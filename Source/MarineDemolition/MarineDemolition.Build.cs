@@ -14,7 +14,9 @@ public class MarineDemolition : ModuleRules
 			// GAS
 			"GameplayAbilities", "GameplayTags", "GameplayTasks",
 			// AI
-			"AIModule"
+			"AIModule",
+			//UI
+			"UMG"
 		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
