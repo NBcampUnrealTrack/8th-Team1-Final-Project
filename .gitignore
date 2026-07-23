@@ -1,0 +1,34 @@
+# Unreal Engine generated folders
+Binaries/
+DerivedDataCache/
+Intermediate/
+Saved/
+Build/
+
+# Plugin generated folders
+Plugins/**/Binaries/
+Plugins/**/Intermediate/
+
+# Rider auto-installed plugin
+Plugins/Developer/RiderLink/
+
+# Visual Studio / Rider files
+.vs/
+.idea/
+*.sln
+*.slnx
+*.suo
+*.opensdf
+*.sdf
+*.VC.db
+*.VC.opendb
+
+# Generated config (keep Config/ tracked, ignore user-specific)
+Config/DefaultEditorPerProjectUserSettings.ini
+
+# Claude Code
+.claude/
+
+# OS files
+.DS_Store
+Thumbs.db
