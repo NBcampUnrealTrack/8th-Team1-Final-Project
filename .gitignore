@@ -4,6 +4,7 @@ DerivedDataCache/
 Intermediate/
 Saved/
 Build/
+Content/Developers/
 
 # Plugin generated folders
 Plugins/**/Binaries/
@@ -26,7 +27,8 @@ Plugins/Developer/RiderLink/
 # Generated config (keep Config/ tracked, ignore user-specific)
 Config/DefaultEditorPerProjectUserSettings.ini
 
-# Claude Code
+# AI coding agents (local state)
+.codex/
 .claude/
 
 # OS files

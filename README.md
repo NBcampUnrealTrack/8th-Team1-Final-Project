@@ -77,11 +77,11 @@ Epic의 [Coding Standard](https://docs.unrealengine.com/coding-standard/)를 따
 
 | 접두사 | 대상 |
 |---|---|
-| `U` | `UObject` 파생 (`UMDComponent`) |
-| `A` | `AActor` 파생 (`AMDCharacter`) |
-| `F` | 일반 구조체 및 클래스, non-UObject (`FMDGameplayTag`) |
-| `E` | 열거형 (`EMDWeaponType`) |
-| `I` | 인터페이스 (`IMDInteractable`) |
+| `U` | `UObject` 파생 (`UComponent`) |
+| `A` | `AActor` 파생 (`ACharacter`) |
+| `F` | 일반 구조체 및 클래스, non-UObject (`FGameplayTag`) |
+| `E` | 열거형 (`EWeaponType`) |
+| `I` | 인터페이스 (`IInteractable`) |
 | `T` | 템플릿 (`TArray`, `TSubclassOf`) |
 | `S` | Slate 위젯 (`SButton`) |
 | `b` | bool 변수 (`bIsDead`, `bHasAuthority`) |
@@ -130,7 +130,7 @@ TObjectPtr<UAnimMontage> AttackMontage;
 
 ### 5.6 기타 규칙
 
-- 첫 소스 파일 생성 시 네이밍 접두사는 'MD'가 앞에 있어야 합니다. (예: MDSurviorCharacter)
+- 첫 소스 파일 생성 시 네이밍 접두사는 'MD_'가 앞에 있어야 합니다. (예: MD_SurviorCharacter)
 - const 정확성을 준수합니다. 멤버를 변경하지 않는 함수는 `const`로 선언하고, 변경하지 않는 참조 인자는 `const&`를 사용합니다.
 - 가상 함수의 재정의에는 반드시 `override`를 명시합니다. (`virtual` 단독 사용 금지)
 - 다형성의 기반이 되는 클래스에는 가상 소멸자를 보장합니다.
@@ -145,16 +145,16 @@ TObjectPtr<UAnimMontage> AttackMontage;
 
 | 타입 | 접두사 | 예시 |
 |---|---|---|
-| 블루프린트 | `BP_` | `BP_PlayerCharacter` |
-| 위젯 블루프린트 | `WBP_` | `WBP_MainMenu` |
+| 블루프린트 | `BP_MD_` | `BP_MD_PlayerCharacter` |
+| 위젯 블루프린트 | `WBP_MD_` | `WBP_MainMenu` |
 | 스태틱 메시 | `SM_` | `SM_Wall_01` |
 | 스켈레탈 메시 | `SKM_` | `SK_Mannequin` |
 | 머티리얼 | `M_` | `M_Floor` |
 | 머티리얼 인스턴스 | `MI_` | `MI_Floor_Wet` |
 | 텍스처 | `T_` | `T_Floor_BaseColor` |
 | 애니메이션 몽타주 | `AM_` | `AM_Attack` |
-| 애님 블루프린트 | `ABP_` | `ABP_Character` |
-| 데이터 애셋 | `DA_` | `DA_WeaponStats` |
+| 애님 블루프린트 | `ABP_MD_` | `ABP_MD_Character` |
+| 데이터 애셋 | `DA_MD_` | `DA_MD_WeaponStats` |
 | 사운드 큐 | `SC_` | `SC_Footstep` |
 
 - 폴더는 기능 또는 모듈 단위로 구성합니다. (예: `Content/Characters/Player/...`)
