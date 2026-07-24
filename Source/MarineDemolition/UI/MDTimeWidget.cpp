@@ -5,10 +5,18 @@
 #include "Components/TextBlock.h"
 #include "MarineDemolition/Game/MDGameStateBase.h"
 #include "TimerManager.h"
+#include "Engine/World.h"
 
 void UMDTimeWidget::NativeConstruct()
 {
     Super::NativeConstruct();
+
+    UWorld* World = GetWorld();
+
+    if (!IsValid(World))
+    {
+        return;
+    }
 
     UpdateTimeText();
 

@@ -22,9 +22,5 @@ protected:
 private:
     FTimerHandle CheckGameTimeTimerHandle;
 
-    bool bWithdrawalNoticeLogged = false;
-    bool bWithdrawalWarningLogged = false;
-    bool bShipDepartureLogged = false;
-
     void CheckGameTimeEvents();
 };

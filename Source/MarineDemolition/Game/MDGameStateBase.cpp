@@ -25,6 +25,7 @@ void AMDGameStateBase::GetLifetimeReplicatedProps(
 
     DOREPLIFETIME(AMDGameStateBase, GameStartServerTime);
     DOREPLIFETIME(AMDGameStateBase, bGameTimeStarted);
+    DOREPLIFETIME(AMDGameStateBase, WithdrawalPhase);
 }
 
 //Timer
@@ -41,31 +42,26 @@ void AMDGameStateBase::StartGameTime()
     ForceNetUpdate();
 }
 
-void AMDGameStateBase::OnRep_GameStartServerTime()
-{
-    
-}
-
-float AMDGameStateBase::GetElapsedRealSeconds() const
+double AMDGameStateBase::GetElapsedRealSeconds() const
 {
     if (!bGameTimeStarted)
     {
-        return 0.0f;
+        return 0.0;
     }
 
     return FMath::Max(
         GetServerWorldTimeSeconds() - GameStartServerTime,
-        0.0f
+        0.0
     );
 }
 
-float AMDGameStateBase::GetElapsedGameSeconds() const
+double AMDGameStateBase::GetElapsedGameSeconds() const
 {
     const float TotalGameSeconds =(EndHour - StartHour) * 60 * 60;
 
     if (RealDayDurationSeconds <= 0.0f)
     {
-        return 0.0f;
+        return 0.0;
     }
 
     //Real: 1sec, InGame: 60sec
@@ -74,7 +70,7 @@ float AMDGameStateBase::GetElapsedGameSeconds() const
 
     return FMath::Clamp(
         GetElapsedRealSeconds() * TimeScale,
-        0.0f,
+        0.0,
         TotalGameSeconds
     );
 }
@@ -82,7 +78,7 @@ float AMDGameStateBase::GetElapsedGameSeconds() const
 int32 AMDGameStateBase::GetCurrentHour() const
 {
     const int32 ElapsedMinutes =
-        FMath::FloorToInt(GetElapsedGameSeconds() / 60.0f);
+        FMath::FloorToInt(GetElapsedGameSeconds() / 60.0);
 
     return StartHour + ElapsedMinutes / 60;
 }
@@ -90,7 +86,7 @@ int32 AMDGameStateBase::GetCurrentHour() const
 int32 AMDGameStateBase::GetCurrentMinute() const
 {
     const int32 ElapsedMinutes =
-        FMath::FloorToInt(GetElapsedGameSeconds() / 60.0f);
+        FMath::FloorToInt(GetElapsedGameSeconds() / 60.0);
 
     return ElapsedMinutes % 60;
 }
@@ -107,4 +103,72 @@ bool AMDGameStateBase::HasReachedTime(
         Hour * 60 + Minute;
 
     return CurrentTotalMinutes >= TargetTotalMinutes;
+}
+
+// Withdrawal
+void AMDGameStateBase::SetWithdrawalPhase(
+    EMDWithdrawalPhase NewPhase
+)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    if (WithdrawalPhase == NewPhase)
+    {
+        return;
+    }
+
+    WithdrawalPhase = NewPhase;
+
+    HandleWithdrawalPhaseChanged();
+
+    ForceNetUpdate();
+}
+
+EMDWithdrawalPhase
+AMDGameStateBase::GetWithdrawalPhase() const
+{
+    return WithdrawalPhase;
+}
+
+void AMDGameStateBase::OnRep_WithdrawalPhase()
+{
+   
+    HandleWithdrawalPhaseChanged();
+}
+
+void AMDGameStateBase::HandleWithdrawalPhaseChanged()
+{
+    switch (WithdrawalPhase)
+    {
+    case EMDWithdrawalPhase::Notice:
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("17:00 -> 철수하세요")
+        );
+        break;
+
+    case EMDWithdrawalPhase::Warning:
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("17:30 -> 철수하셔야할텐데?")
+        );
+        break;
+
+    case EMDWithdrawalPhase::Departed:
+        UE_LOG(
+            LogTemp,
+            Warning,
+            TEXT("18:00 -> 배가 출발합니다,,")
+        );
+        break;
+
+    case EMDWithdrawalPhase::None:
+    default:
+        break;
+    }
 }
