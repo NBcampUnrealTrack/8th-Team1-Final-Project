@@ -4,13 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "MDHUDWidget.generated.h"
+#include "MD_HUDWidget.generated.h"
 
 /**
  * 
  */
 UCLASS()
-class MARINEDEMOLITION_API UMDHUDWidget : public UUserWidget
+class MARINEDEMOLITION_API UMD_HUDWidget : public UUserWidget
 {
 	GENERATED_BODY()
 	

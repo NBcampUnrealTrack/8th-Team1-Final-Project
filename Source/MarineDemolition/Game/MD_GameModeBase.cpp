@@ -1,64 +1,64 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "MDGameModeBase.h"
-#include "MDGameStateBase.h"
+#include "MD_GameModeBase.h"
+#include "MD_GameStateBase.h"
 #include "TimerManager.h"
 
-void AMDGameModeBase::BeginPlay()
+void AMD_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();
 
     GetWorldTimerManager().SetTimer(
         CheckGameTimeTimerHandle,
         this,
-        &AMDGameModeBase::CheckGameTimeEvents,
+        &AMD_GameModeBase::CheckGameTimeEvents,
         0.1f,
         true
     );
 }
 
-void AMDGameModeBase::CheckGameTimeEvents()
+void AMD_GameModeBase::CheckGameTimeEvents()
 {
-    AMDGameStateBase* MDGameState =
-        GetGameState<AMDGameStateBase>();
+    AMD_GameStateBase* MDGameState =
+        GetGameState<AMD_GameStateBase>();
 
     if (!IsValid(MDGameState))
     {
         return;
     }
 
-    const EMDWithdrawalPhase CurrentPhase =
+    const EMD_WithdrawalPhase CurrentPhase =
         MDGameState->GetWithdrawalPhase();
 
     //17:00
-    if (CurrentPhase == EMDWithdrawalPhase::None
+    if (CurrentPhase == EMD_WithdrawalPhase::None
         && MDGameState->HasReachedTime(17, 0))
     {
         MDGameState->SetWithdrawalPhase(
-            EMDWithdrawalPhase::Notice
+            EMD_WithdrawalPhase::Notice
         );
 
         return;
     }
 
     //17:30
-    if (CurrentPhase == EMDWithdrawalPhase::Notice
+    if (CurrentPhase == EMD_WithdrawalPhase::Notice
         && MDGameState->HasReachedTime(17, 30))
     {
         MDGameState->SetWithdrawalPhase(
-            EMDWithdrawalPhase::Warning
+            EMD_WithdrawalPhase::Warning
         );
 
         return;
     }
 
     //18:00
-    if (CurrentPhase == EMDWithdrawalPhase::Warning
+    if (CurrentPhase == EMD_WithdrawalPhase::Warning
         && MDGameState->HasReachedTime(18, 0))
     {
         MDGameState->SetWithdrawalPhase(
-            EMDWithdrawalPhase::Departed
+            EMD_WithdrawalPhase::Departed
         );
 
         GetWorldTimerManager().ClearTimer(

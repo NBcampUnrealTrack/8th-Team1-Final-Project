@@ -1,17 +1,17 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Online/MDSessionTypes.h"
+#include "Online/MD_SessionTypes.h"
 #include "OnlineSessionSettings.h"
-#include "MDSessionSettingKey.h"
+#include "MD_SessionSettingKey.h"
 
-void FMDSessionInfo::ExportSessionInfo(const FOnlineSession& Session)
+void FMD_SessionInfo::ExportSessionInfo(const FOnlineSession& Session)
 {
     // Session Settings에서 Server Name 값 추출
-    Session.SessionSettings.Get(MDSessionKey::Key_ServerName, ServerName);
+    Session.SessionSettings.Get(MD_SessionKey::Key_ServerName, ServerName);
 
     // Session Settings에서 Map Name 값 추출
-    Session.SessionSettings.Get(MDSessionKey::Key_MapName, MapName);
+    Session.SessionSettings.Get(MD_SessionKey::Key_MapName, MapName);
 
     // Session의 Owner Name 복사
     OwnerName = Session.OwningUserName;

@@ -1,13 +1,13 @@
-#include "MDGameStateBase.h"
+#include "MD_GameStateBase.h"
 
 #include "Net/UnrealNetwork.h"
 
-AMDGameStateBase::AMDGameStateBase()
+AMD_GameStateBase::AMD_GameStateBase()
 {
     bReplicates = true;
 }
 
-void AMDGameStateBase::BeginPlay()
+void AMD_GameStateBase::BeginPlay()
 {
     Super::BeginPlay();
 
@@ -17,19 +17,19 @@ void AMDGameStateBase::BeginPlay()
     }
 }
 
-void AMDGameStateBase::GetLifetimeReplicatedProps(
+void AMD_GameStateBase::GetLifetimeReplicatedProps(
     TArray<FLifetimeProperty>& OutLifetimeProps
 ) const
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-    DOREPLIFETIME(AMDGameStateBase, GameStartServerTime);
-    DOREPLIFETIME(AMDGameStateBase, bGameTimeStarted);
-    DOREPLIFETIME(AMDGameStateBase, WithdrawalPhase);
+    DOREPLIFETIME(AMD_GameStateBase, GameStartServerTime);
+    DOREPLIFETIME(AMD_GameStateBase, bGameTimeStarted);
+    DOREPLIFETIME(AMD_GameStateBase, WithdrawalPhase);
 }
 
 //Timer
-void AMDGameStateBase::StartGameTime()
+void AMD_GameStateBase::StartGameTime()
 {
     if (!HasAuthority())
     {
@@ -42,7 +42,7 @@ void AMDGameStateBase::StartGameTime()
     ForceNetUpdate();
 }
 
-double AMDGameStateBase::GetElapsedRealSeconds() const
+double AMD_GameStateBase::GetElapsedRealSeconds() const
 {
     if (!bGameTimeStarted)
     {
@@ -55,7 +55,7 @@ double AMDGameStateBase::GetElapsedRealSeconds() const
     );
 }
 
-double AMDGameStateBase::GetElapsedGameSeconds() const
+double AMD_GameStateBase::GetElapsedGameSeconds() const
 {
     const float TotalGameSeconds =(EndHour - StartHour) * 60 * 60;
 
@@ -75,7 +75,7 @@ double AMDGameStateBase::GetElapsedGameSeconds() const
     );
 }
 
-int32 AMDGameStateBase::GetCurrentHour() const
+int32 AMD_GameStateBase::GetCurrentHour() const
 {
     const int32 ElapsedMinutes =
         FMath::FloorToInt(GetElapsedGameSeconds() / 60.0);
@@ -83,7 +83,7 @@ int32 AMDGameStateBase::GetCurrentHour() const
     return StartHour + ElapsedMinutes / 60;
 }
 
-int32 AMDGameStateBase::GetCurrentMinute() const
+int32 AMD_GameStateBase::GetCurrentMinute() const
 {
     const int32 ElapsedMinutes =
         FMath::FloorToInt(GetElapsedGameSeconds() / 60.0);
@@ -91,7 +91,7 @@ int32 AMDGameStateBase::GetCurrentMinute() const
     return ElapsedMinutes % 60;
 }
 
-bool AMDGameStateBase::HasReachedTime(
+bool AMD_GameStateBase::HasReachedTime(
     int32 Hour,
     int32 Minute
 ) const
@@ -106,8 +106,8 @@ bool AMDGameStateBase::HasReachedTime(
 }
 
 // Withdrawal
-void AMDGameStateBase::SetWithdrawalPhase(
-    EMDWithdrawalPhase NewPhase
+void AMD_GameStateBase::SetWithdrawalPhase(
+    EMD_WithdrawalPhase NewPhase
 )
 {
     if (!HasAuthority())
@@ -127,23 +127,23 @@ void AMDGameStateBase::SetWithdrawalPhase(
     ForceNetUpdate();
 }
 
-EMDWithdrawalPhase
-AMDGameStateBase::GetWithdrawalPhase() const
+EMD_WithdrawalPhase
+AMD_GameStateBase::GetWithdrawalPhase() const
 {
     return WithdrawalPhase;
 }
 
-void AMDGameStateBase::OnRep_WithdrawalPhase()
+void AMD_GameStateBase::OnRep_WithdrawalPhase()
 {
    
     HandleWithdrawalPhaseChanged();
 }
 
-void AMDGameStateBase::HandleWithdrawalPhaseChanged()
+void AMD_GameStateBase::HandleWithdrawalPhaseChanged()
 {
     switch (WithdrawalPhase)
     {
-    case EMDWithdrawalPhase::Notice:
+    case EMD_WithdrawalPhase::Notice:
         UE_LOG(
             LogTemp,
             Warning,
@@ -151,7 +151,7 @@ void AMDGameStateBase::HandleWithdrawalPhaseChanged()
         );
         break;
 
-    case EMDWithdrawalPhase::Warning:
+    case EMD_WithdrawalPhase::Warning:
         UE_LOG(
             LogTemp,
             Warning,
@@ -159,7 +159,7 @@ void AMDGameStateBase::HandleWithdrawalPhaseChanged()
         );
         break;
 
-    case EMDWithdrawalPhase::Departed:
+    case EMD_WithdrawalPhase::Departed:
         UE_LOG(
             LogTemp,
             Warning,
@@ -167,7 +167,7 @@ void AMDGameStateBase::HandleWithdrawalPhaseChanged()
         );
         break;
 
-    case EMDWithdrawalPhase::None:
+    case EMD_WithdrawalPhase::None:
     default:
         break;
     }

@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 
-namespace MDSessionKey
+namespace MD_SessionKey
 {
     // Session Settings의 프로젝트 식별용 Key
     const FName Key_ProjectID = TEXT("PROJECT_ID");

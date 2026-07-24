@@ -1,6 +1,5 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "MDLogUtility.h"
+#include "Online/MD_SessionSettingKey.h"
 
-DEFINE_LOG_CATEGORY(MarineDemolition)
