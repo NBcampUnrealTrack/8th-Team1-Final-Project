@@ -16,8 +16,10 @@ public class MarineDemolition : ModuleRules
 			// AI
 			"AIModule",
 			// Online
-			"OnlineSubsystem", "OnlineSubsystemUtils", "SteamSockets"
-        });
+			"OnlineSubsystem", "OnlineSubsystemUtils", "SteamSockets",
+			//UI
+			"UMG"
+		});
 
 		PrivateDependencyModuleNames.AddRange(new string[] { });
 
