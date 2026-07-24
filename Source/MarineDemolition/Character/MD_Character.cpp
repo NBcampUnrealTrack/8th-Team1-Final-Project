@@ -1,8 +1,8 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "MarineDemolition/Character/MDCharacter.h"
-#include "MarineDemolition/Input/MDInputConfig.h"
+#include "MarineDemolition/Character/MD_Character.h"
+#include "MarineDemolition/Input/MD_InputConfig.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -14,7 +14,7 @@
 #include "GameFramework/PlayerController.h"
 
 // Sets default values
-AMDCharacter::AMDCharacter()
+AMD_Character::AMD_Character()
 {
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = false;
@@ -43,7 +43,7 @@ AMDCharacter::AMDCharacter()
 }
 
 // Called when the game starts or when spawned
-void AMDCharacter::BeginPlay()
+void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
 	
@@ -67,7 +67,7 @@ void AMDCharacter::BeginPlay()
 }
 
 // Called to bind functionality to input
-void AMDCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
+void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
 
@@ -77,18 +77,18 @@ void AMDCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 
 	if (IsValid(EIC))
 	{
-		EIC->BindAction(InputConfig->IA_Move, ETriggerEvent::Triggered, this, &AMDCharacter::Input_Move);
-		EIC->BindAction(InputConfig->IA_Look, ETriggerEvent::Triggered, this, &AMDCharacter::Input_Look);
+		EIC->BindAction(InputConfig->IA_Move, ETriggerEvent::Triggered, this, &AMD_Character::Input_Move);
+		EIC->BindAction(InputConfig->IA_Look, ETriggerEvent::Triggered, this, &AMD_Character::Input_Look);
 		EIC->BindAction(InputConfig->IA_Jump, ETriggerEvent::Started, this, &ACharacter::Jump);
 		EIC->BindAction(InputConfig->IA_Jump, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
-		EIC->BindAction(InputConfig->IA_Interact, ETriggerEvent::Started, this, &AMDCharacter::Input_Interact);
-		EIC->BindAction(InputConfig->IA_Ability, ETriggerEvent::Started, this, &AMDCharacter::Input_Ability);
-		EIC->BindAction(InputConfig->IA_SwapEquipment, ETriggerEvent::Triggered, this, &AMDCharacter::Input_SwapEquipment);
+		EIC->BindAction(InputConfig->IA_Interact, ETriggerEvent::Started, this, &AMD_Character::Input_Interact);
+		EIC->BindAction(InputConfig->IA_Ability, ETriggerEvent::Started, this, &AMD_Character::Input_Ability);
+		EIC->BindAction(InputConfig->IA_SwapEquipment, ETriggerEvent::Triggered, this, &AMD_Character::Input_SwapEquipment);
 	}
 
 }
 
-void AMDCharacter::Input_Move(const FInputActionValue& Value)
+void AMD_Character::Input_Move(const FInputActionValue& Value)
 {
 
 	if (!Controller)
@@ -108,14 +108,14 @@ void AMDCharacter::Input_Move(const FInputActionValue& Value)
 	AddMovementInput(RightDirection, Moveinput.Y);
 }
 
-void AMDCharacter::Input_Look(const FInputActionValue& Value)
+void AMD_Character::Input_Look(const FInputActionValue& Value)
 {
 	const FVector2D LookInput = Value.Get<FVector2D>();
 	AddControllerYawInput(LookInput.X);
 	AddControllerPitchInput(LookInput.Y);
 }
 
-void AMDCharacter::Input_Interact(const FInputActionValue& Value)
+void AMD_Character::Input_Interact(const FInputActionValue& Value)
 {
 	if (!Controller)
 	{
@@ -147,12 +147,12 @@ void AMDCharacter::Input_Interact(const FInputActionValue& Value)
 	}
 }
 
-void AMDCharacter::Input_Ability(const FInputActionValue& Value)
+void AMD_Character::Input_Ability(const FInputActionValue& Value)
 {
 	GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("Ability: Activated"));
 }
 
-void AMDCharacter::Input_SwapEquipment(const FInputActionValue& Value)
+void AMD_Character::Input_SwapEquipment(const FInputActionValue& Value)
 {
 	GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("SwapEquipment: Activated"));
 }

@@ -2,10 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameStateBase.h"
-#include "MDGameStateBase.generated.h"
+#include "MD_GameStateBase.generated.h"
 
 UENUM(BlueprintType)
-enum class EMDWithdrawalPhase : uint8
+enum class EMD_WithdrawalPhase : uint8
 {
     None      UMETA(DisplayName = "None"),
     Notice    UMETA(DisplayName = "Notice"),
@@ -14,12 +14,12 @@ enum class EMDWithdrawalPhase : uint8
 };
 
 UCLASS()
-class MARINEDEMOLITION_API AMDGameStateBase : public AGameStateBase
+class MARINEDEMOLITION_API AMD_GameStateBase : public AGameStateBase
 {
     GENERATED_BODY()
 
 public:
-    AMDGameStateBase();
+    AMD_GameStateBase();
 
     //Timer
     void StartGameTime();
@@ -40,10 +40,10 @@ public:
     bool HasReachedTime(int32 Hour, int32 Minute) const;
 
     // Withdrawal
-    void SetWithdrawalPhase(EMDWithdrawalPhase NewPhase);
+    void SetWithdrawalPhase(EMD_WithdrawalPhase NewPhase);
 
     UFUNCTION(BlueprintPure, Category = "Withdrawal")
-    EMDWithdrawalPhase GetWithdrawalPhase() const;
+    EMD_WithdrawalPhase GetWithdrawalPhase() const;
 
 protected:
     virtual void BeginPlay() override;
@@ -71,8 +71,8 @@ private:
 
     // Withdrawal
     UPROPERTY(ReplicatedUsing = OnRep_WithdrawalPhase)
-    EMDWithdrawalPhase WithdrawalPhase =
-        EMDWithdrawalPhase::None;
+    EMD_WithdrawalPhase WithdrawalPhase =
+        EMD_WithdrawalPhase::None;
 
     UFUNCTION()
     void OnRep_WithdrawalPhase();

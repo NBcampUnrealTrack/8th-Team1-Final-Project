@@ -1,13 +1,13 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "MDTimeWidget.h"
+#include "MD_TimeWidget.h"
 #include "Components/TextBlock.h"
-#include "MarineDemolition/Game/MDGameStateBase.h"
+#include "MarineDemolition/Game/MD_GameStateBase.h"
 #include "TimerManager.h"
 #include "Engine/World.h"
 
-void UMDTimeWidget::NativeConstruct()
+void UMD_TimeWidget::NativeConstruct()
 {
     Super::NativeConstruct();
 
@@ -23,13 +23,13 @@ void UMDTimeWidget::NativeConstruct()
     GetWorld()->GetTimerManager().SetTimer(
         UpdateTimeTimerHandle,
         this,
-        &UMDTimeWidget::UpdateTimeText,
+        &UMD_TimeWidget::UpdateTimeText,
         0.1f,
         true
     );
 }
 
-void UMDTimeWidget::NativeDestruct()
+void UMD_TimeWidget::NativeDestruct()
 {
     if (UWorld* World = GetWorld())
     {
@@ -39,7 +39,7 @@ void UMDTimeWidget::NativeDestruct()
     Super::NativeDestruct();
 }
 
-void UMDTimeWidget::UpdateTimeText()
+void UMD_TimeWidget::UpdateTimeText()
 {
     if (!IsValid(TimeText))
     {
@@ -53,8 +53,8 @@ void UMDTimeWidget::UpdateTimeText()
         return;
     }
 
-    const AMDGameStateBase* MDGameState =
-        World->GetGameState<AMDGameStateBase>();
+    const AMD_GameStateBase* MDGameState =
+        World->GetGameState<AMD_GameStateBase>();
 
     if (!IsValid(MDGameState))
     {

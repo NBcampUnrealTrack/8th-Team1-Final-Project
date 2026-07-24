@@ -4,12 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "MDTimeWidget.generated.h"
+#include "MD_TimeWidget.generated.h"
 
 class UTextBlock;
 
 UCLASS()
-class MARINEDEMOLITION_API UMDTimeWidget : public UUserWidget
+class MARINEDEMOLITION_API UMD_TimeWidget : public UUserWidget
 {
 	GENERATED_BODY()
 	

@@ -4,13 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
-#include "MDGameModeBase.generated.h"
+#include "MD_GameModeBase.generated.h"
 
 /**
  * 
  */
 UCLASS()
-class MARINEDEMOLITION_API AMDGameModeBase : public AGameModeBase
+class MARINEDEMOLITION_API AMD_GameModeBase : public AGameModeBase
 {
 	GENERATED_BODY()
 	

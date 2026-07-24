@@ -5,20 +5,20 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"
-#include "MDSessionTypes.h"
-#include "MDMultiplayManager.generated.h"
+#include "MD_SessionTypes.h"
+#include "MD_MultiplayManager.generated.h"
 
 // Session 생성 완료 시 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCreateMDSessionCompleteSignature, bool, bIsSuccess);
 // Session 검색 완료 시 이벤트
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFindMDSessionCompleteSignature, const TArray<FMDSessionInfo>&, FindResults, bool, bIsSuccess);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFindMDSessionCompleteSignature, const TArray<FMD_SessionInfo>&, FindResults, bool, bIsSuccess);
 // Session 참여 완료 시 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJoinMDSessionCompleteSignature, bool, bIsSuccess);
 // Session 제거 완료 시 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDestroyMDSessionCompleteSignature, bool, bIsSuccess);
 
 USTRUCT(BlueprintType)
-struct MARINEDEMOLITION_API FMDCreateSessionParams
+struct MARINEDEMOLITION_API FMD_CreateSessionParams
 {
     GENERATED_BODY()
 
@@ -36,7 +36,7 @@ public:
  * 
  */
 UCLASS()
-class MARINEDEMOLITION_API UMDMultiplayManager : public UGameInstanceSubsystem
+class MARINEDEMOLITION_API UMD_MultiplayManager : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
 	
@@ -52,7 +52,7 @@ public:
     FOnCreateMDSessionCompleteSignature OnCreateSessionComplete;
 
     // Session 검색 완료 시 실행되는 이벤트
-    // Parameters : (const TArray<FMDSessionInfo>& FindResults, bool bIsSuccess)
+    // Parameters : (const TArray<FMD_SessionInfo>& FindResults, bool bIsSuccess)
     UPROPERTY(BlueprintAssignable, Category = "Marine Demolition|Session")
     FOnFindMDSessionCompleteSignature OnFindSessionsComplete;
 
@@ -89,7 +89,7 @@ protected:
     FDelegateHandle DestroySessionCompleteDelegateHandle;
 
     // Create Session을 위하여 필요한 Parameter들을 저장하는 변수
-    TSharedPtr<FMDCreateSessionParams> PendingCreateSessionParams;
+    TSharedPtr<FMD_CreateSessionParams> PendingCreateSessionParams;
 
 public:
     // ServerName이름으로 최대 MaxPlayerCounts명의 플레이어가 접속할 수 있는 새로운 Session을 생성하는 함수

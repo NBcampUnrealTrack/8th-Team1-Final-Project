@@ -5,9 +5,9 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
-#include "MDCharacter.generated.h"
+#include "MD_Character.generated.h"
 
-class UMDInputConfig;
+class UMD_InputConfig;
 class UInputMappingContext;
 class UInputAction;
 class UCameraComponent;
@@ -15,13 +15,13 @@ class USpringArmComponent;
 class USkeletalMeshComponent;
 
 UCLASS()
-class MARINEDEMOLITION_API AMDCharacter : public ACharacter
+class MARINEDEMOLITION_API AMD_Character : public ACharacter
 {
 	GENERATED_BODY()
 
 public:
 	// Sets default values for this character's properties
-	AMDCharacter();
+	AMD_Character();
 
 protected:
 	// Called when the game starts or when spawned
@@ -45,7 +45,7 @@ protected:
 	TObjectPtr<UInputMappingContext> PlayerMappingContext;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
-	TObjectPtr<UMDInputConfig> InputConfig;
+	TObjectPtr<UMD_InputConfig> InputConfig;
 
 	UPROPERTY(EditAnywhere, Category = "Interact")
 	float InteractTraceDistance = 200.f;
