@@ -5,6 +5,7 @@
 #include "MarineDemolition/Input/MDInputConfig.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "InputMappingContext.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Camera/CameraComponent.h"
@@ -46,6 +47,8 @@ void AMDCharacter::BeginPlay()
 {
 	Super::BeginPlay();
 	
+	if (!IsValid(PlayerMappingContext)) return;
+
 	if (IsLocallyControlled())
 	{
 		APlayerController* PlayerController = Cast<APlayerController>(GetController());
@@ -67,6 +70,8 @@ void AMDCharacter::BeginPlay()
 void AMDCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
 	Super::SetupPlayerInputComponent(PlayerInputComponent);
+
+	if (!IsValid(InputConfig)) return;
 
 	UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent);
 
