@@ -130,7 +130,7 @@ TObjectPtr<UAnimMontage> AttackMontage;
 
 ### 5.6 기타 규칙
 
-- 첫 소스 파일 생성 시 네이밍 접두사는 'SP'가 앞에 있어야 합니다. (예: SPSurviorCharacter)
+- 첫 소스 파일 생성 시 네이밍 접두사는 'MD'가 앞에 있어야 합니다. (예: MDSurviorCharacter)
 - const 정확성을 준수합니다. 멤버를 변경하지 않는 함수는 `const`로 선언하고, 변경하지 않는 참조 인자는 `const&`를 사용합니다.
 - 가상 함수의 재정의에는 반드시 `override`를 명시합니다. (`virtual` 단독 사용 금지)
 - 다형성의 기반이 되는 클래스에는 가상 소멸자를 보장합니다.
@@ -148,7 +148,7 @@ TObjectPtr<UAnimMontage> AttackMontage;
 | 블루프린트 | `BP_` | `BP_PlayerCharacter` |
 | 위젯 블루프린트 | `WBP_` | `WBP_MainMenu` |
 | 스태틱 메시 | `SM_` | `SM_Wall_01` |
-| 스켈레탈 메시 | `SK_` | `SK_Mannequin` |
+| 스켈레탈 메시 | `SKM_` | `SK_Mannequin` |
 | 머티리얼 | `M_` | `M_Floor` |
 | 머티리얼 인스턴스 | `MI_` | `MI_Floor_Wet` |
 | 텍스처 | `T_` | `T_Floor_BaseColor` |
