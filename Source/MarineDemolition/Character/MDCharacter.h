@@ -31,8 +31,6 @@ public:
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
-#pragma region Components
-
 protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
@@ -40,10 +38,6 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USkeletalMeshComponent> FirstPersonMesh;
-
-#pragma endregion
-
-#pragma region Input
 
 protected:
 
@@ -64,5 +58,4 @@ private:
 	void Input_Ability(const FInputActionValue& Value);
 	void Input_SwapEquipment(const FInputActionValue& Value);
 
-#pragma endregion
 };
