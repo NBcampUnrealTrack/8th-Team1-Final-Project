@@ -70,10 +70,10 @@ protected:
     // Online Session Interface
     IOnlineSessionPtr SessionInterface;
 
-    // 현재 Session 생성 설정
+    // 현재 Session을 생성하는데 사용한 설정값
     TSharedPtr<FOnlineSessionSettings> SessionSettings;
 
-    // 현재 세션 검색 설정과 결과를 저장합니다.
+    // 검색된 SessionSearchResult들을 저장하는 변수
     TSharedPtr<FOnlineSessionSearch> SessionSearch;
 
     // Online Session Interface의 Session 생성 완료 이벤트에 대한 함수 등록 및 제거를 담당하는 Handle 값을 저장하는 변수
@@ -88,10 +88,8 @@ protected:
     // Online Session Interface의 Session 제거 완료 이벤트에 대한 함수 등록 및 제거를 담당하는 Handle 값을 저장하는 변수
     FDelegateHandle DestroySessionCompleteDelegateHandle;
 
+    // Create Session을 위하여 필요한 Parameter들을 저장하는 변수
     TSharedPtr<FMDCreateSessionParams> PendingCreateSessionParams;
-
-    // 세션 삭제 완료 후 세션을 다시 만들지 나타냅니다.
-    bool bCreateSessionAfterDestroy = false;
 
 public:
     // ServerName이름으로 최대 MaxPlayerCounts명의 플레이어가 접속할 수 있는 새로운 Session을 생성하는 함수

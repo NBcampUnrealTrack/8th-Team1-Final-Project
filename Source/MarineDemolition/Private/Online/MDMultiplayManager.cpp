@@ -581,7 +581,7 @@ void UMDMultiplayManager::HandleJoinSessionComplete(FName SessionName, EOnJoinSe
     // 플레이어를 Session의 Listen Server로 이동
     PlayerController->ClientTravel(ConnectInfo, ETravelType::TRAVEL_Absolute);
 
-    UE_LOG(MarineDemolition, Log, TEXT("%s 참여하려는 PlayerController가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+    UE_LOG(MarineDemolition, Log, TEXT("%s 플레이어를 Session의 Map으로 이동합니다."), *UE_CALL_LOCATIONINFO);
 }
 
 void UMDMultiplayManager::HandleDestroySessionComplete(FName SessionName, bool bIsSuccess)
