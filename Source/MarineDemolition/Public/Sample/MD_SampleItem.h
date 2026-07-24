@@ -2,16 +2,16 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "MDSampleItem.generated.h"
+#include "MD_SampleItem.generated.h"
 
 // 샘플 스텁. 붕괴 피해를 받으면 손상 상태가 되어 붉게 변한다.
 UCLASS()
-class MARINEDEMOLITION_API AMDSampleItem : public AActor
+class MARINEDEMOLITION_API AMD_SampleItem : public AActor
 {
 	GENERATED_BODY()
 
 public:
-	AMDSampleItem();
+	AMD_SampleItem();
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Sample")
 	bool bDamaged = false;

@@ -1,10 +1,10 @@
-#include "Wall/MDCuttableWall.h"
+#include "Wall/MD_CuttableWall.h"
 
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Sector/MDSector.h"
+#include "Sector/MD_Sector.h"
 #include "UObject/ConstructorHelpers.h"
 
-AMDCuttableWall::AMDCuttableWall()
+AMD_CuttableWall::AMD_CuttableWall()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
@@ -19,7 +19,7 @@ AMDCuttableWall::AMDCuttableWall()
 	}
 }
 
-void AMDCuttableWall::OnConstruction(const FTransform& Transform)
+void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
@@ -31,7 +31,7 @@ void AMDCuttableWall::OnConstruction(const FTransform& Transform)
 	}
 }
 
-void AMDCuttableWall::Cut(AActor* Cutter)
+void AMD_CuttableWall::Cut(AActor* Cutter)
 {
 	if (bCut)
 	{
@@ -42,13 +42,13 @@ void AMDCuttableWall::Cut(AActor* Cutter)
 	if (bIsStrutWall && !bHasSupport)
 	{
 		// 벽이 아니라 "절단자가 서 있는 섹터"가 무너진다
-		if (AMDSector* Sector = AMDSector::FindSectorContaining(Cutter))
+		if (AMD_Sector* Sector = AMD_Sector::FindSectorContaining(Cutter))
 		{
 			Sector->CollapseCeiling();
 		}
 		else
 		{
-			UE_LOG(LogTemp, Warning, TEXT("MDCuttableWall::Cut - 절단자가 속한 섹터를 찾지 못함"));
+			UE_LOG(LogTemp, Warning, TEXT("MD_CuttableWall::Cut - 절단자가 속한 섹터를 찾지 못함"));
 		}
 	}
 

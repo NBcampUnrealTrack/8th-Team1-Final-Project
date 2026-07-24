@@ -1,7 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Sector/MDSector.h"
+#include "Sector/MD_Sector.h"
 
 #include "EngineUtils.h"
 #include "Camera/CameraShakeBase.h"
@@ -13,7 +13,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "UObject/ConstructorHelpers.h"
 
-AMDSector::AMDSector()
+AMD_Sector::AMD_Sector()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
@@ -35,22 +35,22 @@ AMDSector::AMDSector()
 
 }
 
-void AMDSector::BeginPlay()
+void AMD_Sector::BeginPlay()
 {
 	Super::BeginPlay();
 	
-	Volume->OnComponentBeginOverlap.AddDynamic(this, &AMDSector::OnVolumeBeginOverlap);
-	Volume->OnComponentEndOverlap.AddDynamic(this, &AMDSector::OnVolumeEndOverlap);
+	Volume->OnComponentBeginOverlap.AddDynamic(this, &AMD_Sector::OnVolumeBeginOverlap);
+	Volume->OnComponentEndOverlap.AddDynamic(this, &AMD_Sector::OnVolumeEndOverlap);
 }
 
-AMDSector* AMDSector::FindSectorContaining(AActor* Actor)
+AMD_Sector* AMD_Sector::FindSectorContaining(AActor* Actor)
 {
 	if (!Actor)
 	{
 		return nullptr;
 	}
 	
-	for (TActorIterator<AMDSector> It(Actor->GetWorld()); It; ++It)
+	for (TActorIterator<AMD_Sector> It(Actor->GetWorld()); It; ++It)
 	{
 		if (It->ContainsActor(Actor))
 		{
@@ -60,7 +60,7 @@ AMDSector* AMDSector::FindSectorContaining(AActor* Actor)
 	return nullptr;
 }
 
-void AMDSector::OnVolumeBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+void AMD_Sector::OnVolumeBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
 	APawn* Pawn = Cast<APawn>(OtherActor);
@@ -78,13 +78,13 @@ void AMDSector::OnVolumeBeginOverlap(UPrimitiveComponent* OverlappedComp, AActor
 	}
 }
 
-void AMDSector::OnVolumeEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
+void AMD_Sector::OnVolumeEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
 	UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
 	ActorsInside.Remove(OtherActor);
 }
 
-void AMDSector::CollapseCeiling()
+void AMD_Sector::CollapseCeiling()
 {
 	if (bCollapsed)
 	{

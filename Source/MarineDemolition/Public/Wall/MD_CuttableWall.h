@@ -2,17 +2,17 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "MDCuttableWall.generated.h"
+#include "MD_CuttableWall.generated.h"
 
 // 임시 절단 벽 스텁. 격벽 철거 카드(전처리/스캐너 포함) 작업 시 대체 예정.
 // 지주격벽을 지지대 없이 자르면 절단자가 있는 섹터의 천장이 붕괴한다. (시스템 기획 §2)
 UCLASS()
-class MARINEDEMOLITION_API AMDCuttableWall : public AActor
+class MARINEDEMOLITION_API AMD_CuttableWall : public AActor
 {
 	GENERATED_BODY()
 
 public:
-	AMDCuttableWall();
+	AMD_CuttableWall();
 
 	// Cutter = 절단 버튼을 누른 캐릭터
 	UFUNCTION(BlueprintCallable, Category = "Wall")

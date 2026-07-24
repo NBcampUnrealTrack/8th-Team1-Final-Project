@@ -1,9 +1,9 @@
-#include "Sample/MDSampleItem.h"
+#include "Sample/MD_SampleItem.h"
 
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UObject/ConstructorHelpers.h"
 
-AMDSampleItem::AMDSampleItem()
+AMD_SampleItem::AMD_SampleItem()
 {
 	PrimaryActorTick.bCanEverTick = false;
 
@@ -20,14 +20,14 @@ AMDSampleItem::AMDSampleItem()
 	}
 }
 
-void AMDSampleItem::BeginPlay()
+void AMD_SampleItem::BeginPlay()
 {
 	Super::BeginPlay();
 
-	OnTakeAnyDamage.AddDynamic(this, &AMDSampleItem::OnAnyDamage);
+	OnTakeAnyDamage.AddDynamic(this, &AMD_SampleItem::OnAnyDamage);
 }
 
-void AMDSampleItem::OnAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType,
+void AMD_SampleItem::OnAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType,
 	AController* InstigatedBy, AActor* DamageCauser)
 {
 	if (bDamaged)

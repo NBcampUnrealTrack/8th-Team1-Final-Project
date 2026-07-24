@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
-#include "MDSector.generated.h"
+#include "MD_Sector.generated.h"
 
 class UBoxComponent;
 class UCameraShakeBase;
@@ -12,15 +12,15 @@ class UCameraShakeBase;
 // 방 단위 섹터 볼륨. 내부 폰을 추적하고 천장 붕괴를 실행
 
 UCLASS()
-class MARINEDEMOLITION_API AMDSector : public AActor
+class MARINEDEMOLITION_API AMD_Sector : public AActor
 {
 	GENERATED_BODY()
 
 public:
-	AMDSector();
+	AMD_Sector();
 
 	// Actor가 현재 속한 섹터를 반환. 없으면 nullptr
-	static AMDSector* FindSectorContaining(AActor* Actor);
+	static AMD_Sector* FindSectorContaining(AActor* Actor);
 
 	// 이 섹터의 천장 붕괴: 파편 낙하 + 내부 피해 + 카메라 쉐이크
 	UFUNCTION(BlueprintCallable, Category = "Sector")
