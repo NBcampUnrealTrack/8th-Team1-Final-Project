@@ -1,7 +1,7 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Wall/MD_GA_WallCut.h"
+#include "Ability/MD_GA_WallCut.h"
 
 #include "Wall/MD_CuttableWall.h"
 
