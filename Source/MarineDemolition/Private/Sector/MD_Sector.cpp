@@ -41,6 +41,14 @@ void AMD_Sector::BeginPlay()
 	
 	Volume->OnComponentBeginOverlap.AddDynamic(this, &AMD_Sector::OnVolumeBeginOverlap);
 	Volume->OnComponentEndOverlap.AddDynamic(this, &AMD_Sector::OnVolumeEndOverlap);
+
+	// 레벨 시작 시 이미 볼륨 안에 있던 폰은 BeginOverlap을 못 받으므로 직접 등록
+	TArray<AActor*> Overlapping;
+	Volume->GetOverlappingActors(Overlapping, APawn::StaticClass());
+	for (AActor* Actor : Overlapping)
+	{
+		ActorsInside.Add(Actor);
+	}
 }
 
 AMD_Sector* AMD_Sector::FindSectorContaining(AActor* Actor)
