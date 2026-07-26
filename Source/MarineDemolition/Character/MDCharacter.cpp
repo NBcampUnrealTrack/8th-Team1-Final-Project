@@ -3,6 +3,7 @@
 
 #include "MarineDemolition/Character/MDCharacter.h"
 #include "MarineDemolition/Input/MDInputConfig.h"
+#include "MarineDemolition/Component/MDCharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -14,7 +15,8 @@
 #include "GameFramework/PlayerController.h"
 
 // Sets default values
-AMDCharacter::AMDCharacter()
+AMDCharacter::AMDCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer.SetDefaultSubobjectClass<UMDCharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
 	PrimaryActorTick.bCanEverTick = false;
@@ -42,6 +44,12 @@ AMDCharacter::AMDCharacter()
 	FirstPersonMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
+void AMDCharacter::ForceEnterWalkState()
+{
+	// TODO(김동연): GAS 스태미나 고갈 이벤트에서 호출 연결 예정
+	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+}
+
 // Called when the game starts or when spawned
 void AMDCharacter::BeginPlay()
 {
@@ -66,6 +74,31 @@ void AMDCharacter::BeginPlay()
 	
 }
 
+void AMDCharacter::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
+{
+	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
+
+	if (UMDCharacterMovementComponent* MDMovement = Cast<UMDCharacterMovementComponent>(GetCharacterMovement()))
+	{
+		if (MDMovement->MovementMode == MOVE_Walking)
+		{
+			MDMovement->SetWantsToSwim(false);
+		}
+	}
+
+	const EMDMovementState NewState = GetCharacterMovement()->IsSwimming() ? EMDMovementState::Swimming : EMDMovementState::Walking;
+
+	if (NewState == CurrentMovementState)
+	{
+		return;
+	}
+
+	CurrentMovementState = NewState;
+	OnMovementStateChanged.Broadcast(CurrentMovementState);
+
+
+}
+
 // Called to bind functionality to input
 void AMDCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
@@ -77,20 +110,19 @@ void AMDCharacter::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 
 	if (IsValid(EIC))
 	{
-		EIC->BindAction(InputConfig->IA_Move, ETriggerEvent::Triggered, this, &AMDCharacter::Input_Move);
-		EIC->BindAction(InputConfig->IA_Look, ETriggerEvent::Triggered, this, &AMDCharacter::Input_Look);
-		EIC->BindAction(InputConfig->IA_Jump, ETriggerEvent::Started, this, &ACharacter::Jump);
-		EIC->BindAction(InputConfig->IA_Jump, ETriggerEvent::Completed, this, &ACharacter::StopJumping);
-		EIC->BindAction(InputConfig->IA_Interact, ETriggerEvent::Started, this, &AMDCharacter::Input_Interact);
-		EIC->BindAction(InputConfig->IA_Ability, ETriggerEvent::Started, this, &AMDCharacter::Input_Ability);
-		EIC->BindAction(InputConfig->IA_SwapEquipment, ETriggerEvent::Triggered, this, &AMDCharacter::Input_SwapEquipment);
+		EIC->BindAction(InputConfig->MoveAction, ETriggerEvent::Triggered, this, &AMDCharacter::HandleMoveInput);
+		EIC->BindAction(InputConfig->LookAction, ETriggerEvent::Triggered, this, &AMDCharacter::HandleLookInput);
+		EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Started, this, &AMDCharacter::HandleJumpOrSwimInput);
+		EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Completed, this, &AMDCharacter::HandleJumpOrSwimReleasedInput);
+		EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Started, this, &AMDCharacter::HandleInteractInput);
+		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Started, this, &AMDCharacter::HandleAbilityInput);
+		EIC->BindAction(InputConfig->SwapEquipmentAction, ETriggerEvent::Triggered, this, &AMDCharacter::HandleSwapEquipmentInput);
 	}
 
 }
 
-void AMDCharacter::Input_Move(const FInputActionValue& Value)
+void AMDCharacter::HandleMoveInput(const FInputActionValue& Value)
 {
-
 	if (!Controller)
 	{
 		return;
@@ -99,23 +131,24 @@ void AMDCharacter::Input_Move(const FInputActionValue& Value)
 	const FVector2D Moveinput = Value.Get<FVector2D>();
 
 	const FRotator ControlRotation = Controller->GetControlRotation();
-	const FRotator ControlYawRotation(0.0f, ControlRotation.Yaw, 0.0f);
+	//const FRotator ControlYawRotation(0.0f, ControlRotation.Yaw, 0.0f);
+	const FRotator MovementRotation = (CurrentMovementState == EMDMovementState::Swimming) ? ControlRotation : FRotator(0.f, ControlRotation.Yaw, 0.f);
 
-	const FVector ForwardDirection = FRotationMatrix(ControlYawRotation).GetUnitAxis(EAxis::X);
-	const FVector RightDirection = FRotationMatrix(ControlYawRotation).GetUnitAxis(EAxis::Y);
+	const FVector ForwardDirection = FRotationMatrix(MovementRotation).GetUnitAxis(EAxis::X);
+	const FVector RightDirection = FRotationMatrix(MovementRotation).GetUnitAxis(EAxis::Y);
 
 	AddMovementInput(ForwardDirection, Moveinput.X);
 	AddMovementInput(RightDirection, Moveinput.Y);
 }
 
-void AMDCharacter::Input_Look(const FInputActionValue& Value)
+void AMDCharacter::HandleLookInput(const FInputActionValue& Value)
 {
 	const FVector2D LookInput = Value.Get<FVector2D>();
 	AddControllerYawInput(LookInput.X);
 	AddControllerPitchInput(LookInput.Y);
 }
 
-void AMDCharacter::Input_Interact(const FInputActionValue& Value)
+void AMDCharacter::HandleInteractInput(const FInputActionValue& Value)
 {
 	if (!Controller)
 	{
@@ -138,7 +171,7 @@ void AMDCharacter::Input_Interact(const FInputActionValue& Value)
 	{
 		if (AActor* HitActor = Hit.GetActor())
 		{
-				GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Green, FString::Printf(TEXT("Interact Hit: %s"), *HitActor->GetName()));
+			GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Green, FString::Printf(TEXT("Interact Hit: %s"), *HitActor->GetName()));
 		}
 		else
 		{
@@ -147,12 +180,36 @@ void AMDCharacter::Input_Interact(const FInputActionValue& Value)
 	}
 }
 
-void AMDCharacter::Input_Ability(const FInputActionValue& Value)
+void AMDCharacter::HandleAbilityInput(const FInputActionValue& Value)
 {
 	GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("Ability: Activated"));
 }
 
-void AMDCharacter::Input_SwapEquipment(const FInputActionValue& Value)
+void AMDCharacter::HandleSwapEquipmentInput(const FInputActionValue& Value)
 {
 	GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("SwapEquipment: Activated"));
 }
+
+void AMDCharacter::HandleJumpOrSwimInput(const FInputActionValue& Value)
+{
+	UMDCharacterMovementComponent* MDMovement = Cast<UMDCharacterMovementComponent>(GetCharacterMovement());
+	if (!IsValid(MDMovement))
+	{
+		return;
+	}
+
+	if (MDMovement->IsMovingOnGround())
+	{
+		MDMovement->SetWantsToSwim(true);
+		MDMovement->SetMovementMode(MOVE_Swimming);
+		return;
+	}
+
+	Jump();
+}
+
+void AMDCharacter::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value)
+{
+	StopJumping();
+}
+
