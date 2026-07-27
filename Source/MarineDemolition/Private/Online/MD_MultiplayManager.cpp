@@ -78,7 +78,7 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
     if (ExistingSession != nullptr)
     {
         // Destroy Session 완료 이후 실제 Create Session 동작 함수가 호출되도록 Binding
-        OnPostDestroySessionComplete.BindLambda([&](bool bWasSuccessful)
+        OnPostDestroySessionComplete.BindLambda([this, ServerName, MaxPlayerCount, CreateSessionParams](bool bWasSuccessful)
             {
                 // Destroy Session 성공 시 Session 생성 함수 호출
                 if (bWasSuccessful == true)
@@ -199,7 +199,7 @@ void UMD_MultiplayManager::JoinSession(const FBlueprintSessionResult& BlueprintS
     if (ExistingSession != nullptr)
     {
         // Destroy Session 완료 이후 실제 Join Session 동작 함수가 호출되도록 Binding
-        OnPostDestroySessionComplete.BindLambda([&](bool bWasSuccessful)
+        OnPostDestroySessionComplete.BindLambda([this, BlueprintSessionResult](bool bWasSuccessful)
             {
                 // Destroy Session 성공 시 Session 참여 함수 호출
                 if (bWasSuccessful == true)
@@ -741,14 +741,14 @@ void UMD_MultiplayManager::HandleJoinSessionComplete(FName SessionName, EOnJoinS
         return;
     }
 
+    // 로그 출력
+    UE_LOG(MarineDemolition, Log, TEXT("%s 플레이어를 Session의 Map으로 이동합니다.(%s)"), *UE_CALL_LOCATIONINFO, *ConnectInfo);
+
     // Join Session 성공 이벤트 실행
     OnJoinSessionComplete.Broadcast(true);
 
     // 플레이어를 Session의 Listen Server로 이동
     PlayerController->ClientTravel(ConnectInfo, ETravelType::TRAVEL_Absolute);
-
-    // 로그 출력
-    UE_LOG(MarineDemolition, Log, TEXT("%s 플레이어를 Session의 Map으로 이동합니다."), *UE_CALL_LOCATIONINFO);
 }
 
 void UMD_MultiplayManager::HandleDestroySessionComplete(FName SessionName, bool bWasSuccessful)
