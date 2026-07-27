@@ -126,6 +126,12 @@ bool UMD_StylizedSkyControllerComponent::IsDrivenByExternalTimeSource() const
 
 bool UMD_StylizedSkyControllerComponent::TryReadExternalTime(float& OutHours, float& OutDayProgress) const
 {
+	// Lobby/editor frozen preview must win over GameState adapter.
+	if (bFrozenTime)
+	{
+		return false;
+	}
+
 	if (const AActor* Owner = GetOwner())
 	{
 		TArray<UActorComponent*> Components;
@@ -146,20 +152,32 @@ bool UMD_StylizedSkyControllerComponent::TryReadExternalTime(float& OutHours, fl
 
 float UMD_StylizedSkyControllerComponent::SanitizeTimeOfDayHours(float Hours) const
 {
+	// 24:00 is midnight — same as 0:00 (night). Do not remap to 23.999 (samples day end on curves).
+	if (Hours >= 24.f - KINDA_SMALL_NUMBER)
+	{
+		const float Remainder = FMath::Fmod(Hours, 24.f);
+		if (Remainder <= KINDA_SMALL_NUMBER || Remainder >= 24.f - KINDA_SMALL_NUMBER)
+		{
+			return 0.f;
+		}
+		return Remainder;
+	}
+
 	float Normalized = FMath::Fmod(Hours, 24.f);
 	if (Normalized < 0.f)
 	{
 		Normalized += 24.f;
-	}
-	if (Hours >= 24.f && Normalized <= KINDA_SMALL_NUMBER)
-	{
-		return 23.999f;
 	}
 	return Normalized;
 }
 
 float UMD_StylizedSkyControllerComponent::GetEffectiveTimeOfDayHours() const
 {
+	if (bFrozenTime)
+	{
+		return SanitizeTimeOfDayHours(FrozenTimeOfDayHours);
+	}
+
 	float ExternalHours = 0.f;
 	float ExternalProgress = 0.f;
 	if (TryReadExternalTime(ExternalHours, ExternalProgress))
@@ -167,29 +185,29 @@ float UMD_StylizedSkyControllerComponent::GetEffectiveTimeOfDayHours() const
 		return SanitizeTimeOfDayHours(ExternalHours);
 	}
 
-	if (bFrozenTime)
-	{
-		return SanitizeTimeOfDayHours(FrozenTimeOfDayHours);
-	}
-
 	return SanitizeTimeOfDayHours(LocalTimeOfDayHours);
 }
 
 float UMD_StylizedSkyControllerComponent::GetEffectiveDayCycleProgress() const
 {
+	const auto ProgressFromClock = [this](float ClockHours) -> float
+	{
+		return FMath::Frac(MapClockTimeToMpcShaderTime(SanitizeTimeOfDayHours(ClockHours)) / 24.f);
+	};
+
+	if (bFrozenTime)
+	{
+		return ProgressFromClock(FrozenTimeOfDayHours);
+	}
+
 	float ExternalHours = 0.f;
 	float ExternalProgress = 0.f;
 	if (TryReadExternalTime(ExternalHours, ExternalProgress))
 	{
-		return ExternalProgress;
+		return ProgressFromClock(ExternalHours);
 	}
 
-	if (bFrozenTime)
-	{
-		return FMath::Frac(FrozenTimeOfDayHours / 24.f);
-	}
-
-	return FMath::Frac(LocalTimeOfDayHours / 24.f);
+	return ProgressFromClock(LocalTimeOfDayHours);
 }
 
 float UMD_StylizedSkyControllerComponent::ComputeOrbitOrientationDegrees(float TimeOfDayHours) const
@@ -200,6 +218,11 @@ float UMD_StylizedSkyControllerComponent::ComputeOrbitOrientationDegrees(float T
 float UMD_StylizedSkyControllerComponent::MapClockTimeToMpcShaderTime(float ClockHours) const
 {
 	return FMath::Fmod(ClockHours + MpcShaderTimeOffsetHours + 24.f, 24.f);
+}
+
+float UMD_StylizedSkyControllerComponent::SampleClassicCurve01(float TimeOfDayHours) const
+{
+	return FMath::Fmod(TimeOfDayHours + 24.f, 24.f) / 24.f;
 }
 
 void UMD_StylizedSkyControllerComponent::ResolveSoftAssets()
@@ -405,20 +428,25 @@ void UMD_StylizedSkyControllerComponent::UpdateOrbit(float OrbitOrientationDegre
 
 bool UMD_StylizedSkyControllerComponent::IsSunVisibleAtTime(float TimeOfDayHours) const
 {
-	const float Hour = FMath::Fmod(TimeOfDayHours + 24.f, 24.f);
-	const bool bWithinDayWindow = Hour >= SunriseHour && Hour < SunsetHour;
+	const float ShaderTime = MapClockTimeToMpcShaderTime(TimeOfDayHours);
+	// Day band around midnight on wall/shader clock: 0/24 day, 12 night.
+	const bool bWithinDayWindow = ShaderTime <= SunriseHour || ShaderTime >= SunsetHour;
 
 	if (!bWithinDayWindow)
 	{
 		return false;
 	}
 
-	if (ResolvedSunGlowCurve)
+	// Classic SunGlow has a zero key at t=0.5 (shader noon). Never drop out of day window.
+	if (!ResolvedSunGlowCurve || SunVisibilityGlowThreshold <= 0.f)
 	{
-		return ResolvedSunGlowCurve->GetLinearColorValue(Hour).R > SunVisibilityGlowThreshold;
+		return true;
 	}
 
-	return true;
+	const float Glow = FMath::Max(
+		ResolvedSunGlowCurve->GetLinearColorValue(SampleClassicCurve01(ShaderTime)).R,
+		0.25f);
+	return Glow > SunVisibilityGlowThreshold;
 }
 
 void UMD_StylizedSkyControllerComponent::UpdateDirectionalLight(float TimeOfDayHours, float DayProgress01)
@@ -428,8 +456,9 @@ void UMD_StylizedSkyControllerComponent::UpdateDirectionalLight(float TimeOfDayH
 		return;
 	}
 
+	const float ShaderTime = MapClockTimeToMpcShaderTime(TimeOfDayHours);
 	const bool bSunVisible = IsSunVisibleAtTime(TimeOfDayHours);
-	const float CurveTime = TimeOfDayHours;
+	const float CurveSample01 = SampleClassicCurve01(ShaderTime);
 
 	FLinearColor LightColor = FLinearColor(1.f, 0.98f, 0.92f, 1.f);
 	float Glow = 1.f;
@@ -438,11 +467,13 @@ void UMD_StylizedSkyControllerComponent::UpdateDirectionalLight(float TimeOfDayH
 	{
 		if (ResolvedSunColorCurve)
 		{
-			LightColor = ResolvedSunColorCurve->GetLinearColorValue(CurveTime);
+			LightColor = ResolvedSunColorCurve->GetLinearColorValue(CurveSample01);
 		}
 		if (ResolvedSunGlowCurve)
 		{
-			Glow = ResolvedSunGlowCurve->GetLinearColorValue(CurveTime).R;
+			Glow = ResolvedSunGlowCurve->GetLinearColorValue(CurveSample01).R;
+			// Classic SunGlow has an explicit zero key at t=0.5 (noon on 0..1 curve).
+			Glow = FMath::Max(Glow, 0.25f);
 		}
 		Presentation.DirectionalLight->SetRelativeRotation(FRotator(-55.f, 0.f, 0.f));
 	}
@@ -452,11 +483,11 @@ void UMD_StylizedSkyControllerComponent::UpdateDirectionalLight(float TimeOfDayH
 		Glow = 0.35f;
 		if (ResolvedMoonColorCurve)
 		{
-			LightColor = ResolvedMoonColorCurve->GetLinearColorValue(CurveTime);
+			LightColor = ResolvedMoonColorCurve->GetLinearColorValue(CurveSample01);
 		}
 		if (ResolvedMoonGlowCurve)
 		{
-			Glow = ResolvedMoonGlowCurve->GetLinearColorValue(CurveTime).R;
+			Glow = ResolvedMoonGlowCurve->GetLinearColorValue(CurveSample01).R;
 		}
 		Presentation.DirectionalLight->SetRelativeRotation(FRotator(-55.f, MoonOrbitYawOffsetDegrees, 0.f));
 	}
@@ -499,21 +530,28 @@ void UMD_StylizedSkyControllerComponent::WriteMpc(
 	FLinearColor MoonColor = FLinearColor(0.75f, 0.82f, 1.f, 1.f);
 	float MoonGlow = 0.35f;
 
+	const float ShaderTime = MapClockTimeToMpcShaderTime(TimeOfDayHours);
+	const float CurveSample01 = SampleClassicCurve01(ShaderTime);
+
 	if (ResolvedSunColorCurve)
 	{
-		SunColor = ResolvedSunColorCurve->GetLinearColorValue(TimeOfDayHours);
+		SunColor = ResolvedSunColorCurve->GetLinearColorValue(CurveSample01);
 	}
 	if (ResolvedSunGlowCurve)
 	{
-		SunGlow = ResolvedSunGlowCurve->GetLinearColorValue(TimeOfDayHours).R;
+		SunGlow = ResolvedSunGlowCurve->GetLinearColorValue(CurveSample01).R;
+		if (bSunVisible)
+		{
+			SunGlow = FMath::Max(SunGlow, 0.25f);
+		}
 	}
 	if (ResolvedMoonColorCurve)
 	{
-		MoonColor = ResolvedMoonColorCurve->GetLinearColorValue(TimeOfDayHours);
+		MoonColor = ResolvedMoonColorCurve->GetLinearColorValue(CurveSample01);
 	}
 	if (ResolvedMoonGlowCurve)
 	{
-		MoonGlow = ResolvedMoonGlowCurve->GetLinearColorValue(TimeOfDayHours).R;
+		MoonGlow = ResolvedMoonGlowCurve->GetLinearColorValue(CurveSample01).R;
 	}
 
 	const FLinearColor ActiveLightColor = bSunVisible ? SunColor : MoonColor;
@@ -521,6 +559,17 @@ void UMD_StylizedSkyControllerComponent::WriteMpc(
 
 	const float MpcShaderTime = MapClockTimeToMpcShaderTime(TimeOfDayHours);
 	const float MpcShaderProgress = FMath::Frac(MpcShaderTime / 24.f);
+
+	FLinearColor SunLightDir(0.f, 0.f, 1.f, 1.f);
+	FLinearColor MoonLightDir(0.f, 0.f, 1.f, 1.f);
+	if (Presentation.DirectionalLight)
+	{
+		// SoStylized cloud mats treat this as direction toward the light (to the sun).
+		// DirectionalLight forward is the light travel direction (into the ground at day).
+		const FVector ToSun = -Presentation.DirectionalLight->GetForwardVector();
+		SunLightDir = FLinearColor(ToSun.X, ToSun.Y, ToSun.Z, 1.f);
+		MoonLightDir = FLinearColor(-ToSun.X, -ToSun.Y, -ToSun.Z, 1.f);
+	}
 
 	AActor* WorldContext = GetOwner();
 	auto SetScalar = [WorldContext](UMaterialParameterCollection* Collection, FName Name, float Value)
@@ -547,8 +596,13 @@ void UMD_StylizedSkyControllerComponent::WriteMpc(
 		SetScalar(MPCAsset, MpcDayLengthName, MpcDayLengthSeconds);
 		SetScalar(MPCAsset, MpcNightLengthName, MpcNightLengthSeconds);
 		SetScalar(MPCAsset, MpcDayStartTimeName, MpcDayStartTimeHours);
-		SetScalar(MPCAsset, MpcSunStrengthName, bSunVisible ? ActiveGlow * MpcShaderSunStrengthScale : 0.f);
+		const float SunStrengthValue = bSunVisible
+			? FMath::Max(ActiveGlow * MpcShaderSunStrengthScale, 1.0f * MpcShaderSunStrengthScale)
+			: FMath::Max(MoonGlow * MpcShaderSunStrengthScale, 0.15f * MpcShaderSunStrengthScale);
+		SetScalar(MPCAsset, MpcSunStrengthName, SunStrengthValue);
 		SetVector(MPCAsset, MpcSunColorName, ActiveLightColor);
+		SetVector(MPCAsset, MpcSunLightDirectionName, SunLightDir);
+		SetVector(MPCAsset, MpcMoonLightDirectionName, MoonLightDir);
 	}
 
 	if (Presentation.SkyDome)

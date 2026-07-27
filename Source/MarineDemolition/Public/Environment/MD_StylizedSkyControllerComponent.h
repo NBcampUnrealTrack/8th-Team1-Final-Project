@@ -84,6 +84,7 @@ public:
 
 	float ComputeOrbitOrientationDegrees(float TimeOfDayHours) const;
 	float MapClockTimeToMpcShaderTime(float ClockHours) const;
+	float SampleClassicCurve01(float TimeOfDayHours) const;
 
 protected:
 	void ResolveSoftAssets();
@@ -172,11 +173,19 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle")
 	FName MpcDayStartTimeName = TEXT("Day Start Time");
 
+	/**
+	 * Written to MPC "Day Start Time". Keep 0 so wall-clock hours match shader time
+	 * (12 = day, 0/24 = night) for owned Classic sky/cloud materials.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|MPC", meta = (ClampMin = "0.0", ClampMax = "24.0"))
 	float MpcDayStartTimeHours = 0.f;
 
+	/**
+	 * Added when writing MPC "Current Time". SoStylized Classic: CT 0 = day, CT 12 = night.
+	 * Default 0: wall 0/24 -> MPC 0 (day); wall 12 -> MPC 12 (night).
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|MPC", meta = (ClampMin = "0.0", ClampMax = "24.0"))
-	float MpcShaderTimeOffsetHours = 12.f;
+	float MpcShaderTimeOffsetHours = 0.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle", meta = (ClampMin = "0.0", ClampMax = "24.0"))
 	float SunriseHour = 6.f;
@@ -214,8 +223,8 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky")
 	bool bSuppressLevelSkyActors = true;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|MPC", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MpcShaderSunStrengthScale = 0.15f;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|MPC", meta = (ClampMin = "0.0", ClampMax = "8.0"))
+	float MpcShaderSunStrengthScale = 1.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|MPC")
 	FName MpcTimeOfDayName = TEXT("Current Time");
@@ -234,6 +243,13 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|MPC")
 	FName MpcSunColorName = TEXT("SunColor");
+
+	/** SoStylized cloud mats sample this for highlights; write directional light forward. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|MPC")
+	FName MpcSunLightDirectionName = TEXT("Sun Light Direction");
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|MPC")
+	FName MpcMoonLightDirectionName = TEXT("Moon Light Direction");
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialParameterCollection> ResolvedMPC;
