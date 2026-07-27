@@ -17,4 +17,7 @@ namespace MD_SessionKey
 
     // Session Settings의 Map 이름을 구분하는 Key
     const FName Key_MapName = FName("MAP_NAME");
+
+    // Session Settings의 방 코드를 구분하는 Key
+    const FName Key_RoomCode = FName("ROOM_CODE");
 }

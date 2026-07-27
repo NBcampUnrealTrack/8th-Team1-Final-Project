@@ -23,6 +23,10 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "Marine Demolition|Session")
 	FString MapName;
 
+	// 방 참여 코드
+	UPROPERTY(BlueprintReadOnly, Category = "Marine Demolition|Session")
+	FString RoomCode;
+
 	// 현재 참가 인원 수
 	UPROPERTY(BlueprintReadOnly, Category = "Marine Demolition|Session")
 	int32 CurrentPlayers = 0;
