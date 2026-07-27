@@ -1,9 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "MD_TimeWidget.h"
+#include "UI/MD_TimeWidget.h"
 #include "Components/TextBlock.h"
-#include "MarineDemolition/Game/MD_GameStateBase.h"
+#include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
 #include "Engine/World.h"
 

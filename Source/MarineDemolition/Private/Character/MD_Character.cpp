@@ -1,9 +1,9 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "MarineDemolition/Character/MD_Character.h"
-#include "MarineDemolition/Input/MD_InputConfig.h"
-#include "MarineDemolition/Component/MD_CharacterMovementComponent.h"
+#include "Character/MD_Character.h"
+#include "Input/MD_InputConfig.h"
+#include "Component/MD_CharacterMovementComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"

@@ -1,8 +1,8 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "MD_GameModeBase.h"
-#include "MD_GameStateBase.h"
+#include "Game/MD_GameModeBase.h"
+#include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
 
 void AMD_GameModeBase::BeginPlay()
