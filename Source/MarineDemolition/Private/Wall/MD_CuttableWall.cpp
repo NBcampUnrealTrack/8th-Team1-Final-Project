@@ -5,7 +5,6 @@
 #include "Engine/Engine.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Sector/MD_Sector.h"
-#include "UObject/ConstructorHelpers.h"
 #include "Wall/MD_WallPiece.h"
 
 namespace
@@ -20,12 +19,6 @@ AMD_CuttableWall::AMD_CuttableWall()
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
 	Mesh->SetRelativeScale3D(FVector(3.f, 0.2f, 2.5f));
-
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMesh.Succeeded())
-	{
-		Mesh->SetStaticMesh(CubeMesh.Object);
-	}
 
 	PieceClass = AMD_WallPiece::StaticClass();
 }

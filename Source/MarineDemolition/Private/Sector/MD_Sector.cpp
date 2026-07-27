@@ -11,7 +11,6 @@
 #include "Engine/StaticMeshActor.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "UObject/ConstructorHelpers.h"
 
 AMD_Sector::AMD_Sector()
 {
@@ -26,13 +25,6 @@ AMD_Sector::AMD_Sector()
 	Volume->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
 	Volume->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
 	Volume->SetGenerateOverlapEvents(true);
-	
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMesh.Succeeded())
-	{
-		DebrisMesh = CubeMesh.Object;
-	}
-
 }
 
 void AMD_Sector::BeginPlay()

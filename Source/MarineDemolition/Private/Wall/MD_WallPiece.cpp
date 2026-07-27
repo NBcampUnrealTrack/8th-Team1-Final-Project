@@ -4,7 +4,6 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "UObject/ConstructorHelpers.h"
 
 AMD_WallPiece::AMD_WallPiece()
 {
@@ -14,12 +13,6 @@ AMD_WallPiece::AMD_WallPiece()
 	SetRootComponent(Mesh);
 	Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
 	Mesh->SetSimulatePhysics(true);
-
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMesh.Succeeded())
-	{
-		Mesh->SetStaticMesh(CubeMesh.Object);
-	}
 }
 
 void AMD_WallPiece::SetContaminated(bool bInContaminated)

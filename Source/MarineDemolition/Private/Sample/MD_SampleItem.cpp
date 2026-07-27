@@ -1,7 +1,6 @@
 #include "Sample/MD_SampleItem.h"
 
 #include "Materials/MaterialInstanceDynamic.h"
-#include "UObject/ConstructorHelpers.h"
 
 AMD_SampleItem::AMD_SampleItem()
 {
@@ -12,12 +11,6 @@ AMD_SampleItem::AMD_SampleItem()
 	Mesh->SetRelativeScale3D(FVector(0.4f));
 	Mesh->SetCollisionObjectType(ECC_WorldDynamic);
 	Mesh->SetGenerateOverlapEvents(true);
-
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
-	if (SphereMesh.Succeeded())
-	{
-		Mesh->SetStaticMesh(SphereMesh.Object);
-	}
 }
 
 void AMD_SampleItem::BeginPlay()
