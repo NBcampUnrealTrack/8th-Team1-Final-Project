@@ -19,8 +19,6 @@ void UMD_MultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
     if (SessionInterface.IsValid() == true)
     {
         SessionInterface->OnSessionUserInviteAcceptedDelegates.AddUObject(this, &ThisClass::HandleSessionUserInviteAccepted);
-        //FOnSessionInviteReceivedDelegate::CreateUObject();
-        //SessionInterface->AddOnSessionInviteReceivedDelegate_Handle
     }
 }
 
