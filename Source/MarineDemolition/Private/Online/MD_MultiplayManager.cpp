@@ -1,21 +1,21 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Online/MDMultiplayManager.h"
+#include "Online/MD_MultiplayManager.h"
 #include "OnlineSubsystem.h"
 #include "OnlineSessionSettings.h"
 #include "Online/OnlineSessionNames.h"
-#include "MDSessionSettingKey.h"
-#include "MDLogUtility.h"
+#include "MD_SessionSettingKey.h"
+#include "MD_LogUtility.h"
 
-void UMDMultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
+void UMD_MultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
 
     InitOnlineSessionInterface();
 }
 
-void UMDMultiplayManager::Deinitialize()
+void UMD_MultiplayManager::Deinitialize()
 {
     // Online Session Interface의 유효성 검사
     if (SessionInterface.IsValid() == true)
@@ -48,7 +48,7 @@ void UMDMultiplayManager::Deinitialize()
 	Super::Deinitialize();
 }
 
-void UMDMultiplayManager::CreateSession(const FString& ServerName, int32 MaxPlayerCount)
+void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPlayerCount)
 {
     // Online Session Interface 유효성 및 Session 최대 접속 인원 수 유효성 확인
     if (SessionInterface.IsValid() == false || MaxPlayerCount <= 0)
@@ -62,7 +62,7 @@ void UMDMultiplayManager::CreateSession(const FString& ServerName, int32 MaxPlay
     }
 
     // Create Session에 사용되는 Parameter 저장
-    PendingCreateSessionParams = MakeShared<FMDCreateSessionParams>();
+    PendingCreateSessionParams = MakeShared<FMD_CreateSessionParams>();
     PendingCreateSessionParams->ServerName = ServerName;
     PendingCreateSessionParams->MaxPlayerCount = MaxPlayerCount;
 
@@ -79,10 +79,10 @@ void UMDMultiplayManager::CreateSession(const FString& ServerName, int32 MaxPlay
     CreateSessionInternal();
 }
 
-void UMDMultiplayManager::FindSessions(int32 MaxSearchResultCount)
+void UMD_MultiplayManager::FindSessions(int32 MaxSearchResultCount)
 {
     // Find Session 실패 시 반환될 검색 결과
-    const TArray<FMDSessionInfo> EmptyFindResults;
+    const TArray<FMD_SessionInfo> EmptyFindResults;
 
     // Online Session Interface 유효성 및 최대 검색 결과 수 유효성 검사
     if (SessionInterface.IsValid() == false || MaxSearchResultCount <= 0)
@@ -147,7 +147,7 @@ void UMDMultiplayManager::FindSessions(int32 MaxSearchResultCount)
     }
 }
 
-void UMDMultiplayManager::JoinSession(int32 SessionIndex)
+void UMD_MultiplayManager::JoinSession(int32 SessionIndex)
 {
     // Online Session Interface 유효성 및 이전 Session 검색 결과 유효성 검사
     if (SessionInterface.IsValid() == false || SessionSearch.IsValid() == false)
@@ -208,7 +208,7 @@ void UMDMultiplayManager::JoinSession(int32 SessionIndex)
     }
 }
 
-void UMDMultiplayManager::DestroySession()
+void UMD_MultiplayManager::DestroySession()
 {
     // Online Session Interface 유효성 검사
     if (SessionInterface.IsValid() == false)
@@ -254,7 +254,7 @@ void UMDMultiplayManager::DestroySession()
     }
 }
 
-void UMDMultiplayManager::InitOnlineSessionInterface()
+void UMD_MultiplayManager::InitOnlineSessionInterface()
 {
     // 프로젝트에서 사용하는 Online Subsystem 얻기 및 유효성 검사
     IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
@@ -278,7 +278,7 @@ void UMDMultiplayManager::InitOnlineSessionInterface()
     }
 }
 
-TSharedPtr<const FUniqueNetId> UMDMultiplayManager::GetLocalPlayerNetID() const
+TSharedPtr<const FUniqueNetId> UMD_MultiplayManager::GetLocalPlayerNetID() const
 {
     // GameInstance 얻기 및 유효성 검사
     UGameInstance* GameInstance = GetGameInstance();
@@ -305,7 +305,7 @@ TSharedPtr<const FUniqueNetId> UMDMultiplayManager::GetLocalPlayerNetID() const
     return PreferredNetID.IsValid() == true ? PreferredNetID.GetUniqueNetId() : nullptr;
 }
 
-void UMDMultiplayManager::CreateSessionInternal()
+void UMD_MultiplayManager::CreateSessionInternal()
 {
     // Create Session을 위하여 저장된 Parameter의 유효성 확인
     if (PendingCreateSessionParams.IsValid() == false)
@@ -319,7 +319,7 @@ void UMDMultiplayManager::CreateSessionInternal()
     }
 
     // Parameter 값 복사 및 초기화
-    TSharedPtr<FMDCreateSessionParams> CreateSessionParams = PendingCreateSessionParams;
+    TSharedPtr<FMD_CreateSessionParams> CreateSessionParams = PendingCreateSessionParams;
     PendingCreateSessionParams.Reset();
 
     // Session의 Listen Server를 호스팅하는 Local Player의 Net ID 얻기 및 유효성 확인
@@ -376,13 +376,13 @@ void UMDMultiplayManager::CreateSessionInternal()
     SessionSettings->BuildUniqueId = 1;
 
     // 다른 프로젝트의 App ID 480 세션과 구분할 값 저장
-    SessionSettings->Set(MDSessionKey::Key_ProjectID, MDSessionKey::Value_ProjectID, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+    SessionSettings->Set(MD_SessionKey::Key_ProjectID, MD_SessionKey::Value_ProjectID, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
     // 다른 플레이어에게 표시되는 Session 이름 저장
-    SessionSettings->Set(MDSessionKey::Key_ServerName, CreateSessionParams->ServerName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+    SessionSettings->Set(MD_SessionKey::Key_ServerName, CreateSessionParams->ServerName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
     // Session의 Map(Level) 이름 저장
-    SessionSettings->Set(MDSessionKey::Key_MapName, FString(TEXT("Lvl_Lobby")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+    SessionSettings->Set(MD_SessionKey::Key_MapName, FString(TEXT("Lvl_Lobby")), EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
     // Online Session Interface의 Session 생성 완료 이벤트 등록
     FOnCreateSessionCompleteDelegate CreateSessionDelegate = FOnCreateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleCreateSessionComplete);
@@ -406,7 +406,7 @@ void UMDMultiplayManager::CreateSessionInternal()
     }
 }
 
-void UMDMultiplayManager::HandleCreateSessionComplete(FName SessionName, bool bIsSuccess)
+void UMD_MultiplayManager::HandleCreateSessionComplete(FName SessionName, bool bIsSuccess)
 {
     // Online Session Interface의 Create Session 완료 이벤트 연결 해제
     if (SessionInterface.IsValid() == true)
@@ -448,7 +448,7 @@ void UMDMultiplayManager::HandleCreateSessionComplete(FName SessionName, bool bI
     UE_LOG(MarineDemolition, Log, TEXT("%s Session 생성에 성공하였습니다. Map(Lvl_Lobby) 로드 요청...(%s)"), *UE_CALL_LOCATIONINFO, (bIsTravelStarted == true ? TEXT("Success") : TEXT("Failed")));
 }
 
-void UMDMultiplayManager::HandleFindSessionsComplete(bool bIsSuccess)
+void UMD_MultiplayManager::HandleFindSessionsComplete(bool bIsSuccess)
 {
     // Online Session Interface의 Find Sessions 완료 이벤트 연결 해제
     if (SessionInterface.IsValid() == true)
@@ -458,7 +458,7 @@ void UMDMultiplayManager::HandleFindSessionsComplete(bool bIsSuccess)
     FindSessionsCompleteDelegateHandle.Reset();
 
     // 검색 결과를 저장하는 배열 생성
-    TArray<FMDSessionInfo> FoundSessionInfos;
+    TArray<FMD_SessionInfo> FoundSessionInfos;
 
     // Online Session Interface가 유효하지 않으면 함수 조기 종료
     // 검색 실패 또는 검색 결과가 유효하지 않으면 함수 조기 종료
@@ -484,16 +484,16 @@ void UMDMultiplayManager::HandleFindSessionsComplete(bool bIsSuccess)
 
         // 검색된 Session의 ProjectID값 얻기 ({ Key, Value } Pair 찾기)
         FString SessionProjectID;
-        bool bHasProjectID = SessionSearchResult.Session.SessionSettings.Get<FString>(MDSessionKey::Key_ProjectID, SessionProjectID);
+        bool bHasProjectID = SessionSearchResult.Session.SessionSettings.Get<FString>(MD_SessionKey::Key_ProjectID, SessionProjectID);
 
         // Session 설정에 ProjectID 값이 존재하는지 및 현재 프로젝트의 설정과 일치하는지 검사
-        if (bHasProjectID == false || SessionProjectID != MDSessionKey::Value_ProjectID)
+        if (bHasProjectID == false || SessionProjectID != MD_SessionKey::Value_ProjectID)
         {
             continue;
         }
 
         // Session 정보를 변환하여 저장하는 객체 생성
-        FMDSessionInfo SessionInfo;
+        FMD_SessionInfo SessionInfo;
 
         // Session 검색 결과로부터 정보 추출
         SessionInfo.ExportSessionInfo(SessionSearchResult.Session);
@@ -513,7 +513,7 @@ void UMDMultiplayManager::HandleFindSessionsComplete(bool bIsSuccess)
     OnFindSessionsComplete.Broadcast(FoundSessionInfos, true);
 }
 
-void UMDMultiplayManager::HandleJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result)
+void UMD_MultiplayManager::HandleJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result)
 {
     // Online Session Interface의 Join Session 완료 이벤트 연결 해제
     if (SessionInterface.IsValid() == true)
@@ -584,7 +584,7 @@ void UMDMultiplayManager::HandleJoinSessionComplete(FName SessionName, EOnJoinSe
     UE_LOG(MarineDemolition, Log, TEXT("%s 플레이어를 Session의 Map으로 이동합니다."), *UE_CALL_LOCATIONINFO);
 }
 
-void UMDMultiplayManager::HandleDestroySessionComplete(FName SessionName, bool bIsSuccess)
+void UMD_MultiplayManager::HandleDestroySessionComplete(FName SessionName, bool bIsSuccess)
 {
     // Online Session Interface의 Destroy Session 완료 이벤트 연결 해제
     if (SessionInterface.IsValid() == true)

@@ -4,12 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
-#include "MDInputConfig.generated.h"
+#include "MD_InputConfig.generated.h"
 
 class UInputAction;
 
 UCLASS()
-class MARINEDEMOLITION_API UMDInputConfig : public UDataAsset
+class MARINEDEMOLITION_API UMD_InputConfig : public UDataAsset
 {
 	GENERATED_BODY()
 	

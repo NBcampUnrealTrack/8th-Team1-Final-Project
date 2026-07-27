@@ -4,16 +4,16 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/CharacterMovementComponent.h"
-#include "MDCharacterMovementComponent.generated.h"
+#include "MD_CharacterMovementComponent.generated.h"
 
 /**
- * 
+ *
  */
 UCLASS()
-class MARINEDEMOLITION_API UMDCharacterMovementComponent : public UCharacterMovementComponent
+class MARINEDEMOLITION_API UMD_CharacterMovementComponent : public UCharacterMovementComponent
 {
 	GENERATED_BODY()
-	
+
 
 public:
 	virtual bool CanEverSwim() const override;

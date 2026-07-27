@@ -3,10 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "MDSessionTypes.generated.h"
+#include "MD_SessionTypes.generated.h"
 
 USTRUCT(BlueprintType)
-struct MARINEDEMOLITION_API FMDSessionInfo
+struct MARINEDEMOLITION_API FMD_SessionInfo
 {
 	GENERATED_BODY()
 

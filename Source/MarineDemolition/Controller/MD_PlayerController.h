@@ -4,14 +4,14 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerController.h"
-#include "MDPlayerController.generated.h"
+#include "MD_PlayerController.generated.h"
 
 /**
- * 
+ *
  */
 UCLASS()
-class MARINEDEMOLITION_API AMDPlayerController : public APlayerController
+class MARINEDEMOLITION_API AMD_PlayerController : public APlayerController
 {
 	GENERATED_BODY()
-	
+
 };

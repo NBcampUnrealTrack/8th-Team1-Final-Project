@@ -5,15 +5,14 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
-#include "MDCharacter.generated.h"
+#include "MD_Character.generated.h"
 
-class UMDInputConfig;
+class UMD_InputConfig;
 class UInputMappingContext;
 class UInputAction;
 class UCameraComponent;
 class USkeletalMeshComponent;
-class UMDCharacterMovementComponent;
-
+class UMD_CharacterMovementComponent;
 
 UENUM(BlueprintType)
 enum class EMDMovementState : uint8
@@ -25,13 +24,13 @@ enum class EMDMovementState : uint8
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnMovementStateChanged, EMDMovementState, NewMovementState);
 
 UCLASS()
-class MARINEDEMOLITION_API AMDCharacter : public ACharacter
+class MARINEDEMOLITION_API AMD_Character : public ACharacter
 {
 	GENERATED_BODY()
 
 public:
 	// Sets default values for this character's properties
-	AMDCharacter(const FObjectInitializer& ObjectInitializer);
+	AMD_Character(const FObjectInitializer& ObjectInitializer);
 
 	UPROPERTY(BlueprintAssignable, Category = "Movement|Water")
 	FMDOnMovementStateChanged OnMovementStateChanged;
@@ -48,7 +47,7 @@ protected:
 
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
 
-public:	
+public:
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
@@ -66,7 +65,7 @@ protected:
 	TObjectPtr<UInputMappingContext> PlayerMappingContext;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
-	TObjectPtr<UMDInputConfig> InputConfig;
+	TObjectPtr<UMD_InputConfig> InputConfig;
 
 	UPROPERTY(EditAnywhere, Category = "Interact")
 	float InteractTraceDistance = 200.f;
