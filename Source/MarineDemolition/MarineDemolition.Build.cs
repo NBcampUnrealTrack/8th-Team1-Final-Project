@@ -16,7 +16,7 @@ public class MarineDemolition : ModuleRules
 			// AI
 			"AIModule",
 			// Online
-			"OnlineSubsystem", "OnlineSubsystemUtils", "SteamSockets",
+			"OnlineSubsystem", "OnlineSubsystemUtils",
 			//UI
 			"UMG"
 		});

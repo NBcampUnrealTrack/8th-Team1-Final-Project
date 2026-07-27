@@ -438,8 +438,8 @@ void UMD_MultiplayManager::CreateSessionInternal(const FString& ServerName, int3
     // 친구 초대 허용
     SessionSettings->bAllowInvites = true;
 
-    // 친구만 Presence를 통한 세션 참가 허용.
-    SessionSettings->bAllowJoinViaPresenceFriendsOnly = true;
+    //// 친구만 Presence를 통한 세션 참가 허용.
+    //SessionSettings->bAllowJoinViaPresenceFriendsOnly = true;
 
     // 로비 시스템을 가능한 경우 사용
     SessionSettings->bUseLobbiesIfAvailable = true;
@@ -638,6 +638,9 @@ void UMD_MultiplayManager::HandleFindSessionsComplete(bool bWasSuccessful, TShar
         return;
     }
 
+    // 로그 출력
+    UE_LOG(MarineDemolition, Log, TEXT("%s 다른 프로젝트 포함 %d개의 공개 Session이 검색되었습니다."), *UE_CALL_LOCATIONINFO, SessionSearch->SearchResults.Num());
+
     // 검색된 SessionSearchResult 목록 필터링
     for (int32 Index = 0; Index < SessionSearch->SearchResults.Num(); ++Index)
     {
@@ -660,7 +663,7 @@ void UMD_MultiplayManager::HandleFindSessionsComplete(bool bWasSuccessful, TShar
             continue;
         }
 
-        //// 변환된 Session 정보를 목록에 추가
+        // 변환된 Session 정보를 목록에 추가
         FBlueprintSessionResult& BlueprintSearchResult = SearchResults.AddDefaulted_GetRef();
         BlueprintSearchResult.OnlineResult = SessionSearch->SearchResults[Index];
     }
