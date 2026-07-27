@@ -39,6 +39,14 @@ public:
     UFUNCTION(BlueprintPure, Category = "Game Time")
     bool HasReachedTime(int32 Hour, int32 Minute) const;
 
+    /** 0..1 progress across the playable day window (StartHour..EndHour). */
+    UFUNCTION(BlueprintPure, Category = "Game Time")
+    float GetDayCycleProgress() const;
+
+    /** Current in-game time as hours (fractional), e.g. 14.5 = 14:30. */
+    UFUNCTION(BlueprintPure, Category = "Game Time")
+    float GetTimeOfDayHours() const;
+
     // Withdrawal
     void SetWithdrawalPhase(EMD_WithdrawalPhase NewPhase);
 
