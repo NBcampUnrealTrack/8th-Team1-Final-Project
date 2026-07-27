@@ -11,8 +11,17 @@ class UMD_InputConfig;
 class UInputMappingContext;
 class UInputAction;
 class UCameraComponent;
-class USpringArmComponent;
 class USkeletalMeshComponent;
+class UMD_CharacterMovementComponent;
+
+UENUM(BlueprintType)
+enum class EMDMovementState : uint8
+{
+	Walking,
+	Swimming
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnMovementStateChanged, EMDMovementState, NewMovementState);
 
 UCLASS()
 class MARINEDEMOLITION_API AMD_Character : public ACharacter
@@ -21,13 +30,24 @@ class MARINEDEMOLITION_API AMD_Character : public ACharacter
 
 public:
 	// Sets default values for this character's properties
-	AMD_Character();
+	AMD_Character(const FObjectInitializer& ObjectInitializer);
+
+	UPROPERTY(BlueprintAssignable, Category = "Movement|Water")
+	FMDOnMovementStateChanged OnMovementStateChanged;
+
+	UFUNCTION(BlueprintPure, Category = "Movement|Water")
+	EMDMovementState GetCurrentMovementState() const { return CurrentMovementState; }
+
+	UFUNCTION(BlueprintCallable, Category = "Movement|Water")
+	void ForceEnterWalkState();
 
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
-public:	
+	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
+
+public:
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
@@ -50,12 +70,16 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Interact")
 	float InteractTraceDistance = 200.f;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Water")
+	EMDMovementState CurrentMovementState = EMDMovementState::Walking;
+
 private:
 
-	void Input_Move(const FInputActionValue& Value);
-	void Input_Look(const FInputActionValue& Value);
-	void Input_Interact(const FInputActionValue& Value);
-	void Input_Ability(const FInputActionValue& Value);
-	void Input_SwapEquipment(const FInputActionValue& Value);
-
+	void HandleMoveInput(const FInputActionValue& Value);
+	void HandleLookInput(const FInputActionValue& Value);
+	void HandleInteractInput(const FInputActionValue& Value);
+	void HandleAbilityInput(const FInputActionValue& Value);
+	void HandleSwapEquipmentInput(const FInputActionValue& Value);
+	void HandleJumpOrSwimInput(const FInputActionValue& Value);
+	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
 };
