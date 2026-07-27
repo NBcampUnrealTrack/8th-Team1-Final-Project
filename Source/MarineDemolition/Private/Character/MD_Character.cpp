@@ -198,8 +198,7 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 
 	if (MDMovement->IsMovingOnGround())
 	{
-		MDMovement->SetWantsToSwim(true);
-		MDMovement->SetMovementMode(MOVE_Swimming);
+		MDMovement->EnterSwimmingFromGround();
 		return;
 	}
 
