@@ -4,6 +4,8 @@
 #include "Character/MD_Character.h"
 #include "Input/MD_InputConfig.h"
 #include "Component/MD_CharacterMovementComponent.h"
+#include "Demolition/Scrape/MD_ScrapeToolComponent.h"
+#include "AbilitySystemComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -14,6 +16,7 @@
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameplayAbilitySpec.h"
 
 // Sets default values
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
@@ -43,6 +46,21 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	FirstPersonMesh->SetOnlyOwnerSee(true);
 	FirstPersonMesh->SetOwnerNoSee(false);
 	FirstPersonMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ActiveScrapeAbilityHandle = FGameplayAbilitySpecHandle();
+
+	AbilitySystemComponent =
+		CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
+	AbilitySystemComponent->SetIsReplicated(true);
+	AbilitySystemComponent->SetReplicationMode(
+		EGameplayEffectReplicationMode::Minimal);
+
+	ScrapeToolComponent =
+		CreateDefaultSubobject<UMD_ScrapeToolComponent>(TEXT("ScrapeToolComponent"));
+}
+
+UAbilitySystemComponent* AMD_Character::GetAbilitySystemComponent() const
+{
+	return AbilitySystemComponent;
 }
 
 void AMD_Character::ForceEnterWalkState()
@@ -55,6 +73,9 @@ void AMD_Character::ForceEnterWalkState()
 void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
+
+	RefreshAbilityActorInfo();
+	GrantStartupAbilities();
 
 	if (!IsValid(PlayerMappingContext)) return;
 
@@ -73,6 +94,14 @@ void AMD_Character::BeginPlay()
 		}
 	}
 
+}
+
+void AMD_Character::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+
+	RefreshAbilityActorInfo();
+	GrantStartupAbilities();
 }
 
 void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -115,6 +144,8 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Completed, this, &AMD_Character::HandleJumpOrSwimReleasedInput);
 		EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Started, this, &AMD_Character::HandleInteractInput);
 		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Started, this, &AMD_Character::HandleAbilityInput);
+		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAbilityReleasedInput);
+		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAbilityReleasedInput);
 		EIC->BindAction(InputConfig->SwapEquipmentAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleSwapEquipmentInput);
 	}
 
@@ -180,7 +211,46 @@ void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 {
-	GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("Ability: Activated"));
+	if (!AbilitySystemComponent || !ScrapeAbilityClass)
+	{
+		return;
+	}
+
+	FGameplayAbilitySpec* AbilitySpec =
+		AbilitySystemComponent->FindAbilitySpecFromClass(ScrapeAbilityClass);
+	if (!AbilitySpec)
+	{
+		return;
+	}
+
+	if (AbilitySpec->IsActive())
+	{
+		ActiveScrapeAbilityHandle = AbilitySpec->Handle;
+		return;
+	}
+
+	if (AbilitySystemComponent->TryActivateAbility(AbilitySpec->Handle))
+	{
+		ActiveScrapeAbilityHandle = AbilitySpec->Handle;
+	}
+}
+
+void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
+{
+	if (!AbilitySystemComponent || !ActiveScrapeAbilityHandle.IsValid())
+	{
+		return;
+	}
+
+	const FGameplayAbilitySpecHandle AbilityHandle = ActiveScrapeAbilityHandle;
+	ActiveScrapeAbilityHandle = FGameplayAbilitySpecHandle();
+
+	const FGameplayAbilitySpec* AbilitySpec =
+		AbilitySystemComponent->FindAbilitySpecFromHandle(AbilityHandle);
+	if (AbilitySpec && AbilitySpec->IsActive())
+	{
+		AbilitySystemComponent->CancelAbilityHandle(AbilityHandle);
+	}
 }
 
 void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
@@ -209,4 +279,39 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value)
 {
 	StopJumping();
+}
+
+void AMD_Character::RefreshAbilityActorInfo()
+{
+	if (AbilitySystemComponent)
+	{
+		AbilitySystemComponent->InitAbilityActorInfo(this, this);
+	}
+}
+
+void AMD_Character::GrantStartupAbilities()
+{
+	if (!HasAuthority() || !AbilitySystemComponent)
+	{
+		return;
+	}
+
+	for (const FMD_StartupAbilityEntry& StartupAbility : StartupAbilities)
+	{
+		if (!StartupAbility.AbilityClass)
+		{
+			continue;
+		}
+
+		if (AbilitySystemComponent->FindAbilitySpecFromClass(
+				StartupAbility.AbilityClass))
+		{
+			continue;
+		}
+
+		AbilitySystemComponent->GiveAbility(
+			FGameplayAbilitySpec(
+				StartupAbility.AbilityClass,
+				FMath::Max(1, StartupAbility.AbilityLevel)));
+	}
 }
