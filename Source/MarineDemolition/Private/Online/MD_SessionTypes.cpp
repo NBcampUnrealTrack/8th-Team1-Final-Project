@@ -13,6 +13,9 @@ void FMD_SessionInfo::ExportSessionInfo(const FOnlineSession& Session)
     // Session Settings에서 Map Name 값 추출
     Session.SessionSettings.Get(MD_SessionKey::Key_MapName, MapName);
 
+    // Session Settings에서 Room Code 값 추출
+    Session.SessionSettings.Get(MD_SessionKey::Key_RoomCode, RoomCode);
+
     // Session의 Owner Name 복사
     OwnerName = Session.OwningUserName;
 
