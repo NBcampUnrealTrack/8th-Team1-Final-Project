@@ -591,8 +591,8 @@ void UMD_MultiplayManager::CreateSessionInternal(const FString& ServerName, int3
     // 로비 시스템을 가능한 경우 사용
     SessionSettings->bUseLobbiesIfAvailable = true;
 
-    // 로비 음성 채팅 비활성화
-    SessionSettings->bUseLobbiesVoiceChatIfAvailable = false;
+    // 로비 음성 채팅 활성화
+    SessionSettings->bUseLobbiesVoiceChatIfAvailable = true;
 
     // Session 최대 접속 인원 수 설정
     SessionSettings->NumPublicConnections = MaxPlayerCount;
