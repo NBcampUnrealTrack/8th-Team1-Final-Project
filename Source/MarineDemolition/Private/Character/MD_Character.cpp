@@ -309,9 +309,6 @@ void AMD_Character::GrantStartupAbilities()
 			continue;
 		}
 
-		AbilitySystemComponent->GiveAbility(
-			FGameplayAbilitySpec(
-				StartupAbility.AbilityClass,
-				FMath::Max(1, StartupAbility.AbilityLevel)));
+		AbilitySystemComponent->GiveAbility(FGameplayAbilitySpec(StartupAbility.AbilityClass, FMath::Max(1, StartupAbility.AbilityLevel)));
 	}
 }

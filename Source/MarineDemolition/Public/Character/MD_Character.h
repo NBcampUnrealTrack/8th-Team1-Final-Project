@@ -81,16 +81,11 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_ScrapeToolComponent> ScrapeToolComponent;
 
-	/**
-	 * 시작 시 지급할 Ability 목록. 캐릭터 Blueprint의 클래스 기본값에서 구성한다.
-	 */
+	// 시작 시 지급할 Ability 목록
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Ability")
 	TArray<FMD_StartupAbilityEntry> StartupAbilities;
 
-	/**
-	 * Enhanced Input의 AbilityAction으로 활성화할 Scrape Ability.
-	 * MD_GA_Scrape를 상속한 Blueprint Ability를 캐릭터 Blueprint에서 지정한다.
-	 */
+	// AbilityAction으로 실행할 긁기 Ability
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Ability")
 	TSubclassOf<UGameplayAbility> ScrapeAbilityClass;
 

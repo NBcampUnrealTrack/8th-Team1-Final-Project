@@ -51,7 +51,7 @@ void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
-	// 에디터에서 메시 또는 Scale을 바꾸면 런타임 세부 정보에 표시할 작업면 크기도 즉시 다시 계산한다.
+	// 에디터 변경 시 작업면 크기 갱신
 	ResolveContaminationSurfaceGeometry();
 
 	// 스캔 전에는 타입 구분 없이 중립 회색
@@ -67,8 +67,7 @@ void AMD_CuttableWall::BeginPlay()
 {
 	Super::BeginPlay();
 
-	// 오염 셀은 플레이 세션의 상태이므로 Construction Script가 아니라 BeginPlay에서 한 번 초기화한다.
-	// 이렇게 해야 에디터에서 Actor를 움직이거나 속성을 바꿀 때 진행 중인 오염 상태가 예기치 않게 리셋되지 않는다.
+	// 런타임 오염 상태 초기화
 	InitializeContaminationSurface();
 
 	// Transient인 MID는 레벨 로드/PIE 복제 시 유실되므로 런타임에서 재생성
@@ -118,8 +117,7 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 		}
 	}
 
-	// 파편 드랍: 셀에서 계산한 실제 제거율로 깨끗/오염 조각을 배분한다.
-	// 예: 벽을 50%만 긁고 절단했다면 PieceCount의 절반만 깨끗한 조각으로 생성된다.
+	// 파편 드랍: 제거율 비율로 깨끗/오염 배분 (기획 §2.5: 제거율 70% → 7:3)
 	const int32 CleanCount = FMath::RoundToInt(
 		static_cast<float>(PieceCount) * GetContaminationCleanRatio());
 
@@ -153,14 +151,13 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHits(
 	const FHitResult& StartHit,
 	const FHitResult& EndHit)
 {
-	// BeginPlay 이전의 자동화 테스트 호출에서도 아래 면 검사가 유효하도록 먼저 초기화를 보장한다.
+	// BeginPlay 이전 호출도 지원
 	if (!bContaminationSurfaceInitialized)
 	{
 		InitializeContaminationSurface();
 	}
 
-	// 두 점 모두 같은 벽의 동일한 오염 작업면에서 발생해야 한다.
-	// 한 점이라도 다른 Actor, 부속 Component 또는 벽 뒤쪽 면이라면 긴 잘못된 선분을 만들지 않는다.
+	// 같은 벽의 작업면 충돌만 허용
 	if (!IsHitOnContaminationFace(StartHit)
 		|| !IsHitOnContaminationFace(EndHit))
 	{
@@ -184,8 +181,7 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHits(
 FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
 	const FMD_ScrapeStroke& Stroke)
 {
-	// 정상적인 게임 흐름에서는 BeginPlay에서 이미 초기화된다.
-	// 다만 자동화 테스트나 Spawn 직후 호출도 안전하게 처리하도록 필요할 때 한 번 초기화를 시도한다.
+	// Spawn 직후 호출도 지원
 	if (!bContaminationSurfaceInitialized)
 	{
 		InitializeContaminationSurface();
@@ -205,7 +201,7 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
 		ResolvedContaminationSurfaceSizeCm,
 		ContaminationCells);
 
-	// 판정 입력이 유효하지 않으면 셀을 원본으로 하는 캐시와 완료 상태도 변경하지 않는다.
+	// 잘못된 입력은 상태를 변경하지 않음
 	if (!Result.bIsInputValid)
 	{
 		return Result;
@@ -214,8 +210,7 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
 	CachedContaminationCleanRatio = Result.CleanRatioAfter;
 	UpdateContaminationVisualization(Result.CellChanges);
 
-	// 완전히 깨끗하지 않았던 벽이 이번 긁기로 처음 완료된 순간에만 방송한다.
-	// 이미 깨끗한 벽을 계속 긁거나 Blueprint에서 여러 구독자가 있어도 해금 트리거는 한 번뿐이다.
+	// 최초 완료 시 한 번만 방송
 	if (!bWasFullyRemoved
 		&& Result.bIsSurfaceFullyClean
 		&& !bContaminationCompletionBroadcast)
@@ -244,7 +239,7 @@ float AMD_CuttableWall::GetContaminationRemovedPercent() const
 
 float AMD_CuttableWall::GetResidualContaminationRatio() const
 {
-	// 초기화 실패를 깨끗한 상태로 오인하지 않도록 실패 시 잔여 오염 100%로 간주한다.
+	// 초기화 실패는 오염 100%로 처리
 	return 1.0f - GetContaminationCleanRatio();
 }
 
@@ -258,7 +253,7 @@ bool AMD_CuttableWall::IsContaminationFullyRemoved() const
 
 bool AMD_CuttableWall::CanCut() const
 {
-	// 셀 배열이나 표면 크기가 잘못된 벽을 0% 게이트 때문에 절단 가능하다고 오인하지 않도록 실패 폐쇄한다.
+	// 초기화 실패 시 절단 금지
 	if (!bContaminationSurfaceInitialized)
 	{
 		return false;
@@ -285,7 +280,7 @@ bool AMD_CuttableWall::ResolveContaminationSurfaceGeometry()
 		ContaminationMeshLocalBoundsMinimum,
 		ContaminationMeshLocalBoundsMaximum);
 
-	// 메시 피벗이 중앙에서 벗어나 있어도 충돌점을 표면 중앙 기준 좌표로 만들기 위해 Bounds 중심을 보관한다.
+	// 피벗과 무관하게 Bounds 중심 사용
 	ContaminationSurfaceCenterLocal =
 		(ContaminationMeshLocalBoundsMinimum
 			+ ContaminationMeshLocalBoundsMaximum)
@@ -304,8 +299,7 @@ bool AMD_CuttableWall::ResolveContaminationSurfaceGeometry()
 		return true;
 	}
 
-	// Local Bounds는 메시 원본 단위이므로 Component의 최종 월드 Scale을 곱해 실제 cm 크기로 변환한다.
-	// 벽 두께인 로컬 Y는 오염 작업면 넓이에 포함하지 않고 가로 X와 세로 Z만 사용한다.
+	// 로컬 X/Z Bounds를 월드 cm로 변환
 	const FVector LocalBoundsSize =
 		ContaminationMeshLocalBoundsMaximum
 		- ContaminationMeshLocalBoundsMinimum;
@@ -339,7 +333,7 @@ void AMD_CuttableWall::InitializeContaminationSurface()
 		return;
 	}
 
-	// FIntPoint에는 구조체 멤버별 Clamp 메타데이터가 적용되지 않을 수 있으므로 런타임에서도 강제 보정한다.
+	// 런타임에서도 격자 범위 보정
 	ContaminationGridDimensions.X = FMath::Clamp(
 		ContaminationGridDimensions.X,
 		1,
@@ -353,8 +347,7 @@ void AMD_CuttableWall::InitializeContaminationSurface()
 		ContaminationGridDimensions.X * ContaminationGridDimensions.Y;
 	ContaminationCells.SetNum(CellCount);
 
-	// NaN/무한대는 0(깨끗함)으로 바꾸면 설정 오류가 곧바로 무료 완료가 되므로,
-	// 벽 소유 계층에서는 안전한 실패 값인 1(완전 오염)로 복구한다.
+	// 잘못된 초기값은 완전 오염으로 처리
 	const float SafeInitialContamination =
 		FMath::IsFinite(InitialContaminationPerCell)
 		? FMath::Clamp(InitialContaminationPerCell, 0.0f, 1.0f)
@@ -370,8 +363,7 @@ void AMD_CuttableWall::InitializeContaminationSurface()
 		FMD_ScrapeEvaluator::CalculateCleanRatio(ContaminationCells);
 	bContaminationSurfaceInitialized = true;
 
-	// 처음부터 오염량이 0인 벽은 이미 완료 상태다.
-	// 첫 긁기에서 "새로 완료"됐다고 방송하지 않도록 완료 래치를 함께 닫는다.
+	// 초기 완료 상태의 중복 방송 방지
 	bContaminationCompletionBroadcast =
 		IsContaminationFullyRemoved();
 }
@@ -405,9 +397,7 @@ void AMD_CuttableWall::InitializeContaminationVisualization()
 		return;
 	}
 
-	// Static Mesh와 Material은 BP_MD_CuttableWall의 ContaminationOverlay 컴포넌트에서
-	// 직접 지정한다. C++은 사용자가 선택한 에셋을 덮어쓰지 않고 셀 생성과 갱신만 담당한다.
-
+	// Mesh와 Material은 Blueprint에서 지정
 	const FVector AbsoluteScale = Mesh->GetComponentScale().GetAbs();
 	const double SafeScaleX = FMath::Max(
 		static_cast<double>(AbsoluteScale.X),
@@ -419,7 +409,7 @@ void AMD_CuttableWall::InitializeContaminationVisualization()
 		static_cast<double>(AbsoluteScale.Z),
 		static_cast<double>(UE_SMALL_NUMBER));
 
-	// 판정기는 실제 월드 cm를 사용하지만 Overlay는 Mesh의 자식이므로 로컬 단위로 되돌린다.
+	// 월드 크기를 Overlay 로컬 단위로 변환
 	const double SurfaceWidthLocal =
 		static_cast<double>(ResolvedContaminationSurfaceSizeCm.X)
 		/ SafeScaleX;
@@ -553,7 +543,7 @@ FTransform AMD_CuttableWall::MakeContaminationCellVisualTransform(
 		return VisualTransform;
 	}
 
-	// X/Z 면적이 남은 오염 비율과 같도록 각 축에는 제곱근을 적용한다.
+	// 면적 비율 유지를 위해 X/Z에 제곱근 적용
 	const float LinearScale = FMath::Sqrt(RemainingRatio);
 	FVector VisualScale = VisualTransform.GetScale3D();
 	VisualScale.X *= LinearScale;
@@ -581,8 +571,7 @@ bool AMD_CuttableWall::TryProjectWorldPointToContaminationSurface(
 			ContaminationSurfaceCenterLocal);
 	const FVector CenterToPoint = WorldPoint - SurfaceCenterWorld;
 
-	// GetForwardVector와 GetUpVector는 Scale이 제거된 단위축이므로,
-	// 내적 결과는 비균일 Scale이나 Actor 회전과 관계없이 실제 월드 cm 단위를 유지한다.
+	// 단위축 내적으로 월드 cm 좌표 계산
 	OutSurfacePositionCm = FVector2D(
 		FVector::DotProduct(CenterToPoint, Mesh->GetForwardVector()),
 		FVector::DotProduct(CenterToPoint, Mesh->GetUpVector()));
@@ -612,8 +601,7 @@ bool AMD_CuttableWall::IsHitOnContaminationFace(
 		return false;
 	}
 
-	// 언리얼의 로컬 +Y는 Component의 RightVector다.
-	// Actor를 배치할 때 이 방향이 플레이어가 긁을 오염면을 향하도록 회전하면 된다.
+	// 로컬 +Y를 오염면 방향으로 사용
 	return FVector::DotProduct(
 			SafeImpactNormal,
 			Mesh->GetRightVector())

@@ -16,16 +16,12 @@ struct MARINEDEMOLITION_API FMD_StartupAbilityEntry
 	GENERATED_BODY()
 
 public:
-	FMD_StartupAbilityEntry()
-		: AbilityClass(nullptr)
-		, AbilityLevel(1)
-	{
-	}
+	FMD_StartupAbilityEntry() 
+	: AbilityClass(nullptr), AbilityLevel(1) {}
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Ability")
 	TSubclassOf<UGameplayAbility> AbilityClass;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Ability",
-		meta = (ClampMin = "1"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Ability", meta = (ClampMin = "1"))
 	int32 AbilityLevel;
 };
