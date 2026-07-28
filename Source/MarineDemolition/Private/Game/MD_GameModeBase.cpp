@@ -4,6 +4,12 @@
 #include "Game/MD_GameModeBase.h"
 #include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
+#include "Player/MD_PlayerState.h"
+
+AMD_GameModeBase::AMD_GameModeBase()
+{
+    PlayerStateClass = AMD_PlayerState::StaticClass();
+}
 
 void AMD_GameModeBase::BeginPlay()
 {

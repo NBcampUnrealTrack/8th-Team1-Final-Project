@@ -57,7 +57,7 @@ double AMD_GameStateBase::GetElapsedRealSeconds() const
 
 double AMD_GameStateBase::GetElapsedGameSeconds() const
 {
-    const float TotalGameSeconds =(EndHour - StartHour) * 60 * 60;
+    const double TotalGameSeconds =(EndHour - StartHour) * 60 * 60;
 
     if (RealDayDurationSeconds <= 0.0f)
     {
@@ -65,7 +65,7 @@ double AMD_GameStateBase::GetElapsedGameSeconds() const
     }
 
     //Real: 1sec, InGame: 60sec
-    const float TimeScale =
+    const double TimeScale =
         TotalGameSeconds / RealDayDurationSeconds;
 
     return FMath::Clamp(
