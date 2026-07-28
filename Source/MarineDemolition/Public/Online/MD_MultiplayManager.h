@@ -116,7 +116,7 @@ public:
     // 서비스 플랫폼에서 제공하는 친구 목록 UI를 표시하는 함수
     UFUNCTION(BlueprintCallable, Category = "Steam Session")
     bool ShowFriendsUI();
-    
+
 protected:
     // Online Session Interface 객체를 초기화하는 함수
     void InitOnlineSessionInterface();

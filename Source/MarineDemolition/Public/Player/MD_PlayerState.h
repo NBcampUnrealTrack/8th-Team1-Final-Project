@@ -15,7 +15,7 @@ class MARINEDEMOLITION_API AMD_PlayerState : public APlayerState, public IAbilit
 public:
 
 	AMD_PlayerState();
-	
+
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
 protected:
