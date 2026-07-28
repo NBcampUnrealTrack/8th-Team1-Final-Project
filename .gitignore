@@ -34,6 +34,19 @@ Config/DefaultEditorPerProjectUserSettings.ini
 /AGENT.md
 /CLAUDE.md
 
+# Local art / docs (not tracked)
+Art/
+Docs/
+
+# Editor automation scripts (machine-local / WIP)
+Content/Python/
+
+# Local Unreal MCP / AI client configs (machine-local only)
+.cursor/
+.mcp.json
+.gemini/
+.codex/
+
 # OS files
 .DS_Store
 Thumbs.db
