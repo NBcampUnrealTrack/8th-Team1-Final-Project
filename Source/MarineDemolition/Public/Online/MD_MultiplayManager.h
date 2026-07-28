@@ -103,7 +103,11 @@ public:
 
     // Index 순서에 해당하는 Session에 참여하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
-    void JoinSession(const FBlueprintSessionResult& OnlineSessionSearchResult);
+    void JoinSessionBySessionResult(const FBlueprintSessionResult& OnlineSessionSearchResult);
+
+    // 방 코드를 검색하여 해당 Session에 참여하는 함수
+    UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
+    void JoinSessionByRoomCode(const struct FMD_RoomCode& RoomCode);
 
     // 기존 Session을 제거하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
@@ -116,6 +120,14 @@ public:
     // 서비스 플랫폼에서 제공하는 친구 목록 UI를 표시하는 함수
     UFUNCTION(BlueprintCallable, Category = "Steam Session")
     bool ShowFriendsUI();
+
+    // 현재 생성하거나 참여한 방의 코드를 반환하는 함수
+    UFUNCTION(BlueprintPure, Category = "Marine Demolition|Session")
+    FString GetCurrentRoomCode() const;
+
+    // (Only for Debug) 문자열에서 Room Code를 추출하는 함수 (Widget Blueprint Graph 전용)
+    UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
+    FMD_RoomCode ParseRoomCode(FString StringRoomCode);
     
 protected:
     // Online Session Interface 객체를 초기화하는 함수
@@ -135,6 +147,9 @@ protected:
 
     // Online Session Interface에서 Find Sessions을 완료하였을 때 호출되는 함수
     void HandleFindSessionsComplete(bool bWasSuccessful, TSharedPtr<FOnlineSessionSearch> SessionSearch);
+
+    // 방 코드 Session 검색을 완료하였을 때 호출되는 함수
+    void HandleFindSessionByRoomCodeComplete(bool bWasSuccessful, TSharedPtr<FOnlineSessionSearch> SessionSearch);
 
     // Online Session Interface에서 Join Session을 완료하였을 때 호출되는 함수
     void HandleJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);

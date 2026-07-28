@@ -48,11 +48,11 @@ FMD_RoomCode FMD_RoomCode::Random()
 	return RoomCode;
 }
 
-TOptional<FMD_RoomCode> FMD_RoomCode::Parse(FString StringRoomCode)
+FMD_RoomCode FMD_RoomCode::Parse(FString StringRoomCode)
 {
 	// 공백 및 Hypen 문자 제거
-	StringRoomCode.ReplaceCharInline(TEXT(' '),TEXT(''));
-	StringRoomCode.ReplaceCharInline(TEXT('-'),TEXT(''));
+	StringRoomCode.ReplaceInline(TEXT(" "), TEXT(""));
+	StringRoomCode.ReplaceInline(TEXT("-"), TEXT(""));
 
 	FMD_RoomCode RoomCode;
 
@@ -65,7 +65,7 @@ TOptional<FMD_RoomCode> FMD_RoomCode::Parse(FString StringRoomCode)
 
 		if (Left + SectorLength >= StringRoomCode.Len())
 		{
-			return NullOpt;
+			return EmptyRoomCode;
 		}
 
 		FString& SectorCode = RoomCode.RoomCodes.AddDefaulted_GetRef();
@@ -78,7 +78,7 @@ TOptional<FMD_RoomCode> FMD_RoomCode::Parse(FString StringRoomCode)
 
 	if (RoomCode.IsValid() == false)
 	{
-		return NullOpt;
+		return EmptyRoomCode;
 	}
 
 	return RoomCode;
