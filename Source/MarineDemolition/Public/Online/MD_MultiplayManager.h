@@ -159,4 +159,7 @@ protected:
 
     // Online Session Interface에서 Session 초대에 대하여 수락 처리를 완료하였을 때 호출되는 함수
     void HandleSessionUserInviteAccepted(const bool bWasSuccessful, const int32 ControllerId, FUniqueNetIdPtr UserId, const FOnlineSessionSearchResult& InviteResult);
+
+    UFUNCTION()
+    void ExecutePostDestroySessionComplete(bool bWasSuccessful);
 };

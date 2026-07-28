@@ -55,7 +55,7 @@ FMD_RoomCode FMD_RoomCode::Parse(FString StringRoomCode)
 	// 공백 및 Hypen 문자 제거
 	StringRoomCode.ReplaceInline(TEXT(" "), TEXT(""));
 	StringRoomCode.ReplaceInline(TEXT("-"), TEXT(""));
-
+	
 	FMD_RoomCode RoomCode;
 
 	// Room Code 작성
@@ -78,7 +78,7 @@ FMD_RoomCode FMD_RoomCode::Parse(FString StringRoomCode)
 		Left += SectorLength;
 	}
 
-	if (RoomCode.IsValid() == false)
+	if (StringRoomCode.Len() > Left || RoomCode.IsValid() == false)
 	{
 		return EmptyRoomCode;
 	}

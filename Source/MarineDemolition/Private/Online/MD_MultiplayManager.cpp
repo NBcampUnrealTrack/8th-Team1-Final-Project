@@ -21,10 +21,14 @@ void UMD_MultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
     {
         SessionInterface->OnSessionUserInviteAcceptedDelegates.AddUObject(this, &ThisClass::HandleSessionUserInviteAccepted);
     }
+
+    OnDestroySessionComplete.AddDynamic(this, &ThisClass::ExecutePostDestroySessionComplete);
 }
 
 void UMD_MultiplayManager::Deinitialize()
 {
+    OnDestroySessionComplete.RemoveAll(this);
+
     // Online Session의 유효성 검사
     if (SessionInterface.IsValid() == true)
     {
@@ -120,6 +124,17 @@ void UMD_MultiplayManager::FindSessions(int32 MaxSearchResultCount)
         return;
     }
 
+    // Session 검색 요청(비동기) 중복 동작 방지
+    if (SessionInterface->OnFindSessionsCompleteDelegates.IsBoundToObject(this) == true)
+    {
+        // 로그 출력
+        UE_LOG(MarineDemolition, Error, TEXT("%s 이전 Create Session 프로세스가 처리 중입니다."), *UE_CALL_LOCATIONINFO);
+
+        // Find Sessions 실패 이벤트 실행
+        OnFindSessionsComplete.Broadcast(EmptySearchResults, false);
+        return;
+    }
+
     // 최대 검색 결과 수 유효성 검사
     if (MaxSearchResultCount <= 0)
     {
@@ -157,6 +172,8 @@ void UMD_MultiplayManager::FindSessions(int32 MaxSearchResultCount)
 
     // 로비 Session 검색 설정
     SessionSearch->QuerySettings.Set(SEARCH_LOBBIES, true, EOnlineComparisonOp::Equals);
+
+    SessionSearch->QuerySettings.Set(MD_SessionKey::Key_ProjectID, MD_SessionKey::Value_ProjectID, EOnlineComparisonOp::Equals);
 
     // Session 모듈의 Session 검색 완료 이벤트 연결
     SessionInterface->OnFindSessionsCompleteDelegates.AddUObject(this, &ThisClass::HandleFindSessionsComplete, SessionSearch);
@@ -227,20 +244,18 @@ void UMD_MultiplayManager::JoinSessionBySessionResult(const FBlueprintSessionRes
 
 void UMD_MultiplayManager::JoinSessionByRoomCode(const FMD_RoomCode& RoomCode)
 {
+    // Online Subsystem의 Session 모듈 유효성 확인
     if (SessionInterface.IsValid() == false)
     {
+        // 로그 출력
         UE_LOG(MarineDemolition, Error, TEXT("%s Online Subsystem의 Session 모듈이 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+
+        // Join Session 실패 이벤트 실행
         OnJoinSessionComplete.Broadcast(false);
         return;
     }
 
-    if (RoomCode.IsValid() == false)
-    {
-        UE_LOG(MarineDemolition, Warning, TEXT("%s 방 코드가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
-        OnJoinSessionComplete.Broadcast(false);
-        return;
-    }
-
+    // Session 검색 요청(비동기) 중복 동작 방지
     if (SessionInterface->OnFindSessionsCompleteDelegates.IsBoundToObject(this) == true)
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s 다른 Session 검색이 진행 중입니다."), *UE_CALL_LOCATIONINFO);
@@ -248,6 +263,15 @@ void UMD_MultiplayManager::JoinSessionByRoomCode(const FMD_RoomCode& RoomCode)
         return;
     }
 
+    // 방 코드 유효성 확인
+    if (RoomCode.IsValid() == false)
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 방 코드가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+        OnJoinSessionComplete.Broadcast(false);
+        return;
+    }
+
+    // Local Player의 Net ID 얻기 및 유효성 검사
     const FUniqueNetIdPtr LocalPlayerNetID = GetLocalPlayerNetID();
     if (LocalPlayerNetID.IsValid() == false || LocalPlayerNetID->IsValid() == false)
     {
@@ -297,6 +321,16 @@ void UMD_MultiplayManager::DestroySession()
         return;
     }
 
+    // Session 제거 요청(비동기) 중복 동작 방지
+    if (SessionInterface->OnDestroySessionCompleteDelegates.IsBoundToObject(this) == true)
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 이전 Destroy Session 프로세스를 처리 중입니다."), *UE_CALL_LOCATIONINFO);
+
+        // Destroy Session 실패 이벤트 실행
+        OnDestroySessionComplete.Broadcast(false);
+        return;
+    }
+
     // 이전의 Session이 존재하는지 검사
     if (SessionInterface->GetNamedSession(NAME_PartySession) == nullptr)
     {
@@ -305,9 +339,6 @@ void UMD_MultiplayManager::DestroySession()
 
         // Destroy Session 성공 이벤트 실행 (삭제할 Session이 존재하지 않음)
         OnDestroySessionComplete.Broadcast(true);
-
-        OnPostDestroySessionComplete.ExecuteIfBound(true);
-        OnPostDestroySessionComplete.Unbind();
         return;
     }
 
@@ -485,6 +516,17 @@ void UMD_MultiplayManager::CreateSessionInternal(const FString& ServerName, int3
         return;
     }
 
+    // Session 생성 요청(비동기) 중복 동작 방지
+    if (SessionInterface->OnCreateSessionCompleteDelegates.IsBoundToObject(this) == true)
+    {
+        // 로그 출력
+        UE_LOG(MarineDemolition, Error, TEXT("%s 이전 Create Session 프로세스가 처리 중입니다."), *UE_CALL_LOCATIONINFO);
+
+        // Create Session 실패 이벤트 실행
+        OnCreateSessionComplete.Broadcast(false);
+        return;
+    }
+
     if (MaxPlayerCount <= 0)
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s Session 최대 인원 수가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
@@ -526,7 +568,7 @@ void UMD_MultiplayManager::CreateSessionInternal(const FString& ServerName, int3
     SessionSettings->bIsLANMatch = OnlineSubsystem != nullptr && OnlineSubsystem->GetSubsystemName() == FName("NULL");
 
     // Listen Server 사용 설정
-    SessionSettings->bIsDedicated = false;
+    SessionSettings->bIsDedicated = CreateSessionParams.bIsDedicatedServer;
 
     // 다른 플레이어의 Session 검색 허용
     SessionSettings->bShouldAdvertise = true;
@@ -600,6 +642,17 @@ void UMD_MultiplayManager::JoinSessionInternal(const FOnlineSessionSearchResult&
     {
         // 로그 출력
         UE_LOG(MarineDemolition, Error, TEXT("%s Online Subsystem의 Session 모듈이 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+
+        // Join Session 실패 이벤트 실행
+        OnJoinSessionComplete.Broadcast(false);
+        return;
+    }
+
+    // Session 참여 요청(비동기) 중복 동작 방지
+    if (SessionInterface->OnJoinSessionCompleteDelegates.IsBoundToObject(this) == true)
+    {
+        // 로그 출력
+        UE_LOG(MarineDemolition, Error, TEXT("%s 이전 Join Session 프로세스를 처리 중입니다."), *UE_CALL_LOCATIONINFO);
 
         // Join Session 실패 이벤트 실행
         OnJoinSessionComplete.Broadcast(false);
@@ -699,9 +752,6 @@ void UMD_MultiplayManager::HandleCreateSessionComplete(FName SessionName, bool b
         return;
     }
 
-    // Create Session 성공 이벤트 실행
-    OnCreateSessionComplete.Broadcast(true);
-
     // ServerTravel을 위한 URL 생성
     FString TravelURL = CreateSessionParams.InitialSessionMap.GetLongPackageFName().ToString();
     if (CreateSessionParams.bIsDedicatedServer == false)
@@ -711,6 +761,9 @@ void UMD_MultiplayManager::HandleCreateSessionComplete(FName SessionName, bool b
 
     // 초기 맵을 호스팅 하도록 ServerTravel 실행
     bool bIsTravelStarted = World->ServerTravel(TravelURL);
+
+    // Create Session 성공 이벤트 실행
+    OnCreateSessionComplete.Broadcast(bIsTravelStarted);
 
     // 로그 출력
     UE_LOG(MarineDemolition, Log, TEXT("%s Session 생성에 성공하였습니다. ServerTravel(%s)...(%s)"), *UE_CALL_LOCATIONINFO, *TravelURL, (bIsTravelStarted == true ? TEXT("Success") : TEXT("Failed")));
@@ -935,14 +988,34 @@ void UMD_MultiplayManager::HandleDestroySessionComplete(FName SessionName, bool 
 
     // Session 제거 완료 이벤트 실행
     OnDestroySessionComplete.Broadcast(bWasSuccessful);
-
-    // Session 제거 완료 이후 처리해야 하는 과정이 있으면 실행
-    OnPostDestroySessionComplete.ExecuteIfBound(bWasSuccessful);
-    OnPostDestroySessionComplete.Unbind();
 }
 
 void UMD_MultiplayManager::HandleSessionUserInviteAccepted(const bool bWasSuccessful, const int32 ControllerId, FUniqueNetIdPtr UserId, const FOnlineSessionSearchResult& InviteResult)
 {
+    // 초대된 Session의 유효성 검사
+    if (InviteResult.IsValid() == false)
+    {
+        // 로그 출력
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 초대받은 Session이 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+
+        // Invite Session Accepted 실패 이벤트 실행
+        OnSessionInviteAcceptedComplete.Broadcast(false);
+        return;
+    }
+
+    // 초대 수락한 Session에 대하여 현재 프로젝트의 Session 여부 확인
+    FString ProjectID;
+    bool bHasProjectID = InviteResult.Session.SessionSettings.Get(MD_SessionKey::Key_ProjectID, ProjectID);
+    if (bHasProjectID == false || ProjectID != MD_SessionKey::Value_ProjectID)
+    {
+        // 로그 출력
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 초대받은 Session의 프로젝트가 현재 프로젝트와 다릅니다."), *UE_CALL_LOCATIONINFO);
+
+        // Invite Session Accepted 실패 이벤트 실행
+        OnSessionInviteAcceptedComplete.Broadcast(false);
+        return;
+    }
+
     // Online Subsystem의 Session 모듈 유효성 검사
     if (SessionInterface.IsValid() == false)
     {
@@ -976,17 +1049,6 @@ void UMD_MultiplayManager::HandleSessionUserInviteAccepted(const bool bWasSucces
         return;
     }
 
-    // 초대된 Session의 유효성 검사
-    if (InviteResult.IsValid() == false)
-    {
-        // 로그 출력
-        UE_LOG(MarineDemolition, Warning, TEXT("%s 초대받은 Session이 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
-
-        // Invite Session Accepted 실패 이벤트 실행
-        OnSessionInviteAcceptedComplete.Broadcast(false);
-        return;
-    }
-
     // 로그 출력
     UE_LOG(MarineDemolition, Log, TEXT("%s Session 초대에 대하여 수락 처리에 성공하였습니다."), *UE_CALL_LOCATIONINFO);
 
@@ -998,4 +1060,21 @@ void UMD_MultiplayManager::HandleSessionUserInviteAccepted(const bool bWasSucces
     InviteSessionResult.OnlineResult = InviteResult;
     JoinSessionBySessionResult(InviteSessionResult);
 
+}
+
+void UMD_MultiplayManager::ExecutePostDestroySessionComplete(bool bWasSuccessful)
+{
+    // Session 제거 완료 이후 처리해야 하는 과정이 있으면 실행
+    OnPostDestroySessionComplete.ExecuteIfBound(bWasSuccessful);
+
+    // Destroy Session 프로세스 진행 중 OnPostDestroySessionComplete 이벤트 연결 제거 방지
+    if (SessionInterface.IsValid() == true)
+    {
+        if (SessionInterface->OnDestroySessionCompleteDelegates.IsBoundToObject(this) == true)
+        {
+
+            // Session 제거 완료 이후 처리해야 하는 과정 제거
+            OnPostDestroySessionComplete.Unbind();
+        }
+    }
 }
