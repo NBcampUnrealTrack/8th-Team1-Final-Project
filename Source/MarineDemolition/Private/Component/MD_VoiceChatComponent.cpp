@@ -6,6 +6,7 @@
 UMD_VoiceChatComponent::UMD_VoiceChatComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
+	bAutoActivate = true;
 	SetIsReplicatedByDefault(false);
 }
 
@@ -14,18 +15,28 @@ void UMD_VoiceChatComponent::BeginPlay()
 	Super::BeginPlay();
 
 	OwnerPlayerController = Cast<APlayerController>(GetOwner());
-	StartTalking();
+
+	// Push To Talk 가 비활성화 되어있는 경우 컴포넌트가 활성화 되어있으면 마이크 활성화
+	if (IsActive() && bUsePushToTalk == false)
+	{
+		StartTalking();
+	}
 }
 
 void UMD_VoiceChatComponent::Activate(bool bReset)
 {
 	Super::Activate(bReset);
 
-	StartTalking();
+	// Push To Talk 가 비활성화 되어있는 경우 컴포넌트가 활성화 되어있으면 마이크 활성화
+	if (bUsePushToTalk == false)
+	{
+		StartTalking();
+	}
 }
 
 void UMD_VoiceChatComponent::Deactivate()
 {
+	// 컴포넌트 비활성화 시 마이크 비활성화
 	StopTalking();
 
 	Super::Deactivate();
@@ -40,8 +51,8 @@ void UMD_VoiceChatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void UMD_VoiceChatComponent::SetPushToTalk(const bool bNewUsePushToTalk)
 {
-	// Owner 객체(PlayerController)의 유효성 및 로컬 컨트롤러 검사
-	if (OwnerPlayerController.IsValid() == false || OwnerPlayerController->IsLocalPlayerController() == false)
+	// 기존 Push To Talk 설정값이 다른 경우에만 동작
+	if (bUsePushToTalk == bNewUsePushToTalk)
 	{
 		return;
 	}
@@ -49,46 +60,50 @@ void UMD_VoiceChatComponent::SetPushToTalk(const bool bNewUsePushToTalk)
 	// 프로퍼티 값 변경
 	bUsePushToTalk = bNewUsePushToTalk;
 
-	if (IsVoiceActivated() == true)
+	// 컴포넌트가 비활성화 되어있거나 또는 Push To Talk 설정을 켜는 경우 마이크 비활성화
+	if (IsActive() == false || bUsePushToTalk == true)
 	{
-		StartTalking();
+		StopTalking();
 	}
 	else
 	{
-		StopTalking();
+		// Push To Talk 설정을 끄는 경우 마이크 활성화
+		StartTalking();
 	}
 }
 
 void UMD_VoiceChatComponent::StartTalking()
 {
-	if (OwnerPlayerController.IsValid() == false || OwnerPlayerController->IsLocalController() == false)
+	// 컴포넌트가 비활성화 되어있거나 또는 이미 마이크 활성화 되어있는 경우 함수 조기 종료
+	if (IsActive() == false || bIsMicrophonActive == true)
 	{
 		return;
 	}
 
+	// PlayerController(Owner)의 유효성 및 로컬 컨트롤러 검사
+	APlayerController* PlayerController = OwnerPlayerController.Get();
+	if (IsValid(PlayerController) == false || PlayerController->IsLocalController() == false)
+	{
+		return;
+	}
+
+	// 마이크 활성화
+	PlayerController->StartTalking();
+
+	// 마이크 활성화 여부를 나타내는 플래그 변경
 	bIsMicrophonActive = true;
-
-	// 음성 채팅 기능 활성화 조건 검사
-	if (IsVoiceActivated() == true)
-	{
-		// 음성 채팅 기능 활성화
-		OwnerPlayerController->StartTalking();
-		return;
-	}
-
-	// 음성 채팅 기능 비활성화
-	StopTalking();
 }
 
 void UMD_VoiceChatComponent::StopTalking()
 {
-	if (OwnerPlayerController.IsValid() == false || OwnerPlayerController->IsLocalController() == false)
+	// PlayerController(Owner)의 유효성 및 로컬 컨트롤러 검사
+	APlayerController* PlayerController = OwnerPlayerController.Get();
+	if (bIsMicrophonActive == true && IsValid(PlayerController) == true && PlayerController->IsLocalController() == true)
 	{
-		return;
+		// 마이크 비활성화
+		PlayerController->StopTalking();
 	}
 
+	// 마이크 활성화 여부를 나타내는 플래그 설정
 	bIsMicrophonActive = false;
-
-	// 음성 채팅 기능 비활성화
-	OwnerPlayerController->StopTalking();
 }

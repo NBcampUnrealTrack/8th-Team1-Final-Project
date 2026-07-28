@@ -4,7 +4,7 @@
 #include "Online/MD_MultiplayManager.h"
 #include "OnlineSubsystem.h"            // IOnlineSubsystem
 #include "OnlineSessionSettings.h"      // FOnlineSessionSettings
-#include "Online/OnlineSessionNames.h"  // NAME_GameSession, NAME_PartySession
+#include "Online/OnlineSessionNames.h"  // NAME_GameSession
 #include "FindSessionsCallbackProxy.h"  // FBlueprintSessionResult
 #include "MD_SessionSettingKey.h"
 #include "MD_LogUtility.h"
@@ -86,7 +86,7 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
     }
 
     // 이전에 참여했던 Session 정보가 남아있는지 확인
-    FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_PartySession);
+    FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_GameSession);
     if (ExistingSession != nullptr)
     {
         // Destroy Session 완료 이후 실제 Create Session 동작 함수가 호출되도록 Binding
@@ -220,7 +220,7 @@ void UMD_MultiplayManager::JoinSessionBySessionResult(const FBlueprintSessionRes
     }
 
     // 이전에 참여했던 또는 현재 참여중인 Session 정보가 있는지 확인
-    FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_PartySession);
+    FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_GameSession);
     if (ExistingSession != nullptr)
     {
         // Destroy Session 완료 이후 실제 Join Session 동작 함수가 호출되도록 Binding
@@ -332,7 +332,7 @@ void UMD_MultiplayManager::DestroySession()
     }
 
     // 이전의 Session이 존재하는지 검사
-    if (SessionInterface->GetNamedSession(NAME_PartySession) == nullptr)
+    if (SessionInterface->GetNamedSession(NAME_GameSession) == nullptr)
     {
         // 로그 출력
         UE_LOG(MarineDemolition, Log, TEXT("%s 제거할 Session이 존재하지 않습니다."), *UE_CALL_LOCATIONINFO);
@@ -346,7 +346,7 @@ void UMD_MultiplayManager::DestroySession()
     SessionInterface->OnDestroySessionCompleteDelegates.AddUObject(this, &ThisClass::HandleDestroySessionComplete);
 
     // Session 모듈을 통하여 Session 제거 요청(비동기 프로세스)
-    bool bIsAsyncRequested = SessionInterface->DestroySession(NAME_PartySession);
+    bool bIsAsyncRequested = SessionInterface->DestroySession(NAME_GameSession);
 
     // Session 제거 요청이 정상적으로 처리되었는지 검사
     if (bIsAsyncRequested == false)
@@ -381,7 +381,7 @@ bool UMD_MultiplayManager::ShowInviteUI()
     }
 
     // 현재 참여한 세션이 존재하는지 검사
-    FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_PartySession);
+    FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_GameSession);
     if (ExistingSession == nullptr)
     {
         // 로그 출력
@@ -390,7 +390,7 @@ bool UMD_MultiplayManager::ShowInviteUI()
     }
 
     // External UI 모듈을 통하여 친구 초대 UI 표시
-    bool bIsUIOpened = ExternalUIInterface->ShowInviteUI(0, NAME_PartySession);
+    bool bIsUIOpened = ExternalUIInterface->ShowInviteUI(0, NAME_GameSession);
 
     // 로그 출력
     UE_LOG(MarineDemolition, Log, TEXT("%s 친구 초대 UI 출력 %s"), *UE_CALL_LOCATIONINFO, (bIsUIOpened == true ? TEXT("성공") : TEXT("실패")));
@@ -424,7 +424,7 @@ FString UMD_MultiplayManager::GetCurrentRoomCode() const
         return TEXT("");
     }
 
-    FNamedOnlineSession* NamedOnlineSession = SessionInterface->GetNamedSession(NAME_PartySession);
+    FNamedOnlineSession* NamedOnlineSession = SessionInterface->GetNamedSession(NAME_GameSession);
     if (NamedOnlineSession != nullptr)
     {
         FString StringRoomCode;
@@ -619,7 +619,7 @@ void UMD_MultiplayManager::CreateSessionInternal(const FString& ServerName, int3
     SessionInterface->OnCreateSessionCompleteDelegates.AddUObject(this, &ThisClass::HandleCreateSessionComplete, CreateSessionParams);
 
     // Session 모듈을 통하여 Session 생성 요청(비동기 프로세스)
-    bool bIsAsyncRequested = SessionInterface->CreateSession(*LocalPlayerNetID, NAME_PartySession, *SessionSettings);
+    bool bIsAsyncRequested = SessionInterface->CreateSession(*LocalPlayerNetID, NAME_GameSession, *SessionSettings);
 
     // Session 생성 요청이 정상적으로 처리되었는지 확인
     if (bIsAsyncRequested == false)
@@ -686,7 +686,7 @@ void UMD_MultiplayManager::JoinSessionInternal(const FOnlineSessionSearchResult&
     SessionInterface->OnJoinSessionCompleteDelegates.AddUObject(this, &ThisClass::HandleJoinSessionComplete);
 
     // Session 모듈을 통하여 Session 참여 요청(비동기 프로세스)
-    bool bIsAsyncRequested = SessionInterface->JoinSession(*LocalPlayerNetID, NAME_PartySession, SessionResult);
+    bool bIsAsyncRequested = SessionInterface->JoinSession(*LocalPlayerNetID, NAME_GameSession, SessionResult);
 
     // Session 참여 요청이 정상적으로 처리되었는지 확인
     if (bIsAsyncRequested == false)

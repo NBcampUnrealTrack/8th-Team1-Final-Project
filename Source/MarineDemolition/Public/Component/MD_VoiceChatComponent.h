@@ -40,14 +40,14 @@ protected:
 	TWeakObjectPtr<APlayerController> OwnerPlayerController;
 
 public:
-	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
+	UFUNCTION(BlueprintPure, Category = "Voice Chat")
 	FORCEINLINE bool IsPushToTalkEnabled() const { return bUsePushToTalk; }
 
-	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
+	UFUNCTION(BlueprintPure, Category = "Voice Chat")
 	FORCEINLINE bool GetMicrophoneIsActive() const { return bIsMicrophonActive; }
 
-	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
-	FORCEINLINE bool IsVoiceActivated() const { return (IsActive() && (bUsePushToTalk == false || bIsMicrophonActive == true)); }
+	UFUNCTION(BlueprintPure, Category = "Voice Chat")
+	FORCEINLINE bool IsVoiceActivated() const { return IsActive() && bIsMicrophonActive; }
 
 	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
 	void SetPushToTalk(const bool bNewUsePushToTalk);
