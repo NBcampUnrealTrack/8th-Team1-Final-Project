@@ -1,5 +1,4 @@
 #include "Game/MD_GameStateBase.h"
-
 #include "Net/UnrealNetwork.h"
 
 AMD_GameStateBase::AMD_GameStateBase()

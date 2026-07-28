@@ -25,4 +25,6 @@ private:
     FTimerHandle CheckGameTimeTimerHandle;
 
     void CheckGameTimeEvents();
+
+    void FinalizeReturnStatuses();
 };

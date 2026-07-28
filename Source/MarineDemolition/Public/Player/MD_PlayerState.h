@@ -29,6 +29,8 @@ public:
     UFUNCTION(BlueprintPure, Category = "Return")
     EMD_ReturnStatus GetReturnStatus() const;
 
+	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+
 protected:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -43,7 +45,6 @@ private:
     void HandleReturnStatusChanged();
 
 protected:
-	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AbilitySystem")
 	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
