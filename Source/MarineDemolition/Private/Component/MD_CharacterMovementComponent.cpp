@@ -31,3 +31,10 @@ void UMD_CharacterMovementComponent::PhysSwimming(float deltaTime, int32 Iterati
 	}
 
 }
+
+void UMD_CharacterMovementComponent::EnterSwimmingFromGround()
+{
+	bWantsToSwim = true;
+	SetMovementMode(MOVE_Swimming);
+	Velocity.Z = SwimEntryUpwardVelocity;
+}
