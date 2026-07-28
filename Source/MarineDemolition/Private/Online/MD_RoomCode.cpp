@@ -65,7 +65,7 @@ FMD_RoomCode FMD_RoomCode::Parse(FString StringRoomCode)
 	{
 		uint8 SectorLength = CodeLengths[i];
 
-		if (Left + SectorLength >= StringRoomCode.Len())
+		if (Left + SectorLength > StringRoomCode.Len())
 		{
 			return EmptyRoomCode;
 		}
