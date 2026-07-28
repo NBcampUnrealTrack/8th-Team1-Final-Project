@@ -111,7 +111,7 @@ public:
 
     // 기존 Session을 제거하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
-    void DestroySession(FName SessionName);
+    void DestroySession();
 
     // 서비스 플랫폼에서 제공하는 친구 초대 UI를 표시하는 함수
     UFUNCTION(BlueprintCallable, Category = "Steam Session")

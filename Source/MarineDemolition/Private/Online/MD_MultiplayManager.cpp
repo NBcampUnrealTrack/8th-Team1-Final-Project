@@ -96,7 +96,7 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
             });
 
         // 이전 Session 삭제
-        DestroySession(NAME_PartySession);
+        DestroySession();
         return;
     }
 
@@ -217,7 +217,7 @@ void UMD_MultiplayManager::JoinSessionBySessionResult(const FBlueprintSessionRes
             });
 
         // 이전 Session 삭제
-        DestroySession(NAME_PartySession);
+        DestroySession();
         return;
     }
 
@@ -284,33 +284,7 @@ void UMD_MultiplayManager::JoinSessionByRoomCode(const FMD_RoomCode& RoomCode)
     }
 }
 
-FString UMD_MultiplayManager::GetCurrentRoomCode() const
-{
-    if (SessionInterface.IsValid() == false)
-    {
-        return TEXT("");
-    }
-
-    FNamedOnlineSession* NamedOnlineSession = SessionInterface->GetNamedSession(NAME_PartySession);
-    if (NamedOnlineSession != nullptr)
-    {
-        FString StringRoomCode;
-        bool bHasRoomCode = NamedOnlineSession->SessionSettings.Get(MD_SessionKey::Key_RoomCode, StringRoomCode);
-        
-        if (bHasRoomCode == true)
-        {
-            return StringRoomCode;
-        }
-    }
-    return TEXT("");
-}
-
-FMD_RoomCode UMD_MultiplayManager::ParseRoomCode(FString StringRoomCode)
-{
-    return FMD_RoomCode::Parse(StringRoomCode);
-}
-
-void UMD_MultiplayManager::DestroySession(FName SessionName)
+void UMD_MultiplayManager::DestroySession()
 {
     // Online Subsystem의 Session 모듈 유효성 확인
     if (SessionInterface.IsValid() == false)
@@ -324,7 +298,7 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
     }
 
     // 이전의 Session이 존재하는지 검사
-    if (SessionInterface->GetNamedSession(SessionName) == nullptr)
+    if (SessionInterface->GetNamedSession(NAME_PartySession) == nullptr)
     {
         // 로그 출력
         UE_LOG(MarineDemolition, Log, TEXT("%s 제거할 Session이 존재하지 않습니다."), *UE_CALL_LOCATIONINFO);
@@ -341,7 +315,7 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
     SessionInterface->OnDestroySessionCompleteDelegates.AddUObject(this, &ThisClass::HandleDestroySessionComplete);
 
     // Session 모듈을 통하여 Session 제거 요청(비동기 프로세스)
-    bool bIsAsyncRequested = SessionInterface->DestroySession(SessionName);
+    bool bIsAsyncRequested = SessionInterface->DestroySession(NAME_PartySession);
 
     // Session 제거 요청이 정상적으로 처리되었는지 검사
     if (bIsAsyncRequested == false)
@@ -410,6 +384,32 @@ bool UMD_MultiplayManager::ShowFriendsUI()
     UE_LOG(MarineDemolition, Log, TEXT("%s 친구 목록 UI 출력 %s"), *UE_CALL_LOCATIONINFO, (bIsUIOpened == true ? TEXT("성공") : TEXT("실패")));
 
     return bIsUIOpened;
+}
+
+FString UMD_MultiplayManager::GetCurrentRoomCode() const
+{
+    if (SessionInterface.IsValid() == false)
+    {
+        return TEXT("");
+    }
+
+    FNamedOnlineSession* NamedOnlineSession = SessionInterface->GetNamedSession(NAME_PartySession);
+    if (NamedOnlineSession != nullptr)
+    {
+        FString StringRoomCode;
+        bool bHasRoomCode = NamedOnlineSession->SessionSettings.Get(MD_SessionKey::Key_RoomCode, StringRoomCode);
+        
+        if (bHasRoomCode == true)
+        {
+            return StringRoomCode;
+        }
+    }
+    return TEXT("");
+}
+
+FMD_RoomCode UMD_MultiplayManager::ParseRoomCode(FString StringRoomCode)
+{
+    return FMD_RoomCode::Parse(StringRoomCode);
 }
 
 void UMD_MultiplayManager::InitOnlineSessionInterface()

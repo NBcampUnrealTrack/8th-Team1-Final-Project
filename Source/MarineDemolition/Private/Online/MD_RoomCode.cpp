@@ -26,6 +26,7 @@ FMD_RoomCode FMD_RoomCode::Random()
 
 	// Room Code 작성
 	int32 SectorCount = sizeof(CodeLengths) / sizeof(uint8);
+	int32 CharacterCounter = 0;
 	for (int32 i = 0; i < SectorCount; ++i)
 	{
 		uint8 SectorLength = CodeLengths[i];
@@ -33,7 +34,7 @@ FMD_RoomCode FMD_RoomCode::Random()
 
 		for (uint8 j = 0; j < SectorLength; ++j)
 		{
-			int32 BitOffset = i * 5;
+			int32 BitOffset = CharacterCounter * 5;
 			int32 ByteIndex = BitOffset / 8;
 			int32 BitIndex = BitOffset % 8;
 
@@ -42,6 +43,7 @@ FMD_RoomCode FMD_RoomCode::Random()
 			uint8 CharacterIndex = static_cast<uint8>((Window >> BitIndex) & 0x1F);
 
 			SectorCode.AppendChar(CharacterCandidates[CharacterIndex]);
+			++CharacterCounter;
 		}
 	}
 
