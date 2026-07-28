@@ -105,6 +105,24 @@ bool AMD_GameStateBase::HasReachedTime(
     return CurrentTotalMinutes >= TargetTotalMinutes;
 }
 
+float AMD_GameStateBase::GetTimeOfDayHours() const
+{
+    return static_cast<float>(GetCurrentHour())
+        + static_cast<float>(GetCurrentMinute()) / 60.f;
+}
+
+float AMD_GameStateBase::GetDayCycleProgress() const
+{
+    const int32 DayLengthHours = EndHour - StartHour;
+    if (DayLengthHours <= 0)
+    {
+        return 0.f;
+    }
+
+    const float ElapsedHours = static_cast<float>(GetElapsedGameSeconds()) / 3600.f;
+    return FMath::Clamp(ElapsedHours / static_cast<float>(DayLengthHours), 0.f, 1.f);
+}
+
 // Withdrawal
 void AMD_GameStateBase::SetWithdrawalPhase(
     EMD_WithdrawalPhase NewPhase

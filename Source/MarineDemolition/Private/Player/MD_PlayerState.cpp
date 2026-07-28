@@ -2,12 +2,11 @@
 
 
 #include "Player/MD_PlayerState.h"
+#include "AbilitySystemComponent.h"
 
 #include "Net/UnrealNetwork.h"
 
-void AMD_PlayerState::GetLifetimeReplicatedProps(
-	TArray<FLifetimeProperty>& OutLifetimeProps
-) const
+void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
@@ -74,3 +73,14 @@ void AMD_PlayerState::HandleReturnStatusChanged()
 		break;
 	}
 }
+
+AMD_PlayerState::AMD_PlayerState()
+{
+	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
+}
+
+UAbilitySystemComponent* AMD_PlayerState::GetAbilitySystemComponent() const
+{
+	return AbilitySystemComponent;
+}
+
