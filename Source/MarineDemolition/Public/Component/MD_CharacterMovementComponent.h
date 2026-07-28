@@ -20,10 +20,14 @@ public:
 
 	virtual void PhysSwimming(float deltaTime, int32 Iterations) override;
 
+	void EnterSwimmingFromGround();
+
 	void SetWantsToSwim(bool bInWantsToSwim) { bWantsToSwim = bInWantsToSwim; }
 
 	bool GetWantsToSwim() const { return bWantsToSwim; }
 
 private:
+	static constexpr float SwimEntryUpwardVelocity = 200.f;
+
 	bool bWantsToSwim = false;
 };
