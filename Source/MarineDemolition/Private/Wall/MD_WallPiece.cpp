@@ -3,6 +3,7 @@
 #include "Wall/MD_WallPiece.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
 AMD_WallPiece::AMD_WallPiece()
@@ -13,6 +14,19 @@ AMD_WallPiece::AMD_WallPiece()
 	SetRootComponent(Mesh);
 	Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
 	Mesh->SetSimulatePhysics(true);
+
+	StaticGameplayTags.AddTag(MDGameplayTags::Interaction_Pickup_Physics);
+	StaticGameplayTags.AddTag(MDGameplayTags::Item_Type_WallPiece);
+}
+
+void AMD_WallPiece::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
+{
+	TagContainer = StaticGameplayTags;
+
+	if (bContaminated)
+	{
+		TagContainer.AddTag(MDGameplayTags::Item_State_Contaminated);
+	}
 }
 
 void AMD_WallPiece::SetContaminated(bool bInContaminated)

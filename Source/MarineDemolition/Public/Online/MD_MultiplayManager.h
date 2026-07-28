@@ -4,18 +4,23 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
-#include "Interfaces/OnlineSessionInterface.h"
-#include "MD_SessionTypes.h"
+#include "Interfaces/OnlineSessionInterface.h"      // Online Subsystem의 Session 관련 모듈 참조
+#include "Interfaces/OnlineExternalUIInterface.h"   // Online SubSystem의 플랫폼 제공 UI 관련 모듈 참조
 #include "MD_MultiplayManager.generated.h"
 
+struct FBlueprintSessionResult;
+
 // Session 생성 완료 시 이벤트
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCreateMDSessionCompleteSignature, bool, bIsSuccess);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCreateMDSessionCompleteSignature, bool, bWasSuccessful);
 // Session 검색 완료 시 이벤트
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFindMDSessionCompleteSignature, const TArray<FMD_SessionInfo>&, FindResults, bool, bIsSuccess);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFindMDSessionCompleteSignature, const TArray<FBlueprintSessionResult>&, FindResults, bool, bWasSuccessful);
 // Session 참여 완료 시 이벤트
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJoinMDSessionCompleteSignature, bool, bIsSuccess);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnJoinMDSessionCompleteSignature, bool, bWasSuccessful);
 // Session 제거 완료 시 이벤트
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDestroyMDSessionCompleteSignature, bool, bIsSuccess);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnDestroyMDSessionCompleteSignature, bool, bWasSuccessful);
+
+// Session 초대 수락 처리 완료 시 이벤트
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnMDSessionInviteAcceptedCompleteSignature, bool, bWasSuccessful);
 
 USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_CreateSessionParams
@@ -23,13 +28,16 @@ struct MARINEDEMOLITION_API FMD_CreateSessionParams
     GENERATED_BODY()
 
 public:
-    // Server(Session) 이름
+    // Session Hosting 방식
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    FString ServerName;
+    uint8 bIsDedicatedServer : 1 = false;
 
-    // Session에 참여 가능한 최대 인원 수
+    // Session 생성 시 최초로 로드되는 맵
     UPROPERTY(EditAnywhere, BlueprintReadWrite)
-    int32 MaxPlayerCount = 0;
+    TSoftObjectPtr<UWorld> InitialSessionMap;
+
+public:
+    inline const bool IsValid() const { return InitialSessionMap.IsNull() == false; }
 };
 
 /**
@@ -39,6 +47,9 @@ UCLASS()
 class MARINEDEMOLITION_API UMD_MultiplayManager : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
+
+    // UMD_MultiplayManager 내부 로직 처리용 델리게이트
+    DECLARE_DELEGATE_OneParam(FOnPostDestroyMDSessionCompleteDelegate, bool);
 	
 public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
@@ -66,35 +77,25 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Marine Demolition|Session")
     FOnDestroyMDSessionCompleteSignature OnDestroySessionComplete;
 
+    // Session 초대 수락에 대한 처리 완료 시 실행되는 이벤트
+    UPROPERTY(BlueprintAssignable, Category = "Marine Demolition|Steam")
+    FOnMDSessionInviteAcceptedCompleteSignature OnSessionInviteAcceptedComplete;
+
 protected:
-    // Online Session Interface
+    // Online Subsystem의 Session 모듈
     IOnlineSessionPtr SessionInterface;
 
-    // 현재 Session을 생성하는데 사용한 설정값
-    TSharedPtr<FOnlineSessionSettings> SessionSettings;
+    // Online Subsystem의 External UI 모듈
+    // 서비스 플랫폼에서 제공하는 공용 UI 관련
+    IOnlineExternalUIPtr ExternalUIInterface;
 
-    // 검색된 SessionSearchResult들을 저장하는 변수
-    TSharedPtr<FOnlineSessionSearch> SessionSearch;
-
-    // Online Session Interface의 Session 생성 완료 이벤트에 대한 함수 등록 및 제거를 담당하는 Handle 값을 저장하는 변수
-    FDelegateHandle CreateSessionCompleteDelegateHandle;
-
-    // Online Session Interface의 Session 검색 완료 이벤트에 대한 함수 등록 및 제거를 담당하는 Handle 값을 저장하는 변수
-    FDelegateHandle FindSessionsCompleteDelegateHandle;
-
-    // Online Session Interface의 Session 참가 완료 이벤트에 대한 함수 등록 및 제거를 담당하는 Handle 값을 저장하는 변수
-    FDelegateHandle JoinSessionCompleteDelegateHandle;
-
-    // Online Session Interface의 Session 제거 완료 이벤트에 대한 함수 등록 및 제거를 담당하는 Handle 값을 저장하는 변수
-    FDelegateHandle DestroySessionCompleteDelegateHandle;
-
-    // Create Session을 위하여 필요한 Parameter들을 저장하는 변수
-    TSharedPtr<FMD_CreateSessionParams> PendingCreateSessionParams;
+    // Destroy Session이 완료된 이후 실행되는 이벤트(클래스 내부 C++ 전용)
+    FOnPostDestroyMDSessionCompleteDelegate OnPostDestroySessionComplete;
 
 public:
     // ServerName이름으로 최대 MaxPlayerCounts명의 플레이어가 접속할 수 있는 새로운 Session을 생성하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
-    void CreateSession(const FString& ServerName, int32 MaxPlayerCount);
+    void CreateSession(const FString& ServerName, int32 MaxPlayerCount, FMD_CreateSessionParams CreateSessionParams);
 
     // 최대 MaxSearchResultCount개의 Session을 검색하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
@@ -102,11 +103,19 @@ public:
 
     // Index 순서에 해당하는 Session에 참여하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
-    void JoinSession(int32 SessionIndex);
+    void JoinSession(const FBlueprintSessionResult& OnlineSessionSearchResult);
 
     // 기존 Session을 제거하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
-    void DestroySession();
+    void DestroySession(FName SessionName);
+
+    // 서비스 플랫폼에서 제공하는 친구 초대 UI를 표시하는 함수
+    UFUNCTION(BlueprintCallable, Category = "Steam Session")
+    bool ShowInviteUI();
+
+    // 서비스 플랫폼에서 제공하는 친구 목록 UI를 표시하는 함수
+    UFUNCTION(BlueprintCallable, Category = "Steam Session")
+    bool ShowFriendsUI();
 
 protected:
     // Online Session Interface 객체를 초기화하는 함수
@@ -116,17 +125,23 @@ protected:
     TSharedPtr<const FUniqueNetId> GetLocalPlayerNetID() const;
 
     // 요청된 Session을 실제로 생성하는 함수
-    void CreateSessionInternal();
+    void CreateSessionInternal(const FString& ServerName, int32 MaxPlayerCount, FMD_CreateSessionParams CreateSessionParams);
+
+    // 요청된 Session에 실제로 참여하는 함수
+    void JoinSessionInternal(const FOnlineSessionSearchResult& SessionResult);
 
     // Online Session Interface에서 Create Session을 완료하였을 때 호출되는 함수
-    void HandleCreateSessionComplete(FName SessionName, bool bIsSuccess);
+    void HandleCreateSessionComplete(FName SessionName, bool bWasSuccessful, FMD_CreateSessionParams CreateSessionParams);
 
     // Online Session Interface에서 Find Sessions을 완료하였을 때 호출되는 함수
-    void HandleFindSessionsComplete(bool bIsSuccess);
+    void HandleFindSessionsComplete(bool bWasSuccessful, TSharedPtr<FOnlineSessionSearch> SessionSearch);
 
     // Online Session Interface에서 Join Session을 완료하였을 때 호출되는 함수
     void HandleJoinSessionComplete(FName SessionName, EOnJoinSessionCompleteResult::Type Result);
 
     // Online Session Interface에서 Destroy Session을 완료하였을 때 호출되는 함수
-    void HandleDestroySessionComplete(FName SessionName, bool bIsSuccess);
+    void HandleDestroySessionComplete(FName SessionName, bool bWasSuccessful);
+
+    // Online Session Interface에서 Session 초대에 대하여 수락 처리를 완료하였을 때 호출되는 함수
+    void HandleSessionUserInviteAccepted(const bool bWasSuccessful, const int32 ControllerId, FUniqueNetIdPtr UserId, const FOnlineSessionSearchResult& InviteResult);
 };

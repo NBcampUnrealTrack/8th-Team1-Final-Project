@@ -2,15 +2,12 @@
 
 #pragma once
 
-#include "AbilitySystemInterface.h"
-#include "Ability/MD_AbilityTypes.h"
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "GameplayAbilitySpec.h"
 #include "InputActionValue.h"
+#include "AbilitySystemInterface.h"
 #include "MD_Character.generated.h"
 
-class UGameplayAbility;
 class UMD_InputConfig;
 class UInputMappingContext;
 class UInputAction;
@@ -18,7 +15,7 @@ class UCameraComponent;
 class USkeletalMeshComponent;
 class UMD_CharacterMovementComponent;
 class UMD_ScrapeToolComponent;
-class UAbilitySystemComponent;
+class UGameplayAbility;
 
 UENUM(BlueprintType)
 enum class EMDMovementState : uint8
@@ -47,26 +44,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Movement|Water")
 	void ForceEnterWalkState();
 
-	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
-
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
-	UMD_ScrapeToolComponent* GetScrapeToolComponent() const
-	{
-		return ScrapeToolComponent;
-	}
+	UMD_ScrapeToolComponent* GetScrapeToolComponent() const	{ return ScrapeToolComponent; }
 
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 
-	virtual void PossessedBy(AController* NewController) override;
-
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
 
+	virtual void PossessedBy(AController* NewController) override;
+
+	virtual void OnRep_PlayerState() override;
 public:
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
+	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
 protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
@@ -76,18 +70,7 @@ protected:
 	TObjectPtr<USkeletalMeshComponent> FirstPersonMesh;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_ScrapeToolComponent> ScrapeToolComponent;
-
-	// 시작 시 지급할 Ability 목록
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Ability")
-	TArray<FMD_StartupAbilityEntry> StartupAbilities;
-
-	// AbilityAction으로 실행할 긁기 Ability
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Ability")
-	TSubclassOf<UGameplayAbility> ScrapeAbilityClass;
 
 protected:
 
@@ -103,6 +86,15 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Water")
 	EMDMovementState CurrentMovementState = EMDMovementState::Walking;
 
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
+	TArray<TSubclassOf<UGameplayAbility>> DefaultAbilities;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
+	TSubclassOf<UGameplayAbility> WallCutAbilityClass;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
+	TSubclassOf<UGameplayAbility> WallScanAbilityClass;
+
 private:
 
 	void HandleMoveInput(const FInputActionValue& Value);
@@ -113,9 +105,9 @@ private:
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
+	void HandleWallCutInput(const FInputActionValue& Value);
+	void HandleWallScanInput(const FInputActionValue& Value);
 
-	void RefreshAbilityActorInfo();
-	void GrantStartupAbilities();
-
-	FGameplayAbilitySpecHandle ActiveScrapeAbilityHandle;
+	void InitializeAbilitySystem();
+	void GrantDefaultAbilities();
 };

@@ -199,7 +199,7 @@ TObjectPtr<UAnimMontage> AttackMontage;
 | `UMD_ScrapeToolComponent` | 플레이어 시점 Line Trace와 연속 충돌점 수집 |
 | `FMD_ScrapeEvaluator` | 헤라 이동 거리와 폭을 이용한 순수 오염 셀 판정 |
 | `AMD_CuttableWall` | 오염 셀 상태, 전체 제거율, 절단 가능 여부와 시각화 관리 |
-| `FMD_StartupAbilityEntry` | 캐릭터 Blueprint에서 시작 Ability와 레벨을 배열로 구성 |
+| `DefaultAbilities` | PlayerState ASC에 시작 Ability 목록을 지급 |
 
 - 기본 격자는 `30×25`, 총 750셀입니다. 격자 크기와 긁기 수치는 Blueprint에서 변경할 수 있습니다.
 - 오염 상태는 셀마다 `0~1` 범위로 관리하며, 헤라가 지나간 셀만 감소합니다.
@@ -211,15 +211,15 @@ TObjectPtr<UAnimMontage> AttackMontage;
 
 #### `BP_MDPlayerCharacter`
 
-1. `StartupAbilities` 배열에 `BP_GA_Scrape`와 Ability Level을 추가합니다.
-2. `ScrapeAbilityClass`에도 같은 `BP_GA_Scrape`를 지정합니다.
-3. 기존 Input Config의 `AbilityAction`이 입력 Mapping Context에 연결되어 있어야 합니다.
+1. `DefaultAbilities` 배열에 `BP_GA_Scrape`를 추가합니다.
+2. 기존 Input Config의 `AbilityAction`이 입력 Mapping Context에 연결되어 있어야 합니다.
 
-`StartupAbilities`는 캐릭터가 시작할 때 지급할 전체 Ability 목록이고, `ScrapeAbilityClass`는 `AbilityAction` 입력으로 그중 어떤 Ability를 실행할지 알려주는 값입니다.
+`DefaultAbilities`는 PlayerState ASC에 지급할 전체 Ability 목록입니다. `AbilityAction`은 `Ability.Scrape` 태그로 긁기 Ability를 실행하고 입력을 놓으면 같은 태그의 Ability를 종료합니다.
 
 #### `BP_GA_Scrape`
 
 - 부모 클래스는 `MD_GA_Scrape`입니다.
+- Class Defaults의 `Tags > Asset Tags (Default AbilityTags)`에 `Ability.Scrape`를 지정합니다.
 - Instancing Policy와 네트워크 정책 같은 Gameplay Ability 옵션은 C++이 아니라 이 Blueprint의 Class Defaults에서 설정합니다.
 
 #### `BP_MD_CuttableWall`
