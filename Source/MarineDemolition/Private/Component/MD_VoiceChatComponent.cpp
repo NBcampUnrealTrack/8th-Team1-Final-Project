@@ -2,6 +2,7 @@
 
 #include "Component/MD_VoiceChatComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
 
 UMD_VoiceChatComponent::UMD_VoiceChatComponent()
 {
@@ -106,4 +107,54 @@ void UMD_VoiceChatComponent::StopTalking()
 
 	// 마이크 활성화 여부를 나타내는 플래그 설정
 	bIsMicrophonActive = false;
+}
+
+bool UMD_VoiceChatComponent::MuteRemotePlayer(APlayerState* TargetPlayerState, bool bNewMute)
+{
+	// 해당 PlayerState에 대하여 Mute/UnMute 변경이 가능한지 검사
+	if (CanModifyRemotePlayerMute(TargetPlayerState) == false)
+	{
+		return false;
+	}
+
+	// 설정 값에 따라 플레이어 Mute 또는 UnMute 요청
+	if (bNewMute == true)
+	{
+		OwnerPlayerController->ServerMutePlayer(TargetPlayerState->GetUniqueId());
+	}
+	else
+	{
+		OwnerPlayerController->ServerUnmutePlayer(TargetPlayerState->GetUniqueId());
+	}
+	return true;
+}
+
+bool UMD_VoiceChatComponent::IsRemotePlayerMuted(APlayerState* TargetPlayerState) const
+{
+	// 해당 PlayerState에 대하여 Mute/UnMute 변경이 가능한지 검사
+	if (CanModifyRemotePlayerMute(TargetPlayerState) == false)
+	{
+		return false;
+	}
+
+	// 플레이어의 Mute 상태 반환
+	return OwnerPlayerController->IsPlayerMuted(*TargetPlayerState->GetUniqueId());
+}
+
+bool UMD_VoiceChatComponent::CanModifyRemotePlayerMute(APlayerState* TargetPlayerState) const
+{
+	// Onwer PlayerController의 유효성 및 로컬 컨트롤러 검사
+	APlayerController* PlayerController = OwnerPlayerController.Get();
+	if (IsValid(PlayerController) == false || PlayerController->IsLocalController() == false)
+	{
+		return false;
+	}
+
+	// 상태를 변경하려는 PlayerState의 유효성 및 로컬 PlayerState 검사
+	if (IsValid(TargetPlayerState) == false || TargetPlayerState == PlayerController->PlayerState)
+	{
+		return false;
+	}
+
+	return TargetPlayerState->GetUniqueId().IsValid();
 }
