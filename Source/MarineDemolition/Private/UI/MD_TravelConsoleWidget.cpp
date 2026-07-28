@@ -1,0 +1,49 @@
+﻿// Fill out your copyright notice in the Description page of Project Settings.
+
+
+#include "UI/MD_TravelConsoleWidget.h"
+#include "Components/Button.h"
+#include "Controller/MD_PlayerController.h"
+#include "Interaction/MD_TravelConsole.h"
+
+void UMD_TravelConsoleWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+	
+	if (DepartButton)
+	{
+		DepartButton->OnClicked.AddDynamic(this, &UMD_TravelConsoleWidget::HandleDepartClicked);
+	}
+	if (CloseButton)
+	{
+		CloseButton->OnClicked.AddDynamic(this, &UMD_TravelConsoleWidget::HandleCloseClicked);
+	}
+}
+
+void UMD_TravelConsoleWidget::HandleDepartClicked()
+{
+	AMD_PlayerController* PC = Cast<AMD_PlayerController>(GetOwningPlayer());
+
+	if (IsValid(PC) && IsValid(OwningConsole))
+	{
+		PC->ServerRequestTravel(OwningConsole);
+	}
+
+	CloseWidget();
+}
+
+void UMD_TravelConsoleWidget::HandleCloseClicked()
+{
+	CloseWidget();
+}
+
+void UMD_TravelConsoleWidget::CloseWidget()
+{
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		PC->SetShowMouseCursor(false);
+		PC->SetInputMode(FInputModeGameOnly());
+	}
+
+	RemoveFromParent();
+}

@@ -5,6 +5,11 @@
 #include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
 
+AMD_GameModeBase::AMD_GameModeBase()
+{
+    bUseSeamlessTravel = true;
+}
+
 void AMD_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();

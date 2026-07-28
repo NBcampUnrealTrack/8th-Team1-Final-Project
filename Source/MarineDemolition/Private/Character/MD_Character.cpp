@@ -6,6 +6,7 @@
 #include "Input/MD_InputConfig.h"
 #include "Component/MD_CharacterMovementComponent.h"
 #include "Demolition/Scrape/MD_ScrapeToolComponent.h"
+#include "Interaction/MD_Interactable.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -219,13 +220,9 @@ void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 
 	if (GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation, TraceEnd, ECC_Visibility, Params))
 	{
-		if (AActor* HitActor = Hit.GetActor())
+		if (IMD_Interactable* Interactable = Cast<IMD_Interactable>(Hit.GetActor()))
 		{
-			GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Green, FString::Printf(TEXT("Interact Hit: %s"), *HitActor->GetName()));
-		}
-		else
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("Interact: No Target"));
+			Interactable->Interact(this);
 		}
 	}
 }
