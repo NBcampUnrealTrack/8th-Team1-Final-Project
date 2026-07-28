@@ -14,6 +14,7 @@ Plugins/**/Intermediate/
 Plugins/Developer/RiderLink/
 
 # Visual Studio / Rider files
+.vsconfig
 .vs/
 .idea/
 *.sln
