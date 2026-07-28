@@ -1,6 +1,5 @@
 #include "Sample/MD_SampleItem.h"
 
-#include "GameplayTags/MD_GameplayTags.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
 AMD_SampleItem::AMD_SampleItem()
@@ -12,14 +11,6 @@ AMD_SampleItem::AMD_SampleItem()
 	Mesh->SetRelativeScale3D(FVector(0.4f));
 	Mesh->SetCollisionObjectType(ECC_WorldDynamic);
 	Mesh->SetGenerateOverlapEvents(true);
-
-	StaticGameplayTags.AddTag(MDGameplayTags::Interaction_Pickup_Inventory);
-	StaticGameplayTags.AddTag(MDGameplayTags::Item_Type_Sample);
-}
-
-void AMD_SampleItem::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
-{
-	TagContainer = StaticGameplayTags;
 }
 
 void AMD_SampleItem::BeginPlay()
