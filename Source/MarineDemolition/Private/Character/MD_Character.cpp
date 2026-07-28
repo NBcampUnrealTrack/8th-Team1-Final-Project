@@ -2,8 +2,10 @@
 
 
 #include "Character/MD_Character.h"
+#include "Player/MD_PlayerState.h"
 #include "Input/MD_InputConfig.h"
 #include "Component/MD_CharacterMovementComponent.h"
+#include "Demolition/Scrape/MD_ScrapeToolComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -14,6 +16,9 @@
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameplayTags/MD_GameplayTags.h"
+#include "AbilitySystemComponent.h"
+#include "GameplayTagContainer.h"
 
 // Sets default values
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
@@ -43,12 +48,26 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	FirstPersonMesh->SetOnlyOwnerSee(true);
 	FirstPersonMesh->SetOwnerNoSee(false);
 	FirstPersonMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	ScrapeToolComponent = CreateDefaultSubobject<UMD_ScrapeToolComponent>(TEXT("ScrapeToolComponent"));
 }
 
 void AMD_Character::ForceEnterWalkState()
 {
 	// TODO(김동연): GAS 스태미나 고갈 이벤트에서 호출 연결 예정
 	GetCharacterMovement()->SetMovementMode(MOVE_Walking);
+}
+
+UAbilitySystemComponent* AMD_Character::GetAbilitySystemComponent() const
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+
+	if (!IsValid(MDPlayerState))
+	{
+		return nullptr;
+	}
+
+	return MDPlayerState->GetAbilitySystemComponent();
 }
 
 // Called when the game starts or when spawned
@@ -96,6 +115,35 @@ void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 
 
 	CurrentMovementState = NewState;
 	OnMovementStateChanged.Broadcast(CurrentMovementState);
+
+	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+	{
+		static const FGameplayTag SwimmingStateTag = FGameplayTag::RequestGameplayTag(FName("State.Swimming"));
+
+		if (NewState == EMDMovementState::Swimming)
+		{
+			ASC->AddLooseGameplayTag(SwimmingStateTag);
+		}
+		else
+		{
+			ASC->RemoveLooseGameplayTag(SwimmingStateTag);
+		}
+	}
+}
+
+void AMD_Character::PossessedBy(AController* NewController)
+{
+	Super::PossessedBy(NewController);
+
+	InitializeAbilitySystem();
+	GrantDefaultAbilities();
+}
+
+void AMD_Character::OnRep_PlayerState()
+{
+	Super::OnRep_PlayerState();
+
+	InitializeAbilitySystem();
 }
 
 // Called to bind functionality to input
@@ -115,7 +163,11 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Completed, this, &AMD_Character::HandleJumpOrSwimReleasedInput);
 		EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Started, this, &AMD_Character::HandleInteractInput);
 		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Started, this, &AMD_Character::HandleAbilityInput);
+		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAbilityReleasedInput);
+		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAbilityReleasedInput);
 		EIC->BindAction(InputConfig->SwapEquipmentAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleSwapEquipmentInput);
+		EIC->BindAction(InputConfig->WallCutAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallCutInput);
+		EIC->BindAction(InputConfig->WallScanAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallScanInput);
 	}
 
 }
@@ -180,12 +232,33 @@ void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 {
-	GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("Ability: Activated"));
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	FGameplayTagContainer AbilityTags;
+	AbilityTags.AddTag(MDGameplayTags::Ability_Scrape);
+	ASC->TryActivateAbilitiesByTag(AbilityTags);
+}
+
+void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
+{
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	FGameplayTagContainer AbilityTags;
+	AbilityTags.AddTag(MDGameplayTags::Ability_Scrape);
+	ASC->CancelAbilities(&AbilityTags);
 }
 
 void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
 {
-	GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("SwapEquipment: Activated"));
+	//GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("SwapEquipment: Activated"));
 }
 
 void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
@@ -198,8 +271,7 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 
 	if (MDMovement->IsMovingOnGround())
 	{
-		MDMovement->SetWantsToSwim(true);
-		MDMovement->SetMovementMode(MOVE_Swimming);
+		MDMovement->EnterSwimmingFromGround();
 		return;
 	}
 
@@ -209,4 +281,65 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value)
 {
 	StopJumping();
+}
+
+void AMD_Character::HandleWallCutInput(const FInputActionValue& Value)
+{
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	if (!WallCutAbilityClass)
+	{
+		return;
+	}
+
+	ASC->TryActivateAbilityByClass(WallCutAbilityClass);
+}
+
+void AMD_Character::HandleWallScanInput(const FInputActionValue& Value)
+{
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	if (!WallScanAbilityClass)
+	{
+		return;
+	}
+
+	ASC->TryActivateAbilityByClass(WallScanAbilityClass);
+}
+
+void AMD_Character::InitializeAbilitySystem()
+{
+	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
+	{
+		ASC->InitAbilityActorInfo(GetPlayerState(), this);
+	}
+}
+
+void AMD_Character::GrantDefaultAbilities()
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	for (const TSubclassOf<UGameplayAbility>& AbilityClass : DefaultAbilities)
+	{
+		if (AbilityClass)
+		{
+			ASC->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1, INDEX_NONE, this));
+		}
+	}
 }
