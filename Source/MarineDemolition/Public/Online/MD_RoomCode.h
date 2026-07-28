@@ -32,7 +32,7 @@ public:
 	static FMD_RoomCode Random();
 
 	// 임의 문자열으로부터 방 코드를 추출하는 함수
-	static TOptional<FMD_RoomCode> Parse(FString StringRoomCode);
+	static FMD_RoomCode Parse(FString StringRoomCode);
 
 	// 방 코드를 문자열로 변환하는 함수
 	FString ToString() const;
