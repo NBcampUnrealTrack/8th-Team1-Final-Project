@@ -5,6 +5,7 @@
 #include "Player/MD_PlayerState.h"
 #include "Input/MD_InputConfig.h"
 #include "Component/MD_CharacterMovementComponent.h"
+#include "Demolition/Scrape/MD_ScrapeToolComponent.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -15,6 +16,7 @@
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayTagContainer.h"
 
@@ -46,6 +48,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	FirstPersonMesh->SetOnlyOwnerSee(true);
 	FirstPersonMesh->SetOwnerNoSee(false);
 	FirstPersonMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	ScrapeToolComponent = CreateDefaultSubobject<UMD_ScrapeToolComponent>(TEXT("ScrapeToolComponent"));
 }
 
 void AMD_Character::ForceEnterWalkState()
@@ -57,7 +61,7 @@ void AMD_Character::ForceEnterWalkState()
 UAbilitySystemComponent* AMD_Character::GetAbilitySystemComponent() const
 {
 	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
-	
+
 	if (!IsValid(MDPlayerState))
 	{
 		return nullptr;
@@ -159,6 +163,8 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Completed, this, &AMD_Character::HandleJumpOrSwimReleasedInput);
 		EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Started, this, &AMD_Character::HandleInteractInput);
 		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Started, this, &AMD_Character::HandleAbilityInput);
+		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAbilityReleasedInput);
+		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAbilityReleasedInput);
 		EIC->BindAction(InputConfig->SwapEquipmentAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleSwapEquipmentInput);
 		EIC->BindAction(InputConfig->WallCutAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallCutInput);
 		EIC->BindAction(InputConfig->WallScanAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallScanInput);
@@ -226,7 +232,28 @@ void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 {
-	//GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("Ability: Activated"));
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	FGameplayTagContainer AbilityTags;
+	AbilityTags.AddTag(MDGameplayTags::Ability_Scrape);
+	ASC->TryActivateAbilitiesByTag(AbilityTags);
+}
+
+void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
+{
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	FGameplayTagContainer AbilityTags;
+	AbilityTags.AddTag(MDGameplayTags::Ability_Scrape);
+	ASC->CancelAbilities(&AbilityTags);
 }
 
 void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)

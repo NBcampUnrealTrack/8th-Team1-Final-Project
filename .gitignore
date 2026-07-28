@@ -24,6 +24,7 @@ Plugins/Developer/RiderLink/
 *.sdf
 *.VC.db
 *.VC.opendb
+*.vsconfig
 
 # Generated config (keep Config/ tracked, ignore user-specific)
 Config/DefaultEditorPerProjectUserSettings.ini
@@ -31,6 +32,8 @@ Config/DefaultEditorPerProjectUserSettings.ini
 # AI coding agents (local state)
 .codex/
 .claude/
+/AGENT.md
+/CLAUDE.md
 
 # Local art / docs (not tracked)
 Art/
