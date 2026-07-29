@@ -3,6 +3,7 @@
 #include "Component/MD_VoiceChatComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
+#include "MD_LogUtility.h"
 
 UMD_VoiceChatComponent::UMD_VoiceChatComponent()
 {
@@ -78,6 +79,7 @@ void UMD_VoiceChatComponent::StartTalking()
 	// 컴포넌트가 비활성화 되어있거나 또는 이미 마이크 활성화 되어있는 경우 함수 조기 종료
 	if (IsActive() == false || bIsMicrophonActive == true)
 	{
+		UE_LOG(MarineDemolition, Log, TEXT("%s 컴포넌트 비활성화 또는 이미 마이크 활성화 상태"), *UE_CALL_LOCATIONINFO);
 		return;
 	}
 
@@ -85,8 +87,11 @@ void UMD_VoiceChatComponent::StartTalking()
 	APlayerController* PlayerController = OwnerPlayerController.Get();
 	if (IsValid(PlayerController) == false || PlayerController->IsLocalController() == false)
 	{
+		UE_LOG(MarineDemolition, Log, TEXT("%s 잘못된 Player Controller 또는 Remote Player Controller"), *UE_CALL_LOCATIONINFO);
 		return;
 	}
+
+	UE_LOG(MarineDemolition, Log, TEXT("%s 마이크 활성화"), *UE_CALL_LOCATIONINFO);
 
 	// 마이크 활성화
 	PlayerController->StartTalking();
@@ -97,13 +102,24 @@ void UMD_VoiceChatComponent::StartTalking()
 
 void UMD_VoiceChatComponent::StopTalking()
 {
+	if (bIsMicrophonActive == false)
+	{
+		return;
+	}
+
 	// PlayerController(Owner)의 유효성 및 로컬 컨트롤러 검사
 	APlayerController* PlayerController = OwnerPlayerController.Get();
-	if (bIsMicrophonActive == true && IsValid(PlayerController) == true && PlayerController->IsLocalController() == true)
+	if (IsValid(PlayerController) == false || PlayerController->IsLocalController() == false)
 	{
-		// 마이크 비활성화
-		PlayerController->StopTalking();
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 잘못된 Player Controller 또는 Remote Player Controller"), *UE_CALL_LOCATIONINFO);
+		bIsMicrophonActive = false;
+		return;
 	}
+
+	UE_LOG(MarineDemolition, Log, TEXT("%s 마이크 비활성화"), *UE_CALL_LOCATIONINFO);
+
+	// 마이크 비활성화
+	PlayerController->StopTalking();
 
 	// 마이크 활성화 여부를 나타내는 플래그 설정
 	bIsMicrophonActive = false;
@@ -114,8 +130,11 @@ bool UMD_VoiceChatComponent::MuteRemotePlayer(APlayerState* TargetPlayerState, b
 	// 해당 PlayerState에 대하여 Mute/UnMute 변경이 가능한지 검사
 	if (CanModifyRemotePlayerMute(TargetPlayerState) == false)
 	{
+		UE_LOG(MarineDemolition, Log, TEXT("%s 잘못된 TargetPlayerState 또는 LocallPlayerController가 아닌 곳에서 호출됨"), *UE_CALL_LOCATIONINFO);
 		return false;
 	}
+
+	UE_LOG(MarineDemolition, Log, TEXT("%s TargetPlayerState의 Mute 값 변경"), *UE_CALL_LOCATIONINFO);
 
 	// 설정 값에 따라 플레이어 Mute 또는 UnMute 요청
 	if (bNewMute == true)
