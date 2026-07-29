@@ -16,9 +16,10 @@ class MARINEDEMOLITION_API AMD_TravelConsole : public AActor, public IMD_Interac
 
 public:
 	AMD_TravelConsole();
-	
-	virtual void Interact(AMD_Character* InstigatorCharacter) override;
-	
+
+	virtual void Interact_Implementation(AActor* Interactor) override;
+	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+
 	const TSoftObjectPtr<UWorld>& GetTargetLevel() const {return TargetLevel; }
 	
 protected:

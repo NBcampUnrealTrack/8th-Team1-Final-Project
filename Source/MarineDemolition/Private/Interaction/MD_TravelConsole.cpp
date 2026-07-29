@@ -4,6 +4,7 @@
 #include "Interaction/MD_TravelConsole.h"
 
 #include "Character/MD_Character.h"
+#include "Collision/MD_CollisionChannels.h"
 #include "Components/StaticMeshComponent.h"
 #include "UI/MD_TravelConsoleWidget.h"
 
@@ -11,13 +12,25 @@
 AMD_TravelConsole::AMD_TravelConsole()
 {
 	PrimaryActorTick.bCanEverTick = false;
-	
+
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
+	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
 }
 
-void AMD_TravelConsole::Interact(AMD_Character* InstigatorCharacter)
+void AMD_TravelConsole::SetInteractionHighlighted_Implementation(bool bHighlighted)
 {
+	if (IsValid(Mesh))
+	{
+		Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
+		Mesh->SetRenderCustomDepth(bHighlighted);
+	}
+}
+
+void AMD_TravelConsole::Interact_Implementation(AActor* Interactor)
+{
+	AMD_Character* InstigatorCharacter = Cast<AMD_Character>(Interactor);
+
 	if (!IsValid(InstigatorCharacter))
 	{
 		return;

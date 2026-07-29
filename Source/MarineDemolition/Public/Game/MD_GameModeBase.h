@@ -15,7 +15,7 @@ class MARINEDEMOLITION_API AMD_GameModeBase : public AGameModeBase
 	GENERATED_BODY()
 	
 public:
-	AMD_GameModeBase();
+    AMD_GameModeBase();
 
 protected:
     virtual void BeginPlay() override;
@@ -25,4 +25,6 @@ private:
     FTimerHandle CheckGameTimeTimerHandle;
 
     void CheckGameTimeEvents();
+
+    void FinalizeReturnStatuses();
 };

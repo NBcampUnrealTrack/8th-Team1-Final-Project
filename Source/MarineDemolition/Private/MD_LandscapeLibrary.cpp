@@ -141,7 +141,7 @@ bool UMD_LandscapeLibrary::RegisterLandscapeTargetLayer(
 
 	if (LayerInfo)
 	{
-		LayerInfo->LayerName = LayerName;
+		LayerInfo->SetLayerName(LayerName, true);
 	}
 
 	const FLandscapeTargetLayerSettings Settings(LayerInfo);

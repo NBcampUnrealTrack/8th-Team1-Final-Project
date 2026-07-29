@@ -43,8 +43,6 @@ AMD_CuttableWall::AMD_CuttableWall()
 	ContaminationOverlay->SetCanEverAffectNavigation(false);
 	ContaminationOverlay->SetReceivesDecals(false);
 	ContaminationOverlay->CastShadow = false;
-
-	PieceClass = AMD_WallPiece::StaticClass();
 }
 
 void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
