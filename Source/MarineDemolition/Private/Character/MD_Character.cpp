@@ -11,14 +11,21 @@
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
+#include "Components/PrimitiveComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Collision/MD_CollisionChannels.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "GameplayTagAssetInterface.h"
+#include "Hotbar/MD_HotbarComponent.h"
+#include "Interaction/MD_Interactable.h"
+#include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayTagContainer.h"
 
@@ -27,7 +34,7 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UMD_CharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -65,6 +72,20 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	ThirdPersonToolMesh->SetupAttachment(GetMesh(), ToolAttachSocketName);
 	ThirdPersonToolMesh->SetOwnerNoSee(true);
 	ThirdPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	HoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HoldPoint"));
+	HoldPoint->SetupAttachment(Camera);
+	HoldPoint->SetRelativeLocation(FVector(150.f, 0.f, 0.f));
+
+	PhysicsHandle = CreateDefaultSubobject<UPhysicsHandleComponent>(TEXT("PhysicsHandle"));
+}
+
+void AMD_Character::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	UpdateInteractionFocus();
+	UpdateHeldTarget();
+	UpdateHotbarDebug();
 }
 
 void AMD_Character::ForceEnterWalkState()
@@ -112,6 +133,14 @@ void AMD_Character::BeginPlay()
 		EquipHotbarComponent->OnHotbarChanged.AddDynamic(this, &AMD_Character::HandleHotbarChanged);
 		RefreshToolMesh();
 	}
+}
+
+void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	SetCurrentTarget(nullptr);
+	ReleaseTarget();
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -219,33 +248,124 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 {
-	if (!Controller)
+	ServerInteract(CurrentTarget.Get());
+}
+
+void AMD_Character::ServerInteract_Implementation(AActor* RequestedActor)
+{
+	if (IsHolding())
 	{
+		ReleaseTarget();
 		return;
 	}
 
-	//라인트레이스 시작위치
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	if (!IsValid(RequestedActor)
+		|| !RequestedActor->Implements<UMD_Interactable>()
+		|| TraceInteractionTarget() != RequestedActor) return;
 
-	const FVector TraceEnd = ViewLocation + ViewRotation.Vector() * InteractTraceDistance;
-
-	//히트판정
-	FHitResult Hit;
-	FCollisionQueryParams Params;
-	Params.AddIgnoredActor(this);
-
-	if (GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation, TraceEnd, ECC_Visibility, Params))
+	const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(RequestedActor);
+	if (TagAsset
+		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Inventory))
 	{
-		if (AActor* HitActor = Hit.GetActor())
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Green, FString::Printf(TEXT("Interact Hit: %s"), *HitActor->GetName()));
-		}
-		else
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("Interact: No Target"));
-		}
+		TryStoreTarget(RequestedActor);
+		return;
+	}
+
+	if (TagAsset
+		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics))
+	{
+		TryHoldTarget(RequestedActor);
+		return;
+	}
+
+	IMD_Interactable::Execute_Interact(RequestedActor, this);
+}
+
+bool AMD_Character::TryStoreTarget(AActor* Target)
+{
+	if (!IsValid(Target)) return false;
+
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (!IsValid(MDPlayerState)) return false;
+
+	UMD_HotbarComponent* Hotbar = MDPlayerState->GetHotbarComponent();
+	if (!IsValid(Hotbar)) return false;
+
+	const TSubclassOf<AActor> ItemClass = Target->GetClass();
+	int32 SlotIndex = INDEX_NONE;
+	if (!Hotbar->TryAddItem(ItemClass, SlotIndex)) return false;
+
+	if (!Target->Destroy())
+	{
+		Hotbar->TryRemoveItemAt(SlotIndex);
+		return false;
+	}
+
+	return true;
+}
+
+bool AMD_Character::TryHoldTarget(AActor* Target)
+{
+	if (!HasAuthority() || !IsValid(Target) || !IsValid(PhysicsHandle)) return false;
+
+	UPrimitiveComponent* Component = Cast<UPrimitiveComponent>(Target->GetRootComponent());
+	if (!IsValid(Component) || !Component->IsSimulatingPhysics()) return false;
+
+	PhysicsHandle->GrabComponentAtLocationWithRotation(
+		Component,
+		NAME_None,
+		Component->GetCenterOfMass(),
+		Component->GetComponentRotation());
+
+	UpdateHeldTarget();
+	return PhysicsHandle->GetGrabbedComponent() == Component;
+}
+
+bool AMD_Character::IsHolding() const
+{
+	return IsValid(PhysicsHandle) && IsValid(PhysicsHandle->GetGrabbedComponent());
+}
+
+void AMD_Character::ReleaseTarget()
+{
+	if (!IsValid(PhysicsHandle) || !PhysicsHandle->GetGrabbedComponent()) return;
+
+	PhysicsHandle->ReleaseComponent();
+}
+
+void AMD_Character::UpdateHeldTarget()
+{
+	if (!HasAuthority() || !IsHolding() || !IsValid(HoldPoint)) return;
+
+	PhysicsHandle->SetTargetLocationAndRotation(
+		HoldPoint->GetComponentLocation(),
+		HoldPoint->GetComponentRotation());
+}
+
+void AMD_Character::UpdateHotbarDebug() const
+{
+	if (!IsLocallyControlled() || !GEngine) return;
+
+	const AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (!IsValid(MDPlayerState)) return;
+
+	const UMD_HotbarComponent* Hotbar = MDPlayerState->GetHotbarComponent();
+	if (!IsValid(Hotbar)) return;
+
+	constexpr uint64 HotbarKeyBase = 0x4D440000;
+	for (int32 SlotIndex = 0; SlotIndex < Hotbar->GetMaxSlots(); ++SlotIndex)
+	{
+		const TSubclassOf<AActor> ItemClass = Hotbar->GetItemClassAt(SlotIndex);
+		const FString ItemName = ItemClass ? ItemClass->GetName() : TEXT("비어 있음");
+
+		GEngine->AddOnScreenDebugMessage(
+			HotbarKeyBase + SlotIndex,
+			0.f,
+			FColor::Cyan,
+			FString::Printf(
+				TEXT("핫바 %d : %s"),
+				SlotIndex + 1,
+				*ItemName));
 	}
 }
 
@@ -372,6 +492,56 @@ void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value
 
 	ASC->TryActivateAbilityByClass(WallScanAbilityClass);
 }*/
+
+void AMD_Character::UpdateInteractionFocus()
+{
+	if (!IsLocallyControlled() || !Controller || !GetWorld())
+	{
+		SetCurrentTarget(nullptr);
+		return;
+	}
+
+	SetCurrentTarget(TraceInteractionTarget());
+}
+
+AActor* AMD_Character::TraceInteractionTarget() const
+{
+	if (!Controller || !GetWorld()) return nullptr;
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	const FVector TraceEnd = ViewLocation + ViewRotation.Vector() * InteractTraceDistance;
+
+	FHitResult Hit;
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+
+	if (!GetWorld()->LineTraceSingleByChannel(
+		Hit,
+		ViewLocation,
+		TraceEnd,
+		MDCollisionChannels::InteractTrace,
+		QueryParams)) return nullptr;
+
+	AActor* HitActor = Hit.GetActor();
+	return IsValid(HitActor) && HitActor->Implements<UMD_Interactable>() ? HitActor : nullptr;
+}
+
+void AMD_Character::SetCurrentTarget(AActor* NewTarget)
+{
+	if (CurrentTarget.Get() == NewTarget) return;
+
+	if (AActor* PreviousTarget = CurrentTarget.Get())
+	{
+		if (PreviousTarget->Implements<UMD_Interactable>()) IMD_Interactable::Execute_SetInteractionHighlighted(PreviousTarget, false);
+	}
+
+	CurrentTarget = NewTarget;
+
+	if (IsValid(NewTarget) && NewTarget->Implements<UMD_Interactable>()) IMD_Interactable::Execute_SetInteractionHighlighted(NewTarget, true);
+}
 
 void AMD_Character::InitializeAbilitySystem()
 {

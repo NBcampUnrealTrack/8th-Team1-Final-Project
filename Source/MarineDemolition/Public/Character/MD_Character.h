@@ -13,7 +13,9 @@ class UInputMappingContext;
 class UInputAction;
 class UCameraComponent;
 class UStaticMeshComponent;
+class USceneComponent;
 class USkeletalMeshComponent;
+class UPhysicsHandleComponent;
 class UMD_CharacterMovementComponent;
 class UMD_ScrapeToolComponent;
 class UGameplayAbility;
@@ -38,6 +40,8 @@ public:
 	// Sets default values for this character's properties
 	AMD_Character(const FObjectInitializer& ObjectInitializer);
 
+	virtual void Tick(float DeltaSeconds) override;
+
 	UPROPERTY(BlueprintAssignable, Category = "Movement|Water")
 	FMDOnMovementStateChanged OnMovementStateChanged;
 
@@ -56,6 +60,8 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
 
@@ -91,6 +97,10 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
 	FName ToolAttachSocketName = TEXT("hand_r");
+	TObjectPtr<USceneComponent> HoldPoint;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UPhysicsHandleComponent> PhysicsHandle;
 
 protected:
 
@@ -128,6 +138,20 @@ private:
 	//void HandleWallCutInput(const FInputActionValue& Value);
 	//void HandleWallScanInput(const FInputActionValue& Value);
 
+	UFUNCTION(Server, Reliable)
+	void ServerInteract(AActor* RequestedActor);
+
+	bool TryStoreTarget(AActor* Target);
+	bool TryHoldTarget(AActor* Target);
+	bool IsHolding() const;
+	void ReleaseTarget();
+	void UpdateHeldTarget();
+	void UpdateHotbarDebug() const;
+
+	void UpdateInteractionFocus();
+	AActor* TraceInteractionTarget() const;
+	void SetCurrentTarget(AActor* NewTarget);
+
 	void InitializeAbilitySystem();
 	void GrantDefaultAbilities();
 
@@ -135,4 +159,5 @@ private:
 	void HandleHotbarChanged();
 
 	void RefreshToolMesh();
+	TWeakObjectPtr<AActor> CurrentTarget;
 };

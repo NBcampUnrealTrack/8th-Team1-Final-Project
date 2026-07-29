@@ -8,7 +8,7 @@
 
 class UMD_ToolDefinition;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMDOnHotbarChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMDOnEquipHotbarChanged);
 
 UCLASS( ClassGroup=(MarineDemolition), meta=(BlueprintSpawnableComponent) )
 class MARINEDEMOLITION_API UMD_EquipHotbarComponent : public UActorComponent
@@ -27,7 +27,7 @@ protected:
 public:
 	// 슬롯 내용 또는 선택 인덱스가 바뀔 때 브로드캐스트. UI가 구독한다
 	UPROPERTY(BlueprintAssignable, Category = "Hotbar")
-	FMDOnHotbarChanged OnHotbarChanged;
+	FMDOnEquipHotbarChanged OnHotbarChanged;
 
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
 	UMD_ToolDefinition* GetCurrentTool() const;
