@@ -17,7 +17,7 @@ public:
 	AMD_PlayerState();
 
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
-
+	
 protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AbilitySystem")

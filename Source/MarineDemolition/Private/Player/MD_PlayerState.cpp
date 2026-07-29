@@ -7,6 +7,9 @@
 AMD_PlayerState::AMD_PlayerState()
 {
 	AbilitySystemComponent = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("AbilitySystemComponent"));
+
+	AbilitySystemComponent->SetIsReplicated(true);
+	AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
 }
 
 UAbilitySystemComponent* AMD_PlayerState::GetAbilitySystemComponent() const
