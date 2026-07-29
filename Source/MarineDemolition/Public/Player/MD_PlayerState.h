@@ -7,6 +7,8 @@
 #include "AbilitySystemInterface.h"
 #include "MD_PlayerState.generated.h"
 
+class UMD_HotbarComponent;
+
 UENUM(BlueprintType)
 enum class EMD_ReturnStatus : uint8
 {
@@ -30,7 +32,10 @@ public:
     EMD_ReturnStatus GetReturnStatus() const;
 
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
-	
+
+	UFUNCTION(BlueprintPure, Category = "MD|Hotbar")
+	UMD_HotbarComponent* GetHotbarComponent() const { return HotbarComponent; }
+
 protected:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -48,5 +53,8 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AbilitySystem")
 	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Hotbar")
+	TObjectPtr<UMD_HotbarComponent> HotbarComponent;
 
 };
