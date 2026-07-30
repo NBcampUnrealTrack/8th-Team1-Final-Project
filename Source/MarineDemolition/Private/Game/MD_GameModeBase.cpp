@@ -9,6 +9,8 @@
 AMD_GameModeBase::AMD_GameModeBase()
 {
     PlayerStateClass = AMD_PlayerState::StaticClass();
+
+    bUseSeamlessTravel = true;
 }
 
 void AMD_GameModeBase::BeginPlay()

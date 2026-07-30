@@ -12,12 +12,15 @@ class UMD_InputConfig;
 class UInputMappingContext;
 class UInputAction;
 class UCameraComponent;
+class UStaticMeshComponent;
 class USceneComponent;
 class USkeletalMeshComponent;
 class UPhysicsHandleComponent;
 class UMD_CharacterMovementComponent;
 class UMD_ScrapeToolComponent;
 class UGameplayAbility;
+class UMD_EquipHotbarComponent;
+class UMD_ToolDefinition;
 
 UENUM(BlueprintType)
 enum class EMDMovementState : uint8
@@ -51,6 +54,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
 	UMD_ScrapeToolComponent* GetScrapeToolComponent() const	{ return ScrapeToolComponent; }
 
+	UFUNCTION(BlueprintPure, Category = "Equipment")
+	UMD_EquipHotbarComponent* GetHotbarComponent() const { return EquipHotbarComponent; }
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -79,6 +85,18 @@ protected:
 	TObjectPtr<UMD_ScrapeToolComponent> ScrapeToolComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_EquipHotbarComponent> EquipHotbarComponent;
+
+	// 1인칭 전용 도구 메시 (본인만 보임)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UStaticMeshComponent> FirstPersonToolMesh;
+
+	// 3인칭 도구 메시 (타 플레이어에게만 보임)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UStaticMeshComponent> ThirdPersonToolMesh;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
+	FName ToolAttachSocketName = TEXT("hand_r");
 	TObjectPtr<USceneComponent> HoldPoint;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -101,11 +119,11 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
 	TArray<TSubclassOf<UGameplayAbility>> DefaultAbilities;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
-	TSubclassOf<UGameplayAbility> WallCutAbilityClass;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
-	TSubclassOf<UGameplayAbility> WallScanAbilityClass;
+	//UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
+	//TSubclassOf<UGameplayAbility> WallCutAbilityClass;
+	
+	//UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Abilities")
+	//TSubclassOf<UGameplayAbility> WallScanAbilityClass;
 
 private:
 
@@ -117,8 +135,8 @@ private:
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
-	void HandleWallCutInput(const FInputActionValue& Value);
-	void HandleWallScanInput(const FInputActionValue& Value);
+	//void HandleWallCutInput(const FInputActionValue& Value);
+	//void HandleWallScanInput(const FInputActionValue& Value);
 
 	UFUNCTION(Server, Reliable)
 	void ServerInteract(AActor* RequestedActor);
@@ -137,5 +155,9 @@ private:
 	void InitializeAbilitySystem();
 	void GrantDefaultAbilities();
 
+	UFUNCTION()
+	void HandleHotbarChanged();
+
+	void RefreshToolMesh();
 	TWeakObjectPtr<AActor> CurrentTarget;
 };
