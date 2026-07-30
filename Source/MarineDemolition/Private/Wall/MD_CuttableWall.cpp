@@ -1,8 +1,11 @@
 #include "Wall/MD_CuttableWall.h"
 
 #include "TimerManager.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Demolition/Scrape/MD_ScrapeEvaluator.h"
 #include "Engine/Engine.h"
+#include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Sector/MD_Sector.h"
 #include "Wall/MD_WallPiece.h"
@@ -15,17 +18,39 @@ namespace
 AMD_CuttableWall::AMD_CuttableWall()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	ContaminationGridDimensions = FIntPoint(30, 25);
+	InitialContaminationPerCell = 1.0f;
+	ContaminationSurfaceSizeOverrideCm = FVector2D::ZeroVector;
+	ContaminationOverlayOffsetCm = 0.25f;
+	ContaminationOverlayThicknessCm = 0.35f;
+	bShowContaminationOverlay = true;
+	ResolvedContaminationSurfaceSizeCm = FVector2D::ZeroVector;
+	ContaminationSurfaceCenterLocal = FVector::ZeroVector;
+	ContaminationMeshLocalBoundsMinimum = FVector::ZeroVector;
+	ContaminationMeshLocalBoundsMaximum = FVector::ZeroVector;
+	CachedContaminationCleanRatio = 0.0f;
+	bContaminationSurfaceInitialized = false;
+	bContaminationCompletionBroadcast = false;
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
 	Mesh->SetRelativeScale3D(FVector(3.f, 0.2f, 2.5f));
 
-	PieceClass = AMD_WallPiece::StaticClass();
+	ContaminationOverlay = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("ContaminationOverlay"));
+	ContaminationOverlay->SetupAttachment(Mesh);
+	ContaminationOverlay->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ContaminationOverlay->SetGenerateOverlapEvents(false);
+	ContaminationOverlay->SetCanEverAffectNavigation(false);
+	ContaminationOverlay->SetReceivesDecals(false);
+	ContaminationOverlay->CastShadow = false;
 }
 
 void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
+
+	// 에디터 변경 시 작업면 크기 갱신
+	ResolveContaminationSurfaceGeometry();
 
 	// 스캔 전에는 타입 구분 없이 중립 회색
 	MID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
@@ -33,11 +58,15 @@ void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 	{
 		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
 	}
+
 }
 
 void AMD_CuttableWall::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 런타임 오염 상태 초기화
+	InitializeContaminationSurface();
 
 	// Transient인 MID는 레벨 로드/PIE 복제 시 유실되므로 런타임에서 재생성
 	MID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
@@ -45,6 +74,8 @@ void AMD_CuttableWall::BeginPlay()
 	{
 		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
 	}
+
+	InitializeContaminationVisualization();
 }
 
 void AMD_CuttableWall::Cut(AActor* Cutter)
@@ -62,10 +93,13 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 		{
 			GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Yellow,
 			                                 FString::Printf(
-				                                 TEXT("전처리 미완료: %.0f%% / %.0f%%"), ContaminationRemoved, Gate));
+				                                 TEXT("전처리 미완료: %.0f%% / %.0f%%"),
+				                                 GetContaminationRemovedPercent(),
+				                                 Gate));
 		}
 		return;
 	}
+
 	bCut = true;
 
 	if (WallType == EMD_WallType::Strut && !bHasSupport)
@@ -82,7 +116,8 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 	}
 
 	// 파편 드랍: 제거율 비율로 깨끗/오염 배분 (기획 §2.5: 제거율 70% → 7:3)
-	const int32 CleanCount = FMath::RoundToInt(PieceCount * ContaminationRemoved / 100.f);
+	const int32 CleanCount = FMath::RoundToInt(
+		static_cast<float>(PieceCount) * GetContaminationCleanRatio());
 
 	const FVector Origin = GetActorLocation();
 	const FVector Extent = Mesh->Bounds.BoxExtent;
@@ -110,15 +145,465 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 	Destroy();
 }
 
-void AMD_CuttableWall::AddPreprocess(float Amount)
+FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHits(
+	const FHitResult& StartHit,
+	const FHitResult& EndHit)
 {
-	ContaminationRemoved = FMath::Clamp(ContaminationRemoved + Amount, 0.0f, 100.0f);
+	// BeginPlay 이전 호출도 지원
+	if (!bContaminationSurfaceInitialized)
+	{
+		InitializeContaminationSurface();
+	}
+
+	// 같은 벽의 작업면 충돌만 허용
+	if (!IsHitOnContaminationFace(StartHit)
+		|| !IsHitOnContaminationFace(EndHit))
+	{
+		return FMD_ScrapeResult();
+	}
+
+	FMD_ScrapeStroke LocalStroke;
+	if (!TryProjectWorldPointToContaminationSurface(
+			StartHit.ImpactPoint,
+			LocalStroke.StartPositionCm)
+		|| !TryProjectWorldPointToContaminationSurface(
+			EndHit.ImpactPoint,
+			LocalStroke.EndPositionCm))
+	{
+		return FMD_ScrapeResult();
+	}
+
+	return ApplyLocalScrapeStroke(LocalStroke);
+}
+
+FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
+	const FMD_ScrapeStroke& Stroke)
+{
+	// Spawn 직후 호출도 지원
+	if (!bContaminationSurfaceInitialized)
+	{
+		InitializeContaminationSurface();
+	}
+
+	if (!bContaminationSurfaceInitialized)
+	{
+		return FMD_ScrapeResult();
+	}
+
+	const bool bWasFullyRemoved = IsContaminationFullyRemoved();
+
+	FMD_ScrapeResult Result = FMD_ScrapeEvaluator::ApplyStrokeToGrid(
+		Stroke,
+		ScrapeSettings,
+		ContaminationGridDimensions,
+		ResolvedContaminationSurfaceSizeCm,
+		ContaminationCells);
+
+	// 잘못된 입력은 상태를 변경하지 않음
+	if (!Result.bIsInputValid)
+	{
+		return Result;
+	}
+
+	CachedContaminationCleanRatio = Result.CleanRatioAfter;
+	UpdateContaminationVisualization(Result.CellChanges);
+
+	// 최초 완료 시 한 번만 방송
+	if (!bWasFullyRemoved
+		&& Result.bIsSurfaceFullyClean
+		&& !bContaminationCompletionBroadcast)
+	{
+		bContaminationCompletionBroadcast = true;
+		OnContaminationFullyRemoved.Broadcast(this);
+	}
+
+	return Result;
+}
+
+float AMD_CuttableWall::GetContaminationCleanRatio() const
+{
+	if (!bContaminationSurfaceInitialized)
+	{
+		return 0.0f;
+	}
+
+	return FMath::Clamp(CachedContaminationCleanRatio, 0.0f, 1.0f);
+}
+
+float AMD_CuttableWall::GetContaminationRemovedPercent() const
+{
+	return GetContaminationCleanRatio() * 100.0f;
+}
+
+float AMD_CuttableWall::GetResidualContaminationRatio() const
+{
+	// 초기화 실패는 오염 100%로 처리
+	return 1.0f - GetContaminationCleanRatio();
+}
+
+bool AMD_CuttableWall::IsContaminationFullyRemoved() const
+{
+	return bContaminationSurfaceInitialized
+		&& FMD_ScrapeEvaluator::IsSurfaceFullyClean(
+			ContaminationCells,
+			ScrapeSettings.CleanTolerance);
 }
 
 bool AMD_CuttableWall::CanCut() const
 {
+	// 초기화 실패 시 절단 금지
+	if (!bContaminationSurfaceInitialized)
+	{
+		return false;
+	}
+
 	const float Gate = (WallType == EMD_WallType::Strut) ? StrutCutGate : PartitionCutGate;
-	return ContaminationRemoved >= Gate;
+	const float SafeGate = FMath::IsFinite(Gate)
+		? FMath::Clamp(Gate, 0.0f, 100.0f)
+		: 100.0f;
+
+	return GetContaminationRemovedPercent() >= SafeGate;
+}
+
+bool AMD_CuttableWall::ResolveContaminationSurfaceGeometry()
+{
+	if (!Mesh)
+	{
+		ResolvedContaminationSurfaceSizeCm = FVector2D::ZeroVector;
+		ContaminationSurfaceCenterLocal = FVector::ZeroVector;
+		return false;
+	}
+
+	Mesh->GetLocalBounds(
+		ContaminationMeshLocalBoundsMinimum,
+		ContaminationMeshLocalBoundsMaximum);
+
+	// 피벗과 무관하게 Bounds 중심 사용
+	ContaminationSurfaceCenterLocal =
+		(ContaminationMeshLocalBoundsMinimum
+			+ ContaminationMeshLocalBoundsMaximum)
+		* 0.5f;
+
+	const bool bHasValidOverride =
+		FMath::IsFinite(ContaminationSurfaceSizeOverrideCm.X)
+		&& FMath::IsFinite(ContaminationSurfaceSizeOverrideCm.Y)
+		&& ContaminationSurfaceSizeOverrideCm.X > UE_SMALL_NUMBER
+		&& ContaminationSurfaceSizeOverrideCm.Y > UE_SMALL_NUMBER;
+
+	if (bHasValidOverride)
+	{
+		ResolvedContaminationSurfaceSizeCm =
+			ContaminationSurfaceSizeOverrideCm;
+		return true;
+	}
+
+	// 로컬 X/Z Bounds를 월드 cm로 변환
+	const FVector LocalBoundsSize =
+		ContaminationMeshLocalBoundsMaximum
+		- ContaminationMeshLocalBoundsMinimum;
+	const FVector AbsoluteComponentScale =
+		Mesh->GetComponentScale().GetAbs();
+
+	ResolvedContaminationSurfaceSizeCm = FVector2D(
+		LocalBoundsSize.X * AbsoluteComponentScale.X,
+		LocalBoundsSize.Z * AbsoluteComponentScale.Z);
+
+	return FMath::IsFinite(ResolvedContaminationSurfaceSizeCm.X)
+		&& FMath::IsFinite(ResolvedContaminationSurfaceSizeCm.Y)
+		&& ResolvedContaminationSurfaceSizeCm.X > UE_SMALL_NUMBER
+		&& ResolvedContaminationSurfaceSizeCm.Y > UE_SMALL_NUMBER;
+}
+
+void AMD_CuttableWall::InitializeContaminationSurface()
+{
+	bContaminationSurfaceInitialized = false;
+	bContaminationCompletionBroadcast = false;
+	CachedContaminationCleanRatio = 0.0f;
+	ContaminationCells.Reset();
+
+	if (!ResolveContaminationSurfaceGeometry())
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("MD_CuttableWall::InitializeContaminationSurface - %s의 오염 작업면 크기를 계산하지 못했습니다."),
+			*GetName());
+		return;
+	}
+
+	// 런타임에서도 격자 범위 보정
+	ContaminationGridDimensions.X = FMath::Clamp(
+		ContaminationGridDimensions.X,
+		1,
+		MaximumContaminationGridAxis);
+	ContaminationGridDimensions.Y = FMath::Clamp(
+		ContaminationGridDimensions.Y,
+		1,
+		MaximumContaminationGridAxis);
+
+	const int32 CellCount =
+		ContaminationGridDimensions.X * ContaminationGridDimensions.Y;
+	ContaminationCells.SetNum(CellCount);
+
+	// 잘못된 초기값은 완전 오염으로 처리
+	const float SafeInitialContamination =
+		FMath::IsFinite(InitialContaminationPerCell)
+		? FMath::Clamp(InitialContaminationPerCell, 0.0f, 1.0f)
+		: 1.0f;
+
+	for (FMD_ScrapeSurfaceCell& Cell : ContaminationCells)
+	{
+		Cell.InitialContamination = SafeInitialContamination;
+		Cell.RemainingContamination = SafeInitialContamination;
+	}
+
+	CachedContaminationCleanRatio =
+		FMD_ScrapeEvaluator::CalculateCleanRatio(ContaminationCells);
+	bContaminationSurfaceInitialized = true;
+
+	// 초기 완료 상태의 중복 방송 방지
+	bContaminationCompletionBroadcast =
+		IsContaminationFullyRemoved();
+}
+
+void AMD_CuttableWall::InitializeContaminationVisualization()
+{
+	if (!ContaminationOverlay)
+	{
+		return;
+	}
+
+	ContaminationOverlay->ClearInstances();
+	ContaminationCellBaseTransforms.Reset();
+	ContaminationOverlay->SetVisibility(false);
+
+	if (!bShowContaminationOverlay
+		|| !bContaminationSurfaceInitialized
+		|| ContaminationCells.IsEmpty())
+	{
+		return;
+	}
+
+	UStaticMesh* OverlayMesh = ContaminationOverlay->GetStaticMesh();
+	if (!OverlayMesh)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("MD_CuttableWall::InitializeContaminationVisualization - %s의 ContaminationOverlay 컴포넌트에 Static Mesh가 지정되지 않았습니다."),
+			*GetName());
+		return;
+	}
+
+	// Mesh와 Material은 Blueprint에서 지정
+	const FVector AbsoluteScale = Mesh->GetComponentScale().GetAbs();
+	const double SafeScaleX = FMath::Max(
+		static_cast<double>(AbsoluteScale.X),
+		static_cast<double>(UE_SMALL_NUMBER));
+	const double SafeScaleY = FMath::Max(
+		static_cast<double>(AbsoluteScale.Y),
+		static_cast<double>(UE_SMALL_NUMBER));
+	const double SafeScaleZ = FMath::Max(
+		static_cast<double>(AbsoluteScale.Z),
+		static_cast<double>(UE_SMALL_NUMBER));
+
+	// 월드 크기를 Overlay 로컬 단위로 변환
+	const double SurfaceWidthLocal =
+		static_cast<double>(ResolvedContaminationSurfaceSizeCm.X)
+		/ SafeScaleX;
+	const double SurfaceHeightLocal =
+		static_cast<double>(ResolvedContaminationSurfaceSizeCm.Y)
+		/ SafeScaleZ;
+	const double CellWidthLocal =
+		SurfaceWidthLocal
+		/ static_cast<double>(ContaminationGridDimensions.X);
+	const double CellHeightLocal =
+		SurfaceHeightLocal
+		/ static_cast<double>(ContaminationGridDimensions.Y);
+
+	const FVector OverlayMeshSize =
+		OverlayMesh->GetBounds().BoxExtent * 2.0f;
+	if (OverlayMeshSize.X <= UE_SMALL_NUMBER
+		|| OverlayMeshSize.Y <= UE_SMALL_NUMBER
+		|| OverlayMeshSize.Z <= UE_SMALL_NUMBER)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("MD_CuttableWall::InitializeContaminationVisualization - %s의 오염막 단위 메시 Bounds가 올바르지 않습니다."),
+			*GetName());
+		return;
+	}
+
+	const double SurfaceMinimumX =
+		static_cast<double>(ContaminationSurfaceCenterLocal.X)
+		- (SurfaceWidthLocal * 0.5);
+	const double SurfaceMinimumZ =
+		static_cast<double>(ContaminationSurfaceCenterLocal.Z)
+		- (SurfaceHeightLocal * 0.5);
+	const double ThicknessLocal =
+		static_cast<double>(ContaminationOverlayThicknessCm)
+		/ SafeScaleY;
+	const double OffsetLocal =
+		static_cast<double>(ContaminationOverlayOffsetCm)
+		/ SafeScaleY;
+	const double FrontSurfaceY =
+		static_cast<double>(ContaminationMeshLocalBoundsMaximum.Y);
+
+	ContaminationCellBaseTransforms.Reserve(ContaminationCells.Num());
+	ContaminationOverlay->PreAllocateInstancesMemory(ContaminationCells.Num());
+
+	for (int32 CellY = 0; CellY < ContaminationGridDimensions.Y; ++CellY)
+	{
+		for (int32 CellX = 0; CellX < ContaminationGridDimensions.X; ++CellX)
+		{
+			const FVector CellLocation(
+				SurfaceMinimumX
+					+ (static_cast<double>(CellX) + 0.5) * CellWidthLocal,
+				FrontSurfaceY + OffsetLocal + (ThicknessLocal * 0.5),
+				SurfaceMinimumZ
+					+ (static_cast<double>(CellY) + 0.5) * CellHeightLocal);
+			const FVector FullContaminationScale(
+				CellWidthLocal / static_cast<double>(OverlayMeshSize.X),
+				ThicknessLocal / static_cast<double>(OverlayMeshSize.Y),
+				CellHeightLocal / static_cast<double>(OverlayMeshSize.Z));
+
+			ContaminationCellBaseTransforms.Emplace(
+				FQuat::Identity,
+				CellLocation,
+				FullContaminationScale);
+
+			const int32 CellIndex =
+				CellX + (CellY * ContaminationGridDimensions.X);
+			ContaminationOverlay->AddInstance(
+				MakeContaminationCellVisualTransform(CellIndex));
+		}
+	}
+
+	ContaminationOverlay->SetVisibility(true);
+}
+
+void AMD_CuttableWall::UpdateContaminationVisualization(
+	const TArray<FMD_ScrapeCellChange>& CellChanges)
+{
+	if (!ContaminationOverlay
+		|| CellChanges.IsEmpty()
+		|| ContaminationCellBaseTransforms.Num() != ContaminationCells.Num())
+	{
+		return;
+	}
+
+	bool bUpdatedAnyInstance = false;
+	for (const FMD_ScrapeCellChange& CellChange : CellChanges)
+	{
+		if (!ContaminationCells.IsValidIndex(CellChange.CellIndex))
+		{
+			continue;
+		}
+
+		bUpdatedAnyInstance |= ContaminationOverlay->UpdateInstanceTransform(
+			CellChange.CellIndex,
+			MakeContaminationCellVisualTransform(CellChange.CellIndex),
+			false,
+			false,
+			true);
+	}
+
+	if (bUpdatedAnyInstance)
+	{
+		ContaminationOverlay->MarkRenderStateDirty();
+	}
+}
+
+FTransform AMD_CuttableWall::MakeContaminationCellVisualTransform(
+	const int32 CellIndex) const
+{
+	if (!ContaminationCellBaseTransforms.IsValidIndex(CellIndex)
+		|| !ContaminationCells.IsValidIndex(CellIndex))
+	{
+		return FTransform::Identity;
+	}
+
+	FTransform VisualTransform = ContaminationCellBaseTransforms[CellIndex];
+	const FMD_ScrapeSurfaceCell& Cell = ContaminationCells[CellIndex];
+
+	const float RemainingRatio =
+		Cell.InitialContamination > UE_SMALL_NUMBER
+		? FMath::Clamp(
+			Cell.RemainingContamination / Cell.InitialContamination,
+			0.0f,
+			1.0f)
+		: 0.0f;
+
+	if (RemainingRatio <= ScrapeSettings.CleanTolerance)
+	{
+		VisualTransform.SetScale3D(FVector::ZeroVector);
+		return VisualTransform;
+	}
+
+	// 면적 비율 유지를 위해 X/Z에 제곱근 적용
+	const float LinearScale = FMath::Sqrt(RemainingRatio);
+	FVector VisualScale = VisualTransform.GetScale3D();
+	VisualScale.X *= LinearScale;
+	VisualScale.Z *= LinearScale;
+	VisualTransform.SetScale3D(VisualScale);
+
+	return VisualTransform;
+}
+
+bool AMD_CuttableWall::TryProjectWorldPointToContaminationSurface(
+	const FVector& WorldPoint,
+	FVector2D& OutSurfacePositionCm) const
+{
+	OutSurfacePositionCm = FVector2D::ZeroVector;
+
+	if (!bContaminationSurfaceInitialized
+		|| !Mesh
+		|| WorldPoint.ContainsNaN())
+	{
+		return false;
+	}
+
+	const FVector SurfaceCenterWorld =
+		Mesh->GetComponentTransform().TransformPosition(
+			ContaminationSurfaceCenterLocal);
+	const FVector CenterToPoint = WorldPoint - SurfaceCenterWorld;
+
+	// 단위축 내적으로 월드 cm 좌표 계산
+	OutSurfacePositionCm = FVector2D(
+		FVector::DotProduct(CenterToPoint, Mesh->GetForwardVector()),
+		FVector::DotProduct(CenterToPoint, Mesh->GetUpVector()));
+
+	return FMath::IsFinite(OutSurfacePositionCm.X)
+		&& FMath::IsFinite(OutSurfacePositionCm.Y);
+}
+
+bool AMD_CuttableWall::IsHitOnContaminationFace(
+	const FHitResult& Hit) const
+{
+	if (!bContaminationSurfaceInitialized
+		|| !Mesh
+		|| !Hit.bBlockingHit
+		|| Hit.GetActor() != this
+		|| Hit.GetComponent() != Mesh.Get()
+		|| Hit.ImpactPoint.ContainsNaN()
+		|| Hit.ImpactNormal.ContainsNaN())
+	{
+		return false;
+	}
+
+	const FVector SafeImpactNormal =
+		Hit.ImpactNormal.GetSafeNormal();
+	if (SafeImpactNormal.IsNearlyZero())
+	{
+		return false;
+	}
+
+	// 로컬 +Y를 오염면 방향으로 사용
+	return FVector::DotProduct(
+			SafeImpactNormal,
+			Mesh->GetRightVector())
+		>= MinimumContaminationFaceNormalDot;
 }
 
 void AMD_CuttableWall::ScanHighlight(float Duration)

@@ -1,12 +1,18 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Demolition/Scrape/MD_ScrapeTypes.h"
 #include "Engine/TimerHandle.h"
 #include "GameFramework/Actor.h"
 #include "MD_CuttableWall.generated.h"
 
+class UInstancedStaticMeshComponent;
 class UMaterialInstanceDynamic;
 class AMD_WallPiece;
+class AMD_CuttableWall;
+
+// 오염막 완전 제거 시 한 번 발생
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnContaminationFullyRemoved, AMD_CuttableWall*,	Wall);
 
 // 격벽 타입. 칸막이 = 비내력벽(자유 철거), 지주 = 내력벽 (오절단 시 붕괴)
 UENUM(BlueprintType)
@@ -28,17 +34,9 @@ public:
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 
-protected:
-	virtual void BeginPlay() override;
-
-public:
-
 	// Cutter = 절단 버튼을 누른 캐릭터
 	UFUNCTION(BlueprintCallable, Category = "Wall")
 	void Cut(AActor* Cutter);
-
-	UFUNCTION(BlueprintCallable, Category = "Wall")
-	void AddPreprocess(float Amount);
 
 	UFUNCTION(BlueprintPure, Category = "Wall")
 	bool CanCut() const;
@@ -46,9 +44,45 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Wall")
 	void ScanHighlight(float Duration = 3.0f);
 
+	// 충돌점 사이의 오염 셀을 제거
+	UFUNCTION(BlueprintCallable, Category = "Wall|Contamination")
+	FMD_ScrapeResult ApplyScrapeStrokeFromHits(
+		const FHitResult& StartHit,
+		const FHitResult& EndHit);
+
+	// 로컬 좌표의 긁기 경로를 적용
+	UFUNCTION(BlueprintCallable, Category = "Wall|Contamination")
+	FMD_ScrapeResult ApplyLocalScrapeStroke(const FMD_ScrapeStroke& Stroke);
+
+	// 전체 오염 제거 비율(0~1)
+	UFUNCTION(BlueprintPure, Category = "Wall|Contamination")
+	float GetContaminationCleanRatio() const;
+
+	// 전체 오염 제거율(0~100)
+	UFUNCTION(BlueprintPure, Category = "Wall|Contamination")
+	float GetContaminationRemovedPercent() const;
+
+	// 남은 오염 비율(0~1)
+	UFUNCTION(BlueprintPure, Category = "Wall|Contamination")
+	float GetResidualContaminationRatio() const;
+
+	// 오염 완전 제거 여부
+	UFUNCTION(BlueprintPure, Category = "Wall|Contamination")
+	bool IsContaminationFullyRemoved() const;
+
+	// 최초 완전 제거 시 한 번 방송
+	UPROPERTY(BlueprintAssignable, Category = "Wall|Contamination")
+	FMD_OnContaminationFullyRemoved OnContaminationFullyRemoved;
+
 protected:
+	virtual void BeginPlay() override;
+
 	UPROPERTY(VisibleAnywhere, Category = "Wall")
 	TObjectPtr<UStaticMeshComponent> Mesh;
+
+	// 셀 단위 오염막
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual")
+	TObjectPtr<UInstancedStaticMeshComponent> ContaminationOverlay;
 
 	UPROPERTY(EditAnywhere, Category = "Wall")
 	EMD_WallType WallType = EMD_WallType::Partition;
@@ -61,26 +95,114 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Wall")
 	int32 PieceCount = 10;
 
-	UPROPERTY(EditAnywhere, Category = "Wall")
+	/** 절단 시 생성할 벽 조각 Blueprint 클래스. Class Defaults에서 반드시 지정한다. */
+	UPROPERTY(EditDefaultsOnly, Category = "Wall")
 	TSubclassOf<AMD_WallPiece> PieceClass;
 
 	// 스캔 하이라이트 / 원복에 재사용할 다이내믹 머티리얼
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> MID;
 
-	// 오염막 제거율 0 ~ 100
-	UPROPERTY(EditAnywhere, Category="Preprocess", meta=(ClampMin = "0", ClampMax = "100"))
-	float ContaminationRemoved = 0.0f;
+	// 오염 격자 크기
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination",
+		meta = (UIMin = "1", UIMax = "128"))
+	FIntPoint ContaminationGridDimensions;
+
+	// 셀의 초기 오염량(0~1)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float InitialContaminationPerCell;
+
+	// 작업면 크기(cm, 0이면 자동)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination",
+		meta = (ClampMin = "0.0", Units = "cm"))
+	FVector2D ContaminationSurfaceSizeOverrideCm;
+
+	// 헤라 판정 설정
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination")
+	FMD_ScrapeSettings ScrapeSettings;
+
+	// 벽면과 오염막 사이 거리(cm)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual",
+		meta = (ClampMin = "0.0", Units = "cm"))
+	float ContaminationOverlayOffsetCm;
+
+	// 오염막 두께(cm)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual",
+		meta = (ClampMin = "0.01", Units = "cm"))
+	float ContaminationOverlayThicknessCm;
+
+	// 오염막 표시 여부
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual")
+	bool bShowContaminationOverlay;
 
 	// 절단 허용 게이트. 회의 결정으로 기본 0(잠금 없음) — 정책이 바뀌면 에디터에서 수치만 올리면 됨
-	UPROPERTY(EditAnywhere, Category="Preprocess", meta=(ClampMin = "0", ClampMax = "100"))
+	UPROPERTY(EditAnywhere, Category = "Wall|Contamination|Cut",
+		meta = (ClampMin = "0", ClampMax = "100"))
 	float PartitionCutGate = 0.0f;
 
-	UPROPERTY(EditAnywhere, Category="Preprocess", meta=(ClampMin = "0", ClampMax = "100"))
+	UPROPERTY(EditAnywhere, Category = "Wall|Contamination|Cut",
+		meta = (ClampMin = "0", ClampMax = "100"))
 	float StrutCutGate = 0.0f;
 
+private:
+	// 격자 한 축의 최대 셀 수
+	static constexpr int32 MaximumContaminationGridAxis = 256;
+
+	// 작업면 판정 최소 내적값
+	static constexpr float MinimumContaminationFaceNormalDot = 0.5f;
+
+	// 셀별 오염 상태
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+	TArray<FMD_ScrapeSurfaceCell> ContaminationCells;
+
+	// 계산된 작업면 크기(cm)
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+	FVector2D ResolvedContaminationSurfaceSizeCm;
+
+	// 작업면 로컬 중심
+	FVector ContaminationSurfaceCenterLocal;
+
+	// 오염 메시 로컬 Bounds
+	FVector ContaminationMeshLocalBoundsMinimum;
+	FVector ContaminationMeshLocalBoundsMaximum;
+
+	// 제거 비율 캐시
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+	float CachedContaminationCleanRatio;
+
+	// 오염 표면 초기화 여부
+	bool bContaminationSurfaceInitialized;
+
+	// 완료 이벤트 중복 방지
+	bool bContaminationCompletionBroadcast;
+
 	bool bCut = false;
-	
+
+	// 셀 인스턴스 기준 Transform
+	TArray<FTransform> ContaminationCellBaseTransforms;
+
+	// 작업면 위치와 크기 계산
+	bool ResolveContaminationSurfaceGeometry();
+
+	// 오염 셀 초기화
+	void InitializeContaminationSurface();
+
+	// 오염막 인스턴스 생성
+	void InitializeContaminationVisualization();
+
+	// 변경된 셀 시각화 갱신
+	void UpdateContaminationVisualization(const TArray<FMD_ScrapeCellChange>& CellChanges);
+
+	// 셀 오염량을 시각 Transform으로 변환
+	FTransform MakeContaminationCellVisualTransform(int32 CellIndex) const;
+
+	// 월드 위치를 작업면 좌표로 변환
+	bool TryProjectWorldPointToContaminationSurface(const FVector& WorldPoint, FVector2D& OutSurfacePositionCm) const;
+
+	// 충돌점이 오염 작업면인지 확인
+	bool IsHitOnContaminationFace(const FHitResult& Hit) const;
+
 	// 하이라이트 원복
 	void RestoreScanColor();
 

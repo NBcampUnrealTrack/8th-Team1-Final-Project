@@ -5,16 +5,27 @@
 #include "Player/MD_PlayerState.h"
 #include "Input/MD_InputConfig.h"
 #include "Component/MD_CharacterMovementComponent.h"
+#include "Demolition/Scrape/MD_ScrapeToolComponent.h"
+#include "Component/MD_EquipHotbarComponent.h"
+#include "Equipment/MD_ToolDefinition.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
+#include "Components/PrimitiveComponent.h"
+#include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Collision/MD_CollisionChannels.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameplayTags/MD_GameplayTags.h"
+#include "GameplayTagAssetInterface.h"
+#include "Hotbar/MD_HotbarComponent.h"
+#include "Interaction/MD_Interactable.h"
+#include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayTagContainer.h"
 
@@ -23,7 +34,7 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UMD_CharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
  	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -46,6 +57,35 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	FirstPersonMesh->SetOnlyOwnerSee(true);
 	FirstPersonMesh->SetOwnerNoSee(false);
 	FirstPersonMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	ScrapeToolComponent = CreateDefaultSubobject<UMD_ScrapeToolComponent>(TEXT("ScrapeToolComponent"));
+
+	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
+
+	FirstPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FirstPersonToolMesh"));
+	FirstPersonToolMesh->SetupAttachment(FirstPersonMesh, ToolAttachSocketName);
+	FirstPersonToolMesh->SetOnlyOwnerSee(true);
+	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonToolMesh->CastShadow = false;
+
+	ThirdPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ThirdPersonToolMesh"));
+	ThirdPersonToolMesh->SetupAttachment(GetMesh(), ToolAttachSocketName);
+	ThirdPersonToolMesh->SetOwnerNoSee(true);
+	ThirdPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	HoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HoldPoint"));
+	HoldPoint->SetupAttachment(Camera);
+	HoldPoint->SetRelativeLocation(FVector(150.f, 0.f, 0.f));
+
+	PhysicsHandle = CreateDefaultSubobject<UPhysicsHandleComponent>(TEXT("PhysicsHandle"));
+}
+
+void AMD_Character::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	UpdateInteractionFocus();
+	UpdateHeldTarget();
+	UpdateHotbarDebug();
 }
 
 void AMD_Character::ForceEnterWalkState()
@@ -57,7 +97,7 @@ void AMD_Character::ForceEnterWalkState()
 UAbilitySystemComponent* AMD_Character::GetAbilitySystemComponent() const
 {
 	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
-	
+
 	if (!IsValid(MDPlayerState))
 	{
 		return nullptr;
@@ -88,6 +128,19 @@ void AMD_Character::BeginPlay()
 		}
 	}
 
+	if (IsValid(EquipHotbarComponent))
+	{
+		EquipHotbarComponent->OnHotbarChanged.AddDynamic(this, &AMD_Character::HandleHotbarChanged);
+		RefreshToolMesh();
+	}
+}
+
+void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	SetCurrentTarget(nullptr);
+	ReleaseTarget();
+
+	Super::EndPlay(EndPlayReason);
 }
 
 void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -114,15 +167,14 @@ void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 
 
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
 	{
-		static const FGameplayTag SwimmingStateTag = FGameplayTag::RequestGameplayTag(FName("State.Swimming"));
 
 		if (NewState == EMDMovementState::Swimming)
 		{
-			ASC->AddLooseGameplayTag(SwimmingStateTag);
+			ASC->AddLooseGameplayTag(MDGameplayTags::State_Swimming);
 		}
 		else
 		{
-			ASC->RemoveLooseGameplayTag(SwimmingStateTag);
+			ASC->RemoveLooseGameplayTag(MDGameplayTags::State_Swimming);
 		}
 	}
 }
@@ -159,9 +211,11 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Completed, this, &AMD_Character::HandleJumpOrSwimReleasedInput);
 		EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Started, this, &AMD_Character::HandleInteractInput);
 		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Started, this, &AMD_Character::HandleAbilityInput);
+		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAbilityReleasedInput);
+		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAbilityReleasedInput);
 		EIC->BindAction(InputConfig->SwapEquipmentAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleSwapEquipmentInput);
-		EIC->BindAction(InputConfig->WallCutAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallCutInput);
-		EIC->BindAction(InputConfig->WallScanAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallScanInput);
+		//EIC->BindAction(InputConfig->WallCutAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallCutInput);
+		//EIC->BindAction(InputConfig->WallScanAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallScanInput);
 	}
 
 }
@@ -194,44 +248,212 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 {
-	if (!Controller)
+	AActor* Target = CurrentTarget.Get();
+
+	// 픽업 태그가 없는 대상(이동 콘솔 등 로컬 UI 상호작용)은 서버를 거치지 않고 로컬에서 실행
+	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
 	{
+		const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(Target);
+		const bool bPickupTarget = TagAsset
+			&& (TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Inventory)
+				|| TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics));
+
+		if (!bPickupTarget)
+		{
+			IMD_Interactable::Execute_Interact(Target, this);
+			return;
+		}
+	}
+
+	ServerInteract(Target);
+}
+
+void AMD_Character::ServerInteract_Implementation(AActor* RequestedActor)
+{
+	if (IsHolding())
+	{
+		ReleaseTarget();
 		return;
 	}
 
-	//라인트레이스 시작위치
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	if (!IsValid(RequestedActor)
+		|| !RequestedActor->Implements<UMD_Interactable>()
+		|| TraceInteractionTarget() != RequestedActor) return;
 
-	const FVector TraceEnd = ViewLocation + ViewRotation.Vector() * InteractTraceDistance;
-
-	//히트판정
-	FHitResult Hit;
-	FCollisionQueryParams Params;
-	Params.AddIgnoredActor(this);
-
-	if (GetWorld()->LineTraceSingleByChannel(Hit, ViewLocation, TraceEnd, ECC_Visibility, Params))
+	const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(RequestedActor);
+	if (TagAsset
+		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Inventory))
 	{
-		if (AActor* HitActor = Hit.GetActor())
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Green, FString::Printf(TEXT("Interact Hit: %s"), *HitActor->GetName()));
-		}
-		else
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("Interact: No Target"));
-		}
+		TryStoreTarget(RequestedActor);
+		return;
+	}
+
+	if (TagAsset
+		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics))
+	{
+		TryHoldTarget(RequestedActor);
+		return;
+	}
+
+	IMD_Interactable::Execute_Interact(RequestedActor, this);
+}
+
+bool AMD_Character::TryStoreTarget(AActor* Target)
+{
+	if (!IsValid(Target)) return false;
+
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (!IsValid(MDPlayerState)) return false;
+
+	UMD_HotbarComponent* Hotbar = MDPlayerState->GetHotbarComponent();
+	if (!IsValid(Hotbar)) return false;
+
+	const TSubclassOf<AActor> ItemClass = Target->GetClass();
+	int32 SlotIndex = INDEX_NONE;
+	if (!Hotbar->TryAddItem(ItemClass, SlotIndex)) return false;
+
+	if (!Target->Destroy())
+	{
+		Hotbar->TryRemoveItemAt(SlotIndex);
+		return false;
+	}
+
+	return true;
+}
+
+bool AMD_Character::TryHoldTarget(AActor* Target)
+{
+	if (!HasAuthority() || !IsValid(Target) || !IsValid(PhysicsHandle)) return false;
+
+	UPrimitiveComponent* Component = Cast<UPrimitiveComponent>(Target->GetRootComponent());
+	if (!IsValid(Component) || !Component->IsSimulatingPhysics()) return false;
+
+	PhysicsHandle->GrabComponentAtLocationWithRotation(
+		Component,
+		NAME_None,
+		Component->GetCenterOfMass(),
+		Component->GetComponentRotation());
+
+	UpdateHeldTarget();
+	return PhysicsHandle->GetGrabbedComponent() == Component;
+}
+
+bool AMD_Character::IsHolding() const
+{
+	return IsValid(PhysicsHandle) && IsValid(PhysicsHandle->GetGrabbedComponent());
+}
+
+void AMD_Character::ReleaseTarget()
+{
+	if (!IsValid(PhysicsHandle) || !PhysicsHandle->GetGrabbedComponent()) return;
+
+	PhysicsHandle->ReleaseComponent();
+}
+
+void AMD_Character::UpdateHeldTarget()
+{
+	if (!HasAuthority() || !IsHolding() || !IsValid(HoldPoint)) return;
+
+	PhysicsHandle->SetTargetLocationAndRotation(
+		HoldPoint->GetComponentLocation(),
+		HoldPoint->GetComponentRotation());
+}
+
+void AMD_Character::UpdateHotbarDebug() const
+{
+	if (!IsLocallyControlled() || !GEngine) return;
+
+	const AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (!IsValid(MDPlayerState)) return;
+
+	const UMD_HotbarComponent* Hotbar = MDPlayerState->GetHotbarComponent();
+	if (!IsValid(Hotbar)) return;
+
+	constexpr uint64 HotbarKeyBase = 0x4D440000;
+	for (int32 SlotIndex = 0; SlotIndex < Hotbar->GetMaxSlots(); ++SlotIndex)
+	{
+		const TSubclassOf<AActor> ItemClass = Hotbar->GetItemClassAt(SlotIndex);
+		const FString ItemName = ItemClass ? ItemClass->GetName() : TEXT("비어 있음");
+
+		GEngine->AddOnScreenDebugMessage(
+			HotbarKeyBase + SlotIndex,
+			0.f,
+			FColor::Cyan,
+			FString::Printf(
+				TEXT("핫바 %d : %s"),
+				SlotIndex + 1,
+				*ItemName));
 	}
 }
 
 void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 {
-	//GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("Ability: Activated"));
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return;
+	}
+
+	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+	if (!IsValid(CurrentTool) || !CurrentTool->ToolAbilityTag.IsValid())
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("No tool equipped"));
+		return;
+	}
+
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	FGameplayTagContainer AbilityTags;
+	AbilityTags.AddTag(CurrentTool->ToolAbilityTag);
+	ASC->TryActivateAbilitiesByTag(AbilityTags);
+}
+
+void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
+{
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return;
+	}
+
+	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+	if (!IsValid(CurrentTool) || !CurrentTool->ToolAbilityTag.IsValid())
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	FGameplayTagContainer AbilityTags;
+	AbilityTags.AddTag(CurrentTool->ToolAbilityTag);
+	ASC->CancelAbilities(&AbilityTags);
 }
 
 void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
 {
 	//GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("SwapEquipment: Activated"));
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return;
+	}
+
+	const float ScrollValue = Value.Get<float>();
+
+	UE_LOG(LogTemp, Log, TEXT("[SwapEquipment] ScrollValue: %.2f"), ScrollValue);
+
+	if (FMath::IsNearlyZero(ScrollValue))
+	{
+		return;
+	}
+
+	EquipHotbarComponent->CycleSlot(ScrollValue > 0.f ? 1 : -1);
+	UE_LOG(LogTemp, Log, TEXT("[SwapEquipment] Direction: %s"), ScrollValue > 0.f ? TEXT("Next") : TEXT("Prev"));
 }
 
 void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
@@ -242,7 +464,7 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 		return;
 	}
 
-	if (MDMovement->IsMovingOnGround())
+	if (MDMovement->IsMovingOnGround() && MDMovement->IsInWater())
 	{
 		MDMovement->EnterSwimmingFromGround();
 		return;
@@ -256,7 +478,7 @@ void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value
 	StopJumping();
 }
 
-void AMD_Character::HandleWallCutInput(const FInputActionValue& Value)
+/*void AMD_Character::HandleWallCutInput(const FInputActionValue& Value)
 {
 	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
 	if (!IsValid(ASC))
@@ -270,9 +492,9 @@ void AMD_Character::HandleWallCutInput(const FInputActionValue& Value)
 	}
 
 	ASC->TryActivateAbilityByClass(WallCutAbilityClass);
-}
+} */
 
-void AMD_Character::HandleWallScanInput(const FInputActionValue& Value)
+/*void AMD_Character::HandleWallScanInput(const FInputActionValue& Value)
 {
 	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
 	if (!IsValid(ASC))
@@ -286,6 +508,56 @@ void AMD_Character::HandleWallScanInput(const FInputActionValue& Value)
 	}
 
 	ASC->TryActivateAbilityByClass(WallScanAbilityClass);
+}*/
+
+void AMD_Character::UpdateInteractionFocus()
+{
+	if (!IsLocallyControlled() || !Controller || !GetWorld())
+	{
+		SetCurrentTarget(nullptr);
+		return;
+	}
+
+	SetCurrentTarget(TraceInteractionTarget());
+}
+
+AActor* AMD_Character::TraceInteractionTarget() const
+{
+	if (!Controller || !GetWorld()) return nullptr;
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	const FVector TraceEnd = ViewLocation + ViewRotation.Vector() * InteractTraceDistance;
+
+	FHitResult Hit;
+	FCollisionQueryParams QueryParams;
+	QueryParams.AddIgnoredActor(this);
+
+	if (!GetWorld()->LineTraceSingleByChannel(
+		Hit,
+		ViewLocation,
+		TraceEnd,
+		MDCollisionChannels::InteractTrace,
+		QueryParams)) return nullptr;
+
+	AActor* HitActor = Hit.GetActor();
+	return IsValid(HitActor) && HitActor->Implements<UMD_Interactable>() ? HitActor : nullptr;
+}
+
+void AMD_Character::SetCurrentTarget(AActor* NewTarget)
+{
+	if (CurrentTarget.Get() == NewTarget) return;
+
+	if (AActor* PreviousTarget = CurrentTarget.Get())
+	{
+		if (PreviousTarget->Implements<UMD_Interactable>()) IMD_Interactable::Execute_SetInteractionHighlighted(PreviousTarget, false);
+	}
+
+	CurrentTarget = NewTarget;
+
+	if (IsValid(NewTarget) && NewTarget->Implements<UMD_Interactable>()) IMD_Interactable::Execute_SetInteractionHighlighted(NewTarget, true);
 }
 
 void AMD_Character::InitializeAbilitySystem()
@@ -315,4 +587,32 @@ void AMD_Character::GrantDefaultAbilities()
 			ASC->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1, INDEX_NONE, this));
 		}
 	}
+}
+
+void AMD_Character::HandleHotbarChanged()
+{
+	RefreshToolMesh();
+
+	if (IsValid(EquipHotbarComponent))
+	{
+		UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+		UE_LOG(LogTemp, Log, TEXT("[Hotbar] Slot %d/%d, Tool: %s"),
+			EquipHotbarComponent->GetCurrentSlotIndex(),
+			EquipHotbarComponent->GetSlotCount(),
+			IsValid(CurrentTool) ? *CurrentTool->ToolName.ToString() : TEXT("Empty"));
+	}
+}
+
+void AMD_Character::RefreshToolMesh()
+{
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return;
+	}
+
+	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+	UStaticMesh* NewMesh = IsValid(CurrentTool) ? CurrentTool->ToolMesh : nullptr;
+
+	FirstPersonToolMesh->SetStaticMesh(NewMesh);
+	ThirdPersonToolMesh->SetStaticMesh(NewMesh);
 }
