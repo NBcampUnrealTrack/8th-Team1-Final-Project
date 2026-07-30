@@ -6,6 +6,8 @@
 #include "Input/MD_InputConfig.h"
 #include "Component/MD_CharacterMovementComponent.h"
 #include "Demolition/Scrape/MD_ScrapeToolComponent.h"
+#include "Component/MD_EquipHotbarComponent.h"
+#include "Equipment/MD_ToolDefinition.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
@@ -58,6 +60,18 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 
 	ScrapeToolComponent = CreateDefaultSubobject<UMD_ScrapeToolComponent>(TEXT("ScrapeToolComponent"));
 
+	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
+
+	FirstPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FirstPersonToolMesh"));
+	FirstPersonToolMesh->SetupAttachment(FirstPersonMesh, ToolAttachSocketName);
+	FirstPersonToolMesh->SetOnlyOwnerSee(true);
+	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonToolMesh->CastShadow = false;
+
+	ThirdPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ThirdPersonToolMesh"));
+	ThirdPersonToolMesh->SetupAttachment(GetMesh(), ToolAttachSocketName);
+	ThirdPersonToolMesh->SetOwnerNoSee(true);
+	ThirdPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	HoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HoldPoint"));
 	HoldPoint->SetupAttachment(Camera);
 	HoldPoint->SetRelativeLocation(FVector(150.f, 0.f, 0.f));
@@ -114,6 +128,11 @@ void AMD_Character::BeginPlay()
 		}
 	}
 
+	if (IsValid(EquipHotbarComponent))
+	{
+		EquipHotbarComponent->OnHotbarChanged.AddDynamic(this, &AMD_Character::HandleHotbarChanged);
+		RefreshToolMesh();
+	}
 }
 
 void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -148,15 +167,14 @@ void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 
 
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
 	{
-		static const FGameplayTag SwimmingStateTag = FGameplayTag::RequestGameplayTag(FName("State.Swimming"));
 
 		if (NewState == EMDMovementState::Swimming)
 		{
-			ASC->AddLooseGameplayTag(SwimmingStateTag);
+			ASC->AddLooseGameplayTag(MDGameplayTags::State_Swimming);
 		}
 		else
 		{
-			ASC->RemoveLooseGameplayTag(SwimmingStateTag);
+			ASC->RemoveLooseGameplayTag(MDGameplayTags::State_Swimming);
 		}
 	}
 }
@@ -196,8 +214,8 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAbilityReleasedInput);
 		EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAbilityReleasedInput);
 		EIC->BindAction(InputConfig->SwapEquipmentAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleSwapEquipmentInput);
-		EIC->BindAction(InputConfig->WallCutAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallCutInput);
-		EIC->BindAction(InputConfig->WallScanAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallScanInput);
+		//EIC->BindAction(InputConfig->WallCutAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallCutInput);
+		//EIC->BindAction(InputConfig->WallScanAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallScanInput);
 	}
 
 }
@@ -370,6 +388,18 @@ void AMD_Character::UpdateHotbarDebug() const
 
 void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 {
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return;
+	}
+
+	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+	if (!IsValid(CurrentTool) || !CurrentTool->ToolAbilityTag.IsValid())
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("No tool equipped"));
+		return;
+	}
+
 	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
 	if (!IsValid(ASC))
 	{
@@ -377,12 +407,23 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 	}
 
 	FGameplayTagContainer AbilityTags;
-	AbilityTags.AddTag(MDGameplayTags::Ability_Scrape);
+	AbilityTags.AddTag(CurrentTool->ToolAbilityTag);
 	ASC->TryActivateAbilitiesByTag(AbilityTags);
 }
 
 void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 {
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return;
+	}
+
+	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+	if (!IsValid(CurrentTool) || !CurrentTool->ToolAbilityTag.IsValid())
+	{
+		return;
+	}
+
 	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
 	if (!IsValid(ASC))
 	{
@@ -390,13 +431,29 @@ void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 	}
 
 	FGameplayTagContainer AbilityTags;
-	AbilityTags.AddTag(MDGameplayTags::Ability_Scrape);
+	AbilityTags.AddTag(CurrentTool->ToolAbilityTag);
 	ASC->CancelAbilities(&AbilityTags);
 }
 
 void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
 {
 	//GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("SwapEquipment: Activated"));
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return;
+	}
+
+	const float ScrollValue = Value.Get<float>();
+
+	UE_LOG(LogTemp, Log, TEXT("[SwapEquipment] ScrollValue: %.2f"), ScrollValue);
+
+	if (FMath::IsNearlyZero(ScrollValue))
+	{
+		return;
+	}
+
+	EquipHotbarComponent->CycleSlot(ScrollValue > 0.f ? 1 : -1);
+	UE_LOG(LogTemp, Log, TEXT("[SwapEquipment] Direction: %s"), ScrollValue > 0.f ? TEXT("Next") : TEXT("Prev"));
 }
 
 void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
@@ -407,7 +464,7 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 		return;
 	}
 
-	if (MDMovement->IsMovingOnGround())
+	if (MDMovement->IsMovingOnGround() && MDMovement->IsInWater())
 	{
 		MDMovement->EnterSwimmingFromGround();
 		return;
@@ -421,7 +478,7 @@ void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value
 	StopJumping();
 }
 
-void AMD_Character::HandleWallCutInput(const FInputActionValue& Value)
+/*void AMD_Character::HandleWallCutInput(const FInputActionValue& Value)
 {
 	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
 	if (!IsValid(ASC))
@@ -435,9 +492,9 @@ void AMD_Character::HandleWallCutInput(const FInputActionValue& Value)
 	}
 
 	ASC->TryActivateAbilityByClass(WallCutAbilityClass);
-}
+} */
 
-void AMD_Character::HandleWallScanInput(const FInputActionValue& Value)
+/*void AMD_Character::HandleWallScanInput(const FInputActionValue& Value)
 {
 	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
 	if (!IsValid(ASC))
@@ -451,7 +508,7 @@ void AMD_Character::HandleWallScanInput(const FInputActionValue& Value)
 	}
 
 	ASC->TryActivateAbilityByClass(WallScanAbilityClass);
-}
+}*/
 
 void AMD_Character::UpdateInteractionFocus()
 {
@@ -530,4 +587,32 @@ void AMD_Character::GrantDefaultAbilities()
 			ASC->GiveAbility(FGameplayAbilitySpec(AbilityClass, 1, INDEX_NONE, this));
 		}
 	}
+}
+
+void AMD_Character::HandleHotbarChanged()
+{
+	RefreshToolMesh();
+
+	if (IsValid(EquipHotbarComponent))
+	{
+		UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+		UE_LOG(LogTemp, Log, TEXT("[Hotbar] Slot %d/%d, Tool: %s"),
+			EquipHotbarComponent->GetCurrentSlotIndex(),
+			EquipHotbarComponent->GetSlotCount(),
+			IsValid(CurrentTool) ? *CurrentTool->ToolName.ToString() : TEXT("Empty"));
+	}
+}
+
+void AMD_Character::RefreshToolMesh()
+{
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return;
+	}
+
+	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+	UStaticMesh* NewMesh = IsValid(CurrentTool) ? CurrentTool->ToolMesh : nullptr;
+
+	FirstPersonToolMesh->SetStaticMesh(NewMesh);
+	ThirdPersonToolMesh->SetStaticMesh(NewMesh);
 }
