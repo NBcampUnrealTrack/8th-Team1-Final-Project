@@ -248,7 +248,24 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 {
-	ServerInteract(CurrentTarget.Get());
+	AActor* Target = CurrentTarget.Get();
+
+	// 픽업 태그가 없는 대상(이동 콘솔 등 로컬 UI 상호작용)은 서버를 거치지 않고 로컬에서 실행
+	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
+	{
+		const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(Target);
+		const bool bPickupTarget = TagAsset
+			&& (TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Inventory)
+				|| TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics));
+
+		if (!bPickupTarget)
+		{
+			IMD_Interactable::Execute_Interact(Target, this);
+			return;
+		}
+	}
+
+	ServerInteract(Target);
 }
 
 void AMD_Character::ServerInteract_Implementation(AActor* RequestedActor)
