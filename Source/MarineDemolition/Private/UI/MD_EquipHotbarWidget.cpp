@@ -9,6 +9,17 @@ void UMD_EquipHotbarWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
+	AMD_Character* OwningCharacter = Cast<AMD_Character>(GetOwningPlayerPawn());
+	if (!IsValid(OwningCharacter))
+	{
+		return;
+	}
+
+	BoundHotbar = OwningCharacter->GetHotbarComponent();
+	
+	BoundHotbar->OnHotbarChanged.AddDynamic(this, &UMD_EquipHotbarWidget::HandleHotbarChanged);
+	HandleHotbarChanged();
+
 }
 
 void UMD_EquipHotbarWidget::NativeDestruct()
@@ -27,7 +38,7 @@ void UMD_EquipHotbarWidget::HandleHotbarChanged()
 	OnHotbarRefreshed();
 }
 
-int32 UMD_EquipHotbarWidget::GetDSlotCount() const
+int32 UMD_EquipHotbarWidget::GetSlotCount() const
 {
 	return IsValid(BoundHotbar) ? BoundHotbar->GetSlotCount() : 0;
 }

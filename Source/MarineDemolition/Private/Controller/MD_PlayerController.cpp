@@ -3,6 +3,7 @@
 
 #include "Controller/MD_PlayerController.h"
 #include "UI/MD_HUDWidget.h"
+#include "UI/MD_EquipHotbarWidget.h"
 
 void AMD_PlayerController::BeginPlay()
 {
@@ -31,4 +32,18 @@ void AMD_PlayerController::BeginPlay()
 	}
 
 	HUDWidgetInstance->AddToViewport();
+
+	if (!EquipHotbarWidgetClass || IsValid(EquipHotbarWidgetInstance))
+	{
+		return;
+	}
+
+	EquipHotbarWidgetInstance = CreateWidget<UMD_EquipHotbarWidget>(this, EquipHotbarWidgetClass);
+
+	if (!IsValid(EquipHotbarWidgetInstance))
+	{
+		return;
+	}
+
+	EquipHotbarWidgetInstance->AddToViewport();
 }

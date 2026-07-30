@@ -9,7 +9,7 @@
 class UMD_EquipHotbarComponent;
 class UMD_ToolDefinition;
 
-UCLASS()
+UCLASS(BlueprintType)
 class MARINEDEMOLITION_API UMD_EquipHotbarWidget : public UUserWidget
 {
 	GENERATED_BODY()
@@ -23,7 +23,7 @@ public:
 	void OnHotbarRefreshed();
 
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
-	int32 GetDSlotCount() const;
+	int32 GetSlotCount() const;
 
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
 	int32 GetCurrentSlotIndex() const;
