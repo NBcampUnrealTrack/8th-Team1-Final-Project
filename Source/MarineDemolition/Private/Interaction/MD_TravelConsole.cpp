@@ -48,15 +48,22 @@ void AMD_TravelConsole::Interact_Implementation(AActor* Interactor)
 	{
 		return;
 	}
-	
+
+	// 이미 열려 있으면 중복 생성하지 않음
+	if (ActiveWidget.IsValid() && ActiveWidget->IsInViewport())
+	{
+		return;
+	}
+
 	UMD_TravelConsoleWidget* Widget = CreateWidget<UMD_TravelConsoleWidget>(PC, ConsoleWidgetClass);
 	if (!IsValid(Widget))
 	{
 		return;
 	}
-	
+
 	Widget->SetOwningConsole(this);
 	Widget->AddToViewport();
+	ActiveWidget = Widget;
 
 	PC->SetShowMouseCursor(true);
 	PC->SetInputMode(FInputModeGameAndUI());

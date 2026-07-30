@@ -32,4 +32,7 @@ protected:
 	
 	UPROPERTY(EditDefaultsOnly, Category="Console")
 	TSubclassOf<UMD_TravelConsoleWidget> ConsoleWidgetClass;
+
+	// 열려 있는 위젯 (중복 생성 방지용)
+	TWeakObjectPtr<UMD_TravelConsoleWidget> ActiveWidget;
 };

@@ -14,6 +14,13 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 		return;
 	}
 
+	// 콘솔 근처에 있는 플레이어의 요청만 수행 (임의 호출 방지)
+	APawn* MyPawn = GetPawn();
+	if (!IsValid(MyPawn) || FVector::Dist(MyPawn->GetActorLocation(), Console->GetActorLocation()) > 500.f)
+	{
+		return;
+	}
+
 	const FString MapPackage = Console->GetTargetLevel().ToSoftObjectPath().GetLongPackageName();
 
 	if (MapPackage.IsEmpty())

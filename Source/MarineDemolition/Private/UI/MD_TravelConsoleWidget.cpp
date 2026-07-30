@@ -20,6 +20,18 @@ void UMD_TravelConsoleWidget::NativeConstruct()
 	}
 }
 
+void UMD_TravelConsoleWidget::NativeDestruct()
+{
+	// 트래블 등 어떤 경로로 닫혀도 커서/입력 모드 복구
+	if (APlayerController* PC = GetOwningPlayer())
+	{
+		PC->SetShowMouseCursor(false);
+		PC->SetInputMode(FInputModeGameOnly());
+	}
+
+	Super::NativeDestruct();
+}
+
 void UMD_TravelConsoleWidget::HandleDepartClicked()
 {
 	AMD_PlayerController* PC = Cast<AMD_PlayerController>(GetOwningPlayer());
@@ -39,11 +51,6 @@ void UMD_TravelConsoleWidget::HandleCloseClicked()
 
 void UMD_TravelConsoleWidget::CloseWidget()
 {
-	if (APlayerController* PC = GetOwningPlayer())
-	{
-		PC->SetShowMouseCursor(false);
-		PC->SetInputMode(FInputModeGameOnly());
-	}
-
+	// 입력 모드 복구는 NativeDestruct에서 처리
 	RemoveFromParent();
 }
