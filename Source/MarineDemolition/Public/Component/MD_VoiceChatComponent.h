@@ -6,6 +6,8 @@
 #include "Components/ActorComponent.h"
 #include "MD_VoiceChatComponent.generated.h"
 
+class APlayerState;
+
 /**
  * Owns the local PlayerController's network voice transmission state.
  * This component is intentionally not replicated because microphone preferences are local.
@@ -40,14 +42,14 @@ protected:
 	TWeakObjectPtr<APlayerController> OwnerPlayerController;
 
 public:
-	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
+	UFUNCTION(BlueprintPure, Category = "Voice Chat")
 	FORCEINLINE bool IsPushToTalkEnabled() const { return bUsePushToTalk; }
 
-	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
+	UFUNCTION(BlueprintPure, Category = "Voice Chat")
 	FORCEINLINE bool GetMicrophoneIsActive() const { return bIsMicrophonActive; }
 
-	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
-	FORCEINLINE bool IsVoiceActivated() const { return (IsActive() && (bUsePushToTalk == false || bIsMicrophonActive == true)); }
+	UFUNCTION(BlueprintPure, Category = "Voice Chat")
+	FORCEINLINE bool IsVoiceActivated() const { return IsActive() && bIsMicrophonActive; }
 
 	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
 	void SetPushToTalk(const bool bNewUsePushToTalk);
@@ -58,5 +60,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
 	void StopTalking();
 
+	// 임의 Romote Player의 음성을 Mute/UnMute 하도록 요청하는 함수
+	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
+	bool MuteRemotePlayer(APlayerState* TargetPlayerState, bool bNewMute);
+
+	// 임의 Remote Player의 음성이 Mute 처리 되었는지를 반환하는 함수
+	UFUNCTION(BlueprintPure, Category = "Voice Chat")
+	bool IsRemotePlayerMuted(APlayerState* TargetPlayerState) const;
+
 protected:
+	bool CanModifyRemotePlayerMute(APlayerState* TargetPlayerState) const;
 };
