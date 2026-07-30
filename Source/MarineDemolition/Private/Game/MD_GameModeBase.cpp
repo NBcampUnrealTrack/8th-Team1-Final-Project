@@ -4,6 +4,14 @@
 #include "Game/MD_GameModeBase.h"
 #include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
+#include "Player/MD_PlayerState.h"
+
+AMD_GameModeBase::AMD_GameModeBase()
+{
+    PlayerStateClass = AMD_PlayerState::StaticClass();
+
+    bUseSeamlessTravel = true;
+}
 
 void AMD_GameModeBase::BeginPlay()
 {
@@ -61,8 +69,37 @@ void AMD_GameModeBase::CheckGameTimeEvents()
             EMD_WithdrawalPhase::Departed
         );
 
+        FinalizeReturnStatuses();
+
         GetWorldTimerManager().ClearTimer(
             CheckGameTimeTimerHandle
         );
+    }
+}
+
+void AMD_GameModeBase::FinalizeReturnStatuses()
+{
+    AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
+
+    if (!IsValid(MDGameState))
+    {
+        return;
+    }
+
+    for (APlayerState* PlayerState : MDGameState->PlayerArray)
+    {
+        AMD_PlayerState* MDPlayerState = Cast<AMD_PlayerState>(PlayerState);
+
+        if (!IsValid(MDPlayerState))
+        {
+            continue;
+        }
+
+        if (MDPlayerState->GetReturnStatus() != EMD_ReturnStatus::Pending)
+        {
+            continue;
+        }
+
+        MDPlayerState->SetReturnStatus(EMD_ReturnStatus::Failed);
     }
 }

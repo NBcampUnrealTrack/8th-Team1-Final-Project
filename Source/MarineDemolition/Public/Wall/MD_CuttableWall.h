@@ -95,7 +95,8 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Wall")
 	int32 PieceCount = 10;
 
-	UPROPERTY(EditAnywhere, Category = "Wall")
+	/** 절단 시 생성할 벽 조각 Blueprint 클래스. Class Defaults에서 반드시 지정한다. */
+	UPROPERTY(EditDefaultsOnly, Category = "Wall")
 	TSubclassOf<AMD_WallPiece> PieceClass;
 
 	// 스캔 하이라이트 / 원복에 재사용할 다이내믹 머티리얼

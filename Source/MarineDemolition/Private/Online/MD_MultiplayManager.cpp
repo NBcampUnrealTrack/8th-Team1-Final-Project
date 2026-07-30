@@ -9,6 +9,7 @@
 #include "MD_SessionSettingKey.h"
 #include "MD_LogUtility.h"
 #include "Online/MD_RoomCode.h"
+#include "GameFramework/GameModeBase.h"
 
 void UMD_MultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
 {
@@ -757,6 +758,12 @@ void UMD_MultiplayManager::HandleCreateSessionComplete(FName SessionName, bool b
     if (CreateSessionParams.bIsDedicatedServer == false)
     {
         TravelURL = TravelURL.Append(TEXT("?listen"));
+    }
+
+    // 심리스 트래블은 Listen을 시작하지 않으므로 첫 트래블은 하드 트래블로 강제
+    if (AGameModeBase* GameMode = World->GetAuthGameMode())
+    {
+        GameMode->bUseSeamlessTravel = false;
     }
 
     // 초기 맵을 호스팅 하도록 ServerTravel 실행

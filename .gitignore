@@ -4,7 +4,25 @@ DerivedDataCache/
 Intermediate/
 Saved/
 Build/
-Content/Developers/
+# Personal WIP — ignore by default. Soft refs in shared Sky/Lobby still need
+# JunminPark Environment + Landscape shipped until those refs are sealed.
+Content/Developers/*
+!Content/Developers/JunminPark/
+Content/Developers/JunminPark/*
+!Content/Developers/JunminPark/Environment/
+!Content/Developers/JunminPark/Landscape/
+Content/Developers/JunminPark/Environment/**
+!Content/Developers/JunminPark/Environment/Sky/
+!Content/Developers/JunminPark/Environment/Sky/**
+# Pack demo mannequin under Environment is not needed for lobby sky.
+Content/Developers/JunminPark/Environment/Sky/Stylized/Demo/
+Content/Developers/JunminPark/Landscape/**
+!Content/Developers/JunminPark/Landscape/Layers/
+!Content/Developers/JunminPark/Landscape/Layers/**
+!Content/Developers/JunminPark/Landscape/Materials/
+!Content/Developers/JunminPark/Landscape/Materials/**
+!Content/Developers/JunminPark/Landscape/Textures/
+!Content/Developers/JunminPark/Landscape/Textures/**
 
 # Plugin generated folders
 Plugins/**/Binaries/
