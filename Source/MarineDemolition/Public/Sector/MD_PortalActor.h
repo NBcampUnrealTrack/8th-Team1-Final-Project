@@ -22,8 +22,6 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 protected:
-	virtual void OnConstruction(const FTransform& Transform) override;
-
 	virtual void BeginPlay() override;
 
 protected:
@@ -63,15 +61,15 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Portal|Rendering")
 	bool bSurfaceRenderEnabled = true;
 
-	// 연결된 다른 Portal에서 캡처된 Scene을 저장하는 TextureRenderTarget2D
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal|Rendering")
-	TObjectPtr<UTextureRenderTarget2D> TextureRenderTarget;
-
 	// SurfaceMesh에 적용되는 Material의 Texture Parameter 이름
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal|Rendering")
 	FName MaterialTextureParameterName = TEXT("TextureRenderTarget");
 
 private:
+	// 연결된 다른 Portal에서 캡처된 Scene을 저장하는 TextureRenderTarget2D
+	UPROPERTY(Transient)
+	TObjectPtr<UTextureRenderTarget2D> TextureRenderTarget;
+
 	// 설정된 Material 또는 Material Instance를 통하여 Runtime에 생성되고 SurfaceMesh에 적용되는 Material Instance
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> PortalMaterialInstance;
@@ -83,9 +81,17 @@ private:
 	TSet<TWeakObjectPtr<AActor>> ArrivalGuardActors;
 
 public:
+	// 다른 Portal에 연결하는 함수
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Portal")
+	bool ConnectToOtherPortal(AMD_PortalActor* OtherPortal);
+
+	// 기존 Portal의 연결을 제거하는 함수
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Portal")
+	void DisconnectPortal();
+
 	// 연결된 Portal의 위치로 Actor를 이동시키는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Portal")
-	bool TeleportActorThroughPortal(AActor* OtherActor);
+	bool TeleportActor(AActor* OtherActor);
 
 	// 현재 Portal의 활성화 여부를 설정하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Portal")
@@ -100,15 +106,13 @@ public:
 	bool IsActorCanUsePortal(AActor* Actor) const;
 
 protected:
-	// 복제된 Portal 개방 상태를 로컬 캡처와 Blueprint 이벤트에 적용한다.
+	// 서버의 Portal 활성화 상태가 변경되었을 경우 Local에서 실행되는 함수
 	UFUNCTION()
 	void OnRep_PortalActive();
 
-	// 액터가 통과 감지 영역에 진입하면 서버의 추적 목록에 등록한다.
 	UFUNCTION()
 	void OnCollisionBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
-	// 액터가 통과 감지 영역을 완전히 벗어나면 추적 및 재진입 방지 목록에서 제거한다.
 	UFUNCTION()
 	void OnCollisionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex);
 

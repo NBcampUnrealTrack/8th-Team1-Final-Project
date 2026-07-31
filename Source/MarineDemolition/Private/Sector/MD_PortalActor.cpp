@@ -4,14 +4,10 @@
 #include "Sector/MD_PortalActor.h"
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/BoxComponent.h"
-#include "Net/UnrealNetwork.h"
-#include "Camera/PlayerCameraManager.h"
-#include "Engine/TextureRenderTarget2D.h"
-#include "GameFramework/Character.h"
-#include "GameFramework/Controller.h"
 #include "GameFramework/MovementComponent.h"
-#include "GameFramework/PlayerController.h"
-#include "Materials/MaterialInstanceDynamic.h"
+#include "GameFramework/Pawn.h"
+#include "Engine/TextureRenderTarget2D.h"
+#include "Net/UnrealNetwork.h"
 #include "MD_LogUtility.h"
 
 AMD_PortalActor::AMD_PortalActor()
@@ -51,24 +47,20 @@ AMD_PortalActor::AMD_PortalActor()
 	SceneCaptureComponent->CaptureSource = ESceneCaptureSource::SCS_FinalColorLDR;
 }
 
-void AMD_PortalActor::OnConstruction(const FTransform& Transform)
-{
-	Super::OnConstruction(Transform);
-
-	// TextureRenderTarget 초기화 및 현재 Portal에 적용되는 Material Instance의 Parameter 등록
-	InitPortalTextureRenderTarget();
-}
-
 void AMD_PortalActor::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// TextureRenderTarget 초기화 및 현재 Portal에 적용되는 Material Instance의 Parameter 등록
+	InitPortalTextureRenderTarget();
 	
 	BoxCollision->OnComponentBeginOverlap.AddDynamic(this, &ThisClass::OnCollisionBeginOverlap);
 
 	BoxCollision->OnComponentEndOverlap.AddDynamic(this, &ThisClass::OnCollisionEndOverlap);
 
-	// TextureRenderTarget 초기화 및 현재 Portal에 적용되는 Material Instance의 Parameter 등록
-	InitPortalTextureRenderTarget();
+	// 캡처되는 Scene을 연결된 Portal의 위치 기준 정면 방향으로 제한
+	SceneCaptureComponent->ClipPlaneBase = LinkedPortal->GetActorLocation();
+	SceneCaptureComponent->ClipPlaneNormal = LinkedPortal->GetActorForwardVector();
 
 	// 서버와 로컬의 현재 Portal 동작 여부 동기화
 	OnRep_PortalActive();
@@ -98,7 +90,42 @@ void AMD_PortalActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(ThisClass, bIsPortalActive);
 }
 
-bool AMD_PortalActor::TeleportActorThroughPortal(AActor* OtherActor)
+bool AMD_PortalActor::ConnectToOtherPortal(AMD_PortalActor* OtherPortal)
+{
+	// 연결하려는 Portal이 유효하지 않거나 자신과 연결하려는 경우 함수 조기 종료
+	if (IsValid(OtherPortal) == false || OtherPortal == this)
+	{
+		return false;
+	}
+
+	// 기존에 연결된 Portal에 연결하려는 경우 함수 조기 종료
+	if (LinkedPortal.IsValid() == true && LinkedPortal.Get() == OtherPortal)
+	{
+		return true;
+	}
+
+	// 이전 연결 Portal의 연결 제거
+	DisconnectPortal();
+	OtherPortal->DisconnectPortal();
+
+	// 연결된 Portal 등록
+	LinkedPortal = OtherPortal;
+	OtherPortal->LinkedPortal = this;
+	return true;
+}
+
+void AMD_PortalActor::DisconnectPortal()
+{
+	if (LinkedPortal.IsValid() == false)
+	{
+		return;
+	}
+	// 연결된 Portal 변수 초기화
+	LinkedPortal->LinkedPortal = nullptr;
+	LinkedPortal = nullptr;
+}
+
+bool AMD_PortalActor::TeleportActor(AActor* OtherActor)
 {
 	// Client 환경 실행 제한
 	if (HasAuthority() == false)
@@ -171,7 +198,7 @@ bool AMD_PortalActor::TeleportActorThroughPortal(AActor* OtherActor)
 		}
 
 		// Controller에 의하여 제어되고 있는 경우 Controller에 Teleport 이후 회전 값 적용
-		APawn* Pawn = Cast<ACharacter>(OtherActor);
+		APawn* Pawn = Cast<APawn>(OtherActor);
 		if (IsValid(Pawn) == true)
 		{
 			AController* Controller = Pawn->GetController();
@@ -377,13 +404,6 @@ void AMD_PortalActor::UpdatePortalCapture()
 		return;
 	}
 
-	// 연결된 Portal의 SceneCaptureComponent 얻기 및 유효성 검사
-	USceneCaptureComponent2D* const LinkedSceneCaptureComponent = LinkedPortal->SceneCaptureComponent;
-	if (IsValid(LinkedSceneCaptureComponent) == false)
-	{
-		return;
-	}
-
 	// 첫번째 Local Player의 Controller 얻기 및 유효성 검사
 	APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
 	if (IsValid(LocalPlayerController) == false)
@@ -403,18 +423,14 @@ void AMD_PortalActor::UpdatePortalCapture()
 	FRotator CaptureRotation = TransformRotationToLinkedPortal(CameraManager->GetCameraRotation());
 
 	// 연결된 다른 Portal의 SceneCaptureComponent 위치 및 회전값 변경
-	LinkedSceneCaptureComponent->SetWorldLocation(CaptureLocation);
-	LinkedSceneCaptureComponent->SetWorldRotation(CaptureRotation);
+	SceneCaptureComponent->SetWorldLocation(CaptureLocation);
+	SceneCaptureComponent->SetWorldRotation(CaptureRotation);
 
 	// SceneCapture Component의 FOV 설정
-	LinkedSceneCaptureComponent->FOVAngle = CameraManager->GetFOVAngle();
-
-	// 캡처되는 Scene을 연결된 Portal의 위치 기준 정면 방향으로 제한
-	LinkedSceneCaptureComponent->ClipPlaneBase = LinkedPortal->GetActorLocation();
-	LinkedSceneCaptureComponent->ClipPlaneNormal = LinkedPortal->GetActorForwardVector();
+	SceneCaptureComponent->FOVAngle = CameraManager->GetFOVAngle();
 
 	// SceneCapture 동작을 명시적으로 실행
-	LinkedSceneCaptureComponent->CaptureScene();
+	SceneCaptureComponent->CaptureScene();
 }
 
 void AMD_PortalActor::UpdateTrackedActors()
@@ -426,7 +442,7 @@ void AMD_PortalActor::UpdateTrackedActors()
 	}
 
 	// 현재 Portal 이용 블랙리스트 검토
-	for (auto Iterator = ArrivalGuardActors.CreateIterator(); Iterator->IsValid() == true; ++Iterator)
+	for (auto Iterator = ArrivalGuardActors.CreateIterator(); Iterator.operator bool() == true; ++Iterator)
 	{
 		// 액터가 유효하지 않거나 Portal 영역 밖으로 이동된 경우 목록에서 제거
 		if (Iterator->IsValid() == false || BoxCollision->IsOverlappingActor(Iterator->Get()) == false)
@@ -458,13 +474,13 @@ void AMD_PortalActor::UpdateTrackedActors()
 		if (PreviousSignedDistance * CurrentSignedDistance < 0)
 		{
 			// Portal의 후면 방향 출입 허용 또는 Actor가 정면 방향으로 진입하였는지 검사
-			if (bFrontSideOnly == false || PreviousSignedDistance < 0)
+			if (bFrontSideOnly == false || PreviousSignedDistance > 0)
 			{
 				// 추적 목록에서 Actor 제거
 				Iterator.RemoveCurrent();
 
 				// Actor Teleport
-				TeleportActorThroughPortal(OtherActor.Get());
+				TeleportActor(OtherActor.Get());
 				continue;
 			}
 		}
@@ -495,21 +511,24 @@ void AMD_PortalActor::CreatePortalTextureRenderTarget()
 
 	FVector SurfaceBoundsExtent = SurfaceMesh->CalcLocalBounds().BoxExtent;
 	UE_LOG(MarineDemolition, Log, TEXT("%s Size of surface on Portal named %s = %s"), *UE_CALL_LOCATIONINFO, *GetName(), *SurfaceBoundsExtent.ToString());
-
-	TextureRenderTarget->InitAutoFormat(SurfaceBoundsExtent.X, SurfaceBoundsExtent.Y);
-
-	TextureRenderTarget->UpdateResourceImmediate(true);
+	TextureRenderTarget->ResizeTarget(SurfaceBoundsExtent.X, SurfaceBoundsExtent.Y);
 }
 
 void AMD_PortalActor::InitPortalTextureRenderTarget()
 {
 	// TextureRenderTarget 객체 생성 및 유효성 검사
-	CreatePortalTextureRenderTarget();
+	TextureRenderTarget = NewObject<UTextureRenderTarget2D>(this);
 	if (IsValid(TextureRenderTarget) == false)
 	{
 		UE_LOG(MarineDemolition, Warning, TEXT("%s Texture Render Target 객체가 생성되지 않았습니다."), *UE_CALL_LOCATIONINFO);
 		return;
 	}
+
+	TextureRenderTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
+	TextureRenderTarget->ClearColor = FLinearColor::Transparent;
+	TextureRenderTarget->InitAutoFormat(1024, 1024);
+
+	SceneCaptureComponent->TextureTarget = TextureRenderTarget;
 
 	// SurfaceMesh의 Material이 존재하지 않으면 함수 조기 종료
 	if (SurfaceMesh->GetNumMaterials() <= 0)
