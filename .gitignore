@@ -53,9 +53,13 @@ Config/DefaultEditorPerProjectUserSettings.ini
 /AGENT.md
 /CLAUDE.md
 
-# Local art / docs (not tracked)
+# Local art (not tracked)
 Art/
-Docs/
+
+# Docs: track planning markdown; ignore local audit dumps
+Docs/**/_read_*.txt
+Docs/**/_*.tmp.md
+Docs/**/_audit*
 
 # Editor automation scripts (machine-local / WIP)
 Content/Python/
