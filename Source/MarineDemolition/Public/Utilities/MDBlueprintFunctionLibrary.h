@@ -15,5 +15,11 @@ class MARINEDEMOLITION_API UMDBlueprintFunctionLibrary : public UBlueprintFuncti
 	GENERATED_BODY()
 	
 public:
+	// Clipboard에 임의 문자열을 복사하는 함수
+	UFUNCTION(BlueprintCallable, Category = "System|Clipboard")
+	static void CopyTextToClipboard(const FString& CopyString);
 
+	// Clipboard로부터 복사된 문자열을 얻는 함수
+	UFUNCTION(BlueprintCallable, Category = "System|Clipboard")
+	static FString PasteTextFromClipboard();
 };
