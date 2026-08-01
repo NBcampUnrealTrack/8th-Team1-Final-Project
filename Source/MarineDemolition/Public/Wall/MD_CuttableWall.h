@@ -14,6 +14,9 @@ class AMD_CuttableWall;
 // 오염막 완전 제거 시 한 번 발생
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnContaminationFullyRemoved, AMD_CuttableWall*,	Wall);
 
+// 지주격벽 오절단으로 붕괴가 실제 발생했을 때 한 번 발생
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnStrutCollapsed, AMD_CuttableWall*, Wall, AActor*, Cutter);
+
 // 격벽 타입. 칸막이 = 비내력벽(자유 철거), 지주 = 내력벽 (오절단 시 붕괴)
 UENUM(BlueprintType)
 enum class EMD_WallType : uint8
@@ -33,6 +36,22 @@ public:
 	AMD_CuttableWall();
 
 	virtual void OnConstruction(const FTransform& Transform) override;
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	// 지지대 설치 시스템이 호출. 서버에서만 변경
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Wall")
+	void SetSupported(bool bSupported) { bHasSupport = bSupported; }
+
+	UFUNCTION(BlueprintPure, Category = "Wall")
+	bool IsSupported() const { return bHasSupport; }
+
+	UFUNCTION(BlueprintPure, Category = "Wall")
+	EMD_WallType GetWallType() const { return WallType; }
+
+	// 무지지 붕괴 발생 시 방송. 점수 처리는 GameMode가 구독
+	UPROPERTY(BlueprintAssignable, Category = "Wall")
+	FMD_OnStrutCollapsed OnStrutCollapsed;
 
 	// Cutter = 절단 버튼을 누른 캐릭터
 	UFUNCTION(BlueprintCallable, Category = "Wall")
@@ -87,8 +106,8 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Wall")
 	EMD_WallType WallType = EMD_WallType::Partition;
 
-	// 임시: 지지대 설치 여부. true면 오절단해도 붕괴하지 않음
-	UPROPERTY(EditAnywhere, Category = "Wall")
+	// 지지대 설치 여부. true면 오절단해도 붕괴하지 않음
+	UPROPERTY(EditAnywhere, Replicated, Category = "Wall")
 	bool bHasSupport = false;
 
 	// 절단 시 드랍할 조각 수 (기획: 5~10개)

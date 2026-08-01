@@ -7,6 +7,7 @@
 #include "Component/MD_CharacterMovementComponent.h"
 #include "Demolition/Scrape/MD_ScrapeToolComponent.h"
 #include "Component/MD_EquipHotbarComponent.h"
+#include "Component/MD_SupplyComponent.h"
 #include "Equipment/MD_ToolDefinition.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -77,6 +78,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	HoldPoint->SetRelativeLocation(FVector(150.f, 0.f, 0.f));
 
 	PhysicsHandle = CreateDefaultSubobject<UPhysicsHandleComponent>(TEXT("PhysicsHandle"));
+
+	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
 }
 
 void AMD_Character::Tick(float DeltaSeconds)

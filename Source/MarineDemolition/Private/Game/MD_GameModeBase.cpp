@@ -2,9 +2,11 @@
 
 
 #include "Game/MD_GameModeBase.h"
+#include "EngineUtils.h"
 #include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
 #include "Player/MD_PlayerState.h"
+#include "Wall/MD_CuttableWall.h"
 
 AMD_GameModeBase::AMD_GameModeBase()
 {
@@ -24,6 +26,20 @@ void AMD_GameModeBase::BeginPlay()
         0.1f,
         true
     );
+
+    // 레벨의 모든 격벽에 붕괴 점수 처리 바인딩 (GameMode는 서버 전용이라 중복 적용 없음)
+    for (TActorIterator<AMD_CuttableWall> It(GetWorld()); It; ++It)
+    {
+        It->OnStrutCollapsed.AddDynamic(this, &AMD_GameModeBase::HandleStrutCollapsed);
+    }
+}
+
+void AMD_GameModeBase::HandleStrutCollapsed(AMD_CuttableWall* Wall, AActor* Cutter)
+{
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->AddScoreDelta(StrutCollapseScoreDelta);
+    }
 }
 
 void AMD_GameModeBase::CheckGameTimeEvents()
