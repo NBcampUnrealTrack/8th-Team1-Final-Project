@@ -42,7 +42,7 @@ protected:
 	TObjectPtr<class USceneCaptureComponent2D> SceneCaptureComponent;
 
 	// 연결된 다른 Portal
-	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Replicated, Category = "Portal")
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, ReplicatedUsing = OnRep_LinkedPortal, Category = "Portal")
 	TWeakObjectPtr<AMD_PortalActor> LinkedPortal;
 
 	// Portal을 통과하여 다른 장소로 이동 가능 여부를 나타내는 변수
@@ -53,39 +53,47 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Portal")
 	bool bFrontSideOnly = true;
 
-	// Portal을 통한 이동 시 연결된 다른 Portal의 +X(Local)방향 위치 보정 값
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal", meta = (ClampMin = "0.0"))
-	float ExitOffset = 1.0f;
-
 	// Local 환경 기준 연결된 다른 Portal에 비춰지는 장면을 실시간으로 캡처하는 여부를 나타내는 변수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Portal|Rendering")
 	bool bSurfaceRenderEnabled = true;
 
+	// Portal을 통한 이동 시 연결된 다른 Portal의 +X(Local)방향 위치 보정 값
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal", meta = (ClampMin = "0.0"))
+	float ExitOffset = 1.0f;
+
 	// SurfaceMesh에 적용되는 Material의 Texture Parameter 이름
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal|Rendering")
 	FName MaterialTextureParameterName = TEXT("TextureRenderTarget");
+
+	// Clip Plane 오차에 의한 Portal의 표면 아래쪽이 잘리는 것을 방지하기 위한 Backward 방향 Offset
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal|Rendering")
+	float ClipPlaneOffset = 1.0f;
 
 private:
 	// 연결된 다른 Portal에서 캡처된 Scene을 저장하는 TextureRenderTarget2D
 	UPROPERTY(Transient)
 	TObjectPtr<UTextureRenderTarget2D> TextureRenderTarget;
 
-	// 설정된 Material 또는 Material Instance를 통하여 Runtime에 생성되고 SurfaceMesh에 적용되는 Material Instance
+	// SurfaceMesh에 적용된 최초 Material 또는 Material Instance를 통하여 Runtime에 생성되고 SurfaceMesh에 적용되는 Material Instance
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> PortalMaterialInstance;
 
 	// 감지 영역 내부에 존재하는 다른 Actor에 대하여 현재 Portal 사이의 거리 및 방향 정보를 저장하는 변수
-	TMap<TWeakObjectPtr<AActor>, float> TrackedActorDistances;
+	TMap<TWeakObjectPtr<AActor>, float> MapDistanceWithOverlappedActor;
 
-	// 이동된 다른 Actor에 대하여 되돌아 가는 현상을 방지하기 위해 이동된 Actor를 저장하는 변수
-	TSet<TWeakObjectPtr<AActor>> ArrivalGuardActors;
+	// 이동된 다른 Actor에 대하여 바로 되돌아 가는 현상을 방지하기 위해 이동된 Actor를 저장하는 변수
+	TSet<TWeakObjectPtr<AActor>> IgnoreActors;
+
+	// Portal을 관측하는 Local Player 객체
+	UPROPERTY(Transient)
+	TObjectPtr<ULocalPlayer> LocalPlayer;
 
 public:
-	// 다른 Portal에 연결하는 함수
+	// 다른 Portal에 일방적으로 연결하는 함수 (반대편에서 현재 Portal로 연결되지 않음)
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Portal")
 	bool ConnectToOtherPortal(AMD_PortalActor* OtherPortal);
 
-	// 기존 Portal의 연결을 제거하는 함수
+	// 기존 Portal의 연결을 제거하는 함수 (반대편의 Portal 연결 해제 포함)
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Portal")
 	void DisconnectPortal();
 
@@ -105,8 +113,16 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Portal")
 	bool IsActorCanUsePortal(AActor* Actor) const;
 
+	// 서로 다른 2개의 Portal을 연결하는 함수
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Portal")
+	static void ConnectPortal(AMD_PortalActor* PortalA, AMD_PortalActor* PortalB);
+
 protected:
-	// 서버의 Portal 활성화 상태가 변경되었을 경우 Local에서 실행되는 함수
+	// 서버의 LinkedPortal 변수 값이 변경되었을 경우 Local Client에서 실행되는 함수
+	UFUNCTION()
+	void OnRep_LinkedPortal();
+
+	// 서버의 Portal 활성화 상태가 변경되었을 경우 Local Client에서 실행되는 함수
 	UFUNCTION()
 	void OnRep_PortalActive();
 
@@ -117,29 +133,29 @@ protected:
 	void OnCollisionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex);
 
 	// 해당 위치 좌표에 대응하는 연결된 Portal 기준 위치 좌표를 계산하는 함수
-	UFUNCTION(BlueprintCallable, Category = "Portal")
+	UFUNCTION()
 	FVector TransformLocationToLinkedPortal(const FVector& WorldLocation) const;
 
 	// 해당 방향에 대응하는 연결된 Portal 기준 방향을 계산하는 함수
-	UFUNCTION(BlueprintCallable, Category = "Portal")
+	UFUNCTION()
 	FVector TransformDirectionToLinkedPortal(const FVector& WorldDirection) const;
 
 	// 해당 회전 값에 대응하는 연결된 Portal 기준 회전 값을 계산하는 함수
-	UFUNCTION(BlueprintCallable, Category = "Portal")
+	UFUNCTION()
 	FRotator TransformRotationToLinkedPortal(const FRotator& WorldRotation) const;
 
 private:
-	// UTextureRenderTarget2D의 인스턴스를 생성하는 함수
-	void CreatePortalTextureRenderTarget();
-
 	// Portal의 SurfaceMesh에 Material Instance를 동적으로 생성 및 할당하고, TextureRenderTarget를 Parameter에 등록하는 함수
 	void InitPortalTextureRenderTarget();
 
-	// 현재 Portal의 표면에 필요한 Scene을 캡처하는 ScencCapture Component의 Transform을 업데이트하는 함수
-	void UpdatePortalCapture();
+	// 현재 Portal의 표면에 필요한 Scene을 캡처하는 SceneCapture Component의 Transform을 업데이트하는 함수
+	void UpdatePortalCaptureScene();
+
+	// Texture Render Target의 크기를 게임 화면 크기에 맞추어 변경하는 함수
+	void UpdatePortalTextureRenderTargetSize();
 
 	// 현재 Portal의 영역 내부에서 감지된 Actor들을 검토하고 Teleport 또는 목록에서 제거하는 함수
-	void UpdateTrackedActors();
+	void UpdateOverlappedActors();
 
 	// Portal의 현재 위치와 임의 좌표 사이의 부호가 포함된 거리를 계산하는 함수
 	float GetSignedDistance(const FVector& WorldLocation) const;
