@@ -12,6 +12,18 @@ namespace MDGameplayTags
 
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Swimming);
 
+	/** 물리 보관함에 담을 수 있는 내용물 분류의 공통 루트 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content);
+
+	/** 물리 보관함에 담을 수 있는 벽 조각 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_WallPiece);
+
+	/** 물리 보관함에 담을 수 있는 오염물 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Contamination);
+
+	/** 물리 보관함에 담을 수 있는 샘플 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Sample);
+
 	/** 상호작용한 대상을 플레이어 인벤토리로 옮기는 픽업 방식 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Pickup_Inventory);
 

@@ -110,6 +110,7 @@ UAbilitySystemComponent* AMD_Character::GetAbilitySystemComponent() const
 void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
+	CaptureDefaultHoldProfile();
 
 	if (!IsValid(PlayerMappingContext)) return;
 
@@ -325,17 +326,59 @@ bool AMD_Character::TryHoldTarget(AActor* Target)
 {
 	if (!HasAuthority() || !IsValid(Target) || !IsValid(PhysicsHandle)) return false;
 
-	UPrimitiveComponent* Component = Cast<UPrimitiveComponent>(Target->GetRootComponent());
-	if (!IsValid(Component) || !Component->IsSimulatingPhysics()) return false;
+	UPrimitiveComponent* Component = nullptr;
+	FVector GrabLocation = FVector::ZeroVector;
+	FVector HoldOffset = FVector::ZeroVector;
+	FMD_HoldProfile HoldProfile = DefaultHoldProfile;
 
-	PhysicsHandle->GrabComponentAtLocationWithRotation(
-		Component,
-		NAME_None,
-		Component->GetCenterOfMass(),
-		Component->GetComponentRotation());
+	if (Target->Implements<UMD_Grabbable>())
+	{
+		Component = IMD_Grabbable::Execute_GetGrabComponent(Target);
+		const USceneComponent* GrabPoint = IMD_Grabbable::Execute_GetGrabPoint(Target);
 
+		if (!IsValid(Component) || !Component->IsSimulatingPhysics() || !IsValid(GrabPoint)) return false;
+
+		GrabLocation = GrabPoint->GetComponentLocation();
+		HoldOffset = IMD_Grabbable::Execute_GetHoldOffset(Target);
+		HoldProfile = IMD_Grabbable::Execute_GetHoldProfile(Target);
+	}
+	else
+	{
+		Component = Cast<UPrimitiveComponent>(Target->GetRootComponent());
+		if (!IsValid(Component) || !Component->IsSimulatingPhysics()) return false;
+
+		GrabLocation = Component->GetCenterOfMass();
+	}
+
+	ApplyHoldProfile(HoldProfile);
+
+	if (HoldProfile.bConstrainRotation)
+	{
+		PhysicsHandle->GrabComponentAtLocationWithRotation(
+			Component,
+			NAME_None,
+			GrabLocation,
+			Component->GetComponentRotation());
+	}
+	else
+	{
+		PhysicsHandle->GrabComponentAtLocation(
+			Component,
+			NAME_None,
+			GrabLocation);
+	}
+
+	if (PhysicsHandle->GetGrabbedComponent() != Component)
+	{
+		ApplyHoldProfile(DefaultHoldProfile);
+		ActiveHoldProfile = DefaultHoldProfile;
+		return false;
+	}
+
+	HeldTargetOffset = HoldOffset;
+	ActiveHoldProfile = HoldProfile;
 	UpdateHeldTarget();
-	return PhysicsHandle->GetGrabbedComponent() == Component;
+	return true;
 }
 
 bool AMD_Character::IsHolding() const
@@ -345,18 +388,65 @@ bool AMD_Character::IsHolding() const
 
 void AMD_Character::ReleaseTarget()
 {
-	if (!IsValid(PhysicsHandle) || !PhysicsHandle->GetGrabbedComponent()) return;
+	HeldTargetOffset = FVector::ZeroVector;
 
-	PhysicsHandle->ReleaseComponent();
+	if (!IsValid(PhysicsHandle)) return;
+
+	if (PhysicsHandle->GetGrabbedComponent())
+	{
+		PhysicsHandle->ReleaseComponent();
+	}
+
+	ApplyHoldProfile(DefaultHoldProfile);
+	ActiveHoldProfile = DefaultHoldProfile;
 }
 
 void AMD_Character::UpdateHeldTarget()
 {
 	if (!HasAuthority() || !IsHolding() || !IsValid(HoldPoint)) return;
 
-	PhysicsHandle->SetTargetLocationAndRotation(
-		HoldPoint->GetComponentLocation(),
-		HoldPoint->GetComponentRotation());
+	const FVector TargetLocation = HoldPoint->GetComponentTransform().TransformPositionNoScale(HeldTargetOffset);
+
+	if (ActiveHoldProfile.bConstrainRotation)
+	{
+		PhysicsHandle->SetTargetLocationAndRotation(
+			TargetLocation,
+			HoldPoint->GetComponentRotation());
+	}
+	else
+	{
+		PhysicsHandle->SetTargetLocation(TargetLocation);
+	}
+}
+
+void AMD_Character::CaptureDefaultHoldProfile()
+{
+	if (!IsValid(PhysicsHandle)) return;
+
+	DefaultHoldProfile.bConstrainRotation = true;
+	DefaultHoldProfile.bSoftLinear = PhysicsHandle->bSoftLinearConstraint;
+	DefaultHoldProfile.bSoftAngular = PhysicsHandle->bSoftAngularConstraint;
+	DefaultHoldProfile.bInterpolate = PhysicsHandle->bInterpolateTarget;
+	DefaultHoldProfile.LinearStiffness = PhysicsHandle->LinearStiffness;
+	DefaultHoldProfile.LinearDamping = PhysicsHandle->LinearDamping;
+	DefaultHoldProfile.AngularStiffness = PhysicsHandle->AngularStiffness;
+	DefaultHoldProfile.AngularDamping = PhysicsHandle->AngularDamping;
+	DefaultHoldProfile.InterpolationSpeed = PhysicsHandle->InterpolationSpeed;
+	ActiveHoldProfile = DefaultHoldProfile;
+}
+
+void AMD_Character::ApplyHoldProfile(const FMD_HoldProfile& Profile)
+{
+	if (!IsValid(PhysicsHandle)) return;
+
+	PhysicsHandle->bSoftLinearConstraint = Profile.bSoftLinear;
+	PhysicsHandle->bSoftAngularConstraint = Profile.bSoftAngular;
+	PhysicsHandle->bInterpolateTarget = Profile.bInterpolate;
+	PhysicsHandle->SetLinearStiffness(FMath::Max(0.f, Profile.LinearStiffness));
+	PhysicsHandle->SetLinearDamping(FMath::Max(0.f, Profile.LinearDamping));
+	PhysicsHandle->SetAngularStiffness(FMath::Max(0.f, Profile.AngularStiffness));
+	PhysicsHandle->SetAngularDamping(FMath::Max(0.f, Profile.AngularDamping));
+	PhysicsHandle->SetInterpolationSpeed(FMath::Max(0.f, Profile.InterpolationSpeed));
 }
 
 void AMD_Character::UpdateHotbarDebug() const
