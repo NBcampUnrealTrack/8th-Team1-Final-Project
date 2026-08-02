@@ -17,6 +17,11 @@ public:
 
 	void SetSupportedWall(AMD_CuttableWall* Wall) { SupportedWall = Wall; }
 
+	AMD_CuttableWall* GetSupportedWall() const { return SupportedWall; }
+
+	// 밤새 약해진 상태로 전환. 지지 효과를 잃고 기울어진다 (기획 03 §3)
+	void Weaken();
+	
 protected:
 	UPROPERTY(VisibleAnywhere, Category = "Support")
 	TObjectPtr<UStaticMeshComponent> Mesh;

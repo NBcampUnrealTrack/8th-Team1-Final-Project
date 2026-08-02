@@ -3,6 +3,7 @@
 
 #include "Game/MD_GameModeBase.h"
 #include "EngineUtils.h"
+#include "Game/MD_DayPersistenceSubsystem.h"
 #include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
 #include "Player/MD_PlayerState.h"
@@ -32,6 +33,10 @@ void AMD_GameModeBase::BeginPlay()
     {
         It->OnStrutCollapsed.AddDynamic(this, &AMD_GameModeBase::HandleStrutCollapsed);
     }
+
+    // 이전 Day 스냅샷 복원은 전 액터 BeginPlay 이후로 미룸 (벽 오염 초기화보다 늦게)
+    GetWorldTimerManager().SetTimerForNextTick(
+        this, &AMD_GameModeBase::RestoreDaySnapshot);
 }
 
 void AMD_GameModeBase::HandleStrutCollapsed(AMD_CuttableWall* Wall, AActor* Cutter)
@@ -87,6 +92,8 @@ void AMD_GameModeBase::CheckGameTimeEvents()
 
         FinalizeReturnStatuses();
 
+        CaptureDaySnapshot();
+
         GetWorldTimerManager().ClearTimer(
             CheckGameTimeTimerHandle
         );
@@ -118,4 +125,30 @@ void AMD_GameModeBase::FinalizeReturnStatuses()
 
         MDPlayerState->SetReturnStatus(EMD_ReturnStatus::Failed);
     }
+}
+
+void AMD_GameModeBase::CaptureDaySnapshot()
+{
+    if (UMD_DayPersistenceSubsystem* Persistence =
+        GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
+    {
+        Persistence->CaptureSnapshot(GetWorld());
+    }
+}
+
+void AMD_GameModeBase::RestoreDaySnapshot()
+{
+    if (UMD_DayPersistenceSubsystem* Persistence =
+        GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
+    {
+        Persistence->RestoreSnapshot(GetWorld());
+    }
+}
+
+void AMD_GameModeBase::MD_EndDay()
+{
+    CaptureDaySnapshot();
+
+    // 같은 레벨을 다시 로드 → BeginPlay에서 복원 경로 진입
+    GetWorld()->ServerTravel(TEXT("?Restart"));
 }

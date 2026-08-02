@@ -38,4 +38,16 @@ private:
     // 무지지 붕괴 점수 (기획 05: -200)
     UPROPERTY(EditDefaultsOnly, Category = "Score")
     int32 StrutCollapseScoreDelta = -200;
+
+ //Day Persistence
+private:
+    // 18:00 마감 또는 트래블 직전에 스냅샷 기록
+    void CaptureDaySnapshot();
+
+    // 다음 틱에 스냅샷 복원 (전 액터 BeginPlay 완료 보장)
+    void RestoreDaySnapshot();
+
+    // 테스트용 콘솔 커맨드: 즉시 하루 마감 후 레벨 재시작
+    UFUNCTION(Exec)
+    void MD_EndDay();
 };

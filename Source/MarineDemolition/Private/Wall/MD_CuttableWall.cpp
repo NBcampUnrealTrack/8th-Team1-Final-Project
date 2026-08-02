@@ -70,6 +70,52 @@ void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 	DOREPLIFETIME(AMD_CuttableWall, bHasSupport);
 }
 
+void AMD_CuttableWall::ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells)
+{
+	if (!bContaminationSurfaceInitialized)
+	{
+		InitializeContaminationSurface();
+	}
+
+	const int32 GridWidth = ContaminationGridDimensions.X;
+	const int32 GridHeight = ContaminationGridDimensions.Y;
+	if (ContaminationCells.Num() == 0 || GridWidth <= 0 || GridHeight <= 0)
+	{
+		return;
+	}
+
+	// 무작위 중심 주변 사각 패치를 리필해 얼룩처럼 보이게
+	const FIntPoint Center(FMath::RandRange(0, GridWidth - 1), FMath::RandRange(0, GridHeight - 1));
+
+	TArray<FMD_ScrapeCellChange> Changes;
+	for (int32 Y = Center.Y - PatchRadiusCells; Y <= Center.Y + PatchRadiusCells; ++Y)
+	{
+		for (int32 X = Center.X - PatchRadiusCells; X <= Center.X + PatchRadiusCells; ++X)
+		{
+			if (X < 0 || X >= GridWidth || Y < 0 || Y >= GridHeight)
+			{
+				continue;
+			}
+
+			const int32 Index = X + Y * GridWidth;
+			FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
+			Cell.RemainingContamination = FMath::Clamp(
+				Cell.RemainingContamination + Amount, 0.f, Cell.InitialContamination);
+
+			FMD_ScrapeCellChange Change;
+			Change.CellIndex = Index;
+			Change.GridCoordinate = FIntPoint(X, Y);
+			Change.RemainingAmountAfter = Cell.RemainingContamination;
+			Changes.Add(Change);
+		}
+	}
+
+	CachedContaminationCleanRatio = FMD_ScrapeEvaluator::CalculateCleanRatio(ContaminationCells);
+	// 오염이 다시 생겼으므로 완료 방송을 다시 허용
+	bContaminationCompletionBroadcast = IsContaminationFullyRemoved();
+	UpdateContaminationVisualization(Changes);
+}
+
 void AMD_CuttableWall::BeginPlay()
 {
 	Super::BeginPlay();

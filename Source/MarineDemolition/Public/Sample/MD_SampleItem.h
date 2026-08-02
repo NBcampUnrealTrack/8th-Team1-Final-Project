@@ -24,6 +24,9 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Sample")
 	bool bDamaged = false;
 
+	// 손상 상태 적용. 붕괴 피해와 Day 복원에서 공용
+	void SetDamaged();
+	
 protected:
 	virtual void BeginPlay() override;
 

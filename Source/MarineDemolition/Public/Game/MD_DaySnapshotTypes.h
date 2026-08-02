@@ -1,0 +1,94 @@
+﻿#pragma once
+
+#include "CoreMinimal.h"
+#include "Templates/SubclassOf.h"
+#include "MD_DaySnapshotTypes.generated.h"
+
+class AMD_SupportBrace;
+class AMD_WallPiece;
+
+// Day 종료 시점에 살아남은 샘플 기록
+USTRUCT()
+struct FMD_SampleRecord
+{
+      GENERATED_BODY()
+
+      UPROPERTY()
+      FName ActorName = NAME_None;
+
+      UPROPERTY()
+      FTransform Transform = FTransform::Identity;
+
+      UPROPERTY()
+      bool bDamaged = false;
+};
+
+// 설치된 지지대 기록. 동적 스폰 액터라 클래스+트랜스폼으로 재스폰
+USTRUCT()
+struct FMD_BraceRecord
+{
+      GENERATED_BODY()
+
+      UPROPERTY()
+      TSubclassOf<AMD_SupportBrace> BraceClass;
+
+      UPROPERTY()
+      FTransform Transform = FTransform::Identity;
+
+      UPROPERTY()
+      FName SupportedWallName = NAME_None;
+};
+
+// 미수거 잔해(격벽 조각) 기록
+USTRUCT()
+struct FMD_PieceRecord
+{
+      GENERATED_BODY()
+
+      UPROPERTY()
+      TSubclassOf<AMD_WallPiece> PieceClass;
+
+      UPROPERTY()
+      FTransform Transform = FTransform::Identity;
+
+      UPROPERTY()
+      bool bContaminated = false;
+};
+
+// Day 종료 시점의 현장 상태. Cut()이 벽을 Destroy하므로 "살아남은 벽"을 기록한다
+USTRUCT()
+struct FMD_DaySnapshot
+{
+      GENERATED_BODY()
+
+      UPROPERTY()
+      bool bValid = false;
+
+      // 스냅샷을 찍은 레벨. 다른 레벨(모선 등)에서는 복원하지 않음
+      UPROPERTY()
+      FName WorldName = NAME_None;
+
+      // 마감한 Day. 다음 시작 Day = CompletedDay + 1
+      UPROPERTY()
+      int32 CompletedDay = 0;
+
+      UPROPERTY()
+      int32 Score = 0;
+
+      // 목록에 없는 레벨 배치 벽 = 어제 철거된 벽
+      UPROPERTY()
+      TArray<FName> SurvivingWallNames;
+
+      // 살아남은 벽 중 지지대가 설치된 벽
+      UPROPERTY()
+      TArray<FName> SupportedWallNames;
+
+      UPROPERTY()
+      TArray<FMD_BraceRecord> Braces;
+
+      UPROPERTY()
+      TArray<FMD_SampleRecord> Samples;
+
+      UPROPERTY()
+      TArray<FMD_PieceRecord> Pieces;
+};

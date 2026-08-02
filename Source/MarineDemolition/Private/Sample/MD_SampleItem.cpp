@@ -2,6 +2,7 @@
 
 #include "Collision/MD_CollisionChannels.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/Engine.h"
 #include "Materials/MaterialInstanceDynamic.h"
 
 AMD_SampleItem::AMD_SampleItem()
@@ -38,6 +39,20 @@ void AMD_SampleItem::SetInteractionHighlighted_Implementation(bool bHighlighted)
 	}
 }
 
+void AMD_SampleItem::SetDamaged()
+{
+	if (bDamaged)
+	{
+		return;
+	}
+	bDamaged = true;
+	
+	if (UMaterialInstanceDynamic* MID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
+	{
+		MID->SetVectorParameterValue(TEXT("Color"), FLinearColor::Red);
+	}
+}
+
 void AMD_SampleItem::BeginPlay()
 {
 	Super::BeginPlay();
@@ -52,16 +67,11 @@ void AMD_SampleItem::OnAnyDamage(AActor* DamagedActor, float Damage, const UDama
 	{
 		return;
 	}
-	bDamaged = true;
-
-	if (UMaterialInstanceDynamic* MID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
-	{
-		MID->SetVectorParameterValue(TEXT("Color"), FLinearColor::Red);
-	}
+	SetDamaged();
 
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange,
-			FString::Printf(TEXT("샘플 손상: %s"), *GetName()));
+				FString::Printf(TEXT("샘플 손상: %s"), *GetName()));
 	}
 }

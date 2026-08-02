@@ -27,6 +27,8 @@ void AMD_GameStateBase::GetLifetimeReplicatedProps(
     DOREPLIFETIME(AMD_GameStateBase, WithdrawalPhase);
     
     DOREPLIFETIME(AMD_GameStateBase, Score);
+    
+    DOREPLIFETIME(AMD_GameStateBase, CurrentDay);
 }
 
 //Timer
@@ -162,6 +164,18 @@ void AMD_GameStateBase::AddScoreDelta(int32 Delta)
     Score += Delta;
     // 리슨 서버는 OnRep이 안 오므로 직접 방송
     OnRep_Score();
+}
+
+void AMD_GameStateBase::SetCurrentDay(int32 NewDay)
+{
+    CurrentDay = NewDay;
+    // 리슨 서버 호스트는 OnRep이 안 오므로 직접 방송
+    OnRep_CurrentDay();
+}
+
+void AMD_GameStateBase::OnRep_CurrentDay()
+{
+    OnDayChanged.Broadcast(CurrentDay);
 }
 
 void AMD_GameStateBase::OnRep_Score()

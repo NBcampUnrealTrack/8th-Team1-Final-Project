@@ -92,6 +92,9 @@ public:
 	// 최초 완전 제거 시 한 번 방송
 	UPROPERTY(BlueprintAssignable, Category = "Wall|Contamination")
 	FMD_OnContaminationFullyRemoved OnContaminationFullyRemoved;
+	
+	// Day 전환 악화: 무작위 위치에 오염 셀을 소량 리필
+	void ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells);
 
 protected:
 	virtual void BeginPlay() override;
