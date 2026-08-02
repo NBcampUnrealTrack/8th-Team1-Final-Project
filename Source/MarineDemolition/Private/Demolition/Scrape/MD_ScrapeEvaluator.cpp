@@ -73,7 +73,8 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 
 	// 이동 거리가 너무 짧으면 버튼을 누른 채 정지해 있는 입력이나 미세한 손 떨림으로 가정
 	// 정상적인 플레이에서도 매 프레임 발생하는 상황이므로 로그를 남기지 않음
-	if (StrokeDistanceCm < static_cast<double>(Settings.MinimumTravelDistanceCm))
+	if (StrokeDistanceCm <= static_cast<double>(UE_SMALL_NUMBER)
+		|| StrokeDistanceCm < static_cast<double>(Settings.MinimumTravelDistanceCm))
 	{
 		return Result;
 	}

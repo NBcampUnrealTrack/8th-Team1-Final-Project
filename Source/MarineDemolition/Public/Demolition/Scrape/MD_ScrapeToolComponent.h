@@ -32,6 +32,8 @@ class MARINEDEMOLITION_API UMD_ScrapeToolComponent : public UActorComponent
 
 public:
 	UMD_ScrapeToolComponent();
+	virtual void GetLifetimeReplicatedProps(
+		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** 헤라 입력을 시작하고 현재 조준점을 첫 스트로크 기준점으로 기록한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape")
@@ -86,7 +88,8 @@ protected:
 	 * 현재 장착한 헤라의 판정 성능.
 	 * 기본 헤라는 12cm × 12cm 사각형이며 업그레이드 시 형태와 크기를 교체할 수 있다.
 	 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Scrape|Tool")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_ScrapeToolSpec,
+		Category = "MD|Scrape|Tool")
 	FMD_ScrapeToolSpec ScrapeToolSpec;
 
 	/** 이 거리만큼 움직이면 수평·수직 중 한 축을 잠근다. */
@@ -142,6 +145,20 @@ private:
 	static const TCHAR* GetContactTypeLabel(EMD_ScrapeContactType ContactType);
 
 	void ProcessScrapeTrace();
+	void DispatchAuthoritativeScrapeResult(
+		AMD_CuttableWall* Wall,
+		const FMD_ScrapeResult& Result,
+		const FVector& ContactLocation);
+
+	UFUNCTION(Client, Unreliable)
+	void ClientReceiveScrapeResult(
+		AMD_CuttableWall* Wall,
+		const FMD_ScrapeResult& Result,
+		FVector_NetQuantize10 ContactLocation);
+
+	UFUNCTION()
+	void OnRep_ScrapeToolSpec();
+
 	bool TryGetCurrentWallHit(FHitResult& OutHit, AMD_CuttableWall*& OutWall) const;
 	void BeginStrokeTracking(
 		AMD_CuttableWall* Wall,

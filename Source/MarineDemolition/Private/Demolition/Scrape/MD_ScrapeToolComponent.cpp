@@ -8,10 +8,13 @@
 #include "Kismet/GameplayStatics.h"
 #include "Particles/ParticleSystem.h"
 #include "Sound/SoundBase.h"
+#include "Net/UnrealNetwork.h"
 #include "Wall/MD_CuttableWall.h"
 
 UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 {
+	SetIsReplicatedByDefault(true);
+
 	TraceDistanceCm = 220.0f;
 	TraceChannel = ECC_Visibility;
 	ContaminationScrapeSound = nullptr;
@@ -34,6 +37,17 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
+}
+
+void UMD_ScrapeToolComponent::GetLifetimeReplicatedProps(
+	TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME_CONDITION(
+		UMD_ScrapeToolComponent,
+		ScrapeToolSpec,
+		COND_OwnerOnly);
 }
 
 const TCHAR* UMD_ScrapeToolComponent::GetContactTypeLabel(
@@ -92,7 +106,9 @@ FVector2D UMD_ScrapeToolComponent::ConstrainLookInput(
 bool UMD_ScrapeToolComponent::SetScrapeToolSpec(
 	const FMD_ScrapeToolSpec& NewToolSpec)
 {
-	if (!NewToolSpec.IsValid())
+	if (!GetOwner()
+		|| !GetOwner()->HasAuthority()
+		|| !NewToolSpec.IsValid())
 	{
 		return false;
 	}
@@ -101,7 +117,14 @@ bool UMD_ScrapeToolComponent::SetScrapeToolSpec(
 
 	// 성능이 바뀐 프레임에 이전 위치부터 새 범위를 소급 적용하지 않도록 경로를 끊는다.
 	ResetStrokeTracking();
+	GetOwner()->ForceNetUpdate();
 	return true;
+}
+
+void UMD_ScrapeToolComponent::OnRep_ScrapeToolSpec()
+{
+	// 서버에서 새 스펙을 받은 프레임에 이전 로컬 위치부터 새 범위를 잇지 않는다.
+	ResetStrokeTracking();
 }
 
 bool UMD_ScrapeToolComponent::SetScrapeBladeWidthCm(
@@ -207,22 +230,57 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace()
 	FMD_ScrapeStroke Stroke;
 	Stroke.StartPositionCm = PreviousSurfacePositionCm;
 	Stroke.EndPositionCm = ConstrainedSurfacePositionCm;
-	const FMD_ScrapeResult Result =
-		CurrentWall->ApplyLocalScrapeStrokeWithToolSpec(
-			Stroke,
-			ScrapeToolSpec);
-
-	if (Result.bIsInputValid && Result.bWasStrokeLongEnough)
+	if (GetOwner() && GetOwner()->HasAuthority())
 	{
-		const FVector FeedbackLocation = bHasConstrainedWorldPosition
-			? ConstrainedWorldPosition
-			: CurrentHit.ImpactPoint;
+		const FMD_ScrapeResult Result =
+			CurrentWall->ApplyLocalScrapeStrokeWithToolSpec(
+				Stroke,
+				ScrapeToolSpec);
 
-		OnScrapeApplied.Broadcast(CurrentWall, Result);
-		EmitFeedback(CurrentWall, Result, FeedbackLocation);
+		if (Result.bIsInputValid && Result.bWasStrokeLongEnough)
+		{
+			const FVector FeedbackLocation = bHasConstrainedWorldPosition
+				? ConstrainedWorldPosition
+				: CurrentHit.ImpactPoint;
+
+			DispatchAuthoritativeScrapeResult(
+				CurrentWall,
+				Result,
+				FeedbackLocation);
+		}
 	}
 
 	PreviousSurfacePositionCm = ConstrainedSurfacePositionCm;
+}
+
+void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
+	AMD_CuttableWall* Wall,
+	const FMD_ScrapeResult& Result,
+	const FVector& ContactLocation)
+{
+	// 서버 게임 로직은 권한 인스턴스의 이벤트를 계속 구독할 수 있다.
+	OnScrapeApplied.Broadcast(Wall, Result);
+
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	if (OwnerPawn
+		&& OwnerPawn->IsLocallyControlled()
+		&& GetNetMode() != NM_DedicatedServer)
+	{
+		EmitFeedback(Wall, Result, ContactLocation);
+		return;
+	}
+
+	// 원격 소유자의 사운드/이펙트와 Blueprint 피드백은 해당 클라이언트에서 실행한다.
+	ClientReceiveScrapeResult(Wall, Result, ContactLocation);
+}
+
+void UMD_ScrapeToolComponent::ClientReceiveScrapeResult_Implementation(
+	AMD_CuttableWall* Wall,
+	const FMD_ScrapeResult& Result,
+	const FVector_NetQuantize10 ContactLocation)
+{
+	OnScrapeApplied.Broadcast(Wall, Result);
+	EmitFeedback(Wall, Result, ContactLocation);
 }
 
 bool UMD_ScrapeToolComponent::TryGetCurrentWallHit(
@@ -402,7 +460,7 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 			FString::Printf(
 				TEXT("헤라: %s | 오염 제거 %.1f%%"),
 				GetContactTypeLabel(Result.ContactType),
-				Wall->GetContaminationRemovedPercent()));
+				FMath::Clamp(Result.CleanRatioAfter, 0.0f, 1.0f) * 100.0f));
 	}
 
 	const double WorldSeconds = GetWorld()->GetTimeSeconds();
