@@ -21,6 +21,7 @@ class UMD_ScrapeToolComponent;
 class UGameplayAbility;
 class UMD_EquipHotbarComponent;
 class UMD_ToolDefinition;
+class UMD_SupplyComponent;
 
 UENUM(BlueprintType)
 enum class EMDMovementState : uint8
@@ -101,6 +102,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UPhysicsHandleComponent> PhysicsHandle;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_SupplyComponent> SupplyComponent;
 
 protected:
 

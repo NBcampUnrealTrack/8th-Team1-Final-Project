@@ -7,6 +7,7 @@
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Net/UnrealNetwork.h"
 #include "Sector/MD_Sector.h"
 #include "Wall/MD_WallPiece.h"
 
@@ -18,6 +19,8 @@ namespace
 AMD_CuttableWall::AMD_CuttableWall()
 {
 	PrimaryActorTick.bCanEverTick = false;
+	// bHasSupport 복제용 (원격 클라이언트의 절단 판정 일치)
+	bReplicates = true;
 	ContaminationGridDimensions = FIntPoint(30, 25);
 	InitialContaminationPerCell = 1.0f;
 	ContaminationSurfaceSizeOverrideCm = FVector2D::ZeroVector;
@@ -59,6 +62,12 @@ void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
 	}
 
+}
+
+void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AMD_CuttableWall, bHasSupport);
 }
 
 void AMD_CuttableWall::BeginPlay()
@@ -108,6 +117,7 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 		if (AMD_Sector* Sector = AMD_Sector::FindSectorContaining(Cutter))
 		{
 			Sector->CollapseCeiling();
+			OnStrutCollapsed.Broadcast(this, Cutter);
 		}
 		else
 		{

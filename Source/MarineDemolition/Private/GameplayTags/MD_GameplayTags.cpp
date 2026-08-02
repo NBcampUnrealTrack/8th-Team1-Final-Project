@@ -33,4 +33,9 @@ namespace MDGameplayTags
 		Interaction_Pickup_Physics,
 		"Interaction.Pickup.Physics",
 		"Carry the interacted actor as a world physics object");
+	
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+	  Ability_PlaceSupport,
+	  "Ability.PlaceSupport",
+	  "임시 지지대 설치 어빌리티");
 }
