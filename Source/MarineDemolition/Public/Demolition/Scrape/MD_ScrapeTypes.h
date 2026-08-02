@@ -59,11 +59,93 @@ public:
 	FVector2D EndPositionCm;
 };
 
+/** 헤라가 표면과 접촉하는 브러시 형태 */
+UENUM(BlueprintType)
+enum class EMD_ScrapeBrushShape : uint8
+{
+	/** 기본 헤라. 이동 방향에 수직으로 날의 가로축을 맞춘 사각 접촉면 */
+	Rectangle UMETA(DisplayName = "사각형"),
+
+	/** 원형 헤라 업그레이드. BladeWidthCm을 지름으로 사용 */
+	Circle UMETA(DisplayName = "원형")
+};
+
 /**
- * 기본 헤라가 오염막을 제거하는 방식을 조정하는 값 모음
+ * 장착한 헤라가 제공하는 판정 성능
  *
- * 현재는 헤라 한 종류만 사용하지만, 수치를 별도 구조체로 분리해 두면 본게임에서
- * 광폭 헤라나 열선 헤라를 추가할 때 판정 코드를 복제하지 않고 설정값만 교체 가능.
+ * 플레이어별 업그레이드 상태는 이 구조체로 표현한다. 벽은 이 값을 소유하지 않고
+ * 긁기 요청마다 전달받으므로 같은 벽도 플레이어의 장비에 따라 다른 범위로 긁힌다.
+ */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_ScrapeToolSpec
+{
+	GENERATED_BODY()
+
+public:
+	FMD_ScrapeToolSpec()
+		: BrushShape(EMD_ScrapeBrushShape::Rectangle)
+		, BladeWidthCm(12.0f)
+		, BladeDepthCm(12.0f)
+		, RemovalPerTravelCentimeter(0.08f)
+	{
+	}
+
+	/** 기본 사각 헤라와 원형 업그레이드를 구분하는 접촉 형태 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Tool")
+	EMD_ScrapeBrushShape BrushShape;
+
+	/**
+	 * 표면과 실제로 접촉하는 헤라 날의 폭
+	 *
+	 * 사각형에서는 이동 방향과 수직인 날의 가로 길이, 원형에서는 지름으로 사용한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Tool",
+		meta = (ClampMin = "0.1", UIMin = "1.0", Units = "cm"))
+	float BladeWidthCm;
+
+	/**
+	 * 사각형 접촉면이 이동 방향으로 차지하는 길이
+	 *
+	 * 기본값은 폭과 같은 12cm 정사각형이며 원형 판정에서는 사용하지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Tool",
+		meta = (ClampMin = "0.1", UIMin = "1.0", Units = "cm",
+			EditCondition = "BrushShape == EMD_ScrapeBrushShape::Rectangle",
+			EditConditionHides))
+	float BladeDepthCm;
+
+	/**
+	 * 헤라가 1cm 이동할 때 접촉 셀에서 제거하려는 오염막의 정규화 양
+	 *
+	 * 범위 업그레이드와 제거 성능 업그레이드를 서로 독립적으로 조정할 수 있다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Tool",
+		meta = (ClampMin = "0.0001", UIMin = "0.001"))
+	float RemovalPerTravelCentimeter;
+
+	/** 판정기에 전달할 수 있는 유한한 양수 값인지 확인 */
+	bool IsValid() const
+	{
+		const bool bHasKnownShape =
+			BrushShape == EMD_ScrapeBrushShape::Rectangle
+			|| BrushShape == EMD_ScrapeBrushShape::Circle;
+
+		return bHasKnownShape
+			&& FMath::IsFinite(BladeWidthCm)
+			&& BladeWidthCm > UE_SMALL_NUMBER
+			&& FMath::IsFinite(BladeDepthCm)
+			&& BladeDepthCm > UE_SMALL_NUMBER
+			&& FMath::IsFinite(RemovalPerTravelCentimeter)
+			&& RemovalPerTravelCentimeter > UE_SMALL_NUMBER;
+	}
+};
+
+/**
+ * 긁기 판정의 최종 설정값 모음
+ *
+ * 기존 Blueprint 직렬화와 직접 벽 호출의 호환성을 위해 헤라 성능값도 유지한다.
+ * 일반 플레이 경로에서는 UMD_ScrapeToolComponent가 소유한 FMD_ScrapeToolSpec을
+ * 별도 인자로 전달하므로 이 구조체의 헤라 수치는 기존 직접 호출의 기본값으로만 사용한다.
  */
 USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_ScrapeSettings
@@ -84,7 +166,8 @@ public:
 	/**
 	 * 표면과 실제로 접촉하는 헤라 날의 폭
 	 *
-	 * Task 1에서는 복잡한 사각 날 충돌 대신 이 값을 지름으로 갖는 원형 브러시로 근사.
+	 * 기존 직접 호출에서는 이 값을 폭과 깊이로 갖는 기본 정사각형 스펙을 생성한다.
+	 * 일반 플레이 경로의 실제 형태와 크기는 FMD_ScrapeToolSpec을 사용한다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape",
 		meta = (ClampMin = "0.1", UIMin = "1.0", Units = "cm"))
@@ -113,8 +196,8 @@ public:
 	/**
 	 * 셀이 매우 큰 경우에도 샘플 사이가 지나치게 벌어지지 않게 하는 상한 거리
 	 *
-	 * 실제 샘플 간격은 "가장 작은 셀 크기 × 비율"과 이 값 중 더 작은 쪽을 사용.
-	 * 따라서 격자 해상도를 낮춘 테스트 표면에서도 긁기 자국이 점선처럼 끊어지는 현상을 완화.
+	 * 실제 샘플 간격은 "가장 작은 셀 크기 × 비율", 이 값, 그리고 이동 방향의
+	 * 브러시 크기 절반 중 가장 작은 값을 사용해 얇은 사각 헤라도 점선처럼 끊기지 않게 한다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape",
 		meta = (ClampMin = "0.1", UIMin = "0.5", Units = "cm"))
@@ -139,6 +222,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape",
 		meta = (ClampMin = "0.0", ClampMax = "0.1", UIMin = "0.0", UIMax = "0.01"))
 	float CleanTolerance;
+
+	/** 이 설정에 들어 있는 헤라 성능값을 별도 도구 스펙으로 반환 */
+	FMD_ScrapeToolSpec GetToolSpec() const
+	{
+		FMD_ScrapeToolSpec ToolSpec;
+		ToolSpec.BladeWidthCm = BladeWidthCm;
+		ToolSpec.BladeDepthCm = BladeWidthCm;
+		ToolSpec.RemovalPerTravelCentimeter = RemovalPerTravelCentimeter;
+		return ToolSpec;
+	}
 };
 
 /**
@@ -309,7 +402,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	bool bWasStrokeLongEnough;
 
-	/** 헤라의 원형 접촉 범위가 표면의 셀 하나 이상과 겹쳤는지 여부 */
+	/** 헤라의 사각형 또는 원형 접촉 범위가 표면의 셀 하나 이상과 겹쳤는지 여부 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	bool bHadSurfaceContact;
 

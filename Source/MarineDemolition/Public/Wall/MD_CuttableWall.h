@@ -69,9 +69,32 @@ public:
 		const FHitResult& StartHit,
 		const FHitResult& EndHit);
 
+	// 플레이어가 장착한 헤라 성능을 사용해 충돌점 사이의 오염 셀을 제거
+	UFUNCTION(BlueprintCallable, Category = "Wall|Contamination")
+	FMD_ScrapeResult ApplyScrapeStrokeFromHitsWithToolSpec(
+		const FHitResult& StartHit,
+		const FHitResult& EndHit,
+		const FMD_ScrapeToolSpec& ToolSpec);
+
 	// 로컬 좌표의 긁기 경로를 적용
 	UFUNCTION(BlueprintCallable, Category = "Wall|Contamination")
 	FMD_ScrapeResult ApplyLocalScrapeStroke(const FMD_ScrapeStroke& Stroke);
+
+	// 플레이어가 장착한 헤라 성능을 사용해 로컬 긁기 경로를 적용
+	UFUNCTION(BlueprintCallable, Category = "Wall|Contamination")
+	FMD_ScrapeResult ApplyLocalScrapeStrokeWithToolSpec(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec);
+
+	/** 유효한 벽 충돌점을 표면 로컬 2D 좌표로 변환 */
+	bool TryGetScrapeSurfacePositionFromHit(
+		const FHitResult& Hit,
+		FVector2D& OutSurfacePositionCm);
+
+	/** 표면 로컬 2D 좌표를 피드백용 월드 좌표로 변환 */
+	bool TryGetScrapeSurfaceWorldPosition(
+		const FVector2D& SurfacePositionCm,
+		FVector& OutWorldPosition) const;
 
 	// 전체 오염 제거 비율(0~1)
 	UFUNCTION(BlueprintPure, Category = "Wall|Contamination")
@@ -140,7 +163,7 @@ protected:
 		meta = (ClampMin = "0.0", Units = "cm"))
 	FVector2D ContaminationSurfaceSizeOverrideCm;
 
-	// 헤라 판정 설정
+	// 표면 판정 설정. 포함된 헤라 수치는 기존 직접 호출의 기본값으로만 사용
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination")
 	FMD_ScrapeSettings ScrapeSettings;
 

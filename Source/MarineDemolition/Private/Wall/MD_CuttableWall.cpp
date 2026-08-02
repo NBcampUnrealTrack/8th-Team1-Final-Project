@@ -205,35 +205,82 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHits(
 	const FHitResult& StartHit,
 	const FHitResult& EndHit)
 {
-	// BeginPlay 이전 호출도 지원
-	if (!bContaminationSurfaceInitialized)
-	{
-		InitializeContaminationSurface();
-	}
+	return ApplyScrapeStrokeFromHitsWithToolSpec(
+		StartHit,
+		EndHit,
+		ScrapeSettings.GetToolSpec());
+}
 
-	// 같은 벽의 작업면 충돌만 허용
-	if (!IsHitOnContaminationFace(StartHit)
-		|| !IsHitOnContaminationFace(EndHit))
-	{
-		return FMD_ScrapeResult();
-	}
-
+FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHitsWithToolSpec(
+	const FHitResult& StartHit,
+	const FHitResult& EndHit,
+	const FMD_ScrapeToolSpec& ToolSpec)
+{
 	FMD_ScrapeStroke LocalStroke;
-	if (!TryProjectWorldPointToContaminationSurface(
-			StartHit.ImpactPoint,
+	if (!TryGetScrapeSurfacePositionFromHit(
+			StartHit,
 			LocalStroke.StartPositionCm)
-		|| !TryProjectWorldPointToContaminationSurface(
-			EndHit.ImpactPoint,
+		|| !TryGetScrapeSurfacePositionFromHit(
+			EndHit,
 			LocalStroke.EndPositionCm))
 	{
 		return FMD_ScrapeResult();
 	}
 
-	return ApplyLocalScrapeStroke(LocalStroke);
+	return ApplyLocalScrapeStrokeWithToolSpec(LocalStroke, ToolSpec);
+}
+
+bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromHit(
+	const FHitResult& Hit,
+	FVector2D& OutSurfacePositionCm)
+{
+	OutSurfacePositionCm = FVector2D::ZeroVector;
+	if (!bContaminationSurfaceInitialized)
+	{
+		InitializeContaminationSurface();
+	}
+
+	return IsHitOnContaminationFace(Hit)
+		&& TryProjectWorldPointToContaminationSurface(
+			Hit.ImpactPoint,
+			OutSurfacePositionCm);
+}
+
+bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPosition(
+	const FVector2D& SurfacePositionCm,
+	FVector& OutWorldPosition) const
+{
+	OutWorldPosition = FVector::ZeroVector;
+	if (!bContaminationSurfaceInitialized
+		|| !Mesh
+		|| !FMath::IsFinite(SurfacePositionCm.X)
+		|| !FMath::IsFinite(SurfacePositionCm.Y))
+	{
+		return false;
+	}
+
+	FVector SurfaceFaceCenterLocal = ContaminationSurfaceCenterLocal;
+	SurfaceFaceCenterLocal.Y = ContaminationMeshLocalBoundsMaximum.Y;
+	const FVector SurfaceCenterWorld =
+		Mesh->GetComponentTransform().TransformPosition(
+			SurfaceFaceCenterLocal);
+	OutWorldPosition = SurfaceCenterWorld
+		+ Mesh->GetForwardVector() * SurfacePositionCm.X
+		+ Mesh->GetUpVector() * SurfacePositionCm.Y;
+	return !OutWorldPosition.ContainsNaN();
 }
 
 FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
 	const FMD_ScrapeStroke& Stroke)
+{
+	return ApplyLocalScrapeStrokeWithToolSpec(
+		Stroke,
+		ScrapeSettings.GetToolSpec());
+}
+
+FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStrokeWithToolSpec(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec)
 {
 	// Spawn 직후 호출도 지원
 	if (!bContaminationSurfaceInitialized)
@@ -250,6 +297,7 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
 
 	FMD_ScrapeResult Result = FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 		Stroke,
+		ToolSpec,
 		ScrapeSettings,
 		ContaminationGridDimensions,
 		ResolvedContaminationSurfaceSizeCm,

@@ -244,7 +244,13 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 {
-	const FVector2D LookInput = Value.Get<FVector2D>();
+	FVector2D LookInput = Value.Get<FVector2D>();
+	if (IsValid(ScrapeToolComponent))
+	{
+		// 입력을 먼저 고정해 카메라 되튐을 막는다.
+		LookInput = ScrapeToolComponent->ConstrainLookInput(LookInput);
+	}
+
 	AddControllerYawInput(LookInput.X);
 	AddControllerPitchInput(LookInput.Y);
 }

@@ -20,8 +20,16 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	BareSurfaceScrapeEffect = nullptr;
 	MinimumFeedbackIntervalSeconds = 0.08f;
 	bShowDebugFeedback = true;
+	DirectionLockThresholdCm = 1.0f;
+	MaximumPerpendicularDriftCm = 2.0f;
+	BreakStrokePerpendicularDistanceCm = 8.0f;
+	bLockLookInputToStrokeAxis = true;
 	bIsScraping = false;
-	bHasPreviousHit = false;
+	bHasPreviousSurfacePosition = false;
+	bHasLockedStrokeAxis = false;
+	PreviousSurfacePositionCm = FVector2D::ZeroVector;
+	StrokeAnchorPositionCm = FVector2D::ZeroVector;
+	LockedStrokeAxis = FVector2D::ZeroVector;
 	LastFeedbackWorldSeconds = -DBL_MAX;
 
 	PrimaryComponentTick.bCanEverTick = true;
@@ -55,6 +63,55 @@ void UMD_ScrapeToolComponent::BeginPlay()
 	SetComponentTickEnabled(false);
 }
 
+FVector2D UMD_ScrapeToolComponent::ConstrainLookInput(
+	const FVector2D& LookInput) const
+{
+	if (!bLockLookInputToStrokeAxis
+		|| !bIsScraping
+		|| !bHasLockedStrokeAxis)
+	{
+		return LookInput;
+	}
+
+	FVector2D ConstrainedLookInput = LookInput;
+	if (FMath::Abs(LockedStrokeAxis.X)
+		>= FMath::Abs(LockedStrokeAxis.Y))
+	{
+		// 가로 긁기에서는 위아래 시선을 고정한다.
+		ConstrainedLookInput.Y = 0.0;
+	}
+	else
+	{
+		// 세로 긁기에서는 좌우 시선을 고정한다.
+		ConstrainedLookInput.X = 0.0;
+	}
+
+	return ConstrainedLookInput;
+}
+
+bool UMD_ScrapeToolComponent::SetScrapeToolSpec(
+	const FMD_ScrapeToolSpec& NewToolSpec)
+{
+	if (!NewToolSpec.IsValid())
+	{
+		return false;
+	}
+
+	ScrapeToolSpec = NewToolSpec;
+
+	// 성능이 바뀐 프레임에 이전 위치부터 새 범위를 소급 적용하지 않도록 경로를 끊는다.
+	ResetStrokeTracking();
+	return true;
+}
+
+bool UMD_ScrapeToolComponent::SetScrapeBladeWidthCm(
+	const float NewBladeWidthCm)
+{
+	FMD_ScrapeToolSpec NewToolSpec = ScrapeToolSpec;
+	NewToolSpec.BladeWidthCm = NewBladeWidthCm;
+	return SetScrapeToolSpec(NewToolSpec);
+}
+
 void UMD_ScrapeToolComponent::StartScraping()
 {
 	if (bIsScraping)
@@ -63,7 +120,7 @@ void UMD_ScrapeToolComponent::StartScraping()
 	}
 
 	bIsScraping = true;
-	ResetPreviousHit();
+	ResetStrokeTracking();
 	SetComponentTickEnabled(true);
 
 	// 입력을 누른 첫 프레임의 조준점을 즉시 기록해 다음 프레임부터 스트로크를 만들 수 있게 한다.
@@ -79,7 +136,7 @@ void UMD_ScrapeToolComponent::StopScraping()
 
 	bIsScraping = false;
 	SetComponentTickEnabled(false);
-	ResetPreviousHit();
+	ResetStrokeTracking();
 }
 
 void UMD_ScrapeToolComponent::TickComponent(
@@ -103,27 +160,69 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace()
 	AMD_CuttableWall* CurrentWall = nullptr;
 	if (!TryGetCurrentWallHit(CurrentHit, CurrentWall))
 	{
-		ResetPreviousHit();
+		ResetStrokeTracking();
 		return;
 	}
 
-	if (bHasPreviousHit
-		&& PreviousWall.IsValid()
-		&& PreviousWall.Get() == CurrentWall)
+	FVector2D RawSurfacePositionCm;
+	if (!CurrentWall->TryGetScrapeSurfacePositionFromHit(
+		CurrentHit,
+		RawSurfacePositionCm))
 	{
-		const FMD_ScrapeResult Result =
-			CurrentWall->ApplyScrapeStrokeFromHits(PreviousHit, CurrentHit);
-
-		if (Result.bIsInputValid && Result.bWasStrokeLongEnough)
-		{
-			OnScrapeApplied.Broadcast(CurrentWall, Result);
-			EmitFeedback(CurrentWall, Result, CurrentHit.ImpactPoint);
-		}
+		ResetStrokeTracking();
+		return;
 	}
 
-	PreviousHit = CurrentHit;
-	PreviousWall = CurrentWall;
-	bHasPreviousHit = true;
+	if (!bHasPreviousSurfacePosition
+		|| !PreviousWall.IsValid()
+		|| PreviousWall.Get() != CurrentWall)
+	{
+		BeginStrokeTracking(CurrentWall, RawSurfacePositionCm);
+		return;
+	}
+
+	FVector2D ConstrainedSurfacePositionCm;
+	if (!TryConstrainStrokePosition(
+		RawSurfacePositionCm,
+		ConstrainedSurfacePositionCm))
+	{
+		return;
+	}
+
+	FVector ConstrainedWorldPosition = CurrentHit.ImpactPoint;
+	const bool bHasConstrainedWorldPosition =
+		CurrentWall->TryGetScrapeSurfaceWorldPosition(
+			ConstrainedSurfacePositionCm,
+			ConstrainedWorldPosition);
+	if (bLockLookInputToStrokeAxis
+		&& bHasConstrainedWorldPosition
+		&& !RawSurfacePositionCm.Equals(
+			ConstrainedSurfacePositionCm,
+			0.01))
+	{
+		// 조준점과 실제 자국을 한곳에 둔다.
+		KeepAimOnScrapePosition(ConstrainedWorldPosition);
+	}
+
+	FMD_ScrapeStroke Stroke;
+	Stroke.StartPositionCm = PreviousSurfacePositionCm;
+	Stroke.EndPositionCm = ConstrainedSurfacePositionCm;
+	const FMD_ScrapeResult Result =
+		CurrentWall->ApplyLocalScrapeStrokeWithToolSpec(
+			Stroke,
+			ScrapeToolSpec);
+
+	if (Result.bIsInputValid && Result.bWasStrokeLongEnough)
+	{
+		const FVector FeedbackLocation = bHasConstrainedWorldPosition
+			? ConstrainedWorldPosition
+			: CurrentHit.ImpactPoint;
+
+		OnScrapeApplied.Broadcast(CurrentWall, Result);
+		EmitFeedback(CurrentWall, Result, FeedbackLocation);
+	}
+
+	PreviousSurfacePositionCm = ConstrainedSurfacePositionCm;
 }
 
 bool UMD_ScrapeToolComponent::TryGetCurrentWallHit(
@@ -163,10 +262,122 @@ bool UMD_ScrapeToolComponent::TryGetCurrentWallHit(
 	return IsValid(OutWall);
 }
 
-void UMD_ScrapeToolComponent::ResetPreviousHit()
+void UMD_ScrapeToolComponent::BeginStrokeTracking(
+	AMD_CuttableWall* Wall,
+	const FVector2D& SurfacePositionCm)
 {
-	bHasPreviousHit = false;
-	PreviousHit = FHitResult();
+	bHasPreviousSurfacePosition = true;
+	bHasLockedStrokeAxis = false;
+	PreviousSurfacePositionCm = SurfacePositionCm;
+	StrokeAnchorPositionCm = SurfacePositionCm;
+	LockedStrokeAxis = FVector2D::ZeroVector;
+	PreviousWall = Wall;
+}
+
+bool UMD_ScrapeToolComponent::TryConstrainStrokePosition(
+	const FVector2D& RawSurfacePositionCm,
+	FVector2D& OutConstrainedPositionCm)
+{
+	OutConstrainedPositionCm = RawSurfacePositionCm;
+	if (!bHasPreviousSurfacePosition)
+	{
+		return false;
+	}
+
+	const FVector2D AnchorToRawCm =
+		RawSurfacePositionCm - StrokeAnchorPositionCm;
+	if (!bHasLockedStrokeAxis)
+	{
+		const double SafeLockThresholdCm = FMath::Max(
+			static_cast<double>(DirectionLockThresholdCm),
+			static_cast<double>(UE_SMALL_NUMBER));
+		if (AnchorToRawCm.Size() < SafeLockThresholdCm)
+		{
+			return false;
+		}
+
+		// 첫 움직임에서 더 큰 축을 이번 줄의 방향으로 고정한다.
+		LockedStrokeAxis = FMath::Abs(AnchorToRawCm.X)
+			>= FMath::Abs(AnchorToRawCm.Y)
+			? FVector2D(1.0, 0.0)
+			: FVector2D(0.0, 1.0);
+		bHasLockedStrokeAxis = true;
+	}
+
+	const FVector2D ParallelOffsetCm = LockedStrokeAxis
+		* FVector2D::DotProduct(AnchorToRawCm, LockedStrokeAxis);
+	FVector2D PerpendicularOffsetCm =
+		AnchorToRawCm - ParallelOffsetCm;
+	const double PerpendicularDistanceCm =
+		PerpendicularOffsetCm.Size();
+	const double SafeMaximumDriftCm = FMath::Max(
+		0.0,
+		static_cast<double>(MaximumPerpendicularDriftCm));
+	const double SafeBreakDistanceCm = FMath::Max(
+		SafeMaximumDriftCm,
+		static_cast<double>(BreakStrokePerpendicularDistanceCm));
+
+	if (PerpendicularDistanceCm > SafeBreakDistanceCm)
+	{
+		// 큰 옆 이동은 긁지 않고 새 줄의 시작점이 된다.
+		PreviousSurfacePositionCm = RawSurfacePositionCm;
+		StrokeAnchorPositionCm = RawSurfacePositionCm;
+		LockedStrokeAxis = FVector2D::ZeroVector;
+		bHasLockedStrokeAxis = false;
+		return false;
+	}
+
+	if (PerpendicularDistanceCm > SafeMaximumDriftCm
+		&& PerpendicularDistanceCm > UE_SMALL_NUMBER)
+	{
+		PerpendicularOffsetCm *=
+			SafeMaximumDriftCm / PerpendicularDistanceCm;
+	}
+
+	OutConstrainedPositionCm = StrokeAnchorPositionCm
+		+ ParallelOffsetCm
+		+ PerpendicularOffsetCm;
+	return true;
+}
+
+void UMD_ScrapeToolComponent::KeepAimOnScrapePosition(
+	const FVector& WorldPosition) const
+{
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	if (!OwnerPawn
+		|| !OwnerPawn->IsLocallyControlled()
+		|| WorldPosition.ContainsNaN())
+	{
+		return;
+	}
+
+	AController* Controller = OwnerPawn->GetController();
+	if (!Controller)
+	{
+		return;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	const FVector ViewToScrapePosition = WorldPosition - ViewLocation;
+	if (ViewToScrapePosition.IsNearlyZero())
+	{
+		return;
+	}
+
+	FRotator CorrectedViewRotation = ViewToScrapePosition.Rotation();
+	CorrectedViewRotation.Roll = ViewRotation.Roll;
+	Controller->SetControlRotation(CorrectedViewRotation);
+}
+
+void UMD_ScrapeToolComponent::ResetStrokeTracking()
+{
+	bHasPreviousSurfacePosition = false;
+	bHasLockedStrokeAxis = false;
+	PreviousSurfacePositionCm = FVector2D::ZeroVector;
+	StrokeAnchorPositionCm = FVector2D::ZeroVector;
+	LockedStrokeAxis = FVector2D::ZeroVector;
 	PreviousWall.Reset();
 }
 

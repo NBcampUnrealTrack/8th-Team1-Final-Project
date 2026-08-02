@@ -57,6 +57,19 @@ public:
 		TArray<FMD_ScrapeSurfaceCell>& InOutSurfaceCells);
 
 	/**
+	 * 장착한 헤라의 형태와 성능을 명시하여 한 번의 이동을 격자에 적용
+	 *
+	 * 기존 오버로드는 ScrapeSettings 안의 수치로 기본 사각 스펙을 만들어 이 함수로 전달한다.
+	 */
+	static FMD_ScrapeResult ApplyStrokeToGrid(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FMD_ScrapeSettings& Settings,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		TArray<FMD_ScrapeSurfaceCell>& InOutSurfaceCells);
+
+	/**
 	 * ApplyStrokeToGrid를 실행할 수 있는 입력인지 부작용 없이 검사
 	 *
 	 * @param OutErrorMessage
@@ -65,6 +78,16 @@ public:
 	 */
 	static bool IsEvaluationInputValid(
 		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeSettings& Settings,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
+		FString* OutErrorMessage = nullptr);
+
+	/** 장착한 헤라 스펙을 포함하여 판정 입력을 검사 */
+	static bool IsEvaluationInputValid(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
@@ -103,8 +126,22 @@ private:
 	 * 셀 중심만으로 딱 잘라 판정하면 격자 모양의 거친 가장자리가 생기므로,
 	 * 셀 반대각선 길이만큼 경계를 부드럽게 보간
 	 */
-	static double CalculateCellCoverageWeight(
+	static double CalculateCircleCellCoverageWeight(
 		double DistanceFromBrushCenterCm,
 		double BladeRadiusCm,
+		double CellHalfDiagonalCm);
+
+	/** 이동 방향을 기준으로 회전한 사각 헤라가 한 셀을 덮는 가중치를 근사 */
+	static double CalculateRectangleCellCoverageWeight(
+		const FVector2D& BrushToCellCenterCm,
+		const FVector2D& BladeWidthAxis,
+		const FVector2D& BladeDepthAxis,
+		double BladeHalfWidthCm,
+		double BladeHalfDepthCm,
+		double CellHalfDiagonalCm);
+
+	/** 브러시 경계의 signed distance를 셀 피복 가중치 0~1로 변환 */
+	static double CalculateCoverageWeightFromSignedDistance(
+		double SignedDistanceToBrushCm,
 		double CellHalfDiagonalCm);
 };
