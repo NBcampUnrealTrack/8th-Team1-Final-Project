@@ -265,8 +265,7 @@ void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 	{
 		const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(Target);
 		const bool bPickupTarget = TagAsset
-			&& (TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Inventory)
-				|| TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics));
+				&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics);
 
 		if (!bPickupTarget)
 		{
@@ -287,48 +286,19 @@ void AMD_Character::ServerInteract_Implementation(AActor* RequestedActor)
 	}
 
 	if (!IsValid(RequestedActor)
-		|| !RequestedActor->Implements<UMD_Interactable>()
-		|| TraceInteractionTarget() != RequestedActor) return;
+			|| !RequestedActor->Implements<UMD_Interactable>()
+			|| TraceInteractionTarget() != RequestedActor) return;
 
+	// 핫바는 장비 전용 — 월드 오브젝트 픽업은 물리 운반만 허용 (기획 02 §2.5)
 	const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(RequestedActor);
 	if (TagAsset
-		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Inventory))
-	{
-		TryStoreTarget(RequestedActor);
-		return;
-	}
-
-	if (TagAsset
-		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics))
+			&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics))
 	{
 		TryHoldTarget(RequestedActor);
 		return;
 	}
 
 	IMD_Interactable::Execute_Interact(RequestedActor, this);
-}
-
-bool AMD_Character::TryStoreTarget(AActor* Target)
-{
-	if (!IsValid(Target)) return false;
-
-	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
-	if (!IsValid(MDPlayerState)) return false;
-
-	UMD_HotbarComponent* Hotbar = MDPlayerState->GetHotbarComponent();
-	if (!IsValid(Hotbar)) return false;
-
-	const TSubclassOf<AActor> ItemClass = Target->GetClass();
-	int32 SlotIndex = INDEX_NONE;
-	if (!Hotbar->TryAddItem(ItemClass, SlotIndex)) return false;
-
-	if (!Target->Destroy())
-	{
-		Hotbar->TryRemoveItemAt(SlotIndex);
-		return false;
-	}
-
-	return true;
 }
 
 bool AMD_Character::TryHoldTarget(AActor* Target)

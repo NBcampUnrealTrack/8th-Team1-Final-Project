@@ -145,8 +145,7 @@ private:
 
 	UFUNCTION(Server, Reliable)
 	void ServerInteract(AActor* RequestedActor);
-
-	bool TryStoreTarget(AActor* Target);
+	
 	bool TryHoldTarget(AActor* Target);
 	bool IsHolding() const;
 	void ReleaseTarget();
