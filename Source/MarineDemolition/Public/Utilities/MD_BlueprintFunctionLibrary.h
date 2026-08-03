@@ -4,13 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
-#include "MDBlueprintFunctionLibrary.generated.h"
+#include "MD_BlueprintFunctionLibrary.generated.h"
 
 /**
  * 
  */
 UCLASS()
-class MARINEDEMOLITION_API UMDBlueprintFunctionLibrary : public UBlueprintFunctionLibrary
+class MARINEDEMOLITION_API UMD_BlueprintFunctionLibrary : public UBlueprintFunctionLibrary
 {
 	GENERATED_BODY()
 	
