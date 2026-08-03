@@ -3,7 +3,7 @@
 
 #include "Player/MD_PlayerState.h"
 #include "AbilitySystemComponent.h"
-#include "Hotbar/MD_HotbarComponent.h"
+#include "Component/Equipment/MD_HotbarComponent.h"
 #include "Net/UnrealNetwork.h"
 
 void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

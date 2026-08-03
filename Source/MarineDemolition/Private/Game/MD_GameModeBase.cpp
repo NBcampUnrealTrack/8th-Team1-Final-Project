@@ -3,11 +3,11 @@
 
 #include "Game/MD_GameModeBase.h"
 #include "EngineUtils.h"
-#include "Game/MD_DayPersistenceSubsystem.h"
+#include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
 #include "Player/MD_PlayerState.h"
-#include "Wall/MD_CuttableWall.h"
+#include "World/Wall/MD_CuttableWall.h"
 
 AMD_GameModeBase::AMD_GameModeBase()
 {

@@ -6,7 +6,7 @@
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
 #include "AbilitySystemInterface.h"
-#include "Interaction/MD_Grabbable.h"
+#include "Gameplay/Interaction/MD_Grabbable.h"
 #include "MD_Character.generated.h"
 
 class UMD_InputConfig;
