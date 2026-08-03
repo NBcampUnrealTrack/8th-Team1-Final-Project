@@ -13,6 +13,9 @@ enum class EMD_WithdrawalPhase : uint8
     Departed  UMETA(DisplayName = "Departed")
 };
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnScoreChanged, int32, NewScore);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnDayChanged, int32, NewDay);
+
 UCLASS()
 class MARINEDEMOLITION_API AMD_GameStateBase : public AGameStateBase
 {
@@ -52,7 +55,27 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Withdrawal")
     EMD_WithdrawalPhase GetWithdrawalPhase() const;
+    
+    // 평가 점수 증감. 서버에서만 호출 (붕괴 -200 등)
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")
+    void AddScoreDelta(int32 Delta);
 
+    UFUNCTION(BlueprintPure, Category = "Score")
+    int32 GetScore() const { return Score; }
+
+    UPROPERTY(BlueprintAssignable, Category = "Score")
+    FMD_OnScoreChanged OnScoreChanged;
+
+    // 현재 Day (1~4). 서버에서만 변경
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Day")
+    void SetCurrentDay(int32 NewDay);
+
+    UFUNCTION(BlueprintPure, Category = "Day")
+    int32 GetCurrentDay() const { return CurrentDay; }
+
+    UPROPERTY(BlueprintAssignable, Category = "Day")
+    FMD_OnDayChanged OnDayChanged;
+    
 protected:
     virtual void BeginPlay() override;
 
@@ -82,9 +105,20 @@ private:
     EMD_WithdrawalPhase WithdrawalPhase =
         EMD_WithdrawalPhase::None;
 
+    UPROPERTY(ReplicatedUsing = OnRep_Score)
+    int32 Score = 0;
+    
+    UPROPERTY(ReplicatedUsing = OnRep_CurrentDay)
+    int32 CurrentDay = 1;
+
+    UFUNCTION()
+    void OnRep_CurrentDay();
+    
     UFUNCTION()
     void OnRep_WithdrawalPhase();
 
     void HandleWithdrawalPhaseChanged();
 
+    UFUNCTION()
+    void OnRep_Score();
 };
