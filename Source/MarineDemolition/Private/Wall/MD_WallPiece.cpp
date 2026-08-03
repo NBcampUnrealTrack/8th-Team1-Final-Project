@@ -2,9 +2,10 @@
 
 #include "Wall/MD_WallPiece.h"
 
-#include "Collision/MD_CollisionChannels.h"
 #include "Components/StaticMeshComponent.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Collision/MD_CollisionChannels.h"
+#include "GameplayTags/MD_GameplayTags.h"
 
 AMD_WallPiece::AMD_WallPiece()
 {
@@ -17,6 +18,7 @@ AMD_WallPiece::AMD_WallPiece()
 	Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
 	Mesh->SetCollisionObjectType(ECC_PhysicsBody);
 	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
+	Mesh->SetGenerateOverlapEvents(true);
 	Mesh->SetSimulatePhysics(true);
 }
 
@@ -24,9 +26,16 @@ void AMD_WallPiece::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) co
 {
 	TagContainer.Reset();
 
-	if (PickupMethodTag.IsValid())
+	if (PickupMethodTag.IsValid()
+		&& PickupMethodTag.MatchesTag(MDGameplayTags::Interaction_Pickup_Physics))
 	{
 		TagContainer.AddTag(PickupMethodTag);
+	}
+
+	if (StorageContentTag.IsValid()
+		&& StorageContentTag.MatchesTag(MDGameplayTags::Resource_Storage_Content))
+	{
+		TagContainer.AddTag(StorageContentTag);
 	}
 }
 

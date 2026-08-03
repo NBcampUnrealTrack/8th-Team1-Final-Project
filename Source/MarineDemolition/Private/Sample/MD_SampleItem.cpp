@@ -1,15 +1,17 @@
 #include "Sample/MD_SampleItem.h"
 
-#include "Collision/MD_CollisionChannels.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Collision/MD_CollisionChannels.h"
+#include "GameplayTags/MD_GameplayTags.h"
 
 AMD_SampleItem::AMD_SampleItem()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	SetReplicateMovement(true);
+	BreakImpactSpeed = 800.0f;
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
@@ -18,15 +20,24 @@ AMD_SampleItem::AMD_SampleItem()
 	Mesh->SetCollisionObjectType(ECC_PhysicsBody);
 	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
 	Mesh->SetGenerateOverlapEvents(true);
+	Mesh->SetNotifyRigidBodyCollision(true);
+	Mesh->SetSimulatePhysics(true);
 }
 
 void AMD_SampleItem::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
 {
 	TagContainer.Reset();
 
-	if (PickupMethodTag.IsValid())
+	if (PickupMethodTag.IsValid()
+		&& PickupMethodTag.MatchesTag(MDGameplayTags::Interaction_Pickup_Physics))
 	{
 		TagContainer.AddTag(PickupMethodTag);
+	}
+
+	if (StorageContentTag.IsValid()
+		&& StorageContentTag.MatchesTag(MDGameplayTags::Resource_Storage_Content))
+	{
+		TagContainer.AddTag(StorageContentTag);
 	}
 }
 
@@ -58,6 +69,10 @@ void AMD_SampleItem::BeginPlay()
 	Super::BeginPlay();
 
 	OnTakeAnyDamage.AddDynamic(this, &AMD_SampleItem::OnAnyDamage);
+	if (HasAuthority())
+	{
+		Mesh->OnComponentHit.AddDynamic(this, &AMD_SampleItem::HandleMeshHit);
+	}
 }
 
 void AMD_SampleItem::OnAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType,
@@ -74,4 +89,31 @@ void AMD_SampleItem::OnAnyDamage(AActor* DamagedActor, float Damage, const UDama
 		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Orange,
 				FString::Printf(TEXT("샘플 손상: %s"), *GetName()));
 	}
+}
+
+void AMD_SampleItem::HandleMeshHit(
+	UPrimitiveComponent* HitComponent,
+	AActor* OtherActor,
+	UPrimitiveComponent* OtherComponent,
+	FVector NormalImpulse,
+	const FHitResult& Hit)
+{
+	if (!HasAuthority() || IsActorBeingDestroyed())
+	{
+		return;
+	}
+
+	const float SampleMass = Mesh->GetMass();
+	if (!FMath::IsFinite(SampleMass) || SampleMass <= UE_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	const float ImpactSpeed = NormalImpulse.Size() / SampleMass;
+	if (!FMath::IsFinite(ImpactSpeed) || ImpactSpeed < BreakImpactSpeed)
+	{
+		return;
+	}
+
+	Destroy();
 }

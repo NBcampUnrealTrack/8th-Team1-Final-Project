@@ -33,8 +33,13 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "Piece")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
-	/** 이 액터를 집을 때 사용할 처리 방식. Interaction.Pickup 아래 태그만 선택한다. */
+	/** 이 액터를 집을 때 사용할 물리 운반 방식. Blueprint 기본값에서 지정한다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Interaction",
-		meta = (Categories = "Interaction.Pickup"))
+		meta = (Categories = "Interaction.Pickup.Physics"))
 	FGameplayTag PickupMethodTag;
+
+	/** 보관함이 이 벽 조각을 식별할 때 사용할 내용물 분류 태그 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Resource",
+		meta = (Categories = "Resource.Storage.Content"))
+	FGameplayTag StorageContentTag;
 };

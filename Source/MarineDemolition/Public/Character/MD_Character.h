@@ -6,6 +6,7 @@
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
 #include "AbilitySystemInterface.h"
+#include "Interaction/MD_Grabbable.h"
 #include "MD_Character.generated.h"
 
 class UMD_InputConfig;
@@ -150,6 +151,8 @@ private:
 	bool IsHolding() const;
 	void ReleaseTarget();
 	void UpdateHeldTarget();
+	void CaptureDefaultHoldProfile();
+	void ApplyHoldProfile(const FMD_HoldProfile& Profile);
 	void UpdateHotbarDebug() const;
 
 	void UpdateInteractionFocus();
@@ -164,4 +167,7 @@ private:
 
 	void RefreshToolMesh();
 	TWeakObjectPtr<AActor> CurrentTarget;
+	FVector HeldTargetOffset = FVector::ZeroVector;
+	FMD_HoldProfile DefaultHoldProfile;
+	FMD_HoldProfile ActiveHoldProfile;
 };
