@@ -155,15 +155,12 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerInteract(AActor* RequestedActor);
 
-	bool TryStoreTarget(AActor* Target);
 	bool TryHoldTarget(AActor* Target);
 	bool IsHolding() const;
 	void ReleaseTarget();
 	void UpdateHeldTarget();
 	void CaptureDefaultHoldProfile();
 	void ApplyHoldProfile(const FMD_HoldProfile& Profile);
-	void UpdateHotbarDebug() const;
-
 	void UpdateInteractionFocus();
 	AActor* TraceInteractionTarget() const;
 	void SetCurrentTarget(AActor* NewTarget);
