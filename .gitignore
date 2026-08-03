@@ -4,6 +4,25 @@ DerivedDataCache/
 Intermediate/
 Saved/
 Build/
+# Personal WIP — ignore by default. Soft refs in shared Sky/Lobby still need
+# JunminPark Environment + Landscape shipped until those refs are sealed.
+Content/Developers/*
+!Content/Developers/JunminPark/
+Content/Developers/JunminPark/*
+!Content/Developers/JunminPark/Environment/
+!Content/Developers/JunminPark/Landscape/
+Content/Developers/JunminPark/Environment/**
+!Content/Developers/JunminPark/Environment/Sky/
+!Content/Developers/JunminPark/Environment/Sky/**
+# Pack demo mannequin under Environment is not needed for lobby sky.
+Content/Developers/JunminPark/Environment/Sky/Stylized/Demo/
+Content/Developers/JunminPark/Landscape/**
+!Content/Developers/JunminPark/Landscape/Layers/
+!Content/Developers/JunminPark/Landscape/Layers/**
+!Content/Developers/JunminPark/Landscape/Materials/
+!Content/Developers/JunminPark/Landscape/Materials/**
+!Content/Developers/JunminPark/Landscape/Textures/
+!Content/Developers/JunminPark/Landscape/Textures/**
 
 # Plugin generated folders
 Plugins/**/Binaries/
@@ -13,6 +32,7 @@ Plugins/**/Intermediate/
 Plugins/Developer/RiderLink/
 
 # Visual Studio / Rider files
+.vsconfig
 .vs/
 .idea/
 *.sln
@@ -22,12 +42,33 @@ Plugins/Developer/RiderLink/
 *.sdf
 *.VC.db
 *.VC.opendb
+*.vsconfig
 
 # Generated config (keep Config/ tracked, ignore user-specific)
 Config/DefaultEditorPerProjectUserSettings.ini
 
-# Claude Code
+# AI coding agents (local state)
+.codex/
 .claude/
+/AGENT.md
+/CLAUDE.md
+
+# Local art (not tracked)
+Art/
+
+# Docs: track planning markdown; ignore local audit dumps
+Docs/**/_read_*.txt
+Docs/**/_*.tmp.md
+Docs/**/_audit*
+
+# Editor automation scripts (machine-local / WIP)
+Content/Python/
+
+# Local Unreal MCP / AI client configs (machine-local only)
+.cursor/
+.mcp.json
+.gemini/
+.codex/
 
 # OS files
 .DS_Store
