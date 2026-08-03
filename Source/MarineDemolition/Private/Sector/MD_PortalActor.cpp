@@ -226,7 +226,8 @@ bool AMD_PortalActor::TeleportActor(AActor* OtherActor)
 			MovementComponent->Velocity = TeleportedLinearVelocity;
 
 			// ComponentVelocity를 적용된 이동 속도와 동기화
-			MovementComponent->UpdateComponentVelocity();
+			//MovementComponent->UpdateComponentVelocity();
+			ClientUpdateMovementComponentVelocity(MovementComponent, TeleportedLinearVelocity);
 		}
 
 		// Controller에 의하여 제어되고 있는 경우 Controller에 Teleport 이후 회전 값 적용
@@ -240,7 +241,8 @@ bool AMD_PortalActor::TeleportActor(AActor* OtherActor)
 				FRotator TeleportedControllerRotation = TransformRotationToLinkedPortal(Controller->GetControlRotation());
 
 				// 회전 값 적용
-				Controller->SetControlRotation(TeleportedControllerRotation);
+				//Controller->SetControlRotation(TeleportedControllerRotation);
+				Controller->ClientSetRotation(TeleportedControllerRotation, true);
 			}
 		}
 	}
@@ -348,6 +350,7 @@ void AMD_PortalActor::OnRep_LinkedPortal()
 	// 연결된 Portal의 유효성 검사
 	if (LinkedPortal.IsValid() == false)
 	{
+		SceneCaptureComponent->HiddenActors.Reset();
 		return;
 	}
 
@@ -355,6 +358,8 @@ void AMD_PortalActor::OnRep_LinkedPortal()
 	SceneCaptureComponent->ClipPlaneBase = LinkedPortal->GetActorLocation() - ClipPlaneOffset * LinkedPortal->GetActorForwardVector();
 	SceneCaptureComponent->ClipPlaneNormal = LinkedPortal->GetActorForwardVector();
 
+	// 연결된 Portal을 캡처되는 Scene에서 제외
+	SceneCaptureComponent->HiddenActors.Add(LinkedPortal.Get());
 }
 
 void AMD_PortalActor::OnRep_PortalActive()
@@ -497,6 +502,12 @@ void AMD_PortalActor::UpdatePortalCaptureScene()
 {
 	// Dedicated Server 환경의 경우 함수 조기 종료
 	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// 최근 렌더링되지 않은 경우 함수 조기 종료
+	if (WasRecentlyRendered() == false)
 	{
 		return;
 	}
@@ -694,6 +705,7 @@ void AMD_PortalActor::InitPortalTextureRenderTarget()
 	{
 		GEngine->GameViewport->GetViewportSize(ViewportSize);
 	}
+	ViewportSize = FVector2D::Max(ViewportSize, FVector2D::One());
 	TextureRenderTarget->InitAutoFormat(ViewportSize.X, ViewportSize.Y);
 
 	SceneCaptureComponent->TextureTarget = TextureRenderTarget;
@@ -750,4 +762,15 @@ FQuat AMD_PortalActor::GetPortalQuatDelta() const
 	FQuat PortalQuatDelta = (FlippedLinkedPortalQuat * WorldToThisPortalQuat).GetNormalized();
 
 	return PortalQuatDelta;
+}
+
+void AMD_PortalActor::ClientUpdateMovementComponentVelocity_Implementation(UMovementComponent* MovementComponent, FVector NewVelocity)
+{
+	if (IsValid(MovementComponent) == false)
+	{
+		return;
+	}
+
+	MovementComponent->Velocity = NewVelocity;
+	MovementComponent->UpdateComponentVelocity();
 }
