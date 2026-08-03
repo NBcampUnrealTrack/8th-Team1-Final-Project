@@ -5,6 +5,15 @@
 #include "Character/MD_Character.h"
 #include "Demolition/Scrape/MD_ScrapeToolComponent.h"
 
+UMD_GA_Scrape::UMD_GA_Scrape()
+{
+	// 소유 클라이언트는 조준/축 고정을 즉시 예측하고, 같은 Ability를 서버에서도 실행해
+	// 실제 오염 상태 변경은 서버 컴포넌트만 수행한다.
+	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
+	NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
+	ReplicationPolicy = EGameplayAbilityReplicationPolicy::ReplicateNo;
+}
+
 void UMD_GA_Scrape::ActivateAbility(
 	const FGameplayAbilitySpecHandle Handle,
 	const FGameplayAbilityActorInfo* ActorInfo,

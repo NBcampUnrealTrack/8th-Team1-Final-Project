@@ -13,13 +13,37 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 	const FVector2D& SurfaceSizeCm,
 	TArray<FMD_ScrapeSurfaceCell>& InOutSurfaceCells)
 {
+	return ApplyStrokeToGrid(
+		Stroke,
+		Settings.GetToolSpec(),
+		Settings,
+		GridDimensions,
+		SurfaceSizeCm,
+		InOutSurfaceCells);
+}
+
+FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FMD_ScrapeSettings& Settings,
+	const FIntPoint& GridDimensions,
+	const FVector2D& SurfaceSizeCm,
+	TArray<FMD_ScrapeSurfaceCell>& InOutSurfaceCells)
+{
 	FMD_ScrapeResult Result;
 
 	// 실제 배열을 수정하기 전에 모든 입력을 먼저 검사
 	// 실패 이유는 결과 구조체에 담지 않고 로그로만 남김
 	// 게임 규칙 분기는 bIsInputValid로 판단하며, 문자열은 개발 중 원인 추적에만 사용
 	FString ValidationErrorMessage;
-	if (!IsEvaluationInputValid(Stroke,	Settings, GridDimensions, SurfaceSizeCm, InOutSurfaceCells,	&ValidationErrorMessage))
+	if (!IsEvaluationInputValid(
+		Stroke,
+		ToolSpec,
+		Settings,
+		GridDimensions,
+		SurfaceSizeCm,
+		InOutSurfaceCells,
+		&ValidationErrorMessage))
 	{
 		UE_LOG(MarineDemolition, Warning, TEXT("%s 긁기 판정 입력이 올바르지 않음: %s"), *UE_CALL_LOCATIONINFO, *ValidationErrorMessage);
 
@@ -49,7 +73,8 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 
 	// 이동 거리가 너무 짧으면 버튼을 누른 채 정지해 있는 입력이나 미세한 손 떨림으로 가정
 	// 정상적인 플레이에서도 매 프레임 발생하는 상황이므로 로그를 남기지 않음
-	if (StrokeDistanceCm < static_cast<double>(Settings.MinimumTravelDistanceCm))
+	if (StrokeDistanceCm <= static_cast<double>(UE_SMALL_NUMBER)
+		|| StrokeDistanceCm < static_cast<double>(Settings.MinimumTravelDistanceCm))
 	{
 		return Result;
 	}
@@ -63,18 +88,51 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 
 	const double SmallestCellSideCm = FMath::Min(CellSizeCm.X, CellSizeCm.Y);
 	const double RatioBasedSpacingCm = SmallestCellSideCm * static_cast<double>(Settings.SampleSpacingRatioOfSmallestCell);
-	const double SampleSpacingCm = FMath::Min(RatioBasedSpacingCm, static_cast<double>(Settings.MaximumSampleSpacingCm));
+	const double BrushTravelSizeCm =
+		ToolSpec.BrushShape == EMD_ScrapeBrushShape::Circle
+		? static_cast<double>(ToolSpec.BladeWidthCm)
+		: static_cast<double>(ToolSpec.BladeDepthCm);
+	const double BrushBasedSpacingCm = BrushTravelSizeCm * 0.5;
+	const double SampleSpacingCm = FMath::Min3(
+		RatioBasedSpacingCm,
+		static_cast<double>(Settings.MaximumSampleSpacingCm),
+		BrushBasedSpacingCm);
 
 	// 이동 거리를 샘플 최대 간격으로 나눈 뒤 올림하면 실제 간격은 항상 설정값 이하로 유지
-	// 예: 10cm 이동, 최대 간격 2.5cm -> 4개 구간, 각 구간의 길이는 2.5cm
+	// 얇은 사각 헤라도 이동 방향으로 빈틈이 생기지 않도록 브러시 길이의 절반을 추가 상한으로 사용
 	const int32 SampleCount = FMath::Max(1,FMath::CeilToInt(StrokeDistanceCm / SampleSpacingCm));
 	const double TravelDistancePerSampleCm = StrokeDistanceCm / static_cast<double>(SampleCount);
 
-	const double BladeRadiusCm = static_cast<double>(Settings.BladeWidthCm) * 0.5;
 	const double CellHalfDiagonalCm = 0.5 * FMath::Sqrt(FMath::Square(CellSizeCm.X) + FMath::Square(CellSizeCm.Y));
+	const FVector2D BladeDepthAxis = StrokeDelta / StrokeDistanceCm;
+	const FVector2D BladeWidthAxis(
+		-BladeDepthAxis.Y,
+		BladeDepthAxis.X);
+	const double BladeHalfWidthCm =
+		static_cast<double>(ToolSpec.BladeWidthCm) * 0.5;
+	const double BladeHalfDepthCm =
+		static_cast<double>(ToolSpec.BladeDepthCm) * 0.5;
 
-	// 헤라 원과 셀 사각형이 조금이라도 겹칠 수 있는 최대 거리
-	const double MaximumInfluenceRadiusCm = BladeRadiusCm + CellHalfDiagonalCm;
+	// 후보 셀 검색 범위를 브러시 형태의 표면 X/Y AABB로 계산
+	FVector2D MaximumInfluenceExtentCm;
+	if (ToolSpec.BrushShape == EMD_ScrapeBrushShape::Circle)
+	{
+		const double InfluenceRadiusCm =
+			BladeHalfWidthCm + CellHalfDiagonalCm;
+		MaximumInfluenceExtentCm = FVector2D(
+			InfluenceRadiusCm,
+			InfluenceRadiusCm);
+	}
+	else
+	{
+		MaximumInfluenceExtentCm = FVector2D(
+			FMath::Abs(BladeWidthAxis.X) * BladeHalfWidthCm
+				+ FMath::Abs(BladeDepthAxis.X) * BladeHalfDepthCm
+				+ CellHalfDiagonalCm,
+			FMath::Abs(BladeWidthAxis.Y) * BladeHalfWidthCm
+				+ FMath::Abs(BladeDepthAxis.Y) * BladeHalfDepthCm
+				+ CellHalfDiagonalCm);
+	}
 
 	// 동일 셀이 여러 샘플과 겹쳐도 TouchedCellCount는 한 번만 증가해야 하므로 비트 배열을 사용
 	TBitArray<> TouchedCells(false, InOutSurfaceCells.Num());
@@ -101,19 +159,19 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 		const FVector2D SamplePositionCm =
 			FMath::Lerp(Stroke.StartPositionCm, Stroke.EndPositionCm, Alpha);
 
-		// 전체 격자를 매 샘플마다 훑지 않고, 헤라 반경 근처의 셀 인덱스 범위만 계산
+		// 전체 격자를 매 샘플마다 훑지 않고, 헤라 영향 범위 근처의 셀 인덱스만 계산
 		// FloorToInt를 사용하므로 표면 최소 좌표가 정확히 0번 셀의 시작점에 대응
 		const int32 UnclampedMinimumX = FMath::FloorToInt(
-			(SamplePositionCm.X - MaximumInfluenceRadiusCm - SurfaceMinimumCm.X)
+			(SamplePositionCm.X - MaximumInfluenceExtentCm.X - SurfaceMinimumCm.X)
 			/ CellSizeCm.X);
 		const int32 UnclampedMaximumX = FMath::FloorToInt(
-			(SamplePositionCm.X + MaximumInfluenceRadiusCm - SurfaceMinimumCm.X)
+			(SamplePositionCm.X + MaximumInfluenceExtentCm.X - SurfaceMinimumCm.X)
 			/ CellSizeCm.X);
 		const int32 UnclampedMinimumY = FMath::FloorToInt(
-			(SamplePositionCm.Y - MaximumInfluenceRadiusCm - SurfaceMinimumCm.Y)
+			(SamplePositionCm.Y - MaximumInfluenceExtentCm.Y - SurfaceMinimumCm.Y)
 			/ CellSizeCm.Y);
 		const int32 UnclampedMaximumY = FMath::FloorToInt(
-			(SamplePositionCm.Y + MaximumInfluenceRadiusCm - SurfaceMinimumCm.Y)
+			(SamplePositionCm.Y + MaximumInfluenceExtentCm.Y - SurfaceMinimumCm.Y)
 			/ CellSizeCm.Y);
 
 		// 후보 범위가 표면과 전혀 겹치지 않으면 Clamp로 가장자리 셀을 억지로 검사하지 않고 건너뜀
@@ -155,12 +213,26 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 					SurfaceMinimumCm.Y
 						+ (static_cast<double>(CellY) + 0.5) * CellSizeCm.Y);
 
-				const double DistanceFromBrushCenterCm =
-					FVector2D::Distance(SamplePositionCm, CellCenterCm);
-				const double CoverageWeight = CalculateCellCoverageWeight(
-					DistanceFromBrushCenterCm,
-					BladeRadiusCm,
-					CellHalfDiagonalCm);
+				const FVector2D BrushToCellCenterCm =
+					CellCenterCm - SamplePositionCm;
+				double CoverageWeight = 0.0;
+				if (ToolSpec.BrushShape == EMD_ScrapeBrushShape::Circle)
+				{
+					CoverageWeight = CalculateCircleCellCoverageWeight(
+						BrushToCellCenterCm.Size(),
+						BladeHalfWidthCm,
+						CellHalfDiagonalCm);
+				}
+				else
+				{
+					CoverageWeight = CalculateRectangleCellCoverageWeight(
+						BrushToCellCenterCm,
+						BladeWidthAxis,
+						BladeDepthAxis,
+						BladeHalfWidthCm,
+						BladeHalfDepthCm,
+						CellHalfDiagonalCm);
+				}
 
 				// 피복 가중치가 사실상 0인 후보는 실제 접촉으로 미집계
 				if (CoverageWeight <= UE_SMALL_NUMBER)
@@ -178,7 +250,7 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 				// 제거량은 Tick 횟수나 DeltaTime이 아니라 실제 이동 거리 기준
 				// 따라서 30fps와 120fps에서 같은 거리로 움직인 헤라는 거의 같은 결과
 				const double RequestedRemovalAmount =
-					static_cast<double>(Settings.RemovalPerTravelCentimeter)
+					static_cast<double>(ToolSpec.RemovalPerTravelCentimeter)
 					* TravelDistancePerSampleCm
 					* CoverageWeight;
 
@@ -297,6 +369,25 @@ bool FMD_ScrapeEvaluator::IsEvaluationInputValid(
 	const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
 	FString* OutErrorMessage)
 {
+	return IsEvaluationInputValid(
+		Stroke,
+		Settings.GetToolSpec(),
+		Settings,
+		GridDimensions,
+		SurfaceSizeCm,
+		SurfaceCells,
+		OutErrorMessage);
+}
+
+bool FMD_ScrapeEvaluator::IsEvaluationInputValid(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FMD_ScrapeSettings& Settings,
+	const FIntPoint& GridDimensions,
+	const FVector2D& SurfaceSizeCm,
+	const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
+	FString* OutErrorMessage)
+{
 	// 성공할 경우 이전 호출에서 남은 오류 문자열이 사용되지 않도록 먼저 초기화
 	if (OutErrorMessage != nullptr)
 	{
@@ -350,18 +441,32 @@ bool FMD_ScrapeEvaluator::IsEvaluationInputValid(
 			TEXT("Scrape stroke positions must contain finite values."));
 	}
 
-	if (!FMath::IsFinite(Settings.BladeWidthCm)
-		|| Settings.BladeWidthCm <= UE_SMALL_NUMBER)
+	if (ToolSpec.BrushShape != EMD_ScrapeBrushShape::Rectangle
+		&& ToolSpec.BrushShape != EMD_ScrapeBrushShape::Circle)
 	{
 		return FailValidation(
-			TEXT("BladeWidthCm must be finite and greater than zero."));
+			TEXT("ToolSpec.BrushShape must be Rectangle or Circle."));
 	}
 
-	if (!FMath::IsFinite(Settings.RemovalPerTravelCentimeter)
-		|| Settings.RemovalPerTravelCentimeter <= UE_SMALL_NUMBER)
+	if (!FMath::IsFinite(ToolSpec.BladeWidthCm)
+		|| ToolSpec.BladeWidthCm <= UE_SMALL_NUMBER)
 	{
 		return FailValidation(
-			TEXT("RemovalPerTravelCentimeter must be finite and greater than zero."));
+			TEXT("ToolSpec.BladeWidthCm must be finite and greater than zero."));
+	}
+
+	if (!FMath::IsFinite(ToolSpec.BladeDepthCm)
+		|| ToolSpec.BladeDepthCm <= UE_SMALL_NUMBER)
+	{
+		return FailValidation(
+			TEXT("ToolSpec.BladeDepthCm must be finite and greater than zero."));
+	}
+
+	if (!FMath::IsFinite(ToolSpec.RemovalPerTravelCentimeter)
+		|| ToolSpec.RemovalPerTravelCentimeter <= UE_SMALL_NUMBER)
+	{
+		return FailValidation(
+			TEXT("ToolSpec.RemovalPerTravelCentimeter must be finite and greater than zero."));
 	}
 
 	if (!FMath::IsFinite(Settings.SampleSpacingRatioOfSmallestCell)
@@ -476,17 +581,15 @@ bool FMD_ScrapeEvaluator::IsSurfaceFullyClean(
 	return true;
 }
 
-double FMD_ScrapeEvaluator::CalculateCellCoverageWeight(
+double FMD_ScrapeEvaluator::CalculateCircleCellCoverageWeight(
 	const double DistanceFromBrushCenterCm,
 	const double BladeRadiusCm,
 	const double CellHalfDiagonalCm)
 {
-	// 헤라 원 안에 셀 전체가 들어올 수 있는 구간은 100% 피복으로 간주
+	// 기존 원형 판정의 피복 특성을 유지해 원형 업그레이드 전환 시 수치가 달라지지 않게 한다.
 	const double FullCoverageRadiusCm = FMath::Max(
 		0.0,
 		BladeRadiusCm - CellHalfDiagonalCm);
-
-	// 헤라 중심에서 이 거리보다 멀면 원과 셀 사각형이 겹칠 수 없으므로 피복률은 0
 	const double ZeroCoverageRadiusCm =
 		BladeRadiusCm + CellHalfDiagonalCm;
 
@@ -500,13 +603,59 @@ double FMD_ScrapeEvaluator::CalculateCellCoverageWeight(
 		return 0.0;
 	}
 
-	// 정확한 원-사각형 교차 면적 계산은 프로토타입에 비해 비용과 복잡도가 과다
-	// 두 경계 사이를 선형 보간해 부드러운 가장자리를 만드는 것으로 충분히 근사
 	const double FadeRangeCm =
 		ZeroCoverageRadiusCm - FullCoverageRadiusCm;
 	const double FadeAlpha =
 		(DistanceFromBrushCenterCm - FullCoverageRadiusCm)
 		/ FadeRangeCm;
-
 	return FMath::Clamp(1.0 - FadeAlpha, 0.0, 1.0);
+}
+
+double FMD_ScrapeEvaluator::CalculateRectangleCellCoverageWeight(
+	const FVector2D& BrushToCellCenterCm,
+	const FVector2D& BladeWidthAxis,
+	const FVector2D& BladeDepthAxis,
+	const double BladeHalfWidthCm,
+	const double BladeHalfDepthCm,
+	const double CellHalfDiagonalCm)
+{
+	// 셀 중심을 스트로크 방향 기준의 사각 헤라 로컬 좌표로 변환
+	const double LocalWidthDistanceCm = FMath::Abs(
+		FVector2D::DotProduct(BrushToCellCenterCm, BladeWidthAxis));
+	const double LocalDepthDistanceCm = FMath::Abs(
+		FVector2D::DotProduct(BrushToCellCenterCm, BladeDepthAxis));
+
+	// 표준 사각형 signed distance: 음수는 내부, 0은 경계, 양수는 외부
+	const double WidthOutsideCm =
+		LocalWidthDistanceCm - BladeHalfWidthCm;
+	const double DepthOutsideCm =
+		LocalDepthDistanceCm - BladeHalfDepthCm;
+	const double OutsideDistanceCm = FMath::Sqrt(
+		FMath::Square(FMath::Max(WidthOutsideCm, 0.0))
+		+ FMath::Square(FMath::Max(DepthOutsideCm, 0.0)));
+	const double InsideDistanceCm = FMath::Min(
+		FMath::Max(WidthOutsideCm, DepthOutsideCm),
+		0.0);
+	const double SignedDistanceToRectangleCm =
+		OutsideDistanceCm + InsideDistanceCm;
+
+	return CalculateCoverageWeightFromSignedDistance(
+		SignedDistanceToRectangleCm,
+		CellHalfDiagonalCm);
+}
+
+double FMD_ScrapeEvaluator::CalculateCoverageWeightFromSignedDistance(
+	const double SignedDistanceToBrushCm,
+	const double CellHalfDiagonalCm)
+{
+	const double SafeCellHalfDiagonalCm = FMath::Max(
+		CellHalfDiagonalCm,
+		static_cast<double>(UE_SMALL_NUMBER));
+
+	// 셀을 중심과 반대각선으로 근사해 브러시 안쪽은 1, 바깥쪽은 0으로 부드럽게 전환
+	return FMath::Clamp(
+		(SafeCellHalfDiagonalCm - SignedDistanceToBrushCm)
+			/ (2.0 * SafeCellHalfDiagonalCm),
+		0.0,
+		1.0);
 }

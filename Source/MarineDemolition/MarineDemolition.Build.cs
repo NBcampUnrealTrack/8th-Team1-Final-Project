@@ -10,7 +10,7 @@ public class MarineDemolition : ModuleRules
 
 		PublicDependencyModuleNames.AddRange(new string[]
 		{
-			"Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput",
+			"Core", "CoreUObject", "Engine", "InputCore", "EnhancedInput", "NetCore",
 			// GAS
 			"GameplayAbilities", "GameplayTags", "GameplayTasks",
 			// AI

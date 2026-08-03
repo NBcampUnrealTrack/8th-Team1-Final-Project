@@ -16,6 +16,136 @@ namespace
 	const FLinearColor NeutralWallColor(0.4f, 0.4f, 0.45f);
 }
 
+void FMD_ReplicatedScrapeCellStateArray::SetOwner(
+	AMD_CuttableWall* InOwner)
+{
+	Owner = InOwner;
+	CellToItemIndex.Reset();
+
+	for (int32 ItemIndex = 0; ItemIndex < Items.Num(); ++ItemIndex)
+	{
+		const int32 CellIndex = Items[ItemIndex].CellIndex;
+		if (CellIndex != INDEX_NONE)
+		{
+			CellToItemIndex.Add(CellIndex, ItemIndex);
+		}
+	}
+}
+
+void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
+	const int32 CellIndex,
+	const float RemainingContamination)
+{
+	if (!Owner
+		|| !Owner->HasAuthority()
+		|| !Owner->ContaminationCells.IsValidIndex(CellIndex)
+		|| !FMath::IsFinite(RemainingContamination))
+	{
+		return;
+	}
+
+	const float InitialContamination = FMath::Clamp(
+		Owner->ContaminationCells[CellIndex].InitialContamination,
+		0.0f,
+		1.0f);
+	const float SafeRemaining = FMath::Clamp(
+		RemainingContamination,
+		0.0f,
+		InitialContamination);
+	const bool bMatchesInitial = FMath::IsNearlyEqual(
+		SafeRemaining,
+		InitialContamination,
+		UE_SMALL_NUMBER);
+
+	if (const int32* ExistingItemIndex = CellToItemIndex.Find(CellIndex))
+	{
+		if (Items.IsValidIndex(*ExistingItemIndex))
+		{
+			if (bMatchesInitial)
+			{
+				const int32 RemovedItemIndex = *ExistingItemIndex;
+				Items.RemoveAtSwap(RemovedItemIndex, 1, EAllowShrinking::No);
+				CellToItemIndex.Remove(CellIndex);
+				if (Items.IsValidIndex(RemovedItemIndex))
+				{
+					CellToItemIndex.FindOrAdd(
+						Items[RemovedItemIndex].CellIndex) = RemovedItemIndex;
+				}
+				MarkArrayDirty();
+				return;
+			}
+
+			FMD_ReplicatedScrapeCellState& Item = Items[*ExistingItemIndex];
+			if (Item.RemainingContamination != SafeRemaining)
+			{
+				Item.RemainingContamination = SafeRemaining;
+				MarkItemDirty(Item);
+			}
+			return;
+		}
+
+		CellToItemIndex.Remove(CellIndex);
+	}
+
+	if (bMatchesInitial)
+	{
+		return;
+	}
+
+	const int32 NewItemIndex = Items.Emplace(CellIndex, SafeRemaining);
+	CellToItemIndex.Add(CellIndex, NewItemIndex);
+	MarkItemDirty(Items[NewItemIndex]);
+}
+
+void FMD_ReplicatedScrapeCellStateArray::ResetState()
+{
+	if (!Items.IsEmpty())
+	{
+		Items.Reset();
+		MarkArrayDirty();
+	}
+
+	CellToItemIndex.Reset();
+}
+
+void FMD_ReplicatedScrapeCellStateArray::PreReplicatedRemove(
+	const TArrayView<int32>& RemovedIndices,
+	const int32)
+{
+	if (Owner)
+	{
+		Owner->HandleReplicatedContaminationState(RemovedIndices, true);
+	}
+}
+
+void FMD_ReplicatedScrapeCellStateArray::PostReplicatedAdd(
+	const TArrayView<int32>& AddedIndices,
+	const int32)
+{
+	for (const int32 ItemIndex : AddedIndices)
+	{
+		if (Items.IsValidIndex(ItemIndex))
+		{
+			CellToItemIndex.Add(Items[ItemIndex].CellIndex, ItemIndex);
+		}
+	}
+
+	if (Owner)
+	{
+		Owner->HandleReplicatedContaminationState(AddedIndices, false);
+	}
+}
+
+void FMD_ReplicatedScrapeCellStateArray::PostReplicatedChange(
+	const TArrayView<int32>& ChangedIndices,
+	const int32)
+{
+	if (Owner)
+	{
+		Owner->HandleReplicatedContaminationState(ChangedIndices, false);
+	}
+}
+
 AMD_CuttableWall::AMD_CuttableWall()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -34,6 +164,7 @@ AMD_CuttableWall::AMD_CuttableWall()
 	CachedContaminationCleanRatio = 0.0f;
 	bContaminationSurfaceInitialized = false;
 	bContaminationCompletionBroadcast = false;
+	ReplicatedContaminationState.SetOwner(this);
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
@@ -68,10 +199,16 @@ void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AMD_CuttableWall, bHasSupport);
+	DOREPLIFETIME(AMD_CuttableWall, ReplicatedContaminationState);
 }
 
 void AMD_CuttableWall::ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells)
 {
+	if (!HasAuthority())
+	{
+		return;
+	}
+
 	if (!bContaminationSurfaceInitialized)
 	{
 		InitializeContaminationSurface();
@@ -114,11 +251,13 @@ void AMD_CuttableWall::ReapplyContaminationPatch(float Amount, int32 PatchRadius
 	// 오염이 다시 생겼으므로 완료 방송을 다시 허용
 	bContaminationCompletionBroadcast = IsContaminationFullyRemoved();
 	UpdateContaminationVisualization(Changes);
+	PublishContaminationChanges(Changes);
 }
 
 void AMD_CuttableWall::BeginPlay()
 {
 	Super::BeginPlay();
+	ReplicatedContaminationState.SetOwner(this);
 
 	// 런타임 오염 상태 초기화
 	InitializeContaminationSurface();
@@ -131,11 +270,16 @@ void AMD_CuttableWall::BeginPlay()
 	}
 
 	InitializeContaminationVisualization();
+
+	if (!HasAuthority())
+	{
+		ApplyAllReplicatedContaminationState();
+	}
 }
 
 void AMD_CuttableWall::Cut(AActor* Cutter)
 {
-	if (bCut)
+	if (!HasAuthority() || bCut)
 	{
 		return;
 	}
@@ -205,36 +349,88 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHits(
 	const FHitResult& StartHit,
 	const FHitResult& EndHit)
 {
-	// BeginPlay 이전 호출도 지원
-	if (!bContaminationSurfaceInitialized)
-	{
-		InitializeContaminationSurface();
-	}
+	return ApplyScrapeStrokeFromHitsWithToolSpec(
+		StartHit,
+		EndHit,
+		ScrapeSettings.GetToolSpec());
+}
 
-	// 같은 벽의 작업면 충돌만 허용
-	if (!IsHitOnContaminationFace(StartHit)
-		|| !IsHitOnContaminationFace(EndHit))
-	{
-		return FMD_ScrapeResult();
-	}
-
+FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHitsWithToolSpec(
+	const FHitResult& StartHit,
+	const FHitResult& EndHit,
+	const FMD_ScrapeToolSpec& ToolSpec)
+{
 	FMD_ScrapeStroke LocalStroke;
-	if (!TryProjectWorldPointToContaminationSurface(
-			StartHit.ImpactPoint,
+	if (!TryGetScrapeSurfacePositionFromHit(
+			StartHit,
 			LocalStroke.StartPositionCm)
-		|| !TryProjectWorldPointToContaminationSurface(
-			EndHit.ImpactPoint,
+		|| !TryGetScrapeSurfacePositionFromHit(
+			EndHit,
 			LocalStroke.EndPositionCm))
 	{
 		return FMD_ScrapeResult();
 	}
 
-	return ApplyLocalScrapeStroke(LocalStroke);
+	return ApplyLocalScrapeStrokeWithToolSpec(LocalStroke, ToolSpec);
+}
+
+bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromHit(
+	const FHitResult& Hit,
+	FVector2D& OutSurfacePositionCm)
+{
+	OutSurfacePositionCm = FVector2D::ZeroVector;
+	if (!bContaminationSurfaceInitialized)
+	{
+		InitializeContaminationSurface();
+	}
+
+	return IsHitOnContaminationFace(Hit)
+		&& TryProjectWorldPointToContaminationSurface(
+			Hit.ImpactPoint,
+			OutSurfacePositionCm);
+}
+
+bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPosition(
+	const FVector2D& SurfacePositionCm,
+	FVector& OutWorldPosition) const
+{
+	OutWorldPosition = FVector::ZeroVector;
+	if (!bContaminationSurfaceInitialized
+		|| !Mesh
+		|| !FMath::IsFinite(SurfacePositionCm.X)
+		|| !FMath::IsFinite(SurfacePositionCm.Y))
+	{
+		return false;
+	}
+
+	FVector SurfaceFaceCenterLocal = ContaminationSurfaceCenterLocal;
+	SurfaceFaceCenterLocal.Y = ContaminationMeshLocalBoundsMaximum.Y;
+	const FVector SurfaceCenterWorld =
+		Mesh->GetComponentTransform().TransformPosition(
+			SurfaceFaceCenterLocal);
+	OutWorldPosition = SurfaceCenterWorld
+		+ Mesh->GetForwardVector() * SurfacePositionCm.X
+		+ Mesh->GetUpVector() * SurfacePositionCm.Y;
+	return !OutWorldPosition.ContainsNaN();
 }
 
 FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
 	const FMD_ScrapeStroke& Stroke)
 {
+	return ApplyLocalScrapeStrokeWithToolSpec(
+		Stroke,
+		ScrapeSettings.GetToolSpec());
+}
+
+FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStrokeWithToolSpec(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec)
+{
+	if (!HasAuthority())
+	{
+		return FMD_ScrapeResult();
+	}
+
 	// Spawn 직후 호출도 지원
 	if (!bContaminationSurfaceInitialized)
 	{
@@ -250,6 +446,7 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
 
 	FMD_ScrapeResult Result = FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 		Stroke,
+		ToolSpec,
 		ScrapeSettings,
 		ContaminationGridDimensions,
 		ResolvedContaminationSurfaceSizeCm,
@@ -263,6 +460,7 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
 
 	CachedContaminationCleanRatio = Result.CleanRatioAfter;
 	UpdateContaminationVisualization(Result.CellChanges);
+	PublishContaminationChanges(Result.CellChanges);
 
 	// 최초 완료 시 한 번만 방송
 	if (!bWasFullyRemoved
@@ -376,6 +574,10 @@ void AMD_CuttableWall::InitializeContaminationSurface()
 	bContaminationCompletionBroadcast = false;
 	CachedContaminationCleanRatio = 0.0f;
 	ContaminationCells.Reset();
+	if (HasAuthority())
+	{
+		ReplicatedContaminationState.ResetState();
+	}
 
 	if (!ResolveContaminationSurfaceGeometry())
 	{
@@ -569,6 +771,126 @@ void AMD_CuttableWall::UpdateContaminationVisualization(
 	{
 		ContaminationOverlay->MarkRenderStateDirty();
 	}
+}
+
+void AMD_CuttableWall::HandleReplicatedContaminationState(
+	const TConstArrayView<int32> StateItemIndices,
+	const bool bResetToInitial)
+{
+	if (HasAuthority() || !bContaminationSurfaceInitialized)
+	{
+		return;
+	}
+
+	const bool bWasFullyRemoved = IsContaminationFullyRemoved();
+	const TArray<FMD_ReplicatedScrapeCellState>& StateItems =
+		ReplicatedContaminationState.GetItems();
+	TArray<FMD_ScrapeCellChange> CellChanges;
+	CellChanges.Reserve(StateItemIndices.Num());
+
+	for (const int32 StateItemIndex : StateItemIndices)
+	{
+		if (!StateItems.IsValidIndex(StateItemIndex))
+		{
+			continue;
+		}
+
+		const FMD_ReplicatedScrapeCellState& StateItem =
+			StateItems[StateItemIndex];
+		if (!ContaminationCells.IsValidIndex(StateItem.CellIndex))
+		{
+			continue;
+		}
+
+		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[StateItem.CellIndex];
+		const float PreviousRemaining = Cell.RemainingContamination;
+		const float TargetRemaining = bResetToInitial
+			? Cell.InitialContamination
+			: (FMath::IsFinite(StateItem.RemainingContamination)
+				? FMath::Clamp(
+					StateItem.RemainingContamination,
+					0.0f,
+					Cell.InitialContamination)
+				: Cell.InitialContamination);
+
+		if (FMath::IsNearlyEqual(
+			PreviousRemaining,
+			TargetRemaining,
+			UE_SMALL_NUMBER))
+		{
+			continue;
+		}
+
+		Cell.RemainingContamination = TargetRemaining;
+
+		FMD_ScrapeCellChange& CellChange = CellChanges.AddDefaulted_GetRef();
+		CellChange.CellIndex = StateItem.CellIndex;
+		CellChange.GridCoordinate = FIntPoint(
+			StateItem.CellIndex % ContaminationGridDimensions.X,
+			StateItem.CellIndex / ContaminationGridDimensions.X);
+		CellChange.RemovedAmount = FMath::Max(
+			0.0f,
+			PreviousRemaining - TargetRemaining);
+		CellChange.RemainingAmountAfter = TargetRemaining;
+		CellChange.bBecameClean =
+			PreviousRemaining > ScrapeSettings.CleanTolerance
+			&& TargetRemaining <= ScrapeSettings.CleanTolerance;
+	}
+
+	CachedContaminationCleanRatio =
+		FMD_ScrapeEvaluator::CalculateCleanRatio(ContaminationCells);
+	UpdateContaminationVisualization(CellChanges);
+
+	const bool bIsFullyRemoved = IsContaminationFullyRemoved();
+	if (!bWasFullyRemoved
+		&& bIsFullyRemoved
+		&& !bContaminationCompletionBroadcast)
+	{
+		bContaminationCompletionBroadcast = true;
+		OnContaminationFullyRemoved.Broadcast(this);
+	}
+	else if (!bIsFullyRemoved)
+	{
+		bContaminationCompletionBroadcast = false;
+	}
+}
+
+void AMD_CuttableWall::ApplyAllReplicatedContaminationState()
+{
+	const TArray<FMD_ReplicatedScrapeCellState>& StateItems =
+		ReplicatedContaminationState.GetItems();
+	TArray<int32> StateItemIndices;
+	StateItemIndices.Reserve(StateItems.Num());
+
+	for (int32 StateItemIndex = 0;
+		StateItemIndex < StateItems.Num();
+		++StateItemIndex)
+	{
+		StateItemIndices.Add(StateItemIndex);
+	}
+
+	HandleReplicatedContaminationState(StateItemIndices, false);
+}
+
+void AMD_CuttableWall::PublishContaminationChanges(
+	const TArray<FMD_ScrapeCellChange>& CellChanges)
+{
+	if (!HasAuthority() || CellChanges.IsEmpty())
+	{
+		return;
+	}
+
+	for (const FMD_ScrapeCellChange& CellChange : CellChanges)
+	{
+		if (ContaminationCells.IsValidIndex(CellChange.CellIndex))
+		{
+			ReplicatedContaminationState.SetCellRemaining(
+				CellChange.CellIndex,
+				ContaminationCells[CellChange.CellIndex].RemainingContamination);
+		}
+	}
+
+	ForceNetUpdate();
 }
 
 FTransform AMD_CuttableWall::MakeContaminationCellVisualTransform(

@@ -32,6 +32,8 @@ class MARINEDEMOLITION_API UMD_ScrapeToolComponent : public UActorComponent
 
 public:
 	UMD_ScrapeToolComponent();
+	virtual void GetLifetimeReplicatedProps(
+		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** 헤라 입력을 시작하고 현재 조준점을 첫 스트로크 기준점으로 기록한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape")
@@ -43,6 +45,24 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
 	bool IsScraping() const { return bIsScraping; }
+
+	/** 잠긴 스트로크와 다른 방향의 시선 입력을 제거한다. */
+	FVector2D ConstrainLookInput(const FVector2D& LookInput) const;
+
+	/** 현재 장착한 헤라의 판정 성능을 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool")
+	FMD_ScrapeToolSpec GetScrapeToolSpec() const { return ScrapeToolSpec; }
+
+	/**
+	 * 업그레이드 시스템이 새 헤라 성능을 적용한다.
+	 * 잘못된 값은 거부하며 기존 성능을 유지한다.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Scrape|Tool")
+	bool SetScrapeToolSpec(const FMD_ScrapeToolSpec& NewToolSpec);
+
+	/** 제거 성능은 유지하고 사각 날의 폭 또는 원형 판정의 지름만 교체한다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Scrape|Tool")
+	bool SetScrapeBladeWidthCm(float NewBladeWidthCm);
 
 	/**
 	 * 유효한 스트로크가 벽 판정기에 전달될 때마다 발생한다.
@@ -63,6 +83,33 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape",
 		meta = (ClampMin = "1.0", Units = "cm"))
 	float TraceDistanceCm;
+
+	/**
+	 * 현재 장착한 헤라의 판정 성능.
+	 * 기본 헤라는 12cm × 12cm 사각형이며 업그레이드 시 형태와 크기를 교체할 수 있다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_ScrapeToolSpec,
+		Category = "MD|Scrape|Tool")
+	FMD_ScrapeToolSpec ScrapeToolSpec;
+
+	/** 이 거리만큼 움직이면 수평·수직 중 한 축을 잠근다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Motion",
+		meta = (ClampMin = "0.1", Units = "cm"))
+	float DirectionLockThresholdCm;
+
+	/** 잠긴 축에서 허용하는 작은 옆 흔들림이다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Motion",
+		meta = (ClampMin = "0.0", Units = "cm"))
+	float MaximumPerpendicularDriftCm;
+
+	/** 이 거리보다 옆으로 벗어나면 연결 없이 새 스트로크를 시작한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Motion",
+		meta = (ClampMin = "0.1", Units = "cm"))
+	float BreakStrokePerpendicularDistanceCm;
+
+	/** 스트로크가 잠기면 반대 방향의 시선 입력을 막는다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Motion")
+	bool bLockLookInputToStrokeAxis;
 
 	/** 벽 충돌을 검사할 채널. 기본 벽과 동일한 Visibility 채널을 사용한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
@@ -98,17 +145,41 @@ private:
 	static const TCHAR* GetContactTypeLabel(EMD_ScrapeContactType ContactType);
 
 	void ProcessScrapeTrace();
+	void DispatchAuthoritativeScrapeResult(
+		AMD_CuttableWall* Wall,
+		const FMD_ScrapeResult& Result,
+		const FVector& ContactLocation);
+
+	UFUNCTION(Client, Unreliable)
+	void ClientReceiveScrapeResult(
+		AMD_CuttableWall* Wall,
+		const FMD_ScrapeResult& Result,
+		FVector_NetQuantize10 ContactLocation);
+
+	UFUNCTION()
+	void OnRep_ScrapeToolSpec();
+
 	bool TryGetCurrentWallHit(FHitResult& OutHit, AMD_CuttableWall*& OutWall) const;
-	void ResetPreviousHit();
+	void BeginStrokeTracking(
+		AMD_CuttableWall* Wall,
+		const FVector2D& SurfacePositionCm);
+	bool TryConstrainStrokePosition(
+		const FVector2D& RawSurfacePositionCm,
+		FVector2D& OutConstrainedPositionCm);
+	void KeepAimOnScrapePosition(const FVector& WorldPosition) const;
+	void ResetStrokeTracking();
 	void EmitFeedback(
 		AMD_CuttableWall* Wall,
 		const FMD_ScrapeResult& Result,
 		const FVector& ContactLocation);
 
 	bool bIsScraping;
-	bool bHasPreviousHit;
+	bool bHasPreviousSurfacePosition;
+	bool bHasLockedStrokeAxis;
 
-	FHitResult PreviousHit;
+	FVector2D PreviousSurfacePositionCm;
+	FVector2D StrokeAnchorPositionCm;
+	FVector2D LockedStrokeAxis;
 	TWeakObjectPtr<AMD_CuttableWall> PreviousWall;
 
 	double LastFeedbackWorldSeconds;
