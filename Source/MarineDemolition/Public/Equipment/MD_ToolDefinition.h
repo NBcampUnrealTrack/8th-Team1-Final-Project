@@ -10,7 +10,7 @@
 class UGameplayAbility;
 class UTexture2D;
 
-UCLASS()
+UCLASS(BlueprintType)
 class MARINEDEMOLITION_API UMD_ToolDefinition : public UDataAsset
 {
 	GENERATED_BODY()

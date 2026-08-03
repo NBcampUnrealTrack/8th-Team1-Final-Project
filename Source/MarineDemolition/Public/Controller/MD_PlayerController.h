@@ -8,6 +8,7 @@
 
 class AMD_TravelConsole;
 class UMD_HUDWidget;
+class UMD_EquipHotbarWidget;
 
 UCLASS()
 class MARINEDEMOLITION_API AMD_PlayerController : public APlayerController
@@ -28,4 +29,10 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UMD_HUDWidget> HUDWidgetInstance;
+
+	UPROPERTY(EditDefaultsOnly, Category = "HUD")
+	TSubclassOf<UMD_EquipHotbarWidget> EquipHotbarWidgetClass;
+
+	UPROPERTY()
+	TObjectPtr<UMD_EquipHotbarWidget> EquipHotbarWidgetInstance;
 };
