@@ -1,0 +1,39 @@
+# Git LFS Guard — raw 바이너리(포인터 아님)가 들어오면 CI fail.
+# 사용: 각 게임 repo의 ".github/workflows/lfs-guard.yml" 로 복사.
+# 브랜치 보호에서 이 체크를 "필수"로 지정하면 raw 섞인 PR 머지가 차단됨.
+# Reverb(libgit2)가 raw로 커밋해도 push/PR 단계에서 서버측으로 잡힌다 (클라 무관).
+name: LFS Guard
+on: [push, pull_request]
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false # smudge 안 함 — 저장된 포인터 원형을 검사해야 하므로
+
+      - name: LFS 대상인데 raw로 커밋된 파일 탐지
+        shell: bash
+        run: |
+          set -uo pipefail
+          fail=0
+          # 추적 중인 모든 파일을 돌며: .gitattributes 상 filter=lfs 인데
+          # 저장된 blob이 LFS 포인터 헤더로 시작하지 않으면 raw → 실패.
+          while IFS= read -r f; do
+            if git check-attr filter -- "$f" | grep -q 'filter: lfs'; then
+              header="$(git cat-file -p "HEAD:$f" 2>/dev/null | head -c 60 || true)"
+              case "$header" in
+                version*https://git-lfs.github.com/spec*) : ;;  # 정상 포인터
+                *)
+                  echo "::error file=$f::LFS 대상인데 raw로 커밋됨 (포인터 아님). 'git lfs migrate import' 또는 재커밋 필요."
+                  fail=1
+                  ;;
+              esac
+            fi
+          done < <(git ls-files)
+          if [ "$fail" -ne 0 ]; then
+            echo "raw 바이너리가 LFS 포인터 대신 커밋되었습니다. 위 파일들을 정리하세요."
+            exit 1
+          fi
+          echo "LFS OK — raw 바이너리 없음."
