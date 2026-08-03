@@ -163,6 +163,7 @@ private:
 	// 현재 Portal과 연결된 Portal 사이의 회전 값 차이를 계산하는 함수
 	FQuat GetPortalQuatDelta() const;
 
-	UFUNCTION(Client, Reliable)
-	void ClientUpdateMovementComponentVelocity(class UMovementComponent* MovementComponent, FVector NewVelocity);
+	// UMovementComponent의 Velocity를 변경하기 위한 RPC 함수
+	UFUNCTION(NetMulticast, Reliable)
+	void NetMulticastUpdateMovementComponentVelocity(class UMovementComponent* MovementComponent, FVector NewVelocity);
 };
