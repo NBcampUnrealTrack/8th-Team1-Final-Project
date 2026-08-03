@@ -43,6 +43,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "DatasmithImporter",
+			"Enabled": true
+		},
+		{
 			"Name": "Water",
 			"Enabled": true
 		},
