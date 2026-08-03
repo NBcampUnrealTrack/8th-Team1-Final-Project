@@ -94,7 +94,6 @@ void AMD_Character::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	// 하이라이트 억제는 들고 있는 본인에게만 필요하므로 소유 클라이언트로 한정한다.
 	DOREPLIFETIME_CONDITION(AMD_Character, bHoldingPhysicsTarget, COND_OwnerOnly);
 }
 
@@ -568,9 +567,8 @@ void AMD_Character::UpdateInteractionFocus()
 		return;
 	}
 
-	// 물리 픽업을 들고 있는 동안에는 다른 상호작용 대상을 강조하지 않는다.
-	// 들고 있는 통 너머로 보이는 물체가 계속 반짝이면 무엇을 놓는지 헷갈리기 때문이다.
-	// 놓기는 CurrentTarget이 비어 있어도 ServerInteract에서 처리되므로 조작에는 영향이 없다.
+	// 들고 있는 물체 너머의 대상이 계속 반짝이면 헷갈리므로 강조를 끈다.
+	// 놓기는 CurrentTarget이 비어도 ServerInteract에서 처리된다.
 	if (bHoldingPhysicsTarget)
 	{
 		SetCurrentTarget(nullptr);

@@ -102,11 +102,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
 	FName ToolAttachSocketName = TEXT("hand_r");
 
-	/**
-	 * 물리 픽업을 들고 있을 목표 지점. Camera에 부착되므로 카메라 회전을 그대로 따라간다.
-	 * 모든 운반 대상이 공유하는 기준점이라, 여기를 옮기면 Sample과 WallPiece도 함께 움직인다.
-	 * 대상별 배치는 IMD_Grabbable::GetHoldOffset()으로 조정한다.
-	 */
+	/** 모든 물리 픽업이 공유하는 운반 기준점. Camera에 부착되며 대상별 배치는 GetHoldOffset()으로 조정한다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USceneComponent> HoldPoint;
 
@@ -174,20 +170,16 @@ private:
 	void RefreshToolMesh();
 	TWeakObjectPtr<AActor> CurrentTarget;
 
-	/**
-	 * 물리 픽업을 들고 있는지 여부.
-	 * 실제 Grab은 서버에서만 일어나 클라이언트의 PhysicsHandle은 비어 있으므로,
-	 * 소유 클라이언트가 하이라이트를 억제할 수 있도록 이 상태만 복제한다.
-	 */
+	/** Grab은 서버에서만 일어나므로, 소유 클라이언트의 하이라이트 억제를 위해 이 상태만 복제한다. */
 	UPROPERTY(Replicated)
 	bool bHoldingPhysicsTarget = false;
 
-	/** 잡는 순간 대상에서 한 번 읽어 캐시한 HoldOffset. Tick에서 Blueprint getter를 반복 호출하지 않는다. */
+	/** 잡는 순간 대상에서 한 번 읽어 캐시한 HoldOffset */
 	FVector HeldTargetOffset = FVector::ZeroVector;
 
-	/** BeginPlay에서 PhysicsHandle의 Blueprint 설정을 그대로 캡처한 값. 놓을 때 여기로 되돌린다. */
+	/** BeginPlay에서 캡처한 PhysicsHandle 기본 설정. 놓을 때 여기로 되돌린다. */
 	FMD_HoldProfile DefaultHoldProfile;
 
-	/** 현재 잡고 있는 대상에 적용 중인 프로필. 대상이 IMD_Grabbable이 아니면 기본 프로필과 같다. */
+	/** 현재 잡고 있는 대상에 적용 중인 프로필 */
 	FMD_HoldProfile ActiveHoldProfile;
 };
