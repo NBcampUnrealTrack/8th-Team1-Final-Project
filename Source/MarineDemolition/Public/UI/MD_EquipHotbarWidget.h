@@ -32,8 +32,16 @@ public:
 	UMD_ToolDefinition* GetToolAtSlot(int32 SlotIndex) const;
 
 private:
+
+	UFUNCTION()
+	void HandlePossessedPawnChanged(APawn* OldPawn, APawn* NewPawn);
+
 	UFUNCTION()
 	void HandleHotbarChanged();
+
+	void BindToPawn(APawn* NewPawn);
+
+	void UnbindHotbar();
 
 	UPROPERTY()
 	TObjectPtr<UMD_EquipHotbarComponent> BoundHotbar;
