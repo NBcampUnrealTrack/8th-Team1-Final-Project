@@ -24,6 +24,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "GameplayTagAssetInterface.h"
+#include "Net/UnrealNetwork.h"
 #include "Component/Equipment/MD_HotbarComponent.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
@@ -89,6 +90,14 @@ void AMD_Character::Tick(float DeltaSeconds)
 	UpdateInteractionFocus();
 	UpdateHeldTarget();
 	UpdateHotbarDebug();
+}
+
+void AMD_Character::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	// 하이라이트 억제는 들고 있는 본인에게만 필요하므로 소유 클라이언트로 한정한다.
+	DOREPLIFETIME_CONDITION(AMD_Character, bHoldingPhysicsTarget, COND_OwnerOnly);
 }
 
 void AMD_Character::ForceEnterWalkState()
@@ -386,6 +395,7 @@ bool AMD_Character::TryHoldTarget(AActor* Target)
 
 	HeldTargetOffset = HoldOffset;
 	ActiveHoldProfile = HoldProfile;
+	bHoldingPhysicsTarget = true;
 	UpdateHeldTarget();
 	return true;
 }
@@ -398,6 +408,7 @@ bool AMD_Character::IsHolding() const
 void AMD_Character::ReleaseTarget()
 {
 	HeldTargetOffset = FVector::ZeroVector;
+	bHoldingPhysicsTarget = false;
 
 	if (!IsValid(PhysicsHandle)) return;
 
@@ -612,6 +623,15 @@ void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value
 void AMD_Character::UpdateInteractionFocus()
 {
 	if (!IsLocallyControlled() || !Controller || !GetWorld())
+	{
+		SetCurrentTarget(nullptr);
+		return;
+	}
+
+	// 물리 픽업을 들고 있는 동안에는 다른 상호작용 대상을 강조하지 않는다.
+	// 들고 있는 통 너머로 보이는 물체가 계속 반짝이면 무엇을 놓는지 헷갈리기 때문이다.
+	// 놓기는 CurrentTarget이 비어 있어도 ServerInteract에서 처리되므로 조작에는 영향이 없다.
+	if (bHoldingPhysicsTarget)
 	{
 		SetCurrentTarget(nullptr);
 		return;

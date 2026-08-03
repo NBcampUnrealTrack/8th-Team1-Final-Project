@@ -20,12 +20,37 @@ AMD_TrashBin::AMD_TrashBin()
 	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
 	Mesh->SetSimulatePhysics(true);
 
+	// 질량을 메시 볼륨에서 자동 계산하도록 두면, 임시 메시를 최종 메시로 교체하는 순간
+	// 충돌 반응과 내용물과의 힘겨루기가 아무 코드 변경 없이 조용히 바뀐다. 기획 수치로 고정한다.
+	//
+	// 이 값은 운반 추종 감각을 바꾸지 않는다. PhysicsHandle의 스프링은 Chaos에서
+	// EJointForceMode::Acceleration 기본값으로 동작해 유효 질량으로 정규화되기 때문이다.
+	// 실제로 달라지는 것은 벽·캐릭터·내용물과 부딪힐 때 주고받는 운동량이다.
+	// 넣은 내용물이 통을 밀고 다니면 올리고, 통이 아무것도 밀어내지 못하면 내린다.
+	Mesh->SetMassOverrideInKg(NAME_None, 40.f, true);
+
+	// 손에서 놓은 뒤의 잔여 운동을 정리하는 값이다. 운반 중에는 PhysicsHandle 드라이브가
+	// 지배적이라 영향이 작지만, AngularDamping은 잡은 상태의 회전 흔들림도 조금 더 눌러준다.
+	// 엔진 기본 AngularDamping 0은 던진 통이 무언가에 부딪힐 때까지 계속 도는 상태를 뜻한다.
+	Mesh->SetLinearDamping(0.5f);
+	Mesh->SetAngularDamping(1.f);
+
+	// InertiaTensorScale은 기본 (1, 1, 1)을 유지한다. 회전 관성을 직접 배율로 조절하는 값이라
+	// 올리면 같은 충격에도 통이 덜 기울어 내용물이 덜 쏟아지고, 내리면 쉽게 뒤집힌다.
+	// 작은 충돌만으로 내용물이 쏟아지면 HoldProfile의 Angular 값보다 이 값을 먼저 올려본다.
+
 	GrabPoint = CreateDefaultSubobject<USceneComponent>(TEXT("GrabPoint"));
 	GrabPoint->SetupAttachment(Mesh);
-	// 현재 약 160 cm 높이인 임시 메시의 상단 중앙. 에셋 교체 시 Blueprint에서 조정한다.
+	// 임시 메시 기준 상단 중앙. Mesh 로컬 좌표이므로 컴포넌트 스케일의 영향을 받는다.
+	// BP_MD_TrashBin은 이 값을 덮어써서 통을 캐릭터 앞으로 밀어내는 용도로도 쓰고 있다.
+	// 잡는 점을 본체 밖으로 빼면 지렛대가 길어지므로, 순수한 배치 이동은 HoldOffset을 쓴다.
 	GrabPoint->SetRelativeLocation(FVector(0.f, 0.f, 80.f));
 
-	// 위치 추종은 기존 감각을 유지하고, 회전만 부드럽게 따라오도록 시작한다.
+	// 위치 추종과 보간은 캐릭터 기본값(750/200, 보간 50)을 그대로 두고 회전만 완화한다.
+	// 캐릭터 기본값 1500/500은 물체를 손에 단단히 고정하므로 큰 통을 든 무게감이 나지 않는다.
+	// Stiffness를 낮춰 회전이 손보다 늦게 따라오게 하고, Damping도 함께 낮춰
+	// 회전을 멈춘 뒤 한두 번 흔들리다 안정되는 여지를 남긴다.
+	// 조정 시에는 Stiffness 500 -> 400 -> 300, Damping 200 -> 250 -> 300 순으로 한 값씩 움직인다.
 	HoldProfile.AngularStiffness = 500.f;
 	HoldProfile.AngularDamping = 200.f;
 
