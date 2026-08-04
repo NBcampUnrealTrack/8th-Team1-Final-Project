@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/SaveGame.h"
+#include "GameplayTags.h"
 #include "MD_SaveGameSession.generated.h"
 
 USTRUCT(BlueprintType)
@@ -13,7 +14,7 @@ struct MARINEDEMOLITION_API FMD_InventoryDataWraper
 
 public:
 	UPROPERTY()
-	TArray<UObject*> InventoryData;
+	TArray<FGameplayTag> InventoryData;
 };
 
 
@@ -49,7 +50,7 @@ public:
 
 	// 플레이어 별 보유 아이템 목록
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
-	TMap<FUniqueNetIdRepl, FMD_InventoryDataWraper> temp;
+	TMap<FUniqueNetIdRepl, FMD_InventoryDataWraper> InventoryData;
 
 	// 경과 일수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
