@@ -18,6 +18,7 @@ public:
 	TArray<TSoftObjectPtr<class UMD_ToolDefinition>> ToolSlots;
 };
 
+
 /*
  * 합산(누계) 점수
  * 돈(크레딧)
