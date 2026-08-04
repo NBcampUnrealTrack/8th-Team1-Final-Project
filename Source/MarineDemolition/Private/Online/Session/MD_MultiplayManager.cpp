@@ -7,13 +7,19 @@
 #include "Online/OnlineSessionNames.h"  // NAME_GameSession
 #include "FindSessionsCallbackProxy.h"  // FBlueprintSessionResult
 #include "Online/Session/MD_SessionSettingKey.h"
+#include "Engine/AssetManager.h"
 #include "Util/MD_LogUtility.h"
 #include "Types/Online/MD_RoomCode.h"
+#include "Data/Config/MultiplayMapSettings.h"
+#include "Data/Config/SessionMapConfigDataAsset.h"
+#include "Data/SaveGame/MD_SaveSlotInfoList.h"
 #include "GameFramework/GameModeBase.h"
 
 void UMD_MultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);
+
+    LoadConfigDataAsset();
 
     InitOnlineSessionInterface();
 
@@ -107,6 +113,77 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
 
     // 실제 Session 생성
     CreateSessionInternal(ServerName, MaxPlayerCount, CreateSessionParams);
+}
+
+void UMD_MultiplayManager::CreateSessionBySaveData(const FString& ServerName, int32 MaxPlayerCount, TSharedPtr<struct FMD_SaveSlotInfo> SlotInfo)
+{
+    // 세이브 슬롯 정보의 유효성 검사
+    if (SlotInfo.IsValid() == false)
+    {
+        // 로그 출력
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 세이브 슬롯 정보가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+
+        // Create Session 실패 이벤트 실행
+        OnCreateSessionComplete.Broadcast(false);
+        return;
+    }
+
+    // 세이브 슬롯에 저장된 퀘스트 유효성 검사
+    if (SlotInfo->QuestID.IsValid() == false)
+    {
+        // 기본 Session Map 존재 확인
+        if (DefaultSessionMap.IsNull() == true)
+        {
+            // 로그 출력
+            UE_LOG(MarineDemolition, Warning, TEXT("%s 세이브 슬롯에 설정된 맵이 유효하지 않으며 기본 맵이 설정되지 않았습니다."), *UE_CALL_LOCATIONINFO);
+
+            // Create Session 실패 이벤트 실행
+            OnCreateSessionComplete.Broadcast(false);
+            return;
+        }
+
+        // 기본 맵으로 Create Session 진행
+        FMD_CreateSessionParams Params;
+        Params.bIsDedicatedServer = false;
+        Params.InitialSessionMap = DefaultSessionMap;
+
+        CreateSession(ServerName, MaxPlayerCount, Params);
+        return;
+    }
+
+    // 퀘스트 정보 비동기 로드 실행
+    UAssetManager& AssetManager = UAssetManager::Get();
+    TArray<FName> Bundles;
+    FStreamableDelegate OnLoadCompletedDelegate = FStreamableDelegate::CreateLambda([&]() {
+        // 비동기 로드된 DataAsset 얻기 및 유효성 검사
+        UObject* LoadedData = UAssetManager::Get().GetPrimaryAssetObject(SlotInfo->QuestID);
+        //UQuestDataAsset QuestData = Cast<UQuestDataAsset>(LoadedData);
+        //if (IsValid(QuestData) == false)
+        //{
+        //    // 로그 출력
+        //    UE_LOG(MarineDemolition, Warning, TEXT("%s 퀘스트의 PrimaryAssetID가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+
+        //    // Create Session 실패 이벤트 실행
+        //    OnCreateSessionComplete.Broadcast(false);
+        //    return;
+        //}
+
+        //// Create Session을 위한 매개변수 생성
+        //FMD_CreateSessionParams Params;
+        //Params.bIsDedicatedServer = false;
+        //Params.InitialSessionMap = QuestData->QuestMap;
+
+        //// Create Session 진행
+        //CreateSession(ServerName, MaxPlayerCount, Params);
+        //return;
+
+        // 로그 출력
+        UE_LOG(MarineDemolition, Error, TEXT("%s 람다 함수 보강 필요"), *UE_CALL_LOCATIONINFO);
+
+        // Create Session 실패 이벤트 실행
+        OnCreateSessionComplete.Broadcast(false);
+        });
+    AssetManager.LoadPrimaryAsset(SlotInfo->QuestID, Bundles, OnLoadCompletedDelegate);
 }
 
 void UMD_MultiplayManager::FindSessions(int32 MaxSearchResultCount)
@@ -1079,4 +1156,31 @@ void UMD_MultiplayManager::ExecutePostDestroySessionComplete(bool bWasSuccessful
 
     // Session 제거 완료 이후 처리해야 하는 Delegate 실행
     PendingPostDestroyDelegate.ExecuteIfBound(bWasSuccessful);
+}
+
+void UMD_MultiplayManager::LoadConfigDataAsset()
+{
+    const UMultiplayMapSettings* Settings = GetDefault<UMultiplayMapSettings>();
+
+    if (IsValid(Settings) == false)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s Multiplay Map Settings 설정이 존재하지 않습니다."), *UE_CALL_LOCATIONINFO);
+        return;
+    }
+
+    if (Settings->SessionMapConfig.IsNull() == true)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s Session Map Config DataAsset이 설정되지 않았습니다."), *UE_CALL_LOCATIONINFO);
+        return;
+    }
+
+    USessionMapConfigDataAsset* ConfigDataAsset = Settings->SessionMapConfig.LoadSynchronous();
+    if (IsValid(ConfigDataAsset) == false)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s Session Map Config DataAsset을 불러오는데 실패하였습니다."), *UE_CALL_LOCATIONINFO);
+        return;
+    }
+
+    DefaultSessionMap = ConfigDataAsset->DefaultLobbyMap;
+    return;
 }

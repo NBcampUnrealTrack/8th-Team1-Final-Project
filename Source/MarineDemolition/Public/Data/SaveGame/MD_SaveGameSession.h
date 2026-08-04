@@ -14,9 +14,8 @@ struct MARINEDEMOLITION_API FMD_InventoryDataWraper
 
 public:
 	UPROPERTY()
-	TArray<FGameplayTag> InventoryData;
+	TArray<FPrimaryAssetId> InventoryData;
 };
-
 
 /*
  * 합산(누계) 점수
