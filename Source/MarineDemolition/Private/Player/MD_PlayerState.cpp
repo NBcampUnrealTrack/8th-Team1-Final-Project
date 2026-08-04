@@ -3,7 +3,6 @@
 
 #include "Player/MD_PlayerState.h"
 #include "AbilitySystemComponent.h"
-#include "Component/Equipment/MD_HotbarComponent.h"
 #include "Net/UnrealNetwork.h"
 
 void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -80,8 +79,6 @@ AMD_PlayerState::AMD_PlayerState()
 
 	AbilitySystemComponent->SetIsReplicated(true);
 	AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
-
-	HotbarComponent = CreateDefaultSubobject<UMD_HotbarComponent>(TEXT("HotbarComponent"));
 }
 
 UAbilitySystemComponent* AMD_PlayerState::GetAbilitySystemComponent() const

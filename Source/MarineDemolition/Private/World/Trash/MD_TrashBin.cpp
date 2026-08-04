@@ -20,12 +20,19 @@ AMD_TrashBin::AMD_TrashBin()
 	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
 	Mesh->SetSimulatePhysics(true);
 
+	// 메시 교체로 충돌 반응이 바뀌지 않도록 자동 계산 대신 기획 수치로 고정한다.
+	Mesh->SetMassOverrideInKg(NAME_None, 40.f, true);
+
+	// 손에서 놓은 뒤의 잔여 운동을 정리한다. 엔진 기본 AngularDamping 0은 계속 회전한다.
+	Mesh->SetLinearDamping(0.5f);
+	Mesh->SetAngularDamping(1.f);
+
 	GrabPoint = CreateDefaultSubobject<USceneComponent>(TEXT("GrabPoint"));
 	GrabPoint->SetupAttachment(Mesh);
-	// 현재 약 160 cm 높이인 임시 메시의 상단 중앙. 에셋 교체 시 Blueprint에서 조정한다.
+	// 임시 메시 기준 상단 중앙. 에셋 교체 시 Blueprint에서 조정한다.
 	GrabPoint->SetRelativeLocation(FVector(0.f, 0.f, 80.f));
 
-	// 위치 추종은 기존 감각을 유지하고, 회전만 부드럽게 따라오도록 시작한다.
+	// 회전만 캐릭터 기본값(1500/500)보다 완화해 큰 통을 든 무게감을 준다.
 	HoldProfile.AngularStiffness = 500.f;
 	HoldProfile.AngularDamping = 200.f;
 

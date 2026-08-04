@@ -21,14 +21,24 @@ class MARINEDEMOLITION_API AMD_SampleItem
 public:
 	AMD_SampleItem();
 
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 	virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override;
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Sample")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_Damaged, Category = "Sample")
 	bool bDamaged = false;
 
 	// 손상 상태 적용. 붕괴 피해와 Day 복원에서 공용
 	void SetDamaged();
+
+	/** 모든 머신에서 로컬로 파편 연출을 스폰. Destroy 직전에 서버가 호출 */
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastSpawnBreakDebris();
+	
+	/** 파괴 시 스폰할 파편(지오메트리 컬렉션) 액터. 복제 없는 연출 전용 클래스 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sample")
+	TSubclassOf<AActor> BreakDebrisClass;
 	
 protected:
 	virtual void BeginPlay() override;
@@ -66,4 +76,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sample",
 		meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float BreakImpactSpeed;
+	
+	UFUNCTION()
+	void OnRep_Damaged();
+
+	// 손상 시각 표현. 서버(리슨 호스트)와 클라이언트 OnRep 공용
+	void ApplyDamagedVisual();
+
+	/**
+	 * 샘플을 손상시키는 최소 충격 속도(cm/s). BreakImpactSpeed보다 낮게 설정한다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sample",
+			meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float DamageImpactSpeed;
 };
