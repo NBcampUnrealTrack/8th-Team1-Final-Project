@@ -254,6 +254,77 @@ void AMD_CuttableWall::ReapplyContaminationPatch(float Amount, int32 PatchRadius
 	PublishContaminationChanges(Changes);
 }
 
+void AMD_CuttableWall::ExportContaminationDeltas(
+	TArray<int32>& OutCellIndices,
+	TArray<float>& OutRemainingAmounts) const
+{
+	OutCellIndices.Reset();
+	OutRemainingAmounts.Reset();
+
+	for (int32 Index = 0; Index < ContaminationCells.Num(); ++Index)
+	{
+		const FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
+		if (Cell.RemainingContamination != Cell.InitialContamination)
+		{
+			OutCellIndices.Add(Index);
+			OutRemainingAmounts.Add(Cell.RemainingContamination);
+		}
+	}
+}
+
+void AMD_CuttableWall::RestoreContaminationCells(
+	const TArray<int32>& CellIndices,
+	const TArray<float>& RemainingAmounts)
+{
+	if (!HasAuthority() || CellIndices.Num() != RemainingAmounts.Num())
+	{
+		return;
+	}
+
+	if (!bContaminationSurfaceInitialized)
+	{
+		InitializeContaminationSurface();
+	}
+
+	const int32 GridWidth = ContaminationGridDimensions.X;
+	if (ContaminationCells.Num() == 0 || GridWidth <= 0)
+	{
+		return;
+	}
+
+	TArray<FMD_ScrapeCellChange> Changes;
+	for (int32 i = 0; i < CellIndices.Num(); ++i)
+	{
+		const int32 Index = CellIndices[i];
+		// 그리드 크기가 바뀐 구세션 스냅샷의 셀은 무시
+		if (!ContaminationCells.IsValidIndex(Index))
+		{
+			continue;
+		}
+
+		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
+		Cell.RemainingContamination = FMath::Clamp(
+			RemainingAmounts[i], 0.f, Cell.InitialContamination);
+
+		FMD_ScrapeCellChange Change;
+		Change.CellIndex = Index;
+		Change.GridCoordinate = FIntPoint(Index % GridWidth, Index / GridWidth);
+		Change.RemainingAmountAfter = Cell.RemainingContamination;
+		Changes.Add(Change);
+	}
+
+	if (Changes.IsEmpty())
+	{
+		return;
+	}
+
+	CachedContaminationCleanRatio = FMD_ScrapeEvaluator::CalculateCleanRatio(ContaminationCells);
+	// 어제 완전 제거된 벽이면 완료 이벤트가 재방송되지 않게 이미 방송된 것으로 마킹
+	bContaminationCompletionBroadcast = IsContaminationFullyRemoved();
+	UpdateContaminationVisualization(Changes);
+	PublishContaminationChanges(Changes);
+}
+
 void AMD_CuttableWall::BeginPlay()
 {
 	Super::BeginPlay();

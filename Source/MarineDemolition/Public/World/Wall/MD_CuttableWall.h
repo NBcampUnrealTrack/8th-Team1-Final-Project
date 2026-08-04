@@ -209,6 +209,12 @@ public:
 	// Day 전환 악화: 무작위 위치에 오염 셀을 소량 리필
 	void ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells);
 
+	// Day 스냅샷용: 초기값과 다른 셀을 (인덱스, 남은 오염량) 쌍으로 내보낸다
+	void ExportContaminationDeltas(TArray<int32>& OutCellIndices, TArray<float>& OutRemainingAmounts) const;
+
+	// Day 스냅샷용: 저장된 셀 상태를 적용하고 시각화·복제를 갱신한다
+	void RestoreContaminationCells(const TArray<int32>& CellIndices, const TArray<float>& RemainingAmounts);
+
 protected:
 	virtual void BeginPlay() override;
 
