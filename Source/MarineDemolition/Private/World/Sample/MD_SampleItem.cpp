@@ -5,6 +5,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Net/UnrealNetwork.h"
 
 AMD_SampleItem::AMD_SampleItem()
 {
@@ -12,6 +13,7 @@ AMD_SampleItem::AMD_SampleItem()
 	bReplicates = true;
 	SetReplicateMovement(true);
 	BreakImpactSpeed = 800.0f;
+	DamageImpactSpeed = 400.0f;
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
@@ -22,6 +24,29 @@ AMD_SampleItem::AMD_SampleItem()
 	Mesh->SetGenerateOverlapEvents(true);
 	Mesh->SetNotifyRigidBodyCollision(true);
 	Mesh->SetSimulatePhysics(true);
+}
+
+void AMD_SampleItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	
+	DOREPLIFETIME(AMD_SampleItem, bDamaged);
+}
+
+void AMD_SampleItem::OnRep_Damaged()
+{
+	if (bDamaged)
+	{
+		ApplyDamagedVisual();
+	}
+}
+
+void AMD_SampleItem::ApplyDamagedVisual()
+{
+	if (UMaterialInstanceDynamic* MID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
+	{
+		MID->SetVectorParameterValue(TEXT("Color"), FLinearColor::Red);
+	}
 }
 
 void AMD_SampleItem::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
@@ -57,11 +82,21 @@ void AMD_SampleItem::SetDamaged()
 		return;
 	}
 	bDamaged = true;
-	
-	if (UMaterialInstanceDynamic* MID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
+
+	ApplyDamagedVisual();
+}
+
+void AMD_SampleItem::MulticastSpawnBreakDebris_Implementation()
+{
+	if (!BreakDebrisClass)
 	{
-		MID->SetVectorParameterValue(TEXT("Color"), FLinearColor::Red);
+		return;
 	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	GetWorld()->SpawnActor<AActor>(BreakDebrisClass, GetActorTransform(), SpawnParams);
 }
 
 void AMD_SampleItem::BeginPlay()
@@ -110,10 +145,21 @@ void AMD_SampleItem::HandleMeshHit(
 	}
 
 	const float ImpactSpeed = NormalImpulse.Size() / SampleMass;
-	if (!FMath::IsFinite(ImpactSpeed) || ImpactSpeed < BreakImpactSpeed)
+	if (!FMath::IsFinite(ImpactSpeed))
 	{
 		return;
 	}
 
-	Destroy();
+	// 파괴 임계 이상이면 즉시 파괴, 손상 임계 이상이면 손상만 (기획 02 §4 손 운반 리스크)
+	if (ImpactSpeed >= BreakImpactSpeed)
+	{
+		MulticastSpawnBreakDebris();
+		Destroy();
+		return;
+	}
+
+	if (ImpactSpeed >= DamageImpactSpeed)
+	{
+		SetDamaged();
+	}
 }

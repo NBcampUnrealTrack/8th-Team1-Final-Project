@@ -1071,17 +1071,12 @@ void UMD_MultiplayManager::HandleSessionUserInviteAccepted(const bool bWasSucces
 
 void UMD_MultiplayManager::ExecutePostDestroySessionComplete(bool bWasSuccessful)
 {
-    // Session 제거 완료 이후 처리해야 하는 과정이 있으면 실행
-    OnPostDestroySessionComplete.ExecuteIfBound(bWasSuccessful);
+    // Session 제거 완료 이후 처리해야 하는 Delegate 보관
+    FOnPostDestroyMDSessionCompleteDelegate PendingPostDestroyDelegate = OnPostDestroySessionComplete;
 
-    // Destroy Session 프로세스 진행 중 OnPostDestroySessionComplete 이벤트 연결 제거 방지
-    if (SessionInterface.IsValid() == true)
-    {
-        if (SessionInterface->OnDestroySessionCompleteDelegates.IsBoundToObject(this) == true)
-        {
+    // Session 제거 완료 이후 처리해야 하는 Delegate 제거
+    OnPostDestroySessionComplete.Unbind();
 
-            // Session 제거 완료 이후 처리해야 하는 과정 제거
-            OnPostDestroySessionComplete.Unbind();
-        }
-    }
+    // Session 제거 완료 이후 처리해야 하는 Delegate 실행
+    PendingPostDestroyDelegate.ExecuteIfBound(bWasSuccessful);
 }
