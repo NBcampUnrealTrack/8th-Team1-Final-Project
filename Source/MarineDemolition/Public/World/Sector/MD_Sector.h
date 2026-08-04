@@ -8,6 +8,7 @@
 
 class UBoxComponent;
 class UCameraShakeBase;
+class AMD_WallPiece;
 
 // 방 단위 섹터 볼륨. 내부 폰을 추적하고 천장 붕괴를 실행
 
@@ -54,8 +55,17 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Collapse")
 	float CollapseDamage = 40.f;
 
+	// 붕괴 잔해로 스폰할 조각벽 클래스. CuttableWall의 PieceClass와 같은 BP를 에디터에서 지정
 	UPROPERTY(EditAnywhere, Category = "Collapse")
-	TObjectPtr<UStaticMesh> DebrisMesh;
+	TSubclassOf<AMD_WallPiece> DebrisPieceClass;
+
+	// 붕괴 잔해 랜덤 스케일 최소값
+	UPROPERTY(EditAnywhere, Category = "Collapse", meta = (ClampMin = "0.01"))
+	float DebrisScaleMin = 0.2f;
+
+	// 붕괴 잔해 랜덤 스케일 최대값
+	UPROPERTY(EditAnywhere, Category = "Collapse", meta = (ClampMin = "0.01"))
+	float DebrisScaleMax = 0.8f;
 
 	// 붕괴 연출용 카메라 쉐이크. BP 에셋을 에디터에서 지정
 	UPROPERTY(EditAnywhere, Category = "Collapse")
