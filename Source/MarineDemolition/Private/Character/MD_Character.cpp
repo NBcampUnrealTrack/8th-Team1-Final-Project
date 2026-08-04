@@ -24,7 +24,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "GameplayTagAssetInterface.h"
-#include "Component/Equipment/MD_HotbarComponent.h"
+#include "Net/UnrealNetwork.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
@@ -88,7 +88,13 @@ void AMD_Character::Tick(float DeltaSeconds)
 
 	UpdateInteractionFocus();
 	UpdateHeldTarget();
-	UpdateHotbarDebug();
+}
+
+void AMD_Character::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME_CONDITION(AMD_Character, bHoldingPhysicsTarget, COND_OwnerOnly);
 }
 
 void AMD_Character::ForceEnterWalkState()
@@ -356,6 +362,7 @@ bool AMD_Character::TryHoldTarget(AActor* Target)
 
 	HeldTargetOffset = HoldOffset;
 	ActiveHoldProfile = HoldProfile;
+	bHoldingPhysicsTarget = true;
 	UpdateHeldTarget();
 	return true;
 }
@@ -368,6 +375,7 @@ bool AMD_Character::IsHolding() const
 void AMD_Character::ReleaseTarget()
 {
 	HeldTargetOffset = FVector::ZeroVector;
+	bHoldingPhysicsTarget = false;
 
 	if (!IsValid(PhysicsHandle)) return;
 
@@ -426,33 +434,6 @@ void AMD_Character::ApplyHoldProfile(const FMD_HoldProfile& Profile)
 	PhysicsHandle->SetAngularStiffness(FMath::Max(0.f, Profile.AngularStiffness));
 	PhysicsHandle->SetAngularDamping(FMath::Max(0.f, Profile.AngularDamping));
 	PhysicsHandle->SetInterpolationSpeed(FMath::Max(0.f, Profile.InterpolationSpeed));
-}
-
-void AMD_Character::UpdateHotbarDebug() const
-{
-	if (!IsLocallyControlled() || !GEngine) return;
-
-	const AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
-	if (!IsValid(MDPlayerState)) return;
-
-	const UMD_HotbarComponent* Hotbar = MDPlayerState->GetHotbarComponent();
-	if (!IsValid(Hotbar)) return;
-
-	constexpr uint64 HotbarKeyBase = 0x4D440000;
-	for (int32 SlotIndex = 0; SlotIndex < Hotbar->GetMaxSlots(); ++SlotIndex)
-	{
-		const TSubclassOf<AActor> ItemClass = Hotbar->GetItemClassAt(SlotIndex);
-		const FString ItemName = ItemClass ? ItemClass->GetName() : TEXT("비어 있음");
-
-		GEngine->AddOnScreenDebugMessage(
-			HotbarKeyBase + SlotIndex,
-			0.f,
-			FColor::Cyan,
-			FString::Printf(
-				TEXT("핫바 %d : %s"),
-				SlotIndex + 1,
-				*ItemName));
-	}
 }
 
 void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
@@ -582,6 +563,14 @@ void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value
 void AMD_Character::UpdateInteractionFocus()
 {
 	if (!IsLocallyControlled() || !Controller || !GetWorld())
+	{
+		SetCurrentTarget(nullptr);
+		return;
+	}
+
+	// 들고 있는 물체 너머의 대상이 계속 반짝이면 헷갈리므로 강조를 끈다.
+	// 놓기는 CurrentTarget이 비어도 ServerInteract에서 처리된다.
+	if (bHoldingPhysicsTarget)
 	{
 		SetCurrentTarget(nullptr);
 		return;

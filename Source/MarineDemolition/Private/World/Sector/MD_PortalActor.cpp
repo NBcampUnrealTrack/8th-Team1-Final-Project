@@ -227,7 +227,7 @@ bool AMD_PortalActor::TeleportActor(AActor* OtherActor)
 
 			// ComponentVelocity를 적용된 이동 속도와 동기화
 			//MovementComponent->UpdateComponentVelocity();
-			ClientUpdateMovementComponentVelocity(MovementComponent, TeleportedLinearVelocity);
+			NetMulticastUpdateMovementComponentVelocity(MovementComponent, TeleportedLinearVelocity);
 		}
 
 		// Controller에 의하여 제어되고 있는 경우 Controller에 Teleport 이후 회전 값 적용
@@ -347,10 +347,12 @@ void AMD_PortalActor::ConnectPortal(AMD_PortalActor* PortalA, AMD_PortalActor* P
 
 void AMD_PortalActor::OnRep_LinkedPortal()
 {
+	// 캡처되는 Scene에서 제외되는 액터 목록 초기화
+	SceneCaptureComponent->HiddenActors.Reset();
+
 	// 연결된 Portal의 유효성 검사
 	if (LinkedPortal.IsValid() == false)
 	{
-		SceneCaptureComponent->HiddenActors.Reset();
 		return;
 	}
 
@@ -764,7 +766,7 @@ FQuat AMD_PortalActor::GetPortalQuatDelta() const
 	return PortalQuatDelta;
 }
 
-void AMD_PortalActor::ClientUpdateMovementComponentVelocity_Implementation(UMovementComponent* MovementComponent, FVector NewVelocity)
+void AMD_PortalActor::NetMulticastUpdateMovementComponentVelocity_Implementation(UMovementComponent* MovementComponent, FVector NewVelocity)
 {
 	if (IsValid(MovementComponent) == false)
 	{
