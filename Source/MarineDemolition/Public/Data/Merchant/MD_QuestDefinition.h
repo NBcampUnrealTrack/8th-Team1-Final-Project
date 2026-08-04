@@ -44,4 +44,8 @@ public:
 	//성공보수 크레딧
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Reward")
 	int32 RewardCredits = 80;
+
+	//로드할 맵
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|QuestMap")
+	TWeakObjectPtr<UWorld> QuestMap;
 };
