@@ -20,6 +20,10 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestTravel(AMD_TravelConsole* Console);
 
+	//Attrivbute Health 확인용 콘솔 커맨드. UI연결되면 삭제
+	UFUNCTION(Exec)
+	void MD_ShowHealth();
+
 protected:
 	virtual void BeginPlay() override;
 

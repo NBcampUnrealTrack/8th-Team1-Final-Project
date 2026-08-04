@@ -8,6 +8,9 @@
 #include "Engine/World.h"
 #include "World/Interaction/MD_TravelConsole.h"
 
+#include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
+#include "Player/MD_PlayerState.h"
+
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console)
 {
 	if (!IsValid(Console))
@@ -30,6 +33,22 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 	}
 
 	GetWorld()->ServerTravel(MapPackage + TEXT("?listen"));
+}
+
+void AMD_PlayerController::MD_ShowHealth()
+{
+	const AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	const UMD_CharacterAttributeSet* Attributes =
+		IsValid(MDPlayerState) ? MDPlayerState->GetCharacterAttributeSet() : nullptr;
+
+	if (!IsValid(Attributes))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Attribute] AttributeSet을 찾을 수 없다"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Attribute] HP = %.1f / %.1f"),
+		Attributes->GetHealth(), Attributes->GetMaxHealth());
 }
 
 void AMD_PlayerController::BeginPlay()
