@@ -6,11 +6,10 @@
 #include "EngineUtils.h"
 #include "Camera/CameraShakeBase.h"
 #include "Components/BoxComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
-#include "Engine/StaticMeshActor.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
+#include "World/Wall/MD_WallPiece.h"
 
 AMD_Sector::AMD_Sector()
 {
@@ -95,29 +94,34 @@ void AMD_Sector::CollapseCeiling()
 	const FVector Origin = Volume->GetComponentLocation();
 	const FVector Extent = Volume->GetScaledBoxExtent();
 
-	// 1. 파편 낙하: 천장 높이에서 물리 큐브를 흩뿌린다
-	for (int32 i = 0; i < DebrisCount; ++i)
+	// 1. 파편 낙하: 천장 높이에서 조각벽을 흩뿌린다. 잔해는 소멸하지 않고 청소 대상으로 남는다
+	if (HasAuthority() && DebrisPieceClass)
 	{
-		const FVector SpawnLoc(
-				Origin.X + FMath::FRandRange(-Extent.X, Extent.X) * 0.9f,
-				Origin.Y + FMath::FRandRange(-Extent.Y, Extent.Y) * 0.9f,
-				Origin.Z + Extent.Z - 30.f);
-		const FRotator SpawnRot(FMath::FRandRange(0.f, 360.f), FMath::FRandRange(0.f, 360.f), 0.f);
+		FActorSpawnParameters SpawnParams;
+		SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
-		AStaticMeshActor* Debris = GetWorld()->SpawnActor<AStaticMeshActor>(
-				AStaticMeshActor::StaticClass(), SpawnLoc, SpawnRot);
-		if (!Debris)
+		for (int32 i = 0; i < DebrisCount; ++i)
 		{
-			continue;
-		}
+			const FVector SpawnLoc(
+					Origin.X + FMath::FRandRange(-Extent.X, Extent.X) * 0.9f,
+					Origin.Y + FMath::FRandRange(-Extent.Y, Extent.Y) * 0.9f,
+					Origin.Z + Extent.Z - 30.f);
+			const FRotator SpawnRot(FMath::FRandRange(0.f, 360.f), FMath::FRandRange(0.f, 360.f), 0.f);
 
-		Debris->SetMobility(EComponentMobility::Movable);
-		UStaticMeshComponent* MeshComp = Debris->GetStaticMeshComponent();
-		MeshComp->SetStaticMesh(DebrisMesh);
-		Debris->SetActorScale3D(FVector(FMath::FRandRange(0.2f, 0.8f)));
-		MeshComp->SetCollisionProfileName(TEXT("PhysicsActor"));
-		MeshComp->SetSimulatePhysics(true);
-		Debris->SetLifeSpan(12.f);
+			AMD_WallPiece* Debris = GetWorld()->SpawnActor<AMD_WallPiece>(
+					DebrisPieceClass, SpawnLoc, SpawnRot, SpawnParams);
+			if (!Debris)
+			{
+				continue;
+			}
+
+			Debris->SetActorScale3D(FVector(FMath::FRandRange(DebrisScaleMin, DebrisScaleMax)));
+			Debris->SetContaminated(false);
+		}
+	}
+	else if (!DebrisPieceClass)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("MD_Sector::CollapseCeiling - DebrisPieceClass 미지정, 파편 생략"));
 	}
 
 	// 2. 섹터 내부 폰/샘플 피해
