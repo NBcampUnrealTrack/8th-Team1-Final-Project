@@ -82,6 +82,10 @@ public:
     FOnMDSessionInviteAcceptedCompleteSignature OnSessionInviteAcceptedComplete;
 
 protected:
+    // Create Session 실행 시 적용되는 기본 맵
+    UPROPERTY(Transient)
+    TSoftObjectPtr<UWorld> DefaultSessionMap;
+
     // Online Subsystem의 Session 모듈
     IOnlineSessionPtr SessionInterface;
 
@@ -96,6 +100,8 @@ public:
     // ServerName이름으로 최대 MaxPlayerCounts명의 플레이어가 접속할 수 있는 새로운 Session을 생성하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
     void CreateSession(const FString& ServerName, int32 MaxPlayerCount, FMD_CreateSessionParams CreateSessionParams);
+
+    void CreateSessionBySaveData(const FString& ServerName, int32 MaxPlayerCount, TSharedPtr<struct FMD_SaveSlotInfo> SlotInfo);
 
     // 최대 MaxSearchResultCount개의 Session을 검색하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
@@ -162,4 +168,6 @@ protected:
 
     UFUNCTION()
     void ExecutePostDestroySessionComplete(bool bWasSuccessful);
+
+    void LoadConfigDataAsset();
 };
