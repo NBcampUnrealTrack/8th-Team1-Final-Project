@@ -38,17 +38,18 @@ TArray<FMD_SaveSlotInfo> UMD_SaveSlotManager::GetSaveSlotInfoList() const
 }
 
 bool UMD_SaveSlotManager::SaveSlotInfoList()
-{
+	{
 	// Save Slot 정보 목록이 저장되는 Slot 이름
 	const FString SlotName = TEXT("SlotInfoList");
 
 	// Save Slot 정보 목록을 저장하는 객체 생성 및 유효성 검사
 	UMD_SaveSlotInfoList* SlotInfoListData = NewObject<UMD_SaveSlotInfoList>(this);
 	if (IsValid(SlotInfoListData) == false)
-	{
+		{
 		// 로그 출력
 		UE_LOG(MarineDemolition, Warning, TEXT("%s UMD_SaveSlotInfoList 타입의 객체가 생성되지 않았습니다."), *UE_CALL_LOCATIONINFO);
 		return false;
+		}
 	}
 
 	// 저장 데이터 설정
@@ -60,12 +61,19 @@ bool UMD_SaveSlotManager::SaveSlotInfoList()
 
 	// 데이터 저장 성공 여부 검사
 	if (bSaveSuccess == false)
+{
+	// Save Slot 이름 목록이 저장된 SaveGame 데이터 불러오기
+	USaveGame* SaveData = UGameplayStatics::LoadGameFromSlot(TEXT("SaveSlotNames"), 0);
+	UMD_SaveSlotName* SlotNameSaveData = Cast<UMD_SaveSlotName>(SaveData);
+	if (IsValid(SlotNameSaveData) == false)
 	{
 		// 로그 출력
 		UE_LOG(MarineDemolition, Warning, TEXT("%s UMD_SaveSlotInfoList 데이터 저장에 실패하였습니다."), *UE_CALL_LOCATIONINFO);
 		return false;
 	}
-
+	
+	// 세이브 슬롯 이름 목록 저장
+	SaveSlotNames = SlotNameSaveData->SaveSlotNames;
 	return true;
 }
 
@@ -241,6 +249,8 @@ bool UMD_SaveSlotManager::LoadPlayerEquipment(AController* PlayerController)
 	// Equipment 복원은 서버 권위 Pawn에만 적용해 클라이언트 로컬 세이브 개입 차단
 	if (IsValid(PlayerController) == false || PlayerController->HasAuthority() == false)
 	{
+		// 로그 출력
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 동일한 이름으로 저장된 세이브 데이터기 존재합니다."), *UE_CALL_LOCATIONINFO);
 		return false;
 	}
 
@@ -255,6 +265,8 @@ bool UMD_SaveSlotManager::LoadPlayerEquipment(AController* PlayerController)
 	FString PlayerSaveKey;
 	if (BuildPlayerSaveKey(PlayerController, PlayerSaveKey) == false)
 	{
+		// 로그 출력
+		UE_LOG(MarineDemolition, Warning, TEXT("%s GameSession 데이터 저장에 실패하였습니다."), *UE_CALL_LOCATIONINFO);
 		return false;
 	}
 
@@ -299,7 +311,7 @@ bool UMD_SaveSlotManager::LoadSlotInfoList()
 		UE_LOG(MarineDemolition, Warning, TEXT("%s (%s)이름으로 저장된 Save 데이터가 존재하지 않습니다."), *UE_CALL_LOCATIONINFO, *SlotName);
 		return false;
 	}
-	
+
 	// 세이브 슬롯 정보 목록 저장
 	SlotInfoList = SlotInfoListData->SlotInformations;
 	AutoSlotInfoList = SlotInfoListData->AutoSlotInformations;
@@ -314,7 +326,7 @@ TSharedPtr<FMD_SaveSlotInfo> UMD_SaveSlotManager::SaveCurrentGameSessionInternal
 
 	// 덮어쓰기 설정 검사
 	if (bIsOverWrite == false && bIsExist == true)
-	{
+{
 		// 로그 출력
 		UE_LOG(MarineDemolition, Warning, TEXT("%s 동일한 이름(%s)으로 저장된 세이브 데이터가 존재합니다."), *UE_CALL_LOCATIONINFO, *SlotName);
 		return nullptr;
@@ -353,6 +365,7 @@ TSharedPtr<FMD_SaveSlotInfo> UMD_SaveSlotManager::SaveCurrentGameSessionInternal
 	GameSessionData->Score = SessionGameState->GetScore();
 	GameSessionData->Credit = 0;
 	GameSessionData->MerchantLikeability = 0;
+	GameSessionData->MissionID = FPrimaryAssetId();
 	GameSessionData->ElapsedDays = SessionGameState->GetCurrentDay();
 
 	// 접속 종료된 Player를 포함한 현재 Session의 Equipment 캐시를 저장 객체에 복사
