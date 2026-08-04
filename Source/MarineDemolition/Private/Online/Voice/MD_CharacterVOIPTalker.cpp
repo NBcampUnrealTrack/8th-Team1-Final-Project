@@ -24,7 +24,7 @@ void UMD_CharacterVOIPTalker::OnTalkingEnd()
 
 void UMD_CharacterVOIPTalker::SetVolumeMuliplier(float NewVolumeMultiplier)
 {
-	VolumeMultiplier = FMath::Clamp(VolumeMultiplier, 0, 4);
+	VolumeMultiplier = FMath::Clamp(NewVolumeMultiplier, 0, 4);
 
 	if (IsValid(ActiveVoiceAudioComponent) == true)
 	{
