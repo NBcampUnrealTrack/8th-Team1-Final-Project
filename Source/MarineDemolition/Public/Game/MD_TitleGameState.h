@@ -18,8 +18,5 @@ protected:
 	virtual void BeginPlay() override;
 
 protected:
-	// Blueprint UI가 슬롯 순서를 유지한 상태로 로드 결과를 조회할 수 있게 보관한다.
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Category = "Save GameSession")
-	TArray<TObjectPtr<class UMD_SaveGameSession>> SaveSlots;
 
 };
