@@ -33,7 +33,7 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
             Snapshot.SupportedWallNames.Add(It->GetFName());
         }
 
-        // 초기값과 달라진 오염 셀만 기록 (긁은 진행 유지, 02 §10)
+        // 초기값과 달라진 오염 셀만 기록
         FMD_WallContaminationRecord ContaminationRecord;
         ContaminationRecord.WallName = It->GetFName();
         It->ExportContaminationDeltas(
@@ -207,7 +207,7 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
 
 void UMD_DayPersistenceSubsystem::ApplyOvernightWorsening(UWorld* World)
 {
-    // 약해진 지지대 1개 (기획 03 §3)
+    // 약해진 지지대 1개
     TArray<AMD_SupportBrace*> Braces;
     for (TActorIterator<AMD_SupportBrace> It(World); It; ++It)
     {
