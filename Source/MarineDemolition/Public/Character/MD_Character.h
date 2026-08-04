@@ -44,6 +44,8 @@ public:
 
 	virtual void Tick(float DeltaSeconds) override;
 
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 	UPROPERTY(BlueprintAssignable, Category = "Movement|Water")
 	FMDOnMovementStateChanged OnMovementStateChanged;
 
@@ -99,6 +101,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
 	FName ToolAttachSocketName = TEXT("hand_r");
+
+	/** 모든 물리 픽업이 공유하는 운반 기준점. Camera에 부착되며 대상별 배치는 GetHoldOffset()으로 조정한다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USceneComponent> HoldPoint;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -146,15 +151,12 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerInteract(AActor* RequestedActor);
 
-	bool TryStoreTarget(AActor* Target);
 	bool TryHoldTarget(AActor* Target);
 	bool IsHolding() const;
 	void ReleaseTarget();
 	void UpdateHeldTarget();
 	void CaptureDefaultHoldProfile();
 	void ApplyHoldProfile(const FMD_HoldProfile& Profile);
-	void UpdateHotbarDebug() const;
-
 	void UpdateInteractionFocus();
 	AActor* TraceInteractionTarget() const;
 	void SetCurrentTarget(AActor* NewTarget);
@@ -167,7 +169,17 @@ private:
 
 	void RefreshToolMesh();
 	TWeakObjectPtr<AActor> CurrentTarget;
+
+	/** Grab은 서버에서만 일어나므로, 소유 클라이언트의 하이라이트 억제를 위해 이 상태만 복제한다. */
+	UPROPERTY(Replicated)
+	bool bHoldingPhysicsTarget = false;
+
+	/** 잡는 순간 대상에서 한 번 읽어 캐시한 HoldOffset */
 	FVector HeldTargetOffset = FVector::ZeroVector;
+
+	/** BeginPlay에서 캡처한 PhysicsHandle 기본 설정. 놓을 때 여기로 되돌린다. */
 	FMD_HoldProfile DefaultHoldProfile;
+
+	/** 현재 잡고 있는 대상에 적용 중인 프로필 */
 	FMD_HoldProfile ActiveHoldProfile;
 };
