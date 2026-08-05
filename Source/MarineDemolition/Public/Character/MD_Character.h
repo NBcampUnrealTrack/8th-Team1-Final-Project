@@ -91,10 +91,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_EquipHotbarComponent> EquipHotbarComponent;
 
-	// 1인칭 전용 도구 메시 (본인만 보임)
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UStaticMeshComponent> FirstPersonToolMesh;
-
 	// 3인칭 도구 메시 (타 플레이어에게만 보임)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> ThirdPersonToolMesh;

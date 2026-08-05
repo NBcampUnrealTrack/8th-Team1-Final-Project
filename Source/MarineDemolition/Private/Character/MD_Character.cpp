@@ -63,12 +63,6 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 
 	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
 
-	FirstPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FirstPersonToolMesh"));
-	FirstPersonToolMesh->SetupAttachment(FirstPersonMesh, ToolAttachSocketName);
-	FirstPersonToolMesh->SetOnlyOwnerSee(true);
-	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	FirstPersonToolMesh->CastShadow = false;
-
 	ThirdPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ThirdPersonToolMesh"));
 	ThirdPersonToolMesh->SetupAttachment(GetMesh(), ToolAttachSocketName);
 	ThirdPersonToolMesh->SetOwnerNoSee(true);
@@ -680,6 +674,15 @@ void AMD_Character::RefreshToolMesh()
 	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
 	UStaticMesh* NewMesh = IsValid(CurrentTool) ? CurrentTool->ToolMesh : nullptr;
 
-	FirstPersonToolMesh->SetStaticMesh(NewMesh);
+	// 도구별 소켓이 지정돼 있으면 그 소켓, 없으면 기본 소켓
+	const FName SocketName =
+		(IsValid(CurrentTool) && !CurrentTool->AttachSocketName.IsNone())
+			? CurrentTool->AttachSocketName
+			: ToolAttachSocketName;
+
 	ThirdPersonToolMesh->SetStaticMesh(NewMesh);
+
+	// 소켓의 위치·회전·스케일을 그대로 따르도록 스냅 부착
+	ThirdPersonToolMesh->AttachToComponent(
+		GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, SocketName);
 }
