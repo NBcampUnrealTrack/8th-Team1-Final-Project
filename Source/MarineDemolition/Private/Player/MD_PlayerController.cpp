@@ -8,6 +8,8 @@
 #include "Engine/World.h"
 #include "World/Interaction/MD_TravelConsole.h"
 
+#include "AbilitySystemComponent.h"
+#include "GameplayEffect.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "Player/MD_PlayerState.h"
 
@@ -33,6 +35,31 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 	}
 
 	GetWorld()->ServerTravel(MapPackage + TEXT("?listen"));
+}
+
+void AMD_PlayerController::MD_ApplyTestDamage()
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	UAbilitySystemComponent* ASC = MDPlayerState->GetAbilitySystemComponent();
+	
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	//GE를 일으킨 주체 확인
+	FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
+	Context.AddSourceObject(this);
+
+	const FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(TestDamageEffect, 1.0f, Context);
+	if (!Spec.IsValid())
+	{
+		return;
+	}
+
+	ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data);
+
+	MD_ShowHealth();
 }
 
 void AMD_PlayerController::MD_ShowHealth()

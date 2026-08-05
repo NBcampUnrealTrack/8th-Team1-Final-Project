@@ -23,6 +23,8 @@ public:
 
 	virtual void PreAttributeChange(const FGameplayAttribute& Attribute, float& NewValue) override;
 
+	virtual void PreAttributeBaseChange(const FGameplayAttribute& Attribute, float& NewValue) const override;
+
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Attribute")
 	FGameplayAttributeData Health;
 	ATTRIBUTE_ACCESSORS(UMD_CharacterAttributeSet, Health)
@@ -30,4 +32,9 @@ public:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Attribute")
 	FGameplayAttributeData MaxHealth;
 	ATTRIBUTE_ACCESSORS(UMD_CharacterAttributeSet, MaxHealth)
+
+private:
+private:
+	/* 두 경로가 같은 규칙을 쓰도록 클램프를 한 함수로 모은다. */
+	void ClampAttribute(const FGameplayAttribute& Attribute, float& NewValue) const;
 };
