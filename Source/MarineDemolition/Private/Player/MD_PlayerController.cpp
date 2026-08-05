@@ -42,6 +42,11 @@ void AMD_PlayerController::MD_ApplyTestDamage()
 	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
 	UAbilitySystemComponent* ASC = MDPlayerState->GetAbilitySystemComponent();
 	
+	if (!IsValid(MDPlayerState))
+	{
+		return;
+	}
+
 	if (!IsValid(ASC))
 	{
 		return;
