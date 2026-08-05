@@ -7,6 +7,8 @@
 #include "AbilitySystemInterface.h"
 #include "MD_PlayerState.generated.h"
 
+class UMD_CharacterAttributeSet;
+
 UENUM(BlueprintType)
 enum class EMD_ReturnStatus : uint8
 {
@@ -49,4 +51,11 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "AbilitySystem")
 	TObjectPtr<UAbilitySystemComponent> AbilitySystemComponent;
 
+public:
+    UFUNCTION(BlueprintPure, Category = "MD|Attribute")
+    UMD_CharacterAttributeSet* GetCharacterAttributeSet() const { return CharacterAttributeSet; }
+
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Attribute")
+    TObjectPtr<UMD_CharacterAttributeSet> CharacterAttributeSet;
 };

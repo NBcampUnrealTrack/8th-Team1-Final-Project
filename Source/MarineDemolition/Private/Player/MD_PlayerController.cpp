@@ -8,6 +8,11 @@
 #include "Engine/World.h"
 #include "World/Interaction/MD_TravelConsole.h"
 
+#include "AbilitySystemComponent.h"
+#include "GameplayEffect.h"
+#include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
+#include "Player/MD_PlayerState.h"
+
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console)
 {
 	if (!IsValid(Console))
@@ -30,6 +35,53 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 	}
 
 	GetWorld()->ServerTravel(MapPackage + TEXT("?listen"));
+}
+
+void AMD_PlayerController::MD_ApplyTestDamage()
+{
+	ServerApplyTestDamage();
+}
+
+void AMD_PlayerController::MD_ShowHealth()
+{
+	const AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	const UMD_CharacterAttributeSet* Attributes = IsValid(MDPlayerState) ? MDPlayerState->GetCharacterAttributeSet() : nullptr;
+
+	if (!IsValid(Attributes))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Attribute] AttributeSet을 찾을 수 없다"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Attribute] HP = %.1f / %.1f"),
+		Attributes->GetHealth(), Attributes->GetMaxHealth());
+}
+
+void AMD_PlayerController::ServerApplyTestDamage_Implementation()
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (!IsValid(MDPlayerState))
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* ASC = MDPlayerState->GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	//GE를 일으킨 주체 확인
+	FGameplayEffectContextHandle Context = ASC->MakeEffectContext();
+	Context.AddSourceObject(this);
+
+	const FGameplayEffectSpecHandle Spec = ASC->MakeOutgoingSpec(TestDamageEffect, 1.0f, Context);
+	if (!Spec.IsValid())
+	{
+		return;
+	}
+
+	ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data);
 }
 
 void AMD_PlayerController::BeginPlay()
