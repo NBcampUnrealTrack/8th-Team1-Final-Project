@@ -8,13 +8,14 @@
 #include "MD_SaveGameSession.generated.h"
 
 USTRUCT(BlueprintType)
-struct MARINEDEMOLITION_API FMD_InventoryDataWraper
+struct MARINEDEMOLITION_API FMD_EquipHotbarDataWrapper
 {
 	GENERATED_BODY()
 
 public:
-	UPROPERTY()
-	TArray<FPrimaryAssetId> InventoryData;
+	// 플레이어의 핫 바의 슬롯 목록을 복사하여 저장하는 변수
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
+	TArray<TSoftObjectPtr<class UMD_ToolDefinition>> ToolSlots;
 };
 
 /*
@@ -45,11 +46,11 @@ public:
 
 	// 수주한 의뢰
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
-	FPrimaryAssetId MissionID;
+	int32 QuestLevel;
 
-	// 플레이어 별 보유 아이템 목록
+	// 플레이어 별 보유 아이템 목록 { UniqueId.ToString(), FMD_EquipHotbarDataWrapper() }
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
-	TMap<FUniqueNetIdRepl, FMD_InventoryDataWraper> InventoryData;
+	TMap<FString, FMD_EquipHotbarDataWrapper> InventoryData;
 
 	// 경과 일수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")

@@ -1,10 +1,11 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Game/MD_GameModeBase.h"
 #include "EngineUtils.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Game/MD_GameStateBase.h"
+#include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "TimerManager.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
@@ -24,6 +25,13 @@ void AMD_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();
 
+    // 타이틀에서 선택한 GameSession 데이터를 현재 호스팅 Session의 재접속 기준 데이터로 전환
+    UMD_SaveSlotManager* const SaveSlotManager = GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>();
+    if (IsValid(SaveSlotManager) == true)
+    {
+        SaveSlotManager->ActivatePendingGameSession();
+    }
+
     GetWorldTimerManager().SetTimer(
         CheckGameTimeTimerHandle,
         this,
@@ -42,6 +50,30 @@ void AMD_GameModeBase::BeginPlay()
     // 이전 Day 스냅샷 복원은 전 액터 BeginPlay 이후로 미룸 (벽 오염 초기화보다 늦게)
     GetWorldTimerManager().SetTimerForNextTick(
         this, &AMD_GameModeBase::RestoreDaySnapshot);
+}
+
+void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
+{
+    Super::RestartPlayer(NewPlayer);
+
+    // 현재 Game Session 데이터에 저장되어있는 Player별 EquipHotbar의 Slot 목록 불러오기
+    UMD_SaveSlotManager* const SaveSlotManager = GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>();
+    if (IsValid(SaveSlotManager) == true)
+    {
+        SaveSlotManager->LoadPlayerEquipment(NewPlayer);
+    }
+}
+
+void AMD_GameModeBase::Logout(AController* Exiting)
+{
+    // 현재 Game Session 데이터에 Player의 EquipHotbar의 Slot 목록 저장
+    UMD_SaveSlotManager* const SaveSlotManager = GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>();
+    if (IsValid(SaveSlotManager) == true)
+    {
+        SaveSlotManager->SavePlayerEquipment(Exiting);
+    }
+
+    Super::Logout(Exiting);
 }
 
 void AMD_GameModeBase::HandleStrutCollapsed(AMD_CuttableWall* Wall, AActor* Cutter)
