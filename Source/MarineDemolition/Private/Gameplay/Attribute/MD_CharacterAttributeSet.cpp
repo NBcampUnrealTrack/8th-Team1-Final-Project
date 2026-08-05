@@ -2,11 +2,19 @@
 
 
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
+#include "Net/UnrealNetwork.h"
 
 UMD_CharacterAttributeSet::UMD_CharacterAttributeSet()
 {
 	InitMaxHealth(100.0f);
 	InitHealth(100.0f);
+}
+
+void UMD_CharacterAttributeSet::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	//모든 클라에 나타냄
+	DOREPLIFETIME_CONDITION_NOTIFY(UMD_CharacterAttributeSet, Health, COND_None, REPNOTIFY_Always);
+	DOREPLIFETIME_CONDITION_NOTIFY(UMD_CharacterAttributeSet, MaxHealth, COND_None, REPNOTIFY_Always);
 }
 
 void UMD_CharacterAttributeSet::PreAttributeChange(const FGameplayAttribute& Attribute, float& NewValue)
@@ -32,4 +40,15 @@ void UMD_CharacterAttributeSet::ClampAttribute(const FGameplayAttribute& Attribu
 	{
 		NewValue = FMath::Clamp(NewValue, 0.0f, GetMaxHealth());
 	}
+}
+
+void UMD_CharacterAttributeSet::OnRep_Health(const FGameplayAttributeData& OldValue)
+{
+	//체력 설정, 변경 판정은 서버에서만 한다.
+	GAMEPLAYATTRIBUTE_REPNOTIFY(UMD_CharacterAttributeSet, Health, OldValue);
+}
+
+void UMD_CharacterAttributeSet::OnRep_MaxHealth(const FGameplayAttributeData& OldValue)
+{
+	GAMEPLAYATTRIBUTE_REPNOTIFY(UMD_CharacterAttributeSet, MaxHealth, OldValue);
 }

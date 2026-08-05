@@ -39,14 +39,33 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 
 void AMD_PlayerController::MD_ApplyTestDamage()
 {
+	ServerApplyTestDamage();
+}
+
+void AMD_PlayerController::MD_ShowHealth()
+{
+	const AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	const UMD_CharacterAttributeSet* Attributes = IsValid(MDPlayerState) ? MDPlayerState->GetCharacterAttributeSet() : nullptr;
+
+	if (!IsValid(Attributes))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Attribute] AttributeSet을 찾을 수 없다"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Attribute] HP = %.1f / %.1f"),
+		Attributes->GetHealth(), Attributes->GetMaxHealth());
+}
+
+void AMD_PlayerController::ServerApplyTestDamage_Implementation()
+{
 	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
-	UAbilitySystemComponent* ASC = MDPlayerState->GetAbilitySystemComponent();
-	
 	if (!IsValid(MDPlayerState))
 	{
 		return;
 	}
 
+	UAbilitySystemComponent* ASC = MDPlayerState->GetAbilitySystemComponent();
 	if (!IsValid(ASC))
 	{
 		return;
@@ -63,24 +82,6 @@ void AMD_PlayerController::MD_ApplyTestDamage()
 	}
 
 	ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data);
-
-	MD_ShowHealth();
-}
-
-void AMD_PlayerController::MD_ShowHealth()
-{
-	const AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
-	const UMD_CharacterAttributeSet* Attributes =
-		IsValid(MDPlayerState) ? MDPlayerState->GetCharacterAttributeSet() : nullptr;
-
-	if (!IsValid(Attributes))
-	{
-		UE_LOG(LogTemp, Warning, TEXT("[Attribute] AttributeSet을 찾을 수 없다"));
-		return;
-	}
-
-	UE_LOG(LogTemp, Log, TEXT("[Attribute] HP = %.1f / %.1f"),
-		Attributes->GetHealth(), Attributes->GetMaxHealth());
 }
 
 void AMD_PlayerController::BeginPlay()

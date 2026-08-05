@@ -35,6 +35,9 @@ private:
 	UFUNCTION(Exec)
 	void MD_ShowHealth();
 
+	UFUNCTION(Server,Reliable)
+	void ServerApplyTestDamage();
+
 protected:
 	virtual void BeginPlay() override;
 

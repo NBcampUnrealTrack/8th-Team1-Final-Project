@@ -21,19 +21,30 @@ class MARINEDEMOLITION_API UMD_CharacterAttributeSet : public UAttributeSet
 public:
 	UMD_CharacterAttributeSet();
 
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	
 	virtual void PreAttributeChange(const FGameplayAttribute& Attribute, float& NewValue) override;
 
 	virtual void PreAttributeBaseChange(const FGameplayAttribute& Attribute, float& NewValue) const override;
 
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Attribute")
+public:
+
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_Health, Category = "MD|Attribute")
 	FGameplayAttributeData Health;
 	ATTRIBUTE_ACCESSORS(UMD_CharacterAttributeSet, Health)
 
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Attribute")
+	UPROPERTY(BlueprintReadOnly, ReplicatedUsing = OnRep_MaxHealth, Category = "MD|Attribute")
 	FGameplayAttributeData MaxHealth;
 	ATTRIBUTE_ACCESSORS(UMD_CharacterAttributeSet, MaxHealth)
 
 private:
 	/* 두 경로가 같은 규칙을 쓰도록 클램프를 한 함수로 모은다. */
 	void ClampAttribute(const FGameplayAttribute& Attribute, float& NewValue) const;
+
+protected:
+	UFUNCTION()
+	void OnRep_Health(const FGameplayAttributeData& OldValue);
+
+	UFUNCTION()
+	void OnRep_MaxHealth(const FGameplayAttributeData& OldValue);
 };
