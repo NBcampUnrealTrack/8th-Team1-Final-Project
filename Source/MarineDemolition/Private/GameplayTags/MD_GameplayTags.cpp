@@ -50,6 +50,34 @@ namespace MDGameplayTags
 		"Carry the interacted actor as a world physics object");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+	  Ability_PlaceSupport,
+	  "Ability.PlaceSupport",
+	  "임시 지지대 설치 어빌리티");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Resource_Sample_Grade,
+		"Resource.Sample.Grade",
+		"샘플 등급 분류의 공통 루트");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Resource_Sample_Grade_C,
+		"Resource.Sample.Grade_C",
+		"C급 샘플. 퀘스트 보상 80 기준");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Resource_Sample_Grade_B,
+		"Resource.Sample.Grade_B",
+		"B급 샘플. 퀘스트 보상 160 기준");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Resource_Sample_Grade_A,
+		"Resource.Sample.Grade_A",
+		"A급샘플. 퀘스트 보상 280 기준");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Resource_Sample_Grade_S,
+		"Resource.Sample.Grade_S",
+		"S급샘플. 퀘스트 보상 450 기준");
 		Ability_PlaceSupport,
 		"Ability.PlaceSupport",
 		"임시 지지대 설치 어빌리티");
