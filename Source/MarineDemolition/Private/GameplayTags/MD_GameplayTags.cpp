@@ -78,9 +78,6 @@ namespace MDGameplayTags
 		Resource_Sample_Grade_S,
 		"Resource.Sample.Grade_S",
 		"S급샘플. 퀘스트 보상 450 기준");
-		Ability_PlaceSupport,
-		"Ability.PlaceSupport",
-		"임시 지지대 설치 어빌리티");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Score_Sorting_Metal,
