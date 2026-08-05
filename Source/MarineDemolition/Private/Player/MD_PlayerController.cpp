@@ -11,6 +11,7 @@
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
 
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console)
@@ -82,6 +83,34 @@ void AMD_PlayerController::ServerApplyTestDamage_Implementation()
 	}
 
 	ASC->ApplyGameplayEffectSpecToSelf(*Spec.Data);
+}
+
+void AMD_PlayerController::MD_ShowHealthState()
+{
+	const AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (!IsValid(MDPlayerState))
+	{
+		return;
+	}
+
+	const UMD_CharacterAttributeSet* Attributes = MDPlayerState->GetCharacterAttributeSet();
+	if (!IsValid(Attributes))
+	{
+		return;
+	}
+	
+	const UAbilitySystemComponent* ASC = MDPlayerState->GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Health][%s] HP=%.1f 상태=%d 부상태그=%d 사망태그=%d"),
+		HasAuthority() ? TEXT("Server") : TEXT("Client"),
+		IsValid(Attributes) ? Attributes->GetHealth() : -1.0f,
+		static_cast<int32>(MDPlayerState->GetHealthState()),
+		IsValid(ASC) && ASC->HasMatchingGameplayTag(MDGameplayTags::State_Injured) ? 1 : 0,
+		IsValid(ASC) && ASC->HasMatchingGameplayTag(MDGameplayTags::State_Dead) ? 1 : 0);
 }
 
 void AMD_PlayerController::BeginPlay()

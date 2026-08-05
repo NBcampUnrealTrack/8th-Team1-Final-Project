@@ -3,8 +3,10 @@
 
 #include "Player/MD_PlayerState.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "AbilitySystemComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "TimerManager.h"
 
 void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
@@ -12,6 +14,23 @@ void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 
 	DOREPLIFETIME(AMD_PlayerState, ReturnStatus);
 }
+
+void AMD_PlayerState::BeginPlay()
+{
+	Super::BeginPlay();
+
+	if (!IsValid(AbilitySystemComponent) || !IsValid(CharacterAttributeSet))
+	{
+		return;
+	}
+
+	// HP 변경 경로가 여러 개라 델리게이트 한 곳에서 받는다.
+	// 서버·클라이언트 양쪽에서 호출되므로 각자 상태를 계산해 태그가 동일하게 유지된다.
+	AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(CharacterAttributeSet->GetHealthAttribute()).AddUObject(this, &AMD_PlayerState::HandleHealthChanged);
+
+	CachedHealthState = GetHealthState();
+}
+
 
 void AMD_PlayerState::SetReturnStatus(EMD_ReturnStatus NewStatus)
 {
@@ -88,4 +107,103 @@ AMD_PlayerState::AMD_PlayerState()
 UAbilitySystemComponent* AMD_PlayerState::GetAbilitySystemComponent() const
 {
 	return AbilitySystemComponent;
+}
+
+EMD_HealthState AMD_PlayerState::GetHealthState() const
+{
+	if (!IsValid(CharacterAttributeSet))
+	{
+		return EMD_HealthState::Healthy;
+	}
+
+	const float CurrentHealth = CharacterAttributeSet->GetHealth();
+
+	if (CurrentHealth <= 0.0f)
+	{
+		return EMD_HealthState::Dead;
+	}
+
+	if (CurrentHealth <= InjuredHealthThreshold)
+	{
+		return EMD_HealthState::Injured;
+	}
+
+	return EMD_HealthState::Healthy;
+}
+
+void AMD_PlayerState::HandleHealthChanged(const FOnAttributeChangeData& ChangeData)
+{
+	RefreshHealthState();
+}
+
+void AMD_PlayerState::RefreshHealthState()
+{
+	const EMD_HealthState NewState = GetHealthState();
+
+	// 같은 구간 안의 HP 변동(80 → 60)은 전이가 아니므로 무시한다.
+	// 이 비교가 없으면 오염수 지속 피해에서 로그가 초당 수십 번 쏟아진다.
+	if (NewState == CachedHealthState)
+	{
+		return;
+	}
+
+	CachedHealthState = NewState;
+
+	if (IsValid(AbilitySystemComponent))
+	{
+		// 전이 경로가 여러 조합이라 매번 둘 다 지우고 현재 상태만 붙인다.
+		AbilitySystemComponent->RemoveLooseGameplayTag(MDGameplayTags::State_Injured);
+		AbilitySystemComponent->RemoveLooseGameplayTag(MDGameplayTags::State_Dead);
+
+		if (NewState == EMD_HealthState::Injured)
+		{
+			AbilitySystemComponent->AddLooseGameplayTag(MDGameplayTags::State_Injured);
+		}
+		else if (NewState == EMD_HealthState::Dead)
+		{
+			AbilitySystemComponent->AddLooseGameplayTag(MDGameplayTags::State_Dead);
+		}
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Health][%s] 상태 전환 → %d (HP %.1f)"),
+		HasAuthority() ? TEXT("Server") : TEXT("Client"),
+		static_cast<int32>(NewState),
+		IsValid(CharacterAttributeSet) ? CharacterAttributeSet->GetHealth() : -1.0f);
+
+	OnHealthStateChanged.Broadcast(NewState);
+
+	//부활, 타이머로직은 서버에서 처리한다.
+	if (NewState == EMD_HealthState::Dead && HasAuthority())
+	{
+		StartReviveTimer();
+	}
+}
+
+void AMD_PlayerState::StartReviveTimer()
+{
+	UWorld* World = GetWorld();
+	if (!IsValid(World))
+	{
+		return;
+	}
+
+	World->GetTimerManager().SetTimer(
+		ReviveTimerHandle,
+		this,
+		&AMD_PlayerState::Revive,
+		ReviveDelaySeconds,
+		false);
+}
+
+void AMD_PlayerState::Revive()
+{
+	if (!HasAuthority() || !IsValid(CharacterAttributeSet))
+	{
+		return;
+	}
+
+	const float ReviveAmount = CharacterAttributeSet->GetMaxHealth() * ReviveHealthRatio;
+	CharacterAttributeSet->SetHealth(ReviveAmount);
+
+	UE_LOG(LogTemp, Log, TEXT("[Health][Server] 부활 (HP %.1f)"), ReviveAmount);
 }

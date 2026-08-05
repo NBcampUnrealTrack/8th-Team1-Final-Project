@@ -38,6 +38,10 @@ private:
 	UFUNCTION(Server,Reliable)
 	void ServerApplyTestDamage();
 
+	//상태 변경 확인 콘솔 커맨드. UI연결되면 삭제
+	UFUNCTION(Exec)
+	void MD_ShowHealthState();
+
 protected:
 	virtual void BeginPlay() override;
 

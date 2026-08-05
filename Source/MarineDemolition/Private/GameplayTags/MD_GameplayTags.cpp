@@ -19,10 +19,6 @@ namespace MDGameplayTags
 		"Ability.WallScan",
 		"격벽 스캔 어빌리티");
 
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		State_Swimming,
-		"State.Swimming",
-		"수영 중. 정밀 작업 어빌리티 차단용");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Storage_Content,
@@ -61,22 +57,22 @@ namespace MDGameplayTags
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Sample_Grade_C,
-		"Resource.Sample.Grade_C",
+		"Resource.Sample.Grade.C",
 		"C급 샘플. 퀘스트 보상 80 기준");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Sample_Grade_B,
-		"Resource.Sample.Grade_B",
+		"Resource.Sample.Grade.B",
 		"B급 샘플. 퀘스트 보상 160 기준");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Sample_Grade_A,
-		"Resource.Sample.Grade_A",
+		"Resource.Sample.Grade.A",
 		"A급샘플. 퀘스트 보상 280 기준");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Sample_Grade_S,
-		"Resource.Sample.Grade_S",
+		"Resource.Sample.Grade.S",
 		"S급샘플. 퀘스트 보상 450 기준");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
@@ -195,4 +191,18 @@ namespace MDGameplayTags
 		Score_Penalty_PipeLeakTick,
 		"Score.Penalty.PipeLeakTick",
 		"수도 미밀봉 오염 확산 30초당");
+	
+	
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		State_Swimming,
+		"State.Swimming",
+		"수영 중. 정밀 작업 어빌리티 차단용");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		State_Injured,
+		"State.Injured",
+		"부상 상태. HP 30 이하");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		State_Dead,
+		"State.Dead",
+		"사망 상태. HP 0");
 }
