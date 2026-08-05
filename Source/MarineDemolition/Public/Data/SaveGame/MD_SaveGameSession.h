@@ -13,8 +13,9 @@ struct MARINEDEMOLITION_API FMD_EquipHotbarDataWrapper
 	GENERATED_BODY()
 
 public:
-	UPROPERTY()
-	TArray<FPrimaryAssetId> InventoryData;
+	// 플레이어의 핫 바의 슬롯 목록을 복사하여 저장하는 변수
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
+	TArray<TSoftObjectPtr<class UMD_ToolDefinition>> ToolSlots;
 };
 
 /*

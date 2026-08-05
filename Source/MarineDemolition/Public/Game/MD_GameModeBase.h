@@ -23,6 +23,10 @@ public:
     // 정식 하루 마감 진입점. 18:00 자동·모선 인터랙트·MD_EndDay 공용, 하루 1회만 동작
     void RequestEndDay();
 
+    virtual void RestartPlayer(AController* NewPlayer) override;
+
+    virtual void Logout(AController* Exiting) override;
+
 protected:
     virtual void BeginPlay() override;
 
