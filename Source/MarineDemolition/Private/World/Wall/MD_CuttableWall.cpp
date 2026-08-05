@@ -385,6 +385,11 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 			UE_LOG(LogTemp, Warning, TEXT("MD_CuttableWall::Cut - 절단자가 속한 섹터를 찾지 못함"));
 		}
 	}
+	else
+	{
+		// 칸막이 또는 지지 상태 지주 = 철거 성공 (무지지 지주는 붕괴로 전환, 점수 없음)
+		OnWallDemolished.Broadcast(this, Cutter);
+	}
 
 	// 파편 드랍: 제거율 비율로 깨끗/오염 배분 (기획 §2.5: 제거율 70% → 7:3)
 	const int32 CleanCount = FMath::RoundToInt(

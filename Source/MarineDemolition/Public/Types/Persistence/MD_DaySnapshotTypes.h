@@ -91,6 +91,10 @@ struct FMD_DaySnapshot
       UPROPERTY()
       int32 Score = 0;
 
+      // 점검 경고 상태. Day 간 유지 (다음 점검 기준 ×1.1 적용용)
+      UPROPERTY()
+      bool bWarningIssued = false;
+
       // 목록에 없는 레벨 배치 벽 = 어제 철거된 벽
       UPROPERTY()
       TArray<FName> SurvivingWallNames;

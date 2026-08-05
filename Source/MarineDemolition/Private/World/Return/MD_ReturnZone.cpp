@@ -27,6 +27,23 @@ AMD_ReturnZone::AMD_ReturnZone()
 	ReturnZoneCollision->SetGenerateOverlapEvents(true);
 }
 
+bool AMD_ReturnZone::ContainsPoint(const FVector& WorldLocation) const
+{
+	if (!IsValid(ReturnZoneCollision))
+	{
+		return false;
+	}
+
+	// 스케일은 InverseTransformPosition에서 반영되므로 비스케일 extent와 비교
+	const FVector LocalPoint =
+		ReturnZoneCollision->GetComponentTransform().InverseTransformPosition(WorldLocation);
+	const FVector Extent = ReturnZoneCollision->GetUnscaledBoxExtent();
+
+	return FMath::Abs(LocalPoint.X) <= Extent.X
+		&& FMath::Abs(LocalPoint.Y) <= Extent.Y
+		&& FMath::Abs(LocalPoint.Z) <= Extent.Z;
+}
+
 void AMD_ReturnZone::BeginPlay()
 {
 	Super::BeginPlay();
