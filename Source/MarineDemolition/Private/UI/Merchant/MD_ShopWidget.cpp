@@ -12,10 +12,6 @@
 
 namespace
 {
-	/** 호감도 표시 범위 (`02` §7) */
-	constexpr float AffinityMin = -4.f;
-	constexpr float AffinityMax = 5.f;
-
 	FText FormatCredits(int32 Amount)
 	{
 		return FText::FromString(FString::Printf(TEXT("%d₡"), Amount));
