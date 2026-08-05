@@ -1,8 +1,9 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Util/MD_BlueprintFunctionLibrary.h"
 #include "HAL/PlatformApplicationMisc.h"
+#include "Types/Online/MD_SessionTypes.h"
 
 void UMD_BlueprintFunctionLibrary::CopyTextToClipboard(const FString& CopyString)
 {
@@ -17,4 +18,14 @@ FString UMD_BlueprintFunctionLibrary::PasteTextFromClipboard()
 	FPlatformApplicationMisc::ClipboardPaste(OutString);
 
 	return OutString;
+}
+
+FMD_SessionCreateParams UMD_BlueprintFunctionLibrary::MakeMD_SessionCreateParams(TSoftObjectPtr<UWorld> SessionMap, bool bPrivateSession, bool bAllowJoinByFollow)
+{
+	return FMD_SessionCreateParams(SessionMap, bPrivateSession, bAllowJoinByFollow);
+}
+
+FMD_SessionFindParams UMD_BlueprintFunctionLibrary::MakeMD_SessionFindParams(FString ServerName, FString RoomCodeString)
+{
+	return FMD_SessionFindParams(ServerName, RoomCodeString);
 }
