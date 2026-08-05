@@ -19,10 +19,6 @@ namespace MDGameplayTags
 		"Ability.WallScan",
 		"격벽 스캔 어빌리티");
 
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		State_Swimming,
-		"State.Swimming",
-		"수영 중. 정밀 작업 어빌리티 차단용");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Storage_Content,
@@ -195,4 +191,18 @@ namespace MDGameplayTags
 		Score_Penalty_PipeLeakTick,
 		"Score.Penalty.PipeLeakTick",
 		"수도 미밀봉 오염 확산 30초당");
+	
+	
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		State_Swimming,
+		"State.Swimming",
+		"수영 중. 정밀 작업 어빌리티 차단용");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		State_Injured,
+		"State.Injured",
+		"부상 상태. HP 30 이하");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		State_Dead,
+		"State.Dead",
+		"사망 상태. HP 0");
 }

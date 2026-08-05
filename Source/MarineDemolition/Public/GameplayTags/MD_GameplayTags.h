@@ -10,7 +10,6 @@ namespace MDGameplayTags
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_WallCut);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_WallScan);
 
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Swimming);
 
 	/** 물리 보관함에 담을 수 있는 내용물 분류의 공통 루트 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content);
@@ -75,4 +74,15 @@ namespace MDGameplayTags
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_CableCut);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_PipeBurst);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_PipeLeakTick);
+
+	//  ===== 현재 HP에 따른 상태  =====
+	
+	/* 수영 상태. 바닥 접지 여부에 따라 걷기로 전환. */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Swimming);
+
+	/* 부상 상태. HP 30이하. 정밀 작업, 이동속도 감소에 사용 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Injured);
+
+	/* 사망 상태. HP 0. 모든 어빌리티 차단 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Dead);
 }
