@@ -42,6 +42,13 @@ private:
 	UFUNCTION(Exec)
 	void MD_ShowHealthState();
 
+	//상인 크레딧 확인용 콘솔 커맨드. UI 연결되면 삭제
+	UFUNCTION(Exec)
+	void MD_AddCredits(int32 Amount);
+
+	UFUNCTION(Exec)
+	void MD_ShowCredits();
+
 protected:
 	virtual void BeginPlay() override;
 

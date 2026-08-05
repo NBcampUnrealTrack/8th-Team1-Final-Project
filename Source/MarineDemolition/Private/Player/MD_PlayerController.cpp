@@ -14,6 +14,9 @@
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
 
+#include "Engine/GameInstance.h"
+#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console)
 {
 	if (!IsValid(Console))
@@ -111,6 +114,32 @@ void AMD_PlayerController::MD_ShowHealthState()
 		static_cast<int32>(MDPlayerState->GetHealthState()),
 		IsValid(ASC) && ASC->HasMatchingGameplayTag(MDGameplayTags::State_Injured) ? 1 : 0,
 		IsValid(ASC) && ASC->HasMatchingGameplayTag(MDGameplayTags::State_Dead) ? 1 : 0);
+}
+
+void AMD_PlayerController::MD_AddCredits(int32 Amount)
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+	if (!IsValid(GameInstance) || !IsValid(Merchant))
+	{
+		return;
+	}
+
+	Merchant->AddCredits(Amount);
+
+	MD_ShowCredits();
+}
+
+void AMD_PlayerController::MD_ShowCredits()
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+	if (!IsValid(GameInstance) || !IsValid(Merchant))
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Merchant][%s] Credits = %d"),HasAuthority() ? TEXT("Server") : TEXT("Client"),Merchant->GetCredits());
 }
 
 void AMD_PlayerController::BeginPlay()
