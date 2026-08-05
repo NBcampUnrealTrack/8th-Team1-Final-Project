@@ -149,14 +149,14 @@ bool UMD_SaveSlotManager::SaveCurrentGamesessionByAuto()
 	return true;
 }
 
-bool UMD_SaveSlotManager::PrepareGameSessionForHosting(const FString& SlotName)
+bool UMD_SaveSlotManager::PrepareGameSessionForHosting(const FMD_SaveSlotInfo& SlotInfo)
 {
 	// 이전 호스팅 시도의 데이터가 새 Session에 섞이지 않도록 대기 상태 초기화
 	PendingGameSessionData = nullptr;
 	PendingSaveSlotInfo.Reset();
 
 	// 세이브 슬롯에서 저장된 데이터 불러오기
-	UMD_SaveGameSession* const LoadedGameSession = LoadGameSessionDataInternal(SlotName);
+	UMD_SaveGameSession* const LoadedGameSession = LoadGameSessionDataInternal(SlotInfo.SlotName);
 
 	if (IsValid(LoadedGameSession) == false)
 	{
@@ -170,13 +170,7 @@ bool UMD_SaveSlotManager::PrepareGameSessionForHosting(const FString& SlotName)
 	ActiveGameSessionData = nullptr;
 
 	// 선택한 슬롯 정보를 찾아 호스팅 대상 슬롯의 메타데이터도 함께 보관
-	const FMD_SaveSlotInfo* const ManualSlotInfo = SlotInfoList.FindByPredicate([&SlotName](const FMD_SaveSlotInfo& SlotInfo) { return SlotInfo.SlotName == SlotName; });
-	const FMD_SaveSlotInfo* const AutoSlotInfo = AutoSlotInfoList.FindByPredicate([&SlotName](const FMD_SaveSlotInfo& SlotInfo) { return SlotInfo.SlotName == SlotName; });
-	const FMD_SaveSlotInfo* const SelectedSlotInfo = ManualSlotInfo != nullptr ? ManualSlotInfo : AutoSlotInfo;
-	if (SelectedSlotInfo != nullptr)
-	{
-		PendingSaveSlotInfo = MakeShared<FMD_SaveSlotInfo>(*SelectedSlotInfo);
-	}
+	PendingSaveSlotInfo = MakeShared<FMD_SaveSlotInfo>(SlotInfo);
 
 	return true;
 }
@@ -197,35 +191,35 @@ bool UMD_SaveSlotManager::ActivatePendingGameSession()
 
 bool UMD_SaveSlotManager::SavePlayerEquipment(AController* PlayerController)
 {
-	// 클라이언트가 로컬 Equipment 상태를 서버 Session 데이터에 기록하지 못하도록 권위 검사
+	// PlayerController의 유효성 검사 및 클라이언트 환경 실행 제한
 	if (IsValid(PlayerController) == false || PlayerController->HasAuthority() == false)
 	{
 		return false;
 	}
 
-	// 재접속 이후에도 같은 Player를 찾을 수 있도록 Online ID 기반 키 생성
+	// 서로 다른 Player 구분을 위하여 Online ID 기반 키 생성
 	FString PlayerSaveKey;
 	if (BuildPlayerSaveKey(PlayerController, PlayerSaveKey) == false)
 	{
 		return false;
 	}
 
-	// Equipment Component를 소유한 현재 Player Character 확인
-	AMD_Character* const PlayerCharacter = Cast<AMD_Character>(PlayerController->GetPawn());
+	// PlayerController가 조종하는 Pawn을 MD_Character(MD_EquipHotbarComponent 소유)으로 변환 및 유효성
+	AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerController->GetPawn());
 	if (IsValid(PlayerCharacter) == false)
 	{
 		return false;
 	}
 
-	// Character에서 서버 권위 Equipment Hotbar Component 확인
-	UMD_EquipHotbarComponent* const EquipmentComponent = PlayerCharacter->GetHotbarComponent();
+	// MD_EquipHotbarComponent 확인
+	UMD_EquipHotbarComponent* EquipmentComponent = PlayerCharacter->GetHotbarComponent();
 	if (IsValid(EquipmentComponent) == false)
 	{
 		return false;
 	}
 
-	// 신규 Session도 재접속 데이터를 보관할 수 있도록 현재 Session 저장 객체 확보
-	UMD_SaveGameSession* const SessionData = GetMutableEquipmentSessionData();
+	// 신규 Session도 재접속 데이터를 보관할 수 있도록 현재 Session 저장 객체 생성 또는 얻기
+	UMD_SaveGameSession* SessionData = GetMutableEquipmentSessionData();
 	if (IsValid(SessionData) == false)
 	{
 		return false;
@@ -238,48 +232,48 @@ bool UMD_SaveSlotManager::SavePlayerEquipment(AController* PlayerController)
 
 bool UMD_SaveSlotManager::LoadPlayerEquipment(AController* PlayerController)
 {
-	// Equipment 복원은 서버 권위 Pawn에만 적용해 클라이언트 로컬 세이브 개입 차단
+	// PlayerController의 유효성 검사 및 클라이언트 환경 실행 제한
 	if (IsValid(PlayerController) == false || PlayerController->HasAuthority() == false)
 	{
 		return false;
 	}
 
 	// 현재 활성 또는 호스팅 대기 중인 GameSession 데이터 확인
-	const UMD_SaveGameSession* const SessionData = GetEquipmentSessionData();
+	UMD_SaveGameSession* SessionData = GetEquipmentSessionData();
 	if (IsValid(SessionData) == false)
 	{
 		return false;
 	}
 
-	// 접속한 Player의 Online ID를 저장 데이터 조회 키로 변환
+	// Player 식별 문자열 키 얻기
 	FString PlayerSaveKey;
 	if (BuildPlayerSaveKey(PlayerController, PlayerSaveKey) == false)
 	{
 		return false;
 	}
 
-	// 처음 접속한 Player는 저장 기록이 없으므로 Character의 기본 Equipment 유지
-	const FMD_EquipHotbarDataWrapper* const SavedEquipmentData = SessionData->InventoryData.Find(PlayerSaveKey);
+	// 해당 플레이어의 저장된 장비 데이터가 존재하지 않는 경우 함수 조기 종료
+	FMD_EquipHotbarDataWrapper* SavedEquipmentData = SessionData->InventoryData.Find(PlayerSaveKey);
 	if (SavedEquipmentData == nullptr)
 	{
-		return false;
+		return true;
 	}
 
-	// 부모 RestartPlayer가 생성하고 Possess한 Player Character 확인
+	// PlayerController가 조종하는 MD_Character(MD_EquipHotbarComponent 소유) 확인
 	AMD_Character* const PlayerCharacter = Cast<AMD_Character>(PlayerController->GetPawn());
 	if (IsValid(PlayerCharacter) == false)
 	{
 		return false;
 	}
 
-	// 저장된 Equipment를 적용할 Hotbar Component 확인
+	// 저장된 데이터를 적용할 MD_EquipHotbarComponent 확인
 	UMD_EquipHotbarComponent* const EquipmentComponent = PlayerCharacter->GetHotbarComponent();
 	if (IsValid(EquipmentComponent) == false)
 	{
 		return false;
 	}
 
-	// Component가 제공하는 서버 권위 역직렬화 함수로 Equipment 복원
+	// MD_EquipHotbarComponent의 장비 목록 덮어쓰기
 	return EquipmentComponent->RestoreEquipmentSaveData(*SavedEquipmentData);
 }
 
@@ -418,21 +412,22 @@ bool UMD_SaveSlotManager::BuildPlayerSaveKey(const AController* PlayerController
 		return false;
 	}
 
-	const APlayerState* PlayerState = PlayerController->GetPlayerState<APlayerState>();
+	// 플레이어의 UniqueId를 얻기위하여 PlayerState 객체 참조
+	APlayerState* PlayerState = PlayerController->GetPlayerState<APlayerState>();
 	if (IsValid(PlayerState) == false)
 	{
 		return false;
 	}
 
 	// Online Subsystem에서 발급한 ID가 없으면 재접속 Player를 안정적으로 식별할 수 없으므로 중단
-	const FUniqueNetIdRepl& UniqueId = PlayerState->GetUniqueId();
+	FUniqueNetIdRepl UniqueId = PlayerState->GetUniqueId();
 	if (UniqueId.IsValid() == false)
 	{
 		UE_LOG(MarineDemolition, Warning, TEXT("%s Player의 UniqueNetId가 유효하지 않아 Equipment 데이터를 처리할 수 없습니다."), *UE_CALL_LOCATIONINFO);
 		return false;
 	}
 
-	// 세이브 파일에서 직렬화하기 쉬운 문자열 형식으로 Online ID 변환
+	// Online ID를 문자열 형태로 변환
 	OutPlayerSaveKey = UniqueId.ToString();
 	return OutPlayerSaveKey.IsEmpty() == false;
 }
@@ -456,7 +451,7 @@ UMD_SaveGameSession* UMD_SaveSlotManager::GetMutableEquipmentSessionData()
 	return ActiveGameSessionData;
 }
 
-const UMD_SaveGameSession* UMD_SaveSlotManager::GetEquipmentSessionData() const
+UMD_SaveGameSession* UMD_SaveSlotManager::GetEquipmentSessionData() const
 {
 	// 현재 Session 데이터가 있으면 재접속과 저장의 우선 기준으로 사용
 	if (IsValid(ActiveGameSessionData) == true)

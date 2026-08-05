@@ -74,7 +74,7 @@ public:
 
 	// 임의 이름으로 저장된 세이브 슬롯을 호스팅될 Session에서 사용할 데이터로써 로드 및 보관 처리하는 함수
 	UFUNCTION(BlueprintCallable, Category = "Save GameSession")
-	bool PrepareGameSessionForHosting(const FString& SlotName);
+	bool PrepareGameSessionForHosting(const FMD_SaveSlotInfo& SlotInfo);
 
 	// 호스팅 맵 진입 후 대기 중인 GameSession 데이터를 현재 Session 데이터로 전환하는 함수
 	bool ActivatePendingGameSession();
@@ -102,7 +102,7 @@ private:
 	UMD_SaveGameSession* GetMutableEquipmentSessionData();
 
 	// Equipment 데이터를 복원할 현재 또는 대기 중인 GameSession 객체를 반환하는 함수
-	const UMD_SaveGameSession* GetEquipmentSessionData() const;
+	UMD_SaveGameSession* GetEquipmentSessionData() const;
 
 	// 세션 저장 직전에 접속 중인 모든 Player의 최신 Equipment 상태를 수집하는 함수
 	void CaptureAllConnectedPlayerEquipment();
