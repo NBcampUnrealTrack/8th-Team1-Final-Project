@@ -197,4 +197,7 @@ private:
 
 	/** 모선 리스폰 지점으로 옮긴다. 서버에서만 호출한다. */
 	void TeleportToMothership();
+
+	/** 직전에 사망 상태였는지. 부활 전이 판별용 */
+	bool bWasDeadState = false;
 };

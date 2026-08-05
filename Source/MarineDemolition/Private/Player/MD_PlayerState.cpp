@@ -197,7 +197,7 @@ void AMD_PlayerState::StartReviveTimer()
 
 void AMD_PlayerState::Revive()
 {
-	if (!HasAuthority())
+	if (!HasAuthority() || !IsValid(CharacterAttributeSet))
 	{
 		return;
 	}

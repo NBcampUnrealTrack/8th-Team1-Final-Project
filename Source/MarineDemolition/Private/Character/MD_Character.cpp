@@ -706,11 +706,14 @@ void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
 	// 이동 차단은 서버·클라 양쪽에서 걸어 입력 반응을 즉시 없앤다.
 	ApplyDeathMovementLock(bIsDead);
 
+	// 모선 이동은 사망→부활 전이에만. 건강→부상 전이에서 옮기면 안 된다.
 	// 위치 이동은 서버 권한이다. 클라이언트가 옮기면 곧 서버 위치로 되돌아간다.
-	if (!bIsDead && HasAuthority())
+	if (!bIsDead && bWasDeadState && HasAuthority())
 	{
 		TeleportToMothership();
 	}
+
+	bWasDeadState = bIsDead;
 }
 
 void AMD_Character::ApplyDeathMovementLock(bool bLocked)
