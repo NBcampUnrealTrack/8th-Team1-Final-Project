@@ -24,6 +24,7 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
     Snapshot.WorldName = World->GetFName();
     Snapshot.CompletedDay = GameState->GetCurrentDay();
     Snapshot.Score = GameState->GetScore();
+    Snapshot.bWarningIssued = GameState->IsInspectionWarned();
 
     for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
     {
@@ -178,6 +179,7 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     if (IsValid(GameState))
     {
         GameState->AddScoreDelta(Snapshot.Score);
+        GameState->SetInspectionWarned(Snapshot.bWarningIssued);
         GameState->SetCurrentDay(Snapshot.CompletedDay + 1);
     }
 
