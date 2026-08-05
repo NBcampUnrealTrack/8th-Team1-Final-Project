@@ -17,6 +17,9 @@
 #include "Engine/GameInstance.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 
+#include "Data/Merchant/MD_QuestDefinition.h"
+#include "Data/Merchant/MD_SiteDefinition.h"
+
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console)
 {
 	if (!IsValid(Console))
@@ -140,6 +143,42 @@ void AMD_PlayerController::MD_ShowCredits()
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant][%s] Credits = %d"),HasAuthority() ? TEXT("Server") : TEXT("Client"),Merchant->GetCredits());
+}
+
+void AMD_PlayerController::MD_BeginContract()
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	if (!IsValid(GameInstance))
+	{
+		return;
+	}
+
+	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+	if (!IsValid(Merchant))
+	{
+		return;
+	}
+
+	Merchant->BeginContract(DebugSite, DebugAdvancePayment);
+
+	MD_DumpQuests();
+}
+
+void AMD_PlayerController::MD_DumpQuests()
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	if (!IsValid(GameInstance))
+	{
+		return;
+	}
+
+	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+	if (!IsValid(Merchant))
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] Credits=%d Day=%d"),Merchant->GetCredits(), Merchant->GetCurrentDay());
 }
 
 void AMD_PlayerController::BeginPlay()
