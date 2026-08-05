@@ -1,4 +1,5 @@
 #include "Game/MD_GameStateBase.h"
+#include "Data/Score/MD_ScoreTableData.h"
 #include "Net/UnrealNetwork.h"
 
 AMD_GameStateBase::AMD_GameStateBase()
@@ -27,7 +28,11 @@ void AMD_GameStateBase::GetLifetimeReplicatedProps(
     DOREPLIFETIME(AMD_GameStateBase, WithdrawalPhase);
     
     DOREPLIFETIME(AMD_GameStateBase, Score);
-    
+
+    DOREPLIFETIME(AMD_GameStateBase, bInspectionWarned);
+
+    DOREPLIFETIME(AMD_GameStateBase, LastInspectionReport);
+
     DOREPLIFETIME(AMD_GameStateBase, CurrentDay);
 }
 
@@ -164,6 +169,81 @@ void AMD_GameStateBase::AddScoreDelta(int32 Delta)
     Score += Delta;
     // 리슨 서버는 OnRep이 안 오므로 직접 방송
     OnRep_Score();
+}
+
+void AMD_GameStateBase::AddScoreEvent(FGameplayTag EventTag, int32 Count)
+{
+    if (!HasAuthority() || !IsValid(ScoreTable) || Count == 0)
+    {
+        return;
+    }
+
+    const int32 Delta = ScoreTable->GetEventValue(EventTag) * Count;
+    if (Delta == 0)
+    {
+        return;
+    }
+
+    ScoreLog.Add({EventTag, Delta, CurrentDay});
+    AddScoreDelta(Delta);
+}
+
+void AMD_GameStateBase::AddSampleScoreEvent(EMD_SampleGrade Grade, EMD_SampleScoreType Type)
+{
+    if (!HasAuthority() || !IsValid(ScoreTable))
+    {
+        return;
+    }
+
+    const int32 Delta = ScoreTable->GetSampleValue(Grade, Type);
+    if (Delta == 0)
+    {
+        return;
+    }
+
+    ScoreLog.Add({FGameplayTag(), Delta, CurrentDay});
+    AddScoreDelta(Delta);
+}
+
+int32 AMD_GameStateBase::GetInspectionThreshold(int32 Day) const
+{
+    if (!IsValid(ScoreTable))
+    {
+        return 0;
+    }
+
+    const int32 BaseThreshold = ScoreTable->GetDayThreshold(Day);
+    return bInspectionWarned
+        ? FMath::RoundToInt(BaseThreshold * ScoreTable->WarnedThresholdMultiplier)
+        : BaseThreshold;
+}
+
+void AMD_GameStateBase::SetInspectionWarned(bool bWarned)
+{
+    if (HasAuthority())
+    {
+        bInspectionWarned = bWarned;
+    }
+}
+
+void AMD_GameStateBase::SetInspectionReport(const FMD_InspectionReport& Report)
+{
+    if (!HasAuthority())
+    {
+        return;
+    }
+
+    LastInspectionReport = Report;
+    // 리슨 서버는 OnRep이 안 오므로 직접 방송
+    OnRep_InspectionReport();
+}
+
+void AMD_GameStateBase::OnRep_InspectionReport()
+{
+    if (LastInspectionReport.bValid)
+    {
+        OnInspectionReport.Broadcast(LastInspectionReport);
+    }
 }
 
 void AMD_GameStateBase::SetCurrentDay(int32 NewDay)

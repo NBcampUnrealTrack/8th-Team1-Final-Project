@@ -24,6 +24,7 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
     Snapshot.WorldName = World->GetFName();
     Snapshot.CompletedDay = GameState->GetCurrentDay();
     Snapshot.Score = GameState->GetScore();
+    Snapshot.bWarningIssued = GameState->IsInspectionWarned();
 
     for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
     {
@@ -31,6 +32,16 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         if (It->IsSupported())
         {
             Snapshot.SupportedWallNames.Add(It->GetFName());
+        }
+
+        // 초기값과 달라진 오염 셀만 기록
+        FMD_WallContaminationRecord ContaminationRecord;
+        ContaminationRecord.WallName = It->GetFName();
+        It->ExportContaminationDeltas(
+            ContaminationRecord.CellIndices, ContaminationRecord.RemainingAmounts);
+        if (ContaminationRecord.CellIndices.Num() > 0)
+        {
+            Snapshot.WallContaminations.Add(ContaminationRecord);
         }
     }
 
@@ -106,6 +117,15 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
         }
     }
 
+    // 어제 긁은 오염 셀 상태 복원. 이후 ApplyOvernightWorsening이 이 위에 소량 재부착
+    for (const FMD_WallContaminationRecord& Record : Snapshot.WallContaminations)
+    {
+        if (AMD_CuttableWall* const* Wall = WallsByName.Find(Record.WallName))
+        {
+            (*Wall)->RestoreContaminationCells(Record.CellIndices, Record.RemainingAmounts);
+        }
+    }
+
     FActorSpawnParameters SpawnParams;
     SpawnParams.SpawnCollisionHandlingOverride =
         ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
@@ -178,6 +198,7 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     if (IsValid(GameState))
     {
         GameState->AddScoreDelta(Snapshot.Score);
+        GameState->SetInspectionWarned(Snapshot.bWarningIssued);
         GameState->SetCurrentDay(Snapshot.CompletedDay + 1);
     }
 
@@ -188,7 +209,7 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
 
 void UMD_DayPersistenceSubsystem::ApplyOvernightWorsening(UWorld* World)
 {
-    // 약해진 지지대 1개 (기획 03 §3)
+    // 약해진 지지대 1개
     TArray<AMD_SupportBrace*> Braces;
     for (TActorIterator<AMD_SupportBrace> It(World); It; ++It)
     {
