@@ -390,7 +390,16 @@ void AMD_Character::ReleaseTarget()
 
 void AMD_Character::UpdateHeldTarget()
 {
-	if (!HasAuthority() || !IsHolding() || !IsValid(HoldPoint)) return;
+	if (!HasAuthority()) return;
+
+	// 잡은 물체가 외부에서 파괴되면 운반 상태를 정리해 인터랙트 잠김을 방지
+	if (bHoldingPhysicsTarget && !IsHolding())
+	{
+		ReleaseTarget();
+		return;
+	}
+
+	if (!IsHolding() || !IsValid(HoldPoint)) return;
 
 	const FVector TargetLocation = HoldPoint->GetComponentTransform().TransformPositionNoScale(HeldTargetOffset);
 

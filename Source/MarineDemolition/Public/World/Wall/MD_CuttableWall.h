@@ -107,6 +107,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnContaminationFullyRemoved, AMD
 // 지주격벽 오절단으로 붕괴가 실제 발생했을 때 한 번 발생
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnStrutCollapsed, AMD_CuttableWall*, Wall, AActor*, Cutter);
 
+// 철거 성공(칸막이 절단 또는 지지 상태 지주 절단) 시 한 번 발생
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnWallDemolished, AMD_CuttableWall*, Wall, AActor*, Cutter);
+
 // 격벽 타입. 칸막이 = 비내력벽(자유 철거), 지주 = 내력벽 (오절단 시 붕괴)
 UENUM(BlueprintType)
 enum class EMD_WallType : uint8
@@ -142,6 +145,10 @@ public:
 	// 무지지 붕괴 발생 시 방송. 점수 처리는 GameMode가 구독
 	UPROPERTY(BlueprintAssignable, Category = "Wall")
 	FMD_OnStrutCollapsed OnStrutCollapsed;
+
+	// 철거 성공 시 방송. 점수 처리는 GameMode가 구독
+	UPROPERTY(BlueprintAssignable, Category = "Wall")
+	FMD_OnWallDemolished OnWallDemolished;
 
 	// Cutter = 절단 버튼을 누른 캐릭터
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Wall")
@@ -208,6 +215,12 @@ public:
 	
 	// Day 전환 악화: 무작위 위치에 오염 셀을 소량 리필
 	void ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells);
+
+	// Day 스냅샷용: 초기값과 다른 셀을 (인덱스, 남은 오염량) 쌍으로 내보낸다
+	void ExportContaminationDeltas(TArray<int32>& OutCellIndices, TArray<float>& OutRemainingAmounts) const;
+
+	// Day 스냅샷용: 저장된 셀 상태를 적용하고 시각화·복제를 갱신한다
+	void RestoreContaminationCells(const TArray<int32>& CellIndices, const TArray<float>& RemainingAmounts);
 
 protected:
 	virtual void BeginPlay() override;

@@ -2,6 +2,7 @@
 
 
 #include "Player/MD_PlayerState.h"
+#include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "AbilitySystemComponent.h"
 #include "Net/UnrealNetwork.h"
 
@@ -79,6 +80,9 @@ AMD_PlayerState::AMD_PlayerState()
 
 	AbilitySystemComponent->SetIsReplicated(true);
 	AbilitySystemComponent->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
+
+	//캐릭터 AttributeSet
+	CharacterAttributeSet = CreateDefaultSubobject<UMD_CharacterAttributeSet>(TEXT("CharacterAttributeSet"));
 }
 
 UAbilitySystemComponent* AMD_PlayerState::GetAbilitySystemComponent() const
