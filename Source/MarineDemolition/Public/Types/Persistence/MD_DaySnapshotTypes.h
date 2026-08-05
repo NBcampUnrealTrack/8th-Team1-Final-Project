@@ -55,6 +55,22 @@ struct FMD_PieceRecord
       bool bContaminated = false;
 };
 
+// 벽별 오염 셀 상태. 초기값과 다른 셀만 저장한다
+USTRUCT()
+struct FMD_WallContaminationRecord
+{
+      GENERATED_BODY()
+
+      UPROPERTY()
+      FName WallName = NAME_None;
+
+      UPROPERTY()
+      TArray<int32> CellIndices;
+
+      UPROPERTY()
+      TArray<float> RemainingAmounts;
+};
+
 // Day 종료 시점의 현장 상태. Cut()이 벽을 Destroy하므로 "살아남은 벽"을 기록한다
 USTRUCT()
 struct FMD_DaySnapshot
@@ -91,4 +107,7 @@ struct FMD_DaySnapshot
 
       UPROPERTY()
       TArray<FMD_PieceRecord> Pieces;
+
+      UPROPERTY()
+      TArray<FMD_WallContaminationRecord> WallContaminations;
 };
