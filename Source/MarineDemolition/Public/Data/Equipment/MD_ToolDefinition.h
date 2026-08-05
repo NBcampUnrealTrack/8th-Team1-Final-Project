@@ -24,6 +24,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
 	TObjectPtr<UStaticMesh> ToolMesh;
 
+	// 이 도구가 부착될 소켓 이름. 비우면 캐릭터 기본 소켓(hand_r) 사용
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
+	FName AttachSocketName;
+
 	// 이 도구를 든 상태에서 좌클릭 시 발동될 어빌리티
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool", meta = (Categories = "Ability"))
 	FGameplayTag ToolAbilityTag;

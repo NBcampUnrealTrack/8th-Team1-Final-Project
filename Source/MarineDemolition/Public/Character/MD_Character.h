@@ -7,6 +7,7 @@
 #include "InputActionValue.h"
 #include "AbilitySystemInterface.h"
 #include "Gameplay/Interaction/MD_Grabbable.h"
+#include "Types/State/MD_HealthTypes.h"
 #include "MD_Character.generated.h"
 
 class UMD_InputConfig;
@@ -91,10 +92,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_EquipHotbarComponent> EquipHotbarComponent;
 
-	// 1인칭 전용 도구 메시 (본인만 보임)
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UStaticMeshComponent> FirstPersonToolMesh;
-
 	// 3인칭 도구 메시 (타 플레이어에게만 보임)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> ThirdPersonToolMesh;
@@ -111,6 +108,10 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_SupplyComponent> SupplyComponent;
+
+	/** 모선 리스폰 지점을 찾을 때 사용할 PlayerStart 태그 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Health")
+	FName MothershipRespawnTag = TEXT("MothershipRespawn");
 
 protected:
 
@@ -182,4 +183,17 @@ private:
 
 	/** 현재 잡고 있는 대상에 적용 중인 프로필 */
 	FMD_HoldProfile ActiveHoldProfile;
+
+private:
+	UFUNCTION()
+	void HandleHealthStateChanged(EMD_HealthState NewState);
+
+	/** 사망 시 이동을 멈추고, 부활 시 되돌린다. */
+	void ApplyDeathMovementLock(bool bLocked);
+
+	/** 모선 리스폰 지점으로 옮긴다. 서버에서만 호출한다. */
+	void TeleportToMothership();
+
+	/** 직전에 사망 상태였는지. 부활 전이 판별용 */
+	bool bWasDeadState = false;
 };

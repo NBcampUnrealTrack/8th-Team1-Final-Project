@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "GameplayTagAssetInterface.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
+#include "Types/Score/MD_ScoreTypes.h"
 #include "MD_SampleItem.generated.h"
 
 class UPrimitiveComponent;
@@ -25,6 +26,10 @@ public:
 
 	virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override;
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+
+	// 샘플 등급. 배치 시 인스턴스별 지정 (단가 조회 키)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sample")
+	EMD_SampleGrade Grade = EMD_SampleGrade::C;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_Damaged, Category = "Sample")
 	bool bDamaged = false;

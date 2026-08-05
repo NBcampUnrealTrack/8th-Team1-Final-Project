@@ -22,6 +22,7 @@
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerStart.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "GameplayTagAssetInterface.h"
 #include "Net/UnrealNetwork.h"
@@ -29,6 +30,7 @@
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayTagContainer.h"
+#include "Kismet/GameplayStatics.h"
 
 // Sets default values
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
@@ -62,12 +64,6 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	ScrapeToolComponent = CreateDefaultSubobject<UMD_ScrapeToolComponent>(TEXT("ScrapeToolComponent"));
 
 	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
-
-	FirstPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FirstPersonToolMesh"));
-	FirstPersonToolMesh->SetupAttachment(FirstPersonMesh, ToolAttachSocketName);
-	FirstPersonToolMesh->SetOnlyOwnerSee(true);
-	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	FirstPersonToolMesh->CastShadow = false;
 
 	ThirdPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ThirdPersonToolMesh"));
 	ThirdPersonToolMesh->SetupAttachment(GetMesh(), ToolAttachSocketName);
@@ -390,7 +386,16 @@ void AMD_Character::ReleaseTarget()
 
 void AMD_Character::UpdateHeldTarget()
 {
-	if (!HasAuthority() || !IsHolding() || !IsValid(HoldPoint)) return;
+	if (!HasAuthority()) return;
+
+	// 잡은 물체가 외부에서 파괴되면 운반 상태를 정리해 인터랙트 잠김을 방지
+	if (bHoldingPhysicsTarget && !IsHolding())
+	{
+		ReleaseTarget();
+		return;
+	}
+
+	if (!IsHolding() || !IsValid(HoldPoint)) return;
 
 	const FVector TargetLocation = HoldPoint->GetComponentTransform().TransformPositionNoScale(HeldTargetOffset);
 
@@ -624,6 +629,19 @@ void AMD_Character::InitializeAbilitySystem()
 	{
 		ASC->InitAbilityActorInfo(GetPlayerState(), this);
 	}
+	
+	//PlayerState가 호출되는 시점에 체력변화 델리게이트를 구독.
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (!IsValid(MDPlayerState))
+	{
+		return;
+	}
+
+	if (!MDPlayerState->OnHealthStateChanged.IsAlreadyBound(this, &AMD_Character::HandleHealthStateChanged))
+	{
+		MDPlayerState->OnHealthStateChanged.AddDynamic(this, &AMD_Character::HandleHealthStateChanged);
+	}
+
 }
 
 void AMD_Character::GrantDefaultAbilities()
@@ -671,6 +689,73 @@ void AMD_Character::RefreshToolMesh()
 	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
 	UStaticMesh* NewMesh = IsValid(CurrentTool) ? CurrentTool->ToolMesh : nullptr;
 
-	FirstPersonToolMesh->SetStaticMesh(NewMesh);
+	// 도구별 소켓이 지정돼 있으면 그 소켓, 없으면 기본 소켓
+	const FName SocketName =
+		(IsValid(CurrentTool) && !CurrentTool->AttachSocketName.IsNone())
+			? CurrentTool->AttachSocketName
+			: ToolAttachSocketName;
+
 	ThirdPersonToolMesh->SetStaticMesh(NewMesh);
+
+	// 소켓의 위치·회전·스케일을 그대로 따르도록 스냅 부착
+	ThirdPersonToolMesh->AttachToComponent(
+		GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, SocketName);
+}
+
+void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
+{
+	const bool bIsDead = (NewState == EMD_HealthState::Dead);
+
+	// 이동 차단은 서버·클라 양쪽에서 걸어 입력 반응을 즉시 없앤다.
+	ApplyDeathMovementLock(bIsDead);
+
+	// 모선 이동은 사망→부활 전이에만. 건강→부상 전이에서 옮기면 안 된다.
+	// 위치 이동은 서버 권한이다. 클라이언트가 옮기면 곧 서버 위치로 되돌아간다.
+	if (!bIsDead && bWasDeadState && HasAuthority())
+	{
+		TeleportToMothership();
+	}
+
+	bWasDeadState = bIsDead;
+}
+
+void AMD_Character::ApplyDeathMovementLock(bool bLocked)
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!IsValid(Movement))
+	{
+		return;
+	}
+
+	if (bLocked)
+	{
+		Movement->DisableMovement();
+		Movement->StopMovementImmediately();
+		return;
+	}
+
+	// 수중·지상이 섞인 맵이라 특정 모드를 지정하지 않고 기본 판정에 맡긴다.
+	Movement->SetDefaultMovementMode();
+}
+
+void AMD_Character::TeleportToMothership()
+{
+	TArray<AActor*> FoundStarts;
+	UGameplayStatics::GetAllActorsOfClassWithTag(GetWorld(), APlayerStart::StaticClass(), MothershipRespawnTag, FoundStarts);
+
+	if (FoundStarts.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Health] 리스폰 지점(%s)을 찾을 수 없다"),*MothershipRespawnTag.ToString());
+		return;
+	}
+
+	const AActor* RespawnPoint = FoundStarts[0];
+
+	// 붕괴로 막힌 방에 되살아나지 않도록 죽은 자리가 아니라 모선으로 옮긴다. (기획 02 §6)
+	SetActorLocationAndRotation(
+		RespawnPoint->GetActorLocation(),
+		RespawnPoint->GetActorRotation(),
+		/*bSweep=*/false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
 }
