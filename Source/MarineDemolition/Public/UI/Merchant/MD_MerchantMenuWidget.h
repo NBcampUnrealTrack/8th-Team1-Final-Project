@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 
-#include "UI/Merchant/MD_MerchantTypes.h"
+#include "UI/Merchant/MD_MerchantUITypes.h"
 
 #include "MD_MerchantMenuWidget.generated.h"
 

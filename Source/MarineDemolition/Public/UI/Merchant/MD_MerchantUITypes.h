@@ -4,7 +4,7 @@
 
 #include "CoreMinimal.h"
 
-#include "MD_MerchantTypes.generated.h"
+#include "MD_MerchantUITypes.generated.h"
 
 /**
  * 상인 화면이 공통으로 쓰는 정보 묶음.

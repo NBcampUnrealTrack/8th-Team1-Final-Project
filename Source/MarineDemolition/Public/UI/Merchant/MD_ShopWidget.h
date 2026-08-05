@@ -8,7 +8,7 @@
 // 둘 다 값으로 쓰는 타입이라 전방 선언이 안 된다 (EMD_ShopCategory, FMD_ShopItem,
 // FMD_MerchantMenuInfo). 대신 위젯 헤더가 아닌 타입 전용 헤더만 끌어온다.
 #include "Data/Shop/MD_ShopCatalog.h"
-#include "UI/Merchant/MD_MerchantTypes.h"
+#include "UI/Merchant/MD_MerchantUITypes.h"
 
 #include "MD_ShopWidget.generated.h"
 

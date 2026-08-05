@@ -3,8 +3,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Gameplay/Interaction/MD_Interactable.h"
 #include "GameFramework/Actor.h"
+#include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_Merchant.generated.h"
 
 class UMD_MerchantMenuWidget;
