@@ -20,6 +20,10 @@ class MARINEDEMOLITION_API AMD_GameModeBase : public AGameModeBase
 public:
     AMD_GameModeBase();
 
+    virtual void RestartPlayer(AController* NewPlayer) override;
+
+    virtual void Logout(AController* Exiting) override;
+
 protected:
     virtual void BeginPlay() override;
 

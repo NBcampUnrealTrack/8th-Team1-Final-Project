@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -6,6 +6,7 @@
 #include "Components/ActorComponent.h"
 #include "MD_EquipHotbarComponent.generated.h"
 
+struct FMD_EquipHotbarDataWrapper;
 class UMD_ToolDefinition;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMDOnEquipHotbarChanged);
@@ -52,6 +53,12 @@ public:
 	// 슬롯에 도구 등록 (획득 시스템에서 호출)
 	UFUNCTION(BlueprintCallable, Category = "Hotbar")
 	void SetToolAtSlot(int32 SlotIndex, UMD_ToolDefinition* Tool);
+
+	// 서버에서 플레이어의 현재 장비 목록을 저장하기 위한 데이터를 반환하는 함수
+	struct FMD_EquipHotbarDataWrapper BuildEquipmentSaveData() const;
+
+	// 서버에서 저장된 장비 목록을 불러오는 함수
+	bool RestoreEquipmentSaveData(const struct FMD_EquipHotbarDataWrapper& SaveData);
 
 protected:
 
