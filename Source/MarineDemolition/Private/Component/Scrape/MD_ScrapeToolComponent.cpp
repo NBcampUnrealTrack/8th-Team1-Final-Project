@@ -26,7 +26,6 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	DirectionLockThresholdCm = 1.0f;
 	MaximumPerpendicularDriftCm = 2.0f;
 	BreakStrokePerpendicularDistanceCm = 8.0f;
-	bLockLookInputToStrokeAxis = true;
 	bIsScraping = false;
 	bHasPreviousSurfacePosition = false;
 	bHasLockedStrokeAxis = false;
@@ -80,9 +79,7 @@ void UMD_ScrapeToolComponent::BeginPlay()
 FVector2D UMD_ScrapeToolComponent::ConstrainLookInput(
 	const FVector2D& LookInput) const
 {
-	if (!bLockLookInputToStrokeAxis
-		|| !bIsScraping
-		|| !bHasLockedStrokeAxis)
+	if (!bIsScraping || !bHasLockedStrokeAxis)
 	{
 		return LookInput;
 	}
@@ -217,8 +214,7 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace()
 		CurrentWall->TryGetScrapeSurfaceWorldPosition(
 			ConstrainedSurfacePositionCm,
 			ConstrainedWorldPosition);
-	if (bLockLookInputToStrokeAxis
-		&& bHasConstrainedWorldPosition
+	if (bHasConstrainedWorldPosition
 		&& !RawSurfacePositionCm.Equals(
 			ConstrainedSurfacePositionCm,
 			0.01))

@@ -107,10 +107,6 @@ protected:
 		meta = (ClampMin = "0.1", Units = "cm"))
 	float BreakStrokePerpendicularDistanceCm;
 
-	/** 스트로크가 잠기면 반대 방향의 시선 입력을 막는다. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Motion")
-	bool bLockLookInputToStrokeAxis;
-
 	/** 벽 충돌을 검사할 채널. 기본 벽과 동일한 Visibility 채널을 사용한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	TEnumAsByte<ECollisionChannel> TraceChannel;
