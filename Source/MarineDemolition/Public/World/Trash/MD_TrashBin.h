@@ -26,6 +26,9 @@ public:
 	virtual USceneComponent* GetGrabPoint_Implementation() const override;
 	virtual FVector GetHoldOffset_Implementation() const override;
 	virtual FMD_HoldProfile GetHoldProfile_Implementation() const override;
+	virtual void OnCarryStarted_Implementation() override;
+	virtual void OnCarrySettled_Implementation() override;
+	virtual void OnCarryEnded_Implementation() override;
 
 	/** Implements IMD_Interactable*/
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
@@ -84,5 +87,20 @@ private:
 	void RefreshContents();
 	void SyncContentCount();
 
+	/** 끌려가는 동안 내용물을 통에 붙인다. 안 그러면 통 벽이 때려 대부분 튀어나간다 */
+	void FreezeContentsForCarry();
+
+	/** 붙여둔 내용물을 떼고 물리·충돌을 되돌린다 */
+	void ReleaseContentsAfterCarry();
+
 	TSet<TWeakObjectPtr<AActor>> Contents;
+
+	struct FMD_CarryFrozenContent
+	{
+		TWeakObjectPtr<AActor> Actor;
+		TEnumAsByte<ECollisionEnabled::Type> PreviousCollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+	};
+
+	/** Contents와 따로 둔다. 붙어 있는 동안 오버랩이 흔들려도 되돌릴 대상은 남아야 한다 */
+	TArray<FMD_CarryFrozenContent> CarryFrozenContents;
 };
