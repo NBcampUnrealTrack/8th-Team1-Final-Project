@@ -10,6 +10,7 @@ class AMD_TravelConsole;
 class UMD_HUDWidget;
 class UMD_EquipHotbarWidget;
 class UMD_SiteDefinition;
+class UMD_MerchantSubsystem;
 class UGameplayEffect;
 
 UCLASS()
@@ -83,4 +84,48 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UMD_EquipHotbarWidget> EquipHotbarWidgetInstance;
+
+	/* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
+private:
+	
+	UMD_MerchantSubsystem* GetMerchantSubsystem() const;
+
+	UFUNCTION(Server, Reliable)
+	void ServerBeginContract();
+
+	UFUNCTION(Exec)
+	void MD_BeginDay(int32 Day);
+
+	UFUNCTION(Server, Reliable)
+	void ServerBeginDay(int32 Day);
+
+	UFUNCTION(Exec)
+	void MD_AcceptRepeat(int32 Index);
+
+	UFUNCTION(Server, Reliable)
+	void ServerAcceptRepeat(int32 Index);
+
+	UFUNCTION(Exec)
+	void MD_DeclineRepeat(int32 Index);
+
+	UFUNCTION(Server, Reliable)
+	void ServerDeclineRepeat(int32 Index);
+
+	UFUNCTION(Exec)
+	void MD_Deliver(const FString& GradeName, bool bIntact);
+
+	UFUNCTION(Server, Reliable)
+	void ServerDeliver(FGameplayTag GradeTag, bool bIntact);
+
+	UFUNCTION(Exec)
+	void MD_MarkSiteCleared();
+
+	UFUNCTION(Server, Reliable)
+	void ServerMarkSiteCleared();
+
+	UFUNCTION(Exec)
+	void MD_FinalizeContract();
+
+	UFUNCTION(Server, Reliable)
+	void ServerFinalizeContract();
 };
