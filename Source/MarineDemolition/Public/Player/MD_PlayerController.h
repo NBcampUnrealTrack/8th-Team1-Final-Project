@@ -50,6 +50,10 @@ private:
 	UFUNCTION(Exec)
 	void MD_ShowCredits();
 
+	//서버에서 크레딧 변경 처리
+	UFUNCTION(Server, Reliable)
+	void ServerAddCredits(int32 Amount);
+
 	/** 테스트용 현장 애셋. BP_MD_PlayerController에서 DA_Site_X7을 지정한다. */
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Debug")
 	TObjectPtr<UMD_SiteDefinition> DebugSite;

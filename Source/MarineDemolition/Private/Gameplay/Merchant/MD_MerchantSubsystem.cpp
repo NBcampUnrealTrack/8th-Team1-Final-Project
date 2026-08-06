@@ -18,6 +18,11 @@ void UMD_MerchantSubsystem::AddCredits(int32 Amount)
 
 void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment)
 {
+	if (!IsValid(Site))
+	{
+		return;
+	}
+
 	CurrentSite = Site;
 	CurrentDay = 0;
 

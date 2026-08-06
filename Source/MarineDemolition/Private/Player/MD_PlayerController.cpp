@@ -121,28 +121,41 @@ void AMD_PlayerController::MD_ShowHealthState()
 
 void AMD_PlayerController::MD_AddCredits(int32 Amount)
 {
-	UGameInstance* GameInstance = GetGameInstance();
-	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
-	if (!IsValid(GameInstance) || !IsValid(Merchant))
-	{
-		return;
-	}
-
-	Merchant->AddCredits(Amount);
-
-	MD_ShowCredits();
+	ServerAddCredits(Amount);
 }
 
 void AMD_PlayerController::MD_ShowCredits()
 {
 	UGameInstance* GameInstance = GetGameInstance();
+	if (!IsValid(GameInstance))
+	{
+		return;
+	}
+
 	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
-	if (!IsValid(GameInstance) || !IsValid(Merchant))
+	if (!IsValid(Merchant))
 	{
 		return;
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant][%s] Credits = %d"),HasAuthority() ? TEXT("Server") : TEXT("Client"),Merchant->GetCredits());
+}
+
+void AMD_PlayerController::ServerAddCredits_Implementation(int32 Amount)
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	if (!IsValid(GameInstance))
+	{
+		return;
+	}
+
+	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+	if (!IsValid(Merchant))
+	{
+		return;
+	}
+
+	Merchant->AddCredits(Amount);
 }
 
 void AMD_PlayerController::MD_BeginContract()
