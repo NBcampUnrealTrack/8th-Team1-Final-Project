@@ -14,6 +14,12 @@
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
 
+#include "Engine/GameInstance.h"
+#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+
+#include "Data/Merchant/MD_QuestDefinition.h"
+#include "Data/Merchant/MD_SiteDefinition.h"
+
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console)
 {
 	if (!IsValid(Console))
@@ -111,6 +117,81 @@ void AMD_PlayerController::MD_ShowHealthState()
 		static_cast<int32>(MDPlayerState->GetHealthState()),
 		IsValid(ASC) && ASC->HasMatchingGameplayTag(MDGameplayTags::State_Injured) ? 1 : 0,
 		IsValid(ASC) && ASC->HasMatchingGameplayTag(MDGameplayTags::State_Dead) ? 1 : 0);
+}
+
+void AMD_PlayerController::MD_AddCredits(int32 Amount)
+{
+	ServerAddCredits(Amount);
+}
+
+void AMD_PlayerController::MD_ShowCredits()
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	if (!IsValid(GameInstance))
+	{
+		return;
+	}
+
+	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+	if (!IsValid(Merchant))
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Merchant][%s] Credits = %d"),HasAuthority() ? TEXT("Server") : TEXT("Client"),Merchant->GetCredits());
+}
+
+void AMD_PlayerController::ServerAddCredits_Implementation(int32 Amount)
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	if (!IsValid(GameInstance))
+	{
+		return;
+	}
+
+	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+	if (!IsValid(Merchant))
+	{
+		return;
+	}
+
+	Merchant->AddCredits(Amount);
+}
+
+void AMD_PlayerController::MD_BeginContract()
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	if (!IsValid(GameInstance))
+	{
+		return;
+	}
+
+	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+	if (!IsValid(Merchant))
+	{
+		return;
+	}
+
+	Merchant->BeginContract(DebugSite, DebugAdvancePayment);
+
+	MD_DumpQuests();
+}
+
+void AMD_PlayerController::MD_DumpQuests()
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	if (!IsValid(GameInstance))
+	{
+		return;
+	}
+
+	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+	if (!IsValid(Merchant))
+	{
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] Credits=%d Day=%d"),Merchant->GetCredits(), Merchant->GetCurrentDay());
 }
 
 void AMD_PlayerController::BeginPlay()

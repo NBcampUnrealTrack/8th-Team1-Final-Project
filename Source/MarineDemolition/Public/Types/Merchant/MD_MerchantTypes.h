@@ -59,8 +59,8 @@ struct MARINEDEMOLITION_API FMD_MainQuestState
 {
 	GENERATED_BODY()
 
-	//UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
-	//TObjectPtr<UMD_QuestDefinition> Definition = nullptr;
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
+	TObjectPtr<UMD_QuestDefinition> Definition = nullptr;
 
 	/* 메인 퀘스트가 열리는 Day. 애셋 배열 순서로 결정된다. */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
@@ -81,8 +81,8 @@ struct MARINEDEMOLITION_API FMD_RepeatQuestState
 {
 	GENERATED_BODY()
 
-	//UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
-	//TObjectPtr<UMD_QuestDefinition> Definition = nullptr;
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
+	TObjectPtr<UMD_QuestDefinition> Definition = nullptr;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	EMD_RepeatQuestStatus Status = EMD_RepeatQuestStatus::Offered;
