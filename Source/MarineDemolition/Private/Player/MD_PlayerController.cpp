@@ -7,6 +7,8 @@
 
 #include "Engine/World.h"
 #include "World/Interaction/MD_TravelConsole.h"
+#include "World/Interaction/MD_DayEndConsole.h"
+#include "Game/MD_GameModeBase.h"
 
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
@@ -36,6 +38,26 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 	}
 
 	GetWorld()->ServerTravel(MapPackage + TEXT("?listen"));
+}
+
+void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole* Console)
+{
+	if (!IsValid(Console))
+	{
+		return;
+	}
+
+	// 콘솔 근처에 있는 플레이어의 요청만 수행 (임의 호출 방지)
+	APawn* MyPawn = GetPawn();
+	if (!IsValid(MyPawn) || FVector::Dist(MyPawn->GetActorLocation(), Console->GetActorLocation()) > 500.f)
+	{
+		return;
+	}
+
+	if (AMD_GameModeBase* GM = GetWorld()->GetAuthGameMode<AMD_GameModeBase>())
+	{
+		GM->RequestEndDay();
+	}
 }
 
 void AMD_PlayerController::MD_ApplyTestDamage()
