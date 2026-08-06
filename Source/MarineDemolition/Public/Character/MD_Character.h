@@ -92,10 +92,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_EquipHotbarComponent> EquipHotbarComponent;
 
-	// 1인칭 전용 도구 메시 (본인만 보임)
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UStaticMeshComponent> FirstPersonToolMesh;
-
 	// 3인칭 도구 메시 (타 플레이어에게만 보임)
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> ThirdPersonToolMesh;
@@ -128,6 +124,16 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Interact")
 	float InteractTraceDistance = 200.f;
 
+	/** 잡은 물체가 HoldPoint에 이만큼 가까워지면 운반이 안정된 것으로 본다 */
+	UPROPERTY(EditAnywhere, Category = "Interact",
+		meta = (ClampMin = "1.0", UIMin = "5.0", Units = "cm"))
+	float CarrySettleTolerance = 20.f;
+
+	/** 벽에 걸려 목표에 영영 못 닿는 경우를 대비한 상한. 지나면 안정된 것으로 친다 */
+	UPROPERTY(EditAnywhere, Category = "Interact",
+		meta = (ClampMin = "0.1", UIMin = "0.5", Units = "s"))
+	float CarrySettleTimeout = 1.5f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Movement|Water")
 	EMDMovementState CurrentMovementState = EMDMovementState::Walking;
 
@@ -158,6 +164,10 @@ private:
 
 	bool TryHoldTarget(AActor* Target);
 	bool IsHolding() const;
+
+	/** 다른 캐릭터가 이미 운반 중인 대상인지. 서버에서만 의미가 있다 */
+	bool IsHeldByOtherCharacter(const AActor* Target) const;
+
 	void ReleaseTarget();
 	void UpdateHeldTarget();
 	void CaptureDefaultHoldProfile();
@@ -165,6 +175,20 @@ private:
 	void UpdateInteractionFocus();
 	AActor* TraceInteractionTarget() const;
 	void SetCurrentTarget(AActor* NewTarget);
+
+	/** HoldPoint의 월드 Transform. Camera 회전은 원격 머신에서 낡으므로 시점 회전으로 다시 만든다 */
+	FTransform GetHoldPointTransform() const;
+
+	/** HoldPoint 도달 여부를 보고 대상에 한 번 알린다 */
+	void UpdateCarrySettle(float DeltaSeconds);
+
+	/** 서버가 운반 중인 대상을 이 머신에서도 직접 따라가게 만든다. 비권한 머신 전용 */
+	void StartFollowingHeldActor();
+	void StopFollowingHeldActor();
+	void UpdateFollowedHeldActor(float DeltaSeconds);
+
+	UFUNCTION()
+	void OnRep_HeldActor();
 
 	void InitializeAbilitySystem();
 	void GrantDefaultAbilities();
@@ -175,12 +199,28 @@ private:
 	void RefreshToolMesh();
 	TWeakObjectPtr<AActor> CurrentTarget;
 
-	/** Grab은 서버에서만 일어나므로, 소유 클라이언트의 하이라이트 억제를 위해 이 상태만 복제한다. */
-	UPROPERTY(Replicated)
-	bool bHoldingPhysicsTarget = false;
+	/**
+	 * PhysicsHandle로 운반 중인 대상. Grab은 서버에서만 일어난다.
+	 * 클라이언트가 물리 상태 복제를 그대로 시뮬레이션하면 스프링 속도까지 적용돼 물체가 튀어오른다.
+	 * 대신 이 값을 받아 각 머신이 HoldPoint를 직접 따라간다.
+	 */
+	UPROPERTY(ReplicatedUsing = OnRep_HeldActor)
+	TObjectPtr<AActor> HeldActor = nullptr;
+
+	/** 비권한 머신에서 물리를 끄고 따라가는 중인 컴포넌트 */
+	TWeakObjectPtr<UPrimitiveComponent> FollowedComponent;
 
 	/** 잡는 순간 대상에서 한 번 읽어 캐시한 HoldOffset */
 	FVector HeldTargetOffset = FVector::ZeroVector;
+
+	/** 잡은 컴포넌트의 로컬 공간에서 본 GrabPoint 위치. 물리 핸들이 목표에 맞추는 기준점이다. */
+	FVector HeldGrabPointOffset = FVector::ZeroVector;
+
+	/** 잡은 물체가 HoldPoint에 도달했는지. 도달 알림을 한 번만 보내기 위해 들고 있다 */
+	bool bHeldActorSettled = false;
+
+	/** 잡은 뒤 흐른 시간. 목표에 못 닿는 경우의 상한 판정용 */
+	float HeldCarrySeconds = 0.f;
 
 	/** BeginPlay에서 캡처한 PhysicsHandle 기본 설정. 놓을 때 여기로 되돌린다. */
 	FMD_HoldProfile DefaultHoldProfile;

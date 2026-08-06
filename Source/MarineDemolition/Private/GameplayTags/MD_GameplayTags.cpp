@@ -41,6 +41,11 @@ namespace MDGameplayTags
 		"물리 보관함에 담을 수 있는 샘플");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Resource_Storage_Content_Trash,
+		"Resource.Storage.Content.Trash",
+		"물리 보관함에 담을 수 있는 각종 쓰레기");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Interaction_Pickup_Physics,
 		"Interaction.Pickup.Physics",
 		"Carry the interacted actor as a world physics object");
