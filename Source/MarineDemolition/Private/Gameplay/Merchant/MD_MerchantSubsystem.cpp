@@ -39,6 +39,8 @@ void UMD_MerchantSubsystem::AddCredits(int32 Amount)
 	}
 
 	Credits = FMath::Max(0, Credits + Amount);
+
+	OnMerchantStateChanged.Broadcast();
 }
 
 void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment)
@@ -77,6 +79,7 @@ void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 Advanc
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 시작: %s (메인 %d건, 착수금 %d)"), *Site->SiteName.ToString(), MainQuests.Num(), AdvancePayment);
 
+	OnMerchantStateChanged.Broadcast();
 }
 
 bool UMD_MerchantSubsystem::HasClearedCurrentSite() const
@@ -100,6 +103,8 @@ void UMD_MerchantSubsystem::BeginDay(int32 NewDay)
 	RerollRepeatQuests();
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 시작 (반복 %d건)"), NewDay, RepeatQuests.Num());
+
+	OnMerchantStateChanged.Broadcast();
 }
 
 void UMD_MerchantSubsystem::MarkSiteCleared()
@@ -112,6 +117,8 @@ void UMD_MerchantSubsystem::MarkSiteCleared()
 	ClearedSites.Add(CurrentSite);
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 현장 클리어 기록: %s"), *CurrentSite->SiteName.ToString());
+
+	OnMerchantStateChanged.Broadcast();
 }
 
 bool UMD_MerchantSubsystem::TryAcceptRepeatQuest(int32 QuestIndex)
@@ -132,6 +139,8 @@ bool UMD_MerchantSubsystem::TryAcceptRepeatQuest(int32 QuestIndex)
 	QuestState.Status = EMD_RepeatQuestStatus::Accepted;
 	QuestState.CurrentProgress = 0;
 
+	OnMerchantStateChanged.Broadcast();
+
 	return true;
 }
 
@@ -150,6 +159,8 @@ bool UMD_MerchantSubsystem::TryDeclineRepeatQuest(int32 QuestIndex)
 
 	// 거절은 페널티가 없다. 다음 Day 재롤 때 이 카드가 사라진다.
 	QuestState.Status = EMD_RepeatQuestStatus::Declined;
+
+	OnMerchantStateChanged.Broadcast();
 
 	return true;
 }
@@ -192,6 +203,9 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FGameplayTag& GradeTag, 
 			ApplyQuestReward(QuestState.Definition);
 		}
 	}
+
+	OnMerchantStateChanged.Broadcast();
+
 }
 
 void UMD_MerchantSubsystem::FinalizeContract()
@@ -207,6 +221,8 @@ void UMD_MerchantSubsystem::FinalizeContract()
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 종료"));
+
+	OnMerchantStateChanged.Broadcast();
 }
 
 void UMD_MerchantSubsystem::RerollRepeatQuests()

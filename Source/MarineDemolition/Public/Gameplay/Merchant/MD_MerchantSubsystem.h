@@ -12,6 +12,9 @@
  * Gameinstance에 수명을 둠. 값 변경 처리는 서버에서 하고 클라 복제는 GameState에서 담당
  */
 
+
+DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
+
 class UMD_SiteDefinition;
 class UMD_QuestDefinition;
 struct FGameplayTag;
@@ -22,6 +25,11 @@ class MARINEDEMOLITION_API UMD_MerchantSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 	
 public:
+
+	FMD_OnMerchantStateChanged OnMerchantStateChanged;
+
+public:
+
 	int32 GetCredits() const { return Credits; }
 	int32 GetCurrentDay() const { return CurrentDay; }
 
