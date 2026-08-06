@@ -7,6 +7,7 @@
 #include "MD_PlayerController.generated.h"
 
 class AMD_TravelConsole;
+class AMD_DayEndConsole;
 class UMD_HUDWidget;
 class UMD_EquipHotbarWidget;
 class UMD_SiteDefinition;
@@ -21,6 +22,10 @@ public:
 	// 콘솔을 통째로 넘겨 서버가 자기 사본에서 TargetLevel을 읽음 (클라 값 신뢰 안 함)
 	UFUNCTION(Server, Reliable)
 	void ServerRequestTravel(AMD_TravelConsole* Console);
+
+	// 모선 하루 마감 콘솔 요청. 서버가 거리 검증 후 GameMode 마감 실행
+	UFUNCTION(Server, Reliable)
+	void ServerRequestEndDay(AMD_DayEndConsole* Console);
 
 
 private:

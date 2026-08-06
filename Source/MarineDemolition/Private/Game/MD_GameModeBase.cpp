@@ -102,16 +102,41 @@ void AMD_GameModeBase::CheckGameTimeEvents()
     if (CurrentPhase == EMD_WithdrawalPhase::Warning
         && MDGameState->HasReachedTime(18, 0))
     {
-        MDGameState->SetWithdrawalPhase(
-            EMD_WithdrawalPhase::Departed
-        );
-
-        FinalizeDay();
-
-        GetWorldTimerManager().ClearTimer(
-            CheckGameTimeTimerHandle
-        );
+        RequestEndDay();
     }
+}
+
+void AMD_GameModeBase::RequestEndDay()
+{
+    // 18:00 자동 마감과 인터랙트가 겹쳐도 1회만 실행
+    if (bDayFinalized)
+    {
+        return;
+    }
+
+    GetWorldTimerManager().ClearTimer(CheckGameTimeTimerHandle);
+
+    // 조기 마감이어도 출발 연출·HUD는 18:00 마감과 동일하게
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->SetWithdrawalPhase(EMD_WithdrawalPhase::Departed);
+    }
+
+    FinalizeDay();
+
+    GetWorldTimerManager().SetTimer(
+        DepartTravelTimerHandle,
+        this,
+        &AMD_GameModeBase::TravelToNextDay,
+        DepartTravelDelay,
+        false
+    );
+}
+
+void AMD_GameModeBase::TravelToNextDay()
+{
+    // 같은 레벨을 다시 로드 → BeginPlay에서 복원 경로 진입
+    GetWorld()->ServerTravel(TEXT("?Restart"));
 }
 
 void AMD_GameModeBase::FinalizeDay()
@@ -328,8 +353,5 @@ void AMD_GameModeBase::RestoreDaySnapshot()
 
 void AMD_GameModeBase::MD_EndDay()
 {
-    FinalizeDay();
-
-    // 같은 레벨을 다시 로드 → BeginPlay에서 복원 경로 진입
-    GetWorld()->ServerTravel(TEXT("?Restart"));
+    RequestEndDay();
 }
