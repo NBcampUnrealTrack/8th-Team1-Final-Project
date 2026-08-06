@@ -45,6 +45,11 @@ namespace MDGameplayTags
 		"물리 보관함에 담을 수 있는 샘플");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Resource_Storage_Content_Trash,
+		"Resource.Storage.Content.Trash",
+		"물리 보관함에 담을 수 있는 각종 쓰레기");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Interaction_Pickup_Physics,
 		"Interaction.Pickup.Physics",
 		"Carry the interacted actor as a world physics object");
@@ -78,9 +83,6 @@ namespace MDGameplayTags
 		Resource_Sample_Grade_S,
 		"Resource.Sample.Grade_S",
 		"S급샘플. 퀘스트 보상 450 기준");
-		Ability_PlaceSupport,
-		"Ability.PlaceSupport",
-		"임시 지지대 설치 어빌리티");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Score_Sorting_Metal,
