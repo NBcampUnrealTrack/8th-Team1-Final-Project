@@ -73,6 +73,9 @@ void AMD_TrashBin::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			this, &AMD_TrashBin::HandleEndOverlap);
 	}
 
+	// 운반 중에 통이 사라지면 내용물이 물리가 꺼진 채로 남는다
+	ReleaseContentsAfterCarry();
+
 	for (const TWeakObjectPtr<AActor>& ContentPtr : Contents)
 	{
 		if (AActor* Content = ContentPtr.Get())
@@ -122,6 +125,73 @@ FVector AMD_TrashBin::GetHoldOffset_Implementation() const
 FMD_HoldProfile AMD_TrashBin::GetHoldProfile_Implementation() const
 {
 	return HoldProfile;
+}
+
+void AMD_TrashBin::OnCarryStarted_Implementation()
+{
+	FreezeContentsForCarry();
+}
+
+void AMD_TrashBin::OnCarrySettled_Implementation()
+{
+	ReleaseContentsAfterCarry();
+}
+
+void AMD_TrashBin::OnCarryEnded_Implementation()
+{
+	ReleaseContentsAfterCarry();
+}
+
+void AMD_TrashBin::FreezeContentsForCarry()
+{
+	if (!HasAuthority() || !IsValid(Mesh)) return;
+
+	for (const TWeakObjectPtr<AActor>& ContentPtr : Contents)
+	{
+		AActor* Content = ContentPtr.Get();
+		if (!IsValid(Content)) continue;
+
+		UPrimitiveComponent* ContentRoot = Cast<UPrimitiveComponent>(Content->GetRootComponent());
+		if (!IsValid(ContentRoot) || !ContentRoot->IsSimulatingPhysics()) continue;
+
+		FMD_CarryFrozenContent& Frozen = CarryFrozenContents.AddDefaulted_GetRef();
+		Frozen.Actor = ContentPtr;
+		Frozen.PreviousCollisionEnabled = ContentRoot->GetCollisionEnabled();
+
+		// bRepPhysics가 false로 바뀌면 클라이언트도 SyncReplicatedPhysicsSimulation으로 따라 끈다
+		ContentRoot->SetSimulatePhysics(false);
+
+		// 키네마틱은 질량이 무한대라 통 벽에 닿으면 통을 밀거나 가둔다.
+		// 쿼리는 남겨 ContentsVolume 오버랩 판정이 계속 돌게 한다
+		ContentRoot->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+
+		Content->AttachToComponent(Mesh, FAttachmentTransformRules::KeepWorldTransform);
+	}
+}
+
+void AMD_TrashBin::ReleaseContentsAfterCarry()
+{
+	if (CarryFrozenContents.IsEmpty()) return;
+
+	for (const FMD_CarryFrozenContent& Frozen : CarryFrozenContents)
+	{
+		AActor* Content = Frozen.Actor.Get();
+		if (!IsValid(Content)) continue;
+
+		Content->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+
+		if (UPrimitiveComponent* ContentRoot = Cast<UPrimitiveComponent>(Content->GetRootComponent()))
+		{
+			// 충돌이 먼저다. 물리가 먼저 켜지면 그 프레임에 통 바닥을 뚫는다
+			ContentRoot->SetCollisionEnabled(Frozen.PreviousCollisionEnabled);
+			ContentRoot->SetSimulatePhysics(true);
+		}
+	}
+
+	CarryFrozenContents.Reset();
+
+	// 붙어 있는 동안 오버랩이 흔들렸을 수 있다
+	RefreshContents();
 }
 
 void AMD_TrashBin::SetInteractionHighlighted_Implementation(bool bHighlighted)

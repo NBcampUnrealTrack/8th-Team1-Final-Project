@@ -56,6 +56,11 @@ struct MARINEDEMOLITION_API FMD_HoldProfile
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Handle",
 		meta = (ClampMin = "0.0", UIMin = "0.0", EditCondition = "bInterpolate"))
 	float InterpolationSpeed = 50.f;
+
+	/** 비권한 머신에는 스프링이 없다. 이 속도가 위 Stiffness/Damping의 무게감을 대신한다. 0이면 즉시 붙음 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Physics Handle",
+		meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float RemoteFollowSpeed = 12.f;
 };
 
 /** 물리 픽업 시 잡을 컴포넌트와 위치를 명시적으로 제공하는 계약 */
@@ -85,4 +90,19 @@ public:
 	/** 이 물체를 운반하는 동안 적용할 PhysicsHandle 설정 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction|Physics Pickup")
 	FMD_HoldProfile GetHoldProfile() const;
+
+	/** HoldPoint로 끌려가기 시작. 가속이 커서 담고 있는 내용물은 여기서 잡아둬야 한다. 서버 전용 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction|Physics Pickup")
+	void OnCarryStarted();
+	virtual void OnCarryStarted_Implementation() {}
+
+	/** HoldPoint 도달. OnCarryStarted에서 멈춰둔 것을 되돌린다 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction|Physics Pickup")
+	void OnCarrySettled();
+	virtual void OnCarrySettled_Implementation() {}
+
+	/** 운반 종료. 안정화 전에 놓을 수 있어 여기서도 되돌린다 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction|Physics Pickup")
+	void OnCarryEnded();
+	virtual void OnCarryEnded_Implementation() {}
 };
