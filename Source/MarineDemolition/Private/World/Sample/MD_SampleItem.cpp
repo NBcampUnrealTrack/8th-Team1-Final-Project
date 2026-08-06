@@ -6,6 +6,7 @@
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Net/UnrealNetwork.h"
+#include "Util/MD_MaterialTintUtility.h"
 
 AMD_SampleItem::AMD_SampleItem()
 {
@@ -45,7 +46,7 @@ void AMD_SampleItem::ApplyDamagedVisual()
 {
 	if (UMaterialInstanceDynamic* MID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
 	{
-		MID->SetVectorParameterValue(TEXT("Color"), FLinearColor::Red);
+		MDMaterialTint::SetVectorParameterChecked(MID, TEXT("Color"), FLinearColor::Red);
 	}
 }
 
