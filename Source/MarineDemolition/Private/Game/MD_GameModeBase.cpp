@@ -5,7 +5,6 @@
 #include "EngineUtils.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Game/MD_GameStateBase.h"
-#include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "TimerManager.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
@@ -24,13 +23,6 @@ AMD_GameModeBase::AMD_GameModeBase()
 void AMD_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();
-
-    // 타이틀에서 선택한 GameSession 데이터를 현재 호스팅 Session의 재접속 기준 데이터로 전환
-    UMD_SaveSlotManager* const SaveSlotManager = GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>();
-    if (IsValid(SaveSlotManager) == true)
-    {
-        SaveSlotManager->ActivatePendingGameSession();
-    }
 
     GetWorldTimerManager().SetTimer(
         CheckGameTimeTimerHandle,
@@ -55,24 +47,10 @@ void AMD_GameModeBase::BeginPlay()
 void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
 {
     Super::RestartPlayer(NewPlayer);
-
-    // 현재 Game Session 데이터에 저장되어있는 Player별 EquipHotbar의 Slot 목록 불러오기
-    UMD_SaveSlotManager* const SaveSlotManager = GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>();
-    if (IsValid(SaveSlotManager) == true)
-    {
-        SaveSlotManager->LoadPlayerEquipment(NewPlayer);
-    }
 }
 
 void AMD_GameModeBase::Logout(AController* Exiting)
 {
-    // 현재 Game Session 데이터에 Player의 EquipHotbar의 Slot 목록 저장
-    UMD_SaveSlotManager* const SaveSlotManager = GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>();
-    if (IsValid(SaveSlotManager) == true)
-    {
-        SaveSlotManager->SavePlayerEquipment(Exiting);
-    }
-
     Super::Logout(Exiting);
 }
 
