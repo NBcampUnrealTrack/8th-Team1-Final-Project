@@ -4,7 +4,6 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
-#include "Data/SaveGame/MD_SaveGameSession.h"
 
 
 // Sets default values for this component's properties
@@ -100,27 +99,27 @@ void UMD_EquipHotbarComponent::SetToolAtSlot(int32 SlotIndex, UMD_ToolDefinition
 	OnRep_Slots();
 }
 
-FMD_EquipHotbarDataWrapper UMD_EquipHotbarComponent::BuildEquipmentSaveData() const
+TArray<TSoftObjectPtr<UMD_ToolDefinition>> UMD_EquipHotbarComponent::BuildEquipmentSaveData() const
 {
 	// 기본 값 생성
-	FMD_EquipHotbarDataWrapper HotbarDataWrapper;
+	TArray<TSoftObjectPtr<UMD_ToolDefinition>> OutEquipmentList;
 
 	// 컴포넌트 소유 액터가 유효하지 않거나 클라이언트 환경 실행 제한
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false)
 	{
-		return HotbarDataWrapper;
+		return OutEquipmentList;
 	}
 
 	// 슬롯 정보 복사
 	for (UMD_ToolDefinition* Tool : Slots)
 	{
-		HotbarDataWrapper.ToolSlots.Add(IsValid(Tool) == true ? Tool : nullptr);
+		OutEquipmentList.Add(IsValid(Tool) == true ? Tool : nullptr);
 	}
 
-	return HotbarDataWrapper;
+	return OutEquipmentList;
 }
 
-bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const FMD_EquipHotbarDataWrapper& SaveData)
+bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UMD_ToolDefinition>>& SavedToolSlots)
 {
 	// 컴포넌트 소유 액터가 유효하지 않거나 클라이언트 환경 실행 제한
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false)
@@ -129,24 +128,24 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const FMD_EquipHotbarDat
 	}
 
 	// 복구할 데이터가 없으면 함수 조기 종료
-	if (SaveData.ToolSlots.Num() <= 0)
+	if (SavedToolSlots.Num() <= 0)
 	{
 		return true;
 	}
 
 	// 슬롯 목록 초기화(Local 데이터 무시) 및 크기 설정
 	Slots.Reset();
-	Slots.SetNum(SaveData.ToolSlots.Num());
+	Slots.SetNum(SavedToolSlots.Num());
 
 	// 저장된 데이터 복사
-	for (int32 Index = 0; Index < SaveData.ToolSlots.Num(); ++Index)
+	for (int32 Index = 0; Index < SavedToolSlots.Num(); ++Index)
 	{
-		if (SaveData.ToolSlots[Index].IsValid() == false)
+		if (SavedToolSlots[Index].IsValid() == false)
 		{
 			continue;
 		}
 
-		Slots[Index] = SaveData.ToolSlots[Index].LoadSynchronous();
+		Slots[Index] = SavedToolSlots[Index].LoadSynchronous();
 	}
 
 	// Listen Server 환경 고려 Slot 정보 변경 이벤트 실행

@@ -15,6 +15,8 @@ struct FMD_SessionFindParams;     // Find Session 설정 값
 
 // Session 생성 완료 시 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCreateMDSessionCompleteSignature, bool, bWasSuccessful);
+// 게임 시작과 지정 맵 이동 요청 완료 시 이벤트
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnStartMDGameCompleteSignature, bool, bWasSuccessful);
 // Session 검색 완료 시 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFindMDSessionCompleteSignature, const TArray<FBlueprintSessionResult>&, FindResults, bool, bWasSuccessful);
 // Session 참여 완료 시 이벤트
@@ -32,7 +34,10 @@ enum class EMD_SessionRollbackOperation : uint8
     CreateSession,
 
     // Session 참여 실패에 대한 롤백
-    JoinSession
+    JoinSession,
+
+    // 게임 시작 후 맵 이동 실패에 대한 롤백
+    StartGame
 };
 
 /**
@@ -42,9 +47,6 @@ UCLASS()
 class MARINEDEMOLITION_API UMD_MultiplayManager : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
-
-    // UMD_MultiplayManager 내부 로직 처리용 델리게이트
-    DECLARE_DELEGATE_OneParam(FOnPostDestroyMDSessionCompleteDelegate, bool);
 	
 public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
@@ -56,6 +58,11 @@ public:
     // Parameters : (bool bWasSuccessful)
     UPROPERTY(BlueprintAssignable, Category = "Marine Demolition|Session")
     FOnCreateMDSessionCompleteSignature OnCreateSessionComplete;
+
+    // Session 시작과 지정 맵 이동 요청이 완료되었을 때 결과를 전달하는 이벤트
+    // Parameters : (bool bWasSuccessful)
+    UPROPERTY(BlueprintAssignable, Category = "Marine Demolition|Session")
+    FOnStartMDGameCompleteSignature OnStartGameComplete;
 
     // Session 검색 완료 시 실행되는 이벤트
     // Parameters : (const TArray<FBlueprintSessionResult>& FindResults, bool bWasSuccessful)
@@ -94,6 +101,10 @@ public:
     // 비동기 Listen Server 호스팅 절차를 시작하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
     void CreateSession(const FString& ServerName, int32 MaxPlayerCount, const FMD_SessionCreateParams& SessionCreateParams);
+
+    // 호스트가 현재 Session을 시작 상태로 전환하고 모든 접속자를 지정 맵으로 이동시키는 함수
+    UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
+    void StartGame(TSoftObjectPtr<UWorld> GameMap);
 
     // 최대 MaxSearchResultCount개의 Session을 검색하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
@@ -140,6 +151,9 @@ protected:
     // Online Session Interface에서 Create Session을 완료하였을 때 호출되는 함수
     void HandleCreateSessionComplete(FName SessionName, bool bWasSuccessful, const FString SessionMapPackagePath);
 
+    // Online Session Interface에서 Start Session을 완료하면 호스트의 지정 맵 이동을 처리하는 함수
+    void HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString GameMapPackagePath);
+
     // Online Session Interface에서 Find Sessions을 완료하였을 때 호출되는 함수
     void HandleFindSessionsComplete(bool bWasSuccessful, TSharedPtr<FOnlineSessionSearch> SessionSearch);
 
@@ -149,13 +163,13 @@ protected:
     // Online Session Interface에서 Destroy Session을 완료하였을 때 호출되는 함수
     void HandleDestroySessionComplete(FName SessionName, bool bWasSuccessful);
 
-    // 생성 또는 참여 실패 후 남은 NamedSession을 외부 제거 이벤트 없이 정리하는 함수
+    // 생성, 참여 또는 게임 시작 실패 후 남은 NamedSession을 외부 제거 이벤트 없이 정리하는 함수
     void RollbackSession(FName SessionName, EMD_SessionRollbackOperation RollbackOperation);
 
     // 내부 NamedSession 제거 완료 후 기존 작업의 실패 이벤트를 전달하는 함수
     void HandleRollbackSessionComplete(FName SessionName, bool bWasSuccessful, EMD_SessionRollbackOperation RollbackOperation);
 
-    // 롤백을 요청한 생성 또는 참여 작업에 최종 실패를 전달하는 함수
+    // 롤백을 요청한 생성, 참여 또는 게임 시작 작업에 최종 실패를 전달하는 함수
     void BroadcastCompleteSessionRollback(EMD_SessionRollbackOperation RollbackOperation);
 
     // Online Session Interface에서 Session 초대에 대하여 수락 처리를 완료하였을 때 호출되는 함수
