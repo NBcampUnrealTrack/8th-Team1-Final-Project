@@ -93,3 +93,21 @@ void UMD_MerchantComponent::OnRep_MerchantState()
 {
 	OnMerchantStateChanged.Broadcast();
 }
+
+FMD_MerchantMenuInfo UMD_MerchantComponent::BuildMenuInfo() const
+{
+	FMD_MerchantMenuInfo Info;
+
+	// DisplayName·Greeting·TalkLines는 구조체 기본값(06 §4 대사)을 그대로 쓴다.
+	// 상인 액터가 다른 값을 쓰고 싶으면 호출 후 덮어쓰면 된다.
+
+	Info.Credits = Credits;
+	Info.ContractDay = CurrentDay;
+	Info.ActiveQuestReward = ActiveQuestReward;
+
+	// TODO(김동연): 호감도 단계에서 Affinity / AffinityToNextUnlock을 채운다.
+	// TODO(김동연): 대출 단계에서 DebtBalance / LoanLimit / DailyInterestRate를 채운다.
+	// 그때까지는 구조체 기본값(착수금 500 / 한도 800 / 이자 5%)이 표시된다.
+
+	return Info;
+}

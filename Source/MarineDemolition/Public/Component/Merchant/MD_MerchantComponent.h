@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Types/Merchant/MD_MerchantTypes.h"
+#include "UI/Merchant/MD_MerchantUITypes.h"
 #include "MD_MerchantComponent.generated.h"
 
 class UMD_MerchantSubsystem;
@@ -85,4 +86,15 @@ private:
 
 	FDelegateHandle SubsystemChangedHandle;
 		
+
+public:
+	/**
+	 * 상인 메뉴 위젯에 넘길 정보를 만든다.
+	 * MD_MerchantMenuWidget::SetMenuInfo()에 그대로 전달하면 된다.
+	 *
+	 * 아직 시스템이 없는 항목(호감도·대출)은 구조체 기본값을 그대로 둔다.
+	 * 기본값이 기획 07 §5 확정값이라 0으로 덮으면 화면이 더 이상해진다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
+	FMD_MerchantMenuInfo BuildMenuInfo() const;
 };
