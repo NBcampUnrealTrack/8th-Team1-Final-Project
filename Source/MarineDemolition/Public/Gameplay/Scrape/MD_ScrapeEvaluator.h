@@ -54,7 +54,7 @@ public:
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		TArray<FMD_ScrapeSurfaceCell>& InOutSurfaceCells);
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells);
 
 	/**
 	 * 장착한 헤라의 형태와 성능을 명시하여 한 번의 이동을 격자에 적용
@@ -67,7 +67,7 @@ public:
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		TArray<FMD_ScrapeSurfaceCell>& InOutSurfaceCells);
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells);
 
 	/**
 	 * ApplyStrokeToGrid를 실행할 수 있는 입력인지 부작용 없이 검사
@@ -81,7 +81,7 @@ public:
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
+		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
 		FString* OutErrorMessage = nullptr);
 
 	/** 장착한 헤라 스펙을 포함하여 판정 입력을 검사 */
@@ -91,7 +91,7 @@ public:
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
+		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
 		FString* OutErrorMessage = nullptr);
 
 	/**
@@ -104,7 +104,7 @@ public:
 	 * 표면 전체가 처음부터 깨끗했다면 별도 작업이 필요 없으므로 1을 반환
 	 */
 	static float CalculateCleanRatio(
-		const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells);
+		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells);
 
 	/**
 	 * 초기 오염이 있던 모든 셀이 허용 오차 이하까지 제거됐는지 검사
@@ -113,7 +113,7 @@ public:
 	 * 한 셀에 오염이 남았는데 UI 반올림 때문에 완료되는 오류를 차단
 	 */
 	static bool IsSurfaceFullyClean(
-		const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
+		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
 		float CleanTolerance);
 
 private:

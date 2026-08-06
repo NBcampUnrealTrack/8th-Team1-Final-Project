@@ -26,10 +26,16 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	DirectionLockThresholdCm = 1.0f;
 	MaximumPerpendicularDriftCm = 2.0f;
 	BreakStrokePerpendicularDistanceCm = 8.0f;
+	bUseAimCorrection = true;
+	AimCorrectionInterpolationSpeed = 6.0f;
+	AimCorrectionSpeedDegreesPerSecond = 90.0f;
+	AimCorrectionMaximumErrorDegrees = 8.0f;
+	AimCorrectionVisibilityToleranceCm = 2.0f;
 	bIsScraping = false;
 	bHasPreviousSurfacePosition = false;
 	bHasLockedStrokeAxis = false;
 	PreviousSurfacePositionCm = FVector2D::ZeroVector;
+	PreviousSurfaceFace = EMD_ScrapeSurfaceFace::Front;
 	StrokeAnchorPositionCm = FVector2D::ZeroVector;
 	LockedStrokeAxis = FVector2D::ZeroVector;
 	LastFeedbackWorldSeconds = -DBL_MAX;
@@ -144,7 +150,8 @@ void UMD_ScrapeToolComponent::StartScraping()
 	SetComponentTickEnabled(true);
 
 	// 입력을 누른 첫 프레임의 조준점을 즉시 기록해 다음 프레임부터 스트로크를 만들 수 있게 한다.
-	ProcessScrapeTrace();
+	// 이 호출은 기준점만 잡으므로 조준 보정에 쓸 프레임 시간은 없다.
+	ProcessScrapeTrace(0.0f);
 }
 
 void UMD_ScrapeToolComponent::StopScraping()
@@ -171,10 +178,10 @@ void UMD_ScrapeToolComponent::TickComponent(
 		return;
 	}
 
-	ProcessScrapeTrace();
+	ProcessScrapeTrace(DeltaTime);
 }
 
-void UMD_ScrapeToolComponent::ProcessScrapeTrace()
+void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 {
 	FHitResult CurrentHit;
 	AMD_CuttableWall* CurrentWall = nullptr;
@@ -185,9 +192,12 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace()
 	}
 
 	FVector2D RawSurfacePositionCm;
+	EMD_ScrapeSurfaceFace CurrentSurfaceFace =
+		EMD_ScrapeSurfaceFace::Front;
 	if (!CurrentWall->TryGetScrapeSurfacePositionFromHit(
 		CurrentHit,
-		RawSurfacePositionCm))
+		RawSurfacePositionCm,
+		CurrentSurfaceFace))
 	{
 		ResetStrokeTracking();
 		return;
@@ -195,9 +205,13 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace()
 
 	if (!bHasPreviousSurfacePosition
 		|| !PreviousWall.IsValid()
-		|| PreviousWall.Get() != CurrentWall)
+		|| PreviousWall.Get() != CurrentWall
+		|| PreviousSurfaceFace != CurrentSurfaceFace)
 	{
-		BeginStrokeTracking(CurrentWall, RawSurfacePositionCm);
+		BeginStrokeTracking(
+			CurrentWall,
+			RawSurfacePositionCm,
+			CurrentSurfaceFace);
 		return;
 	}
 
@@ -209,10 +223,14 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace()
 		return;
 	}
 
+	// 앞면이 여러 깊이에 걸친 벽에서도 조준 보정이 실제 표면 위에 남도록
+	// 지금 맞고 있는 히트 지점을 깊이 기준으로 넘긴다.
 	FVector ConstrainedWorldPosition = CurrentHit.ImpactPoint;
 	const bool bHasConstrainedWorldPosition =
-		CurrentWall->TryGetScrapeSurfaceWorldPosition(
+		CurrentWall->TryGetScrapeSurfaceWorldPositionAtDepth(
 			ConstrainedSurfacePositionCm,
+			CurrentSurfaceFace,
+			CurrentHit.ImpactPoint,
 			ConstrainedWorldPosition);
 	if (bHasConstrainedWorldPosition
 		&& !RawSurfacePositionCm.Equals(
@@ -220,10 +238,22 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace()
 			0.01))
 	{
 		// 조준점과 실제 자국을 한곳에 둔다.
-		KeepAimOnScrapePosition(ConstrainedWorldPosition);
+		// 지금 맞고 있는 지점과 보정 목표의 각도 차이만큼만 시선을 돌린다.
+		// 단, 보정 목표가 다른 표면에 가려져 있으면 보정하지 않는다.
+		if (IsAimCorrectionTargetVisible(
+				CurrentHit.TraceStart,
+				ConstrainedWorldPosition))
+		{
+			KeepAimOnScrapePosition(
+				CurrentHit.TraceStart,
+				CurrentHit.ImpactPoint,
+				ConstrainedWorldPosition,
+				DeltaTime);
+		}
 	}
 
 	FMD_ScrapeStroke Stroke;
+	Stroke.SurfaceFace = CurrentSurfaceFace;
 	Stroke.StartPositionCm = PreviousSurfacePositionCm;
 	Stroke.EndPositionCm = ConstrainedSurfacePositionCm;
 	if (GetOwner() && GetOwner()->HasAuthority())
@@ -318,11 +348,13 @@ bool UMD_ScrapeToolComponent::TryGetCurrentWallHit(
 
 void UMD_ScrapeToolComponent::BeginStrokeTracking(
 	AMD_CuttableWall* Wall,
-	const FVector2D& SurfacePositionCm)
+	const FVector2D& SurfacePositionCm,
+	const EMD_ScrapeSurfaceFace SurfaceFace)
 {
 	bHasPreviousSurfacePosition = true;
 	bHasLockedStrokeAxis = false;
 	PreviousSurfacePositionCm = SurfacePositionCm;
+	PreviousSurfaceFace = SurfaceFace;
 	StrokeAnchorPositionCm = SurfacePositionCm;
 	LockedStrokeAxis = FVector2D::ZeroVector;
 	PreviousWall = Wall;
@@ -394,13 +426,140 @@ bool UMD_ScrapeToolComponent::TryConstrainStrokePosition(
 	return true;
 }
 
-void UMD_ScrapeToolComponent::KeepAimOnScrapePosition(
+FRotator UMD_ScrapeToolComponent::CalculateAimCorrectionRotation(
+	const FRotator& CurrentControlRotation,
+	const FVector& ViewToCurrentAim,
+	const FVector& ViewToTarget,
+	const float CorrectionRatio,
+	const float MaximumStepDegrees,
+	const float MaximumErrorDegrees)
+{
+	if (CurrentControlRotation.ContainsNaN()
+		|| ViewToCurrentAim.ContainsNaN()
+		|| ViewToTarget.ContainsNaN())
+	{
+		return CurrentControlRotation;
+	}
+
+	const FVector CurrentDirection = ViewToCurrentAim.GetSafeNormal();
+	const FVector TargetDirection = ViewToTarget.GetSafeNormal();
+	if (CurrentDirection.IsNearlyZero() || TargetDirection.IsNearlyZero())
+	{
+		return CurrentControlRotation;
+	}
+
+	const double DirectionDot = FMath::Clamp(
+		FVector::DotProduct(CurrentDirection, TargetDirection),
+		-1.0,
+		1.0);
+	const float ErrorDegrees = FMath::RadiansToDegrees(
+		static_cast<float>(FMath::Acos(DirectionDot)));
+	if (!FMath::IsFinite(ErrorDegrees)
+		|| ErrorDegrees <= UE_KINDA_SMALL_NUMBER)
+	{
+		return CurrentControlRotation;
+	}
+
+	// 시선이 벽을 너무 스치는 각도면 이 프레임은 건너뛴다.
+	if (FMath::IsFinite(MaximumErrorDegrees)
+		&& MaximumErrorDegrees > 0.0f
+		&& ErrorDegrees > MaximumErrorDegrees)
+	{
+		return CurrentControlRotation;
+	}
+
+	// 오차의 일정 비율만 없앤다. 항상 오차보다 작으므로 목표를 지나치지 않는다.
+	const float SafeCorrectionRatio = FMath::IsFinite(CorrectionRatio)
+		? FMath::Clamp(CorrectionRatio, 0.0f, 1.0f)
+		: 0.0f;
+	float AppliedDegrees = ErrorDegrees * SafeCorrectionRatio;
+	if (FMath::IsFinite(MaximumStepDegrees) && MaximumStepDegrees > 0.0f)
+	{
+		AppliedDegrees = FMath::Min(AppliedDegrees, MaximumStepDegrees);
+	}
+	if (AppliedDegrees <= UE_KINDA_SMALL_NUMBER)
+	{
+		return CurrentControlRotation;
+	}
+
+	const FVector RotationAxis = FVector::CrossProduct(
+		CurrentDirection,
+		TargetDirection).GetSafeNormal();
+	if (RotationAxis.IsNearlyZero())
+	{
+		return CurrentControlRotation;
+	}
+
+	// 두 시선 방향의 각도 차이를 그대로 현재 회전에 더한다.
+	const FQuat DeltaQuat(
+		RotationAxis,
+		FMath::DegreesToRadians(AppliedDegrees));
+	FRotator CorrectedRotation =
+		(DeltaQuat * CurrentControlRotation.Quaternion()).Rotator();
+	if (CorrectedRotation.ContainsNaN())
+	{
+		return CurrentControlRotation;
+	}
+
+	// Roll은 보정 대상이 아니므로 현재 값을 유지한다.
+	CorrectedRotation.Roll = CurrentControlRotation.Roll;
+	return CorrectedRotation;
+}
+
+bool UMD_ScrapeToolComponent::IsAimCorrectionTargetVisible(
+	const FVector& ViewLocation,
 	const FVector& WorldPosition) const
 {
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	const UWorld* World = GetWorld();
 	if (!OwnerPawn
-		|| !OwnerPawn->IsLocallyControlled()
+		|| !World
+		|| ViewLocation.ContainsNaN()
 		|| WorldPosition.ContainsNaN())
+	{
+		return false;
+	}
+
+	const FVector ViewToTarget = WorldPosition - ViewLocation;
+	const double DistanceCm = ViewToTarget.Size();
+	const double SafeToleranceCm = FMath::Max(
+		static_cast<double>(AimCorrectionVisibilityToleranceCm),
+		static_cast<double>(UE_KINDA_SMALL_NUMBER));
+	if (DistanceCm <= SafeToleranceCm)
+	{
+		return true;
+	}
+
+	// 목표 표면 자신에 맞는 것은 가림이 아니므로 조금 앞까지만 검사한다.
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(MD_ScrapeAimVisibility),
+		true);
+	QueryParams.AddIgnoredActor(OwnerPawn);
+
+	FHitResult BlockingHit;
+	return !World->LineTraceSingleByChannel(
+		BlockingHit,
+		ViewLocation,
+		ViewLocation
+			+ ViewToTarget.GetSafeNormal()
+				* (DistanceCm - SafeToleranceCm),
+		TraceChannel,
+		QueryParams);
+}
+
+void UMD_ScrapeToolComponent::KeepAimOnScrapePosition(
+	const FVector& ViewLocation,
+	const FVector& CurrentAimWorldPosition,
+	const FVector& TargetWorldPosition,
+	const float DeltaTime) const
+{
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	if (!bUseAimCorrection
+		|| !OwnerPawn
+		|| !OwnerPawn->IsLocallyControlled()
+		|| ViewLocation.ContainsNaN()
+		|| CurrentAimWorldPosition.ContainsNaN()
+		|| TargetWorldPosition.ContainsNaN())
 	{
 		return;
 	}
@@ -411,18 +570,29 @@ void UMD_ScrapeToolComponent::KeepAimOnScrapePosition(
 		return;
 	}
 
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
-	const FVector ViewToScrapePosition = WorldPosition - ViewLocation;
-	if (ViewToScrapePosition.IsNearlyZero())
+	const float SafeDeltaTime = FMath::IsFinite(DeltaTime)
+		? FMath::Max(DeltaTime, 0.0f)
+		: 0.0f;
+
+	// 프레임률이 달라도 같은 속도로 수렴하도록 지수 비율을 쓴다.
+	const float CorrectionRatio = 1.0f - FMath::Exp(
+		-FMath::Max(AimCorrectionInterpolationSpeed, 0.0f) * SafeDeltaTime);
+	const FRotator CurrentControlRotation = Controller->GetControlRotation();
+	const FRotator CorrectedControlRotation = CalculateAimCorrectionRotation(
+		CurrentControlRotation,
+		CurrentAimWorldPosition - ViewLocation,
+		TargetWorldPosition - ViewLocation,
+		CorrectionRatio,
+		AimCorrectionSpeedDegreesPerSecond * SafeDeltaTime,
+		AimCorrectionMaximumErrorDegrees);
+	if (CorrectedControlRotation.Equals(
+			CurrentControlRotation,
+			UE_KINDA_SMALL_NUMBER))
 	{
 		return;
 	}
 
-	FRotator CorrectedViewRotation = ViewToScrapePosition.Rotation();
-	CorrectedViewRotation.Roll = ViewRotation.Roll;
-	Controller->SetControlRotation(CorrectedViewRotation);
+	Controller->SetControlRotation(CorrectedControlRotation);
 }
 
 void UMD_ScrapeToolComponent::ResetStrokeTracking()
@@ -430,6 +600,7 @@ void UMD_ScrapeToolComponent::ResetStrokeTracking()
 	bHasPreviousSurfacePosition = false;
 	bHasLockedStrokeAxis = false;
 	PreviousSurfacePositionCm = FVector2D::ZeroVector;
+	PreviousSurfaceFace = EMD_ScrapeSurfaceFace::Front;
 	StrokeAnchorPositionCm = FVector2D::ZeroVector;
 	LockedStrokeAxis = FVector2D::ZeroVector;
 	PreviousWall.Reset();

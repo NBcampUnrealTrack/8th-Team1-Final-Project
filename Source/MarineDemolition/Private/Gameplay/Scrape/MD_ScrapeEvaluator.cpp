@@ -11,7 +11,7 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 	const FMD_ScrapeSettings& Settings,
 	const FIntPoint& GridDimensions,
 	const FVector2D& SurfaceSizeCm,
-	TArray<FMD_ScrapeSurfaceCell>& InOutSurfaceCells)
+	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells)
 {
 	return ApplyStrokeToGrid(
 		Stroke,
@@ -28,9 +28,10 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 	const FMD_ScrapeSettings& Settings,
 	const FIntPoint& GridDimensions,
 	const FVector2D& SurfaceSizeCm,
-	TArray<FMD_ScrapeSurfaceCell>& InOutSurfaceCells)
+	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells)
 {
 	FMD_ScrapeResult Result;
+	Result.SurfaceFace = Stroke.SurfaceFace;
 
 	// 실제 배열을 수정하기 전에 모든 입력을 먼저 검사
 	// 실패 이유는 결과 구조체에 담지 않고 로그로만 남김
@@ -366,7 +367,7 @@ bool FMD_ScrapeEvaluator::IsEvaluationInputValid(
 	const FMD_ScrapeSettings& Settings,
 	const FIntPoint& GridDimensions,
 	const FVector2D& SurfaceSizeCm,
-	const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
+	const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
 	FString* OutErrorMessage)
 {
 	return IsEvaluationInputValid(
@@ -385,7 +386,7 @@ bool FMD_ScrapeEvaluator::IsEvaluationInputValid(
 	const FMD_ScrapeSettings& Settings,
 	const FIntPoint& GridDimensions,
 	const FVector2D& SurfaceSizeCm,
-	const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
+	const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
 	FString* OutErrorMessage)
 {
 	// 성공할 경우 이전 호출에서 남은 오류 문자열이 사용되지 않도록 먼저 초기화
@@ -404,6 +405,13 @@ bool FMD_ScrapeEvaluator::IsEvaluationInputValid(
 
 			return false;
 		};
+
+	if (Stroke.SurfaceFace != EMD_ScrapeSurfaceFace::Front
+		&& Stroke.SurfaceFace != EMD_ScrapeSurfaceFace::Back)
+	{
+		return FailValidation(
+			TEXT("Stroke.SurfaceFace must be Front or Back."));
+	}
 
 	if (GridDimensions.X <= 0 || GridDimensions.Y <= 0)
 	{
@@ -503,7 +511,7 @@ bool FMD_ScrapeEvaluator::IsEvaluationInputValid(
 }
 
 float FMD_ScrapeEvaluator::CalculateCleanRatio(
-	const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells)
+	const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells)
 {
 	double TotalInitialContamination = 0.0;
 	double TotalRemainingContamination = 0.0;
@@ -544,7 +552,7 @@ float FMD_ScrapeEvaluator::CalculateCleanRatio(
 }
 
 bool FMD_ScrapeEvaluator::IsSurfaceFullyClean(
-	const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
+	const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
 	const float CleanTolerance)
 {
 	const float SafeTolerance = FMath::IsFinite(CleanTolerance)

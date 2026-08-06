@@ -23,7 +23,7 @@ public class MarineDemolition : ModuleRules
 			"Landscape"
 		});
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "ImageWrapper", "Slate", "SlateCore", "DeveloperSettings", "ApplicationCore" });
+		PrivateDependencyModuleNames.AddRange(new string[] { "ImageWrapper", "Slate", "SlateCore", "DeveloperSettings", "ApplicationCore", "RHI" });
 
 		if (Target.bBuildEditor)
 		{
