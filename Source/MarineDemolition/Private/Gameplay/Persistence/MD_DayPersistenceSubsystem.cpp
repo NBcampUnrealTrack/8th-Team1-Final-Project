@@ -2,6 +2,7 @@
 
 #include "EngineUtils.h"
 #include "Game/MD_GameStateBase.h"
+#include "World/Interaction/MD_SectorCloseoutMarker.h"
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Support/MD_SupportBrace.h"
 #include "World/Wall/MD_CuttableWall.h"
@@ -73,6 +74,14 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         Record.Transform = It->GetActorTransform();
         Record.bContaminated = It->bContaminated;
         Snapshot.Pieces.Add(Record);
+    }
+
+    for (TActorIterator<AMD_SectorCloseoutMarker> It(World); It; ++It)
+    {
+        if (It->IsClosed())
+        {
+            Snapshot.ClosedMarkerNames.Add(It->GetFName());
+        }
     }
 
     Snapshot.bValid = true;
@@ -190,6 +199,16 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
         {
             Piece->SetActorScale3D(Record.Transform.GetScale3D());
             Piece->SetContaminated(Record.bContaminated);
+        }
+    }
+
+    // 어제 마감한 섹터는 마감 상태 유지 (점수 재지급 없음 — Score 캐리오버에 이미 포함)
+    const TSet<FName> ClosedMarkers(Snapshot.ClosedMarkerNames);
+    for (TActorIterator<AMD_SectorCloseoutMarker> It(World); It; ++It)
+    {
+        if (ClosedMarkers.Contains(It->GetFName()))
+        {
+            It->RestoreClosed();
         }
     }
 

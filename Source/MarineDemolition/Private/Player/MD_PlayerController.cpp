@@ -8,6 +8,7 @@
 #include "Engine/World.h"
 #include "World/Interaction/MD_TravelConsole.h"
 #include "World/Interaction/MD_DayEndConsole.h"
+#include "World/Interaction/MD_SectorCloseoutMarker.h"
 #include "Game/MD_GameModeBase.h"
 
 #include "AbilitySystemComponent.h"
@@ -64,6 +65,23 @@ void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole*
 	{
 		GM->RequestEndDay();
 	}
+}
+
+void AMD_PlayerController::ServerRequestSectorCloseout_Implementation(AMD_SectorCloseoutMarker* Marker)
+{
+	if (!IsValid(Marker))
+	{
+		return;
+	}
+
+	// 마커 근처에 있는 플레이어의 요청만 수행 (임의 호출 방지)
+	APawn* MyPawn = GetPawn();
+	if (!IsValid(MyPawn) || FVector::Dist(MyPawn->GetActorLocation(), Marker->GetActorLocation()) > 500.f)
+	{
+		return;
+	}
+
+	Marker->TryCloseout();
 }
 
 void AMD_PlayerController::MD_ApplyTestDamage()

@@ -114,4 +114,8 @@ struct FMD_DaySnapshot
 
       UPROPERTY()
       TArray<FMD_WallContaminationRecord> WallContaminations;
+
+      // 마감 완료된 섹터 마감 마커 (레벨 배치 액터라 이름으로 식별)
+      UPROPERTY()
+      TArray<FName> ClosedMarkerNames;
 };
