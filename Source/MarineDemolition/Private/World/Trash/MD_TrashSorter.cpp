@@ -1,4 +1,4 @@
-#include "World/Trash/MD_TrashDispenser.h"
+#include "World/Trash/MD_TrashSorter.h"
 
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -12,7 +12,7 @@
 #include "Util/MD_LogUtility.h"
 #include "Util/MD_MaterialTintUtility.h"
 
-AMD_TrashDispenser::AMD_TrashDispenser()
+AMD_TrashSorter::AMD_TrashSorter()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
@@ -35,21 +35,21 @@ AMD_TrashDispenser::AMD_TrashDispenser()
 	IntakeVolume->SetCanEverAffectNavigation(false);
 }
 
-void AMD_TrashDispenser::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+void AMD_TrashSorter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME(AMD_TrashDispenser, SortedCount);
+	DOREPLIFETIME(AMD_TrashSorter, SortedCount);
 }
 
-void AMD_TrashDispenser::OnConstruction(const FTransform& Transform)
+void AMD_TrashSorter::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
 	ApplyCategoryTint();
 }
 
-void AMD_TrashDispenser::BeginPlay()
+void AMD_TrashSorter::BeginPlay()
 {
 	Super::BeginPlay();
 
@@ -57,7 +57,7 @@ void AMD_TrashDispenser::BeginPlay()
 	if (!UMD_TrashLibrary::IsTrashCategory(AcceptedCategory))
 	{
 		UE_LOG(MarineDemolition, Warning,
-			TEXT("'%s'의 Accepted Category '%s'는 분류 칸이 아니다. 이 컨테이너는 아무것도 삼키지 않는다."),
+			TEXT("'%s'의 Accepted Category '%s'는 분류 칸이 아니다. 이 분류기는 아무것도 삼키지 않는다."),
 			*GetName(), *AcceptedCategory.ToString());
 		return;
 	}
@@ -68,20 +68,20 @@ void AMD_TrashDispenser::BeginPlay()
 		return;
 	}
 
-	IntakeVolume->OnComponentBeginOverlap.AddDynamic(this, &AMD_TrashDispenser::HandleBeginOverlap);
+	IntakeVolume->OnComponentBeginOverlap.AddDynamic(this, &AMD_TrashSorter::HandleBeginOverlap);
 }
 
-void AMD_TrashDispenser::EndPlay(const EEndPlayReason::Type EndPlayReason)
+void AMD_TrashSorter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (IsValid(IntakeVolume))
 	{
-		IntakeVolume->OnComponentBeginOverlap.RemoveDynamic(this, &AMD_TrashDispenser::HandleBeginOverlap);
+		IntakeVolume->OnComponentBeginOverlap.RemoveDynamic(this, &AMD_TrashSorter::HandleBeginOverlap);
 	}
 
 	Super::EndPlay(EndPlayReason);
 }
 
-void AMD_TrashDispenser::HandleBeginOverlap(
+void AMD_TrashSorter::HandleBeginOverlap(
 	UPrimitiveComponent* /*OverlappedComponent*/,
 	AActor* OtherActor,
 	UPrimitiveComponent* /*OtherComponent*/,
@@ -100,7 +100,7 @@ void AMD_TrashDispenser::HandleBeginOverlap(
 	JudgeAndSwallow(OtherActor);
 }
 
-void AMD_TrashDispenser::JudgeAndSwallow(AActor* Item)
+void AMD_TrashSorter::JudgeAndSwallow(AActor* Item)
 {
 	AMD_GameStateBase* MDGameState = GetWorld() ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
 	if (!IsValid(MDGameState)) return;
@@ -138,26 +138,26 @@ void AMD_TrashDispenser::JudgeAndSwallow(AActor* Item)
 	Item->Destroy();
 }
 
-void AMD_TrashDispenser::MulticastItemSwallowed_Implementation(const bool bCorrectSort, const FVector Location)
+void AMD_TrashSorter::MulticastItemSwallowed_Implementation(const bool bCorrectSort, const FVector Location)
 {
 	OnItemSwallowed(bCorrectSort, Location);
 }
 
-void AMD_TrashDispenser::ApplyCategoryTint()
+void AMD_TrashSorter::ApplyCategoryTint()
 {
 	if (!IsValid(Mesh) || !bTintPlaceholderMeshByCategory || TintParameterName.IsNone())
 	{
 		return;
 	}
 
-	UMaterialInstanceDynamic* DispenserMID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
-	if (!DispenserMID)
+	UMaterialInstanceDynamic* SorterMID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
+	if (!SorterMID)
 	{
 		return;
 	}
 
 	MDMaterialTint::SetVectorParameterChecked(
-		DispenserMID,
+		SorterMID,
 		TintParameterName,
 		UMD_TrashLibrary::GetCategoryColor(AcceptedCategory));
 }

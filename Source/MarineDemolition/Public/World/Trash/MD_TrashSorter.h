@@ -3,28 +3,23 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
-#include "MD_TrashDispenser.generated.h"
+#include "MD_TrashSorter.generated.h"
 
 class UBoxComponent;
 class UPrimitiveComponent;
 class UStaticMeshComponent;
 
-/**
- * 모선 분류장의 분류기 한 대 (기획 02 §11 "모선 분리 5종")
- * 5종 = 클래스 5개가 아니라 이 액터 5대 + AcceptedCategory 지정.
- * 넣은 물건은 판정 후 삼켜 없앤다. 다시 꺼낼 수 없어 오분류는 그 자리에서 확정된다.
- */
 UCLASS()
-class MARINEDEMOLITION_API AMD_TrashDispenser : public AActor
+class MARINEDEMOLITION_API AMD_TrashSorter : public AActor
 {
 	GENERATED_BODY()
 
 public:
-	AMD_TrashDispenser();
+	AMD_TrashSorter();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	/** 이 컨테이너가 정분류로 인정하는 칸 */
+	/** 이 분류기가 정분류로 인정하는 칸 */
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	FGameplayTag GetAcceptedCategory() const { return AcceptedCategory; }
 
