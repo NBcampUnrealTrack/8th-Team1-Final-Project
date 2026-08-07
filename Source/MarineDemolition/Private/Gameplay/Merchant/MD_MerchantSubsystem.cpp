@@ -75,7 +75,7 @@ void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 Advanc
 
 	}
 
-	AddCredits(AdvancePayment);
+	AddCreditsInternal(AdvancePayment);
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 시작: %s (메인 %d건, 착수금 %d)"), *Site->SiteName.ToString(), MainQuests.Num(), AdvancePayment);
 
@@ -172,6 +172,8 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FGameplayTag& GradeTag, 
 		return;
 	}
 
+	bool bChanged = false;
+
 	for (FMD_MainQuestState& QuestState : MainQuests)
 	{
 		if (!QuestState.IsActive() || !DoesDeliveryMatch(QuestState.Definition, GradeTag, bIntact))
@@ -180,6 +182,7 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FGameplayTag& GradeTag, 
 		}
 
 		++QuestState.CurrentProgress;
+		bChanged = true;
 
 		if (QuestState.CurrentProgress >= QuestState.Definition->RequiredCount)
 		{
@@ -196,6 +199,7 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FGameplayTag& GradeTag, 
 		}
 
 		++QuestState.CurrentProgress;
+		bChanged = true;
 
 		if (QuestState.CurrentProgress >= QuestState.Definition->RequiredCount)
 		{
@@ -204,12 +208,18 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FGameplayTag& GradeTag, 
 		}
 	}
 
-	OnMerchantStateChanged.Broadcast();
+	// 아무 퀘스트도 반응하지 않았으면 UI를 갱신할 이유가 없다.
+	if (bChanged)
+	{
+		OnMerchantStateChanged.Broadcast();
+	}
 
 }
 
 void UMD_MerchantSubsystem::FinalizeContract()
 {
+	bool bChanged = false;
+
 	// 메인은 실패 상태가 없다. 미완료는 그대로 남긴다. (기획 10 §2)
 	for (FMD_RepeatQuestState& QuestState : RepeatQuests)
 	{
@@ -217,12 +227,16 @@ void UMD_MerchantSubsystem::FinalizeContract()
 		{
 			// 크레딧 차감 없음. 실패는 호감도만 하락한다. (07 M-02 삭제)
 			QuestState.Status = EMD_RepeatQuestStatus::Failed;
+			bChanged = true;
 		}
 	}
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 종료"));
 
-	OnMerchantStateChanged.Broadcast();
+	if (bChanged)
+	{
+		OnMerchantStateChanged.Broadcast();
+	}
 }
 
 void UMD_MerchantSubsystem::RerollRepeatQuests()
@@ -278,6 +292,17 @@ void UMD_MerchantSubsystem::RerollRepeatQuests()
 	}
 }
 
+void UMD_MerchantSubsystem::AddCreditsInternal(int32 Amount)
+{
+	if (Amount == 0)
+	{
+		return;
+	}
+
+	// 크레딧은 0 밑으로 내려가지 않는다.
+	Credits = FMath::Max(0, Credits + Amount);
+}
+
 bool UMD_MerchantSubsystem::DoesDeliveryMatch(const UMD_QuestDefinition* Definition, const FGameplayTag& GradeTag, bool bIntact) const
 {
 	if (!IsValid(Definition))
@@ -317,7 +342,7 @@ void UMD_MerchantSubsystem::ApplyQuestReward(const UMD_QuestDefinition* Definiti
 		? Definition->RewardCredits / 2
 		: Definition->RewardCredits;
 
-	AddCredits(Payout);
+	AddCreditsInternal(Payout);
 
 	// FMD_ShopItem::IsUnlocked의 QuestCompletions 인자로 쓰인다.
 	++QuestCompletions;

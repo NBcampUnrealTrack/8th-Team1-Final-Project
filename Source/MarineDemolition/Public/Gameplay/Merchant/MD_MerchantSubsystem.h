@@ -38,6 +38,7 @@ public:
 	//수락 퀘스트 보수
 	int32 GetActiveQuestReward() const;
 
+	/** 크레딧 증감. 단독 호출용이며 변경 후 델리게이트 알림. */
 	void AddCredits(int32 Amount);
 
 	//계약 시작, 착수금 지급
@@ -84,6 +85,9 @@ private:
 	TSet<TObjectPtr<UMD_SiteDefinition>> ClearedSites;
 
 	void RerollRepeatQuests();
+
+	/** 방송하지 않는 내부용. 여러 변경을 한 번에 묶을 때 쓴다. */
+	void AddCreditsInternal(int32 Amount);
 
 	/** 목표 등급·Intact 조건이 이 퀘스트에 맞는지 판정한다. */
 	bool DoesDeliveryMatch(const UMD_QuestDefinition* Definition,const FGameplayTag& GradeTag, bool bIntact) const;
