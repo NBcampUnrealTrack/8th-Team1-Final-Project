@@ -55,6 +55,10 @@
 		{
 			"Name": "PythonScriptPlugin",
 			"Enabled": true
+		},
+		{
+			"Name": "SQLiteSupport",
+			"Enabled": true
 		}
 	]
 }
