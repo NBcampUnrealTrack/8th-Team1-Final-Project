@@ -9,6 +9,7 @@
 
 class AMD_TravelConsole;
 class AMD_DayEndConsole;
+class AMD_SectorCloseoutMarker;
 class UMD_HUDWidget;
 class UMD_EquipHotbarWidget;
 class UMD_SiteDefinition;
@@ -28,6 +29,10 @@ public:
 	// 모선 하루 마감 콘솔 요청. 서버가 거리 검증 후 GameMode 마감 실행
 	UFUNCTION(Server, Reliable)
 	void ServerRequestEndDay(AMD_DayEndConsole* Console);
+
+	// 구역 마감 제출 요청. 서버가 거리 검증 후 마커 마감 실행
+	UFUNCTION(Server, Reliable)
+	void ServerRequestSectorCloseout(AMD_SectorCloseoutMarker* Marker);
 
 
 private:

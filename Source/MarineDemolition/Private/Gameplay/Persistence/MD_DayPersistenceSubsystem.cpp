@@ -2,6 +2,7 @@
 
 #include "EngineUtils.h"
 #include "Game/MD_GameStateBase.h"
+#include "World/Interaction/MD_SectorCloseoutMarker.h"
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Support/MD_SupportBrace.h"
 #include "World/Wall/MD_CuttableWall.h"
@@ -25,6 +26,8 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
     Snapshot.CompletedDay = GameState->GetCurrentDay();
     Snapshot.Score = GameState->GetScore();
     Snapshot.bWarningIssued = GameState->IsInspectionWarned();
+    Snapshot.CrewCount = GameState->GetContractCrewCount();
+    Snapshot.bEmergencyDay = GameState->IsEmergencyDay();
 
     for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
     {
@@ -73,6 +76,14 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         Record.Transform = It->GetActorTransform();
         Record.bContaminated = It->bContaminated;
         Snapshot.Pieces.Add(Record);
+    }
+
+    for (TActorIterator<AMD_SectorCloseoutMarker> It(World); It; ++It)
+    {
+        if (It->IsClosed())
+        {
+            Snapshot.ClosedMarkerNames.Add(It->GetFName());
+        }
     }
 
     Snapshot.bValid = true;
@@ -193,12 +204,24 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
         }
     }
 
+    // 어제 마감한 섹터는 마감 상태 유지 (점수 재지급 없음 — Score 캐리오버에 이미 포함)
+    const TSet<FName> ClosedMarkers(Snapshot.ClosedMarkerNames);
+    for (TActorIterator<AMD_SectorCloseoutMarker> It(World); It; ++It)
+    {
+        if (ClosedMarkers.Contains(It->GetFName()))
+        {
+            It->RestoreClosed();
+        }
+    }
+
     // 점수 캐리오버 + Day 진행
     AMD_GameStateBase* GameState = World->GetGameState<AMD_GameStateBase>();
     if (IsValid(GameState))
     {
         GameState->AddScoreDelta(Snapshot.Score);
         GameState->SetInspectionWarned(Snapshot.bWarningIssued);
+        GameState->SetContractCrewCount(Snapshot.CrewCount);
+        GameState->SetEmergencyDay(Snapshot.bEmergencyDay);
         GameState->SetCurrentDay(Snapshot.CompletedDay + 1);
     }
 
