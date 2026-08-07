@@ -29,6 +29,35 @@ enum class EMD_ScrapeContactType : uint8
 };
 
 /**
+ * 오염 작업면의 앞면과 뒷면을 구분한다.
+ *
+ * 셀 저장과 마스크는 두 면이 하나의 파이프라인을 공유하지만, 긁기 판정과 제거율은
+ * 이 값으로 작업면을 구분한다. 기존 데이터의 기본 동작을 유지하기 위해 앞면을 0으로 둔다.
+ */
+UENUM(BlueprintType)
+enum class EMD_ScrapeSurfaceFace : uint8
+{
+	Front = 0 UMETA(DisplayName = "앞면"),
+	Back = 1 UMETA(DisplayName = "뒷면")
+};
+
+/**
+ * 오염 작업면의 앞/뒤를 결정하는 메시 로컬 축.
+ *
+ * Auto는 메시 자체에서 뚜렷하게 얇은 Bounds 축을 우선하고, 크기가 비슷하면
+ * 월드 스케일이 반영된 크기에서 가장 얇은 축을 선택한다.
+ * 방향이 특이하거나 두께가 비슷한 메시에서는 X/Y/Z를 직접 지정할 수 있다.
+ */
+UENUM(BlueprintType)
+enum class EMD_ScrapeSurfaceNormalAxis : uint8
+{
+	Auto UMETA(DisplayName = "자동(가장 얇은 축)"),
+	X UMETA(DisplayName = "로컬 X"),
+	Y UMETA(DisplayName = "로컬 Y"),
+	Z UMETA(DisplayName = "로컬 Z")
+};
+
+/**
  * 플레이어가 한 프레임 또는 한 네트워크 갱신 구간 동안 이동시킨 헤라의 경로
  *
  * 좌표는 월드 좌표가 아니라 "오염 표면의 로컬 2D 좌표"를 사용.
@@ -41,10 +70,15 @@ struct MARINEDEMOLITION_API FMD_ScrapeStroke
 
 public:
 	FMD_ScrapeStroke()
-		: StartPositionCm(FVector2D::ZeroVector)
+		: SurfaceFace(EMD_ScrapeSurfaceFace::Front)
+		, StartPositionCm(FVector2D::ZeroVector)
 		, EndPositionCm(FVector2D::ZeroVector)
 	{
 	}
+
+	/** 이번 스트로크가 적용되는 앞면 또는 뒷면. 한 스트로크는 한 면에만 속한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape")
+	EMD_ScrapeSurfaceFace SurfaceFace;
 
 	/**
 	 * 이번 갱신 구간에서 헤라가 출발한 표면 로컬 위치
@@ -287,34 +321,9 @@ public:
 			: 0.0f;
 	}
 
-	/** 현재 잔여량이 허용 오차 이하인지 확인 */
-	bool IsClean(const float Tolerance) const
-	{
-		return !FMath::IsFinite(RemainingContamination)
-			|| RemainingContamination <= FMath::Max(0.0f, Tolerance);
-	}
-
-	/**
-	 * 이 셀에서 제거된 비율을 0~1로 반환
-	 * 처음부터 오염이 없던 셀은 제거할 대상도 없으므로 완료된 값인 1을 반환
-	 */
-	float GetRemovalRatio() const
-	{
-		if (!FMath::IsFinite(InitialContamination)
-			|| InitialContamination <= UE_SMALL_NUMBER)
-		{
-			return 1.0f;
-		}
-
-		const float SafeRemaining = FMath::IsFinite(RemainingContamination)
-			? FMath::Clamp(RemainingContamination, 0.0f, InitialContamination)
-			: 0.0f;
-
-		return FMath::Clamp(
-			1.0f - (SafeRemaining / InitialContamination),
-			0.0f,
-			1.0f);
-	}
+	// 셀 하나의 깨끗함 판정과 제거 비율은 면 전체를 함께 봐야 하므로
+	// FMD_ScrapeEvaluator::IsSurfaceFullyClean / CalculateCleanRatio가 담당한다.
+	// 셀 단위 헬퍼를 여기에 다시 두면 판정 기준이 두 벌이 된다.
 };
 
 /**
@@ -375,7 +384,8 @@ struct MARINEDEMOLITION_API FMD_ScrapeResult
 
 public:
 	FMD_ScrapeResult()
-		: bIsInputValid(false)
+		: SurfaceFace(EMD_ScrapeSurfaceFace::Front)
+		, bIsInputValid(false)
 		, bWasStrokeLongEnough(false)
 		, bHadSurfaceContact(false)
 		, ContactType(EMD_ScrapeContactType::None)
@@ -390,6 +400,10 @@ public:
 		, bTouchedBareSurface(false)
 	{
 	}
+
+	/** 이번 결과가 평가한 앞면 또는 뒷면. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
+	EMD_ScrapeSurfaceFace SurfaceFace;
 
 	/** 격자 크기, 셀 개수, 설정값 등 판정에 필요한 입력이 모두 올바른지 여부 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")

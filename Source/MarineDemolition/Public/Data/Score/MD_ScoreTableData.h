@@ -29,9 +29,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Score")
 	int32 GetDayThreshold(int32 Day) const;
 
+	// 인원수별 점검 기준 배율 (표에 없으면 1.0)
+	UFUNCTION(BlueprintPure, Category = "Score")
+	float GetCrewMultiplier(int32 Crew) const;
+
 	// 경고 상태에서 다음 점검 기준에 곱하는 배율 (기획 : 1.1)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Score|Inspection")
 	float WarnedThresholdMultiplier = 1.1f;
+
+	// 난이도 점검 기준 배율 (표준=1.0)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Score|Inspection")
+	float DifficultyThresholdMultiplier = 1.0f;
 
 	// 수도 미밀봉 확산 감점의 사고당 상한 (기획 : -80)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Score|Penalty")
@@ -46,7 +54,11 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "Score")
 	TMap<EMD_SampleGrade, FMD_SampleScoreRow> SampleValues;
 
-	// Day별 점검 기준 (기획 : 2→600, 3→1400, 4→1600)
+	// Day별 점검 기준 (표준·4인 기준선)
 	UPROPERTY(EditAnywhere, Category = "Score|Inspection")
 	TMap<int32, int32> DayThresholds;
+
+	// 인원 배율 (1인 0.40 / 2인 0.65 / 3인 0.85 / 4인 1.00)
+	UPROPERTY(EditAnywhere, Category = "Score|Inspection")
+	TMap<int32, float> CrewMultipliers;
 };
