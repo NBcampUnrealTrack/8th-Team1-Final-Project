@@ -51,7 +51,7 @@ void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
     
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-    if (IsValid(SaveSlotManager) == true || IsValid(NewPlayer->PlayerState) == true)
+    if (IsValid(SaveSlotManager) == true && IsValid(NewPlayer->PlayerState) == true)
     {
         SaveSlotManager->OverwriteDataToPlayer(NewPlayer->PlayerState);
     }

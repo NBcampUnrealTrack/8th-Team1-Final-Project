@@ -335,7 +335,7 @@ bool UMD_SaveSlotManager::OverwriteDataToAllPlayer() const
 		OverwriteDataToPlayer(PlayerState);
 	}
 
-	return false;
+	return true;
 }
 
 bool UMD_SaveSlotManager::AddSlotToList(const FMD_SaveSlot& SaveSlot, EMD_SaveSlotType SaveSlotType) const
