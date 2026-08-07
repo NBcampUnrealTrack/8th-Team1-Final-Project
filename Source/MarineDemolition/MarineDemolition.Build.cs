@@ -23,14 +23,16 @@ public class MarineDemolition : ModuleRules
 			"Landscape"
         });
 
-		PrivateDependencyModuleNames.AddRange(new string[] 
-		{ 
-			"ImageWrapper", "Slate", "SlateCore", 
-			"DeveloperSettings", 
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"ImageWrapper", "Slate", "SlateCore",
+			"DeveloperSettings",
 			"ApplicationCore",
 			"CoreOnline",
 			// Database
-			"SQLiteCore", "SQLiteSupport"
+			"SQLiteCore", "SQLiteSupport",
+			// 오염 마스크 런타임 텍스처 업로드
+			"RHI"
 		});
 
 		if (Target.bBuildEditor)
