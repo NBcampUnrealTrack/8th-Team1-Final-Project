@@ -14,6 +14,7 @@
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
 #include "Data/SaveGame/MD_SaveSlotManager.h"
+#include "Engine/GameInstance.h"
 
 AMD_GameModeBase::AMD_GameModeBase()
 {
@@ -317,6 +318,16 @@ void AMD_GameModeBase::FinalizeReturnStatuses()
         return;
     }
 
+    // 복귀 판정은 마감 순간 폰의 위치로 확정한다.
+    // 오버랩 진입 이벤트에만 의존하면 (1)존 안에서 스폰된 인원을 놓치고,
+    // (2)한 번 들어왔다 나가도 Returned가 유지되는 문제가 있어 위치로 재판정한다.
+    TArray<AMD_ReturnZone*> ReturnZones;
+
+    for (TActorIterator<AMD_ReturnZone> It(GetWorld()); It; ++It)
+    {
+        ReturnZones.Add(*It);
+    }
+
     for (APlayerState* PlayerState : MDGameState->PlayerArray)
     {
         AMD_PlayerState* MDPlayerState = Cast<AMD_PlayerState>(PlayerState);
@@ -326,12 +337,22 @@ void AMD_GameModeBase::FinalizeReturnStatuses()
             continue;
         }
 
-        if (MDPlayerState->GetReturnStatus() != EMD_ReturnStatus::Pending)
+        bool bInReturnZone = false;
+
+        if (const APawn* Pawn = MDPlayerState->GetPawn())
         {
-            continue;
+            const FVector Location = Pawn->GetActorLocation();
+
+            bInReturnZone = ReturnZones.ContainsByPredicate(
+                [&Location](const AMD_ReturnZone* Zone)
+                {
+                    return Zone->ContainsPoint(Location);
+                });
         }
 
-        MDPlayerState->SetReturnStatus(EMD_ReturnStatus::Failed);
+        MDPlayerState->SetReturnStatus(bInReturnZone
+            ? EMD_ReturnStatus::Returned
+            : EMD_ReturnStatus::Failed);
     }
 }
 
@@ -509,4 +530,36 @@ void AMD_GameModeBase::RestoreDaySnapshot()
 void AMD_GameModeBase::MD_EndDay()
 {
     RequestEndDay();
+}
+
+void AMD_GameModeBase::MD_AddScore(int32 Delta)
+{
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->AddScoreDelta(Delta);
+    }
+}
+
+void AMD_GameModeBase::MD_SetDay(int32 Day)
+{
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->SetCurrentDay(Day);
+    }
+}
+
+void AMD_GameModeBase::MD_SetCrew(int32 Crew)
+{
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->SetContractCrewCount(Crew);
+    }
+}
+
+void AMD_GameModeBase::MD_SetWarned(int32 bWarned)
+{
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->SetInspectionWarned(bWarned != 0);
+    }
 }

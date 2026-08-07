@@ -112,4 +112,17 @@ private:
     // 테스트용 콘솔 커맨드: 정식 마감 경로(RequestEndDay) 즉시 호출
     UFUNCTION(Exec)
     void MD_EndDay();
+
+    // 테스트용 콘솔 커맨드: 점검 상태 강제 세팅 (서버 권한에서만 동작)
+    UFUNCTION(Exec)
+    void MD_AddScore(int32 Delta);
+
+    UFUNCTION(Exec)
+    void MD_SetDay(int32 Day);
+
+    UFUNCTION(Exec)
+    void MD_SetCrew(int32 Crew);
+
+    UFUNCTION(Exec)
+    void MD_SetWarned(int32 bWarned);
 };
