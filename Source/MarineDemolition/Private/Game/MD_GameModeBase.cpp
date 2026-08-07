@@ -12,6 +12,7 @@
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
+#include "Data/SaveGame/MD_SaveSlotManager.h"
 
 AMD_GameModeBase::AMD_GameModeBase()
 {
@@ -47,6 +48,13 @@ void AMD_GameModeBase::BeginPlay()
 void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
 {
     Super::RestartPlayer(NewPlayer);
+    
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true || IsValid(NewPlayer->PlayerState) == true)
+    {
+        SaveSlotManager->OverwriteDataToPlayer(NewPlayer->PlayerState);
+    }
 }
 
 void AMD_GameModeBase::Logout(AController* Exiting)

@@ -21,9 +21,17 @@ public class MarineDemolition : ModuleRules
 			"UMG",
 			// Landscape (editor import helper uses ALandscape::Import)
 			"Landscape"
-		});
+        });
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "ImageWrapper", "Slate", "SlateCore", "DeveloperSettings", "ApplicationCore", "CoreOnline" });
+		PrivateDependencyModuleNames.AddRange(new string[] 
+		{ 
+			"ImageWrapper", "Slate", "SlateCore", 
+			"DeveloperSettings", 
+			"ApplicationCore",
+			"CoreOnline",
+			// Database
+			"SQLiteCore", "SQLiteSupport"
+		});
 
 		if (Target.bBuildEditor)
 		{

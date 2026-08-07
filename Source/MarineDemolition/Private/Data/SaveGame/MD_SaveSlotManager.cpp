@@ -1,4 +1,4 @@
-﻿// 프로젝트 설정의 저작권 안내 문구를 사용한다.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "Kismet/GameplayStatics.h"
@@ -9,7 +9,22 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Util/MD_LogUtility.h"
 
-FMD_SaveSlot UMD_SaveSlotManager::SaveGameSessionData(const FString& SaveSlotName) const
+const FString UMD_SaveSlotManager::SlotListSaveFileName = TEXT("MD_SaveSlotList");
+const FString UMD_SaveSlotManager::SQL_DatabaseFileName = TEXT("MD_GameSession.sqlite");
+
+void UMD_SaveSlotManager::Initialize(FSubsystemCollectionBase& Collection)
+{
+	Super::Initialize(Collection);
+
+	LoadSlotList();
+}
+
+void UMD_SaveSlotManager::Deinitialize()
+{
+	Super::Deinitialize();
+}
+
+FMD_SaveSlot UMD_SaveSlotManager::SaveGameSessionData(const FString& SaveSlotName, EMD_SaveSlotType SaveSlotType) const
 {
 	// 비동기 파일 I/O 중 같은 Manager에서 동기 요청이 실행되어 슬롯 파일이 경합하지 않게 한다.
 	if (bAsyncOperationInProgress == true)
@@ -18,90 +33,31 @@ FMD_SaveSlot UMD_SaveSlotManager::SaveGameSessionData(const FString& SaveSlotNam
 		return FMD_SaveSlot::Empty;
 	}
 
-	// 세이브 슬롯 이름의 유효성 확인
+	// 선택된 세이브 슬롯 종류 또는 최대 저장 가능 개수가 유효하지 않은 경우 함수 조기 종료
+	int32 MaxSaveSlotCount = SaveSlotType == EMD_SaveSlotType::Auto ? MaxAutoSaveSlotCount : MaxUserSaveSlotCount;
+	if ((SaveSlotType != EMD_SaveSlotType::User && SaveSlotType != EMD_SaveSlotType::Auto) || MaxSaveSlotCount <= 0)
+	{
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 선택한 세이브 슬롯 종류를 사용할 수 없습니다."), *UE_CALL_LOCATIONINFO);
+		return FMD_SaveSlot::Empty;
+	}
+
 	if (SaveSlotName.IsEmpty() == true || SaveSlotName.TrimStartAndEnd() != SaveSlotName || FPaths::MakeValidFileName(SaveSlotName) != SaveSlotName)
 	{
 		UE_LOG(MarineDemolition, Warning, TEXT("%s 사용할 수 없는 세이브 슬롯 이름입니다: %s"), *UE_CALL_LOCATIONINFO, *SaveSlotName);
 		return FMD_SaveSlot::Empty;
 	}
 
-	// 현재 World의 유효성 확인 및 클라이언트 환경 실행 제한
-	UWorld* World = GetWorld();
-	if (IsValid(World) == false || World->GetNetMode() == NM_Client)
-	{
-		UE_LOG(MarineDemolition, Warning, TEXT("%s GameSession 저장은 Host/Server에서만 실행할 수 있습니다."), *UE_CALL_LOCATIONINFO);
-		return FMD_SaveSlot::Empty;
-	}
-
-	// GameState 참조 (접속 플레이어 목록)
-	AMD_GameStateBase* GameState = IsValid(World) == true ? World->GetGameState<AMD_GameStateBase>() : nullptr;
-	if (IsValid(GameState) == false || GameState->HasAuthority() == false)
-	{
-		UE_LOG(MarineDemolition, Error, TEXT("%s 저장할 GameState를 찾지 못했습니다."), *UE_CALL_LOCATIONINFO);
-		return FMD_SaveSlot::Empty;
-	}
-
-	// 저장되는 데이터 객체 생성 및 유효성 확인
-	UMD_SaveGameSession* GameSessionData = NewObject<UMD_SaveGameSession>();
-	if (IsValid(GameSessionData) == false)
-	{
-		UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 세이브 데이터 객체를 생성하지 못했습니다."), *UE_CALL_LOCATIONINFO);
-		return FMD_SaveSlot::Empty;
-	}
-
-	// 누계 점수 및 경과 일자 저장
-	GameSessionData->Score = GameState->GetScore();
-	GameSessionData->ElapsedDays = GameState->GetCurrentDay();
-
-	// 현재 접속중인 플레이어 별 데이터 저장
-	for (const APlayerState* PlayerState : GameState->PlayerArray)
-	{
-		// 유효하지 않은 플레이어의 경우 건너뛰기
-		if (IsValid(PlayerState) == false)
-		{
-			continue;
-		}
-
-		// 플레이어 고유 식별자 얻기
-		FUniqueNetIdRepl UniqueNetID = PlayerState->GetUniqueId();
-		FString PlayerKey = (UniqueNetID.IsValid() == true && UniqueNetID->IsValid() == true) ? UniqueNetID.ToString() : TEXT("");
-		// Unique Net ID가 없는 경우 플레이어 이름을 고유 식별자로 사용
-		PlayerKey = PlayerKey.IsEmpty() == true ? PlayerState->GetPlayerName() : PlayerKey;
-
-		// 플레이어 고유 식별자의 유효성 검사
-		if (PlayerKey.IsEmpty() == true)
-		{
-			continue;
-		}
-
-		// 플레이어 데이터가 저장되는 객체 찾기 또는 추가
-		FMD_PlayerData& PlayerData = GameSessionData->PlayerDataMap.FindOrAdd(PlayerKey);
-
-		// 플레이어 캐릭터 참조
-		AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerState->GetPawn());
-
-		// 플레이어 캐릭터의 EquipHotbar Component가 유효한 경우 데이터 저장
-		UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
-		if (IsValid(EquipmentComponent) == true)
-		{
-			PlayerData.ToolSlots = EquipmentComponent->BuildEquipmentSaveData();
-		}
-	}
-
-	// 세이브 슬롯 객체 생성
+	// 데이터 세이브를 위한 객체 생성
 	FMD_SaveSlot SaveSlot = FMD_SaveSlot(SaveSlotName);
+	UMD_SaveGameSession* GameSessionData = NewObject<UMD_SaveGameSession>();
 
-	// 맵이 저장된 패키지 얻기 및 유효성 확인
-	UPackage* WorldPackage = World->GetPackage();
-	if (IsValid(WorldPackage) == false)
+	// 저장해야 하는 데이터 수집 및 결과 확인
+	bool bIsDataCollected = CollectGameSessionData(SaveSlot, GameSessionData);
+	if (bIsDataCollected == false)
 	{
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 현재 맵의 패키지가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 저장되는 GameSession 데이터를 수집하지 못하였습니다."), *UE_CALL_LOCATIONINFO);
 		return FMD_SaveSlot::Empty;
 	}
-
-	// 현재 맵의 패키지 경로 저장(PIE 환경 접두사 제거) 및 저장 시각 기록
-	SaveSlot.MapPackagePath = UWorld::RemovePIEPrefix(WorldPackage->GetName());
-	SaveSlot.SaveTime = FDateTime::Now();
 
 	// MD_SaveGameSession 객체를 슬롯에 저장
 	bool bSaveSuccess = UGameplayStatics::SaveGameToSlot(GameSessionData, SaveSlotName, 0);
@@ -110,6 +66,14 @@ FMD_SaveSlot UMD_SaveSlotManager::SaveGameSessionData(const FString& SaveSlotNam
 	if (bSaveSuccess == false)
 	{
 		UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 저장에 실패했습니다: %s"), *UE_CALL_LOCATIONINFO, *SaveSlotName);
+		return FMD_SaveSlot::Empty;
+	}
+
+	// 세이브 슬롯을 정보 저장 및 가장 오래된 세이브 파일&정보 제거
+	bool bSlotListUpdated = AddSlotToList(SaveSlot, SaveSlotType);
+	if (bSlotListUpdated == false)
+	{
+		UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 슬롯 목록 갱신 또는 오래된 파일 삭제에 실패했습니다: %s"), *UE_CALL_LOCATIONINFO, *SaveSlotName);
 		return FMD_SaveSlot::Empty;
 	}
 
@@ -225,12 +189,21 @@ bool UMD_SaveSlotManager::LoadGameSessionData(const FMD_SaveSlot& SaveSlot) cons
 	return true;
 }
 
-void UMD_SaveSlotManager::SaveGameSessionDataAsync(const FString& SaveSlotName, const FOnSaveMDGameSessionAsyncComplete& CompletionDelegate)
+void UMD_SaveSlotManager::SaveGameSessionDataAsync(const FString& SaveSlotName, EMD_SaveSlotType SaveSlotType, const FOnSaveMDGameSessionAsyncComplete& CompletionDelegate)
 {
 	// 다른 비동기 I/O가 진행 중이면 활성 슬롯과 완료 순서가 뒤섞이지 않도록 새 요청을 거부한다.
 	if (bAsyncOperationInProgress == true)
 	{
 		UE_LOG(MarineDemolition, Warning, TEXT("%s 다른 비동기 세이브 작업이 진행 중입니다."), *UE_CALL_LOCATIONINFO);
+		CompletionDelegate.ExecuteIfBound(FMD_SaveSlot::Empty, false);
+		return;
+	}
+
+	// 선택된 세이브 슬롯 종류 또는 최대 저장 가능 개수가 유효하지 않은 경우 함수 조기 종료
+	int32 MaxSaveSlotCount = SaveSlotType == EMD_SaveSlotType::Auto ? MaxAutoSaveSlotCount : MaxUserSaveSlotCount;
+	if ((SaveSlotType != EMD_SaveSlotType::User && SaveSlotType != EMD_SaveSlotType::Auto) || MaxSaveSlotCount <= 0)
+	{
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 선택한 세이브 슬롯 종류를 사용할 수 없습니다."), *UE_CALL_LOCATIONINFO);
 		CompletionDelegate.ExecuteIfBound(FMD_SaveSlot::Empty, false);
 		return;
 	}
@@ -243,88 +216,24 @@ void UMD_SaveSlotManager::SaveGameSessionDataAsync(const FString& SaveSlotName, 
 		return;
 	}
 
-	// GameState 참조 및 클라이언트 환경 실행 제한 (게임 스레드)
-	UWorld* World = GetWorld();
-	AMD_GameStateBase* GameState = IsValid(World) == true ? World->GetGameState<AMD_GameStateBase>() : nullptr;
-	if (IsValid(GameState) == false || GameState->HasAuthority() == false)
-	{
-		UE_LOG(MarineDemolition, Warning, TEXT("%s GameSession 비동기 저장은 Host/Server에서만 실행할 수 있습니다."), *UE_CALL_LOCATIONINFO);
-		CompletionDelegate.ExecuteIfBound(FMD_SaveSlot::Empty, false);
-		return;
-	}
-
-	// 게임 데이터 저장 객체 생성 및 유효성 확인
-	UMD_SaveGameSession* GameSessionData = NewObject<UMD_SaveGameSession>();
-	if (IsValid(GameSessionData) == false)
-	{
-		UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 세이브 데이터 객체를 생성하지 못했습니다."), *UE_CALL_LOCATIONINFO);
-		CompletionDelegate.ExecuteIfBound(FMD_SaveSlot::Empty, false);
-		return;
-	}
-
-	// 누계 점수 및 경과 일자 저장
-	GameSessionData->Score = GameState->GetScore();
-	GameSessionData->ElapsedDays = GameState->GetCurrentDay();
-
-	// 현재 접속중인 플레이어 별 데이터 저장
-	for (const APlayerState* PlayerState : GameState->PlayerArray)
-	{
-		// 유효하지 않은 플레이어의 경우 건너뛰기
-		if (IsValid(PlayerState) == false)
-		{
-			continue;
-		}
-
-		// 플레이어 고유 식별자 얻기
-		FUniqueNetIdRepl UniqueNetID = PlayerState->GetUniqueId();
-		FString PlayerKey = (UniqueNetID.IsValid() == true && UniqueNetID->IsValid() == true) ? UniqueNetID.ToString() : TEXT("");
-		// Unique Net ID가 없는 경우 플레이어 이름을 고유 식별자로 사용
-		PlayerKey = PlayerKey.IsEmpty() == true ? PlayerState->GetPlayerName() : PlayerKey;
-
-		// 플레이어 고유 식별자의 유효성 검사
-		if (PlayerKey.IsEmpty() == true)
-		{
-			continue;
-		}
-
-		// 플레이어 데이터가 저장되는 객체 찾기 또는 추가
-		FMD_PlayerData& PlayerData = GameSessionData->PlayerDataMap.FindOrAdd(PlayerKey);
-
-		// 플레이어 캐릭터 참조
-		AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerState->GetPawn());
-
-		// 플레이어 캐릭터의 EquipHotbar Component가 유효한 경우 데이터 저장
-		UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
-		if (IsValid(EquipmentComponent) == true)
-		{
-			PlayerData.ToolSlots = EquipmentComponent->BuildEquipmentSaveData();
-		}
-	}
-
-	// 세이브 슬롯 객체 생성
+	// 데이터 세이브를 위한 객체 생성
 	FMD_SaveSlot SaveSlot = FMD_SaveSlot(SaveSlotName);
+	UMD_SaveGameSession* GameSessionData = NewObject<UMD_SaveGameSession>();
 
-	// 맵이 저장된 패키지 얻기 및 유효성 확인
-	UPackage* WorldPackage = World->GetPackage();
-	if (IsValid(WorldPackage) == false)
+	// 저장해야 하는 데이터 수집 및 결과 확인
+	bool bIsDataCollected = CollectGameSessionData(SaveSlot, GameSessionData);
+	if (bIsDataCollected == false)
 	{
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 현재 맵의 패키지가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 저장되는 GameSession 데이터를 수집하지 못하였습니다."), *UE_CALL_LOCATIONINFO);
 		CompletionDelegate.ExecuteIfBound(FMD_SaveSlot::Empty, false);
 		return;
 	}
-
-	// 현재 맵의 패키지 경로 저장(PIE 환경 접두사 제거) 및 저장 시각 기록
-	SaveSlot.MapPackagePath = UWorld::RemovePIEPrefix(WorldPackage->GetName());
-	SaveSlot.SaveTime = FDateTime::Now();
 
 	// 비동기 작업 진행 상태 플래그 설정
 	bAsyncOperationInProgress = true;
 
-	// 비동기 직렬화가 끝날 때까지 저장 객체를 UPROPERTY로 보관하고 중복 요청을 차단한다.
-	PendingAsyncGameSessionData = GameSessionData;
-
 	// 비동기 콜백 함수 바인딩
-	FAsyncSaveGameToSlotDelegate AsyncSaveDelegate = FAsyncSaveGameToSlotDelegate::CreateUObject(this, &ThisClass::HandleSaveGameSessionDataComplete, SaveSlot, CompletionDelegate);
+	FAsyncSaveGameToSlotDelegate AsyncSaveDelegate = FAsyncSaveGameToSlotDelegate::CreateUObject(this, &ThisClass::HandleSaveGameSessionDataComplete, SaveSlot, SaveSlotType, CompletionDelegate);
 
 	// SaveGame 비동기 함수 실행
 	UGameplayStatics::AsyncSaveGameToSlot(GameSessionData, SaveSlot.SlotName, 0, AsyncSaveDelegate);
@@ -369,7 +278,124 @@ void UMD_SaveSlotManager::LoadGameSessionDataAsync(const FMD_SaveSlot& SaveSlot,
 	UGameplayStatics::AsyncLoadGameFromSlot(SaveSlot.SlotName, 0, AsyncLoadDelegate);
 }
 
-bool UMD_SaveSlotManager::CollectGameSessionData(FMD_SaveSlot& OutSaveSlot, UMD_SaveGameSession* OutGameSessionData)
+bool UMD_SaveSlotManager::OverwriteDataToPlayer(const APlayerState* PlayerState) const
+{
+	// 클라이언트 환경 실행 제한
+	if (IsValid(PlayerState) == false || PlayerState->HasAuthority() == false)
+	{
+		return false;
+	}
+
+	if (ActiveSlot.IsValid() == false || IsValid(ActiveGameSessionData) == false)
+	{
+		return false;
+	}
+
+	FUniqueNetIdRepl UniqueNetID = IsValid(PlayerState) == true ? PlayerState->GetUniqueId() : nullptr;
+	FString PlayerKey = UniqueNetID.IsValid() == true ? UniqueNetID.ToString() : TEXT("");
+	PlayerKey = PlayerKey.IsEmpty() == true ? PlayerState->GetPlayerName() : PlayerKey;
+	if (PlayerKey.IsEmpty() == true)
+	{
+		return false;
+	}
+
+	const TMap<FString, FMD_PlayerData>& PlayerDataMap = ActiveGameSessionData->PlayerDataMap;
+	const FMD_PlayerData* PlayerData = PlayerDataMap.Find(PlayerKey);
+	if (PlayerData == nullptr)
+	{
+		return false;
+	}
+
+	// 플레이어 캐릭터 참조
+	AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerState->GetPawn());
+
+	// MD_EquipHotbar Component가 유효하면 저장된 데이터 덮어씌우기
+	UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
+	if (IsValid(EquipmentComponent) == true)
+	{
+		EquipmentComponent->RestoreEquipmentSaveData(PlayerData->ToolSlots);
+	}
+
+	return true;
+}
+
+bool UMD_SaveSlotManager::OverwriteDataToAllPlayer() const
+{
+	// 클라이언트 환경 실행 제한
+	UWorld* World = GetWorld();
+	AGameStateBase* GameState = IsValid(World) == true ? World->GetGameState() : nullptr;
+	if (IsValid(GameState) == false || GameState->HasAuthority() == false)
+	{
+		return false;
+	}
+
+	TArray<APlayerState*> PlayerArray = GameState->PlayerArray;
+	for (const APlayerState* PlayerState : PlayerArray)
+	{
+		OverwriteDataToPlayer(PlayerState);
+	}
+
+	return false;
+}
+
+bool UMD_SaveSlotManager::AddSlotToList(const FMD_SaveSlot& SaveSlot, EMD_SaveSlotType SaveSlotType) const
+{
+	// 저장하려는 세이브 슬롯이 비어있는지 확인
+	if (SaveSlot.IsEmpty() == true)
+	{
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 비어있는 세이브 슬롯을 추가 또는 저장할 수 없습니다."), *UE_CALL_LOCATIONINFO);
+		return false;
+	}
+
+	// 선택된 유형의 세이브 슬롯 최대 개수가 0 이하인 경우 함수 조기 종료
+	int32 MaxSaveSlotCount = SaveSlotType == EMD_SaveSlotType::Auto ? MaxAutoSaveSlotCount : MaxUserSaveSlotCount;
+	if (MaxSaveSlotCount <= 0)
+	{
+		UE_LOG(MarineDemolition, Warning, TEXT("%s %s유형의 세이브 슬롯을 저장할 수 없습니다."), *UE_CALL_LOCATIONINFO, *UEnum::GetValueAsString(SaveSlotType));
+		return false;
+	}
+
+	// 선택된 유형의 세이브 슬롯을 담는 목록 얻기
+	TArray<FMD_SaveSlot>& Slots = SaveSlotType == EMD_SaveSlotType::Auto ? SlotList->AutoSaveSlotList : SlotList->UserSaveSlotList;
+
+	// 중복 슬롯 제거
+	Slots.Remove(SaveSlot);
+
+	// 목록에 세이브 슬롯 추가
+	Slots.Insert(SaveSlot, 0);
+
+	// 세이브 슬롯 목록이 최대 개수보다 많은 경우 가장 오래된 세이브 슬롯 정보 삭제
+	if (Slots.Num() > MaxSaveSlotCount)
+	{
+		// 가장 오래된 세이브 슬롯을 목록에서 제거
+		FMD_SaveSlot OldestSlot = Slots.Pop();
+
+		// 슬롯에 저장된 GameSession 데이터 삭제
+		UGameplayStatics::DeleteGameInSlot(OldestSlot.SlotName, 0);
+	}
+
+	// 변경된 SaveData 저장
+	bool bSaveSuccess = UGameplayStatics::SaveGameToSlot(SlotList, SlotListSaveFileName, 0);
+
+	return bSaveSuccess;
+}
+
+void UMD_SaveSlotManager::LoadSlotList()
+{
+	// 고정된 이름을 사용하여 세이브 슬롯 목록이 저장된 데이터 불러오기
+	USaveGame* SaveData = UGameplayStatics::LoadGameFromSlot(SlotListSaveFileName, 0);
+	UMD_SaveSlotList* LoadedSlotList = Cast<UMD_SaveSlotList>(SaveData);
+	if (IsValid(LoadedSlotList) == false)
+	{
+		LoadedSlotList = NewObject<UMD_SaveSlotList>();
+	}
+
+	SlotList = LoadedSlotList;
+
+	return;
+}
+
+bool UMD_SaveSlotManager::CollectGameSessionData(FMD_SaveSlot& OutSaveSlot, UMD_SaveGameSession* OutGameSessionData) const
 {
 	// GameState 참조 및 클라이언트 환경 실행 제한 (게임 스레드)
 	UWorld* World = GetWorld();
@@ -411,11 +437,18 @@ bool UMD_SaveSlotManager::CollectGameSessionData(FMD_SaveSlot& OutSaveSlot, UMD_
 			continue;
 		}
 
+		// 플레이어가 조종하는 Pawn이 존재하지 않는 경우 건너뛰기
+		APawn* PlayerPawn = PlayerState->GetPawn();
+		if (IsValid(PlayerPawn) == false)
+		{
+			continue;
+		}
+
 		// 플레이어 데이터가 저장되는 객체 찾기 또는 추가
 		FMD_PlayerData& PlayerData = OutGameSessionData->PlayerDataMap.FindOrAdd(PlayerKey);
 
 		// 플레이어 캐릭터 참조
-		AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerState->GetPawn());
+		AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerPawn);
 
 		// 플레이어 캐릭터의 EquipHotbar Component가 유효한 경우 데이터 저장
 		UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
@@ -439,9 +472,11 @@ bool UMD_SaveSlotManager::CollectGameSessionData(FMD_SaveSlot& OutSaveSlot, UMD_
 
 	return true;
 }
-
-void UMD_SaveSlotManager::HandleSaveGameSessionDataComplete(const FString& SavedSlotName, const int32 UserIndex, bool bSaveSuccess, const FMD_SaveSlot SaveSlot, const FOnSaveMDGameSessionAsyncComplete CompletionDelegate)
+void UMD_SaveSlotManager::HandleSaveGameSessionDataComplete(const FString& SavedSlotName, const int32 UserIndex, bool bSaveSuccess, const FMD_SaveSlot SaveSlot, EMD_SaveSlotType SaveSlotType, const FOnSaveMDGameSessionAsyncComplete CompletionDelegate)
 {
+	// 비동기 작업 상태 플래그 해제
+	bAsyncOperationInProgress = false;
+
 	// 데이터 저장 성공 여부 확인
 	bool bWasSuccessful = bSaveSuccess == true && SavedSlotName == SaveSlot.SlotName && UserIndex == 0;
 	if (bWasSuccessful == false)
@@ -449,22 +484,27 @@ void UMD_SaveSlotManager::HandleSaveGameSessionDataComplete(const FString& Saved
 		UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 데이터 비동기 저장에 실패했습니다: %s"), *UE_CALL_LOCATIONINFO, *SaveSlot.SlotName);
 
 		CompletionDelegate.ExecuteIfBound(FMD_SaveSlot::Empty, false);
+		return;
+	}
 
-		// 비동기 작업 상태 플래그 해제
-		bAsyncOperationInProgress = false;
+	bWasSuccessful = AddSlotToList(SaveSlot, SaveSlotType);
+	if (bWasSuccessful == false)
+	{
+		UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 슬롯 목록 갱신 또는 오래된 파일 삭제에 실패했습니다: %s"), *UE_CALL_LOCATIONINFO, *SaveSlot.SlotName);
+		CompletionDelegate.ExecuteIfBound(FMD_SaveSlot::Empty, false);
 		return;
 	}
 
 	UE_LOG(MarineDemolition, Log, TEXT("%s GameSession 비동기 저장을 완료했습니다: %s"), *UE_CALL_LOCATIONINFO, *SavedSlotName);
 
 	CompletionDelegate.ExecuteIfBound(SaveSlot, true);
-
-	// 비동기 작업 상태 플래그 해제
-	bAsyncOperationInProgress = false;
 }
 
 void UMD_SaveSlotManager::HandleLoadGameSessionDataComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FMD_SaveSlot SaveSlot, const FOnLoadMDGameSessionAsyncComplete CompletionDelegate)
 {
+	// 비동기 작업 상태 플래그 해제
+	bAsyncOperationInProgress = false;
+
 	// 불러온 데이터 타입 변환
 	UMD_SaveGameSession* GameSessionData = Cast<UMD_SaveGameSession>(LoadedSaveGame);
 
@@ -475,9 +515,6 @@ void UMD_SaveSlotManager::HandleLoadGameSessionDataComplete(const FString& Loade
 		UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 비동기 로드에 실패했습니다: %s"), *UE_CALL_LOCATIONINFO, *SaveSlot.SlotName);
 
 		CompletionDelegate.ExecuteIfBound(SaveSlot, nullptr, false);
-
-		// 비동기 작업 상태 플래그 해제
-		bAsyncOperationInProgress = false;
 		return;
 	}
 
@@ -489,9 +526,6 @@ void UMD_SaveSlotManager::HandleLoadGameSessionDataComplete(const FString& Loade
 		UE_LOG(MarineDemolition, Error, TEXT("%s 불러온 데이터를 적용할 GameState를 찾지 못했습니다."), *UE_CALL_LOCATIONINFO);
 
 		CompletionDelegate.ExecuteIfBound(SaveSlot, GameSessionData, false);
-
-		// 비동기 작업 상태 플래그 해제
-		bAsyncOperationInProgress = false;
 		return;
 	}
 
@@ -556,7 +590,4 @@ void UMD_SaveSlotManager::HandleLoadGameSessionDataComplete(const FString& Loade
 	UE_LOG(MarineDemolition, Log, TEXT("%s GameSession 비동기 로드를 완료했습니다: %s"), *UE_CALL_LOCATIONINFO, *LoadedSlotName);
 
 	CompletionDelegate.ExecuteIfBound(SaveSlot, GameSessionData, true);
-
-	// 비동기 작업 상태 플래그 해제
-	bAsyncOperationInProgress = false;
 }

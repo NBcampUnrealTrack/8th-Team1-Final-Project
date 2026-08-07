@@ -116,3 +116,19 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
 	int32 ElapsedDays;
 };
+
+/**
+ * 자동 저장과 사용자 저장 슬롯 목록을 구분하여 Host 로컬에 보존한다.
+ */
+UCLASS()
+class MARINEDEMOLITION_API UMD_SaveSlotList : public USaveGame
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Save GameSession")
+	TArray<FMD_SaveSlot> UserSaveSlotList;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Save GameSession")
+	TArray<FMD_SaveSlot> AutoSaveSlotList;
+};
