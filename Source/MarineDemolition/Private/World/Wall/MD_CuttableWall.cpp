@@ -43,7 +43,7 @@ void FMD_ReplicatedScrapeCellStateArray::SetOwner(
 
 	for (int32 ItemIndex = 0; ItemIndex < Items.Num(); ++ItemIndex)
 	{
-		const int32 CellIndex = Items[ItemIndex].CellIndex;
+		const int32 CellIndex = Items[ItemIndex].GetCellIndex();
 		if (CellIndex != INDEX_NONE)
 		{
 			CellToItemIndex.Add(CellIndex, ItemIndex);
@@ -63,6 +63,14 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
 		return;
 	}
 
+	uint16 EncodedCellIndex = FMD_ScrapeReplicationCodec::InvalidCellIndex;
+	if (!FMD_ScrapeReplicationCodec::TryEncodeCellIndex(
+			CellIndex,
+			EncodedCellIndex))
+	{
+		return;
+	}
+
 	const float InitialContamination = FMath::Clamp(
 		Owner->ContaminationCells[CellIndex].InitialContamination,
 		0.0f,
@@ -75,6 +83,12 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
 		SafeRemaining,
 		InitialContamination,
 		UE_SMALL_NUMBER);
+	// 실제로 보내는 값은 양자화 결과다. 같은 바이트로 떨어지는 갱신은
+	// 네트워크로 내보내지 않는다.
+	const uint8 QuantizedRemaining =
+		FMD_ScrapeReplicationCodec::QuantizeRemaining(
+			SafeRemaining,
+			Owner->ScrapeSettings.CleanTolerance);
 
 	if (const int32* ExistingItemIndex = CellToItemIndex.Find(CellIndex))
 	{
@@ -88,16 +102,17 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
 				if (Items.IsValidIndex(RemovedItemIndex))
 				{
 					CellToItemIndex.FindOrAdd(
-						Items[RemovedItemIndex].CellIndex) = RemovedItemIndex;
+						Items[RemovedItemIndex].GetCellIndex()) =
+							RemovedItemIndex;
 				}
 				MarkArrayDirty();
 				return;
 			}
 
 			FMD_ReplicatedScrapeCellState& Item = Items[*ExistingItemIndex];
-			if (Item.RemainingContamination != SafeRemaining)
+			if (Item.QuantizedRemainingContamination != QuantizedRemaining)
 			{
-				Item.RemainingContamination = SafeRemaining;
+				Item.QuantizedRemainingContamination = QuantizedRemaining;
 				MarkItemDirty(Item);
 			}
 			return;
@@ -111,7 +126,9 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
 		return;
 	}
 
-	const int32 NewItemIndex = Items.Emplace(CellIndex, SafeRemaining);
+	const int32 NewItemIndex = Items.Emplace(
+		EncodedCellIndex,
+		QuantizedRemaining);
 	CellToItemIndex.Add(CellIndex, NewItemIndex);
 	MarkItemDirty(Items[NewItemIndex]);
 }
@@ -145,7 +162,11 @@ void FMD_ReplicatedScrapeCellStateArray::PostReplicatedAdd(
 	{
 		if (Items.IsValidIndex(ItemIndex))
 		{
-			CellToItemIndex.Add(Items[ItemIndex].CellIndex, ItemIndex);
+			const int32 CellIndex = Items[ItemIndex].GetCellIndex();
+			if (CellIndex != INDEX_NONE)
+			{
+				CellToItemIndex.Add(CellIndex, ItemIndex);
+			}
 		}
 	}
 
@@ -1855,18 +1876,20 @@ void AMD_CuttableWall::HandleReplicatedContaminationState(
 
 		const FMD_ReplicatedScrapeCellState& StateItem =
 			StateItems[StateItemIndex];
-		if (!ContaminationCells.IsValidIndex(StateItem.CellIndex))
+		const int32 StateCellIndex = StateItem.GetCellIndex();
+		if (!ContaminationCells.IsValidIndex(StateCellIndex))
 		{
 			continue;
 		}
 
-		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[StateItem.CellIndex];
+		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[StateCellIndex];
 		const float PreviousRemaining = Cell.RemainingContamination;
+		const float ReceivedRemaining = StateItem.GetRemainingContamination();
 		const float TargetRemaining = bResetToInitial
 			? Cell.InitialContamination
-			: (FMath::IsFinite(StateItem.RemainingContamination)
+			: (FMath::IsFinite(ReceivedRemaining)
 				? FMath::Clamp(
-					StateItem.RemainingContamination,
+					ReceivedRemaining,
 					0.0f,
 					Cell.InitialContamination)
 				: Cell.InitialContamination);
@@ -1886,7 +1909,7 @@ void AMD_CuttableWall::HandleReplicatedContaminationState(
 		const int32 CellsPerFace = ContaminationCells.Num()
 			/ FMD_ScrapeSurfaceLayout::FaceCount;
 		if (!FMD_ScrapeSurfaceLayout::TryDecodeCombinedCellIndex(
-				StateItem.CellIndex,
+				StateCellIndex,
 				CellsPerFace,
 				SurfaceFace,
 				LocalCellIndex))
@@ -1895,7 +1918,7 @@ void AMD_CuttableWall::HandleReplicatedContaminationState(
 		}
 
 		FMD_ScrapeCellChange& CellChange = CellChanges.AddDefaulted_GetRef();
-		CellChange.CellIndex = StateItem.CellIndex;
+		CellChange.CellIndex = StateCellIndex;
 		CellChange.GridCoordinate = FIntPoint(
 			LocalCellIndex % ContaminationGridDimensions.X,
 			LocalCellIndex / ContaminationGridDimensions.X);

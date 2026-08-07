@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
+#include "Gameplay/Scrape/MD_ScrapeReplicationCodec.h"
 #include "Engine/TimerHandle.h"
 #include "GameFramework/Actor.h"
 #include "Net/Serialization/FastArraySerializer.h"
@@ -15,7 +16,13 @@ class UTexture2D;
 class AMD_WallPiece;
 class AMD_CuttableWall;
 
-/** 서버에서 값이 달라진 오염 셀 하나만 전송하기 위한 Fast Array 항목. */
+/**
+ * 서버에서 값이 달라진 오염 셀 하나만 전송하기 위한 Fast Array 항목.
+ *
+ * 셀 번호는 uint16, 잔여 오염량은 uint8로 보내 항목당 8바이트를 3바이트로 줄인다.
+ * 두 값 모두 FMD_ScrapeReplicationCodec을 거쳐야 한다. 특히 잔여 오염량은
+ * 0이 "깨끗함" 전용이라 단순 캐스팅으로 만들면 완료 판정이 서버와 갈린다.
+ */
 USTRUCT()
 struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 	: public FFastArraySerializerItem
@@ -23,24 +30,39 @@ struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 	GENERATED_BODY()
 
 	FMD_ReplicatedScrapeCellState()
-		: CellIndex(INDEX_NONE)
-		, RemainingContamination(0.0f)
+		: EncodedCellIndex(FMD_ScrapeReplicationCodec::InvalidCellIndex)
+		, QuantizedRemainingContamination(0)
 	{
 	}
 
 	FMD_ReplicatedScrapeCellState(
-		const int32 InCellIndex,
-		const float InRemainingContamination)
-		: CellIndex(InCellIndex)
-		, RemainingContamination(InRemainingContamination)
+		const uint16 InEncodedCellIndex,
+		const uint8 InQuantizedRemainingContamination)
+		: EncodedCellIndex(InEncodedCellIndex)
+		, QuantizedRemainingContamination(InQuantizedRemainingContamination)
 	{
 	}
 
-	UPROPERTY()
-	int32 CellIndex;
+	/** 앞뒤 통합 셀 번호. 유효하지 않으면 INDEX_NONE을 반환한다. */
+	int32 GetCellIndex() const
+	{
+		return FMD_ScrapeReplicationCodec::DecodeCellIndex(EncodedCellIndex);
+	}
 
+	/** 역양자화한 잔여 오염량(0~1). */
+	float GetRemainingContamination() const
+	{
+		return FMD_ScrapeReplicationCodec::DequantizeRemaining(
+			QuantizedRemainingContamination);
+	}
+
+	/** 앞뒤 통합 셀 번호. MAX_uint16은 유효하지 않음을 뜻하는 예약값이다. */
 	UPROPERTY()
-	float RemainingContamination;
+	uint16 EncodedCellIndex;
+
+	/** 0~255로 양자화한 잔여 오염량. 0은 "깨끗함" 전용이다. */
+	UPROPERTY()
+	uint8 QuantizedRemainingContamination;
 };
 
 /**
