@@ -27,6 +27,17 @@ public:
 
 	//계약 시작, 착수금 지급
 	void BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment);
+
+	// 게임오버 시 전체 리셋
+	void ResetContract();
+
+	// 다음 정규일 착수금 배율 (경고 0.7 / 비상 0). 착수금 지급 지점에서 소비
+	void SetNextDepositMultiplier(float Multiplier) { NextDepositMultiplier = Multiplier; }
+	float GetNextDepositMultiplier() const { return NextDepositMultiplier; }
+
+	// 소모품 할인 활성 여부 (경고 시 해제). 상점에서 조회
+	void SetConsumableDiscountActive(bool bActive) { bConsumableDiscountActive = bActive; }
+	bool IsConsumableDiscountActive() const { return bConsumableDiscountActive; }
 private:
 
 	/** 현재 진행 중인 현장. 반복 퀘스트 풀과 클리어 이력 판정에 쓴다. */
@@ -40,4 +51,10 @@ private:
 	int32 Credits = 0;
 
 	int32 CurrentDay = 0;
+
+	// 다음 정규일 착수금 배율 (1.0 기본)
+	float NextDepositMultiplier = 1.f;
+
+	// 소모품 할인 활성 여부
+	bool bConsumableDiscountActive = true;
 };

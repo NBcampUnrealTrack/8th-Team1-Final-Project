@@ -8,6 +8,7 @@
 #include "MD_GameModeBase.generated.h"
 
 class AMD_CuttableWall;
+class UWorld;
 
 /**
  *
@@ -44,15 +45,46 @@ private:
 
  //Daily Score & Inspection
 private:
-    // 18:00 자동 마감과 MD_EndDay 공용 하루 마감 시퀀스. 하루 1회만 실행
-    void FinalizeDay();
+    // 18:00 자동 마감과 MD_EndDay 공용 하루 마감 시퀀스. 하루 1회만 실행. 판정 결과 반환
+    EMD_InspectionResult FinalizeDay();
+
+    // 판정 결과에 따라 다음 날 진입·클리어·게임오버로 분기
+    void RouteAfterDay(EMD_InspectionResult Result);
+
+    // 지연 타이머가 호출. PendingResult에 따라 실제 전환 실행
+    void ExecuteDayTransition();
+
+    void HandleContractCleared();
+
+    void HandleGameOver();
+
+    // 대상 레벨로 리슨 트래블. 미지정이면 안전하게 현재 레벨 리스타트
+    void TravelToLevel(const TSoftObjectPtr<UWorld>& Level);
+
+    // 계약 시작(Day1 마감) 시점의 인원수를 GameState에 고정
+    void CaptureContractCrew();
 
     // FinalizeDay 중복 실행 방지 플래그. 레벨 재시작 시 초기화
     bool bDayFinalized = false;
 
+    // ExecuteDayTransition이 참조할 직전 판정 결과
+    EMD_InspectionResult PendingResult = EMD_InspectionResult::NotApplicable;
+
     // 마감 확정 후 출발 연출을 보여줄 시간
     UPROPERTY(EditDefaultsOnly, Category = "Day")
     float DepartTravelDelay = 3.f;
+
+    // 클리어/게임오버 결과 화면을 보여줄 시간
+    UPROPERTY(EditDefaultsOnly, Category = "Day")
+    float ResultTravelDelay = 8.f;
+
+    // 클리어 시 이동할 레벨(모선/다음 현장 대기). BP GameMode에서 지정
+    UPROPERTY(EditDefaultsOnly, Category = "Day")
+    TSoftObjectPtr<UWorld> ClearedLevel;
+
+    // 게임오버 시 이동할 레벨(타이틀). BP GameMode에서 지정
+    UPROPERTY(EditDefaultsOnly, Category = "Day")
+    TSoftObjectPtr<UWorld> GameOverLevel;
 
     FTimerHandle DepartTravelTimerHandle;
 

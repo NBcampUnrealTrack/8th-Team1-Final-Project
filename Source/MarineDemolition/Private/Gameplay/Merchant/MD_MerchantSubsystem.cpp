@@ -48,8 +48,22 @@ void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 Advanc
 
 	}
 
+	// 새 계약이므로 경고 모디파이어 초기화
+	NextDepositMultiplier = 1.f;
+	bConsumableDiscountActive = true;
+
 	AddCredits(AdvancePayment);
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 시작: %s (메인 %d건, 착수금 %d)"), *Site->SiteName.ToString(), MainQuests.Num(), AdvancePayment);
 
+}
+
+void UMD_MerchantSubsystem::ResetContract()
+{
+	Credits = 0;
+	CurrentSite = nullptr;
+	CurrentDay = 0;
+	MainQuests.Reset();
+	NextDepositMultiplier = 1.f;
+	bConsumableDiscountActive = true;
 }

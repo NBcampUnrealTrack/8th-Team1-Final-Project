@@ -95,6 +95,14 @@ struct FMD_DaySnapshot
       UPROPERTY()
       bool bWarningIssued = false;
 
+      // 계약 인원수 (Day 간 고정 유지)
+      UPROPERTY()
+      int32 CrewCount = 0;
+
+      // 비상 4일차 진행 여부
+      UPROPERTY()
+      bool bEmergencyDay = false;
+
       // 목록에 없는 레벨 배치 벽 = 어제 철거된 벽
       UPROPERTY()
       TArray<FName> SurvivingWallNames;

@@ -26,6 +26,8 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
     Snapshot.CompletedDay = GameState->GetCurrentDay();
     Snapshot.Score = GameState->GetScore();
     Snapshot.bWarningIssued = GameState->IsInspectionWarned();
+    Snapshot.CrewCount = GameState->GetContractCrewCount();
+    Snapshot.bEmergencyDay = GameState->IsEmergencyDay();
 
     for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
     {
@@ -218,6 +220,8 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     {
         GameState->AddScoreDelta(Snapshot.Score);
         GameState->SetInspectionWarned(Snapshot.bWarningIssued);
+        GameState->SetContractCrewCount(Snapshot.CrewCount);
+        GameState->SetEmergencyDay(Snapshot.bEmergencyDay);
         GameState->SetCurrentDay(Snapshot.CompletedDay + 1);
     }
 
