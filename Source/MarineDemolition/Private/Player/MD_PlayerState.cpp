@@ -2,6 +2,7 @@
 
 
 #include "Player/MD_PlayerState.h"
+#include "Game/MD_GameStateBase.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "AbilitySystemComponent.h"
@@ -175,6 +176,12 @@ void AMD_PlayerState::RefreshHealthState()
 	//부활, 타이머로직은 서버에서 처리한다.
 	if (NewState == EMD_HealthState::Dead && HasAuthority())
 	{
+		// 사망 감점은 상태 전이 시점에 1회만 (기획 05 S-10 사망 -30)
+		if (AMD_GameStateBase* GS = GetWorld() ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr)
+		{
+			GS->AddScoreEvent(MDGameplayTags::Score_Penalty_Death);
+		}
+
 		StartReviveTimer();
 	}
 }

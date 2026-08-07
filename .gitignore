@@ -205,6 +205,9 @@ fabric.properties
 SourceArt/**/*.png
 SourceArt/**/*.tga
 
+# 오염물 긁기 자동화 테스트 (로컬 검증 전용, 패키징 빌드에서 제외되는 코드)
+/Source/MarineDemolition/Private/Gameplay/Scrape/Tests/
+
 # Binary Files
 Binaries/*
 Plugins/*/Binaries/*

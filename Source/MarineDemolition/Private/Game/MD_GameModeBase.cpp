@@ -3,6 +3,7 @@
 
 #include "Game/MD_GameModeBase.h"
 #include "EngineUtils.h"
+#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
@@ -13,6 +14,7 @@
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
 #include "Data/SaveGame/MD_SaveSlotManager.h"
+#include "Engine/GameInstance.h"
 
 AMD_GameModeBase::AMD_GameModeBase()
 {
@@ -140,15 +142,9 @@ void AMD_GameModeBase::RequestEndDay()
         GS->SetWithdrawalPhase(EMD_WithdrawalPhase::Departed);
     }
 
-    FinalizeDay();
+    const EMD_InspectionResult Result = FinalizeDay();
 
-    GetWorldTimerManager().SetTimer(
-        DepartTravelTimerHandle,
-        this,
-        &AMD_GameModeBase::TravelToNextDay,
-        DepartTravelDelay,
-        false
-    );
+    RouteAfterDay(Result);
 }
 
 void AMD_GameModeBase::TravelToNextDay()
@@ -157,23 +153,160 @@ void AMD_GameModeBase::TravelToNextDay()
     GetWorld()->ServerTravel(TEXT("?Restart"));
 }
 
-void AMD_GameModeBase::FinalizeDay()
+EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
 {
     // 18:00 자동 마감 후 MD_EndDay가 호출돼도 감점·점검이 중복 적용되지 않게 1회만 실행
     if (bDayFinalized)
     {
-        return;
+        return PendingResult;
     }
 
     bDayFinalized = true;
 
     FinalizeReturnStatuses();
 
+    // 인원 배율용 인원수 고정 (Day1에 한 번, 이후 스냅샷 캐리)
+    CaptureContractCrew();
+
     FinalizeDailyScore();
 
-    EvaluateInspection();
+    PendingResult = EvaluateInspection();
 
     CaptureDaySnapshot();
+
+    return PendingResult;
+}
+
+void AMD_GameModeBase::CaptureContractCrew()
+{
+    AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>();
+
+    // 이미 고정됐으면 유지 (계약 시작 시점 인원 고정)
+    if (!IsValid(GS) || GS->GetContractCrewCount() > 0)
+    {
+        return;
+    }
+
+    int32 Crew = 0;
+    for (APlayerState* PlayerState : GS->PlayerArray)
+    {
+        if (Cast<AMD_PlayerState>(PlayerState))
+        {
+            ++Crew;
+        }
+    }
+
+    GS->SetContractCrewCount(FMath::Max(Crew, 1));
+}
+
+void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result)
+{
+    const AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>();
+    const int32 Day = IsValid(GS) ? GS->GetCurrentDay() : 0;
+
+    // Day4 상한 가드: 4일차 이후 '계속' 결과(통과/경고/비상)는 나올 수 없음 → 게임오버 강제
+    if (Day >= 4 && Result != EMD_InspectionResult::ContractCleared)
+    {
+        Result = EMD_InspectionResult::GameOver;
+    }
+
+    PendingResult = Result;
+
+    // 경고/비상 경제 컨텍스트를 다음 Day로 전달
+    if (UMD_MerchantSubsystem* Merchant =
+        GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
+    {
+        if (Result == EMD_InspectionResult::WarningIssued)
+        {
+            // 다음 정규일 착수금 ×0.7 · 소모품 할인 제거
+            Merchant->SetNextDepositMultiplier(0.7f);
+            Merchant->SetConsumableDiscountActive(false);
+        }
+        else if (Result == EMD_InspectionResult::EmergencyDayOpened)
+        {
+            // 비상 4일차 착수금 없음
+            Merchant->SetNextDepositMultiplier(0.f);
+            Merchant->SetConsumableDiscountActive(false);
+        }
+    }
+
+    const bool bResultScreen =
+        (Result == EMD_InspectionResult::ContractCleared
+            || Result == EMD_InspectionResult::GameOver);
+
+    GetWorldTimerManager().SetTimer(
+        DepartTravelTimerHandle,
+        this,
+        &AMD_GameModeBase::ExecuteDayTransition,
+        bResultScreen ? ResultTravelDelay : DepartTravelDelay,
+        false
+    );
+}
+
+void AMD_GameModeBase::ExecuteDayTransition()
+{
+    switch (PendingResult)
+    {
+    case EMD_InspectionResult::ContractCleared:
+        HandleContractCleared();
+        break;
+
+    case EMD_InspectionResult::GameOver:
+        HandleGameOver();
+        break;
+
+    default:
+        // Passed / WarningIssued / EmergencyDayOpened / NotApplicable → 다음 날 진입
+        TravelToNextDay();
+        break;
+    }
+}
+
+void AMD_GameModeBase::HandleContractCleared()
+{
+    // 진행(크레딧·퀘스트·호감도)은 유지, 현장 3일 스냅샷만 폐기 → 다음 현장은 새로 시작
+    if (UMD_DayPersistenceSubsystem* Persistence =
+        GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
+    {
+        Persistence->ClearSnapshot();
+    }
+
+    TravelToLevel(ClearedLevel);
+}
+
+void AMD_GameModeBase::HandleGameOver()
+{
+    // 게임오버 시 세이브(진행 스냅샷) 삭제
+    if (UMD_DayPersistenceSubsystem* Persistence =
+        GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
+    {
+        Persistence->ClearSnapshot();
+    }
+
+    // 게임오버 시에만 전체 리셋 (크레딧·계약)
+    if (UMD_MerchantSubsystem* Merchant =
+        GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
+    {
+        Merchant->ResetContract();
+    }
+
+    TravelToLevel(GameOverLevel);
+}
+
+void AMD_GameModeBase::TravelToLevel(const TSoftObjectPtr<UWorld>& Level)
+{
+    const FString Package = Level.ToSoftObjectPath().GetLongPackageName();
+
+    if (Package.IsEmpty())
+    {
+        // 대상 미지정 → 안전하게 현재 레벨 리스타트 (BP에서 레벨 지정 필요)
+        UE_LOG(LogTemp, Warning,
+            TEXT("[Day] 전환 대상 레벨 미지정. BP GameMode에서 지정 필요"));
+        GetWorld()->ServerTravel(TEXT("?Restart"));
+        return;
+    }
+
+    GetWorld()->ServerTravel(Package + TEXT("?listen"));
 }
 
 void AMD_GameModeBase::FinalizeReturnStatuses()
@@ -185,6 +318,16 @@ void AMD_GameModeBase::FinalizeReturnStatuses()
         return;
     }
 
+    // 복귀 판정은 마감 순간 폰의 위치로 확정한다.
+    // 오버랩 진입 이벤트에만 의존하면 (1)존 안에서 스폰된 인원을 놓치고,
+    // (2)한 번 들어왔다 나가도 Returned가 유지되는 문제가 있어 위치로 재판정한다.
+    TArray<AMD_ReturnZone*> ReturnZones;
+
+    for (TActorIterator<AMD_ReturnZone> It(GetWorld()); It; ++It)
+    {
+        ReturnZones.Add(*It);
+    }
+
     for (APlayerState* PlayerState : MDGameState->PlayerArray)
     {
         AMD_PlayerState* MDPlayerState = Cast<AMD_PlayerState>(PlayerState);
@@ -194,12 +337,22 @@ void AMD_GameModeBase::FinalizeReturnStatuses()
             continue;
         }
 
-        if (MDPlayerState->GetReturnStatus() != EMD_ReturnStatus::Pending)
+        bool bInReturnZone = false;
+
+        if (const APawn* Pawn = MDPlayerState->GetPawn())
         {
-            continue;
+            const FVector Location = Pawn->GetActorLocation();
+
+            bInReturnZone = ReturnZones.ContainsByPredicate(
+                [&Location](const AMD_ReturnZone* Zone)
+                {
+                    return Zone->ContainsPoint(Location);
+                });
         }
 
-        MDPlayerState->SetReturnStatus(EMD_ReturnStatus::Failed);
+        MDPlayerState->SetReturnStatus(bInReturnZone
+            ? EMD_ReturnStatus::Returned
+            : EMD_ReturnStatus::Failed);
     }
 }
 
@@ -338,6 +491,12 @@ EMD_InspectionResult AMD_GameModeBase::EvaluateInspection()
         MDGameState->SetInspectionWarned(true);
     }
 
+    // 비상 4일차 개방 표시 (Day 간 유지)
+    if (Result == EMD_InspectionResult::EmergencyDayOpened)
+    {
+        MDGameState->SetEmergencyDay(true);
+    }
+
     // 결과를 복제 리포트로 기록 → 전 클라이언트 UI 통지
     FMD_InspectionReport Report;
     Report.bValid = true;
@@ -347,7 +506,6 @@ EMD_InspectionResult AMD_GameModeBase::EvaluateInspection()
     Report.Threshold = Threshold;
     MDGameState->SetInspectionReport(Report);
 
-    // 클리어·게임오버 흐름(레벨 전환 등)은 후속 카드에서 연결
     return Result;
 }
 
@@ -372,4 +530,36 @@ void AMD_GameModeBase::RestoreDaySnapshot()
 void AMD_GameModeBase::MD_EndDay()
 {
     RequestEndDay();
+}
+
+void AMD_GameModeBase::MD_AddScore(int32 Delta)
+{
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->AddScoreDelta(Delta);
+    }
+}
+
+void AMD_GameModeBase::MD_SetDay(int32 Day)
+{
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->SetCurrentDay(Day);
+    }
+}
+
+void AMD_GameModeBase::MD_SetCrew(int32 Crew)
+{
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->SetContractCrewCount(Crew);
+    }
+}
+
+void AMD_GameModeBase::MD_SetWarned(int32 bWarned)
+{
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->SetInspectionWarned(bWarned != 0);
+    }
 }
