@@ -188,12 +188,14 @@ AMD_CuttableWall::AMD_CuttableWall()
 	bAutoFitContaminationDecalDepth = true;
 	ContaminationDecalDepthFitMarginCm = 1.0f;
 	ContaminationDecalSurfaceOffsetCm = 0.05f;
+	ContaminationDecalEdgeInsetCm = 2.0f;
 	ContaminationDecalSortOrder = 0;
 	ResolvedContaminationSurfaceSizeCm = FVector2D::ZeroVector;
 	ResolvedContaminationSurfaceNormalAxis =
 		EMD_ScrapeSurfaceNormalAxis::Y;
 	ResolvedFrontDecalDepthCm = 0.0f;
 	ResolvedBackDecalDepthCm = 0.0f;
+	ResolvedContaminationDecalEdgeInsetCm = 0.0f;
 	ContaminationSurfaceCenterLocal = FVector::ZeroVector;
 	ContaminationMeshLocalBoundsMinimum = FVector::ZeroVector;
 	ContaminationMeshLocalBoundsMaximum = FVector::ZeroVector;
@@ -1525,13 +1527,16 @@ bool AMD_CuttableWall::ConfigureContaminationDecalForFace(
 			Mesh->GetComponentScale().GetAbs(),
 			ResolvedDepthCm,
 			ContaminationDecalSurfaceOffsetCm,
+			ContaminationDecalEdgeInsetCm,
 			Layout))
 	{
 		return false;
 	}
 
-	// 두께 제한까지 적용된 최종값을 에디터 Details에서 확인할 수 있게 남긴다.
+	// 두께·표면 크기 제한까지 적용된 최종값을 에디터 Details에서 확인할 수 있게 남긴다.
 	ResolvedDepthCm = static_cast<float>(Layout.AppliedInwardDepthCm);
+	ResolvedContaminationDecalEdgeInsetCm =
+		static_cast<float>(Layout.AppliedEdgeInsetCm);
 
 	DecalComponent->SetAbsolute(false, false, true);
 	DecalComponent->SetRelativeScale3D(FVector::OneVector);
@@ -1553,8 +1558,10 @@ bool AMD_CuttableWall::ConfigureContaminationDecalForFace(
 	}
 
 	FVector2D MaskHalfTexelUV = FVector2D::ZeroVector;
-	if (!FMD_ScrapeMaskAtlas::TryCalculateHalfTexelUV(
+	if (!FMD_ScrapeDecalLayout::TryCalculateMaskHalfTexelUV(
 			ContaminationMaskAtlasDimensions,
+			ResolvedContaminationSurfaceSizeCm,
+			ContaminationDecalEdgeInsetCm,
 			MaskHalfTexelUV))
 	{
 		return false;
@@ -1600,9 +1607,12 @@ void AMD_CuttableWall::SetContaminationDecalsVisible(
 
 void AMD_CuttableWall::RefreshContaminationDecalMaterialParameters()
 {
+	// 배치 때와 같은 inset 보정을 써야 마스크를 다시 만들 때 무늬가 밀리지 않는다.
 	FVector2D MaskHalfTexelUV = FVector2D::ZeroVector;
-	if (!FMD_ScrapeMaskAtlas::TryCalculateHalfTexelUV(
+	if (!FMD_ScrapeDecalLayout::TryCalculateMaskHalfTexelUV(
 			ContaminationMaskAtlasDimensions,
+			ResolvedContaminationSurfaceSizeCm,
+			ContaminationDecalEdgeInsetCm,
 			MaskHalfTexelUV))
 	{
 		return;

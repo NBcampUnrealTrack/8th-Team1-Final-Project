@@ -411,6 +411,21 @@ protected:
 		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
 	float ContaminationDecalSurfaceOffsetCm;
 
+	/**
+	 * 투영 상자의 옆면을 표면 테두리에서 안쪽으로 물리는 폭.
+	 *
+	 * 0으로 두면 상자 옆면이 벽 실루엣과 정확히 겹쳐, 벽의 두께 면이나 맞닿은
+	 * 바닥처럼 투영축과 거의 평행한 면이 상자 경계에 걸린다. 그런 면에서는
+	 * 텍셀이 길게 늘어나고, 카메라가 멈춰 있어도 시간적 AA의 서브픽셀 흔들림만으로
+	 * 상자 안팎 판정이 매 프레임 뒤집혀 모서리가 지지직거린다.
+	 *
+	 * 이 폭만큼은 오염이 그려지지 않는다. 벽 테두리는 어차피 작업면 판정
+	 * (MinimumContaminationFaceNormalDot)에 걸려 긁을 수 없는 영역이다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual|Decal",
+		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float ContaminationDecalEdgeInsetCm;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual|Decal")
 	int32 ContaminationDecalSortOrder;
 
@@ -479,6 +494,11 @@ private:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
 		Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
 	float ResolvedBackDecalDepthCm;
+
+	/** 표면 크기 제한까지 적용해 실제로 테두리에서 줄인 폭(cm). */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
+		Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+	float ResolvedContaminationDecalEdgeInsetCm;
 
 	// 작업면 로컬 중심
 	FVector ContaminationSurfaceCenterLocal;
