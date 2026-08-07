@@ -24,6 +24,9 @@ protected:
 	UPROPERTY(meta = (BindWidget))
 	TObjectPtr<UProgressBar> HealthBar;
 
+	UPROPERTY(meta = (BindWidget))
+	TObjectPtr<UProgressBar> Pb_Oxygen;
+
 private:
 	// PlayerState/ASC 준비 전이면 0.5초 후 재시도
 	void TryBindToAbilitySystem();
@@ -32,10 +35,18 @@ private:
 
 	void RefreshHealth();
 
+	void HandleOxygenChanged(const FOnAttributeChangeData& Data);
+
+	void RefreshOxygen();
+
+
 	FTimerHandle BindRetryTimerHandle;
 
 	// 언바인드용. 어트리뷰트 변경 델리게이트는 다이내믹이 아니라 핸들로 제거
 	TWeakObjectPtr<UAbilitySystemComponent> BoundASC;
 	FDelegateHandle HealthChangedHandle;
 	FDelegateHandle MaxHealthChangedHandle;
+
+	FDelegateHandle OxygenChangedHandle;     //산소포화도 
+	FDelegateHandle MaxOxygenChangedHandle;
 };

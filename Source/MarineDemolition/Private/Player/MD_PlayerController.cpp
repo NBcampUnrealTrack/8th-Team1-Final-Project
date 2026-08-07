@@ -23,9 +23,15 @@
 #include "Data/Merchant/MD_QuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 
-void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console)
+void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console, int32 SiteIndex, EMD_Difficulty Difficulty)
 {
 	if (!IsValid(Console))
+	{
+		return;
+	}
+
+	// 출발 지정은 호스트만. 리슨서버 호스트의 컨트롤러만 서버에서 로컬이다
+	if (!IsLocalController())
 	{
 		return;
 	}
@@ -37,14 +43,19 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 		return;
 	}
 
-	const FString MapPackage = Console->GetTargetLevel().ToSoftObjectPath().GetLongPackageName();
+	// 클라가 보낸 건 인덱스뿐. 레벨은 서버가 자기 사본에서 읽고 잠긴 현장이면 빈 경로가 돌아온다
+	const FString MapPackage = Console->ResolveSiteLevel(SiteIndex).ToSoftObjectPath().GetLongPackageName();
 
 	if (MapPackage.IsEmpty())
 	{
 		return;
 	}
 
-	GetWorld()->ServerTravel(MapPackage + TEXT("?listen"));
+	// 난이도는 URL 옵션으로 실어 보낸다. 도착 맵 GameMode가 InitGame에서 ParseOption으로 받는다
+	const FString TravelURL = FString::Printf(
+		TEXT("%s?listen?Difficulty=%d"), *MapPackage, static_cast<int32>(Difficulty));
+
+	GetWorld()->ServerTravel(TravelURL);
 }
 
 void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole* Console)
