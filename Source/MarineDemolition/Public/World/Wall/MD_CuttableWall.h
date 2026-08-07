@@ -559,6 +559,14 @@ private:
 	/** 앞면과 뒷면 제거 비율 캐시를 현재 셀 상태에서 함께 갱신한다. */
 	void RefreshContaminationCleanRatioCache();
 
+	/**
+	 * 지정한 한 면의 제거 비율 캐시만 갱신한다.
+	 *
+	 * 제거 비율 계산은 면 전체 셀을 훑는다. 스트로크는 한 면만 건드리므로
+	 * 반대 면까지 다시 계산할 이유가 없다.
+	 */
+	void RefreshContaminationCleanRatioCache(EMD_ScrapeSurfaceFace Face);
+
 	/** 철거 준비도 표시용: 두 면 중 더 높은 제거 비율을 반환한다. */
 	float GetContaminationDemolitionReadyRatio() const;
 

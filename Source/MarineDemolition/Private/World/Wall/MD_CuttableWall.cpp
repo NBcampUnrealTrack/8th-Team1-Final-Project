@@ -21,8 +21,25 @@
 #include "Math/RotationMatrix.h"
 #include "Net/UnrealNetwork.h"
 #include "RHITypes.h"
+#include "Stats/Stats.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
+
+/**
+ * 긁기 한 번의 비용을 구간별로 나눠 재는 통계.
+ *
+ * 콘솔에 `stat MD_Scrape`를 입력하면 화면에 구간별 밀리초가 뜬다.
+ * 어느 구간이 실제로 비싼지 숫자로 확인한 뒤 최적화 대상을 정하기 위한 것이다.
+ * Shipping 빌드에서는 STATS가 꺼져 매크로가 통째로 사라진다.
+ */
+DECLARE_STATS_GROUP(TEXT("MD Scrape"), STATGROUP_MD_Scrape, STATCAT_Advanced);
+DECLARE_CYCLE_STAT(TEXT("Stroke 전체"), STAT_MD_ScrapeStrokeTotal, STATGROUP_MD_Scrape);
+DECLARE_CYCLE_STAT(TEXT("셀 판정 (Evaluator)"), STAT_MD_ScrapeEvaluate, STATGROUP_MD_Scrape);
+DECLARE_CYCLE_STAT(TEXT("제거율 캐시"), STAT_MD_ScrapeCleanRatio, STATGROUP_MD_Scrape);
+DECLARE_CYCLE_STAT(TEXT("G8 마스크 갱신"), STAT_MD_ScrapeMaskUpdate, STATGROUP_MD_Scrape);
+DECLARE_CYCLE_STAT(TEXT("ISM 오버레이 갱신"), STAT_MD_ScrapeOverlayUpdate, STATGROUP_MD_Scrape);
+DECLARE_CYCLE_STAT(TEXT("복제 발행"), STAT_MD_ScrapePublish, STATGROUP_MD_Scrape);
+DECLARE_CYCLE_STAT(TEXT("완료 판정"), STAT_MD_ScrapeFullyRemovedCheck, STATGROUP_MD_Scrape);
 
 namespace
 {
@@ -666,6 +683,8 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStrokeWithToolSpec(
 	const FMD_ScrapeStroke& Stroke,
 	const FMD_ScrapeToolSpec& ToolSpec)
 {
+	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeStrokeTotal);
+
 	if (!HasAuthority())
 	{
 		return FMD_ScrapeResult();
@@ -682,7 +701,11 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStrokeWithToolSpec(
 		return FMD_ScrapeResult();
 	}
 
-	const bool bWasFullyRemoved = IsContaminationFullyRemoved();
+	bool bWasFullyRemoved = false;
+	{
+		SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeFullyRemovedCheck);
+		bWasFullyRemoved = IsContaminationFullyRemoved();
+	}
 
 	TArrayView<FMD_ScrapeSurfaceCell> FaceCells =
 		GetContaminationCellsForFace(Stroke.SurfaceFace);
@@ -693,13 +716,17 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStrokeWithToolSpec(
 		return InvalidResult;
 	}
 
-	FMD_ScrapeResult Result = FMD_ScrapeEvaluator::ApplyStrokeToGrid(
-		Stroke,
-		ToolSpec,
-		ScrapeSettings,
-		ContaminationGridDimensions,
-		ResolvedContaminationSurfaceSizeCm,
-		FaceCells);
+	FMD_ScrapeResult Result;
+	{
+		SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeEvaluate);
+		Result = FMD_ScrapeEvaluator::ApplyStrokeToGrid(
+			Stroke,
+			ToolSpec,
+			ScrapeSettings,
+			ContaminationGridDimensions,
+			ResolvedContaminationSurfaceSizeCm,
+			FaceCells);
+	}
 
 	// 잘못된 입력은 상태를 변경하지 않음
 	if (!Result.bIsInputValid)
@@ -716,12 +743,14 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStrokeWithToolSpec(
 			CellsPerFace);
 	}
 
-	RefreshContaminationCleanRatioCache();
+	// 스트로크는 한 면만 건드리므로 그 면만 다시 계산한다.
+	RefreshContaminationCleanRatioCache(Stroke.SurfaceFace);
 	UpdateContaminationMask(Result.CellChanges);
 	UpdateContaminationVisualization(Result.CellChanges);
 	PublishContaminationChanges(Result.CellChanges);
 
 	// 어느 한 면이 처음 완료되는 전환에서 한 번만 방송
+	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeFullyRemovedCheck);
 	const bool bIsFullyRemoved = IsContaminationFullyRemoved();
 	if (!bWasFullyRemoved
 		&& bIsFullyRemoved
@@ -964,12 +993,30 @@ AMD_CuttableWall::GetContaminationCellsForFace(
 
 void AMD_CuttableWall::RefreshContaminationCleanRatioCache()
 {
-	CachedFrontContaminationCleanRatio =
-		FMD_ScrapeEvaluator::CalculateCleanRatio(
-			GetContaminationCellsForFace(EMD_ScrapeSurfaceFace::Front));
-	CachedBackContaminationCleanRatio =
-		FMD_ScrapeEvaluator::CalculateCleanRatio(
-			GetContaminationCellsForFace(EMD_ScrapeSurfaceFace::Back));
+	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeCleanRatio);
+	RefreshContaminationCleanRatioCache(EMD_ScrapeSurfaceFace::Front);
+	RefreshContaminationCleanRatioCache(EMD_ScrapeSurfaceFace::Back);
+}
+
+void AMD_CuttableWall::RefreshContaminationCleanRatioCache(
+	const EMD_ScrapeSurfaceFace Face)
+{
+	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeCleanRatio);
+
+	// 정의되지 않은 면을 그대로 넘기면 빈 슬라이스가 "오염 없음"으로 계산돼
+	// 제거율이 1.0이 되고 철거 게이트가 열린다. 반드시 먼저 막는다.
+	if (Face != EMD_ScrapeSurfaceFace::Front
+		&& Face != EMD_ScrapeSurfaceFace::Back)
+	{
+		return;
+	}
+
+	// 제거 비율 계산은 면 전체를 훑으므로, 바뀌지 않은 면까지 다시 계산하지 않는다.
+	float& CachedCleanRatio = Face == EMD_ScrapeSurfaceFace::Back
+		? CachedBackContaminationCleanRatio
+		: CachedFrontContaminationCleanRatio;
+	CachedCleanRatio = FMD_ScrapeEvaluator::CalculateCleanRatio(
+		GetContaminationCellsForFace(Face));
 }
 
 float AMD_CuttableWall::GetContaminationDemolitionReadyRatio() const
@@ -1255,6 +1302,8 @@ void AMD_CuttableWall::ReleaseContaminationMask()
 void AMD_CuttableWall::UpdateContaminationMask(
 	const TArray<FMD_ScrapeCellChange>& CellChanges)
 {
+	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeMaskUpdate);
+
 	if (CellChanges.IsEmpty())
 	{
 		return;
@@ -1821,7 +1870,12 @@ void AMD_CuttableWall::InitializeContaminationVisualization()
 void AMD_CuttableWall::UpdateContaminationVisualization(
 	const TArray<FMD_ScrapeCellChange>& CellChanges)
 {
+	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeOverlayUpdate);
+
+	// 데칼 구성에 성공하면 ISM 오버레이는 숨겨져 인스턴스도 비어 있다.
+	// 매 틱 헛도는 루프를 아예 들어가지 않는다.
 	if (!ContaminationOverlay
+		|| bContaminationDecalsConfigured
 		|| CellChanges.IsEmpty())
 	{
 		return;
@@ -1969,6 +2023,8 @@ void AMD_CuttableWall::ApplyAllReplicatedContaminationState()
 void AMD_CuttableWall::PublishContaminationChanges(
 	const TArray<FMD_ScrapeCellChange>& CellChanges)
 {
+	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapePublish);
+
 	if (!HasAuthority() || CellChanges.IsEmpty())
 	{
 		return;
