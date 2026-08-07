@@ -3,6 +3,7 @@
 
 #include "Types/Online/MD_SessionTypes.h"
 #include "OnlineSessionSettings.h"
+#include "Online/OnlineSessionNames.h"
 #include "Online/Session/MD_SessionSettingKey.h"
 
 void FMD_SessionInfo::ExportSessionInfo(const FOnlineSession& Session)
@@ -11,10 +12,10 @@ void FMD_SessionInfo::ExportSessionInfo(const FOnlineSession& Session)
     Session.SessionSettings.Get(MD_SessionKey::Key_ServerName, ServerName);
 
     // Session Settings에서 Map Name 값 추출
-    Session.SessionSettings.Get(MD_SessionKey::Key_MapName, MapName);
+    Session.SessionSettings.Get(SETTING_MAPNAME, MapName);
 
     // Session Settings에서 Room Code 값 추출
-    Session.SessionSettings.Get(MD_SessionKey::Key_RoomCode, RoomCode);
+    Session.SessionSettings.Get(SETTING_SESSIONKEY, RoomCode);
 
     // Session의 Owner Name 복사
     OwnerName = Session.OwningUserName;
