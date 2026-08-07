@@ -158,52 +158,52 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	// 지지대 설치 시스템이 호출. 서버에서만 변경
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Wall")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
 	void SetSupported(bool bSupported) { bHasSupport = bSupported; }
 
-	UFUNCTION(BlueprintPure, Category = "Wall")
+	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	bool IsSupported() const { return bHasSupport; }
 
-	UFUNCTION(BlueprintPure, Category = "Wall")
+	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	EMD_WallType GetWallType() const { return WallType; }
 
 	// 무지지 붕괴 발생 시 방송. 점수 처리는 GameMode가 구독
-	UPROPERTY(BlueprintAssignable, Category = "Wall")
+	UPROPERTY(BlueprintAssignable, Category = "MD|Wall")
 	FMD_OnStrutCollapsed OnStrutCollapsed;
 
 	// 철거 성공 시 방송. 점수 처리는 GameMode가 구독
-	UPROPERTY(BlueprintAssignable, Category = "Wall")
+	UPROPERTY(BlueprintAssignable, Category = "MD|Wall")
 	FMD_OnWallDemolished OnWallDemolished;
 
 	// Cutter = 절단 버튼을 누른 캐릭터
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Wall")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
 	void Cut(AActor* Cutter);
 
-	UFUNCTION(BlueprintPure, Category = "Wall")
+	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	bool CanCut() const;
 	
-	UFUNCTION(BlueprintCallable, Category = "Wall")
+	UFUNCTION(BlueprintCallable, Category = "MD|Wall")
 	void ScanHighlight(float Duration = 3.0f);
 
 	// 충돌점 사이의 오염 셀을 제거
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Wall|Contamination")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Contamination")
 	FMD_ScrapeResult ApplyScrapeStrokeFromHits(
 		const FHitResult& StartHit,
 		const FHitResult& EndHit);
 
 	// 플레이어가 장착한 헤라 성능을 사용해 충돌점 사이의 오염 셀을 제거
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Wall|Contamination")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Contamination")
 	FMD_ScrapeResult ApplyScrapeStrokeFromHitsWithToolSpec(
 		const FHitResult& StartHit,
 		const FHitResult& EndHit,
 		const FMD_ScrapeToolSpec& ToolSpec);
 
 	// 로컬 좌표의 긁기 경로를 적용
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Wall|Contamination")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Contamination")
 	FMD_ScrapeResult ApplyLocalScrapeStroke(const FMD_ScrapeStroke& Stroke);
 
 	// 플레이어가 장착한 헤라 성능을 사용해 로컬 긁기 경로를 적용
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Wall|Contamination")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Contamination")
 	FMD_ScrapeResult ApplyLocalScrapeStrokeWithToolSpec(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec);
@@ -233,70 +233,70 @@ public:
 		FVector& OutWorldPosition) const;
 
 	// 앞면과 뒷면 제거 비율의 전체 평균(0~1). 잔해량/점수처럼 양면 전체 상태에 사용
-	UFUNCTION(BlueprintPure, Category = "Wall|Contamination")
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination")
 	float GetContaminationCleanRatio() const;
 
 	/** 지정한 한 면의 오염 제거 비율(0~1) */
 	float GetContaminationCleanRatio(EMD_ScrapeSurfaceFace Face) const;
 
-	UFUNCTION(BlueprintPure, Category = "Wall|Contamination",
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination",
 		meta = (DisplayName = "Get Contamination Clean Ratio For Face"))
 	float GetContaminationCleanRatioForFace(EMD_ScrapeSurfaceFace Face) const;
 
 	// 앞면과 뒷면 제거율의 전체 평균(0~100)
-	UFUNCTION(BlueprintPure, Category = "Wall|Contamination")
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination")
 	float GetContaminationRemovedPercent() const;
 
 	/** 지정한 한 면의 오염 제거율(0~100) */
 	float GetContaminationRemovedPercent(EMD_ScrapeSurfaceFace Face) const;
 
-	UFUNCTION(BlueprintPure, Category = "Wall|Contamination",
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination",
 		meta = (DisplayName = "Get Contamination Removed Percent For Face"))
 	float GetContaminationRemovedPercentForFace(EMD_ScrapeSurfaceFace Face) const;
 
 	// 남은 오염 비율(0~1)
-	UFUNCTION(BlueprintPure, Category = "Wall|Contamination")
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination")
 	float GetResidualContaminationRatio() const;
 
 	// 앞면 또는 뒷면 중 한 면 이상이 완전히 깨끗한지 여부
-	UFUNCTION(BlueprintPure, Category = "Wall|Contamination")
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination")
 	bool IsContaminationFullyRemoved() const;
 
 	/** 지정한 한 면의 오염 완전 제거 여부 */
 	bool IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace Face) const;
 
-	UFUNCTION(BlueprintPure, Category = "Wall|Contamination",
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination",
 		meta = (DisplayName = "Is Contamination Fully Removed For Face"))
 	bool IsContaminationFullyRemovedForFace(EMD_ScrapeSurfaceFace Face) const;
 
 	/** 앞면(위)과 뒷면(아래)의 오염 상태가 담긴 런타임 G8 W x 2H 마스크. */
-	UFUNCTION(BlueprintPure, Category = "Wall|Contamination|Mask")
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination|Mask")
 	UTexture2D* GetContaminationMaskTexture() const
 	{
 		return ContaminationMaskTexture.Get();
 	}
 
 	/** 현재 런타임 오염 마스크의 픽셀 크기. 초기화 전에는 (0, 0). */
-	UFUNCTION(BlueprintPure, Category = "Wall|Contamination|Mask")
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination|Mask")
 	FIntPoint GetContaminationMaskDimensions() const
 	{
 		return ContaminationMaskAtlasDimensions;
 	}
 
-	UFUNCTION(BlueprintPure, Category = "Wall|Contamination|Decal")
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination|Decal")
 	UDecalComponent* GetFrontContaminationDecal() const
 	{
 		return FrontContaminationDecal.Get();
 	}
 
-	UFUNCTION(BlueprintPure, Category = "Wall|Contamination|Decal")
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination|Decal")
 	UDecalComponent* GetBackContaminationDecal() const
 	{
 		return BackContaminationDecal.Get();
 	}
 
 	// 최초 완전 제거 시 한 번 방송
-	UPROPERTY(BlueprintAssignable, Category = "Wall|Contamination")
+	UPROPERTY(BlueprintAssignable, Category = "MD|Wall|Contamination")
 	FMD_OnContaminationFullyRemoved OnContaminationFullyRemoved;
 	
 	// Day 전환 악화: 무작위 위치에 오염 셀을 소량 리필
@@ -312,33 +312,33 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	UPROPERTY(VisibleAnywhere, Category = "Wall")
+	UPROPERTY(VisibleAnywhere, Category = "MD|Wall")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
 	// 셀 단위 오염막
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Overlay")
 	TObjectPtr<UInstancedStaticMeshComponent> ContaminationOverlay;
 
 	// 최종 오염 시각화: 앞면과 뒷면에 한 장씩 투영하는 Deferred Decal
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Decal")
 	TObjectPtr<UDecalComponent> FrontContaminationDecal;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual")
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Decal")
 	TObjectPtr<UDecalComponent> BackContaminationDecal;
 
-	UPROPERTY(EditAnywhere, Category = "Wall")
+	UPROPERTY(EditAnywhere, Category = "MD|Wall")
 	EMD_WallType WallType = EMD_WallType::Partition;
 
 	// 지지대 설치 여부. true면 오절단해도 붕괴하지 않음
-	UPROPERTY(EditAnywhere, Replicated, Category = "Wall")
+	UPROPERTY(EditAnywhere, Replicated, Category = "MD|Wall")
 	bool bHasSupport = false;
 
 	// 절단 시 드랍할 조각 수 (기획: 5~10개)
-	UPROPERTY(EditAnywhere, Category = "Wall")
+	UPROPERTY(EditAnywhere, Category = "MD|Wall")
 	int32 PieceCount = 10;
 
 	/** 절단 시 생성할 벽 조각 Blueprint 클래스. Class Defaults에서 반드시 지정한다. */
-	UPROPERTY(EditDefaultsOnly, Category = "Wall")
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall")
 	TSubclassOf<AMD_WallPiece> PieceClass;
 
 	// 스캔 하이라이트 / 원복에 재사용할 다이내믹 머티리얼
@@ -346,71 +346,71 @@ protected:
 	TObjectPtr<UMaterialInstanceDynamic> MID;
 
 	// 오염 격자 크기
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination",
 		meta = (UIMin = "1", UIMax = "128"))
 	FIntPoint ContaminationGridDimensions;
 
 	// 셀의 초기 오염량(0~1)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float InitialContaminationPerCell;
 
 	/** 켜면 월드 위치 기반 3D 노이즈가 셀별 초기 오염량을 결정한다. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination|Procedural")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Procedural")
 	bool bUseProceduralContamination;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination|Procedural",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Procedural",
 		meta = (EditCondition = "bUseProceduralContamination", ClampMin = "1.0", Units = "cm"))
 	float ContaminationNoiseScaleCm;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination|Procedural",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Procedural",
 		meta = (EditCondition = "bUseProceduralContamination"))
 	int32 ContaminationNoiseSeed;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination|Procedural",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Procedural",
 		meta = (EditCondition = "bUseProceduralContamination", ClampMin = "0.0", ClampMax = "1.0"))
 	float ContaminationCoverage;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination|Procedural",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Procedural",
 		meta = (EditCondition = "bUseProceduralContamination", ClampMin = "0.0", ClampMax = "1.0"))
 	float ContaminationMinimumAmount;
 
 	// 작업면 크기(cm, 0이면 자동)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination",
 		meta = (ClampMin = "0.0", Units = "cm"))
 	FVector2D ContaminationSurfaceSizeOverrideCm;
 
 	/** Auto는 메시 Bounds에서 판재의 두께 축을 찾는다. 오판하면 로컬 X/Y/Z를 직접 지정한다. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination|Geometry")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Geometry")
 	EMD_ScrapeSurfaceNormalAxis ContaminationSurfaceNormalAxis;
 
 	// 표면 판정 설정. 포함된 헤라 수치는 기존 직접 호출의 기본값으로만 사용
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Wall|Contamination")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination")
 	FMD_ScrapeSettings ScrapeSettings;
 
 	// 벽면과 오염막 사이 거리(cm)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Overlay",
 		meta = (ClampMin = "0.0", Units = "cm"))
 	float ContaminationOverlayOffsetCm;
 
 	// 오염막 두께(cm)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Overlay",
 		meta = (ClampMin = "0.01", Units = "cm"))
 	float ContaminationOverlayThicknessCm;
 
 	// 오염막 표시 여부
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Overlay")
 	bool bShowContaminationOverlay;
 
 	/** Deferred Decal Domain이며 MaskTexture/MaskVScale/MaskVOffset/MaskUFlip/MaskHalfTexelU/V 파라미터를 제공한다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Scrape|Visual|Decal")
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Wall|Contamination|Decal")
 	TObjectPtr<UMaterialInterface> ContaminationDecalMaterial;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual|Decal")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Decal")
 	bool bShowContaminationDecals;
 
 	// 한 면이 벽 안쪽으로 투영하는 최소 깊이. 런타임에 벽 전체 두께의 절반 이하로 제한한다.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual|Decal",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Decal",
 		meta = (ClampMin = "0.01", UIMin = "0.1", Units = "cm"))
 	float ContaminationDecalProjectionDepthCm;
 
@@ -419,17 +419,17 @@ protected:
 	 * 앞면이 여러 깊이에 걸친 벽 메시도 오염이 찍히게 하기 위한 설정이다.
 	 * 반대 면 표면을 침범하지 않는 선까지만 넓히며, 측정에 실패하면 위 수동 깊이를 쓴다.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual|Decal")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Decal")
 	bool bAutoFitContaminationDecalDepth;
 
 	/** 자동 맞춤이 실제 표면 뒤로 더 확보하는 여유. 반대 면과의 안전 간격으로도 쓴다. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual|Decal",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Decal",
 		meta = (EditCondition = "bAutoFitContaminationDecalDepth",
 			ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
 	float ContaminationDecalDepthFitMarginCm;
 
 	// Z-fighting 방지를 위해 Decal 중심을 벽 표면 바깥으로 조금 이동하는 거리
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual|Decal",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Decal",
 		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
 	float ContaminationDecalSurfaceOffsetCm;
 
@@ -444,19 +444,19 @@ protected:
 	 * 이 폭만큼은 오염이 그려지지 않는다. 벽 테두리는 어차피 작업면 판정
 	 * (MinimumContaminationFaceNormalDot)에 걸려 긁을 수 없는 영역이다.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual|Decal",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Decal",
 		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
 	float ContaminationDecalEdgeInsetCm;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Visual|Decal")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Decal")
 	int32 ContaminationDecalSortOrder;
 
 	// 절단 허용 게이트. 회의 결정으로 기본 0(잠금 없음) — 정책이 바뀌면 에디터에서 수치만 올리면 됨
-	UPROPERTY(EditAnywhere, Category = "Wall|Contamination|Cut",
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Contamination|Cut",
 		meta = (ClampMin = "0", ClampMax = "100"))
 	float PartitionCutGate = 0.0f;
 
-	UPROPERTY(EditAnywhere, Category = "Wall|Contamination|Cut",
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Contamination|Cut",
 		meta = (ClampMin = "0", ClampMax = "100"))
 	float StrutCutGate = 0.0f;
 
@@ -472,12 +472,12 @@ private:
 	static constexpr float MinimumContaminationFaceNormalDot = 0.5f;
 
 	// 셀별 오염 상태
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "MD|Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
 	TArray<FMD_ScrapeSurfaceCell> ContaminationCells;
 
 	// 앞면은 위쪽, 뒷면은 아래쪽에 저장하는 런타임 G8 W x 2H 마스크
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
-		Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+		Category = "MD|Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UTexture2D> ContaminationMaskTexture;
 
 	// 런타임 마스크와 동일한 행 우선 CPU G8 버퍼
@@ -499,27 +499,27 @@ private:
 	FMD_ReplicatedScrapeCellStateArray ReplicatedContaminationState;
 
 	// 계산된 작업면 크기(cm)
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "MD|Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
 	FVector2D ResolvedContaminationSurfaceSizeCm;
 
 	/** Auto 또는 수동 설정에서 최종 결정된 메시 로컬 앞/뒤 축. */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
-		Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+		Category = "MD|Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
 	EMD_ScrapeSurfaceNormalAxis ResolvedContaminationSurfaceNormalAxis;
 
 	/** 자동 맞춤까지 반영해 앞면 Decal이 실제로 벽 안쪽을 덮는 깊이(cm). */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
-		Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+		Category = "MD|Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
 	float ResolvedFrontDecalDepthCm;
 
 	/** 자동 맞춤까지 반영해 뒷면 Decal이 실제로 벽 안쪽을 덮는 깊이(cm). */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
-		Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+		Category = "MD|Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
 	float ResolvedBackDecalDepthCm;
 
 	/** 표면 크기 제한까지 적용해 실제로 테두리에서 줄인 폭(cm). */
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
-		Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+		Category = "MD|Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
 	float ResolvedContaminationDecalEdgeInsetCm;
 
 	// 작업면 로컬 중심
@@ -531,12 +531,12 @@ private:
 
 	// 앞면 제거 비율 캐시
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
-		Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+		Category = "MD|Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
 	float CachedFrontContaminationCleanRatio;
 
 	// 뒷면 제거 비율 캐시
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
-		Category = "Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
+		Category = "MD|Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
 	float CachedBackContaminationCleanRatio;
 
 	// 오염 표면 초기화 여부

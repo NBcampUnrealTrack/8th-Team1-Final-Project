@@ -321,34 +321,9 @@ public:
 			: 0.0f;
 	}
 
-	/** 현재 잔여량이 허용 오차 이하인지 확인 */
-	bool IsClean(const float Tolerance) const
-	{
-		return !FMath::IsFinite(RemainingContamination)
-			|| RemainingContamination <= FMath::Max(0.0f, Tolerance);
-	}
-
-	/**
-	 * 이 셀에서 제거된 비율을 0~1로 반환
-	 * 처음부터 오염이 없던 셀은 제거할 대상도 없으므로 완료된 값인 1을 반환
-	 */
-	float GetRemovalRatio() const
-	{
-		if (!FMath::IsFinite(InitialContamination)
-			|| InitialContamination <= UE_SMALL_NUMBER)
-		{
-			return 1.0f;
-		}
-
-		const float SafeRemaining = FMath::IsFinite(RemainingContamination)
-			? FMath::Clamp(RemainingContamination, 0.0f, InitialContamination)
-			: 0.0f;
-
-		return FMath::Clamp(
-			1.0f - (SafeRemaining / InitialContamination),
-			0.0f,
-			1.0f);
-	}
+	// 셀 하나의 깨끗함 판정과 제거 비율은 면 전체를 함께 봐야 하므로
+	// FMD_ScrapeEvaluator::IsSurfaceFullyClean / CalculateCleanRatio가 담당한다.
+	// 셀 단위 헬퍼를 여기에 다시 두면 판정 기준이 두 벌이 된다.
 };
 
 /**

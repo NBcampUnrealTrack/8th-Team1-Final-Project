@@ -41,11 +41,11 @@ public:
 	void SetContaminated(bool bInContaminated);
 
 	/** 어느 칸에 넣어야 하는지가 이 값으로 갈리므로 클라이언트도 알아야 한다 */
-	UPROPERTY(ReplicatedUsing = OnRep_Contaminated, VisibleAnywhere, BlueprintReadOnly, Category = "Piece")
+	UPROPERTY(ReplicatedUsing = OnRep_Contaminated, VisibleAnywhere, BlueprintReadOnly, Category = "MD|Wall|Piece")
 	bool bContaminated = false;
 
 protected:
-	UPROPERTY(VisibleAnywhere, Category = "Piece")
+	UPROPERTY(VisibleAnywhere, Category = "MD|Wall|Piece")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
 	/** 이 액터를 집을 때 사용할 물리 운반 방식. Blueprint 기본값에서 지정한다. */
