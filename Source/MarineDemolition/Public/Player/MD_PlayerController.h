@@ -107,14 +107,8 @@ private:
 	UFUNCTION(Exec)
 	void MD_AcceptRepeat(int32 Index);
 
-	UFUNCTION(Server, Reliable)
-	void ServerAcceptRepeat(int32 Index);
-
 	UFUNCTION(Exec)
 	void MD_DeclineRepeat(int32 Index);
-
-	UFUNCTION(Server, Reliable)
-	void ServerDeclineRepeat(int32 Index);
 
 	UFUNCTION(Exec)
 	void MD_Deliver(const FString& GradeName, bool bIntact);
@@ -133,4 +127,13 @@ private:
 
 	UFUNCTION(Server, Reliable)
 	void ServerFinalizeContract();
+
+	public:
+	
+	/** 상인 UI에서 반복 퀘스트를 수락할 때 호출한다. */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerAcceptRepeat(int32 Index);
+	
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerDeclineRepeat(int32 Index);
 };
