@@ -7,6 +7,7 @@
 
 class UArrowComponent;
 class UBoxComponent;
+class UPrimitiveComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 class AMD_TrashBin;
@@ -39,9 +40,27 @@ public:
 	/** ~Implements IMD_Interactable */
 
 protected:
+	virtual void BeginPlay() override;
+
 	/** 서버 판정 결과를 각 플레이어의 같은 보급기 인스턴스에 전달한다. */
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastDispenseResult(EMD_TrashDispenseResult Result);
+
+	UFUNCTION()
+	void HandleClearanceBeginOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		int32 OtherBodyIndex,
+		bool bFromSweep,
+		const FHitResult& SweepResult);
+
+	UFUNCTION()
+	void HandleClearanceEndOverlap(
+		UPrimitiveComponent* OverlappedComponent,
+		AActor* OtherActor,
+		UPrimitiveComponent* OtherComp,
+		int32 OtherBodyIndex);
 
 	/** Blueprint에서 소리·표시등·메시지 같은 연출을 붙이는 지점 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Trash Dispenser")
@@ -74,4 +93,17 @@ protected:
 private:
 	/** PhysicsActor 충돌 규칙을 기준으로 출구가 비어 있는지 서버에서 확인한다. */
 	bool IsSpawnAreaClear() const;
+
+	/** SpawnClearance 안에 아직 치우지 않은 쓰레기통이 있는지 확인한다. */
+	bool HasTrashBinInClearance() const;
+
+	/** 출구를 막은 통을 대신 조준할 수 있도록 보급기의 InteractTrace 응답을 갱신한다. */
+	void RefreshInteractTraceResponse();
+
+	/** Blueprint에서 프로파일을 바꿔도 원래 응답으로 되돌리도록 BeginPlay에서 기록한다. */
+	ECollisionResponse DefaultMeshInteractResponse = ECR_Block;
+	ECollisionResponse DefaultVolumeInteractResponse = ECR_Block;
+
+	/** 현재 적용된 InteractTrace 응답 상태. 같은 값을 반복 적용하지 않기 위한 기준이다. */
+	bool bClearanceOccupied = false;
 };
