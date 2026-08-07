@@ -61,6 +61,29 @@ public:
 		TArrayView<uint8> InOutAtlasPixels,
 		FIntPoint& OutPixelCoordinate);
 
+	/** 변경 픽셀이 아직 하나도 없는 상태를 뜻하는 사각형을 만든다. */
+	static FIntRect MakeEmptyAtlasRegion();
+
+	/** 사각형이 픽셀을 하나도 담고 있지 않은지 확인한다. */
+	static bool IsAtlasRegionEmpty(const FIntRect& AtlasRegion);
+
+	/** 픽셀 좌표 하나를 담도록 사각형을 넓힌다. Min은 포함, Max는 제외한다. */
+	static void ExpandAtlasRegion(
+		FIntRect& InOutAtlasRegion,
+		const FIntPoint& PixelCoordinate);
+
+	/**
+	 * 아틀라스에서 사각형에 걸친 행만 빈틈없이 모아 GPU 업로드용 버퍼를 만든다.
+	 *
+	 * 결과는 행 우선이고 한 행의 길이가 사각형 너비와 같으므로,
+	 * 업로드 시 SrcPitch로 사각형 너비를 그대로 넘기면 된다.
+	 */
+	static bool TryPackAtlasRegion(
+		const FIntPoint& AtlasDimensions,
+		TConstArrayView<uint8> AtlasPixels,
+		const FIntRect& AtlasRegion,
+		TArrayView<uint8> OutPackedPixels);
+
 private:
 	FMD_ScrapeMaskAtlas() = delete;
 };

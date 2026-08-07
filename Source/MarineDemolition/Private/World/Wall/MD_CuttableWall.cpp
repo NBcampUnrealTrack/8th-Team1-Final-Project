@@ -1256,7 +1256,8 @@ void AMD_CuttableWall::UpdateContaminationMask(
 		return;
 	}
 
-	TSet<int32> ChangedPixelIndexSet;
+	// 값이 실제로 달라진 픽셀만 감싸는 최소 사각형을 모은다.
+	FIntRect ChangedRegion = FMD_ScrapeMaskAtlas::MakeEmptyAtlasRegion();
 	for (const FMD_ScrapeCellChange& CellChange : CellChanges)
 	{
 		if (!ContaminationCells.IsValidIndex(CellChange.CellIndex))
@@ -1277,78 +1278,75 @@ void AMD_CuttableWall::UpdateContaminationMask(
 		const uint8 PreviousMaskValue =
 			ContaminationMaskAtlasPixels[PixelIndex];
 		FIntPoint PixelCoordinate = FIntPoint::NoneValue;
-		if (FMD_ScrapeMaskAtlas::TryUpdateAtlasPixel(
+		if (!FMD_ScrapeMaskAtlas::TryUpdateAtlasPixel(
 				ContaminationGridDimensions,
 				CellChange.CellIndex,
 				ContaminationCells[CellChange.CellIndex],
 				ContaminationMaskAtlasPixels,
 				PixelCoordinate)
-			&& PreviousMaskValue
-				!= ContaminationMaskAtlasPixels[PixelIndex])
+			|| PreviousMaskValue
+				== ContaminationMaskAtlasPixels[PixelIndex])
 		{
-			ChangedPixelIndexSet.Add(PixelIndex);
+			continue;
 		}
+
+		FMD_ScrapeMaskAtlas::ExpandAtlasRegion(
+			ChangedRegion,
+			PixelCoordinate);
 	}
 
-	TArray<int32> ChangedPixelIndices = ChangedPixelIndexSet.Array();
-	ChangedPixelIndices.Sort();
-	if (!ChangedPixelIndices.IsEmpty()
-		&& !UploadContaminationMaskPixels(ChangedPixelIndices))
+	if (FMD_ScrapeMaskAtlas::IsAtlasRegionEmpty(ChangedRegion))
+	{
+		// 스트로크가 이미 깨끗한 곳만 지나면 올릴 픽셀이 없다.
+		return;
+	}
+
+	if (!UploadContaminationMaskRegion(ChangedRegion))
 	{
 		// 렌더 리소스가 잠시 유효하지 않다면 현재 CPU 전체 상태로 다시 만든다.
 		InitializeContaminationMask();
 	}
 }
 
-bool AMD_CuttableWall::UploadContaminationMaskPixels(
-	const TConstArrayView<int32> PixelIndices)
+bool AMD_CuttableWall::UploadContaminationMaskRegion(
+	const FIntRect& AtlasRegion)
 {
+	const int32 RegionWidth = AtlasRegion.Width();
+	const int32 RegionHeight = AtlasRegion.Height();
 	if (!ContaminationMaskTexture
 		|| !ContaminationMaskTexture->GetResource()
-		|| PixelIndices.IsEmpty()
-		|| ContaminationMaskAtlasDimensions.X <= 0
-		|| ContaminationMaskAtlasDimensions.Y <= 0)
+		|| RegionWidth <= 0
+		|| RegionHeight <= 0)
 	{
 		return false;
 	}
 
-	const uint32 UpdateCount = static_cast<uint32>(PixelIndices.Num());
-	FUpdateTextureRegion2D* UpdateRegions =
-		new FUpdateTextureRegion2D[UpdateCount];
-	uint8* UploadValues = new uint8[UpdateCount];
-
-	for (uint32 UpdateIndex = 0;
-		UpdateIndex < UpdateCount;
-		++UpdateIndex)
+	// 사각형에 걸친 행만 빈틈없이 모아 RHI 업로드 한 번으로 끝낸다.
+	uint8* UploadValues = new uint8[RegionWidth * RegionHeight];
+	if (!FMD_ScrapeMaskAtlas::TryPackAtlasRegion(
+			ContaminationMaskAtlasDimensions,
+			MakeArrayView(ContaminationMaskAtlasPixels),
+			AtlasRegion,
+			MakeArrayView(UploadValues, RegionWidth * RegionHeight)))
 	{
-		const int32 PixelIndex = PixelIndices[UpdateIndex];
-		if (!ContaminationMaskAtlasPixels.IsValidIndex(PixelIndex))
-		{
-			delete[] UploadValues;
-			delete[] UpdateRegions;
-			return false;
-		}
-
-		const uint32 PixelX = static_cast<uint32>(
-			PixelIndex % ContaminationMaskAtlasDimensions.X);
-		const uint32 PixelY = static_cast<uint32>(
-			PixelIndex / ContaminationMaskAtlasDimensions.X);
-		UpdateRegions[UpdateIndex] = FUpdateTextureRegion2D(
-			PixelX,
-			PixelY,
-			static_cast<int32>(UpdateIndex),
-			0,
-			1,
-			1);
-		UploadValues[UpdateIndex] =
-			ContaminationMaskAtlasPixels[PixelIndex];
+		delete[] UploadValues;
+		return false;
 	}
+
+	FUpdateTextureRegion2D* UpdateRegions = new FUpdateTextureRegion2D[1];
+	UpdateRegions[0] = FUpdateTextureRegion2D(
+		static_cast<uint32>(AtlasRegion.Min.X),
+		static_cast<uint32>(AtlasRegion.Min.Y),
+		0,
+		0,
+		static_cast<uint32>(RegionWidth),
+		static_cast<uint32>(RegionHeight));
 
 	ContaminationMaskTexture->UpdateTextureRegions(
 		0,
-		UpdateCount,
+		1,
 		UpdateRegions,
-		UpdateCount,
+		static_cast<uint32>(RegionWidth),
 		1,
 		UploadValues,
 		[](uint8* SourceData, const FUpdateTextureRegion2D* Regions)

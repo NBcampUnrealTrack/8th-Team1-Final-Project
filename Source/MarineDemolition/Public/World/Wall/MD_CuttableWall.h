@@ -539,9 +539,9 @@ private:
 	void UpdateContaminationMask(
 		const TArray<FMD_ScrapeCellChange>& CellChanges);
 
-	// 지정한 행 우선 픽셀 번호만 GPU 텍스처에 업로드
-	bool UploadContaminationMaskPixels(
-		TConstArrayView<int32> PixelIndices);
+	// 변경 픽셀을 감싸는 사각형 하나만 GPU 텍스처에 업로드
+	// (Min은 포함, Max는 제외하는 반열린 구간)
+	bool UploadContaminationMaskRegion(const FIntRect& AtlasRegion);
 
 	/** 메시 형상과 벽 두께 배분까지 반영해 앞/뒤 안쪽 투영 깊이를 함께 계산한다. */
 	void ResolveContaminationDecalDepths();

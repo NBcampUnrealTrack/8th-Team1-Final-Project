@@ -260,3 +260,68 @@ bool FMD_ScrapeMaskAtlas::TryUpdateAtlasPixel(
 	InOutAtlasPixels[PixelIndex] = MaskValue;
 	return true;
 }
+
+FIntRect FMD_ScrapeMaskAtlas::MakeEmptyAtlasRegion()
+{
+	// 첫 ExpandAtlasRegion 한 번으로 곧바로 그 픽셀만 담게 되는 뒤집힌 사각형.
+	return FIntRect(MAX_int32, MAX_int32, MIN_int32, MIN_int32);
+}
+
+bool FMD_ScrapeMaskAtlas::IsAtlasRegionEmpty(const FIntRect& AtlasRegion)
+{
+	return AtlasRegion.Min.X >= AtlasRegion.Max.X
+		|| AtlasRegion.Min.Y >= AtlasRegion.Max.Y;
+}
+
+void FMD_ScrapeMaskAtlas::ExpandAtlasRegion(
+	FIntRect& InOutAtlasRegion,
+	const FIntPoint& PixelCoordinate)
+{
+	InOutAtlasRegion.Min.X = FMath::Min(
+		InOutAtlasRegion.Min.X,
+		PixelCoordinate.X);
+	InOutAtlasRegion.Min.Y = FMath::Min(
+		InOutAtlasRegion.Min.Y,
+		PixelCoordinate.Y);
+	InOutAtlasRegion.Max.X = FMath::Max(
+		InOutAtlasRegion.Max.X,
+		PixelCoordinate.X + 1);
+	InOutAtlasRegion.Max.Y = FMath::Max(
+		InOutAtlasRegion.Max.Y,
+		PixelCoordinate.Y + 1);
+}
+
+bool FMD_ScrapeMaskAtlas::TryPackAtlasRegion(
+	const FIntPoint& AtlasDimensions,
+	const TConstArrayView<uint8> AtlasPixels,
+	const FIntRect& AtlasRegion,
+	const TArrayView<uint8> OutPackedPixels)
+{
+	const int32 RegionWidth = AtlasRegion.Width();
+	const int32 RegionHeight = AtlasRegion.Height();
+	if (AtlasDimensions.X <= 0
+		|| AtlasDimensions.Y <= 0
+		|| AtlasPixels.Num() != AtlasDimensions.X * AtlasDimensions.Y
+		|| RegionWidth <= 0
+		|| RegionHeight <= 0
+		|| AtlasRegion.Min.X < 0
+		|| AtlasRegion.Min.Y < 0
+		|| AtlasRegion.Max.X > AtlasDimensions.X
+		|| AtlasRegion.Max.Y > AtlasDimensions.Y
+		|| OutPackedPixels.Num() != RegionWidth * RegionHeight)
+	{
+		return false;
+	}
+
+	for (int32 RowIndex = 0; RowIndex < RegionHeight; ++RowIndex)
+	{
+		const int32 SourceRowStart =
+			((AtlasRegion.Min.Y + RowIndex) * AtlasDimensions.X)
+			+ AtlasRegion.Min.X;
+		FMemory::Memcpy(
+			OutPackedPixels.GetData() + (RowIndex * RegionWidth),
+			AtlasPixels.GetData() + SourceRowStart,
+			RegionWidth);
+	}
+	return true;
+}
