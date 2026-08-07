@@ -183,38 +183,15 @@ void AMD_PlayerController::MD_ShowCredits()
 
 void AMD_PlayerController::ServerAddCredits_Implementation(int32 Amount)
 {
-	UGameInstance* GameInstance = GetGameInstance();
-	if (!IsValid(GameInstance))
+	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
 	{
-		return;
+		Merchant->AddCredits(Amount);
 	}
-
-	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
-	if (!IsValid(Merchant))
-	{
-		return;
-	}
-
-	Merchant->AddCredits(Amount);
 }
 
 void AMD_PlayerController::MD_BeginContract()
 {
-	UGameInstance* GameInstance = GetGameInstance();
-	if (!IsValid(GameInstance))
-	{
-		return;
-	}
-
-	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
-	if (!IsValid(Merchant))
-	{
-		return;
-	}
-
-	Merchant->BeginContract(DebugSite, DebugAdvancePayment);
-
-	MD_DumpQuests();
+	ServerBeginContract();
 }
 
 void AMD_PlayerController::MD_DumpQuests()
@@ -275,4 +252,104 @@ void AMD_PlayerController::BeginPlay()
 	}
 
 	EquipHotbarWidgetInstance->AddToViewport();
+}
+
+
+/* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
+
+UMD_MerchantSubsystem* AMD_PlayerController::GetMerchantSubsystem() const
+{
+	UGameInstance* GameInstance = GetGameInstance();
+
+	return IsValid(GameInstance) ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
+}
+
+void AMD_PlayerController::ServerBeginContract_Implementation()
+{
+	// DebugSite는 서버·클라 양쪽 BP에 같은 값이 들어 있으므로 서버 사본을 쓴다.
+	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	{
+		Merchant->BeginContract(DebugSite, DebugAdvancePayment);
+	}
+}
+
+void AMD_PlayerController::MD_BeginDay(int32 Day)
+{
+	ServerBeginDay(Day);
+}
+
+void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)
+{
+	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	{
+		Merchant->BeginDay(Day);
+	}
+}
+
+void AMD_PlayerController::MD_AcceptRepeat(int32 Index)
+{
+	ServerAcceptRepeat(Index);
+}
+
+void AMD_PlayerController::ServerAcceptRepeat_Implementation(int32 Index)
+{
+	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	{
+		Merchant->TryAcceptRepeatQuest(Index);
+	}
+}
+
+void AMD_PlayerController::MD_DeclineRepeat(int32 Index)
+{
+	ServerDeclineRepeat(Index);
+}
+
+void AMD_PlayerController::ServerDeclineRepeat_Implementation(int32 Index)
+{
+	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	{
+		Merchant->TryDeclineRepeatQuest(Index);
+	}
+}
+
+void AMD_PlayerController::MD_Deliver(const FString& GradeName, bool bIntact)
+{
+	const FGameplayTag GradeTag = FGameplayTag::RequestGameplayTag(FName(*FString::Printf(TEXT("Resource.Sample.Grade.%s"), *GradeName)),/*ErrorIfNotFound=*/false);
+
+	ServerDeliver(GradeTag, bIntact);
+}
+
+void AMD_PlayerController::ServerDeliver_Implementation(FGameplayTag GradeTag, bool bIntact)
+{
+	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	{
+		Merchant->NotifySampleDelivered(GradeTag, bIntact);
+	}
+}
+
+void AMD_PlayerController::MD_MarkSiteCleared()
+{
+	ServerMarkSiteCleared();
+}
+
+void AMD_PlayerController::ServerMarkSiteCleared_Implementation()
+{
+	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	{
+		Merchant->MarkSiteCleared();
+	}
+}
+
+void AMD_PlayerController::MD_FinalizeContract()
+{
+	ServerFinalizeContract();
+
+}
+
+void AMD_PlayerController::ServerFinalizeContract_Implementation()
+{
+	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	{
+		Merchant->FinalizeContract();
+	}
 }

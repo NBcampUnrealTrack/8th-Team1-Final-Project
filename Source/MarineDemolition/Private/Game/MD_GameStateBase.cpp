@@ -1,10 +1,13 @@
 #include "Game/MD_GameStateBase.h"
 #include "Data/Score/MD_ScoreTableData.h"
 #include "Net/UnrealNetwork.h"
+#include "Component/Merchant/MD_MerchantComponent.h"
 
 AMD_GameStateBase::AMD_GameStateBase()
 {
     bReplicates = true;
+
+    MerchantComponent = CreateDefaultSubobject<UMD_MerchantComponent>(TEXT("MerchantComponent"));
 }
 
 void AMD_GameStateBase::BeginPlay()

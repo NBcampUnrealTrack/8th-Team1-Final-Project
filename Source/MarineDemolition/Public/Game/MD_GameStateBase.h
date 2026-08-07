@@ -7,6 +7,7 @@
 #include "MD_GameStateBase.generated.h"
 
 class UMD_ScoreTableData;
+class UMD_MerchantComponent;
 
 UENUM(BlueprintType)
 enum class EMD_WithdrawalPhase : uint8
@@ -198,4 +199,11 @@ private:
 
     UFUNCTION()
     void OnRep_Score();
+
+public:
+    UFUNCTION(BlueprintPure, Category = "MD|Merchant")
+    UMD_MerchantComponent* GetMerchantComponent() const { return MerchantComponent; }
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
+    TObjectPtr<UMD_MerchantComponent> MerchantComponent;
 };

@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Game/MD_GameModeBase.h"
@@ -13,6 +13,7 @@
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
+#include "Data/SaveGame/MD_SaveSlotManager.h"
 
 AMD_GameModeBase::AMD_GameModeBase()
 {
@@ -43,6 +44,23 @@ void AMD_GameModeBase::BeginPlay()
     // 이전 Day 스냅샷 복원은 전 액터 BeginPlay 이후로 미룸 (벽 오염 초기화보다 늦게)
     GetWorldTimerManager().SetTimerForNextTick(
         this, &AMD_GameModeBase::RestoreDaySnapshot);
+}
+
+void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
+{
+    Super::RestartPlayer(NewPlayer);
+    
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true && IsValid(NewPlayer->PlayerState) == true)
+    {
+        SaveSlotManager->OverwriteDataToPlayer(NewPlayer->PlayerState);
+    }
+}
+
+void AMD_GameModeBase::Logout(AController* Exiting)
+{
+    Super::Logout(Exiting);
 }
 
 void AMD_GameModeBase::HandleStrutCollapsed(AMD_CuttableWall* Wall, AActor* Cutter)
