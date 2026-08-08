@@ -34,6 +34,15 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestSectorCloseout(AMD_SectorCloseoutMarker* Marker);
 
+	/** GameMode가 원정 계약을 시작할 때 쓴다. DebugSite와 동일 에셋을 넣으면 된다. */
+	UMD_SiteDefinition* GetExpeditionSite() const { return DebugSite; }
+
+	/** 상인 UI에서 반복 퀘스트를 수락할 때 호출한다. */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerAcceptRepeat(int32 Index);
+
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerDeclineRepeat(int32 Index);
 
 private:
 
@@ -133,13 +142,4 @@ private:
 
 	UFUNCTION(Server, Reliable)
 	void ServerFinalizeContract();
-
-	public:
-	
-	/** 상인 UI에서 반복 퀘스트를 수락할 때 호출한다. */
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
-	void ServerAcceptRepeat(int32 Index);
-	
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
-	void ServerDeclineRepeat(int32 Index);
 };

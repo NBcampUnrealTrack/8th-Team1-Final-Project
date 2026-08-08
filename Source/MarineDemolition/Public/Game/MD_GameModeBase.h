@@ -8,6 +8,8 @@
 #include "MD_GameModeBase.generated.h"
 
 class AMD_CuttableWall;
+class AMD_GameStateBase;
+class UMD_SiteDefinition;
 class UWorld;
 
 /**
@@ -30,6 +32,7 @@ public:
 
 protected:
     virtual void BeginPlay() override;
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
  //TimeAlarm
 private:
@@ -106,8 +109,26 @@ private:
     // 18:00 마감 또는 트래블 직전에 스냅샷 기록
     void CaptureDaySnapshot();
 
-    // 다음 틱에 스냅샷 복원 (전 액터 BeginPlay 완료 보장)
+    // 다음 틱에 스냅샷 복원 후 Merchant Day 동기화 (전 액터 BeginPlay 완료 보장)
+    void InitializeExpeditionDay();
+
     void RestoreDaySnapshot();
+
+    /** GameState CurrentDay와 MerchantSubsystem BeginDay를 맞춘다. 서버 전용. */
+    void SyncMerchantToGameDay(int32 Day);
+
+    UMD_SiteDefinition* ResolveExpeditionSite() const;
+
+    UFUNCTION()
+    void HandleGameDayChanged(int32 NewDay);
+
+    /** BP GameMode 또는 PlayerController DebugSite fallback보다 우선한다. */
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+    TObjectPtr<UMD_SiteDefinition> ExpeditionSite;
+
+    /** 표준 난이도 착수금 (`07` §2.1). 계약 최초 1회만 지급된다. */
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+    int32 ExpeditionAdvancePayment = 500;
 
     // 테스트용 콘솔 커맨드: 정식 마감 경로(RequestEndDay) 즉시 호출
     UFUNCTION(Exec)

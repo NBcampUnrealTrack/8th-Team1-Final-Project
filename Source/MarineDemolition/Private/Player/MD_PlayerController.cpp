@@ -20,7 +20,6 @@
 #include "Engine/GameInstance.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 
-#include "Data/Merchant/MD_QuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console, int32 SiteIndex, EMD_Difficulty Difficulty)
