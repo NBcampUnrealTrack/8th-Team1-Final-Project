@@ -2132,6 +2132,9 @@ void AMD_CuttableWall::ScanHighlight(float Duration)
 		Duration = 3.f;
 	}
 
+	// 겹친 인프라(배관·배선)에 실루엣 노출 알림 (벽 MID 유무와 무관하게 먼저 방송)
+	OnWallScanned.Broadcast(this, Duration);
+
 	if (!MID)
 	{
 		return;

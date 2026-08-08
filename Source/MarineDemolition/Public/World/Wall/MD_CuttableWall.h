@@ -135,6 +135,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnStrutCollapsed, AMD_CuttableW
 // 철거 성공(칸막이 절단 또는 지지 상태 지주 절단) 시 한 번 발생
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnWallDemolished, AMD_CuttableWall*, Wall, AActor*, Cutter);
 
+// 스캔 하이라이트 시 발생. 겹친 인프라가 Duration 초 동안 실루엣을 노출하는 데 사용
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnWallScanned, AMD_CuttableWall*, Wall, float, Duration);
+
 // 격벽 타입. 칸막이 = 비내력벽(자유 철거), 지주 = 내력벽 (오절단 시 붕괴)
 UENUM(BlueprintType)
 enum class EMD_WallType : uint8
@@ -174,6 +177,10 @@ public:
 	// 철거 성공 시 방송. 점수 처리는 GameMode가 구독
 	UPROPERTY(BlueprintAssignable, Category = "MD|Wall")
 	FMD_OnWallDemolished OnWallDemolished;
+
+	// 스캔 시 방송. 겹친 배관/배선이 실루엣을 켜는 데 사용 (파라미터 = 스캔 지속시간)
+	UPROPERTY(BlueprintAssignable, Category = "MD|Wall")
+	FMD_OnWallScanned OnWallScanned;
 
 	// Cutter = 절단 버튼을 누른 캐릭터
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
