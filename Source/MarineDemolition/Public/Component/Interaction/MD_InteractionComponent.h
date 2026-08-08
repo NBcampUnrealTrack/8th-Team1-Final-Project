@@ -65,6 +65,9 @@ private:
 	void ServerInteract(AActor* RequestedActor);
 
 	bool TryHoldTarget(AActor* Target);
+	bool TryGrabPhysicsComponent(UPrimitiveComponent* Component, const FVector& PreferredGrabLocation,
+		const FMD_HoldProfile& HoldProfile);
+	bool ValidateInteractionTarget(AActor* RequestedActor) const;
 	bool IsHeldByOtherPawn(const AActor* Target) const;
 	void ReleaseTarget();
 	void UpdateHeldTarget();

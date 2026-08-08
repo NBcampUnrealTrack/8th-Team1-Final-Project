@@ -11,6 +11,8 @@
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "GameplayTagAssetInterface.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "GeometryCollection/GeometryCollectionActor.h"
+#include "GeometryCollection/GeometryCollectionComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 
@@ -114,26 +116,109 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 	APawn* OwnerPawn = GetOwnerPawn();
 	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()) return;
 
+	UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] ServerInteract 수신: %s (holding=%d)"),
+		IsValid(RequestedActor) ? *RequestedActor->GetName() : TEXT("None"), IsHolding() ? 1 : 0);
+
 	if (IsHolding())
 	{
 		ReleaseTarget();
 		return;
 	}
 
-	if (!IsValid(RequestedActor)
-		|| !RequestedActor->Implements<UMD_Interactable>()
-		|| TraceInteractionTarget() != RequestedActor) return;
+	if (!IsValid(RequestedActor) || !RequestedActor->Implements<UMD_Interactable>())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] 거부: 대상 무효 또는 Interactable 아님"));
+		return;
+	}
+
+	if (!ValidateInteractionTarget(RequestedActor))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] 거부: ValidateInteractionTarget 실패"));
+		return;
+	}
 
 	// 핫바는 장비 전용 — 월드 오브젝트 픽업은 물리 운반만 허용 (기획 02 §2.5).
 	const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(RequestedActor);
 	if (TagAsset
 		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics))
 	{
-		TryHoldTarget(RequestedActor);
+		const bool bHeld = TryHoldTarget(RequestedActor);
+		UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] TryHoldTarget 결과 = %d"), bHeld ? 1 : 0);
 		return;
 	}
 
+	UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] 픽업 태그 없음 → 일반 Interact 실행"));
+
 	IMD_Interactable::Execute_Interact(RequestedActor, OwnerPawn);
+}
+
+bool UMD_InteractionComponent::TryGrabPhysicsComponent(
+	UPrimitiveComponent* Component,
+	const FVector& PreferredGrabLocation,
+	const FMD_HoldProfile& HoldProfile)
+{
+	if (!IsValid(Component) || !IsValid(PhysicsHandle))
+	{
+		return false;
+	}
+
+	if (!Component->IsSimulatingPhysics())
+	{
+		Component->SetSimulatePhysics(true);
+		Component->RecreatePhysicsState();
+	}
+
+	if (UGeometryCollectionComponent* Collection = Cast<UGeometryCollectionComponent>(Component))
+	{
+		Collection->WakeAllRigidBodies();
+	}
+
+	TArray<FVector, TInlineAllocator<3>> GrabCandidates;
+	GrabCandidates.Add(PreferredGrabLocation);
+	GrabCandidates.Add(Component->GetCenterOfMass());
+	GrabCandidates.Add(Component->GetComponentLocation());
+
+	auto AttemptGrab = [this, Component](const FVector& GrabLocation, bool bConstrainRotation) -> bool
+	{
+		if (bConstrainRotation)
+		{
+			PhysicsHandle->GrabComponentAtLocationWithRotation(
+				Component,
+				NAME_None,
+				GrabLocation,
+				Component->GetComponentRotation());
+		}
+		else
+		{
+			PhysicsHandle->GrabComponentAtLocation(Component, NAME_None, GrabLocation);
+		}
+
+		return PhysicsHandle->GetGrabbedComponent() == Component;
+	};
+
+	ApplyHoldProfile(HoldProfile);
+	for (const FVector& GrabLocation : GrabCandidates)
+	{
+		if (AttemptGrab(GrabLocation, HoldProfile.bConstrainRotation))
+		{
+			return true;
+		}
+	}
+
+	// GC는 회전 고정 Grab이 실패하는 경우가 많다.
+	FMD_HoldProfile LooseProfile = HoldProfile;
+	LooseProfile.bConstrainRotation = false;
+	ApplyHoldProfile(LooseProfile);
+	for (const FVector& GrabLocation : GrabCandidates)
+	{
+		if (AttemptGrab(GrabLocation, false))
+		{
+			return true;
+		}
+	}
+
+	ApplyHoldProfile(DefaultHoldProfile);
+	return false;
 }
 
 bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
@@ -143,7 +228,11 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 		|| !IsValid(Target) || !IsValid(PhysicsHandle)) return false;
 
 	// 요청이 서버에 도착하기 전에 다른 플레이어가 먼저 잡았을 수 있다.
-	if (IsHeldByOtherPawn(Target)) return false;
+	if (IsHeldByOtherPawn(Target))
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] Hold 거부: 다른 폰이 이미 잡고 있음"));
+		return false;
+	}
 
 	UPrimitiveComponent* Component = nullptr;
 	FVector GrabLocation = FVector::ZeroVector;
@@ -155,7 +244,11 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 		Component = IMD_Grabbable::Execute_GetGrabComponent(Target);
 		const USceneComponent* GrabPoint = IMD_Grabbable::Execute_GetGrabPoint(Target);
 
-		if (!IsValid(Component) || !Component->IsSimulatingPhysics() || !IsValid(GrabPoint)) return false;
+		if (!IsValid(Component) || !IsValid(GrabPoint))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] Hold 거부: GrabComponent/GrabPoint 무효"));
+			return false;
+		}
 
 		GrabLocation = GrabPoint->GetComponentLocation();
 		HoldOffset = IMD_Grabbable::Execute_GetHoldOffset(Target);
@@ -164,30 +257,21 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 	else
 	{
 		Component = Cast<UPrimitiveComponent>(Target->GetRootComponent());
-		if (!IsValid(Component) || !Component->IsSimulatingPhysics()) return false;
+		if (!IsValid(Component))
+		{
+			return false;
+		}
 
 		GrabLocation = Component->GetCenterOfMass();
 	}
 
-	ApplyHoldProfile(HoldProfile);
-
-	if (HoldProfile.bConstrainRotation)
+	if (!TryGrabPhysicsComponent(Component, GrabLocation, HoldProfile))
 	{
-		PhysicsHandle->GrabComponentAtLocationWithRotation(
-			Component,
-			NAME_None,
-			GrabLocation,
-			Component->GetComponentRotation());
-	}
-	else
-	{
-		PhysicsHandle->GrabComponentAtLocation(Component, NAME_None, GrabLocation);
-	}
-
-	if (PhysicsHandle->GetGrabbedComponent() != Component)
-	{
-		ApplyHoldProfile(DefaultHoldProfile);
-		ActiveHoldProfile = DefaultHoldProfile;
+		UE_LOG(LogTemp, Warning,
+			TEXT("[InteractDiag] Hold 거부: PhysicsHandle Grab 실패 (comp=%s sim=%d mass=%.3f)"),
+			*Component->GetName(),
+			Component->IsSimulatingPhysics() ? 1 : 0,
+			Component->GetMass());
 		return false;
 	}
 
@@ -260,7 +344,11 @@ void UMD_InteractionComponent::ReleaseTarget()
 				IMD_Grabbable::Execute_OnCarryEnded(PreviousHeldActor);
 			}
 
-			PreviousHeldActor->SetReplicateMovement(true);
+			// GC 액터는 RepData로 위치를 맞추므로 movement 복제를 다시 켜지 않는다.
+			if (!PreviousHeldActor->IsA(AGeometryCollectionActor::StaticClass()))
+			{
+				PreviousHeldActor->SetReplicateMovement(true);
+			}
 			PreviousHeldActor->ForceNetUpdate();
 		}
 	}
@@ -374,6 +462,13 @@ void UMD_InteractionComponent::StartFollowingHeldActor()
 	}
 
 	HeldGrabPointOffset = Component->GetComponentTransform().InverseTransformPositionNoScale(GrabLocation);
+
+	// GC는 시뮬레이션을 끄면 물리 프록시가 사라져 렌더까지 멈춘다. 운반 중 위치는 RepData가 맞춘다.
+	if (Component->IsA(UGeometryCollectionComponent::StaticClass()))
+	{
+		return;
+	}
+
 	Component->SetSimulatePhysics(false);
 	FollowedComponent = Component;
 }
@@ -479,8 +574,9 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 
 	const FVector TraceEnd = ViewLocation + ViewRotation.Vector() * InteractTraceDistance;
 
+	// GeometryCollection은 복합(complex) 콜리전이 없다. bTraceComplex를 켜면 GC를 통째로 놓친다.
 	FHitResult Hit;
-	FCollisionQueryParams QueryParams;
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(InteractTrace), /*bTraceComplex*/ false);
 	QueryParams.AddIgnoredActor(OwnerPawn);
 
 	if (!GetWorld()->LineTraceSingleByChannel(
@@ -488,13 +584,78 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 		ViewLocation,
 		TraceEnd,
 		MDCollisionChannels::InteractTrace,
-		QueryParams)) return nullptr;
+		QueryParams))
+	{
+		return nullptr;
+	}
 
 	AActor* HitActor = Hit.GetActor();
-	if (!IsValid(HitActor) || !HitActor->Implements<UMD_Interactable>()) return nullptr;
+	if (!IsValid(HitActor) && IsValid(Hit.GetComponent()))
+	{
+		HitActor = Hit.GetComponent()->GetOwner();
+	}
+
+	if (!IsValid(HitActor) || !HitActor->Implements<UMD_Interactable>())
+	{
+		return nullptr;
+	}
 	if (IsHeldByOtherPawn(HitActor)) return nullptr;
 
 	return HitActor;
+}
+
+bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor) const
+{
+	if (!IsValid(RequestedActor))
+	{
+		return false;
+	}
+
+	if (TraceInteractionTarget() == RequestedActor)
+	{
+		return true;
+	}
+
+	// 클라이언트는 조준·하이라이트가 맞는데 서버 trace가 빗나가는 경우가 있다 (지연, GC 콜리전).
+	const APawn* OwnerPawn = GetOwnerPawn();
+	const AController* Controller = IsValid(OwnerPawn) ? OwnerPawn->GetController() : nullptr;
+	if (!Controller || !GetWorld())
+	{
+		return false;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	const FVector ViewDirection = ViewRotation.Vector();
+	const FBox Bounds = RequestedActor->GetComponentsBoundingBox(true);
+	const FVector ClosestPoint = Bounds.GetClosestPointTo(ViewLocation);
+	const FVector ToClosest = ClosestPoint - ViewLocation;
+	const float Distance = ToClosest.Size();
+
+	static constexpr float RangeToleranceCm = 50.f;
+	if (Distance > InteractTraceDistance + RangeToleranceCm)
+	{
+		return false;
+	}
+
+	const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(RequestedActor);
+	const bool bPickupTarget = TagAsset
+		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics);
+
+	// 픽업 대상은 조준 각도 검사를 완화한다 (GC·멀티 지연).
+	const float MinAlignment = bPickupTarget ? 0.05f : 0.2f;
+	if (Distance > KINDA_SMALL_NUMBER)
+	{
+		const float Alignment = FVector::DotProduct(ViewDirection, ToClosest / Distance);
+		if (Alignment < MinAlignment)
+		{
+			return false;
+		}
+	}
+
+	return true;
 }
 
 void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)
@@ -510,6 +671,11 @@ void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)
 	}
 
 	CurrentTarget = NewTarget;
+
+	UE_LOG(LogTemp, Warning,
+		TEXT("[InteractDiag] %s 조준 대상 = %s"),
+		IsValid(GetOwnerPawn()) ? *GetOwnerPawn()->GetName() : TEXT("None"),
+		IsValid(NewTarget) ? *NewTarget->GetName() : TEXT("None"));
 
 	if (IsValid(NewTarget) && NewTarget->Implements<UMD_Interactable>())
 	{
