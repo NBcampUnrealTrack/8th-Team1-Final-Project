@@ -80,6 +80,14 @@ bool AMD_QuestSampleSpawner::MatchesLinkedQuest(const FMD_MainQuestState& QuestS
 	return QuestState.UnlockDay == UnlockDay;
 }
 
+/**
+ * PostInitializeComponents와 BeginPlay 양쪽에서 초기화를 시도한다.
+ *
+ * 레벨에 미리 배치된 스포너는 PostInitializeComponents 시점에 GameInstance가
+ * 이미 살아 있어 그때 구독을 걸 수 있지만, 런타임에 스폰되거나 트래블 직후
+ * 복원되는 경우에는 그 시점에 GameState·Subsystem이 아직 없다. 두 경로 모두
+ * 커버하고 실제 중복 실행은 bSpawnerInitialized가 막는다.
+ */
 void AMD_QuestSampleSpawner::PostInitializeComponents()
 {
 	Super::PostInitializeComponents();
@@ -143,6 +151,7 @@ void AMD_QuestSampleSpawner::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (HasAuthority())
 	{
+		// 레벨 트래블·종료 시 World가 이미 사라졌을 수 있어 한 번만 잡아두고 재사용한다.
 		if (UWorld* World = GetWorld())
 		{
 			if (UGameInstance* GameInstance = World->GetGameInstance())
@@ -152,19 +161,19 @@ void AMD_QuestSampleSpawner::EndPlay(const EEndPlayReason::Type EndPlayReason)
 					MerchantSubsystem->OnMerchantStateChanged.Remove(SubsystemChangedHandle);
 				}
 			}
+
+			if (AMD_GameStateBase* GameState = World->GetGameState<AMD_GameStateBase>())
+			{
+				if (UMD_MerchantComponent* MerchantComponent = GameState->GetMerchantComponent())
+				{
+					MerchantComponent->OnMerchantStateChanged.RemoveDynamic(
+						this, &AMD_QuestSampleSpawner::HandleMerchantStateChanged);
+				}
+			}
 		}
 
 		SubsystemChangedHandle.Reset();
 		bSpawnerInitialized = false;
-
-		if (AMD_GameStateBase* GameState = GetWorld()->GetGameState<AMD_GameStateBase>())
-		{
-			if (UMD_MerchantComponent* MerchantComponent = GameState->GetMerchantComponent())
-			{
-				MerchantComponent->OnMerchantStateChanged.RemoveDynamic(
-					this, &AMD_QuestSampleSpawner::HandleMerchantStateChanged);
-			}
-		}
 	}
 
 	Super::EndPlay(EndPlayReason);
@@ -342,6 +351,19 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 		return;
 	}
 
+	// 기획 09 §1.5: 스폰 개수는 퀘스트 목표 개수와 1:1이고 여분 샘플은 두지 않는다.
+	// 여분이 있으면 그 하나가 깨져도 납품은 가능한데 퀘스트는 파괴로 실패해버려
+	// (§1.5 "실패 — 파괴, 재시도 불가") 회복 불가 상태가 된다. 배치 실수를 여기서 잡는다.
+	if (Definition.RequiredCount > 0 && SamplesToSpawn != Definition.RequiredCount)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[QuestSampleSpawner] %s: [%s] SamplesToSpawn(%d)이 퀘스트 RequiredCount(%d)와 다르다 — 기획 09 §1.5는 1:1을 요구한다"),
+			*GetName(),
+			*Definition.QuestName.ToString(),
+			SamplesToSpawn,
+			Definition.RequiredCount);
+	}
+
 	const int32 SpawnCount = FMath::Max(1, SamplesToSpawn);
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride =
@@ -365,9 +387,13 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 			continue;
 		}
 
-		Sample->SetActorScale3D(SpawnTransform.GetScale3D().IsNearlyZero()
-			? FVector(0.4f)
-			: SpawnTransform.GetScale3D());
+		// 스폰 포인트에 스케일이 잡혀 있을 때만 덮어쓴다. 비어 있으면 샘플 BP의
+		// 기본 스케일을 그대로 살린다 (여기서 기본값을 복제하면 양쪽이 갈라진다).
+		const FVector SpawnScale = SpawnTransform.GetScale3D();
+		if (!SpawnScale.IsNearlyZero())
+		{
+			Sample->SetActorScale3D(SpawnScale);
+		}
 		Sample->Grade = SampleGrade;
 		Sample->SpawnProtectionDuration = SampleSpawnProtectionDuration;
 

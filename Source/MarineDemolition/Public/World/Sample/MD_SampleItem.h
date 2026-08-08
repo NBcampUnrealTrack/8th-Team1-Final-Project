@@ -45,7 +45,14 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sample")
 	TSubclassOf<AActor> BreakDebrisClass;
 
-	/** 스폰 직후 이 시간(초) 동안 손상·파괴 판정을 막는다. 퀘스트 스포너가 값을 지정한다. */
+	/**
+	 * 스폰 직후 이 시간(초) 동안 손상·파괴 판정을 막는다. 퀘스트 스포너가 값을 지정한다.
+	 *
+	 * 기본값이 0이 아닌 이유: 스포너가 만든 샘플은 공중에서 떨어져 착지하고, Day 스냅샷
+	 * 복원으로 되살아난 샘플도 로드 직후 물리가 안정될 때까지 흔들린다. 그 구간의 충격은
+	 * 플레이어가 만든 게 아니라서 손 운반 리스크(기획 02 §4)로 치면 안 된다.
+	 * 보호가 끝나면 정적·동적 구분 없이 평소 임계값으로 판정한다.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest|Spawn",
 		meta = (ClampMin = "0.0", UIMin = "0.0", DisplayName = "Spawn Protection Duration"))
 	float SpawnProtectionDuration = 3.f;
