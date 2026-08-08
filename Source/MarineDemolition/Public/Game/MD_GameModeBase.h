@@ -35,6 +35,9 @@ protected:
 private:
     FTimerHandle CheckGameTimeTimerHandle;
 
+    // 새 게임 또는 불러오기 데이터를 World에 적용하는 함수
+    void ApplyPendingGameDataOperation();
+
     void CheckGameTimeEvents();
 
     void FinalizeReturnStatuses();

@@ -22,7 +22,7 @@ public:
 	// Add More If Need
 };
 
-USTRUCT(BlueprintType)
+USTRUCT(BlueprintType, meta = (HasNativeMake = "/Script/MarineDemolition.MD_BlueprintFunctionLibrary.MakeMD_GameData"))
 struct MARINEDEMOLITION_API FMD_GameData
 {
 	GENERATED_BODY()
@@ -30,32 +30,32 @@ struct MARINEDEMOLITION_API FMD_GameData
 public:
 	// 서로 다른 게임 데이터와 구분하기 위한 고유 값(세이브 이름)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	FString UniqueName;
+	FString UniqueName = TEXT("");
 
 	// 플레이 맵
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	FString MapPackagePath;
+	FString MapPackagePath = TEXT("");
 
 	// 진행중인 퀘스트 아이디
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	FPrimaryAssetId QuestID;
+	FPrimaryAssetId QuestID = FPrimaryAssetId();
 
 	// 게임 점수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	int32 Score;
+	int32 Score = 0;
 
 	// 인게임 재화
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	int32 Credit;
+	int32 Credit = 0;
 
 	// 상인 우호도
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	float MerchantLevel;
+	float MerchantLevel = 0;
 
 	// 인게임 경과 시간
 	// Ex) 2.2 = 2일 + 2시간(인게임) 경과
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	double InGameTime;
+	double InGameTime = 0;
 
 	// 플레이어 데이터
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
@@ -63,7 +63,7 @@ public:
 
 	// 현실 저장 시간
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	FDateTime SaveTime;
+	FDateTime SaveTime = FDateTime::Now();
 
 public:
 	bool operator==(const FMD_GameData& Other) const
@@ -96,5 +96,5 @@ public:
 	TArray<FMD_GameData> UserSaveList;
 
 public:
-	void ApplyMasSaveCountLimit(const int32& MaxAutoSaveCount, const int32& MaxUserSaveCount);
+	void ApplyMaxSaveCountLimit(const int32& MaxAutoSaveCount, const int32& MaxUserSaveCount);
 };

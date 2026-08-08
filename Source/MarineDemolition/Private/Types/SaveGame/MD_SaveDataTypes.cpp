@@ -3,7 +3,7 @@
 
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 
-void UMD_SaveGame::ApplyMasSaveCountLimit(const int32& MaxAutoSaveCount, const int32& MaxUserSaveCount)
+void UMD_SaveGame::ApplyMaxSaveCountLimit(const int32& MaxAutoSaveCount, const int32& MaxUserSaveCount)
 {
 	if (AutoSaveList.Num() > MaxAutoSaveCount)
 	{

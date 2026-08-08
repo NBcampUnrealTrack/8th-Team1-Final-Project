@@ -8,6 +8,7 @@
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+#include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Util/MD_LogUtility.h"
 
 const FString UMD_SaveSlotManager::GameSaveFileName = TEXT("MarineDemolitionGame");
@@ -20,6 +21,9 @@ void UMD_SaveSlotManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UMD_SaveSlotManager::Deinitialize()
 {
+	// GameInstance 종료 이후 보류 데이터가 다음 World에 적용되지 않도록 전환 상태 초기화
+	ResetTemporaryGameData();
+
 	Super::Deinitialize();
 }
 
@@ -33,16 +37,28 @@ bool UMD_SaveSlotManager::SaveGameData(const FString& DataName, bool bIsAuto)
 		return false;
 	}
 
+	// 저장 가능한 데이터의 최대 개수가 유효하지 않은 경우 함수 조기 종료
+	int32 MaxSaveGameDataCount = bIsAuto == true ? MaxAutoSaveSlotCount : MaxUserSaveSlotCount;
+	if (MaxSaveGameDataCount <= 0)
+	{
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 저장기능이 비활성화 되어있습니다."), *UE_CALL_LOCATIONINFO);
+		return false;
+	}
+
 	// 저장되는 게임 데이터 수집
-	FMD_GameData CollectedGameData;
-	bool bDataCollected =CollectGameSessionData(CollectedGameData);
+	bool bDataCollected =CollectGameData();
 	if (bDataCollected == false)
 	{
 		return false;
 	}
 
+	if (bIsAuto == false && DataName.Contains("AutoSave") == true)
+	{
+		return false;
+	}
+
 	// 데이터 이름 설정
-	CollectedGameData.UniqueName = bIsAuto == true ? FString::Printf(TEXT("AutoSave_%d"), AutoSaveIndex + 1) : DataName;
+	TemporaryGameData->UniqueName = bIsAuto == true ? FString::Printf(TEXT("AutoSave_%d"), AutoSaveIndex + 1) : DataName;
 
 	// 데이터가 저장되는 세이브 파일 불러오기
 	USaveGame* LoadedGame = UGameplayStatics::LoadGameFromSlot(GameSaveFileName, 0);
@@ -55,39 +71,23 @@ bool UMD_SaveSlotManager::SaveGameData(const FString& DataName, bool bIsAuto)
 	}
 
 	// 수집한 게임 데이터 추가
-	if (bIsAuto == true)
-	{
-		// 저장되어야 인덱스가 자동 저장 목록 크기보다 작은 경우 해당 인덱스에 위치한 데이터 교체
-		if (AutoSaveIndex < MD_Game->AutoSaveList.Num())
-		{
-			MD_Game->AutoSaveList[AutoSaveIndex] = CollectedGameData;
-		}
-		else
-		{
-			MD_Game->AutoSaveList.Add(CollectedGameData);
-		}
-	}
-	else
-	{
-		// 동일한 이름으로 저장된 게임 데이터 삭제
-		MD_Game->UserSaveList.RemoveAll([&CollectedGameData](const FMD_GameData& Element)
-			{
-				return Element.UniqueName == CollectedGameData.UniqueName;
-			});
+	bool bListUpdated = InsertGameDataToSaveFile(MD_Game, *TemporaryGameData, bIsAuto);
 
-		// 가장 최근의 게임 데이터가 앞순서에 오도록 0번 인덱스에 삽입
-		MD_Game->UserSaveList.Insert(CollectedGameData, 0);
+	if (bListUpdated == false)
+	{
+		return false;
 	}
-
-	// 최대 저장 개수 제한 적용
-	MD_Game->ApplyMasSaveCountLimit(MaxAutoSaveSlotCount, MaxUserSaveSlotCount);
 
 	// 세이브 파일 저장
 	bool bSaveSuccessful = UGameplayStatics::SaveGameToSlot(MD_Game, GameSaveFileName, 0);
 
-	if (bSaveSuccessful == true && bIsAuto == true)
+	if (bSaveSuccessful == true)
 	{
-		AutoSaveIndex = (AutoSaveIndex + 1) % MaxAutoSaveSlotCount;
+		LatestSavedGameData = MakeShared<FMD_GameData>(*TemporaryGameData);
+		if (bIsAuto == true)
+		{
+			AutoSaveIndex = (AutoSaveIndex + 1) % MaxAutoSaveSlotCount;
+		}
 	}
 
 	return bSaveSuccessful;
@@ -95,14 +95,11 @@ bool UMD_SaveSlotManager::SaveGameData(const FString& DataName, bool bIsAuto)
 
 bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 {
-	// 불러온 게임 데이터를 멤버 변수에 저장
-	ActiveGameData = MakeShared<FMD_GameData>(GameData);
-
 	// 현재 맵이 게임 데이터가 저장된 맵과 일치하는지 확인
 	UWorld* World = GetWorld();
 	UPackage* WorldPackage = IsValid(World) == true ? World->GetPackage() : nullptr;
 	FString WorldPackagePath = IsValid(WorldPackage) == true ? UWorld::RemovePIEPrefix(WorldPackage->GetName()) : TEXT("");
-	if (WorldPackagePath.IsEmpty() == true || WorldPackagePath != ActiveGameData->MapPackagePath)
+	if (WorldPackagePath.IsEmpty() == true || WorldPackagePath != GameData.MapPackagePath)
 	{
 		return false;
 	}
@@ -121,18 +118,21 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 		return false;
 	}
 
+	// 불러온 게임 데이터를 멤버 변수에 저장
+	LatestSavedGameData = MakeShared<FMD_GameData>(GameData);
+
 	// 퀘스트 덮어씌우기
 	UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 로드 시 퀘스트 정보 덮어씌우기 보강 필요"), *UE_CALL_LOCATIONINFO);
 
 	// 점수 데이터 덮어씌우기
-	int32 ScoreDelta = ActiveGameData->Score - GameState->GetScore();
+	int32 ScoreDelta = LatestSavedGameData->Score - GameState->GetScore();
 	if (ScoreDelta != 0)
 	{
 		GameState->AddScoreDelta(ScoreDelta);
 	}
 
 	// 인게임 재화 데이터 덮어씌우기
-	int32 CreditDelta = ActiveGameData->Credit - MerchantManager->GetCredits();
+	int32 CreditDelta = LatestSavedGameData->Credit - MerchantManager->GetCredits();
 	if (CreditDelta != 0)
 	{
 		MerchantManager->AddCredits(CreditDelta);
@@ -142,13 +142,12 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 	UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 로드 시 상인 우호도 정보 덮어씌우기 보강 필요"), *UE_CALL_LOCATIONINFO);
 
 	// 인게임 시간 데이터 덮어씌우기
-	int32 InGameDay = FMath::FloorToInt(FMath::Max(ActiveGameData->InGameTime, 1));
+	int32 InGameDay = FMath::FloorToInt(FMath::Max(LatestSavedGameData->InGameTime, 1));
 	if (GameState->GetCurrentDay() != InGameDay)
 	{
 		GameState->SetCurrentDay(InGameDay);
 	}
 
-	PlayerDataLogMap = GameData.PlayerData;
 	// 전체 플레이어 데이터 덮어씌우기
 	const TArray<APlayerState*> PlayerArray = GameState->PlayerArray;
 	for (const APlayerState* PlayerState : PlayerArray)
@@ -159,34 +158,20 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 	return true;
 }
 
-bool UMD_SaveSlotManager::LoadGameData(const FString& DataName)
+void UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameData)
 {
-	// 다른 비동기 I/O가 진행 중이면 활성 슬롯과 완료 순서가 뒤섞이지 않도록 새 요청을 거부한다.
-	if (bAsyncOperationInProgress == true)
-	{
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 다른 비동기 작업이 진행 중입니다."), *UE_CALL_LOCATIONINFO);
+	// 게임 데이터의 이름이 비어있는 경우 새로 시작된 게임으로 간주한다.
+	// bool bIsNewGame = GameData.UniqueName.IsEmpty();
+	PendingGameDataOperation = GameData.UniqueName.IsEmpty() ? EMD_PendingGameDataOperation::NewGame : EMD_PendingGameDataOperation::LoadGame;
+	TemporaryGameData = MakeShared<FMD_GameData>(GameData);
+	return;
+}
 
-		return false;
-	}
-
-	// 세이브 파일로부터 전체 게임 데이터 목록 불러오기
-	const TArray<FMD_GameData> GameDataList = LoadAllGameData();
-
-	// 이름이 동일한 게임 데이터 찾기
-	const FMD_GameData* LoadedGameData = GameDataList.FindByPredicate([&DataName](const FMD_GameData& GameData)
-		{
-			return GameData.UniqueName == DataName;
-		});
-
-	// 찾는 게임 데이터가 존재하지 않으면 함수 조기 종료
-	if (LoadedGameData == nullptr)
-	{
-		return false;
-	}
-
-	bool LoadSuccess = LoadGameDataToWorld(*LoadedGameData);
-
-	return LoadSuccess;
+void UMD_SaveSlotManager::ResetTemporaryGameData()
+{
+	PendingGameDataOperation = EMD_PendingGameDataOperation::None;
+	TemporaryGameData.Reset();
+	return;
 }
 
 bool UMD_SaveSlotManager::RemoveGameData(const FMD_GameData& GameData)
@@ -228,27 +213,48 @@ bool UMD_SaveSlotManager::RemoveGameData(const FMD_GameData& GameData)
 
 void UMD_SaveSlotManager::AsyncSaveGameData(const FString& DataName, bool bIsAuto, const FOnSaveMDGameDataComplete& SaveCompletionDelegate)
 {
-	FMD_GameData CollectedGameData;
-
 	// 다른 비동기 I/O가 진행 중이면 활성 슬롯과 완료 순서가 뒤섞이지 않도록 새 요청을 거부한다.
 	if (bAsyncOperationInProgress == true)
 	{
 		UE_LOG(MarineDemolition, Warning, TEXT("%s 다른 비동기 작업이 진행 중입니다."), *UE_CALL_LOCATIONINFO);
 
-		SaveCompletionDelegate.ExecuteIfBound(CollectedGameData, false);
+		SaveCompletionDelegate.ExecuteIfBound(false);
+		return;
+	}
+
+	// 저장 가능한 데이터의 최대 개수가 유효하지 않은 경우 함수 조기 종료
+	int32 MaxSaveGameDataCount = bIsAuto == true ? MaxAutoSaveSlotCount : MaxUserSaveSlotCount;
+	if (MaxSaveGameDataCount <= 0)
+	{
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 저장기능이 비활성화 되어있습니다."), *UE_CALL_LOCATIONINFO);
+
+		SaveCompletionDelegate.ExecuteIfBound(false);
+		return;
+	}
+
+	if (bIsAuto == false && DataName.Contains("AutoSave") == true)
+	{
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 데이터 저장에 허용되지 않은 이름입니다."), *UE_CALL_LOCATIONINFO);
+
+		SaveCompletionDelegate.ExecuteIfBound(false);
 		return;
 	}
 
 	// 저장해야 하는 데이터 수집 및 결과 확인
-	bool bIsDataCollected = CollectGameSessionData(CollectedGameData);
+	bool bIsDataCollected = CollectGameData();
 	if (bIsDataCollected == false)
 	{
 		UE_LOG(MarineDemolition, Warning, TEXT("%s 저장되는 GameSession 데이터를 수집하지 못하였습니다."), *UE_CALL_LOCATIONINFO);
 
-		SaveCompletionDelegate.ExecuteIfBound(CollectedGameData, false);
+		SaveCompletionDelegate.ExecuteIfBound(false);
 		return;
 	}
-	CollectedGameData.UniqueName = DataName;
+
+	// 비동기 작업 중 현재 게임 데이터가 변경되어도 저장 요청 내용이 유지되도록 하는 값 복사
+	FMD_GameData CollectedGameData = *TemporaryGameData;
+
+	// 요청된 슬롯을 식별하기 위한 저장 데이터 이름 설정
+	CollectedGameData.UniqueName = bIsAuto == true ? FString::Printf(TEXT("AutoSave_%d"), AutoSaveIndex + 1) : DataName;
 
 	// 비동기 작업 진행 상태 플래그 설정
 	bAsyncOperationInProgress = true;
@@ -261,32 +267,18 @@ void UMD_SaveSlotManager::AsyncSaveGameData(const FString& DataName, bool bIsAut
 	return;
 }
 
-void UMD_SaveSlotManager::AsyncLoadGameData(const FString& DataName, const FOnLoadMDGameDataComplete& LoadCompletionDelegate)
-{
-	FMD_GameData LoadedGameData;
-
-	// 다른 비동기 I/O가 진행 중이면 활성 슬롯과 완료 순서가 뒤섞이지 않도록 새 요청을 거부한다.
-	if (bAsyncOperationInProgress == true)
-	{
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 다른 비동기 작업이 진행 중입니다."), *UE_CALL_LOCATIONINFO);
-
-		LoadCompletionDelegate.ExecuteIfBound(LoadedGameData, false);
-		return;
-	}
-
-	bAsyncOperationInProgress = true;
-
-	FAsyncLoadGameFromSlotDelegate AsyncLoadDelegate = FAsyncLoadGameFromSlotDelegate::CreateUObject(this, &ThisClass::HandleLoadGameToLoadDataComplete, DataName, LoadCompletionDelegate);
-
-	UGameplayStatics::AsyncLoadGameFromSlot(GameSaveFileName, 0, AsyncLoadDelegate);
-}
-
 bool UMD_SaveSlotManager::ParseDataFromPlayer(const APlayerState* PlayerState)
 {
 	// 클라이언트 환경 실행 제한
 	if (IsValid(PlayerState) == false || PlayerState->HasAuthority() == false)
 	{
 		return false;
+	}
+
+	// 데이터를 기록할 객체가 존재하지 않는 경우 객체를 새로 생성
+	if (TemporaryGameData.IsValid() == false)
+	{
+		TemporaryGameData = MakeShared<FMD_GameData>();
 	}
 
 	// 플레이어 고유 식별자 얻기
@@ -309,7 +301,7 @@ bool UMD_SaveSlotManager::ParseDataFromPlayer(const APlayerState* PlayerState)
 	}
 
 	// 플레이어 데이터가 저장되는 객체 찾기 또는 추가
-	FMD_PlayerData& PlayerData = PlayerDataLogMap.FindOrAdd(PlayerKey);
+	FMD_PlayerData& PlayerData = TemporaryGameData->PlayerData.FindOrAdd(PlayerKey);
 
 	// 플레이어 캐릭터 참조
 	AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerPawn);
@@ -332,6 +324,18 @@ bool UMD_SaveSlotManager::OverwriteDataToPlayer(const APlayerState* PlayerState)
 		return false;
 	}
 
+	// 로드한 데이터가 존재하지 않은 경우 함수 조기 종료
+	if (LatestSavedGameData.IsValid() == false)
+	{
+		return false;
+	}
+
+	// 새로하기 트래블 중 이전 세션의 플레이어 데이터가 새 Pawn에 적용되지 않도록 하는 복원 제한
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::NewGame)
+	{
+		return false;
+	}
+
 	FUniqueNetIdRepl UniqueNetID = IsValid(PlayerState) == true ? PlayerState->GetUniqueId() : nullptr;
 	FString PlayerKey = UniqueNetID.IsValid() == true ? UniqueNetID.ToString() : TEXT("");
 	PlayerKey = PlayerKey.IsEmpty() == true ? PlayerState->GetPlayerName() : PlayerKey;
@@ -341,7 +345,7 @@ bool UMD_SaveSlotManager::OverwriteDataToPlayer(const APlayerState* PlayerState)
 	}
 
 	// 플레이어 데이터의 존재 여부 검사
-	const FMD_PlayerData* PlayerData = PlayerDataLogMap.Find(PlayerKey);
+	const FMD_PlayerData* PlayerData = LatestSavedGameData->PlayerData.Find(PlayerKey);
 	if (PlayerData == nullptr)
 	{
 		return false;
@@ -366,7 +370,7 @@ bool UMD_SaveSlotManager::OverwriteDataToPlayer(const APlayerState* PlayerState)
 	return true;
 }
 
-TArray<FMD_GameData> UMD_SaveSlotManager::LoadAllGameData()
+TArray<FMD_GameData> UMD_SaveSlotManager::LoadAllGameDataList()
 {
 	TArray<FMD_GameData> OutGameDataList;
 
@@ -377,11 +381,8 @@ TArray<FMD_GameData> UMD_SaveSlotManager::LoadAllGameData()
 	// 불러온 세이브 파일 유효성 확인
 	if (IsValid(MD_Game) == false)
 	{
-		SaveFile = NewObject<UMD_SaveGame>();
 		return OutGameDataList;
 	}
-
-	SaveFile = MD_Game;
 
 	OutGameDataList.Append(MD_Game->AutoSaveList);
 	OutGameDataList.Append(MD_Game->UserSaveList);
@@ -389,8 +390,69 @@ TArray<FMD_GameData> UMD_SaveSlotManager::LoadAllGameData()
 	return OutGameDataList;
 }
 
-bool UMD_SaveSlotManager::CollectGameSessionData(FMD_GameData& OutGameData)
+bool UMD_SaveSlotManager::ApplyPendingGameDataOperation()
 {
+	// 보류 작업이 없는 일반 맵 시작을 변경하지 않기 위한 실행 제한
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::None || TemporaryGameData.IsValid() == false)
+	{
+		return false;
+	}
+
+	// 서버의 목적지 맵이 완전히 시작된 경우에만 게임 데이터 초기화를 수행하기 위한 World 검사
+	UWorld* World = GetWorld();
+	UPackage* WorldPackage = IsValid(World) == true ? World->GetPackage() : nullptr;
+	FString CurrentMapPackagePath = IsValid(WorldPackage) == true ? UWorld::RemovePIEPrefix(WorldPackage->GetName()) : TEXT("");
+	if (IsValid(World) == false || World->GetNetMode() == NM_Client || CurrentMapPackagePath != TemporaryGameData->MapPackagePath)
+	{
+		return false;
+	}
+
+	// 이전 게임의 일일 스냅샷이 새 세션 또는 불러온 데이터 위에 적용되지 않도록 하는 초기화
+	UGameInstance* GameInstance = GetGameInstance();
+	UMD_DayPersistenceSubsystem* DayPersistence = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr;
+	if (IsValid(DayPersistence) == true)
+	{
+		DayPersistence->ClearSnapshot();
+	}
+
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::NewGame && TemporaryGameData.IsValid() == true)
+	{
+		bool bCollectingSuccess = CollectGameData();
+		if (bCollectingSuccess == false)
+		{
+			return false;
+		}
+
+		LatestSavedGameData.Reset();
+		PendingGameDataOperation = EMD_PendingGameDataOperation::None;
+
+		return true;
+	}
+
+	// 불러오기 목적지의 서버 상태와 접속 플레이어에게 선택한 저장 데이터를 적용하는 처리
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::LoadGame && TemporaryGameData.IsValid() == true)
+	{
+		bool bWasApplied = LoadGameDataToWorld(*TemporaryGameData);
+		if (bWasApplied == true)
+		{
+			PendingGameDataOperation = EMD_PendingGameDataOperation::None;
+			return true;
+		}
+	}
+
+	// 손상된 보류 상태가 다음 맵까지 유지되지 않도록 하는 실패 정리
+	ResetTemporaryGameData();
+
+	return false;
+}
+
+bool UMD_SaveSlotManager::CollectGameData()
+{
+	if (TemporaryGameData.IsValid() == false)
+	{
+		TemporaryGameData = MakeShared<FMD_GameData>();
+	}
+
 	// GameState 참조 및 클라이언트 환경 실행 제한
 	UWorld* World = GetWorld();
 	AMD_GameStateBase* GameState = IsValid(World) == true ? World->GetGameState<AMD_GameStateBase>() : nullptr;
@@ -400,9 +462,6 @@ bool UMD_SaveSlotManager::CollectGameSessionData(FMD_GameData& OutGameData)
 		return false;
 	}
 
-	// 게임 데이터를 수집하는 객체 생성
-	FMD_GameData GameData;
-
 	// 맵이 저장된 패키지 얻기 및 유효성 확인
 	UPackage* WorldPackage = World->GetPackage();
 	if (IsValid(WorldPackage) == false)
@@ -411,34 +470,55 @@ bool UMD_SaveSlotManager::CollectGameSessionData(FMD_GameData& OutGameData)
 		return false;
 	}
 
-	// 현재 맵의 패키지 경로 저장(PIE 환경 접두사 제거) 및 저장 시각 기록
-	GameData.MapPackagePath = UWorld::RemovePIEPrefix(WorldPackage->GetName());
+	// 현재 맵의 패키지 경로 저장(PIE 환경 접두사 제거)
+	TemporaryGameData->MapPackagePath = UWorld::RemovePIEPrefix(WorldPackage->GetName());
 	
 	// 현재 진행중인 퀘스트의 아이디 저장
-	GameData.QuestID = FPrimaryAssetId();
+	TemporaryGameData->QuestID = FPrimaryAssetId();
 
 	// 누계 점수 저장
-	GameData.Score = GameState->GetScore();
+	TemporaryGameData->Score = GameState->GetScore();
 
 	// 인게임 재화량 저장
-	GameData.Credit = 0;
+	UMD_MerchantSubsystem* MerchantManager = GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>();
+	TemporaryGameData->Credit = IsValid(MerchantManager) == true ? MerchantManager->GetCredits() : 0;
 
 	// 상인 우호도 저장
-	GameData.MerchantLevel = 0;
+	TemporaryGameData->MerchantLevel = 0;
 
 	// 인게임 경과 시간 저장
-	GameData.InGameTime = GameState->GetCurrentDay() + GameState->GetElapsedGameSeconds();
+	TemporaryGameData->InGameTime = GameState->GetCurrentDay() + GameState->GetElapsedGameSeconds();
 
 	// 현재 접속중인 플레이어 별 데이터 저장
 	for (const APlayerState* PlayerState : GameState->PlayerArray)
 	{
 		ParseDataFromPlayer(PlayerState);
 	}
-	GameData.PlayerData = PlayerDataLogMap;
 
-	GameData.SaveTime = FDateTime::Now();
+	// 게임 데이터 수집 시각 저장
+	TemporaryGameData->SaveTime = FDateTime::Now();
 
-	OutGameData = GameData;
+	return true;
+}
+
+bool UMD_SaveSlotManager::InsertGameDataToSaveFile(UMD_SaveGame* SaveFile, const FMD_GameData& GameData, bool bIsAuto)
+{
+	if (IsValid(SaveFile) == false)
+	{
+		return false;
+	}
+
+	TArray<FMD_GameData>& DataList = bIsAuto == true ? SaveFile->AutoSaveList : SaveFile->UserSaveList;
+
+	DataList.RemoveAll([&GameData](const FMD_GameData& Element)
+		{
+			return Element.UniqueName == GameData.UniqueName;
+		});
+
+	DataList.Insert(GameData, 0);
+
+	SaveFile->ApplyMaxSaveCountLimit(MaxAutoSaveSlotCount, MaxUserSaveSlotCount);
+
 	return true;
 }
 
@@ -451,45 +531,36 @@ void UMD_SaveSlotManager::HandleLoadGameToSaveDataComplete(const FString& Loaded
 	}
 
 	// 수집한 게임 데이터 추가
-	if (bIsAuto == true)
-	{
-		// 저장되어야 인덱스가 자동 저장 목록 크기보다 작은 경우 해당 인덱스에 위치한 데이터 교체
-		if (AutoSaveIndex < MD_Game->AutoSaveList.Num())
-		{
-			MD_Game->AutoSaveList[AutoSaveIndex] = CollectedGameData;
-		}
-		else
-		{
-			MD_Game->AutoSaveList.Add(CollectedGameData);
-		}
-	}
-	else
-	{
-		// 동일한 이름으로 저장된 게임 데이터 삭제
-		MD_Game->UserSaveList.RemoveAll([&CollectedGameData](const FMD_GameData& Element)
-			{
-				return Element.UniqueName == CollectedGameData.UniqueName;
-			});
+	bool bListUpdated = InsertGameDataToSaveFile(MD_Game, CollectedGameData, bIsAuto);
 
-		// 가장 최근의 게임 데이터가 앞순서에 오도록 0번 인덱스에 삽입
-		MD_Game->UserSaveList.Insert(CollectedGameData, 0);
-	}
+	if (bListUpdated == false)
+	{
+		SaveCompletionDelegate.ExecuteIfBound(false);
 
-	// 최대 저장 개수 제한 적용
-	MD_Game->ApplyMasSaveCountLimit(MaxAutoSaveSlotCount, MaxUserSaveSlotCount);
+		// 비동기 작업 진행 상태 플래그 설정
+		bAsyncOperationInProgress = false;
+		return;
+	}
 
 	// 비동기 콜백 바인딩
-	FAsyncSaveGameToSlotDelegate AsyncSaveDelegate = FAsyncSaveGameToSlotDelegate::CreateLambda([this, CollectedGameData, bIsAuto, SaveCompletionDelegate](const FString& SavedSlotName, const int32 UserIndex, bool bSaveSuccess)
+	FAsyncSaveGameToSlotDelegate AsyncSaveDelegate = FAsyncSaveGameToSlotDelegate::CreateWeakLambda(this, [this, CollectedGameData, bIsAuto, SaveCompletionDelegate](const FString& SavedSlotName, const int32 UserIndex, bool bSaveSuccess)
 		{
 			// 세이브 파일 저장 성공 여부 확인
 			bool bWasSuccessful = bSaveSuccess == true && SavedSlotName == GameSaveFileName && UserIndex == 0;
 
-			if (bWasSuccessful == true && bIsAuto == true)
+			SaveCompletionDelegate.ExecuteIfBound(bWasSuccessful);
+
+			if (bWasSuccessful == true)
 			{
-				AutoSaveIndex = (AutoSaveIndex + 1) % MaxAutoSaveSlotCount;
+				// 저장 완료 시점까지 유지된 요청 스냅샷을 최근 저장 데이터로 확정하는 처리
+				LatestSavedGameData = MakeShared<FMD_GameData>(CollectedGameData);
+
+				if (bIsAuto == true)
+				{
+					AutoSaveIndex = (AutoSaveIndex + 1) % MaxAutoSaveSlotCount;
+				}
 			}
 
-			SaveCompletionDelegate.ExecuteIfBound(CollectedGameData, bWasSuccessful);
 
 			// 비동기 작업 진행 상태 플래그 설정
 			bAsyncOperationInProgress = false;
@@ -497,51 +568,4 @@ void UMD_SaveSlotManager::HandleLoadGameToSaveDataComplete(const FString& Loaded
 
 	// 세이브 파일 저장
 	UGameplayStatics::AsyncSaveGameToSlot(MD_Game, GameSaveFileName, 0, AsyncSaveDelegate);
-}
-
-void UMD_SaveSlotManager::HandleLoadGameToLoadDataComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FString DataName, const FOnLoadMDGameDataComplete LoadCompletionDelegate)
-{
-	FMD_GameData* LoadedGameData = nullptr;
-
-	// 세이브 파일 불러오기 성공 여부 확인
-	UMD_SaveGame* MD_Game = Cast<UMD_SaveGame>(LoadedSaveGame);
-	bool bWasSuccessful = IsValid(MD_Game) == true && LoadedSlotName == GameSaveFileName && UserIndex == 0;
-
-	if (bWasSuccessful == false)
-	{
-		LoadCompletionDelegate.ExecuteIfBound(FMD_GameData(), false);
-
-		bAsyncOperationInProgress = false;
-		return;
-	}
-
-	if (LoadedGameData == nullptr)
-	{
-		LoadedGameData = MD_Game->AutoSaveList.FindByPredicate([&DataName](const FMD_GameData& GameData)
-			{
-				return GameData.UniqueName == DataName;
-			});
-	}
-	if (LoadedGameData == nullptr)
-	{
-		LoadedGameData = MD_Game->UserSaveList.FindByPredicate([&DataName](const FMD_GameData& GameData)
-			{
-				return GameData.UniqueName == DataName;
-			});
-	}
-
-	if (LoadedGameData == nullptr)
-	{
-		LoadCompletionDelegate.ExecuteIfBound(FMD_GameData(), false);
-
-		bAsyncOperationInProgress = false;
-		return;
-	}
-
-	bool LoadSuccess = LoadGameDataToWorld(*LoadedGameData);
-
-	LoadCompletionDelegate.ExecuteIfBound(*LoadedGameData, LoadSuccess);
-
-	bAsyncOperationInProgress = false;
-	return;
 }

@@ -104,7 +104,7 @@ public:
 
     // 호스트가 현재 Session을 시작 상태로 전환하고 모든 접속자를 지정 맵으로 이동시키는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
-    void StartGame(TSoftObjectPtr<UWorld> GameMap);
+    void StartGame(const struct FMD_GameData& GameData);
 
     // 최대 MaxSearchResultCount개의 Session을 검색하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
@@ -148,6 +148,9 @@ protected:
     // 요청된 Session에 실제로 참여하는 함수
     void JoinSessionInternal(const FOnlineSessionSearchResult& SessionSearchResult);
 
+    // 준비된 게임 데이터 작업을 유지한 채 Session 시작과 맵 이동 절차를 실행하는 함수
+    void StartGameInternal(const FString& GameMapPackagePath);
+
     // Online Session Interface에서 Create Session을 완료하였을 때 호출되는 함수
     void HandleCreateSessionComplete(FName SessionName, bool bWasSuccessful, const FString SessionMapPackagePath);
 
@@ -162,6 +165,9 @@ protected:
 
     // Online Session Interface에서 Destroy Session을 완료하였을 때 호출되는 함수
     void HandleDestroySessionComplete(FName SessionName, bool bWasSuccessful);
+
+    // Session 시작 또는 맵 이동 실패 시 데이터 저장 시스템의 저장된 데이터 적용 작업을 취소하는 함수
+    void CancelPendingGameDataOperation();
 
     // 생성, 참여 또는 게임 시작 실패 후 남은 NamedSession을 외부 제거 이벤트 없이 정리하는 함수
     void RollbackSession(FName SessionName, EMD_SessionRollbackOperation RollbackOperation);

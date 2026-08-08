@@ -27,6 +27,9 @@ void AMD_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();
 
+    // 게임 맵의 액터 초기화 이후 새 게임 또는 불러오기 상태를 적용하기 위한 다음 틱 예약
+    GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
+
     GetWorldTimerManager().SetTimer(
         CheckGameTimeTimerHandle,
         this,
@@ -45,6 +48,17 @@ void AMD_GameModeBase::BeginPlay()
     // 이전 Day 스냅샷 복원은 전 액터 BeginPlay 이후로 미룸 (벽 오염 초기화보다 늦게)
     GetWorldTimerManager().SetTimerForNextTick(
         this, &AMD_GameModeBase::RestoreDaySnapshot);
+}
+
+void AMD_GameModeBase::ApplyPendingGameDataOperation()
+{
+    // GameInstance 수명으로 트래블을 통과한 데이터 초기화 작업을 실행할 저장 관리자 참조
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true)
+    {
+        SaveSlotManager->ApplyPendingGameDataOperation();
+    }
 }
 
 void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)

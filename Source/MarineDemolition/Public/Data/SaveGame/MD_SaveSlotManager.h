@@ -8,10 +8,20 @@
 #include "MD_SaveSlotManager.generated.h"
 
 // 비동기 저장 완료 시 생성된 슬롯과 성공 여부를 호출부에 전달한다.
-DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnSaveMDGameDataComplete, const FMD_GameData&, GameData, bool, bSuccess);
+DECLARE_DYNAMIC_DELEGATE_OneParam(FOnSaveMDGameDataComplete, bool, bWasSuccessful);
 
-// 비동기 로드 완료 시 적용한 슬롯과 성공 여부를 호출부에 전달한다.
-DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnLoadMDGameDataComplete, const FMD_GameData&, GameData, bool, bSuccess);
+// 맵 이동 이후 실행할 게임 데이터 초기화 방식을 구분하는 상태
+enum class EMD_PendingGameDataOperation : uint8
+{
+	// 목적지 맵에서 실행할 초기화 작업이 없는 상태
+	None,
+
+	// 목적지 맵의 기본 상태로 임시 게임 데이터를 생성하는 작업
+	NewGame,
+
+	// 목적지 맵에 선택한 저장 데이터를 적용하는 작업
+	LoadGame
+};
 
 /**
  * Host의 서버 권위 GameSession 상태를 슬롯 파일로 저장하고 현재 게임에 로드한다.
@@ -43,18 +53,19 @@ protected:
 	// 비동기 함수 실행 상태를 나타내는 플래그
 	bool bAsyncOperationInProgress = false;
 
-	UPROPERTY()
-	TObjectPtr<UMD_SaveGame> SaveFile;
-
-	// 불러온 게임 데이터 또는 최근에 저장한 게임 데이터
-	// 플레이어에게 이전 데이터가 적용되는 기준
-	TSharedPtr<FMD_GameData> ActiveGameData;
-
-	// 이후 게임 데이터 저장 또는 로드 전까지 있었던 모든 플레이어의 데이터를 저장하는 변수
-	// Ex) 게임 데이터 저장 이전에 접속을 종료한 플레이어의 데이터
-	TMap<FString, FMD_PlayerData> PlayerDataLogMap;
-
+	// 자동 저장 목록에서 다음 저장이 덮어쓸 위치
 	int32 AutoSaveIndex = 0;
+
+	// 가장 최근에 저장된 게임 데이터
+	// 게임 저장 또는 로드를 시도하는 경우 업데이트 됨
+	TSharedPtr<FMD_GameData> LatestSavedGameData;
+
+	// 현재 진행중인 게임의 데이터를 저장(기록)하는 변수
+	// 저장되기 이전의 게임 데이터가 기록됨 (로그인/로그아웃 플레이어 등)
+	TSharedPtr<FMD_GameData> TemporaryGameData;
+
+	// 목적지 맵에서 실행할 게임 데이터 초기화 작업
+	EMD_PendingGameDataOperation PendingGameDataOperation = EMD_PendingGameDataOperation::None;
 
 public:
 	// 현재 서버 게임 내용을 Host 로컬 파일에 저장한다.
@@ -65,20 +76,18 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool LoadGameDataToWorld(const FMD_GameData& GameData);
 
-	// 저장된 게임 데이터 내용을 현재 서버의 GameState와 접속 플레이어에게 적용한다.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
-	bool LoadGameData(const FString& DataName);
+	void OnTryStartGameWithGameData(const FMD_GameData& GameData);
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	void ResetTemporaryGameData();
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool RemoveGameData(const FMD_GameData& GameData);
 
 	// 현재의 게임 데이터를 수집하고 비동기로 세이브 파일에 저장하는 함수
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save GameSession")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	void AsyncSaveGameData(const FString& DataName, bool bIsAuto, const FOnSaveMDGameDataComplete& CompletionDelegate);
-
-	// 저장되어있는 게임 데이터를 비동기로 읽은 뒤 현재 서버 GameState와 접속 플레이어에게 적용한다.
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save GameSession")
-	void AsyncLoadGameData(const FString& DataName, const FOnLoadMDGameDataComplete& CompletionDelegate);
 
 	// 현재 플레이어로부터 플레이어 데이터를 추출하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
@@ -89,17 +98,21 @@ public:
 	bool OverwriteDataToPlayer(const APlayerState* PlayerState) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
-	TArray<FMD_GameData> LoadAllGameData();
+	TArray<FMD_GameData> LoadAllGameDataList();
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	// 목적지 게임 맵의 액터 초기화 이후 임시 데이터 생성 또는 저장 데이터 적용을 완료하는 함수
+	bool ApplyPendingGameDataOperation();
 
 protected:
 	// 저장해야 하는 GameSession 데이터를 수집하는 함수
-	bool CollectGameSessionData(FMD_GameData& OutGameData);
+	bool CollectGameData();
+
+	// 요청 시점에 수집된 게임 데이터를 지정된 세이브 파일 목록에 추가하는 함수
+	bool InsertGameDataToSaveFile(UMD_SaveGame* SaveFile, const FMD_GameData& GameData, bool bIsAuto);
 
 	// 비동기 방식으로 Game 데이터 저장이 완료된 경우의 콜백 함수
 	UFUNCTION()
 	void HandleLoadGameToSaveDataComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FMD_GameData CollectedGameData, const bool bIsAuto, const FOnSaveMDGameDataComplete SaveCompletionDelegate);
 
-	// 비동기 방식으로 Game 데이터 로드가 완료된 경우의 콜백 함수
-	UFUNCTION()
-	void HandleLoadGameToLoadDataComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FString DataName, const FOnLoadMDGameDataComplete SaveCompletionDelegate);
 };
