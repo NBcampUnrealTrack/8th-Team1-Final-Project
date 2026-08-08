@@ -256,6 +256,15 @@ void UMD_MerchantSubsystem::NotifySampleDestroyed(EMD_SampleGrade Grade)
 	}
 }
 
+/**
+ * Day 마감 시 미완료 활성 퀘스트를 실패로 확정한다.
+ *
+ * 메인 퀘스트는 Day별 고정 라인이라 **다음날 재시도가 없다.** 마감 시점에 완료되지
+ * 않았으면 그대로 실패다. 기획 09 §1.5의 "미회수 … 다음날 재시도 가능"은 파괴되지
+ * 않은 **샘플 액터가 맵에 남는다**는 뜻이지(같은 표 "미회수 샘플" 행), 그 Day의 메인
+ * 퀘스트가 다음날로 이월된다는 뜻이 아니다. 남은 샘플은 이후 Day의 퀘스트 조건을
+ * 만족시킬 때 쓰인다.
+ */
 void UMD_MerchantSubsystem::ResolveActiveQuestsAtDayEnd(int32 CompletedDay)
 {
 	if (CompletedDay <= 0)
