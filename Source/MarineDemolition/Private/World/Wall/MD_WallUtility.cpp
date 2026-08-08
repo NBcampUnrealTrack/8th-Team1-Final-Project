@@ -47,10 +47,9 @@ void AMD_WallUtility::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (HasAuthority())
-	{
-		LinkOverlappingWalls();
-	}
+	// 모든 머신에서 링크한다. 컷 델리게이트는 서버에서만 방송되어 클라 구독은 무해하고,
+	// 스캔 실루엣은 스캔한 클라 로컬에서 떠야 하므로 클라 파이프도 구독해야 한다.
+	LinkOverlappingWalls();
 }
 
 void AMD_WallUtility::LinkOverlappingWalls()
@@ -135,9 +134,16 @@ bool AMD_WallUtility::WasCutRayThroughMesh(AActor* Cutter) const
 	return Mesh->LineTraceComponent(Hit, Start, End, Params);
 }
 
-void AMD_WallUtility::HandleHostWallScanned(AMD_CuttableWall* Wall, float Duration)
+void AMD_WallUtility::HandleHostWallScanned(AMD_CuttableWall* Wall, float Duration, AActor* Scanner)
 {
-	// 스캔한 벽에 겹친 인프라 → 벽 너머 실루엣 노출 (렌더링 상태라 각 머신 로컬)
+	// 실루엣은 CustomDepth 렌더 상태라 머신 로컬. 스캔한 플레이어가 로컬 조종 중인
+	// 머신에서만 켜야 한다 (다른 클라·서버 호스트 화면엔 안 뜨도록).
+	const APawn* ScannerPawn = Cast<APawn>(Scanner);
+	if (!ScannerPawn || !ScannerPawn->IsLocallyControlled())
+	{
+		return;
+	}
+
 	SetScanSilhouette(true);
 
 	// 지속시간 후 자동 해제 (재스캔 시 타이머 갱신 = 연장)

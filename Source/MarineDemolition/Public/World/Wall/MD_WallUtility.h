@@ -49,9 +49,9 @@ protected:
 	// 절단자 시점 조준 레이가 이 인프라 메시를 관통했는지 (파이프 회피 컷 판정)
 	bool WasCutRayThroughMesh(AActor* Cutter) const;
 
-	// 겹친 벽 스캔 시 호출. 벽 너머로 보이는 실루엣을 Duration 초간 노출
+	// 겹친 벽 스캔 시 호출. 스캐너가 로컬 조종 중인 머신에서만 실루엣을 Duration 초간 노출
 	UFUNCTION()
-	void HandleHostWallScanned(AMD_CuttableWall* Wall, float Duration);
+	void HandleHostWallScanned(AMD_CuttableWall* Wall, float Duration, AActor* Scanner);
 
 	// 스캔 실루엣 on/off (CustomDepth 렌더 토글). 후처리 머티리얼이 스텐실로 엑스레이 처리
 	void SetScanSilhouette(bool bVisible);

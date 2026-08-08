@@ -136,7 +136,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnStrutCollapsed, AMD_CuttableW
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnWallDemolished, AMD_CuttableWall*, Wall, AActor*, Cutter);
 
 // 스캔 하이라이트 시 발생. 겹친 인프라가 Duration 초 동안 실루엣을 노출하는 데 사용
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnWallScanned, AMD_CuttableWall*, Wall, float, Duration);
+// Scanner = 스캔한 캐릭터. 실루엣은 스캐너 로컬 클라에서만 떠야 하므로 전달한다
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FMD_OnWallScanned, AMD_CuttableWall*, Wall, float, Duration, AActor*, Scanner);
 
 // 격벽 타입. 칸막이 = 비내력벽(자유 철거), 지주 = 내력벽 (오절단 시 붕괴)
 UENUM(BlueprintType)
@@ -190,7 +191,7 @@ public:
 	bool CanCut() const;
 	
 	UFUNCTION(BlueprintCallable, Category = "MD|Wall")
-	void ScanHighlight(float Duration = 3.0f);
+	void ScanHighlight(float Duration = 3.0f, AActor* Scanner = nullptr);
 
 	// 충돌점 사이의 오염 셀을 제거
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Contamination")
