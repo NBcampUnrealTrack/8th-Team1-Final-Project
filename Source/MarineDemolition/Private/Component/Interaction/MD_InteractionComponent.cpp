@@ -116,9 +116,6 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 	APawn* OwnerPawn = GetOwnerPawn();
 	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()) return;
 
-	UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] ServerInteract 수신: %s (holding=%d)"),
-		IsValid(RequestedActor) ? *RequestedActor->GetName() : TEXT("None"), IsHolding() ? 1 : 0);
-
 	if (IsHolding())
 	{
 		ReleaseTarget();
@@ -127,13 +124,11 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 
 	if (!IsValid(RequestedActor) || !RequestedActor->Implements<UMD_Interactable>())
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] 거부: 대상 무효 또는 Interactable 아님"));
 		return;
 	}
 
 	if (!ValidateInteractionTarget(RequestedActor))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] 거부: ValidateInteractionTarget 실패"));
 		return;
 	}
 
@@ -142,12 +137,9 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 	if (TagAsset
 		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics))
 	{
-		const bool bHeld = TryHoldTarget(RequestedActor);
-		UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] TryHoldTarget 결과 = %d"), bHeld ? 1 : 0);
+		TryHoldTarget(RequestedActor);
 		return;
 	}
-
-	UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] 픽업 태그 없음 → 일반 Interact 실행"));
 
 	IMD_Interactable::Execute_Interact(RequestedActor, OwnerPawn);
 }
@@ -230,7 +222,6 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 	// 요청이 서버에 도착하기 전에 다른 플레이어가 먼저 잡았을 수 있다.
 	if (IsHeldByOtherPawn(Target))
 	{
-		UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] Hold 거부: 다른 폰이 이미 잡고 있음"));
 		return false;
 	}
 
@@ -246,7 +237,6 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 
 		if (!IsValid(Component) || !IsValid(GrabPoint))
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[InteractDiag] Hold 거부: GrabComponent/GrabPoint 무효"));
 			return false;
 		}
 
@@ -267,11 +257,6 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 
 	if (!TryGrabPhysicsComponent(Component, GrabLocation, HoldProfile))
 	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("[InteractDiag] Hold 거부: PhysicsHandle Grab 실패 (comp=%s sim=%d mass=%.3f)"),
-			*Component->GetName(),
-			Component->IsSimulatingPhysics() ? 1 : 0,
-			Component->GetMass());
 		return false;
 	}
 
@@ -644,8 +629,12 @@ bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor)
 	const bool bPickupTarget = TagAsset
 		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics);
 
-	// 픽업 대상은 조준 각도 검사를 완화한다 (GC·멀티 지연).
-	const float MinAlignment = bPickupTarget ? 0.05f : 0.2f;
+	// 픽업 대상은 GC 콜리전·멀티 지연 때문에 조준 각도를 조금 더 완화한다.
+	// 다만 조준하지 않은 물체까지 서버가 잡아주면 desync·악용 여지가 생기므로
+	// 콘 각도는 사람이 "그걸 보고 있었다"고 인정할 범위로 제한한다.
+	static constexpr float MinAlignmentPickup = 0.5f;    // 약 60°
+	static constexpr float MinAlignmentDefault = 0.7f;   // 약 45°
+	const float MinAlignment = bPickupTarget ? MinAlignmentPickup : MinAlignmentDefault;
 	if (Distance > KINDA_SMALL_NUMBER)
 	{
 		const float Alignment = FVector::DotProduct(ViewDirection, ToClosest / Distance);
@@ -671,11 +660,6 @@ void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)
 	}
 
 	CurrentTarget = NewTarget;
-
-	UE_LOG(LogTemp, Warning,
-		TEXT("[InteractDiag] %s 조준 대상 = %s"),
-		IsValid(GetOwnerPawn()) ? *GetOwnerPawn()->GetName() : TEXT("None"),
-		IsValid(NewTarget) ? *NewTarget->GetName() : TEXT("None"));
 
 	if (IsValid(NewTarget) && NewTarget->Implements<UMD_Interactable>())
 	{

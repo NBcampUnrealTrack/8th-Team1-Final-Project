@@ -58,6 +58,8 @@ void UMD_QuestWidget::NativeDestruct()
 	{
 		OwningMerchantMenu->SetMenuPanelVisible(true);
 	}
+	// 상인 메뉴가 남아 있으면 입력·커서 복구는 메뉴 쪽 NativeDestruct가 처리한다.
+	// 메뉴 없이 단독으로 띄운 경우에만 여기서 되돌린다 (상점 위젯과 동일 원칙).
 	else if (APlayerController* PC = GetOwningPlayer())
 	{
 		if (APawn* Pawn = PC->GetPawn())
