@@ -15,6 +15,7 @@
 #include "GeometryCollection/GeometryCollectionComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
+#include "World/Sample/MD_SampleItem.h"
 
 UMD_InteractionComponent::UMD_InteractionComponent()
 {
@@ -269,6 +270,12 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 
 	// 운반 중에는 위치를 복제하지 않고, 각 머신이 복제된 HeldActor를 HoldPoint로 따라가게 한다.
 	Target->SetReplicateMovement(false);
+
+	// PhysicsHandle이 HoldPoint로 급가속하는 첫 순간의 오탐 충격을 흡수한다.
+	if (AMD_SampleItem* Sample = Cast<AMD_SampleItem>(Target))
+	{
+		Sample->NotifyGrabbed();
+	}
 
 	if (Target->Implements<UMD_Grabbable>())
 	{
