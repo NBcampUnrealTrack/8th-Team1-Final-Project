@@ -678,7 +678,7 @@ void UMD_MultiplayManager::StartGameInternal(const FString& MapPackagePath)
 
     // 현재 호스팅 중인 GameSession 존재 및 대기 상태 확인
     FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_GameSession);
-    if (ExistingSession == nullptr || ExistingSession->bHosting == false || ExistingSession->SessionState != EOnlineSessionState::Pending)
+    if (ExistingSession == nullptr || ExistingSession->SessionState != EOnlineSessionState::Pending)
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s 시작 대기 상태의 호스팅중인 GameSession이 존재하지 않습니다."), *UE_CALL_LOCATIONINFO);
 
