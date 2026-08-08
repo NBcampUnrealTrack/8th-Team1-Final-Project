@@ -53,8 +53,6 @@ protected:
 
 	void SpawnSamples(const FMD_MainQuestState& QuestState);
 
-	void ResolveDefaultSampleClass();
-
 	TArray<FTransform> CollectSpawnTransforms() const;
 
 	UPROPERTY(VisibleAnywhere, Category = "MD|Quest|Spawn")
@@ -85,7 +83,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Spawn")
 	EMD_SampleGrade SampleGrade = EMD_SampleGrade::C;
 
-	/** 스폰할 샘플 액터 클래스. 기본값 `BP_SampleBase`. */
+	/**
+	 * 스폰할 샘플 액터 클래스.
+	 *
+	 * 기본값은 `BP_QuestSampleSpawner` 블루프린트에서 지정한다. C++에 에셋 경로를 박아두면
+	 * 에셋을 옮겼을 때 리다이렉터를 타지 못하고 조용히 끊기므로, 참조는 BP 기본값으로만 둔다.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Spawn")
 	TSubclassOf<AMD_SampleItem> SampleClass;
 

@@ -123,7 +123,6 @@ void AMD_QuestSampleSpawner::InitializeSpawner()
 	}
 
 	bSpawnerInitialized = true;
-	ResolveDefaultSampleClass();
 
 	if (UMD_MerchantSubsystem* MerchantSubsystem = GameInstance->GetSubsystem<UMD_MerchantSubsystem>())
 	{
@@ -189,22 +188,6 @@ void AMD_QuestSampleSpawner::HandleSubsystemStateChanged()
 	TrySpawnForQuestState();
 }
 
-void AMD_QuestSampleSpawner::ResolveDefaultSampleClass()
-{
-	if (SampleClass)
-	{
-		return;
-	}
-
-	static const FSoftClassPath DefaultSampleClassPath(
-		TEXT("/Game/Blueprint/Sample/BP_SampleBase.BP_SampleBase_C"));
-
-	if (UClass* LoadedClass = DefaultSampleClassPath.TryLoadClass<AMD_SampleItem>())
-	{
-		SampleClass = LoadedClass;
-	}
-}
-
 void AMD_QuestSampleSpawner::TrySpawnForQuestState()
 {
 	if (!HasAuthority())
@@ -212,12 +195,10 @@ void AMD_QuestSampleSpawner::TrySpawnForQuestState()
 		return;
 	}
 
-	ResolveDefaultSampleClass();
-
 	if (!SampleClass)
 	{
 		UE_LOG(LogTemp, Warning,
-			TEXT("[QuestSampleSpawner] %s: SampleClass 없음 — BP_SampleBase가 MD_SampleItem을 상속하는지 확인"),
+			TEXT("[QuestSampleSpawner] %s: SampleClass가 비어 있다 — BP_QuestSampleSpawner 기본값에 샘플 BP(BP_SampleBase 등)를 지정하세요"),
 			*GetName());
 		return;
 	}
