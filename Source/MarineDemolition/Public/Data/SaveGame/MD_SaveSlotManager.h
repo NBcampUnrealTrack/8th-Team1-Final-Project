@@ -7,24 +7,15 @@
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 #include "MD_SaveSlotManager.generated.h"
 
-class FSQLiteDatabase;
-
 // 비동기 저장 완료 시 생성된 슬롯과 성공 여부를 호출부에 전달한다.
-DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnSaveMDGameSessionAsyncComplete, const FMD_SaveSlot&, SaveSlot, bool, bSuccess);
+DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnSaveMDGameDataComplete, const FMD_GameData&, GameData, bool, bSuccess);
 
 // 비동기 로드 완료 시 적용한 슬롯과 성공 여부를 호출부에 전달한다.
-DECLARE_DYNAMIC_DELEGATE_ThreeParams(FOnLoadMDGameSessionAsyncComplete, const FMD_SaveSlot&, SaveSlot, const UMD_SaveGameSession*, GameSessionData, bool, bSuccess);
-
-// 저장 슬롯을 사용자 저장과 자동 저장 목록 중 어디에 등록할지 구분한다.
-UENUM(BlueprintType)
-enum class EMD_SaveSlotType : uint8
-{
-	User UMETA(DisplayName = "User Save"),
-	Auto UMETA(DisplayName = "Auto Save")
-};
+DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnLoadMDGameDataComplete, const FMD_GameData&, GameData, bool, bSuccess);
 
 /**
  * Host의 서버 권위 GameSession 상태를 슬롯 파일로 저장하고 현재 게임에 로드한다.
+ * PostSeamlessTravel에서 플레이어 캐릭터에게 데이터 적용하기
  */
 UCLASS(BlueprintType)
 class MARINEDEMOLITION_API UMD_SaveSlotManager : public UGameInstanceSubsystem
@@ -38,77 +29,77 @@ public:
 
 public:
 	// 자동 저장 목록에 할당할 수 있는 최대 슬롯 개수이며 0이면 자동 저장 목록을 사용하지 않는다.
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Save GameSession", meta = (ClampMin = "0", ClampMax = "3"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession", meta = (ClampMin = "1", ClampMax = "9"))
 	int32 MaxAutoSaveSlotCount = 3;
 
 	// 사용자 저장 목록에 할당할 수 있는 최대 슬롯 개수이며 0이면 사용자 저장 목록을 사용하지 않는다.
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Save GameSession", meta = (ClampMin = "0", ClampMax = "5"))
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession", meta = (ClampMin = "1", ClampMax = "20"))
 	int32 MaxUserSaveSlotCount = 5;
 
 protected:
-	// 개별 게임 데이터 슬롯과 충돌하지 않도록 슬롯 목록에 사용하는 고정 내부 파일명이다.
-	static const FString SlotListSaveFileName;
+	// 세이브 파일 이름
+	static const FString GameSaveFileName;
 
-	// SQLite GameSession 데이터베이스가 Host의 Saved 디렉터리에서 사용할 고정 파일명이다.
-	static const FString SQL_DatabaseFileName;
-
-	// 저장 행과 데이터베이스에 기록하여 향후 구조 변경 시 호환 여부를 판단하는 현재 스키마 버전이다.
-	static constexpr int32 SQL_SchemaVersion = 1;
-
-	// 동시에 실행된 저장과 로드가 활성 슬롯을 서로 덮어쓰지 않도록 진행 상태를 제한한다.
+	// 비동기 함수 실행 상태를 나타내는 플래그
 	bool bAsyncOperationInProgress = false;
 
-	// 세이브 슬롯 목록을 보관하고 있는 USaveGame 객체
-	UPROPERTY(Transient)
-	TObjectPtr<UMD_SaveSlotList> SlotList;
+	UPROPERTY()
+	TObjectPtr<UMD_SaveGame> SaveFile;
 
-	// 마지막으로 비동기 저장 또는 로드에 성공한 슬롯을 후속 세션 처리에서 참조한다.
-	TSharedPtr<FMD_SaveSlot> ActiveSlot;
+	// 불러온 게임 데이터 또는 최근에 저장한 게임 데이터
+	// 플레이어에게 이전 데이터가 적용되는 기준
+	TSharedPtr<FMD_GameData> ActiveGameData;
 
-	// 마지막으로 비동기 저장 또는 로드에 성공한 게임 데이터를 GC로부터 보호한다.
-	UPROPERTY(Transient)
-	TObjectPtr<UMD_SaveGameSession> ActiveGameSessionData;
+	// 이후 게임 데이터 저장 또는 로드 전까지 있었던 모든 플레이어의 데이터를 저장하는 변수
+	// Ex) 게임 데이터 저장 이전에 접속을 종료한 플레이어의 데이터
+	TMap<FString, FMD_PlayerData> PlayerDataLogMap;
+
+	int32 AutoSaveIndex = 0;
 
 public:
-	// 현재 서버 게임 내용을 Host 로컬 파일에 저장하고 생성된 슬롯 메타데이터를 반환한다.
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save GameSession")
-	FMD_SaveSlot SaveGameSessionData(const FString& SaveSlotName, EMD_SaveSlotType SaveSlotType = EMD_SaveSlotType::User) const;
+	// 현재 서버 게임 내용을 Host 로컬 파일에 저장한다.
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	bool SaveGameData(const FString& DataName, bool bIsAuto = false);
 
-	// 슬롯 파일의 게임 내용을 현재 서버 GameState와 접속 플레이어에게 복원한다.
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save GameSession")
-	bool LoadGameSessionData(const FMD_SaveSlot& SaveSlot) const;
+	// 저장된 게임 데이터 내용을 현재 서버의 GameState와 접속 플레이어에게 적용한다.
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	bool LoadGameDataToWorld(const FMD_GameData& GameData);
 
-	// 현재 서버 게임 내용을 수집한 뒤 Host 로컬 파일 쓰기를 비동기로 실행한다.
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save GameSession")
-	void SaveGameSessionDataAsync(const FString& SaveSlotName, EMD_SaveSlotType SaveSlotType, const FOnSaveMDGameSessionAsyncComplete& CompletionDelegate);
+	// 저장된 게임 데이터 내용을 현재 서버의 GameState와 접속 플레이어에게 적용한다.
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	bool LoadGameData(const FString& DataName);
 
-	// 슬롯 파일을 비동기로 읽은 뒤 현재 서버 GameState와 접속 플레이어에게 복원한다.
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	bool RemoveGameData(const FMD_GameData& GameData);
+
+	// 현재의 게임 데이터를 수집하고 비동기로 세이브 파일에 저장하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save GameSession")
-	void LoadGameSessionDataAsync(const FMD_SaveSlot& SaveSlot, const FOnLoadMDGameSessionAsyncComplete& CompletionDelegate);
+	void AsyncSaveGameData(const FString& DataName, bool bIsAuto, const FOnSaveMDGameDataComplete& CompletionDelegate);
+
+	// 저장되어있는 게임 데이터를 비동기로 읽은 뒤 현재 서버 GameState와 접속 플레이어에게 적용한다.
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save GameSession")
+	void AsyncLoadGameData(const FString& DataName, const FOnLoadMDGameDataComplete& CompletionDelegate);
+
+	// 현재 플레이어로부터 플레이어 데이터를 추출하는 함수
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	bool ParseDataFromPlayer(const APlayerState* PlayerState);
 
 	// 로드된 게임 데이터에 존재하는 플레이어의 데이터를 현재 플레이어에게 덮어쓰는 함수
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save GameSession")
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool OverwriteDataToPlayer(const APlayerState* PlayerState) const;
 
-	// 로드된 게임 데이터에 존재하는 플레이어의들의 데이터를 전체 플레이어에게 덮어쓰는 함수
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save GameSession")
-	bool OverwriteDataToAllPlayer() const;
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	TArray<FMD_GameData> LoadAllGameData();
 
 protected:
-	// 저장된 슬롯을 종류별 목록에 등록하고 최대 개수 초과 시 가장 오래된 슬롯 파일을 삭제한다.
-	bool AddSlotToList(const FMD_SaveSlot& SaveSlot, EMD_SaveSlotType SaveSlotType) const;
-
-	// 세이브 슬롯 목록이 저장된 세이브 파일을 불러오는 함수
-	void LoadSlotList();
-
 	// 저장해야 하는 GameSession 데이터를 수집하는 함수
-	bool CollectGameSessionData(FMD_SaveSlot& OutSaveSlot, UMD_SaveGameSession* OutGameSessionData) const;
+	bool CollectGameSessionData(FMD_GameData& OutGameData);
 
-	// 비동기 방식으로 GameSession 데이터 저장이 완료된 경우의 콜백 함수
+	// 비동기 방식으로 Game 데이터 저장이 완료된 경우의 콜백 함수
 	UFUNCTION()
-	void HandleSaveGameSessionDataComplete(const FString& SavedSlotName, const int32 UserIndex, bool bSaveSuccess, const FMD_SaveSlot SaveSlot, EMD_SaveSlotType SaveSlotType, const FOnSaveMDGameSessionAsyncComplete CompletionDelegate);
+	void HandleLoadGameToSaveDataComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FMD_GameData CollectedGameData, const bool bIsAuto, const FOnSaveMDGameDataComplete SaveCompletionDelegate);
 
-	// 비동기 방식으로 GameSession 데이터 로드가 완료된 경우의 콜백 함수
+	// 비동기 방식으로 Game 데이터 로드가 완료된 경우의 콜백 함수
 	UFUNCTION()
-	void HandleLoadGameSessionDataComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FMD_SaveSlot SaveSlot, const FOnLoadMDGameSessionAsyncComplete CompletionDelegate);
+	void HandleLoadGameToLoadDataComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FString DataName, const FOnLoadMDGameDataComplete SaveCompletionDelegate);
 };

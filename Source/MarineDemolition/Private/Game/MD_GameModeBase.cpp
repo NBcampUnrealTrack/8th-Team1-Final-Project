@@ -50,7 +50,7 @@ void AMD_GameModeBase::BeginPlay()
 void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
 {
     Super::RestartPlayer(NewPlayer);
-    
+
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
     if (IsValid(SaveSlotManager) == true && IsValid(NewPlayer->PlayerState) == true)
@@ -61,6 +61,13 @@ void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
 
 void AMD_GameModeBase::Logout(AController* Exiting)
 {
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true && IsValid(Exiting->PlayerState) == true)
+    {
+        SaveSlotManager->ParseDataFromPlayer(Exiting->PlayerState);
+    }
+
     Super::Logout(Exiting);
 }
 
