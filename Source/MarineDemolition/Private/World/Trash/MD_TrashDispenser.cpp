@@ -122,10 +122,8 @@ void AMD_TrashDispenser::Interact_Implementation(AActor* Interactor)
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = this;
 	SpawnParams.Instigator = Cast<APawn>(Interactor);
-	// 출구 판정은 위의 IsSpawnAreaClear가 맡는다. DontSpawnIfColliding은 통의 PhysicsActor
-	// 프로파일로 다시 검사하므로 출구 앞에 선 플레이어까지 충돌로 보고 스폰을 취소한다.
-	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
+	SpawnParams.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding;
 
 	FTransform SpawnTransform = SpawnPoint->GetComponentTransform();
 	SpawnTransform.SetScale3D(SpawnTransform.GetScale3D() / GetActorScale3D());
@@ -147,9 +145,6 @@ bool AMD_TrashDispenser::IsSpawnAreaClear() const
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(TrashDispenserClearance), false, this);
 	QueryParams.AddIgnoredActor(this);
 
-	// PhysicsActor 프로파일은 CustomResponses가 비어 있어 모든 채널이 Block이다.
-	// 앞서 나온 통을 집으려면 플레이어가 출구 안까지 들어와야 하므로 Pawn만 예외로 둔다.
-	// 그대로 두면 통을 치운 직후 자기 몸이 출구를 막아 두 번째 보급이 계속 실패한다.
 	FCollisionResponseParams ResponseParams(ECR_Block);
 	ResponseParams.CollisionResponse.SetResponse(ECC_Pawn, ECR_Ignore);
 
