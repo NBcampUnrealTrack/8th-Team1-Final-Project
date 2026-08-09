@@ -9,6 +9,7 @@
 #include "Particles/ParticleSystem.h"
 #include "Sound/SoundBase.h"
 #include "Net/UnrealNetwork.h"
+#include "World/Contamination/MD_Barnacle.h"
 #include "World/Wall/MD_CuttableWall.h"
 
 UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
@@ -188,6 +189,16 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 	if (!TryGetCurrentWallHit(CurrentHit, CurrentWall))
 	{
 		ResetStrokeTracking();
+
+		// 벽이 아니어도 따개비일 수 있다. 둘은 성격이 달라 경로를 갈라 둔다.
+		if (AMD_Barnacle* const CurrentBarnacle =
+				Cast<AMD_Barnacle>(CurrentHit.GetActor()))
+		{
+			ProcessDirectBarnacleContact(CurrentBarnacle, CurrentHit, DeltaTime);
+			return;
+		}
+
+		SetTrackedBarnacle(nullptr);
 		return;
 	}
 
@@ -221,6 +232,27 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 		ConstrainedSurfacePositionCm))
 	{
 		return;
+	}
+
+	// 따개비는 벽에 붙어 자란 입체물이라 헤라가 그 위를 지나갈 수 없다.
+	// 막히면 스트로크를 거기서 끊고, 가려던 속도를 그대로 따개비에 때린다.
+	// 조준 보정보다 먼저 잘라야 시선까지 그 자리에 붙들린다. 뒤로 미루면 자국만
+	// 멈추고 조준은 따개비를 넘어가 "막혔다"가 읽히지 않는다.
+	const FVector2D AttemptedSurfacePositionCm = ConstrainedSurfacePositionCm;
+	AMD_Barnacle* BlockingBarnacle = nullptr;
+	FVector2D BlockedSurfacePositionCm = ConstrainedSurfacePositionCm;
+	const bool bStrokeBlockedByBarnacle =
+		CurrentWall->TryClampScrapeStrokeAgainstObstacles(
+			CurrentSurfaceFace,
+			PreviousSurfacePositionCm,
+			AttemptedSurfacePositionCm,
+			ScrapeToolSpec.BladeWidthCm * 0.5f,
+			BlockedSurfacePositionCm,
+			BlockingBarnacle);
+
+	if (bStrokeBlockedByBarnacle)
+	{
+		ConstrainedSurfacePositionCm = BlockedSurfacePositionCm;
 	}
 
 	// 앞면이 여러 깊이에 걸친 벽에서도 조준 보정이 실제 표면 위에 남도록
@@ -274,6 +306,44 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 				Result,
 				FeedbackLocation);
 		}
+	}
+
+	if (bStrokeBlockedByBarnacle)
+	{
+		// 힘은 실제로 지나간 거리가 아니라 "지나가려 했던" 거리에서 나온다.
+		// 잘라 낸 거리로 재면 따개비에 바짝 붙을수록 약해져, 세게 그을수록
+		// 오히려 안 떨어지는 거꾸로 된 손맛이 된다.
+		const float AttemptedTravelCm = static_cast<float>(
+			FVector2D::Distance(
+				PreviousSurfacePositionCm,
+				AttemptedSurfacePositionCm));
+
+		FVector StrokeStartWorldPosition;
+		FVector StrokeEndWorldPosition;
+		FVector ImpactWorldDirection = FVector::ZeroVector;
+		if (CurrentWall->TryGetScrapeSurfaceWorldPosition(
+				PreviousSurfacePositionCm,
+				CurrentSurfaceFace,
+				StrokeStartWorldPosition)
+			&& CurrentWall->TryGetScrapeSurfaceWorldPosition(
+				AttemptedSurfacePositionCm,
+				CurrentSurfaceFace,
+				StrokeEndWorldPosition))
+		{
+			ImpactWorldDirection =
+				StrokeEndWorldPosition - StrokeStartWorldPosition;
+		}
+
+		SetTrackedBarnacle(BlockingBarnacle);
+		DeliverBarnacleImpact(
+			BlockingBarnacle,
+			CalculateImpactSpeedCmPerSecond(AttemptedTravelCm, DeltaTime),
+			ImpactWorldDirection);
+	}
+	else
+	{
+		// 경로가 트였다. 다음에 다시 걸리면 새 스윙으로 센다.
+		SetTrackedBarnacle(nullptr);
 	}
 
 	PreviousSurfacePositionCm = ConstrainedSurfacePositionCm;
@@ -344,6 +414,112 @@ bool UMD_ScrapeToolComponent::TryGetCurrentWallHit(
 
 	OutWall = Cast<AMD_CuttableWall>(OutHit.GetActor());
 	return IsValid(OutWall);
+}
+
+void UMD_ScrapeToolComponent::ProcessDirectBarnacleContact(
+	AMD_Barnacle* Barnacle,
+	const FHitResult& Hit,
+	const float DeltaTime)
+{
+	if (!IsValid(Barnacle) || Barnacle->IsFullyRemoved())
+	{
+		SetTrackedBarnacle(nullptr);
+		return;
+	}
+
+	SetTrackedBarnacle(Barnacle);
+
+	// 처음 맞췄으면 기준점만 잡는다. 옮겨오는 동안의 시선 이동을 속도로 세면
+	// 겨냥하는 것만으로 첫 타격이 들어간다.
+	if (!bHasPreviousBarnacleHitLocation)
+	{
+		PreviousBarnacleHitLocation = Hit.ImpactPoint;
+		bHasPreviousBarnacleHitLocation = true;
+		return;
+	}
+
+	const FVector TravelDelta = Hit.ImpactPoint - PreviousBarnacleHitLocation;
+	const float TravelCentimeters = static_cast<float>(TravelDelta.Size());
+
+	// 속도는 프레임 간 변화량이므로 문턱 미만이어도 기준점을 매 프레임 갱신한다.
+	// 갱신을 미루면 여러 프레임이 한 프레임의 이동으로 뭉쳐 속도가 부풀려진다.
+	PreviousBarnacleHitLocation = Hit.ImpactPoint;
+
+	DeliverBarnacleImpact(
+		Barnacle,
+		CalculateImpactSpeedCmPerSecond(TravelCentimeters, DeltaTime),
+		TravelDelta);
+}
+
+void UMD_ScrapeToolComponent::DeliverBarnacleImpact(
+	AMD_Barnacle* Barnacle,
+	const float ImpactSpeedCmPerSecond,
+	const FVector& ImpactWorldDirection)
+{
+	const float MinimumImpactSpeed = FMath::Max(
+		0.0f,
+		ScrapeToolSpec.BarnacleMinimumImpactSpeedCmPerSecond);
+
+	// 스윙이 끝나 속도가 충분히 떨어지면 다음 타격을 준비한다. 최소 속도를 그대로
+	// 빗장으로 쓰면 그 근처에서 진동할 때 준비와 발사가 매 프레임 번갈아 일어난다.
+	if (ImpactSpeedCmPerSecond <= MinimumImpactSpeed * 0.5f)
+	{
+		bBarnacleImpactArmed = true;
+	}
+
+	if (!IsValid(Barnacle)
+		|| !bBarnacleImpactArmed
+		|| ImpactSpeedCmPerSecond < MinimumImpactSpeed)
+	{
+		return;
+	}
+
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		// 클라이언트에서도 빗장은 걸어 둔다. 서버로 옮겨도 리듬이 같아야 한다.
+		bBarnacleImpactArmed = false;
+		return;
+	}
+
+	bBarnacleImpactArmed = false;
+
+	if (Barnacle->ApplyScrapeImpact(
+			ScrapeToolSpec.CalculateBarnacleImpactWork(ImpactSpeedCmPerSecond),
+			ImpactWorldDirection))
+	{
+		// 떨어져 나가면 액터가 파괴되므로 추적을 끊는다.
+		SetTrackedBarnacle(nullptr);
+	}
+}
+
+void UMD_ScrapeToolComponent::SetTrackedBarnacle(AMD_Barnacle* Barnacle)
+{
+	if (TrackedBarnacle.Get() == Barnacle)
+	{
+		return;
+	}
+
+	TrackedBarnacle = Barnacle;
+	PreviousBarnacleHitLocation = FVector::ZeroVector;
+	bHasPreviousBarnacleHitLocation = false;
+	bBarnacleImpactArmed = true;
+}
+
+float UMD_ScrapeToolComponent::CalculateImpactSpeedCmPerSecond(
+	const float TravelCentimeters,
+	const float DeltaTime)
+{
+	// StartScraping이 첫 프레임을 DeltaTime 0으로 부른다. 여기서 막지 않으면
+	// 입력을 누른 순간 무한대 속도로 따개비가 떨어진다.
+	if (!FMath::IsFinite(TravelCentimeters)
+		|| TravelCentimeters <= 0.0f
+		|| !FMath::IsFinite(DeltaTime)
+		|| DeltaTime <= UE_SMALL_NUMBER)
+	{
+		return 0.0f;
+	}
+
+	return TravelCentimeters / DeltaTime;
 }
 
 void UMD_ScrapeToolComponent::BeginStrokeTracking(

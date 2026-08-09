@@ -20,6 +20,9 @@ namespace MDGameplayTags
 	/** 물리 보관함에 담을 수 있는 오염물 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Contamination);
 
+	/** 물리 보관함에 담을 수 있는 따개비. 기획 02 §1.5가 오염물과 따로 나열한다 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Barnacle);
+
 	/** 물리 보관함에 담을 수 있는 샘플 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Sample);
 

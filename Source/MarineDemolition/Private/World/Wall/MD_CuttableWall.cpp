@@ -22,6 +22,8 @@
 #include "Net/UnrealNetwork.h"
 #include "RHITypes.h"
 #include "Stats/Stats.h"
+#include "World/Contamination/MD_Barnacle.h"
+#include "World/Contamination/MD_ContaminationItem.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
 
@@ -314,49 +316,117 @@ void AMD_CuttableWall::ReapplyContaminationPatch(float Amount, int32 PatchRadius
 
 	const int32 GridWidth = ContaminationGridDimensions.X;
 	const int32 GridHeight = ContaminationGridDimensions.Y;
-	if (ContaminationCells.Num() == 0 || GridWidth <= 0 || GridHeight <= 0)
+	int32 CellsPerFace = 0;
+	int32 TotalCellCount = 0;
+	if (ContaminationCells.Num() == 0
+		|| GridWidth <= 0
+		|| GridHeight <= 0
+		|| !FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
+			ContaminationGridDimensions,
+			CellsPerFace,
+			TotalCellCount)
+		|| ContaminationCells.Num() != TotalCellCount)
 	{
 		return;
 	}
 
-	// 무작위 중심 주변 사각 패치를 리필해 얼룩처럼 보이게
-	const FIntPoint Center(FMath::RandRange(0, GridWidth - 1), FMath::RandRange(0, GridHeight - 1));
+	// NaN/무한대가 그대로 들어가면 셀 값이 오염돼 이후 모든 판정이 무너진다.
+	const float SafeAmount = FMath::IsFinite(Amount)
+		? FMath::Clamp(Amount, 0.0f, 1.0f)
+		: 0.0f;
+	const int32 SafePatchRadiusCells = FMath::Max(0, PatchRadiusCells);
+	if (SafeAmount <= UE_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	// 기획 03 §3 "새로운 소형 오염 분출" — 앞뒤가 각자 따로 분출한다.
+	// 같은 좌표를 양면에 쓰면 벽을 관통한 하나의 얼룩처럼 보이는데,
+	// 기획이 말하는 것은 면마다 독립적으로 생기는 분출이다.
+	static constexpr EMD_ScrapeSurfaceFace PatchTargetFaces[] = {
+		EMD_ScrapeSurfaceFace::Front,
+		EMD_ScrapeSurfaceFace::Back };
 
 	TArray<FMD_ScrapeCellChange> Changes;
-	for (int32 Y = Center.Y - PatchRadiusCells; Y <= Center.Y + PatchRadiusCells; ++Y)
+	for (const EMD_ScrapeSurfaceFace TargetFace : PatchTargetFaces)
 	{
-		for (int32 X = Center.X - PatchRadiusCells; X <= Center.X + PatchRadiusCells; ++X)
+		const FIntPoint Center(
+			FMath::RandRange(0, GridWidth - 1),
+			FMath::RandRange(0, GridHeight - 1));
+
+		for (int32 Y = Center.Y - SafePatchRadiusCells;
+			Y <= Center.Y + SafePatchRadiusCells;
+			++Y)
 		{
-			if (X < 0 || X >= GridWidth || Y < 0 || Y >= GridHeight)
+			for (int32 X = Center.X - SafePatchRadiusCells;
+				X <= Center.X + SafePatchRadiusCells;
+				++X)
 			{
-				continue;
+				if (X < 0 || X >= GridWidth || Y < 0 || Y >= GridHeight)
+				{
+					continue;
+				}
+
+				// 면 내부 번호를 그대로 쓰면 최대값이 CellsPerFace - 1이라
+				// 뒷면 구간 [CellsPerFace, 2 * CellsPerFace)에 영영 닿지 못한다.
+				const int32 CombinedCellIndex =
+					FMD_ScrapeSurfaceLayout::ToCombinedCellIndex(
+						TargetFace,
+						X + Y * GridWidth,
+						CellsPerFace);
+				if (!ContaminationCells.IsValidIndex(CombinedCellIndex))
+				{
+					continue;
+				}
+
+				FMD_ScrapeSurfaceCell& Cell =
+					ContaminationCells[CombinedCellIndex];
+				const float PreviousRemaining = Cell.RemainingContamination;
+				const float TargetRemaining = FMath::Clamp(
+					PreviousRemaining + SafeAmount,
+					0.0f,
+					1.0f);
+				if (FMath::IsNearlyEqual(
+					PreviousRemaining,
+					TargetRemaining,
+					UE_SMALL_NUMBER))
+				{
+					continue;
+				}
+
+				Cell.RemainingContamination = TargetRemaining;
+
+				// 새 분출은 이 셀이 짊어진 오염 총량 자체를 늘린다.
+				// InitialContamination은 제거율의 분모이자 마스크·완료 판정의
+				// 게이트다. 여기를 같이 올리지 않으면 원래 깨끗했던 칸은
+				// 마스크가 0으로 고정되고(MD_ScrapeMaskAtlas.cpp SafeInitial 분기)
+				// 완료 판정에서도 건너뛰어져(MD_ScrapeEvaluator.cpp IsSurfaceFullyClean)
+				// 새 오염이 보이지도 세어지지도 않는다.
+				Cell.InitialContamination = FMath::Max(
+					Cell.InitialContamination,
+					TargetRemaining);
+
+				FMD_ScrapeCellChange Change;
+				Change.CellIndex = CombinedCellIndex;
+				Change.GridCoordinate = FIntPoint(X, Y);
+				// 재도포는 제거가 아니므로 제거량은 0이고 깨끗해지지도 않는다.
+				Change.RemovedAmount = 0.0f;
+				Change.RemainingAmountAfter = Cell.RemainingContamination;
+				Change.bBecameClean = false;
+				Changes.Add(Change);
 			}
-
-			const int32 Index = X + Y * GridWidth;
-			FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
-			const float PreviousRemaining = Cell.RemainingContamination;
-			const float TargetRemaining = FMath::Clamp(
-				Cell.RemainingContamination + Amount, 0.f, Cell.InitialContamination);
-			if (FMath::IsNearlyEqual(
-				PreviousRemaining,
-				TargetRemaining,
-				UE_SMALL_NUMBER))
-			{
-				continue;
-			}
-
-			Cell.RemainingContamination = TargetRemaining;
-
-			FMD_ScrapeCellChange Change;
-			Change.CellIndex = Index;
-			Change.GridCoordinate = FIntPoint(X, Y);
-			Change.RemainingAmountAfter = Cell.RemainingContamination;
-			Changes.Add(Change);
 		}
 	}
 
+	if (Changes.IsEmpty())
+	{
+		return;
+	}
+
 	RefreshContaminationCleanRatioCache();
-	// 오염이 다시 생겼으므로 완료 방송을 다시 허용
+	// 양면이 모두 오염됐으면 완료 방송이 다시 무장된다. 한쪽 면이 아직 깨끗하면
+	// OR 게이트상 벽은 여전히 "완료"라 무장되지 않는다. 이 의미가 맞는지는
+	// 별도 결정 대기 중이며, 같은 한 줄이 RestoreContaminationCells에도 있다.
 	bContaminationCompletionBroadcast = IsContaminationFullyRemoved();
 	UpdateContaminationMask(Changes);
 	UpdateContaminationVisualization(Changes);
@@ -365,17 +435,33 @@ void AMD_CuttableWall::ReapplyContaminationPatch(float Amount, int32 PatchRadius
 
 void AMD_CuttableWall::ExportContaminationDeltas(
 	TArray<int32>& OutCellIndices,
+	TArray<float>& OutInitialAmounts,
 	TArray<float>& OutRemainingAmounts) const
 {
 	OutCellIndices.Reset();
+	OutInitialAmounts.Reset();
 	OutRemainingAmounts.Reset();
 
 	for (int32 Index = 0; Index < ContaminationCells.Num(); ++Index)
 	{
 		const FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
-		if (Cell.RemainingContamination != Cell.InitialContamination)
+
+		// 긁힌 셀은 남은 양이 총량보다 적다.
+		const bool bScraped =
+			Cell.RemainingContamination != Cell.InitialContamination;
+
+		// 밤샘 분출을 맞았지만 아직 손대지 않은 셀은 남은 양과 총량이 같아
+		// 위 조건에 걸리지 않는다. 생성 기준값과 비교해야 잡힌다.
+		// 기준 배열이 없거나 길이가 어긋나면 판단 근거가 없으므로 분출로 보지 않는다.
+		const bool bBurstSinceGeneration =
+			ContaminationGeneratedInitialAmounts.IsValidIndex(Index)
+			&& Cell.InitialContamination
+				!= ContaminationGeneratedInitialAmounts[Index];
+
+		if (bScraped || bBurstSinceGeneration)
 		{
 			OutCellIndices.Add(Index);
+			OutInitialAmounts.Add(Cell.InitialContamination);
 			OutRemainingAmounts.Add(Cell.RemainingContamination);
 		}
 	}
@@ -383,9 +469,15 @@ void AMD_CuttableWall::ExportContaminationDeltas(
 
 void AMD_CuttableWall::RestoreContaminationCells(
 	const TArray<int32>& CellIndices,
+	const TArray<float>& InitialAmounts,
 	const TArray<float>& RemainingAmounts)
 {
-	if (!HasAuthority() || CellIndices.Num() != RemainingAmounts.Num())
+	// 총량 배열은 이 필드가 없던 구세션 스냅샷을 위해 비어 있어도 받아준다.
+	// 그 경우 총량은 생성값을 그대로 두고 남은 오염량만 복원한다.
+	const bool bHasInitialAmounts = !InitialAmounts.IsEmpty();
+	if (!HasAuthority()
+		|| CellIndices.Num() != RemainingAmounts.Num()
+		|| (bHasInitialAmounts && CellIndices.Num() != InitialAmounts.Num()))
 	{
 		return;
 	}
@@ -412,6 +504,15 @@ void AMD_CuttableWall::RestoreContaminationCells(
 		}
 
 		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
+
+		// 총량을 먼저 세운다. 남은 오염량이 총량으로 클램프되므로 순서가 뒤바뀌면
+		// 밤샘 분출로 올라간 값이 생성 기준값까지 깎여 얼룩이 사라진다.
+		if (bHasInitialAmounts && FMath::IsFinite(InitialAmounts[i]))
+		{
+			Cell.InitialContamination = FMath::Clamp(
+				InitialAmounts[i], 0.0f, 1.0f);
+		}
+
 		Cell.RemainingContamination = FMath::Clamp(
 			RemainingAmounts[i], 0.f, Cell.InitialContamination);
 
@@ -598,6 +699,188 @@ bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromHit(
 			OutSurfacePositionCm);
 }
 
+bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromWorldPoint(
+	const FVector& WorldPoint,
+	const FVector& WorldNormal,
+	FVector2D& OutSurfacePositionCm,
+	EMD_ScrapeSurfaceFace& OutSurfaceFace)
+{
+	OutSurfacePositionCm = FVector2D::ZeroVector;
+	OutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
+
+	if (!bContaminationSurfaceInitialized)
+	{
+		InitializeContaminationSurface();
+	}
+
+	if (!Mesh || WorldPoint.ContainsNaN() || WorldNormal.ContainsNaN())
+	{
+		return false;
+	}
+
+	return FMD_ScrapeSurfaceGeometry::TryResolveSurfaceFaceFromImpactNormal(
+			WorldNormal,
+			Mesh->GetComponentTransform(),
+			ResolvedContaminationSurfaceNormalAxis,
+			MinimumContaminationFaceNormalDot,
+			OutSurfaceFace)
+		&& TryProjectWorldPointToContaminationSurface(
+			WorldPoint,
+			OutSurfacePositionCm);
+}
+
+bool AMD_CuttableWall::RegisterScrapeObstacle(AMD_Barnacle* const Barnacle)
+{
+	if (!IsValid(Barnacle))
+	{
+		return false;
+	}
+
+	const float RadiusCm = Barnacle->GetScrapeBlockRadiusCm();
+	if (!FMath::IsFinite(RadiusCm) || RadiusCm <= 0.0f)
+	{
+		return false;
+	}
+
+	// 따개비의 Up이 곧 부착면의 법선이다. 배치기가 그렇게 세워 붙인다.
+	FMD_ScrapeSurfaceObstacle Obstacle;
+	Obstacle.Barnacle = Barnacle;
+	Obstacle.RadiusCm = RadiusCm;
+	if (!TryGetScrapeSurfacePositionFromWorldPoint(
+			Barnacle->GetActorLocation(),
+			Barnacle->GetActorUpVector(),
+			Obstacle.CenterCm,
+			Obstacle.SurfaceFace))
+	{
+		return false;
+	}
+
+	// 이미 등록된 것을 다시 넣으면 같은 자리를 두 번 막는다.
+	for (FMD_ScrapeSurfaceObstacle& Existing : ScrapeObstacles)
+	{
+		if (Existing.Barnacle.Get() == Barnacle)
+		{
+			Existing = Obstacle;
+			return true;
+		}
+	}
+
+	ScrapeObstacles.Add(Obstacle);
+	return true;
+}
+
+void AMD_CuttableWall::UnregisterScrapeObstacle(AMD_Barnacle* const Barnacle)
+{
+	// 죽은 참조도 함께 정리한다. 따개비는 Destroy로 사라지므로 등록만 남기 쉽다.
+	ScrapeObstacles.RemoveAll(
+		[Barnacle](const FMD_ScrapeSurfaceObstacle& Obstacle)
+		{
+			const AMD_Barnacle* const Registered = Obstacle.Barnacle.Get();
+			return Registered == nullptr || Registered == Barnacle;
+		});
+}
+
+bool AMD_CuttableWall::TryClampScrapeStrokeAgainstObstacles(
+	const EMD_ScrapeSurfaceFace SurfaceFace,
+	const FVector2D& StartPositionCm,
+	const FVector2D& EndPositionCm,
+	const float ToolHalfWidthCm,
+	FVector2D& OutClampedEndPositionCm,
+	AMD_Barnacle*& OutBlockingBarnacle) const
+{
+	OutClampedEndPositionCm = EndPositionCm;
+	OutBlockingBarnacle = nullptr;
+
+	if (ScrapeObstacles.IsEmpty()
+		|| StartPositionCm.ContainsNaN()
+		|| EndPositionCm.ContainsNaN()
+		|| !FMath::IsFinite(ToolHalfWidthCm))
+	{
+		return false;
+	}
+
+	const FVector2D StrokeDelta = EndPositionCm - StartPositionCm;
+	const double StrokeLengthSquared = StrokeDelta.SizeSquared();
+	if (StrokeLengthSquared <= UE_DOUBLE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const float SafeHalfWidthCm = FMath::Max(0.0f, ToolHalfWidthCm);
+
+	// 여러 부착물이 경로에 걸리면 가장 먼저 만나는 것이 막는다.
+	double EarliestHitAlpha = TNumericLimits<double>::Max();
+	AMD_Barnacle* EarliestBarnacle = nullptr;
+
+	for (const FMD_ScrapeSurfaceObstacle& Obstacle : ScrapeObstacles)
+	{
+		AMD_Barnacle* const Barnacle = Obstacle.Barnacle.Get();
+		if (!IsValid(Barnacle) || Obstacle.SurfaceFace != SurfaceFace)
+		{
+			continue;
+		}
+
+		const double BlockRadius =
+			static_cast<double>(Obstacle.RadiusCm) + SafeHalfWidthCm;
+		if (BlockRadius <= 0.0)
+		{
+			continue;
+		}
+
+		const FVector2D StartToCenter = StartPositionCm - Obstacle.CenterCm;
+		const double StartDistanceSquared = StartToCenter.SizeSquared();
+		const double ApproachDot = FVector2D::DotProduct(StartToCenter, StrokeDelta);
+
+		if (StartDistanceSquared <= BlockRadius * BlockRadius)
+		{
+			// 시작점이 이미 안쪽이다. 멀어지는 방향은 그대로 두고, 더 파고드는
+			// 방향만 그 자리에 묶는다. 둘 다 막으면 스트로크가 영영 풀리지 않는다.
+			if (ApproachDot < 0.0 && 0.0 < EarliestHitAlpha)
+			{
+				EarliestHitAlpha = 0.0;
+				EarliestBarnacle = Barnacle;
+			}
+			continue;
+		}
+
+		// 선분 대 원. 바깥에서 출발했으므로 먼저 닿는 해만 의미가 있다.
+		const double QuadraticB = 2.0 * ApproachDot;
+		const double QuadraticC =
+			StartDistanceSquared - BlockRadius * BlockRadius;
+		const double Discriminant =
+			QuadraticB * QuadraticB - 4.0 * StrokeLengthSquared * QuadraticC;
+		if (Discriminant < 0.0)
+		{
+			continue;
+		}
+
+		const double HitAlpha =
+			(-QuadraticB - FMath::Sqrt(Discriminant)) / (2.0 * StrokeLengthSquared);
+		if (HitAlpha < 0.0 || HitAlpha > 1.0 || HitAlpha >= EarliestHitAlpha)
+		{
+			continue;
+		}
+
+		EarliestHitAlpha = HitAlpha;
+		EarliestBarnacle = Barnacle;
+	}
+
+	if (!EarliestBarnacle)
+	{
+		return false;
+	}
+
+	// 경계에 정확히 붙이지 않고 조금 앞에서 세운다.
+	const double StrokeLength = FMath::Sqrt(StrokeLengthSquared);
+	const double MarginAlpha = ScrapeObstacleContactMarginCm / StrokeLength;
+	const double ClampedAlpha =
+		FMath::Clamp(EarliestHitAlpha - MarginAlpha, 0.0, 1.0);
+
+	OutClampedEndPositionCm = StartPositionCm + StrokeDelta * ClampedAlpha;
+	OutBlockingBarnacle = EarliestBarnacle;
+	return true;
+}
+
 bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPosition(
 	const FVector2D& SurfacePositionCm,
 	const EMD_ScrapeSurfaceFace SurfaceFace,
@@ -748,6 +1031,13 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStrokeWithToolSpec(
 	UpdateContaminationMask(Result.CellChanges);
 	UpdateContaminationVisualization(Result.CellChanges);
 	PublishContaminationChanges(Result.CellChanges);
+
+	// 기획 02 §1 규칙 3: 긁어낸 오염물은 월드 물리 오브젝트로 떨어진다.
+	// 긁기가 끝난 지점에 떨군다. 스트로크는 짧아서 시작점과 큰 차이가 없다.
+	DropContaminationItems(
+		Stroke.SurfaceFace,
+		Result.RemovedContaminationAmount,
+		Stroke.EndPositionCm);
 
 	// 어느 한 면이 처음 완료되는 전환에서 한 번만 방송
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeFullyRemovedCheck);
@@ -1040,6 +1330,11 @@ void AMD_CuttableWall::InitializeContaminationSurface()
 	CachedFrontContaminationCleanRatio = 0.0f;
 	CachedBackContaminationCleanRatio = 0.0f;
 	ContaminationCells.Reset();
+	ContaminationGeneratedInitialAmounts.Reset();
+	// 표면을 새로 만들면 아직 덩어리가 되지 못한 제거량도 같이 버린다.
+	// 남겨 두면 Day가 바뀐 직후 첫 스트로크에 오염물이 갑자기 튀어나온다.
+	PendingContaminationItemAmounts[0] = 0.0f;
+	PendingContaminationItemAmounts[1] = 0.0f;
 	ReleaseContaminationMask();
 	if (HasAuthority())
 	{
@@ -1106,6 +1401,14 @@ void AMD_CuttableWall::InitializeContaminationSurface()
 			Warning,
 			TEXT("MD_CuttableWall::InitializeContaminationSurface - %s의 절차형 초기 오염 생성에 실패해 균일한 초기값을 유지합니다."),
 			*GetName());
+	}
+
+	// 여기까지가 "생성이 만들어 낸 값"이다. 밤샘 분출은 이 뒤에 총량을 올리므로,
+	// 무엇이 생성값이었는지 알아야 Day 스냅샷에 실을 셀을 가려낼 수 있다.
+	ContaminationGeneratedInitialAmounts.Reset(ContaminationCells.Num());
+	for (const FMD_ScrapeSurfaceCell& Cell : ContaminationCells)
+	{
+		ContaminationGeneratedInitialAmounts.Add(Cell.InitialContamination);
 	}
 
 	if (!InitializeContaminationMask())
@@ -2041,6 +2344,156 @@ void AMD_CuttableWall::PublishContaminationChanges(
 	}
 
 	ForceNetUpdate();
+}
+
+bool AMD_CuttableWall::TryCalculateContaminationItemSpawnTransform(
+	const EMD_ScrapeSurfaceFace SurfaceFace,
+	const FVector2D& SurfacePositionCm,
+	FTransform& OutSpawnTransform) const
+{
+	OutSpawnTransform = FTransform::Identity;
+	if (!Mesh)
+	{
+		return false;
+	}
+
+	const FTransform SurfaceTransform = Mesh->GetComponentTransform();
+
+	FVector WorldPosition = FVector::ZeroVector;
+	FVector HorizontalAxis = FVector::ZeroVector;
+	FVector FrontNormalLocal = FVector::ZeroVector;
+	FVector VerticalAxis = FVector::ZeroVector;
+	if (!FMD_ScrapeSurfaceGeometry::TryCalculateSurfaceWorldPosition(
+			SurfacePositionCm,
+			SurfaceFace,
+			SurfaceTransform,
+			ResolvedContaminationSurfaceNormalAxis,
+			ContaminationSurfaceCenterLocal,
+			ContaminationMeshLocalBoundsMinimum,
+			ContaminationMeshLocalBoundsMaximum,
+			WorldPosition)
+		|| !FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
+			ResolvedContaminationSurfaceNormalAxis,
+			HorizontalAxis,
+			FrontNormalLocal,
+			VerticalAxis))
+	{
+		return false;
+	}
+
+	// 벽면 안쪽에서 스폰하면 물리가 벽을 밀어내며 튀어나간다. 긁은 면 바깥으로 뺀다.
+	const FVector OutwardNormal =
+		SurfaceTransform.TransformVectorNoScale(
+			SurfaceFace == EMD_ScrapeSurfaceFace::Back
+				? -FrontNormalLocal
+				: FrontNormalLocal).GetSafeNormal();
+	if (OutwardNormal.IsNearlyZero())
+	{
+		return false;
+	}
+
+	const float SafeOffsetCm = FMath::IsFinite(ContaminationItemSpawnOffsetCm)
+		? FMath::Max(0.0f, ContaminationItemSpawnOffsetCm)
+		: 0.0f;
+
+	OutSpawnTransform = FTransform(
+		FRotationMatrix::MakeFromZ(OutwardNormal).Rotator(),
+		WorldPosition + OutwardNormal * SafeOffsetCm);
+	return true;
+}
+
+int32 AMD_CuttableWall::DropContaminationItems(
+	const EMD_ScrapeSurfaceFace SurfaceFace,
+	const float RemovedAmount,
+	const FVector2D& SurfacePositionCm)
+{
+	const int32 FaceSlot =
+		SurfaceFace == EMD_ScrapeSurfaceFace::Back ? 1 : 0;
+	if (SurfaceFace != EMD_ScrapeSurfaceFace::Front
+		&& SurfaceFace != EMD_ScrapeSurfaceFace::Back)
+	{
+		return 0;
+	}
+
+	if (!HasAuthority()
+		|| !ContaminationItemClass
+		|| ContaminationItemsPerFace <= 0
+		|| !FMath::IsFinite(RemovedAmount)
+		|| RemovedAmount <= 0.0f)
+	{
+		return 0;
+	}
+
+	int32 CellsPerFace = 0;
+	int32 TotalCellCount = 0;
+	if (!FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
+			ContaminationGridDimensions,
+			CellsPerFace,
+			TotalCellCount)
+		|| CellsPerFace <= 0)
+	{
+		return 0;
+	}
+
+	// 문턱을 셀 수로 잡는다. 셀 하나의 최대 오염량이 1.0이므로 면 전체를 다 긁으면
+	// 정확히 ContaminationItemsPerFace개가 나온다. 격자 크기가 달라져도 개수는 같고,
+	// 덜 더러운 벽에서는 자연히 덜 나온다.
+	const float AmountPerItem =
+		static_cast<float>(CellsPerFace)
+		/ static_cast<float>(ContaminationItemsPerFace);
+	if (AmountPerItem <= UE_SMALL_NUMBER)
+	{
+		return 0;
+	}
+
+	// 문턱 비교에 여유를 둔다. 면을 정확히 다 긁어도 AmountPerItem을 정수 번 빼면
+	// 마지막에 1e-7 수준이 모자라 개수가 하나 줄어든다. 그러면 "다 긁었는데 3개가
+	// 아니라 2개"가 되어 기획 개수와 어긋난다.
+	const float ItemThreshold = AmountPerItem - UE_KINDA_SMALL_NUMBER;
+
+	float& PendingAmount = PendingContaminationItemAmounts[FaceSlot];
+	PendingAmount += RemovedAmount;
+	if (PendingAmount < ItemThreshold)
+	{
+		return 0;
+	}
+
+	FTransform SpawnTransform = FTransform::Identity;
+	if (!TryCalculateContaminationItemSpawnTransform(
+			SurfaceFace,
+			SurfacePositionCm,
+			SpawnTransform))
+	{
+		// 위치를 못 구하면 쌓인 양을 흘려보내지 않고 다음 스트로크로 넘긴다.
+		return 0;
+	}
+
+	UWorld* const World = GetWorld();
+	if (!World)
+	{
+		return 0;
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+	SpawnParams.SpawnCollisionHandlingOverride =
+		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+
+	int32 SpawnedCount = 0;
+	while (PendingAmount >= ItemThreshold)
+	{
+		PendingAmount = FMath::Max(0.0f, PendingAmount - AmountPerItem);
+
+		if (World->SpawnActor<AMD_ContaminationItem>(
+				ContaminationItemClass,
+				SpawnTransform,
+				SpawnParams))
+		{
+			++SpawnedCount;
+		}
+	}
+
+	return SpawnedCount;
 }
 
 FTransform AMD_CuttableWall::MakeContaminationCellVisualTransform(

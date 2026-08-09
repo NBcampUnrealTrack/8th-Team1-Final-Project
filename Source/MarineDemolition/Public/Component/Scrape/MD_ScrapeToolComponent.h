@@ -7,6 +7,7 @@
 #include "Types/Scrape/MD_ScrapeTypes.h"
 #include "MD_ScrapeToolComponent.generated.h"
 
+class AMD_Barnacle;
 class AMD_CuttableWall;
 class USoundBase;
 class UParticleSystem;
@@ -242,6 +243,43 @@ private:
 		const FMD_ScrapeResult& Result,
 		const FVector& ContactLocation);
 
+	/**
+	 * 따개비를 직접 겨냥해 긁을 때의 타격 경로. 벽과 완전히 다른 계통이다.
+	 *
+	 * 벽은 표면형이라 2D 투영·면 판정·축 고정·조준 보정이 필요하지만, 따개비는
+	 * 물체형이라 내구도 숫자 하나뿐이다. 두 경로를 한 인터페이스로 묶으면 따개비가
+	 * 쓰지도 않는 기계장치를 끌고 다니게 된다.
+	 *
+	 * 기획 02 §1대로 배치하면 따개비는 보통벽에 붙으므로 그 앞에는 긁을 오염벽이
+	 * 없다. 그때는 이 경로만 탄다.
+	 */
+	void ProcessDirectBarnacleContact(
+		AMD_Barnacle* Barnacle,
+		const FHitResult& Hit,
+		float DeltaTime);
+
+	/**
+	 * 헤라 속도를 따개비 타격으로 바꿔 전달한다. 직접 접촉과 경로 차단이 공유한다.
+	 *
+	 * 한 번 때리면 스윙이 끝나 속도가 충분히 떨어질 때까지 다시 때리지 않는다.
+	 * 이것이 없으면 헤라를 대고 미는 동안 매 프레임 타격이 들어가 한순간에 떨어진다.
+	 */
+	void DeliverBarnacleImpact(
+		AMD_Barnacle* Barnacle,
+		float ImpactSpeedCmPerSecond,
+		const FVector& ImpactWorldDirection);
+
+	/**
+	 * 지금 상대하고 있는 따개비를 바꾼다.
+	 *
+	 * 대상이 바뀌면 타격 준비 상태와 기준점을 함께 초기화한다. 안 그러면 따개비 A에서
+	 * 벽을 거쳐 따개비 B로 옮길 때 그 사이 이동이 B에 들어간다.
+	 */
+	void SetTrackedBarnacle(AMD_Barnacle* Barnacle);
+
+	/** 프레임 간 이동 거리를 속도로 바꾼다. DeltaTime이 0인 첫 프레임은 0을 반환한다 */
+	static float CalculateImpactSpeedCmPerSecond(float TravelCentimeters, float DeltaTime);
+
 	bool bIsScraping;
 	bool bHasPreviousSurfacePosition;
 	bool bHasLockedStrokeAxis;
@@ -251,6 +289,16 @@ private:
 	FVector2D StrokeAnchorPositionCm;
 	FVector2D LockedStrokeAxis;
 	TWeakObjectPtr<AMD_CuttableWall> PreviousWall;
+
+	/** 지금 때리고 있는 따개비. 직접 겨냥한 것이든 경로를 막은 것이든 여기 담긴다 */
+	TWeakObjectPtr<AMD_Barnacle> TrackedBarnacle;
+
+	/** 직접 접촉에서 속도를 재는 기준점 */
+	FVector PreviousBarnacleHitLocation = FVector::ZeroVector;
+	bool bHasPreviousBarnacleHitLocation = false;
+
+	/** 다음 타격을 넣을 수 있는 상태인지. 한 스윙에 한 번만 때리게 하는 빗장이다 */
+	bool bBarnacleImpactArmed = true;
 
 	double LastFeedbackWorldSeconds;
 };

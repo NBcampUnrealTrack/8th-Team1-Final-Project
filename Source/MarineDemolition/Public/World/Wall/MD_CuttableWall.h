@@ -15,6 +15,32 @@ class UMaterialInstanceDynamic;
 class UTexture2D;
 class AMD_WallPiece;
 class AMD_CuttableWall;
+class AMD_ContaminationItem;
+class AMD_Barnacle;
+
+/**
+ * 벽면에서 헤라 경로를 막는 부착물 하나.
+ *
+ * 따개비는 벽에 붙어 자란 입체물이라 헤라가 그 위를 지나갈 수 없다. 표면 2D 좌표의
+ * 원 하나로 다루는 이유는 스트로크 판정 자체가 2D 선분이기 때문이다. 3D로 다루면
+ * 판정 좌표계를 두 번 오가야 하는데 그만한 정밀도가 필요한 대상이 아니다.
+ *
+ * 붙은 자리는 변하지 않으므로 등록할 때 한 번만 투영한다.
+ */
+struct FMD_ScrapeSurfaceObstacle
+{
+	/** 이 자리를 막고 있는 따개비. 사라지면 항목도 함께 정리된다 */
+	TWeakObjectPtr<AMD_Barnacle> Barnacle;
+
+	/** 부착된 면. 반대 면 스트로크는 이 부착물에 걸리지 않는다 */
+	EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
+
+	/** 표면 로컬 2D 중심(cm) */
+	FVector2D CenterCm = FVector2D::ZeroVector;
+
+	/** 표면에 드리우는 반경(cm) */
+	float RadiusCm = 0.0f;
+};
 
 /**
  * 서버에서 값이 달라진 오염 셀 하나만 전송하기 위한 Fast Array 항목.
@@ -214,6 +240,44 @@ public:
 		FVector2D& OutSurfacePositionCm,
 		EMD_ScrapeSurfaceFace& OutSurfaceFace);
 
+	/**
+	 * 월드 지점과 그 지점의 면 법선을 표면 로컬 2D 좌표와 앞/뒤 면으로 변환한다.
+	 *
+	 * 충돌 결과가 없는 부착물을 등록할 때 쓴다. 손으로 놓은 따개비는 자신을 붙인
+	 * 트레이스 결과를 들고 있지 않으므로 위치와 법선만으로 판정할 수 있어야 한다.
+	 */
+	bool TryGetScrapeSurfacePositionFromWorldPoint(
+		const FVector& WorldPoint,
+		const FVector& WorldNormal,
+		FVector2D& OutSurfacePositionCm,
+		EMD_ScrapeSurfaceFace& OutSurfaceFace);
+
+	/**
+	 * 따개비를 헤라 경로 장애물로 등록한다. 이미 등록돼 있으면 위치만 갱신한다.
+	 * @return 이 벽면에 투영되어 실제로 등록됐으면 true
+	 */
+	bool RegisterScrapeObstacle(AMD_Barnacle* Barnacle);
+
+	void UnregisterScrapeObstacle(AMD_Barnacle* Barnacle);
+
+	/**
+	 * 스트로크가 부착물에 막히면 막히는 지점까지로 줄인다.
+	 *
+	 * 헤라는 따개비를 뚫고 지나갈 수 없다. 따개비 뒤쪽 오염을 지우려면 먼저 떼어내야
+	 * 한다는 규칙이 여기서 나온다. 시작점이 이미 부착물 안이면 멀어지는 방향만 허용한다.
+	 * 그렇게 하지 않으면 부착물이 방금 생긴 자리에서 스트로크가 영영 풀리지 않는다.
+	 *
+	 * @param ToolHalfWidthCm  헤라 날의 반폭. 날의 가장자리도 부착물에 걸린다
+	 * @return 실제로 막혔으면 true. 이때만 두 출력 인자가 채워진다
+	 */
+	bool TryClampScrapeStrokeAgainstObstacles(
+		EMD_ScrapeSurfaceFace SurfaceFace,
+		const FVector2D& StartPositionCm,
+		const FVector2D& EndPositionCm,
+		float ToolHalfWidthCm,
+		FVector2D& OutClampedEndPositionCm,
+		AMD_Barnacle*& OutBlockingBarnacle) const;
+
 	/** 표면 로컬 2D 좌표를 피드백용 월드 좌표로 변환. 깊이는 메시 Bounds 바깥 평면을 쓴다. */
 	bool TryGetScrapeSurfaceWorldPosition(
 		const FVector2D& SurfacePositionCm,
@@ -302,11 +366,17 @@ public:
 	// Day 전환 악화: 무작위 위치에 오염 셀을 소량 리필
 	void ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells);
 
-	// Day 스냅샷용: 초기값과 다른 셀을 (인덱스, 남은 오염량) 쌍으로 내보낸다
-	void ExportContaminationDeltas(TArray<int32>& OutCellIndices, TArray<float>& OutRemainingAmounts) const;
+	// Day 스냅샷용: 생성 기준값과 달라진 셀을 (인덱스, 오염 총량, 남은 오염량)으로 내보낸다
+	void ExportContaminationDeltas(
+		TArray<int32>& OutCellIndices,
+		TArray<float>& OutInitialAmounts,
+		TArray<float>& OutRemainingAmounts) const;
 
 	// Day 스냅샷용: 저장된 셀 상태를 적용하고 시각화·복제를 갱신한다
-	void RestoreContaminationCells(const TArray<int32>& CellIndices, const TArray<float>& RemainingAmounts);
+	void RestoreContaminationCells(
+		const TArray<int32>& CellIndices,
+		const TArray<float>& InitialAmounts,
+		const TArray<float>& RemainingAmounts);
 
 protected:
 	virtual void BeginPlay() override;
@@ -344,6 +414,31 @@ protected:
 	// 스캔 하이라이트 / 원복에 재사용할 다이내믹 머티리얼
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> MID;
+
+	/**
+	 * 긁어낸 오염물이 떨어질 때 생성할 Blueprint 클래스 (기획 02 §1 규칙 3).
+	 * 지정하지 않으면 오염물이 떨어지지 않고 셀 숫자만 줄어든다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Wall|Contamination|Debris")
+	TSubclassOf<AMD_ContaminationItem> ContaminationItemClass;
+
+	/**
+	 * 한 면을 완전히 긁어냈을 때 떨어지는 오염물 개수.
+	 *
+	 * 기획서에 벽 하나당 개수 기준이 없다. 05 §3A.1의 "오염물 노드 6개 = 192점"은
+	 * 맵 배치 단위라 벽 단위로 환산되지 않으므로 임시값이다.
+	 * 임시 쓰레기통 슬롯이 12개(05 §7)라는 점을 감안해 작게 잡았다.
+	 *
+	 * 0이면 오염물이 떨어지지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Debris",
+		meta = (ClampMin = "0", UIMax = "10"))
+	int32 ContaminationItemsPerFace = 3;
+
+	/** 오염물이 벽면에 박혀 스폰되지 않도록 표면에서 밀어내는 거리 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Debris",
+		meta = (ClampMin = "0.0", Units = "cm"))
+	float ContaminationItemSpawnOffsetCm = 12.0f;
 
 	// 오염 격자 크기
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination",
@@ -464,6 +559,10 @@ private:
 	friend struct FMD_ReplicatedScrapeCellStateArray;
 	friend class FMD_CuttableWallScrapeIntegrationTest;
 	friend class FMD_CuttableWallArbitraryMeshTest;
+	// 따개비 배치기가 철거 대상 격벽을 걸러내는지 확인할 때 Mesh에 충돌을 달아야 한다
+	friend class FMD_BarnacleSpawnerTest;
+	// 경로 차단 판정은 표면 초기화 없이도 성립한다. 장애물 목록을 직접 세워 검사한다
+	friend class FMD_BarnacleStrokeBlockingTest;
 
 	// 격자 한 축의 최대 셀 수
 	static constexpr int32 MaximumContaminationGridAxis = 256;
@@ -471,9 +570,40 @@ private:
 	// 작업면 판정 최소 내적값
 	static constexpr float MinimumContaminationFaceNormalDot = 0.5f;
 
+	/**
+	 * 막힌 스트로크를 부착물 경계에서 살짝 떼어 두는 여유.
+	 *
+	 * 경계에 정확히 붙여 놓으면 다음 프레임에 "이미 안에 있음" 판정과 경계 판정이
+	 * 부동소수점 오차로 번갈아 나와 헤라가 부착물 앞에서 떨렸다 붙었다 한다.
+	 */
+	static constexpr float ScrapeObstacleContactMarginCm = 0.05f;
+
+	/** 이 벽면에서 헤라를 막고 있는 부착물 목록. 서버·클라이언트가 각자 채운다 */
+	TArray<FMD_ScrapeSurfaceObstacle> ScrapeObstacles;
+
 	// 셀별 오염 상태
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient, Category = "MD|Wall|Contamination|Runtime", meta = (AllowPrivateAccess = "true"))
 	TArray<FMD_ScrapeSurfaceCell> ContaminationCells;
+
+	/**
+	 * 면별로 아직 오염물 하나를 채우지 못하고 남은 제거량.
+	 *
+	 * 셀 하나가 깨끗해질 때마다 덩어리를 떨어뜨리면 벽 하나에서 1500개가 나온다.
+	 * 일정량이 쌓일 때마다 하나씩 떨어뜨리고, 문턱을 못 넘은 나머지는 다음 스트로크로
+	 * 이월한다. 그래야 살살 여러 번 긁어도 총량이 같으면 같은 개수가 나온다.
+	 * 앞면이 [0], 뒷면이 [1]이다.
+	 */
+	float PendingContaminationItemAmounts[2] = { 0.0f, 0.0f };
+
+	/**
+	 * InitializeContaminationSurface가 만들어 낸 셀별 오염 총량의 사본.
+	 *
+	 * 밤샘 분출(기획 03 §3)은 Cell.InitialContamination을 올린다. 손대지 않은 분출은
+	 * 남은 오염량과 총량이 같아 "달라진 셀" 조건에 걸리지 않으므로, 무엇이 생성값이었는지
+	 * 알아야 Day 스냅샷에 실을 수 있다. 생성 로직을 다시 구현하지 않고 결과를 그대로
+	 * 복사해 두는 이유는 두 곳으로 갈라지면 조용히 어긋나기 때문이다.
+	 */
+	TArray<float> ContaminationGeneratedInitialAmounts;
 
 	// 앞면은 위쪽, 뒷면은 아래쪽에 저장하는 런타임 G8 W x 2H 마스크
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
@@ -617,6 +747,21 @@ private:
 	void ApplyAllReplicatedContaminationState();
 	void PublishContaminationChanges(
 		const TArray<FMD_ScrapeCellChange>& CellChanges);
+
+	/**
+	 * 긁어낸 양을 면별로 모아 문턱을 넘을 때마다 오염물을 떨어뜨린다 (기획 02 §1 규칙 3).
+	 * 서버 전용. 스폰한 개수를 돌려준다.
+	 */
+	int32 DropContaminationItems(
+		EMD_ScrapeSurfaceFace SurfaceFace,
+		float RemovedAmount,
+		const FVector2D& SurfacePositionCm);
+
+	/** 표면 2D 좌표를 월드로 옮기고 면 바깥으로 밀어낸 스폰 위치. 실패하면 false */
+	bool TryCalculateContaminationItemSpawnTransform(
+		EMD_ScrapeSurfaceFace SurfaceFace,
+		const FVector2D& SurfacePositionCm,
+		FTransform& OutSpawnTransform) const;
 
 	// 셀 오염량을 시각 Transform으로 변환
 	FTransform MakeContaminationCellVisualTransform(int32 CellIndex) const;

@@ -2,6 +2,7 @@
 
 #include "EngineUtils.h"
 #include "Game/MD_GameStateBase.h"
+#include "World/Contamination/MD_BarnacleSpawner.h"
 #include "World/Interaction/MD_SectorCloseoutMarker.h"
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Support/MD_SupportBrace.h"
@@ -37,11 +38,13 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
             Snapshot.SupportedWallNames.Add(It->GetFName());
         }
 
-        // 초기값과 달라진 오염 셀만 기록
+        // 생성 기준값과 달라진 오염 셀만 기록. 밤샘 분출로 총량이 오른 셀도 포함된다
         FMD_WallContaminationRecord ContaminationRecord;
         ContaminationRecord.WallName = It->GetFName();
         It->ExportContaminationDeltas(
-            ContaminationRecord.CellIndices, ContaminationRecord.RemainingAmounts);
+            ContaminationRecord.CellIndices,
+            ContaminationRecord.InitialAmounts,
+            ContaminationRecord.RemainingAmounts);
         if (ContaminationRecord.CellIndices.Num() > 0)
         {
             Snapshot.WallContaminations.Add(ContaminationRecord);
@@ -84,6 +87,21 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         {
             Snapshot.ClosedMarkerNames.Add(It->GetFName());
         }
+    }
+
+    // 어제 떼어낸 따개비 순번. 배치기는 레벨 배치 액터라 이름이 안정적이다
+    for (TActorIterator<AMD_BarnacleSpawner> It(World); It; ++It)
+    {
+        const TSet<int32>& RemovedIndices = It->GetRemovedSpawnIndices();
+        if (RemovedIndices.IsEmpty())
+        {
+            continue;
+        }
+
+        FMD_BarnacleRemovalRecord RemovalRecord;
+        RemovalRecord.SpawnerName = It->GetFName();
+        RemovalRecord.RemovedSpawnIndices = RemovedIndices.Array();
+        Snapshot.BarnacleRemovals.Add(RemovalRecord);
     }
 
     Snapshot.bValid = true;
@@ -133,7 +151,10 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     {
         if (AMD_CuttableWall* const* Wall = WallsByName.Find(Record.WallName))
         {
-            (*Wall)->RestoreContaminationCells(Record.CellIndices, Record.RemainingAmounts);
+            (*Wall)->RestoreContaminationCells(
+                Record.CellIndices,
+                Record.InitialAmounts,
+                Record.RemainingAmounts);
         }
     }
 
@@ -204,6 +225,26 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
         }
     }
 
+    // 어제 떼어낸 따개비는 되살리지 않는다 (기획 03:101 강제 초기화 금지).
+    // 배치기가 BeginPlay에 이미 다 붙여 놓은 뒤이므로 목록에 든 것을 지운다.
+    if (!Snapshot.BarnacleRemovals.IsEmpty())
+    {
+        TMap<FName, const FMD_BarnacleRemovalRecord*> RemovalsBySpawnerName;
+        for (const FMD_BarnacleRemovalRecord& Record : Snapshot.BarnacleRemovals)
+        {
+            RemovalsBySpawnerName.Add(Record.SpawnerName, &Record);
+        }
+
+        for (TActorIterator<AMD_BarnacleSpawner> It(World); It; ++It)
+        {
+            if (const FMD_BarnacleRemovalRecord* const* Record =
+                    RemovalsBySpawnerName.Find(It->GetFName()))
+            {
+                It->RestoreRemovedSpawnIndices((*Record)->RemovedSpawnIndices);
+            }
+        }
+    }
+
     // 어제 마감한 섹터는 마감 상태 유지 (점수 재지급 없음 — Score 캐리오버에 이미 포함)
     const TSet<FName> ClosedMarkers(Snapshot.ClosedMarkerNames);
     for (TActorIterator<AMD_SectorCloseoutMarker> It(World); It; ++It)
@@ -249,6 +290,21 @@ void UMD_DayPersistenceSubsystem::ApplyOvernightWorsening(UWorld* World)
         if (FMath::FRand() < 0.3f)
         {
             It->ReapplyContaminationPatch(0.6f, 3);
+        }
+    }
+
+    // 따개비 소량 재부착 (기획 03 §3).
+    // 떼어낸 것을 되살리지 않고 새 자리에 돋운다. 어제 한 청소를 무의미하게 만들지
+    // 않으면서 "밤새 조금 나빠진" 연출만 남긴다.
+    // 살아 있는 개수는 배치기의 상한을 넘지 않으므로 3일 동안 05 배치 예산을 넘지 않는다.
+    // 개수·확률은 05 수치 기획에 대응 항목이 없어 임시값이다.
+    const int32 CurrentDay = Snapshot.CompletedDay + 1;
+    for (TActorIterator<AMD_BarnacleSpawner> It(World); It; ++It)
+    {
+        if (FMath::FRand() < 0.5f)
+        {
+            // Day마다 시드를 어긋내야 매번 다른 자리에 돋는다.
+            It->GrowBarnacles(1, CurrentDay * 977);
         }
     }
 
