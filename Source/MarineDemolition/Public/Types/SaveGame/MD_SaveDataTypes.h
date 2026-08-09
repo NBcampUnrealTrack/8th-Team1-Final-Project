@@ -17,118 +17,83 @@ struct MARINEDEMOLITION_API FMD_PlayerData
 public:
 	// 플레이어의 핫 바의 슬롯 목록을 복사하여 저장하는 변수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
-	TArray<TSoftObjectPtr<class UMD_ToolDefinition>> ToolSlots;
+	TArray<TSoftObjectPtr<UDataAsset>> HotbarToolList;
 
 	// Add More If Need
 };
 
-/**
- * 
- */
-USTRUCT(BlueprintType)
-struct MARINEDEMOLITION_API FMD_SaveSlot
+USTRUCT(BlueprintType, meta = (HasNativeMake = "/Script/MarineDemolition.MD_BlueprintFunctionLibrary.MakeMD_GameData"))
+struct MARINEDEMOLITION_API FMD_GameData
 {
 	GENERATED_BODY()
 
 public:
-	FMD_SaveSlot()
-	{
-		SlotName = TEXT("");
-		QuestID = FPrimaryAssetId();
-		MapPackagePath = TEXT("");
-		SaveTime = FDateTime::Now();
-	}
+	// 서로 다른 게임 데이터와 구분하기 위한 고유 값(세이브 이름)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
+	FString UniqueName = TEXT("");
 
-	FMD_SaveSlot(const FString& SlotName) : SlotName(SlotName)
-	{
-		QuestID = FPrimaryAssetId();
-		MapPackagePath = TEXT("");
-		SaveTime = FDateTime::Now();
-	}
+	// 플레이 맵
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
+	FString MapPackagePath = TEXT("");
 
-	FMD_SaveSlot(const FMD_SaveSlot& OtherSaveSlot)
-		: SlotName(OtherSaveSlot.SlotName), QuestID(OtherSaveSlot.QuestID), MapPackagePath(OtherSaveSlot.MapPackagePath), SaveTime(OtherSaveSlot.SaveTime)
-	{
-	}
+	// 진행중인 퀘스트 아이디
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
+	FPrimaryAssetId QuestID = FPrimaryAssetId();
 
-public:
-	const static FMD_SaveSlot Empty;
+	// 게임 점수
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
+	int32 Score = 0;
 
-	// Game Session의 데이터가 저장된 Slot 이름
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Slot")
-	FString SlotName;
+	// 인게임 재화
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
+	int32 Credit = 0;
 
-	// 저장 시점에 진행중인 퀘스트의 ID
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Slot")
-	FPrimaryAssetId QuestID;
+	// 상인 우호도
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
+	float MerchantLevel = 0;
 
-	// 저장 시점에 플레이 중인 Map의 패키지 경로
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Slot")
-	FString MapPackagePath;
+	// 인게임 경과 일차(1일차/2일차)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
+	int32 InGameTime = 0;
 
-	// 저장한 시각
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Slot")
+	// 플레이어 데이터
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
+	TMap<FString, FMD_PlayerData> PlayerData;
+
+	// 현실 저장 시간
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
 	FDateTime SaveTime = FDateTime::Now();
 
 public:
-	const bool IsEmpty() const;
-
-	bool operator==(const FMD_SaveSlot& OtherSlotInfo)
+	bool operator==(const FMD_GameData& Other) const
 	{
-		return SlotName == OtherSlotInfo.SlotName;
+		return UniqueName == Other.UniqueName;
 	}
-	bool operator!=(const FMD_SaveSlot& OtherSlotInfo)
+	bool operator!=(const FMD_GameData& Other) const
 	{
-		return SlotName != OtherSlotInfo.SlotName;
+		return !(UniqueName == Other.UniqueName);
 	}
 
-	USaveGame* LoadGameSessionData() const;
-
-	bool SaveGameSessionData(USaveGame* GameData, bool bOverwrite = true);
+	friend uint32 GetTypeHash(const FMD_GameData& Value)
+	{
+		return GetTypeHash(Value.UniqueName);
+	}
 };
 
-/**
- * 저장되는 Game Session 데이터
- */
 UCLASS()
-class MARINEDEMOLITION_API UMD_SaveGameSession : public USaveGame
+class MARINEDEMOLITION_API UMD_SaveGame : public USaveGame
 {
 	GENERATED_BODY()
+	
+public:
+	// 자동 저장된 데이터 목록
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
+	TArray<FMD_GameData> AutoSaveList;
+
+	// 사용자가 임의로 저장한 데이터 목록
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
+	TArray<FMD_GameData> UserSaveList;
 
 public:
-	// 누계 점수
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
-	int32 Score;
-
-	// 보유 돈
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
-	int32 Credit;
-
-	// 상인 호감도
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
-	float MerchantLikeability;
-
-	// 플레이어 데이터 목록 { UniqueId.ToString(), FMD_PlayerData() }
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
-	TMap<FString, FMD_PlayerData> PlayerDataMap;
-
-	// 3일 루프 중 경과 일수
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
-	int32 ElapsedDays;
-};
-
-/**
- * 자동 저장과 사용자 저장 슬롯 목록을 구분하여 Host 로컬에 보존한다.
- */
-UCLASS()
-class MARINEDEMOLITION_API UMD_SaveSlotList : public USaveGame
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Save GameSession")
-	TArray<FMD_SaveSlot> UserSaveSlotList;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Save GameSession")
-	TArray<FMD_SaveSlot> AutoSaveSlotList;
+	void ApplyMaxSaveCountLimit(const int32& MaxAutoSaveCount, const int32& MaxUserSaveCount);
 };

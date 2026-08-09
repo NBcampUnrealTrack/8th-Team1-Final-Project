@@ -27,6 +27,9 @@ void AMD_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();
 
+    // 게임 맵의 액터 초기화 이후 새 게임 또는 불러오기 상태를 적용하기 위한 다음 틱 예약
+    GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
+
     GetWorldTimerManager().SetTimer(
         CheckGameTimeTimerHandle,
         this,
@@ -47,20 +50,38 @@ void AMD_GameModeBase::BeginPlay()
         this, &AMD_GameModeBase::RestoreDaySnapshot);
 }
 
+void AMD_GameModeBase::ApplyPendingGameDataOperation()
+{
+    // GameInstance 수명으로 트래블을 통과한 데이터 초기화 작업을 실행할 저장 관리자 참조
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true)
+    {
+        SaveSlotManager->ApplyPendingGameDataOperation();
+    }
+}
+
 void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
 {
     Super::RestartPlayer(NewPlayer);
-    
+
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
     if (IsValid(SaveSlotManager) == true && IsValid(NewPlayer->PlayerState) == true)
     {
-        SaveSlotManager->OverwriteDataToPlayer(NewPlayer->PlayerState);
+        SaveSlotManager->LoadPlayerData(NewPlayer->PlayerState);
     }
 }
 
 void AMD_GameModeBase::Logout(AController* Exiting)
 {
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true && IsValid(Exiting) == true)
+    {
+        SaveSlotManager->ParseDataFromPlayer(Exiting->PlayerState);
+    }
+
     Super::Logout(Exiting);
 }
 
@@ -524,6 +545,14 @@ void AMD_GameModeBase::RestoreDaySnapshot()
         GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
     {
         Persistence->RestoreSnapshot(GetWorld());
+    }
+
+    // 게임 자동 저장 실행
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true)
+    {
+        SaveSlotManager->SaveGameData(TEXT("Auto"), true);
     }
 }
 
