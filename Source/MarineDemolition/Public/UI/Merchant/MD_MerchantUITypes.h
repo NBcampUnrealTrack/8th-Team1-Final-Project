@@ -7,6 +7,18 @@
 #include "MD_MerchantUITypes.generated.h"
 
 /**
+ * 퀘스트 화면 3탭 (`04` §5.5). 탭마다 데이터 원천·리스트 형태·상호작용 모델이
+ * 완전히 달라 하나의 카드 컴포넌트로 묶을 수 없다는 게 기획 확정 내용이다.
+ */
+UENUM(BlueprintType)
+enum class EMD_QuestTab : uint8
+{
+	Main   UMETA(DisplayName = "메인퀘"),
+	Repeat UMETA(DisplayName = "반복퀘"),
+	Lore   UMETA(DisplayName = "로어퀘")
+};
+
+/**
  * 상인 화면이 공통으로 쓰는 정보 묶음.
  *
  * 메뉴와 상점이 크레딧·착수금·호감도를 같은 값으로 보여줘야 하므로 정의를 하나로 둔다.

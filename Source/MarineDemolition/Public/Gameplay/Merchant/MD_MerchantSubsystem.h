@@ -16,8 +16,9 @@
 DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
 
 class UMD_SiteDefinition;
-class UMD_QuestDefinition;
 struct FGameplayTag;
+
+enum class EMD_SampleGrade : uint8;
 
 UCLASS()
 class MARINEDEMOLITION_API UMD_MerchantSubsystem : public UGameInstanceSubsystem
@@ -32,6 +33,9 @@ public:
 
 	int32 GetCredits() const { return Credits; }
 	int32 GetCurrentDay() const { return CurrentDay; }
+
+	/** BeginContract 이후 현장 계약이 살아 있는지. GameInstance 수명 동안 유지된다. */
+	bool HasActiveContract() const { return CurrentSite != nullptr; }
 
 	//상점 해금 판정에 넘길 값
 	int32 GetQuestCompletions() const { return QuestCompletions; }
@@ -76,9 +80,21 @@ public:
 	/** 샘플이 모선에 납품될 때 호출한다. 메인·반복 활성 퀘스트를 함께 검사한다. */
 	void NotifySampleDelivered(const FGameplayTag& GradeTag, bool bIntact);
 
+	/** 회수 대상 샘플이 파괴될 때 호출한다. 해당 등급 활성 퀘스트를 즉시 실패 처리한다. */
+	void NotifySampleDestroyed(EMD_SampleGrade Grade);
+
+	/** Day 마감 시 미완료 활성 퀘스트를 실패로 정리한다. */
+	void ResolveActiveQuestsAtDayEnd(int32 CompletedDay);
+
 	/** 계약 종료 시 남은 활성 반복 퀘스트를 실패로 정리한다. */
 	void FinalizeContract();
 private:
+
+	void FailMainQuest(FMD_MainQuestState& QuestState, EMD_QuestFailureReason Reason);
+
+	static FGameplayTag GradeTagFromSampleGrade(EMD_SampleGrade Grade);
+
+	bool DoesQuestTargetGrade(const FMD_QuestDefinitionData& Definition, const FGameplayTag& GradeTag) const;
 
 	/** 현재 진행 중인 현장. 반복 퀘스트 풀과 클리어 이력 판정에 쓴다. */
 	UPROPERTY()
@@ -101,10 +117,9 @@ private:
 	void AddCreditsInternal(int32 Amount);
 
 	/** 목표 등급·Intact 조건이 이 퀘스트에 맞는지 판정한다. */
-	bool DoesDeliveryMatch(const UMD_QuestDefinition* Definition,const FGameplayTag& GradeTag, bool bIntact) const;
+	bool DoesDeliveryMatch(const FMD_QuestDefinitionData& Definition, const FGameplayTag& GradeTag, bool bIntact) const;
 
-	/** 완료 보상을 공용으로 지급한다. */
-	void ApplyQuestReward(const UMD_QuestDefinition* Definition);
+	void ApplyQuestReward(const FMD_QuestDefinitionData& Definition);
 
 	int32 Credits = 0;
 

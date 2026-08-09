@@ -20,7 +20,8 @@ public class MarineDemolition : ModuleRules
 			//UI
 			"UMG",
 			// Landscape (editor import helper uses ALandscape::Import)
-			"Landscape"
+			"Landscape",
+			"GeometryCollectionEngine"
         });
 
 		PrivateDependencyModuleNames.AddRange(new string[]

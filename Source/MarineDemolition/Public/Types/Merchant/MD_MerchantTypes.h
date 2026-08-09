@@ -2,11 +2,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "MD_MerchantTypes.generated.h"
 
-class UMD_QuestDefinition;
+class UWorld;
 
-//퀘스트 목록중 메인과 반복퀘스트. 로어퀘스트는 별도 취급
 UENUM(BlueprintType)
 enum class EMD_QuestKind : uint8
 {
@@ -14,9 +14,8 @@ enum class EMD_QuestKind : uint8
 	Repeat UMETA(DisplayName = "반복퀘스트")
 };
 
-//퀘스트 로직은 회수형만 판정. 나머지2~3단계 호감도와 대출은 구조만 생성
 UENUM(BlueprintType)
-enum class EMD_QuestObjectiveType :uint8
+enum class EMD_QuestObjectiveType : uint8
 {
 	RecoverIntact UMETA(DisplayName = "회수"),
 	RecoverDamaged UMETA(DisplayName = "손상 허용 회수"),
@@ -25,44 +24,87 @@ enum class EMD_QuestObjectiveType :uint8
 	Composite      UMETA(DisplayName = "복합")
 };
 
-//메인퀘스트 상태(잠금, 활성화, 성공)
 UENUM(BlueprintType)
 enum class EMD_MainQuestStatus : uint8
 {
-	Locked    UMETA(DisplayName = "Locked"),
-	Active    UMETA(DisplayName = "Active"),
-	Completed UMETA(DisplayName = "Completed")
+	Locked    UMETA(DisplayName = "잠김"),
+	Active    UMETA(DisplayName = "진행중"),
+	Completed UMETA(DisplayName = "완료"),
+	Failed    UMETA(DisplayName = "실패")
 };
 
-//반복퀘스트 상태(메인에 수락 취소 추가)
 UENUM(BlueprintType)
 enum class EMD_RepeatQuestStatus : uint8
 {
-	Offered   UMETA(DisplayName = "Offered"),
-	Accepted  UMETA(DisplayName = "Accepted"),
-	Declined  UMETA(DisplayName = "Declined"),
-	Completed UMETA(DisplayName = "Completed"),
-	Failed    UMETA(DisplayName = "Failed")
+	Offered   UMETA(DisplayName = "제시"),
+	Accepted  UMETA(DisplayName = "수락"),
+	Declined  UMETA(DisplayName = "거절"),
+	Completed UMETA(DisplayName = "완료"),
+	Failed    UMETA(DisplayName = "실패")
 };
 
-//실패사유
 UENUM(BlueprintType)
 enum class EMD_QuestFailureReason : uint8
 {
-	NotDelivered UMETA(DisplayName = "NotDelivered"),
-	Destroyed    UMETA(DisplayName = "Destroyed")
+	None         UMETA(DisplayName = "없음"),
+	NotDelivered UMETA(DisplayName = "미회수"),
+	Destroyed    UMETA(DisplayName = "파괴")
 };
 
-//메인퀘스트 구조
+/** SiteDefinition.MainQuestLine / RepeatQuestPool 원소. 개별 퀘스트 DA 불필요. */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_QuestDefinitionData
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
+	FName QuestId;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
+	FText QuestName;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
+	FText Description;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
+	EMD_QuestKind Kind = EMD_QuestKind::Repeat;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Objective")
+	EMD_QuestObjectiveType ObjectiveType = EMD_QuestObjectiveType::RecoverIntact;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Objective")
+	FGameplayTag TargetGradeTag;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Objective")
+	int32 RequiredCount = 1;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Reward")
+	int32 RewardCredits = 80;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
+	TSoftObjectPtr<UWorld> QuestMap;
+
+	bool IsValidDefinition() const { return !QuestId.IsNone(); }
+};
+
+inline bool MD_QuestDefinitionsEqual(
+	const FMD_QuestDefinitionData& A,
+	const FMD_QuestDefinitionData& B)
+{
+	return A.QuestId == B.QuestId && !A.QuestId.IsNone();
+}
+
 USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_MainQuestState
 {
 	GENERATED_BODY()
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
-	TObjectPtr<UMD_QuestDefinition> Definition = nullptr;
+	FMD_QuestDefinitionData Definition;
 
-	/* 메인 퀘스트가 열리는 Day. 애셋 배열 순서로 결정된다. */
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
+	int32 SourceIndex = INDEX_NONE;
+
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	int32 UnlockDay = 1;
 
@@ -72,17 +114,19 @@ struct MARINEDEMOLITION_API FMD_MainQuestState
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	int32 CurrentProgress = 0;
 
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
+	EMD_QuestFailureReason FailureReason = EMD_QuestFailureReason::None;
+
 	bool IsActive() const { return Status == EMD_MainQuestStatus::Active; }
 };
 
-//반복퀘스트 구조
 USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_RepeatQuestState
 {
 	GENERATED_BODY()
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
-	TObjectPtr<UMD_QuestDefinition> Definition = nullptr;
+	FMD_QuestDefinitionData Definition;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	EMD_RepeatQuestStatus Status = EMD_RepeatQuestStatus::Offered;
