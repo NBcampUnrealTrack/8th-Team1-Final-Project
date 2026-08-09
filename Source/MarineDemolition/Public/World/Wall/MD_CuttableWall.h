@@ -211,6 +211,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Wall")
 	void ScanHighlight(float Duration = 3.0f);
 
+	// ─────────────────────────────────────────────────────────────
+	// 긁기 적용 · 제거율 — MD_CuttableWall_Scrape.cpp
+	// ─────────────────────────────────────────────────────────────
 	// 충돌점 사이의 오염 셀을 제거
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Contamination")
 	FMD_ScrapeResult ApplyScrapeStrokeFromHits(
@@ -234,6 +237,9 @@ public:
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec);
 
+	// ─────────────────────────────────────────────────────────────
+	// 작업면 좌표 변환 — MD_CuttableWall_Surface.cpp
+	// ─────────────────────────────────────────────────────────────
 	/** 유효한 벽 충돌점을 표면 로컬 2D 좌표로 변환 */
 	bool TryGetScrapeSurfacePositionFromHit(
 		const FHitResult& Hit,
@@ -333,6 +339,9 @@ public:
 		meta = (DisplayName = "Is Contamination Fully Removed For Face"))
 	bool IsContaminationFullyRemovedForFace(EMD_ScrapeSurfaceFace Face) const;
 
+	// ─────────────────────────────────────────────────────────────
+	// 마스크 · 데칼 조회 — MD_CuttableWall_Visual.cpp
+	// ─────────────────────────────────────────────────────────────
 	/** 앞면(위)과 뒷면(아래)의 오염 상태가 담긴 런타임 G8 W x 2H 마스크. */
 	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination|Mask")
 	UTexture2D* GetContaminationMaskTexture() const
@@ -363,6 +372,12 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MD|Wall|Contamination")
 	FMD_OnContaminationFullyRemoved OnContaminationFullyRemoved;
 	
+	// ─────────────────────────────────────────────────────────────
+	// Day 지속 — MD_CuttableWall_Persistence.cpp
+	// ─────────────────────────────────────────────────────────────
+	// ─────────────────────────────────────────────────────────────
+	// Day 지속 — MD_CuttableWall_Persistence.cpp
+	// ─────────────────────────────────────────────────────────────
 	// Day 전환 악화: 무작위 위치에 오염 셀을 소량 리필
 	void ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells);
 
@@ -700,6 +715,9 @@ private:
 	/** 철거 준비도 표시용: 두 면 중 더 높은 제거 비율을 반환한다. */
 	float GetContaminationDemolitionReadyRatio() const;
 
+	// ─────────────────────────────────────────────────────────────
+	// 이하 구현은 MD_CuttableWall_*.cpp에 나뉘어 있다
+	// ─────────────────────────────────────────────────────────────
 	// 작업면 위치와 크기 계산
 	bool ResolveContaminationSurfaceGeometry();
 
