@@ -120,6 +120,9 @@ public:
 	bool ApplyPendingGameDataOperation();
 
 protected:
+	// 저장 슬롯 작업을 실행할 수 있는 Host 또는 서버 World인지 확인하는 함수
+	bool HasServerAuthority() const;
+
 	// 저장해야 하는 GameSession 데이터를 수집하는 함수
 	bool CollectGameData();
 
