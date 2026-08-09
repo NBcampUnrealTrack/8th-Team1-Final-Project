@@ -52,10 +52,9 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
 	float MerchantLevel = 0;
 
-	// 인게임 경과 시간
-	// Ex) 2.2 = 2일 + 2시간(인게임) 경과
+	// 인게임 경과 일차(1일차/2일차)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	double InGameTime = 0;
+	int32 InGameTime = 0;
 
 	// 플레이어 데이터
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")

@@ -7,8 +7,12 @@
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 #include "MD_SaveSlotManager.generated.h"
 
-// 비동기 저장 완료 시 생성된 슬롯과 성공 여부를 호출부에 전달한다.
+// 게임 데이터 비동기 저장 완료 시 성공 여부를 호출부에 전달한다.
 DECLARE_DYNAMIC_DELEGATE_OneParam(FOnSaveMDGameDataComplete, bool, bWasSuccessful);
+// 게임 데이터 비동기 제거 완료 시 성공 여부를 호출부에 전달한다.
+DECLARE_DYNAMIC_DELEGATE_OneParam(FOnRemoveMDGameDataComplete, bool, bWasSuccessful);
+// 게임 데이터 목록을 비동기 로드 완료 시 데이터 목록과 함께 성공 여부를 호출부에 전달한다.
+DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnLoadMDGameDataListComplete, const TArray<FMD_GameData>&, GameDataList , bool, bWasSuccessful);
 
 // 맵 이동 이후 실행할 게임 데이터 초기화 방식을 구분하는 상태
 enum class EMD_PendingGameDataOperation : uint8
@@ -68,26 +72,33 @@ protected:
 	EMD_PendingGameDataOperation PendingGameDataOperation = EMD_PendingGameDataOperation::None;
 
 public:
-	// 현재 서버 게임 내용을 Host 로컬 파일에 저장한다.
+	// 현재의 게임 데이터를 수집하고 세이브 파일에 저장하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool SaveGameData(const FString& DataName, bool bIsAuto = false);
 
-	// 저장된 게임 데이터 내용을 현재 서버의 GameState와 접속 플레이어에게 적용한다.
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
-	bool LoadGameDataToWorld(const FMD_GameData& GameData);
-
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
-	void OnTryStartGameWithGameData(const FMD_GameData& GameData);
-
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
-	void ResetTemporaryGameData();
-
+	// 세이브 파일에 저장된 임의 게임 데이터를 제거하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool RemoveGameData(const FMD_GameData& GameData);
+
+	// 세이브 파일에 저장된 전체 게임 데이터 목록을 불러오는 함수
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	TArray<FMD_GameData> LoadAllGameDataList();
 
 	// 현재의 게임 데이터를 수집하고 비동기로 세이브 파일에 저장하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	void AsyncSaveGameData(const FString& DataName, bool bIsAuto, const FOnSaveMDGameDataComplete& CompletionDelegate);
+
+	// 세이브 파일에 저장된 임의 게임 데이터를 비동기로 제거하는 함수
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	void AsyncRemoveGameData(const FMD_GameData& GameData, const FOnRemoveMDGameDataComplete& CompletionDelegate);
+
+	// 세이브 파일에 저장된 전체 게임 데이터 목록을 비동기로 불러오는 함수
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	void AsyncLoadAllGameDataList(const FOnLoadMDGameDataListComplete& CompletionDelegate);
+
+	// 저장된 게임 데이터 내용을 현재 서버의 GameState와 접속 플레이어에게 적용한다.
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	bool LoadGameDataToWorld(const FMD_GameData& GameData);
 
 	// 현재 플레이어로부터 플레이어 데이터를 추출하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
@@ -98,7 +109,11 @@ public:
 	bool OverwriteDataToPlayer(const APlayerState* PlayerState) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
-	TArray<FMD_GameData> LoadAllGameDataList();
+	void OnTryStartGameWithGameData(const FMD_GameData& GameData);
+
+	// 현재 기록되고 있던 게임 데이터를 초기화하는 함수
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	void ResetTemporaryGameData();
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	// 목적지 게임 맵의 액터 초기화 이후 임시 데이터 생성 또는 저장 데이터 적용을 완료하는 함수
@@ -111,8 +126,16 @@ protected:
 	// 요청 시점에 수집된 게임 데이터를 지정된 세이브 파일 목록에 추가하는 함수
 	bool InsertGameDataToSaveFile(UMD_SaveGame* SaveFile, const FMD_GameData& GameData, bool bIsAuto);
 
-	// 비동기 방식으로 Game 데이터 저장이 완료된 경우의 콜백 함수
+	// 비동기 방식으로 게임 데이터 저장을 위한 세이브 파일 불러오기가 완료된 경우의 콜백 함수
 	UFUNCTION()
 	void HandleLoadGameToSaveDataComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FMD_GameData CollectedGameData, const bool bIsAuto, const FOnSaveMDGameDataComplete SaveCompletionDelegate);
+
+	// 비동기 방식으로 게임 데이터 제거를 위한 세이브 파일 불러오기가 완료된 경우의 콜백 함수
+	UFUNCTION()
+	void HandleLoadGameToRemoveDataComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FMD_GameData GameDataToRemove, const FOnRemoveMDGameDataComplete RemoveCompletionDelegate);
+
+	// 비동기 방식으로 게임 데이터 목록을 불러오기 위한 세이브 파일 불러오기가 완료된 경우의 콜백 함수
+	UFUNCTION()
+	void HandleLoadGameToLoadDataListComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FOnLoadMDGameDataListComplete LoadCompletionDelegate);
 
 };

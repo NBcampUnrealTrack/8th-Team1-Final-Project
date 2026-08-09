@@ -140,7 +140,7 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 	// 저장된 데이터 복사
 	for (int32 Index = 0; Index < SavedToolSlots.Num(); ++Index)
 	{
-		if (SavedToolSlots[Index].IsValid() == false)
+		if (SavedToolSlots[Index].IsNull() == false)
 		{
 			continue;
 		}

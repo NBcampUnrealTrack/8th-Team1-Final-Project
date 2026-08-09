@@ -77,7 +77,7 @@ void AMD_GameModeBase::Logout(AController* Exiting)
 {
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-    if (IsValid(SaveSlotManager) == true && IsValid(Exiting->PlayerState) == true)
+    if (IsValid(SaveSlotManager) == true && IsValid(Exiting) == true)
     {
         SaveSlotManager->ParseDataFromPlayer(Exiting->PlayerState);
     }
