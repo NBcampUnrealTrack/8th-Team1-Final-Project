@@ -22,26 +22,6 @@ AMD_CuttableWall::AMD_CuttableWall()
 	PrimaryActorTick.bCanEverTick = false;
 	// bHasSupport 복제용 (원격 클라이언트의 절단 판정 일치)
 	bReplicates = true;
-	ContaminationGridDimensions = FIntPoint(30, 25);
-	InitialContaminationPerCell = 1.0f;
-	bUseProceduralContamination = false;
-	ContaminationNoiseScaleCm = 75.0f;
-	ContaminationNoiseSeed = 1337;
-	ContaminationCoverage = 0.55f;
-	ContaminationMinimumAmount = 0.25f;
-	ContaminationSurfaceSizeOverrideCm = FVector2D::ZeroVector;
-	ContaminationSurfaceNormalAxis = EMD_ScrapeSurfaceNormalAxis::Auto;
-	ContaminationOverlayOffsetCm = 0.25f;
-	ContaminationOverlayThicknessCm = 0.35f;
-	bShowContaminationOverlay = true;
-	ContaminationDecalMaterial = nullptr;
-	bShowContaminationDecals = true;
-	ContaminationDecalProjectionDepthCm = 1.0f;
-	bAutoFitContaminationDecalDepth = true;
-	ContaminationDecalDepthFitMarginCm = 1.0f;
-	ContaminationDecalSurfaceOffsetCm = 0.05f;
-	ContaminationDecalEdgeInsetCm = 2.0f;
-	ContaminationDecalSortOrder = 0;
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
@@ -97,9 +77,6 @@ void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 			ContaminationOverlay,
 			FrontContaminationDecal,
 			BackContaminationDecal);
-		ScrapeSurface->OnContaminationFullyRemoved.AddUniqueDynamic(
-			this,
-			&AMD_CuttableWall::HandleScrapeSurfaceFullyRemoved);
 		ScrapeSurface->RefreshSurfaceGeometry();
 	}
 
@@ -126,9 +103,6 @@ void AMD_CuttableWall::BeginPlay()
 	SyncLegacySurfaceConfiguration();
 	if (ScrapeSurface)
 	{
-		ScrapeSurface->OnContaminationFullyRemoved.AddUniqueDynamic(
-			this,
-			&AMD_CuttableWall::HandleScrapeSurfaceFullyRemoved);
 		if (!ScrapeSurface->IsSurfaceInitialized())
 		{
 			ScrapeSurface->InitializeSurface();
@@ -192,7 +166,8 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 
 	// 파편 드랍: 제거율 비율로 깨끗/오염 배분 (기획 §2.5: 제거율 70% → 7:3)
 	const int32 CleanCount = FMath::RoundToInt(
-		static_cast<float>(PieceCount) * GetContaminationCleanRatio());
+		static_cast<float>(PieceCount)
+		* ScrapeSurface->GetContaminationCleanRatio());
 
 	const FVector Origin = GetActorLocation();
 	const FVector Extent = Mesh->Bounds.BoxExtent;
@@ -235,8 +210,10 @@ bool AMD_CuttableWall::CanCut() const
 		: 100.0f;
 
 	return FMD_ScrapeFaceProgress::IsEitherFaceReadyForCut(
-		GetContaminationCleanRatio(EMD_ScrapeSurfaceFace::Front),
-		GetContaminationCleanRatio(EMD_ScrapeSurfaceFace::Back),
+		ScrapeSurface->GetContaminationCleanRatio(
+			EMD_ScrapeSurfaceFace::Front),
+		ScrapeSurface->GetContaminationCleanRatio(
+			EMD_ScrapeSurfaceFace::Back),
 		SafeGate / 100.0f);
 }
 
@@ -285,332 +262,7 @@ void AMD_CuttableWall::SyncLegacySurfaceConfiguration()
 
 	ScrapeSurface->ContaminationItemClass = ContaminationItemClass;
 	ScrapeSurface->ContaminationItemsPerFace = ContaminationItemsPerFace;
-	ScrapeSurface->ContaminationItemSpawnOffsetCm =
-		ContaminationItemSpawnOffsetCm;
-	ScrapeSurface->ContaminationGridDimensions = ContaminationGridDimensions;
-	ScrapeSurface->InitialContaminationPerCell = InitialContaminationPerCell;
 	ScrapeSurface->bUseProceduralContamination =
 		bUseProceduralContamination;
-	ScrapeSurface->ContaminationNoiseScaleCm = ContaminationNoiseScaleCm;
-	ScrapeSurface->ContaminationNoiseSeed = ContaminationNoiseSeed;
-	ScrapeSurface->ContaminationCoverage = ContaminationCoverage;
-	ScrapeSurface->ContaminationMinimumAmount = ContaminationMinimumAmount;
-	ScrapeSurface->ContaminationSurfaceSizeOverrideCm =
-		ContaminationSurfaceSizeOverrideCm;
-	ScrapeSurface->ContaminationSurfaceNormalAxis =
-		ContaminationSurfaceNormalAxis;
-	ScrapeSurface->ScrapeSettings = ScrapeSettings;
-	ScrapeSurface->ContaminationOverlayOffsetCm =
-		ContaminationOverlayOffsetCm;
-	ScrapeSurface->ContaminationOverlayThicknessCm =
-		ContaminationOverlayThicknessCm;
-	ScrapeSurface->bShowContaminationOverlay = bShowContaminationOverlay;
 	ScrapeSurface->ContaminationDecalMaterial = ContaminationDecalMaterial;
-	ScrapeSurface->bShowContaminationDecals = bShowContaminationDecals;
-	ScrapeSurface->ContaminationDecalProjectionDepthCm =
-		ContaminationDecalProjectionDepthCm;
-	ScrapeSurface->bAutoFitContaminationDecalDepth =
-		bAutoFitContaminationDecalDepth;
-	ScrapeSurface->ContaminationDecalDepthFitMarginCm =
-		ContaminationDecalDepthFitMarginCm;
-	ScrapeSurface->ContaminationDecalSurfaceOffsetCm =
-		ContaminationDecalSurfaceOffsetCm;
-	ScrapeSurface->ContaminationDecalEdgeInsetCm =
-		ContaminationDecalEdgeInsetCm;
-	ScrapeSurface->ContaminationDecalSortOrder =
-		ContaminationDecalSortOrder;
-}
-
-void AMD_CuttableWall::InitializeContaminationSurface()
-{
-	SyncLegacySurfaceConfiguration();
-	if (ScrapeSurface)
-	{
-		ScrapeSurface->InitializeContaminationSurface();
-	}
-}
-
-bool AMD_CuttableWall::InitializeContaminationMask()
-{
-	return ScrapeSurface
-		&& ScrapeSurface->InitializeContaminationMask();
-}
-
-bool AMD_CuttableWall::ConfigureContaminationDecals()
-{
-	SyncLegacySurfaceConfiguration();
-	return ScrapeSurface
-		&& ScrapeSurface->ConfigureContaminationDecals();
-}
-
-void AMD_CuttableWall::HandleScrapeSurfaceFullyRemoved(
-	UMD_ScrapeSurfaceComponent* const RemovedSurface)
-{
-	if (RemovedSurface == ScrapeSurface)
-	{
-		OnContaminationFullyRemoved.Broadcast(this);
-	}
-}
-
-FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHits(
-	const FHitResult& StartHit,
-	const FHitResult& EndHit)
-{
-	return ScrapeSurface
-		? ScrapeSurface->ApplyScrapeStrokeFromHits(StartHit, EndHit)
-		: FMD_ScrapeResult();
-}
-
-FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHitsWithToolSpec(
-	const FHitResult& StartHit,
-	const FHitResult& EndHit,
-	const FMD_ScrapeToolSpec& ToolSpec)
-{
-	return ScrapeSurface
-		? ScrapeSurface->ApplyScrapeStrokeFromHitsWithToolSpec(
-			StartHit,
-			EndHit,
-			ToolSpec)
-		: FMD_ScrapeResult();
-}
-
-FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
-	const FMD_ScrapeStroke& Stroke)
-{
-	return ScrapeSurface
-		? ScrapeSurface->ApplyLocalScrapeStroke(Stroke)
-		: FMD_ScrapeResult();
-}
-
-FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStrokeWithToolSpec(
-	const FMD_ScrapeStroke& Stroke,
-	const FMD_ScrapeToolSpec& ToolSpec)
-{
-	return ScrapeSurface
-		? ScrapeSurface->ApplyLocalScrapeStrokeWithToolSpec(Stroke, ToolSpec)
-		: FMD_ScrapeResult();
-}
-
-bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromHit(
-	const FHitResult& Hit,
-	FVector2D& OutSurfacePositionCm,
-	EMD_ScrapeSurfaceFace& OutSurfaceFace)
-{
-	return ScrapeSurface
-		&& ScrapeSurface->TryGetScrapeSurfacePositionFromHit(
-			Hit,
-			OutSurfacePositionCm,
-			OutSurfaceFace);
-}
-
-bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromWorldPoint(
-	const FVector& WorldPoint,
-	const FVector& WorldNormal,
-	FVector2D& OutSurfacePositionCm,
-	EMD_ScrapeSurfaceFace& OutSurfaceFace)
-{
-	return ScrapeSurface
-		&& ScrapeSurface->TryGetScrapeSurfacePositionFromWorldPoint(
-			WorldPoint,
-			WorldNormal,
-			OutSurfacePositionCm,
-			OutSurfaceFace);
-}
-
-bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPosition(
-	const FVector2D& SurfacePositionCm,
-	const EMD_ScrapeSurfaceFace SurfaceFace,
-	FVector& OutWorldPosition) const
-{
-	return ScrapeSurface
-		&& ScrapeSurface->TryGetScrapeSurfaceWorldPosition(
-			SurfacePositionCm,
-			SurfaceFace,
-			OutWorldPosition);
-}
-
-bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPositionAtDepth(
-	const FVector2D& SurfacePositionCm,
-	const EMD_ScrapeSurfaceFace SurfaceFace,
-	const FVector& ReferenceWorldPosition,
-	FVector& OutWorldPosition) const
-{
-	return ScrapeSurface
-		&& ScrapeSurface->TryGetScrapeSurfaceWorldPositionAtDepth(
-			SurfacePositionCm,
-			SurfaceFace,
-			ReferenceWorldPosition,
-			OutWorldPosition);
-}
-
-bool AMD_CuttableWall::RegisterScrapeObstacle(AMD_Barnacle* const Barnacle)
-{
-	return ScrapeSurface
-		&& ScrapeSurface->RegisterScrapeObstacle(Barnacle);
-}
-
-void AMD_CuttableWall::UnregisterScrapeObstacle(
-	AMD_Barnacle* const Barnacle)
-{
-	if (ScrapeSurface)
-	{
-		ScrapeSurface->UnregisterScrapeObstacle(Barnacle);
-	}
-}
-
-bool AMD_CuttableWall::TryClampScrapeStrokeAgainstObstacles(
-	const EMD_ScrapeSurfaceFace SurfaceFace,
-	const FVector2D& StartPositionCm,
-	const FVector2D& EndPositionCm,
-	const float ToolHalfWidthCm,
-	FVector2D& OutClampedEndPositionCm,
-	AMD_Barnacle*& OutBlockingBarnacle) const
-{
-	return ScrapeSurface
-		&& ScrapeSurface->TryClampScrapeStrokeAgainstObstacles(
-			SurfaceFace,
-			StartPositionCm,
-			EndPositionCm,
-			ToolHalfWidthCm,
-			OutClampedEndPositionCm,
-			OutBlockingBarnacle);
-}
-
-float AMD_CuttableWall::GetContaminationCleanRatio() const
-{
-	return ScrapeSurface
-		? ScrapeSurface->GetContaminationCleanRatio()
-		: 0.0f;
-}
-
-float AMD_CuttableWall::GetContaminationCleanRatio(
-	const EMD_ScrapeSurfaceFace Face) const
-{
-	return ScrapeSurface
-		? ScrapeSurface->GetContaminationCleanRatio(Face)
-		: 0.0f;
-}
-
-float AMD_CuttableWall::GetContaminationCleanRatioForFace(
-	const EMD_ScrapeSurfaceFace Face) const
-{
-	return GetContaminationCleanRatio(Face);
-}
-
-float AMD_CuttableWall::GetContaminationRemovedPercent() const
-{
-	return ScrapeSurface
-		? ScrapeSurface->GetContaminationRemovedPercent()
-		: 0.0f;
-}
-
-float AMD_CuttableWall::GetContaminationRemovedPercent(
-	const EMD_ScrapeSurfaceFace Face) const
-{
-	return ScrapeSurface
-		? ScrapeSurface->GetContaminationRemovedPercent(Face)
-		: 0.0f;
-}
-
-float AMD_CuttableWall::GetContaminationRemovedPercentForFace(
-	const EMD_ScrapeSurfaceFace Face) const
-{
-	return GetContaminationRemovedPercent(Face);
-}
-
-float AMD_CuttableWall::GetResidualContaminationRatio() const
-{
-	return ScrapeSurface
-		? ScrapeSurface->GetResidualContaminationRatio()
-		: 1.0f;
-}
-
-bool AMD_CuttableWall::IsContaminationFullyRemoved() const
-{
-	return ScrapeSurface
-		&& ScrapeSurface->IsContaminationFullyRemoved();
-}
-
-bool AMD_CuttableWall::IsContaminationFullyRemoved(
-	const EMD_ScrapeSurfaceFace Face) const
-{
-	return ScrapeSurface
-		&& ScrapeSurface->IsContaminationFullyRemoved(Face);
-}
-
-bool AMD_CuttableWall::IsContaminationFullyRemovedForFace(
-	const EMD_ScrapeSurfaceFace Face) const
-{
-	return IsContaminationFullyRemoved(Face);
-}
-
-UTexture2D* AMD_CuttableWall::GetContaminationMaskTexture() const
-{
-	return ScrapeSurface
-		? ScrapeSurface->GetContaminationMaskTexture()
-		: nullptr;
-}
-
-FIntPoint AMD_CuttableWall::GetContaminationMaskDimensions() const
-{
-	return ScrapeSurface
-		? ScrapeSurface->GetContaminationMaskDimensions()
-		: FIntPoint::ZeroValue;
-}
-
-UDecalComponent* AMD_CuttableWall::GetFrontContaminationDecal() const
-{
-	return ScrapeSurface
-		? ScrapeSurface->GetFrontContaminationDecal()
-		: FrontContaminationDecal.Get();
-}
-
-UDecalComponent* AMD_CuttableWall::GetBackContaminationDecal() const
-{
-	return ScrapeSurface
-		? ScrapeSurface->GetBackContaminationDecal()
-		: BackContaminationDecal.Get();
-}
-
-void AMD_CuttableWall::ReapplyContaminationPatch(
-	const float Amount,
-	const int32 PatchRadiusCells)
-{
-	if (ScrapeSurface)
-	{
-		ScrapeSurface->ReapplyContaminationPatch(Amount, PatchRadiusCells);
-	}
-}
-
-void AMD_CuttableWall::ExportContaminationDeltas(
-	TArray<int32>& OutCellIndices,
-	TArray<float>& OutInitialAmounts,
-	TArray<float>& OutRemainingAmounts) const
-{
-	if (ScrapeSurface)
-	{
-		ScrapeSurface->ExportContaminationDeltas(
-			OutCellIndices,
-			OutInitialAmounts,
-			OutRemainingAmounts);
-		return;
-	}
-
-	OutCellIndices.Reset();
-	OutInitialAmounts.Reset();
-	OutRemainingAmounts.Reset();
-}
-
-void AMD_CuttableWall::RestoreContaminationCells(
-	const TArray<int32>& CellIndices,
-	const TArray<float>& InitialAmounts,
-	const TArray<float>& RemainingAmounts)
-{
-	if (ScrapeSurface)
-	{
-		ScrapeSurface->RestoreContaminationCells(
-			CellIndices,
-			InitialAmounts,
-			RemainingAmounts);
-	}
 }

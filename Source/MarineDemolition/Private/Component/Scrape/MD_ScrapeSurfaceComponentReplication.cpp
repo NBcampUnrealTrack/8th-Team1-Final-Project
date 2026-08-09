@@ -1,35 +1,12 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
-#include "TimerManager.h"
-#include "Components/DecalComponent.h"
-#include "Components/InstancedStaticMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Gameplay/Scrape/MD_ContaminationNoise.h"
-#include "Gameplay/Scrape/MD_ScrapeDecalLayout.h"
-#include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
-#include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
-#include "Gameplay/Scrape/MD_ScrapeMaskAtlas.h"
-#include "Gameplay/Scrape/MD_ScrapeMeshSurfaceProfile.h"
-#include "Gameplay/Scrape/MD_ScrapeSurfaceGeometry.h"
-#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
-#include "Engine/Engine.h"
-#include "Engine/StaticMesh.h"
-#include "Engine/Texture2D.h"
-#include "Materials/Material.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "Materials/MaterialInterface.h"
-#include "Math/RotationMatrix.h"
-#include "Net/UnrealNetwork.h"
-#include "RHITypes.h"
-#include "Stats/Stats.h"
-#include "World/Contamination/MD_Barnacle.h"
-#include "World/Contamination/MD_ContaminationItem.h"
-#include "World/Sector/MD_Sector.h"
-#include "World/Wall/MD_WallPiece.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
+#include "GameFramework/Actor.h"
+#include "Gameplay/Scrape/MD_ScrapeReplicationCodec.h"
+#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 
 // 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
-// 이 파일: Fast Array 셀 복제 · 수신 상태 반영
+// 책임: Fast Array 셀 복제 · 수신 상태 반영
 
 using namespace MD_ScrapeSurfaceComponentInternal;
 

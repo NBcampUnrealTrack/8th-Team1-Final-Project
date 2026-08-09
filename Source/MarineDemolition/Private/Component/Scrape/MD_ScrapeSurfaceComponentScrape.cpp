@@ -1,76 +1,15 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
-#include "TimerManager.h"
-#include "Components/DecalComponent.h"
-#include "Components/InstancedStaticMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Gameplay/Scrape/MD_ContaminationNoise.h"
-#include "Gameplay/Scrape/MD_ScrapeDecalLayout.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 #include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
 #include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
-#include "Gameplay/Scrape/MD_ScrapeMaskAtlas.h"
-#include "Gameplay/Scrape/MD_ScrapeMeshSurfaceProfile.h"
-#include "Gameplay/Scrape/MD_ScrapeSurfaceGeometry.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
-#include "Engine/Engine.h"
-#include "Engine/StaticMesh.h"
-#include "Engine/Texture2D.h"
-#include "Materials/Material.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "Materials/MaterialInterface.h"
-#include "Math/RotationMatrix.h"
-#include "Net/UnrealNetwork.h"
-#include "RHITypes.h"
-#include "Stats/Stats.h"
 #include "World/Contamination/MD_Barnacle.h"
-#include "World/Contamination/MD_ContaminationItem.h"
-#include "World/Sector/MD_Sector.h"
-#include "World/Wall/MD_WallPiece.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 
 // 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
-// 이 파일: 긁기 스트로크 적용 · 제거율 조회 · 따개비 경로 차단
+// 책임: 긁기 스트로크 적용 · 제거율 조회 · 따개비 경로 차단
 
 using namespace MD_ScrapeSurfaceComponentInternal;
-
-FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyScrapeStrokeFromHits(
-	const FHitResult& StartHit,
-	const FHitResult& EndHit)
-{
-	return ApplyScrapeStrokeFromHitsWithToolSpec(
-		StartHit,
-		EndHit,
-		ScrapeSettings.GetToolSpec());
-}
-
-
-FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyScrapeStrokeFromHitsWithToolSpec(
-	const FHitResult& StartHit,
-	const FHitResult& EndHit,
-	const FMD_ScrapeToolSpec& ToolSpec)
-{
-	FMD_ScrapeStroke LocalStroke;
-	EMD_ScrapeSurfaceFace StartSurfaceFace =
-		EMD_ScrapeSurfaceFace::Front;
-	EMD_ScrapeSurfaceFace EndSurfaceFace =
-		EMD_ScrapeSurfaceFace::Front;
-	if (!TryGetScrapeSurfacePositionFromHit(
-			StartHit,
-			LocalStroke.StartPositionCm,
-			StartSurfaceFace)
-		|| !TryGetScrapeSurfacePositionFromHit(
-			EndHit,
-			LocalStroke.EndPositionCm,
-			EndSurfaceFace)
-		|| StartSurfaceFace != EndSurfaceFace)
-	{
-		return FMD_ScrapeResult();
-	}
-
-	LocalStroke.SurfaceFace = StartSurfaceFace;
-	return ApplyLocalScrapeStrokeWithToolSpec(LocalStroke, ToolSpec);
-}
-
 
 bool UMD_ScrapeSurfaceComponent::RegisterScrapeObstacle(AMD_Barnacle* const Barnacle)
 {
@@ -227,15 +166,6 @@ bool UMD_ScrapeSurfaceComponent::TryClampScrapeStrokeAgainstObstacles(
 }
 
 
-FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStroke(
-	const FMD_ScrapeStroke& Stroke)
-{
-	return ApplyLocalScrapeStrokeWithToolSpec(
-		Stroke,
-		ScrapeSettings.GetToolSpec());
-}
-
-
 FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithToolSpec(
 	const FMD_ScrapeStroke& Stroke,
 	const FMD_ScrapeToolSpec& ToolSpec)
@@ -367,35 +297,6 @@ float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatio(
 	}
 }
 
-float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatioForFace(
-	const EMD_ScrapeSurfaceFace Face) const
-{
-	return GetContaminationCleanRatio(Face);
-}
-
-float UMD_ScrapeSurfaceComponent::GetContaminationRemovedPercent() const
-{
-	return GetContaminationCleanRatio() * 100.0f;
-}
-
-float UMD_ScrapeSurfaceComponent::GetContaminationRemovedPercent(
-	const EMD_ScrapeSurfaceFace Face) const
-{
-	return GetContaminationCleanRatio(Face) * 100.0f;
-}
-
-float UMD_ScrapeSurfaceComponent::GetContaminationRemovedPercentForFace(
-	const EMD_ScrapeSurfaceFace Face) const
-{
-	return GetContaminationRemovedPercent(Face);
-}
-
-float UMD_ScrapeSurfaceComponent::GetResidualContaminationRatio() const
-{
-	// 초기화 실패는 오염 100%로 처리
-	return 1.0f - GetContaminationCleanRatio();
-}
-
 bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved() const
 {
 	return IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace::Front)
@@ -413,13 +314,6 @@ bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved(
 			FaceCells,
 			ScrapeSettings.CleanTolerance);
 }
-
-bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemovedForFace(
-	const EMD_ScrapeSurfaceFace Face) const
-{
-	return IsContaminationFullyRemoved(Face);
-}
-
 
 void UMD_ScrapeSurfaceComponent::RefreshContaminationCleanRatioCache()
 {
@@ -461,4 +355,3 @@ float UMD_ScrapeSurfaceComponent::GetContaminationDemolitionReadyRatio() const
 		CachedFrontContaminationCleanRatio,
 		CachedBackContaminationCleanRatio);
 }
-

@@ -206,23 +206,6 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
 		Category = "MD|Scrape Surface")
-	FMD_ScrapeResult ApplyScrapeStrokeFromHits(
-		const FHitResult& StartHit,
-		const FHitResult& EndHit);
-
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
-		Category = "MD|Scrape Surface")
-	FMD_ScrapeResult ApplyScrapeStrokeFromHitsWithToolSpec(
-		const FHitResult& StartHit,
-		const FHitResult& EndHit,
-		const FMD_ScrapeToolSpec& ToolSpec);
-
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
-		Category = "MD|Scrape Surface")
-	FMD_ScrapeResult ApplyLocalScrapeStroke(const FMD_ScrapeStroke& Stroke);
-
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
-		Category = "MD|Scrape Surface")
 	FMD_ScrapeResult ApplyLocalScrapeStrokeWithToolSpec(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec);
@@ -264,30 +247,9 @@ public:
 	float GetContaminationCleanRatio() const;
 	float GetContaminationCleanRatio(EMD_ScrapeSurfaceFace Face) const;
 
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface",
-		meta = (DisplayName = "Get Contamination Clean Ratio For Face"))
-	float GetContaminationCleanRatioForFace(EMD_ScrapeSurfaceFace Face) const;
-
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
-	float GetContaminationRemovedPercent() const;
-	float GetContaminationRemovedPercent(EMD_ScrapeSurfaceFace Face) const;
-
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface",
-		meta = (DisplayName = "Get Contamination Removed Percent For Face"))
-	float GetContaminationRemovedPercentForFace(
-		EMD_ScrapeSurfaceFace Face) const;
-
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
-	float GetResidualContaminationRatio() const;
-
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
 	bool IsContaminationFullyRemoved() const;
 	bool IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace Face) const;
-
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface",
-		meta = (DisplayName = "Is Contamination Fully Removed For Face"))
-	bool IsContaminationFullyRemovedForFace(
-		EMD_ScrapeSurfaceFace Face) const;
 
 	/** Used by demolition owners without coupling this component to wall types. */
 	float GetContaminationDemolitionReadyRatio() const;

@@ -1,37 +1,14 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
-#include "TimerManager.h"
-#include "Components/DecalComponent.h"
-#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Gameplay/Scrape/MD_ContaminationNoise.h"
-#include "Gameplay/Scrape/MD_ScrapeDecalLayout.h"
-#include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
-#include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
-#include "Gameplay/Scrape/MD_ScrapeMaskAtlas.h"
-#include "Gameplay/Scrape/MD_ScrapeMeshSurfaceProfile.h"
+#include "Engine/World.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceGeometry.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
-#include "Engine/Engine.h"
-#include "Engine/StaticMesh.h"
-#include "Engine/Texture2D.h"
-#include "Materials/Material.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "Materials/MaterialInterface.h"
 #include "Math/RotationMatrix.h"
-#include "Net/UnrealNetwork.h"
-#include "RHITypes.h"
-#include "Stats/Stats.h"
-#include "World/Contamination/MD_Barnacle.h"
 #include "World/Contamination/MD_ContaminationItem.h"
-#include "World/Sector/MD_Sector.h"
-#include "World/Wall/MD_WallPiece.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 
 // 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
-// 이 파일: 밤샘 악화 · Day 스냅샷 입출력 · 오염물 드롭
-
-using namespace MD_ScrapeSurfaceComponentInternal;
+// 책임: 밤샘 악화 · Day 스냅샷 입출력 · 오염물 드롭
 
 void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells)
 {
@@ -61,7 +38,6 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 		return;
 	}
 
-	// NaN/무한대가 그대로 들어가면 셀 값이 오염돼 이후 모든 판정이 무너진다.
 	const float SafeAmount = FMath::IsFinite(Amount)
 		? FMath::Clamp(Amount, 0.0f, 1.0f)
 		: 0.0f;
@@ -71,9 +47,6 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 		return;
 	}
 
-	// 기획 03 §3 "새로운 소형 오염 분출" — 앞뒤가 각자 따로 분출한다.
-	// 같은 좌표를 양면에 쓰면 벽을 관통한 하나의 얼룩처럼 보이는데,
-	// 기획이 말하는 것은 면마다 독립적으로 생기는 분출이다.
 	static constexpr EMD_ScrapeSurfaceFace PatchTargetFaces[] = {
 		EMD_ScrapeSurfaceFace::Front,
 		EMD_ScrapeSurfaceFace::Back };
@@ -98,8 +71,7 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 					continue;
 				}
 
-				// 면 내부 번호를 그대로 쓰면 최대값이 CellsPerFace - 1이라
-				// 뒷면 구간 [CellsPerFace, 2 * CellsPerFace)에 영영 닿지 못한다.
+
 				const int32 CombinedCellIndex =
 					FMD_ScrapeSurfaceLayout::ToCombinedCellIndex(
 						TargetFace,
@@ -126,13 +98,6 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 				}
 
 				Cell.RemainingContamination = TargetRemaining;
-
-				// 새 분출은 이 셀이 짊어진 오염 총량 자체를 늘린다.
-				// InitialContamination은 제거율의 분모이자 마스크·완료 판정의
-				// 게이트다. 여기를 같이 올리지 않으면 원래 깨끗했던 칸은
-				// 마스크가 0으로 고정되고(MD_ScrapeMaskAtlas.cpp SafeInitial 분기)
-				// 완료 판정에서도 건너뛰어져(MD_ScrapeEvaluator.cpp IsSurfaceFullyClean)
-				// 새 오염이 보이지도 세어지지도 않는다.
 				Cell.InitialContamination = FMath::Max(
 					Cell.InitialContamination,
 					TargetRemaining);
@@ -140,7 +105,6 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 				FMD_ScrapeCellChange Change;
 				Change.CellIndex = CombinedCellIndex;
 				Change.GridCoordinate = FIntPoint(X, Y);
-				// 재도포는 제거가 아니므로 제거량은 0이고 깨끗해지지도 않는다.
 				Change.RemovedAmount = 0.0f;
 				Change.RemainingAmountAfter = Cell.RemainingContamination;
 				Change.bBecameClean = false;
@@ -155,9 +119,6 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 	}
 
 	RefreshContaminationCleanRatioCache();
-	// 양면이 모두 오염됐으면 완료 방송이 다시 무장된다. 한쪽 면이 아직 깨끗하면
-	// OR 게이트상 벽은 여전히 "완료"라 무장되지 않는다. 이 의미가 맞는지는
-	// 별도 결정 대기 중이며, 같은 한 줄이 RestoreContaminationCells에도 있다.
 	bContaminationCompletionBroadcast = IsContaminationFullyRemoved();
 	UpdateContaminationMask(Changes);
 	UpdateContaminationVisualization(Changes);
@@ -177,14 +138,8 @@ void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
 	for (int32 Index = 0; Index < ContaminationCells.Num(); ++Index)
 	{
 		const FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
+		const bool bScraped = Cell.RemainingContamination != Cell.InitialContamination;
 
-		// 긁힌 셀은 남은 양이 총량보다 적다.
-		const bool bScraped =
-			Cell.RemainingContamination != Cell.InitialContamination;
-
-		// 밤샘 분출을 맞았지만 아직 손대지 않은 셀은 남은 양과 총량이 같아
-		// 위 조건에 걸리지 않는다. 생성 기준값과 비교해야 잡힌다.
-		// 기준 배열이 없거나 길이가 어긋나면 판단 근거가 없으므로 분출로 보지 않는다.
 		const bool bBurstSinceGeneration =
 			ContaminationGeneratedInitialAmounts.IsValidIndex(Index)
 			&& Cell.InitialContamination
@@ -205,8 +160,6 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 	const TArray<float>& InitialAmounts,
 	const TArray<float>& RemainingAmounts)
 {
-	// 총량 배열은 이 필드가 없던 구세션 스냅샷을 위해 비어 있어도 받아준다.
-	// 그 경우 총량은 생성값을 그대로 두고 남은 오염량만 복원한다.
 	const bool bHasInitialAmounts = !InitialAmounts.IsEmpty();
 	if (!HasAuthority()
 		|| CellIndices.Num() != RemainingAmounts.Num()
@@ -238,8 +191,6 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 
 		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
 
-		// 총량을 먼저 세운다. 남은 오염량이 총량으로 클램프되므로 순서가 뒤바뀌면
-		// 밤샘 분출로 올라간 값이 생성 기준값까지 깎여 얼룩이 사라진다.
 		if (bHasInitialAmounts && FMath::IsFinite(InitialAmounts[i]))
 		{
 			Cell.InitialContamination = FMath::Clamp(
@@ -307,7 +258,6 @@ bool UMD_ScrapeSurfaceComponent::TryCalculateContaminationItemSpawnTransform(
 		return false;
 	}
 
-	// 벽면 안쪽에서 스폰하면 물리가 벽을 밀어내며 튀어나간다. 긁은 면 바깥으로 뺀다.
 	const FVector OutwardNormal =
 		SurfaceTransform.TransformVectorNoScale(
 			SurfaceFace == EMD_ScrapeSurfaceFace::Back
@@ -319,8 +269,7 @@ bool UMD_ScrapeSurfaceComponent::TryCalculateContaminationItemSpawnTransform(
 	}
 
 	const float SafeOffsetCm = FMath::IsFinite(ContaminationItemSpawnOffsetCm)
-		? FMath::Max(0.0f, ContaminationItemSpawnOffsetCm)
-		: 0.0f;
+		? FMath::Max(0.0f, ContaminationItemSpawnOffsetCm)	: 0.0f;
 
 	OutSpawnTransform = FTransform(
 		FRotationMatrix::MakeFromZ(OutwardNormal).Rotator(),
@@ -329,53 +278,36 @@ bool UMD_ScrapeSurfaceComponent::TryCalculateContaminationItemSpawnTransform(
 }
 
 
-int32 UMD_ScrapeSurfaceComponent::DropContaminationItems(
-	const EMD_ScrapeSurfaceFace SurfaceFace,
-	const float RemovedAmount,
-	const FVector2D& SurfacePositionCm)
+int32 UMD_ScrapeSurfaceComponent::DropContaminationItems(const EMD_ScrapeSurfaceFace SurfaceFace,
+	const float RemovedAmount, const FVector2D& SurfacePositionCm)
 {
-	const int32 FaceSlot =
-		SurfaceFace == EMD_ScrapeSurfaceFace::Back ? 1 : 0;
-	if (SurfaceFace != EMD_ScrapeSurfaceFace::Front
-		&& SurfaceFace != EMD_ScrapeSurfaceFace::Back)
+	const int32 FaceSlot = SurfaceFace == EMD_ScrapeSurfaceFace::Back ? 1 : 0;
+	if (SurfaceFace != EMD_ScrapeSurfaceFace::Front	&& SurfaceFace != EMD_ScrapeSurfaceFace::Back)
 	{
 		return 0;
 	}
 
-	if (!HasAuthority()
-		|| !ContaminationItemClass
-		|| ContaminationItemsPerFace <= 0
-		|| !FMath::IsFinite(RemovedAmount)
-		|| RemovedAmount <= 0.0f)
+	if (!HasAuthority()	|| !ContaminationItemClass || ContaminationItemsPerFace <= 0
+		|| !FMath::IsFinite(RemovedAmount) || RemovedAmount <= 0.0f)
 	{
 		return 0;
 	}
 
 	int32 CellsPerFace = 0;
 	int32 TotalCellCount = 0;
-	if (!FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
-			ContaminationGridDimensions,
-			CellsPerFace,
-			TotalCellCount)
-		|| CellsPerFace <= 0)
+	if (!FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(ContaminationGridDimensions,
+			CellsPerFace,TotalCellCount) || CellsPerFace <= 0)
 	{
 		return 0;
 	}
 
-	// 문턱을 셀 수로 잡는다. 셀 하나의 최대 오염량이 1.0이므로 면 전체를 다 긁으면
-	// 정확히 ContaminationItemsPerFace개가 나온다. 격자 크기가 달라져도 개수는 같고,
-	// 덜 더러운 벽에서는 자연히 덜 나온다.
-	const float AmountPerItem =
-		static_cast<float>(CellsPerFace)
-		/ static_cast<float>(ContaminationItemsPerFace);
+	const float AmountPerItem =	static_cast<float>(CellsPerFace) / static_cast<float>(ContaminationItemsPerFace);
 	if (AmountPerItem <= UE_SMALL_NUMBER)
 	{
 		return 0;
 	}
 
-	// 문턱 비교에 여유를 둔다. 면을 정확히 다 긁어도 AmountPerItem을 정수 번 빼면
-	// 마지막에 1e-7 수준이 모자라 개수가 하나 줄어든다. 그러면 "다 긁었는데 3개가
-	// 아니라 2개"가 되어 기획 개수와 어긋난다.
+
 	const float ItemThreshold = AmountPerItem - UE_KINDA_SMALL_NUMBER;
 
 	float& PendingAmount = PendingContaminationItemAmounts[FaceSlot];
@@ -391,7 +323,6 @@ int32 UMD_ScrapeSurfaceComponent::DropContaminationItems(
 			SurfacePositionCm,
 			SpawnTransform))
 	{
-		// 위치를 못 구하면 쌓인 양을 흘려보내지 않고 다음 스트로크로 넘긴다.
 		return 0;
 	}
 
