@@ -328,21 +328,18 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 		return false;
 	}
 
-	// 불러온 게임 데이터를 멤버 변수에 저장
-	LatestSavedGameData = MakeShared<FMD_GameData>(GameData);
-
 	// 퀘스트 덮어씌우기
 	UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 로드 시 퀘스트 정보 덮어씌우기 보강 필요"), *UE_CALL_LOCATIONINFO);
 
 	// 점수 데이터 덮어씌우기
-	int32 ScoreDelta = LatestSavedGameData->Score - GameState->GetScore();
+	int32 ScoreDelta = TemporaryGameData->Score - GameState->GetScore();
 	if (ScoreDelta != 0)
 	{
 		GameState->AddScoreDelta(ScoreDelta);
 	}
 
 	// 인게임 재화 데이터 덮어씌우기
-	int32 CreditDelta = LatestSavedGameData->Credit - MerchantManager->GetCredits();
+	int32 CreditDelta = TemporaryGameData->Credit - MerchantManager->GetCredits();
 	if (CreditDelta != 0)
 	{
 		MerchantManager->AddCredits(CreditDelta);
@@ -352,7 +349,7 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 	UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 로드 시 상인 우호도 정보 덮어씌우기 보강 필요"), *UE_CALL_LOCATIONINFO);
 
 	// 인게임 시간 데이터 덮어씌우기
-	int32 InGameDay = LatestSavedGameData->InGameTime;
+	int32 InGameDay = TemporaryGameData->InGameTime;
 	if (GameState->GetCurrentDay() != InGameDay)
 	{
 		GameState->SetCurrentDay(InGameDay);
@@ -364,6 +361,9 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 	{
 		OverwriteDataToPlayer(PlayerState);
 	}
+
+	// 불러온 게임 데이터를 멤버 변수에 저장
+	LatestSavedGameData = MakeShared<FMD_GameData>(GameData);
 
 	return true;
 }
@@ -426,7 +426,7 @@ bool UMD_SaveSlotManager::OverwriteDataToPlayer(const APlayerState* PlayerState)
 	}
 
 	// 로드한 데이터가 존재하지 않은 경우 함수 조기 종료
-	if (LatestSavedGameData.IsValid() == false)
+	if (TemporaryGameData.IsValid() == false)
 	{
 		return false;
 	}
@@ -446,7 +446,7 @@ bool UMD_SaveSlotManager::OverwriteDataToPlayer(const APlayerState* PlayerState)
 	}
 
 	// 플레이어 데이터의 존재 여부 검사
-	const FMD_PlayerData* PlayerData = LatestSavedGameData->PlayerData.Find(PlayerKey);
+	const FMD_PlayerData* PlayerData = TemporaryGameData->PlayerData.Find(PlayerKey);
 	if (PlayerData == nullptr)
 	{
 		return false;
