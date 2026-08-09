@@ -1,5 +1,6 @@
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "EngineUtils.h"
 #include "Game/MD_GameStateBase.h"
 #include "World/Contamination/MD_BarnacleSpawner.h"
@@ -8,6 +9,84 @@
 #include "World/Support/MD_SupportBrace.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
+
+namespace
+{
+    void GatherScrapeSurfaces(
+        UWorld* World,
+        TArray<UMD_ScrapeSurfaceComponent*>& OutSurfaces)
+    {
+        OutSurfaces.Reset();
+        if (!World)
+        {
+            return;
+        }
+
+        for (TActorIterator<AActor> It(World); It; ++It)
+        {
+            TInlineComponentArray<UMD_ScrapeSurfaceComponent*> ActorSurfaces(*It);
+            for (UMD_ScrapeSurfaceComponent* const Surface : ActorSurfaces)
+            {
+                if (IsValid(Surface))
+                {
+                    OutSurfaces.Add(Surface);
+                }
+            }
+        }
+    }
+
+    FName GetPersistentSurfaceComponentName(
+        const UMD_ScrapeSurfaceComponent* Surface)
+    {
+        const AMD_CuttableWall* const LegacyWall = Surface
+            ? Cast<AMD_CuttableWall>(Surface->GetOwner())
+            : nullptr;
+        if (LegacyWall
+            && LegacyWall->GetScrapeSurfaceComponent() == Surface)
+        {
+            // 기존 저장은 벽 이름만 가졌다. 기본 철거벽 표면은 그 키를 계속 쓴다.
+            return NAME_None;
+        }
+
+        return Surface ? Surface->GetFName() : NAME_None;
+    }
+
+    UMD_ScrapeSurfaceComponent* FindSavedScrapeSurface(
+        const FMD_WallContaminationRecord& Record,
+        const TMap<FName, AMD_CuttableWall*>& WallsByName,
+        const TMap<FName, TArray<UMD_ScrapeSurfaceComponent*>>& SurfacesByOwnerName)
+    {
+        if (Record.SurfaceComponentName.IsNone())
+        {
+            if (AMD_CuttableWall* const* Wall = WallsByName.Find(Record.WallName))
+            {
+                return IsValid(*Wall)
+                    ? (*Wall)->GetScrapeSurfaceComponent()
+                    : nullptr;
+            }
+
+            return nullptr;
+        }
+
+        const TArray<UMD_ScrapeSurfaceComponent*>* const OwnerSurfaces =
+            SurfacesByOwnerName.Find(Record.WallName);
+        if (!OwnerSurfaces)
+        {
+            return nullptr;
+        }
+
+        for (UMD_ScrapeSurfaceComponent* const Surface : *OwnerSurfaces)
+        {
+            if (IsValid(Surface)
+                && Surface->GetFName() == Record.SurfaceComponentName)
+            {
+                return Surface;
+            }
+        }
+
+        return nullptr;
+    }
+}
 
 void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
 {
@@ -37,11 +116,24 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         {
             Snapshot.SupportedWallNames.Add(It->GetFName());
         }
+    }
+
+    TArray<UMD_ScrapeSurfaceComponent*> ScrapeSurfaces;
+    GatherScrapeSurfaces(World, ScrapeSurfaces);
+    for (UMD_ScrapeSurfaceComponent* const Surface : ScrapeSurfaces)
+    {
+        AActor* const SurfaceOwner = Surface->GetOwner();
+        if (!IsValid(SurfaceOwner))
+        {
+            continue;
+        }
 
         // 생성 기준값과 달라진 오염 셀만 기록. 밤샘 분출로 총량이 오른 셀도 포함된다
         FMD_WallContaminationRecord ContaminationRecord;
-        ContaminationRecord.WallName = It->GetFName();
-        It->ExportContaminationDeltas(
+        ContaminationRecord.WallName = SurfaceOwner->GetFName();
+        ContaminationRecord.SurfaceComponentName =
+            GetPersistentSurfaceComponentName(Surface);
+        Surface->ExportContaminationDeltas(
             ContaminationRecord.CellIndices,
             ContaminationRecord.InitialAmounts,
             ContaminationRecord.RemainingAmounts);
@@ -137,6 +229,18 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
         }
     }
 
+    // 철거된 벽을 제거한 뒤 살아 있는 모든 표면을 복원용 키로 묶는다.
+    TArray<UMD_ScrapeSurfaceComponent*> ScrapeSurfaces;
+    GatherScrapeSurfaces(World, ScrapeSurfaces);
+    TMap<FName, TArray<UMD_ScrapeSurfaceComponent*>> SurfacesByOwnerName;
+    for (UMD_ScrapeSurfaceComponent* const Surface : ScrapeSurfaces)
+    {
+        if (AActor* const Owner = Surface->GetOwner(); IsValid(Owner))
+        {
+            SurfacesByOwnerName.FindOrAdd(Owner->GetFName()).Add(Surface);
+        }
+    }
+
     // 지지대 설치 상태 복원
     for (const FName& WallName : Snapshot.SupportedWallNames)
     {
@@ -149,9 +253,12 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     // 어제 긁은 오염 셀 상태 복원. 이후 ApplyOvernightWorsening이 이 위에 소량 재부착
     for (const FMD_WallContaminationRecord& Record : Snapshot.WallContaminations)
     {
-        if (AMD_CuttableWall* const* Wall = WallsByName.Find(Record.WallName))
+        if (UMD_ScrapeSurfaceComponent* const Surface = FindSavedScrapeSurface(
+                Record,
+                WallsByName,
+                SurfacesByOwnerName))
         {
-            (*Wall)->RestoreContaminationCells(
+            Surface->RestoreContaminationCells(
                 Record.CellIndices,
                 Record.InitialAmounts,
                 Record.RemainingAmounts);
@@ -284,12 +391,14 @@ void UMD_DayPersistenceSubsystem::ApplyOvernightWorsening(UWorld* World)
         Braces[FMath::RandRange(0, Braces.Num() - 1)]->Weaken();
     }
 
-    // 살아남은 벽 일부에 소형 오염 재부착
-    for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
+    // 살아남은 일반 표면과 철거벽 표면 일부에 소형 오염 재부착
+    TArray<UMD_ScrapeSurfaceComponent*> ScrapeSurfaces;
+    GatherScrapeSurfaces(World, ScrapeSurfaces);
+    for (UMD_ScrapeSurfaceComponent* const Surface : ScrapeSurfaces)
     {
         if (FMath::FRand() < 0.3f)
         {
-            It->ReapplyContaminationPatch(0.6f, 3);
+            Surface->ReapplyContaminationPatch(0.6f, 3);
         }
     }
 

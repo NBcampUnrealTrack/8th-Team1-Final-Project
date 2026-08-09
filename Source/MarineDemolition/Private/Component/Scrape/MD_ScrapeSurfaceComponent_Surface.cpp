@@ -1,4 +1,4 @@
-#include "World/Wall/MD_CuttableWall.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
 #include "TimerManager.h"
 #include "Components/DecalComponent.h"
@@ -26,14 +26,14 @@
 #include "World/Contamination/MD_ContaminationItem.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
-#include "World/Wall/MD_CuttableWallInternal.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 
-// 파일 분할 기준은 MD_CuttableWallInternal.h 표 참고.
+// 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 이 파일: 작업면 기하 해석 · 셀 초기화 · 좌표 변환
 
-using namespace MD_CuttableWallInternal;
+using namespace MD_ScrapeSurfaceComponentInternal;
 
-bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromHit(
+bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromHit(
 	const FHitResult& Hit,
 	FVector2D& OutSurfacePositionCm,
 	EMD_ScrapeSurfaceFace& OutSurfaceFace)
@@ -52,7 +52,7 @@ bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromHit(
 }
 
 
-bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromWorldPoint(
+bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromWorldPoint(
 	const FVector& WorldPoint,
 	const FVector& WorldNormal,
 	FVector2D& OutSurfacePositionCm,
@@ -66,14 +66,14 @@ bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromWorldPoint(
 		InitializeContaminationSurface();
 	}
 
-	if (!Mesh || WorldPoint.ContainsNaN() || WorldNormal.ContainsNaN())
+	if (!SurfaceMesh || WorldPoint.ContainsNaN() || WorldNormal.ContainsNaN())
 	{
 		return false;
 	}
 
 	return FMD_ScrapeSurfaceGeometry::TryResolveSurfaceFaceFromImpactNormal(
 			WorldNormal,
-			Mesh->GetComponentTransform(),
+			SurfaceMesh->GetComponentTransform(),
 			ResolvedContaminationSurfaceNormalAxis,
 			MinimumContaminationFaceNormalDot,
 			OutSurfaceFace)
@@ -83,18 +83,18 @@ bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromWorldPoint(
 }
 
 
-bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPosition(
+bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceWorldPosition(
 	const FVector2D& SurfacePositionCm,
 	const EMD_ScrapeSurfaceFace SurfaceFace,
 	FVector& OutWorldPosition) const
 {
 	OutWorldPosition = FVector::ZeroVector;
 	if (!bContaminationSurfaceInitialized
-		|| !Mesh
+		|| !SurfaceMesh
 		|| !FMD_ScrapeSurfaceGeometry::TryCalculateSurfaceWorldPosition(
 			SurfacePositionCm,
 			SurfaceFace,
-			Mesh->GetComponentTransform(),
+			SurfaceMesh->GetComponentTransform(),
 			ResolvedContaminationSurfaceNormalAxis,
 			ContaminationSurfaceCenterLocal,
 			ContaminationMeshLocalBoundsMinimum,
@@ -108,7 +108,7 @@ bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPosition(
 }
 
 
-bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPositionAtDepth(
+bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceWorldPositionAtDepth(
 	const FVector2D& SurfacePositionCm,
 	const EMD_ScrapeSurfaceFace SurfaceFace,
 	const FVector& ReferenceWorldPosition,
@@ -136,7 +136,7 @@ bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPositionAtDepth(
 		return true;
 	}
 
-	const FVector WorldFrontNormal = Mesh->GetComponentTransform()
+	const FVector WorldFrontNormal = SurfaceMesh->GetComponentTransform()
 		.TransformVector(FrontNormalLocal)
 		.GetSafeNormal();
 	if (WorldFrontNormal.IsNearlyZero())
@@ -158,9 +158,9 @@ bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPositionAtDepth(
 }
 
 
-bool AMD_CuttableWall::ResolveContaminationSurfaceGeometry()
+bool UMD_ScrapeSurfaceComponent::ResolveContaminationSurfaceGeometry()
 {
-	if (!Mesh)
+	if (!SurfaceMesh)
 	{
 		ResolvedContaminationSurfaceSizeCm = FVector2D::ZeroVector;
 		ResolvedContaminationSurfaceNormalAxis =
@@ -169,7 +169,7 @@ bool AMD_CuttableWall::ResolveContaminationSurfaceGeometry()
 		return false;
 	}
 
-	Mesh->GetLocalBounds(
+	SurfaceMesh->GetLocalBounds(
 		ContaminationMeshLocalBoundsMinimum,
 		ContaminationMeshLocalBoundsMaximum);
 
@@ -184,7 +184,7 @@ bool AMD_CuttableWall::ResolveContaminationSurfaceGeometry()
 		&& ContaminationSurfaceSizeOverrideCm.X > UE_SMALL_NUMBER
 		&& ContaminationSurfaceSizeOverrideCm.Y > UE_SMALL_NUMBER;
 	const FVector AbsoluteComponentScale =
-		Mesh->GetComponentScale().GetAbs();
+		SurfaceMesh->GetComponentScale().GetAbs();
 	if (!FMD_ScrapeSurfaceGeometry::TryResolveSurfaceNormalAxis(
 			ContaminationSurfaceNormalAxis,
 			ContaminationMeshLocalBoundsMinimum,
@@ -220,7 +220,7 @@ bool AMD_CuttableWall::ResolveContaminationSurfaceGeometry()
 }
 
 TArrayView<FMD_ScrapeSurfaceCell>
-AMD_CuttableWall::GetContaminationCellsForFace(
+UMD_ScrapeSurfaceComponent::GetContaminationCellsForFace(
 	const EMD_ScrapeSurfaceFace Face)
 {
 	int32 CellsPerFace = 0;
@@ -248,7 +248,7 @@ AMD_CuttableWall::GetContaminationCellsForFace(
 }
 
 TConstArrayView<FMD_ScrapeSurfaceCell>
-AMD_CuttableWall::GetContaminationCellsForFace(
+UMD_ScrapeSurfaceComponent::GetContaminationCellsForFace(
 	const EMD_ScrapeSurfaceFace Face) const
 {
 	int32 CellsPerFace = 0;
@@ -275,7 +275,7 @@ AMD_CuttableWall::GetContaminationCellsForFace(
 		CellsPerFace);
 }
 
-void AMD_CuttableWall::InitializeContaminationSurface()
+void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 {
 	bContaminationSurfaceInitialized = false;
 	bContaminationDecalsConfigured = false;
@@ -384,11 +384,11 @@ void AMD_CuttableWall::InitializeContaminationSurface()
 }
 
 
-bool AMD_CuttableWall::TryApplyProceduralInitialContamination(
+bool UMD_ScrapeSurfaceComponent::TryApplyProceduralInitialContamination(
 	const int32 CellsPerFace,
 	const float BaseInitialContamination)
 {
-	if (!Mesh
+	if (!SurfaceMesh
 		|| CellsPerFace <= 0
 		|| ContaminationCells.Num()
 			!= CellsPerFace * FMD_ScrapeSurfaceLayout::FaceCount
@@ -436,7 +436,7 @@ bool AMD_CuttableWall::TryApplyProceduralInitialContamination(
 			if (!FMD_ScrapeSurfaceGeometry::TryCalculateSurfaceWorldPosition(
 					SurfacePositionCm,
 					Face,
-					Mesh->GetComponentTransform(),
+					SurfaceMesh->GetComponentTransform(),
 					ResolvedContaminationSurfaceNormalAxis,
 					ContaminationSurfaceCenterLocal,
 					ContaminationMeshLocalBoundsMinimum,
@@ -480,14 +480,14 @@ bool AMD_CuttableWall::TryApplyProceduralInitialContamination(
 }
 
 
-bool AMD_CuttableWall::TryProjectWorldPointToContaminationSurface(
+bool UMD_ScrapeSurfaceComponent::TryProjectWorldPointToContaminationSurface(
 	const FVector& WorldPoint,
 	FVector2D& OutSurfacePositionCm) const
 {
 	OutSurfacePositionCm = FVector2D::ZeroVector;
 
 	if (!bContaminationSurfaceInitialized
-		|| !Mesh
+		|| !SurfaceMesh
 		|| WorldPoint.ContainsNaN())
 	{
 		return false;
@@ -495,23 +495,23 @@ bool AMD_CuttableWall::TryProjectWorldPointToContaminationSurface(
 
 	return FMD_ScrapeSurfaceGeometry::TryProjectWorldPositionToSurface(
 		WorldPoint,
-		Mesh->GetComponentTransform(),
+		SurfaceMesh->GetComponentTransform(),
 		ResolvedContaminationSurfaceNormalAxis,
 		ContaminationSurfaceCenterLocal,
 		OutSurfacePositionCm);
 }
 
 
-bool AMD_CuttableWall::TryGetContaminationFaceFromHit(
+bool UMD_ScrapeSurfaceComponent::TryGetContaminationFaceFromHit(
 	const FHitResult& Hit,
 	EMD_ScrapeSurfaceFace& OutSurfaceFace) const
 {
 	OutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
 	if (!bContaminationSurfaceInitialized
-		|| !Mesh
+		|| !SurfaceMesh
 		|| !Hit.bBlockingHit
-		|| Hit.GetActor() != this
-		|| Hit.GetComponent() != Mesh.Get()
+		|| Hit.GetActor() != GetOwner()
+		|| Hit.GetComponent() != SurfaceMesh.Get()
 		|| Hit.ImpactPoint.ContainsNaN()
 		|| Hit.ImpactNormal.ContainsNaN())
 	{
@@ -520,9 +520,8 @@ bool AMD_CuttableWall::TryGetContaminationFaceFromHit(
 
 	return FMD_ScrapeSurfaceGeometry::TryResolveSurfaceFaceFromImpactNormal(
 		Hit.ImpactNormal,
-		Mesh->GetComponentTransform(),
+		SurfaceMesh->GetComponentTransform(),
 		ResolvedContaminationSurfaceNormalAxis,
 		MinimumContaminationFaceNormalDot,
 		OutSurfaceFace);
 }
-

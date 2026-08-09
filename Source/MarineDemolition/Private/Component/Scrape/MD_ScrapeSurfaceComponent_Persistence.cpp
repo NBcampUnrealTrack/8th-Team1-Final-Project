@@ -1,4 +1,4 @@
-#include "World/Wall/MD_CuttableWall.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
 #include "TimerManager.h"
 #include "Components/DecalComponent.h"
@@ -26,14 +26,14 @@
 #include "World/Contamination/MD_ContaminationItem.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
-#include "World/Wall/MD_CuttableWallInternal.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 
-// 파일 분할 기준은 MD_CuttableWallInternal.h 표 참고.
+// 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 이 파일: 밤샘 악화 · Day 스냅샷 입출력 · 오염물 드롭
 
-using namespace MD_CuttableWallInternal;
+using namespace MD_ScrapeSurfaceComponentInternal;
 
-void AMD_CuttableWall::ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells)
+void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells)
 {
 	if (!HasAuthority())
 	{
@@ -165,7 +165,7 @@ void AMD_CuttableWall::ReapplyContaminationPatch(float Amount, int32 PatchRadius
 }
 
 
-void AMD_CuttableWall::ExportContaminationDeltas(
+void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
 	TArray<int32>& OutCellIndices,
 	TArray<float>& OutInitialAmounts,
 	TArray<float>& OutRemainingAmounts) const
@@ -200,7 +200,7 @@ void AMD_CuttableWall::ExportContaminationDeltas(
 }
 
 
-void AMD_CuttableWall::RestoreContaminationCells(
+void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 	const TArray<int32>& CellIndices,
 	const TArray<float>& InitialAmounts,
 	const TArray<float>& RemainingAmounts)
@@ -272,18 +272,18 @@ void AMD_CuttableWall::RestoreContaminationCells(
 }
 
 
-bool AMD_CuttableWall::TryCalculateContaminationItemSpawnTransform(
+bool UMD_ScrapeSurfaceComponent::TryCalculateContaminationItemSpawnTransform(
 	const EMD_ScrapeSurfaceFace SurfaceFace,
 	const FVector2D& SurfacePositionCm,
 	FTransform& OutSpawnTransform) const
 {
 	OutSpawnTransform = FTransform::Identity;
-	if (!Mesh)
+	if (!SurfaceMesh)
 	{
 		return false;
 	}
 
-	const FTransform SurfaceTransform = Mesh->GetComponentTransform();
+	const FTransform SurfaceTransform = SurfaceMesh->GetComponentTransform();
 
 	FVector WorldPosition = FVector::ZeroVector;
 	FVector HorizontalAxis = FVector::ZeroVector;
@@ -329,7 +329,7 @@ bool AMD_CuttableWall::TryCalculateContaminationItemSpawnTransform(
 }
 
 
-int32 AMD_CuttableWall::DropContaminationItems(
+int32 UMD_ScrapeSurfaceComponent::DropContaminationItems(
 	const EMD_ScrapeSurfaceFace SurfaceFace,
 	const float RemovedAmount,
 	const FVector2D& SurfacePositionCm)
@@ -402,7 +402,7 @@ int32 AMD_CuttableWall::DropContaminationItems(
 	}
 
 	FActorSpawnParameters SpawnParams;
-	SpawnParams.Owner = this;
+	SpawnParams.Owner = GetOwner();
 	SpawnParams.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
@@ -422,4 +422,3 @@ int32 AMD_CuttableWall::DropContaminationItems(
 
 	return SpawnedCount;
 }
-

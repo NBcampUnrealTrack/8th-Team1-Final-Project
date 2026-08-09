@@ -2,6 +2,7 @@
 
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
@@ -53,29 +54,34 @@ void AMD_Barnacle::BeginPlay()
 	}
 
 	ApplyRemovalProgressVisual();
-	RegisterWithScrapeWall();
+	RegisterWithScrapeSurface();
 }
 
 void AMD_Barnacle::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	// 떨어져 나갔든 레벨이 내려갔든 벽에 남은 등록은 지운다.
+	// 떨어져 나갔든 레벨이 내려갔든 표면에 남은 등록은 지운다.
 	// 남겨 두면 없는 따개비가 헤라를 계속 막는다.
-	UnregisterFromScrapeWall();
+	UnregisterFromScrapeSurface();
 
 	Super::EndPlay(EndPlayReason);
 }
 
-void AMD_Barnacle::RegisterWithScrapeWall()
+void AMD_Barnacle::RegisterWithScrapeSurface()
 {
-	if (RegisteredScrapeWall.IsValid())
+	if (RegisteredScrapeSurface.IsValid())
 	{
 		return;
 	}
 
 	// 배치기가 맞은 컴포넌트에 붙이므로 부착 부모가 가장 확실한 단서다.
-	AMD_CuttableWall* Wall = Cast<AMD_CuttableWall>(GetAttachParentActor());
+	const USceneComponent* const AttachParentComponent = GetRootComponent()
+		? GetRootComponent()->GetAttachParent()
+		: nullptr;
+	UMD_ScrapeSurfaceComponent* Surface =
+		UMD_ScrapeSurfaceComponent::FindForPrimitiveComponent(
+		Cast<UPrimitiveComponent>(AttachParentComponent));
 
-	if (!Wall && IsValid(Mesh) && GetWorld())
+	if (!Surface && IsValid(Mesh) && GetWorld())
 	{
 		// 손으로 놓은 따개비는 붙어 있지 않다. 밑동이 닿아 있을 만한 범위만 훑는다.
 		const float SearchRadius = FMath::Max(
@@ -87,7 +93,7 @@ void AMD_Barnacle::RegisterWithScrapeWall()
 		ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
 		ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
 
-		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MD_BarnacleWallSearch), false);
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MD_BarnacleSurfaceSearch), false);
 		QueryParams.AddIgnoredActor(this);
 
 		if (GetWorld()->OverlapMultiByObjectType(
@@ -100,31 +106,32 @@ void AMD_Barnacle::RegisterWithScrapeWall()
 		{
 			for (const FOverlapResult& Overlap : Overlaps)
 			{
-				if (AMD_CuttableWall* const OverlappedWall =
-						Cast<AMD_CuttableWall>(Overlap.GetActor()))
+				if (UMD_ScrapeSurfaceComponent* const OverlappedSurface =
+						UMD_ScrapeSurfaceComponent::FindForPrimitiveComponent(
+							Overlap.GetComponent()))
 				{
-					Wall = OverlappedWall;
+					Surface = OverlappedSurface;
 					break;
 				}
 			}
 		}
 	}
 
-	// 기획 02 §1대로 보통벽에 붙였으면 여기서 아무것도 못 찾는 것이 정상이다.
-	if (Wall && Wall->RegisterScrapeObstacle(this))
+	if (Surface && Surface->RegisterScrapeObstacle(this))
 	{
-		RegisteredScrapeWall = Wall;
+		RegisteredScrapeSurface = Surface;
 	}
 }
 
-void AMD_Barnacle::UnregisterFromScrapeWall()
+void AMD_Barnacle::UnregisterFromScrapeSurface()
 {
-	if (AMD_CuttableWall* const Wall = RegisteredScrapeWall.Get())
+	if (UMD_ScrapeSurfaceComponent* const Surface =
+		RegisteredScrapeSurface.Get())
 	{
-		Wall->UnregisterScrapeObstacle(this);
+		Surface->UnregisterScrapeObstacle(this);
 	}
 
-	RegisteredScrapeWall.Reset();
+	RegisteredScrapeSurface.Reset();
 }
 
 float AMD_Barnacle::GetScrapeBlockRadiusCm() const

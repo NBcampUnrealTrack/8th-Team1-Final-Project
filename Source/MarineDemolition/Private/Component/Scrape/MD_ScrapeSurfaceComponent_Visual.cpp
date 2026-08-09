@@ -1,4 +1,4 @@
-#include "World/Wall/MD_CuttableWall.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
 #include "TimerManager.h"
 #include "Components/DecalComponent.h"
@@ -26,14 +26,14 @@
 #include "World/Contamination/MD_ContaminationItem.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
-#include "World/Wall/MD_CuttableWallInternal.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 
-// 파일 분할 기준은 MD_CuttableWallInternal.h 표 참고.
+// 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 이 파일: G8 마스크 · 앞뒤 데칼 · 셀 오버레이
 
-using namespace MD_CuttableWallInternal;
+using namespace MD_ScrapeSurfaceComponentInternal;
 
-bool AMD_CuttableWall::InitializeContaminationMask()
+bool UMD_ScrapeSurfaceComponent::InitializeContaminationMask()
 {
 	ReleaseContaminationMask();
 
@@ -99,7 +99,7 @@ bool AMD_CuttableWall::InitializeContaminationMask()
 }
 
 
-void AMD_CuttableWall::ReleaseContaminationMask()
+void UMD_ScrapeSurfaceComponent::ReleaseContaminationMask()
 {
 	if (ContaminationMaskTexture)
 	{
@@ -113,7 +113,7 @@ void AMD_CuttableWall::ReleaseContaminationMask()
 }
 
 
-void AMD_CuttableWall::UpdateContaminationMask(
+void UMD_ScrapeSurfaceComponent::UpdateContaminationMask(
 	const TArray<FMD_ScrapeCellChange>& CellChanges)
 {
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeMaskUpdate);
@@ -195,7 +195,7 @@ void AMD_CuttableWall::UpdateContaminationMask(
 }
 
 
-bool AMD_CuttableWall::UploadContaminationMaskRegion(
+bool UMD_ScrapeSurfaceComponent::UploadContaminationMaskRegion(
 	const FIntRect& AtlasRegion)
 {
 	const int32 RegionWidth = AtlasRegion.Width();
@@ -245,7 +245,7 @@ bool AMD_CuttableWall::UploadContaminationMaskRegion(
 }
 
 
-bool AMD_CuttableWall::ConfigureContaminationDecals()
+bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecals()
 {
 	bContaminationDecalsConfigured = false;
 	SetContaminationDecalsVisible(false);
@@ -302,7 +302,7 @@ bool AMD_CuttableWall::ConfigureContaminationDecals()
 }
 
 
-void AMD_CuttableWall::ResolveContaminationDecalDepths()
+void UMD_ScrapeSurfaceComponent::ResolveContaminationDecalDepths()
 {
 	const double RequestedDepthCm = FMath::IsFinite(
 		ContaminationDecalProjectionDepthCm)
@@ -325,7 +325,7 @@ void AMD_CuttableWall::ResolveContaminationDecalDepths()
 	FVector HorizontalAxisLocal;
 	FVector FrontNormalLocal;
 	FVector VerticalAxisLocal;
-	if (Mesh
+	if (SurfaceMesh
 		&& FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
 			ResolvedContaminationSurfaceNormalAxis,
 			HorizontalAxisLocal,
@@ -337,7 +337,7 @@ void AMD_CuttableWall::ResolveContaminationDecalDepths()
 		WallThicknessCm =
 			FMath::Abs(FVector::DotProduct(LocalBoundsSize, FrontNormalLocal))
 			* FMath::Abs(FVector::DotProduct(
-				Mesh->GetComponentScale().GetAbs(),
+				SurfaceMesh->GetComponentScale().GetAbs(),
 				FrontNormalLocal));
 		if (!FMath::IsFinite(WallThicknessCm))
 		{
@@ -346,10 +346,10 @@ void AMD_CuttableWall::ResolveContaminationDecalDepths()
 	}
 
 	// 메시 형상에서 각 면이 실제로 필요로 하는 깊이를 구한다.
-	if (bAutoFitContaminationDecalDepth && Mesh)
+	if (bAutoFitContaminationDecalDepth && SurfaceMesh)
 	{
-		const UStaticMesh* MeshAsset = Mesh->GetStaticMesh();
-		const FVector AbsoluteScale = Mesh->GetComponentScale().GetAbs();
+		const UStaticMesh* MeshAsset = SurfaceMesh->GetStaticMesh();
+		const FVector AbsoluteScale = SurfaceMesh->GetComponentScale().GetAbs();
 		auto FitFaceDepth = [&](const EMD_ScrapeSurfaceFace Face)
 		{
 			FMD_ScrapeFaceSurfaceProfile Profile;
@@ -392,12 +392,12 @@ void AMD_CuttableWall::ResolveContaminationDecalDepths()
 }
 
 
-bool AMD_CuttableWall::ConfigureContaminationDecalForFace(
+bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalForFace(
 	UDecalComponent* DecalComponent,
 	const EMD_ScrapeSurfaceFace Face,
 	TObjectPtr<UMaterialInstanceDynamic>& InOutMID)
 {
-	if (!DecalComponent || !Mesh || !ContaminationDecalMaterial)
+	if (!DecalComponent || !SurfaceMesh || !ContaminationDecalMaterial)
 	{
 		return false;
 	}
@@ -412,7 +412,7 @@ bool AMD_CuttableWall::ConfigureContaminationDecalForFace(
 			ResolvedContaminationSurfaceSizeCm,
 			ContaminationMeshLocalBoundsMinimum,
 			ContaminationMeshLocalBoundsMaximum,
-			Mesh->GetComponentScale().GetAbs(),
+			SurfaceMesh->GetComponentScale().GetAbs(),
 			ResolvedDepthCm,
 			ContaminationDecalSurfaceOffsetCm,
 			ContaminationDecalEdgeInsetCm,
@@ -479,7 +479,7 @@ bool AMD_CuttableWall::ConfigureContaminationDecalForFace(
 }
 
 
-void AMD_CuttableWall::SetContaminationDecalsVisible(
+void UMD_ScrapeSurfaceComponent::SetContaminationDecalsVisible(
 	const bool bVisible)
 {
 	if (FrontContaminationDecal)
@@ -495,7 +495,7 @@ void AMD_CuttableWall::SetContaminationDecalsVisible(
 }
 
 
-void AMD_CuttableWall::RefreshContaminationDecalMaterialParameters()
+void UMD_ScrapeSurfaceComponent::RefreshContaminationDecalMaterialParameters()
 {
 	// 배치 때와 같은 inset 보정을 써야 마스크를 다시 만들 때 무늬가 밀리지 않는다.
 	FVector2D MaskHalfTexelUV = FVector2D::ZeroVector;
@@ -543,7 +543,7 @@ void AMD_CuttableWall::RefreshContaminationDecalMaterialParameters()
 }
 
 
-void AMD_CuttableWall::InitializeContaminationVisualization()
+void UMD_ScrapeSurfaceComponent::InitializeContaminationVisualization()
 {
 	if (!ContaminationOverlay)
 	{
@@ -568,12 +568,12 @@ void AMD_CuttableWall::InitializeContaminationVisualization()
 		UE_LOG(
 			LogTemp,
 			Warning,
-			TEXT("MD_CuttableWall::InitializeContaminationVisualization - %s의 ContaminationOverlay 컴포넌트에 Static Mesh가 지정되지 않았습니다."),
+			TEXT("MD_CuttableWall::InitializeContaminationVisualization - %s의 ContaminationOverlay 컴포넌트에 Static SurfaceMesh가 지정되지 않았습니다."),
 			*GetName());
 		return;
 	}
 
-	// Mesh와 Material은 Blueprint에서 지정
+	// SurfaceMesh와 Material은 Blueprint에서 지정
 	FVector HorizontalAxisLocal;
 	FVector FrontNormalLocal;
 	FVector VerticalAxisLocal;
@@ -586,7 +586,7 @@ void AMD_CuttableWall::InitializeContaminationVisualization()
 		return;
 	}
 
-	const FVector AbsoluteScale = Mesh->GetComponentScale().GetAbs();
+	const FVector AbsoluteScale = SurfaceMesh->GetComponentScale().GetAbs();
 	const double SafeHorizontalScale = FMath::Max(
 		FMath::Abs(FVector::DotProduct(
 			AbsoluteScale,
@@ -689,7 +689,7 @@ void AMD_CuttableWall::InitializeContaminationVisualization()
 }
 
 
-void AMD_CuttableWall::UpdateContaminationVisualization(
+void UMD_ScrapeSurfaceComponent::UpdateContaminationVisualization(
 	const TArray<FMD_ScrapeCellChange>& CellChanges)
 {
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeOverlayUpdate);
@@ -729,7 +729,7 @@ void AMD_CuttableWall::UpdateContaminationVisualization(
 }
 
 
-FTransform AMD_CuttableWall::MakeContaminationCellVisualTransform(
+FTransform UMD_ScrapeSurfaceComponent::MakeContaminationCellVisualTransform(
 	const int32 CellIndex) const
 {
 	if (!ContaminationCellBaseTransforms.IsValidIndex(CellIndex)

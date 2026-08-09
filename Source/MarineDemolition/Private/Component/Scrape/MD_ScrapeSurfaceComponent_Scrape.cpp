@@ -1,4 +1,4 @@
-#include "World/Wall/MD_CuttableWall.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
 #include "TimerManager.h"
 #include "Components/DecalComponent.h"
@@ -26,14 +26,14 @@
 #include "World/Contamination/MD_ContaminationItem.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
-#include "World/Wall/MD_CuttableWallInternal.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 
-// 파일 분할 기준은 MD_CuttableWallInternal.h 표 참고.
+// 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 이 파일: 긁기 스트로크 적용 · 제거율 조회 · 따개비 경로 차단
 
-using namespace MD_CuttableWallInternal;
+using namespace MD_ScrapeSurfaceComponentInternal;
 
-FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHits(
+FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyScrapeStrokeFromHits(
 	const FHitResult& StartHit,
 	const FHitResult& EndHit)
 {
@@ -44,7 +44,7 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHits(
 }
 
 
-FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHitsWithToolSpec(
+FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyScrapeStrokeFromHitsWithToolSpec(
 	const FHitResult& StartHit,
 	const FHitResult& EndHit,
 	const FMD_ScrapeToolSpec& ToolSpec)
@@ -72,7 +72,7 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHitsWithToolSpec(
 }
 
 
-bool AMD_CuttableWall::RegisterScrapeObstacle(AMD_Barnacle* const Barnacle)
+bool UMD_ScrapeSurfaceComponent::RegisterScrapeObstacle(AMD_Barnacle* const Barnacle)
 {
 	if (!IsValid(Barnacle))
 	{
@@ -113,7 +113,7 @@ bool AMD_CuttableWall::RegisterScrapeObstacle(AMD_Barnacle* const Barnacle)
 }
 
 
-void AMD_CuttableWall::UnregisterScrapeObstacle(AMD_Barnacle* const Barnacle)
+void UMD_ScrapeSurfaceComponent::UnregisterScrapeObstacle(AMD_Barnacle* const Barnacle)
 {
 	// 죽은 참조도 함께 정리한다. 따개비는 Destroy로 사라지므로 등록만 남기 쉽다.
 	ScrapeObstacles.RemoveAll(
@@ -125,7 +125,7 @@ void AMD_CuttableWall::UnregisterScrapeObstacle(AMD_Barnacle* const Barnacle)
 }
 
 
-bool AMD_CuttableWall::TryClampScrapeStrokeAgainstObstacles(
+bool UMD_ScrapeSurfaceComponent::TryClampScrapeStrokeAgainstObstacles(
 	const EMD_ScrapeSurfaceFace SurfaceFace,
 	const FVector2D& StartPositionCm,
 	const FVector2D& EndPositionCm,
@@ -227,7 +227,7 @@ bool AMD_CuttableWall::TryClampScrapeStrokeAgainstObstacles(
 }
 
 
-FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
+FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStroke(
 	const FMD_ScrapeStroke& Stroke)
 {
 	return ApplyLocalScrapeStrokeWithToolSpec(
@@ -236,7 +236,7 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
 }
 
 
-FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStrokeWithToolSpec(
+FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithToolSpec(
 	const FMD_ScrapeStroke& Stroke,
 	const FMD_ScrapeToolSpec& ToolSpec)
 {
@@ -328,7 +328,7 @@ FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStrokeWithToolSpec(
 }
 
 
-float AMD_CuttableWall::GetContaminationCleanRatio() const
+float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatio() const
 {
 	if (!bContaminationSurfaceInitialized)
 	{
@@ -340,7 +340,7 @@ float AMD_CuttableWall::GetContaminationCleanRatio() const
 		CachedBackContaminationCleanRatio);
 }
 
-float AMD_CuttableWall::GetContaminationCleanRatio(
+float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatio(
 	const EMD_ScrapeSurfaceFace Face) const
 {
 	if (!bContaminationSurfaceInitialized)
@@ -367,42 +367,42 @@ float AMD_CuttableWall::GetContaminationCleanRatio(
 	}
 }
 
-float AMD_CuttableWall::GetContaminationCleanRatioForFace(
+float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatioForFace(
 	const EMD_ScrapeSurfaceFace Face) const
 {
 	return GetContaminationCleanRatio(Face);
 }
 
-float AMD_CuttableWall::GetContaminationRemovedPercent() const
+float UMD_ScrapeSurfaceComponent::GetContaminationRemovedPercent() const
 {
 	return GetContaminationCleanRatio() * 100.0f;
 }
 
-float AMD_CuttableWall::GetContaminationRemovedPercent(
+float UMD_ScrapeSurfaceComponent::GetContaminationRemovedPercent(
 	const EMD_ScrapeSurfaceFace Face) const
 {
 	return GetContaminationCleanRatio(Face) * 100.0f;
 }
 
-float AMD_CuttableWall::GetContaminationRemovedPercentForFace(
+float UMD_ScrapeSurfaceComponent::GetContaminationRemovedPercentForFace(
 	const EMD_ScrapeSurfaceFace Face) const
 {
 	return GetContaminationRemovedPercent(Face);
 }
 
-float AMD_CuttableWall::GetResidualContaminationRatio() const
+float UMD_ScrapeSurfaceComponent::GetResidualContaminationRatio() const
 {
 	// 초기화 실패는 오염 100%로 처리
 	return 1.0f - GetContaminationCleanRatio();
 }
 
-bool AMD_CuttableWall::IsContaminationFullyRemoved() const
+bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved() const
 {
 	return IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace::Front)
 		|| IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace::Back);
 }
 
-bool AMD_CuttableWall::IsContaminationFullyRemoved(
+bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved(
 	const EMD_ScrapeSurfaceFace Face) const
 {
 	const TConstArrayView<FMD_ScrapeSurfaceCell> FaceCells =
@@ -414,21 +414,21 @@ bool AMD_CuttableWall::IsContaminationFullyRemoved(
 			ScrapeSettings.CleanTolerance);
 }
 
-bool AMD_CuttableWall::IsContaminationFullyRemovedForFace(
+bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemovedForFace(
 	const EMD_ScrapeSurfaceFace Face) const
 {
 	return IsContaminationFullyRemoved(Face);
 }
 
 
-void AMD_CuttableWall::RefreshContaminationCleanRatioCache()
+void UMD_ScrapeSurfaceComponent::RefreshContaminationCleanRatioCache()
 {
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeCleanRatio);
 	RefreshContaminationCleanRatioCache(EMD_ScrapeSurfaceFace::Front);
 	RefreshContaminationCleanRatioCache(EMD_ScrapeSurfaceFace::Back);
 }
 
-void AMD_CuttableWall::RefreshContaminationCleanRatioCache(
+void UMD_ScrapeSurfaceComponent::RefreshContaminationCleanRatioCache(
 	const EMD_ScrapeSurfaceFace Face)
 {
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeCleanRatio);
@@ -450,7 +450,7 @@ void AMD_CuttableWall::RefreshContaminationCleanRatioCache(
 }
 
 
-float AMD_CuttableWall::GetContaminationDemolitionReadyRatio() const
+float UMD_ScrapeSurfaceComponent::GetContaminationDemolitionReadyRatio() const
 {
 	if (!bContaminationSurfaceInitialized)
 	{

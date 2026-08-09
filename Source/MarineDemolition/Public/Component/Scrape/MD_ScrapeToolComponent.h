@@ -9,6 +9,7 @@
 
 class AMD_Barnacle;
 class AMD_CuttableWall;
+class UMD_ScrapeSurfaceComponent;
 class USoundBase;
 class UParticleSystem;
 
@@ -19,12 +20,19 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FMD_ScrapeResult,
 	Result);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FMD_OnScrapeSurfaceApplied,
+	UMD_ScrapeSurfaceComponent*,
+	Surface,
+	FMD_ScrapeResult,
+	Result);
+
 /**
- * 플레이어 시점에서 연속 충돌점을 수집해 오염벽에 헤라 스트로크를 전달한다.
+ * 플레이어 시점에서 연속 충돌점을 수집해 오염 표면에 헤라 스트로크를 전달한다.
  *
- * 컴포넌트는 헤라를 누른 동안에만 Tick하며, 같은 벽의 연속된 두 충돌점만 연결한다.
- * 벽을 놓치거나 다른 벽으로 조준을 옮기면 이전 충돌점을 폐기하므로 벽 사이를 가로지르는
- * 비정상적으로 긴 스트로크가 생성되지 않는다.
+ * 컴포넌트는 헤라를 누른 동안에만 Tick하며, 같은 표면 컴포넌트의 연속된 두 충돌점만
+ * 연결한다. 표면을 놓치거나 다른 표면으로 조준을 옮기면 이전 충돌점을 폐기하므로
+ * 서로 다른 물체 사이를 가로지르는 비정상적으로 긴 스트로크가 생성되지 않는다.
  */
 UCLASS(ClassGroup = (MD), meta = (BlueprintSpawnableComponent))
 class MARINEDEMOLITION_API UMD_ScrapeToolComponent : public UActorComponent
@@ -88,9 +96,13 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Scrape|Tool")
 	bool SetScrapeBladeWidthCm(float NewBladeWidthCm);
 
+	/** 유효한 스트로크가 어느 오염 표면에든 전달될 때마다 발생한다. */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Scrape")
+	FMD_OnScrapeSurfaceApplied OnScrapeSurfaceApplied;
+
 	/**
-	 * 유효한 스트로크가 벽 판정기에 전달될 때마다 발생한다.
-	 * Blueprint는 ContactType을 이용해 임시 사운드나 이펙트를 추가할 수 있다.
+	 * 기존 철거벽 Blueprint를 위한 하위 호환 이벤트.
+	 * 일반 벽·바닥·설비 표면에서는 OnScrapeSurfaceApplied만 발생한다.
 	 */
 	UPROPERTY(BlueprintAssignable, Category = "MD|Scrape")
 	FMD_OnScrapeApplied OnScrapeApplied;
@@ -171,7 +183,7 @@ protected:
 		meta = (ClampMin = "0.1", Units = "cm"))
 	float AimCorrectionVisibilityToleranceCm;
 
-	/** 벽 충돌을 검사할 채널. 기본 벽과 동일한 Visibility 채널을 사용한다. */
+	/** 표면 충돌을 검사할 채널. 기본 환경 메시와 같은 Visibility 채널을 사용한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	TEnumAsByte<ECollisionChannel> TraceChannel;
 
@@ -206,22 +218,24 @@ private:
 
 	void ProcessScrapeTrace(float DeltaTime);
 	void DispatchAuthoritativeScrapeResult(
-		AMD_CuttableWall* Wall,
+		UMD_ScrapeSurfaceComponent* Surface,
 		const FMD_ScrapeResult& Result,
 		const FVector& ContactLocation);
 
 	UFUNCTION(Client, Unreliable)
 	void ClientReceiveScrapeResult(
-		AMD_CuttableWall* Wall,
+		UMD_ScrapeSurfaceComponent* Surface,
 		const FMD_ScrapeResult& Result,
 		FVector_NetQuantize10 ContactLocation);
 
 	UFUNCTION()
 	void OnRep_ScrapeToolSpec();
 
-	bool TryGetCurrentWallHit(FHitResult& OutHit, AMD_CuttableWall*& OutWall) const;
+	bool TryGetCurrentSurfaceHit(
+		FHitResult& OutHit,
+		UMD_ScrapeSurfaceComponent*& OutSurface) const;
 	void BeginStrokeTracking(
-		AMD_CuttableWall* Wall,
+		UMD_ScrapeSurfaceComponent* Surface,
 		const FVector2D& SurfacePositionCm,
 		EMD_ScrapeSurfaceFace SurfaceFace);
 	bool TryConstrainStrokePosition(
@@ -239,7 +253,7 @@ private:
 		const FVector& WorldPosition) const;
 	void ResetStrokeTracking();
 	void EmitFeedback(
-		AMD_CuttableWall* Wall,
+		UMD_ScrapeSurfaceComponent* Surface,
 		const FMD_ScrapeResult& Result,
 		const FVector& ContactLocation);
 
@@ -250,8 +264,7 @@ private:
 	 * 물체형이라 내구도 숫자 하나뿐이다. 두 경로를 한 인터페이스로 묶으면 따개비가
 	 * 쓰지도 않는 기계장치를 끌고 다니게 된다.
 	 *
-	 * 기획 02 §1대로 배치하면 따개비는 보통벽에 붙으므로 그 앞에는 긁을 오염벽이
-	 * 없다. 그때는 이 경로만 탄다.
+	 * 따개비 메시를 직접 맞히면 뒤 표면의 종류와 무관하게 이 경로를 탄다.
 	 */
 	void ProcessDirectBarnacleContact(
 		AMD_Barnacle* Barnacle,
@@ -288,7 +301,7 @@ private:
 	EMD_ScrapeSurfaceFace PreviousSurfaceFace;
 	FVector2D StrokeAnchorPositionCm;
 	FVector2D LockedStrokeAxis;
-	TWeakObjectPtr<AMD_CuttableWall> PreviousWall;
+	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> PreviousSurface;
 
 	/** 지금 때리고 있는 따개비. 직접 겨냥한 것이든 경로를 막은 것이든 여기 담긴다 */
 	TWeakObjectPtr<AMD_Barnacle> TrackedBarnacle;

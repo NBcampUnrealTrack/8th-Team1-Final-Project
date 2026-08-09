@@ -1,58 +1,21 @@
 #include "World/Wall/MD_CuttableWall.h"
 
 #include "TimerManager.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Components/DecalComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Gameplay/Scrape/MD_ContaminationNoise.h"
-#include "Gameplay/Scrape/MD_ScrapeDecalLayout.h"
-#include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
 #include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
-#include "Gameplay/Scrape/MD_ScrapeMaskAtlas.h"
-#include "Gameplay/Scrape/MD_ScrapeMeshSurfaceProfile.h"
-#include "Gameplay/Scrape/MD_ScrapeSurfaceGeometry.h"
-#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Engine/Engine.h"
-#include "Engine/StaticMesh.h"
-#include "Engine/Texture2D.h"
-#include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
-#include "Materials/MaterialInterface.h"
-#include "Math/RotationMatrix.h"
 #include "Net/UnrealNetwork.h"
-#include "RHITypes.h"
-#include "Stats/Stats.h"
-#include "World/Contamination/MD_Barnacle.h"
-#include "World/Contamination/MD_ContaminationItem.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
-#include "World/Wall/MD_CuttableWallInternal.h"
 
-// 이 파일: 액터 수명 · 철거(Cut/CanCut) · 스캔.
-// 오염 표면 구현은 MD_CuttableWall_*.cpp로 나뉘어 있다.
-// 파일별 책임은 MD_CuttableWallInternal.h의 표를 참고한다.
-
-// 통계 정의는 이 파일 한 곳에만 둔다. 선언은 내부 헤더에 있다.
-DEFINE_STAT(STAT_MD_ScrapeStrokeTotal);
-DEFINE_STAT(STAT_MD_ScrapeEvaluate);
-DEFINE_STAT(STAT_MD_ScrapeCleanRatio);
-DEFINE_STAT(STAT_MD_ScrapeMaskUpdate);
-DEFINE_STAT(STAT_MD_ScrapeOverlayUpdate);
-DEFINE_STAT(STAT_MD_ScrapePublish);
-DEFINE_STAT(STAT_MD_ScrapeFullyRemovedCheck);
-
-namespace MD_CuttableWallInternal
+namespace
 {
 	const FLinearColor NeutralWallColor(0.4f, 0.4f, 0.45f);
-	const FName ContaminationMaskTextureParameterName(TEXT("MaskTexture"));
-	const FName ContaminationMaskVScaleParameterName(TEXT("MaskVScale"));
-	const FName ContaminationMaskVOffsetParameterName(TEXT("MaskVOffset"));
-	const FName ContaminationMaskUFlipParameterName(TEXT("MaskUFlip"));
-	const FName ContaminationMaskHalfTexelUParameterName(TEXT("MaskHalfTexelU"));
-	const FName ContaminationMaskHalfTexelVParameterName(TEXT("MaskHalfTexelV"));
 }
-
-using namespace MD_CuttableWallInternal;
 
 AMD_CuttableWall::AMD_CuttableWall()
 {
@@ -79,22 +42,6 @@ AMD_CuttableWall::AMD_CuttableWall()
 	ContaminationDecalSurfaceOffsetCm = 0.05f;
 	ContaminationDecalEdgeInsetCm = 2.0f;
 	ContaminationDecalSortOrder = 0;
-	ResolvedContaminationSurfaceSizeCm = FVector2D::ZeroVector;
-	ResolvedContaminationSurfaceNormalAxis =
-		EMD_ScrapeSurfaceNormalAxis::Y;
-	ResolvedFrontDecalDepthCm = 0.0f;
-	ResolvedBackDecalDepthCm = 0.0f;
-	ResolvedContaminationDecalEdgeInsetCm = 0.0f;
-	ContaminationSurfaceCenterLocal = FVector::ZeroVector;
-	ContaminationMeshLocalBoundsMinimum = FVector::ZeroVector;
-	ContaminationMeshLocalBoundsMaximum = FVector::ZeroVector;
-	CachedFrontContaminationCleanRatio = 0.0f;
-	CachedBackContaminationCleanRatio = 0.0f;
-	ContaminationMaskAtlasDimensions = FIntPoint::ZeroValue;
-	bContaminationDecalsConfigured = false;
-	bContaminationSurfaceInitialized = false;
-	bContaminationCompletionBroadcast = false;
-	ReplicatedContaminationState.SetOwner(this);
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
@@ -126,6 +73,15 @@ AMD_CuttableWall::AMD_CuttableWall()
 	BackContaminationDecal->SetFadeScreenSize(0.0f);
 	BackContaminationDecal->SetVisibility(false);
 	BackContaminationDecal->SetHiddenInGame(true);
+
+	ScrapeSurface = CreateDefaultSubobject<UMD_ScrapeSurfaceComponent>(
+		TEXT("ScrapeSurface"));
+	ScrapeSurface->ConfigureExternalComponents(
+		Mesh,
+		ContaminationOverlay,
+		FrontContaminationDecal,
+		BackContaminationDecal);
+	SyncLegacySurfaceConfiguration();
 }
 
 
@@ -133,8 +89,19 @@ void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
-	// 에디터 변경 시 작업면 크기 갱신
-	ResolveContaminationSurfaceGeometry();
+	SyncLegacySurfaceConfiguration();
+	if (ScrapeSurface)
+	{
+		ScrapeSurface->ConfigureExternalComponents(
+			Mesh,
+			ContaminationOverlay,
+			FrontContaminationDecal,
+			BackContaminationDecal);
+		ScrapeSurface->OnContaminationFullyRemoved.AddUniqueDynamic(
+			this,
+			&AMD_CuttableWall::HandleScrapeSurfaceFullyRemoved);
+		ScrapeSurface->RefreshSurfaceGeometry();
+	}
 
 	// 스캔 전에는 타입 구분 없이 중립 회색
 	MID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
@@ -150,17 +117,23 @@ void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AMD_CuttableWall, bHasSupport);
-	DOREPLIFETIME(AMD_CuttableWall, ReplicatedContaminationState);
 }
 
 
 void AMD_CuttableWall::BeginPlay()
 {
 	Super::BeginPlay();
-	ReplicatedContaminationState.SetOwner(this);
-
-	// 런타임 오염 상태 초기화
-	InitializeContaminationSurface();
+	SyncLegacySurfaceConfiguration();
+	if (ScrapeSurface)
+	{
+		ScrapeSurface->OnContaminationFullyRemoved.AddUniqueDynamic(
+			this,
+			&AMD_CuttableWall::HandleScrapeSurfaceFullyRemoved);
+		if (!ScrapeSurface->IsSurfaceInitialized())
+		{
+			ScrapeSurface->InitializeSurface();
+		}
+	}
 
 	// Transient인 MID는 레벨 로드/PIE 복제 시 유실되므로 런타임에서 재생성
 	MID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
@@ -169,23 +142,6 @@ void AMD_CuttableWall::BeginPlay()
 		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
 	}
 
-	InitializeContaminationVisualization();
-
-	if (!HasAuthority())
-	{
-		ApplyAllReplicatedContaminationState();
-	}
-}
-
-
-void AMD_CuttableWall::EndPlay(
-	const EEndPlayReason::Type EndPlayReason)
-{
-	SetContaminationDecalsVisible(false);
-	ReleaseContaminationMask();
-	FrontContaminationDecalMID = nullptr;
-	BackContaminationDecalMID = nullptr;
-	Super::EndPlay(EndPlayReason);
 }
 
 
@@ -203,9 +159,11 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 		if (GEngine)
 		{
 			GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Yellow,
-			                                 FString::Printf(
+				                                 FString::Printf(
 				                                 TEXT("전처리 미완료: %.0f%% / %.0f%%"),
-				                                 GetContaminationDemolitionReadyRatio() * 100.0f,
+				                                 ScrapeSurface
+					                                 ? ScrapeSurface->GetContaminationDemolitionReadyRatio() * 100.0f
+					                                 : 0.0f,
 				                                 Gate));
 		}
 		return;
@@ -266,7 +224,7 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 bool AMD_CuttableWall::CanCut() const
 {
 	// 초기화 실패 시 절단 금지
-	if (!bContaminationSurfaceInitialized)
+	if (!ScrapeSurface || !ScrapeSurface->IsSurfaceInitialized())
 	{
 		return false;
 	}
@@ -315,5 +273,344 @@ void AMD_CuttableWall::RestoreScanColor()
 	if (MID)
 	{
 		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
+	}
+}
+
+void AMD_CuttableWall::SyncLegacySurfaceConfiguration()
+{
+	if (!ScrapeSurface)
+	{
+		return;
+	}
+
+	ScrapeSurface->ContaminationItemClass = ContaminationItemClass;
+	ScrapeSurface->ContaminationItemsPerFace = ContaminationItemsPerFace;
+	ScrapeSurface->ContaminationItemSpawnOffsetCm =
+		ContaminationItemSpawnOffsetCm;
+	ScrapeSurface->ContaminationGridDimensions = ContaminationGridDimensions;
+	ScrapeSurface->InitialContaminationPerCell = InitialContaminationPerCell;
+	ScrapeSurface->bUseProceduralContamination =
+		bUseProceduralContamination;
+	ScrapeSurface->ContaminationNoiseScaleCm = ContaminationNoiseScaleCm;
+	ScrapeSurface->ContaminationNoiseSeed = ContaminationNoiseSeed;
+	ScrapeSurface->ContaminationCoverage = ContaminationCoverage;
+	ScrapeSurface->ContaminationMinimumAmount = ContaminationMinimumAmount;
+	ScrapeSurface->ContaminationSurfaceSizeOverrideCm =
+		ContaminationSurfaceSizeOverrideCm;
+	ScrapeSurface->ContaminationSurfaceNormalAxis =
+		ContaminationSurfaceNormalAxis;
+	ScrapeSurface->ScrapeSettings = ScrapeSettings;
+	ScrapeSurface->ContaminationOverlayOffsetCm =
+		ContaminationOverlayOffsetCm;
+	ScrapeSurface->ContaminationOverlayThicknessCm =
+		ContaminationOverlayThicknessCm;
+	ScrapeSurface->bShowContaminationOverlay = bShowContaminationOverlay;
+	ScrapeSurface->ContaminationDecalMaterial = ContaminationDecalMaterial;
+	ScrapeSurface->bShowContaminationDecals = bShowContaminationDecals;
+	ScrapeSurface->ContaminationDecalProjectionDepthCm =
+		ContaminationDecalProjectionDepthCm;
+	ScrapeSurface->bAutoFitContaminationDecalDepth =
+		bAutoFitContaminationDecalDepth;
+	ScrapeSurface->ContaminationDecalDepthFitMarginCm =
+		ContaminationDecalDepthFitMarginCm;
+	ScrapeSurface->ContaminationDecalSurfaceOffsetCm =
+		ContaminationDecalSurfaceOffsetCm;
+	ScrapeSurface->ContaminationDecalEdgeInsetCm =
+		ContaminationDecalEdgeInsetCm;
+	ScrapeSurface->ContaminationDecalSortOrder =
+		ContaminationDecalSortOrder;
+}
+
+void AMD_CuttableWall::InitializeContaminationSurface()
+{
+	SyncLegacySurfaceConfiguration();
+	if (ScrapeSurface)
+	{
+		ScrapeSurface->InitializeContaminationSurface();
+	}
+}
+
+bool AMD_CuttableWall::InitializeContaminationMask()
+{
+	return ScrapeSurface
+		&& ScrapeSurface->InitializeContaminationMask();
+}
+
+bool AMD_CuttableWall::ConfigureContaminationDecals()
+{
+	SyncLegacySurfaceConfiguration();
+	return ScrapeSurface
+		&& ScrapeSurface->ConfigureContaminationDecals();
+}
+
+void AMD_CuttableWall::HandleScrapeSurfaceFullyRemoved(
+	UMD_ScrapeSurfaceComponent* const RemovedSurface)
+{
+	if (RemovedSurface == ScrapeSurface)
+	{
+		OnContaminationFullyRemoved.Broadcast(this);
+	}
+}
+
+FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHits(
+	const FHitResult& StartHit,
+	const FHitResult& EndHit)
+{
+	return ScrapeSurface
+		? ScrapeSurface->ApplyScrapeStrokeFromHits(StartHit, EndHit)
+		: FMD_ScrapeResult();
+}
+
+FMD_ScrapeResult AMD_CuttableWall::ApplyScrapeStrokeFromHitsWithToolSpec(
+	const FHitResult& StartHit,
+	const FHitResult& EndHit,
+	const FMD_ScrapeToolSpec& ToolSpec)
+{
+	return ScrapeSurface
+		? ScrapeSurface->ApplyScrapeStrokeFromHitsWithToolSpec(
+			StartHit,
+			EndHit,
+			ToolSpec)
+		: FMD_ScrapeResult();
+}
+
+FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStroke(
+	const FMD_ScrapeStroke& Stroke)
+{
+	return ScrapeSurface
+		? ScrapeSurface->ApplyLocalScrapeStroke(Stroke)
+		: FMD_ScrapeResult();
+}
+
+FMD_ScrapeResult AMD_CuttableWall::ApplyLocalScrapeStrokeWithToolSpec(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec)
+{
+	return ScrapeSurface
+		? ScrapeSurface->ApplyLocalScrapeStrokeWithToolSpec(Stroke, ToolSpec)
+		: FMD_ScrapeResult();
+}
+
+bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromHit(
+	const FHitResult& Hit,
+	FVector2D& OutSurfacePositionCm,
+	EMD_ScrapeSurfaceFace& OutSurfaceFace)
+{
+	return ScrapeSurface
+		&& ScrapeSurface->TryGetScrapeSurfacePositionFromHit(
+			Hit,
+			OutSurfacePositionCm,
+			OutSurfaceFace);
+}
+
+bool AMD_CuttableWall::TryGetScrapeSurfacePositionFromWorldPoint(
+	const FVector& WorldPoint,
+	const FVector& WorldNormal,
+	FVector2D& OutSurfacePositionCm,
+	EMD_ScrapeSurfaceFace& OutSurfaceFace)
+{
+	return ScrapeSurface
+		&& ScrapeSurface->TryGetScrapeSurfacePositionFromWorldPoint(
+			WorldPoint,
+			WorldNormal,
+			OutSurfacePositionCm,
+			OutSurfaceFace);
+}
+
+bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPosition(
+	const FVector2D& SurfacePositionCm,
+	const EMD_ScrapeSurfaceFace SurfaceFace,
+	FVector& OutWorldPosition) const
+{
+	return ScrapeSurface
+		&& ScrapeSurface->TryGetScrapeSurfaceWorldPosition(
+			SurfacePositionCm,
+			SurfaceFace,
+			OutWorldPosition);
+}
+
+bool AMD_CuttableWall::TryGetScrapeSurfaceWorldPositionAtDepth(
+	const FVector2D& SurfacePositionCm,
+	const EMD_ScrapeSurfaceFace SurfaceFace,
+	const FVector& ReferenceWorldPosition,
+	FVector& OutWorldPosition) const
+{
+	return ScrapeSurface
+		&& ScrapeSurface->TryGetScrapeSurfaceWorldPositionAtDepth(
+			SurfacePositionCm,
+			SurfaceFace,
+			ReferenceWorldPosition,
+			OutWorldPosition);
+}
+
+bool AMD_CuttableWall::RegisterScrapeObstacle(AMD_Barnacle* const Barnacle)
+{
+	return ScrapeSurface
+		&& ScrapeSurface->RegisterScrapeObstacle(Barnacle);
+}
+
+void AMD_CuttableWall::UnregisterScrapeObstacle(
+	AMD_Barnacle* const Barnacle)
+{
+	if (ScrapeSurface)
+	{
+		ScrapeSurface->UnregisterScrapeObstacle(Barnacle);
+	}
+}
+
+bool AMD_CuttableWall::TryClampScrapeStrokeAgainstObstacles(
+	const EMD_ScrapeSurfaceFace SurfaceFace,
+	const FVector2D& StartPositionCm,
+	const FVector2D& EndPositionCm,
+	const float ToolHalfWidthCm,
+	FVector2D& OutClampedEndPositionCm,
+	AMD_Barnacle*& OutBlockingBarnacle) const
+{
+	return ScrapeSurface
+		&& ScrapeSurface->TryClampScrapeStrokeAgainstObstacles(
+			SurfaceFace,
+			StartPositionCm,
+			EndPositionCm,
+			ToolHalfWidthCm,
+			OutClampedEndPositionCm,
+			OutBlockingBarnacle);
+}
+
+float AMD_CuttableWall::GetContaminationCleanRatio() const
+{
+	return ScrapeSurface
+		? ScrapeSurface->GetContaminationCleanRatio()
+		: 0.0f;
+}
+
+float AMD_CuttableWall::GetContaminationCleanRatio(
+	const EMD_ScrapeSurfaceFace Face) const
+{
+	return ScrapeSurface
+		? ScrapeSurface->GetContaminationCleanRatio(Face)
+		: 0.0f;
+}
+
+float AMD_CuttableWall::GetContaminationCleanRatioForFace(
+	const EMD_ScrapeSurfaceFace Face) const
+{
+	return GetContaminationCleanRatio(Face);
+}
+
+float AMD_CuttableWall::GetContaminationRemovedPercent() const
+{
+	return ScrapeSurface
+		? ScrapeSurface->GetContaminationRemovedPercent()
+		: 0.0f;
+}
+
+float AMD_CuttableWall::GetContaminationRemovedPercent(
+	const EMD_ScrapeSurfaceFace Face) const
+{
+	return ScrapeSurface
+		? ScrapeSurface->GetContaminationRemovedPercent(Face)
+		: 0.0f;
+}
+
+float AMD_CuttableWall::GetContaminationRemovedPercentForFace(
+	const EMD_ScrapeSurfaceFace Face) const
+{
+	return GetContaminationRemovedPercent(Face);
+}
+
+float AMD_CuttableWall::GetResidualContaminationRatio() const
+{
+	return ScrapeSurface
+		? ScrapeSurface->GetResidualContaminationRatio()
+		: 1.0f;
+}
+
+bool AMD_CuttableWall::IsContaminationFullyRemoved() const
+{
+	return ScrapeSurface
+		&& ScrapeSurface->IsContaminationFullyRemoved();
+}
+
+bool AMD_CuttableWall::IsContaminationFullyRemoved(
+	const EMD_ScrapeSurfaceFace Face) const
+{
+	return ScrapeSurface
+		&& ScrapeSurface->IsContaminationFullyRemoved(Face);
+}
+
+bool AMD_CuttableWall::IsContaminationFullyRemovedForFace(
+	const EMD_ScrapeSurfaceFace Face) const
+{
+	return IsContaminationFullyRemoved(Face);
+}
+
+UTexture2D* AMD_CuttableWall::GetContaminationMaskTexture() const
+{
+	return ScrapeSurface
+		? ScrapeSurface->GetContaminationMaskTexture()
+		: nullptr;
+}
+
+FIntPoint AMD_CuttableWall::GetContaminationMaskDimensions() const
+{
+	return ScrapeSurface
+		? ScrapeSurface->GetContaminationMaskDimensions()
+		: FIntPoint::ZeroValue;
+}
+
+UDecalComponent* AMD_CuttableWall::GetFrontContaminationDecal() const
+{
+	return ScrapeSurface
+		? ScrapeSurface->GetFrontContaminationDecal()
+		: FrontContaminationDecal.Get();
+}
+
+UDecalComponent* AMD_CuttableWall::GetBackContaminationDecal() const
+{
+	return ScrapeSurface
+		? ScrapeSurface->GetBackContaminationDecal()
+		: BackContaminationDecal.Get();
+}
+
+void AMD_CuttableWall::ReapplyContaminationPatch(
+	const float Amount,
+	const int32 PatchRadiusCells)
+{
+	if (ScrapeSurface)
+	{
+		ScrapeSurface->ReapplyContaminationPatch(Amount, PatchRadiusCells);
+	}
+}
+
+void AMD_CuttableWall::ExportContaminationDeltas(
+	TArray<int32>& OutCellIndices,
+	TArray<float>& OutInitialAmounts,
+	TArray<float>& OutRemainingAmounts) const
+{
+	if (ScrapeSurface)
+	{
+		ScrapeSurface->ExportContaminationDeltas(
+			OutCellIndices,
+			OutInitialAmounts,
+			OutRemainingAmounts);
+		return;
+	}
+
+	OutCellIndices.Reset();
+	OutInitialAmounts.Reset();
+	OutRemainingAmounts.Reset();
+}
+
+void AMD_CuttableWall::RestoreContaminationCells(
+	const TArray<int32>& CellIndices,
+	const TArray<float>& InitialAmounts,
+	const TArray<float>& RemainingAmounts)
+{
+	if (ScrapeSurface)
+	{
+		ScrapeSurface->RestoreContaminationCells(
+			CellIndices,
+			InitialAmounts,
+			RemainingAmounts);
 	}
 }

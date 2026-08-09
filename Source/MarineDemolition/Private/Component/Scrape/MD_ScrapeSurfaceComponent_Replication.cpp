@@ -1,4 +1,4 @@
-#include "World/Wall/MD_CuttableWall.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
 #include "TimerManager.h"
 #include "Components/DecalComponent.h"
@@ -26,15 +26,15 @@
 #include "World/Contamination/MD_ContaminationItem.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
-#include "World/Wall/MD_CuttableWallInternal.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 
-// 파일 분할 기준은 MD_CuttableWallInternal.h 표 참고.
+// 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 이 파일: Fast Array 셀 복제 · 수신 상태 반영
 
-using namespace MD_CuttableWallInternal;
+using namespace MD_ScrapeSurfaceComponentInternal;
 
 void FMD_ReplicatedScrapeCellStateArray::SetOwner(
-	AMD_CuttableWall* InOwner)
+	UMD_ScrapeSurfaceComponent* InOwner)
 {
 	Owner = InOwner;
 	CellToItemIndex.Reset();
@@ -184,7 +184,7 @@ void FMD_ReplicatedScrapeCellStateArray::PostReplicatedChange(
 	}
 }
 
-void AMD_CuttableWall::HandleReplicatedContaminationState(
+void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 	const TConstArrayView<int32> StateItemIndices,
 	const bool bResetToInitial)
 {
@@ -282,7 +282,7 @@ void AMD_CuttableWall::HandleReplicatedContaminationState(
 }
 
 
-void AMD_CuttableWall::ApplyAllReplicatedContaminationState()
+void UMD_ScrapeSurfaceComponent::ApplyAllReplicatedContaminationState()
 {
 	const TArray<FMD_ReplicatedScrapeCellState>& StateItems =
 		ReplicatedContaminationState.GetItems();
@@ -300,7 +300,7 @@ void AMD_CuttableWall::ApplyAllReplicatedContaminationState()
 }
 
 
-void AMD_CuttableWall::PublishContaminationChanges(
+void UMD_ScrapeSurfaceComponent::PublishContaminationChanges(
 	const TArray<FMD_ScrapeCellChange>& CellChanges)
 {
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapePublish);
@@ -320,6 +320,8 @@ void AMD_CuttableWall::PublishContaminationChanges(
 		}
 	}
 
-	ForceNetUpdate();
+	if (AActor* const OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
+	}
 }
-

@@ -8,7 +8,7 @@
 
 class AMD_BarnacleItem;
 class AMD_BarnacleSpawner;
-class AMD_CuttableWall;
+class UMD_ScrapeSurfaceComponent;
 class UStaticMeshComponent;
 class UMaterialInstanceDynamic;
 
@@ -26,9 +26,9 @@ class UMaterialInstanceDynamic;
  * 부착물이라 벗겨지는 것이 아니라 톡 하고 떨어진다. 그래서 헤라가 닿는 시간이
  * 아니라 부딪히는 속도가 힘을 정하고, 여러 번 쳐야 떨어진다.
  *
- * 헤라 경로를 물리적으로 막기도 한다. 철거 대상 격벽 표면에 붙어 있으면 그 자리를
+ * 헤라 경로를 물리적으로 막기도 한다. 오염 표면에 붙어 있으면 그 자리를
  * 지나는 스트로크가 따개비에서 멈추므로, 뒤쪽 오염은 따개비를 떼기 전에는 못 지운다.
- * 그 등록은 AMD_CuttableWall이 관리한다.
+ * 그 등록은 벽 종류와 무관하게 UMD_ScrapeSurfaceComponent가 관리한다.
  */
 UCLASS()
 class MARINEDEMOLITION_API AMD_Barnacle : public AActor
@@ -200,16 +200,14 @@ private:
 	void ApplyRemovalProgressVisual();
 
 	/**
-	 * 붙어 있는 철거 대상 격벽을 찾아 헤라를 막는 장애물로 등록한다.
-	 *
-	 * 기획 02 §1대로 배치하면 따개비는 보통벽에만 붙으므로 대개 아무것도 찾지 못한다.
-	 * 찾지 못하는 것이 정상이며 그때는 막을 벽이 없다는 뜻이다.
+	 * 붙어 있는 오염 표면을 찾아 헤라를 막는 장애물로 등록한다.
+	 * 표면 컴포넌트가 없는 환경 메시에서는 아무것도 등록하지 않는다.
 	 */
-	void RegisterWithScrapeWall();
-	void UnregisterFromScrapeWall();
+	void RegisterWithScrapeSurface();
+	void UnregisterFromScrapeSurface();
 
-	/** 등록해 둔 벽. 떨어질 때 등록을 지우려고 들고 있다 */
-	TWeakObjectPtr<AMD_CuttableWall> RegisteredScrapeWall;
+	/** 등록해 둔 표면. 떨어질 때 장애물 등록을 지우려고 들고 있다 */
+	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> RegisteredScrapeSurface;
 
 	/** 이 따개비를 붙인 배치기. 떨어질 때 순번을 돌려주려고 들고 있다 */
 	TWeakObjectPtr<AMD_BarnacleSpawner> OwningSpawner;

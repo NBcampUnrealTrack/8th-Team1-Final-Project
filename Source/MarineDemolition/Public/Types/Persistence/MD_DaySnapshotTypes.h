@@ -55,14 +55,25 @@ struct FMD_PieceRecord
       bool bContaminated = false;
 };
 
-// 벽별 오염 셀 상태. 생성 기준값과 달라진 셀만 저장한다
+// 표면별 오염 셀 상태. 생성 기준값과 달라진 셀만 저장한다
 USTRUCT()
 struct FMD_WallContaminationRecord
 {
       GENERATED_BODY()
 
+      /**
+       * 표면 컴포넌트를 소유한 레벨 배치 액터 이름.
+       * 기존 스냅샷 호환 때문에 WallName이라는 직렬화 이름은 유지한다.
+       */
       UPROPERTY()
       FName WallName = NAME_None;
+
+      /**
+       * 일반 벽·바닥·설비의 표면 컴포넌트 이름.
+       * NAME_None은 기존 AMD_CuttableWall의 기본 표면을 뜻한다.
+       */
+      UPROPERTY()
+      FName SurfaceComponentName = NAME_None;
 
       UPROPERTY()
       TArray<int32> CellIndices;
@@ -148,6 +159,7 @@ struct FMD_DaySnapshot
       UPROPERTY()
       TArray<FMD_PieceRecord> Pieces;
 
+      // 이름은 하위 호환을 위해 유지하지만 일반 표면 컴포넌트도 포함한다
       UPROPERTY()
       TArray<FMD_WallContaminationRecord> WallContaminations;
 
