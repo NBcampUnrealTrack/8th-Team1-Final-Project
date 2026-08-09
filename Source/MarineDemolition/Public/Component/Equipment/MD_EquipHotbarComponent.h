@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -52,6 +52,12 @@ public:
 	// 슬롯에 도구 등록 (획득 시스템에서 호출)
 	UFUNCTION(BlueprintCallable, Category = "Hotbar")
 	void SetToolAtSlot(int32 SlotIndex, UMD_ToolDefinition* Tool);
+
+	// 서버에서 플레이어의 현재 장비 목록을 저장하기 위한 데이터를 반환하는 함수
+	TArray<TSoftObjectPtr<UDataAsset>> BuildEquipmentSaveData() const;
+
+	// 서버에서 저장된 장비 목록을 불러오는 함수
+	bool RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UDataAsset>>& SaveData);
 
 protected:
 

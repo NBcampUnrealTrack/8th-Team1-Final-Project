@@ -7,26 +7,23 @@
 #include "Component/Character/MD_CharacterMovementComponent.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Interaction/MD_InteractionComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
-#include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Camera/CameraComponent.h"
-#include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameplayTags/MD_GameplayTags.h"
-#include "GameplayTagAssetInterface.h"
-#include "Net/UnrealNetwork.h"
-#include "Gameplay/Interaction/MD_Interactable.h"
+#include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayTagContainer.h"
@@ -75,38 +72,10 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 
 	PhysicsHandle = CreateDefaultSubobject<UPhysicsHandleComponent>(TEXT("PhysicsHandle"));
 
+	InteractionComponent = CreateDefaultSubobject<UMD_InteractionComponent>(TEXT("InteractionComponent"));
+	InteractionComponent->SetInteractionDependencies(Camera, HoldPoint, PhysicsHandle);
+
 	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
-}
-
-void AMD_Character::Tick(float DeltaSeconds)
-{
-	Super::Tick(DeltaSeconds);
-
-	UpdateInteractionFocus();
-
-	if (HasAuthority())
-	{
-		// 대상이 파괴되면 핸들이 조용히 비므로 복제 상태도 같이 정리한다
-		if (HeldActor && !IsHolding())
-		{
-			ReleaseTarget();
-		}
-
-		UpdateHeldTarget();
-		UpdateCarrySettle(DeltaSeconds);
-	}
-	else
-	{
-		UpdateFollowedHeldActor(DeltaSeconds);
-	}
-}
-
-void AMD_Character::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
-	// 다른 플레이어가 운반하는 물체도 그 머신에서 따라가야 하므로 모두에게 보낸다
-	DOREPLIFETIME(AMD_Character, HeldActor);
 }
 
 void AMD_Character::ForceEnterWalkState()
@@ -131,7 +100,12 @@ UAbilitySystemComponent* AMD_Character::GetAbilitySystemComponent() const
 void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
-	CaptureDefaultHoldProfile();
+
+	// 데미지 브리지: 서버에서 ApplyDamage(오염수 DoT·붕괴 등)를 Health 감소로 연결
+	if (HasAuthority())
+	{
+		OnTakeAnyDamage.AddDynamic(this, &AMD_Character::HandleTakeAnyDamage);
+	}
 
 	if (!IsValid(PlayerMappingContext)) return;
 
@@ -155,15 +129,6 @@ void AMD_Character::BeginPlay()
 		EquipHotbarComponent->OnHotbarChanged.AddDynamic(this, &AMD_Character::HandleHotbarChanged);
 		RefreshToolMesh();
 	}
-}
-
-void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-	SetCurrentTarget(nullptr);
-	ReleaseTarget();
-	StopFollowingHeldActor();
-
-	Super::EndPlay(EndPlayReason);
 }
 
 void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -277,367 +242,10 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 {
-	AActor* Target = CurrentTarget.Get();
-
-	// 픽업 태그가 없는 대상(이동 콘솔 등 로컬 UI 상호작용)은 서버를 거치지 않고 로컬에서 실행
-	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
+	if (IsValid(InteractionComponent))
 	{
-		const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(Target);
-		const bool bPickupTarget = TagAsset
-				&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics);
-
-		if (!bPickupTarget)
-		{
-			IMD_Interactable::Execute_Interact(Target, this);
-			return;
-		}
+		InteractionComponent->Interact();
 	}
-
-	ServerInteract(Target);
-}
-
-void AMD_Character::ServerInteract_Implementation(AActor* RequestedActor)
-{
-	if (IsHolding())
-	{
-		ReleaseTarget();
-		return;
-	}
-
-	if (!IsValid(RequestedActor)
-			|| !RequestedActor->Implements<UMD_Interactable>()
-			|| TraceInteractionTarget() != RequestedActor) return;
-
-	// 핫바는 장비 전용 — 월드 오브젝트 픽업은 물리 운반만 허용 (기획 02 §2.5)
-	const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(RequestedActor);
-	if (TagAsset
-			&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics))
-	{
-		TryHoldTarget(RequestedActor);
-		return;
-	}
-
-	IMD_Interactable::Execute_Interact(RequestedActor, this);
-}
-
-bool AMD_Character::TryHoldTarget(AActor* Target)
-{
-	if (!HasAuthority() || !IsValid(Target) || !IsValid(PhysicsHandle)) return false;
-
-	// 들고 있는 물체도 InteractTrace를 막아 남이 조준할 수 있다. 두 핸들이 한 컴포넌트를 잡으면
-	// 먼저 놓는 쪽이 SetReplicateMovement(true)로 되돌려 남은 쪽의 운반이 깨진다
-	if (IsHeldByOtherCharacter(Target)) return false;
-
-	UPrimitiveComponent* Component = nullptr;
-	FVector GrabLocation = FVector::ZeroVector;
-	FVector HoldOffset = FVector::ZeroVector;
-	FMD_HoldProfile HoldProfile = DefaultHoldProfile;
-
-	if (Target->Implements<UMD_Grabbable>())
-	{
-		Component = IMD_Grabbable::Execute_GetGrabComponent(Target);
-		const USceneComponent* GrabPoint = IMD_Grabbable::Execute_GetGrabPoint(Target);
-
-		if (!IsValid(Component) || !Component->IsSimulatingPhysics() || !IsValid(GrabPoint)) return false;
-
-		GrabLocation = GrabPoint->GetComponentLocation();
-		HoldOffset = IMD_Grabbable::Execute_GetHoldOffset(Target);
-		HoldProfile = IMD_Grabbable::Execute_GetHoldProfile(Target);
-	}
-	else
-	{
-		Component = Cast<UPrimitiveComponent>(Target->GetRootComponent());
-		if (!IsValid(Component) || !Component->IsSimulatingPhysics()) return false;
-
-		GrabLocation = Component->GetCenterOfMass();
-	}
-
-	ApplyHoldProfile(HoldProfile);
-
-	if (HoldProfile.bConstrainRotation)
-	{
-		PhysicsHandle->GrabComponentAtLocationWithRotation(
-			Component,
-			NAME_None,
-			GrabLocation,
-			Component->GetComponentRotation());
-	}
-	else
-	{
-		PhysicsHandle->GrabComponentAtLocation(
-			Component,
-			NAME_None,
-			GrabLocation);
-	}
-
-	if (PhysicsHandle->GetGrabbedComponent() != Component)
-	{
-		ApplyHoldProfile(DefaultHoldProfile);
-		ActiveHoldProfile = DefaultHoldProfile;
-		return false;
-	}
-
-	HeldTargetOffset = HoldOffset;
-	HeldGrabPointOffset = Component->GetComponentTransform().InverseTransformPositionNoScale(GrabLocation);
-	ActiveHoldProfile = HoldProfile;
-	HeldActor = Target;
-	bHeldActorSettled = false;
-	HeldCarrySeconds = 0.f;
-
-	// 운반 중에는 위치를 복제하지 않는다. 스프링 속도가 복제되면 클라이언트가 그 속도로
-	// 자유 낙하를 이어받아 물체가 튀어오른다. 대신 각 머신이 HoldPoint를 따라간다
-	Target->SetReplicateMovement(false);
-
-	if (Target->Implements<UMD_Grabbable>())
-	{
-		IMD_Grabbable::Execute_OnCarryStarted(Target);
-	}
-
-	UpdateHeldTarget();
-	return true;
-}
-
-bool AMD_Character::IsHolding() const
-{
-	return IsValid(PhysicsHandle) && IsValid(PhysicsHandle->GetGrabbedComponent());
-}
-
-bool AMD_Character::IsHeldByOtherCharacter(const AActor* Target) const
-{
-	const UWorld* World = GetWorld();
-	if (!IsValid(Target) || !World) return false;
-
-	// 운반은 ServerInteract에서만 시작되므로 조종 중인 캐릭터만 보면 된다. 협동 인원수라 순회로 충분하다
-	for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-	{
-		const APlayerController* PlayerController = It->Get();
-		if (!IsValid(PlayerController)) continue;
-
-		const AMD_Character* OtherCharacter = Cast<AMD_Character>(PlayerController->GetPawn());
-		if (OtherCharacter && OtherCharacter != this && OtherCharacter->HeldActor == Target)
-		{
-			return true;
-		}
-	}
-
-	return false;
-}
-
-void AMD_Character::ReleaseTarget()
-{
-	HeldTargetOffset = FVector::ZeroVector;
-	HeldGrabPointOffset = FVector::ZeroVector;
-	bHeldActorSettled = false;
-	HeldCarrySeconds = 0.f;
-
-	if (AActor* PreviousHeldActor = HeldActor)
-	{
-		HeldActor = nullptr;
-
-		if (IsValid(PreviousHeldActor))
-		{
-			if (PreviousHeldActor->Implements<UMD_Grabbable>())
-			{
-				IMD_Grabbable::Execute_OnCarryEnded(PreviousHeldActor);
-			}
-
-			// 낙하·투척 궤적은 다시 서버가 알려준다. 즉시 보내 따라가기와의 공백을 줄인다
-			PreviousHeldActor->SetReplicateMovement(true);
-			PreviousHeldActor->ForceNetUpdate();
-		}
-	}
-
-	if (!IsValid(PhysicsHandle)) return;
-
-	if (PhysicsHandle->GetGrabbedComponent())
-	{
-		PhysicsHandle->ReleaseComponent();
-	}
-
-	ApplyHoldProfile(DefaultHoldProfile);
-	ActiveHoldProfile = DefaultHoldProfile;
-}
-
-FTransform AMD_Character::GetHoldPointTransform() const
-{
-	if (!IsValid(HoldPoint)) return FTransform::Identity;
-
-	// Camera의 bUsePawnControlRotation 갱신은 시점을 그리는 머신에서만 일어난다.
-	// 원격 캐릭터에는 낡은 회전이 남으므로 GetBaseAimRotation()으로 다시 만든다.
-	// 위치는 캡슐에 붙어 있어 어디서나 정확하다
-	if (!IsValid(Camera)) return HoldPoint->GetComponentTransform();
-
-	const FTransform ViewTransform(GetBaseAimRotation(), Camera->GetComponentLocation());
-	return HoldPoint->GetRelativeTransform() * ViewTransform;
-}
-
-void AMD_Character::UpdateHeldTarget()
-{
-	if (!HasAuthority() || !IsHolding() || !IsValid(HoldPoint)) return;
-
-	const FTransform HoldTransform = GetHoldPointTransform();
-	const FVector TargetLocation = HoldTransform.TransformPositionNoScale(HeldTargetOffset);
-
-	if (ActiveHoldProfile.bConstrainRotation)
-	{
-		PhysicsHandle->SetTargetLocationAndRotation(
-			TargetLocation,
-			HoldTransform.Rotator());
-	}
-	else
-	{
-		PhysicsHandle->SetTargetLocation(TargetLocation);
-	}
-}
-
-void AMD_Character::UpdateCarrySettle(float DeltaSeconds)
-{
-	if (!HasAuthority() || bHeldActorSettled || !IsValid(HeldActor) || !IsValid(HoldPoint)) return;
-
-	// 알림을 받을 대상이 아니면 계속 재볼 이유가 없다
-	if (!HeldActor->Implements<UMD_Grabbable>())
-	{
-		bHeldActorSettled = true;
-		return;
-	}
-
-	HeldCarrySeconds += DeltaSeconds;
-
-	const UPrimitiveComponent* Component = PhysicsHandle ? PhysicsHandle->GetGrabbedComponent() : nullptr;
-	if (!IsValid(Component)) return;
-
-	// 물리 핸들이 맞추는 지점은 컴포넌트 원점이 아니라 GrabPoint다
-	const FVector CurrentGrabPoint =
-		Component->GetComponentTransform().TransformPositionNoScale(HeldGrabPointOffset);
-	const FVector TargetLocation =
-		GetHoldPointTransform().TransformPositionNoScale(HeldTargetOffset);
-
-	const bool bReachedTarget =
-		FVector::DistSquared(CurrentGrabPoint, TargetLocation) <= FMath::Square(CarrySettleTolerance);
-
-	// 벽에 끼면 영영 못 닿는다. 내용물이 영구히 굳는 것을 막는 상한
-	const bool bTimedOut = HeldCarrySeconds >= CarrySettleTimeout;
-
-	if (!bReachedTarget && !bTimedOut) return;
-
-	bHeldActorSettled = true;
-	IMD_Grabbable::Execute_OnCarrySettled(HeldActor);
-}
-
-void AMD_Character::OnRep_HeldActor()
-{
-	StopFollowingHeldActor();
-	StartFollowingHeldActor();
-}
-
-void AMD_Character::StartFollowingHeldActor()
-{
-	if (HasAuthority() || !IsValid(HeldActor)) return;
-
-	UPrimitiveComponent* Component = nullptr;
-	FVector GrabLocation = FVector::ZeroVector;
-
-	// 서버 TryHoldTarget과 같은 기준이라야 두 머신의 잡는 지점이 어긋나지 않는다
-	if (HeldActor->Implements<UMD_Grabbable>())
-	{
-		Component = IMD_Grabbable::Execute_GetGrabComponent(HeldActor);
-		const USceneComponent* GrabPoint = IMD_Grabbable::Execute_GetGrabPoint(HeldActor);
-
-		if (!IsValid(Component) || !IsValid(GrabPoint)) return;
-
-		GrabLocation = GrabPoint->GetComponentLocation();
-		HeldTargetOffset = IMD_Grabbable::Execute_GetHoldOffset(HeldActor);
-		ActiveHoldProfile = IMD_Grabbable::Execute_GetHoldProfile(HeldActor);
-	}
-	else
-	{
-		Component = Cast<UPrimitiveComponent>(HeldActor->GetRootComponent());
-		if (!IsValid(Component)) return;
-
-		GrabLocation = Component->GetCenterOfMass();
-		HeldTargetOffset = FVector::ZeroVector;
-		ActiveHoldProfile = DefaultHoldProfile;
-	}
-
-	HeldGrabPointOffset = Component->GetComponentTransform().InverseTransformPositionNoScale(GrabLocation);
-
-	// 물리를 켠 채로 두면 중력이 계속 끌어내려 따라가기와 싸운다
-	Component->SetSimulatePhysics(false);
-	FollowedComponent = Component;
-}
-
-void AMD_Character::StopFollowingHeldActor()
-{
-	UPrimitiveComponent* Component = FollowedComponent.Get();
-
-	FollowedComponent = nullptr;
-	HeldTargetOffset = FVector::ZeroVector;
-	HeldGrabPointOffset = FVector::ZeroVector;
-	ActiveHoldProfile = DefaultHoldProfile;
-
-	if (!IsValid(Component)) return;
-
-	// 서버의 위치 복제가 다시 오기 전까지도 자연스럽게 떨어지도록 물리를 되돌린다
-	Component->SetSimulatePhysics(true);
-}
-
-void AMD_Character::UpdateFollowedHeldActor(float DeltaSeconds)
-{
-	UPrimitiveComponent* Component = FollowedComponent.Get();
-
-	if (!IsValid(Component) || !IsValid(HoldPoint)) return;
-
-	const FTransform HoldTransform = GetHoldPointTransform();
-	const FVector GrabTargetLocation = HoldTransform.TransformPositionNoScale(HeldTargetOffset);
-
-	// 회전 비제약 프로필은 서버에서 자유롭게 구른다. 재현할 수 없어 자세를 고정하고 위치만 따라간다
-	FQuat TargetRotation = ActiveHoldProfile.bConstrainRotation
-		? HoldTransform.GetRotation()
-		: Component->GetComponentQuat();
-
-	// 물리 핸들은 GrabPoint를 목표 지점에 맞춘다. 컴포넌트 원점은 그만큼 물러나 있어야 한다.
-	FVector TargetLocation = GrabTargetLocation - TargetRotation.RotateVector(HeldGrabPointOffset);
-
-	// 서버 스프링이 만드는 지연을 대신한다. 잡는 순간의 이동도 이 속도로 흡수돼 튀지 않는다.
-	if (ActiveHoldProfile.RemoteFollowSpeed > 0.f)
-	{
-		const float Alpha = FMath::Clamp(DeltaSeconds * ActiveHoldProfile.RemoteFollowSpeed, 0.f, 1.f);
-		TargetLocation = FMath::Lerp(Component->GetComponentLocation(), TargetLocation, Alpha);
-		TargetRotation = FQuat::Slerp(Component->GetComponentQuat(), TargetRotation, Alpha).GetNormalized();
-	}
-
-	// Teleport가 아닌 이동이라야 키네마틱 바디가 속도를 갖고, 쓰레기통 안의 내용물도 같이 실려 간다
-	Component->SetWorldLocationAndRotation(TargetLocation, TargetRotation, false, nullptr, ETeleportType::None);
-}
-
-void AMD_Character::CaptureDefaultHoldProfile()
-{
-	if (!IsValid(PhysicsHandle)) return;
-
-	DefaultHoldProfile.bConstrainRotation = true;
-	DefaultHoldProfile.bSoftLinear = PhysicsHandle->bSoftLinearConstraint;
-	DefaultHoldProfile.bSoftAngular = PhysicsHandle->bSoftAngularConstraint;
-	DefaultHoldProfile.bInterpolate = PhysicsHandle->bInterpolateTarget;
-	DefaultHoldProfile.LinearStiffness = PhysicsHandle->LinearStiffness;
-	DefaultHoldProfile.LinearDamping = PhysicsHandle->LinearDamping;
-	DefaultHoldProfile.AngularStiffness = PhysicsHandle->AngularStiffness;
-	DefaultHoldProfile.AngularDamping = PhysicsHandle->AngularDamping;
-	DefaultHoldProfile.InterpolationSpeed = PhysicsHandle->InterpolationSpeed;
-	ActiveHoldProfile = DefaultHoldProfile;
-}
-
-void AMD_Character::ApplyHoldProfile(const FMD_HoldProfile& Profile)
-{
-	if (!IsValid(PhysicsHandle)) return;
-
-	PhysicsHandle->bSoftLinearConstraint = Profile.bSoftLinear;
-	PhysicsHandle->bSoftAngularConstraint = Profile.bSoftAngular;
-	PhysicsHandle->bInterpolateTarget = Profile.bInterpolate;
-	PhysicsHandle->SetLinearStiffness(FMath::Max(0.f, Profile.LinearStiffness));
-	PhysicsHandle->SetLinearDamping(FMath::Max(0.f, Profile.LinearDamping));
-	PhysicsHandle->SetAngularStiffness(FMath::Max(0.f, Profile.AngularStiffness));
-	PhysicsHandle->SetAngularDamping(FMath::Max(0.f, Profile.AngularDamping));
-	PhysicsHandle->SetInterpolationSpeed(FMath::Max(0.f, Profile.InterpolationSpeed));
 }
 
 void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
@@ -764,64 +372,6 @@ void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value
 	ASC->TryActivateAbilityByClass(WallScanAbilityClass);
 }*/
 
-void AMD_Character::UpdateInteractionFocus()
-{
-	if (!IsLocallyControlled() || !Controller || !GetWorld())
-	{
-		SetCurrentTarget(nullptr);
-		return;
-	}
-
-	// 들고 있는 물체 너머의 대상이 계속 반짝이면 헷갈리므로 강조를 끈다.
-	// 놓기는 CurrentTarget이 비어도 ServerInteract에서 처리된다.
-	if (HeldActor)
-	{
-		SetCurrentTarget(nullptr);
-		return;
-	}
-
-	SetCurrentTarget(TraceInteractionTarget());
-}
-
-AActor* AMD_Character::TraceInteractionTarget() const
-{
-	if (!Controller || !GetWorld()) return nullptr;
-
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
-
-	const FVector TraceEnd = ViewLocation + ViewRotation.Vector() * InteractTraceDistance;
-
-	FHitResult Hit;
-	FCollisionQueryParams QueryParams;
-	QueryParams.AddIgnoredActor(this);
-
-	if (!GetWorld()->LineTraceSingleByChannel(
-		Hit,
-		ViewLocation,
-		TraceEnd,
-		MDCollisionChannels::InteractTrace,
-		QueryParams)) return nullptr;
-
-	AActor* HitActor = Hit.GetActor();
-	return IsValid(HitActor) && HitActor->Implements<UMD_Interactable>() ? HitActor : nullptr;
-}
-
-void AMD_Character::SetCurrentTarget(AActor* NewTarget)
-{
-	if (CurrentTarget.Get() == NewTarget) return;
-
-	if (AActor* PreviousTarget = CurrentTarget.Get())
-	{
-		if (PreviousTarget->Implements<UMD_Interactable>()) IMD_Interactable::Execute_SetInteractionHighlighted(PreviousTarget, false);
-	}
-
-	CurrentTarget = NewTarget;
-
-	if (IsValid(NewTarget) && NewTarget->Implements<UMD_Interactable>()) IMD_Interactable::Execute_SetInteractionHighlighted(NewTarget, true);
-}
-
 void AMD_Character::InitializeAbilitySystem()
 {
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
@@ -916,6 +466,27 @@ void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
 	}
 
 	bWasDeadState = bIsDead;
+}
+
+void AMD_Character::HandleTakeAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType,
+	AController* InstigatedBy, AActor* DamageCauser)
+{
+	// 서버 권한에서만 판정. 회복(음수 데미지)·0 데미지는 무시
+	if (!HasAuthority() || Damage <= 0.f)
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	// 오염수 DoT·붕괴 등 모든 피해를 Health 하나로 귀결시킨다 (기획 02 §6).
+	// 클램프(0~Max)는 AttributeSet, 부상/사망 전환은 PlayerState가 담당한다.
+	ASC->ApplyModToAttribute(UMD_CharacterAttributeSet::GetHealthAttribute(),
+		EGameplayModOp::Additive, -Damage);
 }
 
 void AMD_Character::ApplyDeathMovementLock(bool bLocked)

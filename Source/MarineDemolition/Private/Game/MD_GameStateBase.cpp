@@ -1,10 +1,13 @@
 #include "Game/MD_GameStateBase.h"
 #include "Data/Score/MD_ScoreTableData.h"
 #include "Net/UnrealNetwork.h"
+#include "Component/Merchant/MD_MerchantComponent.h"
 
 AMD_GameStateBase::AMD_GameStateBase()
 {
     bReplicates = true;
+
+    MerchantComponent = CreateDefaultSubobject<UMD_MerchantComponent>(TEXT("MerchantComponent"));
 }
 
 void AMD_GameStateBase::BeginPlay()
@@ -34,6 +37,10 @@ void AMD_GameStateBase::GetLifetimeReplicatedProps(
     DOREPLIFETIME(AMD_GameStateBase, LastInspectionReport);
 
     DOREPLIFETIME(AMD_GameStateBase, CurrentDay);
+
+    DOREPLIFETIME(AMD_GameStateBase, ContractCrewCount);
+
+    DOREPLIFETIME(AMD_GameStateBase, bEmergencyDay);
 }
 
 //Timer
@@ -213,9 +220,23 @@ int32 AMD_GameStateBase::GetInspectionThreshold(int32 Day) const
     }
 
     const int32 BaseThreshold = ScoreTable->GetDayThreshold(Day);
-    return bInspectionWarned
-        ? FMath::RoundToInt(BaseThreshold * ScoreTable->WarnedThresholdMultiplier)
-        : BaseThreshold;
+    if (BaseThreshold <= 0)
+    {
+        return 0;
+    }
+
+    // 최종 기준 = 표준 × 난이도 × 인원 × (경고 시 1.1)
+    float Multiplier = ScoreTable->DifficultyThresholdMultiplier;
+    if (ContractCrewCount > 0)
+    {
+        Multiplier *= ScoreTable->GetCrewMultiplier(ContractCrewCount);
+    }
+    if (bInspectionWarned)
+    {
+        Multiplier *= ScoreTable->WarnedThresholdMultiplier;
+    }
+
+    return FMath::RoundToInt(BaseThreshold * Multiplier);
 }
 
 void AMD_GameStateBase::SetInspectionWarned(bool bWarned)
@@ -223,6 +244,22 @@ void AMD_GameStateBase::SetInspectionWarned(bool bWarned)
     if (HasAuthority())
     {
         bInspectionWarned = bWarned;
+    }
+}
+
+void AMD_GameStateBase::SetContractCrewCount(int32 Crew)
+{
+    if (HasAuthority())
+    {
+        ContractCrewCount = Crew;
+    }
+}
+
+void AMD_GameStateBase::SetEmergencyDay(bool bEmergency)
+{
+    if (HasAuthority())
+    {
+        bEmergencyDay = bEmergency;
     }
 }
 

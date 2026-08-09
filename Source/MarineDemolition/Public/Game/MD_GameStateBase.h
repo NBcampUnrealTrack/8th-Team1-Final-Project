@@ -7,6 +7,7 @@
 #include "MD_GameStateBase.generated.h"
 
 class UMD_ScoreTableData;
+class UMD_MerchantComponent;
 
 UENUM(BlueprintType)
 enum class EMD_WithdrawalPhase : uint8
@@ -112,7 +113,21 @@ public:
 
     UPROPERTY(BlueprintAssignable, Category = "Day")
     FMD_OnDayChanged OnDayChanged;
-    
+
+    // 계약 시작 시점에 고정되는 인원수 (점검 기준 인원 배율용)
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Day")
+    void SetContractCrewCount(int32 Crew);
+
+    UFUNCTION(BlueprintPure, Category = "Day")
+    int32 GetContractCrewCount() const { return ContractCrewCount; }
+
+    // 비상 4일차 진행 여부. Day 간 스냅샷으로 유지
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Day")
+    void SetEmergencyDay(bool bEmergency);
+
+    UFUNCTION(BlueprintPure, Category = "Day")
+    bool IsEmergencyDay() const { return bEmergencyDay; }
+
 protected:
     virtual void BeginPlay() override;
 
@@ -166,6 +181,14 @@ private:
     UPROPERTY(ReplicatedUsing = OnRep_CurrentDay)
     int32 CurrentDay = 1;
 
+    // 계약 인원수 (0 = 미확정). 계약 시작 시점 고정
+    UPROPERTY(Replicated)
+    int32 ContractCrewCount = 0;
+
+    // 비상 4일차 여부
+    UPROPERTY(Replicated)
+    bool bEmergencyDay = false;
+
     UFUNCTION()
     void OnRep_CurrentDay();
     
@@ -176,4 +199,11 @@ private:
 
     UFUNCTION()
     void OnRep_Score();
+
+public:
+    UFUNCTION(BlueprintPure, Category = "MD|Merchant")
+    UMD_MerchantComponent* GetMerchantComponent() const { return MerchantComponent; }
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
+    TObjectPtr<UMD_MerchantComponent> MerchantComponent;
 };

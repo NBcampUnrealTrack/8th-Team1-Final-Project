@@ -17,7 +17,8 @@ void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 
 	if (AMD_CuttableWall* Wall = GetAimedWall(ActorInfo))
 	{
-		Wall->ScanHighlight(ScanDuration);
+		// 스캐너를 전달 → 실루엣은 스캔한 플레이어 로컬 클라에서만 노출
+		Wall->ScanHighlight(ScanDuration, ActorInfo->AvatarActor.Get());
 	}
 
 	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
