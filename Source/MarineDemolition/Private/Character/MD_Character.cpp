@@ -9,6 +9,7 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
+#include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -75,6 +76,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	InteractionComponent->SetInteractionDependencies(Camera, HoldPoint, PhysicsHandle);
 
 	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
+
+	OxygenComponent = CreateDefaultSubobject<UMD_OxygenComponent>(TEXT("OxygenComponent"));
 }
 
 void AMD_Character::ForceEnterWalkState()
