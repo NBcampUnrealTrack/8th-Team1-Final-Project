@@ -23,6 +23,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayTagContainer.h"
@@ -99,6 +100,12 @@ UAbilitySystemComponent* AMD_Character::GetAbilitySystemComponent() const
 void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 데미지 브리지: 서버에서 ApplyDamage(오염수 DoT·붕괴 등)를 Health 감소로 연결
+	if (HasAuthority())
+	{
+		OnTakeAnyDamage.AddDynamic(this, &AMD_Character::HandleTakeAnyDamage);
+	}
 
 	if (!IsValid(PlayerMappingContext)) return;
 
@@ -459,6 +466,27 @@ void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
 	}
 
 	bWasDeadState = bIsDead;
+}
+
+void AMD_Character::HandleTakeAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType,
+	AController* InstigatedBy, AActor* DamageCauser)
+{
+	// 서버 권한에서만 판정. 회복(음수 데미지)·0 데미지는 무시
+	if (!HasAuthority() || Damage <= 0.f)
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	// 오염수 DoT·붕괴 등 모든 피해를 Health 하나로 귀결시킨다 (기획 02 §6).
+	// 클램프(0~Max)는 AttributeSet, 부상/사망 전환은 PlayerState가 담당한다.
+	ASC->ApplyModToAttribute(UMD_CharacterAttributeSet::GetHealthAttribute(),
+		EGameplayModOp::Additive, -Damage);
 }
 
 void AMD_Character::ApplyDeathMovementLock(bool bLocked)
