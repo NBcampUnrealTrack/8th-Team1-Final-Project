@@ -158,6 +158,12 @@ private:
 	UFUNCTION()
 	void HandleHealthStateChanged(EMD_HealthState NewState);
 
+	// 데미지 브리지: ApplyDamage(오염수 DoT·붕괴 등)를 Health 감소로 연결한다 (서버 전용).
+	// 클램프·부상/사망 전환은 AttributeSet·PlayerState가 처리한다.
+	UFUNCTION()
+	void HandleTakeAnyDamage(AActor* DamagedActor, float Damage, const class UDamageType* DamageType,
+		class AController* InstigatedBy, AActor* DamageCauser);
+
 	/** 사망 시 이동을 멈추고, 부활 시 되돌린다. */
 	void ApplyDeathMovementLock(bool bLocked);
 

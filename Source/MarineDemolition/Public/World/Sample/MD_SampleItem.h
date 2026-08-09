@@ -44,9 +44,40 @@ public:
 	/** 파괴 시 스폰할 파편(지오메트리 컬렉션) 액터. 복제 없는 연출 전용 클래스 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Sample")
 	TSubclassOf<AActor> BreakDebrisClass;
-	
+
+	/**
+	 * 스폰 직후 이 시간(초) 동안 손상·파괴 판정을 막는다. 퀘스트 스포너가 값을 지정한다.
+	 *
+	 * 기본값이 0이 아닌 이유: 스포너가 만든 샘플은 공중에서 떨어져 착지하고, Day 스냅샷
+	 * 복원으로 되살아난 샘플도 로드 직후 물리가 안정될 때까지 흔들린다. 그 구간의 충격은
+	 * 플레이어가 만든 게 아니라서 손 운반 리스크(기획 02 §4)로 치면 안 된다.
+	 * 보호가 끝나면 정적·동적 구분 없이 평소 임계값으로 판정한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest|Spawn",
+		meta = (ClampMin = "0.0", UIMin = "0.0", DisplayName = "Spawn Protection Duration"))
+	float SpawnProtectionDuration = 3.f;
+
+	/**
+	 * 그랩 시작 직후 이 시간(초) 동안 손상·파괴 판정을 막는다.
+	 * PhysicsHandle이 목표 지점(HoldPoint)으로 급가속하는 순간 생기는 오탐 충격을 흡수한다.
+	 * 그 외의 충격(운반 중 실제로 세게 부딪힘)은 그대로 판정된다 (기획 02 §4 손 운반 리스크).
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Interaction",
+		meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float GrabProtectionDuration = 0.4f;
+
+	/** MD_InteractionComponent가 그랩 성공 직후 호출한다. */
+	void NotifyGrabbed();
+
 protected:
 	virtual void BeginPlay() override;
+
+	void BeginSpawnProtection();
+	void BeginImpactProtection(float Duration);
+	void EndImpactProtection();
+
+	bool bImpactProtected = false;
+	FTimerHandle ImpactProtectionTimerHandle;
 
 	UFUNCTION()
 	void OnAnyDamage(AActor* DamagedActor, float Damage, const class UDamageType* DamageType,

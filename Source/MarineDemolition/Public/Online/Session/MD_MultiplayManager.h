@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineBaseTypes.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"      // Online Subsystem의 Session 관련 모듈 참조
 #include "Interfaces/OnlineExternalUIInterface.h"   // Online SubSystem의 플랫폼 제공 UI 관련 모듈 참조
@@ -10,13 +11,14 @@
 
 struct FBlueprintSessionResult;
 struct FMD_SessionCreateParams;     // Hosting Session 설정값
-struct FMD_SessionDestroyParams;    // Leav Session 설정 값
 struct FMD_SessionFindParams;     // Find Session 설정 값
 
 // Session 생성 완료 시 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCreateMDSessionCompleteSignature, bool, bWasSuccessful);
 // 게임 시작과 지정 맵 이동 요청 완료 시 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnStartMDGameCompleteSignature, bool, bWasSuccessful);
+// 진행 중인 게임 Session 종료와 지정 맵 이동 완료 시 이벤트
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnEndMDGameCompleteSignature, bool, bWasSuccessful);
 // Session 검색 완료 시 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FOnFindMDSessionCompleteSignature, const TArray<FBlueprintSessionResult>&, FindResults, bool, bWasSuccessful);
 // Session 참여 완료 시 이벤트
@@ -64,6 +66,11 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Marine Demolition|Session")
     FOnStartMDGameCompleteSignature OnStartGameComplete;
 
+    // 진행 중인 게임 Session 종료와 지정 맵 이동 결과 전달 이벤트
+    // Parameters : (bool bWasSuccessful)
+    UPROPERTY(BlueprintAssignable, Category = "Marine Demolition|Session")
+    FOnEndMDGameCompleteSignature OnEndGameComplete;
+
     // Session 검색 완료 시 실행되는 이벤트
     // Parameters : (const TArray<FBlueprintSessionResult>& FindResults, bool bWasSuccessful)
     UPROPERTY(BlueprintAssignable, Category = "Marine Demolition|Session")
@@ -95,6 +102,7 @@ protected:
     // 서비스 플랫폼에서 제공하는 공용 UI 관련
     IOnlineExternalUIPtr ExternalUIInterface;
 
+    // Session 비동기 작업의 중복 실행과 완료 이벤트 수명을 관리하기 위한 핸들
     FDelegateHandle SessionDelegateHandle;
 
 public:
@@ -104,7 +112,11 @@ public:
 
     // 호스트가 현재 Session을 시작 상태로 전환하고 모든 접속자를 지정 맵으로 이동시키는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
-    void StartGame(TSoftObjectPtr<UWorld> GameMap);
+    void StartSession(const struct FMD_GameData& GameData);
+
+    // 호스트가 진행 중인 Session을 종료 상태로 전환하고 모든 접속자를 지정 맵으로 이동시키는 함수
+    UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
+    void EndSession(const FString& MapPackagePath);
 
     // 최대 MaxSearchResultCount개의 Session을 검색하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
@@ -148,11 +160,20 @@ protected:
     // 요청된 Session에 실제로 참여하는 함수
     void JoinSessionInternal(const FOnlineSessionSearchResult& SessionSearchResult);
 
+    // 준비된 게임 데이터 작업을 유지한 채 Session 시작과 맵 이동 절차를 실행하는 함수
+    void StartGameInternal(const FString& GameMapPackagePath);
+
     // Online Session Interface에서 Create Session을 완료하였을 때 호출되는 함수
     void HandleCreateSessionComplete(FName SessionName, bool bWasSuccessful, const FString SessionMapPackagePath);
 
     // Online Session Interface에서 Start Session을 완료하면 호스트의 지정 맵 이동을 처리하는 함수
-    void HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString GameMapPackagePath);
+    void HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
+
+    // Online Session Interface에서 End Session을 완료하면 호스트의 지정 맵 이동을 처리하는 함수
+    void HandleEndSessionComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
+
+    // EndSession 맵 이동 실패 이후 Ended Session을 진행 상태로 복구하는 함수
+    void RecoverEndGameSession(FName SessionName);
 
     // Online Session Interface에서 Find Sessions을 완료하였을 때 호출되는 함수
     void HandleFindSessionsComplete(bool bWasSuccessful, TSharedPtr<FOnlineSessionSearch> SessionSearch);
@@ -162,6 +183,9 @@ protected:
 
     // Online Session Interface에서 Destroy Session을 완료하였을 때 호출되는 함수
     void HandleDestroySessionComplete(FName SessionName, bool bWasSuccessful);
+
+    // Session 시작 또는 맵 이동 실패 시 데이터 저장 시스템의 저장된 데이터 적용 작업을 취소하는 함수
+    void CancelPendingGameDataOperation();
 
     // 생성, 참여 또는 게임 시작 실패 후 남은 NamedSession을 외부 제거 이벤트 없이 정리하는 함수
     void RollbackSession(FName SessionName, EMD_SessionRollbackOperation RollbackOperation);

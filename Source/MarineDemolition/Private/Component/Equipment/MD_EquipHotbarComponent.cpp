@@ -99,10 +99,10 @@ void UMD_EquipHotbarComponent::SetToolAtSlot(int32 SlotIndex, UMD_ToolDefinition
 	OnRep_Slots();
 }
 
-TArray<TSoftObjectPtr<UMD_ToolDefinition>> UMD_EquipHotbarComponent::BuildEquipmentSaveData() const
+TArray<TSoftObjectPtr<UDataAsset>> UMD_EquipHotbarComponent::BuildEquipmentSaveData() const
 {
 	// 기본 값 생성
-	TArray<TSoftObjectPtr<UMD_ToolDefinition>> OutEquipmentList;
+	TArray<TSoftObjectPtr<UDataAsset>> OutEquipmentList;
 
 	// 컴포넌트 소유 액터가 유효하지 않거나 클라이언트 환경 실행 제한
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false)
@@ -119,7 +119,7 @@ TArray<TSoftObjectPtr<UMD_ToolDefinition>> UMD_EquipHotbarComponent::BuildEquipm
 	return OutEquipmentList;
 }
 
-bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UMD_ToolDefinition>>& SavedToolSlots)
+bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UDataAsset>>& SavedToolSlots)
 {
 	// 컴포넌트 소유 액터가 유효하지 않거나 클라이언트 환경 실행 제한
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false)
@@ -140,12 +140,19 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 	// 저장된 데이터 복사
 	for (int32 Index = 0; Index < SavedToolSlots.Num(); ++Index)
 	{
-		if (SavedToolSlots[Index].IsValid() == false)
+		if (SavedToolSlots[Index].IsNull() == true)
 		{
 			continue;
 		}
 
-		Slots[Index] = SavedToolSlots[Index].LoadSynchronous();
+		UDataAsset* DataAsset = SavedToolSlots[Index].LoadSynchronous();
+		UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(DataAsset);
+		if (IsValid(Tool) == false)
+		{
+			continue;
+		}
+
+		Slots[Index] = Tool;
 	}
 
 	// Listen Server 환경 고려 Slot 정보 변경 이벤트 실행

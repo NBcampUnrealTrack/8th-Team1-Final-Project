@@ -2124,13 +2124,16 @@ bool AMD_CuttableWall::TryGetContaminationFaceFromHit(
 		OutSurfaceFace);
 }
 
-void AMD_CuttableWall::ScanHighlight(float Duration)
+void AMD_CuttableWall::ScanHighlight(float Duration, AActor* Scanner)
 {
 	// 콘솔/외부 호출에서 0이 들어와도 기본 지속시간 보장
 	if (Duration <= 0.f)
 	{
 		Duration = 3.f;
 	}
+
+	// 겹친 인프라(배관·배선)에 실루엣 노출 알림 (벽 MID 유무와 무관하게 먼저 방송)
+	OnWallScanned.Broadcast(this, Duration, Scanner);
 
 	if (!MID)
 	{

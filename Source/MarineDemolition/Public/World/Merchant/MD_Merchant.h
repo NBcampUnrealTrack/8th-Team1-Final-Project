@@ -10,6 +10,9 @@
 class UMD_MerchantMenuWidget;
 class UMD_ShopCatalog;
 class UMD_ShopWidget;
+class UMD_QuestWidget;
+class UMD_MerchantComponent;
+class AMD_PlayerController;
 class UStaticMeshComponent;
 
 /**
@@ -64,6 +67,10 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	TObjectPtr<UMD_ShopCatalog> ShopCatalog;
 
+	/** 메뉴에서 '퀘스트'를 눌렀을 때 열리는 화면 (메인/반복/로어 3탭, `04` §5.5) */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+	TSubclassOf<UMD_QuestWidget> QuestWidgetClass;
+
 	/**
 	 * 이미 가득 찬 품목을 사려 할 때 브릭스가 하는 말.
 	 *
@@ -87,6 +94,8 @@ protected:
 
 	TWeakObjectPtr<UMD_ShopWidget> ActiveShopWidget;
 
+	TWeakObjectPtr<UMD_QuestWidget> ActiveQuestWidget;
+
 private:
 	/** 메뉴에서 '나가기'를 눌렀을 때 */
 	UFUNCTION()
@@ -104,8 +113,37 @@ private:
 	UFUNCTION()
 	void HandleShopPurchaseRejected(FName ItemId);
 
+	/** 메뉴에서 '퀘스트'를 눌렀을 때 */
+	UFUNCTION()
+	void HandleQuestRequested();
+
+	/** 퀘스트 화면에서 '뒤로'를 눌렀을 때 */
+	UFUNCTION()
+	void HandleQuestBackRequested();
+
+	/** 반복 퀘스트 카드에서 '수락'을 눌렀을 때 — 서버 판정은 PlayerController RPC가 맡는다. */
+	UFUNCTION()
+	void HandleRepeatAcceptRequested(int32 QuestIndex);
+
+	UFUNCTION()
+	void HandleRepeatDeclineRequested(int32 QuestIndex);
+
+	/** 백엔드(UMD_MerchantSubsystem)에 수락 이후 파기 처리가 아직 없어 안내만 띄운다. */
+	UFUNCTION()
+	void HandleRepeatAbandonRequested(int32 QuestIndex);
+
+	/** 상인 상태(퀘스트 등)가 바뀔 때마다 열려 있는 퀘스트 화면을 다시 그린다. */
+	UFUNCTION()
+	void HandleMerchantStateChangedForQuest();
+
+	void RefreshQuestWidgetFromComponent();
+
+	UMD_MerchantComponent* GetMerchantComponent() const;
+
+	AMD_PlayerController* GetInteractingPlayerController() const;
+
 	/**
-	 * 퀘스트·대출은 아직 화면이 없다. 버튼을 숨기면 돌아올 길이 없으니
+	 * 대출은 아직 화면이 없다. 버튼을 숨기면 돌아올 길이 없으니
 	 * 숨기지 않고 대사로만 알린다.
 	 */
 	UFUNCTION()
