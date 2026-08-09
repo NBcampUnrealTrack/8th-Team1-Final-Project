@@ -332,14 +332,14 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 	UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 로드 시 퀘스트 정보 덮어씌우기 보강 필요"), *UE_CALL_LOCATIONINFO);
 
 	// 점수 데이터 덮어씌우기
-	int32 ScoreDelta = TemporaryGameData->Score - GameState->GetScore();
+	int32 ScoreDelta = GameData.Score - GameState->GetScore();
 	if (ScoreDelta != 0)
 	{
 		GameState->AddScoreDelta(ScoreDelta);
 	}
 
 	// 인게임 재화 데이터 덮어씌우기
-	int32 CreditDelta = TemporaryGameData->Credit - MerchantManager->GetCredits();
+	int32 CreditDelta = GameData.Credit - MerchantManager->GetCredits();
 	if (CreditDelta != 0)
 	{
 		MerchantManager->AddCredits(CreditDelta);
@@ -349,17 +349,18 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 	UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 로드 시 상인 우호도 정보 덮어씌우기 보강 필요"), *UE_CALL_LOCATIONINFO);
 
 	// 인게임 시간 데이터 덮어씌우기
-	int32 InGameDay = TemporaryGameData->InGameTime;
+	int32 InGameDay = GameData.InGameTime;
 	if (GameState->GetCurrentDay() != InGameDay)
 	{
 		GameState->SetCurrentDay(InGameDay);
 	}
+	MerchantManager->BeginDay(InGameDay);
 
 	// 전체 플레이어 데이터 덮어씌우기
 	const TArray<APlayerState*> PlayerArray = GameState->PlayerArray;
 	for (const APlayerState* PlayerState : PlayerArray)
 	{
-		OverwriteDataToPlayer(PlayerState);
+		OverwriteDataToPlayerInternal(PlayerState, GameData);
 	}
 
 	// 불러온 게임 데이터를 멤버 변수에 저장
@@ -417,58 +418,16 @@ bool UMD_SaveSlotManager::ParseDataFromPlayer(const APlayerState* PlayerState)
 	return true;
 }
 
-bool UMD_SaveSlotManager::OverwriteDataToPlayer(const APlayerState* PlayerState) const
+bool UMD_SaveSlotManager::LoadPlayerData(const APlayerState* PlayerState) const
 {
-	// 클라이언트 환경 실행 제한
-	if (IsValid(PlayerState) == false || PlayerState->HasAuthority() == false)
+	// 데이터를 덮어씌워질 플레이어가 유효하지 않거나 덮어씌울 데이터가 존재하지 않는 경우 함수 조기 종료
+	if (IsValid(PlayerState) == false || TemporaryGameData.IsValid() == false)
 	{
 		return false;
 	}
 
-	// 로드한 데이터가 존재하지 않은 경우 함수 조기 종료
-	if (TemporaryGameData.IsValid() == false)
-	{
-		return false;
-	}
-
-	// 새로하기 트래블 중 이전 세션의 플레이어 데이터가 새 Pawn에 적용되지 않도록 하는 복원 제한
-	if (PendingGameDataOperation == EMD_PendingGameDataOperation::NewGame)
-	{
-		return false;
-	}
-
-	FUniqueNetIdRepl UniqueNetID = IsValid(PlayerState) == true ? PlayerState->GetUniqueId() : nullptr;
-	FString PlayerKey = UniqueNetID.IsValid() == true ? UniqueNetID.ToString() : TEXT("");
-	PlayerKey = PlayerKey.IsEmpty() == true ? PlayerState->GetPlayerName() : PlayerKey;
-	if (PlayerKey.IsEmpty() == true)
-	{
-		return false;
-	}
-
-	// 플레이어 데이터의 존재 여부 검사
-	const FMD_PlayerData* PlayerData = TemporaryGameData->PlayerData.Find(PlayerKey);
-	if (PlayerData == nullptr)
-	{
-		return false;
-	}
-
-	// 플레이어가 조종하는 캐릭터(폰)이 존재하지 않으면 함수 조기 종료
-	if (IsValid(PlayerState->GetPawn()) == false)
-	{
-		return false;
-	}
-
-	// 플레이어 캐릭터 참조
-	AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerState->GetPawn());
-
-	// MD_EquipHotbar Component가 유효하면 저장된 데이터 덮어씌우기
-	UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
-	if (IsValid(EquipmentComponent) == true)
-	{
-		EquipmentComponent->RestoreEquipmentSaveData(PlayerData->HotbarToolList);
-	}
-
-	return true;
+	bool bOverwriteSuccess =OverwriteDataToPlayerInternal(PlayerState, *TemporaryGameData);
+	return bOverwriteSuccess;
 }
 
 void UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameData)
@@ -615,6 +574,54 @@ bool UMD_SaveSlotManager::CollectGameData()
 
 	// 게임 데이터 수집 시각 저장
 	TemporaryGameData->SaveTime = FDateTime::Now();
+
+	return true;
+}
+
+bool UMD_SaveSlotManager::OverwriteDataToPlayerInternal(const APlayerState* PlayerState, const FMD_GameData& GameData) const
+{
+	// 클라이언트 환경 실행 제한
+	if (IsValid(PlayerState) == false || PlayerState->HasAuthority() == false)
+	{
+		return false;
+	}
+
+	// 새로하기 트래블 중 이전 세션의 플레이어 데이터가 새 Pawn에 적용되지 않도록 하는 복원 제한
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::NewGame)
+	{
+		return false;
+	}
+
+	FUniqueNetIdRepl UniqueNetID = IsValid(PlayerState) == true ? PlayerState->GetUniqueId() : nullptr;
+	FString PlayerKey = UniqueNetID.IsValid() == true ? UniqueNetID.ToString() : TEXT("");
+	PlayerKey = PlayerKey.IsEmpty() == true ? PlayerState->GetPlayerName() : PlayerKey;
+	if (PlayerKey.IsEmpty() == true)
+	{
+		return false;
+	}
+
+	// 플레이어 데이터의 존재 여부 검사
+	const FMD_PlayerData* PlayerData = GameData.PlayerData.Find(PlayerKey);
+	if (PlayerData == nullptr)
+	{
+		return false;
+	}
+
+	// 플레이어가 조종하는 캐릭터(폰)이 존재하지 않으면 함수 조기 종료
+	if (IsValid(PlayerState->GetPawn()) == false)
+	{
+		return false;
+	}
+
+	// 플레이어 캐릭터 참조
+	AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerState->GetPawn());
+
+	// MD_EquipHotbar Component가 유효하면 저장된 데이터 덮어씌우기
+	UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
+	if (IsValid(EquipmentComponent) == true)
+	{
+		EquipmentComponent->RestoreEquipmentSaveData(PlayerData->HotbarToolList);
+	}
 
 	return true;
 }

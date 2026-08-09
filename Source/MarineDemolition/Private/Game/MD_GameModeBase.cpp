@@ -69,7 +69,7 @@ void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
     if (IsValid(SaveSlotManager) == true && IsValid(NewPlayer->PlayerState) == true)
     {
-        SaveSlotManager->OverwriteDataToPlayer(NewPlayer->PlayerState);
+        SaveSlotManager->LoadPlayerData(NewPlayer->PlayerState);
     }
 }
 
@@ -545,6 +545,14 @@ void AMD_GameModeBase::RestoreDaySnapshot()
         GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
     {
         Persistence->RestoreSnapshot(GetWorld());
+    }
+
+    // 게임 자동 저장 실행
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true)
+    {
+        SaveSlotManager->SaveGameData(TEXT("Auto"), true);
     }
 }
 

@@ -106,7 +106,7 @@ public:
 
 	// 로드된 게임 데이터에 존재하는 플레이어의 데이터를 현재 플레이어에게 덮어쓰는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
-	bool OverwriteDataToPlayer(const APlayerState* PlayerState) const;
+	bool LoadPlayerData(const APlayerState* PlayerState) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	void OnTryStartGameWithGameData(const FMD_GameData& GameData);
@@ -125,6 +125,9 @@ protected:
 
 	// 저장해야 하는 GameSession 데이터를 수집하는 함수
 	bool CollectGameData();
+
+	// 게임 데이터에 존재하는 플레이어의 데이터를 현재 플레이어에게 덮어쓰는 함수
+	bool OverwriteDataToPlayerInternal(const APlayerState* PlayerState, const FMD_GameData& GameData) const;
 
 	// 요청 시점에 수집된 게임 데이터를 지정된 세이브 파일 목록에 추가하는 함수
 	bool InsertGameDataToSaveFile(UMD_SaveGame* SaveFile, const FMD_GameData& GameData, bool bIsAuto);

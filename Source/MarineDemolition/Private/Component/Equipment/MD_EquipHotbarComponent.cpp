@@ -140,18 +140,17 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 	// 저장된 데이터 복사
 	for (int32 Index = 0; Index < SavedToolSlots.Num(); ++Index)
 	{
-		if (SavedToolSlots[Index].IsNull() == false)
+		if (SavedToolSlots[Index].IsNull() == true)
 		{
 			continue;
 		}
 
-		TSoftObjectPtr<UDataAsset> DataAsset = SavedToolSlots[Index];
-		if (DataAsset->IsA<UMD_ToolDefinition>() == false)
+		UDataAsset* DataAsset = SavedToolSlots[Index].LoadSynchronous();
+		UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(DataAsset);
+		if (IsValid(Tool) == false)
 		{
 			continue;
 		}
-
-		UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(DataAsset.LoadSynchronous());
 
 		Slots[Index] = Tool;
 	}
