@@ -186,21 +186,36 @@ void UMD_ScrapeToolComponent::TickComponent(
 void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 {
 	FHitResult CurrentHit;
+	FHitResult DirectBarnacleHit;
 	UMD_ScrapeSurfaceComponent* CurrentSurface = nullptr;
-	if (!TryGetCurrentSurfaceHit(CurrentHit, CurrentSurface))
+	AMD_Barnacle* OccludingBarnacle = nullptr;
+	if (!TryGetCurrentSurfaceHit(
+			CurrentHit,
+			CurrentSurface,
+			OccludingBarnacle,
+			DirectBarnacleHit))
 	{
 		ResetStrokeTracking();
 
 		// 오염 표면이 아니어도 따개비일 수 있다. 둘은 성격이 달라 경로를 갈라 둔다.
-		if (AMD_Barnacle* const CurrentBarnacle =
-				Cast<AMD_Barnacle>(CurrentHit.GetActor()))
+		if (IsValid(OccludingBarnacle))
 		{
-			ProcessDirectBarnacleContact(CurrentBarnacle, CurrentHit, DeltaTime);
+			ProcessDirectBarnacleContact(
+				OccludingBarnacle,
+				DirectBarnacleHit,
+				DeltaTime);
 			return;
 		}
 
 		SetTrackedBarnacle(nullptr);
 		return;
+	}
+
+	if (IsValid(OccludingBarnacle))
+	{
+		// 클라이언트에서 부착 복제가 BeginPlay보다 늦어도 직접 맞은 순간 복구한다.
+		// 장애물 등록이 있어야 아래 경로 차단과 조준 보정이 함께 작동한다.
+		OccludingBarnacle->RegisterWithScrapeSurface(CurrentSurface);
 	}
 
 	FVector2D RawSurfacePositionCm;
@@ -275,7 +290,10 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 		// 단, 보정 목표가 다른 표면에 가려져 있으면 보정하지 않는다.
 		if (IsAimCorrectionTargetVisible(
 				CurrentHit.TraceStart,
-				ConstrainedWorldPosition))
+				ConstrainedWorldPosition,
+				bStrokeBlockedByBarnacle
+					? BlockingBarnacle
+					: nullptr))
 		{
 			KeepAimOnScrapePosition(
 				CurrentHit.TraceStart,
@@ -394,10 +412,14 @@ void UMD_ScrapeToolComponent::ClientReceiveScrapeResult_Implementation(
 
 bool UMD_ScrapeToolComponent::TryGetCurrentSurfaceHit(
 	FHitResult& OutHit,
-	UMD_ScrapeSurfaceComponent*& OutSurface) const
+	UMD_ScrapeSurfaceComponent*& OutSurface,
+	AMD_Barnacle*& OutOccludingBarnacle,
+	FHitResult& OutBarnacleHit) const
 {
 	OutHit = FHitResult();
 	OutSurface = nullptr;
+	OutOccludingBarnacle = nullptr;
+	OutBarnacleHit = FHitResult();
 
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	if (!OwnerPawn || !OwnerPawn->GetController() || !GetWorld())
@@ -408,16 +430,72 @@ bool UMD_ScrapeToolComponent::TryGetCurrentSurfaceHit(
 	FVector ViewLocation;
 	FRotator ViewRotation;
 	OwnerPawn->GetController()->GetPlayerViewPoint(ViewLocation, ViewRotation);
-
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MD_ScrapeTrace), true);
-	QueryParams.AddIgnoredActor(OwnerPawn);
-
 	const FVector TraceEnd =
 		ViewLocation + (ViewRotation.Vector() * TraceDistanceCm);
+	return TryTraceScrapeTarget(
+		ViewLocation,
+		TraceEnd,
+		OwnerPawn,
+		OutHit,
+		OutSurface,
+		OutOccludingBarnacle,
+		OutBarnacleHit);
+}
 
+bool UMD_ScrapeToolComponent::TryTraceScrapeTarget(
+	const FVector& TraceStart,
+	const FVector& TraceEnd,
+	const AActor* const IgnoredActor,
+	FHitResult& OutHit,
+	UMD_ScrapeSurfaceComponent*& OutSurface,
+	AMD_Barnacle*& OutOccludingBarnacle,
+	FHitResult& OutBarnacleHit) const
+{
+	OutHit = FHitResult();
+	OutSurface = nullptr;
+	OutOccludingBarnacle = nullptr;
+	OutBarnacleHit = FHitResult();
+	if (!GetWorld() || TraceStart.ContainsNaN() || TraceEnd.ContainsNaN())
+	{
+		return false;
+	}
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MD_ScrapeTrace), true);
+	QueryParams.AddIgnoredActor(IgnoredActor);
+
+	FHitResult FirstHit;
 	if (!GetWorld()->LineTraceSingleByChannel(
-			OutHit,
-			ViewLocation,
+			FirstHit,
+			TraceStart,
+			TraceEnd,
+			TraceChannel,
+			QueryParams))
+	{
+		return false;
+	}
+
+	OutHit = FirstHit;
+	OutSurface = UMD_ScrapeSurfaceComponent::FindForPrimitiveComponent(
+		FirstHit.GetComponent());
+	if (IsValid(OutSurface))
+	{
+		return true;
+	}
+
+	OutOccludingBarnacle = Cast<AMD_Barnacle>(FirstHit.GetActor());
+	if (!IsValid(OutOccludingBarnacle))
+	{
+		return false;
+	}
+	OutBarnacleHit = FirstHit;
+
+	// 따개비가 Visibility를 막아도 그 뒤의 작업면 좌표가 있어야 헤라 경로를
+	// 따개비 앞에서 자를 수 있다. 첫 따개비만 무시하고 같은 선을 다시 쏜다.
+	QueryParams.AddIgnoredActor(OutOccludingBarnacle);
+	FHitResult SurfaceHit;
+	if (!GetWorld()->LineTraceSingleByChannel(
+			SurfaceHit,
+			TraceStart,
 			TraceEnd,
 			TraceChannel,
 			QueryParams))
@@ -426,8 +504,14 @@ bool UMD_ScrapeToolComponent::TryGetCurrentSurfaceHit(
 	}
 
 	OutSurface = UMD_ScrapeSurfaceComponent::FindForPrimitiveComponent(
-		OutHit.GetComponent());
-	return IsValid(OutSurface);
+		SurfaceHit.GetComponent());
+	if (!IsValid(OutSurface))
+	{
+		return false;
+	}
+
+	OutHit = SurfaceHit;
+	return true;
 }
 
 void UMD_ScrapeToolComponent::ProcessDirectBarnacleContact(
@@ -698,7 +782,8 @@ FRotator UMD_ScrapeToolComponent::CalculateAimCorrectionRotation(
 
 bool UMD_ScrapeToolComponent::IsAimCorrectionTargetVisible(
 	const FVector& ViewLocation,
-	const FVector& WorldPosition) const
+	const FVector& WorldPosition,
+	const AActor* IgnoredActor) const
 {
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	const UWorld* World = GetWorld();
@@ -725,6 +810,10 @@ bool UMD_ScrapeToolComponent::IsAimCorrectionTargetVisible(
 		SCENE_QUERY_STAT(MD_ScrapeAimVisibility),
 		true);
 	QueryParams.AddIgnoredActor(OwnerPawn);
+	if (IsValid(IgnoredActor))
+	{
+		QueryParams.AddIgnoredActor(IgnoredActor);
+	}
 
 	FHitResult BlockingHit;
 	return !World->LineTraceSingleByChannel(

@@ -213,6 +213,8 @@ protected:
 	bool bShowDebugFeedback;
 
 private:
+	friend class FMD_ScrapeToolBarnacleOcclusionTest;
+
 	/** 디버그 표시용 접촉 종류 문자열. 이 컴포넌트에서만 사용한다. */
 	static const TCHAR* GetContactTypeLabel(EMD_ScrapeContactType ContactType);
 
@@ -233,7 +235,17 @@ private:
 
 	bool TryGetCurrentSurfaceHit(
 		FHitResult& OutHit,
-		UMD_ScrapeSurfaceComponent*& OutSurface) const;
+		UMD_ScrapeSurfaceComponent*& OutSurface,
+		AMD_Barnacle*& OutOccludingBarnacle,
+		FHitResult& OutBarnacleHit) const;
+	bool TryTraceScrapeTarget(
+		const FVector& TraceStart,
+		const FVector& TraceEnd,
+		const AActor* IgnoredActor,
+		FHitResult& OutHit,
+		UMD_ScrapeSurfaceComponent*& OutSurface,
+		AMD_Barnacle*& OutOccludingBarnacle,
+		FHitResult& OutBarnacleHit) const;
 	void BeginStrokeTracking(
 		UMD_ScrapeSurfaceComponent* Surface,
 		const FVector2D& SurfacePositionCm,
@@ -250,7 +262,8 @@ private:
 	/** 보정 목표가 다른 표면에 가려지지 않고 시점에서 바로 보이는지 확인한다. */
 	bool IsAimCorrectionTargetVisible(
 		const FVector& ViewLocation,
-		const FVector& WorldPosition) const;
+		const FVector& WorldPosition,
+		const AActor* IgnoredActor = nullptr) const;
 	void ResetStrokeTracking();
 	void EmitFeedback(
 		UMD_ScrapeSurfaceComponent* Surface,

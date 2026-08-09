@@ -66,20 +66,28 @@ void AMD_Barnacle::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void AMD_Barnacle::RegisterWithScrapeSurface()
+bool AMD_Barnacle::RegisterWithScrapeSurface(
+	UMD_ScrapeSurfaceComponent* const PreferredSurface)
 {
-	if (RegisteredScrapeSurface.IsValid())
+	UMD_ScrapeSurfaceComponent* const ExistingSurface =
+		RegisteredScrapeSurface.Get();
+	if (IsValid(ExistingSurface)
+		&& (!IsValid(PreferredSurface)
+			|| ExistingSurface == PreferredSurface))
 	{
-		return;
+		return true;
 	}
 
-	// 배치기가 맞은 컴포넌트에 붙이므로 부착 부모가 가장 확실한 단서다.
-	const USceneComponent* const AttachParentComponent = GetRootComponent()
-		? GetRootComponent()->GetAttachParent()
-		: nullptr;
-	UMD_ScrapeSurfaceComponent* Surface =
-		UMD_ScrapeSurfaceComponent::FindForPrimitiveComponent(
-		Cast<UPrimitiveComponent>(AttachParentComponent));
+	UMD_ScrapeSurfaceComponent* Surface = PreferredSurface;
+	if (!IsValid(Surface))
+	{
+		// 배치기가 맞은 컴포넌트에 붙이므로 부착 부모가 가장 확실한 단서다.
+		const USceneComponent* const AttachParentComponent = GetRootComponent()
+			? GetRootComponent()->GetAttachParent()
+			: nullptr;
+		Surface = UMD_ScrapeSurfaceComponent::FindForPrimitiveComponent(
+			Cast<UPrimitiveComponent>(AttachParentComponent));
+	}
 
 	if (!Surface && IsValid(Mesh) && GetWorld())
 	{
@@ -119,8 +127,15 @@ void AMD_Barnacle::RegisterWithScrapeSurface()
 
 	if (Surface && Surface->RegisterScrapeObstacle(this))
 	{
+		if (IsValid(ExistingSurface) && ExistingSurface != Surface)
+		{
+			ExistingSurface->UnregisterScrapeObstacle(this);
+		}
 		RegisteredScrapeSurface = Surface;
+		return true;
 	}
+
+	return false;
 }
 
 void AMD_Barnacle::UnregisterFromScrapeSurface()

@@ -306,6 +306,9 @@ int32 AMD_BarnacleSpawner::PlaceBarnacles(
 					MemberHit.GetComponent(),
 					FAttachmentTransformRules::KeepWorldTransform);
 			}
+			// SpawnActor는 플레이 중인 월드에서 BeginPlay까지 실행한 뒤 반환한다.
+			// 따라서 BeginPlay 등록은 위 Attach보다 먼저일 수 있어 부착 완료 후 확정한다.
+			Barnacle->RegisterWithScrapeSurface();
 
 			IgnoredActors.Add(Barnacle);
 			SpawnedBarnacles.Add(Barnacle);

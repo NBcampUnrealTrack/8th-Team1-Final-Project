@@ -180,6 +180,8 @@ protected:
 private:
 	// 자동화 테스트가 배치 프로퍼티를 직접 세팅한다. 지우면 테스트가 컴파일되지 않는다
 	friend class FMD_BarnacleRemovalTest;
+	friend class AMD_BarnacleSpawner;
+	friend class UMD_ScrapeToolComponent;
 
 	UFUNCTION()
 	void OnRep_AccumulatedRemovalWork();
@@ -203,7 +205,8 @@ private:
 	 * 붙어 있는 오염 표면을 찾아 헤라를 막는 장애물로 등록한다.
 	 * 표면 컴포넌트가 없는 환경 메시에서는 아무것도 등록하지 않는다.
 	 */
-	void RegisterWithScrapeSurface();
+	bool RegisterWithScrapeSurface(
+		UMD_ScrapeSurfaceComponent* PreferredSurface = nullptr);
 	void UnregisterFromScrapeSurface();
 
 	/** 등록해 둔 표면. 떨어질 때 장애물 등록을 지우려고 들고 있다 */
