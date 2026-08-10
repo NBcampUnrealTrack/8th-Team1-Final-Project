@@ -1,12 +1,92 @@
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "EngineUtils.h"
 #include "Game/MD_GameStateBase.h"
+#include "World/Contamination/MD_BarnacleSpawner.h"
 #include "World/Interaction/MD_SectorCloseoutMarker.h"
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Support/MD_SupportBrace.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
+
+namespace
+{
+    void GatherScrapeSurfaces(
+        UWorld* World,
+        TArray<UMD_ScrapeSurfaceComponent*>& OutSurfaces)
+    {
+        OutSurfaces.Reset();
+        if (!World)
+        {
+            return;
+        }
+
+        for (TActorIterator<AActor> It(World); It; ++It)
+        {
+            TInlineComponentArray<UMD_ScrapeSurfaceComponent*> ActorSurfaces(*It);
+            for (UMD_ScrapeSurfaceComponent* const Surface : ActorSurfaces)
+            {
+                if (IsValid(Surface))
+                {
+                    OutSurfaces.Add(Surface);
+                }
+            }
+        }
+    }
+
+    FName GetPersistentSurfaceComponentName(
+        const UMD_ScrapeSurfaceComponent* Surface)
+    {
+        const AMD_CuttableWall* const LegacyWall = Surface
+            ? Cast<AMD_CuttableWall>(Surface->GetOwner())
+            : nullptr;
+        if (LegacyWall
+            && LegacyWall->GetScrapeSurfaceComponent() == Surface)
+        {
+            // 기존 저장은 벽 이름만 가졌다. 기본 철거벽 표면은 그 키를 계속 쓴다.
+            return NAME_None;
+        }
+
+        return Surface ? Surface->GetFName() : NAME_None;
+    }
+
+    UMD_ScrapeSurfaceComponent* FindSavedScrapeSurface(
+        const FMD_WallContaminationRecord& Record,
+        const TMap<FName, AMD_CuttableWall*>& WallsByName,
+        const TMap<FName, TArray<UMD_ScrapeSurfaceComponent*>>& SurfacesByOwnerName)
+    {
+        if (Record.SurfaceComponentName.IsNone())
+        {
+            if (AMD_CuttableWall* const* Wall = WallsByName.Find(Record.WallName))
+            {
+                return IsValid(*Wall)
+                    ? (*Wall)->GetScrapeSurfaceComponent()
+                    : nullptr;
+            }
+
+            return nullptr;
+        }
+
+        const TArray<UMD_ScrapeSurfaceComponent*>* const OwnerSurfaces =
+            SurfacesByOwnerName.Find(Record.WallName);
+        if (!OwnerSurfaces)
+        {
+            return nullptr;
+        }
+
+        for (UMD_ScrapeSurfaceComponent* const Surface : *OwnerSurfaces)
+        {
+            if (IsValid(Surface)
+                && Surface->GetFName() == Record.SurfaceComponentName)
+            {
+                return Surface;
+            }
+        }
+
+        return nullptr;
+    }
+}
 
 void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
 {
@@ -36,12 +116,27 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         {
             Snapshot.SupportedWallNames.Add(It->GetFName());
         }
+    }
 
-        // 초기값과 달라진 오염 셀만 기록
+    TArray<UMD_ScrapeSurfaceComponent*> ScrapeSurfaces;
+    GatherScrapeSurfaces(World, ScrapeSurfaces);
+    for (UMD_ScrapeSurfaceComponent* const Surface : ScrapeSurfaces)
+    {
+        AActor* const SurfaceOwner = Surface->GetOwner();
+        if (!IsValid(SurfaceOwner))
+        {
+            continue;
+        }
+
+        // 생성 기준값과 달라진 오염 셀만 기록. 밤샘 분출로 총량이 오른 셀도 포함된다
         FMD_WallContaminationRecord ContaminationRecord;
-        ContaminationRecord.WallName = It->GetFName();
-        It->ExportContaminationDeltas(
-            ContaminationRecord.CellIndices, ContaminationRecord.RemainingAmounts);
+        ContaminationRecord.WallName = SurfaceOwner->GetFName();
+        ContaminationRecord.SurfaceComponentName =
+            GetPersistentSurfaceComponentName(Surface);
+        Surface->ExportContaminationDeltas(
+            ContaminationRecord.CellIndices,
+            ContaminationRecord.InitialAmounts,
+            ContaminationRecord.RemainingAmounts);
         if (ContaminationRecord.CellIndices.Num() > 0)
         {
             Snapshot.WallContaminations.Add(ContaminationRecord);
@@ -86,6 +181,21 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         }
     }
 
+    // 어제 떼어낸 따개비 순번. 배치기는 레벨 배치 액터라 이름이 안정적이다
+    for (TActorIterator<AMD_BarnacleSpawner> It(World); It; ++It)
+    {
+        const TSet<int32>& RemovedIndices = It->GetRemovedSpawnIndices();
+        if (RemovedIndices.IsEmpty())
+        {
+            continue;
+        }
+
+        FMD_BarnacleRemovalRecord RemovalRecord;
+        RemovalRecord.SpawnerName = It->GetFName();
+        RemovalRecord.RemovedSpawnIndices = RemovedIndices.Array();
+        Snapshot.BarnacleRemovals.Add(RemovalRecord);
+    }
+
     Snapshot.bValid = true;
 }
 
@@ -119,6 +229,18 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
         }
     }
 
+    // 철거된 벽을 제거한 뒤 살아 있는 모든 표면을 복원용 키로 묶는다.
+    TArray<UMD_ScrapeSurfaceComponent*> ScrapeSurfaces;
+    GatherScrapeSurfaces(World, ScrapeSurfaces);
+    TMap<FName, TArray<UMD_ScrapeSurfaceComponent*>> SurfacesByOwnerName;
+    for (UMD_ScrapeSurfaceComponent* const Surface : ScrapeSurfaces)
+    {
+        if (AActor* const Owner = Surface->GetOwner(); IsValid(Owner))
+        {
+            SurfacesByOwnerName.FindOrAdd(Owner->GetFName()).Add(Surface);
+        }
+    }
+
     // 지지대 설치 상태 복원
     for (const FName& WallName : Snapshot.SupportedWallNames)
     {
@@ -131,9 +253,15 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     // 어제 긁은 오염 셀 상태 복원. 이후 ApplyOvernightWorsening이 이 위에 소량 재부착
     for (const FMD_WallContaminationRecord& Record : Snapshot.WallContaminations)
     {
-        if (AMD_CuttableWall* const* Wall = WallsByName.Find(Record.WallName))
+        if (UMD_ScrapeSurfaceComponent* const Surface = FindSavedScrapeSurface(
+                Record,
+                WallsByName,
+                SurfacesByOwnerName))
         {
-            (*Wall)->RestoreContaminationCells(Record.CellIndices, Record.RemainingAmounts);
+            Surface->RestoreContaminationCells(
+                Record.CellIndices,
+                Record.InitialAmounts,
+                Record.RemainingAmounts);
         }
     }
 
@@ -204,6 +332,26 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
         }
     }
 
+    // 어제 떼어낸 따개비는 되살리지 않는다 (기획 03:101 강제 초기화 금지).
+    // 배치기가 BeginPlay에 이미 다 붙여 놓은 뒤이므로 목록에 든 것을 지운다.
+    if (!Snapshot.BarnacleRemovals.IsEmpty())
+    {
+        TMap<FName, const FMD_BarnacleRemovalRecord*> RemovalsBySpawnerName;
+        for (const FMD_BarnacleRemovalRecord& Record : Snapshot.BarnacleRemovals)
+        {
+            RemovalsBySpawnerName.Add(Record.SpawnerName, &Record);
+        }
+
+        for (TActorIterator<AMD_BarnacleSpawner> It(World); It; ++It)
+        {
+            if (const FMD_BarnacleRemovalRecord* const* Record =
+                    RemovalsBySpawnerName.Find(It->GetFName()))
+            {
+                It->RestoreRemovedSpawnIndices((*Record)->RemovedSpawnIndices);
+            }
+        }
+    }
+
     // 어제 마감한 섹터는 마감 상태 유지 (점수 재지급 없음 — Score 캐리오버에 이미 포함)
     const TSet<FName> ClosedMarkers(Snapshot.ClosedMarkerNames);
     for (TActorIterator<AMD_SectorCloseoutMarker> It(World); It; ++It)
@@ -243,12 +391,29 @@ void UMD_DayPersistenceSubsystem::ApplyOvernightWorsening(UWorld* World)
         Braces[FMath::RandRange(0, Braces.Num() - 1)]->Weaken();
     }
 
-    // 살아남은 벽 일부에 소형 오염 재부착
-    for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
+    // 살아남은 일반 표면과 철거벽 표면 일부에 소형 오염 재부착
+    TArray<UMD_ScrapeSurfaceComponent*> ScrapeSurfaces;
+    GatherScrapeSurfaces(World, ScrapeSurfaces);
+    for (UMD_ScrapeSurfaceComponent* const Surface : ScrapeSurfaces)
     {
         if (FMath::FRand() < 0.3f)
         {
-            It->ReapplyContaminationPatch(0.6f, 3);
+            Surface->ReapplyContaminationPatch(0.6f, 3);
+        }
+    }
+
+    // 따개비 소량 재부착 (기획 03 §3).
+    // 떼어낸 것을 되살리지 않고 새 자리에 돋운다. 어제 한 청소를 무의미하게 만들지
+    // 않으면서 "밤새 조금 나빠진" 연출만 남긴다.
+    // 살아 있는 개수는 배치기의 상한을 넘지 않으므로 3일 동안 05 배치 예산을 넘지 않는다.
+    // 개수·확률은 05 수치 기획에 대응 항목이 없어 임시값이다.
+    const int32 CurrentDay = Snapshot.CompletedDay + 1;
+    for (TActorIterator<AMD_BarnacleSpawner> It(World); It; ++It)
+    {
+        if (FMath::FRand() < 0.5f)
+        {
+            // Day마다 시드를 어긋내야 매번 다른 자리에 돋는다.
+            It->GrowBarnacles(1, CurrentDay * 977);
         }
     }
 

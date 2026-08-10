@@ -157,6 +157,75 @@ public:
 		meta = (ClampMin = "0.0001", UIMin = "0.001"))
 	float RemovalPerTravelCentimeter;
 
+	/**
+	 * 따개비를 때릴 수 있는 최소 헤라 속도
+	 *
+	 * 따개비는 문질러서 벗기는 것이 아니라 쳐서 떼어내는 부착물이다. 이 속도에
+	 * 못 미치면 헤라가 닿아도 흔들리기만 하고 내구도는 줄지 않는다. 기대고
+	 * 밀기만 해서 떼는 편법을 막는 값이기도 하다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Tool|Barnacle",
+		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm/s"))
+	float BarnacleMinimumImpactSpeedCmPerSecond = 60.0f;
+
+	/**
+	 * 한 번의 타격으로 인정하는 최대 헤라 속도
+	 *
+	 * 프레임이 한 번 튀거나 순간이동하듯 시선이 돌아가면 속도가 비현실적으로
+	 * 크게 잡힌다. 상한이 없으면 그 한 프레임에 따개비가 떨어진다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Tool|Barnacle",
+		meta = (ClampMin = "0.0", UIMin = "1.0", Units = "cm/s"))
+	float BarnacleMaximumImpactSpeedCmPerSecond = 600.0f;
+
+	/**
+	 * 최소 속도를 넘어선 1cm/s마다 따개비 내구도에서 깎는 작업량
+	 *
+	 * 벽의 RemovalPerTravelCentimeter와 따로 두는 이유는 둘의 대상이 다르기 때문이다.
+	 * 저쪽은 표면 오염 셀을 훑어 벗기는 것이고 이쪽은 부착물 하나를 쳐서 떼는 것이다.
+	 * 도구 등급 차이도 두 대상에서 같지 않다 — 08 §2.1의 열선 헤라는 "두꺼운
+	 * 오염층·단단한 따개비"에 x2.2인데, 광폭 헤라는 넓이로 이득을 보므로 따개비
+	 * 하나에는 이점이 덜하다.
+	 *
+	 * 기획서에 절대 수치가 없어 임시값이다. 기본 헤라로 250cm/s 정도의 보통 스트로크를
+	 * 네다섯 번 치면 정규화 내구도 1.0이 소진되도록 잡았다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Tool|Barnacle",
+		meta = (ClampMin = "0.0", UIMin = "0.0001"))
+	float BarnacleImpactWorkPerSpeedUnit = 0.0015f;
+
+	/**
+	 * 헤라 속도를 따개비 내구도에서 깎을 작업량으로 바꾼다.
+	 *
+	 * 최소 속도 미만이면 0을 반환한다. 잘못 설정된 값이 들어와도 0을 돌려줄 뿐
+	 * 음수나 NaN을 내보내지 않는다. 여기서 막지 않으면 진행도가 통째로 무너진다.
+	 */
+	float CalculateBarnacleImpactWork(const float ImpactSpeedCmPerSecond) const
+	{
+		if (!FMath::IsFinite(ImpactSpeedCmPerSecond)
+			|| !FMath::IsFinite(BarnacleMinimumImpactSpeedCmPerSecond)
+			|| !FMath::IsFinite(BarnacleMaximumImpactSpeedCmPerSecond)
+			|| !FMath::IsFinite(BarnacleImpactWorkPerSpeedUnit)
+			|| BarnacleImpactWorkPerSpeedUnit <= 0.0f)
+		{
+			return 0.0f;
+		}
+
+		const float MinimumSpeed = FMath::Max(0.0f, BarnacleMinimumImpactSpeedCmPerSecond);
+		if (ImpactSpeedCmPerSecond < MinimumSpeed)
+		{
+			return 0.0f;
+		}
+
+		// 상한이 최소 속도보다 낮게 설정돼도 구간이 음수가 되지 않게 한다.
+		const float MaximumSpeed = FMath::Max(
+			MinimumSpeed,
+			BarnacleMaximumImpactSpeedCmPerSecond);
+		const float EffectiveSpeed = FMath::Min(ImpactSpeedCmPerSecond, MaximumSpeed);
+
+		return (EffectiveSpeed - MinimumSpeed) * BarnacleImpactWorkPerSpeedUnit;
+	}
+
 	/** 판정기에 전달할 수 있는 유한한 양수 값인지 확인 */
 	bool IsValid() const
 	{

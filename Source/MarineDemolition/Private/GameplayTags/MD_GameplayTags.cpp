@@ -36,6 +36,11 @@ namespace MDGameplayTags
 		"물리 보관함에 담을 수 있는 오염물");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Resource_Storage_Content_Barnacle,
+		"Resource.Storage.Content.Barnacle",
+		"물리 보관함에 담을 수 있는 따개비");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Storage_Content_Sample,
 		"Resource.Storage.Content.Sample",
 		"물리 보관함에 담을 수 있는 샘플");
