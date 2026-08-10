@@ -204,6 +204,17 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		EIC->BindAction(InputConfig->SwapEquipmentAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleSwapEquipmentInput);
 		//EIC->BindAction(InputConfig->WallCutAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallCutInput);
 		//EIC->BindAction(InputConfig->WallScanAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallScanInput);
+	
+		for (int32 SlotIndex = 0; SlotIndex < InputConfig->HotbarSlotActions.Num(); ++SlotIndex)
+		{
+			UInputAction* SlotAction = InputConfig->HotbarSlotActions[SlotIndex];
+
+			if (!IsValid(SlotAction))
+			{
+				continue;
+			}
+			EIC->BindAction(SlotAction,ETriggerEvent::Started,this,&AMD_Character::HandleSelectHotbarSlotInput,SlotIndex);
+		}
 	}
 
 }
@@ -316,6 +327,17 @@ void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
 
 	EquipHotbarComponent->CycleSlot(ScrollValue > 0.f ? 1 : -1);
 	UE_LOG(LogTemp, Log, TEXT("[SwapEquipment] Direction: %s"), ScrollValue > 0.f ? TEXT("Next") : TEXT("Prev"));
+}
+
+void AMD_Character::HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex)
+{
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return;
+	}
+
+	EquipHotbarComponent->SelectSlot(SlotIndex);
+	UE_LOG(LogTemp, Log, TEXT("[Hotbar] 숫자키 슬롯 선택: %d"), SlotIndex);
 }
 
 void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
