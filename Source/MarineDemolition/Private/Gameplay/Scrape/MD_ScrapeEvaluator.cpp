@@ -30,8 +30,51 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 	const FVector2D& SurfaceSizeCm,
 	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells)
 {
+	return ApplyStrokeToGridInternal(
+		Stroke,
+		ToolSpec,
+		Settings,
+		GridDimensions,
+		SurfaceSizeCm,
+		InOutSurfaceCells,
+		nullptr);
+}
+
+FMD_ScrapeResult
+FMD_ScrapeEvaluator::ApplyStrokeToGridAndCaptureRequestedAmounts(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FMD_ScrapeSettings& Settings,
+	const FIntPoint& GridDimensions,
+	const FVector2D& SurfaceSizeCm,
+	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+	TArray<float>& OutRequestedRemovalAmounts)
+{
+	return ApplyStrokeToGridInternal(
+		Stroke,
+		ToolSpec,
+		Settings,
+		GridDimensions,
+		SurfaceSizeCm,
+		InOutSurfaceCells,
+		&OutRequestedRemovalAmounts);
+}
+
+FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FMD_ScrapeSettings& Settings,
+	const FIntPoint& GridDimensions,
+	const FVector2D& SurfaceSizeCm,
+	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+	TArray<float>* const OutRequestedRemovalAmounts)
+{
 	FMD_ScrapeResult Result;
 	Result.SurfaceFace = Stroke.SurfaceFace;
+	if (OutRequestedRemovalAmounts)
+	{
+		OutRequestedRemovalAmounts->Reset();
+	}
 
 	// 실제 배열을 수정하기 전에 모든 입력을 먼저 검사
 	// 실패 이유는 결과 구조체에 담지 않고 로그로만 남김
@@ -81,6 +124,10 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 	}
 
 	Result.bWasStrokeLongEnough = true;
+	if (OutRequestedRemovalAmounts)
+	{
+		OutRequestedRemovalAmounts->SetNumZeroed(InOutSurfaceCells.Num());
+	}
 
 	const FVector2D CellSizeCm(SurfaceSizeCm.X / static_cast<double>(GridDimensions.X),SurfaceSizeCm.Y / static_cast<double>(GridDimensions.Y));
 
@@ -254,6 +301,12 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 					static_cast<double>(ToolSpec.RemovalPerTravelCentimeter)
 					* TravelDistancePerSampleCm
 					* CoverageWeight;
+				if (OutRequestedRemovalAmounts
+					&& OutRequestedRemovalAmounts->IsValidIndex(CellIndex))
+				{
+					(*OutRequestedRemovalAmounts)[CellIndex] +=
+						static_cast<float>(RequestedRemovalAmount);
+				}
 
 				// 이미 깨끗한 셀에 작업량이 가해지면 모든 힘이 맨 벽면으로 전달
 				if (RemainingBeforeSample
@@ -360,6 +413,73 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 	}
 
 	return Result;
+}
+
+float FMD_ScrapeEvaluator::ApplyContaminationStampToGrid(
+	const FIntPoint& GridDimensions,
+	const TConstArrayView<float> RequestedRemovalAmounts,
+	const float StampRatio,
+	const TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+	TArray<FMD_ScrapeCellChange>& OutCellChanges)
+{
+	OutCellChanges.Reset();
+
+	const int64 ExpectedCellCount =
+		static_cast<int64>(GridDimensions.X)
+		* static_cast<int64>(GridDimensions.Y);
+	if (GridDimensions.X <= 0
+		|| GridDimensions.Y <= 0
+		|| ExpectedCellCount > MAX_int32
+		|| RequestedRemovalAmounts.Num() != ExpectedCellCount
+		|| InOutSurfaceCells.Num() != ExpectedCellCount
+		|| !FMath::IsFinite(StampRatio)
+		|| StampRatio <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	const float SafeStampRatio = FMath::Clamp(StampRatio, 0.0f, 1.0f);
+	float AddedContaminationAmount = 0.0f;
+	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)
+	{
+		const float RequestedRemovalAmount = RequestedRemovalAmounts[CellIndex];
+		if (!FMath::IsFinite(RequestedRemovalAmount)
+			|| RequestedRemovalAmount <= UE_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		FMD_ScrapeSurfaceCell& Cell = InOutSurfaceCells[CellIndex];
+		Cell.Normalize();
+		const float PreviousRemaining = Cell.RemainingContamination;
+		const float TargetRemaining = FMath::Clamp(
+			PreviousRemaining + RequestedRemovalAmount * SafeStampRatio,
+			0.0f,
+			1.0f);
+		if (TargetRemaining <= PreviousRemaining + UE_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		// 처음부터 깨끗했던 셀에도 새 오염을 만들 수 있도록 현재 최대량을 함께 확장한다.
+		Cell.InitialContamination = FMath::Max(
+			Cell.InitialContamination,
+			TargetRemaining);
+		Cell.RemainingContamination = TargetRemaining;
+
+		FMD_ScrapeCellChange& Change = OutCellChanges.AddDefaulted_GetRef();
+		Change.CellIndex = CellIndex;
+		Change.GridCoordinate = FIntPoint(
+			CellIndex % GridDimensions.X,
+			CellIndex / GridDimensions.X);
+		Change.RemovedAmount = 0.0f;
+		Change.RemainingAmountAfter = TargetRemaining;
+		Change.bBecameClean = false;
+
+		AddedContaminationAmount += TargetRemaining - PreviousRemaining;
+	}
+
+	return AddedContaminationAmount;
 }
 
 bool FMD_ScrapeEvaluator::IsEvaluationInputValid(

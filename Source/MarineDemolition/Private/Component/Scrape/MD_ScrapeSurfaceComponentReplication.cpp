@@ -26,14 +26,12 @@ void FMD_ReplicatedScrapeCellStateArray::SetOwner(
 	}
 }
 
-void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
-	const int32 CellIndex,
-	const float RemainingContamination)
+void FMD_ReplicatedScrapeCellStateArray::SetCellState(
+	const int32 CellIndex)
 {
 	if (!Owner
 		|| !Owner->HasAuthority()
-		|| !Owner->ContaminationCells.IsValidIndex(CellIndex)
-		|| !FMath::IsFinite(RemainingContamination))
+		|| !Owner->ContaminationCells.IsValidIndex(CellIndex))
 	{
 		return;
 	}
@@ -46,20 +44,36 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
 		return;
 	}
 
+	const FMD_ScrapeSurfaceCell& Cell = Owner->ContaminationCells[CellIndex];
 	const float InitialContamination = FMath::Clamp(
-		Owner->ContaminationCells[CellIndex].InitialContamination,
+		Cell.InitialContamination,
 		0.0f,
 		1.0f);
 	const float SafeRemaining = FMath::Clamp(
-		RemainingContamination,
+		Cell.RemainingContamination,
 		0.0f,
 		InitialContamination);
-	const bool bMatchesInitial = FMath::IsNearlyEqual(
-		SafeRemaining,
+	const float GeneratedInitial =
+		Owner->ContaminationGeneratedInitialAmounts.IsValidIndex(CellIndex)
+		? FMath::Clamp(
+			Owner->ContaminationGeneratedInitialAmounts[CellIndex],
+			0.0f,
+			1.0f)
+		: InitialContamination;
+	const bool bMatchesGeneratedState = FMath::IsNearlyEqual(
 		InitialContamination,
+		GeneratedInitial,
+		UE_SMALL_NUMBER)
+		&& FMath::IsNearlyEqual(
+		SafeRemaining,
+		GeneratedInitial,
 		UE_SMALL_NUMBER);
 	// 실제로 보내는 값은 양자화 결과다. 같은 바이트로 떨어지는 갱신은
 	// 네트워크로 내보내지 않는다.
+	const uint8 QuantizedInitial =
+		FMD_ScrapeReplicationCodec::QuantizeRemaining(
+			InitialContamination,
+			0.0f);
 	const uint8 QuantizedRemaining =
 		FMD_ScrapeReplicationCodec::QuantizeRemaining(
 			SafeRemaining,
@@ -69,7 +83,7 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
 	{
 		if (Items.IsValidIndex(*ExistingItemIndex))
 		{
-			if (bMatchesInitial)
+			if (bMatchesGeneratedState)
 			{
 				const int32 RemovedItemIndex = *ExistingItemIndex;
 				Items.RemoveAtSwap(RemovedItemIndex, 1, EAllowShrinking::No);
@@ -85,8 +99,10 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
 			}
 
 			FMD_ReplicatedScrapeCellState& Item = Items[*ExistingItemIndex];
-			if (Item.QuantizedRemainingContamination != QuantizedRemaining)
+			if (Item.QuantizedInitialContamination != QuantizedInitial
+				|| Item.QuantizedRemainingContamination != QuantizedRemaining)
 			{
+				Item.QuantizedInitialContamination = QuantizedInitial;
 				Item.QuantizedRemainingContamination = QuantizedRemaining;
 				MarkItemDirty(Item);
 			}
@@ -96,13 +112,14 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
 		CellToItemIndex.Remove(CellIndex);
 	}
 
-	if (bMatchesInitial)
+	if (bMatchesGeneratedState)
 	{
 		return;
 	}
 
 	const int32 NewItemIndex = Items.Emplace(
 		EncodedCellIndex,
+		QuantizedInitial,
 		QuantizedRemaining);
 	CellToItemIndex.Add(CellIndex, NewItemIndex);
 	MarkItemDirty(Items[NewItemIndex]);
@@ -192,18 +209,36 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 		}
 
 		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[StateCellIndex];
+		const float PreviousInitial = Cell.InitialContamination;
 		const float PreviousRemaining = Cell.RemainingContamination;
+		const float GeneratedInitial =
+			ContaminationGeneratedInitialAmounts.IsValidIndex(StateCellIndex)
+			? FMath::Clamp(
+				ContaminationGeneratedInitialAmounts[StateCellIndex],
+				0.0f,
+				1.0f)
+			: PreviousInitial;
+		const float ReceivedInitial = StateItem.GetInitialContamination();
 		const float ReceivedRemaining = StateItem.GetRemainingContamination();
+		const float TargetInitial = bResetToInitial
+			? GeneratedInitial
+			: (FMath::IsFinite(ReceivedInitial)
+				? FMath::Clamp(ReceivedInitial, 0.0f, 1.0f)
+				: GeneratedInitial);
 		const float TargetRemaining = bResetToInitial
-			? Cell.InitialContamination
+			? GeneratedInitial
 			: (FMath::IsFinite(ReceivedRemaining)
 				? FMath::Clamp(
 					ReceivedRemaining,
 					0.0f,
-					Cell.InitialContamination)
-				: Cell.InitialContamination);
+					TargetInitial)
+				: TargetInitial);
 
 		if (FMath::IsNearlyEqual(
+			PreviousInitial,
+			TargetInitial,
+			UE_SMALL_NUMBER)
+			&& FMath::IsNearlyEqual(
 			PreviousRemaining,
 			TargetRemaining,
 			UE_SMALL_NUMBER))
@@ -211,6 +246,7 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 			continue;
 		}
 
+		Cell.InitialContamination = TargetInitial;
 		Cell.RemainingContamination = TargetRemaining;
 
 		EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
@@ -291,9 +327,7 @@ void UMD_ScrapeSurfaceComponent::PublishContaminationChanges(
 	{
 		if (ContaminationCells.IsValidIndex(CellChange.CellIndex))
 		{
-			ReplicatedContaminationState.SetCellRemaining(
-				CellChange.CellIndex,
-				ContaminationCells[CellChange.CellIndex].RemainingContamination);
+			ReplicatedContaminationState.SetCellState(CellChange.CellIndex);
 		}
 	}
 

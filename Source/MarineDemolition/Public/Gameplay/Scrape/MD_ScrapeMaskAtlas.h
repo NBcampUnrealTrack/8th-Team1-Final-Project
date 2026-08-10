@@ -41,6 +41,15 @@ public:
 		int32 CombinedCellIndex,
 		int32& OutPixelIndex);
 
+	/**
+	 * 생성 당시보다 Initial이 커진 런타임 오염은 자기 최대량을 기준으로 표시한다.
+	 * 기존 오염은 이전과 같이 Remaining 절대값을 그대로 반환한다.
+	 */
+	static float CalculateRuntimeAwareVisualContamination(
+		float RemainingContamination,
+		float InitialContamination,
+		float GeneratedInitialContamination);
+
 	/** 셀의 현재 잔여 오염량을 0~255로 양자화한다. */
 	static bool TryQuantizeRemainingContamination(
 		float RemainingContamination,

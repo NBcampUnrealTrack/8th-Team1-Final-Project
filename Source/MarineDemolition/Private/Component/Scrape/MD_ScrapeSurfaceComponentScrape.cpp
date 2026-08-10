@@ -170,7 +170,38 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithToolSpec(
 	const FMD_ScrapeStroke& Stroke,
 	const FMD_ScrapeToolSpec& ToolSpec)
 {
+	float IgnoredRemovedCleanRatioDelta = 0.0f;
+	return ApplyLocalScrapeStrokeInternal(
+		Stroke,
+		ToolSpec,
+		0.0f,
+		IgnoredRemovedCleanRatioDelta);
+}
+
+
+FMD_ScrapeResult
+UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithContaminationStamp(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const float StampRatio,
+	float& OutRemovedCleanRatioDelta)
+{
+	return ApplyLocalScrapeStrokeInternal(
+		Stroke,
+		ToolSpec,
+		StampRatio,
+		OutRemovedCleanRatioDelta);
+}
+
+
+FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const float StampRatio,
+	float& OutRemovedCleanRatioDelta)
+{
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeStrokeTotal);
+	OutRemovedCleanRatioDelta = 0.0f;
 
 	if (!HasAuthority())
 	{
@@ -204,21 +235,79 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithToolSpec(
 	}
 
 	FMD_ScrapeResult Result;
+	TArray<float> RequestedRemovalAmounts;
 	{
 		SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeEvaluate);
-		Result = FMD_ScrapeEvaluator::ApplyStrokeToGrid(
-			Stroke,
-			ToolSpec,
-			ScrapeSettings,
-			ContaminationGridDimensions,
-			ResolvedContaminationSurfaceSizeCm,
-			FaceCells);
+		if (FMath::IsFinite(StampRatio) && StampRatio > 0.0f)
+		{
+			Result =
+				FMD_ScrapeEvaluator::ApplyStrokeToGridAndCaptureRequestedAmounts(
+					Stroke,
+					ToolSpec,
+					ScrapeSettings,
+					ContaminationGridDimensions,
+					ResolvedContaminationSurfaceSizeCm,
+					FaceCells,
+					RequestedRemovalAmounts);
+		}
+		else
+		{
+			Result = FMD_ScrapeEvaluator::ApplyStrokeToGrid(
+				Stroke,
+				ToolSpec,
+				ScrapeSettings,
+				ContaminationGridDimensions,
+				ResolvedContaminationSurfaceSizeCm,
+				FaceCells);
+		}
 	}
 
 	// 잘못된 입력은 상태를 변경하지 않음
 	if (!Result.bIsInputValid)
 	{
 		return Result;
+	}
+	OutRemovedCleanRatioDelta = Result.CleanRatioDelta;
+
+	TArray<FMD_ScrapeCellChange> StampChanges;
+	if (!RequestedRemovalAmounts.IsEmpty())
+	{
+		FMD_ScrapeEvaluator::ApplyContaminationStampToGrid(
+			ContaminationGridDimensions,
+			RequestedRemovalAmounts,
+			StampRatio,
+			FaceCells,
+			StampChanges);
+
+		// 결과의 제거량은 헤라 적재 계산용으로 보존하고, 진행도만 최종 도포 상태로 맞춘다.
+		Result.CleanRatioAfter =
+			FMD_ScrapeEvaluator::CalculateCleanRatio(FaceCells);
+		Result.CleanRatioDelta = FMath::Max(
+			0.0f,
+			Result.CleanRatioAfter - Result.CleanRatioBefore);
+		Result.bIsSurfaceFullyClean =
+			FMD_ScrapeEvaluator::IsSurfaceFullyClean(
+				FaceCells,
+				ScrapeSettings.CleanTolerance);
+
+		Result.NewlyCleanedCellCount = 0;
+		for (FMD_ScrapeCellChange& CellChange : Result.CellChanges)
+		{
+			if (!FaceCells.IsValidIndex(CellChange.CellIndex))
+			{
+				continue;
+			}
+
+			CellChange.RemainingAmountAfter =
+				FaceCells[CellChange.CellIndex].RemainingContamination;
+			CellChange.bBecameClean = CellChange.bBecameClean
+				&& CellChange.RemainingAmountAfter
+					<= ScrapeSettings.CleanTolerance;
+			if (CellChange.bBecameClean)
+			{
+				++Result.NewlyCleanedCellCount;
+			}
+		}
 	}
 
 	const int32 CellsPerFace = FaceCells.Num();
@@ -229,12 +318,22 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithToolSpec(
 			CellChange.CellIndex,
 			CellsPerFace);
 	}
+	for (FMD_ScrapeCellChange& CellChange : StampChanges)
+	{
+		CellChange.CellIndex = FMD_ScrapeSurfaceLayout::ToCombinedCellIndex(
+			Stroke.SurfaceFace,
+			CellChange.CellIndex,
+			CellsPerFace);
+	}
+
+	TArray<FMD_ScrapeCellChange> SurfaceChanges = Result.CellChanges;
+	SurfaceChanges.Append(StampChanges);
 
 	// 스트로크는 한 면만 건드리므로 그 면만 다시 계산한다.
 	RefreshContaminationCleanRatioCache(Stroke.SurfaceFace);
-	UpdateContaminationMask(Result.CellChanges);
-	UpdateContaminationVisualization(Result.CellChanges);
-	PublishContaminationChanges(Result.CellChanges);
+	UpdateContaminationMask(SurfaceChanges);
+	UpdateContaminationVisualization(SurfaceChanges);
+	PublishContaminationChanges(SurfaceChanges);
 
 	// 기획 02 §1 규칙 3: 긁어낸 오염물은 월드 물리 오브젝트로 떨어진다.
 	// 긁기가 끝난 지점에 떨군다. 스트로크는 짧아서 시작점과 큰 차이가 없다.
@@ -252,6 +351,10 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithToolSpec(
 	{
 		bContaminationCompletionBroadcast = true;
 		OnContaminationFullyRemoved.Broadcast(this);
+	}
+	else if (!bIsFullyRemoved)
+	{
+		bContaminationCompletionBroadcast = false;
 	}
 
 	return Result;

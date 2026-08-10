@@ -24,6 +24,22 @@ namespace MD_ScrapeSurfaceComponentInternal
 	const FName ContaminationMaskUFlipParameterName(TEXT("MaskUFlip"));
 	const FName ContaminationMaskHalfTexelUParameterName(TEXT("MaskHalfTexelU"));
 	const FName ContaminationMaskHalfTexelVParameterName(TEXT("MaskHalfTexelV"));
+	const FName ContaminationPatchUVScaleUParameterName(TEXT("PatchUVScaleU"));
+	const FName ContaminationPatchUVOffsetUParameterName(TEXT("PatchUVOffsetU"));
+	const FName ContaminationPatchUVScaleVParameterName(TEXT("PatchUVScaleV"));
+	const FName ContaminationPatchUVOffsetVParameterName(TEXT("PatchUVOffsetV"));
+	const FName ContaminationSurfaceWidthParameterName(TEXT("SurfaceWidthCm"));
+	const FName ContaminationSurfaceHeightParameterName(TEXT("SurfaceHeightCm"));
+	const FName ContaminationDetailTileWorldSizeParameterName(
+		TEXT("DetailTileWorldSizeCm"));
+	const FName ContaminationDecalProjectionDirectionParameterName(
+		TEXT("DecalProjectionDirectionWS"));
+	const FName ContaminationSurfaceOriginParameterName(
+		TEXT("SurfaceOriginWS"));
+	const FName ContaminationSurfaceTangentUParameterName(
+		TEXT("SurfaceTangentUWS"));
+	const FName ContaminationSurfaceTangentVParameterName(
+		TEXT("SurfaceTangentVWS"));
 }
 
 UMD_ScrapeSurfaceComponent::UMD_ScrapeSurfaceComponent()
@@ -52,6 +68,10 @@ UMD_ScrapeSurfaceComponent::UMD_ScrapeSurfaceComponent()
 	ContaminationDecalDepthFitMarginCm = 1.0f;
 	ContaminationDecalSurfaceOffsetCm = 0.05f;
 	ContaminationDecalEdgeInsetCm = 2.0f;
+	// 패치 하나는 평면 한 장이므로 구간이 넓을수록 곡면을 못 따라가고 각도 마스크에
+	// 걸려 사라진다. Wall_Inter_A 기준으로 150 cm는 앞면의 87.6%, 50 cm는 100%를 덮는다.
+	ContaminationDecalPatchWidthCm = 50.0f;
+	ContaminationDetailTileWorldSizeCm = 150.0f;
 	ContaminationDecalSortOrder = 0;
 
 	ResolvedContaminationSurfaceSizeCm = FVector2D::ZeroVector;
@@ -111,6 +131,7 @@ void UMD_ScrapeSurfaceComponent::ConfigureExternalComponents(
 	UDecalComponent* const InFrontContaminationDecal,
 	UDecalComponent* const InBackContaminationDecal)
 {
+	DestroyAdditionalContaminationDecalPatches();
 	SurfaceMesh = InSurfaceMesh;
 	ContaminationOverlay = InContaminationOverlay;
 	FrontContaminationDecal = InFrontContaminationDecal;
@@ -221,6 +242,8 @@ void UMD_ScrapeSurfaceComponent::EnsureVisualizationComponents()
 
 void UMD_ScrapeSurfaceComponent::DestroyOwnedVisualizationComponents()
 {
+	DestroyAdditionalContaminationDecalPatches();
+
 	if (bOwnsContaminationOverlay && ContaminationOverlay)
 	{
 		ContaminationOverlay->DestroyComponent();
@@ -286,6 +309,7 @@ void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 {
 	SetContaminationDecalsVisible(false);
 	ReleaseContaminationMask();
+	DestroyAdditionalContaminationDecalPatches();
 	FrontContaminationDecalMID = nullptr;
 	BackContaminationDecalMID = nullptr;
 }

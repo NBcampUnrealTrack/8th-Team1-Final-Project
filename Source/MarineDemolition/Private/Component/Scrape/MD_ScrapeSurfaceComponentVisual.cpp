@@ -21,18 +21,52 @@
 
 using namespace MD_ScrapeSurfaceComponentInternal;
 
+FMD_ScrapeSurfaceCell
+UMD_ScrapeSurfaceComponent::MakeContaminationMaskCell(
+	const int32 CellIndex) const
+{
+	FMD_ScrapeSurfaceCell MaskCell;
+	MaskCell.InitialContamination = 1.0f;
+	MaskCell.RemainingContamination = 0.0f;
+	if (!ContaminationCells.IsValidIndex(CellIndex))
+	{
+		return MaskCell;
+	}
+
+	const FMD_ScrapeSurfaceCell& SourceCell = ContaminationCells[CellIndex];
+	const float GeneratedInitial =
+		ContaminationGeneratedInitialAmounts.IsValidIndex(CellIndex)
+		? ContaminationGeneratedInitialAmounts[CellIndex]
+		: SourceCell.InitialContamination;
+	MaskCell.RemainingContamination =
+		FMD_ScrapeMaskAtlas::CalculateRuntimeAwareVisualContamination(
+			SourceCell.RemainingContamination,
+			SourceCell.InitialContamination,
+			GeneratedInitial);
+	return MaskCell;
+}
+
 bool UMD_ScrapeSurfaceComponent::InitializeContaminationMask()
 {
 	ReleaseContaminationMask();
 
 	FIntPoint AtlasDimensions = FIntPoint::ZeroValue;
 	TArray<uint8> AtlasPixels;
+	TArray<FMD_ScrapeSurfaceCell> MaskCells;
+	MaskCells.Reserve(ContaminationCells.Num());
+	for (int32 CellIndex = 0;
+		CellIndex < ContaminationCells.Num();
+		++CellIndex)
+	{
+		MaskCells.Add(MakeContaminationMaskCell(CellIndex));
+	}
+
 	if (!FMD_ScrapeMaskAtlas::TryCalculateAtlasDimensions(
 			ContaminationGridDimensions,
 			AtlasDimensions)
 		|| !FMD_ScrapeMaskAtlas::TryBuildAtlasBuffer(
 			ContaminationGridDimensions,
-			MakeArrayView(ContaminationCells),
+			MakeArrayView(MaskCells),
 			AtlasPixels))
 	{
 		return false;
@@ -151,11 +185,13 @@ void UMD_ScrapeSurfaceComponent::UpdateContaminationMask(
 
 		const uint8 PreviousMaskValue =
 			ContaminationMaskAtlasPixels[PixelIndex];
+		const FMD_ScrapeSurfaceCell MaskCell =
+			MakeContaminationMaskCell(CellChange.CellIndex);
 		FIntPoint PixelCoordinate = FIntPoint::NoneValue;
 		if (!FMD_ScrapeMaskAtlas::TryUpdateAtlasPixel(
 				ContaminationGridDimensions,
 				CellChange.CellIndex,
-				ContaminationCells[CellChange.CellIndex],
+				MaskCell,
 				ContaminationMaskAtlasPixels,
 				PixelCoordinate)
 			|| PreviousMaskValue
@@ -237,6 +273,7 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecals()
 {
 	bContaminationDecalsConfigured = false;
 	SetContaminationDecalsVisible(false);
+	DestroyAdditionalContaminationDecalPatches();
 
 	if (!bShowContaminationDecals
 		|| !bContaminationSurfaceInitialized
@@ -262,16 +299,19 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecals()
 	// 두 면의 투영 깊이는 서로 영향을 주므로 배치 전에 함께 계산한다.
 	ResolveContaminationDecalDepths();
 
-	const bool bConfiguredFront = ConfigureContaminationDecalForFace(
+	const bool bConfiguredFront = ConfigureContaminationDecalPatchesForFace(
 		FrontContaminationDecal,
 		EMD_ScrapeSurfaceFace::Front,
-		FrontContaminationDecalMID);
-	const bool bConfiguredBack = ConfigureContaminationDecalForFace(
+		FrontContaminationDecalPatches,
+		FrontContaminationDecalPatchMIDs);
+	const bool bConfiguredBack = ConfigureContaminationDecalPatchesForFace(
 		BackContaminationDecal,
 		EMD_ScrapeSurfaceFace::Back,
-		BackContaminationDecalMID);
+		BackContaminationDecalPatches,
+		BackContaminationDecalPatchMIDs);
 	if (!bConfiguredFront || !bConfiguredBack)
 	{
+		DestroyAdditionalContaminationDecalPatches();
 		UE_LOG(
 			LogTemp,
 			Warning,
@@ -279,6 +319,9 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecals()
 			*GetName());
 		return false;
 	}
+
+	FrontContaminationDecalMID = FrontContaminationDecalPatchMIDs[0];
+	BackContaminationDecalMID = BackContaminationDecalPatchMIDs[0];
 
 	bContaminationDecalsConfigured = true;
 	SetContaminationDecalsVisible(true);
@@ -380,39 +423,15 @@ void UMD_ScrapeSurfaceComponent::ResolveContaminationDecalDepths()
 }
 
 
-bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalForFace(
+bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalPatch(
 	UDecalComponent* DecalComponent,
-	const EMD_ScrapeSurfaceFace Face,
+	const FMD_ScrapeDecalFaceLayout& Layout,
 	TObjectPtr<UMaterialInstanceDynamic>& InOutMID)
 {
-	if (!DecalComponent || !SurfaceMesh || !ContaminationDecalMaterial)
+	if (!DecalComponent || !ContaminationDecalMaterial)
 	{
 		return false;
 	}
-
-	float& ResolvedDepthCm = Face == EMD_ScrapeSurfaceFace::Front
-		? ResolvedFrontDecalDepthCm
-		: ResolvedBackDecalDepthCm;
-	FMD_ScrapeDecalFaceLayout Layout;
-	if (!FMD_ScrapeDecalLayout::TryCalculateFaceLayout(
-			Face,
-			ResolvedContaminationSurfaceNormalAxis,
-			ResolvedContaminationSurfaceSizeCm,
-			ContaminationMeshLocalBoundsMinimum,
-			ContaminationMeshLocalBoundsMaximum,
-			SurfaceMesh->GetComponentScale().GetAbs(),
-			ResolvedDepthCm,
-			ContaminationDecalSurfaceOffsetCm,
-			ContaminationDecalEdgeInsetCm,
-			Layout))
-	{
-		return false;
-	}
-
-	// 두께·표면 크기 제한까지 적용된 최종값을 에디터 Details에서 확인할 수 있게 남긴다.
-	ResolvedDepthCm = static_cast<float>(Layout.AppliedInwardDepthCm);
-	ResolvedContaminationDecalEdgeInsetCm =
-		static_cast<float>(Layout.AppliedEdgeInsetCm);
 
 	DecalComponent->SetAbsolute(false, false, true);
 	DecalComponent->SetRelativeScale3D(FVector::OneVector);
@@ -462,24 +481,137 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalForFace(
 	InOutMID->SetScalarParameterValue(
 		ContaminationMaskHalfTexelVParameterName,
 		MaskHalfTexelUV.Y);
+	InOutMID->SetScalarParameterValue(
+		ContaminationPatchUVScaleUParameterName,
+		Layout.PatchUVScaleU);
+	InOutMID->SetScalarParameterValue(
+		ContaminationPatchUVOffsetUParameterName,
+		Layout.PatchUVOffsetU);
+	InOutMID->SetScalarParameterValue(
+		ContaminationPatchUVScaleVParameterName,
+		Layout.PatchUVScaleV);
+	InOutMID->SetScalarParameterValue(
+		ContaminationPatchUVOffsetVParameterName,
+		Layout.PatchUVOffsetV);
+	InOutMID->SetScalarParameterValue(
+		ContaminationSurfaceWidthParameterName,
+		static_cast<float>(ResolvedContaminationSurfaceSizeCm.X));
+	InOutMID->SetScalarParameterValue(
+		ContaminationSurfaceHeightParameterName,
+		static_cast<float>(ResolvedContaminationSurfaceSizeCm.Y));
+	const float DetailTileWorldSizeCm = FMath::IsFinite(
+		ContaminationDetailTileWorldSizeCm)
+		? FMath::Max(ContaminationDetailTileWorldSizeCm, 1.0f)
+		: 150.0f;
+	InOutMID->SetScalarParameterValue(
+		ContaminationDetailTileWorldSizeParameterName,
+		DetailTileWorldSizeCm);
+	const FVector ProjectionDirectionWS = DecalComponent
+		->GetComponentTransform()
+		.TransformVectorNoScale(FVector::ForwardVector)
+		.GetSafeNormal();
+	InOutMID->SetVectorParameterValue(
+		ContaminationDecalProjectionDirectionParameterName,
+		FLinearColor(
+			static_cast<float>(ProjectionDirectionWS.X),
+			static_cast<float>(ProjectionDirectionWS.Y),
+			static_cast<float>(ProjectionDirectionWS.Z),
+			0.0f));
+	ApplyContaminationDetailWorldFrame(*InOutMID);
 	DecalComponent->MarkRenderStateDirty();
 	return true;
+}
+
+
+void UMD_ScrapeSurfaceComponent::ApplyContaminationDetailWorldFrame(
+	UMaterialInstanceDynamic& DecalMID) const
+{
+	FVector HorizontalAxisLocal;
+	FVector FrontNormalLocal;
+	FVector VerticalAxisLocal;
+	if (!SurfaceMesh
+		|| !FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
+			ResolvedContaminationSurfaceNormalAxis,
+			HorizontalAxisLocal,
+			FrontNormalLocal,
+			VerticalAxisLocal))
+	{
+		return;
+	}
+
+	const FTransform MeshTransform = SurfaceMesh->GetComponentTransform();
+	const FVector HorizontalAxisWorld =
+		MeshTransform.TransformVector(HorizontalAxisLocal).GetSafeNormal();
+	const FVector VerticalAxisWorld =
+		MeshTransform.TransformVector(VerticalAxisLocal).GetSafeNormal();
+	if (HorizontalAxisWorld.IsNearlyZero()
+		|| VerticalAxisWorld.IsNearlyZero())
+	{
+		return;
+	}
+
+	// 무늬 좌표의 원점은 표면 중심이다. 벽 하나 안에서만 일관되면 되고, 앞/뒤 패치가
+	// 전부 같은 값을 받으므로 어느 패치가 칠하든 같은 월드 지점은 같은 무늬를 얻는다.
+	const FVector SurfaceOriginWorld =
+		MeshTransform.TransformPosition(ContaminationSurfaceCenterLocal);
+	auto SetVectorParameter = [&DecalMID](
+		const FName ParameterName,
+		const FVector& Value)
+	{
+		DecalMID.SetVectorParameterValue(
+			ParameterName,
+			FLinearColor(
+				static_cast<float>(Value.X),
+				static_cast<float>(Value.Y),
+				static_cast<float>(Value.Z),
+				0.0f));
+	};
+
+	SetVectorParameter(
+		ContaminationSurfaceOriginParameterName,
+		SurfaceOriginWorld);
+	SetVectorParameter(
+		ContaminationSurfaceTangentUParameterName,
+		HorizontalAxisWorld);
+	SetVectorParameter(
+		ContaminationSurfaceTangentVParameterName,
+		VerticalAxisWorld);
 }
 
 
 void UMD_ScrapeSurfaceComponent::SetContaminationDecalsVisible(
 	const bool bVisible)
 {
-	if (FrontContaminationDecal)
+	auto SetFaceVisible = [bVisible](
+		const TArray<TObjectPtr<UDecalComponent>>& PatchComponents,
+		UDecalComponent* BaseDecalComponent)
 	{
-		FrontContaminationDecal->SetVisibility(bVisible);
-		FrontContaminationDecal->SetHiddenInGame(!bVisible);
-	}
-	if (BackContaminationDecal)
-	{
-		BackContaminationDecal->SetVisibility(bVisible);
-		BackContaminationDecal->SetHiddenInGame(!bVisible);
-	}
+		if (PatchComponents.IsEmpty())
+		{
+			if (BaseDecalComponent)
+			{
+				BaseDecalComponent->SetVisibility(bVisible);
+				BaseDecalComponent->SetHiddenInGame(!bVisible);
+			}
+			return;
+		}
+
+		for (UDecalComponent* const PatchComponent : PatchComponents)
+		{
+			if (PatchComponent)
+			{
+				PatchComponent->SetVisibility(bVisible);
+				PatchComponent->SetHiddenInGame(!bVisible);
+			}
+		}
+	};
+
+	SetFaceVisible(
+		FrontContaminationDecalPatches,
+		FrontContaminationDecal);
+	SetFaceVisible(
+		BackContaminationDecalPatches,
+		BackContaminationDecal);
 }
 
 
@@ -526,8 +658,34 @@ void UMD_ScrapeSurfaceComponent::RefreshContaminationDecalMaterialParameters()
 			MaskHalfTexelUV.Y);
 	};
 
-	RefreshMID(FrontContaminationDecalMID, 0.0f, 1.0f);
-	RefreshMID(BackContaminationDecalMID, 0.5f, 0.0f);
+	auto RefreshFaceMIDs = [&RefreshMID](
+		const TArray<TObjectPtr<UMaterialInstanceDynamic>>& PatchMIDs,
+		UMaterialInstanceDynamic* BaseMID,
+		const float VOffset,
+		const float UFlip)
+	{
+		if (PatchMIDs.IsEmpty())
+		{
+			RefreshMID(BaseMID, VOffset, UFlip);
+			return;
+		}
+
+		for (UMaterialInstanceDynamic* const PatchMID : PatchMIDs)
+		{
+			RefreshMID(PatchMID, VOffset, UFlip);
+		}
+	};
+
+	RefreshFaceMIDs(
+		FrontContaminationDecalPatchMIDs,
+		FrontContaminationDecalMID,
+		0.0f,
+		1.0f);
+	RefreshFaceMIDs(
+		BackContaminationDecalPatchMIDs,
+		BackContaminationDecalMID,
+		0.5f,
+		0.0f);
 }
 
 

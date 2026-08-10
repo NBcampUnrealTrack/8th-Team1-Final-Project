@@ -29,4 +29,23 @@ namespace MD_ScrapeSurfaceComponentInternal
 	extern const FName ContaminationMaskUFlipParameterName;
 	extern const FName ContaminationMaskHalfTexelUParameterName;
 	extern const FName ContaminationMaskHalfTexelVParameterName;
+	extern const FName ContaminationPatchUVScaleUParameterName;
+	extern const FName ContaminationPatchUVOffsetUParameterName;
+	extern const FName ContaminationPatchUVScaleVParameterName;
+	extern const FName ContaminationPatchUVOffsetVParameterName;
+	extern const FName ContaminationSurfaceWidthParameterName;
+	extern const FName ContaminationSurfaceHeightParameterName;
+	extern const FName ContaminationDetailTileWorldSizeParameterName;
+	extern const FName ContaminationDecalProjectionDirectionParameterName;
+
+	/**
+	 * 장식용 오염 무늬를 패치 UV가 아니라 벽 표면의 월드 좌표로 만들기 위한 기준계.
+	 *
+	 * 패치마다 상자 크기와 방향이 다르므로 데칼 로컬 UV로 무늬를 만들면 패치마다
+	 * 무늬 밀도가 달라지고 경계에서 끊긴다. 세 값은 한 벽의 모든 패치가 공유하므로
+	 * 어떤 패치가 칠하든 같은 월드 지점은 같은 무늬 좌표를 얻는다.
+	 */
+	extern const FName ContaminationSurfaceOriginParameterName;
+	extern const FName ContaminationSurfaceTangentUParameterName;
+	extern const FName ContaminationSurfaceTangentVParameterName;
 }

@@ -70,6 +70,36 @@ public:
 		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells);
 
 	/**
+	 * 일반 제거 판정과 함께 헤라 경로가 각 셀에 요청한 작업량을 기록한다.
+	 *
+	 * 오염이 이미 없는 셀도 경로 기록에는 포함된다. 따라서 포화 헤라가
+	 * 깨끗한 곳을 지나갈 때도 같은 모양의 새 오염 자국을 만들 수 있다.
+	 */
+	static FMD_ScrapeResult ApplyStrokeToGridAndCaptureRequestedAmounts(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FMD_ScrapeSettings& Settings,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		TArray<float>& OutRequestedRemovalAmounts);
+
+	/**
+	 * 캡처한 헤라 경로를 새 오염 자국으로 도포한다.
+	 *
+	 * 기존 오염의 과거 상태를 복원하지 않는다. 현재 셀 값 위에
+	 * RequestedRemovalAmounts * StampRatio만큼 새 오염을 더한다.
+	 *
+	 * @return 실제로 추가된 오염량의 합계
+	 */
+	static float ApplyContaminationStampToGrid(
+		const FIntPoint& GridDimensions,
+		TConstArrayView<float> RequestedRemovalAmounts,
+		float StampRatio,
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		TArray<FMD_ScrapeCellChange>& OutCellChanges);
+
+	/**
 	 * ApplyStrokeToGrid를 실행할 수 있는 입력인지 부작용 없이 검사
 	 *
 	 * @param OutErrorMessage
@@ -119,6 +149,15 @@ public:
 private:
 	/** 정적 함수만 제공하는 유틸리티 클래스이므로 인스턴스 생성 금지 */
 	FMD_ScrapeEvaluator() = delete;
+
+	static FMD_ScrapeResult ApplyStrokeToGridInternal(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FMD_ScrapeSettings& Settings,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		TArray<float>* OutRequestedRemovalAmounts);
 
 	/**
 	 * 원형 헤라 브러시가 한 셀을 얼마나 덮는지 0~1 가중치로 근사

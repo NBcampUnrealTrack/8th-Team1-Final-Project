@@ -15,6 +15,7 @@ class UPrimitiveComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 class UTexture2D;
+struct FMD_ScrapeDecalFaceLayout;
 class AMD_Barnacle;
 class AMD_ContaminationItem;
 class UMD_ScrapeSurfaceComponent;
@@ -28,7 +29,7 @@ struct FMD_ScrapeSurfaceObstacle
 	float RadiusCm = 0.0f;
 };
 
-/** A compact replicated cell delta: uint16 cell index plus uint8 remaining amount. */
+/** A compact replicated cell delta: uint16 index plus uint8 initial/remaining amounts. */
 USTRUCT()
 struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 	: public FFastArraySerializerItem
@@ -37,14 +38,17 @@ struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 
 	FMD_ReplicatedScrapeCellState()
 		: EncodedCellIndex(FMD_ScrapeReplicationCodec::InvalidCellIndex)
+		, QuantizedInitialContamination(0)
 		, QuantizedRemainingContamination(0)
 	{
 	}
 
 	FMD_ReplicatedScrapeCellState(
 		const uint16 InEncodedCellIndex,
+		const uint8 InQuantizedInitialContamination,
 		const uint8 InQuantizedRemainingContamination)
 		: EncodedCellIndex(InEncodedCellIndex)
+		, QuantizedInitialContamination(InQuantizedInitialContamination)
 		, QuantizedRemainingContamination(InQuantizedRemainingContamination)
 	{
 	}
@@ -60,8 +64,17 @@ struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 			QuantizedRemainingContamination);
 	}
 
+	float GetInitialContamination() const
+	{
+		return FMD_ScrapeReplicationCodec::DequantizeRemaining(
+			QuantizedInitialContamination);
+	}
+
 	UPROPERTY()
 	uint16 EncodedCellIndex;
+
+	UPROPERTY()
+	uint8 QuantizedInitialContamination;
 
 	UPROPERTY()
 	uint8 QuantizedRemainingContamination;
@@ -86,7 +99,7 @@ public:
 	}
 
 	void SetOwner(UMD_ScrapeSurfaceComponent* InOwner);
-	void SetCellRemaining(int32 CellIndex, float RemainingContamination);
+	void SetCellState(int32 CellIndex);
 	void ResetState();
 
 	const TArray<FMD_ReplicatedScrapeCellState>& GetItems() const
@@ -204,11 +217,34 @@ public:
 		return BackContaminationDecal.Get();
 	}
 
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface|Decal")
+	int32 GetFrontContaminationDecalPatchCount() const
+	{
+		return FrontContaminationDecalPatches.IsEmpty()
+			? (FrontContaminationDecal ? 1 : 0)
+			: FrontContaminationDecalPatches.Num();
+	}
+
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface|Decal")
+	int32 GetBackContaminationDecalPatchCount() const
+	{
+		return BackContaminationDecalPatches.IsEmpty()
+			? (BackContaminationDecal ? 1 : 0)
+			: BackContaminationDecalPatches.Num();
+	}
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
 		Category = "MD|Scrape Surface")
 	FMD_ScrapeResult ApplyLocalScrapeStrokeWithToolSpec(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec);
+
+	/** 서버에서 일반 제거 후 같은 헤라 경로를 새 오염 데칼 자국으로 도포한다. */
+	FMD_ScrapeResult ApplyLocalScrapeStrokeWithContaminationStamp(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		float StampRatio,
+		float& OutRemovedCleanRatioDelta);
 
 	bool TryGetScrapeSurfacePositionFromHit(
 		const FHitResult& Hit,
@@ -385,6 +421,18 @@ protected:
 		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
 	float ContaminationDecalEdgeInsetCm;
 
+	/** Target horizontal width of one physical decal projection patch. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,
+		Category = "MD|Scrape Surface|Decal",
+		meta = (ClampMin = "1.0", UIMin = "25.0", Units = "cm"))
+	float ContaminationDecalPatchWidthCm;
+
+	/** Physical size represented by one repeat of the grime detail textures. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,
+		Category = "MD|Scrape Surface|Decal",
+		meta = (ClampMin = "1.0", UIMin = "25.0", Units = "cm"))
+	float ContaminationDetailTileWorldSizeCm;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly,
 		Category = "MD|Scrape Surface|Decal")
 	int32 ContaminationDecalSortOrder;
@@ -400,6 +448,7 @@ private:
 	static constexpr int32 MaximumContaminationGridAxis = 256;
 	static constexpr float MinimumContaminationFaceNormalDot = 0.5f;
 	static constexpr float ScrapeObstacleContactMarginCm = 0.05f;
+	static constexpr int32 MaximumContaminationDecalPatchesPerFace = 32;
 
 	bool HasAuthority() const;
 	void ResolveSurfaceMeshFromOwner();
@@ -431,6 +480,14 @@ private:
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
+	TArray<TObjectPtr<UDecalComponent>> FrontContaminationDecalPatches;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
+		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
+	TArray<TObjectPtr<UDecalComponent>> BackContaminationDecalPatches;
+
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
+		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UTexture2D> ContaminationMaskTexture;
 
 	TArray<uint8> ContaminationMaskAtlasPixels;
@@ -441,6 +498,13 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> BackContaminationDecalMID;
+
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> FrontContaminationDecalPatchMIDs;
+
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMaterialInstanceDynamic>> BackContaminationDecalPatchMIDs;
 
 	bool bContaminationDecalsConfigured;
 
@@ -490,6 +554,11 @@ private:
 		EMD_ScrapeSurfaceFace Face);
 	TConstArrayView<FMD_ScrapeSurfaceCell> GetContaminationCellsForFace(
 		EMD_ScrapeSurfaceFace Face) const;
+	FMD_ScrapeResult ApplyLocalScrapeStrokeInternal(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		float StampRatio,
+		float& OutRemovedCleanRatioDelta);
 
 	void RefreshContaminationCleanRatioCache();
 	void RefreshContaminationCleanRatioCache(EMD_ScrapeSurfaceFace Face);
@@ -500,15 +569,30 @@ private:
 		float BaseInitialContamination);
 	bool InitializeContaminationMask();
 	void ReleaseContaminationMask();
+	FMD_ScrapeSurfaceCell MakeContaminationMaskCell(int32 CellIndex) const;
 	void UpdateContaminationMask(
 		const TArray<FMD_ScrapeCellChange>& CellChanges);
 	bool UploadContaminationMaskRegion(const FIntRect& AtlasRegion);
 	void ResolveContaminationDecalDepths();
 	bool ConfigureContaminationDecals();
-	bool ConfigureContaminationDecalForFace(
-		UDecalComponent* DecalComponent,
+	bool ConfigureContaminationDecalPatchesForFace(
+		UDecalComponent* BaseDecalComponent,
 		EMD_ScrapeSurfaceFace Face,
+		TArray<TObjectPtr<UDecalComponent>>& OutPatchComponents,
+		TArray<TObjectPtr<UMaterialInstanceDynamic>>& OutPatchMIDs);
+	bool ConfigureContaminationDecalPatch(
+		UDecalComponent* DecalComponent,
+		const FMD_ScrapeDecalFaceLayout& Layout,
 		TObjectPtr<UMaterialInstanceDynamic>& InOutMID);
+	void ApplyContaminationDetailWorldFrame(
+		UMaterialInstanceDynamic& DecalMID) const;
+	UDecalComponent* CreateAdditionalContaminationDecalPatch(
+		EMD_ScrapeSurfaceFace Face,
+		int32 PatchIndex);
+	void DestroyAdditionalContaminationDecalPatches();
+	bool TryFitContaminationDecalPatchToSurface(
+		EMD_ScrapeSurfaceFace Face,
+		FMD_ScrapeDecalFaceLayout& InOutLayout) const;
 	void SetContaminationDecalsVisible(bool bVisible);
 	void RefreshContaminationDecalMaterialParameters();
 	void InitializeContaminationVisualization();
