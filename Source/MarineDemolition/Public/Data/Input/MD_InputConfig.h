@@ -32,6 +32,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> SwapEquipmentAction;
 
+	// 핫바 슬롯 숫자키로 직접 선택.
+	// 배열로 핫바 슬롯 증감.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TArray<TObjectPtr<UInputAction>> HotbarSlotActions;
+
 	//UPROPERTY(EditDefaultsOnly, Category = "Input")
 	//TObjectPtr<UInputAction> WallCutAction;
 
