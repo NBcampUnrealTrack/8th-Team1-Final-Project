@@ -125,7 +125,14 @@ void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData)
         return;
     }
 
-    SaveSlotManager->OnTryStartGameWithGameData(GameData);
+    // 새 게임 또는 저장 데이터 적용 작업이 준비된 경우에만 세션 시작 절차로 진입하는 처리
+    const bool bWasGameDataPrepared = SaveSlotManager->OnTryStartGameWithGameData(GameData);
+    if (bWasGameDataPrepared == false)
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 검증 실패로 세션 시작을 취소합니다."), *UE_CALL_LOCATIONINFO);
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
 
     StartGameInternal(GameData.MapPackagePath);
 }

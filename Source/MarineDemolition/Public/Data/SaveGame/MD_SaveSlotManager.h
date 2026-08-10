@@ -1,4 +1,4 @@
-﻿// 프로젝트 설정의 저작권 안내 문구를 사용한다.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -12,7 +12,7 @@ DECLARE_DYNAMIC_DELEGATE_OneParam(FOnSaveMDGameDataComplete, bool, bWasSuccessfu
 // 게임 데이터 비동기 제거 완료 시 성공 여부를 호출부에 전달한다.
 DECLARE_DYNAMIC_DELEGATE_OneParam(FOnRemoveMDGameDataComplete, bool, bWasSuccessful);
 // 게임 데이터 목록을 비동기 로드 완료 시 데이터 목록과 함께 성공 여부를 호출부에 전달한다.
-DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnLoadMDGameDataListComplete, const TArray<FMD_GameData>&, GameDataList , bool, bWasSuccessful);
+DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnLoadMDGameDataListComplete, const TArray<FMD_GameData>&, GameDataList, bool, bWasSuccessful);
 
 // 맵 이동 이후 실행할 게임 데이터 초기화 방식을 구분하는 상태
 enum class EMD_PendingGameDataOperation : uint8
@@ -108,8 +108,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool LoadPlayerData(const APlayerState* PlayerState) const;
 
+	// 새 게임 또는 검증된 저장 데이터의 맵 적용 작업을 예약하고 성공 여부를 반환하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
-	void OnTryStartGameWithGameData(const FMD_GameData& GameData);
+	bool OnTryStartGameWithGameData(const FMD_GameData& GameData);
 
 	// 현재 기록되고 있던 게임 데이터를 초기화하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")

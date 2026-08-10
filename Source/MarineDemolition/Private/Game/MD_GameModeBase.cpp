@@ -574,6 +574,14 @@ void AMD_GameModeBase::InitializeExpeditionDay()
     {
         SyncMerchantToGameDay(GS->GetCurrentDay());
     }
+
+    // 월드 복원과 상인 퀘스트 일차 동기화가 끝난 경계 상태만 자동 저장하는 처리
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true)
+    {
+        SaveSlotManager->SaveGameData(TEXT("Auto"), true);
+    }
 }
 
 void AMD_GameModeBase::HandleGameDayChanged(int32 NewDay)
@@ -667,14 +675,6 @@ void AMD_GameModeBase::RestoreDaySnapshot()
         GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
     {
         Persistence->RestoreSnapshot(GetWorld());
-    }
-
-    // 게임 자동 저장 실행
-    UGameInstance* GameInstance = GetGameInstance();
-    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-    if (IsValid(SaveSlotManager) == true)
-    {
-        SaveSlotManager->SaveGameData(TEXT("Auto"), true);
     }
 }
 
