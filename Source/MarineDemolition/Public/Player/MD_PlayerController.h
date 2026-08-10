@@ -89,6 +89,16 @@ private:
 	UFUNCTION(Exec)
 	void MD_DumpQuests();
 
+public:
+	/**
+	 * 게임플레이 HUD(상태창·핫바)를 숨기거나 다시 보여준다.
+	 *
+	 * 상인 메뉴처럼 화면을 덮는 UI가 열릴 때 HUD가 겹쳐 보이는 것을 막는다.
+	 * 위젯을 파괴하지 않고 가시성만 바꾸므로 닫으면 이전 상태가 그대로 돌아온다.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "MD|UI")
+	void SetGameplayHUDVisible(bool bVisible);
+
 protected:
 	virtual void BeginPlay() override;
 

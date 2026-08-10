@@ -264,6 +264,24 @@ void AMD_PlayerController::BeginPlay()
 	EquipHotbarWidgetInstance->AddToViewport();
 }
 
+void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
+{
+	// Collapsed로 두면 레이아웃 계산에서도 빠지고, 되돌릴 때 SelfHitTestInvisible이라
+	// HUD가 마우스 입력을 가로채지 않는다 (원래 AddToViewport 기본 동작과 동일).
+	const ESlateVisibility Target =
+		bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed;
+
+	if (IsValid(HUDWidgetInstance))
+	{
+		HUDWidgetInstance->SetVisibility(Target);
+	}
+
+	if (IsValid(EquipHotbarWidgetInstance))
+	{
+		EquipHotbarWidgetInstance->SetVisibility(Target);
+	}
+}
+
 
 /* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 
