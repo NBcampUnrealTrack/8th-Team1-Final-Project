@@ -91,4 +91,12 @@ namespace MDGameplayTags
 
 	/* 사망 상태. HP 0. 모든 어빌리티 차단 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Dead);
+
+	// ====== 산소 게이지 태그
+
+	/* 완전 잠수 상태. 산소 소모, 질식 피해 GE가 작동하는 태그 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Submerged);
+
+	/* 산소 0. State_Submerged와 함께 있을때 HP -15/s */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Oxygen_Depleted);
 }

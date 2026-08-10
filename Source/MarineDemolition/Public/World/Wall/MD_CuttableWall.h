@@ -27,6 +27,14 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	Wall,
 	AActor*,
 	Cutter);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+	FMD_OnWallScanned,
+	AMD_CuttableWall*,
+	Wall,
+	float,
+	Duration,
+	AActor*,
+	Scanner);
 
 UENUM(BlueprintType)
 enum class EMD_WallType : uint8
@@ -75,6 +83,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MD|Wall")
 	FMD_OnWallDemolished OnWallDemolished;
 
+	/** Broadcasts a local scan request to overlapping wall utilities. */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Wall")
+	FMD_OnWallScanned OnWallScanned;
+
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
 	void Cut(AActor* Cutter);
 
@@ -82,7 +94,7 @@ public:
 	bool CanCut() const;
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Wall")
-	void ScanHighlight(float Duration = 3.0f);
+	void ScanHighlight(float Duration = 3.0f, AActor* Scanner = nullptr);
 
 protected:
 	virtual void BeginPlay() override;

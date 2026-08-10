@@ -54,10 +54,10 @@ public:
 	void SetToolAtSlot(int32 SlotIndex, UMD_ToolDefinition* Tool);
 
 	// 서버에서 플레이어의 현재 장비 목록을 저장하기 위한 데이터를 반환하는 함수
-	TArray<TSoftObjectPtr<UMD_ToolDefinition>> BuildEquipmentSaveData() const;
+	TArray<TSoftObjectPtr<UDataAsset>> BuildEquipmentSaveData() const;
 
 	// 서버에서 저장된 장비 목록을 불러오는 함수
-	bool RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UMD_ToolDefinition>>& SaveData);
+	bool RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UDataAsset>>& SaveData);
 
 protected:
 

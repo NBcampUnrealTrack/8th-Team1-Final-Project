@@ -215,4 +215,14 @@ namespace MDGameplayTags
 		State_Dead,
 		"State.Dead",
 		"사망 상태. HP 0");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		State_Submerged,
+		"State.Submerged",
+		"완전 잠수 상태. 산소 소모 GE의 조건");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		State_Oxygen_Depleted,
+		"State.Oxygen.Depleted",
+		"산소 0 상태. 잠수중이면 질식 피해 -15/s");
 }

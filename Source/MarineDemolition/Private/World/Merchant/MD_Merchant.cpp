@@ -7,9 +7,13 @@
 #include "UObject/ConstructorHelpers.h"
 
 #include "Character/MD_Character.h"
+#include "Component/Merchant/MD_MerchantComponent.h"
 #include "Data/Shop/MD_ShopCatalog.h"
+#include "Game/MD_GameStateBase.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
+#include "Player/MD_PlayerController.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
+#include "UI/Merchant/MD_QuestWidget.h"
 #include "UI/Merchant/MD_ShopWidget.h"
 
 namespace
@@ -92,10 +96,15 @@ void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 	Widget->SetOwningMerchant(this);
 	Widget->OnExitRequested.AddDynamic(this, &AMD_Merchant::HandleMenuExitRequested);
 	Widget->OnShopRequested.AddDynamic(this, &AMD_Merchant::HandleShopRequested);
+	Widget->OnQuestRequested.AddDynamic(this, &AMD_Merchant::HandleQuestRequested);
 
-	// 퀘스트·대출 화면이 생기면 HandleShopRequested와 같은 패턴으로 갈아끼운다:
+	if (const UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+	{
+		Widget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
+	}
+
+	// 대출 화면이 생기면 HandleShopRequested와 같은 패턴으로 갈아끼운다:
 	// 화면을 띄운 뒤 SetMenuButtonsVisible(false), 뒤로가기에서 다시 true.
-	Widget->OnQuestRequested.AddDynamic(this, &AMD_Merchant::HandleNotReadyRequested);
 	Widget->OnLoanRequested.AddDynamic(this, &AMD_Merchant::HandleNotReadyRequested);
 
 	// 대화는 메뉴 위젯이 자체 대사창으로 처리한다.
@@ -111,11 +120,21 @@ void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 void AMD_Merchant::HandleMenuExitRequested()
 {
 	// 위젯 자체 제거와 입력 모드 복구는 위젯이 처리한다.
-	// 상점이 위에 떠 있는 상태에서 메뉴가 닫히면 상점만 남으므로 같이 정리한다.
+	// 상점·퀘스트가 위에 떠 있는 상태에서 메뉴가 닫히면 같이 정리한다.
 	if (ActiveShopWidget.IsValid())
 	{
 		ActiveShopWidget->RemoveFromParent();
 		ActiveShopWidget.Reset();
+	}
+
+	if (ActiveQuestWidget.IsValid())
+	{
+		if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+		{
+			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForQuest);
+		}
+		ActiveQuestWidget->RemoveFromParent();
+		ActiveQuestWidget.Reset();
 	}
 
 	ActiveMenuWidget.Reset();
@@ -193,4 +212,128 @@ void AMD_Merchant::HandleShopPurchaseRejected(FName ItemId)
 	{
 		ActiveMenuWidget->ShowDialogueLine(FullStockDialogue);
 	}
+}
+
+void AMD_Merchant::HandleQuestRequested()
+{
+	if (!QuestWidgetClass)
+	{
+		return;
+	}
+
+	if (ActiveQuestWidget.IsValid() && ActiveQuestWidget->IsInViewport())
+	{
+		return;
+	}
+
+	if (!ActiveMenuWidget.IsValid())
+	{
+		return;
+	}
+
+	APlayerController* PC = ActiveMenuWidget->GetOwningPlayer();
+	if (!IsValid(PC))
+	{
+		return;
+	}
+
+	UMD_QuestWidget* QuestWidget = CreateWidget<UMD_QuestWidget>(PC, QuestWidgetClass);
+	if (!IsValid(QuestWidget))
+	{
+		return;
+	}
+
+	QuestWidget->OnBackRequested.AddDynamic(this, &AMD_Merchant::HandleQuestBackRequested);
+	QuestWidget->OnRepeatAcceptRequested.AddDynamic(this, &AMD_Merchant::HandleRepeatAcceptRequested);
+	QuestWidget->OnRepeatDeclineRequested.AddDynamic(this, &AMD_Merchant::HandleRepeatDeclineRequested);
+	QuestWidget->OnRepeatAbandonRequested.AddDynamic(this, &AMD_Merchant::HandleRepeatAbandonRequested);
+
+	QuestWidget->SetOwningMerchantMenu(ActiveMenuWidget.Get());
+	QuestWidget->AddToViewport();
+	ActiveQuestWidget = QuestWidget;
+
+	// 상인 상태(수락·완료 등)가 바뀔 때마다 화면을 다시 그리도록 구독한다.
+	// 리슨 서버 호스트든 원격 클라이언트든 이 델리게이트 하나로 갱신된다 (`MD_MerchantComponent` 참고).
+	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+	{
+		MerchantComponent->OnMerchantStateChanged.AddDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForQuest);
+	}
+
+	RefreshQuestWidgetFromComponent();
+}
+
+void AMD_Merchant::HandleQuestBackRequested()
+{
+	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+	{
+		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForQuest);
+	}
+
+	if (ActiveQuestWidget.IsValid())
+	{
+		ActiveQuestWidget->RemoveFromParent();
+		ActiveQuestWidget.Reset();
+	}
+}
+
+void AMD_Merchant::HandleRepeatAcceptRequested(int32 QuestIndex)
+{
+	if (AMD_PlayerController* InteractingPC = GetInteractingPlayerController())
+	{
+		InteractingPC->ServerAcceptRepeat(QuestIndex);
+	}
+}
+
+void AMD_Merchant::HandleRepeatDeclineRequested(int32 QuestIndex)
+{
+	if (AMD_PlayerController* InteractingPC = GetInteractingPlayerController())
+	{
+		InteractingPC->ServerDeclineRepeat(QuestIndex);
+	}
+}
+
+void AMD_Merchant::HandleRepeatAbandonRequested(int32 QuestIndex)
+{
+	// UMD_MerchantSubsystem에 수락 이후 파기(포기) 처리가 아직 없다 — TryAcceptRepeatQuest/
+	// TryDeclineRepeatQuest만 있고 Accepted 상태를 되돌리는 함수가 없다. 백엔드가 생기면
+	// 여기서 그 서버 RPC를 호출하도록 바꾼다.
+	if (ActiveMenuWidget.IsValid())
+	{
+		ActiveMenuWidget->ShowDialogueLine(FText::FromString(TEXT("그건 아직 처리 못 해. 수락한 건 끝내거나 그냥 둬.")));
+	}
+}
+
+void AMD_Merchant::HandleMerchantStateChangedForQuest()
+{
+	RefreshQuestWidgetFromComponent();
+}
+
+void AMD_Merchant::RefreshQuestWidgetFromComponent()
+{
+	if (!ActiveQuestWidget.IsValid())
+	{
+		return;
+	}
+
+	const UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (!IsValid(MerchantComponent))
+	{
+		return;
+	}
+
+	ActiveQuestWidget->SetMainQuests(MerchantComponent->GetMainQuests());
+	ActiveQuestWidget->SetRepeatQuests(MerchantComponent->GetRepeatQuests());
+}
+
+UMD_MerchantComponent* AMD_Merchant::GetMerchantComponent() const
+{
+	const UWorld* World = GetWorld();
+	const AMD_GameStateBase* GameState = IsValid(World) ? World->GetGameState<AMD_GameStateBase>() : nullptr;
+
+	return IsValid(GameState) ? GameState->GetMerchantComponent() : nullptr;
+}
+
+AMD_PlayerController* AMD_Merchant::GetInteractingPlayerController() const
+{
+	return ActiveMenuWidget.IsValid() ? Cast<AMD_PlayerController>(ActiveMenuWidget->GetOwningPlayer()) : nullptr;
 }

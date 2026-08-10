@@ -6,6 +6,8 @@
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Game/MD_GameStateBase.h"
+#include "Data/Merchant/MD_SiteDefinition.h"
+#include "Player/MD_PlayerController.h"
 #include "TimerManager.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
@@ -27,6 +29,9 @@ void AMD_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();
 
+    // 게임 맵의 액터 초기화 이후 새 게임 또는 불러오기 상태를 적용하기 위한 다음 틱 예약
+    GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
+
     GetWorldTimerManager().SetTimer(
         CheckGameTimeTimerHandle,
         this,
@@ -42,25 +47,59 @@ void AMD_GameModeBase::BeginPlay()
         It->OnWallDemolished.AddDynamic(this, &AMD_GameModeBase::HandleWallDemolished);
     }
 
-    // 이전 Day 스냅샷 복원은 전 액터 BeginPlay 이후로 미룸 (벽 오염 초기화보다 늦게)
+    // 이전 Day 스냅샷 복원은 전 액터 BeginPlay 이후로 미룸 (벽 오염 초기화보다 늦게).
+    // 복원 직후 Merchant Day·퀘스트를 GameState와 맞춘다.
     GetWorldTimerManager().SetTimerForNextTick(
-        this, &AMD_GameModeBase::RestoreDaySnapshot);
+        this, &AMD_GameModeBase::InitializeExpeditionDay);
+
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->OnDayChanged.AddDynamic(this, &AMD_GameModeBase::HandleGameDayChanged);
+    }
+}
+
+void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        GS->OnDayChanged.RemoveDynamic(this, &AMD_GameModeBase::HandleGameDayChanged);
+    }
+
+    Super::EndPlay(EndPlayReason);
+}
+
+void AMD_GameModeBase::ApplyPendingGameDataOperation()
+{
+    // GameInstance 수명으로 트래블을 통과한 데이터 초기화 작업을 실행할 저장 관리자 참조
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true)
+    {
+        SaveSlotManager->ApplyPendingGameDataOperation();
+    }
 }
 
 void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
 {
     Super::RestartPlayer(NewPlayer);
-    
+
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
     if (IsValid(SaveSlotManager) == true && IsValid(NewPlayer->PlayerState) == true)
     {
-        SaveSlotManager->OverwriteDataToPlayer(NewPlayer->PlayerState);
+        SaveSlotManager->LoadPlayerData(NewPlayer->PlayerState);
     }
 }
 
 void AMD_GameModeBase::Logout(AController* Exiting)
 {
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true && IsValid(Exiting) == true)
+    {
+        SaveSlotManager->ParseDataFromPlayer(Exiting->PlayerState);
+    }
+
     Super::Logout(Exiting);
 }
 
@@ -162,6 +201,15 @@ EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
     }
 
     bDayFinalized = true;
+
+    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        if (UMD_MerchantSubsystem* Merchant =
+            GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
+        {
+            Merchant->ResolveActiveQuestsAtDayEnd(GS->GetCurrentDay());
+        }
+    }
 
     FinalizeReturnStatuses();
 
@@ -518,12 +566,115 @@ void AMD_GameModeBase::CaptureDaySnapshot()
     }
 }
 
+void AMD_GameModeBase::InitializeExpeditionDay()
+{
+    RestoreDaySnapshot();
+
+    if (const AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    {
+        SyncMerchantToGameDay(GS->GetCurrentDay());
+    }
+}
+
+void AMD_GameModeBase::HandleGameDayChanged(int32 NewDay)
+{
+    SyncMerchantToGameDay(NewDay);
+}
+
+UMD_SiteDefinition* AMD_GameModeBase::ResolveExpeditionSite() const
+{
+    if (IsValid(ExpeditionSite))
+    {
+        return ExpeditionSite;
+    }
+
+    const UWorld* World = GetWorld();
+    if (!IsValid(World))
+    {
+        return nullptr;
+    }
+
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+    {
+        if (const AMD_PlayerController* PC = Cast<AMD_PlayerController>(It->Get()))
+        {
+            if (UMD_SiteDefinition* Site = PC->GetExpeditionSite())
+            {
+                return Site;
+            }
+        }
+    }
+
+    return nullptr;
+}
+
+void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
+{
+    if (Day <= 0)
+    {
+        return;
+    }
+
+    UWorld* World = GetWorld();
+    if (!IsValid(World) || World->GetNetMode() == NM_Client)
+    {
+        return;
+    }
+
+    UMD_MerchantSubsystem* Merchant =
+        GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>();
+    if (!IsValid(Merchant))
+    {
+        return;
+    }
+
+    if (!Merchant->HasActiveContract())
+    {
+        UMD_SiteDefinition* Site = ResolveExpeditionSite();
+        if (!IsValid(Site))
+        {
+            UE_LOG(LogTemp, Warning,
+                TEXT("[Merchant] 원정 Site 미지정 — BP GameMode ExpeditionSite 또는 BP PlayerController DebugSite(DA_Site_X7) 설정 필요"));
+            return;
+        }
+
+        Merchant->BeginContract(Site, ExpeditionAdvancePayment);
+    }
+
+    bool bShouldBeginDay = Merchant->GetCurrentDay() != Day;
+    if (!bShouldBeginDay)
+    {
+        for (const FMD_MainQuestState& QuestState : Merchant->GetMainQuests())
+        {
+            if (QuestState.UnlockDay <= Day
+                && QuestState.Status == EMD_MainQuestStatus::Locked)
+            {
+                bShouldBeginDay = true;
+                break;
+            }
+        }
+    }
+
+    if (bShouldBeginDay)
+    {
+        Merchant->BeginDay(Day);
+    }
+}
+
 void AMD_GameModeBase::RestoreDaySnapshot()
 {
     if (UMD_DayPersistenceSubsystem* Persistence =
         GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
     {
         Persistence->RestoreSnapshot(GetWorld());
+    }
+
+    // 게임 자동 저장 실행
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    if (IsValid(SaveSlotManager) == true)
+    {
+        SaveSlotManager->SaveGameData(TEXT("Auto"), true);
     }
 }
 
