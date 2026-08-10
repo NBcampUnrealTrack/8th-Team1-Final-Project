@@ -108,8 +108,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool LoadPlayerData(const APlayerState* PlayerState) const;
 
+	// 새 게임 또는 검증된 저장 데이터의 맵 적용 작업을 예약하고 성공 여부를 반환하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
-	void OnTryStartGameWithGameData(const FMD_GameData& GameData);
+	bool OnTryStartGameWithGameData(const FMD_GameData& GameData);
 
 	// 현재 기록되고 있던 게임 데이터를 초기화하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")

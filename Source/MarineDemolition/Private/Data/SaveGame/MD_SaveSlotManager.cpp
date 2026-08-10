@@ -492,13 +492,13 @@ bool UMD_SaveSlotManager::LoadPlayerData(const APlayerState* PlayerState) const
 	return bOverwriteSuccess;
 }
 
-void UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameData)
+bool UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameData)
 {
 	// 클라이언트가 로드할 데이터를 독립적으로 예약하지 못하도록 하는 권한 제한
 	if (HasServerAuthority() == false)
 	{
 		UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 기반 시작 요청은 Host/Server에서만 실행할 수 있습니다."), *UE_CALL_LOCATIONINFO);
-		return;
+		return false;
 	}
 
 	// 이름이 없는 입력은 새 게임으로 예약하고 선택 슬롯은 마이그레이션 검증 이후에만 예약하는 처리
@@ -508,7 +508,7 @@ void UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameDat
 		NewGameData.SchemaVersion = FMD_GameData::CurrentSchemaVersion;
 		PendingGameDataOperation = EMD_PendingGameDataOperation::NewGame;
 		TemporaryGameData = MakeShared<FMD_GameData>(MoveTemp(NewGameData));
-		return;
+		return true;
 	}
 
 	FMD_GameData MigratedGameData = GameData;
@@ -516,12 +516,12 @@ void UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameDat
 	{
 		UE_LOG(MarineDemolition, Error, TEXT("%s 시작할 저장 데이터가 손상되었거나 지원하지 않는 버전입니다."), *UE_CALL_LOCATIONINFO);
 		ResetTemporaryGameData();
-		return;
+		return false;
 	}
 
 	PendingGameDataOperation = EMD_PendingGameDataOperation::LoadGame;
 	TemporaryGameData = MakeShared<FMD_GameData>(MoveTemp(MigratedGameData));
-	return;
+	return true;
 }
 
 void UMD_SaveSlotManager::ResetTemporaryGameData()
