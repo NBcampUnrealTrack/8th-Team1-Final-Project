@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "GameplayTags/MD_GameplayTags.h"
 
@@ -34,6 +34,11 @@ namespace MDGameplayTags
 		Resource_Storage_Content_Contamination,
 		"Resource.Storage.Content.Contamination",
 		"물리 보관함에 담을 수 있는 오염물");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Resource_Storage_Content_Barnacle,
+		"Resource.Storage.Content.Barnacle",
+		"물리 보관함에 담을 수 있는 따개비");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Storage_Content_Sample,
@@ -210,4 +215,32 @@ namespace MDGameplayTags
 		State_Dead,
 		"State.Dead",
 		"사망 상태. HP 0");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		State_Submerged,
+		"State.Submerged",
+		"완전 잠수 상태. 산소 소모 GE의 조건");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		State_Oxygen_Depleted,
+		"State.Oxygen.Depleted",
+		"산소 0 상태. 잠수중이면 질식 피해 -15/s");
+
+	// For Save Data
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Save_Data_GameState,
+		"Save.Data.GameState",
+		"저장된 게임 데이터로부터 점수, 인게임 시간 등의 정보를 얻는 키");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Save_Data_Merchant,
+		"Save.Data.Merchant",
+		"저장된 게임 데이터로부터 상인 관련 정보를 얻는 키");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Save_Data_Player,
+		"Save.Data.Player",
+		"저장된 게임 데이터로부터 플레이어 정보를 얻는 키");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Save_Data_World,
+		"Save.Data.World",
+		"저장된 게임 데이터로부터 맵의 변경 사항에 대한 정보를 얻는 키");
 }

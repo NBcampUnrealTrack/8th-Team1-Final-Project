@@ -2,6 +2,7 @@
 
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
@@ -9,6 +10,7 @@
 #include "Particles/ParticleSystem.h"
 #include "Sound/SoundBase.h"
 #include "Net/UnrealNetwork.h"
+#include "World/Contamination/MD_Barnacle.h"
 #include "World/Wall/MD_CuttableWall.h"
 
 UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
@@ -184,17 +186,42 @@ void UMD_ScrapeToolComponent::TickComponent(
 void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 {
 	FHitResult CurrentHit;
-	AMD_CuttableWall* CurrentWall = nullptr;
-	if (!TryGetCurrentWallHit(CurrentHit, CurrentWall))
+	FHitResult DirectBarnacleHit;
+	UMD_ScrapeSurfaceComponent* CurrentSurface = nullptr;
+	AMD_Barnacle* OccludingBarnacle = nullptr;
+	if (!TryGetCurrentSurfaceHit(
+			CurrentHit,
+			CurrentSurface,
+			OccludingBarnacle,
+			DirectBarnacleHit))
 	{
 		ResetStrokeTracking();
+
+		// 오염 표면이 아니어도 따개비일 수 있다. 둘은 성격이 달라 경로를 갈라 둔다.
+		if (IsValid(OccludingBarnacle))
+		{
+			ProcessDirectBarnacleContact(
+				OccludingBarnacle,
+				DirectBarnacleHit,
+				DeltaTime);
+			return;
+		}
+
+		SetTrackedBarnacle(nullptr);
 		return;
+	}
+
+	if (IsValid(OccludingBarnacle))
+	{
+		// 클라이언트에서 부착 복제가 BeginPlay보다 늦어도 직접 맞은 순간 복구한다.
+		// 장애물 등록이 있어야 아래 경로 차단과 조준 보정이 함께 작동한다.
+		OccludingBarnacle->RegisterWithScrapeSurface(CurrentSurface);
 	}
 
 	FVector2D RawSurfacePositionCm;
 	EMD_ScrapeSurfaceFace CurrentSurfaceFace =
 		EMD_ScrapeSurfaceFace::Front;
-	if (!CurrentWall->TryGetScrapeSurfacePositionFromHit(
+	if (!CurrentSurface->TryGetScrapeSurfacePositionFromHit(
 		CurrentHit,
 		RawSurfacePositionCm,
 		CurrentSurfaceFace))
@@ -204,12 +231,12 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 	}
 
 	if (!bHasPreviousSurfacePosition
-		|| !PreviousWall.IsValid()
-		|| PreviousWall.Get() != CurrentWall
+		|| !PreviousSurface.IsValid()
+		|| PreviousSurface.Get() != CurrentSurface
 		|| PreviousSurfaceFace != CurrentSurfaceFace)
 	{
 		BeginStrokeTracking(
-			CurrentWall,
+			CurrentSurface,
 			RawSurfacePositionCm,
 			CurrentSurfaceFace);
 		return;
@@ -223,11 +250,32 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 		return;
 	}
 
+	// 따개비는 벽에 붙어 자란 입체물이라 헤라가 그 위를 지나갈 수 없다.
+	// 막히면 스트로크를 거기서 끊고, 가려던 속도를 그대로 따개비에 때린다.
+	// 조준 보정보다 먼저 잘라야 시선까지 그 자리에 붙들린다. 뒤로 미루면 자국만
+	// 멈추고 조준은 따개비를 넘어가 "막혔다"가 읽히지 않는다.
+	const FVector2D AttemptedSurfacePositionCm = ConstrainedSurfacePositionCm;
+	AMD_Barnacle* BlockingBarnacle = nullptr;
+	FVector2D BlockedSurfacePositionCm = ConstrainedSurfacePositionCm;
+	const bool bStrokeBlockedByBarnacle =
+		CurrentSurface->TryClampScrapeStrokeAgainstObstacles(
+			CurrentSurfaceFace,
+			PreviousSurfacePositionCm,
+			AttemptedSurfacePositionCm,
+			ScrapeToolSpec.BladeWidthCm * 0.5f,
+			BlockedSurfacePositionCm,
+			BlockingBarnacle);
+
+	if (bStrokeBlockedByBarnacle)
+	{
+		ConstrainedSurfacePositionCm = BlockedSurfacePositionCm;
+	}
+
 	// 앞면이 여러 깊이에 걸친 벽에서도 조준 보정이 실제 표면 위에 남도록
 	// 지금 맞고 있는 히트 지점을 깊이 기준으로 넘긴다.
 	FVector ConstrainedWorldPosition = CurrentHit.ImpactPoint;
 	const bool bHasConstrainedWorldPosition =
-		CurrentWall->TryGetScrapeSurfaceWorldPositionAtDepth(
+		CurrentSurface->TryGetScrapeSurfaceWorldPositionAtDepth(
 			ConstrainedSurfacePositionCm,
 			CurrentSurfaceFace,
 			CurrentHit.ImpactPoint,
@@ -242,7 +290,10 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 		// 단, 보정 목표가 다른 표면에 가려져 있으면 보정하지 않는다.
 		if (IsAimCorrectionTargetVisible(
 				CurrentHit.TraceStart,
-				ConstrainedWorldPosition))
+				ConstrainedWorldPosition,
+				bStrokeBlockedByBarnacle
+					? BlockingBarnacle
+					: nullptr))
 		{
 			KeepAimOnScrapePosition(
 				CurrentHit.TraceStart,
@@ -259,7 +310,7 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 	if (GetOwner() && GetOwner()->HasAuthority())
 	{
 		const FMD_ScrapeResult Result =
-			CurrentWall->ApplyLocalScrapeStrokeWithToolSpec(
+			CurrentSurface->ApplyLocalScrapeStrokeWithToolSpec(
 				Stroke,
 				ScrapeToolSpec);
 
@@ -270,51 +321,105 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 				: CurrentHit.ImpactPoint;
 
 			DispatchAuthoritativeScrapeResult(
-				CurrentWall,
+				CurrentSurface,
 				Result,
 				FeedbackLocation);
 		}
+	}
+
+	if (bStrokeBlockedByBarnacle)
+	{
+		// 힘은 실제로 지나간 거리가 아니라 "지나가려 했던" 거리에서 나온다.
+		// 잘라 낸 거리로 재면 따개비에 바짝 붙을수록 약해져, 세게 그을수록
+		// 오히려 안 떨어지는 거꾸로 된 손맛이 된다.
+		const float AttemptedTravelCm = static_cast<float>(
+			FVector2D::Distance(
+				PreviousSurfacePositionCm,
+				AttemptedSurfacePositionCm));
+
+		FVector StrokeStartWorldPosition;
+		FVector StrokeEndWorldPosition;
+		FVector ImpactWorldDirection = FVector::ZeroVector;
+		if (CurrentSurface->TryGetScrapeSurfaceWorldPosition(
+				PreviousSurfacePositionCm,
+				CurrentSurfaceFace,
+				StrokeStartWorldPosition)
+			&& CurrentSurface->TryGetScrapeSurfaceWorldPosition(
+				AttemptedSurfacePositionCm,
+				CurrentSurfaceFace,
+				StrokeEndWorldPosition))
+		{
+			ImpactWorldDirection =
+				StrokeEndWorldPosition - StrokeStartWorldPosition;
+		}
+
+		SetTrackedBarnacle(BlockingBarnacle);
+		DeliverBarnacleImpact(
+			BlockingBarnacle,
+			CalculateImpactSpeedCmPerSecond(AttemptedTravelCm, DeltaTime),
+			ImpactWorldDirection);
+	}
+	else
+	{
+		// 경로가 트였다. 다음에 다시 걸리면 새 스윙으로 센다.
+		SetTrackedBarnacle(nullptr);
 	}
 
 	PreviousSurfacePositionCm = ConstrainedSurfacePositionCm;
 }
 
 void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
-	AMD_CuttableWall* Wall,
+	UMD_ScrapeSurfaceComponent* Surface,
 	const FMD_ScrapeResult& Result,
 	const FVector& ContactLocation)
 {
-	// 서버 게임 로직은 권한 인스턴스의 이벤트를 계속 구독할 수 있다.
-	OnScrapeApplied.Broadcast(Wall, Result);
+	// 서버 게임 로직은 권한 인스턴스의 공통 표면 이벤트를 구독할 수 있다.
+	OnScrapeSurfaceApplied.Broadcast(Surface, Result);
+	if (AMD_CuttableWall* const Wall = Surface
+		? Cast<AMD_CuttableWall>(Surface->GetOwner())
+		: nullptr)
+	{
+		OnScrapeApplied.Broadcast(Wall, Result);
+	}
 
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	if (OwnerPawn
 		&& OwnerPawn->IsLocallyControlled()
 		&& GetNetMode() != NM_DedicatedServer)
 	{
-		EmitFeedback(Wall, Result, ContactLocation);
+		EmitFeedback(Surface, Result, ContactLocation);
 		return;
 	}
 
 	// 원격 소유자의 사운드/이펙트와 Blueprint 피드백은 해당 클라이언트에서 실행한다.
-	ClientReceiveScrapeResult(Wall, Result, ContactLocation);
+	ClientReceiveScrapeResult(Surface, Result, ContactLocation);
 }
 
 void UMD_ScrapeToolComponent::ClientReceiveScrapeResult_Implementation(
-	AMD_CuttableWall* Wall,
+	UMD_ScrapeSurfaceComponent* Surface,
 	const FMD_ScrapeResult& Result,
 	const FVector_NetQuantize10 ContactLocation)
 {
-	OnScrapeApplied.Broadcast(Wall, Result);
-	EmitFeedback(Wall, Result, ContactLocation);
+	OnScrapeSurfaceApplied.Broadcast(Surface, Result);
+	if (AMD_CuttableWall* const Wall = Surface
+		? Cast<AMD_CuttableWall>(Surface->GetOwner())
+		: nullptr)
+	{
+		OnScrapeApplied.Broadcast(Wall, Result);
+	}
+	EmitFeedback(Surface, Result, ContactLocation);
 }
 
-bool UMD_ScrapeToolComponent::TryGetCurrentWallHit(
+bool UMD_ScrapeToolComponent::TryGetCurrentSurfaceHit(
 	FHitResult& OutHit,
-	AMD_CuttableWall*& OutWall) const
+	UMD_ScrapeSurfaceComponent*& OutSurface,
+	AMD_Barnacle*& OutOccludingBarnacle,
+	FHitResult& OutBarnacleHit) const
 {
 	OutHit = FHitResult();
-	OutWall = nullptr;
+	OutSurface = nullptr;
+	OutOccludingBarnacle = nullptr;
+	OutBarnacleHit = FHitResult();
 
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	if (!OwnerPawn || !OwnerPawn->GetController() || !GetWorld())
@@ -325,16 +430,43 @@ bool UMD_ScrapeToolComponent::TryGetCurrentWallHit(
 	FVector ViewLocation;
 	FRotator ViewRotation;
 	OwnerPawn->GetController()->GetPlayerViewPoint(ViewLocation, ViewRotation);
-
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MD_ScrapeTrace), true);
-	QueryParams.AddIgnoredActor(OwnerPawn);
-
 	const FVector TraceEnd =
 		ViewLocation + (ViewRotation.Vector() * TraceDistanceCm);
+	return TryTraceScrapeTarget(
+		ViewLocation,
+		TraceEnd,
+		OwnerPawn,
+		OutHit,
+		OutSurface,
+		OutOccludingBarnacle,
+		OutBarnacleHit);
+}
 
+bool UMD_ScrapeToolComponent::TryTraceScrapeTarget(
+	const FVector& TraceStart,
+	const FVector& TraceEnd,
+	const AActor* const IgnoredActor,
+	FHitResult& OutHit,
+	UMD_ScrapeSurfaceComponent*& OutSurface,
+	AMD_Barnacle*& OutOccludingBarnacle,
+	FHitResult& OutBarnacleHit) const
+{
+	OutHit = FHitResult();
+	OutSurface = nullptr;
+	OutOccludingBarnacle = nullptr;
+	OutBarnacleHit = FHitResult();
+	if (!GetWorld() || TraceStart.ContainsNaN() || TraceEnd.ContainsNaN())
+	{
+		return false;
+	}
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MD_ScrapeTrace), true);
+	QueryParams.AddIgnoredActor(IgnoredActor);
+
+	FHitResult FirstHit;
 	if (!GetWorld()->LineTraceSingleByChannel(
-			OutHit,
-			ViewLocation,
+			FirstHit,
+			TraceStart,
 			TraceEnd,
 			TraceChannel,
 			QueryParams))
@@ -342,12 +474,154 @@ bool UMD_ScrapeToolComponent::TryGetCurrentWallHit(
 		return false;
 	}
 
-	OutWall = Cast<AMD_CuttableWall>(OutHit.GetActor());
-	return IsValid(OutWall);
+	OutHit = FirstHit;
+	OutSurface = UMD_ScrapeSurfaceComponent::FindForPrimitiveComponent(
+		FirstHit.GetComponent());
+	if (IsValid(OutSurface))
+	{
+		return true;
+	}
+
+	OutOccludingBarnacle = Cast<AMD_Barnacle>(FirstHit.GetActor());
+	if (!IsValid(OutOccludingBarnacle))
+	{
+		return false;
+	}
+	OutBarnacleHit = FirstHit;
+
+	// 따개비가 Visibility를 막아도 그 뒤의 작업면 좌표가 있어야 헤라 경로를
+	// 따개비 앞에서 자를 수 있다. 첫 따개비만 무시하고 같은 선을 다시 쏜다.
+	QueryParams.AddIgnoredActor(OutOccludingBarnacle);
+	FHitResult SurfaceHit;
+	if (!GetWorld()->LineTraceSingleByChannel(
+			SurfaceHit,
+			TraceStart,
+			TraceEnd,
+			TraceChannel,
+			QueryParams))
+	{
+		return false;
+	}
+
+	OutSurface = UMD_ScrapeSurfaceComponent::FindForPrimitiveComponent(
+		SurfaceHit.GetComponent());
+	if (!IsValid(OutSurface))
+	{
+		return false;
+	}
+
+	OutHit = SurfaceHit;
+	return true;
+}
+
+void UMD_ScrapeToolComponent::ProcessDirectBarnacleContact(
+	AMD_Barnacle* Barnacle,
+	const FHitResult& Hit,
+	const float DeltaTime)
+{
+	if (!IsValid(Barnacle) || Barnacle->IsFullyRemoved())
+	{
+		SetTrackedBarnacle(nullptr);
+		return;
+	}
+
+	SetTrackedBarnacle(Barnacle);
+
+	// 처음 맞췄으면 기준점만 잡는다. 옮겨오는 동안의 시선 이동을 속도로 세면
+	// 겨냥하는 것만으로 첫 타격이 들어간다.
+	if (!bHasPreviousBarnacleHitLocation)
+	{
+		PreviousBarnacleHitLocation = Hit.ImpactPoint;
+		bHasPreviousBarnacleHitLocation = true;
+		return;
+	}
+
+	const FVector TravelDelta = Hit.ImpactPoint - PreviousBarnacleHitLocation;
+	const float TravelCentimeters = static_cast<float>(TravelDelta.Size());
+
+	// 속도는 프레임 간 변화량이므로 문턱 미만이어도 기준점을 매 프레임 갱신한다.
+	// 갱신을 미루면 여러 프레임이 한 프레임의 이동으로 뭉쳐 속도가 부풀려진다.
+	PreviousBarnacleHitLocation = Hit.ImpactPoint;
+
+	DeliverBarnacleImpact(
+		Barnacle,
+		CalculateImpactSpeedCmPerSecond(TravelCentimeters, DeltaTime),
+		TravelDelta);
+}
+
+void UMD_ScrapeToolComponent::DeliverBarnacleImpact(
+	AMD_Barnacle* Barnacle,
+	const float ImpactSpeedCmPerSecond,
+	const FVector& ImpactWorldDirection)
+{
+	const float MinimumImpactSpeed = FMath::Max(
+		0.0f,
+		ScrapeToolSpec.BarnacleMinimumImpactSpeedCmPerSecond);
+
+	// 스윙이 끝나 속도가 충분히 떨어지면 다음 타격을 준비한다. 최소 속도를 그대로
+	// 빗장으로 쓰면 그 근처에서 진동할 때 준비와 발사가 매 프레임 번갈아 일어난다.
+	if (ImpactSpeedCmPerSecond <= MinimumImpactSpeed * 0.5f)
+	{
+		bBarnacleImpactArmed = true;
+	}
+
+	if (!IsValid(Barnacle)
+		|| !bBarnacleImpactArmed
+		|| ImpactSpeedCmPerSecond < MinimumImpactSpeed)
+	{
+		return;
+	}
+
+	if (!GetOwner() || !GetOwner()->HasAuthority())
+	{
+		// 클라이언트에서도 빗장은 걸어 둔다. 서버로 옮겨도 리듬이 같아야 한다.
+		bBarnacleImpactArmed = false;
+		return;
+	}
+
+	bBarnacleImpactArmed = false;
+
+	if (Barnacle->ApplyScrapeImpact(
+			ScrapeToolSpec.CalculateBarnacleImpactWork(ImpactSpeedCmPerSecond),
+			ImpactWorldDirection))
+	{
+		// 떨어져 나가면 액터가 파괴되므로 추적을 끊는다.
+		SetTrackedBarnacle(nullptr);
+	}
+}
+
+void UMD_ScrapeToolComponent::SetTrackedBarnacle(AMD_Barnacle* Barnacle)
+{
+	if (TrackedBarnacle.Get() == Barnacle)
+	{
+		return;
+	}
+
+	TrackedBarnacle = Barnacle;
+	PreviousBarnacleHitLocation = FVector::ZeroVector;
+	bHasPreviousBarnacleHitLocation = false;
+	bBarnacleImpactArmed = true;
+}
+
+float UMD_ScrapeToolComponent::CalculateImpactSpeedCmPerSecond(
+	const float TravelCentimeters,
+	const float DeltaTime)
+{
+	// StartScraping이 첫 프레임을 DeltaTime 0으로 부른다. 여기서 막지 않으면
+	// 입력을 누른 순간 무한대 속도로 따개비가 떨어진다.
+	if (!FMath::IsFinite(TravelCentimeters)
+		|| TravelCentimeters <= 0.0f
+		|| !FMath::IsFinite(DeltaTime)
+		|| DeltaTime <= UE_SMALL_NUMBER)
+	{
+		return 0.0f;
+	}
+
+	return TravelCentimeters / DeltaTime;
 }
 
 void UMD_ScrapeToolComponent::BeginStrokeTracking(
-	AMD_CuttableWall* Wall,
+	UMD_ScrapeSurfaceComponent* Surface,
 	const FVector2D& SurfacePositionCm,
 	const EMD_ScrapeSurfaceFace SurfaceFace)
 {
@@ -357,7 +631,7 @@ void UMD_ScrapeToolComponent::BeginStrokeTracking(
 	PreviousSurfaceFace = SurfaceFace;
 	StrokeAnchorPositionCm = SurfacePositionCm;
 	LockedStrokeAxis = FVector2D::ZeroVector;
-	PreviousWall = Wall;
+	PreviousSurface = Surface;
 }
 
 bool UMD_ScrapeToolComponent::TryConstrainStrokePosition(
@@ -508,7 +782,8 @@ FRotator UMD_ScrapeToolComponent::CalculateAimCorrectionRotation(
 
 bool UMD_ScrapeToolComponent::IsAimCorrectionTargetVisible(
 	const FVector& ViewLocation,
-	const FVector& WorldPosition) const
+	const FVector& WorldPosition,
+	const AActor* IgnoredActor) const
 {
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	const UWorld* World = GetWorld();
@@ -535,6 +810,10 @@ bool UMD_ScrapeToolComponent::IsAimCorrectionTargetVisible(
 		SCENE_QUERY_STAT(MD_ScrapeAimVisibility),
 		true);
 	QueryParams.AddIgnoredActor(OwnerPawn);
+	if (IsValid(IgnoredActor))
+	{
+		QueryParams.AddIgnoredActor(IgnoredActor);
+	}
 
 	FHitResult BlockingHit;
 	return !World->LineTraceSingleByChannel(
@@ -603,15 +882,15 @@ void UMD_ScrapeToolComponent::ResetStrokeTracking()
 	PreviousSurfaceFace = EMD_ScrapeSurfaceFace::Front;
 	StrokeAnchorPositionCm = FVector2D::ZeroVector;
 	LockedStrokeAxis = FVector2D::ZeroVector;
-	PreviousWall.Reset();
+	PreviousSurface.Reset();
 }
 
 void UMD_ScrapeToolComponent::EmitFeedback(
-	AMD_CuttableWall* Wall,
+	UMD_ScrapeSurfaceComponent* Surface,
 	const FMD_ScrapeResult& Result,
 	const FVector& ContactLocation)
 {
-	if (!Wall || !GetWorld() || !Result.bHadSurfaceContact)
+	if (!Surface || !GetWorld() || !Result.bHadSurfaceContact)
 	{
 		return;
 	}

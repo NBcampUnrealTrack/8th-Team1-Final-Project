@@ -15,4 +15,13 @@ namespace MDMaterialTint
 		UMaterialInstanceDynamic* Material,
 		FName ParameterName,
 		const FLinearColor& Value);
+
+	/**
+	 * 스칼라 버전. SetScalarParameterValue도 없는 이름을 조용히 무시하는 것은 마찬가지다.
+	 * 진행도처럼 값이 안 들어가도 화면이 그냥 안 변할 뿐인 경우에 특히 찾기 어렵다.
+	 */
+	MARINEDEMOLITION_API bool SetScalarParameterChecked(
+		UMaterialInstanceDynamic* Material,
+		FName ParameterName,
+		float Value);
 }

@@ -7,6 +7,7 @@
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "GameFramework/Pawn.h"
+#include "Player/MD_PlayerController.h"
 #include "World/Merchant/MD_Merchant.h"
 
 namespace
@@ -29,6 +30,12 @@ void UMD_MerchantMenuWidget::NativeConstruct()
 		if (APawn* Pawn = PC->GetPawn())
 		{
 			Pawn->DisableInput(PC);
+		}
+
+		// 메뉴가 화면을 덮으므로 HUD를 숨긴다. 복구는 NativeDestruct에서.
+		if (AMD_PlayerController* MDPlayerController = Cast<AMD_PlayerController>(PC))
+		{
+			MDPlayerController->SetGameplayHUDVisible(false);
 		}
 	}
 
@@ -70,6 +77,13 @@ void UMD_MerchantMenuWidget::NativeDestruct()
 		if (APawn* Pawn = PC->GetPawn())
 		{
 			Pawn->EnableInput(PC);
+		}
+
+		// HUD 복구. 상점·퀘스트 화면은 이 메뉴를 살려둔 채 겹쳐 뜨므로,
+		// 메뉴가 실제로 사라지는 이 시점이 HUD를 되돌릴 유일한 지점이다.
+		if (AMD_PlayerController* MDPlayerController = Cast<AMD_PlayerController>(PC))
+		{
+			MDPlayerController->SetGameplayHUDVisible(true);
 		}
 	}
 

@@ -24,6 +24,7 @@ class UGameplayAbility;
 class UMD_EquipHotbarComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
+class UMD_OxygenComponent;
 
 UENUM(BlueprintType)
 enum class EMDMovementState : uint8
@@ -60,6 +61,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	UMD_InteractionComponent* GetInteractionComponent() const { return InteractionComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Oxygen")
+	UMD_OxygenComponent* GetOxygenComponent() const { return OxygenComponent; }
 
 protected:
 	// Called when the game starts or when spawned
@@ -109,6 +113,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_SupplyComponent> SupplyComponent;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_OxygenComponent> OxygenComponent;
+
 	/** 모선 리스폰 지점을 찾을 때 사용할 PlayerStart 태그 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Health")
 	FName MothershipRespawnTag = TEXT("MothershipRespawn");
@@ -141,6 +148,7 @@ private:
 	void HandleAbilityInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
+	void HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
 	//void HandleWallCutInput(const FInputActionValue& Value);

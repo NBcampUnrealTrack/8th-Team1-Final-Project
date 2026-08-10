@@ -55,20 +55,59 @@ struct FMD_PieceRecord
       bool bContaminated = false;
 };
 
-// 벽별 오염 셀 상태. 초기값과 다른 셀만 저장한다
+// 표면별 오염 셀 상태. 생성 기준값과 달라진 셀만 저장한다
 USTRUCT()
 struct FMD_WallContaminationRecord
 {
       GENERATED_BODY()
 
+      /**
+       * 표면 컴포넌트를 소유한 레벨 배치 액터 이름.
+       * 기존 스냅샷 호환 때문에 WallName이라는 직렬화 이름은 유지한다.
+       */
       UPROPERTY()
       FName WallName = NAME_None;
+
+      /**
+       * 일반 벽·바닥·설비의 표면 컴포넌트 이름.
+       * NAME_None은 기존 AMD_CuttableWall의 기본 표면을 뜻한다.
+       */
+      UPROPERTY()
+      FName SurfaceComponentName = NAME_None;
 
       UPROPERTY()
       TArray<int32> CellIndices;
 
+      /**
+       * 셀이 짊어진 오염 총량. 밤샘 분출(기획 03 §3)이 이 값을 올리므로 함께 저장한다.
+       * 저장하지 않으면 다음 Day에 생성 기준값으로 되돌아가고, 복원 시 남은 오염량이
+       * 그 값까지 깎여 밤새 생긴 얼룩이 통째로 사라진다.
+       */
+      UPROPERTY()
+      TArray<float> InitialAmounts;
+
       UPROPERTY()
       TArray<float> RemainingAmounts;
+};
+
+/**
+ * 배치기별로 어제 떼어낸 따개비 순번 (기획 03 §3)
+ *
+ * 따개비는 배치기가 시드로 흩뿌리는 런타임 스폰 액터라 FName이 세션마다 달라진다.
+ * 벽·샘플처럼 이름으로 식별할 수 없어 "몇 번째였는지"를 남긴다.
+ * 이것이 없으면 Day가 바뀔 때 어제 떼어낸 따개비가 같은 자리에 전부 되살아난다.
+ */
+USTRUCT()
+struct FMD_BarnacleRemovalRecord
+{
+      GENERATED_BODY()
+
+      // 배치기는 레벨 배치 액터라 이름이 안정적이다
+      UPROPERTY()
+      FName SpawnerName = NAME_None;
+
+      UPROPERTY()
+      TArray<int32> RemovedSpawnIndices;
 };
 
 // Day 종료 시점의 현장 상태. Cut()이 벽을 Destroy하므로 "살아남은 벽"을 기록한다
@@ -120,10 +159,15 @@ struct FMD_DaySnapshot
       UPROPERTY()
       TArray<FMD_PieceRecord> Pieces;
 
+      // 이름은 하위 호환을 위해 유지하지만 일반 표면 컴포넌트도 포함한다
       UPROPERTY()
       TArray<FMD_WallContaminationRecord> WallContaminations;
 
       // 마감 완료된 섹터 마감 마커 (레벨 배치 액터라 이름으로 식별)
       UPROPERTY()
       TArray<FName> ClosedMarkerNames;
+
+      // 배치기별로 어제 떼어낸 따개비 순번
+      UPROPERTY()
+      TArray<FMD_BarnacleRemovalRecord> BarnacleRemovals;
 };

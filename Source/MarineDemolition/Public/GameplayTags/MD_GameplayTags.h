@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -19,6 +19,9 @@ namespace MDGameplayTags
 
 	/** 물리 보관함에 담을 수 있는 오염물 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Contamination);
+
+	/** 물리 보관함에 담을 수 있는 따개비. 기획 02 §1.5가 오염물과 따로 나열한다 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Barnacle);
 
 	/** 물리 보관함에 담을 수 있는 샘플 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Sample);
@@ -88,4 +91,22 @@ namespace MDGameplayTags
 
 	/* 사망 상태. HP 0. 모든 어빌리티 차단 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Dead);
+
+	// ====== 산소 게이지 태그
+
+	/* 완전 잠수 상태. 산소 소모, 질식 피해 GE가 작동하는 태그 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Submerged);
+
+	/* 산소 0. State_Submerged와 함께 있을때 HP -15/s */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Oxygen_Depleted);
+
+	/* For Save Data */
+	// 저장된 게임 데이터로부터 점수, 인게임 시간 등의 정보를 얻는 키
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_GameState);
+	// 저장된 게임 데이터로부터 상인 관련 정보를 얻는 키
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_Merchant);
+	// 저장된 게임 데이터로부터 플레이어 정보를 얻는 키
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_Player);
+	// 저장된 게임 데이터로부터 맵의 변경 사항에 대한 정보를 얻는 키
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_World);
 }

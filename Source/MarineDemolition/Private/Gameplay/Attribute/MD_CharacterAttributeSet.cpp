@@ -56,7 +56,7 @@ void UMD_CharacterAttributeSet::PreAttributeBaseChange(const FGameplayAttribute&
 
 void UMD_CharacterAttributeSet::PostAttributeChange(const FGameplayAttribute& Attribute, float OldValue, float NewValue)
 {
-	Super::PostAttributeBaseChange(Attribute, OldValue, NewValue);
+	Super::PostAttributeChange(Attribute, OldValue, NewValue);
 
 	//값 보정은 서버에서
 	const AActor* OwningActor = GetOwningActor();
