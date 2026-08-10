@@ -139,8 +139,26 @@ void AMD_SampleItem::NotifyGrabbed()
 	BeginImpactProtection(GrabProtectionDuration);
 }
 
+void AMD_SampleItem::SuppressImpactDamage(float Duration)
+{
+	if (Duration <= 0.f)
+	{
+		return;
+	}
+
+	BeginImpactProtection(Duration);
+}
+
 void AMD_SampleItem::BeginImpactProtection(float Duration)
 {
+	// 이미 더 길게 걸려 있는 보호를 짧은 요청이 덮어쓰지 않게 한다.
+	// (스폰 보호 3초 중에 선반 보호 0.5초가 들어오면 스폰 보호가 잘려버린다)
+	const float Remaining = GetWorldTimerManager().GetTimerRemaining(ImpactProtectionTimerHandle);
+	if (bImpactProtected && Remaining > Duration)
+	{
+		return;
+	}
+
 	bImpactProtected = true;
 	GetWorldTimerManager().SetTimer(
 		ImpactProtectionTimerHandle, this, &AMD_SampleItem::EndImpactProtection, Duration, false);
