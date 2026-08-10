@@ -69,6 +69,15 @@ public:
 	/** MD_InteractionComponent가 그랩 성공 직후 호출한다. */
 	void NotifyGrabbed();
 
+	/**
+	 * 이 시간(초) 동안 손상·파괴 판정을 막는다.
+	 *
+	 * 파손이 일어나면 안 되는 구역(회수 선반 등)이 호출한다. 선반은 샘플을 그 앞까지
+	 * 들고 와야 하는 곳이라 접촉이 불가피한데, 그 접촉으로 깨지면 회수 자체가 불가능해진다.
+	 * 구역에 머무는 동안 주기적으로 갱신해서 쓴다.
+	 */
+	void SuppressImpactDamage(float Duration);
+
 protected:
 	virtual void BeginPlay() override;
 
