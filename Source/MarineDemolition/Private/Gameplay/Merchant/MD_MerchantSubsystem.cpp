@@ -1,10 +1,11 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Types/Score/MD_ScoreTypes.h"
+#include "Types/SaveGame/MD_SaveDataTypes.h"
 
 
 int32 UMD_MerchantSubsystem::GetActiveQuestReward() const
@@ -329,6 +330,32 @@ void UMD_MerchantSubsystem::FinalizeContract()
 	{
 		OnMerchantStateChanged.Broadcast();
 	}
+}
+
+FMD_MerchantData UMD_MerchantSubsystem::GetMerchantSaveData()
+{
+	FMD_MerchantData SaveData = FMD_MerchantData();
+	SaveData.bConsumableDiscountActive = bConsumableDiscountActive;
+	SaveData.Credits = Credits;
+	SaveData.CurrentDay = CurrentDay;
+	SaveData.NextDepositMultiplier = NextDepositMultiplier;
+	SaveData.QuestCompletions = QuestCompletions;
+	return SaveData;
+}
+
+bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveData)
+{
+	if (IsValid(GetWorld()) == false || GetWorld()->GetNetMode() == ENetMode::NM_Client)
+	{
+		return false;
+	}
+
+	bConsumableDiscountActive = SaveData.bConsumableDiscountActive;
+	Credits = SaveData.Credits;
+	CurrentDay = SaveData.CurrentDay;
+	NextDepositMultiplier = SaveData.NextDepositMultiplier;
+	QuestCompletions = SaveData.QuestCompletions;
+	return true;
 }
 
 void UMD_MerchantSubsystem::RerollRepeatQuests()

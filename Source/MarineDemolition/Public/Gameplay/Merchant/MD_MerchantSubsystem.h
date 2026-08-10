@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -17,6 +17,7 @@ DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
 
 class UMD_SiteDefinition;
 struct FGameplayTag;
+struct FMD_MerchantData;
 
 enum class EMD_SampleGrade : uint8;
 
@@ -88,6 +89,9 @@ public:
 
 	/** 계약 종료 시 남은 활성 반복 퀘스트를 실패로 정리한다. */
 	void FinalizeContract();
+
+	FMD_MerchantData GetMerchantSaveData();
+	bool ApplyMerchantSaveData(const FMD_MerchantData& SaveData);
 
 	/** `Resource.Sample.Grade.X` 태그 변환. 등급 태그가 필요한 곳에서 공용으로 쓴다. */
 	static FGameplayTag GradeTagFromSampleGrade(EMD_SampleGrade Grade);

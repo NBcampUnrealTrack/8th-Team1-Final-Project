@@ -68,6 +68,14 @@ protected:
 	// 저장되기 이전의 게임 데이터가 기록됨 (로그인/로그아웃 플레이어 등)
 	TSharedPtr<FMD_GameData> TemporaryGameData;
 
+	// 가장 최근에 저장된 게임 데이터
+	// 게임 저장 또는 로드를 시도하는 경우 업데이트 됨
+	TSharedPtr<FMD_GameDataVer2> LatestSavedGameDataVer2;
+
+	// 현재 진행중인 게임의 데이터를 저장(기록)하는 변수
+	// 저장되기 이전의 게임 데이터가 기록됨 (로그인/로그아웃 플레이어 등)
+	TSharedPtr<FMD_GameDataVer2> TemporaryGameDataVer2;
+
 	// 목적지 맵에서 실행할 게임 데이터 초기화 작업
 	EMD_PendingGameDataOperation PendingGameDataOperation = EMD_PendingGameDataOperation::None;
 
@@ -75,14 +83,17 @@ public:
 	// 현재의 게임 데이터를 수집하고 세이브 파일에 저장하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool SaveGameData(const FString& DataName, bool bIsAuto = false);
+	bool SaveGameDataVer2(const FString& DataName, bool bIsAuto = false);
 
 	// 세이브 파일에 저장된 임의 게임 데이터를 제거하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool RemoveGameData(const FMD_GameData& GameData);
+	bool RemoveGameDataVer2(const FMD_GameDataVer2& GameData);
 
 	// 세이브 파일에 저장된 전체 게임 데이터 목록을 불러오는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	TArray<FMD_GameData> LoadAllGameDataList();
+	TArray<FMD_GameDataVer2> LoadAllGameDataListVer2();
 
 	// 현재의 게임 데이터를 수집하고 비동기로 세이브 파일에 저장하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
@@ -99,25 +110,31 @@ public:
 	// 저장된 게임 데이터 내용을 현재 서버의 GameState와 접속 플레이어에게 적용한다.
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool LoadGameDataToWorld(const FMD_GameData& GameData);
+	bool LoadGameDataToWorldVer2(const FMD_GameDataVer2& GameData);
 
 	// 현재 플레이어로부터 플레이어 데이터를 추출하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool ParseDataFromPlayer(const APlayerState* PlayerState);
+	bool ParseDataFromPlayerVer2(const APlayerState* PlayerState);
 
 	// 로드된 게임 데이터에 존재하는 플레이어의 데이터를 현재 플레이어에게 덮어쓰는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool LoadPlayerData(const APlayerState* PlayerState) const;
+	bool LoadPlayerDataVer2(const APlayerState* PlayerState) const;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	void OnTryStartGameWithGameData(const FMD_GameData& GameData);
+	void OnTryStartGameWithGameDataVer2(const FMD_GameDataVer2& GameData);
 
 	// 현재 기록되고 있던 게임 데이터를 초기화하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	void ResetTemporaryGameData();
+	void ResetTemporaryGameDataVer2();
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	// 목적지 게임 맵의 액터 초기화 이후 임시 데이터 생성 또는 저장 데이터 적용을 완료하는 함수
 	bool ApplyPendingGameDataOperation();
+	bool ApplyPendingGameDataOperationVer2();
 
 protected:
 	// 저장 슬롯 작업을 실행할 수 있는 Host 또는 서버 World인지 확인하는 함수
@@ -125,12 +142,15 @@ protected:
 
 	// 저장해야 하는 GameSession 데이터를 수집하는 함수
 	bool CollectGameData();
+	bool CollectGameDataVer2();
 
 	// 게임 데이터에 존재하는 플레이어의 데이터를 현재 플레이어에게 덮어쓰는 함수
 	bool OverwriteDataToPlayerInternal(const APlayerState* PlayerState, const FMD_GameData& GameData) const;
+	bool OverwriteDataToPlayerInternalVer2(const APlayerState* PlayerState, const FMD_GameDataVer2& GameData) const;
 
 	// 요청 시점에 수집된 게임 데이터를 지정된 세이브 파일 목록에 추가하는 함수
 	bool InsertGameDataToSaveFile(UMD_SaveGame* SaveFile, const FMD_GameData& GameData, bool bIsAuto);
+	bool InsertGameDataToSaveFileVer2(UMD_SaveGame* SaveFile, const FMD_GameDataVer2& GameData, bool bIsAuto);
 
 	// 비동기 방식으로 게임 데이터 저장을 위한 세이브 파일 불러오기가 완료된 경우의 콜백 함수
 	UFUNCTION()

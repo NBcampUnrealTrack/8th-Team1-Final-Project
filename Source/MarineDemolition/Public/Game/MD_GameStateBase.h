@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameStateBase.h"
@@ -8,6 +8,7 @@
 
 class UMD_ScoreTableData;
 class UMD_MerchantComponent;
+struct FMD_GameStateData;
 
 UENUM(BlueprintType)
 enum class EMD_WithdrawalPhase : uint8
@@ -206,4 +207,7 @@ public:
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
     TObjectPtr<UMD_MerchantComponent> MerchantComponent;
+
+    FMD_GameStateData GetGameStateSaveData();
+    bool ApplyGameStateSaveData(const FMD_GameStateData& SaveData);
 };

@@ -1,7 +1,8 @@
-#include "Game/MD_GameStateBase.h"
+﻿#include "Game/MD_GameStateBase.h"
 #include "Data/Score/MD_ScoreTableData.h"
 #include "Net/UnrealNetwork.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
+#include "Types/SaveGame/MD_SaveDataTypes.h"
 
 AMD_GameStateBase::AMD_GameStateBase()
 {
@@ -298,6 +299,33 @@ void AMD_GameStateBase::OnRep_CurrentDay()
 void AMD_GameStateBase::OnRep_Score()
 {
     OnScoreChanged.Broadcast(Score);
+}
+
+FMD_GameStateData AMD_GameStateBase::GetGameStateSaveData()
+{
+    FMD_GameStateData SaveData = FMD_GameStateData();
+    SaveData.bEmergencyDay = bEmergencyDay;
+    SaveData.bInspectionWarned = bInspectionWarned;
+    SaveData.ElapsedDay = CurrentDay;
+    SaveData.ElapsedSeconds = GetElapsedGameSeconds();
+    SaveData.Score = Score;
+    return SaveData;
+}
+
+bool AMD_GameStateBase::ApplyGameStateSaveData(const FMD_GameStateData& SaveData)
+{
+    if (HasAuthority() == false)
+    {
+        return false;
+    }
+
+    bEmergencyDay = SaveData.bEmergencyDay;
+    bInspectionWarned = SaveData.bInspectionWarned;
+    CurrentDay = SaveData.ElapsedDay;
+    //ServerWorldTimeSecondsDelta = SaveData.ElapsedSeconds;
+    Score = SaveData.Score;
+
+    return true;
 }
 
 void AMD_GameStateBase::OnRep_WithdrawalPhase()

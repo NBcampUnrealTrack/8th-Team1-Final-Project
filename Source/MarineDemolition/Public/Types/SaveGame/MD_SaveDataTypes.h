@@ -90,6 +90,9 @@ struct MARINEDEMOLITION_API FMD_GameStateData
 	GENERATED_BODY()
 
 public:
+	const static FGameplayTag DataFieldKey;
+
+public:
 	// 점수
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	int32 Score = 0;
@@ -120,6 +123,9 @@ struct MARINEDEMOLITION_API FMD_MerchantData
 	GENERATED_BODY()
 
 public:
+	const static FGameplayTag DataFieldKey;
+
+public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	int32 Credits = 0;
 
@@ -144,6 +150,9 @@ USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_WorldData
 {
 	GENERATED_BODY()
+
+public:
+	const static FGameplayTag DataFieldKey;
 
 public:
 	// 목록에 없는 레벨 배치 벽 = 어제 철거된 벽
