@@ -335,21 +335,36 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 		return false;
 	}
 
-	// 서버 권위 GameState와 상인 상태를 저장 스냅샷으로 교체하는 처리
-	if (GameState->ApplyGameStateSaveData(GameStateData) == false || MerchantManager->ApplyMerchantSaveData(MerchantData) == false)
+	// 월드 데이터가 존재하는 최신 세이브와 필드가 없는 이전 세이브를 구분하는 조회
+	UMD_DayPersistenceSubsystem* DayPersistenceManager = GameInstance->GetSubsystem<UMD_DayPersistenceSubsystem>();
+	FMD_WorldData WorldData;
+	bool bContainsWorldData = GameData.DataFields.Contains(FMD_WorldData::DataFieldKey);
+	bool bHasWorldData = GameData.GetDataField(FMD_WorldData::DataFieldKey, WorldData);
+	if (bContainsWorldData == true && bHasWorldData == false)
+	{
+		return false;
+	}
+	if (bHasWorldData == true && IsValid(DayPersistenceManager) == false)
 	{
 		return false;
 	}
 
-	// World 변경사항 관리 서브시스템 참조
-	UMD_DayPersistenceSubsystem* DayPersistenceManager = GameInstance->GetSubsystem<UMD_DayPersistenceSubsystem>();
-	if (IsValid(DayPersistenceManager) == true)
+	// GameState를 저장 스냅샷으로 교체하는 처리
+	if (GameState->ApplyGameStateSaveData(GameStateData) == false)
 	{
-		FMD_WorldData WorldData;
-		if (GameData.GetDataField(FMD_WorldData::DataFieldKey, WorldData) == true)
-		{
-			//DayPersistenceManager->Apply(MerchantData);
-		}
+		return false;
+	}
+
+	// 상인 상태를 저장 스냅샷으로 교체하는 처리
+	if (MerchantManager->ApplyMerchantSaveData(MerchantData) == false)
+	{
+		return false;
+	}
+
+	// 저장 데이터에 월드 필드가 존재하는 경우 파괴와 오염 상태까지 복원하는 처리
+	if (bHasWorldData == true && DayPersistenceManager->ApplyWorldSaveData(World, WorldData) == false)
+	{
+		return false;
 	}
 
 	// 전체 플레이어 데이터 덮어씌우기
@@ -559,7 +574,12 @@ bool UMD_SaveSlotManager::CollectGameData()
 		return false;
 	}
 
-	// DayPersistence 관련 정보 저장
+	// 파괴된 벽과 동적 액터를 포함한 현재 월드 상태 저장
+	FMD_WorldData WorldData;
+	if (DayPersistenceManager->BuildWorldSaveData(World, WorldData) == false || TemporaryGameData->AddDataField(FMD_WorldData::DataFieldKey, WorldData) == false)
+	{
+		return false;
+	}
 
 	// GameState관련 정보 저장
 	FMD_GameStateData GameStateData = GameState->GetGameStateSaveData();

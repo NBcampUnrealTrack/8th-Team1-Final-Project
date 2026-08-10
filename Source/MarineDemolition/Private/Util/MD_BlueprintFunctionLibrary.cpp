@@ -31,9 +31,9 @@ FMD_SessionFindParams UMD_BlueprintFunctionLibrary::MakeMD_SessionFindParams(FSt
 	return FMD_SessionFindParams(ServerName, RoomCodeString);
 }
 
-FMD_GameDataVer2 UMD_BlueprintFunctionLibrary::MakeMD_GameData(TSoftObjectPtr<UWorld> GameMap)
+FMD_GameData UMD_BlueprintFunctionLibrary::MakeMD_GameData(TSoftObjectPtr<UWorld> GameMap)
 {
-	FMD_GameDataVer2 OutGameData = FMD_GameDataVer2();
+	FMD_GameData OutGameData = FMD_GameData();
 	OutGameData.MapPackagePath = GameMap.ToSoftObjectPath().GetLongPackageName();
 	return OutGameData;
 }

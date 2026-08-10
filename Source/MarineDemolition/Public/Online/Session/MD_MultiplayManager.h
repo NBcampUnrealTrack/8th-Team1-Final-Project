@@ -12,7 +12,7 @@
 struct FBlueprintSessionResult;
 struct FMD_SessionCreateParams;     // Hosting Session 설정값
 struct FMD_SessionFindParams;     // Find Session 설정 값
-struct FMD_GameDataVer2;     // 게임 시작과 불러오기에 사용하는 확장 세이브 데이터
+struct FMD_GameData;     // 게임 시작과 불러오기에 사용하는 확장 세이브 데이터
 
 // Session 생성 완료 시 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCreateMDSessionCompleteSignature, bool, bWasSuccessful);
@@ -113,7 +113,7 @@ public:
 
     // 호스트가 현재 Session을 시작 상태로 전환하고 모든 접속자를 지정 맵으로 이동시키는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
-    void StartSession(const struct FMD_GameDataVer2& GameData);
+    void StartSession(const struct FMD_GameData& GameData);
 
     // 호스트가 진행 중인 Session을 종료 상태로 전환하고 모든 접속자를 지정 맵으로 이동시키는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")

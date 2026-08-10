@@ -93,7 +93,7 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
     CreateSessionInternal(ServerName, MaxPlayerCount, SessionCreateParams);
 }
 
-void UMD_MultiplayManager::StartSession(const FMD_GameDataVer2& GameData)
+void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData)
 {
     // 클라이언트 환경 실행 제한
     UWorld* World = GetWorld();

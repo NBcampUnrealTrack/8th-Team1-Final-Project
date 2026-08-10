@@ -117,6 +117,10 @@ public:
 	UPROPERTY()
 	TArray<FMD_WallContaminationRecord> WallContaminations;
 
+	// 배치기별로 제거되어 다시 생성하면 안 되는 따개비 순번 목록
+	UPROPERTY()
+	TArray<FMD_BarnacleRemovalRecord> BarnacleRemovals;
+
 	// 마감 완료된 섹터 마감 마커 (레벨 배치 액터라 이름으로 식별)
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FName> ClosedMarkerNames;
