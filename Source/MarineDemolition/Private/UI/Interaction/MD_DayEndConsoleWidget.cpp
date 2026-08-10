@@ -18,6 +18,12 @@ void UMD_DayEndConsoleWidget::NativeConstruct()
 	{
 		CloseButton->OnClicked.AddDynamic(this, &UMD_DayEndConsoleWidget::HandleCloseClicked);
 	}
+
+	// 콘솔 화면이 화면을 덮으므로 HUD를 숨긴다. 복구는 NativeDestruct에서.
+	if (AMD_PlayerController* MDPlayerController = Cast<AMD_PlayerController>(GetOwningPlayer()))
+	{
+		MDPlayerController->SetGameplayHUDVisible(false);
+	}
 }
 
 void UMD_DayEndConsoleWidget::NativeDestruct()
@@ -27,6 +33,11 @@ void UMD_DayEndConsoleWidget::NativeDestruct()
 	{
 		PC->SetShowMouseCursor(false);
 		PC->SetInputMode(FInputModeGameOnly());
+
+		if (AMD_PlayerController* MDPlayerController = Cast<AMD_PlayerController>(PC))
+		{
+			MDPlayerController->SetGameplayHUDVisible(true);
+		}
 	}
 
 	Super::NativeDestruct();
