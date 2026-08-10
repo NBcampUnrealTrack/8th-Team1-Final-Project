@@ -301,11 +301,13 @@ void AMD_GameStateBase::OnRep_Score()
     OnScoreChanged.Broadcast(Score);
 }
 
-FMD_GameStateData AMD_GameStateBase::GetGameStateSaveData()
+FMD_GameStateData AMD_GameStateBase::GetGameStateSaveData() const
 {
-    FMD_GameStateData SaveData = FMD_GameStateData();
+    // 하나의 수집 시점에 속한 복제 진행 상태만 슬롯에 기록하기 위한 값 복사
+    FMD_GameStateData SaveData;
     SaveData.bEmergencyDay = bEmergencyDay;
     SaveData.bInspectionWarned = bInspectionWarned;
+    SaveData.ContractCrewCount = ContractCrewCount;
     SaveData.ElapsedDay = CurrentDay;
     SaveData.ElapsedSeconds = GetElapsedGameSeconds();
     SaveData.Score = Score;
@@ -314,18 +316,37 @@ FMD_GameStateData AMD_GameStateBase::GetGameStateSaveData()
 
 bool AMD_GameStateBase::ApplyGameStateSaveData(const FMD_GameStateData& SaveData)
 {
-    if (HasAuthority() == false)
-    {
-        return false;
-    }
+	// 선행 검증을 통과한 데이터만 복제 상태에 적용하기 위한 검사
+	if (CanApplyGameStateSaveData(SaveData) == false)
+	{
+		return false;
+	}
 
+	// 저장 당시 인게임 경과 초를 현재 서버 시각 기준의 시작 시각으로 역산하는 처리
+	const double TotalGameSeconds = static_cast<double>(EndHour - StartHour) * 60.0 * 60.0;
+    const double TimeScale = TotalGameSeconds / RealDayDurationSeconds;
+    const double ElapsedRealSeconds = SaveData.ElapsedSeconds / TimeScale;
+    GameStartServerTime = GetServerWorldTimeSeconds() - ElapsedRealSeconds;
+    bGameTimeStarted = true;
     bEmergencyDay = SaveData.bEmergencyDay;
     bInspectionWarned = SaveData.bInspectionWarned;
+    ContractCrewCount = SaveData.ContractCrewCount;
     CurrentDay = SaveData.ElapsedDay;
-    //ServerWorldTimeSecondsDelta = SaveData.ElapsedSeconds;
     Score = SaveData.Score;
 
-    return true;
+    // 리슨 서버와 접속 클라이언트가 같은 복원 결과를 즉시 관찰하도록 하는 알림과 복제 요청
+    OnRep_Score();
+    OnRep_CurrentDay();
+    ForceNetUpdate();
+
+	return true;
+}
+
+bool AMD_GameStateBase::CanApplyGameStateSaveData(const FMD_GameStateData& SaveData) const
+{
+	// 클라이언트 적용과 설정된 하루 길이를 벗어난 진행 시간의 부분 적용을 방지하기 위한 검사
+	const double TotalGameSeconds = static_cast<double>(EndHour - StartHour) * 60.0 * 60.0;
+	return HasAuthority() == true && SaveData.IsStructurallyValid() == true && RealDayDurationSeconds > 0.0 && TotalGameSeconds > 0.0 && SaveData.ElapsedSeconds <= TotalGameSeconds;
 }
 
 void AMD_GameStateBase::OnRep_WithdrawalPhase()

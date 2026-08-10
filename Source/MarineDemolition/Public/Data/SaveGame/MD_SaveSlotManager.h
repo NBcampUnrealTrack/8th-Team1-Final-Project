@@ -1,4 +1,4 @@
-﻿// 프로젝트 설정의 저작권 안내 문구를 사용한다.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 

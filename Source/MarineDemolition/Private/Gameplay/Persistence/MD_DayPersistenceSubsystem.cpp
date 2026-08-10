@@ -238,8 +238,8 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
 
 bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_WorldData& WorldData) const
 {
-    // 파일 데이터 적용을 서버 권위 월드로 제한하기 위한 검사
-    if (IsValid(World) == false || World->GetNetMode() == NM_Client)
+	// 파일 데이터 적용을 서버 권위 월드로 제한하고 손상 배열의 부분 적용을 막기 위한 검사
+	if (IsValid(World) == false || World->GetNetMode() == NM_Client || WorldData.IsStructurallyValid() == false)
     {
         return false;
     }
@@ -420,11 +420,16 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
         return false;
     }
 
-    // 다음 일차에 필요한 점수와 계약 진행 상태를 서버 GameState에 반영하는 처리
+    // 다음 일차에 필요한 점수와 계약 진행 상태를 서버 GameState에 정확히 반영하는 처리
     AMD_GameStateBase* GameState = World->GetGameState<AMD_GameStateBase>();
-    if (IsValid(GameState))
+    if (IsValid(GameState) == true)
     {
-        GameState->AddScoreDelta(Snapshot.Score);
+        const int32 ScoreDelta = Snapshot.Score - GameState->GetScore();
+        if (ScoreDelta != 0)
+        {
+            GameState->AddScoreDelta(ScoreDelta);
+        }
+
         GameState->SetInspectionWarned(Snapshot.bWarningIssued);
         GameState->SetContractCrewCount(Snapshot.CrewCount);
         GameState->SetEmergencyDay(Snapshot.bEmergencyDay);

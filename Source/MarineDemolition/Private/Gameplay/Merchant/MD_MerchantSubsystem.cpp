@@ -44,6 +44,19 @@ void UMD_MerchantSubsystem::AddCredits(int32 Amount)
 	OnMerchantStateChanged.Broadcast();
 }
 
+void UMD_MerchantSubsystem::AddAffinity(float Amount)
+{
+	// 의미 없는 변경 알림과 부동소수점 누적 오차를 줄이기 위한 조기 종료
+	if (FMath::IsNearlyZero(Amount) == true)
+	{
+		return;
+	}
+
+	// 기획에서 정의한 호감도 범위를 벗어나 상점 해금 판정이 왜곡되지 않도록 하는 제한
+	Affinity = FMath::Clamp(Affinity + Amount, -4.0f, 5.0f);
+	OnMerchantStateChanged.Broadcast();
+}
+
 void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment)
 {
 	if (!IsValid(Site))
@@ -332,29 +345,73 @@ void UMD_MerchantSubsystem::FinalizeContract()
 	}
 }
 
-FMD_MerchantData UMD_MerchantSubsystem::GetMerchantSaveData()
+FMD_MerchantData UMD_MerchantSubsystem::GetMerchantSaveData() const
 {
-	FMD_MerchantData SaveData = FMD_MerchantData();
+	// 하나의 수집 시점에 속한 상인 원장만 슬롯에 기록하기 위한 값 복사
+	FMD_MerchantData SaveData;
 	SaveData.bConsumableDiscountActive = bConsumableDiscountActive;
 	SaveData.Credits = Credits;
+	SaveData.Affinity = Affinity;
 	SaveData.CurrentDay = CurrentDay;
 	SaveData.NextDepositMultiplier = NextDepositMultiplier;
 	SaveData.QuestCompletions = QuestCompletions;
+	SaveData.CurrentSite = TSoftObjectPtr<UMD_SiteDefinition>(CurrentSite.Get());
+	SaveData.MainQuests = MainQuests;
+	SaveData.RepeatQuests = RepeatQuests;
+
+	// UObject 강참조 집합을 파일에 안전한 소프트 경로 목록으로 변환하기 위한 처리
+	for (const TObjectPtr<UMD_SiteDefinition>& ClearedSite : ClearedSites)
+	{
+		if (IsValid(ClearedSite) == true)
+		{
+			SaveData.ClearedSites.Add(TSoftObjectPtr<UMD_SiteDefinition>(ClearedSite.Get()));
+		}
+	}
+
 	return SaveData;
 }
 
 bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveData)
 {
-	if (IsValid(GetWorld()) == false || GetWorld()->GetNetMode() == ENetMode::NM_Client)
+	// 클라이언트 적용과 손상된 경제·퀘스트 상태의 부분 적용을 막기 위한 검사
+	if (IsValid(GetWorld()) == false || GetWorld()->GetNetMode() == ENetMode::NM_Client || SaveData.IsStructurallyValid() == false)
 	{
 		return false;
 	}
 
+	// 현재 현장 애셋을 먼저 검증하여 실패 시 기존 서버 원장을 유지하기 위한 선행 로드
+	UMD_SiteDefinition* LoadedCurrentSite = SaveData.CurrentSite.IsNull() == true ? nullptr : SaveData.CurrentSite.LoadSynchronous();
+	if (SaveData.CurrentSite.IsNull() == false && IsValid(LoadedCurrentSite) == false)
+	{
+		return false;
+	}
+
+	// 클리어 현장 경로를 임시 집합에 모두 구성한 뒤 한 번에 교체하기 위한 처리
+	TSet<TObjectPtr<UMD_SiteDefinition>> LoadedClearedSites;
+	for (const TSoftObjectPtr<UMD_SiteDefinition>& ClearedSitePath : SaveData.ClearedSites)
+	{
+		UMD_SiteDefinition* ClearedSite = ClearedSitePath.IsNull() == true ? nullptr : ClearedSitePath.LoadSynchronous();
+		if (IsValid(ClearedSite) == false)
+		{
+			return false;
+		}
+
+		LoadedClearedSites.Add(ClearedSite);
+	}
+
+	// 모든 참조 검증 이후 경제·호감도·퀘스트 원장을 한 번에 교체하는 처리
 	bConsumableDiscountActive = SaveData.bConsumableDiscountActive;
 	Credits = SaveData.Credits;
+	Affinity = SaveData.Affinity;
 	CurrentDay = SaveData.CurrentDay;
 	NextDepositMultiplier = SaveData.NextDepositMultiplier;
 	QuestCompletions = SaveData.QuestCompletions;
+	CurrentSite = LoadedCurrentSite;
+	MainQuests = SaveData.MainQuests;
+	RepeatQuests = SaveData.RepeatQuests;
+	ClearedSites = MoveTemp(LoadedClearedSites);
+	OnMerchantStateChanged.Broadcast();
+
 	return true;
 }
 
@@ -522,9 +579,14 @@ void UMD_MerchantSubsystem::ApplyQuestReward(const FMD_QuestDefinitionData& Defi
 void UMD_MerchantSubsystem::ResetContract()
 {
 	Credits = 0;
+	Affinity = 0.0f;
 	CurrentSite = nullptr;
 	CurrentDay = 0;
 	MainQuests.Reset();
+	RepeatQuests.Reset();
+	ClearedSites.Reset();
 	NextDepositMultiplier = 1.f;
 	bConsumableDiscountActive = true;
+	QuestCompletions = 0;
+	OnMerchantStateChanged.Broadcast();
 }

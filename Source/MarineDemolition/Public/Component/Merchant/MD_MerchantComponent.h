@@ -45,6 +45,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	int32 GetCurrentDay() const { return CurrentDay; }
 
+	// 서버 원장에서 복제된 호감도를 UI와 상점 해금 판정에 제공하는 함수
+	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
+	float GetAffinity() const { return Affinity; }
+
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	int32 GetQuestCompletions() const { return QuestCompletions; }
 
@@ -72,6 +76,10 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
 	int32 CurrentDay = 0;
 
+	// 모든 클라이언트가 같은 상점 해금 상태를 사용하기 위한 복제 호감도
+	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
+	float Affinity = 0.0f;
+
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
 	int32 QuestCompletions = 0;
 
@@ -92,7 +100,7 @@ public:
 	 * 상인 메뉴 위젯에 넘길 정보를 만든다.
 	 * MD_MerchantMenuWidget::SetMenuInfo()에 그대로 전달하면 된다.
 	 *
-	 * 아직 시스템이 없는 항목(호감도·대출)은 구조체 기본값을 그대로 둔다.
+	 * 아직 시스템이 없는 항목(대출)은 구조체 기본값을 그대로 둔다.
 	 * 기본값이 기획 07 §5 확정값이라 0으로 덮으면 화면이 더 이상해진다.
 	 */
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
