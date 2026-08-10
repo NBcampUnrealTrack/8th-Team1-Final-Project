@@ -6,6 +6,9 @@
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "MD_BlueprintFunctionLibrary.generated.h"
 
+// 새 게임 생성 노드가 반환하는 확장 게임 데이터 구조 전방 선언
+struct FMD_GameDataVer2;
+
 /**
  * 
  */
@@ -30,5 +33,5 @@ public:
 	static FMD_SessionFindParams MakeMD_SessionFindParams(FString ServerName, FString RoomCodeString);
 
 	UFUNCTION(BlueprintPure, Category = "Game Data", meta = (NativeMakeFunc, DisplayName = "Make MD_GameData"))
-	static struct FMD_GameData MakeMD_GameData(TSoftObjectPtr<UWorld> GameMap);
+	static struct FMD_GameDataVer2 MakeMD_GameData(TSoftObjectPtr<UWorld> GameMap);
 };

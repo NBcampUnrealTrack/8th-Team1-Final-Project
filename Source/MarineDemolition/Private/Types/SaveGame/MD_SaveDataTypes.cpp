@@ -18,15 +18,6 @@ void UMD_SaveGame::ApplyMaxSaveCountLimit(const int32& MaxAutoSaveCount, const i
 	{
 		UserSaveList.SetNum(MaxUserSaveCount);
 	}
-	
-	if (AutoSaveList2.Num() > MaxAutoSaveCount)
-	{
-		AutoSaveList2.SetNum(MaxAutoSaveCount);
-	}
-	if (UserSaveList2.Num() > MaxUserSaveCount)
-	{
-		UserSaveList2.SetNum(MaxUserSaveCount);
-	}
 
 	return;
 }
