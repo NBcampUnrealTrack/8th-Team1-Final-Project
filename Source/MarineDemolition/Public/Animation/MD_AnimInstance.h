@@ -26,6 +26,9 @@ public:
 
 protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Anim|Movement")
+	FVector OwnerVelocity = FVector::ZeroVector;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Anim|Movement")
 	float GroundSpeed = 0.f;
 
 	/** 진행 방향 −180 ~ 180. 좌우·후진 블렌드스페이스용 */
