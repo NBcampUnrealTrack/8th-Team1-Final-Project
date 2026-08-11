@@ -101,7 +101,7 @@ protected:
 	TObjectPtr<UStaticMeshComponent> ThirdPersonToolMesh;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
-	FName ToolAttachSocketName = TEXT("hand_r");
+	FName ToolAttachSocketName = TEXT("ToolSocket");
 
 	/** 모든 물리 픽업이 공유하는 운반 기준점. Camera에 부착되며 대상별 배치는 GetHoldOffset()으로 조정한다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
