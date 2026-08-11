@@ -30,9 +30,9 @@ void UMD_AnimInstance::NativeUpdateAnimation(float DeltaSeconds)
 		return;
 	}
 
-	const FVector Velocity = OwnerMovement->Velocity;
+	OwnerVelocity = OwnerMovement->Velocity;
 
-	GroundSpeed = Velocity.Size2D();
+	GroundSpeed = OwnerVelocity.Size2D();
 
 	const float GroundAcceleration = OwnerMovement->GetCurrentAcceleration().Size2D();
 
