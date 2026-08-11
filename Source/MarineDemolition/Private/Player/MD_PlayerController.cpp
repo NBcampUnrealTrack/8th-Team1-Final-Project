@@ -22,6 +22,7 @@
 
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
+#include "Character/MD_Character.h"
 #include "World/Merchant/MD_Merchant.h"
 
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console, int32 SiteIndex, EMD_Difficulty Difficulty)
@@ -88,17 +89,17 @@ void AMD_PlayerController::ServerRequestShopPurchase_Implementation(AMD_Merchant
 		return;
 	}
 
-	APawn* RequestingPawn = GetPawn();
+	AMD_Character* RequestingCharacter = Cast<AMD_Character>(GetPawn());
 
 	// 상점에서 멀어진 플레이어가 보관한 UI나 임의 RPC로 결제하지 못하도록 하는 거리 검사
-	if (IsValid(RequestingPawn) == false || FVector::Dist(RequestingPawn->GetActorLocation(), Merchant->GetActorLocation()) > 500.0f)
+	if (IsValid(RequestingCharacter) == false || FVector::Dist(RequestingCharacter->GetActorLocation(), Merchant->GetActorLocation()) > 500.0f)
 	{
 		ClientReceiveShopPurchaseResult(Merchant, ItemId, EMD_ShopPurchaseResult::InvalidRequest);
 		return;
 	}
 
 	// 카탈로그와 서버 경제 원장을 소유한 상인 액터에 최종 구매 판정을 위임하는 처리
-	const EMD_ShopPurchaseResult PurchaseResult = Merchant->TryPurchaseItem(ItemId);
+	const EMD_ShopPurchaseResult PurchaseResult = Merchant->TryPurchaseItem(RequestingCharacter, ItemId);
 	ClientReceiveShopPurchaseResult(Merchant, ItemId, PurchaseResult);
 }
 

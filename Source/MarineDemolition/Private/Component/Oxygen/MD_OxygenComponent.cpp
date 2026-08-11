@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Component/Oxygen/MD_OxygenComponent.h"
@@ -9,10 +9,21 @@
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
+#include "Character/MD_Character.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
 #include "Util/MD_LogUtility.h"
+
+namespace
+{
+	/** 산소 캔 사용 시 핫바 원장에서 차감할 상점 품목 식별자 */
+	const FName OxygenCanItemId(TEXT("IT-O1"));
+
+	/** 산소 확장 탱크 소유 여부를 핫바 원장에서 조회할 상점 품목 식별자 */
+	const FName OxygenTankItemId(TEXT("IT-O2"));
+}
 
 UMD_OxygenComponent::UMD_OxygenComponent()
 {
@@ -88,7 +99,18 @@ void UMD_OxygenComponent::RefillOxygen()
 void UMD_OxygenComponent::UseOxygenCan()
 {
 	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
-	if (!IsValid(ASC))
+	AMD_Character* OwnerCharacter = Cast<AMD_Character>(GetOwner());
+	UMD_EquipHotbarComponent* HotbarComponent = IsValid(OwnerCharacter) == true ? OwnerCharacter->GetHotbarComponent() : nullptr;
+
+	// 효과를 적용할 수 없거나 구매한 산소 캔이 없으면 무료 사용을 막기 위한 검사
+	if (IsValid(ASC) == false || OxygenCanEffectClass == nullptr || IsValid(HotbarComponent) == false)
+	{
+		return;
+	}
+
+	// 산소 캔 소비 처리
+	bool bConsumeSuccess = HotbarComponent->TryConsumeShopItem(OxygenCanItemId, 1);
+	if (bConsumeSuccess == false)
 	{
 		return;
 	}
@@ -209,6 +231,14 @@ void UMD_OxygenComponent::EnsureInitialized(UAbilitySystemComponent* ASC)
 	// 잠수할 때마다 Apply/Remove 하면 주기 타이머가 리셋돼 소모를 회피할 수 있다.
 	ApplyPassiveEffect(ASC, OxygenDrainEffectClass);
 	ApplyPassiveEffect(ASC, OxygenDepletedDamageEffectClass);
+
+	// ASC 준비 전에 구매한 확장 탱크 아이템이 존재하면 해당 효과를 적용
+	const AMD_Character* OwnerCharacter = Cast<AMD_Character>(GetOwner());
+	const UMD_EquipHotbarComponent* HotbarComponent = IsValid(OwnerCharacter) == true ? OwnerCharacter->GetHotbarComponent() : nullptr;
+	if (IsValid(HotbarComponent) == true && HotbarComponent->GetShopItemCount(OxygenTankItemId) > 0)
+	{
+		SetOxygenTankEquipped(true);
+	}
 }
 
 FActiveGameplayEffectHandle UMD_OxygenComponent::ApplyPassiveEffect(UAbilitySystemComponent* ASC, const TSubclassOf<UGameplayEffect>& EffectClass)

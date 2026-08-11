@@ -14,6 +14,7 @@ class UMD_QuestWidget;
 class UMD_MerchantComponent;
 class UMD_MerchantSubsystem;
 class AMD_PlayerController;
+class AMD_Character;
 class UStaticMeshComponent;
 
 enum class EMD_ShopPurchaseResult : uint8;
@@ -42,8 +43,8 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	FText GetMerchantDisplayName() const { return MerchantDisplayName; }
 
-	/** 서버 카탈로그와 경제 원장을 사용해 요청 품목을 최종 구매하는 함수 */
-	EMD_ShopPurchaseResult TryPurchaseItem(FName ItemId);
+	/** 서버 카탈로그와 경제 원장을 사용해 구매자에게 품목을 지급하고 결제를 확정하는 함수 */
+	EMD_ShopPurchaseResult TryPurchaseItem(AMD_Character* PurchasingCharacter, FName ItemId);
 
 	/** 서버 구매 결과를 현재 로컬 상점과 대사창에 반영하는 함수 */
 	void ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResult Result);

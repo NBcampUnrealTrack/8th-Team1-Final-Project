@@ -50,8 +50,8 @@ public:
 	/** 크레딧 증감. 단독 호출용이며 변경 후 델리게이트 알림. */
 	void AddCredits(int32 Amount);
 
-	/** 서버 원장에서 가격·해금·중복 소유를 검증하고 구매를 원자적으로 반영하는 함수 */
-	EMD_ShopPurchaseResult TryPurchaseShopItem(const FMD_ShopItem& ShopItem);
+	/** 아이템 지급 콜백(FulfillPurchase) 반환 값이 true일 때만 재화 차감과 구매 원장을 함께 확정하는 서버 구매 함수 */
+	EMD_ShopPurchaseResult TryPurchaseShopItem(const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase);
 
 	/** 상점 해금과 UI 갱신에 사용할 구매 완료 품목 식별자 목록 */
 	TArray<FName> GetOwnedItemIds() const;

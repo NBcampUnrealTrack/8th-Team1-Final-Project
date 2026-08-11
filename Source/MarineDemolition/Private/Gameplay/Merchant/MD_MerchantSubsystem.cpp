@@ -45,7 +45,7 @@ void UMD_MerchantSubsystem::AddCredits(int32 Amount)
 	OnMerchantStateChanged.Broadcast();
 }
 
-EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(const FMD_ShopItem& ShopItem)
+EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase)
 {
 	// 클라이언트가 로컬 원장을 변경하지 못하도록 막는 서버 권위 검사
 	if (IsValid(GetWorld()) == false || GetWorld()->GetNetMode() == ENetMode::NM_Client)
@@ -80,6 +80,12 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(const FMD_Shop
 	}
 
 	// 결제와 구매 원장을 같은 프레임에 반영하여 부분 성공을 막는 원자적 처리
+	if (FulfillPurchase() == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 지급 성공이 보장된 같은 프레임에 결제와 팀 구매 원장을 확정하는 원자적 처리
 	Credits -= ShopItem.Price;
 	int32& PurchasedCount = PurchasedItemCounts.FindOrAdd(ShopItem.ItemId);
 	PurchasedCount += 1;

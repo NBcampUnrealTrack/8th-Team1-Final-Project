@@ -10,6 +10,21 @@ class UMD_ToolDefinition;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMDOnEquipHotbarChanged);
 
+/** 네트워크 복제를 지원하는 배열에 상점 품목 식별자와 수량을 함께 담는 항목 구조체 */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_HotbarShopItemEntry
+{
+	GENERATED_BODY()
+
+	/** 카탈로그 품목과 핫바 보유 수량을 연결하는 고유 식별자 */
+	UPROPERTY(BlueprintReadOnly, Category = "Hotbar")
+	FName ItemId;
+
+	/** 해당 플레이어가 현재 보유한 품목 수량 */
+	UPROPERTY(BlueprintReadOnly, Category = "Hotbar")
+	int32 Count = 0;
+};
+
 UCLASS( ClassGroup=(MarineDemolition), meta=(BlueprintSpawnableComponent) )
 class MARINEDEMOLITION_API UMD_EquipHotbarComponent : public UActorComponent
 {
@@ -20,6 +35,7 @@ public:
 	UMD_EquipHotbarComponent();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
 protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
@@ -29,6 +45,18 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "Hotbar")
 	FMDOnEquipHotbarChanged OnHotbarChanged;
 
+private:
+	UPROPERTY(ReplicatedUsing = OnRep_Slots)
+	TArray<TObjectPtr<UMD_ToolDefinition>> Slots;
+
+	UPROPERTY(ReplicatedUsing = OnRep_CurrentSlotIndex)
+	int32 CurrentSlotIndex = 0;
+
+	/** TMap 복제 제약을 피하면서 플레이어별 장비와 소모품을 공유하기 위한 복제 품목 배열 */
+	UPROPERTY(ReplicatedUsing = OnRep_ShopItemEntries)
+	TArray<FMD_HotbarShopItemEntry> ShopItemEntries;
+
+public:
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
 	UMD_ToolDefinition* GetCurrentTool() const;
 
@@ -40,6 +68,18 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
 	int32 GetCurrentSlotIndex() const { return CurrentSlotIndex; }
+
+	/** 별도 가방 인벤토리 없이 핫바가 보관하는 상점 구매 품목 수량 조회 함수 */
+	UFUNCTION(BlueprintPure, Category = "Hotbar")
+	int32 GetShopItemCount(FName ItemId) const;
+
+	/** 서버가 검증한 상점 구매 품목을 핫바 소유 원장에 추가하는 함수 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
+	bool AddShopItem(FName ItemId, int32 Amount = 1);
+
+	/** 소모품 사용 시 핫바 소유 원장에서 지정 수량을 차감하는 함수 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
+	bool TryConsumeShopItem(FName ItemId, int32 Amount = 1);
 
 	// 슬롯 직접 선택 (숫자키)
 	UFUNCTION(BlueprintCallable, Category = "Hotbar")
@@ -70,19 +110,19 @@ protected:
 	TArray<TObjectPtr<UMD_ToolDefinition>> DefaultTools;
 
 private:
+	/** 클라이언트 슬롯 선택을 서버 권위 상태에 반영하는 RPC */
 	UFUNCTION(Server, Reliable)
 	void ServerSelectSlot(int32 SlotIndex);
 
+	/** 슬롯 배열 복제 후 UI를 갱신하는 알림 함수 */
 	UFUNCTION()
 	void OnRep_Slots();
 
+	/** 선택 인덱스 복제 후 UI를 갱신하는 알림 함수 */
 	UFUNCTION()
 	void OnRep_CurrentSlotIndex();
 
-	UPROPERTY(ReplicatedUsing = OnRep_Slots)
-	TArray<TObjectPtr<UMD_ToolDefinition>> Slots;
-
-	UPROPERTY(ReplicatedUsing = OnRep_CurrentSlotIndex)
-	int32 CurrentSlotIndex = 0;
-
+	/** 상점 구매 품목 배열 복제 후 핫바 UI 갱신 알림 함수 */
+	UFUNCTION()
+	void OnRep_ShopItemEntries();
 };

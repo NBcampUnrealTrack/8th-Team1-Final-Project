@@ -19,6 +19,7 @@ void UMD_EquipHotbarComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 
 	DOREPLIFETIME(UMD_EquipHotbarComponent, Slots);
 	DOREPLIFETIME(UMD_EquipHotbarComponent, CurrentSlotIndex);
+	DOREPLIFETIME(UMD_EquipHotbarComponent, ShopItemEntries);
 }
 
 
@@ -53,6 +54,93 @@ UMD_ToolDefinition* UMD_EquipHotbarComponent::GetToolAtSlot(int32 SlotIndex) con
 	}
 
 	return Slots[SlotIndex];
+}
+
+/** 별도 가방 없이 핫바가 보유한 상점 품목 수량을 반환하는 조회 함수 */
+int32 UMD_EquipHotbarComponent::GetShopItemCount(FName ItemId) const
+{
+	// 소규모 카탈로그 배열을 순회하여 복제 불가능한 TMap 없이 품목 수량을 조회하는 처리
+	const FMD_HotbarShopItemEntry* ItemEntry = ShopItemEntries.FindByPredicate([ItemId](const FMD_HotbarShopItemEntry& Entry) { return Entry.ItemId == ItemId; });
+	return ItemEntry != nullptr ? ItemEntry->Count : 0;
+}
+
+/** 서버에서 검증을 마친 상점 품목을 플레이어 핫바 원장에 지급하는 함수 */
+bool UMD_EquipHotbarComponent::AddShopItem(FName ItemId, int32 Amount)
+{
+	AActor* OwnerActor = GetOwner();
+
+	// 클라이언트 임의 지급 방지
+	if (IsValid(OwnerActor) == false || OwnerActor->HasAuthority() == false)
+	{
+		return false;
+	}
+
+	// 잘못된 식별자 또는 수량으로 인한 지급 방지
+	if (ItemId.IsNone() == true || Amount <= 0)
+	{
+		return false;
+	}
+
+	const int32 CurrentCount = GetShopItemCount(ItemId);
+
+	// 비정상적으로 큰 반복 구매로 int32 수량이 순환하는 상황 방지
+	if (CurrentCount > MAX_int32 - Amount)
+	{
+		return false;
+	}
+
+	FMD_HotbarShopItemEntry* ItemEntry = ShopItemEntries.FindByPredicate([ItemId](const FMD_HotbarShopItemEntry& Entry) 
+		{ 
+			return Entry.ItemId == ItemId; 
+		});
+
+	// Hotbar에 아이템 추가
+	if (ItemEntry == nullptr)
+	{
+		FMD_HotbarShopItemEntry& NewEntry = ShopItemEntries.AddDefaulted_GetRef();
+		NewEntry.ItemId = ItemId;
+		NewEntry.Count = Amount;
+	}
+	else
+	{
+		ItemEntry->Count = CurrentCount + Amount;
+	}
+
+	OnRep_ShopItemEntries();
+	OwnerActor->ForceNetUpdate();
+	return true;
+}
+
+/** 실제 사용이 승인된 소모품을 플레이어 핫바 원장에서 차감하는 함수 */
+bool UMD_EquipHotbarComponent::TryConsumeShopItem(FName ItemId, int32 Amount)
+{
+	AActor* OwnerActor = GetOwner();
+
+	// 서버 권위와 유효한 소비 요청만 허용하기 위한 검사
+	if (IsValid(OwnerActor) == false || OwnerActor->HasAuthority() == false || ItemId.IsNone() == true || Amount <= 0)
+	{
+		return false;
+	}
+
+	const int32 ItemIndex = ShopItemEntries.IndexOfByPredicate([ItemId](const FMD_HotbarShopItemEntry& Entry) 
+		{ 
+			return Entry.ItemId == ItemId; 
+		});
+
+	if (ShopItemEntries.IsValidIndex(ItemIndex) == false || ShopItemEntries[ItemIndex].Count < Amount)
+	{
+		return false;
+	}
+
+	ShopItemEntries[ItemIndex].Count -= Amount;
+	if (ShopItemEntries[ItemIndex].Count == 0)
+	{
+		ShopItemEntries.RemoveAt(ItemIndex);
+	}
+
+	OnRep_ShopItemEntries();
+	OwnerActor->ForceNetUpdate();
+	return true;
 }
 
 void UMD_EquipHotbarComponent::SelectSlot(int32 SlotIndex)
@@ -171,6 +259,12 @@ void UMD_EquipHotbarComponent::OnRep_Slots()
 
 void UMD_EquipHotbarComponent::OnRep_CurrentSlotIndex()
 {
+	OnHotbarChanged.Broadcast();
+}
+
+void UMD_EquipHotbarComponent::OnRep_ShopItemEntries()
+{
+	// 슬롯과 구매 품목 수량을 하나의 핫바 갱신 경로로 전달하기 위한 알림
 	OnHotbarChanged.Broadcast();
 }
 

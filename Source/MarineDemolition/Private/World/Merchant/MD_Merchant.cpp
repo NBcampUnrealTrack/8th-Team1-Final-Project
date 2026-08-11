@@ -8,7 +8,10 @@
 #include "UObject/ConstructorHelpers.h"
 
 #include "Character/MD_Character.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
+#include "Component/Oxygen/MD_OxygenComponent.h"
+#include "Component/Support/MD_SupplyComponent.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
@@ -20,6 +23,12 @@
 
 namespace
 {
+	/** 임시 지지대 구매를 기존 설치 수량 컴포넌트로 전달하기 위한 품목 식별자 */
+	const FName SupportItemId(TEXT("IT-P1"));
+
+	/** 산소 확장 탱크 구매 직후 패시브 효과를 장착하기 위한 품목 식별자 */
+	const FName OxygenTankItemId(TEXT("IT-O2"));
+
 	/**
 	 * 캐릭터 에셋 대체용 큐브를 사람 크기(60×60×180cm)로 맞추는 값.
 	 * 엔진 기본 큐브가 100cm 정육면체라 스케일로 눌러 세운다.
@@ -29,6 +38,56 @@ namespace
 
 	/** 큐브 피벗이 가운데라 절반 높이만큼 올려야 액터 원점이 발밑에 온다. */
 	constexpr float PlaceholderHalfHeight = 90.f;
+
+	/** 구매 품목을 구매자 전용 핫바 원장 또는 기존 품목 컴포넌트에 지급하는 처리 */
+	bool FulfillPurchasedItem(AMD_Character* PurchasingCharacter, FName ItemId)
+	{
+		if (IsValid(PurchasingCharacter) == false || PurchasingCharacter->HasAuthority() == false || ItemId.IsNone() == true)
+		{
+			return false;
+		}
+
+		// 지지대 설치 어빌리티가 기존 수량 컴포넌트를 원본으로 사용하기 위한 직접 지급 처리
+		if (ItemId == SupportItemId)
+		{
+			UMD_SupplyComponent* SupplyComponent = PurchasingCharacter->FindComponentByClass<UMD_SupplyComponent>();
+			if (IsValid(SupplyComponent) == false || SupplyComponent->GetSupportCount() >= MAX_int32)
+			{
+				return false;
+			}
+
+			SupplyComponent->AddSupport(1);
+			PurchasingCharacter->ForceNetUpdate();
+			return true;
+		}
+
+		UMD_EquipHotbarComponent* HotbarComponent = PurchasingCharacter->GetHotbarComponent();
+		if (IsValid(HotbarComponent) == false)
+		{
+			return false;
+		}
+
+		// 탱크 패시브 적용 실패 전에 소유 원장이 변경되지 않도록 하는 필수 컴포넌트 검사
+		UMD_OxygenComponent* OxygenComponent = ItemId == OxygenTankItemId ? PurchasingCharacter->GetOxygenComponent() : nullptr;
+		if (ItemId == OxygenTankItemId && IsValid(OxygenComponent) == false)
+		{
+			return false;
+		}
+
+		// Hotbar에 아이템 추가 시도
+		if (HotbarComponent->AddShopItem(ItemId, 1) == false)
+		{
+			return false;
+		}
+
+		// 산소 탱크 아이템 효과 적용
+		if (ItemId == OxygenTankItemId)
+		{
+			OxygenComponent->SetOxygenTankEquipped(true);
+		}
+
+		return true;
+	}
 }
 
 AMD_Merchant::AMD_Merchant()
@@ -256,10 +315,10 @@ void AMD_Merchant::HandleMerchantStateChangedForShop()
 	RefreshShopWidgetFromComponent();
 }
 
-EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(FName ItemId)
+EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCharacter, FName ItemId)
 {
 	// 클라이언트 액터에서 경제 원장을 변경하지 못하도록 하는 서버 권한 검사
-	if (HasAuthority() == false)
+	if (HasAuthority() == false || IsValid(PurchasingCharacter) == false || PurchasingCharacter->HasAuthority() == false)
 	{
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
@@ -277,7 +336,13 @@ EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(FName ItemId)
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
 
-	return MerchantSubsystem->TryPurchaseShopItem(ShopItem);
+	// 실제 플레이어 지급이 성공한 경우에만 팀 경제 원장의 결제를 확정하기 위한 콜백 전달
+	EMD_ShopPurchaseResult PurchaseResult = MerchantSubsystem->TryPurchaseShopItem(ShopItem, [PurchasingCharacter, ItemId]() 
+		{
+			bool bWasSuccessful = FulfillPurchasedItem(PurchasingCharacter, ItemId); 
+			return bWasSuccessful;
+		});
+	return PurchaseResult;
 }
 
 void AMD_Merchant::ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResult Result)
