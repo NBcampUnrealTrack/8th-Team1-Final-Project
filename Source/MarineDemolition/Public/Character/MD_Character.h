@@ -68,10 +68,12 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
 
 	virtual void PossessedBy(AController* NewController) override;
+	virtual void UnPossessed() override;
 
 	virtual void OnRep_PlayerState() override;
 public:

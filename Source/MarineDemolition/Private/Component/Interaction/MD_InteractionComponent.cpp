@@ -1,8 +1,11 @@
 #include "Component/Interaction/MD_InteractionComponent.h"
 
+#include "AbilitySystemComponent.h"
+#include "AbilitySystemInterface.h"
 #include "Camera/CameraComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
+#include "Engine/World.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
@@ -11,7 +14,6 @@
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "GameplayTagAssetInterface.h"
 #include "GameplayTags/MD_GameplayTags.h"
-#include "GeometryCollection/GeometryCollectionActor.h"
 #include "GeometryCollection/GeometryCollectionComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
@@ -20,21 +22,18 @@
 UMD_InteractionComponent::UMD_InteractionComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.bStartWithTickEnabled = false;
 	SetIsReplicatedByDefault(true);
 }
 
-void UMD_InteractionComponent::GetLifetimeReplicatedProps(
-	TArray<FLifetimeProperty>& OutLifetimeProps) const
+void UMD_InteractionComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(UMD_InteractionComponent, HeldActor);
 }
 
-void UMD_InteractionComponent::SetInteractionDependencies(
-	UCameraComponent* InCamera,
-	USceneComponent* InHoldPoint,
-	UPhysicsHandleComponent* InPhysicsHandle)
+void UMD_InteractionComponent::SetInteractionDependencies(UCameraComponent* InCamera, USceneComponent* InHoldPoint, UPhysicsHandleComponent* InPhysicsHandle)
 {
 	Camera = InCamera;
 	HoldPoint = InHoldPoint;
@@ -45,64 +44,79 @@ void UMD_InteractionComponent::BeginPlay()
 {
 	Super::BeginPlay();
 	CaptureDefaultHoldProfile();
+	RefreshTickEnabled();
 }
 
 void UMD_InteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	SetCurrentTarget(nullptr);
-	ReleaseTarget();
-	StopFollowingHeldActor();
+	CancelInteraction();
 
 	Super::EndPlay(EndPlayReason);
 }
 
-void UMD_InteractionComponent::TickComponent(
-	float DeltaTime,
-	ELevelTick TickType,
-	FActorComponentTickFunction* ThisTickFunction)
+void UMD_InteractionComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	APawn* OwnerPawn = GetOwnerPawn();
-	if (!IsValid(OwnerPawn)) return;
+	if (!IsValid(OwnerPawn))
+	{
+		SetComponentTickEnabled(false);
+		return;
+	}
 
-	UpdateInteractionFocus();
+	if (!CanOwnerInteract())
+	{
+		SetCurrentTarget(nullptr);
 
-	if (OwnerPawn->HasAuthority())
+		if (OwnerPawn->HasAuthority() && (HeldActor || HasAuthorityPhysicsGrip()))
+		{
+			ReleaseHeldActor();
+		}
+		else
+		{
+			RefreshTickEnabled();
+		}
+		return;
+	}
+
+	if (OwnerPawn->IsLocallyControlled())
+	{
+		UpdateInteractionFocus();
+	}
+
+	if (OwnerPawn->HasAuthority() && (HeldActor || HasAuthorityPhysicsGrip()))
 	{
 		// 대상이 파괴되면 핸들이 조용히 비므로 복제 상태도 같이 정리한다.
-		if (HeldActor && !IsHolding())
+		if (!IsValid(HeldActor) || !HasAuthorityPhysicsGrip())
 		{
-			ReleaseTarget();
+			ReleaseHeldActor();
+			return;
 		}
 
 		UpdateHeldTarget();
 		UpdateCarrySettle(DeltaTime);
-	}
-	else
-	{
-		UpdateFollowedHeldActor(DeltaTime);
 	}
 }
 
 void UMD_InteractionComponent::Interact()
 {
 	APawn* OwnerPawn = GetOwnerPawn();
-	if (!IsValid(OwnerPawn)) return;
+	if (!IsValid(OwnerPawn) || !CanOwnerInteract())
+	{
+		SetCurrentTarget(nullptr);
+		return;
+	}
 
 	AActor* Target = CurrentTarget.Get();
 
-	// 물리 픽업 또는 대상이 서버 실행을 요구하는 상호작용은 검증된 ServerInteract 경로로 보낸다.
-	// 이동 콘솔·상인처럼 로컬 UI만 여는 대상은 기존처럼 로컬에서 즉시 실행한다.
+	// New interactables are server-authoritative by default. UI-only targets must explicitly opt out.
 	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
 	{
-		const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(Target);
-		const bool bPickupTarget = TagAsset
-			&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics);
 		const bool bRequiresServerInteraction =
 			IMD_Interactable::Execute_RequiresServerInteraction(Target);
 
-		if (!bPickupTarget && !bRequiresServerInteraction)
+		if (!bRequiresServerInteraction)
 		{
 			IMD_Interactable::Execute_Interact(Target, OwnerPawn);
 			return;
@@ -112,16 +126,59 @@ void UMD_InteractionComponent::Interact()
 	ServerInteract(Target);
 }
 
+void UMD_InteractionComponent::CancelInteraction()
+{
+	SetCurrentTarget(nullptr);
+
+	const APawn* OwnerPawn = GetOwnerPawn();
+	if (IsValid(OwnerPawn) && OwnerPawn->HasAuthority())
+	{
+		ReleaseHeldActor();
+	}
+}
+
+void UMD_InteractionComponent::SetInteractionBlocked(bool bBlocked)
+{
+	bInteractionBlocked = bBlocked;
+
+	if (bInteractionBlocked)
+	{
+		CancelInteraction();
+	}
+
+	RefreshTickEnabled();
+}
+
 void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedActor)
 {
 	APawn* OwnerPawn = GetOwnerPawn();
 	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()) return;
-
-	if (IsHolding())
+	if (!CanOwnerInteract())
 	{
-		ReleaseTarget();
+		ReleaseHeldActor();
 		return;
 	}
+
+	if (HeldActor || HasAuthorityPhysicsGrip())
+	{
+		ReleaseHeldActor();
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	if (!World) return;
+
+	const double ServerTimeSeconds = World->GetTimeSeconds();
+	const double ElapsedSeconds = ServerTimeSeconds - LastServerInteractionTimeSeconds;
+	const double MinIntervalSeconds = FMath::Clamp(ServerInteractionMinInterval, 0.05f, 0.1f);
+	if (bHasServerInteractionTimestamp && ElapsedSeconds >= 0.0
+		&& ElapsedSeconds < MinIntervalSeconds)
+	{
+		return;
+	}
+
+	bHasServerInteractionTimestamp = true;
+	LastServerInteractionTimeSeconds = ServerTimeSeconds;
 
 	if (!IsValid(RequestedActor) || !RequestedActor->Implements<UMD_Interactable>())
 	{
@@ -218,7 +275,7 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 {
 	APawn* OwnerPawn = GetOwnerPawn();
 	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()
-		|| !IsValid(Target) || !IsValid(PhysicsHandle)) return false;
+		|| !CanOwnerInteract() || !IsValid(Target) || !IsValid(PhysicsHandle)) return false;
 
 	// 요청이 서버에 도착하기 전에 다른 플레이어가 먼저 잡았을 수 있다.
 	if (IsHeldByOtherPawn(Target))
@@ -268,8 +325,8 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 	bHeldActorSettled = false;
 	HeldCarrySeconds = 0.f;
 
-	// 운반 중에는 위치를 복제하지 않고, 각 머신이 복제된 HeldActor를 HoldPoint로 따라가게 한다.
-	Target->SetReplicateMovement(false);
+	// The server remains the sole physics authority; preserve the actor's existing movement replication strategy.
+	// Clients never move the carried actor from their local HoldPoint.
 
 	// PhysicsHandle이 HoldPoint로 급가속하는 첫 순간의 오탐 충격을 흡수한다.
 	if (AMD_SampleItem* Sample = Cast<AMD_SampleItem>(Target))
@@ -283,12 +340,56 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 	}
 
 	UpdateHeldTarget();
+	Target->ForceNetUpdate();
+	OwnerPawn->ForceNetUpdate();
+	RefreshTickEnabled();
 	return true;
 }
 
 bool UMD_InteractionComponent::IsHolding() const
 {
-	return IsValid(PhysicsHandle) && IsValid(PhysicsHandle->GetGrabbedComponent());
+	return IsValid(HeldActor);
+}
+
+bool UMD_InteractionComponent::CanOwnerInteract() const
+{
+	APawn* OwnerPawn = GetOwnerPawn();
+	if (!IsValid(OwnerPawn) || bInteractionBlocked)
+	{
+		return false;
+	}
+
+	const AController* Controller = OwnerPawn->GetController();
+	if (!IsValid(Controller) || Controller->GetPawn() != OwnerPawn)
+	{
+		return false;
+	}
+
+	const IAbilitySystemInterface* AbilitySystemOwner = Cast<IAbilitySystemInterface>(OwnerPawn);
+	const UAbilitySystemComponent* AbilitySystem = AbilitySystemOwner
+		? AbilitySystemOwner->GetAbilitySystemComponent()
+		: nullptr;
+
+	return !IsValid(AbilitySystem)
+		|| !AbilitySystem->HasMatchingGameplayTag(MDGameplayTags::State_Dead);
+}
+
+bool UMD_InteractionComponent::HasAuthorityPhysicsGrip() const
+{
+	const APawn* OwnerPawn = GetOwnerPawn();
+	return IsValid(OwnerPawn) && OwnerPawn->HasAuthority()
+		&& IsValid(PhysicsHandle) && IsValid(PhysicsHandle->GetGrabbedComponent());
+}
+
+void UMD_InteractionComponent::RefreshTickEnabled()
+{
+	const APawn* OwnerPawn = GetOwnerPawn();
+	const bool bNeedsLocalFocus = IsValid(OwnerPawn)
+		&& OwnerPawn->IsLocallyControlled() && CanOwnerInteract();
+	const bool bNeedsAuthorityCarry = IsValid(OwnerPawn)
+		&& OwnerPawn->HasAuthority() && (HeldActor || HasAuthorityPhysicsGrip());
+
+	SetComponentTickEnabled(bNeedsLocalFocus || bNeedsAuthorityCarry);
 }
 
 bool UMD_InteractionComponent::IsHeldByOtherPawn(const AActor* Target) const
@@ -318,42 +419,44 @@ bool UMD_InteractionComponent::IsHeldByOtherPawn(const AActor* Target) const
 	return false;
 }
 
-void UMD_InteractionComponent::ReleaseTarget()
+void UMD_InteractionComponent::ReleaseHeldActor()
 {
+	APawn* OwnerPawn = GetOwnerPawn();
+	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()) return;
+	if (!HeldActor && !HasAuthorityPhysicsGrip())
+	{
+		RefreshTickEnabled();
+		return;
+	}
+
+	AActor* PreviousHeldActor = HeldActor;
+	HeldActor = nullptr;
 	HeldTargetOffset = FVector::ZeroVector;
 	HeldGrabPointOffset = FVector::ZeroVector;
 	bHeldActorSettled = false;
 	HeldCarrySeconds = 0.f;
 
-	if (AActor* PreviousHeldActor = HeldActor)
-	{
-		HeldActor = nullptr;
-
-		if (IsValid(PreviousHeldActor))
-		{
-			if (PreviousHeldActor->Implements<UMD_Grabbable>())
-			{
-				IMD_Grabbable::Execute_OnCarryEnded(PreviousHeldActor);
-			}
-
-			// GC 액터는 RepData로 위치를 맞추므로 movement 복제를 다시 켜지 않는다.
-			if (!PreviousHeldActor->IsA(AGeometryCollectionActor::StaticClass()))
-			{
-				PreviousHeldActor->SetReplicateMovement(true);
-			}
-			PreviousHeldActor->ForceNetUpdate();
-		}
-	}
-
-	if (!IsValid(PhysicsHandle)) return;
-
-	if (PhysicsHandle->GetGrabbedComponent())
+	// Release server physics before notifying gameplay code or replicating the empty HeldActor state.
+	if (IsValid(PhysicsHandle) && PhysicsHandle->GetGrabbedComponent())
 	{
 		PhysicsHandle->ReleaseComponent();
 	}
 
 	ApplyHoldProfile(DefaultHoldProfile);
 	ActiveHoldProfile = DefaultHoldProfile;
+
+	if (IsValid(PreviousHeldActor))
+	{
+		if (PreviousHeldActor->Implements<UMD_Grabbable>())
+		{
+			IMD_Grabbable::Execute_OnCarryEnded(PreviousHeldActor);
+		}
+
+		PreviousHeldActor->ForceNetUpdate();
+	}
+
+	OwnerPawn->ForceNetUpdate();
+	RefreshTickEnabled();
 }
 
 FTransform UMD_InteractionComponent::GetHoldPointTransform() const
@@ -372,7 +475,7 @@ void UMD_InteractionComponent::UpdateHeldTarget()
 {
 	const APawn* OwnerPawn = GetOwnerPawn();
 	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()
-		|| !IsHolding() || !IsValid(HoldPoint)) return;
+		|| !HasAuthorityPhysicsGrip() || !IsValid(HoldPoint)) return;
 
 	const FTransform HoldTransform = GetHoldPointTransform();
 	const FVector TargetLocation = HoldTransform.TransformPositionNoScale(HeldTargetOffset);
@@ -413,7 +516,14 @@ void UMD_InteractionComponent::UpdateCarrySettle(float DeltaSeconds)
 		FVector::DistSquared(CurrentGrabPoint, TargetLocation) <= FMath::Square(CarrySettleTolerance);
 	const bool bTimedOut = HeldCarrySeconds >= CarrySettleTimeout;
 
-	if (!bReachedTarget && !bTimedOut) return;
+	if (bTimedOut && !bReachedTarget)
+	{
+		// Timeout ends monitoring only. OnCarrySettled is reserved for a real physical arrival.
+		bHeldActorSettled = true;
+		return;
+	}
+
+	if (!bReachedTarget) return;
 
 	bHeldActorSettled = true;
 	IMD_Grabbable::Execute_OnCarrySettled(HeldActor);
@@ -421,87 +531,13 @@ void UMD_InteractionComponent::UpdateCarrySettle(float DeltaSeconds)
 
 void UMD_InteractionComponent::OnRep_HeldActor()
 {
-	StopFollowingHeldActor();
-	StartFollowingHeldActor();
-}
-
-void UMD_InteractionComponent::StartFollowingHeldActor()
-{
-	const APawn* OwnerPawn = GetOwnerPawn();
-	if (!IsValid(OwnerPawn) || OwnerPawn->HasAuthority() || !IsValid(HeldActor)) return;
-
-	UPrimitiveComponent* Component = nullptr;
-	FVector GrabLocation = FVector::ZeroVector;
-
-	if (HeldActor->Implements<UMD_Grabbable>())
+	// HeldActor is only presentation state on clients. Actor/physics movement stays server-authoritative.
+	if (IsHolding())
 	{
-		Component = IMD_Grabbable::Execute_GetGrabComponent(HeldActor);
-		const USceneComponent* GrabPoint = IMD_Grabbable::Execute_GetGrabPoint(HeldActor);
-		if (!IsValid(Component) || !IsValid(GrabPoint)) return;
-
-		GrabLocation = GrabPoint->GetComponentLocation();
-		HeldTargetOffset = IMD_Grabbable::Execute_GetHoldOffset(HeldActor);
-		ActiveHoldProfile = IMD_Grabbable::Execute_GetHoldProfile(HeldActor);
-	}
-	else
-	{
-		Component = Cast<UPrimitiveComponent>(HeldActor->GetRootComponent());
-		if (!IsValid(Component)) return;
-
-		GrabLocation = Component->GetCenterOfMass();
-		HeldTargetOffset = FVector::ZeroVector;
-		ActiveHoldProfile = DefaultHoldProfile;
+		SetCurrentTarget(nullptr);
 	}
 
-	HeldGrabPointOffset = Component->GetComponentTransform().InverseTransformPositionNoScale(GrabLocation);
-
-	// GC는 시뮬레이션을 끄면 물리 프록시가 사라져 렌더까지 멈춘다. 운반 중 위치는 RepData가 맞춘다.
-	if (Component->IsA(UGeometryCollectionComponent::StaticClass()))
-	{
-		return;
-	}
-
-	Component->SetSimulatePhysics(false);
-	FollowedComponent = Component;
-}
-
-void UMD_InteractionComponent::StopFollowingHeldActor()
-{
-	UPrimitiveComponent* Component = FollowedComponent.Get();
-
-	FollowedComponent = nullptr;
-	HeldTargetOffset = FVector::ZeroVector;
-	HeldGrabPointOffset = FVector::ZeroVector;
-	ActiveHoldProfile = DefaultHoldProfile;
-
-	if (!IsValid(Component)) return;
-
-	Component->SetSimulatePhysics(true);
-}
-
-void UMD_InteractionComponent::UpdateFollowedHeldActor(float DeltaSeconds)
-{
-	UPrimitiveComponent* Component = FollowedComponent.Get();
-	if (!IsValid(Component) || !IsValid(HoldPoint)) return;
-
-	const FTransform HoldTransform = GetHoldPointTransform();
-	const FVector GrabTargetLocation = HoldTransform.TransformPositionNoScale(HeldTargetOffset);
-
-	FQuat TargetRotation = ActiveHoldProfile.bConstrainRotation
-		? HoldTransform.GetRotation()
-		: Component->GetComponentQuat();
-	FVector TargetLocation = GrabTargetLocation - TargetRotation.RotateVector(HeldGrabPointOffset);
-
-	if (ActiveHoldProfile.RemoteFollowSpeed > 0.f)
-	{
-		const float Alpha = FMath::Clamp(DeltaSeconds * ActiveHoldProfile.RemoteFollowSpeed, 0.f, 1.f);
-		TargetLocation = FMath::Lerp(Component->GetComponentLocation(), TargetLocation, Alpha);
-		TargetRotation = FQuat::Slerp(Component->GetComponentQuat(), TargetRotation, Alpha).GetNormalized();
-	}
-
-	// Teleport가 아닌 이동이라야 키네마틱 바디가 속도를 갖고 통 안의 내용물도 함께 이동한다.
-	Component->SetWorldLocationAndRotation(
-		TargetLocation, TargetRotation, false, nullptr, ETeleportType::None);
+	RefreshTickEnabled();
 }
 
 void UMD_InteractionComponent::CaptureDefaultHoldProfile()
@@ -649,6 +685,41 @@ bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor)
 		{
 			return false;
 		}
+	}
+
+	// The relaxed bounds/aim fallback must not authorize an actor hidden by world geometry
+	// or another interactable. A clear trace may either hit the requested actor itself or hit nothing
+	// (for example, a GeometryCollection without a matching simple collision representation).
+	const auto IsOccludedOnChannel = [this, OwnerPawn, RequestedActor, &ViewLocation, &ClosestPoint](
+		ECollisionChannel Channel) -> bool
+	{
+		FHitResult OcclusionHit;
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(InteractFallbackOcclusion), /*bTraceComplex*/ false);
+		QueryParams.AddIgnoredActor(OwnerPawn);
+
+		if (!GetWorld()->LineTraceSingleByChannel(
+			OcclusionHit,
+			ViewLocation,
+			ClosestPoint,
+			Channel,
+			QueryParams))
+		{
+			return false;
+		}
+
+		AActor* BlockingActor = OcclusionHit.GetActor();
+		if (!IsValid(BlockingActor) && IsValid(OcclusionHit.GetComponent()))
+		{
+			BlockingActor = OcclusionHit.GetComponent()->GetOwner();
+		}
+
+		return BlockingActor != RequestedActor;
+	};
+
+	if (IsOccludedOnChannel(ECC_Visibility)
+		|| IsOccludedOnChannel(MDCollisionChannels::InteractTrace))
+	{
+		return false;
 	}
 
 	return true;
