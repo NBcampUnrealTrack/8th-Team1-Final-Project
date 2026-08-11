@@ -6,8 +6,12 @@
 #include "MD_TrashSorter.generated.h"
 
 class UBoxComponent;
+class UMaterialInstanceDynamic;
 class UPrimitiveComponent;
 class UStaticMeshComponent;
+class AMD_GameStateBase;
+class UMD_MerchantSubsystem;
+struct FMD_TrashSortResult;
 
 UCLASS()
 class MARINEDEMOLITION_API AMD_TrashSorter : public AActor
@@ -38,6 +42,15 @@ protected:
 	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Trash")
 	void OnItemSwallowed(bool bCorrectSort, const FVector& Location);
 
+	/** 통째 투입은 품목별 로그 대신 합산 결과 하나만 연출한다. 통 자체는 점수에 포함하지 않는다 */
+	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Trash")
+	void OnContainerSwallowed(
+		int32 CorrectCount,
+		int32 MisSortCount,
+		int32 DiscardedCount,
+		int32 RefundCredits,
+		const FVector& Location);
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
@@ -63,6 +76,9 @@ protected:
 	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "MD|Trash")
 	int32 SortedCount = 0;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> SorterMID;
+
 private:
 	UFUNCTION()
 	void HandleBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
@@ -72,8 +88,29 @@ private:
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastItemSwallowed(bool bCorrectSort, FVector Location);
 
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastContainerSwallowed(
+		int32 CorrectCount,
+		int32 MisSortCount,
+		int32 DiscardedCount,
+		int32 RefundCredits,
+		FVector Location);
+
 	/** 판정 → 점수 → 삼킴. 서버 전용 */
 	void JudgeAndSwallow(AActor* Item);
+	void JudgeAndSwallowContainer(AActor* ContainerActor);
+
+	bool ResolveSortResult(AActor* Item, FMD_TrashSortResult& OutResult) const;
+	bool ConsumeSortable(
+		AActor* Item,
+		AMD_GameStateBase* MDGameState,
+		const FMD_TrashSortResult& Result,
+		int32& OutRefundCredits);
+	bool GetServerLedgers(
+		AMD_GameStateBase*& OutGameState,
+		UMD_MerchantSubsystem*& OutMerchant) const;
+
+	TSet<TWeakObjectPtr<AActor>> ActorsBeingProcessed;
 
 	/** 담당 칸 색을 메시에 반영 */
 	void ApplyCategoryTint();

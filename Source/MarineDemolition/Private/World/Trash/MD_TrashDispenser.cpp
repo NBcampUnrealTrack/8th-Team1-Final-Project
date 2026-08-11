@@ -87,6 +87,28 @@ void AMD_TrashDispenser::BeginPlay()
 	RefreshInteractTraceResponse();
 }
 
+void AMD_TrashDispenser::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (IsValid(SpawnClearance))
+	{
+		SpawnClearance->OnComponentBeginOverlap.RemoveDynamic(
+			this, &AMD_TrashDispenser::HandleClearanceBeginOverlap);
+		SpawnClearance->OnComponentEndOverlap.RemoveDynamic(
+			this, &AMD_TrashDispenser::HandleClearanceEndOverlap);
+	}
+
+	for (const TWeakObjectPtr<AMD_TrashBin>& BinPtr : LiveDispensedBins)
+	{
+		if (AMD_TrashBin* Bin = BinPtr.Get())
+		{
+			Bin->OnDestroyed.RemoveDynamic(this, &AMD_TrashDispenser::HandleDispensedBinDestroyed);
+		}
+	}
+	LiveDispensedBins.Reset();
+
+	Super::EndPlay(EndPlayReason);
+}
+
 void AMD_TrashDispenser::SetInteractionHighlighted_Implementation(bool bHighlighted)
 {
 	if (!IsValid(Mesh)) return;
@@ -102,14 +124,29 @@ bool AMD_TrashDispenser::RequiresServerInteraction_Implementation() const
 
 void AMD_TrashDispenser::Interact_Implementation(AActor* Interactor)
 {
-	if (!HasAuthority()) return;
+	if (!HasAuthority() || !GetWorld()) return;
 
-	if (!IsValid(SpawnPoint) || !IsValid(SpawnClearance) || !TrashBinClass || !GetWorld())
+	const double CurrentTime = GetWorld()->GetTimeSeconds();
+	if (CurrentTime < NextAllowedInteractionTime)
+	{
+		// 결과까지 multicast하면 공격자의 요청 하나가 모든 client의 Reliable RPC로 증폭된다.
+		return;
+	}
+	NextAllowedInteractionTime = CurrentTime + FMath::Max(0.05f, InteractionCooldown);
+
+	if (!IsValid(SpawnPoint) || !IsValid(SpawnClearance) || !TrashBinClass)
 	{
 		UE_LOG(MarineDemolition, Warning,
 			TEXT("'%s' 보급기의 SpawnPoint, SpawnClearance 또는 TrashBinClass가 설정되지 않았다."),
 			*GetName());
 		MulticastDispenseResult(EMD_TrashDispenseResult::NotConfigured);
+		return;
+	}
+
+	CompactLiveDispensedBins();
+	if (LiveDispensedBins.Num() >= FMath::Max(1, MaxLiveDispensedBins))
+	{
+		MulticastDispenseResult(EMD_TrashDispenseResult::LiveLimitReached);
 		return;
 	}
 
@@ -133,9 +170,56 @@ void AMD_TrashDispenser::Interact_Implementation(AActor* Interactor)
 		SpawnTransform,
 		SpawnParams);
 
-	MulticastDispenseResult(IsValid(SpawnedTrashBin)
-		? EMD_TrashDispenseResult::Success
-		: EMD_TrashDispenseResult::SpawnFailed);
+	if (IsValid(SpawnedTrashBin))
+	{
+		if (RegisterTrackedBin(SpawnedTrashBin))
+		{
+			MulticastDispenseResult(EMD_TrashDispenseResult::Success);
+		}
+		else
+		{
+			SpawnedTrashBin->Destroy();
+			MulticastDispenseResult(EMD_TrashDispenseResult::SpawnFailed);
+		}
+	}
+	else
+	{
+		MulticastDispenseResult(EMD_TrashDispenseResult::SpawnFailed);
+	}
+}
+
+bool AMD_TrashDispenser::RegisterTrackedBin(AMD_TrashBin* Bin)
+{
+	if (!HasAuthority() || !IsValid(Bin) || Bin->IsActorBeingDestroyed())
+	{
+		return false;
+	}
+
+	CompactLiveDispensedBins();
+	const TWeakObjectPtr<AMD_TrashBin> BinPtr(Bin);
+	if (!LiveDispensedBins.Contains(BinPtr))
+	{
+		LiveDispensedBins.Add(BinPtr);
+		Bin->OnDestroyed.AddUniqueDynamic(
+			this, &AMD_TrashDispenser::HandleDispensedBinDestroyed);
+	}
+	return true;
+}
+
+void AMD_TrashDispenser::HandleDispensedBinDestroyed(AActor* DestroyedActor)
+{
+	if (!DestroyedActor) return;
+
+	LiveDispensedBins.Remove(TWeakObjectPtr<AMD_TrashBin>(Cast<AMD_TrashBin>(DestroyedActor)));
+}
+
+void AMD_TrashDispenser::CompactLiveDispensedBins()
+{
+	LiveDispensedBins.RemoveAll(
+		[](const TWeakObjectPtr<AMD_TrashBin>& BinPtr)
+		{
+			return !BinPtr.IsValid();
+		});
 }
 
 bool AMD_TrashDispenser::IsSpawnAreaClear() const
