@@ -40,8 +40,6 @@ protected:
 	float InjuredCutSpeedMultiplier = 0.7f;
 
 private:
-	UFUNCTION()
-	void HandleInputReleased(float TimeHeld);
 
 	void TickCutProgress();
 

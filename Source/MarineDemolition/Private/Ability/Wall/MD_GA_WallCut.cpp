@@ -5,7 +5,6 @@
 
 #include "World/Wall/MD_CuttableWall.h"
 
-#include "Abilities/Tasks/AbilityTask_WaitInputRelease.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
@@ -24,12 +23,13 @@ void UMD_GA_WallCut::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 		return;
 	}
 
-	if (AMD_CuttableWall* Wall = GetAimedWall(ActorInfo))
+	if (UWorld* World = GetWorld())
 	{
-		Wall->Cut(ActorInfo->AvatarActor.Get());
+		World->GetTimerManager().SetTimer(
+			ProgressTimerHandle, this, &UMD_GA_WallCut::TickCutProgress, ProgressInterval, true);
 	}
 
-	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+	OnCutStarted();
 }
 
 void UMD_GA_WallCut::EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled)
@@ -44,11 +44,7 @@ void UMD_GA_WallCut::EndAbility(const FGameplayAbilitySpecHandle Handle, const F
 	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }
 
-void UMD_GA_WallCut::HandleInputReleased(float TimeHeld)
-{
-	// 진행도는 벽에 남으므로 여기서 정리할 것이 없다 (기획 §1 "진행도 유지")
-	EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
-}
+
 
 void UMD_GA_WallCut::TickCutProgress()
 {
