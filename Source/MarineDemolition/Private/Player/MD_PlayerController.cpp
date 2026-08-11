@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Player/MD_PlayerController.h"
@@ -21,6 +21,8 @@
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 
 #include "Data/Merchant/MD_SiteDefinition.h"
+#include "Data/Shop/MD_ShopCatalog.h"
+#include "World/Merchant/MD_Merchant.h"
 
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console, int32 SiteIndex, EMD_Difficulty Difficulty)
 {
@@ -74,6 +76,38 @@ void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole*
 	if (AMD_GameModeBase* GM = GetWorld()->GetAuthGameMode<AMD_GameModeBase>())
 	{
 		GM->RequestEndDay();
+	}
+}
+
+void AMD_PlayerController::ServerRequestShopPurchase_Implementation(AMD_Merchant* Merchant, FName ItemId)
+{
+	// 유효하지 않은 액터 참조로 서버 원장에 접근하지 못하도록 하는 요청 검사
+	if (IsValid(Merchant) == false || ItemId.IsNone() == true)
+	{
+		ClientReceiveShopPurchaseResult(Merchant, ItemId, EMD_ShopPurchaseResult::InvalidRequest);
+		return;
+	}
+
+	APawn* RequestingPawn = GetPawn();
+
+	// 상점에서 멀어진 플레이어가 보관한 UI나 임의 RPC로 결제하지 못하도록 하는 거리 검사
+	if (IsValid(RequestingPawn) == false || FVector::Dist(RequestingPawn->GetActorLocation(), Merchant->GetActorLocation()) > 500.0f)
+	{
+		ClientReceiveShopPurchaseResult(Merchant, ItemId, EMD_ShopPurchaseResult::InvalidRequest);
+		return;
+	}
+
+	// 카탈로그와 서버 경제 원장을 소유한 상인 액터에 최종 구매 판정을 위임하는 처리
+	const EMD_ShopPurchaseResult PurchaseResult = Merchant->TryPurchaseItem(ItemId);
+	ClientReceiveShopPurchaseResult(Merchant, ItemId, PurchaseResult);
+}
+
+void AMD_PlayerController::ClientReceiveShopPurchaseResult_Implementation(AMD_Merchant* Merchant, FName ItemId, EMD_ShopPurchaseResult Result)
+{
+	// 다른 상인의 로컬 위젯에 결과가 섞이지 않도록 요청 대상 액터에 직접 전달하는 처리
+	if (IsValid(Merchant) == true)
+	{
+		Merchant->ReceiveShopPurchaseResult(ItemId, Result);
 	}
 }
 

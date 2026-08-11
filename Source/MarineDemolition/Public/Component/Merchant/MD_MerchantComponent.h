@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -61,6 +61,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	TArray<FMD_RepeatQuestState> GetRepeatQuests() const { return RepeatQuests; }
 
+	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
+	TArray<FName> GetOwnedItemIds() const { return OwnedItemIds; }
+
 private:
 	/** Subsystem 값을 복제 변수로 복사한다. 서버에서만 호출된다. */
 	void RefreshFromSubsystem();
@@ -91,6 +94,9 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
 	TArray<FMD_RepeatQuestState> RepeatQuests;
+
+	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
+	TArray<FName> OwnedItemIds;
 
 	FDelegateHandle SubsystemChangedHandle;
 		

@@ -262,12 +262,12 @@ void UMD_ShopWidget::HandleCardBuyRequested(FName ItemId)
 	// 가득 찬 품목은 버튼을 비활성화하지 않고 눌리게 두되 여기서 막는다.
 	// 눌러야 상인이 이유를 말해줄 수 있어서다 — 회색으로 죽어 있으면
 	// 플레이어는 왜 못 사는지 모른 채 넘어간다.
-	if (FullyStockedItemIds.Contains(ItemId))
+	if (FullyStockedItemIds.Contains(ItemId) == true)
 	{
 		OnPurchaseRejected.Broadcast(ItemId);
 		return;
 	}
 
-	// 실제 결제·인벤 반영은 경제 시스템이 붙은 뒤에 처리한다.
+	// 표시 전용 위젯에서 서버 권위 구매 처리 진입점으로 전달하기 위한 요청 방송
 	OnItemPurchaseRequested.Broadcast(ItemId);
 }

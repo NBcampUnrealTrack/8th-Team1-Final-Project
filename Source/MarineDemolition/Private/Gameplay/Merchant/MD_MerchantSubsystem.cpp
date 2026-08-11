@@ -4,6 +4,7 @@
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
+#include "Data/Shop/MD_ShopCatalog.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 
@@ -42,6 +43,69 @@ void UMD_MerchantSubsystem::AddCredits(int32 Amount)
 	Credits = FMath::Max(0, Credits + Amount);
 
 	OnMerchantStateChanged.Broadcast();
+}
+
+EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(const FMD_ShopItem& ShopItem)
+{
+	// 클라이언트가 로컬 원장을 변경하지 못하도록 막는 서버 권위 검사
+	if (IsValid(GetWorld()) == false || GetWorld()->GetNetMode() == ENetMode::NM_Client)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 카탈로그 식별자와 구매 가격이 없는 항목의 직접 구매를 막는 데이터 검사
+	if (ShopItem.ItemId.IsNone() == true || ShopItem.Price < 0)
+	{
+		return EMD_ShopPurchaseResult::InvalidItem;
+	}
+
+	const TArray<FName> OwnedItemIds = GetOwnedItemIds();
+
+	// UI 표시와 동일한 조건을 서버 원장 값으로 다시 계산하는 해금 검사
+	if (ShopItem.IsUnlocked(Affinity, QuestCompletions, OwnedItemIds) == false)
+	{
+		return EMD_ShopPurchaseResult::Locked;
+	}
+
+	// 개당 판매 품목이 아닌 장비의 중복 결제를 막는 보유 검사
+	if (ShopItem.bPricePerUnit == false && GetPurchasedItemCount(ShopItem.ItemId) > 0)
+	{
+		return EMD_ShopPurchaseResult::FullyStocked;
+	}
+
+	// 부족한 크레딧으로 원장이 음수가 되는 상황을 막는 결제 검사
+	if (Credits < ShopItem.Price)
+	{
+		return EMD_ShopPurchaseResult::InsufficientCredits;
+	}
+
+	// 결제와 구매 원장을 같은 프레임에 반영하여 부분 성공을 막는 원자적 처리
+	Credits -= ShopItem.Price;
+	int32& PurchasedCount = PurchasedItemCounts.FindOrAdd(ShopItem.ItemId);
+	PurchasedCount += 1;
+
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] 상점 구매 완료: %s (-%d, 잔액 %d, 누적 %d개)"), *ShopItem.ItemId.ToString(), ShopItem.Price, Credits, PurchasedCount);
+
+	// GameState 복제 미러와 열려 있는 상점 UI를 함께 갱신하기 위한 변경 알림
+	OnMerchantStateChanged.Broadcast();
+
+	return EMD_ShopPurchaseResult::Success;
+}
+
+TArray<FName> UMD_MerchantSubsystem::GetOwnedItemIds() const
+{
+	TArray<FName> OwnedItemIds;
+	PurchasedItemCounts.GenerateKeyArray(OwnedItemIds);
+
+	// TMap 순회 순서 차이로 복제 배열이 불필요하게 변경되는 상황을 막기 위한 정렬
+	OwnedItemIds.Sort(FNameLexicalLess());
+	return OwnedItemIds;
+}
+
+int32 UMD_MerchantSubsystem::GetPurchasedItemCount(FName ItemId) const
+{
+	const int32* PurchasedCount = PurchasedItemCounts.Find(ItemId);
+	return PurchasedCount != nullptr ? *PurchasedCount : 0;
 }
 
 void UMD_MerchantSubsystem::AddAffinity(float Amount)
@@ -355,6 +419,7 @@ FMD_MerchantData UMD_MerchantSubsystem::GetMerchantSaveData() const
 	SaveData.CurrentDay = CurrentDay;
 	SaveData.NextDepositMultiplier = NextDepositMultiplier;
 	SaveData.QuestCompletions = QuestCompletions;
+	SaveData.PurchasedItemCounts = PurchasedItemCounts;
 	SaveData.CurrentSite = TSoftObjectPtr<UMD_SiteDefinition>(CurrentSite.Get());
 	SaveData.MainQuests = MainQuests;
 	SaveData.RepeatQuests = RepeatQuests;
@@ -406,6 +471,7 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 	CurrentDay = SaveData.CurrentDay;
 	NextDepositMultiplier = SaveData.NextDepositMultiplier;
 	QuestCompletions = SaveData.QuestCompletions;
+	PurchasedItemCounts = SaveData.PurchasedItemCounts;
 	CurrentSite = LoadedCurrentSite;
 	MainQuests = SaveData.MainQuests;
 	RepeatQuests = SaveData.RepeatQuests;
@@ -588,5 +654,6 @@ void UMD_MerchantSubsystem::ResetContract()
 	NextDepositMultiplier = 1.f;
 	bConsumableDiscountActive = true;
 	QuestCompletions = 0;
+	PurchasedItemCounts.Reset();
 	OnMerchantStateChanged.Broadcast();
 }

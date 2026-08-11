@@ -1,9 +1,10 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "World/Merchant/MD_Merchant.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "Engine/GameInstance.h"
 #include "UObject/ConstructorHelpers.h"
 
 #include "Character/MD_Character.h"
@@ -11,6 +12,7 @@
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
+#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Player/MD_PlayerController.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
 #include "UI/Merchant/MD_QuestWidget.h"
@@ -123,6 +125,12 @@ void AMD_Merchant::HandleMenuExitRequested()
 	// 상점·퀘스트가 위에 떠 있는 상태에서 메뉴가 닫히면 같이 정리한다.
 	if (ActiveShopWidget.IsValid())
 	{
+		UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+		if (MerchantComponent != nullptr)
+		{
+			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForShop);
+		}
+
 		ActiveShopWidget->RemoveFromParent();
 		ActiveShopWidget.Reset();
 	}
@@ -173,21 +181,40 @@ void AMD_Merchant::HandleShopRequested()
 
 	ShopWidget->SetCatalog(ShopCatalog);
 
-	// 메뉴가 들고 있는 정보를 그대로 넘겨 두 화면의 수치가 갈리지 않게 한다.
-	ShopWidget->SetShopInfo(ActiveMenuWidget->GetMenuInfo());
-
 	ShopWidget->OnBackRequested.AddDynamic(this, &AMD_Merchant::HandleShopBackRequested);
 	ShopWidget->OnPurchaseRejected.AddDynamic(this, &AMD_Merchant::HandleShopPurchaseRejected);
+	ShopWidget->OnItemPurchaseRequested.AddDynamic(this, &AMD_Merchant::HandleShopItemPurchaseRequested);
 
 	// 메뉴 위젯 자체는 살려둔다 — 파괴하면 입력 모드가 초기화되고 대사창도 함께 사라진다.
 	// 대신 메뉴 패널을 숨겨서 상점과 겹치지 않게 한다.
 	ShopWidget->SetOwningMerchantMenu(ActiveMenuWidget.Get());
 	ShopWidget->AddToViewport();
 	ActiveShopWidget = ShopWidget;
+
+	// 서버 원장의 복제 미러가 바뀌면 크레딧과 구매 가능 상태를 즉시 다시 계산하기 위한 구독
+	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (MerchantComponent != nullptr)
+	{
+		MerchantComponent->OnMerchantStateChanged.AddUniqueDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForShop);
+	}
+
+	RefreshShopWidgetFromComponent();
 }
 
 void AMD_Merchant::HandleShopBackRequested()
 {
+	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (MerchantComponent != nullptr)
+	{
+		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForShop);
+
+		// 상점에서 차감된 크레딧을 다시 드러나는 루트 메뉴에도 즉시 반영하기 위한 갱신
+		if (ActiveMenuWidget.IsValid() == true)
+		{
+			ActiveMenuWidget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
+		}
+	}
+
 	if (ActiveShopWidget.IsValid())
 	{
 		ActiveShopWidget->RemoveFromParent();
@@ -212,6 +239,83 @@ void AMD_Merchant::HandleShopPurchaseRejected(FName ItemId)
 	{
 		ActiveMenuWidget->ShowDialogueLine(FullStockDialogue);
 	}
+}
+
+void AMD_Merchant::HandleShopItemPurchaseRequested(FName ItemId)
+{
+	// 소유 컨트롤러를 통해서만 서버 RPC를 보낼 수 있도록 하는 구매 요청 전달
+	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+	if (InteractingPlayerController != nullptr)
+	{
+		InteractingPlayerController->ServerRequestShopPurchase(this, ItemId);
+	}
+}
+
+void AMD_Merchant::HandleMerchantStateChangedForShop()
+{
+	RefreshShopWidgetFromComponent();
+}
+
+EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(FName ItemId)
+{
+	// 클라이언트 액터에서 경제 원장을 변경하지 못하도록 하는 서버 권한 검사
+	if (HasAuthority() == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 서버가 보유한 카탈로그에 없는 식별자를 이용한 가격 조작을 막는 품목 조회
+	FMD_ShopItem ShopItem;
+	if (IsValid(ShopCatalog) == false || ShopCatalog->FindItem(ItemId, ShopItem) == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidItem;
+	}
+
+	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
+	if (IsValid(MerchantSubsystem) == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	return MerchantSubsystem->TryPurchaseShopItem(ShopItem);
+}
+
+void AMD_Merchant::ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResult Result)
+{
+	// 닫힌 메뉴에 피드백을 남기지 않도록 하는 로컬 위젯 수명 검사
+	if (ActiveMenuWidget.IsValid() == false)
+	{
+		return;
+	}
+
+	if (Result == EMD_ShopPurchaseResult::Success)
+	{
+		FMD_ShopItem PurchasedItem;
+		const bool bHasPurchasedItem = IsValid(ShopCatalog) == true && ShopCatalog->FindItem(ItemId, PurchasedItem) == true;
+		const FText ItemName = bHasPurchasedItem == true ? PurchasedItem.DisplayName : FText::FromName(ItemId);
+		ActiveMenuWidget->ShowDialogueLine(FText::Format(NSLOCTEXT("MDMerchant", "ShopPurchaseSuccess", "{0}, 챙겨 둬."), ItemName));
+		return;
+	}
+
+	if (Result == EMD_ShopPurchaseResult::FullyStocked)
+	{
+		ActiveMenuWidget->ShowDialogueLine(FullStockDialogue);
+		return;
+	}
+
+	if (Result == EMD_ShopPurchaseResult::InsufficientCredits)
+	{
+		ActiveMenuWidget->ShowDialogueLine(InsufficientCreditsDialogue);
+		return;
+	}
+
+	if (Result == EMD_ShopPurchaseResult::Locked)
+	{
+		ActiveMenuWidget->ShowDialogueLine(LockedItemDialogue);
+		return;
+	}
+
+	ActiveMenuWidget->ShowDialogueLine(InvalidPurchaseDialogue);
 }
 
 void AMD_Merchant::HandleQuestRequested()
@@ -325,12 +429,51 @@ void AMD_Merchant::RefreshQuestWidgetFromComponent()
 	ActiveQuestWidget->SetRepeatQuests(MerchantComponent->GetRepeatQuests());
 }
 
+void AMD_Merchant::RefreshShopWidgetFromComponent()
+{
+	if (ActiveShopWidget.IsValid() == false)
+	{
+		return;
+	}
+
+	const UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (IsValid(MerchantComponent) == false)
+	{
+		return;
+	}
+
+	// 소유권과 선행 품목 해금을 동일한 복제 스냅샷으로 계산하기 위한 목록 복사
+	const TArray<FName> OwnedItemIds = MerchantComponent->GetOwnedItemIds();
+	TArray<FName> FullyStockedItemIds;
+
+	if (IsValid(ShopCatalog) == true)
+	{
+		for (const FMD_ShopItem& ShopItem : ShopCatalog->Items)
+		{
+			if (ShopItem.bPricePerUnit == false && OwnedItemIds.Contains(ShopItem.ItemId) == true)
+			{
+				FullyStockedItemIds.Add(ShopItem.ItemId);
+			}
+		}
+	}
+
+	ActiveShopWidget->SetShopInfo(MerchantComponent->BuildMenuInfo());
+	ActiveShopWidget->SetProgress(MerchantComponent->GetQuestCompletions(), OwnedItemIds);
+	ActiveShopWidget->SetFullyStockedItems(FullyStockedItemIds);
+}
+
 UMD_MerchantComponent* AMD_Merchant::GetMerchantComponent() const
 {
 	const UWorld* World = GetWorld();
 	const AMD_GameStateBase* GameState = IsValid(World) ? World->GetGameState<AMD_GameStateBase>() : nullptr;
 
 	return IsValid(GameState) ? GameState->GetMerchantComponent() : nullptr;
+}
+
+UMD_MerchantSubsystem* AMD_Merchant::GetMerchantSubsystem() const
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	return IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
 }
 
 AMD_PlayerController* AMD_Merchant::GetInteractingPlayerController() const

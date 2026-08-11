@@ -8,6 +8,18 @@
 
 class UTexture2D;
 
+/** 서버 구매 검증 결과를 클라이언트 UI에 전달하기 위한 상태 */
+UENUM(BlueprintType)
+enum class EMD_ShopPurchaseResult : uint8
+{
+	Success             UMETA(DisplayName = "구매 성공"),
+	InvalidRequest      UMETA(DisplayName = "잘못된 요청"),
+	InvalidItem         UMETA(DisplayName = "유효하지 않은 품목"),
+	Locked              UMETA(DisplayName = "잠긴 품목"),
+	InsufficientCredits UMETA(DisplayName = "크레딧 부족"),
+	FullyStocked        UMETA(DisplayName = "이미 보유한 품목")
+};
+
 /**
  * 상점 카테고리 (`04` §3 = `08` §1, 5탭)
  *

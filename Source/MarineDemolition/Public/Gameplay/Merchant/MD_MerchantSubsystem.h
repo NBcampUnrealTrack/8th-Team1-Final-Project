@@ -18,8 +18,10 @@ DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
 class UMD_SiteDefinition;
 struct FGameplayTag;
 struct FMD_MerchantData;
+struct FMD_ShopItem;
 
 enum class EMD_SampleGrade : uint8;
+enum class EMD_ShopPurchaseResult : uint8;
 
 UCLASS()
 class MARINEDEMOLITION_API UMD_MerchantSubsystem : public UGameInstanceSubsystem
@@ -47,6 +49,15 @@ public:
 
 	/** 크레딧 증감. 단독 호출용이며 변경 후 델리게이트 알림. */
 	void AddCredits(int32 Amount);
+
+	/** 서버 원장에서 가격·해금·중복 소유를 검증하고 구매를 원자적으로 반영하는 함수 */
+	EMD_ShopPurchaseResult TryPurchaseShopItem(const FMD_ShopItem& ShopItem);
+
+	/** 상점 해금과 UI 갱신에 사용할 구매 완료 품목 식별자 목록 */
+	TArray<FName> GetOwnedItemIds() const;
+
+	/** 소모품을 포함한 품목별 누적 구매 횟수 */
+	int32 GetPurchasedItemCount(FName ItemId) const;
 
 	// 호감도를 기획 범위 안에서 증감하고 복제 미러 갱신을 요청하는 함수
 	void AddAffinity(float Amount);
@@ -150,4 +161,8 @@ private:
 
 	/** 누적 퀘스트 성공 횟수. 계약을 넘어 유지되며 상점 해금 조건에 쓴다. */
 	int32 QuestCompletions = 0;
+
+	/** 계약 중 구매 결과와 선행 품목 해금을 유지하기 위한 서버 권위 구매 원장 */
+	UPROPERTY()
+	TMap<FName, int32> PurchasedItemCounts;
 };
