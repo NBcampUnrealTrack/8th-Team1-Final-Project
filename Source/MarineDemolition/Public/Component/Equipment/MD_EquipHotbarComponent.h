@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "GameplayTagContainer.h"
 #include "MD_EquipHotbarComponent.generated.h"
 
 class UMD_ToolDefinition;
@@ -76,6 +77,10 @@ public:
 	/** 서버가 검증한 상점 구매 품목을 핫바 소유 원장에 추가하는 함수 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
 	bool AddShopItem(FName ItemId, int32 Amount = 1);
+
+	/** 상점 장비 업그레이드 구매 시 GameplayTag가 정확히 일치하는 기존 장비 슬롯을 교체하는 함수 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
+	bool ReplaceToolByGameplayTag(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool);
 
 	/** 소모품 사용 시 핫바 소유 원장에서 지정 수량을 차감하는 함수 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")

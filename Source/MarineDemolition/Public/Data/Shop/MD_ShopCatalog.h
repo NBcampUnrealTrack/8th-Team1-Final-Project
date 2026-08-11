@@ -7,6 +7,7 @@
 #include "MD_ShopCatalog.generated.h"
 
 class UTexture2D;
+class UMD_ToolDefinition;
 
 /** 서버 구매 검증 결과를 클라이언트 UI에 전달하기 위한 상태 */
 UENUM(BlueprintType)
@@ -72,6 +73,10 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop")
 	TSoftObjectPtr<UTexture2D> Icon;
+
+	/** 구매 시 기존 핫바 슬롯의 장비를 교체하기 위한 장비 정의 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Equipment")
+	TObjectPtr<UMD_ToolDefinition> EquipmentDefinition;
 
 	// ───── 해금 조건 (`07` §4). 아무것도 설정하지 않으면 "상점 상시". ─────
 

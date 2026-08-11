@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -46,7 +46,7 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
 	void ServerDeclineRepeat(int32 Index);
 
-	/** 상점 액터와 품목을 서버에서 다시 검증하는 구매 요청 진입점 */
+	/** 상점 액터와 품목을 서버에서 다시 검증하도록 요청하는 함수 */
 	UFUNCTION(Server, Reliable)
 	void ServerRequestShopPurchase(AMD_Merchant* Merchant, FName ItemId);
 

@@ -111,6 +111,54 @@ bool UMD_EquipHotbarComponent::AddShopItem(FName ItemId, int32 Amount)
 	return true;
 }
 
+/** 서버에서 GameplayTag로 장비 계열 슬롯을 찾아 업그레이드를 원자적으로 반영하는 함수 */
+bool UMD_EquipHotbarComponent::ReplaceToolByGameplayTag(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool)
+{
+	AActor* OwnerActor = GetOwner();
+
+	// 클라이언트의 임의 장비 변경과 유효하지 않은 태그 또는 장비 교체를 방지하기 위한 검사
+	if (IsValid(OwnerActor) == false || OwnerActor->HasAuthority() == false || TargetToolTag.IsValid() == false || IsValid(Tool) == false)
+	{
+		return false;
+	}
+
+	int32 MatchingSlotIndex = INDEX_NONE;
+	for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
+	{
+		const UMD_ToolDefinition* SlotTool = Slots[SlotIndex];
+		if (IsValid(SlotTool) == false || SlotTool->ToolAbilityTag.MatchesTagExact(TargetToolTag) == false)
+		{
+			continue;
+		}
+
+		// 동일 태그 슬롯이 여러 개인 잘못된 로드아웃에서 임의 슬롯 교체를 방지하기 위한 검사
+		if (MatchingSlotIndex != INDEX_NONE)
+		{
+			return false;
+		}
+
+		MatchingSlotIndex = SlotIndex;
+	}
+
+	// 교체할 장비 계열이 현재 핫바에 없는 경우 결제를 막기 위한 검사
+	if (Slots.IsValidIndex(MatchingSlotIndex) == false)
+	{
+		return false;
+	}
+
+	// 동일 장비를 다시 지급하여 결제만 발생하는 상황을 방지하기 위한 검사
+	if (Slots[MatchingSlotIndex] == Tool)
+	{
+		return false;
+	}
+
+	// 슬롯 배열 순서와 무관하게 태그로 찾은 기존 장비를 업그레이드 장비로 교체하는 처리
+	Slots[MatchingSlotIndex] = Tool;
+	OnRep_Slots();
+	OwnerActor->ForceNetUpdate();
+	return true;
+}
+
 /** 실제 사용이 승인된 소모품을 플레이어 핫바 원장에서 차감하는 함수 */
 bool UMD_EquipHotbarComponent::TryConsumeShopItem(FName ItemId, int32 Amount)
 {
