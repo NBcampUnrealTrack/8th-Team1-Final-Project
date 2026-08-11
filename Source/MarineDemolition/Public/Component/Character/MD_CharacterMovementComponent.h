@@ -160,6 +160,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Movement|Ladder")
 	float GetLadderClimbSpeed() const;
 
+	/** 뒤 입력으로 하단에 도달한 캐릭터를 바닥 상태에 맞게 사다리에서 이탈시키는 함수 */
+	bool TryLeaveLadderAtBottom(float RequestedClimbSpeed);
+
 protected:
 	/** 입력과 속도를 사다리 축으로 제한하는 등반 물리 함수 */
 	void PhysLadder(float DeltaTime, int32 Iterations);

@@ -448,9 +448,19 @@ void AMD_Character::HandleCollisionEndOverlap(UPrimitiveComponent* OverlappedCom
 
 	// 사다리 타기 종료 지점으로 이동중이 아닐 때, 낙하 모드로 복귀
 	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
-	if (IsValid(MDMovement) == true && MDMovement->GetCurrentLadder() == Ladder && MDMovement->IsTopDismounting() == false)
+	if (IsValid(MDMovement) == true && MDMovement->GetCurrentLadder() == Ladder)
 	{
-		MDMovement->StopClimbing(MOVE_Falling);
+		// 하단에 도달한 경우 오버랩 종료보다 바닥 착지 판정을 우선 적용
+		float SpeedAtLadder = MDMovement->GetLadderClimbSpeed();
+		if (MDMovement->TryLeaveLadderAtBottom(SpeedAtLadder) == true)
+		{
+			return;
+		}
+
+		if (MDMovement->IsTopDismounting() == false)
+		{
+			MDMovement->StopClimbing(MOVE_Falling);
+		}
 	}
 }
 

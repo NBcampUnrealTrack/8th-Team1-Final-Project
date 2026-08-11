@@ -215,8 +215,8 @@ void UMD_CharacterMovementComponent::StopClimbing(EMovementMode ExitMovementMode
 
 bool UMD_CharacterMovementComponent::JumpOffLadder()
 {
-	// 사다리 밖 점프에 사용할 현재 등반 대상 검증
-	if (IsClimbing() == false)
+	// 현재 사다리 등반 상태가 아니거나, 등반 종료 지점을 향하여 자동 이동 상태인 경우 점프 실패 처리
+	if (IsClimbing() == false || bIsTopDismounting == true)
 	{
 		return false;
 	}
@@ -269,6 +269,48 @@ float UMD_CharacterMovementComponent::GetLadderClimbSpeed() const
 	// 현재 이동 속도의 사다리 진행 방향(위쪽) 성분 계산
 	float UpwardSpeedOnLadder = FVector::DotProduct(Velocity, CurrentLadder->GetClimbUpVector());
 	return UpwardSpeedOnLadder;
+}
+
+bool UMD_CharacterMovementComponent::TryLeaveLadderAtBottom(float RequestedClimbSpeed)
+{
+	// 사다리를 타고 있는 상태가 아니거나 이동을 적용할 객체가 유효하지 않으면 사다리 계속 타기
+	if (IsClimbing() == false || IsValid(UpdatedComponent) == false)
+	{
+		return false;
+	}
+
+	// 이동 방향이 사다리 상단 방향일 경우 사다리 계속 타기
+	if (RequestedClimbSpeed >= 0.0f)
+	{
+		return false;
+	}
+
+	// 사다리 하단 방향으로 이동 시 바닥 검사
+	FFindFloorResult FloorResult;
+	FindFloor(UpdatedComponent->GetComponentLocation(), FloorResult, false);
+
+	// 걸을 수 있는 바닥이 검출되고 바닥까지의 거리가 허용 오차 범위 안에 있을 경우 사다리 타기 중지
+	bool bHasReachedWalkableFloor = FloorResult.IsWalkableFloor() == true && FloorResult.FloorDist <= MAX_FLOOR_DIST;
+	if (bHasReachedWalkableFloor == true)
+	{
+		LeaveLadderAtBottom();
+		return true;
+	}
+
+	// 사다리 길이에 관계없이 동일한 거리 허용 오차를 적용하기 위한 정규화 값 계산
+	float ClimbLength = FMath::Max(CurrentLadder->GetClimbLength(), 1.0f);
+	float BoundaryProgressTolerance = FMath::Clamp(LadderBoundaryTolerance / ClimbLength, 0.0f, 1.0f);
+	float ClimbProgress = CurrentLadder->GetClimbProgress(UpdatedComponent->GetComponentLocation());
+
+	// 남은 하단 이동 거리가 허용 오차 범위 보다 클 경우 사다리 계속 타기
+	if (ClimbProgress > BoundaryProgressTolerance)
+	{
+		return false;
+	}
+
+	// 사다리 타기 종료
+	LeaveLadderAtBottom();
+	return true;
 }
 
 void UMD_CharacterMovementComponent::PhysLadder(float DeltaTime, int32 Iterations)
@@ -330,6 +372,12 @@ void UMD_CharacterMovementComponent::PhysLadder(float DeltaTime, int32 Iteration
 	FHitResult MoveHit;
 	SafeMoveUpdatedComponent(MoveDelta, UpdatedComponent->GetComponentQuat(), true, MoveHit);
 
+	// 사다리를 통한 이동 이후 등반 상태가 아닌 경우 위치 오차 보정, 등반 종료 위치로의 자동 이동 시작 등의 후속 처리 중단
+	if (IsClimbing() == false)
+	{
+		return;
+	}
+
 	// 이동 경로를 막은 충돌을 게임플레이 충돌 처리에 전달하고 속도 제거
 	if (MoveHit.IsValidBlockingHit() == true)
 	{
@@ -360,10 +408,7 @@ void UMD_CharacterMovementComponent::PhysLadder(float DeltaTime, int32 Iteration
 	}
 
 	// 아래쪽 입력으로 하단에 도달한 경우 바닥, 추락 또는 수영 상태 복귀
-	if (RequestedClimbSpeed < 0.0f && ClimbProgress <= BoundaryProgressTolerance)
-	{
-		LeaveLadderAtBottom();
-	}
+	TryLeaveLadderAtBottom(RequestedClimbSpeed);
 }
 
 void UMD_CharacterMovementComponent::PhysLadderTopDismount(float DeltaTime, int32 Iterations)
@@ -540,6 +585,10 @@ bool UMD_CharacterMovementComponent::TryStartTopDismount()
 
 void UMD_CharacterMovementComponent::FinishTopDismount()
 {
+	// 사다리 타기 종료 직후 이동 속도 초기화
+	Velocity = FVector::ZeroVector;
+	Acceleration = FVector::ZeroVector;
+
 	// 바닥 찾기
 	FFindFloorResult FloorResult;
 	FindFloor(UpdatedComponent->GetComponentLocation(), FloorResult, false);
@@ -560,6 +609,10 @@ void UMD_CharacterMovementComponent::FinishTopDismount()
 
 void UMD_CharacterMovementComponent::LeaveLadderAtBottom()
 {
+	// 사다리 타기 종료 직후 이동 속도 초기화
+	Velocity = FVector::ZeroVector;
+	Acceleration = FVector::ZeroVector;
+
 	// 바닥 찾기
 	FFindFloorResult FloorResult;
 	FindFloor(UpdatedComponent->GetComponentLocation(), FloorResult, false);
