@@ -47,6 +47,9 @@ public:
 	FMDOnEquipHotbarChanged OnHotbarChanged;
 
 private:
+	/** 모든 플레이어가 동일한 네 칸 핫바 구조를 사용하도록 보장하는 고정 슬롯 수 */
+	static constexpr int32 FixedSlotCount = 4;
+
 	UPROPERTY(ReplicatedUsing = OnRep_Slots)
 	TArray<TObjectPtr<UMD_ToolDefinition>> Slots;
 
@@ -74,11 +77,19 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
 	int32 GetShopItemCount(FName ItemId) const;
 
+	/** 동일 품목 스택 또는 비어 있는 네 칸 품목 슬롯을 이용할 수 있는지 확인하는 함수 */
+	UFUNCTION(BlueprintPure, Category = "Hotbar")
+	bool CanAddShopItem(FName ItemId) const;
+
 	/** 서버가 검증한 상점 구매 품목을 핫바 소유 원장에 추가하는 함수 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
 	bool AddShopItem(FName ItemId, int32 Amount = 1);
 
-	/** 상점 장비 업그레이드 구매 시 GameplayTag가 정확히 일치하는 기존 장비 슬롯을 교체하는 함수 */
+	/** 동일 GameplayTag 장비 슬롯 또는 빈 장비 슬롯에 구매 장비를 배치할 수 있는지 확인하는 함수 */
+	UFUNCTION(BlueprintPure, Category = "Hotbar")
+	bool CanReplaceToolByGameplayTag(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool) const;
+
+	/** 동일 GameplayTag 슬롯을 교체하고 일치 슬롯이 없으면 빈 장비 슬롯에 구매 장비를 배치하는 함수 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
 	bool ReplaceToolByGameplayTag(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool);
 
@@ -105,16 +116,14 @@ public:
 	bool RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UDataAsset>>& SaveData);
 
 protected:
-
-	// HotBar 칸수. 이 값을 바꿔 UI도 따라가게
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hotbar", meta = (ClampMin = "1"))
-	int32 InitialSlotCount = 1;
-
 	// BP에서 미리 채워둘 기본 도구들 (프로토 테스트용)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hotbar")
 	TArray<TObjectPtr<UMD_ToolDefinition>> DefaultTools;
 
 private:
+	/** 동일 태그 슬롯을 우선하고 없으면 첫 빈 슬롯을 반환하여 구매 배치 위치를 결정하는 함수 */
+	bool FindAvailableToolSlot(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool, int32& OutSlotIndex) const;
+
 	/** 클라이언트 슬롯 선택을 서버 권위 상태에 반영하는 RPC */
 	UFUNCTION(Server, Reliable)
 	void ServerSelectSlot(int32 SlotIndex);

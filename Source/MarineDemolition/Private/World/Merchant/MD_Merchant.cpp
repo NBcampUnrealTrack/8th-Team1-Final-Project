@@ -340,6 +340,24 @@ EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCh
 		return EMD_ShopPurchaseResult::InvalidItem;
 	}
 
+	UMD_EquipHotbarComponent* HotbarComponent = PurchasingCharacter->GetHotbarComponent();
+	if (IsValid(HotbarComponent) == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 동일 태그 장비 교체 또는 빈 장비 슬롯 배치가 모두 불가능하면 결제 전 포화 결과를 반환하는 검사
+	if (IsValid(ShopItem.EquipmentDefinition.Get()) == true && HotbarComponent->CanReplaceToolByGameplayTag(ShopItem.EquipmentDefinition->ToolAbilityTag, ShopItem.EquipmentDefinition.Get()) == false)
+	{
+		return EMD_ShopPurchaseResult::FullyStocked;
+	}
+
+	// 지지대 전용 수량과 장비 교체 품목을 제외한 신규 품목이 네 칸 제한을 넘으면 결제 전 포화 결과를 반환하는 검사
+	if (ShopItem.ItemId != SupportItemId && IsValid(ShopItem.EquipmentDefinition.Get()) == false && HotbarComponent->CanAddShopItem(ShopItem.ItemId) == false)
+	{
+		return EMD_ShopPurchaseResult::FullyStocked;
+	}
+
 	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
 	if (IsValid(MerchantSubsystem) == false)
 	{

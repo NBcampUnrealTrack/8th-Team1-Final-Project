@@ -29,7 +29,8 @@ void UMD_EquipHotbarComponent::BeginPlay()
 
 	if (GetOwner()->HasAuthority())
 	{
-		Slots.SetNum(InitialSlotCount);
+		// Blueprint 설정과 무관하게 모든 플레이어가 동일한 네 칸 슬롯 배열을 갖도록 하는 초기화
+		Slots.SetNum(FixedSlotCount);
 
 		const int32 CopyCount = FMath::Min(DefaultTools.Num(), Slots.Num());
 		for (int32 Index = 0; Index < CopyCount; ++Index)
@@ -64,6 +65,18 @@ int32 UMD_EquipHotbarComponent::GetShopItemCount(FName ItemId) const
 	return ItemEntry != nullptr ? ItemEntry->Count : 0;
 }
 
+/** 동일 품목은 기존 스택을 사용하고 신규 품목은 네 칸 제한 안에서만 추가하도록 판정하는 함수 */
+bool UMD_EquipHotbarComponent::CanAddShopItem(FName ItemId) const
+{
+	if (ItemId.IsNone() == true)
+	{
+		return false;
+	}
+
+	const bool bHasMatchingItem = ShopItemEntries.ContainsByPredicate([ItemId](const FMD_HotbarShopItemEntry& Entry) { return Entry.ItemId == ItemId; });
+	return bHasMatchingItem == true || ShopItemEntries.Num() < FixedSlotCount;
+}
+
 /** 서버에서 검증을 마친 상점 품목을 플레이어 핫바 원장에 지급하는 함수 */
 bool UMD_EquipHotbarComponent::AddShopItem(FName ItemId, int32 Amount)
 {
@@ -77,6 +90,12 @@ bool UMD_EquipHotbarComponent::AddShopItem(FName ItemId, int32 Amount)
 
 	// 잘못된 식별자 또는 수량으로 인한 지급 방지
 	if (ItemId.IsNone() == true || Amount <= 0)
+	{
+		return false;
+	}
+
+	// 중복 품목이 없는 상태에서 네 칸이 모두 사용 중이면 신규 스택 생성을 막는 검사
+	if (CanAddShopItem(ItemId) == false)
 	{
 		return false;
 	}
@@ -111,22 +130,30 @@ bool UMD_EquipHotbarComponent::AddShopItem(FName ItemId, int32 Amount)
 	return true;
 }
 
-/** 서버에서 GameplayTag로 장비 계열 슬롯을 찾아 업그레이드를 원자적으로 반영하는 함수 */
-bool UMD_EquipHotbarComponent::ReplaceToolByGameplayTag(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool)
+/** 동일 GameplayTag 슬롯을 우선하고 일치 슬롯이 없으면 첫 빈 슬롯을 구매 배치 위치로 반환하는 함수 */
+bool UMD_EquipHotbarComponent::FindAvailableToolSlot(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool, int32& OutSlotIndex) const
 {
-	AActor* OwnerActor = GetOwner();
-
-	// 클라이언트의 임의 장비 변경과 유효하지 않은 태그 또는 장비 교체를 방지하기 위한 검사
-	if (IsValid(OwnerActor) == false || OwnerActor->HasAuthority() == false || TargetToolTag.IsValid() == false || IsValid(Tool) == false)
+	OutSlotIndex = INDEX_NONE;
+	if (TargetToolTag.IsValid() == false || IsValid(Tool) == false)
 	{
 		return false;
 	}
 
 	int32 MatchingSlotIndex = INDEX_NONE;
+	int32 EmptySlotIndex = INDEX_NONE;
 	for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
 	{
 		const UMD_ToolDefinition* SlotTool = Slots[SlotIndex];
-		if (IsValid(SlotTool) == false || SlotTool->ToolAbilityTag.MatchesTagExact(TargetToolTag) == false)
+		if (IsValid(SlotTool) == false)
+		{
+			if (EmptySlotIndex == INDEX_NONE)
+			{
+				EmptySlotIndex = SlotIndex;
+			}
+			continue;
+		}
+
+		if (SlotTool->ToolAbilityTag.MatchesTagExact(TargetToolTag) == false)
 		{
 			continue;
 		}
@@ -140,20 +167,43 @@ bool UMD_EquipHotbarComponent::ReplaceToolByGameplayTag(const FGameplayTag& Targ
 		MatchingSlotIndex = SlotIndex;
 	}
 
-	// 교체할 장비 계열이 현재 핫바에 없는 경우 결제를 막기 위한 검사
-	if (Slots.IsValidIndex(MatchingSlotIndex) == false)
-	{
-		return false;
-	}
-
 	// 동일 장비를 다시 지급하여 결제만 발생하는 상황을 방지하기 위한 검사
-	if (Slots[MatchingSlotIndex] == Tool)
+	if (Slots.IsValidIndex(MatchingSlotIndex) == true && Slots[MatchingSlotIndex] == Tool)
 	{
 		return false;
 	}
 
-	// 슬롯 배열 순서와 무관하게 태그로 찾은 기존 장비를 업그레이드 장비로 교체하는 처리
-	Slots[MatchingSlotIndex] = Tool;
+	// 동일 계열이 있으면 교체하고 없으면 비어 있는 슬롯을 신규 장비 위치로 선택하는 처리
+	OutSlotIndex = Slots.IsValidIndex(MatchingSlotIndex) == true ? MatchingSlotIndex : EmptySlotIndex;
+	return Slots.IsValidIndex(OutSlotIndex) == true;
+}
+
+/** 장비 구매가 동일 태그 교체 또는 빈 슬롯 추가로 완료될 수 있는지 확인하는 함수 */
+bool UMD_EquipHotbarComponent::CanReplaceToolByGameplayTag(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool) const
+{
+	int32 AvailableSlotIndex = INDEX_NONE;
+	return FindAvailableToolSlot(TargetToolTag, Tool, AvailableSlotIndex);
+}
+
+/** 서버에서 GameplayTag로 장비 계열 슬롯 또는 빈 슬롯을 찾아 구매 장비를 원자적으로 반영하는 함수 */
+bool UMD_EquipHotbarComponent::ReplaceToolByGameplayTag(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool)
+{
+	AActor* OwnerActor = GetOwner();
+
+	// 클라이언트의 임의 장비 변경과 유효하지 않은 장비 지급을 방지하기 위한 검사
+	if (IsValid(OwnerActor) == false || OwnerActor->HasAuthority() == false)
+	{
+		return false;
+	}
+
+	int32 AvailableSlotIndex = INDEX_NONE;
+	if (FindAvailableToolSlot(TargetToolTag, Tool, AvailableSlotIndex) == false)
+	{
+		return false;
+	}
+
+	// 슬롯 배열 순서와 무관하게 동일 계열 또는 빈 슬롯에 구매 장비를 배치하는 처리
+	Slots[AvailableSlotIndex] = Tool;
 	OnRep_Slots();
 	OwnerActor->ForceNetUpdate();
 	return true;
