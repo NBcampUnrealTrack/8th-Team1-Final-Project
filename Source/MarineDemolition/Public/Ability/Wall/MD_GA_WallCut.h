@@ -16,4 +16,37 @@ public:
 	virtual void ActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo,
 	                             const FGameplayAbilityActivationInfo ActivationInfo,
 	                             const FGameplayEventData* TriggerEventData) override;
+
+	virtual void EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo,
+							const FGameplayAbilityActivationInfo ActivationInfo,
+							bool bReplicateEndAbility, bool bWasCancelled) override;
+
+protected:
+	/** 절단 몽타주 재생·정지는 BP에서 처리한다 (기획 §5) */
+	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Wall|Cut")
+	void OnCutStarted();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Wall|Cut")
+	void OnCutStopped();
+
+	/** 진행도 누적 주기. 매 프레임 돌 필요가 없다 */
+	UPROPERTY(EditDefaultsOnly, Category = "Ability",
+		meta = (ClampMin = "0.02", Units = "s"))
+	float ProgressInterval = 0.05f;
+
+	/** 부상 중 절단 속도 (기획 §3) */
+	UPROPERTY(EditDefaultsOnly, Category = "Ability",
+		meta = (ClampMin = "0.1", ClampMax = "1.0"))
+	float InjuredCutSpeedMultiplier = 0.7f;
+
+private:
+	UFUNCTION()
+	void HandleInputReleased(float TimeHeld);
+
+	void TickCutProgress();
+
+	/** 장비·부상 배율을 곱한 최종 속도 */
+	float GetCutSpeedMultiplier() const;
+
+	FTimerHandle ProgressTimerHandle;
 };
