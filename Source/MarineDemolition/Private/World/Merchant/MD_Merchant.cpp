@@ -131,7 +131,7 @@ void AMD_Merchant::HandleMenuExitRequested()
 	{
 		if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
 		{
-			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForQuest);
+			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
 		}
 		ActiveQuestWidget->RemoveFromParent();
 		ActiveQuestWidget.Reset();
@@ -256,7 +256,7 @@ void AMD_Merchant::HandleQuestRequested()
 	// 리슨 서버 호스트든 원격 클라이언트든 이 델리게이트 하나로 갱신된다 (`MD_MerchantComponent` 참고).
 	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
 	{
-		MerchantComponent->OnMerchantStateChanged.AddDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForQuest);
+		MerchantComponent->OnMerchantStateChanged.AddDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
 	}
 
 	RefreshQuestWidgetFromComponent();
@@ -266,7 +266,7 @@ void AMD_Merchant::HandleQuestBackRequested()
 {
 	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
 	{
-		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForQuest);
+		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
 	}
 
 	if (ActiveQuestWidget.IsValid())
@@ -302,8 +302,14 @@ void AMD_Merchant::HandleRepeatAbandonRequested(int32 QuestIndex)
 	}
 }
 
-void AMD_Merchant::HandleMerchantStateChangedForQuest()
+void AMD_Merchant::HandleMerchantStateChanged()
 {
+	const UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (IsValid(MerchantComponent) == true && ActiveMenuWidget.IsValid() == true)
+	{
+		ActiveMenuWidget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
+	}
+
 	RefreshQuestWidgetFromComponent();
 }
 
