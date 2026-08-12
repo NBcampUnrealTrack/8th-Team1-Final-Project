@@ -41,9 +41,8 @@ protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
 
-public:
 	// 슬롯 내용 또는 선택 인덱스가 바뀔 때 브로드캐스트. UI가 구독한다
-	UPROPERTY(BlueprintAssignable, Category = "Hotbar")
+	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
 	FMDOnEquipHotbarChanged OnHotbarChanged;
 
 protected:
@@ -64,16 +63,16 @@ private:
 	int32 CurrentSlotIndex = 0;
 
 public:
-	UFUNCTION(BlueprintPure, Category = "Hotbar")
+	UFUNCTION(BlueprintPure, Category = "MD|Hotbar")
 	UMD_ToolDefinition* GetCurrentTool() const;
 
-	UFUNCTION(BlueprintPure, Category = "Hotbar")
+	UFUNCTION(BlueprintPure, Category = "MD|HotBar")
 	UMD_ToolDefinition* GetToolAtSlot(int32 SlotIndex) const;
 
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
 	int32 GetSlotCount() const { return ToolEntries.Num(); }
 
-	UFUNCTION(BlueprintPure, Category = "Hotbar")
+	UFUNCTION(BlueprintPure, Category = "MD|HotBar")
 	int32 GetCurrentSlotIndex() const { return CurrentSlotIndex; }
 
 	/** ToolDefinition을 기준으로 Hotbar가 보관하는 수량을 반환하는 함수 */
@@ -97,15 +96,15 @@ public:
 	bool TryConsumeTool(UMD_ToolDefinition* ToolDefinition, int32 Amount = 1);
 
 	// 슬롯 직접 선택 (숫자키)
-	UFUNCTION(BlueprintCallable, Category = "Hotbar")
+	UFUNCTION(BlueprintCallable, Category = "MD|HotBar")
 	void SelectSlot(int32 SlotIndex);
 
 	// 다음/이전 슬롯으로 순환 (휠)
-	UFUNCTION(BlueprintCallable, Category = "Hotbar")
+	UFUNCTION(BlueprintCallable, Category = "MD|HotBar")
 	void CycleSlot(int32 Direction);
 
 	// 슬롯에 도구 등록 (획득 시스템에서 호출)
-	UFUNCTION(BlueprintCallable, Category = "Hotbar")
+	UFUNCTION(BlueprintCallable, Category = "MD|HotBar")
 	void SetToolAtSlot(int32 SlotIndex, UMD_ToolDefinition* Tool);
 
 	// 서버에서 플레이어의 현재 장비 목록을 저장하기 위한 데이터를 반환하는 함수

@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/MD_Character.h"
@@ -17,6 +17,7 @@
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/BoxComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
@@ -24,6 +25,7 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "World/Traversal/MD_Ladder.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
@@ -34,8 +36,7 @@
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UMD_CharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
- 	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = false;
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -44,6 +45,9 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	GetCharacterMovement()->bUseControllerDesiredRotation = false;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
+
+	// 사다리 감지 영역과 캐릭터 캡슐 사이의 오버랩 이벤트 생성 활성화
+	GetCapsuleComponent()->SetGenerateOverlapEvents(true);
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(GetCapsuleComponent());
@@ -104,6 +108,14 @@ void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 사다리 진입과 이탈을 캐릭터 캡슐 기준으로 감지하기 위한 델리게이트 연결
+	UCapsuleComponent* CharacterCapsule = GetCapsuleComponent();
+	if (IsValid(CharacterCapsule) == true)
+	{
+		CharacterCapsule->OnComponentBeginOverlap.AddUniqueDynamic(this, &AMD_Character::HandleCollisionBeginOverlap);
+		CharacterCapsule->OnComponentEndOverlap.AddUniqueDynamic(this, &AMD_Character::HandleCollisionEndOverlap);
+	}
+
 	// 데미지 브리지: 서버에서 ApplyDamage(오염수 DoT·붕괴 등)를 Health 감소로 연결
 	if (HasAuthority())
 	{
@@ -134,11 +146,23 @@ void AMD_Character::BeginPlay()
 	}
 }
 
+void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->CancelInteraction();
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
 void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
 {
 	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
 
-	if (UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement()))
+	// 커스텀 사다리 모드 확인과 기존 수영 진입 의사 해제를 함께 처리하기 위한 이동 컴포넌트 참조
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
+	if (IsValid(MDMovement) == true)
 	{
 		if (MDMovement->MovementMode == MOVE_Walking)
 		{
@@ -146,7 +170,11 @@ void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 
 		}
 	}
 
-	const EMDMovementState NewState = GetCharacterMovement()->IsSwimming() ? EMDMovementState::Swimming : EMDMovementState::Walking;
+	EMDMovementState NewState = GetCharacterMovement()->IsSwimming() ? EMDMovementState::Swimming : EMDMovementState::Walking;
+	if (IsValid(MDMovement) == true && MDMovement->IsClimbing() == true)
+	{
+		NewState = EMDMovementState::Climbing;
+	}
 
 	if (NewState == CurrentMovementState)
 	{
@@ -167,6 +195,16 @@ void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 
 		{
 			ASC->RemoveLooseGameplayTag(MDGameplayTags::State_Swimming);
 		}
+
+		// 사다리 타기 상태 태그 추가 또는 제거
+		if (NewState == EMDMovementState::Climbing)
+		{
+			ASC->AddLooseGameplayTag(MDGameplayTags::State_Climbing);
+		}
+		else
+		{
+			ASC->RemoveLooseGameplayTag(MDGameplayTags::State_Climbing);
+		}
 	}
 }
 
@@ -176,6 +214,16 @@ void AMD_Character::PossessedBy(AController* NewController)
 
 	InitializeAbilitySystem();
 	GrantDefaultAbilities();
+}
+
+void AMD_Character::UnPossessed()
+{
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->CancelInteraction();
+	}
+
+	Super::UnPossessed();
 }
 
 void AMD_Character::OnRep_PlayerState()
@@ -230,6 +278,19 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 	}
 
 	const FVector2D MoveInput = Value.Get<FVector2D>();
+
+	// 사다리 타기 상태 확인
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
+	if (IsValid(MDMovement) == true && MDMovement->IsClimbing() == true)
+	{
+		// 사용중인 사다리가 유효하고, 종료 지점으로 이동중이 아닌 경우 입력값 적용
+		AMD_Ladder* CurrentLadder = MDMovement->GetCurrentLadder();
+		if (IsValid(CurrentLadder) == true && MDMovement->IsTopDismounting() == false)
+		{
+			AddMovementInput(CurrentLadder->GetClimbUpVector(), MoveInput.X);
+		}
+		return;
+	}
 
 	const FRotator ControlRotation = Controller->GetControlRotation();
 	const FRotator MovementRotation = (CurrentMovementState == EMDMovementState::Swimming) ? ControlRotation : FRotator(0.f, ControlRotation.Yaw, 0.f);
@@ -351,6 +412,19 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 		return;
 	}
 
+	// 사다리 이동 상태 확인
+	if (MDMovement->IsClimbing() == true)
+	{
+		// 클라이언트 환경에서 점프 처리
+		bool bClientJump = MDMovement->JumpOffLadder();
+		// 클라이언트에서 점프 성공 시 서버에게 캐릭터 점프 요청
+		if (bClientJump == true && HasAuthority() == false)
+		{
+			ServerJumpOffLadder();
+		}
+		return;
+	}
+
 	if (MDMovement->IsMovingOnGround() && MDMovement->IsInWater())
 	{
 		MDMovement->EnterSwimmingFromGround();
@@ -363,6 +437,60 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value)
 {
 	StopJumping();
+}
+
+void AMD_Character::HandleCollisionBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	// 사다리 영역 진입 확인
+	AMD_Ladder* Ladder = Cast<AMD_Ladder>(OtherActor);
+	if (IsValid(Ladder) == false || OtherComponent != Ladder->GetClimbTrigger())
+	{
+		return;
+	}
+
+	// 사다리 타기 시작
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
+	if (IsValid(MDMovement) == true)
+	{
+		MDMovement->StartClimbing(Ladder);
+	}
+}
+
+void AMD_Character::HandleCollisionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex)
+{
+	// 사다리 영역 진입 확인
+	AMD_Ladder* Ladder = Cast<AMD_Ladder>(OtherActor);
+	if (IsValid(Ladder) == false || OtherComponent != Ladder->GetClimbTrigger())
+	{
+		return;
+	}
+
+	// 사다리 타기 종료 지점으로 이동중이 아닐 때, 낙하 모드로 복귀
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
+	if (IsValid(MDMovement) == true && MDMovement->GetCurrentLadder() == Ladder)
+	{
+		// 하단에 도달한 경우 오버랩 종료보다 바닥 착지 판정을 우선 적용
+		float SpeedAtLadder = MDMovement->GetLadderClimbSpeed();
+		if (MDMovement->TryLeaveLadderAtBottom(SpeedAtLadder) == true)
+		{
+			return;
+		}
+
+		if (MDMovement->IsTopDismounting() == false)
+		{
+			MDMovement->StopClimbing(MOVE_Falling);
+		}
+	}
+}
+
+void AMD_Character::ServerJumpOffLadder_Implementation()
+{
+	// 서버에서 사다리를 타고 있는 상태의 경우 점프 처리
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
+	if (IsValid(MDMovement) == true && MDMovement->IsClimbing() == true)
+	{
+		MDMovement->JumpOffLadder();
+	}
 }
 
 /*void AMD_Character::HandleWallCutInput(const FInputActionValue& Value)
@@ -416,6 +544,8 @@ void AMD_Character::InitializeAbilitySystem()
 		MDPlayerState->OnHealthStateChanged.AddDynamic(this, &AMD_Character::HandleHealthStateChanged);
 	}
 
+	// The delegate can fire before possession/PlayerState replication finishes, so synchronize once on bind.
+	HandleHealthStateChanged(MDPlayerState->GetHealthState());
 }
 
 void AMD_Character::GrantDefaultAbilities()
@@ -474,11 +604,21 @@ void AMD_Character::RefreshToolMesh()
 	// 소켓의 위치·회전·스케일을 그대로 따르도록 스냅 부착
 	ThirdPersonToolMesh->AttachToComponent(
 		GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, SocketName);
+
+	//스냅 후 도구별 오프셋을 얹는다. 직접 오프셋 지정전에는 영향이 없습니다.
+	if (IsValid(CurrentTool))
+	{
+		ThirdPersonToolMesh->SetRelativeTransform(CurrentTool->AttachOffset);
+	}
 }
 
 void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
 {
 	const bool bIsDead = (NewState == EMD_HealthState::Dead);
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->SetInteractionBlocked(bIsDead);
+	}
 
 	// 이동 차단은 서버·클라 양쪽에서 걸어 입력 반응을 즉시 없앤다.
 	ApplyDeathMovementLock(bIsDead);
@@ -545,6 +685,10 @@ void AMD_Character::TeleportToMothership()
 	}
 
 	const AActor* RespawnPoint = FoundStarts[0];
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->CancelInteraction();
+	}
 
 	// 붕괴로 막힌 방에 되살아나지 않도록 죽은 자리가 아니라 모선으로 옮긴다. (기획 02 §6)
 	SetActorLocationAndRotation(

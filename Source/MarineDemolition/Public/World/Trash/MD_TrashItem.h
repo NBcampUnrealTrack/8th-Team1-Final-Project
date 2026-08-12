@@ -9,6 +9,7 @@
 #include "MD_TrashItem.generated.h"
 
 class UStaticMeshComponent;
+class UMaterialInstanceDynamic;
 
 /**
  * 기지 바닥에 산재한 각종 쓰레기 (기획 02 §1)
@@ -35,6 +36,7 @@ public:
 	/** 정답 칸은 배치 값이 아니라 종류 테이블에서 온다. 캔에 플라스틱 칸을 달아둘 수 없다 */
 	virtual FGameplayTag GetTrashCategory_Implementation() const override;
 	virtual FGameplayTag GetSortScoreBonusTag_Implementation() const override;
+	virtual FMD_TrashSortDescriptor GetTrashSortDescriptor_Implementation() const override;
 	/** ~Implements IMD_TrashSortable */
 
 	/** 종류 지정 + 행 사양 적용. 런타임 스폰 직후 서버에서 호출 */
@@ -84,4 +86,12 @@ private:
 
 	/** 종류 행의 질량·메시·색을 메시 컴포넌트에 반영 */
 	void ApplyTrashKindRow();
+
+	/** OnConstruction/OnRep 중복 호출이 같은 메시를 다시 동기 로드하거나 MID를 누적하지 않게 한다 */
+	FName AppliedTrashKindId = NAME_None;
+	FGameplayTag AppliedCategory;
+	bool bHasAppliedTrashKind = false;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> TrashMID;
 };

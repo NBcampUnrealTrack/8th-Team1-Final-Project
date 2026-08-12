@@ -2,6 +2,7 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/World.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "GameplayTags/MD_GameplayTags.h"
@@ -82,6 +83,13 @@ FGameplayTag AMD_TrashItem::GetSortScoreBonusTag_Implementation() const
 	return UMD_TrashLibrary::GetTrashKindScoreBonusTag(TrashKindId);
 }
 
+FMD_TrashSortDescriptor AMD_TrashItem::GetTrashSortDescriptor_Implementation() const
+{
+	FMD_TrashSortDescriptor Descriptor;
+	UMD_TrashLibrary::GetTrashKindSortDescriptor(TrashKindId, Descriptor);
+	return Descriptor;
+}
+
 void AMD_TrashItem::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
@@ -106,25 +114,61 @@ void AMD_TrashItem::ApplyTrashKindRow()
 		return;
 	}
 
-	// 행이 없으면 기본값이 들어온다. 경고는 조회 계층이 한 번만 남긴다
-	FMD_TrashKindRow KindRow;
-	UMD_TrashLibrary::FindTrashKindRow(TrashKindId, KindRow);
-
-	// 메시 볼륨 자동 계산에 맡기면 메시 교체만으로 무게감이 조용히 달라진다
-	Mesh->SetMassOverrideInKg(NAME_None, FMath::Max(KindRow.MassKg, 0.01f), true);
-
-	// 행에 메시가 없으면 Blueprint에 설정된 메시를 유지한다
-	if (UStaticMesh* KindMesh = KindRow.Mesh.LoadSynchronous())
+	bool bNeedsKindData = !bHasAppliedTrashKind || AppliedTrashKindId != TrashKindId;
+#if WITH_EDITOR
+	// 에디터 배치에서는 DataTable 행 수정도 즉시 반영하되 PIE/런타임 캐시는 유지한다.
+	if (const UWorld* World = GetWorld(); World && World->WorldType == EWorldType::Editor)
 	{
-		Mesh->SetStaticMesh(KindMesh);
+		bNeedsKindData = true;
+	}
+#endif
+
+	if (bNeedsKindData)
+	{
+		FMD_TrashKindRow KindRow;
+		if (!UMD_TrashLibrary::FindTrashKindRow(TrashKindId, KindRow))
+		{
+			return;
+		}
+
+		// 메시 볼륨 자동 계산에 맡기면 메시 교체만으로 무게감이 조용히 달라진다
+		Mesh->SetMassOverrideInKg(NAME_None, FMath::Max(KindRow.MassKg, 0.01f), true);
+
+		// 이미 메모리에 있으면 Get()으로 즉시 사용하고, 종류가 실제로 바뀐 경우에만 동기 로드한다.
+		UStaticMesh* KindMesh = KindRow.Mesh.Get();
+		if (!KindMesh && !KindRow.Mesh.IsNull())
+		{
+			KindMesh = KindRow.Mesh.LoadSynchronous();
+		}
+		if (KindMesh && Mesh->GetStaticMesh() != KindMesh)
+		{
+			// 이전 메시의 override MID가 새 메시로 새어 가지 않게 먼저 해제한다.
+			if (TrashMID)
+			{
+				Mesh->SetMaterial(0, nullptr);
+				TrashMID = nullptr;
+			}
+			Mesh->SetStaticMesh(KindMesh);
+		}
+
+		AppliedTrashKindId = TrashKindId;
+		AppliedCategory = KindRow.Category;
+		bHasAppliedTrashKind = true;
 	}
 
-	if (!bTintPlaceholderMeshByCategory || TintParameterName.IsNone())
+	// 전용 서버에는 색/MID가 필요 없다. 메시·질량은 서버 물리 때문에 위에서 계속 적용한다.
+	if (GetNetMode() == NM_DedicatedServer
+		|| !bTintPlaceholderMeshByCategory
+		|| TintParameterName.IsNone()
+		|| Mesh->GetNumMaterials() <= 0)
 	{
 		return;
 	}
 
-	UMaterialInstanceDynamic* TrashMID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
+	if (!TrashMID)
+	{
+		TrashMID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
+	}
 	if (!TrashMID)
 	{
 		return;
@@ -133,5 +177,5 @@ void AMD_TrashItem::ApplyTrashKindRow()
 	MDMaterialTint::SetVectorParameterChecked(
 		TrashMID,
 		TintParameterName,
-		UMD_TrashLibrary::GetCategoryColor(KindRow.Category));
+		UMD_TrashLibrary::GetCategoryColor(AppliedCategory));
 }

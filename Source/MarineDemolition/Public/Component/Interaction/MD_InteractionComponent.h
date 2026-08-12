@@ -15,7 +15,7 @@ class USceneComponent;
 /**
  * 플레이어의 조준 상호작용과 물리 오브젝트 운반을 담당
  */
-UCLASS(ClassGroup = (MD), meta = (BlueprintSpawnableComponent))
+UCLASS(ClassGroup = (MD))
 class MARINEDEMOLITION_API UMD_InteractionComponent : public UActorComponent
 {
 	GENERATED_BODY()
@@ -37,6 +37,18 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
 	void Interact();
 
+	/** Clears local focus and releases any authoritative carry state. Safe to call during death/teleport/teardown. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
+	void CancelInteraction();
+
+	/** Releases the held actor on the server. Client calls are intentionally ignored. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
+	void ReleaseHeldActor();
+
+	/** Blocks new interactions and immediately cancels the current interaction when blocked. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
+	void SetInteractionBlocked(bool bBlocked);
+
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	AActor* GetHeldActor() const { return HeldActor; }
 
@@ -50,12 +62,17 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "MD|Interaction", meta = (ClampMin = "0.0", Units = "cm"))
 	float InteractTraceDistance = 200.f;
 
+	/** 서버에서 새 상호작용 요청을 받아들이는 최소 간격. 운반 해제 요청에는 적용하지 않는다. */
+	UPROPERTY(EditAnywhere, Category = "MD|Interaction",
+		meta = (ClampMin = "0.05", ClampMax = "0.1", Units = "s"))
+	float ServerInteractionMinInterval = 0.075f;
+
 	/** 잡은 물체가 HoldPoint에 이만큼 가까워지면 운반이 안정된 것으로 본다. */
 	UPROPERTY(EditAnywhere, Category = "MD|Interaction",
 		meta = (ClampMin = "1.0", UIMin = "5.0", Units = "cm"))
 	float CarrySettleTolerance = 20.f;
 
-	/** 벽에 걸려 목표에 영영 못 닿는 경우를 대비한 상한. 지나면 안정된 것으로 친다. */
+	/** 벽에 걸려 목표에 영영 못 닿는 경우를 대비한 감시 상한. 지나면 정착 콜백 없이 감시만 끝낸다. */
 	UPROPERTY(EditAnywhere, Category = "MD|Interaction",
 		meta = (ClampMin = "0.1", UIMin = "0.5", Units = "s"))
 	float CarrySettleTimeout = 1.5f;
@@ -69,7 +86,9 @@ private:
 		const FMD_HoldProfile& HoldProfile);
 	bool ValidateInteractionTarget(AActor* RequestedActor) const;
 	bool IsHeldByOtherPawn(const AActor* Target) const;
-	void ReleaseTarget();
+	bool CanOwnerInteract() const;
+	bool HasAuthorityPhysicsGrip() const;
+	void RefreshTickEnabled();
 	void UpdateHeldTarget();
 	void CaptureDefaultHoldProfile();
 	void ApplyHoldProfile(const FMD_HoldProfile& Profile);
@@ -78,9 +97,6 @@ private:
 	void SetCurrentTarget(AActor* NewTarget);
 	FTransform GetHoldPointTransform() const;
 	void UpdateCarrySettle(float DeltaSeconds);
-	void StartFollowingHeldActor();
-	void StopFollowingHeldActor();
-	void UpdateFollowedHeldActor(float DeltaSeconds);
 	APawn* GetOwnerPawn() const;
 
 	UFUNCTION()
@@ -97,13 +113,18 @@ private:
 
 	TWeakObjectPtr<AActor> CurrentTarget;
 
-	/** 서버가 잡은 대상. 모든 머신이 같은 대상을 HoldPoint로 따라가도록 복제한다. */
+	/** 서버가 잡은 대상. 운반 상태 UI를 위해 복제하며 위치는 대상 액터의 서버 이동 복제를 따른다. */
 	UPROPERTY(ReplicatedUsing = OnRep_HeldActor)
 	TObjectPtr<AActor> HeldActor = nullptr;
 
-	TWeakObjectPtr<UPrimitiveComponent> FollowedComponent;
 	FVector HeldTargetOffset = FVector::ZeroVector;
 	FVector HeldGrabPointOffset = FVector::ZeroVector;
+
+	UPROPERTY(Transient)
+	bool bInteractionBlocked = false;
+
+	double LastServerInteractionTimeSeconds = 0.0;
+	bool bHasServerInteractionTimestamp = false;
 	bool bHeldActorSettled = false;
 	float HeldCarrySeconds = 0.f;
 	FMD_HoldProfile DefaultHoldProfile;

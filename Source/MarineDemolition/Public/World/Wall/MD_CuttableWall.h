@@ -36,6 +36,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 	AActor*,
 	Scanner);
 
+// 진행도 게이지 UI가 구독한다 (기획 §6)
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FMD_OnCutProgressChanged,
+	AMD_CuttableWall*, Wall,
+	float, ProgressRatio);
+
 UENUM(BlueprintType)
 enum class EMD_WallType : uint8
 {
@@ -95,6 +101,21 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Wall")
 	void ScanHighlight(float Duration = 3.0f, AActor* Scanner = nullptr);
+
+	// 절단 진행도 누적. 서버 전용. 100% 도달 시 Cut()을 호출한다
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Cut")
+	void AddCutProgress(float DeltaSeconds, AActor* Cutter);
+
+	// 이 벽을 자르는 데 필요한 총 시간(초)
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Cut")
+	float GetRequiredCutSeconds() const;
+
+	// 0~1 진행도. UI 게이지용
+	UFUNCTION(BlueprintPure, Category = "MD|Wall|Cut")
+	float GetCutProgressRatio() const;
+
+	UPROPERTY(BlueprintAssignable, Category = "MD|Wall|Cut")
+	FMD_OnCutProgressChanged OnCutProgressChanged;
 
 protected:
 	virtual void BeginPlay() override;
@@ -160,6 +181,15 @@ protected:
 		meta = (ClampMin = "0", ClampMax = "100"))
 	float StrutCutGate = 0.0f;
 
+	// 기획 §2 — 애니메이션 1사이클(3.567초)의 정수배로 잡는다
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Cut",
+		meta = (ClampMin = "0.1", Units = "s"))
+	float PartitionCutSeconds = 10.8f;      // 3사이클
+
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Cut",
+		meta = (ClampMin = "0.1", Units = "s"))
+	float StrutCutSeconds = 14.4f;          // 4사이클
+
 private:
 	friend class FMD_CuttableWallScrapeIntegrationTest;
 	friend class FMD_CuttableWallArbitraryMeshTest;
@@ -170,6 +200,13 @@ private:
 
 	void RestoreScanColor();
 
+	UFUNCTION()
+	void OnRep_CutProgress();
+
 	bool bCut = false;
 	FTimerHandle ScanTimerHandle;
+
+	//  누적 절단 시간. 감소하지 않으며 Day 간에도 유지된다 (기획 §3)
+	UPROPERTY(ReplicatedUsing = OnRep_CutProgress)
+	float CutProgressSeconds = 0.f;
 };
