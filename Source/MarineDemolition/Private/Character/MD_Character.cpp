@@ -474,6 +474,12 @@ void AMD_Character::RefreshToolMesh()
 	// 소켓의 위치·회전·스케일을 그대로 따르도록 스냅 부착
 	ThirdPersonToolMesh->AttachToComponent(
 		GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, SocketName);
+
+	//스냅 후 도구별 오프셋을 얹는다. 직접 오프셋 지정전에는 영향이 없습니다.
+	if (IsValid(CurrentTool))
+	{
+		ThirdPersonToolMesh->SetRelativeTransform(CurrentTool->AttachOffset);
+	}
 }
 
 void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
