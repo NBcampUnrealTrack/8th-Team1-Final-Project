@@ -1,8 +1,9 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Data/Shop/MD_ShopCatalog.h"
 #include "GameFramework/PlayerController.h"
 #include "Types/Travel/MD_TravelTypes.h"
 #include "MD_PlayerController.generated.h"
@@ -10,6 +11,7 @@
 class AMD_TravelConsole;
 class AMD_DayEndConsole;
 class AMD_SectorCloseoutMarker;
+class AMD_Merchant;
 class UMD_HUDWidget;
 class UMD_EquipHotbarWidget;
 class UMD_SiteDefinition;
@@ -43,6 +45,14 @@ public:
 
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
 	void ServerDeclineRepeat(int32 Index);
+
+	/** 상점 액터와 품목을 서버에서 다시 검증하도록 요청하는 함수 */
+	UFUNCTION(Server, Reliable)
+	void ServerRequestShopPurchase(AMD_Merchant* Merchant, FName ItemId);
+
+	/** 서버 구매 결과를 요청한 로컬 상점 화면에 전달하는 응답 진입점 */
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveShopPurchaseResult(AMD_Merchant* Merchant, FName ItemId, EMD_ShopPurchaseResult Result);
 
 private:
 

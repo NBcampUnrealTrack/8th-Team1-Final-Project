@@ -1,23 +1,36 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "World/Merchant/MD_Merchant.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "Engine/GameInstance.h"
 #include "UObject/ConstructorHelpers.h"
 
 #include "Character/MD_Character.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
+#include "Component/Oxygen/MD_OxygenComponent.h"
+#include "Component/Support/MD_SupplyComponent.h"
+#include "Data/Equipment/MD_ToolDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
+#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Player/MD_PlayerController.h"
+#include "Player/MD_PlayerState.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
 #include "UI/Merchant/MD_QuestWidget.h"
 #include "UI/Merchant/MD_ShopWidget.h"
 
 namespace
 {
+	/** 임시 지지대 구매를 기존 설치 수량 컴포넌트로 전달하기 위한 품목 식별자 */
+	const FName SupportItemId(TEXT("IT-P1"));
+
+	/** 산소 확장 탱크 구매 직후 패시브 효과를 장착하기 위한 품목 식별자 */
+	const FName OxygenTankItemId(TEXT("IT-O2"));
+
 	/**
 	 * 캐릭터 에셋 대체용 큐브를 사람 크기(60×60×180cm)로 맞추는 값.
 	 * 엔진 기본 큐브가 100cm 정육면체라 스케일로 눌러 세운다.
@@ -27,6 +40,69 @@ namespace
 
 	/** 큐브 피벗이 가운데라 절반 높이만큼 올려야 액터 원점이 발밑에 온다. */
 	constexpr float PlaceholderHalfHeight = 90.f;
+
+	/** bPricePerUnit 값에 따라 ToolDefinition 수량 증가 또는 동일 GameplayTag 항목 교체를 수행하는 처리 */
+	bool FulfillPurchasedItem(AMD_Character* PurchasingCharacter, const FMD_ShopItem& ShopItem)
+	{
+		if (IsValid(PurchasingCharacter) == false || PurchasingCharacter->HasAuthority() == false || ShopItem.ItemId.IsNone() == true)
+		{
+			return false;
+		}
+
+		UMD_EquipHotbarComponent* HotbarComponent = PurchasingCharacter->GetHotbarComponent();
+		if (IsValid(HotbarComponent) == false)
+		{
+			return false;
+		}
+
+		// 지지대 설치 어빌리티가 기존 수량 컴포넌트를 원본으로 사용하기 위한 직접 지급 처리
+		if (ShopItem.ItemId == SupportItemId)
+		{
+			UMD_SupplyComponent* SupplyComponent = PurchasingCharacter->FindComponentByClass<UMD_SupplyComponent>();
+			if (IsValid(SupplyComponent) == false || SupplyComponent->GetSupportCount() >= MAX_int32)
+			{
+				return false;
+			}
+
+			SupplyComponent->AddSupport(1);
+			PurchasingCharacter->ForceNetUpdate();
+			return true;
+		}
+
+		// Hotbar 품목 데이터로 사용할 카탈로그 ToolDefinition 참조
+		UMD_ToolDefinition* PurchasedToolDefinition = ShopItem.EquipmentDefinition.Get();
+		if (IsValid(PurchasedToolDefinition) == false)
+		{
+			return false;
+		}
+
+		// 개당 판매 품목은 동일 ToolDefinition 항목의 수량을 증가시키는 처리
+		if (ShopItem.bPricePerUnit == true)
+		{
+			return HotbarComponent->AddTool(PurchasedToolDefinition, 1);
+		}
+
+		// 탱크 패시브 적용 실패 전에 소유 원장이 변경되지 않도록 하는 필수 컴포넌트 검사
+		UMD_OxygenComponent* OxygenComponent = ShopItem.ItemId == OxygenTankItemId ? PurchasingCharacter->GetOxygenComponent() : nullptr;
+		if (ShopItem.ItemId == OxygenTankItemId && IsValid(OxygenComponent) == false)
+		{
+			return false;
+		}
+
+		// 일회성 판매 품목은 동일 GameplayTag 항목을 교체하거나 빈 항목에 추가하는 처리
+		if (HotbarComponent->ReplaceTool(PurchasedToolDefinition) == false)
+		{
+			return false;
+		}
+
+		// 산소 탱크 아이템 효과 적용
+		if (ShopItem.ItemId == OxygenTankItemId)
+		{
+			OxygenComponent->SetOxygenTankEquipped(true);
+		}
+
+		return true;
+	}
 }
 
 AMD_Merchant::AMD_Merchant()
@@ -123,6 +199,18 @@ void AMD_Merchant::HandleMenuExitRequested()
 	// 상점·퀘스트가 위에 떠 있는 상태에서 메뉴가 닫히면 같이 정리한다.
 	if (ActiveShopWidget.IsValid())
 	{
+		UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+		if (MerchantComponent != nullptr)
+		{
+			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForShop);
+		}
+
+		AMD_PlayerState* InteractingPlayerState = GetInteractingPlayerState();
+		if (IsValid(InteractingPlayerState) == true)
+		{
+			InteractingPlayerState->OnShopOwnershipChanged.RemoveDynamic(this, &AMD_Merchant::HandlePlayerShopOwnershipChanged);
+		}
+
 		ActiveShopWidget->RemoveFromParent();
 		ActiveShopWidget.Reset();
 	}
@@ -173,21 +261,53 @@ void AMD_Merchant::HandleShopRequested()
 
 	ShopWidget->SetCatalog(ShopCatalog);
 
-	// 메뉴가 들고 있는 정보를 그대로 넘겨 두 화면의 수치가 갈리지 않게 한다.
-	ShopWidget->SetShopInfo(ActiveMenuWidget->GetMenuInfo());
-
 	ShopWidget->OnBackRequested.AddDynamic(this, &AMD_Merchant::HandleShopBackRequested);
 	ShopWidget->OnPurchaseRejected.AddDynamic(this, &AMD_Merchant::HandleShopPurchaseRejected);
+	ShopWidget->OnItemPurchaseRequested.AddDynamic(this, &AMD_Merchant::HandleShopItemPurchaseRequested);
 
 	// 메뉴 위젯 자체는 살려둔다 — 파괴하면 입력 모드가 초기화되고 대사창도 함께 사라진다.
 	// 대신 메뉴 패널을 숨겨서 상점과 겹치지 않게 한다.
 	ShopWidget->SetOwningMerchantMenu(ActiveMenuWidget.Get());
 	ShopWidget->AddToViewport();
 	ActiveShopWidget = ShopWidget;
+
+	// 서버 원장의 복제 미러가 바뀌면 크레딧과 구매 가능 상태를 즉시 다시 계산하기 위한 구독
+	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (MerchantComponent != nullptr)
+	{
+		MerchantComponent->OnMerchantStateChanged.AddUniqueDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForShop);
+	}
+
+	// 상점을 이용하는 플레이어의 장비 소유권 복제를 상점에 반영하기 위하여 이벤트 연결
+	AMD_PlayerState* InteractingPlayerState = GetInteractingPlayerState();
+	if (IsValid(InteractingPlayerState) == true)
+	{
+		InteractingPlayerState->OnShopOwnershipChanged.AddUniqueDynamic(this, &AMD_Merchant::HandlePlayerShopOwnershipChanged);
+	}
+
+	RefreshShopWidgetFromComponent();
 }
 
 void AMD_Merchant::HandleShopBackRequested()
 {
+	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (MerchantComponent != nullptr)
+	{
+		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForShop);
+
+		// 상점에서 차감된 크레딧을 다시 드러나는 루트 메뉴에도 즉시 반영하기 위한 갱신
+		if (ActiveMenuWidget.IsValid() == true)
+		{
+			ActiveMenuWidget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
+		}
+	}
+
+	AMD_PlayerState* InteractingPlayerState = GetInteractingPlayerState();
+	if (IsValid(InteractingPlayerState) == true)
+	{
+		InteractingPlayerState->OnShopOwnershipChanged.RemoveDynamic(this, &AMD_Merchant::HandlePlayerShopOwnershipChanged);
+	}
+
 	if (ActiveShopWidget.IsValid())
 	{
 		ActiveShopWidget->RemoveFromParent();
@@ -212,6 +332,126 @@ void AMD_Merchant::HandleShopPurchaseRejected(FName ItemId)
 	{
 		ActiveMenuWidget->ShowDialogueLine(FullStockDialogue);
 	}
+}
+
+void AMD_Merchant::HandleShopItemPurchaseRequested(FName ItemId)
+{
+	// 소유 컨트롤러를 통해서만 서버 RPC를 보낼 수 있도록 하는 구매 요청 전달
+	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+	if (InteractingPlayerController != nullptr)
+	{
+		InteractingPlayerController->ServerRequestShopPurchase(this, ItemId);
+	}
+}
+
+void AMD_Merchant::HandleMerchantStateChangedForShop()
+{
+	RefreshShopWidgetFromComponent();
+}
+
+void AMD_Merchant::HandlePlayerShopOwnershipChanged()
+{
+	RefreshShopWidgetFromComponent();
+}
+
+EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCharacter, FName ItemId)
+{
+	// 클라이언트 액터에서 경제 원장을 변경하지 못하도록 하는 서버 권한 검사
+	if (HasAuthority() == false || IsValid(PurchasingCharacter) == false || PurchasingCharacter->HasAuthority() == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 서버가 보유한 카탈로그에 없는 식별자를 이용한 가격 조작을 막는 품목 조회
+	FMD_ShopItem ShopItem;
+	if (IsValid(ShopCatalog) == false || ShopCatalog->FindItem(ItemId, ShopItem) == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidItem;
+	}
+
+	UMD_EquipHotbarComponent* HotbarComponent = PurchasingCharacter->GetHotbarComponent();
+	if (IsValid(HotbarComponent) == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 상점 거래 식별자를 Hotbar 품목 데이터인 ToolDefinition으로 변환하는 처리
+	UMD_ToolDefinition* PurchasedToolDefinition = ShopItem.EquipmentDefinition.Get();
+	if (ShopItem.ItemId != SupportItemId && IsValid(PurchasedToolDefinition) == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidItem;
+	}
+
+	// 일회성 품목의 동일 계열 교체에 필요한 GameplayTag 유효성 검사
+	if (ShopItem.ItemId != SupportItemId && ShopItem.bPricePerUnit == false && PurchasedToolDefinition->ToolAbilityTag.IsValid() == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidItem;
+	}
+
+	// ToolDefinition 하나로 수량 증가, 동일 태그 교체, 빈 항목 추가 가능성을 결제 전에 확인하는 검사
+	if (ShopItem.ItemId != SupportItemId && (HotbarComponent->CanAddTool(PurchasedToolDefinition) == false || (ShopItem.bPricePerUnit == true && HotbarComponent->GetToolCount(PurchasedToolDefinition) >= MAX_int32)))
+	{
+		return EMD_ShopPurchaseResult::FullyStocked;
+	}
+
+	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
+	if (IsValid(MerchantSubsystem) == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 상점을 이용하는 플레이어의 PlayerState가 유효하지 않으면 구매 과정 중단
+	AMD_PlayerState* PurchasingPlayerState = PurchasingCharacter->GetPlayerState<AMD_PlayerState>();
+	if (IsValid(PurchasingPlayerState) == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 실제 플레이어 지급이 성공한 경우에만 팀 경제 원장의 결제를 확정하기 위한 콜백 전달
+	EMD_ShopPurchaseResult PurchaseResult = MerchantSubsystem->TryPurchaseShopItem(PurchasingPlayerState, ShopItem, [PurchasingCharacter, ShopItem]()
+		{
+			const bool bWasSuccessful = FulfillPurchasedItem(PurchasingCharacter, ShopItem);
+			return bWasSuccessful;
+		});
+	return PurchaseResult;
+}
+
+void AMD_Merchant::ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResult Result)
+{
+	// 닫힌 메뉴에 피드백을 남기지 않도록 하는 로컬 위젯 수명 검사
+	if (ActiveMenuWidget.IsValid() == false)
+	{
+		return;
+	}
+
+	if (Result == EMD_ShopPurchaseResult::Success)
+	{
+		FMD_ShopItem PurchasedItem;
+		const bool bHasPurchasedItem = IsValid(ShopCatalog) == true && ShopCatalog->FindItem(ItemId, PurchasedItem) == true;
+		const FText ItemName = bHasPurchasedItem == true ? PurchasedItem.DisplayName : FText::FromName(ItemId);
+		ActiveMenuWidget->ShowDialogueLine(FText::Format(NSLOCTEXT("MDMerchant", "ShopPurchaseSuccess", "{0}, 챙겨 둬."), ItemName));
+		return;
+	}
+
+	if (Result == EMD_ShopPurchaseResult::FullyStocked)
+	{
+		ActiveMenuWidget->ShowDialogueLine(FullStockDialogue);
+		return;
+	}
+
+	if (Result == EMD_ShopPurchaseResult::InsufficientCredits)
+	{
+		ActiveMenuWidget->ShowDialogueLine(InsufficientCreditsDialogue);
+		return;
+	}
+
+	if (Result == EMD_ShopPurchaseResult::Locked)
+	{
+		ActiveMenuWidget->ShowDialogueLine(LockedItemDialogue);
+		return;
+	}
+
+	ActiveMenuWidget->ShowDialogueLine(InvalidPurchaseDialogue);
 }
 
 void AMD_Merchant::HandleQuestRequested()
@@ -325,6 +565,40 @@ void AMD_Merchant::RefreshQuestWidgetFromComponent()
 	ActiveQuestWidget->SetRepeatQuests(MerchantComponent->GetRepeatQuests());
 }
 
+void AMD_Merchant::RefreshShopWidgetFromComponent()
+{
+	if (ActiveShopWidget.IsValid() == false)
+	{
+		return;
+	}
+
+	const UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (IsValid(MerchantComponent) == false)
+	{
+		return;
+	}
+
+	// 소유권과 선행 품목 해금을 동일한 복제 스냅샷으로 계산하기 위한 목록 복사
+	AMD_PlayerState* InteractingPlayerState = GetInteractingPlayerState();
+	TArray<FName> OwnedItemIds = IsValid(InteractingPlayerState) == true ? InteractingPlayerState->GetPurchasedShopItemIds() : TArray<FName>();
+	TArray<FName> FullyStockedItemIds;
+
+	if (IsValid(ShopCatalog) == true)
+	{
+		for (const FMD_ShopItem& ShopItem : ShopCatalog->Items)
+		{
+			if (ShopItem.bPricePerUnit == false && OwnedItemIds.Contains(ShopItem.ItemId) == true)
+			{
+				FullyStockedItemIds.Add(ShopItem.ItemId);
+			}
+		}
+	}
+
+	ActiveShopWidget->SetShopInfo(MerchantComponent->BuildMenuInfo());
+	ActiveShopWidget->SetProgress(MerchantComponent->GetQuestCompletions(), OwnedItemIds);
+	ActiveShopWidget->SetFullyStockedItems(FullyStockedItemIds);
+}
+
 UMD_MerchantComponent* AMD_Merchant::GetMerchantComponent() const
 {
 	const UWorld* World = GetWorld();
@@ -333,7 +607,19 @@ UMD_MerchantComponent* AMD_Merchant::GetMerchantComponent() const
 	return IsValid(GameState) ? GameState->GetMerchantComponent() : nullptr;
 }
 
+UMD_MerchantSubsystem* AMD_Merchant::GetMerchantSubsystem() const
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	return IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
+}
+
 AMD_PlayerController* AMD_Merchant::GetInteractingPlayerController() const
 {
 	return ActiveMenuWidget.IsValid() ? Cast<AMD_PlayerController>(ActiveMenuWidget->GetOwningPlayer()) : nullptr;
+}
+
+AMD_PlayerState* AMD_Merchant::GetInteractingPlayerState() const
+{
+	const AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+	return IsValid(InteractingPlayerController) == true ? InteractingPlayerController->GetPlayerState<AMD_PlayerState>() : nullptr;
 }

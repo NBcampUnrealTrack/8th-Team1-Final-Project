@@ -14,6 +14,20 @@ void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_PlayerState, ReturnStatus);
+	DOREPLIFETIME_CONDITION(AMD_PlayerState, PurchasedShopItemIds, COND_OwnerOnly);
+}
+
+void AMD_PlayerState::CopyProperties(APlayerState* PlayerState)
+{
+	Super::CopyProperties(PlayerState);
+
+	// Seamless Travel이나 플레이어 연결 해제 후 재접속 시 보존되어야 하는 데이터 복사
+	AMD_PlayerState* TargetPlayerState = Cast<AMD_PlayerState>(PlayerState);
+	if (IsValid(TargetPlayerState) == true)
+	{
+		// 장비 해금 조건을 유지하기 위하여 플레이어가 구매한 장비 목록 복사
+		TargetPlayerState->PurchasedShopItemIds = PurchasedShopItemIds;
+	}
 }
 
 void AMD_PlayerState::BeginPlay()
@@ -130,6 +144,35 @@ EMD_HealthState AMD_PlayerState::GetHealthState() const
 	}
 
 	return EMD_HealthState::Healthy;
+}
+
+bool AMD_PlayerState::HasPurchasedShopItem(FName ItemId) const
+{
+	return ItemId.IsNone() == false && PurchasedShopItemIds.Contains(ItemId) == true;
+}
+
+bool AMD_PlayerState::RecordPurchasedShopItem(FName ItemId)
+{
+	// 클라이언트가 로컬 소유권을 조작하거나 잘못된 식별자가 기록되는 상황을 막기 위한 검사
+	if (HasAuthority() == false || ItemId.IsNone() == true || PurchasedShopItemIds.Contains(ItemId) == true)
+	{
+		return false;
+	}
+
+	// 복제 배열 순서를 일정하게 유지하여 불필요한 네트워크 변경을 줄이기 위한 정렬
+	PurchasedShopItemIds.Add(ItemId);
+	PurchasedShopItemIds.Sort(FNameLexicalLess());
+
+	// Listen Server환경 고려 상점 UI 갱신을 위한 UI 소유권 변화 이벤트 호출
+	OnRep_PurchasedShopItemIds();
+	ForceNetUpdate();
+	return true;
+}
+
+void AMD_PlayerState::OnRep_PurchasedShopItemIds()
+{
+	// 플레이어의 화면에 보여지는 상점 UI를 갱신하도록 UI 소유 플레이어 변경 이벤트 호출
+	OnShopOwnershipChanged.Broadcast();
 }
 
 void AMD_PlayerState::HandleHealthChanged(const FOnAttributeChangeData& ChangeData)

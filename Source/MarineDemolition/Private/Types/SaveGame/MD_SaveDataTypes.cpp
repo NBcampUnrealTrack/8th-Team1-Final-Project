@@ -28,6 +28,15 @@ bool FMD_MerchantData::IsStructurallyValid() const
 		return false;
 	}
 
+	// 식별자가 없거나 수량이 유효하지 않은 구매 원장이 해금과 중복 구매 판정을 오염시키지 않도록 하는 검사
+	for (const TPair<FName, int32>& PurchasedItemEntry : PurchasedItemCounts)
+	{
+		if (PurchasedItemEntry.Key.IsNone() == true || PurchasedItemEntry.Value <= 0)
+		{
+			return false;
+		}
+	}
+
 	return true;
 }
 
