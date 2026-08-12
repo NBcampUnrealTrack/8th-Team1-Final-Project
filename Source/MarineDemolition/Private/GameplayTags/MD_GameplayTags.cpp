@@ -201,12 +201,16 @@ namespace MDGameplayTags
 		Score_Penalty_PipeLeakTick,
 		"Score.Penalty.PipeLeakTick",
 		"수도 미밀봉 오염 확산 30초당");
-	
-	
+
+
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		State_Swimming,
 		"State.Swimming",
 		"수영 중. 정밀 작업 어빌리티 차단용");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		State_Climbing,
+		"State.Climbing",
+		"사다리 등반 중");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		State_Injured,
 		"State.Injured",
