@@ -18,6 +18,7 @@
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Player/MD_PlayerController.h"
+#include "UI/Merchant/MD_LoanWidget.h"
 #include "Player/MD_PlayerState.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
 #include "UI/Merchant/MD_QuestWidget.h"
@@ -179,9 +180,7 @@ void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 		Widget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
 	}
 
-	// 대출 화면이 생기면 HandleShopRequested와 같은 패턴으로 갈아끼운다:
-	// 화면을 띄운 뒤 SetMenuButtonsVisible(false), 뒤로가기에서 다시 true.
-	Widget->OnLoanRequested.AddDynamic(this, &AMD_Merchant::HandleNotReadyRequested);
+	Widget->OnLoanRequested.AddDynamic(this, &AMD_Merchant::HandleLoanRequested);
 
 	// 대화는 메뉴 위젯이 자체 대사창으로 처리한다.
 	// 치료(70₡/회, `07` §2.5)는 대화 안에서 처리하기로 정해졌다 → 대화 화면 담당.
@@ -223,6 +222,16 @@ void AMD_Merchant::HandleMenuExitRequested()
 		}
 		ActiveQuestWidget->RemoveFromParent();
 		ActiveQuestWidget.Reset();
+	}
+
+	if (ActiveLoanWidget.IsValid() == true)
+	{
+		if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+		{
+			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+		}
+		ActiveLoanWidget->RemoveFromParent();
+		ActiveLoanWidget.Reset();
 	}
 
 	ActiveMenuWidget.Reset();
@@ -322,6 +331,86 @@ void AMD_Merchant::HandleNotReadyRequested()
 	if (ActiveMenuWidget.IsValid())
 	{
 		ActiveMenuWidget->ShowDialogueLine(NotReadyDialogue);
+	}
+}
+
+void AMD_Merchant::HandleLoanRequested()
+{
+	if (IsValid(LoanWidgetClass) == false || ActiveMenuWidget.IsValid() == false)
+	{
+		return;
+	}
+
+	// 이미 생성된 UI가 있는 경우
+	if (ActiveLoanWidget.IsValid() == true)
+	{
+		// Viewport에 없으면 추가
+		if (ActiveLoanWidget->IsInViewport() == false)
+		{
+			ActiveLoanWidget->AddToViewport();
+		}
+		return;
+	}
+
+	// UI를 이용하는(소유하는) 플레이어의 Controller 얻기
+	APlayerController* PlayerController = ActiveMenuWidget->GetOwningPlayer();
+	if (IsValid(PlayerController) == false)
+	{
+		return;
+	}
+
+	// UI 생성
+	UMD_LoanWidget* LoanWidget = CreateWidget<UMD_LoanWidget>(PlayerController, LoanWidgetClass);
+	if (IsValid(LoanWidget) == false)
+	{
+		return;
+	}
+
+	// 초기 설정 진행
+	LoanWidget->SetOwningMerchantMenu(ActiveMenuWidget.Get());
+	LoanWidget->OnBackRequested.AddDynamic(this, &AMD_Merchant::HandleLoanBackRequested);
+	LoanWidget->OnBorrowRequested.AddDynamic(this, &AMD_Merchant::HandleBorrowRequested);
+	LoanWidget->OnRepayRequested.AddDynamic(this, &AMD_Merchant::HandleRepayRequested);
+	LoanWidget->AddToViewport();
+	ActiveLoanWidget = LoanWidget;
+
+	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+	{
+		MerchantComponent->OnMerchantStateChanged.AddUniqueDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+	}
+
+	RefreshLoanWidgetFromComponent();
+}
+
+void AMD_Merchant::HandleLoanBackRequested()
+{
+	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+	{
+		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+	}
+
+	if (ActiveLoanWidget.IsValid() == true)
+	{
+		ActiveLoanWidget->RemoveFromParent();
+		ActiveLoanWidget.Reset();
+	}
+}
+
+void AMD_Merchant::HandleBorrowRequested(int32 Amount)
+{
+	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+	if (IsValid(InteractingPlayerController) == true)
+	{
+		InteractingPlayerController->ServerBorrowCredits(this, Amount);
+	}
+}
+
+void AMD_Merchant::HandleRepayRequested(int32 Amount)
+{
+	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+	if (IsValid(InteractingPlayerController) == true)
+	{
+		InteractingPlayerController->ServerRepayLoan(this, Amount);
 	}
 }
 
@@ -551,6 +640,7 @@ void AMD_Merchant::HandleMerchantStateChanged()
 	}
 
 	RefreshQuestWidgetFromComponent();
+	RefreshLoanWidgetFromComponent();
 }
 
 void AMD_Merchant::RefreshQuestWidgetFromComponent()
@@ -602,6 +692,22 @@ void AMD_Merchant::RefreshShopWidgetFromComponent()
 	ActiveShopWidget->SetShopInfo(MerchantComponent->BuildMenuInfo());
 	ActiveShopWidget->SetProgress(MerchantComponent->GetQuestCompletions(), OwnedItemIds);
 	ActiveShopWidget->SetFullyStockedItems(FullyStockedItemIds);
+}
+
+void AMD_Merchant::RefreshLoanWidgetFromComponent()
+{
+	if (ActiveLoanWidget.IsValid() == false)
+	{
+		return;
+	}
+
+	const UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (IsValid(MerchantComponent) == false)
+	{
+		return;
+	}
+
+	ActiveLoanWidget->SetLoanInfo(MerchantComponent->BuildMenuInfo());
 }
 
 UMD_MerchantComponent* AMD_Merchant::GetMerchantComponent() const

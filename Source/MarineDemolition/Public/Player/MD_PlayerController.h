@@ -58,6 +58,14 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
 	void ServerAbandonRepeatQuest(int32 Index);
 
+	// 모선 상인과의 거리 및 대출 한도를 서버에서 검증한 뒤 대출을 실행하는 함수
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerBorrowCredits(AMD_Merchant* MerchantActor, int32 Amount);
+
+	// 모선 상인과의 거리 및 보유 크레딧을 서버에서 검증한 뒤 상환을 실행하는 함수
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerRepayLoan(AMD_Merchant* MerchantActor, int32 Amount);
+
 private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Debug")

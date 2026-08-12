@@ -17,7 +17,7 @@ bool FMD_GameStateData::IsStructurallyValid() const
 bool FMD_MerchantData::IsStructurallyValid() const
 {
 	// 경제와 호감도 범위가 런타임 규칙에서 허용하는 범위인지 확인하는 검사
-	if (Credits < 0 || Affinity < -4.0f || Affinity > 5.0f || FMath::IsFinite(Affinity) == false || CurrentDay < 0 || CurrentDay > 4 || NextDepositMultiplier < 0.0f || FMath::IsFinite(NextDepositMultiplier) == false || QuestCompletions < 0)
+	if (Credits < 0 || DebtBalance < 0 || Affinity < -4.0f || Affinity > 5.0f || FMath::IsFinite(Affinity) == false || CurrentDay < 0 || CurrentDay > 4 || NextDepositMultiplier < 0.0f || FMath::IsFinite(NextDepositMultiplier) == false || QuestCompletions < 0)
 	{
 		return false;
 	}

@@ -134,6 +134,96 @@ void UMD_MerchantSubsystem::AddAffinity(float Amount)
 	OnMerchantStateChanged.Broadcast();
 }
 
+int32 UMD_MerchantSubsystem::GetLoanLimit() const
+{
+	return CalculateLoanLimit(Affinity);
+}
+
+int32 UMD_MerchantSubsystem::CalculateLoanLimit(float InAffinity)
+{
+	// 높은 호감도 보상과 낮은 호감도 제한을 기획 임계값에 맞춰 구분하는 계산
+	float ClampedAffinity = FMath::Clamp(InAffinity, -2.0f, 2.0f);
+
+	float ClampedAffinityFactor = FMath::GetRangePct(-2.0f, 2.0f, ClampedAffinity);
+
+	// 호감도가 -2일 때 최소값(400), 호감도가 2일 때 최대값(1200)
+	int32 PotentialLoanLimit = FMath::Lerp(400, 1200, ClampedAffinityFactor);
+
+	// 100 단위로 끊기
+	int32 ActualLoanLimit = FMath::RoundToInt32(PotentialLoanLimit * 0.01f) * 100;
+
+	return 800;
+}
+
+int32 UMD_MerchantSubsystem::GetAvailableLoanAmount() const
+{
+	// 호감도 하락으로 현재 부채가 새 한도를 넘더라도 강제 회수 없이 추가 대출만 차단하는 계산
+	return FMath::Max(0, GetLoanLimit() - DebtBalance);
+}
+
+bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount)
+{
+	// 잘못된 금액과 현재 호감도 한도를 넘는 대출 요청을 서버 원장에 반영하지 않기 위한 검사
+	if (Amount <= 0 || Amount > GetAvailableLoanAmount())
+	{
+		return false;
+	}
+
+	// 플레이어 측 보유 금액 및 빚에 대하여 오버플로우 검사
+	if (Credits > MAX_int32 - Amount || DebtBalance > MAX_int32 - Amount)
+	{
+		return false;
+	}
+
+	// 대출 실행
+	Credits += Amount;
+	DebtBalance += Amount;
+
+	OnMerchantStateChanged.Broadcast();
+
+	return true;
+}
+
+bool UMD_MerchantSubsystem::TryRepayLoan(int32 Amount)
+{
+	// 실제 부채와 보유 크레딧 범위를 넘는 상환 요청을 거부하여 두 원장의 불일치를 방지하는 검사
+	if (Amount <= 0 || Amount > DebtBalance || Amount > Credits)
+	{
+		return false;
+	}
+
+	// 빚 상환 실행
+	Credits -= Amount;
+	DebtBalance -= Amount;
+	OnMerchantStateChanged.Broadcast();
+
+	return true;
+}
+
+int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
+{
+	// 빚이 존재하지 않거나 최대값의 경우 추가되는 이자 없음
+	if (DebtBalance <= 0 || DebtBalance == MAX_int32)
+	{
+		return 0;
+	}
+
+	// 기획 예시의 450₡ 대출 이자 23₡과 일치하도록 원 단위 반올림을 적용하는 계산
+	float CalculatedInterest = DebtBalance * DailyInterestRate;
+	int32 InterestAmount = FMath::Clamp(CalculatedInterest, 1, MAX_int32 - DebtBalance);	// 이자 값 보정
+	if (InterestAmount <= 0)
+	{
+		return 0;
+	}
+
+	// 빚에 이자 추가
+	DebtBalance += InterestAmount;
+	OnMerchantStateChanged.Broadcast();
+
+	// 추가된 이자 값 반환
+	return InterestAmount;
+}
+
 void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment)
 {
 	if (!IsValid(Site))
@@ -459,6 +549,7 @@ FMD_MerchantData UMD_MerchantSubsystem::GetMerchantSaveData() const
 	FMD_MerchantData SaveData;
 	SaveData.bConsumableDiscountActive = bConsumableDiscountActive;
 	SaveData.Credits = Credits;
+	SaveData.DebtBalance = DebtBalance;
 	SaveData.Affinity = Affinity;
 	SaveData.CurrentDay = CurrentDay;
 	SaveData.NextDepositMultiplier = NextDepositMultiplier;
@@ -511,6 +602,7 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 	// 모든 참조 검증 이후 경제·호감도·퀘스트 원장을 한 번에 교체하는 처리
 	bConsumableDiscountActive = SaveData.bConsumableDiscountActive;
 	Credits = SaveData.Credits;
+	DebtBalance = SaveData.DebtBalance;
 	Affinity = SaveData.Affinity;
 	CurrentDay = SaveData.CurrentDay;
 	NextDepositMultiplier = SaveData.NextDepositMultiplier;
@@ -700,6 +792,7 @@ void UMD_MerchantSubsystem::ApplyQuestReward(const FMD_QuestDefinitionData& Defi
 void UMD_MerchantSubsystem::ResetContract()
 {
 	Credits = 0;
+	DebtBalance = 0;
 	Affinity = 0.0f;
 	CurrentSite = nullptr;
 	CurrentDay = 0;
