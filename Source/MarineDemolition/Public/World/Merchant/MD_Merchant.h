@@ -168,9 +168,9 @@ private:
 	UFUNCTION()
 	void HandleRepeatAbandonRequested(int32 QuestIndex);
 
-	/** 상인 상태(퀘스트 등)가 바뀔 때마다 열려 있는 퀘스트 화면을 다시 그린다. */
+	/** 상인 상태 변경 시 열려 있는 UI의 호감도 정보를 갱신하는 함수 */
 	UFUNCTION()
-	void HandleMerchantStateChangedForQuest();
+	void HandleMerchantStateChanged();
 
 	void RefreshQuestWidgetFromComponent();
 
