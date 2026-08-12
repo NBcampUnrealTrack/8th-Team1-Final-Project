@@ -160,20 +160,7 @@ float FMD_ScrapeMaskAtlas::CalculateRuntimeAwareVisualContamination(
 		RemainingContamination,
 		0.0f,
 		SafeInitial);
-	const float SafeGeneratedInitial =
-		FMath::IsFinite(GeneratedInitialContamination)
-		? FMath::Clamp(GeneratedInitialContamination, 0.0f, 1.0f)
-		: SafeInitial;
-
-	if (SafeInitial > SafeGeneratedInitial + UE_SMALL_NUMBER
-		&& SafeInitial > UE_SMALL_NUMBER)
-	{
-		return FMath::Clamp(
-			SafeRemaining / SafeInitial,
-			0.0f,
-			1.0f);
-	}
-
+	(void)GeneratedInitialContamination;
 	return SafeRemaining;
 }
 
