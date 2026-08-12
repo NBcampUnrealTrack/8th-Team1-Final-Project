@@ -78,6 +78,17 @@ public:
 		double& InOutFrontDepthCm,
 		double& InOutBackDepthCm);
 
+	/**
+	 * Expands the two required face depths into the unused middle space while
+	 * keeping a small separation gap between their projection volumes.
+	 * Returns false when both required depths cannot fit without overlap.
+	 */
+	static bool TryPartitionFaceDepths(
+		double WallThicknessCm,
+		double SeparationGapCm,
+		double& InOutFrontDepthCm,
+		double& InOutBackDepthCm);
+
 private:
 	FMD_ScrapeMeshSurfaceProfile() = delete;
 };

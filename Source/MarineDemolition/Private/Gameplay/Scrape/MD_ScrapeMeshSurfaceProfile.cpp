@@ -89,9 +89,16 @@ bool FMD_ScrapeMeshSurfaceProfile::TryMeasureFaceProfile(
 
 	// 이 면의 Bounds 바깥 평면. 여기서부터 안쪽으로 얼마나 들어가는지를 잰다.
 	const FBoxSphereBounds Bounds = MeshAsset->GetBounds();
-	const double OuterPlaneCoordinate = FVector::DotProduct(
-		Bounds.Origin + Bounds.BoxExtent * OutwardNormalLocal.GetAbs(),
-		OutwardNormalLocal) * NormalScale;
+	// The support point depends on the sign of the outward direction. Adding
+	// an absolute extent to the position works for +X/+Y/+Z only; for a back
+	// face (for example -Y) it selects the opposite side of the bounds and
+	// makes every measured depth negative. Compute the support coordinate
+	// directly so both signs use their actual outer plane.
+	const double OuterPlaneCoordinate = (
+		FVector::DotProduct(Bounds.Origin, OutwardNormalLocal)
+		+ FVector::DotProduct(
+			Bounds.BoxExtent,
+			OutwardNormalLocal.GetAbs())) * NormalScale;
 	if (!FMath::IsFinite(OuterPlaneCoordinate))
 	{
 		return false;
@@ -307,4 +314,47 @@ void FMD_ScrapeMeshSurfaceProfile::BalanceFaceDepths(
 	const double ScaleFactor = WallThicknessCm / TotalDepthCm;
 	InOutFrontDepthCm *= ScaleFactor;
 	InOutBackDepthCm *= ScaleFactor;
+}
+
+bool FMD_ScrapeMeshSurfaceProfile::TryPartitionFaceDepths(
+	const double WallThicknessCm,
+	const double SeparationGapCm,
+	double& InOutFrontDepthCm,
+	double& InOutBackDepthCm)
+{
+	if (!FMath::IsFinite(WallThicknessCm)
+		|| WallThicknessCm <= 0.0
+		|| !FMath::IsFinite(SeparationGapCm)
+		|| SeparationGapCm < 0.0
+		|| !FMath::IsFinite(InOutFrontDepthCm)
+		|| !FMath::IsFinite(InOutBackDepthCm))
+	{
+		return false;
+	}
+
+	const double TargetCombinedDepthCm = FMath::Max(
+		WallThicknessCm - SeparationGapCm,
+		0.0);
+	const double FrontRequiredDepthCm = FMath::Max(
+		InOutFrontDepthCm,
+		0.0);
+	const double BackRequiredDepthCm = FMath::Max(
+		InOutBackDepthCm,
+		0.0);
+	const double RequiredCombinedDepthCm =
+		FrontRequiredDepthCm + BackRequiredDepthCm;
+	if (RequiredCombinedDepthCm
+		> TargetCombinedDepthCm + static_cast<double>(UE_SMALL_NUMBER))
+	{
+		return false;
+	}
+
+	const double UnallocatedDepthCm = FMath::Max(
+		TargetCombinedDepthCm - RequiredCombinedDepthCm,
+		0.0);
+	const double FrontShareCm = UnallocatedDepthCm * 0.5;
+	InOutFrontDepthCm = FrontRequiredDepthCm + FrontShareCm;
+	InOutBackDepthCm = BackRequiredDepthCm
+		+ (UnallocatedDepthCm - FrontShareCm);
+	return true;
 }
