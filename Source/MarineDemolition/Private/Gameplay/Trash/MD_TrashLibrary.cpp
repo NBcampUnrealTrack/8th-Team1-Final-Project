@@ -4,6 +4,7 @@
 
 #include "Engine/DataTable.h"
 #include "Gameplay/Trash/MD_TrashSettings.h"
+#include "Gameplay/Trash/MD_TrashSortable.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Util/MD_LogUtility.h"
 
@@ -112,7 +113,9 @@ namespace
 		return Row;
 	}
 
-	const FMD_TrashCategoryRow* FindTrashCategoryRowInternal(const FGameplayTag Category)
+	const FMD_TrashCategoryRow* FindTrashCategoryRowInternal(
+		const FGameplayTag Category,
+		const bool bWarnIfMissing = true)
 	{
 		if (!Category.IsValid())
 		{
@@ -135,11 +138,59 @@ namespace
 			}
 		}
 
-		WarnOnce(
-			FName(*FString::Printf(TEXT("TrashCategoryRow:%s"), *Category.ToString())),
-			FString::Printf(TEXT("칸 테이블에 '%s' 행이 없다."), *Category.ToString()));
+		if (bWarnIfMissing)
+		{
+			WarnOnce(
+				FName(*FString::Printf(TEXT("TrashCategoryRow:%s"), *Category.ToString())),
+				FString::Printf(TEXT("칸 테이블에 '%s' 행이 없다."), *Category.ToString()));
+		}
 
 		return nullptr;
+	}
+
+	/** 기존 DataTable도 동작하도록 비어 있는 신규 정책 필드를 안전한 호환값으로 채운다. */
+	bool CompleteSortDescriptor(FMD_TrashSortDescriptor& Descriptor)
+	{
+		const FMD_TrashCategoryRow* CategoryRow =
+			FindTrashCategoryRowInternal(Descriptor.Category);
+		if (!CategoryRow)
+		{
+			return false;
+		}
+
+		if (!Descriptor.CorrectSortScoreTag.IsValid())
+		{
+			Descriptor.CorrectSortScoreTag = CategoryRow->CorrectSortScoreTag.IsValid()
+				? CategoryRow->CorrectSortScoreTag
+				: CategoryRow->Category;
+		}
+
+		if (!Descriptor.MisSortScoreTag.IsValid())
+		{
+			if (CategoryRow->MisSortScoreTag.IsValid())
+			{
+				Descriptor.MisSortScoreTag = CategoryRow->MisSortScoreTag;
+			}
+			else
+			{
+				// 신규 열이 비어 있는 기존 asset의 호환 규칙. 데이터가 채워지면 이 분기는 타지 않는다.
+				Descriptor.MisSortScoreTag = Descriptor.Category.MatchesTagExact(
+					MDGameplayTags::Score_Sorting_Contaminated)
+					? MDGameplayTags::Score_Penalty_MissortContaminated
+					: MDGameplayTags::Score_Penalty_Missort;
+			}
+		}
+
+		if (Descriptor.RefundCredits == INDEX_NONE)
+		{
+			Descriptor.RefundCredits = FMath::Max(0, CategoryRow->RefundCredits);
+		}
+		else
+		{
+			Descriptor.RefundCredits = FMath::Max(0, Descriptor.RefundCredits);
+		}
+
+		return Descriptor.IsResolved();
 	}
 }
 
@@ -169,14 +220,35 @@ FGameplayTag UMD_TrashLibrary::GetTrashKindCategory(const FName TrashKindId)
 
 int32 UMD_TrashLibrary::GetTrashKindRefundCredits(const FName TrashKindId)
 {
-	const FMD_TrashKindRow* Row = FindTrashKindRowInternal(TrashKindId);
-	if (!Row)
+	FMD_TrashSortDescriptor Descriptor;
+	return GetTrashKindSortDescriptor(TrashKindId, Descriptor)
+		? Descriptor.RefundCredits
+		: 0;
+}
+
+bool UMD_TrashLibrary::GetTrashKindSortDescriptor(
+	const FName TrashKindId,
+	FMD_TrashSortDescriptor& OutDescriptor)
+{
+	OutDescriptor = FMD_TrashSortDescriptor();
+
+	const FMD_TrashKindRow* KindRow = FindTrashKindRowInternal(TrashKindId);
+	if (!KindRow)
 	{
-		return 0;
+		return false;
 	}
 
-	// 기획이 "칸 기본 + 품목 가산" 구조라 합산값을 행에 적지 않고 계산한다
-	return GetCategoryRefundCredits(Row->Category) + Row->RefundBonusCredits;
+	OutDescriptor.Category = KindRow->Category;
+	OutDescriptor.BonusScoreTag = KindRow->ScoreBonusTag;
+	if (!CompleteSortDescriptor(OutDescriptor))
+	{
+		OutDescriptor = FMD_TrashSortDescriptor();
+		return false;
+	}
+
+	// 산재 쓰레기는 칸 기본 환급에 종류별 가산을 더한다. 음수 데이터는 경제 차감으로 번지지 않는다.
+	OutDescriptor.RefundCredits += FMath::Max(0, KindRow->RefundBonusCredits);
+	return true;
 }
 
 FGameplayTag UMD_TrashLibrary::GetTrashKindScoreBonusTag(const FName TrashKindId)
@@ -214,23 +286,104 @@ FLinearColor UMD_TrashLibrary::GetCategoryColor(const FGameplayTag Category)
 int32 UMD_TrashLibrary::GetCategoryRefundCredits(const FGameplayTag Category)
 {
 	const FMD_TrashCategoryRow* Row = FindTrashCategoryRowInternal(Category);
-	return Row ? Row->RefundCredits : 0;
+	return Row ? FMath::Max(0, Row->RefundCredits) : 0;
 }
 
 bool UMD_TrashLibrary::IsTrashCategory(const FGameplayTag Category)
 {
-	// Bonus.* 가 칸 5개와 같은 가지에 있어 드롭다운에 섞인다. 명시적으로 나열해 걸러낸다
-	return Category.MatchesTagExact(MDGameplayTags::Score_Sorting_Metal)
-		|| Category.MatchesTagExact(MDGameplayTags::Score_Sorting_General)
-		|| Category.MatchesTagExact(MDGameplayTags::Score_Sorting_Plastic)
-		|| Category.MatchesTagExact(MDGameplayTags::Score_Sorting_Contaminated)
-		|| Category.MatchesTagExact(MDGameplayTags::Score_Sorting_NonBurnable);
+	return FindTrashCategoryRowInternal(Category, /*bWarnIfMissing=*/false) != nullptr;
+}
+
+FGameplayTag UMD_TrashLibrary::GetCorrectSortScoreTag(const FGameplayTag Category)
+{
+	const FMD_TrashCategoryRow* Row = FindTrashCategoryRowInternal(Category);
+	if (!Row)
+	{
+		return FGameplayTag();
+	}
+
+	return Row->CorrectSortScoreTag.IsValid()
+		? Row->CorrectSortScoreTag
+		: Row->Category;
 }
 
 FGameplayTag UMD_TrashLibrary::GetMisplacedSortScoreTag(const FGameplayTag CorrectCategory)
 {
-	// 기획 05 S−02: 오염물·따개비·오염조각을 비오염 칸에 넣으면 −24 (그 외 −12)
+	const FMD_TrashCategoryRow* Row = FindTrashCategoryRowInternal(CorrectCategory);
+	if (!Row)
+	{
+		return FGameplayTag();
+	}
+
+	if (Row->MisSortScoreTag.IsValid())
+	{
+		return Row->MisSortScoreTag;
+	}
+
+	// 신규 열이 비어 있는 기존 asset의 호환 규칙.
 	return CorrectCategory.MatchesTagExact(MDGameplayTags::Score_Sorting_Contaminated)
 		? MDGameplayTags::Score_Penalty_MissortContaminated
 		: MDGameplayTags::Score_Penalty_Missort;
+}
+
+bool UMD_TrashLibrary::ResolveSortDescriptor(
+	UObject* SortableObject,
+	FMD_TrashSortDescriptor& OutDescriptor)
+{
+	OutDescriptor = FMD_TrashSortDescriptor();
+	if (!IsValid(SortableObject) || !SortableObject->Implements<UMD_TrashSortable>())
+	{
+		return false;
+	}
+
+	OutDescriptor = IMD_TrashSortable::Execute_GetTrashSortDescriptor(SortableObject);
+
+	// 기존 WallPiece/오염물/BP 구현은 descriptor 추가 전 계약만 구현해도 계속 동작한다.
+	if (!OutDescriptor.Category.IsValid())
+	{
+		OutDescriptor.Category = IMD_TrashSortable::Execute_GetTrashCategory(SortableObject);
+	}
+	if (!OutDescriptor.BonusScoreTag.IsValid())
+	{
+		OutDescriptor.BonusScoreTag =
+			IMD_TrashSortable::Execute_GetSortScoreBonusTag(SortableObject);
+	}
+
+	if (!CompleteSortDescriptor(OutDescriptor))
+	{
+		OutDescriptor = FMD_TrashSortDescriptor();
+		return false;
+	}
+
+	return true;
+}
+
+FMD_TrashSortResult UMD_TrashLibrary::EvaluateSort(
+	const FMD_TrashSortDescriptor& Descriptor,
+	const FGameplayTag AcceptedCategory)
+{
+	FMD_TrashSortResult Result;
+	if (!Descriptor.IsResolved()
+		|| !IsTrashCategory(AcceptedCategory))
+	{
+		return Result;
+	}
+
+	Result.bCorrectSort = Descriptor.Category.MatchesTagExact(AcceptedCategory);
+	Result.PrimaryScoreTag = Result.bCorrectSort
+		? Descriptor.CorrectSortScoreTag
+		: Descriptor.MisSortScoreTag;
+	if (!Result.PrimaryScoreTag.IsValid())
+	{
+		return FMD_TrashSortResult();
+	}
+
+	Result.bCanSort = true;
+	if (Result.bCorrectSort)
+	{
+		Result.BonusScoreTag = Descriptor.BonusScoreTag;
+		Result.RefundCredits = FMath::Max(0, Descriptor.RefundCredits);
+	}
+
+	return Result;
 }

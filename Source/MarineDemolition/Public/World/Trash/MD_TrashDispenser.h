@@ -19,7 +19,8 @@ enum class EMD_TrashDispenseResult : uint8
 	Success,
 	Blocked,
 	NotConfigured,
-	SpawnFailed
+	SpawnFailed,
+	LiveLimitReached
 };
 
 /**
@@ -39,8 +40,11 @@ public:
 	virtual void Interact_Implementation(AActor* Interactor) override;
 	/** ~Implements IMD_Interactable */
 
+	int32 GetLiveDispensedBinCount() const { return LiveDispensedBins.Num(); }
+
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** 서버 판정 결과를 각 플레이어의 같은 보급기 인스턴스에 전달한다. */
 	UFUNCTION(NetMulticast, Reliable)
@@ -90,7 +94,23 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Dispenser")
 	TSubclassOf<AMD_TrashBin> TrashBinClass;
 
+	/** 서버 요청 스팸과 Reliable 결과 multicast 증폭을 막는 최소 요청 간격 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Dispenser",
+		meta = (ClampMin = "0.05", UIMin = "0.1", Units = "s"))
+	float InteractionCooldown = 0.25f;
+
+	/** 누적 보급량은 무한이지만 이 보급기가 동시에 유지할 수 있는 통 수는 제한한다 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Dispenser",
+		meta = (ClampMin = "1", UIMin = "1"))
+	int32 MaxLiveDispensedBins = 8;
+
 private:
+	UFUNCTION()
+	void HandleDispensedBinDestroyed(AActor* DestroyedActor);
+
+	void CompactLiveDispensedBins();
+	bool RegisterTrackedBin(AMD_TrashBin* Bin);
+
 	/** PhysicsActor 충돌 규칙을 기준으로 출구가 비어 있는지 서버에서 확인한다. */
 	bool IsSpawnAreaClear() const;
 
@@ -106,4 +126,7 @@ private:
 
 	/** 현재 적용된 InteractTrace 응답 상태. 같은 값을 반복 적용하지 않기 위한 기준이다. */
 	bool bClearanceOccupied = false;
+
+	TArray<TWeakObjectPtr<AMD_TrashBin>> LiveDispensedBins;
+	double NextAllowedInteractionTime = 0.0;
 };
