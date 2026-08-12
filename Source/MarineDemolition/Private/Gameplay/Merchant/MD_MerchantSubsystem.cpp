@@ -75,7 +75,7 @@ int32 UMD_MerchantSubsystem::CalculateLoanLimit(float InAffinity)
 	// 100 단위로 끊기
 	int32 ActualLoanLimit = FMath::RoundToInt32(PotentialLoanLimit * 0.01f) * 100;
 
-	return 800;
+	return ActualLoanLimit;
 }
 
 int32 UMD_MerchantSubsystem::GetAvailableLoanAmount() const
