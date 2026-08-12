@@ -9,6 +9,7 @@
 #include "World/Interaction/MD_TravelConsole.h"
 #include "World/Interaction/MD_DayEndConsole.h"
 #include "World/Interaction/MD_SectorCloseoutMarker.h"
+#include "World/Merchant/MD_Merchant.h"
 #include "Game/MD_GameModeBase.h"
 #include "Game/MD_GameStateBase.h"
 
@@ -283,6 +284,73 @@ void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
 	}
 }
 
+void AMD_PlayerController::ServerAbandonRepeatQuest_Implementation(int32 Index)
+{
+	// 퀘스트 포기에 따른 패널티를 적용할 GameState 얻기
+	AMD_GameStateBase* MDGameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
+	if (IsValid(MDGameState) == false || MDGameState->HasAuthority() == false)
+	{
+		return;
+	}
+
+	// 퀘스트 상태와 경제·호감도 페널티를 관리하는 서버의 상인 매니저 얻기
+	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
+	if (IsValid(Merchant) == false)
+	{
+		return;
+	}
+
+	// 퀘스트 포기 요청 성공 시 점수 감소
+	if (Merchant->TryAbandonRepeatQuest(Index) == true)
+	{
+		MDGameState->AddScoreDelta(-100);
+	}
+}
+
+void AMD_PlayerController::ServerBorrowCredits_Implementation(AMD_Merchant* MerchantActor, int32 Amount)
+{
+	APawn* PlayerPawn = GetPawn();
+	if (IsValid(MerchantActor) == false || IsValid(PlayerPawn) == false)
+	{
+		return;
+	}
+
+	// 멀리 떨어지 상태에서 돈을 빌리는 경우 함수 조기 종료
+	if (FVector::DistSquared(PlayerPawn->GetActorLocation(), MerchantActor->GetActorLocation()) > FMath::Square(500.0f))
+	{
+		return;
+	}
+
+	// 대출 실행
+	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
+	if (IsValid(MerchantSubsystem) == true)
+	{
+		MerchantSubsystem->TryBorrowCredits(Amount);
+	}
+}
+
+void AMD_PlayerController::ServerRepayLoan_Implementation(AMD_Merchant* MerchantActor, int32 Amount)
+{
+	APawn* PlayerPawn = GetPawn();
+	if (IsValid(MerchantActor) == false || IsValid(PlayerPawn) == false)
+	{
+		return;
+	}
+
+	// 멀리 떨어지 상태에서 돈을 상환하는 경우 함수 조기 종료
+	if (FVector::DistSquared(PlayerPawn->GetActorLocation(), MerchantActor->GetActorLocation()) > FMath::Square(500.0f))
+	{
+		return;
+	}
+
+
+	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
+	if (IsValid(MerchantSubsystem) == true)
+	{
+		MerchantSubsystem->TryRepayLoan(Amount);
+	}
+}
+
 
 /* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 
@@ -338,30 +406,6 @@ void AMD_PlayerController::ServerDeclineRepeat_Implementation(int32 Index)
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
 	{
 		Merchant->TryDeclineRepeatQuest(Index);
-	}
-}
-
-
-void AMD_PlayerController::ServerAbandonRepeatQuest_Implementation(int32 Index)
-{
-	// 퀘스트 포기에 따른 패널티를 적용할 GameState 얻기
-	AMD_GameStateBase* MDGameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
-	if (IsValid(MDGameState) == false || MDGameState->HasAuthority() == false)
-	{
-		return;
-	}
-
-	// 퀘스트 상태와 경제·호감도 페널티를 관리하는 서버의 상인 매니저 얻기
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == false)
-	{
-		return;
-	}
-
-	// 퀘스트 포기 요청 성공 시 점수 감소
-	if (Merchant->TryAbandonRepeatQuest(Index) == true)
-	{
-		MDGameState->AddScoreDelta(-100);
 	}
 }
 

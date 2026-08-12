@@ -11,6 +11,7 @@ class UMD_MerchantMenuWidget;
 class UMD_ShopCatalog;
 class UMD_ShopWidget;
 class UMD_QuestWidget;
+class UMD_LoanWidget;
 class UMD_MerchantComponent;
 class AMD_PlayerController;
 class UStaticMeshComponent;
@@ -72,6 +73,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
 	TSubclassOf<UMD_QuestWidget> QuestWidgetClass;
 
+	// 메뉴에서 대출을 눌렀을 때 열리는 서버 원장 연동 화면 클래스
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+	TSubclassOf<UMD_LoanWidget> LoanWidgetClass;
+
 	/**
 	 * 이미 가득 찬 품목을 사려 할 때 브릭스가 하는 말.
 	 *
@@ -82,10 +87,10 @@ protected:
 	FText FullStockDialogue = FText::FromString(TEXT("그건 이미 꽉 찼어. 돈 아껴."));
 
 	/**
-	 * 아직 화면이 없는 메뉴(퀘스트·대출)를 눌렀을 때의 대사.
+	 * 아직 화면이 연결되지 않은 추가 메뉴를 눌렀을 때의 대사.
 	 *
 	 * 기획서에 이 상황 대사가 없어 `06` §4 톤에 맞춰 임시로 적었다.
-	 * 해당 화면이 생기면 이 대사 대신 화면을 띄우도록 바꾼다.
+	 * 추가 화면이 생기면 이 대사 대신 화면을 띄우도록 바꾸기 위한 예비 문구.
 	 */
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	FText NotReadyDialogue = FText::FromString(TEXT("그건 아직 안 열었어. 목록이나 봐."));
@@ -96,6 +101,9 @@ protected:
 	TWeakObjectPtr<UMD_ShopWidget> ActiveShopWidget;
 
 	TWeakObjectPtr<UMD_QuestWidget> ActiveQuestWidget;
+
+	// 중복 생성 방지와 복제 상태 갱신에 사용하는 현재 대출 화면 참조
+	TWeakObjectPtr<UMD_LoanWidget> ActiveLoanWidget;
 
 private:
 	/** 메뉴에서 '나가기'를 눌렀을 때 */
@@ -118,9 +126,25 @@ private:
 	UFUNCTION()
 	void HandleQuestRequested();
 
+	// 상인 메뉴에서 대출 화면을 생성하고 복제 원장 갱신을 연결하는 함수
+	UFUNCTION()
+	void HandleLoanRequested();
+
 	/** 퀘스트 화면에서 '뒤로'를 눌렀을 때 */
 	UFUNCTION()
 	void HandleQuestBackRequested();
+
+	// 대출 화면을 닫고 상인 메뉴와 상태 변경 구독을 복구하는 함수
+	UFUNCTION()
+	void HandleLoanBackRequested();
+
+	// 대출 화면의 금액 요청을 서버 권위 PlayerController로 전달하는 함수
+	UFUNCTION()
+	void HandleBorrowRequested(int32 Amount);
+
+	// 상환 화면의 금액 요청을 서버 권위 PlayerController로 전달하는 함수
+	UFUNCTION()
+	void HandleRepayRequested(int32 Amount);
 
 	/** 반복 퀘스트 카드에서 '수락'을 눌렀을 때 — 서버 판정은 PlayerController RPC가 맡는다. */
 	UFUNCTION()
@@ -139,13 +163,15 @@ private:
 
 	void RefreshQuestWidgetFromComponent();
 
+	// 복제된 크레딧과 부채를 현재 대출 화면에 다시 적용하는 함수
+	void RefreshLoanWidgetFromComponent();
+
 	UMD_MerchantComponent* GetMerchantComponent() const;
 
 	AMD_PlayerController* GetInteractingPlayerController() const;
 
 	/**
-	 * 대출은 아직 화면이 없다. 버튼을 숨기면 돌아올 길이 없으니
-	 * 숨기지 않고 대사로만 알린다.
+	 * 아직 화면이 없는 추가 메뉴를 버튼 상태 변경 없이 대사로 안내하는 예비 처리 함수
 	 */
 	UFUNCTION()
 	void HandleNotReadyRequested();

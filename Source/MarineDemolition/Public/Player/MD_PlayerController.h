@@ -10,6 +10,7 @@
 class AMD_TravelConsole;
 class AMD_DayEndConsole;
 class AMD_SectorCloseoutMarker;
+class AMD_Merchant;
 class UMD_HUDWidget;
 class UMD_EquipHotbarWidget;
 class UMD_SiteDefinition;
@@ -47,6 +48,14 @@ public:
 	// 서버에서 반복 퀘스트 포기와 관련 페널티를 처리하도록 요청하는 함수
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
 	void ServerAbandonRepeatQuest(int32 Index);
+
+	// 모선 상인과의 거리 및 대출 한도를 서버에서 검증한 뒤 대출을 실행하는 함수
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerBorrowCredits(AMD_Merchant* MerchantActor, int32 Amount);
+
+	// 모선 상인과의 거리 및 보유 크레딧을 서버에서 검증한 뒤 상환을 실행하는 함수
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerRepayLoan(AMD_Merchant* MerchantActor, int32 Amount);
 
 private:
 

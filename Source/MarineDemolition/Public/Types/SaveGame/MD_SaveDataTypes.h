@@ -83,6 +83,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	int32 Credits = 0;
 
+	// 계약과 게임 재시작을 넘어 유지되는 팀 공유 미상환 대출 잔액
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
+	int32 DebtBalance = 0;
+
 	// 상점 해금과 대화 분기에 사용하는 누적 상인 호감도
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	float Affinity = 0.0f;
