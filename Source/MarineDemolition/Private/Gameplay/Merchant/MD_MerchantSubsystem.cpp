@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
+#include "Player/MD_PlayerState.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 
@@ -45,10 +46,10 @@ void UMD_MerchantSubsystem::AddCredits(int32 Amount)
 	OnMerchantStateChanged.Broadcast();
 }
 
-EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase)
+EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase)
 {
 	// 클라이언트가 로컬 원장을 변경하지 못하도록 막는 서버 권위 검사
-	if (IsValid(GetWorld()) == false || GetWorld()->GetNetMode() == ENetMode::NM_Client)
+	if (IsValid(PurchasingPlayerState) == false || PurchasingPlayerState->HasAuthority() == false)
 	{
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
@@ -59,16 +60,16 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(const FMD_Shop
 		return EMD_ShopPurchaseResult::InvalidItem;
 	}
 
-	const TArray<FName> OwnedItemIds = GetOwnedItemIds();
+	const TArray<FName> AlreadyPurchasedItemIds = PurchasingPlayerState->GetPurchasedShopItemIds();
 
 	// UI 표시와 동일한 조건을 서버 원장 값으로 다시 계산하는 해금 검사
-	if (ShopItem.IsUnlocked(Affinity, QuestCompletions, OwnedItemIds) == false)
+	if (ShopItem.IsUnlocked(Affinity, QuestCompletions, AlreadyPurchasedItemIds) == false)
 	{
 		return EMD_ShopPurchaseResult::Locked;
 	}
 
 	// 개당 판매 품목이 아닌 장비의 중복 결제를 막는 보유 검사
-	if (ShopItem.bPricePerUnit == false && GetPurchasedItemCount(ShopItem.ItemId) > 0)
+	if (ShopItem.bPricePerUnit == false && PurchasingPlayerState->HasPurchasedShopItem(ShopItem.ItemId) == true)
 	{
 		return EMD_ShopPurchaseResult::FullyStocked;
 	}
@@ -81,6 +82,12 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(const FMD_Shop
 
 	// 결제와 구매 원장을 같은 프레임에 반영하여 부분 성공을 막는 원자적 처리
 	if (FulfillPurchase() == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 아이템을 구매하는 플레이어의 PlayerState에 해당 아이템 구매 이력 남기기 실패 시 Invalid 반환
+	if (ShopItem.bPricePerUnit == false && PurchasingPlayerState->RecordPurchasedShopItem(ShopItem.ItemId) == false)
 	{
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}

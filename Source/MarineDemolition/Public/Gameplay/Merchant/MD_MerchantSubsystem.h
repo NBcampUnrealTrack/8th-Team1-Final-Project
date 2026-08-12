@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -16,6 +16,7 @@
 DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
 
 class UMD_SiteDefinition;
+class AMD_PlayerState;
 struct FGameplayTag;
 struct FMD_MerchantData;
 struct FMD_ShopItem;
@@ -50,8 +51,8 @@ public:
 	/** 크레딧 증감. 단독 호출용이며 변경 후 델리게이트 알림. */
 	void AddCredits(int32 Amount);
 
-	/** 아이템 지급 콜백(FulfillPurchase) 반환 값이 true일 때만 재화 차감과 구매 원장을 함께 확정하는 서버 구매 함수 */
-	EMD_ShopPurchaseResult TryPurchaseShopItem(const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase);
+	/** 플레이어별 소유권을 검증하고 아이템 지급 성공 시에만 팀 재화 차감과 구매 원장을 확정하는 서버 구매 함수 */
+	EMD_ShopPurchaseResult TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase);
 
 	/** 상점 해금과 UI 갱신에 사용할 구매 완료 품목 식별자 목록 */
 	TArray<FName> GetOwnedItemIds() const;

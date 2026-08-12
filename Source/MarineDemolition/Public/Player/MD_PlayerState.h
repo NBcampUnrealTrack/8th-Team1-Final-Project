@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -10,6 +10,7 @@
 #include "MD_PlayerState.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnHealthStateChanged, EMD_HealthState, NewState);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_OnShopOwnershipChanged);
 
 class UMD_CharacterAttributeSet;
 
@@ -29,6 +30,8 @@ class MARINEDEMOLITION_API AMD_PlayerState : public APlayerState, public IAbilit
 
 public:
 	AMD_PlayerState();
+
+	virtual void CopyProperties(APlayerState* PlayerState) override;
 
     void SetReturnStatus(EMD_ReturnStatus NewStatus);
 
@@ -70,9 +73,24 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MD|Health")
 	FMD_OnHealthStateChanged OnHealthStateChanged;
 
+	/** 현재 플레이어의 상점 소유권 변경을 로컬 상점 UI에 전달하는 델리게이트 */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Shop")
+	FMD_OnShopOwnershipChanged OnShopOwnershipChanged;
+
 	/** 현재 HP로부터 상태를 계산한다. 저장된 값이 아니다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Health")
 	EMD_HealthState GetHealthState() const;
+
+	/** 현재 플레이어가 이미 구매한 비소모 품목인지 확인하는 함수 */
+	UFUNCTION(BlueprintPure, Category = "MD|Shop")
+	bool HasPurchasedShopItem(FName ItemId) const;
+
+	/** 현재 플레이어의 비소모 품목 구매 이력을 상점 해금 판정에 제공하는 함수 */
+	UFUNCTION(BlueprintPure, Category = "MD|Shop")
+	TArray<FName> GetPurchasedShopItemIds() const { return PurchasedShopItemIds; }
+
+	/** 서버에서 구매가 완료된 비소모 품목을 현재 플레이어의 소유권에 기록하는 함수 */
+	bool RecordPurchasedShopItem(FName ItemId);
 
 protected:
 
@@ -88,6 +106,14 @@ protected:
 	float ReviveHealthRatio = 1.0f;
 
 private:
+	/** 현재 플레이어만 확인하는 비소모 품목 구매 이력 */
+	UPROPERTY(ReplicatedUsing = OnRep_PurchasedShopItemIds)
+	TArray<FName> PurchasedShopItemIds;
+
+	/** 플레이어별 소유권 복제 후 열려 있는 상점 화면을 갱신하는 함수 */
+	UFUNCTION()
+	void OnRep_PurchasedShopItemIds();
+
 	/** HP가 바뀔 때마다 호출된다. SetHealth·GE·리플리케이션 어느 경로든 여기로 들어온다. */
 	void HandleHealthChanged(const FOnAttributeChangeData& ChangeData);
 

@@ -18,6 +18,7 @@
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Player/MD_PlayerController.h"
+#include "Player/MD_PlayerState.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
 #include "UI/Merchant/MD_QuestWidget.h"
 #include "UI/Merchant/MD_ShopWidget.h"
@@ -204,6 +205,12 @@ void AMD_Merchant::HandleMenuExitRequested()
 			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForShop);
 		}
 
+		AMD_PlayerState* InteractingPlayerState = GetInteractingPlayerState();
+		if (IsValid(InteractingPlayerState) == true)
+		{
+			InteractingPlayerState->OnShopOwnershipChanged.RemoveDynamic(this, &AMD_Merchant::HandlePlayerShopOwnershipChanged);
+		}
+
 		ActiveShopWidget->RemoveFromParent();
 		ActiveShopWidget.Reset();
 	}
@@ -271,6 +278,13 @@ void AMD_Merchant::HandleShopRequested()
 		MerchantComponent->OnMerchantStateChanged.AddUniqueDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForShop);
 	}
 
+	// 상점을 이용하는 플레이어의 장비 소유권 복제를 상점에 반영하기 위하여 이벤트 연결
+	AMD_PlayerState* InteractingPlayerState = GetInteractingPlayerState();
+	if (IsValid(InteractingPlayerState) == true)
+	{
+		InteractingPlayerState->OnShopOwnershipChanged.AddUniqueDynamic(this, &AMD_Merchant::HandlePlayerShopOwnershipChanged);
+	}
+
 	RefreshShopWidgetFromComponent();
 }
 
@@ -286,6 +300,12 @@ void AMD_Merchant::HandleShopBackRequested()
 		{
 			ActiveMenuWidget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
 		}
+	}
+
+	AMD_PlayerState* InteractingPlayerState = GetInteractingPlayerState();
+	if (IsValid(InteractingPlayerState) == true)
+	{
+		InteractingPlayerState->OnShopOwnershipChanged.RemoveDynamic(this, &AMD_Merchant::HandlePlayerShopOwnershipChanged);
 	}
 
 	if (ActiveShopWidget.IsValid())
@@ -325,6 +345,11 @@ void AMD_Merchant::HandleShopItemPurchaseRequested(FName ItemId)
 }
 
 void AMD_Merchant::HandleMerchantStateChangedForShop()
+{
+	RefreshShopWidgetFromComponent();
+}
+
+void AMD_Merchant::HandlePlayerShopOwnershipChanged()
 {
 	RefreshShopWidgetFromComponent();
 }
@@ -375,8 +400,15 @@ EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCh
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
 
+	// 상점을 이용하는 플레이어의 PlayerState가 유효하지 않으면 구매 과정 중단
+	AMD_PlayerState* PurchasingPlayerState = PurchasingCharacter->GetPlayerState<AMD_PlayerState>();
+	if (IsValid(PurchasingPlayerState) == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
 	// 실제 플레이어 지급이 성공한 경우에만 팀 경제 원장의 결제를 확정하기 위한 콜백 전달
-	EMD_ShopPurchaseResult PurchaseResult = MerchantSubsystem->TryPurchaseShopItem(ShopItem, [PurchasingCharacter, ShopItem]()
+	EMD_ShopPurchaseResult PurchaseResult = MerchantSubsystem->TryPurchaseShopItem(PurchasingPlayerState, ShopItem, [PurchasingCharacter, ShopItem]()
 		{
 			const bool bWasSuccessful = FulfillPurchasedItem(PurchasingCharacter, ShopItem);
 			return bWasSuccessful;
@@ -547,7 +579,8 @@ void AMD_Merchant::RefreshShopWidgetFromComponent()
 	}
 
 	// 소유권과 선행 품목 해금을 동일한 복제 스냅샷으로 계산하기 위한 목록 복사
-	const TArray<FName> OwnedItemIds = MerchantComponent->GetOwnedItemIds();
+	AMD_PlayerState* InteractingPlayerState = GetInteractingPlayerState();
+	TArray<FName> OwnedItemIds = IsValid(InteractingPlayerState) == true ? InteractingPlayerState->GetPurchasedShopItemIds() : TArray<FName>();
 	TArray<FName> FullyStockedItemIds;
 
 	if (IsValid(ShopCatalog) == true)
@@ -583,4 +616,10 @@ UMD_MerchantSubsystem* AMD_Merchant::GetMerchantSubsystem() const
 AMD_PlayerController* AMD_Merchant::GetInteractingPlayerController() const
 {
 	return ActiveMenuWidget.IsValid() ? Cast<AMD_PlayerController>(ActiveMenuWidget->GetOwningPlayer()) : nullptr;
+}
+
+AMD_PlayerState* AMD_Merchant::GetInteractingPlayerState() const
+{
+	const AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+	return IsValid(InteractingPlayerController) == true ? InteractingPlayerController->GetPlayerState<AMD_PlayerState>() : nullptr;
 }

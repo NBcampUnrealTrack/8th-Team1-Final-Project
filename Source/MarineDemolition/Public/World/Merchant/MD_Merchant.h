@@ -14,6 +14,7 @@ class UMD_QuestWidget;
 class UMD_MerchantComponent;
 class UMD_MerchantSubsystem;
 class AMD_PlayerController;
+class AMD_PlayerState;
 class AMD_Character;
 class UStaticMeshComponent;
 
@@ -143,6 +144,10 @@ private:
 	UFUNCTION()
 	void HandleMerchantStateChangedForShop();
 
+	/** 현재 플레이어의 상점 소유권이 복제될 때 구매 가능 상태를 갱신하는 처리 */
+	UFUNCTION()
+	void HandlePlayerShopOwnershipChanged();
+
 	/** 메뉴에서 '퀘스트'를 눌렀을 때 */
 	UFUNCTION()
 	void HandleQuestRequested();
@@ -177,6 +182,9 @@ private:
 	UMD_MerchantSubsystem* GetMerchantSubsystem() const;
 
 	AMD_PlayerController* GetInteractingPlayerController() const;
+
+	/** 현재 상점 화면을 소유한 플레이어의 개별 구매 원장을 제공하는 함수 */
+	AMD_PlayerState* GetInteractingPlayerState() const;
 
 	/**
 	 * 대출은 아직 화면이 없다. 버튼을 숨기면 돌아올 길이 없으니
