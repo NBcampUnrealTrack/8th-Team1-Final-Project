@@ -35,4 +35,9 @@ public:
 	// 임시 UI용 아이콘 (없으면 이름만 표시)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
 	TObjectPtr<UTexture2D> ToolIcon;
+
+	// 절단 진행 속도 배율. 기획 08 §3의 "절단 시간 −35%"(IT-C1)는 속도 배율 약 1.54에 해당한다 (1 / 0.65)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool",
+		meta = (ClampMin = "0.1"))
+	float CutSpeedMultiplier = 1.0f;
 };

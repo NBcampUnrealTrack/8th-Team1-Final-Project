@@ -94,6 +94,7 @@ void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AMD_CuttableWall, bHasSupport);
+	DOREPLIFETIME(AMD_CuttableWall, CutProgressSeconds);
 }
 
 
@@ -247,6 +248,45 @@ void AMD_CuttableWall::ScanHighlight(float Duration, AActor* Scanner)
 	GetWorldTimerManager().SetTimer(ScanTimerHandle, this, &AMD_CuttableWall::RestoreScanColor, Duration, false);
 }
 
+void AMD_CuttableWall::AddCutProgress(float DeltaSeconds, AActor* Cutter)
+{
+	// 협동 합산(기획 §4) 때문에 진행도는 벽이 소유하고 서버만 갱신한다.
+	// 여러 명이 같은 벽을 자르면 각자 이 함수를 불러 자연히 합산된다.
+	if (!HasAuthority() || bCut || DeltaSeconds <= 0.0f)
+	{
+		return;
+	}
+
+	if (!CanCut())
+	{
+		return;
+	}
+
+	const float Required = GetRequiredCutSeconds();
+
+	CutProgressSeconds = FMath::Clamp(CutProgressSeconds + DeltaSeconds, 0.0f, Required);
+
+	// 서버에는 OnRep이 오지 않으므로 직접 부른다
+	OnRep_CutProgress();
+
+	if (CutProgressSeconds >= Required)
+	{
+		Cut(Cutter);
+	}
+}
+
+float AMD_CuttableWall::GetRequiredCutSeconds() const
+{
+	return (WallType == EMD_WallType::Strut) ? StrutCutSeconds : PartitionCutSeconds;
+}
+
+float AMD_CuttableWall::GetCutProgressRatio() const
+{
+	const float Required = GetRequiredCutSeconds();
+
+	return Required > 0.0f ? FMath::Clamp(CutProgressSeconds / Required, 0.0f, 1.0f) : 0.0f;
+}
+
 
 void AMD_CuttableWall::RestoreScanColor()
 {
@@ -254,6 +294,11 @@ void AMD_CuttableWall::RestoreScanColor()
 	{
 		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
 	}
+}
+
+void AMD_CuttableWall::OnRep_CutProgress()
+{
+	OnCutProgressChanged.Broadcast(this, GetCutProgressRatio());
 }
 
 void AMD_CuttableWall::SyncLegacySurfaceConfiguration()
