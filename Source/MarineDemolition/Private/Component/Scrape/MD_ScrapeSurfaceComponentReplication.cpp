@@ -26,14 +26,12 @@ void FMD_ReplicatedScrapeCellStateArray::SetOwner(
 	}
 }
 
-void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
-	const int32 CellIndex,
-	const float RemainingContamination)
+void FMD_ReplicatedScrapeCellStateArray::SetCellState(
+	const int32 CellIndex)
 {
 	if (!Owner
 		|| !Owner->HasAuthority()
-		|| !Owner->ContaminationCells.IsValidIndex(CellIndex)
-		|| !FMath::IsFinite(RemainingContamination))
+		|| !Owner->ContaminationCells.IsValidIndex(CellIndex))
 	{
 		return;
 	}
@@ -46,30 +44,67 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
 		return;
 	}
 
+	const FMD_ScrapeSurfaceCell& Cell = Owner->ContaminationCells[CellIndex];
 	const float InitialContamination = FMath::Clamp(
-		Owner->ContaminationCells[CellIndex].InitialContamination,
+		Cell.InitialContamination,
 		0.0f,
 		1.0f);
 	const float SafeRemaining = FMath::Clamp(
-		RemainingContamination,
+		Cell.RemainingContamination,
 		0.0f,
 		InitialContamination);
-	const bool bMatchesInitial = FMath::IsNearlyEqual(
-		SafeRemaining,
+	const float SafeTransferred = FMath::Clamp(
+		Cell.TransferredContamination,
+		0.0f,
+		1.0f);
+	const float SafeTransferredPatternDensity =
+		SafeTransferred > Owner->ScrapeSettings.CleanTolerance
+		? FMath::Clamp(
+			Cell.TransferredPaintPatternDensity,
+			0.0f,
+			1.0f)
+		: 0.0f;
+	const float GeneratedInitial =
+		Owner->ContaminationGeneratedInitialAmounts.IsValidIndex(CellIndex)
+		? FMath::Clamp(
+			Owner->ContaminationGeneratedInitialAmounts[CellIndex],
+			0.0f,
+			1.0f)
+		: InitialContamination;
+	const bool bMatchesGeneratedState = FMath::IsNearlyEqual(
 		InitialContamination,
-		UE_SMALL_NUMBER);
+		GeneratedInitial,
+		UE_SMALL_NUMBER)
+		&& FMath::IsNearlyEqual(
+		SafeRemaining,
+		GeneratedInitial,
+		UE_SMALL_NUMBER)
+		&& SafeTransferred <= UE_SMALL_NUMBER
+		&& SafeTransferredPatternDensity <= UE_SMALL_NUMBER;
 	// 실제로 보내는 값은 양자화 결과다. 같은 바이트로 떨어지는 갱신은
 	// 네트워크로 내보내지 않는다.
+	const uint8 QuantizedInitial =
+		FMD_ScrapeReplicationCodec::QuantizeRemaining(
+			InitialContamination,
+			0.0f);
 	const uint8 QuantizedRemaining =
 		FMD_ScrapeReplicationCodec::QuantizeRemaining(
 			SafeRemaining,
 			Owner->ScrapeSettings.CleanTolerance);
+	const uint8 QuantizedTransferred =
+		FMD_ScrapeReplicationCodec::QuantizeRemaining(
+			SafeTransferred,
+			Owner->ScrapeSettings.CleanTolerance);
+	const uint8 QuantizedTransferredPatternDensity =
+		FMD_ScrapeReplicationCodec::QuantizeRemaining(
+			SafeTransferredPatternDensity,
+			0.0f);
 
 	if (const int32* ExistingItemIndex = CellToItemIndex.Find(CellIndex))
 	{
 		if (Items.IsValidIndex(*ExistingItemIndex))
 		{
-			if (bMatchesInitial)
+			if (bMatchesGeneratedState)
 			{
 				const int32 RemovedItemIndex = *ExistingItemIndex;
 				Items.RemoveAtSwap(RemovedItemIndex, 1, EAllowShrinking::No);
@@ -85,9 +120,18 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
 			}
 
 			FMD_ReplicatedScrapeCellState& Item = Items[*ExistingItemIndex];
-			if (Item.QuantizedRemainingContamination != QuantizedRemaining)
+			if (Item.QuantizedInitialContamination != QuantizedInitial
+				|| Item.QuantizedRemainingContamination != QuantizedRemaining
+				|| Item.QuantizedTransferredContamination
+					!= QuantizedTransferred
+				|| Item.QuantizedTransferredPatternDensity
+					!= QuantizedTransferredPatternDensity)
 			{
+				Item.QuantizedInitialContamination = QuantizedInitial;
 				Item.QuantizedRemainingContamination = QuantizedRemaining;
+				Item.QuantizedTransferredContamination = QuantizedTransferred;
+				Item.QuantizedTransferredPatternDensity =
+					QuantizedTransferredPatternDensity;
 				MarkItemDirty(Item);
 			}
 			return;
@@ -96,14 +140,17 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellRemaining(
 		CellToItemIndex.Remove(CellIndex);
 	}
 
-	if (bMatchesInitial)
+	if (bMatchesGeneratedState)
 	{
 		return;
 	}
 
 	const int32 NewItemIndex = Items.Emplace(
 		EncodedCellIndex,
-		QuantizedRemaining);
+		QuantizedInitial,
+		QuantizedRemaining,
+		QuantizedTransferred,
+		QuantizedTransferredPatternDensity);
 	CellToItemIndex.Add(CellIndex, NewItemIndex);
 	MarkItemDirty(Items[NewItemIndex]);
 }
@@ -165,7 +212,9 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 	const TConstArrayView<int32> StateItemIndices,
 	const bool bResetToInitial)
 {
-	if (HasAuthority() || !bContaminationSurfaceInitialized)
+	if (!bContaminationEnabled
+		|| HasAuthority()
+		|| !bContaminationSurfaceInitialized)
 	{
 		return;
 	}
@@ -192,26 +241,80 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 		}
 
 		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[StateCellIndex];
+		const float PreviousInitial = Cell.InitialContamination;
 		const float PreviousRemaining = Cell.RemainingContamination;
+		const float PreviousTransferred = Cell.TransferredContamination;
+		const float PreviousTransferredPatternDensity =
+			Cell.TransferredPaintPatternDensity;
+		const float GeneratedInitial =
+			ContaminationGeneratedInitialAmounts.IsValidIndex(StateCellIndex)
+			? FMath::Clamp(
+				ContaminationGeneratedInitialAmounts[StateCellIndex],
+				0.0f,
+				1.0f)
+			: PreviousInitial;
+		const float ReceivedInitial = StateItem.GetInitialContamination();
 		const float ReceivedRemaining = StateItem.GetRemainingContamination();
+		const float ReceivedTransferred =
+			StateItem.GetTransferredContamination();
+		const float ReceivedTransferredPatternDensity =
+			StateItem.GetTransferredPatternDensity();
+		const float TargetInitial = bResetToInitial
+			? GeneratedInitial
+			: (FMath::IsFinite(ReceivedInitial)
+				? FMath::Clamp(ReceivedInitial, 0.0f, 1.0f)
+				: GeneratedInitial);
 		const float TargetRemaining = bResetToInitial
-			? Cell.InitialContamination
+			? GeneratedInitial
 			: (FMath::IsFinite(ReceivedRemaining)
 				? FMath::Clamp(
 					ReceivedRemaining,
 					0.0f,
-					Cell.InitialContamination)
-				: Cell.InitialContamination);
+					TargetInitial)
+				: TargetInitial);
+		const float TargetTransferred = bResetToInitial
+			? 0.0f
+			: (FMath::IsFinite(ReceivedTransferred)
+				? FMath::Clamp(
+					ReceivedTransferred,
+					0.0f,
+					1.0f)
+				: 0.0f);
+		const float TargetTransferredPatternDensity =
+			TargetTransferred > ScrapeSettings.CleanTolerance
+			? (FMath::IsFinite(ReceivedTransferredPatternDensity)
+				? FMath::Clamp(
+					ReceivedTransferredPatternDensity,
+					0.0f,
+					1.0f)
+				: 0.0f)
+			: 0.0f;
 
 		if (FMath::IsNearlyEqual(
+			PreviousInitial,
+			TargetInitial,
+			UE_SMALL_NUMBER)
+			&& FMath::IsNearlyEqual(
 			PreviousRemaining,
 			TargetRemaining,
-			UE_SMALL_NUMBER))
+			UE_SMALL_NUMBER)
+			&& FMath::IsNearlyEqual(
+				PreviousTransferred,
+				TargetTransferred,
+				UE_SMALL_NUMBER)
+			&& FMath::IsNearlyEqual(
+				PreviousTransferredPatternDensity,
+				TargetTransferredPatternDensity,
+				UE_SMALL_NUMBER))
 		{
 			continue;
 		}
 
+		Cell.InitialContamination = TargetInitial;
 		Cell.RemainingContamination = TargetRemaining;
+		Cell.TransferredContamination = TargetTransferred;
+		Cell.TransferredPaintPatternDensity =
+			TargetTransferredPatternDensity;
 
 		EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
 		int32 LocalCellIndex = INDEX_NONE;
@@ -233,16 +336,20 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 			LocalCellIndex / ContaminationGridDimensions.X);
 		CellChange.RemovedAmount = FMath::Max(
 			0.0f,
-			PreviousRemaining - TargetRemaining);
+			PreviousRemaining - TargetRemaining)
+			+ FMath::Max(
+				0.0f,
+				PreviousTransferred - TargetTransferred);
 		CellChange.RemainingAmountAfter = TargetRemaining;
 		CellChange.bBecameClean =
-			PreviousRemaining > ScrapeSettings.CleanTolerance
-			&& TargetRemaining <= ScrapeSettings.CleanTolerance;
+			(PreviousRemaining > ScrapeSettings.CleanTolerance
+				|| PreviousTransferred > ScrapeSettings.CleanTolerance)
+			&& TargetRemaining <= ScrapeSettings.CleanTolerance
+			&& TargetTransferred <= ScrapeSettings.CleanTolerance;
 	}
 
 	RefreshContaminationCleanRatioCache();
 	UpdateContaminationMask(CellChanges);
-	UpdateContaminationVisualization(CellChanges);
 
 	const bool bIsFullyRemoved = IsContaminationFullyRemoved();
 	if (!bWasFullyRemoved
@@ -261,6 +368,11 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 
 void UMD_ScrapeSurfaceComponent::ApplyAllReplicatedContaminationState()
 {
+	if (!bContaminationEnabled)
+	{
+		return;
+	}
+
 	const TArray<FMD_ReplicatedScrapeCellState>& StateItems =
 		ReplicatedContaminationState.GetItems();
 	TArray<int32> StateItemIndices;
@@ -282,7 +394,9 @@ void UMD_ScrapeSurfaceComponent::PublishContaminationChanges(
 {
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapePublish);
 
-	if (!HasAuthority() || CellChanges.IsEmpty())
+	if (!bContaminationEnabled
+		|| !HasAuthority()
+		|| CellChanges.IsEmpty())
 	{
 		return;
 	}
@@ -291,9 +405,7 @@ void UMD_ScrapeSurfaceComponent::PublishContaminationChanges(
 	{
 		if (ContaminationCells.IsValidIndex(CellChange.CellIndex))
 		{
-			ReplicatedContaminationState.SetCellRemaining(
-				CellChange.CellIndex,
-				ContaminationCells[CellChange.CellIndex].RemainingContamination);
+			ReplicatedContaminationState.SetCellState(CellChange.CellIndex);
 		}
 	}
 

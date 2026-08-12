@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -12,8 +12,13 @@ class UMD_ShopCatalog;
 class UMD_ShopWidget;
 class UMD_QuestWidget;
 class UMD_MerchantComponent;
+class UMD_MerchantSubsystem;
 class AMD_PlayerController;
+class AMD_PlayerState;
+class AMD_Character;
 class UStaticMeshComponent;
+
+enum class EMD_ShopPurchaseResult : uint8;
 
 /**
  * 모선 상인 노라 브릭스 (팀 호칭 "브릭스").
@@ -39,6 +44,12 @@ public:
 	/** WBP가 표시할 상인 이름 (`06` §4: 노라 브릭스) */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	FText GetMerchantDisplayName() const { return MerchantDisplayName; }
+
+	/** 서버 카탈로그와 경제 원장을 사용해 구매자에게 품목을 지급하고 결제를 확정하는 함수 */
+	EMD_ShopPurchaseResult TryPurchaseItem(AMD_Character* PurchasingCharacter, FName ItemId);
+
+	/** 서버 구매 결과를 현재 로컬 상점과 대사창에 반영하는 함수 */
+	void ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResult Result);
 
 protected:
 	/**
@@ -81,6 +92,18 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	FText FullStockDialogue = FText::FromString(TEXT("그건 이미 꽉 찼어. 돈 아껴."));
 
+	/** 크레딧이 부족한 구매 요청에 표시할 상인 대사 */
+	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
+	FText InsufficientCreditsDialogue = FText::FromString(TEXT("잔액부터 확인해. 외상은 안 받아."));
+
+	/** 해금 조건을 충족하지 못한 구매 요청에 표시할 상인 대사 */
+	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
+	FText LockedItemDialogue = FText::FromString(TEXT("아직 네게 팔 물건은 아니야."));
+
+	/** 잘못된 품목이나 만료된 요청에 표시할 상인 대사 */
+	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
+	FText InvalidPurchaseDialogue = FText::FromString(TEXT("그 거래는 처리할 수 없어."));
+
 	/**
 	 * 아직 화면이 없는 메뉴(퀘스트·대출)를 눌렀을 때의 대사.
 	 *
@@ -114,6 +137,18 @@ private:
 	UFUNCTION()
 	void HandleShopPurchaseRejected(FName ItemId);
 
+	/** 로컬 상점 구매 요청을 소유 PlayerController의 서버 RPC로 전달하는 처리 */
+	UFUNCTION()
+	void HandleShopItemPurchaseRequested(FName ItemId);
+
+	/** 상인 복제 미러가 바뀔 때 열려 있는 상점 정보와 구매 가능 상태를 갱신하는 처리 */
+	UFUNCTION()
+	void HandleMerchantStateChangedForShop();
+
+	/** 현재 플레이어의 상점 소유권이 복제될 때 구매 가능 상태를 갱신하는 처리 */
+	UFUNCTION()
+	void HandlePlayerShopOwnershipChanged();
+
 	/** 메뉴에서 '퀘스트'를 눌렀을 때 */
 	UFUNCTION()
 	void HandleQuestRequested();
@@ -139,9 +174,18 @@ private:
 
 	void RefreshQuestWidgetFromComponent();
 
+	/** 복제된 재화·해금·소유권을 현재 상점 위젯에 한 번에 반영하는 처리 */
+	void RefreshShopWidgetFromComponent();
+
 	UMD_MerchantComponent* GetMerchantComponent() const;
 
+	/** 서버 구매 원장을 제공하는 GameInstance 상인 서브시스템 조회 함수 */
+	UMD_MerchantSubsystem* GetMerchantSubsystem() const;
+
 	AMD_PlayerController* GetInteractingPlayerController() const;
+
+	/** 현재 상점 화면을 소유한 플레이어의 개별 구매 원장을 제공하는 함수 */
+	AMD_PlayerState* GetInteractingPlayerState() const;
 
 	/**
 	 * 대출은 아직 화면이 없다. 버튼을 숨기면 돌아올 길이 없으니

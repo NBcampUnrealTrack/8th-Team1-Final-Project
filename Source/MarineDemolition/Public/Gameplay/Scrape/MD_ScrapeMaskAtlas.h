@@ -41,6 +41,12 @@ public:
 		int32 CombinedCellIndex,
 		int32& OutPixelIndex);
 
+	/** 런타임 덧칠도 누적 진하기가 보이도록 현재 오염의 절대량을 반환한다. */
+	static float CalculateRuntimeAwareVisualContamination(
+		float RemainingContamination,
+		float InitialContamination,
+		float GeneratedInitialContamination);
+
 	/** 셀의 현재 잔여 오염량을 0~255로 양자화한다. */
 	static bool TryQuantizeRemainingContamination(
 		float RemainingContamination,

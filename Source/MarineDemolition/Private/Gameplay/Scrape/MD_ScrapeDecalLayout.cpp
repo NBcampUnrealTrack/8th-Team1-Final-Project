@@ -27,6 +27,84 @@ double FMD_ScrapeDecalLayout::ClampEdgeInsetCm(
 		MaximumInsetCm);
 }
 
+int32 FMD_ScrapeDecalLayout::CalculateHorizontalPatchCount(
+	const double SurfaceWidthCm,
+	const double TargetPatchWidthCm,
+	const int32 MaximumPatchCount)
+{
+	if (!FMath::IsFinite(SurfaceWidthCm)
+		|| !FMath::IsFinite(TargetPatchWidthCm)
+		|| SurfaceWidthCm <= static_cast<double>(UE_SMALL_NUMBER)
+		|| TargetPatchWidthCm <= static_cast<double>(UE_SMALL_NUMBER)
+		|| MaximumPatchCount <= 0)
+	{
+		return 0;
+	}
+
+	return FMath::Clamp(
+		FMath::CeilToInt(SurfaceWidthCm / TargetPatchWidthCm),
+		1,
+		MaximumPatchCount);
+}
+
+bool FMD_ScrapeDecalLayout::TryCalculateHorizontalPatchLayout(
+	const FMD_ScrapeDecalFaceLayout& FaceLayout,
+	const EMD_ScrapeSurfaceNormalAxis SurfaceNormalAxis,
+	const FVector& MeshAbsoluteScale,
+	const int32 PatchIndex,
+	const int32 PatchCount,
+	FMD_ScrapeDecalFaceLayout& OutPatchLayout)
+{
+	OutPatchLayout = FMD_ScrapeDecalFaceLayout();
+
+	FVector HorizontalAxis;
+	FVector FrontNormal;
+	FVector VerticalAxis;
+	if (PatchCount <= 0
+		|| PatchIndex < 0
+		|| PatchIndex >= PatchCount
+		|| FaceLayout.RelativeLocation.ContainsNaN()
+		|| FaceLayout.RelativeRotation.ContainsNaN()
+		|| FaceLayout.DecalSize.ContainsNaN()
+		|| FaceLayout.DecalSize.Z <= UE_SMALL_NUMBER
+		|| MeshAbsoluteScale.ContainsNaN()
+		|| !FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
+			SurfaceNormalAxis,
+			HorizontalAxis,
+			FrontNormal,
+			VerticalAxis))
+	{
+		return false;
+	}
+
+	const double HorizontalScale = FMath::Abs(FVector::DotProduct(
+		MeshAbsoluteScale.GetAbs(),
+		HorizontalAxis));
+	const double UsableSurfaceWidthCm = FaceLayout.DecalSize.Z * 2.0;
+	if (!FMath::IsFinite(HorizontalScale)
+		|| HorizontalScale <= static_cast<double>(UE_SMALL_NUMBER)
+		|| !FMath::IsFinite(UsableSurfaceWidthCm)
+		|| UsableSurfaceWidthCm <= static_cast<double>(UE_SMALL_NUMBER))
+	{
+		return false;
+	}
+
+	const double PatchWidthCm = UsableSurfaceWidthCm
+		/ static_cast<double>(PatchCount);
+	const double PatchCenterOffsetCm = -UsableSurfaceWidthCm * 0.5
+		+ (static_cast<double>(PatchIndex) + 0.5) * PatchWidthCm;
+
+	OutPatchLayout = FaceLayout;
+	OutPatchLayout.RelativeLocation += HorizontalAxis
+		* (PatchCenterOffsetCm / HorizontalScale);
+	OutPatchLayout.DecalSize.Z = PatchWidthCm * 0.5;
+	OutPatchLayout.PatchUVScaleU = 1.0f
+		/ static_cast<float>(PatchCount);
+	OutPatchLayout.PatchUVOffsetU = static_cast<float>(PatchIndex)
+		* OutPatchLayout.PatchUVScaleU;
+	return true;
+}
+
 bool FMD_ScrapeDecalLayout::TryCalculateMaskHalfTexelUV(
 	const FIntPoint& AtlasDimensions,
 	const FVector2D& SurfaceSizeCm,
@@ -173,6 +251,7 @@ bool FMD_ScrapeDecalLayout::TryCalculateFaceLayout(
 		static_cast<double>(SurfaceSizeCm.Y) * 0.5 - AppliedEdgeInsetCm,
 		static_cast<double>(SurfaceSizeCm.X) * 0.5 - AppliedEdgeInsetCm);
 	OutLayout.AppliedInwardDepthCm = SafeInwardDepth;
+	OutLayout.AppliedOutwardMarginCm = SafeOutwardMargin;
 	OutLayout.AppliedEdgeInsetCm = AppliedEdgeInsetCm;
 	OutLayout.MaskVOffset = bIsFront ? 0.0f : 0.5f;
 	OutLayout.MaskUFlip = bIsFront ? 1.0f : 0.0f;

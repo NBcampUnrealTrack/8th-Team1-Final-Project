@@ -103,6 +103,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	int32 QuestCompletions = 0;
 
+	// 구매 소유권과 소모품 누적 수량을 재개 세션에 복원하기 위한 품목별 구매 원장
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
+	TMap<FName, int32> PurchasedItemCounts;
+
 	// 재개 시 같은 퀘스트 정의를 연결하기 위한 현재 현장 애셋
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TSoftObjectPtr<UMD_SiteDefinition> CurrentSite;

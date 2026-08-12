@@ -28,7 +28,7 @@ namespace
             TInlineComponentArray<UMD_ScrapeSurfaceComponent*> ActorSurfaces(*It);
             for (UMD_ScrapeSurfaceComponent* const Surface : ActorSurfaces)
             {
-                if (IsValid(Surface))
+                if (IsValid(Surface) && Surface->IsContaminationEnabled())
                 {
                     OutSurfaces.Add(Surface);
                 }
@@ -61,8 +61,11 @@ namespace
         {
             if (AMD_CuttableWall* const* Wall = WallsByName.Find(Record.WallName))
             {
-                return IsValid(*Wall)
+                UMD_ScrapeSurfaceComponent* const Surface = IsValid(*Wall)
                     ? (*Wall)->GetScrapeSurfaceComponent()
+                    : nullptr;
+                return IsValid(Surface) && Surface->IsContaminationEnabled()
+                    ? Surface
                     : nullptr;
             }
 
@@ -79,6 +82,7 @@ namespace
         for (UMD_ScrapeSurfaceComponent* const Surface : *OwnerSurfaces)
         {
             if (IsValid(Surface)
+				&& Surface->IsContaminationEnabled()
                 && Surface->GetFName() == Record.SurfaceComponentName)
             {
                 return Surface;
@@ -137,7 +141,9 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         Surface->ExportContaminationDeltas(
             ContaminationRecord.CellIndices,
             ContaminationRecord.InitialAmounts,
-            ContaminationRecord.RemainingAmounts);
+            ContaminationRecord.RemainingAmounts,
+            ContaminationRecord.TransferredAmounts,
+            ContaminationRecord.TransferredPatternDensities);
         if (ContaminationRecord.CellIndices.Num() > 0)
         {
             Snapshot.WallContaminations.Add(ContaminationRecord);
@@ -288,7 +294,12 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
     {
         if (UMD_ScrapeSurfaceComponent* const Surface = FindSavedScrapeSurface(Record, WallsByName, SurfacesByOwnerName); Surface != nullptr)
         {
-            Surface->RestoreContaminationCells(Record.CellIndices, Record.InitialAmounts, Record.RemainingAmounts);
+            Surface->RestoreContaminationCells(
+                Record.CellIndices,
+                Record.InitialAmounts,
+                Record.RemainingAmounts,
+                Record.TransferredAmounts,
+                Record.TransferredPatternDensities);
         }
     }
 

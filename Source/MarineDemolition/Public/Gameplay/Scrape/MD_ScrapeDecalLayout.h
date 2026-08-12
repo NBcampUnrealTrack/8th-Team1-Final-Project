@@ -12,9 +12,16 @@ struct MARINEDEMOLITION_API FMD_ScrapeDecalFaceLayout
 	float MaskVScale = 0.5f;
 	float MaskVOffset = 0.0f;
 	float MaskUFlip = 0.0f;
+	float PatchUVScaleU = 1.0f;
+	float PatchUVOffsetU = 0.0f;
+	float PatchUVScaleV = 1.0f;
+	float PatchUVOffsetV = 0.0f;
 
 	/** 제한을 적용한 뒤 실제로 벽 안쪽을 덮는 깊이(cm). 벽이 결과를 되읽어 보관한다. */
 	double AppliedInwardDepthCm = 0.0;
+
+	/** The world-space margin kept outside the receiver surface. */
+	double AppliedOutwardMarginCm = 0.0;
 
 	/** 제한을 적용한 뒤 실제로 표면 테두리에서 줄인 폭(cm). */
 	double AppliedEdgeInsetCm = 0.0;
@@ -61,6 +68,21 @@ public:
 		float RequestedOutwardMarginCm,
 		float RequestedEdgeInsetCm,
 		FMD_ScrapeDecalFaceLayout& OutLayout);
+
+	/** Returns how many horizontal projection patches are needed. */
+	static int32 CalculateHorizontalPatchCount(
+		double SurfaceWidthCm,
+		double TargetPatchWidthCm,
+		int32 MaximumPatchCount);
+
+	/** Splits one face layout into a continuous horizontal UV patch. */
+	static bool TryCalculateHorizontalPatchLayout(
+		const FMD_ScrapeDecalFaceLayout& FaceLayout,
+		EMD_ScrapeSurfaceNormalAxis SurfaceNormalAxis,
+		const FVector& MeshAbsoluteScale,
+		int32 PatchIndex,
+		int32 PatchCount,
+		FMD_ScrapeDecalFaceLayout& OutPatchLayout);
 
 	/** 요청한 테두리 inset을 표면 크기가 허용하는 범위로 자른다. */
 	static double ClampEdgeInsetCm(

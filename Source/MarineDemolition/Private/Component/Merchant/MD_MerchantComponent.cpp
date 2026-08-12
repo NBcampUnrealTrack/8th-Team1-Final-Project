@@ -25,6 +25,7 @@ void UMD_MerchantComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(UMD_MerchantComponent, ActiveQuestReward);
 	DOREPLIFETIME(UMD_MerchantComponent, MainQuests);
 	DOREPLIFETIME(UMD_MerchantComponent, RepeatQuests);
+	DOREPLIFETIME(UMD_MerchantComponent, OwnedItemIds);
 }
 
 void UMD_MerchantComponent::BeginPlay()
@@ -86,6 +87,7 @@ void UMD_MerchantComponent::RefreshFromSubsystem()
 	ActiveQuestReward = Merchant->GetActiveQuestReward();
 	MainQuests = Merchant->GetMainQuests();
 	RepeatQuests = Merchant->GetRepeatQuests();
+	OwnedItemIds = Merchant->GetOwnedItemIds();
 
 	// 저장 복원 직후 접속 클라이언트가 다음 일반 갱신 주기를 기다리지 않도록 하는 즉시 복제 요청
 	GetOwner()->ForceNetUpdate();

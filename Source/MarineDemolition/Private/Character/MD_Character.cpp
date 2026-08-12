@@ -16,6 +16,7 @@
 #include "InputMappingContext.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/BoxComponent.h"
 #include "Camera/CameraComponent.h"
@@ -71,6 +72,15 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	ThirdPersonToolMesh->SetupAttachment(GetMesh(), ToolAttachSocketName);
 	ThirdPersonToolMesh->SetOwnerNoSee(true);
 	ThirdPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	FirstPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(
+		TEXT("FirstPersonToolMesh"));
+	FirstPersonToolMesh->SetupAttachment(FirstPersonMesh, ToolAttachSocketName);
+	FirstPersonToolMesh->SetOnlyOwnerSee(true);
+	FirstPersonToolMesh->SetOwnerNoSee(false);
+	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonToolMesh->SetCanEverAffectNavigation(false);
+
 	HoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HoldPoint"));
 	HoldPoint->SetupAttachment(Camera);
 	HoldPoint->SetRelativeLocation(FVector(150.f, 0.f, 0.f));
@@ -114,6 +124,13 @@ void AMD_Character::BeginPlay()
 	{
 		CharacterCapsule->OnComponentBeginOverlap.AddUniqueDynamic(this, &AMD_Character::HandleCollisionBeginOverlap);
 		CharacterCapsule->OnComponentEndOverlap.AddUniqueDynamic(this, &AMD_Character::HandleCollisionEndOverlap);
+	}
+
+	if (IsValid(ScrapeToolComponent))
+	{
+		ScrapeToolComponent->OnScrapeLoadChanged.AddUniqueDynamic(
+			this,
+			&AMD_Character::HandleScrapeLoadChanged);
 	}
 
 	// 데미지 브리지: 서버에서 ApplyDamage(오염수 DoT·붕괴 등)를 Health 감소로 연결
@@ -583,6 +600,11 @@ void AMD_Character::HandleHotbarChanged()
 	}
 }
 
+void AMD_Character::HandleScrapeLoadChanged(const float NewScrapeLoad)
+{
+	RefreshScrapeLoadVisual();
+}
+
 void AMD_Character::RefreshToolMesh()
 {
 	if (!IsValid(EquipHotbarComponent))
@@ -591,25 +613,97 @@ void AMD_Character::RefreshToolMesh()
 	}
 
 	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
-	UStaticMesh* NewMesh = IsValid(CurrentTool) ? CurrentTool->ToolMesh : nullptr;
 
 	// 도구별 소켓이 지정돼 있으면 그 소켓, 없으면 기본 소켓
 	const FName SocketName =
 		(IsValid(CurrentTool) && !CurrentTool->AttachSocketName.IsNone())
 			? CurrentTool->AttachSocketName
 			: ToolAttachSocketName;
+	const auto ResolveAttachSocket = [this, SocketName](
+		const USkeletalMeshComponent* SkeletalMesh) -> FName
+	{
+		if (!IsValid(SkeletalMesh))
+		{
+			return NAME_None;
+		}
 
-	ThirdPersonToolMesh->SetStaticMesh(NewMesh);
+		if (!SocketName.IsNone() && SkeletalMesh->DoesSocketExist(SocketName))
+		{
+			return SocketName;
+		}
+
+		return !ToolAttachSocketName.IsNone()
+			&& SkeletalMesh->DoesSocketExist(ToolAttachSocketName)
+				? ToolAttachSocketName
+				: NAME_None;
+	};
+	const FName ThirdPersonSocketName = ResolveAttachSocket(GetMesh());
+	const FName FirstPersonSocketName = ResolveAttachSocket(FirstPersonMesh);
 
 	// 소켓의 위치·회전·스케일을 그대로 따르도록 스냅 부착
 	ThirdPersonToolMesh->AttachToComponent(
-		GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, SocketName);
+		GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, ThirdPersonSocketName);
+	FirstPersonToolMesh->AttachToComponent(
+		FirstPersonMesh,
+		FAttachmentTransformRules::SnapToTargetIncludingScale,
+		FirstPersonSocketName);
 
-	//스냅 후 도구별 오프셋을 얹는다. 직접 오프셋 지정전에는 영향이 없습니다.
-	if (IsValid(CurrentTool))
+	// 스냅 후 도구별 오프셋을 양쪽 시점의 전체 도구 메시에도 동일하게 적용한다.
+	const FTransform AttachOffset = IsValid(CurrentTool)
+		? CurrentTool->AttachOffset
+		: FTransform::Identity;
+	ThirdPersonToolMesh->SetRelativeTransform(AttachOffset);
+	FirstPersonToolMesh->SetRelativeTransform(AttachOffset);
+
+	RefreshScrapeLoadVisual();
+}
+
+void AMD_Character::RefreshScrapeLoadVisual()
+{
+	const UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
+		? EquipHotbarComponent->GetCurrentTool()
+		: nullptr;
+	UStaticMesh* NewToolMesh = IsValid(CurrentTool) ? CurrentTool->ToolMesh : nullptr;
+	if (IsValid(CurrentTool) && IsValid(ScrapeToolComponent))
 	{
-		ThirdPersonToolMesh->SetRelativeTransform(CurrentTool->AttachOffset);
+		switch (ScrapeToolComponent->GetScrapeLoadStage())
+		{
+		case EMD_ScrapeLoadStage::Stage1:
+			if (IsValid(CurrentTool->ScrapeLoadStage1Mesh))
+			{
+				NewToolMesh = CurrentTool->ScrapeLoadStage1Mesh;
+			}
+			break;
+
+		case EMD_ScrapeLoadStage::Stage2:
+			if (IsValid(CurrentTool->ScrapeLoadStage2Mesh))
+			{
+				NewToolMesh = CurrentTool->ScrapeLoadStage2Mesh;
+			}
+			break;
+
+		case EMD_ScrapeLoadStage::Stage3:
+			if (IsValid(CurrentTool->ScrapeLoadStage3Mesh))
+			{
+				NewToolMesh = CurrentTool->ScrapeLoadStage3Mesh;
+			}
+			break;
+
+		case EMD_ScrapeLoadStage::Empty:
+		default:
+			break;
+		}
 	}
+
+	const bool bShowTool = IsValid(NewToolMesh);
+	const bool bHasFirstPersonSocket = IsValid(FirstPersonMesh)
+		&& FirstPersonMesh->DoesSocketExist(FirstPersonToolMesh->GetAttachSocketName());
+	const bool bHasThirdPersonSocket = IsValid(GetMesh())
+		&& GetMesh()->DoesSocketExist(ThirdPersonToolMesh->GetAttachSocketName());
+	FirstPersonToolMesh->SetStaticMesh(NewToolMesh);
+	FirstPersonToolMesh->SetVisibility(bShowTool && bHasFirstPersonSocket, true);
+	ThirdPersonToolMesh->SetStaticMesh(NewToolMesh);
+	ThirdPersonToolMesh->SetVisibility(bShowTool && bHasThirdPersonSocket, true);
 }
 
 void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)

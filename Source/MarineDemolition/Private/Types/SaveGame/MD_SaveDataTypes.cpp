@@ -28,6 +28,15 @@ bool FMD_MerchantData::IsStructurallyValid() const
 		return false;
 	}
 
+	// 식별자가 없거나 수량이 유효하지 않은 구매 원장이 해금과 중복 구매 판정을 오염시키지 않도록 하는 검사
+	for (const TPair<FName, int32>& PurchasedItemEntry : PurchasedItemCounts)
+	{
+		if (PurchasedItemEntry.Key.IsNone() == true || PurchasedItemEntry.Value <= 0)
+		{
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -36,7 +45,18 @@ bool FMD_WorldData::IsStructurallyValid() const
 	// 오염 셀의 병렬 배열 길이가 다르면 잘못된 인덱스 복원을 수행하지 않기 위한 검사
 	for (const FMD_WallContaminationRecord& ContaminationRecord : WallContaminations)
 	{
-		if (ContaminationRecord.WallName.IsNone() == true || ContaminationRecord.CellIndices.Num() != ContaminationRecord.InitialAmounts.Num() || ContaminationRecord.CellIndices.Num() != ContaminationRecord.RemainingAmounts.Num())
+		const int32 CellCount = ContaminationRecord.CellIndices.Num();
+		const bool bTransferredAmountsValid =
+			ContaminationRecord.TransferredAmounts.IsEmpty()
+			|| ContaminationRecord.TransferredAmounts.Num() == CellCount;
+		const bool bTransferredPatternDensitiesValid =
+			ContaminationRecord.TransferredPatternDensities.IsEmpty()
+			|| ContaminationRecord.TransferredPatternDensities.Num() == CellCount;
+		if (ContaminationRecord.WallName.IsNone() == true
+			|| CellCount != ContaminationRecord.InitialAmounts.Num()
+			|| CellCount != ContaminationRecord.RemainingAmounts.Num()
+			|| bTransferredAmountsValid == false
+			|| bTransferredPatternDensitiesValid == false)
 		{
 			return false;
 		}
