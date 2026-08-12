@@ -41,6 +41,7 @@ protected:
 	// Called when the game starts
 	virtual void BeginPlay() override;
 
+public:
 	// 슬롯 내용 또는 선택 인덱스가 바뀔 때 브로드캐스트. UI가 구독한다
 	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
 	FMDOnEquipHotbarChanged OnHotbarChanged;
