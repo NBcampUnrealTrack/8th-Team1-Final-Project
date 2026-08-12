@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -25,12 +25,16 @@ class UMD_EquipHotbarComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
 class UMD_OxygenComponent;
+// 캡슐 오버랩 콜백 매개변수 형식 전방 선언
+class UPrimitiveComponent;
 
 UENUM(BlueprintType)
 enum class EMDMovementState : uint8
 {
 	Walking,
-	Swimming
+	Swimming,
+	// 사다리 전용 이동 상태
+	Climbing
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnMovementStateChanged, EMDMovementState, NewMovementState);
@@ -68,10 +72,12 @@ public:
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
 
 	virtual void PossessedBy(AController* NewController) override;
+	virtual void UnPossessed() override;
 
 	virtual void OnRep_PlayerState() override;
 public:
@@ -151,6 +157,18 @@ private:
 	void HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
+
+	// 사다리 진입을 처리하는 캡슐 오버랩 시작 콜백
+	UFUNCTION()
+	void HandleCollisionBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+
+	// 사다리 이탈을 처리하는 캡슐 오버랩 종료 콜백
+	UFUNCTION()
+	void HandleCollisionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex);
+
+	// 클라이언트의 사다리 점프 이탈을 서버에 반영하는 요청
+	UFUNCTION(Server, Reliable)
+	void ServerJumpOffLadder();
 	//void HandleWallCutInput(const FInputActionValue& Value);
 	//void HandleWallScanInput(const FInputActionValue& Value);
 

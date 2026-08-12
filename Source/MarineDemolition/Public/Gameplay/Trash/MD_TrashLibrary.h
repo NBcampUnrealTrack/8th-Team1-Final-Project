@@ -35,6 +35,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	static int32 GetTrashKindRefundCredits(FName TrashKindId);
 
+	/** 종류 행과 카테고리 행을 결합한 완성된 분류 정책 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Trash")
+	static bool GetTrashKindSortDescriptor(FName TrashKindId, FMD_TrashSortDescriptor& OutDescriptor);
+
 	/** 정분류 시 칸 점수에 더할 품목 보너스 이벤트. 보너스가 없으면 무효 태그 */
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	static FGameplayTag GetTrashKindScoreBonusTag(FName TrashKindId);
@@ -54,11 +58,25 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	static int32 GetCategoryRefundCredits(FGameplayTag Category);
 
-	/** 칸으로 쓸 수 있는 태그인지. Score.Sorting 밑의 Bonus.* 를 걸러낸다 */
+	/** 카테고리 DataTable에 실제 행으로 정의된 칸인지 */
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	static bool IsTrashCategory(FGameplayTag Category);
 
-	/** 오분류 감점 태그. 기획 05 S−02가 오염계만 −24라 물건의 정답 칸으로 결정된다 */
+	/** 카테고리의 정분류 점수 이벤트. 미설정인 기존 행은 Category로 호환한다 */
+	UFUNCTION(BlueprintPure, Category = "MD|Trash")
+	static FGameplayTag GetCorrectSortScoreTag(FGameplayTag Category);
+
+	/** 카테고리의 오분류 점수 이벤트. 미설정인 기존 행은 기존 규칙으로 호환한다 */
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	static FGameplayTag GetMisplacedSortScoreTag(FGameplayTag CorrectCategory);
+
+	/** 신규 descriptor 또는 기존 인터페이스 함수를 DataTable 정책으로 보완한다 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Trash")
+	static bool ResolveSortDescriptor(UObject* SortableObject, FMD_TrashSortDescriptor& OutDescriptor);
+
+	/** 원장 변경 없이 정분류 여부·점수 이벤트·환급을 계산하는 순수 정책 */
+	UFUNCTION(BlueprintPure, Category = "MD|Trash")
+	static FMD_TrashSortResult EvaluateSort(
+		const FMD_TrashSortDescriptor& Descriptor,
+		FGameplayTag AcceptedCategory);
 };

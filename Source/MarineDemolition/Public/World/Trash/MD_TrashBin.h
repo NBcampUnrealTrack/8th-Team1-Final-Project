@@ -5,6 +5,7 @@
 #include "GameplayTagAssetInterface.h"
 #include "Gameplay/Interaction/MD_Grabbable.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
+#include "Gameplay/Trash/MD_TrashContainer.h"
 #include "MD_TrashBin.generated.h"
 
 class UBoxComponent;
@@ -12,8 +13,18 @@ class UPrimitiveComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
+	FMDOnTrashBinContentsChanged,
+	int32, ContentCount,
+	int32, MaxCapacity);
+
 UCLASS()
-class MARINEDEMOLITION_API AMD_TrashBin	: public AActor, public IGameplayTagAssetInterface, public IMD_Grabbable, public IMD_Interactable
+class MARINEDEMOLITION_API AMD_TrashBin
+	: public AActor
+	, public IGameplayTagAssetInterface
+	, public IMD_Grabbable
+	, public IMD_Interactable
+	, public IMD_TrashContainer
 {
 	GENERATED_BODY()
 
@@ -34,8 +45,32 @@ public:
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 	/** ~Implements IMD_Interactable*/
 
+	/** Implements IMD_TrashContainer */
+	virtual TArray<AActor*> GetContainedActors_Implementation() const override;
+	virtual bool TryDrainContentsForSorting_Implementation(TArray<AActor*>& OutContents) override;
+	virtual bool TryRestoreDrainedContentsAfterFailedSort_Implementation(
+		const TArray<AActor*>& Contents) override;
+	/** ~Implements IMD_TrashContainer */
+
 	UFUNCTION(BlueprintPure, Category = "MD|Trash Bin")
 	int32 GetContentCount() const { return ContentCount; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Trash Bin")
+	int32 GetMaxCapacity() const { return FMath::Max(1, MaxCapacity); }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Trash Bin")
+	bool IsFull() const { return ContentCount >= GetMaxCapacity(); }
+
+	/** 분류 판정용 비파괴 C++ snapshot. 내부 collection 참조는 노출하지 않는다. */
+	void GetContentsSnapshot(TArray<AActor*>& OutContents) const;
+
+	/** 현재 물리 overlap을 기준으로 서버의 내용물 목록을 다시 맞춘다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Trash Bin")
+	void RefreshContentsFromOverlaps();
+
+	/** 서버 입고와 클라이언트 ContentCount OnRep 양쪽에서 한 번씩 방송한다. */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Trash Bin")
+	FMDOnTrashBinContentsChanged OnContentsChanged;
 
 protected:
 	/** 서버에서 내부 내용물의 진입과 이탈 추적을 시작 */
@@ -70,7 +105,13 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Bin", meta = (Categories = "Resource.Storage.Content"))
 	FGameplayTagContainer AcceptedContentTags;
 
-	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "MD|Trash Bin")
+	/** 고체 Actor 기준 최대 적재 수. 0은 허용하지 않는다 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Bin",
+		meta = (ClampMin = "1", UIMin = "1"))
+	int32 MaxCapacity = 12;
+
+	UPROPERTY(ReplicatedUsing = OnRep_ContentCount, VisibleInstanceOnly, BlueprintReadOnly,
+		Category = "MD|Trash Bin")
 	int32 ContentCount = 0;
 
 private:
@@ -83,8 +124,15 @@ private:
 	UFUNCTION()
 	void HandleContentDestroyed(AActor* DestroyedActor);
 
+	UFUNCTION()
+	void OnRep_ContentCount();
+
 	bool IsAcceptedContent(const AActor* Actor) const;
-	void RefreshContents();
+	bool TryAdmitContent(AActor* Actor);
+	bool RemoveAdmittedContent(AActor* Actor);
+	void AdmitWaitingContents();
+	void RebuildContentsFromOverlaps(bool bPreserveAdmissionOrder);
+	void RefreshContentsFromOverlapsPreservingAdmissions();
 	void SyncContentCount();
 
 	/** 끌려가는 동안 내용물을 통에 붙인다. 안 그러면 통 벽이 때려 대부분 튀어나간다 */
@@ -94,6 +142,13 @@ private:
 	void ReleaseContentsAfterCarry();
 
 	TSet<TWeakObjectPtr<AActor>> Contents;
+
+	/** Begin/End overlap을 actor 단위 ref-count로 합쳐 매 이벤트마다 전체 volume을 재조회하지 않는다. */
+	TMap<TWeakObjectPtr<AActor>, int32> ContentOverlapCounts;
+	TArray<TWeakObjectPtr<AActor>> ContentAdmissionOrder;
+
+	/** 통째 분류 drain은 서버 game thread에서 단 한 번만 성공한다. */
+	bool bSortingTransactionActive = false;
 
 	struct FMD_CarryFrozenContent
 	{
