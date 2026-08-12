@@ -33,12 +33,22 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	AimCorrectionSpeedDegreesPerSecond = 90.0f;
 	AimCorrectionMaximumErrorDegrees = 8.0f;
 	AimCorrectionVisibilityToleranceCm = 2.0f;
+	ScrapeLoad = 0.0f;
+	ScrapeLoadPerRemovedPercent = 0.6f;
+	ScrapeLoadPerRemovedBarnacle = 8.0f;
+	SaturatedContaminationStampRatio = 0.4f;
+	SaturatedRemovalMultiplier = 0.05f;
+	SaturatedContaminationStampCoverage = 0.5f;
+	SaturatedContaminationStampDepthCm = 4.0f;
+	SaturatedContaminationStampSpacingCm = 6.0f;
 	bIsScraping = false;
 	bHasPreviousSurfacePosition = false;
 	bHasLockedStrokeAxis = false;
+	SaturatedContaminationStampPatternSeed = 7319;
 	PreviousSurfacePositionCm = FVector2D::ZeroVector;
 	PreviousSurfaceFace = EMD_ScrapeSurfaceFace::Front;
 	StrokeAnchorPositionCm = FVector2D::ZeroVector;
+	FurthestSurfacePositionCm = FVector2D::ZeroVector;
 	LockedStrokeAxis = FVector2D::ZeroVector;
 	LastFeedbackWorldSeconds = -DBL_MAX;
 
@@ -55,6 +65,17 @@ void UMD_ScrapeToolComponent::GetLifetimeReplicatedProps(
 		UMD_ScrapeToolComponent,
 		ScrapeToolSpec,
 		COND_OwnerOnly);
+	DOREPLIFETIME(
+		UMD_ScrapeToolComponent,
+		ScrapeLoad);
+	DOREPLIFETIME_CONDITION(
+		UMD_ScrapeToolComponent,
+		LastContactWorldLocation,
+		COND_SkipOwner);
+	DOREPLIFETIME_CONDITION(
+		UMD_ScrapeToolComponent,
+		bHasLastContact,
+		COND_SkipOwner);
 }
 
 const TCHAR* UMD_ScrapeToolComponent::GetContactTypeLabel(
@@ -118,10 +139,9 @@ bool UMD_ScrapeToolComponent::SetScrapeToolSpec(
 		return false;
 	}
 
-	ScrapeToolSpec = NewToolSpec;
-
 	// 성능이 바뀐 프레임에 이전 위치부터 새 범위를 소급 적용하지 않도록 경로를 끊는다.
 	ResetStrokeTracking();
+	ScrapeToolSpec = NewToolSpec;
 	GetOwner()->ForceNetUpdate();
 	return true;
 }
@@ -138,6 +158,139 @@ bool UMD_ScrapeToolComponent::SetScrapeBladeWidthCm(
 	FMD_ScrapeToolSpec NewToolSpec = ScrapeToolSpec;
 	NewToolSpec.BladeWidthCm = NewBladeWidthCm;
 	return SetScrapeToolSpec(NewToolSpec);
+}
+
+EMD_ScrapeLoadStage UMD_ScrapeToolComponent::CalculateScrapeLoadStage(
+	const float Load)
+{
+	if (!FMath::IsFinite(Load) || Load <= 0.0f)
+	{
+		return EMD_ScrapeLoadStage::Empty;
+	}
+
+	if (Load < ScrapeLoadStage2Threshold)
+	{
+		return EMD_ScrapeLoadStage::Stage1;
+	}
+
+	if (Load < ScrapeLoadStage3Threshold)
+	{
+		return EMD_ScrapeLoadStage::Stage2;
+	}
+
+	return EMD_ScrapeLoadStage::Stage3;
+}
+
+float UMD_ScrapeToolComponent::CalculateScrapeLoadGainFromCleanRatioDelta(
+	const float CleanRatioDelta,
+	const float LoadPerRemovedPercent)
+{
+	if (!FMath::IsFinite(CleanRatioDelta)
+		|| CleanRatioDelta <= 0.0f
+		|| !FMath::IsFinite(LoadPerRemovedPercent)
+		|| LoadPerRemovedPercent <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	return FMath::Clamp(CleanRatioDelta, 0.0f, 1.0f)
+		* 100.0f
+		* LoadPerRemovedPercent;
+}
+
+bool UMD_ScrapeToolComponent::SetScrapeLoad(const float NewLoad)
+{
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !FMath::IsFinite(NewLoad))
+	{
+		return false;
+	}
+
+	const float PreviousLoad = GetScrapeLoad();
+	ScrapeLoad = FMath::Clamp(NewLoad, 0.0f, MaximumScrapeLoad);
+	if (!FMath::IsNearlyEqual(PreviousLoad, ScrapeLoad))
+	{
+		NotifyScrapeLoadChanged();
+		GetOwner()->ForceNetUpdate();
+	}
+	return true;
+}
+
+float UMD_ScrapeToolComponent::AddScrapeLoad(
+	const float RequestedAmount)
+{
+	if (!GetOwner()
+		|| !GetOwner()->HasAuthority()
+		|| !FMath::IsFinite(RequestedAmount)
+		|| RequestedAmount <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	const float PreviousLoad = GetScrapeLoad();
+	ScrapeLoad = FMath::Clamp(
+		PreviousLoad + RequestedAmount,
+		0.0f,
+		MaximumScrapeLoad);
+	const float AddedAmount = ScrapeLoad - PreviousLoad;
+	if (AddedAmount > 0.0f)
+	{
+		NotifyScrapeLoadChanged();
+		GetOwner()->ForceNetUpdate();
+	}
+
+	return AddedAmount;
+}
+
+void UMD_ScrapeToolComponent::OnRep_ScrapeLoad()
+{
+	ScrapeLoad = GetScrapeLoad();
+	NotifyScrapeLoadChanged();
+}
+
+void UMD_ScrapeToolComponent::NotifyScrapeLoadChanged()
+{
+	OnScrapeLoadChanged.Broadcast(ScrapeLoad);
+}
+
+bool UMD_ScrapeToolComponent::GetCurrentScrapeContact(
+	FVector& OutWorldLocation) const
+{
+	if (!bHasLastContact)
+	{
+		return false;
+	}
+
+	OutWorldLocation = LastContactWorldLocation;
+	return true;
+}
+
+void UMD_ScrapeToolComponent::SetCurrentScrapeContact(
+	const FVector& WorldLocation)
+{
+	const bool bHadContact = bHasLastContact;
+	LastContactWorldLocation = WorldLocation;
+	// 위치를 먼저 기록해야 같은 복제 묶음에서 유효 플래그가 켜질 때 완성된 값을 읽는다.
+	bHasLastContact = true;
+
+	if (!bHadContact && GetOwner() && GetOwner()->HasAuthority())
+	{
+		GetOwner()->ForceNetUpdate();
+	}
+}
+
+void UMD_ScrapeToolComponent::ClearCurrentScrapeContact()
+{
+	if (!bHasLastContact)
+	{
+		return;
+	}
+
+	bHasLastContact = false;
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		// Tick이 멈춘 뒤에도 시뮬레이티드 프록시에 해제 상태가 바로 전달되어야 한다.
+		GetOwner()->ForceNetUpdate();
+	}
 }
 
 void UMD_ScrapeToolComponent::StartScraping()
@@ -160,6 +313,7 @@ void UMD_ScrapeToolComponent::StopScraping()
 {
 	if (!bIsScraping)
 	{
+		ClearCurrentScrapeContact();
 		return;
 	}
 
@@ -210,6 +364,8 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 		SetTrackedBarnacle(nullptr);
 		return;
 	}
+
+	SetCurrentScrapeContact(CurrentHit.ImpactPoint);
 
 	if (IsValid(OccludingBarnacle))
 	{
@@ -303,16 +459,52 @@ void UMD_ScrapeToolComponent::ProcessScrapeTrace(const float DeltaTime)
 		}
 	}
 
+	if (bHasLockedStrokeAxis
+		&& FVector2D::DotProduct(
+			ConstrainedSurfacePositionCm - StrokeAnchorPositionCm,
+			LockedStrokeAxis)
+			> FVector2D::DotProduct(
+				FurthestSurfacePositionCm - StrokeAnchorPositionCm,
+				LockedStrokeAxis))
+	{
+		FurthestSurfacePositionCm = ConstrainedSurfacePositionCm;
+	}
+
 	FMD_ScrapeStroke Stroke;
 	Stroke.SurfaceFace = CurrentSurfaceFace;
 	Stroke.StartPositionCm = PreviousSurfacePositionCm;
 	Stroke.EndPositionCm = ConstrainedSurfacePositionCm;
 	if (GetOwner() && GetOwner()->HasAuthority())
 	{
+		const bool bIsSaturated =
+			GetScrapeLoadStage() == EMD_ScrapeLoadStage::Stage3;
+		FMD_ScrapeToolSpec EffectiveToolSpec = ScrapeToolSpec;
+		if (bIsSaturated)
+		{
+			EffectiveToolSpec.RemovalPerTravelCentimeter *=
+				GetSaturatedRemovalMultiplier();
+		}
+		float RemovedCleanRatioDelta = 0.0f;
 		const FMD_ScrapeResult Result =
-			CurrentSurface->ApplyLocalScrapeStrokeWithToolSpec(
+			CurrentSurface->ApplyLocalScrapeStrokeWithContaminationStamp(
 				Stroke,
-				ScrapeToolSpec);
+				EffectiveToolSpec,
+				StrokeAnchorPositionCm,
+				LockedStrokeAxis,
+				bIsSaturated
+					? GetSaturatedContaminationStampRatio()
+					: 0.0f,
+				bIsSaturated
+					? GetSaturatedContaminationStampCoverage()
+					: 0.0f,
+				GetSaturatedContaminationStampDepthCm(),
+				GetSaturatedContaminationStampSpacingCm(),
+				SaturatedContaminationStampPatternSeed,
+				RemovedCleanRatioDelta);
+
+		AddScrapeLoad(CalculateScrapeLoadGainFromCleanRatioDelta(
+			RemovedCleanRatioDelta,
+			ScrapeLoadPerRemovedPercent));
 
 		if (Result.bIsInputValid && Result.bWasStrokeLongEnough)
 		{
@@ -585,6 +777,8 @@ void UMD_ScrapeToolComponent::DeliverBarnacleImpact(
 			ScrapeToolSpec.CalculateBarnacleImpactWork(ImpactSpeedCmPerSecond),
 			ImpactWorldDirection))
 	{
+		AddScrapeLoad(ScrapeLoadPerRemovedBarnacle);
+
 		// 떨어져 나가면 액터가 파괴되므로 추적을 끊는다.
 		SetTrackedBarnacle(nullptr);
 	}
@@ -625,11 +819,13 @@ void UMD_ScrapeToolComponent::BeginStrokeTracking(
 	const FVector2D& SurfacePositionCm,
 	const EMD_ScrapeSurfaceFace SurfaceFace)
 {
+	FlushPendingContaminationPaintTail();
 	bHasPreviousSurfacePosition = true;
 	bHasLockedStrokeAxis = false;
 	PreviousSurfacePositionCm = SurfacePositionCm;
 	PreviousSurfaceFace = SurfaceFace;
 	StrokeAnchorPositionCm = SurfacePositionCm;
+	FurthestSurfacePositionCm = SurfacePositionCm;
 	LockedStrokeAxis = FVector2D::ZeroVector;
 	PreviousSurface = Surface;
 }
@@ -659,8 +855,8 @@ bool UMD_ScrapeToolComponent::TryConstrainStrokePosition(
 		// 첫 움직임에서 더 큰 축을 이번 줄의 방향으로 고정한다.
 		LockedStrokeAxis = FMath::Abs(AnchorToRawCm.X)
 			>= FMath::Abs(AnchorToRawCm.Y)
-			? FVector2D(1.0, 0.0)
-			: FVector2D(0.0, 1.0);
+			? FVector2D(AnchorToRawCm.X >= 0.0 ? 1.0 : -1.0, 0.0)
+			: FVector2D(0.0, AnchorToRawCm.Y >= 0.0 ? 1.0 : -1.0);
 		bHasLockedStrokeAxis = true;
 	}
 
@@ -680,8 +876,10 @@ bool UMD_ScrapeToolComponent::TryConstrainStrokePosition(
 	if (PerpendicularDistanceCm > SafeBreakDistanceCm)
 	{
 		// 큰 옆 이동은 긁지 않고 새 줄의 시작점이 된다.
+		FlushPendingContaminationPaintTail();
 		PreviousSurfacePositionCm = RawSurfacePositionCm;
 		StrokeAnchorPositionCm = RawSurfacePositionCm;
+		FurthestSurfacePositionCm = RawSurfacePositionCm;
 		LockedStrokeAxis = FVector2D::ZeroVector;
 		bHasLockedStrokeAxis = false;
 		return false;
@@ -874,13 +1072,45 @@ void UMD_ScrapeToolComponent::KeepAimOnScrapePosition(
 	Controller->SetControlRotation(CorrectedControlRotation);
 }
 
+void UMD_ScrapeToolComponent::FlushPendingContaminationPaintTail()
+{
+	UMD_ScrapeSurfaceComponent* const Surface = PreviousSurface.Get();
+	if (!bHasPreviousSurfacePosition
+		|| !bHasLockedStrokeAxis
+		|| !IsValid(Surface)
+		|| GetScrapeLoadStage() != EMD_ScrapeLoadStage::Stage3
+		|| FVector2D::Distance(
+			StrokeAnchorPositionCm,
+			FurthestSurfacePositionCm) <= UE_SMALL_NUMBER)
+	{
+		return;
+	}
+
+	FMD_ScrapeStroke FullPathStroke;
+	FullPathStroke.SurfaceFace = PreviousSurfaceFace;
+	FullPathStroke.StartPositionCm = StrokeAnchorPositionCm;
+	FullPathStroke.EndPositionCm = FurthestSurfacePositionCm;
+	Surface->FlushLocalContaminationPaintTail(
+		FullPathStroke,
+		LockedStrokeAxis,
+		ScrapeToolSpec,
+		GetSaturatedContaminationStampRatio(),
+		GetSaturatedContaminationStampCoverage(),
+		GetSaturatedContaminationStampDepthCm(),
+		GetSaturatedContaminationStampSpacingCm(),
+		SaturatedContaminationStampPatternSeed);
+}
+
 void UMD_ScrapeToolComponent::ResetStrokeTracking()
 {
+	FlushPendingContaminationPaintTail();
+	ClearCurrentScrapeContact();
 	bHasPreviousSurfacePosition = false;
 	bHasLockedStrokeAxis = false;
 	PreviousSurfacePositionCm = FVector2D::ZeroVector;
 	PreviousSurfaceFace = EMD_ScrapeSurfaceFace::Front;
 	StrokeAnchorPositionCm = FVector2D::ZeroVector;
+	FurthestSurfacePositionCm = FVector2D::ZeroVector;
 	LockedStrokeAxis = FVector2D::ZeroVector;
 	PreviousSurface.Reset();
 }
@@ -904,9 +1134,10 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 				? FColor::Silver
 				: FColor::Purple,
 			FString::Printf(
-				TEXT("헤라: %s | 오염 제거 %.1f%%"),
+				TEXT("헤라: %s | 오염 제거 %.1f%% | 오염 스택 %.1f / 100"),
 				GetContactTypeLabel(Result.ContactType),
-				FMath::Clamp(Result.CleanRatioAfter, 0.0f, 1.0f) * 100.0f));
+				FMath::Clamp(Result.CleanRatioAfter, 0.0f, 1.0f) * 100.0f,
+				GetScrapeLoad()));
 	}
 
 	const double WorldSeconds = GetWorld()->GetTimeSeconds();

@@ -141,6 +141,29 @@ bool FMD_ScrapeMaskAtlas::TryGetAtlasPixelIndexFromCombinedCellIndex(
 		&& OutPixelIndex < AtlasDimensions.X * AtlasDimensions.Y;
 }
 
+float FMD_ScrapeMaskAtlas::CalculateRuntimeAwareVisualContamination(
+	const float RemainingContamination,
+	const float InitialContamination,
+	const float GeneratedInitialContamination)
+{
+	if (!FMath::IsFinite(RemainingContamination)
+		|| !FMath::IsFinite(InitialContamination))
+	{
+		return 0.0f;
+	}
+
+	const float SafeInitial = FMath::Clamp(
+		InitialContamination,
+		0.0f,
+		1.0f);
+	const float SafeRemaining = FMath::Clamp(
+		RemainingContamination,
+		0.0f,
+		SafeInitial);
+	(void)GeneratedInitialContamination;
+	return SafeRemaining;
+}
+
 bool FMD_ScrapeMaskAtlas::TryQuantizeRemainingContamination(
 	const float RemainingContamination,
 	const float InitialContamination,

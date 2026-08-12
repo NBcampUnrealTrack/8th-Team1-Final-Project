@@ -35,6 +35,8 @@ AMD_CuttableWall::AMD_CuttableWall()
 	ContaminationOverlay->SetCanEverAffectNavigation(false);
 	ContaminationOverlay->SetReceivesDecals(false);
 	ContaminationOverlay->CastShadow = false;
+	ContaminationOverlay->SetVisibility(false);
+	ContaminationOverlay->SetHiddenInGame(true);
 
 	FrontContaminationDecal = CreateDefaultSubobject<UDecalComponent>(
 		TEXT("FrontContaminationDecal"));
@@ -58,7 +60,6 @@ AMD_CuttableWall::AMD_CuttableWall()
 		TEXT("ScrapeSurface"));
 	ScrapeSurface->ConfigureExternalComponents(
 		Mesh,
-		ContaminationOverlay,
 		FrontContaminationDecal,
 		BackContaminationDecal);
 	SyncLegacySurfaceConfiguration();
@@ -70,11 +71,16 @@ void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 	Super::OnConstruction(Transform);
 
 	SyncLegacySurfaceConfiguration();
+	if (ContaminationOverlay)
+	{
+		ContaminationOverlay->ClearInstances();
+		ContaminationOverlay->SetVisibility(false);
+		ContaminationOverlay->SetHiddenInGame(true);
+	}
 	if (ScrapeSurface)
 	{
 		ScrapeSurface->ConfigureExternalComponents(
 			Mesh,
-			ContaminationOverlay,
 			FrontContaminationDecal,
 			BackContaminationDecal);
 		ScrapeSurface->RefreshSurfaceGeometry();
@@ -101,10 +107,17 @@ void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 void AMD_CuttableWall::BeginPlay()
 {
 	Super::BeginPlay();
+	if (ContaminationOverlay)
+	{
+		ContaminationOverlay->ClearInstances();
+		ContaminationOverlay->SetVisibility(false);
+		ContaminationOverlay->SetHiddenInGame(true);
+	}
 	SyncLegacySurfaceConfiguration();
 	if (ScrapeSurface)
 	{
-		if (!ScrapeSurface->IsSurfaceInitialized())
+		if (ScrapeSurface->IsContaminationEnabled()
+			&& !ScrapeSurface->IsSurfaceInitialized())
 		{
 			ScrapeSurface->InitializeSurface();
 		}
@@ -200,7 +213,9 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 bool AMD_CuttableWall::CanCut() const
 {
 	// 초기화 실패 시 절단 금지
-	if (!ScrapeSurface || !ScrapeSurface->IsSurfaceInitialized())
+	if (!ScrapeSurface
+		|| (ScrapeSurface->IsContaminationEnabled()
+			&& !ScrapeSurface->IsSurfaceInitialized()))
 	{
 		return false;
 	}

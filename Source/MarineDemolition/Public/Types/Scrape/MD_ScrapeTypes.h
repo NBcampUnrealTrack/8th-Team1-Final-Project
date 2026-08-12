@@ -41,6 +41,23 @@ enum class EMD_ScrapeSurfaceFace : uint8
 	Back = 1 UMETA(DisplayName = "뒷면")
 };
 
+/** 헤라 날에 쌓인 오염물의 즉시 교체형 시각 단계 */
+UENUM(BlueprintType)
+enum class EMD_ScrapeLoadStage : uint8
+{
+	/** ScrapeLoad가 0인 깨끗한 날 */
+	Empty = 0 UMETA(DisplayName = "0단계 - 깨끗함"),
+
+	/** 0보다 크고 34보다 작은 상태 */
+	Stage1 = 1 UMETA(DisplayName = "1단계 - 얇은 코팅"),
+
+	/** 34 이상 67 미만인 포화 직전 상태 */
+	Stage2 = 2 UMETA(DisplayName = "2단계 - 처짐과 방울"),
+
+	/** 67 이상인 포화 상태 */
+	Stage3 = 3 UMETA(DisplayName = "3단계 - 포화")
+};
+
 /**
  * 오염 작업면의 앞/뒤를 결정하는 메시 로컬 축.
  *
@@ -352,14 +369,16 @@ public:
 	FMD_ScrapeSurfaceCell()
 		: InitialContamination(1.0f)
 		, RemainingContamination(1.0f)
+		, TransferredContamination(0.0f)
+		, TransferredPaintPatternDensity(0.0f)
 	{
 	}
 
 	/**
-	 * 미션 시작 시 이 셀에 존재했던 오염막의 양
+	 * 이 셀이 보유할 수 있는 현재 오염 기준량
 	 *
-	 * 0은 처음부터 깨끗한 부분, 1은 완전히 덮인 부분을 의미.
-	 * 제거율의 분모로 사용되므로 플레이 도중에는 바꾸지 않는 값으로 취급.
+	 * 생성 시에는 미션 시작 오염량이며 제거율의 분모로 사용한다.
+	 * 플레이 중 새 오염이 처음부터 깨끗했던 셀에 묻으면 그 양까지 확장될 수 있다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -375,6 +394,16 @@ public:
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float RemainingContamination;
 
+	/** 포화된 헤라가 새로 덧바른 오염량. RemainingContamination에 포함된다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float TransferredContamination;
+
+	/** 전용 페인트 마스크가 사용할 고정 점묘 밀도. 0이면 새 페인트가 없다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float TransferredPaintPatternDensity;
+
 	/**
 	 * 외부 데이터 입력이나 블루프린트 수정으로 범위를 벗어난 값을 안전한 상태로 복구
 	 * NaN/무한대 값은 계산 전체를 오염시키므로 0으로 정리
@@ -388,6 +417,19 @@ public:
 		RemainingContamination = FMath::IsFinite(RemainingContamination)
 			? FMath::Clamp(RemainingContamination, 0.0f, InitialContamination)
 			: 0.0f;
+
+		TransferredContamination = FMath::IsFinite(TransferredContamination)
+			? FMath::Clamp(TransferredContamination, 0.0f, 1.0f)
+			: 0.0f;
+		TransferredPaintPatternDensity =
+			FMath::IsFinite(TransferredPaintPatternDensity)
+			? FMath::Clamp(TransferredPaintPatternDensity, 0.0f, 1.0f)
+			: 0.0f;
+		if (TransferredContamination <= UE_SMALL_NUMBER)
+		{
+			TransferredContamination = 0.0f;
+			TransferredPaintPatternDensity = 0.0f;
+		}
 	}
 
 	// 셀 하나의 깨끗함 판정과 제거 비율은 면 전체를 함께 봐야 하므로
@@ -500,7 +542,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	int32 TouchedCellCount;
 
-	/** 잔여 오염량이 실제로 감소한 고유 셀 수. CellChanges.Num()과 동일한 값 */
+	/** 제거 또는 역오염 도포로 잔여 오염량이 실제로 바뀐 고유 셀 수. CellChanges.Num()과 동일한 값 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	int32 ModifiedCellCount;
 

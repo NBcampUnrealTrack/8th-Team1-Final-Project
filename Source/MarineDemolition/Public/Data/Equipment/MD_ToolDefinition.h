@@ -8,6 +8,7 @@
 #include "MD_ToolDefinition.generated.h"
 
 class UGameplayAbility;
+class UStaticMesh;
 class UTexture2D;
 
 UCLASS(BlueprintType)
@@ -20,11 +21,23 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
 	FText ToolName;
 
-	// 프로토 단계에서는 임시 큐브 사용
+	/** 기본 전체 도구 메시. ScrapeLoad가 0이거나 단계 메시가 비어 있으면 사용한다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
 	TObjectPtr<UStaticMesh> ToolMesh;
 
-	// 이 도구가 부착될 소켓 이름. 비우면 캐릭터 기본 소켓(hand_r) 사용
+	/** ScrapeLoad 1단계에서 ToolMesh를 대체할 오염 포함 전체 도구 메시 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape Load")
+	TObjectPtr<UStaticMesh> ScrapeLoadStage1Mesh;
+
+	/** ScrapeLoad 2단계에서 ToolMesh를 대체할 오염 포함 전체 도구 메시 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape Load")
+	TObjectPtr<UStaticMesh> ScrapeLoadStage2Mesh;
+
+	/** ScrapeLoad 3단계에서 ToolMesh를 대체할 오염 포함 전체 도구 메시 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape Load")
+	TObjectPtr<UStaticMesh> ScrapeLoadStage3Mesh;
+
+	// 이 도구가 부착될 소켓 이름. 비우면 캐릭터 기본 소켓(ToolSocket) 사용
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
 	FName AttachSocketName;
 

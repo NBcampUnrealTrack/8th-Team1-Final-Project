@@ -123,9 +123,14 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "MD|Wall")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
-	/** Existing native visual subobjects are retained so old BP overrides survive. */
+	/**
+	 * Deprecated inert compatibility shell. It is retained temporarily so old
+	 * Blueprint component overrides do not become orphaned.
+	 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Overlay")
+		AdvancedDisplay, Category = "MD|Wall|Contamination|Deprecated",
+		meta = (DeprecatedProperty,
+			DeprecationMessage = "Cell ISM contamination overlays are no longer used."))
 	TObjectPtr<UInstancedStaticMeshComponent> ContaminationOverlay;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,

@@ -12,8 +12,6 @@ DECLARE_CYCLE_STAT_EXTERN(TEXT("Clean Ratio"), STAT_MD_ScrapeCleanRatio,
 	STATGROUP_MD_Scrape, MARINEDEMOLITION_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("G8 Mask Update"), STAT_MD_ScrapeMaskUpdate,
 	STATGROUP_MD_Scrape, MARINEDEMOLITION_API);
-DECLARE_CYCLE_STAT_EXTERN(TEXT("ISM Overlay Update"), STAT_MD_ScrapeOverlayUpdate,
-	STATGROUP_MD_Scrape, MARINEDEMOLITION_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("Replication Publish"), STAT_MD_ScrapePublish,
 	STATGROUP_MD_Scrape, MARINEDEMOLITION_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("Fully Removed Check"),
@@ -24,9 +22,40 @@ DECLARE_CYCLE_STAT_EXTERN(TEXT("Fully Removed Check"),
 namespace MD_ScrapeSurfaceComponentInternal
 {
 	extern const FName ContaminationMaskTextureParameterName;
+	extern const FName TransferredPaintMaskTextureParameterName;
+	extern const FName ContaminationBaseColorTextureParameterName;
+	extern const FName ContaminationShapeMaskTextureParameterName;
+	extern const FName ContaminationBaseCoverageParameterName;
+	extern const FName ContaminationOpacityParameterName;
 	extern const FName ContaminationMaskVScaleParameterName;
 	extern const FName ContaminationMaskVOffsetParameterName;
 	extern const FName ContaminationMaskUFlipParameterName;
 	extern const FName ContaminationMaskHalfTexelUParameterName;
 	extern const FName ContaminationMaskHalfTexelVParameterName;
+	extern const FName ContaminationPatchUVScaleUParameterName;
+	extern const FName ContaminationPatchUVOffsetUParameterName;
+	extern const FName ContaminationPatchUVScaleVParameterName;
+	extern const FName ContaminationPatchUVOffsetVParameterName;
+	extern const FName ContaminationSurfaceWidthParameterName;
+	extern const FName ContaminationSurfaceHeightParameterName;
+	extern const FName ContaminationSurfaceThicknessParameterName;
+	extern const FName ContaminationDetailTileWorldSizeParameterName;
+	extern const FName ContaminationDecalProjectionDirectionParameterName;
+	extern const FName ContaminationAngleFadeStartParameterName;
+	extern const FName ContaminationAngleFadeEndParameterName;
+	extern const FName ContaminationFaceSplitOriginParameterName;
+	extern const FName ContaminationFaceSplitNormalParameterName;
+	extern const FName ContaminationFaceIsFrontParameterName;
+	extern const FName ContaminationFaceOwnershipEnabledParameterName;
+
+	/**
+	 * 장식용 오염 무늬를 패치 UV가 아니라 벽 표면의 월드 좌표로 만들기 위한 기준계.
+	 *
+	 * 패치마다 상자 크기와 방향이 다르므로 데칼 로컬 UV로 무늬를 만들면 패치마다
+	 * 무늬 밀도가 달라지고 경계에서 끊긴다. 세 값은 한 벽의 모든 패치가 공유하므로
+	 * 어떤 패치가 칠하든 같은 월드 지점은 같은 무늬 좌표를 얻는다.
+	 */
+	extern const FName ContaminationSurfaceOriginParameterName;
+	extern const FName ContaminationSurfaceTangentUParameterName;
+	extern const FName ContaminationSurfaceTangentVParameterName;
 }
