@@ -519,6 +519,17 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 	CurrentSite = LoadedCurrentSite;
 	MainQuests = SaveData.MainQuests;
 	RepeatQuests = SaveData.RepeatQuests;
+
+	// 실패 처리된 반복 퀘스트를 다시 수락할 수 있는 상태로 복구
+	for (FMD_RepeatQuestState& RepeatQuest : RepeatQuests)
+	{
+		if (RepeatQuest.Status == EMD_RepeatQuestStatus::Failed)
+		{
+			RepeatQuest.Status = EMD_RepeatQuestStatus::Offered;
+			RepeatQuest.CurrentProgress = 0;
+		}
+	}
+
 	ClearedSites = MoveTemp(LoadedClearedSites);
 	OnMerchantStateChanged.Broadcast();
 

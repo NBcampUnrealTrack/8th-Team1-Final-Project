@@ -115,7 +115,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FMD_MainQuestState> MainQuests;
 
-	// 제시·수락·거절·완료·실패와 목표 진행도를 유지하기 위한 반복 퀘스트 목록
+	// 퀘스트 진행도를 유지하기 위한 반복 퀘스트 목록
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FMD_RepeatQuestState> RepeatQuests;
 
