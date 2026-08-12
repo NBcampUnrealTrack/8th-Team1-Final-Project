@@ -6,12 +6,71 @@
 
 #include "Util/MD_LogUtility.h"
 
+namespace
+{
+	uint32 AvalancheContaminationPaintHash(uint32 Value)
+	{
+		Value ^= Value >> 16;
+		Value *= 0x7FEB352DU;
+		Value ^= Value >> 15;
+		Value *= 0x846CA68BU;
+		Value ^= Value >> 16;
+		return Value;
+	}
+
+	uint32 BuildContaminationPaintHash(
+		const int32 PatternSeed,
+		const int32 DabBinIndex,
+		const uint32 ChannelSalt)
+	{
+		uint32 Value = AvalancheContaminationPaintHash(
+			static_cast<uint32>(DabBinIndex) + 0x9E3779B9U);
+		Value ^= AvalancheContaminationPaintHash(
+			static_cast<uint32>(PatternSeed) + 0x85EBCA6BU);
+		Value ^= AvalancheContaminationPaintHash(
+			ChannelSalt + 0xC2B2AE35U);
+		return AvalancheContaminationPaintHash(Value);
+	}
+
+	double ContaminationPaintHashToUnitDouble(const uint32 Hash)
+	{
+		// 상위 24비트를 사용해 플랫폼과 프레임 분할에 무관한 [0, 1) 값을 만든다.
+		return static_cast<double>(Hash >> 8) / 16777216.0;
+	}
+
+	double CalculateTransferredPaintPatternDensity(
+		const FVector2D& BrushToCellCenterCm,
+		const FVector2D& CanonicalBladeWidthAxis,
+		const double BladeHalfWidthCm)
+	{
+		if (BladeHalfWidthCm <= UE_SMALL_NUMBER)
+		{
+			return 1.0;
+		}
+
+		const double NormalizedWidth = FMath::Clamp(
+			FVector2D::DotProduct(
+				BrushToCellCenterCm,
+				CanonicalBladeWidthAxis)
+				/ (BladeHalfWidthCm * 2.0)
+				+ 0.5,
+			0.0,
+			1.0);
+		const double SmoothedWidth = NormalizedWidth * NormalizedWidth
+			* (3.0 - 2.0 * NormalizedWidth);
+
+		// 참조 붓자국처럼 긴 축의 전반부는 약 50% 점묘로 유지하고,
+		// 반대쪽 끝으로 갈수록 약 96%까지 조밀해진다.
+		return 0.50 + 0.46 * SmoothedWidth;
+	}
+}
+
 FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 	const FMD_ScrapeStroke& Stroke,
 	const FMD_ScrapeSettings& Settings,
 	const FIntPoint& GridDimensions,
 	const FVector2D& SurfaceSizeCm,
-	TArray<FMD_ScrapeSurfaceCell>& InOutSurfaceCells)
+	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells)
 {
 	return ApplyStrokeToGrid(
 		Stroke,
@@ -28,9 +87,53 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 	const FMD_ScrapeSettings& Settings,
 	const FIntPoint& GridDimensions,
 	const FVector2D& SurfaceSizeCm,
-	TArray<FMD_ScrapeSurfaceCell>& InOutSurfaceCells)
+	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells)
+{
+	return ApplyStrokeToGridInternal(
+		Stroke,
+		ToolSpec,
+		Settings,
+		GridDimensions,
+		SurfaceSizeCm,
+		InOutSurfaceCells,
+		nullptr);
+}
+
+FMD_ScrapeResult
+FMD_ScrapeEvaluator::ApplyStrokeToGridAndCaptureRequestedAmounts(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FMD_ScrapeSettings& Settings,
+	const FIntPoint& GridDimensions,
+	const FVector2D& SurfaceSizeCm,
+	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+	TArray<float>& OutRequestedRemovalAmounts)
+{
+	return ApplyStrokeToGridInternal(
+		Stroke,
+		ToolSpec,
+		Settings,
+		GridDimensions,
+		SurfaceSizeCm,
+		InOutSurfaceCells,
+		&OutRequestedRemovalAmounts);
+}
+
+FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FMD_ScrapeSettings& Settings,
+	const FIntPoint& GridDimensions,
+	const FVector2D& SurfaceSizeCm,
+	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+	TArray<float>* const OutRequestedRemovalAmounts)
 {
 	FMD_ScrapeResult Result;
+	Result.SurfaceFace = Stroke.SurfaceFace;
+	if (OutRequestedRemovalAmounts)
+	{
+		OutRequestedRemovalAmounts->Reset();
+	}
 
 	// 실제 배열을 수정하기 전에 모든 입력을 먼저 검사
 	// 실패 이유는 결과 구조체에 담지 않고 로그로만 남김
@@ -62,6 +165,11 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 		{
 			Cell.RemainingContamination = 0.0f;
 		}
+		if (Cell.TransferredContamination <= Settings.CleanTolerance)
+		{
+			Cell.TransferredContamination = 0.0f;
+			Cell.TransferredPaintPatternDensity = 0.0f;
+		}
 	}
 
 	Result.CleanRatioBefore = CalculateCleanRatio(InOutSurfaceCells);
@@ -80,6 +188,10 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 	}
 
 	Result.bWasStrokeLongEnough = true;
+	if (OutRequestedRemovalAmounts)
+	{
+		OutRequestedRemovalAmounts->SetNumZeroed(InOutSurfaceCells.Num());
+	}
 
 	const FVector2D CellSizeCm(SurfaceSizeCm.X / static_cast<double>(GridDimensions.X),SurfaceSizeCm.Y / static_cast<double>(GridDimensions.Y));
 
@@ -141,10 +253,13 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 	// 적용 전 잔여량을 별도 배열에 보관
 	TArray<float> RemainingBeforeStroke;
 	RemainingBeforeStroke.SetNumUninitialized(InOutSurfaceCells.Num());
+	TArray<float> TransferredBeforeStroke;
+	TransferredBeforeStroke.SetNumUninitialized(InOutSurfaceCells.Num());
 
 	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)
 	{
 		RemainingBeforeStroke[CellIndex] = InOutSurfaceCells[CellIndex].RemainingContamination;
+		TransferredBeforeStroke[CellIndex] = InOutSurfaceCells[CellIndex].TransferredContamination;
 	}
 
 	bool bRemovedAnyContamination = false;
@@ -244,8 +359,12 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 				TouchedCells[CellIndex] = true;
 
 				FMD_ScrapeSurfaceCell& Cell = InOutSurfaceCells[CellIndex];
-				const double RemainingBeforeSample =
+				const double BaseRemainingBeforeSample =
 					static_cast<double>(Cell.RemainingContamination);
+				const double PaintRemainingBeforeSample =
+					static_cast<double>(Cell.TransferredContamination);
+				const double TotalRemainingBeforeSample =
+					BaseRemainingBeforeSample + PaintRemainingBeforeSample;
 
 				// 제거량은 Tick 횟수나 DeltaTime이 아니라 실제 이동 거리 기준
 				// 따라서 30fps와 120fps에서 같은 거리로 움직인 헤라는 거의 같은 결과
@@ -253,26 +372,49 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 					static_cast<double>(ToolSpec.RemovalPerTravelCentimeter)
 					* TravelDistancePerSampleCm
 					* CoverageWeight;
+				if (OutRequestedRemovalAmounts
+					&& OutRequestedRemovalAmounts->IsValidIndex(CellIndex))
+				{
+					(*OutRequestedRemovalAmounts)[CellIndex] +=
+						static_cast<float>(RequestedRemovalAmount);
+				}
 
 				// 이미 깨끗한 셀에 작업량이 가해지면 모든 힘이 맨 벽면으로 전달
-				if (RemainingBeforeSample
+				if (TotalRemainingBeforeSample
 					<= static_cast<double>(Settings.CleanTolerance))
 				{
 					Result.bTouchedBareSurface = true;
 					continue;
 				}
 
-				const double ActualRemovedAmount = FMath::Min(
-					RemainingBeforeSample,
+				const double RemovedTransferredAmount = FMath::Min(
+					PaintRemainingBeforeSample,
 					RequestedRemovalAmount);
+				const double RemainingRemovalBudget = FMath::Max(
+					0.0,
+					RequestedRemovalAmount - RemovedTransferredAmount);
+				const double RemovedBaseAmount = FMath::Min(
+					BaseRemainingBeforeSample,
+					RemainingRemovalBudget);
+				const double ActualRemovedAmount =
+					RemovedTransferredAmount + RemovedBaseAmount;
 
 				Cell.RemainingContamination = static_cast<float>(
-					FMath::Max(0.0, RemainingBeforeSample - ActualRemovedAmount));
+					FMath::Max(0.0, BaseRemainingBeforeSample - RemovedBaseAmount));
+				Cell.TransferredContamination = static_cast<float>(
+					FMath::Max(
+						0.0,
+						PaintRemainingBeforeSample - RemovedTransferredAmount));
 
 				// 허용 오차보다 작은 찌꺼기는 0으로 스냅해 완료 판정과 시각 마스크를 일치
 				if (Cell.RemainingContamination <= Settings.CleanTolerance)
 				{
 					Cell.RemainingContamination = 0.0f;
+				}
+				if (Cell.TransferredContamination <= Settings.CleanTolerance)
+				{
+					Cell.TransferredContamination = 0.0f;
+					Cell.TransferredPaintPatternDensity = 0.0f;
 				}
 
 				if (ActualRemovedAmount > UE_SMALL_NUMBER)
@@ -283,7 +425,7 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 				// 요청 작업량이 실제 남은 양보다 컸다면 오염막을 다 벗긴 뒤에도 힘이 남은 상태
 				// 그 여분의 작업량은 맨 벽면을 긁은 것으로 분류해 위험한 피드백의 근거로 기록
 				if (RequestedRemovalAmount
-					> RemainingBeforeSample
+					> TotalRemainingBeforeSample
 						+ static_cast<double>(Settings.CleanTolerance))
 				{
 					Result.bTouchedBareSurface = true;
@@ -299,9 +441,18 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 			++Result.TouchedCellCount;
 		}
 
-		const float RemovedAmount =
+		const FMD_ScrapeSurfaceCell& CellAfterStroke =
+			InOutSurfaceCells[CellIndex];
+		const float RemovedBaseAmount = FMath::Max(
+			0.0f,
 			RemainingBeforeStroke[CellIndex]
-			- InOutSurfaceCells[CellIndex].RemainingContamination;
+				- CellAfterStroke.RemainingContamination);
+		const float RemovedTransferredAmount = FMath::Max(
+			0.0f,
+			TransferredBeforeStroke[CellIndex]
+				- CellAfterStroke.TransferredContamination);
+		const float RemovedAmount =
+			RemovedBaseAmount + RemovedTransferredAmount;
 
 		// 부동소수점 연산 중 생길 수 있는 무의미한 극소 차이는 변경 내역에서 제외
 		if (RemovedAmount <= UE_SMALL_NUMBER)
@@ -316,11 +467,12 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 			CellIndex / GridDimensions.X);
 		CellChange.RemovedAmount = RemovedAmount;
 		CellChange.RemainingAmountAfter =
-			InOutSurfaceCells[CellIndex].RemainingContamination;
+			CellAfterStroke.RemainingContamination;
 		CellChange.bBecameClean =
-			RemainingBeforeStroke[CellIndex] > Settings.CleanTolerance
-			&& InOutSurfaceCells[CellIndex].RemainingContamination
-				<= Settings.CleanTolerance;
+			(RemainingBeforeStroke[CellIndex] > Settings.CleanTolerance
+				|| TransferredBeforeStroke[CellIndex] > Settings.CleanTolerance)
+			&& CellAfterStroke.RemainingContamination <= Settings.CleanTolerance
+			&& CellAfterStroke.TransferredContamination <= Settings.CleanTolerance;
 
 		Result.RemovedContaminationAmount += RemovedAmount;
 
@@ -361,12 +513,547 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 	return Result;
 }
 
+float FMD_ScrapeEvaluator::ApplyContaminationStampToGrid(
+	const FIntPoint& GridDimensions,
+	const TConstArrayView<float> RequestedRemovalAmounts,
+	const float StampRatio,
+	const TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+	TArray<FMD_ScrapeCellChange>& OutCellChanges)
+{
+	OutCellChanges.Reset();
+
+	const int64 ExpectedCellCount =
+		static_cast<int64>(GridDimensions.X)
+		* static_cast<int64>(GridDimensions.Y);
+	if (GridDimensions.X <= 0
+		|| GridDimensions.Y <= 0
+		|| ExpectedCellCount > MAX_int32
+		|| RequestedRemovalAmounts.Num() != ExpectedCellCount
+		|| InOutSurfaceCells.Num() != ExpectedCellCount
+		|| !FMath::IsFinite(StampRatio)
+		|| StampRatio <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	const float SafeStampRatio = FMath::Clamp(StampRatio, 0.0f, 1.0f);
+	float AddedContaminationAmount = 0.0f;
+	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)
+	{
+		const float RequestedRemovalAmount = RequestedRemovalAmounts[CellIndex];
+		if (!FMath::IsFinite(RequestedRemovalAmount)
+			|| RequestedRemovalAmount <= UE_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		FMD_ScrapeSurfaceCell& Cell = InOutSurfaceCells[CellIndex];
+		Cell.Normalize();
+		const float PreviousTransferred = Cell.TransferredContamination;
+		const float TargetTransferred = FMath::Clamp(
+			PreviousTransferred + RequestedRemovalAmount * SafeStampRatio,
+			0.0f,
+			1.0f);
+		if (TargetTransferred <= PreviousTransferred + UE_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		Cell.TransferredContamination = TargetTransferred;
+		Cell.TransferredPaintPatternDensity = 1.0f;
+
+		FMD_ScrapeCellChange& Change = OutCellChanges.AddDefaulted_GetRef();
+		Change.CellIndex = CellIndex;
+		Change.GridCoordinate = FIntPoint(
+			CellIndex % GridDimensions.X,
+			CellIndex / GridDimensions.X);
+		Change.RemovedAmount = 0.0f;
+		Change.RemainingAmountAfter = Cell.RemainingContamination;
+		Change.bBecameClean = false;
+
+		AddedContaminationAmount += TargetTransferred - PreviousTransferred;
+	}
+
+	return AddedContaminationAmount;
+}
+
+bool FMD_ScrapeEvaluator::TryBuildProtectedContaminationPaintStroke(
+	const FMD_ScrapeStroke& Stroke,
+	const FVector2D& PathStartPositionCm,
+	const FVector2D& PathAxis,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FIntPoint& GridDimensions,
+	const FVector2D& SurfaceSizeCm,
+	const float StampDepthCm,
+	FMD_ScrapeStroke& OutPaintStroke)
+{
+	OutPaintStroke = Stroke;
+	const auto IsFiniteVector = [](const FVector2D& Value)
+	{
+		return FMath::IsFinite(Value.X) && FMath::IsFinite(Value.Y);
+	};
+
+	if (!IsFiniteVector(Stroke.StartPositionCm)
+		|| !IsFiniteVector(Stroke.EndPositionCm)
+		|| !IsFiniteVector(PathStartPositionCm)
+		|| !IsFiniteVector(PathAxis)
+		|| !ToolSpec.IsValid()
+		|| GridDimensions.X <= 0
+		|| GridDimensions.Y <= 0
+		|| !IsFiniteVector(SurfaceSizeCm)
+		|| SurfaceSizeCm.X <= UE_SMALL_NUMBER
+		|| SurfaceSizeCm.Y <= UE_SMALL_NUMBER
+		|| !FMath::IsFinite(StampDepthCm)
+		|| StampDepthCm <= UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const FVector2D StrokeDelta =
+		Stroke.EndPositionCm - Stroke.StartPositionCm;
+	FVector2D SafePathAxis = PathAxis.GetSafeNormal();
+	if (SafePathAxis.IsNearlyZero())
+	{
+		SafePathAxis = StrokeDelta.GetSafeNormal();
+	}
+	if (SafePathAxis.IsNearlyZero())
+	{
+		return false;
+	}
+
+	// LockedStrokeAxis는 축만 나타내므로, 시작점에서 실제 진행하는 부호를 붙인다.
+	if (FVector2D::DotProduct(
+			Stroke.EndPositionCm - PathStartPositionCm,
+			SafePathAxis) < 0.0)
+	{
+		SafePathAxis *= -1.0;
+	}
+
+	const double StartTravelCm = FVector2D::DotProduct(
+		Stroke.StartPositionCm - PathStartPositionCm,
+		SafePathAxis);
+	const double EndTravelCm = FVector2D::DotProduct(
+		Stroke.EndPositionCm - PathStartPositionCm,
+		SafePathAxis);
+	if (!FMath::IsFinite(StartTravelCm)
+		|| !FMath::IsFinite(EndTravelCm)
+		|| EndTravelCm <= StartTravelCm + UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const FVector2D CellSizeCm(
+		SurfaceSizeCm.X / static_cast<double>(GridDimensions.X),
+		SurfaceSizeCm.Y / static_cast<double>(GridDimensions.Y));
+	const double CellHalfDiagonalCm = 0.5 * FMath::Sqrt(
+		FMath::Square(CellSizeCm.X) + FMath::Square(CellSizeCm.Y));
+	// 다음 segment가 수직 drift로 기울어도 안전하도록 제거 사각형의
+	// 특정 축 반경이 아닌 회전 전체를 감싸는 반대각선 반경을 사용한다.
+	const double RemovalBoundingRadiusCm = 0.5 * FMath::Sqrt(
+		FMath::Square(static_cast<double>(ToolSpec.BladeWidthCm))
+		+ FMath::Square(static_cast<double>(ToolSpec.BladeDepthCm)));
+	const double PaintProtectionDistanceCm =
+		RemovalBoundingRadiusCm
+		+ static_cast<double>(StampDepthCm) * 0.5
+		+ CellHalfDiagonalCm * 2.0;
+	const double PaintStartTravelCm = FMath::Max(
+		0.0,
+		StartTravelCm - PaintProtectionDistanceCm);
+	const double PaintEndTravelCm =
+		EndTravelCm - PaintProtectionDistanceCm;
+	if (PaintEndTravelCm
+		<= PaintStartTravelCm + UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	OutPaintStroke.StartPositionCm =
+		PathStartPositionCm + SafePathAxis * PaintStartTravelCm;
+	OutPaintStroke.EndPositionCm =
+		PathStartPositionCm + SafePathAxis * PaintEndTravelCm;
+	return IsFiniteVector(OutPaintStroke.StartPositionCm)
+		&& IsFiniteVector(OutPaintStroke.EndPositionCm);
+}
+
+bool FMD_ScrapeEvaluator::TryBuildPendingContaminationPaintStroke(
+	const FMD_ScrapeStroke& FullPathStroke,
+	const FVector2D& PathAxis,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FIntPoint& GridDimensions,
+	const FVector2D& SurfaceSizeCm,
+	const float StampDepthCm,
+	FMD_ScrapeStroke& OutPaintStroke)
+{
+	OutPaintStroke = FullPathStroke;
+	const auto IsFiniteVector = [](const FVector2D& Value)
+	{
+		return FMath::IsFinite(Value.X) && FMath::IsFinite(Value.Y);
+	};
+	if (!IsFiniteVector(FullPathStroke.StartPositionCm)
+		|| !IsFiniteVector(FullPathStroke.EndPositionCm)
+		|| !IsFiniteVector(PathAxis)
+		|| !ToolSpec.IsValid()
+		|| GridDimensions.X <= 0
+		|| GridDimensions.Y <= 0
+		|| !IsFiniteVector(SurfaceSizeCm)
+		|| SurfaceSizeCm.X <= UE_SMALL_NUMBER
+		|| SurfaceSizeCm.Y <= UE_SMALL_NUMBER
+		|| !FMath::IsFinite(StampDepthCm)
+		|| StampDepthCm <= UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const FVector2D FullPathDelta =
+		FullPathStroke.EndPositionCm - FullPathStroke.StartPositionCm;
+	FVector2D SafePathAxis = PathAxis.GetSafeNormal();
+	if (SafePathAxis.IsNearlyZero())
+	{
+		SafePathAxis = FullPathDelta.GetSafeNormal();
+	}
+	if (SafePathAxis.IsNearlyZero())
+	{
+		return false;
+	}
+	if (FVector2D::DotProduct(FullPathDelta, SafePathAxis) < 0.0)
+	{
+		SafePathAxis *= -1.0;
+	}
+
+	const double EndTravelCm = FVector2D::DotProduct(
+		FullPathDelta,
+		SafePathAxis);
+	if (!FMath::IsFinite(EndTravelCm)
+		|| EndTravelCm <= UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	FMD_ScrapeStroke ProjectedFullPathStroke = FullPathStroke;
+	ProjectedFullPathStroke.EndPositionCm =
+		FullPathStroke.StartPositionCm + SafePathAxis * EndTravelCm;
+	FMD_ScrapeStroke ProtectedPaintStroke;
+	if (TryBuildProtectedContaminationPaintStroke(
+			ProjectedFullPathStroke,
+			FullPathStroke.StartPositionCm,
+			SafePathAxis,
+			ToolSpec,
+			GridDimensions,
+			SurfaceSizeCm,
+			StampDepthCm,
+			ProtectedPaintStroke))
+	{
+		OutPaintStroke.StartPositionCm =
+			ProtectedPaintStroke.EndPositionCm;
+	}
+	else
+	{
+		OutPaintStroke.StartPositionCm =
+			FullPathStroke.StartPositionCm;
+	}
+	OutPaintStroke.EndPositionCm =
+		ProjectedFullPathStroke.EndPositionCm;
+	return FVector2D::Distance(
+			OutPaintStroke.StartPositionCm,
+			OutPaintStroke.EndPositionCm) > UE_SMALL_NUMBER;
+}
+
+float FMD_ScrapeEvaluator::ApplyContaminationPaintStrokeToGrid(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FIntPoint& GridDimensions,
+	const FVector2D& SurfaceSizeCm,
+	const float StampAmount,
+	const float StampChance,
+	const float StampDepthCm,
+	const float StampSpacingCm,
+	const int32 PatternSeed,
+	const TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+	TArray<FMD_ScrapeCellChange>& OutCellChanges)
+{
+	OutCellChanges.Reset();
+
+	const int64 ExpectedCellCount =
+		static_cast<int64>(GridDimensions.X)
+		* static_cast<int64>(GridDimensions.Y);
+	const FVector2D StrokeDelta =
+		Stroke.EndPositionCm - Stroke.StartPositionCm;
+	const double StrokeDistanceCm = StrokeDelta.Size();
+	if (GridDimensions.X <= 0
+		|| GridDimensions.Y <= 0
+		|| ExpectedCellCount > MAX_int32
+		|| InOutSurfaceCells.Num() != ExpectedCellCount
+		|| !FMath::IsFinite(SurfaceSizeCm.X)
+		|| !FMath::IsFinite(SurfaceSizeCm.Y)
+		|| SurfaceSizeCm.X <= UE_SMALL_NUMBER
+		|| SurfaceSizeCm.Y <= UE_SMALL_NUMBER
+		|| !ToolSpec.IsValid()
+		|| !FMath::IsFinite(StampAmount)
+		|| StampAmount <= 0.0f
+		|| !FMath::IsFinite(StampChance)
+		|| StampChance <= 0.0f
+		|| !FMath::IsFinite(StampDepthCm)
+		|| StampDepthCm <= UE_SMALL_NUMBER
+		|| !FMath::IsFinite(StampSpacingCm)
+		|| StampSpacingCm <= UE_SMALL_NUMBER
+		|| !FMath::IsFinite(StrokeDistanceCm)
+		|| StrokeDistanceCm <= UE_SMALL_NUMBER)
+	{
+		return 0.0f;
+	}
+
+	const float SafeStampAmount = FMath::Clamp(StampAmount, 0.0f, 1.0f);
+	const float SafeStampChance = FMath::Clamp(StampChance, 0.0f, 1.0f);
+	const double SafeStampSpacingCm = static_cast<double>(StampSpacingCm);
+	const FVector2D BladeDepthAxis = StrokeDelta / StrokeDistanceCm;
+	const FVector2D BladeWidthAxis(
+		-BladeDepthAxis.Y,
+		BladeDepthAxis.X);
+	FVector2D CanonicalBladeWidthAxis = BladeWidthAxis;
+	if (CanonicalBladeWidthAxis.X < -UE_SMALL_NUMBER
+		|| (FMath::Abs(CanonicalBladeWidthAxis.X) <= UE_SMALL_NUMBER
+			&& CanonicalBladeWidthAxis.Y < 0.0))
+	{
+		CanonicalBladeWidthAxis *= -1.0;
+	}
+	const double BladeHalfWidthCm =
+		static_cast<double>(ToolSpec.BladeWidthCm) * 0.5;
+	const double BladeHalfDepthCm =
+		static_cast<double>(StampDepthCm) * 0.5;
+	const FVector2D CellSizeCm(
+		SurfaceSizeCm.X / static_cast<double>(GridDimensions.X),
+		SurfaceSizeCm.Y / static_cast<double>(GridDimensions.Y));
+	const FVector2D SurfaceMinimumCm = SurfaceSizeCm * -0.5;
+	const double CellHalfDiagonalCm = 0.5 * FMath::Sqrt(
+		FMath::Square(CellSizeCm.X) + FMath::Square(CellSizeCm.Y));
+
+	FVector2D MaximumInfluenceExtentCm;
+	if (ToolSpec.BrushShape == EMD_ScrapeBrushShape::Circle)
+	{
+		const double InfluenceRadiusCm =
+			BladeHalfWidthCm + CellHalfDiagonalCm;
+		MaximumInfluenceExtentCm = FVector2D(
+			InfluenceRadiusCm,
+			InfluenceRadiusCm);
+	}
+	else
+	{
+		MaximumInfluenceExtentCm = FVector2D(
+			FMath::Abs(BladeWidthAxis.X) * BladeHalfWidthCm
+				+ FMath::Abs(BladeDepthAxis.X) * BladeHalfDepthCm
+				+ CellHalfDiagonalCm,
+			FMath::Abs(BladeWidthAxis.Y) * BladeHalfWidthCm
+				+ FMath::Abs(BladeDepthAxis.Y) * BladeHalfDepthCm
+				+ CellHalfDiagonalCm);
+	}
+
+	TArray<float> TransferredBeforePaint;
+	TransferredBeforePaint.SetNumUninitialized(InOutSurfaceCells.Num());
+	TArray<float> PatternDensityBeforePaint;
+	PatternDensityBeforePaint.SetNumUninitialized(InOutSurfaceCells.Num());
+	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)
+	{
+		FMD_ScrapeSurfaceCell& Cell = InOutSurfaceCells[CellIndex];
+		Cell.Normalize();
+		TransferredBeforePaint[CellIndex] = Cell.TransferredContamination;
+		PatternDensityBeforePaint[CellIndex] =
+			Cell.TransferredPaintPatternDensity;
+	}
+
+	const double StartCoordinate = FVector2D::DotProduct(
+		Stroke.StartPositionCm,
+		BladeDepthAxis);
+	const double EndCoordinate = FVector2D::DotProduct(
+		Stroke.EndPositionCm,
+		BladeDepthAxis);
+	const double WidthCoordinate = FVector2D::DotProduct(
+		Stroke.StartPositionCm,
+		BladeWidthAxis);
+	const int32 FirstCandidateBin =
+		FMath::FloorToInt(StartCoordinate / SafeStampSpacingCm) - 1;
+	const int32 LastCandidateBin =
+		FMath::FloorToInt(EndCoordinate / SafeStampSpacingCm) + 1;
+	float AddedContaminationAmount = 0.0f;
+
+	for (int32 DabBinIndex = FirstCandidateBin;
+		DabBinIndex <= LastCandidateBin;
+		++DabBinIndex)
+	{
+		const double SelectionSample = ContaminationPaintHashToUnitDouble(
+			BuildContaminationPaintHash(
+				PatternSeed,
+				DabBinIndex,
+				0U));
+		const bool bShouldPaintDab =
+			SelectionSample < static_cast<double>(SafeStampChance);
+		const double JitterSample = ContaminationPaintHashToUnitDouble(
+			BuildContaminationPaintHash(
+				PatternSeed,
+				DabBinIndex,
+				1U));
+		const double MaximumPositionJitterCm = FMath::Max(
+			0.0,
+			FMath::Min(
+				SafeStampSpacingCm * 0.3,
+				(SafeStampSpacingCm - BladeHalfDepthCm * 2.0) * 0.5));
+		const double PositionJitterCm =
+			(JitterSample * 2.0 - 1.0) * MaximumPositionJitterCm;
+		const double DabCoordinate =
+			(static_cast<double>(DabBinIndex) + 0.5)
+				* SafeStampSpacingCm
+			+ PositionJitterCm;
+
+		// 시작점은 제외하고 끝점은 포함해 연속 프레임 경계에서 같은 도장을 두 번 찍지 않는다.
+		if (!bShouldPaintDab
+			|| DabCoordinate <= StartCoordinate + UE_KINDA_SMALL_NUMBER
+			|| DabCoordinate > EndCoordinate + UE_KINDA_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const FVector2D DabPositionCm =
+			BladeDepthAxis * DabCoordinate
+			+ BladeWidthAxis * WidthCoordinate;
+		const int32 UnclampedMinimumX = FMath::FloorToInt(
+			(DabPositionCm.X - MaximumInfluenceExtentCm.X - SurfaceMinimumCm.X)
+			/ CellSizeCm.X);
+		const int32 UnclampedMaximumX = FMath::FloorToInt(
+			(DabPositionCm.X + MaximumInfluenceExtentCm.X - SurfaceMinimumCm.X)
+			/ CellSizeCm.X);
+		const int32 UnclampedMinimumY = FMath::FloorToInt(
+			(DabPositionCm.Y - MaximumInfluenceExtentCm.Y - SurfaceMinimumCm.Y)
+			/ CellSizeCm.Y);
+		const int32 UnclampedMaximumY = FMath::FloorToInt(
+			(DabPositionCm.Y + MaximumInfluenceExtentCm.Y - SurfaceMinimumCm.Y)
+			/ CellSizeCm.Y);
+		if (UnclampedMaximumX < 0
+			|| UnclampedMinimumX >= GridDimensions.X
+			|| UnclampedMaximumY < 0
+			|| UnclampedMinimumY >= GridDimensions.Y)
+		{
+			continue;
+		}
+
+		const int32 MinimumX = FMath::Clamp(
+			UnclampedMinimumX,
+			0,
+			GridDimensions.X - 1);
+		const int32 MaximumX = FMath::Clamp(
+			UnclampedMaximumX,
+			0,
+			GridDimensions.X - 1);
+		const int32 MinimumY = FMath::Clamp(
+			UnclampedMinimumY,
+			0,
+			GridDimensions.Y - 1);
+		const int32 MaximumY = FMath::Clamp(
+			UnclampedMaximumY,
+			0,
+			GridDimensions.Y - 1);
+
+		for (int32 CellY = MinimumY; CellY <= MaximumY; ++CellY)
+		{
+			for (int32 CellX = MinimumX; CellX <= MaximumX; ++CellX)
+			{
+				const int32 CellIndex = CellX + CellY * GridDimensions.X;
+				const FVector2D CellCenterCm(
+					SurfaceMinimumCm.X
+						+ (static_cast<double>(CellX) + 0.5) * CellSizeCm.X,
+					SurfaceMinimumCm.Y
+						+ (static_cast<double>(CellY) + 0.5) * CellSizeCm.Y);
+				const FVector2D BrushToCellCenterCm =
+					CellCenterCm - DabPositionCm;
+
+				double CoverageWeight = 0.0;
+				if (ToolSpec.BrushShape == EMD_ScrapeBrushShape::Circle)
+				{
+					CoverageWeight = CalculateCircleCellCoverageWeight(
+						BrushToCellCenterCm.Size(),
+						BladeHalfWidthCm,
+						CellHalfDiagonalCm);
+				}
+				else
+				{
+					CoverageWeight = CalculateRectangleCellCoverageWeight(
+						BrushToCellCenterCm,
+						BladeWidthAxis,
+						BladeDepthAxis,
+						BladeHalfWidthCm,
+						BladeHalfDepthCm,
+						CellHalfDiagonalCm);
+				}
+				if (CoverageWeight <= UE_SMALL_NUMBER)
+				{
+					continue;
+				}
+
+				FMD_ScrapeSurfaceCell& Cell = InOutSurfaceCells[CellIndex];
+				const float PreviousTransferred =
+					Cell.TransferredContamination;
+				const float TargetTransferred = FMath::Clamp(
+					PreviousTransferred
+						+ SafeStampAmount * static_cast<float>(CoverageWeight),
+					0.0f,
+					1.0f);
+				const float PaintPatternDensity =
+					ToolSpec.BrushShape == EMD_ScrapeBrushShape::Rectangle
+					? static_cast<float>(CalculateTransferredPaintPatternDensity(
+						BrushToCellCenterCm,
+						CanonicalBladeWidthAxis,
+						BladeHalfWidthCm))
+					: 1.0f;
+				const float TargetPatternDensity = FMath::Max(
+					Cell.TransferredPaintPatternDensity,
+					PaintPatternDensity);
+				if (TargetTransferred <= PreviousTransferred + UE_SMALL_NUMBER
+					&& TargetPatternDensity
+						<= Cell.TransferredPaintPatternDensity + UE_SMALL_NUMBER)
+				{
+					continue;
+				}
+
+				Cell.TransferredContamination = TargetTransferred;
+				Cell.TransferredPaintPatternDensity = TargetPatternDensity;
+				AddedContaminationAmount +=
+					TargetTransferred - PreviousTransferred;
+			}
+		}
+	}
+
+	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)
+	{
+		const FMD_ScrapeSurfaceCell& Cell = InOutSurfaceCells[CellIndex];
+		if (FMath::IsNearlyEqual(
+				Cell.TransferredContamination,
+				TransferredBeforePaint[CellIndex],
+				UE_SMALL_NUMBER)
+			&& FMath::IsNearlyEqual(
+				Cell.TransferredPaintPatternDensity,
+				PatternDensityBeforePaint[CellIndex],
+				UE_SMALL_NUMBER))
+		{
+			continue;
+		}
+
+		FMD_ScrapeCellChange& Change = OutCellChanges.AddDefaulted_GetRef();
+		Change.CellIndex = CellIndex;
+		Change.GridCoordinate = FIntPoint(
+			CellIndex % GridDimensions.X,
+			CellIndex / GridDimensions.X);
+		Change.RemovedAmount = 0.0f;
+		Change.RemainingAmountAfter = Cell.RemainingContamination;
+		Change.bBecameClean = false;
+	}
+
+	return AddedContaminationAmount;
+}
+
 bool FMD_ScrapeEvaluator::IsEvaluationInputValid(
 	const FMD_ScrapeStroke& Stroke,
 	const FMD_ScrapeSettings& Settings,
 	const FIntPoint& GridDimensions,
 	const FVector2D& SurfaceSizeCm,
-	const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
+	const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
 	FString* OutErrorMessage)
 {
 	return IsEvaluationInputValid(
@@ -385,7 +1072,7 @@ bool FMD_ScrapeEvaluator::IsEvaluationInputValid(
 	const FMD_ScrapeSettings& Settings,
 	const FIntPoint& GridDimensions,
 	const FVector2D& SurfaceSizeCm,
-	const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
+	const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
 	FString* OutErrorMessage)
 {
 	// 성공할 경우 이전 호출에서 남은 오류 문자열이 사용되지 않도록 먼저 초기화
@@ -404,6 +1091,13 @@ bool FMD_ScrapeEvaluator::IsEvaluationInputValid(
 
 			return false;
 		};
+
+	if (Stroke.SurfaceFace != EMD_ScrapeSurfaceFace::Front
+		&& Stroke.SurfaceFace != EMD_ScrapeSurfaceFace::Back)
+	{
+		return FailValidation(
+			TEXT("Stroke.SurfaceFace must be Front or Back."));
+	}
 
 	if (GridDimensions.X <= 0 || GridDimensions.Y <= 0)
 	{
@@ -503,7 +1197,7 @@ bool FMD_ScrapeEvaluator::IsEvaluationInputValid(
 }
 
 float FMD_ScrapeEvaluator::CalculateCleanRatio(
-	const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells)
+	const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells)
 {
 	double TotalInitialContamination = 0.0;
 	double TotalRemainingContamination = 0.0;
@@ -544,7 +1238,7 @@ float FMD_ScrapeEvaluator::CalculateCleanRatio(
 }
 
 bool FMD_ScrapeEvaluator::IsSurfaceFullyClean(
-	const TArray<FMD_ScrapeSurfaceCell>& SurfaceCells,
+	const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
 	const float CleanTolerance)
 {
 	const float SafeTolerance = FMath::IsFinite(CleanTolerance)
@@ -553,6 +1247,15 @@ bool FMD_ScrapeEvaluator::IsSurfaceFullyClean(
 
 	for (const FMD_ScrapeSurfaceCell& Cell : SurfaceCells)
 	{
+		const float SafeTransferredContamination =
+			FMath::IsFinite(Cell.TransferredContamination)
+			? FMath::Clamp(Cell.TransferredContamination, 0.0f, 1.0f)
+			: 0.0f;
+		if (SafeTransferredContamination > SafeTolerance)
+		{
+			return false;
+		}
+
 		const float SafeInitialContamination =
 			FMath::IsFinite(Cell.InitialContamination)
 			? FMath::Clamp(Cell.InitialContamination, 0.0f, 1.0f)

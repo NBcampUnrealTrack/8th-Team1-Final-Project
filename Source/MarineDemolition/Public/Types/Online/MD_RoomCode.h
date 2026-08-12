@@ -22,7 +22,7 @@ public:
 
 private:
 	// 방 코드의 길이
-	static constexpr uint8 CodeLengths[] = { 4, 4, 4 };
+	static constexpr uint8 CodeLengths[] = { 2, 2, 2 };
 
 	// 방 코드를 분할하여 저장하는 변수
 	TArray<FString> RoomCodes;

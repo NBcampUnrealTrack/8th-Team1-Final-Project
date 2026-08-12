@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/MD_Character.h"
@@ -7,35 +7,37 @@
 #include "Component/Character/MD_CharacterMovementComponent.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Interaction/MD_InteractionComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
+#include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputMappingContext.h"
-#include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Components/CapsuleComponent.h"
+#include "Components/BoxComponent.h"
 #include "Camera/CameraComponent.h"
-#include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerStart.h"
 #include "GameplayTags/MD_GameplayTags.h"
-#include "GameplayTagAssetInterface.h"
-#include "Component/Equipment/MD_HotbarComponent.h"
-#include "Gameplay/Interaction/MD_Interactable.h"
+#include "World/Traversal/MD_Ladder.h"
+#include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
 #include "GameplayTagContainer.h"
+#include "Kismet/GameplayStatics.h"
 
 // Sets default values
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UMD_CharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
- 	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = false;
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -44,6 +46,9 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	GetCharacterMovement()->bUseControllerDesiredRotation = false;
 	GetCharacterMovement()->bOrientRotationToMovement = false;
 	GetCharacterMovement()->RotationRate = FRotator(0.0f, 540.0f, 0.0f);
+
+	// 사다리 감지 영역과 캐릭터 캡슐 사이의 오버랩 이벤트 생성 활성화
+	GetCapsuleComponent()->SetGenerateOverlapEvents(true);
 
 	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
 	Camera->SetupAttachment(GetCapsuleComponent());
@@ -63,32 +68,31 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 
 	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
 
-	FirstPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("FirstPersonToolMesh"));
-	FirstPersonToolMesh->SetupAttachment(FirstPersonMesh, ToolAttachSocketName);
-	FirstPersonToolMesh->SetOnlyOwnerSee(true);
-	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	FirstPersonToolMesh->CastShadow = false;
-
 	ThirdPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ThirdPersonToolMesh"));
 	ThirdPersonToolMesh->SetupAttachment(GetMesh(), ToolAttachSocketName);
 	ThirdPersonToolMesh->SetOwnerNoSee(true);
 	ThirdPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+
+	FirstPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(
+		TEXT("FirstPersonToolMesh"));
+	FirstPersonToolMesh->SetupAttachment(FirstPersonMesh, ToolAttachSocketName);
+	FirstPersonToolMesh->SetOnlyOwnerSee(true);
+	FirstPersonToolMesh->SetOwnerNoSee(false);
+	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonToolMesh->SetCanEverAffectNavigation(false);
+
 	HoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HoldPoint"));
 	HoldPoint->SetupAttachment(Camera);
 	HoldPoint->SetRelativeLocation(FVector(150.f, 0.f, 0.f));
 
 	PhysicsHandle = CreateDefaultSubobject<UPhysicsHandleComponent>(TEXT("PhysicsHandle"));
 
+	InteractionComponent = CreateDefaultSubobject<UMD_InteractionComponent>(TEXT("InteractionComponent"));
+	InteractionComponent->SetInteractionDependencies(Camera, HoldPoint, PhysicsHandle);
+
 	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
-}
 
-void AMD_Character::Tick(float DeltaSeconds)
-{
-	Super::Tick(DeltaSeconds);
-
-	UpdateInteractionFocus();
-	UpdateHeldTarget();
-	UpdateHotbarDebug();
+	OxygenComponent = CreateDefaultSubobject<UMD_OxygenComponent>(TEXT("OxygenComponent"));
 }
 
 void AMD_Character::ForceEnterWalkState()
@@ -113,7 +117,27 @@ UAbilitySystemComponent* AMD_Character::GetAbilitySystemComponent() const
 void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
-	CaptureDefaultHoldProfile();
+
+	// 사다리 진입과 이탈을 캐릭터 캡슐 기준으로 감지하기 위한 델리게이트 연결
+	UCapsuleComponent* CharacterCapsule = GetCapsuleComponent();
+	if (IsValid(CharacterCapsule) == true)
+	{
+		CharacterCapsule->OnComponentBeginOverlap.AddUniqueDynamic(this, &AMD_Character::HandleCollisionBeginOverlap);
+		CharacterCapsule->OnComponentEndOverlap.AddUniqueDynamic(this, &AMD_Character::HandleCollisionEndOverlap);
+	}
+
+	if (IsValid(ScrapeToolComponent))
+	{
+		ScrapeToolComponent->OnScrapeLoadChanged.AddUniqueDynamic(
+			this,
+			&AMD_Character::HandleScrapeLoadChanged);
+	}
+
+	// 데미지 브리지: 서버에서 ApplyDamage(오염수 DoT·붕괴 등)를 Health 감소로 연결
+	if (HasAuthority())
+	{
+		OnTakeAnyDamage.AddDynamic(this, &AMD_Character::HandleTakeAnyDamage);
+	}
 
 	if (!IsValid(PlayerMappingContext)) return;
 
@@ -141,8 +165,10 @@ void AMD_Character::BeginPlay()
 
 void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	SetCurrentTarget(nullptr);
-	ReleaseTarget();
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->CancelInteraction();
+	}
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -151,7 +177,9 @@ void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 
 {
 	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
 
-	if (UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement()))
+	// 커스텀 사다리 모드 확인과 기존 수영 진입 의사 해제를 함께 처리하기 위한 이동 컴포넌트 참조
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
+	if (IsValid(MDMovement) == true)
 	{
 		if (MDMovement->MovementMode == MOVE_Walking)
 		{
@@ -159,7 +187,11 @@ void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 
 		}
 	}
 
-	const EMDMovementState NewState = GetCharacterMovement()->IsSwimming() ? EMDMovementState::Swimming : EMDMovementState::Walking;
+	EMDMovementState NewState = GetCharacterMovement()->IsSwimming() ? EMDMovementState::Swimming : EMDMovementState::Walking;
+	if (IsValid(MDMovement) == true && MDMovement->IsClimbing() == true)
+	{
+		NewState = EMDMovementState::Climbing;
+	}
 
 	if (NewState == CurrentMovementState)
 	{
@@ -180,6 +212,16 @@ void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 
 		{
 			ASC->RemoveLooseGameplayTag(MDGameplayTags::State_Swimming);
 		}
+
+		// 사다리 타기 상태 태그 추가 또는 제거
+		if (NewState == EMDMovementState::Climbing)
+		{
+			ASC->AddLooseGameplayTag(MDGameplayTags::State_Climbing);
+		}
+		else
+		{
+			ASC->RemoveLooseGameplayTag(MDGameplayTags::State_Climbing);
+		}
 	}
 }
 
@@ -189,6 +231,16 @@ void AMD_Character::PossessedBy(AController* NewController)
 
 	InitializeAbilitySystem();
 	GrantDefaultAbilities();
+}
+
+void AMD_Character::UnPossessed()
+{
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->CancelInteraction();
+	}
+
+	Super::UnPossessed();
 }
 
 void AMD_Character::OnRep_PlayerState()
@@ -220,6 +272,17 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		EIC->BindAction(InputConfig->SwapEquipmentAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleSwapEquipmentInput);
 		//EIC->BindAction(InputConfig->WallCutAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallCutInput);
 		//EIC->BindAction(InputConfig->WallScanAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallScanInput);
+	
+		for (int32 SlotIndex = 0; SlotIndex < InputConfig->HotbarSlotActions.Num(); ++SlotIndex)
+		{
+			UInputAction* SlotAction = InputConfig->HotbarSlotActions[SlotIndex];
+
+			if (!IsValid(SlotAction))
+			{
+				continue;
+			}
+			EIC->BindAction(SlotAction,ETriggerEvent::Started,this,&AMD_Character::HandleSelectHotbarSlotInput,SlotIndex);
+		}
 	}
 
 }
@@ -232,6 +295,19 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 	}
 
 	const FVector2D MoveInput = Value.Get<FVector2D>();
+
+	// 사다리 타기 상태 확인
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
+	if (IsValid(MDMovement) == true && MDMovement->IsClimbing() == true)
+	{
+		// 사용중인 사다리가 유효하고, 종료 지점으로 이동중이 아닌 경우 입력값 적용
+		AMD_Ladder* CurrentLadder = MDMovement->GetCurrentLadder();
+		if (IsValid(CurrentLadder) == true && MDMovement->IsTopDismounting() == false)
+		{
+			AddMovementInput(CurrentLadder->GetClimbUpVector(), MoveInput.X);
+		}
+		return;
+	}
 
 	const FRotator ControlRotation = Controller->GetControlRotation();
 	const FRotator MovementRotation = (CurrentMovementState == EMDMovementState::Swimming) ? ControlRotation : FRotator(0.f, ControlRotation.Yaw, 0.f);
@@ -258,230 +334,9 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 {
-	AActor* Target = CurrentTarget.Get();
-
-	// 픽업 태그가 없는 대상(이동 콘솔 등 로컬 UI 상호작용)은 서버를 거치지 않고 로컬에서 실행
-	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
+	if (IsValid(InteractionComponent))
 	{
-		const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(Target);
-		const bool bPickupTarget = TagAsset
-			&& (TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Inventory)
-				|| TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics));
-
-		if (!bPickupTarget)
-		{
-			IMD_Interactable::Execute_Interact(Target, this);
-			return;
-		}
-	}
-
-	ServerInteract(Target);
-}
-
-void AMD_Character::ServerInteract_Implementation(AActor* RequestedActor)
-{
-	if (IsHolding())
-	{
-		ReleaseTarget();
-		return;
-	}
-
-	if (!IsValid(RequestedActor)
-		|| !RequestedActor->Implements<UMD_Interactable>()
-		|| TraceInteractionTarget() != RequestedActor) return;
-
-	const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(RequestedActor);
-	if (TagAsset
-		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Inventory))
-	{
-		TryStoreTarget(RequestedActor);
-		return;
-	}
-
-	if (TagAsset
-		&& TagAsset->HasMatchingGameplayTag(MDGameplayTags::Interaction_Pickup_Physics))
-	{
-		TryHoldTarget(RequestedActor);
-		return;
-	}
-
-	IMD_Interactable::Execute_Interact(RequestedActor, this);
-}
-
-bool AMD_Character::TryStoreTarget(AActor* Target)
-{
-	if (!IsValid(Target)) return false;
-
-	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
-	if (!IsValid(MDPlayerState)) return false;
-
-	UMD_HotbarComponent* Hotbar = MDPlayerState->GetHotbarComponent();
-	if (!IsValid(Hotbar)) return false;
-
-	const TSubclassOf<AActor> ItemClass = Target->GetClass();
-	int32 SlotIndex = INDEX_NONE;
-	if (!Hotbar->TryAddItem(ItemClass, SlotIndex)) return false;
-
-	if (!Target->Destroy())
-	{
-		Hotbar->TryRemoveItemAt(SlotIndex);
-		return false;
-	}
-
-	return true;
-}
-
-bool AMD_Character::TryHoldTarget(AActor* Target)
-{
-	if (!HasAuthority() || !IsValid(Target) || !IsValid(PhysicsHandle)) return false;
-
-	UPrimitiveComponent* Component = nullptr;
-	FVector GrabLocation = FVector::ZeroVector;
-	FVector HoldOffset = FVector::ZeroVector;
-	FMD_HoldProfile HoldProfile = DefaultHoldProfile;
-
-	if (Target->Implements<UMD_Grabbable>())
-	{
-		Component = IMD_Grabbable::Execute_GetGrabComponent(Target);
-		const USceneComponent* GrabPoint = IMD_Grabbable::Execute_GetGrabPoint(Target);
-
-		if (!IsValid(Component) || !Component->IsSimulatingPhysics() || !IsValid(GrabPoint)) return false;
-
-		GrabLocation = GrabPoint->GetComponentLocation();
-		HoldOffset = IMD_Grabbable::Execute_GetHoldOffset(Target);
-		HoldProfile = IMD_Grabbable::Execute_GetHoldProfile(Target);
-	}
-	else
-	{
-		Component = Cast<UPrimitiveComponent>(Target->GetRootComponent());
-		if (!IsValid(Component) || !Component->IsSimulatingPhysics()) return false;
-
-		GrabLocation = Component->GetCenterOfMass();
-	}
-
-	ApplyHoldProfile(HoldProfile);
-
-	if (HoldProfile.bConstrainRotation)
-	{
-		PhysicsHandle->GrabComponentAtLocationWithRotation(
-			Component,
-			NAME_None,
-			GrabLocation,
-			Component->GetComponentRotation());
-	}
-	else
-	{
-		PhysicsHandle->GrabComponentAtLocation(
-			Component,
-			NAME_None,
-			GrabLocation);
-	}
-
-	if (PhysicsHandle->GetGrabbedComponent() != Component)
-	{
-		ApplyHoldProfile(DefaultHoldProfile);
-		ActiveHoldProfile = DefaultHoldProfile;
-		return false;
-	}
-
-	HeldTargetOffset = HoldOffset;
-	ActiveHoldProfile = HoldProfile;
-	UpdateHeldTarget();
-	return true;
-}
-
-bool AMD_Character::IsHolding() const
-{
-	return IsValid(PhysicsHandle) && IsValid(PhysicsHandle->GetGrabbedComponent());
-}
-
-void AMD_Character::ReleaseTarget()
-{
-	HeldTargetOffset = FVector::ZeroVector;
-
-	if (!IsValid(PhysicsHandle)) return;
-
-	if (PhysicsHandle->GetGrabbedComponent())
-	{
-		PhysicsHandle->ReleaseComponent();
-	}
-
-	ApplyHoldProfile(DefaultHoldProfile);
-	ActiveHoldProfile = DefaultHoldProfile;
-}
-
-void AMD_Character::UpdateHeldTarget()
-{
-	if (!HasAuthority() || !IsHolding() || !IsValid(HoldPoint)) return;
-
-	const FVector TargetLocation = HoldPoint->GetComponentTransform().TransformPositionNoScale(HeldTargetOffset);
-
-	if (ActiveHoldProfile.bConstrainRotation)
-	{
-		PhysicsHandle->SetTargetLocationAndRotation(
-			TargetLocation,
-			HoldPoint->GetComponentRotation());
-	}
-	else
-	{
-		PhysicsHandle->SetTargetLocation(TargetLocation);
-	}
-}
-
-void AMD_Character::CaptureDefaultHoldProfile()
-{
-	if (!IsValid(PhysicsHandle)) return;
-
-	DefaultHoldProfile.bConstrainRotation = true;
-	DefaultHoldProfile.bSoftLinear = PhysicsHandle->bSoftLinearConstraint;
-	DefaultHoldProfile.bSoftAngular = PhysicsHandle->bSoftAngularConstraint;
-	DefaultHoldProfile.bInterpolate = PhysicsHandle->bInterpolateTarget;
-	DefaultHoldProfile.LinearStiffness = PhysicsHandle->LinearStiffness;
-	DefaultHoldProfile.LinearDamping = PhysicsHandle->LinearDamping;
-	DefaultHoldProfile.AngularStiffness = PhysicsHandle->AngularStiffness;
-	DefaultHoldProfile.AngularDamping = PhysicsHandle->AngularDamping;
-	DefaultHoldProfile.InterpolationSpeed = PhysicsHandle->InterpolationSpeed;
-	ActiveHoldProfile = DefaultHoldProfile;
-}
-
-void AMD_Character::ApplyHoldProfile(const FMD_HoldProfile& Profile)
-{
-	if (!IsValid(PhysicsHandle)) return;
-
-	PhysicsHandle->bSoftLinearConstraint = Profile.bSoftLinear;
-	PhysicsHandle->bSoftAngularConstraint = Profile.bSoftAngular;
-	PhysicsHandle->bInterpolateTarget = Profile.bInterpolate;
-	PhysicsHandle->SetLinearStiffness(FMath::Max(0.f, Profile.LinearStiffness));
-	PhysicsHandle->SetLinearDamping(FMath::Max(0.f, Profile.LinearDamping));
-	PhysicsHandle->SetAngularStiffness(FMath::Max(0.f, Profile.AngularStiffness));
-	PhysicsHandle->SetAngularDamping(FMath::Max(0.f, Profile.AngularDamping));
-	PhysicsHandle->SetInterpolationSpeed(FMath::Max(0.f, Profile.InterpolationSpeed));
-}
-
-void AMD_Character::UpdateHotbarDebug() const
-{
-	if (!IsLocallyControlled() || !GEngine) return;
-
-	const AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
-	if (!IsValid(MDPlayerState)) return;
-
-	const UMD_HotbarComponent* Hotbar = MDPlayerState->GetHotbarComponent();
-	if (!IsValid(Hotbar)) return;
-
-	constexpr uint64 HotbarKeyBase = 0x4D440000;
-	for (int32 SlotIndex = 0; SlotIndex < Hotbar->GetMaxSlots(); ++SlotIndex)
-	{
-		const TSubclassOf<AActor> ItemClass = Hotbar->GetItemClassAt(SlotIndex);
-		const FString ItemName = ItemClass ? ItemClass->GetName() : TEXT("비어 있음");
-
-		GEngine->AddOnScreenDebugMessage(
-			HotbarKeyBase + SlotIndex,
-			0.f,
-			FColor::Cyan,
-			FString::Printf(
-				TEXT("핫바 %d : %s"),
-				SlotIndex + 1,
-				*ItemName));
+		InteractionComponent->Interact();
 	}
 }
 
@@ -555,11 +410,35 @@ void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
 	UE_LOG(LogTemp, Log, TEXT("[SwapEquipment] Direction: %s"), ScrollValue > 0.f ? TEXT("Next") : TEXT("Prev"));
 }
 
+void AMD_Character::HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex)
+{
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return;
+	}
+
+	EquipHotbarComponent->SelectSlot(SlotIndex);
+	UE_LOG(LogTemp, Log, TEXT("[Hotbar] 숫자키 슬롯 선택: %d"), SlotIndex);
+}
+
 void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 {
 	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
 	if (!IsValid(MDMovement))
 	{
+		return;
+	}
+
+	// 사다리 이동 상태 확인
+	if (MDMovement->IsClimbing() == true)
+	{
+		// 클라이언트 환경에서 점프 처리
+		bool bClientJump = MDMovement->JumpOffLadder();
+		// 클라이언트에서 점프 성공 시 서버에게 캐릭터 점프 요청
+		if (bClientJump == true && HasAuthority() == false)
+		{
+			ServerJumpOffLadder();
+		}
 		return;
 	}
 
@@ -575,6 +454,60 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value)
 {
 	StopJumping();
+}
+
+void AMD_Character::HandleCollisionBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	// 사다리 영역 진입 확인
+	AMD_Ladder* Ladder = Cast<AMD_Ladder>(OtherActor);
+	if (IsValid(Ladder) == false || OtherComponent != Ladder->GetClimbTrigger())
+	{
+		return;
+	}
+
+	// 사다리 타기 시작
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
+	if (IsValid(MDMovement) == true)
+	{
+		MDMovement->StartClimbing(Ladder);
+	}
+}
+
+void AMD_Character::HandleCollisionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex)
+{
+	// 사다리 영역 진입 확인
+	AMD_Ladder* Ladder = Cast<AMD_Ladder>(OtherActor);
+	if (IsValid(Ladder) == false || OtherComponent != Ladder->GetClimbTrigger())
+	{
+		return;
+	}
+
+	// 사다리 타기 종료 지점으로 이동중이 아닐 때, 낙하 모드로 복귀
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
+	if (IsValid(MDMovement) == true && MDMovement->GetCurrentLadder() == Ladder)
+	{
+		// 하단에 도달한 경우 오버랩 종료보다 바닥 착지 판정을 우선 적용
+		float SpeedAtLadder = MDMovement->GetLadderClimbSpeed();
+		if (MDMovement->TryLeaveLadderAtBottom(SpeedAtLadder) == true)
+		{
+			return;
+		}
+
+		if (MDMovement->IsTopDismounting() == false)
+		{
+			MDMovement->StopClimbing(MOVE_Falling);
+		}
+	}
+}
+
+void AMD_Character::ServerJumpOffLadder_Implementation()
+{
+	// 서버에서 사다리를 타고 있는 상태의 경우 점프 처리
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
+	if (IsValid(MDMovement) == true && MDMovement->IsClimbing() == true)
+	{
+		MDMovement->JumpOffLadder();
+	}
 }
 
 /*void AMD_Character::HandleWallCutInput(const FInputActionValue& Value)
@@ -609,62 +542,27 @@ void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value
 	ASC->TryActivateAbilityByClass(WallScanAbilityClass);
 }*/
 
-void AMD_Character::UpdateInteractionFocus()
-{
-	if (!IsLocallyControlled() || !Controller || !GetWorld())
-	{
-		SetCurrentTarget(nullptr);
-		return;
-	}
-
-	SetCurrentTarget(TraceInteractionTarget());
-}
-
-AActor* AMD_Character::TraceInteractionTarget() const
-{
-	if (!Controller || !GetWorld()) return nullptr;
-
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
-
-	const FVector TraceEnd = ViewLocation + ViewRotation.Vector() * InteractTraceDistance;
-
-	FHitResult Hit;
-	FCollisionQueryParams QueryParams;
-	QueryParams.AddIgnoredActor(this);
-
-	if (!GetWorld()->LineTraceSingleByChannel(
-		Hit,
-		ViewLocation,
-		TraceEnd,
-		MDCollisionChannels::InteractTrace,
-		QueryParams)) return nullptr;
-
-	AActor* HitActor = Hit.GetActor();
-	return IsValid(HitActor) && HitActor->Implements<UMD_Interactable>() ? HitActor : nullptr;
-}
-
-void AMD_Character::SetCurrentTarget(AActor* NewTarget)
-{
-	if (CurrentTarget.Get() == NewTarget) return;
-
-	if (AActor* PreviousTarget = CurrentTarget.Get())
-	{
-		if (PreviousTarget->Implements<UMD_Interactable>()) IMD_Interactable::Execute_SetInteractionHighlighted(PreviousTarget, false);
-	}
-
-	CurrentTarget = NewTarget;
-
-	if (IsValid(NewTarget) && NewTarget->Implements<UMD_Interactable>()) IMD_Interactable::Execute_SetInteractionHighlighted(NewTarget, true);
-}
-
 void AMD_Character::InitializeAbilitySystem()
 {
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
 	{
 		ASC->InitAbilityActorInfo(GetPlayerState(), this);
 	}
+	
+	//PlayerState가 호출되는 시점에 체력변화 델리게이트를 구독.
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (!IsValid(MDPlayerState))
+	{
+		return;
+	}
+
+	if (!MDPlayerState->OnHealthStateChanged.IsAlreadyBound(this, &AMD_Character::HandleHealthStateChanged))
+	{
+		MDPlayerState->OnHealthStateChanged.AddDynamic(this, &AMD_Character::HandleHealthStateChanged);
+	}
+
+	// The delegate can fire before possession/PlayerState replication finishes, so synchronize once on bind.
+	HandleHealthStateChanged(MDPlayerState->GetHealthState());
 }
 
 void AMD_Character::GrantDefaultAbilities()
@@ -702,6 +600,11 @@ void AMD_Character::HandleHotbarChanged()
 	}
 }
 
+void AMD_Character::HandleScrapeLoadChanged(const float NewScrapeLoad)
+{
+	RefreshScrapeLoadVisual();
+}
+
 void AMD_Character::RefreshToolMesh()
 {
 	if (!IsValid(EquipHotbarComponent))
@@ -710,8 +613,182 @@ void AMD_Character::RefreshToolMesh()
 	}
 
 	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
-	UStaticMesh* NewMesh = IsValid(CurrentTool) ? CurrentTool->ToolMesh : nullptr;
 
-	FirstPersonToolMesh->SetStaticMesh(NewMesh);
-	ThirdPersonToolMesh->SetStaticMesh(NewMesh);
+	// 도구별 소켓이 지정돼 있으면 그 소켓, 없으면 기본 소켓
+	const FName SocketName =
+		(IsValid(CurrentTool) && !CurrentTool->AttachSocketName.IsNone())
+			? CurrentTool->AttachSocketName
+			: ToolAttachSocketName;
+	const auto ResolveAttachSocket = [this, SocketName](
+		const USkeletalMeshComponent* SkeletalMesh) -> FName
+	{
+		if (!IsValid(SkeletalMesh))
+		{
+			return NAME_None;
+		}
+
+		if (!SocketName.IsNone() && SkeletalMesh->DoesSocketExist(SocketName))
+		{
+			return SocketName;
+		}
+
+		return !ToolAttachSocketName.IsNone()
+			&& SkeletalMesh->DoesSocketExist(ToolAttachSocketName)
+				? ToolAttachSocketName
+				: NAME_None;
+	};
+	const FName ThirdPersonSocketName = ResolveAttachSocket(GetMesh());
+	const FName FirstPersonSocketName = ResolveAttachSocket(FirstPersonMesh);
+
+	// 소켓의 위치·회전·스케일을 그대로 따르도록 스냅 부착
+	ThirdPersonToolMesh->AttachToComponent(
+		GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, ThirdPersonSocketName);
+	FirstPersonToolMesh->AttachToComponent(
+		FirstPersonMesh,
+		FAttachmentTransformRules::SnapToTargetIncludingScale,
+		FirstPersonSocketName);
+
+	// 스냅 후 도구별 오프셋을 양쪽 시점의 전체 도구 메시에도 동일하게 적용한다.
+	const FTransform AttachOffset = IsValid(CurrentTool)
+		? CurrentTool->AttachOffset
+		: FTransform::Identity;
+	ThirdPersonToolMesh->SetRelativeTransform(AttachOffset);
+	FirstPersonToolMesh->SetRelativeTransform(AttachOffset);
+
+	RefreshScrapeLoadVisual();
+}
+
+void AMD_Character::RefreshScrapeLoadVisual()
+{
+	const UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
+		? EquipHotbarComponent->GetCurrentTool()
+		: nullptr;
+	UStaticMesh* NewToolMesh = IsValid(CurrentTool) ? CurrentTool->ToolMesh : nullptr;
+	if (IsValid(CurrentTool) && IsValid(ScrapeToolComponent))
+	{
+		switch (ScrapeToolComponent->GetScrapeLoadStage())
+		{
+		case EMD_ScrapeLoadStage::Stage1:
+			if (IsValid(CurrentTool->ScrapeLoadStage1Mesh))
+			{
+				NewToolMesh = CurrentTool->ScrapeLoadStage1Mesh;
+			}
+			break;
+
+		case EMD_ScrapeLoadStage::Stage2:
+			if (IsValid(CurrentTool->ScrapeLoadStage2Mesh))
+			{
+				NewToolMesh = CurrentTool->ScrapeLoadStage2Mesh;
+			}
+			break;
+
+		case EMD_ScrapeLoadStage::Stage3:
+			if (IsValid(CurrentTool->ScrapeLoadStage3Mesh))
+			{
+				NewToolMesh = CurrentTool->ScrapeLoadStage3Mesh;
+			}
+			break;
+
+		case EMD_ScrapeLoadStage::Empty:
+		default:
+			break;
+		}
+	}
+
+	const bool bShowTool = IsValid(NewToolMesh);
+	const bool bHasFirstPersonSocket = IsValid(FirstPersonMesh)
+		&& FirstPersonMesh->DoesSocketExist(FirstPersonToolMesh->GetAttachSocketName());
+	const bool bHasThirdPersonSocket = IsValid(GetMesh())
+		&& GetMesh()->DoesSocketExist(ThirdPersonToolMesh->GetAttachSocketName());
+	FirstPersonToolMesh->SetStaticMesh(NewToolMesh);
+	FirstPersonToolMesh->SetVisibility(bShowTool && bHasFirstPersonSocket, true);
+	ThirdPersonToolMesh->SetStaticMesh(NewToolMesh);
+	ThirdPersonToolMesh->SetVisibility(bShowTool && bHasThirdPersonSocket, true);
+}
+
+void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
+{
+	const bool bIsDead = (NewState == EMD_HealthState::Dead);
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->SetInteractionBlocked(bIsDead);
+	}
+
+	// 이동 차단은 서버·클라 양쪽에서 걸어 입력 반응을 즉시 없앤다.
+	ApplyDeathMovementLock(bIsDead);
+
+	// 모선 이동은 사망→부활 전이에만. 건강→부상 전이에서 옮기면 안 된다.
+	// 위치 이동은 서버 권한이다. 클라이언트가 옮기면 곧 서버 위치로 되돌아간다.
+	if (!bIsDead && bWasDeadState && HasAuthority())
+	{
+		TeleportToMothership();
+	}
+
+	bWasDeadState = bIsDead;
+}
+
+void AMD_Character::HandleTakeAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType,
+	AController* InstigatedBy, AActor* DamageCauser)
+{
+	// 서버 권한에서만 판정. 회복(음수 데미지)·0 데미지는 무시
+	if (!HasAuthority() || Damage <= 0.f)
+	{
+		return;
+	}
+
+	UAbilitySystemComponent* ASC = GetAbilitySystemComponent();
+	if (!IsValid(ASC))
+	{
+		return;
+	}
+
+	// 오염수 DoT·붕괴 등 모든 피해를 Health 하나로 귀결시킨다 (기획 02 §6).
+	// 클램프(0~Max)는 AttributeSet, 부상/사망 전환은 PlayerState가 담당한다.
+	ASC->ApplyModToAttribute(UMD_CharacterAttributeSet::GetHealthAttribute(),
+		EGameplayModOp::Additive, -Damage);
+}
+
+void AMD_Character::ApplyDeathMovementLock(bool bLocked)
+{
+	UCharacterMovementComponent* Movement = GetCharacterMovement();
+	if (!IsValid(Movement))
+	{
+		return;
+	}
+
+	if (bLocked)
+	{
+		Movement->DisableMovement();
+		Movement->StopMovementImmediately();
+		return;
+	}
+
+	// 수중·지상이 섞인 맵이라 특정 모드를 지정하지 않고 기본 판정에 맡긴다.
+	Movement->SetDefaultMovementMode();
+}
+
+void AMD_Character::TeleportToMothership()
+{
+	TArray<AActor*> FoundStarts;
+	UGameplayStatics::GetAllActorsOfClassWithTag(GetWorld(), APlayerStart::StaticClass(), MothershipRespawnTag, FoundStarts);
+
+	if (FoundStarts.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Health] 리스폰 지점(%s)을 찾을 수 없다"),*MothershipRespawnTag.ToString());
+		return;
+	}
+
+	const AActor* RespawnPoint = FoundStarts[0];
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->CancelInteraction();
+	}
+
+	// 붕괴로 막힌 방에 되살아나지 않도록 죽은 자리가 아니라 모선으로 옮긴다. (기획 02 §6)
+	SetActorLocationAndRotation(
+		RespawnPoint->GetActorLocation(),
+		RespawnPoint->GetActorRotation(),
+		/*bSweep=*/false,
+		nullptr,
+		ETeleportType::TeleportPhysics);
 }

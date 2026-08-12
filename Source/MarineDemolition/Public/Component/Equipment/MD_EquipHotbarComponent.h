@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -20,47 +20,51 @@ public:
 	UMD_EquipHotbarComponent();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-protected:
-	// Called when the game starts
-	virtual void BeginPlay() override;
 
-public:
 	// 슬롯 내용 또는 선택 인덱스가 바뀔 때 브로드캐스트. UI가 구독한다
-	UPROPERTY(BlueprintAssignable, Category = "Hotbar")
+	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
 	FMDOnEquipHotbarChanged OnHotbarChanged;
 
-	UFUNCTION(BlueprintPure, Category = "Hotbar")
+	UFUNCTION(BlueprintPure, Category = "MD|HotBar")
 	UMD_ToolDefinition* GetCurrentTool() const;
 
-	UFUNCTION(BlueprintPure, Category = "Hotbar")
+	UFUNCTION(BlueprintPure, Category = "MD|HotBar")
 	UMD_ToolDefinition* GetToolAtSlot(int32 SlotIndex) const;
 
-	UFUNCTION(BlueprintPure, Category = "Hotbar")
+	UFUNCTION(BlueprintPure, Category = "MD|HotBar")
 	int32 GetSlotCount() const { return Slots.Num(); }
 
-	UFUNCTION(BlueprintPure, Category = "Hotbar")
+	UFUNCTION(BlueprintPure, Category = "MD|HotBar")
 	int32 GetCurrentSlotIndex() const { return CurrentSlotIndex; }
 
 	// 슬롯 직접 선택 (숫자키)
-	UFUNCTION(BlueprintCallable, Category = "Hotbar")
+	UFUNCTION(BlueprintCallable, Category = "MD|HotBar")
 	void SelectSlot(int32 SlotIndex);
 
 	// 다음/이전 슬롯으로 순환 (휠)
-	UFUNCTION(BlueprintCallable, Category = "Hotbar")
+	UFUNCTION(BlueprintCallable, Category = "MD|HotBar")
 	void CycleSlot(int32 Direction);
 
 	// 슬롯에 도구 등록 (획득 시스템에서 호출)
-	UFUNCTION(BlueprintCallable, Category = "Hotbar")
+	UFUNCTION(BlueprintCallable, Category = "MD|HotBar")
 	void SetToolAtSlot(int32 SlotIndex, UMD_ToolDefinition* Tool);
 
+	// 서버에서 플레이어의 현재 장비 목록을 저장하기 위한 데이터를 반환하는 함수
+	TArray<TSoftObjectPtr<UDataAsset>> BuildEquipmentSaveData() const;
+
+	// 서버에서 저장된 장비 목록을 불러오는 함수
+	bool RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UDataAsset>>& SaveData);
+
 protected:
+	/** 엔진이 게임 시작 시 호출하는 생명주기 함수. 외부에서 직접 호출하지 않는다. */
+	virtual void BeginPlay() override;
 
 	// HotBar 칸수. 이 값을 바꿔 UI도 따라가게
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hotbar", meta = (ClampMin = "1"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|HotBar", meta = (ClampMin = "1"))
 	int32 InitialSlotCount = 1;
 
 	// BP에서 미리 채워둘 기본 도구들 (프로토 테스트용)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hotbar")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|HotBar")
 	TArray<TObjectPtr<UMD_ToolDefinition>> DefaultTools;
 
 private:
@@ -73,10 +77,10 @@ private:
 	UFUNCTION()
 	void OnRep_CurrentSlotIndex();
 
-	UPROPERTY(ReplicatedUsing = OnRep_Slots)
+	UPROPERTY(Transient, ReplicatedUsing = OnRep_Slots)
 	TArray<TObjectPtr<UMD_ToolDefinition>> Slots;
 
-	UPROPERTY(ReplicatedUsing = OnRep_CurrentSlotIndex)
+	UPROPERTY(Transient, ReplicatedUsing = OnRep_CurrentSlotIndex)
 	int32 CurrentSlotIndex = 0;
 
 };

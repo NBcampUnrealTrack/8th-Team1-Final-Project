@@ -1,8 +1,14 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameStateBase.h"
+#include "GameplayTagContainer.h"
+#include "Types/Score/MD_ScoreTypes.h"
 #include "MD_GameStateBase.generated.h"
+
+class UMD_ScoreTableData;
+class UMD_MerchantComponent;
+struct FMD_GameStateData;
 
 UENUM(BlueprintType)
 enum class EMD_WithdrawalPhase : uint8
@@ -15,6 +21,7 @@ enum class EMD_WithdrawalPhase : uint8
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnScoreChanged, int32, NewScore);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnDayChanged, int32, NewDay);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnInspectionReport, const FMD_InspectionReport&, Report);
 
 UCLASS()
 class MARINEDEMOLITION_API AMD_GameStateBase : public AGameStateBase
@@ -66,6 +73,38 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Score")
     FMD_OnScoreChanged OnScoreChanged;
 
+    // 점수 이벤트 발생. 단가는 ScoreTable에서 조회, Count는 건수 (미복귀 2인 등)
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")
+    void AddScoreEvent(FGameplayTag EventTag, int32 Count = 1);
+
+    // 샘플 점수 이벤트 발생 (등급×상태 단가)
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")
+    void AddSampleScoreEvent(EMD_SampleGrade Grade, EMD_SampleScoreType Type);
+
+    // 해당 Day 점검 기준. 경고 상태면 배율 반영 (HUD 표시 공용)
+    UFUNCTION(BlueprintPure, Category = "Score")
+    int32 GetInspectionThreshold(int32 Day) const;
+
+    // 점검 경고 상태. 서버에서만 변경, 스냅샷으로 Day 간 유지
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")
+    void SetInspectionWarned(bool bWarned);
+
+    UFUNCTION(BlueprintPure, Category = "Score")
+    bool IsInspectionWarned() const { return bInspectionWarned; }
+
+    UFUNCTION(BlueprintPure, Category = "Score")
+    const UMD_ScoreTableData* GetScoreTable() const { return ScoreTable; }
+
+    // 점검 결과 기록 + 전 클라이언트 통지. 서버 EvaluateInspection이 호출
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")
+    void SetInspectionReport(const FMD_InspectionReport& Report);
+
+    UFUNCTION(BlueprintPure, Category = "Score")
+    const FMD_InspectionReport& GetInspectionReport() const { return LastInspectionReport; }
+
+    UPROPERTY(BlueprintAssignable, Category = "Score")
+    FMD_OnInspectionReport OnInspectionReport;
+    
     // 현재 Day (1~4). 서버에서만 변경
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Day")
     void SetCurrentDay(int32 NewDay);
@@ -75,7 +114,21 @@ public:
 
     UPROPERTY(BlueprintAssignable, Category = "Day")
     FMD_OnDayChanged OnDayChanged;
-    
+
+    // 계약 시작 시점에 고정되는 인원수 (점검 기준 인원 배율용)
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Day")
+    void SetContractCrewCount(int32 Crew);
+
+    UFUNCTION(BlueprintPure, Category = "Day")
+    int32 GetContractCrewCount() const { return ContractCrewCount; }
+
+    // 비상 4일차 진행 여부. Day 간 스냅샷으로 유지
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Day")
+    void SetEmergencyDay(bool bEmergency);
+
+    UFUNCTION(BlueprintPure, Category = "Day")
+    bool IsEmergencyDay() const { return bEmergencyDay; }
+
 protected:
     virtual void BeginPlay() override;
 
@@ -107,9 +160,35 @@ private:
 
     UPROPERTY(ReplicatedUsing = OnRep_Score)
     int32 Score = 0;
-    
+
+    // 단가표. BP GameState 기본값에서 지정
+    UPROPERTY(EditDefaultsOnly, Category = "Score")
+    TObjectPtr<UMD_ScoreTableData> ScoreTable;
+
+    // 점검 경고 상태. 다음 점검 기준 ×1.1
+    UPROPERTY(Replicated)
+    bool bInspectionWarned = false;
+
+    // 서버 원장 로그. 정산 화면 연결 전까지 복제하지 않음
+    UPROPERTY(Transient)
+    TArray<FMD_ScoreEntry> ScoreLog;
+
+    UPROPERTY(ReplicatedUsing = OnRep_InspectionReport)
+    FMD_InspectionReport LastInspectionReport;
+
+    UFUNCTION()
+    void OnRep_InspectionReport();
+
     UPROPERTY(ReplicatedUsing = OnRep_CurrentDay)
     int32 CurrentDay = 1;
+
+    // 계약 인원수 (0 = 미확정). 계약 시작 시점 고정
+    UPROPERTY(Replicated)
+    int32 ContractCrewCount = 0;
+
+    // 비상 4일차 여부
+    UPROPERTY(Replicated)
+    bool bEmergencyDay = false;
 
     UFUNCTION()
     void OnRep_CurrentDay();
@@ -121,4 +200,20 @@ private:
 
     UFUNCTION()
     void OnRep_Score();
+
+public:
+    UFUNCTION(BlueprintPure, Category = "MD|Merchant")
+    UMD_MerchantComponent* GetMerchantComponent() const { return MerchantComponent; }
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
+    TObjectPtr<UMD_MerchantComponent> MerchantComponent;
+
+    // 현재 서버 권위 점수·일차·시간 상태를 저장 필드로 복사하는 함수
+    FMD_GameStateData GetGameStateSaveData() const;
+
+    // 저장 필드를 변경 없이 검사하여 다른 서브시스템과의 원자적 복원 순서를 보장하는 함수
+    bool CanApplyGameStateSaveData(const FMD_GameStateData& SaveData) const;
+
+    // 검증된 저장 필드를 복제 GameState와 리슨 서버 알림에 적용하는 함수
+    bool ApplyGameStateSaveData(const FMD_GameStateData& SaveData);
 };

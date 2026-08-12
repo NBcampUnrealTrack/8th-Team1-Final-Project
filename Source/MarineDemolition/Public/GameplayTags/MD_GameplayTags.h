@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -10,7 +10,6 @@ namespace MDGameplayTags
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_WallCut);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_WallScan);
 
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Swimming);
 
 	/** 물리 보관함에 담을 수 있는 내용물 분류의 공통 루트 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content);
@@ -21,14 +20,96 @@ namespace MDGameplayTags
 	/** 물리 보관함에 담을 수 있는 오염물 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Contamination);
 
+	/** 물리 보관함에 담을 수 있는 따개비. 기획 02 §1.5가 오염물과 따로 나열한다 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Barnacle);
+
 	/** 물리 보관함에 담을 수 있는 샘플 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Sample);
 
-	/** 상호작용한 대상을 플레이어 인벤토리로 옮기는 픽업 방식 */
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Pickup_Inventory);
+	/** 물리 보관함에 담을 수 있는 각종 쓰레기 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Trash);
 
 	/** 상호작용한 대상을 월드의 물리 오브젝트로 운반하는 픽업 방식 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Pickup_Physics);
-	
+
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_PlaceSupport);
+
+	/*샘플 등급 분류. 퀘스트 목표 달성 여부 확인*/
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Sample_Grade);
+
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Sample_Grade_C);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Sample_Grade_B);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Sample_Grade_A);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Sample_Grade_S);
+
+	// ===== 평가 점수 이벤트 (기획 05 §1, 단가는 UMD_ScoreTableData) =====
+
+	/** 분리 정분류 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_Metal);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_General);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_Plastic);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_Contaminated);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_NonBurnable);
+
+	/** 정분류 품목 보너스 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_Bonus_Tool);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_Bonus_Workwear);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_Bonus_Glass);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_Bonus_Battery);
+
+	/** 철거 성공 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Demolition_Partition);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Demolition_Strut);
+
+	/** 일과 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Daily_SectorClosed);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Daily_Quest);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Daily_QuestS);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Daily_AllReturned);
+
+	/** 감점 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_Missort);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_MissortContaminated);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_UnsortedRemain);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_UncollectedRemain);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_Collapse_Unsupported);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_Collapse_Supported);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_NotReturned);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_Death);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_Warning);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_CableCut);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_PipeBurst);
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_PipeLeakTick);
+
+	//  ===== 현재 HP에 따른 상태  =====
+
+	/* 수영 상태. 바닥 접지 여부에 따라 걷기로 전환. */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Swimming);
+
+	/* 사다리 등반 상태를 나타내는 태그 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Climbing);
+
+	/* 부상 상태. HP 30이하. 정밀 작업, 이동속도 감소에 사용 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Injured);
+
+	/* 사망 상태. HP 0. 모든 어빌리티 차단 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Dead);
+
+	// ====== 산소 게이지 태그
+
+	/* 완전 잠수 상태. 산소 소모, 질식 피해 GE가 작동하는 태그 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Submerged);
+
+	/* 산소 0. State_Submerged와 함께 있을때 HP -15/s */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Oxygen_Depleted);
+
+	/* For Save Data */
+	// 저장된 게임 데이터로부터 점수, 인게임 시간 등의 정보를 얻는 키
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_GameState);
+	// 저장된 게임 데이터로부터 상인 관련 정보를 얻는 키
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_Merchant);
+	// 저장된 게임 데이터로부터 플레이어 정보를 얻는 키
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_Player);
+	// 저장된 게임 데이터로부터 맵의 변경 사항에 대한 정보를 얻는 키
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_World);
 }

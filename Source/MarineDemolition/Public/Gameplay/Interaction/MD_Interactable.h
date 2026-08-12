@@ -25,6 +25,14 @@ public:
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
 	void SetInteractionHighlighted(bool bHighlighted);
 
+	/**
+	 * 상호작용을 서버의 검증된 ServerInteract 경로에서 실행해야 하는지 여부.
+	 * 안전한 기본값은 서버 실행이다. 화면만 여는 로컬 전용 대상만 명시적으로 false를 반환한다.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
+	bool RequiresServerInteraction() const;
+	virtual bool RequiresServerInteraction_Implementation() const { return true; }
+
 	/** 플레이어의 상호작용 입력을 액터에 전달한다. */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
 	void Interact(AActor* Interactor);

@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 using UnrealBuildTool;
 
@@ -20,10 +20,23 @@ public class MarineDemolition : ModuleRules
 			//UI
 			"UMG",
 			// Landscape (editor import helper uses ALandscape::Import)
-			"Landscape"
-		});
+			"Landscape",
+			"GeometryCollectionEngine",
+			// FInstancedStruct
+			"StructUtils"
+        });
 
-		PrivateDependencyModuleNames.AddRange(new string[] { "ImageWrapper", "Slate", "SlateCore", "DeveloperSettings", "ApplicationCore" });
+		PrivateDependencyModuleNames.AddRange(new string[]
+		{
+			"ImageWrapper", "Slate", "SlateCore",
+			"DeveloperSettings",
+			"ApplicationCore",
+			"CoreOnline",
+			// Database
+			"SQLiteCore", "SQLiteSupport",
+			// 오염 마스크 런타임 텍스처 업로드
+			"RHI"
+		});
 
 		if (Target.bBuildEditor)
 		{
