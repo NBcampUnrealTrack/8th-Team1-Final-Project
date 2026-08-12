@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -43,6 +43,10 @@ public:
 
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
 	void ServerDeclineRepeat(int32 Index);
+
+	// 서버에서 반복 퀘스트 포기와 관련 페널티를 처리하도록 요청하는 함수
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerAbandonRepeatQuest(int32 Index);
 
 private:
 

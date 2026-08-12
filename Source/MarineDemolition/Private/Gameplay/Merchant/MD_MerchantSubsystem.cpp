@@ -181,6 +181,37 @@ bool UMD_MerchantSubsystem::TryDeclineRepeatQuest(int32 QuestIndex)
 	return true;
 }
 
+bool UMD_MerchantSubsystem::TryAbandonRepeatQuest(int32 QuestIndex)
+{
+	if (RepeatQuests.IsValidIndex(QuestIndex) == false)
+	{
+		return false;
+	}
+
+	// 포기하려는 퀘스트
+	FMD_RepeatQuestState& QuestState = RepeatQuests[QuestIndex];
+
+	// 포기하려는 퀘스트를 수주받은 상태가 아닌 경우 실패 처리
+	if (QuestState.Status != EMD_RepeatQuestStatus::Accepted)
+	{
+		return false;
+	}
+
+	// 호감도 감소 처리
+	float MinimumAffinity = -4.0f;
+	float MaximumAffinity = 5.0f;
+	float AffinityPenalty = 0.1f * (MaximumAffinity - MinimumAffinity);
+	Affinity = FMath::Clamp(Affinity - AffinityPenalty, MinimumAffinity, MaximumAffinity);
+
+	// 퀘스트 상태를 실패 상태로 전환
+	QuestState.Status = EMD_RepeatQuestStatus::Failed;
+
+	// 퀘스트 상태 변경으로 인한 상인 업데이트 이벤트 호출
+	OnMerchantStateChanged.Broadcast();
+
+	return true;
+}
+
 void UMD_MerchantSubsystem::NotifySampleDelivered(const FGameplayTag& GradeTag, bool bIntact)
 {
 	if (!GradeTag.IsValid())

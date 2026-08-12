@@ -129,7 +129,7 @@ private:
 	UFUNCTION()
 	void HandleRepeatDeclineRequested(int32 QuestIndex);
 
-	/** 백엔드(UMD_MerchantSubsystem)에 수락 이후 파기 처리가 아직 없어 안내만 띄운다. */
+	/** 반복 퀘스트 카드의 포기 요청을 서버 권위 PlayerController로 전달하는 함수 */
 	UFUNCTION()
 	void HandleRepeatAbandonRequested(int32 QuestIndex);
 
