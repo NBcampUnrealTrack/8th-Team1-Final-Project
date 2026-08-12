@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -67,6 +67,7 @@ public:
 	FMD_QuestRepeatActionRequest OnRepeatDeclineRequested;
 
 	/** 백엔드에 파기 처리가 아직 없다 (`09` 김동연 TODO 대응). 요청만 올라가며 처리는 호출부가 안내로 대신한다. */
+	/** 반복 퀘스트 카드의 포기 요청을 상인 액터까지 전달하는 델리게이트 */
 	UPROPERTY(BlueprintAssignable, Category = "MD|Quest")
 	FMD_QuestRepeatActionRequest OnRepeatAbandonRequested;
 

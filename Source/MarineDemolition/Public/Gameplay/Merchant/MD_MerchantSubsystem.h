@@ -95,6 +95,9 @@ public:
 	/** 거절. 페널티 없이 다음 Day 재롤 대상이 된다. */
 	bool TryDeclineRepeatQuest(int32 QuestIndex);
 
+	/** 포기하는 반복 퀘스트를 실패 처리 및 패널티(호감도 감소) 처리하는 함수 */
+	bool TryAbandonRepeatQuest(int32 QuestIndex);
+
 	/** 샘플이 모선에 납품될 때 호출한다. 메인·반복 활성 퀘스트를 함께 검사한다. */
 	void NotifySampleDelivered(const FGameplayTag& GradeTag, bool bIntact);
 

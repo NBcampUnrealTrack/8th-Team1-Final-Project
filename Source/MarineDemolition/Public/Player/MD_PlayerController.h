@@ -54,6 +54,10 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveShopPurchaseResult(AMD_Merchant* Merchant, FName ItemId, EMD_ShopPurchaseResult Result);
 
+	// 서버에서 반복 퀘스트 포기와 관련 페널티를 처리하도록 요청하는 함수
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerAbandonRepeatQuest(int32 Index);
+
 private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Debug")

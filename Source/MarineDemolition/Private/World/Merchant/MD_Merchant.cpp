@@ -534,12 +534,11 @@ void AMD_Merchant::HandleRepeatDeclineRequested(int32 QuestIndex)
 
 void AMD_Merchant::HandleRepeatAbandonRequested(int32 QuestIndex)
 {
-	// UMD_MerchantSubsystem에 수락 이후 파기(포기) 처리가 아직 없다 — TryAcceptRepeatQuest/
-	// TryDeclineRepeatQuest만 있고 Accepted 상태를 되돌리는 함수가 없다. 백엔드가 생기면
-	// 여기서 그 서버 RPC를 호출하도록 바꾼다.
-	if (ActiveMenuWidget.IsValid())
+	// PlayerController의 반복 퀘스트 포기 요청 Server RPC 함수 호출
+	AMD_PlayerController* InteractingPC = GetInteractingPlayerController();
+	if (IsValid(InteractingPC) == true)
 	{
-		ActiveMenuWidget->ShowDialogueLine(FText::FromString(TEXT("그건 아직 처리 못 해. 수락한 건 끝내거나 그냥 둬.")));
+		InteractingPC->ServerAbandonRepeatQuest(QuestIndex);
 	}
 }
 

@@ -10,6 +10,7 @@
 #include "World/Interaction/MD_DayEndConsole.h"
 #include "World/Interaction/MD_SectorCloseoutMarker.h"
 #include "Game/MD_GameModeBase.h"
+#include "Game/MD_GameStateBase.h"
 
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
@@ -372,6 +373,30 @@ void AMD_PlayerController::ServerDeclineRepeat_Implementation(int32 Index)
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
 	{
 		Merchant->TryDeclineRepeatQuest(Index);
+	}
+}
+
+
+void AMD_PlayerController::ServerAbandonRepeatQuest_Implementation(int32 Index)
+{
+	// 퀘스트 포기에 따른 패널티를 적용할 GameState 얻기
+	AMD_GameStateBase* MDGameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
+	if (IsValid(MDGameState) == false || MDGameState->HasAuthority() == false)
+	{
+		return;
+	}
+
+	// 퀘스트 상태와 경제·호감도 페널티를 관리하는 서버의 상인 매니저 얻기
+	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
+	if (IsValid(Merchant) == false)
+	{
+		return;
+	}
+
+	// 퀘스트 포기 요청 성공 시 점수 감소
+	if (Merchant->TryAbandonRepeatQuest(Index) == true)
+	{
+		MDGameState->AddScoreDelta(-100);
 	}
 }
 
