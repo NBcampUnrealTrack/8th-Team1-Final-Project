@@ -28,6 +28,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
 	FName AttachSocketName;
 
+	//소켓 오프셋 미세 조정
+	//도구 매쉬 마다 손잡이 위치가 달라 미세 조정 필요.
+	//소켓에 스냅한 뒤 이 값을 트랜스폼으로 얹는다.
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
+	FTransform AttachOffset;
+
 	// 이 도구를 든 상태에서 좌클릭 시 발동될 어빌리티
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool", meta = (Categories = "Ability"))
 	FGameplayTag ToolAbilityTag;
