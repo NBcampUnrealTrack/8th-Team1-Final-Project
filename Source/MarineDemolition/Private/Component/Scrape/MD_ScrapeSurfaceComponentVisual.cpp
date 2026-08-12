@@ -1,13 +1,13 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
 #include "Components/DecalComponent.h"
-#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 #include "Gameplay/Scrape/MD_ScrapeDecalLayout.h"
 #include "Gameplay/Scrape/MD_ScrapeMaskAtlas.h"
 #include "Gameplay/Scrape/MD_ScrapeMeshSurfaceProfile.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceGeometry.h"
+#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Materials/Material.h"
@@ -20,6 +20,32 @@
 // 책임: G8 마스크 · 앞뒤 데칼 · 셀 오버레이
 
 using namespace MD_ScrapeSurfaceComponentInternal;
+
+namespace
+{
+	uint32 MixTransferredPaintHash(uint32 Value)
+	{
+		Value ^= Value >> 16;
+		Value *= 0x7FEB352Du;
+		Value ^= Value >> 15;
+		Value *= 0x846CA68Bu;
+		Value ^= Value >> 16;
+		return Value;
+	}
+
+	double CalculateTransferredPaintGrainSample(
+		const int32 GrainX,
+		const int32 GrainY,
+		const EMD_ScrapeSurfaceFace Face)
+	{
+		uint32 Hash = HashCombineFast(
+			GetTypeHash(GrainX),
+			GetTypeHash(GrainY));
+		Hash = HashCombineFast(Hash, GetTypeHash(static_cast<uint8>(Face)));
+		Hash = MixTransferredPaintHash(Hash ^ 0x51ED270Bu);
+		return static_cast<double>(Hash & 0x00FFFFFFu) / 16777216.0;
+	}
+}
 
 FMD_ScrapeSurfaceCell
 UMD_ScrapeSurfaceComponent::MakeContaminationMaskCell(
@@ -38,17 +64,22 @@ UMD_ScrapeSurfaceComponent::MakeContaminationMaskCell(
 		ContaminationGeneratedInitialAmounts.IsValidIndex(CellIndex)
 		? ContaminationGeneratedInitialAmounts[CellIndex]
 		: SourceCell.InitialContamination;
-	MaskCell.RemainingContamination =
+	const float TotalVisualContamination =
 		FMD_ScrapeMaskAtlas::CalculateRuntimeAwareVisualContamination(
 			SourceCell.RemainingContamination,
 			SourceCell.InitialContamination,
 			GeneratedInitial);
+	MaskCell.RemainingContamination = TotalVisualContamination;
 	return MaskCell;
 }
 
 bool UMD_ScrapeSurfaceComponent::InitializeContaminationMask()
 {
 	ReleaseContaminationMask();
+	if (!bContaminationEnabled)
+	{
+		return false;
+	}
 
 	FIntPoint AtlasDimensions = FIntPoint::ZeroValue;
 	TArray<uint8> AtlasPixels;
@@ -116,6 +147,14 @@ bool UMD_ScrapeSurfaceComponent::InitializeContaminationMask()
 	ContaminationMaskAtlasPixels = MoveTemp(AtlasPixels);
 	ContaminationMaskTexture = NewMaskTexture;
 	ContaminationMaskTexture->UpdateResource();
+	if (!InitializeTransferredPaintMask())
+	{
+		ContaminationMaskTexture->ReleaseResource();
+		ContaminationMaskTexture = nullptr;
+		ContaminationMaskAtlasPixels.Reset();
+		ContaminationMaskAtlasDimensions = FIntPoint::ZeroValue;
+		return false;
+	}
 	RefreshContaminationDecalMaterialParameters();
 	return true;
 }
@@ -123,6 +162,7 @@ bool UMD_ScrapeSurfaceComponent::InitializeContaminationMask()
 
 void UMD_ScrapeSurfaceComponent::ReleaseContaminationMask()
 {
+	ReleaseTransferredPaintMask();
 	if (ContaminationMaskTexture)
 	{
 		ContaminationMaskTexture->ReleaseResource();
@@ -135,15 +175,462 @@ void UMD_ScrapeSurfaceComponent::ReleaseContaminationMask()
 }
 
 
+bool UMD_ScrapeSurfaceComponent::TryCalculateTransferredPaintMaskDimensions(
+	FIntPoint& OutFaceDimensions,
+	FIntPoint& OutAtlasDimensions) const
+{
+	OutFaceDimensions = FIntPoint::ZeroValue;
+	OutAtlasDimensions = FIntPoint::ZeroValue;
+	if (!FMath::IsFinite(TransferredPaintVisualTexelSizeCm)
+		|| TransferredPaintVisualTexelSizeCm <= UE_SMALL_NUMBER
+		|| !FMath::IsFinite(ResolvedContaminationSurfaceSizeCm.X)
+		|| !FMath::IsFinite(ResolvedContaminationSurfaceSizeCm.Y)
+		|| ResolvedContaminationSurfaceSizeCm.X <= UE_SMALL_NUMBER
+		|| ResolvedContaminationSurfaceSizeCm.Y <= UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	OutFaceDimensions.X = FMath::Clamp(
+		FMath::Max(
+			ContaminationGridDimensions.X,
+			FMath::CeilToInt(
+				ResolvedContaminationSurfaceSizeCm.X
+					/ TransferredPaintVisualTexelSizeCm)),
+		1,
+		MaximumTransferredPaintMaskAxis);
+	OutFaceDimensions.Y = FMath::Clamp(
+		FMath::Max(
+			ContaminationGridDimensions.Y,
+			FMath::CeilToInt(
+				ResolvedContaminationSurfaceSizeCm.Y
+					/ TransferredPaintVisualTexelSizeCm)),
+		1,
+		MaximumTransferredPaintMaskAxis);
+	OutAtlasDimensions = FIntPoint(
+		OutFaceDimensions.X,
+		OutFaceDimensions.Y * FMD_ScrapeSurfaceLayout::FaceCount);
+	return OutAtlasDimensions.X > 0 && OutAtlasDimensions.Y > 0;
+}
+
+
+uint8 UMD_ScrapeSurfaceComponent::CalculateTransferredPaintMaskPixel(
+	const EMD_ScrapeSurfaceFace Face,
+	const FIntPoint& FacePixelCoordinate,
+	const FIntPoint& FaceMaskDimensions) const
+{
+	if (FacePixelCoordinate.X < 0
+		|| FacePixelCoordinate.Y < 0
+		|| FacePixelCoordinate.X >= FaceMaskDimensions.X
+		|| FacePixelCoordinate.Y >= FaceMaskDimensions.Y
+		|| ContaminationGridDimensions.X <= 0
+		|| ContaminationGridDimensions.Y <= 0)
+	{
+		return 0;
+	}
+
+	int32 CellsPerFace = 0;
+	int32 TotalCellCount = 0;
+	if (!FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
+			ContaminationGridDimensions,
+			CellsPerFace,
+			TotalCellCount)
+		|| ContaminationCells.Num() != TotalCellCount)
+	{
+		return 0;
+	}
+
+	const double U = (static_cast<double>(FacePixelCoordinate.X) + 0.5)
+		/ static_cast<double>(FaceMaskDimensions.X);
+	const double V = (static_cast<double>(FacePixelCoordinate.Y) + 0.5)
+		/ static_cast<double>(FaceMaskDimensions.Y);
+	const double GridX = U * ContaminationGridDimensions.X - 0.5;
+	const double GridY = V * ContaminationGridDimensions.Y - 0.5;
+	const int32 GridX0 = FMath::FloorToInt(GridX);
+	const int32 GridY0 = FMath::FloorToInt(GridY);
+	const double FractionX = GridX - GridX0;
+	const double FractionY = GridY - GridY0;
+
+	double PaintAmount = 0.0;
+	double WeightedPatternDensity = 0.0;
+	for (int32 OffsetY = 0; OffsetY <= 1; ++OffsetY)
+	{
+		const int32 CellY = FMath::Clamp(
+			GridY0 + OffsetY,
+			0,
+			ContaminationGridDimensions.Y - 1);
+		const double WeightY = OffsetY == 0
+			? 1.0 - FractionY
+			: FractionY;
+		for (int32 OffsetX = 0; OffsetX <= 1; ++OffsetX)
+		{
+			const int32 CellX = FMath::Clamp(
+				GridX0 + OffsetX,
+				0,
+				ContaminationGridDimensions.X - 1);
+			const double WeightX = OffsetX == 0
+				? 1.0 - FractionX
+				: FractionX;
+			const double Weight = WeightX * WeightY;
+			const int32 CombinedCellIndex =
+				FMD_ScrapeSurfaceLayout::ToCombinedCellIndex(
+					Face,
+					CellX + CellY * ContaminationGridDimensions.X,
+					CellsPerFace);
+			if (!ContaminationCells.IsValidIndex(CombinedCellIndex))
+			{
+				continue;
+			}
+
+			const FMD_ScrapeSurfaceCell& Cell =
+				ContaminationCells[CombinedCellIndex];
+			const double CellPaintAmount = FMath::Clamp(
+				static_cast<double>(Cell.TransferredContamination),
+				0.0,
+				1.0);
+			PaintAmount += CellPaintAmount * Weight;
+			WeightedPatternDensity += CellPaintAmount
+				* FMath::Clamp(
+					static_cast<double>(
+						Cell.TransferredPaintPatternDensity),
+					0.0,
+					1.0)
+				* Weight;
+		}
+	}
+
+	if (PaintAmount <= ScrapeSettings.CleanTolerance)
+	{
+		return 0;
+	}
+
+	const double PatternDensity = FMath::Clamp(
+		WeightedPatternDensity / PaintAmount,
+		0.0,
+		1.0);
+	static constexpr double PaintGrainSizeCm = 0.85;
+	const int32 GrainX = FMath::FloorToInt(
+		(U * ResolvedContaminationSurfaceSizeCm.X) / PaintGrainSizeCm);
+	const int32 GrainY = FMath::FloorToInt(
+		(V * ResolvedContaminationSurfaceSizeCm.Y) / PaintGrainSizeCm);
+	if (CalculateTransferredPaintGrainSample(GrainX, GrainY, Face)
+		>= PatternDensity)
+	{
+		return 0;
+	}
+
+	return static_cast<uint8>(FMath::Clamp(
+		FMath::RoundToInt(PaintAmount * static_cast<double>(MAX_uint8)),
+		0,
+		static_cast<int32>(MAX_uint8)));
+}
+
+
+bool UMD_ScrapeSurfaceComponent::InitializeTransferredPaintMask()
+{
+	ReleaseTransferredPaintMask();
+
+	FIntPoint FaceDimensions = FIntPoint::ZeroValue;
+	FIntPoint AtlasDimensions = FIntPoint::ZeroValue;
+	if (!TryCalculateTransferredPaintMaskDimensions(
+			FaceDimensions,
+			AtlasDimensions))
+	{
+		return false;
+	}
+
+	const int64 PixelCount64 = static_cast<int64>(AtlasDimensions.X)
+		* static_cast<int64>(AtlasDimensions.Y);
+	if (PixelCount64 <= 0 || PixelCount64 > MAX_int32)
+	{
+		return false;
+	}
+
+	TArray<uint8> AtlasPixels;
+	AtlasPixels.SetNumZeroed(static_cast<int32>(PixelCount64));
+	bool bHasTransferredPaint = false;
+	for (const FMD_ScrapeSurfaceCell& Cell : ContaminationCells)
+	{
+		if (Cell.TransferredContamination > ScrapeSettings.CleanTolerance)
+		{
+			bHasTransferredPaint = true;
+			break;
+		}
+	}
+	if (bHasTransferredPaint)
+	{
+		for (int32 AtlasY = 0; AtlasY < AtlasDimensions.Y; ++AtlasY)
+		{
+			const EMD_ScrapeSurfaceFace Face = AtlasY < FaceDimensions.Y
+				? EMD_ScrapeSurfaceFace::Front
+				: EMD_ScrapeSurfaceFace::Back;
+			const int32 FaceY = AtlasY % FaceDimensions.Y;
+			for (int32 PixelX = 0; PixelX < FaceDimensions.X; ++PixelX)
+			{
+				AtlasPixels[PixelX + AtlasY * AtlasDimensions.X] =
+					CalculateTransferredPaintMaskPixel(
+						Face,
+						FIntPoint(PixelX, FaceY),
+						FaceDimensions);
+			}
+		}
+	}
+
+	UTexture2D* NewMaskTexture = UTexture2D::CreateTransient(
+		AtlasDimensions.X,
+		AtlasDimensions.Y,
+		PF_G8);
+	if (!NewMaskTexture)
+	{
+		return false;
+	}
+
+	NewMaskTexture->SRGB = false;
+	NewMaskTexture->NeverStream = true;
+	// Dry-brush holes must remain discrete; bilinear filtering turns the
+	// stipple into a faint continuous decal at this sub-centimeter resolution.
+	NewMaskTexture->Filter = TF_Nearest;
+	NewMaskTexture->AddressX = TA_Clamp;
+	NewMaskTexture->AddressY = TA_Clamp;
+	FTexturePlatformData* PlatformData = NewMaskTexture->GetPlatformData();
+	if (!PlatformData || PlatformData->Mips.IsEmpty())
+	{
+		NewMaskTexture->ReleaseResource();
+		return false;
+	}
+
+	FTexture2DMipMap& Mip = PlatformData->Mips[0];
+	Mip.BulkData.Lock(LOCK_READ_WRITE);
+	void* DestinationData = Mip.BulkData.Realloc(AtlasPixels.Num());
+	if (DestinationData)
+	{
+		FMemory::Memcpy(
+			DestinationData,
+			AtlasPixels.GetData(),
+			AtlasPixels.Num());
+	}
+	Mip.BulkData.Unlock();
+	if (!DestinationData)
+	{
+		NewMaskTexture->ReleaseResource();
+		return false;
+	}
+
+	TransferredPaintMaskAtlasDimensions = AtlasDimensions;
+	TransferredPaintMaskAtlasPixels = MoveTemp(AtlasPixels);
+	TransferredPaintMaskTexture = NewMaskTexture;
+	TransferredPaintMaskTexture->UpdateResource();
+	return true;
+}
+
+
+void UMD_ScrapeSurfaceComponent::ReleaseTransferredPaintMask()
+{
+	if (TransferredPaintMaskTexture)
+	{
+		TransferredPaintMaskTexture->ReleaseResource();
+		TransferredPaintMaskTexture = nullptr;
+	}
+	TransferredPaintMaskAtlasPixels.Reset();
+	TransferredPaintMaskAtlasDimensions = FIntPoint::ZeroValue;
+}
+
+
+void UMD_ScrapeSurfaceComponent::UpdateTransferredPaintMask(
+	const TArray<FMD_ScrapeCellChange>& CellChanges)
+{
+	FIntPoint FaceDimensions = FIntPoint::ZeroValue;
+	FIntPoint ExpectedAtlasDimensions = FIntPoint::ZeroValue;
+	if (!TryCalculateTransferredPaintMaskDimensions(
+			FaceDimensions,
+			ExpectedAtlasDimensions))
+	{
+		return;
+	}
+
+	const int32 ExpectedPixelCount =
+		ExpectedAtlasDimensions.X * ExpectedAtlasDimensions.Y;
+	if (!TransferredPaintMaskTexture
+		|| !TransferredPaintMaskTexture->GetResource()
+		|| TransferredPaintMaskAtlasDimensions != ExpectedAtlasDimensions
+		|| TransferredPaintMaskAtlasPixels.Num() != ExpectedPixelCount)
+	{
+		InitializeTransferredPaintMask();
+		RefreshContaminationDecalMaterialParameters();
+		return;
+	}
+
+	const int32 CellsPerFace = ContaminationGridDimensions.X
+		* ContaminationGridDimensions.Y;
+	FIntRect CandidateRegion = FMD_ScrapeMaskAtlas::MakeEmptyAtlasRegion();
+	for (const FMD_ScrapeCellChange& CellChange : CellChanges)
+	{
+		EMD_ScrapeSurfaceFace Face = EMD_ScrapeSurfaceFace::Front;
+		int32 LocalCellIndex = INDEX_NONE;
+		if (!FMD_ScrapeSurfaceLayout::TryDecodeCombinedCellIndex(
+				CellChange.CellIndex,
+				CellsPerFace,
+				Face,
+				LocalCellIndex))
+		{
+			continue;
+		}
+
+		const int32 CellX = LocalCellIndex % ContaminationGridDimensions.X;
+		const int32 CellY = LocalCellIndex / ContaminationGridDimensions.X;
+		const int32 MinimumCellX = FMath::Max(0, CellX - 1);
+		const int32 MaximumCellX = FMath::Min(
+			ContaminationGridDimensions.X,
+			CellX + 2);
+		const int32 MinimumCellY = FMath::Max(0, CellY - 1);
+		const int32 MaximumCellY = FMath::Min(
+			ContaminationGridDimensions.Y,
+			CellY + 2);
+		const int32 MinimumPixelX = FMath::Clamp(
+			FMath::FloorToInt(
+				static_cast<double>(MinimumCellX)
+					/ ContaminationGridDimensions.X * FaceDimensions.X),
+			0,
+			FaceDimensions.X - 1);
+		const int32 MaximumPixelX = FMath::Clamp(
+			FMath::CeilToInt(
+				static_cast<double>(MaximumCellX)
+					/ ContaminationGridDimensions.X * FaceDimensions.X) - 1,
+			0,
+			FaceDimensions.X - 1);
+		const int32 FacePixelOffsetY =
+			Face == EMD_ScrapeSurfaceFace::Back ? FaceDimensions.Y : 0;
+		const int32 MinimumPixelY = FacePixelOffsetY + FMath::Clamp(
+			FMath::FloorToInt(
+				static_cast<double>(MinimumCellY)
+					/ ContaminationGridDimensions.Y * FaceDimensions.Y),
+			0,
+			FaceDimensions.Y - 1);
+		const int32 MaximumPixelY = FacePixelOffsetY + FMath::Clamp(
+			FMath::CeilToInt(
+				static_cast<double>(MaximumCellY)
+					/ ContaminationGridDimensions.Y * FaceDimensions.Y) - 1,
+			0,
+			FaceDimensions.Y - 1);
+		FMD_ScrapeMaskAtlas::ExpandAtlasRegion(
+			CandidateRegion,
+			FIntPoint(MinimumPixelX, MinimumPixelY));
+		FMD_ScrapeMaskAtlas::ExpandAtlasRegion(
+			CandidateRegion,
+			FIntPoint(MaximumPixelX, MaximumPixelY));
+	}
+
+	if (FMD_ScrapeMaskAtlas::IsAtlasRegionEmpty(CandidateRegion))
+	{
+		return;
+	}
+
+	FIntRect ChangedRegion = FMD_ScrapeMaskAtlas::MakeEmptyAtlasRegion();
+	for (int32 AtlasY = CandidateRegion.Min.Y;
+		AtlasY < CandidateRegion.Max.Y;
+		++AtlasY)
+	{
+		const EMD_ScrapeSurfaceFace Face = AtlasY < FaceDimensions.Y
+			? EMD_ScrapeSurfaceFace::Front
+			: EMD_ScrapeSurfaceFace::Back;
+		const int32 FaceY = AtlasY % FaceDimensions.Y;
+		for (int32 PixelX = CandidateRegion.Min.X;
+			PixelX < CandidateRegion.Max.X;
+			++PixelX)
+		{
+			const int32 PixelIndex = PixelX
+				+ AtlasY * TransferredPaintMaskAtlasDimensions.X;
+			if (!TransferredPaintMaskAtlasPixels.IsValidIndex(PixelIndex))
+			{
+				continue;
+			}
+			const uint8 NewValue = CalculateTransferredPaintMaskPixel(
+				Face,
+				FIntPoint(PixelX, FaceY),
+				FaceDimensions);
+			if (TransferredPaintMaskAtlasPixels[PixelIndex] == NewValue)
+			{
+				continue;
+			}
+			TransferredPaintMaskAtlasPixels[PixelIndex] = NewValue;
+			FMD_ScrapeMaskAtlas::ExpandAtlasRegion(
+				ChangedRegion,
+				FIntPoint(PixelX, AtlasY));
+		}
+	}
+
+	if (!FMD_ScrapeMaskAtlas::IsAtlasRegionEmpty(ChangedRegion)
+		&& !UploadTransferredPaintMaskRegion(ChangedRegion))
+	{
+		InitializeTransferredPaintMask();
+		RefreshContaminationDecalMaterialParameters();
+	}
+}
+
+
+bool UMD_ScrapeSurfaceComponent::UploadTransferredPaintMaskRegion(
+	const FIntRect& AtlasRegion)
+{
+	const int32 RegionWidth = AtlasRegion.Width();
+	const int32 RegionHeight = AtlasRegion.Height();
+	if (!TransferredPaintMaskTexture
+		|| !TransferredPaintMaskTexture->GetResource()
+		|| RegionWidth <= 0
+		|| RegionHeight <= 0)
+	{
+		return false;
+	}
+
+	uint8* UploadValues = new uint8[RegionWidth * RegionHeight];
+	if (!FMD_ScrapeMaskAtlas::TryPackAtlasRegion(
+			TransferredPaintMaskAtlasDimensions,
+			MakeArrayView(TransferredPaintMaskAtlasPixels),
+			AtlasRegion,
+			MakeArrayView(UploadValues, RegionWidth * RegionHeight)))
+	{
+		delete[] UploadValues;
+		return false;
+	}
+
+	FUpdateTextureRegion2D* UpdateRegions = new FUpdateTextureRegion2D[1];
+	UpdateRegions[0] = FUpdateTextureRegion2D(
+		static_cast<uint32>(AtlasRegion.Min.X),
+		static_cast<uint32>(AtlasRegion.Min.Y),
+		0,
+		0,
+		static_cast<uint32>(RegionWidth),
+		static_cast<uint32>(RegionHeight));
+	TransferredPaintMaskTexture->UpdateTextureRegions(
+		0,
+		1,
+		UpdateRegions,
+		static_cast<uint32>(RegionWidth),
+		1,
+		UploadValues,
+		[](uint8* SourceData, const FUpdateTextureRegion2D* Regions)
+		{
+			delete[] SourceData;
+			delete[] Regions;
+		});
+	return true;
+}
+
+
 void UMD_ScrapeSurfaceComponent::UpdateContaminationMask(
 	const TArray<FMD_ScrapeCellChange>& CellChanges)
 {
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeMaskUpdate);
+	if (!bContaminationEnabled)
+	{
+		return;
+	}
 
 	if (CellChanges.IsEmpty())
 	{
 		return;
 	}
+
+	UpdateTransferredPaintMask(CellChanges);
 
 	FIntPoint ExpectedDimensions = FIntPoint::ZeroValue;
 	if (!FMD_ScrapeMaskAtlas::TryCalculateAtlasDimensions(
@@ -272,12 +759,17 @@ bool UMD_ScrapeSurfaceComponent::UploadContaminationMaskRegion(
 bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecals()
 {
 	bContaminationDecalsConfigured = false;
+	bResolvedFullCoverageContaminationDecals = false;
 	SetContaminationDecalsVisible(false);
 	DestroyAdditionalContaminationDecalPatches();
-
+	if (!bContaminationEnabled)
+	{
+		return false;
+	}
 	if (!bShowContaminationDecals
 		|| !bContaminationSurfaceInitialized
 		|| !ContaminationMaskTexture
+		|| !TransferredPaintMaskTexture
 		|| !FrontContaminationDecal
 		|| !BackContaminationDecal
 		|| !ContaminationDecalMaterial)
@@ -325,16 +817,13 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecals()
 
 	bContaminationDecalsConfigured = true;
 	SetContaminationDecalsVisible(true);
-	if (ContaminationOverlay)
-	{
-		ContaminationOverlay->SetVisibility(false);
-	}
 	return true;
 }
 
 
 void UMD_ScrapeSurfaceComponent::ResolveContaminationDecalDepths()
 {
+	bResolvedFullCoverageContaminationDecals = false;
 	const double RequestedDepthCm = FMath::IsFinite(
 		ContaminationDecalProjectionDepthCm)
 		? FMath::Max(
@@ -353,9 +842,9 @@ void UMD_ScrapeSurfaceComponent::ResolveContaminationDecalDepths()
 
 	// 앞/뒤 축 방향의 실제 벽 두께. 축을 못 구하면 0으로 두고 두께 배분을 건너뛴다.
 	double WallThicknessCm = 0.0;
-	FVector HorizontalAxisLocal;
-	FVector FrontNormalLocal;
-	FVector VerticalAxisLocal;
+	FVector HorizontalAxisLocal = FVector::ZeroVector;
+	FVector FrontNormalLocal = FVector::ZeroVector;
+	FVector VerticalAxisLocal = FVector::ZeroVector;
 	if (SurfaceMesh
 		&& FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
 			ResolvedContaminationSurfaceNormalAxis,
@@ -413,18 +902,147 @@ void UMD_ScrapeSurfaceComponent::ResolveContaminationDecalDepths()
 	}
 
 	// 앞/뒤 상자가 겹쳐 같은 표면을 두 번 칠하지 않도록 벽 두께를 나눈다.
-	FMD_ScrapeMeshSurfaceProfile::BalanceFaceDepths(
-		WallThicknessCm,
-		FrontDepthCm,
-		BackDepthCm);
+	if (bAutoFitContaminationDecalDepth
+		&& bUseFullCoverageContaminationDecals)
+	{
+		// Facing-normal profiles do not include tangent trims. The logical front
+		// and back halves therefore meet at one split plane. Their render volumes
+		// overlap that plane below, while the material applies an exclusive
+		// world-position ownership gate. This avoids both a missing tangent strip
+		// and double blending from the two atlas halves.
+		constexpr double FaceSeparationGapCm = 0.0;
+		bResolvedFullCoverageContaminationDecals =
+			FMD_ScrapeMeshSurfaceProfile::TryPartitionFaceDepths(
+				WallThicknessCm,
+				FaceSeparationGapCm,
+				FrontDepthCm,
+				BackDepthCm);
+		if (!bResolvedFullCoverageContaminationDecals)
+		{
+			const double RequiredFrontDepthCm = FrontDepthCm;
+			const double RequiredBackDepthCm = BackDepthCm;
+			const double RequiredCombinedDepthCm =
+				RequiredFrontDepthCm + RequiredBackDepthCm;
+			const double TargetCombinedDepthCm = FMath::IsFinite(
+				WallThicknessCm)
+				? FMath::Max(
+					WallThicknessCm - FaceSeparationGapCm,
+					0.0)
+				: 0.0;
+			const bool bHasValidSpatialPartitionInputs =
+				FMath::IsFinite(RequiredFrontDepthCm)
+				&& RequiredFrontDepthCm >= 0.0
+				&& FMath::IsFinite(RequiredBackDepthCm)
+				&& RequiredBackDepthCm >= 0.0
+				&& FMath::IsFinite(RequiredCombinedDepthCm)
+				&& FMath::IsFinite(TargetCombinedDepthCm)
+				&& TargetCombinedDepthCm
+					> static_cast<double>(UE_SMALL_NUMBER)
+				&& RequiredCombinedDepthCm > TargetCombinedDepthCm;
+
+			// Corner meshes can require both normal-facing profiles deep into the
+			// same bounds interval. Coverage-first mode owns receivers by the spatial
+			// division rather than the original facing profile, so compress both
+			// requirements proportionally into the complete wall thickness.
+			if (bHasValidSpatialPartitionInputs)
+			{
+				FMD_ScrapeMeshSurfaceProfile::BalanceFaceDepths(
+					TargetCombinedDepthCm,
+					FrontDepthCm,
+					BackDepthCm);
+			}
+
+			const double BalancedCombinedDepthCm =
+				FrontDepthCm + BackDepthCm;
+			bResolvedFullCoverageContaminationDecals =
+				bHasValidSpatialPartitionInputs
+				&& FMath::IsFinite(FrontDepthCm)
+				&& FrontDepthCm >= 0.0
+				&& FMath::IsFinite(BackDepthCm)
+				&& BackDepthCm >= 0.0
+				&& FMath::IsNearlyEqual(
+					BalancedCombinedDepthCm,
+					TargetCombinedDepthCm,
+					0.01);
+			if (bResolvedFullCoverageContaminationDecals)
+			{
+				UE_LOG(
+					LogTemp,
+					Verbose,
+					TEXT("MD_ScrapeSurfaceComponent: %s compressed full-coverage depths %.3f/%.3f cm to the gapless logical partition %.3f/%.3f cm."),
+					*GetName(),
+					RequiredFrontDepthCm,
+					RequiredBackDepthCm,
+					FrontDepthCm,
+					BackDepthCm);
+			}
+			else
+			{
+				UE_LOG(
+					LogTemp,
+					Warning,
+					TEXT("MD_ScrapeSurfaceComponent: full-coverage decal partition was rejected for %s (wall %.3f cm, required %.3f/%.3f cm, target %.3f cm); using directional decal placement."),
+					*GetName(),
+					WallThicknessCm,
+					RequiredFrontDepthCm,
+					RequiredBackDepthCm,
+					TargetCombinedDepthCm);
+			}
+		}
+	}
+	else
+	{
+		FMD_ScrapeMeshSurfaceProfile::BalanceFaceDepths(
+			WallThicknessCm,
+			FrontDepthCm,
+			BackDepthCm);
+	}
+
+	// Keep the logical partition for the near-tangent ownership fallback. The
+	// normal-first classifier can assign a curved receiver to either face at
+	// any depth in the mesh bounds, so both physical decal volumes must span
+	// the complete thickness. The material's complementary hard gate still
+	// guarantees that exactly one atlas half contributes at every pixel.
+	const double FaceSplitFrontDepthCm = FrontDepthCm;
+	const double FaceSplitBackDepthCm = BackDepthCm;
+	if (bResolvedFullCoverageContaminationDecals)
+	{
+		FrontDepthCm = WallThicknessCm;
+		BackDepthCm = WallThicknessCm;
+	}
 
 	ResolvedFrontDecalDepthCm = static_cast<float>(FrontDepthCm);
 	ResolvedBackDecalDepthCm = static_cast<float>(BackDepthCm);
+	ResolvedContaminationFaceSplitCoordinateLocal = 0.0;
+	if (SurfaceMesh
+		&& !FrontNormalLocal.IsNearlyZero())
+	{
+		const double NormalScale = FMath::Abs(FVector::DotProduct(
+			SurfaceMesh->GetComponentScale().GetAbs(),
+			FrontNormalLocal));
+		if (FMath::IsFinite(NormalScale)
+			&& NormalScale > static_cast<double>(UE_SMALL_NUMBER))
+		{
+			const double FrontOuterCoordinate = FVector::DotProduct(
+				ContaminationMeshLocalBoundsMaximum,
+				FrontNormalLocal);
+			const double BackOuterCoordinate = FVector::DotProduct(
+				ContaminationMeshLocalBoundsMinimum,
+				FrontNormalLocal);
+			const double FrontInnerCoordinate = FrontOuterCoordinate
+				- FaceSplitFrontDepthCm / NormalScale;
+			const double BackInnerCoordinate = BackOuterCoordinate
+				+ FaceSplitBackDepthCm / NormalScale;
+			ResolvedContaminationFaceSplitCoordinateLocal =
+				(FrontInnerCoordinate + BackInnerCoordinate) * 0.5;
+		}
+	}
 }
 
 
 bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalPatch(
 	UDecalComponent* DecalComponent,
+	const EMD_ScrapeSurfaceFace Face,
 	const FMD_ScrapeDecalFaceLayout& Layout,
 	TObjectPtr<UMaterialInstanceDynamic>& InOutMID)
 {
@@ -456,7 +1074,7 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalPatch(
 	if (!FMD_ScrapeDecalLayout::TryCalculateMaskHalfTexelUV(
 			ContaminationMaskAtlasDimensions,
 			ResolvedContaminationSurfaceSizeCm,
-			ContaminationDecalEdgeInsetCm,
+			ResolvedContaminationDecalEdgeInsetCm,
 			MaskHalfTexelUV))
 	{
 		return false;
@@ -466,6 +1084,12 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalPatch(
 	InOutMID->SetTextureParameterValue(
 		ContaminationMaskTextureParameterName,
 		ContaminationMaskTexture);
+	InOutMID->SetTextureParameterValue(
+		TransferredPaintMaskTextureParameterName,
+		TransferredPaintMaskTexture);
+	ApplyContaminationAppearanceParameters(
+		*InOutMID,
+		ContaminationDecalMaterial);
 	InOutMID->SetScalarParameterValue(
 		ContaminationMaskVScaleParameterName,
 		Layout.MaskVScale);
@@ -517,9 +1141,79 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalPatch(
 			static_cast<float>(ProjectionDirectionWS.Y),
 			static_cast<float>(ProjectionDirectionWS.Z),
 			0.0f));
+	if (bResolvedFullCoverageContaminationDecals)
+	{
+		// The material assigns the overlapping volumes to complementary spatial
+		// halves, so a receiver-normal fade would only remove valid tangent trims.
+		// SmoothStep(-1, 0, saturate(...)) is identically one.
+		InOutMID->SetScalarParameterValue(
+			ContaminationAngleFadeStartParameterName,
+			-1.0f);
+		InOutMID->SetScalarParameterValue(
+			ContaminationAngleFadeEndParameterName,
+			0.0f);
+	}
+	ApplyContaminationFaceOwnershipParameters(*InOutMID, Face);
 	ApplyContaminationDetailWorldFrame(*InOutMID);
 	DecalComponent->MarkRenderStateDirty();
 	return true;
+}
+
+
+void UMD_ScrapeSurfaceComponent::ApplyContaminationFaceOwnershipParameters(
+	UMaterialInstanceDynamic& DecalMID,
+	const EMD_ScrapeSurfaceFace Face) const
+{
+	FVector SplitOriginWS = FVector::ZeroVector;
+	FVector SplitNormalWS = FVector::ForwardVector;
+	bool bEnableOwnership = false;
+	FVector HorizontalAxisLocal;
+	FVector FrontNormalLocal;
+	FVector VerticalAxisLocal;
+	if (bResolvedFullCoverageContaminationDecals
+		&& SurfaceMesh
+		&& FMath::IsFinite(ResolvedContaminationFaceSplitCoordinateLocal)
+		&& FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
+			ResolvedContaminationSurfaceNormalAxis,
+			HorizontalAxisLocal,
+			FrontNormalLocal,
+			VerticalAxisLocal))
+	{
+		const FTransform& MeshTransform = SurfaceMesh->GetComponentTransform();
+		SplitOriginWS = MeshTransform.TransformPosition(
+			FrontNormalLocal
+				* ResolvedContaminationFaceSplitCoordinateLocal);
+		// Keep the render-side ownership axis identical to the gameplay face
+		// resolver. TransformVector preserves a mirrored component scale's sign,
+		// while TransformVectorNoScale would make CPU and material ownership
+		// disagree for mirrored wall instances.
+		SplitNormalWS = MeshTransform.TransformVector(
+			FrontNormalLocal).GetSafeNormal();
+		bEnableOwnership = !SplitOriginWS.ContainsNaN()
+			&& !SplitNormalWS.ContainsNaN()
+			&& !SplitNormalWS.IsNearlyZero();
+	}
+
+	DecalMID.SetVectorParameterValue(
+		ContaminationFaceSplitOriginParameterName,
+		FLinearColor(
+			static_cast<float>(SplitOriginWS.X),
+			static_cast<float>(SplitOriginWS.Y),
+			static_cast<float>(SplitOriginWS.Z),
+			0.0f));
+	DecalMID.SetVectorParameterValue(
+		ContaminationFaceSplitNormalParameterName,
+		FLinearColor(
+			static_cast<float>(SplitNormalWS.X),
+			static_cast<float>(SplitNormalWS.Y),
+			static_cast<float>(SplitNormalWS.Z),
+			0.0f));
+	DecalMID.SetScalarParameterValue(
+		ContaminationFaceIsFrontParameterName,
+		Face == EMD_ScrapeSurfaceFace::Front ? 1.0f : 0.0f);
+	DecalMID.SetScalarParameterValue(
+		ContaminationFaceOwnershipEnabledParameterName,
+		bEnableOwnership ? 1.0f : 0.0f);
 }
 
 
@@ -576,13 +1270,99 @@ void UMD_ScrapeSurfaceComponent::ApplyContaminationDetailWorldFrame(
 	SetVectorParameter(
 		ContaminationSurfaceTangentVParameterName,
 		VerticalAxisWorld);
+
+	const FVector LocalBoundsSize = ContaminationMeshLocalBoundsMaximum
+		- ContaminationMeshLocalBoundsMinimum;
+	const double LocalThicknessCm = FMath::Abs(FVector::DotProduct(
+		LocalBoundsSize,
+		FrontNormalLocal));
+	const double NormalWorldScale = MeshTransform
+		.TransformVector(FrontNormalLocal)
+		.Size();
+	const double SurfaceThicknessCm = LocalThicknessCm * NormalWorldScale;
+	if (!FMath::IsFinite(SurfaceThicknessCm)
+		|| SurfaceThicknessCm <= static_cast<double>(UE_SMALL_NUMBER))
+	{
+		// Keep the shared coordinate frame current while failing open for the
+		// optional spill gate. This avoids retaining a stale MID value when a
+		// temporarily degenerate mesh is assigned.
+		DecalMID.SetScalarParameterValue(
+			ContaminationSurfaceThicknessParameterName,
+			1000000.0f);
+		return;
+	}
+	DecalMID.SetScalarParameterValue(
+		ContaminationSurfaceThicknessParameterName,
+		static_cast<float>(SurfaceThicknessCm));
+}
+
+
+void UMD_ScrapeSurfaceComponent::ApplyContaminationAppearanceParameters(
+	UMaterialInstanceDynamic& DecalMID,
+	UMaterialInterface* const ParentMaterial) const
+{
+	auto ResolveTexture = [ParentMaterial](
+		UTexture2D* const TextureOverride,
+		const FName ParameterName) -> UTexture*
+	{
+		if (TextureOverride)
+		{
+			return TextureOverride;
+		}
+
+		UTexture* InheritedTexture = nullptr;
+		if (ParentMaterial)
+		{
+			ParentMaterial->GetTextureParameterValue(
+				FHashedMaterialParameterInfo(ParameterName),
+				InheritedTexture);
+		}
+		return InheritedTexture;
+	};
+
+	if (UTexture* const BaseColorTexture = ResolveTexture(
+			ContaminationBaseColorTexture,
+			ContaminationBaseColorTextureParameterName))
+	{
+		DecalMID.SetTextureParameterValue(
+			ContaminationBaseColorTextureParameterName,
+			BaseColorTexture);
+	}
+	if (UTexture* const ShapeMaskTexture = ResolveTexture(
+			ContaminationShapeMaskTexture,
+			ContaminationShapeMaskTextureParameterName))
+	{
+		DecalMID.SetTextureParameterValue(
+			ContaminationShapeMaskTextureParameterName,
+			ShapeMaskTexture);
+	}
+
+	const float BaseCoverage = FMath::IsFinite(ContaminationBaseCoverage)
+		? FMath::Clamp(ContaminationBaseCoverage, 0.0f, 1.0f)
+		: 0.85f;
+	const float OverallOpacity = FMath::IsFinite(ContaminationOpacity)
+		? FMath::Clamp(ContaminationOpacity, 0.0f, 1.0f)
+		: 0.90f;
+	DecalMID.SetScalarParameterValue(
+		ContaminationBaseCoverageParameterName,
+		BaseCoverage);
+	DecalMID.SetScalarParameterValue(
+		ContaminationOpacityParameterName,
+		OverallOpacity);
+}
+
+
+void UMD_ScrapeSurfaceComponent::RefreshContaminationAppearance()
+{
+	RefreshContaminationDecalMaterialParameters();
 }
 
 
 void UMD_ScrapeSurfaceComponent::SetContaminationDecalsVisible(
 	const bool bVisible)
 {
-	auto SetFaceVisible = [bVisible](
+	const bool bShouldBeVisible = bVisible && bContaminationEnabled;
+	auto SetFaceVisible = [bShouldBeVisible](
 		const TArray<TObjectPtr<UDecalComponent>>& PatchComponents,
 		UDecalComponent* BaseDecalComponent)
 	{
@@ -590,8 +1370,8 @@ void UMD_ScrapeSurfaceComponent::SetContaminationDecalsVisible(
 		{
 			if (BaseDecalComponent)
 			{
-				BaseDecalComponent->SetVisibility(bVisible);
-				BaseDecalComponent->SetHiddenInGame(!bVisible);
+				BaseDecalComponent->SetVisibility(bShouldBeVisible);
+				BaseDecalComponent->SetHiddenInGame(!bShouldBeVisible);
 			}
 			return;
 		}
@@ -600,8 +1380,8 @@ void UMD_ScrapeSurfaceComponent::SetContaminationDecalsVisible(
 		{
 			if (PatchComponent)
 			{
-				PatchComponent->SetVisibility(bVisible);
-				PatchComponent->SetHiddenInGame(!bVisible);
+				PatchComponent->SetVisibility(bShouldBeVisible);
+				PatchComponent->SetHiddenInGame(!bShouldBeVisible);
 			}
 		}
 	};
@@ -617,12 +1397,17 @@ void UMD_ScrapeSurfaceComponent::SetContaminationDecalsVisible(
 
 void UMD_ScrapeSurfaceComponent::RefreshContaminationDecalMaterialParameters()
 {
+	if (!bContaminationEnabled)
+	{
+		return;
+	}
+
 	// 배치 때와 같은 inset 보정을 써야 마스크를 다시 만들 때 무늬가 밀리지 않는다.
 	FVector2D MaskHalfTexelUV = FVector2D::ZeroVector;
 	if (!FMD_ScrapeDecalLayout::TryCalculateMaskHalfTexelUV(
 			ContaminationMaskAtlasDimensions,
 			ResolvedContaminationSurfaceSizeCm,
-			ContaminationDecalEdgeInsetCm,
+			ResolvedContaminationDecalEdgeInsetCm,
 			MaskHalfTexelUV))
 	{
 		return;
@@ -630,6 +1415,7 @@ void UMD_ScrapeSurfaceComponent::RefreshContaminationDecalMaterialParameters()
 
 	auto RefreshMID = [this, MaskHalfTexelUV](
 		UMaterialInstanceDynamic* DecalMID,
+		const EMD_ScrapeSurfaceFace Face,
 		const float VOffset,
 		const float UFlip)
 	{
@@ -641,6 +1427,12 @@ void UMD_ScrapeSurfaceComponent::RefreshContaminationDecalMaterialParameters()
 		DecalMID->SetTextureParameterValue(
 			ContaminationMaskTextureParameterName,
 			ContaminationMaskTexture);
+		DecalMID->SetTextureParameterValue(
+			TransferredPaintMaskTextureParameterName,
+			TransferredPaintMaskTexture);
+		ApplyContaminationAppearanceParameters(
+			*DecalMID,
+			DecalMID->Parent.Get());
 		DecalMID->SetScalarParameterValue(
 			ContaminationMaskVScaleParameterName,
 			0.5f);
@@ -656,257 +1448,39 @@ void UMD_ScrapeSurfaceComponent::RefreshContaminationDecalMaterialParameters()
 		DecalMID->SetScalarParameterValue(
 			ContaminationMaskHalfTexelVParameterName,
 			MaskHalfTexelUV.Y);
+		ApplyContaminationFaceOwnershipParameters(*DecalMID, Face);
+		ApplyContaminationDetailWorldFrame(*DecalMID);
 	};
 
 	auto RefreshFaceMIDs = [&RefreshMID](
 		const TArray<TObjectPtr<UMaterialInstanceDynamic>>& PatchMIDs,
 		UMaterialInstanceDynamic* BaseMID,
+		const EMD_ScrapeSurfaceFace Face,
 		const float VOffset,
 		const float UFlip)
 	{
 		if (PatchMIDs.IsEmpty())
 		{
-			RefreshMID(BaseMID, VOffset, UFlip);
+			RefreshMID(BaseMID, Face, VOffset, UFlip);
 			return;
 		}
 
 		for (UMaterialInstanceDynamic* const PatchMID : PatchMIDs)
 		{
-			RefreshMID(PatchMID, VOffset, UFlip);
+			RefreshMID(PatchMID, Face, VOffset, UFlip);
 		}
 	};
 
 	RefreshFaceMIDs(
 		FrontContaminationDecalPatchMIDs,
 		FrontContaminationDecalMID,
+		EMD_ScrapeSurfaceFace::Front,
 		0.0f,
 		1.0f);
 	RefreshFaceMIDs(
 		BackContaminationDecalPatchMIDs,
 		BackContaminationDecalMID,
+		EMD_ScrapeSurfaceFace::Back,
 		0.5f,
 		0.0f);
-}
-
-
-void UMD_ScrapeSurfaceComponent::InitializeContaminationVisualization()
-{
-	if (!ContaminationOverlay)
-	{
-		return;
-	}
-
-	ContaminationOverlay->ClearInstances();
-	ContaminationCellBaseTransforms.Reset();
-	ContaminationOverlay->SetVisibility(false);
-
-	if (!bShowContaminationOverlay
-		|| bContaminationDecalsConfigured
-		|| !bContaminationSurfaceInitialized
-		|| ContaminationCells.IsEmpty())
-	{
-		return;
-	}
-
-	UStaticMesh* OverlayMesh = ContaminationOverlay->GetStaticMesh();
-	if (!OverlayMesh)
-	{
-		UE_LOG(
-			LogTemp,
-			Warning,
-			TEXT("MD_CuttableWall::InitializeContaminationVisualization - %s의 ContaminationOverlay 컴포넌트에 Static SurfaceMesh가 지정되지 않았습니다."),
-			*GetName());
-		return;
-	}
-
-	// SurfaceMesh와 Material은 Blueprint에서 지정
-	FVector HorizontalAxisLocal;
-	FVector FrontNormalLocal;
-	FVector VerticalAxisLocal;
-	if (!FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
-			ResolvedContaminationSurfaceNormalAxis,
-			HorizontalAxisLocal,
-			FrontNormalLocal,
-			VerticalAxisLocal))
-	{
-		return;
-	}
-
-	const FVector AbsoluteScale = SurfaceMesh->GetComponentScale().GetAbs();
-	const double SafeHorizontalScale = FMath::Max(
-		FMath::Abs(FVector::DotProduct(
-			AbsoluteScale,
-			HorizontalAxisLocal)),
-		static_cast<double>(UE_SMALL_NUMBER));
-	const double SafeNormalScale = FMath::Max(
-		FMath::Abs(FVector::DotProduct(
-			AbsoluteScale,
-			FrontNormalLocal)),
-		static_cast<double>(UE_SMALL_NUMBER));
-	const double SafeVerticalScale = FMath::Max(
-		FMath::Abs(FVector::DotProduct(
-			AbsoluteScale,
-			VerticalAxisLocal)),
-		static_cast<double>(UE_SMALL_NUMBER));
-
-	// 월드 크기를 Overlay 로컬 단위로 변환
-	const double SurfaceWidthLocal =
-		static_cast<double>(ResolvedContaminationSurfaceSizeCm.X)
-		/ SafeHorizontalScale;
-	const double SurfaceHeightLocal =
-		static_cast<double>(ResolvedContaminationSurfaceSizeCm.Y)
-		/ SafeVerticalScale;
-	const double CellWidthLocal =
-		SurfaceWidthLocal
-		/ static_cast<double>(ContaminationGridDimensions.X);
-	const double CellHeightLocal =
-		SurfaceHeightLocal
-		/ static_cast<double>(ContaminationGridDimensions.Y);
-
-	const FVector OverlayMeshSize =
-		OverlayMesh->GetBounds().BoxExtent * 2.0f;
-	if (OverlayMeshSize.X <= UE_SMALL_NUMBER
-		|| OverlayMeshSize.Y <= UE_SMALL_NUMBER
-		|| OverlayMeshSize.Z <= UE_SMALL_NUMBER)
-	{
-		UE_LOG(
-			LogTemp,
-			Warning,
-			TEXT("MD_CuttableWall::InitializeContaminationVisualization - %s의 오염막 단위 메시 Bounds가 올바르지 않습니다."),
-			*GetName());
-		return;
-	}
-
-	const double ThicknessLocal =
-		static_cast<double>(ContaminationOverlayThicknessCm)
-		/ SafeNormalScale;
-	const double OffsetLocal =
-		static_cast<double>(ContaminationOverlayOffsetCm)
-		/ SafeNormalScale;
-	const double FrontSurfaceCoordinate = FVector::DotProduct(
-		ContaminationMeshLocalBoundsMaximum,
-		FrontNormalLocal);
-	const double CenterNormalCoordinate = FVector::DotProduct(
-		ContaminationSurfaceCenterLocal,
-		FrontNormalLocal);
-	const FQuat CellRotation = FRotationMatrix::MakeFromXY(
-		HorizontalAxisLocal,
-		FrontNormalLocal).ToQuat();
-
-	const int32 FrontCellCount =
-		GetContaminationCellsForFace(EMD_ScrapeSurfaceFace::Front).Num();
-	ContaminationCellBaseTransforms.Reserve(FrontCellCount);
-	ContaminationOverlay->PreAllocateInstancesMemory(FrontCellCount);
-
-	for (int32 CellY = 0; CellY < ContaminationGridDimensions.Y; ++CellY)
-	{
-		for (int32 CellX = 0; CellX < ContaminationGridDimensions.X; ++CellX)
-		{
-			const double HorizontalOffset = -SurfaceWidthLocal * 0.5
-				+ (static_cast<double>(CellX) + 0.5) * CellWidthLocal;
-			const double VerticalOffset = -SurfaceHeightLocal * 0.5
-				+ (static_cast<double>(CellY) + 0.5) * CellHeightLocal;
-			const double NormalOffset = FrontSurfaceCoordinate
-				- CenterNormalCoordinate
-				+ OffsetLocal
-				+ ThicknessLocal * 0.5;
-			const FVector CellLocation = ContaminationSurfaceCenterLocal
-				+ HorizontalAxisLocal * HorizontalOffset
-				+ FrontNormalLocal * NormalOffset
-				+ VerticalAxisLocal * VerticalOffset;
-			const FVector FullContaminationScale(
-				CellWidthLocal / static_cast<double>(OverlayMeshSize.X),
-				ThicknessLocal / static_cast<double>(OverlayMeshSize.Y),
-				CellHeightLocal / static_cast<double>(OverlayMeshSize.Z));
-
-			ContaminationCellBaseTransforms.Emplace(
-				CellRotation,
-				CellLocation,
-				FullContaminationScale);
-
-			const int32 CellIndex =
-				CellX + (CellY * ContaminationGridDimensions.X);
-			ContaminationOverlay->AddInstance(
-				MakeContaminationCellVisualTransform(CellIndex));
-		}
-	}
-
-	ContaminationOverlay->SetVisibility(true);
-}
-
-
-void UMD_ScrapeSurfaceComponent::UpdateContaminationVisualization(
-	const TArray<FMD_ScrapeCellChange>& CellChanges)
-{
-	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeOverlayUpdate);
-
-	// 데칼 구성에 성공하면 ISM 오버레이는 숨겨져 인스턴스도 비어 있다.
-	// 매 틱 헛도는 루프를 아예 들어가지 않는다.
-	if (!ContaminationOverlay
-		|| bContaminationDecalsConfigured
-		|| CellChanges.IsEmpty())
-	{
-		return;
-	}
-
-	bool bUpdatedAnyInstance = false;
-	for (const FMD_ScrapeCellChange& CellChange : CellChanges)
-	{
-		// 기존 ISM 프로토타입은 앞면 N개만 표시한다. 뒷면은 데칼 Task에서 시각화한다.
-		if (!ContaminationCellBaseTransforms.IsValidIndex(
-				CellChange.CellIndex)
-			|| !ContaminationCells.IsValidIndex(CellChange.CellIndex))
-		{
-			continue;
-		}
-
-		bUpdatedAnyInstance |= ContaminationOverlay->UpdateInstanceTransform(
-			CellChange.CellIndex,
-			MakeContaminationCellVisualTransform(CellChange.CellIndex),
-			false,
-			false,
-			true);
-	}
-
-	if (bUpdatedAnyInstance)
-	{
-		ContaminationOverlay->MarkRenderStateDirty();
-	}
-}
-
-
-FTransform UMD_ScrapeSurfaceComponent::MakeContaminationCellVisualTransform(
-	const int32 CellIndex) const
-{
-	if (!ContaminationCellBaseTransforms.IsValidIndex(CellIndex)
-		|| !ContaminationCells.IsValidIndex(CellIndex))
-	{
-		return FTransform::Identity;
-	}
-
-	FTransform VisualTransform = ContaminationCellBaseTransforms[CellIndex];
-	const FMD_ScrapeSurfaceCell& Cell = ContaminationCells[CellIndex];
-
-	const float RemainingRatio =
-		Cell.InitialContamination > UE_SMALL_NUMBER
-		? FMath::Clamp(
-			Cell.RemainingContamination / Cell.InitialContamination,
-			0.0f,
-			1.0f)
-		: 0.0f;
-
-	if (RemainingRatio <= ScrapeSettings.CleanTolerance)
-	{
-		VisualTransform.SetScale3D(FVector::ZeroVector);
-		return VisualTransform;
-	}
-
-	// 면적 비율 유지를 위해 X/Z에 제곱근 적용
-	const float LinearScale = FMath::Sqrt(RemainingRatio);
-	FVector VisualScale = VisualTransform.GetScale3D();
-	VisualScale.X *= LinearScale;
-	VisualScale.Z *= LinearScale;
-	VisualTransform.SetScale3D(VisualScale);
-
-	return VisualTransform;
 }

@@ -1,10 +1,7 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
 #include "Components/DecalComponent.h"
-#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/StaticMesh.h"
-#include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 
@@ -12,13 +9,20 @@ DEFINE_STAT(STAT_MD_ScrapeStrokeTotal);
 DEFINE_STAT(STAT_MD_ScrapeEvaluate);
 DEFINE_STAT(STAT_MD_ScrapeCleanRatio);
 DEFINE_STAT(STAT_MD_ScrapeMaskUpdate);
-DEFINE_STAT(STAT_MD_ScrapeOverlayUpdate);
 DEFINE_STAT(STAT_MD_ScrapePublish);
 DEFINE_STAT(STAT_MD_ScrapeFullyRemovedCheck);
 
 namespace MD_ScrapeSurfaceComponentInternal
 {
 	const FName ContaminationMaskTextureParameterName(TEXT("MaskTexture"));
+	const FName TransferredPaintMaskTextureParameterName(
+		TEXT("PaintMaskTexture"));
+	const FName ContaminationBaseColorTextureParameterName(
+		TEXT("ContamBaseColor"));
+	const FName ContaminationShapeMaskTextureParameterName(
+		TEXT("ContaminationShapeMask"));
+	const FName ContaminationBaseCoverageParameterName(TEXT("ShapeFloorMin"));
+	const FName ContaminationOpacityParameterName(TEXT("ContaminationOpacity"));
 	const FName ContaminationMaskVScaleParameterName(TEXT("MaskVScale"));
 	const FName ContaminationMaskVOffsetParameterName(TEXT("MaskVOffset"));
 	const FName ContaminationMaskUFlipParameterName(TEXT("MaskUFlip"));
@@ -30,10 +34,24 @@ namespace MD_ScrapeSurfaceComponentInternal
 	const FName ContaminationPatchUVOffsetVParameterName(TEXT("PatchUVOffsetV"));
 	const FName ContaminationSurfaceWidthParameterName(TEXT("SurfaceWidthCm"));
 	const FName ContaminationSurfaceHeightParameterName(TEXT("SurfaceHeightCm"));
+	const FName ContaminationSurfaceThicknessParameterName(
+		TEXT("SurfaceThicknessCm"));
 	const FName ContaminationDetailTileWorldSizeParameterName(
 		TEXT("DetailTileWorldSizeCm"));
 	const FName ContaminationDecalProjectionDirectionParameterName(
 		TEXT("DecalProjectionDirectionWS"));
+	const FName ContaminationAngleFadeStartParameterName(
+		TEXT("AngleFadeStartDot"));
+	const FName ContaminationAngleFadeEndParameterName(
+		TEXT("AngleFadeEndDot"));
+	const FName ContaminationFaceSplitOriginParameterName(
+		TEXT("ContaminationFaceSplitOriginWS"));
+	const FName ContaminationFaceSplitNormalParameterName(
+		TEXT("ContaminationFaceSplitNormalWS"));
+	const FName ContaminationFaceIsFrontParameterName(
+		TEXT("ContaminationFaceIsFront"));
+	const FName ContaminationFaceOwnershipEnabledParameterName(
+		TEXT("ContaminationFaceOwnershipEnabled"));
 	const FName ContaminationSurfaceOriginParameterName(
 		TEXT("SurfaceOriginWS"));
 	const FName ContaminationSurfaceTangentUParameterName(
@@ -46,8 +64,12 @@ UMD_ScrapeSurfaceComponent::UMD_ScrapeSurfaceComponent()
 {
 	PrimaryComponentTick.bCanEverTick = false;
 	SetIsReplicatedByDefault(true);
+	bContaminationEnabled = true;
 
-	ContaminationGridDimensions = FIntPoint(30, 25);
+	// 12 x 4cm 헤라 도장을 실제 벽에서도 넓은 직사각형으로 표현할 수 있는 해상도.
+	// 양면 아틀라스는 128 x 128(16,384셀)로 uint16 복제 인덱스 범위 안에 있다.
+	ContaminationGridDimensions = FIntPoint(128, 64);
+	TransferredPaintVisualTexelSizeCm = 0.75f;
 	InitialContaminationPerCell = 1.0f;
 	bUseProceduralContamination = false;
 	ContaminationNoiseScaleCm = 75.0f;
@@ -56,28 +78,31 @@ UMD_ScrapeSurfaceComponent::UMD_ScrapeSurfaceComponent()
 	ContaminationMinimumAmount = 0.25f;
 	ContaminationSurfaceSizeOverrideCm = FVector2D::ZeroVector;
 	ContaminationSurfaceNormalAxis = EMD_ScrapeSurfaceNormalAxis::Auto;
-	ContaminationOverlayOffsetCm = 0.25f;
-	ContaminationOverlayThicknessCm = 0.35f;
-	bShowContaminationOverlay = true;
-	ContaminationOverlayMesh = nullptr;
-	ContaminationOverlayMaterial = nullptr;
 	ContaminationDecalMaterial = nullptr;
+	ContaminationBaseColorTexture = nullptr;
+	ContaminationShapeMaskTexture = nullptr;
+	ContaminationBaseCoverage = 0.85f;
+	ContaminationOpacity = 0.90f;
 	bShowContaminationDecals = true;
 	ContaminationDecalProjectionDepthCm = 1.0f;
 	bAutoFitContaminationDecalDepth = true;
+	bUseFullCoverageContaminationDecals = false;
 	ContaminationDecalDepthFitMarginCm = 1.0f;
+	FullCoverageContaminationDecalOuterMarginCm = 35.0f;
 	ContaminationDecalSurfaceOffsetCm = 0.05f;
 	ContaminationDecalEdgeInsetCm = 2.0f;
+	bFitContaminationDecalPatchesToSurface = true;
 	// 패치 하나는 평면 한 장이므로 구간이 넓을수록 곡면을 못 따라가고 각도 마스크에
 	// 걸려 사라진다. Wall_Inter_A 기준으로 150 cm는 앞면의 87.6%, 50 cm는 100%를 덮는다.
 	ContaminationDecalPatchWidthCm = 50.0f;
 	ContaminationDetailTileWorldSizeCm = 150.0f;
 	ContaminationDecalSortOrder = 0;
-
 	ResolvedContaminationSurfaceSizeCm = FVector2D::ZeroVector;
 	ResolvedContaminationSurfaceNormalAxis = EMD_ScrapeSurfaceNormalAxis::Y;
 	ResolvedFrontDecalDepthCm = 0.0f;
 	ResolvedBackDecalDepthCm = 0.0f;
+	bResolvedFullCoverageContaminationDecals = false;
+	ResolvedContaminationFaceSplitCoordinateLocal = 0.0;
 	ResolvedContaminationDecalEdgeInsetCm = 0.0f;
 	ContaminationSurfaceCenterLocal = FVector::ZeroVector;
 	ContaminationMeshLocalBoundsMinimum = FVector::ZeroVector;
@@ -85,6 +110,7 @@ UMD_ScrapeSurfaceComponent::UMD_ScrapeSurfaceComponent()
 	CachedFrontContaminationCleanRatio = 0.0f;
 	CachedBackContaminationCleanRatio = 0.0f;
 	ContaminationMaskAtlasDimensions = FIntPoint::ZeroValue;
+	TransferredPaintMaskAtlasDimensions = FIntPoint::ZeroValue;
 	bContaminationDecalsConfigured = false;
 	bContaminationSurfaceInitialized = false;
 	bContaminationCompletionBroadcast = false;
@@ -107,6 +133,7 @@ UMD_ScrapeSurfaceComponent::FindForPrimitiveComponent(
 	for (UMD_ScrapeSurfaceComponent* const Surface : Surfaces)
 	{
 		if (IsValid(Surface)
+			&& Surface->IsContaminationEnabled()
 			&& Surface->GetSurfaceMesh() == PrimitiveComponent)
 		{
 			return Surface;
@@ -122,23 +149,75 @@ void UMD_ScrapeSurfaceComponent::GetLifetimeReplicatedProps(
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(
 		UMD_ScrapeSurfaceComponent,
+		bContaminationEnabled);
+	DOREPLIFETIME(
+		UMD_ScrapeSurfaceComponent,
 		ReplicatedContaminationState);
 }
 
 void UMD_ScrapeSurfaceComponent::ConfigureExternalComponents(
 	UStaticMeshComponent* const InSurfaceMesh,
-	UInstancedStaticMeshComponent* const InContaminationOverlay,
 	UDecalComponent* const InFrontContaminationDecal,
 	UDecalComponent* const InBackContaminationDecal)
 {
 	DestroyAdditionalContaminationDecalPatches();
 	SurfaceMesh = InSurfaceMesh;
-	ContaminationOverlay = InContaminationOverlay;
 	FrontContaminationDecal = InFrontContaminationDecal;
 	BackContaminationDecal = InBackContaminationDecal;
-	bOwnsContaminationOverlay = false;
 	bOwnsFrontContaminationDecal = false;
 	bOwnsBackContaminationDecal = false;
+	if (!bContaminationEnabled)
+	{
+		SetContaminationDecalsVisible(false);
+	}
+}
+
+void UMD_ScrapeSurfaceComponent::SetContaminationEnabled(const bool bEnabled)
+{
+	if (!HasAuthority() || bContaminationEnabled == bEnabled)
+	{
+		return;
+	}
+
+	bContaminationEnabled = bEnabled;
+	if (!bContaminationEnabled)
+	{
+		ReplicatedContaminationState.ResetState();
+	}
+	ApplyContaminationEnabledState();
+
+	if (AActor* const OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
+	}
+}
+
+void UMD_ScrapeSurfaceComponent::OnRep_ContaminationEnabled()
+{
+	ApplyContaminationEnabledState();
+}
+
+void UMD_ScrapeSurfaceComponent::ApplyContaminationEnabledState()
+{
+	if (!bContaminationEnabled)
+	{
+		ShutdownRuntimeState();
+		DestroyOwnedVisualizationComponents();
+		return;
+	}
+
+	if (!IsRegistered())
+	{
+		return;
+	}
+
+	EnsureVisualizationComponents();
+	ResolveContaminationSurfaceGeometry();
+	const AActor* const OwnerActor = GetOwner();
+	if (OwnerActor && OwnerActor->HasActorBegunPlay())
+	{
+		InitializeRuntimeState();
+	}
 }
 
 bool UMD_ScrapeSurfaceComponent::HasAuthority() const
@@ -175,31 +254,6 @@ void UMD_ScrapeSurfaceComponent::EnsureVisualizationComponents()
 	if (!OwnerActor || !World || !SurfaceMesh)
 	{
 		return;
-	}
-
-	if (!ContaminationOverlay)
-	{
-		ContaminationOverlay = NewObject<UInstancedStaticMeshComponent>(
-			OwnerActor,
-			MakeUniqueObjectName(
-				OwnerActor,
-				UInstancedStaticMeshComponent::StaticClass(),
-				TEXT("ScrapeSurfaceOverlay")),
-			RF_Transient | RF_Transactional | RF_TextExportTransient);
-		ContaminationOverlay->SetupAttachment(SurfaceMesh);
-		ContaminationOverlay->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		ContaminationOverlay->SetGenerateOverlapEvents(false);
-		ContaminationOverlay->SetCanEverAffectNavigation(false);
-		ContaminationOverlay->SetReceivesDecals(false);
-		ContaminationOverlay->CastShadow = false;
-		ContaminationOverlay->SetStaticMesh(ContaminationOverlayMesh);
-		if (ContaminationOverlayMaterial)
-		{
-			ContaminationOverlay->SetMaterial(0, ContaminationOverlayMaterial);
-		}
-		ContaminationOverlay->CreationMethod = CreationMethod;
-		ContaminationOverlay->RegisterComponentWithWorld(World);
-		bOwnsContaminationOverlay = true;
 	}
 
 	auto CreateDecal = [this, OwnerActor, World](
@@ -244,11 +298,6 @@ void UMD_ScrapeSurfaceComponent::DestroyOwnedVisualizationComponents()
 {
 	DestroyAdditionalContaminationDecalPatches();
 
-	if (bOwnsContaminationOverlay && ContaminationOverlay)
-	{
-		ContaminationOverlay->DestroyComponent();
-		ContaminationOverlay = nullptr;
-	}
 	if (bOwnsFrontContaminationDecal && FrontContaminationDecal)
 	{
 		FrontContaminationDecal->DestroyComponent();
@@ -260,7 +309,6 @@ void UMD_ScrapeSurfaceComponent::DestroyOwnedVisualizationComponents()
 		BackContaminationDecal = nullptr;
 	}
 
-	bOwnsContaminationOverlay = false;
 	bOwnsFrontContaminationDecal = false;
 	bOwnsBackContaminationDecal = false;
 }
@@ -269,8 +317,15 @@ void UMD_ScrapeSurfaceComponent::OnRegister()
 {
 	Super::OnRegister();
 	ReplicatedContaminationState.SetOwner(this);
-	EnsureVisualizationComponents();
-	ResolveContaminationSurfaceGeometry();
+	if (bContaminationEnabled)
+	{
+		EnsureVisualizationComponents();
+		ResolveContaminationSurfaceGeometry();
+	}
+	else
+	{
+		ShutdownRuntimeState();
+	}
 }
 
 void UMD_ScrapeSurfaceComponent::OnUnregister()
@@ -283,7 +338,7 @@ void UMD_ScrapeSurfaceComponent::OnUnregister()
 void UMD_ScrapeSurfaceComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	InitializeRuntimeState();
+	ApplyContaminationEnabledState();
 }
 
 void UMD_ScrapeSurfaceComponent::EndPlay(
@@ -295,9 +350,14 @@ void UMD_ScrapeSurfaceComponent::EndPlay(
 
 void UMD_ScrapeSurfaceComponent::InitializeRuntimeState()
 {
+	if (!bContaminationEnabled)
+	{
+		ShutdownRuntimeState();
+		return;
+	}
+
 	ReplicatedContaminationState.SetOwner(this);
 	InitializeContaminationSurface();
-	InitializeContaminationVisualization();
 
 	if (!HasAuthority())
 	{
@@ -312,16 +372,37 @@ void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 	DestroyAdditionalContaminationDecalPatches();
 	FrontContaminationDecalMID = nullptr;
 	BackContaminationDecalMID = nullptr;
+	bContaminationDecalsConfigured = false;
+	bContaminationSurfaceInitialized = false;
+	bContaminationCompletionBroadcast = false;
+	ContaminationCells.Reset();
+	ContaminationGeneratedInitialAmounts.Reset();
+	PendingContaminationItemAmounts[0] = 0.0f;
+	PendingContaminationItemAmounts[1] = 0.0f;
+	CachedFrontContaminationCleanRatio = 0.0f;
+	CachedBackContaminationCleanRatio = 0.0f;
 }
 
 void UMD_ScrapeSurfaceComponent::InitializeSurface()
 {
+	if (!bContaminationEnabled)
+	{
+		ShutdownRuntimeState();
+		DestroyOwnedVisualizationComponents();
+		return;
+	}
+
 	EnsureVisualizationComponents();
 	InitializeRuntimeState();
 }
 
 bool UMD_ScrapeSurfaceComponent::RefreshSurfaceGeometry()
 {
+	if (!bContaminationEnabled)
+	{
+		return false;
+	}
+
 	ResolveSurfaceMeshFromOwner();
 	return ResolveContaminationSurfaceGeometry();
 }

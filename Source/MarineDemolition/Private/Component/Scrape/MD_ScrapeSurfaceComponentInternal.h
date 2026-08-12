@@ -12,8 +12,6 @@ DECLARE_CYCLE_STAT_EXTERN(TEXT("Clean Ratio"), STAT_MD_ScrapeCleanRatio,
 	STATGROUP_MD_Scrape, MARINEDEMOLITION_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("G8 Mask Update"), STAT_MD_ScrapeMaskUpdate,
 	STATGROUP_MD_Scrape, MARINEDEMOLITION_API);
-DECLARE_CYCLE_STAT_EXTERN(TEXT("ISM Overlay Update"), STAT_MD_ScrapeOverlayUpdate,
-	STATGROUP_MD_Scrape, MARINEDEMOLITION_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("Replication Publish"), STAT_MD_ScrapePublish,
 	STATGROUP_MD_Scrape, MARINEDEMOLITION_API);
 DECLARE_CYCLE_STAT_EXTERN(TEXT("Fully Removed Check"),
@@ -24,6 +22,11 @@ DECLARE_CYCLE_STAT_EXTERN(TEXT("Fully Removed Check"),
 namespace MD_ScrapeSurfaceComponentInternal
 {
 	extern const FName ContaminationMaskTextureParameterName;
+	extern const FName TransferredPaintMaskTextureParameterName;
+	extern const FName ContaminationBaseColorTextureParameterName;
+	extern const FName ContaminationShapeMaskTextureParameterName;
+	extern const FName ContaminationBaseCoverageParameterName;
+	extern const FName ContaminationOpacityParameterName;
 	extern const FName ContaminationMaskVScaleParameterName;
 	extern const FName ContaminationMaskVOffsetParameterName;
 	extern const FName ContaminationMaskUFlipParameterName;
@@ -35,8 +38,15 @@ namespace MD_ScrapeSurfaceComponentInternal
 	extern const FName ContaminationPatchUVOffsetVParameterName;
 	extern const FName ContaminationSurfaceWidthParameterName;
 	extern const FName ContaminationSurfaceHeightParameterName;
+	extern const FName ContaminationSurfaceThicknessParameterName;
 	extern const FName ContaminationDetailTileWorldSizeParameterName;
 	extern const FName ContaminationDecalProjectionDirectionParameterName;
+	extern const FName ContaminationAngleFadeStartParameterName;
+	extern const FName ContaminationAngleFadeEndParameterName;
+	extern const FName ContaminationFaceSplitOriginParameterName;
+	extern const FName ContaminationFaceSplitNormalParameterName;
+	extern const FName ContaminationFaceIsFrontParameterName;
+	extern const FName ContaminationFaceOwnershipEnabledParameterName;
 
 	/**
 	 * 장식용 오염 무늬를 패치 UV가 아니라 벽 표면의 월드 좌표로 만들기 위한 기준계.

@@ -1,5 +1,7 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
+#include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
+
 #include "CollisionQueryParams.h"
 #include "Components/DecalComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -8,6 +10,7 @@
 #include "Gameplay/Scrape/MD_ScrapeDecalLayout.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceGeometry.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/MaterialInterface.h"
 #include "Math/RotationMatrix.h"
 
 bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalPatchesForFace(
@@ -26,7 +29,21 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalPatchesForFace(
 	float& ResolvedDepthCm = Face == EMD_ScrapeSurfaceFace::Front
 		? ResolvedFrontDecalDepthCm
 		: ResolvedBackDecalDepthCm;
-	FMD_ScrapeDecalFaceLayout FaceLayout;
+	float UnusedSurfaceThicknessCm = 0.0f;
+	const bool bMaterialSupportsSurfaceThicknessGate =
+		ContaminationDecalMaterial->GetScalarParameterValue(
+			FHashedMaterialParameterInfo(
+				MD_ScrapeSurfaceComponentInternal::
+					ContaminationSurfaceThicknessParameterName),
+			UnusedSurfaceThicknessCm);
+	const float RequestedOutwardMarginCm =
+		bResolvedFullCoverageContaminationDecals
+			&& bMaterialSupportsSurfaceThicknessGate
+		? FMath::Max(
+			ContaminationDecalSurfaceOffsetCm,
+			FullCoverageContaminationDecalOuterMarginCm)
+		: ContaminationDecalSurfaceOffsetCm;
+	FMD_ScrapeDecalFaceLayout TraceFaceLayout;
 	if (!FMD_ScrapeDecalLayout::TryCalculateFaceLayout(
 			Face,
 			ResolvedContaminationSurfaceNormalAxis,
@@ -35,24 +52,110 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalPatchesForFace(
 			ContaminationMeshLocalBoundsMaximum,
 			SurfaceMesh->GetComponentScale().GetAbs(),
 			ResolvedDepthCm,
-			ContaminationDecalSurfaceOffsetCm,
+			RequestedOutwardMarginCm,
 			ContaminationDecalEdgeInsetCm,
-			FaceLayout))
+			TraceFaceLayout))
 	{
 		return false;
 	}
 
-	ResolvedDepthCm = static_cast<float>(FaceLayout.AppliedInwardDepthCm);
+	if (bResolvedFullCoverageContaminationDecals)
+	{
+		// Keep the configured lower inset to protect a coplanar floor, but extend
+		// the top and horizontal sides slightly beyond the mesh bounds. A positive
+		// inset excludes a bounds-aligned end cap wholesale, while an exact zero
+		// boundary can still lose a pixel to decal-volume clipping. Moving the
+		// center and half-height together preserves the lower boundary exactly.
+		constexpr double CoverageSideAndTopOverhangCm = 0.25;
+		const double ExistingInsetCm = TraceFaceLayout.AppliedEdgeInsetCm;
+		const double ExpansionCm = ExistingInsetCm
+			+ CoverageSideAndTopOverhangCm;
+		if (ExpansionCm > 0.0)
+		{
+			FVector HorizontalAxisLocal;
+			FVector FrontNormalLocal;
+			FVector VerticalAxisLocal;
+			if (!FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
+					ResolvedContaminationSurfaceNormalAxis,
+					HorizontalAxisLocal,
+					FrontNormalLocal,
+					VerticalAxisLocal))
+			{
+				return false;
+			}
+
+			const double VerticalScale = FMath::Abs(FVector::DotProduct(
+				SurfaceMesh->GetComponentScale().GetAbs(),
+				VerticalAxisLocal));
+			if (!FMath::IsFinite(VerticalScale)
+				|| VerticalScale <= static_cast<double>(UE_SMALL_NUMBER))
+			{
+				return false;
+			}
+
+			TraceFaceLayout.DecalSize.Z += ExpansionCm;
+			TraceFaceLayout.DecalSize.Y += ExpansionCm * 0.5;
+			TraceFaceLayout.RelativeLocation += VerticalAxisLocal
+				* (ExpansionCm * 0.5 / VerticalScale);
+			TraceFaceLayout.AppliedEdgeInsetCm =
+				0.0;
+		}
+	}
+
+	ResolvedDepthCm = static_cast<float>(
+		TraceFaceLayout.AppliedInwardDepthCm);
 	ResolvedContaminationDecalEdgeInsetCm =
-		static_cast<float>(FaceLayout.AppliedEdgeInsetCm);
-	const int32 PatchCount = FMD_ScrapeDecalLayout::
-		CalculateHorizontalPatchCount(
-			FaceLayout.DecalSize.Z * 2.0,
+		static_cast<float>(TraceFaceLayout.AppliedEdgeInsetCm);
+
+	const int32 PatchCount = bResolvedFullCoverageContaminationDecals
+		? 1
+		: FMD_ScrapeDecalLayout::CalculateHorizontalPatchCount(
+			TraceFaceLayout.DecalSize.Z * 2.0,
 			ContaminationDecalPatchWidthCm,
 			MaximumContaminationDecalPatchesPerFace);
 	if (PatchCount <= 0)
 	{
 		return false;
+	}
+
+	TArray<FMD_ScrapeDecalFaceLayout> TracePatchLayouts;
+	TracePatchLayouts.Reserve(PatchCount);
+	for (int32 PatchIndex = 0; PatchIndex < PatchCount; ++PatchIndex)
+	{
+		FMD_ScrapeDecalFaceLayout TracePatchLayout;
+		if (!FMD_ScrapeDecalLayout::TryCalculateHorizontalPatchLayout(
+				TraceFaceLayout,
+				ResolvedContaminationSurfaceNormalAxis,
+				SurfaceMesh->GetComponentScale().GetAbs(),
+				PatchIndex,
+				PatchCount,
+				TracePatchLayout))
+		{
+			return false;
+		}
+		TracePatchLayouts.Add(TracePatchLayout);
+	}
+
+	TArray<FMD_ScrapeDecalFaceLayout> RenderPatchLayouts = TracePatchLayouts;
+	if (bFitContaminationDecalPatchesToSurface
+		&& !bResolvedFullCoverageContaminationDecals)
+	{
+		bool bUseBoundsAlignedFaceFallback = false;
+		for (FMD_ScrapeDecalFaceLayout& PatchLayout : RenderPatchLayouts)
+		{
+			if (!TryFitContaminationDecalPatchToSurface(Face, PatchLayout))
+			{
+				bUseBoundsAlignedFaceFallback = true;
+				break;
+			}
+		}
+		if (bUseBoundsAlignedFaceFallback)
+		{
+			// Never mix a partly fitted face with rotated leftovers. The
+			// original bounds-aligned trace layouts are safe as one atomic OBB:
+			// the dangerous case was retaining their full depth after rotation.
+			RenderPatchLayouts = TracePatchLayouts;
+		}
 	}
 
 	OutPatchComponents.Reserve(PatchCount);
@@ -68,26 +171,11 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalPatchesForFace(
 		}
 		OutPatchComponents.Add(DecalComponent);
 
-		FMD_ScrapeDecalFaceLayout PatchLayout;
-		if (!FMD_ScrapeDecalLayout::TryCalculateHorizontalPatchLayout(
-				FaceLayout,
-				ResolvedContaminationSurfaceNormalAxis,
-				SurfaceMesh->GetComponentScale().GetAbs(),
-				PatchIndex,
-				PatchCount,
-				PatchLayout))
-		{
-			return false;
-		}
-
-		// Collision may be unavailable on a mesh. In that case the original
-		// bounds-aligned patch remains valid instead of losing the decal.
-		TryFitContaminationDecalPatchToSurface(Face, PatchLayout);
-
 		TObjectPtr<UMaterialInstanceDynamic> PatchMID;
 		if (!ConfigureContaminationDecalPatch(
 				DecalComponent,
-				PatchLayout,
+				Face,
+				RenderPatchLayouts[PatchIndex],
 				PatchMID))
 		{
 			return false;
@@ -253,6 +341,10 @@ bool UMD_ScrapeSurfaceComponent::TryFitContaminationDecalPatchToSurface(
 	QueryParams.bReturnFaceIndex = true;
 	FVector SurfaceCenterSum = FVector::ZeroVector;
 	FVector SurfaceNormalSum = FVector::ZeroVector;
+	TArray<FVector> SurfaceSamplePoints;
+	SurfaceSamplePoints.Reserve(
+		UE_ARRAY_COUNT(HorizontalSampleFractions)
+			* UE_ARRAY_COUNT(VerticalSampleFractions));
 	int32 ValidHitCount = 0;
 	for (const double HorizontalFraction : HorizontalSampleFractions)
 	{
@@ -315,6 +407,7 @@ bool UMD_ScrapeSurfaceComponent::TryFitContaminationDecalPatchToSurface(
 
 			SurfaceCenterSum += PlanarSurfaceCenterWorld
 				+ InwardTraceDirection * DistanceAlongInward;
+			SurfaceSamplePoints.Add(Hit.ImpactPoint);
 			SurfaceNormalSum += HitNormal;
 			++ValidHitCount;
 		}
@@ -327,14 +420,13 @@ bool UMD_ScrapeSurfaceComponent::TryFitContaminationDecalPatchToSurface(
 
 	const FVector SurfaceCenterWorld = SurfaceCenterSum
 		/ static_cast<double>(ValidHitCount);
-	const FVector OutwardNormal = SurfaceNormalSum.GetSafeNormal();
-	const FVector TangentVerticalAxis = (
-		NominalVerticalAxis
-		- OutwardNormal * FVector::DotProduct(
-			NominalVerticalAxis,
-			OutwardNormal)).GetSafeNormal();
+	FVector OutwardNormal = SurfaceNormalSum.GetSafeNormal();
+	OutwardNormal = (
+		OutwardNormal
+		- NominalVerticalAxis * FVector::DotProduct(
+			OutwardNormal,
+			NominalVerticalAxis)).GetSafeNormal();
 	if (OutwardNormal.IsNearlyZero()
-		|| TangentVerticalAxis.IsNearlyZero()
 		|| FVector::DotProduct(OutwardNormal, NominalOutwardNormal)
 			< MinimumPatchSurfaceNormalDot)
 	{
@@ -344,12 +436,89 @@ bool UMD_ScrapeSurfaceComponent::TryFitContaminationDecalPatchToSurface(
 	const FVector ProjectionDirection = -OutwardNormal;
 	const FQuat WorldRotation = FRotationMatrix::MakeFromXY(
 		ProjectionDirection,
-		TangentVerticalAxis).ToQuat();
+		NominalVerticalAxis).ToQuat();
 	const FVector TangentHorizontalAxis = WorldRotation.GetAxisZ();
 	const double HorizontalAlignment = FMath::Abs(FVector::DotProduct(
 		TangentHorizontalAxis,
 		NominalHorizontalAxis));
-	if (FMath::IsFinite(HorizontalAlignment))
+	if (!FMath::IsFinite(HorizontalAlignment)
+		|| HorizontalAlignment <= static_cast<double>(UE_SMALL_NUMBER))
+	{
+		return false;
+	}
+
+	double OutermostSampleCoordinate = -TNumericLimits<double>::Max();
+	double InnermostSampleCoordinate = TNumericLimits<double>::Max();
+	for (const FVector& SurfaceSamplePoint : SurfaceSamplePoints)
+	{
+		const double SampleCoordinate = FVector::DotProduct(
+			SurfaceSamplePoint,
+			OutwardNormal);
+		if (!FMath::IsFinite(SampleCoordinate))
+		{
+			return false;
+		}
+		OutermostSampleCoordinate = FMath::Max(
+			OutermostSampleCoordinate,
+			SampleCoordinate);
+		InnermostSampleCoordinate = FMath::Min(
+			InnermostSampleCoordinate,
+			SampleCoordinate);
+	}
+
+	const double SurfaceSampleSpanCm = FMath::Max(
+		OutermostSampleCoordinate - InnermostSampleCoordinate,
+		0.0);
+	const double RequestedRenderDepthCm = FMath::IsFinite(
+		ContaminationDecalProjectionDepthCm)
+		? FMath::Max(
+			static_cast<double>(ContaminationDecalProjectionDepthCm),
+			0.0)
+		: 0.0;
+	const double LocalFitMarginCm = FMath::IsFinite(
+		ContaminationDecalDepthFitMarginCm)
+		? FMath::Max(
+			static_cast<double>(ContaminationDecalDepthFitMarginCm),
+			0.0)
+		: 0.0;
+	const double LocalInwardDepthCm = FMath::Max(
+		RequestedRenderDepthCm,
+		SurfaceSampleSpanCm + LocalFitMarginCm);
+	const double PatchWorldWidthCm = InOutLayout.DecalSize.Z * 2.0;
+	const double MaximumLocalRenderDepthCm = FMath::Min(
+		FMath::Min(PatchWorldWidthCm * 0.25, 8.0),
+		FMath::Min(
+			InOutLayout.AppliedInwardDepthCm,
+			WorldThicknessCm));
+	if (!FMath::IsFinite(LocalInwardDepthCm)
+		|| LocalInwardDepthCm <= static_cast<double>(UE_SMALL_NUMBER)
+		|| !FMath::IsFinite(MaximumLocalRenderDepthCm)
+		|| MaximumLocalRenderDepthCm <= static_cast<double>(UE_SMALL_NUMBER)
+		|| LocalInwardDepthCm > MaximumLocalRenderDepthCm)
+	{
+		return false;
+	}
+
+	const FVector InwardTraceDirection = -NominalOutwardNormal;
+	const double SurfacePlaneDenominator = FVector::DotProduct(
+		InwardTraceDirection,
+		OutwardNormal);
+	if (FMath::Abs(SurfacePlaneDenominator)
+		<= static_cast<double>(UE_SMALL_NUMBER))
+	{
+		return false;
+	}
+	const double SurfaceCenterCorrectionCm =
+		(OutermostSampleCoordinate - FVector::DotProduct(
+			SurfaceCenterWorld,
+			OutwardNormal)) / SurfacePlaneDenominator;
+	if (!FMath::IsFinite(SurfaceCenterCorrectionCm))
+	{
+		return false;
+	}
+	const FVector FittedSurfaceCenterWorld = SurfaceCenterWorld
+		+ InwardTraceDirection * SurfaceCenterCorrectionCm;
+	FMD_ScrapeDecalFaceLayout FittedLayout = InOutLayout;
 	{
 		// 기울어진 상자는 담당 구간을 다 덮으려면 그만큼 넓어야 한다. 그런데 상자만
 		// 넓히고 U 구간을 그대로 두면 데칼 로컬 U 한 칸이 가리키는 월드 폭이 패치마다
@@ -358,25 +527,35 @@ bool UMD_ScrapeSurfaceComponent::TryFitContaminationDecalPatchToSurface(
 		const double WidthScale = 1.0
 			/ FMath::Max(HorizontalAlignment, 0.35);
 		const double PreviousUVScaleU =
-			static_cast<double>(InOutLayout.PatchUVScaleU);
-		InOutLayout.DecalSize.Z *= WidthScale;
-		InOutLayout.PatchUVScaleU = static_cast<float>(
+			static_cast<double>(FittedLayout.PatchUVScaleU);
+		FittedLayout.DecalSize.Z *= WidthScale;
+		FittedLayout.PatchUVScaleU = static_cast<float>(
 			PreviousUVScaleU * WidthScale);
-		InOutLayout.PatchUVOffsetU = static_cast<float>(
-			static_cast<double>(InOutLayout.PatchUVOffsetU)
+		FittedLayout.PatchUVOffsetU = static_cast<float>(
+			static_cast<double>(FittedLayout.PatchUVOffsetU)
 			- PreviousUVScaleU * (WidthScale - 1.0) * 0.5);
 	}
 
+	FittedLayout.AppliedInwardDepthCm = LocalInwardDepthCm;
+	FittedLayout.DecalSize.X = (
+		LocalInwardDepthCm + FittedLayout.AppliedOutwardMarginCm) * 0.5;
 	const double VolumeCenterFromSurfaceCm =
-		(InOutLayout.AppliedOutwardMarginCm
-			- InOutLayout.AppliedInwardDepthCm) * 0.5;
-	const FVector VolumeCenterWorld = SurfaceCenterWorld
+		(FittedLayout.AppliedOutwardMarginCm - LocalInwardDepthCm) * 0.5;
+	const FVector VolumeCenterWorld = FittedSurfaceCenterWorld
 		+ OutwardNormal * VolumeCenterFromSurfaceCm;
-	InOutLayout.RelativeLocation = MeshTransform.InverseTransformPosition(
+	FittedLayout.RelativeLocation = MeshTransform.InverseTransformPosition(
 		VolumeCenterWorld);
-	InOutLayout.RelativeRotation = (
+	FittedLayout.RelativeRotation = (
 		MeshTransform.GetRotation().Inverse() * WorldRotation).GetNormalized();
-	return !InOutLayout.RelativeLocation.ContainsNaN()
-		&& !InOutLayout.RelativeRotation.ContainsNaN()
-		&& !InOutLayout.DecalSize.ContainsNaN();
+	if (FittedLayout.RelativeLocation.ContainsNaN()
+		|| FittedLayout.RelativeRotation.ContainsNaN()
+		|| FittedLayout.DecalSize.ContainsNaN()
+		|| !FMath::IsFinite(FittedLayout.PatchUVScaleU)
+		|| !FMath::IsFinite(FittedLayout.PatchUVOffsetU))
+	{
+		return false;
+	}
+
+	InOutLayout = MoveTemp(FittedLayout);
+	return true;
 }

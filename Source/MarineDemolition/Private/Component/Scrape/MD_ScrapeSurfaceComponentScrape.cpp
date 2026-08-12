@@ -11,9 +11,24 @@
 
 using namespace MD_ScrapeSurfaceComponentInternal;
 
+namespace
+{
+	uint32 BuildStableContaminationPaintSurfaceSalt(
+		const UMD_ScrapeSurfaceComponent* const Surface,
+		const EMD_ScrapeSurfaceFace Face)
+	{
+		const UObject* const StableOwner = Surface && Surface->GetOwner()
+			? static_cast<const UObject*>(Surface->GetOwner())
+			: static_cast<const UObject*>(Surface);
+		return HashCombineFast(
+			StableOwner ? GetTypeHash(StableOwner->GetFName()) : 0u,
+			GetTypeHash(static_cast<uint8>(Face)));
+	}
+}
+
 bool UMD_ScrapeSurfaceComponent::RegisterScrapeObstacle(AMD_Barnacle* const Barnacle)
 {
-	if (!IsValid(Barnacle))
+	if (!bContaminationEnabled || !IsValid(Barnacle))
 	{
 		return false;
 	}
@@ -75,7 +90,8 @@ bool UMD_ScrapeSurfaceComponent::TryClampScrapeStrokeAgainstObstacles(
 	OutClampedEndPositionCm = EndPositionCm;
 	OutBlockingBarnacle = nullptr;
 
-	if (ScrapeObstacles.IsEmpty()
+	if (!bContaminationEnabled
+		|| ScrapeObstacles.IsEmpty()
 		|| StartPositionCm.ContainsNaN()
 		|| EndPositionCm.ContainsNaN()
 		|| !FMath::IsFinite(ToolHalfWidthCm))
@@ -174,7 +190,13 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithToolSpec(
 	return ApplyLocalScrapeStrokeInternal(
 		Stroke,
 		ToolSpec,
+		Stroke.StartPositionCm,
+		(Stroke.EndPositionCm - Stroke.StartPositionCm).GetSafeNormal(),
 		0.0f,
+		0.0f,
+		1.0f,
+		1.0f,
+		0,
 		IgnoredRemovedCleanRatioDelta);
 }
 
@@ -186,24 +208,156 @@ UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithContaminationStamp(
 	const float StampRatio,
 	float& OutRemovedCleanRatioDelta)
 {
+	const FVector2D StrokeDelta =
+		Stroke.EndPositionCm - Stroke.StartPositionCm;
+	const FVector2D StampPathAxis = StrokeDelta.IsNearlyZero()
+		? FVector2D(1.0, 0.0)
+		: StrokeDelta.GetSafeNormal();
+	const float LegacyStampDepthCm = FMath::Max(
+		ToolSpec.BladeDepthCm,
+		0.001f);
 	return ApplyLocalScrapeStrokeInternal(
 		Stroke,
 		ToolSpec,
+		Stroke.StartPositionCm,
+		StampPathAxis,
 		StampRatio,
+		1.0f,
+		LegacyStampDepthCm,
+		LegacyStampDepthCm,
+		0,
 		OutRemovedCleanRatioDelta);
+}
+
+
+FMD_ScrapeResult
+UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithContaminationStamp(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FVector2D& StampPathStartPositionCm,
+	const FVector2D& StampPathAxis,
+	const float StampRatio,
+	const float StampCoverage,
+	const float StampDepthCm,
+	const float StampSpacingCm,
+	const int32 StampPatternSeed,
+	float& OutRemovedCleanRatioDelta)
+{
+	return ApplyLocalScrapeStrokeInternal(
+		Stroke,
+		ToolSpec,
+		StampPathStartPositionCm,
+		StampPathAxis,
+		StampRatio,
+		StampCoverage,
+		StampDepthCm,
+		StampSpacingCm,
+		StampPatternSeed,
+		OutRemovedCleanRatioDelta);
+}
+
+
+void UMD_ScrapeSurfaceComponent::FlushLocalContaminationPaintTail(
+	const FMD_ScrapeStroke& FullPathStroke,
+	const FVector2D& StampPathAxis,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const float StampRatio,
+	const float StampCoverage,
+	const float StampDepthCm,
+	const float StampSpacingCm,
+	const int32 StampPatternSeed)
+{
+	if (!bContaminationEnabled
+		|| !HasAuthority()
+		|| !FMath::IsFinite(StampRatio)
+		|| StampRatio <= 0.0f
+		|| !FMath::IsFinite(StampCoverage)
+		|| StampCoverage <= 0.0f)
+	{
+		return;
+	}
+
+	if (!bContaminationSurfaceInitialized)
+	{
+		InitializeContaminationSurface();
+	}
+	if (!bContaminationSurfaceInitialized)
+	{
+		return;
+	}
+
+	TArrayView<FMD_ScrapeSurfaceCell> FaceCells =
+		GetContaminationCellsForFace(FullPathStroke.SurfaceFace);
+	FMD_ScrapeStroke PaintStroke;
+	if (FaceCells.IsEmpty()
+		|| !FMD_ScrapeEvaluator::TryBuildPendingContaminationPaintStroke(
+			FullPathStroke,
+			StampPathAxis,
+			ToolSpec,
+			ContaminationGridDimensions,
+			ResolvedContaminationSurfaceSizeCm,
+			StampDepthCm,
+			PaintStroke))
+	{
+		return;
+	}
+
+	const uint32 SurfacePatternHash = HashCombineFast(
+		GetTypeHash(StampPatternSeed),
+		BuildStableContaminationPaintSurfaceSalt(
+			this,
+			FullPathStroke.SurfaceFace));
+	const int32 SurfacePatternSeed = static_cast<int32>(
+		SurfacePatternHash & static_cast<uint32>(MAX_int32));
+	TArray<FMD_ScrapeCellChange> StampChanges;
+	FMD_ScrapeEvaluator::ApplyContaminationPaintStrokeToGrid(
+		PaintStroke,
+		ToolSpec,
+		ContaminationGridDimensions,
+		ResolvedContaminationSurfaceSizeCm,
+		StampRatio,
+		StampCoverage,
+		StampDepthCm,
+		StampSpacingCm,
+		SurfacePatternSeed,
+		FaceCells,
+		StampChanges);
+	if (StampChanges.IsEmpty())
+	{
+		return;
+	}
+
+	const int32 CellsPerFace = FaceCells.Num();
+	for (FMD_ScrapeCellChange& StampChange : StampChanges)
+	{
+		StampChange.CellIndex = FMD_ScrapeSurfaceLayout::ToCombinedCellIndex(
+			FullPathStroke.SurfaceFace,
+			StampChange.CellIndex,
+			CellsPerFace);
+	}
+	RefreshContaminationCleanRatioCache(FullPathStroke.SurfaceFace);
+	UpdateContaminationMask(StampChanges);
+	PublishContaminationChanges(StampChanges);
+	bContaminationCompletionBroadcast = IsContaminationFullyRemoved();
 }
 
 
 FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	const FMD_ScrapeStroke& Stroke,
 	const FMD_ScrapeToolSpec& ToolSpec,
+	const FVector2D& StampPathStartPositionCm,
+	const FVector2D& StampPathAxis,
 	const float StampRatio,
+	const float StampCoverage,
+	const float StampDepthCm,
+	const float StampSpacingCm,
+	const int32 StampPatternSeed,
 	float& OutRemovedCleanRatioDelta)
 {
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeStrokeTotal);
 	OutRemovedCleanRatioDelta = 0.0f;
 
-	if (!HasAuthority())
+	if (!bContaminationEnabled || !HasAuthority())
 	{
 		return FMD_ScrapeResult();
 	}
@@ -235,31 +389,15 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	}
 
 	FMD_ScrapeResult Result;
-	TArray<float> RequestedRemovalAmounts;
 	{
 		SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeEvaluate);
-		if (FMath::IsFinite(StampRatio) && StampRatio > 0.0f)
-		{
-			Result =
-				FMD_ScrapeEvaluator::ApplyStrokeToGridAndCaptureRequestedAmounts(
-					Stroke,
-					ToolSpec,
-					ScrapeSettings,
-					ContaminationGridDimensions,
-					ResolvedContaminationSurfaceSizeCm,
-					FaceCells,
-					RequestedRemovalAmounts);
-		}
-		else
-		{
-			Result = FMD_ScrapeEvaluator::ApplyStrokeToGrid(
-				Stroke,
-				ToolSpec,
-				ScrapeSettings,
-				ContaminationGridDimensions,
-				ResolvedContaminationSurfaceSizeCm,
-				FaceCells);
-		}
+		Result = FMD_ScrapeEvaluator::ApplyStrokeToGrid(
+			Stroke,
+			ToolSpec,
+			ScrapeSettings,
+			ContaminationGridDimensions,
+			ResolvedContaminationSurfaceSizeCm,
+			FaceCells);
 	}
 
 	// 잘못된 입력은 상태를 변경하지 않음
@@ -270,42 +408,75 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	OutRemovedCleanRatioDelta = Result.CleanRatioDelta;
 
 	TArray<FMD_ScrapeCellChange> StampChanges;
-	if (!RequestedRemovalAmounts.IsEmpty())
+	if (FMath::IsFinite(StampRatio)
+		&& StampRatio > 0.0f
+		&& FMath::IsFinite(StampCoverage)
+		&& StampCoverage > 0.0f)
 	{
-		FMD_ScrapeEvaluator::ApplyContaminationStampToGrid(
-			ContaminationGridDimensions,
-			RequestedRemovalAmounts,
-			StampRatio,
-			FaceCells,
-			StampChanges);
-
-		// 결과의 제거량은 헤라 적재 계산용으로 보존하고, 진행도만 최종 도포 상태로 맞춘다.
-		Result.CleanRatioAfter =
-			FMD_ScrapeEvaluator::CalculateCleanRatio(FaceCells);
-		Result.CleanRatioDelta = FMath::Max(
-			0.0f,
-			Result.CleanRatioAfter - Result.CleanRatioBefore);
-		Result.bIsSurfaceFullyClean =
-			FMD_ScrapeEvaluator::IsSurfaceFullyClean(
-				FaceCells,
-				ScrapeSettings.CleanTolerance);
-
-		Result.NewlyCleanedCellCount = 0;
-		for (FMD_ScrapeCellChange& CellChange : Result.CellChanges)
+		const uint32 SurfacePatternHash = HashCombineFast(
+			GetTypeHash(StampPatternSeed),
+			BuildStableContaminationPaintSurfaceSalt(
+				this,
+				Stroke.SurfaceFace));
+		const int32 SurfacePatternSeed = static_cast<int32>(
+			SurfacePatternHash & static_cast<uint32>(MAX_int32));
+		FMD_ScrapeStroke PaintStroke;
+		if (FMD_ScrapeEvaluator::TryBuildProtectedContaminationPaintStroke(
+				Stroke,
+				StampPathStartPositionCm,
+				StampPathAxis,
+				ToolSpec,
+				ContaminationGridDimensions,
+				ResolvedContaminationSurfaceSizeCm,
+				StampDepthCm,
+				PaintStroke))
 		{
-			if (!FaceCells.IsValidIndex(CellChange.CellIndex))
-			{
-				continue;
-			}
+			FMD_ScrapeEvaluator::ApplyContaminationPaintStrokeToGrid(
+				PaintStroke,
+				ToolSpec,
+				ContaminationGridDimensions,
+				ResolvedContaminationSurfaceSizeCm,
+				StampRatio,
+				StampCoverage,
+				StampDepthCm,
+				StampSpacingCm,
+				SurfacePatternSeed,
+				FaceCells,
+				StampChanges);
+		}
 
-			CellChange.RemainingAmountAfter =
-				FaceCells[CellChange.CellIndex].RemainingContamination;
-			CellChange.bBecameClean = CellChange.bBecameClean
-				&& CellChange.RemainingAmountAfter
-					<= ScrapeSettings.CleanTolerance;
-			if (CellChange.bBecameClean)
+		if (!StampChanges.IsEmpty())
+		{
+			// 제거량은 헤라 적재 계산용으로 보존하고, 진행도만 최종 도포 상태로 맞춘다.
+			Result.CleanRatioAfter =
+				FMD_ScrapeEvaluator::CalculateCleanRatio(FaceCells);
+			Result.CleanRatioDelta = FMath::Max(
+				0.0f,
+				Result.CleanRatioAfter - Result.CleanRatioBefore);
+			Result.bIsSurfaceFullyClean =
+				FMD_ScrapeEvaluator::IsSurfaceFullyClean(
+					FaceCells,
+					ScrapeSettings.CleanTolerance);
+
+			Result.NewlyCleanedCellCount = 0;
+			for (FMD_ScrapeCellChange& CellChange : Result.CellChanges)
 			{
-				++Result.NewlyCleanedCellCount;
+				if (!FaceCells.IsValidIndex(CellChange.CellIndex))
+				{
+					continue;
+				}
+
+				CellChange.RemainingAmountAfter =
+					FaceCells[CellChange.CellIndex].RemainingContamination;
+				CellChange.bBecameClean = CellChange.bBecameClean
+					&& CellChange.RemainingAmountAfter
+						<= ScrapeSettings.CleanTolerance
+					&& FaceCells[CellChange.CellIndex].TransferredContamination
+						<= ScrapeSettings.CleanTolerance;
+				if (CellChange.bBecameClean)
+				{
+					++Result.NewlyCleanedCellCount;
+				}
 			}
 		}
 	}
@@ -327,12 +498,41 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	}
 
 	TArray<FMD_ScrapeCellChange> SurfaceChanges = Result.CellChanges;
-	SurfaceChanges.Append(StampChanges);
+	TMap<int32, int32> SurfaceChangeIndexByCell;
+	SurfaceChangeIndexByCell.Reserve(
+		Result.CellChanges.Num() + StampChanges.Num());
+	for (int32 ChangeIndex = 0;
+		ChangeIndex < SurfaceChanges.Num();
+		++ChangeIndex)
+	{
+		SurfaceChangeIndexByCell.Add(
+			SurfaceChanges[ChangeIndex].CellIndex,
+			ChangeIndex);
+	}
+	for (const FMD_ScrapeCellChange& StampChange : StampChanges)
+	{
+		if (const int32* ExistingChangeIndex =
+			SurfaceChangeIndexByCell.Find(StampChange.CellIndex))
+		{
+			FMD_ScrapeCellChange& ExistingChange =
+				SurfaceChanges[*ExistingChangeIndex];
+			ExistingChange.RemainingAmountAfter =
+				StampChange.RemainingAmountAfter;
+			ExistingChange.bBecameClean = false;
+			continue;
+		}
+
+		const int32 AddedChangeIndex = SurfaceChanges.Add(StampChange);
+		SurfaceChangeIndexByCell.Add(
+			StampChange.CellIndex,
+			AddedChangeIndex);
+	}
+	Result.CellChanges = SurfaceChanges;
+	Result.ModifiedCellCount = SurfaceChanges.Num();
 
 	// 스트로크는 한 면만 건드리므로 그 면만 다시 계산한다.
 	RefreshContaminationCleanRatioCache(Stroke.SurfaceFace);
 	UpdateContaminationMask(SurfaceChanges);
-	UpdateContaminationVisualization(SurfaceChanges);
 	PublishContaminationChanges(SurfaceChanges);
 
 	// 기획 02 §1 규칙 3: 긁어낸 오염물은 월드 물리 오브젝트로 떨어진다.
@@ -363,6 +563,11 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 
 float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatio() const
 {
+	if (!bContaminationEnabled)
+	{
+		return 1.0f;
+	}
+
 	if (!bContaminationSurfaceInitialized)
 	{
 		return 0.0f;
@@ -376,6 +581,11 @@ float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatio() const
 float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatio(
 	const EMD_ScrapeSurfaceFace Face) const
 {
+	if (!bContaminationEnabled)
+	{
+		return 1.0f;
+	}
+
 	if (!bContaminationSurfaceInitialized)
 	{
 		return 0.0f;
@@ -402,6 +612,11 @@ float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatio(
 
 bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved() const
 {
+	if (!bContaminationEnabled)
+	{
+		return true;
+	}
+
 	return IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace::Front)
 		|| IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace::Back);
 }
@@ -409,6 +624,11 @@ bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved() const
 bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved(
 	const EMD_ScrapeSurfaceFace Face) const
 {
+	if (!bContaminationEnabled)
+	{
+		return true;
+	}
+
 	const TConstArrayView<FMD_ScrapeSurfaceCell> FaceCells =
 		GetContaminationCellsForFace(Face);
 	return bContaminationSurfaceInitialized
@@ -449,6 +669,11 @@ void UMD_ScrapeSurfaceComponent::RefreshContaminationCleanRatioCache(
 
 float UMD_ScrapeSurfaceComponent::GetContaminationDemolitionReadyRatio() const
 {
+	if (!bContaminationEnabled)
+	{
+		return 1.0f;
+	}
+
 	if (!bContaminationSurfaceInitialized)
 	{
 		return 0.0f;

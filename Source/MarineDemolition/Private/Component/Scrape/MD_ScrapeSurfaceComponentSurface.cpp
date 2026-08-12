@@ -15,9 +15,17 @@ bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromHit(
 {
 	OutSurfacePositionCm = FVector2D::ZeroVector;
 	OutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
+	if (!bContaminationEnabled)
+	{
+		return false;
+	}
 	if (!bContaminationSurfaceInitialized)
 	{
 		InitializeContaminationSurface();
+	}
+	if (!bContaminationSurfaceInitialized)
+	{
+		return false;
 	}
 
 	return TryGetContaminationFaceFromHit(Hit, OutSurfaceFace)
@@ -35,10 +43,18 @@ bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromWorldPoint(
 {
 	OutSurfacePositionCm = FVector2D::ZeroVector;
 	OutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
+	if (!bContaminationEnabled)
+	{
+		return false;
+	}
 
 	if (!bContaminationSurfaceInitialized)
 	{
 		InitializeContaminationSurface();
+	}
+	if (!bContaminationSurfaceInitialized)
+	{
+		return false;
 	}
 
 	if (!SurfaceMesh || WorldPoint.ContainsNaN() || WorldNormal.ContainsNaN())
@@ -46,11 +62,9 @@ bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromWorldPoint(
 		return false;
 	}
 
-	return FMD_ScrapeSurfaceGeometry::TryResolveSurfaceFaceFromImpactNormal(
+	return TryResolveContaminationFace(
+			WorldPoint,
 			WorldNormal,
-			SurfaceMesh->GetComponentTransform(),
-			ResolvedContaminationSurfaceNormalAxis,
-			MinimumContaminationFaceNormalDot,
 			OutSurfaceFace)
 		&& TryProjectWorldPointToContaminationSurface(
 			WorldPoint,
@@ -64,7 +78,8 @@ bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceWorldPosition(
 	FVector& OutWorldPosition) const
 {
 	OutWorldPosition = FVector::ZeroVector;
-	if (!bContaminationSurfaceInitialized
+	if (!bContaminationEnabled
+		|| !bContaminationSurfaceInitialized
 		|| !SurfaceMesh
 		|| !FMD_ScrapeSurfaceGeometry::TryCalculateSurfaceWorldPosition(
 			SurfacePositionCm,
@@ -270,6 +285,11 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 		ReplicatedContaminationState.ResetState();
 	}
 
+	if (!bContaminationEnabled)
+	{
+		return;
+	}
+
 	if (!ResolveContaminationSurfaceGeometry())
 	{
 		UE_LOG(
@@ -280,15 +300,61 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 		return;
 	}
 
-	// 런타임에서도 격자 범위 보정
+	// 큰 구조물에서도 12cm 헤라 폭이 최소 4~5셀에 걸리도록 물리 크기를 기준으로
+	// 오래된 64x64 인스턴스 설정을 자동 보강한다. uint16 양면 복제 상한은 유지한다.
+	static constexpr int32 MinimumGridAxisForAutomaticResolution = 16;
+	if (FMath::Min(
+			ContaminationGridDimensions.X,
+			ContaminationGridDimensions.Y)
+		>= MinimumGridAxisForAutomaticResolution)
+	{
+	const int32 MinimumGridWidth = FMath::CeilToInt(
+		ResolvedContaminationSurfaceSizeCm.X
+			/ MaximumContaminationCellSizeForPaintCm);
+	const int32 MinimumGridHeight = FMath::CeilToInt(
+		ResolvedContaminationSurfaceSizeCm.Y
+			/ MaximumContaminationCellSizeForPaintCm);
 	ContaminationGridDimensions.X = FMath::Clamp(
-		ContaminationGridDimensions.X,
+		FMath::Max(ContaminationGridDimensions.X, MinimumGridWidth),
 		1,
 		MaximumContaminationGridAxis);
 	ContaminationGridDimensions.Y = FMath::Clamp(
-		ContaminationGridDimensions.Y,
+		FMath::Max(ContaminationGridDimensions.Y, MinimumGridHeight),
 		1,
 		MaximumContaminationGridAxis);
+
+	const int32 MaximumCellsPerFace =
+		FMD_ScrapeSurfaceLayout::MaximumCombinedCellCount
+		/ FMD_ScrapeSurfaceLayout::FaceCount;
+	const int64 RequestedCellsPerFace =
+		static_cast<int64>(ContaminationGridDimensions.X)
+		* static_cast<int64>(ContaminationGridDimensions.Y);
+	if (RequestedCellsPerFace > MaximumCellsPerFace)
+	{
+		const double Scale = FMath::Sqrt(
+			static_cast<double>(MaximumCellsPerFace)
+				/ static_cast<double>(RequestedCellsPerFace));
+		ContaminationGridDimensions.X = FMath::Max(
+			1,
+			FMath::FloorToInt(ContaminationGridDimensions.X * Scale));
+		ContaminationGridDimensions.Y = FMath::Max(
+			1,
+			FMath::FloorToInt(ContaminationGridDimensions.Y * Scale));
+		while (static_cast<int64>(ContaminationGridDimensions.X)
+			* static_cast<int64>(ContaminationGridDimensions.Y)
+			> MaximumCellsPerFace)
+		{
+			if (ContaminationGridDimensions.X >= ContaminationGridDimensions.Y)
+			{
+				--ContaminationGridDimensions.X;
+			}
+			else
+			{
+				--ContaminationGridDimensions.Y;
+			}
+		}
+	}
+	}
 
 	int32 CellsPerFace = 0;
 	int32 TotalCellCount = 0;
@@ -319,6 +385,8 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 	{
 		Cell.InitialContamination = SafeInitialContamination;
 		Cell.RemainingContamination = SafeInitialContamination;
+		Cell.TransferredContamination = 0.0f;
+		Cell.TransferredPaintPatternDensity = 0.0f;
 	}
 	if (bUseProceduralContamination
 		&& !TryApplyProceduralInitialContamination(
@@ -461,7 +529,8 @@ bool UMD_ScrapeSurfaceComponent::TryProjectWorldPointToContaminationSurface(
 {
 	OutSurfacePositionCm = FVector2D::ZeroVector;
 
-	if (!bContaminationSurfaceInitialized
+	if (!bContaminationEnabled
+		|| !bContaminationSurfaceInitialized
 		|| !SurfaceMesh
 		|| WorldPoint.ContainsNaN())
 	{
@@ -482,7 +551,8 @@ bool UMD_ScrapeSurfaceComponent::TryGetContaminationFaceFromHit(
 	EMD_ScrapeSurfaceFace& OutSurfaceFace) const
 {
 	OutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
-	if (!bContaminationSurfaceInitialized
+	if (!bContaminationEnabled
+		|| !bContaminationSurfaceInitialized
 		|| !SurfaceMesh
 		|| !Hit.bBlockingHit
 		|| Hit.GetActor() != GetOwner()
@@ -493,10 +563,93 @@ bool UMD_ScrapeSurfaceComponent::TryGetContaminationFaceFromHit(
 		return false;
 	}
 
-	return FMD_ScrapeSurfaceGeometry::TryResolveSurfaceFaceFromImpactNormal(
+	return TryResolveContaminationFace(
+		Hit.ImpactPoint,
 		Hit.ImpactNormal,
-		SurfaceMesh->GetComponentTransform(),
-		ResolvedContaminationSurfaceNormalAxis,
-		MinimumContaminationFaceNormalDot,
 		OutSurfaceFace);
+}
+
+
+bool UMD_ScrapeSurfaceComponent::TryResolveContaminationFace(
+	const FVector& WorldPosition,
+	const FVector& WorldNormal,
+	EMD_ScrapeSurfaceFace& OutSurfaceFace) const
+{
+	OutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
+	if (!bContaminationEnabled
+		|| !bContaminationSurfaceInitialized
+		|| !SurfaceMesh
+		|| WorldPosition.ContainsNaN()
+		|| WorldNormal.ContainsNaN())
+	{
+		return false;
+	}
+
+	const float MinimumNormalDot = bResolvedFullCoverageContaminationDecals
+		? MinimumFullCoverageFaceNormalDot
+		: MinimumContaminationFaceNormalDot;
+	if (FMD_ScrapeSurfaceGeometry::TryResolveSurfaceFaceFromImpactNormal(
+			WorldNormal,
+			SurfaceMesh->GetComponentTransform(),
+			ResolvedContaminationSurfaceNormalAxis,
+			MinimumNormalDot,
+			OutSurfaceFace))
+	{
+		return true;
+	}
+
+	// Full coverage still needs a deterministic owner for tangent trims where
+	// the receiver normal cannot distinguish the semantic front and back.
+	return bResolvedFullCoverageContaminationDecals
+		&& TryResolveContaminationFaceFromWorldPosition(
+			WorldPosition,
+			OutSurfaceFace);
+}
+
+
+bool UMD_ScrapeSurfaceComponent::
+TryResolveContaminationFaceFromWorldPosition(
+	const FVector& WorldPosition,
+	EMD_ScrapeSurfaceFace& OutSurfaceFace) const
+{
+	OutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
+	if (!bContaminationEnabled
+		|| !bContaminationSurfaceInitialized
+		|| !SurfaceMesh
+		|| WorldPosition.ContainsNaN()
+		|| !FMath::IsFinite(
+			ResolvedContaminationFaceSplitCoordinateLocal))
+	{
+		return false;
+	}
+
+	FVector HorizontalAxisLocal;
+	FVector FrontNormalLocal;
+	FVector VerticalAxisLocal;
+	if (!FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
+			ResolvedContaminationSurfaceNormalAxis,
+			HorizontalAxisLocal,
+			FrontNormalLocal,
+			VerticalAxisLocal))
+	{
+		return false;
+	}
+
+	const FVector LocalPosition = SurfaceMesh->GetComponentTransform()
+		.InverseTransformPosition(WorldPosition);
+	const double FaceCoordinate = FVector::DotProduct(
+		LocalPosition,
+		FrontNormalLocal);
+	if (!FMath::IsFinite(FaceCoordinate))
+	{
+		return false;
+	}
+
+	// The equality case belongs to Front, giving the shared split plane one
+	// deterministic owner on both authority and clients.
+	OutSurfaceFace = FaceCoordinate
+		>= ResolvedContaminationFaceSplitCoordinateLocal
+		? EMD_ScrapeSurfaceFace::Front
+		: EMD_ScrapeSurfaceFace::Back;
+	return true;
 }
