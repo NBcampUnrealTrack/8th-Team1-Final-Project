@@ -18,6 +18,7 @@ class MARINEDEMOLITION_API AMD_SectorCloseoutMarker : public AActor, public IMD_
 public:
 	AMD_SectorCloseoutMarker();
 
+	virtual bool RequiresServerInteraction_Implementation() const override { return false; }
 	virtual void Interact_Implementation(AActor* Interactor) override;
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 

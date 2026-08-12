@@ -66,6 +66,12 @@ void UMD_TravelConsoleWidget::NativeConstruct()
 
 	SelectedSiteIndex = INDEX_NONE;
 	ShowPage(SitePageIndex);
+
+	// 콘솔 화면이 화면을 덮으므로 HUD를 숨긴다. 복구는 NativeDestruct에서.
+	if (AMD_PlayerController* MDPlayerController = Cast<AMD_PlayerController>(GetOwningPlayer()))
+	{
+		MDPlayerController->SetGameplayHUDVisible(false);
+	}
 }
 
 void UMD_TravelConsoleWidget::NativeDestruct()
@@ -74,6 +80,11 @@ void UMD_TravelConsoleWidget::NativeDestruct()
 	{
 		PC->SetShowMouseCursor(false);
 		PC->SetInputMode(FInputModeGameOnly());
+
+		if (AMD_PlayerController* MDPlayerController = Cast<AMD_PlayerController>(PC))
+		{
+			MDPlayerController->SetGameplayHUDVisible(true);
+		}
 	}
 
 	Super::NativeDestruct();

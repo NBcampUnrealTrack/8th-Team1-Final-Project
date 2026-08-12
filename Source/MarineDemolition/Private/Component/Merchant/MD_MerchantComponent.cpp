@@ -20,6 +20,7 @@ void UMD_MerchantComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	// 상인 상태는 팀 공유 데이터라 전원에게 보낸다.
 	DOREPLIFETIME(UMD_MerchantComponent, Credits);
 	DOREPLIFETIME(UMD_MerchantComponent, CurrentDay);
+	DOREPLIFETIME(UMD_MerchantComponent, Affinity);
 	DOREPLIFETIME(UMD_MerchantComponent, QuestCompletions);
 	DOREPLIFETIME(UMD_MerchantComponent, ActiveQuestReward);
 	DOREPLIFETIME(UMD_MerchantComponent, MainQuests);
@@ -80,12 +81,16 @@ void UMD_MerchantComponent::RefreshFromSubsystem()
 
 	Credits = Merchant->GetCredits();
 	CurrentDay = Merchant->GetCurrentDay();
+	Affinity = Merchant->GetAffinity();
 	QuestCompletions = Merchant->GetQuestCompletions();
 	ActiveQuestReward = Merchant->GetActiveQuestReward();
 	MainQuests = Merchant->GetMainQuests();
 	RepeatQuests = Merchant->GetRepeatQuests();
 
-	// 리슨서버 호스트는 OnRep이 오지 않으므로 명시적 호출.
+	// 저장 복원 직후 접속 클라이언트가 다음 일반 갱신 주기를 기다리지 않도록 하는 즉시 복제 요청
+	GetOwner()->ForceNetUpdate();
+
+	// 리슨서버 호스트는 OnRep이 오지 않으므로 동일한 UI 상태를 보장하기 위한 직접 방송
 	OnMerchantStateChanged.Broadcast();
 }
 
@@ -104,8 +109,9 @@ FMD_MerchantMenuInfo UMD_MerchantComponent::BuildMenuInfo() const
 	Info.Credits = Credits;
 	Info.ContractDay = CurrentDay;
 	Info.ActiveQuestReward = ActiveQuestReward;
+	Info.Affinity = Affinity;
 
-	// TODO(김동연): 호감도 단계에서 Affinity / AffinityToNextUnlock을 채운다.
+	// 다음 해금 임계값은 카탈로그별 값이므로 호출 위젯에서 계산하기 위한 기본 상태 유지
 	// TODO(김동연): 대출 단계에서 DebtBalance / LoanLimit / DailyInterestRate를 채운다.
 	// 그때까지는 구조체 기본값(착수금 500 / 한도 800 / 이자 5%)이 표시된다.
 

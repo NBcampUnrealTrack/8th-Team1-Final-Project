@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -17,6 +17,7 @@ DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
 
 class UMD_SiteDefinition;
 struct FGameplayTag;
+struct FMD_MerchantData;
 
 enum class EMD_SampleGrade : uint8;
 
@@ -33,6 +34,8 @@ public:
 
 	int32 GetCredits() const { return Credits; }
 	int32 GetCurrentDay() const { return CurrentDay; }
+	// 상점 해금과 대화 분기에 사용하는 현재 호감도를 반환하는 함수
+	float GetAffinity() const { return Affinity; }
 
 	/** BeginContract 이후 현장 계약이 살아 있는지. GameInstance 수명 동안 유지된다. */
 	bool HasActiveContract() const { return CurrentSite != nullptr; }
@@ -44,6 +47,9 @@ public:
 
 	/** 크레딧 증감. 단독 호출용이며 변경 후 델리게이트 알림. */
 	void AddCredits(int32 Amount);
+
+	// 호감도를 기획 범위 안에서 증감하고 복제 미러 갱신을 요청하는 함수
+	void AddAffinity(float Amount);
 
 	//계약 시작, 착수금 지급
 	void BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment);
@@ -89,6 +95,12 @@ public:
 	/** 계약 종료 시 남은 활성 반복 퀘스트를 실패로 정리한다. */
 	void FinalizeContract();
 
+	// 현재 경제·호감도·퀘스트 원장을 저장 필드로 복사하는 함수
+	FMD_MerchantData GetMerchantSaveData() const;
+
+	// 검증된 저장 필드를 서버 권위 상인 원장에 원자적으로 적용하는 함수
+	bool ApplyMerchantSaveData(const FMD_MerchantData& SaveData);
+
 	/** `Resource.Sample.Grade.X` 태그 변환. 등급 태그가 필요한 곳에서 공용으로 쓴다. */
 	static FGameplayTag GradeTagFromSampleGrade(EMD_SampleGrade Grade);
 
@@ -124,6 +136,9 @@ private:
 	void ApplyQuestReward(const FMD_QuestDefinitionData& Definition);
 
 	int32 Credits = 0;
+
+	// 상점 해금과 대화 분기를 계약 사이에도 유지하기 위한 누적 호감도
+	float Affinity = 0.0f;
 
 	int32 CurrentDay = 0;
 

@@ -1,9 +1,11 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Types/Persistence/MD_DaySnapshotTypes.h"
 #include "MD_DayPersistenceSubsystem.generated.h"
+
+struct FMD_WorldData;
 
 // 계약(3일) 동안 Day 간 현장 상태를 보관/복원. GameInstance 수명이라 레벨 트래블에도 유지
 UCLASS()
@@ -17,6 +19,12 @@ public:
 
     // Day 시작 시 서버에서 호출. 스냅샷 적용 + 소량 악화. 적용했으면 true
     bool RestoreSnapshot(UWorld* World);
+
+    // 파일 저장에 사용할 현재 서버 월드 상태를 수집하는 함수
+    bool BuildWorldSaveData(UWorld* World, FMD_WorldData& OutWorldData);
+
+    // 파일에서 불러온 월드 상태를 현재 서버 월드에 정확히 적용하는 함수
+    bool ApplyWorldSaveData(UWorld* World, const FMD_WorldData& WorldData) const;
 
     // 새 계약 시작 시 스냅샷 폐기
     void ClearSnapshot() { Snapshot = FMD_DaySnapshot(); }

@@ -12,6 +12,7 @@
 struct FBlueprintSessionResult;
 struct FMD_SessionCreateParams;     // Hosting Session 설정값
 struct FMD_SessionFindParams;     // Find Session 설정 값
+struct FMD_GameData;     // 게임 시작과 불러오기에 사용하는 확장 세이브 데이터
 
 // Session 생성 완료 시 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCreateMDSessionCompleteSignature, bool, bWasSuccessful);
