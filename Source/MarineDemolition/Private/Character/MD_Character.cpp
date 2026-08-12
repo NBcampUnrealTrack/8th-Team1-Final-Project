@@ -36,8 +36,7 @@
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UMD_CharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
- 	// Set this character to call Tick() every frame.  You can turn this off to improve performance if you don't need it.
-	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bCanEverTick = false;
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -147,6 +146,16 @@ void AMD_Character::BeginPlay()
 	}
 }
 
+void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->CancelInteraction();
+	}
+
+	Super::EndPlay(EndPlayReason);
+}
+
 void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
 {
 	Super::OnMovementModeChanged(PrevMovementMode, PreviousCustomMode);
@@ -205,6 +214,16 @@ void AMD_Character::PossessedBy(AController* NewController)
 
 	InitializeAbilitySystem();
 	GrantDefaultAbilities();
+}
+
+void AMD_Character::UnPossessed()
+{
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->CancelInteraction();
+	}
+
+	Super::UnPossessed();
 }
 
 void AMD_Character::OnRep_PlayerState()
@@ -525,6 +544,8 @@ void AMD_Character::InitializeAbilitySystem()
 		MDPlayerState->OnHealthStateChanged.AddDynamic(this, &AMD_Character::HandleHealthStateChanged);
 	}
 
+	// The delegate can fire before possession/PlayerState replication finishes, so synchronize once on bind.
+	HandleHealthStateChanged(MDPlayerState->GetHealthState());
 }
 
 void AMD_Character::GrantDefaultAbilities()
@@ -594,6 +615,10 @@ void AMD_Character::RefreshToolMesh()
 void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
 {
 	const bool bIsDead = (NewState == EMD_HealthState::Dead);
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->SetInteractionBlocked(bIsDead);
+	}
 
 	// 이동 차단은 서버·클라 양쪽에서 걸어 입력 반응을 즉시 없앤다.
 	ApplyDeathMovementLock(bIsDead);
@@ -660,6 +685,10 @@ void AMD_Character::TeleportToMothership()
 	}
 
 	const AActor* RespawnPoint = FoundStarts[0];
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->CancelInteraction();
+	}
 
 	// 붕괴로 막힌 방에 되살아나지 않도록 죽은 자리가 아니라 모선으로 옮긴다. (기획 02 §6)
 	SetActorLocationAndRotation(
