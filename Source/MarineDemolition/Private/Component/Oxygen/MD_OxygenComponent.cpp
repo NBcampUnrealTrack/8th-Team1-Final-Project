@@ -15,15 +15,7 @@
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
 #include "Util/MD_LogUtility.h"
-
-namespace
-{
-	/** 산소 캔 사용 시 핫바 원장에서 차감할 상점 품목 식별자 */
-	const FName OxygenCanItemId(TEXT("IT-O1"));
-
-	/** 산소 확장 탱크 소유 여부를 핫바 원장에서 조회할 상점 품목 식별자 */
-	const FName OxygenTankItemId(TEXT("IT-O2"));
-}
+#include "Data/Equipment/MD_ToolDefinition.h"
 
 UMD_OxygenComponent::UMD_OxygenComponent()
 {
@@ -103,13 +95,13 @@ void UMD_OxygenComponent::UseOxygenCan()
 	UMD_EquipHotbarComponent* HotbarComponent = IsValid(OwnerCharacter) == true ? OwnerCharacter->GetHotbarComponent() : nullptr;
 
 	// 효과를 적용할 수 없거나 구매한 산소 캔이 없으면 무료 사용을 막기 위한 검사
-	if (IsValid(ASC) == false || OxygenCanEffectClass == nullptr || IsValid(HotbarComponent) == false)
+	if (IsValid(ASC) == false || OxygenCanEffectClass == nullptr || IsValid(OxygenCanToolDefinition) == false || IsValid(HotbarComponent) == false)
 	{
 		return;
 	}
 
 	// 산소 캔 소비 처리
-	bool bConsumeSuccess = HotbarComponent->TryConsumeShopItem(OxygenCanItemId, 1);
+	bool bConsumeSuccess = HotbarComponent->TryConsumeTool(OxygenCanToolDefinition, 1);
 	if (bConsumeSuccess == false)
 	{
 		return;
@@ -235,7 +227,7 @@ void UMD_OxygenComponent::EnsureInitialized(UAbilitySystemComponent* ASC)
 	// ASC 준비 전에 구매한 확장 탱크 아이템이 존재하면 해당 효과를 적용
 	const AMD_Character* OwnerCharacter = Cast<AMD_Character>(GetOwner());
 	const UMD_EquipHotbarComponent* HotbarComponent = IsValid(OwnerCharacter) == true ? OwnerCharacter->GetHotbarComponent() : nullptr;
-	if (IsValid(HotbarComponent) == true && HotbarComponent->GetShopItemCount(OxygenTankItemId) > 0)
+	if (IsValid(HotbarComponent) == true && IsValid(OxygenTankToolDefinition) == true && HotbarComponent->GetToolCount(OxygenTankToolDefinition) > 0)
 	{
 		SetOxygenTankEquipped(true);
 	}

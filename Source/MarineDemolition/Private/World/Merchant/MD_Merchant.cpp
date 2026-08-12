@@ -40,7 +40,7 @@ namespace
 	/** 큐브 피벗이 가운데라 절반 높이만큼 올려야 액터 원점이 발밑에 온다. */
 	constexpr float PlaceholderHalfHeight = 90.f;
 
-	/** 구매 품목을 구매자 전용 핫바 슬롯, 품목 원장 또는 기존 품목 컴포넌트에 지급하는 처리 */
+	/** bPricePerUnit 값에 따라 ToolDefinition 수량 증가 또는 동일 GameplayTag 항목 교체를 수행하는 처리 */
 	bool FulfillPurchasedItem(AMD_Character* PurchasingCharacter, const FMD_ShopItem& ShopItem)
 	{
 		if (IsValid(PurchasingCharacter) == false || PurchasingCharacter->HasAuthority() == false || ShopItem.ItemId.IsNone() == true)
@@ -68,13 +68,17 @@ namespace
 			return true;
 		}
 
-		// 장비 정의가 있는 상점 품목을 기존 장비 계열 교체 대상으로 판정하는 처리
-		const bool bHasEquipmentDefinition = IsValid(ShopItem.EquipmentDefinition.Get()) == true;
-
-		// 장비 업그레이드는 신규 슬롯이나 수량 항목을 만들지 않고 동일 GameplayTag 장비 슬롯을 교체하는 처리
-		if (bHasEquipmentDefinition == true)
+		// Hotbar 품목 데이터로 사용할 카탈로그 ToolDefinition 참조
+		UMD_ToolDefinition* PurchasedToolDefinition = ShopItem.EquipmentDefinition.Get();
+		if (IsValid(PurchasedToolDefinition) == false)
 		{
-			return HotbarComponent->ReplaceToolByGameplayTag(ShopItem.EquipmentDefinition->ToolAbilityTag, ShopItem.EquipmentDefinition.Get());
+			return false;
+		}
+
+		// 개당 판매 품목은 동일 ToolDefinition 항목의 수량을 증가시키는 처리
+		if (ShopItem.bPricePerUnit == true)
+		{
+			return HotbarComponent->AddTool(PurchasedToolDefinition, 1);
 		}
 
 		// 탱크 패시브 적용 실패 전에 소유 원장이 변경되지 않도록 하는 필수 컴포넌트 검사
@@ -84,8 +88,8 @@ namespace
 			return false;
 		}
 
-		// 소모품과 패시브 장비를 기존 핫바 품목 원장에 추가하는 처리
-		if (HotbarComponent->AddShopItem(ShopItem.ItemId, 1) == false)
+		// 일회성 판매 품목은 동일 GameplayTag 항목을 교체하거나 빈 항목에 추가하는 처리
+		if (HotbarComponent->ReplaceTool(PurchasedToolDefinition) == false)
 		{
 			return false;
 		}
@@ -346,14 +350,21 @@ EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCh
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
 
-	// 동일 태그 장비 교체 또는 빈 장비 슬롯 배치가 모두 불가능하면 결제 전 포화 결과를 반환하는 검사
-	if (IsValid(ShopItem.EquipmentDefinition.Get()) == true && HotbarComponent->CanReplaceToolByGameplayTag(ShopItem.EquipmentDefinition->ToolAbilityTag, ShopItem.EquipmentDefinition.Get()) == false)
+	// 상점 거래 식별자를 Hotbar 품목 데이터인 ToolDefinition으로 변환하는 처리
+	UMD_ToolDefinition* PurchasedToolDefinition = ShopItem.EquipmentDefinition.Get();
+	if (ShopItem.ItemId != SupportItemId && IsValid(PurchasedToolDefinition) == false)
 	{
-		return EMD_ShopPurchaseResult::FullyStocked;
+		return EMD_ShopPurchaseResult::InvalidItem;
 	}
 
-	// 지지대 전용 수량과 장비 교체 품목을 제외한 신규 품목이 네 칸 제한을 넘으면 결제 전 포화 결과를 반환하는 검사
-	if (ShopItem.ItemId != SupportItemId && IsValid(ShopItem.EquipmentDefinition.Get()) == false && HotbarComponent->CanAddShopItem(ShopItem.ItemId) == false)
+	// 일회성 품목의 동일 계열 교체에 필요한 GameplayTag 유효성 검사
+	if (ShopItem.ItemId != SupportItemId && ShopItem.bPricePerUnit == false && PurchasedToolDefinition->ToolAbilityTag.IsValid() == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidItem;
+	}
+
+	// ToolDefinition 하나로 수량 증가, 동일 태그 교체, 빈 항목 추가 가능성을 결제 전에 확인하는 검사
+	if (ShopItem.ItemId != SupportItemId && (HotbarComponent->CanAddTool(PurchasedToolDefinition) == false || (ShopItem.bPricePerUnit == true && HotbarComponent->GetToolCount(PurchasedToolDefinition) >= MAX_int32)))
 	{
 		return EMD_ShopPurchaseResult::FullyStocked;
 	}

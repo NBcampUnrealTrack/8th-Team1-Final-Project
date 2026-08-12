@@ -17,9 +17,8 @@ void UMD_EquipHotbarComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
-	DOREPLIFETIME(UMD_EquipHotbarComponent, Slots);
+	DOREPLIFETIME(UMD_EquipHotbarComponent, ToolEntries);
 	DOREPLIFETIME(UMD_EquipHotbarComponent, CurrentSlotIndex);
-	DOREPLIFETIME(UMD_EquipHotbarComponent, ShopItemEntries);
 }
 
 
@@ -27,15 +26,17 @@ void UMD_EquipHotbarComponent::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (GetOwner()->HasAuthority())
+	if (IsValid(GetOwner()) == true && GetOwner()->HasAuthority() == true)
 	{
-		// Blueprint 설정과 무관하게 모든 플레이어가 동일한 네 칸 슬롯 배열을 갖도록 하는 초기화
-		Slots.SetNum(FixedSlotCount);
+		// 설정 슬롯 수와 기본 도구 수 중 큰 값으로 런타임 고정 항목 배열을 구성하는 처리
+		ToolEntries.SetNum(ResolveSlotCount());
 
-		const int32 CopyCount = FMath::Min(DefaultTools.Num(), Slots.Num());
+		// 기본 도구가 고정 항목 배열 범위를 벗어나지 않도록 제한하는 복사 수
+		const int32 CopyCount = FMath::Min(DefaultTools.Num(), ToolEntries.Num());
 		for (int32 Index = 0; Index < CopyCount; ++Index)
 		{
-			Slots[Index] = DefaultTools[Index];
+			ToolEntries[Index].ToolDefinition = DefaultTools[Index];
+			ToolEntries[Index].Count = IsValid(DefaultTools[Index]) == true ? 1 : 0;
 		}
 
 		OnHotbarChanged.Broadcast();
@@ -47,60 +48,108 @@ UMD_ToolDefinition* UMD_EquipHotbarComponent::GetCurrentTool() const
 	return GetToolAtSlot(CurrentSlotIndex);
 }
 
+int32 UMD_EquipHotbarComponent::ResolveSlotCount() const
+{
+	return FMath::Max(ConfiguredSlotCount, DefaultTools.Num());
+}
+
 UMD_ToolDefinition* UMD_EquipHotbarComponent::GetToolAtSlot(int32 SlotIndex) const
 {
-	if (!Slots.IsValidIndex(SlotIndex))
+	if (ToolEntries.IsValidIndex(SlotIndex) == false)
 	{
 		return nullptr;
 	}
 
-	return Slots[SlotIndex];
+	return ToolEntries[SlotIndex].ToolDefinition;
 }
 
-/** 별도 가방 없이 핫바가 보유한 상점 품목 수량을 반환하는 조회 함수 */
-int32 UMD_EquipHotbarComponent::GetShopItemCount(FName ItemId) const
+int32 UMD_EquipHotbarComponent::GetToolCount(UMD_ToolDefinition* ToolDefinition) const
 {
-	// 소규모 카탈로그 배열을 순회하여 복제 불가능한 TMap 없이 품목 수량을 조회하는 처리
-	const FMD_HotbarShopItemEntry* ItemEntry = ShopItemEntries.FindByPredicate([ItemId](const FMD_HotbarShopItemEntry& Entry) { return Entry.ItemId == ItemId; });
-	return ItemEntry != nullptr ? ItemEntry->Count : 0;
+	// 고정 항목 배열에서 동일 ToolDefinition의 수량을 조회하는 처리
+	const FMD_HotbarToolEntry* SameToolEntry = ToolEntries.FindByPredicate([ToolDefinition](const FMD_HotbarToolEntry& Entry) 
+		{ 
+			return Entry.ToolDefinition == ToolDefinition;
+		});
+	return SameToolEntry != nullptr ? SameToolEntry->Count : 0;
 }
 
-/** 동일 품목은 기존 스택을 사용하고 신규 품목은 네 칸 제한 안에서만 추가하도록 판정하는 함수 */
-bool UMD_EquipHotbarComponent::CanAddShopItem(FName ItemId) const
+bool UMD_EquipHotbarComponent::FindAvailableToolEntry(UMD_ToolDefinition* ToolDefinition, int32& OutEntryIndex) const
 {
-	if (ItemId.IsNone() == true)
+	OutEntryIndex = INDEX_NONE;
+	if (IsValid(ToolDefinition) == false || ToolDefinition->ToolAbilityTag.IsValid()== false)
 	{
 		return false;
 	}
 
-	const bool bHasMatchingItem = ShopItemEntries.ContainsByPredicate([ItemId](const FMD_HotbarShopItemEntry& Entry) { return Entry.ItemId == ItemId; });
-	return bHasMatchingItem == true || ShopItemEntries.Num() < FixedSlotCount;
+	int32 SameToolEntryIndex = INDEX_NONE;
+	int32 EmptyEntryIndex = INDEX_NONE;
+	for (int32 EntryIndex = 0; EntryIndex < ToolEntries.Num(); ++EntryIndex)
+	{
+		const UMD_ToolDefinition* EntryToolDefinition = ToolEntries[EntryIndex].ToolDefinition;
+		if (IsValid(EntryToolDefinition) == false || ToolEntries[EntryIndex].Count <= 0)
+		{
+			if (EmptyEntryIndex == INDEX_NONE)
+			{
+				EmptyEntryIndex = EntryIndex;
+			}
+			continue;
+		}
+
+		if (EntryToolDefinition->ToolAbilityTag.MatchesTagExact(ToolDefinition->ToolAbilityTag) == true)
+		{
+			// 동일한 아이템이 여러 슬롯에 존재하는 잘못된 상태에서 임의 항목을 변경하지 않기 위한 검사
+			if (SameToolEntryIndex != INDEX_NONE)
+			{
+				return false;
+			}
+
+			SameToolEntryIndex = EntryIndex;
+			continue;
+		}
+	}
+
+	// 동일 정의 수량 증가, 동일 태그 교체, 빈 항목 추가 순서로 반영 위치를 선택하는 처리
+	OutEntryIndex = ToolEntries.IsValidIndex(SameToolEntryIndex) == true ? SameToolEntryIndex : EmptyEntryIndex;
+	return ToolEntries.IsValidIndex(OutEntryIndex) == true;
 }
 
-/** 서버에서 검증을 마친 상점 품목을 플레이어 핫바 원장에 지급하는 함수 */
-bool UMD_EquipHotbarComponent::AddShopItem(FName ItemId, int32 Amount)
+bool UMD_EquipHotbarComponent::CanAddTool(UMD_ToolDefinition* ToolDefinition) const
 {
-	AActor* OwnerActor = GetOwner();
+	if (IsValid(ToolDefinition) == false)
+	{
+		return false;
+	}
 
-	// 클라이언트 임의 지급 방지
+	int32 AvailableEntryIndex = INDEX_NONE;
+	return FindAvailableToolEntry(ToolDefinition, AvailableEntryIndex);
+}
+
+bool UMD_EquipHotbarComponent::AddTool(UMD_ToolDefinition* ToolDefinition, int32 Amount)
+{
+	// 클라이언트 환경 실행 제한
+	AActor* OwnerActor = GetOwner();
 	if (IsValid(OwnerActor) == false || OwnerActor->HasAuthority() == false)
 	{
 		return false;
 	}
 
-	// 잘못된 식별자 또는 수량으로 인한 지급 방지
-	if (ItemId.IsNone() == true || Amount <= 0)
+	// 잘못된 ToolDefinition 또는 수량으로 인한 지급 방지
+	if (IsValid(ToolDefinition) == false || Amount <= 0)
 	{
 		return false;
 	}
 
-	// 중복 품목이 없는 상태에서 네 칸이 모두 사용 중이면 신규 스택 생성을 막는 검사
-	if (CanAddShopItem(ItemId) == false)
+	// 아이템을 추가할 수 있는 Slot의 인덱스 찾기
+	int32 AvailableEntryIndex = INDEX_NONE;
+	bool bIsAvailable = FindAvailableToolEntry(ToolDefinition, AvailableEntryIndex);
+
+	if (bIsAvailable == false)
 	{
 		return false;
 	}
 
-	const int32 CurrentCount = GetShopItemCount(ItemId);
+	// 동일 정의 항목의 현재 수량을 정수 범위 검사에 사용하기 위한 값
+	const int32 CurrentCount = ToolEntries[AvailableEntryIndex].Count;
 
 	// 비정상적으로 큰 반복 구매로 int32 수량이 순환하는 상황 방지
 	if (CurrentCount > MAX_int32 - Amount)
@@ -108,147 +157,95 @@ bool UMD_EquipHotbarComponent::AddShopItem(FName ItemId, int32 Amount)
 		return false;
 	}
 
-	FMD_HotbarShopItemEntry* ItemEntry = ShopItemEntries.FindByPredicate([ItemId](const FMD_HotbarShopItemEntry& Entry) 
-		{ 
-			return Entry.ItemId == ItemId; 
-		});
-
-	// Hotbar에 아이템 추가
-	if (ItemEntry == nullptr)
-	{
-		FMD_HotbarShopItemEntry& NewEntry = ShopItemEntries.AddDefaulted_GetRef();
-		NewEntry.ItemId = ItemId;
-		NewEntry.Count = Amount;
-	}
-	else
-	{
-		ItemEntry->Count = CurrentCount + Amount;
-	}
-
-	OnRep_ShopItemEntries();
+	// ToolDefinition과 수량을 동일 고정 항목에 원자적으로 반영하는 처리
+	ToolEntries[AvailableEntryIndex].ToolDefinition = ToolDefinition;
+	ToolEntries[AvailableEntryIndex].Count = CurrentCount + Amount;
+	OnRep_ToolEntries();
 	OwnerActor->ForceNetUpdate();
 	return true;
 }
 
-/** 동일 GameplayTag 슬롯을 우선하고 일치 슬롯이 없으면 첫 빈 슬롯을 구매 배치 위치로 반환하는 함수 */
-bool UMD_EquipHotbarComponent::FindAvailableToolSlot(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool, int32& OutSlotIndex) const
+bool UMD_EquipHotbarComponent::ReplaceTool(UMD_ToolDefinition* Tool)
 {
-	OutSlotIndex = INDEX_NONE;
-	if (TargetToolTag.IsValid() == false || IsValid(Tool) == false)
-	{
-		return false;
-	}
-
-	int32 MatchingSlotIndex = INDEX_NONE;
-	int32 EmptySlotIndex = INDEX_NONE;
-	for (int32 SlotIndex = 0; SlotIndex < Slots.Num(); ++SlotIndex)
-	{
-		const UMD_ToolDefinition* SlotTool = Slots[SlotIndex];
-		if (IsValid(SlotTool) == false)
-		{
-			if (EmptySlotIndex == INDEX_NONE)
-			{
-				EmptySlotIndex = SlotIndex;
-			}
-			continue;
-		}
-
-		if (SlotTool->ToolAbilityTag.MatchesTagExact(TargetToolTag) == false)
-		{
-			continue;
-		}
-
-		// 동일 태그 슬롯이 여러 개인 잘못된 로드아웃에서 임의 슬롯 교체를 방지하기 위한 검사
-		if (MatchingSlotIndex != INDEX_NONE)
-		{
-			return false;
-		}
-
-		MatchingSlotIndex = SlotIndex;
-	}
-
-	// 동일 장비를 다시 지급하여 결제만 발생하는 상황을 방지하기 위한 검사
-	if (Slots.IsValidIndex(MatchingSlotIndex) == true && Slots[MatchingSlotIndex] == Tool)
-	{
-		return false;
-	}
-
-	// 동일 계열이 있으면 교체하고 없으면 비어 있는 슬롯을 신규 장비 위치로 선택하는 처리
-	OutSlotIndex = Slots.IsValidIndex(MatchingSlotIndex) == true ? MatchingSlotIndex : EmptySlotIndex;
-	return Slots.IsValidIndex(OutSlotIndex) == true;
-}
-
-/** 장비 구매가 동일 태그 교체 또는 빈 슬롯 추가로 완료될 수 있는지 확인하는 함수 */
-bool UMD_EquipHotbarComponent::CanReplaceToolByGameplayTag(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool) const
-{
-	int32 AvailableSlotIndex = INDEX_NONE;
-	return FindAvailableToolSlot(TargetToolTag, Tool, AvailableSlotIndex);
-}
-
-/** 서버에서 GameplayTag로 장비 계열 슬롯 또는 빈 슬롯을 찾아 구매 장비를 원자적으로 반영하는 함수 */
-bool UMD_EquipHotbarComponent::ReplaceToolByGameplayTag(const FGameplayTag& TargetToolTag, UMD_ToolDefinition* Tool)
-{
+	// 클라이언트 환경 실행 제한
 	AActor* OwnerActor = GetOwner();
-
-	// 클라이언트의 임의 장비 변경과 유효하지 않은 장비 지급을 방지하기 위한 검사
 	if (IsValid(OwnerActor) == false || OwnerActor->HasAuthority() == false)
 	{
 		return false;
 	}
 
-	int32 AvailableSlotIndex = INDEX_NONE;
-	if (FindAvailableToolSlot(TargetToolTag, Tool, AvailableSlotIndex) == false)
+	// 유효하지 않은 장비 지급을 방지하기 위한 검사
+	if (IsValid(Tool) == false || Tool->ToolAbilityTag.IsValid() == false)
 	{
 		return false;
 	}
 
-	// 슬롯 배열 순서와 무관하게 동일 계열 또는 빈 슬롯에 구매 장비를 배치하는 처리
-	Slots[AvailableSlotIndex] = Tool;
-	OnRep_Slots();
+	// 아이템 교체 또는 추가할 수 있는 인덱스 위치 찾기
+	int32 AvailableEntryIndex = INDEX_NONE;
+	bool bIsAvailable = FindAvailableToolEntry(Tool, AvailableEntryIndex);
+
+	// 가능한 인덱스가 존재하지 않거나, 동일한 아이템으로 교체 시도 시 실패 반환
+	if (bIsAvailable == false || ToolEntries[AvailableEntryIndex].ToolDefinition == Tool)
+	{
+		return false;
+	}
+
+	// 새로운 ToolDefinition 할당
+	ToolEntries[AvailableEntryIndex].ToolDefinition = Tool;
+	ToolEntries[AvailableEntryIndex].Count = 1;
+	OnRep_ToolEntries();
 	OwnerActor->ForceNetUpdate();
 	return true;
 }
 
-/** 실제 사용이 승인된 소모품을 플레이어 핫바 원장에서 차감하는 함수 */
-bool UMD_EquipHotbarComponent::TryConsumeShopItem(FName ItemId, int32 Amount)
+bool UMD_EquipHotbarComponent::TryConsumeTool(UMD_ToolDefinition* ToolDefinition, int32 Amount)
 {
+	// 클라이언트 환경 실행 제한
 	AActor* OwnerActor = GetOwner();
-
-	// 서버 권위와 유효한 소비 요청만 허용하기 위한 검사
-	if (IsValid(OwnerActor) == false || OwnerActor->HasAuthority() == false || ItemId.IsNone() == true || Amount <= 0)
+	if (IsValid(OwnerActor) == false || OwnerActor->HasAuthority() == false)
 	{
 		return false;
 	}
 
-	const int32 ItemIndex = ShopItemEntries.IndexOfByPredicate([ItemId](const FMD_HotbarShopItemEntry& Entry) 
-		{ 
-			return Entry.ItemId == ItemId; 
+	// 사용하려는 아이템 및 수량 유효성 확인
+	if (IsValid(ToolDefinition) == false || Amount <= 0)
+	{
+		return false;
+	}
+
+	// 차감할 ToolDefinition의 고정 항목 위치 조회
+	int32 ToolEntryIndex = ToolEntries.IndexOfByPredicate([ToolDefinition](const FMD_HotbarToolEntry& Entry)
+		{
+			bool bIsMatch = Entry.ToolDefinition->ToolAbilityTag.MatchesTagExact(ToolDefinition->ToolAbilityTag);
+			bIsMatch = bIsMatch && Entry.ToolDefinition == ToolDefinition;
+			return bIsMatch;
 		});
 
-	if (ShopItemEntries.IsValidIndex(ItemIndex) == false || ShopItemEntries[ItemIndex].Count < Amount)
+	if (ToolEntries.IsValidIndex(ToolEntryIndex) == false || ToolEntries[ToolEntryIndex].Count < Amount)
 	{
 		return false;
 	}
 
-	ShopItemEntries[ItemIndex].Count -= Amount;
-	if (ShopItemEntries[ItemIndex].Count == 0)
+	ToolEntries[ToolEntryIndex].Count -= Amount;
+	if (ToolEntries[ToolEntryIndex].Count == 0)
 	{
-		ShopItemEntries.RemoveAt(ItemIndex);
+		// 배열 길이를 유지하면서 소진된 위치를 재사용할 수 있도록 항목만 초기화하는 처리
+		ToolEntries[ToolEntryIndex].ToolDefinition = nullptr;
 	}
 
-	OnRep_ShopItemEntries();
+	OnRep_ToolEntries();
 	OwnerActor->ForceNetUpdate();
 	return true;
 }
 
 void UMD_EquipHotbarComponent::SelectSlot(int32 SlotIndex)
 {
-	if (!Slots.IsValidIndex(SlotIndex) || SlotIndex == CurrentSlotIndex)
+	if (ToolEntries.IsValidIndex(SlotIndex) == false || SlotIndex == CurrentSlotIndex)
 	{
 		return;
 	}
 
-	if (GetOwner()->HasAuthority())
+	if (IsValid(GetOwner()) == true && GetOwner()->HasAuthority() == true)
 	{
 		CurrentSlotIndex = SlotIndex;
 		OnRep_CurrentSlotIndex();
@@ -263,26 +260,30 @@ void UMD_EquipHotbarComponent::SelectSlot(int32 SlotIndex)
 
 void UMD_EquipHotbarComponent::CycleSlot(int32 Direction)
 {
-	if (Slots.Num() <= 1 || Direction == 0)
+	if (ToolEntries.Num() <= 1 || Direction == 0)
 	{
 		return;
 	}
 
+	// 입력 방향을 한 칸 이동 단위로 정규화한 값
 	const int32 Step = (Direction > 0) ? 1 : -1;
-	const int32 NextIndex = (CurrentSlotIndex + Step + Slots.Num()) % Slots.Num();
+	// 배열 양 끝에서 순환하도록 계산한 다음 선택 인덱스
+	const int32 NextIndex = (CurrentSlotIndex + Step + ToolEntries.Num()) % ToolEntries.Num();
 
 	SelectSlot(NextIndex);
 }
 
 void UMD_EquipHotbarComponent::SetToolAtSlot(int32 SlotIndex, UMD_ToolDefinition* Tool)
 {
-	if (!GetOwner()->HasAuthority() || !Slots.IsValidIndex(SlotIndex))
+	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false || ToolEntries.IsValidIndex(SlotIndex) == false)
 	{
 		return;
 	}
 
-	Slots[SlotIndex] = Tool;
-	OnRep_Slots();
+	// 별도 도구 배열 없이 지정 고정 항목에 ToolDefinition과 기본 수량을 함께 설정하는 처리
+	ToolEntries[SlotIndex].ToolDefinition = Tool;
+	ToolEntries[SlotIndex].Count = IsValid(Tool) == true ? 1 : 0;
+	OnRep_ToolEntries();
 }
 
 TArray<TSoftObjectPtr<UDataAsset>> UMD_EquipHotbarComponent::BuildEquipmentSaveData() const
@@ -296,10 +297,10 @@ TArray<TSoftObjectPtr<UDataAsset>> UMD_EquipHotbarComponent::BuildEquipmentSaveD
 		return OutEquipmentList;
 	}
 
-	// 슬롯 정보 복사
-	for (UMD_ToolDefinition* Tool : Slots)
+	// 고정 항목 순서를 보존하면서 ToolDefinition만 기존 저장 형식으로 복사하는 처리
+	for (const FMD_HotbarToolEntry& ToolEntry : ToolEntries)
 	{
-		OutEquipmentList.Add(IsValid(Tool) == true ? Tool : nullptr);
+		OutEquipmentList.Add(IsValid(ToolEntry.ToolDefinition) == true ? ToolEntry.ToolDefinition.Get() : nullptr);
 	}
 
 	return OutEquipmentList;
@@ -319,12 +320,13 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 		return true;
 	}
 
-	// 슬롯 목록 초기화(Local 데이터 무시) 및 크기 설정
-	Slots.Reset();
-	Slots.SetNum(SavedToolSlots.Num());
+	// 저장 데이터 길이와 무관하게 에디터에서 결정한 고정 항목 수를 유지하는 초기화
+	ToolEntries.Reset();
+	ToolEntries.SetNum(ResolveSlotCount());
 
-	// 저장된 데이터 복사
-	for (int32 Index = 0; Index < SavedToolSlots.Num(); ++Index)
+	// 저장 데이터가 고정 항목 수를 넘지 않도록 제한하는 복사 수
+	const int32 CopyCount = FMath::Min(SavedToolSlots.Num(), ToolEntries.Num());
+	for (int32 Index = 0; Index < CopyCount; ++Index)
 	{
 		if (SavedToolSlots[Index].IsNull() == true)
 		{
@@ -338,11 +340,12 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 			continue;
 		}
 
-		Slots[Index] = Tool;
+		ToolEntries[Index].ToolDefinition = Tool;
+		ToolEntries[Index].Count = 1;
 	}
 
-	// Listen Server 환경 고려 Slot 정보 변경 이벤트 실행
-	OnRep_Slots();
+	// Listen Server 환경에서도 통합 항목 변경을 UI에 즉시 전달하는 처리
+	OnRep_ToolEntries();
 
 	// 클라이언트에 변경 사항 즉시 전달
 	GetOwner()->ForceNetUpdate();
@@ -350,7 +353,8 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 	return true;
 }
 
-void UMD_EquipHotbarComponent::OnRep_Slots()
+/** ToolEntries 복제 완료 후 Hotbar UI 갱신을 요청하는 함수 */
+void UMD_EquipHotbarComponent::OnRep_ToolEntries()
 {
 	OnHotbarChanged.Broadcast();
 }
@@ -360,15 +364,9 @@ void UMD_EquipHotbarComponent::OnRep_CurrentSlotIndex()
 	OnHotbarChanged.Broadcast();
 }
 
-void UMD_EquipHotbarComponent::OnRep_ShopItemEntries()
-{
-	// 슬롯과 구매 품목 수량을 하나의 핫바 갱신 경로로 전달하기 위한 알림
-	OnHotbarChanged.Broadcast();
-}
-
 void UMD_EquipHotbarComponent::ServerSelectSlot_Implementation(int32 SlotIndex)
 {
-	if (!Slots.IsValidIndex(SlotIndex))
+	if (ToolEntries.IsValidIndex(SlotIndex) == false)
 	{
 		return;
 	}
