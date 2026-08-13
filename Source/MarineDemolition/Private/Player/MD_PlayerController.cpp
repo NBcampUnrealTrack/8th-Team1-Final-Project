@@ -131,6 +131,52 @@ void AMD_PlayerController::ServerRequestSectorCloseout_Implementation(AMD_Sector
 	Marker->TryCloseout();
 }
 
+void AMD_PlayerController::InitializeGameplayHUD()
+{
+	if (IsLocalController() == false || IsValid(GetPawn()) == false)
+	{
+		return;
+	}
+
+	if (IsValid(HUDWidgetClass) == true)
+	{
+		if (IsValid(HUDWidgetInstance) == false)
+		{
+			// Pawn 소유가 확정된 컨트롤러에 플레이어 상태를 참조할 메인 HUD 생성
+			HUDWidgetInstance = CreateWidget<UMD_HUDWidget>(this, HUDWidgetClass);
+		}
+
+		if (IsValid(HUDWidgetInstance) == true)
+		{
+			if (HUDWidgetInstance->IsInViewport() == false)
+			{
+				// 맵 전환 과정에서 화면에서 제거된 메인 HUD 재연결
+				HUDWidgetInstance->AddToViewport();
+			}
+			HUDWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		}
+	}
+
+	if (IsValid(EquipHotbarWidgetClass) == true)
+	{
+		if (IsValid(EquipHotbarWidgetInstance) == false)
+		{
+			// 소유 Pawn의 장비 상태를 참조할 핫바 생성
+			EquipHotbarWidgetInstance = CreateWidget<UMD_EquipHotbarWidget>(this, EquipHotbarWidgetClass);
+		}
+
+		if (IsValid(EquipHotbarWidgetInstance) == true)
+		{
+			if (EquipHotbarWidgetInstance->IsInViewport() == false)
+			{
+				// 맵 전환 과정에서 화면에서 제거된 핫바 재연결
+				EquipHotbarWidgetInstance->AddToViewport();
+			}
+			EquipHotbarWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		}
+	}
+}
+
 void AMD_PlayerController::MD_ApplyTestDamage()
 {
 	ServerApplyTestDamage();
@@ -228,6 +274,14 @@ void AMD_PlayerController::MD_ShowCredits()
 	UE_LOG(LogTemp, Log, TEXT("[Merchant][%s] Credits = %d"),HasAuthority() ? TEXT("Server") : TEXT("Client"),Merchant->GetCredits());
 }
 
+void AMD_PlayerController::MD_AddAffinity(int32 DeltaAffinity)
+{
+	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	{
+		Merchant->AddAffinity(DeltaAffinity);
+	}
+}
+
 void AMD_PlayerController::ServerAddCredits_Implementation(int32 Amount)
 {
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
@@ -261,44 +315,32 @@ void AMD_PlayerController::MD_DumpQuests()
 void AMD_PlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+	InitializeGameplayHUD();
+}
 
-	if (!IsLocalController())
+void AMD_PlayerController::BeginPlayingState()
+{
+	Super::BeginPlayingState();
+
+	InitializeGameplayHUD();
+}
+
+void AMD_PlayerController::PostSeamlessTravel()
+{
+	Super::PostSeamlessTravel();
+
+	InitializeGameplayHUD();
+}
+
+void AMD_PlayerController::SetPawn(APawn* InPawn)
+{
+	Super::SetPawn(InPawn);
+
+	if (HasActorBegunPlay() == true)
 	{
-		return;
+		// 최초 스폰과 재스폰 모두 Pawn 지정이 끝난 뒤 HUD를 보장하는 처리
+		InitializeGameplayHUD();
 	}
-
-	if (!HUDWidgetClass)
-	{
-		return;
-	}
-
-	if (IsValid(HUDWidgetInstance))
-	{
-		return;
-	}
-
-	HUDWidgetInstance = CreateWidget<UMD_HUDWidget>(this, HUDWidgetClass);
-
-	if (!IsValid(HUDWidgetInstance))
-	{
-		return;
-	}
-
-	HUDWidgetInstance->AddToViewport();
-
-	if (!EquipHotbarWidgetClass || IsValid(EquipHotbarWidgetInstance))
-	{
-		return;
-	}
-
-	EquipHotbarWidgetInstance = CreateWidget<UMD_EquipHotbarWidget>(this, EquipHotbarWidgetClass);
-
-	if (!IsValid(EquipHotbarWidgetInstance))
-	{
-		return;
-	}
-
-	EquipHotbarWidgetInstance->AddToViewport();
 }
 
 void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)

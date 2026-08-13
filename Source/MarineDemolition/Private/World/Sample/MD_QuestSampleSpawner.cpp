@@ -1,4 +1,4 @@
-#include "World/Sample/MD_QuestSampleSpawner.h"
+﻿#include "World/Sample/MD_QuestSampleSpawner.h"
 
 #include "Components/ArrowComponent.h"
 #include "Components/SceneComponent.h"
@@ -195,7 +195,7 @@ void AMD_QuestSampleSpawner::TrySpawnForQuestState()
 		return;
 	}
 
-	if (!SampleClass)
+	if (IsValid(SampleClass) == false)
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("[QuestSampleSpawner] %s: SampleClass가 비어 있다 — BP_QuestSampleSpawner 기본값에 샘플 BP(BP_SampleBase 등)를 지정하세요"),
@@ -217,6 +217,12 @@ void AMD_QuestSampleSpawner::TrySpawnForQuestState()
 		return;
 	}
 
+	TrySpawnForMainQuestState(MerchantSubsystem);
+	TrySpawnForRepeatQuestStates(MerchantSubsystem);
+}
+
+void AMD_QuestSampleSpawner::TrySpawnForMainQuestState(const UMD_MerchantSubsystem* MerchantSubsystem)
+{
 	FMD_MainQuestState QuestState;
 	if (!FindLinkedMainQuest(MerchantSubsystem, QuestState))
 	{
@@ -245,6 +251,131 @@ void AMD_QuestSampleSpawner::TrySpawnForQuestState()
 
 	SpawnSamples(QuestState);
 	bHasSpawnedForActiveQuest = true;
+}
+
+void AMD_QuestSampleSpawner::TrySpawnForRepeatQuestStates(const UMD_MerchantSubsystem* MerchantSubsystem)
+{
+	if (IsValid(MerchantSubsystem) == false || IsPrimaryRepeatQuestSpawner() == false)
+	{
+		return;
+	}
+
+	// 완료·실패 뒤 같은 퀘스트가 다시 제시될 때 새 수락 주기를 처리하기 위한 기록 정리.
+	TSet<FName> AcceptedQuestIds;
+	for (const FMD_RepeatQuestState& QuestState : MerchantSubsystem->GetRepeatQuests())
+	{
+		if (QuestState.Status == EMD_RepeatQuestStatus::Accepted && MatchesRepeatQuest(QuestState) == true)
+		{
+			AcceptedQuestIds.Add(QuestState.Definition.QuestId);
+		}
+	}
+
+	// 이전에 필요한 샘플 생성 처리가 완료된 퀘스트 아이디 목록화
+	TArray<FName> HandledQuestIdsToRemove;
+	for (const FName& HandledQuestId : HandledRepeatQuestIds)
+	{
+		if (AcceptedQuestIds.Contains(HandledQuestId) == false)
+		{
+			HandledQuestIdsToRemove.Add(HandledQuestId);
+		}
+	}
+
+	// 이전에 필요한 샘플 생성 처리가 완료된 퀘스트 아이디 제외
+	for (const FName& HandledQuestId : HandledQuestIdsToRemove)
+	{
+		HandledRepeatQuestIds.Remove(HandledQuestId);
+	}
+
+	// 메인 퀘스트와 반복 퀘스트가 같은 등급 샘플을 함께 인정하는 현재 납품 규칙에 맞춘 부족분 계산.
+	for (const FMD_RepeatQuestState& QuestState : MerchantSubsystem->GetRepeatQuests())
+	{
+		const FName QuestId = QuestState.Definition.QuestId;
+		if (QuestState.Status != EMD_RepeatQuestStatus::Accepted || MatchesRepeatQuest(QuestState) == false || HandledRepeatQuestIds.Contains(QuestId) == true)
+		{
+			continue;
+		}
+
+		const int32 RemainingCount = FMath::Max(0, QuestState.Definition.RequiredCount - QuestState.CurrentProgress);
+		const int32 MissingCount = FMath::Max(0, RemainingCount - CountAvailableSamplesForGrade());
+		const int32 SpawnedCount = MissingCount > 0 ? SpawnRepeatQuestSamples(QuestState, MissingCount) : 0;
+		if (MissingCount == 0 || SpawnedCount == MissingCount)
+		{
+			HandledRepeatQuestIds.Add(QuestId);
+		}
+	}
+}
+
+bool AMD_QuestSampleSpawner::IsPrimaryRepeatQuestSpawner() const
+{
+	const UWorld* World = GetWorld();
+	bool bIsPrimarySpawner = IsValid(World);
+	if (bIsPrimarySpawner == false)
+	{
+		return bIsPrimarySpawner;
+	}
+
+	const FString SpawnerPath = GetPathName();
+	for (TActorIterator<AMD_QuestSampleSpawner> It(World); It; ++It)
+	{
+		const AMD_QuestSampleSpawner* Candidate = *It;
+		if (IsValid(Candidate) == false || Candidate == this || Candidate->SampleGrade != SampleGrade || IsValid(Candidate->SampleClass.Get()) == false)
+		{
+			continue;
+		}
+
+		if (Candidate->GetPathName() < SpawnerPath)
+		{
+			bIsPrimarySpawner = false;
+			break;
+		}
+	}
+
+	return bIsPrimarySpawner;
+}
+
+int32 AMD_QuestSampleSpawner::CountAvailableSamplesForGrade() const
+{
+	const UWorld* World = GetWorld();
+	int32 AvailableSampleCount = 0;
+	if (IsValid(World) == false)
+	{
+		return AvailableSampleCount;
+	}
+
+	for (TActorIterator<AMD_SampleItem> It(World); It; ++It)
+	{
+		const AMD_SampleItem* Sample = *It;
+		if (IsValid(Sample) == true && Sample->Grade == SampleGrade)
+		{
+			++AvailableSampleCount;
+		}
+	}
+
+	return AvailableSampleCount;
+}
+
+bool AMD_QuestSampleSpawner::MatchesRepeatQuest(const FMD_RepeatQuestState& QuestState) const
+{
+	const FMD_QuestDefinitionData& Definition = QuestState.Definition;
+	if (Definition.IsValidDefinition() == false)
+	{
+		return false;
+	}
+
+	const bool bRecoveryObjective = Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverIntact || Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
+	if (bRecoveryObjective == false)
+	{
+		return false;
+	}
+
+	const FGameplayTag ExpectedGradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(SampleGrade);
+	if (ExpectedGradeTag.IsValid() == false)
+	{
+		return false;
+	}
+
+	const bool bMatchesRepeatQuest = Definition.Kind == EMD_QuestKind::Repeat && Definition.TargetGradeTag.MatchesTagExact(ExpectedGradeTag) == true;
+	return bMatchesRepeatQuest;
 }
 
 bool AMD_QuestSampleSpawner::FindLinkedMainQuest(
@@ -386,6 +517,70 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 			*StaticEnum<EMD_SampleGrade>()->GetNameStringByValue(static_cast<int64>(SampleGrade)),
 			*Sample->GetActorLocation().ToCompactString());
 	}
+}
+
+int32 AMD_QuestSampleSpawner::SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, int32 SpawnCount)
+{
+	const FMD_QuestDefinitionData& Definition = QuestState.Definition;
+	int32 SpawnedCount = 0;
+	if (Definition.IsValidDefinition() == false || SpawnCount <= 0)
+	{
+		return SpawnedCount;
+	}
+
+	const TArray<FTransform> SpawnTransforms = CollectSpawnTransforms();
+	if (SpawnTransforms.Num() == 0)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[QuestSampleSpawner] %s: [%s] 반복 퀘스트 스폰 포인트 없음"),
+			*GetName(),
+			*Definition.QuestName.ToString());
+		return SpawnedCount;
+	}
+
+	UWorld* World = GetWorld();
+	if (IsValid(World) == false)
+	{
+		return SpawnedCount;
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	for (int32 Index = 0; Index < SpawnCount; ++Index)
+	{
+		const FTransform& SpawnTransform = SpawnTransforms[Index % SpawnTransforms.Num()];
+		AMD_SampleItem* Sample = World->SpawnActor<AMD_SampleItem>(SampleClass, SpawnTransform.GetLocation(), SpawnTransform.Rotator(), SpawnParams);
+		if (IsValid(Sample) == false)
+		{
+			UE_LOG(LogTemp, Warning,
+				TEXT("[QuestSampleSpawner] %s: [%s] 반복 퀘스트 샘플 스폰 실패 (index %d) — BP_SampleBase 부모=MD_SampleItem 확인"),
+				*GetName(),
+				*Definition.QuestName.ToString(),
+				Index);
+			continue;
+		}
+
+		// 스폰 포인트의 명시적인 크기만 반영하고 샘플 BP 기본 크기를 보존하기 위한 처리.
+		const FVector SpawnScale = SpawnTransform.GetScale3D();
+		if (SpawnScale.IsNearlyZero() == false)
+		{
+			Sample->SetActorScale3D(SpawnScale);
+		}
+
+		Sample->Grade = SampleGrade;
+		Sample->SpawnProtectionDuration = SampleSpawnProtectionDuration;
+		++SpawnedCount;
+
+		UE_LOG(LogTemp, Log,
+			TEXT("[QuestSampleSpawner] %s: [%s] 반복 퀘스트 %s급 샘플 스폰 @ %s"),
+			*GetName(),
+			*Definition.QuestName.ToString(),
+			*StaticEnum<EMD_SampleGrade>()->GetNameStringByValue(static_cast<int64>(SampleGrade)),
+			*Sample->GetActorLocation().ToCompactString());
+	}
+
+	return SpawnedCount;
 }
 
 TArray<FTransform> AMD_QuestSampleSpawner::CollectSpawnTransforms() const
