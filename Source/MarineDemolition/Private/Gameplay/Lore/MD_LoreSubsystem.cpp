@@ -51,10 +51,15 @@ bool UMD_LoreSubsystem::TryDiscoverLore(const UMD_LoreCatalog* LoreCatalog, FNam
 	// 마지막 발견과 완성 보상을 하나의 서버 연산으로 확정하기 위한 완료 예정 상태
 	bool bWillCompleteCatalog = WillCompleteCatalog(LoreCatalog, NewSiteProgress, LoreId);
 	bool bShouldGrantCompletionReward = bWillCompleteCatalog == true && NewSiteProgress.bCompletionRewardGranted == false;
-	int32 TotalRewardCredits = LoreDefinition->RewardCredits + (bShouldGrantCompletionReward == true ? LoreCatalog->CompletionRewardCredits : 0);
+	int32 CompletionRewardCredits = bShouldGrantCompletionReward == true ? LoreCatalog->CompletionRewardCredits : 0;
 
 	// 크레딧 정수 범위를 넘는 데이터가 발견 상태만 먼저 확정하는 부분 처리를 막기 위한 검사
-	if (TotalRewardCredits < 0 || TotalRewardCredits > MAX_int32 || MerchantSubsystem->GetCredits() + TotalRewardCredits > MAX_int32)
+	if (LoreDefinition->RewardCredits < 0 || CompletionRewardCredits < 0 || LoreDefinition->RewardCredits > MAX_int32 - CompletionRewardCredits)
+	{
+		return false;
+	}
+	int32 TotalRewardCredits = LoreDefinition->RewardCredits + CompletionRewardCredits;
+	if (MerchantSubsystem->GetCredits() > MAX_int32 - TotalRewardCredits)
 	{
 		return false;
 	}
@@ -75,7 +80,7 @@ bool UMD_LoreSubsystem::TryDiscoverLore(const UMD_LoreCatalog* LoreCatalog, FNam
 	*SiteProgress = MoveTemp(NewSiteProgress);
 
 	// 최초 발견 기록과 같은 서버 호출 안에서만 실행되는 중복 방지 보상 지급
-	MerchantSubsystem->AddCredits(static_cast<int32>(TotalRewardCredits));
+	MerchantSubsystem->AddCredits(TotalRewardCredits);
 
 	// 액터 파괴 이벤트보다 먼저 서버의 확정 결과를 남기기 위한 수집 로그
 	UE_LOG(MarineDemolition, Log, TEXT("%s [로어] 기록물 수집 완료: 현장=%s, 로어=%s, 보상=%d, 진행=%d/%d"), *UE_CALL_LOCATIONINFO, *LoreCatalog->SiteId.ToString(), *LoreId.ToString(), TotalRewardCredits, SiteProgress->DiscoveredLoreIds.Num(), LoreCatalog->LoreEntries.Num());

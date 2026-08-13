@@ -9,6 +9,7 @@
 
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Lore/MD_LoreComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
@@ -219,6 +220,10 @@ void AMD_Merchant::HandleMenuExitRequested()
 		if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
 		{
 			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+		}
+		if (UMD_LoreComponent* LoreComponent = GetLoreComponent())
+		{
+			LoreComponent->OnLoreProgressUpdated.RemoveDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
 		}
 		ActiveQuestWidget->RemoveFromParent();
 		ActiveQuestWidget.Reset();
@@ -588,7 +593,14 @@ void AMD_Merchant::HandleQuestRequested()
 		MerchantComponent->OnMerchantStateChanged.AddDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
 	}
 
+	// 로어 수집 정보가 변경될 때만 열린 코덱스 탭을 갱신하기 위한 전용 이벤트 구독
+	if (UMD_LoreComponent* LoreComponent = GetLoreComponent())
+	{
+		LoreComponent->OnLoreProgressUpdated.AddDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
+	}
+
 	RefreshQuestWidgetFromComponent();
+	RefreshLoreWidgetFromComponent();
 }
 
 void AMD_Merchant::HandleQuestBackRequested()
@@ -596,6 +608,10 @@ void AMD_Merchant::HandleQuestBackRequested()
 	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
 	{
 		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+	}
+	if (UMD_LoreComponent* LoreComponent = GetLoreComponent())
+	{
+		LoreComponent->OnLoreProgressUpdated.RemoveDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
 	}
 
 	if (ActiveQuestWidget.IsValid())
@@ -643,6 +659,11 @@ void AMD_Merchant::HandleMerchantStateChanged()
 	RefreshLoanWidgetFromComponent();
 }
 
+void AMD_Merchant::HandleLoreProgressUpdated()
+{
+	RefreshLoreWidgetFromComponent();
+}
+
 void AMD_Merchant::RefreshQuestWidgetFromComponent()
 {
 	if (!ActiveQuestWidget.IsValid())
@@ -658,6 +679,22 @@ void AMD_Merchant::RefreshQuestWidgetFromComponent()
 
 	ActiveQuestWidget->SetMainQuests(MerchantComponent->GetMainQuests());
 	ActiveQuestWidget->SetRepeatQuests(MerchantComponent->GetRepeatQuests());
+}
+
+void AMD_Merchant::RefreshLoreWidgetFromComponent()
+{
+	if (ActiveQuestWidget.IsValid() == false)
+	{
+		return;
+	}
+
+	UMD_LoreComponent* LoreComponent = GetLoreComponent();
+	if (IsValid(LoreComponent) == false)
+	{
+		return;
+	}
+
+	ActiveQuestWidget->SetLoreProgress(LoreComponent->GetSiteProgressList());
 }
 
 void AMD_Merchant::RefreshShopWidgetFromComponent()
@@ -716,6 +753,13 @@ UMD_MerchantComponent* AMD_Merchant::GetMerchantComponent() const
 	const AMD_GameStateBase* GameState = IsValid(World) ? World->GetGameState<AMD_GameStateBase>() : nullptr;
 
 	return IsValid(GameState) ? GameState->GetMerchantComponent() : nullptr;
+}
+
+UMD_LoreComponent* AMD_Merchant::GetLoreComponent() const
+{
+	const UWorld* World = GetWorld();
+	const AMD_GameStateBase* GameState = IsValid(World) == true ? World->GetGameState<AMD_GameStateBase>() : nullptr;
+	return IsValid(GameState) == true ? GameState->GetLoreComponent() : nullptr;
 }
 
 UMD_MerchantSubsystem* AMD_Merchant::GetMerchantSubsystem() const

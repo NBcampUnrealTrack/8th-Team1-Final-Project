@@ -53,6 +53,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	bool HasDiscoveredLore(FName SiteId, FName LoreId) const;
 
+	/** 열린 코덱스 UI가 모든 현장의 수집 정보를 한 번에 복사하기 위한 조회 함수 */
+	UFUNCTION(BlueprintPure, Category = "MD|Lore")
+	TArray<FMD_LoreSiteProgress> GetSiteProgressList() const { return SiteProgressList; }
+
 protected:
 	/** 서버 원장 전체를 복제 배열로 복사하고 즉시 전파하는 함수 */
 	void RefreshFromSubsystem();

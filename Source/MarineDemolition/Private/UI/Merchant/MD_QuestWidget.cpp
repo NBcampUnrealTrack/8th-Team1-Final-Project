@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "UI/Merchant/MD_QuestWidget.h"
@@ -83,6 +83,12 @@ void UMD_QuestWidget::SetRepeatQuests(const TArray<FMD_RepeatQuestState>& InRepe
 	RefreshDisplay();
 }
 
+void UMD_QuestWidget::SetLoreProgress(const TArray<FMD_LoreSiteProgress>& InSiteProgressList)
+{
+	LoreSiteProgressList = InSiteProgressList;
+	RefreshLoreDisplay();
+}
+
 void UMD_QuestWidget::SelectTab(EMD_QuestTab InTab)
 {
 	SelectedTab = InTab;
@@ -141,12 +147,13 @@ void UMD_QuestWidget::ApplyTabVisibility()
 	}
 	if (IsValid(TXT_LoreEmptyNotice))
 	{
-		const bool bShowLoreEmpty = SelectedTab == EMD_QuestTab::Lore;
-		TXT_LoreEmptyNotice->SetVisibility(bShowLoreEmpty ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-		if (bShowLoreEmpty)
-		{
-			TXT_LoreEmptyNotice->SetText(FText::FromString(TEXT("코덱스 데이터가 아직 연결되지 않았다.")));
-		}
+		TXT_LoreEmptyNotice->SetVisibility(SelectedTab == EMD_QuestTab::Lore ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		//const bool bShowLoreEmpty = SelectedTab == EMD_QuestTab::Lore;
+		//TXT_LoreEmptyNotice->SetVisibility(bShowLoreEmpty ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		//if (bShowLoreEmpty)
+		//{
+		//	TXT_LoreEmptyNotice->SetText(FText::FromString(TEXT("코덱스 데이터가 아직 연결되지 않았다.")));
+		//}
 	}
 
 	// 패널 타이틀은 탭 공통으로 고정하지 않는다 — 로어 탭은 "퀘스트"가 아니라
@@ -166,6 +173,25 @@ void UMD_QuestWidget::ApplyTabVisibility()
 			break;
 		}
 	}
+}
+
+void UMD_QuestWidget::RefreshLoreDisplay()
+{
+	if (IsValid(TXT_LoreEmptyNotice) == false)
+	{
+		return;
+	}
+
+	// 서로 다른 현장의 영구 수집 기록을 코덱스 전체 발견량으로 합산하는 누적값
+	int32 DiscoveredLoreCount = 0;
+	for (const FMD_LoreSiteProgress& SiteProgress : LoreSiteProgressList)
+	{
+		DiscoveredLoreCount += SiteProgress.DiscoveredLoreIds.Num();
+	}
+
+	// 현재 연결된 단일 텍스트 영역에서 영구 누적 로어 수집량을 즉시 확인하기 위한 표시
+	FText LoreProgressText = DiscoveredLoreCount > 0 ? FText::Format(FText::FromString(TEXT("수집한 기록물: {0}개")), FText::AsNumber(DiscoveredLoreCount)) : FText::FromString(TEXT("아직 수집한 기록물이 없다."));
+	TXT_LoreEmptyNotice->SetText(LoreProgressText);
 }
 
 void UMD_QuestWidget::RebuildMainQuestList()

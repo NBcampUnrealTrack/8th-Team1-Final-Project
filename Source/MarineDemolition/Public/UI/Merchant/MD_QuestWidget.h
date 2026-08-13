@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
+#include "Types/Lore/MD_LoreTypes.h"
 #include "Types/Merchant/MD_MerchantTypes.h"
 #include "UI/Merchant/MD_MerchantUITypes.h"
 
@@ -25,8 +26,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_QuestRepeatActionRequest, int32,
  *
  * 탭마다 데이터 원천·리스트 형태·상호작용 모델이 다르다는 게 기획 확정 내용이라
  * 하나의 카드로 셋을 억지로 재사용하지 않는다. 메인은 UMD_MainQuestRowWidget,
- * 반복은 UMD_QuestCardWidget을 쓰고, 로어는 코덱스 백엔드가 아직 없어 빈 화면
- * 자리만 잡아 둔다.
+ * 반복은 UMD_QuestCardWidget을 쓰고, 로어는 LoreComponent의 영구 수집 원장을 사용한다.
  *
  * 반복 퀘스트 수락/거절/포기 처리는 여기서 하지 않는다. 상점 위젯과 같은 원칙으로,
  * 요청만 델리게이트로 올리고 실제 서버 판정(AMD_PlayerController::ServerAcceptRepeat 등)은
@@ -46,6 +46,10 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
 	void SetRepeatQuests(const TArray<FMD_RepeatQuestState>& InRepeatQuests);
+
+	/** 로어 전용 복제 원장에서 받은 현장별 수집 정보를 코덱스 탭에 적용하는 함수 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
+	void SetLoreProgress(const TArray<FMD_LoreSiteProgress>& InSiteProgressList);
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
 	void SelectTab(EMD_QuestTab InTab);
@@ -77,6 +81,8 @@ protected:
 
 	void RebuildMainQuestList();
 	void RebuildRepeatQuestList();
+	/** 전달받은 로어 수집 원장만 사용하여 코덱스 표시를 다시 구성하는 함수 */
+	void RefreshLoreDisplay();
 	void ApplyTabVisibility();
 
 	UFUNCTION()
@@ -116,6 +122,10 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest")
 	TArray<FMD_RepeatQuestState> RepeatQuests;
+
+	/** 메인·반복 퀘스트와 분리된 코덱스 탭 표시용 현장별 수집 정보 */
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
+	TArray<FMD_LoreSiteProgress> LoreSiteProgressList;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest")
 	EMD_QuestTab SelectedTab = EMD_QuestTab::Main;
@@ -162,10 +172,7 @@ protected:
 
 	// ───────────────── 탭3: 로어퀘 (코덱스) ─────────────────
 
-	/**
-	 * 코덱스(기록물 수집) 백엔드가 아직 없다 (`09` §5, `04` §5.5 탭3).
-	 * 지금은 이 자리만 잡아 둔다 — 발견 목록·완성률 바는 데이터가 생기면 채운다.
-	 */
+	/** 로어 전용 복제 원장의 수집 현황을 표시하는 코덱스 탭 패널 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UWidget> PNL_LoreTab;
 

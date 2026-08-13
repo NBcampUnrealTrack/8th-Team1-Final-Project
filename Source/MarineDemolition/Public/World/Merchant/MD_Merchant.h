@@ -12,6 +12,7 @@ class UMD_ShopCatalog;
 class UMD_ShopWidget;
 class UMD_QuestWidget;
 class UMD_LoanWidget;
+class UMD_LoreComponent;
 class UMD_MerchantComponent;
 class UMD_MerchantSubsystem;
 class AMD_PlayerController;
@@ -196,7 +197,14 @@ private:
 	UFUNCTION()
 	void HandleMerchantStateChanged();
 
+	/** 로어 전용 복제 정보가 바뀔 때 열려 있는 코덱스 탭만 갱신하는 함수 */
+	UFUNCTION()
+	void HandleLoreProgressUpdated();
+
 	void RefreshQuestWidgetFromComponent();
+
+	/** UI 개방 또는 로어 수집 변경 시 코덱스 탭에 복제 원장을 적용하는 함수 */
+	void RefreshLoreWidgetFromComponent();
 
 	/** 복제된 재화·해금·소유권을 현재 상점 위젯에 한 번에 반영하는 처리 */
 	void RefreshShopWidgetFromComponent();
@@ -205,6 +213,9 @@ private:
 	void RefreshLoanWidgetFromComponent();
 
 	UMD_MerchantComponent* GetMerchantComponent() const;
+
+	/** 메인·반복 퀘스트와 독립된 로어 수집 복제 컴포넌트 조회 함수 */
+	UMD_LoreComponent* GetLoreComponent() const;
 
 	/** 서버 구매 원장을 제공하는 GameInstance 상인 서브시스템 조회 함수 */
 	UMD_MerchantSubsystem* GetMerchantSubsystem() const;

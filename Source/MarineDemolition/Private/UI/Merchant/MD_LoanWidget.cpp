@@ -123,10 +123,14 @@ int32 UMD_LoanWidget::GetRequestedAmount() const
 		return 0;
 	}
 
-	int64 ParsedAmount = FCString::Atoi64(*AmountText);
+	// 크레딧 원장과 같은 int32 범위를 벗어난 입력을 변환 단계에서 거부하는 파싱
+	int32 ParsedAmount = 0;
+	if (LexTryParseString(ParsedAmount, *AmountText) == false || ParsedAmount <= 0)
+	{
+		return 0;
+	}
 
-	int32 Amount = ParsedAmount > 0 && ParsedAmount <= MAX_int32 ? static_cast<int32>(ParsedAmount) : 0;
-	return Amount;
+	return ParsedAmount;
 }
 
 void UMD_LoanWidget::HandleBorrowClicked()

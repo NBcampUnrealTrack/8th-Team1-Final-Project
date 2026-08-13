@@ -41,7 +41,19 @@ void UMD_MerchantSubsystem::AddCredits(int32 Amount)
 		return;
 	}
 
-	Credits = FMath::Max(0, Credits + Amount);
+	// int32 범위 안에서 합산하기 전에 상한과 하한을 판정하는 원장 보호
+	if (Amount > 0 && Credits > MAX_int32 - Amount)
+	{
+		Credits = MAX_int32;
+	}
+	else if (Amount < 0 && Amount < -Credits)
+	{
+		Credits = 0;
+	}
+	else
+	{
+		Credits += Amount;
+	}
 
 	OnMerchantStateChanged.Broadcast();
 }
@@ -688,8 +700,19 @@ void UMD_MerchantSubsystem::AddCreditsInternal(int32 Amount)
 		return;
 	}
 
-	// 크레딧은 0 밑으로 내려가지 않는다.
-	Credits = FMath::Max(0, Credits + Amount);
+	// int32 범위 안에서 여러 보상의 합산 상한과 차감 하한을 지키기 위한 원장 보호
+	if (Amount > 0 && Credits > MAX_int32 - Amount)
+	{
+		Credits = MAX_int32;
+	}
+	else if (Amount < 0 && Amount < -Credits)
+	{
+		Credits = 0;
+	}
+	else
+	{
+		Credits += Amount;
+	}
 }
 
 bool UMD_MerchantSubsystem::DoesDeliveryMatch(

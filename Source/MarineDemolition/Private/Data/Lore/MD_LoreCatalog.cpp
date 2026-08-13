@@ -106,6 +106,12 @@ bool UMD_LoreCatalog::ValidateCatalog(TArray<FText>& OutErrors) const
 			OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "InvalidLoreDefinition", "필수 데이터가 잘못된 로어 기록물입니다: {0}"), FText::FromName(LoreEntry.LoreId)));
 		}
 
+		// 에디터 제한을 우회한 음수 개별 보상이 팀 크레딧을 차감하지 못하도록 하는 검사
+		if (LoreEntry.RewardCredits < 0)
+		{
+			OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "InvalidLoreReward", "개별 보상이 음수인 로어 기록물입니다: {0}"), FText::FromName(LoreEntry.LoreId)));
+		}
+
 		if (LoreEntry.bEncryptedUntilPrerequisitesComplete == true && LoreEntry.DecryptionPrerequisiteLoreIds.Num() <= 0)
 		{
 			OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "MissingDecryptionPrerequisite", "암호화 선행 기록이 없는 로어 기록물입니다: {0}"), FText::FromName(LoreEntry.LoreId)));
