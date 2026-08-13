@@ -2,6 +2,7 @@
 
 #include "Engine/GameInstance.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+#include "Util/MD_LogUtility.h"
 
 bool UMD_LoreSubsystem::TryDiscoverLore(const UMD_LoreCatalog* LoreCatalog, FName LoreId)
 {
@@ -75,6 +76,9 @@ bool UMD_LoreSubsystem::TryDiscoverLore(const UMD_LoreCatalog* LoreCatalog, FNam
 
 	// 최초 발견 기록과 같은 서버 호출 안에서만 실행되는 중복 방지 보상 지급
 	MerchantSubsystem->AddCredits(static_cast<int32>(TotalRewardCredits));
+
+	// 액터 파괴 이벤트보다 먼저 서버의 확정 결과를 남기기 위한 수집 로그
+	UE_LOG(MarineDemolition, Log, TEXT("%s [로어] 기록물 수집 완료: 현장=%s, 로어=%s, 보상=%d, 진행=%d/%d"), *UE_CALL_LOCATIONINFO, *LoreCatalog->SiteId.ToString(), *LoreId.ToString(), TotalRewardCredits, SiteProgress->DiscoveredLoreIds.Num(), LoreCatalog->LoreEntries.Num());
 	OnLoreProgressChanged.Broadcast();
 
 	return true;
@@ -113,6 +117,17 @@ int32 UMD_LoreSubsystem::GetDiscoveredLoreCount(FName SiteId) const
 {
 	const FMD_LoreSiteProgress* SiteProgress = FindSiteProgress(SiteId);
 	return SiteProgress != nullptr ? SiteProgress->DiscoveredLoreIds.Num() : 0;
+}
+
+bool UMD_LoreSubsystem::HasDiscoveredLore(FName SiteId, FName LoreId) const
+{
+	if (LoreId.IsNone() == true)
+	{
+		return false;
+	}
+
+	const FMD_LoreSiteProgress* SiteProgress = FindSiteProgress(SiteId);
+	return SiteProgress != nullptr && SiteProgress->DiscoveredLoreIds.Contains(LoreId) == true;
 }
 
 bool UMD_LoreSubsystem::IsCatalogComplete(const UMD_LoreCatalog* LoreCatalog) const

@@ -41,6 +41,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	int32 GetDiscoveredLoreCount(FName SiteId) const;
 
+	/** 지정한 현장과 로어 식별자가 서버 원장에 최초 발견으로 기록되었는지 확인하는 함수 */
+	UFUNCTION(BlueprintPure, Category = "MD|Lore")
+	bool HasDiscoveredLore(FName SiteId, FName LoreId) const;
+
 	/** 지정한 카탈로그의 모든 기록물이 발견되었는지 확인하는 조회 함수 */
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	bool IsCatalogComplete(const UMD_LoreCatalog* LoreCatalog) const;
