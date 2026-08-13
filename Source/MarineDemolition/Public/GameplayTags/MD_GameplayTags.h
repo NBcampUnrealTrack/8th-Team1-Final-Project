@@ -112,4 +112,6 @@ namespace MDGameplayTags
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_Player);
 	// 저장된 게임 데이터로부터 맵의 변경 사항에 대한 정보를 얻는 키
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_World);
+	// 저장된 게임 데이터로부터 영구 누적 로어 진행 정보를 얻는 키
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_Lore);
 }

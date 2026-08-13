@@ -73,6 +73,11 @@ bool UMD_LoreCatalog::ValidateCatalog(TArray<FText>& OutErrors) const
 	{
 		OutErrors.Add(NSLOCTEXT("MDLoreValidation", "EmptyLoreEntries", "로어 카탈로그에 기록물이 없습니다."));
 	}
+	// 에디터 메타데이터 범위를 우회한 음수 완성 보상이 원장에 적용되지 않도록 하는 검사
+	if (CompletionRewardCredits < 0)
+	{
+		OutErrors.Add(NSLOCTEXT("MDLoreValidation", "InvalidCompletionReward", "로어 카탈로그의 완성 보상이 음수입니다."));
+	}
 
 	// 선행 참조가 배열 순서와 무관하게 같은 카탈로그 항목을 가리키는지 확인하기 위한 식별자 집합
 	TSet<FName> KnownLoreIds;

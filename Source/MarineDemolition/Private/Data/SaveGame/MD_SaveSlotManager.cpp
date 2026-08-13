@@ -7,6 +7,7 @@
 #include "Game/MD_GameStateBase.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Gameplay/Lore/MD_LoreSubsystem.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Util/MD_LogUtility.h"
@@ -367,8 +368,9 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 
 	// 필수 서버 상태가 준비되지 않은 시점의 부분 적용을 방지하기 위한 객체 검사
 	AMD_GameStateBase* GameState = World->GetGameState<AMD_GameStateBase>();
+	UMD_LoreSubsystem* LoreManager = GameInstance->GetSubsystem<UMD_LoreSubsystem>();
 	UMD_MerchantSubsystem* MerchantManager = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
-	if (IsValid(GameState) == false || GameState->HasAuthority() == false || IsValid(MerchantManager) == false)
+	if (IsValid(GameState) == false || GameState->HasAuthority() == false || IsValid(LoreManager) == false || IsValid(MerchantManager) == false)
 	{
 		return false;
 	}
@@ -377,6 +379,15 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 	FMD_GameStateData GameStateData;
 	FMD_MerchantData MerchantData;
 	if (MigratedGameData.GetDataField(FMD_GameStateData::DataFieldKey, GameStateData) == false || MigratedGameData.GetDataField(FMD_MerchantData::DataFieldKey, MerchantData) == false)
+	{
+		return false;
+	}
+
+	// 로어 필드가 없는 초기 슬롯은 빈 진행으로 복원하고 타입이 손상된 최신 슬롯만 거부하는 조회
+	FMD_LoreData LoreData;
+	const bool bContainsLoreData = MigratedGameData.DataFields.Contains(FMD_LoreData::DataFieldKey);
+	const bool bHasLoreData = MigratedGameData.GetDataField(FMD_LoreData::DataFieldKey, LoreData);
+	if (bContainsLoreData == true && bHasLoreData == false)
 	{
 		return false;
 	}
@@ -400,9 +411,19 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 	{
 		return false;
 	}
+	if (LoreManager->CanApplyLoreSaveData(LoreData) == false)
+	{
+		return false;
+	}
 
 	// 상인 상태를 먼저 복원하여 GameState 일차 알림이 퀘스트를 다시 초기화하지 않도록 하는 처리
 	if (MerchantManager->ApplyMerchantSaveData(MerchantData) == false)
+	{
+		return false;
+	}
+
+	// 기존 슬롯의 빈 상태를 포함한 로어 원장을 상인 상태와 같은 복원 시점에 적용하는 처리
+	if (LoreManager->ApplyLoreSaveData(LoreData) == false)
 	{
 		return false;
 	}
@@ -613,9 +634,10 @@ bool UMD_SaveSlotManager::CollectGameData()
 
 	// 게임 데이터를 수집하기 위하여 필요한 객체들 참조
 	UGameInstance* GameInstance = GetGameInstance();
+	UMD_LoreSubsystem* LoreManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_LoreSubsystem>() : nullptr;
 	UMD_MerchantSubsystem* MerchantManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
 	UMD_DayPersistenceSubsystem* DayPersistenceManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr;
-	if (IsValid(MerchantManager) == false || IsValid(DayPersistenceManager) == false)
+	if (IsValid(LoreManager) == false || IsValid(MerchantManager) == false || IsValid(DayPersistenceManager) == false)
 	{
 		return false;
 	}
@@ -639,6 +661,13 @@ bool UMD_SaveSlotManager::CollectGameData()
 	// 상인 관련 정보 저장
 	FMD_MerchantData MerchantData = MerchantManager->GetMerchantSaveData();
 	if (TemporaryGameData->AddDataField(FMD_MerchantData::DataFieldKey, MerchantData) == false)
+	{
+		return false;
+	}
+
+	// 계약을 넘어 누적되는 현장별 발견 목록과 완료 보상 상태 저장
+	FMD_LoreData LoreData = LoreManager->GetLoreSaveData();
+	if (TemporaryGameData->AddDataField(FMD_LoreData::DataFieldKey, LoreData) == false)
 	{
 		return false;
 	}

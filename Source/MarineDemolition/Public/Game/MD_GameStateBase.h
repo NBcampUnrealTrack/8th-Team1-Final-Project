@@ -8,6 +8,7 @@
 
 class UMD_ScoreTableData;
 class UMD_MerchantComponent;
+class UMD_LoreComponent;
 struct FMD_GameStateData;
 
 UENUM(BlueprintType)
@@ -202,8 +203,15 @@ private:
     void OnRep_Score();
 
 public:
+    // 로어 진행을 조회하기 위한 접근 함수
+    UFUNCTION(BlueprintPure, Category = "MD|Lore")
+    UMD_LoreComponent* GetLoreComponent() const { return LoreComponent; }
+
     UFUNCTION(BlueprintPure, Category = "MD|Merchant")
     UMD_MerchantComponent* GetMerchantComponent() const { return MerchantComponent; }
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Lore")
+    TObjectPtr<UMD_LoreComponent> LoreComponent;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
     TObjectPtr<UMD_MerchantComponent> MerchantComponent;
