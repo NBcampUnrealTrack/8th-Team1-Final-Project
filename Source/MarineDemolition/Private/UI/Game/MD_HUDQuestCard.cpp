@@ -1,4 +1,4 @@
-﻿#include "UI/Game/MD_HUDQuestCard.h"
+#include "UI/Game/MD_HUDQuestCard.h"
 
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
@@ -41,7 +41,7 @@ void UMD_HUDQuestCard::ApplyQuestData(EMD_QuestKind QuestKind, const FMD_QuestDe
 		// 잘못된 목표 수량에서도 0으로 나누지 않도록 보정한 진행률 계산
 		int32 RequiredCount = FMath::Max(Definition.RequiredCount, 1);
 		int32 ClampedProgress = FMath::Clamp(CurrentProgress, 0, RequiredCount);
-		float ProgressRate = FMath::SafeDivide<float, float>(RequiredCount, ClampedProgress);
+		float ProgressRate = FMath::SafeDivide<float, float>(ClampedProgress, RequiredCount);
 		PB_QuestProgressRate->SetPercent(ProgressRate);
 	}
 }
