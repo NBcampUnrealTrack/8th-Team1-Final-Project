@@ -3,6 +3,7 @@
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Types/Lore/MD_LoreTypes.h"
 
 const FGameplayTag FMD_GameStateData::DataFieldKey = MDGameplayTags::Save_Data_GameState;
 const FGameplayTag FMD_MerchantData::DataFieldKey = MDGameplayTags::Save_Data_Merchant;
@@ -17,7 +18,7 @@ bool FMD_GameStateData::IsStructurallyValid() const
 bool FMD_MerchantData::IsStructurallyValid() const
 {
 	// 경제와 호감도 범위가 런타임 규칙에서 허용하는 범위인지 확인하는 검사
-	if (Credits < 0 || Affinity < -4.0f || Affinity > 5.0f || FMath::IsFinite(Affinity) == false || CurrentDay < 0 || CurrentDay > 4 || NextDepositMultiplier < 0.0f || FMath::IsFinite(NextDepositMultiplier) == false || QuestCompletions < 0)
+	if (Credits < 0 || DebtBalance < 0 || Affinity < -4.0f || Affinity > 5.0f || FMath::IsFinite(Affinity) == false || CurrentDay < 0 || CurrentDay > 4 || NextDepositMultiplier < 0.0f || FMath::IsFinite(NextDepositMultiplier) == false || QuestCompletions < 0)
 	{
 		return false;
 	}
@@ -129,6 +130,16 @@ bool FMD_GameData::IsValidForLoad() const
 	{
 		FMD_WorldData WorldData;
 		if (GetDataField(FMD_WorldData::DataFieldKey, WorldData) == false || WorldData.IsStructurallyValid() == false)
+		{
+			return false;
+		}
+	}
+
+	// 로어 필드는 초기 슬롯 호환을 위해 선택 사항이지만 존재하면 정확한 타입과 구조를 요구하는 검사
+	if (DataFields.Contains(FMD_LoreData::DataFieldKey) == true)
+	{
+		FMD_LoreData LoreData;
+		if (GetDataField(FMD_LoreData::DataFieldKey, LoreData) == false || LoreData.IsStructurallyValid() == false)
 		{
 			return false;
 		}

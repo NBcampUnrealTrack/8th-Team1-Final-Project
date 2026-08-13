@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -63,6 +63,30 @@ public:
 	// 호감도를 기획 범위 안에서 증감하고 복제 미러 갱신을 요청하는 함수
 	void AddAffinity(float Amount);
 
+	// 현재 미상환 대출 잔액을 반환하는 함수
+	int32 GetDebtBalance() const { return DebtBalance; }
+
+	// 현재 호감도 구간에 맞는 대출 한도를 반환하는 함수
+	int32 GetLoanLimit() const;
+
+	// 서버 원장과 클라이언트 복제 UI가 동일한 호감도 구간별 한도를 사용하기 위한 계산 함수
+	static int32 CalculateLoanLimit(float InAffinity);
+
+	// 현재 부채를 제외하고 추가로 빌릴 수 있는 금액을 반환하는 함수
+	int32 GetAvailableLoanAmount() const;
+
+	// 기획에서 확정한 일일 대출 이자율을 반환하는 함수
+	float GetDailyInterestRate() const { return DailyInterestRate; }
+
+	// 요청 금액과 현재 한도를 검증한 뒤 크레딧과 부채를 함께 증가시키는 함수
+	bool TryBorrowCredits(int32 Amount);
+
+	// 보유 크레딧과 미상환 잔액 범위에서 대출금을 상환하는 함수
+	bool TryRepayLoan(int32 Amount);
+
+	// 일 마감 시 미상환 잔액에 일일 이자를 한 번 합산하고 부과액을 반환하는 함수
+	int32 ApplyDailyLoanInterest();
+
 	//계약 시작, 착수금 지급
 	void BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment);
 
@@ -94,6 +118,9 @@ public:
 
 	/** 거절. 페널티 없이 다음 Day 재롤 대상이 된다. */
 	bool TryDeclineRepeatQuest(int32 QuestIndex);
+
+	/** 포기하는 반복 퀘스트를 실패 처리 및 패널티(호감도 감소) 처리하는 함수 */
+	bool TryAbandonRepeatQuest(int32 QuestIndex);
 
 	/** 샘플이 모선에 납품될 때 호출한다. 메인·반복 활성 퀘스트를 함께 검사한다. */
 	void NotifySampleDelivered(const FGameplayTag& GradeTag, bool bIntact);
@@ -149,6 +176,9 @@ private:
 
 	int32 Credits = 0;
 
+	// 계약과 게임 재시작을 넘어 유지되는 팀 공유 미상환 대출 잔액
+	int32 DebtBalance = 0;
+
 	// 상점 해금과 대화 분기를 계약 사이에도 유지하기 위한 누적 호감도
 	float Affinity = 0.0f;
 
@@ -166,4 +196,7 @@ private:
 	/** 계약 중 구매 결과와 선행 품목 해금을 유지하기 위한 서버 권위 구매 원장 */
 	UPROPERTY()
 	TMap<FName, int32> PurchasedItemCounts;
+
+	// 기획상 모든 호감도 구간에 공통으로 적용되는 일일 대출 이자율
+	static constexpr float DailyInterestRate = 0.05f;
 };

@@ -208,6 +208,9 @@ EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
             GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
         {
             Merchant->ResolveActiveQuestsAtDayEnd(GS->GetCurrentDay());
+
+			// 빚에 대한 이자 측정 및 증가
+			Merchant->ApplyDailyLoanInterest();
         }
     }
 

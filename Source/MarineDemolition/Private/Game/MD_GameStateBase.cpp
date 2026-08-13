@@ -1,4 +1,5 @@
 ﻿#include "Game/MD_GameStateBase.h"
+#include "Component/Lore/MD_LoreComponent.h"
 #include "Data/Score/MD_ScoreTableData.h"
 #include "Net/UnrealNetwork.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
@@ -8,6 +9,7 @@ AMD_GameStateBase::AMD_GameStateBase()
 {
     bReplicates = true;
 
+    LoreComponent = CreateDefaultSubobject<UMD_LoreComponent>(TEXT("LoreComponent"));
     MerchantComponent = CreateDefaultSubobject<UMD_MerchantComponent>(TEXT("MerchantComponent"));
 }
 

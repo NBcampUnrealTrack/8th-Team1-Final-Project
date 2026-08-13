@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Component/Merchant/MD_MerchantComponent.h"
@@ -19,6 +19,7 @@ void UMD_MerchantComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 
 	// 상인 상태는 팀 공유 데이터라 전원에게 보낸다.
 	DOREPLIFETIME(UMD_MerchantComponent, Credits);
+	DOREPLIFETIME(UMD_MerchantComponent, DebtBalance);
 	DOREPLIFETIME(UMD_MerchantComponent, CurrentDay);
 	DOREPLIFETIME(UMD_MerchantComponent, Affinity);
 	DOREPLIFETIME(UMD_MerchantComponent, QuestCompletions);
@@ -81,6 +82,7 @@ void UMD_MerchantComponent::RefreshFromSubsystem()
 	}
 
 	Credits = Merchant->GetCredits();
+	DebtBalance = Merchant->GetDebtBalance();
 	CurrentDay = Merchant->GetCurrentDay();
 	Affinity = Merchant->GetAffinity();
 	QuestCompletions = Merchant->GetQuestCompletions();
@@ -114,8 +116,9 @@ FMD_MerchantMenuInfo UMD_MerchantComponent::BuildMenuInfo() const
 	Info.Affinity = Affinity;
 
 	// 다음 해금 임계값은 카탈로그별 값이므로 호출 위젯에서 계산하기 위한 기본 상태 유지
-	// TODO(김동연): 대출 단계에서 DebtBalance / LoanLimit / DailyInterestRate를 채운다.
-	// 그때까지는 구조체 기본값(착수금 500 / 한도 800 / 이자 5%)이 표시된다.
-
+	Info.DebtBalance = DebtBalance;
+	// 클라이언트와 서버의 대출 한도 값이 달라지지 않도록 복제 값 기반 계산
+	Info.LoanLimit = UMD_MerchantSubsystem::CalculateLoanLimit(Affinity);
+	Info.DailyInterestRate = 0.05f;
 	return Info;
 }

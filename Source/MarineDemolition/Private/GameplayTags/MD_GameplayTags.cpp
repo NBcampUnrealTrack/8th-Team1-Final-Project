@@ -247,4 +247,8 @@ namespace MDGameplayTags
 		Save_Data_World,
 		"Save.Data.World",
 		"저장된 게임 데이터로부터 맵의 변경 사항에 대한 정보를 얻는 키");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Save_Data_Lore,
+		"Save.Data.Lore",
+		"저장된 게임 데이터로부터 영구 누적 로어 진행 정보를 얻는 키");
 }
