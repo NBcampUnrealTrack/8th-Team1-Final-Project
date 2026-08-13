@@ -10,7 +10,7 @@ void UMD_LoreCardWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	// 내부 버튼만 카드 선택을 허용하기 위한 클릭 연결
+	// 내부 버튼 클릭 연결
 	if (IsValid(Btn_Select) == true)
 	{
 		Btn_Select->OnClicked.AddUniqueDynamic(this, &UMD_LoreCardWidget::HandleCardClicked);
