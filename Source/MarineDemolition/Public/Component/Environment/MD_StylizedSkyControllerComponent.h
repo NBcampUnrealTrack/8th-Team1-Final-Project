@@ -97,6 +97,7 @@ protected:
 	void ApplyRuntimePresentation();
 	void SuppressConflictingLevelSky();
 	void ConfigureInteriorDomeMesh(UStaticMeshComponent* Dome) const;
+	bool IsBlueprintPreviewWorld() const;
 	float SanitizeTimeOfDayHours(float Hours) const;
 	bool IsDrivenByExternalTimeSource() const;
 	bool TryReadExternalTime(float& OutHours, float& OutDayProgress) const;
