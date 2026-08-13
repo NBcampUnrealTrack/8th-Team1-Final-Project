@@ -14,6 +14,7 @@
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
@@ -694,7 +695,16 @@ void AMD_Merchant::RefreshLoreWidgetFromComponent()
 		return;
 	}
 
-	ActiveQuestWidget->SetLoreProgress(LoreComponent->GetSiteProgressList());
+	// 상인과 상호작용 중인 플레이어가 선택한 탐사 현장을 찾기 위한 컨트롤러
+	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+
+	// 퀘스트 데이터와 분리된 현장별 로어 카탈로그 접근을 위한 탐사 현장 정의
+	UMD_SiteDefinition* ExpeditionSite = IsValid(InteractingPlayerController) == true ? InteractingPlayerController->GetExpeditionSite() : nullptr;
+
+	// 수집 원장의 식별자와 화면 표시 정의를 연결하기 위한 로어 카탈로그
+	UMD_LoreCatalog* LoreCatalog = IsValid(ExpeditionSite) == true ? ExpeditionSite->LoreCatalog : nullptr;
+
+	ActiveQuestWidget->SetLoreData(LoreCatalog, LoreComponent->GetSiteProgressList());
 }
 
 void AMD_Merchant::RefreshShopWidgetFromComponent()

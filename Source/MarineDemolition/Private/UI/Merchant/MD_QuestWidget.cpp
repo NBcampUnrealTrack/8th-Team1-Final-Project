@@ -7,7 +7,9 @@
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/Widget.h"
+#include "Data/Lore/MD_LoreCatalog.h"
 #include "GameFramework/Pawn.h"
+#include "UI/Merchant/MD_LoreQuestTabWidget.h"
 #include "UI/Merchant/MD_MainQuestRowWidget.h"
 #include "UI/Merchant/MD_QuestCardWidget.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
@@ -49,6 +51,8 @@ void UMD_QuestWidget::NativeConstruct()
 		OwningMerchantMenu->SetMenuPanelVisible(false);
 	}
 
+	// 블루프린트 로어 패널을 전용 위젯으로 교체하기 위한 최초 생성
+	EnsureLoreTabWidget();
 	RefreshDisplay();
 }
 
@@ -86,6 +90,16 @@ void UMD_QuestWidget::SetRepeatQuests(const TArray<FMD_RepeatQuestState>& InRepe
 void UMD_QuestWidget::SetLoreProgress(const TArray<FMD_LoreSiteProgress>& InSiteProgressList)
 {
 	LoreSiteProgressList = InSiteProgressList;
+	RefreshLoreDisplay();
+}
+
+void UMD_QuestWidget::SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FMD_LoreSiteProgress>& InSiteProgressList)
+{
+	// 현재 탐사 현장의 정적 정의와 플레이어별 수집 원장을 함께 보관하는 처리
+	LoreCatalog = InLoreCatalog;
+	LoreSiteProgressList = InSiteProgressList;
+	// 이미 열린 UI에서 수집 변경을 즉시 반영하기 위한 전용 탭 갱신
+	EnsureLoreTabWidget();
 	RefreshLoreDisplay();
 }
 
@@ -147,8 +161,8 @@ void UMD_QuestWidget::ApplyTabVisibility()
 	}
 	if (IsValid(TXT_LoreEmptyNotice))
 	{
-		TXT_LoreEmptyNotice->SetVisibility(SelectedTab == EMD_QuestTab::Lore ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-		//const bool bShowLoreEmpty = SelectedTab == EMD_QuestTab::Lore;
+		const bool bShowLoreTab = SelectedTab == EMD_QuestTab::Lore && IsValid(LoreQuestTabWidget) == true;
+		TXT_LoreEmptyNotice->SetVisibility(bShowLoreTab ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 		//TXT_LoreEmptyNotice->SetVisibility(bShowLoreEmpty ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 		//if (bShowLoreEmpty)
 		//{
@@ -177,6 +191,30 @@ void UMD_QuestWidget::ApplyTabVisibility()
 
 void UMD_QuestWidget::RefreshLoreDisplay()
 {
+	// 기존 로어 패널이 준비된 시점에만 전용 표시 경로를 사용하기 위한 생성 보장
+	EnsureLoreTabWidget();
+	if (IsValid(LoreQuestTabWidget) == true)
+	{
+		// 현재 카탈로그와 일치하는 현장 기록만 탭에 전달하기 위한 진행 정보
+		FMD_LoreSiteProgress SiteProgress;
+		if (IsValid(LoreCatalog) == true)
+		{
+			SiteProgress.SiteId = LoreCatalog->SiteId;
+			// 여러 현장 원장에서 현재 탐사 현장의 진행 정보를 찾기 위한 반복
+			for (const FMD_LoreSiteProgress& CurrentSiteProgress : LoreSiteProgressList)
+			{
+				if (CurrentSiteProgress.SiteId == LoreCatalog->SiteId)
+				{
+					SiteProgress = CurrentSiteProgress;
+					break;
+				}
+			}
+		}
+
+		LoreQuestTabWidget->SetLoreData(LoreCatalog, SiteProgress);
+		return;
+	}
+
 	if (IsValid(TXT_LoreEmptyNotice) == false)
 	{
 		return;
@@ -192,6 +230,26 @@ void UMD_QuestWidget::RefreshLoreDisplay()
 	// 현재 연결된 단일 텍스트 영역에서 영구 누적 로어 수집량을 즉시 확인하기 위한 표시
 	FText LoreProgressText = DiscoveredLoreCount > 0 ? FText::Format(FText::FromString(TEXT("수집한 기록물: {0}개")), FText::AsNumber(DiscoveredLoreCount)) : FText::FromString(TEXT("아직 수집한 기록물이 없다."));
 	TXT_LoreEmptyNotice->SetText(LoreProgressText);
+}
+
+void UMD_QuestWidget::EnsureLoreTabWidget()
+{
+	// 중복 생성과 불완전한 블루프린트 구성에서의 위젯 생성을 차단하는 검증
+	if (IsValid(LoreQuestTabWidget) == true || IsValid(PNL_LoreTab) == false || LoreQuestTabClass == nullptr)
+	{
+		return;
+	}
+
+	// 퀘스트 화면 수명 동안 재사용할 로어 전용 탭 인스턴스
+	LoreQuestTabWidget = CreateWidget<UMD_LoreQuestTabWidget>(this, LoreQuestTabClass);
+	if (IsValid(LoreQuestTabWidget) == false)
+	{
+		return;
+	}
+
+	// 기존 안내용 목업을 실제 로어 탭으로 교체하기 위한 패널 구성
+	PNL_LoreTab->ClearChildren();
+	PNL_LoreTab->AddChild(LoreQuestTabWidget);
 }
 
 void UMD_QuestWidget::RebuildMainQuestList()

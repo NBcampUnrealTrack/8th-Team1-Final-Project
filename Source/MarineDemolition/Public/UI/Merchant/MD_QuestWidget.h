@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -16,6 +16,8 @@ class UTextBlock;
 class UWidget;
 class UMD_MainQuestRowWidget;
 class UMD_QuestCardWidget;
+class UMD_LoreCatalog;
+class UMD_LoreQuestTabWidget;
 class UMD_MerchantMenuWidget;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_QuestBackRequest);
@@ -51,6 +53,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
 	void SetLoreProgress(const TArray<FMD_LoreSiteProgress>& InSiteProgressList);
 
+	/** 현재 현장의 카탈로그와 로어 수집 원장을 코덱스 탭에 함께 적용하는 함수 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
+	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FMD_LoreSiteProgress>& InSiteProgressList);
+
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
 	void SelectTab(EMD_QuestTab InTab);
 
@@ -83,6 +89,8 @@ protected:
 	void RebuildRepeatQuestList();
 	/** 전달받은 로어 수집 원장만 사용하여 코덱스 표시를 다시 구성하는 함수 */
 	void RefreshLoreDisplay();
+	/** 퀘스트 화면의 로어 패널에 전용 탭 위젯을 한 번만 생성하는 함수 */
+	void EnsureLoreTabWidget();
 	void ApplyTabVisibility();
 
 	UFUNCTION()
@@ -126,6 +134,18 @@ protected:
 	/** 메인·반복 퀘스트와 분리된 코덱스 탭 표시용 현장별 수집 정보 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
 	TArray<FMD_LoreSiteProgress> LoreSiteProgressList;
+
+	/** 현재 퀘스트 화면에서 표시할 현장의 정적 로어 목록 */
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
+	TObjectPtr<UMD_LoreCatalog> LoreCatalog;
+
+	/** 기존 퀘스트 화면의 로어 패널에 생성할 전용 탭 위젯 클래스 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Lore")
+	TSubclassOf<UMD_LoreQuestTabWidget> LoreQuestTabClass;
+
+	/** 화면이 열린 동안 수집 변경만 전달하기 위한 생성된 로어 탭 참조 */
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
+	TObjectPtr<UMD_LoreQuestTabWidget> LoreQuestTabWidget;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest")
 	EMD_QuestTab SelectedTab = EMD_QuestTab::Main;
@@ -174,7 +194,7 @@ protected:
 
 	/** 로어 전용 복제 원장의 수집 현황을 표시하는 코덱스 탭 패널 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UWidget> PNL_LoreTab;
+	TObjectPtr<UPanelWidget> PNL_LoreTab;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> TXT_LoreEmptyNotice;
