@@ -139,7 +139,42 @@ void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData, bool bLoad
         return;
     }
 
-    StartSessionInternal(GameMapPackagePath);
+    StartSessionInternal(GameMapPackagePath, GameMapPackagePath);
+}
+
+void UMD_MultiplayManager::StartSessionByMap(const FString& MapPackagePath, const FString& TravelOptions)
+{
+    // 클라이언트가 호스트의 Session 상태와 전체 접속자의 이동을 변경하지 못하도록 하는 실행 환경 검사
+    UWorld* World = GetWorld();
+    if (IsValid(World) == false || World->GetNetMode() == ENetMode::NM_Client)
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 지정 맵 Session 시작은 Host 또는 Server에서만 실행할 수 있습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    // Session 광고와 ServerTravel에 동일한 실제 World 패키지를 사용하기 위한 경로 검사
+    if (IsValidMapPackagePath(MapPackagePath) == false)
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 지정 맵 Session 시작에 사용할 맵 패키지 경로가 유효하지 않습니다: %s"), *UE_CALL_LOCATIONINFO, *MapPackagePath);
+
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 목적지 맵을 바꾸거나 콘솔 명령 경계를 벗어나는 문자열이 URL 옵션으로 전달되지 않도록 하는 형식 검사
+    if (TravelOptions.IsEmpty() == false && (TravelOptions.StartsWith(TEXT("?")) == false || TravelOptions.Contains(TEXT("\r")) == true || TravelOptions.Contains(TEXT("\n")) == true || TravelOptions.Contains(TEXT(" ")) == true))
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 지정 맵 Session 시작에 사용할 Travel 옵션이 유효하지 않습니다: %s"), *UE_CALL_LOCATIONINFO, *TravelOptions);
+
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 검증된 목적지 패키지 뒤에 게임 규칙 전달용 URL 옵션만 결합하는 처리
+    FString TravelURL = FString::Printf(TEXT("%s%s"), *MapPackagePath, *TravelOptions);
+    StartSessionInternal(MapPackagePath, TravelURL);
 }
 
 void UMD_MultiplayManager::EndSession(const FString& MapPackagePath)
@@ -735,7 +770,7 @@ void UMD_MultiplayManager::JoinSessionInternal(const FOnlineSessionSearchResult&
     }
 }
 
-void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath)
+void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath, const FString& TravelURL)
 {
     // 잘못된 에셋이나 일반 에셋 패키지를 대상으로 한 게임 시작 방지
     if (IsValidMapPackagePath(MapPackagePath) == false)
@@ -791,7 +826,7 @@ void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath)
     UpdatedSessionSettings.Set(SETTING_MAPNAME, SessionMapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
     // 추가 참가 차단 완료 후 실제 Session 시작을 이어가기 위한 이벤트 등록
-    FOnUpdateSessionCompleteDelegate OnUpdateSessionCompleteDelegate = FOnUpdateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleStartGameJoinabilityUpdateComplete, MapPackagePath);
+    FOnUpdateSessionCompleteDelegate OnUpdateSessionCompleteDelegate = FOnUpdateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleStartGameJoinabilityUpdateComplete, TravelURL);
     SessionDelegateHandle = SessionInterface->AddOnUpdateSessionCompleteDelegate_Handle(OnUpdateSessionCompleteDelegate);
 
     // 게임 시작 전에 Steam 로비의 추가 참가를 차단하기 위한 갱신 요청
@@ -812,7 +847,7 @@ void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath)
     }
 }
 
-void UMD_MultiplayManager::RequestStartSession(const FString& MapPackagePath)
+void UMD_MultiplayManager::RequestStartSession(const FString& TravelURL)
 {
     // 추가 참가 차단 이후 실제 Session 시작 요청을 수행할 모듈 검증
     if (SessionInterface.IsValid() == false || SessionDelegateHandle.IsValid() == true)
@@ -826,7 +861,7 @@ void UMD_MultiplayManager::RequestStartSession(const FString& MapPackagePath)
     }
 
     // 실제 Session 시작 결과 수신을 위한 이벤트 등록
-    FOnStartSessionCompleteDelegate OnStartSessionCompleteDelegate = FOnStartSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleStartSessionComplete, MapPackagePath);
+    FOnStartSessionCompleteDelegate OnStartSessionCompleteDelegate = FOnStartSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleStartSessionComplete, TravelURL);
     SessionDelegateHandle = SessionInterface->AddOnStartSessionCompleteDelegate_Handle(OnStartSessionCompleteDelegate);
 
     // 추가 참가가 차단된 Session의 시작 요청
@@ -983,7 +1018,7 @@ void UMD_MultiplayManager::HandleCreateSessionComplete(FName SessionName, bool b
     }
 }
 
-void UMD_MultiplayManager::HandleStartGameJoinabilityUpdateComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath)
+void UMD_MultiplayManager::HandleStartGameJoinabilityUpdateComplete(FName SessionName, bool bWasSuccessful, const FString TravelURL)
 {
     // 추가 참가 차단 절차에서 연결한 이벤트 및 핸들 초기화
     if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
@@ -1004,10 +1039,10 @@ void UMD_MultiplayManager::HandleStartGameJoinabilityUpdateComplete(FName Sessio
     }
 
     // 추가 참가 차단 완료 이후 실제 Session 시작 요청
-    RequestStartSession(MapPackagePath);
+    RequestStartSession(TravelURL);
 }
 
-void UMD_MultiplayManager::HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath)
+void UMD_MultiplayManager::HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString TravelURL)
 {
     // Start Session 절차에서 연결한 이벤트 및 핸들 초기화
     if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
@@ -1040,11 +1075,11 @@ void UMD_MultiplayManager::HandleStartSessionComplete(FName SessionName, bool bW
     }
 
     // 선택된 맵으로 이동(클라이언트 포함)
-    bool bWasTravelStarted = World->ServerTravel(MapPackagePath);
+    bool bWasTravelStarted = World->ServerTravel(TravelURL);
 
     if (bWasTravelStarted == false)
     {
-        UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 시작 후 지정 맵 이동을 시작하지 못했습니다: %s"), *UE_CALL_LOCATIONINFO, *MapPackagePath);
+        UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 시작 후 지정 맵 이동을 시작하지 못했습니다: %s"), *UE_CALL_LOCATIONINFO, *TravelURL);
 
         CancelPendingGameDataOperation();
 

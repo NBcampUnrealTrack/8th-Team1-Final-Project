@@ -114,6 +114,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
     void StartSession(const struct FMD_GameData& GameData, bool bLoadGame = false);
 
+    // 지정 맵과 URL 옵션을 사용하여 기존 Session의 게임 시작 및 모든 접속자의 맵 이동 절차를 실행하는 함수
+    UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
+    void StartSessionByMap(const FString& MapPackagePath, const FString& TravelOptions);
+
     // 호스트가 진행 중인 Session을 종료 상태로 전환하고 모든 접속자를 지정 맵으로 이동시키는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
     void EndSession(const FString& MapPackagePath);
@@ -160,11 +164,11 @@ protected:
     // 요청된 Session에 실제로 참여하는 함수
     void JoinSessionInternal(const FOnlineSessionSearchResult& SessionSearchResult);
 
-    // 준비된 게임 데이터 작업을 유지한 채 Session 시작과 맵 이동 절차를 실행하는 함수
-    void StartSessionInternal(const FString& GameMapPackagePath);
+    // 검증된 맵 광고 경로와 실제 이동 URL을 사용하여 Session 시작 절차를 실행하는 함수
+    void StartSessionInternal(const FString& MapPackagePath, const FString& TravelURL);
 
     // 추가 참가를 닫은 GameSession에 실제 시작 요청을 전달하는 함수
-    void RequestStartSession(const FString& MapPackagePath);
+    void RequestStartSession(const FString& TravelURL);
 
     // 게임 시작 준비 실패 이후 로비의 추가 참가 허용 상태를 복구하는 함수
     void RecoverStartGameJoinability();
@@ -172,11 +176,11 @@ protected:
     // Online Session Interface에서 Create Session을 완료하였을 때 호출되는 함수
     void HandleCreateSessionComplete(FName SessionName, bool bWasSuccessful, const FString SessionMapPackagePath);
 
-    // Online Session Interface에서 Start Session을 완료하면 호스트의 지정 맵 이동을 처리하는 함수
-    void HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
+    // Online Session Interface에서 Start Session을 완료하면 호스트의 지정 URL 이동을 처리하는 함수
+    void HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString TravelURL);
 
     // 게임 시작 전 추가 참가 차단 설정이 완료되면 실제 Session 시작을 요청하는 함수
-    void HandleStartGameJoinabilityUpdateComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
+    void HandleStartGameJoinabilityUpdateComplete(FName SessionName, bool bWasSuccessful, const FString TravelURL);
 
     // Online Session Interface에서 End Session을 완료하면 로비의 추가 참가 허용 설정을 요청하는 함수
     void HandleEndSessionComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
