@@ -1,4 +1,4 @@
-#include "UI/Game/MD_HUDQuestWidget.h"
+﻿#include "UI/Game/MD_HUDQuestWidget.h"
 
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Components/ScrollBox.h"
@@ -143,4 +143,7 @@ void UMD_HUDQuestWidget::RefreshQuestDisplay()
 			AddRepeatQuestCard(RepeatQuest);
 		}
 	}
+
+	int32 CurrentQuestCount = SB_QuestList->GetChildrenCount();
+	SetVisibility(CurrentQuestCount <= 0 ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 }

@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -42,6 +42,14 @@ public:
 
 	/** BeginContract 이후 현장 계약이 살아 있는지. GameInstance 수명 동안 유지된다. */
 	bool HasActiveContract() const { return CurrentSite != nullptr; }
+
+	/** 현재 맵에 맞는 현장 데이터와 기존 계약을 비교하기 위한 활성 현장 반환 함수 */
+	UMD_SiteDefinition* GetCurrentSite() const
+	{
+		// GameInstance 수명 동안 유지되는 현재 현장 참조
+		UMD_SiteDefinition* OutSite = CurrentSite.Get();
+		return OutSite;
+	}
 
 	//상점 해금 판정에 넘길 값
 	int32 GetQuestCompletions() const { return QuestCompletions; }
