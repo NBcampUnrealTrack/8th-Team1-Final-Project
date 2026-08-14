@@ -164,14 +164,26 @@ protected:
     // 준비된 게임 데이터 작업을 유지한 채 Session 시작과 맵 이동 절차를 실행하는 함수
     void StartSessionInternal(const FString& GameMapPackagePath);
 
+    // 추가 참가를 닫은 GameSession에 실제 시작 요청을 전달하는 함수
+    void RequestStartSession(const FString& MapPackagePath);
+
+    // 게임 시작 준비 실패 이후 로비의 추가 참가 허용 상태를 복구하는 함수
+    void RecoverStartGameJoinability();
+
     // Online Session Interface에서 Create Session을 완료하였을 때 호출되는 함수
     void HandleCreateSessionComplete(FName SessionName, bool bWasSuccessful, const FString SessionMapPackagePath);
 
     // Online Session Interface에서 Start Session을 완료하면 호스트의 지정 맵 이동을 처리하는 함수
     void HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
 
-    // Online Session Interface에서 End Session을 완료하면 호스트의 지정 맵 이동을 처리하는 함수
+    // 게임 시작 전 추가 참가 차단 설정이 완료되면 실제 Session 시작을 요청하는 함수
+    void HandleStartGameJoinabilityUpdateComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
+
+    // Online Session Interface에서 End Session을 완료하면 로비의 추가 참가 허용 설정을 요청하는 함수
     void HandleEndSessionComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
+
+    // 게임 종료 후 추가 참가 허용 설정이 완료되면 호스트의 지정 맵 이동을 처리하는 함수
+    void HandleEndGameJoinabilityUpdateComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
 
     // EndSession 맵 이동 실패 이후 Ended Session을 진행 상태로 복구하는 함수
     void RecoverEndGameSession(FName SessionName);
