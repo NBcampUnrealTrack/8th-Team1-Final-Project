@@ -476,7 +476,7 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 			Definition.RequiredCount);
 	}
 
-	const int32 SpawnCount = FMath::Max(1, SamplesToSpawn);
+	const int32 SpawnCount = FMath::Max(1, QuestState.Definition.RequiredCount);
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -508,6 +508,9 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 		}
 		Sample->Grade = SampleGrade;
 		Sample->SpawnProtectionDuration = SampleSpawnProtectionDuration;
+
+		// 생성 직후 샘플 파괴 방지를 위하여 2초동안 무적 처리
+		Sample->SuppressImpactDamage(2);
 
 		UE_LOG(LogTemp, Log,
 			TEXT("[QuestSampleSpawner] %s: [%s] Day%d %s급 샘플 스폰 @ %s"),
@@ -570,6 +573,9 @@ int32 AMD_QuestSampleSpawner::SpawnRepeatQuestSamples(const FMD_RepeatQuestState
 
 		Sample->Grade = SampleGrade;
 		Sample->SpawnProtectionDuration = SampleSpawnProtectionDuration;
+
+		Sample->SuppressImpactDamage(2);
+
 		++SpawnedCount;
 
 		UE_LOG(LogTemp, Log,
