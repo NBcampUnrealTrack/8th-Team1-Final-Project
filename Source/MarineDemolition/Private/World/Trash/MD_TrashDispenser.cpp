@@ -62,26 +62,16 @@ void AMD_TrashDispenser::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (IsValid(Mesh))
-	{
-		DefaultMeshInteractResponse =
-			Mesh->GetCollisionResponseToChannel(MDCollisionChannels::InteractTrace);
-	}
-
-	if (IsValid(InteractionVolume))
-	{
-		DefaultVolumeInteractResponse =
-			InteractionVolume->GetCollisionResponseToChannel(MDCollisionChannels::InteractTrace);
-	}
+	DefaultMeshInteractResponse =
+		Mesh->GetCollisionResponseToChannel(MDCollisionChannels::InteractTrace);
+	DefaultVolumeInteractResponse =
+		InteractionVolume->GetCollisionResponseToChannel(MDCollisionChannels::InteractTrace);
 
 	// 상호작용 Trace는 각 머신에서 로컬로 쏘므로 서버·클라이언트 모두에서 갱신해야 한다.
-	if (IsValid(SpawnClearance))
-	{
-		SpawnClearance->OnComponentBeginOverlap.AddDynamic(
-			this, &AMD_TrashDispenser::HandleClearanceBeginOverlap);
-		SpawnClearance->OnComponentEndOverlap.AddDynamic(
-			this, &AMD_TrashDispenser::HandleClearanceEndOverlap);
-	}
+	SpawnClearance->OnComponentBeginOverlap.AddDynamic(
+		this, &AMD_TrashDispenser::HandleClearanceBeginOverlap);
+	SpawnClearance->OnComponentEndOverlap.AddDynamic(
+		this, &AMD_TrashDispenser::HandleClearanceEndOverlap);
 
 	// 델리게이트를 붙이기 전부터 출구에 놓여 있던 통도 최초 상태에 포함한다.
 	RefreshInteractTraceResponse();
@@ -89,13 +79,10 @@ void AMD_TrashDispenser::BeginPlay()
 
 void AMD_TrashDispenser::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	if (IsValid(SpawnClearance))
-	{
-		SpawnClearance->OnComponentBeginOverlap.RemoveDynamic(
-			this, &AMD_TrashDispenser::HandleClearanceBeginOverlap);
-		SpawnClearance->OnComponentEndOverlap.RemoveDynamic(
-			this, &AMD_TrashDispenser::HandleClearanceEndOverlap);
-	}
+	SpawnClearance->OnComponentBeginOverlap.RemoveDynamic(
+		this, &AMD_TrashDispenser::HandleClearanceBeginOverlap);
+	SpawnClearance->OnComponentEndOverlap.RemoveDynamic(
+		this, &AMD_TrashDispenser::HandleClearanceEndOverlap);
 
 	for (const TWeakObjectPtr<AMD_TrashBin>& BinPtr : LiveDispensedBins)
 	{
@@ -111,106 +98,86 @@ void AMD_TrashDispenser::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AMD_TrashDispenser::SetInteractionHighlighted_Implementation(bool bHighlighted)
 {
-	if (!IsValid(Mesh)) return;
-
 	Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
 	Mesh->SetRenderCustomDepth(bHighlighted);
 }
 
-bool AMD_TrashDispenser::RequiresServerInteraction_Implementation() const
-{
-	return true;
-}
-
 void AMD_TrashDispenser::Interact_Implementation(AActor* Interactor)
 {
-	if (!HasAuthority() || !GetWorld()) return;
+	if (!HasAuthority()) return;
+
+	APawn* RequestingPawn = Cast<APawn>(Interactor);
 
 	const double CurrentTime = GetWorld()->GetTimeSeconds();
 	if (CurrentTime < NextAllowedInteractionTime)
 	{
-		// 결과까지 multicast하면 공격자의 요청 하나가 모든 client의 Reliable RPC로 증폭된다.
+		// 결과까지 multicast하면 공격자의 요청 하나가 모든 client의 RPC로 증폭된다.
 		return;
 	}
-	NextAllowedInteractionTime = CurrentTime + FMath::Max(0.05f, InteractionCooldown);
+	NextAllowedInteractionTime = CurrentTime + InteractionCooldown;
 
-	if (!IsValid(SpawnPoint) || !IsValid(SpawnClearance) || !TrashBinClass)
+	if (!TrashBinClass)
 	{
 		UE_LOG(MarineDemolition, Warning,
-			TEXT("'%s' 보급기의 SpawnPoint, SpawnClearance 또는 TrashBinClass가 설정되지 않았다."),
+			TEXT("'%s' 보급기의 TrashBinClass가 설정되지 않았다."),
 			*GetName());
-		MulticastDispenseResult(EMD_TrashDispenseResult::NotConfigured);
+		MulticastDispenseResult(EMD_TrashDispenseResult::NotConfigured, RequestingPawn);
 		return;
 	}
 
 	CompactLiveDispensedBins();
-	if (LiveDispensedBins.Num() >= FMath::Max(1, MaxLiveDispensedBins))
+	if (LiveDispensedBins.Num() >= MaxLiveDispensedBins)
 	{
-		MulticastDispenseResult(EMD_TrashDispenseResult::LiveLimitReached);
+		MulticastDispenseResult(EMD_TrashDispenseResult::LiveLimitReached, RequestingPawn);
 		return;
 	}
 
-	if (!IsSpawnAreaClear())
+	if (!CanSpawnBinHere())
 	{
-		MulticastDispenseResult(EMD_TrashDispenseResult::Blocked);
+		MulticastDispenseResult(EMD_TrashDispenseResult::Blocked, RequestingPawn);
 		return;
 	}
 
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.Owner = this;
-	SpawnParams.Instigator = Cast<APawn>(Interactor);
+	SpawnParams.Instigator = RequestingPawn;
 	SpawnParams.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButDontSpawnIfColliding;
 
+	// SpawnActor의 기본 스케일 처리(MultiplyWithRoot)는 BP 루트 스케일에 이 트랜스폼의 스케일을 곱한다.
+	// 보급기를 레벨에서 키워도 통은 BP에 저장된 크기로 나와야 하므로 액터 스케일만 상쇄해서 넘긴다.
 	FTransform SpawnTransform = SpawnPoint->GetComponentTransform();
-	SpawnTransform.SetScale3D(SpawnTransform.GetScale3D() / GetActorScale3D());
+	FVector SpawnScale = SpawnTransform.GetScale3D();
+	const FVector ActorScale = GetActorScale3D();
+	for (int32 Axis = 0; Axis < 3; ++Axis)
+	{
+		// 액터 스케일이 0인 배치에서 inf/NaN 스케일로 물리 바디가 생성되는 것을 막는다.
+		SpawnScale[Axis] = FMath::IsNearlyZero(ActorScale[Axis])
+			? 1.0
+			: SpawnScale[Axis] / ActorScale[Axis];
+	}
+	SpawnTransform.SetScale3D(SpawnScale);
 
 	AMD_TrashBin* SpawnedTrashBin = GetWorld()->SpawnActor<AMD_TrashBin>(
 		TrashBinClass,
 		SpawnTransform,
 		SpawnParams);
 
-	if (IsValid(SpawnedTrashBin))
+	if (!IsValid(SpawnedTrashBin))
 	{
-		if (RegisterTrackedBin(SpawnedTrashBin))
-		{
-			MulticastDispenseResult(EMD_TrashDispenseResult::Success);
-		}
-		else
-		{
-			SpawnedTrashBin->Destroy();
-			MulticastDispenseResult(EMD_TrashDispenseResult::SpawnFailed);
-		}
-	}
-	else
-	{
-		MulticastDispenseResult(EMD_TrashDispenseResult::SpawnFailed);
-	}
-}
-
-bool AMD_TrashDispenser::RegisterTrackedBin(AMD_TrashBin* Bin)
-{
-	if (!HasAuthority() || !IsValid(Bin) || Bin->IsActorBeingDestroyed())
-	{
-		return false;
+		MulticastDispenseResult(EMD_TrashDispenseResult::SpawnFailed, RequestingPawn);
+		return;
 	}
 
-	CompactLiveDispensedBins();
-	const TWeakObjectPtr<AMD_TrashBin> BinPtr(Bin);
-	if (!LiveDispensedBins.Contains(BinPtr))
-	{
-		LiveDispensedBins.Add(BinPtr);
-		Bin->OnDestroyed.AddUniqueDynamic(
-			this, &AMD_TrashDispenser::HandleDispensedBinDestroyed);
-	}
-	return true;
+	LiveDispensedBins.Add(SpawnedTrashBin);
+	SpawnedTrashBin->OnDestroyed.AddDynamic(this, &AMD_TrashDispenser::HandleDispensedBinDestroyed);
+	MulticastDispenseResult(EMD_TrashDispenseResult::Success, RequestingPawn);
 }
 
 void AMD_TrashDispenser::HandleDispensedBinDestroyed(AActor* DestroyedActor)
 {
-	if (!DestroyedActor) return;
-
-	LiveDispensedBins.Remove(TWeakObjectPtr<AMD_TrashBin>(Cast<AMD_TrashBin>(DestroyedActor)));
+	// AMD_TrashBin의 OnDestroyed에만 바인딩하므로 다른 타입이 들어올 수 없다.
+	LiveDispensedBins.Remove(TWeakObjectPtr<AMD_TrashBin>(CastChecked<AMD_TrashBin>(DestroyedActor)));
 }
 
 void AMD_TrashDispenser::CompactLiveDispensedBins()
@@ -222,15 +189,14 @@ void AMD_TrashDispenser::CompactLiveDispensedBins()
 		});
 }
 
-bool AMD_TrashDispenser::IsSpawnAreaClear() const
+bool AMD_TrashDispenser::CanSpawnBinHere() const
 {
-	if (!GetWorld() || !IsValid(SpawnClearance)) return false;
-
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(TrashDispenserClearance), false, this);
-	QueryParams.AddIgnoredActor(this);
 
+	// 스폰 단계의 AdjustIfPossibleButDontSpawnIfColliding은 Pawn을 막는 통 충돌로 판정하므로
+	// 여기서도 Pawn을 장애물로 본다. 두 판정이 어긋나면 사람이 서 있을 때 Blocked 대신
+	// SpawnFailed가 나가고, 밀어내기가 성공하면 통이 캡슐 안에서 물리를 시작한다.
 	FCollisionResponseParams ResponseParams(ECR_Block);
-	ResponseParams.CollisionResponse.SetResponse(ECC_Pawn, ECR_Ignore);
 
 	const FCollisionShape ClearanceShape =
 		FCollisionShape::MakeBox(SpawnClearance->GetScaledBoxExtent());
@@ -260,42 +226,30 @@ bool AMD_TrashDispenser::IsSpawnAreaClear() const
 	return true;
 }
 
-bool AMD_TrashDispenser::HasTrashBinInClearance() const
+bool AMD_TrashDispenser::ShouldYieldInteractTraceToBin() const
 {
-	if (!IsValid(SpawnClearance)) return false;
-
 	TArray<AActor*> OverlappingBins;
 	SpawnClearance->GetOverlappingActors(OverlappingBins, AMD_TrashBin::StaticClass());
 
-	for (const AActor* Bin : OverlappingBins)
-	{
-		if (IsValid(Bin)) return true;
-	}
-
-	return false;
+	// GetOverlappingActors가 파괴 중인 액터를 이미 걸러내므로 개수만 보면 된다.
+	return OverlappingBins.Num() > 0;
 }
 
 void AMD_TrashDispenser::RefreshInteractTraceResponse()
 {
-	const bool bOccupied = HasTrashBinInClearance();
+	const bool bOccupied = ShouldYieldInteractTraceToBin();
 	if (bOccupied == bClearanceOccupied) return;
 
 	bClearanceOccupied = bOccupied;
 
 	// 통이 남아 있는 동안에는 보급기가 Trace를 가로채지 않아야 그 통을 집어 치울 수 있다.
-	if (IsValid(Mesh))
-	{
-		Mesh->SetCollisionResponseToChannel(
-			MDCollisionChannels::InteractTrace,
-			bOccupied ? ECR_Ignore : DefaultMeshInteractResponse);
-	}
+	Mesh->SetCollisionResponseToChannel(
+		MDCollisionChannels::InteractTrace,
+		bOccupied ? ECR_Ignore : DefaultMeshInteractResponse);
 
-	if (IsValid(InteractionVolume))
-	{
-		InteractionVolume->SetCollisionResponseToChannel(
-			MDCollisionChannels::InteractTrace,
-			bOccupied ? ECR_Ignore : DefaultVolumeInteractResponse);
-	}
+	InteractionVolume->SetCollisionResponseToChannel(
+		MDCollisionChannels::InteractTrace,
+		bOccupied ? ECR_Ignore : DefaultVolumeInteractResponse);
 }
 
 void AMD_TrashDispenser::HandleClearanceBeginOverlap(
@@ -324,7 +278,9 @@ void AMD_TrashDispenser::HandleClearanceEndOverlap(
 }
 
 void AMD_TrashDispenser::MulticastDispenseResult_Implementation(
-	EMD_TrashDispenseResult Result)
+	EMD_TrashDispenseResult Result, APawn* RequestingPawn)
 {
-	OnDispenseResult(Result);
+	// 실패 메시지처럼 요청자 화면에만 띄울 연출을 BP가 구분할 수 있게 로컬 여부를 계산해 넘긴다.
+	const bool bIsLocalRequester = IsValid(RequestingPawn) && RequestingPawn->IsLocallyControlled();
+	OnDispenseResult(Result, bIsLocalRequester);
 }

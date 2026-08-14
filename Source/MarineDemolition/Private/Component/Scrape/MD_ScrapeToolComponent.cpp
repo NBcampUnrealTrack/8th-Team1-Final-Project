@@ -105,8 +105,7 @@ void UMD_ScrapeToolComponent::BeginPlay()
 	SetComponentTickEnabled(false);
 }
 
-FVector2D UMD_ScrapeToolComponent::ConstrainLookInput(
-	const FVector2D& LookInput) const
+FVector2D UMD_ScrapeToolComponent::ConstrainLookInput(const FVector2D& LookInput) const
 {
 	if (!bIsScraping || !bHasLockedStrokeAxis)
 	{
@@ -114,8 +113,7 @@ FVector2D UMD_ScrapeToolComponent::ConstrainLookInput(
 	}
 
 	FVector2D ConstrainedLookInput = LookInput;
-	if (FMath::Abs(LockedStrokeAxis.X)
-		>= FMath::Abs(LockedStrokeAxis.Y))
+	if (FMath::Abs(LockedStrokeAxis.X) >= FMath::Abs(LockedStrokeAxis.Y))
 	{
 		// 가로 긁기에서는 위아래 시선을 고정한다.
 		ConstrainedLookInput.Y = 0.0;
@@ -129,12 +127,9 @@ FVector2D UMD_ScrapeToolComponent::ConstrainLookInput(
 	return ConstrainedLookInput;
 }
 
-bool UMD_ScrapeToolComponent::SetScrapeToolSpec(
-	const FMD_ScrapeToolSpec& NewToolSpec)
+bool UMD_ScrapeToolComponent::SetScrapeToolSpec(const FMD_ScrapeToolSpec& NewToolSpec)
 {
-	if (!GetOwner()
-		|| !GetOwner()->HasAuthority()
-		|| !NewToolSpec.IsValid())
+	if (!GetOwner() || !GetOwner()->HasAuthority() || !NewToolSpec.IsValid())
 	{
 		return false;
 	}

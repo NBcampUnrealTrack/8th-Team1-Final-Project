@@ -2,13 +2,9 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/StaticMesh.h"
-#include "Engine/World.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "GameplayTags/MD_GameplayTags.h"
-#include "Materials/MaterialInstanceDynamic.h"
-#include "Net/UnrealNetwork.h"
-#include "Util/MD_MaterialTintUtility.h"
 
 AMD_TrashItem::AMD_TrashItem()
 {
@@ -32,13 +28,6 @@ AMD_TrashItem::AMD_TrashItem()
 	// 산재 쓰레기는 종류와 무관하게 태그가 같으므로 코드에서 기본값을 준다
 	PickupMethodTag = MDGameplayTags::Interaction_Pickup_Physics;
 	StorageContentTag = MDGameplayTags::Resource_Storage_Content_Trash;
-}
-
-void AMD_TrashItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
-	DOREPLIFETIME(AMD_TrashItem, TrashKindId);
 }
 
 void AMD_TrashItem::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
@@ -65,12 +54,6 @@ void AMD_TrashItem::SetInteractionHighlighted_Implementation(bool bHighlighted)
 		Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
 		Mesh->SetRenderCustomDepth(bHighlighted);
 	}
-}
-
-void AMD_TrashItem::SetTrashKindId(const FName InTrashKindId)
-{
-	TrashKindId = InTrashKindId;
-	ApplyTrashKindRow();
 }
 
 FGameplayTag AMD_TrashItem::GetTrashCategory_Implementation() const
@@ -102,11 +85,6 @@ TArray<FName> AMD_TrashItem::GetTrashKindIdOptions() const
 	return UMD_TrashLibrary::GetTrashKindIds();
 }
 
-void AMD_TrashItem::OnRep_TrashKindId()
-{
-	ApplyTrashKindRow();
-}
-
 void AMD_TrashItem::ApplyTrashKindRow()
 {
 	if (!IsValid(Mesh))
@@ -114,22 +92,11 @@ void AMD_TrashItem::ApplyTrashKindRow()
 		return;
 	}
 
-	bool bNeedsKindData = !bHasAppliedTrashKind || AppliedTrashKindId != TrashKindId;
-#if WITH_EDITOR
-	// 에디터 배치에서는 DataTable 행 수정도 즉시 반영하되 PIE/런타임 캐시는 유지한다.
-	if (const UWorld* World = GetWorld(); World && World->WorldType == EWorldType::Editor)
+	if (!bHasAppliedTrashKind || AppliedTrashKindId != TrashKindId)
 	{
-		bNeedsKindData = true;
-	}
-#endif
-
-	if (bNeedsKindData)
-	{
+		// 행이 없으면 기본값 행이 그대로 적용된다. 무효 카테고리는 아래에서 누락 신호 색이 된다
 		FMD_TrashKindRow KindRow;
-		if (!UMD_TrashLibrary::FindTrashKindRow(TrashKindId, KindRow))
-		{
-			return;
-		}
+		UMD_TrashLibrary::FindTrashKindRow(TrashKindId, KindRow);
 
 		// 메시 볼륨 자동 계산에 맡기면 메시 교체만으로 무게감이 조용히 달라진다
 		Mesh->SetMassOverrideInKg(NAME_None, FMath::Max(KindRow.MassKg, 0.01f), true);
@@ -142,12 +109,6 @@ void AMD_TrashItem::ApplyTrashKindRow()
 		}
 		if (KindMesh && Mesh->GetStaticMesh() != KindMesh)
 		{
-			// 이전 메시의 override MID가 새 메시로 새어 가지 않게 먼저 해제한다.
-			if (TrashMID)
-			{
-				Mesh->SetMaterial(0, nullptr);
-				TrashMID = nullptr;
-			}
 			Mesh->SetStaticMesh(KindMesh);
 		}
 
@@ -156,26 +117,18 @@ void AMD_TrashItem::ApplyTrashKindRow()
 		bHasAppliedTrashKind = true;
 	}
 
-	// 전용 서버에는 색/MID가 필요 없다. 메시·질량은 서버 물리 때문에 위에서 계속 적용한다.
-	if (GetNetMode() == NM_DedicatedServer
-		|| !bTintPlaceholderMeshByCategory
-		|| TintParameterName.IsNone()
-		|| Mesh->GetNumMaterials() <= 0)
+	// 전용 서버에는 색이 필요 없다. 메시·질량은 서버 물리 때문에 위에서 계속 적용한다.
+	if (GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
 
-	if (!TrashMID)
-	{
-		TrashMID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
-	}
-	if (!TrashMID)
-	{
-		return;
-	}
+	// MID를 쓰면 개체마다 고유 머티리얼이 생겨 같은 메시끼리도 인스턴싱이 깨진다.
+	// Custom Primitive Data는 머티리얼을 공유한 채 값만 개체별로 넘긴다.
+	// 틴트를 끄면 데이터가 0(검정)으로 남으므로 흰색으로 중립화한다.
+	const FLinearColor TintColor = bTintPlaceholderMeshByCategory
+		? UMD_TrashLibrary::GetCategoryColor(AppliedCategory)
+		: FLinearColor::White;
 
-	MDMaterialTint::SetVectorParameterChecked(
-		TrashMID,
-		TintParameterName,
-		UMD_TrashLibrary::GetCategoryColor(AppliedCategory));
+	Mesh->SetCustomPrimitiveDataVector4(TintCustomDataIndex, FVector4(TintColor));
 }

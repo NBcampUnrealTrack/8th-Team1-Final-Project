@@ -14,11 +14,7 @@
  * 매일 ~10개가 나와 산재 쓰레기와 맞먹는 분리 대상이다.
  */
 UCLASS()
-class MARINEDEMOLITION_API AMD_WallPiece
-	: public AActor
-	, public IGameplayTagAssetInterface
-	, public IMD_Interactable
-	, public IMD_TrashSortable
+class MARINEDEMOLITION_API AMD_WallPiece: public AActor, public IGameplayTagAssetInterface, public IMD_Interactable, public IMD_TrashSortable
 {
 	GENERATED_BODY()
 
