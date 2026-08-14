@@ -5,9 +5,9 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
+#include "Gameplay/Trash/MD_TrashContentClaimSubsystem.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Net/UnrealNetwork.h"
-#include "World/Trash/MD_TrashContentClaimSubsystem.h"
 
 AMD_TrashBin::AMD_TrashBin()
 {

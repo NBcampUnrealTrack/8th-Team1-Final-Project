@@ -1,4 +1,4 @@
-#include "World/Trash/MD_TrashContentClaimSubsystem.h"
+#include "Gameplay/Trash/MD_TrashContentClaimSubsystem.h"
 
 #include "World/Trash/MD_TrashBin.h"
 

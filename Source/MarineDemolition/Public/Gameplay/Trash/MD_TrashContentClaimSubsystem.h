@@ -16,7 +16,7 @@ struct FContentClaim
 };
 
 UCLASS()
-class UMD_TrashContentClaimSubsystem final : public UWorldSubsystem
+class MARINEDEMOLITION_API UMD_TrashContentClaimSubsystem final : public UWorldSubsystem
 {
 	GENERATED_BODY()
 
