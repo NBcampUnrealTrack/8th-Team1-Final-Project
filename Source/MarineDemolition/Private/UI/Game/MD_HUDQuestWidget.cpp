@@ -143,4 +143,7 @@ void UMD_HUDQuestWidget::RefreshQuestDisplay()
 			AddRepeatQuestCard(RepeatQuest);
 		}
 	}
+
+	int32 CurrentQuestCount = SB_QuestList->GetChildrenCount();
+	SetVisibility(CurrentQuestCount <= 0 ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 }

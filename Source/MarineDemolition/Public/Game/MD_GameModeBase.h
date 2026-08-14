@@ -76,6 +76,8 @@ private:
 
     bool DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld* World) const;
 
+    TSoftObjectPtr<UWorld> MakeWorldAssetReference(UWorld* World) const;
+
     // FinalizeDay 중복 실행 방지 플래그. 레벨 재시작 시 초기화
     bool bDayFinalized = false;
 
@@ -127,7 +129,11 @@ private:
     UFUNCTION()
     void HandleGameDayChanged(int32 NewDay);
 
-    /** BP GameMode 또는 PlayerController DebugSite fallback보다 우선한다. */
+    /** 현재 맵을 키로 사용하여 현장 데이터를 직접 선택하기 위한 맵별 계약 목록 */
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+    TMap<TSoftObjectPtr<UWorld>, TObjectPtr<UMD_SiteDefinition>> ExpeditionSitesByMap;
+
+    /** 기존 BP 설정과 단일 현장 테스트를 유지하기 위한 호환 후보 */
     UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
     TObjectPtr<UMD_SiteDefinition> ExpeditionSite;
 

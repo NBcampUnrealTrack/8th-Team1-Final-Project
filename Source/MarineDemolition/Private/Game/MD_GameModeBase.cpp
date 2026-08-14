@@ -275,6 +275,31 @@ bool AMD_GameModeBase::DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld*
     return false;
 }
 
+TSoftObjectPtr<UWorld> AMD_GameModeBase::MakeWorldAssetReference(UWorld* World) const
+{
+    // 현재 실행 월드의 원본 애셋을 가리키는 반환 참조
+    TSoftObjectPtr<UWorld> OutWorldReference;
+
+    if (IsValid(World) == true)
+    {
+        // PIE 접두사가 포함될 수 있는 실행 월드 패키지 이름
+        FString WorldPackageName = World->GetPackage()->GetName();
+
+        // 원본 월드 오브젝트 경로를 재구성하기 위한 패키지 경로
+        FString WorldPackagePath = FPackageName::GetLongPackagePath(WorldPackageName);
+
+        // PIE 접두사를 제거하여 원본 애셋 이름으로 복구할 현재 맵 이름
+        FString WorldAssetName = FPackageName::GetShortName(WorldPackageName);
+        WorldAssetName.RemoveFromStart(World->StreamingLevelsPrefix);
+
+        // TMap의 월드 소프트 참조 키와 동일한 형식의 오브젝트 경로
+        FString WorldObjectPath = FString::Printf(TEXT("%s/%s.%s"), *WorldPackagePath, *WorldAssetName, *WorldAssetName);
+        OutWorldReference = TSoftObjectPtr<UWorld>(FSoftObjectPath(WorldObjectPath));
+    }
+
+    return OutWorldReference;
+}
+
 void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result)
 {
     const AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>();
@@ -632,24 +657,39 @@ UMD_SiteDefinition* AMD_GameModeBase::ResolveExpeditionSite() const
 
     // PIE 맵 이름까지 포함하여 후보 현장의 실제 실행 맵을 확인하기 위한 월드
     UWorld* World = GetWorld();
-    if (DoesSiteUseCurrentWorld(ExpeditionSite, World) == true)
+    if (IsValid(World) == true)
     {
-        OutSite = ExpeditionSite;
-    }
-    else if (IsValid(World) == true)
-    {
-        // GameMode에 현장이 없을 때 테스트용 PlayerController 현장을 제한적으로 사용하는 대체 경로
-        for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
-        {
-            // 현재 서버 월드에서 테스트용 현장 설정을 제공하는 플레이어 컨트롤러
-            AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(It->Get());
+        // PIE에서도 원본 맵 키로 조회하기 위한 현재 월드 소프트 참조
+        TSoftObjectPtr<UWorld> CurrentWorldReference = MakeWorldAssetReference(World);
 
-            // 플레이어 컨트롤러가 제공하는 원정 현장 후보
-            UMD_SiteDefinition* PlayerSite = IsValid(PlayerController) == true ? PlayerController->GetExpeditionSite() : nullptr;
-            if (DoesSiteUseCurrentWorld(PlayerSite, World) == true)
+        // 현재 맵과 일대일로 등록된 현장 데이터 조회
+        TObjectPtr<UMD_SiteDefinition> RegisteredSite = ExpeditionSitesByMap.FindRef(CurrentWorldReference);
+        if (IsValid(RegisteredSite) == true)
+        {
+            OutSite = RegisteredSite.Get();
+        }
+
+        // 기존 단일 Site 설정을 사용하는 Blueprint와의 호환 경로
+        if (IsValid(OutSite) == false && DoesSiteUseCurrentWorld(ExpeditionSite, World) == true)
+        {
+            OutSite = ExpeditionSite;
+        }
+
+        if (IsValid(OutSite) == false)
+        {
+            // 등록 현장이 없을 때 테스트용 PlayerController 현장을 제한적으로 사용하는 대체 경로
+            for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
             {
-                OutSite = PlayerSite;
-                break;
+                // 현재 서버 월드에서 테스트용 현장 설정을 제공하는 플레이어 컨트롤러
+                AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(It->Get());
+
+                // 플레이어 컨트롤러가 제공하는 원정 현장 후보
+                UMD_SiteDefinition* PlayerSite = IsValid(PlayerController) == true ? PlayerController->GetExpeditionSite() : nullptr;
+                if (DoesSiteUseCurrentWorld(PlayerSite, World) == true)
+                {
+                    OutSite = PlayerSite;
+                    break;
+                }
             }
         }
     }
@@ -677,16 +717,19 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
         return;
     }
 
-    if (!Merchant->HasActiveContract())
+    // 여러 현장 후보 중 현재 맵에 연결된 계약 데이터
+    UMD_SiteDefinition* ResolvedSite = ResolveExpeditionSite();
+    if (IsValid(ResolvedSite) == false)
     {
-        UMD_SiteDefinition* Site = ResolveExpeditionSite();
-        if (!IsValid(Site))
-        {
-            UE_LOG(LogTemp, Log, TEXT("[Merchant] 현재 맵에 연결된 원정 Site 없음: %s"), *World->GetMapName());
-            return;
-        }
+        UE_LOG(LogTemp, Log, TEXT("[Merchant] 현재 맵에 연결된 원정 Site 없음: %s"), *World->GetMapName());
+        return;
+    }
 
-        Merchant->BeginContract(Site, ExpeditionAdvancePayment);
+    // 같은 현장의 Day 전환은 유지하고 다른 현장 진입만 새 계약으로 교체하기 위한 현재 데이터
+    UMD_SiteDefinition* CurrentSite = Merchant->GetCurrentSite();
+    if (CurrentSite != ResolvedSite)
+    {
+        Merchant->BeginContract(ResolvedSite, ExpeditionAdvancePayment);
     }
 
     bool bShouldBeginDay = Merchant->GetCurrentDay() != Day;
