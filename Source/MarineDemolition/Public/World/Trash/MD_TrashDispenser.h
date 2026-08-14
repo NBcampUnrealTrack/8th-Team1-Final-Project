@@ -5,6 +5,7 @@
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_TrashDispenser.generated.h"
 
+class APawn;
 class UArrowComponent;
 class UBoxComponent;
 class UPrimitiveComponent;
@@ -17,6 +18,10 @@ UENUM(BlueprintType)
 enum class EMD_TrashDispenseResult : uint8
 {
 	Success,
+	/**
+	 * 통이 아닌 물리 오브젝트나 사람이 출구를 막았다.
+	 * 통이 막은 경우는 RefreshInteractTraceResponse가 조준을 그 통으로 넘기므로 여기까지 오지 않는다.
+	 */
 	Blocked,
 	NotConfigured,
 	SpawnFailed,
@@ -36,19 +41,19 @@ public:
 
 	/** Implements IMD_Interactable */
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
-	virtual bool RequiresServerInteraction_Implementation() const override;
 	virtual void Interact_Implementation(AActor* Interactor) override;
 	/** ~Implements IMD_Interactable */
-
-	int32 GetLiveDispensedBinCount() const { return LiveDispensedBins.Num(); }
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	/** 서버 판정 결과를 각 플레이어의 같은 보급기 인스턴스에 전달한다. */
-	UFUNCTION(NetMulticast, Reliable)
-	void MulticastDispenseResult(EMD_TrashDispenseResult Result);
+	/**
+	 * 서버 판정 결과를 각 머신의 같은 보급기 인스턴스에 전달한다.
+	 * 연출 전용이라 한 번 유실돼도 게임 상태가 어긋나지 않으므로 Unreliable로 보낸다.
+	 */
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastDispenseResult(EMD_TrashDispenseResult Result, APawn* RequestingPawn);
 
 	UFUNCTION()
 	void HandleClearanceBeginOverlap(
@@ -66,9 +71,13 @@ protected:
 		UPrimitiveComponent* OtherComp,
 		int32 OtherBodyIndex);
 
-	/** Blueprint에서 소리·표시등·메시지 같은 연출을 붙이는 지점 */
+	/**
+	 * Blueprint에서 소리·표시등·메시지 같은 연출을 붙이는 지점.
+	 * 모든 머신에서 실행되므로 소리·표시등은 그대로 재생하되,
+	 * 요청자 화면에만 띄울 실패 메시지는 bIsLocalRequester로 걸러야 옆 사람에게도 뜨지 않는다.
+	 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Trash Dispenser")
-	void OnDispenseResult(EMD_TrashDispenseResult Result);
+	void OnDispenseResult(EMD_TrashDispenseResult Result, bool bIsLocalRequester);
 
 	/** 배치 트랜스폼과 시각 요소를 분리하는 기준점 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash Dispenser")
@@ -94,7 +103,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Dispenser")
 	TSubclassOf<AMD_TrashBin> TrashBinClass;
 
-	/** 서버 요청 스팸과 Reliable 결과 multicast 증폭을 막는 최소 요청 간격 */
+	/** 서버 요청 스팸과 결과 multicast 증폭을 막는 최소 요청 간격 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Dispenser",
 		meta = (ClampMin = "0.05", UIMin = "0.1", Units = "s"))
 	float InteractionCooldown = 0.25f;
@@ -109,13 +118,20 @@ private:
 	void HandleDispensedBinDestroyed(AActor* DestroyedActor);
 
 	void CompactLiveDispensedBins();
-	bool RegisterTrackedBin(AMD_TrashBin* Bin);
 
-	/** PhysicsActor 충돌 규칙을 기준으로 출구가 비어 있는지 서버에서 확인한다. */
-	bool IsSpawnAreaClear() const;
+	/**
+	 * 새 통을 스폰해도 되는지 서버에서 확인한다.
+	 * 월드 overlap 질의로 모든 PhysicsBody와 Pawn을 장애물로 보며, 스폰 성사 여부를 가른다.
+	 * ShouldYieldInteractTraceToBin과 판정 기준이 다르므로 한쪽만 고치지 말 것.
+	 */
+	bool CanSpawnBinHere() const;
 
-	/** SpawnClearance 안에 아직 치우지 않은 쓰레기통이 있는지 확인한다. */
-	bool HasTrashBinInClearance() const;
+	/**
+	 * 출구를 막은 통을 대신 조준할 수 있도록 보급기가 조준을 양보해야 하는지 확인한다.
+	 * SpawnClearance의 overlap 캐시로 AMD_TrashBin만 보며, 조준 우선순위만 가른다.
+	 * CanSpawnBinHere와 판정 기준이 다르므로 한쪽만 고치지 말 것.
+	 */
+	bool ShouldYieldInteractTraceToBin() const;
 
 	/** 출구를 막은 통을 대신 조준할 수 있도록 보급기의 InteractTrace 응답을 갱신한다. */
 	void RefreshInteractTraceResponse();
