@@ -87,8 +87,9 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	LockedStrokeAxis = FVector2D::ZeroVector;
 	PendingScrapePathArcLengthCm = 0.0;
 	ScrapePathArcLengthCm = 0.0;
-	NextScrapeDirectionSampleArcLengthCm = 0.0;
 	LastEmittedScrapePathArcLengthCm = 0.0;
+	PendingResolvedScrapePathPointsCm.Reset();
+	PendingResolvedScrapePathTravelCm = 0.0;
 	PendingScrapePathSampleTimeSeconds = 0.0;
 	LastEmittedScrapePathPositionCm = FVector2D::ZeroVector;
 	LastEmittedBladeDepthAxis = FVector2D::ZeroVector;
@@ -3214,12 +3215,12 @@ void UMD_ScrapeToolComponent::ResolvePendingScrapePath(
 	FurthestSurfacePositionCm = StrokeAnchorPositionCm;
 	ScrapeDirectionSamples.Reset();
 	ScrapePathArcLengthCm = 0.0;
-	NextScrapeDirectionSampleArcLengthCm = FMath::Max(
-		static_cast<double>(PathDirectionResampleSpacingCm),
-		0.01);
 	AddDirectionSample(PendingScrapePolylineCm[0], 0.0);
 	LastEmittedScrapePathArcLengthCm = 0.0;
 	LastEmittedScrapePathPositionCm = PendingScrapePolylineCm[0];
+	PendingResolvedScrapePathPointsCm.Reset();
+	PendingResolvedScrapePathPointsCm.Add(PendingScrapePolylineCm[0]);
+	PendingResolvedScrapePathTravelCm = 0.0;
 	LastEmittedBladeDepthAxis = StableBladeDepthAxis;
 
 	const TArray<FVector2D> BufferedPolyline = PendingScrapePolylineCm;
@@ -3252,37 +3253,129 @@ void UMD_ScrapeToolComponent::AppendResolvedScrapePathSegment(
 		static_cast<double>(PathDirectionResampleSpacingCm),
 		0.01);
 
-	while (NextScrapeDirectionSampleArcLengthCm
-		<= SegmentEndArcCm + UE_SMALL_NUMBER)
+	if (PendingResolvedScrapePathPointsCm.IsEmpty())
 	{
-		const double SampleArcCm = NextScrapeDirectionSampleArcLengthCm;
-		const double Alpha = FMath::Clamp(
-			(SampleArcCm - SegmentStartArcCm) / SegmentTravelCm,
-			0.0,
-			1.0);
-		const FVector2D SamplePositionCm =
-			StartPositionCm + Delta * Alpha;
+		PendingResolvedScrapePathPointsCm.Add(StartPositionCm);
+	}
+	else if (!PendingResolvedScrapePathPointsCm.Last().Equals(
+		StartPositionCm,
+		UE_SMALL_NUMBER))
+	{
+		// A rebase or future direct caller must never turn a discontinuity into a
+		// scrape chord. Drop only the un-emitted tail and restart at this point.
+		PendingResolvedScrapePathPointsCm.Reset();
+		PendingResolvedScrapePathPointsCm.Add(StartPositionCm);
+		PendingResolvedScrapePathTravelCm = 0.0;
+		LastEmittedScrapePathPositionCm = StartPositionCm;
+		LastEmittedScrapePathArcLengthCm = SegmentStartArcCm;
+		LastEmittedBladeDepthAxis = StableBladeDepthAxis;
+	}
+
+	// Raw aim frequency must not become an evaluator boundary. Extend a pending
+	// leg while travel continues in the same direction, but keep turnarounds as
+	// explicit points so sub-spacing A-B-A movement is not chorded away.
+	bool bExtendedPendingLeg = false;
+	if (PendingResolvedScrapePathPointsCm.Num() >= 2
+		&& PendingResolvedScrapePathPointsCm.Last().Equals(
+			StartPositionCm,
+			UE_SMALL_NUMBER))
+	{
+		const FVector2D PendingLeg =
+			PendingResolvedScrapePathPointsCm.Last()
+			- PendingResolvedScrapePathPointsCm[
+				PendingResolvedScrapePathPointsCm.Num() - 2];
+		if (FVector2D::DotProduct(PendingLeg, Delta)
+			> UE_DOUBLE_SMALL_NUMBER)
+		{
+			PendingResolvedScrapePathPointsCm.Last() = EndPositionCm;
+			bExtendedPendingLeg = true;
+		}
+	}
+	if (!bExtendedPendingLeg)
+	{
+		PendingResolvedScrapePathPointsCm.Add(EndPositionCm);
+	}
+	PendingResolvedScrapePathTravelCm += SegmentTravelCm;
+
+	while (PendingResolvedScrapePathTravelCm
+		>= SafeSpacingCm - UE_SMALL_NUMBER
+		&& PendingResolvedScrapePathPointsCm.Num() >= 2)
+	{
+		double RemainingSampleTravelCm = SafeSpacingCm;
+		FVector2D SamplePositionCm = PendingResolvedScrapePathPointsCm[0];
+		TArray<FVector2D, TInlineAllocator<8>> ConsumedChunkPointsCm;
+		ConsumedChunkPointsCm.Add(SamplePositionCm);
+		while (RemainingSampleTravelCm > UE_SMALL_NUMBER
+			&& PendingResolvedScrapePathPointsCm.Num() >= 2)
+		{
+			const FVector2D LegStartCm = PendingResolvedScrapePathPointsCm[0];
+			const FVector2D LegEndCm = PendingResolvedScrapePathPointsCm[1];
+			const double LegTravelCm = FVector2D::Distance(
+				LegStartCm,
+				LegEndCm);
+			if (LegTravelCm <= UE_SMALL_NUMBER)
+			{
+				PendingResolvedScrapePathPointsCm.RemoveAt(
+					0,
+					1,
+					EAllowShrinking::No);
+				continue;
+			}
+			if (LegTravelCm <= RemainingSampleTravelCm + UE_SMALL_NUMBER)
+			{
+				SamplePositionCm = LegEndCm;
+				ConsumedChunkPointsCm.Add(SamplePositionCm);
+				RemainingSampleTravelCm = FMath::Max(
+					RemainingSampleTravelCm - LegTravelCm,
+					0.0);
+				PendingResolvedScrapePathPointsCm.RemoveAt(
+					0,
+					1,
+					EAllowShrinking::No);
+			}
+			else
+			{
+				const double Alpha = RemainingSampleTravelCm / LegTravelCm;
+				SamplePositionCm = FMath::Lerp(LegStartCm, LegEndCm, Alpha);
+				ConsumedChunkPointsCm.Add(SamplePositionCm);
+				PendingResolvedScrapePathPointsCm[0] = SamplePositionCm;
+				RemainingSampleTravelCm = 0.0;
+			}
+		}
+
+		const double SampleArcCm = LastEmittedScrapePathArcLengthCm
+			+ SafeSpacingCm;
 		AddDirectionSample(SamplePositionCm, SampleArcCm);
 		UpdateStableBladeAxis(SafeSpacingCm);
 
-		const double PartTravelCm =
-			SampleArcCm - LastEmittedScrapePathArcLengthCm;
-		if (PartTravelCm > UE_SMALL_NUMBER
-			&& !LastEmittedScrapePathPositionCm.Equals(
-				SamplePositionCm,
-				UE_SMALL_NUMBER))
+		FVector2D PartStartPositionCm = LastEmittedScrapePathPositionCm;
+		for (int32 ConsumedIndex = 1;
+			ConsumedIndex < ConsumedChunkPointsCm.Num();
+			++ConsumedIndex)
 		{
-			FMD_ScrapeToolPathSegment& Part = OutSegments.AddDefaulted_GetRef();
-			Part.StartPositionCm = LastEmittedScrapePathPositionCm;
-			Part.EndPositionCm = SamplePositionCm;
-			Part.StartBladeDepthAxis = LastEmittedBladeDepthAxis;
-			Part.EndBladeDepthAxis = StableBladeDepthAxis;
-			Part.TravelDistanceCm = static_cast<float>(PartTravelCm);
+			const FVector2D PartEndPositionCm =
+				ConsumedChunkPointsCm[ConsumedIndex];
+			const double PartTravelCm = FVector2D::Distance(
+				PartStartPositionCm,
+				PartEndPositionCm);
+			if (PartTravelCm > UE_SMALL_NUMBER)
+			{
+				FMD_ScrapeToolPathSegment& Part =
+					OutSegments.AddDefaulted_GetRef();
+				Part.StartPositionCm = PartStartPositionCm;
+				Part.EndPositionCm = PartEndPositionCm;
+				Part.StartBladeDepthAxis = LastEmittedBladeDepthAxis;
+				Part.EndBladeDepthAxis = StableBladeDepthAxis;
+				Part.TravelDistanceCm = static_cast<float>(PartTravelCm);
+			}
+			PartStartPositionCm = PartEndPositionCm;
 		}
 		LastEmittedScrapePathPositionCm = SamplePositionCm;
 		LastEmittedScrapePathArcLengthCm = SampleArcCm;
 		LastEmittedBladeDepthAxis = StableBladeDepthAxis;
-		NextScrapeDirectionSampleArcLengthCm += SafeSpacingCm;
+		PendingResolvedScrapePathTravelCm = FMath::Max(
+			PendingResolvedScrapePathTravelCm - SafeSpacingCm,
+			0.0);
 	}
 	ScrapePathArcLengthCm = SegmentEndArcCm;
 }
@@ -3298,23 +3391,63 @@ void UMD_ScrapeToolComponent::FlushResolvedScrapePathTail(
 
 	const double TailTravelCm =
 		ScrapePathArcLengthCm - LastEmittedScrapePathArcLengthCm;
-	if (TailTravelCm <= UE_SMALL_NUMBER
-		|| LastEmittedScrapePathPositionCm.Equals(
-			EndPositionCm,
-			UE_SMALL_NUMBER))
+	if (TailTravelCm <= UE_SMALL_NUMBER)
 	{
 		return;
 	}
 
-	FMD_ScrapeToolPathSegment& Tail = OutSegments.AddDefaulted_GetRef();
-	Tail.StartPositionCm = LastEmittedScrapePathPositionCm;
-	Tail.EndPositionCm = EndPositionCm;
-	Tail.StartBladeDepthAxis = LastEmittedBladeDepthAxis;
-	Tail.EndBladeDepthAxis = StableBladeDepthAxis;
-	Tail.TravelDistanceCm = static_cast<float>(TailTravelCm);
+	const int32 InitialSegmentCount = OutSegments.Num();
+	FVector2D TailStartPositionCm = LastEmittedScrapePathPositionCm;
+	FVector2D TailStartBladeAxis = LastEmittedBladeDepthAxis;
+	for (int32 PointIndex = 1;
+		PointIndex < PendingResolvedScrapePathPointsCm.Num();
+		++PointIndex)
+	{
+		const FVector2D TailEndPositionCm =
+			PendingResolvedScrapePathPointsCm[PointIndex];
+		const double LegTravelCm = FVector2D::Distance(
+			TailStartPositionCm,
+			TailEndPositionCm);
+		if (LegTravelCm <= UE_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		FMD_ScrapeToolPathSegment& Tail = OutSegments.AddDefaulted_GetRef();
+		Tail.StartPositionCm = TailStartPositionCm;
+		Tail.EndPositionCm = TailEndPositionCm;
+		Tail.StartBladeDepthAxis = TailStartBladeAxis;
+		Tail.EndBladeDepthAxis = StableBladeDepthAxis;
+		Tail.TravelDistanceCm = static_cast<float>(LegTravelCm);
+		TailStartPositionCm = TailEndPositionCm;
+		TailStartBladeAxis = StableBladeDepthAxis;
+	}
+	if (!TailStartPositionCm.Equals(EndPositionCm, UE_SMALL_NUMBER))
+	{
+		const double FinalLegTravelCm = FVector2D::Distance(
+			TailStartPositionCm,
+			EndPositionCm);
+		if (FinalLegTravelCm > UE_SMALL_NUMBER)
+		{
+			FMD_ScrapeToolPathSegment& Tail = OutSegments.AddDefaulted_GetRef();
+			Tail.StartPositionCm = TailStartPositionCm;
+			Tail.EndPositionCm = EndPositionCm;
+			Tail.StartBladeDepthAxis = TailStartBladeAxis;
+			Tail.EndBladeDepthAxis = StableBladeDepthAxis;
+			Tail.TravelDistanceCm = static_cast<float>(FinalLegTravelCm);
+		}
+	}
+	if (OutSegments.Num() == InitialSegmentCount)
+	{
+		return;
+	}
+
 	LastEmittedScrapePathPositionCm = EndPositionCm;
 	LastEmittedScrapePathArcLengthCm = ScrapePathArcLengthCm;
 	LastEmittedBladeDepthAxis = StableBladeDepthAxis;
+	PendingResolvedScrapePathPointsCm.Reset();
+	PendingResolvedScrapePathPointsCm.Add(EndPositionCm);
+	PendingResolvedScrapePathTravelCm = 0.0;
 }
 
 void UMD_ScrapeToolComponent::FlushPendingScrapePathApplication()
@@ -3379,8 +3512,10 @@ void UMD_ScrapeToolComponent::ResetScrapePathAccumulator(
 	PendingScrapePathArcLengthCm = 0.0;
 	ScrapeDirectionSamples.Reset();
 	ScrapePathArcLengthCm = 0.0;
-	NextScrapeDirectionSampleArcLengthCm = 0.0;
 	LastEmittedScrapePathArcLengthCm = 0.0;
+	PendingResolvedScrapePathPointsCm.Reset();
+	PendingResolvedScrapePathPointsCm.Add(StartPositionCm);
+	PendingResolvedScrapePathTravelCm = 0.0;
 	LastEmittedScrapePathPositionCm = StartPositionCm;
 	LastEmittedBladeDepthAxis = FVector2D::ZeroVector;
 	StableBladeDepthAxis = FVector2D::ZeroVector;
