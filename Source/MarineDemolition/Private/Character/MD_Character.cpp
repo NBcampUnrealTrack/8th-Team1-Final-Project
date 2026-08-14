@@ -442,11 +442,11 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 		return;
 	}
 
-	if (MDMovement->IsMovingOnGround() && MDMovement->IsInWater())
-	{
-		MDMovement->EnterSwimmingFromGround();
-		return;
-	}
+	//if (MDMovement->IsMovingOnGround() && MDMovement->IsInWater())
+	//{
+	//	MDMovement->EnterSwimmingFromGround();
+	//	return;
+	//}
 
 	Jump();
 }

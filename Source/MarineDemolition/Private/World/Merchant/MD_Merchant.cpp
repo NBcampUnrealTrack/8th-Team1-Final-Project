@@ -9,15 +9,18 @@
 
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Lore/MD_LoreComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Player/MD_PlayerController.h"
+#include "UI/Merchant/MD_LoanWidget.h"
 #include "Player/MD_PlayerState.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
 #include "UI/Merchant/MD_QuestWidget.h"
@@ -179,9 +182,7 @@ void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 		Widget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
 	}
 
-	// 대출 화면이 생기면 HandleShopRequested와 같은 패턴으로 갈아끼운다:
-	// 화면을 띄운 뒤 SetMenuButtonsVisible(false), 뒤로가기에서 다시 true.
-	Widget->OnLoanRequested.AddDynamic(this, &AMD_Merchant::HandleNotReadyRequested);
+	Widget->OnLoanRequested.AddDynamic(this, &AMD_Merchant::HandleLoanRequested);
 
 	// 대화는 메뉴 위젯이 자체 대사창으로 처리한다.
 	// 치료(70₡/회, `07` §2.5)는 대화 안에서 처리하기로 정해졌다 → 대화 화면 담당.
@@ -219,10 +220,24 @@ void AMD_Merchant::HandleMenuExitRequested()
 	{
 		if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
 		{
-			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForQuest);
+			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+		}
+		if (UMD_LoreComponent* LoreComponent = GetLoreComponent())
+		{
+			LoreComponent->OnLoreProgressUpdated.RemoveDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
 		}
 		ActiveQuestWidget->RemoveFromParent();
 		ActiveQuestWidget.Reset();
+	}
+
+	if (ActiveLoanWidget.IsValid() == true)
+	{
+		if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+		{
+			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+		}
+		ActiveLoanWidget->RemoveFromParent();
+		ActiveLoanWidget.Reset();
 	}
 
 	ActiveMenuWidget.Reset();
@@ -322,6 +337,86 @@ void AMD_Merchant::HandleNotReadyRequested()
 	if (ActiveMenuWidget.IsValid())
 	{
 		ActiveMenuWidget->ShowDialogueLine(NotReadyDialogue);
+	}
+}
+
+void AMD_Merchant::HandleLoanRequested()
+{
+	if (IsValid(LoanWidgetClass) == false || ActiveMenuWidget.IsValid() == false)
+	{
+		return;
+	}
+
+	// 이미 생성된 UI가 있는 경우
+	if (ActiveLoanWidget.IsValid() == true)
+	{
+		// Viewport에 없으면 추가
+		if (ActiveLoanWidget->IsInViewport() == false)
+		{
+			ActiveLoanWidget->AddToViewport();
+		}
+		return;
+	}
+
+	// UI를 이용하는(소유하는) 플레이어의 Controller 얻기
+	APlayerController* PlayerController = ActiveMenuWidget->GetOwningPlayer();
+	if (IsValid(PlayerController) == false)
+	{
+		return;
+	}
+
+	// UI 생성
+	UMD_LoanWidget* LoanWidget = CreateWidget<UMD_LoanWidget>(PlayerController, LoanWidgetClass);
+	if (IsValid(LoanWidget) == false)
+	{
+		return;
+	}
+
+	// 초기 설정 진행
+	LoanWidget->SetOwningMerchantMenu(ActiveMenuWidget.Get());
+	LoanWidget->OnBackRequested.AddDynamic(this, &AMD_Merchant::HandleLoanBackRequested);
+	LoanWidget->OnBorrowRequested.AddDynamic(this, &AMD_Merchant::HandleBorrowRequested);
+	LoanWidget->OnRepayRequested.AddDynamic(this, &AMD_Merchant::HandleRepayRequested);
+	LoanWidget->AddToViewport();
+	ActiveLoanWidget = LoanWidget;
+
+	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+	{
+		MerchantComponent->OnMerchantStateChanged.AddUniqueDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+	}
+
+	RefreshLoanWidgetFromComponent();
+}
+
+void AMD_Merchant::HandleLoanBackRequested()
+{
+	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+	{
+		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+	}
+
+	if (ActiveLoanWidget.IsValid() == true)
+	{
+		ActiveLoanWidget->RemoveFromParent();
+		ActiveLoanWidget.Reset();
+	}
+}
+
+void AMD_Merchant::HandleBorrowRequested(int32 Amount)
+{
+	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+	if (IsValid(InteractingPlayerController) == true)
+	{
+		InteractingPlayerController->ServerBorrowCredits(this, Amount);
+	}
+}
+
+void AMD_Merchant::HandleRepayRequested(int32 Amount)
+{
+	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+	if (IsValid(InteractingPlayerController) == true)
+	{
+		InteractingPlayerController->ServerRepayLoan(this, Amount);
 	}
 }
 
@@ -496,17 +591,28 @@ void AMD_Merchant::HandleQuestRequested()
 	// 리슨 서버 호스트든 원격 클라이언트든 이 델리게이트 하나로 갱신된다 (`MD_MerchantComponent` 참고).
 	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
 	{
-		MerchantComponent->OnMerchantStateChanged.AddDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForQuest);
+		MerchantComponent->OnMerchantStateChanged.AddDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+	}
+
+	// 로어 수집 정보가 변경될 때만 열린 코덱스 탭을 갱신하기 위한 전용 이벤트 구독
+	if (UMD_LoreComponent* LoreComponent = GetLoreComponent())
+	{
+		LoreComponent->OnLoreProgressUpdated.AddDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
 	}
 
 	RefreshQuestWidgetFromComponent();
+	RefreshLoreWidgetFromComponent();
 }
 
 void AMD_Merchant::HandleQuestBackRequested()
 {
 	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
 	{
-		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChangedForQuest);
+		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+	}
+	if (UMD_LoreComponent* LoreComponent = GetLoreComponent())
+	{
+		LoreComponent->OnLoreProgressUpdated.RemoveDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
 	}
 
 	if (ActiveQuestWidget.IsValid())
@@ -534,18 +640,29 @@ void AMD_Merchant::HandleRepeatDeclineRequested(int32 QuestIndex)
 
 void AMD_Merchant::HandleRepeatAbandonRequested(int32 QuestIndex)
 {
-	// UMD_MerchantSubsystem에 수락 이후 파기(포기) 처리가 아직 없다 — TryAcceptRepeatQuest/
-	// TryDeclineRepeatQuest만 있고 Accepted 상태를 되돌리는 함수가 없다. 백엔드가 생기면
-	// 여기서 그 서버 RPC를 호출하도록 바꾼다.
-	if (ActiveMenuWidget.IsValid())
+	// PlayerController의 반복 퀘스트 포기 요청 Server RPC 함수 호출
+	AMD_PlayerController* InteractingPC = GetInteractingPlayerController();
+	if (IsValid(InteractingPC) == true)
 	{
-		ActiveMenuWidget->ShowDialogueLine(FText::FromString(TEXT("그건 아직 처리 못 해. 수락한 건 끝내거나 그냥 둬.")));
+		InteractingPC->ServerAbandonRepeatQuest(QuestIndex);
 	}
 }
 
-void AMD_Merchant::HandleMerchantStateChangedForQuest()
+void AMD_Merchant::HandleMerchantStateChanged()
 {
+	const UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (IsValid(MerchantComponent) == true && ActiveMenuWidget.IsValid() == true)
+	{
+		ActiveMenuWidget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
+	}
+
 	RefreshQuestWidgetFromComponent();
+	RefreshLoanWidgetFromComponent();
+}
+
+void AMD_Merchant::HandleLoreProgressUpdated()
+{
+	RefreshLoreWidgetFromComponent();
 }
 
 void AMD_Merchant::RefreshQuestWidgetFromComponent()
@@ -563,6 +680,31 @@ void AMD_Merchant::RefreshQuestWidgetFromComponent()
 
 	ActiveQuestWidget->SetMainQuests(MerchantComponent->GetMainQuests());
 	ActiveQuestWidget->SetRepeatQuests(MerchantComponent->GetRepeatQuests());
+}
+
+void AMD_Merchant::RefreshLoreWidgetFromComponent()
+{
+	if (ActiveQuestWidget.IsValid() == false)
+	{
+		return;
+	}
+
+	UMD_LoreComponent* LoreComponent = GetLoreComponent();
+	if (IsValid(LoreComponent) == false)
+	{
+		return;
+	}
+
+	// 상인과 상호작용 중인 플레이어가 선택한 탐사 현장을 찾기 위한 컨트롤러
+	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+
+	// 퀘스트 데이터와 분리된 현장별 로어 카탈로그 접근을 위한 탐사 현장 정의
+	UMD_SiteDefinition* ExpeditionSite = IsValid(InteractingPlayerController) == true ? InteractingPlayerController->GetExpeditionSite() : nullptr;
+
+	// 수집 원장의 식별자와 화면 표시 정의를 연결하기 위한 로어 카탈로그
+	UMD_LoreCatalog* LoreCatalog = IsValid(ExpeditionSite) == true ? ExpeditionSite->LoreCatalog : nullptr;
+
+	ActiveQuestWidget->SetLoreData(LoreCatalog, LoreComponent->GetSiteProgressList());
 }
 
 void AMD_Merchant::RefreshShopWidgetFromComponent()
@@ -599,12 +741,35 @@ void AMD_Merchant::RefreshShopWidgetFromComponent()
 	ActiveShopWidget->SetFullyStockedItems(FullyStockedItemIds);
 }
 
+void AMD_Merchant::RefreshLoanWidgetFromComponent()
+{
+	if (ActiveLoanWidget.IsValid() == false)
+	{
+		return;
+	}
+
+	const UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (IsValid(MerchantComponent) == false)
+	{
+		return;
+	}
+
+	ActiveLoanWidget->SetLoanInfo(MerchantComponent->BuildMenuInfo());
+}
+
 UMD_MerchantComponent* AMD_Merchant::GetMerchantComponent() const
 {
 	const UWorld* World = GetWorld();
 	const AMD_GameStateBase* GameState = IsValid(World) ? World->GetGameState<AMD_GameStateBase>() : nullptr;
 
 	return IsValid(GameState) ? GameState->GetMerchantComponent() : nullptr;
+}
+
+UMD_LoreComponent* AMD_Merchant::GetLoreComponent() const
+{
+	const UWorld* World = GetWorld();
+	const AMD_GameStateBase* GameState = IsValid(World) == true ? World->GetGameState<AMD_GameStateBase>() : nullptr;
+	return IsValid(GameState) == true ? GameState->GetLoreComponent() : nullptr;
 }
 
 UMD_MerchantSubsystem* AMD_Merchant::GetMerchantSubsystem() const

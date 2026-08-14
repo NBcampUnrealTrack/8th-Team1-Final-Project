@@ -613,12 +613,12 @@ void UMD_MultiplayManager::CreateSessionInternal(const FString& ServerName, int3
     SessionSettings.bIsLANMatch = DefaultOnlineSubsystem != nullptr && DefaultOnlineSubsystem->GetSubsystemName() == FName("NULL");
 
     SessionSettings.bIsDedicated = false;		                                            // Marine Demolition 프로젝트 게임은 Listen Server 고정
-    SessionSettings.bShouldAdvertise = SessionCreateParams.bPrivateSession == false;		        // 비공개 Session 여부 설정
-    SessionSettings.bAllowJoinInProgress = false;		                                    // 게임 진행 중 참여 불가 고정
+    SessionSettings.bShouldAdvertise = SessionCreateParams.bPrivateSession == false || SessionCreateParams.bAllowJoinByFollow == true;		// 공개 또는 친구 전용 Steam 로비 생성을 위한 광고 설정
+    SessionSettings.bAllowJoinInProgress = true;		                                    // 게임 진행 중 참여 불가 고정
     SessionSettings.bUsesPresence = true;				                                    // Presence 사용 고정
-    SessionSettings.bAllowJoinViaPresence = SessionCreateParams.bAllowJoinByFollow;		            // 친구의 Presence 정보를 통하여 Session을 찾아 참여 허용 여부 설정
-    SessionSettings.bAllowJoinViaPresenceFriendsOnly = SessionCreateParams.bAllowJoinByFollow;		// 친구 전용 Presence를 통한 Session을 참여 허용 여부 설정
-    SessionSettings.bAllowInvites = true;				                                    // 초대 허용 고정
+    SessionSettings.bAllowJoinViaPresence = SessionCreateParams.bAllowJoinByFollow == true;		                            // Steam Presence의 친구 따라오기를 통한 참여 허용 설정
+    SessionSettings.bAllowJoinViaPresenceFriendsOnly = SessionCreateParams.bPrivateSession == true && SessionCreateParams.bAllowJoinByFollow == true;	// 비공개이면서 따라오기가 가능한 Session의 친구 전용 로비 설정
+    SessionSettings.bAllowInvites = SessionCreateParams.bPrivateSession == true || SessionCreateParams.bAllowJoinByFollow == true;		// 비공개 또는 따라오기 가능 Session의 Steam 초대 허용 설정
     SessionSettings.bUseLobbiesIfAvailable = true;		                                    // 로비 사용 고정
     SessionSettings.bUseLobbiesVoiceChatIfAvailable = true;		                            // 음성 채팅 사용 고정
     SessionSettings.NumPublicConnections = MaxPlayerCount;		                                    // Session 최대 인원 수 설정

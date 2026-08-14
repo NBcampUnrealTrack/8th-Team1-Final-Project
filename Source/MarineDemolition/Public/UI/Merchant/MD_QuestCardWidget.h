@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -46,7 +46,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MD|Quest")
 	FMD_QuestCardActionRequest OnDeclineRequested;
 
-	/** 수락한 카드에서 '포기'를 눌렀을 때. 백엔드에 파기 처리가 아직 없어 현재는 안내만 뜬다. */
+	/** 수락한 카드에서 '포기'를 눌렀을 때 발생하는 이벤트 */
 	UPROPERTY(BlueprintAssignable, Category = "MD|Quest")
 	FMD_QuestCardActionRequest OnAbandonRequested;
 
@@ -105,7 +105,7 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UButton> BTN_Decline;
 
-	/** 수락 후 포기(파기). `07` §3.2: 포기해도 크레딧 위약금은 없다 — 호감도만 하락 예정. */
+	/** 확정된 포기 페널티를 서버 상인 원장에 요청하는 버튼 (호감도만 하락) */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UButton> BTN_Abandon;
 };
