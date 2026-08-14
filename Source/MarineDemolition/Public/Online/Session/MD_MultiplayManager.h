@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/EngineBaseTypes.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"      // Online Subsystem의 Session 관련 모듈 참조
 #include "Interfaces/OnlineExternalUIInterface.h"   // Online SubSystem의 플랫폼 제공 UI 관련 모듈 참조
@@ -187,6 +186,12 @@ protected:
 
     // EndSession 맵 이동 실패 이후 Ended Session을 진행 상태로 복구하는 함수
     void RecoverEndGameSession(FName SessionName);
+
+    // 게임 종료 복구용 세션 설정 갱신이 완료되면 Session 재시작을 요청하는 함수
+    void HandleRecoverEndGameSessionSettingsComplete(FName UpdatedSessionName, bool bWasSuccessful, FName SessionName);
+
+    // 현재 맵 정보가 복구된 Ended Session을 진행 상태로 되돌리는 함수
+    void RequestRecoverEndGameSessionStart(FName SessionName);
 
     // Online Session Interface에서 Find Sessions을 완료하였을 때 호출되는 함수
     void HandleFindSessionsComplete(bool bWasSuccessful, TSharedPtr<FOnlineSessionSearch> SessionSearch);

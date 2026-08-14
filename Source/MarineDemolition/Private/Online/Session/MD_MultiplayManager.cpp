@@ -786,6 +786,10 @@ void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath)
     FOnlineSessionSettings UpdatedSessionSettings = ExistingSession->SessionSettings;
     UpdatedSessionSettings.bAllowJoinInProgress = false;
 
+    // 세션 검색 결과의 맵 정보가 실제 게임 이동 대상과 일치하도록 갱신하는 처리
+    FString SessionMapName = FPackageName::GetShortName(MapPackagePath);
+    UpdatedSessionSettings.Set(SETTING_MAPNAME, SessionMapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+
     // 추가 참가 차단 완료 후 실제 Session 시작을 이어가기 위한 이벤트 등록
     FOnUpdateSessionCompleteDelegate OnUpdateSessionCompleteDelegate = FOnUpdateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleStartGameJoinabilityUpdateComplete, MapPackagePath);
     SessionDelegateHandle = SessionInterface->AddOnUpdateSessionCompleteDelegate_Handle(OnUpdateSessionCompleteDelegate);
@@ -867,6 +871,20 @@ void UMD_MultiplayManager::RecoverStartGameJoinability()
     // 기존 광고 설정을 유지하면서 로비의 추가 참가만 다시 허용하기 위한 복사
     FOnlineSessionSettings UpdatedSessionSettings = ExistingSession->SessionSettings;
     UpdatedSessionSettings.bAllowJoinInProgress = true;
+
+    // 게임 시작 실패 후 세션 검색 결과를 현재 로비 맵으로 되돌리기 위한 월드 검증
+    UWorld* World = GetWorld();
+    if (IsValid(World) == false)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 게임 시작 실패 이후 현재 로비 맵 정보를 확인할 수 없습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 실패한 게임 맵 대신 실제로 유지 중인 로비 맵을 다시 광고하는 처리
+    FString CurrentSessionMapName = FPackageName::GetShortName(World->GetPackage()->GetName());
+    UpdatedSessionSettings.Set(SETTING_MAPNAME, CurrentSessionMapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
     // 로비 참가 상태 복구 결과를 정리하고 최초 게임 시작 실패를 전달하기 위한 이벤트 등록
     FOnUpdateSessionCompleteDelegate OnUpdateSessionCompleteDelegate = FOnUpdateSessionCompleteDelegate::CreateWeakLambda(this, [this](FName SessionName, bool bWasSuccessful)
@@ -1070,6 +1088,10 @@ void UMD_MultiplayManager::HandleEndSessionComplete(FName SessionName, bool bWas
     FOnlineSessionSettings UpdatedSessionSettings = ExistingSession->SessionSettings;
     UpdatedSessionSettings.bAllowJoinInProgress = true;
 
+    // 세션 검색 결과의 맵 정보가 실제 복귀 이동 대상과 일치하도록 갱신하는 처리
+    FString SessionMapName = FPackageName::GetShortName(MapPackagePath);
+    UpdatedSessionSettings.Set(SETTING_MAPNAME, SessionMapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+
     // 추가 참가 허용 완료 후 로비 맵 이동을 이어가기 위한 이벤트 등록
     FOnUpdateSessionCompleteDelegate OnUpdateSessionCompleteDelegate = FOnUpdateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleEndGameJoinabilityUpdateComplete, MapPackagePath);
     SessionDelegateHandle = SessionInterface->AddOnUpdateSessionCompleteDelegate_Handle(OnUpdateSessionCompleteDelegate);
@@ -1140,16 +1162,85 @@ void UMD_MultiplayManager::RecoverEndGameSession(FName SessionName)
         return;
     }
 
-    // Online Subsystem의 Session 모듈에 이벤트 등록
+    // 복구할 GameSession과 현재 게임 맵 확인
+    FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(SessionName);
+    UWorld* World = GetWorld();
+    if (ExistingSession == nullptr || IsValid(World) == false)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 맵 이동 실패 이후 복구할 Session 또는 현재 게임 맵이 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnEndGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 복귀 이동 실패 후 현재 게임 맵과 진행 중 참가 제한을 다시 광고하기 위한 설정
+    FOnlineSessionSettings UpdatedSessionSettings = ExistingSession->SessionSettings;
+    UpdatedSessionSettings.bAllowJoinInProgress = false;
+    FString CurrentSessionMapName = FPackageName::GetShortName(World->GetPackage()->GetName());
+    UpdatedSessionSettings.Set(SETTING_MAPNAME, CurrentSessionMapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+
+    // 현재 게임 맵 정보 복구 완료 후 Ended Session 재시작을 이어가기 위한 이벤트 등록
+    FOnUpdateSessionCompleteDelegate OnUpdateSessionCompleteDelegate = FOnUpdateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleRecoverEndGameSessionSettingsComplete, SessionName);
+    SessionDelegateHandle = SessionInterface->AddOnUpdateSessionCompleteDelegate_Handle(OnUpdateSessionCompleteDelegate);
+
+    // 현재 게임 맵 정보와 진행 중 참가 제한 복구 요청
+    bool bWasRequestSuccessful = SessionInterface->UpdateSession(SessionName, UpdatedSessionSettings, true);
+    if (bWasRequestSuccessful == false)
+    {
+        // 접수 실패 이후 다른 Session 작업을 허용하기 위한 이벤트 정리
+        SessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SessionDelegateHandle);
+        SessionDelegateHandle.Reset();
+
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 맵 이동 실패 이후 Session 맵 정보 복구 요청을 접수하지 못했습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnEndGameComplete.Broadcast(false);
+    }
+}
+
+void UMD_MultiplayManager::HandleRecoverEndGameSessionSettingsComplete(FName UpdatedSessionName, bool bWasSuccessful, FName SessionName)
+{
+    // 게임 종료 복구 설정에 사용한 이벤트 및 핸들 정리
+    if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
+    {
+        SessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SessionDelegateHandle);
+    }
+    SessionDelegateHandle.Reset();
+
+    // 현재 게임 맵 정보 복구 실패 시 잘못된 세션 광고 상태에서 재시작하지 않기 위한 차단
+    if (UpdatedSessionName != SessionName || bWasSuccessful == false)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 맵 이동 실패 이후 Session 맵 정보 복구에 실패했습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnEndGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 현재 맵 정보가 복구된 Ended Session의 진행 상태 복구 요청
+    RequestRecoverEndGameSessionStart(SessionName);
+}
+
+void UMD_MultiplayManager::RequestRecoverEndGameSessionStart(FName SessionName)
+{
+    // Session 재시작 요청을 수행할 모듈과 비동기 작업 상태 검증
+    if (SessionInterface.IsValid() == false || SessionDelegateHandle.IsValid() == true)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 맵 이동 실패 이후 GameSession 재시작을 요청할 수 없습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnEndGameComplete.Broadcast(false);
+        return;
+    }
+
+    // Session 진행 상태 복구 결과를 정리하기 위한 이벤트 등록
     FOnStartSessionCompleteDelegate OnEndGameRecoveryCompleteDelegate = FOnStartSessionCompleteDelegate::CreateWeakLambda(this, [this, SessionName](FName StartedSessionName, bool bWasSuccessful)
         {
-            // Recorver Session 절차에서 연결한 이벤트 및 핸들 초기화
+            // Session 진행 상태 복구에 사용한 이벤트 및 핸들 정리
             if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
             {
                 SessionInterface->ClearOnStartSessionCompleteDelegate_Handle(SessionDelegateHandle);
             }
             SessionDelegateHandle.Reset();
 
+            // 실제 Session 재시작 결과 기록
             if (StartedSessionName != SessionName || bWasSuccessful == false)
             {
                 UE_LOG(MarineDemolition, Error, TEXT("%s 맵 이동 실패 이후 Session 진행 상태 복구에 실패했습니다."), *UE_CALL_LOCATIONINFO);
@@ -1164,17 +1255,15 @@ void UMD_MultiplayManager::RecoverEndGameSession(FName SessionName)
         });
     SessionDelegateHandle = SessionInterface->AddOnStartSessionCompleteDelegate_Handle(OnEndGameRecoveryCompleteDelegate);
 
-    // Session 시작 요청
-    bool bWasRequestSuccessful = SessionInterface->StartSession(NAME_GameSession);
-
-    // Session 시작 요청이 정상 처리되었는지 확인
+    // 현재 게임 맵 정보가 복구된 Session의 시작 요청
+    bool bWasRequestSuccessful = SessionInterface->StartSession(SessionName);
     if (bWasRequestSuccessful == false)
     {
-        // Online Subsystem의 Session 모듈의 이벤트 연결 해제
+        // 접수 실패 이후 다른 Session 작업을 허용하기 위한 이벤트 정리
         SessionInterface->ClearOnStartSessionCompleteDelegate_Handle(SessionDelegateHandle);
         SessionDelegateHandle.Reset();
 
-        UE_LOG(MarineDemolition, Warning, TEXT("%s 맵 이동 실패 이후 GameSession 복구 요청을 접수하지 못했습니다."), *UE_CALL_LOCATIONINFO);
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 맵 이동 실패 이후 GameSession 재시작 요청을 접수하지 못했습니다."), *UE_CALL_LOCATIONINFO);
 
         OnEndGameComplete.Broadcast(false);
     }
