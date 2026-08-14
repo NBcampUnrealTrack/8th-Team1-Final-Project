@@ -54,7 +54,7 @@ protected:
 	// BP에서 미리 채워둘 기본 도구들 (프로토 테스트용)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hotbar")
 	TArray<TObjectPtr<UMD_ToolDefinition>> DefaultTools;
-
+	 
 private:
 	/** 슬롯 위치와 ToolDefinition 및 수량을 단일 상태로 유지하는 고정 길이 복제 배열 */
 	UPROPERTY(ReplicatedUsing = OnRep_ToolEntries)
