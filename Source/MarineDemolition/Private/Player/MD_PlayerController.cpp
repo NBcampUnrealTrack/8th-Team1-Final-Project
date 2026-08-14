@@ -9,7 +9,9 @@
 #include "World/Interaction/MD_TravelConsole.h"
 #include "World/Interaction/MD_DayEndConsole.h"
 #include "World/Interaction/MD_SectorCloseoutMarker.h"
+#include "World/Merchant/MD_Merchant.h"
 #include "Game/MD_GameModeBase.h"
+#include "Game/MD_GameStateBase.h"
 
 #include "AbilitySystemComponent.h"
 #include "GameplayEffect.h"
@@ -129,6 +131,52 @@ void AMD_PlayerController::ServerRequestSectorCloseout_Implementation(AMD_Sector
 	Marker->TryCloseout();
 }
 
+void AMD_PlayerController::InitializeGameplayHUD()
+{
+	if (IsLocalController() == false || IsValid(GetPawn()) == false)
+	{
+		return;
+	}
+
+	if (IsValid(HUDWidgetClass) == true)
+	{
+		if (IsValid(HUDWidgetInstance) == false)
+		{
+			// Pawn 소유가 확정된 컨트롤러에 플레이어 상태를 참조할 메인 HUD 생성
+			HUDWidgetInstance = CreateWidget<UMD_HUDWidget>(this, HUDWidgetClass);
+		}
+
+		if (IsValid(HUDWidgetInstance) == true)
+		{
+			if (HUDWidgetInstance->IsInViewport() == false)
+			{
+				// 맵 전환 과정에서 화면에서 제거된 메인 HUD 재연결
+				HUDWidgetInstance->AddToViewport();
+			}
+			HUDWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		}
+	}
+
+	if (IsValid(EquipHotbarWidgetClass) == true)
+	{
+		if (IsValid(EquipHotbarWidgetInstance) == false)
+		{
+			// 소유 Pawn의 장비 상태를 참조할 핫바 생성
+			EquipHotbarWidgetInstance = CreateWidget<UMD_EquipHotbarWidget>(this, EquipHotbarWidgetClass);
+		}
+
+		if (IsValid(EquipHotbarWidgetInstance) == true)
+		{
+			if (EquipHotbarWidgetInstance->IsInViewport() == false)
+			{
+				// 맵 전환 과정에서 화면에서 제거된 핫바 재연결
+				EquipHotbarWidgetInstance->AddToViewport();
+			}
+			EquipHotbarWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		}
+	}
+}
+
 void AMD_PlayerController::MD_ApplyTestDamage()
 {
 	ServerApplyTestDamage();
@@ -226,6 +274,14 @@ void AMD_PlayerController::MD_ShowCredits()
 	UE_LOG(LogTemp, Log, TEXT("[Merchant][%s] Credits = %d"),HasAuthority() ? TEXT("Server") : TEXT("Client"),Merchant->GetCredits());
 }
 
+void AMD_PlayerController::MD_AddAffinity(int32 DeltaAffinity)
+{
+	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	{
+		Merchant->AddAffinity(DeltaAffinity);
+	}
+}
+
 void AMD_PlayerController::ServerAddCredits_Implementation(int32 Amount)
 {
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
@@ -259,44 +315,32 @@ void AMD_PlayerController::MD_DumpQuests()
 void AMD_PlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+	InitializeGameplayHUD();
+}
 
-	if (!IsLocalController())
+void AMD_PlayerController::BeginPlayingState()
+{
+	Super::BeginPlayingState();
+
+	InitializeGameplayHUD();
+}
+
+void AMD_PlayerController::PostSeamlessTravel()
+{
+	Super::PostSeamlessTravel();
+
+	InitializeGameplayHUD();
+}
+
+void AMD_PlayerController::SetPawn(APawn* InPawn)
+{
+	Super::SetPawn(InPawn);
+
+	if (HasActorBegunPlay() == true)
 	{
-		return;
+		// 최초 스폰과 재스폰 모두 Pawn 지정이 끝난 뒤 HUD를 보장하는 처리
+		InitializeGameplayHUD();
 	}
-
-	if (!HUDWidgetClass)
-	{
-		return;
-	}
-
-	if (IsValid(HUDWidgetInstance))
-	{
-		return;
-	}
-
-	HUDWidgetInstance = CreateWidget<UMD_HUDWidget>(this, HUDWidgetClass);
-
-	if (!IsValid(HUDWidgetInstance))
-	{
-		return;
-	}
-
-	HUDWidgetInstance->AddToViewport();
-
-	if (!EquipHotbarWidgetClass || IsValid(EquipHotbarWidgetInstance))
-	{
-		return;
-	}
-
-	EquipHotbarWidgetInstance = CreateWidget<UMD_EquipHotbarWidget>(this, EquipHotbarWidgetClass);
-
-	if (!IsValid(EquipHotbarWidgetInstance))
-	{
-		return;
-	}
-
-	EquipHotbarWidgetInstance->AddToViewport();
 }
 
 void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
@@ -314,6 +358,73 @@ void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
 	if (IsValid(EquipHotbarWidgetInstance))
 	{
 		EquipHotbarWidgetInstance->SetVisibility(Target);
+	}
+}
+
+void AMD_PlayerController::ServerAbandonRepeatQuest_Implementation(int32 Index)
+{
+	// 퀘스트 포기에 따른 패널티를 적용할 GameState 얻기
+	AMD_GameStateBase* MDGameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
+	if (IsValid(MDGameState) == false || MDGameState->HasAuthority() == false)
+	{
+		return;
+	}
+
+	// 퀘스트 상태와 경제·호감도 페널티를 관리하는 서버의 상인 매니저 얻기
+	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
+	if (IsValid(Merchant) == false)
+	{
+		return;
+	}
+
+	// 퀘스트 포기 요청 성공 시 점수 감소
+	if (Merchant->TryAbandonRepeatQuest(Index) == true)
+	{
+		MDGameState->AddScoreDelta(-100);
+	}
+}
+
+void AMD_PlayerController::ServerBorrowCredits_Implementation(AMD_Merchant* MerchantActor, int32 Amount)
+{
+	APawn* PlayerPawn = GetPawn();
+	if (IsValid(MerchantActor) == false || IsValid(PlayerPawn) == false)
+	{
+		return;
+	}
+
+	// 멀리 떨어지 상태에서 돈을 빌리는 경우 함수 조기 종료
+	if (FVector::DistSquared(PlayerPawn->GetActorLocation(), MerchantActor->GetActorLocation()) > FMath::Square(500.0f))
+	{
+		return;
+	}
+
+	// 대출 실행
+	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
+	if (IsValid(MerchantSubsystem) == true)
+	{
+		MerchantSubsystem->TryBorrowCredits(Amount);
+	}
+}
+
+void AMD_PlayerController::ServerRepayLoan_Implementation(AMD_Merchant* MerchantActor, int32 Amount)
+{
+	APawn* PlayerPawn = GetPawn();
+	if (IsValid(MerchantActor) == false || IsValid(PlayerPawn) == false)
+	{
+		return;
+	}
+
+	// 멀리 떨어지 상태에서 돈을 상환하는 경우 함수 조기 종료
+	if (FVector::DistSquared(PlayerPawn->GetActorLocation(), MerchantActor->GetActorLocation()) > FMath::Square(500.0f))
+	{
+		return;
+	}
+
+
+	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
+	if (IsValid(MerchantSubsystem) == true)
+	{
+		MerchantSubsystem->TryRepayLoan(Amount);
 	}
 }
 

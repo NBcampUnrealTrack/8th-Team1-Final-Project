@@ -97,6 +97,7 @@ protected:
 	void ApplyRuntimePresentation();
 	void SuppressConflictingLevelSky();
 	void ConfigureInteriorDomeMesh(UStaticMeshComponent* Dome) const;
+	bool IsBlueprintPreviewWorld() const;
 	float SanitizeTimeOfDayHours(float Hours) const;
 	bool IsDrivenByExternalTimeSource() const;
 	bool TryReadExternalTime(float& OutHours, float& OutDayProgress) const;
@@ -135,19 +136,22 @@ protected:
 	TSoftObjectPtr<UCurveLinearColor> MoonGlowCurve;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle")
-	bool bFrozenTime = true;
+	bool bFrozenTime = false;
 
+	/** 12 = midnight on the sky clock (wall 00:00). */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle", meta = (ClampMin = "0.0", ClampMax = "24.0"))
 	float FrozenTimeOfDayHours = 12.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle")
 	bool bLocalDayCycle = true;
 
+	/** Preview-only 24h loop when GameState is not driving (24 min = 1 sky hour / real minute). Ignored in-match. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle", meta = (ClampMin = "1.0"))
-	float DayLengthSeconds = 600.f;
+	float DayLengthSeconds = 1440.f;
 
+	/** 12 = midnight. Default 20 = wall 08:00 so editor preview matches match start. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle", meta = (ClampMin = "0.0", ClampMax = "24.0"))
-	float LocalTimeOfDayHours = 12.f;
+	float LocalTimeOfDayHours = 20.f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle")
 	float OrbitInclinationDegrees = 28.f;

@@ -54,6 +54,18 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveShopPurchaseResult(AMD_Merchant* Merchant, FName ItemId, EMD_ShopPurchaseResult Result);
 
+	// 서버에서 반복 퀘스트 포기와 관련 페널티를 처리하도록 요청하는 함수
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerAbandonRepeatQuest(int32 Index);
+
+	// 모선 상인과의 거리 및 대출 한도를 서버에서 검증한 뒤 대출을 실행하는 함수
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerBorrowCredits(AMD_Merchant* MerchantActor, int32 Amount);
+
+	// 모선 상인과의 거리 및 보유 크레딧을 서버에서 검증한 뒤 상환을 실행하는 함수
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerRepayLoan(AMD_Merchant* MerchantActor, int32 Amount);
+
 private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Debug")
@@ -80,6 +92,9 @@ private:
 
 	UFUNCTION(Exec)
 	void MD_ShowCredits();
+
+	UFUNCTION(Exec)
+	void MD_AddAffinity(int32 DeltaAffinity);
 
 	//서버에서 크레딧 변경 처리
 	UFUNCTION(Server, Reliable)
@@ -110,7 +125,17 @@ public:
 	void SetGameplayHUDVisible(bool bVisible);
 
 protected:
+	// 컨트롤러 시작 이후 이미 소유된 Pawn을 기준으로 HUD를 초기화하는 진입점
 	virtual void BeginPlay() override;
+
+	// 플레이 상태 전환 이후 Pawn 기반 HUD를 복구하는 진입점
+	virtual void BeginPlayingState() override;
+
+	// Seamless Travel 완료 이후 새 뷰포트에 HUD를 복구하는 진입점
+	virtual void PostSeamlessTravel() override;
+
+	// 서버 소유 및 클라이언트 복제로 Pawn이 확정될 때 HUD를 초기화하는 진입점
+	virtual void SetPawn(APawn* InPawn) override;
 
 private:
 	UPROPERTY(EditDefaultsOnly, Category = "HUD")
@@ -124,6 +149,10 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UMD_EquipHotbarWidget> EquipHotbarWidgetInstance;
+
+private:
+	// 로컬 플레이어의 메인 HUD와 장비 핫바를 생성하거나 화면에 복구하는 처리
+	void InitializeGameplayHUD();
 
 	/* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 private:
