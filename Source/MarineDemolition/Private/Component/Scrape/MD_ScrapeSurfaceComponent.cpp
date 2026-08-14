@@ -367,6 +367,8 @@ void UMD_ScrapeSurfaceComponent::InitializeRuntimeState()
 
 void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 {
+	AppliedContaminationStampIdentities.Reset();
+	AppliedContaminationStampIdentityOrder.Reset();
 	SetContaminationDecalsVisible(false);
 	ReleaseContaminationMask();
 	DestroyAdditionalContaminationDecalPatches();

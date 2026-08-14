@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayAbilitySpecHandle.h"
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
 #include "AbilitySystemInterface.h"
@@ -12,7 +13,9 @@
 class UMD_InputConfig;
 class UInputMappingContext;
 class UInputAction;
+class UEnhancedInputLocalPlayerSubsystem;
 class UCameraComponent;
+class UStaticMesh;
 class UStaticMeshComponent;
 class USceneComponent;
 class USkeletalMeshComponent;
@@ -25,6 +28,8 @@ class UMD_EquipHotbarComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
 class UMD_OxygenComponent;
+struct FMinimalViewInfo;
+struct FGameplayTag;
 // 캡슐 오버랩 콜백 매개변수 형식 전방 선언
 class UPrimitiveComponent;
 
@@ -60,6 +65,23 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
 	UMD_ScrapeToolComponent* GetScrapeToolComponent() const	{ return ScrapeToolComponent; }
 
+	/**
+	 * 서버/로컬이 확정한 접촉 자세를 기존 ABP 입력 형식으로 변환한다.
+	 * 카메라 중앙을 다시 Trace하지 않으며 원격 Pawn도 복제 pose만 소비한다.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "MD|Scrape|Animation")
+	void GetScrapeAnimationAim(FRotator& AimDelta, bool& Active);
+
+	/**
+	 * 명시적 blade 진행축을 도구의 소켓 기준 twist로 적용한다.
+	 * ControlRotation 변화량으로 가로/세로를 재추정하지 않는다.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "MD|Scrape|Animation")
+	void UpdateScrapeAnimationBlade(
+		bool Active,
+		double DeltaTime,
+		FRotator& Swing);
+
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	UMD_EquipHotbarComponent* GetHotbarComponent() const { return EquipHotbarComponent; }
 
@@ -68,6 +90,27 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Oxygen")
 	UMD_OxygenComponent* GetOxygenComponent() const { return OxygenComponent; }
+
+	/** UI·앱 비활성화·외부 시스템이 입력을 가져가기 전에 헤라 Ability와 Focus를 정리한다. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Scrape")
+	void CancelScrapeInteraction();
+
+	/**
+	 * Called from the actual GA activation callback on both client and server.
+	 * The session id prevents a late EndAbility from clearing a newer activation
+	 * that reuses the same GameplayAbilitySpecHandle.
+	 */
+	bool RegisterActiveScrapeAbility(
+		FGameplayAbilitySpecHandle AbilityHandle,
+		uint64 FocusSessionId);
+
+	/** Clears the tracked activation only when both handle and session still match. */
+	void UnregisterActiveScrapeAbility(
+		FGameplayAbilitySpecHandle AbilityHandle,
+		uint64 FocusSessionId);
+
+	/** Server Focus cleanup cancels exactly the GA registered for this session. */
+	void CancelScrapeAbilityForSession(uint64 FocusSessionId);
 
 protected:
 	// Called when the game starts or when spawned
@@ -78,8 +121,10 @@ protected:
 
 	virtual void PossessedBy(AController* NewController) override;
 	virtual void UnPossessed() override;
+	virtual void PawnClientRestart() override;
 
 	virtual void OnRep_PlayerState() override;
+	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 public:
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
@@ -157,6 +202,8 @@ private:
 	void HandleInteractInput(const FInputActionValue& Value);
 	void HandleAbilityInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
+	void HandleScrapeFocusInputStarted();
+	void HandleScrapeFocusInputEnded();
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
 	void HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
@@ -188,6 +235,29 @@ private:
 	void RefreshToolMesh();
 	void RefreshScrapeLoadVisual();
 
+	/** 우클릭 헤라 포커스 입력용 런타임 액션/컨텍스트를 필요할 때 생성한다. */
+	void EnsureScrapeFocusInputObjects();
+
+	/** 현재 장착 도구에 맞춰 로컬 플레이어의 헤라 포커스 입력 컨텍스트를 갱신한다. */
+	void RefreshScrapeFocusInputContext();
+
+	/** 컨텍스트 제거 전에 진행 중인 헤라 포커스를 항상 종료한다. */
+	void RemoveScrapeFocusInputContext();
+
+	/** 이번 LMB 입력으로 정확히 활성화한 헤라 Ability만 취소한다. */
+	void CancelActiveScrapeAbility();
+
+	/** Ability 취소와 Focus 종료를 한 입력 경계에서 순서대로 처리한다. */
+	void CancelActiveScrapeAbilityAndEndFocus();
+
+	bool TryActivateScrapeAbility(
+		UAbilitySystemComponent* AbilitySystem,
+		const FGameplayTag& AbilityTag,
+		UMD_ToolDefinition* SourceTool);
+
+	bool IsScrapeToolEquipped() const;
+	UEnhancedInputLocalPlayerSubsystem* GetEnhancedInputSubsystem() const;
+
 private:
 	UFUNCTION()
 	void HandleHealthStateChanged(EMD_HealthState NewState);
@@ -206,4 +276,54 @@ private:
 
 	/** 직전에 사망 상태였는지. 부활 전이 판별용 */
 	bool bWasDeadState = false;
+
+	/** 에셋 의존 없이 우클릭 포커스를 바인딩하는 런타임 전용 입력 액션. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputAction> ScrapeFocusInputAction;
+
+	/** 헤라를 장착한 동안에만 로컬 플레이어에게 추가하는 입력 오버레이. */
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> ScrapeFocusInputMappingContext;
+
+	/** 컨트롤러 교체 뒤에도 이전 로컬 플레이어에서 컨텍스트를 제거하기 위한 약한 참조. */
+	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> ScrapeFocusInputSubsystem;
+
+	/** 수량 변경과 실제 장비 교체를 구분하기 위해 컨텍스트 적용 당시의 도구를 기억한다. */
+	TWeakObjectPtr<UMD_ToolDefinition> ScrapeFocusContextTool;
+
+	/** 서버가 현재 ScrapeTool runtime snapshot에 적용한 기본 Profile의 도구 identity. */
+	TWeakObjectPtr<UMD_ToolDefinition> AppliedScrapeProfileTool;
+
+	/** LMB로 실제 활성화된 Scrape Ability Spec. 장비가 바뀌어도 이 핸들로 정확히 취소한다. */
+	FGameplayAbilitySpecHandle ActiveScrapeAbilityHandle;
+
+	/** 같은 SpecHandle을 재사용하는 빠른 Focus 재진입을 구분하는 권위 session identity. */
+	uint64 ActiveScrapeAbilitySessionId = 0;
+
+	/** 수량 변경과 장비 교체를 구분하는 활성 Ability의 도구 identity. */
+	TWeakObjectPtr<UMD_ToolDefinition> ActiveScrapeAbilityTool;
+
+	/** 장비 변경이 LMB release보다 빨라도 release가 새 도구를 취소하지 않도록 입력 소유권을 유지한다. */
+	bool bScrapeAbilityInputCaptured = false;
+
+	bool bScrapeFocusInputContextAdded = false;
+
+	/** 0값 Triggered가 Focus를 해제하지 않도록 하는 이동 입력 deadzone. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Focus",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ScrapeFocusMoveInputDeadzone = 0.1f;
+
+	/** 180도 동치 blade 축이 프레임마다 뒤집히지 않도록 마지막 부호를 보존한다. */
+	FVector LastScrapeAnimationBladeWorldDirection = FVector::ZeroVector;
+
+	/** 현재 메시에서 날 축에 대응하는 component-space 기준 방향. */
+	FVector ScrapeAnimationBladeReferenceDirection = FVector::ZeroVector;
+	FVector ScrapeAnimationToolTwistAxis = FVector::ZeroVector;
+
+	TWeakObjectPtr<UStaticMesh> ScrapeAnimationBladeReferenceMesh;
+
+	/** 접촉이 끊길 때 도구 회전을 AttachOffset으로 부드럽게 복귀시키는 현재 값. */
+	FRotator ScrapeAnimationToolRelativeRotation = FRotator::ZeroRotator;
+
+	bool bHasScrapeAnimationBladeDirection = false;
 };

@@ -293,6 +293,14 @@ public:
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec);
 
+	/** Stage3 ordered path가 tail을 확정할 때까지 완전 제거 이벤트만 유예한다. */
+	FMD_ScrapeResult ApplyLocalScrapeStrokeWithDeferredCompletion(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec);
+
+	/** 유예한 Stage3 제거와 pending dab이 모두 끝난 후 완료 전환을 확정한다. */
+	void FinalizeLocalContaminationPath();
+
 	/** 서버에서 일반 제거 후 경로의 무작위 지점에 헤라 접촉면 모양으로 새 오염을 덧칠한다. */
 	FMD_ScrapeResult ApplyLocalScrapeStrokeWithContaminationStamp(
 		const FMD_ScrapeStroke& Stroke,
@@ -310,7 +318,8 @@ public:
 		float StampDepthCm,
 		float StampSpacingCm,
 		int32 StampPatternSeed,
-		float& OutRemovedCleanRatioDelta);
+		float& OutRemovedCleanRatioDelta,
+		bool bDeferCompletionBroadcast = false);
 
 	/** 입력 종료 시 보호 거리 뒤에 남겨 둔 마지막 오염 도장 구간을 적용한다. */
 	void FlushLocalContaminationPaintTail(
@@ -322,6 +331,27 @@ public:
 		float StampDepthCm,
 		float StampSpacingCm,
 		int32 StampPatternSeed);
+
+	/** ordered Stage3 path의 exact-position dab을 identity dedupe 후 적용한다. */
+	float ApplyLocalContaminationDab(
+		const FMD_ScrapeContaminationDab& Dab,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		float StampAmount,
+		float StampDepthCm);
+
+	/** 현재 격자와 도구 footprint에 맞는 Stage3 causal delay 거리. */
+	double GetContaminationPaintProtectionDistanceCm(
+		const FMD_ScrapeToolSpec& ToolSpec,
+		float StampDepthCm) const;
+
+	/** Exact movement spacing used by the evaluator for this surface and tool. */
+	double GetScrapeSampleSpacingCm(
+		const FMD_ScrapeToolSpec& ToolSpec) const;
+
+	/** 표면·면 salt를 기존 Stage3 pattern seed에 결합한다. */
+	int32 ResolveContaminationPaintPatternSeed(
+		EMD_ScrapeSurfaceFace SurfaceFace,
+		int32 PatternSeed) const;
 
 	bool TryGetScrapeSurfacePositionFromHit(
 		const FHitResult& Hit,
@@ -350,6 +380,17 @@ public:
 	bool RegisterScrapeObstacle(AMD_Barnacle* Barnacle);
 	void UnregisterScrapeObstacle(AMD_Barnacle* Barnacle);
 
+	/**
+	 * 명시적 blade basis와 실제 BladeWidth x BladeDepth 사각 footprint로
+	 * 스트로크를 따개비 앞에 제한한다.
+	 */
+	bool TryClampScrapeStrokeAgainstObstacles(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		FVector2D& OutClampedEndPositionCm,
+		AMD_Barnacle*& OutBlockingBarnacle) const;
+
+	/** Legacy 원형 확장 판정. 기존 호출과 테스트 호환을 위해 유지한다. */
 	bool TryClampScrapeStrokeAgainstObstacles(
 		EMD_ScrapeSurfaceFace SurfaceFace,
 		const FVector2D& StartPositionCm,
@@ -585,6 +626,7 @@ protected:
 	int32 ContaminationDecalSortOrder;
 
 private:
+	friend class FMD_ScrapeFootprintCharacterizationTest;
 	friend struct FMD_ReplicatedScrapeCellStateArray;
 	friend class AMD_CuttableWall;
 	friend class FMD_CuttableWallScrapeIntegrationTest;
@@ -599,6 +641,8 @@ private:
 	static constexpr float MinimumFullCoverageFaceNormalDot = 0.05f;
 	static constexpr float ScrapeObstacleContactMarginCm = 0.05f;
 	static constexpr int32 MaximumContaminationDecalPatchesPerFace = 32;
+	/** TASK 7의 최대 재전송 window보다 넓게 유지하는 bounded dedupe history. */
+	static constexpr int32 MaximumRecentContaminationStampIdentities = 4096;
 
 	bool HasAuthority() const;
 	void ResolveSurfaceMeshFromOwner();
@@ -612,6 +656,11 @@ private:
 	void OnRep_ContaminationEnabled();
 
 	TArray<FMD_ScrapeSurfaceObstacle> ScrapeObstacles;
+
+	TSet<FMD_ScrapeContaminationStampIdentity>
+		AppliedContaminationStampIdentities;
+	TArray<FMD_ScrapeContaminationStampIdentity>
+		AppliedContaminationStampIdentityOrder;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
@@ -726,7 +775,8 @@ private:
 		float StampDepthCm,
 		float StampSpacingCm,
 		int32 StampPatternSeed,
-		float& OutRemovedCleanRatioDelta);
+		float& OutRemovedCleanRatioDelta,
+		bool bDeferCompletionBroadcast = false);
 
 	void RefreshContaminationCleanRatioCache();
 	void RefreshContaminationCleanRatioCache(EMD_ScrapeSurfaceFace Face);

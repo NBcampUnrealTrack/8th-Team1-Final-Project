@@ -14,6 +14,7 @@ class AMD_SectorCloseoutMarker;
 class AMD_Merchant;
 class UMD_HUDWidget;
 class UMD_EquipHotbarWidget;
+class UMD_ScrapeFocusReticleWidget;
 class UMD_SiteDefinition;
 class UMD_MerchantSubsystem;
 class UGameplayEffect;
@@ -24,6 +25,25 @@ class MARINEDEMOLITION_API AMD_PlayerController : public APlayerController
 	GENERATED_BODY()
 
 public:
+	AMD_PlayerController();
+
+	/**
+	 * 입력 모드를 바꾸기 전에 진행 중인 헤라 Focus와 Ability를 함께 정리한다.
+	 *
+	 * Blueprint UI도 같은 진입점을 사용할 수 있도록 공개한다. 호출은 중복되어도 안전하다.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Scrape")
+	void CancelScrapeInteraction();
+
+	/**
+	 * 모든 C++/Blueprint 입력 모드 전환을 한곳에서 가로채 RMB release 유실 전에
+	 * 헤라 상호작용을 정리한다. GameOnly 복귀에서도 호출되지만 정리는 멱등이다.
+	 */
+	virtual void SetInputMode(const FInputModeDataBase& InData) override;
+	virtual void SetViewTarget(
+		AActor* NewViewTarget,
+		FViewTargetTransitionParams TransitionParams = FViewTargetTransitionParams()) override;
+
 	// 콘솔을 통째로 넘겨 서버가 자기 사본 Sites[SiteIndex]에서 레벨을 읽음 (클라 값 신뢰 안 함)
 	UFUNCTION(Server, Reliable)
 	void ServerRequestTravel(AMD_TravelConsole* Console, int32 SiteIndex, EMD_Difficulty Difficulty);
@@ -123,8 +143,14 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
+	/** Alt-Tab/창 비활성화로 입력 release를 잃기 전에 헤라 상호작용을 정리한다. */
+	void HandleApplicationWillDeactivate();
+
+	FDelegateHandle ApplicationWillDeactivateHandle;
+
 	UPROPERTY(EditDefaultsOnly, Category = "HUD")
 	TSubclassOf<UMD_HUDWidget> HUDWidgetClass;
 
@@ -136,6 +162,13 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UMD_EquipHotbarWidget> EquipHotbarWidgetInstance;
+
+	/** Blueprint 자산이 없어도 동작하는 Focus 가상 포인터. */
+	UPROPERTY(EditDefaultsOnly, Category = "HUD|Scrape")
+	TSubclassOf<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetClass;
+
+	UPROPERTY()
+	TObjectPtr<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetInstance;
 
 	/* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 private:
