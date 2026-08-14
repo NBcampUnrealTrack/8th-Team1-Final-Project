@@ -1,4 +1,4 @@
-#include "UI/Game/MD_HUDQuestWidget.h"
+﻿#include "UI/Game/MD_HUDQuestWidget.h"
 
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Components/ScrollBox.h"
@@ -123,11 +123,11 @@ void UMD_HUDQuestWidget::RefreshQuestDisplay()
 		return;
 	}
 
-	// 완료·실패한 이벤트가 HUD에 남지 않도록 현재 일차에 진행 중인 메인 퀘스트만 표시
+	// 현재 일차에 해금된 메인 퀘스트 하나를 최상단에 표시
 	TArray<FMD_MainQuestState> MainQuests = MerchantComponent->GetMainQuests();
 	for (FMD_MainQuestState& MainQuest : MainQuests)
 	{
-		if (MainQuest.UnlockDay == MerchantComponent->GetCurrentDay() && MainQuest.Status == EMD_MainQuestStatus::Active && MainQuest.Definition.IsValidDefinition() == true)
+		if (MainQuest.UnlockDay == MerchantComponent->GetCurrentDay() && MainQuest.Status != EMD_MainQuestStatus::Locked && MainQuest.Definition.IsValidDefinition() == true)
 		{
 			AddMainQuestCard(MainQuest);
 			break;

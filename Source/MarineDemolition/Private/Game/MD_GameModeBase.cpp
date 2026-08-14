@@ -250,6 +250,31 @@ void AMD_GameModeBase::CaptureContractCrew()
     GS->SetContractCrewCount(FMath::Max(Crew, 1));
 }
 
+bool AMD_GameModeBase::DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld* World) const
+{
+    if (IsValid(Site) == false || IsValid(World) == false)
+    {
+        return false;
+    }
+
+    // PIE 접두사를 제거하여 데이터 에셋 경로와 비교할 현재 맵 이름
+    FString CurrentMapName = World->GetMapName();
+    CurrentMapName.RemoveFromStart(World->StreamingLevelsPrefix);
+
+    // 현장의 일차별 메인 퀘스트가 참조하는 실행 맵 검사
+    for (const FMD_QuestDefinitionData& MainQuestDefinition : Site->MainQuestLine)
+    {
+        // 소프트 월드 경로에서 추출한 비교용 맵 애셋 이름
+        FString QuestMapName = MainQuestDefinition.QuestMap.ToSoftObjectPath().GetAssetName();
+        if (QuestMapName.IsEmpty() == false && QuestMapName == CurrentMapName)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result)
 {
     const AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>();
@@ -602,29 +627,34 @@ void AMD_GameModeBase::HandleGameDayChanged(int32 NewDay)
 
 UMD_SiteDefinition* AMD_GameModeBase::ResolveExpeditionSite() const
 {
-    if (IsValid(ExpeditionSite))
-    {
-        return ExpeditionSite;
-    }
+    // 현재 월드와 퀘스트 맵이 일치하는 현장만 반환하기 위한 결과
+    UMD_SiteDefinition* OutSite = nullptr;
 
-    const UWorld* World = GetWorld();
-    if (!IsValid(World))
+    // PIE 맵 이름까지 포함하여 후보 현장의 실제 실행 맵을 확인하기 위한 월드
+    UWorld* World = GetWorld();
+    if (DoesSiteUseCurrentWorld(ExpeditionSite, World) == true)
     {
-        return nullptr;
+        OutSite = ExpeditionSite;
     }
-
-    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+    else if (IsValid(World) == true)
     {
-        if (const AMD_PlayerController* PC = Cast<AMD_PlayerController>(It->Get()))
+        // GameMode에 현장이 없을 때 테스트용 PlayerController 현장을 제한적으로 사용하는 대체 경로
+        for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
         {
-            if (UMD_SiteDefinition* Site = PC->GetExpeditionSite())
+            // 현재 서버 월드에서 테스트용 현장 설정을 제공하는 플레이어 컨트롤러
+            AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(It->Get());
+
+            // 플레이어 컨트롤러가 제공하는 원정 현장 후보
+            UMD_SiteDefinition* PlayerSite = IsValid(PlayerController) == true ? PlayerController->GetExpeditionSite() : nullptr;
+            if (DoesSiteUseCurrentWorld(PlayerSite, World) == true)
             {
-                return Site;
+                OutSite = PlayerSite;
+                break;
             }
         }
     }
 
-    return nullptr;
+    return OutSite;
 }
 
 void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
@@ -652,8 +682,7 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
         UMD_SiteDefinition* Site = ResolveExpeditionSite();
         if (!IsValid(Site))
         {
-            UE_LOG(LogTemp, Warning,
-                TEXT("[Merchant] 원정 Site 미지정 — BP GameMode ExpeditionSite 또는 BP PlayerController DebugSite(DA_Site_X7) 설정 필요"));
+            UE_LOG(LogTemp, Log, TEXT("[Merchant] 현재 맵에 연결된 원정 Site 없음: %s"), *World->GetMapName());
             return;
         }
 

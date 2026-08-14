@@ -74,6 +74,8 @@ private:
     // 계약 시작(Day1 마감) 시점의 인원수를 GameState에 고정
     void CaptureContractCrew();
 
+    bool DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld* World) const;
+
     // FinalizeDay 중복 실행 방지 플래그. 레벨 재시작 시 초기화
     bool bDayFinalized = false;
 
