@@ -614,7 +614,7 @@ void UMD_MultiplayManager::CreateSessionInternal(const FString& ServerName, int3
 
     SessionSettings.bIsDedicated = false;		                                            // Marine Demolition 프로젝트 게임은 Listen Server 고정
     SessionSettings.bShouldAdvertise = SessionCreateParams.bPrivateSession == false || SessionCreateParams.bAllowJoinByFollow == true;		// 공개 또는 친구 전용 Steam 로비 생성을 위한 광고 설정
-    SessionSettings.bAllowJoinInProgress = false;		                                    // 게임 진행 중 참여 불가 고정
+    SessionSettings.bAllowJoinInProgress = true;		                                    // 게임 진행 중 참여 불가 고정
     SessionSettings.bUsesPresence = true;				                                    // Presence 사용 고정
     SessionSettings.bAllowJoinViaPresence = SessionCreateParams.bAllowJoinByFollow == true;		                            // Steam Presence의 친구 따라오기를 통한 참여 허용 설정
     SessionSettings.bAllowJoinViaPresenceFriendsOnly = SessionCreateParams.bPrivateSession == true && SessionCreateParams.bAllowJoinByFollow == true;	// 비공개이면서 따라오기가 가능한 Session의 친구 전용 로비 설정
