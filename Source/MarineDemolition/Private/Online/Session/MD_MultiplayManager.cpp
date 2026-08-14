@@ -357,7 +357,7 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
         UE_LOG(MarineDemolition, Warning, TEXT("%s 현재 참여하거나 호스팅 중인 GameSession이 없습니다."), *UE_CALL_LOCATIONINFO);
 
         // Destroy Session 성공 이벤트 실행 (삭제할 Session이 존재하지 않음)
-        OnDestroySessionComplete.Broadcast(false);
+        OnDestroySessionComplete.Broadcast(true);
         return;
     }
 
