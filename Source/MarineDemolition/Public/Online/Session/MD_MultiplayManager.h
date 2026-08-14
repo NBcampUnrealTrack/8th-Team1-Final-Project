@@ -111,9 +111,9 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
     void CreateSession(const FString& ServerName, int32 MaxPlayerCount, const FMD_SessionCreateParams& SessionCreateParams);
 
-    // 호스트가 현재 Session을 시작 상태로 전환하고 모든 접속자를 지정 맵으로 이동시키는 함수
+    // 불러오기 여부와 현재 진행 데이터 존재 여부에 따라 게임 시작 방식을 결정하고 모든 접속자를 지정 맵으로 이동시키는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
-    void StartSession(const struct FMD_GameData& GameData);
+    void StartSession(const struct FMD_GameData& GameData, bool bLoadGame = false);
 
     // 호스트가 진행 중인 Session을 종료 상태로 전환하고 모든 접속자를 지정 맵으로 이동시키는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
@@ -162,7 +162,7 @@ protected:
     void JoinSessionInternal(const FOnlineSessionSearchResult& SessionSearchResult);
 
     // 준비된 게임 데이터 작업을 유지한 채 Session 시작과 맵 이동 절차를 실행하는 함수
-    void StartGameInternal(const FString& GameMapPackagePath);
+    void StartSessionInternal(const FString& GameMapPackagePath);
 
     // Online Session Interface에서 Create Session을 완료하였을 때 호출되는 함수
     void HandleCreateSessionComplete(FName SessionName, bool bWasSuccessful, const FString SessionMapPackagePath);

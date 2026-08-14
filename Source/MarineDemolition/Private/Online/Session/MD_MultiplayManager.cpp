@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Online/Session/MD_MultiplayManager.h"
@@ -93,22 +93,13 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
     CreateSessionInternal(ServerName, MaxPlayerCount, SessionCreateParams);
 }
 
-void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData)
+void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData, bool bLoadGame)
 {
     // 클라이언트 환경 실행 제한
     UWorld* World = GetWorld();
     if (IsValid(World) == false || World->GetNetMode() == ENetMode::NM_Client)
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작은 Host 또는 Server에서만 실행할 수 있습니다."), *UE_CALL_LOCATIONINFO);
-
-        OnStartGameComplete.Broadcast(false);
-        return;
-    }
-
-    // 잘못된 에셋이나 일반 에셋 패키지로 게임 시작을 요청하지 못하도록 맵 경로를 먼저 검증합니다.
-    if (IsValidMapPackagePath(GameData.MapPackagePath) == false)
-    {
-        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작에 사용할 맵 패키지 경로가 유효하지 않습니다: %s"), *UE_CALL_LOCATIONINFO, *GameData.MapPackagePath);
 
         OnStartGameComplete.Broadcast(false);
         return;
@@ -125,8 +116,9 @@ void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData)
         return;
     }
 
-    // 새 게임 또는 저장 데이터 적용 작업이 준비된 경우에만 세션 시작 절차로 진입하는 처리
-    const bool bWasGameDataPrepared = SaveSlotManager->OnTryStartGameWithGameData(GameData);
+    // 불러오기 여부와 현재 진행 데이터 존재 여부에 맞는 시작 작업과 목적지 맵을 준비하는 처리
+    FString GameMapPackagePath;
+    const bool bWasGameDataPrepared = SaveSlotManager->OnTryStartGameWithGameData(GameData, bLoadGame, GameMapPackagePath);
     if (bWasGameDataPrepared == false)
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 검증 실패로 세션 시작을 취소합니다."), *UE_CALL_LOCATIONINFO);
@@ -134,7 +126,17 @@ void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData)
         return;
     }
 
-    StartGameInternal(GameData.MapPackagePath);
+    // SaveSlotManager가 결정한 시작 방식의 맵이 실제 World 패키지인지 확인하는 처리
+    if (IsValidMapPackagePath(GameMapPackagePath) == false)
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작에 사용할 맵 패키지 경로가 유효하지 않습니다: %s"), *UE_CALL_LOCATIONINFO, *GameMapPackagePath);
+
+        SaveSlotManager->CancelPendingGameDataOperation();
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    StartSessionInternal(GameMapPackagePath);
 }
 
 void UMD_MultiplayManager::EndSession(const FString& MapPackagePath)
@@ -730,7 +732,7 @@ void UMD_MultiplayManager::JoinSessionInternal(const FOnlineSessionSearchResult&
     }
 }
 
-void UMD_MultiplayManager::StartGameInternal(const FString& MapPackagePath)
+void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath)
 {
     // 잘못된 에셋이나 일반 에셋 패키지를 대상으로 한 게임 시작 방지
     if (IsValidMapPackagePath(MapPackagePath) == false)
@@ -1186,11 +1188,10 @@ void UMD_MultiplayManager::CancelPendingGameDataOperation()
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
 
-    // 임시로 보관된 게임 데이터 초기화(잊어버리기)
+    // 현재 진행 데이터는 유지하고 실패한 시작 절차의 보류 작업만 취소하는 처리
     if (IsValid(SaveSlotManager) == true)
     {
-        //SaveSlotManager->CancelPendingGameDataOperation();
-        SaveSlotManager->ResetTemporaryGameData();
+        SaveSlotManager->CancelPendingGameDataOperation();
     }
 }
 
