@@ -197,6 +197,17 @@ public:
 		return ScrapeFocusPointerNormalized;
 	}
 
+	/** Mouse2D 한 단위를 화면 폭 기준 이동량으로 바꾸는 Focus 감도. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Focus")
+	float GetScrapeFocusPointerSensitivity() const
+	{
+		return ScrapeFocusPointerSensitivity;
+	}
+
+	/** 로컬 Focus 포인터 감도를 런타임에 조절한다. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Scrape|Focus")
+	void SetScrapeFocusPointerSensitivity(float NewSensitivity);
+
 	/** 진입·조준·서버 검증에서 함께 사용할 현재 헤라 도달 거리. */
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool")
 	float GetEffectiveScrapeReachCm() const;
@@ -228,8 +239,8 @@ public:
 		FVector& OutBladeWorldDirection) const;
 
 	/**
-	 * 잠긴 스트로크와 다른 방향의 시선 입력을 제거한다.
-	 * 헤라는 수평 또는 수직으로만 긁으므로 이 제한은 끌 수 없다.
+	 * legacy non-Focus 호출에서 잠긴 임의 축과 다른 방향의 시선 입력을 제거한다.
+	 * Focus 중 입력은 ConsumeScrapeFocusLookInput이 포인터 공간에서 직접 처리한다.
 	 */
 	FVector2D ConstrainLookInput(const FVector2D& LookInput) const;
 
@@ -439,7 +450,7 @@ protected:
 		meta = (ClampMin = "0.1", UIMin = "1.0", Units = "cm"))
 	float SaturatedContaminationStampSpacingCm;
 
-	/** 이 거리만큼 움직이면 수평·수직 중 한 축을 잠근다. */
+	/** 표면 시작점에서 이 거리만큼 움직이면 최초 이동 방향 축을 잠근다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Motion",
 		meta = (ClampMin = "0.1", Units = "cm"))
 	float DirectionLockThresholdCm;
@@ -543,10 +554,20 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Debug")
 	bool bShowDebugFeedback;
 
-	/** Mouse2D 한 단위를 viewport normalized 포인터 이동량으로 바꾸는 감도. */
+	/** Mouse2D 한 단위를 화면 폭 기준 포인터 이동량으로 바꾸는 감도. 값이 클수록 빠르다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Focus",
-		meta = (ClampMin = "0.0001", ClampMax = "0.1"))
+		meta = (ClampMin = "0.0001", ClampMax = "0.1",
+			UIMin = "0.0005", UIMax = "0.01"))
 	float ScrapeFocusPointerSensitivity;
+
+	/**
+	 * LMB 시작점에서 화면 폭 기준으로 이 거리만큼 움직이면 임의 각도의 포인터 축을 고정한다.
+	 * 고정 뒤에는 같은 직선의 앞/뒤 성분만 허용하며 LMB 종료 때 다시 해제한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Focus",
+		meta = (ClampMin = "0.001", ClampMax = "0.25",
+			UIMin = "0.005", UIMax = "0.05"))
+	float ScrapeFocusPointerDirectionLockThresholdNormalized;
 
 	/** 가상 포인터가 화면 가장자리에서 유지할 normalized 안전 여백. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Focus",
@@ -743,6 +764,9 @@ private:
 	bool IsCameraRelativeAimInsideSessionCone(
 		const FVector& CameraRelativeDirection) const;
 	void ClampScrapeFocusPointerToAuthorityCone();
+	void ResetScrapeFocusPointerStrokeConstraint();
+	void TryLatchScrapeFocusPointerStrokeAxis();
+	float GetScrapeFocusPointerAspectRatio() const;
 	static float CalculateScrapeFocusPointerNormalizedHalfRange(
 		float ProjectionHalfTangent,
 		float AuthorityHalfTangent,
@@ -991,6 +1015,20 @@ private:
 
 	UPROPERTY(Transient)
 	FVector2D ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
+
+	/** LMB를 누른 순간의 포인터 위치. 잠긴 임의 각도 직선의 원점이다. */
+	FVector2D ScrapeFocusPointerStrokeAnchorNormalized = FVector2D(0.5, 0.5);
+
+	/** viewport pixel과 같은 등방 metric에서 누적한 LMB 제스처. */
+	FVector2D ScrapeFocusPointerGestureDisplacement = FVector2D::ZeroVector;
+
+	/** viewport pixel metric에서 고정된 방향. 부호 반전 왕복은 같은 축이다. */
+	FVector2D ScrapeFocusPointerGestureAxis = FVector2D::ZeroVector;
+
+	/** normalized 포인터 직선 방향. authority rectangle 교차·clamp에 사용한다. */
+	FVector2D ScrapeFocusPointerStrokeAxis = FVector2D::ZeroVector;
+
+	bool bHasScrapeFocusPointerStrokeAxis = false;
 
 	UPROPERTY(Transient)
 	bool bHasScrapeFocusView = false;

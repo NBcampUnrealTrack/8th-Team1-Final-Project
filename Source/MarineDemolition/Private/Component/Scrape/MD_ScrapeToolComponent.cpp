@@ -36,6 +36,7 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	MinimumFeedbackIntervalSeconds = 0.08f;
 	bShowDebugFeedback = true;
 	ScrapeFocusPointerSensitivity = 0.0025f;
+	ScrapeFocusPointerDirectionLockThresholdNormalized = 0.01f;
 	ScrapeFocusPointerSafeMargin = 0.05f;
 	ScrapeFocusAspectRatioAbsoluteTolerance = 0.0045f;
 	ScrapeFocusViewOriginDriftToleranceCm = 5.0f;
@@ -715,6 +716,7 @@ void UMD_ScrapeToolComponent::EndScrapeFocusInternal(
 	ScrapeFocusAuthorityVerticalHalfTangent = 9.0f / 16.0f;
 	ScrapeFocusViewportSize = FIntPoint::ZeroValue;
 	ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
+	ResetScrapeFocusPointerStrokeConstraint();
 	ResetScrapeFocusSessionState();
 	SetComponentTickEnabled(false);
 }
@@ -888,6 +890,7 @@ bool UMD_ScrapeToolComponent::CaptureScrapeFocusView()
 	ScrapeFocusAuthorityVerticalHalfTangent = VerticalHalfTangent;
 	ScrapeFocusViewportSize = FIntPoint(ViewportWidth, ViewportHeight);
 	ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
+	ResetScrapeFocusPointerStrokeConstraint();
 	bHasScrapeFocusView = true;
 	return true;
 }
@@ -904,14 +907,104 @@ bool UMD_ScrapeToolComponent::ConsumeScrapeFocusLookInput(
 		const float Sensitivity = FMath::Max(
 			ScrapeFocusPointerSensitivity,
 			0.0f);
-		ScrapeFocusPointerNormalized.X += LookInput.X * Sensitivity;
-		ScrapeFocusPointerNormalized.Y -= LookInput.Y * Sensitivity;
+		FVector2D GestureDelta = LookInput * Sensitivity;
+		// 이 프로젝트의 Look 매핑은 마우스를 위로 움직일 때 Y가 음수다.
+		// 화면 normalized Y도 위쪽이 작으므로 부호를 다시 뒤집지 않는다.
+		if (bIsScraping && bHasScrapeFocusPointerStrokeAxis)
+		{
+			GestureDelta = ScrapeFocusPointerGestureAxis
+				* FVector2D::DotProduct(
+					GestureDelta,
+					ScrapeFocusPointerGestureAxis);
+		}
+		else if (bIsScraping)
+		{
+			const FVector2D OriginalGestureDelta = GestureDelta;
+			const FVector2D PreviousGestureDisplacement =
+				ScrapeFocusPointerGestureDisplacement;
+			const FVector2D RequestedGestureDisplacement =
+				PreviousGestureDisplacement + OriginalGestureDelta;
+			const double Threshold = FMath::Max(
+				static_cast<double>(
+					ScrapeFocusPointerDirectionLockThresholdNormalized),
+				static_cast<double>(UE_KINDA_SMALL_NUMBER));
+			if (RequestedGestureDisplacement.SizeSquared()
+				>= Threshold * Threshold)
+			{
+				// 임계점을 건넌 정확한 위치에서 축을 잡고, 같은 입력의 남은
+				// 부분부터 투영해 입력 표본 밀도에 따른 각도 차이를 없앤다.
+				const double A = OriginalGestureDelta.SizeSquared();
+				const double B = 2.0 * FVector2D::DotProduct(
+					PreviousGestureDisplacement,
+					OriginalGestureDelta);
+				const double C = PreviousGestureDisplacement.SizeSquared()
+					- Threshold * Threshold;
+				double CrossingAlpha = 1.0;
+				const double Discriminant = B * B - 4.0 * A * C;
+				if (A > UE_DOUBLE_SMALL_NUMBER && Discriminant >= 0.0)
+				{
+					const double Root = FMath::Sqrt(Discriminant);
+					const double First = (-B - Root) / (2.0 * A);
+					const double Second = (-B + Root) / (2.0 * A);
+					if (First >= 0.0 && First <= 1.0)
+					{
+						CrossingAlpha = First;
+					}
+					else if (Second >= 0.0 && Second <= 1.0)
+					{
+						CrossingAlpha = Second;
+					}
+				}
+				ScrapeFocusPointerGestureDisplacement =
+					PreviousGestureDisplacement
+					+ OriginalGestureDelta * CrossingAlpha;
+				TryLatchScrapeFocusPointerStrokeAxis();
+				if (bHasScrapeFocusPointerStrokeAxis)
+				{
+					const FVector2D RemainingGestureDelta =
+						OriginalGestureDelta * (1.0 - CrossingAlpha);
+					GestureDelta = OriginalGestureDelta * CrossingAlpha
+						+ ScrapeFocusPointerGestureAxis
+							* FVector2D::DotProduct(
+								RemainingGestureDelta,
+								ScrapeFocusPointerGestureAxis);
+				}
+			}
+			else
+			{
+				ScrapeFocusPointerGestureDisplacement =
+					RequestedGestureDisplacement;
+			}
+		}
+		const float AspectRatio = GetScrapeFocusPointerAspectRatio();
+		const FVector2D PointerDelta(
+			GestureDelta.X,
+			GestureDelta.Y * static_cast<double>(AspectRatio));
+		ScrapeFocusPointerNormalized += PointerDelta;
 		ClampScrapeFocusPointerToAuthorityCone();
+		if (bIsScraping && !bHasScrapeFocusPointerStrokeAxis)
+		{
+			TryLatchScrapeFocusPointerStrokeAxis();
+			ClampScrapeFocusPointerToAuthorityCone();
+		}
 
 		// Look과 LMB Started가 같은 프레임에 들어와도 이전 Tick의 aim을 사용하지 않는다.
 		RefreshScrapeFocusAim();
 	}
 	return true;
+}
+
+void UMD_ScrapeToolComponent::SetScrapeFocusPointerSensitivity(
+	const float NewSensitivity)
+{
+	if (!FMath::IsFinite(NewSensitivity))
+	{
+		return;
+	}
+	ScrapeFocusPointerSensitivity = FMath::Clamp(
+		NewSensitivity,
+		0.0001f,
+		0.1f);
 }
 
 float UMD_ScrapeToolComponent::
@@ -951,14 +1044,128 @@ void UMD_ScrapeToolComponent::ClampScrapeFocusPointerToAuthorityCone()
 			ScrapeFocusVerticalHalfTangent,
 			ScrapeFocusAuthorityVerticalHalfTangent,
 			ScrapeFocusPointerSafeMargin);
-	ScrapeFocusPointerNormalized.X = FMath::Clamp(
-		ScrapeFocusPointerNormalized.X,
-		0.5f - HorizontalHalfRange,
-		0.5f + HorizontalHalfRange);
-	ScrapeFocusPointerNormalized.Y = FMath::Clamp(
-		ScrapeFocusPointerNormalized.Y,
-		0.5f - VerticalHalfRange,
-		0.5f + VerticalHalfRange);
+	const double MinimumX = 0.5 - static_cast<double>(HorizontalHalfRange);
+	const double MaximumX = 0.5 + static_cast<double>(HorizontalHalfRange);
+	const double MinimumY = 0.5 - static_cast<double>(VerticalHalfRange);
+	const double MaximumY = 0.5 + static_cast<double>(VerticalHalfRange);
+	if (!bIsScraping || !bHasScrapeFocusPointerStrokeAxis)
+	{
+		ScrapeFocusPointerNormalized.X = FMath::Clamp(
+			ScrapeFocusPointerNormalized.X,
+			MinimumX,
+			MaximumX);
+		ScrapeFocusPointerNormalized.Y = FMath::Clamp(
+			ScrapeFocusPointerNormalized.Y,
+			MinimumY,
+			MaximumY);
+		return;
+	}
+
+	// X/Y를 따로 clamp하면 대각선 끝점에서 잠긴 직선 밖으로 꺾인다.
+	// 직선과 허용 사각형의 교차 구간을 구해 scalar travel만 제한한다.
+	double MinimumTravel = -TNumericLimits<double>::Max();
+	double MaximumTravel = TNumericLimits<double>::Max();
+	const auto IntersectAxisInterval = [&MinimumTravel, &MaximumTravel](
+		const double Anchor,
+		const double Axis,
+		const double Minimum,
+		const double Maximum)
+	{
+		if (FMath::Abs(Axis) <= UE_DOUBLE_SMALL_NUMBER)
+		{
+			return Anchor >= Minimum && Anchor <= Maximum;
+		}
+		double First = (Minimum - Anchor) / Axis;
+		double Second = (Maximum - Anchor) / Axis;
+		if (First > Second)
+		{
+			Swap(First, Second);
+		}
+		MinimumTravel = FMath::Max(MinimumTravel, First);
+		MaximumTravel = FMath::Min(MaximumTravel, Second);
+		return MinimumTravel <= MaximumTravel;
+	};
+	if (!IntersectAxisInterval(
+			ScrapeFocusPointerStrokeAnchorNormalized.X,
+			ScrapeFocusPointerStrokeAxis.X,
+			MinimumX,
+			MaximumX)
+		|| !IntersectAxisInterval(
+			ScrapeFocusPointerStrokeAnchorNormalized.Y,
+			ScrapeFocusPointerStrokeAxis.Y,
+			MinimumY,
+			MaximumY))
+	{
+		ScrapeFocusPointerNormalized = ScrapeFocusPointerStrokeAnchorNormalized;
+		return;
+	}
+
+	const double RequestedTravel = FVector2D::DotProduct(
+		ScrapeFocusPointerNormalized - ScrapeFocusPointerStrokeAnchorNormalized,
+		ScrapeFocusPointerStrokeAxis);
+	const double ClampedTravel = FMath::Clamp(
+		RequestedTravel,
+		MinimumTravel,
+		MaximumTravel);
+	ScrapeFocusPointerNormalized = ScrapeFocusPointerStrokeAnchorNormalized
+		+ ScrapeFocusPointerStrokeAxis * ClampedTravel;
+}
+
+void UMD_ScrapeToolComponent::ResetScrapeFocusPointerStrokeConstraint()
+{
+	ScrapeFocusPointerStrokeAnchorNormalized = ScrapeFocusPointerNormalized;
+	ScrapeFocusPointerGestureDisplacement = FVector2D::ZeroVector;
+	ScrapeFocusPointerGestureAxis = FVector2D::ZeroVector;
+	ScrapeFocusPointerStrokeAxis = FVector2D::ZeroVector;
+	bHasScrapeFocusPointerStrokeAxis = false;
+}
+
+void UMD_ScrapeToolComponent::TryLatchScrapeFocusPointerStrokeAxis()
+{
+	if (!bIsScraping || bHasScrapeFocusPointerStrokeAxis)
+	{
+		return;
+	}
+
+	const FVector2D Displacement = ScrapeFocusPointerGestureDisplacement;
+	const double Threshold = FMath::Max(
+		static_cast<double>(
+			ScrapeFocusPointerDirectionLockThresholdNormalized),
+		static_cast<double>(UE_KINDA_SMALL_NUMBER));
+	if (!FMath::IsFinite(Displacement.SizeSquared())
+		|| Displacement.SizeSquared() < Threshold * Threshold)
+	{
+		return;
+	}
+
+	ScrapeFocusPointerGestureAxis = Displacement.GetSafeNormal();
+	const float AspectRatio = GetScrapeFocusPointerAspectRatio();
+	ScrapeFocusPointerStrokeAxis = FVector2D(
+		ScrapeFocusPointerGestureAxis.X,
+		ScrapeFocusPointerGestureAxis.Y * static_cast<double>(AspectRatio))
+		.GetSafeNormal();
+	bHasScrapeFocusPointerStrokeAxis =
+		!ScrapeFocusPointerGestureAxis.IsNearlyZero()
+		&& !ScrapeFocusPointerStrokeAxis.IsNearlyZero();
+}
+
+float UMD_ScrapeToolComponent::GetScrapeFocusPointerAspectRatio() const
+{
+	if (ScrapeFocusViewportSize.X > 0 && ScrapeFocusViewportSize.Y > 0)
+	{
+		const float ViewportAspectRatio =
+			static_cast<float>(ScrapeFocusViewportSize.X)
+			/ static_cast<float>(ScrapeFocusViewportSize.Y);
+		if (FMath::IsFinite(ViewportAspectRatio)
+			&& ViewportAspectRatio > UE_SMALL_NUMBER)
+		{
+			return ViewportAspectRatio;
+		}
+	}
+	return FMath::IsFinite(ScrapeFocusAspectRatio)
+		&& ScrapeFocusAspectRatio > UE_SMALL_NUMBER
+		? ScrapeFocusAspectRatio
+		: 1.0f;
 }
 
 bool UMD_ScrapeToolComponent::ApplyScrapeFocusCameraView(
@@ -988,8 +1195,13 @@ FVector UMD_ScrapeToolComponent::GetScrapeFocusAimDirection() const
 		return FVector::ZeroVector;
 	}
 
-	const double ScreenX = (ScrapeFocusPointerNormalized.X - 0.5) * 2.0;
-	const double ScreenY = (0.5 - ScrapeFocusPointerNormalized.Y) * 2.0;
+	// 방향 판정 구간에는 reticle만 움직이고 실제 판정 ray는 LMB 시작점에 둔다.
+	const FVector2D AimPointerNormalized =
+		bIsScraping && !bHasScrapeFocusPointerStrokeAxis
+		? ScrapeFocusPointerStrokeAnchorNormalized
+		: ScrapeFocusPointerNormalized;
+	const double ScreenX = (AimPointerNormalized.X - 0.5) * 2.0;
+	const double ScreenY = (0.5 - AimPointerNormalized.Y) * 2.0;
 	const FRotationMatrix ViewAxes(ScrapeFocusViewRotation);
 	return (ViewAxes.GetScaledAxis(EAxis::X)
 		+ ViewAxes.GetScaledAxis(EAxis::Y) * ScreenX
@@ -1782,20 +1994,10 @@ FVector2D UMD_ScrapeToolComponent::ConstrainLookInput(
 		return LookInput;
 	}
 
-	FVector2D ConstrainedLookInput = LookInput;
-	if (FMath::Abs(LockedStrokeAxis.X)
-		>= FMath::Abs(LockedStrokeAxis.Y))
-	{
-		// 가로 긁기에서는 위아래 시선을 고정한다.
-		ConstrainedLookInput.Y = 0.0;
-	}
-	else
-	{
-		// 세로 긁기에서는 좌우 시선을 고정한다.
-		ConstrainedLookInput.X = 0.0;
-	}
-
-	return ConstrainedLookInput;
+	const FVector2D SafeAxis = LockedStrokeAxis.GetSafeNormal();
+	return SafeAxis.IsNearlyZero()
+		? LookInput
+		: SafeAxis * FVector2D::DotProduct(LookInput, SafeAxis);
 }
 
 bool UMD_ScrapeToolComponent::SetScrapeToolSpec(
@@ -2063,6 +2265,7 @@ void UMD_ScrapeToolComponent::StartScraping()
 	}
 
 	bIsScraping = true;
+	ResetScrapeFocusPointerStrokeConstraint();
 	if (GetOwner() && GetOwner()->HasAuthority())
 	{
 		// Remote pose state must not wait for the next ordinary actor update.
@@ -2104,6 +2307,7 @@ void UMD_ScrapeToolComponent::StopScraping()
 {
 	const bool bWasScraping = bIsScraping;
 	bIsScraping = false;
+	ResetScrapeFocusPointerStrokeConstraint();
 	ResetStrokeTracking();
 	ResetInvalidScrapeAim();
 	if (ScrapeFocusState == EMD_ScrapeFocusState::FocusedScraping)
