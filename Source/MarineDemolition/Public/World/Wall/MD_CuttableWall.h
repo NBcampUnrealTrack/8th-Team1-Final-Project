@@ -15,26 +15,9 @@ class AMD_CuttableWall;
 class AMD_ContaminationItem;
 class AMD_WallPiece;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-	FMD_OnStrutCollapsed,
-	AMD_CuttableWall*,
-	Wall,
-	AActor*,
-	Cutter);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-	FMD_OnWallDemolished,
-	AMD_CuttableWall*,
-	Wall,
-	AActor*,
-	Cutter);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
-	FMD_OnWallScanned,
-	AMD_CuttableWall*,
-	Wall,
-	float,
-	Duration,
-	AActor*,
-	Scanner);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnStrutCollapsed, AMD_CuttableWall*, Wall, AActor*, Cutter);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnWallDemolished, AMD_CuttableWall*, Wall,	AActor*, Cutter);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FMD_OnWallScanned, AMD_CuttableWall*, Wall, float, Duration, AActor*, Scanner);
 
 // 진행도 게이지 UI가 구독한다 (기획 §6)
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
