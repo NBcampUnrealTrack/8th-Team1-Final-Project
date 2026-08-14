@@ -21,6 +21,7 @@ UMD_StylizedSkyControllerComponent::UMD_StylizedSkyControllerComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = true;
+	bTickInEditor = true;
 }
 
 void UMD_StylizedSkyControllerComponent::OnRegister()
@@ -253,17 +254,19 @@ void UMD_StylizedSkyControllerComponent::ResolveSoftAssets()
 
 void UMD_StylizedSkyControllerComponent::ApplyRuntimePresentation()
 {
+	const bool bPreview = IsBlueprintPreviewWorld();
+
 	if (Presentation.OrbitInclinator)
 	{
 		Presentation.OrbitInclinator->SetRelativeRotation(FRotator(OrbitInclinationDegrees, 0.f, 0.f));
 	}
 	if (Presentation.SkyDome)
 	{
-		Presentation.SkyDome->SetRelativeScale3D(SkyDomeScale);
+		Presentation.SkyDome->SetRelativeScale3D(bPreview ? FVector(1.f) : SkyDomeScale);
 	}
 	if (Presentation.CloudDome)
 	{
-		Presentation.CloudDome->SetRelativeScale3D(CloudDomeScale);
+		Presentation.CloudDome->SetRelativeScale3D(bPreview ? FVector(1.05f) : CloudDomeScale);
 	}
 	if (Presentation.DirectionalLight)
 	{
@@ -275,10 +278,12 @@ void UMD_StylizedSkyControllerComponent::ApplyRuntimePresentation()
 	}
 	if (Presentation.HeightFog)
 	{
-		Presentation.HeightFog->SetFogDensity(FogDensity);
+		Presentation.HeightFog->SetVisibility(!bPreview);
+		Presentation.HeightFog->SetFogDensity(bPreview ? 0.f : FogDensity);
 	}
 	if (Presentation.PostProcess)
 	{
+		Presentation.PostProcess->bEnabled = !bPreview;
 		FPostProcessSettings& Settings = Presentation.PostProcess->Settings;
 		Settings.bOverride_BloomIntensity = true;
 		Settings.BloomIntensity = BloomIntensity;
@@ -293,7 +298,7 @@ void UMD_StylizedSkyControllerComponent::ApplyRuntimePresentation()
 
 void UMD_StylizedSkyControllerComponent::SuppressConflictingLevelSky()
 {
-	if (!bSuppressLevelSkyActors || bDidSuppressLevelSky)
+	if (!bSuppressLevelSkyActors || bDidSuppressLevelSky || IsBlueprintPreviewWorld())
 	{
 		return;
 	}
@@ -338,12 +343,20 @@ void UMD_StylizedSkyControllerComponent::SuppressConflictingLevelSky()
 	bDidSuppressLevelSky = true;
 }
 
+bool UMD_StylizedSkyControllerComponent::IsBlueprintPreviewWorld() const
+{
+	const UWorld* World = GetWorld();
+	return World && World->IsPreviewWorld();
+}
+
 void UMD_StylizedSkyControllerComponent::ConfigureInteriorDomeMesh(UStaticMeshComponent* Dome) const
 {
 	if (!Dome)
 	{
 		return;
 	}
+
+	const bool bPreview = IsBlueprintPreviewWorld();
 
 	Dome->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Dome->SetCastShadow(false);
@@ -352,8 +365,10 @@ void UMD_StylizedSkyControllerComponent::ConfigureInteriorDomeMesh(UStaticMeshCo
 	Dome->SetCanEverAffectNavigation(false);
 	Dome->SetVisibility(true);
 	Dome->SetHiddenInGame(false);
-	Dome->SetReverseCulling(true);
-	Dome->BoundsScale = 1000.f;
+	// Level cameras sit inside the dome. BP editor frames the actor from outside,
+	// so reverse-cull would make the sphere invisible in that viewport.
+	Dome->SetReverseCulling(!bPreview);
+	Dome->BoundsScale = bPreview ? 1.f : 1000.f;
 	Dome->SetTranslucentSortPriority(0);
 	Dome->SetForceDisableNanite(true);
 }

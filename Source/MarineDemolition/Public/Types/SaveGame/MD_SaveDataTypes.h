@@ -83,6 +83,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	int32 Credits = 0;
 
+	// 계약과 게임 재시작을 넘어 유지되는 팀 공유 미상환 대출 잔액
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
+	int32 DebtBalance = 0;
+
 	// 상점 해금과 대화 분기에 사용하는 누적 상인 호감도
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	float Affinity = 0.0f;
@@ -103,6 +107,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	int32 QuestCompletions = 0;
 
+	// 구매 소유권과 소모품 누적 수량을 재개 세션에 복원하기 위한 품목별 구매 원장
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
+	TMap<FName, int32> PurchasedItemCounts;
+
 	// 재개 시 같은 퀘스트 정의를 연결하기 위한 현재 현장 애셋
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TSoftObjectPtr<UMD_SiteDefinition> CurrentSite;
@@ -111,7 +119,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FMD_MainQuestState> MainQuests;
 
-	// 제시·수락·거절·완료·실패와 목표 진행도를 유지하기 위한 반복 퀘스트 목록
+	// 퀘스트 진행도를 유지하기 위한 반복 퀘스트 목록
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FMD_RepeatQuestState> RepeatQuests;
 

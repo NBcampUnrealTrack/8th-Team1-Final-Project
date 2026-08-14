@@ -88,6 +88,14 @@ struct FMD_WallContaminationRecord
 
       UPROPERTY()
       TArray<float> RemainingAmounts;
+
+      /** 포화된 헤라가 새로 덧바른 오염량. 구버전 스냅샷에서는 비어 있다. */
+      UPROPERTY()
+      TArray<float> TransferredAmounts;
+
+      /** 새 페인트의 성김-조밀함 시각 패턴 밀도. */
+      UPROPERTY()
+      TArray<float> TransferredPatternDensities;
 };
 
 /**

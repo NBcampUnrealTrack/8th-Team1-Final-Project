@@ -4,6 +4,8 @@
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "GameplayTagContainer.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
+#include "Data/Shop/MD_ShopCatalog.h"
+#include "Player/MD_PlayerState.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 
@@ -39,9 +41,96 @@ void UMD_MerchantSubsystem::AddCredits(int32 Amount)
 		return;
 	}
 
-	Credits = FMath::Max(0, Credits + Amount);
+	// int32 범위 안에서 합산하기 전에 상한과 하한을 판정하는 원장 보호
+	if (Amount > 0 && Credits > MAX_int32 - Amount)
+	{
+		Credits = MAX_int32;
+	}
+	else if (Amount < 0 && Amount < -Credits)
+	{
+		Credits = 0;
+	}
+	else
+	{
+		Credits += Amount;
+	}
 
 	OnMerchantStateChanged.Broadcast();
+}
+
+EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase)
+{
+	// 클라이언트가 로컬 원장을 변경하지 못하도록 막는 서버 권위 검사
+	if (IsValid(PurchasingPlayerState) == false || PurchasingPlayerState->HasAuthority() == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 카탈로그 식별자와 구매 가격이 없는 항목의 직접 구매를 막는 데이터 검사
+	if (ShopItem.ItemId.IsNone() == true || ShopItem.Price < 0)
+	{
+		return EMD_ShopPurchaseResult::InvalidItem;
+	}
+
+	const TArray<FName> AlreadyPurchasedItemIds = PurchasingPlayerState->GetPurchasedShopItemIds();
+
+	// UI 표시와 동일한 조건을 서버 원장 값으로 다시 계산하는 해금 검사
+	if (ShopItem.IsUnlocked(Affinity, QuestCompletions, AlreadyPurchasedItemIds) == false)
+	{
+		return EMD_ShopPurchaseResult::Locked;
+	}
+
+	// 개당 판매 품목이 아닌 장비의 중복 결제를 막는 보유 검사
+	if (ShopItem.bPricePerUnit == false && PurchasingPlayerState->HasPurchasedShopItem(ShopItem.ItemId) == true)
+	{
+		return EMD_ShopPurchaseResult::FullyStocked;
+	}
+
+	// 부족한 크레딧으로 원장이 음수가 되는 상황을 막는 결제 검사
+	if (Credits < ShopItem.Price)
+	{
+		return EMD_ShopPurchaseResult::InsufficientCredits;
+	}
+
+	// 결제와 구매 원장을 같은 프레임에 반영하여 부분 성공을 막는 원자적 처리
+	if (FulfillPurchase() == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 아이템을 구매하는 플레이어의 PlayerState에 해당 아이템 구매 이력 남기기 실패 시 Invalid 반환
+	if (ShopItem.bPricePerUnit == false && PurchasingPlayerState->RecordPurchasedShopItem(ShopItem.ItemId) == false)
+	{
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
+	// 지급 성공이 보장된 같은 프레임에 결제와 팀 구매 원장을 확정하는 원자적 처리
+	Credits -= ShopItem.Price;
+	int32& PurchasedCount = PurchasedItemCounts.FindOrAdd(ShopItem.ItemId);
+	PurchasedCount += 1;
+
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] 상점 구매 완료: %s (-%d, 잔액 %d, 누적 %d개)"), *ShopItem.ItemId.ToString(), ShopItem.Price, Credits, PurchasedCount);
+
+	// GameState 복제 미러와 열려 있는 상점 UI를 함께 갱신하기 위한 변경 알림
+	OnMerchantStateChanged.Broadcast();
+
+	return EMD_ShopPurchaseResult::Success;
+}
+
+TArray<FName> UMD_MerchantSubsystem::GetOwnedItemIds() const
+{
+	TArray<FName> OwnedItemIds;
+	PurchasedItemCounts.GenerateKeyArray(OwnedItemIds);
+
+	// TMap 순회 순서 차이로 복제 배열이 불필요하게 변경되는 상황을 막기 위한 정렬
+	OwnedItemIds.Sort(FNameLexicalLess());
+	return OwnedItemIds;
+}
+
+int32 UMD_MerchantSubsystem::GetPurchasedItemCount(FName ItemId) const
+{
+	const int32* PurchasedCount = PurchasedItemCounts.Find(ItemId);
+	return PurchasedCount != nullptr ? *PurchasedCount : 0;
 }
 
 void UMD_MerchantSubsystem::AddAffinity(float Amount)
@@ -55,6 +144,96 @@ void UMD_MerchantSubsystem::AddAffinity(float Amount)
 	// 기획에서 정의한 호감도 범위를 벗어나 상점 해금 판정이 왜곡되지 않도록 하는 제한
 	Affinity = FMath::Clamp(Affinity + Amount, -4.0f, 5.0f);
 	OnMerchantStateChanged.Broadcast();
+}
+
+int32 UMD_MerchantSubsystem::GetLoanLimit() const
+{
+	return CalculateLoanLimit(Affinity);
+}
+
+int32 UMD_MerchantSubsystem::CalculateLoanLimit(float InAffinity)
+{
+	// 높은 호감도 보상과 낮은 호감도 제한을 기획 임계값에 맞춰 구분하는 계산
+	float ClampedAffinity = FMath::Clamp(InAffinity, -2.0f, 2.0f);
+
+	float ClampedAffinityFactor = FMath::GetRangePct(-2.0f, 2.0f, ClampedAffinity);
+
+	// 호감도가 -2일 때 최소값(400), 호감도가 2일 때 최대값(1200)
+	int32 PotentialLoanLimit = FMath::Lerp(400, 1200, ClampedAffinityFactor);
+
+	// 100 단위로 끊기
+	int32 ActualLoanLimit = FMath::RoundToInt32(PotentialLoanLimit * 0.01f) * 100;
+
+	return ActualLoanLimit;
+}
+
+int32 UMD_MerchantSubsystem::GetAvailableLoanAmount() const
+{
+	// 호감도 하락으로 현재 부채가 새 한도를 넘더라도 강제 회수 없이 추가 대출만 차단하는 계산
+	return FMath::Max(0, GetLoanLimit() - DebtBalance);
+}
+
+bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount)
+{
+	// 잘못된 금액과 현재 호감도 한도를 넘는 대출 요청을 서버 원장에 반영하지 않기 위한 검사
+	if (Amount <= 0 || Amount > GetAvailableLoanAmount())
+	{
+		return false;
+	}
+
+	// 플레이어 측 보유 금액 및 빚에 대하여 오버플로우 검사
+	if (Credits > MAX_int32 - Amount || DebtBalance > MAX_int32 - Amount)
+	{
+		return false;
+	}
+
+	// 대출 실행
+	Credits += Amount;
+	DebtBalance += Amount;
+
+	OnMerchantStateChanged.Broadcast();
+
+	return true;
+}
+
+bool UMD_MerchantSubsystem::TryRepayLoan(int32 Amount)
+{
+	// 실제 부채와 보유 크레딧 범위를 넘는 상환 요청을 거부하여 두 원장의 불일치를 방지하는 검사
+	if (Amount <= 0 || Amount > DebtBalance || Amount > Credits)
+	{
+		return false;
+	}
+
+	// 빚 상환 실행
+	Credits -= Amount;
+	DebtBalance -= Amount;
+	OnMerchantStateChanged.Broadcast();
+
+	return true;
+}
+
+int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
+{
+	// 빚이 존재하지 않거나 최대값의 경우 추가되는 이자 없음
+	if (DebtBalance <= 0 || DebtBalance == MAX_int32)
+	{
+		return 0;
+	}
+
+	// 기획 예시의 450₡ 대출 이자 23₡과 일치하도록 원 단위 반올림을 적용하는 계산
+	float CalculatedInterest = DebtBalance * DailyInterestRate;
+	int32 InterestAmount = FMath::Clamp(CalculatedInterest, 1, MAX_int32 - DebtBalance);	// 이자 값 보정
+	if (InterestAmount <= 0)
+	{
+		return 0;
+	}
+
+	// 빚에 이자 추가
+	DebtBalance += InterestAmount;
+	OnMerchantStateChanged.Broadcast();
+
+	// 추가된 이자 값 반환
+	return InterestAmount;
 }
 
 void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment)
@@ -176,6 +355,37 @@ bool UMD_MerchantSubsystem::TryDeclineRepeatQuest(int32 QuestIndex)
 	// 거절은 페널티가 없다. 다음 Day 재롤 때 이 카드가 사라진다.
 	QuestState.Status = EMD_RepeatQuestStatus::Declined;
 
+	OnMerchantStateChanged.Broadcast();
+
+	return true;
+}
+
+bool UMD_MerchantSubsystem::TryAbandonRepeatQuest(int32 QuestIndex)
+{
+	if (RepeatQuests.IsValidIndex(QuestIndex) == false)
+	{
+		return false;
+	}
+
+	// 포기하려는 퀘스트
+	FMD_RepeatQuestState& QuestState = RepeatQuests[QuestIndex];
+
+	// 포기하려는 퀘스트를 수주받은 상태가 아닌 경우 실패 처리
+	if (QuestState.Status != EMD_RepeatQuestStatus::Accepted)
+	{
+		return false;
+	}
+
+	// 호감도 감소 처리
+	float MinimumAffinity = -4.0f;
+	float MaximumAffinity = 5.0f;
+	float AffinityPenalty = 0.1f * (MaximumAffinity - MinimumAffinity);
+	Affinity = FMath::Clamp(Affinity - AffinityPenalty, MinimumAffinity, MaximumAffinity);
+
+	// 퀘스트 상태를 실패 상태로 전환
+	QuestState.Status = EMD_RepeatQuestStatus::Failed;
+
+	// 퀘스트 상태 변경으로 인한 상인 업데이트 이벤트 호출
 	OnMerchantStateChanged.Broadcast();
 
 	return true;
@@ -351,10 +561,12 @@ FMD_MerchantData UMD_MerchantSubsystem::GetMerchantSaveData() const
 	FMD_MerchantData SaveData;
 	SaveData.bConsumableDiscountActive = bConsumableDiscountActive;
 	SaveData.Credits = Credits;
+	SaveData.DebtBalance = DebtBalance;
 	SaveData.Affinity = Affinity;
 	SaveData.CurrentDay = CurrentDay;
 	SaveData.NextDepositMultiplier = NextDepositMultiplier;
 	SaveData.QuestCompletions = QuestCompletions;
+	SaveData.PurchasedItemCounts = PurchasedItemCounts;
 	SaveData.CurrentSite = TSoftObjectPtr<UMD_SiteDefinition>(CurrentSite.Get());
 	SaveData.MainQuests = MainQuests;
 	SaveData.RepeatQuests = RepeatQuests;
@@ -402,13 +614,26 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 	// 모든 참조 검증 이후 경제·호감도·퀘스트 원장을 한 번에 교체하는 처리
 	bConsumableDiscountActive = SaveData.bConsumableDiscountActive;
 	Credits = SaveData.Credits;
+	DebtBalance = SaveData.DebtBalance;
 	Affinity = SaveData.Affinity;
 	CurrentDay = SaveData.CurrentDay;
 	NextDepositMultiplier = SaveData.NextDepositMultiplier;
 	QuestCompletions = SaveData.QuestCompletions;
+	PurchasedItemCounts = SaveData.PurchasedItemCounts;
 	CurrentSite = LoadedCurrentSite;
 	MainQuests = SaveData.MainQuests;
 	RepeatQuests = SaveData.RepeatQuests;
+
+	// 실패 처리된 반복 퀘스트를 다시 수락할 수 있는 상태로 복구
+	for (FMD_RepeatQuestState& RepeatQuest : RepeatQuests)
+	{
+		if (RepeatQuest.Status == EMD_RepeatQuestStatus::Failed)
+		{
+			RepeatQuest.Status = EMD_RepeatQuestStatus::Offered;
+			RepeatQuest.CurrentProgress = 0;
+		}
+	}
+
 	ClearedSites = MoveTemp(LoadedClearedSites);
 	OnMerchantStateChanged.Broadcast();
 
@@ -475,8 +700,19 @@ void UMD_MerchantSubsystem::AddCreditsInternal(int32 Amount)
 		return;
 	}
 
-	// 크레딧은 0 밑으로 내려가지 않는다.
-	Credits = FMath::Max(0, Credits + Amount);
+	// int32 범위 안에서 여러 보상의 합산 상한과 차감 하한을 지키기 위한 원장 보호
+	if (Amount > 0 && Credits > MAX_int32 - Amount)
+	{
+		Credits = MAX_int32;
+	}
+	else if (Amount < 0 && Amount < -Credits)
+	{
+		Credits = 0;
+	}
+	else
+	{
+		Credits += Amount;
+	}
 }
 
 bool UMD_MerchantSubsystem::DoesDeliveryMatch(
@@ -565,20 +801,27 @@ void UMD_MerchantSubsystem::ApplyQuestReward(const FMD_QuestDefinitionData& Defi
 		return;
 	}
 
-	const int32 Payout = (Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged)
+	int32 Payout = (Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged)
 		? Definition.RewardCredits / 2
 		: Definition.RewardCredits;
 
+	// 반복 퀘스트 호감도 보상 범위에서 서버가 선택하는 0.1 단위 임의 보상
+	int32 AffinityRewardStep = FMath::RandRange(1, 2);
+	float AffinityReward = AffinityRewardStep * 0.1f;
+
 	AddCreditsInternal(Payout);
+	// 퀘스트 완료 보상이 상점 해금 범위를 벗어나지 않도록 호감도 반영
+	Affinity = FMath::Clamp(Affinity + AffinityReward, -4.0f, 5.0f);
 	++QuestCompletions;
 
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] 퀘스트 완료: %s (+%d, 누적 성공 %d)"),
-		*Definition.QuestName.ToString(), Payout, QuestCompletions);
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] 퀘스트 완료: %s (크레딧 +%d  |  호감도 +%.1f, 누적 성공 %d)"),
+		*Definition.QuestName.ToString(), Payout, AffinityReward, QuestCompletions);
 }
 
 void UMD_MerchantSubsystem::ResetContract()
 {
 	Credits = 0;
+	DebtBalance = 0;
 	Affinity = 0.0f;
 	CurrentSite = nullptr;
 	CurrentDay = 0;
@@ -588,5 +831,6 @@ void UMD_MerchantSubsystem::ResetContract()
 	NextDepositMultiplier = 1.f;
 	bConsumableDiscountActive = true;
 	QuestCompletions = 0;
+	PurchasedItemCounts.Reset();
 	OnMerchantStateChanged.Broadcast();
 }

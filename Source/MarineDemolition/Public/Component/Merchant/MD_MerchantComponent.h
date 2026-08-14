@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -42,6 +42,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	int32 GetCredits() const { return Credits; }
 
+	// 서버 원장에서 복제된 현재 미상환 대출 잔액을 반환하는 함수
+	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
+	int32 GetDebtBalance() const { return DebtBalance; }
+
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	int32 GetCurrentDay() const { return CurrentDay; }
 
@@ -61,6 +65,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	TArray<FMD_RepeatQuestState> GetRepeatQuests() const { return RepeatQuests; }
 
+	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
+	TArray<FName> GetOwnedItemIds() const { return OwnedItemIds; }
+
 private:
 	/** Subsystem 값을 복제 변수로 복사한다. 서버에서만 호출된다. */
 	void RefreshFromSubsystem();
@@ -72,6 +79,10 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
 	int32 Credits = 0;
+
+	// 모든 클라이언트가 같은 대출 잔액과 상환 가능 상태를 표시하기 위한 복제 값
+	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
+	int32 DebtBalance = 0;
 
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
 	int32 CurrentDay = 0;
@@ -91,6 +102,9 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
 	TArray<FMD_RepeatQuestState> RepeatQuests;
+
+	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
+	TArray<FName> OwnedItemIds;
 
 	FDelegateHandle SubsystemChangedHandle;
 		

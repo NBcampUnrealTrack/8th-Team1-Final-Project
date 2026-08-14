@@ -102,9 +102,13 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_InteractionComponent> InteractionComponent;
 
-	// 3인칭 도구 메시 (타 플레이어에게만 보임)
+	/** 다른 플레이어가 보는 전체 도구 메시. 적재 단계가 바뀌면 메시 자체를 교체한다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> ThirdPersonToolMesh;
+
+	/** 로컬 플레이어가 보는 전체 도구 메시. 적재 단계가 바뀌면 메시 자체를 교체한다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UStaticMeshComponent> FirstPersonToolMesh;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
 	FName ToolAttachSocketName = TEXT("ToolSocket");
@@ -178,7 +182,11 @@ private:
 	UFUNCTION()
 	void HandleHotbarChanged();
 
+	UFUNCTION()
+	void HandleScrapeLoadChanged(float NewScrapeLoad);
+
 	void RefreshToolMesh();
+	void RefreshScrapeLoadVisual();
 
 private:
 	UFUNCTION()

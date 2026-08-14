@@ -38,63 +38,61 @@ bool FMD_ScrapeSurfaceGeometry::TryResolveSurfaceNormalAxis(
 		return false;
 	}
 
-	auto SelectSmallestAxis = [](const FVector& Size)
+	auto SelectNarrowerHorizontalAxis = [](const FVector& Size)
 	{
-		EMD_ScrapeSurfaceNormalAxis Axis =
-			EMD_ScrapeSurfaceNormalAxis::Y;
-		double SmallestSize = Size.Y;
-		if (Size.X < SmallestSize - UE_KINDA_SMALL_NUMBER)
-		{
-			Axis = EMD_ScrapeSurfaceNormalAxis::X;
-			SmallestSize = Size.X;
-		}
-		if (Size.Z < SmallestSize - UE_KINDA_SMALL_NUMBER)
-		{
-			Axis = EMD_ScrapeSurfaceNormalAxis::Z;
-		}
-		return Axis;
+		return Size.X < Size.Y - UE_KINDA_SMALL_NUMBER
+			? EMD_ScrapeSurfaceNormalAxis::X
+			: EMD_ScrapeSurfaceNormalAxis::Y;
 	};
-	auto GetAxisSize = [](const FVector& Size,
-		const EMD_ScrapeSurfaceNormalAxis Axis)
+	auto TrySelectClearlyThinAxis = [&SelectNarrowerHorizontalAxis](
+		const FVector& Size,
+		EMD_ScrapeSurfaceNormalAxis& OutAxis)
 	{
-		switch (Axis)
+		// 바닥·천장은 Z가 두 가로축 모두에 비해 확실히 얇을 때만 인정한다.
+		// 코너/T자/십자 벽은 전체 Bounds의 Z가 우연히 가장 짧을 수 있으므로,
+		// 일반적인 "세 축 중 최솟값" 규칙으로는 수직 Decal이 바닥에 투영된다.
+		constexpr double MaximumHorizontalSurfaceThicknessRatio = 0.5;
+		const double SmallerHorizontalSize = FMath::Min(Size.X, Size.Y);
+		if (Size.Z <= SmallerHorizontalSize
+			* MaximumHorizontalSurfaceThicknessRatio)
 		{
-		case EMD_ScrapeSurfaceNormalAxis::X:
-			return static_cast<double>(Size.X);
-		case EMD_ScrapeSurfaceNormalAxis::Y:
-			return static_cast<double>(Size.Y);
-		case EMD_ScrapeSurfaceNormalAxis::Z:
-			return static_cast<double>(Size.Z);
-		default:
-			return TNumericLimits<double>::Max();
+			OutAxis = EMD_ScrapeSurfaceNormalAxis::Z;
+			return true;
 		}
+
+		// 수직 판재는 더 얇은 가로축을 앞/뒤 축으로 사용한다.
+		constexpr double MaximumVerticalSurfaceThicknessRatio = 0.75;
+		const EMD_ScrapeSurfaceNormalAxis HorizontalAxis =
+			SelectNarrowerHorizontalAxis(Size);
+		const double HorizontalThickness =
+			HorizontalAxis == EMD_ScrapeSurfaceNormalAxis::X
+				? static_cast<double>(Size.X)
+				: static_cast<double>(Size.Y);
+		const double OtherHorizontalSize =
+			HorizontalAxis == EMD_ScrapeSurfaceNormalAxis::X
+				? static_cast<double>(Size.Y)
+				: static_cast<double>(Size.X);
+		if (HorizontalThickness <= OtherHorizontalSize
+			* MaximumVerticalSurfaceThicknessRatio)
+		{
+			OutAxis = HorizontalAxis;
+			return true;
+		}
+
+		return false;
 	};
 
-	const EMD_ScrapeSurfaceNormalAxis LocalSmallestAxis =
-		SelectSmallestAxis(LocalSize);
-	const double LocalSmallestSize = GetAxisSize(
-		LocalSize,
-		LocalSmallestAxis);
-	double LocalSecondSmallestSize = TNumericLimits<double>::Max();
-	for (const EMD_ScrapeSurfaceNormalAxis Axis : {
-		EMD_ScrapeSurfaceNormalAxis::X,
-		EMD_ScrapeSurfaceNormalAxis::Y,
-		EMD_ScrapeSurfaceNormalAxis::Z })
+	// 이미 판재로 모델링된 메시는 Blueprint의 기존 비균일 Scale보다 원본 형상을
+	// 우선하고, Cube처럼 원본이 모호한 경우에만 월드 스케일로 다시 판정한다.
+	if (TrySelectClearlyThinAxis(LocalSize, OutResolvedNormalAxis)
+		|| TrySelectClearlyThinAxis(WorldSize, OutResolvedNormalAxis))
 	{
-		if (Axis != LocalSmallestAxis)
-		{
-			LocalSecondSmallestSize = FMath::Min(
-				LocalSecondSmallestSize,
-				GetAxisSize(LocalSize, Axis));
-		}
+		return true;
 	}
 
-	// 이미 판재로 모델링된 메시는 Blueprint의 기존 비균일 Scale보다 원본 두께를 우선한다.
-	constexpr double ClearlyThinRatio = 0.75;
-	OutResolvedNormalAxis =
-		LocalSmallestSize <= LocalSecondSmallestSize * ClearlyThinRatio
-		? LocalSmallestAxis
-		: SelectSmallestAxis(WorldSize);
+	// 세 축이 비슷한 조립형 메시에는 명확한 두께 축이 없다. 이때 Z를 고르면 벽용
+	// Decal이 바닥/천장 방향으로 투영되므로, 기존 기본값과 같은 수직면을 택한다.
+	OutResolvedNormalAxis = SelectNarrowerHorizontalAxis(WorldSize);
 	return true;
 }
 

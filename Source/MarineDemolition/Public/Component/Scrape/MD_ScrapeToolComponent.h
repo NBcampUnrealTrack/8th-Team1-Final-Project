@@ -27,6 +27,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	FMD_ScrapeResult,
 	Result);
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
+	FMD_OnScrapeLoadChanged,
+	float,
+	ScrapeLoad);
+
 /**
  * 플레이어 시점에서 연속 충돌점을 수집해 오염 표면에 헤라 스트로크를 전달한다.
  *
@@ -56,6 +61,16 @@ public:
 	bool IsScraping() const { return bIsScraping; }
 
 	/**
+	 * 이번 프레임 헤라가 닿은 표면의 월드 위치를 반환한다.
+	 *
+	 * 긁고 있지 않거나 표면을 놓친 프레임에는 false를 반환하며 출력값을
+	 * 건드리지 않는다. 로컬 플레이어는 자신의 트레이스 결과를 사용하고,
+	 * 시뮬레이티드 프록시는 서버에서 복제된 위치를 사용한다.
+	 */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
+	bool GetCurrentScrapeContact(FVector& OutWorldLocation) const;
+
+	/**
 	 * 잠긴 스트로크와 다른 방향의 시선 입력을 제거한다.
 	 * 헤라는 수평 또는 수직으로만 긁으므로 이 제한은 끌 수 없다.
 	 */
@@ -64,6 +79,79 @@ public:
 	/** 현재 장착한 헤라의 판정 성능을 반환한다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool")
 	FMD_ScrapeToolSpec GetScrapeToolSpec() const { return ScrapeToolSpec; }
+
+	static constexpr float MaximumScrapeLoad = 100.0f;
+	static constexpr float ScrapeLoadStage2Threshold = 34.0f;
+	static constexpr float ScrapeLoadStage3Threshold = 67.0f;
+
+	/** 적재량을 0/1/2/3단계 중 하나로 즉시 분류한다. */
+	static EMD_ScrapeLoadStage CalculateScrapeLoadStage(float Load);
+
+	/** CleanRatioDelta 0.01(1%)를 기획 수치에 따라 ScrapeLoad 증가량으로 바꾼다. */
+	static float CalculateScrapeLoadGainFromCleanRatioDelta(
+		float CleanRatioDelta,
+		float LoadPerRemovedPercent);
+
+	/** 현재 헤라 인스턴스의 적재량을 0~100으로 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	float GetScrapeLoad() const
+	{
+		return FMath::IsFinite(ScrapeLoad)
+			? FMath::Clamp(ScrapeLoad, 0.0f, MaximumScrapeLoad)
+			: 0.0f;
+	}
+
+	/** 현재 적재량에 대응하는 날 오염 메시 단계를 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	EMD_ScrapeLoadStage GetScrapeLoadStage() const
+	{
+		return CalculateScrapeLoadStage(GetScrapeLoad());
+	}
+
+	/** 3단계 헤라의 직사각형 도장 한 번이 더하는 최대 오염량을 0~1로 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	float GetSaturatedContaminationStampRatio() const
+	{
+		return FMath::IsFinite(SaturatedContaminationStampRatio)
+			? FMath::Clamp(SaturatedContaminationStampRatio, 0.0f, 1.0f)
+			: 0.0f;
+	}
+
+	/** 3단계 포화 헤라의 제거력을 일반 헤라 대비 배율로 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	float GetSaturatedRemovalMultiplier() const
+	{
+		return FMath::IsFinite(SaturatedRemovalMultiplier)
+			? FMath::Clamp(SaturatedRemovalMultiplier, 0.01f, 1.0f)
+			: 0.05f;
+	}
+
+	/** 3단계 헤라의 무작위 도장 후보 간격을 cm로 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	float GetSaturatedContaminationStampSpacingCm() const
+	{
+		return FMath::IsFinite(SaturatedContaminationStampSpacingCm)
+			? FMath::Max(0.1f, SaturatedContaminationStampSpacingCm)
+			: 0.1f;
+	}
+
+	/** 3단계 헤라가 남기는 직사각형 오염 도장의 진행 방향 깊이를 cm로 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	float GetSaturatedContaminationStampDepthCm() const
+	{
+		return FMath::IsFinite(SaturatedContaminationStampDepthCm)
+			? FMath::Max(0.1f, SaturatedContaminationStampDepthCm)
+			: 0.1f;
+	}
+
+	/** 3단계 헤라의 각 도장 후보가 실제 자국이 될 확률을 0~1로 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	float GetSaturatedContaminationStampCoverage() const
+	{
+		return FMath::IsFinite(SaturatedContaminationStampCoverage)
+			? FMath::Clamp(SaturatedContaminationStampCoverage, 0.0f, 1.0f)
+			: 0.0f;
+	}
 
 	/**
 	 * 조준 보정으로 이번 프레임에 적용할 컨트롤 회전을 계산한다.
@@ -96,6 +184,20 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Scrape|Tool")
 	bool SetScrapeBladeWidthCm(float NewBladeWidthCm);
 
+	/** 서버에서 ScrapeLoad를 직접 설정하고 0~100으로 보정한다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+		Category = "MD|Scrape|Tool|Load")
+	bool SetScrapeLoad(float NewLoad);
+
+	/** 서버에서 양수 적재량을 더하고, 100 상한까지 실제로 들어간 양을 반환한다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+		Category = "MD|Scrape|Tool|Load")
+	float AddScrapeLoad(float RequestedAmount);
+
+	/** 서버 변경 또는 복제 수신으로 ScrapeLoad가 실제로 바뀔 때 발생한다. */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Scrape|Tool|Load")
+	FMD_OnScrapeLoadChanged OnScrapeLoadChanged;
+
 	/** 유효한 스트로크가 어느 오염 표면에든 전달될 때마다 발생한다. */
 	UPROPERTY(BlueprintAssignable, Category = "MD|Scrape")
 	FMD_OnScrapeSurfaceApplied OnScrapeSurfaceApplied;
@@ -127,6 +229,58 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, ReplicatedUsing = OnRep_ScrapeToolSpec,
 		Category = "MD|Scrape|Tool")
 	FMD_ScrapeToolSpec ScrapeToolSpec;
+
+	/** 헤라 인스턴스별 적재량. 자연 감소하지 않으며 서버만 변경한다. */
+	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly,
+		ReplicatedUsing = OnRep_ScrapeLoad,
+		Category = "MD|Scrape|Tool|Load",
+		meta = (ClampMin = "0.0", ClampMax = "100.0"))
+	float ScrapeLoad;
+
+	/** 오염 마스크 실제 제거율 1%당 적재량. 정본 기본값은 +0.6이다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "MD|Scrape|Tool|Load",
+		meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float ScrapeLoadPerRemovedPercent;
+
+	/** 따개비 한 개를 완전히 제거했을 때 적재량. 정본 기본값은 +8이다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "MD|Scrape|Tool|Load",
+		meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float ScrapeLoadPerRemovedBarnacle;
+
+	/** 선택된 직사각형 도장 한 번이 셀에 더하는 최대 오염량. 덧칠하면 1까지 누적된다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "MD|Scrape|Tool|Load",
+		meta = (ClampMin = "0.0", ClampMax = "1.0",
+			UIMin = "0.0", UIMax = "1.0"))
+	float SaturatedContaminationStampRatio;
+
+	/** 3단계 포화 헤라의 제거력 배율. 낮을수록 기존 오염과 전이 페인트를 덜 긁어낸다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "MD|Scrape|Tool|Load",
+		meta = (ClampMin = "0.01", ClampMax = "1.0",
+			UIMin = "0.01", UIMax = "1.0"))
+	float SaturatedRemovalMultiplier;
+
+	/** 경로의 각 무작위 도장 후보가 실제 오염 자국이 될 확률. 나머지는 빈 간격으로 남긴다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "MD|Scrape|Tool|Load",
+		meta = (ClampMin = "0.0", ClampMax = "1.0",
+			UIMin = "0.0", UIMax = "1.0"))
+	float SaturatedContaminationStampCoverage;
+
+	/** 오염 도장의 진행 방향 깊이. 폭은 장착한 헤라 폭을 그대로 사용한다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "MD|Scrape|Tool|Load",
+		meta = (ClampMin = "0.1", UIMin = "1.0", Units = "cm"))
+	float SaturatedContaminationStampDepthCm;
+
+	/** 경로를 따라 무작위 도장 후보를 배치하는 기준 간격. 각 후보는 약간 위치가 흔들린다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "MD|Scrape|Tool|Load",
+		meta = (ClampMin = "0.1", UIMin = "1.0", Units = "cm"))
+	float SaturatedContaminationStampSpacingCm;
 
 	/** 이 거리만큼 움직이면 수평·수직 중 한 축을 잠근다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Motion",
@@ -214,10 +368,13 @@ protected:
 
 private:
 	friend class FMD_ScrapeToolBarnacleOcclusionTest;
+	friend class FMD_ScrapeLoadTest;
 
 	/** 디버그 표시용 접촉 종류 문자열. 이 컴포넌트에서만 사용한다. */
 	static const TCHAR* GetContactTypeLabel(EMD_ScrapeContactType ContactType);
 
+	void SetCurrentScrapeContact(const FVector& WorldLocation);
+	void ClearCurrentScrapeContact();
 	void ProcessScrapeTrace(float DeltaTime);
 	void DispatchAuthoritativeScrapeResult(
 		UMD_ScrapeSurfaceComponent* Surface,
@@ -232,6 +389,11 @@ private:
 
 	UFUNCTION()
 	void OnRep_ScrapeToolSpec();
+
+	UFUNCTION()
+	void OnRep_ScrapeLoad();
+
+	void NotifyScrapeLoadChanged();
 
 	bool TryGetCurrentSurfaceHit(
 		FHitResult& OutHit,
@@ -264,6 +426,7 @@ private:
 		const FVector& ViewLocation,
 		const FVector& WorldPosition,
 		const AActor* IgnoredActor = nullptr) const;
+	void FlushPendingContaminationPaintTail();
 	void ResetStrokeTracking();
 	void EmitFeedback(
 		UMD_ScrapeSurfaceComponent* Surface,
@@ -309,10 +472,20 @@ private:
 	bool bIsScraping;
 	bool bHasPreviousSurfacePosition;
 	bool bHasLockedStrokeAxis;
+	int32 SaturatedContaminationStampPatternSeed;
+
+	/** 마지막으로 표면에 닿은 월드 위치. 접촉이 끊기면 무효로 표시한다. */
+	UPROPERTY(Replicated)
+	FVector_NetQuantize10 LastContactWorldLocation = FVector::ZeroVector;
+
+	/** 위 위치가 이번 프레임 기준으로 유효한지 여부. */
+	UPROPERTY(Replicated)
+	bool bHasLastContact = false;
 
 	FVector2D PreviousSurfacePositionCm;
 	EMD_ScrapeSurfaceFace PreviousSurfaceFace;
 	FVector2D StrokeAnchorPositionCm;
+	FVector2D FurthestSurfacePositionCm;
 	FVector2D LockedStrokeAxis;
 	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> PreviousSurface;
 

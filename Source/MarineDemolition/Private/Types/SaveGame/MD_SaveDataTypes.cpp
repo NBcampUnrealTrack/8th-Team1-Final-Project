@@ -3,6 +3,7 @@
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Types/Lore/MD_LoreTypes.h"
 
 const FGameplayTag FMD_GameStateData::DataFieldKey = MDGameplayTags::Save_Data_GameState;
 const FGameplayTag FMD_MerchantData::DataFieldKey = MDGameplayTags::Save_Data_Merchant;
@@ -17,7 +18,7 @@ bool FMD_GameStateData::IsStructurallyValid() const
 bool FMD_MerchantData::IsStructurallyValid() const
 {
 	// 경제와 호감도 범위가 런타임 규칙에서 허용하는 범위인지 확인하는 검사
-	if (Credits < 0 || Affinity < -4.0f || Affinity > 5.0f || FMath::IsFinite(Affinity) == false || CurrentDay < 0 || CurrentDay > 4 || NextDepositMultiplier < 0.0f || FMath::IsFinite(NextDepositMultiplier) == false || QuestCompletions < 0)
+	if (Credits < 0 || DebtBalance < 0 || Affinity < -4.0f || Affinity > 5.0f || FMath::IsFinite(Affinity) == false || CurrentDay < 0 || CurrentDay > 4 || NextDepositMultiplier < 0.0f || FMath::IsFinite(NextDepositMultiplier) == false || QuestCompletions < 0)
 	{
 		return false;
 	}
@@ -28,6 +29,15 @@ bool FMD_MerchantData::IsStructurallyValid() const
 		return false;
 	}
 
+	// 식별자가 없거나 수량이 유효하지 않은 구매 원장이 해금과 중복 구매 판정을 오염시키지 않도록 하는 검사
+	for (const TPair<FName, int32>& PurchasedItemEntry : PurchasedItemCounts)
+	{
+		if (PurchasedItemEntry.Key.IsNone() == true || PurchasedItemEntry.Value <= 0)
+		{
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -36,7 +46,18 @@ bool FMD_WorldData::IsStructurallyValid() const
 	// 오염 셀의 병렬 배열 길이가 다르면 잘못된 인덱스 복원을 수행하지 않기 위한 검사
 	for (const FMD_WallContaminationRecord& ContaminationRecord : WallContaminations)
 	{
-		if (ContaminationRecord.WallName.IsNone() == true || ContaminationRecord.CellIndices.Num() != ContaminationRecord.InitialAmounts.Num() || ContaminationRecord.CellIndices.Num() != ContaminationRecord.RemainingAmounts.Num())
+		const int32 CellCount = ContaminationRecord.CellIndices.Num();
+		const bool bTransferredAmountsValid =
+			ContaminationRecord.TransferredAmounts.IsEmpty()
+			|| ContaminationRecord.TransferredAmounts.Num() == CellCount;
+		const bool bTransferredPatternDensitiesValid =
+			ContaminationRecord.TransferredPatternDensities.IsEmpty()
+			|| ContaminationRecord.TransferredPatternDensities.Num() == CellCount;
+		if (ContaminationRecord.WallName.IsNone() == true
+			|| CellCount != ContaminationRecord.InitialAmounts.Num()
+			|| CellCount != ContaminationRecord.RemainingAmounts.Num()
+			|| bTransferredAmountsValid == false
+			|| bTransferredPatternDensitiesValid == false)
 		{
 			return false;
 		}
@@ -109,6 +130,16 @@ bool FMD_GameData::IsValidForLoad() const
 	{
 		FMD_WorldData WorldData;
 		if (GetDataField(FMD_WorldData::DataFieldKey, WorldData) == false || WorldData.IsStructurallyValid() == false)
+		{
+			return false;
+		}
+	}
+
+	// 로어 필드는 초기 슬롯 호환을 위해 선택 사항이지만 존재하면 정확한 타입과 구조를 요구하는 검사
+	if (DataFields.Contains(FMD_LoreData::DataFieldKey) == true)
+	{
+		FMD_LoreData LoreData;
+		if (GetDataField(FMD_LoreData::DataFieldKey, LoreData) == false || LoreData.IsStructurallyValid() == false)
 		{
 			return false;
 		}

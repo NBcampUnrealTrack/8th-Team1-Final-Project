@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -7,6 +7,19 @@
 #include "MD_ShopCatalog.generated.h"
 
 class UTexture2D;
+class UMD_ToolDefinition;
+
+/** 서버 구매 검증 결과를 클라이언트 UI에 전달하기 위한 상태 */
+UENUM(BlueprintType)
+enum class EMD_ShopPurchaseResult : uint8
+{
+	Success             UMETA(DisplayName = "구매 성공"),
+	InvalidRequest      UMETA(DisplayName = "잘못된 요청"),
+	InvalidItem         UMETA(DisplayName = "유효하지 않은 품목"),
+	Locked              UMETA(DisplayName = "잠긴 품목"),
+	InsufficientCredits UMETA(DisplayName = "크레딧 부족"),
+	FullyStocked        UMETA(DisplayName = "이미 보유한 품목")
+};
 
 /**
  * 상점 카테고리 (`04` §3 = `08` §1, 5탭)
@@ -60,6 +73,10 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop")
 	TSoftObjectPtr<UTexture2D> Icon;
+
+	/** 구매 시 기존 핫바 슬롯의 장비를 교체하기 위한 장비 정의 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Equipment")
+	TObjectPtr<UMD_ToolDefinition> EquipmentDefinition;
 
 	// ───── 해금 조건 (`07` §4). 아무것도 설정하지 않으면 "상점 상시". ─────
 

@@ -24,27 +24,24 @@ bool UMD_GameStateDayCycleAdapterComponent::IsDayCycleActive_Implementation() co
 		return false;
 	}
 
-	if (const AMD_GameStateBase* GS = ResolveGameState())
-	{
-		return GS->GetElapsedRealSeconds() > 0.0 || GS->GetElapsedGameSeconds() > 0.0;
-	}
-	return false;
+	return ResolveGameState() != nullptr;
 }
 
 float UMD_GameStateDayCycleAdapterComponent::GetTimeOfDayHours_Implementation() const
 {
 	if (const AMD_GameStateBase* GS = ResolveGameState())
 	{
-		return GS->GetTimeOfDayHours();
+		// GameState is wall-clock (8 = 08:00). Sky controller 12 = midnight.
+		return FMath::Fmod(GS->GetTimeOfDayHours() + 12.f, 24.f);
 	}
-	return 0.f;
+	return 20.f; // 08:00
 }
 
 float UMD_GameStateDayCycleAdapterComponent::GetDayCycleProgress_Implementation() const
 {
 	if (const AMD_GameStateBase* GS = ResolveGameState())
 	{
-		return FMath::Frac(GS->GetTimeOfDayHours() / 24.f);
+		return FMath::Frac((GS->GetTimeOfDayHours() + 12.f) / 24.f);
 	}
 	return 0.f;
 }

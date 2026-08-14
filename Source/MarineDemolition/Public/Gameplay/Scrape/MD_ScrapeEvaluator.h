@@ -70,6 +70,80 @@ public:
 		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells);
 
 	/**
+	 * 일반 제거 판정과 함께 헤라 경로가 각 셀에 요청한 작업량을 기록한다.
+	 *
+	 * 오염이 이미 없는 셀도 경로 기록에는 포함된다. 따라서 포화 헤라가
+	 * 깨끗한 곳을 지나갈 때도 같은 모양의 새 오염 자국을 만들 수 있다.
+	 */
+	static FMD_ScrapeResult ApplyStrokeToGridAndCaptureRequestedAmounts(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FMD_ScrapeSettings& Settings,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		TArray<float>& OutRequestedRemovalAmounts);
+
+	/**
+	 * 캡처한 헤라 경로를 새 오염 자국으로 도포한다.
+	 *
+	 * 기존 오염의 과거 상태를 복원하지 않는다. 현재 셀 값 위에
+	 * RequestedRemovalAmounts * StampRatio만큼 새 오염을 더한다.
+	 *
+	 * @return 실제로 추가된 오염량의 합계
+	 */
+	static float ApplyContaminationStampToGrid(
+		const FIntPoint& GridDimensions,
+		TConstArrayView<float> RequestedRemovalAmounts,
+		float StampRatio,
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		TArray<FMD_ScrapeCellChange>& OutCellChanges);
+
+	/**
+	 * 새 도장을 헤라의 제거 범위 뒤로 밀어, 다음 프레임 제거가 방금 묻힌
+	 * 오염을 다시 깎지 않는 안전한 도포 구간을 만든다.
+	 */
+	static bool TryBuildProtectedContaminationPaintStroke(
+		const FMD_ScrapeStroke& Stroke,
+		const FVector2D& PathStartPositionCm,
+		const FVector2D& PathAxis,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		float StampDepthCm,
+		FMD_ScrapeStroke& OutPaintStroke);
+
+	/** 보호 거리 때문에 남겨 둔 마지막 구간을 입력 종료 시 도포할 stroke로 만든다. */
+	static bool TryBuildPendingContaminationPaintStroke(
+		const FMD_ScrapeStroke& FullPathStroke,
+		const FVector2D& PathAxis,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		float StampDepthCm,
+		FMD_ScrapeStroke& OutPaintStroke);
+
+	/**
+	 * 경로 위의 무작위 지점에 헤라의 실제 접촉 모양을 페인트 도장처럼 누적한다.
+	 *
+	 * 도장 후보는 전역 표면 좌표의 고정 간격 bin에서 만들고 PatternSeed로
+	 * 선택·위치 흔들림을 결정하므로 같은 직선 경로를 여러 프레임으로 나누어도
+	 * 최종 도포 결과가 같다.
+	 */
+	static float ApplyContaminationPaintStrokeToGrid(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		float StampAmount,
+		float StampChance,
+		float StampDepthCm,
+		float StampSpacingCm,
+		int32 PatternSeed,
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		TArray<FMD_ScrapeCellChange>& OutCellChanges);
+
+	/**
 	 * ApplyStrokeToGrid를 실행할 수 있는 입력인지 부작용 없이 검사
 	 *
 	 * @param OutErrorMessage
@@ -119,6 +193,15 @@ public:
 private:
 	/** 정적 함수만 제공하는 유틸리티 클래스이므로 인스턴스 생성 금지 */
 	FMD_ScrapeEvaluator() = delete;
+
+	static FMD_ScrapeResult ApplyStrokeToGridInternal(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FMD_ScrapeSettings& Settings,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		TArray<float>* OutRequestedRemovalAmounts);
 
 	/**
 	 * 원형 헤라 브러시가 한 셀을 얼마나 덮는지 0~1 가중치로 근사
