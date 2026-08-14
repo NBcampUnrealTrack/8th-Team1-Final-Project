@@ -988,16 +988,18 @@ void UMD_MultiplayManager::HandleCreateSessionComplete(FName SessionName, bool b
         return;
     }
 
-    // 심리스 트래블은 Listen을 시작하지 않으므로 첫 트래블은 하드 트래블로 강제
-    // 최초 Listen 이동의 경우 하드 트래블으로 설정되어야만 "?listen" 옵션이 새 NetDriver를 정상 생성할 수 있다.
+    // PIE 또는 실행 옵션으로 이미 열린 Listen NetDriver에 두 번째 Listen 소켓을 생성하지 않기 위한 상태 확인
+    bool bIsAlreadyListenServer = World->GetNetMode() == ENetMode::NM_ListenServer && World->GetNetDriver() != nullptr;
+
+    // 기존 Listen 연결은 심리스 트래블로 유지하고 최초 Listen 시작만 하드 트래블로 처리하기 위한 설정
     AGameModeBase* GameMode = World->GetAuthGameMode();
     if (IsValid(GameMode) == true)
     {
-        GameMode->bUseSeamlessTravel = false;
+        GameMode->bUseSeamlessTravel = bIsAlreadyListenServer;
     }
 
-    // Session Map의 패키지 이름에 "?listen" 옵션 추가
-    FString TravelURL = FString::Printf(TEXT("%s?listen"), *SessionMapPackagePath);
+    // 아직 Listen Server가 아닌 실행에서만 새 NetDriver 생성을 요청하는 Travel URL 구성
+    FString TravelURL = bIsAlreadyListenServer == true ? SessionMapPackagePath : FString::Printf(TEXT("%s?listen"), *SessionMapPackagePath);
 
     // 현재 클라이언트를 Listen Server의 호스트로 설정된 맵 호스팅
     bool bWasTravelStarted = World->ServerTravel(TravelURL);
