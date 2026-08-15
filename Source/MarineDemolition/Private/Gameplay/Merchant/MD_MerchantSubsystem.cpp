@@ -801,15 +801,21 @@ void UMD_MerchantSubsystem::ApplyQuestReward(const FMD_QuestDefinitionData& Defi
 		return;
 	}
 
-	const int32 Payout = (Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged)
+	int32 Payout = (Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged)
 		? Definition.RewardCredits / 2
 		: Definition.RewardCredits;
 
+	// 반복 퀘스트 호감도 보상 범위에서 서버가 선택하는 0.1 단위 임의 보상
+	int32 AffinityRewardStep = FMath::RandRange(1, 2);
+	float AffinityReward = AffinityRewardStep * 0.1f;
+
 	AddCreditsInternal(Payout);
+	// 퀘스트 완료 보상이 상점 해금 범위를 벗어나지 않도록 호감도 반영
+	Affinity = FMath::Clamp(Affinity + AffinityReward, -4.0f, 5.0f);
 	++QuestCompletions;
 
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] 퀘스트 완료: %s (+%d, 누적 성공 %d)"),
-		*Definition.QuestName.ToString(), Payout, QuestCompletions);
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] 퀘스트 완료: %s (크레딧 +%d  |  호감도 +%.1f, 누적 성공 %d)"),
+		*Definition.QuestName.ToString(), Payout, AffinityReward, QuestCompletions);
 }
 
 void UMD_MerchantSubsystem::ResetContract()

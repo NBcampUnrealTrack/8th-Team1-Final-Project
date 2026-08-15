@@ -113,6 +113,9 @@ private:
 	UFUNCTION(Exec)
 	void MD_ShowCredits();
 
+	UFUNCTION(Exec)
+	void MD_AddAffinity(int32 DeltaAffinity);
+
 	//서버에서 크레딧 변경 처리
 	UFUNCTION(Server, Reliable)
 	void ServerAddCredits(int32 Amount);
@@ -142,8 +145,18 @@ public:
 	void SetGameplayHUDVisible(bool bVisible);
 
 protected:
+	// 컨트롤러 시작 이후 이미 소유된 Pawn을 기준으로 HUD를 초기화하는 진입점
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	// 플레이 상태 전환 이후 Pawn 기반 HUD를 복구하는 진입점
+	virtual void BeginPlayingState() override;
+
+	// Seamless Travel 완료 이후 새 뷰포트에 HUD를 복구하는 진입점
+	virtual void PostSeamlessTravel() override;
+
+	// 서버 소유 및 클라이언트 복제로 Pawn이 확정될 때 HUD를 초기화하는 진입점
+	virtual void SetPawn(APawn* InPawn) override;
 
 private:
 	/** Alt-Tab/창 비활성화로 입력 release를 잃기 전에 헤라 상호작용을 정리한다. */
@@ -169,6 +182,12 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetInstance;
+
+	// 로컬 플레이어의 메인 HUD와 장비 핫바를 생성하거나 화면에 복구하는 처리
+	void InitializeGameplayHUD();
+
+	// 로컬 플레이어의 헤라 Focus 포인터를 생성하거나 화면에 복구하는 처리
+	void InitializeScrapeFocusReticle();
 
 	/* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 private:

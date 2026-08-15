@@ -67,19 +67,8 @@ struct FMD_BufferedAuthoritativeScrapeAim
 	FMD_ScrapeAimQueryResult ValidatedAim;
 };
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-	FMD_OnScrapeApplied,
-	AMD_CuttableWall*,
-	Wall,
-	FMD_ScrapeResult,
-	Result);
-
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-	FMD_OnScrapeSurfaceApplied,
-	UMD_ScrapeSurfaceComponent*,
-	Surface,
-	FMD_ScrapeResult,
-	Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnScrapeApplied, AMD_CuttableWall*, Wall, FMD_ScrapeResult, Result);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnScrapeSurfaceApplied, UMD_ScrapeSurfaceComponent*, Surface, FMD_ScrapeResult, Result);
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FMD_OnScrapeLoadChanged,

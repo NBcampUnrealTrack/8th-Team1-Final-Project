@@ -173,6 +173,86 @@ void AMD_PlayerController::ServerRequestSectorCloseout_Implementation(AMD_Sector
 	Marker->TryCloseout();
 }
 
+void AMD_PlayerController::InitializeGameplayHUD()
+{
+	if (IsLocalController() == false || IsValid(GetPawn()) == false)
+	{
+		return;
+	}
+
+	if (IsValid(HUDWidgetClass) == true)
+	{
+		if (IsValid(HUDWidgetInstance) == false)
+		{
+			// Pawn 소유가 확정된 컨트롤러에 플레이어 상태를 참조할 메인 HUD 생성
+			HUDWidgetInstance = CreateWidget<UMD_HUDWidget>(this, HUDWidgetClass);
+		}
+
+		if (IsValid(HUDWidgetInstance) == true)
+		{
+			if (HUDWidgetInstance->IsInViewport() == false)
+			{
+				// 맵 전환 과정에서 화면에서 제거된 메인 HUD 재연결
+				HUDWidgetInstance->AddToViewport();
+			}
+			HUDWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		}
+	}
+
+	if (IsValid(EquipHotbarWidgetClass) == true)
+	{
+		if (IsValid(EquipHotbarWidgetInstance) == false)
+		{
+			// 소유 Pawn의 장비 상태를 참조할 핫바 생성
+			EquipHotbarWidgetInstance = CreateWidget<UMD_EquipHotbarWidget>(this, EquipHotbarWidgetClass);
+		}
+
+		if (IsValid(EquipHotbarWidgetInstance) == true)
+		{
+			if (EquipHotbarWidgetInstance->IsInViewport() == false)
+			{
+				// 맵 전환 과정에서 화면에서 제거된 핫바 재연결
+				EquipHotbarWidgetInstance->AddToViewport();
+			}
+			EquipHotbarWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
+		}
+	}
+}
+
+void AMD_PlayerController::InitializeScrapeFocusReticle()
+{
+	if (IsLocalController() == false || ScrapeFocusReticleWidgetClass == nullptr)
+	{
+		return;
+	}
+
+	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
+	{
+		ScrapeFocusReticleWidgetInstance =
+			CreateWidget<UMD_ScrapeFocusReticleWidget>(
+				this,
+				ScrapeFocusReticleWidgetClass);
+	}
+
+	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
+	{
+		return;
+	}
+
+	// 파생 Blueprint defaults와 무관하게 이 overlay 전체를 비입력형으로 고정한다.
+	ScrapeFocusReticleWidgetInstance->SetVisibility(ESlateVisibility::HitTestInvisible);
+	ScrapeFocusReticleWidgetInstance->SetIsFocusable(false);
+	ScrapeFocusReticleWidgetInstance->ForceVolatile(true);
+
+	// Seamless Travel에서 유효한 위젯이 기존 viewport에서 제거된 경우에도 복구한다.
+	if (ScrapeFocusReticleWidgetInstance->IsInViewport() == false)
+	{
+		// Owning local player 영역에만 붙여 split-screen이나 다중 local player에서도
+		// 다른 플레이어의 normalized 좌표/입력을 시각화하지 않는다.
+		ScrapeFocusReticleWidgetInstance->AddToPlayerScreen(1000);
+	}
+}
+
 void AMD_PlayerController::MD_ApplyTestDamage()
 {
 	ServerApplyTestDamage();
@@ -270,6 +350,14 @@ void AMD_PlayerController::MD_ShowCredits()
 	UE_LOG(LogTemp, Log, TEXT("[Merchant][%s] Credits = %d"),HasAuthority() ? TEXT("Server") : TEXT("Client"),Merchant->GetCredits());
 }
 
+void AMD_PlayerController::MD_AddAffinity(int32 DeltaAffinity)
+{
+	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	{
+		Merchant->AddAffinity(DeltaAffinity);
+	}
+}
+
 void AMD_PlayerController::ServerAddCredits_Implementation(int32 Amount)
 {
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
@@ -303,8 +391,9 @@ void AMD_PlayerController::MD_DumpQuests()
 void AMD_PlayerController::BeginPlay()
 {
 	Super::BeginPlay();
+	InitializeGameplayHUD();
 
-	if (!IsLocalController())
+	if (IsLocalController() == false)
 	{
 		return;
 	}
@@ -317,57 +406,35 @@ void AMD_PlayerController::BeginPlay()
 				&AMD_PlayerController::HandleApplicationWillDeactivate);
 	}
 
-	if (ScrapeFocusReticleWidgetClass && !IsValid(ScrapeFocusReticleWidgetInstance))
+	InitializeScrapeFocusReticle();
+}
+
+void AMD_PlayerController::BeginPlayingState()
+{
+	Super::BeginPlayingState();
+
+	InitializeGameplayHUD();
+	InitializeScrapeFocusReticle();
+}
+
+void AMD_PlayerController::PostSeamlessTravel()
+{
+	Super::PostSeamlessTravel();
+
+	InitializeGameplayHUD();
+	InitializeScrapeFocusReticle();
+}
+
+void AMD_PlayerController::SetPawn(APawn* InPawn)
+{
+	Super::SetPawn(InPawn);
+
+	if (HasActorBegunPlay() == true)
 	{
-		ScrapeFocusReticleWidgetInstance =
-			CreateWidget<UMD_ScrapeFocusReticleWidget>(
-				this,
-				ScrapeFocusReticleWidgetClass);
-		if (IsValid(ScrapeFocusReticleWidgetInstance))
-		{
-			// 파생 Blueprint defaults와 무관하게 이 overlay 전체를 비입력형으로 고정한다.
-			ScrapeFocusReticleWidgetInstance->SetVisibility(
-				ESlateVisibility::HitTestInvisible);
-			ScrapeFocusReticleWidgetInstance->SetIsFocusable(false);
-			ScrapeFocusReticleWidgetInstance->ForceVolatile(true);
-			// Owning local player 영역에만 붙여 split-screen이나 다중 local player에서도
-			// 다른 플레이어의 normalized 좌표/입력을 시각화하지 않는다.
-			ScrapeFocusReticleWidgetInstance->AddToPlayerScreen(1000);
-		}
+		// 최초 스폰과 재스폰 모두 Pawn 지정이 끝난 뒤 HUD를 보장하는 처리
+		InitializeGameplayHUD();
+		InitializeScrapeFocusReticle();
 	}
-
-	if (!HUDWidgetClass)
-	{
-		return;
-	}
-
-	if (IsValid(HUDWidgetInstance))
-	{
-		return;
-	}
-
-	HUDWidgetInstance = CreateWidget<UMD_HUDWidget>(this, HUDWidgetClass);
-
-	if (!IsValid(HUDWidgetInstance))
-	{
-		return;
-	}
-
-	HUDWidgetInstance->AddToViewport();
-
-	if (!EquipHotbarWidgetClass || IsValid(EquipHotbarWidgetInstance))
-	{
-		return;
-	}
-
-	EquipHotbarWidgetInstance = CreateWidget<UMD_EquipHotbarWidget>(this, EquipHotbarWidgetClass);
-
-	if (!IsValid(EquipHotbarWidgetInstance))
-	{
-		return;
-	}
-
-	EquipHotbarWidgetInstance->AddToViewport();
 }
 
 void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
