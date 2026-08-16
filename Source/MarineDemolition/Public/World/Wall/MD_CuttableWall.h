@@ -186,13 +186,10 @@ private:
 
 	void SyncLegacySurfaceConfiguration();
 
-	void RestoreScanColor();
-
 	UFUNCTION()
 	void OnRep_CutProgress();
 
 	bool bCut = false;
-	FTimerHandle ScanTimerHandle;
 
 	//  누적 절단 시간. 감소하지 않으며 Day 간에도 유지된다 (기획 §3)
 	UPROPERTY(ReplicatedUsing = OnRep_CutProgress)
