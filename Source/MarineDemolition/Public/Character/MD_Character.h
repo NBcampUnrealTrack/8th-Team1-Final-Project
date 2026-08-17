@@ -116,6 +116,7 @@ protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+	virtual void Tick(float DeltaSeconds) override;
 
 	virtual void OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode) override;
 
@@ -125,6 +126,7 @@ protected:
 
 	virtual void OnRep_PlayerState() override;
 	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
+	virtual void OnRep_Controller() override;
 public:
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
@@ -135,8 +137,28 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UCameraComponent> Camera;
 
+	/**
+	 * 1인칭 팔 전용 피벗. Camera가 아니라 캡슐에 붙어 있고 매 프레임 조준 회전을 따라간다.
+	 * 덕분에 Camera 위치·회전을 팔과 독립적으로 조정할 수 있다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<USceneComponent> FirstPersonArmsPivot;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USkeletalMeshComponent> FirstPersonMesh;
+
+	/** 조준 기준점에서 팔을 얼마나 띄울지. 조준 방향 기준 (X=앞, Y=오른쪽, Z=위). */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "MD|FirstPerson")
+	FVector FirstPersonArmsOffset = FVector::ZeroVector;
+
+	/** 팔에 추가로 줄 회전. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "MD|FirstPerson")
+	FRotator FirstPersonArmsRotationOffset = FRotator::ZeroRotator;
+
+	/** 팔이 조준을 따라가는 속도. 0이면 지연 없이 즉시 붙고, 값이 작을수록 스웨이가 커진다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "MD|FirstPerson",
+		meta = (ClampMin = "0.0", UIMin = "0.0"))
+	float FirstPersonArmsFollowSpeed = 0.f;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_ScrapeToolComponent> ScrapeToolComponent;
@@ -157,6 +179,15 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
 	FName ToolAttachSocketName = TEXT("ToolSocket");
+
+	/**
+	 * 도구 스태틱 메시에서 손에 닿을 지점을 표시하는 소켓 이름.
+	 * 이 소켓이 있으면 그 지점이 캐릭터 손 소켓에 오도록 도구를 배치하므로,
+	 * 메시 에디터에서 소켓을 옮기는 것만으로 잡는 위치가 바뀐다.
+	 * 소켓이 없는 도구는 예전처럼 메시 원점이 손에 온다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
+	FName ToolGripSocketName = TEXT("Grip_R");
 
 	/** 모든 물리 픽업이 공유하는 운반 기준점. Camera에 부착되며 대상별 배치는 GetHoldOffset()으로 조정한다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -257,6 +288,22 @@ private:
 
 	bool IsScrapeToolEquipped() const;
 	UEnhancedInputLocalPlayerSubsystem* GetEnhancedInputSubsystem() const;
+
+	/**
+	 * 도구 메시의 그립 소켓이 손 소켓 원점에 오도록 하는 상대 트랜스폼.
+	 * 그립 소켓이 없으면 Tool의 AttachOffset을 그대로 돌려준다.
+	 */
+	FTransform GetToolAttachTransform(
+		const UStaticMesh* ToolMesh,
+		const UMD_ToolDefinition* Tool) const;
+
+	/** 1인칭 팔은 소유 클라이언트에만 보이므로 그 경우에만 틱한다. */
+	void RefreshFirstPersonArmsTick();
+
+	/** 1인칭 팔이 3인칭 메시의 포즈를 따라가도록 Leader Pose를 건다. */
+	void BindFirstPersonArmsToBodyPose();
+
+	void UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget = false);
 
 private:
 	UFUNCTION()

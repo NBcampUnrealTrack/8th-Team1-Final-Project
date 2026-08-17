@@ -48,7 +48,8 @@ namespace
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer.SetDefaultSubobjectClass<UMD_CharacterMovementComponent>(ACharacter::CharacterMovementComponentName))
 {
-	PrimaryActorTick.bCanEverTick = false;
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.bStartWithTickEnabled = false;
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -69,8 +70,13 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	GetMesh()->SetOwnerNoSee(true);
 	GetMesh()->SetOnlyOwnerSee(false);
 
+	// 팔은 Camera가 아니라 별도 피벗에 붙는다. Camera 시점을 팔과 따로 잡기 위해서다.
+	FirstPersonArmsPivot = CreateDefaultSubobject<USceneComponent>(TEXT("FirstPersonArmsPivot"));
+	FirstPersonArmsPivot->SetupAttachment(GetCapsuleComponent());
+	FirstPersonArmsPivot->SetRelativeLocation(FVector(0.f, 0.f, BaseEyeHeight));
+
 	FirstPersonMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("FirstPersonMesh"));
-	FirstPersonMesh->SetupAttachment(Camera);
+	FirstPersonMesh->SetupAttachment(FirstPersonArmsPivot);
 	FirstPersonMesh->SetOnlyOwnerSee(true);
 	FirstPersonMesh->SetOwnerNoSee(false);
 	FirstPersonMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -400,6 +406,8 @@ void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
 
+	RefreshFirstPersonArmsTick();
+
 	// 사다리 진입과 이탈을 캐릭터 캡슐 기준으로 감지하기 위한 델리게이트 연결
 	UCapsuleComponent* CharacterCapsule = GetCapsuleComponent();
 	if (IsValid(CharacterCapsule) == true)
@@ -450,6 +458,73 @@ void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void AMD_Character::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+
+	UpdateFirstPersonArms(DeltaSeconds);
+}
+
+void AMD_Character::RefreshFirstPersonArmsTick()
+{
+	const bool bNeedsTick = IsLocallyControlled();
+	SetActorTickEnabled(bNeedsTick);
+
+	if (!bNeedsTick)
+	{
+		return;
+	}
+
+	BindFirstPersonArmsToBodyPose();
+	UpdateFirstPersonArms(0.f, /*bSnapToTarget=*/true);
+}
+
+void AMD_Character::BindFirstPersonArmsToBodyPose()
+{
+	USkeletalMeshComponent* BodyMesh = GetMesh();
+	if (!IsValid(FirstPersonMesh) || !IsValid(BodyMesh))
+	{
+		return;
+	}
+
+	// 1인칭 팔은 자체 AnimBP 없이 3인칭 메시의 포즈를 그대로 따라간다(본 이름이 동일).
+	// BP 그래프의 SetLeaderPoseComponent에만 의존하면 BP를 되돌릴 때 조용히 끊긴다.
+	if (FirstPersonMesh->LeaderPoseComponent != BodyMesh)
+	{
+		FirstPersonMesh->SetLeaderPoseComponent(BodyMesh);
+	}
+}
+
+void AMD_Character::UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget)
+{
+	if (!IsValid(FirstPersonArmsPivot) || !IsValid(Camera) || !IsLocallyControlled())
+	{
+		return;
+	}
+
+	const FRotator TargetRotation = GetControlRotation() + FirstPersonArmsRotationOffset;
+	const FVector TargetLocation =
+		Camera->GetComponentLocation() + TargetRotation.RotateVector(FirstPersonArmsOffset);
+
+	// 리스폰·텔레포트로 멀리 튀었을 때 팔이 월드를 가로질러 날아오지 않게 끊어서 붙인다.
+	static constexpr float SnapDistanceSq = 200.f * 200.f;
+	const bool bSnap = bSnapToTarget
+		|| FirstPersonArmsFollowSpeed <= 0.f
+		|| FVector::DistSquared(FirstPersonArmsPivot->GetComponentLocation(), TargetLocation) > SnapDistanceSq;
+
+	if (bSnap)
+	{
+		FirstPersonArmsPivot->SetWorldLocationAndRotation(TargetLocation, TargetRotation);
+		return;
+	}
+
+	FirstPersonArmsPivot->SetWorldLocationAndRotation(
+		FMath::VInterpTo(FirstPersonArmsPivot->GetComponentLocation(), TargetLocation,
+			DeltaSeconds, FirstPersonArmsFollowSpeed),
+		FMath::RInterpTo(FirstPersonArmsPivot->GetComponentRotation(), TargetRotation,
+			DeltaSeconds, FirstPersonArmsFollowSpeed));
 }
 
 void AMD_Character::OnMovementModeChanged(EMovementMode PrevMovementMode, uint8 PreviousCustomMode)
@@ -511,6 +586,7 @@ void AMD_Character::PossessedBy(AController* NewController)
 
 	InitializeAbilitySystem();
 	GrantDefaultAbilities();
+	RefreshFirstPersonArmsTick();
 }
 
 void AMD_Character::UnPossessed()
@@ -523,6 +599,8 @@ void AMD_Character::UnPossessed()
 	}
 
 	Super::UnPossessed();
+
+	RefreshFirstPersonArmsTick();
 }
 
 void AMD_Character::PawnClientRestart()
@@ -559,6 +637,13 @@ void AMD_Character::CalcCamera(
 	{
 		ScrapeToolComponent->ApplyScrapeFocusCameraView(OutResult);
 	}
+}
+
+void AMD_Character::OnRep_Controller()
+{
+	Super::OnRep_Controller();
+
+	RefreshFirstPersonArmsTick();
 }
 
 // Called to bind functionality to input
@@ -1288,12 +1373,9 @@ void AMD_Character::RefreshToolMesh()
 		FAttachmentTransformRules::SnapToTargetIncludingScale,
 		FirstPersonSocketName);
 
-	// 스냅 후 도구별 오프셋을 양쪽 시점의 전체 도구 메시에도 동일하게 적용한다.
 	const FTransform AttachOffset = IsValid(CurrentTool)
 		? CurrentTool->AttachOffset
 		: FTransform::Identity;
-	ThirdPersonToolMesh->SetRelativeTransform(AttachOffset);
-	FirstPersonToolMesh->SetRelativeTransform(AttachOffset);
 	ScrapeAnimationToolRelativeRotation = AttachOffset.Rotator();
 	ScrapeAnimationBladeReferenceDirection = FVector::ZeroVector;
 	ScrapeAnimationToolTwistAxis = FVector::ZeroVector;
@@ -1301,6 +1383,9 @@ void AMD_Character::RefreshToolMesh()
 	LastScrapeAnimationBladeWorldDirection = FVector::ZeroVector;
 	bHasScrapeAnimationBladeDirection = false;
 
+	// 상대 트랜스폼 자체는 RefreshScrapeLoadVisual 에서 준다. 오염 적재 단계에 따라
+	// 메시가 바뀌는데, 그립 소켓은 메시마다 다를 수 있어 최종 메시가 정해진 뒤에
+	// 계산해야 한다.
 	RefreshScrapeLoadVisual();
 }
 
@@ -1350,6 +1435,38 @@ void AMD_Character::RefreshScrapeLoadVisual()
 	FirstPersonToolMesh->SetVisibility(bShowTool && bHasFirstPersonSocket, true);
 	ThirdPersonToolMesh->SetStaticMesh(NewToolMesh);
 	ThirdPersonToolMesh->SetVisibility(bShowTool && bHasThirdPersonSocket, true);
+
+	const FTransform ToolTransform = GetToolAttachTransform(NewToolMesh, CurrentTool);
+	FirstPersonToolMesh->SetRelativeTransform(ToolTransform);
+	ThirdPersonToolMesh->SetRelativeTransform(ToolTransform);
+}
+
+FTransform AMD_Character::GetToolAttachTransform(
+	const UStaticMesh* ToolMesh,
+	const UMD_ToolDefinition* Tool) const
+{
+	const FTransform Offset = IsValid(Tool) ? Tool->AttachOffset : FTransform::Identity;
+
+	if (!IsValid(ToolMesh) || ToolGripSocketName.IsNone())
+	{
+		return Offset;
+	}
+
+	const UStaticMeshSocket* Grip = ToolMesh->FindSocket(ToolGripSocketName);
+	if (Grip == nullptr)
+	{
+		// 그립 소켓이 없는 도구는 예전처럼 원점이 손에 온다.
+		return Offset;
+	}
+
+	// 메시 로컬의 그립 지점이 손 소켓 원점에 오도록 역변환한다. 그래야 메시
+	// 에디터에서 소켓을 끌어 옮기는 것만으로 잡는 위치가 바뀐다. AttachOffset 은
+	// 그 위에 얹는 미세 조정으로 남는다.
+	//
+	// 소켓 스케일은 일부러 무시한다. 역변환에 넣으면 소켓을 키웠을 때 도구가
+	// 반대로 작아져서 조작이 직관과 어긋난다. 크기는 AttachOffset 으로 준다.
+	const FTransform GripLocal(Grip->RelativeRotation, Grip->RelativeLocation);
+	return GripLocal.Inverse() * Offset;
 }
 
 void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
