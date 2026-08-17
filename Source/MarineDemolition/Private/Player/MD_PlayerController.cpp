@@ -24,6 +24,7 @@
 #include "Engine/GameInstance.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Misc/CoreDelegates.h"
+#include "Online/Session/MD_MultiplayManager.h"
 
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
@@ -97,11 +98,22 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 		return;
 	}
 
-	// 난이도는 URL 옵션으로 실어 보낸다. 도착 맵 GameMode가 InitGame에서 ParseOption으로 받는다
-	const FString TravelURL = FString::Printf(
-		TEXT("%s?listen?Difficulty=%d"), *MapPackage, static_cast<int32>(Difficulty));
+	// 네트워크로 전달된 난이도 값이 정의된 계약 범위를 벗어나지 않도록 하는 서버 검증
+	if (Difficulty < EMD_Difficulty::Safe || Difficulty > EMD_Difficulty::Extreme)
+	{
+		return;
+	}
 
-	GetWorld()->ServerTravel(TravelURL);
+	UGameInstance* GameInstance = GetGameInstance();
+	UMD_MultiplayManager* MultiplayManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MultiplayManager>() : nullptr;
+	if (IsValid(MultiplayManager) == false)
+	{
+		return;
+	}
+
+	// 난이도는 URL 옵션으로 전달하고 Session 갱신과 ServerTravel 실행은 MultiplayManager에 위임하는 처리
+	FString TravelOptions = FString::Printf(TEXT("?listen?Difficulty=%d"), static_cast<int32>(Difficulty));
+	MultiplayManager->StartSessionByMap(MapPackage, TravelOptions);
 }
 
 void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole* Console)

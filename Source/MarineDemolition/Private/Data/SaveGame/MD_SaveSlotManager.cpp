@@ -125,13 +125,10 @@ bool UMD_SaveSlotManager::SaveGameData(const FString& DataName, bool bIsAuto)
 	// 세이브 파일 저장
 	bool bSaveSuccessful = UGameplayStatics::SaveGameToSlot(MD_Game, GameSaveFileName, 0);
 
-	if (bSaveSuccessful == true)
+	if (bSaveSuccessful == true && bIsAuto == true)
 	{
-		LatestSavedGameData = MakeShared<FMD_GameData>(*TemporaryGameData);
-		if (bIsAuto == true)
-		{
-			AutoSaveIndex = (AutoSaveIndex + 1) % MaxAutoSaveSlotCount;
-		}
+		AutoSaveIndex = (AutoSaveIndex + 1) % MaxAutoSaveSlotCount;
+
 	}
 
 	return bSaveSuccessful;
@@ -336,6 +333,12 @@ void UMD_SaveSlotManager::AsyncLoadAllGameDataList(const FOnLoadMDGameDataListCo
 
 bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 {
+	bool bWasApplied = ApplyGameDataToWorldInternal(GameData, true);
+	return bWasApplied;
+}
+
+bool UMD_SaveSlotManager::ApplyGameDataToWorldInternal(const FMD_GameData& GameData, bool bRequireSavedSlotIdentity)
+{
 	// 클라이언트가 저장 데이터를 자신의 World에 적용하지 못하도록 하는 권한 제한
 	if (HasServerAuthority() == false)
 	{
@@ -345,6 +348,11 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 
 	// 구버전 슬롯을 현재 필드 스키마로 승격하고 모든 필수 데이터가 유효할 때만 적용하기 위한 복사
 	FMD_GameData MigratedGameData = GameData;
+	if (bRequireSavedSlotIdentity == false && MigratedGameData.UniqueName.IsEmpty() == true)
+	{
+		// 저장되지 않은 현재 회차도 저장 슬롯과 동일한 구조 검증을 재사용하기 위한 임시 식별자
+		MigratedGameData.UniqueName = TEXT("TemporaryGameData");
+	}
 	if (MigratedGameData.MigrateToCurrentVersion() == false || MigratedGameData.IsValidForLoad() == false)
 	{
 		UE_LOG(MarineDemolition, Error, TEXT("%s 손상되었거나 지원하지 않는 게임 데이터의 적용을 거부합니다."), *UE_CALL_LOCATIONINFO);
@@ -377,8 +385,12 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 
 	// 필수 데이터 필드의 누락이나 타입 불일치로 인한 불완전한 복원을 방지하기 위한 검사
 	FMD_GameStateData GameStateData;
+	if (MigratedGameData.GetDataField(FMD_GameStateData::DataFieldKey, GameStateData) == false)
+	{
+		return false;
+	}
 	FMD_MerchantData MerchantData;
-	if (MigratedGameData.GetDataField(FMD_GameStateData::DataFieldKey, GameStateData) == false || MigratedGameData.GetDataField(FMD_MerchantData::DataFieldKey, MerchantData) == false)
+	if (MigratedGameData.GetDataField(FMD_MerchantData::DataFieldKey, MerchantData) == false)
 	{
 		return false;
 	}
@@ -447,9 +459,8 @@ bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 		OverwriteDataToPlayerInternal(PlayerState, MigratedGameData);
 	}
 
-	// 이후 접속하거나 Pawn이 교체된 플레이어도 같은 개인 데이터를 사용하도록 활성 슬롯 유지
+	// 이후 접속하거나 Pawn이 교체된 플레이어도 같은 개인 데이터를 사용하도록 현재 회차 데이터 유지
 	TemporaryGameData = MakeShared<FMD_GameData>(MigratedGameData);
-	LatestSavedGameData = MakeShared<FMD_GameData>(MigratedGameData);
 
 	return true;
 }
@@ -513,8 +524,10 @@ bool UMD_SaveSlotManager::LoadPlayerData(const APlayerState* PlayerState) const
 	return bOverwriteSuccess;
 }
 
-bool UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameData)
+bool UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameData, bool bLoadGame, FString& OutMapPackagePath)
 {
+	OutMapPackagePath.Reset();
+
 	// 클라이언트가 로드할 데이터를 독립적으로 예약하지 못하도록 하는 권한 제한
 	if (HasServerAuthority() == false)
 	{
@@ -522,27 +535,56 @@ bool UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameDat
 		return false;
 	}
 
-	// 이름이 없는 입력은 새 게임으로 예약하고 선택 슬롯은 마이그레이션 검증 이후에만 예약하는 처리
-	if (GameData.UniqueName.IsEmpty() == true)
+	// 불러오기 버튼에서 전달한 저장 데이터만 선택 데이터로 보관하는 처리
+	if (bLoadGame == true)
 	{
-		FMD_GameData NewGameData = GameData;
-		NewGameData.SchemaVersion = FMD_GameData::CurrentSchemaVersion;
-		PendingGameDataOperation = EMD_PendingGameDataOperation::NewGame;
-		TemporaryGameData = MakeShared<FMD_GameData>(MoveTemp(NewGameData));
+		SelectedLoadGameData.Reset();
+
+		FMD_GameData MigratedGameData = GameData;
+		if (MigratedGameData.MigrateToCurrentVersion() == false || MigratedGameData.IsValidForLoad() == false)
+		{
+			UE_LOG(MarineDemolition, Error, TEXT("%s 시작할 저장 데이터가 손상되었거나 지원하지 않는 버전입니다."), *UE_CALL_LOCATIONINFO);
+			PendingGameDataOperation = EMD_PendingGameDataOperation::None;
+			return false;
+		}
+
+		SelectedLoadGameData = MakeShared<FMD_GameData>(MoveTemp(MigratedGameData));
+		PendingGameDataOperation = EMD_PendingGameDataOperation::LoadGame;
+		OutMapPackagePath = SelectedLoadGameData->MapPackagePath;
 		return true;
 	}
 
-	FMD_GameData MigratedGameData = GameData;
-	if (MigratedGameData.MigrateToCurrentVersion() == false || MigratedGameData.IsValidForLoad() == false)
+	// MultiplayManager가 Session 시작과 맵 이동에 사용할 요청 경로를 직접 반환하는 처리
+	OutMapPackagePath = GameData.MapPackagePath;
+
+	// 저장 전 현재 회차 데이터가 남아 있으면 새 게임을 만들지 않고 이어하기로 예약하는 처리
+	if (TemporaryGameData.IsValid() == true)
 	{
-		UE_LOG(MarineDemolition, Error, TEXT("%s 시작할 저장 데이터가 손상되었거나 지원하지 않는 버전입니다."), *UE_CALL_LOCATIONINFO);
-		ResetTemporaryGameData();
-		return false;
+		PendingGameDataOperation = EMD_PendingGameDataOperation::ContinueGame;
+		return true;
 	}
 
-	PendingGameDataOperation = EMD_PendingGameDataOperation::LoadGame;
-	TemporaryGameData = MakeShared<FMD_GameData>(MoveTemp(MigratedGameData));
+	// 현재 회차가 없는 일반 시작 요청만 기존 데이터 변경 없이 새 게임으로 예약하는 처리
+	PendingGameDataOperation = EMD_PendingGameDataOperation::NewGame;
 	return true;
+}
+
+bool UMD_SaveSlotManager::HasTemporaryGameData() const
+{
+	bool bHasTemporaryGameData = TemporaryGameData.IsValid() == true;
+	return bHasTemporaryGameData;
+}
+
+void UMD_SaveSlotManager::CancelPendingGameDataOperation()
+{
+	// 실패한 불러오기 선택 데이터가 다음 시작 요청에 적용되지 않도록 하는 정리
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::LoadGame)
+	{
+		SelectedLoadGameData.Reset();
+	}
+
+	PendingGameDataOperation = EMD_PendingGameDataOperation::None;
+	return;
 }
 
 void UMD_SaveSlotManager::ResetTemporaryGameData()
@@ -562,7 +604,7 @@ bool UMD_SaveSlotManager::ApplyPendingGameDataOperation()
 	}
 
 	// 보류 작업이 없는 일반 맵 시작을 변경하지 않기 위한 실행 제한
-	if (PendingGameDataOperation == EMD_PendingGameDataOperation::None || TemporaryGameData.IsValid() == false)
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::None)
 	{
 		return false;
 	}
@@ -571,8 +613,22 @@ bool UMD_SaveSlotManager::ApplyPendingGameDataOperation()
 	UWorld* World = GetWorld();
 	UPackage* WorldPackage = IsValid(World) == true ? World->GetPackage() : nullptr;
 	FString CurrentMapPackagePath = IsValid(WorldPackage) == true ? UWorld::RemovePIEPrefix(WorldPackage->GetName()) : TEXT("");
-	if (IsValid(World) == false || CurrentMapPackagePath != TemporaryGameData->MapPackagePath)
+	if (IsValid(World) == false)
 	{
+		return false;
+	}
+
+	// 불러오기는 선택한 저장 데이터가 수집된 맵에 도착한 경우에만 적용하기 위한 검사
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::LoadGame && (SelectedLoadGameData.IsValid() == false || CurrentMapPackagePath != SelectedLoadGameData->MapPackagePath))
+	{
+		CancelPendingGameDataOperation();
+		return false;
+	}
+
+	// 이어하기는 이전 맵과 관계없이 현재 회차 데이터가 존재할 때만 적용하기 위한 검사
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::ContinueGame && TemporaryGameData.IsValid() == false)
+	{
+		CancelPendingGameDataOperation();
 		return false;
 	}
 
@@ -584,24 +640,39 @@ bool UMD_SaveSlotManager::ApplyPendingGameDataOperation()
 		DayPersistence->ClearSnapshot();
 	}
 
-	if (PendingGameDataOperation == EMD_PendingGameDataOperation::NewGame && TemporaryGameData.IsValid() == true)
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::NewGame)
 	{
-		bool bCollectingSuccess = CollectGameData();
-		if (bCollectingSuccess == false)
-		{
-			return false;
-		}
+		// 저장 시점 전에는 World 데이터를 수집하지 않고 현재 회차 식별 정보만 생성하는 처리
+		FMD_GameData NewGameData;
+		NewGameData.SchemaVersion = FMD_GameData::CurrentSchemaVersion;
+		NewGameData.MapPackagePath = CurrentMapPackagePath;
+		TemporaryGameData = MakeShared<FMD_GameData>(MoveTemp(NewGameData));
 
-		LatestSavedGameData.Reset();
 		PendingGameDataOperation = EMD_PendingGameDataOperation::None;
 
 		return true;
 	}
 
-	// 불러오기 목적지의 서버 상태와 접속 플레이어에게 선택한 저장 데이터를 적용하는 처리
-	if (PendingGameDataOperation == EMD_PendingGameDataOperation::LoadGame && TemporaryGameData.IsValid() == true)
+	// 로비에서 보존한 현재 회차 데이터를 목적지 게임 맵에 적용하는 처리
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::ContinueGame && TemporaryGameData.IsValid() == true)
 	{
-		bool bWasApplied = LoadGameDataToWorld(*TemporaryGameData);
+		// 이전 출항의 파괴와 오염 상태를 목적지 맵에 적용하지 않도록 현재 회차 데이터의 복사본을 구성하는 처리
+		FMD_GameData ContinueGameData = *TemporaryGameData;
+		ContinueGameData.DataFields.Remove(FMD_WorldData::DataFieldKey);
+		ContinueGameData.MapPackagePath = CurrentMapPackagePath;
+
+		bool bWasApplied = ApplyGameDataToWorldInternal(ContinueGameData, false);
+		if (bWasApplied == true)
+		{
+			PendingGameDataOperation = EMD_PendingGameDataOperation::None;
+			return true;
+		}
+	}
+
+	// 불러오기 목적지의 서버 상태와 접속 플레이어에게 선택한 저장 데이터를 적용하는 처리
+	if (PendingGameDataOperation == EMD_PendingGameDataOperation::LoadGame && SelectedLoadGameData.IsValid() == true)
+	{
+		bool bWasApplied = LoadGameDataToWorld(*SelectedLoadGameData);
 		if (bWasApplied == true)
 		{
 			PendingGameDataOperation = EMD_PendingGameDataOperation::None;
@@ -610,7 +681,7 @@ bool UMD_SaveSlotManager::ApplyPendingGameDataOperation()
 	}
 
 	// 손상된 보류 상태가 다음 맵까지 유지되지 않도록 하는 실패 정리
-	ResetTemporaryGameData();
+	CancelPendingGameDataOperation();
 
 	return false;
 }
@@ -835,9 +906,6 @@ void UMD_SaveSlotManager::HandleLoadGameToSaveDataComplete(const FString& Loaded
 
 			if (bWasSuccessful == true)
 			{
-				// 저장 완료 시점까지 유지된 요청 스냅샷을 최근 저장 데이터로 확정하는 처리
-				LatestSavedGameData = MakeShared<FMD_GameData>(CollectedGameData);
-
 				if (bIsAuto == true)
 				{
 					AutoSaveIndex = (AutoSaveIndex + 1) % MaxAutoSaveSlotCount;

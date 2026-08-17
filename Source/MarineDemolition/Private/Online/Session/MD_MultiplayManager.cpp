@@ -42,6 +42,9 @@ void UMD_MultiplayManager::Deinitialize()
         // Session 시작 완료에 대한 이벤트 연결 해제
         SessionInterface->OnStartSessionCompleteDelegates.RemoveAll(this);
 
+        // Session 설정 갱신 완료에 대한 이벤트 연결 해제
+        SessionInterface->OnUpdateSessionCompleteDelegates.RemoveAll(this);
+
         // Session 종료 완료에 대한 이벤트 연결 해제
         SessionInterface->OnEndSessionCompleteDelegates.RemoveAll(this);
 
@@ -93,22 +96,13 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
     CreateSessionInternal(ServerName, MaxPlayerCount, SessionCreateParams);
 }
 
-void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData)
+void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData, bool bLoadGame)
 {
     // 클라이언트 환경 실행 제한
     UWorld* World = GetWorld();
     if (IsValid(World) == false || World->GetNetMode() == ENetMode::NM_Client)
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작은 Host 또는 Server에서만 실행할 수 있습니다."), *UE_CALL_LOCATIONINFO);
-
-        OnStartGameComplete.Broadcast(false);
-        return;
-    }
-
-    // 잘못된 에셋이나 일반 에셋 패키지로 게임 시작을 요청하지 못하도록 맵 경로를 먼저 검증합니다.
-    if (IsValidMapPackagePath(GameData.MapPackagePath) == false)
-    {
-        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작에 사용할 맵 패키지 경로가 유효하지 않습니다: %s"), *UE_CALL_LOCATIONINFO, *GameData.MapPackagePath);
 
         OnStartGameComplete.Broadcast(false);
         return;
@@ -125,8 +119,9 @@ void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData)
         return;
     }
 
-    // 새 게임 또는 저장 데이터 적용 작업이 준비된 경우에만 세션 시작 절차로 진입하는 처리
-    const bool bWasGameDataPrepared = SaveSlotManager->OnTryStartGameWithGameData(GameData);
+    // 불러오기 여부와 현재 진행 데이터 존재 여부에 맞는 시작 작업과 목적지 맵을 준비하는 처리
+    FString GameMapPackagePath;
+    const bool bWasGameDataPrepared = SaveSlotManager->OnTryStartGameWithGameData(GameData, bLoadGame, GameMapPackagePath);
     if (bWasGameDataPrepared == false)
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 검증 실패로 세션 시작을 취소합니다."), *UE_CALL_LOCATIONINFO);
@@ -134,7 +129,52 @@ void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData)
         return;
     }
 
-    StartGameInternal(GameData.MapPackagePath);
+    // SaveSlotManager가 결정한 시작 방식의 맵이 실제 World 패키지인지 확인하는 처리
+    if (IsValidMapPackagePath(GameMapPackagePath) == false)
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작에 사용할 맵 패키지 경로가 유효하지 않습니다: %s"), *UE_CALL_LOCATIONINFO, *GameMapPackagePath);
+
+        SaveSlotManager->CancelPendingGameDataOperation();
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    StartSessionInternal(GameMapPackagePath, GameMapPackagePath);
+}
+
+void UMD_MultiplayManager::StartSessionByMap(const FString& MapPackagePath, const FString& TravelOptions)
+{
+    // 클라이언트가 호스트의 Session 상태와 전체 접속자의 이동을 변경하지 못하도록 하는 실행 환경 검사
+    UWorld* World = GetWorld();
+    if (IsValid(World) == false || World->GetNetMode() == ENetMode::NM_Client)
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 지정 맵 Session 시작은 Host 또는 Server에서만 실행할 수 있습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    // Session 광고와 ServerTravel에 동일한 실제 World 패키지를 사용하기 위한 경로 검사
+    if (IsValidMapPackagePath(MapPackagePath) == false)
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 지정 맵 Session 시작에 사용할 맵 패키지 경로가 유효하지 않습니다: %s"), *UE_CALL_LOCATIONINFO, *MapPackagePath);
+
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 목적지 맵을 바꾸거나 콘솔 명령 경계를 벗어나는 문자열이 URL 옵션으로 전달되지 않도록 하는 형식 검사
+    if (TravelOptions.IsEmpty() == false && (TravelOptions.StartsWith(TEXT("?")) == false || TravelOptions.Contains(TEXT("\r")) == true || TravelOptions.Contains(TEXT("\n")) == true || TravelOptions.Contains(TEXT(" ")) == true))
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 지정 맵 Session 시작에 사용할 Travel 옵션이 유효하지 않습니다: %s"), *UE_CALL_LOCATIONINFO, *TravelOptions);
+
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 검증된 목적지 패키지 뒤에 게임 규칙 전달용 URL 옵션만 결합하는 처리
+    FString TravelURL = FString::Printf(TEXT("%s%s"), *MapPackagePath, *TravelOptions);
+    StartSessionInternal(MapPackagePath, TravelURL);
 }
 
 void UMD_MultiplayManager::EndSession(const FString& MapPackagePath)
@@ -357,7 +397,7 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
         UE_LOG(MarineDemolition, Warning, TEXT("%s 현재 참여하거나 호스팅 중인 GameSession이 없습니다."), *UE_CALL_LOCATIONINFO);
 
         // Destroy Session 성공 이벤트 실행 (삭제할 Session이 존재하지 않음)
-        OnDestroySessionComplete.Broadcast(false);
+        OnDestroySessionComplete.Broadcast(true);
         return;
     }
 
@@ -730,7 +770,7 @@ void UMD_MultiplayManager::JoinSessionInternal(const FOnlineSessionSearchResult&
     }
 }
 
-void UMD_MultiplayManager::StartGameInternal(const FString& MapPackagePath)
+void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath, const FString& TravelURL)
 {
     // 잘못된 에셋이나 일반 에셋 패키지를 대상으로 한 게임 시작 방지
     if (IsValidMapPackagePath(MapPackagePath) == false)
@@ -777,23 +817,140 @@ void UMD_MultiplayManager::StartGameInternal(const FString& MapPackagePath)
         return;
     }
 
-    // Online Subsystem의 Session 모듈에 이벤트 등록
-    FOnStartSessionCompleteDelegate OnStartSessionCompleteDelegate = FOnStartSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleStartSessionComplete, MapPackagePath);
+    // 기존 광고 설정을 유지하면서 게임 진행 중 추가 참가 설정만 닫기 위한 복사
+    FOnlineSessionSettings UpdatedSessionSettings = ExistingSession->SessionSettings;
+    UpdatedSessionSettings.bAllowJoinInProgress = false;
+
+    // 세션 검색 결과의 맵 정보가 실제 게임 이동 대상과 일치하도록 갱신하는 처리
+    FString SessionMapName = FPackageName::GetShortName(MapPackagePath);
+    UpdatedSessionSettings.Set(SETTING_MAPNAME, SessionMapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+
+    // 추가 참가 차단 완료 후 실제 Session 시작을 이어가기 위한 이벤트 등록
+    FOnUpdateSessionCompleteDelegate OnUpdateSessionCompleteDelegate = FOnUpdateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleStartGameJoinabilityUpdateComplete, TravelURL);
+    SessionDelegateHandle = SessionInterface->AddOnUpdateSessionCompleteDelegate_Handle(OnUpdateSessionCompleteDelegate);
+
+    // 게임 시작 전에 Steam 로비의 추가 참가를 차단하기 위한 갱신 요청
+    bool bWasRequestSuccessful = SessionInterface->UpdateSession(NAME_GameSession, UpdatedSessionSettings, true);
+
+    // Session 설정 갱신 요청이 정상 처리되었는지 확인
+    if (bWasRequestSuccessful == false)
+    {
+        // Online Subsystem의 Session 설정 갱신 이벤트 연결 해제
+        SessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SessionDelegateHandle);
+        SessionDelegateHandle.Reset();
+
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작 전 추가 참가 차단 요청을 접수하지 못했습니다."), *UE_CALL_LOCATIONINFO);
+
+        CancelPendingGameDataOperation();
+
+        RecoverStartGameJoinability();
+    }
+}
+
+void UMD_MultiplayManager::RequestStartSession(const FString& TravelURL)
+{
+    // 추가 참가 차단 이후 실제 Session 시작 요청을 수행할 모듈 검증
+    if (SessionInterface.IsValid() == false || SessionDelegateHandle.IsValid() == true)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 추가 참가 차단 이후 GameSession을 시작할 수 없습니다."), *UE_CALL_LOCATIONINFO);
+
+        CancelPendingGameDataOperation();
+
+        RecoverStartGameJoinability();
+        return;
+    }
+
+    // 실제 Session 시작 결과 수신을 위한 이벤트 등록
+    FOnStartSessionCompleteDelegate OnStartSessionCompleteDelegate = FOnStartSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleStartSessionComplete, TravelURL);
     SessionDelegateHandle = SessionInterface->AddOnStartSessionCompleteDelegate_Handle(OnStartSessionCompleteDelegate);
 
-    // Session 시작 요청
+    // 추가 참가가 차단된 Session의 시작 요청
     bool bWasRequestSuccessful = SessionInterface->StartSession(NAME_GameSession);
 
     // Session 시작 요청이 정상 처리되었는지 확인
     if (bWasRequestSuccessful == false)
     {
-        // Online Subsystem의 Session 모듈의 이벤트 연결 해제
+        // Online Subsystem의 Session 시작 이벤트 연결 해제
         SessionInterface->ClearOnStartSessionCompleteDelegate_Handle(SessionDelegateHandle);
         SessionDelegateHandle.Reset();
 
         UE_LOG(MarineDemolition, Warning, TEXT("%s Online Subsystem의 Session 모듈에서 Session 시작 요청에 실패하였습니다."), *UE_CALL_LOCATIONINFO);
 
         CancelPendingGameDataOperation();
+
+        RecoverStartGameJoinability();
+    }
+}
+
+void UMD_MultiplayManager::RecoverStartGameJoinability()
+{
+    // 복구할 Session 모듈과 비동기 작업 상태 검증
+    if (SessionInterface.IsValid() == false || SessionDelegateHandle.IsValid() == true)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 게임 시작 실패 이후 로비의 추가 참가 상태를 복구할 수 없습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 복구 대상 GameSession 검증
+    FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_GameSession);
+    if (ExistingSession == nullptr)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 게임 시작 실패 이후 복구할 GameSession이 존재하지 않습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 기존 광고 설정을 유지하면서 로비의 추가 참가만 다시 허용하기 위한 복사
+    FOnlineSessionSettings UpdatedSessionSettings = ExistingSession->SessionSettings;
+    UpdatedSessionSettings.bAllowJoinInProgress = true;
+
+    // 게임 시작 실패 후 세션 검색 결과를 현재 로비 맵으로 되돌리기 위한 월드 검증
+    UWorld* World = GetWorld();
+    if (IsValid(World) == false)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 게임 시작 실패 이후 현재 로비 맵 정보를 확인할 수 없습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnStartGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 실패한 게임 맵 대신 실제로 유지 중인 로비 맵을 다시 광고하는 처리
+    FString CurrentSessionMapName = FPackageName::GetShortName(World->GetPackage()->GetName());
+    UpdatedSessionSettings.Set(SETTING_MAPNAME, CurrentSessionMapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+
+    // 로비 참가 상태 복구 결과를 정리하고 최초 게임 시작 실패를 전달하기 위한 이벤트 등록
+    FOnUpdateSessionCompleteDelegate OnUpdateSessionCompleteDelegate = FOnUpdateSessionCompleteDelegate::CreateWeakLambda(this, [this](FName SessionName, bool bWasSuccessful)
+        {
+            // 로비 참가 상태 복구 절차에서 연결한 이벤트 및 핸들 초기화
+            if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
+            {
+                SessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SessionDelegateHandle);
+            }
+            SessionDelegateHandle.Reset();
+
+            // 복구 실패 시 후속 참가 문제 확인을 위한 오류 기록
+            if (SessionName != NAME_GameSession || bWasSuccessful == false)
+            {
+                UE_LOG(MarineDemolition, Error, TEXT("%s 게임 시작 실패 이후 로비의 추가 참가 상태 복구에 실패했습니다."), *UE_CALL_LOCATIONINFO);
+            }
+
+            OnStartGameComplete.Broadcast(false);
+            return;
+        });
+    SessionDelegateHandle = SessionInterface->AddOnUpdateSessionCompleteDelegate_Handle(OnUpdateSessionCompleteDelegate);
+
+    // 대기 로비의 추가 참가 허용 상태 복구 요청
+    bool bWasRequestSuccessful = SessionInterface->UpdateSession(NAME_GameSession, UpdatedSessionSettings, true);
+    if (bWasRequestSuccessful == false)
+    {
+        // 접수 실패 이후 다른 Session 작업을 허용하기 위한 이벤트 정리
+        SessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SessionDelegateHandle);
+        SessionDelegateHandle.Reset();
+
+        UE_LOG(MarineDemolition, Error, TEXT("%s 게임 시작 실패 이후 로비 참가 상태 복구 요청을 접수하지 못했습니다."), *UE_CALL_LOCATIONINFO);
 
         OnStartGameComplete.Broadcast(false);
     }
@@ -831,16 +988,18 @@ void UMD_MultiplayManager::HandleCreateSessionComplete(FName SessionName, bool b
         return;
     }
 
-    // 심리스 트래블은 Listen을 시작하지 않으므로 첫 트래블은 하드 트래블로 강제
-    // 최초 Listen 이동의 경우 하드 트래블으로 설정되어야만 "?listen" 옵션이 새 NetDriver를 정상 생성할 수 있다.
+    // PIE 또는 실행 옵션으로 이미 열린 Listen NetDriver에 두 번째 Listen 소켓을 생성하지 않기 위한 상태 확인
+    bool bIsAlreadyListenServer = World->GetNetMode() == ENetMode::NM_ListenServer && World->GetNetDriver() != nullptr;
+
+    // 기존 Listen 연결은 심리스 트래블로 유지하고 최초 Listen 시작만 하드 트래블로 처리하기 위한 설정
     AGameModeBase* GameMode = World->GetAuthGameMode();
     if (IsValid(GameMode) == true)
     {
-        GameMode->bUseSeamlessTravel = false;
+        GameMode->bUseSeamlessTravel = bIsAlreadyListenServer;
     }
 
-    // Session Map의 패키지 이름에 "?listen" 옵션 추가
-    FString TravelURL = FString::Printf(TEXT("%s?listen"), *SessionMapPackagePath);
+    // 아직 Listen Server가 아닌 실행에서만 새 NetDriver 생성을 요청하는 Travel URL 구성
+    FString TravelURL = bIsAlreadyListenServer == true ? SessionMapPackagePath : FString::Printf(TEXT("%s?listen"), *SessionMapPackagePath);
 
     // 현재 클라이언트를 Listen Server의 호스트로 설정된 맵 호스팅
     bool bWasTravelStarted = World->ServerTravel(TravelURL);
@@ -861,7 +1020,31 @@ void UMD_MultiplayManager::HandleCreateSessionComplete(FName SessionName, bool b
     }
 }
 
-void UMD_MultiplayManager::HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath)
+void UMD_MultiplayManager::HandleStartGameJoinabilityUpdateComplete(FName SessionName, bool bWasSuccessful, const FString TravelURL)
+{
+    // 추가 참가 차단 절차에서 연결한 이벤트 및 핸들 초기화
+    if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
+    {
+        SessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SessionDelegateHandle);
+    }
+    SessionDelegateHandle.Reset();
+
+    // 추가 참가 차단 실패 이후 게임 데이터 작업 취소와 로비 상태 복구
+    if (SessionName != NAME_GameSession || bWasSuccessful == false)
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작 전 로비의 추가 참가 차단에 실패했습니다."), *UE_CALL_LOCATIONINFO);
+
+        CancelPendingGameDataOperation();
+
+        RecoverStartGameJoinability();
+        return;
+    }
+
+    // 추가 참가 차단 완료 이후 실제 Session 시작 요청
+    RequestStartSession(TravelURL);
+}
+
+void UMD_MultiplayManager::HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString TravelURL)
 {
     // Start Session 절차에서 연결한 이벤트 및 핸들 초기화
     if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
@@ -877,7 +1060,7 @@ void UMD_MultiplayManager::HandleStartSessionComplete(FName SessionName, bool bW
 
         CancelPendingGameDataOperation();
 
-        OnStartGameComplete.Broadcast(false);
+        RecoverStartGameJoinability();
         return;
     }
 
@@ -894,11 +1077,11 @@ void UMD_MultiplayManager::HandleStartSessionComplete(FName SessionName, bool bW
     }
 
     // 선택된 맵으로 이동(클라이언트 포함)
-    bool bWasTravelStarted = World->ServerTravel(MapPackagePath);
+    bool bWasTravelStarted = World->ServerTravel(TravelURL);
 
     if (bWasTravelStarted == false)
     {
-        UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 시작 후 지정 맵 이동을 시작하지 못했습니다: %s"), *UE_CALL_LOCATIONINFO, *MapPackagePath);
+        UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 시작 후 지정 맵 이동을 시작하지 못했습니다: %s"), *UE_CALL_LOCATIONINFO, *TravelURL);
 
         CancelPendingGameDataOperation();
 
@@ -925,6 +1108,60 @@ void UMD_MultiplayManager::HandleEndSessionComplete(FName SessionName, bool bWas
         UE_LOG(MarineDemolition, Warning, TEXT("%s GameSession 종료에 실패했습니다."), *UE_CALL_LOCATIONINFO);
 
         OnEndGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 종료된 GameSession의 광고 설정 복사를 위한 대상 검증
+    FNamedOnlineSession* ExistingSession = SessionInterface.IsValid() == true ? SessionInterface->GetNamedSession(NAME_GameSession) : nullptr;
+    if (ExistingSession == nullptr)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 게임 종료 후 추가 참가를 허용할 GameSession이 존재하지 않습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnEndGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 기존 광고 설정을 유지하면서 로비의 추가 참가만 다시 허용하기 위한 복사
+    FOnlineSessionSettings UpdatedSessionSettings = ExistingSession->SessionSettings;
+    UpdatedSessionSettings.bAllowJoinInProgress = true;
+
+    // 세션 검색 결과의 맵 정보가 실제 복귀 이동 대상과 일치하도록 갱신하는 처리
+    FString SessionMapName = FPackageName::GetShortName(MapPackagePath);
+    UpdatedSessionSettings.Set(SETTING_MAPNAME, SessionMapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+
+    // 추가 참가 허용 완료 후 로비 맵 이동을 이어가기 위한 이벤트 등록
+    FOnUpdateSessionCompleteDelegate OnUpdateSessionCompleteDelegate = FOnUpdateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleEndGameJoinabilityUpdateComplete, MapPackagePath);
+    SessionDelegateHandle = SessionInterface->AddOnUpdateSessionCompleteDelegate_Handle(OnUpdateSessionCompleteDelegate);
+
+    // 게임 종료 후 Steam 로비의 추가 참가를 다시 허용하기 위한 갱신 요청
+    bool bWasRequestSuccessful = SessionInterface->UpdateSession(NAME_GameSession, UpdatedSessionSettings, true);
+    if (bWasRequestSuccessful == false)
+    {
+        // 요청 접수 실패 이후 Session 진행 상태 복구를 허용하기 위한 이벤트 정리
+        SessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SessionDelegateHandle);
+        SessionDelegateHandle.Reset();
+
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 종료 후 추가 참가 허용 요청을 접수하지 못했습니다."), *UE_CALL_LOCATIONINFO);
+
+        RecoverEndGameSession(SessionName);
+    }
+}
+
+void UMD_MultiplayManager::HandleEndGameJoinabilityUpdateComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath)
+{
+    // 추가 참가 허용 절차에서 연결한 이벤트 및 핸들 초기화
+    if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
+    {
+        SessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SessionDelegateHandle);
+    }
+    SessionDelegateHandle.Reset();
+
+    // 추가 참가 허용 실패 이후 기존 진행 상태 복구
+    if (SessionName != NAME_GameSession || bWasSuccessful == false)
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 종료 후 로비의 추가 참가 허용에 실패했습니다."), *UE_CALL_LOCATIONINFO);
+
+        RecoverEndGameSession(NAME_GameSession);
         return;
     }
 
@@ -962,16 +1199,85 @@ void UMD_MultiplayManager::RecoverEndGameSession(FName SessionName)
         return;
     }
 
-    // Online Subsystem의 Session 모듈에 이벤트 등록
+    // 복구할 GameSession과 현재 게임 맵 확인
+    FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(SessionName);
+    UWorld* World = GetWorld();
+    if (ExistingSession == nullptr || IsValid(World) == false)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 맵 이동 실패 이후 복구할 Session 또는 현재 게임 맵이 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnEndGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 복귀 이동 실패 후 현재 게임 맵과 진행 중 참가 제한을 다시 광고하기 위한 설정
+    FOnlineSessionSettings UpdatedSessionSettings = ExistingSession->SessionSettings;
+    UpdatedSessionSettings.bAllowJoinInProgress = false;
+    FString CurrentSessionMapName = FPackageName::GetShortName(World->GetPackage()->GetName());
+    UpdatedSessionSettings.Set(SETTING_MAPNAME, CurrentSessionMapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
+
+    // 현재 게임 맵 정보 복구 완료 후 Ended Session 재시작을 이어가기 위한 이벤트 등록
+    FOnUpdateSessionCompleteDelegate OnUpdateSessionCompleteDelegate = FOnUpdateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleRecoverEndGameSessionSettingsComplete, SessionName);
+    SessionDelegateHandle = SessionInterface->AddOnUpdateSessionCompleteDelegate_Handle(OnUpdateSessionCompleteDelegate);
+
+    // 현재 게임 맵 정보와 진행 중 참가 제한 복구 요청
+    bool bWasRequestSuccessful = SessionInterface->UpdateSession(SessionName, UpdatedSessionSettings, true);
+    if (bWasRequestSuccessful == false)
+    {
+        // 접수 실패 이후 다른 Session 작업을 허용하기 위한 이벤트 정리
+        SessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SessionDelegateHandle);
+        SessionDelegateHandle.Reset();
+
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 맵 이동 실패 이후 Session 맵 정보 복구 요청을 접수하지 못했습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnEndGameComplete.Broadcast(false);
+    }
+}
+
+void UMD_MultiplayManager::HandleRecoverEndGameSessionSettingsComplete(FName UpdatedSessionName, bool bWasSuccessful, FName SessionName)
+{
+    // 게임 종료 복구 설정에 사용한 이벤트 및 핸들 정리
+    if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
+    {
+        SessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SessionDelegateHandle);
+    }
+    SessionDelegateHandle.Reset();
+
+    // 현재 게임 맵 정보 복구 실패 시 잘못된 세션 광고 상태에서 재시작하지 않기 위한 차단
+    if (UpdatedSessionName != SessionName || bWasSuccessful == false)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 맵 이동 실패 이후 Session 맵 정보 복구에 실패했습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnEndGameComplete.Broadcast(false);
+        return;
+    }
+
+    // 현재 맵 정보가 복구된 Ended Session의 진행 상태 복구 요청
+    RequestRecoverEndGameSessionStart(SessionName);
+}
+
+void UMD_MultiplayManager::RequestRecoverEndGameSessionStart(FName SessionName)
+{
+    // Session 재시작 요청을 수행할 모듈과 비동기 작업 상태 검증
+    if (SessionInterface.IsValid() == false || SessionDelegateHandle.IsValid() == true)
+    {
+        UE_LOG(MarineDemolition, Error, TEXT("%s 맵 이동 실패 이후 GameSession 재시작을 요청할 수 없습니다."), *UE_CALL_LOCATIONINFO);
+
+        OnEndGameComplete.Broadcast(false);
+        return;
+    }
+
+    // Session 진행 상태 복구 결과를 정리하기 위한 이벤트 등록
     FOnStartSessionCompleteDelegate OnEndGameRecoveryCompleteDelegate = FOnStartSessionCompleteDelegate::CreateWeakLambda(this, [this, SessionName](FName StartedSessionName, bool bWasSuccessful)
         {
-            // Recorver Session 절차에서 연결한 이벤트 및 핸들 초기화
+            // Session 진행 상태 복구에 사용한 이벤트 및 핸들 정리
             if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
             {
                 SessionInterface->ClearOnStartSessionCompleteDelegate_Handle(SessionDelegateHandle);
             }
             SessionDelegateHandle.Reset();
 
+            // 실제 Session 재시작 결과 기록
             if (StartedSessionName != SessionName || bWasSuccessful == false)
             {
                 UE_LOG(MarineDemolition, Error, TEXT("%s 맵 이동 실패 이후 Session 진행 상태 복구에 실패했습니다."), *UE_CALL_LOCATIONINFO);
@@ -986,17 +1292,15 @@ void UMD_MultiplayManager::RecoverEndGameSession(FName SessionName)
         });
     SessionDelegateHandle = SessionInterface->AddOnStartSessionCompleteDelegate_Handle(OnEndGameRecoveryCompleteDelegate);
 
-    // Session 시작 요청
-    bool bWasRequestSuccessful = SessionInterface->StartSession(NAME_GameSession);
-
-    // Session 시작 요청이 정상 처리되었는지 확인
+    // 현재 게임 맵 정보가 복구된 Session의 시작 요청
+    bool bWasRequestSuccessful = SessionInterface->StartSession(SessionName);
     if (bWasRequestSuccessful == false)
     {
-        // Online Subsystem의 Session 모듈의 이벤트 연결 해제
+        // 접수 실패 이후 다른 Session 작업을 허용하기 위한 이벤트 정리
         SessionInterface->ClearOnStartSessionCompleteDelegate_Handle(SessionDelegateHandle);
         SessionDelegateHandle.Reset();
 
-        UE_LOG(MarineDemolition, Warning, TEXT("%s 맵 이동 실패 이후 GameSession 복구 요청을 접수하지 못했습니다."), *UE_CALL_LOCATIONINFO);
+        UE_LOG(MarineDemolition, Warning, TEXT("%s 맵 이동 실패 이후 GameSession 재시작 요청을 접수하지 못했습니다."), *UE_CALL_LOCATIONINFO);
 
         OnEndGameComplete.Broadcast(false);
     }
@@ -1186,11 +1490,10 @@ void UMD_MultiplayManager::CancelPendingGameDataOperation()
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
 
-    // 임시로 보관된 게임 데이터 초기화(잊어버리기)
+    // 현재 진행 데이터는 유지하고 실패한 시작 절차의 보류 작업만 취소하는 처리
     if (IsValid(SaveSlotManager) == true)
     {
-        //SaveSlotManager->CancelPendingGameDataOperation();
-        SaveSlotManager->ResetTemporaryGameData();
+        SaveSlotManager->CancelPendingGameDataOperation();
     }
 }
 
