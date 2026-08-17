@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Game/MD_GameModeBase.h"
@@ -17,6 +17,7 @@
 #include "World/Wall/MD_WallPiece.h"
 #include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "Engine/GameInstance.h"
+#include "Online/Session/MD_MultiplayManager.h"
 
 AMD_GameModeBase::AMD_GameModeBase()
 {
@@ -415,7 +416,17 @@ void AMD_GameModeBase::TravelToLevel(const TSoftObjectPtr<UWorld>& Level)
         return;
     }
 
-    GetWorld()->ServerTravel(Package + TEXT("?listen"));
+    // 게임 세션 종료와 로비 복귀를 하나의 비동기 절차로 처리할 세션 관리자 참조
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_MultiplayManager* MultiplayManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MultiplayManager>() : nullptr;
+    if (IsValid(MultiplayManager) == false)
+    {
+        UE_LOG(LogTemp, Error, TEXT("[Day] 세션 종료와 로비 이동을 처리할 MultiplayManager가 존재하지 않습니다."));
+        return;
+    }
+
+    // 기존 Listen Server 연결을 유지하면서 세션 상태와 광고 맵을 로비 기준으로 갱신하는 처리
+    MultiplayManager->EndSession(Package);
 }
 
 void AMD_GameModeBase::FinalizeReturnStatuses()
