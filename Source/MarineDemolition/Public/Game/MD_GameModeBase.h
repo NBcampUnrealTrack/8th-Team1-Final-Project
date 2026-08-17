@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -68,7 +68,7 @@ private:
 
     void HandleGameOver();
 
-    // 대상 레벨로 리슨 트래블. 미지정이면 안전하게 현재 레벨 리스타트
+    // 게임 종료 세션 상태를 갱신한 뒤 대상 로비 레벨로 이동하는 함수
     void TravelToLevel(const TSoftObjectPtr<UWorld>& Level);
 
     // 계약 시작(Day1 마감) 시점의 인원수를 GameState에 고정
