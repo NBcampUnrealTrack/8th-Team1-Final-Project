@@ -310,7 +310,7 @@ int32 AMD_QuestSampleSpawner::CountAvailableSamplesForGrade(const FPrimaryAssetI
 	for (TActorIterator<AMD_SampleItem> It(World); It; ++It)
 	{
 		const AMD_SampleItem* Sample = *It;
-		if (IsValid(Sample) == true && Sample->Grade == SampleGrade && Sample->QuestDefinitionId == QuestDefinitionId)
+		if (IsValid(Sample) == true && Sample->IsActorBeingDestroyed() == false && Sample->Grade == SampleGrade && Sample->QuestDefinitionId == QuestDefinitionId)
 		{
 			++AvailableSampleCount;
 		}

@@ -1,4 +1,4 @@
-#include "World/Sample/MD_SampleShelf.h"
+﻿#include "World/Sample/MD_SampleShelf.h"
 
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Components/ArrowComponent.h"
@@ -246,22 +246,25 @@ void AMD_SampleShelf::CollectSample(AMD_SampleItem* Sample)
 	UWorld* World = GetWorld();
 	UGameInstance* GameInstance = IsValid(World) ? World->GetGameInstance() : nullptr;
 	const bool bIntact = !Sample->bDamaged;
+	UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
+	FPrimaryAssetId QuestDefinitionId = Sample->QuestDefinitionId;
+	EMD_SampleGrade SampleGrade = Sample->Grade;
 
-	// 점수·크레딧은 여기서 주지 않는다. 기획 09 §1.5: 샘플 납품 자체는 0이고
-	// 모든 보상은 퀘스트 완료에 귀속된다.
-	if (UMD_MerchantSubsystem* Merchant =
-		IsValid(GameInstance) ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr)
-	{
-		const FGameplayTag GradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(Sample->Grade);
-		Merchant->NotifySampleDelivered(Sample->QuestDefinitionId, GradeTag, bIntact);
-	}
-
+	// 샘플 액터 제거 이후에도 선반 전시와 퀘스트 진행에 사용할 최소 정보 복사
 	FMD_ShelfDisplayEntry Entry;
 	Entry.bDamaged = Sample->bDamaged;
 	Entry.Scale = Sample->GetActorScale3D();
-	if (const UStaticMeshComponent* SampleMesh = Sample->FindComponentByClass<UStaticMeshComponent>())
+	UStaticMeshComponent* SampleMesh = Sample->FindComponentByClass<UStaticMeshComponent>();
+	if (IsValid(SampleMesh) == true)
 	{
 		Entry.Mesh = SampleMesh->GetStaticMesh();
+	}
+
+	// 다음 페이즈 스폰 부족분 계산에서 제출 완료 샘플을 제외하기 위한 선행 파괴
+	bool bSampleDestroyed = Sample->Destroy();
+	if (bSampleDestroyed == false)
+	{
+		return;
 	}
 
 	DisplayEntries.Add(Entry);
@@ -269,14 +272,19 @@ void AMD_SampleShelf::CollectSample(AMD_SampleItem* Sample)
 	UE_LOG(LogTemp, Log,
 		TEXT("[SampleShelf] %s: %s급 샘플 회수 (%s) — 전시 %d건"),
 		*GetName(),
-		*StaticEnum<EMD_SampleGrade>()->GetNameStringByValue(static_cast<int64>(Sample->Grade)),
-		bIntact ? TEXT("온전") : TEXT("손상"),
+		*StaticEnum<EMD_SampleGrade>()->GetNameStringByValue(static_cast<int64>(SampleGrade)),
+		bIntact == true ? TEXT("온전") : TEXT("손상"),
 		DisplayEntries.Num());
 
 	// 리슨 서버는 OnRep가 오지 않으므로 직접 갱신한다.
 	RebuildDisplay();
 
-	Sample->Destroy();
+	// 점수·크레딧은 지급하지 않고 파괴가 확정된 샘플의 퀘스트 진행만 반영하는 처리
+	if (IsValid(Merchant) == true)
+	{
+		FGameplayTag GradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(SampleGrade);
+		Merchant->NotifySampleDelivered(QuestDefinitionId, GradeTag, bIntact);
+	}
 }
 
 void AMD_SampleShelf::OnRep_DisplayEntries()
