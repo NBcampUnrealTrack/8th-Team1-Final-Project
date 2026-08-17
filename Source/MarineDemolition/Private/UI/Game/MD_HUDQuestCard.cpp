@@ -2,26 +2,56 @@
 
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
+#include "Data/Merchant/MD_RepeatQuestDefinition.h"
 
 void UMD_HUDQuestCard::SetMainQuest(const FMD_MainQuestState& QuestState)
 {
-	// 메인 퀘스트임을 명시하여 데이터 에셋의 종류 입력 오류와 무관한 HUD 표시 보장
-	ApplyQuestData(EMD_QuestKind::Main, QuestState.Definition, QuestState.CurrentProgress);
+	// 메인 퀘스트 전용 표시 함수에 정의와 진행도를 적용하는 처리
+	ApplyQuestData(QuestState.Definition, QuestState.CurrentProgress);
 }
 
 void UMD_HUDQuestCard::SetRepeatQuest(const FMD_RepeatQuestState& QuestState)
 {
-	// 반복 퀘스트임을 명시하여 수락 목록의 카드 종류 표시 보장
-	ApplyQuestData(EMD_QuestKind::Repeat, QuestState.Definition, QuestState.CurrentProgress);
+	// 반복 퀘스트 상태의 PrimaryAssetId와 현재 페이즈를 HUD 표시 정보로 적용하는 처리
+	ApplyRepeatQuestData(QuestState);
 }
 
-void UMD_HUDQuestCard::ApplyQuestData(EMD_QuestKind QuestKind, const FMD_QuestDefinitionData& Definition, int32 CurrentProgress)
+void UMD_HUDQuestCard::ApplyRepeatQuestData(const FMD_RepeatQuestState& QuestState)
 {
-	// 카드 상단에서 메인과 반복 퀘스트를 즉시 구분하기 위한 종류 텍스트
-	FText QuestKindText = QuestKind == EMD_QuestKind::Main ? FText::FromString(TEXT("메인")) : FText::FromString(TEXT("반복"));
+	const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	const FMD_RepeatQuestPhaseData* CurrentPhase = IsValid(Definition) == true ? Definition->GetPhase(QuestState.CurrentPhaseIndex) : nullptr;
+
 	if (IsValid(Txt_QuestKind) == true)
 	{
-		Txt_QuestKind->SetText(QuestKindText);
+		Txt_QuestKind->SetText(FText::FromString(TEXT("반복")));
+	}
+
+	if (IsValid(Txt_QuestName) == true)
+	{
+		Txt_QuestName->SetText(IsValid(Definition) == true ? Definition->QuestName : FText::GetEmpty());
+	}
+
+	if (IsValid(Txt_QuestDescription) == true)
+	{
+		// HUD에는 페이즈 설명 대신 기획에서 공통 표시로 확정한 QuestName만 사용하는 빈 본문
+		Txt_QuestDescription->SetText(FText::GetEmpty());
+	}
+
+	if (IsValid(PB_QuestProgressRate) == true)
+	{
+		int32 RequiredCount = CurrentPhase != nullptr ? FMath::Max(CurrentPhase->RequiredCount, 1) : 1;
+		int32 ClampedProgress = FMath::Clamp(QuestState.CurrentProgress, 0, RequiredCount);
+		float ProgressRate = FMath::SafeDivide<float, float>(ClampedProgress, RequiredCount);
+		PB_QuestProgressRate->SetPercent(ProgressRate);
+	}
+}
+
+void UMD_HUDQuestCard::ApplyQuestData(const FMD_QuestDefinitionData& Definition, int32 CurrentProgress)
+{
+	if (IsValid(Txt_QuestKind) == true)
+	{
+		// 메인 퀘스트 전용 경로에서 카드 종류를 고정하는 표시
+		Txt_QuestKind->SetText(FText::FromString(TEXT("메인")));
 	}
 
 	if (IsValid(Txt_QuestName) == true)

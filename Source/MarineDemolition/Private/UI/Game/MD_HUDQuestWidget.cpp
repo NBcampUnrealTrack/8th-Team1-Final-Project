@@ -134,11 +134,11 @@ void UMD_HUDQuestWidget::RefreshQuestDisplay()
 		}
 	}
 
-	// 사용자가 명시적으로 수락했고 아직 진행 중인 반복 퀘스트 전체 표시
+	// 수락 후 진행 중이거나 목표를 달성하고 보상 수령을 기다리는 반복 퀘스트 전체 표시
 	TArray<FMD_RepeatQuestState> RepeatQuests = MerchantComponent->GetRepeatQuests();
 	for (FMD_RepeatQuestState& RepeatQuest : RepeatQuests)
 	{
-		if (RepeatQuest.Status == EMD_RepeatQuestStatus::Accepted && RepeatQuest.Definition.IsValidDefinition() == true)
+		if (RepeatQuest.Status == EMD_RepeatQuestStatus::Accepted && RepeatQuest.HasValidDefinitionId() == true)
 		{
 			AddRepeatQuestCard(RepeatQuest);
 		}

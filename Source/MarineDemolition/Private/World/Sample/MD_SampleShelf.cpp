@@ -253,7 +253,7 @@ void AMD_SampleShelf::CollectSample(AMD_SampleItem* Sample)
 		IsValid(GameInstance) ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr)
 	{
 		const FGameplayTag GradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(Sample->Grade);
-		Merchant->NotifySampleDelivered(GradeTag, bIntact);
+		Merchant->NotifySampleDelivered(Sample->QuestDefinitionId, GradeTag, bIntact);
 	}
 
 	FMD_ShelfDisplayEntry Entry;

@@ -16,9 +16,11 @@
 DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
 
 class UMD_SiteDefinition;
+class UMD_RepeatQuestDefinition;
 class AMD_PlayerState;
 struct FGameplayTag;
 struct FMD_MerchantData;
+struct FMD_RepeatQuestPhaseData;
 struct FMD_ShopItem;
 
 enum class EMD_SampleGrade : uint8;
@@ -121,7 +123,7 @@ public:
 	/** 계약 클리어 시 호출. 반복 퀘스트 게이트를 여는 이력을 남긴다. */
 	void MarkSiteCleared();
 
-	/** 반복 퀘스트 수락. Offered 상태에서만 가능하다. */
+	/** 제시 상태에서는 반복 퀘스트를 수락하고 목표를 달성한 수락 상태에서는 상인 메뉴 보상을 수령하는 함수 */
 	bool TryAcceptRepeatQuest(int32 QuestIndex);
 
 	/** 거절. 페널티 없이 다음 Day 재롤 대상이 된다. */
@@ -130,13 +132,13 @@ public:
 	/** 포기하는 반복 퀘스트를 실패 처리 및 패널티(호감도 감소) 처리하는 함수 */
 	bool TryAbandonRepeatQuest(int32 QuestIndex);
 
-	/** 샘플이 모선에 납품될 때 호출한다. 메인·반복 활성 퀘스트를 함께 검사한다. */
-	void NotifySampleDelivered(const FGameplayTag& GradeTag, bool bIntact);
+	/** 샘플이 분류장에 제출될 때 퀘스트 Asset ID·등급·손상 상태로 메인·반복 활성 퀘스트를 검사하는 함수 */
+	void NotifySampleDelivered(const FPrimaryAssetId& QuestDefinitionId, const FGameplayTag& GradeTag, bool bIntact);
 
-	/** 회수 대상 샘플이 파괴될 때 호출한다. 해당 등급 활성 퀘스트를 즉시 실패 처리한다. */
-	void NotifySampleDestroyed(EMD_SampleGrade Grade);
+	/** 회수 대상 샘플이 파괴될 때 퀘스트 Asset ID와 등급이 일치하는 활성 퀘스트를 실패 처리하는 함수 */
+	void NotifySampleDestroyed(const FPrimaryAssetId& QuestDefinitionId, EMD_SampleGrade Grade);
 
-	/** Day 마감 시 미완료 활성 퀘스트를 실패로 정리한다. */
+	/** Day 마감 시 목표를 달성하지 못한 활성 퀘스트를 실패로 정리하는 함수 */
 	void ResolveActiveQuestsAtDayEnd(int32 CompletedDay);
 
 	/** 계약 종료 시 남은 활성 반복 퀘스트를 실패로 정리한다. */
@@ -156,6 +158,21 @@ private:
 	void FailMainQuest(FMD_MainQuestState& QuestState, EMD_QuestFailureReason Reason);
 
 	bool DoesQuestTargetGrade(const FMD_QuestDefinitionData& Definition, const FGameplayTag& GradeTag) const;
+
+	/** 반복 퀘스트 상태에서 원본 에셋과 현재 페이즈를 함께 검증하여 반환하는 함수 */
+	const FMD_RepeatQuestPhaseData* GetCurrentRepeatQuestPhase(const FMD_RepeatQuestState& QuestState, UMD_RepeatQuestDefinition*& OutDefinition) const;
+
+	/** 수락한 반복 퀘스트가 마지막 페이즈 목표를 충족했는지 원본 에셋 기준으로 판정하는 함수 */
+	bool IsRepeatQuestObjectiveComplete(const FMD_RepeatQuestState& QuestState) const;
+
+	/** 성공한 반복 퀘스트 에셋의 고정 크레딧·점수·호감도를 서버 원장에 적용하는 함수 */
+	void ApplyRepeatQuestReward(const UMD_RepeatQuestDefinition& Definition);
+
+	/** 실패 원인에 맞는 반복 퀘스트 에셋의 패널티를 서버 원장에 적용하는 함수 */
+	void ApplyRepeatQuestPenalty(const UMD_RepeatQuestDefinition& Definition, bool bDestroyed);
+
+	/** 활성 반복 퀘스트를 실패로 전환하고 원본 에셋의 패널티를 한 번 적용하는 함수 */
+	void FailRepeatQuest(FMD_RepeatQuestState& QuestState, bool bDestroyed);
 
 	/** 현재 진행 중인 현장. 반복 퀘스트 풀과 클리어 이력 판정에 쓴다. */
 	UPROPERTY()
