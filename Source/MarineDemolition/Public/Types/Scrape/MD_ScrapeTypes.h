@@ -3,7 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/HitResult.h"
 #include "MD_ScrapeTypes.generated.h"
+
+class AMD_Barnacle;
+class UMD_ScrapeSurfaceComponent;
 
 /**
  * 한 번의 긁기 판정이 표면에 만든 접촉의 종류
@@ -41,6 +45,135 @@ enum class EMD_ScrapeSurfaceFace : uint8
 	Back = 1 UMETA(DisplayName = "뒷면")
 };
 
+/** 우클릭으로 유지하는 헤라 전용 작업 상태. */
+UENUM(BlueprintType)
+enum class EMD_ScrapeFocusState : uint8
+{
+	Free UMETA(DisplayName = "비활성"),
+	FocusPending UMETA(DisplayName = "진입 대기"),
+	FocusedReady UMETA(DisplayName = "작업 준비"),
+	FocusedScraping UMETA(DisplayName = "긁는 중")
+};
+
+/** 서버 Focus 요청의 Reliable 응답. */
+UENUM()
+enum class EMD_ScrapeFocusBeginResult : uint8
+{
+	Denied,
+	Accepted
+};
+
+/** 서버가 Focus를 강제로 정리한 이유. 클라이언트에서는 모두 같은 멱등 Cleanup을 탄다. */
+UENUM()
+enum class EMD_ScrapeFocusTerminationReason : uint8
+{
+	SessionTimeout,
+	ViewInvalid,
+	ProtocolViolation,
+	EligibilityLost
+};
+
+/**
+ * 클라이언트 hit를 포함하지 않는 Focus aim 전송 단위.
+ *
+ * CameraRelativeAimDirection은 승인된 고정 View의 Forward/Right/Up 좌표계에
+ * 대한 단위 방향이다. 서버가 자신의 eye 원점과 session basis로 world ray를
+ * 재구성한다.
+ */
+USTRUCT()
+struct MARINEDEMOLITION_API FMD_ScrapeAimNetSample
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	uint64 FocusSessionId = 0;
+
+	UPROPERTY()
+	uint32 Sequence = 0;
+
+	/** Focus 시작 뒤 client monotonic 초. float 정밀도로 0.15s age 판정을 충분히 보존한다. */
+	UPROPERTY()
+	float ClientMonotonicSeconds = 0.0f;
+
+	UPROPERTY()
+	FVector_NetQuantizeNormal CameraRelativeAimDirection = FVector::ForwardVector;
+};
+
+/** 하나의 헤라 조준 ray가 찾은 처리 가능한 대상 종류. */
+UENUM(BlueprintType)
+enum class EMD_ScrapeAimQueryType : uint8
+{
+	/** 아무것도 맞지 않았거나 일반 물체가 작업 대상을 가린 상태. */
+	NoTarget UMETA(DisplayName = "대상 없음"),
+
+	/** 오염 작업면을 직접 맞혔거나 따개비 뒤에서 작업면을 찾은 상태. */
+	SurfaceHit UMETA(DisplayName = "작업면"),
+
+	/** 따개비를 맞혔지만 그 뒤에 오염 작업면은 없는 독립 접촉 상태. */
+	DirectBarnacleOnly UMETA(DisplayName = "직접 따개비")
+};
+
+/**
+ * 진입 검증, 로컬 조준과 이후 서버 재검증이 공유하는 헤라 ray 조회 결과.
+ *
+ * Type은 기존 표면/직접 따개비/무접촉 세 갈래를 보존한다. NoTarget일 때
+ * bWasBlocked가 true면 ray가 빗나간 것이 아니라 일반 물체에 가로막힌 것이다.
+ */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_ScrapeAimQueryResult
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Aim")
+	EMD_ScrapeAimQueryType Type = EMD_ScrapeAimQueryType::NoTarget;
+
+	/** SurfaceHit일 때 실제 판정을 적용할 작업면. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
+		Category = "MD|Scrape|Aim")
+	TObjectPtr<UMD_ScrapeSurfaceComponent> Surface = nullptr;
+
+	/** ray가 처음 직접 맞힌 따개비. 뒤 Surface가 있으면 SurfaceHit에도 채워진다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
+		Category = "MD|Scrape|Aim")
+	TObjectPtr<AMD_Barnacle> Barnacle = nullptr;
+
+	/** SurfaceHit의 표면 충돌 또는 DirectBarnacleOnly의 따개비 충돌. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Aim")
+	FHitResult Hit;
+
+	/** 따개비를 먼저 맞힌 경우 원래 따개비 충돌. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Aim")
+	FHitResult BarnacleHit;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Aim")
+	EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Aim",
+		meta = (Units = "cm"))
+	FVector2D SurfacePositionCm = FVector2D::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Aim")
+	FVector WorldContactLocation = FVector::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Aim")
+	FVector WorldContactNormal = FVector::ZeroVector;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Aim",
+		meta = (Units = "cm"))
+	float TraceDistanceCm = 0.0f;
+
+	/** NoTarget이 일반 충돌물 또는 투영 불가능한 표면 때문에 발생했는지 여부. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Aim")
+	bool bWasBlocked = false;
+
+	bool IsActionable() const
+	{
+		return Type == EMD_ScrapeAimQueryType::SurfaceHit
+			|| Type == EMD_ScrapeAimQueryType::DirectBarnacleOnly;
+	}
+};
+
 /** 헤라 날에 쌓인 오염물의 즉시 교체형 시각 단계 */
 UENUM(BlueprintType)
 enum class EMD_ScrapeLoadStage : uint8
@@ -75,6 +208,140 @@ enum class EMD_ScrapeSurfaceNormalAxis : uint8
 };
 
 /**
+ * 표면 로컬 2D 공간에서의 헤라 날 방향.
+ *
+ * 두 축이 모두 0이면 아직 basis를 제공하지 않은 legacy 입력이다. 둘 중 하나만 있거나
+ * 평행한 축은 잘못된 명시 입력으로 취급한다. Evaluator는 유효한 입력을 정규직교화한 뒤
+ * 사용하므로 월드→표면 투영에서 생긴 작은 수치 오차는 footprint 크기에 영향을 주지 않는다.
+ */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_ScrapeBladeBasis
+{
+	GENERATED_BODY()
+
+public:
+	FMD_ScrapeBladeBasis()
+		: DepthAxis(FVector2D::ZeroVector)
+		, WidthAxis(FVector2D::ZeroVector)
+	{
+	}
+
+	FMD_ScrapeBladeBasis(
+		const FVector2D& InDepthAxis,
+		const FVector2D& InWidthAxis)
+		: DepthAxis(InDepthAxis)
+		, WidthAxis(InWidthAxis)
+	{
+	}
+
+	/** BladeDepthCm이 놓이는 축. 이동 방향과 별개인 180도 동치 방향이다. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Blade")
+	FVector2D DepthAxis;
+
+	/** BladeWidthCm이 놓이는 축. DepthAxis와 직교해야 한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Blade")
+	FVector2D WidthAxis;
+
+	/** 기존 호출자가 basis를 전혀 제공하지 않은 기본 상태인지 확인한다. */
+	bool IsUnset() const
+	{
+		return DepthAxis.IsNearlyZero() && WidthAxis.IsNearlyZero();
+	}
+};
+
+/**
+ * Stage3 역오염 dab의 논리적 식별자.
+ *
+ * DistanceBin은 월드 좌표나 진행축 투영값이 아니라, 해당
+ * sub-stroke의 서버 승인 누적 arc length에서 계산한 고정 간격 bin이다.
+ * 네트워크 batch를 재전송해도 이 네 값이 같으면 같은 dab이다.
+ */
+USTRUCT()
+struct MARINEDEMOLITION_API FMD_ScrapeContaminationStampIdentity
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY()
+	uint64 FocusSessionGeneration = 0;
+
+	UPROPERTY()
+	uint32 LmbStrokeGeneration = 0;
+
+	UPROPERTY()
+	uint32 SubStrokeGeneration = 0;
+
+	UPROPERTY()
+	int32 DistanceBin = INDEX_NONE;
+
+	bool IsValid() const
+	{
+		return FocusSessionGeneration != 0
+			&& LmbStrokeGeneration != 0
+			&& SubStrokeGeneration != 0
+			&& DistanceBin >= 0;
+	}
+
+	bool operator==(const FMD_ScrapeContaminationStampIdentity& Other) const
+	{
+		return FocusSessionGeneration == Other.FocusSessionGeneration
+			&& LmbStrokeGeneration == Other.LmbStrokeGeneration
+			&& SubStrokeGeneration == Other.SubStrokeGeneration
+			&& DistanceBin == Other.DistanceBin;
+	}
+
+	bool operator!=(const FMD_ScrapeContaminationStampIdentity& Other) const
+	{
+		return !(*this == Other);
+	}
+
+	friend uint32 GetTypeHash(
+		const FMD_ScrapeContaminationStampIdentity& Identity)
+	{
+		uint32 Hash = HashCombineFast(
+			GetTypeHash(Identity.FocusSessionGeneration),
+			GetTypeHash(Identity.LmbStrokeGeneration));
+		Hash = HashCombineFast(Hash, GetTypeHash(Identity.SubStrokeGeneration));
+		return HashCombineFast(Hash, GetTypeHash(Identity.DistanceBin));
+	}
+};
+
+/**
+ * ordered Stage3 path에서 확정된 exact-position dab.
+ *
+ * 위치와 blade basis는 candidate 생성 시점의 값을 저장한다. tail flush나
+ * 재전송 시점의 현재 tangent로 다시 계산하지 않는다.
+ */
+USTRUCT()
+struct MARINEDEMOLITION_API FMD_ScrapeContaminationDab
+{
+	GENERATED_BODY()
+
+public:
+	UPROPERTY()
+	FMD_ScrapeContaminationStampIdentity Identity;
+
+	UPROPERTY()
+	FVector2D PositionCm = FVector2D::ZeroVector;
+
+	UPROPERTY()
+	FMD_ScrapeBladeBasis BladeBasis;
+
+	UPROPERTY()
+	EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
+
+	UPROPERTY()
+	double ArcLengthCm = 0.0;
+
+	/** TASK 7 RPC sequence가 붙기 전에는 서버 로컬 승인 순번을 사용한다. */
+	UPROPERTY()
+	uint64 SampleSequence = 0;
+
+	UPROPERTY()
+	uint32 ToolSpecGeneration = 0;
+};
+
+/**
  * 플레이어가 한 프레임 또는 한 네트워크 갱신 구간 동안 이동시킨 헤라의 경로
  *
  * 좌표는 월드 좌표가 아니라 "오염 표면의 로컬 2D 좌표"를 사용.
@@ -90,6 +357,9 @@ public:
 		: SurfaceFace(EMD_ScrapeSurfaceFace::Front)
 		, StartPositionCm(FVector2D::ZeroVector)
 		, EndPositionCm(FVector2D::ZeroVector)
+		, TravelDistanceCm(0.0f)
+		, StartBladeBasis()
+		, EndBladeBasis()
 	{
 	}
 
@@ -108,6 +378,25 @@ public:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape")
 	FVector2D EndPositionCm;
+
+	/**
+	 * 이 구간이 담당하는 실제 누적 이동 거리.
+	 *
+	 * 0이면 기존 호출과 호환되도록 시작-끝 직선 거리를 사용한다. 양수 값은 명시 blade
+	 * basis와 함께 안정화된 polyline을 짧은 구간으로 replay할 때만 제거 작업량의 기준이 된다.
+	 * basis가 모두 미지정인 legacy 입력에서는 양수 값도 무시하고 직선 거리를 사용한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape",
+		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float TravelDistanceCm;
+
+	/** 구간 시작점에서의 명시적 표면 로컬 날 방향. 미지정 시 legacy tangent fallback을 쓴다. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Blade")
+	FMD_ScrapeBladeBasis StartBladeBasis;
+
+	/** 구간 끝점의 날 방향. 한쪽 끝만 지정하면 그 basis를 구간 전체에서 고정 사용한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Blade")
+	FMD_ScrapeBladeBasis EndBladeBasis;
 };
 
 /** 헤라가 표면과 접촉하는 브러시 형태 */
@@ -138,6 +427,7 @@ public:
 		, BladeWidthCm(12.0f)
 		, BladeDepthCm(12.0f)
 		, RemovalPerTravelCentimeter(0.08f)
+		, ReachCm(220.0f)
 	{
 	}
 
@@ -173,6 +463,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Tool",
 		meta = (ClampMin = "0.0001", UIMin = "0.001"))
 	float RemovalPerTravelCentimeter;
+
+	/**
+	 * 카메라 ray 기준으로 이 헤라가 작업 대상을 판정할 수 있는 최대 거리.
+	 *
+	 * 기존 제품 동작을 보존하는 임시 기본값은 220cm다. 각 도구의 출시 값은 실제
+	 * 메시·팔 IK 도달 시험 뒤 ToolDefinition의 ScrapeProfile에서 승인해야 한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Tool",
+		meta = (ClampMin = "1.0", UIMin = "1.0", Units = "cm"))
+	float ReachCm;
 
 	/**
 	 * 따개비를 때릴 수 있는 최소 헤라 속도
@@ -256,7 +556,9 @@ public:
 			&& FMath::IsFinite(BladeDepthCm)
 			&& BladeDepthCm > UE_SMALL_NUMBER
 			&& FMath::IsFinite(RemovalPerTravelCentimeter)
-			&& RemovalPerTravelCentimeter > UE_SMALL_NUMBER;
+			&& RemovalPerTravelCentimeter > UE_SMALL_NUMBER
+			&& FMath::IsFinite(ReachCm)
+			&& ReachCm > UE_SMALL_NUMBER;
 	}
 };
 
@@ -278,6 +580,7 @@ public:
 		, RemovalPerTravelCentimeter(0.08f)
 		, SampleSpacingRatioOfSmallestCell(0.5f)
 		, MaximumSampleSpacingCm(2.5f)
+		, MaximumBladeRotationDegreesPerSample(5.0f)
 		, MinimumTravelDistanceCm(0.1f)
 		, CleanTolerance(0.001f)
 	{
@@ -322,6 +625,17 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape",
 		meta = (ClampMin = "0.1", UIMin = "0.5", Units = "cm"))
 	float MaximumSampleSpacingCm;
+
+	/**
+	 * 인접 Evaluator 샘플 사이에서 허용하는 최대 날 회전각.
+	 *
+	 * 명시적 시작/끝 basis가 회전하면 이동 거리가 짧더라도 이 각도 이하가 되도록 추가
+	 * 세분화한다. 날 방향은 180도 동치이므로 실제 보간 회전은 항상 0~90도 범위다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape",
+		meta = (ClampMin = "0.1", ClampMax = "90.0", UIMin = "1.0",
+			UIMax = "30.0", Units = "deg"))
+	float MaximumBladeRotationDegreesPerSample;
 
 	/**
 	 * 이 거리보다 짧은 입력을 손 떨림이나 동일 위치 중복 입력으로 보고 무시하는 기준

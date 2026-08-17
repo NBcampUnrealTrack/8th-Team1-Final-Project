@@ -273,6 +273,8 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 	bContaminationCompletionBroadcast = false;
 	CachedFrontContaminationCleanRatio = 0.0f;
 	CachedBackContaminationCleanRatio = 0.0f;
+	AppliedContaminationStampIdentities.Reset();
+	AppliedContaminationStampIdentityOrder.Reset();
 	ContaminationCells.Reset();
 	ContaminationGeneratedInitialAmounts.Reset();
 	// 표면을 새로 만들면 아직 덩어리가 되지 못한 제거량도 같이 버린다.

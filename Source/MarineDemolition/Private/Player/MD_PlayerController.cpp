@@ -3,6 +3,7 @@
 
 #include "Player/MD_PlayerController.h"
 #include "UI/Game/MD_HUDWidget.h"
+#include "UI/Game/MD_ScrapeFocusReticleWidget.h"
 #include "UI/Equipment/MD_EquipHotbarWidget.h"
 
 #include "Engine/World.h"
@@ -18,15 +19,56 @@
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
+#include "Player/MD_PlayerCameraManager.h"
 
 #include "Engine/GameInstance.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+#include "Misc/CoreDelegates.h"
 #include "Online/Session/MD_MultiplayManager.h"
 
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Character/MD_Character.h"
 #include "World/Merchant/MD_Merchant.h"
+
+AMD_PlayerController::AMD_PlayerController()
+{
+	PlayerCameraManagerClass = AMD_PlayerCameraManager::StaticClass();
+	ScrapeFocusReticleWidgetClass = UMD_ScrapeFocusReticleWidget::StaticClass();
+}
+
+void AMD_PlayerController::CancelScrapeInteraction()
+{
+	AMD_Character* const ScrapeCharacter = Cast<AMD_Character>(GetPawn());
+	if (IsValid(ScrapeCharacter))
+	{
+		ScrapeCharacter->CancelScrapeInteraction();
+	}
+}
+
+void AMD_PlayerController::SetInputMode(const FInputModeDataBase& InData)
+{
+	// UI 전환으로 Completed/Canceled 입력을 잃기 전에 먼저 Focus와 Ability를 정리한다.
+	CancelScrapeInteraction();
+	Super::SetInputMode(InData);
+}
+
+void AMD_PlayerController::SetViewTarget(
+	AActor* NewViewTarget,
+	const FViewTargetTransitionParams TransitionParams)
+{
+	if (NewViewTarget != GetPawn())
+	{
+		// 컷신·관전 카메라가 Focus 고정 카메라와 경쟁하지 않게 먼저 정리한다.
+		CancelScrapeInteraction();
+	}
+	Super::SetViewTarget(NewViewTarget, TransitionParams);
+}
+
+void AMD_PlayerController::HandleApplicationWillDeactivate()
+{
+	CancelScrapeInteraction();
+}
 
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console, int32 SiteIndex, EMD_Difficulty Difficulty)
 {
@@ -189,6 +231,40 @@ void AMD_PlayerController::InitializeGameplayHUD()
 	}
 }
 
+void AMD_PlayerController::InitializeScrapeFocusReticle()
+{
+	if (IsLocalController() == false || ScrapeFocusReticleWidgetClass == nullptr)
+	{
+		return;
+	}
+
+	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
+	{
+		ScrapeFocusReticleWidgetInstance =
+			CreateWidget<UMD_ScrapeFocusReticleWidget>(
+				this,
+				ScrapeFocusReticleWidgetClass);
+	}
+
+	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
+	{
+		return;
+	}
+
+	// 파생 Blueprint defaults와 무관하게 이 overlay 전체를 비입력형으로 고정한다.
+	ScrapeFocusReticleWidgetInstance->SetVisibility(ESlateVisibility::HitTestInvisible);
+	ScrapeFocusReticleWidgetInstance->SetIsFocusable(false);
+	ScrapeFocusReticleWidgetInstance->ForceVolatile(true);
+
+	// Seamless Travel에서 유효한 위젯이 기존 viewport에서 제거된 경우에도 복구한다.
+	if (ScrapeFocusReticleWidgetInstance->IsInViewport() == false)
+	{
+		// Owning local player 영역에만 붙여 split-screen이나 다중 local player에서도
+		// 다른 플레이어의 normalized 좌표/입력을 시각화하지 않는다.
+		ScrapeFocusReticleWidgetInstance->AddToPlayerScreen(1000);
+	}
+}
+
 void AMD_PlayerController::MD_ApplyTestDamage()
 {
 	ServerApplyTestDamage();
@@ -328,6 +404,21 @@ void AMD_PlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 	InitializeGameplayHUD();
+
+	if (IsLocalController() == false)
+	{
+		return;
+	}
+
+	if (!ApplicationWillDeactivateHandle.IsValid())
+	{
+		ApplicationWillDeactivateHandle =
+			FCoreDelegates::ApplicationWillDeactivateDelegate.AddUObject(
+				this,
+				&AMD_PlayerController::HandleApplicationWillDeactivate);
+	}
+
+	InitializeScrapeFocusReticle();
 }
 
 void AMD_PlayerController::BeginPlayingState()
@@ -335,6 +426,7 @@ void AMD_PlayerController::BeginPlayingState()
 	Super::BeginPlayingState();
 
 	InitializeGameplayHUD();
+	InitializeScrapeFocusReticle();
 }
 
 void AMD_PlayerController::PostSeamlessTravel()
@@ -342,6 +434,7 @@ void AMD_PlayerController::PostSeamlessTravel()
 	Super::PostSeamlessTravel();
 
 	InitializeGameplayHUD();
+	InitializeScrapeFocusReticle();
 }
 
 void AMD_PlayerController::SetPawn(APawn* InPawn)
@@ -352,7 +445,27 @@ void AMD_PlayerController::SetPawn(APawn* InPawn)
 	{
 		// 최초 스폰과 재스폰 모두 Pawn 지정이 끝난 뒤 HUD를 보장하는 처리
 		InitializeGameplayHUD();
+		InitializeScrapeFocusReticle();
 	}
+}
+
+void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (ApplicationWillDeactivateHandle.IsValid())
+	{
+		FCoreDelegates::ApplicationWillDeactivateDelegate.Remove(
+			ApplicationWillDeactivateHandle);
+		ApplicationWillDeactivateHandle.Reset();
+	}
+
+	if (IsValid(ScrapeFocusReticleWidgetInstance))
+	{
+		ScrapeFocusReticleWidgetInstance->RemoveFromParent();
+		ScrapeFocusReticleWidgetInstance = nullptr;
+	}
+
+	CancelScrapeInteraction();
+	Super::EndPlay(EndPlayReason);
 }
 
 void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
