@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/AssetManagerTypes.h"
 #include "GameFramework/Actor.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "MD_QuestSampleSpawner.generated.h"
@@ -11,6 +12,7 @@ class UMD_MerchantSubsystem;
 class UMD_SiteDefinition;
 class AMD_SampleItem;
 struct FMD_MainQuestState;
+struct FMD_RepeatQuestPhaseData;
 struct FMD_RepeatQuestState;
 
 /**
@@ -53,24 +55,22 @@ protected:
 	/** 같은 등급 스포너가 여러 개일 때 반복 퀘스트를 담당할 대표 스포너 판정. */
 	bool IsPrimaryRepeatQuestSpawner() const;
 
-	/** 현재 월드에 존재하는 같은 등급 샘플 수 집계. */
-	int32 CountAvailableSamplesForGrade() const;
+	/** 현재 월드에 존재하는 같은 등급과 반복 퀘스트 Asset ID의 샘플 수 집계 */
+	int32 CountAvailableSamplesForGrade(const FPrimaryAssetId& QuestDefinitionId) const;
 
-	/** 반복 퀘스트 목표와 스포너 등급의 일치 여부 판정. */
-	bool MatchesRepeatQuest(const FMD_RepeatQuestState& QuestState) const;
+	/** 반복 퀘스트 페이즈와 스포너 등급의 일치 여부 판정 */
+	bool MatchesRepeatQuest(const FMD_RepeatQuestPhaseData& QuestPhase) const;
 
 	bool FindLinkedMainQuest(const UMD_MerchantSubsystem* MerchantSubsystem, FMD_MainQuestState& OutQuestState) const;
 
 	void RefreshLinkedQuestPreview();
 
-	bool MatchesLinkedQuest(const FMD_MainQuestState& QuestState) const;
-
 	bool HasOccupyingSamples() const;
 
 	void SpawnSamples(const FMD_MainQuestState& QuestState);
 
-	/** 회수 반복 퀘스트에 필요한 샘플 생성 처리. */
-	int32 SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, int32 SpawnCount);
+	/** 회수 반복 퀘스트에 필요한 샘플 생성 처리 */
+	void SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, int32 SpawnCount);
 
 	TArray<FTransform> CollectSpawnTransforms() const;
 
@@ -129,9 +129,6 @@ protected:
 
 	/** 이번 Active 주기에 스폰을 완료했는지. 계약 재시작(Locked) 시 리셋된다. */
 	bool bHasSpawnedForActiveQuest = false;
-
-	/** 같은 수락 상태에서 반복 퀘스트 샘플의 중복 생성을 막는 퀘스트 식별자 집합. */
-	TSet<FName> HandledRepeatQuestIds;
 
 	bool bSpawnerInitialized = false;
 

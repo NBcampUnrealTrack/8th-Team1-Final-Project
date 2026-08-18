@@ -39,6 +39,9 @@ public:
 	void SetRepeatQuest(const FMD_RepeatQuestState& QuestState);
 
 protected:
-	// 퀘스트 종류와 공통 정의 및 진행도를 실제 UI 요소에 적용하는 함수
-	void ApplyQuestData(EMD_QuestKind QuestKind, const FMD_QuestDefinitionData& Definition, int32 CurrentProgress);
+	// 메인 퀘스트 정의와 진행도를 실제 UI 요소에 적용하는 함수
+	void ApplyQuestData(const FMD_QuestDefinitionData& Definition, int32 CurrentProgress);
+
+	/** Primary Data Asset의 현재 페이즈와 진행도를 반복 퀘스트 HUD에 적용하는 함수 */
+	void ApplyRepeatQuestData(const FMD_RepeatQuestState& QuestState);
 };

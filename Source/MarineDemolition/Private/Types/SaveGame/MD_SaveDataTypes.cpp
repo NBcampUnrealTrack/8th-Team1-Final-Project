@@ -38,6 +38,15 @@ bool FMD_MerchantData::IsStructurallyValid() const
 		}
 	}
 
+	// 반복 퀘스트 상태가 Primary Data Asset과 페이즈 진행을 다시 찾을 최소 식별 정보를 갖는지 확인하는 검사
+	for (const FMD_RepeatQuestState& RepeatQuest : RepeatQuests)
+	{
+		if (RepeatQuest.HasValidDefinitionId() == false || RepeatQuest.CurrentPhaseIndex < 0 || RepeatQuest.CurrentProgress < 0)
+		{
+			return false;
+		}
+	}
+
 	return true;
 }
 
@@ -88,13 +97,17 @@ bool FMD_GameData::MigrateToCurrentVersion()
 		return false;
 	}
 
-	// 버전 필드가 없던 FInstancedStruct 기반 초기 슬롯을 동일한 필드 구조의 첫 정식 버전으로 승격하는 처리
-	if (SchemaVersion <= 0)
+	// 구형 반복 퀘스트 구조와 제거된 보상 수령 상태를 현재 의미로 오인하지 않고 안전하게 재선정하도록 비우는 마이그레이션
+	if (SchemaVersion < 4)
 	{
 		FMD_MerchantData MerchantData;
 		if (GetDataField(FMD_MerchantData::DataFieldKey, MerchantData) == true)
 		{
-			MerchantData.Affinity = FMath::Clamp(MerchantData.Affinity, -4.0f, 5.0f);
+			if (SchemaVersion <= 0)
+			{
+				MerchantData.Affinity = FMath::Clamp(MerchantData.Affinity, -4.0f, 5.0f);
+			}
+			MerchantData.RepeatQuests.Reset();
 			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
 		}
 	}
