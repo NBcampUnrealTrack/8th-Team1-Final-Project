@@ -72,6 +72,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "Score")
     int32 GetScore() const { return Score; }
 
+    // 서버 점수 원장에서 지정 Day에 발생한 증감만 합산하여 일일 보고서에 제공하는 함수
+    int32 GetScoreForDay(int32 Day) const;
+
     UPROPERTY(BlueprintAssignable, Category = "Score")
     FMD_OnScoreChanged OnScoreChanged;
 

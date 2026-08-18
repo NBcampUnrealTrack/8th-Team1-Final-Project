@@ -184,6 +184,21 @@ void AMD_GameStateBase::AddScoreDelta(int32 Delta)
     OnRep_Score();
 }
 
+int32 AMD_GameStateBase::GetScoreForDay(int32 Day) const
+{
+    // 계약 누적 점수와 분리된 일일 정산값을 구성하기 위한 해당 Day 원장 합계
+    int32 OutScore = 0;
+    for (const FMD_ScoreEntry& ScoreEntry : ScoreLog)
+    {
+        if (ScoreEntry.Day == Day)
+        {
+            OutScore += ScoreEntry.Delta;
+        }
+    }
+
+    return OutScore;
+}
+
 void AMD_GameStateBase::AddScoreEvent(FGameplayTag EventTag, int32 Count, bool bUseCountAsDelta)
 {
     if (HasAuthority() == false || Count == 0)

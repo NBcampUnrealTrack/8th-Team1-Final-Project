@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -10,6 +10,7 @@
 
 class AMD_CuttableWall;
 class AMD_GameStateBase;
+class AMD_PlayerController;
 class UMD_SiteDefinition;
 class UWorld;
 
@@ -26,6 +27,9 @@ public:
 
     // 정식 하루 마감 진입점. 18:00 자동·모선 인터랙트·MD_EndDay 공용, 하루 1회만 동작
     void RequestEndDay();
+
+    // 일일 보고서 확인 버튼을 누른 플레이어의 서버 요청으로 보류 중인 Day 전환을 확정하는 진입점
+    void ConfirmDayTransition(AMD_PlayerController* RequestingController);
 
     virtual void RestartPlayer(AController* NewPlayer) override;
 
@@ -100,6 +104,9 @@ private:
 
     // ExecuteDayTransition이 참조할 직전 판정 결과
     EMD_InspectionResult PendingResult = EMD_InspectionResult::NotApplicable;
+
+    // 여러 플레이어의 보고서 버튼 요청이 같은 Day 전환을 중복 실행하지 않도록 하는 서버 상태
+    bool bDayTransitionConfirmed = false;
 
     // 마감 확정 후 출발 연출을 보여줄 시간
     UPROPERTY(EditDefaultsOnly, Category = "Day")
