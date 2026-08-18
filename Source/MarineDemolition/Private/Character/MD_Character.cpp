@@ -50,6 +50,10 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+	// 1인칭 팔·도구 배치는 스켈레탈 메시의 애니메이션 평가가 끝난 뒤에 해야 한다.
+	// 기본 TG_PrePhysics 로 두면 이번 프레임 포즈가 아직 없어서 소켓 트랜스폼과
+	// 도구 회전을 한 프레임 늦게 읽고, 마우스를 드래그할 때 그 지연이 흔들림으로 보인다.
+	PrimaryActorTick.TickGroup = TG_PostUpdateWork;
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -465,6 +469,7 @@ void AMD_Character::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	UpdateFirstPersonArms(DeltaSeconds);
+	UpdateFirstPersonToolTransform();
 }
 
 void AMD_Character::RefreshFirstPersonArmsTick()
@@ -497,6 +502,42 @@ void AMD_Character::BindFirstPersonArmsToBodyPose()
 	}
 }
 
+void AMD_Character::UpdateFirstPersonToolTransform()
+{
+	const USkeletalMeshComponent* BodyMesh = GetMesh();
+	if (!IsValid(FirstPersonToolMesh) || !IsValid(FirstPersonMesh) || !IsValid(BodyMesh)
+		|| !IsLocallyControlled())
+	{
+		return;
+	}
+
+	if (!BodyMesh->DoesSocketExist(ToolAttachSocketName))
+	{
+		return;
+	}
+
+	const UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
+		? EquipHotbarComponent->GetCurrentTool()
+		: nullptr;
+
+	// 본체가 확정한 소켓 자세를 컴포넌트 공간으로 받아, 1인칭 팔이 놓인 자리에
+	// 그대로 얹는다. 팔로워가 자식 트랜스폼을 갱신하지 않는 문제를 우회한다.
+	const FTransform SocketLocal =
+		BodyMesh->GetSocketTransform(ToolAttachSocketName, RTS_Component);
+	FTransform Offset =
+		GetToolAttachTransform(FirstPersonToolMesh->GetStaticMesh(), CurrentTool);
+
+	// 날 축 roll 은 UpdateScrapeAnimationBlade 가 ThirdPersonToolMesh 의 상대
+	// 회전으로만 넣는다. 1인칭 도구는 그 처리에서 빠져 있어 같은 값을 얹어 준다.
+	if (IsValid(ThirdPersonToolMesh))
+	{
+		Offset.SetRotation(ThirdPersonToolMesh->GetRelativeRotation().Quaternion());
+	}
+
+	FirstPersonToolMesh->SetWorldTransform(
+		Offset * SocketLocal * FirstPersonMesh->GetComponentTransform());
+}
+
 void AMD_Character::UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget)
 {
 	if (!IsValid(FirstPersonArmsPivot) || !IsValid(Camera) || !IsLocallyControlled())
@@ -504,7 +545,15 @@ void AMD_Character::UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget
 		return;
 	}
 
-	const FRotator TargetRotation = GetControlRotation() + FirstPersonArmsRotationOffset;
+	// 헤라 포커스 중에는 화면이 ScrapeFocusViewRotation 으로 잠기고 마우스는
+	// 화면 안의 포인터만 움직인다. 그 구간에 컨트롤 회전을 따라가면 화면은
+	// 가만한데 팔만 매 틱 다시 세워져 떨린다. 그때는 CalcCamera 가 확정한
+	// 뷰 회전을 쓴다. 포커스가 아닐 때는 지연이 없도록 컨트롤 회전 그대로.
+	const bool bUseViewRotation = bHasLastViewRotation
+		&& IsValid(ScrapeToolComponent)
+		&& ScrapeToolComponent->IsScrapeFocusActive();
+	const FRotator BaseRotation = bUseViewRotation ? LastViewRotation : GetControlRotation();
+	const FRotator TargetRotation = BaseRotation + FirstPersonArmsRotationOffset;
 	const FVector TargetLocation =
 		Camera->GetComponentLocation() + TargetRotation.RotateVector(FirstPersonArmsOffset);
 
@@ -637,6 +686,11 @@ void AMD_Character::CalcCamera(
 	{
 		ScrapeToolComponent->ApplyScrapeFocusCameraView(OutResult);
 	}
+
+	// 포커스 조준 중에는 여기서 뷰가 잠긴 회전으로 덮인다. 팔 피벗이 화면과
+	// 같은 기준을 쓸 수 있도록 확정된 값을 남긴다.
+	LastViewRotation = OutResult.Rotation;
+	bHasLastViewRotation = true;
 }
 
 void AMD_Character::OnRep_Controller()
