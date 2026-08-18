@@ -50,6 +50,10 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+	// 1인칭 팔·도구 배치는 스켈레탈 메시의 애니메이션 평가가 끝난 뒤에 해야 한다.
+	// 기본 TG_PrePhysics 로 두면 이번 프레임 포즈가 아직 없어서 소켓 트랜스폼과
+	// 도구 회전을 한 프레임 늦게 읽고, 마우스를 드래그할 때 그 지연이 흔들림으로 보인다.
+	PrimaryActorTick.TickGroup = TG_PostUpdateWork;
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -92,7 +96,10 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 
 	FirstPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(
 		TEXT("FirstPersonToolMesh"));
-	FirstPersonToolMesh->SetupAttachment(FirstPersonMesh, ToolAttachSocketName);
+	// 팔로워 메시의 소켓에 붙이면 부착 시스템이 신뢰할 수 없는 소켓 트랜스폼으로
+	// 도구를 배치하고, 그 위에 UpdateFirstPersonToolTransform 이 다시 배치하면서
+	// 두 힘이 프레임마다 경쟁한다. 값을 직접 넣는 피벗에 붙여 부모를 확정한다.
+	FirstPersonToolMesh->SetupAttachment(FirstPersonArmsPivot);
 	FirstPersonToolMesh->SetOnlyOwnerSee(true);
 	FirstPersonToolMesh->SetOwnerNoSee(false);
 	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -465,6 +472,7 @@ void AMD_Character::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	UpdateFirstPersonArms(DeltaSeconds);
+	UpdateFirstPersonToolTransform();
 }
 
 void AMD_Character::RefreshFirstPersonArmsTick()
@@ -497,6 +505,47 @@ void AMD_Character::BindFirstPersonArmsToBodyPose()
 	}
 }
 
+void AMD_Character::UpdateFirstPersonToolTransform()
+{
+	const USkeletalMeshComponent* BodyMesh = GetMesh();
+	if (!IsValid(FirstPersonToolMesh) || !IsValid(FirstPersonMesh) || !IsValid(BodyMesh)
+		|| !IsLocallyControlled())
+	{
+		return;
+	}
+
+	if (!BodyMesh->DoesSocketExist(ToolAttachSocketName))
+	{
+		return;
+	}
+
+	const UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
+		? EquipHotbarComponent->GetCurrentTool()
+		: nullptr;
+
+	// 본체가 확정한 소켓 자세를 컴포넌트 공간으로 받아, 1인칭 팔이 놓인 자리에
+	// 그대로 얹는다. 팔로워가 자식 트랜스폼을 갱신하지 않는 문제를 우회한다.
+	const FTransform SocketLocal =
+		BodyMesh->GetSocketTransform(ToolAttachSocketName, RTS_Component);
+	FTransform Offset =
+		GetToolAttachTransform(FirstPersonToolMesh->GetStaticMesh(), CurrentTool);
+
+	// 날 축 roll 은 UpdateScrapeAnimationBlade 가 ThirdPersonToolMesh 의 상대
+	// 회전으로만 넣는다. 1인칭 도구는 그 처리에서 빠져 있어 같은 값을 얹어 준다.
+	if (IsValid(ThirdPersonToolMesh))
+	{
+		Offset.SetRotation(ThirdPersonToolMesh->GetRelativeRotation().Quaternion());
+	}
+
+	// 부모가 피벗(값이 확정적인 SceneComponent)이므로 월드로 지정해도 역산 기준이
+	// 흔들리지 않는다. 컴포넌트 계층이 어떻게 구성돼 있든 결과가 같도록
+	// 1인칭 팔의 월드 트랜스폼에서 곧바로 합성한다.
+	//   도구 →AttachOffset→ 본체 컴포넌트 공간 소켓 → 1인칭 팔 월드
+	FirstPersonToolMesh->SetWorldTransform(
+		Offset * SocketLocal * FirstPersonMesh->GetComponentTransform());
+
+}
+
 void AMD_Character::UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget)
 {
 	if (!IsValid(FirstPersonArmsPivot) || !IsValid(Camera) || !IsLocallyControlled())
@@ -504,6 +553,9 @@ void AMD_Character::UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget
 		return;
 	}
 
+	// 헤라 포커스 중에도 컨트롤 회전이 함께 잠긴다(측정으로 확인: 포커스 구간에서
+	// 컨트롤 회전과 카메라 최종 회전이 동일하고 둘 다 프레임 간 변화 0).
+	// 그래서 별도의 뷰 회전 조회 없이 컨트롤 회전만 따라가면 된다.
 	const FRotator TargetRotation = GetControlRotation() + FirstPersonArmsRotationOffset;
 	const FVector TargetLocation =
 		Camera->GetComponentLocation() + TargetRotation.RotateVector(FirstPersonArmsOffset);
@@ -637,6 +689,7 @@ void AMD_Character::CalcCamera(
 	{
 		ScrapeToolComponent->ApplyScrapeFocusCameraView(OutResult);
 	}
+
 }
 
 void AMD_Character::OnRep_Controller()
@@ -1363,15 +1416,15 @@ void AMD_Character::RefreshToolMesh()
 				: NAME_None;
 	};
 	const FName ThirdPersonSocketName = ResolveAttachSocket(GetMesh());
-	const FName FirstPersonSocketName = ResolveAttachSocket(FirstPersonMesh);
 
 	// 소켓의 위치·회전·스케일을 그대로 따르도록 스냅 부착
 	ThirdPersonToolMesh->AttachToComponent(
 		GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, ThirdPersonSocketName);
+	// 1인칭 도구의 배치는 UpdateFirstPersonToolTransform 이 매 프레임 계산한다.
+	// 부모는 값이 확정적인 피벗이어야 한다.
 	FirstPersonToolMesh->AttachToComponent(
-		FirstPersonMesh,
-		FAttachmentTransformRules::SnapToTargetIncludingScale,
-		FirstPersonSocketName);
+		FirstPersonArmsPivot,
+		FAttachmentTransformRules::KeepRelativeTransform);
 
 	const FTransform AttachOffset = IsValid(CurrentTool)
 		? CurrentTool->AttachOffset
@@ -1427,8 +1480,10 @@ void AMD_Character::RefreshScrapeLoadVisual()
 	}
 
 	const bool bShowTool = IsValid(NewToolMesh);
+	// 1인칭 도구도 본체 소켓에서 배치를 유도하므로 그쪽 유무로 판정한다.
 	const bool bHasFirstPersonSocket = IsValid(FirstPersonMesh)
-		&& FirstPersonMesh->DoesSocketExist(FirstPersonToolMesh->GetAttachSocketName());
+		&& IsValid(GetMesh())
+		&& GetMesh()->DoesSocketExist(ToolAttachSocketName);
 	const bool bHasThirdPersonSocket = IsValid(GetMesh())
 		&& GetMesh()->DoesSocketExist(ThirdPersonToolMesh->GetAttachSocketName());
 	FirstPersonToolMesh->SetStaticMesh(NewToolMesh);

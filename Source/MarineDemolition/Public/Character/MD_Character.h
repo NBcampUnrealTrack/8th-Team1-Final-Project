@@ -305,6 +305,17 @@ private:
 
 	void UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget = false);
 
+	/**
+	 * 1인칭 도구 메시를 본체 포즈에서 직접 배치한다.
+	 *
+	 * FirstPersonMesh 는 SetLeaderPoseComponent 팔로워라 자기 본 갱신 경로를
+	 * 건너뛴다. 그래서 그 본 소켓에 붙은 자식 컴포넌트는 본 단위 회전(날 비틀기)을
+	 * 받지 못하고, 1인칭에서만 도구가 안 도는 현상이 생긴다.
+	 * 본체의 컴포넌트 공간 소켓 트랜스폼을 1인칭 팔의 컴포넌트 트랜스폼에 얹는다.
+	 */
+	void UpdateFirstPersonToolTransform();
+
+
 private:
 	UFUNCTION()
 	void HandleHealthStateChanged(EMD_HealthState NewState);
