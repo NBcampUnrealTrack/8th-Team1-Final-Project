@@ -354,8 +354,9 @@ bool UMD_MerchantSubsystem::TryAcceptRepeatQuest(int32 QuestIndex)
 
 		if (Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress) == true)
 		{
-			ApplyRepeatQuestReward(*Definition);
+			// 보상 적용 중 재진입하더라도 동일 퀘스트를 다시 정산하지 않기 위한 선행 완료 확정
 			QuestState.Status = EMD_RepeatQuestStatus::Completed;
+			ApplyRepeatQuestReward(*Definition);
 			OnMerchantStateChanged.Broadcast();
 			return true;
 		}
@@ -503,7 +504,8 @@ void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDe
 
 	for (FMD_MainQuestState& QuestState : MainQuests)
 	{
-		if (QuestState.IsActive() == false)
+		// 파괴된 샘플과 직접 연결된 활성 메인 퀘스트만 실패 대상으로 인정하는 식별자 검사
+		if (QuestState.IsActive() == false || QuestState.DefinitionId != QuestDefinitionId)
 		{
 			continue;
 		}
@@ -831,12 +833,13 @@ void UMD_MerchantSubsystem::FailRepeatQuest(FMD_RepeatQuestState& QuestState, bo
 		return;
 	}
 
+	// 패널티 적용 중 재진입하더라도 동일 퀘스트를 다시 정산하지 않기 위한 선행 실패 확정
+	QuestState.Status = EMD_RepeatQuestStatus::Failed;
+
 	if (IsValid(Definition) == true)
 	{
 		ApplyRepeatQuestPenalty(*Definition, bDestroyed);
 	}
-
-	QuestState.Status = EMD_RepeatQuestStatus::Failed;
 }
 
 void UMD_MerchantSubsystem::AddCreditsInternal(int32 Amount)

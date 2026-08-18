@@ -528,11 +528,8 @@ void AMD_PlayerController::ServerAbandonRepeatQuest_Implementation(int32 Index)
 		return;
 	}
 
-	// 퀘스트 포기 요청 성공 시 점수 감소
-	if (Merchant->TryAbandonRepeatQuest(Index) == true)
-	{
-		MDGameState->AddScoreDelta(-100);
-	}
+	// 고정 점수 차감 없이 퀘스트 에셋의 미회수 패널티만 적용하는 포기 처리
+	Merchant->TryAbandonRepeatQuest(Index);
 }
 
 void AMD_PlayerController::ServerBorrowCredits_Implementation(AMD_Merchant* MerchantActor, int32 Amount)
