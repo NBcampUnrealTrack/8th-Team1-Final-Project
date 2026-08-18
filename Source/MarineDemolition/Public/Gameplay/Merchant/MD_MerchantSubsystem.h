@@ -16,6 +16,7 @@
 DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
 
 class UMD_SiteDefinition;
+class UMD_MainQuestDefinition;
 class UMD_RepeatQuestDefinition;
 class AMD_PlayerState;
 struct FGameplayTag;
@@ -157,8 +158,6 @@ private:
 
 	void FailMainQuest(FMD_MainQuestState& QuestState, EMD_QuestFailureReason Reason);
 
-	bool DoesQuestTargetGrade(const FMD_QuestDefinitionData& Definition, const FGameplayTag& GradeTag) const;
-
 	/** 반복 퀘스트 상태에서 원본 에셋과 현재 페이즈를 함께 검증하여 반환하는 함수 */
 	const FMD_RepeatQuestPhaseData* GetCurrentRepeatQuestPhase(const FMD_RepeatQuestState& QuestState, UMD_RepeatQuestDefinition*& OutDefinition) const;
 
@@ -178,7 +177,7 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMD_SiteDefinition> CurrentSite;
 
-	/** 메인 퀘스트 상태. UPROPERTY라 GC가 Definition 참조를 추적한다. */
+	/** 메인 퀘스트 상태. 원본 데이터는 PrimaryAssetId로 조회한다. */
 	UPROPERTY()
 	TArray<FMD_MainQuestState> MainQuests;
 
@@ -194,10 +193,8 @@ private:
 	/** 방송하지 않는 내부용. 여러 변경을 한 번에 묶을 때 쓴다. */
 	void AddCreditsInternal(int32 Amount);
 
-	/** 목표 등급·Intact 조건이 이 퀘스트에 맞는지 판정한다. */
-	bool DoesDeliveryMatch(const FMD_QuestDefinitionData& Definition, const FGameplayTag& GradeTag, bool bIntact) const;
-
-	void ApplyQuestReward(const FMD_QuestDefinitionData& Definition);
+	/** 성공한 메인 퀘스트 에셋의 크레딧·점수·호감도를 서버 원장에 적용하는 함수 */
+	void ApplyMainQuestReward(const UMD_MainQuestDefinition& Definition);
 
 	int32 Credits = 0;
 

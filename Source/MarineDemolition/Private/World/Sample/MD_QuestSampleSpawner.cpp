@@ -3,6 +3,7 @@
 #include "Components/ArrowComponent.h"
 #include "Components/SceneComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
+#include "Data/Merchant/MD_MainQuestDefinition.h"
 #include "Data/Merchant/MD_RepeatQuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Engine/GameInstance.h"
@@ -61,10 +62,14 @@ void AMD_QuestSampleSpawner::RefreshLinkedQuestPreview()
 {
 	if (const UMD_SiteDefinition* Site = QuestCatalogSite.LoadSynchronous())
 	{
-		if (Site->MainQuestLine.IsValidIndex(MainQuestIndex))
+		if (Site->MainQuestAssets.IsValidIndex(MainQuestIndex))
 		{
-			LinkedQuestName = Site->MainQuestLine[MainQuestIndex].QuestName;
-			return;
+			const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(Site->MainQuestAssets[MainQuestIndex]);
+			if (IsValid(Definition) == true)
+			{
+				LinkedQuestName = Definition->QuestName;
+				return;
+			}
 		}
 	}
 
@@ -385,8 +390,8 @@ bool AMD_QuestSampleSpawner::HasOccupyingSamples() const
 
 void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 {
-	const FMD_QuestDefinitionData& Definition = QuestState.Definition;
-	if (!Definition.IsValidDefinition())
+	const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	if (IsValid(Definition) == false || Definition->IsValidDefinition() == false)
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("[QuestSampleSpawner] %s: Day%d 퀘스트 Definition 없음"),
@@ -396,12 +401,12 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 
 	const FGameplayTag ExpectedGradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(SampleGrade);
 	if (ExpectedGradeTag.IsValid()
-		&& !Definition.TargetGradeTag.MatchesTagExact(ExpectedGradeTag))
+		&& !Definition->TargetGradeTag.MatchesTagExact(ExpectedGradeTag))
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("[QuestSampleSpawner] %s: [%s] SampleGrade와 퀘스트 등급 태그가 다르다"),
 			*GetName(),
-			*Definition.QuestName.ToString());
+			*Definition->QuestName.ToString());
 	}
 
 	const TArray<FTransform> SpawnTransforms = CollectSpawnTransforms();
@@ -416,17 +421,17 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 	// 기획 09 §1.5: 스폰 개수는 퀘스트 목표 개수와 1:1이고 여분 샘플은 두지 않는다.
 	// 여분이 있으면 그 하나가 깨져도 납품은 가능한데 퀘스트는 파괴로 실패해버려
 	// (§1.5 "실패 — 파괴, 재시도 불가") 회복 불가 상태가 된다. 배치 실수를 여기서 잡는다.
-	if (Definition.RequiredCount > 0 && SamplesToSpawn != Definition.RequiredCount)
+	if (Definition->RequiredCount > 0 && SamplesToSpawn != Definition->RequiredCount)
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("[QuestSampleSpawner] %s: [%s] SamplesToSpawn(%d)이 퀘스트 RequiredCount(%d)와 다르다 — 기획 09 §1.5는 1:1을 요구한다"),
 			*GetName(),
-			*Definition.QuestName.ToString(),
+			*Definition->QuestName.ToString(),
 			SamplesToSpawn,
-			Definition.RequiredCount);
+			Definition->RequiredCount);
 	}
 
-	const int32 SpawnCount = FMath::Max(1, QuestState.Definition.RequiredCount);
+	const int32 SpawnCount = FMath::Max(1, Definition->RequiredCount);
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -457,6 +462,7 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 			Sample->SetActorScale3D(SpawnScale);
 		}
 		Sample->Grade = SampleGrade;
+		Sample->QuestDefinitionId = QuestState.DefinitionId;
 		Sample->SpawnProtectionDuration = SampleSpawnProtectionDuration;
 
 		// 생성 직후 샘플 파괴 방지를 위하여 2초동안 무적 처리
@@ -465,7 +471,7 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 		UE_LOG(LogTemp, Log,
 			TEXT("[QuestSampleSpawner] %s: [%s] Day%d %s급 샘플 스폰 @ %s"),
 			*GetName(),
-			*Definition.QuestName.ToString(),
+			*Definition->QuestName.ToString(),
 			QuestState.UnlockDay,
 			*StaticEnum<EMD_SampleGrade>()->GetNameStringByValue(static_cast<int64>(SampleGrade)),
 			*Sample->GetActorLocation().ToCompactString());

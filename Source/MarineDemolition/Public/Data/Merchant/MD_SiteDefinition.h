@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Engine/AssetManagerTypes.h"
 #include "Engine/DataAsset.h"
-#include "Types/Merchant/MD_MerchantTypes.h"
 #include "MD_SiteDefinition.generated.h"
 
 class UMD_LoreCatalog;
@@ -18,9 +17,9 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
 	FText SiteName;
 
-	/** Day1, Day2, … 순서의 메인 퀘스트. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Main")
-	TArray<FMD_QuestDefinitionData> MainQuestLine;
+	/** Day1, Day2, … 순서로 사용할 MD_MainQuestDefinition 에셋의 PrimaryAssetId 목록 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Main", meta = (AllowedTypes = "Quest"))
+	TArray<FPrimaryAssetId> MainQuestAssets;
 
 	/** 현장에서 선택할 MD_RepeatQuestDefinition 에셋의 PrimaryAssetId 목록 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat", meta = (AllowedTypes = "Quest"))

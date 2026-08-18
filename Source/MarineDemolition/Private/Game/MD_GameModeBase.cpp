@@ -6,6 +6,7 @@
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Game/MD_GameStateBase.h"
+#include "Data/Merchant/MD_MainQuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Player/MD_PlayerController.h"
 #include "TimerManager.h"
@@ -263,10 +264,16 @@ bool AMD_GameModeBase::DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld*
     CurrentMapName.RemoveFromStart(World->StreamingLevelsPrefix);
 
     // 현장의 일차별 메인 퀘스트가 참조하는 실행 맵 검사
-    for (const FMD_QuestDefinitionData& MainQuestDefinition : Site->MainQuestLine)
+    for (const FPrimaryAssetId& MainQuestDefinitionId : Site->MainQuestAssets)
     {
+        const UMD_MainQuestDefinition* MainQuestDefinition = UMD_MainQuestDefinition::LoadDefinition(MainQuestDefinitionId);
+        if (IsValid(MainQuestDefinition) == false)
+        {
+            continue;
+        }
+
         // 소프트 월드 경로에서 추출한 비교용 맵 애셋 이름
-        FString QuestMapName = MainQuestDefinition.QuestMap.ToSoftObjectPath().GetAssetName();
+        FString QuestMapName = MainQuestDefinition->QuestMap.ToSoftObjectPath().GetAssetName();
         if (QuestMapName.IsEmpty() == false && QuestMapName == CurrentMapName)
         {
             return true;
@@ -738,7 +745,7 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
 
     // 같은 현장의 Day 전환은 유지하고 다른 현장 진입만 새 계약으로 교체하기 위한 현재 데이터
     UMD_SiteDefinition* CurrentSite = Merchant->GetCurrentSite();
-    if (CurrentSite != ResolvedSite)
+    if (CurrentSite != ResolvedSite || Merchant->GetMainQuests().IsEmpty() == true)
     {
         Merchant->BeginContract(ResolvedSite, ExpeditionAdvancePayment);
     }
