@@ -44,8 +44,14 @@ private:
     // 직접 맵 실행과 Day 재시작을 출발 난이도 지정 계약과 구분하기 위한 옵션 존재 여부
     bool bHasRequestedContractDifficulty = false;
 
-    // 서버 GameState에 검증된 출발 난이도를 계약 상태로 반영하는 처리
-    void ApplyRequestedContractDifficulty();
+    // 출발 요청 URL에서 검증한 계약 인원수를 GameState 생성 이후 적용하기 위한 임시 상태
+    int32 RequestedContractCrewCount = 0;
+
+    // 직접 맵 실행과 Day 재시작을 출발 인원 지정 계약과 구분하기 위한 옵션 존재 여부
+    bool bHasRequestedContractCrewCount = false;
+
+    // 서버 GameState에 검증된 출발 난이도와 인원수를 계약 상태로 반영하는 처리
+    void ApplyRequestedContractSettings();
 
     FTimerHandle CheckGameTimeTimerHandle;
 
@@ -81,9 +87,6 @@ private:
 
     // 게임 종료 세션 상태를 갱신한 뒤 대상 로비 레벨로 이동하는 함수
     void TravelToLevel(const TSoftObjectPtr<UWorld>& Level);
-
-    // 계약 시작(Day1 마감) 시점의 인원수를 GameState에 고정
-    void CaptureContractCrew();
 
     bool DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld* World) const;
 

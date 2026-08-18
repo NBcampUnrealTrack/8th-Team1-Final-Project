@@ -111,10 +111,32 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 		return;
 	}
 
+	// 서버가 출발 요청을 승인한 순간의 실제 접속 인원을 계약 인원으로 확정하기 위한 GameState 조회
+	AGameStateBase* TravelGameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState() : nullptr;
+	if (IsValid(TravelGameState) == false)
+	{
+		return;
+	}
+
+	// 접속 중인 PlayerState만 집계하여 클라이언트 입력으로 인원 배율을 조작할 수 없도록 하는 서버 계산
+	int32 ConnectedCrewCount = 0;
+	for (APlayerState* ConnectedPlayerState : TravelGameState->PlayerArray)
+	{
+		if (IsValid(ConnectedPlayerState) == true)
+		{
+			++ConnectedCrewCount;
+		}
+	}
+
+	// 점수표가 정의한 1~4인 계약 범위 안에서 사용할 최종 출발 인원수
+	int32 ContractCrewCount = FMath::Clamp(ConnectedCrewCount, 1, 4);
+
 	// uint8 기반 난이도를 동일한 저장 폭의 숫자 문자열로 직렬화하는 출발 옵션 구성
 	uint8 DifficultyValue = static_cast<uint8>(Difficulty);
 	FString TravelOptions = TEXT("?listen?Difficulty=");
 	TravelOptions.AppendInt(DifficultyValue);
+	TravelOptions.Append(TEXT("?CrewCount="));
+	TravelOptions.AppendInt(ContractCrewCount);
 
 	// Session 갱신과 ServerTravel 실행은 MultiplayManager에 위임하는 처리
 	MultiplayManager->StartSessionByMap(MapPackage, TravelOptions);

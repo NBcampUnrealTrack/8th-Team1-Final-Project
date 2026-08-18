@@ -33,28 +33,37 @@ void AMD_GameModeBase::InitGame(const FString& MapName, const FString& Options, 
 
     // 출발 콘솔이 전달한 난이도 옵션만 계약 난이도로 인정하기 위한 원문 검사
     FString DifficultyOption = UGameplayStatics::ParseOption(Options, TEXT("Difficulty"));
-    if (DifficultyOption.IsEmpty() == true)
+    if (DifficultyOption.IsEmpty() == false)
     {
-        return;
+        // 변조되거나 정의되지 않은 정수 값이 점검 기준을 오염시키지 않도록 하는 서버 검증
+        uint8 DifficultyValue = MAX_uint8;
+        if (LexTryParseString(DifficultyValue, *DifficultyOption) == true && DifficultyValue >= static_cast<uint8>(EMD_Difficulty::Safe) && DifficultyValue <= static_cast<uint8>(EMD_Difficulty::Extreme))
+        {
+            RequestedContractDifficulty = static_cast<EMD_Difficulty>(DifficultyValue);
+            bHasRequestedContractDifficulty = true;
+        }
     }
 
-    // 변조되거나 정의되지 않은 정수 값이 점검 기준을 오염시키지 않도록 하는 서버 검증
-    uint8 DifficultyValue = MAX_uint8;
-    if (LexTryParseString(DifficultyValue, *DifficultyOption) == false || DifficultyValue < static_cast<uint8>(EMD_Difficulty::Safe) || DifficultyValue > static_cast<uint8>(EMD_Difficulty::Extreme))
+    // 출발 서버가 확정한 인원수만 계약 인원수로 인정하기 위한 원문 검사
+    FString CrewCountOption = UGameplayStatics::ParseOption(Options, TEXT("CrewCount"));
+    if (CrewCountOption.IsEmpty() == false)
     {
-        return;
+        // 기획에서 지원하는 1~4인 범위 외 값이 점검 기준을 오염시키지 않도록 하는 서버 검증
+        int32 CrewCountValue = 0;
+        if (LexTryParseString(CrewCountValue, *CrewCountOption) == true && CrewCountValue >= 1 && CrewCountValue <= 4)
+        {
+            RequestedContractCrewCount = CrewCountValue;
+            bHasRequestedContractCrewCount = true;
+        }
     }
-
-    RequestedContractDifficulty = static_cast<EMD_Difficulty>(DifficultyValue);
-    bHasRequestedContractDifficulty = true;
 }
 
 void AMD_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();
 
-    // GameState 생성이 끝난 시점에 출발 화면에서 선택한 계약 난이도를 서버 원장에 반영
-    ApplyRequestedContractDifficulty();
+    // GameState 생성이 끝난 시점에 출발 서버가 확정한 계약 설정을 서버 원장에 반영
+    ApplyRequestedContractSettings();
 
     // 게임 맵의 액터 초기화 이후 새 게임 또는 불러오기 상태를 적용하기 위한 다음 틱 예약
     GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
@@ -85,20 +94,25 @@ void AMD_GameModeBase::BeginPlay()
     }
 }
 
-void AMD_GameModeBase::ApplyRequestedContractDifficulty()
+void AMD_GameModeBase::ApplyRequestedContractSettings()
 {
-    if (bHasRequestedContractDifficulty == false)
-    {
-        return;
-    }
-
     AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
     if (IsValid(MDGameState) == false)
     {
         return;
     }
 
-    MDGameState->SetContractDifficulty(RequestedContractDifficulty);
+    // 출발 콘솔을 거치지 않은 직접 맵 실행에서는 GameState의 표준 난이도 기본값 유지
+    if (bHasRequestedContractDifficulty == true)
+    {
+        MDGameState->SetContractDifficulty(RequestedContractDifficulty);
+    }
+
+    // 출발 콘솔을 거치지 않은 직접 맵 실행에서는 미확정 인원 상태 유지
+    if (bHasRequestedContractCrewCount == true)
+    {
+        MDGameState->SetContractCrewCount(RequestedContractCrewCount);
+    }
 }
 
 void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -259,9 +273,6 @@ EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
 
     FinalizeReturnStatuses();
 
-    // 인원 배율용 인원수 고정 (Day1에 한 번, 이후 스냅샷 캐리)
-    CaptureContractCrew();
-
     FinalizeDailyScore();
 
     PendingResult = EvaluateInspection();
@@ -269,28 +280,6 @@ EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
     CaptureDaySnapshot();
 
     return PendingResult;
-}
-
-void AMD_GameModeBase::CaptureContractCrew()
-{
-    AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>();
-
-    // 이미 고정됐으면 유지 (계약 시작 시점 인원 고정)
-    if (!IsValid(GS) || GS->GetContractCrewCount() > 0)
-    {
-        return;
-    }
-
-    int32 Crew = 0;
-    for (APlayerState* PlayerState : GS->PlayerArray)
-    {
-        if (Cast<AMD_PlayerState>(PlayerState))
-        {
-            ++Crew;
-        }
-    }
-
-    GS->SetContractCrewCount(FMath::Max(Crew, 1));
 }
 
 bool AMD_GameModeBase::DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld* World) const
