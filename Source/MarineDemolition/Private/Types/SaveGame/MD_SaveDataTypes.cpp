@@ -133,14 +133,14 @@ bool FMD_GameData::MigrateToCurrentVersion()
 			for (FMD_MainQuestState& MainQuest : MerchantData.MainQuests)
 			{
 				const int32 DefinitionIndex = MainQuest.UnlockDay - 1;
-				if (bCanRelinkAllMainQuests == false || Site->MainQuestAssets.IsValidIndex(DefinitionIndex) == false
-					|| Site->MainQuestAssets[DefinitionIndex].IsValid() == false)
+				if (bCanRelinkAllMainQuests == false || Site->MainQuestLine.IsValidIndex(DefinitionIndex) == false
+					|| Site->MainQuestLine[DefinitionIndex].IsValid() == false)
 				{
 					bCanRelinkAllMainQuests = false;
 					break;
 				}
 
-				MainQuest.DefinitionId = Site->MainQuestAssets[DefinitionIndex];
+				MainQuest.DefinitionId = Site->MainQuestLine[DefinitionIndex];
 			}
 
 			if (bCanRelinkAllMainQuests == false)

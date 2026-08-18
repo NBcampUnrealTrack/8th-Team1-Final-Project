@@ -258,13 +258,10 @@ bool AMD_GameModeBase::DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld*
         return false;
     }
 
-    // PIE 접두사를 제거하여 데이터 에셋 경로와 비교할 현재 맵 이름
-    FString CurrentMapName = World->GetMapName();
-    CurrentMapName.RemoveFromStart(World->StreamingLevelsPrefix);
-
-    // 현장에 한 번만 지정된 공통 원정 맵을 사용하여 퀘스트 목록 순회와 개별 에셋 로드를 피한다.
-    const FString QuestMapName = Site->QuestMap.ToSoftObjectPath().GetAssetName();
-    return QuestMapName.IsEmpty() == false && QuestMapName == CurrentMapName;
+    // PIE 접두사를 제거한 전체 오브젝트 경로를 비교하여 같은 이름의 다른 패키지를 오인하지 않는다.
+    const FSoftObjectPath SiteMapPath = Site->QuestMap.ToSoftObjectPath();
+    const FSoftObjectPath CurrentWorldPath = MakeWorldAssetReference(World).ToSoftObjectPath();
+    return SiteMapPath.IsNull() == false && SiteMapPath == CurrentWorldPath;
 }
 
 TSoftObjectPtr<UWorld> AMD_GameModeBase::MakeWorldAssetReference(UWorld* World) const

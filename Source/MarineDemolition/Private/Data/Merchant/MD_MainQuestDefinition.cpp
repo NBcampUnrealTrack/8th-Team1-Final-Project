@@ -1,7 +1,5 @@
 #include "Data/Merchant/MD_MainQuestDefinition.h"
 
-#include "Engine/AssetManager.h"
-
 UMD_MainQuestDefinition::UMD_MainQuestDefinition()
 {
 	// 반복 퀘스트와 같은 Asset Manager 스캔 그룹에서 클래스 캐스트로 종류를 구분한다.
@@ -10,26 +8,7 @@ UMD_MainQuestDefinition::UMD_MainQuestDefinition()
 
 UMD_MainQuestDefinition* UMD_MainQuestDefinition::LoadDefinition(const FPrimaryAssetId& DefinitionId)
 {
-	UMD_MainQuestDefinition* OutDefinition = nullptr;
-	if (DefinitionId.IsValid() == false)
-	{
-		return OutDefinition;
-	}
-
-	UAssetManager& AssetManager = UAssetManager::Get();
-	OutDefinition = Cast<UMD_MainQuestDefinition>(AssetManager.GetPrimaryAssetObject(DefinitionId));
-	if (IsValid(OutDefinition) == false)
-	{
-		const FSoftObjectPath DefinitionPath = AssetManager.GetPrimaryAssetPath(DefinitionId);
-		OutDefinition = Cast<UMD_MainQuestDefinition>(DefinitionPath.TryLoad());
-	}
-
-	if (IsValid(OutDefinition) == true && OutDefinition->GetPrimaryAssetId() != DefinitionId)
-	{
-		OutDefinition = nullptr;
-	}
-
-	return OutDefinition;
+	return Cast<UMD_MainQuestDefinition>(UMD_QuestDefinition::LoadDefinition(DefinitionId));
 }
 
 bool UMD_MainQuestDefinition::IsValidDefinition() const

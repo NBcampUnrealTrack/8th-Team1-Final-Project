@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/AssetManagerTypes.h"
@@ -24,7 +24,7 @@ public:
 
 	/** Day1, Day2, … 순서로 사용할 MD_MainQuestDefinition 에셋의 PrimaryAssetId 목록 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Main", meta = (AllowedTypes = "Quest"))
-	TArray<FPrimaryAssetId> MainQuestAssets;
+	TArray<FPrimaryAssetId> MainQuestLine;
 
 	/** 현장에서 선택할 MD_RepeatQuestDefinition 에셋의 PrimaryAssetId 목록 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat", meta = (AllowedTypes = "Quest"))

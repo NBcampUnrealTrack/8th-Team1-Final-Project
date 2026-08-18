@@ -62,9 +62,9 @@ void AMD_QuestSampleSpawner::RefreshLinkedQuestPreview()
 {
 	if (const UMD_SiteDefinition* Site = QuestCatalogSite.LoadSynchronous())
 	{
-		if (Site->MainQuestAssets.IsValidIndex(MainQuestIndex))
+		if (Site->MainQuestLine.IsValidIndex(MainQuestIndex))
 		{
-			const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(Site->MainQuestAssets[MainQuestIndex]);
+			const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(Site->MainQuestLine[MainQuestIndex]);
 			if (IsValid(Definition) == true)
 			{
 				LinkedQuestName = Definition->QuestName;
@@ -256,12 +256,17 @@ void AMD_QuestSampleSpawner::TrySpawnForRepeatQuestStates(const UMD_MerchantSubs
 		return;
 	}
 
-	// 메인 퀘스트와 반복 퀘스트가 같은 등급 샘플을 함께 인정하는 현재 납품 규칙에 맞춘 부족분 계산.
+	// 수락한 반복 퀘스트의 현재 페이즈에 연결된 샘플 부족분만 생성한다.
 	for (const FMD_RepeatQuestState& QuestState : MerchantSubsystem->GetRepeatQuests())
 	{
+		if (QuestState.Status != EMD_RepeatQuestStatus::Accepted)
+		{
+			continue;
+		}
+
 		const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(QuestState.DefinitionId);
 		const FMD_RepeatQuestPhaseData* CurrentPhase = IsValid(Definition) == true ? Definition->GetPhase(QuestState.CurrentPhaseIndex) : nullptr;
-		if (QuestState.Status != EMD_RepeatQuestStatus::Accepted || CurrentPhase == nullptr || Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress) == true || MatchesRepeatQuest(*CurrentPhase) == false)
+		if (CurrentPhase == nullptr || Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress) == true || MatchesRepeatQuest(*CurrentPhase) == false)
 		{
 			continue;
 		}
