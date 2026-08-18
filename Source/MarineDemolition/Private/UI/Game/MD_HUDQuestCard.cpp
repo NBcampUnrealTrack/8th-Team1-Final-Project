@@ -33,8 +33,9 @@ void UMD_HUDQuestCard::ApplyRepeatQuestData(const FMD_RepeatQuestState& QuestSta
 
 	if (IsValid(Txt_QuestDescription) == true)
 	{
-		// HUD에는 페이즈 설명 대신 기획에서 공통 표시로 확정한 QuestName만 사용하는 빈 본문
-		Txt_QuestDescription->SetText(FText::GetEmpty());
+		// 에셋에서 현재 페이즈에 직접 작성한 HUD 목표 내용만 표시하는 본문
+		FText PhaseDescription = CurrentPhase != nullptr ? CurrentPhase->HUDDescription : FText::GetEmpty();
+		Txt_QuestDescription->SetText(PhaseDescription);
 	}
 
 	if (IsValid(PB_QuestProgressRate) == true)

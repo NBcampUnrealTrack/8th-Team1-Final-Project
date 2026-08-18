@@ -23,6 +23,10 @@ struct MARINEDEMOLITION_API FMD_RepeatQuestPhaseData
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase", meta = (ClampMin = "1", UIMin = "1"))
 	int32 RequiredCount = 1;
 
+	/** 현재 페이즈 진행 중 HUD 퀘스트 카드에 표시할 목표 내용 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
+	FText HUDDescription;
+
 	/** 현재 페이즈의 회수 목표를 완료했을 때 표시할 대사 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
 	FText CompletionDialogue;
