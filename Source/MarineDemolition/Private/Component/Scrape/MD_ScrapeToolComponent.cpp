@@ -5,6 +5,7 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Camera/CameraComponent.h"
 #include "Camera/CameraTypes.h"
 #include "Camera/PlayerCameraManager.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
@@ -189,10 +190,22 @@ bool UMD_ScrapeToolComponent::TryBeginScrapeFocus()
 	const FMD_ScrapeAimQueryResult PreflightAim = QueryCurrentScrapeAim();
 	if (!PreflightAim.IsActionable())
 	{
+		UE_LOG(
+			LogTemp,
+			Log,
+			TEXT("[ScrapeFocus][Local][%s] Begin skipped: no actionable target (Blocked=%s, Component=%s)"),
+			*GetNameSafe(GetOwner()),
+			*GetNameSafe(PreflightAim.Hit.GetActor()),
+			*GetNameSafe(PreflightAim.Hit.GetComponent()));
 		return false;
 	}
 	if (!CaptureScrapeFocusView())
 	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[ScrapeFocus][Local][%s] Begin skipped: camera view unavailable"),
+			*GetNameSafe(GetOwner()));
 		return false;
 	}
 
@@ -265,6 +278,14 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 		const FRotator& ReplyViewRotation,
 		const float ReplyFOV)
 	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[ScrapeFocus][Server][%s] Begin rejected (Session=%llu, Reason=%d, Existing=%d)"),
+			*GetNameSafe(GetOwner()),
+			static_cast<unsigned long long>(FocusSessionId),
+			static_cast<int32>(SameSessionReason),
+			bIsSameAcceptedSession ? 1 : 0);
 		if (bIsSameAcceptedSession)
 		{
 			TerminateAuthoritativeScrapeFocus(SameSessionReason);
@@ -291,6 +312,19 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 		|| RequestedAspectRatio < MinimumSupportedFocusAspectRatio
 		|| RequestedAspectRatio > MaximumSupportedFocusAspectRatio)
 	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[ScrapeFocus][Server][%s] Invalid Begin payload: Session=%llu RotationNaN=%d FOV=%.3f Aspect=%.4f HalfTangents=(%.4f, %.4f) SupportedAspect=(%.4f, %.4f)"),
+			*GetNameSafe(GetOwner()),
+			static_cast<unsigned long long>(FocusSessionId),
+			RequestedViewRotation.ContainsNaN() ? 1 : 0,
+			RequestedFOV,
+			RequestedAspectRatio,
+			RequestedHorizontalHalfTangent,
+			RequestedVerticalHalfTangent,
+			MinimumSupportedFocusAspectRatio,
+			MaximumSupportedFocusAspectRatio);
 		RejectBegin(
 			EMD_ScrapeFocusTerminationReason::ProtocolViolation,
 			FRotator::ZeroRotator,
@@ -306,11 +340,12 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 		return;
 	}
 
-	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
-	const AController* const OwnerController = OwnerPawn
+	APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+	AController* const OwnerController = OwnerPawn
 		? OwnerPawn->GetController()
 		: nullptr;
-	if (!OwnerController)
+	FMinimalViewInfo ServerViewInfo;
+	if (!TryGetAuthoritativeScrapeView(ServerViewInfo))
 	{
 		RejectBegin(
 			EMD_ScrapeFocusTerminationReason::ViewInvalid,
@@ -319,32 +354,17 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 		return;
 	}
 
-	FVector ServerEyeLocation = FVector::ZeroVector;
-	FRotator ServerViewRotation = FRotator::ZeroRotator;
-	OwnerController->GetPlayerViewPoint(ServerEyeLocation, ServerViewRotation);
-	const APlayerController* const PlayerController = Cast<APlayerController>(
-		OwnerController);
-	const APlayerCameraManager* const PlayerCameraManager = PlayerController
-		? PlayerController->PlayerCameraManager
-		: nullptr;
-	if (!PlayerCameraManager)
-	{
-		RejectBegin(
-			EMD_ScrapeFocusTerminationReason::ViewInvalid,
-			ServerViewRotation,
-			90.0f);
-		return;
-	}
-
-	const float ServerFOV = PlayerCameraManager->GetFOVAngle();
+	const FVector ServerEyeLocation = ServerViewInfo.Location;
+	const FRotator ServerViewRotation = ServerViewInfo.Rotation;
+	const float ServerFOV = ServerViewInfo.FOV;
+	const FRotator ApprovedViewRotation = RequestedViewRotation.GetNormalized();
 	const ULocalPlayer* const LocalPlayerDefaults = GetDefault<ULocalPlayer>();
 	const EAspectRatioAxisConstraint DefaultAxisConstraint =
 		LocalPlayerDefaults
 			? static_cast<EAspectRatioAxisConstraint>(
 				LocalPlayerDefaults->AspectRatioAxisConstraint.GetValue())
 			: AspectRatio_MaintainYFOV;
-	FMinimalViewInfo RequestedProjectionView =
-		PlayerCameraManager->GetCameraCacheView();
+	FMinimalViewInfo RequestedProjectionView = ServerViewInfo;
 	RequestedProjectionView.FOV = RequestedFOV;
 	float RequestedProjectionHorizontalHalfTangent = 0.0f;
 	float RequestedProjectionVerticalHalfTangent = 0.0f;
@@ -365,8 +385,7 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 
 	float LiveHorizontalHalfTangent = 0.0f;
 	float LiveVerticalHalfTangent = 0.0f;
-	FMinimalViewInfo LiveProjectionView =
-		PlayerCameraManager->GetCameraCacheView();
+	FMinimalViewInfo LiveProjectionView = ServerViewInfo;
 	LiveProjectionView.FOV = ServerFOV;
 	float AuthorityPolicyHorizontalHalfTangent = 0.0f;
 	float AuthorityPolicyVerticalHalfTangent = 0.0f;
@@ -425,14 +444,16 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 			&& FMath::Abs(RequestedVerticalHalfTangent
 					- ScrapeFocusVerticalHalfTangent)
 				<= ProjectionHalfTangentTolerance);
+	const bool bRequestedViewMatchesAgreedSession =
+		!bIsSameAcceptedSession
+		|| CalculateRotatorErrorDegrees(
+			ApprovedViewRotation,
+			ScrapeFocusViewRotation)
+			<= FMath::Max(BeginBasisRotationToleranceDegrees, 0.0f);
 	const bool bLiveViewMatchesAgreedSession = !bIsSameAcceptedSession
 		|| (bHasScrapeFocusView
 			&& FVector::Distance(ServerEyeLocation, ScrapeFocusViewOrigin)
 				<= FMath::Max(ScrapeFocusViewOriginDriftToleranceCm, 0.0f)
-			&& CalculateRotatorErrorDegrees(
-				ServerViewRotation,
-				ScrapeFocusViewRotation)
-				<= FMath::Max(BeginBasisRotationToleranceDegrees, 0.0f)
 			&& FMath::Abs(ServerFOV - ScrapeFocusViewFOV)
 				<= FMath::Max(BeginFOVToleranceDegrees, 0.0f)
 			&& bLiveProjectionMatchesAgreedSession);
@@ -443,18 +464,28 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 		&& bAuthorityProjectionPolicyValid
 		&& bAuthorityProjectionMatchesAgreedSession
 		&& bRequestedContractMatchesAgreedSession
+		&& bRequestedViewMatchesAgreedSession
 		&& bLiveViewMatchesAgreedSession
-		&& CalculateRotatorErrorDegrees(
-			RequestedViewRotation,
-			ServerViewRotation)
-			<= FMath::Max(BeginBasisRotationToleranceDegrees, 0.0f)
 		&& FMath::Abs(RequestedFOV - ServerFOV)
 			<= FMath::Max(BeginFOVToleranceDegrees, 0.0f);
 	const FMD_ScrapeAimQueryResult Preflight = bBasisMatches
-		? QueryScrapeAim(ServerEyeLocation, ServerViewRotation.Vector())
+		? QueryScrapeAim(ServerEyeLocation, ApprovedViewRotation.Vector())
 		: FMD_ScrapeAimQueryResult();
 	if (!bBasisMatches || !Preflight.IsActionable())
 	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[ScrapeFocus][Server][%s] Begin denied: Basis=%d Target=%d RotationError=%.2f FOV(client/server)=%.2f/%.2f Aspect=%.4f"),
+			*GetNameSafe(GetOwner()),
+			bBasisMatches ? 1 : 0,
+			Preflight.IsActionable() ? 1 : 0,
+			CalculateRotatorErrorDegrees(
+				ApprovedViewRotation,
+				ServerViewRotation),
+			RequestedFOV,
+			ServerFOV,
+			RequestedAspectRatio);
 		RejectBegin(
 			EMD_ScrapeFocusTerminationReason::ViewInvalid,
 			ServerViewRotation,
@@ -471,6 +502,14 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 			ScrapeFocusViewFOV,
 			ScrapeFocusAuthorityHorizontalHalfTangent,
 			ScrapeFocusAuthorityVerticalHalfTangent);
+		return;
+	}
+	if (!OwnerController)
+	{
+		RejectBegin(
+			EMD_ScrapeFocusTerminationReason::ViewInvalid,
+			ServerViewRotation,
+			ServerFOV);
 		return;
 	}
 
@@ -501,8 +540,14 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 	bBufferedPreFirstAimReplayDiscontinuous = false;
 	AuthoritativeAimRateTokens = AuthoritativeAimBurstCapacity;
 	LastAuthoritativeAimRateRefillSeconds = GetScrapeMonotonicSeconds();
+	// The owning client already controls this rotation through CharacterMovement.
+	// The Reliable Begin carries the newest sample and can legitimately arrive
+	// before its Unreliable movement packet. Adopt it so remote clients use the
+	// same frozen Focus basis as a listen host, while origin/FOV/trace remain
+	// server authoritative.
+	OwnerController->SetControlRotation(ApprovedViewRotation);
 	ScrapeFocusViewOrigin = ServerEyeLocation;
-	ScrapeFocusViewRotation = ServerViewRotation;
+	ScrapeFocusViewRotation = ApprovedViewRotation;
 	ScrapeFocusViewFOV = ServerFOV;
 	ScrapeFocusAspectRatio = RequestedAspectRatio;
 	ScrapeFocusHorizontalHalfTangent =
@@ -522,7 +567,7 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 	ClientScrapeFocusBeginResult(
 		FocusSessionId,
 		EMD_ScrapeFocusBeginResult::Accepted,
-		ServerViewRotation,
+		ApprovedViewRotation,
 		ServerFOV,
 		ApprovedHorizontalHalfTangent,
 		ApprovedVerticalHalfTangent);
@@ -777,6 +822,52 @@ bool UMD_ScrapeToolComponent::RefreshScrapeFocusAim()
 	return CurrentScrapeAim.IsActionable();
 }
 
+bool UMD_ScrapeToolComponent::TryGetAuthoritativeScrapeView(
+	FMinimalViewInfo& OutViewInfo) const
+{
+	OutViewInfo = FMinimalViewInfo();
+	APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+	const AController* const OwnerController = OwnerPawn
+		? OwnerPawn->GetController()
+		: nullptr;
+	if (!OwnerPawn
+		|| !OwnerController
+		|| !GetOwner()->HasAuthority())
+	{
+		return false;
+	}
+
+	// A remote server PlayerCameraManager does not continuously evaluate the
+	// owning client's camera. Its cache can therefore retain the default 4:3
+	// projection (and a stale pose), while the client is using the Character's
+	// actual CameraComponent. Read that raw component view directly; calling the
+	// Pawn's CalcCamera here would feed the already-frozen scrape Focus view back
+	// into this validation on a listen server.
+	TInlineComponentArray<UCameraComponent*> CameraComponents;
+	OwnerPawn->GetComponents(CameraComponents);
+	UCameraComponent* ActiveCamera = nullptr;
+	for (UCameraComponent* CameraComponent : CameraComponents)
+	{
+		if (IsValid(CameraComponent) && CameraComponent->IsActive())
+		{
+			ActiveCamera = CameraComponent;
+			break;
+		}
+	}
+	if (!ActiveCamera)
+	{
+		return false;
+	}
+	ActiveCamera->GetCameraView(0.0f, OutViewInfo);
+	OutViewInfo.Rotation = OwnerController->GetControlRotation();
+	return !OutViewInfo.Location.ContainsNaN()
+		&& !OutViewInfo.Rotation.ContainsNaN()
+		&& FMath::IsFinite(OutViewInfo.FOV)
+		&& OutViewInfo.FOV > UE_SMALL_NUMBER
+		&& FMath::IsFinite(OutViewInfo.AspectRatio)
+		&& OutViewInfo.AspectRatio > UE_SMALL_NUMBER;
+}
+
 bool UMD_ScrapeToolComponent::IsScrapeFocusViewOriginValid() const
 {
 	if (!IsScrapeFocusActive() || !bHasScrapeFocusView)
@@ -794,8 +885,22 @@ bool UMD_ScrapeToolComponent::IsScrapeFocusViewOriginValid() const
 	}
 
 	FVector CurrentViewLocation = FVector::ZeroVector;
-	FRotator CurrentViewRotation = FRotator::ZeroRotator;
-	OwnerController->GetPlayerViewPoint(CurrentViewLocation, CurrentViewRotation);
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		FMinimalViewInfo ServerViewInfo;
+		if (!TryGetAuthoritativeScrapeView(ServerViewInfo))
+		{
+			return false;
+		}
+		CurrentViewLocation = ServerViewInfo.Location;
+	}
+	else
+	{
+		FRotator CurrentViewRotation = FRotator::ZeroRotator;
+		OwnerController->GetPlayerViewPoint(
+			CurrentViewLocation,
+			CurrentViewRotation);
+	}
 	const float DriftToleranceCm = FMath::Max(
 		ScrapeFocusViewOriginDriftToleranceCm,
 		0.0f);
@@ -1899,27 +2004,27 @@ bool UMD_ScrapeToolComponent::ValidateAndCacheAuthoritativeAim(
 		return false;
 	}
 
-	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
-	const AController* const OwnerController = OwnerPawn
-		? OwnerPawn->GetController()
-		: nullptr;
-	if (!OwnerController || !IsScrapeToolCurrentlyEligible())
+	if (!IsScrapeToolCurrentlyEligible())
 	{
 		TerminateAuthoritativeScrapeFocus(
 			EMD_ScrapeFocusTerminationReason::EligibilityLost);
 		return false;
 	}
-	FVector ServerEyeLocation = FVector::ZeroVector;
-	FRotator ServerViewRotation = FRotator::ZeroRotator;
-	OwnerController->GetPlayerViewPoint(ServerEyeLocation, ServerViewRotation);
+	FMinimalViewInfo ServerViewInfo;
+	if (!TryGetAuthoritativeScrapeView(ServerViewInfo))
+	{
+		TerminateAuthoritativeScrapeFocus(
+			EMD_ScrapeFocusTerminationReason::ViewInvalid);
+		return false;
+	}
+	const FVector ServerEyeLocation = ServerViewInfo.Location;
+	// The accepted Focus basis is frozen for the session. A delayed movement
+	// packet may temporarily restore the pre-Begin ControlRotation, so continuous
+	// samples validate their server-owned origin and session-relative direction
+	// without comparing against that independently ordered live rotation.
 	if (ServerEyeLocation.ContainsNaN()
-		|| ServerViewRotation.ContainsNaN()
 		|| FVector::Distance(ServerEyeLocation, ScrapeFocusViewOrigin)
-			> FMath::Max(ScrapeFocusViewOriginDriftToleranceCm, 0.0f)
-		|| CalculateRotatorErrorDegrees(
-			ServerViewRotation,
-			ScrapeFocusViewRotation)
-			> FMath::Max(BeginBasisRotationToleranceDegrees, 0.0f))
+			> FMath::Max(ScrapeFocusViewOriginDriftToleranceCm, 0.0f))
 	{
 		TerminateAuthoritativeScrapeFocus(
 			EMD_ScrapeFocusTerminationReason::ViewInvalid);
@@ -2625,8 +2730,20 @@ bool UMD_ScrapeToolComponent::ValidateReconnectBridge(
 	}
 
 	FVector ViewLocation = FVector::ZeroVector;
-	FRotator ViewRotation = FRotator::ZeroRotator;
-	OwnerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		FMinimalViewInfo ServerViewInfo;
+		if (!TryGetAuthoritativeScrapeView(ServerViewInfo))
+		{
+			return false;
+		}
+		ViewLocation = ServerViewInfo.Location;
+	}
+	else
+	{
+		FRotator ViewRotation = FRotator::ZeroRotator;
+		OwnerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	}
 	const FVector AimDirection = MidpointWorldPosition - ViewLocation;
 	if (ViewLocation.ContainsNaN()
 		|| AimDirection.ContainsNaN()

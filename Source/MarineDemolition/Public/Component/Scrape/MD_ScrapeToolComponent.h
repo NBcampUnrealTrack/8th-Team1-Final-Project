@@ -717,6 +717,7 @@ private:
 	void ResetScrapeFocusSessionState();
 	void EndScrapeFocusInternal(bool bSendServerEnd);
 	bool CaptureScrapeFocusView();
+	bool TryGetAuthoritativeScrapeView(FMinimalViewInfo& OutViewInfo) const;
 	bool IsScrapeFocusViewOriginValid() const;
 	void TerminateScrapeFocusFromComponent();
 	void TerminateAuthoritativeScrapeFocus(
@@ -776,7 +777,8 @@ private:
 	static constexpr double MaximumAuthoritativeAimRateHz = 30.0;
 	static constexpr double AuthoritativeAimBurstCapacity = 3.0;
 	static constexpr int32 MaximumBufferedPreFirstAimSamples = 8;
-	static constexpr float MinimumSupportedFocusAspectRatio = 4.0f / 3.0f;
+	/** Supports both landscape and portrait PIE/client windows up to 32:9 either way. */
+	static constexpr float MinimumSupportedFocusAspectRatio = 9.0f / 32.0f;
 	static constexpr float MaximumSupportedFocusAspectRatio = 32.0f / 9.0f;
 	/**
 	 * Trusted server policy used when a remote viewport is unavailable (including
