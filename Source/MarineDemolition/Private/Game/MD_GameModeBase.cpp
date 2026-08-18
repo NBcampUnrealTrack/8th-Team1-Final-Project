@@ -259,6 +259,10 @@ EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
 
     bDayFinalized = true;
 
+    // 복귀 구역 샘플 제출을 퀘스트 실패 확정보다 먼저 반영하기 위한 마감 순서
+    FinalizeReturnStatuses();
+    FinalizeDeliveredSamples();
+
     if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
     {
         if (UMD_MerchantSubsystem* Merchant =
@@ -270,8 +274,6 @@ EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
 			Merchant->ApplyDailyLoanInterest();
         }
     }
-
-    FinalizeReturnStatuses();
 
     FinalizeDailyScore();
 
@@ -496,6 +498,60 @@ void AMD_GameModeBase::FinalizeReturnStatuses()
     }
 }
 
+void AMD_GameModeBase::FinalizeDeliveredSamples()
+{
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
+    if (IsValid(Merchant) == false)
+    {
+        return;
+    }
+
+    // 마감 순간 샘플의 제출 여부를 위치로 판정하기 위한 복귀 구역 목록
+    TArray<AMD_ReturnZone*> ReturnZones;
+    for (TActorIterator<AMD_ReturnZone> It(GetWorld()); It; ++It)
+    {
+        ReturnZones.Add(*It);
+    }
+
+    for (TActorIterator<AMD_SampleItem> It(GetWorld()); It; ++It)
+    {
+        AMD_SampleItem* Sample = *It;
+        if (IsValid(Sample) == false)
+        {
+            continue;
+        }
+
+        // 복귀 구역 경계 내부에 존재하는 샘플만 자동 제출 대상으로 인정하는 위치 판정
+        FVector SampleLocation = Sample->GetActorLocation();
+        bool bDelivered = ReturnZones.ContainsByPredicate(
+            [&SampleLocation](const AMD_ReturnZone* Zone)
+            {
+                bool bContainsSample = IsValid(Zone) == true && Zone->ContainsPoint(SampleLocation) == true;
+                return bContainsSample;
+            });
+        if (bDelivered == false)
+        {
+            continue;
+        }
+
+        // 액터 제거 이후 퀘스트 제출에 사용할 Definition ID·등급·손상 상태 복사
+        FPrimaryAssetId QuestDefinitionId = Sample->QuestDefinitionId;
+        FGameplayTag GradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(Sample->Grade);
+        bool bIntact = Sample->bDamaged == false;
+
+        // 제거가 확정된 샘플만 제출 처리하여 다음 Day 중복 진행을 막는 처리
+        bool bSampleDestroyed = Sample->Destroy();
+        if (bSampleDestroyed == false)
+        {
+            continue;
+        }
+
+        // 샘플 자체 보상 없이 연결된 QuestDefinition의 성공 Reward 판정만 진행하는 제출 통지
+        Merchant->NotifySampleDelivered(QuestDefinitionId, GradeTag, bIntact);
+    }
+}
+
 void AMD_GameModeBase::FinalizeDailyScore()
 {
     AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
@@ -533,39 +589,6 @@ void AMD_GameModeBase::FinalizeDailyScore()
     else if (PlayerCount > 0)
     {
         MDGameState->AddScoreEvent(MDGameplayTags::Score_Daily_AllReturned);
-    }
-
-    // 샘플 정산: 복귀 구역 안 = 납품, 밖 = 미회수
-    TArray<AMD_ReturnZone*> ReturnZones;
-
-    for (TActorIterator<AMD_ReturnZone> It(GetWorld()); It; ++It)
-    {
-        ReturnZones.Add(*It);
-    }
-
-    for (TActorIterator<AMD_SampleItem> It(GetWorld()); It; ++It)
-    {
-        AMD_SampleItem* Sample = *It;
-
-        const bool bDelivered = ReturnZones.ContainsByPredicate(
-            [Sample](const AMD_ReturnZone* Zone)
-            {
-                return Zone->ContainsPoint(Sample->GetActorLocation());
-            });
-
-        if (bDelivered)
-        {
-            MDGameState->AddSampleScoreEvent(
-                Sample->Grade,
-                Sample->bDamaged ? EMD_SampleScoreType::Damaged : EMD_SampleScoreType::Intact);
-
-            // 납품 완료된 샘플은 제거 → 스냅샷에서 빠져 다음날 중복 정산 없음
-            Sample->Destroy();
-        }
-        else
-        {
-            MDGameState->AddSampleScoreEvent(Sample->Grade, EMD_SampleScoreType::Unrecovered);
-        }
     }
 
     // 현장 미수거: 월드에 남은 분리 대상. 현재는 벽 조각만 집계

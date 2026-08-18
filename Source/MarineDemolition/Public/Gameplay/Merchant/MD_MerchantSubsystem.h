@@ -21,6 +21,7 @@ class UMD_RepeatQuestDefinition;
 class AMD_PlayerState;
 struct FGameplayTag;
 struct FMD_MerchantData;
+struct FMD_QuestRewardData;
 struct FMD_RepeatQuestPhaseData;
 struct FMD_ShopItem;
 
@@ -156,7 +157,11 @@ public:
 
 private:
 
-	void FailMainQuest(FMD_MainQuestState& QuestState, EMD_QuestFailureReason Reason);
+	/** 활성 메인 퀘스트를 검증하고 Definition의 실패 원인별 Penalty를 한 번 적용하는 함수 */
+	bool FailMainQuest(FMD_MainQuestState& QuestState, EMD_QuestFailureReason Reason);
+
+	/** QuestDefinition의 Reward 또는 Penalty를 성공·실패 방향으로 서버 원장에 적용하는 함수 */
+	void ApplyQuestRewardData(const FMD_QuestRewardData& RewardData, bool bPenalty);
 
 	/** 반복 퀘스트 상태에서 원본 에셋과 현재 페이즈를 함께 검증하여 반환하는 함수 */
 	const FMD_RepeatQuestPhaseData* GetCurrentRepeatQuestPhase(const FMD_RepeatQuestState& QuestState, UMD_RepeatQuestDefinition*& OutDefinition) const;

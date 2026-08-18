@@ -62,6 +62,9 @@ private:
 
     void FinalizeReturnStatuses();
 
+    // Day 마감 시 복귀 구역 내부 샘플을 퀘스트 제출로 확정하는 처리
+    void FinalizeDeliveredSamples();
+
  //Collapse Score
 private:
     UFUNCTION()
@@ -119,7 +122,7 @@ private:
     // 같은 레벨 재로드 → 복원 경로에서 Day+1 진입
     void TravelToNextDay();
 
-    // 18:00 정산 시점 요소 일괄 적용 (복귀·샘플 납품/미회수·현장 미수거)
+    // 18:00 정산 시점의 인원 복귀 점수와 현장 미수거 점수를 적용하는 처리
     void FinalizeDailyScore();
 
     // Day2/3/4 점검 판정 + 경고/게임오버 상태 적용
