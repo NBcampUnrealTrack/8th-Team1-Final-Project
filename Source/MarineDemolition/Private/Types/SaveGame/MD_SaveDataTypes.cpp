@@ -2,6 +2,7 @@
 
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 
+#include "Data/Merchant/MD_SiteDefinition.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Types/Lore/MD_LoreTypes.h"
 
@@ -33,6 +34,15 @@ bool FMD_MerchantData::IsStructurallyValid() const
 	for (const TPair<FName, int32>& PurchasedItemEntry : PurchasedItemCounts)
 	{
 		if (PurchasedItemEntry.Key.IsNone() == true || PurchasedItemEntry.Value <= 0)
+		{
+			return false;
+		}
+	}
+
+	// 메인 퀘스트 상태가 원본 Primary Data Asset을 다시 찾을 식별자와 유효한 진행도를 갖는지 확인하는 검사
+	for (const FMD_MainQuestState& MainQuest : MainQuests)
+	{
+		if (MainQuest.HasValidDefinitionId() == false || MainQuest.UnlockDay <= 0 || MainQuest.CurrentProgress < 0)
 		{
 			return false;
 		}
@@ -108,6 +118,37 @@ bool FMD_GameData::MigrateToCurrentVersion()
 				MerchantData.Affinity = FMath::Clamp(MerchantData.Affinity, -4.0f, 5.0f);
 			}
 			MerchantData.RepeatQuests.Reset();
+			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
+		}
+	}
+
+	// 인라인 메인 퀘스트를 저장하던 슬롯은 현장 에셋의 일차별 PrimaryAssetId에 다시 연결한다.
+	if (SchemaVersion < 5)
+	{
+		FMD_MerchantData MerchantData;
+		if (GetDataField(FMD_MerchantData::DataFieldKey, MerchantData) == true && MerchantData.MainQuests.IsEmpty() == false)
+		{
+			const UMD_SiteDefinition* Site = MerchantData.CurrentSite.IsNull() == true ? nullptr : MerchantData.CurrentSite.LoadSynchronous();
+			bool bCanRelinkAllMainQuests = IsValid(Site) == true;
+			for (FMD_MainQuestState& MainQuest : MerchantData.MainQuests)
+			{
+				const int32 DefinitionIndex = MainQuest.UnlockDay - 1;
+				if (bCanRelinkAllMainQuests == false || Site->MainQuestLine.IsValidIndex(DefinitionIndex) == false
+					|| Site->MainQuestLine[DefinitionIndex].IsValid() == false)
+				{
+					bCanRelinkAllMainQuests = false;
+					break;
+				}
+
+				MainQuest.DefinitionId = Site->MainQuestLine[DefinitionIndex];
+			}
+
+			if (bCanRelinkAllMainQuests == false)
+			{
+				// 복원할 원본이 없으면 다음 월드 동기화에서 계약을 안전하게 재초기화하도록 비운다.
+				MerchantData.MainQuests.Reset();
+			}
+
 			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
 		}
 	}

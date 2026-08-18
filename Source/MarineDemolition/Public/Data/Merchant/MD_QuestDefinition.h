@@ -15,6 +15,9 @@ public:
 	/** Asset Manager와 저장 데이터가 사용할 공통 퀘스트 PrimaryAssetId 생성 함수 */
 	virtual FPrimaryAssetId GetPrimaryAssetId() const override;
 
+	/** 저장·복제된 PrimaryAssetId로 공통 퀘스트 원본 자산을 동기 로드하는 함수 */
+	static UMD_QuestDefinition* LoadDefinition(const FPrimaryAssetId& DefinitionId);
+
 public:
 	/** 퀘스트 자산을 Asset Manager에서 분류할 PrimaryAssetType */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Identity")

@@ -7,6 +7,7 @@
 #include "MD_QuestSampleSpawner.generated.h"
 
 class UArrowComponent;
+class UMD_MainQuestDefinition;
 class UMD_MerchantComponent;
 class UMD_MerchantSubsystem;
 class UMD_SiteDefinition;
@@ -55,8 +56,8 @@ protected:
 	/** 같은 등급 스포너가 여러 개일 때 반복 퀘스트를 담당할 대표 스포너 판정. */
 	bool IsPrimaryRepeatQuestSpawner() const;
 
-	/** 현재 월드에 존재하는 같은 등급과 반복 퀘스트 Asset ID의 샘플 수 집계 */
-	int32 CountAvailableSamplesForGrade(const FPrimaryAssetId& QuestDefinitionId) const;
+	/** 현재 월드에 존재하는 같은 등급과 퀘스트 Asset ID의 샘플 수 집계 */
+	int32 CountAvailableSamplesForQuest(const FPrimaryAssetId& QuestDefinitionId) const;
 
 	/** 반복 퀘스트 페이즈와 스포너 등급의 일치 여부 판정 */
 	bool MatchesRepeatQuest(const FMD_RepeatQuestPhaseData& QuestPhase) const;
@@ -65,9 +66,11 @@ protected:
 
 	void RefreshLinkedQuestPreview();
 
-	bool HasOccupyingSamples() const;
+	/** 스폰 지점에 있는 미지정 샘플을 현재 메인 퀘스트 목표로 연결하고 연결 수를 반환하는 함수 */
+	int32 BindOccupyingSamplesToMainQuest(const FPrimaryAssetId& QuestDefinitionId, int32 MaxAssignments) const;
 
-	void SpawnSamples(const FMD_MainQuestState& QuestState);
+	/** 현재 메인 퀘스트에 부족한 목표 샘플만 생성하는 함수 */
+	void SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_MainQuestDefinition& Definition, int32 SpawnCount);
 
 	/** 회수 반복 퀘스트에 필요한 샘플 생성 처리 */
 	void SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, int32 SpawnCount);
@@ -118,7 +121,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Spawn", meta = (ClampMin = "1"))
 	int32 SamplesToSpawn = 1;
 
-	/** 이미 샘플이 있으면 중복 스폰하지 않는 반경(cm). Day 스냅샷 복원 대응. */
+	/** 스폰 지점의 미지정 샘플을 메인 퀘스트 목표로 연결할 판정 반경(cm) */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Spawn", meta = (ClampMin = "1.0"))
 	float OccupiedCheckRadius = 80.f;
 

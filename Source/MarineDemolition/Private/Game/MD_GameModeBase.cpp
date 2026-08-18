@@ -258,22 +258,10 @@ bool AMD_GameModeBase::DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld*
         return false;
     }
 
-    // PIE 접두사를 제거하여 데이터 에셋 경로와 비교할 현재 맵 이름
-    FString CurrentMapName = World->GetMapName();
-    CurrentMapName.RemoveFromStart(World->StreamingLevelsPrefix);
-
-    // 현장의 일차별 메인 퀘스트가 참조하는 실행 맵 검사
-    for (const FMD_QuestDefinitionData& MainQuestDefinition : Site->MainQuestLine)
-    {
-        // 소프트 월드 경로에서 추출한 비교용 맵 애셋 이름
-        FString QuestMapName = MainQuestDefinition.QuestMap.ToSoftObjectPath().GetAssetName();
-        if (QuestMapName.IsEmpty() == false && QuestMapName == CurrentMapName)
-        {
-            return true;
-        }
-    }
-
-    return false;
+    // PIE 접두사를 제거한 전체 오브젝트 경로를 비교하여 같은 이름의 다른 패키지를 오인하지 않는다.
+    const FSoftObjectPath SiteMapPath = Site->QuestMap.ToSoftObjectPath();
+    const FSoftObjectPath CurrentWorldPath = MakeWorldAssetReference(World).ToSoftObjectPath();
+    return SiteMapPath.IsNull() == false && SiteMapPath == CurrentWorldPath;
 }
 
 TSoftObjectPtr<UWorld> AMD_GameModeBase::MakeWorldAssetReference(UWorld* World) const
@@ -366,12 +354,13 @@ void AMD_GameModeBase::ExecuteDayTransition()
 
 void AMD_GameModeBase::HandleContractCleared()
 {
-    // 반복 퀘스트 해금 판정에 사용할 현장 클리어 이력 등록
+    // 클리어 이력 등록 후 남은 반복 퀘스트의 미회수 정산과 같은 현장 재진입 판정을 위한 기존 계약 종료
     UGameInstance* GameInstance = GetGameInstance();
     UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
     if (IsValid(Merchant) == true)
     {
         Merchant->MarkSiteCleared();
+        Merchant->FinalizeContract();
     }
 
     // 진행(크레딧·퀘스트·호감도)은 유지, 현장 3일 스냅샷만 폐기 → 다음 현장은 새로 시작
@@ -738,7 +727,7 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
 
     // 같은 현장의 Day 전환은 유지하고 다른 현장 진입만 새 계약으로 교체하기 위한 현재 데이터
     UMD_SiteDefinition* CurrentSite = Merchant->GetCurrentSite();
-    if (CurrentSite != ResolvedSite)
+    if (CurrentSite != ResolvedSite || Merchant->GetMainQuests().IsEmpty() == true)
     {
         Merchant->BeginContract(ResolvedSite, ExpeditionAdvancePayment);
     }

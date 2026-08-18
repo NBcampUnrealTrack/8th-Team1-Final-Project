@@ -2,12 +2,16 @@
 
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
+#include "Data/Merchant/MD_MainQuestDefinition.h"
 #include "Data/Merchant/MD_RepeatQuestDefinition.h"
 
 void UMD_HUDQuestCard::SetMainQuest(const FMD_MainQuestState& QuestState)
 {
-	// 메인 퀘스트 전용 표시 함수에 정의와 진행도를 적용하는 처리
-	ApplyQuestData(QuestState.Definition, QuestState.CurrentProgress);
+	const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	if (IsValid(Definition) == true)
+	{
+		ApplyMainQuestData(*Definition, QuestState.CurrentProgress);
+	}
 }
 
 void UMD_HUDQuestCard::SetRepeatQuest(const FMD_RepeatQuestState& QuestState)
@@ -47,7 +51,7 @@ void UMD_HUDQuestCard::ApplyRepeatQuestData(const FMD_RepeatQuestState& QuestSta
 	}
 }
 
-void UMD_HUDQuestCard::ApplyQuestData(const FMD_QuestDefinitionData& Definition, int32 CurrentProgress)
+void UMD_HUDQuestCard::ApplyMainQuestData(const UMD_MainQuestDefinition& Definition, int32 CurrentProgress)
 {
 	if (IsValid(Txt_QuestKind) == true)
 	{
@@ -64,7 +68,7 @@ void UMD_HUDQuestCard::ApplyQuestData(const FMD_QuestDefinitionData& Definition,
 	if (IsValid(Txt_QuestDescription) == true)
 	{
 		// 퀘스트 본문 전용 영역에 정의된 목표 설명 적용
-		Txt_QuestDescription->SetText(Definition.Description);
+		Txt_QuestDescription->SetText(Definition.HUDDescription);
 	}
 
 	if (IsValid(PB_QuestProgressRate) == true)
