@@ -8,12 +8,10 @@
 // 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 책임: 작업면 기하 해석 · 셀 초기화 · 좌표 변환
 
-bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromHit(
+bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceFaceFromHit(
 	const FHitResult& Hit,
-	FVector2D& OutSurfacePositionCm,
 	EMD_ScrapeSurfaceFace& OutSurfaceFace)
 {
-	OutSurfacePositionCm = FVector2D::ZeroVector;
 	OutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
 	if (!bContaminationEnabled)
 	{
@@ -28,7 +26,17 @@ bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromHit(
 		return false;
 	}
 
-	return TryGetContaminationFaceFromHit(Hit, OutSurfaceFace)
+	return TryGetContaminationFaceFromHit(Hit, OutSurfaceFace);
+}
+
+
+bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromHit(
+	const FHitResult& Hit,
+	FVector2D& OutSurfacePositionCm,
+	EMD_ScrapeSurfaceFace& OutSurfaceFace)
+{
+	OutSurfacePositionCm = FVector2D::ZeroVector;
+	return TryGetScrapeSurfaceFaceFromHit(Hit, OutSurfaceFace)
 		&& TryProjectWorldPointToContaminationSurface(
 			Hit.ImpactPoint,
 			OutSurfacePositionCm);

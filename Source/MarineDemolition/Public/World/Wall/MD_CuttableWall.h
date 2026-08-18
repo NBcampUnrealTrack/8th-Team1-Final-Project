@@ -14,6 +14,7 @@ class UMD_ScrapeSurfaceComponent;
 class AMD_CuttableWall;
 class AMD_ContaminationItem;
 class AMD_WallPiece;
+struct FHitResult;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnStrutCollapsed, AMD_CuttableWall*, Wall, AActor*, Cutter);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnWallDemolished, AMD_CuttableWall*, Wall,	AActor*, Cutter);
@@ -89,6 +90,12 @@ public:
 	// 절단 진행도 누적. 서버 전용. 100% 도달 시 Cut()을 호출한다
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Cut")
 	void AddCutProgress(float DeltaSeconds, AActor* Cutter);
+
+	/** 서버 GA의 마지막 벽 충돌면을 조각 배분까지 동기 전달한다. */
+	void AddCutProgressFromHit(
+		float DeltaSeconds,
+		AActor* Cutter,
+		const FHitResult& WallHit);
 
 	// 이 벽을 자르는 데 필요한 총 시간(초)
 	UFUNCTION(BlueprintPure, Category = "MD|Wall|Cut")
@@ -179,6 +186,13 @@ private:
 	friend class FMD_BarnacleStrokeBlockingTest;
 
 	void SyncLegacySurfaceConfiguration();
+	void CutFromHit(AActor* Cutter, const FHitResult* WallHit);
+	float ResolveCutSurfaceCleanRatio(const FHitResult* WallHit);
+	void CompleteCutWithCleanRatio(AActor* Cutter, float CutSurfaceCleanRatio);
+	void AddCutProgressInternal(
+		float DeltaSeconds,
+		AActor* Cutter,
+		const FHitResult* WallHit);
 
 	void RestoreScanColor();
 

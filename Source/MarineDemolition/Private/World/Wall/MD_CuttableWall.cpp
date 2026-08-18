@@ -135,13 +135,67 @@ void AMD_CuttableWall::BeginPlay()
 
 void AMD_CuttableWall::Cut(AActor* Cutter)
 {
+	CutFromHit(Cutter, nullptr);
+}
+
+
+void AMD_CuttableWall::CutFromHit(
+	AActor* Cutter,
+	const FHitResult* WallHit)
+{
 	if (!HasAuthority() || !CanCut())
 	{
 		return;
 	}
 
+	const float CutSurfaceCleanRatio = ResolveCutSurfaceCleanRatio(WallHit);
 	bCut = true;
+	CompleteCutWithCleanRatio(Cutter, CutSurfaceCleanRatio);
+}
 
+
+float AMD_CuttableWall::ResolveCutSurfaceCleanRatio(
+	const FHitResult* WallHit)
+{
+	if (!ScrapeSurface)
+	{
+		return 0.0f;
+	}
+
+	if (WallHit
+		&& WallHit->bBlockingHit
+		&& WallHit->GetActor() == this)
+	{
+		EMD_ScrapeSurfaceFace CutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
+		bool bResolvedFace = ScrapeSurface->TryGetScrapeSurfaceFaceFromHit(
+			*WallHit,
+			CutSurfaceFace);
+		if (!bResolvedFace)
+		{
+			// 모서리나 BP 추가 충돌 컴포넌트를 맞은 경우에도 GA 시점이
+			// 벽의 어느 쪽에 있는지로 한쪽 면을 결정한다.
+			bResolvedFace = ScrapeSurface->
+				TryResolveContaminationFaceFromWorldPosition(
+					WallHit->TraceStart,
+					CutSurfaceFace);
+		}
+
+		if (bResolvedFace)
+		{
+			return ScrapeSurface->GetContaminationCleanRatio(CutSurfaceFace);
+		}
+	}
+
+	// Hit이 없는 기존 Blueprint 직접 호출이나 기하 해석 불가 상태만
+	// 이전 동작과 동일한 양면 전체 값으로 안전하게 폴백한다.
+	return ScrapeSurface->GetContaminationCleanRatio();
+}
+
+
+void AMD_CuttableWall::CompleteCutWithCleanRatio(
+	AActor* Cutter,
+	const float CutSurfaceCleanRatio)
+{
 	if (WallType == EMD_WallType::Strut && !bHasSupport)
 	{
 		// 벽이 아니라 "절단자가 서 있는 섹터"가 무너진다
@@ -161,15 +215,12 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 		OnWallDemolished.Broadcast(this, Cutter);
 	}
 
-	// 파편 드랍: 남은 오염까지 반영한 제거율로 깨끗/오염 배분
+	// 파편 드랍: GA가 타격한 한쪽 면의 남은 오염만으로 깨끗/오염 배분
 	// (기획 §2.5: 제거율 70% → 7:3)
 	const int32 SafePieceCount = FMath::Max(0, PieceCount);
-	const float OverallCleanRatio = ScrapeSurface
-		? ScrapeSurface->GetContaminationCleanRatio()
-		: 0.0f;
 	const int32 CleanCount = FMD_ScrapeFaceProgress::CalculateCleanPieceCount(
 		SafePieceCount,
-		OverallCleanRatio);
+		CutSurfaceCleanRatio);
 
 	const FVector Origin = GetActorLocation();
 	const FVector Extent = Mesh->Bounds.BoxExtent;
@@ -235,6 +286,24 @@ void AMD_CuttableWall::ScanHighlight(float Duration, AActor* Scanner)
 
 void AMD_CuttableWall::AddCutProgress(float DeltaSeconds, AActor* Cutter)
 {
+	AddCutProgressInternal(DeltaSeconds, Cutter, nullptr);
+}
+
+
+void AMD_CuttableWall::AddCutProgressFromHit(
+	const float DeltaSeconds,
+	AActor* Cutter,
+	const FHitResult& WallHit)
+{
+	AddCutProgressInternal(DeltaSeconds, Cutter, &WallHit);
+}
+
+
+void AMD_CuttableWall::AddCutProgressInternal(
+	const float DeltaSeconds,
+	AActor* Cutter,
+	const FHitResult* WallHit)
+{
 	// 협동 합산(기획 §4) 때문에 진행도는 벽이 소유하고 서버만 갱신한다.
 	// 여러 명이 같은 벽을 자르면 각자 이 함수를 불러 자연히 합산된다.
 	if (!HasAuthority() || bCut || DeltaSeconds <= 0.0f)
@@ -250,13 +319,22 @@ void AMD_CuttableWall::AddCutProgress(float DeltaSeconds, AActor* Cutter)
 	const float Required = GetRequiredCutSeconds();
 
 	CutProgressSeconds = FMath::Clamp(CutProgressSeconds + DeltaSeconds, 0.0f, Required);
+	const bool bCompletesCut = CutProgressSeconds >= Required;
+	const float CompletionCleanRatio = bCompletesCut
+		? ResolveCutSurfaceCleanRatio(WallHit)
+		: 0.0f;
+	if (bCompletesCut)
+	{
+		// 진행도 delegate의 재진입보다 먼저 파괴를 예약하고 비율을 고정한다.
+		bCut = true;
+	}
 
 	// 서버에는 OnRep이 오지 않으므로 직접 부른다
 	OnRep_CutProgress();
 
-	if (CutProgressSeconds >= Required)
+	if (bCompletesCut)
 	{
-		Cut(Cutter);
+		CompleteCutWithCleanRatio(Cutter, CompletionCleanRatio);
 	}
 }
 

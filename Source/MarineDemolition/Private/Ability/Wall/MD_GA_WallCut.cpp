@@ -5,6 +5,7 @@
 
 #include "World/Wall/MD_CuttableWall.h"
 
+#include "Engine/HitResult.h"
 #include "Engine/World.h"
 #include "TimerManager.h"
 
@@ -54,18 +55,26 @@ void UMD_GA_WallCut::TickCutProgress()
 		return;
 	}
 
-	AMD_CuttableWall* Wall = GetAimedWall(ActorInfo);
+	AMD_CuttableWall* Wall = nullptr;
+	FHitResult WallHit;
+	const bool bHasAimedWallHit = TryGetAimedWallHit(
+		ActorInfo,
+		Wall,
+		WallHit);
 
 	// 조준이 벗어나면 진행만 멈추고 어빌리티는 유지한다.
 	// 전선·수도관을 확인하려고 잠깐 시선을 돌리는 정석 플레이를 처벌하지 않기 위해서다 (기획 §1)
-	if (!IsValid(Wall) || !Wall->CanCut())
+	if (!bHasAimedWallHit || !IsValid(Wall) || !Wall->CanCut())
 	{
 		return;
 	}
 
 	// AddCutProgress가 서버 권한을 검사하므로 클라이언트 호출은 무시된다.
 	// 클라이언트는 복제된 CutProgressSeconds로 UI만 그린다 (기획 §7-5)
-	Wall->AddCutProgress(ProgressInterval * GetCutSpeedMultiplier(), ActorInfo->AvatarActor.Get());
+	Wall->AddCutProgressFromHit(
+		ProgressInterval * GetCutSpeedMultiplier(),
+		ActorInfo->AvatarActor.Get(),
+		WallHit);
 }
 
 float UMD_GA_WallCut::GetCutSpeedMultiplier() const

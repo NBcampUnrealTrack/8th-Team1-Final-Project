@@ -353,6 +353,11 @@ public:
 		EMD_ScrapeSurfaceFace SurfaceFace,
 		int32 PatternSeed) const;
 
+	/** 스크래핑과 동일한 충돌 기준으로 앞면/뒷면만 판정한다. */
+	bool TryGetScrapeSurfaceFaceFromHit(
+		const FHitResult& Hit,
+		EMD_ScrapeSurfaceFace& OutSurfaceFace);
+
 	bool TryGetScrapeSurfacePositionFromHit(
 		const FHitResult& Hit,
 		FVector2D& OutSurfacePositionCm,
