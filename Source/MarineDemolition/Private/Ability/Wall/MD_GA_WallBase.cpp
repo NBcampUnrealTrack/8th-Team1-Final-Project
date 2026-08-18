@@ -16,23 +16,52 @@ UMD_GA_WallBase::UMD_GA_WallBase()
 
 AMD_CuttableWall* UMD_GA_WallBase::GetAimedWall(const FGameplayAbilityActorInfo* ActorInfo) const
 {
+	AMD_CuttableWall* Wall = nullptr;
+	FHitResult Hit;
+	TryGetAimedWallHit(ActorInfo, Wall, Hit);
+	return Wall;
+}
+
+bool UMD_GA_WallBase::TryGetAimedWallHit(
+	const FGameplayAbilityActorInfo* ActorInfo,
+	AMD_CuttableWall*& OutWall,
+	FHitResult& OutHit) const
+{
+	OutWall = nullptr;
+	OutHit = FHitResult();
+
+	if (!ActorInfo)
+	{
+		return false;
+	}
+
 	APawn* Pawn = Cast<APawn>(ActorInfo->AvatarActor.Get());
 	if (!Pawn || !Pawn->GetController())
 	{
-		return nullptr;
+		return false;
 	}
 	
 	FVector ViewLoc;
 	FRotator ViewRot;
 	Pawn->GetController()->GetPlayerViewPoint(ViewLoc, ViewRot);
 	
-	FHitResult Hit;
 	FCollisionQueryParams Params;
 	Params.AddIgnoredActor(Pawn);
 
-	if (Pawn->GetWorld()->LineTraceSingleByChannel(Hit, ViewLoc, ViewLoc + ViewRot.Vector() * TraceDistance, ECC_Visibility, Params))
+	FHitResult Hit;
+	if (Pawn->GetWorld()->LineTraceSingleByChannel(
+			Hit,
+			ViewLoc,
+			ViewLoc + ViewRot.Vector() * TraceDistance,
+			ECC_Visibility,
+			Params))
 	{
-		return Cast<AMD_CuttableWall>(Hit.GetActor());
+		OutWall = Cast<AMD_CuttableWall>(Hit.GetActor());
+		if (OutWall)
+		{
+			OutHit = Hit;
+			return true;
+		}
 	}
-	return nullptr;
+	return false;
 }

@@ -1811,6 +1811,85 @@ float FMD_ScrapeEvaluator::CalculateCleanRatio(
 		1.0));
 }
 
+float FMD_ScrapeEvaluator::CalculateCurrentCleanRatio(
+	const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells)
+{
+	double InitialContaminationAmount = 0.0;
+	double CurrentContaminationAmount = 0.0;
+	return CalculateCurrentCleanRatio(
+		SurfaceCells,
+		InitialContaminationAmount,
+		CurrentContaminationAmount);
+}
+
+float FMD_ScrapeEvaluator::CalculateCurrentCleanRatio(
+	const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
+	double& OutInitialContaminationAmount,
+	double& OutCurrentContaminationAmount)
+{
+	OutInitialContaminationAmount = 0.0;
+	OutCurrentContaminationAmount = 0.0;
+
+	for (const FMD_ScrapeSurfaceCell& Cell : SurfaceCells)
+	{
+		const double SafeInitialContamination =
+			FMath::IsFinite(Cell.InitialContamination)
+			? FMath::Clamp(
+				static_cast<double>(Cell.InitialContamination),
+				0.0,
+				1.0)
+			: 0.0;
+		const double SafeRemainingContamination =
+			FMath::IsFinite(Cell.RemainingContamination)
+			? FMath::Clamp(
+				static_cast<double>(Cell.RemainingContamination),
+				0.0,
+				SafeInitialContamination)
+			: 0.0;
+		const double SafeTransferredContamination =
+			FMath::IsFinite(Cell.TransferredContamination)
+			? FMath::Clamp(
+				static_cast<double>(Cell.TransferredContamination),
+				0.0,
+				1.0)
+			: 0.0;
+
+		OutInitialContaminationAmount += SafeInitialContamination;
+		OutCurrentContaminationAmount +=
+			SafeRemainingContamination + SafeTransferredContamination;
+	}
+
+	return CalculateCurrentCleanRatio(
+		OutInitialContaminationAmount,
+		OutCurrentContaminationAmount);
+}
+
+float FMD_ScrapeEvaluator::CalculateCurrentCleanRatio(
+	const double InitialContaminationAmount,
+	const double CurrentContaminationAmount)
+{
+	const double SafeInitialContaminationAmount =
+		FMath::IsFinite(InitialContaminationAmount)
+		? FMath::Max(0.0, InitialContaminationAmount)
+		: 0.0;
+	const double SafeCurrentContaminationAmount =
+		FMath::IsFinite(CurrentContaminationAmount)
+		? FMath::Max(0.0, CurrentContaminationAmount)
+		: 0.0;
+
+	// 처음부터 깨끗한 표면도 새로 묻은 오염이 있으면 조각 품질 제거율은 0%다.
+	if (SafeInitialContaminationAmount <= UE_SMALL_NUMBER)
+	{
+		return SafeCurrentContaminationAmount <= UE_SMALL_NUMBER ? 1.0f : 0.0f;
+	}
+
+	return static_cast<float>(FMath::Clamp(
+		1.0 - (SafeCurrentContaminationAmount
+			/ SafeInitialContaminationAmount),
+		0.0,
+		1.0));
+}
+
 bool FMD_ScrapeEvaluator::IsSurfaceFullyClean(
 	const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
 	const float CleanTolerance)
