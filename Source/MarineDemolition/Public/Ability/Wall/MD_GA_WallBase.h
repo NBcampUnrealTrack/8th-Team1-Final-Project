@@ -7,6 +7,7 @@
 #include "MD_GA_WallBase.generated.h"
 
 class AMD_CuttableWall;
+struct FHitResult;
 
 // 격벽 대상 어빌리티 공통 베이스. 아바타 시점 트레이스로 조준한 격벽을 찾는다
 UCLASS()
@@ -22,4 +23,8 @@ protected:
 	float TraceDistance = 200.0f;
 	
 	AMD_CuttableWall* GetAimedWall(const FGameplayAbilityActorInfo* ActorInfo) const;
+	bool TryGetAimedWallHit(
+		const FGameplayAbilityActorInfo* ActorInfo,
+		AMD_CuttableWall*& OutWall,
+		FHitResult& OutHit) const;
 };

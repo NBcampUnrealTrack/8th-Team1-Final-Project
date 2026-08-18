@@ -227,7 +227,7 @@ void AMD_SampleItem::HandleMeshHit(
 		{
 			if (UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>())
 			{
-				Merchant->NotifySampleDestroyed(Grade);
+				Merchant->NotifySampleDestroyed(QuestDefinitionId, Grade);
 			}
 		}
 

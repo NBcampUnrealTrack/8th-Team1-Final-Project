@@ -109,6 +109,10 @@ UMD_ScrapeSurfaceComponent::UMD_ScrapeSurfaceComponent()
 	ContaminationMeshLocalBoundsMaximum = FVector::ZeroVector;
 	CachedFrontContaminationCleanRatio = 0.0f;
 	CachedBackContaminationCleanRatio = 0.0f;
+	CachedFrontInitialContaminationAmount = 0.0;
+	CachedBackInitialContaminationAmount = 0.0;
+	CachedFrontCurrentContaminationAmount = 0.0;
+	CachedBackCurrentContaminationAmount = 0.0;
 	ContaminationMaskAtlasDimensions = FIntPoint::ZeroValue;
 	TransferredPaintMaskAtlasDimensions = FIntPoint::ZeroValue;
 	bContaminationDecalsConfigured = false;
@@ -383,6 +387,10 @@ void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 	PendingContaminationItemAmounts[1] = 0.0f;
 	CachedFrontContaminationCleanRatio = 0.0f;
 	CachedBackContaminationCleanRatio = 0.0f;
+	CachedFrontInitialContaminationAmount = 0.0;
+	CachedBackInitialContaminationAmount = 0.0;
+	CachedFrontCurrentContaminationAmount = 0.0;
+	CachedBackCurrentContaminationAmount = 0.0;
 }
 
 void UMD_ScrapeSurfaceComponent::InitializeSurface()

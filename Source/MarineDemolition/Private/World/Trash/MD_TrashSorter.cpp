@@ -204,11 +204,12 @@ void AMD_TrashSorter::JudgeAndSwallowContainer(AActor* ContainerActor)
 			const TOptional<EMD_SampleGrade> DestroyedSampleGrade = Sample
 				? TOptional<EMD_SampleGrade>(Sample->Grade)
 				: TOptional<EMD_SampleGrade>();
+			const FPrimaryAssetId DestroyedSampleQuestDefinitionId = Sample != nullptr ? Sample->QuestDefinitionId : FPrimaryAssetId();
 			if (Content->Destroy())
 			{
 				if (DestroyedSampleGrade.IsSet())
 				{
-					Merchant->NotifySampleDestroyed(DestroyedSampleGrade.GetValue());
+					Merchant->NotifySampleDestroyed(DestroyedSampleQuestDefinitionId, DestroyedSampleGrade.GetValue());
 				}
 				++DiscardedCount;
 			}

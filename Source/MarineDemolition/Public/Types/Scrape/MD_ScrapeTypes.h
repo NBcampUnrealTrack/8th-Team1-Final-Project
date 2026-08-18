@@ -424,7 +424,7 @@ struct MARINEDEMOLITION_API FMD_ScrapeToolSpec
 public:
 	FMD_ScrapeToolSpec()
 		: BrushShape(EMD_ScrapeBrushShape::Rectangle)
-		, BladeWidthCm(12.0f)
+		, BladeWidthCm(24.0f)
 		, BladeDepthCm(12.0f)
 		, RemovalPerTravelCentimeter(0.08f)
 		, ReachCm(220.0f)
@@ -708,7 +708,7 @@ public:
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float RemainingContamination;
 
-	/** 포화된 헤라가 새로 덧바른 오염량. RemainingContamination에 포함된다. */
+	/** 포화된 헤라가 새로 덧바른 오염량. 기본 오염과 별도 층으로 추적한다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float TransferredContamination;

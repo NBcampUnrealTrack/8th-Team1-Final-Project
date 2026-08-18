@@ -353,6 +353,11 @@ public:
 		EMD_ScrapeSurfaceFace SurfaceFace,
 		int32 PatternSeed) const;
 
+	/** 스크래핑과 동일한 충돌 기준으로 앞면/뒷면만 판정한다. */
+	bool TryGetScrapeSurfaceFaceFromHit(
+		const FHitResult& Hit,
+		EMD_ScrapeSurfaceFace& OutSurfaceFace);
+
 	bool TryGetScrapeSurfacePositionFromHit(
 		const FHitResult& Hit,
 		FVector2D& OutSurfacePositionCm,
@@ -406,9 +411,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
 	bool IsContaminationFullyRemoved() const;
 	bool IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace Face) const;
-
-	/** Used by demolition owners without coupling this component to wall types. */
-	float GetContaminationDemolitionReadyRatio() const;
 
 	void ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells);
 	void ExportContaminationDeltas(
@@ -756,6 +758,12 @@ private:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
 	float CachedBackContaminationCleanRatio;
+
+	// 전체 벽 제거율은 면별 퍼센트 평균이 아니라 실제 초기/현재 오염 총량으로 계산한다.
+	double CachedFrontInitialContaminationAmount;
+	double CachedBackInitialContaminationAmount;
+	double CachedFrontCurrentContaminationAmount;
+	double CachedBackCurrentContaminationAmount;
 
 	bool bContaminationSurfaceInitialized;
 	bool bContaminationCompletionBroadcast;

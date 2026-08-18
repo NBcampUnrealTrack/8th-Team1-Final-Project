@@ -223,6 +223,20 @@ public:
 		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells);
 
 	/**
+	 * 벽 조각 배분에 사용할 현재 제거율을 계산한다.
+	 * 기본 오염뿐 아니라 포화된 헤라가 다시 묻힌 오염도 남은 양에 포함한다.
+	 */
+	static float CalculateCurrentCleanRatio(
+		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells);
+	static float CalculateCurrentCleanRatio(
+		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
+		double& OutInitialContaminationAmount,
+		double& OutCurrentContaminationAmount);
+	static float CalculateCurrentCleanRatio(
+		double InitialContaminationAmount,
+		double CurrentContaminationAmount);
+
+	/**
 	 * 초기 오염이 있던 모든 셀이 허용 오차 이하까지 제거됐는지 검사
 	 *
 	 * 단순히 반올림된 퍼센트가 100%인지 보는 대신 셀을 직접 검사하므로,

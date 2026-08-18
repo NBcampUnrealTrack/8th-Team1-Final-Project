@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/AssetManagerTypes.h"
 #include "Engine/DataAsset.h"
 #include "Types/Merchant/MD_MerchantTypes.h"
 #include "MD_SiteDefinition.generated.h"
@@ -17,18 +18,13 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
 	FText SiteName;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
-	FText ClientName;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
-	int32 ContractDayCount = 3;
-
 	/** Day1, Day2, … 순서의 메인 퀘스트. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Main")
 	TArray<FMD_QuestDefinitionData> MainQuestLine;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat")
-	TArray<FMD_QuestDefinitionData> RepeatQuestPool;
+	/** 현장에서 선택할 MD_RepeatQuestDefinition 에셋의 PrimaryAssetId 목록 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat", meta = (AllowedTypes = "Quest"))
+	TArray<FPrimaryAssetId> RepeatQuestPool;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat")
 	int32 MinRepeatCount = 2;
