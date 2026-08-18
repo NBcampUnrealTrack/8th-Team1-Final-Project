@@ -135,25 +135,8 @@ void AMD_CuttableWall::BeginPlay()
 
 void AMD_CuttableWall::Cut(AActor* Cutter)
 {
-	if (!HasAuthority() || bCut)
+	if (!HasAuthority() || !CanCut())
 	{
-		return;
-	}
-
-	// 전처리 미달이면 절단 잠김
-	if (!CanCut())
-	{
-		const float Gate = (WallType == EMD_WallType::Strut) ? StrutCutGate : PartitionCutGate;
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Yellow,
-				                                 FString::Printf(
-				                                 TEXT("전처리 미완료: %.0f%% / %.0f%%"),
-				                                 ScrapeSurface
-					                                 ? ScrapeSurface->GetContaminationDemolitionReadyRatio() * 100.0f
-					                                 : 0.0f,
-				                                 Gate));
-		}
 		return;
 	}
 
@@ -178,10 +161,15 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 		OnWallDemolished.Broadcast(this, Cutter);
 	}
 
-	// 파편 드랍: 제거율 비율로 깨끗/오염 배분 (기획 §2.5: 제거율 70% → 7:3)
-	const int32 CleanCount = FMath::RoundToInt(
-		static_cast<float>(PieceCount)
-		* ScrapeSurface->GetContaminationCleanRatio());
+	// 파편 드랍: 남은 오염까지 반영한 제거율로 깨끗/오염 배분
+	// (기획 §2.5: 제거율 70% → 7:3)
+	const int32 SafePieceCount = FMath::Max(0, PieceCount);
+	const float OverallCleanRatio = ScrapeSurface
+		? ScrapeSurface->GetContaminationCleanRatio()
+		: 0.0f;
+	const int32 CleanCount = FMD_ScrapeFaceProgress::CalculateCleanPieceCount(
+		SafePieceCount,
+		OverallCleanRatio);
 
 	const FVector Origin = GetActorLocation();
 	const FVector Extent = Mesh->Bounds.BoxExtent;
@@ -189,7 +177,7 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
-	for (int32 i = 0; i < PieceCount; ++i)
+	for (int32 i = 0; i < SafePieceCount; ++i)
 	{
 		const FVector SpawnLoc(
 				Origin.X + FMath::FRandRange(-Extent.X, Extent.X) * 0.8f,
@@ -212,25 +200,7 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 
 bool AMD_CuttableWall::CanCut() const
 {
-	// 초기화 실패 시 절단 금지
-	if (!ScrapeSurface
-		|| (ScrapeSurface->IsContaminationEnabled()
-			&& !ScrapeSurface->IsSurfaceInitialized()))
-	{
-		return false;
-	}
-
-	const float Gate = (WallType == EMD_WallType::Strut) ? StrutCutGate : PartitionCutGate;
-	const float SafeGate = FMath::IsFinite(Gate)
-		? FMath::Clamp(Gate, 0.0f, 100.0f)
-		: 100.0f;
-
-	return FMD_ScrapeFaceProgress::IsEitherFaceReadyForCut(
-		ScrapeSurface->GetContaminationCleanRatio(
-			EMD_ScrapeSurfaceFace::Front),
-		ScrapeSurface->GetContaminationCleanRatio(
-			EMD_ScrapeSurfaceFace::Back),
-		SafeGate / 100.0f);
+	return !bCut;
 }
 
 

@@ -79,6 +79,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
 	void Cut(AActor* Cutter);
 
+	/** 오염 상태와 무관하게 아직 파괴되지 않은 벽이면 절단할 수 있다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	bool CanCut() const;
 
@@ -134,7 +135,8 @@ protected:
 	UPROPERTY(EditAnywhere, Replicated, Category = "MD|Wall")
 	bool bHasSupport = false;
 
-	UPROPERTY(EditAnywhere, Category = "MD|Wall")
+	UPROPERTY(EditAnywhere, Category = "MD|Wall",
+		meta = (ClampMin = "0"))
 	int32 PieceCount = 10;
 
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall")
@@ -160,14 +162,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "MD|Wall|Contamination|Decal")
 	TObjectPtr<UMaterialInterface> ContaminationDecalMaterial;
-
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Contamination|Cut",
-		meta = (ClampMin = "0", ClampMax = "100"))
-	float PartitionCutGate = 0.0f;
-
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Contamination|Cut",
-		meta = (ClampMin = "0", ClampMax = "100"))
-	float StrutCutGate = 0.0f;
 
 	// 기획 §2 — 애니메이션 1사이클(3.567초)의 정수배로 잡는다
 	UPROPERTY(EditAnywhere, Category = "MD|Wall|Cut",

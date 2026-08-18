@@ -2,7 +2,6 @@
 
 #include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 #include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
-#include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "World/Contamination/MD_Barnacle.h"
 
@@ -1258,9 +1257,15 @@ float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatio() const
 		return 0.0f;
 	}
 
-	return FMD_ScrapeFaceProgress::CalculateOverallCleanRatio(
-		CachedFrontContaminationCleanRatio,
-		CachedBackContaminationCleanRatio);
+	const double TotalInitialContaminationAmount =
+		CachedFrontInitialContaminationAmount
+		+ CachedBackInitialContaminationAmount;
+	const double TotalCurrentContaminationAmount =
+		CachedFrontCurrentContaminationAmount
+		+ CachedBackCurrentContaminationAmount;
+	return FMD_ScrapeEvaluator::CalculateCurrentCleanRatio(
+		TotalInitialContaminationAmount,
+		TotalCurrentContaminationAmount);
 }
 
 float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatio(
@@ -1336,7 +1341,7 @@ void UMD_ScrapeSurfaceComponent::RefreshContaminationCleanRatioCache(
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeCleanRatio);
 
 	// 정의되지 않은 면을 그대로 넘기면 빈 슬라이스가 "오염 없음"으로 계산돼
-	// 제거율이 1.0이 되고 철거 게이트가 열린다. 반드시 먼저 막는다.
+	// 제거율이 1.0으로 잘못 캐시되므로 반드시 먼저 막는다.
 	if (Face != EMD_ScrapeSurfaceFace::Front
 		&& Face != EMD_ScrapeSurfaceFace::Back)
 	{
@@ -1347,24 +1352,16 @@ void UMD_ScrapeSurfaceComponent::RefreshContaminationCleanRatioCache(
 	float& CachedCleanRatio = Face == EMD_ScrapeSurfaceFace::Back
 		? CachedBackContaminationCleanRatio
 		: CachedFrontContaminationCleanRatio;
-	CachedCleanRatio = FMD_ScrapeEvaluator::CalculateCleanRatio(
-		GetContaminationCellsForFace(Face));
-}
-
-
-float UMD_ScrapeSurfaceComponent::GetContaminationDemolitionReadyRatio() const
-{
-	if (!bContaminationEnabled)
-	{
-		return 1.0f;
-	}
-
-	if (!bContaminationSurfaceInitialized)
-	{
-		return 0.0f;
-	}
-
-	return FMD_ScrapeFaceProgress::CalculateDemolitionReadyCleanRatio(
-		CachedFrontContaminationCleanRatio,
-		CachedBackContaminationCleanRatio);
+	double& CachedInitialContaminationAmount =
+		Face == EMD_ScrapeSurfaceFace::Back
+		? CachedBackInitialContaminationAmount
+		: CachedFrontInitialContaminationAmount;
+	double& CachedCurrentContaminationAmount =
+		Face == EMD_ScrapeSurfaceFace::Back
+		? CachedBackCurrentContaminationAmount
+		: CachedFrontCurrentContaminationAmount;
+	CachedCleanRatio = FMD_ScrapeEvaluator::CalculateCurrentCleanRatio(
+		GetContaminationCellsForFace(Face),
+		CachedInitialContaminationAmount,
+		CachedCurrentContaminationAmount);
 }

@@ -273,6 +273,10 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 	bContaminationCompletionBroadcast = false;
 	CachedFrontContaminationCleanRatio = 0.0f;
 	CachedBackContaminationCleanRatio = 0.0f;
+	CachedFrontInitialContaminationAmount = 0.0;
+	CachedBackInitialContaminationAmount = 0.0;
+	CachedFrontCurrentContaminationAmount = 0.0;
+	CachedBackCurrentContaminationAmount = 0.0;
 	AppliedContaminationStampIdentities.Reset();
 	AppliedContaminationStampIdentityOrder.Reset();
 	ContaminationCells.Reset();

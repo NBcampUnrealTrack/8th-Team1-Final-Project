@@ -407,9 +407,6 @@ public:
 	bool IsContaminationFullyRemoved() const;
 	bool IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace Face) const;
 
-	/** Used by demolition owners without coupling this component to wall types. */
-	float GetContaminationDemolitionReadyRatio() const;
-
 	void ReapplyContaminationPatch(float Amount, int32 PatchRadiusCells);
 	void ExportContaminationDeltas(
 		TArray<int32>& OutCellIndices,
@@ -756,6 +753,12 @@ private:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
 	float CachedBackContaminationCleanRatio;
+
+	// 전체 벽 제거율은 면별 퍼센트 평균이 아니라 실제 초기/현재 오염 총량으로 계산한다.
+	double CachedFrontInitialContaminationAmount;
+	double CachedBackInitialContaminationAmount;
+	double CachedFrontCurrentContaminationAmount;
+	double CachedBackCurrentContaminationAmount;
 
 	bool bContaminationSurfaceInitialized;
 	bool bContaminationCompletionBroadcast;
