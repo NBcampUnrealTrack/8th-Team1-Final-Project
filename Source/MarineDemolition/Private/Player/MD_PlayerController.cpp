@@ -579,10 +579,25 @@ void AMD_PlayerController::MD_BeginDay(int32 Day)
 
 void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)
 {
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
+	if (IsValid(Merchant) == false)
 	{
-		Merchant->BeginDay(Day);
+		return;
 	}
+
+	// 실제 맵 재진입 경로처럼 종료된 계약 다음 Day 명령에서 새 디버그 계약을 먼저 구성하는 처리
+	if (Merchant->HasActiveContract() == false)
+	{
+		Merchant->BeginContract(DebugSite, DebugAdvancePayment);
+	}
+
+	// DebugSite 미설정으로 계약 생성에 실패했을 때 잘못된 Day 상태만 남기지 않기 위한 검사
+	if (Merchant->HasActiveContract() == false)
+	{
+		return;
+	}
+
+	Merchant->BeginDay(Day);
 }
 
 void AMD_PlayerController::MD_AcceptRepeat(int32 Index)
@@ -634,10 +649,15 @@ void AMD_PlayerController::MD_MarkSiteCleared()
 
 void AMD_PlayerController::ServerMarkSiteCleared_Implementation()
 {
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
+	if (IsValid(Merchant) == false)
 	{
-		Merchant->MarkSiteCleared();
+		return;
 	}
+
+	// 실제 사이트 클리어 전환과 동일하게 이력 등록 후 현재 계약을 종료하는 처리
+	Merchant->MarkSiteCleared();
+	Merchant->FinalizeContract();
 }
 
 void AMD_PlayerController::MD_FinalizeContract()

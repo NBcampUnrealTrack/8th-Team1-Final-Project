@@ -354,12 +354,13 @@ void AMD_GameModeBase::ExecuteDayTransition()
 
 void AMD_GameModeBase::HandleContractCleared()
 {
-    // 반복 퀘스트 해금 판정에 사용할 현장 클리어 이력 등록
+    // 클리어 이력 등록 후 남은 반복 퀘스트의 미회수 정산과 같은 현장 재진입 판정을 위한 기존 계약 종료
     UGameInstance* GameInstance = GetGameInstance();
     UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
     if (IsValid(Merchant) == true)
     {
         Merchant->MarkSiteCleared();
+        Merchant->FinalizeContract();
     }
 
     // 진행(크레딧·퀘스트·호감도)은 유지, 현장 3일 스냅샷만 폐기 → 다음 현장은 새로 시작
