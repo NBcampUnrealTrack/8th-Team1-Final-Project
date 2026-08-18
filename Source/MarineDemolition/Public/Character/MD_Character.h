@@ -315,12 +315,6 @@ private:
 	 */
 	void UpdateFirstPersonToolTransform();
 
-	/**
-	 * CalcCamera 가 확정한 뷰 회전. 헤라 포커스 중에는 화면이 잠기므로
-	 * 컨트롤 회전과 달라진다. 팔 피벗이 화면과 같은 기준을 쓰게 하려고 캐시한다.
-	 */
-	FRotator LastViewRotation = FRotator::ZeroRotator;
-	bool bHasLastViewRotation = false;
 
 private:
 	UFUNCTION()
