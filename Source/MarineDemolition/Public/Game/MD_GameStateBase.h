@@ -75,9 +75,9 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Score")
     FMD_OnScoreChanged OnScoreChanged;
 
-    // 점수 이벤트 발생. 단가는 ScoreTable에서 조회, Count는 건수 (미복귀 2인 등)
-    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")
-    void AddScoreEvent(FGameplayTag EventTag, int32 Count = 1);
+    // 점수 이벤트 발생. 기본값은 ScoreTable 단가×Count이며, 계산 완료된 점수는 Count를 최종 증감값으로 사용
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score", meta = (AdvancedDisplay = "bUseCountAsDelta"))
+    void AddScoreEvent(FGameplayTag EventTag, int32 Count = 1, bool bUseCountAsDelta = false);
 
     // 샘플 점수 이벤트 발생 (등급×상태 단가)
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")

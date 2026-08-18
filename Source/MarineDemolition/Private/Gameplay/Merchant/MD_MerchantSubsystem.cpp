@@ -8,6 +8,7 @@
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Game/MD_GameStateBase.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
@@ -790,11 +791,12 @@ void UMD_MerchantSubsystem::ApplyQuestRewardData(const FMD_QuestRewardData& Rewa
 	float AffinityDelta = bPenalty == true ? -AffinityAmount : AffinityAmount;
 	AddCreditsInternal(CreditsDelta);
 
-	// QuestDefinition에 명시된 점수만 서버 권위 평가 원장에 반영하는 처리
+	// QuestDefinition에 명시된 점수를 성공·실패 원인 태그와 함께 서버 권위 평가 원장에 반영하는 처리
 	AMD_GameStateBase* GameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
 	if (IsValid(GameState) == true && ScoreAmount > 0)
 	{
-		GameState->AddScoreDelta(ScoreDelta);
+		FGameplayTag ScoreEventTag = bPenalty == true ? MDGameplayTags::Score_Penalty_Quest : MDGameplayTags::Score_Daily_Quest;
+		GameState->AddScoreEvent(ScoreEventTag, ScoreDelta, true);
 	}
 
 	// QuestDefinition에 명시된 호감도만 상점 해금 범위 안에서 반영하는 처리

@@ -184,26 +184,37 @@ void AMD_GameStateBase::AddScoreDelta(int32 Delta)
     OnRep_Score();
 }
 
-void AMD_GameStateBase::AddScoreEvent(FGameplayTag EventTag, int32 Count)
+void AMD_GameStateBase::AddScoreEvent(FGameplayTag EventTag, int32 Count, bool bUseCountAsDelta)
 {
-    if (!HasAuthority() || !IsValid(ScoreTable) || Count == 0)
+    if (HasAuthority() == false || Count == 0)
     {
         return;
     }
 
-    const int32 Delta = ScoreTable->GetEventValue(EventTag) * Count;
-    if (Delta == 0)
+    // QuestDefinition처럼 외부 데이터에서 계산된 점수와 ScoreTable 단가 기반 점수를 동일한 원장 경로로 처리하기 위한 분기
+    int32 Delta = Count;
+    if (bUseCountAsDelta == false)
     {
-        return;
+        if (IsValid(ScoreTable) == false)
+        {
+            return;
+        }
+
+        Delta = ScoreTable->GetEventValue(EventTag) * Count;
+        if (Delta == 0)
+        {
+            return;
+        }
     }
 
+    // 총점 변경과 동일한 일차·원인의 원장 항목을 한 번에 남기기 위한 기록
     ScoreLog.Add({EventTag, Delta, CurrentDay});
     AddScoreDelta(Delta);
 }
 
 void AMD_GameStateBase::AddSampleScoreEvent(EMD_SampleGrade Grade, EMD_SampleScoreType Type)
 {
-    if (!HasAuthority() || !IsValid(ScoreTable))
+    if (HasAuthority() == false || IsValid(ScoreTable) == false)
     {
         return;
     }
