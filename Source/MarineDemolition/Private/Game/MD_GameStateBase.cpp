@@ -4,6 +4,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
+#include "Types/Travel/MD_TravelTypes.h"
 
 AMD_GameStateBase::AMD_GameStateBase()
 {
@@ -42,6 +43,8 @@ void AMD_GameStateBase::GetLifetimeReplicatedProps(
     DOREPLIFETIME(AMD_GameStateBase, CurrentDay);
 
     DOREPLIFETIME(AMD_GameStateBase, ContractCrewCount);
+
+    DOREPLIFETIME(AMD_GameStateBase, ContractDifficulty);
 
     DOREPLIFETIME(AMD_GameStateBase, bEmergencyDay);
 }
@@ -229,7 +232,7 @@ int32 AMD_GameStateBase::GetInspectionThreshold(int32 Day) const
     }
 
     // 최종 기준 = 표준 × 난이도 × 인원 × (경고 시 1.1)
-    float Multiplier = ScoreTable->DifficultyThresholdMultiplier;
+    float Multiplier = MDTravel::GetDifficultyMultiplier(ContractDifficulty);
     if (ContractCrewCount > 0)
     {
         Multiplier *= ScoreTable->GetCrewMultiplier(ContractCrewCount);
@@ -256,6 +259,23 @@ void AMD_GameStateBase::SetContractCrewCount(int32 Crew)
     {
         ContractCrewCount = Crew;
     }
+}
+
+void AMD_GameStateBase::SetContractDifficulty(EMD_Difficulty Difficulty)
+{
+    if (HasAuthority() == false)
+    {
+        return;
+    }
+
+    // C++ 또는 Blueprint에서 전달된 열거형 값도 정식 난이도 범위로 제한하기 위한 검사
+    if (Difficulty < EMD_Difficulty::Safe || Difficulty > EMD_Difficulty::Extreme)
+    {
+        return;
+    }
+
+    ContractDifficulty = Difficulty;
+    ForceNetUpdate();
 }
 
 void AMD_GameStateBase::SetEmergencyDay(bool bEmergency)
@@ -310,6 +330,7 @@ FMD_GameStateData AMD_GameStateBase::GetGameStateSaveData() const
     SaveData.bEmergencyDay = bEmergencyDay;
     SaveData.bInspectionWarned = bInspectionWarned;
     SaveData.ContractCrewCount = ContractCrewCount;
+    SaveData.ContractDifficulty = ContractDifficulty;
     SaveData.ElapsedDay = CurrentDay;
     SaveData.ElapsedSeconds = GetElapsedGameSeconds();
     SaveData.Score = Score;
@@ -333,6 +354,7 @@ bool AMD_GameStateBase::ApplyGameStateSaveData(const FMD_GameStateData& SaveData
     bEmergencyDay = SaveData.bEmergencyDay;
     bInspectionWarned = SaveData.bInspectionWarned;
     ContractCrewCount = SaveData.ContractCrewCount;
+    ContractDifficulty = SaveData.ContractDifficulty;
     CurrentDay = SaveData.ElapsedDay;
     Score = SaveData.Score;
 

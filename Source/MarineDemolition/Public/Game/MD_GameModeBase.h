@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "Types/Score/MD_ScoreTypes.h"
+#include "Types/Travel/MD_TravelTypes.h"
 #include "MD_GameModeBase.generated.h"
 
 class AMD_CuttableWall;
@@ -31,11 +32,21 @@ public:
     virtual void Logout(AController* Exiting) override;
 
 protected:
+    virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
  //TimeAlarm
 private:
+    // 출발 요청 URL에서 검증한 계약 난이도를 GameState 생성 이후 적용하기 위한 임시 상태
+    EMD_Difficulty RequestedContractDifficulty = EMD_Difficulty::Standard;
+
+    // 직접 맵 실행과 Day 재시작을 출발 난이도 지정 계약과 구분하기 위한 옵션 존재 여부
+    bool bHasRequestedContractDifficulty = false;
+
+    // 서버 GameState에 검증된 출발 난이도를 계약 상태로 반영하는 처리
+    void ApplyRequestedContractDifficulty();
+
     FTimerHandle CheckGameTimeTimerHandle;
 
     // 새 게임 또는 불러오기 데이터를 World에 적용하는 함수

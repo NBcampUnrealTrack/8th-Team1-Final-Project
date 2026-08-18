@@ -4,6 +4,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameplayTagContainer.h"
 #include "Types/Score/MD_ScoreTypes.h"
+#include "Types/Travel/MD_TravelTypes.h"
 #include "MD_GameStateBase.generated.h"
 
 class UMD_ScoreTableData;
@@ -123,6 +124,14 @@ public:
     UFUNCTION(BlueprintPure, Category = "Day")
     int32 GetContractCrewCount() const { return ContractCrewCount; }
 
+    // 출발 시 선택한 난이도를 계약 전체 점검 기준에 사용하도록 고정하는 설정
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")
+    void SetContractDifficulty(EMD_Difficulty Difficulty);
+
+    // HUD와 점검 판정이 동일한 계약 난이도를 조회하기 위한 접근 함수
+    UFUNCTION(BlueprintPure, Category = "Score")
+    EMD_Difficulty GetContractDifficulty() const { return ContractDifficulty; }
+
     // 비상 4일차 진행 여부. Day 간 스냅샷으로 유지
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Day")
     void SetEmergencyDay(bool bEmergency);
@@ -186,6 +195,10 @@ private:
     // 계약 인원수 (0 = 미확정). 계약 시작 시점 고정
     UPROPERTY(Replicated)
     int32 ContractCrewCount = 0;
+
+    // 출발 시 서버가 확정하고 Day 전환과 저장 이후에도 유지하는 계약 난이도
+    UPROPERTY(Replicated)
+    EMD_Difficulty ContractDifficulty = EMD_Difficulty::Standard;
 
     // 비상 4일차 여부
     UPROPERTY(Replicated)

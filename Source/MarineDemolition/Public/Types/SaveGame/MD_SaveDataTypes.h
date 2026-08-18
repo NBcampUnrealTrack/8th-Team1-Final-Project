@@ -62,6 +62,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	int32 ContractCrewCount = 0;
 
+	// 출발 시 선택한 점검 난이도를 세이브 로드 이후에도 유지하기 위한 계약 값
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
+	EMD_Difficulty ContractDifficulty = EMD_Difficulty::Standard;
+
 public:
 	// 손상된 숫자 범위가 서버 진행 상태에 적용되지 않도록 검사하는 함수
 	bool IsStructurallyValid() const;

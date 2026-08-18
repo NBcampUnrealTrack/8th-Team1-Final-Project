@@ -111,8 +111,12 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 		return;
 	}
 
-	// 난이도는 URL 옵션으로 전달하고 Session 갱신과 ServerTravel 실행은 MultiplayManager에 위임하는 처리
-	FString TravelOptions = FString::Printf(TEXT("?listen?Difficulty=%d"), static_cast<int32>(Difficulty));
+	// uint8 기반 난이도를 동일한 저장 폭의 숫자 문자열로 직렬화하는 출발 옵션 구성
+	uint8 DifficultyValue = static_cast<uint8>(Difficulty);
+	FString TravelOptions = TEXT("?listen?Difficulty=");
+	TravelOptions.AppendInt(DifficultyValue);
+
+	// Session 갱신과 ServerTravel 실행은 MultiplayManager에 위임하는 처리
 	MultiplayManager->StartSessionByMap(MapPackage, TravelOptions);
 }
 

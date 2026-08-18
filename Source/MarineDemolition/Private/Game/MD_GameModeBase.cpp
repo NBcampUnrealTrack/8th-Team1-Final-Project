@@ -3,6 +3,7 @@
 
 #include "Game/MD_GameModeBase.h"
 #include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Game/MD_GameStateBase.h"
@@ -26,9 +27,34 @@ AMD_GameModeBase::AMD_GameModeBase()
     bUseSeamlessTravel = true;
 }
 
+void AMD_GameModeBase::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
+{
+    Super::InitGame(MapName, Options, ErrorMessage);
+
+    // 출발 콘솔이 전달한 난이도 옵션만 계약 난이도로 인정하기 위한 원문 검사
+    FString DifficultyOption = UGameplayStatics::ParseOption(Options, TEXT("Difficulty"));
+    if (DifficultyOption.IsEmpty() == true)
+    {
+        return;
+    }
+
+    // 변조되거나 정의되지 않은 정수 값이 점검 기준을 오염시키지 않도록 하는 서버 검증
+    uint8 DifficultyValue = MAX_uint8;
+    if (LexTryParseString(DifficultyValue, *DifficultyOption) == false || DifficultyValue < static_cast<uint8>(EMD_Difficulty::Safe) || DifficultyValue > static_cast<uint8>(EMD_Difficulty::Extreme))
+    {
+        return;
+    }
+
+    RequestedContractDifficulty = static_cast<EMD_Difficulty>(DifficultyValue);
+    bHasRequestedContractDifficulty = true;
+}
+
 void AMD_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();
+
+    // GameState 생성이 끝난 시점에 출발 화면에서 선택한 계약 난이도를 서버 원장에 반영
+    ApplyRequestedContractDifficulty();
 
     // 게임 맵의 액터 초기화 이후 새 게임 또는 불러오기 상태를 적용하기 위한 다음 틱 예약
     GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
@@ -57,6 +83,22 @@ void AMD_GameModeBase::BeginPlay()
     {
         GS->OnDayChanged.AddDynamic(this, &AMD_GameModeBase::HandleGameDayChanged);
     }
+}
+
+void AMD_GameModeBase::ApplyRequestedContractDifficulty()
+{
+    if (bHasRequestedContractDifficulty == false)
+    {
+        return;
+    }
+
+    AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
+    if (IsValid(MDGameState) == false)
+    {
+        return;
+    }
+
+    MDGameState->SetContractDifficulty(RequestedContractDifficulty);
 }
 
 void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
