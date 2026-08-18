@@ -32,7 +32,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sample")
 	EMD_SampleGrade Grade = EMD_SampleGrade::C;
 
-	/** 샘플을 생성한 반복 퀘스트와 제출·파괴 이벤트를 연결하는 PrimaryAssetId */
+	/** 샘플을 생성하거나 할당한 메인·반복 퀘스트와 제출·파괴 이벤트를 연결하는 PrimaryAssetId */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
 	FPrimaryAssetId QuestDefinitionId;
 

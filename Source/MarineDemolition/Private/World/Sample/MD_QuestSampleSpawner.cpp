@@ -239,13 +239,28 @@ void AMD_QuestSampleSpawner::TrySpawnForMainQuestState(const UMD_MerchantSubsyst
 		return;
 	}
 
-	if (bHasSpawnedForActiveQuest || HasOccupyingSamples())
+	if (bHasSpawnedForActiveQuest == true)
 	{
-		bHasSpawnedForActiveQuest = true;
 		return;
 	}
 
-	SpawnSamples(QuestState);
+	const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	if (IsValid(Definition) == false || Definition->IsValidDefinition() == false)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[QuestSampleSpawner] %s: Day%d 퀘스트 Definition 없음"), *GetName(), UnlockDay);
+		return;
+	}
+
+	// 기존 점유 샘플을 목표에 연결한 뒤 제출 완료 수량과 현재 월드 잔여 수량을 제외한 부족분 계산
+	const int32 RequiredCount = FMath::Max(1, Definition->RequiredCount);
+	const int32 RemainingCount = FMath::Max(0, RequiredCount - QuestState.CurrentProgress);
+	BindOccupyingSamplesToMainQuest(QuestState.DefinitionId, RemainingCount);
+	const int32 MissingCount = FMath::Max(0, RemainingCount - CountAvailableSamplesForQuest(QuestState.DefinitionId));
+	if (MissingCount > 0)
+	{
+		SpawnSamples(QuestState, *Definition, MissingCount);
+	}
+
 	bHasSpawnedForActiveQuest = true;
 }
 
@@ -272,7 +287,7 @@ void AMD_QuestSampleSpawner::TrySpawnForRepeatQuestStates(const UMD_MerchantSubs
 		}
 
 		int32 RemainingCount = FMath::Max(0, CurrentPhase->RequiredCount - QuestState.CurrentProgress);
-		int32 MissingCount = FMath::Max(0, RemainingCount - CountAvailableSamplesForGrade(QuestState.DefinitionId));
+		int32 MissingCount = FMath::Max(0, RemainingCount - CountAvailableSamplesForQuest(QuestState.DefinitionId));
 		if (MissingCount > 0)
 		{
 			SpawnRepeatQuestSamples(QuestState, MissingCount);
@@ -308,7 +323,7 @@ bool AMD_QuestSampleSpawner::IsPrimaryRepeatQuestSpawner() const
 	return bIsPrimarySpawner;
 }
 
-int32 AMD_QuestSampleSpawner::CountAvailableSamplesForGrade(const FPrimaryAssetId& QuestDefinitionId) const
+int32 AMD_QuestSampleSpawner::CountAvailableSamplesForQuest(const FPrimaryAssetId& QuestDefinitionId) const
 {
 	const UWorld* World = GetWorld();
 	int32 AvailableSampleCount = 0;
@@ -354,64 +369,64 @@ bool AMD_QuestSampleSpawner::FindLinkedMainQuest(
 	return false;
 }
 
-bool AMD_QuestSampleSpawner::HasOccupyingSamples() const
+int32 AMD_QuestSampleSpawner::BindOccupyingSamplesToMainQuest(const FPrimaryAssetId& QuestDefinitionId, int32 MaxAssignments) const
 {
 	const UWorld* World = GetWorld();
-	if (!IsValid(World))
+	int32 AssignedSampleCount = 0;
+	if (IsValid(World) == false || QuestDefinitionId.IsValid() == false || MaxAssignments <= 0)
 	{
-		return false;
+		return AssignedSampleCount;
 	}
 
 	const TArray<FTransform> SpawnTransforms = CollectSpawnTransforms();
 	if (SpawnTransforms.Num() == 0)
 	{
-		return false;
+		return AssignedSampleCount;
 	}
 
 	const float RadiusSq = FMath::Square(OccupiedCheckRadius);
-	TSet<const AMD_SampleItem*> CountedSamples;
+	TSet<AMD_SampleItem*> CountedSamples;
 
 	for (const FTransform& SpawnTransform : SpawnTransforms)
 	{
+		if (AssignedSampleCount >= MaxAssignments)
+		{
+			break;
+		}
+
 		const FVector Location = SpawnTransform.GetLocation();
 
 		for (TActorIterator<AMD_SampleItem> It(World); It; ++It)
 		{
-			const AMD_SampleItem* Sample = *It;
-			if (!IsValid(Sample) || Sample->Grade != SampleGrade || CountedSamples.Contains(Sample))
+			AMD_SampleItem* Sample = *It;
+			if (IsValid(Sample) == false || Sample->IsActorBeingDestroyed() == true || Sample->Grade != SampleGrade || Sample->QuestDefinitionId.IsValid() == true || CountedSamples.Contains(Sample) == true)
 			{
 				continue;
 			}
 
 			if (FVector::DistSquared(Sample->GetActorLocation(), Location) <= RadiusSq)
 			{
+				// 일반 샘플을 현재 메인 퀘스트 전용 목표로 전환하여 제출 이벤트가 정확한 ID를 전달하도록 하는 연결
+				Sample->QuestDefinitionId = QuestDefinitionId;
 				CountedSamples.Add(Sample);
+				++AssignedSampleCount;
+				break;
 			}
 		}
 	}
 
-	return CountedSamples.Num() >= SamplesToSpawn;
+	return AssignedSampleCount;
 }
 
-void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
+void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_MainQuestDefinition& Definition, int32 SpawnCount)
 {
-	const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(QuestState.DefinitionId);
-	if (IsValid(Definition) == false || Definition->IsValidDefinition() == false)
-	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("[QuestSampleSpawner] %s: Day%d 퀘스트 Definition 없음"),
-			*GetName(), UnlockDay);
-		return;
-	}
-
 	const FGameplayTag ExpectedGradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(SampleGrade);
-	if (ExpectedGradeTag.IsValid()
-		&& !Definition->TargetGradeTag.MatchesTagExact(ExpectedGradeTag))
+	if (ExpectedGradeTag.IsValid() == true && Definition.TargetGradeTag.MatchesTagExact(ExpectedGradeTag) == false)
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("[QuestSampleSpawner] %s: [%s] SampleGrade와 퀘스트 등급 태그가 다르다"),
 			*GetName(),
-			*Definition->QuestName.ToString());
+			*Definition.QuestName.ToString());
 	}
 
 	const TArray<FTransform> SpawnTransforms = CollectSpawnTransforms();
@@ -426,17 +441,16 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 	// 기획 09 §1.5: 스폰 개수는 퀘스트 목표 개수와 1:1이고 여분 샘플은 두지 않는다.
 	// 여분이 있으면 그 하나가 깨져도 납품은 가능한데 퀘스트는 파괴로 실패해버려
 	// (§1.5 "실패 — 파괴, 재시도 불가") 회복 불가 상태가 된다. 배치 실수를 여기서 잡는다.
-	if (Definition->RequiredCount > 0 && SamplesToSpawn != Definition->RequiredCount)
+	if (Definition.RequiredCount > 0 && SamplesToSpawn != Definition.RequiredCount)
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("[QuestSampleSpawner] %s: [%s] SamplesToSpawn(%d)이 퀘스트 RequiredCount(%d)와 다르다 — 기획 09 §1.5는 1:1을 요구한다"),
 			*GetName(),
-			*Definition->QuestName.ToString(),
+			*Definition.QuestName.ToString(),
 			SamplesToSpawn,
-			Definition->RequiredCount);
+			Definition.RequiredCount);
 	}
 
-	const int32 SpawnCount = FMath::Max(1, Definition->RequiredCount);
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -476,7 +490,7 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState)
 		UE_LOG(LogTemp, Log,
 			TEXT("[QuestSampleSpawner] %s: [%s] Day%d %s급 샘플 스폰 @ %s"),
 			*GetName(),
-			*Definition->QuestName.ToString(),
+			*Definition.QuestName.ToString(),
 			QuestState.UnlockDay,
 			*StaticEnum<EMD_SampleGrade>()->GetNameStringByValue(static_cast<int64>(SampleGrade)),
 			*Sample->GetActorLocation().ToCompactString());
