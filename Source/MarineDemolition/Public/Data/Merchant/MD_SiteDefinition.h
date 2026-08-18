@@ -6,6 +6,7 @@
 #include "MD_SiteDefinition.generated.h"
 
 class UMD_LoreCatalog;
+class UWorld;
 
 /** 작업 현장 1곳의 메타데이터 + 메인/반복 퀘스트 목록. */
 UCLASS(BlueprintType)
@@ -16,6 +17,10 @@ class MARINEDEMOLITION_API UMD_SiteDefinition : public UDataAsset
 public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
 	FText SiteName;
+
+	/** 이 현장의 메인·반복 퀘스트를 수행하는 공통 원정 맵 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
+	TSoftObjectPtr<UWorld> QuestMap;
 
 	/** Day1, Day2, … 순서로 사용할 MD_MainQuestDefinition 에셋의 PrimaryAssetId 목록 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Main", meta = (AllowedTypes = "Quest"))

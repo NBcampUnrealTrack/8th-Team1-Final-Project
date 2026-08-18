@@ -6,9 +6,7 @@
 #include "Types/Merchant/MD_MerchantTypes.h"
 #include "MD_MainQuestDefinition.generated.h"
 
-class UWorld;
-
-/** 일차별 고정 목표와 실행 맵을 정의하는 메인 퀘스트 원본 자산 */
+/** 일차별 고정 목표와 보상을 정의하는 메인 퀘스트 원본 자산 */
 UCLASS(BlueprintType)
 class MARINEDEMOLITION_API UMD_MainQuestDefinition : public UMD_QuestDefinition
 {
@@ -32,10 +30,6 @@ public:
 	/** 목표를 완료하기 위해 필요한 이벤트 누적 횟수 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Objective", meta = (ClampMin = "1", UIMin = "1"))
 	int32 RequiredCount = 1;
-
-	/** 이 퀘스트가 속한 원정 맵 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest")
-	TSoftObjectPtr<UWorld> QuestMap;
 
 public:
 	/** 저장·복제된 PrimaryAssetId로 메인 퀘스트 원본 자산을 동기 로드하는 함수 */

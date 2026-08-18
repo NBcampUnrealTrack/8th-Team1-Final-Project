@@ -6,7 +6,6 @@
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Game/MD_GameStateBase.h"
-#include "Data/Merchant/MD_MainQuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Player/MD_PlayerController.h"
 #include "TimerManager.h"
@@ -263,24 +262,9 @@ bool AMD_GameModeBase::DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld*
     FString CurrentMapName = World->GetMapName();
     CurrentMapName.RemoveFromStart(World->StreamingLevelsPrefix);
 
-    // 현장의 일차별 메인 퀘스트가 참조하는 실행 맵 검사
-    for (const FPrimaryAssetId& MainQuestDefinitionId : Site->MainQuestAssets)
-    {
-        const UMD_MainQuestDefinition* MainQuestDefinition = UMD_MainQuestDefinition::LoadDefinition(MainQuestDefinitionId);
-        if (IsValid(MainQuestDefinition) == false)
-        {
-            continue;
-        }
-
-        // 소프트 월드 경로에서 추출한 비교용 맵 애셋 이름
-        FString QuestMapName = MainQuestDefinition->QuestMap.ToSoftObjectPath().GetAssetName();
-        if (QuestMapName.IsEmpty() == false && QuestMapName == CurrentMapName)
-        {
-            return true;
-        }
-    }
-
-    return false;
+    // 현장에 한 번만 지정된 공통 원정 맵을 사용하여 퀘스트 목록 순회와 개별 에셋 로드를 피한다.
+    const FString QuestMapName = Site->QuestMap.ToSoftObjectPath().GetAssetName();
+    return QuestMapName.IsEmpty() == false && QuestMapName == CurrentMapName;
 }
 
 TSoftObjectPtr<UWorld> AMD_GameModeBase::MakeWorldAssetReference(UWorld* World) const

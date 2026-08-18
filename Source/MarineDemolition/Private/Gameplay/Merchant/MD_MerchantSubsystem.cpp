@@ -418,7 +418,8 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDe
 	for (FMD_MainQuestState& QuestState : MainQuests)
 	{
 		const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(QuestState.DefinitionId);
-		if (QuestState.IsActive() == false || IsValid(Definition) == false
+		if (QuestState.IsActive() == false || QuestState.DefinitionId != QuestDefinitionId
+			|| IsValid(Definition) == false
 			|| Definition->AcceptsSample(GradeTag, bIntact) == false)
 		{
 			continue;
