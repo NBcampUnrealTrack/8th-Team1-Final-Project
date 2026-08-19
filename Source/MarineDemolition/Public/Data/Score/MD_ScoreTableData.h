@@ -37,10 +37,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Score|Inspection")
 	float WarnedThresholdMultiplier = 1.1f;
 
-	// 난이도 점검 기준 배율 (표준=1.0)
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Score|Inspection")
-	float DifficultyThresholdMultiplier = 1.0f;
-
 	// 수도 미밀봉 확산 감점의 사고당 상한 (기획 : -80)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Score|Penalty")
 	int32 PipeLeakCapPerIncident = -80;

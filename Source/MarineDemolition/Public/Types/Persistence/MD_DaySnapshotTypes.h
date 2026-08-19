@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Templates/SubclassOf.h"
+#include "Types/Travel/MD_TravelTypes.h"
 #include "MD_DaySnapshotTypes.generated.h"
 
 class AMD_SupportBrace;
@@ -145,6 +146,10 @@ struct FMD_DaySnapshot
       // 계약 인원수 (Day 간 고정 유지)
       UPROPERTY()
       int32 CrewCount = 0;
+
+      // 출발 시 선택한 점검 난이도를 다음 Day에서도 동일하게 유지하기 위한 계약 값
+      UPROPERTY()
+      EMD_Difficulty ContractDifficulty = EMD_Difficulty::Standard;
 
       // 비상 4일차 진행 여부
       UPROPERTY()
