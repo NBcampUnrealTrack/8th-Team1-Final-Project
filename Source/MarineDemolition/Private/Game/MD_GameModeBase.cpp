@@ -614,20 +614,12 @@ void AMD_GameModeBase::FinalizeDeliveredSamples()
             continue;
         }
 
-        // 액터 제거 이후 퀘스트 제출에 사용할 Definition ID·등급·손상 상태 복사
-        FPrimaryAssetId QuestDefinitionId = Sample->QuestDefinitionId;
-        FGameplayTag GradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(Sample->Grade);
-        bool bIntact = Sample->bDamaged == false;
-
-        // 제거가 확정된 샘플만 제출 처리하여 다음 Day 중복 진행을 막는 처리
-        bool bSampleDestroyed = Sample->Destroy();
-        if (bSampleDestroyed == false)
+        // 통합된 제출 경로에서 액터 검증과 제거가 성공한 경우에만 퀘스트 진행도를 반영한다.
+        bool bSampleDelivered = Merchant->TryDeliverQuestItem(Sample);
+        if (bSampleDelivered == false)
         {
             continue;
         }
-
-        // 샘플 자체 보상 없이 연결된 QuestDefinition의 성공 Reward 판정만 진행하는 제출 통지
-        Merchant->NotifySampleDelivered(QuestDefinitionId, GradeTag, bIntact);
     }
 }
 

@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
@@ -598,6 +598,15 @@ void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDe
 			continue;
 		}
 
+		// 메인 퀘스트의 현재 단계와 파괴된 목표를 비교하기 위해 공통 Definition을 복원한다.
+		UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		// 유효한 Definition만 목표 일치 여부를 판정하도록 복원 결과를 확인한다.
+		bool bIsDefinitionValid = IsValid(Definition);
+		if (bIsDefinitionValid == false)
+		{
+			continue;
+		}
+
 		bool bTargetsQuestItem = Definition->TargetsQuestItem(QuestState.CurrentPhaseIndex, GradeTag);
 		if (bTargetsQuestItem == false)
 		{
@@ -933,7 +942,7 @@ void UMD_MerchantSubsystem::ApplyQuestRewardData(const FMD_QuestRewardData& Rewa
 	Affinity = FMath::Clamp(Affinity + AffinityDelta, -4.0f, 5.0f);
 }
 
-void UMD_MerchantSubsystem::ApplyRepeatQuestReward(const UMD_RepeatQuestDefinition& Definition)
+void UMD_MerchantSubsystem::ApplyRepeatQuestReward(const UMD_QuestDefinition& Definition)
 {
 	// 반복 퀘스트 Definition의 성공 Reward를 공통 정산 경로로 적용하는 처리
 	ApplyQuestRewardData(Definition.SuccessReward, false);
@@ -1006,8 +1015,8 @@ bool UMD_MerchantSubsystem::FailMainQuest(FMD_MainQuestState& QuestState, EMD_Qu
 		return bOutFailed;
 	}
 
-	// 상태를 변경하기 전에 원본 Definition과 실패 원인을 모두 검증하기 위한 선행 검사
-	const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	// 상태 변경 전에 통합된 퀘스트 Definition과 실패 원인을 검증하기 위해 원본 데이터를 복원한다.
+	UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
 	if (IsValid(Definition) == false || Definition->IsValidDefinition() == false)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[Merchant] 원본 Definition이 유효하지 않아 메인 퀘스트 실패 처리를 건너뜁니다."));
