@@ -3,8 +3,7 @@
 #include "Components/ArrowComponent.h"
 #include "Components/SceneComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
-#include "Data/Merchant/MD_MainQuestDefinition.h"
-#include "Data/Merchant/MD_RepeatQuestDefinition.h"
+#include "Data/Merchant/MD_QuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -64,7 +63,7 @@ void AMD_QuestSampleSpawner::RefreshLinkedQuestPreview()
 	{
 		if (Site->MainQuestLine.IsValidIndex(MainQuestIndex))
 		{
-			const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(Site->MainQuestLine[MainQuestIndex]);
+			const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(Site->MainQuestLine[MainQuestIndex]);
 			if (IsValid(Definition) == true)
 			{
 				LinkedQuestName = Definition->QuestName;
@@ -227,7 +226,7 @@ void AMD_QuestSampleSpawner::TrySpawnForMainQuestState(const UMD_MerchantSubsyst
 
 	if (QuestState.Status == EMD_MainQuestStatus::Locked)
 	{
-		bHasSpawnedForActiveQuest = false;
+		LastSpawnedMainPhaseIndex = INDEX_NONE;
 		return;
 	}
 
@@ -239,20 +238,45 @@ void AMD_QuestSampleSpawner::TrySpawnForMainQuestState(const UMD_MerchantSubsyst
 		return;
 	}
 
-	if (bHasSpawnedForActiveQuest == true)
+	if (LastSpawnedMainPhaseIndex == QuestState.CurrentPhaseIndex)
 	{
 		return;
 	}
 
-	const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(QuestState.DefinitionId);
-	if (IsValid(Definition) == false || Definition->IsValidDefinition() == false)
+	const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	// 원본 포인터부터 현재 단계까지 순서대로 검증하기 위한 결과
+	bool bIsDefinitionValid = IsValid(Definition);
+	if (bIsDefinitionValid == false)
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[QuestSampleSpawner] %s: Day%d 퀘스트 Definition 없음"), *GetName(), UnlockDay);
 		return;
 	}
 
+	bool bIsDefinitionDataValid = Definition->IsValidDefinition();
+	if (bIsDefinitionDataValid == false)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[QuestSampleSpawner] %s: Day%d 퀘스트 Definition 없음"), *GetName(), UnlockDay);
+		return;
+	}
+
+	bool bHasCurrentPhase = Definition->HasPhase(QuestState.CurrentPhaseIndex);
+	if (bHasCurrentPhase == false)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[QuestSampleSpawner] %s: Day%d 퀘스트 Definition 없음"), *GetName(), UnlockDay);
+		return;
+	}
+
+	// 공통 Definition의 청소·마감 페이즈는 각 전용 진행 시스템이 처리하므로 샘플을 만들지 않는 분기
+	const EMD_QuestObjectiveType ObjectiveType = Definition->GetObjectiveType(QuestState.CurrentPhaseIndex);
+	const bool bIsRecoveryObjective = ObjectiveType == EMD_QuestObjectiveType::RecoverIntact || ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
+	if (bIsRecoveryObjective == false)
+	{
+		LastSpawnedMainPhaseIndex = QuestState.CurrentPhaseIndex;
+		return;
+	}
+
 	// 기존 점유 샘플을 목표에 연결한 뒤 제출 완료 수량과 현재 월드 잔여 수량을 제외한 부족분 계산
-	const int32 RequiredCount = FMath::Max(1, Definition->RequiredCount);
+	const int32 RequiredCount = FMath::Max(1, Definition->GetRequiredCount(QuestState.CurrentPhaseIndex));
 	const int32 RemainingCount = FMath::Max(0, RequiredCount - QuestState.CurrentProgress);
 	BindOccupyingSamplesToMainQuest(QuestState.DefinitionId, RemainingCount);
 	const int32 MissingCount = FMath::Max(0, RemainingCount - CountAvailableSamplesForQuest(QuestState.DefinitionId));
@@ -261,7 +285,7 @@ void AMD_QuestSampleSpawner::TrySpawnForMainQuestState(const UMD_MerchantSubsyst
 		SpawnSamples(QuestState, *Definition, MissingCount);
 	}
 
-	bHasSpawnedForActiveQuest = true;
+	LastSpawnedMainPhaseIndex = QuestState.CurrentPhaseIndex;
 }
 
 void AMD_QuestSampleSpawner::TrySpawnForRepeatQuestStates(const UMD_MerchantSubsystem* MerchantSubsystem)
@@ -279,14 +303,32 @@ void AMD_QuestSampleSpawner::TrySpawnForRepeatQuestStates(const UMD_MerchantSubs
 			continue;
 		}
 
-		const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(QuestState.DefinitionId);
-		const FMD_RepeatQuestPhaseData* CurrentPhase = IsValid(Definition) == true ? Definition->GetPhase(QuestState.CurrentPhaseIndex) : nullptr;
-		if (CurrentPhase == nullptr || Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress) == true || MatchesRepeatQuest(*CurrentPhase) == false)
+		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		bool bIsDefinitionValid = IsValid(Definition);
+		if (bIsDefinitionValid == false)
 		{
 			continue;
 		}
 
-		int32 RemainingCount = FMath::Max(0, CurrentPhase->RequiredCount - QuestState.CurrentProgress);
+		bool bHasCurrentPhase = Definition->HasPhase(QuestState.CurrentPhaseIndex);
+		if (bHasCurrentPhase == false)
+		{
+			continue;
+		}
+
+		bool bIsObjectiveComplete = Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress);
+		if (bIsObjectiveComplete == true)
+		{
+			continue;
+		}
+
+		bool bMatchesRepeatQuest = MatchesRepeatQuest(*Definition, QuestState.CurrentPhaseIndex);
+		if (bMatchesRepeatQuest == false)
+		{
+			continue;
+		}
+
+		int32 RemainingCount = FMath::Max(0, Definition->GetRequiredCount(QuestState.CurrentPhaseIndex) - QuestState.CurrentProgress);
 		int32 MissingCount = FMath::Max(0, RemainingCount - CountAvailableSamplesForQuest(QuestState.DefinitionId));
 		if (MissingCount > 0)
 		{
@@ -344,11 +386,19 @@ int32 AMD_QuestSampleSpawner::CountAvailableSamplesForQuest(const FPrimaryAssetI
 	return AvailableSampleCount;
 }
 
-bool AMD_QuestSampleSpawner::MatchesRepeatQuest(const FMD_RepeatQuestPhaseData& QuestPhase) const
+bool AMD_QuestSampleSpawner::MatchesRepeatQuest(const UMD_QuestDefinition& Definition, int32 PhaseIndex) const
 {
+	const EMD_QuestObjectiveType ObjectiveType = Definition.GetObjectiveType(PhaseIndex);
+	const bool bIsRecoveryObjective = ObjectiveType == EMD_QuestObjectiveType::RecoverIntact || ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
+	if (bIsRecoveryObjective == false)
+	{
+		return false;
+	}
+
 	const FGameplayTag ExpectedGradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(SampleGrade);
 	// 복수 허용 등급마다 별도 스포너가 목표 수량을 중복 생성하지 않도록 첫 등급을 대표 생성 등급으로 사용하는 판정
-	const TArray<FGameplayTag>& AcceptedGradeTags = QuestPhase.AcceptedGradeTags.GetGameplayTagArray();
+	const FGameplayTagContainer AcceptedGrades = Definition.GetAcceptedGradeTags(PhaseIndex);
+	const TArray<FGameplayTag>& AcceptedGradeTags = AcceptedGrades.GetGameplayTagArray();
 	bool bMatchesRepeatQuest = ExpectedGradeTag.IsValid() == true && (AcceptedGradeTags.Num() > 0 ? AcceptedGradeTags[0].MatchesTagExact(ExpectedGradeTag) == true : SampleGrade == EMD_SampleGrade::C);
 	return bMatchesRepeatQuest;
 }
@@ -418,10 +468,13 @@ int32 AMD_QuestSampleSpawner::BindOccupyingSamplesToMainQuest(const FPrimaryAsse
 	return AssignedSampleCount;
 }
 
-void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_MainQuestDefinition& Definition, int32 SpawnCount)
+void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition, int32 SpawnCount)
 {
 	const FGameplayTag ExpectedGradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(SampleGrade);
-	if (ExpectedGradeTag.IsValid() == true && Definition.TargetGradeTag.MatchesTagExact(ExpectedGradeTag) == false)
+	// 유효한 스포너 등급과 퀘스트 단계의 목표 등급 일치 여부
+	bool bIsExpectedGradeValid = ExpectedGradeTag.IsValid();
+	bool bTargetsExpectedGrade = bIsExpectedGradeValid == true && Definition.TargetsGrade(QuestState.CurrentPhaseIndex, ExpectedGradeTag) == true;
+	if (bIsExpectedGradeValid == true && bTargetsExpectedGrade == false)
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("[QuestSampleSpawner] %s: [%s] SampleGrade와 퀘스트 등급 태그가 다르다"),
@@ -441,14 +494,15 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState, 
 	// 기획 09 §1.5: 스폰 개수는 퀘스트 목표 개수와 1:1이고 여분 샘플은 두지 않는다.
 	// 여분이 있으면 그 하나가 깨져도 납품은 가능한데 퀘스트는 파괴로 실패해버려
 	// (§1.5 "실패 — 파괴, 재시도 불가") 회복 불가 상태가 된다. 배치 실수를 여기서 잡는다.
-	if (Definition.RequiredCount > 0 && SamplesToSpawn != Definition.RequiredCount)
+	const int32 RequiredCount = Definition.GetRequiredCount(QuestState.CurrentPhaseIndex);
+	if (RequiredCount > 0 && SamplesToSpawn != RequiredCount)
 	{
 		UE_LOG(LogTemp, Warning,
 			TEXT("[QuestSampleSpawner] %s: [%s] SamplesToSpawn(%d)이 퀘스트 RequiredCount(%d)와 다르다 — 기획 09 §1.5는 1:1을 요구한다"),
 			*GetName(),
 			*Definition.QuestName.ToString(),
 			SamplesToSpawn,
-			Definition.RequiredCount);
+			RequiredCount);
 	}
 
 	FActorSpawnParameters SpawnParams;
@@ -499,8 +553,16 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState, 
 
 void AMD_QuestSampleSpawner::SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, int32 SpawnCount)
 {
-	const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(QuestState.DefinitionId);
-	if (IsValid(Definition) == false || Definition->GetPhase(QuestState.CurrentPhaseIndex) == nullptr || SpawnCount <= 0)
+	const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	// 원본 포인터와 단계가 확인된 뒤에만 반복 퀘스트 샘플 생성을 진행하기 위한 결과
+	bool bIsDefinitionValid = IsValid(Definition);
+	if (bIsDefinitionValid == false)
+	{
+		return;
+	}
+
+	bool bHasCurrentPhase = Definition->HasPhase(QuestState.CurrentPhaseIndex);
+	if (bHasCurrentPhase == false || SpawnCount <= 0)
 	{
 		return;
 	}

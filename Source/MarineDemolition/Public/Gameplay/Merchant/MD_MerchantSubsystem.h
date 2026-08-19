@@ -16,12 +16,10 @@
 DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
 
 class UMD_SiteDefinition;
-class UMD_MainQuestDefinition;
-class UMD_RepeatQuestDefinition;
+class UMD_QuestDefinition;
 class AMD_PlayerState;
 struct FGameplayTag;
 struct FMD_MerchantData;
-struct FMD_RepeatQuestPhaseData;
 struct FMD_ShopItem;
 
 enum class EMD_SampleGrade : uint8;
@@ -158,17 +156,17 @@ private:
 
 	void FailMainQuest(FMD_MainQuestState& QuestState, EMD_QuestFailureReason Reason);
 
-	/** 반복 퀘스트 상태에서 원본 에셋과 현재 페이즈를 함께 검증하여 반환하는 함수 */
-	const FMD_RepeatQuestPhaseData* GetCurrentRepeatQuestPhase(const FMD_RepeatQuestState& QuestState, UMD_RepeatQuestDefinition*& OutDefinition) const;
+	/** 반복 퀘스트 상태에서 공통 원본 에셋과 현재 목표 인덱스를 함께 검증하여 반환하는 함수 */
+	UMD_QuestDefinition* GetRepeatQuestDefinition(const FMD_RepeatQuestState& QuestState) const;
 
 	/** 수락한 반복 퀘스트가 마지막 페이즈 목표를 충족했는지 원본 에셋 기준으로 판정하는 함수 */
 	bool IsRepeatQuestObjectiveComplete(const FMD_RepeatQuestState& QuestState) const;
 
 	/** 성공한 반복 퀘스트 에셋의 고정 크레딧·점수·호감도를 서버 원장에 적용하는 함수 */
-	void ApplyRepeatQuestReward(const UMD_RepeatQuestDefinition& Definition);
+	void ApplyRepeatQuestReward(const UMD_QuestDefinition& Definition);
 
 	/** 실패 원인에 맞는 반복 퀘스트 에셋의 패널티를 서버 원장에 적용하는 함수 */
-	void ApplyRepeatQuestPenalty(const UMD_RepeatQuestDefinition& Definition, bool bDestroyed);
+	void ApplyRepeatQuestPenalty(const UMD_QuestDefinition& Definition, bool bDestroyed);
 
 	/** 활성 반복 퀘스트를 실패로 전환하고 원본 에셋의 패널티를 한 번 적용하는 함수 */
 	void FailRepeatQuest(FMD_RepeatQuestState& QuestState, bool bDestroyed);
@@ -195,7 +193,7 @@ private:
 	void AddCreditsInternal(int32 Amount);
 
 	/** 성공한 메인 퀘스트 에셋의 크레딧·점수·호감도를 서버 원장에 적용하는 함수 */
-	void ApplyMainQuestReward(const UMD_MainQuestDefinition& Definition);
+	void ApplyMainQuestReward(const UMD_QuestDefinition& Definition);
 
 	int32 Credits = 0;
 

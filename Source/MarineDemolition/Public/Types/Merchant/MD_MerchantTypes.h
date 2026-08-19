@@ -47,7 +47,7 @@ struct MARINEDEMOLITION_API FMD_MainQuestState
 {
 	GENERATED_BODY()
 
-	/** 원본 MD_MainQuestDefinition을 저장·복제 환경에서 다시 찾기 위한 식별자 */
+	/** 메인 역할로 배치된 공통 퀘스트 원본을 저장·복제 환경에서 다시 찾기 위한 식별자 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	FPrimaryAssetId DefinitionId;
 
@@ -56,6 +56,10 @@ struct MARINEDEMOLITION_API FMD_MainQuestState
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	EMD_MainQuestStatus Status = EMD_MainQuestStatus::Locked;
+
+	/** 메인 역할로 배치된 다단계 퀘스트의 현재 목표 인덱스 */
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
+	int32 CurrentPhaseIndex = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	int32 CurrentProgress = 0;
@@ -74,7 +78,7 @@ struct MARINEDEMOLITION_API FMD_RepeatQuestState
 {
 	GENERATED_BODY()
 
-	/** 원본 MD_RepeatQuestDefinition을 저장·복제 환경에서 다시 찾기 위한 식별자 */
+	/** 반복 역할로 배치된 공통 퀘스트 원본을 저장·복제 환경에서 다시 찾기 위한 식별자 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	FPrimaryAssetId DefinitionId;
 

@@ -7,13 +7,12 @@
 #include "MD_QuestSampleSpawner.generated.h"
 
 class UArrowComponent;
-class UMD_MainQuestDefinition;
+class UMD_QuestDefinition;
 class UMD_MerchantComponent;
 class UMD_MerchantSubsystem;
 class UMD_SiteDefinition;
 class AMD_SampleItem;
 struct FMD_MainQuestState;
-struct FMD_RepeatQuestPhaseData;
 struct FMD_RepeatQuestState;
 
 /**
@@ -60,7 +59,7 @@ protected:
 	int32 CountAvailableSamplesForQuest(const FPrimaryAssetId& QuestDefinitionId) const;
 
 	/** 반복 퀘스트 페이즈와 스포너 등급의 일치 여부 판정 */
-	bool MatchesRepeatQuest(const FMD_RepeatQuestPhaseData& QuestPhase) const;
+	bool MatchesRepeatQuest(const UMD_QuestDefinition& Definition, int32 PhaseIndex) const;
 
 	bool FindLinkedMainQuest(const UMD_MerchantSubsystem* MerchantSubsystem, FMD_MainQuestState& OutQuestState) const;
 
@@ -70,7 +69,7 @@ protected:
 	int32 BindOccupyingSamplesToMainQuest(const FPrimaryAssetId& QuestDefinitionId, int32 MaxAssignments) const;
 
 	/** 현재 메인 퀘스트에 부족한 목표 샘플만 생성하는 함수 */
-	void SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_MainQuestDefinition& Definition, int32 SpawnCount);
+	void SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition, int32 SpawnCount);
 
 	/** 회수 반복 퀘스트에 필요한 샘플 생성 처리 */
 	void SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, int32 SpawnCount);
@@ -130,8 +129,8 @@ protected:
 		meta = (ClampMin = "0.0", UIMin = "0.0", DisplayName = "Spawn Protection Duration"))
 	float SampleSpawnProtectionDuration = 3.f;
 
-	/** 이번 Active 주기에 스폰을 완료했는지. 계약 재시작(Locked) 시 리셋된다. */
-	bool bHasSpawnedForActiveQuest = false;
+	/** 메인 역할 퀘스트에서 마지막으로 스폰을 완료한 페이즈 인덱스 */
+	int32 LastSpawnedMainPhaseIndex = INDEX_NONE;
 
 	bool bSpawnerInitialized = false;
 
