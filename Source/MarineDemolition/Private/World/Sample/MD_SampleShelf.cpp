@@ -237,8 +237,6 @@ void AMD_SampleShelf::CollectQuestItem(AMD_QuestItem* QuestItem)
 	UGameInstance* GameInstance = IsValid(World) ? World->GetGameInstance() : nullptr;
 	bool bIntact = QuestItem->IsQuestItemIntact();
 	UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
-	FPrimaryAssetId QuestDefinitionId = QuestItem->QuestDefinitionId;
-	FGameplayTag GradeTag = QuestItem->GetQuestGradeTag();
 	AMD_SampleItem* Sample = Cast<AMD_SampleItem>(QuestItem);
 	bool bIsDestructibleSample = IsValid(Sample);
 	EMD_SampleGrade SampleGrade = bIsDestructibleSample == true ? Sample->Grade : EMD_SampleGrade::C;
@@ -253,8 +251,17 @@ void AMD_SampleShelf::CollectQuestItem(AMD_QuestItem* QuestItem)
 		Entry.Mesh = QuestItemMesh->GetStaticMesh();
 	}
 
-	// 다음 페이즈 스폰 부족분 계산에서 제출 완료 아이템을 제외하기 위한 관리 목적 제거
-	bool bQuestItemRemoved = QuestItem->Destroy();
+	// 퀘스트 판정에 실제 액터를 사용하고 제거가 확정된 뒤에만 진행도를 반영하는 제출 처리
+	bool bQuestItemRemoved = false;
+	if (IsValid(Merchant) == true)
+	{
+		bQuestItemRemoved = Merchant->TryDeliverQuestItem(QuestItem);
+	}
+	else
+	{
+		bQuestItemRemoved = QuestItem->Destroy();
+	}
+
 	if (bQuestItemRemoved == false)
 	{
 		return;
@@ -273,12 +280,6 @@ void AMD_SampleShelf::CollectQuestItem(AMD_QuestItem* QuestItem)
 
 	// 리슨 서버는 OnRep가 오지 않으므로 직접 갱신한다.
 	RebuildDisplay();
-
-	// 점수·크레딧은 지급하지 않고 제거가 확정된 퀘스트 아이템의 진행만 반영하는 처리
-	if (IsValid(Merchant) == true)
-	{
-		Merchant->NotifyQuestItemDelivered(QuestDefinitionId, GradeTag, bIntact);
-	}
 }
 
 void AMD_SampleShelf::OnRep_DisplayEntries()

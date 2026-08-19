@@ -26,7 +26,7 @@ public:
 	/** 조준 중인 퀘스트 아이템의 외곽선 표시를 제어하는 함수 */
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 
-	/** 등급 조건이 없는 기본 퀘스트 아이템의 빈 등급 태그 반환 함수 */
+	/** 등급 조건을 적용하지 않는 기본 퀘스트 아이템의 빈 등급 태그 반환 함수 */
 	virtual FGameplayTag GetQuestGradeTag() const;
 
 	/** 손상 기능이 없는 기본 퀘스트 아이템의 온전한 상태 반환 함수 */

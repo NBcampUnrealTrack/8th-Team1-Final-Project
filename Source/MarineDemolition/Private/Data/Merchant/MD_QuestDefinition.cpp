@@ -2,16 +2,31 @@
 
 #include "Engine/AssetManager.h"
 #include "World/Sample/MD_QuestItem.h"
+#include "World/Sample/MD_SampleItem.h"
 
-bool FMD_QuestPhaseData::AcceptsQuestItem(const FGameplayTag& GradeTag, bool bIntact) const
+bool FMD_QuestPhaseData::AcceptsQuestItem(AMD_QuestItem* SubmittedItem) const
 {
-	// 등급 조건이 없는 파괴 불가 아이템과 등급 조건이 있는 샘플을 함께 지원하는 제출 판정
-	bool bHasGradeRequirement = AcceptedGradeTags.Num() > 0;
-	bool bGradeMatches = bHasGradeRequirement == false || (GradeTag.IsValid() == true && AcceptedGradeTags.HasTagExact(GradeTag) == true);
+	bool bOutAccepted = false;
+	if (IsValid(SubmittedItem) == false)
+	{
+		return bOutAccepted;
+	}
 
+	// 파괴 가능한 샘플을 제출할 때만 설정된 등급 조건을 적용하는 판정
+	UClass* SubmittedClass = SubmittedItem->GetClass();
+	bool bCheckGradeTag = IsValid(SubmittedClass) == true && SubmittedClass->IsChildOf(AMD_SampleItem::StaticClass()) == true;
+	bool bHasGradeRequirement = AcceptedGradeTags.Num() > 0;
+	bool bGradeMatches = true;
+	if (bCheckGradeTag == true)
+	{
+		FGameplayTag GradeTag = SubmittedItem->GetQuestGradeTag();
+		bGradeMatches = bHasGradeRequirement == false || (GradeTag.IsValid() == true && AcceptedGradeTags.HasTagExact(GradeTag) == true);
+	}
+
+	bool bIntact = SubmittedItem->IsQuestItemIntact();
 	bool bIsRecovery = ObjectiveType == EMD_QuestObjectiveType::RecoverIntact || ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
 	bool bConditionMatches = ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged || bIntact == true;
-	bool bOutAccepted = bIsRecovery == true && bGradeMatches == true && bConditionMatches == true;
+	bOutAccepted = bIsRecovery == true && bGradeMatches == true && bConditionMatches == true;
 	return bOutAccepted;
 }
 
@@ -145,10 +160,10 @@ bool UMD_QuestDefinition::AllowsDamagedTarget(int32 PhaseIndex) const
 	return GetObjectiveType(PhaseIndex) == EMD_QuestObjectiveType::RecoverDamaged;
 }
 
-bool UMD_QuestDefinition::AcceptsQuestItem(int32 PhaseIndex, const FGameplayTag& GradeTag, bool bIntact) const
+bool UMD_QuestDefinition::AcceptsQuestItem(int32 PhaseIndex, AMD_QuestItem* SubmittedItem) const
 {
 	const FMD_QuestPhaseData* Phase = GetPhase(PhaseIndex);
-	bool bOutAcceptsQuestItem = Phase != nullptr && Phase->AcceptsQuestItem(GradeTag, bIntact) == true;
+	bool bOutAcceptsQuestItem = Phase != nullptr && Phase->AcceptsQuestItem(SubmittedItem) == true;
 	return bOutAcceptsQuestItem;
 }
 

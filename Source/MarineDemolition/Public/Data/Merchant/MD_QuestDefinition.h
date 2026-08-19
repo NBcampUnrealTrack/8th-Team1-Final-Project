@@ -40,8 +40,8 @@ struct MARINEDEMOLITION_API FMD_QuestPhaseData
 	FText CompletionDialogue;
 
 public:
-	/** 퀘스트에 귀속된 제출 아이템이 현재 페이즈의 등급·손상 조건을 충족하는지 판정하는 함수 */
-	bool AcceptsQuestItem(const FGameplayTag& GradeTag, bool bIntact) const;
+	/** 제출된 퀘스트 아이템 액터가 현재 페이즈의 샘플 등급·손상 조건을 충족하는지 판정하는 함수 */
+	bool AcceptsQuestItem(AMD_QuestItem* SubmittedItem) const;
 
 	/** 퀘스트에 귀속된 아이템의 등급이 현재 회수 목표에 포함되는지 판정하는 함수 */
 	bool TargetsQuestItem(const FGameplayTag& GradeTag) const;
@@ -123,8 +123,8 @@ public:
 	/** 현재 목표가 손상된 회수물도 인정하는지 판정하는 함수 */
 	bool AllowsDamagedTarget(int32 PhaseIndex) const;
 
-	/** 퀘스트에 귀속된 제출 아이템이 현재 목표의 등급·손상 조건을 충족하는지 판정하는 함수 */
-	bool AcceptsQuestItem(int32 PhaseIndex, const FGameplayTag& GradeTag, bool bIntact) const;
+	/** 제출된 퀘스트 아이템 액터가 현재 목표의 샘플 등급·손상 조건을 충족하는지 판정하는 함수 */
+	bool AcceptsQuestItem(int32 PhaseIndex, AMD_QuestItem* SubmittedItem) const;
 
 	/** 퀘스트에 귀속된 파괴 아이템의 등급이 현재 회수 목표와 일치하는지 판정하는 함수 */
 	bool TargetsQuestItem(int32 PhaseIndex, const FGameplayTag& GradeTag) const;
