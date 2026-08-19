@@ -9,7 +9,7 @@ class UArrowComponent;
 class UBoxComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
-class AMD_SampleItem;
+class AMD_QuestItem;
 
 /**
  * 회수된 샘플 하나의 전시 정보.
@@ -60,20 +60,10 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UFUNCTION()
-	void OnCollectionBeginOverlap(
-		UPrimitiveComponent* OverlappedComponent,
-		AActor* OtherActor,
-		UPrimitiveComponent* OtherComp,
-		int32 OtherBodyIndex,
-		bool bFromSweep,
-		const FHitResult& SweepResult);
+	void OnCollectionBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
 	UFUNCTION()
-	void OnCollectionEndOverlap(
-		UPrimitiveComponent* OverlappedComponent,
-		AActor* OtherActor,
-		UPrimitiveComponent* OtherComp,
-		int32 OtherBodyIndex);
+	void OnCollectionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
 	/**
 	 * 볼륨 안 샘플이 손을 떠났는지 주기적으로 본다.
@@ -86,8 +76,8 @@ protected:
 	/** 어느 플레이어든 이 액터를 운반 중인지. UMD_InteractionComponent::GetHeldActor 기준. */
 	bool IsHeldByAnyPawn(const AActor* Target) const;
 
-	/** 서버 전용. 퀘스트 진행도를 올리고 전시 항목을 추가한 뒤 샘플을 파괴한다. */
-	void CollectSample(AMD_SampleItem* Sample);
+	/** 서버에서 퀘스트 진행도와 전시 항목을 추가한 뒤 제출 아이템을 제거하는 함수 */
+	void CollectQuestItem(AMD_QuestItem* QuestItem);
 
 	UFUNCTION()
 	void OnRep_DisplayEntries();
@@ -158,9 +148,9 @@ protected:
 	TArray<FMD_ShelfDisplayEntry> DisplayEntries;
 
 private:
-	/** 볼륨 안에 있지만 아직 손에 들려 있어 회수를 못 한 샘플. 서버에서만 채운다. */
+	/** 볼륨 안에 있지만 아직 손에 들려 있어 회수를 못 한 퀘스트 아이템 목록 */
 	UPROPERTY()
-	TSet<TObjectPtr<AMD_SampleItem>> PendingSamples;
+	TSet<TObjectPtr<AMD_QuestItem>> PendingQuestItems;
 
 	UPROPERTY()
 	TArray<TObjectPtr<UStaticMeshComponent>> DisplayMeshes;

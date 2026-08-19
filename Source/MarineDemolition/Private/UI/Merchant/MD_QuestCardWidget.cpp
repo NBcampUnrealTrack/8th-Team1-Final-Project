@@ -2,7 +2,7 @@
 
 #include "Components/Button.h"
 #include "Components/TextBlock.h"
-#include "Data/Merchant/MD_RepeatQuestDefinition.h"
+#include "Data/Merchant/MD_QuestDefinition.h"
 
 void UMD_QuestCardWidget::SetQuest(int32 InQuestIndex, const FMD_RepeatQuestState& InState)
 {
@@ -13,9 +13,8 @@ void UMD_QuestCardWidget::SetQuest(int32 InQuestIndex, const FMD_RepeatQuestStat
 
 void UMD_QuestCardWidget::RefreshDisplay()
 {
-	const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(QuestState.DefinitionId);
-	const FMD_RepeatQuestPhaseData* CurrentPhase = IsValid(Definition) == true ? Definition->GetPhase(QuestState.CurrentPhaseIndex) : nullptr;
-	const bool bHasDefinition = IsValid(Definition) == true && CurrentPhase != nullptr;
+	const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	const bool bHasDefinition = IsValid(Definition) == true && Definition->HasPhase(QuestState.CurrentPhaseIndex) == true;
 	const bool bObjectiveComplete = IsValid(Definition) == true && Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress) == true;
 
 	if (IsValid(TXT_QuestName) == true)
@@ -34,26 +33,30 @@ void UMD_QuestCardWidget::RefreshDisplay()
 		{
 			CompletedPhaseIndex = QuestState.CurrentPhaseIndex - 1;
 		}
-		const FMD_RepeatQuestPhaseData* CompletedPhase = IsValid(Definition) == true ? Definition->GetPhase(CompletedPhaseIndex) : nullptr;
 		FText DisplayDialogue = IsValid(Definition) == true ? Definition->OfferDialogue : FText::GetEmpty();
-		if (CompletedPhase != nullptr)
+		// 완료 대화가 존재하는 단계를 별도로 확인한 결과
+		bool bHasCompletedPhase = IsValid(Definition) == true && Definition->HasPhase(CompletedPhaseIndex) == true;
+		if (bHasCompletedPhase == true)
 		{
-			DisplayDialogue = CompletedPhase->CompletionDialogue;
+			DisplayDialogue = Definition->GetCompletionDialogue(CompletedPhaseIndex);
 		}
 		TXT_Description->SetText(bHasDefinition == true ? DisplayDialogue : FText::GetEmpty());
 	}
 	if (IsValid(TXT_GradeBadge) == true)
 	{
-		TXT_GradeBadge->SetText(bHasDefinition == true ? BuildGradeBadgeText(CurrentPhase->AcceptedGradeTags) : FText::GetEmpty());
+		TXT_GradeBadge->SetText(bHasDefinition == true ? BuildGradeBadgeText(Definition->GetAcceptedGradeTags(QuestState.CurrentPhaseIndex)) : FText::GetEmpty());
 	}
 	if (IsValid(TXT_ObjectiveType) == true)
 	{
-		FText ObjectiveText = bHasDefinition == true ? FText::FromString(CurrentPhase->bAllowDamagedTarget == true ? TEXT("손상 허용 회수") : TEXT("회수")) : FText::GetEmpty();
+		const UEnum* ObjectiveTypeEnum = StaticEnum<EMD_QuestObjectiveType>();
+		FText ObjectiveText = bHasDefinition == true && IsValid(ObjectiveTypeEnum) == true
+			? ObjectiveTypeEnum->GetDisplayNameTextByValue(static_cast<int64>(Definition->GetObjectiveType(QuestState.CurrentPhaseIndex)))
+			: FText::GetEmpty();
 		TXT_ObjectiveType->SetText(ObjectiveText);
 	}
 	if (IsValid(TXT_Progress) == true)
 	{
-		const int32 Required = bHasDefinition == true ? FMath::Max(CurrentPhase->RequiredCount, 1) : 0;
+		const int32 Required = bHasDefinition == true ? FMath::Max(Definition->GetRequiredCount(QuestState.CurrentPhaseIndex), 1) : 0;
 		TXT_Progress->SetText(FText::FromString(FString::Printf(TEXT("%d/%d"), QuestState.CurrentProgress, Required)));
 	}
 	if (IsValid(TXT_RewardCredits) == true)

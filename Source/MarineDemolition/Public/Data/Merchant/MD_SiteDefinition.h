@@ -22,11 +22,11 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
 	TSoftObjectPtr<UWorld> QuestMap;
 
-	/** Day1, Day2, … 순서로 사용할 MD_MainQuestDefinition 에셋의 PrimaryAssetId 목록 */
+	/** Day1, Day2, … 순서로 메인 역할을 부여할 공통 퀘스트 에셋의 PrimaryAssetId 목록 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Main", meta = (AllowedTypes = "Quest"))
 	TArray<FPrimaryAssetId> MainQuestLine;
 
-	/** 현장에서 선택할 MD_RepeatQuestDefinition 에셋의 PrimaryAssetId 목록 */
+	/** 현장에서 반복 역할로 선택할 공통 퀘스트 에셋의 PrimaryAssetId 목록 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat", meta = (AllowedTypes = "Quest"))
 	TArray<FPrimaryAssetId> RepeatQuestPool;
 

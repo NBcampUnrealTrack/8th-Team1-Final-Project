@@ -775,18 +775,15 @@ void AMD_PlayerController::ServerDeclineRepeat_Implementation(int32 Index)
 
 void AMD_PlayerController::MD_Deliver(const FString& GradeName, bool bIntact)
 {
-	const FGameplayTag GradeTag = FGameplayTag::RequestGameplayTag(FName(*FString::Printf(TEXT("Resource.Sample.Grade.%s"), *GradeName)),/*ErrorIfNotFound=*/false);
+	FGameplayTag GradeTag = FGameplayTag::RequestGameplayTag(FName(*FString::Printf(TEXT("Resource.Sample.Grade.%s"), *GradeName)),/*ErrorIfNotFound=*/false);
 
 	ServerDeliver(GradeTag, bIntact);
 }
 
 void AMD_PlayerController::ServerDeliver_Implementation(FGameplayTag GradeTag, bool bIntact)
 {
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
-	{
-		// 전용 샘플 액터가 없는 디버그 명령을 반복 퀘스트와 연결하지 않는 제출
-		Merchant->NotifySampleDelivered(FPrimaryAssetId(), GradeTag, bIntact);
-	}
+	// 실제 퀘스트 아이템 액터 검사를 우회하는 필드 기반 디버그 제출의 차단 기록
+	UE_LOG(LogTemp, Warning, TEXT("[Quest] MD_Deliver 제출 차단: 실제 아이템 액터 필요 (등급=%s, 온전함=%s)"), *GradeTag.ToString(), bIntact == true ? TEXT("true") : TEXT("false"));
 }
 
 void AMD_PlayerController::MD_MarkSiteCleared()

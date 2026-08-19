@@ -1,4 +1,4 @@
-#include "Component/Interaction/MD_InteractionComponent.h"
+﻿#include "Component/Interaction/MD_InteractionComponent.h"
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
@@ -17,7 +17,7 @@
 #include "GeometryCollection/GeometryCollectionComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
-#include "World/Sample/MD_SampleItem.h"
+#include "World/Sample/MD_QuestItem.h"
 
 UMD_InteractionComponent::UMD_InteractionComponent()
 {
@@ -329,9 +329,9 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 	// Clients never move the carried actor from their local HoldPoint.
 
 	// PhysicsHandle이 HoldPoint로 급가속하는 첫 순간의 오탐 충격을 흡수한다.
-	if (AMD_SampleItem* Sample = Cast<AMD_SampleItem>(Target))
+	if (AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Target))
 	{
-		Sample->NotifyGrabbed();
+		QuestItem->NotifyGrabbed();
 	}
 
 	if (Target->Implements<UMD_Grabbable>())
