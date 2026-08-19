@@ -15,6 +15,7 @@ class UNiagaraSystem;
 class AMD_CuttableWall;
 class AMD_ContaminationItem;
 class AMD_WallPiece;
+struct FHitResult;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnStrutCollapsed, AMD_CuttableWall*, Wall, AActor*, Cutter);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnWallDemolished, AMD_CuttableWall*, Wall,	AActor*, Cutter);
@@ -80,6 +81,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
 	void Cut(AActor* Cutter);
 
+	/** 오염 상태와 무관하게 아직 파괴되지 않은 벽이면 절단할 수 있다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	bool CanCut() const;
 
@@ -89,6 +91,12 @@ public:
 	// 절단 진행도 누적. 서버 전용. 100% 도달 시 Cut()을 호출한다
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Cut")
 	void AddCutProgress(float DeltaSeconds, AActor* Cutter);
+
+	/** 서버 GA의 마지막 벽 충돌면을 조각 배분까지 동기 전달한다. */
+	void AddCutProgressFromHit(
+		float DeltaSeconds,
+		AActor* Cutter,
+		const FHitResult& WallHit);
 
 	// 이 벽을 자르는 데 필요한 총 시간(초)
 	UFUNCTION(BlueprintPure, Category = "MD|Wall|Cut")
@@ -135,7 +143,8 @@ protected:
 	UPROPERTY(EditAnywhere, Replicated, Category = "MD|Wall")
 	bool bHasSupport = false;
 
-	UPROPERTY(EditAnywhere, Category = "MD|Wall")
+	UPROPERTY(EditAnywhere, Category = "MD|Wall",
+		meta = (ClampMin = "0"))
 	int32 PieceCount = 10;
 
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall")
@@ -162,14 +171,6 @@ protected:
 		Category = "MD|Wall|Contamination|Decal")
 	TObjectPtr<UMaterialInterface> ContaminationDecalMaterial;
 
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Contamination|Cut",
-		meta = (ClampMin = "0", ClampMax = "100"))
-	float PartitionCutGate = 0.0f;
-
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Contamination|Cut",
-		meta = (ClampMin = "0", ClampMax = "100"))
-	float StrutCutGate = 0.0f;
-
 	/** 철거 완료 순간 벽 중심에 재생할 원샷 버스트 (NS_Cutter_Finish) */
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|VFX")
 	TObjectPtr<UNiagaraSystem> DemolishEffect;
@@ -190,6 +191,13 @@ private:
 	friend class FMD_BarnacleStrokeBlockingTest;
 
 	void SyncLegacySurfaceConfiguration();
+	void CutFromHit(AActor* Cutter, const FHitResult* WallHit);
+	float ResolveCutSurfaceCleanRatio(const FHitResult* WallHit);
+	void CompleteCutWithCleanRatio(AActor* Cutter, float CutSurfaceCleanRatio);
+	void AddCutProgressInternal(
+		float DeltaSeconds,
+		AActor* Cutter,
+		const FHitResult* WallHit);
 
 	// 파괴 직전 서버가 쏘고 모든 클라이언트가 벽 중심에 원샷 재생한다
 	UFUNCTION(NetMulticast, Unreliable)

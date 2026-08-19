@@ -16,9 +16,12 @@
 DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
 
 class UMD_SiteDefinition;
+class UMD_MainQuestDefinition;
+class UMD_RepeatQuestDefinition;
 class AMD_PlayerState;
 struct FGameplayTag;
 struct FMD_MerchantData;
+struct FMD_RepeatQuestPhaseData;
 struct FMD_ShopItem;
 
 enum class EMD_SampleGrade : uint8;
@@ -95,7 +98,7 @@ public:
 	// 일 마감 시 미상환 잔액에 일일 이자를 한 번 합산하고 부과액을 반환하는 함수
 	int32 ApplyDailyLoanInterest();
 
-	//계약 시작, 착수금 지급
+	// 새 계약의 퀘스트 상태를 구성하고 반복 퀘스트를 최초 추첨한 뒤 착수금을 지급하는 함수
 	void BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment);
 
 	// 게임오버 시 전체 리셋
@@ -115,31 +118,31 @@ public:
 	/** 반복 퀘스트 노출 조건. 현장을 한 번 클리어해야 열린다. (기획 09 §4) */
 	bool HasClearedCurrentSite() const;
 
-	/** Day 시작 시 호출. 메인 언락 판정 + 반복 카드 재롤. */
+	/** Day 시작 시 호출하여 메인 퀘스트의 해금 상태를 갱신하는 함수 */
 	void BeginDay(int32 NewDay);
 
 	/** 계약 클리어 시 호출. 반복 퀘스트 게이트를 여는 이력을 남긴다. */
 	void MarkSiteCleared();
 
-	/** 반복 퀘스트 수락. Offered 상태에서만 가능하다. */
+	/** 제시 상태에서는 반복 퀘스트를 수락하고 목표를 달성한 수락 상태에서는 상인 메뉴 보상을 수령하는 함수 */
 	bool TryAcceptRepeatQuest(int32 QuestIndex);
 
-	/** 거절. 페널티 없이 다음 Day 재롤 대상이 된다. */
+	/** 제시된 반복 퀘스트를 페널티 없이 거절 상태로 전환하는 함수 */
 	bool TryDeclineRepeatQuest(int32 QuestIndex);
 
 	/** 포기하는 반복 퀘스트를 실패 처리 및 패널티(호감도 감소) 처리하는 함수 */
 	bool TryAbandonRepeatQuest(int32 QuestIndex);
 
-	/** 샘플이 모선에 납품될 때 호출한다. 메인·반복 활성 퀘스트를 함께 검사한다. */
-	void NotifySampleDelivered(const FGameplayTag& GradeTag, bool bIntact);
+	/** 샘플이 분류장에 제출될 때 퀘스트 Asset ID·등급·손상 상태로 메인·반복 활성 퀘스트를 검사하는 함수 */
+	void NotifySampleDelivered(const FPrimaryAssetId& QuestDefinitionId, const FGameplayTag& GradeTag, bool bIntact);
 
-	/** 회수 대상 샘플이 파괴될 때 호출한다. 해당 등급 활성 퀘스트를 즉시 실패 처리한다. */
-	void NotifySampleDestroyed(EMD_SampleGrade Grade);
+	/** 회수 대상 샘플이 파괴될 때 퀘스트 Asset ID와 등급이 일치하는 활성 퀘스트를 실패 처리하는 함수 */
+	void NotifySampleDestroyed(const FPrimaryAssetId& QuestDefinitionId, EMD_SampleGrade Grade);
 
-	/** Day 마감 시 미완료 활성 퀘스트를 실패로 정리한다. */
+	/** Day 마감 시 해당 Day의 미완료 메인 퀘스트만 실패로 정리하는 함수 */
 	void ResolveActiveQuestsAtDayEnd(int32 CompletedDay);
 
-	/** 계약 종료 시 남은 활성 반복 퀘스트를 실패로 정리한다. */
+	/** 계약 종료 시 남은 반복 퀘스트를 정산하고 활성 현장을 해제하는 함수 */
 	void FinalizeContract();
 
 	// 현재 경제·호감도·퀘스트 원장을 저장 필드로 복사하는 함수
@@ -155,32 +158,44 @@ private:
 
 	void FailMainQuest(FMD_MainQuestState& QuestState, EMD_QuestFailureReason Reason);
 
-	bool DoesQuestTargetGrade(const FMD_QuestDefinitionData& Definition, const FGameplayTag& GradeTag) const;
+	/** 반복 퀘스트 상태에서 원본 에셋과 현재 페이즈를 함께 검증하여 반환하는 함수 */
+	const FMD_RepeatQuestPhaseData* GetCurrentRepeatQuestPhase(const FMD_RepeatQuestState& QuestState, UMD_RepeatQuestDefinition*& OutDefinition) const;
+
+	/** 수락한 반복 퀘스트가 마지막 페이즈 목표를 충족했는지 원본 에셋 기준으로 판정하는 함수 */
+	bool IsRepeatQuestObjectiveComplete(const FMD_RepeatQuestState& QuestState) const;
+
+	/** 성공한 반복 퀘스트 에셋의 고정 크레딧·점수·호감도를 서버 원장에 적용하는 함수 */
+	void ApplyRepeatQuestReward(const UMD_RepeatQuestDefinition& Definition);
+
+	/** 실패 원인에 맞는 반복 퀘스트 에셋의 패널티를 서버 원장에 적용하는 함수 */
+	void ApplyRepeatQuestPenalty(const UMD_RepeatQuestDefinition& Definition, bool bDestroyed);
+
+	/** 활성 반복 퀘스트를 실패로 전환하고 원본 에셋의 패널티를 한 번 적용하는 함수 */
+	void FailRepeatQuest(FMD_RepeatQuestState& QuestState, bool bDestroyed);
 
 	/** 현재 진행 중인 현장. 반복 퀘스트 풀과 클리어 이력 판정에 쓴다. */
 	UPROPERTY()
 	TObjectPtr<UMD_SiteDefinition> CurrentSite;
 
-	/** 메인 퀘스트 상태. UPROPERTY라 GC가 Definition 참조를 추적한다. */
+	/** 메인 퀘스트 상태. 원본 데이터는 PrimaryAssetId로 조회한다. */
 	UPROPERTY()
 	TArray<FMD_MainQuestState> MainQuests;
 
-	/** 반복 퀘스트 상태. Day마다 재롤된다. */
+	/** 계약 시작 시 한 번 추첨되어 계약 기간 동안 유지되는 반복 퀘스트 상태 */
 	UPROPERTY()
 	TArray<FMD_RepeatQuestState> RepeatQuests;
 
 	UPROPERTY()
 	TSet<TObjectPtr<UMD_SiteDefinition>> ClearedSites;
 
-	void RerollRepeatQuests();
+	/** 현재 현장의 반복 퀘스트 풀에서 계약에 사용할 카드를 최초 한 번 추첨하는 함수 */
+	void DrawRepeatQuestsForContract();
 
 	/** 방송하지 않는 내부용. 여러 변경을 한 번에 묶을 때 쓴다. */
 	void AddCreditsInternal(int32 Amount);
 
-	/** 목표 등급·Intact 조건이 이 퀘스트에 맞는지 판정한다. */
-	bool DoesDeliveryMatch(const FMD_QuestDefinitionData& Definition, const FGameplayTag& GradeTag, bool bIntact) const;
-
-	void ApplyQuestReward(const FMD_QuestDefinitionData& Definition);
+	/** 성공한 메인 퀘스트 에셋의 크레딧·점수·호감도를 서버 원장에 적용하는 함수 */
+	void ApplyMainQuestReward(const UMD_MainQuestDefinition& Definition);
 
 	int32 Credits = 0;
 

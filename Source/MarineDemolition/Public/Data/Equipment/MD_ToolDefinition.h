@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
 #include "GameplayTagContainer.h"
+#include "Types/Scrape/MD_ScrapeTypes.h"
 #include "MD_ToolDefinition.generated.h"
 
 class UGameplayAbility;
@@ -50,6 +51,13 @@ public:
 	// 이 도구를 든 상태에서 좌클릭 시 발동될 어빌리티
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool", meta = (Categories = "Ability"))
 	FGameplayTag ToolAbilityTag;
+
+	/**
+	 * 헤라 도구가 장착될 때 서버가 ScrapeToolComponent에 확정하는 단일 성능 정본.
+	 * 비헤라 도구에서는 사용하지 않는다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape")
+	FMD_ScrapeToolSpec ScrapeProfile;
 
 	// 임시 UI용 아이콘 (없으면 이름만 표시)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")

@@ -3,6 +3,7 @@
 
 #include "Player/MD_PlayerController.h"
 #include "UI/Game/MD_HUDWidget.h"
+#include "UI/Game/MD_ScrapeFocusReticleWidget.h"
 #include "UI/Equipment/MD_EquipHotbarWidget.h"
 
 #include "Engine/World.h"
@@ -18,14 +19,56 @@
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
+#include "Player/MD_PlayerCameraManager.h"
 
 #include "Engine/GameInstance.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+#include "Misc/CoreDelegates.h"
+#include "Online/Session/MD_MultiplayManager.h"
 
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Character/MD_Character.h"
 #include "World/Merchant/MD_Merchant.h"
+
+AMD_PlayerController::AMD_PlayerController()
+{
+	PlayerCameraManagerClass = AMD_PlayerCameraManager::StaticClass();
+	ScrapeFocusReticleWidgetClass = UMD_ScrapeFocusReticleWidget::StaticClass();
+}
+
+void AMD_PlayerController::CancelScrapeInteraction()
+{
+	AMD_Character* const ScrapeCharacter = Cast<AMD_Character>(GetPawn());
+	if (IsValid(ScrapeCharacter))
+	{
+		ScrapeCharacter->CancelScrapeInteraction();
+	}
+}
+
+void AMD_PlayerController::SetInputMode(const FInputModeDataBase& InData)
+{
+	// UI 전환으로 Completed/Canceled 입력을 잃기 전에 먼저 Focus와 Ability를 정리한다.
+	CancelScrapeInteraction();
+	Super::SetInputMode(InData);
+}
+
+void AMD_PlayerController::SetViewTarget(
+	AActor* NewViewTarget,
+	const FViewTargetTransitionParams TransitionParams)
+{
+	if (NewViewTarget != GetPawn())
+	{
+		// 컷신·관전 카메라가 Focus 고정 카메라와 경쟁하지 않게 먼저 정리한다.
+		CancelScrapeInteraction();
+	}
+	Super::SetViewTarget(NewViewTarget, TransitionParams);
+}
+
+void AMD_PlayerController::HandleApplicationWillDeactivate()
+{
+	CancelScrapeInteraction();
+}
 
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console, int32 SiteIndex, EMD_Difficulty Difficulty)
 {
@@ -55,11 +98,22 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 		return;
 	}
 
-	// 난이도는 URL 옵션으로 실어 보낸다. 도착 맵 GameMode가 InitGame에서 ParseOption으로 받는다
-	const FString TravelURL = FString::Printf(
-		TEXT("%s?listen?Difficulty=%d"), *MapPackage, static_cast<int32>(Difficulty));
+	// 네트워크로 전달된 난이도 값이 정의된 계약 범위를 벗어나지 않도록 하는 서버 검증
+	if (Difficulty < EMD_Difficulty::Safe || Difficulty > EMD_Difficulty::Extreme)
+	{
+		return;
+	}
 
-	GetWorld()->ServerTravel(TravelURL);
+	UGameInstance* GameInstance = GetGameInstance();
+	UMD_MultiplayManager* MultiplayManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MultiplayManager>() : nullptr;
+	if (IsValid(MultiplayManager) == false)
+	{
+		return;
+	}
+
+	// 난이도는 URL 옵션으로 전달하고 Session 갱신과 ServerTravel 실행은 MultiplayManager에 위임하는 처리
+	FString TravelOptions = FString::Printf(TEXT("?listen?Difficulty=%d"), static_cast<int32>(Difficulty));
+	MultiplayManager->StartSessionByMap(MapPackage, TravelOptions);
 }
 
 void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole* Console)
@@ -174,6 +228,40 @@ void AMD_PlayerController::InitializeGameplayHUD()
 			}
 			EquipHotbarWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 		}
+	}
+}
+
+void AMD_PlayerController::InitializeScrapeFocusReticle()
+{
+	if (IsLocalController() == false || ScrapeFocusReticleWidgetClass == nullptr)
+	{
+		return;
+	}
+
+	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
+	{
+		ScrapeFocusReticleWidgetInstance =
+			CreateWidget<UMD_ScrapeFocusReticleWidget>(
+				this,
+				ScrapeFocusReticleWidgetClass);
+	}
+
+	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
+	{
+		return;
+	}
+
+	// 파생 Blueprint defaults와 무관하게 이 overlay 전체를 비입력형으로 고정한다.
+	ScrapeFocusReticleWidgetInstance->SetVisibility(ESlateVisibility::HitTestInvisible);
+	ScrapeFocusReticleWidgetInstance->SetIsFocusable(false);
+	ScrapeFocusReticleWidgetInstance->ForceVolatile(true);
+
+	// Seamless Travel에서 유효한 위젯이 기존 viewport에서 제거된 경우에도 복구한다.
+	if (ScrapeFocusReticleWidgetInstance->IsInViewport() == false)
+	{
+		// Owning local player 영역에만 붙여 split-screen이나 다중 local player에서도
+		// 다른 플레이어의 normalized 좌표/입력을 시각화하지 않는다.
+		ScrapeFocusReticleWidgetInstance->AddToPlayerScreen(1000);
 	}
 }
 
@@ -316,6 +404,21 @@ void AMD_PlayerController::BeginPlay()
 {
 	Super::BeginPlay();
 	InitializeGameplayHUD();
+
+	if (IsLocalController() == false)
+	{
+		return;
+	}
+
+	if (!ApplicationWillDeactivateHandle.IsValid())
+	{
+		ApplicationWillDeactivateHandle =
+			FCoreDelegates::ApplicationWillDeactivateDelegate.AddUObject(
+				this,
+				&AMD_PlayerController::HandleApplicationWillDeactivate);
+	}
+
+	InitializeScrapeFocusReticle();
 }
 
 void AMD_PlayerController::BeginPlayingState()
@@ -323,6 +426,7 @@ void AMD_PlayerController::BeginPlayingState()
 	Super::BeginPlayingState();
 
 	InitializeGameplayHUD();
+	InitializeScrapeFocusReticle();
 }
 
 void AMD_PlayerController::PostSeamlessTravel()
@@ -330,6 +434,7 @@ void AMD_PlayerController::PostSeamlessTravel()
 	Super::PostSeamlessTravel();
 
 	InitializeGameplayHUD();
+	InitializeScrapeFocusReticle();
 }
 
 void AMD_PlayerController::SetPawn(APawn* InPawn)
@@ -340,7 +445,27 @@ void AMD_PlayerController::SetPawn(APawn* InPawn)
 	{
 		// 최초 스폰과 재스폰 모두 Pawn 지정이 끝난 뒤 HUD를 보장하는 처리
 		InitializeGameplayHUD();
+		InitializeScrapeFocusReticle();
 	}
+}
+
+void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	if (ApplicationWillDeactivateHandle.IsValid())
+	{
+		FCoreDelegates::ApplicationWillDeactivateDelegate.Remove(
+			ApplicationWillDeactivateHandle);
+		ApplicationWillDeactivateHandle.Reset();
+	}
+
+	if (IsValid(ScrapeFocusReticleWidgetInstance))
+	{
+		ScrapeFocusReticleWidgetInstance->RemoveFromParent();
+		ScrapeFocusReticleWidgetInstance = nullptr;
+	}
+
+	CancelScrapeInteraction();
+	Super::EndPlay(EndPlayReason);
 }
 
 void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
@@ -454,10 +579,25 @@ void AMD_PlayerController::MD_BeginDay(int32 Day)
 
 void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)
 {
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
+	if (IsValid(Merchant) == false)
 	{
-		Merchant->BeginDay(Day);
+		return;
 	}
+
+	// 실제 맵 재진입 경로처럼 종료된 계약 다음 Day 명령에서 새 디버그 계약을 먼저 구성하는 처리
+	if (Merchant->HasActiveContract() == false)
+	{
+		Merchant->BeginContract(DebugSite, DebugAdvancePayment);
+	}
+
+	// DebugSite 미설정으로 계약 생성에 실패했을 때 잘못된 Day 상태만 남기지 않기 위한 검사
+	if (Merchant->HasActiveContract() == false)
+	{
+		return;
+	}
+
+	Merchant->BeginDay(Day);
 }
 
 void AMD_PlayerController::MD_AcceptRepeat(int32 Index)
@@ -497,7 +637,8 @@ void AMD_PlayerController::ServerDeliver_Implementation(FGameplayTag GradeTag, b
 {
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
 	{
-		Merchant->NotifySampleDelivered(GradeTag, bIntact);
+		// 전용 샘플 액터가 없는 디버그 명령을 반복 퀘스트와 연결하지 않는 제출
+		Merchant->NotifySampleDelivered(FPrimaryAssetId(), GradeTag, bIntact);
 	}
 }
 
@@ -508,10 +649,15 @@ void AMD_PlayerController::MD_MarkSiteCleared()
 
 void AMD_PlayerController::ServerMarkSiteCleared_Implementation()
 {
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
+	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
+	if (IsValid(Merchant) == false)
 	{
-		Merchant->MarkSiteCleared();
+		return;
 	}
+
+	// 실제 사이트 클리어 전환과 동일하게 이력 등록 후 현재 계약을 종료하는 처리
+	Merchant->MarkSiteCleared();
+	Merchant->FinalizeContract();
 }
 
 void AMD_PlayerController::MD_FinalizeContract()

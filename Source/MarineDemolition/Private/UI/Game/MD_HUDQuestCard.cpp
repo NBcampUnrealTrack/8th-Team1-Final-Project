@@ -2,26 +2,61 @@
 
 #include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
+#include "Data/Merchant/MD_MainQuestDefinition.h"
+#include "Data/Merchant/MD_RepeatQuestDefinition.h"
 
 void UMD_HUDQuestCard::SetMainQuest(const FMD_MainQuestState& QuestState)
 {
-	// 메인 퀘스트임을 명시하여 데이터 에셋의 종류 입력 오류와 무관한 HUD 표시 보장
-	ApplyQuestData(EMD_QuestKind::Main, QuestState.Definition, QuestState.CurrentProgress);
+	const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	if (IsValid(Definition) == true)
+	{
+		ApplyMainQuestData(*Definition, QuestState.CurrentProgress);
+	}
 }
 
 void UMD_HUDQuestCard::SetRepeatQuest(const FMD_RepeatQuestState& QuestState)
 {
-	// 반복 퀘스트임을 명시하여 수락 목록의 카드 종류 표시 보장
-	ApplyQuestData(EMD_QuestKind::Repeat, QuestState.Definition, QuestState.CurrentProgress);
+	// 반복 퀘스트 상태의 PrimaryAssetId와 현재 페이즈를 HUD 표시 정보로 적용하는 처리
+	ApplyRepeatQuestData(QuestState);
 }
 
-void UMD_HUDQuestCard::ApplyQuestData(EMD_QuestKind QuestKind, const FMD_QuestDefinitionData& Definition, int32 CurrentProgress)
+void UMD_HUDQuestCard::ApplyRepeatQuestData(const FMD_RepeatQuestState& QuestState)
 {
-	// 카드 상단에서 메인과 반복 퀘스트를 즉시 구분하기 위한 종류 텍스트
-	FText QuestKindText = QuestKind == EMD_QuestKind::Main ? FText::FromString(TEXT("메인")) : FText::FromString(TEXT("반복"));
+	const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	const FMD_RepeatQuestPhaseData* CurrentPhase = IsValid(Definition) == true ? Definition->GetPhase(QuestState.CurrentPhaseIndex) : nullptr;
+
 	if (IsValid(Txt_QuestKind) == true)
 	{
-		Txt_QuestKind->SetText(QuestKindText);
+		Txt_QuestKind->SetText(FText::FromString(TEXT("반복")));
+	}
+
+	if (IsValid(Txt_QuestName) == true)
+	{
+		Txt_QuestName->SetText(IsValid(Definition) == true ? Definition->QuestName : FText::GetEmpty());
+	}
+
+	if (IsValid(Txt_QuestDescription) == true)
+	{
+		// 에셋에서 현재 페이즈에 직접 작성한 HUD 목표 내용만 표시하는 본문
+		FText PhaseDescription = CurrentPhase != nullptr ? CurrentPhase->HUDDescription : FText::GetEmpty();
+		Txt_QuestDescription->SetText(PhaseDescription);
+	}
+
+	if (IsValid(PB_QuestProgressRate) == true)
+	{
+		int32 RequiredCount = CurrentPhase != nullptr ? FMath::Max(CurrentPhase->RequiredCount, 1) : 1;
+		int32 ClampedProgress = FMath::Clamp(QuestState.CurrentProgress, 0, RequiredCount);
+		float ProgressRate = FMath::SafeDivide<float, float>(ClampedProgress, RequiredCount);
+		PB_QuestProgressRate->SetPercent(ProgressRate);
+	}
+}
+
+void UMD_HUDQuestCard::ApplyMainQuestData(const UMD_MainQuestDefinition& Definition, int32 CurrentProgress)
+{
+	if (IsValid(Txt_QuestKind) == true)
+	{
+		// 메인 퀘스트 전용 경로에서 카드 종류를 고정하는 표시
+		Txt_QuestKind->SetText(FText::FromString(TEXT("메인")));
 	}
 
 	if (IsValid(Txt_QuestName) == true)
@@ -33,7 +68,7 @@ void UMD_HUDQuestCard::ApplyQuestData(EMD_QuestKind QuestKind, const FMD_QuestDe
 	if (IsValid(Txt_QuestDescription) == true)
 	{
 		// 퀘스트 본문 전용 영역에 정의된 목표 설명 적용
-		Txt_QuestDescription->SetText(Definition.Description);
+		Txt_QuestDescription->SetText(Definition.HUDDescription);
 	}
 
 	if (IsValid(PB_QuestProgressRate) == true)

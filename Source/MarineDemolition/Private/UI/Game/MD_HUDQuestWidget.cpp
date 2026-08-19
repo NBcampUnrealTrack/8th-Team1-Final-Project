@@ -2,6 +2,7 @@
 
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Components/ScrollBox.h"
+#include "Data/Merchant/MD_MainQuestDefinition.h"
 #include "Engine/World.h"
 #include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
@@ -127,18 +128,24 @@ void UMD_HUDQuestWidget::RefreshQuestDisplay()
 	TArray<FMD_MainQuestState> MainQuests = MerchantComponent->GetMainQuests();
 	for (FMD_MainQuestState& MainQuest : MainQuests)
 	{
-		if (MainQuest.UnlockDay == MerchantComponent->GetCurrentDay() && MainQuest.Status != EMD_MainQuestStatus::Locked && MainQuest.Definition.IsValidDefinition() == true)
+		if (MainQuest.UnlockDay != MerchantComponent->GetCurrentDay() || MainQuest.Status == EMD_MainQuestStatus::Locked)
+		{
+			continue;
+		}
+
+		UMD_MainQuestDefinition* QuestDefinition = UMD_MainQuestDefinition::LoadDefinition(MainQuest.DefinitionId);
+		if (IsValid(QuestDefinition) == true)
 		{
 			AddMainQuestCard(MainQuest);
 			break;
 		}
 	}
 
-	// 사용자가 명시적으로 수락했고 아직 진행 중인 반복 퀘스트 전체 표시
+	// 수락 후 진행 중이거나 목표를 달성하고 보상 수령을 기다리는 반복 퀘스트 전체 표시
 	TArray<FMD_RepeatQuestState> RepeatQuests = MerchantComponent->GetRepeatQuests();
 	for (FMD_RepeatQuestState& RepeatQuest : RepeatQuests)
 	{
-		if (RepeatQuest.Status == EMD_RepeatQuestStatus::Accepted && RepeatQuest.Definition.IsValidDefinition() == true)
+		if (RepeatQuest.Status == EMD_RepeatQuestStatus::Accepted && RepeatQuest.HasValidDefinitionId() == true)
 		{
 			AddRepeatQuestCard(RepeatQuest);
 		}

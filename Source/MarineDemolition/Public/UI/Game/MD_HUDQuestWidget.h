@@ -9,7 +9,7 @@ class UMD_HUDQuestCard;
 class UMD_MerchantComponent;
 class UScrollBox;
 
-/** 현재 메인 퀘스트와 수락한 반복 퀘스트를 카드 목록으로 표시하는 HUD 위젯 */
+/** 현재 메인 퀘스트와 보상 수령 전까지의 수락한 반복 퀘스트를 카드 목록으로 표시하는 HUD 위젯 */
 UCLASS()
 class MARINEDEMOLITION_API UMD_HUDQuestWidget : public UUserWidget
 {
@@ -48,7 +48,7 @@ protected:
 	// 사용자가 수락한 반복 퀘스트 카드를 목록에 추가하는 처리
 	void AddRepeatQuestCard(const FMD_RepeatQuestState& QuestState);
 
-	// 복제된 메인 퀘스트와 수락한 반복 퀘스트로 카드 목록을 다시 만드는 처리
+	// 복제된 메인 퀘스트와 보상 수령 전까지의 수락한 반복 퀘스트로 카드 목록을 다시 만드는 처리
 	UFUNCTION()
 	void RefreshQuestDisplay();
 };

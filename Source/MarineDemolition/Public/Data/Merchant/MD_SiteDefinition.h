@@ -1,11 +1,12 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/AssetManagerTypes.h"
 #include "Engine/DataAsset.h"
-#include "Types/Merchant/MD_MerchantTypes.h"
 #include "MD_SiteDefinition.generated.h"
 
 class UMD_LoreCatalog;
+class UWorld;
 
 /** 작업 현장 1곳의 메타데이터 + 메인/반복 퀘스트 목록. */
 UCLASS(BlueprintType)
@@ -17,18 +18,17 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
 	FText SiteName;
 
+	/** 이 현장의 메인·반복 퀘스트를 수행하는 공통 원정 맵 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
-	FText ClientName;
+	TSoftObjectPtr<UWorld> QuestMap;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
-	int32 ContractDayCount = 3;
+	/** Day1, Day2, … 순서로 사용할 MD_MainQuestDefinition 에셋의 PrimaryAssetId 목록 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Main", meta = (AllowedTypes = "Quest"))
+	TArray<FPrimaryAssetId> MainQuestLine;
 
-	/** Day1, Day2, … 순서의 메인 퀘스트. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Main")
-	TArray<FMD_QuestDefinitionData> MainQuestLine;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat")
-	TArray<FMD_QuestDefinitionData> RepeatQuestPool;
+	/** 현장에서 선택할 MD_RepeatQuestDefinition 에셋의 PrimaryAssetId 목록 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat", meta = (AllowedTypes = "Quest"))
+	TArray<FPrimaryAssetId> RepeatQuestPool;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat")
 	int32 MinRepeatCount = 2;

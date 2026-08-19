@@ -25,6 +25,13 @@
 class MARINEDEMOLITION_API FMD_ScrapeEvaluator final
 {
 public:
+	/** Returns the exact movement spacing used to subdivide one scrape sweep. */
+	static double CalculateStrokeSampleSpacingCm(
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FMD_ScrapeSettings& Settings,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm);
+
 	/**
 	 * 한 번의 헤라 이동을 격자 셀 배열에 적용
 	 *
@@ -98,6 +105,41 @@ public:
 		float StampRatio,
 		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
 		TArray<FMD_ScrapeCellChange>& OutCellChanges);
+
+	/**
+	 * Stage3 ordered path가 확정한 하나의 dab을 저장된 위치·basis 그대로 적용한다.
+	 * 확률·간격·jitter는 candidate 생성 단계에서 이미 확정되었으므로 여기서 다시
+	 * 난수를 뽑지 않는다.
+	 */
+	static float ApplyContaminationDabToGrid(
+		const FMD_ScrapeContaminationDab& Dab,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		float StampAmount,
+		float StampDepthCm,
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		TArray<FMD_ScrapeCellChange>& OutCellChanges);
+
+	/** 기존 직선 구현과 같은 제거 footprint 보호 거리를 계산한다. */
+	static double CalculateContaminationPaintProtectionDistanceCm(
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		float StampDepthCm);
+
+	/** identity 기반의 결정적 확률 선택. */
+	static bool ShouldSelectContaminationDab(
+		const FMD_ScrapeContaminationStampIdentity& Identity,
+		float StampChance,
+		int32 PatternSeed);
+
+	/** distance bin 안의 결정적 jitter까지 포함한 sub-stroke arc 위치. */
+	static double CalculateContaminationDabArcLengthCm(
+		const FMD_ScrapeContaminationStampIdentity& Identity,
+		float StampDepthCm,
+		float StampSpacingCm,
+		int32 PatternSeed);
 
 	/**
 	 * 새 도장을 헤라의 제거 범위 뒤로 밀어, 다음 프레임 제거가 방금 묻힌
@@ -179,6 +221,20 @@ public:
 	 */
 	static float CalculateCleanRatio(
 		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells);
+
+	/**
+	 * 벽 조각 배분에 사용할 현재 제거율을 계산한다.
+	 * 기본 오염뿐 아니라 포화된 헤라가 다시 묻힌 오염도 남은 양에 포함한다.
+	 */
+	static float CalculateCurrentCleanRatio(
+		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells);
+	static float CalculateCurrentCleanRatio(
+		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
+		double& OutInitialContaminationAmount,
+		double& OutCurrentContaminationAmount);
+	static float CalculateCurrentCleanRatio(
+		double InitialContaminationAmount,
+		double CurrentContaminationAmount);
 
 	/**
 	 * 초기 오염이 있던 모든 셀이 허용 오차 이하까지 제거됐는지 검사

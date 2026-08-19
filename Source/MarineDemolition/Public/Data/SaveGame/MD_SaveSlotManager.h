@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -22,6 +22,9 @@ enum class EMD_PendingGameDataOperation : uint8
 
 	// 목적지 맵의 기본 상태로 임시 게임 데이터를 생성하는 작업
 	NewGame,
+
+	// 현재 진행중인 임시 게임 데이터를 목적지 맵에 적용하는 작업
+	ContinueGame,
 
 	// 목적지 맵에 선택한 저장 데이터를 적용하는 작업
 	LoadGame
@@ -60,9 +63,8 @@ protected:
 	// 자동 저장 목록에서 다음 저장이 덮어쓸 위치
 	int32 AutoSaveIndex = 0;
 
-	// 가장 최근에 저장된 게임 데이터
-	// 게임 저장 또는 로드를 시도하는 경우 업데이트 됨
-	TSharedPtr<FMD_GameData> LatestSavedGameData;
+	// 불러오기로 선택되어 검증을 통과한 게임 데이터
+	TSharedPtr<FMD_GameData> SelectedLoadGameData;
 
 	// 현재 진행중인 게임의 데이터를 저장(기록)하는 변수
 	// 저장되기 이전의 게임 데이터가 기록됨 (로그인/로그아웃 플레이어 등)
@@ -108,9 +110,17 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool LoadPlayerData(const APlayerState* PlayerState) const;
 
-	// 새 게임 또는 검증된 저장 데이터의 맵 적용 작업을 예약하고 성공 여부를 반환하는 함수
+	// 불러오기 여부와 현재 진행 데이터 존재 여부에 따라 맵 적용 작업을 예약하고 목적지 맵을 반환하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
-	bool OnTryStartGameWithGameData(const FMD_GameData& GameData);
+	bool OnTryStartGameWithGameData(const FMD_GameData& GameData, bool bLoadGame, FString& OutMapPackagePath);
+
+	// 현재 진행중인 게임 데이터의 존재 여부를 반환하는 함수
+	UFUNCTION(BlueprintPure, Category = "Save Game")
+	bool HasTemporaryGameData() const;
+
+	// Session 시작 실패 시 현재 진행 데이터는 유지하고 보류 작업만 취소하는 함수
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
+	void CancelPendingGameDataOperation();
 
 	// 현재 기록되고 있던 게임 데이터를 초기화하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
@@ -129,6 +139,9 @@ protected:
 
 	// 게임 데이터에 존재하는 플레이어의 데이터를 현재 플레이어에게 덮어쓰는 함수
 	bool OverwriteDataToPlayerInternal(const APlayerState* PlayerState, const FMD_GameData& GameData) const;
+
+	// 저장 슬롯과 저장되지 않은 현재 회차에 필요한 검증 기준을 구분하여 World에 적용하는 함수
+	bool ApplyGameDataToWorldInternal(const FMD_GameData& GameData, bool bRequireSavedSlotIdentity);
 
 	// 요청 시점에 수집된 게임 데이터를 지정된 세이브 파일 목록에 추가하는 함수
 	bool InsertGameDataToSaveFile(UMD_SaveGame* SaveFile, const FMD_GameData& GameData, bool bIsAuto);

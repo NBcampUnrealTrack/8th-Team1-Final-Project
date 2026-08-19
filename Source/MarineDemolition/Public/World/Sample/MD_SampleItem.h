@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/AssetManagerTypes.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagAssetInterface.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
@@ -30,6 +31,10 @@ public:
 	// 샘플 등급. 배치 시 인스턴스별 지정 (단가 조회 키)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sample")
 	EMD_SampleGrade Grade = EMD_SampleGrade::C;
+
+	/** 샘플을 생성하거나 할당한 메인·반복 퀘스트와 제출·파괴 이벤트를 연결하는 PrimaryAssetId */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
+	FPrimaryAssetId QuestDefinitionId;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_Damaged, Category = "Sample")
 	bool bDamaged = false;

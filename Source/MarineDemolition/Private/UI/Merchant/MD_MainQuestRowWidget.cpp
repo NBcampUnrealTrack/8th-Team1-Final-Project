@@ -5,6 +5,7 @@
 
 #include "Components/TextBlock.h"
 #include "Components/Widget.h"
+#include "Data/Merchant/MD_MainQuestDefinition.h"
 
 void UMD_MainQuestRowWidget::SetMainQuest(const FMD_MainQuestState& InState)
 {
@@ -14,8 +15,8 @@ void UMD_MainQuestRowWidget::SetMainQuest(const FMD_MainQuestState& InState)
 
 void UMD_MainQuestRowWidget::RefreshDisplay()
 {
-	const FMD_QuestDefinitionData& Definition = QuestState.Definition;
-	const bool bHasDefinition = Definition.IsValidDefinition();
+	const UMD_MainQuestDefinition* Definition = UMD_MainQuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	const bool bHasDefinition = IsValid(Definition) == true && Definition->IsValidDefinition() == true;
 
 	if (IsValid(TXT_DayLabel))
 	{
@@ -23,7 +24,7 @@ void UMD_MainQuestRowWidget::RefreshDisplay()
 	}
 	if (IsValid(TXT_QuestName))
 	{
-		TXT_QuestName->SetText(bHasDefinition ? Definition.QuestName : FText::GetEmpty());
+		TXT_QuestName->SetText(bHasDefinition ? Definition->QuestName : FText::GetEmpty());
 	}
 	if (IsValid(TXT_Status))
 	{
@@ -54,11 +55,11 @@ void UMD_MainQuestRowWidget::RefreshDisplay()
 	}
 	if (IsValid(TXT_Description))
 	{
-		TXT_Description->SetText(bHasDefinition ? Definition.Description : FText::GetEmpty());
+		TXT_Description->SetText(bHasDefinition ? Definition->HUDDescription : FText::GetEmpty());
 	}
 	if (IsValid(TXT_Progress))
 	{
-		const int32 Required = bHasDefinition ? Definition.RequiredCount : 0;
+		const int32 Required = bHasDefinition ? Definition->RequiredCount : 0;
 		TXT_Progress->SetText(FText::FromString(FString::Printf(TEXT("%d/%d"), QuestState.CurrentProgress, Required)));
 	}
 	if (IsValid(TXT_IncompleteBadge))

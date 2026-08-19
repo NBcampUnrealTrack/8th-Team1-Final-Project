@@ -17,6 +17,8 @@ class MARINEDEMOLITION_API UMD_CharacterVOIPTalker : public UVOIPTalker
 public:
 	virtual void OnTalkingBegin(UAudioComponent* AudioComponent) override;
 	virtual void OnTalkingEnd() override;
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 protected:
 	UPROPERTY(Transient)
@@ -28,5 +30,11 @@ protected:
 public:
 	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
 	void SetVolumeMuliplier(float NewVolumeMultiplier);
+
+private:
+	void TryRegisterWithOwnerPlayerState();
+
+	FTimerHandle PlayerStateRetryTimerHandle;
+	bool bVoiceRegistrationComplete = false;
 
 };
