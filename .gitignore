@@ -50,6 +50,7 @@ Config/DefaultEditorPerProjectUserSettings.ini
 # AI coding agents (local state)
 .codex/
 .claude/
+.revvy/
 /AGENT.md
 /CLAUDE.md
 

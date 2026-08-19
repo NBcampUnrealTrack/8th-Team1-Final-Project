@@ -11,7 +11,7 @@ class AMD_Barnacle;
 class AMD_CuttableWall;
 class UMD_ScrapeSurfaceComponent;
 class USoundBase;
-class UParticleSystem;
+class UNiagaraSystem;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnScrapeApplied, AMD_CuttableWall*, Wall, FMD_ScrapeResult, Result);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnScrapeSurfaceApplied, UMD_ScrapeSurfaceComponent*, Surface, FMD_ScrapeResult, Result);
@@ -338,13 +338,13 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
 	TObjectPtr<USoundBase> BareSurfaceScrapeSound;
 
-	/** 오염막 제거 접촉 위치에 생성할 임시 파티클. 미지정 가능. */
+	/** 오염막 제거 접촉 위치에 생성할 파티클 (NS_Scrape_Contamination). 미지정 가능. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
-	TObjectPtr<UParticleSystem> ContaminationScrapeEffect;
+	TObjectPtr<UNiagaraSystem> ContaminationScrapeEffect;
 
-	/** 맨 벽면 접촉 위치에 생성할 임시 파티클. 미지정 가능. */
+	/** 맨 벽면 접촉 위치에 생성할 파티클 (NS_Scrape_Bare). 미지정 가능. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
-	TObjectPtr<UParticleSystem> BareSurfaceScrapeEffect;
+	TObjectPtr<UNiagaraSystem> BareSurfaceScrapeEffect;
 
 	/** 프레임마다 사운드가 겹치지 않도록 피드백 재생 간격을 제한한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback",
@@ -372,6 +372,13 @@ private:
 
 	UFUNCTION(Client, Unreliable)
 	void ClientReceiveScrapeResult(
+		UMD_ScrapeSurfaceComponent* Surface,
+		const FMD_ScrapeResult& Result,
+		FVector_NetQuantize10 ContactLocation);
+
+	// 다른 플레이어 화면·스피커용 코스메틱 피드백. 소유 클라이언트는 전용 경로가 있어 건너뛴다
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastReceiveScrapeFeedback(
 		UMD_ScrapeSurfaceComponent* Surface,
 		const FMD_ScrapeResult& Result,
 		FVector_NetQuantize10 ContactLocation);

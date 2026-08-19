@@ -7,7 +7,8 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
-#include "Particles/ParticleSystem.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "Sound/SoundBase.h"
 #include "Net/UnrealNetwork.h"
 #include "World/Contamination/MD_Barnacle.h"
@@ -569,6 +570,9 @@ void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
 		OnScrapeApplied.Broadcast(Wall, Result);
 	}
 
+	// 다른 플레이어 화면에도 접촉 이펙트·사운드를 재생한다. 소유자는 아래 전용 경로가 담당한다
+	MulticastReceiveScrapeFeedback(Surface, Result, ContactLocation);
+
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	if (OwnerPawn
 		&& OwnerPawn->IsLocallyControlled()
@@ -580,6 +584,26 @@ void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
 
 	// 원격 소유자의 사운드/이펙트와 Blueprint 피드백은 해당 클라이언트에서 실행한다.
 	ClientReceiveScrapeResult(Surface, Result, ContactLocation);
+}
+
+void UMD_ScrapeToolComponent::MulticastReceiveScrapeFeedback_Implementation(
+	UMD_ScrapeSurfaceComponent* Surface,
+	const FMD_ScrapeResult& Result,
+	const FVector_NetQuantize10 ContactLocation)
+{
+	// 소유 클라이언트는 로컬 즉시 재생 또는 Client RPC로 이미 받으므로 중복을 막는다
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
+	if (OwnerPawn && OwnerPawn->IsLocallyControlled())
+	{
+		return;
+	}
+
+	EmitFeedback(Surface, Result, ContactLocation);
 }
 
 void UMD_ScrapeToolComponent::ClientReceiveScrapeResult_Implementation(
@@ -1149,7 +1173,7 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 	USoundBase* FeedbackSound = bBareSurfaceFeedback
 		? BareSurfaceScrapeSound
 		: ContaminationScrapeSound;
-	UParticleSystem* FeedbackEffect = bBareSurfaceFeedback
+	UNiagaraSystem* FeedbackEffect = bBareSurfaceFeedback
 		? BareSurfaceScrapeEffect
 		: ContaminationScrapeEffect;
 
@@ -1163,10 +1187,10 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 
 	if (FeedbackEffect)
 	{
-		UGameplayStatics::SpawnEmitterAtLocation(
-			GetWorld(),
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			this,
 			FeedbackEffect,
-			FTransform(ContactLocation));
+			ContactLocation);
 	}
 
 	if (FeedbackSound || FeedbackEffect)

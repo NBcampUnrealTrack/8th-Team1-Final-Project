@@ -32,6 +32,10 @@
 #include "AbilitySystemComponent.h"
 #include "GameplayTagContainer.h"
 #include "Kismet/GameplayStatics.h"
+#include "Net/UnrealNetwork.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 
 // Sets default values
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
@@ -704,6 +708,76 @@ void AMD_Character::RefreshScrapeLoadVisual()
 	FirstPersonToolMesh->SetVisibility(bShowTool && bHasFirstPersonSocket, true);
 	ThirdPersonToolMesh->SetStaticMesh(NewToolMesh);
 	ThirdPersonToolMesh->SetVisibility(bShowTool && bHasThirdPersonSocket, true);
+}
+
+void AMD_Character::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AMD_Character, bCutterVFXActive);
+}
+
+void AMD_Character::SetCutterVFXActive(bool bActive)
+{
+	if (bCutterVFXActive == bActive)
+	{
+		return;
+	}
+
+	bCutterVFXActive = bActive;
+	RefreshCutterVFX();
+}
+
+void AMD_Character::OnRep_CutterVFXActive()
+{
+	RefreshCutterVFX();
+}
+
+void AMD_Character::RefreshCutterVFX()
+{
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	if (!bCutterVFXActive)
+	{
+		// 즉시 파괴하지 않고 비활성만 해 잔여 파티클이 자연 소멸하게 둔다
+		if (IsValid(CutterVFXComponent))
+		{
+			CutterVFXComponent->Deactivate();
+		}
+		return;
+	}
+
+	if (!CutterCutEffect)
+	{
+		return;
+	}
+
+	UStaticMeshComponent* AttachMesh = IsLocallyControlled() ? FirstPersonToolMesh : ThirdPersonToolMesh;
+	if (!IsValid(AttachMesh))
+	{
+		return;
+	}
+
+	// 빙의가 바뀌어 부착 대상 시점 메시가 달라졌으면 새로 붙인다
+	if (IsValid(CutterVFXComponent) && CutterVFXComponent->GetAttachParent() != AttachMesh)
+	{
+		CutterVFXComponent->DestroyComponent();
+		CutterVFXComponent = nullptr;
+	}
+
+	if (IsValid(CutterVFXComponent))
+	{
+		CutterVFXComponent->Activate(true);
+		return;
+	}
+
+	CutterVFXComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+		CutterCutEffect, AttachMesh, CutterVFXSocketName,
+		FVector::ZeroVector, FRotator::ZeroRotator,
+		EAttachLocation::SnapToTarget, /*bAutoDestroy=*/false);
 }
 
 void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)

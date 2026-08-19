@@ -25,6 +25,8 @@ class UMD_EquipHotbarComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
 class UMD_OxygenComponent;
+class UNiagaraSystem;
+class UNiagaraComponent;
 // 캡슐 오버랩 콜백 매개변수 형식 전방 선언
 class UPrimitiveComponent;
 
@@ -69,6 +71,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Oxygen")
 	UMD_OxygenComponent* GetOxygenComponent() const { return OxygenComponent; }
 
+	// 절단 루프 VFX 토글. 어빌리티가 서버·소유 클라 양쪽에서 부르고, 사본 프록시는 복제로 따라온다
+	void SetCutterVFXActive(bool bActive);
+
 protected:
 	// Called when the game starts or when spawned
 	virtual void BeginPlay() override;
@@ -80,6 +85,8 @@ protected:
 	virtual void UnPossessed() override;
 
 	virtual void OnRep_PlayerState() override;
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 public:
 	// Called to bind functionality to input
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
@@ -112,6 +119,14 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
 	FName ToolAttachSocketName = TEXT("ToolSocket");
+
+	/** 절단 중 톱날에 붙여 재생할 루프 이펙트 (NS_Cutter_Cut) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|VFX")
+	TObjectPtr<UNiagaraSystem> CutterCutEffect;
+
+	/** 도구 스태틱 메시에서 절단 이펙트를 붙일 소켓. 없으면 메시 원점에 붙는다 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|VFX")
+	FName CutterVFXSocketName = TEXT("VFX_Blade");
 
 	/** 모든 물리 픽업이 공유하는 운반 기준점. Camera에 부착되며 대상별 배치는 GetHoldOffset()으로 조정한다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -187,6 +202,20 @@ private:
 
 	void RefreshToolMesh();
 	void RefreshScrapeLoadVisual();
+
+	UFUNCTION()
+	void OnRep_CutterVFXActive();
+
+	// 로컬은 1인칭, 타인은 3인칭 도구 메시에 붙여 시점별 표시를 기존 OwnerSee 구조에 맡긴다
+	void RefreshCutterVFX();
+
+	/** 절단 어빌리티가 활성인지. 서버가 굳히고 사본 프록시가 복제로 받는다 */
+	UPROPERTY(ReplicatedUsing = OnRep_CutterVFXActive)
+	bool bCutterVFXActive = false;
+
+	/** 현재 도구 메시에 붙어 있는 절단 루프 이펙트 인스턴스 */
+	UPROPERTY(Transient)
+	TObjectPtr<UNiagaraComponent> CutterVFXComponent;
 
 private:
 	UFUNCTION()

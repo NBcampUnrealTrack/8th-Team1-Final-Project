@@ -9,6 +9,8 @@
 #include "Engine/Engine.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
 
@@ -205,8 +207,25 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 		}
 	}
 
-	// 경로 개방 (조각이 벽 자리를 대체)
-	Destroy();
+	MulticastPlayDemolishEffect();
+
+	// 경로 개방 (조각이 벽 자리를 대체).
+	// 즉시 Destroy하면 방금 보낸 멀티캐스트가 채널과 함께 유실될 수 있어 잠깐 미룬다
+	SetActorHiddenInGame(true);
+	SetActorEnableCollision(false);
+	SetLifeSpan(0.2f);
+}
+
+void AMD_CuttableWall::MulticastPlayDemolishEffect_Implementation()
+{
+	if (GetNetMode() == NM_DedicatedServer || !DemolishEffect)
+	{
+		return;
+	}
+
+	// 액터 원점이 아니라 메시 바운드 중심에서 터뜨린다
+	UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		this, DemolishEffect, Mesh->Bounds.Origin, GetActorRotation());
 }
 
 

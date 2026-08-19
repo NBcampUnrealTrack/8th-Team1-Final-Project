@@ -29,6 +29,12 @@ void UMD_GA_WallCut::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 			ProgressTimerHandle, this, &UMD_GA_WallCut::TickCutProgress, ProgressInterval, true);
 	}
 
+	// 서버 값이 사본 프록시로 복제되고, 소유 클라는 지연 없이 즉시 켠다
+	if (AMD_Character* Character = Cast<AMD_Character>(GetAvatarActorFromActorInfo()))
+	{
+		Character->SetCutterVFXActive(true);
+	}
+
 	OnCutStarted();
 }
 
@@ -37,6 +43,11 @@ void UMD_GA_WallCut::EndAbility(const FGameplayAbilitySpecHandle Handle, const F
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(ProgressTimerHandle);
+	}
+
+	if (AMD_Character* Character = Cast<AMD_Character>(GetAvatarActorFromActorInfo()))
+	{
+		Character->SetCutterVFXActive(false);
 	}
 
 	OnCutStopped();
