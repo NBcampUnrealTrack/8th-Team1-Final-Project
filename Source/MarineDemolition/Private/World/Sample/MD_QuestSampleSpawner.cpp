@@ -190,14 +190,6 @@ void AMD_QuestSampleSpawner::TrySpawnForQuestState()
 		return;
 	}
 
-	if (IsValid(SampleClass) == false)
-	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("[QuestSampleSpawner] %s: SampleClass가 비어 있다 — BP_QuestSampleSpawner 기본값에 샘플 BP(BP_SampleBase 등)를 지정하세요"),
-			*GetName());
-		return;
-	}
-
 	UWorld* World = GetWorld();
 	UGameInstance* GameInstance = IsValid(World) ? World->GetGameInstance() : nullptr;
 	const UMD_MerchantSubsystem* MerchantSubsystem =
@@ -278,11 +270,22 @@ void AMD_QuestSampleSpawner::TrySpawnForMainQuestState(const UMD_MerchantSubsyst
 	// 기존 점유 샘플을 목표에 연결한 뒤 제출 완료 수량과 현재 월드 잔여 수량을 제외한 부족분 계산
 	const int32 RequiredCount = FMath::Max(1, Definition->GetRequiredCount(QuestState.CurrentPhaseIndex));
 	const int32 RemainingCount = FMath::Max(0, RequiredCount - QuestState.CurrentProgress);
-	BindOccupyingSamplesToMainQuest(QuestState.DefinitionId, RemainingCount);
-	const int32 MissingCount = FMath::Max(0, RemainingCount - CountAvailableSamplesForQuest(QuestState.DefinitionId));
+	TSubclassOf<AMD_SampleItem> RequiredItemClass = Definition->GetRequiredItemClass(QuestState.CurrentPhaseIndex);
+	UClass* RequiredItemClassObject = RequiredItemClass.Get();
+	BindOccupyingSamplesToMainQuest(QuestState.DefinitionId, RequiredItemClassObject, RemainingCount);
+	const int32 MissingCount = FMath::Max(0, RemainingCount - CountAvailableSamplesForQuest(QuestState.DefinitionId, RequiredItemClassObject));
 	if (MissingCount > 0)
 	{
-		SpawnSamples(QuestState, *Definition, MissingCount);
+		TSubclassOf<AMD_SampleItem> SpawnItemClass = ResolveSpawnItemClass(*Definition, QuestState.CurrentPhaseIndex);
+		bool bIsSpawnItemClassValid = IsValid(SpawnItemClass.Get());
+		if (bIsSpawnItemClassValid == true)
+		{
+			SpawnSamples(QuestState, *Definition, SpawnItemClass, MissingCount);
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[QuestSampleSpawner] %s: [%s] 요구 아이템 클래스와 기본 SampleClass가 모두 비어 있다"), *GetName(), *Definition->QuestName.ToString());
+		}
 	}
 
 	LastSpawnedMainPhaseIndex = QuestState.CurrentPhaseIndex;
@@ -329,10 +332,20 @@ void AMD_QuestSampleSpawner::TrySpawnForRepeatQuestStates(const UMD_MerchantSubs
 		}
 
 		int32 RemainingCount = FMath::Max(0, Definition->GetRequiredCount(QuestState.CurrentPhaseIndex) - QuestState.CurrentProgress);
-		int32 MissingCount = FMath::Max(0, RemainingCount - CountAvailableSamplesForQuest(QuestState.DefinitionId));
+		TSubclassOf<AMD_SampleItem> RequiredItemClass = Definition->GetRequiredItemClass(QuestState.CurrentPhaseIndex);
+		UClass* RequiredItemClassObject = RequiredItemClass.Get();
+		int32 MissingCount = FMath::Max(0, RemainingCount - CountAvailableSamplesForQuest(QuestState.DefinitionId, RequiredItemClassObject));
 		if (MissingCount > 0)
 		{
-			SpawnRepeatQuestSamples(QuestState, MissingCount);
+			TSubclassOf<AMD_SampleItem> SpawnItemClass = ResolveSpawnItemClass(*Definition, QuestState.CurrentPhaseIndex);
+			bool bIsSpawnItemClassValid = IsValid(SpawnItemClass.Get());
+			if (bIsSpawnItemClassValid == false)
+			{
+				UE_LOG(LogTemp, Warning, TEXT("[QuestSampleSpawner] %s: [%s] 요구 아이템 클래스와 기본 SampleClass가 모두 비어 있다"), *GetName(), *Definition->QuestName.ToString());
+				continue;
+			}
+
+			SpawnRepeatQuestSamples(QuestState, *Definition, SpawnItemClass, MissingCount);
 		}
 	}
 }
@@ -350,7 +363,8 @@ bool AMD_QuestSampleSpawner::IsPrimaryRepeatQuestSpawner() const
 	for (TActorIterator<AMD_QuestSampleSpawner> It(World); It; ++It)
 	{
 		const AMD_QuestSampleSpawner* Candidate = *It;
-		if (IsValid(Candidate) == false || Candidate == this || Candidate->SampleGrade != SampleGrade || IsValid(Candidate->SampleClass.Get()) == false)
+		bool bIsCandidateValid = IsValid(Candidate);
+		if (bIsCandidateValid == false || Candidate == this || Candidate->SampleGrade != SampleGrade)
 		{
 			continue;
 		}
@@ -365,7 +379,7 @@ bool AMD_QuestSampleSpawner::IsPrimaryRepeatQuestSpawner() const
 	return bIsPrimarySpawner;
 }
 
-int32 AMD_QuestSampleSpawner::CountAvailableSamplesForQuest(const FPrimaryAssetId& QuestDefinitionId) const
+int32 AMD_QuestSampleSpawner::CountAvailableSamplesForQuest(const FPrimaryAssetId& QuestDefinitionId, const UClass* RequiredItemClass) const
 {
 	const UWorld* World = GetWorld();
 	int32 AvailableSampleCount = 0;
@@ -377,7 +391,15 @@ int32 AMD_QuestSampleSpawner::CountAvailableSamplesForQuest(const FPrimaryAssetI
 	for (TActorIterator<AMD_SampleItem> It(World); It; ++It)
 	{
 		const AMD_SampleItem* Sample = *It;
-		if (IsValid(Sample) == true && Sample->IsActorBeingDestroyed() == false && Sample->Grade == SampleGrade && Sample->QuestDefinitionId == QuestDefinitionId)
+		bool bIsSampleValid = IsValid(Sample);
+		if (bIsSampleValid == false)
+		{
+			continue;
+		}
+
+		bool bIsSampleBeingDestroyed = Sample->IsActorBeingDestroyed();
+		bool bMatchesRequiredClass = RequiredItemClass == nullptr || Sample->IsA(RequiredItemClass) == true;
+		if (bIsSampleBeingDestroyed == false && bMatchesRequiredClass == true && Sample->Grade == SampleGrade && Sample->QuestDefinitionId == QuestDefinitionId)
 		{
 			++AvailableSampleCount;
 		}
@@ -403,6 +425,18 @@ bool AMD_QuestSampleSpawner::MatchesRepeatQuest(const UMD_QuestDefinition& Defin
 	return bMatchesRepeatQuest;
 }
 
+TSubclassOf<AMD_SampleItem> AMD_QuestSampleSpawner::ResolveSpawnItemClass(const UMD_QuestDefinition& Definition, int32 PhaseIndex) const
+{
+	// 에셋이 지정한 요구 클래스를 우선하여 퀘스트별 액터 구성을 스포너 설정과 분리하는 선택
+	TSubclassOf<AMD_SampleItem> OutSpawnItemClass = Definition.GetRequiredItemClass(PhaseIndex);
+	bool bHasRequiredItemClass = IsValid(OutSpawnItemClass.Get());
+	if (bHasRequiredItemClass == false)
+	{
+		OutSpawnItemClass = SampleClass;
+	}
+	return OutSpawnItemClass;
+}
+
 bool AMD_QuestSampleSpawner::FindLinkedMainQuest(
 	const UMD_MerchantSubsystem* MerchantSubsystem,
 	FMD_MainQuestState& OutQuestState) const
@@ -419,7 +453,7 @@ bool AMD_QuestSampleSpawner::FindLinkedMainQuest(
 	return false;
 }
 
-int32 AMD_QuestSampleSpawner::BindOccupyingSamplesToMainQuest(const FPrimaryAssetId& QuestDefinitionId, int32 MaxAssignments) const
+int32 AMD_QuestSampleSpawner::BindOccupyingSamplesToMainQuest(const FPrimaryAssetId& QuestDefinitionId, const UClass* RequiredItemClass, int32 MaxAssignments) const
 {
 	const UWorld* World = GetWorld();
 	int32 AssignedSampleCount = 0;
@@ -449,7 +483,22 @@ int32 AMD_QuestSampleSpawner::BindOccupyingSamplesToMainQuest(const FPrimaryAsse
 		for (TActorIterator<AMD_SampleItem> It(World); It; ++It)
 		{
 			AMD_SampleItem* Sample = *It;
-			if (IsValid(Sample) == false || Sample->IsActorBeingDestroyed() == true || Sample->Grade != SampleGrade || Sample->QuestDefinitionId.IsValid() == true || CountedSamples.Contains(Sample) == true)
+			bool bIsSampleValid = IsValid(Sample);
+			if (bIsSampleValid == false)
+			{
+				continue;
+			}
+
+			bool bIsSampleBeingDestroyed = Sample->IsActorBeingDestroyed();
+			bool bHasQuestDefinition = Sample->QuestDefinitionId.IsValid();
+			bool bWasSampleCounted = CountedSamples.Contains(Sample);
+			bool bMatchesRequiredClass = RequiredItemClass == nullptr || Sample->IsA(RequiredItemClass) == true;
+			if (bIsSampleBeingDestroyed == true || Sample->Grade != SampleGrade || bHasQuestDefinition == true)
+			{
+				continue;
+			}
+
+			if (bWasSampleCounted == true || bMatchesRequiredClass == false)
 			{
 				continue;
 			}
@@ -468,12 +517,20 @@ int32 AMD_QuestSampleSpawner::BindOccupyingSamplesToMainQuest(const FPrimaryAsse
 	return AssignedSampleCount;
 }
 
-void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition, int32 SpawnCount)
+void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition, TSubclassOf<AMD_SampleItem> SpawnItemClass, int32 SpawnCount)
 {
+	UWorld* World = GetWorld();
+	bool bIsWorldValid = IsValid(World);
+	if (bIsWorldValid == false)
+	{
+		return;
+	}
+
 	const FGameplayTag ExpectedGradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(SampleGrade);
 	// 유효한 스포너 등급과 퀘스트 단계의 목표 등급 일치 여부
 	bool bIsExpectedGradeValid = ExpectedGradeTag.IsValid();
-	bool bTargetsExpectedGrade = bIsExpectedGradeValid == true && Definition.TargetsGrade(QuestState.CurrentPhaseIndex, ExpectedGradeTag) == true;
+	UClass* SpawnItemClassObject = SpawnItemClass.Get();
+	bool bTargetsExpectedGrade = bIsExpectedGradeValid == true && Definition.TargetsSample(QuestState.CurrentPhaseIndex, SpawnItemClassObject, ExpectedGradeTag) == true;
 	if (bIsExpectedGradeValid == true && bTargetsExpectedGrade == false)
 	{
 		UE_LOG(LogTemp, Warning,
@@ -513,13 +570,14 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState, 
 	{
 		const FTransform& SpawnTransform = SpawnTransforms[Index % SpawnTransforms.Num()];
 
-		AMD_SampleItem* Sample = GetWorld()->SpawnActor<AMD_SampleItem>(
-			SampleClass,
+		AMD_SampleItem* Sample = World->SpawnActor<AMD_SampleItem>(
+			SpawnItemClass,
 			SpawnTransform.GetLocation(),
 			SpawnTransform.Rotator(),
 			SpawnParams);
 
-		if (!IsValid(Sample))
+		bool bIsSampleValid = IsValid(Sample);
+		if (bIsSampleValid == false)
 		{
 			UE_LOG(LogTemp, Warning,
 				TEXT("[QuestSampleSpawner] %s: 샘플 스폰 실패 (Day%d, index %d) — BP_SampleBase 부모=MD_SampleItem 확인"),
@@ -530,7 +588,8 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState, 
 		// 스폰 포인트에 스케일이 잡혀 있을 때만 덮어쓴다. 비어 있으면 샘플 BP의
 		// 기본 스케일을 그대로 살린다 (여기서 기본값을 복제하면 양쪽이 갈라진다).
 		const FVector SpawnScale = SpawnTransform.GetScale3D();
-		if (!SpawnScale.IsNearlyZero())
+		bool bHasSpawnScale = SpawnScale.IsNearlyZero() == false;
+		if (bHasSpawnScale == true)
 		{
 			Sample->SetActorScale3D(SpawnScale);
 		}
@@ -551,18 +610,9 @@ void AMD_QuestSampleSpawner::SpawnSamples(const FMD_MainQuestState& QuestState, 
 	}
 }
 
-void AMD_QuestSampleSpawner::SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, int32 SpawnCount)
+void AMD_QuestSampleSpawner::SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, const UMD_QuestDefinition& Definition, TSubclassOf<AMD_SampleItem> SpawnItemClass, int32 SpawnCount)
 {
-	const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
-	// 원본 포인터와 단계가 확인된 뒤에만 반복 퀘스트 샘플 생성을 진행하기 위한 결과
-	bool bIsDefinitionValid = IsValid(Definition);
-	if (bIsDefinitionValid == false)
-	{
-		return;
-	}
-
-	bool bHasCurrentPhase = Definition->HasPhase(QuestState.CurrentPhaseIndex);
-	if (bHasCurrentPhase == false || SpawnCount <= 0)
+	if (SpawnCount <= 0)
 	{
 		return;
 	}
@@ -573,12 +623,13 @@ void AMD_QuestSampleSpawner::SpawnRepeatQuestSamples(const FMD_RepeatQuestState&
 		UE_LOG(LogTemp, Warning,
 			TEXT("[QuestSampleSpawner] %s: [%s] 반복 퀘스트 스폰 포인트 없음"),
 			*GetName(),
-			*Definition->QuestName.ToString());
+			*Definition.QuestName.ToString());
 		return;
 	}
 
 	UWorld* World = GetWorld();
-	if (IsValid(World) == false)
+	bool bIsWorldValid = IsValid(World);
+	if (bIsWorldValid == false)
 	{
 		return;
 	}
@@ -589,20 +640,22 @@ void AMD_QuestSampleSpawner::SpawnRepeatQuestSamples(const FMD_RepeatQuestState&
 	for (int32 Index = 0; Index < SpawnCount; ++Index)
 	{
 		const FTransform& SpawnTransform = SpawnTransforms[Index % SpawnTransforms.Num()];
-		AMD_SampleItem* Sample = World->SpawnActor<AMD_SampleItem>(SampleClass, SpawnTransform.GetLocation(), SpawnTransform.Rotator(), SpawnParams);
-		if (IsValid(Sample) == false)
+		AMD_SampleItem* Sample = World->SpawnActor<AMD_SampleItem>(SpawnItemClass, SpawnTransform.GetLocation(), SpawnTransform.Rotator(), SpawnParams);
+		bool bIsSampleValid = IsValid(Sample);
+		if (bIsSampleValid == false)
 		{
 			UE_LOG(LogTemp, Warning,
 				TEXT("[QuestSampleSpawner] %s: [%s] 반복 퀘스트 샘플 스폰 실패 (index %d) — BP_SampleBase 부모=MD_SampleItem 확인"),
 				*GetName(),
-				*Definition->QuestName.ToString(),
+				*Definition.QuestName.ToString(),
 				Index);
 			continue;
 		}
 
 		// 스폰 포인트의 명시적인 크기만 반영하고 샘플 BP 기본 크기를 보존하기 위한 처리.
 		const FVector SpawnScale = SpawnTransform.GetScale3D();
-		if (SpawnScale.IsNearlyZero() == false)
+		bool bHasSpawnScale = SpawnScale.IsNearlyZero() == false;
+		if (bHasSpawnScale == true)
 		{
 			Sample->SetActorScale3D(SpawnScale);
 		}
@@ -617,7 +670,7 @@ void AMD_QuestSampleSpawner::SpawnRepeatQuestSamples(const FMD_RepeatQuestState&
 		UE_LOG(LogTemp, Log,
 			TEXT("[QuestSampleSpawner] %s: [%s] 반복 퀘스트 %s급 샘플 스폰 @ %s"),
 			*GetName(),
-			*Definition->QuestName.ToString(),
+			*Definition.QuestName.ToString(),
 			*StaticEnum<EMD_SampleGrade>()->GetNameStringByValue(static_cast<int64>(SampleGrade)),
 			*Sample->GetActorLocation().ToCompactString());
 	}

@@ -7,6 +7,8 @@
 #include "Types/Merchant/MD_QuestRewardTypes.h"
 #include "MD_QuestDefinition.generated.h"
 
+class AMD_SampleItem;
+
 /** 메인·반복 배치와 무관하게 순차 목표 하나를 정의하는 공통 페이즈 데이터 */
 USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_QuestPhaseData
@@ -16,6 +18,10 @@ struct MARINEDEMOLITION_API FMD_QuestPhaseData
 	/** 납품·청소·마감 등 현재 페이즈의 목표 분류 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
 	EMD_QuestObjectiveType ObjectiveType = EMD_QuestObjectiveType::RecoverIntact;
+
+	/** 이 페이즈에서 납품·파괴 대상으로 인정할 샘플 액터 클래스이며 비어 있으면 클래스를 제한하지 않는 설정 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
+	TSubclassOf<AMD_SampleItem> RequiredItemClass;
 
 	/** 비어 있으면 등급을 제한하지 않고 값이 있으면 하나와 일치해야 하는 허용 등급 목록 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
@@ -34,11 +40,14 @@ struct MARINEDEMOLITION_API FMD_QuestPhaseData
 	FText CompletionDialogue;
 
 public:
-	/** 제출 또는 파괴된 샘플이 현재 페이즈의 등급·손상 조건을 충족하는지 판정하는 함수 */
-	bool AcceptsSample(const FGameplayTag& GradeTag, bool bIntact) const;
+	/** 전달된 액터 클래스가 현재 페이즈의 요구 클래스와 일치하는지 판정하는 함수 */
+	bool AcceptsItemClass(const UClass* ItemClass) const;
 
-	/** 파괴된 샘플의 등급이 현재 회수 목표에 포함되는지 판정하는 함수 */
-	bool TargetsGrade(const FGameplayTag& GradeTag) const;
+	/** 제출된 샘플이 현재 페이즈의 클래스·등급·손상 조건을 충족하는지 판정하는 함수 */
+	bool AcceptsSample(const UClass* ItemClass, const FGameplayTag& GradeTag, bool bIntact) const;
+
+	/** 파괴된 샘플의 클래스와 등급이 현재 회수 목표에 포함되는지 판정하는 함수 */
+	bool TargetsSample(const UClass* ItemClass, const FGameplayTag& GradeTag) const;
 
 };
 
@@ -111,14 +120,17 @@ public:
 	/** 현재 목표가 인정하는 등급 목록 반환 */
 	FGameplayTagContainer GetAcceptedGradeTags(int32 PhaseIndex) const;
 
+	/** 현재 목표가 요구하는 샘플 액터 클래스 반환 */
+	TSubclassOf<AMD_SampleItem> GetRequiredItemClass(int32 PhaseIndex) const;
+
 	/** 현재 목표가 손상된 회수물도 인정하는지 판정하는 함수 */
 	bool AllowsDamagedTarget(int32 PhaseIndex) const;
 
-	/** 제출 샘플이 현재 목표의 등급·손상 조건을 충족하는지 판정하는 함수 */
-	bool AcceptsSample(int32 PhaseIndex, const FGameplayTag& GradeTag, bool bIntact) const;
+	/** 제출 샘플이 현재 목표의 클래스·등급·손상 조건을 충족하는지 판정하는 함수 */
+	bool AcceptsSample(int32 PhaseIndex, const UClass* ItemClass, const FGameplayTag& GradeTag, bool bIntact) const;
 
-	/** 파괴 샘플의 등급이 현재 회수 목표와 일치하는지 판정하는 함수 */
-	bool TargetsGrade(int32 PhaseIndex, const FGameplayTag& GradeTag) const;
+	/** 파괴 샘플의 클래스와 등급이 현재 회수 목표와 일치하는지 판정하는 함수 */
+	bool TargetsSample(int32 PhaseIndex, const UClass* ItemClass, const FGameplayTag& GradeTag) const;
 
 	/** 마지막 페이즈의 목표 수량을 충족하여 보상을 받을 수 있는지 판정하는 함수 */
 	bool IsObjectiveComplete(int32 PhaseIndex, int32 CurrentProgress) const;

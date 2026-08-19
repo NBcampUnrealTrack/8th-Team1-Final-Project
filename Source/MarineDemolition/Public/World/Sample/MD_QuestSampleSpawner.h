@@ -55,24 +55,27 @@ protected:
 	/** 같은 등급 스포너가 여러 개일 때 반복 퀘스트를 담당할 대표 스포너 판정. */
 	bool IsPrimaryRepeatQuestSpawner() const;
 
-	/** 현재 월드에 존재하는 같은 등급과 퀘스트 Asset ID의 샘플 수 집계 */
-	int32 CountAvailableSamplesForQuest(const FPrimaryAssetId& QuestDefinitionId) const;
+	/** 현재 월드에 존재하는 같은 요구 클래스·등급·퀘스트 Asset ID의 샘플 수 집계 */
+	int32 CountAvailableSamplesForQuest(const FPrimaryAssetId& QuestDefinitionId, const UClass* RequiredItemClass) const;
 
 	/** 반복 퀘스트 페이즈와 스포너 등급의 일치 여부 판정 */
 	bool MatchesRepeatQuest(const UMD_QuestDefinition& Definition, int32 PhaseIndex) const;
+
+	/** 퀘스트 요구 클래스를 우선하고 미지정이면 스포너 기본 클래스를 반환하는 함수 */
+	TSubclassOf<AMD_SampleItem> ResolveSpawnItemClass(const UMD_QuestDefinition& Definition, int32 PhaseIndex) const;
 
 	bool FindLinkedMainQuest(const UMD_MerchantSubsystem* MerchantSubsystem, FMD_MainQuestState& OutQuestState) const;
 
 	void RefreshLinkedQuestPreview();
 
-	/** 스폰 지점에 있는 미지정 샘플을 현재 메인 퀘스트 목표로 연결하고 연결 수를 반환하는 함수 */
-	int32 BindOccupyingSamplesToMainQuest(const FPrimaryAssetId& QuestDefinitionId, int32 MaxAssignments) const;
+	/** 스폰 지점에 있는 요구 클래스의 미지정 샘플을 현재 메인 퀘스트 목표로 연결하고 연결 수를 반환하는 함수 */
+	int32 BindOccupyingSamplesToMainQuest(const FPrimaryAssetId& QuestDefinitionId, const UClass* RequiredItemClass, int32 MaxAssignments) const;
 
 	/** 현재 메인 퀘스트에 부족한 목표 샘플만 생성하는 함수 */
-	void SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition, int32 SpawnCount);
+	void SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition, TSubclassOf<AMD_SampleItem> SpawnItemClass, int32 SpawnCount);
 
 	/** 회수 반복 퀘스트에 필요한 샘플 생성 처리 */
-	void SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, int32 SpawnCount);
+	void SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, const UMD_QuestDefinition& Definition, TSubclassOf<AMD_SampleItem> SpawnItemClass, int32 SpawnCount);
 
 	TArray<FTransform> CollectSpawnTransforms() const;
 
@@ -105,7 +108,7 @@ protected:
 	EMD_SampleGrade SampleGrade = EMD_SampleGrade::C;
 
 	/**
-	 * 스폰할 샘플 액터 클래스.
+	 * 퀘스트 페이즈에 요구 클래스가 없을 때 사용할 기본 샘플 액터 클래스.
 	 *
 	 * 기본값은 `BP_QuestSampleSpawner` 블루프린트에서 지정한다. C++에 에셋 경로를 박아두면
 	 * 에셋을 옮겼을 때 리다이렉터를 타지 못하고 조용히 끊기므로, 참조는 BP 기본값으로만 둔다.

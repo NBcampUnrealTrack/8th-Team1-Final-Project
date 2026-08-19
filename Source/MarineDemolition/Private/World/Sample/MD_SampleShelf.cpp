@@ -249,6 +249,7 @@ void AMD_SampleShelf::CollectSample(AMD_SampleItem* Sample)
 	UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
 	FPrimaryAssetId QuestDefinitionId = Sample->QuestDefinitionId;
 	EMD_SampleGrade SampleGrade = Sample->Grade;
+	UClass* SampleItemClass = Sample->GetClass();
 
 	// 샘플 액터 제거 이후에도 선반 전시와 퀘스트 진행에 사용할 최소 정보 복사
 	FMD_ShelfDisplayEntry Entry;
@@ -283,7 +284,7 @@ void AMD_SampleShelf::CollectSample(AMD_SampleItem* Sample)
 	if (IsValid(Merchant) == true)
 	{
 		FGameplayTag GradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(SampleGrade);
-		Merchant->NotifySampleDelivered(QuestDefinitionId, GradeTag, bIntact);
+		Merchant->NotifySampleDelivered(QuestDefinitionId, SampleItemClass, GradeTag, bIntact);
 	}
 }
 
