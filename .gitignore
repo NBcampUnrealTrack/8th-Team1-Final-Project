@@ -814,3 +814,10 @@ Content/Assets/Stylized_Cemetery/**
 !Content/Assets/Stylized_Cemetery/Textures/Trees_Textures/T_Tree_04_Bark_BaseColor.uasset
 !Content/Assets/Stylized_Cemetery/Textures/Trees_Textures/T_Tree_04_Bark_Normal.uasset
 !Content/Assets/Stylized_Cemetery/Textures/Trees_Textures/T_Tree_04_Bark_ORM.uasset
+
+# 타워 본체가 MI_Stone_Tile1 을 쓰게 되어 그 의존성도 추적한다.
+# (M_House_Parts_Details 와 T_House_12_Parts_* 는 이미 위에 포함돼 있다)
+!Content/Assets/Stylized_Cemetery/Materials/Material_Instance/MI_Stone_Tile1.uasset
+!Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Stone_Tile_BaseColor.uasset
+!Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Stone_Tile_Normal.uasset
+!Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Stone_Tile_ORM.uasset
