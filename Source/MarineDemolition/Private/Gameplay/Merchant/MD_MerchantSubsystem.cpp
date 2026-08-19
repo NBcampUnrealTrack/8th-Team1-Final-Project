@@ -792,8 +792,9 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 
 void UMD_MerchantSubsystem::DrawRepeatQuestsForContract()
 {
-	// 현장을 한 번 클리어한 이후의 계약부터 반복 퀘스트를 제공하기 위한 노출 조건 검사
-	if (IsValid(CurrentSite) == false || HasClearedCurrentSite() == false)
+	// 최초 진입을 포함해 현재 계약 현장의 반복 퀘스트 풀을 즉시 사용할 수 있는지 확인하는 검사
+	bool bIsCurrentSiteValid = IsValid(CurrentSite);
+	if (bIsCurrentSiteValid == false)
 	{
 		return;
 	}

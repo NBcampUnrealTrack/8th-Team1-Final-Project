@@ -113,13 +113,13 @@ public:
 	const TArray<FMD_MainQuestState>& GetMainQuests() const { return MainQuests; }
 	const TArray<FMD_RepeatQuestState>& GetRepeatQuests() const { return RepeatQuests; }
 
-	/** 반복 퀘스트 노출 조건. 현장을 한 번 클리어해야 열린다. (기획 09 §4) */
+	/** 현재 계약 현장이 과거에 클리어된 적 있는지 저장 이력에서 확인하는 함수 */
 	bool HasClearedCurrentSite() const;
 
 	/** Day 시작 시 호출하여 메인 퀘스트의 해금 상태를 갱신하는 함수 */
 	void BeginDay(int32 NewDay);
 
-	/** 계약 클리어 시 호출. 반복 퀘스트 게이트를 여는 이력을 남긴다. */
+	/** 계약 클리어 시 호출하여 현장 완료 이력을 남기는 함수 */
 	void MarkSiteCleared();
 
 	/** 제시 상태에서는 반복 퀘스트를 수락하고 목표를 달성한 수락 상태에서는 상인 메뉴 보상을 수령하는 함수 */
@@ -171,7 +171,7 @@ private:
 	/** 활성 반복 퀘스트를 실패로 전환하고 원본 에셋의 패널티를 한 번 적용하는 함수 */
 	void FailRepeatQuest(FMD_RepeatQuestState& QuestState, bool bDestroyed);
 
-	/** 현재 진행 중인 현장. 반복 퀘스트 풀과 클리어 이력 판정에 쓴다. */
+	/** 현재 진행 중인 현장으로 메인·반복 퀘스트 구성과 완료 이력 기록에 사용하는 참조 */
 	UPROPERTY()
 	TObjectPtr<UMD_SiteDefinition> CurrentSite;
 

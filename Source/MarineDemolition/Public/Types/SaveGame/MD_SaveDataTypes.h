@@ -123,7 +123,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FMD_RepeatQuestState> RepeatQuests;
 
-	// 반복 퀘스트 개방 이력을 계약 사이에도 유지하기 위한 클리어 현장 목록
+	// 계약 사이에도 완료된 현장 기록을 유지하기 위한 클리어 현장 목록
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<TSoftObjectPtr<UMD_SiteDefinition>> ClearedSites;
 

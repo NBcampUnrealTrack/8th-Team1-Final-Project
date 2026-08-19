@@ -182,7 +182,7 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UPanelWidget> PNL_RepeatQuestList;
 
-	/** 현장을 아직 클리어하지 않아 반복퀘가 없을 때 (`09` §4) */
+	/** 현재 수령 가능한 반복 퀘스트가 없을 때 표시하는 안내 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> TXT_RepeatEmptyNotice;
 
