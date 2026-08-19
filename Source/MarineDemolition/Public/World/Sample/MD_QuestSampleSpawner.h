@@ -56,7 +56,7 @@ protected:
 	bool IsPrimaryRepeatQuestSpawner() const;
 
 	/** 현재 월드에 존재하는 같은 요구 클래스·등급·퀘스트 Asset ID의 샘플 수 집계 */
-	int32 CountAvailableSamplesForQuest(const FPrimaryAssetId& QuestDefinitionId, const UClass* RequiredItemClass) const;
+	int32 CountAvailableSamplesForQuest(const FPrimaryAssetId& QuestDefinitionId, const UClass* RequiredItemClass, EMD_SampleGrade TargetGrade) const;
 
 	/** 반복 퀘스트 페이즈와 스포너 등급의 일치 여부 판정 */
 	bool MatchesRepeatQuest(const UMD_QuestDefinition& Definition, int32 PhaseIndex) const;
@@ -64,18 +64,21 @@ protected:
 	/** 퀘스트 요구 클래스를 우선하고 미지정이면 스포너 기본 클래스를 반환하는 함수 */
 	TSubclassOf<AMD_SampleItem> ResolveSpawnItemClass(const UMD_QuestDefinition& Definition, int32 PhaseIndex) const;
 
+	/** 퀘스트 허용 등급에서 실제 생성에 사용할 샘플 등급을 결정하는 함수 */
+	bool ResolveSpawnGrade(const UMD_QuestDefinition& Definition, int32 PhaseIndex, EMD_SampleGrade& OutSampleGrade) const;
+
 	bool FindLinkedMainQuest(const UMD_MerchantSubsystem* MerchantSubsystem, FMD_MainQuestState& OutQuestState) const;
 
 	void RefreshLinkedQuestPreview();
 
-	/** 스폰 지점에 있는 요구 클래스의 미지정 샘플을 현재 메인 퀘스트 목표로 연결하고 연결 수를 반환하는 함수 */
-	int32 BindOccupyingSamplesToMainQuest(const FPrimaryAssetId& QuestDefinitionId, const UClass* RequiredItemClass, int32 MaxAssignments) const;
+	/** 스폰 지점에 있는 요구 클래스·등급의 미지정 샘플을 현재 메인 퀘스트 목표로 연결하고 연결 수를 반환하는 함수 */
+	int32 BindOccupyingSamplesToMainQuest(const FPrimaryAssetId& QuestDefinitionId, const UClass* RequiredItemClass, EMD_SampleGrade TargetGrade, int32 MaxAssignments) const;
 
 	/** 현재 메인 퀘스트에 부족한 목표 샘플만 생성하는 함수 */
-	void SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition, TSubclassOf<AMD_SampleItem> SpawnItemClass, int32 SpawnCount);
+	void SpawnSamples(const FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition, TSubclassOf<AMD_SampleItem> SpawnItemClass, EMD_SampleGrade SpawnGrade, int32 SpawnCount);
 
 	/** 회수 반복 퀘스트에 필요한 샘플 생성 처리 */
-	void SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, const UMD_QuestDefinition& Definition, TSubclassOf<AMD_SampleItem> SpawnItemClass, int32 SpawnCount);
+	void SpawnRepeatQuestSamples(const FMD_RepeatQuestState& QuestState, const UMD_QuestDefinition& Definition, TSubclassOf<AMD_SampleItem> SpawnItemClass, EMD_SampleGrade SpawnGrade, int32 SpawnCount);
 
 	TArray<FTransform> CollectSpawnTransforms() const;
 
@@ -103,7 +106,7 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Spawn", meta = (ClampMin = "1"))
 	int32 UnlockDay = 1;
 
-	/** 스폰할 샘플 등급. 연결된 메인퀘 TargetGradeTag와 일치해야 한다. */
+	/** 퀘스트에 허용 등급이 없거나 복수일 때 우선 적용할 샘플 등급 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Spawn")
 	EMD_SampleGrade SampleGrade = EMD_SampleGrade::C;
 

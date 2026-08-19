@@ -421,7 +421,7 @@ bool UMD_MerchantSubsystem::TryAbandonRepeatQuest(int32 QuestIndex)
 	return true;
 }
 
-void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDefinitionId, const UClass* ItemClass, const FGameplayTag& GradeTag, bool bIntact)
+void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDefinitionId, const FGameplayTag& GradeTag, bool bIntact)
 {
 	if (GradeTag.IsValid() == false)
 	{
@@ -451,7 +451,7 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDe
 			continue;
 		}
 
-		bool bAcceptsSample = Definition->AcceptsSample(QuestState.CurrentPhaseIndex, ItemClass, GradeTag, bIntact);
+		bool bAcceptsSample = Definition->AcceptsSample(QuestState.CurrentPhaseIndex, GradeTag, bIntact);
 		if (bAcceptsSample == false)
 		{
 			continue;
@@ -499,7 +499,7 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDe
 			continue;
 		}
 
-		bool bAcceptsSample = Definition->AcceptsSample(QuestState.CurrentPhaseIndex, ItemClass, GradeTag, bIntact);
+		bool bAcceptsSample = Definition->AcceptsSample(QuestState.CurrentPhaseIndex, GradeTag, bIntact);
 		if (bAcceptsSample == false)
 		{
 			continue;
@@ -529,7 +529,7 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDe
 
 }
 
-void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDefinitionId, const UClass* ItemClass, EMD_SampleGrade Grade)
+void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDefinitionId, EMD_SampleGrade Grade)
 {
 	const FGameplayTag GradeTag = GradeTagFromSampleGrade(Grade);
 	if (GradeTag.IsValid() == false)
@@ -541,7 +541,7 @@ void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDe
 
 	for (FMD_MainQuestState& QuestState : MainQuests)
 	{
-		if (QuestState.IsActive() == false)
+		if (QuestState.IsActive() == false || QuestState.DefinitionId != QuestDefinitionId)
 		{
 			continue;
 		}
@@ -554,7 +554,7 @@ void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDe
 			continue;
 		}
 
-		bool bTargetsSample = Definition->TargetsSample(QuestState.CurrentPhaseIndex, ItemClass, GradeTag);
+		bool bTargetsSample = Definition->TargetsSample(QuestState.CurrentPhaseIndex, GradeTag);
 		if (bTargetsSample == false)
 		{
 			continue;
@@ -585,7 +585,7 @@ void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDe
 			continue;
 		}
 
-		bool bAcceptsSample = Definition->AcceptsSample(QuestState.CurrentPhaseIndex, ItemClass, GradeTag, true);
+		bool bAcceptsSample = Definition->AcceptsSample(QuestState.CurrentPhaseIndex, GradeTag, true);
 		if (bAcceptsSample == false)
 		{
 			continue;
