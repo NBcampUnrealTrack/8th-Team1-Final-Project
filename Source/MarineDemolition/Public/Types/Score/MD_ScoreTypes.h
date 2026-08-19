@@ -74,6 +74,14 @@ struct FMD_InspectionReport
 	UPROPERTY(BlueprintReadOnly, Category = "Score")
 	int32 Score = 0;
 
+	// 일일 정산 화면에서 누적 점수와 분리해 표시할 해당 Day의 점수 증감 합계
+	UPROPERTY(BlueprintReadOnly, Category = "Score")
+	int32 DailyScore = 0;
+
+	// 보고서가 표시되는 모든 클라이언트에 서버 확정 크레딧을 함께 전달하기 위한 값
+	UPROPERTY(BlueprintReadOnly, Category = "Credit")
+	int32 Credits = 0;
+
 	UPROPERTY(BlueprintReadOnly, Category = "Score")
 	int32 Threshold = 0;
 };

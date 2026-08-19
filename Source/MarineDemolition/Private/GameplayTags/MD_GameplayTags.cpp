@@ -201,6 +201,10 @@ namespace MDGameplayTags
 		Score_Penalty_PipeLeakTick,
 		"Score.Penalty.PipeLeakTick",
 		"수도 미밀봉 오염 확산 30초당");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Score_Penalty_Quest,
+		"Score.Penalty.Quest",
+		"상인 퀘스트 실패");
 
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(

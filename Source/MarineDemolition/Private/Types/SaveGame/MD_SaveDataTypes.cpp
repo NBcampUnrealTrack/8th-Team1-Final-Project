@@ -13,7 +13,7 @@ const FGameplayTag FMD_WorldData::DataFieldKey = MDGameplayTags::Save_Data_World
 bool FMD_GameStateData::IsStructurallyValid() const
 {
 	// 계약 범위와 하루 길이를 벗어난 값이 시간·점검 로직을 오염시키지 않도록 하는 검사
-	return ElapsedDay >= 1 && ElapsedDay <= 4 && ElapsedSeconds >= 0.0 && FMath::IsFinite(ElapsedSeconds) == true && ContractCrewCount >= 0;
+	return ElapsedDay >= 1 && ElapsedDay <= 4 && ElapsedSeconds >= 0.0 && FMath::IsFinite(ElapsedSeconds) == true && ContractCrewCount >= 0 && ContractDifficulty >= EMD_Difficulty::Safe && ContractDifficulty <= EMD_Difficulty::Extreme;
 }
 
 bool FMD_MerchantData::IsStructurallyValid() const

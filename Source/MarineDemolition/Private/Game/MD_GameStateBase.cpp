@@ -4,6 +4,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
+#include "Types/Travel/MD_TravelTypes.h"
 
 AMD_GameStateBase::AMD_GameStateBase()
 {
@@ -42,6 +43,8 @@ void AMD_GameStateBase::GetLifetimeReplicatedProps(
     DOREPLIFETIME(AMD_GameStateBase, CurrentDay);
 
     DOREPLIFETIME(AMD_GameStateBase, ContractCrewCount);
+
+    DOREPLIFETIME(AMD_GameStateBase, ContractDifficulty);
 
     DOREPLIFETIME(AMD_GameStateBase, bEmergencyDay);
 }
@@ -181,26 +184,52 @@ void AMD_GameStateBase::AddScoreDelta(int32 Delta)
     OnRep_Score();
 }
 
-void AMD_GameStateBase::AddScoreEvent(FGameplayTag EventTag, int32 Count)
+int32 AMD_GameStateBase::GetScoreForDay(int32 Day) const
 {
-    if (!HasAuthority() || !IsValid(ScoreTable) || Count == 0)
+    // 계약 누적 점수와 분리된 일일 정산값을 구성하기 위한 해당 Day 원장 합계
+    int32 OutScore = 0;
+    for (const FMD_ScoreEntry& ScoreEntry : ScoreLog)
+    {
+        if (ScoreEntry.Day == Day)
+        {
+            OutScore += ScoreEntry.Delta;
+        }
+    }
+
+    return OutScore;
+}
+
+void AMD_GameStateBase::AddScoreEvent(FGameplayTag EventTag, int32 Count, bool bUseCountAsDelta)
+{
+    if (HasAuthority() == false || Count == 0)
     {
         return;
     }
 
-    const int32 Delta = ScoreTable->GetEventValue(EventTag) * Count;
-    if (Delta == 0)
+    // QuestDefinition처럼 외부 데이터에서 계산된 점수와 ScoreTable 단가 기반 점수를 동일한 원장 경로로 처리하기 위한 분기
+    int32 Delta = Count;
+    if (bUseCountAsDelta == false)
     {
-        return;
+        if (IsValid(ScoreTable) == false)
+        {
+            return;
+        }
+
+        Delta = ScoreTable->GetEventValue(EventTag) * Count;
+        if (Delta == 0)
+        {
+            return;
+        }
     }
 
+    // 총점 변경과 동일한 일차·원인의 원장 항목을 한 번에 남기기 위한 기록
     ScoreLog.Add({EventTag, Delta, CurrentDay});
     AddScoreDelta(Delta);
 }
 
 void AMD_GameStateBase::AddSampleScoreEvent(EMD_SampleGrade Grade, EMD_SampleScoreType Type)
 {
-    if (!HasAuthority() || !IsValid(ScoreTable))
+    if (HasAuthority() == false || IsValid(ScoreTable) == false)
     {
         return;
     }
@@ -229,7 +258,7 @@ int32 AMD_GameStateBase::GetInspectionThreshold(int32 Day) const
     }
 
     // 최종 기준 = 표준 × 난이도 × 인원 × (경고 시 1.1)
-    float Multiplier = ScoreTable->DifficultyThresholdMultiplier;
+    float Multiplier = MDTravel::GetDifficultyMultiplier(ContractDifficulty);
     if (ContractCrewCount > 0)
     {
         Multiplier *= ScoreTable->GetCrewMultiplier(ContractCrewCount);
@@ -256,6 +285,23 @@ void AMD_GameStateBase::SetContractCrewCount(int32 Crew)
     {
         ContractCrewCount = Crew;
     }
+}
+
+void AMD_GameStateBase::SetContractDifficulty(EMD_Difficulty Difficulty)
+{
+    if (HasAuthority() == false)
+    {
+        return;
+    }
+
+    // C++ 또는 Blueprint에서 전달된 열거형 값도 정식 난이도 범위로 제한하기 위한 검사
+    if (Difficulty < EMD_Difficulty::Safe || Difficulty > EMD_Difficulty::Extreme)
+    {
+        return;
+    }
+
+    ContractDifficulty = Difficulty;
+    ForceNetUpdate();
 }
 
 void AMD_GameStateBase::SetEmergencyDay(bool bEmergency)
@@ -310,6 +356,7 @@ FMD_GameStateData AMD_GameStateBase::GetGameStateSaveData() const
     SaveData.bEmergencyDay = bEmergencyDay;
     SaveData.bInspectionWarned = bInspectionWarned;
     SaveData.ContractCrewCount = ContractCrewCount;
+    SaveData.ContractDifficulty = ContractDifficulty;
     SaveData.ElapsedDay = CurrentDay;
     SaveData.ElapsedSeconds = GetElapsedGameSeconds();
     SaveData.Score = Score;
@@ -333,6 +380,7 @@ bool AMD_GameStateBase::ApplyGameStateSaveData(const FMD_GameStateData& SaveData
     bEmergencyDay = SaveData.bEmergencyDay;
     bInspectionWarned = SaveData.bInspectionWarned;
     ContractCrewCount = SaveData.ContractCrewCount;
+    ContractDifficulty = SaveData.ContractDifficulty;
     CurrentDay = SaveData.ElapsedDay;
     Score = SaveData.Score;
 
