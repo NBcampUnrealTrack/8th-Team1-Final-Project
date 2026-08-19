@@ -1,26 +1,28 @@
 #include "Data/Merchant/MD_QuestDefinition.h"
 
 #include "Engine/AssetManager.h"
-#include "World/Sample/MD_SampleItem.h"
+#include "World/Sample/MD_QuestItem.h"
 
-bool FMD_QuestPhaseData::AcceptsSample(const FGameplayTag& GradeTag, bool bIntact) const
+bool FMD_QuestPhaseData::AcceptsQuestItem(const FGameplayTag& GradeTag, bool bIntact) const
 {
-	// 퀘스트 식별자로 귀속을 확인한 이후 등급과 손상 상태만 검사하는 제출 판정
-	const bool bGradeMatches = AcceptedGradeTags.Num() == 0 || AcceptedGradeTags.HasTagExact(GradeTag) == true;
+	// 등급 조건이 없는 파괴 불가 아이템과 등급 조건이 있는 샘플을 함께 지원하는 제출 판정
+	bool bHasGradeRequirement = AcceptedGradeTags.Num() > 0;
+	bool bGradeMatches = bHasGradeRequirement == false || (GradeTag.IsValid() == true && AcceptedGradeTags.HasTagExact(GradeTag) == true);
 
-	const bool bIsRecovery = ObjectiveType == EMD_QuestObjectiveType::RecoverIntact || ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
-	const bool bConditionMatches = ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged || bIntact == true;
-	const bool bOutAccepted = bIsRecovery == true && GradeTag.IsValid() == true && bGradeMatches == true && bConditionMatches == true;
+	bool bIsRecovery = ObjectiveType == EMD_QuestObjectiveType::RecoverIntact || ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
+	bool bConditionMatches = ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged || bIntact == true;
+	bool bOutAccepted = bIsRecovery == true && bGradeMatches == true && bConditionMatches == true;
 	return bOutAccepted;
 }
 
-bool FMD_QuestPhaseData::TargetsSample(const FGameplayTag& GradeTag) const
+bool FMD_QuestPhaseData::TargetsQuestItem(const FGameplayTag& GradeTag) const
 {
-	// 퀘스트 식별자로 귀속을 확인한 이후 목표 유형과 등급만 검사하는 대상 판정
-	const bool bIsRecovery = ObjectiveType == EMD_QuestObjectiveType::RecoverIntact || ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
-	const bool bGradeMatches = AcceptedGradeTags.Num() == 0 || AcceptedGradeTags.HasTagExact(GradeTag) == true;
-	const bool bOutTargetsSample = bIsRecovery == true && GradeTag.IsValid() == true && bGradeMatches == true;
-	return bOutTargetsSample;
+	// 등급 조건이 없는 아이템도 회수 목표로 판정하기 위한 대상 판정
+	bool bIsRecovery = ObjectiveType == EMD_QuestObjectiveType::RecoverIntact || ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
+	bool bHasGradeRequirement = AcceptedGradeTags.Num() > 0;
+	bool bGradeMatches = bHasGradeRequirement == false || (GradeTag.IsValid() == true && AcceptedGradeTags.HasTagExact(GradeTag) == true);
+	bool bOutTargetsQuestItem = bIsRecovery == true && bGradeMatches == true;
+	return bOutTargetsQuestItem;
 }
 
 const FPrimaryAssetType UMD_QuestDefinition::QuestPrimaryAssetType(TEXT("Quest"));
@@ -45,7 +47,7 @@ UMD_QuestDefinition* UMD_QuestDefinition::LoadDefinition(const FPrimaryAssetId& 
 		bool bIsDefinitionLoaded = IsValid(Definition);
 		if (bIsDefinitionLoaded == false)
 		{
-			const FSoftObjectPath DefinitionPath = AssetManager.GetPrimaryAssetPath(DefinitionId);
+			FSoftObjectPath DefinitionPath = AssetManager.GetPrimaryAssetPath(DefinitionId);
 			Definition = Cast<UMD_QuestDefinition>(DefinitionPath.TryLoad());
 		}
 
@@ -127,10 +129,10 @@ FGameplayTagContainer UMD_QuestDefinition::GetAcceptedGradeTags(int32 PhaseIndex
 	return OutGradeTags;
 }
 
-TSubclassOf<AMD_SampleItem> UMD_QuestDefinition::GetRequiredItemClass(int32 PhaseIndex) const
+TSubclassOf<AMD_QuestItem> UMD_QuestDefinition::GetRequiredItemClass(int32 PhaseIndex) const
 {
 	const FMD_QuestPhaseData* Phase = GetPhase(PhaseIndex);
-	TSubclassOf<AMD_SampleItem> OutRequiredItemClass;
+	TSubclassOf<AMD_QuestItem> OutRequiredItemClass;
 	if (Phase != nullptr)
 	{
 		OutRequiredItemClass = Phase->RequiredItemClass;
@@ -143,18 +145,18 @@ bool UMD_QuestDefinition::AllowsDamagedTarget(int32 PhaseIndex) const
 	return GetObjectiveType(PhaseIndex) == EMD_QuestObjectiveType::RecoverDamaged;
 }
 
-bool UMD_QuestDefinition::AcceptsSample(int32 PhaseIndex, const FGameplayTag& GradeTag, bool bIntact) const
+bool UMD_QuestDefinition::AcceptsQuestItem(int32 PhaseIndex, const FGameplayTag& GradeTag, bool bIntact) const
 {
 	const FMD_QuestPhaseData* Phase = GetPhase(PhaseIndex);
-	bool bOutAcceptsSample = Phase != nullptr && Phase->AcceptsSample(GradeTag, bIntact) == true;
-	return bOutAcceptsSample;
+	bool bOutAcceptsQuestItem = Phase != nullptr && Phase->AcceptsQuestItem(GradeTag, bIntact) == true;
+	return bOutAcceptsQuestItem;
 }
 
-bool UMD_QuestDefinition::TargetsSample(int32 PhaseIndex, const FGameplayTag& GradeTag) const
+bool UMD_QuestDefinition::TargetsQuestItem(int32 PhaseIndex, const FGameplayTag& GradeTag) const
 {
 	const FMD_QuestPhaseData* Phase = GetPhase(PhaseIndex);
-	bool bOutTargetsSample = Phase != nullptr && Phase->TargetsSample(GradeTag) == true;
-	return bOutTargetsSample;
+	bool bOutTargetsQuestItem = Phase != nullptr && Phase->TargetsQuestItem(GradeTag) == true;
+	return bOutTargetsQuestItem;
 }
 
 bool UMD_QuestDefinition::IsObjectiveComplete(int32 PhaseIndex, int32 CurrentProgress) const

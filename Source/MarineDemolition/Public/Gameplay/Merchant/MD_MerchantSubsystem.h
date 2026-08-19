@@ -131,8 +131,8 @@ public:
 	/** 포기하는 반복 퀘스트를 실패 처리 및 패널티(호감도 감소) 처리하는 함수 */
 	bool TryAbandonRepeatQuest(int32 QuestIndex);
 
-	/** 샘플이 분류장에 제출될 때 퀘스트 Asset ID·등급·손상 상태로 활성 퀘스트를 검사하는 함수 */
-	void NotifySampleDelivered(const FPrimaryAssetId& QuestDefinitionId, const FGameplayTag& GradeTag, bool bIntact);
+	/** 퀘스트 아이템이 회수될 때 퀘스트 Asset ID·등급·손상 상태로 활성 퀘스트를 검사하는 함수 */
+	void NotifyQuestItemDelivered(const FPrimaryAssetId& QuestDefinitionId, const FGameplayTag& GradeTag, bool bIntact);
 
 	/** 회수 대상 샘플이 파괴될 때 퀘스트 Asset ID·등급이 일치하는 활성 퀘스트를 실패 처리하는 함수 */
 	void NotifySampleDestroyed(const FPrimaryAssetId& QuestDefinitionId, EMD_SampleGrade Grade);

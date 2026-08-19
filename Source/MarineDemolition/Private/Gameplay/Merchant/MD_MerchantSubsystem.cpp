@@ -23,7 +23,7 @@ int32 UMD_MerchantSubsystem::GetActiveQuestReward() const
 			continue;
 		}
 
-		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
 		if (IsValid(Definition) == true)
 		{
 			Total += Definition->SuccessReward.Credits;
@@ -421,13 +421,8 @@ bool UMD_MerchantSubsystem::TryAbandonRepeatQuest(int32 QuestIndex)
 	return true;
 }
 
-void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDefinitionId, const FGameplayTag& GradeTag, bool bIntact)
+void UMD_MerchantSubsystem::NotifyQuestItemDelivered(const FPrimaryAssetId& QuestDefinitionId, const FGameplayTag& GradeTag, bool bIntact)
 {
-	if (GradeTag.IsValid() == false)
-	{
-		return;
-	}
-
 	bool bChanged = false;
 
 	for (FMD_MainQuestState& QuestState : MainQuests)
@@ -437,7 +432,7 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDe
 			continue;
 		}
 
-		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
 		// 포인터 검증 이후에만 현재 단계와 납품 조건을 순서대로 평가하기 위한 결과
 		bool bIsDefinitionValid = IsValid(Definition);
 		if (bIsDefinitionValid == false)
@@ -451,8 +446,8 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDe
 			continue;
 		}
 
-		bool bAcceptsSample = Definition->AcceptsSample(QuestState.CurrentPhaseIndex, GradeTag, bIntact);
-		if (bAcceptsSample == false)
+		bool bAcceptsQuestItem = Definition->AcceptsQuestItem(QuestState.CurrentPhaseIndex, GradeTag, bIntact);
+		if (bAcceptsQuestItem == false)
 		{
 			continue;
 		}
@@ -499,13 +494,13 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDe
 			continue;
 		}
 
-		bool bAcceptsSample = Definition->AcceptsSample(QuestState.CurrentPhaseIndex, GradeTag, bIntact);
-		if (bAcceptsSample == false)
+		bool bAcceptsQuestItem = Definition->AcceptsQuestItem(QuestState.CurrentPhaseIndex, GradeTag, bIntact);
+		if (bAcceptsQuestItem == false)
 		{
 			continue;
 		}
 
-		const int32 RequiredCount = FMath::Max(Definition->GetRequiredCount(QuestState.CurrentPhaseIndex), 1);
+		int32 RequiredCount = FMath::Max(Definition->GetRequiredCount(QuestState.CurrentPhaseIndex), 1);
 		QuestState.CurrentProgress = FMath::Min(QuestState.CurrentProgress + 1, RequiredCount);
 		bChanged = true;
 
@@ -531,7 +526,7 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDe
 
 void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDefinitionId, EMD_SampleGrade Grade)
 {
-	const FGameplayTag GradeTag = GradeTagFromSampleGrade(Grade);
+	FGameplayTag GradeTag = GradeTagFromSampleGrade(Grade);
 	if (GradeTag.IsValid() == false)
 	{
 		return;
@@ -546,7 +541,7 @@ void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDe
 			continue;
 		}
 
-		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
 		// 유효 원본만 목표 등급을 판정하기 위한 순차 검사 결과
 		bool bIsDefinitionValid = IsValid(Definition);
 		if (bIsDefinitionValid == false)
@@ -554,8 +549,8 @@ void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDe
 			continue;
 		}
 
-		bool bTargetsSample = Definition->TargetsSample(QuestState.CurrentPhaseIndex, GradeTag);
-		if (bTargetsSample == false)
+		bool bTargetsQuestItem = Definition->TargetsQuestItem(QuestState.CurrentPhaseIndex, GradeTag);
+		if (bTargetsQuestItem == false)
 		{
 			continue;
 		}
@@ -585,8 +580,8 @@ void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDe
 			continue;
 		}
 
-		bool bAcceptsSample = Definition->AcceptsSample(QuestState.CurrentPhaseIndex, GradeTag, true);
-		if (bAcceptsSample == false)
+		bool bAcceptsQuestItem = Definition->AcceptsQuestItem(QuestState.CurrentPhaseIndex, GradeTag, true);
+		if (bAcceptsQuestItem == false)
 		{
 			continue;
 		}

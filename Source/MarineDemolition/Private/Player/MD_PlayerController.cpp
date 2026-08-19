@@ -638,7 +638,7 @@ void AMD_PlayerController::ServerDeliver_Implementation(FGameplayTag GradeTag, b
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
 	{
 		// 전용 샘플 액터가 없는 디버그 명령을 반복 퀘스트와 연결하지 않는 제출
-		Merchant->NotifySampleDelivered(FPrimaryAssetId(), GradeTag, bIntact);
+		Merchant->NotifyQuestItemDelivered(FPrimaryAssetId(), GradeTag, bIntact);
 	}
 }
 
