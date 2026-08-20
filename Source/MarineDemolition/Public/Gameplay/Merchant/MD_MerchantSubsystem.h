@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Types/Merchant/MD_MerchantTypes.h"
+#include "Types/Score/MD_ScoreTypes.h"
 #include "MD_MerchantSubsystem.generated.h"
 
 /**
@@ -25,7 +26,6 @@ struct FMD_QuestRewardData;
 struct FMD_RepeatQuestPhaseData;
 struct FMD_ShopItem;
 
-enum class EMD_SampleGrade : uint8;
 enum class EMD_ShopPurchaseResult : uint8;
 
 UCLASS()
@@ -40,6 +40,8 @@ public:
 public:
 
 	int32 GetCredits() const { return Credits; }
+	// 현재 Day의 Enum Map 크레딧 원장을 네트워크 전달용 항목 배열로 반환하는 함수
+	TArray<FMD_DailyReportValue> GetDailyCreditTotals() const;
 	int32 GetCurrentDay() const { return CurrentDay; }
 	// 상점 해금과 대화 분기에 사용하는 현재 호감도를 반환하는 함수
 	float GetAffinity() const { return Affinity; }
@@ -60,8 +62,8 @@ public:
 	//수락 퀘스트 보수
 	int32 GetActiveQuestReward() const;
 
-	/** 크레딧 증감. 단독 호출용이며 변경 후 델리게이트 알림. */
-	void AddCredits(int32 Amount);
+	// Enum 분류와 금액을 잔액 및 현재 Day Map 원장에 함께 기록하는 단일 함수
+	void AddCredits(EMD_DailyReportCategory Category, int32 Amount);
 
 	/** 플레이어별 소유권을 검증하고 아이템 지급 성공 시에만 팀 재화 차감과 구매 원장을 확정하는 서버 구매 함수 */
 	EMD_ShopPurchaseResult TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase);
@@ -196,13 +198,16 @@ private:
 	/** 현재 현장의 반복 퀘스트 풀에서 계약에 사용할 카드를 최초 한 번 추첨하는 함수 */
 	void DrawRepeatQuestsForContract();
 
-	/** 방송하지 않는 내부용. 여러 변경을 한 번에 묶을 때 쓴다. */
-	void AddCreditsInternal(int32 Amount);
+	/** 방송하지 않고 잔액과 Enum Map 원장을 함께 변경하는 내부 함수 */
+	void AddCreditsInternal(EMD_DailyReportCategory Category, int32 Amount);
 
 	/** 성공한 메인 퀘스트 에셋의 크레딧·점수·호감도를 서버 원장에 적용하는 함수 */
 	void ApplyMainQuestReward(const UMD_QuestDefinition& Definition);
 
 	int32 Credits = 0;
+
+	// 현재 Day의 크레딧 증감을 정산 분류별로 누적하는 서버 Map 원장
+	TMap<EMD_DailyReportCategory, int64> DailyCreditTotals;
 
 	// 계약과 게임 재시작을 넘어 유지되는 팀 공유 미상환 대출 잔액
 	int32 DebtBalance = 0;

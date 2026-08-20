@@ -521,7 +521,7 @@ void AMD_PlayerController::ServerAddCredits_Implementation(int32 Amount)
 {
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
 	{
-		Merchant->AddCredits(Amount);
+		Merchant->AddCredits(EMD_DailyReportCategory::Other, Amount);
 	}
 }
 

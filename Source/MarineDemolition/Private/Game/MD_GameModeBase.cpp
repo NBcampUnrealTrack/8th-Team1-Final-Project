@@ -350,7 +350,8 @@ EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
                 bool bMerchantValid = IsValid(Merchant);
                 if (bMerchantValid == true)
                 {
-                    Merchant->AddCredits(DailyScoreCreditReward);
+                    // 당일 점수 보상을 보고서의 평가 금액 행에 함께 기록
+                    Merchant->AddCredits(EMD_DailyReportCategory::Evaluation, DailyScoreCreditReward);
                 }
             }
         }
@@ -451,7 +452,15 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result)
         DailyReport.Day = Day;
         DailyReport.Result = Result;
         DailyReport.DailyScore = GS->GetScoreForDay(Day);
-        DailyReport.Credits = IsValid(Merchant) == true ? Merchant->GetCredits() : 0;
+        // 일일 보고서가 서버 점수 Map을 그대로 전달받도록 구성
+        DailyReport.DailyScoreTotals = GS->GetDailyScoreTotals();
+
+        // 서버 크레딧 원장이 존재할 때 당일 착수금·기타 변동·현재 잔액을 함께 기록
+        bool bMerchantValid = IsValid(Merchant);
+        if (bMerchantValid == true)
+        {
+            DailyReport.DailyCreditTotals = Merchant->GetDailyCreditTotals();
+        }
         GS->SetInspectionReport(DailyReport);
     }
 
