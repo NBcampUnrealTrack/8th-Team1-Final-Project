@@ -13,7 +13,7 @@ const FGameplayTag FMD_WorldData::DataFieldKey = MDGameplayTags::Save_Data_World
 bool FMD_GameStateData::IsStructurallyValid() const
 {
 	// 계약 범위와 하루 길이를 벗어난 값이 시간·점검 로직을 오염시키지 않도록 하는 검사
-	return ElapsedDay >= 1 && ElapsedDay <= 4 && ElapsedSeconds >= 0.0 && FMath::IsFinite(ElapsedSeconds) == true && ContractCrewCount >= 0;
+	return ElapsedDay >= 1 && ElapsedDay <= 4 && ElapsedSeconds >= 0.0 && FMath::IsFinite(ElapsedSeconds) == true && ContractCrewCount >= 0 && ContractDifficulty >= EMD_Difficulty::Safe && ContractDifficulty <= EMD_Difficulty::Extreme;
 }
 
 bool FMD_MerchantData::IsStructurallyValid() const
@@ -42,7 +42,13 @@ bool FMD_MerchantData::IsStructurallyValid() const
 	// 메인 퀘스트 상태가 원본 Primary Data Asset을 다시 찾을 식별자와 유효한 진행도를 갖는지 확인하는 검사
 	for (const FMD_MainQuestState& MainQuest : MainQuests)
 	{
-		if (MainQuest.HasValidDefinitionId() == false || MainQuest.UnlockDay <= 0 || MainQuest.CurrentProgress < 0)
+		bool bHasValidDefinitionId = MainQuest.HasValidDefinitionId();
+		if (bHasValidDefinitionId == false || MainQuest.UnlockDay <= 0)
+		{
+			return false;
+		}
+
+		if (MainQuest.CurrentPhaseIndex < 0 || MainQuest.CurrentProgress < 0)
 		{
 			return false;
 		}
@@ -51,7 +57,8 @@ bool FMD_MerchantData::IsStructurallyValid() const
 	// 반복 퀘스트 상태가 Primary Data Asset과 페이즈 진행을 다시 찾을 최소 식별 정보를 갖는지 확인하는 검사
 	for (const FMD_RepeatQuestState& RepeatQuest : RepeatQuests)
 	{
-		if (RepeatQuest.HasValidDefinitionId() == false || RepeatQuest.CurrentPhaseIndex < 0 || RepeatQuest.CurrentProgress < 0)
+		bool bHasValidDefinitionId = RepeatQuest.HasValidDefinitionId();
+		if (bHasValidDefinitionId == false || RepeatQuest.CurrentPhaseIndex < 0 || RepeatQuest.CurrentProgress < 0)
 		{
 			return false;
 		}
@@ -149,6 +156,22 @@ bool FMD_GameData::MigrateToCurrentVersion()
 				MerchantData.MainQuests.Reset();
 			}
 
+			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
+		}
+	}
+
+	// 통합 Definition에서 메인 역할도 다단계를 지원하므로 기존 슬롯을 첫 페이즈 상태로 명시하는 마이그레이션
+	if (SchemaVersion < 6)
+	{
+		FMD_MerchantData MerchantData;
+		// 기존 상인 데이터가 있을 때만 메인 퀘스트 단계 인덱스를 보정하기 위한 조회 결과
+		bool bHasMerchantData = GetDataField(FMD_MerchantData::DataFieldKey, MerchantData);
+		if (bHasMerchantData == true)
+		{
+			for (FMD_MainQuestState& MainQuest : MerchantData.MainQuests)
+			{
+				MainQuest.CurrentPhaseIndex = 0;
+			}
 			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
 		}
 	}

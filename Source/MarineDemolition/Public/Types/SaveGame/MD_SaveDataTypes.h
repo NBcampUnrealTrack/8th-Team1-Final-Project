@@ -62,6 +62,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	int32 ContractCrewCount = 0;
 
+	// 출발 시 선택한 점검 난이도를 세이브 로드 이후에도 유지하기 위한 계약 값
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
+	EMD_Difficulty ContractDifficulty = EMD_Difficulty::Standard;
+
 public:
 	// 손상된 숫자 범위가 서버 진행 상태에 적용되지 않도록 검사하는 함수
 	bool IsStructurallyValid() const;
@@ -123,7 +127,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FMD_RepeatQuestState> RepeatQuests;
 
-	// 반복 퀘스트 개방 이력을 계약 사이에도 유지하기 위한 클리어 현장 목록
+	// 계약 사이에도 완료된 현장 기록을 유지하기 위한 클리어 현장 목록
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<TSoftObjectPtr<UMD_SiteDefinition>> ClearedSites;
 
@@ -191,7 +195,7 @@ struct MARINEDEMOLITION_API FMD_GameData
 
 public:
 	// 이후 필드 변경을 안전하게 마이그레이션하기 위한 현재 스키마 버전
-	static constexpr int32 CurrentSchemaVersion = 5;
+	static constexpr int32 CurrentSchemaVersion = 6;
 
 	// 저장된 필드 배치를 판별하기 위한 슬롯 데이터 버전
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")

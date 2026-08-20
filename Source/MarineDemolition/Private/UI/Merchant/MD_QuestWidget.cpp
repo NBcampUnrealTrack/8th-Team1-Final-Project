@@ -304,8 +304,8 @@ void UMD_QuestWidget::RebuildRepeatQuestList()
 		TXT_RepeatEmptyNotice->SetVisibility(RepeatQuests.Num() > 0 ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 		if (RepeatQuests.Num() == 0)
 		{
-			// `09` §4: 현장을 한 번 클리어해야 반복퀘가 열린다.
-			TXT_RepeatEmptyNotice->SetText(FText::FromString(TEXT("현장을 한 번 클리어하면 반복 퀘스트가 열린다.")));
+			// 유효한 후보가 없거나 현장의 추첨 수량이 0인 경우를 함께 안내하는 문구
+			TXT_RepeatEmptyNotice->SetText(FText::FromString(TEXT("현재 수령 가능한 반복 퀘스트가 없다.")));
 		}
 	}
 

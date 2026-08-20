@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "GameFramework/PlayerController.h"
+#include "Types/Score/MD_ScoreTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
 #include "MD_PlayerController.generated.h"
 
@@ -13,6 +14,7 @@ class AMD_DayEndConsole;
 class AMD_SectorCloseoutMarker;
 class AMD_Merchant;
 class UMD_HUDWidget;
+class UMD_DailyReportWidget;
 class UMD_EquipHotbarWidget;
 class UMD_ScrapeFocusReticleWidget;
 class UMD_SiteDefinition;
@@ -73,6 +75,18 @@ public:
 	/** 서버 구매 결과를 요청한 로컬 상점 화면에 전달하는 응답 진입점 */
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveShopPurchaseResult(AMD_Merchant* Merchant, FName ItemId, EMD_ShopPurchaseResult Result);
+
+	// 서버가 확정한 Day 결과를 로컬 WBP_DailyReport에 표시하는 응답 진입점
+	UFUNCTION(Client, Reliable)
+	void ClientShowDailyReport(FMD_InspectionReport Report);
+
+	// 서버가 전환을 승인한 뒤 모든 로컬 보고서와 전용 입력 상태를 정리하는 응답
+	UFUNCTION(Client, Reliable)
+	void ClientCloseDailyReport();
+
+	// 일일 보고서 확인 버튼 입력을 서버의 보류 중인 Day 전환에 전달하는 요청
+	UFUNCTION(Server, Reliable)
+	void ServerConfirmDayTransition();
 
 	// 서버에서 반복 퀘스트 포기와 관련 페널티를 처리하도록 요청하는 함수
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
@@ -183,11 +197,29 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetInstance;
 
+	// EndDay 결과를 표시하고 다음 전환 확인 입력을 받는 기존 WBP_DailyReport 클래스
+	UPROPERTY(EditDefaultsOnly, Category = "HUD|Daily Report")
+	TSubclassOf<UMD_DailyReportWidget> DailyReportWidgetClass;
+
+	// 같은 EndDay 알림이 중복 도착해도 하나의 보고서 화면만 유지하기 위한 로컬 인스턴스
+	UPROPERTY()
+	TObjectPtr<UMD_DailyReportWidget> DailyReportWidgetInstance;
+
 	// 로컬 플레이어의 메인 HUD와 장비 핫바를 생성하거나 화면에 복구하는 처리
 	void InitializeGameplayHUD();
 
 	// 로컬 플레이어의 헤라 Focus 포인터를 생성하거나 화면에 복구하는 처리
 	void InitializeScrapeFocusReticle();
+
+	// WBP_DailyReport의 확인 버튼을 서버 전환 요청으로 연결하는 로컬 처리
+	UFUNCTION()
+	void HandleDailyReportContinueClicked();
+
+	// 맵 전환 전 보고서와 전용 입력 상태를 원래 게임플레이 상태로 복구하는 처리
+	void CloseDailyReport();
+
+	// 보고서 인스턴스와 외부 버튼 이벤트 연결을 정리하고 실제 제거 여부를 반환하는 공통 처리
+	bool RemoveDailyReportWidget();
 
 	/* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 private:

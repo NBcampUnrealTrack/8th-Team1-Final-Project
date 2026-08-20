@@ -2,7 +2,7 @@
 
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Components/ScrollBox.h"
-#include "Data/Merchant/MD_MainQuestDefinition.h"
+#include "Data/Merchant/MD_QuestDefinition.h"
 #include "Engine/World.h"
 #include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
@@ -133,7 +133,7 @@ void UMD_HUDQuestWidget::RefreshQuestDisplay()
 			continue;
 		}
 
-		UMD_MainQuestDefinition* QuestDefinition = UMD_MainQuestDefinition::LoadDefinition(MainQuest.DefinitionId);
+		UMD_QuestDefinition* QuestDefinition = UMD_QuestDefinition::LoadDefinition(MainQuest.DefinitionId);
 		if (IsValid(QuestDefinition) == true)
 		{
 			AddMainQuestCard(MainQuest);

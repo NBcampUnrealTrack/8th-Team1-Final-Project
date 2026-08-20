@@ -7,7 +7,7 @@
 
 class UProgressBar;
 class UTextBlock;
-class UMD_MainQuestDefinition;
+class UMD_QuestDefinition;
 
 /** 퀘스트 한 건의 종류·이름·설명·진행률을 표시하는 HUD 카드 */
 UCLASS()
@@ -41,7 +41,7 @@ public:
 
 protected:
 	/** Primary Data Asset의 목표 정보와 진행도를 메인 퀘스트 HUD에 적용하는 함수 */
-	void ApplyMainQuestData(const UMD_MainQuestDefinition& Definition, int32 CurrentProgress);
+	void ApplyMainQuestData(const UMD_QuestDefinition& Definition, int32 PhaseIndex, int32 CurrentProgress);
 
 	/** Primary Data Asset의 현재 페이즈와 진행도를 반복 퀘스트 HUD에 적용하는 함수 */
 	void ApplyRepeatQuestData(const FMD_RepeatQuestState& QuestState);
