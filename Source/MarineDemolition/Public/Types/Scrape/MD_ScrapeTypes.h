@@ -589,6 +589,7 @@ public:
 		, MaximumBladeRotationDegreesPerSample(5.0f)
 		, MinimumTravelDistanceCm(0.1f)
 		, CleanTolerance(0.001f)
+		, NegligibleFilmFraction(0.13f)
 	{
 	}
 
@@ -663,6 +664,24 @@ public:
 		meta = (ClampMin = "0.0", ClampMax = "0.1", UIMin = "0.0", UIMax = "0.01"))
 	float CleanTolerance;
 
+	/**
+	 * 날에 완전히 덮인 셀에서 "다 벗겼다"고 인정할 잔여 막 비율
+	 *
+	 * 마스크는 이 비율보다 얇은 막을 화면에 표현하지 못한다. 그대로 두면 깨끗해
+	 * 보이는데 완료 판정만 막히는 셀이 남으므로, 이미 있는 부분 피복 하한의
+	 * MinimumVisibleContaminationFraction과 같은 원칙으로 0까지 정리한다.
+	 *
+	 * 부분 피복 셀에는 적용하지 않는다. 적용하면 자국 경계의 피복 램프에 구멍이
+	 * 생겨 테두리가 셀 단위 계단으로 돌아간다.
+	 *
+	 * 기본값 0.13은 UMD_ScrapeSurfaceComponent의 마스크 판정 구간 폭
+	 * (ContaminationVisualEdgeSoftness 0.55)에서 안 보이는 구간과 같다.
+	 * 둘 중 하나를 바꾸면 나머지도 같이 맞춰야 한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape",
+		meta = (ClampMin = "0.0", ClampMax = "0.5", UIMin = "0.0", UIMax = "0.3"))
+	float NegligibleFilmFraction;
+
 	/** 이 설정에 들어 있는 헤라 성능값을 별도 도구 스펙으로 반환 */
 	FMD_ScrapeToolSpec GetToolSpec() const
 	{
@@ -691,6 +710,7 @@ public:
 		, RemainingContamination(1.0f)
 		, TransferredContamination(0.0f)
 		, TransferredPaintPatternDensity(0.0f)
+		, CoveredFraction(0.0f)
 	{
 	}
 
@@ -725,6 +745,20 @@ public:
 	float TransferredPaintPatternDensity;
 
 	/**
+	 * 지금 얹혀 있는 오염층에서 헤라 날에 덮인 면적의 비율. 시각 전용.
+	 *
+	 * RemainingContamination 하나로는 "셀 전체에 얇게 남은 막"과 "셀의 일부만
+	 * 덮이고 나머지는 그대로인 상태"를 구분할 수 없다. 둘은 같은 잔여량이어도
+	 * 겉모습이 전혀 달라서(앞은 진한 막, 뒤는 자국 경계의 부분 피복) 한 값으로
+	 * 뭉개면 막을 진하게 보이는 것과 경계를 곧게 만드는 것을 동시에 못 한다.
+	 *
+	 * 제거 판정은 이 값을 읽지 않는다. 오염이 다시 쌓이면 0으로 돌아간다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float CoveredFraction;
+
+	/**
 	 * 외부 데이터 입력이나 블루프린트 수정으로 범위를 벗어난 값을 안전한 상태로 복구
 	 * NaN/무한대 값은 계산 전체를 오염시키므로 0으로 정리
 	 */
@@ -750,6 +784,9 @@ public:
 			TransferredContamination = 0.0f;
 			TransferredPaintPatternDensity = 0.0f;
 		}
+		CoveredFraction = FMath::IsFinite(CoveredFraction)
+			? FMath::Clamp(CoveredFraction, 0.0f, 1.0f)
+			: 0.0f;
 	}
 
 	// 셀 하나의 깨끗함 판정과 제거 비율은 면 전체를 함께 봐야 하므로
