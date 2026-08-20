@@ -30,6 +30,48 @@ bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceFaceFromHit(
 }
 
 
+bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceWorldNormal(
+	const EMD_ScrapeSurfaceFace SurfaceFace,
+	FVector& OutWorldNormal)
+{
+	OutWorldNormal = FVector::ZeroVector;
+	if (!bContaminationEnabled)
+	{
+		return false;
+	}
+	if (!bContaminationSurfaceInitialized)
+	{
+		InitializeContaminationSurface();
+	}
+	if (!bContaminationSurfaceInitialized || !SurfaceMesh)
+	{
+		return false;
+	}
+
+	FVector HorizontalAxisLocal;
+	FVector FrontNormalLocal;
+	FVector VerticalAxisLocal;
+	if (!FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
+			ResolvedContaminationSurfaceNormalAxis,
+			HorizontalAxisLocal,
+			FrontNormalLocal,
+			VerticalAxisLocal))
+	{
+		return false;
+	}
+
+	OutWorldNormal = SurfaceMesh->GetComponentTransform()
+		.TransformVector(FrontNormalLocal)
+		.GetSafeNormal();
+	if (SurfaceFace == EMD_ScrapeSurfaceFace::Back)
+	{
+		OutWorldNormal = -OutWorldNormal;
+	}
+
+	return !OutWorldNormal.IsNearlyZero() && !OutWorldNormal.ContainsNaN();
+}
+
+
 bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromHit(
 	const FHitResult& Hit,
 	FVector2D& OutSurfacePositionCm,

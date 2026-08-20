@@ -358,6 +358,11 @@ public:
 		const FHitResult& Hit,
 		EMD_ScrapeSurfaceFace& OutSurfaceFace);
 
+	/** 지정한 앞/뒤 면의 월드 법선을 반환한다. 접촉 이펙트 방향 정렬용. */
+	bool TryGetScrapeSurfaceWorldNormal(
+		EMD_ScrapeSurfaceFace SurfaceFace,
+		FVector& OutWorldNormal);
+
 	bool TryGetScrapeSurfacePositionFromHit(
 		const FHitResult& Hit,
 		FVector2D& OutSurfacePositionCm,

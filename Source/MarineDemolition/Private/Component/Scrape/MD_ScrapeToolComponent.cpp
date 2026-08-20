@@ -4619,10 +4619,17 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 
 	if (FeedbackEffect)
 	{
+		// 이펙트 로컬 +X가 벽 법선을 향하도록 정렬한다. 법선을 못 구하면 기존처럼 무회전.
+		FVector ContactNormal = FVector::ZeroVector;
+		const FRotator EffectRotation =
+			Surface->TryGetScrapeSurfaceWorldNormal(Result.SurfaceFace, ContactNormal)
+				? ContactNormal.Rotation()
+				: FRotator::ZeroRotator;
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 			this,
 			FeedbackEffect,
-			ContactLocation);
+			ContactLocation,
+			EffectRotation);
 	}
 
 	if (FeedbackSound || FeedbackEffect)
