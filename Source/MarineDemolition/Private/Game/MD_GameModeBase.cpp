@@ -854,7 +854,7 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
     UMD_SiteDefinition* CurrentSite = Merchant->GetCurrentSite();
     if (CurrentSite != ResolvedSite || Merchant->GetMainQuests().IsEmpty() == true)
     {
-        Merchant->BeginContract(ResolvedSite, ExpeditionAdvancePayment);
+        Merchant->BeginContract(ResolvedSite);
     }
 
     bool bShouldBeginDay = Merchant->GetCurrentDay() != Day;
@@ -873,7 +873,7 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
 
     if (bShouldBeginDay)
     {
-        Merchant->BeginDay(Day);
+        Merchant->BeginDay(Day, ExpeditionAdvancePayment);
     }
 }
 

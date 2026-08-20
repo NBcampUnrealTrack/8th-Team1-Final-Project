@@ -99,8 +99,8 @@ public:
 	// 일 마감 시 미상환 잔액에 일일 이자를 한 번 합산하고 부과액을 반환하는 함수
 	int32 ApplyDailyLoanInterest();
 
-	// 새 계약의 퀘스트 상태를 구성하고 반복 퀘스트를 최초 추첨한 뒤 착수금을 지급하는 함수
-	void BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment);
+	// 새 계약의 퀘스트 상태를 구성하고 반복 퀘스트를 최초 추첨하는 함수
+	void BeginContract(UMD_SiteDefinition* Site);
 
 	// 게임오버 시 전체 리셋
 	void ResetContract();
@@ -119,8 +119,8 @@ public:
 	/** 현재 계약 현장이 과거에 클리어된 적 있는지 저장 이력에서 확인하는 함수 */
 	bool HasClearedCurrentSite() const;
 
-	/** Day 시작 시 호출하여 메인 퀘스트의 해금 상태를 갱신하는 함수 */
-	void BeginDay(int32 NewDay);
+	/** Day 시작 시 고정 착수금을 지급하고 메인 퀘스트의 해금 상태를 갱신하는 함수 */
+	void BeginDay(int32 NewDay, int32 AdvancePayment);
 
 	/** 계약 클리어 시 호출하여 현장 완료 이력을 남기는 함수 */
 	void MarkSiteCleared();

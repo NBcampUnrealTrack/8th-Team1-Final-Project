@@ -252,7 +252,7 @@ int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 	return InterestAmount;
 }
 
-void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment)
+void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site)
 {
 	if (IsValid(Site) == false)
 	{
@@ -292,9 +292,7 @@ void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 Advanc
 	NextDepositMultiplier = 1.f;
 	bConsumableDiscountActive = true;
 
-	AddCreditsInternal(AdvancePayment);
-
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 시작: %s (메인 %d건, 반복 %d건, 착수금 %d)"), *Site->SiteName.ToString(), MainQuests.Num(), RepeatQuests.Num(), AdvancePayment);
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 시작: %s (메인 %d건, 반복 %d건)"), *Site->SiteName.ToString(), MainQuests.Num(), RepeatQuests.Num());
 
 	OnMerchantStateChanged.Broadcast();
 }
@@ -304,8 +302,13 @@ bool UMD_MerchantSubsystem::HasClearedCurrentSite() const
 	return IsValid(CurrentSite) && ClearedSites.Contains(CurrentSite);
 }
 
-void UMD_MerchantSubsystem::BeginDay(int32 NewDay)
+void UMD_MerchantSubsystem::BeginDay(int32 NewDay, int32 AdvancePayment)
 {
+	// 잘못된 설정값으로 팀 크레딧이 차감되지 않도록 고정 착수금을 0 이상으로 제한
+	int32 GrantedAdvancePayment = FMath::Max(AdvancePayment, 0);
+	AddCreditsInternal(GrantedAdvancePayment);
+
+	// 현재 계약의 일차를 서버 상인 원장에 반영
 	CurrentDay = NewDay;
 
 	// Day에 도달하면 Locked에서 Active가 된다. 실패·완료 건은 그대로 둔다.
@@ -316,7 +319,7 @@ void UMD_MerchantSubsystem::BeginDay(int32 NewDay)
 			MainQuest.Status = EMD_MainQuestStatus::Active;
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 시작 (반복 %d건)"), NewDay, RepeatQuests.Num());
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 시작 (착수금 %d, 반복 %d건)"), NewDay, GrantedAdvancePayment, RepeatQuests.Num());
 
 	OnMerchantStateChanged.Broadcast();
 }

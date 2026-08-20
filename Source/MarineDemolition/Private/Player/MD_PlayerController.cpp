@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Player/MD_PlayerController.h"
@@ -715,7 +715,7 @@ void AMD_PlayerController::ServerBeginContract_Implementation()
 	// DebugSite는 서버·클라 양쪽 BP에 같은 값이 들어 있으므로 서버 사본을 쓴다.
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
 	{
-		Merchant->BeginContract(DebugSite, DebugAdvancePayment);
+		Merchant->BeginContract(DebugSite);
 	}
 }
 
@@ -735,7 +735,7 @@ void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)
 	// 실제 맵 재진입 경로처럼 종료된 계약 다음 Day 명령에서 새 디버그 계약을 먼저 구성하는 처리
 	if (Merchant->HasActiveContract() == false)
 	{
-		Merchant->BeginContract(DebugSite, DebugAdvancePayment);
+		Merchant->BeginContract(DebugSite);
 	}
 
 	// DebugSite 미설정으로 계약 생성에 실패했을 때 잘못된 Day 상태만 남기지 않기 위한 검사
@@ -744,7 +744,7 @@ void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)
 		return;
 	}
 
-	Merchant->BeginDay(Day);
+	Merchant->BeginDay(Day, DebugAdvancePayment);
 }
 
 void AMD_PlayerController::MD_AcceptRepeat(int32 Index)
