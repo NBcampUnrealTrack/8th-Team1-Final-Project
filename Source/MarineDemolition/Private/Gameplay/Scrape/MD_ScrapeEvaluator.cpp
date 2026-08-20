@@ -8,6 +8,19 @@
 
 namespace
 {
+	// 부분 접촉으로 남기는 잔여 오염이 기준량의 이 비율보다 작으면
+	// 화면에서 사실상 보이지 않아 플레이어가 남은 자리를 찾을 수 없다.
+	// 그런 잔여는 아예 남기지 않아 완료 판정이 막히지 않게 한다.
+	constexpr double MinimumVisibleContaminationFraction = 0.1;
+
+	/**
+	 * 얇은 막 정리를 적용할 최소 피복률.
+	 *
+	 * 이 값보다 덜 덮인 셀은 자국 경계를 이루는 부분 피복 셀이다. 그쪽까지
+	 * 정리하면 경계 램프에 구멍이 생겨 테두리가 셀 단위 계단으로 돌아간다.
+	 */
+	constexpr float FullCoverageFilmCleanupFraction = 0.98f;
+
 	enum class EBladeBasisResolveState : uint8
 	{
 		Unset,
@@ -476,6 +489,23 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 	const double BladeHalfDepthCm =
 		static_cast<double>(ToolSpec.BladeDepthCm) * 0.5;
 
+	// 셀 중심이 브러시 중심과 정확히 겹쳤을 때의 피복 가중치
+	// 부분 접촉 하한을 이 값으로 정규화하므로, 셀보다 얇은 헤라도
+	// 셀 정중앙을 지나가면 그 셀을 끝까지 벗길 수 있다
+	const double FullContactCoverageWeight =
+		ToolSpec.BrushShape == EMD_ScrapeBrushShape::Circle
+		? CalculateCircleCellCoverageWeight(
+			0.0,
+			BladeHalfWidthCm,
+			CellHalfDiagonalCm)
+		: CalculateRectangleCellCoverageWeight(
+			FVector2D::ZeroVector,
+			StrokeBladeBasis.Start.WidthAxis,
+			StrokeBladeBasis.Start.DepthAxis,
+			BladeHalfWidthCm,
+			BladeHalfDepthCm,
+			CellHalfDiagonalCm);
+
 	// 후보 셀 검색 범위를 브러시 형태의 표면 X/Y AABB로 계산
 
 	// 동일 셀이 여러 샘플과 겹쳐도 TouchedCellCount는 한 번만 증가해야 하므로 비트 배열을 사용
@@ -487,11 +517,18 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 	RemainingBeforeStroke.SetNumUninitialized(InOutSurfaceCells.Num());
 	TArray<float> TransferredBeforeStroke;
 	TransferredBeforeStroke.SetNumUninitialized(InOutSurfaceCells.Num());
+	// 시각 마스크는 잔여량과 피복률을 면적으로 가중합하므로, 잔여량이 그대로여도
+	// 피복률만 늘면 겉모습이 달라진다. 그런 셀도 변경 내역에 담아야 마스크가
+	// 갱신된다. 피복률은 단조 증가라 1에 포화되면 더는 변경을 만들지 않는다.
+	TArray<float> CoveredFractionBeforeStroke;
+	CoveredFractionBeforeStroke.SetNumUninitialized(InOutSurfaceCells.Num());
 
 	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)
 	{
 		RemainingBeforeStroke[CellIndex] = InOutSurfaceCells[CellIndex].RemainingContamination;
 		TransferredBeforeStroke[CellIndex] = InOutSurfaceCells[CellIndex].TransferredContamination;
+		CoveredFractionBeforeStroke[CellIndex] =
+			InOutSurfaceCells[CellIndex].CoveredFraction;
 	}
 
 	bool bRemovedAnyContamination = false;
@@ -616,6 +653,21 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 				TouchedCells[CellIndex] = true;
 
 				FMD_ScrapeSurfaceCell& Cell = InOutSurfaceCells[CellIndex];
+
+				// 셀 중심만 보고 딱 잘라 판정하면 격자 모양 경계가 생기므로
+				// 아래 하한 계산과 같은 정규화 피복률을 시각용으로 누적한다.
+				// 이미 깨끗한 셀도 갱신해야 한다. 그래야 나중에 오염이 다시
+				// 쌓였을 때 "얼마나 덮였는지"가 이 스트로크까지 반영된다.
+				const double NormalizedCoverageWeight =
+					FullContactCoverageWeight > UE_SMALL_NUMBER
+					? FMath::Min(
+						1.0,
+						CoverageWeight / FullContactCoverageWeight)
+					: 1.0;
+				Cell.CoveredFraction = FMath::Max(
+					Cell.CoveredFraction,
+					static_cast<float>(NormalizedCoverageWeight));
+
 				const double BaseRemainingBeforeSample =
 					static_cast<double>(Cell.RemainingContamination);
 				const double PaintRemainingBeforeSample =
@@ -644,12 +696,33 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 					continue;
 				}
 
+				// 셀을 일부만 덮은 헤라는 덮은 면적만큼만 벗겨낼 수 있다
+				// 이 하한이 없으면 살짝 걸친 셀도 반복 접촉으로 결국 0까지 깎이고,
+				// 마스크가 셀 단위 0/1로만 남아 자국 경계가 격자 계단 모양이 된다
+				const double ReferenceContamination =
+					static_cast<double>(Cell.InitialContamination);
+				const double UncoveredContamination = ReferenceContamination
+					* (1.0 - NormalizedCoverageWeight);
+				const double CoverageLimitedRemainingFloor =
+					UncoveredContamination
+						>= ReferenceContamination
+							* MinimumVisibleContaminationFraction
+					? UncoveredContamination
+					: 0.0;
+				const double RemovableTotalAmount = FMath::Max(
+					0.0,
+					TotalRemainingBeforeSample
+						- CoverageLimitedRemainingFloor);
+				const double AllowedRemovalAmount = FMath::Min(
+					RequestedRemovalAmount,
+					RemovableTotalAmount);
+
 				const double RemovedTransferredAmount = FMath::Min(
 					PaintRemainingBeforeSample,
-					RequestedRemovalAmount);
+					AllowedRemovalAmount);
 				const double RemainingRemovalBudget = FMath::Max(
 					0.0,
-					RequestedRemovalAmount - RemovedTransferredAmount);
+					AllowedRemovalAmount - RemovedTransferredAmount);
 				const double RemovedBaseAmount = FMath::Min(
 					BaseRemainingBeforeSample,
 					RemainingRemovalBudget);
@@ -668,6 +741,17 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 				{
 					Cell.RemainingContamination = 0.0f;
 				}
+				// 날에 완전히 덮인 셀에 마스크가 표현할 수 없을 만큼 얇은 막만
+				// 남았다면 끝낸 것으로 본다. 안 그러면 깨끗해 보이는데 완료만
+				// 막히는 셀이 남는다. 부분 피복 셀은 제외해야 자국 경계의 피복
+				// 램프에 구멍이 생기지 않는다.
+				if (Cell.CoveredFraction >= FullCoverageFilmCleanupFraction
+					&& Cell.RemainingContamination
+						<= Cell.InitialContamination
+							* FMath::Max(0.0f, Settings.NegligibleFilmFraction))
+				{
+					Cell.RemainingContamination = 0.0f;
+				}
 				if (Cell.TransferredContamination <= Settings.CleanTolerance)
 				{
 					Cell.TransferredContamination = 0.0f;
@@ -679,10 +763,11 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 					bRemovedAnyContamination = true;
 				}
 
-				// 요청 작업량이 실제 남은 양보다 컸다면 오염막을 다 벗긴 뒤에도 힘이 남은 상태
+				// 요청 작업량이 덮은 면적에서 벗겨낼 수 있는 양보다 컸다면
+				// 그 자리의 오염막을 다 벗긴 뒤에도 힘이 남은 상태
 				// 그 여분의 작업량은 맨 벽면을 긁은 것으로 분류해 위험한 피드백의 근거로 기록
 				if (RequestedRemovalAmount
-					> TotalRemainingBeforeSample
+					> RemovableTotalAmount
 						+ static_cast<double>(Settings.CleanTolerance))
 				{
 					Result.bTouchedBareSurface = true;
@@ -710,9 +795,14 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 				- CellAfterStroke.TransferredContamination);
 		const float RemovedAmount =
 			RemovedBaseAmount + RemovedTransferredAmount;
+		const float AddedCoveredFraction = FMath::Max(
+			0.0f,
+			CellAfterStroke.CoveredFraction
+				- CoveredFractionBeforeStroke[CellIndex]);
 
 		// 부동소수점 연산 중 생길 수 있는 무의미한 극소 차이는 변경 내역에서 제외
-		if (RemovedAmount <= UE_SMALL_NUMBER)
+		if (RemovedAmount <= UE_SMALL_NUMBER
+			&& AddedCoveredFraction <= UE_SMALL_NUMBER)
 		{
 			continue;
 		}

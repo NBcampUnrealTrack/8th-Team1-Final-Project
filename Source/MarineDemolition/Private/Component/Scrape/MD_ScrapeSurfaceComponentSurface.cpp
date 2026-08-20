@@ -443,6 +443,7 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 		Cell.RemainingContamination = SafeInitialContamination;
 		Cell.TransferredContamination = 0.0f;
 		Cell.TransferredPaintPatternDensity = 0.0f;
+		Cell.CoveredFraction = 0.0f;
 	}
 	if (bUseProceduralContamination
 		&& !TryApplyProceduralInitialContamination(

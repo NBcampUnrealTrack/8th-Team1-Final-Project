@@ -71,6 +71,10 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellState(
 			0.0f,
 			1.0f)
 		: InitialContamination;
+	const float SafeCoveredFraction = FMath::Clamp(
+		Cell.CoveredFraction,
+		0.0f,
+		1.0f);
 	const bool bMatchesGeneratedState = FMath::IsNearlyEqual(
 		InitialContamination,
 		GeneratedInitial,
@@ -80,7 +84,8 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellState(
 		GeneratedInitial,
 		UE_SMALL_NUMBER)
 		&& SafeTransferred <= UE_SMALL_NUMBER
-		&& SafeTransferredPatternDensity <= UE_SMALL_NUMBER;
+		&& SafeTransferredPatternDensity <= UE_SMALL_NUMBER
+		&& SafeCoveredFraction <= UE_SMALL_NUMBER;
 	// 실제로 보내는 값은 양자화 결과다. 같은 바이트로 떨어지는 갱신은
 	// 네트워크로 내보내지 않는다.
 	const uint8 QuantizedInitial =
@@ -98,6 +103,10 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellState(
 	const uint8 QuantizedTransferredPatternDensity =
 		FMD_ScrapeReplicationCodec::QuantizeRemaining(
 			SafeTransferredPatternDensity,
+			0.0f);
+	const uint8 QuantizedCoveredFraction =
+		FMD_ScrapeReplicationCodec::QuantizeRemaining(
+			SafeCoveredFraction,
 			0.0f);
 
 	if (const int32* ExistingItemIndex = CellToItemIndex.Find(CellIndex))
@@ -125,13 +134,15 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellState(
 				|| Item.QuantizedTransferredContamination
 					!= QuantizedTransferred
 				|| Item.QuantizedTransferredPatternDensity
-					!= QuantizedTransferredPatternDensity)
+					!= QuantizedTransferredPatternDensity
+				|| Item.QuantizedCoveredFraction != QuantizedCoveredFraction)
 			{
 				Item.QuantizedInitialContamination = QuantizedInitial;
 				Item.QuantizedRemainingContamination = QuantizedRemaining;
 				Item.QuantizedTransferredContamination = QuantizedTransferred;
 				Item.QuantizedTransferredPatternDensity =
 					QuantizedTransferredPatternDensity;
+				Item.QuantizedCoveredFraction = QuantizedCoveredFraction;
 				MarkItemDirty(Item);
 			}
 			return;
@@ -150,7 +161,8 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellState(
 		QuantizedInitial,
 		QuantizedRemaining,
 		QuantizedTransferred,
-		QuantizedTransferredPatternDensity);
+		QuantizedTransferredPatternDensity,
+		QuantizedCoveredFraction);
 	CellToItemIndex.Add(CellIndex, NewItemIndex);
 	MarkItemDirty(Items[NewItemIndex]);
 }
@@ -246,6 +258,7 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 		const float PreviousTransferred = Cell.TransferredContamination;
 		const float PreviousTransferredPatternDensity =
 			Cell.TransferredPaintPatternDensity;
+		const float PreviousCoveredFraction = Cell.CoveredFraction;
 		const float GeneratedInitial =
 			ContaminationGeneratedInitialAmounts.IsValidIndex(StateCellIndex)
 			? FMath::Clamp(
@@ -289,6 +302,12 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 					1.0f)
 				: 0.0f)
 			: 0.0f;
+		const float ReceivedCoveredFraction = StateItem.GetCoveredFraction();
+		const float TargetCoveredFraction = bResetToInitial
+			? 0.0f
+			: (FMath::IsFinite(ReceivedCoveredFraction)
+				? FMath::Clamp(ReceivedCoveredFraction, 0.0f, 1.0f)
+				: 0.0f);
 
 		if (FMath::IsNearlyEqual(
 			PreviousInitial,
@@ -305,6 +324,10 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 			&& FMath::IsNearlyEqual(
 				PreviousTransferredPatternDensity,
 				TargetTransferredPatternDensity,
+				UE_SMALL_NUMBER)
+			&& FMath::IsNearlyEqual(
+				PreviousCoveredFraction,
+				TargetCoveredFraction,
 				UE_SMALL_NUMBER))
 		{
 			continue;
@@ -315,6 +338,7 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 		Cell.TransferredContamination = TargetTransferred;
 		Cell.TransferredPaintPatternDensity =
 			TargetTransferredPatternDensity;
+		Cell.CoveredFraction = TargetCoveredFraction;
 
 		EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
 		int32 LocalCellIndex = INDEX_NONE;

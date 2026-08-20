@@ -212,6 +212,14 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 		bHasScrapeAnimationBladeDirection = false;
 	}
 
+	if (!Active)
+	{
+		// 긁기가 끝나면 유지 중이던 twist 를 버린다. 다음 스트로크가 다른 면에서
+		// 시작될 수 있으므로 이전 각을 물려받으면 안 된다.
+		LastScrapeAnimationTwistDegrees = 0.0f;
+		bHasScrapeAnimationTwist = false;
+	}
+
 	const UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
 		? EquipHotbarComponent->GetCurrentTool()
 		: nullptr;
@@ -296,16 +304,26 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 			ScrapeAnimationToolTwistAxis).GetSafeNormal();
 		const FVector ReferenceBladeDirection = BaseToolRotation.RotateVector(
 			ScrapeAnimationBladeReferenceDirection).GetSafeNormal();
-		const FVector ReferenceOnBladePlane = FVector::VectorPlaneProject(
+		// 투영 전 길이를 남겨 둔다. 그 길이가 스트로크 방향과 날 긴 축이 이루는
+		// 각의 sin 이고, 특이점에 얼마나 가까운지를 재는 유일한 척도다.
+		const FVector ReferenceProjected = FVector::VectorPlaneProject(
 			ReferenceBladeDirection,
-			ToolForwardAxis).GetSafeNormal();
-		const FVector TargetOnBladePlane = FVector::VectorPlaneProject(
+			ToolForwardAxis);
+		const FVector TargetProjected = FVector::VectorPlaneProject(
 			SocketSpaceBladeDirection,
-			ToolForwardAxis).GetSafeNormal();
+			ToolForwardAxis);
+		// 스트로크가 날 축과 거의 평행하면 축 주위 twist 자체가 정의되지 않는다.
+		// 이 구간에서 계산을 시도하면 각이 요동치고, IsNearlyZero(1e-4)로만 걸러
+		// 내면 그 임계값에 닿기 훨씬 전부터 값이 흔들린 뒤 AttachOffset 으로
+		// 스냅한다. 예방용 가드다 — 실측(투영 0.95~0.98)에서는 이 구간에
+		// 들어가지 않았고, 확인된 떨림 원인은 GetToolAttachTransform 쪽이었다.
 		if (!ToolForwardAxis.IsNearlyZero()
-			&& !ReferenceOnBladePlane.IsNearlyZero()
-			&& !TargetOnBladePlane.IsNearlyZero())
+			&& ReferenceProjected.Size() > ScrapeBladeTwistMinProjection
+			&& TargetProjected.Size() > ScrapeBladeTwistMinProjection)
 		{
+			const FVector ReferenceOnBladePlane =
+				ReferenceProjected.GetSafeNormal();
+			const FVector TargetOnBladePlane = TargetProjected.GetSafeNormal();
 			const float CosAngle = FMath::Clamp(FVector::DotProduct(
 				ReferenceOnBladePlane,
 				TargetOnBladePlane), -1.0f, 1.0f);
@@ -314,10 +332,17 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 				FVector::CrossProduct(
 					ReferenceOnBladePlane,
 					TargetOnBladePlane));
-			const float TwistDegrees = FMath::RadiansToDegrees(
+			LastScrapeAnimationTwistDegrees = FMath::RadiansToDegrees(
 				FMath::Atan2(SinAngle, CosAngle));
+			bHasScrapeAnimationTwist = true;
+		}
+
+		// 특이점 구간에서는 직전에 정의된 twist 를 그대로 유지한다. 되돌리지
+		// 않는 것이 요점이다 — 정의되지 않는 동안은 마지막 각이 가장 옳다.
+		if (bHasScrapeAnimationTwist && !ToolForwardAxis.IsNearlyZero())
+		{
 			const FQuat TwistRotation(ToolForwardAxis, FMath::DegreesToRadians(
-				TwistDegrees));
+				LastScrapeAnimationTwistDegrees));
 			TargetToolRotation = (TwistRotation
 				* BaseToolRotation.Quaternion()).Rotator();
 			// ABP의 upperarm_r 입력은 기존에도 Pitch/Yaw swing이었다. 날 축의
@@ -336,8 +361,11 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 		10.0f);
 	if (IsValid(ThirdPersonToolMesh))
 	{
-		ThirdPersonToolMesh->SetRelativeRotation(
-			ScrapeAnimationToolRelativeRotation);
+		// 회전만 쓰면 그립 소켓 보정이 빠진 값이 남는다. RefreshScrapeLoadVisual
+		// 과 같은 합성 결과를 써서 두 경로가 같은 값을 쓰게 한다.
+		ThirdPersonToolMesh->SetRelativeTransform(GetToolAttachTransform(
+			ThirdPersonToolMesh->GetStaticMesh(),
+			CurrentTool));
 	}
 }
 
@@ -531,15 +559,12 @@ void AMD_Character::UpdateFirstPersonToolTransform()
 	// 그대로 얹는다. 팔로워가 자식 트랜스폼을 갱신하지 않는 문제를 우회한다.
 	const FTransform SocketLocal =
 		BodyMesh->GetSocketTransform(ToolAttachSocketName, RTS_Component);
-	FTransform Offset =
+	// 날 축 roll 은 GetToolAttachTransform 안에 이미 들어 있다. 3인칭 메시의
+	// 상대 회전을 읽어 오면 안 된다 — 그 컴포넌트는 블레이드 갱신과
+	// RefreshScrapeLoadVisual 두 곳이 쓰는 경쟁 상태이고, 되돌려진 프레임을
+	// 집으면 AttachOffset 으로 튀어 1인칭에서만 떨림으로 보인다.
+	const FTransform Offset =
 		GetToolAttachTransform(FirstPersonToolMesh->GetStaticMesh(), CurrentTool);
-
-	// 날 축 roll 은 UpdateScrapeAnimationBlade 가 ThirdPersonToolMesh 의 상대
-	// 회전으로만 넣는다. 1인칭 도구는 그 처리에서 빠져 있어 같은 값을 얹어 준다.
-	if (IsValid(ThirdPersonToolMesh))
-	{
-		Offset.SetRotation(ThirdPersonToolMesh->GetRelativeRotation().Quaternion());
-	}
 
 	// 부모가 피벗(값이 확정적인 SceneComponent)이므로 월드로 지정해도 역산 기준이
 	// 흔들리지 않는다. 컴포넌트 계층이 어떻게 구성돼 있든 결과가 같도록
@@ -1504,7 +1529,12 @@ FTransform AMD_Character::GetToolAttachTransform(
 	const UStaticMesh* ToolMesh,
 	const UMD_ToolDefinition* Tool) const
 {
-	const FTransform Offset = IsValid(Tool) ? Tool->AttachOffset : FTransform::Identity;
+	FTransform Offset = IsValid(Tool) ? Tool->AttachOffset : FTransform::Identity;
+	// 긁기 중 날 축 twist 는 AttachOffset 의 회전을 대체한다. 이 함수가 도구
+	// 부착 자세의 유일한 출처여야 한다 — 3인칭 메시의 상대 트랜스폼을 읽어
+	// 재사용하면 RefreshScrapeLoadVisual 이 같은 값을 되돌리는 것과 경쟁해
+	// 프레임마다 AttachOffset 으로 튄다.
+	Offset.SetRotation(ScrapeAnimationToolRelativeRotation.Quaternion());
 
 	if (!IsValid(ToolMesh) || ToolGripSocketName.IsNone())
 	{

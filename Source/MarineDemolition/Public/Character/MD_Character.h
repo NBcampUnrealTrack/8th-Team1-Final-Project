@@ -412,5 +412,22 @@ private:
 	/** 접촉이 끊길 때 도구 회전을 AttachOffset으로 부드럽게 복귀시키는 현재 값. */
 	FRotator ScrapeAnimationToolRelativeRotation = FRotator::ZeroRotator;
 
+	/**
+	 * 날 축 twist 를 정의된 값으로 인정하는 최소 투영 길이. 투영 길이는 스트로크
+	 * 방향과 날 긴 축이 이루는 각의 sin 이므로, 이 값은 "축에서 몇 도 이상
+	 * 떨어져야 회전을 신뢰하는가"를 뜻한다. 0.25 ≈ 14.5도.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ScrapeBladeTwistMinProjection = 0.25f;
+
+	/**
+	 * 마지막으로 정의된 날 축 twist(도). 스트로크 방향이 날 축과 평행해지는
+	 * 특이점 구간에서는 새로 계산하지 않고 이 값을 유지한다 — AttachOffset 으로
+	 * 되돌리면 프레임마다 70~80도를 왕복한다.
+	 */
+	float LastScrapeAnimationTwistDegrees = 0.0f;
+
 	bool bHasScrapeAnimationBladeDirection = false;
+	bool bHasScrapeAnimationTwist = false;
 };

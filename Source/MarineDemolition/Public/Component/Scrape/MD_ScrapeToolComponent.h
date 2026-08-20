@@ -5,6 +5,10 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
+#include "Types/Scrape/MD_ScrapeToolState.h"
+#include "Gameplay/Scrape/MD_ScrapeAimValidation.h"
+#include "Gameplay/Scrape/MD_ScrapeBladeAxis.h"
+#include "Gameplay/Scrape/MD_ScrapeReacquirePolicy.h"
 #include "MD_ScrapeToolComponent.generated.h"
 
 class AMD_Barnacle;
@@ -28,44 +32,22 @@ struct FMD_ScrapeToolPathSegment
 	bool bStartsNewSubStroke = false;
 };
 
-/** 날 방향만 프레임 분할과 무관하게 계산하기 위한 고정 arc-length 표본. */
-struct FMD_ScrapeToolDirectionSample
+/** Begin 요청을 서버 시점과 맞춰 본 결과. 승인 시 그대로 세션 basis가 된다. */
+struct FMD_ScrapeFocusBeginApproval
 {
-	FVector2D PositionCm = FVector2D::ZeroVector;
-	double ArcLengthCm = 0.0;
-};
+	/** 요청 회전을 정규화한 값. 승인되면 이 회전으로 세션을 고정한다. */
+	FRotator ApprovedViewRotation = FRotator::ZeroRotator;
 
-/** pending candidate가 다른 표면·spec으로 바뀌 후에도 생성 시점 정보를 보존한다. */
-struct FMD_PendingScrapeContaminationDab
-{
-	FMD_ScrapeContaminationDab Dab;
-	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> Surface;
-	FMD_ScrapeToolSpec ToolSpec;
-	float StampAmount = 0.0f;
-	float StampDepthCm = 0.0f;
-};
+	/** 요청 FOV와 종횡비로 서버가 다시 계산한 투영 half-tangent. */
+	float RequestedProjectionHorizontalHalfTangent = 0.0f;
+	float RequestedProjectionVerticalHalfTangent = 0.0f;
 
-enum class EMD_ScrapeReacquireDecision : uint8
-{
-	KeepWaiting,
-	ContinueBridge,
-	StartNewStroke,
-	TerminateFocus
-};
+	/** 투영과 서버 정책 중 좁은 쪽. 조준 권위는 이 원뿔을 넘지 못한다. */
+	float ApprovedAuthorityHorizontalHalfTangent = 0.0f;
+	float ApprovedAuthorityVerticalHalfTangent = 0.0f;
 
-struct FMD_ScrapeReacquireEvaluation
-{
-	EMD_ScrapeReacquireDecision Decision =
-		EMD_ScrapeReacquireDecision::KeepWaiting;
-	bool bIsReconnectCandidate = false;
-	bool bCanBridge = false;
-};
-
-/** 첫 Reliable aim보다 먼저 검증된 continuous 표본의 bounded replay 항목. */
-struct FMD_BufferedAuthoritativeScrapeAim
-{
-	FMD_ScrapeAimNetSample Sample;
-	FMD_ScrapeAimQueryResult ValidatedAim;
+	/** 요청한 화면 계약과 서버 시점이 허용 오차 안에서 일치하는지. */
+	bool bBasisMatches = false;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnScrapeApplied, AMD_CuttableWall*, Wall, FMD_ScrapeResult, Result);
@@ -145,13 +127,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Focus")
 	int64 GetScrapeFocusGeneration() const
 	{
-		return static_cast<int64>(ScrapeFocusGeneration);
+		return static_cast<int64>(ScrapeFocusSession.ScrapeFocusGeneration);
 	}
 
 	/** 현재 클라이언트/서버가 합의한 Focus session. 0은 승인 session 없음. */
 	uint64 GetActiveScrapeFocusSessionId() const
 	{
-		return ActiveScrapeFocusSessionId;
+		return ScrapeFocusSession.ActiveScrapeFocusSessionId;
 	}
 
 	/** GAS 첫 TargetData에 넣을 fresh aim과 단조 sequence를 예약한다. */
@@ -668,6 +650,22 @@ private:
 		float SampleDeltaTime,
 		bool bSequenceGapKnown,
 		int32 MissingAimSequences);
+	void ApplyAimSequenceGapPolicy(
+		bool bSequenceGapKnown,
+		int32 MissingAimSequences,
+		float SampleDeltaTime);
+	void ResetStrokeOnDiscontinuousSurfaceJump(
+		const FMD_ScrapeAimQueryResult& AimResult);
+	bool TryStartNewSurfaceStroke(
+		UMD_ScrapeSurfaceComponent* CurrentSurface,
+		EMD_ScrapeSurfaceFace CurrentSurfaceFace,
+		const FVector2D& RawSurfacePositionCm,
+		const FHitResult& CurrentHit);
+	bool TryApplyResolvedScrapePath(
+		UMD_ScrapeSurfaceComponent* CurrentSurface,
+		EMD_ScrapeSurfaceFace CurrentSurfaceFace,
+		const FHitResult& CurrentHit,
+		const TArray<FMD_ScrapeToolPathSegment>& PathSegments);
 	void ProcessReadyScrapeAim(float DeltaTime);
 	void ProcessReadyScrapeAimResult(
 		const FMD_ScrapeAimQueryResult& AimResult,
@@ -682,20 +680,6 @@ private:
 	bool ValidateReconnectBridge(
 		const FMD_ScrapeAimQueryResult& AimResult,
 		double EffectiveBridgeMaxCm) const;
-	static FMD_ScrapeReacquireEvaluation EvaluateScrapeReacquisition(
-		bool bHasValidSurface,
-		bool bHasPriorStroke,
-		bool bSameSurfaceAndFace,
-		double InvalidElapsedSeconds,
-		double ReconnectDistanceCm,
-		double CandidateMaxCm,
-		double EffectiveBridgeMaxCm,
-		bool bBridgeVisibilityValid,
-		bool bSequenceGapKnown,
-		int32 MissingAimSequences,
-		int32 MaximumMissingAimSequences,
-		double GraceSeconds,
-		double PersistentExitSeconds);
 	void DispatchAuthoritativeScrapeResult(
 		UMD_ScrapeSurfaceComponent* Surface,
 		const FMD_ScrapeResult& Result,
@@ -725,16 +709,42 @@ private:
 	void ResetScrapeFocusSessionState();
 	void EndScrapeFocusInternal(bool bSendServerEnd);
 	bool CaptureScrapeFocusView();
+	bool TryGetAuthoritativeScrapeView(FMinimalViewInfo& OutViewInfo) const;
+	void RejectScrapeFocusBegin(
+		uint64 FocusSessionId,
+		bool bIsSameAcceptedSession,
+		EMD_ScrapeFocusTerminationReason SameSessionReason,
+		const FRotator& ReplyViewRotation,
+		float ReplyFOV);
+	bool IsScrapeFocusBeginPayloadValid(
+		uint64 FocusSessionId,
+		const FRotator& RequestedViewRotation,
+		float RequestedFOV,
+		float RequestedAspectRatio,
+		float RequestedHorizontalHalfTangent,
+		float RequestedVerticalHalfTangent) const;
+	FMD_ScrapeFocusBeginApproval EvaluateScrapeFocusBeginRequest(
+		const FMinimalViewInfo& ServerViewInfo,
+		const FRotator& RequestedViewRotation,
+		float RequestedFOV,
+		float RequestedAspectRatio,
+		float RequestedHorizontalHalfTangent,
+		float RequestedVerticalHalfTangent,
+		bool bIsSameAcceptedSession) const;
+	void AdoptApprovedScrapeFocusSession(
+		uint64 FocusSessionId,
+		uint32 InitialAimSequence,
+		AController& OwnerController,
+		const FMinimalViewInfo& ServerViewInfo,
+		float RequestedAspectRatio,
+		const FMD_ScrapeFocusBeginApproval& Approval,
+		const FMD_ScrapeAimQueryResult& Preflight);
 	bool IsScrapeFocusViewOriginValid() const;
 	void TerminateScrapeFocusFromComponent();
 	void TerminateAuthoritativeScrapeFocus(
 		EMD_ScrapeFocusTerminationReason Reason);
 	FVector GetScrapeFocusAimDirection() const;
 	bool IsCurrentScrapeFocusViewportAspectCompatible() const;
-	static bool IsScrapeFocusViewportAspectCompatible(
-		float AgreedAspectRatio,
-		const FIntPoint& CurrentViewportSize,
-		float AbsoluteTolerance);
 	bool IsScrapeToolCurrentlyEligible() const;
 	bool BuildLocalAimSample(FMD_ScrapeAimNetSample& OutSample);
 	void SendLocalAimIfDue(float DeltaTime);
@@ -744,48 +754,37 @@ private:
 		FMD_ScrapeAimQueryResult& OutAim,
 		float& OutSampleDeltaTime,
 		int32& OutMissingSequences);
+	bool TryAcceptAuthoritativeAimTiming(
+		const FMD_ScrapeAimNetSample& Sample,
+		double ServerNowSeconds,
+		double& OutClientSampleSeconds);
+	bool TryResolveAuthoritativeAimDirection(
+		const FVector& CameraRelativeDirection,
+		FVector& OutServerEyeLocation,
+		FVector& OutWorldDirection);
+	bool TryRecordAuthoritativeAimSample(
+		const FMD_ScrapeAimNetSample& Sample,
+		bool bAllowReorderedFirstAim,
+		double ClientSampleSeconds,
+		double ServerNowSeconds,
+		const FMD_ScrapeAimQueryResult& Aim,
+		float& OutSampleDeltaTime,
+		int32& OutMissingSequences);
 	bool ConsumeAuthoritativeAimRateToken(double ServerNowSeconds);
 	void BufferPreFirstAuthoritativeAim(
 		const FMD_ScrapeAimNetSample& Sample,
 		const FMD_ScrapeAimQueryResult& ValidatedAim);
 	void PrepareBufferedAuthoritativeAimReplay(uint32 FirstAimSequence);
 	void ReplayBufferedAuthoritativeAims();
-	float CalculateAuthoritativeSampleDeltaTime(
-		double PreviousClientSeconds,
-		double CurrentClientSeconds,
-		bool& bOutIsDiscontinuous) const;
-	static bool IsAuthoritativeAimPositionDiscontinuous(
-		const FMD_ScrapeAimQueryResult& PreviousAim,
-		const FMD_ScrapeAimQueryResult& CurrentAim,
-		double MaximumDistanceCm);
-	bool IsCameraRelativeAimInsideSessionCone(
-		const FVector& CameraRelativeDirection) const;
+	/** 현재 세션이 허용하는 조준 원뿔을 판정용 값으로 모아 준다. */
+	FMD_ScrapeAimAuthorityCone MakeAimAuthorityCone() const;
 	void ClampScrapeFocusPointerToAuthorityCone();
 	void ResetScrapeFocusPointerStrokeConstraint();
 	void TryLatchScrapeFocusPointerStrokeAxis();
 	float GetScrapeFocusPointerAspectRatio() const;
-	static float CalculateScrapeFocusPointerNormalizedHalfRange(
-		float ProjectionHalfTangent,
-		float AuthorityHalfTangent,
-		float PointerSafeMargin);
-	static bool CalculateScrapeFocusProjectionHalfTangents(
-		const FMinimalViewInfo& ViewInfo,
-		EAspectRatioAxisConstraint DefaultAxisConstraint,
-		float ViewportAspectRatio,
-		bool bUseLegacyMaintainYFOV,
-		float& OutHorizontalHalfTangent,
-		float& OutVerticalHalfTangent);
 	static bool IsLegacyMaintainYFOVProjectionEnabled();
 	static double GetScrapeMonotonicSeconds();
-	static float CalculateRotatorErrorDegrees(
-		const FRotator& A,
-		const FRotator& B);
 
-	static constexpr double MaximumAuthoritativeAimRateHz = 30.0;
-	static constexpr double AuthoritativeAimBurstCapacity = 3.0;
-	static constexpr int32 MaximumBufferedPreFirstAimSamples = 8;
-	static constexpr float MinimumSupportedFocusAspectRatio = 4.0f / 3.0f;
-	static constexpr float MaximumSupportedFocusAspectRatio = 32.0f / 9.0f;
 	/**
 	 * Trusted server policy used when a remote viewport is unavailable (including
 	 * dedicated servers). A client projection may narrow this envelope, but its
@@ -850,6 +849,15 @@ private:
 		const FVector2D& StartPositionCm,
 		const FVector2D& EndPositionCm,
 		TArray<FMD_ScrapeToolPathSegment>& OutSegments);
+	void RestartPendingResolvedScrapePath(
+		const FVector2D& StartPositionCm,
+		double SegmentStartArcCm);
+	FVector2D ConsumePendingResolvedScrapePathChunk(
+		double SpacingCm,
+		TArray<FVector2D, TInlineAllocator<8>>& OutConsumedPointsCm);
+	void EmitResolvedScrapePathParts(
+		TConstArrayView<FVector2D> ConsumedPointsCm,
+		TArray<FMD_ScrapeToolPathSegment>& OutSegments);
 	void FlushResolvedScrapePathTail(
 		const FVector2D& EndPositionCm,
 		TArray<FMD_ScrapeToolPathSegment>& OutSegments);
@@ -857,10 +865,6 @@ private:
 	void SplitScrapeSubStrokeAtCorner(const FVector2D& CornerPositionCm);
 	void ResetScrapePathAccumulator(const FVector2D& StartPositionCm);
 	void RebaseScrapePathAfterObstacle(const FVector2D& BlockedPositionCm);
-	void AddDirectionSample(
-		const FVector2D& PositionCm,
-		double ArcLengthCm);
-	FVector2D CalculateWindowedBladeAxis() const;
 	void UpdateStableBladeAxis(double ArcStepCm);
 	bool ApplyScrapePathSegment(
 		UMD_ScrapeSurfaceComponent* Surface,
@@ -870,12 +874,21 @@ private:
 		float DeltaTime,
 		FVector2D& OutAppliedEndPositionCm,
 		AMD_Barnacle*& OutBlockingBarnacle);
-	static FMD_ScrapeBladeBasis MakeBladeBasis(
-		const FVector2D& BladeDepthAxis);
-	static FVector2D InterpolateBladeAxis(
-		const FVector2D& StartAxis,
-		const FVector2D& EndAxis,
-		double Alpha);
+	void ApplyAuthoritativeScrapeStroke(
+		UMD_ScrapeSurfaceComponent* Surface,
+		EMD_ScrapeSurfaceFace SurfaceFace,
+		const FMD_ScrapeToolPathSegment& PathSegment,
+		const FMD_ScrapeStroke& Stroke,
+		double AppliedRatio,
+		const FVector2D& AppliedEndPositionCm,
+		const FVector2D& AppliedEndBladeAxis,
+		const FVector& FeedbackLocation);
+	void DeliverPathSegmentObstacleImpact(
+		UMD_ScrapeSurfaceComponent* Surface,
+		EMD_ScrapeSurfaceFace SurfaceFace,
+		const FMD_ScrapeToolPathSegment& PathSegment,
+		float DeltaTime,
+		AMD_Barnacle* BlockingBarnacle);
 	void KeepAimOnScrapePosition(
 		const FVector& ViewLocation,
 		const FVector& CurrentAimWorldPosition,
@@ -967,36 +980,12 @@ private:
 	UPROPERTY(Transient)
 	FMD_ScrapeAimQueryResult CurrentScrapeAim;
 
-	uint32 ScrapeFocusGeneration = 0;
-	uint64 ActiveScrapeFocusSessionId = 0;
-	uint32 NextLocalAimSequence = 0;
-	uint32 LastAuthoritativeAimSequence = 0;
-	double FocusPendingElapsedSeconds = 0.0;
-	double LocalAimSendAccumulatorSeconds = 0.0;
-	double LocalFocusMonotonicStartSeconds = 0.0;
-	double LastAuthoritativeAimReceiveSeconds = 0.0;
-	double LastAuthoritativeClientSampleSeconds = 0.0;
-	double AuthoritativeClientClockOffsetSeconds = 0.0;
-	float ScrapeFocusAspectRatio = 16.0f / 9.0f;
-	/** Client projection used to keep the reticle and generated screen ray aligned. */
-	float ScrapeFocusHorizontalHalfTangent = 1.0f;
-	float ScrapeFocusVerticalHalfTangent = 9.0f / 16.0f;
-	/** Server-owned cone. It can only be equal to or narrower than the projection. */
-	float ScrapeFocusAuthorityHorizontalHalfTangent = 1.0f;
-	float ScrapeFocusAuthorityVerticalHalfTangent = 9.0f / 16.0f;
-	bool bAuthoritativeScrapeFocusAccepted = false;
-	bool bAuthoritativeClientClockInitialized = false;
-	bool bAuthoritativeFirstScrapeAimApproved = false;
-	uint64 AuthoritativeFirstAimSessionId = 0;
-	uint32 AuthoritativeFirstAimSequence = 0;
-	double AuthoritativeFirstAimClientSampleSeconds = 0.0;
-	bool bLastAuthoritativeAimWasActionable = false;
-	double AuthoritativeAimRateTokens = AuthoritativeAimBurstCapacity;
-	double LastAuthoritativeAimRateRefillSeconds = -1.0;
-	TArray<FMD_BufferedAuthoritativeScrapeAim>
-		BufferedPreFirstAuthoritativeAims;
-	uint32 HighestDroppedPreFirstAimSequence = 0;
-	bool bBufferedPreFirstAimReplayDiscontinuous = false;
+	/** 컴포넌트가 프레임 사이에 들고 있는 내부 진행 상태. */
+	FMD_ScrapeFocusSessionState ScrapeFocusSession;
+	FMD_ScrapeAuthoritativeAimState AuthoritativeAim;
+	FMD_ScrapeStrokePathState StrokePath;
+	FMD_ScrapeAimRecoveryState AimRecovery;
+	FMD_ScrapeContaminationPaintState ContaminationPaint;
 
 	UPROPERTY(Transient)
 	FVector ScrapeFocusViewOrigin = FVector::ZeroVector;
@@ -1013,32 +1002,11 @@ private:
 	UPROPERTY(Transient)
 	FVector2D ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
 
-	/** LMB를 누른 순간의 포인터 위치. 잠긴 임의 각도 직선의 원점이다. */
-	FVector2D ScrapeFocusPointerStrokeAnchorNormalized = FVector2D(0.5, 0.5);
-
-	/** viewport pixel과 같은 등방 metric에서 누적한 LMB 제스처. */
-	FVector2D ScrapeFocusPointerGestureDisplacement = FVector2D::ZeroVector;
-
-	/** viewport pixel metric에서 고정된 방향. 부호 반전 왕복은 같은 축이다. */
-	FVector2D ScrapeFocusPointerGestureAxis = FVector2D::ZeroVector;
-
-	/** normalized 포인터 직선 방향. authority rectangle 교차·clamp에 사용한다. */
-	FVector2D ScrapeFocusPointerStrokeAxis = FVector2D::ZeroVector;
-
-	bool bHasScrapeFocusPointerStrokeAxis = false;
-
 	UPROPERTY(Transient)
 	bool bHasScrapeFocusView = false;
 
-	bool bHasPreviousSurfacePosition;
-	bool bHasLockedStrokeAxis;
-	int32 SaturatedContaminationStampPatternSeed;
 	uint32 LmbStrokeGeneration = 0;
-	uint32 Stage3SubStrokeGeneration = 0;
 	uint32 ScrapeToolSpecGeneration = 1;
-	uint64 Stage3SampleSequence = 0;
-	/** TASK 7 권위 session id가 배정되면 owner placeholder 대신 사용한다. */
-	uint64 Stage3FocusSessionIdentityOverride = 0;
 
 	/** 마지막으로 표면에 닿은 월드 위치. 접촉이 끊기면 무효로 표시한다. */
 	UPROPERTY(Replicated)
@@ -1054,63 +1022,6 @@ private:
 
 	UPROPERTY(Replicated)
 	bool bHasLastContactBladeDirection = false;
-
-	FVector2D PreviousSurfacePositionCm;
-	EMD_ScrapeSurfaceFace PreviousSurfaceFace;
-	FVector2D StrokeAnchorPositionCm;
-	FVector2D FurthestSurfacePositionCm;
-	FVector2D LockedStrokeAxis;
-	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> PreviousSurface;
-
-	/** 초기 basis가 확정될 때까지 원래 raw 점 순서를 그대로 보관한다. */
-	TArray<FVector2D> PendingScrapePolylineCm;
-	double PendingScrapePathArcLengthCm = 0.0;
-
-	/** 방향 계산에만 사용하는 고정 arc-length 표본. 판정 선분과는 별개다. */
-	TArray<FMD_ScrapeToolDirectionSample> ScrapeDirectionSamples;
-	double ScrapePathArcLengthCm = 0.0;
-	double LastEmittedScrapePathArcLengthCm = 0.0;
-	/** Fixed-arc 경계 전의 실제 1D 이동 순서. 같은 방향 leg만 합치고 반전은 보존한다. */
-	TArray<FVector2D> PendingResolvedScrapePathPointsCm;
-	double PendingResolvedScrapePathTravelCm = 0.0;
-	/** 아직 fixed-arc segment로 방출되지 않은 경로가 보유한 승인 sample time. */
-	double PendingScrapePathSampleTimeSeconds = 0.0;
-	FVector2D LastEmittedScrapePathPositionCm = FVector2D::ZeroVector;
-	FVector2D LastEmittedBladeDepthAxis = FVector2D::ZeroVector;
-	FVector2D StableBladeDepthAxis = FVector2D::ZeroVector;
-	FVector2D LastRawTravelTangent = FVector2D::ZeroVector;
-	bool bHasStableBladeDepthAxis = false;
-	bool bHasLastRawTravelTangent = false;
-
-	/** 고정 arc 경계 사이에 남은 마지막 유효 경로를 종료 시 적용하기 위한 표면 hit. */
-	FHitResult LastScrapeSurfaceHit;
-	bool bHasLastScrapeSurfaceHit = false;
-
-	/** Invalid-aim lease and the last valid endpoint retained during its grace. */
-	bool bHasInvalidScrapeAim = false;
-	double InvalidScrapeAimElapsedSeconds = 0.0;
-	bool bClosedStrokeForInvalidScrapeAim = false;
-	bool bHasScrapeReconnectAnchor = false;
-	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> ScrapeReconnectSurface;
-	EMD_ScrapeSurfaceFace ScrapeReconnectSurfaceFace =
-		EMD_ScrapeSurfaceFace::Front;
-	FVector2D ScrapeReconnectPositionCm = FVector2D::ZeroVector;
-	FHitResult ScrapeReconnectSurfaceHit;
-
-	/** Stage3에 진입한 지점부터만 누적하는 ordered path state. */
-	bool bStage3PathActive = false;
-	double Stage3PathArcLengthCm = 0.0;
-	int32 Stage3NextDistanceBin = 0;
-	double Stage3ProtectionDistanceCm = 0.0;
-	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> Stage3PathSurface;
-	EMD_ScrapeSurfaceFace Stage3PathSurfaceFace =
-		EMD_ScrapeSurfaceFace::Front;
-	FMD_ScrapeToolSpec Stage3PathToolSpec;
-	FVector2D Stage3PathStartPositionCm = FVector2D::ZeroVector;
-	FMD_ScrapeBladeBasis Stage3PathStartBladeBasis;
-	TArray<FMD_PendingScrapeContaminationDab> PendingStage3Dabs;
-	/** 자동화 스냅샷과 재전송 안전성 확인용. */
-	TArray<FMD_ScrapeContaminationDab> CommittedStage3Dabs;
 
 	/** 지금 때리고 있는 따개비. 직접 겨냥한 것이든 경로를 막은 것이든 여기 담긴다 */
 	TWeakObjectPtr<AMD_Barnacle> TrackedBarnacle;
