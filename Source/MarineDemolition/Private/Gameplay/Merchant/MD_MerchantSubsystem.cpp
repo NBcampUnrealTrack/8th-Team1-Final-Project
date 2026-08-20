@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
@@ -302,10 +302,19 @@ bool UMD_MerchantSubsystem::HasClearedCurrentSite() const
 	return IsValid(CurrentSite) && ClearedSites.Contains(CurrentSite);
 }
 
-void UMD_MerchantSubsystem::BeginDay(int32 NewDay, int32 AdvancePayment)
+void UMD_MerchantSubsystem::BeginDay(int32 NewDay, int32 BaseAdvancePayment, bool bEmergencyDay)
 {
-	// 잘못된 설정값으로 팀 크레딧이 차감되지 않도록 고정 착수금을 0 이상으로 제한
-	int32 GrantedAdvancePayment = FMath::Max(AdvancePayment, 0);
+	// 잘못된 설정값으로 팀 크레딧이 차감되지 않도록 기본 착수금을 0 이상으로 제한
+	int32 ValidBaseAdvancePayment = FMath::Max(BaseAdvancePayment, 0);
+
+	// 높은 호감도는 착수금을 10% 늘리고 낮은 호감도는 10% 줄이는 배율 계산
+	float AffinityAdvanceMultiplier = FMath::GetRangePct(-2.0f, 2.0f, Affinity);
+	AffinityAdvanceMultiplier = 0.9f + 0.2f * FMath::Clamp(AffinityAdvanceMultiplier, 0, 1);
+	AffinityAdvanceMultiplier *= bEmergencyDay == true ? 0.7f : 1;
+
+	// 비상 Day에는 호감도와 무관하게 착수금을 지급하지 않는 최종 금액 계산
+	int32 GrantedAdvancePayment = FMath::RoundToInt32(ValidBaseAdvancePayment * AffinityAdvanceMultiplier);
+
 	AddCreditsInternal(GrantedAdvancePayment);
 
 	// 현재 계약의 일차를 서버 상인 원장에 반영
@@ -319,7 +328,7 @@ void UMD_MerchantSubsystem::BeginDay(int32 NewDay, int32 AdvancePayment)
 			MainQuest.Status = EMD_MainQuestStatus::Active;
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 시작 (착수금 %d, 반복 %d건)"), NewDay, GrantedAdvancePayment, RepeatQuests.Num());
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 시작 (기본 착수금 %d, 호감도 %.1f, 비상 %s, 지급 %d, 반복 %d건)"), NewDay, ValidBaseAdvancePayment, Affinity, bEmergencyDay == true ? TEXT("true") : TEXT("false"), GrantedAdvancePayment, RepeatQuests.Num());
 
 	OnMerchantStateChanged.Broadcast();
 }

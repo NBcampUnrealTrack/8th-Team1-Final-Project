@@ -119,8 +119,8 @@ public:
 	/** 현재 계약 현장이 과거에 클리어된 적 있는지 저장 이력에서 확인하는 함수 */
 	bool HasClearedCurrentSite() const;
 
-	/** Day 시작 시 고정 착수금을 지급하고 메인 퀘스트의 해금 상태를 갱신하는 함수 */
-	void BeginDay(int32 NewDay, int32 AdvancePayment);
+	/** Day 시작 시 호감도·비상 상태를 반영한 착수금을 지급하고 메인 퀘스트의 해금 상태를 갱신하는 함수 */
+	void BeginDay(int32 NewDay, int32 BaseAdvancePayment, bool bEmergencyDay);
 
 	/** 계약 클리어 시 호출하여 현장 완료 이력을 남기는 함수 */
 	void MarkSiteCleared();

@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Player/MD_PlayerController.h"
@@ -744,7 +744,11 @@ void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)
 		return;
 	}
 
-	Merchant->BeginDay(Day, DebugAdvancePayment);
+	// 실제 Day 시작과 동일하게 GameState의 비상 상태를 디버그 착수금 계산에 전달
+	AMD_GameStateBase* MDGameState = GetWorld()->GetGameState<AMD_GameStateBase>();
+	bool bEmergencyDay = IsValid(MDGameState) == true ? bEmergencyDay = MDGameState->IsEmergencyDay() : false;
+
+	Merchant->BeginDay(Day, DebugAdvancePayment, bEmergencyDay);
 }
 
 void AMD_PlayerController::MD_AcceptRepeat(int32 Index)

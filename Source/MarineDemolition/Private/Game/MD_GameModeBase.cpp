@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Game/MD_GameModeBase.h"
@@ -873,7 +873,11 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
 
     if (bShouldBeginDay)
     {
-        Merchant->BeginDay(Day, ExpeditionAdvancePayment);
+        // 복원된 GameState의 비상 Day 상태를 착수금 계산에 전달
+        AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
+        bool bEmergencyDay = IsValid(MDGameState) == true ? bEmergencyDay = MDGameState->IsEmergencyDay() : false;
+
+        Merchant->BeginDay(Day, ExpeditionAdvancePayment, bEmergencyDay);
     }
 }
 
