@@ -40,6 +40,7 @@ struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 		, QuantizedRemainingContamination(0)
 		, QuantizedTransferredContamination(0)
 		, QuantizedTransferredPatternDensity(0)
+		, QuantizedCoveredFraction(0)
 	{
 	}
 
@@ -48,7 +49,8 @@ struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 		const uint8 InQuantizedInitialContamination,
 		const uint8 InQuantizedRemainingContamination,
 		const uint8 InQuantizedTransferredContamination = 0,
-		const uint8 InQuantizedTransferredPatternDensity = 0)
+		const uint8 InQuantizedTransferredPatternDensity = 0,
+		const uint8 InQuantizedCoveredFraction = 0)
 		: EncodedCellIndex(InEncodedCellIndex)
 		, QuantizedInitialContamination(InQuantizedInitialContamination)
 		, QuantizedRemainingContamination(InQuantizedRemainingContamination)
@@ -56,6 +58,7 @@ struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 			InQuantizedTransferredContamination)
 		, QuantizedTransferredPatternDensity(
 			InQuantizedTransferredPatternDensity)
+		, QuantizedCoveredFraction(InQuantizedCoveredFraction)
 	{
 	}
 
@@ -88,6 +91,12 @@ struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 			QuantizedTransferredPatternDensity);
 	}
 
+	float GetCoveredFraction() const
+	{
+		return FMD_ScrapeReplicationCodec::DequantizeRemaining(
+			QuantizedCoveredFraction);
+	}
+
 	UPROPERTY()
 	uint16 EncodedCellIndex;
 
@@ -102,6 +111,16 @@ struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 
 	UPROPERTY()
 	uint8 QuantizedTransferredPatternDensity;
+
+	/**
+	 * 헤라 날에 덮인 면적 비율. 시각 전용이지만 복제해야 한다.
+	 *
+	 * 클라이언트는 셀 델타만 받고 스트로크 기하는 모른다. 이 값 없이 잔여량에서
+	 * 역산하면 얇은 막과 부분 피복이 다시 한 값으로 뭉개져, 서버에서는 곧은
+	 * 자국 경계가 클라이언트에서만 격자 계단으로 보인다.
+	 */
+	UPROPERTY()
+	uint8 QuantizedCoveredFraction;
 };
 
 /** Fast Array containing only cells that differ from their generated value. */
@@ -423,6 +442,19 @@ public:
 		TArray<float>& OutRemainingAmounts,
 		TArray<float>& OutTransferredAmounts,
 		TArray<float>& OutTransferredPatternDensities) const;
+	/**
+	 * 시각용 피복률까지 함께 내보낸다.
+	 *
+	 * 이 값이 없으면 다음 Day에 어제 긁어 둔 자국의 경계가 격자 계단으로
+	 * 되돌아간다. 잔여량만으로는 얇은 막과 부분 피복을 구분할 수 없다.
+	 */
+	void ExportContaminationDeltas(
+		TArray<int32>& OutCellIndices,
+		TArray<float>& OutInitialAmounts,
+		TArray<float>& OutRemainingAmounts,
+		TArray<float>& OutTransferredAmounts,
+		TArray<float>& OutTransferredPatternDensities,
+		TArray<float>& OutCoveredFractions) const;
 	void RestoreContaminationCells(
 		const TArray<int32>& CellIndices,
 		const TArray<float>& InitialAmounts,
@@ -433,6 +465,14 @@ public:
 		const TArray<float>& RemainingAmounts,
 		const TArray<float>& TransferredAmounts,
 		const TArray<float>& TransferredPatternDensities);
+	/** CoveredFractions가 비어 있으면 잔여량에서 역산해 구버전 겉모습을 쓴다. */
+	void RestoreContaminationCells(
+		const TArray<int32>& CellIndices,
+		const TArray<float>& InitialAmounts,
+		const TArray<float>& RemainingAmounts,
+		const TArray<float>& TransferredAmounts,
+		const TArray<float>& TransferredPatternDensities,
+		const TArray<float>& CoveredFractions);
 
 	UPROPERTY(BlueprintAssignable, Category = "MD|Scrape Surface")
 	FMD_OnScrapeSurfaceFullyRemoved OnContaminationFullyRemoved;
@@ -442,6 +482,10 @@ protected:
 	virtual void OnUnregister() override;
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(
+		FPropertyChangedEvent& PropertyChangedEvent) override;
+#endif
 
 	/** Mesh that defines the working surface. Auto-resolved from the owner if empty. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape Surface|Geometry",
@@ -479,6 +523,44 @@ protected:
 		Category = "MD|Scrape Surface|Mask",
 		meta = (ClampMin = "0.25", UIMin = "0.25", UIMax = "2.0", Units = "cm"))
 	float TransferredPaintVisualTexelSizeCm;
+
+	/**
+	 * 헤라 자국 경계를 자를 때 쓰는 마스크 값 구간의 폭.
+	 *
+	 * 마스크 텍셀은 0~1 불투명도 신호이고, 머티리얼은 0.5를 중심으로 이 폭만큼
+	 * 부드럽게 자른다. 경계의 위치 정확도는 마스크 필드의 기울기가 정하므로 이
+	 * 값과 무관하다. 즉 이 값은 경계선의 선명도만 바꾼다. 넓으면 부분 피복
+	 * 대역 전체가 그라데이션으로 퍼져 선이 아니라 흐릿한 띠로 보인다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,
+		Category = "MD|Scrape Surface|Mask",
+		meta = (ClampMin = "0.02", ClampMax = "1.0", UIMax = "0.5"))
+	float ContaminationVisualEdgeSoftness;
+
+	/**
+	 * 셀에 얇게 남은 오염막의 두께를 불투명도로 바꿀 때 쓰는 감마.
+	 *
+	 * 1은 두께에 정비례한다. 그래야 한 번 긁을 때 줄어든 잔량이 그만큼 옅어져,
+	 * 긁은 횟수만큼 일정하게 지워지는 것으로 보인다. 낮추면 얇은 막이 더 진하게
+	 * 보이지만, 막이 남은 경계 셀에서 곡선이 포화되어 그 쪽 테두리가 셀 단위
+	 * 톱니로 돌아간다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,
+		Category = "MD|Scrape Surface|Mask",
+		meta = (ClampMin = "0.75", ClampMax = "1.0"))
+	float ContaminationVisualFilmOpacityGamma;
+
+	/**
+	 * 경계에 얹는 머티리얼 노이즈의 세기. 자르는 구간 폭에 대한 비율이다.
+	 *
+	 * 0이면 완전한 직선이 된다. 절대값이 아니라 비율로 두는 이유는, 구간을 좁혀
+	 * 경계를 날카롭게 만들 때 같은 절대 세기의 노이즈가 경계를 통째로 들었다
+	 * 놨다 하며 톱니로 만들어 버리기 때문이다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,
+		Category = "MD|Scrape Surface|Mask",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ContaminationVisualEdgeNoiseAmount;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape Surface",
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
@@ -831,6 +913,8 @@ private:
 	void ApplyContaminationAppearanceParameters(
 		UMaterialInstanceDynamic& DecalMID,
 		UMaterialInterface* ParentMaterial) const;
+	void ApplyContaminationVisualMaskCurveParameters(
+		UMaterialInstanceDynamic& DecalMID) const;
 	bool TryResolveContaminationFace(
 		const FVector& WorldPosition,
 		const FVector& WorldNormal,

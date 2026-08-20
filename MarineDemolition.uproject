@@ -1,4 +1,4 @@
-﻿{
+{
 	"FileVersion": 3,
 	"EngineAssociation": "5.8",
 	"Category": "",
@@ -58,6 +58,10 @@
 		},
 		{
 			"Name": "SQLiteSupport",
+			"Enabled": true
+		},
+		{
+			"Name": "EditorToolset",
 			"Enabled": true
 		}
 	]

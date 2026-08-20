@@ -144,7 +144,8 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
             ContaminationRecord.InitialAmounts,
             ContaminationRecord.RemainingAmounts,
             ContaminationRecord.TransferredAmounts,
-            ContaminationRecord.TransferredPatternDensities);
+            ContaminationRecord.TransferredPatternDensities,
+            ContaminationRecord.CoveredFractions);
         if (ContaminationRecord.CellIndices.Num() > 0)
         {
             Snapshot.WallContaminations.Add(ContaminationRecord);
@@ -300,7 +301,8 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
                 Record.InitialAmounts,
                 Record.RemainingAmounts,
                 Record.TransferredAmounts,
-                Record.TransferredPatternDensities);
+                Record.TransferredPatternDensities,
+                Record.CoveredFractions);
         }
     }
 
