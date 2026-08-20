@@ -426,7 +426,7 @@ public:
 		: BrushShape(EMD_ScrapeBrushShape::Rectangle)
 		, BladeWidthCm(24.0f)
 		, BladeDepthCm(12.0f)
-		, RemovalPerTravelCentimeter(0.08f)
+		, RemovalPerTravelCentimeter(0.028f)
 		, ReachCm(220.0f)
 	{
 	}
@@ -457,6 +457,12 @@ public:
 
 	/**
 	 * 헤라가 1cm 이동할 때 접촉 셀에서 제거하려는 오염막의 정규화 양
+	 *
+	 * 셀 하나는 날 길이(BladeDepthCm)에 셀 크기를 더한 거리만큼 날 밑을 지나므로,
+	 * 24 x 12cm 날과 2.5cm 셀에서는 한 번 통과에 약 14.5cm 분량이 가해진다.
+	 * 기본값 0.028은 한 번 통과에 약 1/3을 지워, 세 번 겹쳐 긁으면 완전히
+	 * 벗겨지도록 맞춘 값이다. 이보다 크면 첫 통과에 거의 다 지워져서 긁은
+	 * 횟수만큼 누적되는 느낌이 사라진다.
 	 *
 	 * 범위 업그레이드와 제거 성능 업그레이드를 서로 독립적으로 조정할 수 있다.
 	 */
@@ -577,7 +583,7 @@ struct MARINEDEMOLITION_API FMD_ScrapeSettings
 public:
 	FMD_ScrapeSettings()
 		: BladeWidthCm(12.0f)
-		, RemovalPerTravelCentimeter(0.08f)
+		, RemovalPerTravelCentimeter(0.028f)
 		, SampleSpacingRatioOfSmallestCell(0.5f)
 		, MaximumSampleSpacingCm(2.5f)
 		, MaximumBladeRotationDegreesPerSample(5.0f)
@@ -599,7 +605,7 @@ public:
 	/**
 	 * 헤라가 1cm 이동할 때 접촉 셀에서 제거하려는 오염막의 정규화 양
 	 *
-	 * 오염량은 0~1 범위이므로 0.08은 "이동 거리 1cm당 최대 8%"의 제거 작업량을 의미.
+	 * 오염량은 0~1 범위이므로 0.028은 "이동 거리 1cm당 최대 2.8%"의 제거 작업량을 의미.
 	 * 실제 제거량에는 셀 피복 가중치가 곱해지므로 헤라 날 가장자리는 중앙보다 덜 벗겨짐.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape",
