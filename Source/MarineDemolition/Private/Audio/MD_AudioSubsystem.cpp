@@ -74,9 +74,26 @@ namespace MD_AudioPrivate
 		return !AmbienceRoot.IsValid() || !EventTag.MatchesTag(AmbienceRoot);
 	}
 
-	bool ShouldApplyDepthPitch(bool bUnderwater, bool bDepthPitch)
+	bool ShouldApplyDepthPitch(bool bUnderwater, bool bDepthPitch, const FGameplayTag& EventTag)
 	{
-		return bUnderwater && bDepthPitch;
+		if (!bUnderwater)
+		{
+			return false;
+		}
+
+		if (bDepthPitch)
+		{
+			return true;
+		}
+
+		const FGameplayTag AmbienceRoot = GetAmbienceRootTag();
+		return AmbienceRoot.IsValid() && EventTag.MatchesTag(AmbienceRoot);
+	}
+
+	bool ShouldApplyDepthPitch(const FMD_AudioEntry& Entry)
+	{
+		return ShouldApplyDepthPitch(
+			Entry.Space == EMD_AudioSpace::Underwater, Entry.bDepthPitch, Entry.EventTag);
 	}
 
 	/** 옥타브(로그) 공간 보간. 사람 지각이 로그라 깊이 변화가 균일하게 들린다 */
@@ -314,10 +331,13 @@ UAudioComponent* UMD_AudioSubsystem::SpawnForEntry(const FMD_AudioEntry& Entry, 
 			Component->bEnableLowPassFilter = true;
 			Component->LowPassFilterFrequency = CurrentCutoffHz;
 		}
-		else if (Component && MD_AudioPrivate::ShouldApplyDepthPitch(
-			Entry.Space == EMD_AudioSpace::Underwater, Entry.bDepthPitch))
+		else if (Component)
 		{
-			Component->SetPitchMultiplier(Entry.PitchMultiplier * CurrentDepthPitch);
+			ClearUnderwaterFilter(Component);
+			if (MD_AudioPrivate::ShouldApplyDepthPitch(Entry))
+			{
+				Component->SetPitchMultiplier(Entry.PitchMultiplier * CurrentDepthPitch);
+			}
 		}
 
 		if (Component)
@@ -344,10 +364,13 @@ UAudioComponent* UMD_AudioSubsystem::SpawnForEntry(const FMD_AudioEntry& Entry, 
 	{
 		ApplyUnderwaterFilter(Component);
 	}
-	else if (Component && MD_AudioPrivate::ShouldApplyDepthPitch(
-		Entry.Space == EMD_AudioSpace::Underwater, Entry.bDepthPitch))
+	else if (Component)
 	{
-		Component->SetPitchMultiplier(Entry.PitchMultiplier * CurrentDepthPitch);
+		ClearUnderwaterFilter(Component);
+		if (MD_AudioPrivate::ShouldApplyDepthPitch(Entry))
+		{
+			Component->SetPitchMultiplier(Entry.PitchMultiplier * CurrentDepthPitch);
+		}
 	}
 
 	return Component;
@@ -583,9 +606,21 @@ void UMD_AudioSubsystem::ApplyUnderwaterFilter(UAudioComponent* Component) const
 	Component->SetLowPassFilterFrequency(CurrentCutoffHz);
 }
 
+void UMD_AudioSubsystem::ClearUnderwaterFilter(UAudioComponent* Component) const
+{
+	if (!Component)
+	{
+		return;
+	}
+
+	Component->SetLowPassFilterEnabled(false);
+}
+
 void UMD_AudioSubsystem::ApplyCutoffToActiveSounds()
 {
 	LastAppliedCount = 0;
+	LastLpfAppliedCount = 0;
+	LastPitchAppliedCount = 0;
 	LastSkippedCount = 0;
 
 	for (const FActiveSound& Active : ActiveSounds)
@@ -603,13 +638,18 @@ void UMD_AudioSubsystem::ApplyCutoffToActiveSounds()
 			Component->bEnableLowPassFilter = true;
 			Component->SetLowPassFilterFrequency(CurrentCutoffHz);
 			++LastAppliedCount;
+			++LastLpfAppliedCount;
 			continue;
 		}
 
-		if (MD_AudioPrivate::ShouldApplyDepthPitch(Active.bUnderwater, Active.bDepthPitch))
+		ClearUnderwaterFilter(Component);
+
+		if (MD_AudioPrivate::ShouldApplyDepthPitch(
+			Active.bUnderwater, Active.bDepthPitch, Active.EventTag))
 		{
 			Component->SetPitchMultiplier(Active.BasePitch * CurrentDepthPitch);
 			++LastAppliedCount;
+			++LastPitchAppliedCount;
 			continue;
 		}
 
@@ -657,7 +697,7 @@ void UMD_AudioSubsystem::DrawDebugInfo()
 		CameraZ, Settings.WaterSurfaceZ));
 	Line(3, FString::Printf(TEXT("  depth         : %.0f cm  alpha %.2f  (max %.0f)"),
 		Depth, Alpha, Settings.MaxDepthCm));
-	Line(4, FString::Printf(TEXT("  cutoff        : %.0f Hz  [%.0f -> %.0f]"),
+	Line(4, FString::Printf(TEXT("  cutoff (SFX)  : %.0f Hz  [%.0f -> %.0f]  (ambience LPF off)"),
 		CurrentCutoffHz, Settings.CutoffAtSurface, Settings.CutoffAtMaxDepth));
 	Line(5, FString::Printf(TEXT("  IsInWater     : %s  immersion %.2f  (thr %.2f)"),
 		Movement ? (Movement->IsInWater() ? TEXT("true") : TEXT("false")) : TEXT("(no pawn)"),
@@ -668,8 +708,8 @@ void UMD_AudioSubsystem::DrawDebugInfo()
 		ActiveStateTags.IsEmpty() ? TEXT("(none)") : *ActiveStateTags.ToStringSimple()));
 	Line(8, FString::Printf(TEXT("  loops         : %d / requests %d  events %d"),
 		ActiveLoops, ActiveSounds.Num(), EntriesByTag.Num()));
-	Line(9, FString::Printf(TEXT("  depth fx      : lpf/pitch applied %d  skipped %d"),
-		LastAppliedCount, LastSkippedCount));
+	Line(9, FString::Printf(TEXT("  depth fx      : lpf %d  pitch %d  skipped %d"),
+		LastLpfAppliedCount, LastPitchAppliedCount, LastSkippedCount));
 	Line(10, FString::Printf(TEXT("  depth pitch   : %.3f  [%.2f -> %.2f]"),
 		CurrentDepthPitch, Settings.PitchAtSurface, Settings.PitchAtMaxDepth));
 }
@@ -711,10 +751,13 @@ void UMD_AudioSubsystem::EnforceLoopConditions()
 				{
 					ApplyUnderwaterFilter(Restarted);
 				}
-				else if (MD_AudioPrivate::ShouldApplyDepthPitch(
-					Entry->Space == EMD_AudioSpace::Underwater, Entry->bDepthPitch))
+				else
 				{
-					Restarted->SetPitchMultiplier(Entry->PitchMultiplier * CurrentDepthPitch);
+					ClearUnderwaterFilter(Restarted);
+					if (MD_AudioPrivate::ShouldApplyDepthPitch(*Entry))
+					{
+						Restarted->SetPitchMultiplier(Entry->PitchMultiplier * CurrentDepthPitch);
+					}
 				}
 			}
 		}

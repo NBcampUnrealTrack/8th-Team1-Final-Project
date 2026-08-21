@@ -105,6 +105,9 @@ private:
 	/** 재생 직후 컴포넌트에 수중 로우패스를 걸어 준다 */
 	void ApplyUnderwaterFilter(UAudioComponent* Component) const;
 
+	/** 앰비언스 등 LPF를 쓰지 않는 항목에서 컴포넌트 로우패스를 끈다 */
+	void ClearUnderwaterFilter(UAudioComponent* Component) const;
+
 	FMD_AudioHandle PlayResolved(const FMD_AudioEntry& Entry, const FVector& Location,
 		USceneComponent* AttachTo, FName SocketName, bool bForce2D);
 
@@ -168,6 +171,8 @@ private:
 	float CurrentCutoffHz = 2000.0f;
 	float CurrentDepthPitch = 1.0f;
 	int32 LastAppliedCount = 0;
+	int32 LastLpfAppliedCount = 0;
+	int32 LastPitchAppliedCount = 0;
 	int32 LastSkippedCount = 0;
 	float CutoffUpdateAccumulator = 0.0f;
 	bool bIndexBuilt = false;
