@@ -7,7 +7,6 @@
 #include "Subsystems/LocalPlayerSubsystem.h"
 #include "MD_LocalUIManager.generated.h"
 
-class APlayerController;
 class UCommonActivatableWidget;
 class UCommonActivatableWidgetStack;
 class UUserWidget;
@@ -19,6 +18,8 @@ class MARINEDEMOLITION_API UMD_LocalUIManager : public ULocalPlayerSubsystem
 	GENERATED_BODY()
 
 public:
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
 	virtual void Deinitialize() override;
 
 	virtual void PlayerControllerChanged(APlayerController* NewPlayerController) override;
@@ -32,7 +33,7 @@ protected:
 	UPROPERTY(Transient)
 	TMap<FGameplayTag, TObjectPtr<UCommonActivatableWidgetStack>> LayerStacks;
 
-	// PlayerController 교체 시 PrimaryLayout을 복원할 수 있도록 사용할 클래스를 보관한다.
+	// 프로젝트 설정과 PlayerController 교체에서 PrimaryLayout을 생성할 클래스를 보관한다.
 	UPROPERTY(Transient)
 	TSubclassOf<UUserWidget> PrimaryLayoutClass;
 
@@ -74,13 +75,16 @@ public:
 	bool IsPrimaryLayoutReady();
 
 protected:
+	// Project Settings의 PrimaryLayout 클래스를 로드하고 준비된 플레이어에 Layout을 생성한다.
+	void LoadPrimaryLayoutFromSettings();
+
 	// 저장된 클래스를 사용하여 현재 PlayerController에 PrimaryLayout을 생성한다.
 	bool CreatePrimaryLayout();
 
 	// 기존 PrimaryLayout과 그 Layout이 등록한 모든 Stack 참조를 제거한다.
 	void RemovePrimaryLayout();
 
-	// 요청 태그가 프로젝트에서 허용한 네 표준 UI 레이어인지 확인한다.
+	// 요청 태그가 프로젝트에서 표준 UI 레이어인지 확인한다.
 	bool IsSupportedLayerTag(FGameplayTag LayerTag);
 
 	// 등록된 Stack 중 요청 태그에 해당하는 유효한 Stack을 반환한다.

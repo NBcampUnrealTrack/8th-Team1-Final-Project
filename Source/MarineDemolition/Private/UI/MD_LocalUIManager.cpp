@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/MD_LocalUIManager.h"
 
@@ -7,6 +7,41 @@
 #include "Widgets/CommonActivatableWidgetContainer.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Util/MD_LogUtility.h"
+#include "UI/MD_UISettings.h"
+
+void UMD_LocalUIManager::Initialize(FSubsystemCollectionBase& Collection)
+{
+	// 부모 서브시스템 초기화를 먼저 완료하여 LocalPlayer 접근 기반을 준비한다.
+	Super::Initialize(Collection);
+
+	// 프로젝트 설정에서 PrimaryLayout 클래스를 읽어 초기 UI 생성을 준비한다.
+	LoadPrimaryLayoutFromSettings();
+}
+
+void UMD_LocalUIManager::LoadPrimaryLayoutFromSettings()
+{
+	// Project Settings에 등록된 Common UI 설정을 조회한다.
+	const UMD_UISettings* UISettings = UMD_UISettings::Get();
+	if (IsValid(UISettings) == false)
+	{
+		return;
+	}
+
+	// 설정된 소프트 클래스를 로드하여 World 전환 후에도 재사용할 클래스에 저장한다.
+	TSubclassOf<UUserWidget> ConfiguredPrimaryLayoutClass = UISettings->LoadPrimaryLayoutClass();
+	if (IsValid(ConfiguredPrimaryLayoutClass) == false)
+	{
+		return;
+	}
+	PrimaryLayoutClass = ConfiguredPrimaryLayoutClass;
+
+	// 설정된 클래스와 현재 플레이어 컨텍스트를 사용하여 PrimaryLayout을 초기화한다.
+	bool bCreateResult = CreatePrimaryLayout();
+	if (bCreateResult == false)
+	{
+		UE_LOG(MarineDemolition, Warning, TEXT("Local UI Manager가 프로젝트 설정의 PrimaryLayout을 생성하지 못했습니다."));
+	}
+}
 
 void UMD_LocalUIManager::Deinitialize()
 {
@@ -27,10 +62,42 @@ void UMD_LocalUIManager::PlayerControllerChanged(APlayerController* NewPlayerCon
 		return;
 	}
 
-	// 기존 PrimaryLayout과 Stack 상태를 유지하면서 Owning PlayerController만 갱신한다.
+	// 기존 PrimaryLayout과 Stack 상태를 유지하면서 Owning PlayerController를 갱신한다.
 	if (IsValid(PrimaryLayout) == true)
 	{
 		PrimaryLayout->SetOwningPlayer(NewPlayerController);
+
+		// 기존 Layout이 Viewport에 남아 있으면 추가 등록 없이 변경 처리를 완료한다.
+		bool bIsReadyResult = IsPrimaryLayoutReady();
+		if (bIsReadyResult == true)
+		{
+			return;
+		}
+
+		// 화면에서 제거된 Layout을 같은 LocalPlayer 영역에 다시 등록한다.
+		ULocalPlayer* OwningLocalPlayer = GetLocalPlayer();
+		if (IsValid(OwningLocalPlayer) == false)
+		{
+			return;
+		}
+
+		// Engine 전역 GameViewport 관리자를 통해 기존 Layout의 화면 등록을 복원한다.
+		UGameViewportSubsystem* GameViewportManager = UGameViewportSubsystem::Get();
+		if (IsValid(GameViewportManager) == false)
+		{
+			return;
+		}
+
+		// 이후 World가 제거되어도 복원한 PrimaryLayout을 자동 제거하지 않도록 설정한다.
+		FGameViewportWidgetSlot ViewportSlot;
+		ViewportSlot.bAutoRemoveOnWorldRemoved = false;
+
+		// 기존 Layout 인스턴스를 재사용하여 활성 화면과 레이어 Stack 상태를 보존한다.
+		bool bRestoreResult = GameViewportManager->AddWidgetForPlayer(PrimaryLayout, OwningLocalPlayer, ViewportSlot);
+		if (bRestoreResult == false)
+		{
+			UE_LOG(MarineDemolition, Warning, TEXT("Local UI Manager가 기존 PrimaryLayout의 Viewport 등록을 복원하지 못했습니다."));
+		}
 		return;
 	}
 
