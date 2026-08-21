@@ -186,21 +186,8 @@ void UMD_LocalUIManager::UnregisterLayer(FGameplayTag LayerTag, UCommonActivatab
 
 UCommonActivatableWidget* UMD_LocalUIManager::PushScreenToLayer(FGameplayTag LayerTag, TSubclassOf<UCommonActivatableWidget> ScreenClass)
 {
-	// 생성할 화면 클래스가 없으면 Stack을 변경하지 않는다.
-	if (IsValid(ScreenClass) == false)
-	{
-		return nullptr;
-	}
-
-	// PrimaryLayout이 등록한 대상 레이어 Stack을 찾는다.
-	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
-	if (IsValid(LayerStack) == false)
-	{
-		return nullptr;
-	}
-
-	// Common UI Stack이 화면 생성과 활성화 수명을 소유하도록 클래스로 Push한다.
-	UCommonActivatableWidget* PushedScreen = LayerStack->AddWidget(ScreenClass);
+	// 별도 초기화가 없는 동기 요청도 공통 Stack Push 경로를 사용한다.
+	UCommonActivatableWidget* PushedScreen = PushScreenToLayerInitialized(LayerTag, ScreenClass, [](UCommonActivatableWidget&) {});
 	return PushedScreen;
 }
 
@@ -268,6 +255,84 @@ bool UMD_LocalUIManager::IsPrimaryLayoutReady()
 	// 관리자의 등록 여부를 결과 변수에 저장하여 반환한다.
 	bool bIsWidgetAdded = GameViewportManager->IsWidgetAdded(PrimaryLayout);
 	return bIsWidgetAdded;
+}
+
+bool UMD_LocalUIManager::IsLayerRegistered(FGameplayTag LayerTag)
+{
+	// 등록된 레이어 Stack을 조회하여 Async 요청 전에 목적지 준비 상태를 확인한다.
+	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
+	if (IsValid(LayerStack) == false)
+	{
+		return false;
+	}
+
+	// 유효한 Stack이 존재하면 등록 완료 상태를 반환한다.
+	return true;
+}
+
+UCommonActivatableWidget* UMD_LocalUIManager::PushScreenToLayerInitialized(
+	FGameplayTag LayerTag,
+	TSubclassOf<UCommonActivatableWidget> ScreenClass,
+	TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen)
+{
+	// 생성할 화면 클래스가 없으면 Stack을 변경하지 않는다.
+	if (IsValid(ScreenClass) == false)
+	{
+		return nullptr;
+	}
+
+	// PrimaryLayout이 등록한 대상 레이어 Stack을 찾는다.
+	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
+	if (IsValid(LayerStack) == false)
+	{
+		return nullptr;
+	}
+
+	// Stack 활성화 전에 호출자가 화면 데이터를 초기화할 수 있는 Push 경로를 사용한다.
+	UCommonActivatableWidget* PushedScreen = LayerStack->AddWidget(ScreenClass, InitializeScreen);
+	return PushedScreen;
+}
+
+void UMD_LocalUIManager::SuspendInputForAsyncRequest()
+{
+	// 병렬 요청이 있어도 첫 요청에서만 기존 Layout 활성 상태를 저장한다.
+	AsyncInputSuspensionCount++;
+	if (AsyncInputSuspensionCount > 1)
+	{
+		return;
+	}
+
+	// 입력을 차단할 PrimaryLayout이 없으면 카운트만 유지하여 완료 경로를 맞춘다.
+	if (IsValid(PrimaryLayout) == false)
+	{
+		return;
+	}
+
+	// 모든 자식 위젯의 Click과 탐색 입력을 차단하기 전에 기존 활성 상태를 보관한다.
+	bPrimaryLayoutWasEnabled = PrimaryLayout->GetIsEnabled();
+	PrimaryLayout->SetIsEnabled(false);
+}
+
+void UMD_LocalUIManager::ResumeInputForAsyncRequest()
+{
+	// 이미 모두 복구된 상태에서는 입력 활성 상태를 다시 변경하지 않는다.
+	if (AsyncInputSuspensionCount <= 0)
+	{
+		return;
+	}
+
+	// 마지막 요청이 완료될 때까지 PrimaryLayout 입력 차단을 유지한다.
+	AsyncInputSuspensionCount--;
+	if (AsyncInputSuspensionCount > 0)
+	{
+		return;
+	}
+
+	// 유지 중인 Layout이 있으면 첫 요청 이전의 활성 상태로 복구한다.
+	if (IsValid(PrimaryLayout) == true)
+	{
+		PrimaryLayout->SetIsEnabled(bPrimaryLayoutWasEnabled);
+	}
 }
 
 bool UMD_LocalUIManager::CreatePrimaryLayout()

@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -37,6 +37,14 @@ protected:
 	UPROPERTY(Transient)
 	TSubclassOf<UUserWidget> PrimaryLayoutClass;
 
+	// 동시에 진행 중인 Async UI 요청이 PrimaryLayout 입력을 차단한 횟수를 보관한다.
+	UPROPERTY(Transient)
+	int32 AsyncInputSuspensionCount = 0;
+
+	// 첫 Async 입력 차단 전에 PrimaryLayout이 사용하던 활성 상태를 보관한다.
+	UPROPERTY(Transient)
+	bool bPrimaryLayoutWasEnabled = true;
+
 public:
 	// 지정한 클래스로 LocalPlayer 전용 PrimaryLayout을 한 번만 생성한다.
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI")
@@ -73,6 +81,22 @@ public:
 	// PrimaryLayout이 생성되어 플레이어 화면에 연결되었는지 반환한다.
 	UFUNCTION(BlueprintPure, Category = "MarineDemolition|UI")
 	bool IsPrimaryLayoutReady();
+
+	// 지정한 레이어에 유효한 Common UI Stack이 등록되어 있는지 반환한다.
+	UFUNCTION(BlueprintPure, Category = "MarineDemolition|UI")
+	bool IsLayerRegistered(FGameplayTag LayerTag);
+
+	// Stack 활성화 전에 화면 초기화 함수를 실행하며 화면을 Push한다.
+	UCommonActivatableWidget* PushScreenToLayerInitialized(
+		FGameplayTag LayerTag,
+		TSubclassOf<UCommonActivatableWidget> ScreenClass,
+		TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen);
+
+	// Async 화면 로드 중 PrimaryLayout의 중복 입력을 차단한다.
+	void SuspendInputForAsyncRequest();
+
+	// 완료된 Async 요청의 입력 차단을 해제하고 기존 활성 상태를 복구한다.
+	void ResumeInputForAsyncRequest();
 
 protected:
 	// Project Settings의 PrimaryLayout 클래스를 로드하고 준비된 플레이어에 Layout을 생성한다.
