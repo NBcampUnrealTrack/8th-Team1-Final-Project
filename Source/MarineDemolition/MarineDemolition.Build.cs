@@ -18,7 +18,7 @@ public class MarineDemolition : ModuleRules
 			// Online
 			"OnlineSubsystem", "OnlineSubsystemUtils",
 			//UI
-			"UMG",
+			"UMG", "CommonUI", "CommonInput",
 			// Landscape (editor import helper uses ALandscape::Import)
 			"Landscape",
 			"GeometryCollectionEngine",
@@ -32,8 +32,6 @@ public class MarineDemolition : ModuleRules
 			"DeveloperSettings",
 			"ApplicationCore",
 			"CoreOnline",
-			// Database
-			"SQLiteCore", "SQLiteSupport",
 			// 오염 마스크 런타임 텍스처 업로드
 			"RHI",
 			// 절단·헤라 VFX
