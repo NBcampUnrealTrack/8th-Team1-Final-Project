@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
@@ -49,28 +49,24 @@ int32 UMD_MerchantSubsystem::GetActiveQuestReward() const
 	return Total;
 }
 
-void UMD_MerchantSubsystem::AddCredits(int32 Amount)
+TArray<FMD_DailyReportValue> UMD_MerchantSubsystem::GetDailyCreditTotals() const
 {
-	//크레딧은 최소 0
-	if (Amount == 0)
+	// 서버 Map을 RPC와 복제가 지원하는 항목 배열로 변환
+	TArray<FMD_DailyReportValue> OutCreditTotals;
+	OutCreditTotals.Reserve(DailyCreditTotals.Num());
+	for (const TPair<EMD_DailyReportCategory, int64>& CreditEntry : DailyCreditTotals)
 	{
-		return;
+		int32 CreditValue = static_cast<int32>(FMath::Clamp<int64>(CreditEntry.Value, MIN_int32, MAX_int32));
+		OutCreditTotals.Add({CreditEntry.Key, CreditValue});
 	}
 
-	// int32 범위 안에서 합산하기 전에 상한과 하한을 판정하는 원장 보호
-	if (Amount > 0 && Credits > MAX_int32 - Amount)
-	{
-		Credits = MAX_int32;
-	}
-	else if (Amount < 0 && Amount < -Credits)
-	{
-		Credits = 0;
-	}
-	else
-	{
-		Credits += Amount;
-	}
+	return OutCreditTotals;
+}
 
+void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 Amount)
+{
+	// 모든 외부 크레딧 변경을 단일 Enum 기반 기록 경로로 처리
+	AddCreditsInternal(Category, Amount);
 	OnMerchantStateChanged.Broadcast();
 }
 
@@ -121,7 +117,8 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerStat
 	}
 
 	// 지급 성공이 보장된 같은 프레임에 결제와 팀 구매 원장을 확정하는 원자적 처리
-	Credits -= ShopItem.Price;
+	// 상점 구매 비용을 기타 정산 분류로 기록
+	AddCreditsInternal(EMD_DailyReportCategory::Other, -ShopItem.Price);
 	int32& PurchasedCount = PurchasedItemCounts.FindOrAdd(ShopItem.ItemId);
 	PurchasedCount += 1;
 
@@ -204,7 +201,8 @@ bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount)
 	}
 
 	// 대출 실행
-	Credits += Amount;
+	// 대출 수령액을 기타 정산 분류로 기록
+	AddCreditsInternal(EMD_DailyReportCategory::Other, Amount);
 	DebtBalance += Amount;
 
 	OnMerchantStateChanged.Broadcast();
@@ -221,7 +219,8 @@ bool UMD_MerchantSubsystem::TryRepayLoan(int32 Amount)
 	}
 
 	// 빚 상환 실행
-	Credits -= Amount;
+	// 대출 상환액을 기타 정산 분류로 기록
+	AddCreditsInternal(EMD_DailyReportCategory::Other, -Amount);
 	DebtBalance -= Amount;
 	OnMerchantStateChanged.Broadcast();
 
@@ -252,7 +251,7 @@ int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 	return InterestAmount;
 }
 
-void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment)
+void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site)
 {
 	if (IsValid(Site) == false)
 	{
@@ -292,9 +291,7 @@ void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 Advanc
 	NextDepositMultiplier = 1.f;
 	bConsumableDiscountActive = true;
 
-	AddCreditsInternal(AdvancePayment);
-
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 시작: %s (메인 %d건, 반복 %d건, 착수금 %d)"), *Site->SiteName.ToString(), MainQuests.Num(), RepeatQuests.Num(), AdvancePayment);
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 시작: %s (메인 %d건, 반복 %d건)"), *Site->SiteName.ToString(), MainQuests.Num(), RepeatQuests.Num());
 
 	OnMerchantStateChanged.Broadcast();
 }
@@ -304,8 +301,23 @@ bool UMD_MerchantSubsystem::HasClearedCurrentSite() const
 	return IsValid(CurrentSite) && ClearedSites.Contains(CurrentSite);
 }
 
-void UMD_MerchantSubsystem::BeginDay(int32 NewDay)
+void UMD_MerchantSubsystem::BeginDay(int32 NewDay, int32 BaseAdvancePayment, bool bEmergencyDay)
 {
+	// 잘못된 설정값으로 팀 크레딧이 차감되지 않도록 기본 착수금을 0 이상으로 제한
+	int32 ValidBaseAdvancePayment = FMath::Max(BaseAdvancePayment, 0);
+
+	// 높은 호감도는 착수금을 10% 늘리고 낮은 호감도는 10% 줄이는 배율 계산
+	float AffinityAdvanceMultiplier = FMath::GetRangePct(-2.0f, 2.0f, Affinity);
+	AffinityAdvanceMultiplier = 0.9f + 0.2f * FMath::Clamp(AffinityAdvanceMultiplier, 0, 1);
+	AffinityAdvanceMultiplier *= bEmergencyDay == true ? 0.7f : 1;
+
+	// 비상 Day에는 호감도와 무관하게 착수금을 지급하지 않는 최종 금액 계산
+	int32 GrantedAdvancePayment = FMath::RoundToInt32(ValidBaseAdvancePayment * AffinityAdvanceMultiplier);
+	// 새 Day의 Enum Map 원장을 초기화한 뒤 실제 착수금을 기록
+	DailyCreditTotals.Reset();
+	AddCreditsInternal(EMD_DailyReportCategory::Retainer, GrantedAdvancePayment);
+
+	// 현재 계약의 일차를 서버 상인 원장에 반영
 	CurrentDay = NewDay;
 
 	// Day에 도달하면 Locked에서 Active가 된다. 실패·완료 건은 그대로 둔다.
@@ -316,7 +328,7 @@ void UMD_MerchantSubsystem::BeginDay(int32 NewDay)
 			MainQuest.Status = EMD_MainQuestStatus::Active;
 		}
 	}
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 시작 (반복 %d건)"), NewDay, RepeatQuests.Num());
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 시작 (기본 착수금 %d, 호감도 %.1f, 비상 %s, 지급 %d, 반복 %d건)"), NewDay, ValidBaseAdvancePayment, Affinity, bEmergencyDay == true ? TEXT("true") : TEXT("false"), GrantedAdvancePayment, RepeatQuests.Num());
 
 	OnMerchantStateChanged.Broadcast();
 }
@@ -824,6 +836,7 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 	// 모든 참조 검증 이후 경제·호감도·퀘스트 원장을 한 번에 교체하는 처리
 	bConsumableDiscountActive = SaveData.bConsumableDiscountActive;
 	Credits = SaveData.Credits;
+	DailyCreditTotals.Reset();
 	DebtBalance = SaveData.DebtBalance;
 	Affinity = SaveData.Affinity;
 	CurrentDay = SaveData.CurrentDay;
@@ -928,7 +941,8 @@ void UMD_MerchantSubsystem::ApplyQuestRewardData(const FMD_QuestRewardData& Rewa
 	int32 CreditsDelta = bPenalty == true ? -CreditsAmount : CreditsAmount;
 	int32 ScoreDelta = bPenalty == true ? -ScoreAmount : ScoreAmount;
 	float AffinityDelta = bPenalty == true ? -AffinityAmount : AffinityAmount;
-	AddCreditsInternal(CreditsDelta);
+	// 퀘스트 보상과 페널티를 실제 반영된 금액 기준으로 상세 보고서에 기록
+	AddCreditsInternal(EMD_DailyReportCategory::Quest, CreditsDelta);
 
 	// QuestDefinition에 명시된 점수를 성공·실패 원인 태그와 함께 서버 권위 평가 원장에 반영하는 처리
 	AMD_GameStateBase* GameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
@@ -983,12 +997,15 @@ void UMD_MerchantSubsystem::FailRepeatQuest(FMD_RepeatQuestState& QuestState, bo
 	}
 }
 
-void UMD_MerchantSubsystem::AddCreditsInternal(int32 Amount)
+void UMD_MerchantSubsystem::AddCreditsInternal(EMD_DailyReportCategory Category, int32 Amount)
 {
 	if (Amount == 0)
 	{
 		return;
 	}
+
+	// 실제 잔액 반영액만 Map 원장에 기록하기 위한 변경 전 잔액 저장
+	int32 CreditsBeforeChange = Credits;
 
 	// int32 범위 안에서 여러 보상의 합산 상한과 차감 하한을 지키기 위한 원장 보호
 	if (Amount > 0 && Credits > MAX_int32 - Amount)
@@ -1003,6 +1020,11 @@ void UMD_MerchantSubsystem::AddCreditsInternal(int32 Amount)
 	{
 		Credits += Amount;
 	}
+
+	// 요청액이 아닌 실제 잔액 변동을 Enum 분류의 Map 합계에 누적
+	int32 AppliedAmount = Credits - CreditsBeforeChange;
+	int64& CategoryTotal = DailyCreditTotals.FindOrAdd(Category);
+	CategoryTotal += AppliedAmount;
 }
 
 bool UMD_MerchantSubsystem::FailMainQuest(FMD_MainQuestState& QuestState, EMD_QuestFailureReason Reason)
@@ -1073,6 +1095,7 @@ void UMD_MerchantSubsystem::ApplyMainQuestReward(const UMD_QuestDefinition& Defi
 void UMD_MerchantSubsystem::ResetContract()
 {
 	Credits = 0;
+	DailyCreditTotals.Reset();
 	DebtBalance = 0;
 	Affinity = 0.0f;
 	CurrentSite = nullptr;

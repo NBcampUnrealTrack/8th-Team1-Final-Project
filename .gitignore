@@ -50,6 +50,7 @@ Config/DefaultEditorPerProjectUserSettings.ini
 # AI coding agents (local state)
 .codex/
 .claude/
+.revvy/
 /AGENT.md
 /CLAUDE.md
 
@@ -821,3 +822,25 @@ Content/Assets/Stylized_Cemetery/**
 !Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Stone_Tile_BaseColor.uasset
 !Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Stone_Tile_Normal.uasset
 !Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Stone_Tile_ORM.uasset
+
+# TR-9(L_TR9)이 쓰는 Stylized_Cemetery 에셋.
+# 랜드스케이프 페인트 레이어 2종 — Landscape_Floor에 Grass/Rock 레이어를 추가하면서 참조가 생겼다.
+!Content/Assets/Stylized_Cemetery/Materials/Landscape_Material/LayerInfo_Grass.uasset
+!Content/Assets/Stylized_Cemetery/Materials/Landscape_Material/Rock_LayerInfo.uasset
+# 맵에 배치한 소품 메시와 그 머티리얼·텍스처 (의존성 폐포까지 포함)
+!Content/Assets/Stylized_Cemetery/Static_Meshes/Environment_Assets/SM_Car_01.uasset
+!Content/Assets/Stylized_Cemetery/Static_Meshes/Environment_Assets/SM_Dirt_Island_01.uasset
+!Content/Assets/Stylized_Cemetery/Static_Meshes/Environment_Assets/SM_Stone_08.uasset
+!Content/Assets/Stylized_Cemetery/Static_Meshes/Environment_Assets/SM_Stone_09.uasset
+!Content/Assets/Stylized_Cemetery/Static_Meshes/Environment_Assets/SM_Tile_Brick_01.uasset
+!Content/Assets/Stylized_Cemetery/Static_Meshes/Environment_Assets/SM_Tile_Brick_02.uasset
+!Content/Assets/Stylized_Cemetery/Static_Meshes/Foliage_Assets/SM_Car_Part_Wheel_02.uasset
+!Content/Assets/Stylized_Cemetery/Materials/Material_Instance/MI_Car_01.uasset
+!Content/Assets/Stylized_Cemetery/Materials/Material_Instance/MI_Dirt_Islands.uasset
+!Content/Assets/Stylized_Cemetery/Materials/Material_Instance/MI_Stone_Tile.uasset
+!Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Car_01_BaseColor.uasset
+!Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Car_01_Normal.uasset
+!Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Car_01_ORM.uasset
+!Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Dirt_Islands_BaseColor.uasset
+!Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Dirt_Islands_Normal.uasset
+!Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Dirt_Islands_ORM.uasset

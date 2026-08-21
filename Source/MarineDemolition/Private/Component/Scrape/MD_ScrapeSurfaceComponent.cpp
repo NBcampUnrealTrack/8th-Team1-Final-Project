@@ -23,6 +23,12 @@ namespace MD_ScrapeSurfaceComponentInternal
 		TEXT("ContaminationShapeMask"));
 	const FName ContaminationBaseCoverageParameterName(TEXT("ShapeFloorMin"));
 	const FName ContaminationOpacityParameterName(TEXT("ContaminationOpacity"));
+	const FName ContaminationEdgeMinParameterName(TEXT("EdgeMin"));
+	const FName ContaminationEdgeMaxParameterName(TEXT("EdgeMax"));
+	const FName ContaminationEdgeNoiseStrengthParameterName(
+		TEXT("EdgeNoiseStrength"));
+	const FName ContaminationVisualMaskGammaParameterName(
+		TEXT("VisualMaskGamma"));
 	const FName ContaminationMaskVScaleParameterName(TEXT("MaskVScale"));
 	const FName ContaminationMaskVOffsetParameterName(TEXT("MaskVOffset"));
 	const FName ContaminationMaskUFlipParameterName(TEXT("MaskUFlip"));
@@ -70,6 +76,12 @@ UMD_ScrapeSurfaceComponent::UMD_ScrapeSurfaceComponent()
 	// 양면 아틀라스는 128 x 128(16,384셀)로 uint16 복제 인덱스 범위 안에 있다.
 	ContaminationGridDimensions = FIntPoint(128, 64);
 	TransferredPaintVisualTexelSizeCm = 0.75f;
+	// 경계 전이 폭 약 1.8cm. 더 좁히면 선은 날카로워지지만 색조 단계가 사라져
+	// 한 번 긁을 때마다 옅어지는 것이 안 보이고, 두 번째 통과에서 갑자기
+	// 사라지는 것처럼 된다. 경계 위치 정확도는 이 값과 무관하다.
+	ContaminationVisualEdgeSoftness = 0.55f;
+	ContaminationVisualFilmOpacityGamma = 1.0f;
+	ContaminationVisualEdgeNoiseAmount = 0.0f;
 	InitialContaminationPerCell = 1.0f;
 	bUseProceduralContamination = false;
 	ContaminationNoiseScaleCm = 75.0f;
@@ -351,6 +363,30 @@ void UMD_ScrapeSurfaceComponent::EndPlay(
 	ShutdownRuntimeState();
 	Super::EndPlay(EndPlayReason);
 }
+
+#if WITH_EDITOR
+void UMD_ScrapeSurfaceComponent::PostEditChangeProperty(
+	FPropertyChangedEvent& PropertyChangedEvent)
+{
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+
+	// 마스크 텍셀 값 규약과 머티리얼 판정 구간은 한 쌍이다. 어느 쪽을 만져도
+	// 같이 다시 만들어야 하므로, 에디터에서 값을 굴려 보며 맞출 수 있게 한다.
+	const FName PropertyName = PropertyChangedEvent.GetPropertyName();
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(
+			UMD_ScrapeSurfaceComponent,
+			ContaminationVisualEdgeSoftness)
+		|| PropertyName == GET_MEMBER_NAME_CHECKED(
+			UMD_ScrapeSurfaceComponent,
+			ContaminationVisualFilmOpacityGamma)
+		|| PropertyName == GET_MEMBER_NAME_CHECKED(
+			UMD_ScrapeSurfaceComponent,
+			ContaminationVisualEdgeNoiseAmount))
+	{
+		RefreshContaminationAppearance();
+	}
+}
+#endif
 
 void UMD_ScrapeSurfaceComponent::InitializeRuntimeState()
 {

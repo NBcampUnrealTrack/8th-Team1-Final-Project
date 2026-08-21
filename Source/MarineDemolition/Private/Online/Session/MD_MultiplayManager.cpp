@@ -36,6 +36,26 @@ void UMD_MultiplayManager::Deinitialize()
     // Online Session의 유효성 검사
     if (SessionInterface.IsValid() == true)
     {
+        // PIE 종료 후 에디터 Online Subsystem에 세션이 남지 않도록 현재 월드 유형 확인
+        UWorld* World = GetWorld();
+        bool bIsPIEWorld = false;
+        bool bWorldValid = IsValid(World);
+        if (bWorldValid == true)
+        {
+            bIsPIEWorld = World->WorldType == EWorldType::PIE;
+        }
+
+        // 다음 PIE의 호스트 요청을 막는 기존 GameSession을 로컬 Named Session 원장에서 제거
+        if (bIsPIEWorld == true)
+        {
+            FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_GameSession);
+            if (ExistingSession != nullptr)
+            {
+                SessionInterface->RemoveNamedSession(NAME_GameSession);
+                UE_LOG(MarineDemolition, Log, TEXT("%s PIE 종료 시 남은 GameSession을 정리했습니다."), *UE_CALL_LOCATIONINFO);
+            }
+        }
+
         // Session 생성 완료에 대한 이벤트 연결 해제
         SessionInterface->OnCreateSessionCompleteDelegates.RemoveAll(this);
 

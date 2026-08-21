@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Engine/EngineTypes.h"
 #include "Gameplay/Interaction/MD_Grabbable.h"
 #include "MD_InteractionComponent.generated.h"
 
@@ -77,6 +78,42 @@ protected:
 		meta = (ClampMin = "0.1", UIMin = "0.5", Units = "s"))
 	float CarrySettleTimeout = 1.5f;
 
+	/**
+	 * 홀드 목표점을 월드에 대고 훑을 때 쓰는 구체 반지름을 물체 바운드에서 뽑는 배율.
+	 * 1이면 물체가 지오메트리에 절대 안 겹치고, 낮추면 시선을 더 충실히 따라오는 대신 살짝 파고든다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "MD|Interaction",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float HoldProbeRadiusScale = 1.f;
+
+	/** 작은 물체도 최소한 이만큼은 여유를 두고 멈춘다. */
+	UPROPERTY(EditAnywhere, Category = "MD|Interaction",
+		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float HoldProbeMinRadius = 8.f;
+
+	/**
+	 * 홀드 목표점이 카메라 쪽으로 붕괴할 수 있는 하한.
+	 *
+	 * 벽에 붙으면 스윕이 목표점을 머리 안쪽까지 당기고, 스프링은 물체를 거기로 끌어당긴다.
+	 * 이 값보다 가까워지지 않게 잡아 물체가 시야 앞에 남도록 한다. 벽이 이보다 가까우면
+	 * 목표가 벽 너머에 서지만, 캡슐이 물체를 막아주는 한 정지 접촉이라 발산하지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "MD|Interaction",
+		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float HoldMinDistance = 60.f;
+
+	/**
+	 * 운반 중인 물체의 Pawn 채널 응답을 Ignore로 낮출지 여부.
+	 *
+	 * 기본값 false. 캐릭터 캡슐은 kinematic이라 dynamic 물체가 솔버로 밀지 못하고,
+	 * 물체가 캐릭터를 날리는 실제 경로(무브먼트 베이스)는 IgnoreComponentWhenMoving만으로
+	 * 막힌다. 반대로 Ignore로 낮추면 물체를 막아설 것이 없어져 머리 뒤로 통과한다.
+	 *
+	 * 그래도 발사 현상이 재발하면 여기를 켜서 원인을 좁힌다. 켜는 순간 통과 문제가 같이 돌아온다.
+	 */
+	UPROPERTY(EditAnywhere, Category = "MD|Interaction")
+	bool bIsolateCarriedFromPawnChannel = false;
+
 private:
 	UFUNCTION(Server, Reliable)
 	void ServerInteract(AActor* RequestedActor);
@@ -84,6 +121,30 @@ private:
 	bool TryHoldTarget(AActor* Target);
 	bool TryGrabPhysicsComponent(UPrimitiveComponent* Component, const FVector& PreferredGrabLocation,
 		const FMD_HoldProfile& HoldProfile);
+
+	/**
+	 * 운반 중인 물체와 운반자 캡슐의 충돌을 끊는다. 물리를 켜기 전에 호출해야 한다.
+	 *
+	 * HoldPoint는 Camera의 자식이라 시선을 내리면 캡슐 안쪽을 가리킨다. 그 상태에서
+	 * PhysicsHandle 스프링이 물체를 캡슐로 끌어당기면 물체가 캡슐을 밀고, 밀린 캡슐을 따라
+	 * 목표점이 도망가고, 스프링이 더 세게 당기는 되먹임이 걸려 둘 다 발사된다.
+	 */
+	void BeginCarryCollisionIsolation(UPrimitiveComponent* Component);
+
+	/** BeginCarryCollisionIsolation을 되돌린다. 호출 횟수와 무관하게 안전하다. */
+	void EndCarryCollisionIsolation();
+
+	/** 운반자의 캡슐. 없으면 nullptr. */
+	UPrimitiveComponent* GetOwnerCollisionComponent() const;
+
+	/**
+	 * HoldPoint가 가리키는 지점을 월드 지오메트리 앞까지 당겨서 돌려준다.
+	 *
+	 * HoldPoint는 카메라 기준 앞쪽 고정 거리라, 시선을 내리면 목표점이 바닥 밑으로 들어간다.
+	 * 도달 불가능한 목표를 스프링이 계속 당기고 바닥이 계속 밀어내면 평형점이 없어 떨린다.
+	 * 목표를 항상 빈 공간에 두면 그 싸움 자체가 없어진다.
+	 */
+	FVector ResolveHoldTargetLocation(const FTransform& HoldTransform) const;
 	bool ValidateInteractionTarget(AActor* RequestedActor) const;
 	bool IsHeldByOtherPawn(const AActor* Target) const;
 	bool CanOwnerInteract() const;
@@ -119,6 +180,14 @@ private:
 
 	FVector HeldTargetOffset = FVector::ZeroVector;
 	FVector HeldGrabPointOffset = FVector::ZeroVector;
+
+	/** 충돌을 끊어둔 운반 중인 컴포넌트. 해제 시 원복 대상이다. */
+	TWeakObjectPtr<UPrimitiveComponent> CarryIsolatedComponent;
+
+	/** 끊기 전 Pawn 채널 응답. 프리팹마다 다를 수 있어 값을 기억했다가 그대로 되돌린다. */
+	ECollisionResponse CarryIsolatedPawnResponse = ECR_Block;
+
+	bool bHasCarryCollisionIsolation = false;
 
 	UPROPERTY(Transient)
 	bool bInteractionBlocked = false;

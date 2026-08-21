@@ -9,6 +9,8 @@
 #include "Engine/Engine.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
 
@@ -244,8 +246,25 @@ void AMD_CuttableWall::CompleteCutWithCleanRatio(
 		}
 	}
 
-	// 경로 개방 (조각이 벽 자리를 대체)
-	Destroy();
+	MulticastPlayDemolishEffect();
+
+	// 경로 개방 (조각이 벽 자리를 대체).
+	// 즉시 Destroy하면 방금 보낸 멀티캐스트가 채널과 함께 유실될 수 있어 잠깐 미룬다
+	SetActorHiddenInGame(true);
+	SetActorEnableCollision(false);
+	SetLifeSpan(0.2f);
+}
+
+void AMD_CuttableWall::MulticastPlayDemolishEffect_Implementation()
+{
+	if (GetNetMode() == NM_DedicatedServer || !DemolishEffect)
+	{
+		return;
+	}
+
+	// 액터 원점이 아니라 메시 바운드 중심에서 터뜨린다
+	UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		this, DemolishEffect, Mesh->Bounds.Origin, GetActorRotation());
 }
 
 
@@ -263,25 +282,14 @@ void AMD_CuttableWall::ScanHighlight(float Duration, AActor* Scanner)
 		Duration = 3.f;
 	}
 
-	// 겹친 인프라(배관·배선)에 실루엣 노출 알림 (벽 MID 유무와 무관하게 먼저 방송)
+	// 벽 타입 확인용 디버그 로그 (화면 표시는 UI 담당)
+	UE_LOG(LogTemp, Log, TEXT("MD_CuttableWall::ScanHighlight - %s 스캔: %s, 지속 %.1fs"),
+			*GetName(),
+			WallType == EMD_WallType::Strut ? TEXT("지주격벽 (위험)") : TEXT("칸막이격벽 (자유 철거)"),
+			Duration);
+
+	// 겹친 인프라(배관·배선)에 실루엣 노출 알림. 벽 타입 표시는 UI 담당
 	OnWallScanned.Broadcast(this, Duration, Scanner);
-
-	if (!MID)
-	{
-		return;
-	}
-	
-	const bool bStrut = (WallType == EMD_WallType::Strut);
-	MID->SetVectorParameterValue(TEXT("Color"),
-			bStrut ? FLinearColor(0.7f, 0.05f, 0.05f) : FLinearColor(0.05f, 0.6f, 0.1f));
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(reinterpret_cast<uint64>(this), Duration, FColor::Cyan,
-				bStrut ? TEXT("스캔: 지주격벽 (위험)") : TEXT("스캔: 칸막이격벽 (자유 철거)"));
-	}
-	
-	GetWorldTimerManager().SetTimer(ScanTimerHandle, this, &AMD_CuttableWall::RestoreScanColor, Duration, false);
 }
 
 void AMD_CuttableWall::AddCutProgress(float DeltaSeconds, AActor* Cutter)
@@ -350,14 +358,6 @@ float AMD_CuttableWall::GetCutProgressRatio() const
 	return Required > 0.0f ? FMath::Clamp(CutProgressSeconds / Required, 0.0f, 1.0f) : 0.0f;
 }
 
-
-void AMD_CuttableWall::RestoreScanColor()
-{
-	if (MID)
-	{
-		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
-	}
-}
 
 void AMD_CuttableWall::OnRep_CutProgress()
 {

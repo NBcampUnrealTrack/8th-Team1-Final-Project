@@ -11,6 +11,7 @@ class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UStaticMeshComponent;
 class UMD_ScrapeSurfaceComponent;
+class UNiagaraSystem;
 class AMD_CuttableWall;
 class AMD_ContaminationItem;
 class AMD_WallPiece;
@@ -170,6 +171,10 @@ protected:
 		Category = "MD|Wall|Contamination|Decal")
 	TObjectPtr<UMaterialInterface> ContaminationDecalMaterial;
 
+	/** 철거 완료 순간 벽 중심에 재생할 원샷 버스트 (NS_Cutter_Finish) */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|VFX")
+	TObjectPtr<UNiagaraSystem> DemolishEffect;
+
 	// 기획 §2 — 애니메이션 1사이클(3.567초)의 정수배로 잡는다
 	UPROPERTY(EditAnywhere, Category = "MD|Wall|Cut",
 		meta = (ClampMin = "0.1", Units = "s"))
@@ -194,13 +199,14 @@ private:
 		AActor* Cutter,
 		const FHitResult* WallHit);
 
-	void RestoreScanColor();
+	// 파괴 직전 서버가 쏘고 모든 클라이언트가 벽 중심에 원샷 재생한다
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlayDemolishEffect();
 
 	UFUNCTION()
 	void OnRep_CutProgress();
 
 	bool bCut = false;
-	FTimerHandle ScanTimerHandle;
 
 	//  누적 절단 시간. 감소하지 않으며 Day 간에도 유지된다 (기획 §3)
 	UPROPERTY(ReplicatedUsing = OnRep_CutProgress)

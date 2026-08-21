@@ -33,7 +33,9 @@ public class MarineDemolition : ModuleRules
 			"ApplicationCore",
 			"CoreOnline",
 			// 오염 마스크 런타임 텍스처 업로드
-			"RHI"
+			"RHI",
+			// 절단·헤라 VFX
+			"Niagara"
 		});
 
 		if (Target.bBuildEditor)

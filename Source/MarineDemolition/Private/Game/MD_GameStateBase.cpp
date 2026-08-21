@@ -174,14 +174,13 @@ AMD_GameStateBase::GetWithdrawalPhase() const
 
 void AMD_GameStateBase::AddScoreDelta(int32 Delta)
 {
-    if (!HasAuthority())
+    if (HasAuthority() == false)
     {
         return;
     }
 
-    Score += Delta;
-    // 리슨 서버는 OnRep이 안 오므로 직접 방송
-    OnRep_Score();
+    // 원인이 지정되지 않은 직접 점수 변경은 사고 분류의 공통 기록 경로로 처리
+    RecordScore(EMD_DailyReportCategory::Accident, FGameplayTag(), Delta);
 }
 
 int32 AMD_GameStateBase::GetScoreForDay(int32 Day) const
@@ -197,6 +196,20 @@ int32 AMD_GameStateBase::GetScoreForDay(int32 Day) const
     }
 
     return OutScore;
+}
+
+TArray<FMD_DailyReportValue> AMD_GameStateBase::GetDailyScoreTotals() const
+{
+    // 서버 Map을 RPC와 복제가 지원하는 항목 배열로 변환
+    TArray<FMD_DailyReportValue> OutScoreTotals;
+    OutScoreTotals.Reserve(DailyScoreTotals.Num());
+    for (const TPair<EMD_DailyReportCategory, int64>& ScoreEntry : DailyScoreTotals)
+    {
+        int32 ScoreValue = static_cast<int32>(FMath::Clamp<int64>(ScoreEntry.Value, MIN_int32, MAX_int32));
+        OutScoreTotals.Add({ScoreEntry.Key, ScoreValue});
+    }
+
+    return OutScoreTotals;
 }
 
 void AMD_GameStateBase::AddScoreEvent(FGameplayTag EventTag, int32 Count, bool bUseCountAsDelta)
@@ -222,9 +235,9 @@ void AMD_GameStateBase::AddScoreEvent(FGameplayTag EventTag, int32 Count, bool b
         }
     }
 
-    // 총점 변경과 동일한 일차·원인의 원장 항목을 한 번에 남기기 위한 기록
-    ScoreLog.Add({EventTag, Delta, CurrentDay});
-    AddScoreDelta(Delta);
+    // 태그를 Enum 분류로 변환하여 점수·로그·Map을 한 번에 기록
+    EMD_DailyReportCategory Category = ResolveScoreCategory(EventTag);
+    RecordScore(Category, EventTag, Delta);
 }
 
 void AMD_GameStateBase::AddSampleScoreEvent(EMD_SampleGrade Grade, EMD_SampleScoreType Type)
@@ -240,8 +253,79 @@ void AMD_GameStateBase::AddSampleScoreEvent(EMD_SampleGrade Grade, EMD_SampleSco
         return;
     }
 
-    ScoreLog.Add({FGameplayTag(), Delta, CurrentDay});
-    AddScoreDelta(Delta);
+    // 샘플 점수는 현재 구성에서 사고·기타 점수로 기록
+    RecordScore(EMD_DailyReportCategory::Accident, FGameplayTag(), Delta);
+}
+
+EMD_DailyReportCategory AMD_GameStateBase::ResolveScoreCategory(FGameplayTag EventTag) const
+{
+    // GameplayTag를 한 번만 문자열로 변환하여 정산 분류를 결정
+    FString EventName = EventTag.ToString();
+    bool bIsCategorizing = EventName.StartsWith(TEXT("Score.Sorting"));
+    if (bIsCategorizing == false)
+    {
+        bIsCategorizing = EventName.StartsWith(TEXT("Score.Penalty.Missort"));
+    }
+    if (bIsCategorizing == false)
+    {
+        bIsCategorizing = EventName == TEXT("Score.Penalty.UnsortedRemain");
+    }
+    if (bIsCategorizing == false)
+    {
+        bIsCategorizing = EventName == TEXT("Score.Penalty.UncollectedRemain");
+    }
+    if (bIsCategorizing == true)
+    {
+        return EMD_DailyReportCategory::Categorizing;
+    }
+
+    // 복귀 성공과 실패 태그를 복귀 분류로 변환
+    bool bIsReturn = EventName == TEXT("Score.Daily.AllReturned");
+    if (bIsReturn == false)
+    {
+        bIsReturn = EventName == TEXT("Score.Penalty.NotReturned");
+    }
+    if (bIsReturn == true)
+    {
+        return EMD_DailyReportCategory::Return;
+    }
+
+    // 퀘스트 성공과 실패 태그를 퀘스트 분류로 변환
+    bool bIsQuest = EventName == TEXT("Score.Daily.Quest");
+    if (bIsQuest == false)
+    {
+        bIsQuest = EventName == TEXT("Score.Daily.QuestS");
+    }
+    if (bIsQuest == false)
+    {
+        bIsQuest = EventName == TEXT("Score.Penalty.Quest");
+    }
+    if (bIsQuest == true)
+    {
+        return EMD_DailyReportCategory::Quest;
+    }
+
+    // 나머지 철거·사고·경고 태그는 사고 분류로 처리
+    return EMD_DailyReportCategory::Accident;
+}
+
+void AMD_GameStateBase::RecordScore(EMD_DailyReportCategory Category, FGameplayTag EventTag, int32 Delta)
+{
+    if (Delta == 0)
+    {
+        return;
+    }
+
+    // 일차별 총점 계산과 원인 추적을 위한 기존 로그 유지
+    ScoreLog.Add({EventTag, Delta, CurrentDay});
+
+    // 상세 보고서가 문자열 재분류 없이 조회하도록 Enum Map에 누적
+    int64& CategoryTotal = DailyScoreTotals.FindOrAdd(Category);
+    CategoryTotal += Delta;
+
+    // 누적 점수와 리슨 서버 UI를 동일한 기록 경로에서 갱신
+    Score += Delta;
+    OnRep_Score();
 }
 
 int32 AMD_GameStateBase::GetInspectionThreshold(int32 Day) const
@@ -334,6 +418,11 @@ void AMD_GameStateBase::OnRep_InspectionReport()
 
 void AMD_GameStateBase::SetCurrentDay(int32 NewDay)
 {
+    // 실제 Day가 변경될 때만 이전 Day의 상세 Enum Map을 초기화
+    if (CurrentDay != NewDay)
+    {
+        DailyScoreTotals.Reset();
+    }
     CurrentDay = NewDay;
     // 리슨 서버 호스트는 OnRep이 안 오므로 직접 방송
     OnRep_CurrentDay();
