@@ -18,7 +18,7 @@ public class MarineDemolition : ModuleRules
 			// Online
 			"OnlineSubsystem", "OnlineSubsystemUtils",
 			//UI
-			"UMG",
+			"UMG", "CommonUI", "CommonInput",
 			// Landscape (editor import helper uses ALandscape::Import)
 			"Landscape",
 			"GeometryCollectionEngine",
