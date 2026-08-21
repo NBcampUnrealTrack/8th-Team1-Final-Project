@@ -52,31 +52,60 @@ private:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_tHeader;
 
-	// 현재 Day에 발생한 평가 점수 증감 합계
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_TodayNum;
-
-	// 계약 전체에 누적된 평가 점수
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_CumulativeNum;
-
-	// 일일 착수금 원장 연결 전 잘못된 예시값 노출을 막는 표시 영역
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_HandselNum;
-
-	// 일일 크레딧 정산 원장 연결 전 잘못된 예시값 노출을 막는 표시 영역
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_AdjustmentNum;
-
-	// 서버 원장에서 확정된 현재 크레딧 표시 영역
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_Credit;
-
 	// 판정 결과에 맞는 확인 버튼 문구 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_Nextday;
 
+	// 분류 점수 값 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_CategorizingScore_Value;
+
+	// 복귀 점수 값 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_ReturnScore_Value;
+
+	// 사고·기타 점수 값 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_AccidentScore_Value;
+
+	// 퀘스트 점수 값 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_QuestScore_Value;
+
+	// 당일 총점 값 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_TotalScore_Value;
+
+	// 착수금 값 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_RetainerCredit_Value;
+
+	// 분류 환급 값 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_CategorizingCredit_Value;
+
+	// 사고·기타 조정 값 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_AccidentCredit_Value;
+
+	// 평가 보상 값 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_EvaluationCredit_Value;
+
+	// 퀘스트 금액 값 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_QuestCredit_Value;
+
+	// 구매·대출·상환 등 기타 금액 값 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_OtherCredit_Value;
+
+	// 당일 최종 크레딧 변동 합계 표시 영역
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_TotalCredit_Value;
+
 	// WBP 버튼 클릭을 외부 전환 요청 이벤트로 변환하는 처리
 	UFUNCTION()
 	void HandleContinueClicked();
+
 };

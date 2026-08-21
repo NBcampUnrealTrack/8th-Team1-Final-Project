@@ -80,7 +80,8 @@ bool UMD_LoreSubsystem::TryDiscoverLore(const UMD_LoreCatalog* LoreCatalog, FNam
 	*SiteProgress = MoveTemp(NewSiteProgress);
 
 	// 최초 발견 기록과 같은 서버 호출 안에서만 실행되는 중복 방지 보상 지급
-	MerchantSubsystem->AddCredits(TotalRewardCredits);
+	// 로어 보상을 일일 보고서의 퀘스트 금액 행에 기록
+	MerchantSubsystem->AddCredits(EMD_DailyReportCategory::Quest, TotalRewardCredits);
 
 	// 액터 파괴 이벤트보다 먼저 서버의 확정 결과를 남기기 위한 수집 로그
 	UE_LOG(MarineDemolition, Log, TEXT("%s [로어] 기록물 수집 완료: 현장=%s, 로어=%s, 보상=%d, 진행=%d/%d"), *UE_CALL_LOCATIONINFO, *LoreCatalog->SiteId.ToString(), *LoreId.ToString(), TotalRewardCredits, SiteProgress->DiscoveredLoreIds.Num(), LoreCatalog->LoreEntries.Num());
