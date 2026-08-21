@@ -232,6 +232,11 @@ public:
 		float CleanRatioDelta,
 		float LoadPerRemovedPercent);
 
+	/** 현재 적재량과 요청량만으로 실제 제거 가능한 양을 계산하며 상태는 변경하지 않는다. */
+	static float CalculateActualScrapeLoadRemoval(
+		float CurrentLoad,
+		float RequestedAmount);
+
 	/** 현재 헤라 인스턴스의 적재량을 0~100으로 반환한다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
 	float GetScrapeLoad() const
@@ -333,6 +338,11 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
 		Category = "MD|Scrape|Tool|Load")
 	float AddScrapeLoad(float RequestedAmount);
+
+	/** 서버에서 양수 적재량을 제거하고, 0 하한까지 실제로 제거된 양을 반환한다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+		Category = "MD|Scrape|Tool|Load")
+	float RemoveScrapeLoad(float RequestedAmount);
 
 	/** 서버 변경 또는 복제 수신으로 ScrapeLoad가 실제로 바뀔 때 발생한다. */
 	UPROPERTY(BlueprintAssignable, Category = "MD|Scrape|Tool|Load")

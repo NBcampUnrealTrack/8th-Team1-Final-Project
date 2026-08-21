@@ -1,5 +1,6 @@
 #include "World/Trash/MD_TrashBin.h"
 
+#include "Character/MD_Character.h"
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -470,6 +471,56 @@ void AMD_TrashBin::SetInteractionHighlighted_Implementation(bool bHighlighted)
 		Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
 		Mesh->SetRenderCustomDepth(bHighlighted);
 	}
+}
+
+bool AMD_TrashBin::ShouldPrioritizeInteractionOverPhysicsPickup_Implementation(
+	AActor* Interactor) const
+{
+	float RequestedAmount = 0.0f;
+	if (!TryGetScrapeLoadUnloadAmount(RequestedAmount))
+	{
+		return false;
+	}
+
+	const AMD_Character* Character = Cast<AMD_Character>(Interactor);
+	return IsValid(Character)
+		&& Character->CanUnloadScrapeLoadForRequest(RequestedAmount);
+}
+
+void AMD_TrashBin::Interact_Implementation(AActor* Interactor)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	float RequestedAmount = 0.0f;
+	if (!TryGetScrapeLoadUnloadAmount(RequestedAmount))
+	{
+		return;
+	}
+
+	AMD_Character* Character = Cast<AMD_Character>(Interactor);
+	if (!IsValid(Character))
+	{
+		return;
+	}
+
+	Character->TryUnloadScrapeLoad(RequestedAmount);
+}
+
+bool AMD_TrashBin::TryGetScrapeLoadUnloadAmount(float& OutRequestedAmount) const
+{
+	OutRequestedAmount = 0.0f;
+	if (!FMath::IsFinite(ScrapeLoadUnloadAmount)
+		|| ScrapeLoadUnloadAmount <= 0.0f
+		|| FMath::IsNearlyZero(ScrapeLoadUnloadAmount))
+	{
+		return false;
+	}
+
+	OutRequestedAmount = FMath::Min(ScrapeLoadUnloadAmount, 20.0f);
+	return true;
 }
 
 void AMD_TrashBin::HandleBeginOverlap(UPrimitiveComponent* /*OverlappedComponent*/,	AActor* OtherActor,	UPrimitiveComponent* /*OtherComponent*/, int32 /*OtherBodyIndex*/, bool /*bFromSweep*/,	const FHitResult& /*SweepResult*/)

@@ -243,6 +243,30 @@ float UMD_ScrapeToolComponent::CalculateScrapeLoadGainFromCleanRatioDelta(
 		* LoadPerRemovedPercent;
 }
 
+float UMD_ScrapeToolComponent::CalculateActualScrapeLoadRemoval(
+	const float CurrentLoad,
+	const float RequestedAmount)
+{
+	if (!FMath::IsFinite(CurrentLoad)
+		|| !FMath::IsFinite(RequestedAmount)
+		|| CurrentLoad <= 0.0f
+		|| RequestedAmount <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	const float ClampedCurrentLoad = FMath::Clamp(
+		CurrentLoad,
+		0.0f,
+		MaximumScrapeLoad);
+	const float RemainingLoad = FMath::Max(
+		0.0f,
+		ClampedCurrentLoad - RequestedAmount);
+	return FMath::IsNearlyEqual(ClampedCurrentLoad, RemainingLoad)
+		? 0.0f
+		: ClampedCurrentLoad - RemainingLoad;
+}
+
 bool UMD_ScrapeToolComponent::SetScrapeLoad(const float NewLoad)
 {
 	if (!GetOwner() || !GetOwner()->HasAuthority() || !FMath::IsFinite(NewLoad))
@@ -296,6 +320,41 @@ float UMD_ScrapeToolComponent::AddScrapeLoad(
 	}
 
 	return AddedAmount;
+}
+
+float UMD_ScrapeToolComponent::RemoveScrapeLoad(
+	const float RequestedAmount)
+{
+	const AActor* OwnerActor = GetOwner();
+	if (!IsValid(OwnerActor)
+		|| !OwnerActor->HasAuthority()
+		|| !FMath::IsFinite(RequestedAmount)
+		|| RequestedAmount <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	const float PreviousLoad = GetScrapeLoad();
+	const float CalculatedRemoval = CalculateActualScrapeLoadRemoval(
+		PreviousLoad,
+		RequestedAmount);
+	if (CalculatedRemoval <= 0.0f)
+	{
+		return 0.0f;
+	}
+
+	const float TargetLoad = PreviousLoad - CalculatedRemoval;
+	if (FMath::IsNearlyEqual(PreviousLoad, TargetLoad))
+	{
+		return 0.0f;
+	}
+
+	if (!SetScrapeLoad(TargetLoad))
+	{
+		return 0.0f;
+	}
+
+	return PreviousLoad - GetScrapeLoad();
 }
 
 void UMD_ScrapeToolComponent::OnRep_ScrapeLoad()

@@ -190,6 +190,22 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 		return;
 	}
 
+	const bool bPrioritizeInteraction =
+		IMD_Interactable::Execute_ShouldPrioritizeInteractionOverPhysicsPickup(
+			RequestedActor,
+			OwnerPawn);
+	if (bPrioritizeInteraction)
+	{
+		// 검증 뒤 다른 플레이어가 먼저 집은 대상에는 gameplay 상호작용도 실행하지 않는다.
+		if (IsHeldByOtherPawn(RequestedActor))
+		{
+			return;
+		}
+
+		IMD_Interactable::Execute_Interact(RequestedActor, OwnerPawn);
+		return;
+	}
+
 	// 핫바는 장비 전용 — 월드 오브젝트 픽업은 물리 운반만 허용 (기획 02 §2.5).
 	const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(RequestedActor);
 	if (TagAsset

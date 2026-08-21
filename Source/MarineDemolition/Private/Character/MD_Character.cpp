@@ -1290,6 +1290,35 @@ bool AMD_Character::IsScrapeToolEquipped() const
 		&& CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_Scrape);
 }
 
+bool AMD_Character::CanUnloadScrapeLoad() const
+{
+	return IsValid(ScrapeToolComponent)
+		&& IsScrapeToolEquipped()
+		&& !FMath::IsNearlyZero(ScrapeToolComponent->GetScrapeLoad());
+}
+
+bool AMD_Character::CanUnloadScrapeLoadForRequest(const float RequestedAmount) const
+{
+	if (!CanUnloadScrapeLoad())
+	{
+		return false;
+	}
+
+	return UMD_ScrapeToolComponent::CalculateActualScrapeLoadRemoval(
+		ScrapeToolComponent->GetScrapeLoad(),
+		RequestedAmount) > 0.0f;
+}
+
+float AMD_Character::TryUnloadScrapeLoad(const float RequestedAmount)
+{
+	if (!HasAuthority() || !CanUnloadScrapeLoadForRequest(RequestedAmount))
+	{
+		return 0.0f;
+	}
+
+	return ScrapeToolComponent->RemoveScrapeLoad(RequestedAmount);
+}
+
 UEnhancedInputLocalPlayerSubsystem* AMD_Character::GetEnhancedInputSubsystem() const
 {
 	APlayerController* PlayerController = Cast<APlayerController>(GetController());

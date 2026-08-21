@@ -45,6 +45,9 @@ public:
 
 	/** Implements IMD_Interactable*/
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+	virtual bool ShouldPrioritizeInteractionOverPhysicsPickup_Implementation(
+		AActor* Interactor) const override;
+	virtual void Interact_Implementation(AActor* Interactor) override;
 	/** ~Implements IMD_Interactable*/
 
 	/** Implements IMD_TrashContainer */
@@ -96,6 +99,11 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Interaction",	meta = (Categories = "Interaction.Pickup.Physics"))
 	FGameplayTag PickupMethodTag;
 
+	/** 개별 상호작용 한 번이 현재 장착한 헤라에서 덜어내는 최대 적재량. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Bin|Scrape Unload",
+		meta = (ClampMin = "0.0", ClampMax = "20.0", UIMin = "0.0", UIMax = "20.0"))
+	float ScrapeLoadUnloadAmount = 20.0f;
+
 	/** 쓰레기통이 수용할 내용물 분류 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Bin", meta = (Categories = "Resource.Storage.Content"))
 	FGameplayTagContainer AcceptedContentTags;
@@ -105,6 +113,9 @@ protected:
 	int32 ContentCount = 0;
 
 private:
+	/** 설정된 감산량이 유한한 양수일 때만 최대 20으로 제한해 반환한다. */
+	bool TryGetScrapeLoadUnloadAmount(float& OutRequestedAmount) const;
+
 	UFUNCTION()
 	void HandleBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 

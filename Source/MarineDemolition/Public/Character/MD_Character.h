@@ -67,6 +67,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
 	UMD_ScrapeToolComponent* GetScrapeToolComponent() const	{ return ScrapeToolComponent; }
 
+	/** 현재 장착한 헤라에 털어낼 적재량이 있는지 외부 상호작용 대상에 알려준다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Unload")
+	bool CanUnloadScrapeLoad() const;
+
+	/** 현재 장착한 헤라에서 요청량만큼 실제 표현 가능한 감소가 생기는지 반환한다. */
+	bool CanUnloadScrapeLoadForRequest(float RequestedAmount) const;
+
+	/** 서버에서 장착 상태를 재검증하고 요청량만큼 헤라 적재량 제거를 시도한다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Scrape|Unload")
+	float TryUnloadScrapeLoad(float RequestedAmount);
+
 	/**
 	 * 서버/로컬이 확정한 접촉 자세를 기존 ABP 입력 형식으로 변환한다.
 	 * 카메라 중앙을 다시 Trace하지 않으며 원격 Pawn도 복제 pose만 소비한다.
