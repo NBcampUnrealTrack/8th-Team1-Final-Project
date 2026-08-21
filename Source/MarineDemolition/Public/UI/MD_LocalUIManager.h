@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -8,7 +8,7 @@
 #include "MD_LocalUIManager.generated.h"
 
 class UCommonActivatableWidget;
-class UCommonActivatableWidgetStack;
+class UMD_WidgetStack;
 class UUserWidget;
 
 /** LocalPlayer별 PrimaryLayout과 Common UI 레이어를 소유하는 중앙 관리자다. */
@@ -31,7 +31,7 @@ protected:
 
 	// PrimaryLayout이 제공한 GameplayTag별 Common UI Stack을 보관한다.
 	UPROPERTY(Transient)
-	TMap<FGameplayTag, TObjectPtr<UCommonActivatableWidgetStack>> LayerStacks;
+	TMap<FGameplayTag, TObjectPtr<UMD_WidgetStack>> LayerStacks;
 
 	// 프로젝트 설정과 PlayerController 교체에서 PrimaryLayout을 생성할 클래스를 보관한다.
 	UPROPERTY(Transient)
@@ -59,11 +59,11 @@ public:
 
 	// PrimaryLayout 내부 Stack을 표준 UI 레이어 태그와 연결한다.
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI")
-	bool RegisterLayer(FGameplayTag LayerTag, UCommonActivatableWidgetStack* LayerStack);
+	bool RegisterLayer(FGameplayTag LayerTag, UMD_WidgetStack* LayerStack);
 
 	// PrimaryLayout 재구성 시 더 이상 유효하지 않은 Stack 연결을 해제한다.
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI")
-	void UnregisterLayer(FGameplayTag LayerTag, UCommonActivatableWidgetStack* LayerStack);
+	void UnregisterLayer(FGameplayTag LayerTag, UMD_WidgetStack* LayerStack);
 
 	// 지정한 레이어 Stack에 CommonActivatableWidget 화면을 Push한다.
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI", meta = (DeterminesOutputType = "ScreenClass"))
@@ -128,5 +128,5 @@ protected:
 	bool IsSupportedLayerTag(FGameplayTag LayerTag) const;
 
 	// 등록된 Stack 중 요청 태그에 해당하는 유효한 Stack을 반환한다.
-	UCommonActivatableWidgetStack* FindLayerStack(FGameplayTag LayerTag) const;
+	UMD_WidgetStack* FindLayerStack(FGameplayTag LayerTag) const;
 };

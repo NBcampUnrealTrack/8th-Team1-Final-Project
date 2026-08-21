@@ -1,6 +1,8 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/MD_LocalUIManager.h"
+
+#include "UI/Foundation/MD_WidgetStack.h"
 
 #include "Blueprint/GameViewportSubsystem.h"
 #include "CommonActivatableWidget.h"
@@ -62,6 +64,7 @@ void UMD_LocalUIManager::PlayerControllerChanged(APlayerController* NewPlayerCon
 	// 기존 PrimaryLayout과 Stack 상태를 유지하면서 Owning PlayerController를 갱신한다.
 	if (IsValid(PrimaryLayout) == true)
 	{
+		UE_LOG(MarineDemolition, Log, TEXT("Local UI Manager가 기존 PrimaryLayout의 Owning Player Controller를 변경하였습니다."));
 		PrimaryLayout->SetOwningPlayer(NewPlayerController);
 
 		// 기존 Layout이 Viewport에 남아 있으면 추가 등록 없이 변경 처리를 완료한다.
@@ -134,7 +137,7 @@ bool UMD_LocalUIManager::InitializePrimaryLayout(TSubclassOf<UUserWidget> InPrim
 	return bCreateResult;
 }
 
-bool UMD_LocalUIManager::RegisterLayer(FGameplayTag LayerTag, UCommonActivatableWidgetStack* LayerStack)
+bool UMD_LocalUIManager::RegisterLayer(FGameplayTag LayerTag, UMD_WidgetStack* LayerStack)
 {
 	// 표준 UI 레이어가 아니거나 실제 Stack이 없는 등록 요청을 한 번에 거부한다.
 	if (IsSupportedLayerTag(LayerTag) == false || IsValid(LayerStack) == false)
@@ -153,10 +156,10 @@ bool UMD_LocalUIManager::RegisterLayer(FGameplayTag LayerTag, UCommonActivatable
 	return true;
 }
 
-void UMD_LocalUIManager::UnregisterLayer(FGameplayTag LayerTag, UCommonActivatableWidgetStack* LayerStack)
+void UMD_LocalUIManager::UnregisterLayer(FGameplayTag LayerTag, UMD_WidgetStack* LayerStack)
 {
 	// 현재 등록된 Stack을 조회하여 오래된 Layout이 새 연결을 지우는 것을 막는다.
-	UCommonActivatableWidgetStack* RegisteredStack = FindLayerStack(LayerTag);
+	UMD_WidgetStack* RegisteredStack = FindLayerStack(LayerTag);
 	if (RegisteredStack != LayerStack)
 	{
 		return;
@@ -192,7 +195,7 @@ bool UMD_LocalUIManager::PopScreenFromLayer(FGameplayTag LayerTag)
 bool UMD_LocalUIManager::ClearLayer(FGameplayTag LayerTag)
 {
 	// 등록된 레이어가 없으면 제거할 화면도 없으므로 실패 처리한다.
-	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
+	UMD_WidgetStack* LayerStack = FindLayerStack(LayerTag);
 	if (LayerStack == nullptr)
 	{
 		return false;
@@ -208,7 +211,7 @@ bool UMD_LocalUIManager::ClearLayer(FGameplayTag LayerTag)
 UCommonActivatableWidget* UMD_LocalUIManager::GetActiveScreen(FGameplayTag LayerTag) const
 {
 	// 등록된 레이어 Stack을 조회한다.
-	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
+	UMD_WidgetStack* LayerStack = FindLayerStack(LayerTag);
 	if (LayerStack == nullptr)
 	{
 		return nullptr;
@@ -236,7 +239,7 @@ bool UMD_LocalUIManager::IsPrimaryLayoutReady() const
 bool UMD_LocalUIManager::IsLayerRegistered(FGameplayTag LayerTag) const
 {
 	// 등록된 레이어 Stack을 조회하여 Async 요청 전에 목적지 준비 상태를 확인한다.
-	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
+	UMD_WidgetStack* LayerStack = FindLayerStack(LayerTag);
 
 	// 중앙 조회 함수가 검증한 Stack의 존재 여부를 등록 상태로 반환한다.
 	bool bIsLayerRegistered = LayerStack != nullptr;
@@ -246,7 +249,7 @@ bool UMD_LocalUIManager::IsLayerRegistered(FGameplayTag LayerTag) const
 UCommonActivatableWidget* UMD_LocalUIManager::PushScreenToLayerInitialized(FGameplayTag LayerTag, TSubclassOf<UCommonActivatableWidget> ScreenClass, TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen)
 {
 	// PrimaryLayout이 등록한 대상 레이어 Stack을 찾는다.
-	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
+	UMD_WidgetStack* LayerStack = FindLayerStack(LayerTag);
 
 	// 생성할 화면 클래스 또는 등록된 레이어 Stack이 없으면 Stack을 변경하지 않는다.
 	if (LayerStack == nullptr || IsValid(ScreenClass) == false)
@@ -387,18 +390,19 @@ void UMD_LocalUIManager::HandleWorldBeginTearDown(UWorld* World)
 	// Travel 이후 새 Async 요청이 이전 요청의 입력 차단 횟수를 이어받지 않도록 초기화한다.
 	AsyncInputSuspensionCount = 0;
 
-	// 비동기 로드 중 비활성화된 Layout을 Travel 이후 다시 사용할 수 있도록 기존 상태로 복구한다.
-	PrimaryLayout->SetIsEnabled(IsValid(PrimaryLayout));
+	// 새 World에서 생성할 Layout이 기본 활성 상태로 시작하도록 복구 기준을 초기화한다.
+	bPrimaryLayoutWasEnabled = true;
 }
 
 void UMD_LocalUIManager::ClearAllLayers()
 {
-	// WidgetStack에 생성된 Widget 목록을 초기화한다.
-	for (const TPair<FGameplayTag, TObjectPtr<UCommonActivatableWidgetStack>>& Pair : LayerStacks)
+	// World 전환 이후 이전 화면 인스턴스가 재사용되지 않도록 모든 프로젝트 Stack을 초기화한다.
+	for (const TPair<FGameplayTag, TObjectPtr<UMD_WidgetStack>>& Pair : LayerStacks)
 	{
 		if (IsValid(Pair.Value) == true)
 		{
-			Pair.Value->ClearWidgets();
+			// 표시 화면과 내부 풀을 함께 비워 다음 World의 Push가 새 화면 인스턴스를 생성하게 한다.
+			Pair.Value->ClearWidgetsAndResetPool();
 		}
 	}
 }
@@ -411,7 +415,7 @@ bool UMD_LocalUIManager::IsSupportedLayerTag(FGameplayTag LayerTag) const
 	return bIsLayerTag;
 }
 
-UCommonActivatableWidgetStack* UMD_LocalUIManager::FindLayerStack(FGameplayTag LayerTag) const
+UMD_WidgetStack* UMD_LocalUIManager::FindLayerStack(FGameplayTag LayerTag) const
 {
 	// 허용되지 않은 태그는 레이어 맵을 조회하지 않는다.
 	bool bIsSupportedTag = IsSupportedLayerTag(LayerTag);
@@ -421,7 +425,7 @@ UCommonActivatableWidgetStack* UMD_LocalUIManager::FindLayerStack(FGameplayTag L
 	}
 
 	// TMap에서 레이어 Stack을 값으로 조회한다.
-	UCommonActivatableWidgetStack* FoundStack = LayerStacks.FindRef(LayerTag);
+	UMD_WidgetStack* FoundStack = LayerStacks.FindRef(LayerTag);
 
 	// Common UI Stack을 호출자에게 반환한다.
 	return FoundStack;
