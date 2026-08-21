@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Game/MD_GameModeBase.h"
@@ -329,6 +329,34 @@ EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
 
     PendingResult = EvaluateInspection();
 
+    // 점검 실패 페널티까지 포함한 당일 최종 평가 점수를 크레딧 연동 보너스로 지급
+    AMD_GameStateBase* ScoreGameState = GetGameState<AMD_GameStateBase>();
+    bool bScoreGameStateValid = IsValid(ScoreGameState);
+    if (bScoreGameStateValid == true)
+    {
+        // 누적 점수가 아니라 현재 Day의 순 평가 점수만 보너스 기준으로 사용
+        int32 CurrentDay = ScoreGameState->GetCurrentDay();
+        int32 DailyScore = ScoreGameState->GetScoreForDay(CurrentDay);
+        int32 DailyScoreCreditReward = FMath::Max(DailyScore, 0);
+
+        // 음수인 당일 점수는 추가 크레딧 차감 없이 보너스 0으로 처리
+        if (DailyScoreCreditReward > 0)
+        {
+            UGameInstance* GameInstance = GetGameInstance();
+            bool bGameInstanceValid = IsValid(GameInstance);
+            if (bGameInstanceValid == true)
+            {
+                UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+                bool bMerchantValid = IsValid(Merchant);
+                if (bMerchantValid == true)
+                {
+                    // 당일 점수 보상을 보고서의 평가 금액 행에 함께 기록
+                    Merchant->AddCredits(EMD_DailyReportCategory::Evaluation, DailyScoreCreditReward);
+                }
+            }
+        }
+    }
+
     CaptureDaySnapshot();
 
     return PendingResult;
@@ -424,7 +452,15 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result)
         DailyReport.Day = Day;
         DailyReport.Result = Result;
         DailyReport.DailyScore = GS->GetScoreForDay(Day);
-        DailyReport.Credits = IsValid(Merchant) == true ? Merchant->GetCredits() : 0;
+        // 일일 보고서가 서버 점수 Map을 그대로 전달받도록 구성
+        DailyReport.DailyScoreTotals = GS->GetDailyScoreTotals();
+
+        // 서버 크레딧 원장이 존재할 때 당일 착수금·기타 변동·현재 잔액을 함께 기록
+        bool bMerchantValid = IsValid(Merchant);
+        if (bMerchantValid == true)
+        {
+            DailyReport.DailyCreditTotals = Merchant->GetDailyCreditTotals();
+        }
         GS->SetInspectionReport(DailyReport);
     }
 
@@ -854,7 +890,7 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
     UMD_SiteDefinition* CurrentSite = Merchant->GetCurrentSite();
     if (CurrentSite != ResolvedSite || Merchant->GetMainQuests().IsEmpty() == true)
     {
-        Merchant->BeginContract(ResolvedSite, ExpeditionAdvancePayment);
+        Merchant->BeginContract(ResolvedSite);
     }
 
     bool bShouldBeginDay = Merchant->GetCurrentDay() != Day;
@@ -873,7 +909,11 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
 
     if (bShouldBeginDay)
     {
-        Merchant->BeginDay(Day);
+        // 복원된 GameState의 비상 Day 상태를 착수금 계산에 전달
+        AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
+        bool bEmergencyDay = IsValid(MDGameState) == true ? bEmergencyDay = MDGameState->IsEmergencyDay() : false;
+
+        Merchant->BeginDay(Day, ExpeditionAdvancePayment, bEmergencyDay);
     }
 }
 

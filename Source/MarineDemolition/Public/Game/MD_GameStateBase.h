@@ -75,6 +75,9 @@ public:
     // 서버 점수 원장에서 지정 Day에 발생한 증감만 합산하여 일일 보고서에 제공하는 함수
     int32 GetScoreForDay(int32 Day) const;
 
+    // 현재 Day의 Enum Map 점수 원장을 네트워크 전달용 항목 배열로 반환하는 함수
+    TArray<FMD_DailyReportValue> GetDailyScoreTotals() const;
+
     UPROPERTY(BlueprintAssignable, Category = "Score")
     FMD_OnScoreChanged OnScoreChanged;
 
@@ -186,6 +189,9 @@ private:
     UPROPERTY(Transient)
     TArray<FMD_ScoreEntry> ScoreLog;
 
+    // 현재 Day 점수를 정산 분류별로 누적하는 서버 Map 원장
+    TMap<EMD_DailyReportCategory, int64> DailyScoreTotals;
+
     UPROPERTY(ReplicatedUsing = OnRep_InspectionReport)
     FMD_InspectionReport LastInspectionReport;
 
@@ -214,6 +220,12 @@ private:
     void OnRep_WithdrawalPhase();
 
     void HandleWithdrawalPhaseChanged();
+
+    // 점수 이벤트 태그를 공통 일일 정산 Enum으로 변환하는 함수
+    EMD_DailyReportCategory ResolveScoreCategory(FGameplayTag EventTag) const;
+
+    // 점수 변경과 로그 및 Enum Map 원장을 한 경로에서 기록하는 함수
+    void RecordScore(EMD_DailyReportCategory Category, FGameplayTag EventTag, int32 Delta);
 
     UFUNCTION()
     void OnRep_Score();
