@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/Foundation/MD_AsyncAction_PushScreenToLayer.h"
 
@@ -83,6 +83,9 @@ void UMD_AsyncAction_PushScreenToLayer::Activate()
 		return;
 	}
 	RequestWorld = ResolvedRequestWorld;
+
+	// World 포인터만으로 감지하기 어려운 전환도 폐기할 수 있도록 Manager의 현재 세대를 저장한다.
+	RequestWorldGeneration = ResolvedUIManager->GetWorldGeneration();
 
 	// 옵션이 활성화된 요청은 로드 중 PrimaryLayout의 Click과 탐색 입력을 차단한다.
 	if (bSuspendInputUntilComplete == true)
@@ -196,6 +199,14 @@ void UMD_AsyncAction_PushScreenToLayer::HandleScreenClassLoaded()
 	if (IsValid(ResolvedUIManager) == false)
 	{
 		FinishCanceled();
+		return;
+	}
+
+	// 요청 시작 이후 World teardown이 발생했다면 새 World의 Stack에 이전 요청을 적용하지 않는다.
+	bool bIsCurrentWorldGeneration = ResolvedUIManager->IsWorldGenerationCurrent(RequestWorldGeneration);
+	if (bIsCurrentWorldGeneration == false)
+	{
+		FinishFailure(EMDUIPushFailure::StaleRequest, NSLOCTEXT("MDCommonUI", "WorldGenerationChangedDuringLoad", "Screen Class 로드 중 World 전환이 시작되어 요청을 폐기했습니다."));
 		return;
 	}
 

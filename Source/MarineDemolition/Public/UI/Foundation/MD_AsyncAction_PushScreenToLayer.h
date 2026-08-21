@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -74,6 +74,9 @@ protected:
 
 	// 요청이 시작된 World를 저장하여 Travel 후 도착한 완료 콜백을 폐기한다.
 	TWeakObjectPtr<UWorld> RequestWorld;
+
+	// 요청이 시작된 UI World 세대를 저장하여 같은 World 객체를 재사용하는 전환도 감지한다.
+	uint32 RequestWorldGeneration = 0;
 
 	// 목적지 Common UI Stack을 선택할 표준 UI Layer 태그를 보관한다.
 	FGameplayTag LayerTag;

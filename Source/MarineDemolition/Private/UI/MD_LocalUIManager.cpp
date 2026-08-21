@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/MD_LocalUIManager.h"
 
@@ -16,6 +16,9 @@ void UMD_LocalUIManager::Initialize(FSubsystemCollectionBase& Collection)
 
 	// 프로젝트 설정에서 PrimaryLayout 클래스를 읽어 초기 UI 생성을 준비한다.
 	LoadPrimaryLayoutFromSettings();
+
+	// 소유한 World가 제거되기 전에 화면과 비동기 요청 상태를 정리하도록 알림을 등록한다.
+	WorldBeginTearDownHandle = FWorldDelegates::OnWorldBeginTearDown.AddUObject(this, &UMD_LocalUIManager::HandleWorldBeginTearDown);
 }
 
 void UMD_LocalUIManager::LoadPrimaryLayoutFromSettings()
@@ -28,23 +31,17 @@ void UMD_LocalUIManager::LoadPrimaryLayoutFromSettings()
 	}
 
 	// 설정된 소프트 클래스를 로드하여 World 전환 후에도 재사용할 클래스에 저장한다.
-	TSubclassOf<UUserWidget> ConfiguredPrimaryLayoutClass = UISettings->LoadPrimaryLayoutClass();
-	if (IsValid(ConfiguredPrimaryLayoutClass) == false)
-	{
-		return;
-	}
-	PrimaryLayoutClass = ConfiguredPrimaryLayoutClass;
+	PrimaryLayoutClass = UISettings->LoadPrimaryLayoutClass();
 
-	// 설정된 클래스와 현재 플레이어 컨텍스트를 사용하여 PrimaryLayout을 초기화한다.
-	bool bCreateResult = CreatePrimaryLayout();
-	if (bCreateResult == false)
-	{
-		UE_LOG(MarineDemolition, Warning, TEXT("Local UI Manager가 프로젝트 설정의 PrimaryLayout을 생성하지 못했습니다."));
-	}
+	// 실제 Layout 생성은 유효한 PlayerController가 전달되는 PlayerControllerChanged 시점에 진행한다.
 }
 
 void UMD_LocalUIManager::Deinitialize()
 {
+	// LocalPlayer Subsystem 종료 이후 World delegate가 호출되지 않도록 등록을 해제한다.
+	FWorldDelegates::OnWorldBeginTearDown.Remove(WorldBeginTearDownHandle);
+	WorldBeginTearDownHandle.Reset();
+
 	// LocalPlayer 제거 전에 플레이어 화면과 Stack 참조를 정리한다.
 	RemovePrimaryLayout();
 
@@ -68,20 +65,13 @@ void UMD_LocalUIManager::PlayerControllerChanged(APlayerController* NewPlayerCon
 		PrimaryLayout->SetOwningPlayer(NewPlayerController);
 
 		// 기존 Layout이 Viewport에 남아 있으면 추가 등록 없이 변경 처리를 완료한다.
-		bool bIsReadyResult = IsPrimaryLayoutReady();
-		if (bIsReadyResult == true)
+		if (IsPrimaryLayoutReady() == true)
 		{
 			return;
 		}
 
 		// 화면에서 제거된 Layout을 같은 LocalPlayer 영역에 다시 등록한다.
-		ULocalPlayer* OwningLocalPlayer = GetLocalPlayer();
-		if (IsValid(OwningLocalPlayer) == false)
-		{
-			return;
-		}
-
-		// Engine 전역 GameViewport 관리자를 통해 기존 Layout의 화면 등록을 복원한다.
+		// GameViewport 관리자를 검증하여 복원에 필요한 컨텍스트를 보장한다.
 		UGameViewportSubsystem* GameViewportManager = UGameViewportSubsystem::Get();
 		if (IsValid(GameViewportManager) == false)
 		{
@@ -93,7 +83,7 @@ void UMD_LocalUIManager::PlayerControllerChanged(APlayerController* NewPlayerCon
 		ViewportSlot.bAutoRemoveOnWorldRemoved = false;
 
 		// 기존 Layout 인스턴스를 재사용하여 활성 화면과 레이어 Stack 상태를 보존한다.
-		bool bRestoreResult = GameViewportManager->AddWidgetForPlayer(PrimaryLayout, OwningLocalPlayer, ViewportSlot);
+		bool bRestoreResult = GameViewportManager->AddWidgetForPlayer(PrimaryLayout, GetLocalPlayer(), ViewportSlot);
 		if (bRestoreResult == false)
 		{
 			UE_LOG(MarineDemolition, Warning, TEXT("Local UI Manager가 기존 PrimaryLayout의 Viewport 등록을 복원하지 못했습니다."));
@@ -102,16 +92,15 @@ void UMD_LocalUIManager::PlayerControllerChanged(APlayerController* NewPlayerCon
 	}
 
 	// 이전에 지정된 Layout 클래스가 없으면 명시적 초기화 요청을 기다린다.
-	if (IsValid(PrimaryLayoutClass) == false)
+	if (IsValid(PrimaryLayoutClass) == true)
 	{
+		// 기존 Layout이 없는 경우에만 새 PlayerController를 통해 PrimaryLayout을 생성한다.
+		bool bCreateResult = CreatePrimaryLayout();
+		if (bCreateResult == false)
+		{
+			UE_LOG(MarineDemolition, Warning, TEXT("Local UI Manager가 PlayerController 교체 후 PrimaryLayout을 복원하지 못했습니다."));
+		}
 		return;
-	}
-
-	// 기존 Layout이 없는 경우에만 새 PlayerController를 통해 PrimaryLayout을 생성한다.
-	bool bCreateResult = CreatePrimaryLayout();
-	if (bCreateResult == false)
-	{
-		UE_LOG(MarineDemolition, Warning, TEXT("Local UI Manager가 PlayerController 교체 후 PrimaryLayout을 복원하지 못했습니다."));
 	}
 }
 
@@ -147,15 +136,8 @@ bool UMD_LocalUIManager::InitializePrimaryLayout(TSubclassOf<UUserWidget> InPrim
 
 bool UMD_LocalUIManager::RegisterLayer(FGameplayTag LayerTag, UCommonActivatableWidgetStack* LayerStack)
 {
-	// 표준 UI 레이어가 아닌 태그가 임의 Stack으로 등록되는 것을 막는다.
-	bool bIsSupportedTag = IsSupportedLayerTag(LayerTag);
-	if (bIsSupportedTag == false)
-	{
-		return false;
-	}
-
-	// 실제 Stack이 없는 Blueprint 등록 요청을 거부한다.
-	if (IsValid(LayerStack) == false)
+	// 표준 UI 레이어가 아니거나 실제 Stack이 없는 등록 요청을 한 번에 거부한다.
+	if (IsSupportedLayerTag(LayerTag) == false || IsValid(LayerStack) == false)
 	{
 		return false;
 	}
@@ -195,7 +177,7 @@ bool UMD_LocalUIManager::PopScreenFromLayer(FGameplayTag LayerTag)
 {
 	// 대상 레이어에 현재 표시 중인 화면이 있는지 확인한다.
 	UCommonActivatableWidget* ActiveScreen = GetActiveScreen(LayerTag);
-	if (IsValid(ActiveScreen) == false)
+	if (ActiveScreen == nullptr)
 	{
 		return false;
 	}
@@ -211,7 +193,7 @@ bool UMD_LocalUIManager::ClearLayer(FGameplayTag LayerTag)
 {
 	// 등록된 레이어가 없으면 제거할 화면도 없으므로 실패 처리한다.
 	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
-	if (IsValid(LayerStack) == false)
+	if (LayerStack == nullptr)
 	{
 		return false;
 	}
@@ -223,11 +205,11 @@ bool UMD_LocalUIManager::ClearLayer(FGameplayTag LayerTag)
 	return true;
 }
 
-UCommonActivatableWidget* UMD_LocalUIManager::GetActiveScreen(FGameplayTag LayerTag)
+UCommonActivatableWidget* UMD_LocalUIManager::GetActiveScreen(FGameplayTag LayerTag) const
 {
 	// 등록된 레이어 Stack을 조회한다.
 	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
-	if (IsValid(LayerStack) == false)
+	if (LayerStack == nullptr)
 	{
 		return nullptr;
 	}
@@ -237,17 +219,11 @@ UCommonActivatableWidget* UMD_LocalUIManager::GetActiveScreen(FGameplayTag Layer
 	return ActiveScreen;
 }
 
-bool UMD_LocalUIManager::IsPrimaryLayoutReady()
+bool UMD_LocalUIManager::IsPrimaryLayoutReady() const
 {
-	// Layout이 존재하는지 먼저 확인한다.
-	if (IsValid(PrimaryLayout) == false)
-	{
-		return false;
-	}
-
-	// GameViewport 관리자를 통해 실제 등록 상태를 확인한다.
+	// Layout과 GameViewport 관리자를 함께 검증하여 등록 상태 조회의 안전성을 보장한다.
 	UGameViewportSubsystem* GameViewportManager = UGameViewportSubsystem::Get();
-	if (IsValid(GameViewportManager) == false)
+	if (IsValid(PrimaryLayout) == false || IsValid(GameViewportManager) == false)
 	{
 		return false;
 	}
@@ -257,33 +233,28 @@ bool UMD_LocalUIManager::IsPrimaryLayoutReady()
 	return bIsWidgetAdded;
 }
 
-bool UMD_LocalUIManager::IsLayerRegistered(FGameplayTag LayerTag)
+bool UMD_LocalUIManager::IsLayerRegistered(FGameplayTag LayerTag) const
 {
 	// 등록된 레이어 Stack을 조회하여 Async 요청 전에 목적지 준비 상태를 확인한다.
 	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
-	if (IsValid(LayerStack) == false)
-	{
-		return false;
-	}
 
-	// 유효한 Stack이 존재하면 등록 완료 상태를 반환한다.
-	return true;
+	// 중앙 조회 함수가 검증한 Stack의 존재 여부를 등록 상태로 반환한다.
+	bool bIsLayerRegistered = LayerStack != nullptr;
+	return bIsLayerRegistered;
 }
 
-UCommonActivatableWidget* UMD_LocalUIManager::PushScreenToLayerInitialized(
-	FGameplayTag LayerTag,
-	TSubclassOf<UCommonActivatableWidget> ScreenClass,
-	TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen)
+UCommonActivatableWidget* UMD_LocalUIManager::PushScreenToLayerInitialized(FGameplayTag LayerTag, TSubclassOf<UCommonActivatableWidget> ScreenClass, TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen)
 {
-	// 생성할 화면 클래스가 없으면 Stack을 변경하지 않는다.
-	if (IsValid(ScreenClass) == false)
+	// PrimaryLayout이 등록한 대상 레이어 Stack을 찾는다.
+	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
+
+	// 생성할 화면 클래스 또는 등록된 레이어 Stack이 없으면 Stack을 변경하지 않는다.
+	if (LayerStack == nullptr || IsValid(ScreenClass) == false)
 	{
 		return nullptr;
 	}
 
-	// PrimaryLayout이 등록한 대상 레이어 Stack을 찾는다.
-	UCommonActivatableWidgetStack* LayerStack = FindLayerStack(LayerTag);
-	if (IsValid(LayerStack) == false)
+	if (LayerStack == nullptr)
 	{
 		return nullptr;
 	}
@@ -297,7 +268,7 @@ void UMD_LocalUIManager::SuspendInputForAsyncRequest()
 {
 	// 병렬 요청이 있어도 첫 요청에서만 기존 Layout 활성 상태를 저장한다.
 	AsyncInputSuspensionCount++;
-	if (AsyncInputSuspensionCount > 1)
+	if (AsyncInputSuspensionCount > 1 || IsValid(PrimaryLayout) == false)
 	{
 		return;
 	}
@@ -337,22 +308,17 @@ void UMD_LocalUIManager::ResumeInputForAsyncRequest()
 
 bool UMD_LocalUIManager::CreatePrimaryLayout()
 {
-	// 생성에 필요한 Layout 클래스가 지정되어 있는지 확인한다.
+	// Layout 클래스를 함께 검증하여 생성에 필요한 기본 컨텍스트를 보장한다.
 	if (IsValid(PrimaryLayoutClass) == false)
 	{
 		return false;
 	}
 
-	// 전역 0번 플레이어 대신 이 서브시스템을 소유한 LocalPlayer를 사용한다.
+	// PlayerController와 GameViewport 관리자를 함께 검증하여 생성과 등록 경로를 준비한다.
 	ULocalPlayer* OwningLocalPlayer = GetLocalPlayer();
-	if (IsValid(OwningLocalPlayer) == false)
-	{
-		return false;
-	}
-
-	// 해당 LocalPlayer에 연결된 PlayerController를 생성 전 확인하여 올바른 플레이어 컨텍스트를 보장한다.
-	APlayerController* OwningPlayerController = OwningLocalPlayer->GetPlayerController(GetWorld());
-	if (IsValid(OwningPlayerController) == false)
+	APlayerController* OwningPlayerController = IsValid(OwningLocalPlayer) == true ? OwningLocalPlayer->GetPlayerController(GetWorld()) : nullptr;
+	UGameViewportSubsystem* GameViewportManager = UGameViewportSubsystem::Get();
+	if (IsValid(OwningPlayerController) == false || IsValid(GameViewportManager) == false)
 	{
 		return false;
 	}
@@ -366,13 +332,6 @@ bool UMD_LocalUIManager::CreatePrimaryLayout()
 
 	// 입력과 플레이어 컨텍스트가 현재 PlayerController를 사용하도록 OwningPlayer를 명시한다.
 	CreatedLayout->SetOwningPlayer(OwningPlayerController);
-
-	// Engine 전역 GameViewport 관리자를 통해 World 수명과 분리된 화면 등록을 수행한다.
-	UGameViewportSubsystem* GameViewportManager = UGameViewportSubsystem::Get();
-	if (IsValid(GameViewportManager) == false)
-	{
-		return false;
-	}
 
 	// World가 제거되어도 PrimaryLayout을 자동 제거하지 않는 전체 화면 슬롯을 구성한다.
 	FGameViewportWidgetSlot ViewportSlot;
@@ -403,38 +362,56 @@ void UMD_LocalUIManager::RemovePrimaryLayout()
 		return;
 	}
 
-	// GameViewport 관리자가 등록한 화면과 LocalPlayer 슬롯을 함께 제거한다.
-	UGameViewportSubsystem* GameViewportManager = UGameViewportSubsystem::Get();
-	if (IsValid(GameViewportManager) == true)
-	{
-		GameViewportManager->RemoveWidget(PrimaryLayout);
-	}
-	else
-	{
-		// Engine 종료 단계에서 관리자를 얻지 못하면 Widget 자체 제거 경로를 사용한다.
-		PrimaryLayout->RemoveFromParent();
-	}
+	// Widget 자체 제거 경로를 사용한다.
+	PrimaryLayout->RemoveFromParent();
 
 	// 가비지 컬렉션이 이전 World의 Layout을 회수할 수 있도록 강한 참조를 해제한다.
 	PrimaryLayout = nullptr;
 }
 
-bool UMD_LocalUIManager::IsSupportedLayerTag(FGameplayTag LayerTag)
+void UMD_LocalUIManager::HandleWorldBeginTearDown(UWorld* World)
 {
-	// 유효하지 않은 GameplayTag 요청을 조기에 거부한다.
-	bool bIsValidTag = LayerTag.IsValid();
-	if (bIsValidTag == false)
+	// 다른 PIE 인스턴스나 서버 World의 종료 알림은 이 LocalPlayer UI에 적용하지 않는다.
+	UWorld* OwningWorld = GetWorld();
+	if (World != OwningWorld)
 	{
-		return false;
+		return;
 	}
 
+	// 이전 World에서 시작된 Async UI 완료 콜백이 새 화면을 생성하지 못하도록 세대를 변경한다.
+	WorldGeneration++;
+
+	// 화면이 보유한 이전 World Actor와 delegate가 화면 수명 종료 경로에서 해제되도록 Stack을 비운다.
+	ClearAllLayers();
+
+	// Travel 이후 새 Async 요청이 이전 요청의 입력 차단 횟수를 이어받지 않도록 초기화한다.
+	AsyncInputSuspensionCount = 0;
+
+	// 비동기 로드 중 비활성화된 Layout을 Travel 이후 다시 사용할 수 있도록 기존 상태로 복구한다.
+	PrimaryLayout->SetIsEnabled(IsValid(PrimaryLayout));
+}
+
+void UMD_LocalUIManager::ClearAllLayers()
+{
+	// WidgetStack에 생성된 Widget 목록을 초기화한다.
+	for (const TPair<FGameplayTag, TObjectPtr<UCommonActivatableWidgetStack>>& Pair : LayerStacks)
+	{
+		if (IsValid(Pair.Value) == true)
+		{
+			Pair.Value->ClearWidgets();
+		}
+	}
+}
+
+bool UMD_LocalUIManager::IsSupportedLayerTag(FGameplayTag LayerTag) const
+{
 	// UI.Layer의 하위 태그인지 확인한다.
 	bool bIsLayerTag = LayerTag.MatchesTag(MDGameplayTags::UI_Layer);
 
 	return bIsLayerTag;
 }
 
-UCommonActivatableWidgetStack* UMD_LocalUIManager::FindLayerStack(FGameplayTag LayerTag)
+UCommonActivatableWidgetStack* UMD_LocalUIManager::FindLayerStack(FGameplayTag LayerTag) const
 {
 	// 허용되지 않은 태그는 레이어 맵을 조회하지 않는다.
 	bool bIsSupportedTag = IsSupportedLayerTag(LayerTag);
@@ -445,11 +422,7 @@ UCommonActivatableWidgetStack* UMD_LocalUIManager::FindLayerStack(FGameplayTag L
 
 	// TMap에서 레이어 Stack을 값으로 조회한다.
 	UCommonActivatableWidgetStack* FoundStack = LayerStacks.FindRef(LayerTag);
-	if (IsValid(FoundStack) == false)
-	{
-		return nullptr;
-	}
 
-	// 유효한 Common UI Stack을 호출자에게 반환한다.
+	// Common UI Stack을 호출자에게 반환한다.
 	return FoundStack;
 }
