@@ -57,10 +57,6 @@
 			"Enabled": true
 		},
 		{
-			"Name": "SQLiteSupport",
-			"Enabled": true
-		},
-		{
 			"Name": "EditorToolset",
 			"Enabled": true
 		}

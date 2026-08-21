@@ -1,11 +1,11 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "UI/Game/MD_PlayerStatusWidget.h"
 
 #include "AbilitySystemComponent.h"
+#include "Components/HorizontalBox.h"
 #include "Components/ProgressBar.h"
-#include "Engine/World.h"
 #include "TimerManager.h"
 
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
@@ -14,7 +14,10 @@
 void UMD_PlayerStatusWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
-	
+
+	// 위젯이 다시 Construct될 때 현재 Oxygen 비율로 모든 Child를 다시 동기화한다.
+	PreviousOxygenIndex = INDEX_NONE;
+
 	TryBindToAbilitySystem();
 }
 
@@ -118,14 +121,36 @@ void UMD_PlayerStatusWidget::RefreshOxygen()
 	const UMD_CharacterAttributeSet* Attributes =
 		IsValid(MDPlayerState) ? MDPlayerState->GetCharacterAttributeSet() : nullptr;
 
-	if (!IsValid(Pb_Oxygen) || !IsValid(Attributes))
+	if (!IsValid(HB_Oxygen) || !IsValid(Attributes))
 	{
 		return;
 	}
 
-	const float MaxOxygenValue = Attributes->GetMaxOxygen();
+	// 최대 산소값을 사용하여 현재 산소 비율을 계산한다.
+	float MaxOxygenValue = Attributes->GetMaxOxygen();
+	float OxygenRatio = MaxOxygenValue > 0.0f ? OxygenRatio = Attributes->GetOxygen() / MaxOxygenValue : 0.0f;
 
-	// RefreshHealth와 같은 방식. 0으로 나누는 것만 막고 0~1 비율을 넘긴다
-	Pb_Oxygen->SetPercent(
-		MaxOxygenValue > 0.f ? Attributes->GetOxygen() / MaxOxygenValue : 0.f);
+	// 비정상적인 어트리뷰트 값이 Child Index 범위를 벗어나지 않도록 제한한다.
+	OxygenRatio = FMath::Clamp(OxygenRatio, 0.0f, 1.0f);
+
+	// 현재 구성된 산소 위젯 개수를 저장한다.
+	int32 OxygenWidgetCount = HB_Oxygen->GetChildrenCount();
+
+	// 표시할 산소 위젯이 없는 경우 갱신을 종료한다.
+	if (OxygenWidgetCount <= 0)
+	{
+		return;
+	}
+
+	// 산소 비율을 실제 Child 개수에 맞는 단계로 변환한다.
+	int32 NewOxygenIndex = FMath::FloorToInt(OxygenRatio * OxygenWidgetCount);
+
+	// 산소가 가득 찬 경우에도 마지막 Child Index를 넘지 않도록 제한한다.
+	NewOxygenIndex = FMath::Clamp(NewOxygenIndex, 0, OxygenWidgetCount - 1);
+
+	UpdateOxygenWidget(NewOxygenIndex);
+
+	//// RefreshHealth와 같은 방식. 0으로 나누는 것만 막고 0~1 비율을 넘긴다
+	//Pb_Oxygen->SetPercent(
+	//	MaxOxygenValue > 0.f ? Attributes->GetOxygen() / MaxOxygenValue : 0.f);
 }

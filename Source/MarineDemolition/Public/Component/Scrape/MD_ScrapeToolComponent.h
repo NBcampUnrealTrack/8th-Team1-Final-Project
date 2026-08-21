@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -9,12 +9,12 @@
 #include "Gameplay/Scrape/MD_ScrapeAimValidation.h"
 #include "Gameplay/Scrape/MD_ScrapeBladeAxis.h"
 #include "Gameplay/Scrape/MD_ScrapeReacquirePolicy.h"
+#include "GameplayTagContainer.h"
 #include "MD_ScrapeToolComponent.generated.h"
 
 class AMD_Barnacle;
 class AMD_CuttableWall;
 class UMD_ScrapeSurfaceComponent;
-class USoundBase;
 class UNiagaraSystem;
 class UParticleSystem;
 struct FMinimalViewInfo;
@@ -501,13 +501,16 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	TEnumAsByte<ECollisionChannel> TraceChannel;
 
-	/** 오염막을 실제로 제거한 스트로크에 재생할 임시 사운드. 미지정 가능. */
+	/**
+	 * 오염막을 실제로 제거한 스트로크에 재생할 이벤트 태그.
+	 * 사운드 에셋은 코드가 아니라 DA_MD_Audio_Clean 이 결정한다.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
-	TObjectPtr<USoundBase> ContaminationScrapeSound;
+	FGameplayTag ContaminationScrapeSoundTag;
 
-	/** 이미 깨끗한 벽면을 긁었을 때 재생할 금속 마찰 사운드. 미지정 가능. */
+	/** 이미 깨끗한 벽면을 긁었을 때 재생할 이벤트 태그. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
-	TObjectPtr<USoundBase> BareSurfaceScrapeSound;
+	FGameplayTag BareSurfaceScrapeSoundTag;
 
 	/** 오염막 제거 접촉 위치에 생성할 파티클 (NS_Scrape_Contamination). 미지정 가능. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
