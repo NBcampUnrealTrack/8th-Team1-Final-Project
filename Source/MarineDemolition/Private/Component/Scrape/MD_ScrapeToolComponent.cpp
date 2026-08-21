@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 
@@ -8,7 +8,7 @@
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
-#include "Sound/SoundBase.h"
+#include "Audio/MD_AudioSubsystem.h"
 #include "Net/UnrealNetwork.h"
 
 UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
@@ -17,8 +17,11 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 
 	TraceDistanceCm = 220.0f;
 	TraceChannel = ECC_Visibility;
-	ContaminationScrapeSound = nullptr;
-	BareSurfaceScrapeSound = nullptr;
+	// 사운드는 태그로만 지정한다. 에셋 참조는 DA_MD_Audio_Clean 에 있다.
+	ContaminationScrapeSoundTag =
+		FGameplayTag::RequestGameplayTag(TEXT("SFX.Clean.Hera.StrokeSludge"), /*ErrorIfNotFound*/ false);
+	BareSurfaceScrapeSoundTag =
+		FGameplayTag::RequestGameplayTag(TEXT("SFX.Clean.Hera.StrokeBare"), /*ErrorIfNotFound*/ false);
 	ContaminationScrapeEffect = nullptr;
 	BareSurfaceScrapeEffect = nullptr;
 	MinimumFeedbackIntervalSeconds = 0.08f;
@@ -636,19 +639,22 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 		Result.ContactType == EMD_ScrapeContactType::BareSurfaceOnly
 		|| Result.ContactType == EMD_ScrapeContactType::Mixed;
 
-	USoundBase* FeedbackSound = bBareSurfaceFeedback
-		? BareSurfaceScrapeSound
-		: ContaminationScrapeSound;
+	const FGameplayTag& FeedbackSoundTag = bBareSurfaceFeedback
+		? BareSurfaceScrapeSoundTag
+		: ContaminationScrapeSoundTag;
 	UNiagaraSystem* FeedbackEffect = bBareSurfaceFeedback
 		? BareSurfaceScrapeEffect
 		: ContaminationScrapeEffect;
 
-	if (FeedbackSound)
+	if (FeedbackSoundTag.IsValid())
 	{
-		UGameplayStatics::PlaySoundAtLocation(
-			this,
-			FeedbackSound,
-			ContactLocation);
+		if (const UWorld* World = GetWorld())
+		{
+			if (UMD_AudioSubsystem* Audio = World->GetSubsystem<UMD_AudioSubsystem>())
+			{
+				Audio->PlayEventAtLocation(FeedbackSoundTag, ContactLocation);
+			}
+		}
 	}
 
 	if (FeedbackEffect)
@@ -666,7 +672,7 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 			EffectRotation);
 	}
 
-	if (FeedbackSound || FeedbackEffect)
+	if (FeedbackSoundTag.IsValid() || FeedbackEffect)
 	{
 		LastFeedbackWorldSeconds = WorldSeconds;
 	}
