@@ -5,10 +5,55 @@
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Types/Lore/MD_LoreTypes.h"
+#include "World/Trash/MD_TrashBin.h"
 
 const FGameplayTag FMD_GameStateData::DataFieldKey = MDGameplayTags::Save_Data_GameState;
 const FGameplayTag FMD_MerchantData::DataFieldKey = MDGameplayTags::Save_Data_Merchant;
 const FGameplayTag FMD_WorldData::DataFieldKey = MDGameplayTags::Save_Data_World;
+
+bool FMD_TrashBinRecord::IsStructurallyValid() const
+{
+	const UClass* const SavedBinClass = TrashBinClass.Get();
+	const FVector SavedLocation = Transform.GetLocation();
+	const FVector SavedScale = Transform.GetScale3D();
+	const FQuat SavedRotation = Transform.GetRotation();
+	if (!StableBinId.IsValid()
+		|| SourceDispenserName.IsNone()
+		|| !IsValid(SavedBinClass)
+		|| !SavedBinClass->IsChildOf(AMD_TrashBin::StaticClass())
+		|| SavedLocation.ContainsNaN()
+		|| SavedScale.ContainsNaN()
+		|| SavedRotation.ContainsNaN()
+		|| !SavedRotation.IsNormalized()
+		|| LiquidRevision < 0)
+	{
+		return false;
+	}
+
+	FMD_TrashBinLiquidState SavedLiquidState;
+	SavedLiquidState.LiquidUnits = LiquidUnits;
+	SavedLiquidState.RewardUnits = RewardUnits;
+	SavedLiquidState.Revision = LiquidRevision;
+	if (!SavedLiquidState.IsValid(5.0))
+	{
+		return false;
+	}
+
+	const double SavedCarrierAmount =
+		FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(LiquidRecoveryLots);
+	const double SavedRewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(LiquidRecoveryLots);
+	return SavedCarrierAmount >= 0.0
+		&& SavedRewardUnits >= 0.0
+		&& FMath::IsNearlyEqual(
+			SavedCarrierAmount,
+			LiquidUnits,
+			1.0e-9)
+		&& FMath::IsNearlyEqual(
+			SavedRewardUnits,
+			RewardUnits,
+			1.0e-12);
+}
 
 bool FMD_GameStateData::IsStructurallyValid() const
 {
@@ -69,6 +114,18 @@ bool FMD_MerchantData::IsStructurallyValid() const
 
 bool FMD_WorldData::IsStructurallyValid() const
 {
+	// 같은 stable ID가 두 record를 가리키거나 lot 합이 요약과 다르면 일부만 복원하지 않는다.
+	TSet<FGuid> SavedTrashBinIds;
+	for (const FMD_TrashBinRecord& TrashBinRecord : TrashBins)
+	{
+		if (!TrashBinRecord.IsStructurallyValid()
+			|| SavedTrashBinIds.Contains(TrashBinRecord.StableBinId))
+		{
+			return false;
+		}
+		SavedTrashBinIds.Add(TrashBinRecord.StableBinId);
+	}
+
 	// 오염 셀의 병렬 배열 길이가 다르면 잘못된 인덱스 복원을 수행하지 않기 위한 검사
 	for (const FMD_WallContaminationRecord& ContaminationRecord : WallContaminations)
 	{

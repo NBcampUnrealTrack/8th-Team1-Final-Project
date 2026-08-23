@@ -15,6 +15,118 @@ namespace
 	constexpr double MaximumObstacleBladeRotationRadiansPerStep =
 		5.0 * UE_PI / 180.0;
 	constexpr double MaximumObstacleBladeTravelCmPerStep = 0.5;
+	constexpr double RecoveryCarrierComparisonTolerance = 1.0e-9;
+
+	bool TryAppendRecoveryLots(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		const TConstArrayView<FMD_ScrapeRecoveryLot> LotsToAppend)
+	{
+		TArray<FMD_ScrapeRecoveryLot> WorkingLots = InOutLots;
+		for (const FMD_ScrapeRecoveryLot& Lot : LotsToAppend)
+		{
+			if (!FMD_ScrapeRecoveryLedger::AppendLot(WorkingLots, Lot))
+			{
+				return false;
+			}
+		}
+		InOutLots = MoveTemp(WorkingLots);
+		return true;
+	}
+
+	bool TryExtractRecoveryLots(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		const double RequestedCarrierAmount,
+		TArray<FMD_ScrapeRecoveryLot>& OutExtractedLots)
+	{
+		OutExtractedLots.Reset();
+		if (!FMath::IsFinite(RequestedCarrierAmount)
+			|| RequestedCarrierAmount < 0.0)
+		{
+			return false;
+		}
+		if (RequestedCarrierAmount == 0.0)
+		{
+			return true;
+		}
+
+		const double AvailableCarrierAmount =
+			FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(InOutLots);
+		if (AvailableCarrierAmount < 0.0)
+		{
+			return false;
+		}
+		if (AvailableCarrierAmount < RequestedCarrierAmount
+			&& !FMD_ScrapeRecoveryLedger::AppendZeroRewardCarrier(
+				InOutLots,
+				RequestedCarrierAmount - AvailableCarrierAmount))
+		{
+			// 오래된/외부 상태에 provenance가 없으면 부족분만 reward 0으로
+			// 보충한다. 기존 canonical unit을 새로 발행하지 않는다.
+			return false;
+		}
+
+		const double ExtractedCarrierAmount =
+			FMD_ScrapeRecoveryLedger::ExtractProportional(
+				InOutLots,
+				RequestedCarrierAmount,
+				OutExtractedLots);
+		return FMath::Abs(
+			ExtractedCarrierAmount - RequestedCarrierAmount)
+			<= RecoveryCarrierComparisonTolerance
+				* FMath::Max(1.0, RequestedCarrierAmount);
+	}
+
+	bool TryReconcileRecoveryLayer(
+		TArray<FMD_ScrapeRecoveryLot>& InOutRemainingLots,
+		const double ExpectedRemainingCarrierAmount,
+		TArray<FMD_ScrapeRecoveryLot>& InOutRemovedLots)
+	{
+		if (!FMath::IsFinite(ExpectedRemainingCarrierAmount)
+			|| ExpectedRemainingCarrierAmount < 0.0)
+		{
+			return false;
+		}
+		const double CurrentRemainingCarrierAmount =
+			FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(
+				InOutRemainingLots);
+		if (CurrentRemainingCarrierAmount < 0.0)
+		{
+			return false;
+		}
+
+		if (CurrentRemainingCarrierAmount
+			> ExpectedRemainingCarrierAmount)
+		{
+			TArray<FMD_ScrapeRecoveryLot> NumericallyRemovedLots;
+			if (!TryExtractRecoveryLots(
+					InOutRemainingLots,
+					CurrentRemainingCarrierAmount
+						- ExpectedRemainingCarrierAmount,
+					NumericallyRemovedLots)
+				|| !TryAppendRecoveryLots(
+					InOutRemovedLots,
+					NumericallyRemovedLots))
+			{
+				return false;
+			}
+		}
+		else if (CurrentRemainingCarrierAmount
+			< ExpectedRemainingCarrierAmount)
+		{
+			// legacy cell raw에 lot이 없던 부족분은 canonical 발행 없이 보충한다.
+			if (!FMD_ScrapeRecoveryLedger::AppendZeroRewardCarrier(
+					InOutRemainingLots,
+					ExpectedRemainingCarrierAmount
+						- CurrentRemainingCarrierAmount))
+			{
+				return false;
+			}
+		}
+
+		return FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+			InOutRemainingLots,
+			ExpectedRemainingCarrierAmount);
+	}
 
 	struct FResolvedObstacleBladeBasis
 	{
@@ -706,7 +818,7 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithToolSpec(
 	const FMD_ScrapeToolSpec& ToolSpec)
 {
 	float IgnoredRemovedCleanRatioDelta = 0.0f;
-	return ApplyLocalScrapeStrokeInternal(
+	FMD_ScrapeResult Result = ApplyLocalScrapeStrokeInternal(
 		Stroke,
 		ToolSpec,
 		Stroke.StartPositionCm,
@@ -717,6 +829,17 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithToolSpec(
 		1.0f,
 		0,
 		IgnoredRemovedCleanRatioDelta);
+	// 기존 Blueprint 직접 호출은 Tool의 Load 소유자를 알 수 없다. 제거 질량을
+	// 버리지 않도록 예전과 같은 물리 100%로 한 번 귀속한다. 제품 긁기 경로는
+	// 아래 deferred API를 사용해 Tool이 Load/물리 비율을 먼저 결정한다.
+	FMD_ScrapeMassAllocationResult PhysicalOnlyAllocation;
+	PhysicalOnlyAllocation.bIsValid = true;
+	PhysicalOnlyAllocation.PhysicalDropRatio = 1.0f;
+	CommitContaminationPhysicalDrop(
+		Result,
+		PhysicalOnlyAllocation,
+		Stroke.EndPositionCm);
+	return Result;
 }
 
 
@@ -751,7 +874,9 @@ void UMD_ScrapeSurfaceComponent::FinalizeLocalContaminationPath()
 	}
 
 	const bool bIsFullyRemoved = IsContaminationFullyRemoved();
-	if (bIsFullyRemoved && !bContaminationCompletionBroadcast)
+	if (bDeferredContaminationCompletionTransition
+		&& bIsFullyRemoved
+		&& !bContaminationCompletionBroadcast)
 	{
 		bContaminationCompletionBroadcast = true;
 		OnContaminationFullyRemoved.Broadcast(this);
@@ -760,6 +885,7 @@ void UMD_ScrapeSurfaceComponent::FinalizeLocalContaminationPath()
 	{
 		bContaminationCompletionBroadcast = false;
 	}
+	bDeferredContaminationCompletionTransition = false;
 }
 
 
@@ -768,7 +894,8 @@ UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithContaminationStamp(
 	const FMD_ScrapeStroke& Stroke,
 	const FMD_ScrapeToolSpec& ToolSpec,
 	const float StampRatio,
-	float& OutRemovedCleanRatioDelta)
+	float& OutRemovedCleanRatioDelta,
+	const bool bDeferCompletionBroadcast)
 {
 	const FVector2D StrokeDelta =
 		Stroke.EndPositionCm - Stroke.StartPositionCm;
@@ -788,7 +915,9 @@ UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeWithContaminationStamp(
 		LegacyStampDepthCm,
 		LegacyStampDepthCm,
 		0,
-		OutRemovedCleanRatioDelta);
+		OutRemovedCleanRatioDelta,
+		bDeferCompletionBroadcast,
+		true);
 }
 
 
@@ -940,6 +1069,14 @@ float UMD_ScrapeSurfaceComponent::ApplyLocalContaminationDab(
 	{
 		return 0.0f;
 	}
+	const int32 FaceSlot = Dab.SurfaceFace == EMD_ScrapeSurfaceFace::Back
+		? 1
+		: 0;
+	if (FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(
+			TransferredContaminationRecoveryLots[FaceSlot]) < 0.0)
+	{
+		return 0.0f;
+	}
 
 	TArray<FMD_ScrapeCellChange> StampChanges;
 	const float AddedAmount = FMD_ScrapeEvaluator::ApplyContaminationDabToGrid(
@@ -951,6 +1088,30 @@ float UMD_ScrapeSurfaceComponent::ApplyLocalContaminationDab(
 		StampDepthCm,
 		FaceCells,
 		StampChanges);
+	if (AddedAmount > 0.0f)
+	{
+		// 독립 dab은 제거 provenance를 승계하지 않으므로 reward 0이다.
+		const bool bRecorded =
+			FMD_ScrapeRecoveryLedger::AppendZeroRewardCarrier(
+				TransferredContaminationRecoveryLots[FaceSlot],
+				static_cast<double>(AddedAmount));
+		ensureMsgf(
+			bRecorded,
+			TEXT("Contamination dab could not be recorded in recovery ledger."));
+		double FinalTransferredCarrierAmount = 0.0;
+		for (const FMD_ScrapeSurfaceCell& Cell : FaceCells)
+		{
+			FinalTransferredCarrierAmount +=
+				static_cast<double>(Cell.TransferredContamination);
+		}
+		const bool bReconciled = bRecorded
+			&& FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+				TransferredContaminationRecoveryLots[FaceSlot],
+				FinalTransferredCarrierAmount);
+		ensureMsgf(
+			bReconciled,
+			TEXT("Contamination dab recovery carrier could not be reconciled."));
+	}
 
 	// 표면 밖의 유효한 dab도 승인된 identity다. 재전송이 뒤늦게
 	// 들어와 다른 표면 상태에서 적용되는 것을 막기 위해 기록한다.
@@ -1035,7 +1196,8 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	const float StampSpacingCm,
 	const int32 StampPatternSeed,
 	float& OutRemovedCleanRatioDelta,
-	const bool bDeferCompletionBroadcast)
+	const bool bDeferCompletionBroadcast,
+	const bool bUseExactRequestedAmountStamp)
 {
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeStrokeTotal);
 	OutRemovedCleanRatioDelta = 0.0f;
@@ -1055,6 +1217,12 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	{
 		return FMD_ScrapeResult();
 	}
+	if (!CanAcceptRecoveryTransaction(Stroke.SurfaceFace))
+	{
+		FMD_ScrapeResult InvalidResult;
+		InvalidResult.SurfaceFace = Stroke.SurfaceFace;
+		return InvalidResult;
+	}
 
 	bool bWasFullyRemoved = false;
 	{
@@ -1070,17 +1238,79 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 		InvalidResult.SurfaceFace = Stroke.SurfaceFace;
 		return InvalidResult;
 	}
+	const int32 FaceSlot = Stroke.SurfaceFace == EMD_ScrapeSurfaceFace::Back
+		? 1
+		: 0;
+	// 잘못된 runtime lot은 셀을 먼저 바꾸고 뒤늦게 발견하지 않는다.
+	// 각 layer 안의 여러 source는 균질하게 섞여 비례 소비된다.
+	const double BaseRecoveryRewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
+			BaseContaminationRecoveryLots[FaceSlot]);
+	const double TransferredRecoveryRewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
+			TransferredContaminationRecoveryLots[FaceSlot]);
+	if (FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(
+			BaseContaminationRecoveryLots[FaceSlot]) < 0.0
+		|| FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(
+			TransferredContaminationRecoveryLots[FaceSlot]) < 0.0
+		|| BaseRecoveryRewardUnits < 0.0
+		|| TransferredRecoveryRewardUnits < 0.0)
+	{
+		FMD_ScrapeResult InvalidResult;
+		InvalidResult.SurfaceFace = Stroke.SurfaceFace;
+		return InvalidResult;
+	}
+	// 저작/절차 생성 직후 고정한 분모만 제품 net 1% -> Load 1 환산에 쓴다.
+	// 화면용 초기량 cache는 밤샘/legacy 복원 때 달라질 수 있으므로 여기서
+	// 읽으면 같은 canonical face의 총 Load 가치가 Day에 따라 변한다.
+	const double InitialContaminationAmount =
+		CanonicalInitialContaminationCarrierAmounts[FaceSlot];
+	FMD_ScrapeSettings EffectiveScrapeSettings = ScrapeSettings;
+	if (BaseRecoveryRewardUnits + TransferredRecoveryRewardUnits > 0.0)
+	{
+		// 보상 provenance가 붙은 미세 오염은 CleanTolerance로 조용히
+		// 지우지 않는다. 실제로 긁혀 owner가 Tool/물리 경로로 이동할 때까지
+		// 셀과 원장을 함께 유지해 가치가 논리-clean Surface에 갇히지 않는다.
+		EffectiveScrapeSettings.CleanTolerance = 0.0f;
+	}
 
+	const bool bApplyExactRequestedAmountStamp =
+		bUseExactRequestedAmountStamp
+		&& FMath::IsFinite(StampRatio)
+		&& StampRatio > 0.0f;
+	TArray<FMD_ScrapeSurfaceCell> OriginalFaceCells;
+	if (bApplyExactRequestedAmountStamp)
+	{
+		// Evaluator의 Normalize와 제거도 transaction에 포함된다. 상한 거부 시
+		// 다섯 셀 필드를 정확히 되돌릴 수 있도록 전체 원본을 한 번 보관한다.
+		OriginalFaceCells.Append(FaceCells.GetData(), FaceCells.Num());
+	}
 	FMD_ScrapeResult Result;
+	TArray<float> RequestedRemovalAmounts;
 	{
 		SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeEvaluate);
-		Result = FMD_ScrapeEvaluator::ApplyStrokeToGrid(
-			Stroke,
-			ToolSpec,
-			ScrapeSettings,
-			ContaminationGridDimensions,
-			ResolvedContaminationSurfaceSizeCm,
-			FaceCells);
+		if (bApplyExactRequestedAmountStamp)
+		{
+			Result =
+				FMD_ScrapeEvaluator::ApplyStrokeToGridAndCaptureRequestedAmounts(
+					Stroke,
+					ToolSpec,
+					EffectiveScrapeSettings,
+					ContaminationGridDimensions,
+					ResolvedContaminationSurfaceSizeCm,
+					FaceCells,
+					RequestedRemovalAmounts);
+		}
+		else
+		{
+			Result = FMD_ScrapeEvaluator::ApplyStrokeToGrid(
+				Stroke,
+				ToolSpec,
+				EffectiveScrapeSettings,
+				ContaminationGridDimensions,
+				ResolvedContaminationSurfaceSizeCm,
+				FaceCells);
+		}
 	}
 
 	// 잘못된 입력은 상태를 변경하지 않음
@@ -1088,10 +1318,33 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	{
 		return Result;
 	}
-	OutRemovedCleanRatioDelta = Result.CleanRatioDelta;
-
+	const float GrossRemovedContaminationAmount =
+		Result.RemovedContaminationAmount;
+	const float GrossRemovedCleanRatioDelta = Result.CleanRatioDelta;
 	TArray<FMD_ScrapeCellChange> StampChanges;
-	if (FMath::IsFinite(StampRatio)
+	float AddedContaminationAmount = 0.0f;
+	if (bApplyExactRequestedAmountStamp
+		&& !RequestedRemovalAmounts.IsEmpty())
+	{
+		if (!FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
+			ContaminationGridDimensions,
+			RequestedRemovalAmounts,
+			StampRatio,
+			FaceCells,
+			StampChanges,
+			AddedContaminationAmount))
+		{
+			for (int32 CellIndex = 0; CellIndex < FaceCells.Num(); ++CellIndex)
+			{
+				FaceCells[CellIndex] = OriginalFaceCells[CellIndex];
+			}
+
+			FMD_ScrapeResult RejectedResult;
+			RejectedResult.SurfaceFace = Stroke.SurfaceFace;
+			return RejectedResult;
+		}
+	}
+	else if (FMath::IsFinite(StampRatio)
 		&& StampRatio > 0.0f
 		&& FMath::IsFinite(StampCoverage)
 		&& StampCoverage > 0.0f)
@@ -1114,7 +1367,8 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 				StampDepthCm,
 				PaintStroke))
 		{
-			FMD_ScrapeEvaluator::ApplyContaminationPaintStrokeToGrid(
+			AddedContaminationAmount =
+				FMD_ScrapeEvaluator::ApplyContaminationPaintStrokeToGrid(
 				PaintStroke,
 				ToolSpec,
 				ContaminationGridDimensions,
@@ -1127,39 +1381,201 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 				FaceCells,
 				StampChanges);
 		}
+	}
+	OutRemovedCleanRatioDelta = GrossRemovedCleanRatioDelta;
 
-		if (!StampChanges.IsEmpty())
+	// MASS-003: 같은 transaction의 역오염까지 끝난 뒤 표면에서 실제로
+	// 사라진 양만 Load와 물리 드롭이 나눠 갖는다. 새로 더럽힌 양이 gross
+	// 제거량보다 큰 경우에도 음수 산출물은 만들지 않는다.
+	const float NetRemovedContaminationAmount = FMath::Max(
+		0.0f,
+		GrossRemovedContaminationAmount - AddedContaminationAmount);
+	Result.NetRemovedContaminationAmount =
+		NetRemovedContaminationAmount;
+	Result.NetRemovedCleanRatioDelta =
+		InitialContaminationAmount > 0.0
+		? static_cast<float>(FMath::Clamp(
+			static_cast<double>(NetRemovedContaminationAmount)
+				/ InitialContaminationAmount,
+			0.0,
+			1.0))
+		: 0.0f;
+
+	// MASS-011: evaluator가 나눈 base/transferred 실제 제거량만큼 각 layer
+	// 원장에서 lot을 비례 추출한다. Stage3가 같은 transaction에서 되묻힌
+	// raw는 추출 lot의 일부를 transferred layer로 되돌려 새 unit을 만들지
+	// 않고, 제거량보다 더 생성된 부분만 reward 0으로 기록한다.
+	TArray<FMD_ScrapeRecoveryLot> WorkingBaseLots =
+		BaseContaminationRecoveryLots[FaceSlot];
+	TArray<FMD_ScrapeRecoveryLot> WorkingTransferredLots =
+		TransferredContaminationRecoveryLots[FaceSlot];
+	TArray<FMD_ScrapeRecoveryLot> RemovedBaseLots;
+	TArray<FMD_ScrapeRecoveryLot> RemovedTransferredLots;
+	TArray<FMD_ScrapeRecoveryLot> GrossRemovedLots;
+	const bool bExtractedBaseLots = TryExtractRecoveryLots(
+		WorkingBaseLots,
+		static_cast<double>(Result.RemovedBaseContaminationAmount),
+		RemovedBaseLots);
+	const bool bExtractedTransferredLots = TryExtractRecoveryLots(
+		WorkingTransferredLots,
+		static_cast<double>(Result.RemovedTransferredContaminationAmount),
+		RemovedTransferredLots);
+	double FinalBaseCarrierAmount = 0.0;
+	double FinalTransferredCarrierAmount = 0.0;
+	for (const FMD_ScrapeSurfaceCell& Cell : FaceCells)
+	{
+		FinalBaseCarrierAmount +=
+			static_cast<double>(Cell.RemainingContamination);
+		FinalTransferredCarrierAmount +=
+			static_cast<double>(Cell.TransferredContamination);
+	}
+	const double FinalTransferredCarrierBeforeStamp = FMath::Max(
+		0.0,
+		FinalTransferredCarrierAmount
+			- static_cast<double>(AddedContaminationAmount));
+	const bool bReconciledBaseLots = bExtractedBaseLots
+		&& TryReconcileRecoveryLayer(
+			WorkingBaseLots,
+			FinalBaseCarrierAmount,
+			RemovedBaseLots);
+	const bool bReconciledTransferredLots = bExtractedTransferredLots
+		&& TryReconcileRecoveryLayer(
+			WorkingTransferredLots,
+			FinalTransferredCarrierBeforeStamp,
+			RemovedTransferredLots);
+	const bool bBuiltGrossLots = bReconciledBaseLots
+		&& bReconciledTransferredLots
+		&& TryAppendRecoveryLots(GrossRemovedLots, RemovedBaseLots)
+		&& TryAppendRecoveryLots(GrossRemovedLots, RemovedTransferredLots)
+		&& FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+			GrossRemovedLots,
+			static_cast<double>(GrossRemovedContaminationAmount));
+	if (!bBuiltGrossLots)
+	{
+		if (bApplyExactRequestedAmountStamp)
 		{
-			// 제거량은 헤라 적재 계산용으로 보존하고, 진행도만 최종 도포 상태로 맞춘다.
-			Result.CleanRatioAfter =
-				FMD_ScrapeEvaluator::CalculateCleanRatio(FaceCells);
-			Result.CleanRatioDelta = FMath::Max(
-				0.0f,
-				Result.CleanRatioAfter - Result.CleanRatioBefore);
-			Result.bIsSurfaceFullyClean =
-				FMD_ScrapeEvaluator::IsSurfaceFullyClean(
-					FaceCells,
-					ScrapeSettings.CleanTolerance);
-
-			Result.NewlyCleanedCellCount = 0;
-			for (FMD_ScrapeCellChange& CellChange : Result.CellChanges)
+			for (int32 CellIndex = 0; CellIndex < FaceCells.Num(); ++CellIndex)
 			{
-				if (!FaceCells.IsValidIndex(CellChange.CellIndex))
-				{
-					continue;
-				}
+				FaceCells[CellIndex] = OriginalFaceCells[CellIndex];
+			}
+		}
+		FMD_ScrapeResult RejectedResult;
+		RejectedResult.SurfaceFace = Stroke.SurfaceFace;
+		return RejectedResult;
+	}
 
-				CellChange.RemainingAmountAfter =
-					FaceCells[CellChange.CellIndex].RemainingContamination;
-				CellChange.bBecameClean = CellChange.bBecameClean
-					&& CellChange.RemainingAmountAfter
-						<= ScrapeSettings.CleanTolerance
-					&& FaceCells[CellChange.CellIndex].TransferredContamination
-						<= ScrapeSettings.CleanTolerance;
-				if (CellChange.bBecameClean)
-				{
-					++Result.NewlyCleanedCellCount;
-				}
+	const double ReturnedCarrierAmount = FMath::Min(
+		static_cast<double>(AddedContaminationAmount),
+		static_cast<double>(GrossRemovedContaminationAmount));
+	TArray<FMD_ScrapeRecoveryLot> ReturnedLots;
+	if (!TryExtractRecoveryLots(
+			GrossRemovedLots,
+			ReturnedCarrierAmount,
+			ReturnedLots)
+		|| !TryAppendRecoveryLots(WorkingTransferredLots, ReturnedLots))
+	{
+		if (bApplyExactRequestedAmountStamp)
+		{
+			for (int32 CellIndex = 0; CellIndex < FaceCells.Num(); ++CellIndex)
+			{
+				FaceCells[CellIndex] = OriginalFaceCells[CellIndex];
+			}
+		}
+		FMD_ScrapeResult RejectedResult;
+		RejectedResult.SurfaceFace = Stroke.SurfaceFace;
+		return RejectedResult;
+	}
+
+	const double ZeroRewardAddedCarrierAmount = FMath::Max(
+		0.0,
+		static_cast<double>(AddedContaminationAmount)
+			- ReturnedCarrierAmount);
+	if ((ZeroRewardAddedCarrierAmount > 0.0
+			&& !FMD_ScrapeRecoveryLedger::AppendZeroRewardCarrier(
+				WorkingTransferredLots,
+				ZeroRewardAddedCarrierAmount))
+		|| !FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+			GrossRemovedLots,
+			static_cast<double>(NetRemovedContaminationAmount))
+		|| !FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+			WorkingTransferredLots,
+			FinalTransferredCarrierAmount))
+	{
+		if (bApplyExactRequestedAmountStamp)
+		{
+			for (int32 CellIndex = 0; CellIndex < FaceCells.Num(); ++CellIndex)
+			{
+				FaceCells[CellIndex] = OriginalFaceCells[CellIndex];
+			}
+		}
+		FMD_ScrapeResult RejectedResult;
+		RejectedResult.SurfaceFace = Stroke.SurfaceFace;
+		return RejectedResult;
+	}
+
+	Result.NetRemovedRecoveryLots = GrossRemovedLots;
+	Result.NetRemovedRewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
+			Result.NetRemovedRecoveryLots);
+	if (Result.NetRemovedRewardUnits < 0.0)
+	{
+		if (bApplyExactRequestedAmountStamp)
+		{
+			for (int32 CellIndex = 0; CellIndex < FaceCells.Num(); ++CellIndex)
+			{
+				FaceCells[CellIndex] = OriginalFaceCells[CellIndex];
+			}
+		}
+		FMD_ScrapeResult RejectedResult;
+		RejectedResult.SurfaceFace = Stroke.SurfaceFace;
+		return RejectedResult;
+	}
+	BaseContaminationRecoveryLots[FaceSlot] = MoveTemp(WorkingBaseLots);
+	TransferredContaminationRecoveryLots[FaceSlot] =
+		MoveTemp(WorkingTransferredLots);
+	const double RemainingFaceRewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
+			BaseContaminationRecoveryLots[FaceSlot])
+		+ FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
+			TransferredContaminationRecoveryLots[FaceSlot]);
+	const float EffectiveCompletionTolerance =
+		RemainingFaceRewardUnits > 0.0
+			? 0.0f
+			: ScrapeSettings.CleanTolerance;
+
+	if (!StampChanges.IsEmpty())
+	{
+		// gross 제거량은 진단과 셀 변경 내역으로 보존한다. 실제 Load·물리
+		// 산출 귀속은 위에서 계산한 net 필드만 사용한다.
+		// 완료 여부와 셀 변경 목록은 제거 뒤 되묻힌 최종 상태에 맞춘다.
+		Result.CleanRatioAfter =
+			FMD_ScrapeEvaluator::CalculateCleanRatio(FaceCells);
+		Result.CleanRatioDelta = FMath::Max(
+			0.0f,
+			Result.CleanRatioAfter - Result.CleanRatioBefore);
+		Result.bIsSurfaceFullyClean =
+			FMD_ScrapeEvaluator::IsSurfaceFullyClean(
+				FaceCells,
+				EffectiveCompletionTolerance);
+
+		Result.NewlyCleanedCellCount = 0;
+		for (FMD_ScrapeCellChange& CellChange : Result.CellChanges)
+		{
+			if (!FaceCells.IsValidIndex(CellChange.CellIndex))
+			{
+				continue;
+			}
+
+			CellChange.RemainingAmountAfter =
+				FaceCells[CellChange.CellIndex].RemainingContamination;
+			CellChange.bBecameClean = CellChange.bBecameClean
+				&& CellChange.RemainingAmountAfter
+					<= EffectiveCompletionTolerance
+				&& FaceCells[CellChange.CellIndex].TransferredContamination
+					<= EffectiveCompletionTolerance;
+			if (CellChange.bBecameClean)
+			{
+				++Result.NewlyCleanedCellCount;
 			}
 		}
 	}
@@ -1218,26 +1634,38 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	UpdateContaminationMask(SurfaceChanges);
 	PublishContaminationChanges(SurfaceChanges);
 
-	// 기획 02 §1 규칙 3: 긁어낸 오염물은 월드 물리 오브젝트로 떨어진다.
-	// 긁기가 끝난 지점에 떨군다. 스트로크는 짧아서 시작점과 큰 차이가 없다.
-	DropContaminationItems(
-		Stroke.SurfaceFace,
-		Result.RemovedContaminationAmount,
-		Stroke.EndPositionCm);
+	// MASS-004: 여기서는 표면 상태만 확정한다. Tool이 실제 Load 수용량을
+	// 확인한 뒤 받지 못한 순제거 몫만 CommitContaminationPhysicalDrop으로
+	// 한 번 전달한다.
 
 	// 어느 한 면이 처음 완료되는 전환에서 한 번만 방송
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeFullyRemovedCheck);
 	const bool bIsFullyRemoved = IsContaminationFullyRemoved();
-	if (!bDeferCompletionBroadcast
-		&& !bWasFullyRemoved
+	if (bDeferCompletionBroadcast)
+	{
+		if (!bWasFullyRemoved
+			&& bIsFullyRemoved
+			&& !bContaminationCompletionBroadcast)
+		{
+			bDeferredContaminationCompletionTransition = true;
+		}
+		else if (!bIsFullyRemoved)
+		{
+			bDeferredContaminationCompletionTransition = false;
+			bContaminationCompletionBroadcast = false;
+		}
+	}
+	else if (!bWasFullyRemoved
 		&& bIsFullyRemoved
 		&& !bContaminationCompletionBroadcast)
 	{
+		bDeferredContaminationCompletionTransition = false;
 		bContaminationCompletionBroadcast = true;
 		OnContaminationFullyRemoved.Broadcast(this);
 	}
 	else if (!bIsFullyRemoved)
 	{
+		bDeferredContaminationCompletionTransition = false;
 		bContaminationCompletionBroadcast = false;
 	}
 
@@ -1321,11 +1749,24 @@ bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved(
 
 	const TConstArrayView<FMD_ScrapeSurfaceCell> FaceCells =
 		GetContaminationCellsForFace(Face);
+	const int32 FaceSlot = Face == EMD_ScrapeSurfaceFace::Back ? 1 : 0;
+	const double RemainingRewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
+			BaseContaminationRecoveryLots[FaceSlot])
+		+ FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
+			TransferredContaminationRecoveryLots[FaceSlot]);
+	if (RemainingRewardUnits < 0.0)
+	{
+		return false;
+	}
+	const float EffectiveCleanTolerance = RemainingRewardUnits > 0.0
+		? 0.0f
+		: ScrapeSettings.CleanTolerance;
 	return bContaminationSurfaceInitialized
 		&& !FaceCells.IsEmpty()
 		&& FMD_ScrapeEvaluator::IsSurfaceFullyClean(
 			FaceCells,
-			ScrapeSettings.CleanTolerance);
+			EffectiveCleanTolerance);
 }
 
 void UMD_ScrapeSurfaceComponent::RefreshContaminationCleanRatioCache()

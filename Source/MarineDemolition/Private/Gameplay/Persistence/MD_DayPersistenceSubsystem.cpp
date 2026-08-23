@@ -7,12 +7,223 @@
 #include "World/Interaction/MD_SectorCloseoutMarker.h"
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Support/MD_SupportBrace.h"
+#include "World/Trash/MD_TrashBin.h"
+#include "World/Trash/MD_TrashDispenser.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 
 namespace
 {
+	struct FMD_TrashBinRestoreContext
+	{
+		TMap<FName, AMD_TrashDispenser*> DispensersByName;
+		TMap<FGuid, AMD_TrashBin*> ReusableBinsById;
+		TSet<FGuid> AmbiguousExistingIds;
+		TArray<AMD_TrashBin*> ExistingDispensedBins;
+	};
+
+	bool GatherPersistentTrashBinRecords(
+		UWorld* World,
+		TArray<FMD_TrashBinRecord>& OutRecords)
+	{
+		OutRecords.Reset();
+		if (!IsValid(World) || World->GetNetMode() == NM_Client)
+		{
+			return false;
+		}
+
+		TSet<FGuid> CapturedIds;
+		TSet<FName> AvailableDispenserNames;
+		for (TActorIterator<AMD_TrashDispenser> It(World); It; ++It)
+		{
+			AvailableDispenserNames.Add(It->GetFName());
+		}
+		for (TActorIterator<AMD_TrashBin> It(World); It; ++It)
+		{
+			AMD_TrashBin* const Bin = *It;
+			const bool bWasDispensed =
+				!Bin->GetSourceTrashDispenserName().IsNone()
+				|| IsValid(Cast<AMD_TrashDispenser>(Bin->GetOwner()));
+			if (!bWasDispensed)
+			{
+				continue;
+			}
+
+			FMD_TrashBinRecord Record;
+			if (!Bin->BuildPersistenceRecord(Record)
+				|| !AvailableDispenserNames.Contains(Record.SourceDispenserName)
+				|| CapturedIds.Contains(Record.StableBinId))
+			{
+				OutRecords.Reset();
+				return false;
+			}
+
+			CapturedIds.Add(Record.StableBinId);
+			OutRecords.Add(MoveTemp(Record));
+		}
+
+		return true;
+	}
+
+	bool BuildTrashBinRestoreContext(
+		UWorld* World,
+		TConstArrayView<FMD_TrashBinRecord> Records,
+		FMD_TrashBinRestoreContext& OutContext)
+	{
+		OutContext = FMD_TrashBinRestoreContext();
+		if (!IsValid(World))
+		{
+			return false;
+		}
+
+		for (TActorIterator<AMD_TrashDispenser> It(World); It; ++It)
+		{
+			if (OutContext.DispensersByName.Contains(It->GetFName()))
+			{
+				return false;
+			}
+			OutContext.DispensersByName.Add(It->GetFName(), *It);
+		}
+
+		for (const FMD_TrashBinRecord& Record : Records)
+		{
+			AMD_TrashDispenser* const* SavedDispenser =
+				OutContext.DispensersByName.Find(Record.SourceDispenserName);
+			if (!Record.IsStructurallyValid()
+				|| !SavedDispenser
+				|| !IsValid(*SavedDispenser))
+			{
+				return false;
+			}
+		}
+
+		for (TActorIterator<AMD_TrashBin> It(World); It; ++It)
+		{
+			AMD_TrashBin* const Bin = *It;
+			if (Bin->GetSourceTrashDispenserName().IsNone())
+			{
+				for (const FMD_TrashBinRecord& Record : Records)
+				{
+					if (Bin->GetStableBinId().IsValid()
+						&& Bin->GetStableBinId() == Record.StableBinId)
+					{
+						// 레벨 배치 통과 저장 동적 통이 같은 ID를 공유하면 고유성을 보장할 수 없다.
+						return false;
+					}
+				}
+				continue;
+			}
+
+			OutContext.ExistingDispensedBins.Add(Bin);
+			const FGuid& ExistingId = Bin->GetStableBinId();
+			if (!ExistingId.IsValid()
+				|| OutContext.AmbiguousExistingIds.Contains(ExistingId))
+			{
+				continue;
+			}
+			if (OutContext.ReusableBinsById.Contains(ExistingId))
+			{
+				OutContext.ReusableBinsById.Remove(ExistingId);
+				OutContext.AmbiguousExistingIds.Add(ExistingId);
+				continue;
+			}
+			OutContext.ReusableBinsById.Add(ExistingId, Bin);
+		}
+
+		return true;
+	}
+
+	bool RestorePersistentTrashBins(
+		UWorld* World,
+		TConstArrayView<FMD_TrashBinRecord> Records,
+		FMD_TrashBinRestoreContext& Context)
+	{
+		TSet<TWeakObjectPtr<AMD_TrashBin>> RestoredBins;
+		for (const FMD_TrashBinRecord& Record : Records)
+		{
+			AMD_TrashDispenser* const* DispenserPtr =
+				Context.DispensersByName.Find(Record.SourceDispenserName);
+			AMD_TrashDispenser* const Dispenser = DispenserPtr
+				? *DispenserPtr
+				: nullptr;
+			if (!IsValid(Dispenser))
+			{
+				return false;
+			}
+
+			AMD_TrashBin* Bin = nullptr;
+			if (AMD_TrashBin* const* ExistingBin =
+				Context.ReusableBinsById.Find(Record.StableBinId))
+			{
+				if (IsValid(*ExistingBin)
+					&& (*ExistingBin)->GetClass() == Record.TrashBinClass.Get()
+					&& (*ExistingBin)->GetSourceTrashDispenserName()
+						== Record.SourceDispenserName)
+				{
+					Bin = *ExistingBin;
+				}
+			}
+
+			if (!IsValid(Bin))
+			{
+				const FTransform SpawnTransform(
+					Record.Transform.GetRotation(),
+					Record.Transform.GetLocation(),
+					FVector::OneVector);
+				Bin = World->SpawnActorDeferred<AMD_TrashBin>(
+					Record.TrashBinClass,
+					SpawnTransform,
+					Dispenser,
+					nullptr,
+					ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+				if (!IsValid(Bin)
+					|| !Bin->RestorePersistenceRecord(Record))
+				{
+					if (IsValid(Bin))
+					{
+						Bin->Destroy();
+					}
+					return false;
+				}
+				Bin->FinishSpawning(SpawnTransform);
+			}
+			else if (!Bin->RestorePersistenceRecord(Record))
+			{
+				return false;
+			}
+
+			const TWeakObjectPtr<AMD_TrashBin> BinPtr(Bin);
+			if (!Bin->SetActorTransform(
+					Record.Transform,
+					false,
+					nullptr,
+					ETeleportType::TeleportPhysics)
+				|| !Dispenser->RegisterDispensedBin(Bin))
+			{
+				if (!RestoredBins.Contains(BinPtr))
+				{
+					Bin->Destroy();
+				}
+				return false;
+			}
+
+			RestoredBins.Add(BinPtr);
+		}
+
+		// 저장 목록에 없는 보급 통은 로드 시점의 과거 월드에는 존재하지 않았던 개체다.
+		for (AMD_TrashBin* const ExistingBin : Context.ExistingDispensedBins)
+		{
+			const TWeakObjectPtr<AMD_TrashBin> ExistingBinPtr(ExistingBin);
+			if (IsValid(ExistingBin) && !RestoredBins.Contains(ExistingBinPtr))
+			{
+				ExistingBin->Destroy();
+			}
+		}
+
+		return true;
+	}
+
     void GatherScrapeSurfaces(
         UWorld* World,
         TArray<UMD_ScrapeSurfaceComponent*>& OutSurfaces)
@@ -182,6 +393,13 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         Snapshot.Pieces.Add(Record);
     }
 
+	// 보급 통은 액터 이름이 아니라 stable ID와 원래 보급기 이름으로 전체 액체 원장을 기록한다.
+	if (!GatherPersistentTrashBinRecords(World, Snapshot.TrashBins))
+	{
+		Snapshot = FMD_DaySnapshot();
+		return;
+	}
+
     for (TActorIterator<AMD_SectorCloseoutMarker> It(World); It; ++It)
     {
         if (It->IsClosed())
@@ -234,6 +452,7 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
     OutWorldData.Braces = Snapshot.Braces;
     OutWorldData.Samples = Snapshot.Samples;
     OutWorldData.Pieces = Snapshot.Pieces;
+	OutWorldData.TrashBins = Snapshot.TrashBins;
     OutWorldData.WallContaminations = Snapshot.WallContaminations;
     OutWorldData.BarnacleRemovals = Snapshot.BarnacleRemovals;
     OutWorldData.ClosedMarkerNames = Snapshot.ClosedMarkerNames;
@@ -251,6 +470,16 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
     {
         return false;
     }
+
+	// 벽 등 다른 월드 상태를 바꾸기 전에 모든 통 class·보급기 연결을 먼저 확인한다.
+	FMD_TrashBinRestoreContext TrashBinRestoreContext;
+	if (!BuildTrashBinRestoreContext(
+			World,
+			WorldData.TrashBins,
+			TrashBinRestoreContext))
+	{
+		return false;
+	}
 
     // 다른 레벨(모선 등)에서는 적용하지 않음
     // 이름 → 벽 조회용 맵
@@ -400,6 +629,14 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
         }
     }
 
+	if (!RestorePersistentTrashBins(
+			World,
+			WorldData.TrashBins,
+			TrashBinRestoreContext))
+	{
+		return false;
+	}
+
     // 점수 캐리오버 + Day 진행
     return true;
 }
@@ -425,6 +662,7 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     WorldData.Braces = Snapshot.Braces;
     WorldData.Samples = Snapshot.Samples;
     WorldData.Pieces = Snapshot.Pieces;
+	WorldData.TrashBins = Snapshot.TrashBins;
     WorldData.WallContaminations = Snapshot.WallContaminations;
     WorldData.BarnacleRemovals = Snapshot.BarnacleRemovals;
     WorldData.ClosedMarkerNames = Snapshot.ClosedMarkerNames;

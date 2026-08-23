@@ -4,9 +4,57 @@
 #include "Gameplay/Scrape/MD_ContaminationNoise.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceGeometry.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
+#include "GameFramework/Actor.h"
+#include "Misc/SecureHash.h"
 
 // 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 책임: 작업면 기하 해석 · 셀 초기화 · 좌표 변환
+
+namespace
+{
+	const FName ContaminationRewardClass(TEXT("Contamination"));
+
+	uint32 ReadRecoverySourceHashWord(const uint8* const Bytes)
+	{
+		return (static_cast<uint32>(Bytes[0]) << 24)
+			| (static_cast<uint32>(Bytes[1]) << 16)
+			| (static_cast<uint32>(Bytes[2]) << 8)
+			| static_cast<uint32>(Bytes[3]);
+	}
+
+	FGuid BuildCanonicalContaminationSourceId(
+		const UMD_ScrapeSurfaceComponent* const Surface,
+		const EMD_ScrapeSurfaceFace Face)
+	{
+		const AActor* const Owner = Surface ? Surface->GetOwner() : nullptr;
+		const FString StableSourceName = FString::Printf(
+			TEXT("%s|%s|%s"),
+			Owner ? *Owner->GetPathName() : TEXT("None"),
+			Surface ? *Surface->GetName() : TEXT("None"),
+			Face == EMD_ScrapeSurfaceFace::Back
+				? TEXT("Back")
+				: TEXT("Front"));
+		const FTCHARToUTF8 Utf8SourceName(*StableSourceName);
+		uint8 Hash[FSHA1::DigestSize];
+		FSHA1::HashBuffer(
+			Utf8SourceName.Get(),
+			Utf8SourceName.Length(),
+			Hash);
+
+		FGuid SourceId(
+			ReadRecoverySourceHashWord(Hash),
+			ReadRecoverySourceHashWord(Hash + 4),
+			ReadRecoverySourceHashWord(Hash + 8),
+			ReadRecoverySourceHashWord(Hash + 12));
+		if (!SourceId.IsValid())
+		{
+			// SHA-1의 앞 128 bit가 전부 0일 이론적 경우에도 reward lot은
+			// 항상 유효한 source id를 가져야 한다.
+			SourceId.D = 1;
+		}
+		return SourceId;
+	}
+}
 
 bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceFaceFromHit(
 	const FHitResult& Hit,
@@ -321,6 +369,7 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 	bContaminationDecalsConfigured = false;
 	SetContaminationDecalsVisible(false);
 	bContaminationCompletionBroadcast = false;
+	bDeferredContaminationCompletionTransition = false;
 	CachedFrontContaminationCleanRatio = 0.0f;
 	CachedBackContaminationCleanRatio = 0.0f;
 	CachedFrontInitialContaminationAmount = 0.0;
@@ -335,6 +384,14 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 	// 남겨 두면 Day가 바뀐 직후 첫 스트로크에 오염물이 갑자기 튀어나온다.
 	PendingContaminationItemAmounts[0] = 0.0f;
 	PendingContaminationItemAmounts[1] = 0.0f;
+	for (int32 FaceSlot = 0; FaceSlot < 2; ++FaceSlot)
+	{
+		BaseContaminationRecoveryLots[FaceSlot].Reset();
+		TransferredContaminationRecoveryLots[FaceSlot].Reset();
+		PendingPhysicalRecoveryLots[FaceSlot].Reset();
+		SpawnedPhysicalRecoveryLotsAwaitingCarrier[FaceSlot].Reset();
+		CanonicalInitialContaminationCarrierAmounts[FaceSlot] = 0.0;
+	}
 	ReleaseContaminationMask();
 	if (HasAuthority())
 	{
@@ -465,6 +522,39 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 		ContaminationGeneratedInitialAmounts.Add(Cell.InitialContamination);
 	}
 
+	// 저작/절차 생성이 끝난 바로 이 시점의 제거 가능량만 제품 환산 분모로
+	// 고정한다. evaluator가 첫 긁기 때 CleanTolerance 이하를 0으로 정리하므로,
+	// 그 찌꺼기는 carrier·Reward1·Load100 어느 쪽에도 포함하지 않는다.
+	const float SafeCleanTolerance = FMath::IsFinite(
+		ScrapeSettings.CleanTolerance)
+		? FMath::Max(0.0f, ScrapeSettings.CleanTolerance)
+		: 0.0f;
+	for (int32 FaceSlot = 0; FaceSlot < 2; ++FaceSlot)
+	{
+		const EMD_ScrapeSurfaceFace Face = FaceSlot == 0
+			? EMD_ScrapeSurfaceFace::Front
+			: EMD_ScrapeSurfaceFace::Back;
+		double CanonicalCarrierAmount = 0.0;
+		for (const FMD_ScrapeSurfaceCell& Cell
+			: GetContaminationCellsForFace(Face))
+		{
+			const double SafeRemainingContamination =
+				FMath::IsFinite(Cell.RemainingContamination)
+				? FMath::Clamp(
+					static_cast<double>(Cell.RemainingContamination),
+					0.0,
+					1.0)
+				: 0.0;
+			if (SafeRemainingContamination
+				> static_cast<double>(SafeCleanTolerance))
+			{
+				CanonicalCarrierAmount += SafeRemainingContamination;
+			}
+		}
+		CanonicalInitialContaminationCarrierAmounts[FaceSlot] =
+			CanonicalCarrierAmount;
+	}
+
 	if (!InitializeContaminationMask())
 	{
 		UE_LOG(
@@ -475,6 +565,37 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 	}
 
 	RefreshContaminationCleanRatioCache();
+	if (HasAuthority())
+	{
+		// 저작된 초기 오염은 오염된 face 하나당 정확히 1.0 unit을 한 번
+		// 발행한다. clean face는 lot 자체가 없으므로 보상도 0이다.
+		for (int32 FaceSlot = 0; FaceSlot < 2; ++FaceSlot)
+		{
+			const EMD_ScrapeSurfaceFace Face = FaceSlot == 0
+				? EMD_ScrapeSurfaceFace::Front
+				: EMD_ScrapeSurfaceFace::Back;
+			const double InitialCarrierAmount =
+				CanonicalInitialContaminationCarrierAmounts[FaceSlot];
+			if (InitialCarrierAmount <= 0.0)
+			{
+				continue;
+			}
+
+			FMD_ScrapeRecoveryLot CanonicalLot;
+			CanonicalLot.SourceId = BuildCanonicalContaminationSourceId(
+				this,
+				Face);
+			CanonicalLot.RewardClass = ContaminationRewardClass;
+			CanonicalLot.CarrierAmount = InitialCarrierAmount;
+			CanonicalLot.RewardUnits = 1.0;
+			const bool bSeeded = FMD_ScrapeRecoveryLedger::AppendLot(
+				BaseContaminationRecoveryLots[FaceSlot],
+				CanonicalLot);
+			ensureMsgf(
+				bSeeded,
+				TEXT("Canonical contamination recovery lot could not be seeded."));
+		}
+	}
 	bContaminationSurfaceInitialized = true;
 
 	// 초기 완료 상태의 중복 방송 방지

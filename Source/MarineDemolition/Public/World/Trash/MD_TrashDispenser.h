@@ -39,6 +39,12 @@ class MARINEDEMOLITION_API AMD_TrashDispenser : public AActor, public IMD_Intera
 public:
 	AMD_TrashDispenser();
 
+	/**
+	 * 새 통과 저장에서 복원한 통을 같은 생존 한도·파괴 추적 원장에 등록한다.
+	 * 복원 경로는 저장된 SourceDispenserName이 이 액터와 일치할 때만 성공한다.
+	 */
+	bool RegisterDispensedBin(AMD_TrashBin* Bin);
+
 	/** Implements IMD_Interactable */
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 	virtual void Interact_Implementation(AActor* Interactor) override;
@@ -145,4 +151,5 @@ private:
 
 	TArray<TWeakObjectPtr<AMD_TrashBin>> LiveDispensedBins;
 	double NextAllowedInteractionTime = 0.0;
+
 };

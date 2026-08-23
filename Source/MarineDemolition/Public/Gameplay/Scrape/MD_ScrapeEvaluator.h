@@ -94,17 +94,17 @@ public:
 	/**
 	 * 캡처한 헤라 경로를 새 오염 자국으로 도포한다.
 	 *
-	 * 기존 오염의 과거 상태를 복원하지 않는다. 현재 셀 값 위에
-	 * RequestedRemovalAmounts * StampRatio만큼 새 오염을 더한다.
-	 *
-	 * @return 실제로 추가된 오염량의 합계
+	 * 모든 셀이 RequestedRemovalAmounts * StampRatio를 수용할 수 있는지 먼저
+	 * 검사하고, 하나라도 상한 1.0을 넘으면 어느 셀도 바꾸지 않는다.
+	 * @return 전 셀을 원자적으로 적용했으면 true, 입력 또는 용량 경계를 거부했으면 false
 	 */
-	static float ApplyContaminationStampToGrid(
+	static bool TryApplyContaminationStampToGrid(
 		const FIntPoint& GridDimensions,
 		TConstArrayView<float> RequestedRemovalAmounts,
 		float StampRatio,
 		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
-		TArray<FMD_ScrapeCellChange>& OutCellChanges);
+		TArray<FMD_ScrapeCellChange>& OutCellChanges,
+		float& OutAddedContaminationAmount);
 
 	/**
 	 * Stage3 ordered path가 확정한 하나의 dab을 저장된 위치·basis 그대로 적용한다.

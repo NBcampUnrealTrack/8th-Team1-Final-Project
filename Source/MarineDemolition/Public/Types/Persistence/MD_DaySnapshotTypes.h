@@ -2,10 +2,12 @@
 
 #include "CoreMinimal.h"
 #include "Templates/SubclassOf.h"
+#include "Types/Scrape/MD_ScrapeTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
 #include "MD_DaySnapshotTypes.generated.h"
 
 class AMD_SupportBrace;
+class AMD_TrashBin;
 class AMD_WallPiece;
 
 // Day 종료 시점에 살아남은 샘플 기록
@@ -54,6 +56,54 @@ struct FMD_PieceRecord
 
       UPROPERTY()
       bool bContaminated = false;
+};
+
+/**
+ * 보급기가 만든 동적 쓰레기통 하나의 서버 권위 영속 상태.
+ *
+ * 클라이언트에는 FMD_TrashBinLiquidState 요약만 복제한다. 이 record의 stable ID,
+ * 전체 recovery lots와 NextSpillSequence는 Day/ServerTravel/파일 저장에서만
+ * 왕복하며 cosmetic 횟수나 액터 이름을 원장으로 사용하지 않는다.
+ */
+USTRUCT()
+struct MARINEDEMOLITION_API FMD_TrashBinRecord
+{
+      GENERATED_BODY()
+
+      /** 재스폰과 쏟김 transaction ID의 기준이 되는 영구 식별자. */
+      UPROPERTY()
+      FGuid StableBinId;
+
+      /** 원래 보급 제한과 파괴 추적 원장에 다시 연결할 레벨 배치 보급기 이름. */
+      UPROPERTY()
+      FName SourceDispenserName = NAME_None;
+
+      UPROPERTY()
+      TSubclassOf<AMD_TrashBin> TrashBinClass;
+
+      UPROPERTY()
+      FTransform Transform = FTransform::Identity;
+
+      UPROPERTY()
+      double LiquidUnits = 0.0;
+
+      UPROPERTY()
+      double RewardUnits = 0.0;
+
+      /** 복원은 이 값을 증가시키지 않고 저장값을 그대로 유지한다. */
+      UPROPERTY()
+      int32 LiquidRevision = 0;
+
+      /** SourceId별 carrier/reward 합을 잃지 않는 서버 전용 전체 원장. */
+      UPROPERTY()
+      TArray<FMD_ScrapeRecoveryLot> LiquidRecoveryLots;
+
+      /** SPILL-001이 current+1을 preview할 성공 sequence high-water. 신규/구버전은 0. */
+      UPROPERTY()
+      uint64 NextSpillSequence = 0;
+
+      /** 손상 record를 월드에 일부 적용하기 전에 거르는 공통 검사. */
+      bool IsStructurallyValid() const;
 };
 
 // 표면별 오염 셀 상태. 생성 기준값과 달라진 셀만 저장한다
@@ -181,6 +231,10 @@ struct FMD_DaySnapshot
 
       UPROPERTY()
       TArray<FMD_PieceRecord> Pieces;
+
+      /** 보급기에서 생성되어 다음 Day에도 같은 개체로 이어질 동적 쓰레기통. */
+      UPROPERTY()
+      TArray<FMD_TrashBinRecord> TrashBins;
 
       // 이름은 하위 호환을 위해 유지하지만 일반 표면 컴포넌트도 포함한다
       UPROPERTY()

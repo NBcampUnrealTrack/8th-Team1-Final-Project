@@ -320,12 +320,13 @@ public:
 	/** 유예한 Stage3 제거와 pending dab이 모두 끝난 후 완료 전환을 확정한다. */
 	void FinalizeLocalContaminationPath();
 
-	/** 서버에서 일반 제거 후 경로의 무작위 지점에 헤라 접촉면 모양으로 새 오염을 덧칠한다. */
+	/** 서버에서 정상 제거 후 같은 셀별 제거 시도량의 일정 비율을 정확히 되묻힌다. */
 	FMD_ScrapeResult ApplyLocalScrapeStrokeWithContaminationStamp(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec,
 		float StampRatio,
-		float& OutRemovedCleanRatioDelta);
+		float& OutRemovedCleanRatioDelta,
+		bool bDeferCompletionBroadcast = false);
 
 	FMD_ScrapeResult ApplyLocalScrapeStrokeWithContaminationStamp(
 		const FMD_ScrapeStroke& Stroke,
@@ -722,6 +723,7 @@ private:
 	friend class FMD_CuttableWallArbitraryMeshTest;
 	friend class FMD_BarnacleSpawnerTest;
 	friend class FMD_BarnacleStrokeBlockingTest;
+	friend class UMD_ScrapeToolComponent;
 
 	static constexpr int32 MaximumContaminationGridAxis = 256;
 	static constexpr float MaximumContaminationCellSizeForPaintCm = 2.5f;
@@ -755,7 +757,26 @@ private:
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
 	TArray<FMD_ScrapeSurfaceCell> ContaminationCells;
 
-	float PendingContaminationItemAmounts[2] = { 0.0f, 0.0f };
+	double PendingContaminationItemAmounts[2] = { 0.0, 0.0 };
+	/**
+	 * 한 face의 base/transferred layer는 내부에서 완전히 섞인 것으로 보고
+	 * 모든 source lot을 제거 질량 비율대로 함께 소비한다.
+	 */
+	TArray<FMD_ScrapeRecoveryLot> BaseContaminationRecoveryLots[2];
+	TArray<FMD_ScrapeRecoveryLot> TransferredContaminationRecoveryLots[2];
+	/** 아직 물리 아이템 한 개의 임계량에 못 미친 raw와 정확히 대응하는 lot. */
+	TArray<FMD_ScrapeRecoveryLot> PendingPhysicalRecoveryLots[2];
+	/**
+	 * legacy 물리 Actor에는 lot 필드가 아직 없으므로, 이미 스폰된 몫을
+	 * MASS-013 carrier 연결 전까지 Surface가 잃지 않고 보관한다.
+	 */
+	TArray<FMD_ScrapeRecoveryLot> SpawnedPhysicalRecoveryLotsAwaitingCarrier[2];
+	/**
+	 * authoring/procedural 생성 직후 실제로 제거 가능한 base carrier 합계.
+	 * 화면용 cache와 달리 밤샘 악화·legacy 복원·Refresh가 바꾸지 않으며,
+	 * 제품 net 제거율과 face당 canonical Reward1.0의 공통 분모다.
+	 */
+	double CanonicalInitialContaminationCarrierAmounts[2] = { 0.0, 0.0 };
 	TArray<float> ContaminationGeneratedInitialAmounts;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
@@ -854,6 +875,7 @@ private:
 
 	bool bContaminationSurfaceInitialized;
 	bool bContaminationCompletionBroadcast;
+	bool bDeferredContaminationCompletionTransition = false;
 	bool bOwnsFrontContaminationDecal = false;
 	bool bOwnsBackContaminationDecal = false;
 	TArrayView<FMD_ScrapeSurfaceCell> GetContaminationCellsForFace(
@@ -871,7 +893,8 @@ private:
 		float StampSpacingCm,
 		int32 StampPatternSeed,
 		float& OutRemovedCleanRatioDelta,
-		bool bDeferCompletionBroadcast = false);
+		bool bDeferCompletionBroadcast = false,
+		bool bUseExactRequestedAmountStamp = false);
 
 	void RefreshContaminationCleanRatioCache();
 	void RefreshContaminationCleanRatioCache(EMD_ScrapeSurfaceFace Face);
@@ -942,9 +965,44 @@ private:
 	void ApplyAllReplicatedContaminationState();
 	void PublishContaminationChanges(
 		const TArray<FMD_ScrapeCellChange>& CellChanges);
+	/**
+	 * Tool이 셀을 바꾸기 전에 후속 recovery commit이 실패할 수 없는지 검사한다.
+	 * legacy pending raw의 missing lot은 Commit에서 reward 0으로 보충 가능하다.
+	 */
+	bool CanAcceptRecoveryTransaction(
+		EMD_ScrapeSurfaceFace SurfaceFace) const;
 	int32 DropContaminationItems(
 		EMD_ScrapeSurfaceFace SurfaceFace,
-		float RemovedAmount,
+		double RemovedAmount,
+		const FVector2D& SurfacePositionCm,
+		TConstArrayView<FMD_ScrapeRecoveryLot> RecoveryLots,
+		bool* bOutAcceptedToLedger = nullptr);
+	enum class EPhysicalCommitStatus : uint8
+	{
+		Rejected,
+		AcceptedNoPhysicalShare,
+		AcceptedPending
+	};
+	struct FPhysicalCommitResult
+	{
+		EPhysicalCommitStatus Status = EPhysicalCommitStatus::Rejected;
+		double CommittedRawAmount = 0.0;
+		double CommittedRewardUnits = 0.0;
+		TArray<FMD_ScrapeRecoveryLot> CommittedRecoveryLots;
+		int32 SpawnedCount = 0;
+
+		bool IsAccepted() const
+		{
+			return Status != EPhysicalCommitStatus::Rejected;
+		}
+	};
+	/**
+	 * Tool이 Load 수용량을 확정한 뒤 받지 못한 순제거 질량만 한 번 커밋한다.
+	 * 제품 호출자는 UMD_ScrapeToolComponent 하나로 제한해 같은 결과의 중복 커밋을 막는다.
+	 */
+	FPhysicalCommitResult CommitContaminationPhysicalDrop(
+		const FMD_ScrapeResult& ScrapeResult,
+		const FMD_ScrapeMassAllocationResult& Allocation,
 		const FVector2D& SurfacePositionCm);
 	bool TryCalculateContaminationItemSpawnTransform(
 		EMD_ScrapeSurfaceFace SurfaceFace,

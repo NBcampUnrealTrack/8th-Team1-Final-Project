@@ -168,6 +168,10 @@ public:
 	UPROPERTY()
 	TArray<FMD_PieceRecord> Pieces;
 
+	// 보급기가 만든 동적 통의 class·transform·stable ID와 전체 액체 원장을 복원하기 위한 목록
+	UPROPERTY()
+	TArray<FMD_TrashBinRecord> TrashBins;
+
 	// 생성 기준과 달라진 표면 오염 셀을 복원하기 위한 목록
 	UPROPERTY()
 	TArray<FMD_WallContaminationRecord> WallContaminations;

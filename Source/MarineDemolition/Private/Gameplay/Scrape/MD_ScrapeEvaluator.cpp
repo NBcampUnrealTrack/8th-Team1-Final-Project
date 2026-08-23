@@ -821,6 +821,12 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 			&& CellAfterStroke.RemainingContamination <= Settings.CleanTolerance
 			&& CellAfterStroke.TransferredContamination <= Settings.CleanTolerance;
 
+		// Surface의 보상 provenance 원장은 base와 Stage3 transferred를
+		// 서로 다른 layer로 보존한다. RPC/Blueprint에는 노출하지 않는
+		// server-only 합계만 기록해 실제 제거 비율대로 lot을 옮길 수 있게 한다.
+		Result.RemovedBaseContaminationAmount += RemovedBaseAmount;
+		Result.RemovedTransferredContaminationAmount +=
+			RemovedTransferredAmount;
 		Result.RemovedContaminationAmount += RemovedAmount;
 
 		if (CellChange.bBecameClean)
@@ -834,6 +840,11 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 	Result.CleanRatioDelta = FMath::Max(
 		0.0f,
 		Result.CleanRatioAfter - Result.CleanRatioBefore);
+	// 순수 제거 판정에는 아직 역오염 단계가 없으므로 gross와 net이 같다.
+	// Surface가 같은 트랜잭션에서 역오염을 더하면 두 net 필드만 다시 줄인다.
+	Result.NetRemovedContaminationAmount =
+		Result.RemovedContaminationAmount;
+	Result.NetRemovedCleanRatioDelta = Result.CleanRatioDelta;
 	Result.bIsSurfaceFullyClean = IsSurfaceFullyClean(
 		InOutSurfaceCells,
 		Settings.CleanTolerance);
@@ -860,14 +871,16 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 	return Result;
 }
 
-float FMD_ScrapeEvaluator::ApplyContaminationStampToGrid(
+bool FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
 	const FIntPoint& GridDimensions,
 	const TConstArrayView<float> RequestedRemovalAmounts,
 	const float StampRatio,
 	const TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
-	TArray<FMD_ScrapeCellChange>& OutCellChanges)
+	TArray<FMD_ScrapeCellChange>& OutCellChanges,
+	float& OutAddedContaminationAmount)
 {
 	OutCellChanges.Reset();
+	OutAddedContaminationAmount = 0.0f;
 
 	const int64 ExpectedCellCount =
 		static_cast<int64>(GridDimensions.X)
@@ -880,32 +893,72 @@ float FMD_ScrapeEvaluator::ApplyContaminationStampToGrid(
 		|| !FMath::IsFinite(StampRatio)
 		|| StampRatio <= 0.0f)
 	{
-		return 0.0f;
+		return false;
 	}
 
 	const float SafeStampRatio = FMath::Clamp(StampRatio, 0.0f, 1.0f);
-	float AddedContaminationAmount = 0.0f;
+	const auto GetSafeCurrentTransferred =
+		[](const float CurrentTransferred)
+		{
+			return FMath::IsFinite(CurrentTransferred)
+				? FMath::Clamp(CurrentTransferred, 0.0f, 1.0f)
+				: 0.0f;
+		};
+	const auto CalculateTargetTransferred =
+		[SafeStampRatio](
+			const float CurrentTransferred,
+			const float RequestedRemovalAmount)
+		{
+			return CurrentTransferred
+				+ RequestedRemovalAmount * SafeStampRatio;
+		};
+
+	// DEC-020: 어느 한 셀이라도 목표 역오염을 전부 담지 못하면 전체 segment를
+	// 거부한다. 이 사전 검사는 실제 셀을 하나도 바꾸지 않아 부분 적용을 막는다.
 	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)
 	{
 		const float RequestedRemovalAmount = RequestedRemovalAmounts[CellIndex];
 		if (!FMath::IsFinite(RequestedRemovalAmount)
-			|| RequestedRemovalAmount <= UE_SMALL_NUMBER)
+			|| RequestedRemovalAmount < 0.0f)
+		{
+			return false;
+		}
+		if (RequestedRemovalAmount <= UE_SMALL_NUMBER)
+		{
+			continue;
+		}
+
+		const float TargetTransferred = CalculateTargetTransferred(
+			GetSafeCurrentTransferred(
+				InOutSurfaceCells[CellIndex].TransferredContamination),
+			RequestedRemovalAmount);
+		if (!FMath::IsFinite(TargetTransferred)
+			|| TargetTransferred > 1.0f)
+		{
+			return false;
+		}
+	}
+
+	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)
+	{
+		const float RequestedRemovalAmount = RequestedRemovalAmounts[CellIndex];
+		if (RequestedRemovalAmount <= UE_SMALL_NUMBER)
 		{
 			continue;
 		}
 
 		FMD_ScrapeSurfaceCell& Cell = InOutSurfaceCells[CellIndex];
-		Cell.Normalize();
-		const float PreviousTransferred = Cell.TransferredContamination;
-		const float TargetTransferred = FMath::Clamp(
-			PreviousTransferred + RequestedRemovalAmount * SafeStampRatio,
-			0.0f,
-			1.0f);
+		const float PreviousTransferred =
+			GetSafeCurrentTransferred(Cell.TransferredContamination);
+		const float TargetTransferred = CalculateTargetTransferred(
+			PreviousTransferred,
+			RequestedRemovalAmount);
 		if (TargetTransferred <= PreviousTransferred + UE_SMALL_NUMBER)
 		{
 			continue;
 		}
 
+		Cell.Normalize();
 		Cell.TransferredContamination = TargetTransferred;
 		Cell.TransferredPaintPatternDensity = 1.0f;
 
@@ -918,10 +971,11 @@ float FMD_ScrapeEvaluator::ApplyContaminationStampToGrid(
 		Change.RemainingAmountAfter = Cell.RemainingContamination;
 		Change.bBecameClean = false;
 
-		AddedContaminationAmount += TargetTransferred - PreviousTransferred;
+		OutAddedContaminationAmount +=
+			TargetTransferred - PreviousTransferred;
 	}
 
-	return AddedContaminationAmount;
+	return true;
 }
 
 float FMD_ScrapeEvaluator::ApplyContaminationDabToGrid(

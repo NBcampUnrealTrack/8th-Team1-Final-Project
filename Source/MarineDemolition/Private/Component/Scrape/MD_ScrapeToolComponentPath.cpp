@@ -526,7 +526,7 @@ void UMD_ScrapeToolComponent::UpdateStableBladeAxis(const double ArcStepCm)
 	StrokePath.bHasLockedStrokeAxis = true;
 }
 
-void UMD_ScrapeToolComponent::ApplyAuthoritativeScrapeStroke(
+bool UMD_ScrapeToolComponent::ApplyAuthoritativeScrapeStroke(
 	UMD_ScrapeSurfaceComponent* const Surface,
 	const EMD_ScrapeSurfaceFace SurfaceFace,
 	const FMD_ScrapeToolPathSegment& PathSegment,
@@ -536,51 +536,170 @@ void UMD_ScrapeToolComponent::ApplyAuthoritativeScrapeStroke(
 	const FVector2D& AppliedEndBladeAxis,
 	const FVector& FeedbackLocation)
 {
-	const bool bWasSaturated =
-		GetScrapeLoadStage() == EMD_ScrapeLoadStage::Stage3;
-	FMD_ScrapeToolSpec EffectiveToolSpec = ScrapeToolSpec;
-	if (bWasSaturated)
-	{
-		EffectiveToolSpec.RemovalPerTravelCentimeter *=
-			GetSaturatedRemovalMultiplier();
-	}
-	const FMD_ScrapeResult Result =
-		bWasSaturated
-		? Surface->ApplyLocalScrapeStrokeWithDeferredCompletion(
-			Stroke,
-			EffectiveToolSpec)
-		: Surface->ApplyLocalScrapeStrokeWithToolSpec(
-			Stroke,
-			EffectiveToolSpec);
-	AddScrapeLoad(CalculateScrapeLoadGainFromCleanRatioDelta(
-		Result.CleanRatioDelta,
-		ScrapeLoadPerRemovedPercent));
+	// Exact Stage3 transfer is completed inside the Surface transaction. These
+	// ordered-path arguments remain part of the caller contract but no longer
+	// feed the retired random-dab accumulator.
+	(void)PathSegment;
+	(void)AppliedRatio;
+	(void)AppliedEndPositionCm;
+	(void)AppliedEndBladeAxis;
 
-	if (bWasSaturated)
+	const double CurrentRecoveryCarrierAmount =
+		FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(
+			ScrapeLoadRecoveryLots);
+	const double CurrentRecoveryRewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
+			ScrapeLoadRecoveryLots);
+	if (!IsValid(Surface)
+		|| SurfaceFace != Stroke.SurfaceFace
+		|| !FMath::IsFinite(ScrapeLoad)
+		|| ScrapeLoad < 0.0f
+		|| ScrapeLoad > MaximumScrapeLoad
+		|| CurrentRecoveryCarrierAmount < 0.0
+		|| CurrentRecoveryRewardUnits < 0.0
+		|| !FMath::IsNearlyEqual(
+			CurrentRecoveryCarrierAmount,
+			static_cast<double>(ScrapeLoad),
+			1.0e-9)
+		|| !Surface->CanAcceptRecoveryTransaction(SurfaceFace))
 	{
-		// Surface의 제거가 완료된 뒤 candidate를 enqueue/commit한다.
-		AccumulateStage3PathSegment(
-			Surface,
-			SurfaceFace,
-			PathSegment,
-			AppliedRatio);
+		return false;
 	}
-	else if (GetScrapeLoadStage() == EMD_ScrapeLoadStage::Stage3)
+
+	const FMD_ScrapeResult Result =
+		ApplyScrapeStrokeForCurrentLoad(Surface, Stroke);
+	const bool bWasSurfaceTransactionApplied =
+		Result.bIsInputValid && Result.bWasStrokeLongEnough;
+	if (!bWasSurfaceTransactionApplied)
 	{
-		// Stage2→3 전환 segment는 소급 도포하지 않고 endpoint에서 시작한다.
-		StartStage3PathAccumulator(
-			Surface,
-			SurfaceFace,
-			AppliedEndPositionCm,
-			AppliedEndBladeAxis);
+		return false;
 	}
-	if (Result.bIsInputValid && Result.bWasStrokeLongEnough)
+
+	const double ResultCarrierAmount =
+		FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(
+			Result.NetRemovedRecoveryLots);
+	const double ResultRewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
+			Result.NetRemovedRecoveryLots);
+	const double ExpectedCarrierAmount =
+		static_cast<double>(Result.NetRemovedContaminationAmount);
+	const double CarrierTolerance = FMath::Max(
+		1.0e-9,
+		FMath::Abs(ExpectedCarrierAmount) * 1.0e-6);
+	const double RewardTolerance = FMath::Max(
+		1.0e-12,
+		FMath::Abs(Result.NetRemovedRewardUnits) * 1.0e-9);
+	if (!FMath::IsFinite(Result.NetRemovedCleanRatioDelta)
+		|| !FMath::IsFinite(ExpectedCarrierAmount)
+		|| ExpectedCarrierAmount < 0.0
+		|| !FMath::IsFinite(Result.NetRemovedRewardUnits)
+		|| Result.NetRemovedRewardUnits < 0.0
+		|| ResultCarrierAmount < 0.0
+		|| ResultRewardUnits < 0.0
+		|| !FMath::IsNearlyEqual(
+			ResultCarrierAmount,
+			ExpectedCarrierAmount,
+			CarrierTolerance)
+		|| !FMath::IsNearlyEqual(
+			ResultRewardUnits,
+			Result.NetRemovedRewardUnits,
+			RewardTolerance))
 	{
-		DispatchAuthoritativeScrapeResult(
-			Surface,
-			Result,
-			FeedbackLocation);
+		ensureMsgf(
+			false,
+			TEXT("Scrape Surface returned an invalid recovery provenance ledger."));
+		return false;
 	}
+
+	const float RequestedLoadAmount =
+		CalculateScrapeLoadGainFromCleanRatioDelta(
+			Result.NetRemovedCleanRatioDelta,
+			CanonicalScrapeLoadPerRemovedPercent);
+	const float PreviousScrapeLoad = ScrapeLoad;
+	TArray<FMD_ScrapeRecoveryLot> PreviousRecoveryLots =
+		ScrapeLoadRecoveryLots;
+	// Load 값은 먼저 확정하되 delegate/복제 알림은 물리 잔여 몫까지 같은
+	// transaction에 기록한 뒤 보낸다. 알림 콜백이 중간 상태를 볼 수 없다.
+	float ActualLoadAmount = 0.0f;
+	if (RequestedLoadAmount > 0.0f
+		&& !TryAddScrapeLoadWithRecoveryInternal(
+			RequestedLoadAmount,
+			Result.NetRemovedRecoveryLots,
+			false,
+			ActualLoadAmount))
+	{
+		ensureMsgf(
+			false,
+			TEXT("Scrape Load rejected a valid Surface recovery ledger."));
+		return false;
+	}
+	FMD_ScrapeMassAllocationResult MassAllocation;
+	if (RequestedLoadAmount > 0.0f)
+	{
+		MassAllocation = CalculateScrapeMassAllocation(
+			RequestedLoadAmount,
+			ActualLoadAmount);
+	}
+	else
+	{
+		// 초기 오염량이 0인 transferred-only 등 Load 백분율 분모를 만들 수
+		// 없는 정상 제거는 invalid 결과와 섞지 않고 명시적으로 물리 100%다.
+		MassAllocation.bIsValid = true;
+		MassAllocation.PhysicalDropRatio = 1.0f;
+	}
+
+	// MASS-012: Surface 결과의 동일 provenance lot은 LoadOwnedRatio만 Tool에
+	// 들어왔고, 아래 커밋이 나머지 PhysicalDropRatio를 물리 원장에 넘긴다.
+	const UMD_ScrapeSurfaceComponent::FPhysicalCommitResult CommitResult =
+		Surface->CommitContaminationPhysicalDrop(
+		Result,
+		MassAllocation,
+		Stroke.EndPositionCm);
+	if (!ensureMsgf(
+		CommitResult.IsAccepted(),
+		TEXT("Scrape physical mass was rejected after the Surface transaction.")))
+	{
+		// Tool은 아직 외부 알림을 보내지 않았으므로 원장과 float를 함께 되돌린다.
+		ScrapeLoad = PreviousScrapeLoad;
+		ScrapeLoadRecoveryLots = MoveTemp(PreviousRecoveryLots);
+		return false;
+	}
+	if (ActualLoadAmount > 0.0f)
+	{
+		NotifyScrapeLoadChangedAndForceNetUpdate();
+	}
+	Surface->FinalizeLocalContaminationPath();
+	DispatchAuthoritativeScrapeResult(
+		Surface,
+		Result,
+		FeedbackLocation);
+	return true;
+}
+
+
+FMD_ScrapeResult UMD_ScrapeToolComponent::ApplyScrapeStrokeForCurrentLoad(
+	UMD_ScrapeSurfaceComponent* const Surface,
+	const FMD_ScrapeStroke& Stroke) const
+{
+	if (!IsValid(Surface))
+	{
+		return FMD_ScrapeResult();
+	}
+
+	if (GetScrapeLoadStage() == EMD_ScrapeLoadStage::Stage3)
+	{
+		float GrossRemovedCleanRatioDelta = 0.0f;
+		return Surface->ApplyLocalScrapeStrokeWithContaminationStamp(
+			Stroke,
+			ScrapeToolSpec,
+			SaturatedReverseContaminationRatio,
+			GrossRemovedCleanRatioDelta,
+			true);
+	}
+
+	return Surface->ApplyLocalScrapeStrokeWithDeferredCompletion(
+		Stroke,
+		ScrapeToolSpec);
 }
 
 void UMD_ScrapeToolComponent::DeliverPathSegmentObstacleImpact(
@@ -665,6 +784,7 @@ bool UMD_ScrapeToolComponent::ApplyScrapePathSegment(
 			CurrentHit.ImpactPoint,
 			AppliedWorldPosition);
 
+	bool bWasSurfaceTransactionRejected = false;
 	if (AppliedChordCm > UE_SMALL_NUMBER)
 	{
 		if (StrokePath.bHasLockedStrokeAxis
@@ -685,7 +805,7 @@ bool UMD_ScrapeToolComponent::ApplyScrapePathSegment(
 		Stroke.EndBladeBasis = FMD_ScrapeBladeAxis::MakeBasis(AppliedEndBladeAxis);
 		if (GetOwner() && GetOwner()->HasAuthority())
 		{
-			ApplyAuthoritativeScrapeStroke(
+			bWasSurfaceTransactionRejected = !ApplyAuthoritativeScrapeStroke(
 				Surface,
 				SurfaceFace,
 				PathSegment,
@@ -702,6 +822,12 @@ bool UMD_ScrapeToolComponent::ApplyScrapePathSegment(
 	if (!bBlocked)
 	{
 		return false;
+	}
+	if (bWasSurfaceTransactionRejected)
+	{
+		// DEC-020: Surface가 segment 전체를 원자 거부했다면 같은 segment의
+		// 따개비 충돌과 +8 Load도 별도 부작용으로 남기지 않는다.
+		return true;
 	}
 
 	DeliverPathSegmentObstacleImpact(

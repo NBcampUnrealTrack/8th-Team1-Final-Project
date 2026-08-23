@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -12,9 +12,11 @@
 #include "GameplayTagContainer.h"
 #include "MD_ScrapeToolComponent.generated.h"
 
+class AController;
 class AMD_Barnacle;
 class AMD_CuttableWall;
 class UMD_ScrapeSurfaceComponent;
+class AMD_TrashBin;
 class UNiagaraSystem;
 class UParticleSystem;
 struct FMinimalViewInfo;
@@ -223,6 +225,8 @@ public:
 	static constexpr float MaximumScrapeLoad = 100.0f;
 	static constexpr float ScrapeLoadStage2Threshold = 34.0f;
 	static constexpr float ScrapeLoadStage3Threshold = 67.0f;
+	/** 제품 긁기 환산 정본. 오염 면의 순제거율 1%는 모든 헤라에서 Load 1이다. */
+	static constexpr float CanonicalScrapeLoadPerRemovedPercent = 1.0f;
 
 	/** 적재량을 0/1/2/3단계 중 하나로 즉시 분류한다. */
 	static EMD_ScrapeLoadStage CalculateScrapeLoadStage(float Load);
@@ -231,6 +235,11 @@ public:
 	static float CalculateScrapeLoadGainFromCleanRatioDelta(
 		float CleanRatioDelta,
 		float LoadPerRemovedPercent);
+
+	/** 요청 Load와 실제 수용 Load를 합이 1인 단일 질량 귀속 비율로 바꾼다. */
+	static FMD_ScrapeMassAllocationResult CalculateScrapeMassAllocation(
+		float RequestedLoadAmount,
+		float ActualLoadAmount);
 
 	/** 현재 적재량과 요청량만으로 실제 제거 가능한 양을 계산하며 상태는 변경하지 않는다. */
 	static float CalculateActualScrapeLoadRemoval(
@@ -260,15 +269,6 @@ public:
 		return FMath::IsFinite(SaturatedContaminationStampRatio)
 			? FMath::Clamp(SaturatedContaminationStampRatio, 0.0f, 1.0f)
 			: 0.0f;
-	}
-
-	/** 3단계 포화 헤라의 제거력을 일반 헤라 대비 배율로 반환한다. */
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
-	float GetSaturatedRemovalMultiplier() const
-	{
-		return FMath::IsFinite(SaturatedRemovalMultiplier)
-			? FMath::Clamp(SaturatedRemovalMultiplier, 0.01f, 1.0f)
-			: 0.05f;
 	}
 
 	/** 3단계 헤라의 무작위 도장 후보 간격을 cm로 반환한다. */
@@ -329,7 +329,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Scrape|Tool")
 	bool SetScrapeBladeWidthCm(float NewBladeWidthCm);
 
-	/** 서버에서 ScrapeLoad를 직접 설정하고 0~100으로 보정한다. */
+	/**
+	 * 서버에서 ScrapeLoad를 직접 설정하고 0~100으로 보정한다.
+	 * 테스트/관리용 재정의 API이므로 기존 보상 원장은 버리고 전체 Load를 보상 0으로 만든다.
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
 		Category = "MD|Scrape|Tool|Load")
 	bool SetScrapeLoad(float NewLoad);
@@ -343,6 +346,15 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
 		Category = "MD|Scrape|Tool|Load")
 	float RemoveScrapeLoad(float RequestedAmount);
+
+	/** 서버에서 Load와 그 안의 보상 원장을 같은 비율로 원자 이동한다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+		Category = "MD|Scrape|Tool|Load")
+	FMD_ScrapeLoadTransferResult RemoveScrapeLoadWithRecovery(
+		float RequestedAmount);
+
+	/** 서버 전용 원장에 현재 남은 회수 가능 보상 단위. 클라이언트에는 복제하지 않는다. */
+	double GetScrapeLoadRewardUnits() const;
 
 	/** 서버 변경 또는 복제 수신으로 ScrapeLoad가 실제로 바뀔 때 발생한다. */
 	UPROPERTY(BlueprintAssignable, Category = "MD|Scrape|Tool|Load")
@@ -387,7 +399,10 @@ protected:
 		meta = (ClampMin = "0.0", ClampMax = "100.0"))
 	float ScrapeLoad;
 
-	/** 오염 마스크 실제 제거율 1%당 적재량. 정본 기본값은 +0.6이다. */
+	/**
+	 * 이전 Blueprint 직렬화 호환용 값. 제품 긁기는 이 override를 읽지 않고
+	 * CanonicalScrapeLoadPerRemovedPercent를 사용한다.
+	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "MD|Scrape|Tool|Load",
 		meta = (ClampMin = "0.0", UIMin = "0.0"))
@@ -405,13 +420,6 @@ protected:
 		meta = (ClampMin = "0.0", ClampMax = "1.0",
 			UIMin = "0.0", UIMax = "1.0"))
 	float SaturatedContaminationStampRatio;
-
-	/** 3단계 포화 헤라의 제거력 배율. 낮을수록 기존 오염과 전이 페인트를 덜 긁어낸다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Scrape|Tool|Load",
-		meta = (ClampMin = "0.01", ClampMax = "1.0",
-			UIMin = "0.01", UIMax = "1.0"))
-	float SaturatedRemovalMultiplier;
 
 	/** 경로의 각 무작위 도장 후보가 실제 오염 자국이 될 확률. 나머지는 빈 간격으로 남긴다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
@@ -638,6 +646,7 @@ protected:
 	float ReadyAimHeartbeatRateHz;
 
 private:
+	friend class AMD_TrashBin;
 	friend class FMD_ScrapeFootprintCharacterizationTest;
 	friend class FMD_ScrapeFocusCameraLockTest;
 	friend class FMD_ScrapeToolBarnacleOcclusionTest;
@@ -645,6 +654,31 @@ private:
 	friend class FMD_ScrapeStage3PathTest;
 	friend class FMD_ScrapeReacquisitionTest;
 	friend class FMD_ScrapeNetworkSessionTest;
+
+	/** Stage3 권위 규칙. Blueprint에서 바꿀 수 없는 정확한 역오염 비율이다. */
+	static constexpr float SaturatedReverseContaminationRatio = 0.4f;
+
+	/** Load와 함께 이동하지만 저장·복제하지 않는 서버 권위 보상 provenance 원장. */
+	TArray<FMD_ScrapeRecoveryLot> ScrapeLoadRecoveryLots;
+
+	/**
+	 * 통 같은 서버 운반체가 외부 알림 없이 두 원장을 먼저 검증한 뒤 한 번에
+	 * 확정할 수 있도록 준비한 제거 후보. public Blueprint API로 노출하지 않는다.
+	 */
+	struct FPreparedScrapeLoadRemoval
+	{
+		uint32 ExpectedRevision = 0;
+		float PreviousLoad = 0.0f;
+		float NewLoad = 0.0f;
+		FMD_ScrapeLoadTransferResult TransferResult;
+		TArray<FMD_ScrapeRecoveryLot> RemainingRecoveryLots;
+	};
+
+	/** Load나 provenance가 바뀔 때마다 증가해 오래된 준비 결과의 commit을 막는다. */
+	uint32 ScrapeLoadStateRevision = 0;
+
+	/** Bin과 Tool 두 원장이 함께 확정되는 동안 delegate 재진입 변경을 거부한다. */
+	bool bScrapeLoadTransactionInProgress = false;
 
 	/** 디버그 표시용 접촉 종류 문자열. 이 컴포넌트에서만 사용한다. */
 	static const TCHAR* GetContactTypeLabel(EMD_ScrapeContactType ContactType);
@@ -716,6 +750,34 @@ private:
 
 	UFUNCTION()
 	void OnRep_ScrapeLoad();
+
+	/** 보상 없는 직접 증가(따개비/관리 호출)를 위한 하위 호환 경로. */
+	float AddScrapeLoadInternal(float RequestedAmount, bool bNotifyChange);
+
+	/** Surface provenance를 실제 Load 수용량만큼만 원자 편입한다. */
+	bool TryAddScrapeLoadWithRecoveryInternal(
+		float RequestedAmount,
+		TConstArrayView<FMD_ScrapeRecoveryLot> RequestedRecoveryLots,
+		bool bNotifyChange,
+		float& OutActualLoadAmount);
+
+	/** 검증된 Load와 원장을 함께 확정한다. 공개 Set의 보상 0 재정의와 분리한다. */
+	bool CommitScrapeLoadStateInternal(
+		float NewLoad,
+		TArray<FMD_ScrapeRecoveryLot>&& NewRecoveryLots,
+		bool bNotifyChange);
+
+	/** 현재 상태를 바꾸지 않고 제거 결과와 남은 원장을 계산한다. */
+	bool TryPrepareScrapeLoadRemoval(
+		float RequestedAmount,
+		FPreparedScrapeLoadRemoval& OutPreparedRemoval) const;
+
+	/** 같은 revision에서 준비한 제거만 실제 Tool 상태에 반영한다. */
+	bool CommitPreparedScrapeLoadRemoval(
+		FPreparedScrapeLoadRemoval&& PreparedRemoval,
+		bool bNotifyChange);
+
+	void NotifyScrapeLoadChangedAndForceNetUpdate();
 
 	void NotifyScrapeLoadChanged();
 	void SetScrapeFocusState(EMD_ScrapeFocusState NewState);
@@ -887,7 +949,7 @@ private:
 		float DeltaTime,
 		FVector2D& OutAppliedEndPositionCm,
 		AMD_Barnacle*& OutBlockingBarnacle);
-	void ApplyAuthoritativeScrapeStroke(
+	bool ApplyAuthoritativeScrapeStroke(
 		UMD_ScrapeSurfaceComponent* Surface,
 		EMD_ScrapeSurfaceFace SurfaceFace,
 		const FMD_ScrapeToolPathSegment& PathSegment,
@@ -896,6 +958,9 @@ private:
 		const FVector2D& AppliedEndPositionCm,
 		const FVector2D& AppliedEndBladeAxis,
 		const FVector& FeedbackLocation);
+	FMD_ScrapeResult ApplyScrapeStrokeForCurrentLoad(
+		UMD_ScrapeSurfaceComponent* Surface,
+		const FMD_ScrapeStroke& Stroke) const;
 	void DeliverPathSegmentObstacleImpact(
 		UMD_ScrapeSurfaceComponent* Surface,
 		EMD_ScrapeSurfaceFace SurfaceFace,

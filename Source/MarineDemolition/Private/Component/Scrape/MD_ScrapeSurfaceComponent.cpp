@@ -130,6 +130,7 @@ UMD_ScrapeSurfaceComponent::UMD_ScrapeSurfaceComponent()
 	bContaminationDecalsConfigured = false;
 	bContaminationSurfaceInitialized = false;
 	bContaminationCompletionBroadcast = false;
+	bDeferredContaminationCompletionTransition = false;
 	ReplicatedContaminationState.SetOwner(this);
 }
 
@@ -417,10 +418,19 @@ void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 	bContaminationDecalsConfigured = false;
 	bContaminationSurfaceInitialized = false;
 	bContaminationCompletionBroadcast = false;
+	bDeferredContaminationCompletionTransition = false;
 	ContaminationCells.Reset();
 	ContaminationGeneratedInitialAmounts.Reset();
 	PendingContaminationItemAmounts[0] = 0.0f;
 	PendingContaminationItemAmounts[1] = 0.0f;
+	for (int32 FaceSlot = 0; FaceSlot < 2; ++FaceSlot)
+	{
+		BaseContaminationRecoveryLots[FaceSlot].Reset();
+		TransferredContaminationRecoveryLots[FaceSlot].Reset();
+		PendingPhysicalRecoveryLots[FaceSlot].Reset();
+		SpawnedPhysicalRecoveryLotsAwaitingCarrier[FaceSlot].Reset();
+		CanonicalInitialContaminationCarrierAmounts[FaceSlot] = 0.0;
+	}
 	CachedFrontContaminationCleanRatio = 0.0f;
 	CachedBackContaminationCleanRatio = 0.0f;
 	CachedFrontInitialContaminationAmount = 0.0;

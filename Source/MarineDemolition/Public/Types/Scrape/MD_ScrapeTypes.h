@@ -795,6 +795,101 @@ public:
 };
 
 /**
+ * 오염 가치가 현재 운반체에서 차지하는 양과 최종 보상 단위를 함께 보존하는 lot.
+ *
+ * CarrierAmount의 단위는 운반체마다 다르다. Surface에서는 raw cell 질량,
+ * Tool에서는 Load point다. RewardUnits만 경제 가치이며 항상 double로 계산한다.
+ * RewardUnits가 0인 lot은 따개비 연질 잔사처럼 관리량만 차지할 수 있다.
+ */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_ScrapeRecoveryLot
+{
+	GENERATED_BODY()
+
+public:
+	FMD_ScrapeRecoveryLot()
+		: SourceId()
+		, RewardClass(NAME_None)
+		, CarrierAmount(0.0)
+		, RewardUnits(0.0)
+	{
+	}
+
+	/** 최초 발행원을 식별한다. 보상 가치가 0인 관리용 lot은 invalid Guid를 허용한다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	FGuid SourceId;
+
+	/** 서로 합산 가능한 보상 종류. 현재 표면 오염은 Contamination을 사용한다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	FName RewardClass;
+
+	/** 현재 운반체에서 이 lot이 차지하는 양. 유한한 0 이상 값만 허용한다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	double CarrierAmount;
+
+	/** 최종 정분류로 회수 가능한 보상 단위. 유한한 0 이상 값만 허용한다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	double RewardUnits;
+};
+
+/**
+ * 헤라 Load를 비울 때 실제로 빠진 관리량과 함께 이동한 가치 lot.
+ * LIQ 구현 전에도 단일 원자 API의 출력 계약을 고정한다.
+ */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_ScrapeLoadTransferResult
+{
+	GENERATED_BODY()
+
+public:
+	FMD_ScrapeLoadTransferResult()
+		: bSucceeded(false)
+		, RemovedLoadAmount(0.0f)
+		, RemovedRewardUnits(0.0)
+	{
+	}
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	bool bSucceeded;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	float RemovedLoadAmount;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	double RemovedRewardUnits;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	TArray<FMD_ScrapeRecoveryLot> RemovedLots;
+};
+
+/** 서버 권위 recovery lot 배열에 공통으로 쓰는 결정적·무손실 산술. */
+struct MARINEDEMOLITION_API FMD_ScrapeRecoveryLedger
+{
+	static bool IsLotValid(const FMD_ScrapeRecoveryLot& Lot);
+	static double GetTotalCarrierAmount(
+		TConstArrayView<FMD_ScrapeRecoveryLot> Lots);
+	static double GetTotalRewardUnits(
+		TConstArrayView<FMD_ScrapeRecoveryLot> Lots);
+	static bool AppendLot(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		const FMD_ScrapeRecoveryLot& Lot);
+	static bool AppendScaledLots(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		TConstArrayView<FMD_ScrapeRecoveryLot> SourceLots,
+		double Scale);
+	static bool RebaseCarrierAmount(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		double NewTotalCarrierAmount);
+	static double ExtractProportional(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		double RequestedCarrierAmount,
+		TArray<FMD_ScrapeRecoveryLot>& OutExtractedLots);
+	static bool AppendZeroRewardCarrier(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		double CarrierAmount);
+};
+
+/**
  * 한 번의 긁기로 실제 값이 변한 셀 하나의 변경 내역
  *
  * 표면 Actor는 이 배열만 순회해 머티리얼 마스크를 갱신 가능.
@@ -840,6 +935,48 @@ public:
 };
 
 /**
+ * 한 번의 표면 순제거 질량을 헤라 적재와 물리 드롭 사이에 나눈 결과.
+ *
+ * RequestedLoadAmount가 유효한 양수일 때만 성공한다. 성공 결과의 두 비율은
+ * 항상 유한한 0~1이며 LoadOwnedRatio + PhysicalDropRatio == 1이다.
+ */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_ScrapeMassAllocationResult
+{
+	GENERATED_BODY()
+
+public:
+	FMD_ScrapeMassAllocationResult()
+		: bIsValid(false)
+		, RequestedLoadAmount(0.0f)
+		, ActualLoadAmount(0.0f)
+		, LoadOwnedRatio(0.0f)
+		, PhysicalDropRatio(0.0f)
+	{
+	}
+
+	/** 요청량과 실제 수용량으로 안전한 배분을 계산했는지 여부. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	bool bIsValid;
+
+	/** 이번 순제거량에서 헤라 적재로 바꾸려고 요청한 양. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float RequestedLoadAmount;
+
+	/** 0~100 상한을 적용한 뒤 헤라가 실제로 받아들인 양. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float ActualLoadAmount;
+
+	/** 순제거 질량 중 헤라 Load가 한 번 소유하는 몫. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float LoadOwnedRatio;
+
+	/** Load가 받지 못해 기존 물리 드롭 누적기로 보내는 나머지 몫. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float PhysicalDropRatio;
+};
+
+/**
  * 한 번의 긁기 입력을 격자에 적용한 최종 결과
  *
  * 이 구조체에는 판정 결과만 담고 사운드 재생, 이펙트 생성, 점수 변경은 미수행.
@@ -861,9 +998,14 @@ public:
 		, ModifiedCellCount(0)
 		, NewlyCleanedCellCount(0)
 		, RemovedContaminationAmount(0.0f)
+		, NetRemovedContaminationAmount(0.0f)
+		, RemovedBaseContaminationAmount(0.0f)
+		, RemovedTransferredContaminationAmount(0.0f)
+		, NetRemovedRewardUnits(0.0)
 		, CleanRatioBefore(0.0f)
 		, CleanRatioAfter(0.0f)
 		, CleanRatioDelta(0.0f)
+		, NetRemovedCleanRatioDelta(0.0f)
 		, bIsSurfaceFullyClean(false)
 		, bTouchedBareSurface(false)
 	{
@@ -916,6 +1058,25 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	float RemovedContaminationAmount;
 
+	/**
+	 * 같은 트랜잭션의 역오염 도포까지 뺀 실제 순제거 질량.
+	 * 헤라 Load와 물리 드롭은 이 값 하나를 배분하며 gross 제거량을 다시 쓰지 않는다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float NetRemovedContaminationAmount;
+
+	/** 서버 회계 전용 gross 기본층 제거량. RPC 피드백에는 직렬화하지 않는다. */
+	float RemovedBaseContaminationAmount;
+
+	/** 서버 회계 전용 gross 재부착층 제거량. RPC 피드백에는 직렬화하지 않는다. */
+	float RemovedTransferredContaminationAmount;
+
+	/** 역오염 재부착 뒤 현재 운반체 밖으로 실제 이동한 보상 단위. */
+	double NetRemovedRewardUnits;
+
+	/** 서버 회계 전용 provenance lot. 클라이언트 피드백 RPC에는 직렬화하지 않는다. */
+	TArray<FMD_ScrapeRecoveryLot> NetRemovedRecoveryLots;
+
 	/** 스트로크 적용 전 표면 전체의 제거 비율. 0은 미제거, 1은 완전 제거를 의미 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	float CleanRatioBefore;
@@ -927,6 +1088,13 @@ public:
 	/** 이번 스트로크가 증가시킨 표면 전체 제거 비율이며 CleanRatioAfter - CleanRatioBefore 값 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	float CleanRatioDelta;
+
+	/**
+	 * CleanRatioDelta에서 같은 트랜잭션의 역오염 몫을 뺀 순제거율.
+	 * 헤라가 요청할 Load 양은 이 값으로만 계산한다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float NetRemovedCleanRatioDelta;
 
 	/**
 	 * 초기 오염이 존재했던 모든 셀의 잔여량이 CleanTolerance 이하인지 여부

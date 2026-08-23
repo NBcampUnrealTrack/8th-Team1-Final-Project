@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 
@@ -60,7 +60,6 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	ScrapeLoadPerRemovedPercent = 0.6f;
 	ScrapeLoadPerRemovedBarnacle = 8.0f;
 	SaturatedContaminationStampRatio = 0.4f;
-	SaturatedRemovalMultiplier = 0.05f;
 	SaturatedContaminationStampCoverage = 0.5f;
 	SaturatedContaminationStampDepthCm = 4.0f;
 	SaturatedContaminationStampSpacingCm = 6.0f;
@@ -243,6 +242,37 @@ float UMD_ScrapeToolComponent::CalculateScrapeLoadGainFromCleanRatioDelta(
 		* LoadPerRemovedPercent;
 }
 
+FMD_ScrapeMassAllocationResult
+UMD_ScrapeToolComponent::CalculateScrapeMassAllocation(
+	const float RequestedLoadAmount,
+	const float ActualLoadAmount)
+{
+	FMD_ScrapeMassAllocationResult Result;
+	if (!FMath::IsFinite(RequestedLoadAmount)
+		|| RequestedLoadAmount <= 0.0f
+		|| !FMath::IsFinite(ActualLoadAmount)
+		|| ActualLoadAmount < 0.0f
+		|| ActualLoadAmount > RequestedLoadAmount)
+	{
+		return Result;
+	}
+
+	const float LoadOwnedRatio = ActualLoadAmount / RequestedLoadAmount;
+	if (!FMath::IsFinite(LoadOwnedRatio)
+		|| LoadOwnedRatio < 0.0f
+		|| LoadOwnedRatio > 1.0f)
+	{
+		return Result;
+	}
+
+	Result.bIsValid = true;
+	Result.RequestedLoadAmount = RequestedLoadAmount;
+	Result.ActualLoadAmount = ActualLoadAmount;
+	Result.LoadOwnedRatio = LoadOwnedRatio;
+	Result.PhysicalDropRatio = 1.0f - LoadOwnedRatio;
+	return Result;
+}
+
 float UMD_ScrapeToolComponent::CalculateActualScrapeLoadRemoval(
 	const float CurrentLoad,
 	const float RequestedAmount)
@@ -259,6 +289,11 @@ float UMD_ScrapeToolComponent::CalculateActualScrapeLoadRemoval(
 		CurrentLoad,
 		0.0f,
 		MaximumScrapeLoad);
+	if (RequestedAmount >= ClampedCurrentLoad)
+	{
+		// 전량 요청은 일반 알림 허용오차보다 작은 tail도 정확히 0까지 비운다.
+		return ClampedCurrentLoad;
+	}
 	const float RemainingLoad = FMath::Max(
 		0.0f,
 		ClampedCurrentLoad - RequestedAmount);
@@ -269,69 +304,201 @@ float UMD_ScrapeToolComponent::CalculateActualScrapeLoadRemoval(
 
 bool UMD_ScrapeToolComponent::SetScrapeLoad(const float NewLoad)
 {
-	if (!GetOwner() || !GetOwner()->HasAuthority() || !FMath::IsFinite(NewLoad))
+	if (bScrapeLoadTransactionInProgress
+		|| !GetOwner()
+		|| !GetOwner()->HasAuthority()
+		|| !FMath::IsFinite(NewLoad))
 	{
 		return false;
 	}
 
-	const float PreviousLoad = GetScrapeLoad();
 	const float ClampedNewLoad = FMath::Clamp(
 		NewLoad,
 		0.0f,
 		MaximumScrapeLoad);
-	if (CalculateScrapeLoadStage(PreviousLoad) == EMD_ScrapeLoadStage::Stage3
-		&& CalculateScrapeLoadStage(ClampedNewLoad)
-			!= EMD_ScrapeLoadStage::Stage3)
+	TArray<FMD_ScrapeRecoveryLot> ZeroRewardRecoveryLots;
+	if (ClampedNewLoad > 0.0f
+		&& !FMD_ScrapeRecoveryLedger::AppendZeroRewardCarrier(
+			ZeroRewardRecoveryLots,
+			static_cast<double>(ClampedNewLoad)))
 	{
-		// 이전 spec/generation으로 생성한 tail을 먼저 확정한다.
-		FlushStage3PathTail();
-		AdvanceStage3SubStrokeGeneration();
+		return false;
 	}
-	ScrapeLoad = ClampedNewLoad;
-	if (!FMath::IsNearlyEqual(PreviousLoad, ScrapeLoad))
-	{
-		NotifyScrapeLoadChanged();
-		GetOwner()->ForceNetUpdate();
-	}
-	return true;
+
+	// Public Set은 저장 복원이 아닌 테스트/관리용 fixture다. 같은 숫자를 다시
+	// 설정하더라도 이전 provenance를 남기지 않고 보상 0 상태로 재정의한다.
+	return CommitScrapeLoadStateInternal(
+		ClampedNewLoad,
+		MoveTemp(ZeroRewardRecoveryLots),
+		true);
 }
 
 float UMD_ScrapeToolComponent::AddScrapeLoad(
 	const float RequestedAmount)
 {
-	if (!GetOwner()
+	return AddScrapeLoadInternal(RequestedAmount, true);
+}
+
+float UMD_ScrapeToolComponent::AddScrapeLoadInternal(
+	const float RequestedAmount,
+	const bool bNotifyChange)
+{
+	float ActualLoadAmount = 0.0f;
+	TryAddScrapeLoadWithRecoveryInternal(
+		RequestedAmount,
+		TConstArrayView<FMD_ScrapeRecoveryLot>(),
+		bNotifyChange,
+		ActualLoadAmount);
+	return ActualLoadAmount;
+}
+
+bool UMD_ScrapeToolComponent::TryAddScrapeLoadWithRecoveryInternal(
+	const float RequestedAmount,
+	const TConstArrayView<FMD_ScrapeRecoveryLot> RequestedRecoveryLots,
+	const bool bNotifyChange,
+	float& OutActualLoadAmount)
+{
+	OutActualLoadAmount = 0.0f;
+	if (bScrapeLoadTransactionInProgress
+		|| !GetOwner()
 		|| !GetOwner()->HasAuthority()
 		|| !FMath::IsFinite(RequestedAmount)
 		|| RequestedAmount <= 0.0f)
 	{
-		return 0.0f;
+		return false;
 	}
 
 	const float PreviousLoad = GetScrapeLoad();
-	ScrapeLoad = FMath::Clamp(
+	TArray<FMD_ScrapeRecoveryLot> CandidateRecoveryLots =
+		ScrapeLoadRecoveryLots;
+	if (!FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+			CandidateRecoveryLots,
+			static_cast<double>(PreviousLoad)))
+	{
+		return false;
+	}
+
+	TArray<FMD_ScrapeRecoveryLot> IncomingRecoveryLots;
+	if (RequestedRecoveryLots.Num() == 0)
+	{
+		if (!FMD_ScrapeRecoveryLedger::AppendZeroRewardCarrier(
+				IncomingRecoveryLots,
+				static_cast<double>(RequestedAmount)))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		IncomingRecoveryLots.Append(
+			RequestedRecoveryLots.GetData(),
+			RequestedRecoveryLots.Num());
+		if (!FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+				IncomingRecoveryLots,
+				static_cast<double>(RequestedAmount)))
+		{
+			return false;
+		}
+	}
+
+	float CandidateLoad = FMath::Clamp(
 		PreviousLoad + RequestedAmount,
 		0.0f,
 		MaximumScrapeLoad);
-	const float AddedAmount = ScrapeLoad - PreviousLoad;
-	if (AddedAmount > 0.0f)
+	float StoredLoadDelta = CandidateLoad - PreviousLoad;
+	if (StoredLoadDelta > RequestedAmount && CandidateLoad > PreviousLoad)
 	{
-		NotifyScrapeLoadChanged();
-		GetOwner()->ForceNetUpdate();
+		// 양수 float의 bit 표현은 값 순서와 같다. 최근접 반올림이 요청량을
+		// 넘겼다면 바로 아래 표현값으로 내려 실제 저장 증가도 요청 이하로 만든다.
+		const uint32 CandidateBits = FMath::AsUInt(CandidateLoad);
+		CandidateLoad = CandidateBits > 0
+			? FMath::AsFloat(CandidateBits - 1)
+			: PreviousLoad;
+		if (!FMath::IsFinite(CandidateLoad) || CandidateLoad < PreviousLoad)
+		{
+			CandidateLoad = PreviousLoad;
+		}
+		StoredLoadDelta = CandidateLoad - PreviousLoad;
+	}
+	if (StoredLoadDelta <= 0.0f)
+	{
+		// 가득 찬 헤라는 정상적인 0 수용이다. Surface가 같은 비율을 물리
+		// 경로에 전부 넘길 수 있도록 validation 성공과 구분한다.
+		return true;
 	}
 
-	return AddedAmount;
+	TArray<FMD_ScrapeRecoveryLot> AcceptedRecoveryLots;
+	const double AcceptedCarrierAmount =
+		FMD_ScrapeRecoveryLedger::ExtractProportional(
+			IncomingRecoveryLots,
+			static_cast<double>(StoredLoadDelta),
+			AcceptedRecoveryLots);
+	if (!FMath::IsNearlyEqual(
+			AcceptedCarrierAmount,
+			static_cast<double>(StoredLoadDelta),
+			1.0e-9)
+		|| !FMD_ScrapeRecoveryLedger::AppendScaledLots(
+			CandidateRecoveryLots,
+			AcceptedRecoveryLots,
+			1.0)
+		|| !FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+			CandidateRecoveryLots,
+			static_cast<double>(CandidateLoad)))
+	{
+		return false;
+	}
+
+	if (!CommitScrapeLoadStateInternal(
+			CandidateLoad,
+			MoveTemp(CandidateRecoveryLots),
+			bNotifyChange))
+	{
+		return false;
+	}
+
+	OutActualLoadAmount = StoredLoadDelta;
+	return true;
 }
 
 float UMD_ScrapeToolComponent::RemoveScrapeLoad(
 	const float RequestedAmount)
 {
+	return RemoveScrapeLoadWithRecovery(RequestedAmount).RemovedLoadAmount;
+}
+
+FMD_ScrapeLoadTransferResult
+UMD_ScrapeToolComponent::RemoveScrapeLoadWithRecovery(
+	const float RequestedAmount)
+{
+	FPreparedScrapeLoadRemoval PreparedRemoval;
+	if (!TryPrepareScrapeLoadRemoval(RequestedAmount, PreparedRemoval))
+	{
+		return FMD_ScrapeLoadTransferResult();
+	}
+
+	FMD_ScrapeLoadTransferResult Result = PreparedRemoval.TransferResult;
+	if (!CommitPreparedScrapeLoadRemoval(
+			MoveTemp(PreparedRemoval),
+			/*bNotifyChange=*/true))
+	{
+		return FMD_ScrapeLoadTransferResult();
+	}
+	return Result;
+}
+
+bool UMD_ScrapeToolComponent::TryPrepareScrapeLoadRemoval(
+	const float RequestedAmount,
+	FPreparedScrapeLoadRemoval& OutPreparedRemoval) const
+{
+	OutPreparedRemoval = FPreparedScrapeLoadRemoval();
 	const AActor* OwnerActor = GetOwner();
-	if (!IsValid(OwnerActor)
+	if (bScrapeLoadTransactionInProgress
+		|| !IsValid(OwnerActor)
 		|| !OwnerActor->HasAuthority()
 		|| !FMath::IsFinite(RequestedAmount)
 		|| RequestedAmount <= 0.0f)
 	{
-		return 0.0f;
+		return false;
 	}
 
 	const float PreviousLoad = GetScrapeLoad();
@@ -340,21 +507,151 @@ float UMD_ScrapeToolComponent::RemoveScrapeLoad(
 		RequestedAmount);
 	if (CalculatedRemoval <= 0.0f)
 	{
-		return 0.0f;
+		return false;
 	}
 
-	const float TargetLoad = PreviousLoad - CalculatedRemoval;
-	if (FMath::IsNearlyEqual(PreviousLoad, TargetLoad))
+	const float TargetLoad = FMath::Max(
+		0.0f,
+		PreviousLoad - CalculatedRemoval);
+	if (PreviousLoad == TargetLoad)
 	{
-		return 0.0f;
+		return false;
 	}
 
-	if (!SetScrapeLoad(TargetLoad))
+	TArray<FMD_ScrapeRecoveryLot> RemainingRecoveryLots =
+		ScrapeLoadRecoveryLots;
+	if (!FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+			RemainingRecoveryLots,
+			static_cast<double>(PreviousLoad)))
 	{
-		return 0.0f;
+		return false;
 	}
 
-	return PreviousLoad - GetScrapeLoad();
+	TArray<FMD_ScrapeRecoveryLot> RemovedRecoveryLots;
+	const double RemovedCarrierAmount =
+		FMD_ScrapeRecoveryLedger::ExtractProportional(
+			RemainingRecoveryLots,
+			static_cast<double>(CalculatedRemoval),
+			RemovedRecoveryLots);
+	const double RemovedRewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(RemovedRecoveryLots);
+	if (!FMath::IsNearlyEqual(
+			RemovedCarrierAmount,
+			static_cast<double>(CalculatedRemoval),
+			1.0e-9)
+		|| RemovedRewardUnits < 0.0)
+	{
+		return false;
+	}
+
+	if (TargetLoad == 0.0f)
+	{
+		// 완전 비움은 double tail을 남기지 않고 원장의 마지막 unit까지 이동한다.
+		RemainingRecoveryLots.Reset();
+	}
+	else if (!FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+		RemainingRecoveryLots,
+		static_cast<double>(TargetLoad)))
+	{
+		return false;
+	}
+
+	OutPreparedRemoval.ExpectedRevision = ScrapeLoadStateRevision;
+	OutPreparedRemoval.PreviousLoad = PreviousLoad;
+	OutPreparedRemoval.NewLoad = TargetLoad;
+	OutPreparedRemoval.RemainingRecoveryLots = MoveTemp(RemainingRecoveryLots);
+	OutPreparedRemoval.TransferResult.bSucceeded = true;
+	OutPreparedRemoval.TransferResult.RemovedLoadAmount =
+		PreviousLoad - TargetLoad;
+	OutPreparedRemoval.TransferResult.RemovedRewardUnits = RemovedRewardUnits;
+	OutPreparedRemoval.TransferResult.RemovedLots = MoveTemp(RemovedRecoveryLots);
+	return true;
+}
+
+bool UMD_ScrapeToolComponent::CommitPreparedScrapeLoadRemoval(
+	FPreparedScrapeLoadRemoval&& PreparedRemoval,
+	const bool bNotifyChange)
+{
+	if (!PreparedRemoval.TransferResult.bSucceeded
+		|| PreparedRemoval.ExpectedRevision != ScrapeLoadStateRevision
+		|| GetScrapeLoad() != PreparedRemoval.PreviousLoad)
+	{
+		return false;
+	}
+
+	return CommitScrapeLoadStateInternal(
+		PreparedRemoval.NewLoad,
+		MoveTemp(PreparedRemoval.RemainingRecoveryLots),
+		bNotifyChange);
+}
+
+double UMD_ScrapeToolComponent::GetScrapeLoadRewardUnits() const
+{
+	const double RewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
+			ScrapeLoadRecoveryLots);
+	return RewardUnits >= 0.0 ? RewardUnits : 0.0;
+}
+
+bool UMD_ScrapeToolComponent::CommitScrapeLoadStateInternal(
+	const float NewLoad,
+	TArray<FMD_ScrapeRecoveryLot>&& NewRecoveryLots,
+	const bool bNotifyChange)
+{
+	AActor* const OwnerActor = GetOwner();
+	if (!IsValid(OwnerActor)
+		|| !OwnerActor->HasAuthority()
+		|| !FMath::IsFinite(NewLoad)
+		|| NewLoad < 0.0f
+		|| NewLoad > MaximumScrapeLoad)
+	{
+		return false;
+	}
+
+	const double CarrierAmount =
+		FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(NewRecoveryLots);
+	const double RewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(NewRecoveryLots);
+	if (CarrierAmount < 0.0
+		|| RewardUnits < 0.0
+		|| !FMath::IsNearlyEqual(
+			CarrierAmount,
+			static_cast<double>(NewLoad),
+			1.0e-9))
+	{
+		return false;
+	}
+
+	const float PreviousLoad = GetScrapeLoad();
+	if (CalculateScrapeLoadStage(PreviousLoad) == EMD_ScrapeLoadStage::Stage3
+		&& CalculateScrapeLoadStage(NewLoad) != EMD_ScrapeLoadStage::Stage3)
+	{
+		// 이전 spec/generation으로 생성한 tail을 먼저 확정한다.
+		FlushStage3PathTail();
+		AdvanceStage3SubStrokeGeneration();
+	}
+
+	ScrapeLoad = NewLoad;
+	ScrapeLoadRecoveryLots = MoveTemp(NewRecoveryLots);
+	++ScrapeLoadStateRevision;
+	if (ScrapeLoad == 0.0f)
+	{
+		ScrapeLoadRecoveryLots.Reset();
+	}
+	if (PreviousLoad != ScrapeLoad && bNotifyChange)
+	{
+		NotifyScrapeLoadChangedAndForceNetUpdate();
+	}
+	return true;
+}
+
+void UMD_ScrapeToolComponent::NotifyScrapeLoadChangedAndForceNetUpdate()
+{
+	NotifyScrapeLoadChanged();
+	if (AActor* const OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
+	}
 }
 
 void UMD_ScrapeToolComponent::OnRep_ScrapeLoad()
