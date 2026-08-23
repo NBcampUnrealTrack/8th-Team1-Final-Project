@@ -1,12 +1,10 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/MD_LocalUIManager.h"
 
 #include "UI/Foundation/MD_WidgetStack.h"
-
 #include "Blueprint/GameViewportSubsystem.h"
 #include "CommonActivatableWidget.h"
-#include "Widgets/CommonActivatableWidgetContainer.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Util/MD_LogUtility.h"
 #include "UI/MD_UISettings.h"
@@ -384,8 +382,8 @@ void UMD_LocalUIManager::HandleWorldBeginTearDown(UWorld* World)
 	// 이전 World에서 시작된 Async UI 완료 콜백이 새 화면을 생성하지 못하도록 세대를 변경한다.
 	WorldGeneration++;
 
-	// 화면이 보유한 이전 World Actor와 delegate가 화면 수명 종료 경로에서 해제되도록 Stack을 비운다.
-	ClearAllLayers();
+	// 각 화면이 선택한 정책에 따라 이전 World에서 제거할 화면만 Stack에서 정리한다.
+	RemoveWorldTravelWidgetsFromAllLayers();
 
 	// Travel 이후 새 Async 요청이 이전 요청의 입력 차단 횟수를 이어받지 않도록 초기화한다.
 	AsyncInputSuspensionCount = 0;
@@ -394,15 +392,15 @@ void UMD_LocalUIManager::HandleWorldBeginTearDown(UWorld* World)
 	bPrimaryLayoutWasEnabled = true;
 }
 
-void UMD_LocalUIManager::ClearAllLayers()
+void UMD_LocalUIManager::RemoveWorldTravelWidgetsFromAllLayers()
 {
-	// World 전환 이후 이전 화면 인스턴스가 재사용되지 않도록 모든 프로젝트 Stack을 초기화한다.
+	// 각 레이어에서 World Travel 제거 정책이 활성화된 화면만 정리한다.
 	for (const TPair<FGameplayTag, TObjectPtr<UMD_WidgetStack>>& Pair : LayerStacks)
 	{
 		if (IsValid(Pair.Value) == true)
 		{
-			// 표시 화면과 내부 풀을 함께 비워 다음 World의 Push가 새 화면 인스턴스를 생성하게 한다.
-			Pair.Value->ClearWidgetsAndResetPool();
+			// 유지 화면과 순서를 보존하면서 제거 대상 화면의 내부 풀 참조까지 해제한다.
+			Pair.Value->RemoveWidgetsOnWorldTravel();
 		}
 	}
 }
