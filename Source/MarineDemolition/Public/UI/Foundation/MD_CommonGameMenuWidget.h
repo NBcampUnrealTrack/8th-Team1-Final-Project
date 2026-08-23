@@ -17,6 +17,8 @@ class MARINEDEMOLITION_API UMD_CommonGameMenuWidget : public UMD_CommonActivatab
 public:
 	virtual void NativeOnActivated() override;
 
+	virtual void NativeOnDeactivated() override;
+
 protected:
 	virtual void NativeOnInitialized() override;
 };

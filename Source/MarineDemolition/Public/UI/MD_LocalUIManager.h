@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -77,6 +77,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI")
 	bool ClearLayer(FGameplayTag LayerTag);
 
+	// 등록된 Stack 중 요청 태그에 해당하는 유효한 Stack을 반환한다.
+	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI")
+	UMD_WidgetStack* FindLayerStack(FGameplayTag LayerTag) const;
+
 	// 지정한 레이어의 현재 활성 화면을 반환한다.
 	UFUNCTION(BlueprintPure, Category = "MarineDemolition|UI")
 	UCommonActivatableWidget* GetActiveScreen(FGameplayTag LayerTag) const;
@@ -121,12 +125,9 @@ protected:
 	// 소유한 World가 종료되기 전에 화면과 비동기 입력 상태를 정리한다.
 	void HandleWorldBeginTearDown(UWorld* World);
 
-	// World 객체를 참조할 수 있는 화면을 상위 레이어부터 모두 제거한다.
-	void ClearAllLayers();
+	// 각 화면의 World Travel 제거 정책에 따라 모든 레이어를 정리한다.
+	void RemoveWorldTravelWidgetsFromAllLayers();
 
 	// 요청 태그가 프로젝트에서 표준 UI 레이어인지 확인한다.
 	bool IsSupportedLayerTag(FGameplayTag LayerTag) const;
-
-	// 등록된 Stack 중 요청 태그에 해당하는 유효한 Stack을 반환한다.
-	UMD_WidgetStack* FindLayerStack(FGameplayTag LayerTag) const;
 };

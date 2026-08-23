@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -13,6 +13,9 @@ class MARINEDEMOLITION_API UMD_WidgetStack : public UCommonActivatableWidgetStac
 	GENERATED_BODY()
 
 public:
+	// World Travel 제거 정책이 활성화된 화면만 Stack과 내부 풀에서 제거한다.
+	void RemoveWidgetsOnWorldTravel();
+
 	// 현재 화면을 즉시 제거하고 다음 Push가 새 위젯 인스턴스를 생성하도록 내부 풀을 초기화한다.
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI")
 	void ClearWidgetsAndResetPool();
