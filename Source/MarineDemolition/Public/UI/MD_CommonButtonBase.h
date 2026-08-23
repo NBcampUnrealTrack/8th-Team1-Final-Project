@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -20,9 +20,14 @@ public:
 	virtual void NativeOnCurrentTextStyleChanged() override;
 
 protected:
+	virtual void HandleFocusReceived() override;
+
+	virtual void HandleFocusLost() override;
+
+protected:
 	// PreConstruct에서 버튼 Content로 적용할 편집 가능한 텍스트를 보관한다.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|UI")
-	FText Text;
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+	FText Text_ButtonText;
 
 	// Common TextBlock 또는 TextBlock
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MD|UI")
