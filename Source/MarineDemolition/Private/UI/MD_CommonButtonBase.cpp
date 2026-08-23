@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "UI/MD_CommonButtonBase.h"
 #include "CommonTextBlock.h"
@@ -9,8 +9,8 @@ void UMD_CommonButtonBase::NativePreConstruct()
 	// 부모 클래스의 디자인 타임과 런타임 사전 구성을 먼저 수행한다.
 	Super::NativePreConstruct();
 
-	// 편집한 Text 값을 바인딩된 버튼 TextBlock의 Content에 반영한다.
-	SetContentText(Text);
+	// 편집한 Text_ButtonText 값을 바인딩된 버튼 TextBlock의 Content에 반영한다.
+	SetContentText(Text_ButtonText);
 }
 
 void UMD_CommonButtonBase::NativeOnCurrentTextStyleChanged()
@@ -33,10 +33,26 @@ void UMD_CommonButtonBase::NativeOnCurrentTextStyleChanged()
 	}
 }
 
+void UMD_CommonButtonBase::HandleFocusReceived()
+{
+	Super::HandleFocusReceived();
+
+	// 키보드나 게임패드 포커스도 마우스 Hover와 같은 이벤트 경로로 전달한다.
+	NativeOnHovered();
+}
+
+void UMD_CommonButtonBase::HandleFocusLost()
+{
+	Super::HandleFocusLost();
+
+	// 키보드나 게임패드 포커스도 마우스 UnHover와 같은 이벤트 경로로 전달한다.
+	NativeOnUnhovered();
+}
+
 FText UMD_CommonButtonBase::GetContentText()
 {
 	// 디자인 타임과 런타임에 공통으로 사용하는 Content 값을 저장한다.
-	FText ContentText = Text;
+	FText ContentText = Text_ButtonText;
 
 	// 저장한 Content를 호출자에게 반환한다.
 	return ContentText;
@@ -45,7 +61,7 @@ FText UMD_CommonButtonBase::GetContentText()
 void UMD_CommonButtonBase::SetContentText(FText InContentText)
 {
 	// PreConstruct와 이후 TextBlock 재구성에서도 유지할 Content 값을 갱신한다.
-	Text = InContentText;
+	Text_ButtonText = InContentText;
 
 	// TextBlock이 바인딩되지 않은 버튼은 Content를 변경하지 않는다.
 	if (IsValid(Txt_ButtonText) == false)
