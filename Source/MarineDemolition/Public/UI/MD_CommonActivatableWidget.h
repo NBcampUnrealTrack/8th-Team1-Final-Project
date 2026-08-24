@@ -28,5 +28,5 @@ public:
 
 	// World Travel 시작 시 화면 제거 여부를 반환한다.
 	UFUNCTION(BlueprintPure, Category = "MD|UI|Navigation")
-	FORCEINLINE bool ShouldRemoveOnWorldTravel() const { bool ShouldRemoveOnWorldTravelResult = RemoveOnWorldTravel; return ShouldRemoveOnWorldTravelResult; }
+	FORCEINLINE bool ShouldRemoveOnWorldTravel() const { return RemoveOnWorldTravel; }
 };

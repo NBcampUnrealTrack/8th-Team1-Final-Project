@@ -14,7 +14,6 @@ void UMD_CommonGameMenuWidget::NativeOnActivated()
 	{
 		// 게임 입력을 차단하고 메뉴 UI만 입력을 받도록 설정한다.
 		FInputModeUIOnly InputMode = FInputModeUIOnly();
-		InputMode.SetWidgetToFocus(TakeWidget());
 		InputMode.SetLockMouseToViewportBehavior(EMouseLockMode::DoNotLock);
 
 		OwningPlayerController->SetInputMode(InputMode);
