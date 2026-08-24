@@ -513,11 +513,13 @@ protected:
 
 	/**
 	 * 드래그가 멈춘 뒤 지속음을 끊기까지의 유예(초).
-	 * 0 에 가까우면 방향을 바꾸는 순간마다 소리가 끊겨 딸꾹거린다.
+	 *
+	 * 방향을 꺾을 때는 손이 잠깐 멈춘다. 이 값이 그 정지보다 짧으면
+	 * 왕복해서 긁을 때마다 소리가 딸꾹거린다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback",
 		meta = (ClampMin = "0.0", ClampMax = "1.0", Units = "s"))
-	float ScrapeLoopIdleGraceSeconds = 0.12f;
+	float ScrapeLoopIdleGraceSeconds = 0.25f;
 
 	/** 이 거리(cm) 이상 표면을 훑어야 드래그로 본다. 손떨림을 걸러낸다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback",

@@ -22,7 +22,7 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 		FGameplayTag::RequestGameplayTag(TEXT("SFX.Clean.Hera.ScrapeSludge"), /*ErrorIfNotFound*/ false);
 	ContaminationScrapeEffect = nullptr;
 	BareSurfaceScrapeEffect = nullptr;
-	ScrapeLoopIdleGraceSeconds = 0.12f;
+	ScrapeLoopIdleGraceSeconds = 0.25f;
 	ScrapeLoopMinTravelCm = 0.0f;
 	MinimumFeedbackIntervalSeconds = 0.08f;
 	bShowDebugFeedback = true;
@@ -459,9 +459,15 @@ void UMD_ScrapeToolComponent::UpdateScrapeLoopAudio()
 		StrokePath.ScrapePathArcLengthCm + StrokePath.PendingScrapePathArcLengthCm;
 
 	// 경로가 늘었다 = 날이 표면을 훑고 있다.
-	// 버튼만 누르고 마우스를 멈추면 이 값이 그대로라 소리가 멎는다
+	// 버튼만 누르고 마우스를 멈추면 이 값이 그대로라 소리가 멎는다.
+	//
+	// 방향을 꺾으면 ResetScrapePathAccumulator 가 누적을 0 으로 되돌린다.
+	// 그때 값이 거꾸로 떨어지므로 "늘었는가" 만 보면 이동으로 안 잡혀
+	// 하필 방향 전환마다 소리가 끊긴다. 경로가 리셋됐다는 것 자체가
+	// 플레이어가 날을 꺾었다는 뜻이라 이동으로 친다
 	const double PreviousArc = LastObservedScrapePathArcLengthCm;
-	if (Arc - PreviousArc > ScrapeLoopMinTravelCm)
+	const bool bPathReset = Arc < PreviousArc - UE_KINDA_SMALL_NUMBER;
+	if (bPathReset || Arc - PreviousArc > ScrapeLoopMinTravelCm)
 	{
 		LastScrapeTravelWorldSeconds = Now;
 	}

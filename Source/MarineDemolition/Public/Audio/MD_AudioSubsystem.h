@@ -132,14 +132,16 @@ private:
 	void PruneFinished();
 
 	/**
-	 * 인덱스에 들어온 소재를 미리 올려 둔다.
+	 * 인덱스에 들어온 소재를 백그라운드로 미리 올린다.
 	 *
 	 * 재생 시점의 LoadSynchronous 는 첫 타에만 걸리지만, 그 첫 타가 하필
 	 * 플레이어가 처음 긁는 순간이라 "반응이 굼뜨다" 로 체감된다.
-	 * 참조를 여기 붙들어 두면 GC 로 풀렸다가 다시 로드되는 것도 막는다.
+	 * 동기로 올리면 그 비용이 레벨 로드로 옮겨갈 뿐이라 카탈로그가 커질수록
+	 * 로딩이 길어진다. 핸들을 들고 있으면 GC 로 풀리는 것도 막힌다.
+	 *
+	 * 선로드가 끝나기 전에 재생 요청이 오면 그 건만 기존대로 동기 로드된다.
 	 */
-	UPROPERTY(Transient)
-	TArray<TObjectPtr<USoundBase>> PreloadedSounds;
+	TSharedPtr<struct FStreamableHandle> PreloadHandle;
 
 	/** EventTag → 후보 항목들 */
 	TMap<FGameplayTag, TArray<FMD_AudioEntry>> EntriesByTag;

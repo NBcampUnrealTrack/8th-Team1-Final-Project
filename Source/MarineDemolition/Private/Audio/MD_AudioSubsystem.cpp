@@ -12,6 +12,8 @@
 #include "GameFramework/Character.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "Kismet/GameplayStatics.h"
+#include "Engine/AssetManager.h"
+#include "Engine/StreamableManager.h"
 #include "Sound/SoundBase.h"
 #include "Sound/SoundSubmix.h"
 #include "Sound/SoundAttenuation.h"
@@ -156,6 +158,13 @@ void UMD_AudioSubsystem::Deinitialize()
 	EntriesByTag.Reset();
 	CachedFilter = nullptr;
 
+	// 월드가 내려가는데 로드가 계속 돌 이유가 없다
+	if (PreloadHandle.IsValid())
+	{
+		PreloadHandle->CancelHandle();
+		PreloadHandle.Reset();
+	}
+
 	Super::Deinitialize();
 }
 
@@ -213,19 +222,42 @@ void UMD_AudioSubsystem::RebuildIndex()
 		});
 	}
 
-	// 소재를 지금 올려 둔다. 재생 순간에 로드가 걸리면 그 한 번이 굼뜨게 들린다
-	PreloadedSounds.Reset();
+	// 소재를 백그라운드로 올린다. 재생 순간에 로드가 걸리면 그 한 번이 굼뜨게 들린다
+	if (PreloadHandle.IsValid())
+	{
+		PreloadHandle->CancelHandle();
+		PreloadHandle.Reset();
+	}
+
+	TArray<FSoftObjectPath> SoundPaths;
+	SoundPaths.Reserve(AllEntries.Num());
 	for (const FMD_AudioEntry& Entry : AllEntries)
 	{
-		if (USoundBase* Sound = Entry.Sound.LoadSynchronous())
+		const FSoftObjectPath& Path = Entry.Sound.ToSoftObjectPath();
+		if (Path.IsValid())
 		{
-			PreloadedSounds.AddUnique(Sound);
+			SoundPaths.AddUnique(Path);
 		}
 	}
 
+	const int32 PreloadCount = SoundPaths.Num();
+	if (PreloadCount > 0)
+	{
+		PreloadHandle = UAssetManager::GetStreamableManager().RequestAsyncLoad(
+			MoveTemp(SoundPaths),
+			FStreamableDelegate::CreateWeakLambda(this, [this, PreloadCount]()
+			{
+				UE_LOG(LogTemp, Log, TEXT("[MD_Audio] 소재 %d개 선로드 완료"), PreloadCount);
+			}),
+			FStreamableManager::DefaultAsyncLoadPriority,
+			/*bManageActiveHandle*/ false,
+			/*bStartStalled*/ false,
+			TEXT("MD_Audio Preload"));
+	}
+
 	bIndexBuilt = true;
-	UE_LOG(LogTemp, Log, TEXT("[MD_Audio] 이벤트 %d개 / 정의 %d건 인덱싱, 소재 %d개 선로드"),
-		EntriesByTag.Num(), AllEntries.Num(), PreloadedSounds.Num());
+	UE_LOG(LogTemp, Log, TEXT("[MD_Audio] 이벤트 %d개 / 정의 %d건 인덱싱, 소재 %d개 선로드 요청"),
+		EntriesByTag.Num(), AllEntries.Num(), PreloadCount);
 }
 
 const FMD_AudioEntry* UMD_AudioSubsystem::ResolveEntry(const FGameplayTag& EventTag) const
