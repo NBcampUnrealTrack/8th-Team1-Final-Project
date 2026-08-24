@@ -296,19 +296,15 @@ void AMD_GameModeBase::ConfirmDayTransition(AMD_PlayerController* RequestingCont
 
 void AMD_GameModeBase::TravelToNextDay()
 {
-    PreparePlayersForTravel(NSLOCTEXT(
-        "MDLoadingScreen",
-        "StartingNextDay",
-        "NEXT SHIFT PREPARING • 다음 작업일 준비 중"));
+    PreparePlayersForTravel(NSLOCTEXT("MDLoadingScreen", "StartingNextDay", "NEXT SHIFT PREPARING • 다음 작업일 준비 중"));
 
     // 같은 레벨을 다시 로드 → BeginPlay에서 복원 경로 진입
     RestartLevelAfterLoadingIntro();
 }
 
-// 세션 절차(MD_MultiplayManager)를 거치지 않는 직접 ServerTravel 앞에서
-// 모든 소유 클라이언트의 로딩 화면을 켠다.
+// 세션 절차를 거치지 않는 직접 ServerTravel 앞에서 모든 소유 클라이언트의 로딩을 켠다.
+// 클라이언트가 서버와 같은 시점에 인트로를 시작해야 하므로
 // RestartLevelAfterLoadingIntro의 콜백 안이 아니라 그 전에 호출해야 한다.
-// 클라이언트가 서버와 같은 시점에 인트로를 시작해야 하기 때문이다.
 void AMD_GameModeBase::PreparePlayersForTravel(const FText& Subtitle)
 {
     UWorld* World = GetWorld();
@@ -326,9 +322,9 @@ void AMD_GameModeBase::PreparePlayersForTravel(const FText& Subtitle)
     }
 }
 
-// 같은 레벨 재시작(?Restart)을 로딩 인트로가 끝난 뒤로 미룬다.
-// 세션 이동 경로는 MD_MultiplayManager::RunAfterLoadingIntro가 같은 역할을 하며,
-// 이 헬퍼는 세션을 거치지 않는 Day 전환/목적지 미지정 fallback 두 곳이 공유한다.
+// 같은 레벨 재시작(?Restart)을 로딩 인트로가 끝난 뒤로 미룬다. 세션 이동 경로는
+// MD_MultiplayManager::RunAfterLoadingIntro가 같은 역할을 하며, 이 헬퍼는 세션을
+// 거치지 않는 Day 전환과 목적지 미지정 fallback 두 곳이 공유한다.
 void AMD_GameModeBase::RestartLevelAfterLoadingIntro()
 {
     UGameInstance* GameInstance = GetGameInstance();
@@ -351,15 +347,13 @@ void AMD_GameModeBase::RestartLevelAfterLoadingIntro()
     {
         AMD_GameModeBase* Self = WeakThis.Get();
         UWorld* TravelWorld = Self != nullptr ? Self->GetWorld() : nullptr;
-        if (Self == nullptr || IsValid(TravelWorld) == false)
+        if (IsValid(TravelWorld) == false)
         {
             return;
         }
-
         if (TravelWorld->ServerTravel(TEXT("?Restart")) == false)
         {
-            UE_LOG(LogTemp, Error,
-                TEXT("[Day] 같은 레벨 재시작 트래블을 시작하지 못했습니다."));
+            UE_LOG(LogTemp, Error, TEXT("[Day] 같은 레벨 재시작 트래블을 시작하지 못했습니다."));
         }
     });
 }

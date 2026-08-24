@@ -8,6 +8,8 @@
 #include "Interfaces/OnlineExternalUIInterface.h"   // Online SubSystem의 플랫폼 제공 UI 관련 모듈 참조
 #include "MD_MultiplayManager.generated.h"
 
+class UMD_LoadingScreenSubsystem;
+
 struct FBlueprintSessionResult;
 struct FMD_SessionCreateParams;     // Hosting Session 설정값
 struct FMD_SessionFindParams;     // Find Session 설정 값
@@ -157,6 +159,15 @@ protected:
 
 	// 로컬 인트로가 화면을 덮은 뒤에 블로킹 트래블/연결 종료를 실행한다.
 	void RunAfterLoadingIntro(TFunction<void()>&& Callback);
+
+	// Create/Start/EndGame 세 경로가 공유하는 인트로 게이트 + ServerTravel + 실패 처리
+	void ServerTravelAfterLoadingIntro(const FString& TravelURL, const FString& FailureMessage,
+		TFunction<void(UMD_MultiplayManager&)>&& OnFailed, TFunction<void(UMD_MultiplayManager&)>&& OnStarted);
+
+	// 인트로 뒤에 NetDriver 연결을 끊고 DestroySession 완료를 알린다.
+	void DisconnectAfterLoadingIntro();
+
+	UMD_LoadingScreenSubsystem* GetLoadingScreen() const;
 
     // Online Session Interface 객체를 초기화하는 함수
     void InitOnlineSessionInterface();

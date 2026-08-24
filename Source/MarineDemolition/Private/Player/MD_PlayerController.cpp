@@ -266,6 +266,17 @@ void AMD_PlayerController::ClientPrepareLoadingTransition_Implementation(const F
 	}
 }
 
+// 조작 주체가 준비됐음을 알려 준비 판정을 앞당긴다. 하드 트래블(BeginPlayingState)과
+// seamless travel(PostSeamlessTravel) 두 경로가 공유한다.
+// 판정 자체는 로딩 서브시스템이 스트리밍까지 확인한 뒤 최종 결정한다.
+void AMD_PlayerController::NotifyLoadingScreenPlayerReady()
+{
+	if (UMD_LoadingScreenSubsystem* LoadingScreen = GetGameInstance()->GetSubsystem<UMD_LoadingScreenSubsystem>())
+	{
+		LoadingScreen->NotifyPlayerReady(this);
+	}
+}
+
 void AMD_PlayerController::ServerConfirmDayTransition_Implementation()
 {
 	// 실제 전환 분기와 중복 실행 방지는 서버 전용 GameMode가 최종 결정하는 구조
@@ -586,12 +597,7 @@ void AMD_PlayerController::BeginPlayingState()
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
 
-	// 하드 트래블로 들어온 경로. 조작 주체가 준비됐음을 알려 준비 판정을 앞당긴다.
-	// (판정 자체는 로딩 서브시스템이 스트리밍까지 확인한 뒤 최종 결정한다.)
-	if (UMD_LoadingScreenSubsystem* LoadingScreen = GetGameInstance()->GetSubsystem<UMD_LoadingScreenSubsystem>())
-	{
-		LoadingScreen->NotifyPlayerReady(this);
-	}
+	NotifyLoadingScreenPlayerReady();
 }
 
 void AMD_PlayerController::PostSeamlessTravel()
@@ -603,11 +609,7 @@ void AMD_PlayerController::PostSeamlessTravel()
 	InitializeScrapeFocusReticle();
 
 	// Seamless travel은 BeginPlayingState를 거치지 않으므로 같은 알림을 여기서도 보낸다.
-	// 두 경로 중 하나만 빠져도 해당 방식의 이동에서 로딩이 안 닫힌다.
-	if (UMD_LoadingScreenSubsystem* LoadingScreen = GetGameInstance()->GetSubsystem<UMD_LoadingScreenSubsystem>())
-	{
-		LoadingScreen->NotifyPlayerReady(this);
-	}
+	NotifyLoadingScreenPlayerReady();
 }
 
 void AMD_PlayerController::SetPawn(APawn* InPawn)
