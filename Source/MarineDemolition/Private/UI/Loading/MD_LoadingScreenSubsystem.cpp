@@ -98,7 +98,6 @@ void UMD_LoadingScreenSubsystem::BeginLoadingScreen(const FText& Subtitle)
 	// 이미 로딩 중이면 처음부터 다시 시작하지 않는다.
 	// (서버 로컬 호출과 자기 자신에게 온 Client RPC가 겹치는 경우가 있다.)
 	if (IsLoadingScreenActive()) { return; }
-	if (Phase == EMD_LoadingPhase::Outro) { RemoveLoadingWidgets(); }
 
 	StartLoadingVisuals(Subtitle, /*bSkipIntro=*/false);
 	SetLoadingTimer(IntroTimerHandle, &ThisClass::HandleIntroAnimationFinished, MD_LoadingScreen::IntroDurationSeconds);
@@ -180,7 +179,11 @@ void UMD_LoadingScreenSubsystem::HandlePostLoadMap(UWorld* LoadedWorld)
 	}
 
 	// 새 월드가 올라왔으므로 준비 판정과 타임아웃 시한을 여기서부터 새로 센다.
-	StartWorldReadyPolling(LoadedWorld);
+	// 위에서 인트로 잔여 시간이 0이라 곧바로 종료 절차로 넘어갔다면 폴링할 이유가 없다.
+	if (IsLoadingScreenActive())
+	{
+		StartWorldReadyPolling(LoadedWorld);
+	}
 }
 
 void UMD_LoadingScreenSubsystem::StartWorldReadyPolling(UWorld* TimerWorld)
@@ -334,6 +337,10 @@ void UMD_LoadingScreenSubsystem::BeginOutro()
 // 연출 상태를 만들고 화면을 덮는다. bSkipIntro는 인트로를 기다릴 수 없는 fallback 경로용이다.
 void UMD_LoadingScreenSubsystem::StartLoadingVisuals(const FText& Subtitle, bool bSkipIntro)
 {
+	// 남아 있는 위젯은 이전 VisualState를 붙든 채 재사용되므로 새 연출이 보이지 않는다.
+	// outro 도중 다음 로딩이 시작되는 경우가 있어 여기서 먼저 걷어낸다.
+	RemoveLoadingWidgets();
+
 	const FText Resolved = Subtitle.IsEmpty() ? LOCTEXT("DefaultSubtitle", "Preparing expedition...") : Subtitle;
 
 	Phase = bSkipIntro ? EMD_LoadingPhase::Loading : EMD_LoadingPhase::Intro;
