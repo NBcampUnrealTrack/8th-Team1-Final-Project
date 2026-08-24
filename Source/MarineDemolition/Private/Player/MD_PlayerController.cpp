@@ -5,9 +5,9 @@
 #include "UI/Game/MD_HUDWidget.h"
 #include "UI/Game/MD_DailyReportWidget.h"
 #include "UI/Game/MD_ScrapeFocusReticleWidget.h"
-#include "UI/Equipment/MD_EquipHotbarWidget.h"
+#include "UI/MD_LocalUIManager.h"
 
-#include "Engine/World.h"
+#include "CommonActivatableWidget.h"
 #include "World/Interaction/MD_TravelConsole.h"
 #include "World/Interaction/MD_DayEndConsole.h"
 #include "World/Interaction/MD_SectorCloseoutMarker.h"
@@ -24,7 +24,6 @@
 
 #include "Engine/GameInstance.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
-#include "Misc/CoreDelegates.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
 
@@ -361,42 +360,33 @@ void AMD_PlayerController::InitializeGameplayHUD()
 		return;
 	}
 
-	if (IsValid(HUDWidgetClass) == true)
+	// 설정되지 않은 HUD 클래스는 Stack에 전달하지 않는다.
+	if (IsValid(HUDWidgetClass) == false)
 	{
-		if (IsValid(HUDWidgetInstance) == false)
-		{
-			// Pawn 소유가 확정된 컨트롤러에 플레이어 상태를 참조할 메인 HUD 생성
-			HUDWidgetInstance = CreateWidget<UMD_HUDWidget>(this, HUDWidgetClass);
-		}
-
-		if (IsValid(HUDWidgetInstance) == true)
-		{
-			if (HUDWidgetInstance->IsInViewport() == false)
-			{
-				// 맵 전환 과정에서 화면에서 제거된 메인 HUD 재연결
-				HUDWidgetInstance->AddToViewport();
-			}
-			HUDWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-		}
+		return;
 	}
 
-	if (IsValid(EquipHotbarWidgetClass) == true)
+	// LocalPlayer의 중앙 UI 관리자를 가져온다.
+	ULocalPlayer* OwningLocalPlayer = GetLocalPlayer();
+	UMD_LocalUIManager* LocalUIManager = IsValid(OwningLocalPlayer) == true ? OwningLocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
+	if (IsValid(LocalUIManager) == false)
 	{
-		if (IsValid(EquipHotbarWidgetInstance) == false)
-		{
-			// 소유 Pawn의 장비 상태를 참조할 핫바 생성
-			EquipHotbarWidgetInstance = CreateWidget<UMD_EquipHotbarWidget>(this, EquipHotbarWidgetClass);
-		}
+		return;
+	}
 
-		if (IsValid(EquipHotbarWidgetInstance) == true)
-		{
-			if (EquipHotbarWidgetInstance->IsInViewport() == false)
-			{
-				// 맵 전환 과정에서 화면에서 제거된 핫바 재연결
-				EquipHotbarWidgetInstance->AddToViewport();
-			}
-			EquipHotbarWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-		}
+	// 여러 초기화 진입점이 호출되어도 이미 활성화된 HUD를 중복 Push하지 않는다.
+	UCommonActivatableWidget* ActiveScreen = LocalUIManager->GetActiveScreen(MDGameplayTags::UI_Layer_GameHUD);
+	UMD_HUDWidget* ActiveHUDWidget = Cast<UMD_HUDWidget>(ActiveScreen);
+	if (IsValid(ActiveHUDWidget) == true)
+	{
+		HUDWidgetInstance = ActiveHUDWidget;
+	}
+	else
+	{
+		// HUD 생성과 활성화를 PrimaryLayout의 GameHUD Stack에 위임한다.
+		UCommonActivatableWidget* PushedScreen = LocalUIManager->PushScreenToLayer(MDGameplayTags::UI_Layer_GameHUD, HUDWidgetClass);
+		HUDWidgetInstance = Cast<UMD_HUDWidget>(PushedScreen);
+		HUDWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	}
 }
 
@@ -648,18 +638,13 @@ void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
 {
 	// Collapsed로 두면 레이아웃 계산에서도 빠지고, 되돌릴 때 SelfHitTestInvisible이라
-	// HUD가 마우스 입력을 가로채지 않는다 (원래 AddToViewport 기본 동작과 동일).
+	// GameHUD Stack 내부의 HUD가 마우스 입력을 가로채지 않는다.
 	const ESlateVisibility Target =
 		bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed;
 
 	if (IsValid(HUDWidgetInstance))
 	{
 		HUDWidgetInstance->SetVisibility(Target);
-	}
-
-	if (IsValid(EquipHotbarWidgetInstance))
-	{
-		EquipHotbarWidgetInstance->SetVisibility(Target);
 	}
 }
 

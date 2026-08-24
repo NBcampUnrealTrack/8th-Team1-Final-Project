@@ -15,7 +15,6 @@ class AMD_SectorCloseoutMarker;
 class AMD_Merchant;
 class UMD_HUDWidget;
 class UMD_DailyReportWidget;
-class UMD_EquipHotbarWidget;
 class UMD_ScrapeFocusReticleWidget;
 class UMD_SiteDefinition;
 class UMD_MerchantSubsystem;
@@ -191,12 +190,6 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMD_HUDWidget> HUDWidgetInstance;
 
-	UPROPERTY(EditDefaultsOnly, Category = "HUD")
-	TSubclassOf<UMD_EquipHotbarWidget> EquipHotbarWidgetClass;
-
-	UPROPERTY()
-	TObjectPtr<UMD_EquipHotbarWidget> EquipHotbarWidgetInstance;
-
 	/** Blueprint 자산이 없어도 동작하는 Focus 가상 포인터. */
 	UPROPERTY(EditDefaultsOnly, Category = "HUD|Scrape")
 	TSubclassOf<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetClass;
@@ -212,7 +205,7 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMD_DailyReportWidget> DailyReportWidgetInstance;
 
-	// 로컬 플레이어의 메인 HUD와 장비 핫바를 생성하거나 화면에 복구하는 처리
+	// 로컬 플레이어의 메인 HUD를 생성하거나 화면에 복구하는 처리
 	void InitializeGameplayHUD();
 
 	// 로컬 플레이어의 헤라 Focus 포인터를 생성하거나 화면에 복구하는 처리
