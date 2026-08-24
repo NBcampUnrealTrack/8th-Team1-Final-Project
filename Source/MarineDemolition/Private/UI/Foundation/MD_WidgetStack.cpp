@@ -50,7 +50,10 @@ void UMD_WidgetStack::RemoveWidgetsOnWorldTravel()
 		UMD_CommonActivatableWidget* MDWidget = Cast<UMD_CommonActivatableWidget>(Widgets[WidgetIndex]);
 		if (IsValid(MDWidget) == false)
 		{
-			RemoveWidget(*MDWidget);
+			if (MDWidget != nullptr)
+			{
+				RemoveWidget(*MDWidget);
+			}
 			continue;
 		}
 
@@ -63,9 +66,6 @@ void UMD_WidgetStack::RemoveWidgetsOnWorldTravel()
 		// 비활성 제거 대상 화면을 Stack에서 즉시 제거한다.
 		RemoveWidget(*MDWidget);
 	}
-
-	// 제거된 화면이 새 World에서 재사용되지 않도록 비활성 풀을 초기화한다.
-	GeneratedWidgetsPool.ResetPool();
 }
 
 void UMD_WidgetStack::ClearWidgetsAndResetPool()
