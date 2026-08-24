@@ -20,6 +20,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Online/Session/MD_MultiplayManager.h"
+#include "UI/Loading/MD_LoadingScreenSubsystem.h"
 
 AMD_GameModeBase::AMD_GameModeBase()
 {
@@ -295,8 +296,72 @@ void AMD_GameModeBase::ConfirmDayTransition(AMD_PlayerController* RequestingCont
 
 void AMD_GameModeBase::TravelToNextDay()
 {
+    PreparePlayersForTravel(NSLOCTEXT(
+        "MDLoadingScreen",
+        "StartingNextDay",
+        "NEXT SHIFT PREPARING • 다음 작업일 준비 중"));
+
     // 같은 레벨을 다시 로드 → BeginPlay에서 복원 경로 진입
-    GetWorld()->ServerTravel(TEXT("?Restart"));
+    RestartLevelAfterLoadingIntro();
+}
+
+// 세션 절차(MD_MultiplayManager)를 거치지 않는 직접 ServerTravel 앞에서
+// 모든 소유 클라이언트의 로딩 화면을 켠다.
+// RestartLevelAfterLoadingIntro의 콜백 안이 아니라 그 전에 호출해야 한다.
+// 클라이언트가 서버와 같은 시점에 인트로를 시작해야 하기 때문이다.
+void AMD_GameModeBase::PreparePlayersForTravel(const FText& Subtitle)
+{
+    UWorld* World = GetWorld();
+    if (!IsValid(World))
+    {
+        return;
+    }
+
+    for (FConstPlayerControllerIterator Iterator = World->GetPlayerControllerIterator(); Iterator; ++Iterator)
+    {
+        if (AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(Iterator->Get()))
+        {
+            PlayerController->ClientPrepareLoadingTransition(Subtitle);
+        }
+    }
+}
+
+// 같은 레벨 재시작(?Restart)을 로딩 인트로가 끝난 뒤로 미룬다.
+// 세션 이동 경로는 MD_MultiplayManager::RunAfterLoadingIntro가 같은 역할을 하며,
+// 이 헬퍼는 세션을 거치지 않는 Day 전환/목적지 미지정 fallback 두 곳이 공유한다.
+void AMD_GameModeBase::RestartLevelAfterLoadingIntro()
+{
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_LoadingScreenSubsystem* LoadingScreen = IsValid(GameInstance) == true
+        ? GameInstance->GetSubsystem<UMD_LoadingScreenSubsystem>()
+        : nullptr;
+
+    // 로딩 서브시스템이 없는 실행에서는 기존 동작대로 즉시 이동한다.
+    if (IsValid(LoadingScreen) == false)
+    {
+        if (UWorld* World = GetWorld())
+        {
+            World->ServerTravel(TEXT("?Restart"));
+        }
+        return;
+    }
+
+    TWeakObjectPtr<AMD_GameModeBase> WeakThis(this);
+    LoadingScreen->RunAfterIntro([WeakThis]()
+    {
+        AMD_GameModeBase* Self = WeakThis.Get();
+        UWorld* TravelWorld = Self != nullptr ? Self->GetWorld() : nullptr;
+        if (Self == nullptr || IsValid(TravelWorld) == false)
+        {
+            return;
+        }
+
+        if (TravelWorld->ServerTravel(TEXT("?Restart")) == false)
+        {
+            UE_LOG(LogTemp, Error,
+                TEXT("[Day] 같은 레벨 재시작 트래블을 시작하지 못했습니다."));
+        }
+    });
 }
 
 EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
@@ -549,7 +614,8 @@ void AMD_GameModeBase::TravelToLevel(const TSoftObjectPtr<UWorld>& Level)
         // 대상 미지정 → 안전하게 현재 레벨 리스타트 (BP에서 레벨 지정 필요)
         UE_LOG(LogTemp, Warning,
             TEXT("[Day] 전환 대상 레벨 미지정. BP GameMode에서 지정 필요"));
-        GetWorld()->ServerTravel(TEXT("?Restart"));
+        PreparePlayersForTravel(NSLOCTEXT("MDLoadingScreen", "RestartingCurrentLevel", "Reloading area..."));
+        RestartLevelAfterLoadingIntro();
         return;
     }
 

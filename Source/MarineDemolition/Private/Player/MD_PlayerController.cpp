@@ -26,6 +26,7 @@
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Misc/CoreDelegates.h"
 #include "Online/Session/MD_MultiplayManager.h"
+#include "UI/Loading/MD_LoadingScreenSubsystem.h"
 
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
@@ -253,6 +254,16 @@ void AMD_PlayerController::ClientShowDailyReport_Implementation(FMD_InspectionRe
 void AMD_PlayerController::ClientCloseDailyReport_Implementation()
 {
 	CloseDailyReport();
+}
+
+// 서버가 트래블하기 직전에 각 소유 클라이언트에서 로딩 화면을 시작시킨다.
+// 서버 화면만 덮으면 원격 클라이언트는 아무 예고 없이 멈춘 것처럼 보인다.
+void AMD_PlayerController::ClientPrepareLoadingTransition_Implementation(const FText& Subtitle)
+{
+	if (UMD_LoadingScreenSubsystem* LoadingScreen = GetGameInstance()->GetSubsystem<UMD_LoadingScreenSubsystem>())
+	{
+		LoadingScreen->BeginLoadingScreen(Subtitle);
+	}
 }
 
 void AMD_PlayerController::ServerConfirmDayTransition_Implementation()
@@ -574,6 +585,13 @@ void AMD_PlayerController::BeginPlayingState()
 
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
+
+	// 하드 트래블로 들어온 경로. 조작 주체가 준비됐음을 알려 준비 판정을 앞당긴다.
+	// (판정 자체는 로딩 서브시스템이 스트리밍까지 확인한 뒤 최종 결정한다.)
+	if (UMD_LoadingScreenSubsystem* LoadingScreen = GetGameInstance()->GetSubsystem<UMD_LoadingScreenSubsystem>())
+	{
+		LoadingScreen->NotifyPlayerReady(this);
+	}
 }
 
 void AMD_PlayerController::PostSeamlessTravel()
@@ -583,6 +601,13 @@ void AMD_PlayerController::PostSeamlessTravel()
 	CloseDailyReport();
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
+
+	// Seamless travel은 BeginPlayingState를 거치지 않으므로 같은 알림을 여기서도 보낸다.
+	// 두 경로 중 하나만 빠져도 해당 방식의 이동에서 로딩이 안 닫힌다.
+	if (UMD_LoadingScreenSubsystem* LoadingScreen = GetGameInstance()->GetSubsystem<UMD_LoadingScreenSubsystem>())
+	{
+		LoadingScreen->NotifyPlayerReady(this);
+	}
 }
 
 void AMD_PlayerController::SetPawn(APawn* InPawn)

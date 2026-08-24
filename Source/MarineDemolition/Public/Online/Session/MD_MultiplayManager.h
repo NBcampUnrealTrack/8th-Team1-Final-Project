@@ -152,6 +152,12 @@ public:
     FMD_RoomCode ParseRoomCode(FString StringRoomCode);
     
 protected:
+	// 로컬 화면과 서버가 소유한 각 클라이언트 화면에 실제 로딩 시작을 전달하는 공통 처리
+	void BeginLoadingScreenForTravel(const FText& Subtitle);
+
+	// 로컬 인트로가 화면을 덮은 뒤에 블로킹 트래블/연결 종료를 실행한다.
+	void RunAfterLoadingIntro(TFunction<void()>&& Callback);
+
     // Online Session Interface 객체를 초기화하는 함수
     void InitOnlineSessionInterface();
 

@@ -9,6 +9,8 @@
 #include "Engine/Engine.h"
 #include "GameFramework/GameModeBase.h"
 #include "UObject/UObjectGlobals.h"
+#include "Player/MD_PlayerController.h"
+#include "UI/Loading/MD_LoadingScreenSubsystem.h"
 
 #include "Online/Session/MD_SessionSettingKey.h"
 #include "Types/Online/MD_RoomCode.h"
@@ -112,6 +114,8 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
         return;
     }
 
+    BeginLoadingScreenForTravel(NSLOCTEXT("MDLoadingScreen", "CreatingSession", "CREW ASSEMBLING • 잠수팀 준비 중"));
+
     // Online Session 비동기 생성 절차 실행
     CreateSessionInternal(ServerName, MaxPlayerCount, SessionCreateParams);
 }
@@ -159,6 +163,7 @@ void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData, bool bLoad
         return;
     }
 
+    BeginLoadingScreenForTravel(NSLOCTEXT("MDLoadingScreen", "StartingExpedition", "DIVE IN PROGRESS • 잠수 준비 중"));
     StartSessionInternal(GameMapPackagePath, GameMapPackagePath);
 }
 
@@ -194,6 +199,7 @@ void UMD_MultiplayManager::StartSessionByMap(const FString& MapPackagePath, cons
 
     // 검증된 목적지 패키지 뒤에 게임 규칙 전달용 URL 옵션만 결합하는 처리
     FString TravelURL = FString::Printf(TEXT("%s%s"), *MapPackagePath, *TravelOptions);
+    BeginLoadingScreenForTravel(NSLOCTEXT("MDLoadingScreen", "StartingExpedition", "DIVE IN PROGRESS • 잠수 준비 중"));
     StartSessionInternal(MapPackagePath, TravelURL);
 }
 
@@ -245,6 +251,8 @@ void UMD_MultiplayManager::EndSession(const FString& MapPackagePath)
         OnEndGameComplete.Broadcast(false);
         return;
     }
+
+    BeginLoadingScreenForTravel(NSLOCTEXT("MDLoadingScreen", "ReturningToLobby", "MISSION INCOMPLETE • 작업 중단 후 복귀 중"));
 
     // End Session 비동기 요청의 최종 결과 수신을 위한 완료 이벤트 등록
     const FOnEndSessionCompleteDelegate OnEndSessionCompleteDelegate = FOnEndSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleEndSessionComplete, MapPackagePath);
@@ -380,6 +388,8 @@ void UMD_MultiplayManager::JoinSession(const FBlueprintSessionResult& BlueprintS
         return;
     }
 
+    BeginLoadingScreenForTravel(NSLOCTEXT("MDLoadingScreen", "JoiningSession", "CREW ASSEMBLING • 잠수팀 준비 중"));
+
     // Session 참여 함수 호출
     JoinSessionInternal(BlueprintSessionResult.OnlineResult);
 }
@@ -407,6 +417,15 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
         return;
     }
 
+    const UWorld* CurrentWorld = GetWorld();
+    const FString CurrentMapPackage = IsValid(CurrentWorld)
+        ? CurrentWorld->GetOutermost()->GetName()
+        : FString();
+    const bool bLeavingLobby = CurrentMapPackage.Contains(TEXT("Lobby"), ESearchCase::IgnoreCase);
+    BeginLoadingScreenForTravel(bLeavingLobby
+        ? NSLOCTEXT("MDLoadingScreen", "LeavingLobby", "LEAVING THE CREW • 팀에서 나가는 중")
+        : NSLOCTEXT("MDLoadingScreen", "ReturningToTitle", "RETURNING TO SURFACE • 수면으로 복귀 중"));
+
     // SessionName의 기본값 설정(UFUNCTION 측에서 NAME_GameSession을 인식하지 못하여 .cpp 측에서 설정)
     SessionName = SessionName == NAME_None ? NAME_GameSession : SessionName;
 
@@ -416,9 +435,20 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
         // 로그 출력
         UE_LOG(MarineDemolition, Warning, TEXT("%s 현재 참여하거나 호스팅 중인 GameSession이 없습니다."), *UE_CALL_LOCATIONINFO);
 
-        // Destroy Session 성공 이벤트 실행 (삭제할 Session이 존재하지 않음)
-        OnDestroySessionComplete.Broadcast(true);
-        return;
+		TWeakObjectPtr<UMD_MultiplayManager> WeakThis(this);
+		RunAfterLoadingIntro([WeakThis]()
+		{
+			UMD_MultiplayManager* Self = WeakThis.Get();
+			UWorld* DisconnectWorld = Self ? Self->GetWorld() : nullptr;
+			if (!Self || !IsValid(DisconnectWorld) || !GEngine)
+			{
+				return;
+			}
+
+			GEngine->HandleDisconnect(DisconnectWorld, DisconnectWorld->GetNetDriver());
+			Self->OnDestroySessionComplete.Broadcast(true);
+		});
+		return;
     }
 
     // Online Subsystem의 Session 모듈에 이벤트 등록
@@ -441,6 +471,55 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
         // Destroy Session 실패 이벤트 실행
         OnDestroySessionComplete.Broadcast(false);
     }
+}
+
+// 로컬 화면과 서버가 소유한 모든 클라이언트 화면에서 동시에 로딩을 시작한다.
+// 서버만 켜면 원격 클라이언트는 트래블 순간 그대로 얼어붙으므로 RPC를 함께 보낸다.
+// 리슨 서버 호스트의 PC는 로컬 컨트롤러라 이 RPC로 호스트 화면도 같이 켜진다.
+void UMD_MultiplayManager::BeginLoadingScreenForTravel(const FText& Subtitle)
+{
+    UGameInstance* GameInstance = GetGameInstance();
+    if (UMD_LoadingScreenSubsystem* LoadingScreen = IsValid(GameInstance)
+        ? GameInstance->GetSubsystem<UMD_LoadingScreenSubsystem>()
+        : nullptr)
+    {
+        LoadingScreen->BeginLoadingScreen(Subtitle);
+    }
+
+    UWorld* World = GetWorld();
+    if (!IsValid(World) || World->GetNetMode() == NM_Client)
+    {
+        return;
+    }
+
+    for (FConstPlayerControllerIterator Iterator = World->GetPlayerControllerIterator(); Iterator; ++Iterator)
+    {
+        if (AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(Iterator->Get()))
+        {
+            PlayerController->ClientPrepareLoadingTransition(Subtitle);
+        }
+	}
+}
+
+// 인트로가 화면을 완전히 덮은 뒤에 실제 트래블을 실행하기 위한 게이트다.
+// 바로 ServerTravel/ClientTravel을 부르면 화면이 덜 덮인 상태에서 게임 스레드가
+// 막혀 마지막 프레임이 그대로 얼어붙는다.
+// 로딩 서브시스템이 없는 실행에서는 콜백을 즉시 실행해 트래블이 멈추지 않게 한다.
+void UMD_MultiplayManager::RunAfterLoadingIntro(TFunction<void()>&& Callback)
+{
+	UGameInstance* GameInstance = GetGameInstance();
+	if (UMD_LoadingScreenSubsystem* LoadingScreen = IsValid(GameInstance)
+		? GameInstance->GetSubsystem<UMD_LoadingScreenSubsystem>()
+		: nullptr)
+	{
+		LoadingScreen->RunAfterIntro(MoveTemp(Callback));
+		return;
+	}
+
+	if (Callback)
+	{
+		Callback();
+	}
 }
 
 bool UMD_MultiplayManager::ShowInviteUI()
@@ -1021,23 +1100,26 @@ void UMD_MultiplayManager::HandleCreateSessionComplete(FName SessionName, bool b
     // 아직 Listen Server가 아닌 실행에서만 새 NetDriver 생성을 요청하는 Travel URL 구성
     FString TravelURL = bIsAlreadyListenServer == true ? SessionMapPackagePath : FString::Printf(TEXT("%s?listen"), *SessionMapPackagePath);
 
-    // 현재 클라이언트를 Listen Server의 호스트로 설정된 맵 호스팅
-    bool bWasTravelStarted = World->ServerTravel(TravelURL);
+	TWeakObjectPtr<UMD_MultiplayManager> WeakThis(this);
+	RunAfterLoadingIntro([WeakThis, SessionName, TravelURL]()
+	{
+		UMD_MultiplayManager* Self = WeakThis.Get();
+		UWorld* TravelWorld = Self ? Self->GetWorld() : nullptr;
+		if (!Self || !IsValid(TravelWorld))
+		{
+			return;
+		}
 
-    if (bWasTravelStarted == false)
-    {
-        // 로그 출력
-        UE_LOG(MarineDemolition, Error, TEXT("%s Listen Server 맵 이동을 시작하지 못했습니다: %s"), *UE_CALL_LOCATIONINFO, *TravelURL);
+		const bool bWasTravelStarted = TravelWorld->ServerTravel(TravelURL);
+		if (!bWasTravelStarted)
+		{
+			UE_LOG(MarineDemolition, Error, TEXT("%s Listen Server 맵 이동을 시작하지 못했습니다: %s"), *UE_CALL_LOCATIONINFO, *TravelURL);
+			Self->RollbackSession(SessionName, EMD_SessionRollbackOperation::CreateSession);
+			return;
+		}
 
-        // 생성에 성공한 NamedSession을 조용히 제거한 뒤 Create Session 실패 이벤트를 전달합니다.
-        RollbackSession(SessionName, EMD_SessionRollbackOperation::CreateSession);
-    }
-
-    // 맵 이동이 시작된 경우에만 Create Session 성공 이벤트를 즉시 전달합니다.
-    if (bWasTravelStarted == true)
-    {
-        OnCreateSessionComplete.Broadcast(true);
-    }
+		Self->OnCreateSessionComplete.Broadcast(true);
+	});
 }
 
 void UMD_MultiplayManager::HandleStartGameJoinabilityUpdateComplete(FName SessionName, bool bWasSuccessful, const FString TravelURL)
@@ -1096,21 +1178,27 @@ void UMD_MultiplayManager::HandleStartSessionComplete(FName SessionName, bool bW
         return;
     }
 
-    // 선택된 맵으로 이동(클라이언트 포함)
-    bool bWasTravelStarted = World->ServerTravel(TravelURL);
+	TWeakObjectPtr<UMD_MultiplayManager> WeakThis(this);
+	RunAfterLoadingIntro([WeakThis, SessionName, TravelURL]()
+	{
+		UMD_MultiplayManager* Self = WeakThis.Get();
+		UWorld* TravelWorld = Self ? Self->GetWorld() : nullptr;
+		if (!Self || !IsValid(TravelWorld))
+		{
+			return;
+		}
 
-    if (bWasTravelStarted == false)
-    {
-        UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 시작 후 지정 맵 이동을 시작하지 못했습니다: %s"), *UE_CALL_LOCATIONINFO, *TravelURL);
+		const bool bWasTravelStarted = TravelWorld->ServerTravel(TravelURL);
+		if (!bWasTravelStarted)
+		{
+			UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 시작 후 지정 맵 이동을 시작하지 못했습니다: %s"), *UE_CALL_LOCATIONINFO, *TravelURL);
+			Self->CancelPendingGameDataOperation();
+			Self->RollbackSession(SessionName, EMD_SessionRollbackOperation::StartGame);
+			return;
+		}
 
-        CancelPendingGameDataOperation();
-
-        RollbackSession(SessionName, EMD_SessionRollbackOperation::StartGame);
-        return;
-    }
-
-    // Session 시작과 ServerTravel 요청이 모두 접수된 경우에만 외부에 게임 시작 성공을 전달합니다.
-    OnStartGameComplete.Broadcast(true);
+		Self->OnStartGameComplete.Broadcast(true);
+	});
 }
 
 void UMD_MultiplayManager::HandleEndSessionComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath)
@@ -1194,18 +1282,26 @@ void UMD_MultiplayManager::HandleEndGameJoinabilityUpdateComplete(FName SessionN
         return;
     }
 
-    // 기존 Listen Server 연결을 유지한 채 모든 접속자를 지정 맵으로 이동시키기 위한 ServerTravel 요청
-    bool bWasTravelStarted = World->ServerTravel(MapPackagePath);
+	TWeakObjectPtr<UMD_MultiplayManager> WeakThis(this);
+	RunAfterLoadingIntro([WeakThis, SessionName, MapPackagePath]()
+	{
+		UMD_MultiplayManager* Self = WeakThis.Get();
+		UWorld* TravelWorld = Self ? Self->GetWorld() : nullptr;
+		if (!Self || !IsValid(TravelWorld))
+		{
+			return;
+		}
 
-    if (bWasTravelStarted == false)
-    {
-        UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 종료 후 지정 맵 이동을 시작하지 못했습니다: %s"), *UE_CALL_LOCATIONINFO, *MapPackagePath);
+		const bool bWasTravelStarted = TravelWorld->ServerTravel(MapPackagePath);
+		if (!bWasTravelStarted)
+		{
+			UE_LOG(MarineDemolition, Error, TEXT("%s GameSession 종료 후 지정 맵 이동을 시작하지 못했습니다: %s"), *UE_CALL_LOCATIONINFO, *MapPackagePath);
+			Self->RecoverEndGameSession(SessionName);
+			return;
+		}
 
-        RecoverEndGameSession(SessionName);
-        return;
-    }
-
-    OnEndGameComplete.Broadcast(true);
+		Self->OnEndGameComplete.Broadcast(true);
+	});
 }
 
 void UMD_MultiplayManager::RecoverEndGameSession(FName SessionName)
@@ -1445,11 +1541,20 @@ void UMD_MultiplayManager::HandleJoinSessionComplete(FName SessionName, EOnJoinS
     // 로그 출력
     UE_LOG(MarineDemolition, Log, TEXT("%s 플레이어를 Session의 Map으로 이동합니다.(%s)"), *UE_CALL_LOCATIONINFO, *ConnectInfo);
 
-    // 플레이어를 Session의 Listen Server로 이동
-    PlayerController->ClientTravel(ConnectInfo, ETravelType::TRAVEL_Absolute);
+	TWeakObjectPtr<UMD_MultiplayManager> WeakThis(this);
+	TWeakObjectPtr<APlayerController> WeakPlayerController(PlayerController);
+	RunAfterLoadingIntro([WeakThis, WeakPlayerController, ConnectInfo]()
+	{
+		UMD_MultiplayManager* Self = WeakThis.Get();
+		APlayerController* TravelController = WeakPlayerController.Get();
+		if (!Self || !IsValid(TravelController))
+		{
+			return;
+		}
 
-    // Join Session 성공 이벤트 실행
-    OnJoinSessionComplete.Broadcast(true);
+		TravelController->ClientTravel(ConnectInfo, ETravelType::TRAVEL_Absolute);
+		Self->OnJoinSessionComplete.Broadcast(true);
+	});
 }
 
 void UMD_MultiplayManager::HandleDestroySessionComplete(FName SessionName, bool bWasSuccessful)
@@ -1496,12 +1601,19 @@ void UMD_MultiplayManager::HandleDestroySessionComplete(FName SessionName, bool 
         return;
     }
 
-    // 현재 NetDriver 연결 종료
-    // 클라이언트 : Session에서 나가기 / Listen Server Host : 서버 닫기
-    Engine->HandleDisconnect(World, World->GetNetDriver());
+	TWeakObjectPtr<UMD_MultiplayManager> WeakThis(this);
+	RunAfterLoadingIntro([WeakThis]()
+	{
+		UMD_MultiplayManager* Self = WeakThis.Get();
+		UWorld* DisconnectWorld = Self ? Self->GetWorld() : nullptr;
+		if (!Self || !IsValid(DisconnectWorld) || !GEngine)
+		{
+			return;
+		}
 
-    // Session 제거 성공 이벤트 실행
-    OnDestroySessionComplete.Broadcast(true);
+		GEngine->HandleDisconnect(DisconnectWorld, DisconnectWorld->GetNetDriver());
+		Self->OnDestroySessionComplete.Broadcast(true);
+	});
 }
 
 void UMD_MultiplayManager::CancelPendingGameDataOperation()
