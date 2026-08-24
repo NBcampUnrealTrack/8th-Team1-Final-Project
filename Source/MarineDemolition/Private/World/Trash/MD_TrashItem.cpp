@@ -56,6 +56,14 @@ void AMD_TrashItem::SetInteractionHighlighted_Implementation(bool bHighlighted)
 	}
 }
 
+FText AMD_TrashItem::GetInteractionDisplayName_Implementation() const
+{
+	FMD_TrashKindRow TrashKind;
+	return UMD_TrashLibrary::FindTrashKindRow(TrashKindId, TrashKind)
+		? TrashKind.DisplayName
+		: FText::GetEmpty();
+}
+
 FGameplayTag AMD_TrashItem::GetTrashCategory_Implementation() const
 {
 	return UMD_TrashLibrary::GetTrashKindCategory(TrashKindId);

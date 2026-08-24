@@ -26,6 +26,14 @@ public:
 	void SetInteractionHighlighted(bool bHighlighted);
 
 	/**
+	 * 이 대상이 이미 보유한 데이터에서 화면 표시 이름을 반환한다.
+	 * 빈 값이면 공용 상호작용 이름표가 대상 클래스에 맞는 이름을 대신 찾는다.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
+	FText GetInteractionDisplayName() const;
+	virtual FText GetInteractionDisplayName_Implementation() const { return FText::GetEmpty(); }
+
+	/**
 	 * 이 Interactor가 현재 대상과 상호작용할 수 있는지.
 	 * 매 프레임과 서버 검증에서 반복 호출될 수 있으므로 상태를 바꾸지 않는 빠른 판정이어야 한다.
 	 * 기본값은 기존 상호작용 동작을 보존하는 true다.

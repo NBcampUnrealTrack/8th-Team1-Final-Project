@@ -13,6 +13,8 @@ class UPhysicsHandleComponent;
 class UPrimitiveComponent;
 class USceneComponent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnInteractionTargetChanged, AActor*, NewTarget);
+
 /**
  * 플레이어의 조준 상호작용과 물리 오브젝트 운반을 담당
  */
@@ -52,6 +54,18 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	AActor* GetHeldActor() const { return HeldActor; }
+
+	/** 로컬 플레이어가 현재 조준 중인 상호작용 가능 대상. */
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
+	AActor* GetCurrentTarget() const { return CurrentTarget.Get(); }
+
+	/** 현재 대상의 데이터 기반 표시 이름. 대상이나 이름이 없으면 빈 텍스트. */
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
+	FText GetCurrentTargetDisplayName() const;
+
+	/** 로컬 플레이어가 조준하는 상호작용 가능 대상이 바뀔 때 방송한다. */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Interaction")
+	FMDOnInteractionTargetChanged OnInteractionTargetChanged;
 
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	bool IsHolding() const;

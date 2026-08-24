@@ -12,6 +12,7 @@
 #include "GameFramework/PlayerState.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
 #include "GameplayTagAssetInterface.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "GeometryCollection/GeometryCollectionComponent.h"
@@ -38,6 +39,11 @@ void UMD_InteractionComponent::SetInteractionDependencies(UCameraComponent* InCa
 	Camera = InCamera;
 	HoldPoint = InHoldPoint;
 	PhysicsHandle = InPhysicsHandle;
+}
+
+FText UMD_InteractionComponent::GetCurrentTargetDisplayName() const
+{
+	return UMD_InteractionPresentationLibrary::ResolveInteractionDisplayName(CurrentTarget.Get());
 }
 
 void UMD_InteractionComponent::BeginPlay()
@@ -864,9 +870,13 @@ bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor)
 
 void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)
 {
-	if (CurrentTarget.Get() == NewTarget) return;
+	AActor* PreviousTarget = GetCurrentTarget();
+	if (!CurrentTarget.IsStale() && PreviousTarget == NewTarget)
+	{
+		return;
+	}
 
-	if (AActor* PreviousTarget = CurrentTarget.Get())
+	if (PreviousTarget)
 	{
 		if (PreviousTarget->Implements<UMD_Interactable>())
 		{
@@ -880,6 +890,8 @@ void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)
 	{
 		IMD_Interactable::Execute_SetInteractionHighlighted(NewTarget, true);
 	}
+
+	OnInteractionTargetChanged.Broadcast(GetCurrentTarget());
 }
 
 APawn* UMD_InteractionComponent::GetOwnerPawn() const

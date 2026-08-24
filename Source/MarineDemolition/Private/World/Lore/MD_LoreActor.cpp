@@ -63,6 +63,15 @@ void AMD_LoreActor::SetInteractionHighlighted_Implementation(bool bHighlighted)
 	Mesh->SetRenderCustomDepth(bHighlighted);
 }
 
+FText AMD_LoreActor::GetInteractionDisplayName_Implementation() const
+{
+	FMD_LoreDefinition LoreDefinition;
+	return IsValid(LoreCatalog)
+		&& LoreCatalog->FindLore(LoreId, LoreDefinition)
+		? LoreDefinition.EntryName
+		: FText::GetEmpty();
+}
+
 void AMD_LoreActor::BeginPlay()
 {
 	Super::BeginPlay();

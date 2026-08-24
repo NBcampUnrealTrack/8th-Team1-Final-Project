@@ -28,6 +28,9 @@ public:
 	/** 현재 조준 중인 기록물 메시를 하이라이트하는 표시 함수 */
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 
+	/** 로어 카탈로그의 기록물 이름을 상호작용 HUD에 제공한다. */
+	virtual FText GetInteractionDisplayName_Implementation() const override;
+
 protected:
 	/** 서버 원장 변경을 구독하고 이미 발견된 배치물을 제거하는 초기화 함수 */
 	virtual void BeginPlay() override;
