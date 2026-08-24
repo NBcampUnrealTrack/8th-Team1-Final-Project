@@ -105,11 +105,21 @@ private:
 	/** 재생 직후 컴포넌트에 수중 로우패스를 걸어 준다 */
 	void ApplyUnderwaterFilter(UAudioComponent* Component) const;
 
+	/** 앰비언스 등 LPF를 쓰지 않는 항목에서 컴포넌트 로우패스를 끈다 */
+	void ClearUnderwaterFilter(UAudioComponent* Component) const;
+
 	FMD_AudioHandle PlayResolved(const FMD_AudioEntry& Entry, const FVector& Location,
 		USceneComponent* AttachTo, FName SocketName, bool bForce2D);
 
 	/** 컴포넌트만 띄운다. 핸들 관리는 호출자가 한다 */
 	UAudioComponent* SpawnForEntry(const FMD_AudioEntry& Entry, const FVector& Location,
+		USceneComponent* AttachTo, FName SocketName, bool bForce2D);
+
+	/**
+	 * 지금은 조건이 안 맞아 재생할 수 없지만, 조건이 돌아오면 시작해야 하는
+	 * 자동관리 루프를 요청만 등록한다. (수면 위 앰비를 물속에서 요청한 경우 등)
+	 */
+	FMD_AudioHandle RegisterPendingLoop(const FGameplayTag& EventTag, const FVector& Location,
 		USceneComponent* AttachTo, FName SocketName, bool bForce2D);
 
 	void UpdateUnderwaterCutoff(float DeltaTime);
@@ -153,6 +163,9 @@ private:
 		/** 항목이 지정한 기본 피치. 깊이 배율을 여기에 곱한다 */
 		float BasePitch = 1.0f;
 
+		/** 항목이 지정한 기본 정지 페이드. StopHandle 에 음수를 넘기면 이 값을 쓴다 */
+		float FadeOutSeconds = 0.1f;
+
 		// 재개에 필요한 재생 위치 정보
 		TWeakObjectPtr<USceneComponent> AttachTo;
 		FName SocketName = NAME_None;
@@ -168,6 +181,8 @@ private:
 	float CurrentCutoffHz = 2000.0f;
 	float CurrentDepthPitch = 1.0f;
 	int32 LastAppliedCount = 0;
+	int32 LastLpfAppliedCount = 0;
+	int32 LastPitchAppliedCount = 0;
 	int32 LastSkippedCount = 0;
 	float CutoffUpdateAccumulator = 0.0f;
 	bool bIndexBuilt = false;

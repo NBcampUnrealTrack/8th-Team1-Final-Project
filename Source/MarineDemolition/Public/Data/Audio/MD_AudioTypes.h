@@ -147,6 +147,20 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Audio|수중")
 	bool bDepthPitch = false;
 
+	/**
+	 * 재생 시작 페이드(초). 0 이면 즉시 최대 음량으로 시작한다.
+	 * 앞선 소리와 겹쳐 들려야 할 때 짧게 준다 — 어택이 부딪히는 것을 막는다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Audio|믹스", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+	float FadeInSeconds = 0.0f;
+
+	/**
+	 * 정지 페이드(초). 루프를 끌 때 쓰는 기본값이다.
+	 * 호출자가 음수를 넘기면 이 값을 쓰고, 0 이상을 넘기면 그쪽이 우선한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Audio|믹스", meta = (ClampMin = "0.0", ClampMax = "5.0"))
+	float FadeOutSeconds = 0.1f;
+
 	/** 어테뉴에이션 프리셋. 비우면 3D 재생 시 엔진 기본값을 쓴다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Audio|믹스")
 	TSoftObjectPtr<USoundAttenuation> Attenuation;
