@@ -18,11 +18,6 @@ public:
 	virtual FName GetCategoryName() const override { return FName(TEXT("Game")); }
 	virtual FName GetSectionName() const override { return FName(TEXT("MD Interaction")); }
 
-#if WITH_EDITOR
-	virtual FText GetSectionText() const override;
-	virtual FText GetSectionDescription() const override;
-#endif
-
 	/** 행 구조체는 FMD_InteractionPresentationRow이며, 행 이름은 대상 종류의 ID다. */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Presentation")
 	TSoftObjectPtr<UDataTable> InteractionPresentationTable;
