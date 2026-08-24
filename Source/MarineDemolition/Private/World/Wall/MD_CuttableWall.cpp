@@ -364,7 +364,6 @@ void AMD_CuttableWall::OnRep_CutProgress()
 	const float ProgressRatio = GetCutProgressRatio();
 	OnCutProgressChanged.Broadcast(this, ProgressRatio);
 
-#if !UE_BUILD_SHIPPING
 	if (GEngine && GetNetMode() != NM_DedicatedServer)
 	{
 		const TCHAR* WallTypeLabel = WallType == EMD_WallType::Strut
@@ -390,7 +389,6 @@ void AMD_CuttableWall::OnRep_CutProgress()
 				CutProgressSeconds,
 				GetRequiredCutSeconds()));
 	}
-#endif
 }
 
 void AMD_CuttableWall::SyncLegacySurfaceConfiguration()
