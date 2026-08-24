@@ -167,6 +167,11 @@ protected:
 		meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float FirstPersonArmsFollowSpeed = 0.f;
 
+	/** 월드 메시 관통을 줄이도록 팔·도구를 카메라 쪽으로 당겨 그리는 비율. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "MD|FirstPerson",
+		meta = (ClampMin = "0.1", ClampMax = "1.0", UIMin = "0.1", UIMax = "1.0"))
+	float FirstPersonRenderScale = 0.8f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_ScrapeToolComponent> ScrapeToolComponent;
 
@@ -328,6 +333,9 @@ private:
 
 	/** 1인칭 팔은 소유 클라이언트에만 보이므로 그 경우에만 틱한다. */
 	void RefreshFirstPersonArmsTick();
+
+	/** 팔·도구의 데칼 수신을 끄고 UE 전용 1인칭 렌더링을 적용한다. */
+	void ConfigureFirstPersonRendering();
 
 	/** 1인칭 팔이 3인칭 메시의 포즈를 따라가도록 Leader Pose를 건다. */
 	void BindFirstPersonArmsToBodyPose();
