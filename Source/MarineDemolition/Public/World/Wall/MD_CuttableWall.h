@@ -1,8 +1,10 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/TimerHandle.h"
 #include "GameFramework/Actor.h"
+#include "GameplayTagAssetInterface.h"
+#include "GameplayTagContainer.h"
 #include "MD_CuttableWall.generated.h"
 
 class UDecalComponent;
@@ -42,12 +44,26 @@ enum class EMD_WallType : uint8
  * settings that have not been migrated to the component yet.
  */
 UCLASS()
-class MARINEDEMOLITION_API AMD_CuttableWall : public AActor
+class MARINEDEMOLITION_API AMD_CuttableWall : public AActor, public IGameplayTagAssetInterface
 {
 	GENERATED_BODY()
 
 public:
 	AMD_CuttableWall();
+
+	//~ IGameplayTagAssetInterface
+	/** 절단 어빌리티가 대상 여부를 이 태그로 판정한다 */
+	virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override
+	{
+		TagContainer.AppendTags(OwnedGameplayTags);
+	}
+
+	/**
+	 * 이 액터가 가진 태그. 기본으로 `Interaction.Cuttable` 이 들어 있어
+	 * 배치된 격벽은 추가 작업 없이 절단 대상이 된다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|태그")
+	FGameplayTagContainer OwnedGameplayTags;
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void GetLifetimeReplicatedProps(

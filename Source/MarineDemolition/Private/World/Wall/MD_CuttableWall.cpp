@@ -1,4 +1,5 @@
-#include "World/Wall/MD_CuttableWall.h"
+﻿#include "World/Wall/MD_CuttableWall.h"
+#include "GameplayTags/MD_GameplayTags.h"
 
 #include "TimerManager.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
@@ -24,6 +25,9 @@ AMD_CuttableWall::AMD_CuttableWall()
 	PrimaryActorTick.bCanEverTick = false;
 	// bHasSupport 복제용 (원격 클라이언트의 절단 판정 일치)
 	bReplicates = true;
+
+	// 배치된 격벽은 별도 설정 없이 절단 대상이 된다
+	OwnedGameplayTags.AddTag(MDGameplayTags::Interaction_Cuttable);
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);

@@ -115,6 +115,13 @@ private:
 	UAudioComponent* SpawnForEntry(const FMD_AudioEntry& Entry, const FVector& Location,
 		USceneComponent* AttachTo, FName SocketName, bool bForce2D);
 
+	/**
+	 * 지금은 조건이 안 맞아 재생할 수 없지만, 조건이 돌아오면 시작해야 하는
+	 * 자동관리 루프를 요청만 등록한다. (수면 위 앰비를 물속에서 요청한 경우 등)
+	 */
+	FMD_AudioHandle RegisterPendingLoop(const FGameplayTag& EventTag, const FVector& Location,
+		USceneComponent* AttachTo, FName SocketName, bool bForce2D);
+
 	void UpdateUnderwaterCutoff(float DeltaTime);
 
 	/** 캡슐 잠김으로 Env.Surface.Above 를 갱신한다 */
@@ -155,6 +162,9 @@ private:
 
 		/** 항목이 지정한 기본 피치. 깊이 배율을 여기에 곱한다 */
 		float BasePitch = 1.0f;
+
+		/** 항목이 지정한 기본 정지 페이드. StopHandle 에 음수를 넘기면 이 값을 쓴다 */
+		float FadeOutSeconds = 0.1f;
 
 		// 재개에 필요한 재생 위치 정보
 		TWeakObjectPtr<USceneComponent> AttachTo;
