@@ -5,7 +5,7 @@
 
 AMD_PowerConduit::AMD_PowerConduit()
 {
-	// TODO: RequiredRepairToolTag = 절연테이프 태그로 지정 (장비 시스템 연결 후)
+	RequiredRepairToolTag = MDGameplayTags::Ability_UtilityRepair_Insulation;
 }
 
 void AMD_PowerConduit::OnBroken(AActor* Cutter)

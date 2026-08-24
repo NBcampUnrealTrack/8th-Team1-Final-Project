@@ -26,6 +26,18 @@ public:
 	void SetInteractionHighlighted(bool bHighlighted);
 
 	/**
+	 * 이 Interactor가 현재 대상과 상호작용할 수 있는지.
+	 * 매 프레임과 서버 검증에서 반복 호출될 수 있으므로 상태를 바꾸지 않는 빠른 판정이어야 한다.
+	 * 기본값은 기존 상호작용 동작을 보존하는 true다.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
+	bool CanInteract(AActor* Interactor) const;
+	virtual bool CanInteract_Implementation(AActor* Interactor) const { return true; }
+
+	/** Blueprint 재정의와 C++ 기본 구현을 모두 존중하며 CanInteract를 호출하는 공통 진입점. */
+	static bool CanInteractWith(const UObject* Target, AActor* Interactor);
+
+	/**
 	 * 상호작용을 서버의 검증된 ServerInteract 경로에서 실행해야 하는지 여부.
 	 * 안전한 기본값은 서버 실행이다. 화면만 여는 로컬 전용 대상만 명시적으로 false를 반환한다.
 	 */

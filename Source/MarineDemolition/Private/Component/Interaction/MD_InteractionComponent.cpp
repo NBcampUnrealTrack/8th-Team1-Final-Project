@@ -113,6 +113,12 @@ void UMD_InteractionComponent::Interact()
 	// New interactables are server-authoritative by default. UI-only targets must explicitly opt out.
 	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
 	{
+		if (!IMD_Interactable::CanInteractWith(Target, OwnerPawn))
+		{
+			SetCurrentTarget(nullptr);
+			return;
+		}
+
 		const bool bRequiresServerInteraction =
 			IMD_Interactable::Execute_RequiresServerInteraction(Target);
 
@@ -186,6 +192,10 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 	}
 
 	if (!ValidateInteractionTarget(RequestedActor))
+	{
+		return;
+	}
+	if (!IMD_Interactable::CanInteractWith(RequestedActor, OwnerPawn))
 	{
 		return;
 	}
@@ -718,7 +728,7 @@ void UMD_InteractionComponent::UpdateInteractionFocus()
 
 AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 {
-	const APawn* OwnerPawn = GetOwnerPawn();
+	APawn* OwnerPawn = GetOwnerPawn();
 	AController* Controller = IsValid(OwnerPawn) ? OwnerPawn->GetController() : nullptr;
 	if (!IsValid(Controller) || !GetWorld()) return nullptr;
 
@@ -754,6 +764,7 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 		return nullptr;
 	}
 	if (IsHeldByOtherPawn(HitActor)) return nullptr;
+	if (!IMD_Interactable::CanInteractWith(HitActor, OwnerPawn)) return nullptr;
 
 	return HitActor;
 }

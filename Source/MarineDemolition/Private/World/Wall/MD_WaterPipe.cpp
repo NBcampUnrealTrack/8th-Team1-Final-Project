@@ -10,7 +10,7 @@ AMD_WaterPipe::AMD_WaterPipe()
 	HazardVolume = CreateDefaultSubobject<UMD_HazardVolumeComponent>(TEXT("HazardVolume"));
 	HazardVolume->SetupAttachment(Root);
 
-	// TODO: RequiredRepairToolTag = 폼건 태그로 지정 (장비 시스템 연결 후)
+	RequiredRepairToolTag = MDGameplayTags::Ability_UtilityRepair_Foam;
 }
 
 void AMD_WaterPipe::OnBroken(AActor* Cutter)

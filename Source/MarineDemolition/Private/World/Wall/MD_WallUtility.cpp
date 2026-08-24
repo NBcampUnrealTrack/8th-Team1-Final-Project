@@ -1,11 +1,15 @@
 #include "World/Wall/MD_WallUtility.h"
 
+#include "Character/MD_Character.h"
 #include "CollisionQueryParams.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/OverlapResult.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
+#include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "World/Wall/MD_CuttableWall.h"
@@ -22,6 +26,7 @@ AMD_WallUtility::AMD_WallUtility()
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(Root);
 	Mesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
 
 	LinkTrigger = CreateDefaultSubobject<UBoxComponent>(TEXT("LinkTrigger"));
 	LinkTrigger->SetupAttachment(Root);
@@ -199,6 +204,8 @@ void AMD_WallUtility::SetRepaired(AActor* Repairer)
 	}
 
 	UtilityState = EMD_UtilityState::Repaired;
+	UE_LOG(LogTemp, Display, TEXT("[MD_Utility] %s SetRepaired: UtilityState=Repaired, Repairer=%s"),
+		*GetName(), *GetNameSafe(Repairer));
 
 	OnRepaired(Repairer);
 
@@ -212,8 +219,32 @@ void AMD_WallUtility::OnRep_UtilityState()
 
 bool AMD_WallUtility::CanRepairWith(AActor* Interactor) const
 {
-	// TODO: Interactor의 장착 도구가 RequiredRepairToolTag와 일치하는지 확인
-	return true;
+	if (!RequiredRepairToolTag.IsValid())
+	{
+		return false;
+	}
+
+	const AMD_Character* Character = Cast<AMD_Character>(Interactor);
+	if (!IsValid(Character))
+	{
+		return false;
+	}
+
+	const UMD_EquipHotbarComponent* Hotbar = Character->GetHotbarComponent();
+	if (!IsValid(Hotbar))
+	{
+		return false;
+	}
+
+	const UMD_ToolDefinition* CurrentTool = Hotbar->GetCurrentTool();
+	return IsValid(CurrentTool)
+		&& CurrentTool->ToolAbilityTag.MatchesTagExact(RequiredRepairToolTag);
+}
+
+bool AMD_WallUtility::CanInteract_Implementation(AActor* Interactor) const
+{
+	return UtilityState == EMD_UtilityState::Broken
+		&& CanRepairWith(Interactor);
 }
 
 void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
@@ -223,8 +254,8 @@ void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
 		return;
 	}
 
-	// 파손 상태에서 올바른 수리 도구를 든 경우에만 수리
-	if (UtilityState == EMD_UtilityState::Broken && CanRepairWith(Interactor))
+	// 조준 이후 상태·장비가 바뀔 수 있으므로 실제 실행 직전에도 같은 규칙을 다시 확인한다.
+	if (CanInteract_Implementation(Interactor))
 	{
 		SetRepaired(Interactor);
 	}

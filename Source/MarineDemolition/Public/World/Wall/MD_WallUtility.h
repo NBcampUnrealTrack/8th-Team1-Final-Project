@@ -36,6 +36,7 @@ public:
 
 	// IMD_Interactable — 수리는 서버에서 검증
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
 	virtual bool RequiresServerInteraction_Implementation() const override { return true; }
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
@@ -63,8 +64,7 @@ protected:
 	// 파생 클래스가 수리 결과(봉합/재점등)를 구현. 서버에서만 호출된다
 	virtual void OnRepaired(AActor* Repairer) {}
 
-	// 이 인프라를 수리할 수 있는 도구를 Interactor가 들고 있는지
-	// TODO: 장비/핫바 시스템과 연결해 RequiredRepairToolTag 소지 여부 확인 (폼건/절연테이프)
+	// 현재 장착 도구의 ToolAbilityTag가 RequiredRepairToolTag와 정확히 일치하는지 확인
 	virtual bool CanRepairWith(AActor* Interactor) const;
 
 	// 상태 전이 진입점 (중복 방지 + 복제 + 파생 훅 호출). 서버 전용
