@@ -524,13 +524,6 @@ protected:
 		meta = (ClampMin = "0.0"))
 	float ScrapeLoopMinTravelCm = 0.05f;
 
-	/**
-	 * 오염막을 실제로 제거한 스트로크에 재생할 이벤트 태그.
-	 * 사운드 에셋은 코드가 아니라 DA_MD_Audio_Clean 이 결정한다.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
-	FGameplayTag ContaminationScrapeSoundTag;
-
 	/** 오염막 제거 접촉 위치에 생성할 파티클 (NS_Scrape_Contamination). 미지정 가능. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
 	TObjectPtr<UNiagaraSystem> ContaminationScrapeEffect;

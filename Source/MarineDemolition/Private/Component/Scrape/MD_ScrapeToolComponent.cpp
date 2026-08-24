@@ -17,11 +17,9 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 
 	TraceDistanceCm = 220.0f;
 	TraceChannel = ECC_Visibility;
-	// 사운드는 태그로만 지정한다. 에셋 참조는 DA_MD_Audio_Clean 에 있다.
+	// 긁는 소리는 지속음 하나뿐이다. 에셋 참조는 DA_MD_Audio_Clean 에 있다.
 	ScrapeLoopSoundTag =
 		FGameplayTag::RequestGameplayTag(TEXT("SFX.Clean.Hera.ScrapeSludge"), /*ErrorIfNotFound*/ false);
-	ContaminationScrapeSoundTag =
-		FGameplayTag::RequestGameplayTag(TEXT("SFX.Clean.Hera.StrokeSludge"), /*ErrorIfNotFound*/ false);
 	ContaminationScrapeEffect = nullptr;
 	BareSurfaceScrapeEffect = nullptr;
 	ScrapeLoopIdleGraceSeconds = 0.12f;
