@@ -8,6 +8,7 @@
 
 class UAbilitySystemComponent;
 class UProgressBar;
+class UHorizontalBox;
 struct FOnAttributeChangeData;
 /**
  * 
@@ -21,13 +22,17 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 
-	UPROPERTY(meta = (BindWidget))
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (BindWidgetOptional))
 	TObjectPtr<UProgressBar> HealthBar;
 
-	UPROPERTY(meta = (BindWidget))
-	TObjectPtr<UProgressBar> Pb_Oxygen;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (BindWidgetOptional))
+	TObjectPtr<UHorizontalBox> HB_Oxygen;
 
-private:
+	// 직전 산소 단계와 비교하여 감소한 Child에만 Pop 애니메이션을 재생한다.
+	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
+	int32 PreviousOxygenIndex = INDEX_NONE;
+
+protected:
 	// PlayerState/ASC 준비 전이면 0.5초 후 재시도
 	void TryBindToAbilitySystem();
 
@@ -39,6 +44,8 @@ private:
 
 	void RefreshOxygen();
 
+	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent)
+	void UpdateOxygenWidget(int32 NewOxygenIndex);
 
 	FTimerHandle BindRetryTimerHandle;
 

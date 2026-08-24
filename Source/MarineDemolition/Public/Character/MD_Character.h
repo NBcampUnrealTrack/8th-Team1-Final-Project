@@ -28,6 +28,8 @@ class UMD_EquipHotbarComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
 class UMD_OxygenComponent;
+class UNiagaraSystem;
+class UNiagaraComponent;
 struct FMinimalViewInfo;
 struct FGameplayTag;
 // 캡슐 오버랩 콜백 매개변수 형식 전방 선언
@@ -91,6 +93,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Oxygen")
 	UMD_OxygenComponent* GetOxygenComponent() const { return OxygenComponent; }
 
+	// 절단 루프 VFX 토글. 어빌리티가 서버·소유 클라 양쪽에서 부르고, 사본 프록시는 복제로 따라온다
+	void SetCutterVFXActive(bool bActive);
+
 	/** UI·앱 비활성화·외부 시스템이 입력을 가져가기 전에 헤라 Ability와 Focus를 정리한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape")
 	void CancelScrapeInteraction();
@@ -125,6 +130,8 @@ protected:
 	virtual void PawnClientRestart() override;
 
 	virtual void OnRep_PlayerState() override;
+
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 	virtual void OnRep_Controller() override;
 public:
@@ -179,6 +186,14 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
 	FName ToolAttachSocketName = TEXT("ToolSocket");
+
+	/** 절단 중 톱날에 붙여 재생할 루프 이펙트 (NS_Cutter_Cut) */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|VFX")
+	TObjectPtr<UNiagaraSystem> CutterCutEffect;
+
+	/** 도구 스태틱 메시에서 절단 이펙트를 붙일 소켓. 없으면 메시 원점에 붙는다 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|VFX")
+	FName CutterVFXSocketName = TEXT("VFX_Blade");
 
 	/**
 	 * 도구 스태틱 메시에서 손에 닿을 지점을 표시하는 소켓 이름.
@@ -266,6 +281,20 @@ private:
 	void RefreshToolMesh();
 	void RefreshScrapeLoadVisual();
 
+	UFUNCTION()
+	void OnRep_CutterVFXActive();
+
+	// 로컬은 1인칭, 타인은 3인칭 도구 메시에 붙여 시점별 표시를 기존 OwnerSee 구조에 맡긴다
+	void RefreshCutterVFX();
+
+	/** 절단 어빌리티가 활성인지. 서버가 굳히고 사본 프록시가 복제로 받는다 */
+	UPROPERTY(ReplicatedUsing = OnRep_CutterVFXActive)
+	bool bCutterVFXActive = false;
+
+	/** 현재 도구 메시에 붙어 있는 절단 루프 이펙트 인스턴스 */
+	UPROPERTY(Transient)
+	TObjectPtr<UNiagaraComponent> CutterVFXComponent;
+
 	/** 우클릭 헤라 포커스 입력용 런타임 액션/컨텍스트를 필요할 때 생성한다. */
 	void EnsureScrapeFocusInputObjects();
 
@@ -304,6 +333,17 @@ private:
 	void BindFirstPersonArmsToBodyPose();
 
 	void UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget = false);
+
+	/**
+	 * 1인칭 도구 메시를 본체 포즈에서 직접 배치한다.
+	 *
+	 * FirstPersonMesh 는 SetLeaderPoseComponent 팔로워라 자기 본 갱신 경로를
+	 * 건너뛴다. 그래서 그 본 소켓에 붙은 자식 컴포넌트는 본 단위 회전(날 비틀기)을
+	 * 받지 못하고, 1인칭에서만 도구가 안 도는 현상이 생긴다.
+	 * 본체의 컴포넌트 공간 소켓 트랜스폼을 1인칭 팔의 컴포넌트 트랜스폼에 얹는다.
+	 */
+	void UpdateFirstPersonToolTransform();
+
 
 private:
 	UFUNCTION()
@@ -372,5 +412,22 @@ private:
 	/** 접촉이 끊길 때 도구 회전을 AttachOffset으로 부드럽게 복귀시키는 현재 값. */
 	FRotator ScrapeAnimationToolRelativeRotation = FRotator::ZeroRotator;
 
+	/**
+	 * 날 축 twist 를 정의된 값으로 인정하는 최소 투영 길이. 투영 길이는 스트로크
+	 * 방향과 날 긴 축이 이루는 각의 sin 이므로, 이 값은 "축에서 몇 도 이상
+	 * 떨어져야 회전을 신뢰하는가"를 뜻한다. 0.25 ≈ 14.5도.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ScrapeBladeTwistMinProjection = 0.25f;
+
+	/**
+	 * 마지막으로 정의된 날 축 twist(도). 스트로크 방향이 날 축과 평행해지는
+	 * 특이점 구간에서는 새로 계산하지 않고 이 값을 유지한다 — AttachOffset 으로
+	 * 되돌리면 프레임마다 70~80도를 왕복한다.
+	 */
+	float LastScrapeAnimationTwistDegrees = 0.0f;
+
 	bool bHasScrapeAnimationBladeDirection = false;
+	bool bHasScrapeAnimationTwist = false;
 };

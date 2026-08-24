@@ -112,6 +112,7 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
     Snapshot.Score = GameState->GetScore();
     Snapshot.bWarningIssued = GameState->IsInspectionWarned();
     Snapshot.CrewCount = GameState->GetContractCrewCount();
+    Snapshot.ContractDifficulty = GameState->GetContractDifficulty();
     Snapshot.bEmergencyDay = GameState->IsEmergencyDay();
 
     for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
@@ -143,7 +144,8 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
             ContaminationRecord.InitialAmounts,
             ContaminationRecord.RemainingAmounts,
             ContaminationRecord.TransferredAmounts,
-            ContaminationRecord.TransferredPatternDensities);
+            ContaminationRecord.TransferredPatternDensities,
+            ContaminationRecord.CoveredFractions);
         if (ContaminationRecord.CellIndices.Num() > 0)
         {
             Snapshot.WallContaminations.Add(ContaminationRecord);
@@ -299,7 +301,8 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
                 Record.InitialAmounts,
                 Record.RemainingAmounts,
                 Record.TransferredAmounts,
-                Record.TransferredPatternDensities);
+                Record.TransferredPatternDensities,
+                Record.CoveredFractions);
         }
     }
 
@@ -443,6 +446,7 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
 
         GameState->SetInspectionWarned(Snapshot.bWarningIssued);
         GameState->SetContractCrewCount(Snapshot.CrewCount);
+        GameState->SetContractDifficulty(Snapshot.ContractDifficulty);
         GameState->SetEmergencyDay(Snapshot.bEmergencyDay);
         GameState->SetCurrentDay(Snapshot.CompletedDay + 1);
     }

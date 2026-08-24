@@ -3,10 +3,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/AssetManagerTypes.h"
-#include "GameplayTagContainer.h"
 #include "MD_MerchantTypes.generated.h"
-
-class UWorld;
 
 UENUM(BlueprintType)
 enum class EMD_QuestObjectiveType : uint8
@@ -45,52 +42,24 @@ enum class EMD_QuestFailureReason : uint8
 	Destroyed    UMETA(DisplayName = "파괴")
 };
 
-/** SiteDefinition.MainQuestLine / RepeatQuestPool 원소. 개별 퀘스트 DA 불필요. */
-USTRUCT(BlueprintType)
-struct MARINEDEMOLITION_API FMD_QuestDefinitionData
-{
-	GENERATED_BODY()
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
-	FName QuestId;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
-	FText QuestName;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
-	FText Description;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Objective")
-	EMD_QuestObjectiveType ObjectiveType = EMD_QuestObjectiveType::RecoverIntact;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Objective")
-	FGameplayTag TargetGradeTag;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Objective")
-	int32 RequiredCount = 1;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest|Reward")
-	int32 RewardCredits = 80;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
-	TSoftObjectPtr<UWorld> QuestMap;
-
-	bool IsValidDefinition() const { return !QuestId.IsNone(); }
-};
-
 USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_MainQuestState
 {
 	GENERATED_BODY()
 
+	/** 메인 역할로 배치된 공통 퀘스트 원본을 저장·복제 환경에서 다시 찾기 위한 식별자 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
-	FMD_QuestDefinitionData Definition;
+	FPrimaryAssetId DefinitionId;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	int32 UnlockDay = 1;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	EMD_MainQuestStatus Status = EMD_MainQuestStatus::Locked;
+
+	/** 메인 역할로 배치된 다단계 퀘스트의 현재 목표 인덱스 */
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
+	int32 CurrentPhaseIndex = 0;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	int32 CurrentProgress = 0;
@@ -99,6 +68,9 @@ struct MARINEDEMOLITION_API FMD_MainQuestState
 	EMD_QuestFailureReason FailureReason = EMD_QuestFailureReason::None;
 
 	bool IsActive() const { return Status == EMD_MainQuestStatus::Active; }
+
+	/** 원본 메인 퀘스트를 조회할 수 있는 식별자인지 확인하는 함수 */
+	bool HasValidDefinitionId() const { return DefinitionId.IsValid(); }
 };
 
 USTRUCT(BlueprintType)
@@ -106,7 +78,7 @@ struct MARINEDEMOLITION_API FMD_RepeatQuestState
 {
 	GENERATED_BODY()
 
-	/** 원본 MD_RepeatQuestDefinition을 저장·복제 환경에서 다시 찾기 위한 식별자 */
+	/** 반복 역할로 배치된 공통 퀘스트 원본을 저장·복제 환경에서 다시 찾기 위한 식별자 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	FPrimaryAssetId DefinitionId;
 

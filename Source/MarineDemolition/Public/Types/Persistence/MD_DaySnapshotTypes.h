@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Templates/SubclassOf.h"
+#include "Types/Travel/MD_TravelTypes.h"
 #include "MD_DaySnapshotTypes.generated.h"
 
 class AMD_SupportBrace;
@@ -96,6 +97,16 @@ struct FMD_WallContaminationRecord
       /** 새 페인트의 성김-조밀함 시각 패턴 밀도. */
       UPROPERTY()
       TArray<float> TransferredPatternDensities;
+
+      /**
+       * 셀에서 헤라 날에 덮인 면적 비율. 구버전 스냅샷에서는 비어 있다.
+       *
+       * 저장하지 않으면 다음 Day에 어제 긁어 둔 자국의 경계가 격자 계단으로
+       * 되돌아간다. 잔여량만으로는 셀 전체에 얇게 남은 막과 셀의 일부만 덮인
+       * 상태를 구분할 수 없기 때문이다.
+       */
+      UPROPERTY()
+      TArray<float> CoveredFractions;
 };
 
 /**
@@ -145,6 +156,10 @@ struct FMD_DaySnapshot
       // 계약 인원수 (Day 간 고정 유지)
       UPROPERTY()
       int32 CrewCount = 0;
+
+      // 출발 시 선택한 점검 난이도를 다음 Day에서도 동일하게 유지하기 위한 계약 값
+      UPROPERTY()
+      EMD_Difficulty ContractDifficulty = EMD_Difficulty::Standard;
 
       // 비상 4일차 진행 여부
       UPROPERTY()

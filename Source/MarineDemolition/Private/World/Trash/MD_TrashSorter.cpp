@@ -15,6 +15,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Util/MD_LogUtility.h"
 #include "Util/MD_MaterialTintUtility.h"
+#include "World/Sample/MD_QuestItem.h"
 #include "World/Sample/MD_SampleItem.h"
 
 AMD_TrashSorter::AMD_TrashSorter()
@@ -119,6 +120,13 @@ void AMD_TrashSorter::JudgeAndSwallow(AActor* Item)
 		return;
 	}
 
+	AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Item);
+	if (IsValid(QuestItem) == true && QuestItem->CanBeDestroyedByGameplay() == false)
+	{
+		// 파괴 불가 퀘스트 아이템을 단일 투입 경로에서도 소비하지 않는 보호 처리
+		return;
+	}
+
 	AMD_GameStateBase* MDGameState = nullptr;
 	UMD_MerchantSubsystem* Merchant = nullptr;
 	FMD_TrashSortResult Result;
@@ -128,12 +136,12 @@ void AMD_TrashSorter::JudgeAndSwallow(AActor* Item)
 		return;
 	}
 
-	const FVector SwallowLocation = Item->GetActorLocation();
-	const TWeakObjectPtr<AActor> ItemPtr(Item);
+	FVector SwallowLocation = Item->GetActorLocation();
+	TWeakObjectPtr<AActor> ItemPtr(Item);
 	ActorsBeingProcessed.Add(ItemPtr);
 
 	int32 RefundCredits = 0;
-	const bool bConsumed = ConsumeSortable(Item, MDGameState, Result, RefundCredits);
+	bool bConsumed = ConsumeSortable(Item, MDGameState, Result, RefundCredits);
 	ActorsBeingProcessed.Remove(ItemPtr);
 	if (!bConsumed)
 	{
@@ -142,7 +150,8 @@ void AMD_TrashSorter::JudgeAndSwallow(AActor* Item)
 
 	if (RefundCredits > 0)
 	{
-		Merchant->AddCredits(RefundCredits);
+		// 정분류 환급을 일일 보고서의 분류 금액 행에 기록
+		Merchant->AddCredits(EMD_DailyReportCategory::Categorizing, RefundCredits);
 	}
 
 	ForceNetUpdate();
@@ -165,8 +174,8 @@ void AMD_TrashSorter::JudgeAndSwallowContainer(AActor* ContainerActor)
 	}
 
 	// Drain이 최신 overlap을 반영한 최종 소비 목록을 반환한다.
-	const FVector SwallowLocation = ContainerActor->GetActorLocation();
-	const TWeakObjectPtr<AActor> ContainerPtr(ContainerActor);
+	FVector SwallowLocation = ContainerActor->GetActorLocation();
+	TWeakObjectPtr<AActor> ContainerPtr(ContainerActor);
 	ActorsBeingProcessed.Add(ContainerPtr);
 
 	TArray<AActor*> DrainedContents;
@@ -178,7 +187,7 @@ void AMD_TrashSorter::JudgeAndSwallowContainer(AActor* ContainerActor)
 	}
 
 	// 정상적인 서버 TrashBin은 반드시 파괴된다. 실패는 복구 분기 대신 개발 중 invariant 위반으로 알린다.
-	const bool bContainerDestroyed = ContainerActor->Destroy();
+	bool bContainerDestroyed = ContainerActor->Destroy();
 	ensureMsgf(bContainerDestroyed,
 		TEXT("분류기에 들어온 컨테이너 '%s' 파괴에 실패했습니다."),
 		*GetNameSafe(ContainerActor));
@@ -193,18 +202,26 @@ void AMD_TrashSorter::JudgeAndSwallowContainer(AActor* ContainerActor)
 	{
 		if (!IsValid(Content)) continue;
 
-		const TWeakObjectPtr<AActor> ContentPtr(Content);
+		TWeakObjectPtr<AActor> ContentPtr(Content);
 		if (ActorsBeingProcessed.Contains(ContentPtr)) continue;
 		ActorsBeingProcessed.Add(ContentPtr);
+
+		AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Content);
+		if (IsValid(QuestItem) == true && QuestItem->CanBeDestroyedByGameplay() == false)
+		{
+			// 컨테이너에서 배출된 파괴 불가 퀘스트 아이템을 월드에 남기는 보호 처리
+			ActorsBeingProcessed.Remove(ContentPtr);
+			continue;
+		}
 
 		if (!Content->Implements<UMD_TrashSortable>())
 		{
 			// 샘플처럼 분류 계약이 없는 내용물은 점수/환급 없이 소비한다.
-			const AMD_SampleItem* Sample = Cast<AMD_SampleItem>(Content);
-			const TOptional<EMD_SampleGrade> DestroyedSampleGrade = Sample
+			AMD_SampleItem* Sample = Cast<AMD_SampleItem>(Content);
+			TOptional<EMD_SampleGrade> DestroyedSampleGrade = Sample
 				? TOptional<EMD_SampleGrade>(Sample->Grade)
 				: TOptional<EMD_SampleGrade>();
-			const FPrimaryAssetId DestroyedSampleQuestDefinitionId = Sample != nullptr ? Sample->QuestDefinitionId : FPrimaryAssetId();
+			FPrimaryAssetId DestroyedSampleQuestDefinitionId = Sample != nullptr ? Sample->QuestDefinitionId : FPrimaryAssetId();
 			if (Content->Destroy())
 			{
 				if (DestroyedSampleGrade.IsSet())
@@ -243,7 +260,8 @@ void AMD_TrashSorter::JudgeAndSwallowContainer(AActor* ContainerActor)
 	// 내용물 수와 무관하게 Merchant delegate/복제 갱신은 한 번만 일으킨다.
 	if (TotalRefundCredits > 0)
 	{
-		Merchant->AddCredits(TotalRefundCredits);
+		// 일괄 정분류 환급을 일일 보고서의 분류 금액 행에 기록
+		Merchant->AddCredits(EMD_DailyReportCategory::Categorizing, TotalRefundCredits);
 	}
 
 	ForceNetUpdate();

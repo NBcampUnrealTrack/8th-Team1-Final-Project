@@ -18,6 +18,7 @@
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "Util/MD_MaterialTintUtility.h"
+#include "World/Sample/MD_QuestItem.h"
 #include "World/Sample/MD_SampleItem.h"
 
 AMD_SampleShelf::AMD_SampleShelf()
@@ -74,20 +75,20 @@ void AMD_SampleShelf::BeginPlay()
 	CollectionVolume->OnComponentBeginOverlap.AddDynamic(this, &AMD_SampleShelf::OnCollectionBeginOverlap);
 	CollectionVolume->OnComponentEndOverlap.AddDynamic(this, &AMD_SampleShelf::OnCollectionEndOverlap);
 
-	// 스냅샷 복원 등으로 이미 볼륨 안에 놓여 있는 샘플도 회수 대상이다.
-	if (HasAuthority())
+	// 스냅샷 복원 등으로 이미 볼륨 안에 놓여 있는 퀘스트 아이템을 회수 대상으로 등록하는 처리
+	if (HasAuthority() == true)
 	{
 		TArray<AActor*> Overlapping;
-		CollectionVolume->GetOverlappingActors(Overlapping, AMD_SampleItem::StaticClass());
+		CollectionVolume->GetOverlappingActors(Overlapping, AMD_QuestItem::StaticClass());
 		for (AActor* Actor : Overlapping)
 		{
-			if (AMD_SampleItem* Sample = Cast<AMD_SampleItem>(Actor))
+			if (AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Actor))
 			{
-				PendingSamples.Add(Sample);
+				PendingQuestItems.Add(QuestItem);
 			}
 		}
 
-		if (PendingSamples.Num() > 0)
+		if (PendingQuestItems.Num() > 0)
 		{
 			GetWorldTimerManager().SetTimer(
 				PollTimerHandle, this, &AMD_SampleShelf::PollPendingSamples, PollInterval, true);
@@ -107,29 +108,23 @@ void AMD_SampleShelf::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-void AMD_SampleShelf::OnCollectionBeginOverlap(
-	UPrimitiveComponent* OverlappedComponent,
-	AActor* OtherActor,
-	UPrimitiveComponent* OtherComp,
-	int32 OtherBodyIndex,
-	bool bFromSweep,
-	const FHitResult& SweepResult)
+void AMD_SampleShelf::OnCollectionBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	if (!HasAuthority())
+	if (HasAuthority() == false)
 	{
 		return;
 	}
 
-	AMD_SampleItem* Sample = Cast<AMD_SampleItem>(OtherActor);
-	if (!IsValid(Sample))
+	AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(OtherActor);
+	if (IsValid(QuestItem) == false)
 	{
 		return;
 	}
 
-	PendingSamples.Add(Sample);
+	PendingQuestItems.Add(QuestItem);
 
-	// 볼륨에 들어온 순간부터 파손 판정을 막는다. 놓는 순간의 낙하 충격까지 흡수해야 한다.
-	Sample->SuppressImpactDamage(ImpactSuppressDuration);
+	// 파괴 기능이 있는 파생 아이템만 볼륨 진입 충격을 무시하게 하는 확장 호출
+	QuestItem->SuppressImpactDamage(ImpactSuppressDuration);
 
 	// 들고 들어온 경우 지금은 회수하면 안 된다. 손을 떠날 때까지 폴링으로 기다린다.
 	if (!GetWorldTimerManager().IsTimerActive(PollTimerHandle))
@@ -139,60 +134,55 @@ void AMD_SampleShelf::OnCollectionBeginOverlap(
 	}
 }
 
-void AMD_SampleShelf::OnCollectionEndOverlap(
-	UPrimitiveComponent* OverlappedComponent,
-	AActor* OtherActor,
-	UPrimitiveComponent* OtherComp,
-	int32 OtherBodyIndex)
+void AMD_SampleShelf::OnCollectionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
 {
-	if (!HasAuthority())
+	if (HasAuthority() == false)
 	{
 		return;
 	}
 
-	if (AMD_SampleItem* Sample = Cast<AMD_SampleItem>(OtherActor))
+	if (AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(OtherActor))
 	{
-		PendingSamples.Remove(Sample);
+		PendingQuestItems.Remove(QuestItem);
 	}
 }
 
 void AMD_SampleShelf::PollPendingSamples()
 {
-	if (!HasAuthority())
+	if (HasAuthority() == false)
 	{
 		return;
 	}
 
-	TArray<AMD_SampleItem*> Collectable;
+	TArray<AMD_QuestItem*> CollectableQuestItems;
 
-	for (auto It = PendingSamples.CreateIterator(); It; ++It)
+	for (auto It = PendingQuestItems.CreateIterator(); It; ++It)
 	{
-		AMD_SampleItem* Sample = It->Get();
-		if (!IsValid(Sample) || Sample->IsActorBeingDestroyed())
+		AMD_QuestItem* QuestItem = It->Get();
+		if (IsValid(QuestItem) == false || QuestItem->IsActorBeingDestroyed() == true)
 		{
 			It.RemoveCurrent();
 			continue;
 		}
 
-		// 볼륨에 머무는 동안 보호를 계속 갱신한다. 플레이어가 샘플을 든 채로
-		// 선반 앞에 서 있는 시간이 길어도 보호가 끊기지 않아야 한다.
-		Sample->SuppressImpactDamage(ImpactSuppressDuration);
+		// 파괴 기능이 있는 파생 아이템의 보호가 폴링 사이에 끊기지 않게 하는 갱신
+		QuestItem->SuppressImpactDamage(ImpactSuppressDuration);
 
-		if (IsHeldByAnyPawn(Sample))
+		if (IsHeldByAnyPawn(QuestItem) == true)
 		{
 			continue;
 		}
 
-		Collectable.Add(Sample);
+		CollectableQuestItems.Add(QuestItem);
 		It.RemoveCurrent();
 	}
 
-	for (AMD_SampleItem* Sample : Collectable)
+	for (AMD_QuestItem* QuestItem : CollectableQuestItems)
 	{
-		CollectSample(Sample);
+		CollectQuestItem(QuestItem);
 	}
 
-	if (PendingSamples.Num() == 0)
+	if (PendingQuestItems.Num() == 0)
 	{
 		GetWorldTimerManager().ClearTimer(PollTimerHandle);
 	}
@@ -200,32 +190,32 @@ void AMD_SampleShelf::PollPendingSamples()
 
 bool AMD_SampleShelf::IsHeldByAnyPawn(const AActor* Target) const
 {
-	const UWorld* World = GetWorld();
+	UWorld* World = GetWorld();
 	if (!IsValid(Target) || !IsValid(World))
 	{
 		return false;
 	}
 
-	const AGameStateBase* GameState = World->GetGameState();
+	AGameStateBase* GameState = World->GetGameState();
 	if (!IsValid(GameState))
 	{
 		return false;
 	}
 
-	for (const APlayerState* PlayerState : GameState->PlayerArray)
+	for (APlayerState* PlayerState : GameState->PlayerArray)
 	{
 		if (!IsValid(PlayerState))
 		{
 			continue;
 		}
 
-		const APawn* Pawn = PlayerState->GetPawn();
+		APawn* Pawn = PlayerState->GetPawn();
 		if (!IsValid(Pawn))
 		{
 			continue;
 		}
 
-		const UMD_InteractionComponent* Interaction =
+		UMD_InteractionComponent* Interaction =
 			Pawn->FindComponentByClass<UMD_InteractionComponent>();
 		if (IsValid(Interaction) && Interaction->GetHeldActor() == Target)
 		{
@@ -236,55 +226,60 @@ bool AMD_SampleShelf::IsHeldByAnyPawn(const AActor* Target) const
 	return false;
 }
 
-void AMD_SampleShelf::CollectSample(AMD_SampleItem* Sample)
+void AMD_SampleShelf::CollectQuestItem(AMD_QuestItem* QuestItem)
 {
-	if (!HasAuthority() || !IsValid(Sample) || Sample->IsActorBeingDestroyed())
+	if (HasAuthority() == false || IsValid(QuestItem) == false || QuestItem->IsActorBeingDestroyed() == true)
 	{
 		return;
 	}
 
 	UWorld* World = GetWorld();
 	UGameInstance* GameInstance = IsValid(World) ? World->GetGameInstance() : nullptr;
-	const bool bIntact = !Sample->bDamaged;
+	bool bIntact = QuestItem->IsQuestItemIntact();
 	UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
-	FPrimaryAssetId QuestDefinitionId = Sample->QuestDefinitionId;
-	EMD_SampleGrade SampleGrade = Sample->Grade;
+	AMD_SampleItem* Sample = Cast<AMD_SampleItem>(QuestItem);
+	bool bIsDestructibleSample = IsValid(Sample);
+	EMD_SampleGrade SampleGrade = bIsDestructibleSample == true ? Sample->Grade : EMD_SampleGrade::C;
 
-	// 샘플 액터 제거 이후에도 선반 전시와 퀘스트 진행에 사용할 최소 정보 복사
+	// 아이템 액터 제거 이후에도 선반 전시와 퀘스트 진행에 사용할 최소 정보 복사
 	FMD_ShelfDisplayEntry Entry;
-	Entry.bDamaged = Sample->bDamaged;
-	Entry.Scale = Sample->GetActorScale3D();
-	UStaticMeshComponent* SampleMesh = Sample->FindComponentByClass<UStaticMeshComponent>();
-	if (IsValid(SampleMesh) == true)
+	Entry.bDamaged = bIntact == false;
+	Entry.Scale = QuestItem->GetActorScale3D();
+	UStaticMeshComponent* QuestItemMesh = QuestItem->FindComponentByClass<UStaticMeshComponent>();
+	if (IsValid(QuestItemMesh) == true)
 	{
-		Entry.Mesh = SampleMesh->GetStaticMesh();
+		Entry.Mesh = QuestItemMesh->GetStaticMesh();
 	}
 
-	// 다음 페이즈 스폰 부족분 계산에서 제출 완료 샘플을 제외하기 위한 선행 파괴
-	bool bSampleDestroyed = Sample->Destroy();
-	if (bSampleDestroyed == false)
+	// 퀘스트 판정에 실제 액터를 사용하고 제거가 확정된 뒤에만 진행도를 반영하는 제출 처리
+	bool bQuestItemRemoved = false;
+	if (IsValid(Merchant) == true)
+	{
+		bQuestItemRemoved = Merchant->TryDeliverQuestItem(QuestItem);
+	}
+	else
+	{
+		bQuestItemRemoved = QuestItem->Destroy();
+	}
+
+	if (bQuestItemRemoved == false)
 	{
 		return;
 	}
 
 	DisplayEntries.Add(Entry);
 
-	UE_LOG(LogTemp, Log,
-		TEXT("[SampleShelf] %s: %s급 샘플 회수 (%s) — 전시 %d건"),
-		*GetName(),
-		*StaticEnum<EMD_SampleGrade>()->GetNameStringByValue(static_cast<int64>(SampleGrade)),
-		bIntact == true ? TEXT("온전") : TEXT("손상"),
-		DisplayEntries.Num());
+	if (bIsDestructibleSample == true)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[SampleShelf] %s: %s급 샘플 회수 (%s) — 전시 %d건"), *GetName(), *StaticEnum<EMD_SampleGrade>()->GetNameStringByValue(static_cast<int64>(SampleGrade)), bIntact == true ? TEXT("온전") : TEXT("손상"), DisplayEntries.Num());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Log, TEXT("[SampleShelf] %s: 파괴 불가 퀘스트 아이템 회수 — 전시 %d건"), *GetName(), DisplayEntries.Num());
+	}
 
 	// 리슨 서버는 OnRep가 오지 않으므로 직접 갱신한다.
 	RebuildDisplay();
-
-	// 점수·크레딧은 지급하지 않고 파괴가 확정된 샘플의 퀘스트 진행만 반영하는 처리
-	if (IsValid(Merchant) == true)
-	{
-		FGameplayTag GradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(SampleGrade);
-		Merchant->NotifySampleDelivered(QuestDefinitionId, GradeTag, bIntact);
-	}
 }
 
 void AMD_SampleShelf::OnRep_DisplayEntries()
@@ -305,7 +300,7 @@ void AMD_SampleShelf::RebuildDisplay()
 
 	for (int32 Index = 0; Index < DisplayEntries.Num(); ++Index)
 	{
-		const FMD_ShelfDisplayEntry& Entry = DisplayEntries[Index];
+		FMD_ShelfDisplayEntry& Entry = DisplayEntries[Index];
 		if (!IsValid(Entry.Mesh))
 		{
 			continue;
@@ -367,11 +362,11 @@ TArray<FTransform> AMD_SampleShelf::CollectManualSlots() const
 FTransform AMD_SampleShelf::GetSlotTransform(int32 Index) const
 {
 	// 디자이너가 Arrow를 여러 개 놓았으면 그 배치를 그대로 존중한다.
-	const TArray<FTransform> ManualSlots = CollectManualSlots();
+	TArray<FTransform> ManualSlots = CollectManualSlots();
 	if (ManualSlots.Num() > 0)
 	{
-		const FTransform& Slot = ManualSlots[Index % ManualSlots.Num()];
-		const int32 Row = Index / ManualSlots.Num();
+		FTransform& Slot = ManualSlots[Index % ManualSlots.Num()];
+		int32 Row = Index / ManualSlots.Num();
 		if (Row == 0)
 		{
 			return Slot;
@@ -383,20 +378,20 @@ FTransform AMD_SampleShelf::GetSlotTransform(int32 Index) const
 	}
 
 	// 기본 배치: DefaultSlot을 시작점으로 SlotsPerRow만큼 한 줄에 늘어놓고 다음 줄로 내린다.
-	const USceneComponent* Origin = IsValid(DefaultSlot)
-		? static_cast<const USceneComponent*>(DefaultSlot)
-		: static_cast<const USceneComponent*>(Root);
+	USceneComponent* Origin = IsValid(DefaultSlot)
+		? static_cast<USceneComponent*>(DefaultSlot)
+		: static_cast<USceneComponent*>(Root);
 	if (!IsValid(Origin))
 	{
 		return GetActorTransform();
 	}
 
-	const int32 PerRow = FMath::Max(1, SlotsPerRow);
-	const int32 Column = Index % PerRow;
-	const int32 Row = Index / PerRow;
+	int32 PerRow = FMath::Max(1, SlotsPerRow);
+	int32 Column = Index % PerRow;
+	int32 Row = Index / PerRow;
 
 	FTransform Result = Origin->GetComponentTransform();
-	const FVector LocalOffset = SlotSpacing * Column + RowSpacing * Row;
+	FVector LocalOffset = SlotSpacing * Column + RowSpacing * Row;
 	Result.AddToTranslation(Result.GetRotation().RotateVector(LocalOffset));
 
 	return Result;

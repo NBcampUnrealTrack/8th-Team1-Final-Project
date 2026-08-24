@@ -3,13 +3,15 @@
 
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "GameplayTagContainer.h"
-#include "Data/Merchant/MD_RepeatQuestDefinition.h"
+#include "Data/Merchant/MD_QuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Game/MD_GameStateBase.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
+#include "World/Sample/MD_QuestItem.h"
 
 
 int32 UMD_MerchantSubsystem::GetActiveQuestReward() const
@@ -18,16 +20,27 @@ int32 UMD_MerchantSubsystem::GetActiveQuestReward() const
 
 	for (const FMD_MainQuestState& QuestState : MainQuests)
 	{
-		if (QuestState.IsActive() && QuestState.Definition.IsValidDefinition())
+		if (QuestState.IsActive() == false)
 		{
-			Total += QuestState.Definition.RewardCredits;
+			continue;
+		}
+
+		UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		if (IsValid(Definition) == true)
+		{
+			Total += Definition->SuccessReward.Credits;
 		}
 	}
 
 	for (const FMD_RepeatQuestState& QuestState : RepeatQuests)
 	{
-		const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(QuestState.DefinitionId);
-		if (QuestState.IsActive() == true && IsValid(Definition) == true)
+		if (QuestState.IsActive() == false)
+		{
+			continue;
+		}
+
+		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		if (IsValid(Definition) == true)
 		{
 			Total += Definition->SuccessReward.Credits;
 		}
@@ -36,28 +49,24 @@ int32 UMD_MerchantSubsystem::GetActiveQuestReward() const
 	return Total;
 }
 
-void UMD_MerchantSubsystem::AddCredits(int32 Amount)
+TArray<FMD_DailyReportValue> UMD_MerchantSubsystem::GetDailyCreditTotals() const
 {
-	//크레딧은 최소 0
-	if (Amount == 0)
+	// 서버 Map을 RPC와 복제가 지원하는 항목 배열로 변환
+	TArray<FMD_DailyReportValue> OutCreditTotals;
+	OutCreditTotals.Reserve(DailyCreditTotals.Num());
+	for (const TPair<EMD_DailyReportCategory, int64>& CreditEntry : DailyCreditTotals)
 	{
-		return;
+		int32 CreditValue = static_cast<int32>(FMath::Clamp<int64>(CreditEntry.Value, MIN_int32, MAX_int32));
+		OutCreditTotals.Add({CreditEntry.Key, CreditValue});
 	}
 
-	// int32 범위 안에서 합산하기 전에 상한과 하한을 판정하는 원장 보호
-	if (Amount > 0 && Credits > MAX_int32 - Amount)
-	{
-		Credits = MAX_int32;
-	}
-	else if (Amount < 0 && Amount < -Credits)
-	{
-		Credits = 0;
-	}
-	else
-	{
-		Credits += Amount;
-	}
+	return OutCreditTotals;
+}
 
+void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 Amount)
+{
+	// 모든 외부 크레딧 변경을 단일 Enum 기반 기록 경로로 처리
+	AddCreditsInternal(Category, Amount);
 	OnMerchantStateChanged.Broadcast();
 }
 
@@ -108,7 +117,8 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerStat
 	}
 
 	// 지급 성공이 보장된 같은 프레임에 결제와 팀 구매 원장을 확정하는 원자적 처리
-	Credits -= ShopItem.Price;
+	// 상점 구매 비용을 기타 정산 분류로 기록
+	AddCreditsInternal(EMD_DailyReportCategory::Other, -ShopItem.Price);
 	int32& PurchasedCount = PurchasedItemCounts.FindOrAdd(ShopItem.ItemId);
 	PurchasedCount += 1;
 
@@ -191,7 +201,8 @@ bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount)
 	}
 
 	// 대출 실행
-	Credits += Amount;
+	// 대출 수령액을 기타 정산 분류로 기록
+	AddCreditsInternal(EMD_DailyReportCategory::Other, Amount);
 	DebtBalance += Amount;
 
 	OnMerchantStateChanged.Broadcast();
@@ -208,7 +219,8 @@ bool UMD_MerchantSubsystem::TryRepayLoan(int32 Amount)
 	}
 
 	// 빚 상환 실행
-	Credits -= Amount;
+	// 대출 상환액을 기타 정산 분류로 기록
+	AddCreditsInternal(EMD_DailyReportCategory::Other, -Amount);
 	DebtBalance -= Amount;
 	OnMerchantStateChanged.Broadcast();
 
@@ -239,9 +251,9 @@ int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 	return InterestAmount;
 }
 
-void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 AdvancePayment)
+void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site)
 {
-	if (!IsValid(Site))
+	if (IsValid(Site) == false)
 	{
 		return;
 	}
@@ -249,20 +261,26 @@ void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 Advanc
 	CurrentSite = Site;
 	CurrentDay = 0;
 
+	// 이전 계약의 상태가 새 계약으로 이어지지 않도록 초기화한 뒤 현재 현장 기준으로 최초 추첨하는 처리
+	RepeatQuests.Reset();
+	DrawRepeatQuestsForContract();
+
 	//메인퀘스트 반복 방지
 	MainQuests.Reset();
+	MainQuests.Reserve(Site->MainQuestLine.Num());
 
 	for (int32 Index = 0; Index < Site->MainQuestLine.Num(); ++Index)
 	{
-		const FMD_QuestDefinitionData& Definition = Site->MainQuestLine[Index];
-		if (!Definition.IsValidDefinition())
+		const FPrimaryAssetId& DefinitionId = Site->MainQuestLine[Index];
+		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(DefinitionId);
+		if (IsValid(Definition) == false || Definition->IsValidDefinition() == false)
 		{
-			UE_LOG(LogTemp, Warning, TEXT("[Merchant] MainQuestLine[%d]가 비어 있다"), Index);
+			UE_LOG(LogTemp, Warning, TEXT("[Merchant] MainQuestLine[%d]가 비어 있다: %s"), Index, *DefinitionId.ToString());
 			continue;
 		}
 
 		FMD_MainQuestState NewMain;
-		NewMain.Definition = Definition;
+		NewMain.DefinitionId = DefinitionId;
 		NewMain.UnlockDay = Index + 1;
 		NewMain.Status = EMD_MainQuestStatus::Locked;
 
@@ -273,9 +291,7 @@ void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 Advanc
 	NextDepositMultiplier = 1.f;
 	bConsumableDiscountActive = true;
 
-	AddCreditsInternal(AdvancePayment);
-
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 시작: %s (메인 %d건, 착수금 %d)"), *Site->SiteName.ToString(), MainQuests.Num(), AdvancePayment);
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 시작: %s (메인 %d건, 반복 %d건)"), *Site->SiteName.ToString(), MainQuests.Num(), RepeatQuests.Num());
 
 	OnMerchantStateChanged.Broadcast();
 }
@@ -285,8 +301,23 @@ bool UMD_MerchantSubsystem::HasClearedCurrentSite() const
 	return IsValid(CurrentSite) && ClearedSites.Contains(CurrentSite);
 }
 
-void UMD_MerchantSubsystem::BeginDay(int32 NewDay)
+void UMD_MerchantSubsystem::BeginDay(int32 NewDay, int32 BaseAdvancePayment, bool bEmergencyDay)
 {
+	// 잘못된 설정값으로 팀 크레딧이 차감되지 않도록 기본 착수금을 0 이상으로 제한
+	int32 ValidBaseAdvancePayment = FMath::Max(BaseAdvancePayment, 0);
+
+	// 높은 호감도는 착수금을 10% 늘리고 낮은 호감도는 10% 줄이는 배율 계산
+	float AffinityAdvanceMultiplier = FMath::GetRangePct(-2.0f, 2.0f, Affinity);
+	AffinityAdvanceMultiplier = 0.9f + 0.2f * FMath::Clamp(AffinityAdvanceMultiplier, 0, 1);
+	AffinityAdvanceMultiplier *= bEmergencyDay == true ? 0.7f : 1;
+
+	// 비상 Day에는 호감도와 무관하게 착수금을 지급하지 않는 최종 금액 계산
+	int32 GrantedAdvancePayment = FMath::RoundToInt32(ValidBaseAdvancePayment * AffinityAdvanceMultiplier);
+	// 새 Day의 Enum Map 원장을 초기화한 뒤 실제 착수금을 기록
+	DailyCreditTotals.Reset();
+	AddCreditsInternal(EMD_DailyReportCategory::Retainer, GrantedAdvancePayment);
+
+	// 현재 계약의 일차를 서버 상인 원장에 반영
 	CurrentDay = NewDay;
 
 	// Day에 도달하면 Locked에서 Active가 된다. 실패·완료 건은 그대로 둔다.
@@ -297,9 +328,7 @@ void UMD_MerchantSubsystem::BeginDay(int32 NewDay)
 			MainQuest.Status = EMD_MainQuestStatus::Active;
 		}
 	}
-	RerollRepeatQuests();
-
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 시작 (반복 %d건)"), NewDay, RepeatQuests.Num());
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 시작 (기본 착수금 %d, 호감도 %.1f, 비상 %s, 지급 %d, 반복 %d건)"), NewDay, ValidBaseAdvancePayment, Affinity, bEmergencyDay == true ? TEXT("true") : TEXT("false"), GrantedAdvancePayment, RepeatQuests.Num());
 
 	OnMerchantStateChanged.Broadcast();
 }
@@ -327,19 +356,23 @@ bool UMD_MerchantSubsystem::TryAcceptRepeatQuest(int32 QuestIndex)
 
 	FMD_RepeatQuestState& QuestState = RepeatQuests[QuestIndex];
 
-	// 마지막 목표를 충족한 수락 상태에서만 상인 메뉴 보상을 한 번 지급하고 최종 완료로 전환하는 처리
-	if (QuestState.Status == EMD_RepeatQuestStatus::Accepted && IsRepeatQuestObjectiveComplete(QuestState) == true)
+	// 수락 상태에서는 원본을 한 번만 로드하여 마지막 목표 완료와 보상 수령을 함께 처리한다.
+	if (QuestState.Status == EMD_RepeatQuestStatus::Accepted)
 	{
-		const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
 		if (IsValid(Definition) == false)
 		{
 			return false;
 		}
 
-		ApplyRepeatQuestReward(*Definition);
-		QuestState.Status = EMD_RepeatQuestStatus::Completed;
-		OnMerchantStateChanged.Broadcast();
-		return true;
+		if (Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress) == true)
+		{
+			// 보상 적용 중 재진입하더라도 동일 퀘스트를 다시 정산하지 않기 위한 선행 완료 확정
+			QuestState.Status = EMD_RepeatQuestStatus::Completed;
+			ApplyRepeatQuestReward(*Definition);
+			OnMerchantStateChanged.Broadcast();
+			return true;
+		}
 	}
 
 	// 제시 상태가 아닌 카드를 다시 수락하거나 목표 달성 전 보상을 적용하지 못하게 하는 검사
@@ -370,7 +403,7 @@ bool UMD_MerchantSubsystem::TryDeclineRepeatQuest(int32 QuestIndex)
 		return false;
 	}
 
-	// 거절은 페널티가 없다. 다음 Day 재롤 때 이 카드가 사라진다.
+	// 거절한 카드는 현재 계약이 끝날 때까지 유지하며 별도 페널티를 적용하지 않는 처리
 	QuestState.Status = EMD_RepeatQuestStatus::Declined;
 
 	OnMerchantStateChanged.Broadcast();
@@ -403,49 +436,147 @@ bool UMD_MerchantSubsystem::TryAbandonRepeatQuest(int32 QuestIndex)
 	return true;
 }
 
-void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDefinitionId, const FGameplayTag& GradeTag, bool bIntact)
+bool UMD_MerchantSubsystem::TryDeliverQuestItem(AMD_QuestItem* SubmittedItem)
 {
-	if (GradeTag.IsValid() == false)
+	bool bOutDelivered = false;
+	bool bCanDeliver = IsValid(SubmittedItem) == true && SubmittedItem->HasAuthority() == true && SubmittedItem->IsActorBeingDestroyed() == false;
+	if (bCanDeliver == false)
 	{
-		return;
+		return bOutDelivered;
+	}
+
+	/** 아이템 제거가 확정된 뒤 진행도를 반영하기 위한 사전 판정 결과 */
+	struct FAcceptedQuestDelivery
+	{
+		/** 상태 배열 위치 */
+		int32 QuestIndex = INDEX_NONE;
+
+		/** 제출 조건 판정에 사용한 퀘스트 원본 */
+		UMD_QuestDefinition* Definition = nullptr;
+	};
+
+	FPrimaryAssetId QuestDefinitionId = SubmittedItem->QuestDefinitionId;
+	TArray<FAcceptedQuestDelivery> AcceptedMainDeliveries;
+	TArray<FAcceptedQuestDelivery> AcceptedRepeatDeliveries;
+
+	for (int32 QuestIndex = 0; QuestIndex < MainQuests.Num(); ++QuestIndex)
+	{
+		FMD_MainQuestState& QuestState = MainQuests[QuestIndex];
+		if (QuestState.IsActive() == false || QuestState.DefinitionId != QuestDefinitionId)
+		{
+			continue;
+		}
+
+		UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		// 포인터 검증 이후에만 현재 단계와 납품 조건을 순서대로 평가하기 위한 결과
+		bool bIsDefinitionValid = IsValid(Definition);
+		if (bIsDefinitionValid == false)
+		{
+			continue;
+		}
+
+		bool bHasCurrentPhase = Definition->HasPhase(QuestState.CurrentPhaseIndex);
+		if (bHasCurrentPhase == false)
+		{
+			continue;
+		}
+
+		bool bAcceptsQuestItem = Definition->AcceptsQuestItem(QuestState.CurrentPhaseIndex, SubmittedItem);
+		if (bAcceptsQuestItem == false)
+		{
+			continue;
+		}
+
+		AcceptedMainDeliveries.Add({ QuestIndex, Definition });
+	}
+
+	for (int32 QuestIndex = 0; QuestIndex < RepeatQuests.Num(); ++QuestIndex)
+	{
+		FMD_RepeatQuestState& QuestState = RepeatQuests[QuestIndex];
+		if (QuestState.IsActive() == false || QuestState.DefinitionId != QuestDefinitionId)
+		{
+			continue;
+		}
+
+		UMD_QuestDefinition* Definition = GetRepeatQuestDefinition(QuestState);
+		// 유효 원본만 단계 완료와 샘플 수락 여부를 순서대로 평가하기 위한 결과
+		bool bIsDefinitionValid = IsValid(Definition);
+		if (bIsDefinitionValid == false)
+		{
+			continue;
+		}
+
+		bool bIsObjectiveComplete = Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress);
+		if (bIsObjectiveComplete == true)
+		{
+			continue;
+		}
+
+		bool bAcceptsQuestItem = Definition->AcceptsQuestItem(QuestState.CurrentPhaseIndex, SubmittedItem);
+		if (bAcceptsQuestItem == false)
+		{
+			continue;
+		}
+
+		AcceptedRepeatDeliveries.Add({ QuestIndex, Definition });
+	}
+
+	// 제출 액터 제거 실패 시 사전 판정 결과를 적용하지 않는 처리
+	bOutDelivered = SubmittedItem->Destroy();
+	if (bOutDelivered == false)
+	{
+		return bOutDelivered;
 	}
 
 	bool bChanged = false;
-
-	for (FMD_MainQuestState& QuestState : MainQuests)
+	for (FAcceptedQuestDelivery& Delivery : AcceptedMainDeliveries)
 	{
-		if (QuestState.IsActive() == false || DoesDeliveryMatch(QuestState.Definition, GradeTag, bIntact) == false)
+		if (MainQuests.IsValidIndex(Delivery.QuestIndex) == false || IsValid(Delivery.Definition) == false)
 		{
 			continue;
 		}
 
+		FMD_MainQuestState& QuestState = MainQuests[Delivery.QuestIndex];
+		UMD_QuestDefinition* Definition = Delivery.Definition;
 		++QuestState.CurrentProgress;
 		bChanged = true;
 
-		if (QuestState.CurrentProgress >= QuestState.Definition.RequiredCount)
+		int32 RequiredCount = Definition->GetRequiredCount(QuestState.CurrentPhaseIndex);
+		if (QuestState.CurrentProgress >= RequiredCount)
 		{
-			QuestState.Status = EMD_MainQuestStatus::Completed;
-			ApplyQuestReward(QuestState.Definition);
+			// 다단계 퀘스트의 경우 순서대로 진행하기 위한 전환
+			bool bHasNextPhase = Definition->HasPhase(QuestState.CurrentPhaseIndex + 1);
+			if (bHasNextPhase == true)
+			{
+				++QuestState.CurrentPhaseIndex;
+				QuestState.CurrentProgress = 0;
+			}
+			else
+			{
+				QuestState.Status = EMD_MainQuestStatus::Completed;
+				ApplyMainQuestReward(*Definition);
+			}
 		}
 	}
 
-	for (FMD_RepeatQuestState& QuestState : RepeatQuests)
+	for (FAcceptedQuestDelivery& Delivery : AcceptedRepeatDeliveries)
 	{
-		UMD_RepeatQuestDefinition* Definition = nullptr;
-		const FMD_RepeatQuestPhaseData* CurrentPhase = GetCurrentRepeatQuestPhase(QuestState, Definition);
-		if (QuestState.IsActive() == false || CurrentPhase == nullptr || QuestState.DefinitionId != QuestDefinitionId || Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress) == true || CurrentPhase->AcceptsSample(GradeTag, bIntact) == false)
+		if (RepeatQuests.IsValidIndex(Delivery.QuestIndex) == false || IsValid(Delivery.Definition) == false)
 		{
 			continue;
 		}
 
-		const int32 RequiredCount = FMath::Max(CurrentPhase->RequiredCount, 1);
+		FMD_RepeatQuestState& QuestState = RepeatQuests[Delivery.QuestIndex];
+		UMD_QuestDefinition* Definition = Delivery.Definition;
+		int32 RequiredCount = FMath::Max(Definition->GetRequiredCount(QuestState.CurrentPhaseIndex), 1);
 		QuestState.CurrentProgress = FMath::Min(QuestState.CurrentProgress + 1, RequiredCount);
 		bChanged = true;
 
 		if (QuestState.CurrentProgress >= RequiredCount)
 		{
 			// 다음 페이즈가 있으면 진행도를 초기화하고 마지막 페이즈에서는 수락 상태와 최대 진행도를 유지하는 처리
-			if (Definition->GetPhase(QuestState.CurrentPhaseIndex + 1) != nullptr)
+			bool bHasNextPhase = Definition->HasPhase(QuestState.CurrentPhaseIndex + 1);
+			if (bHasNextPhase == true)
 			{
 				++QuestState.CurrentPhaseIndex;
 				QuestState.CurrentProgress = 0;
@@ -458,12 +589,12 @@ void UMD_MerchantSubsystem::NotifySampleDelivered(const FPrimaryAssetId& QuestDe
 	{
 		OnMerchantStateChanged.Broadcast();
 	}
-
+	return bOutDelivered;
 }
 
 void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDefinitionId, EMD_SampleGrade Grade)
 {
-	const FGameplayTag GradeTag = GradeTagFromSampleGrade(Grade);
+	FGameplayTag GradeTag = GradeTagFromSampleGrade(Grade);
 	if (GradeTag.IsValid() == false)
 	{
 		return;
@@ -473,20 +604,58 @@ void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDe
 
 	for (FMD_MainQuestState& QuestState : MainQuests)
 	{
-		if (QuestState.IsActive() == false || DoesQuestTargetGrade(QuestState.Definition, GradeTag) == false)
+		// 파괴된 샘플과 직접 연결된 활성 메인 퀘스트만 실패 대상으로 인정하는 식별자 검사
+		if (QuestState.IsActive() == false || QuestState.DefinitionId != QuestDefinitionId)
 		{
 			continue;
 		}
 
-		FailMainQuest(QuestState, EMD_QuestFailureReason::Destroyed);
-		bChanged = true;
+		// 메인 퀘스트의 현재 단계와 파괴된 목표를 비교하기 위해 공통 Definition을 복원한다.
+		UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		// 유효한 Definition만 목표 일치 여부를 판정하도록 복원 결과를 확인한다.
+		bool bIsDefinitionValid = IsValid(Definition);
+		if (bIsDefinitionValid == false)
+		{
+			continue;
+		}
+
+		bool bTargetsQuestItem = Definition->TargetsQuestItem(QuestState.CurrentPhaseIndex, GradeTag);
+		if (bTargetsQuestItem == false)
+		{
+			continue;
+		}
+
+		// 유효한 Definition의 파괴 Penalty가 실제 적용된 경우에만 변경 상태를 기록하는 처리
+		bool bQuestFailed = FailMainQuest(QuestState, EMD_QuestFailureReason::Destroyed);
+		if (bQuestFailed == true)
+		{
+			bChanged = true;
+		}
 	}
 
 	for (FMD_RepeatQuestState& QuestState : RepeatQuests)
 	{
-		UMD_RepeatQuestDefinition* Definition = nullptr;
-		const FMD_RepeatQuestPhaseData* CurrentPhase = GetCurrentRepeatQuestPhase(QuestState, Definition);
-		if (QuestState.IsActive() == false || CurrentPhase == nullptr || QuestState.DefinitionId != QuestDefinitionId || Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress) == true || CurrentPhase->AcceptsSample(GradeTag, true) == false)
+		if (QuestState.IsActive() == false || QuestState.DefinitionId != QuestDefinitionId)
+		{
+			continue;
+		}
+
+		UMD_QuestDefinition* Definition = GetRepeatQuestDefinition(QuestState);
+		// 유효 원본만 완료 보호와 파괴 대상 수락 여부를 순서대로 평가하기 위한 결과
+		bool bIsDefinitionValid = IsValid(Definition);
+		if (bIsDefinitionValid == false)
+		{
+			continue;
+		}
+
+		bool bIsObjectiveComplete = Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress);
+		if (bIsObjectiveComplete == true)
+		{
+			continue;
+		}
+
+		bool bTargetsQuestItem = Definition->TargetsQuestItem(QuestState.CurrentPhaseIndex, GradeTag);
+		if (bTargetsQuestItem == false)
 		{
 			continue;
 		}
@@ -502,13 +671,13 @@ void UMD_MerchantSubsystem::NotifySampleDestroyed(const FPrimaryAssetId& QuestDe
 }
 
 /**
- * Day 마감 시 미완료 활성 퀘스트를 실패로 확정한다.
+ * Day 마감 시 해당 Day의 미완료 메인 퀘스트를 실패로 확정한다.
  *
  * 메인 퀘스트는 Day별 고정 라인이라 **다음날 재시도가 없다.** 마감 시점에 완료되지
  * 않았으면 그대로 실패다. 기획 09 §1.5의 "미회수 … 다음날 재시도 가능"은 파괴되지
  * 않은 **샘플 액터가 맵에 남는다**는 뜻이지(같은 표 "미회수 샘플" 행), 그 Day의 메인
  * 퀘스트가 다음날로 이월된다는 뜻이 아니다. 남은 샘플은 이후 Day의 퀘스트 조건을
- * 만족시킬 때 쓰인다.
+ * 만족시킬 때 쓰인다. 반복 퀘스트는 계약 단위이므로 이 함수에서 변경하지 않는다.
  */
 void UMD_MerchantSubsystem::ResolveActiveQuestsAtDayEnd(int32 CompletedDay)
 {
@@ -531,49 +700,40 @@ void UMD_MerchantSubsystem::ResolveActiveQuestsAtDayEnd(int32 CompletedDay)
 			continue;
 		}
 
-		FailMainQuest(QuestState, EMD_QuestFailureReason::NotDelivered);
-		bChanged = true;
-	}
-
-	for (FMD_RepeatQuestState& QuestState : RepeatQuests)
-	{
-		if (QuestState.IsActive() == false || IsRepeatQuestObjectiveComplete(QuestState) == true)
+		// 유효한 Definition의 미회수 Penalty가 실제 적용된 경우에만 변경 상태를 기록하는 처리
+		bool bQuestFailed = FailMainQuest(QuestState, EMD_QuestFailureReason::NotDelivered);
+		if (bQuestFailed == true)
 		{
-			continue;
+			bChanged = true;
 		}
-
-		FailRepeatQuest(QuestState, false);
-		bChanged = true;
 	}
 
 	if (bChanged == true)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 마감 — 미완료 퀘스트 실패 처리"), CompletedDay);
+		UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 마감 — 미완료 메인 퀘스트 실패 처리"), CompletedDay);
 		OnMerchantStateChanged.Broadcast();
 	}
 }
 
 void UMD_MerchantSubsystem::FinalizeContract()
 {
-	bool bChanged = false;
-
-	// 미완료 반복만 실패로 정리한다. 메인은 Day 마감 시 ResolveActiveQuestsAtDayEnd에서 처리한다.
+	// 미완료 반복만 실패로 정리하고 메인은 Day 마감 결과를 유지하기 위한 계약 정산
 	for (FMD_RepeatQuestState& QuestState : RepeatQuests)
 	{
 		if (QuestState.IsActive() == true && IsRepeatQuestObjectiveComplete(QuestState) == false)
 		{
 			// 계약 종료 미회수도 에셋에 정의된 미회수 패널티를 적용하는 실패 처리
 			FailRepeatQuest(QuestState, false);
-			bChanged = true;
 		}
 	}
 
+	// 같은 Site에 재진입해도 새 계약으로 판정하여 반복 퀘스트를 다시 추첨하기 위한 활성 계약 해제
+	CurrentSite = nullptr;
+	CurrentDay = 0;
+
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 종료"));
 
-	if (bChanged == true)
-	{
-		OnMerchantStateChanged.Broadcast();
-	}
+	OnMerchantStateChanged.Broadcast();
 }
 
 FMD_MerchantData UMD_MerchantSubsystem::GetMerchantSaveData() const
@@ -632,11 +792,42 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 		LoadedClearedSites.Add(ClearedSite);
 	}
 
+	// 저장된 PrimaryAssetId가 실제 메인 퀘스트 에셋에서 복원 가능한지 확인하는 검사
+	for (const FMD_MainQuestState& MainQuest : SaveData.MainQuests)
+	{
+		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(MainQuest.DefinitionId);
+		// 원본 포인터부터 단계까지 기존 단락 평가 순서로 검증하기 위한 결과
+		bool bIsDefinitionValid = IsValid(Definition);
+		if (bIsDefinitionValid == false)
+		{
+			return false;
+		}
+
+		bool bIsDefinitionDataValid = Definition->IsValidDefinition();
+		if (bIsDefinitionDataValid == false)
+		{
+			return false;
+		}
+
+		bool bHasCurrentPhase = Definition->HasPhase(MainQuest.CurrentPhaseIndex);
+		if (bHasCurrentPhase == false)
+		{
+			return false;
+		}
+	}
+
 	// 저장된 PrimaryAssetId와 페이즈 인덱스가 실제 반복 퀘스트 에셋에서 복원 가능한지 확인하는 검사
 	for (const FMD_RepeatQuestState& RepeatQuest : SaveData.RepeatQuests)
 	{
-		const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(RepeatQuest.DefinitionId);
-		if (IsValid(Definition) == false || Definition->GetPhase(RepeatQuest.CurrentPhaseIndex) == nullptr)
+		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(RepeatQuest.DefinitionId);
+		bool bIsDefinitionValid = IsValid(Definition);
+		if (bIsDefinitionValid == false)
+		{
+			return false;
+		}
+
+		bool bHasCurrentPhase = Definition->HasPhase(RepeatQuest.CurrentPhaseIndex);
+		if (bHasCurrentPhase == false)
 		{
 			return false;
 		}
@@ -645,6 +836,7 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 	// 모든 참조 검증 이후 경제·호감도·퀘스트 원장을 한 번에 교체하는 처리
 	bConsumableDiscountActive = SaveData.bConsumableDiscountActive;
 	Credits = SaveData.Credits;
+	DailyCreditTotals.Reset();
 	DebtBalance = SaveData.DebtBalance;
 	Affinity = SaveData.Affinity;
 	CurrentDay = SaveData.CurrentDay;
@@ -672,42 +864,36 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 	return true;
 }
 
-void UMD_MerchantSubsystem::RerollRepeatQuests()
+void UMD_MerchantSubsystem::DrawRepeatQuestsForContract()
 {
-	// 현장을 한 번 클리어해야 반복 퀘스트가 열린다. 첫 방문에는 메인만 보인다. (기획 09 §4)
-	if (IsValid(CurrentSite) == false || HasClearedCurrentSite() == false)
+	// 최초 진입을 포함해 현재 계약 현장의 반복 퀘스트 풀을 즉시 사용할 수 있는지 확인하는 검사
+	bool bIsCurrentSiteValid = IsValid(CurrentSite);
+	if (bIsCurrentSiteValid == false)
 	{
-		RepeatQuests.Reset();
 		return;
 	}
 
-	// 수락해 진행 중이거나 보상 수령을 기다리는 퀘스트는 남기고 종료된 카드를 교체하는 처리
-	RepeatQuests.RemoveAll([](const FMD_RepeatQuestState& Entry)
-		{
-			bool bRemoveEntry = Entry.Status == EMD_RepeatQuestStatus::Offered || Entry.Status == EMD_RepeatQuestStatus::Declined || Entry.Status == EMD_RepeatQuestStatus::Completed || Entry.Status == EMD_RepeatQuestStatus::Failed;
-			return bRemoveEntry;
-		});
-
-	// 잘못된 ID와 현재 들고 있는 퀘스트를 후보에서 제외하여 에셋 로드 실패와 중복 제시를 방지하는 처리
+	// 잘못된 ID와 목표가 없는 에셋을 후보에서 제외하여 유효한 계약 카드만 제공하는 처리
 	TArray<FPrimaryAssetId> Pool = CurrentSite->RepeatQuestPool;
-	Pool.RemoveAll([this](const FPrimaryAssetId& Entry)
+	Pool.RemoveAll([](const FPrimaryAssetId& Entry)
 		{
-			const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(Entry);
-			bool bRemoveEntry = Entry.IsValid() == false || IsValid(Definition) == false || Definition->Phases.Num() == 0;
-			if (bRemoveEntry == false)
+			if (Entry.IsValid() == false)
 			{
-				bRemoveEntry = RepeatQuests.ContainsByPredicate([&Entry](const FMD_RepeatQuestState& Existing) { return Existing.DefinitionId == Entry; });
+				return true;
 			}
 
+			const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(Entry);
+			bool bRemoveEntry = IsValid(Definition) == false || Definition->IsValidDefinition() == false;
 			return bRemoveEntry;
 		});
 
-	// 애셋에 Min > Max로 잘못 입력돼도 크래시하지 않게 정렬한다.
+	// 에셋의 최소·최대 입력 순서가 뒤바뀌어도 안전하게 추첨하기 위한 범위 보정
 	const int32 MinCount = FMath::Min(CurrentSite->MinRepeatCount, CurrentSite->MaxRepeatCount);
 	const int32 MaxCount = FMath::Max(CurrentSite->MinRepeatCount, CurrentSite->MaxRepeatCount);
 
-	const int32 TargetCount = FMath::Min(FMath::RandRange(MinCount, MaxCount), RepeatQuests.Num() + Pool.Num());
+	const int32 TargetCount = FMath::Min(FMath::RandRange(MinCount, MaxCount), Pool.Num());
 
+	// 동일 에셋의 중복 추첨을 막기 위해 선택한 후보를 풀에서 즉시 제거하는 처리
 	while (RepeatQuests.Num() < TargetCount && Pool.Num() > 0)
 	{
 		const int32 PickIndex = FMath::RandRange(0, Pool.Num() - 1);
@@ -721,83 +907,105 @@ void UMD_MerchantSubsystem::RerollRepeatQuests()
 	}
 }
 
-const FMD_RepeatQuestPhaseData* UMD_MerchantSubsystem::GetCurrentRepeatQuestPhase(const FMD_RepeatQuestState& QuestState, UMD_RepeatQuestDefinition*& OutDefinition) const
+UMD_QuestDefinition* UMD_MerchantSubsystem::GetRepeatQuestDefinition(const FMD_RepeatQuestState& QuestState) const
 {
-	// 복제·저장 상태에는 ID와 인덱스만 두고 원본 데이터는 Primary Data Asset에서 읽는 처리
-	OutDefinition = UMD_RepeatQuestDefinition::LoadDefinition(QuestState.DefinitionId);
-	const FMD_RepeatQuestPhaseData* OutPhase = IsValid(OutDefinition) == true ? OutDefinition->GetPhase(QuestState.CurrentPhaseIndex) : nullptr;
-	return OutPhase;
+	// 복제·저장 상태에는 역할과 진행 상태만 두고 공통 원본 데이터는 Primary Data Asset에서 읽는 처리
+	UMD_QuestDefinition* OutDefinition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	bool bIsDefinitionValid = IsValid(OutDefinition);
+	if (bIsDefinitionValid == true)
+	{
+		bool bHasCurrentPhase = OutDefinition->HasPhase(QuestState.CurrentPhaseIndex);
+		if (bHasCurrentPhase == false)
+		{
+			OutDefinition = nullptr;
+		}
+	}
+	return OutDefinition;
 }
 
 bool UMD_MerchantSubsystem::IsRepeatQuestObjectiveComplete(const FMD_RepeatQuestState& QuestState) const
 {
-	const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
 	bool bOutComplete = IsValid(Definition) == true && Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress) == true;
 	return bOutComplete;
 }
 
-void UMD_MerchantSubsystem::ApplyRepeatQuestReward(const UMD_RepeatQuestDefinition& Definition)
+void UMD_MerchantSubsystem::ApplyQuestRewardData(const FMD_QuestRewardData& RewardData, bool bPenalty)
 {
-	// 반복 퀘스트 에셋이 보유한 성공 크레딧을 별도 손상 비율 없이 그대로 적용하는 정산
-	AddCreditsInternal(Definition.SuccessReward.Credits);
+	// 잘못된 음수와 비정상 값이 적용 방향을 뒤집거나 원장을 오염시키지 않도록 하는 정산값 검증
+	int32 CreditsAmount = FMath::Max(RewardData.Credits, 0);
+	int32 ScoreAmount = FMath::Max(RewardData.Score, 0);
+	float AffinityAmount = FMath::IsFinite(RewardData.Affinity) == true ? FMath::Max(RewardData.Affinity, 0.0f) : 0.0f;
 
-	// 계약 평가 점수도 퀘스트 원본 에셋의 성공 수치와 동일하게 반영하는 정산
+	// 동일한 Definition 데이터를 성공은 가산하고 실패는 차감하기 위한 방향 변환
+	int32 CreditsDelta = bPenalty == true ? -CreditsAmount : CreditsAmount;
+	int32 ScoreDelta = bPenalty == true ? -ScoreAmount : ScoreAmount;
+	float AffinityDelta = bPenalty == true ? -AffinityAmount : AffinityAmount;
+	// 퀘스트 보상과 페널티를 실제 반영된 금액 기준으로 상세 보고서에 기록
+	AddCreditsInternal(EMD_DailyReportCategory::Quest, CreditsDelta);
+
+	// QuestDefinition에 명시된 점수를 성공·실패 원인 태그와 함께 서버 권위 평가 원장에 반영하는 처리
 	AMD_GameStateBase* GameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
-	if (IsValid(GameState) == true && Definition.SuccessReward.Score > 0)
+	if (IsValid(GameState) == true && ScoreAmount > 0)
 	{
-		GameState->AddScoreDelta(Definition.SuccessReward.Score);
+		FGameplayTag ScoreEventTag = bPenalty == true ? MDGameplayTags::Score_Penalty_Quest : MDGameplayTags::Score_Daily_Quest;
+		GameState->AddScoreEvent(ScoreEventTag, ScoreDelta, true);
 	}
 
-	// 상점 해금 범위를 유지하면서 에셋에 명시된 성공 호감도를 적용하는 정산
-	Affinity = FMath::Clamp(Affinity + Definition.SuccessReward.Affinity, -4.0f, 5.0f);
+	// QuestDefinition에 명시된 호감도만 상점 해금 범위 안에서 반영하는 처리
+	Affinity = FMath::Clamp(Affinity + AffinityDelta, -4.0f, 5.0f);
+}
+
+void UMD_MerchantSubsystem::ApplyRepeatQuestReward(const UMD_QuestDefinition& Definition)
+{
+	// 반복 퀘스트 Definition의 성공 Reward를 공통 정산 경로로 적용하는 처리
+	ApplyQuestRewardData(Definition.SuccessReward, false);
 	++QuestCompletions;
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 반복 퀘스트 완료: %s (크레딧 +%d | 점수 +%d | 호감도 +%.1f, 누적 성공 %d)"), *Definition.QuestName.ToString(), Definition.SuccessReward.Credits, Definition.SuccessReward.Score, Definition.SuccessReward.Affinity, QuestCompletions);
 }
 
-void UMD_MerchantSubsystem::ApplyRepeatQuestPenalty(const UMD_RepeatQuestDefinition& Definition, bool bDestroyed)
+void UMD_MerchantSubsystem::ApplyRepeatQuestPenalty(const UMD_QuestDefinition& Definition, bool bDestroyed)
 {
 	// 파괴 여부에 따라 에셋이 구분한 미회수 또는 파괴 패널티를 선택하는 처리
 	const FMD_QuestRewardData& Penalty = bDestroyed == true ? Definition.DestroyedFailureReward : Definition.UnrecoveredFailurePenalty;
-	AddCreditsInternal(-Penalty.Credits);
-
-	// 점수 패널티를 현재 계약의 서버 권위 평가 원장에 차감하는 처리
-	AMD_GameStateBase* GameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
-	if (IsValid(GameState) == true && Penalty.Score > 0)
-	{
-		GameState->AddScoreDelta(-Penalty.Score);
-	}
-
-	// 상인 관계 범위를 유지하면서 실패 호감도 크기를 차감하는 처리
-	Affinity = FMath::Clamp(Affinity - Penalty.Affinity, -4.0f, 5.0f);
+	ApplyQuestRewardData(Penalty, true);
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 반복 퀘스트 실패: %s (%s, 크레딧 -%d | 점수 -%d | 호감도 -%.1f)"), *Definition.QuestName.ToString(), bDestroyed == true ? TEXT("파괴") : TEXT("미회수"), Penalty.Credits, Penalty.Score, Penalty.Affinity);
 }
 
 void UMD_MerchantSubsystem::FailRepeatQuest(FMD_RepeatQuestState& QuestState, bool bDestroyed)
 {
-	// 모든 실패 진입점에서 목표 달성 후 보상 수령을 기다리는 퀘스트를 보호하는 최종 검사
-	if (QuestState.IsActive() == false || IsRepeatQuestObjectiveComplete(QuestState) == true)
+	if (QuestState.IsActive() == false)
 	{
 		return;
 	}
 
-	// 동일 실패 상태에 패널티가 중복 적용되지 않도록 상태 전환 직전에 한 번만 원본을 조회하는 처리
-	const UMD_RepeatQuestDefinition* Definition = UMD_RepeatQuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	// 완료 보호와 실패 패널티에 같은 원본을 재사용하여 중복 Asset Manager 조회를 피한다.
+	const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	if (IsValid(Definition) == true && Definition->IsObjectiveComplete(QuestState.CurrentPhaseIndex, QuestState.CurrentProgress) == true)
+	{
+		return;
+	}
+
+	// 패널티 적용 중 재진입하더라도 동일 퀘스트를 다시 정산하지 않기 위한 선행 실패 확정
+	QuestState.Status = EMD_RepeatQuestStatus::Failed;
+
 	if (IsValid(Definition) == true)
 	{
 		ApplyRepeatQuestPenalty(*Definition, bDestroyed);
 	}
-
-	QuestState.Status = EMD_RepeatQuestStatus::Failed;
 }
 
-void UMD_MerchantSubsystem::AddCreditsInternal(int32 Amount)
+void UMD_MerchantSubsystem::AddCreditsInternal(EMD_DailyReportCategory Category, int32 Amount)
 {
 	if (Amount == 0)
 	{
 		return;
 	}
+
+	// 실제 잔액 반영액만 Map 원장에 기록하기 위한 변경 전 잔액 저장
+	int32 CreditsBeforeChange = Credits;
 
 	// int32 범위 안에서 여러 보상의 합산 상한과 차감 하한을 지키기 위한 원장 보호
 	if (Amount > 0 && Credits > MAX_int32 - Amount)
@@ -812,55 +1020,48 @@ void UMD_MerchantSubsystem::AddCreditsInternal(int32 Amount)
 	{
 		Credits += Amount;
 	}
+
+	// 요청액이 아닌 실제 잔액 변동을 Enum 분류의 Map 합계에 누적
+	int32 AppliedAmount = Credits - CreditsBeforeChange;
+	int64& CategoryTotal = DailyCreditTotals.FindOrAdd(Category);
+	CategoryTotal += AppliedAmount;
 }
 
-bool UMD_MerchantSubsystem::DoesDeliveryMatch(
-	const FMD_QuestDefinitionData& Definition,
-	const FGameplayTag& GradeTag,
-	bool bIntact) const
+bool UMD_MerchantSubsystem::FailMainQuest(FMD_MainQuestState& QuestState, EMD_QuestFailureReason Reason)
 {
-	if (!Definition.IsValidDefinition())
-	{
-		return false;
-	}
+	bool bOutFailed = false;
 
-	const bool bIsRecovery =
-		Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverIntact
-		|| Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
-
-	if (!bIsRecovery)
-	{
-		return false;
-	}
-
-	if (Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverIntact && !bIntact)
-	{
-		return false;
-	}
-
-	return Definition.TargetGradeTag.MatchesTagExact(GradeTag);
-}
-
-void UMD_MerchantSubsystem::FailMainQuest(
-	FMD_MainQuestState& QuestState,
-	EMD_QuestFailureReason Reason)
-{
+	// 완료되거나 이미 실패한 퀘스트에 Penalty를 중복 적용하지 않기 위한 상태 검사
 	if (QuestState.Status != EMD_MainQuestStatus::Active)
 	{
-		return;
+		return bOutFailed;
 	}
 
+	// 상태 변경 전에 통합된 퀘스트 Definition과 실패 원인을 검증하기 위해 원본 데이터를 복원한다.
+	UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+	if (IsValid(Definition) == false || Definition->IsValidDefinition() == false)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Merchant] 원본 Definition이 유효하지 않아 메인 퀘스트 실패 처리를 건너뜁니다."));
+		return bOutFailed;
+	}
+
+	bool bSupportedFailureReason = Reason == EMD_QuestFailureReason::NotDelivered || Reason == EMD_QuestFailureReason::Destroyed;
+	if (bSupportedFailureReason == false)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[Merchant] 지원하지 않는 메인 퀘스트 실패 원인을 건너뜁니다: %s"), *StaticEnum<EMD_QuestFailureReason>()->GetNameStringByValue(static_cast<int64>(Reason)));
+		return bOutFailed;
+	}
+
+	// 검증을 통과한 퀘스트만 실패 상태로 전환하고 원인별 Definition Penalty를 한 번 적용하는 처리
 	QuestState.Status = EMD_MainQuestStatus::Failed;
 	QuestState.FailureReason = Reason;
+	const FMD_QuestRewardData& Penalty = Reason == EMD_QuestFailureReason::Destroyed ? Definition->DestroyedFailureReward : Definition->UnrecoveredFailurePenalty;
+	ApplyQuestRewardData(Penalty, true);
+	bOutFailed = true;
 
-	if (QuestState.Definition.IsValidDefinition())
-	{
-		UE_LOG(LogTemp, Log, TEXT("[Merchant] 메인 퀘스트 실패: %s (%s)"),
-			*QuestState.Definition.QuestName.ToString(),
-			*StaticEnum<EMD_QuestFailureReason>()->GetNameStringByValue(static_cast<int64>(Reason)));
-	}
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] 메인 퀘스트 실패: %s (%s, 크레딧 -%d | 점수 -%d | 호감도 -%.1f)"), *Definition->QuestName.ToString(), *StaticEnum<EMD_QuestFailureReason>()->GetNameStringByValue(static_cast<int64>(Reason)), Penalty.Credits, Penalty.Score, Penalty.Affinity);
 
-	// TODO(김동연): `09` §1.5 실패 점수·호감도 감점을 여기서 적용한다.
+	return bOutFailed;
 }
 
 FGameplayTag UMD_MerchantSubsystem::GradeTagFromSampleGrade(EMD_SampleGrade Grade)
@@ -877,49 +1078,24 @@ FGameplayTag UMD_MerchantSubsystem::GradeTagFromSampleGrade(EMD_SampleGrade Grad
 		/*ErrorIfNotFound=*/false);
 }
 
-bool UMD_MerchantSubsystem::DoesQuestTargetGrade(
-	const FMD_QuestDefinitionData& Definition,
-	const FGameplayTag& GradeTag) const
+void UMD_MerchantSubsystem::ApplyMainQuestReward(const UMD_QuestDefinition& Definition)
 {
-	if (!Definition.IsValidDefinition() || !GradeTag.IsValid())
-	{
-		return false;
-	}
-
-	const bool bIsRecovery =
-		Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverIntact
-		|| Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
-
-	return bIsRecovery && Definition.TargetGradeTag.MatchesTagExact(GradeTag);
-}
-
-void UMD_MerchantSubsystem::ApplyQuestReward(const FMD_QuestDefinitionData& Definition)
-{
-	if (!Definition.IsValidDefinition())
+	if (Definition.IsValidDefinition() == false)
 	{
 		return;
 	}
 
-	int32 Payout = (Definition.ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged)
-		? Definition.RewardCredits / 2
-		: Definition.RewardCredits;
-
-	// 반복 퀘스트 호감도 보상 범위에서 서버가 선택하는 0.1 단위 임의 보상
-	int32 AffinityRewardStep = FMath::RandRange(1, 2);
-	float AffinityReward = AffinityRewardStep * 0.1f;
-
-	AddCreditsInternal(Payout);
-	// 퀘스트 완료 보상이 상점 해금 범위를 벗어나지 않도록 호감도 반영
-	Affinity = FMath::Clamp(Affinity + AffinityReward, -4.0f, 5.0f);
+	// 메인 퀘스트 Definition의 성공 Reward를 손상 비율 등의 별도 계산 없이 적용하는 처리
+	ApplyQuestRewardData(Definition.SuccessReward, false);
 	++QuestCompletions;
 
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] 퀘스트 완료: %s (크레딧 +%d  |  호감도 +%.1f, 누적 성공 %d)"),
-		*Definition.QuestName.ToString(), Payout, AffinityReward, QuestCompletions);
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] 메인 퀘스트 완료: %s (크레딧 +%d | 점수 +%d | 호감도 +%.1f, 누적 성공 %d)"), *Definition.QuestName.ToString(), Definition.SuccessReward.Credits, Definition.SuccessReward.Score, Definition.SuccessReward.Affinity, QuestCompletions);
 }
 
 void UMD_MerchantSubsystem::ResetContract()
 {
 	Credits = 0;
+	DailyCreditTotals.Reset();
 	DebtBalance = 0;
 	Affinity = 0.0f;
 	CurrentSite = nullptr;

@@ -38,6 +38,10 @@
 #include "GameplayAbilitySpec.h"
 #include "GameplayTagContainer.h"
 #include "Kismet/GameplayStatics.h"
+#include "Net/UnrealNetwork.h"
+#include "NiagaraComponent.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 
 namespace
 {
@@ -50,6 +54,10 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 {
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
+	// 1인칭 팔·도구 배치는 스켈레탈 메시의 애니메이션 평가가 끝난 뒤에 해야 한다.
+	// 기본 TG_PrePhysics 로 두면 이번 프레임 포즈가 아직 없어서 소켓 트랜스폼과
+	// 도구 회전을 한 프레임 늦게 읽고, 마우스를 드래그할 때 그 지연이 흔들림으로 보인다.
+	PrimaryActorTick.TickGroup = TG_PostUpdateWork;
 
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = true;
@@ -92,7 +100,10 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 
 	FirstPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(
 		TEXT("FirstPersonToolMesh"));
-	FirstPersonToolMesh->SetupAttachment(FirstPersonMesh, ToolAttachSocketName);
+	// 팔로워 메시의 소켓에 붙이면 부착 시스템이 신뢰할 수 없는 소켓 트랜스폼으로
+	// 도구를 배치하고, 그 위에 UpdateFirstPersonToolTransform 이 다시 배치하면서
+	// 두 힘이 프레임마다 경쟁한다. 값을 직접 넣는 피벗에 붙여 부모를 확정한다.
+	FirstPersonToolMesh->SetupAttachment(FirstPersonArmsPivot);
 	FirstPersonToolMesh->SetOnlyOwnerSee(true);
 	FirstPersonToolMesh->SetOwnerNoSee(false);
 	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
@@ -201,6 +212,14 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 		bHasScrapeAnimationBladeDirection = false;
 	}
 
+	if (!Active)
+	{
+		// 긁기가 끝나면 유지 중이던 twist 를 버린다. 다음 스트로크가 다른 면에서
+		// 시작될 수 있으므로 이전 각을 물려받으면 안 된다.
+		LastScrapeAnimationTwistDegrees = 0.0f;
+		bHasScrapeAnimationTwist = false;
+	}
+
 	const UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
 		? EquipHotbarComponent->GetCurrentTool()
 		: nullptr;
@@ -285,16 +304,26 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 			ScrapeAnimationToolTwistAxis).GetSafeNormal();
 		const FVector ReferenceBladeDirection = BaseToolRotation.RotateVector(
 			ScrapeAnimationBladeReferenceDirection).GetSafeNormal();
-		const FVector ReferenceOnBladePlane = FVector::VectorPlaneProject(
+		// 투영 전 길이를 남겨 둔다. 그 길이가 스트로크 방향과 날 긴 축이 이루는
+		// 각의 sin 이고, 특이점에 얼마나 가까운지를 재는 유일한 척도다.
+		const FVector ReferenceProjected = FVector::VectorPlaneProject(
 			ReferenceBladeDirection,
-			ToolForwardAxis).GetSafeNormal();
-		const FVector TargetOnBladePlane = FVector::VectorPlaneProject(
+			ToolForwardAxis);
+		const FVector TargetProjected = FVector::VectorPlaneProject(
 			SocketSpaceBladeDirection,
-			ToolForwardAxis).GetSafeNormal();
+			ToolForwardAxis);
+		// 스트로크가 날 축과 거의 평행하면 축 주위 twist 자체가 정의되지 않는다.
+		// 이 구간에서 계산을 시도하면 각이 요동치고, IsNearlyZero(1e-4)로만 걸러
+		// 내면 그 임계값에 닿기 훨씬 전부터 값이 흔들린 뒤 AttachOffset 으로
+		// 스냅한다. 예방용 가드다 — 실측(투영 0.95~0.98)에서는 이 구간에
+		// 들어가지 않았고, 확인된 떨림 원인은 GetToolAttachTransform 쪽이었다.
 		if (!ToolForwardAxis.IsNearlyZero()
-			&& !ReferenceOnBladePlane.IsNearlyZero()
-			&& !TargetOnBladePlane.IsNearlyZero())
+			&& ReferenceProjected.Size() > ScrapeBladeTwistMinProjection
+			&& TargetProjected.Size() > ScrapeBladeTwistMinProjection)
 		{
+			const FVector ReferenceOnBladePlane =
+				ReferenceProjected.GetSafeNormal();
+			const FVector TargetOnBladePlane = TargetProjected.GetSafeNormal();
 			const float CosAngle = FMath::Clamp(FVector::DotProduct(
 				ReferenceOnBladePlane,
 				TargetOnBladePlane), -1.0f, 1.0f);
@@ -303,10 +332,17 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 				FVector::CrossProduct(
 					ReferenceOnBladePlane,
 					TargetOnBladePlane));
-			const float TwistDegrees = FMath::RadiansToDegrees(
+			LastScrapeAnimationTwistDegrees = FMath::RadiansToDegrees(
 				FMath::Atan2(SinAngle, CosAngle));
+			bHasScrapeAnimationTwist = true;
+		}
+
+		// 특이점 구간에서는 직전에 정의된 twist 를 그대로 유지한다. 되돌리지
+		// 않는 것이 요점이다 — 정의되지 않는 동안은 마지막 각이 가장 옳다.
+		if (bHasScrapeAnimationTwist && !ToolForwardAxis.IsNearlyZero())
+		{
 			const FQuat TwistRotation(ToolForwardAxis, FMath::DegreesToRadians(
-				TwistDegrees));
+				LastScrapeAnimationTwistDegrees));
 			TargetToolRotation = (TwistRotation
 				* BaseToolRotation.Quaternion()).Rotator();
 			// ABP의 upperarm_r 입력은 기존에도 Pitch/Yaw swing이었다. 날 축의
@@ -325,8 +361,11 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 		10.0f);
 	if (IsValid(ThirdPersonToolMesh))
 	{
-		ThirdPersonToolMesh->SetRelativeRotation(
-			ScrapeAnimationToolRelativeRotation);
+		// 회전만 쓰면 그립 소켓 보정이 빠진 값이 남는다. RefreshScrapeLoadVisual
+		// 과 같은 합성 결과를 써서 두 경로가 같은 값을 쓰게 한다.
+		ThirdPersonToolMesh->SetRelativeTransform(GetToolAttachTransform(
+			ThirdPersonToolMesh->GetStaticMesh(),
+			CurrentTool));
 	}
 }
 
@@ -465,6 +504,7 @@ void AMD_Character::Tick(float DeltaSeconds)
 	Super::Tick(DeltaSeconds);
 
 	UpdateFirstPersonArms(DeltaSeconds);
+	UpdateFirstPersonToolTransform();
 }
 
 void AMD_Character::RefreshFirstPersonArmsTick()
@@ -497,6 +537,44 @@ void AMD_Character::BindFirstPersonArmsToBodyPose()
 	}
 }
 
+void AMD_Character::UpdateFirstPersonToolTransform()
+{
+	const USkeletalMeshComponent* BodyMesh = GetMesh();
+	if (!IsValid(FirstPersonToolMesh) || !IsValid(FirstPersonMesh) || !IsValid(BodyMesh)
+		|| !IsLocallyControlled())
+	{
+		return;
+	}
+
+	if (!BodyMesh->DoesSocketExist(ToolAttachSocketName))
+	{
+		return;
+	}
+
+	const UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
+		? EquipHotbarComponent->GetCurrentTool()
+		: nullptr;
+
+	// 본체가 확정한 소켓 자세를 컴포넌트 공간으로 받아, 1인칭 팔이 놓인 자리에
+	// 그대로 얹는다. 팔로워가 자식 트랜스폼을 갱신하지 않는 문제를 우회한다.
+	const FTransform SocketLocal =
+		BodyMesh->GetSocketTransform(ToolAttachSocketName, RTS_Component);
+	// 날 축 roll 은 GetToolAttachTransform 안에 이미 들어 있다. 3인칭 메시의
+	// 상대 회전을 읽어 오면 안 된다 — 그 컴포넌트는 블레이드 갱신과
+	// RefreshScrapeLoadVisual 두 곳이 쓰는 경쟁 상태이고, 되돌려진 프레임을
+	// 집으면 AttachOffset 으로 튀어 1인칭에서만 떨림으로 보인다.
+	const FTransform Offset =
+		GetToolAttachTransform(FirstPersonToolMesh->GetStaticMesh(), CurrentTool);
+
+	// 부모가 피벗(값이 확정적인 SceneComponent)이므로 월드로 지정해도 역산 기준이
+	// 흔들리지 않는다. 컴포넌트 계층이 어떻게 구성돼 있든 결과가 같도록
+	// 1인칭 팔의 월드 트랜스폼에서 곧바로 합성한다.
+	//   도구 →AttachOffset→ 본체 컴포넌트 공간 소켓 → 1인칭 팔 월드
+	FirstPersonToolMesh->SetWorldTransform(
+		Offset * SocketLocal * FirstPersonMesh->GetComponentTransform());
+
+}
+
 void AMD_Character::UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget)
 {
 	if (!IsValid(FirstPersonArmsPivot) || !IsValid(Camera) || !IsLocallyControlled())
@@ -504,6 +582,9 @@ void AMD_Character::UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget
 		return;
 	}
 
+	// 헤라 포커스 중에도 컨트롤 회전이 함께 잠긴다(측정으로 확인: 포커스 구간에서
+	// 컨트롤 회전과 카메라 최종 회전이 동일하고 둘 다 프레임 간 변화 0).
+	// 그래서 별도의 뷰 회전 조회 없이 컨트롤 회전만 따라가면 된다.
 	const FRotator TargetRotation = GetControlRotation() + FirstPersonArmsRotationOffset;
 	const FVector TargetLocation =
 		Camera->GetComponentLocation() + TargetRotation.RotateVector(FirstPersonArmsOffset);
@@ -637,6 +718,7 @@ void AMD_Character::CalcCamera(
 	{
 		ScrapeToolComponent->ApplyScrapeFocusCameraView(OutResult);
 	}
+
 }
 
 void AMD_Character::OnRep_Controller()
@@ -1363,15 +1445,15 @@ void AMD_Character::RefreshToolMesh()
 				: NAME_None;
 	};
 	const FName ThirdPersonSocketName = ResolveAttachSocket(GetMesh());
-	const FName FirstPersonSocketName = ResolveAttachSocket(FirstPersonMesh);
 
 	// 소켓의 위치·회전·스케일을 그대로 따르도록 스냅 부착
 	ThirdPersonToolMesh->AttachToComponent(
 		GetMesh(), FAttachmentTransformRules::SnapToTargetIncludingScale, ThirdPersonSocketName);
+	// 1인칭 도구의 배치는 UpdateFirstPersonToolTransform 이 매 프레임 계산한다.
+	// 부모는 값이 확정적인 피벗이어야 한다.
 	FirstPersonToolMesh->AttachToComponent(
-		FirstPersonMesh,
-		FAttachmentTransformRules::SnapToTargetIncludingScale,
-		FirstPersonSocketName);
+		FirstPersonArmsPivot,
+		FAttachmentTransformRules::KeepRelativeTransform);
 
 	const FTransform AttachOffset = IsValid(CurrentTool)
 		? CurrentTool->AttachOffset
@@ -1427,8 +1509,10 @@ void AMD_Character::RefreshScrapeLoadVisual()
 	}
 
 	const bool bShowTool = IsValid(NewToolMesh);
+	// 1인칭 도구도 본체 소켓에서 배치를 유도하므로 그쪽 유무로 판정한다.
 	const bool bHasFirstPersonSocket = IsValid(FirstPersonMesh)
-		&& FirstPersonMesh->DoesSocketExist(FirstPersonToolMesh->GetAttachSocketName());
+		&& IsValid(GetMesh())
+		&& GetMesh()->DoesSocketExist(ToolAttachSocketName);
 	const bool bHasThirdPersonSocket = IsValid(GetMesh())
 		&& GetMesh()->DoesSocketExist(ThirdPersonToolMesh->GetAttachSocketName());
 	FirstPersonToolMesh->SetStaticMesh(NewToolMesh);
@@ -1445,7 +1529,12 @@ FTransform AMD_Character::GetToolAttachTransform(
 	const UStaticMesh* ToolMesh,
 	const UMD_ToolDefinition* Tool) const
 {
-	const FTransform Offset = IsValid(Tool) ? Tool->AttachOffset : FTransform::Identity;
+	FTransform Offset = IsValid(Tool) ? Tool->AttachOffset : FTransform::Identity;
+	// 긁기 중 날 축 twist 는 AttachOffset 의 회전을 대체한다. 이 함수가 도구
+	// 부착 자세의 유일한 출처여야 한다 — 3인칭 메시의 상대 트랜스폼을 읽어
+	// 재사용하면 RefreshScrapeLoadVisual 이 같은 값을 되돌리는 것과 경쟁해
+	// 프레임마다 AttachOffset 으로 튄다.
+	Offset.SetRotation(ScrapeAnimationToolRelativeRotation.Quaternion());
 
 	if (!IsValid(ToolMesh) || ToolGripSocketName.IsNone())
 	{
@@ -1467,6 +1556,76 @@ FTransform AMD_Character::GetToolAttachTransform(
 	// 반대로 작아져서 조작이 직관과 어긋난다. 크기는 AttachOffset 으로 준다.
 	const FTransform GripLocal(Grip->RelativeRotation, Grip->RelativeLocation);
 	return GripLocal.Inverse() * Offset;
+}
+
+void AMD_Character::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AMD_Character, bCutterVFXActive);
+}
+
+void AMD_Character::SetCutterVFXActive(bool bActive)
+{
+	if (bCutterVFXActive == bActive)
+	{
+		return;
+	}
+
+	bCutterVFXActive = bActive;
+	RefreshCutterVFX();
+}
+
+void AMD_Character::OnRep_CutterVFXActive()
+{
+	RefreshCutterVFX();
+}
+
+void AMD_Character::RefreshCutterVFX()
+{
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	if (!bCutterVFXActive)
+	{
+		// 즉시 파괴하지 않고 비활성만 해 잔여 파티클이 자연 소멸하게 둔다
+		if (IsValid(CutterVFXComponent))
+		{
+			CutterVFXComponent->Deactivate();
+		}
+		return;
+	}
+
+	if (!CutterCutEffect)
+	{
+		return;
+	}
+
+	UStaticMeshComponent* AttachMesh = IsLocallyControlled() ? FirstPersonToolMesh : ThirdPersonToolMesh;
+	if (!IsValid(AttachMesh))
+	{
+		return;
+	}
+
+	// 빙의가 바뀌어 부착 대상 시점 메시가 달라졌으면 새로 붙인다
+	if (IsValid(CutterVFXComponent) && CutterVFXComponent->GetAttachParent() != AttachMesh)
+	{
+		CutterVFXComponent->DestroyComponent();
+		CutterVFXComponent = nullptr;
+	}
+
+	if (IsValid(CutterVFXComponent))
+	{
+		CutterVFXComponent->Activate(true);
+		return;
+	}
+
+	CutterVFXComponent = UNiagaraFunctionLibrary::SpawnSystemAttached(
+		CutterCutEffect, AttachMesh, CutterVFXSocketName,
+		FVector::ZeroVector, FRotator::ZeroRotator,
+		EAttachLocation::SnapToTarget, /*bAutoDestroy=*/false);
 }
 
 void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)

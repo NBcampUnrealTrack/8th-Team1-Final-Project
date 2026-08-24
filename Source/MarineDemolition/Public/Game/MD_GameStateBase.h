@@ -4,6 +4,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameplayTagContainer.h"
 #include "Types/Score/MD_ScoreTypes.h"
+#include "Types/Travel/MD_TravelTypes.h"
 #include "MD_GameStateBase.generated.h"
 
 class UMD_ScoreTableData;
@@ -71,12 +72,18 @@ public:
     UFUNCTION(BlueprintPure, Category = "Score")
     int32 GetScore() const { return Score; }
 
+    // 서버 점수 원장에서 지정 Day에 발생한 증감만 합산하여 일일 보고서에 제공하는 함수
+    int32 GetScoreForDay(int32 Day) const;
+
+    // 현재 Day의 Enum Map 점수 원장을 네트워크 전달용 항목 배열로 반환하는 함수
+    TArray<FMD_DailyReportValue> GetDailyScoreTotals() const;
+
     UPROPERTY(BlueprintAssignable, Category = "Score")
     FMD_OnScoreChanged OnScoreChanged;
 
-    // 점수 이벤트 발생. 단가는 ScoreTable에서 조회, Count는 건수 (미복귀 2인 등)
-    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")
-    void AddScoreEvent(FGameplayTag EventTag, int32 Count = 1);
+    // 점수 이벤트 발생. 기본값은 ScoreTable 단가×Count이며, 계산 완료된 점수는 Count를 최종 증감값으로 사용
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score", meta = (AdvancedDisplay = "bUseCountAsDelta"))
+    void AddScoreEvent(FGameplayTag EventTag, int32 Count = 1, bool bUseCountAsDelta = false);
 
     // 샘플 점수 이벤트 발생 (등급×상태 단가)
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")
@@ -122,6 +129,14 @@ public:
 
     UFUNCTION(BlueprintPure, Category = "Day")
     int32 GetContractCrewCount() const { return ContractCrewCount; }
+
+    // 출발 시 선택한 난이도를 계약 전체 점검 기준에 사용하도록 고정하는 설정
+    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")
+    void SetContractDifficulty(EMD_Difficulty Difficulty);
+
+    // HUD와 점검 판정이 동일한 계약 난이도를 조회하기 위한 접근 함수
+    UFUNCTION(BlueprintPure, Category = "Score")
+    EMD_Difficulty GetContractDifficulty() const { return ContractDifficulty; }
 
     // 비상 4일차 진행 여부. Day 간 스냅샷으로 유지
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Day")
@@ -174,6 +189,9 @@ private:
     UPROPERTY(Transient)
     TArray<FMD_ScoreEntry> ScoreLog;
 
+    // 현재 Day 점수를 정산 분류별로 누적하는 서버 Map 원장
+    TMap<EMD_DailyReportCategory, int64> DailyScoreTotals;
+
     UPROPERTY(ReplicatedUsing = OnRep_InspectionReport)
     FMD_InspectionReport LastInspectionReport;
 
@@ -187,6 +205,10 @@ private:
     UPROPERTY(Replicated)
     int32 ContractCrewCount = 0;
 
+    // 출발 시 서버가 확정하고 Day 전환과 저장 이후에도 유지하는 계약 난이도
+    UPROPERTY(Replicated)
+    EMD_Difficulty ContractDifficulty = EMD_Difficulty::Standard;
+
     // 비상 4일차 여부
     UPROPERTY(Replicated)
     bool bEmergencyDay = false;
@@ -198,6 +220,12 @@ private:
     void OnRep_WithdrawalPhase();
 
     void HandleWithdrawalPhaseChanged();
+
+    // 점수 이벤트 태그를 공통 일일 정산 Enum으로 변환하는 함수
+    EMD_DailyReportCategory ResolveScoreCategory(FGameplayTag EventTag) const;
+
+    // 점수 변경과 로그 및 Enum Map 원장을 한 경로에서 기록하는 함수
+    void RecordScore(EMD_DailyReportCategory Category, FGameplayTag EventTag, int32 Delta);
 
     UFUNCTION()
     void OnRep_Score();

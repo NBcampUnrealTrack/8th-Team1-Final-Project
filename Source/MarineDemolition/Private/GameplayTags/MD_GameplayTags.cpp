@@ -201,7 +201,16 @@ namespace MDGameplayTags
 		Score_Penalty_PipeLeakTick,
 		"Score.Penalty.PipeLeakTick",
 		"수도 미밀봉 오염 확산 30초당");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Score_Penalty_Quest,
+		"Score.Penalty.Quest",
+		"상인 퀘스트 실패");
 
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Interaction_Cuttable,
+		"Interaction.Cuttable",
+		"절단기로 자를 수 있는 대상. 이 태그가 있어야 절단 몽타주가 재생된다");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		State_Swimming,
