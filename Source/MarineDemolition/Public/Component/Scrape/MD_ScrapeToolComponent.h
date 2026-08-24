@@ -519,25 +519,6 @@ protected:
 		meta = (ClampMin = "0.0", ClampMax = "1.0", Units = "s"))
 	float ScrapeLoopIdleGraceSeconds = 0.12f;
 
-	/**
-	 * 이미 긁어낸 면을 훑을 때의 지속음.
-	 *
-	 * 오염물이 남아 있는지 여부로 소리가 갈려야 플레이어가 "여기는 다 됐다"를
-	 * 화면을 보지 않고도 안다. 접촉 종류가 바뀌면 루프가 이 태그로 교체된다.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
-	FGameplayTag ScrapeBareLoopSoundTag;
-
-	/**
-	 * 마지막으로 오염물이 벗겨진 뒤 맨 벽면 소리로 넘어가기까지의 유예(초).
-	 *
-	 * 프레임마다 제거량이 0/1 로 튀기 때문에 즉시 전환하면 두 루프가 딸꾹거린다.
-	 * 이 시간 동안 아무것도 안 벗겨지면 "여기는 다 됐다" 로 판정한다.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback",
-		meta = (ClampMin = "0.0", ClampMax = "2.0", Units = "s"))
-	float ScrapeBareSwitchDelaySeconds = 0.25f;
-
 	/** 이 거리(cm) 이상 표면을 훑어야 드래그로 본다. 손떨림을 걸러낸다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback",
 		meta = (ClampMin = "0.0"))
@@ -549,10 +530,6 @@ protected:
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
 	FGameplayTag ContaminationScrapeSoundTag;
-
-	/** 이미 깨끗한 벽면을 긁었을 때 재생할 이벤트 태그. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
-	FGameplayTag BareSurfaceScrapeSoundTag;
 
 	/** 오염막 제거 접촉 위치에 생성할 파티클 (NS_Scrape_Contamination). 미지정 가능. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
@@ -1028,30 +1005,14 @@ private:
 	/** 직전 프레임의 경로 누적 길이 */
 	double LastObservedScrapePathArcLengthCm = 0.0;
 
-	/** 포화 상태에서 소재를 유지할지 판단할 때만 쓰는 접촉 종류 캐시 */
-	bool bLastScrapeContactWasBareSurfaceOnly = false;
-
-	/** 직전 프레임의 헤라 적재량. 증가분이 곧 "지금 걷어내고 있다" 는 신호다 */
-	float LastObservedScrapeLoad = 0.0f;
-
-	/**
-	 * 마지막으로 오염물이 실제로 벗겨진 시각.
-	 * 접촉 종류가 아니라 "제거가 일어났는가" 로 소재를 고르기 위한 기준이다.
-	 */
-	double LastContaminationRemovedWorldSeconds = -DBL_MAX;
-
-	/** 현재 재생 중인 루프의 태그. 접촉이 바뀌면 이 값과 비교해 교체한다 */
-	FGameplayTag ActiveScrapeLoopTag;
-
-	void StartScrapeLoopAudio(const FGameplayTag& LoopTag);
+	void StartScrapeLoopAudio();
 	void StopScrapeLoopAudio();
 
 	/** 드래그가 이어지는 동안에만 지속음을 유지한다 */
 	void UpdateScrapeLoopAudio();
 
 	/** bShowDebugFeedback 이 켜져 있으면 긁기 오디오 판정 상태를 화면에 찍는다 */
-	void DrawScrapeAudioDebug(
-		double Now, double Arc, double ArcDelta, bool bDragging, bool bBareSurface) const;
+	void DrawScrapeAudioDebug(double Now, double Arc, double ArcDelta, bool bDragging) const;
 
 	UPROPERTY(Transient)
 	EMD_ScrapeFocusState ScrapeFocusState = EMD_ScrapeFocusState::Free;

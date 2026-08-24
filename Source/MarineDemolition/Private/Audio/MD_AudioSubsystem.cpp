@@ -213,9 +213,19 @@ void UMD_AudioSubsystem::RebuildIndex()
 		});
 	}
 
+	// 소재를 지금 올려 둔다. 재생 순간에 로드가 걸리면 그 한 번이 굼뜨게 들린다
+	PreloadedSounds.Reset();
+	for (const FMD_AudioEntry& Entry : AllEntries)
+	{
+		if (USoundBase* Sound = Entry.Sound.LoadSynchronous())
+		{
+			PreloadedSounds.AddUnique(Sound);
+		}
+	}
+
 	bIndexBuilt = true;
-	UE_LOG(LogTemp, Log, TEXT("[MD_Audio] 이벤트 %d개 / 정의 %d건 인덱싱"),
-		EntriesByTag.Num(), AllEntries.Num());
+	UE_LOG(LogTemp, Log, TEXT("[MD_Audio] 이벤트 %d개 / 정의 %d건 인덱싱, 소재 %d개 선로드"),
+		EntriesByTag.Num(), AllEntries.Num(), PreloadedSounds.Num());
 }
 
 const FMD_AudioEntry* UMD_AudioSubsystem::ResolveEntry(const FGameplayTag& EventTag) const
