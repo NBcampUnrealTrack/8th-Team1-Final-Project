@@ -563,17 +563,22 @@ FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& Ho
 		static_cast<float>(Held->Bounds.SphereRadius) * HoldProbeRadiusScale);
 
 	// 폰과 다른 물리 프롭은 제외한다. 목표점을 막아야 할 건 월드 지오메트리뿐이다.
-	FCollisionObjectQueryParams ObjectParams;
-	ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
-	ObjectParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+	// 채널 스윕으로 양쪽 충돌 응답을 함께 확인해야 Overlap 감지 볼륨을 벽으로 오인하지 않는다.
+	FCollisionResponseParams ProbeResponses(ECR_Ignore);
+	ProbeResponses.CollisionResponse.SetResponse(
+		ECC_WorldStatic,
+		Held->GetCollisionResponseToChannel(ECC_WorldStatic));
+	ProbeResponses.CollisionResponse.SetResponse(
+		ECC_WorldDynamic,
+		Held->GetCollisionResponseToChannel(ECC_WorldDynamic));
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDHoldProbe), false, GetOwner());
 	QueryParams.AddIgnoredActor(Held->GetOwner());
 
 	FHitResult Hit;
-	const bool bBlocked = World->SweepSingleByObjectType(
-		Hit, Origin, Desired, FQuat::Identity, ObjectParams,
-		FCollisionShape::MakeSphere(ProbeRadius), QueryParams);
+	const bool bBlocked = World->SweepSingleByChannel(
+		Hit, Origin, Desired, FQuat::Identity, Held->GetCollisionObjectType(),
+		FCollisionShape::MakeSphere(ProbeRadius), QueryParams, ProbeResponses);
 
 	const FVector ToDesired = Desired - Origin;
 	const double DesiredDistance = ToDesired.Size();
