@@ -2,11 +2,10 @@
 
 
 #include "UI/Game/MD_ExpeditionStatusWidget.h"
+
+#include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
-#include "Components/Widget.h"
 #include "Game/MD_GameStateBase.h"
-#include "TimerManager.h"
-#include "Engine/World.h"
 
 void UMD_ExpeditionStatusWidget::NativeConstruct()
 {
@@ -42,45 +41,48 @@ void UMD_ExpeditionStatusWidget::NativeDestruct()
 
 void UMD_ExpeditionStatusWidget::UpdateStatusText()
 {
-    if (!IsValid(ScoreText) || !IsValid(GoalText))
+    // 현재 플레이 세션의 점수와 일차 정보를 가진 GameState를 조회한다.
+    UWorld* World = GetWorld();
+    AMD_GameStateBase* MDGameState = IsValid(World) == true ? World->GetGameState<AMD_GameStateBase>() : nullptr;
+    if (IsValid(MDGameState) == false)
     {
         return;
     }
 
-    const UWorld* World = GetWorld();
+    // 누적 평가 점수를 새 위젯의 본문과 그림자에 동일하게 표시한다.
+    int32 CurrentScore = MDGameState->GetScore();
+    FText CurrentScoreText = FText::AsNumber(CurrentScore);
+    SetTextPair(ScoreText, ScoreText_Shadow, CurrentScoreText);
 
-    if (!IsValid(World))
+    // 현재 일차에 난이도와 인원 및 경고 배율이 반영된 목표 점수를 계산한다.
+    int32 CurrentDay = MDGameState->GetCurrentDay();
+    int32 Threshold = MDGameState->GetInspectionThreshold(CurrentDay);
+
+    // 현재 일차의 목표 점수를 본문과 그림자에 동일하게 표시한다.
+    FText ThresholdText = Threshold == 0 ? FText::FromString(TEXT("-")) : FText::AsNumber(Threshold);
+    SetTextPair(GoalText, GoalText_Shadow, ThresholdText);
+
+    if (IsValid(ScoreProgress) == true)
     {
-        return;
+        // 정수 나눗셈으로 목표 미달 진행률이 0이 되지 않도록 실수 비율을 계산한다.
+        float ScorePercent = Threshold > 0 ? static_cast<float>(CurrentScore) / Threshold : 0;
+        // 음수 점수와 목표 초과 점수를 진행 막대의 유효 범위로 보정한다.
+        ScorePercent = FMath::Clamp(ScorePercent, 0.0f, 1.0f);
+        ScoreProgress->SetPercent(ScorePercent);
+    }
+}
+
+void UMD_ExpeditionStatusWidget::SetTextPair(UTextBlock* TextWidget, UTextBlock* ShadowWidget, FText Text)
+{
+    // 앞쪽 본문 TextBlock에 표시 내용을 적용한다.
+    if (IsValid(TextWidget) == true)
+    {
+        TextWidget->SetText(Text);
     }
 
-    const AMD_GameStateBase* MDGameState =
-        World->GetGameState<AMD_GameStateBase>();
-
-    if (!IsValid(MDGameState))
+    // 뒤쪽 그림자 TextBlock에도 같은 표시 내용을 적용한다.
+    if (IsValid(ShadowWidget) == true)
     {
-        return;
+        ShadowWidget->SetText(Text);
     }
-
-    ScoreText->SetText(FText::AsNumber(MDGameState->GetScore()));
-
-    // 경고 표시는 문자열 대신 별도 위젯 토글 (레이아웃 유지)
-    if (IsValid(WarningIndicator))
-    {
-        WarningIndicator->SetVisibility(MDGameState->IsInspectionWarned()
-            ? ESlateVisibility::HitTestInvisible
-            : ESlateVisibility::Collapsed);
-    }
-
-    const int32 Threshold =
-        MDGameState->GetInspectionThreshold(MDGameState->GetCurrentDay());
-
-    // 점검 없는 날(Day1)은 기준 표시 생략
-    if (Threshold <= 0)
-    {
-        GoalText->SetText(FText::FromString(TEXT("-")));
-        return;
-    }
-
-    GoalText->SetText(FText::AsNumber(Threshold));
 }
