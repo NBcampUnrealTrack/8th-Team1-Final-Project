@@ -1,17 +1,14 @@
 #include "World/Trash/MD_TrashBin.h"
 
-#include "Algo/Sort.h"
 #include "Audio/MD_AudioSubsystem.h"
-#include "Components/BoxComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
-#include "GameFramework/Pawn.h"
+#include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "World/Contamination/MD_WetContaminationPatch.h"
 #include "World/Trash/MD_TrashBinLiquidSloshVisualComponent.h"
-#include "World/Trash/MD_TrashBinSpillStreamVisualComponent.h"
 
 namespace MD_TrashBinSpillPrivate
 {
@@ -19,7 +16,6 @@ namespace MD_TrashBinSpillPrivate
 	constexpr double RewardTolerance = 1.0e-12;
 	constexpr double WetSurfaceOffsetCm = 0.15;
 	constexpr float CosmeticRimInsetCm = 6.0f;
-	const FName NoSpillSupportTag(TEXT("MD.NoSpillSupport"));
 
 	bool AreLedgerTotalsEqual(
 		TConstArrayView<FMD_ScrapeRecoveryLot> Lots,
@@ -41,22 +37,6 @@ namespace MD_TrashBinSpillPrivate
 		return Revision == MAX_int32 ? 0 : Revision + 1;
 	}
 
-	bool IsPointInsideContentsVolume(
-		const UBoxComponent* const ContentsVolume,
-		const FVector& WorldPoint)
-	{
-		if (!IsValid(ContentsVolume))
-		{
-			return false;
-		}
-
-		const FVector LocalPoint = ContentsVolume->GetComponentTransform()
-			.InverseTransformPosition(WorldPoint);
-		const FVector Extent = ContentsVolume->GetUnscaledBoxExtent();
-		return FMath::Abs(LocalPoint.X) <= Extent.X
-			&& FMath::Abs(LocalPoint.Y) <= Extent.Y
-			&& FMath::Abs(LocalPoint.Z) <= Extent.Z;
-	}
 }
 
 void AMD_TrashBin::HandleSpillMeshWake(
@@ -99,67 +79,13 @@ void AMD_TrashBin::HandleSpillMeshSleep(
 			SpillTuning);
 	if (LiquidState.LiquidUnits > 0.0
 		&& Tilt.bInputValid
-		&& Tilt.bMeetsAngle
-		&& !bTiltBlockedUntilUpright)
+		&& Tilt.bMeetsAngle)
 	{
-		// 넘어진 채 잠든 통도 계속 샌다. Actor Tick 대신 이 timer만 유지한다.
 		EnsureSpillSampleTimer();
 		return;
 	}
 
-	StopSpillSampleTimer(/*bResetTiltState=*/!Tilt.bMeetsAngle);
-}
-
-void AMD_TrashBin::HandleSpillMeshHit(
-	UPrimitiveComponent* const HitComponent,
-	AActor* const OtherActor,
-	UPrimitiveComponent* const OtherComponent,
-	const FVector NormalImpulse,
-	const FHitResult& Hit)
-{
-	(void)OtherActor;
-	(void)Hit;
-	if (!HasAuthority()
-		|| HitComponent != Mesh.Get()
-		|| !IsValid(OtherComponent)
-		|| bLiquidTransferInProgress
-		|| LiquidState.LiquidUnits <= 0.0
-		|| !SpillTuning.IsValid())
-	{
-		return;
-	}
-
-	const UWorld* const World = GetWorld();
-	if (!IsValid(World))
-	{
-		return;
-	}
-	const double Now = World->GetTimeSeconds();
-	const double SecondsSincePickup = LastPickupStartedWorldSeconds >= 0.0
-		? FMath::Max(0.0, Now - LastPickupStartedWorldSeconds)
-		: TNumericLimits<double>::Max();
-	const FMD_TrashBinImpactEvaluation Impact =
-		FMD_TrashBinSpillEvaluator::EvaluateImpact(
-			NormalImpulse.Size(),
-			SecondsSincePickup,
-			SpillTuning);
-	if (!Impact.bCanPulse)
-	{
-		return;
-	}
-
-	if (LastAcceptedImpactOtherComponent.Get() == OtherComponent
-		&& LastAcceptedImpactWorldSeconds >= 0.0
-		&& Now - LastAcceptedImpactWorldSeconds
-			< SpillTuning.ImpactDebounceSeconds)
-	{
-		return;
-	}
-
-	// 한 Chaos contact의 여러 Hit는 receiver 결과와 무관하게 먼저 묶는다.
-	LastAcceptedImpactWorldSeconds = Now;
-	LastAcceptedImpactOtherComponent = OtherComponent;
-	TryExecuteSpillPulse(EMD_TrashBinSpillTrigger::Impact);
+	StopSpillSampleTimer();
 }
 
 void AMD_TrashBin::EnsureSpillSampleTimer()
@@ -187,26 +113,11 @@ void AMD_TrashBin::EnsureSpillSampleTimer()
 	}
 }
 
-void AMD_TrashBin::StopSpillSampleTimer(const bool bResetTiltState)
+void AMD_TrashBin::StopSpillSampleTimer()
 {
 	if (UWorld* const World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(SpillSampleTimerHandle);
-	}
-	if (bResetTiltState)
-	{
-		ResetSustainedTiltState(/*bClearReceiverBlock=*/true);
-	}
-}
-
-void AMD_TrashBin::ResetSustainedTiltState(
-	const bool bClearReceiverBlock)
-{
-	TiltCandidateStartedWorldSeconds = -1.0;
-	NextSustainedPulseWorldSeconds = -1.0;
-	if (bClearReceiverBlock)
-	{
-		bTiltBlockedUntilUpright = false;
 	}
 }
 
@@ -223,7 +134,7 @@ void AMD_TrashBin::RefreshSpillSamplingAfterLiquidMutation()
 	}
 	else
 	{
-		StopSpillSampleTimer(/*bResetTiltState=*/true);
+		StopSpillSampleTimer();
 	}
 }
 
@@ -234,95 +145,46 @@ void AMD_TrashBin::SampleSpillTilt()
 		|| !IsValid(World)
 		|| !IsValid(Mesh.Get())
 		|| !LiquidState.IsValid(MaximumLiquidUnits)
-		|| LiquidState.LiquidUnits <= 0.0
 		|| !SpillTuning.IsValid())
 	{
-		StopSpillSampleTimer(/*bResetTiltState=*/true);
+		StopSpillSampleTimer();
+		return;
+	}
+	if (LiquidState.LiquidUnits <= 0.0)
+	{
+		StopSpillSampleTimer();
 		return;
 	}
 
-	const double Now = World->GetTimeSeconds();
-	const double HeldSeconds = TiltCandidateStartedWorldSeconds >= 0.0
-		? FMath::Max(0.0, Now - TiltCandidateStartedWorldSeconds)
-		: 0.0;
 	const FMD_TrashBinTiltEvaluation Tilt =
 		FMD_TrashBinSpillEvaluator::EvaluateTilt(
 			Mesh->GetUpVector(),
-			HeldSeconds,
+			0.0,
 			SpillTuning);
 	if (!Tilt.bInputValid)
 	{
-		StopSpillSampleTimer(/*bResetTiltState=*/true);
+		StopSpillSampleTimer();
 		return;
 	}
 
-	if (!Tilt.bMeetsAngle)
+	if (Tilt.bMeetsAngle)
 	{
-		ResetSustainedTiltState(/*bClearReceiverBlock=*/true);
-		if (!Mesh->IsAnyRigidBodyAwake() && !bCarryAccelerationActive)
-		{
-			StopSpillSampleTimer(/*bResetTiltState=*/false);
-		}
-		return;
+		TryExecuteSpillPulse(EMD_TrashBinSpillTrigger::SustainedTilt);
 	}
 
-	if (bTiltBlockedUntilUpright)
+	if (!Mesh->IsAnyRigidBodyAwake() && !bCarryAccelerationActive)
 	{
-		// 깨어 있는 동안에는 세워졌는지만 계속 본다. tipped+sleep이면 다음 Wake가 재평가한다.
-		if (!Mesh->IsAnyRigidBodyAwake())
-		{
-			StopSpillSampleTimer(/*bResetTiltState=*/false);
-		}
-		return;
-	}
-
-	if (TiltCandidateStartedWorldSeconds < 0.0)
-	{
-		TiltCandidateStartedWorldSeconds = Now;
-		NextSustainedPulseWorldSeconds = Now + SpillTuning.TiltHoldSeconds;
-		return;
-	}
-
-	if (NextSustainedPulseWorldSeconds < 0.0
-		|| Now + UE_DOUBLE_SMALL_NUMBER < NextSustainedPulseWorldSeconds)
-	{
-		return;
-	}
-
-	const ESpillAttemptResult Result = TryExecuteSpillPulse(
-		EMD_TrashBinSpillTrigger::SustainedTilt);
-	if (Result == ESpillAttemptResult::Committed)
-	{
-		// 긴 frame 뒤에도 catch-up을 여러 번 하지 않고 현재부터 한 간격만 예약한다.
-		NextSustainedPulseWorldSeconds =
-			Now + SpillTuning.SustainedPulseIntervalSeconds;
-		if (LiquidState.LiquidUnits <= 0.0)
-		{
-			StopSpillSampleTimer(/*bResetTiltState=*/true);
-		}
-	}
-	else if (Result == ESpillAttemptResult::NoReceiver)
-	{
-		bTiltBlockedUntilUpright = true;
-		TiltCandidateStartedWorldSeconds = -1.0;
-		NextSustainedPulseWorldSeconds = -1.0;
-	}
-	else if (Result == ESpillAttemptResult::Rejected)
-	{
-		// 잘못된 class/token/state를 20Hz spawn 실패 폭풍으로 만들지 않는다.
-		bTiltBlockedUntilUpright = true;
-		TiltCandidateStartedWorldSeconds = -1.0;
-		NextSustainedPulseWorldSeconds = -1.0;
-	}
-	else if (Result == ESpillAttemptResult::NoLiquid)
-	{
-		StopSpillSampleTimer(/*bResetTiltState=*/true);
+		StopSpillSampleTimer();
 	}
 }
 
 AMD_TrashBin::ESpillAttemptResult AMD_TrashBin::TryExecuteSpillPulse(
 	const EMD_TrashBinSpillTrigger Trigger)
 {
+	if (Trigger != EMD_TrashBinSpillTrigger::SustainedTilt)
+	{
+		return ESpillAttemptResult::Rejected;
+	}
 	if (!HasAuthority()
 		|| bLiquidTransferInProgress
 		|| !LiquidState.IsValid(MaximumLiquidUnits)
@@ -335,7 +197,11 @@ AMD_TrashBin::ESpillAttemptResult AMD_TrashBin::TryExecuteSpillPulse(
 
 	FMD_TrashBinSpillContact Contact;
 	UPrimitiveComponent* SupportComponent = nullptr;
-	if (!TryFindSpillContact(Contact, SupportComponent))
+	FVector SourceWorldLocation = FVector::ZeroVector;
+	if (!TryFindSpillContact(
+			Contact,
+			SupportComponent,
+			SourceWorldLocation))
 	{
 		return ESpillAttemptResult::NoReceiver;
 	}
@@ -361,10 +227,16 @@ AMD_TrashBin::ESpillAttemptResult AMD_TrashBin::TryExecuteSpillPulse(
 	{
 		return ESpillAttemptResult::Rejected;
 	}
-	UClass* const PatchClass =
-		WetContaminationPatchClass
-			? WetContaminationPatchClass.Get()
-			: AMD_WetContaminationPatch::StaticClass();
+	UClass* const PatchClass = WetContaminationPatchClass.Get();
+	const AMD_WetContaminationPatch* const PatchDefaults =
+		IsValid(PatchClass)
+			? PatchClass->GetDefaultObject<AMD_WetContaminationPatch>()
+			: nullptr;
+	if (!IsValid(PatchDefaults)
+		|| !PatchDefaults->HasCompleteVisualConfiguration())
+	{
+		return ESpillAttemptResult::Rejected;
+	}
 	FActorSpawnParameters SpawnParameters;
 	SpawnParameters.SpawnCollisionHandlingOverride =
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
@@ -398,20 +270,14 @@ AMD_TrashBin::ESpillAttemptResult AMD_TrashBin::TryExecuteSpillPulse(
 	}
 
 	FMD_TrashBinSpillCosmeticResult CosmeticResult;
-	const FVector SourceWorldLocation =
-		CalculateSpillCosmeticSourceWorldLocation(Contact);
-	CosmeticResult.SourceActorLocalLocation = GetActorTransform()
-		.InverseTransformPosition(SourceWorldLocation);
+	CosmeticResult.TransactionId = Candidate.TransactionId;
+	CosmeticResult.CommittedLiquidRevision = RemainingState.Revision;
+	CosmeticResult.RemainingLiquidUnits = RemainingState.LiquidUnits;
+	CosmeticResult.SourceWorldLocation = SourceWorldLocation;
 	CosmeticResult.ContactWorldLocation = Contact.WorldLocation;
 	CosmeticResult.ContactWorldNormal = Contact.WorldNormal;
 	CosmeticResult.SpillUnits = static_cast<float>(Candidate.Payload.LiquidUnits);
 	CosmeticResult.Trigger = Candidate.Trigger;
-	CosmeticResult.StreamLeaseSeconds = Candidate.Trigger
-		== EMD_TrashBinSpillTrigger::SustainedTilt
-		? SpillTuning.SustainedPulseIntervalSeconds
-			+ static_cast<float>(
-				UMD_TrashBinSpillStreamVisualComponent::DiameterShrinkSeconds)
-		: 0.0f;
 	if (!CosmeticResult.IsValid())
 	{
 		PreparedPatch->AbortPreparedSpill();
@@ -444,6 +310,18 @@ void AMD_TrashBin::MulticastCommittedSpillCosmetic_Implementation(
 	{
 		return;
 	}
+	if (LastConsumedSpillCosmeticStableBinId.IsValid()
+		&& LastConsumedSpillCosmeticStableBinId
+			!= Result.TransactionId.StableBinId)
+	{
+		return;
+	}
+	if (Result.TransactionId.Sequence <= LastConsumedSpillCosmeticSequence)
+	{
+		return;
+	}
+	LastConsumedSpillCosmeticStableBinId = Result.TransactionId.StableBinId;
+	LastConsumedSpillCosmeticSequence = Result.TransactionId.Sequence;
 
 
 	UWorld* const World = GetWorld();
@@ -451,10 +329,16 @@ void AMD_TrashBin::MulticastCommittedSpillCosmetic_Implementation(
 	{
 		return;
 	}
-	if (Result.Trigger == EMD_TrashBinSpillTrigger::SustainedTilt
-		&& IsValid(SpillStreamVisualComponent))
+	const FVector SourceWorldLocation = Result.SourceWorldLocation;
+	if (SourceWorldLocation.ContainsNaN())
 	{
-		SpillStreamVisualComponent->PlayCommittedPulse(Result);
+		return;
+	}
+	FVector SpillDirection =
+		(Result.ContactWorldLocation - SourceWorldLocation).GetSafeNormal();
+	if (SpillDirection.IsNearlyZero())
+	{
+		SpillDirection = FVector::DownVector;
 	}
 
 	if (UNiagaraSystem* const Effect = SpillEffect.LoadSynchronous())
@@ -462,8 +346,8 @@ void AMD_TrashBin::MulticastCommittedSpillCosmetic_Implementation(
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
 			this,
 			Effect,
-			Result.ContactWorldLocation,
-			Result.ContactWorldNormal.Rotation(),
+			SourceWorldLocation,
+			SpillDirection.Rotation(),
 			FVector::OneVector,
 			/*bAutoDestroy=*/true,
 			/*bAutoActivate=*/true,
@@ -569,10 +453,12 @@ bool AMD_TrashBin::TryBuildSpillRemovalCandidate(
 
 bool AMD_TrashBin::TryFindSpillContact(
 	FMD_TrashBinSpillContact& OutContact,
-	UPrimitiveComponent*& OutSupportComponent) const
+	UPrimitiveComponent*& OutSupportComponent,
+	FVector& OutSourceWorldLocation) const
 {
 	OutContact = FMD_TrashBinSpillContact();
 	OutSupportComponent = nullptr;
+	OutSourceWorldLocation = FVector::ZeroVector;
 	UWorld* const World = GetWorld();
 	if (!HasAuthority()
 		|| !IsValid(World)
@@ -592,59 +478,43 @@ bool AMD_TrashBin::TryFindSpillContact(
 		}
 	}
 
-	const FVector TraceStart = Mesh->Bounds.Origin + FVector::UpVector * 2.0;
-	const FVector TraceEnd = TraceStart
-		- FVector::UpVector * SpillTuning.FloorTraceDistanceCm;
-	TArray<FHitResult> Hits;
-	if (!World->LineTraceMultiByChannel(
-			Hits,
-			TraceStart,
+	const FVector MouthCenterWorldLocation =
+		CalculateSpillMouthCenterWorldLocation();
+	if (MouthCenterWorldLocation.ContainsNaN())
+	{
+		return false;
+	}
+	const FVector TraceEnd = MouthCenterWorldLocation
+		+ FVector::DownVector * SpillTuning.FloorTraceDistanceCm;
+	FHitResult FloorHit;
+	if (!World->LineTraceSingleByChannel(
+			FloorHit,
+			MouthCenterWorldLocation,
 			TraceEnd,
-			ECC_Visibility,
+			MDCollisionChannels::SpillFloor,
 			QueryParams))
 	{
 		return false;
 	}
-	Algo::SortBy(Hits, &FHitResult::Distance);
-
-	// 첫 blocking 물체가 수용 불가면 그 아래 바닥으로 관통하지 않는다.
-	const FHitResult* FirstBlockingHit = Hits.FindByPredicate(
-		[](const FHitResult& CandidateHit)
-		{
-			return CandidateHit.bBlockingHit;
-		});
-	if (!FirstBlockingHit)
+	if (!FloorHit.bBlockingHit)
 	{
 		return false;
 	}
 
 	UPrimitiveComponent* const SupportComponent =
-		FirstBlockingHit->GetComponent();
-	AActor* const SupportActor = FirstBlockingHit->GetActor();
-	const FVector SupportNormal = FirstBlockingHit->ImpactNormal.GetSafeNormal();
+		FloorHit.GetComponent();
+	AActor* const SupportActor = FloorHit.GetActor();
+	const FVector SupportNormal = FloorHit.ImpactNormal.GetSafeNormal();
 	if (!IsValid(SupportComponent)
 		|| !IsValid(SupportActor)
-		|| SupportActor == this
-		|| SupportActor->IsA<APawn>()
-		|| SupportActor->IsA<AMD_TrashBin>()
-		|| SupportActor->IsA<AMD_WetContaminationPatch>()
-		|| (IsValid(ContentsVolume)
-			&& ContentsVolume->IsOverlappingComponent(SupportComponent))
-		|| MD_TrashBinSpillPrivate::IsPointInsideContentsVolume(
-			ContentsVolume,
-			FirstBlockingHit->ImpactPoint)
-		|| SupportComponent->ComponentHasTag(
-			MD_TrashBinSpillPrivate::NoSpillSupportTag)
-		|| SupportNormal.IsNearlyZero()
-		|| FVector::DotProduct(SupportNormal, FVector::UpVector)
-			< SpillTuning.MinimumSupportUpDot)
+		|| SupportNormal.IsNearlyZero())
 	{
 		return false;
 	}
 
 	const FTransform WetWorldTransform(
 		FRotationMatrix::MakeFromZ(SupportNormal).ToQuat(),
-		FirstBlockingHit->ImpactPoint
+		FloorHit.ImpactPoint
 			+ SupportNormal * MD_TrashBinSpillPrivate::WetSurfaceOffsetCm);
 	OutContact.WorldLocation = WetWorldTransform.GetLocation();
 	OutContact.WorldNormal = SupportNormal;
@@ -661,11 +531,11 @@ bool AMD_TrashBin::TryFindSpillContact(
 	}
 
 	OutSupportComponent = SupportComponent;
+	OutSourceWorldLocation = CalculateSpillMouthSourceWorldLocation();
 	return true;
 }
 
-FVector AMD_TrashBin::CalculateSpillCosmeticSourceWorldLocation(
-	const FMD_TrashBinSpillContact& Contact) const
+FVector AMD_TrashBin::CalculateSpillMouthCenterWorldLocation() const
 {
 	FVector MouthCenterWorld = IsValid(ScrapeUnloadEffectOrigin)
 		? ScrapeUnloadEffectOrigin->GetComponentLocation()
@@ -676,34 +546,25 @@ FVector AMD_TrashBin::CalculateSpillCosmeticSourceWorldLocation(
 	{
 		MouthCenterWorld = GetActorLocation();
 	}
+	return MouthCenterWorld;
+}
+
+FVector AMD_TrashBin::CalculateSpillMouthSourceWorldLocation() const
+{
+	const FVector MouthCenterWorld = CalculateSpillMouthCenterWorldLocation();
 	if (!IsValid(Mesh.Get()))
 	{
 		return MouthCenterWorld;
 	}
 
 	const FTransform MeshTransform = Mesh->GetComponentTransform();
-	const FVector RimPlaneNormal = Mesh->GetUpVector().GetSafeNormal();
-	auto ProjectToRimPlane = [RimPlaneNormal](const FVector& Direction)
-	{
-		return FVector::VectorPlaneProject(Direction, RimPlaneNormal)
-			.GetSafeNormal();
-	};
-
-	// 기울어진 통에서 월드 아래쪽이 실제 낮은 입구다. upright/수치 퇴화 때만
-	// 접점 방향, 마지막으로 메시 forward를 사용한다.
-	FVector RimDirectionWorld = ProjectToRimPlane(FVector::DownVector);
-	if (RimDirectionWorld.IsNearlyZero())
-	{
-		RimDirectionWorld = ProjectToRimPlane(
-			Contact.WorldLocation - MouthCenterWorld);
-	}
-	if (RimDirectionWorld.IsNearlyZero())
-	{
-		RimDirectionWorld = ProjectToRimPlane(Mesh->GetForwardVector());
-	}
-
-	FVector RimDirectionLocal = MeshTransform
-		.InverseTransformVectorNoScale(RimDirectionWorld);
+	const FVector LocalWorldDown = MeshTransform
+		.InverseTransformVectorNoScale(FVector::DownVector);
+	const FVector MeshScale = MeshTransform.GetScale3D();
+	FVector RimDirectionLocal(
+		LocalWorldDown.X * MeshScale.X,
+		LocalWorldDown.Y * MeshScale.Y,
+		0.0);
 	RimDirectionLocal.Z = 0.0;
 	RimDirectionLocal = RimDirectionLocal.GetSafeNormal();
 	if (RimDirectionLocal.IsNearlyZero())
@@ -717,8 +578,6 @@ FVector AMD_TrashBin::CalculateSpillCosmeticSourceWorldLocation(
 			LiquidVisualRadiusCm
 				- MD_TrashBinSpillPrivate::CosmeticRimInsetCm)
 		: 0.0f;
-	// TransformVector를 사용해 BP/Actor에 설정된 Mesh scale도 실제 world offset에
-	// 포함한다. 이 점은 payload cosmetic에만 쓰이며 접점·Wet 권위에는 영향이 없다.
 	const FVector WorldRimOffset = MeshTransform.TransformVector(
 		RimDirectionLocal * LocalRimRadiusCm);
 	const FVector SourceWorldLocation = MouthCenterWorld + WorldRimOffset;

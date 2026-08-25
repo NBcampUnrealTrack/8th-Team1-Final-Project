@@ -6,6 +6,7 @@
 #include "Types/Trash/MD_TrashBinSpillTypes.h"
 #include "MD_WetContaminationPatch.generated.h"
 
+class UMaterialInterface;
 class UPrimitiveComponent;
 class USceneComponent;
 class UStaticMesh;
@@ -171,6 +172,9 @@ public:
 		return ScrapeSurface;
 	}
 
+	/** 제품 Blueprint가 런타임에 보이는 Wet을 만들 모든 에셋을 명시했는지. */
+	bool HasCompleteVisualConfiguration() const;
+
 protected:
 	virtual void BeginPlay() override;
 
@@ -201,8 +205,16 @@ private:
 	 * 한 VisualMesh가 PatchId로 고른 전용 다형 자국. 순서는 저장 호환 계약이다.
 	 * 별도 Actor/component/replicated state를 만들지 않는다.
 	 */
-	UPROPERTY(Transient)
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "MD|Wet Contamination|Visual",
+		meta = (EditFixedSize, AllowPrivateAccess = "true"))
 	TArray<TObjectPtr<UStaticMesh>> VisualVariantMeshes;
+
+	/** 모든 Wet variant가 공유하는 제품 머터리얼. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "MD|Wet Contamination|Visual",
+		meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMaterialInterface> VisualMaterial;
 
 	UPROPERTY(VisibleAnywhere, Category = "MD|Wet Contamination")
 	TObjectPtr<UMD_WetScrapeSurfaceComponent> ScrapeSurface;

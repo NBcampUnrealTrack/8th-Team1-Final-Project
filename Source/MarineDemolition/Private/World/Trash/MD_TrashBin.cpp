@@ -13,12 +13,10 @@
 #include "GameplayTags/MD_GameplayTags.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Net/UnrealNetwork.h"
-#include "Materials/MaterialInterface.h"
 #include "Types/Persistence/MD_DaySnapshotTypes.h"
-#include "UObject/ConstructorHelpers.h"
+#include "TimerManager.h"
 #include "World/Trash/MD_TrashDispenser.h"
 #include "World/Trash/MD_TrashBinLiquidSloshVisualComponent.h"
-#include "World/Trash/MD_TrashBinSpillStreamVisualComponent.h"
 
 bool FMD_TrashBinLiquidState::IsValid(
 	const double MaximumLiquidUnits) const
@@ -36,17 +34,18 @@ bool FMD_TrashBinLiquidState::IsValid(
 
 bool FMD_TrashBinSpillCosmeticResult::IsValid() const
 {
-	const bool bLeaseValid = Trigger == EMD_TrashBinSpillTrigger::SustainedTilt
-		? FMath::IsFinite(StreamLeaseSeconds) && StreamLeaseSeconds > 0.0f
-		: FMath::IsFinite(StreamLeaseSeconds) && StreamLeaseSeconds == 0.0f;
-	return !SourceActorLocalLocation.ContainsNaN()
+	return TransactionId.IsValid()
+		&& CommittedLiquidRevision >= 0
+		&& FMath::IsFinite(RemainingLiquidUnits)
+		&& RemainingLiquidUnits >= 0.0
+		&& RemainingLiquidUnits <= 5.0
+		&& !SourceWorldLocation.ContainsNaN()
 		&& !ContactWorldLocation.ContainsNaN()
 		&& !ContactWorldNormal.ContainsNaN()
 		&& !ContactWorldNormal.IsNearlyZero()
 		&& FMath::IsFinite(SpillUnits)
 		&& SpillUnits > 0.0f
-		&& Trigger != EMD_TrashBinSpillTrigger::None
-		&& bLeaseValid;
+		&& Trigger == EMD_TrashBinSpillTrigger::SustainedTilt;
 }
 
 AMD_TrashBin::AMD_TrashBin()
@@ -98,29 +97,8 @@ AMD_TrashBin::AMD_TrashBin()
 	LiquidFillMesh->SetRelativeLocation(FVector(0.0f, 0.0f, 0.75f));
 	LiquidFillMesh->SetRelativeScale3D(FVector(0.68f, 0.68f, 0.015f));
 
-	// 영속 수위는 particle SubUV/DepthFade가 있는 one-shot VFX 재질과 분리한다.
-	// 사용자는 BP에서 기준점 위치/슬롯만 확인하고, 실제 높이는 복제 LiquidUnits가
-	// 계속 결정한다.
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> LiquidSurfaceFinder(
-		TEXT("/Game/Assets/TrashBin/SM_MD_TrashBinLiquidFill.SM_MD_TrashBinLiquidFill"));
-	if (LiquidSurfaceFinder.Succeeded())
-	{
-		LiquidFillMesh->SetStaticMesh(LiquidSurfaceFinder.Object);
-	}
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> LiquidMaterialFinder(
-		TEXT("/Game/Materials/MI_MD_TrashBinSludge.MI_MD_TrashBinSludge"));
-	if (LiquidMaterialFinder.Succeeded())
-	{
-		LiquidFillMesh->SetMaterial(0, LiquidMaterialFinder.Object);
-	}
-
-	// 전용 spill Niagara는 Editor에서 뒤에 만들어져도 CDO를 다시 저장할 필요가
-	// 없도록 soft path만 기본값으로 둔다. 실제 관찰 peer에서만 지연 로드한다.
-	SpillEffect = TSoftObjectPtr<UNiagaraSystem>(FSoftObjectPath(
-		TEXT("/Game/VFX/02_Scrape/NS_Scrape_Spill.NS_Scrape_Spill")));
-	SpillSoundTag = FGameplayTag::RequestGameplayTag(
-		TEXT("SFX.Clean.Sludge.Drop"),
-		/*ErrorIfNotFound=*/false);
+	// 채움 메시·재질, spill Niagara·sound tag와 Wet class는 제품 Blueprint가
+	// 명시적으로 소유한다. C++ CDO는 콘텐츠 에셋을 직접 찾지 않는다.
 
 	// 회전만 캐릭터 기본값(1500/500)보다 완화해 큰 통을 든 무게감을 준다.
 	HoldProfile.AngularStiffness = 500.f;
@@ -156,21 +134,6 @@ void AMD_TrashBin::BeginPlay()
 				Mesh);
 		}
 	}
-	if (UMD_TrashBinSpillStreamVisualComponent::ShouldCreateForNetMode(
-			GetNetMode()))
-	{
-		SpillStreamVisualComponent =
-			NewObject<UMD_TrashBinSpillStreamVisualComponent>(
-				this,
-				TEXT("SpillStreamVisualComponent"),
-				RF_Transient);
-		if (IsValid(SpillStreamVisualComponent))
-		{
-			AddInstanceComponent(SpillStreamVisualComponent);
-			SpillStreamVisualComponent->RegisterComponent();
-			SpillStreamVisualComponent->InitializeVisual();
-		}
-	}
 	RefreshLiquidVisual();
 	Mesh->OnComponentWake.AddDynamic(this, &AMD_TrashBin::HandleSpillMeshWake);
 	Mesh->OnComponentSleep.AddDynamic(this, &AMD_TrashBin::HandleSpillMeshSleep);
@@ -182,7 +145,6 @@ void AMD_TrashBin::BeginPlay()
 	}
 
 	EnsureStableBinId();
-	Mesh->OnComponentHit.AddDynamic(this, &AMD_TrashBin::HandleSpillMeshHit);
 	RefreshSpillSamplingAfterLiquidMutation();
 
 	ContentsVolume->OnComponentBeginOverlap.AddDynamic(this, &AMD_TrashBin::HandleBeginOverlap);
@@ -194,22 +156,21 @@ void AMD_TrashBin::BeginPlay()
 
 void AMD_TrashBin::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	StopSpillSampleTimer(/*bResetTiltState=*/true);
+	StopSpillSampleTimer();
 	if (IsValid(Mesh))
 	{
 		Mesh->OnComponentWake.RemoveDynamic(this, &AMD_TrashBin::HandleSpillMeshWake);
 		Mesh->OnComponentSleep.RemoveDynamic(this, &AMD_TrashBin::HandleSpillMeshSleep);
-		Mesh->OnComponentHit.RemoveDynamic(this, &AMD_TrashBin::HandleSpillMeshHit);
 	}
 	if (IsValid(LiquidSloshVisualComponent))
 	{
 		LiquidSloshVisualComponent->DestroyComponent();
 		LiquidSloshVisualComponent = nullptr;
 	}
-	if (IsValid(SpillStreamVisualComponent))
+	if (UWorld* const World = GetWorld())
 	{
-		SpillStreamVisualComponent->DestroyComponent();
-		SpillStreamVisualComponent = nullptr;
+		World->GetTimerManager().ClearTimer(
+			SpillCosmeticRestoreTimerHandle);
 	}
 
 	if (IsValid(ContentsVolume))
@@ -269,6 +230,7 @@ void AMD_TrashBin::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 
 	DOREPLIFETIME(AMD_TrashBin, ContentCount);
 	DOREPLIFETIME(AMD_TrashBin, LiquidState);
+	DOREPLIFETIME(AMD_TrashBin, SpillCosmeticEpoch);
 	DOREPLIFETIME(AMD_TrashBin, ReplicatedCarryFrozenContents);
 }
 
@@ -408,6 +370,10 @@ bool AMD_TrashBin::RestorePersistenceRecord(
 		|| LiquidState.RewardUnits != Record.RewardUnits
 		|| LiquidState.Revision != Record.LiquidRevision;
 
+	LastConsumedSpillCosmeticStableBinId.Invalidate();
+	LastConsumedSpillCosmeticSequence = 0;
+	LastRenderedLiquidRevision = INDEX_NONE;
+
 	StableBinId = Record.StableBinId;
 	SourceTrashDispenserName = Record.SourceDispenserName;
 	LiquidState.LiquidUnits = Record.LiquidUnits;
@@ -416,6 +382,11 @@ bool AMD_TrashBin::RestorePersistenceRecord(
 	LiquidState.Revision = Record.LiquidRevision;
 	LiquidRecoveryLots = Record.LiquidRecoveryLots;
 	NextSpillSequence = Record.NextSpillSequence;
+	++SpillCosmeticEpoch;
+	if (SpillCosmeticEpoch == 0)
+	{
+		++SpillCosmeticEpoch;
+	}
 
 	if (HasActorBegunPlay() && bLiquidStateChanged)
 	{
@@ -612,10 +583,6 @@ void AMD_TrashBin::OnCarryStarted_Implementation()
 	FreezeContentsForCarry();
 	if (HasAuthority())
 	{
-		if (const UWorld* const World = GetWorld())
-		{
-			LastPickupStartedWorldSeconds = World->GetTimeSeconds();
-		}
 		EnsureSpillSampleTimer();
 	}
 }
@@ -1324,6 +1291,31 @@ void AMD_TrashBin::OnRep_LiquidState()
 		LiquidState.RewardUnits);
 }
 
+void AMD_TrashBin::OnRep_SpillCosmeticEpoch()
+{
+	if (HasAuthority())
+	{
+		return;
+	}
+	if (UWorld* const World = GetWorld())
+	{
+		World->GetTimerManager().ClearTimer(
+			SpillCosmeticRestoreTimerHandle);
+		SpillCosmeticRestoreTimerHandle =
+			World->GetTimerManager().SetTimerForNextTick(
+				this,
+				&AMD_TrashBin::ResetSpillCosmeticAfterRestoreEpoch);
+	}
+}
+
+void AMD_TrashBin::ResetSpillCosmeticAfterRestoreEpoch()
+{
+	LastConsumedSpillCosmeticStableBinId.Invalidate();
+	LastConsumedSpillCosmeticSequence = 0;
+	LastRenderedLiquidRevision = INDEX_NONE;
+	RefreshLiquidVisual();
+}
+
 void AMD_TrashBin::OnRep_ReplicatedMovement()
 {
 	Super::OnRep_ReplicatedMovement();
@@ -1362,6 +1354,14 @@ void AMD_TrashBin::RefreshLiquidVisual()
 	{
 		return;
 	}
+
+	if (LastRenderedLiquidRevision != INDEX_NONE
+		&& LiquidState.Revision < LastRenderedLiquidRevision)
+	{
+		LastConsumedSpillCosmeticStableBinId.Invalidate();
+		LastConsumedSpillCosmeticSequence = 0;
+	}
+	LastRenderedLiquidRevision = LiquidState.Revision;
 
 	const float FillRatio = GetLiquidFillRatio();
 	const float SafeFullHeightCm = FMath::Max(1.0f, LiquidVisualFullHeightCm);

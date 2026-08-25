@@ -14,7 +14,6 @@
 class UBoxComponent;
 class UMD_TrashContentClaimSubsystem;
 class UMD_TrashBinLiquidSloshVisualComponent;
-class UMD_TrashBinSpillStreamVisualComponent;
 class UNiagaraSystem;
 class UPrimitiveComponent;
 class USceneComponent;
@@ -88,9 +87,20 @@ struct MARINEDEMOLITION_API FMD_TrashBinSpillCosmeticResult
 {
 	GENERATED_BODY()
 
-	/** 서버가 확정한 통 actor-local 입구점. RPC/물리 이동 복제 순서와 무관하다. */
+	/** Stable per-bin sequence used by every observing peer for stale/dedupe. */
 	UPROPERTY()
-	FVector_NetQuantize10 SourceActorLocalLocation = FVector::ZeroVector;
+	FMD_TrashBinSpillTransactionId TransactionId;
+
+	/** Post-commit replicated state paired with this unreliable cosmetic. */
+	UPROPERTY()
+	int32 CommittedLiquidRevision = INDEX_NONE;
+
+	UPROPERTY()
+	double RemainingLiquidUnits = 0.0;
+
+	/** 서버가 commit 순간 확정한 월드 입구점. RPC/RepMovement 도착 순서와 무관하다. */
+	UPROPERTY()
+	FVector_NetQuantize10 SourceWorldLocation = FVector::ZeroVector;
 
 	UPROPERTY()
 	FVector_NetQuantize10 ContactWorldLocation = FVector::ZeroVector;
@@ -100,10 +110,6 @@ struct MARINEDEMOLITION_API FMD_TrashBinSpillCosmeticResult
 
 	UPROPERTY()
 	float SpillUnits = 0.0f;
-
-	/** SustainedTilt 반복 간격 + 0.10초. Impact는 0이다. */
-	UPROPERTY()
-	float StreamLeaseSeconds = 0.0f;
 
 	UPROPERTY()
 	EMD_TrashBinSpillTrigger Trigger = EMD_TrashBinSpillTrigger::None;
@@ -288,7 +294,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Bin|Spill")
 	FMD_TrashBinSpillTuning SpillTuning;
 
-	/** 유효 바닥에 원자 commit될 서버 권위 Wet 운반체. 비어 있으면 native class를 쓴다. */
+	/** 유효 바닥에 원자 commit될 서버 권위 Wet 운반체. 비어 있거나 시각 설정이 불완전하면 원장을 바꾸지 않는다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Bin|Spill")
 	TSubclassOf<AMD_WetContaminationPatch> WetContaminationPatchClass;
 
@@ -312,6 +318,10 @@ protected:
 	UPROPERTY(ReplicatedUsing = OnRep_LiquidState, VisibleInstanceOnly, BlueprintReadOnly,
 		Category = "MD|Trash Bin|Liquid")
 	FMD_TrashBinLiquidState LiquidState;
+
+	/** 저장 복원에서 sequence가 되감겨도 원격 cosmetic dedupe를 다시 맞춘다. */
+	UPROPERTY(ReplicatedUsing = OnRep_SpillCosmeticEpoch)
+	uint32 SpillCosmeticEpoch = 0;
 
 	/**
 	 * 성공한 입력마다 각 관찰 머신에서 정확히 한 번 호출되는 선택적 Blueprint 확장 지점.
@@ -351,6 +361,9 @@ private:
 	void OnRep_LiquidState();
 
 	UFUNCTION()
+	void OnRep_SpillCosmeticEpoch();
+
+	UFUNCTION()
 	void OnRep_CarryFrozenContents();
 
 	UFUNCTION()
@@ -358,14 +371,6 @@ private:
 
 	UFUNCTION()
 	void HandleSpillMeshSleep(UPrimitiveComponent* SleepingComponent, FName BoneName);
-
-	UFUNCTION()
-	void HandleSpillMeshHit(
-		UPrimitiveComponent* HitComponent,
-		AActor* OtherActor,
-		UPrimitiveComponent* OtherComponent,
-		FVector NormalImpulse,
-		const FHitResult& Hit);
 
 	/** TSet의 내용물을 TArray로 이동하는 함수 */
 	void GetContentsSnapshot(TArray<AActor*>& OutContents) const;
@@ -375,6 +380,7 @@ private:
 	void RebuildContentsFromOverlaps();
 	void SyncContentCount();
 	void RefreshLiquidVisual();
+	void ResetSpillCosmeticAfterRestoreEpoch();
 	void NotifyLiquidStateChanged();
 	bool TryBuildLiquidTransferCandidate(
 		const FMD_ScrapeLoadTransferResult& PreviewTransfer,
@@ -390,8 +396,7 @@ private:
 	};
 
 	void EnsureSpillSampleTimer();
-	void StopSpillSampleTimer(bool bResetTiltState);
-	void ResetSustainedTiltState(bool bClearReceiverBlock);
+	void StopSpillSampleTimer();
 	void RefreshSpillSamplingAfterLiquidMutation();
 	void SampleSpillTilt();
 	ESpillAttemptResult TryExecuteSpillPulse(
@@ -403,10 +408,10 @@ private:
 		TArray<FMD_ScrapeRecoveryLot>& OutRemainingLots) const;
 	bool TryFindSpillContact(
 		FMD_TrashBinSpillContact& OutContact,
-		UPrimitiveComponent*& OutSupportComponent) const;
-	/** cosmetic payload에만 쓰는, 현재 기울기에서 가장 낮은 통 입구점. */
-	FVector CalculateSpillCosmeticSourceWorldLocation(
-		const FMD_TrashBinSpillContact& Contact) const;
+		UPrimitiveComponent*& OutSupportComponent,
+		FVector& OutSourceWorldLocation) const;
+	FVector CalculateSpillMouthCenterWorldLocation() const;
+	FVector CalculateSpillMouthSourceWorldLocation() const;
 	bool CanCommitSpillRemoval(
 		const FMD_TrashBinSpillCandidate& Candidate,
 		const FMD_TrashBinLiquidState& RemainingState,
@@ -454,22 +459,17 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMD_TrashBinLiquidSloshVisualComponent> LiquidSloshVisualComponent;
 
-	/** 렌더링 peer에만 존재하며 지속 쏟김 동안 입구와 접점을 잇는 비복제 줄기. */
-	UPROPERTY(Transient)
-	TObjectPtr<UMD_TrashBinSpillStreamVisualComponent>
-		SpillStreamVisualComponent;
+	/** unreliable cosmetic RPC의 stale/duplicate를 시청각 연출 전에 차단한다. */
+	FGuid LastConsumedSpillCosmeticStableBinId;
+	uint64 LastConsumedSpillCosmeticSequence = 0;
+	int32 LastRenderedLiquidRevision = INDEX_NONE;
+	FTimerHandle SpillCosmeticRestoreTimerHandle;
 
 	/** FRepMovement의 deg/s를 로컬 Chaos 시각 드라이버의 rad/s로 맞춘다. */
 	static FVector ConvertReplicatedAngularVelocityToRadians(
 		const FVector& AngularVelocityDegreesPerSecond);
 
 	FTimerHandle SpillSampleTimerHandle;
-	double TiltCandidateStartedWorldSeconds = -1.0;
-	double NextSustainedPulseWorldSeconds = -1.0;
-	double LastPickupStartedWorldSeconds = -1.0;
-	double LastAcceptedImpactWorldSeconds = -1.0;
-	TWeakObjectPtr<UPrimitiveComponent> LastAcceptedImpactOtherComponent;
-	bool bTiltBlockedUntilUpright = false;
 
 	static constexpr double MaximumLiquidUnits = 5.0;
 

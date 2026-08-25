@@ -102,6 +102,10 @@ struct MARINEDEMOLITION_API FMD_TrashBinRecord
       UPROPERTY()
       uint64 NextSpillSequence = 0;
 
+      /** 구버전 저장 호환용 폐기 필드. 현재 판정은 읽지 않고 새 저장은 false다. */
+      UPROPERTY()
+      bool bSpillTiltAttemptConsumedUntilRearm = false;
+
       /** 손상 record를 월드에 일부 적용하기 전에 거르는 공통 검사. */
       bool IsStructurallyValid() const;
 };

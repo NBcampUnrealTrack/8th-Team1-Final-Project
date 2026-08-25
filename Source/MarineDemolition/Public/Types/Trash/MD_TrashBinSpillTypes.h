@@ -7,21 +7,17 @@
 #include "UObject/SoftObjectPath.h"
 #include "MD_TrashBinSpillTypes.generated.h"
 
-/**
- * 쓰레기통 액체 쏟김과 Wet 정착이 공유하는 서버 튜닝 값.
- *
- * 판정 코드는 이 구조체만 읽는다. 따라서 Blueprint 기본값이나 향후 DataAsset이
- * 수치를 바꾸더라도 서버 판정과 자동화가 같은 계약을 사용할 수 있다.
- */
+/** 쓰레기통 액체 쏟김의 서버 판정 값. */
 USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_TrashBinSpillTuning
 {
 	GENERATED_BODY()
 
 public:
-	/** Wet 패치가 고착 오염으로 바뀌기까지의 gameplay 시간. */
+	/** 구버전 저장 호환용 폐기 필드. Wet은 다른 상태로 굳지 않는다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash Bin|Spill",
-		meta = (ClampMin = "0.01", UIMin = "0.01", Units = "s"))
+		meta = (DeprecatedProperty,
+			DeprecationMessage = "Wet 자국은 굳지 않습니다."))
 	float SettleSeconds = 30.0f;
 
 	/** Actor Tick 대신 쓰는 서버 기울기 표본 간격. */
@@ -29,38 +25,44 @@ public:
 		meta = (ClampMin = "0.01", UIMin = "0.01", Units = "s"))
 	float SampleIntervalSeconds = 0.05f;
 
-	/** 통의 월드 Up과 통 Up 사이 각도가 이 값 이상이면 기울기 후보가 된다. */
+	/** 통의 월드 Up과 통 Up 사이 각도가 이 값 이상이면 전량 유실 후보가 된다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash Bin|Spill",
 		meta = (ClampMin = "0.0", ClampMax = "180.0", UIMin = "0.0",
 			UIMax = "180.0", Units = "deg"))
-	float TiltThresholdDegrees = 60.0f;
+	float TiltThresholdDegrees = 70.0f;
 
-	/** 기울기 후보가 첫 pulse를 만들기 전에 연속으로 유지되어야 하는 시간. */
+	/** 구버전 Blueprint 직렬화 호환용 폐기 필드. 판정 코드는 읽지 않는다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash Bin|Spill",
-		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
-	float TiltHoldSeconds = 0.35f;
+		meta = (DeprecatedProperty,
+			DeprecationMessage = "70도 상태 조건은 재무장 각도를 사용하지 않습니다."))
+	float TiltRearmDegrees = 65.0f;
 
-	/** 성공한 한 pulse가 통에서 옮기려는 최대 액체량. */
+	/**
+	 * 구버전 Blueprint 직렬화 호환용 폐기 필드. 현 계약은 임계각 이상에서
+	 * 현재 원장 전량을 한 번 옮기므로 판정 코드가 이 값을 읽지 않는다.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash Bin|Spill",
-		meta = (ClampMin = "0.001", UIMin = "0.001"))
-	double SpillUnitsPerPulse = 0.2;
+		meta = (DeprecatedProperty,
+			DeprecationMessage = "임계각 전량 유실 계약에서는 사용하지 않습니다."))
+	double SpillUnitsPerPulse = 5.0;
 
-	/** 첫 pulse 뒤 계속 기울어 있을 때 다음 pulse까지의 간격. */
+	/** 구버전 Blueprint 직렬화 호환용 폐기 필드. 반복 유실은 금지한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash Bin|Spill",
-		meta = (ClampMin = "0.01", UIMin = "0.01", Units = "s"))
+		meta = (DeprecatedProperty,
+			DeprecationMessage = "임계각 전량 유실 계약에서는 반복하지 않습니다."))
 	float SustainedPulseIntervalSeconds = 0.40f;
 
-	/** 충돌 쏟김 후보를 만드는 최소 NormalImpulse 크기. */
+	/** 구버전 충격 진단 호환값. 현재 gameplay 유실 판정에는 사용하지 않는다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash Bin|Spill",
 		meta = (ClampMin = "0.0", UIMin = "0.0"))
 	double ImpactImpulseThreshold = 12000.0;
 
-	/** 통을 집은 직후 손/제약 충격을 쏟김으로 보지 않는 시간. */
+	/** 구버전 충격 진단 호환값. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash Bin|Spill",
 		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
 	float PickupImpactIgnoreSeconds = 0.60f;
 
-	/** 같은 접점에서 연속 Hit가 올 때 새 충돌로 다시 무장하기까지의 시간. */
+	/** 구버전 충격 진단 호환값. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash Bin|Spill",
 		meta = (ClampMin = "0.0", UIMin = "0.0", Units = "s"))
 	float ImpactDebounceSeconds = 0.20f;
@@ -70,23 +72,25 @@ public:
 		meta = (ClampMin = "1.0", UIMin = "1.0", Units = "cm"))
 	float FloorTraceDistanceCm = 150.0f;
 
-	/** 지지면 법선과 월드 Up의 내적 하한. 기본 0.5는 최대 60도 경사를 허용한다. */
+	/** 구버전 Blueprint 직렬화 호환용 폐기 필드. SpillFloor hit만 사용한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash Bin|Spill",
-		meta = (ClampMin = "-1.0", ClampMax = "1.0", UIMin = "-1.0",
-			UIMax = "1.0"))
+		meta = (DeprecatedProperty,
+			DeprecationMessage = "SpillFloor hit에는 추가 경사 제한을 적용하지 않습니다."))
 	float MinimumSupportUpDot = 0.50f;
 
-	/** Wet→Adhered 원자 commit 실패 뒤 첫 재시도 대기. */
+	/** 구버전 저장 호환용 폐기 필드. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash Bin|Spill",
-		meta = (ClampMin = "0.01", UIMin = "0.01", Units = "s"))
+		meta = (DeprecatedProperty,
+			DeprecationMessage = "Wet 정착 재시도는 사용하지 않습니다."))
 	float SettleRetryInitialBackoffSeconds = 0.50f;
 
-	/** 반복 실패 때 증가할 수 있는 재시도 대기의 상한. */
+	/** 구버전 저장 호환용 폐기 필드. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash Bin|Spill",
-		meta = (ClampMin = "0.01", UIMin = "0.01", Units = "s"))
+		meta = (DeprecatedProperty,
+			DeprecationMessage = "Wet 정착 재시도는 사용하지 않습니다."))
 	float SettleRetryMaximumBackoffSeconds = 4.0f;
 
-	/** 모든 수치가 서버 판정에 안전한 유한 범위인지 검사한다. */
+	/** 현재 쏟김 판정에 쓰는 수치만 검사한다. */
 	bool IsValid() const;
 };
 
@@ -192,6 +196,7 @@ enum class EMD_TrashBinSpillTrigger : uint8
 {
 	None,
 	SustainedTilt,
+	/** 구버전 식별자. 현재 후보·실행 경로는 항상 거부한다. */
 	Impact
 };
 
@@ -313,7 +318,7 @@ struct MARINEDEMOLITION_API FMD_TrashBinTiltEvaluation
 	bool bCanPulse = false;
 };
 
-/** 한 Hit의 impulse와 pickup 직후 무시 시간을 순수 계산한 결과. */
+/** 구버전 Hit 진단 결과. bCanPulse는 현재 계약에서 항상 false다. */
 struct MARINEDEMOLITION_API FMD_TrashBinImpactEvaluation
 {
 	bool bInputValid = false;
@@ -339,7 +344,7 @@ public:
 		double SecondsSincePickup,
 		const FMD_TrashBinSpillTuning& Tuning);
 
-	/** 현재 액체와 pulse 상한 중 작은 유한·양수 값만 반환한다. */
+	/** 현재 통의 유한·양수 액체 전량을 반환한다. */
 	static double CalculateRequestedSpillUnits(
 		double CurrentLiquidUnits,
 		const FMD_TrashBinSpillTuning& Tuning);

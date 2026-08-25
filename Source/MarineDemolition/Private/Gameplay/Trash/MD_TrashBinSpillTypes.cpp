@@ -35,35 +35,13 @@ namespace
 
 bool FMD_TrashBinSpillTuning::IsValid() const
 {
-	return FMath::IsFinite(SettleSeconds)
-		&& SettleSeconds > 0.0f
-		&& FMath::IsFinite(SampleIntervalSeconds)
+	return FMath::IsFinite(SampleIntervalSeconds)
 		&& SampleIntervalSeconds > 0.0f
 		&& FMath::IsFinite(TiltThresholdDegrees)
 		&& TiltThresholdDegrees >= 0.0f
 		&& TiltThresholdDegrees <= 180.0f
-		&& FMath::IsFinite(TiltHoldSeconds)
-		&& TiltHoldSeconds >= 0.0f
-		&& FMath::IsFinite(SpillUnitsPerPulse)
-		&& SpillUnitsPerPulse > 0.0
-		&& FMath::IsFinite(SustainedPulseIntervalSeconds)
-		&& SustainedPulseIntervalSeconds > 0.0f
-		&& FMath::IsFinite(ImpactImpulseThreshold)
-		&& ImpactImpulseThreshold > 0.0
-		&& FMath::IsFinite(PickupImpactIgnoreSeconds)
-		&& PickupImpactIgnoreSeconds >= 0.0f
-		&& FMath::IsFinite(ImpactDebounceSeconds)
-		&& ImpactDebounceSeconds >= 0.0f
 		&& FMath::IsFinite(FloorTraceDistanceCm)
-		&& FloorTraceDistanceCm > 0.0f
-		&& FMath::IsFinite(MinimumSupportUpDot)
-		&& MinimumSupportUpDot >= -1.0f
-		&& MinimumSupportUpDot <= 1.0f
-		&& FMath::IsFinite(SettleRetryInitialBackoffSeconds)
-		&& SettleRetryInitialBackoffSeconds > 0.0f
-		&& FMath::IsFinite(SettleRetryMaximumBackoffSeconds)
-		&& SettleRetryMaximumBackoffSeconds
-			>= SettleRetryInitialBackoffSeconds;
+		&& FloorTraceDistanceCm > 0.0f;
 }
 
 bool FMD_TrashBinPerBinDedupeState::IsValid() const
@@ -213,7 +191,7 @@ bool FMD_TrashBinSpillPayload::IsValid() const
 bool FMD_TrashBinSpillCandidate::IsValid() const
 {
 	return TransactionId.IsValid()
-		&& Trigger != EMD_TrashBinSpillTrigger::None
+		&& Trigger == EMD_TrashBinSpillTrigger::SustainedTilt
 		&& ExpectedBinRevision >= 0
 		&& Payload.LiquidUnits > 0.0
 		&& Payload.IsValid();
@@ -306,12 +284,11 @@ FMD_TrashBinTiltEvaluation FMD_TrashBinSpillEvaluator::EvaluateTilt(
 		return Evaluation;
 	}
 
-	// acos round-trip이 정확한 60도를 59.999999999…로 만들어도
-	// 승인 경계를 거부하지 않는 수준의 각도 오차만 허용한다.
+	// acos 계산 오차가 정확한 경계각을 거부하지 않게 한다.
 	Evaluation.bMeetsAngle = Evaluation.TiltDegrees + TiltDegreeTolerance
 		>= static_cast<double>(Tuning.TiltThresholdDegrees);
-	Evaluation.bMeetsHold = HeldSeconds
-		>= static_cast<double>(Tuning.TiltHoldSeconds);
+	// HeldSeconds는 구 호출부의 입력 호환만 보존한다.
+	Evaluation.bMeetsHold = true;
 	Evaluation.bCanPulse = Evaluation.bMeetsAngle && Evaluation.bMeetsHold;
 	return Evaluation;
 }
@@ -323,6 +300,10 @@ FMD_TrashBinImpactEvaluation FMD_TrashBinSpillEvaluator::EvaluateImpact(
 {
 	FMD_TrashBinImpactEvaluation Evaluation;
 	Evaluation.bInputValid = Tuning.IsValid()
+		&& FMath::IsFinite(Tuning.ImpactImpulseThreshold)
+		&& Tuning.ImpactImpulseThreshold > 0.0
+		&& FMath::IsFinite(Tuning.PickupImpactIgnoreSeconds)
+		&& Tuning.PickupImpactIgnoreSeconds >= 0.0f
 		&& FMath::IsFinite(NormalImpulseMagnitude)
 		&& NormalImpulseMagnitude >= 0.0
 		&& FMath::IsFinite(SecondsSincePickup)
@@ -336,8 +317,9 @@ FMD_TrashBinImpactEvaluation FMD_TrashBinSpillEvaluator::EvaluateImpact(
 		< static_cast<double>(Tuning.PickupImpactIgnoreSeconds);
 	Evaluation.bMeetsImpulse = NormalImpulseMagnitude
 		>= Tuning.ImpactImpulseThreshold;
-	Evaluation.bCanPulse = !Evaluation.bIgnoredAfterPickup
-		&& Evaluation.bMeetsImpulse;
+	// 충격 값은 구버전 직렬화/진단 호환으로 계산만 남긴다. 현재 gameplay는
+	// 충돌만으로 액체를 유실하지 않는다.
+	Evaluation.bCanPulse = false;
 	return Evaluation;
 }
 
@@ -352,5 +334,5 @@ double FMD_TrashBinSpillEvaluator::CalculateRequestedSpillUnits(
 		return 0.0;
 	}
 
-	return FMath::Min(CurrentLiquidUnits, Tuning.SpillUnitsPerPulse);
+	return CurrentLiquidUnits;
 }

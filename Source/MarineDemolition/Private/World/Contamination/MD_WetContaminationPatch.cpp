@@ -5,7 +5,6 @@
 #include "Engine/StaticMesh.h"
 #include "Materials/MaterialInterface.h"
 #include "Net/UnrealNetwork.h"
-#include "UObject/ConstructorHelpers.h"
 
 namespace MD_WetContaminationPatchPrivate
 {
@@ -200,36 +199,34 @@ AMD_WetContaminationPatch::AMD_WetContaminationPatch()
 		FMD_WetContaminationVisualDescriptor::SurfaceOffsetCm));
 	VisualMesh->SetRelativeScale3D(FVector(0.35, 0.35, 1.0));
 
-	// 인덱스는 PatchId hash와 저장 호환 계약이다. 기존 경로를 재정렬하지 않는다.
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> WetMesh01Finder(
-		TEXT("/Game/Assets/Contamination/Wet/SM_MD_WetPatch_01.SM_MD_WetPatch_01"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> WetMesh02Finder(
-		TEXT("/Game/Assets/Contamination/Wet/SM_MD_WetPatch_02.SM_MD_WetPatch_02"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> WetMesh03Finder(
-		TEXT("/Game/Assets/Contamination/Wet/SM_MD_WetPatch_03.SM_MD_WetPatch_03"));
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> WetMesh04Finder(
-		TEXT("/Game/Assets/Contamination/Wet/SM_MD_WetPatch_04.SM_MD_WetPatch_04"));
-	VisualVariantMeshes.Reserve(
+	// 배열 인덱스는 PatchId hash와 저장 호환 계약이다. 제품 Blueprint가
+	// 01→04 순서로 에셋을 명시하며 C++는 경로를 소유하지 않는다.
+	VisualVariantMeshes.SetNum(
 		FMD_WetContaminationVisualDescriptor::VariantCount);
-	VisualVariantMeshes.Add(WetMesh01Finder.Object);
-	VisualVariantMeshes.Add(WetMesh02Finder.Object);
-	VisualVariantMeshes.Add(WetMesh03Finder.Object);
-	VisualVariantMeshes.Add(WetMesh04Finder.Object);
-	if (WetMesh01Finder.Succeeded())
-	{
-		VisualMesh->SetStaticMesh(WetMesh01Finder.Object);
-	}
-
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WetMaterialFinder(
-		TEXT("/Game/Materials/MI_MD_TrashBinSludge.MI_MD_TrashBinSludge"));
-	if (WetMaterialFinder.Succeeded())
-	{
-		VisualMesh->SetMaterial(0, WetMaterialFinder.Object);
-	}
 
 	ScrapeSurface = CreateDefaultSubobject<UMD_WetScrapeSurfaceComponent>(
 		TEXT("WetScrapeSurface"));
 	ScrapeSurface->ConfigureExternalComponents(VisualMesh, nullptr, nullptr);
+}
+
+bool AMD_WetContaminationPatch::HasCompleteVisualConfiguration() const
+{
+	if (!IsValid(VisualMesh)
+		|| !IsValid(VisualMaterial)
+		|| VisualVariantMeshes.Num()
+			!= FMD_WetContaminationVisualDescriptor::VariantCount)
+	{
+		return false;
+	}
+
+	for (const UStaticMesh* const VariantMesh : VisualVariantMeshes)
+	{
+		if (!IsValid(VariantMesh))
+		{
+			return false;
+		}
+	}
+	return true;
 }
 
 void AMD_WetContaminationPatch::BeginPlay()
@@ -404,10 +401,11 @@ void AMD_WetContaminationPatch::OnRep_Support()
 
 void AMD_WetContaminationPatch::RefreshVisual()
 {
-	if (!IsValid(VisualMesh))
+	if (!IsValid(VisualMesh) || !IsValid(VisualMaterial))
 	{
 		return;
 	}
+	VisualMesh->SetMaterial(0, VisualMaterial);
 
 	const UPrimitiveComponent* const ResolvedSupport = ResolveSupportComponent();
 	const bool bSupportReady = IsValid(ResolvedSupport)

@@ -167,10 +167,7 @@ namespace
 
 			if (!IsValid(Bin))
 			{
-				const FTransform SpawnTransform(
-					Record.Transform.GetRotation(),
-					Record.Transform.GetLocation(),
-					FVector::OneVector);
+				const FTransform SpawnTransform = Record.Transform;
 				Bin = World->SpawnActorDeferred<AMD_TrashBin>(
 					Record.TrashBinClass,
 					SpawnTransform,
@@ -188,9 +185,19 @@ namespace
 				}
 				Bin->FinishSpawning(SpawnTransform);
 			}
-			else if (!Bin->RestorePersistenceRecord(Record))
+			else
 			{
-				return false;
+				// 먼저 물리 통을 저장 transform으로 옮긴 뒤 원장을 복원해야
+				// 정적 채움 시각화와 spill 기준점이 같은 frame을 사용한다.
+				if (!Bin->SetActorTransform(
+						Record.Transform,
+						false,
+						nullptr,
+						ETeleportType::TeleportPhysics)
+					|| !Bin->RestorePersistenceRecord(Record))
+				{
+					return false;
+				}
 			}
 
 			const TWeakObjectPtr<AMD_TrashBin> BinPtr(Bin);
