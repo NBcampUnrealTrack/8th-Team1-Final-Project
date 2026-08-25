@@ -493,14 +493,13 @@ UMD_ScrapeToolComponent::RemoveScrapeLoadWithRecovery(
 		return FMD_ScrapeLoadTransferResult();
 	}
 
-	FMD_ScrapeLoadTransferResult Result = PreparedRemoval.TransferResult;
 	if (!CommitPreparedScrapeLoadRemoval(
 			MoveTemp(PreparedRemoval),
 			/*bNotifyChange=*/true))
 	{
 		return FMD_ScrapeLoadTransferResult();
 	}
-	return Result;
+	return MoveTemp(PreparedRemoval.TransferResult);
 }
 
 bool UMD_ScrapeToolComponent::TryPrepareScrapeLoadRemoval(

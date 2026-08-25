@@ -437,8 +437,9 @@ void UMD_ScrapeToolComponent::ProcessScrapeAimResult(
 		return;
 	}
 
-	// 오염 표면이 아니어도 따개비일 수 있다. 둘은 성격이 달라 경로를 갈라 둔다.
-	if (AimResult.Type != EMD_ScrapeAimQueryType::SurfaceHit)
+	// 직접 따개비가 아닌 잘못된 조준은 한 경로로 정리한다.
+	if (AimResult.Type != EMD_ScrapeAimQueryType::SurfaceHit
+		|| !IsValid(AimResult.Surface))
 	{
 		ClearCurrentScrapeContact();
 		SetTrackedBarnacle(nullptr);
@@ -449,13 +450,6 @@ void UMD_ScrapeToolComponent::ProcessScrapeAimResult(
 	FHitResult CurrentHit = AimResult.Hit;
 	UMD_ScrapeSurfaceComponent* const CurrentSurface = AimResult.Surface;
 	AMD_Barnacle* const OccludingBarnacle = AimResult.Barnacle;
-	if (!IsValid(CurrentSurface))
-	{
-		ClearCurrentScrapeContact();
-		SetTrackedBarnacle(nullptr);
-		HandleInvalidScrapeAim(SampleDeltaTime, true);
-		return;
-	}
 
 	if (!PrepareReacquiredSurface(
 			AimResult,

@@ -600,27 +600,23 @@ void UMD_ScrapeToolComponent::TerminateAuthoritativeScrapeFocus(
 void UMD_ScrapeToolComponent::ServerUpdateScrapeAim_Implementation(
 	const FMD_ScrapeAimNetSample& Sample)
 {
+	FMD_ScrapeAimQueryResult ValidatedAim;
+	float SampleDeltaTime = 0.0f;
+	int32 MissingSequences = 0;
 	if (!GetOwner()
 		|| !GetOwner()->HasAuthority()
 		|| !ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted
 		|| Sample.FocusSessionId == 0
 		|| Sample.FocusSessionId != ScrapeFocusSession.ActiveScrapeFocusSessionId
-		|| !ConsumeAuthoritativeAimRateToken(GetScrapeMonotonicSeconds()))
-	{
-		// Wrong-session과 초과-rate 표본은 session lease도 갱신하지 않는다.
-		return;
-	}
-
-	FMD_ScrapeAimQueryResult ValidatedAim;
-	float SampleDeltaTime = 0.0f;
-	int32 MissingSequences = 0;
-	if (!ValidateAndCacheAuthoritativeAim(
+		|| !ConsumeAuthoritativeAimRateToken(GetScrapeMonotonicSeconds())
+		|| !ValidateAndCacheAuthoritativeAim(
 			Sample,
 			false,
 			ValidatedAim,
 			SampleDeltaTime,
 			MissingSequences))
 	{
+		// 잘못된 session, 초과 rate, 유효하지 않은 aim은 거부한다.
 		return;
 	}
 
@@ -709,15 +705,10 @@ bool UMD_ScrapeToolComponent::RefreshScrapeFocusAim()
 		CurrentScrapeAim = FMD_ScrapeAimQueryResult();
 		return false;
 	}
-	if (!IsCurrentScrapeFocusViewportAspectCompatible())
+	if (!IsCurrentScrapeFocusViewportAspectCompatible()
+		|| !IsScrapeFocusViewOriginValid())
 	{
-		// 서버 session cone은 Begin 때 합의한 비율을 사용한다. 창 크기 변경으로
-		// 실제 비율이 달라졌다면 다른 ray를 protocol violation으로 보내기 전에 정리한다.
-		TerminateScrapeFocusFromComponent();
-		return false;
-	}
-	if (!IsScrapeFocusViewOriginValid())
-	{
+		// 화면 비율이나 View 시작점이 바뀌면 새 ray를 보내기 전에 종료한다.
 		TerminateScrapeFocusFromComponent();
 		return false;
 	}
