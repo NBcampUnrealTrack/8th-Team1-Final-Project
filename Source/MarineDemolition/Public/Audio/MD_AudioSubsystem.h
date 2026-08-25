@@ -7,6 +7,7 @@
 #include "MD_AudioSubsystem.generated.h"
 
 class UAudioComponent;
+class USoundBase;
 class USubmixEffectFilterPreset;
 
 /** 루프 사운드를 나중에 멈추기 위한 핸들 */
@@ -115,6 +116,13 @@ private:
 	UAudioComponent* SpawnForEntry(const FMD_AudioEntry& Entry, const FVector& Location,
 		USceneComponent* AttachTo, FName SocketName, bool bForce2D);
 
+	/**
+	 * 지금은 조건이 안 맞아 재생할 수 없지만, 조건이 돌아오면 시작해야 하는
+	 * 자동관리 루프를 요청만 등록한다. (수면 위 앰비를 물속에서 요청한 경우 등)
+	 */
+	FMD_AudioHandle RegisterPendingLoop(const FGameplayTag& EventTag, const FVector& Location,
+		USceneComponent* AttachTo, FName SocketName, bool bForce2D);
+
 	void UpdateUnderwaterCutoff(float DeltaTime);
 
 	/** 캡슐 잠김으로 Env.Surface.Above 를 갱신한다 */
@@ -122,6 +130,18 @@ private:
 
 	/** 끝난 원샷 컴포넌트를 정리한다 */
 	void PruneFinished();
+
+	/**
+	 * 인덱스에 들어온 소재를 백그라운드로 미리 올린다.
+	 *
+	 * 재생 시점의 LoadSynchronous 는 첫 타에만 걸리지만, 그 첫 타가 하필
+	 * 플레이어가 처음 긁는 순간이라 "반응이 굼뜨다" 로 체감된다.
+	 * 동기로 올리면 그 비용이 레벨 로드로 옮겨갈 뿐이라 카탈로그가 커질수록
+	 * 로딩이 길어진다. 핸들을 들고 있으면 GC 로 풀리는 것도 막힌다.
+	 *
+	 * 선로드가 끝나기 전에 재생 요청이 오면 그 건만 기존대로 동기 로드된다.
+	 */
+	TSharedPtr<struct FStreamableHandle> PreloadHandle;
 
 	/** EventTag → 후보 항목들 */
 	TMap<FGameplayTag, TArray<FMD_AudioEntry>> EntriesByTag;
@@ -155,6 +175,9 @@ private:
 
 		/** 항목이 지정한 기본 피치. 깊이 배율을 여기에 곱한다 */
 		float BasePitch = 1.0f;
+
+		/** 항목이 지정한 기본 정지 페이드. StopHandle 에 음수를 넘기면 이 값을 쓴다 */
+		float FadeOutSeconds = 0.1f;
 
 		// 재개에 필요한 재생 위치 정보
 		TWeakObjectPtr<USceneComponent> AttachTo;

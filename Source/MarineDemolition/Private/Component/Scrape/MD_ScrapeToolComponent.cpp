@@ -17,13 +17,13 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 
 	TraceDistanceCm = 220.0f;
 	TraceChannel = ECC_Visibility;
-	// 사운드는 태그로만 지정한다. 에셋 참조는 DA_MD_Audio_Clean 에 있다.
-	ContaminationScrapeSoundTag =
-		FGameplayTag::RequestGameplayTag(TEXT("SFX.Clean.Hera.StrokeSludge"), /*ErrorIfNotFound*/ false);
-	BareSurfaceScrapeSoundTag =
-		FGameplayTag::RequestGameplayTag(TEXT("SFX.Clean.Hera.StrokeBare"), /*ErrorIfNotFound*/ false);
+	// 긁는 소리는 지속음 하나뿐이다. 에셋 참조는 DA_MD_Audio_Clean 에 있다.
+	ScrapeLoopSoundTag =
+		FGameplayTag::RequestGameplayTag(TEXT("SFX.Clean.Hera.ScrapeSludge"), /*ErrorIfNotFound*/ false);
 	ContaminationScrapeEffect = nullptr;
 	BareSurfaceScrapeEffect = nullptr;
+	ScrapeLoopIdleGraceSeconds = 0.25f;
+	ScrapeLoopMinTravelCm = 0.0f;
 	MinimumFeedbackIntervalSeconds = 0.08f;
 	bShowDebugFeedback = true;
 	ScrapeFocusPointerSensitivity = 0.0025f;
@@ -400,6 +400,116 @@ void UMD_ScrapeToolComponent::ClearCurrentScrapeContact()
 	}
 }
 
+void UMD_ScrapeToolComponent::StartScrapeLoopAudio()
+{
+	if (ScrapeLoopHandle.IsValid() || !ScrapeLoopSoundTag.IsValid())
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	UMD_AudioSubsystem* Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr;
+	AActor* Owner = GetOwner();
+	if (!Audio || !IsValid(Owner))
+	{
+		return;
+	}
+
+	// 헤라는 손에 있다. 벽이 아니라 캐릭터를 따라가야 한다
+	ScrapeLoopHandle = Audio->PlayEventAttached(ScrapeLoopSoundTag, Owner->GetRootComponent());
+}
+
+void UMD_ScrapeToolComponent::StopScrapeLoopAudio()
+{
+	if (!ScrapeLoopHandle.IsValid())
+	{
+		return;
+	}
+
+	const UWorld* World = GetWorld();
+	if (UMD_AudioSubsystem* Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr)
+	{
+		// 음수 = 데이터 에셋의 FadeOutSeconds 를 쓴다
+		Audio->StopHandle(ScrapeLoopHandle, -1.0f);
+	}
+
+	ScrapeLoopHandle = FMD_AudioHandle();
+}
+
+void UMD_ScrapeToolComponent::UpdateScrapeLoopAudio()
+{
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return;
+	}
+
+	if (!bIsScraping)
+	{
+		StopScrapeLoopAudio();
+		return;
+	}
+
+	const double Now = World->GetTimeSeconds();
+
+	// 커밋된 경로만 보면 안 된다. 이동량은 Pending 에 모였다가 임계값을 넘을 때
+	// 한 덩어리로 넘어오므로, 그것만 보면 스트로크 첫 구간에서 소리가 늦게 붙는다.
+	// 두 값을 합치면 드래그하는 동안 연속으로 증가한다
+	const double Arc =
+		StrokePath.ScrapePathArcLengthCm + StrokePath.PendingScrapePathArcLengthCm;
+
+	// 경로가 늘었다 = 날이 표면을 훑고 있다.
+	// 버튼만 누르고 마우스를 멈추면 이 값이 그대로라 소리가 멎는다.
+	//
+	// 방향을 꺾으면 ResetScrapePathAccumulator 가 누적을 0 으로 되돌린다.
+	// 그때 값이 거꾸로 떨어지므로 "늘었는가" 만 보면 이동으로 안 잡혀
+	// 하필 방향 전환마다 소리가 끊긴다. 경로가 리셋됐다는 것 자체가
+	// 플레이어가 날을 꺾었다는 뜻이라 이동으로 친다
+	const double PreviousArc = LastObservedScrapePathArcLengthCm;
+	const bool bPathReset = Arc < PreviousArc - UE_KINDA_SMALL_NUMBER;
+	if (bPathReset || Arc - PreviousArc > ScrapeLoopMinTravelCm)
+	{
+		LastScrapeTravelWorldSeconds = Now;
+	}
+	LastObservedScrapePathArcLengthCm = Arc;
+
+	const double ArcDelta = Arc - PreviousArc;
+	const bool bDragging =
+		(Now - LastScrapeTravelWorldSeconds) <= static_cast<double>(ScrapeLoopIdleGraceSeconds);
+	DrawScrapeAudioDebug(Now, Arc, ArcDelta, bDragging);
+
+	if (!bDragging)
+	{
+		StopScrapeLoopAudio();
+		return;
+	}
+
+	// 소재는 하나뿐이다. 면 상태에 따라 갈아 끼우면 훑는 중에 소리가 바뀌어 산만해진다
+	StartScrapeLoopAudio();
+}
+
+void UMD_ScrapeToolComponent::DrawScrapeAudioDebug(
+	double Now, double Arc, double ArcDelta, bool bDragging) const
+{
+	if (!bShowDebugFeedback || !GEngine)
+	{
+		return;
+	}
+
+	const double SinceTravel = Now - LastScrapeTravelWorldSeconds;
+
+	GEngine->AddOnScreenDebugMessage(
+		reinterpret_cast<uint64>(this) + 1,
+		0.15f,
+		bDragging ? FColor::Green : FColor::Red,
+		FString::Printf(
+			TEXT("[헤라오디오] drag=%s | arc=%.2f d=%.3f | 이동후=%.2fs | handle=%s"),
+			bDragging ? TEXT("O") : TEXT("X"),
+			Arc, ArcDelta,
+			SinceTravel > 1000.0 ? -1.0 : SinceTravel,
+			ScrapeLoopHandle.IsValid() ? TEXT("O") : TEXT("X")));
+}
+
 void UMD_ScrapeToolComponent::StartScraping()
 {
 	if (bIsScraping)
@@ -429,6 +539,9 @@ void UMD_ScrapeToolComponent::StartScraping()
 	}
 
 	bIsScraping = true;
+	LastObservedScrapePathArcLengthCm =
+		StrokePath.ScrapePathArcLengthCm + StrokePath.PendingScrapePathArcLengthCm;
+	LastScrapeTravelWorldSeconds = -DBL_MAX;
 	ResetScrapeFocusPointerStrokeConstraint();
 	if (GetOwner() && GetOwner()->HasAuthority())
 	{
@@ -471,6 +584,7 @@ void UMD_ScrapeToolComponent::StopScraping()
 {
 	const bool bWasScraping = bIsScraping;
 	bIsScraping = false;
+	StopScrapeLoopAudio();
 	ResetScrapeFocusPointerStrokeConstraint();
 	ResetStrokeTracking();
 	ResetInvalidScrapeAim();
@@ -492,6 +606,8 @@ void UMD_ScrapeToolComponent::TickComponent(
 	FActorComponentTickFunction* ThisTickFunction)
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+
+	UpdateScrapeLoopAudio();
 
 	if (!IsScrapeFocusActive() && !bIsScraping)
 	{
@@ -639,23 +755,11 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 		Result.ContactType == EMD_ScrapeContactType::BareSurfaceOnly
 		|| Result.ContactType == EMD_ScrapeContactType::Mixed;
 
-	const FGameplayTag& FeedbackSoundTag = bBareSurfaceFeedback
-		? BareSurfaceScrapeSoundTag
-		: ContaminationScrapeSoundTag;
+	// 긁는 소리는 지속음(ScrapeLoopSoundTag) 하나로 끝낸다.
+	// 면에 따라 원샷을 덧대면 훑는 중에 소재가 바뀌어 들려 산만하다
 	UNiagaraSystem* FeedbackEffect = bBareSurfaceFeedback
 		? BareSurfaceScrapeEffect
 		: ContaminationScrapeEffect;
-
-	if (FeedbackSoundTag.IsValid())
-	{
-		if (const UWorld* World = GetWorld())
-		{
-			if (UMD_AudioSubsystem* Audio = World->GetSubsystem<UMD_AudioSubsystem>())
-			{
-				Audio->PlayEventAtLocation(FeedbackSoundTag, ContactLocation);
-			}
-		}
-	}
 
 	if (FeedbackEffect)
 	{
@@ -672,7 +776,7 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 			EffectRotation);
 	}
 
-	if (FeedbackSoundTag.IsValid() || FeedbackEffect)
+	if (FeedbackEffect)
 	{
 		LastFeedbackWorldSeconds = WorldSeconds;
 	}

@@ -35,6 +35,15 @@ namespace MDGameplayTags
 	/** 물리 보관함에 담을 수 있는 각종 쓰레기 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content_Trash);
 
+	/**
+	 * 절단기로 자를 수 있는 대상. 이 태그가 붙은 액터를 조준했을 때만
+	 * 절단 어빌리티가 발동한다. 격벽뿐 아니라 퀘스트 오브젝트에도 붙인다.
+	 *
+	 * 블루프린트 액터는 디테일 패널의 Actor Tags 에 `Interaction.Cuttable` 을
+	 * 문자열로 넣어도 인식된다 (UMD_GA_WallBase::ActorHasAnyTargetTag).
+	 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Cuttable);
+
 	/** 상호작용한 대상을 월드의 물리 오브젝트로 운반하는 픽업 방식 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Pickup_Physics);
 

@@ -218,6 +218,11 @@ namespace MDGameplayTags
 
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Interaction_Cuttable,
+		"Interaction.Cuttable",
+		"절단기로 자를 수 있는 대상. 이 태그가 있어야 절단 몽타주가 재생된다");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		State_Swimming,
 		"State.Swimming",
 		"수영 중. 정밀 작업 어빌리티 차단용");

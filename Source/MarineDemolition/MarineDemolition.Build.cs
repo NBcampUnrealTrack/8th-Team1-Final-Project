@@ -28,7 +28,7 @@ public class MarineDemolition : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
-			"ImageWrapper", "Slate", "SlateCore",
+			"ImageWrapper", "Slate", "SlateCore", "MoviePlayer",
 			"DeveloperSettings",
 			"ApplicationCore",
 			"CoreOnline",

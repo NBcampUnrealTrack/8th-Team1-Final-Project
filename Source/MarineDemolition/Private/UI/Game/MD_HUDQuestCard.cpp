@@ -1,84 +1,80 @@
-#include "UI/Game/MD_HUDQuestCard.h"
+﻿#include "UI/Game/MD_HUDQuestCard.h"
 
-#include "Components/ProgressBar.h"
 #include "Components/TextBlock.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
+#include "UI/Merchant/MD_MerchantUITypes.h"
 
 void UMD_HUDQuestCard::SetMainQuest(const FMD_MainQuestState& QuestState)
 {
-	const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
-	// 유효 원본에서 현재 단계가 확인된 경우에만 메인 카드 데이터를 적용하기 위한 결과
-	bool bIsDefinitionValid = IsValid(Definition);
-	bool bHasCurrentPhase = bIsDefinitionValid == true && Definition->HasPhase(QuestState.CurrentPhaseIndex) == true;
-	if (bHasCurrentPhase == true)
-	{
-		ApplyMainQuestData(*Definition, QuestState.CurrentPhaseIndex, QuestState.CurrentProgress);
-	}
+	// 메인 퀘스트 상태에서 카드 표시에 필요한 공통 값만 전달한다.
+	SetQuest(QuestState.DefinitionId, QuestState.CurrentPhaseIndex, QuestState.CurrentProgress, EMD_QuestTab::Main);
 }
 
 void UMD_HUDQuestCard::SetRepeatQuest(const FMD_RepeatQuestState& QuestState)
 {
-	// 반복 퀘스트 상태의 PrimaryAssetId와 현재 페이즈를 HUD 표시 정보로 적용하는 처리
-	ApplyRepeatQuestData(QuestState);
+	// 반복 퀘스트 상태에서 카드 표시에 필요한 공통 값만 전달한다.
+	SetQuest(QuestState.DefinitionId, QuestState.CurrentPhaseIndex, QuestState.CurrentProgress, EMD_QuestTab::Repeat);
 }
 
-void UMD_HUDQuestCard::ApplyRepeatQuestData(const FMD_RepeatQuestState& QuestState)
+void UMD_HUDQuestCard::SetQuest(FPrimaryAssetId DefinitionId, int32 PhaseIndex, int32 CurrentProgress, EMD_QuestTab QuestType)
 {
-	const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
-	const bool bHasCurrentPhase = IsValid(Definition) == true && Definition->HasPhase(QuestState.CurrentPhaseIndex) == true;
+	// 공통 식별자로 퀘스트 표시 원본을 불러온다.
+	UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(DefinitionId);
 
-	if (IsValid(Txt_QuestKind) == true)
+	// 원본을 불러오지 못한 카드에는 잘못된 정보를 표시하지 않는다.
+	// 존재하지 않는 페이즈의 진행 정보는 카드에 적용하지 않는다.
+	if (IsValid(Definition) == false || Definition->HasPhase(PhaseIndex) == false)
 	{
-		Txt_QuestKind->SetText(FText::FromString(TEXT("반복")));
+		return;
 	}
 
-	if (IsValid(Txt_QuestName) == true)
+	// 기본 종류 문구는 메인 퀘스트로 준비한다.
+	FText QuestKindText = FText::FromString(TEXT("메인"));
+	// 반복 퀘스트인 경우에만 종류 문구를 반복으로 교체한다.
+	if (QuestType == EMD_QuestTab::Repeat)
 	{
-		Txt_QuestName->SetText(IsValid(Definition) == true ? Definition->QuestName : FText::GetEmpty());
+		QuestKindText = FText::FromString(TEXT("반복"));
+	}
+	SetTextPair(Txt_QuestKind, Txt_QuestKind_Shadow, QuestKindText);
+
+	// 공통 퀘스트 제목을 본문과 그림자에 적용한다.
+	SetTextPair(Txt_QuestName, Txt_QuestName_Shadow, Definition->QuestName);
+
+	// 현재 페이즈의 목표 설명을 새 카드의 본문과 그림자에 적용한다.
+	FText QuestDescriptionText = Definition->GetHUDDescription(PhaseIndex);
+	SetTextPair(Txt_QuestDescription, Txt_QuestDescription_Shadow, QuestDescriptionText);
+
+	// 목표 수량을 보정한 뒤 숫자 진행도로 표시한다.
+	int32 RequiredCount = FMath::Max(Definition->GetRequiredCount(PhaseIndex), 1);
+	SetProgressText(CurrentProgress, RequiredCount);
+
+	// Blueprint가 퀘스트 종류에 맞는 아이콘과 색상을 적용하도록 요청한다.
+	SetQuestCardType(QuestType);
+}
+
+void UMD_HUDQuestCard::SetTextPair(UTextBlock* TextWidget, UTextBlock* ShadowWidget, FText Text)
+{
+	// 앞쪽 본문 텍스트가 존재하면 표시 내용을 적용한다.
+	if (IsValid(TextWidget) == true)
+	{
+		TextWidget->SetText(Text);
 	}
 
-	if (IsValid(Txt_QuestDescription) == true)
+	// 뒤쪽 그림자 텍스트가 존재하면 본문과 같은 내용을 적용한다.
+	if (IsValid(ShadowWidget) == true)
 	{
-		// 에셋에서 현재 페이즈에 직접 작성한 HUD 목표 내용만 표시하는 본문
-		FText PhaseDescription = bHasCurrentPhase == true ? Definition->GetHUDDescription(QuestState.CurrentPhaseIndex) : FText::GetEmpty();
-		Txt_QuestDescription->SetText(PhaseDescription);
-	}
-
-	if (IsValid(PB_QuestProgressRate) == true)
-	{
-		int32 RequiredCount = bHasCurrentPhase == true ? FMath::Max(Definition->GetRequiredCount(QuestState.CurrentPhaseIndex), 1) : 1;
-		int32 ClampedProgress = FMath::Clamp(QuestState.CurrentProgress, 0, RequiredCount);
-		float ProgressRate = FMath::SafeDivide<float, float>(ClampedProgress, RequiredCount);
-		PB_QuestProgressRate->SetPercent(ProgressRate);
+		ShadowWidget->SetText(Text);
 	}
 }
 
-void UMD_HUDQuestCard::ApplyMainQuestData(const UMD_QuestDefinition& Definition, int32 PhaseIndex, int32 CurrentProgress)
+void UMD_HUDQuestCard::SetProgressText(int32 CurrentProgress, int32 RequiredCount)
 {
-	if (IsValid(Txt_QuestKind) == true)
-	{
-		// 메인 퀘스트 전용 경로에서 카드 종류를 고정하는 표시
-		Txt_QuestKind->SetText(FText::FromString(TEXT("메인")));
-	}
+	// 목표 수량 범위 안에서 표시할 현재 진행도를 보정한다.
+	int32 ClampedProgress = FMath::Clamp(CurrentProgress, 0, RequiredCount);
 
-	if (IsValid(Txt_QuestName) == true)
-	{
-		// 퀘스트 제목 전용 영역에 정의된 이름 적용
-		Txt_QuestName->SetText(Definition.QuestName);
-	}
+	// 새 카드가 사용하는 현재 수량/목표 수량 형식의 텍스트를 만든다.
+	FText ProgressText = FText::Format(NSLOCTEXT("MDHUDQuestCard", "QuestProgress", "{0}/{1}"), ClampedProgress, RequiredCount);
 
-	if (IsValid(Txt_QuestDescription) == true)
-	{
-		// 퀘스트 본문 전용 영역에 정의된 목표 설명 적용
-		Txt_QuestDescription->SetText(Definition.GetHUDDescription(PhaseIndex));
-	}
-
-	if (IsValid(PB_QuestProgressRate) == true)
-	{
-		// 잘못된 목표 수량에서도 0으로 나누지 않도록 보정한 진행률 계산
-		int32 RequiredCount = FMath::Max(Definition.GetRequiredCount(PhaseIndex), 1);
-		int32 ClampedProgress = FMath::Clamp(CurrentProgress, 0, RequiredCount);
-		float ProgressRate = FMath::SafeDivide<float, float>(ClampedProgress, RequiredCount);
-		PB_QuestProgressRate->SetPercent(ProgressRate);
-	}
+	// 진행도 본문과 그림자에 같은 값을 적용한다.
+	SetTextPair(Txt_Progress, Txt_Progress_Shadow, ProgressText);
 }
