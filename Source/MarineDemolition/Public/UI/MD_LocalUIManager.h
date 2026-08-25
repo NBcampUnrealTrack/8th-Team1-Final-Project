@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -39,7 +39,7 @@ protected:
 
 	// 동시에 진행 중인 Async UI 요청이 PrimaryLayout 입력을 차단한 횟수를 보관한다.
 	UPROPERTY(Transient)
-	int32 AsyncInputSuspensionCount = 0;
+	int32 InputBlockRequestCount = 0;
 
 	// 첫 Async 입력 차단 전에 PrimaryLayout이 사용하던 활성 상태를 보관한다.
 	UPROPERTY(Transient)
@@ -101,10 +101,10 @@ public:
 	UCommonActivatableWidget* PushScreenToLayerInitialized(FGameplayTag LayerTag, TSubclassOf<UCommonActivatableWidget> ScreenClass, TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen);
 
 	// Async 화면 로드 중 PrimaryLayout의 중복 입력을 차단한다.
-	void SuspendInputForAsyncRequest();
+	void BlockInputDuringPush();
 
 	// 완료된 Async 요청의 입력 차단을 해제하고 기존 활성 상태를 복구한다.
-	void ResumeInputForAsyncRequest();
+	void UnblockInputAfterPush();
 
 	// 현재 World에 속한 Async UI 요청이 저장할 세대 번호를 반환한다.
 	FORCEINLINE uint32 GetWorldGeneration() const { return WorldGeneration; }
