@@ -1,0 +1,1068 @@
+<title>TR-9 터널 단면도</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    --paper:      #E7EBEC;
+    --paper-2:    #F3F6F6;
+    --ink:        #12191F;
+    --ink-2:      #4A585F;
+    --ink-3:      #7C8A91;
+    --rule:       #C0C9CC;
+    --water:      #16626F;
+    --water-fill: rgba(22, 98, 111, .17);
+    --air:        #A8730F;
+    --air-fill:   rgba(228, 178, 60, .45);
+    --steel:      #6E7A80;
+    --steel-fill: rgba(110, 122, 128, .18);
+    --rust:       #A8502A;
+    --rust-fill:  rgba(168, 80, 42, .16);
+    --rock:       #A9B0B0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0D1417;
+      --paper-2:    #141D21;
+      --ink:        #DCE3E5;
+      --ink-2:      #9AA8AF;
+      --ink-3:      #6B7A81;
+      --rule:       #2A363B;
+      --water:      #4FA9BB;
+      --water-fill: rgba(79, 169, 187, .15);
+      --air:        #E9BE52;
+      --air-fill:   rgba(233, 190, 82, .32);
+      --steel:      #8A979E;
+      --steel-fill: rgba(138, 151, 158, .18);
+      --rust:       #C87A48;
+      --rust-fill:  rgba(200, 122, 72, .16);
+      --rock:       #46545A;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0D1417;
+    --paper-2:    #141D21;
+    --ink:        #DCE3E5;
+    --ink-2:      #9AA8AF;
+    --ink-3:      #6B7A81;
+    --rule:       #2A363B;
+    --water:      #4FA9BB;
+    --water-fill: rgba(79, 169, 187, .15);
+    --air:        #E9BE52;
+    --air-fill:   rgba(233, 190, 82, .32);
+    --steel:      #8A979E;
+    --steel-fill: rgba(138, 151, 158, .18);
+    --rust:       #C87A48;
+    --rust-fill:  rgba(200, 122, 72, .16);
+    --rock:       #46545A;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .sheet {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 40px 28px 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 46px;
+  }
+
+  .titleblock {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px 32px;
+    align-items: end;
+    border-bottom: 2px solid var(--ink);
+    padding-bottom: 14px;
+  }
+  .eyebrow {
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 600; font-size: 13px;
+    letter-spacing: .14em; text-transform: uppercase;
+    color: var(--ink-3); margin: 0 0 2px;
+  }
+  h1 {
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 700;
+    font-size: clamp(30px, 5vw, 46px);
+    line-height: 1.02; letter-spacing: -.005em;
+    margin: 0; text-wrap: balance;
+  }
+  .rev {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; color: var(--ink-2);
+    text-align: right; line-height: 1.9; white-space: nowrap;
+  }
+
+  .specstrip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+    gap: 1px; background: var(--rule); border: 1px solid var(--rule);
+  }
+  .spec { background: var(--paper-2); padding: 11px 13px; }
+  .spec dt {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 12px; font-weight: 600;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3);
+  }
+  .spec dd {
+    margin: 1px 0 0; font-family: "IBM Plex Mono", monospace;
+    font-size: 15px; font-variant-numeric: tabular-nums;
+  }
+
+  section { display: flex; flex-direction: column; gap: 16px; }
+
+  h2 {
+    font-family: "Barlow Condensed", sans-serif;
+    font-weight: 700; font-size: 24px; letter-spacing: .01em;
+    margin: 0; padding-bottom: 6px; border-bottom: 1px solid var(--rule);
+    display: flex; align-items: baseline; gap: 12px;
+  }
+  h2 .num { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--ink-3); font-weight: 400; }
+  h3 { font-family: "Barlow Condensed", sans-serif; font-weight: 600; font-size: 17px; letter-spacing: .02em; margin: 0; }
+  p { margin: 0; max-width: 68ch; }
+  .lede { color: var(--ink-2); }
+
+  figure { margin: 0; display: flex; flex-direction: column; gap: 10px; }
+  .plate { background: var(--paper-2); border: 1px solid var(--rule); overflow-x: auto; padding: 4px; }
+  .plate svg { display: block; height: auto; }
+  .plate--long svg { width: 1320px; max-width: none; }
+  .plate--wide svg { width: 100%; min-width: 560px; }
+  figcaption { font-size: 13px; color: var(--ink-2); max-width: 76ch; }
+  figcaption b { color: var(--ink); font-weight: 600; }
+
+  .sections3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(238px, 1fr)); gap: 20px; }
+  .sections3 .plate svg { width: 100%; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 6px 22px;
+    color: var(--ink-2);
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 14px; letter-spacing: .02em;
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .swatch { width: 20px; height: 10px; border: 1px solid var(--ink-3); flex: none; }
+  .sw-water { background: var(--water-fill); border-color: var(--water); }
+  .sw-air   { background: var(--air-fill);   border-color: var(--air); }
+  .sw-steel { background: var(--steel-fill); border-color: var(--steel); }
+  .sw-rust  { background: var(--rust-fill);  border-color: var(--rust); }
+  .sw-dash  { background: none; border: 1px dashed var(--ink-2); }
+
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); }
+  table { border-collapse: collapse; width: 100%; min-width: 700px; font-size: 14px; }
+  caption { text-align: left; padding: 10px 12px; font-size: 13px; color: var(--ink-2); background: var(--paper-2); border-bottom: 1px solid var(--rule); }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  thead th {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 13px; font-weight: 600; letter-spacing: .09em;
+    text-transform: uppercase; color: var(--ink-3);
+    background: var(--paper-2); white-space: nowrap;
+  }
+  td.num, th.num { font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  tbody tr:last-child td { border-bottom: none; }
+  .gate { font-family: "IBM Plex Mono", monospace; font-weight: 500; color: var(--air); white-space: nowrap; }
+  .tag-air { color: var(--air); font-weight: 600; }
+  .tag-rust { color: var(--rust); font-weight: 600; }
+  .inout {
+    font-family: "Barlow Condensed", sans-serif;
+    font-size: 13px; letter-spacing: .06em;
+    padding: 1px 7px; border: 1px solid currentColor; white-space: nowrap;
+  }
+  .inout--in { color: var(--steel); }
+  .inout--out { color: var(--water); }
+
+  .notes { display: flex; flex-direction: column; gap: 18px; }
+  .note { border-left: 3px solid var(--rule); padding: 2px 0 2px 16px; display: flex; flex-direction: column; gap: 5px; }
+  .note--flag { border-left-color: var(--air); }
+  .note h3 { display: flex; gap: 9px; align-items: baseline; }
+  .note h3 .ix { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-3); font-weight: 400; }
+  .note p { font-size: 14px; }
+  .decide { font-family: "Barlow Condensed", sans-serif; font-size: 14px; letter-spacing: .03em; color: var(--air); }
+
+  code {
+    font-family: "IBM Plex Mono", monospace; font-size: .9em;
+    background: var(--paper-2); border: 1px solid var(--rule); padding: .5px 4px;
+  }
+  footer { border-top: 1px solid var(--rule); padding-top: 14px; font-size: 13px; color: var(--ink-3); }
+</style>
+
+<div class="sheet">
+
+  <header class="titleblock">
+    <div>
+      <p class="eyebrow">TR-9 관통선 · 침수 화물열차</p>
+      <h1>터널 종·횡단면도</h1>
+    </div>
+    <div class="rev">
+      도면 A-02 · 초안<br>
+      기준 <code>02 TR-9 레벨 배치</code> v2<br>
+      키트 <code>Art/Blender/TR9</code>
+    </div>
+  </header>
+
+  <dl class="specstrip">
+    <div class="spec"><dt>터널 내경</dt><dd>8.00 × 8.00 m</dd></div>
+    <div class="spec"><dt>보어 구성</dt><dd>다리 4.0 + R4.0</dd></div>
+    <div class="spec"><dt>라이닝</dt><dd>0.30 m</dd></div>
+    <div class="spec"><dt>베이 피치</dt><dd>4.00 m</dd></div>
+    <div class="spec"><dt>편성</dt><dd>결합 2묶음 + 단독 2</dd></div>
+    <div class="spec"><dt>공동</dt><dd>수직구 Ø16 · 대피선 14</dd></div>
+    <div class="spec"><dt>유개화차</dt><dd>15.0 × 3.0 × 3.6 m</dd></div>
+    <div class="spec"><dt>침수</dt><dd>전 구간 만수</dd></div>
+    <div class="spec"><dt>기믹 게이트</dt><dd>G1 – G4</dd></div>
+    <div class="spec"><dt>에어포켓</dt><dd>AP-0 – AP-3</dd></div>
+    <div class="spec"><dt>도면 연장</dt><dd>0 – 240 m</dd></div>
+  </dl>
+
+  <!-- ===================== A 종단면 ===================== -->
+  <section>
+    <h2><span class="num">A</span> 평면 — 척추 하나에 공동 둘, 갈래 둘</h2>
+    <p class="lede">직선 보어만으로는 리듬이 없다. 8 m 척추는 그대로 두되 <b>넓은 공동 둘</b>을 끼우고 <b>막다른 갈래 둘</b>을 붙였다. 폭과 갈림은 종단면으로는 그릴 수 없어 평면이 따로 필요하다.</p>
+
+    <figure>
+      <div class="plate plate--long">
+        <svg viewBox="0 0 1320 430" role="img" aria-label="TR-9 터널 평면도. 0에서 240미터 직선 보어를 척추로, 55에서 85미터에 지름 16미터 환기 수직구 공동, 131에서 171미터에 폭 14미터 복선 대피선 공동이 있고, 공동에서 펌프실과 기관실 두 갈래가 뻗는다.">
+          <defs>
+            <pattern id="pRock" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+              <line x1="0" y1="0" x2="0" y2="7" stroke="var(--rock)" stroke-width="1"/>
+            </pattern>
+            <pattern id="pChoke" width="5" height="5" patternTransform="rotate(-45)" patternUnits="userSpaceOnUse">
+              <line x1="0" y1="0" x2="0" y2="5" stroke="var(--rust)" stroke-width=".9"/>
+            </pattern>
+            <marker id="pArrow" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+              <polygon points="0,1 8,4 0,7" fill="var(--ink-2)"/>
+            </marker>
+          </defs>
+
+          <text x="60" y="20" font-family="Barlow Condensed" font-size="12" letter-spacing=".1em" fill="var(--ink-3)">평면 · 축척 1:200 (왜곡 없음)</text>
+          <text x="1260" y="20" text-anchor="end" font-family="Barlow Condensed" font-size="11.5" letter-spacing=".08em" fill="var(--ink-3)">보어 내경 8 m · 공동 16 m · 대피선 14 m</text>
+
+          <!-- ===== 본선 보어 (척추) ===== -->
+          <rect x="60" y="150" width="1200" height="40" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.4"/>
+          <line x1="60" y1="170" x2="1080" y2="170" stroke="var(--steel)" stroke-width="1" stroke-dasharray="7 5" opacity=".8"/>
+
+          <!-- ===== 결합 A : 1+2호 (24-55) ===== -->
+          <rect x="180" y="155" width="75" height="30" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.6"/>
+          <rect x="257" y="155" width="75" height="30" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.6"/>
+          <path d="M 255 155 L 257 163 L 255 170 L 257 178 L 255 185" fill="none" stroke="var(--rust)" stroke-width="1.6"/>
+          <text x="256" y="146" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" font-weight="600" fill="var(--steel)">결합 A · 1+2호</text>
+
+          <!-- ===== 환기 수직구 공동 (55-85) ===== -->
+          <circle cx="410" cy="170" r="75" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.6"/>
+          <circle cx="410" cy="170" r="75" fill="none" stroke="var(--rock)" stroke-width="6" opacity=".35"/>
+          <circle cx="410" cy="170" r="30" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.8"/>
+          <text x="410" y="167" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--air)">수직구</text>
+          <text x="410" y="180" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="var(--air)">AP-1</text>
+          <text x="410" y="76" text-anchor="middle" font-family="Barlow Condensed" font-size="13" font-weight="600" letter-spacing=".04em" fill="var(--ink)">환기 수직구 공동</text>
+          <text x="410" y="90" text-anchor="middle" font-family="IBM Plex Mono" font-size="10.5" fill="var(--ink-2)">Ø16 m · 55–85</text>
+          <!-- 나선 계단 -->
+          <path d="M 410 200 A 45 45 0 0 1 455 170" fill="none" stroke="var(--steel)" stroke-width="2.4"/>
+          <path d="M 455 170 A 45 45 0 0 1 410 125" fill="none" stroke="var(--steel)" stroke-width="2.4" opacity=".55"/>
+
+          <!-- 펌프실 분기 (공동 남측) -->
+          <rect x="368" y="272" width="84" height="58" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.4"/>
+          <rect x="380" y="288" width="26" height="26" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.6"/>
+          <circle cx="428" cy="301" r="11" fill="none" stroke="var(--rust)" stroke-width="1.6"/>
+          <rect x="392" y="244" width="36" height="30" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.4"/>
+          <text x="410" y="344" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--ink)">펌프실</text>
+          <text x="410" y="358" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="var(--ink-2)">12 × 9 m · 막다른 방</text>
+          <g font-family="IBM Plex Mono" font-size="11" font-weight="500">
+            <rect x="458" y="292" width="28" height="17" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.2"/>
+            <text x="472" y="305" text-anchor="middle" fill="var(--air)">G3</text>
+          </g>
+          <text x="492" y="299" font-family="Barlow Condensed" font-size="11" fill="var(--ink-2)">폼건 2 · 테이프 1</text>
+          <text x="492" y="311" font-family="Barlow Condensed" font-size="11" fill="var(--air)">→ AP-3 생성</text>
+
+          <!-- ===== 3호 단독 (85-100) ===== -->
+          <rect x="485" y="155" width="75" height="30" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.6"/>
+          <text x="522" y="146" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" font-weight="600" fill="var(--steel)">3호</text>
+          <g font-family="IBM Plex Mono" font-size="11" font-weight="500">
+            <rect x="508" y="196" width="28" height="17" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.2"/>
+            <text x="522" y="209" text-anchor="middle" fill="var(--air)">G1</text>
+          </g>
+          <text x="522" y="224" text-anchor="middle" font-family="Barlow Condensed" font-size="11" fill="var(--ink-2)">지지대 2</text>
+
+          <!-- ===== 결합 B : 4+5호 (100-131) ===== -->
+          <rect x="560" y="155" width="75" height="30" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.6"/>
+          <rect x="637" y="155" width="75" height="30" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.6"/>
+          <path d="M 635 155 L 637 163 L 635 170 L 637 178 L 635 185" fill="none" stroke="var(--rust)" stroke-width="1.6"/>
+          <text x="636" y="146" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" font-weight="600" fill="var(--steel)">결합 B · 4+5호</text>
+
+          <!-- 기관실 분기 (북측) -->
+          <rect x="586" y="96" width="30" height="54" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.4"/>
+          <rect x="556" y="60" width="90" height="38" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.4"/>
+          <rect x="566" y="68" width="70" height="22" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.4"/>
+          <text x="601" y="52" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--ink)">기관실</text>
+          <text x="666" y="82" font-family="Barlow Condensed" font-size="11" fill="var(--ink-2)">TR9-R04 · 막다른 방</text>
+
+          <!-- ===== 대피선 공동 : 복선 (131-171) ===== -->
+          <path d="M 715 150 L 735 115 L 895 115 L 915 150 L 915 190 L 895 225 L 735 225 L 715 190 Z"
+                fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.6"/>
+          <text x="815" y="100" text-anchor="middle" font-family="Barlow Condensed" font-size="13" font-weight="600" letter-spacing=".04em" fill="var(--ink)">대피선 공동 · 복선</text>
+          <text x="815" y="114" text-anchor="middle" font-family="IBM Plex Mono" font-size="10.5" fill="var(--ink-2)">폭 14 m · 131–171</text>
+          <!-- 중앙 지주 기둥열 -->
+          <g fill="var(--rock)" stroke="var(--ink-3)" stroke-width="1">
+            <rect x="748" y="164" width="13" height="13"/><rect x="788" y="164" width="13" height="13"/>
+            <rect x="828" y="164" width="13" height="13"/><rect x="868" y="164" width="13" height="13"/>
+          </g>
+          <text x="815" y="158" text-anchor="middle" font-family="Barlow Condensed" font-size="10.5" fill="var(--ink-3)">중앙 지주</text>
+          <!-- 좌선(북) : 낙차 컨테이너 -> 절단기 철거 -->
+          <line x1="715" y1="135" x2="915" y2="135" stroke="var(--steel)" stroke-width="1" stroke-dasharray="7 5"/>
+          <rect x="800" y="124" width="34" height="22" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.6" transform="rotate(-12 817 135)"/>
+          <text x="770" y="131" font-family="Barlow Condensed" font-size="11" fill="var(--ink-2)">북선 · CT-B 철거</text>
+          <text x="856" y="131" font-family="Barlow Condensed" font-size="11" fill="var(--ink-3)">절단기 · 느림</text>
+          <!-- 우선(남) : 라이닝 파열 -> 폼건 -->
+          <line x1="715" y1="205" x2="915" y2="205" stroke="var(--steel)" stroke-width="1" stroke-dasharray="7 5"/>
+          <path d="M 817 225 L 810 205 L 824 205 Z" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.4"/>
+          <g stroke="var(--rust)" stroke-width="1.1" opacity=".8">
+            <line x1="817" y1="205" x2="805" y2="188"/><line x1="817" y1="205" x2="817" y2="185"/><line x1="817" y1="205" x2="829" y2="188"/>
+          </g>
+          <text x="762" y="219" font-family="Barlow Condensed" font-size="11" fill="var(--ink-2)">남선 · 파열 밀봉</text>
+          <text x="856" y="219" font-family="Barlow Condensed" font-size="11" fill="var(--ink-3)">폼건 · 빠름</text>
+          <g font-family="IBM Plex Mono" font-size="11" font-weight="500">
+            <rect x="928" y="196" width="28" height="17" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.2"/>
+            <text x="942" y="209" text-anchor="middle" fill="var(--air)">G2</text>
+          </g>
+          <text x="962" y="209" font-family="Barlow Condensed" font-size="11" fill="var(--ink-2)">폼건 1 (남선만)</text>
+
+          <!-- ===== 6호 단독 (171-186) ===== -->
+          <rect x="915" y="155" width="75" height="30" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.6"/>
+          <text x="952" y="146" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" font-weight="600" fill="var(--steel)">6호</text>
+
+          <!-- ===== 공백 + AP-2 + CT-C2 (186-196) ===== -->
+          <rect x="990" y="150" width="50" height="40" fill="url(#pChoke)" opacity=".45"/>
+          <rect x="1002" y="160" width="26" height="20" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.6"/>
+          <text x="1015" y="204" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="var(--rust)">CT-C2</text>
+          <text x="1015" y="142" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="var(--air)">AP-2</text>
+
+          <!-- ===== 터널 진입부 G4 (196-204) ===== -->
+          <rect x="1040" y="152" width="40" height="36" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.6"/>
+          <line x1="1060" y1="152" x2="1060" y2="188" stroke="var(--rust)" stroke-width="2" stroke-dasharray="5 3"/>
+          <g font-family="IBM Plex Mono" font-size="11" font-weight="500">
+            <rect x="1046" y="196" width="28" height="17" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.2"/>
+            <text x="1060" y="209" text-anchor="middle" fill="var(--air)">G4</text>
+          </g>
+          <text x="1060" y="224" text-anchor="middle" font-family="Barlow Condensed" font-size="11" fill="var(--ink-2)">지지대 1</text>
+
+          <!-- ===== 붕괴 구간 (204-240) ===== -->
+          <path d="M 1080 150 L 1260 150 L 1260 190 L 1080 190 Z" fill="url(#pRock)" opacity=".7"/>
+          <path d="M 1080 150 C 1120 158, 1160 176, 1210 168 L 1260 172 L 1260 190 L 1080 190 Z"
+                fill="var(--rock)" opacity=".5" stroke="var(--rust)" stroke-width="1.4"/>
+          <text x="1170" y="144" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--rust)">붕괴 구간</text>
+
+          <!-- ===== 체인지 ===== -->
+          <line x1="60" y1="386" x2="1260" y2="386" stroke="var(--ink-2)" stroke-width="1.2"/>
+          <g stroke="var(--ink-2)" stroke-width="1" font-family="IBM Plex Mono" font-size="10.5" fill="var(--ink-2)">
+            <line x1="60" y1="386" x2="60" y2="394"/><text x="60" y="408" text-anchor="middle" stroke="none">0</text>
+            <line x1="260" y1="386" x2="260" y2="392"/><text x="260" y="408" text-anchor="middle" stroke="none">40</text>
+            <line x1="460" y1="386" x2="460" y2="392"/><text x="460" y="408" text-anchor="middle" stroke="none">80</text>
+            <line x1="660" y1="386" x2="660" y2="392"/><text x="660" y="408" text-anchor="middle" stroke="none">120</text>
+            <line x1="860" y1="386" x2="860" y2="392"/><text x="860" y="408" text-anchor="middle" stroke="none">160</text>
+            <line x1="1060" y1="386" x2="1060" y2="392"/><text x="1060" y="408" text-anchor="middle" stroke="none">200</text>
+            <line x1="1260" y1="386" x2="1260" y2="394"/><text x="1260" y="408" text-anchor="middle" stroke="none">240</text>
+          </g>
+          <text x="60" y="424" font-family="Barlow Condensed" font-size="11.5" letter-spacing=".08em" fill="var(--ink-3)">체인지 (m) · 터널 입구 = 0</text>
+
+          <!-- 진행 방향 -->
+          <line x1="1105" y1="366" x2="1180" y2="366" stroke="var(--ink-2)" stroke-width="1.4" marker-end="url(#pArrow)"/>
+          <text x="1096" y="370" text-anchor="end" font-family="Barlow Condensed" font-size="11.5" fill="var(--ink-2)">진행</text>
+        </svg>
+      </div>
+      <figcaption><b>갈림은 "둘 중 하나 고르기"가 아니라 "가진 도구로 지날 수 있는 쪽"이다.</b> 대피선 공동에서 북선은 낙차 컨테이너를 <b>절단기로 철거</b>해야 하고(지급 도구, 느림), 남선은 라이닝 파열을 <b>폼건으로 밀봉</b>해야 한다(구매, 빠름). 폼건이 없으면 북선으로 돌아가면 되므로 막히지는 않는다 — 준비한 만큼 빨라지는 갈림이다. 양쪽은 다시 합류한다.</figcaption>
+    </figure>
+
+    <div class="tablewrap">
+      <table>
+        <caption>새로 들어간 세 공간. 터널 키트가 직선 4 m 베이 조립이라 공동은 별도 형상이 필요하다 — 제작 항목으로 남긴다.</caption>
+        <thead>
+          <tr><th>공간</th><th class="num">규격</th><th class="num">체인지</th><th>역할</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>환기 수직구 공동</b></td><td class="num">Ø16 × 14 m</td><td class="num">55 – 85</td>
+            <td>맵 중반 랜드마크. 천장 수직구가 해저까지 뚫려 <b>빛이 들어오고 공기가 갇힌다</b> — <span class="tag-air">AP-1</span>이 여기로 옮겨오고 훨씬 커진다. 벽면 나선 계단으로 수직 이동</td>
+          </tr>
+          <tr>
+            <td><b>펌프실</b> (갈래)</td><td class="num">12 × 9 × 5 m</td><td class="num">공동에서 분기</td>
+            <td><span class="gate">G3</span>가 여기로 온다. 배수 펌프가 추상적인 "회로"가 아니라 <b>실제 방</b>이 되고, 파훼하면 <span class="tag-air">AP-3</span>가 생긴다. 막다른 방</td>
+          </tr>
+          <tr>
+            <td><b>대피선 공동</b></td><td class="num">폭 14 m · 복선</td><td class="num">131 – 171</td>
+            <td>중앙 지주 기둥열을 사이에 두고 <b>북선·남선이 갈렸다 합류</b>한다. 양쪽 장애물이 요구하는 도구가 다르다</td>
+          </tr>
+          <tr>
+            <td><b>기관실</b> (갈래)</td><td class="num">7300호대 1량</td><td class="num">결합 B에서 분기</td>
+            <td>기존 반복 퀘스트 TR9-R04. 막다른 방</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2><span class="num">B</span> 종단면 — 내부·외부 교대 진행</h2>
+    <p class="lede">열차는 균일하게 끊어지지 않았다. <b>아직 결합된 묶음 둘</b>(1+2호, 4+5호)과 <b>완전히 떨어진 단독 둘</b>(3호, 6호)이 공백을 사이에 두고 흩어져 있다. 결합 구역은 충돌로 끝벽이 찢겨 <b>내부가 연속 통로</b>가 되고, 단독 칸은 한 칸만 통과한다. 평판차는 전복되어 공백에 잔해로 남았고, 쏟아진 컨테이너가 낙차물이자 <b>화차 옆 보어를 막은 원인</b>이다.</p>
+
+    <figure>
+      <div class="plate plate--long">
+        <svg viewBox="0 0 1320 392" role="img" aria-label="TR-9 터널 종단면도. 0에서 240미터. 결합 화차 두 묶음과 단독 두 칸 사이에 환기 수직구 공동과 복선 대피선 공동이 끼어 있고, 수직구 상부에 대형 에어포켓이 있다.">
+          <defs>
+            <pattern id="rockHatch" width="7" height="7" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+              <line x1="0" y1="0" x2="0" y2="7" stroke="var(--rock)" stroke-width="1"/>
+            </pattern>
+            <pattern id="chokeHatch" width="5" height="5" patternTransform="rotate(-45)" patternUnits="userSpaceOnUse">
+              <line x1="0" y1="0" x2="0" y2="5" stroke="var(--rust)" stroke-width=".9"/>
+            </pattern>
+            <marker id="ahUp" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto">
+              <polygon points="0,1 8,4 0,7" fill="var(--air)"/>
+            </marker>
+          </defs>
+
+          <rect x="70" y="24" width="1200" height="30" fill="url(#rockHatch)"/>
+          <line x1="70" y1="24" x2="1270" y2="24" stroke="var(--rock)" stroke-width="1"/>
+          <text x="76" y="19" font-family="Barlow Condensed" font-size="12" letter-spacing=".1em" fill="var(--ink-3)">해저 암반 / 오버버든</text>
+          <text x="1270" y="19" text-anchor="end" font-family="Barlow Condensed" font-size="11.5" letter-spacing=".08em" fill="var(--ink-3)">수평 1:5 · 수직 1:2 (수직 2.5배 강조)</text>
+
+          <rect x="70" y="54" width="1200" height="6" fill="var(--rock)" opacity=".55"/>
+          <rect x="70" y="204" width="1200" height="6" fill="var(--rock)" opacity=".55"/>
+          <rect x="70" y="60" width="1200" height="144" fill="var(--water-fill)"/>
+          <line x1="70" y1="60" x2="1270" y2="60" stroke="var(--water)" stroke-width="1.6"/>
+          <line x1="70" y1="204" x2="1270" y2="204" stroke="var(--water)" stroke-width="1.6"/>
+          <line x1="70" y1="200" x2="1050" y2="200" stroke="var(--steel)" stroke-width="1.6"/>
+
+          <!-- 결합 A : 1+2호  24-55 -->
+          <rect x="190" y="60" width="155" height="75" fill="url(#chokeHatch)" opacity=".55"/>
+          <rect x="190" y="135" width="75" height="65" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.8"/>
+          <rect x="270" y="135" width="75" height="65" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.8"/>
+          <line x1="190" y1="135" x2="190" y2="200" stroke="var(--rust)" stroke-width="3"/>
+          <path d="M 265 135 L 270 148 L 265 162 L 270 176 L 265 190 L 270 200" fill="none" stroke="var(--rust)" stroke-width="2"/>
+          <path d="M 192 135 L 343 135 L 343 149 L 192 149 Z" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.4"/>
+          <text x="267" y="129" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" font-weight="600" fill="var(--air)">AP-0 · 지붕 아래</text>
+          <text x="267" y="222" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" letter-spacing=".05em" fill="var(--steel)">결합 A · 1+2호</text>
+
+          <!-- 환기 수직구 공동 55-85 : 보어가 위아래로 확장 + 수직구 -->
+          <rect x="345" y="30" width="150" height="180" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.8"/>
+          <rect x="390" y="0" width="60" height="34" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.6"/>
+          <rect x="390" y="0" width="60" height="26" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.8"/>
+          <text x="420" y="17" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" font-weight="500" fill="var(--air)">AP-1</text>
+          <text x="466" y="16" font-family="Barlow Condensed" font-size="11" fill="var(--air)">수직구가 공기를 가둔다</text>
+          <text x="420" y="48" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--ink)">환기 수직구 공동</text>
+          <path d="M 420 200 A 52 52 0 0 1 470 148" fill="none" stroke="var(--steel)" stroke-width="2.4"/>
+          <path d="M 470 148 A 52 52 0 0 1 420 96" fill="none" stroke="var(--steel)" stroke-width="2.4" opacity=".5"/>
+          <text x="420" y="222" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="var(--ink-2)">Ø16 m · 펌프실 분기</text>
+
+          <!-- 3호 단독 85-100 (G1) -->
+          <rect x="495" y="60" width="75" height="75" fill="url(#chokeHatch)" opacity=".55"/>
+          <rect x="495" y="135" width="75" height="65" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.8"/>
+          <line x1="570" y1="135" x2="570" y2="200" stroke="var(--rust)" stroke-width="3"/>
+          <path d="M 495 135 L 520 155 L 546 150 L 570 135 Z" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.4"/>
+          <text x="532" y="182" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--ink)">3호</text>
+
+          <!-- 결합 B : 4+5호 100-131 -->
+          <rect x="570" y="60" width="155" height="75" fill="url(#chokeHatch)" opacity=".55"/>
+          <rect x="570" y="135" width="75" height="65" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.8"/>
+          <rect x="650" y="135" width="75" height="65" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.8"/>
+          <line x1="570" y1="135" x2="570" y2="200" stroke="var(--rust)" stroke-width="3"/>
+          <path d="M 645 135 L 650 148 L 645 162 L 650 176 L 645 190 L 650 200" fill="none" stroke="var(--rust)" stroke-width="2"/>
+          <text x="647" y="222" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" letter-spacing=".05em" fill="var(--steel)">결합 B · 4+5호</text>
+
+          <!-- 대피선 공동 131-171 : 폭 확장은 평면도, 여기서는 높이만 -->
+          <rect x="725" y="46" width="200" height="164" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.8"/>
+          <g fill="var(--rock)" stroke="var(--ink-3)" stroke-width="1">
+            <rect x="758" y="46" width="14" height="158"/><rect x="818" y="46" width="14" height="158"/>
+            <rect x="878" y="46" width="14" height="158"/>
+          </g>
+          <text x="825" y="40" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--ink)">대피선 공동 · 복선 (평면도 참조)</text>
+          <rect x="800" y="170" width="34" height="26" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.6" transform="rotate(-10 817 183)"/>
+          <text x="825" y="222" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="var(--ink-2)">폭 14 m · 중앙 지주</text>
+
+          <!-- 6호 단독 171-186 -->
+          <rect x="925" y="60" width="75" height="75" fill="url(#chokeHatch)" opacity=".55"/>
+          <rect x="925" y="135" width="75" height="65" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.8"/>
+          <line x1="1000" y1="135" x2="1000" y2="200" stroke="var(--rust)" stroke-width="3"/>
+          <text x="962" y="182" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--ink)">6호</text>
+
+          <!-- AP-2 + CT-C2  186-196 -->
+          <path d="M 1000 60 L 1050 60 L 1050 86 L 1000 86 Z" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.6"/>
+          <text x="1025" y="52" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" font-weight="600" fill="var(--air)">AP-2</text>
+          <rect x="1000" y="60" width="50" height="72" fill="url(#chokeHatch)" opacity=".5"/>
+          <rect x="1006" y="132" width="40" height="68" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.8"/>
+          <line x1="1004" y1="146" x2="1048" y2="146" stroke="var(--air)" stroke-width="2.2"/>
+          <line x1="1004" y1="186" x2="1048" y2="186" stroke="var(--air)" stroke-width="2.2"/>
+          <line x1="1025" y1="128" x2="1025" y2="96" stroke="var(--air)" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ahUp)"/>
+          <text x="1025" y="222" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="var(--rust)">CT-C2 · 필수</text>
+
+          <!-- 터널 진입부 196-204 -->
+          <rect x="1050" y="86" width="40" height="114" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1.8"/>
+          <line x1="1064" y1="86" x2="1064" y2="200" stroke="var(--rust)" stroke-width="2.4" stroke-dasharray="5 3"/>
+          <text x="1070" y="80" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" font-weight="600" fill="var(--ink)">문 1</text>
+
+          <!-- 붕괴 204-240 -->
+          <path d="M 1090 60 C 1130 100, 1175 132, 1225 152 L 1270 162 L 1270 204 L 1090 204 Z" fill="var(--rock)" opacity=".55" stroke="var(--rust)" stroke-width="1.4"/>
+          <text x="1180" y="96" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--rust)">붕괴</text>
+
+          <!-- 게이트 -->
+          <g font-family="IBM Plex Mono" font-size="11" font-weight="500">
+            <rect x="518" y="240" width="28" height="17" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.2"/><text x="532" y="253" text-anchor="middle" fill="var(--air)">G1</text>
+            <rect x="406" y="240" width="28" height="17" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.2"/><text x="420" y="253" text-anchor="middle" fill="var(--air)">G3</text>
+            <rect x="811" y="240" width="28" height="17" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.2"/><text x="825" y="253" text-anchor="middle" fill="var(--air)">G2</text>
+            <rect x="1056" y="240" width="28" height="17" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.2"/><text x="1070" y="253" text-anchor="middle" fill="var(--air)">G4</text>
+          </g>
+          <g font-family="Barlow Condensed" font-size="11" fill="var(--ink-2)" text-anchor="middle">
+            <text x="420" y="270">폼건2·테이프1</text>
+            <text x="532" y="270">지지대 2</text>
+            <text x="825" y="270">폼건 1 (남선)</text>
+            <text x="1070" y="270">지지대 1</text>
+          </g>
+          <text x="70" y="253" font-family="Barlow Condensed" font-size="11.5" letter-spacing=".08em" fill="var(--ink-3)">기믹 게이트</text>
+
+          <!-- 진행 경로 -->
+          <g font-family="Barlow Condensed" font-size="11" letter-spacing=".05em" text-anchor="middle">
+            <rect x="70" y="286" width="120" height="18" fill="none" stroke="var(--water)" stroke-width="1"/><text x="130" y="299" fill="var(--water)">외부</text>
+            <rect x="190" y="286" width="155" height="18" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1"/><text x="267" y="299" fill="var(--steel)">내부 연속 · 결합 A</text>
+            <rect x="345" y="286" width="150" height="18" fill="none" stroke="var(--water)" stroke-width="1"/><text x="420" y="299" fill="var(--water)">외부 · 공동</text>
+            <rect x="495" y="286" width="75" height="18" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1"/><text x="532" y="299" fill="var(--steel)">내부</text>
+            <rect x="570" y="286" width="155" height="18" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1"/><text x="647" y="299" fill="var(--steel)">내부 연속 · 결합 B</text>
+            <rect x="725" y="286" width="200" height="18" fill="none" stroke="var(--water)" stroke-width="1"/><text x="825" y="299" fill="var(--water)">외부 · 갈림 (북선/남선)</text>
+            <rect x="925" y="286" width="75" height="18" fill="var(--steel-fill)" stroke="var(--steel)" stroke-width="1"/><text x="962" y="299" fill="var(--steel)">내부</text>
+            <rect x="1000" y="286" width="270" height="18" fill="none" stroke="var(--water)" stroke-width="1"/><text x="1135" y="299" fill="var(--water)">외부</text>
+          </g>
+          <text x="70" y="282" font-family="Barlow Condensed" font-size="11.5" letter-spacing=".08em" fill="var(--ink-3)">진행 경로</text>
+
+          <!-- 체인지 -->
+          <line x1="70" y1="328" x2="1270" y2="328" stroke="var(--ink-2)" stroke-width="1.2"/>
+          <g stroke="var(--ink-2)" stroke-width="1" font-family="IBM Plex Mono" font-size="10.5" fill="var(--ink-2)">
+            <line x1="70" y1="328" x2="70" y2="336"/><text x="70" y="350" text-anchor="middle" stroke="none">0</text>
+            <line x1="270" y1="328" x2="270" y2="334"/><text x="270" y="350" text-anchor="middle" stroke="none">40</text>
+            <line x1="470" y1="328" x2="470" y2="334"/><text x="470" y="350" text-anchor="middle" stroke="none">80</text>
+            <line x1="670" y1="328" x2="670" y2="334"/><text x="670" y="350" text-anchor="middle" stroke="none">120</text>
+            <line x1="870" y1="328" x2="870" y2="334"/><text x="870" y="350" text-anchor="middle" stroke="none">160</text>
+            <line x1="1070" y1="328" x2="1070" y2="334"/><text x="1070" y="350" text-anchor="middle" stroke="none">200</text>
+            <line x1="1270" y1="328" x2="1270" y2="336"/><text x="1270" y="350" text-anchor="middle" stroke="none">240</text>
+          </g>
+          <text x="70" y="366" font-family="Barlow Condensed" font-size="11.5" letter-spacing=".08em" fill="var(--ink-3)">체인지 (m) · 터널 입구 = 0</text>
+
+          <g font-family="Barlow Condensed" font-size="12" letter-spacing=".06em">
+            <rect x="70" y="374" width="425" height="18" fill="none" stroke="var(--ink-3)" stroke-width="1"/>
+            <text x="282" y="387" text-anchor="middle" fill="var(--ink-2)">S1 진입 구역 · 0–85</text>
+            <rect x="495" y="374" width="430" height="18" fill="none" stroke="var(--ink-3)" stroke-width="1"/>
+            <text x="710" y="387" text-anchor="middle" fill="var(--ink-2)">S2 손상 구역 · 85–171</text>
+            <rect x="925" y="374" width="345" height="18" fill="none" stroke="var(--ink-3)" stroke-width="1"/>
+            <text x="1097" y="387" text-anchor="middle" fill="var(--ink-2)">S3 터널 구간 · 171–240</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption><b>결합부의 톱니 선이 찢긴 끝벽이다</b> — 커플러는 버텼지만 끝벽이 터져 두 칸이 하나의 통로가 됐다. 그래서 결합 A·B는 31 m짜리 긴 내부 구간이고, 단독 3호·6호는 15 m 한 칸이다. 화차 위아래 사선 해칭은 보어 폐색이라 우회로가 없다. 붉은 단부는 찢긴 파단면(입구), 반대쪽은 문으로 남겨 문 통과 학습을 유지한다. <b>AP-3은 점선</b>으로, G3를 파훼했을 때만 생기는 플레이어 생성 포켓이다.</figcaption>
+    </figure>
+
+    <div class="legend">
+      <span><i class="swatch sw-water"></i>침수 보어 · 외부 진행</span>
+      <span><i class="swatch sw-steel"></i>화차 · 내부 진행</span>
+      <span><i class="swatch sw-air"></i>에어포켓 · 기믹 게이트</span>
+      <span><i class="swatch sw-rust"></i>파단면 · 낙차물 · 폐색 · 붕괴</span>
+      <span><i class="swatch sw-dash"></i>단면 밖 분기 / 조건부 생성</span>
+      <span><i class="swatch sw-air"></i>절단 대상 — 굵은 실선 = 결박, 파선 = 벽면</span>
+    </div>
+  </section>
+
+  <!-- ===================== B 횡단면 ===================== -->
+  <section>
+    <h2><span class="num">C</span> 횡단면 — 왜 내부로만 지나는가</h2>
+    <p class="lede">보어는 8 × 8 m이고 화차 폭은 3 m뿐이라 원래는 양옆 2.5 m가 남는다. 그 여유를 잔해로 막아야 화차 내부가 유일한 통로가 된다.</p>
+
+    <div class="sections3">
+
+      <figure>
+        <div class="plate">
+          <svg viewBox="0 0 260 268" role="img" aria-label="표준 보어 횡단면. 폭 8미터 높이 8미터, 다리 4미터에 반원 반지름 4미터, 라이닝 0.3미터, 전 구간 만수. 외부 진행 구간의 단면.">
+            <defs>
+              <pattern id="rh2" width="6" height="6" patternTransform="rotate(45)" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="0" y2="6" stroke="var(--rock)" stroke-width="1"/>
+              </pattern>
+              <marker id="ah2" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><polygon points="0,1 8,4 0,7" fill="var(--ink-2)"/></marker>
+              <marker id="ahs2" viewBox="0 0 8 8" refX="1" refY="4" markerWidth="6" markerHeight="6" orient="auto"><polygon points="8,1 0,4 8,7" fill="var(--ink-2)"/></marker>
+            </defs>
+            <path d="M 26.8 227.2 L 26.8 124 A 103.2 103.2 0 0 1 233.2 124 L 233.2 227.2 Z" fill="url(#rh2)" stroke="var(--rock)" stroke-width="1"/>
+            <path d="M 34 220 L 34 124 A 96 96 0 0 1 226 124 L 226 220 Z" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.8"/>
+            <line x1="34" y1="220" x2="226" y2="220" stroke="var(--steel)" stroke-width="1.4"/>
+            <rect x="110" y="215" width="6" height="5" fill="var(--steel)"/>
+            <rect x="144" y="215" width="6" height="5" fill="var(--steel)"/>
+            <g stroke="var(--ink-2)" stroke-width=".9" font-family="IBM Plex Mono" font-size="10" fill="var(--ink-2)">
+              <line x1="34" y1="240" x2="226" y2="240" marker-start="url(#ahs2)" marker-end="url(#ah2)"/>
+              <text x="130" y="254" text-anchor="middle" stroke="none">8.00</text>
+              <line x1="16" y1="220" x2="16" y2="28" marker-start="url(#ahs2)" marker-end="url(#ah2)"/>
+              <text x="12" y="128" text-anchor="middle" stroke="none" transform="rotate(-90 12 128)">8.00</text>
+            </g>
+            <text x="130" y="60" text-anchor="middle" font-family="Barlow Condensed" font-size="12" fill="var(--water)">R 4.00</text>
+            <text x="130" y="18" text-anchor="middle" font-family="Barlow Condensed" font-size="13" font-weight="600" letter-spacing=".06em" fill="var(--ink)">B-1 외부 구간</text>
+          </svg>
+        </div>
+        <figcaption>공백·진입·붕괴 구간. 보어가 열려 있어 자유 유영으로 통과한다. 전도 평판차 잔해가 여기 흩어져 있다.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="plate">
+          <svg viewBox="0 0 260 268" role="img" aria-label="화차 구간 횡단면. 화차 양옆 2.5미터 여유가 잔해로 폐색되어 통로는 화차 내부 폭 2.6미터만 남는다.">
+            <defs>
+              <pattern id="ch2" width="5" height="5" patternTransform="rotate(-45)" patternUnits="userSpaceOnUse">
+                <line x1="0" y1="0" x2="0" y2="5" stroke="var(--rust)" stroke-width=".9"/>
+              </pattern>
+              <marker id="ah3" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><polygon points="0,1 8,4 0,7" fill="var(--ink-2)"/></marker>
+              <marker id="ahs3" viewBox="0 0 8 8" refX="1" refY="4" markerWidth="6" markerHeight="6" orient="auto"><polygon points="8,1 0,4 8,7" fill="var(--ink-2)"/></marker>
+            </defs>
+            <path d="M 34 220 L 34 124 A 96 96 0 0 1 226 124 L 226 220 Z" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.8"/>
+            <!-- 폐색: 좌우 + 상부 -->
+            <path d="M 34 220 L 34 124 A 96 96 0 0 1 226 124 L 226 220 L 166 220 L 166 129 L 94 129 L 94 220 Z" fill="url(#ch2)" opacity=".75" stroke="var(--rust)" stroke-width="1.2"/>
+            <!-- 화차 -->
+            <rect x="94" y="129" width="72" height="91" fill="var(--paper-2)" stroke="var(--steel)" stroke-width="1.8"/>
+            <text x="130" y="176" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--steel)">통로</text>
+            <g stroke="var(--ink-2)" stroke-width=".9" font-family="IBM Plex Mono" font-size="10" fill="var(--ink-2)">
+              <line x1="98" y1="240" x2="162" y2="240" marker-start="url(#ahs3)" marker-end="url(#ah3)"/>
+              <text x="130" y="254" text-anchor="middle" stroke="none">2.60</text>
+            </g>
+            <text x="64" y="200" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" fill="var(--rust)">폐색</text>
+            <text x="196" y="200" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" fill="var(--rust)">폐색</text>
+            <text x="130" y="18" text-anchor="middle" font-family="Barlow Condensed" font-size="13" font-weight="600" letter-spacing=".06em" fill="var(--ink)">B-2 유개화차 구간</text>
+          </svg>
+        </div>
+        <figcaption>전도된 평판차와 쏟아진 컨테이너가 양옆 2.50 m와 상부를 메운다. 통로는 유개화차 내부 2.60 m뿐이다.</figcaption>
+      </figure>
+
+      <figure>
+        <div class="plate">
+          <svg viewBox="0 0 260 268" role="img" aria-label="에어포켓 횡단면. 크라운 아래 깊이 1.2미터 폭 5.71미터의 공기층이 있고 그 아래 결박된 밀폐 컨테이너가 있다.">
+            <defs>
+              <marker id="ah4" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="6" markerHeight="6" orient="auto"><polygon points="0,1 8,4 0,7" fill="var(--ink-2)"/></marker>
+              <marker id="ahs4" viewBox="0 0 8 8" refX="1" refY="4" markerWidth="6" markerHeight="6" orient="auto"><polygon points="8,1 0,4 8,7" fill="var(--ink-2)"/></marker>
+            </defs>
+            <path d="M 34 220 L 34 124 A 96 96 0 0 1 226 124 L 226 220 Z" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.8"/>
+            <path d="M 61.4 57 A 96 96 0 0 1 198.6 57 Z" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.6"/>
+            <line x1="61.4" y1="57" x2="198.6" y2="57" stroke="var(--air)" stroke-width="2.2"/>
+            <!-- 결박된 밀폐 컨테이너 -->
+            <rect x="101" y="158" width="58" height="62" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.8"/>
+            <line x1="101" y1="174" x2="159" y2="174" stroke="var(--steel)" stroke-width="1.4"/>
+            <line x1="101" y1="204" x2="159" y2="204" stroke="var(--steel)" stroke-width="1.4"/>
+            <text x="130" y="194" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" fill="var(--rust)">밀폐·결박</text>
+            <g stroke="var(--ink-2)" stroke-width=".9" font-family="IBM Plex Mono" font-size="10" fill="var(--ink-2)">
+              <line x1="61.4" y1="240" x2="198.6" y2="240" marker-start="url(#ahs4)" marker-end="url(#ah4)"/>
+              <text x="130" y="254" text-anchor="middle" stroke="none">5.71</text>
+              <line x1="238" y1="28" x2="238" y2="57" marker-start="url(#ahs4)" marker-end="url(#ah4)"/>
+              <text x="246" y="48" stroke="none">1.20</text>
+            </g>
+            <text x="130" y="44" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--air)">공기</text>
+            <text x="130" y="18" text-anchor="middle" font-family="Barlow Condensed" font-size="13" font-weight="600" letter-spacing=".06em" fill="var(--ink)">B-3 에어포켓</text>
+          </svg>
+        </div>
+        <figcaption>공기층 아래 결박된 컨테이너. 포켓 수면이 만수 터널의 유일한 자유수면이다.</figcaption>
+      </figure>
+
+    </div>
+  </section>
+
+  <!-- ===================== C 부력 트랩 ===================== -->
+  <section>
+    <h2><span class="num">D</span> 컨테이너 절단 — 결박형과 철거형</h2>
+    <p class="lede">컨테이너는 전부 <b>평판차에서 나온 것</b>이다 — 아직 얹혀 있거나, 쏟아져 바닥에 박혔거나, 전도된 평판차에 래싱된 채 매달려 있다. 막혔을 때 답이 하나가 아니다. <b>결박형</b>은 래싱만 끊어 띄워 보내고, <b>철거형</b>은 컨테이너 자체를 잘라낸다. 래싱이 보이고 밀폐돼 있으면 결박형, 파손·고정이면 철거형이다.</p>
+
+    <figure>
+      <div class="plate plate--wide">
+        <svg viewBox="0 0 560 252" role="img" aria-label="컨테이너 절단 2종 비교. 결박형은 에어포켓 아래 밀폐 컨테이너의 결박을 끊어 부력으로 띄워 보내며 조각이 나오지 않는다. 철거형은 화차 내부에 끼인 컨테이너 자체를 잘라내 조각과 점수를 남기고 그 자리를 통과한다.">
+          <defs>
+            <marker id="ahU2" viewBox="0 0 9 9" refX="8" refY="4.5" markerWidth="7" markerHeight="7" orient="auto"><polygon points="0,1 9,4.5 0,8" fill="var(--air)"/></marker>
+            <pattern id="ch3" width="5" height="5" patternTransform="rotate(-45)" patternUnits="userSpaceOnUse">
+              <line x1="0" y1="0" x2="0" y2="5" stroke="var(--rust)" stroke-width=".9"/>
+            </pattern>
+          </defs>
+
+          <!-- ===== 좌 : 결박형 CT-C ===== -->
+          <g>
+            <path d="M 60 200 L 60 120 A 80 80 0 0 1 220 120 L 220 200 Z" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.5"/>
+            <path d="M 83 64 A 80 80 0 0 1 197 64 Z" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.5"/>
+            <line x1="83" y1="64" x2="197" y2="64" stroke="var(--air)" stroke-width="2.2"/>
+            <text x="140" y="56" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" font-weight="600" fill="var(--air)">에어포켓</text>
+            <line x1="60" y1="200" x2="220" y2="200" stroke="var(--steel)" stroke-width="1.4"/>
+            <!-- 온전한 밀폐 컨테이너 -->
+            <rect x="116" y="148" width="49" height="52" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.8"/>
+            <text x="140" y="178" text-anchor="middle" font-family="Barlow Condensed" font-size="11" fill="var(--rust)">밀폐</text>
+            <!-- 결박: 절단 대상 강조 -->
+            <line x1="110" y1="162" x2="171" y2="162" stroke="var(--air)" stroke-width="3"/>
+            <line x1="110" y1="188" x2="171" y2="188" stroke="var(--air)" stroke-width="3"/>
+            <text x="182" y="166" font-family="Barlow Condensed" font-size="11.5" font-weight="600" fill="var(--air)">결박</text>
+            <text x="182" y="180" font-family="Barlow Condensed" font-size="10.5" fill="var(--ink-3)">= 절단 대상</text>
+            <line x1="140" y1="144" x2="140" y2="96" stroke="var(--air)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ahU2)"/>
+            <text x="140" y="226" text-anchor="middle" font-family="Barlow Condensed" font-size="13" font-weight="600" letter-spacing=".05em" fill="var(--ink)">결박형 · CT-C</text>
+            <text x="140" y="242" text-anchor="middle" font-family="Barlow Condensed" font-size="11" fill="var(--ink-2)">빠름 · 조각 0 · 포켓 소멸</text>
+          </g>
+
+          <!-- ===== 우 : 철거형 CT-B ===== -->
+          <g>
+            <path d="M 320 200 L 320 120 A 80 80 0 0 1 480 120 L 480 200 Z" fill="none" stroke="var(--water)" stroke-width="1" opacity=".5"/>
+            <!-- 보어 잔여 단면 폐색 -->
+            <path d="M 320 200 L 320 120 A 80 80 0 0 1 480 120 L 480 200 L 430 200 L 430 128 L 370 128 L 370 200 Z" fill="url(#ch3)" opacity=".6" stroke="var(--rust)" stroke-width="1"/>
+            <!-- 화차 -->
+            <rect x="370" y="128" width="60" height="72" fill="var(--paper-2)" stroke="var(--steel)" stroke-width="1.8"/>
+            <line x1="320" y1="200" x2="480" y2="200" stroke="var(--steel)" stroke-width="1.4"/>
+            <!-- 끼인 컨테이너 : 기울어 단면을 메움 -->
+            <rect x="376" y="140" width="49" height="52" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.8" transform="rotate(34 400 166)"/>
+            <!-- 절단선 -->
+            <line x1="372" y1="166" x2="428" y2="166" stroke="var(--air)" stroke-width="2.4" stroke-dasharray="6 4"/>
+            <text x="446" y="162" font-family="Barlow Condensed" font-size="11.5" font-weight="600" fill="var(--air)">벽면</text>
+            <text x="446" y="176" font-family="Barlow Condensed" font-size="10.5" fill="var(--ink-3)">= 절단 대상</text>
+            <!-- 조각 -->
+            <g fill="none" stroke="var(--steel)" stroke-width="1.2">
+              <rect x="336" y="176" width="9" height="7" transform="rotate(18 340 180)"/>
+              <rect x="348" y="188" width="7" height="6" transform="rotate(-24 351 191)"/>
+              <rect x="458" y="182" width="9" height="7" transform="rotate(-14 462 186)"/>
+            </g>
+            <text x="400" y="226" text-anchor="middle" font-family="Barlow Condensed" font-size="13" font-weight="600" letter-spacing=".05em" fill="var(--ink)">철거형 · CT-B</text>
+            <text x="400" y="242" text-anchor="middle" font-family="Barlow Condensed" font-size="11" fill="var(--ink-2)">느림 · 조각 + 점수 · 통로 개방</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption><b>결박형은 철거 세그먼트가 아니다.</b> 조각이 나오지 않으니 정분류 환급도, 철거 성공 점수도 없다 — 빠른 대신 벌이가 없다. 철거형은 208점 상당의 조각과 환급을 남기지만 시간이 든다. 그래서 둘은 서로를 대체하지 못하고, 어느 쪽인지 읽는 것이 판단이 된다.</figcaption>
+    </figure>
+
+    <h3>결박형의 대가 — AP-2</h3>
+    <p class="lede">CT-C2(결박형)는 보어를 막고 있어 <b>절단이 진행 조건</b>이다. 결박이 끊어지면 떠올라 통로를 비우는 동시에 에어포켓 수면을 돌파한다. 밀려난 공기가 빠져나가 <b>AP-2는 반드시 사라진다</b> — 선택이 아니라 진행의 대가다.</p>
+
+    <figure>
+      <div class="plate plate--wide">
+        <svg viewBox="0 0 560 262" role="img" aria-label="부력 컨테이너 절단 전후 비교. 절단 전에는 크라운 아래 에어포켓이 있고 컨테이너가 결박되어 있다. 절단 후 컨테이너가 떠올라 포켓 수면을 돌파하고 공기가 빠져 포켓이 사라진다.">
+          <defs>
+            <marker id="ah5" viewBox="0 0 9 9" refX="8" refY="4.5" markerWidth="7" markerHeight="7" orient="auto"><polygon points="0,1 9,4.5 0,8" fill="var(--air)"/></marker>
+            <marker id="ah6" viewBox="0 0 9 9" refX="8" refY="4.5" markerWidth="8" markerHeight="8" orient="auto"><polygon points="0,1 9,4.5 0,8" fill="var(--ink-2)"/></marker>
+          </defs>
+
+          <!-- ===== 좌: 절단 전 ===== -->
+          <g>
+            <path d="M 60 210 L 60 130 A 80 80 0 0 1 220 130 L 220 210 Z" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.6"/>
+            <path d="M 82.9 74 A 80 80 0 0 1 197.1 74 Z" fill="var(--air-fill)" stroke="var(--air)" stroke-width="1.5"/>
+            <line x1="82.9" y1="74" x2="197.1" y2="74" stroke="var(--air)" stroke-width="2.2"/>
+            <text x="140" y="64" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--air)">공기 유지</text>
+            <line x1="60" y1="210" x2="220" y2="210" stroke="var(--steel)" stroke-width="1.4"/>
+            <!-- 컨테이너 + 결박 -->
+            <rect x="116" y="158" width="49" height="52" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.8"/>
+            <line x1="112" y1="172" x2="169" y2="172" stroke="var(--steel)" stroke-width="2"/>
+            <line x1="112" y1="196" x2="169" y2="196" stroke="var(--steel)" stroke-width="2"/>
+            <text x="178" y="176" font-family="Barlow Condensed" font-size="11.5" fill="var(--steel)">결박</text>
+            <text x="140" y="234" text-anchor="middle" font-family="Barlow Condensed" font-size="13" font-weight="600" letter-spacing=".05em" fill="var(--ink)">절단 전</text>
+            <text x="140" y="250" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" fill="var(--ink-2)">포켓 유효 · 보어 폐색으로 전진 불가</text>
+          </g>
+
+          <!-- 화살 -->
+          <line x1="240" y1="140" x2="300" y2="140" stroke="var(--ink-2)" stroke-width="1.6" marker-end="url(#ah6)"/>
+          <text x="270" y="132" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--ink-2)">절단</text>
+          <text x="270" y="156" text-anchor="middle" font-family="Barlow Condensed" font-size="11" fill="var(--ink-3)">칸막이격벽</text>
+
+          <!-- ===== 우: 절단 후 ===== -->
+          <g>
+            <path d="M 320 210 L 320 130 A 80 80 0 0 1 480 130 L 480 210 Z" fill="var(--water-fill)" stroke="var(--water)" stroke-width="1.6"/>
+            <!-- 소멸한 포켓의 원래 범위 -->
+            <path d="M 342.9 74 A 80 80 0 0 1 457.1 74 Z" fill="none" stroke="var(--air)" stroke-width="1.2" stroke-dasharray="4 4"/>
+            <line x1="320" y1="210" x2="480" y2="210" stroke="var(--steel)" stroke-width="1.4"/>
+            <!-- 떠오른 컨테이너: 포켓 수면 돌파 -->
+            <rect x="376" y="58" width="49" height="52" fill="var(--rust-fill)" stroke="var(--rust)" stroke-width="1.8"/>
+            <!-- 끊긴 결박 -->
+            <g stroke="var(--steel)" stroke-width="2">
+              <line x1="332" y1="196" x2="352" y2="196"/><line x1="448" y1="196" x2="468" y2="196"/>
+            </g>
+            <!-- 상승 궤적 -->
+            <line x1="400" y1="196" x2="400" y2="120" stroke="var(--air)" stroke-width="1.4" stroke-dasharray="5 4" marker-end="url(#ah5)"/>
+            <!-- 빠져나가는 공기 -->
+            <g fill="none" stroke="var(--air)" stroke-width="1.3">
+              <circle cx="352" cy="86" r="4"/><circle cx="340" cy="104" r="3"/><circle cx="358" cy="112" r="2.4"/>
+              <circle cx="448" cy="88" r="4"/><circle cx="460" cy="106" r="3"/><circle cx="442" cy="114" r="2.4"/>
+            </g>
+            <text x="400" y="44" text-anchor="middle" font-family="Barlow Condensed" font-size="12" font-weight="600" fill="var(--rust)">수면 돌파</text>
+            <text x="400" y="234" text-anchor="middle" font-family="Barlow Condensed" font-size="13" font-weight="600" letter-spacing=".05em" fill="var(--ink)">절단 후</text>
+            <text x="400" y="250" text-anchor="middle" font-family="Barlow Condensed" font-size="11.5" fill="var(--ink-2)">포켓 소멸 · 통로 개방 + 회수물</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption><b>바뀌는 것은 화살표 하나가 아니라 계약 후반의 산소 예산 전체다.</b> AP-2는 마지막 자연 포켓이고, 그걸 없애야 G4로 갈 수 있다. 이후 무보급 구간을 메우는 방법은 두 가지뿐 — <b>산소 캔·확장 탱크를 사 두거나, G3를 파훼해 AP-3를 미리 만들어 두거나.</b> 컨테이너 안의 회수물은 이 대가에 딸린 보상이다.</figcaption>
+    </figure>
+
+    <h3>컨테이너 총괄 — 9개</h3>
+    <div class="tablewrap">
+      <table>
+        <caption>철거 세그먼트로 계상되는 것은 CT-A·CT-B <b>7개</b>다. CT-C 2개는 결박만 끊으므로 조각·환급·철거 점수가 없어 세그먼트에서 제외한다.</caption>
+        <thead>
+          <tr><th>유형</th><th class="num">개수</th><th>위치</th><th>절단 대상</th><th>결과</th><th>세그먼트</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><b>CT-A</b> 내용물 개방형</td><td class="num">5</td>
+            <td>평판차 위에 아직 얹힌 채 — 공백 구간 전역</td>
+            <td>벽면</td>
+            <td>내용물 노출. 통행과 무관 — 안 잘라도 진행된다</td>
+            <td>포함</td>
+          </tr>
+          <tr>
+            <td><b>CT-B</b> 통로 폐색형</td><td class="num">2</td>
+            <td>공백 55–65 · 121–133 · 바닥에 박혀 보어를 막음</td>
+            <td>벽면</td>
+            <td><b>철거해야 그 칸을 통과</b>한다. 조각 + 208점 상당 + 환급</td>
+            <td>포함</td>
+          </tr>
+          <tr>
+            <td><b>CT-C</b> 결박형(부력)</td><td class="num">2</td>
+            <td>전도 평판차 래싱 — CT-C1 AP-1 아래(선택) · CT-C2 AP-2 아래(필수)</td>
+            <td><b>래싱</b></td>
+            <td>부력으로 상승 → 통로 개방 + <b>해당 포켓 소멸</b>. 조각 없음</td>
+            <td>제외</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p><b>CT-C1이 학습용이다.</b> AP-1 아래에 있고 통행과 무관해서 <b>안 잘라도 진행된다</b> — 자르면 회수물을 얻고 Day2 포켓을 잃는다. 그 대가를 낮은 위험에서 한 번 배운 다음, Day3의 CT-C2에서는 선택권 없이 같은 일을 당한다.</p>
+  </section>
+
+  <!-- ===================== D 게이트 ===================== -->
+  <section>
+    <h2><span class="num">E</span> 기믹 게이트 — 파훼 못 하면 못 간다</h2>
+    <div class="tablewrap">
+      <table>
+        <caption>G1·G4는 물리적 차단이라 우회로가 없다. G2는 대피선 <b>남선 전용</b>이라 북선으로 우회할 수 있고, G3는 경제 게이트다 — 도구로 풀거나 소모품으로 밀거나. 실패는 그날의 전진을 막고 다음 Day에 다시 시도한다(메인은 이월되지 않는다 — <code>09</code> §1.5).</caption>
+        <thead>
+          <tr><th>게이트</th><th class="num">체인지</th><th>기믹</th><th>요구 도구</th><th>파훼 못 하면</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="gate">G1</td><td class="num">85 – 100</td>
+            <td>유개화차 3호 지붕 함몰. 진입 개구부 프레임이 하중을 받고 있다</td>
+            <td><b>지지대 2</b> 설치 후 프레임 절단 (지주격벽)</td>
+            <td>무지지 절단 시 붕괴 — 화차 3호 매몰. <b>S2 전체 접근 불가</b></td>
+          </tr>
+          <tr>
+            <td class="gate">G2</td><td class="num">131 – 171 남선</td>
+            <td>대피선 <b>남선</b>의 라이닝 파열부에서 해수·토사 분출</td>
+            <td><b>폼건 1</b> 밀봉 (남선 전용)</td>
+            <td><b>막히지 않는다</b> — 북선으로 돌아가 CT-B를 철거하면 된다. 폼건은 시간을 사는 것이지 통행권이 아니다</td>
+          </tr>
+          <tr>
+            <td class="gate">G3</td><td class="num">펌프실</td>
+            <td><b>펌프실</b>의 바닥 파공 2 + 배수 펌프 회로 단선. 둘 다 해결해야 국소 배수가 걸린다</td>
+            <td><b>폼건 2</b> 파공 밀봉 + <b>절연테이프 1</b> 펌프 회로</td>
+            <td><b>경제 게이트</b> — AP-3 미생성. 막히지는 않지만 이후 무보급 구간을 산소 캔·탱크로 메워야 한다</td>
+          </tr>
+          <tr>
+            <td class="gate">G4</td><td class="num">196 – 204</td>
+            <td>횡전 유개화차 잔해가 보어를 막음. 문 1개가 유일한 개구부</td>
+            <td><b>지지대 1</b> 설치 후 문 절단 (지주격벽)</td>
+            <td>무지지 절단 시 붕괴 + 과태료 250₡. <b>붕괴 구간 접근 불가</b></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>도구 사용처 총괄</h3>
+    <div class="tablewrap">
+      <table>
+        <caption>가격은 <code>07</code> §4 / <code>08</code>. 폼건은 본체 380₡ + 카트리지 55₡/발.</caption>
+        <thead>
+          <tr><th>도구</th><th class="num">필요 수량</th><th>사용처</th><th class="num">최소 비용</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>임시 지지대 <code>IT-P1</code></td><td class="num">3</td><td>G1 유개화차 3호 프레임 2 · G4 터널 진입부 문 1</td><td class="num">270₡</td></tr>
+          <tr><td>폼건 <code>IT-FG0</code> + 카트리지</td><td class="num">본체 1 + 3발</td><td>G2 라이닝 파열 1 · G3 바닥 파공 2</td><td class="num">545₡</td></tr>
+          <tr><td>절연테이프 <code>IT-T1</code></td><td class="num">1</td><td>G3 배수 펌프 회로 1노드</td><td class="num">45₡</td></tr>
+          <tr><td>절단기 <code>IT-C0</code></td><td class="num">지급</td><td>컨테이너 7 · 화차 문 1 · 함몰 프레임 1 · 부력 컨테이너 1</td><td class="num">0₡</td></tr>
+          <tr><td>헤라 <code>IT-H0</code></td><td class="num">지급</td><td>따개비 14 · 오염물 8 (로어 은폐 포함)</td><td class="num">0₡</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <h3>자금 곡선과 맞는가</h3>
+    <div class="tablewrap">
+      <table>
+        <caption>수입은 <code>07</code> §1.1 + <code>05</code> §3B.2 TR-9 점수 궤적(평가 연동 = 당일 점수 × 1₡). 분리 환급은 TR-9가 분리 중심 맵이라 보수적으로 잡은 값이다.</caption>
+        <thead>
+          <tr><th>시점</th><th class="num">착수금</th><th class="num">평가 연동</th><th class="num">분리 환급</th><th class="num">가용</th><th>그날 게이트 지출</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Day1 아침</td><td class="num">500</td><td class="num">—</td><td class="num">—</td><td class="num">500</td>
+            <td><b>없음</b> — S1은 학습 구간, 게이트 0</td>
+          </tr>
+          <tr>
+            <td>Day2 아침</td><td class="num">+500</td><td class="num">+325</td><td class="num">+150 안팎</td><td class="num">~1400</td>
+            <td>G1 지지대 2 <b>180</b> · G2 폼건+카트리지 <b>435</b> = <b>615₡</b></td>
+          </tr>
+          <tr>
+            <td>Day3 아침</td><td class="num">+500</td><td class="num">+707</td><td class="num">+200 안팎</td><td class="num">~2200</td>
+            <td>G3 카트리지 2 + 테이프 <b>155</b> · G4 지지대 1 <b>90</b> = <b>245₡</b></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p>도구비는 제약이 아니다. 게이트 지출이 필요한 날에는 이미 전날 정산분이 들어와 있고, 게이트가 하나도 없는 Day1만 착수금 500₡로 버틴다. <b>재방문은 더 싸다</b> — 폼건 본체 380₡는 영구 장비라 2회차부터 도구비가 <b>480₡</b>로 떨어진다(지지대 270 + 카트리지 165 + 테이프 45).</p>
+
+    <h3>에어포켓 용량 — 단면에서 계산된다</h3>
+    <p>포켓은 무한 급유소가 아니라 <b>정해진 부피의 소모 자원</b>이다. 충전 상한(%)을 임의로 정하지 않고, 단면 기하에서 부피를 뽑는다 — 크라운 아래 공기층은 반지름 4 m 원의 원형 세그먼트다.</p>
+    <p style="font-family:'IBM Plex Mono',monospace;font-size:13.5px;background:var(--paper-2);border:1px solid var(--rule);padding:9px 12px;max-width:none;">
+      A = R²·arccos((R−d)/R) − (R−d)·√(2Rd−d²) &nbsp;·&nbsp; V = A × 길이 &nbsp;·&nbsp; R = 4.00 m
+    </p>
+    <div class="tablewrap">
+      <table>
+        <caption>환산 상수 <b>1 인·분 = 2.0 m³</b>. 물리값이 아니라 튜닝 상수다 — 소형 포켓이 4인 파티에 반 탱크, AP-2가 한 탱크를 주도록 잡았다(기본 탱크 5분, <code>02</code>).</caption>
+        <thead>
+          <tr><th>포켓</th><th>위치</th><th class="num">길이</th><th class="num">깊이</th><th class="num">단면</th><th class="num">부피</th><th class="num">인·분</th><th class="num">4인 1인당</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="tag-air">AP-0</td><td>결합 A · 차량 지붕 아래</td><td class="num">6.0 m</td><td class="num">0.90 m</td><td class="num">3.11 m²</td><td class="num">18.7 m³</td><td class="num">9.3</td><td class="num">2.3분</td></tr>
+          <tr><td class="tag-air">AP-1</td><td>환기 수직구 상부</td><td class="num">6.0 m</td><td class="num">1.00 m</td><td class="num">3.63 m²</td><td class="num">21.8 m³</td><td class="num">10.9</td><td class="num">2.7분</td></tr>
+          <tr><td class="tag-air">AP-2</td><td>공백 186–196 · 크라운</td><td class="num">10.0 m</td><td class="num">1.20 m</td><td class="num">4.73 m²</td><td class="num">47.3 m³</td><td class="num">23.6</td><td class="num">5.9분</td></tr>
+          <tr><td class="tag-air">AP-3</td><td>펌프실 (G3 생성)</td><td class="num">15.0 m</td><td class="num">0.70 m</td><td class="num">1.82 m²</td><td class="num">27.3 m³</td><td class="num">13.7</td><td class="num">3.4분</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p><b>잔량은 UI 없이 읽힌다.</b> 공기를 쓰면 그만큼 물이 차올라 포켓이 눈에 보이게 얕아진다. 바닥이 드러난 포켓은 다시 못 쓴다 — 게이지를 따로 띄울 필요가 없다.</p>
+    <p><b>소진은 계약 단위로 영구다.</b> 하룻밤에 공기가 다시 모일 근거가 없으니 재생시키지 않는다. 그래도 Day마다 새 포켓을 만나는 것은 <b>재생이 아니라 전진</b> 때문이다 — Day1은 AP-0, Day2는 AP-1, Day3는 AP-3. 대신 모선 왕복으로 S1을 다시 지날 때 AP-0이 이미 비어 있는 것도 정상적인 결과다.</p>
+
+    <h3>산소 수요는 뒤로 갈수록 커진다</h3>
+    <p>에어포켓이 앞쪽에 있고 뒤에서 사라지므로 산소 캔 수요가 <b>계약 후반에 몰린다.</b> 소모품 지출이 평평하지 않고 상승 곡선을 그린다.</p>
+    <div class="tablewrap">
+      <table>
+        <caption>기본 산소 5분(<code>02</code>). 캔 <code>IT-O1</code> 40₡ · 확장 탱크 <code>IT-O2</code> 320₡(영구).</caption>
+        <thead>
+          <tr><th>Day</th><th>구간</th><th>가용 포켓</th><th class="num">캔 수요</th><th>이유</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Day1</td><td class="num">S1 · 0–85</td>
+            <td><span class="tag-air">AP-0</span></td><td class="num">0</td>
+            <td>결합 A를 내부로 통과하고 지붕 아래 AP-0이 있다. 노출은 공백 10 m 하나. <b>캔 없이 완주</b></td>
+          </tr>
+          <tr>
+            <td>Day2</td><td class="num">S2 · 85–171</td>
+            <td><span class="tag-air">AP-1</span></td><td class="num">1 – 2</td>
+            <td>공백 10·10·12 m 세 곳. 결합 B가 길어 내부 체류가 늘고, 포켓은 AP-1 하나뿐이다</td>
+          </tr>
+          <tr>
+            <td>Day3</td><td class="num">S3 · 171–240</td>
+            <td>AP-2 <b>소멸</b> · <span class="tag-air">AP-3</span>(G3 성공 시)</td><td class="num">3 – 4</td>
+            <td>CT-C2 래싱 절단이 진행 조건이라 마지막 자연 포켓이 사라진다. G4 작업과 붕괴 구간(34 m)이 무보급</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p><b>확장 탱크(320₡)가 여기서 의미를 갖는다.</b> Day3에 캔 4개(160₡)를 매 계약 사는 것보다, 재방문을 전제하면 탱크가 싸진다 — 지금까지 320₡짜리 탱크는 살 이유가 약했다.</p>
+  </section>
+
+  <!-- ===================== E 배치표 ===================== -->
+  <section>
+    <h2><span class="num">F</span> 체인지 배치표</h2>
+    <div class="tablewrap">
+      <table>
+        <caption>체인지는 터널 입구를 0으로 한 터널 축(+X) 거리. 화차 15.0 × 3.0 × 3.6 m, 컨테이너 20 ft(6.10 × 2.44 × 2.59 m).</caption>
+        <thead>
+          <tr><th class="num">체인지</th><th>구간</th><th>진행</th><th>배치 내용</th><th>섹터</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="num">0 – 24</td><td>진입 접근</td><td><span class="inout inout--out">외부</span></td><td>터널 6베이. 초입에 쓰레기통 대기장</td><td>S1</td></tr>
+          <tr><td class="num">24 – 55</td><td><b>결합 A</b> · 1호+2호</td><td><span class="inout inout--in">내부 연속</span></td><td>끝벽 파단으로 두 칸 관통. <span class="tag-air">AP-0</span> 지붕 아래. 슬라이딩 도어 학습, TR9-R01 은닉</td><td>S1</td></tr>
+          <tr><td class="num">55 – 85</td><td><b>환기 수직구 공동</b> Ø16 m</td><td><span class="inout inout--out">외부</span></td><td>맵 중반 랜드마크. 수직구 상부 <span class="tag-air">AP-1</span> 대형 포켓 + 해저 채광. 나선 계단. <b>펌프실 분기</b></td><td>S1</td></tr>
+          <tr><td class="num">—</td><td>└ <b>펌프실</b> (갈래)</td><td><span class="inout inout--out">외부</span></td><td><span class="gate">G3</span> 바닥 파공 2 + 펌프 회로 → <span class="tag-air">AP-3</span> 생성. 막다른 방</td><td>S1</td></tr>
+          <tr><td class="num">85 – 100</td><td>3호 <b>단독</b></td><td><span class="inout inout--in">내부</span></td><td><span class="gate">G1</span> 지붕 함몰 · 지지대 2. 잠긴 사무 캐비닛, 로어 #1</td><td>S2</td></tr>
+          <tr><td class="num">100 – 131</td><td><b>결합 B</b> · 4호+5호</td><td><span class="inout inout--in">내부 연속</span></td><td>끝벽 파단으로 두 칸 관통. 개인 로커(로어 #3), 손상 샘플 B급 2개. <b>기관실 분기</b></td><td>S2</td></tr>
+          <tr><td class="num">131 – 171</td><td><b>대피선 공동</b> 폭 14 m · 복선</td><td><span class="inout inout--out">외부 · 갈림</span></td><td><b>북선</b> CT-B 낙차 컨테이너 철거(절단기·느림) / <b>남선</b> <span class="gate">G2</span> 라이닝 파열 밀봉(폼건·빠름). 다시 합류</td><td>S2</td></tr>
+          <tr><td class="num">171 – 186</td><td>6호 <b>단독</b></td><td><span class="inout inout--in">내부</span></td><td>손상 컨테이너. TR9-R02 은닉</td><td>S3</td></tr>
+          <tr><td class="num">186 – 196</td><td>공백 10 m</td><td><span class="inout inout--out">외부</span></td><td><span class="tag-air">AP-2</span> 마지막 자연 포켓 + 래싱된 <b>CT-C2</b>가 보어를 막음. <b>래싱 절단 필수 → AP-2 소멸</b></td><td>S3</td></tr>
+          <tr><td class="num">196 – 204</td><td>터널 진입부</td><td><span class="inout inout--out">외부</span></td><td><span class="gate">G4</span> 횡전 유개화차 잔해. 문 1개 지주격벽 · 지지대 1</td><td>S3</td></tr>
+          <tr><td class="num">204 – 240</td><td>터널 붕괴 구간</td><td><span class="inout inout--out">외부</span></td><td>천장 함몰·잔해 청소. 조사관 가방 로어 #4</td><td>S3</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== F 설계 함의 ===================== -->
+  <section>
+    <h2><span class="num">G</span> 이 배치가 바꾸는 것</h2>
+    <p class="lede">확정 문서와 부딪히는 지점만 적는다. 도면만 그리면 넘어가지만 구현에서 반드시 걸린다.</p>
+
+    <div class="notes">
+
+      <div class="note note--flag">
+        <h3><span class="ix">F-1</span> 컨테이너 절단은 이제 항상 안전하지 않다</h3>
+        <p><code>01</code> §1은 컨테이너 = 칸막이격벽이라 <b>자르면 항상 안전</b>하다고 못박았다. 부력 컨테이너는 판정은 그대로 칸막이격벽(붕괴 없음)인데 <b>에어포켓을 없애는 부작용</b>이 붙는다.</p>
+        <p class="decide">대응안 — 판정 표는 건드리지 않고 "구조 안전 ≠ 결과 안전"으로 남긴다. 붕괴는 없지만 보급점을 잃는다. 새 판정을 만들지 않아 기존 두 판정 체계가 유지된다.</p>
+      </div>
+
+      <div class="note note--flag">
+        <h3><span class="ix">F-2</span> 산소 시스템에 3막 구조가 생긴다</h3>
+        <p>포켓 배치를 앞에 몰고 뒤에서 없애면 산소가 계약 내내 같은 압박이 아니라 <b>배운다 → 의존한다 → 잃는다</b>가 된다. Day1은 AP-0로 캔 없이 완주, Day2는 AP-1에 의존, Day3는 CT-C2 절단으로 마지막 포켓을 잃는다. 소모품 지출이 평평하지 않고 후반에 몰린다.</p>
+        <p>이 구조 덕에 <b>G3의 성격이 바뀐다.</b> 하드 게이트가 아니라 경제 게이트다 — 파훼하면 AP-3로 대체 보급점을 얻고, 못 하면 캔·탱크로 밀 수 있다. 물리적 차단은 G1·G2·G4 세 개로 충분하다.</p>
+        <p class="decide">충전 상한(%) 대신 <b>포켓별 용량</b>으로 풀었다(§D). 상한은 임의값이지만 용량은 단면에서 계산되고, 4인이 나눠 쓰면 자연히 줄어든다. 남은 결정은 하나 — <b>재생 여부</b>. 위 표는 재생 없음(계약 단위 영구 소진)을 전제로 잡았다.</p>
+      </div>
+
+      <div class="note">
+        <h3><span class="ix">F-3</span> 도구 비용은 제약이 아니다</h3>
+        <p>게이트 4개 총액은 <b>860₡</b>이고 일 착수금은 500₡뿐이지만, <b>착수금만으로 사는 게 아니다.</b> 분리 환급(<code>07</code> M+02)과 평가 연동 보너스(M+04, 당일 점수 × 1₡)가 들어온다. TR-9 3일 점수 궤적이 325 / 707 / 955(<code>05</code> §3B.2)라 그것만으로 <b>약 1,990₡</b>가 추가된다.</p>
+        <p>지출 시점도 맞물린다 — 게이트가 하나도 없는 Day1만 착수금 500₡로 버티고, 615₡가 필요한 Day2 아침에는 이미 Day1 정산분이 들어와 있다. 2회차부터는 폼건 본체가 영구 장비라 <b>480₡</b>로 내려간다.</p>
+        <p class="decide">따라서 폼건을 시작 지급으로 돌릴 이유는 없다. 다만 <b>Day1에 대형 장비를 선구매하면</b>(광폭 헤라 450₡ 등) Day2 게이트 자금이 빡빡해질 수 있다 — 대출 한도 800₡가 그 완충이다.</p>
+      </div>
+
+      <div class="note note--flag">
+        <h3><span class="ix">G-0</span> 공동은 터널 키트로 못 만든다</h3>
+        <p>지금 키트는 <b>직선 4 m 베이</b>(내경 8 m)를 이어 붙이는 조립이다. 수직구 공동(Ø16 m)과 대피선 공동(폭 14 m)은 그 조립으로 나오지 않으므로 <b>전용 형상 제작이 필요하다</b> — 도면에 넣은 것과 만들 수 있는 것을 헷갈리면 안 된다.</p>
+        <p class="decide">제작 항목 — 공동 셸 2종, 수직구 통(Ø6 m), 중앙 지주 기둥, 나선 계단, 펌프실 박스. 모두 기존 <code>MI_MD_Concrete</code>·<code>MI_MD_Metal_Iron</code>을 쓰면 되고 새 머티리얼은 필요 없다.</p>
+      </div>
+
+      <div class="note note--flag">
+        <h3><span class="ix">G-0b</span> 갈림이 통행권이 되면 안 된다</h3>
+        <p>대피선의 두 갈래를 "폼건 있으면 남선, 없으면 못 감"으로 만들면 갈림이 아니라 게이트가 하나 더 생기는 것이다. 그래서 <b>북선은 지급 도구(절단기)만으로 항상 통과 가능</b>하게 두고, 남선은 폼건으로 <b>시간을 사는</b> 쪽으로 잡았다.</p>
+        <p class="decide">결과적으로 G2의 성격이 바뀐다 — 물리적 차단(G1·G4)이 아니라 <b>속도 선택</b>이다. 하드 게이트는 G1·G4 둘, 경제 게이트가 G2·G3 둘로 균형이 잡힌다.</p>
+      </div>
+
+      <div class="note">
+        <h3><span class="ix">G-0c</span> 수직구가 산소 곡선의 중간 거점이 된다</h3>
+        <p>수직구는 위가 막힌 통이라 <b>공기가 갇히는 게 자연스럽다.</b> AP-1을 크라운 포켓에서 여기로 옮기면서 용량이 크게 늘었고, 맵 중반에 <b>확실한 보급 거점</b>이 생겼다. 해저까지 뚫려 있어 빛도 들어오므로 어두운 터널에서 방향 감각의 기준점도 된다.</p>
+        <p>대신 <code>05</code> §3B의 동선 길이가 200 → 240 m로 늘었다. 하루 이동 시간이 20 % 늘어나므로 <b>일차별 기대 점수를 다시 볼 필요</b>가 있다.</p>
+      </div>
+
+      <div class="note note--flag">
+        <h3><span class="ix">F-0b</span> 결합 구역이 성립하려면 끝벽이 찢겨야 한다</h3>
+        <p>화물열차는 결합돼 있어도 <b>칸 사이를 지날 수 없다</b> — 객차와 달리 관통 통로(갱웨이)가 없다. 그래서 "결합 구역"을 그냥 붙여 두면 통로가 아니라 <b>막힌 벽 두 겹</b>이 된다.</p>
+        <p>충돌로 <b>커플러는 버텼지만 끝벽이 터진</b> 것으로 잡았다. 그 파단면이 두 칸을 하나의 통로로 잇는다. 결합 A·B는 31 m짜리 긴 내부 구간, 단독 3호·6호는 15 m 한 칸이 되어 리듬이 생긴다.</p>
+        <p class="decide">부수 효과 — 결합 구역은 내부 체류가 길어 <b>산소 소모가 몰린다.</b> AP-0을 결합 A 지붕 아래에 둔 것이 그 대응이고, 결합 B에는 포켓이 없어 Day2 캔 수요가 오르는 근거가 된다.</p>
+      </div>
+
+      <div class="note note--flag">
+        <h3><span class="ix">F-0</span> 화물열차에는 관통 통로가 없다</h3>
+        <p>객차와 달리 화물열차는 <b>칸 사이를 걸어 지날 수 없고</b>, 평판차는 애초에 내부가 없다. "화차 내부로 진행"을 성립시키려면 편성을 정해야 한다.</p>
+        <p>편성을 <b>유개화차 6칸 + 전도된 평판차</b>로 잡았다. 유개화차는 내부가 빈 상자이고 측면에 대형 슬라이딩 도어가 있어, <b>파단면으로 들어가 도어로 나오는 한 칸 통과</b>는 물리적으로 성립한다. 칸끼리 이어지지 않는 것은 애초에 열차가 끊어져 있으니 문제가 되지 않는다.</p>
+        <p class="decide">덤으로 두 가지가 설명된다 — <b>낙차 컨테이너의 출처</b>(전복된 평판차에서 쏟아짐)와 <b>보어 측면 폐색의 원인</b>(그 잔해가 유개화차 옆을 메움). CT-C의 결박도 상상한 장치가 아니라 실제 <b>평판차 래싱</b>이 된다.</p>
+      </div>
+
+      <div class="note">
+        <h3><span class="ix">F-4</span> 문 학습 순서는 유지된다</h3>
+        <p>칸을 띄우면 파단면으로 드나들게 되어 "문은 보통 그냥 연다" 학습이 약해질 수 있었다. 각 칸의 <b>한쪽 단부만</b> 파단으로 열고 반대쪽은 문으로 남겼다. Day1 화차 1·2호에서 문 통과를 먼저 배우고, 지주격벽 문 절단은 G4에서 처음 만난다 — 기존 학습 순서가 그대로다.</p>
+      </div>
+
+      <div class="note note--flag">
+        <h3><span class="ix">F-4b</span> 대피 통로 삭제 — TR9-R05가 갈 곳을 잃는다</h3>
+        <p>대피 통로 분기를 뺐다. 분기는 <b>기관실 하나만</b> 남는다. 그런데 반복 퀘스트 <b>TR9-R05 "대피로 확보"</b>(<code>01</code> §3, 마감 계약 100₡)가 바로 그 통로를 목표로 삼고 있어 대상이 사라진다. 두면 풀 5종 중 하나가 죽는다.</p>
+        <p class="decide">대체안 — <b>"평판차 잔해 정리"</b>로 교체한다. 전도된 평판차 주변에 쏟아진 잔해를 치우고 구역을 마감하는 계약이다. 유형(마감 계약)·보수(100₡)·성격(안전 동선 확보)이 그대로라 <code>05</code> §3B 예산을 건드리지 않고, 새 편성에 근거가 있다. 폐지하고 4종으로 줄이는 것보다 낫다 — <code>09</code> §4의 "계약당 2~3개 랜덤"은 풀이 얕을수록 반복감이 커진다.</p>
+      </div>
+
+      <div class="note">
+        <h3><span class="ix">F-5</span> 콘텐츠 배치표 갱신 필요</h3>
+        <p><code>02</code> §4와 <code>05</code> §3B.1은 철거 세그먼트를 8(컨테이너 7 + 화차 문 1)로 잡았다. 새 구성은 <b>9</b>다 — CT-A 5 + CT-B 2 + 화차 문 1 + 함몰 프레임 1. <b>CT-C 2개는 결박만 끊어 조각이 없으므로 세그먼트에서 제외</b>한다. 만점 잠재가 8×208 → 9×208로 208점 올라가므로 <code>05</code> §3B.1 예산과 클리어 목표 비율(현재 만점의 ~38%)을 소폭 다시 계산해야 한다.</p>
+        <p>마감 섹터는 화차 단위 대신 체인지 구간(S1 0–85 / S2 85–171 / S3 171–240)으로 재정의했다.</p>
+      </div>
+
+    </div>
+  </section>
+
+  <footer>
+    미확정 — 화차 길이 15 m, 칸 간격(4·6·10·12 m), 폐색 단면, 포켓 충전 상한은 이 도면에서 처음 잡은 값이다. 8 m 보어에서 무호흡 유영 시간이 산소 5분과 맞는지는 화이트박스 실측이 필요하고, 특히 CT-C2 래싱 절단 이후 G4·붕괴 구간을 무보급으로 도는 데 캔 3~4개가 맞는지, 그리고 AP-0가 Day1을 캔 0개로 완주시키는지 검증해야 한다. 확정되면 <code>02 TR-9 레벨 배치</code>에 반영한다.
+  </footer>
+
+</div>

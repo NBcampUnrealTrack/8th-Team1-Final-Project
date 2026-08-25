@@ -84,6 +84,13 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientCloseDailyReport();
 
+	/** 서버 이동 전에 각 소유 클라이언트에서 실제 로딩 화면을 시작한다. */
+	UFUNCTION(Client, Reliable)
+	void ClientPrepareLoadingTransition(const FText& Subtitle);
+
+	/** 로딩 화면에 조작 주체 준비 완료를 알린다(하드 트래블/seamless travel 공용). */
+	void NotifyLoadingScreenPlayerReady();
+
 	// 일일 보고서 확인 버튼 입력을 서버의 보류 중인 Day 전환에 전달하는 요청
 	UFUNCTION(Server, Reliable)
 	void ServerConfirmDayTransition();

@@ -10,6 +10,7 @@
 #include "Gameplay/Scrape/MD_ScrapeBladeAxis.h"
 #include "Gameplay/Scrape/MD_ScrapeReacquirePolicy.h"
 #include "GameplayTagContainer.h"
+#include "Audio/MD_AudioSubsystem.h"
 #include "MD_ScrapeToolComponent.generated.h"
 
 class AController;
@@ -520,15 +521,28 @@ protected:
 	TEnumAsByte<ECollisionChannel> TraceChannel;
 
 	/**
-	 * 오염막을 실제로 제거한 스트로크에 재생할 이벤트 태그.
-	 * 사운드 에셋은 코드가 아니라 DA_MD_Audio_Clean 이 결정한다.
+	 * 오염물을 긁는 동안 이어지는 지속음.
+	 *
+	 * 기획 02 §1 의 "표면 Hold" 를 그대로 소리로 옮긴 것이다.
+	 * 스트로크마다 원샷을 때리면 몇 번 긁었는지만 들리고 "계속 긁고 있다"가 안 들린다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
-	FGameplayTag ContaminationScrapeSoundTag;
+	FGameplayTag ScrapeLoopSoundTag;
 
-	/** 이미 깨끗한 벽면을 긁었을 때 재생할 이벤트 태그. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
-	FGameplayTag BareSurfaceScrapeSoundTag;
+	/**
+	 * 드래그가 멈춘 뒤 지속음을 끊기까지의 유예(초).
+	 *
+	 * 방향을 꺾을 때는 손이 잠깐 멈춘다. 이 값이 그 정지보다 짧으면
+	 * 왕복해서 긁을 때마다 소리가 딸꾹거린다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback",
+		meta = (ClampMin = "0.0", ClampMax = "1.0", Units = "s"))
+	float ScrapeLoopIdleGraceSeconds = 0.25f;
+
+	/** 이 거리(cm) 이상 표면을 훑어야 드래그로 본다. 손떨림을 걸러낸다 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback",
+		meta = (ClampMin = "0.0"))
+	float ScrapeLoopMinTravelCm = 0.05f;
 
 	/** 오염막 제거 접촉 위치에 생성할 파티클 (NS_Scrape_Contamination). 미지정 가능. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback")
@@ -1051,6 +1065,24 @@ private:
 	 */
 	UPROPERTY(Replicated)
 	bool bIsScraping;
+
+	/** 긁는 동안 살아 있는 지속음 핸들 */
+	FMD_AudioHandle ScrapeLoopHandle;
+
+	/** 마지막으로 표면 경로가 늘어난 시각. 드래그가 멈췄는지 판정한다 */
+	double LastScrapeTravelWorldSeconds = -DBL_MAX;
+
+	/** 직전 프레임의 경로 누적 길이 */
+	double LastObservedScrapePathArcLengthCm = 0.0;
+
+	void StartScrapeLoopAudio();
+	void StopScrapeLoopAudio();
+
+	/** 드래그가 이어지는 동안에만 지속음을 유지한다 */
+	void UpdateScrapeLoopAudio();
+
+	/** bShowDebugFeedback 이 켜져 있으면 긁기 오디오 판정 상태를 화면에 찍는다 */
+	void DrawScrapeAudioDebug(double Now, double Arc, double ArcDelta, bool bDragging) const;
 
 	UPROPERTY(Transient)
 	EMD_ScrapeFocusState ScrapeFocusState = EMD_ScrapeFocusState::Free;
