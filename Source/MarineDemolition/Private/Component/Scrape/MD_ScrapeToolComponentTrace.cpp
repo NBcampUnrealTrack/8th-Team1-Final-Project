@@ -516,6 +516,16 @@ void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
 	const FMD_ScrapeResult& Result,
 	const FVector& ContactLocation)
 {
+	FMD_ScrapeAuthoritativeVisualDelta VisualDelta;
+	const bool bBuiltVisualDelta = IsValid(Surface)
+		&& Surface->BuildAuthoritativeVisualDelta(
+			Result.CellChanges,
+			ScrapeLoad,
+			VisualDelta);
+	ensureMsgf(
+		bBuiltVisualDelta,
+		TEXT("A successful scrape transaction could not build its visual delta."));
+
 	// 서버 게임 로직은 권한 인스턴스의 공통 표면 이벤트를 구독할 수 있다.
 	OnScrapeSurfaceApplied.Broadcast(Surface, Result);
 	if (AMD_CuttableWall* const Wall = Surface
@@ -525,8 +535,14 @@ void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
 		OnScrapeApplied.Broadcast(Wall, Result);
 	}
 
-	// 다른 플레이어 화면에도 접촉 이펙트·사운드를 재생한다. 소유자는 아래 전용 경로가 담당한다
-	MulticastReceiveScrapeFeedback(Surface, Result, ContactLocation);
+	// 소유자와 관찰자에게 같은 서버 확정 셀과 Load를 먼저 보낸다.
+	if (bBuiltVisualDelta)
+	{
+		MulticastReceiveScrapeFeedback(
+			VisualDelta,
+			Result,
+			ContactLocation);
+	}
 
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	if (OwnerPawn
@@ -534,46 +550,52 @@ void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
 		&& GetNetMode() != NM_DedicatedServer)
 	{
 		EmitFeedback(Surface, Result, ContactLocation);
-		return;
 	}
-
-	// 원격 소유자의 사운드/이펙트와 Blueprint 피드백은 해당 클라이언트에서 실행한다.
-	ClientReceiveScrapeResult(Surface, Result, ContactLocation);
 }
 
 void UMD_ScrapeToolComponent::MulticastReceiveScrapeFeedback_Implementation(
-	UMD_ScrapeSurfaceComponent* Surface,
+	const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
 	const FMD_ScrapeResult& Result,
 	const FVector_NetQuantize10 ContactLocation)
 {
-	// 소유 클라이언트는 로컬 즉시 재생 또는 Client RPC로 이미 받으므로 중복을 막는다
 	if (GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
 
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
-	if (OwnerPawn && OwnerPawn->IsLocallyControlled())
+	const bool bIsLocallyControlledOwner =
+		OwnerPawn && OwnerPawn->IsLocallyControlled();
+	if (GetOwner() && GetOwner()->HasAuthority())
 	{
+		// 서버에는 상태가 이미 적용되어 원격 Pawn의 피드백만 재생한다.
+		if (!bIsLocallyControlledOwner)
+		{
+			EmitFeedback(
+				VisualDelta.Surface,
+				Result,
+				ContactLocation);
+		}
 		return;
 	}
 
-	EmitFeedback(Surface, Result, ContactLocation);
-}
-
-void UMD_ScrapeToolComponent::ClientReceiveScrapeResult_Implementation(
-	UMD_ScrapeSurfaceComponent* Surface,
-	const FMD_ScrapeResult& Result,
-	const FVector_NetQuantize10 ContactLocation)
-{
-	OnScrapeSurfaceApplied.Broadcast(Surface, Result);
-	if (AMD_CuttableWall* const Wall = Surface
-		? Cast<AMD_CuttableWall>(Surface->GetOwner())
-		: nullptr)
+	if (!ApplyAuthoritativeScrapeVisualDelta(VisualDelta))
 	{
-		OnScrapeApplied.Broadcast(Wall, Result);
+		// 오래되거나 중복된 결과는 상태와 피드백을 함께 거부한다.
+		return;
 	}
-	EmitFeedback(Surface, Result, ContactLocation);
+
+	if (bIsLocallyControlledOwner)
+	{
+		OnScrapeSurfaceApplied.Broadcast(VisualDelta.Surface, Result);
+		if (AMD_CuttableWall* const Wall = VisualDelta.Surface
+			? Cast<AMD_CuttableWall>(VisualDelta.Surface->GetOwner())
+			: nullptr)
+		{
+			OnScrapeApplied.Broadcast(Wall, Result);
+		}
+	}
+	EmitFeedback(VisualDelta.Surface, Result, ContactLocation);
 }
 
 FMD_ScrapeAimQueryResult UMD_ScrapeToolComponent::QueryCurrentScrapeAim() const

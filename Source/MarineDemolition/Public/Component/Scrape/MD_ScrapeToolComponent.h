@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
 #include "Types/Scrape/MD_ScrapeToolState.h"
 #include "Gameplay/Scrape/MD_ScrapeAimValidation.h"
@@ -705,6 +706,7 @@ private:
 		const FVector2D& BladeDepthAxis,
 		const FVector& ReferenceWorldPosition);
 	void ClearCurrentScrapeContact();
+	void RequestScrapePoseNetUpdate();
 	void ProcessScrapeTrace(float DeltaTime);
 	void ProcessScrapeAimResult(
 		const FMD_ScrapeAimQueryResult& AimResult,
@@ -746,24 +748,20 @@ private:
 		const FMD_ScrapeResult& Result,
 		const FVector& ContactLocation);
 
-	UFUNCTION(Client, Unreliable)
-	void ClientReceiveScrapeResult(
-		UMD_ScrapeSurfaceComponent* Surface,
-		const FMD_ScrapeResult& Result,
-		FVector_NetQuantize10 ContactLocation);
-
-	// 다른 플레이어 화면·스피커용 코스메틱 피드백. 소유 클라이언트는 전용 경로가 있어 건너뛴다
+	/** 소유자와 관찰자가 같은 서버 확정 셀/Load를 먼저 적용한 뒤 피드백을 재생한다. */
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastReceiveScrapeFeedback(
-		UMD_ScrapeSurfaceComponent* Surface,
+		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
 		const FMD_ScrapeResult& Result,
 		FVector_NetQuantize10 ContactLocation);
+	bool ApplyAuthoritativeScrapeVisualDelta(
+		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta);
 
 	UFUNCTION()
 	void OnRep_ScrapeToolSpec();
 
 	UFUNCTION()
-	void OnRep_ScrapeLoad();
+	void OnRep_ScrapeLoad(float PreviousScrapeLoad);
 
 	/** 보상 없는 직접 증가(따개비/관리 호출)를 위한 하위 호환 경로. */
 	float AddScrapeLoadInternal(float RequestedAmount, bool bNotifyChange);
@@ -1117,6 +1115,7 @@ private:
 
 	uint32 LmbStrokeGeneration = 0;
 	uint32 ScrapeToolSpecGeneration = 1;
+	uint64 LastScrapePoseNetUpdateFrame = MAX_uint64;
 
 	/** 마지막으로 표면에 닿은 월드 위치. 접촉이 끊기면 무효로 표시한다. */
 	UPROPERTY(Replicated)

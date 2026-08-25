@@ -169,6 +169,9 @@ void UMD_ScrapeSurfaceComponent::GetLifetimeReplicatedProps(
 		bContaminationEnabled);
 	DOREPLIFETIME(
 		UMD_ScrapeSurfaceComponent,
+		ReplicatedContaminationVisualRevision);
+	DOREPLIFETIME(
+		UMD_ScrapeSurfaceComponent,
 		ReplicatedContaminationState);
 }
 

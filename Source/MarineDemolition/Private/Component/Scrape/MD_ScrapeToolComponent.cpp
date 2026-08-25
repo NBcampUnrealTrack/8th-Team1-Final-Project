@@ -11,6 +11,26 @@
 #include "Audio/MD_AudioSubsystem.h"
 #include "Net/UnrealNetwork.h"
 
+namespace
+{
+	FIntVector QuantizeScrapeContactForReplication(const FVector& Value)
+	{
+		return FIntVector(
+			FMath::RoundToInt(Value.X * 10.0),
+			FMath::RoundToInt(Value.Y * 10.0),
+			FMath::RoundToInt(Value.Z * 10.0));
+	}
+
+	FIntVector QuantizeScrapeNormalForReplication(const FVector& Value)
+	{
+		constexpr double NormalScale = 32767.0;
+		return FIntVector(
+			FMath::RoundToInt(FMath::Clamp(Value.X, -1.0, 1.0) * NormalScale),
+			FMath::RoundToInt(FMath::Clamp(Value.Y, -1.0, 1.0) * NormalScale),
+			FMath::RoundToInt(FMath::Clamp(Value.Z, -1.0, 1.0) * NormalScale));
+	}
+}
+
 UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 {
 	SetIsReplicatedByDefault(true);
@@ -111,22 +131,19 @@ void UMD_ScrapeToolComponent::GetLifetimeReplicatedProps(
 		UMD_ScrapeToolComponent,
 		bIsScraping,
 		COND_SkipOwner);
-	DOREPLIFETIME_CONDITION(
+	// 최종 접촉 pose는 소유자에게도 서버 승인값을 복제한다.
+	DOREPLIFETIME(
 		UMD_ScrapeToolComponent,
-		LastContactWorldLocation,
-		COND_SkipOwner);
-	DOREPLIFETIME_CONDITION(
+		LastContactWorldLocation);
+	DOREPLIFETIME(
 		UMD_ScrapeToolComponent,
-		bHasLastContact,
-		COND_SkipOwner);
-	DOREPLIFETIME_CONDITION(
+		bHasLastContact);
+	DOREPLIFETIME(
 		UMD_ScrapeToolComponent,
-		LastContactBladeWorldDirection,
-		COND_SkipOwner);
-	DOREPLIFETIME_CONDITION(
+		LastContactBladeWorldDirection);
+	DOREPLIFETIME(
 		UMD_ScrapeToolComponent,
-		bHasLastContactBladeDirection,
-		COND_SkipOwner);
+		bHasLastContactBladeDirection);
 }
 
 const TCHAR* UMD_ScrapeToolComponent::GetContactTypeLabel(
@@ -654,10 +671,39 @@ void UMD_ScrapeToolComponent::NotifyScrapeLoadChangedAndForceNetUpdate()
 	}
 }
 
-void UMD_ScrapeToolComponent::OnRep_ScrapeLoad()
+void UMD_ScrapeToolComponent::OnRep_ScrapeLoad(
+	const float PreviousScrapeLoad)
 {
 	ScrapeLoad = GetScrapeLoad();
-	NotifyScrapeLoadChanged();
+	if (PreviousScrapeLoad != ScrapeLoad)
+	{
+		NotifyScrapeLoadChanged();
+	}
+}
+
+bool UMD_ScrapeToolComponent::ApplyAuthoritativeScrapeVisualDelta(
+	const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta)
+{
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		return false;
+	}
+	if (!IsValid(VisualDelta.Surface)
+		|| !FMath::IsFinite(VisualDelta.ScrapeLoadAfter)
+		|| VisualDelta.ScrapeLoadAfter < 0.0f
+		|| VisualDelta.ScrapeLoadAfter > MaximumScrapeLoad
+		|| !VisualDelta.Surface->ApplyAuthoritativeVisualDelta(VisualDelta))
+	{
+		return false;
+	}
+
+	const float PreviousScrapeLoad = ScrapeLoad;
+	ScrapeLoad = VisualDelta.ScrapeLoadAfter;
+	if (PreviousScrapeLoad != ScrapeLoad)
+	{
+		NotifyScrapeLoadChanged();
+	}
+	return true;
 }
 
 void UMD_ScrapeToolComponent::NotifyScrapeLoadChanged()
@@ -693,14 +739,16 @@ bool UMD_ScrapeToolComponent::GetCurrentScrapeContactPose(
 void UMD_ScrapeToolComponent::SetCurrentScrapeContact(
 	const FVector& WorldLocation)
 {
-	const bool bHadContact = bHasLastContact;
+	const bool bPoseChanged = !bHasLastContact
+		|| QuantizeScrapeContactForReplication(LastContactWorldLocation)
+			!= QuantizeScrapeContactForReplication(WorldLocation);
 	LastContactWorldLocation = WorldLocation;
 	// 위치를 먼저 기록해야 같은 복제 묶음에서 유효 플래그가 켜질 때 완성된 값을 읽는다.
 	bHasLastContact = true;
 
-	if (!bHadContact && GetOwner() && GetOwner()->HasAuthority())
+	if (bPoseChanged)
 	{
-		GetOwner()->ForceNetUpdate();
+		RequestScrapePoseNetUpdate();
 	}
 }
 
@@ -736,24 +784,42 @@ void UMD_ScrapeToolComponent::SetCurrentScrapeBladeDirection(
 	{
 		return;
 	}
+	const bool bPoseChanged = !bHasLastContactBladeDirection
+		|| QuantizeScrapeNormalForReplication(LastContactBladeWorldDirection)
+			!= QuantizeScrapeNormalForReplication(WorldDirection);
 	LastContactBladeWorldDirection = WorldDirection;
 	bHasLastContactBladeDirection = true;
+	if (bPoseChanged)
+	{
+		RequestScrapePoseNetUpdate();
+	}
 }
 
 void UMD_ScrapeToolComponent::ClearCurrentScrapeContact()
 {
-	if (!bHasLastContact)
+	if (!bHasLastContact && !bHasLastContactBladeDirection)
 	{
 		return;
 	}
 
 	bHasLastContact = false;
 	bHasLastContactBladeDirection = false;
-	if (GetOwner() && GetOwner()->HasAuthority())
+	RequestScrapePoseNetUpdate();
+}
+
+void UMD_ScrapeToolComponent::RequestScrapePoseNetUpdate()
+{
+	AActor* const OwnerActor = GetOwner();
+	if (!OwnerActor
+		|| !OwnerActor->HasAuthority()
+		|| LastScrapePoseNetUpdateFrame == GFrameCounter)
 	{
-		// Tick이 멈춘 뒤에도 시뮬레이티드 프록시에 해제 상태가 바로 전달되어야 한다.
-		GetOwner()->ForceNetUpdate();
+		return;
 	}
+
+	// 같은 서버 프레임의 contact와 blade 변경은 한 번만 갱신한다.
+	LastScrapePoseNetUpdateFrame = GFrameCounter;
+	OwnerActor->ForceNetUpdate();
 }
 
 void UMD_ScrapeToolComponent::StartScrapeLoopAudio()

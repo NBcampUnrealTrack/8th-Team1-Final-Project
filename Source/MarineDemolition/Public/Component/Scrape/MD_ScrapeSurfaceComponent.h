@@ -180,6 +180,34 @@ struct TStructOpsTypeTraits<FMD_ReplicatedScrapeCellStateArray>
 	};
 };
 
+/**
+ * 서버가 성공한 한 번의 긁기 뒤 현재 렌더 peer에만 보내는 작은 절대 상태 묶음.
+ *
+ * FastArray와 ScrapeLoad property가 저장/JIP/손실 복구의 정본이다. 이 값은
+ * 같은 서버 확정 상태를 그 복제보다 먼저 화면에 반영할 뿐 gameplay 권위를
+ * 가지지 않는다.
+ */
+USTRUCT()
+struct MARINEDEMOLITION_API FMD_ScrapeAuthoritativeVisualDelta
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<UMD_ScrapeSurfaceComponent> Surface = nullptr;
+
+	/** Surface 전체에서 증가하는 서버 확정 시각 revision. 0은 무효다. */
+	UPROPERTY()
+	uint32 SurfaceVisualRevision = 0;
+
+	/** 바뀐 셀의 최종 1/255 상태. 상대 제거량이 아니라 절대값이다. */
+	UPROPERTY()
+	TArray<FMD_ReplicatedScrapeCellState> CellStates;
+
+	/** 같은 transaction이 끝난 뒤 서버의 절대 Tool Load. */
+	UPROPERTY()
+	float ScrapeLoadAfter = 0.0f;
+};
+
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
 	FMD_OnScrapeSurfaceFullyRemoved,
 	UMD_ScrapeSurfaceComponent*,
@@ -825,8 +853,18 @@ private:
 
 	bool bContaminationDecalsConfigured;
 
+	/** FastArray보다 먼저 수신해 오래된 canonical cell bunch도 되감지 못하게 한다. */
+	UPROPERTY(ReplicatedUsing = OnRep_ContaminationVisualRevision, Transient)
+	uint32 ReplicatedContaminationVisualRevision = 0;
+
 	UPROPERTY(Replicated, Transient)
 	FMD_ReplicatedScrapeCellStateArray ReplicatedContaminationState;
+
+	/** client mirror에 이미 반영된 FastArray 또는 visual delta revision. */
+	uint32 LastAppliedContaminationVisualRevision = 0;
+
+	/** one-shot delegate/feedback까지 소비한 visual delta revision. JIP에는 복제하지 않는다. */
+	uint32 LastConsumedContaminationVisualRevision = 0;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
@@ -962,9 +1000,27 @@ private:
 	void HandleReplicatedContaminationState(
 		TConstArrayView<int32> StateItemIndices,
 		bool bResetToInitial);
+	void ApplyReplicatedContaminationStates(
+		TConstArrayView<FMD_ReplicatedScrapeCellState> StateItems,
+		bool bResetToInitial);
 	void ApplyAllReplicatedContaminationState();
 	void PublishContaminationChanges(
 		const TArray<FMD_ScrapeCellChange>& CellChanges);
+	bool TryBuildReplicatedCellState(
+		int32 CellIndex,
+		FMD_ReplicatedScrapeCellState& OutState,
+		bool& bOutMatchesGeneratedState) const;
+	bool BuildAuthoritativeVisualDelta(
+		const TArray<FMD_ScrapeCellChange>& CellChanges,
+		float ScrapeLoadAfter,
+		FMD_ScrapeAuthoritativeVisualDelta& OutDelta);
+	bool ApplyAuthoritativeVisualDelta(
+		const FMD_ScrapeAuthoritativeVisualDelta& Delta);
+	void AdvanceContaminationVisualRevision();
+	static bool IsVisualRevisionNewer(uint32 Candidate, uint32 Baseline);
+
+	UFUNCTION()
+	void OnRep_ContaminationVisualRevision();
 	/**
 	 * Tool이 셀을 바꾸기 전에 후속 recovery commit이 실패할 수 없는지 검사한다.
 	 * legacy pending raw의 missing lot은 Commit에서 reward 0으로 보충 가능하다.
