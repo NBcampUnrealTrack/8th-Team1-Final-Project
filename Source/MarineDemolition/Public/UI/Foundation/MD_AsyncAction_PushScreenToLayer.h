@@ -11,31 +11,27 @@ class UCommonActivatableWidget;
 class UMD_LocalUIManager;
 struct FStreamableHandle;
 
-/** Async 화면 Push 요청이 실패한 원인을 Blueprint에 전달한다. */
-UENUM(BlueprintType)
-enum class EMDUIPushFailure : uint8
+// Async 화면 Push 요청의 단일 종료 경로에서 전달할 결과를 구분한다.
+enum class EMDAsyncScreenPushResult : uint8
 {
-	InvalidOwningPlayer UMETA(DisplayName = "Invalid Owning Player"),
-	NotLocalPlayer UMETA(DisplayName = "Not Local Player"),
-	SubsystemUnavailable UMETA(DisplayName = "Subsystem Unavailable"),
-	LayoutNotReady UMETA(DisplayName = "Layout Not Ready"),
-	UnknownLayer UMETA(DisplayName = "Unknown Layer"),
-	InvalidScreenClass UMETA(DisplayName = "Invalid Screen Class"),
-	ClassLoadFailed UMETA(DisplayName = "Class Load Failed"),
-	DuplicateRejected UMETA(DisplayName = "Duplicate Rejected"),
-	PushFailed UMETA(DisplayName = "Push Failed"),
-	StaleRequest UMETA(DisplayName = "Stale Request"),
-	Canceled UMETA(DisplayName = "Canceled")
+	// 화면 Push가 완료되어 성공 이벤트를 전달해야 하는 결과다.
+	Success,
+
+	// 런타임 실패 정보와 실패 이벤트를 전달해야 하는 결과다.
+	Failure,
+
+	// 요청 식별 키와 취소 이벤트를 전달해야 하는 결과다.
+	Canceled
 };
 
 // 활성화 전과 Push 완료 시 생성된 화면을 전달한다.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDAsyncScreenPushDelegate, UCommonActivatableWidget*, Screen);
 
-// 실패 코드와 아티스트가 확인할 수 있는 메시지를 전달한다.
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMDAsyncScreenPushFailedDelegate, EMDUIPushFailure, Failure, FText, Message);
+// 화면 Push 실패를 Blueprint에 신호로 전달한다.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMDAsyncScreenPushFailedDelegate);
 
 // 취소된 요청을 구분할 수 있도록 요청 키를 전달한다.
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDAsyncScreenPushCanceledDelegate, FName, RequestKey);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDAsyncScreenPushCanceledDelegate, FName, CancellationKey);
 
 /** Soft 화면 클래스를 로드하고 LocalPlayer의 Common UI 레이어에 Push하는 취소 가능 Async Action이다. */
 UCLASS(meta = (ExposedAsyncProxy = "AsyncRequest"))
@@ -57,7 +53,7 @@ public:
 	UPROPERTY(BlueprintAssignable)
 	FMDAsyncScreenPushDelegate AfterPush;
 
-	// 검증, 로드 또는 Push 실패를 명확한 코드와 메시지로 전달한다.
+	// 로그에 기록된 화면 Push 실패가 발생했음을 전달한다.
 	UPROPERTY(BlueprintAssignable)
 	FMDAsyncScreenPushFailedDelegate Failed;
 
@@ -85,13 +81,13 @@ protected:
 	TSoftClassPtr<UCommonActivatableWidget> ScreenClass;
 
 	// 취소 결과에서 논리적 요청을 식별할 선택적 키를 보관한다.
-	FName RequestKey;
+	FName CancellationKey;
 
 	// 비동기 로드가 끝날 때까지 PrimaryLayout 입력을 차단할지 보관한다.
-	bool bSuspendInputUntilComplete = true;
+	bool bBlockInputDuringPush = true;
 
 	// Manager에 등록한 입력 차단을 정확히 한 번 복구하기 위해 상태를 보관한다.
-	bool bInputSuspended = false;
+	bool bInputBlockedDuringPush = false;
 
 	// 성공, 실패, 취소 중 하나만 한 번 발생하도록 종료 상태를 보관한다.
 	bool bFinished = false;
@@ -100,17 +96,26 @@ protected:
 	TSharedPtr<FStreamableHandle> StreamingHandle;
 
 public:
-	// 지정한 플레이어의 Layer에 Soft Screen Class를 비동기로 Push하는 Blueprint 노드를 생성한다.
+	/**
+	 * 지정한 플레이어의 Layer에 Soft Screen Class를 비동기로 Push하는 Blueprint 노드를 생성한다.
+	 *
+	 * @param OwningPlayer UI 화면을 소유하며 대상 LocalPlayer와 World를 결정할 로컬 PlayerController다.
+	 * @param Layer Screen을 Push할 PrimaryLayout의 UI Layer GameplayTag다.
+	 * @param ScreenClass 비동기로 로드한 뒤 Layer에 생성할 CommonActivatableWidget 소프트 클래스다.
+	 * @param bBlockInputDuringPush true이면 클래스 로드와 Push가 끝날 때까지 PrimaryLayout 입력을 차단한다.
+	 * @param CancellationKey 취소된 요청을 Blueprint에서 식별할 때 사용하는 선택적 키다.
+	 * @return 성공, 실패, 취소 및 활성화 전 초기화 이벤트를 제공하는 Async Action proxy다.
+	 */
 	UFUNCTION(
 		BlueprintCallable,
 		Category = "MD | UI | Navigation",
-		meta = (BlueprintInternalUseOnly = "true", DisplayName = "Push UI Screen to Layer (Async)", GameplayTagFilter = "UI.Layer", AdvancedDisplay = "RequestKey"))
+		meta = (BlueprintInternalUseOnly = "true", DisplayName = "Push UI Screen to Layer (Async)", GameplayTagFilter = "UI.Layer", AdvancedDisplay = "CancellationKey"))
 	static UMD_AsyncAction_PushScreenToLayer* PushScreenToLayerAsync(
 		APlayerController* OwningPlayer,
 		FGameplayTag Layer,
 		TSoftClassPtr<UCommonActivatableWidget> ScreenClass,
-		bool bSuspendInputUntilComplete = true,
-		FName RequestKey = NAME_None);
+		bool bBlockInputDuringPush = true,
+		FName CancellationKey = NAME_None);
 
 	// 진행 중인 비동기 로드를 중단하고 Canceled 이벤트로 요청을 종료한다.
 	UFUNCTION(BlueprintCallable, Category = "MD | UI | Navigation")
@@ -123,18 +128,12 @@ protected:
 	// Stack이 화면을 활성화하기 전에 Before Push 이벤트를 안전하게 전달한다.
 	void HandleBeforePush(UCommonActivatableWidget& Screen);
 
-	// 성공 이벤트를 전달하고 입력과 비동기 자원을 정리한다.
-	void FinishSuccess(UCommonActivatableWidget* Screen);
-
-	// 실패 이벤트를 한 번 전달하고 입력과 비동기 자원을 정리한다.
-	void FinishFailure(EMDUIPushFailure Failure, FText Message);
-
-	// 취소 이벤트를 한 번 전달하고 입력과 비동기 자원을 정리한다.
-	void FinishCanceled();
+	// 결과에 맞는 이벤트를 전달하고 입력과 비동기 자원을 하나의 경로에서 정리한다.
+	void FinishRequest(EMDAsyncScreenPushResult Result, UCommonActivatableWidget* Screen = nullptr);
 
 	// 요청이 보유한 Streamable Handle을 취소하고 해제한다.
 	void CancelStreaming();
 
 	// Manager에 등록한 UI 입력 차단을 정확히 한 번 해제한다.
-	void ReleaseInputSuspension();
+	void ReleaseInputBlock();
 };

@@ -10,19 +10,57 @@
 
 void UMD_AsyncAction_PushScreenToLayer::Activate()
 {
-	// Factory에서 저장한 Owning Player가 요청 실행 시점에도 유효한지 확인한다.
-	APlayerController* ResolvedOwningPlayer = OwningPlayer.Get();
-	if (IsValid(ResolvedOwningPlayer) == false)
+	// 활성화 검증 과정에서 사용할 객체를 조건부로 조회한다.
+	ULocalPlayer* OwningLocalPlayer = OwningPlayer.IsValid() == true ? OwningPlayer->GetLocalPlayer() : nullptr;
+	UMD_LocalUIManager* ResolvedUIManager = IsValid(OwningLocalPlayer) == true ? OwningLocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
+	FSoftObjectPath ScreenClassPath = ScreenClass.ToSoftObjectPath();
+	UWorld* ResolvedRequestWorld = OwningPlayer.IsValid() == true ? OwningPlayer->GetWorld() : nullptr;
+
+	// Factory에서 저장한 Player가 유효한 로컬 Controller인지 함께 확인한다.
+	if (OwningPlayer.IsValid() == false || OwningPlayer->IsLocalController() == false)
 	{
-		FinishFailure(EMDUIPushFailure::InvalidOwningPlayer, NSLOCTEXT("MDCommonUI", "InvalidOwningPlayer", "유효한 Owning Player가 필요합니다."));
+		UE_LOG(MarineDemolition, Error, TEXT("PushScreenToLayerAsync에는 유효한 Local Owning Player가 필요합니다."));
+		FinishRequest(EMDAsyncScreenPushResult::Failure);
 		return;
 	}
 
-	// 원격 Controller가 로컬 UI Stack을 조작하지 못하도록 요청을 거부한다.
-	bool bIsLocalController = ResolvedOwningPlayer->IsLocalController();
-	if (bIsLocalController == false)
+	// 초기화 과정에서 조회한 LocalPlayer가 유효한지 확인한다.
+	if (IsValid(OwningLocalPlayer) == false)
 	{
-		FinishFailure(EMDUIPushFailure::NotLocalPlayer, NSLOCTEXT("MDCommonUI", "NotLocalPlayer", "로컬 PlayerController만 UI 화면을 열 수 있습니다."));
+		UE_LOG(MarineDemolition, Error, TEXT("PushScreenToLayerAsync에는 유효한 LocalPlayer가 필요합니다."));
+		FinishRequest(EMDAsyncScreenPushResult::Failure);
+		return;
+	}
+
+	// 초기화 과정에서 조회한 Local UI Manager가 유효한지 확인한다.
+	if (IsValid(ResolvedUIManager) == false)
+	{
+		UE_LOG(MarineDemolition, Error, TEXT("LocalPlayer에 MD_LocalUIManager Subsystem이 생성되지 않았습니다."));
+		FinishRequest(EMDAsyncScreenPushResult::Failure);
+		return;
+	}
+
+	// 유효한 Manager의 PrimaryLayout 준비 상태와 Layer 등록 상태를 함께 검증한다.
+	if (ResolvedUIManager->IsPrimaryLayoutReady() == false || ResolvedUIManager->IsLayerRegistered(LayerTag) == false)
+	{
+		UE_LOG(MarineDemolition, Error, TEXT("PrimaryLayout이 준비되고 요청한 UI Layer가 등록되어야 합니다. Layer=%s"), *LayerTag.ToString());
+		FinishRequest(EMDAsyncScreenPushResult::Failure);
+		return;
+	}
+
+	// 비어 있거나 잘못된 Soft Class 경로를 Asset Manager에 전달하지 않는다.
+	if (ScreenClassPath.IsValid() == false)
+	{
+		UE_LOG(MarineDemolition, Error, TEXT("PushScreenToLayerAsync에는 유효한 CommonActivatableWidget Screen Class가 필요합니다."));
+		FinishRequest(EMDAsyncScreenPushResult::Failure);
+		return;
+	}
+
+	// 초기화 과정에서 조회한 요청 시작 World가 유효한지 확인한다.
+	if (IsValid(ResolvedRequestWorld) == false)
+	{
+		UE_LOG(MarineDemolition, Error, TEXT("Owning Player에는 UI 요청을 시작할 유효한 World가 필요합니다."));
+		FinishRequest(EMDAsyncScreenPushResult::Failure);
 		return;
 	}
 
@@ -30,68 +68,21 @@ void UMD_AsyncAction_PushScreenToLayer::Activate()
 	UGameInstance* RegisteredGameInstance = RegisteredWithGameInstance.Get();
 	if (IsValid(RegisteredGameInstance) == false)
 	{
-		RegisterWithGameInstance(ResolvedOwningPlayer);
+		RegisterWithGameInstance(OwningPlayer.Get());
 	}
 
-	// 요청한 Controller에 연결된 LocalPlayer를 조회한다.
-	ULocalPlayer* OwningLocalPlayer = ResolvedOwningPlayer->GetLocalPlayer();
-	if (IsValid(OwningLocalPlayer) == false)
-	{
-		FinishFailure(EMDUIPushFailure::NotLocalPlayer, NSLOCTEXT("MDCommonUI", "LocalPlayerUnavailable", "Owning Player에 연결된 LocalPlayer가 없습니다."));
-		return;
-	}
-
-	// 해당 LocalPlayer의 중앙 UI Manager를 조회한다.
-	UMD_LocalUIManager* ResolvedUIManager = OwningLocalPlayer->GetSubsystem<UMD_LocalUIManager>();
-	if (IsValid(ResolvedUIManager) == false)
-	{
-		FinishFailure(EMDUIPushFailure::SubsystemUnavailable, NSLOCTEXT("MDCommonUI", "SubsystemUnavailable", "Local UI Manager를 찾을 수 없습니다."));
-		return;
-	}
+	// 검증한 Manager와 World를 비동기 완료 시점의 재검사에 사용하도록 저장한다.
 	UIManager = ResolvedUIManager;
-
-	// PrimaryLayout이 화면에 연결되기 전에 들어온 요청을 명확히 실패 처리한다.
-	bool bIsLayoutReady = ResolvedUIManager->IsPrimaryLayoutReady();
-	if (bIsLayoutReady == false)
-	{
-		FinishFailure(EMDUIPushFailure::LayoutNotReady, NSLOCTEXT("MDCommonUI", "LayoutNotReady", "PrimaryLayout이 아직 준비되지 않았습니다."));
-		return;
-	}
-
-	// 등록되지 않은 GameplayTag가 비동기 로드까지 진행되지 않도록 조기에 거부한다.
-	bool bIsLayerRegistered = ResolvedUIManager->IsLayerRegistered(LayerTag);
-	if (bIsLayerRegistered == false)
-	{
-		FinishFailure(EMDUIPushFailure::UnknownLayer, NSLOCTEXT("MDCommonUI", "UnknownLayer", "요청한 UI Layer가 PrimaryLayout에 등록되지 않았습니다."));
-		return;
-	}
-
-	// 비어 있거나 잘못된 Soft Class 경로를 Asset Manager에 전달하지 않는다.
-	FSoftObjectPath ScreenClassPath = ScreenClass.ToSoftObjectPath();
-	bool bIsScreenClassPathValid = ScreenClassPath.IsValid();
-	if (bIsScreenClassPathValid == false)
-	{
-		FinishFailure(EMDUIPushFailure::InvalidScreenClass, NSLOCTEXT("MDCommonUI", "InvalidScreenClass", "유효한 CommonActivatableWidget Screen Class가 필요합니다."));
-		return;
-	}
-
-	// 로드 완료 시 World가 바뀌었는지 비교할 시작 World를 약한 참조로 저장한다.
-	UWorld* ResolvedRequestWorld = ResolvedOwningPlayer->GetWorld();
-	if (IsValid(ResolvedRequestWorld) == false)
-	{
-		FinishFailure(EMDUIPushFailure::InvalidOwningPlayer, NSLOCTEXT("MDCommonUI", "OwningWorldUnavailable", "Owning Player의 World를 찾을 수 없습니다."));
-		return;
-	}
 	RequestWorld = ResolvedRequestWorld;
 
 	// World 포인터만으로 감지하기 어려운 전환도 폐기할 수 있도록 Manager의 현재 세대를 저장한다.
 	RequestWorldGeneration = ResolvedUIManager->GetWorldGeneration();
 
 	// 옵션이 활성화된 요청은 로드 중 PrimaryLayout의 Click과 탐색 입력을 차단한다.
-	if (bSuspendInputUntilComplete == true)
+	if (bBlockInputDuringPush == true)
 	{
-		ResolvedUIManager->SuspendInputForAsyncRequest();
-		bInputSuspended = true;
+		ResolvedUIManager->BlockInputDuringPush();
+		bInputBlockedDuringPush = true;
 	}
 
 	// Asset Manager의 Streamable Manager를 통해 Soft Widget Class를 비동기로 로드한다.
@@ -100,7 +91,8 @@ void UMD_AsyncAction_PushScreenToLayer::Activate()
 	StreamingHandle = StreamableManager.RequestAsyncLoad(ScreenClassPath, MoveTemp(LoadCompleteDelegate));
 	if (StreamingHandle.IsValid() == false)
 	{
-		FinishFailure(EMDUIPushFailure::ClassLoadFailed, NSLOCTEXT("MDCommonUI", "ClassLoadRequestFailed", "Screen Class 비동기 로드 요청을 시작하지 못했습니다."));
+		UE_LOG(MarineDemolition, Warning, TEXT("Screen Class 비동기 로드 요청을 시작하지 못했습니다."));
+		FinishRequest(EMDAsyncScreenPushResult::Failure);
 	}
 }
 
@@ -111,7 +103,7 @@ void UMD_AsyncAction_PushScreenToLayer::BeginDestroy()
 	{
 		bFinished = true;
 		CancelStreaming();
-		ReleaseInputSuspension();
+		ReleaseInputBlock();
 	}
 
 	// 기반 Blueprint Async Action의 파괴 처리를 이어서 실행한다.
@@ -127,15 +119,15 @@ void UMD_AsyncAction_PushScreenToLayer::Cancel()
 	}
 
 	// 명시적 Cancel은 로드 작업과 입력 차단을 정리한 뒤 Canceled만 전달한다.
-	FinishCanceled();
+	FinishRequest(EMDAsyncScreenPushResult::Canceled);
 }
 
 UMD_AsyncAction_PushScreenToLayer* UMD_AsyncAction_PushScreenToLayer::PushScreenToLayerAsync(
 	APlayerController* InOwningPlayer,
 	FGameplayTag Layer,
 	TSoftClassPtr<UCommonActivatableWidget> InScreenClass,
-	bool bInSuspendInputUntilComplete,
-	FName InRequestKey)
+	bool bBlockInputDuringPush,
+	FName CancellationKey)
 {
 	// Blueprint가 delegate를 연결한 뒤 Activate할 수 있도록 Async proxy를 생성한다.
 	UMD_AsyncAction_PushScreenToLayer* AsyncRequest = NewObject<UMD_AsyncAction_PushScreenToLayer>();
@@ -144,8 +136,8 @@ UMD_AsyncAction_PushScreenToLayer* UMD_AsyncAction_PushScreenToLayer::PushScreen
 	AsyncRequest->OwningPlayer = InOwningPlayer;
 	AsyncRequest->LayerTag = Layer;
 	AsyncRequest->ScreenClass = InScreenClass;
-	AsyncRequest->bSuspendInputUntilComplete = bInSuspendInputUntilComplete;
-	AsyncRequest->RequestKey = InRequestKey;
+	AsyncRequest->bBlockInputDuringPush = bBlockInputDuringPush;
+	AsyncRequest->CancellationKey = CancellationKey;
 
 	// 유효한 플레이어 요청은 Activate 이전부터 GameInstance가 proxy 수명을 보장하도록 등록한다.
 	if (IsValid(InOwningPlayer) == true)
@@ -169,7 +161,7 @@ void UMD_AsyncAction_PushScreenToLayer::HandleScreenClassLoaded()
 	APlayerController* ResolvedOwningPlayer = OwningPlayer.Get();
 	if (IsValid(ResolvedOwningPlayer) == false)
 	{
-		FinishCanceled();
+		FinishRequest(EMDAsyncScreenPushResult::Canceled);
 		return;
 	}
 
@@ -177,20 +169,15 @@ void UMD_AsyncAction_PushScreenToLayer::HandleScreenClassLoaded()
 	UWorld* InitialRequestWorld = RequestWorld.Get();
 	if (IsValid(InitialRequestWorld) == false)
 	{
-		FinishFailure(EMDUIPushFailure::StaleRequest, NSLOCTEXT("MDCommonUI", "StaleRequestWorld", "요청을 시작한 World가 더 이상 유효하지 않습니다."));
+		FinishRequest(EMDAsyncScreenPushResult::Canceled);
 		return;
 	}
 
 	// 현재 Controller의 World를 요청 시작 시 저장한 World와 비교한다.
 	UWorld* CurrentPlayerWorld = ResolvedOwningPlayer->GetWorld();
-	if (IsValid(CurrentPlayerWorld) == false)
+	if (IsValid(CurrentPlayerWorld) == false || CurrentPlayerWorld != InitialRequestWorld)
 	{
-		FinishFailure(EMDUIPushFailure::StaleRequest, NSLOCTEXT("MDCommonUI", "CurrentWorldUnavailable", "현재 Player World가 유효하지 않습니다."));
-		return;
-	}
-	if (CurrentPlayerWorld != InitialRequestWorld)
-	{
-		FinishFailure(EMDUIPushFailure::StaleRequest, NSLOCTEXT("MDCommonUI", "WorldChangedDuringLoad", "Screen Class 로드 중 World가 변경되어 요청을 폐기했습니다."));
+		FinishRequest(EMDAsyncScreenPushResult::Canceled);
 		return;
 	}
 
@@ -198,61 +185,45 @@ void UMD_AsyncAction_PushScreenToLayer::HandleScreenClassLoaded()
 	UMD_LocalUIManager* ResolvedUIManager = UIManager.Get();
 	if (IsValid(ResolvedUIManager) == false)
 	{
-		FinishCanceled();
+		FinishRequest(EMDAsyncScreenPushResult::Canceled);
 		return;
 	}
 
-	// 요청 시작 이후 World teardown이 발생했다면 새 World의 Stack에 이전 요청을 적용하지 않는다.
-	bool bIsCurrentWorldGeneration = ResolvedUIManager->IsWorldGenerationCurrent(RequestWorldGeneration);
-	if (bIsCurrentWorldGeneration == false)
+	// World 전환이나 Layout 구성 변경이 발생한 요청을 한 번에 취소한다.
+	if (ResolvedUIManager->IsWorldGenerationCurrent(RequestWorldGeneration) == false
+		|| ResolvedUIManager->IsPrimaryLayoutReady() == false
+		|| ResolvedUIManager->IsLayerRegistered(LayerTag) == false)
 	{
-		FinishFailure(EMDUIPushFailure::StaleRequest, NSLOCTEXT("MDCommonUI", "WorldGenerationChangedDuringLoad", "Screen Class 로드 중 World 전환이 시작되어 요청을 폐기했습니다."));
+		FinishRequest(EMDAsyncScreenPushResult::Canceled);
 		return;
 	}
 
-	// 로드 중 Layout이나 Layer가 제거된 경우 이전 화면 구조에 Push하지 않는다.
-	bool bIsLayoutReady = ResolvedUIManager->IsPrimaryLayoutReady();
-	if (bIsLayoutReady == false)
+	// 비동기 로드가 끝난 Soft Class 포인터의 유효성을 직접 확인한다.
+	if (ScreenClass.IsValid() == false)
 	{
-		FinishFailure(EMDUIPushFailure::LayoutNotReady, NSLOCTEXT("MDCommonUI", "LayoutRemovedDuringLoad", "Screen Class 로드 중 PrimaryLayout이 제거되었습니다."));
-		return;
-	}
-	bool bIsLayerRegistered = ResolvedUIManager->IsLayerRegistered(LayerTag);
-	if (bIsLayerRegistered == false)
-	{
-		FinishFailure(EMDUIPushFailure::UnknownLayer, NSLOCTEXT("MDCommonUI", "LayerRemovedDuringLoad", "Screen Class 로드 중 대상 UI Layer가 제거되었습니다."));
+		UE_LOG(MarineDemolition, Warning, TEXT("Screen Class를 로드하지 못했습니다."));
+		FinishRequest(EMDAsyncScreenPushResult::Failure);
 		return;
 	}
 
-	// 완료된 Soft Class가 실제 UClass로 해석되었는지 확인한다.
+	// 유효성 검사를 통과한 Soft Class에서 로드된 UClass를 가져온다.
 	UClass* LoadedScreenClass = ScreenClass.Get();
-	if (IsValid(LoadedScreenClass) == false)
-	{
-		FinishFailure(EMDUIPushFailure::ClassLoadFailed, NSLOCTEXT("MDCommonUI", "ClassLoadFailed", "Screen Class를 로드하지 못했습니다."));
-		return;
-	}
 
 	// 잘못된 Soft Class가 Common UI Stack에 전달되지 않도록 기반 클래스를 검증한다.
-	bool bIsActivatableWidgetClass = LoadedScreenClass->IsChildOf(UCommonActivatableWidget::StaticClass());
-	if (bIsActivatableWidgetClass == false)
+	if (LoadedScreenClass->IsChildOf(UCommonActivatableWidget::StaticClass()) == false)
 	{
-		FinishFailure(
-			EMDUIPushFailure::InvalidScreenClass,
-			NSLOCTEXT("MDCommonUI", "NotActivatableWidgetClass", "Screen Class가 CommonActivatableWidget을 상속하지 않습니다."));
+		UE_LOG(MarineDemolition, Error, TEXT("Screen Class는 CommonActivatableWidget을 상속해야 합니다. Screen=%s"), *GetNameSafe(LoadedScreenClass));
+		FinishRequest(EMDAsyncScreenPushResult::Failure);
 		return;
 	}
 	TSubclassOf<UCommonActivatableWidget> LoadedActivatableClass = LoadedScreenClass;
 
 	// 같은 클래스가 레이어 최상단에 활성화되어 있으면 연속 클릭에 의한 중복 Push를 거부한다.
 	UCommonActivatableWidget* ActiveScreen = ResolvedUIManager->GetActiveScreen(LayerTag);
-	if (IsValid(ActiveScreen) == true)
+	if (IsValid(ActiveScreen) == true && ActiveScreen->GetClass() == LoadedScreenClass)
 	{
-		UClass* ActiveScreenClass = ActiveScreen->GetClass();
-		if (ActiveScreenClass == LoadedScreenClass)
-		{
-			FinishFailure(EMDUIPushFailure::DuplicateRejected, NSLOCTEXT("MDCommonUI", "DuplicateRejected", "같은 Screen Class가 이미 대상 Layer에서 활성화되어 있습니다."));
-			return;
-		}
+		FinishRequest(EMDAsyncScreenPushResult::Canceled);
+		return;
 	}
 
 	// Async proxy가 활성화 전 초기화 콜백까지 살아 있는지 안전하게 확인할 약한 참조를 만든다.
@@ -281,15 +252,16 @@ void UMD_AsyncAction_PushScreenToLayer::HandleScreenClassLoaded()
 		return;
 	}
 
-	// Stack이 화면을 만들지 못한 경우 활성화 성공 이벤트를 발생시키지 않는다.
+	// 등록된 Stack이 화면을 정상적으로 생성했는지 검증한다.
 	if (IsValid(PushedScreen) == false)
 	{
-		FinishFailure(EMDUIPushFailure::PushFailed, NSLOCTEXT("MDCommonUI", "PushFailed", "대상 UI Layer에 Screen을 Push하지 못했습니다."));
+		UE_LOG(MarineDemolition, Error, TEXT("등록된 UI Layer에 Screen을 Push하지 못했습니다. Layer=%s Screen=%s"), *LayerTag.ToString(), *GetNameSafe(LoadedScreenClass));
+		FinishRequest(EMDAsyncScreenPushResult::Failure);
 		return;
 	}
 
 	// 활성화 요청까지 완료된 화면을 성공 경로로 전달한다.
-	FinishSuccess(PushedScreen);
+	FinishRequest(EMDAsyncScreenPushResult::Success, PushedScreen);
 }
 
 void UMD_AsyncAction_PushScreenToLayer::HandleBeforePush(UCommonActivatableWidget& Screen)
@@ -301,7 +273,7 @@ void UMD_AsyncAction_PushScreenToLayer::HandleBeforePush(UCommonActivatableWidge
 	}
 }
 
-void UMD_AsyncAction_PushScreenToLayer::FinishSuccess(UCommonActivatableWidget* Screen)
+void UMD_AsyncAction_PushScreenToLayer::FinishRequest(EMDAsyncScreenPushResult Result, UCommonActivatableWidget* Screen)
 {
 	// 성공, 실패, 취소 중 먼저 도착한 경로만 종료 처리를 소유한다.
 	if (bFinished == true)
@@ -310,66 +282,35 @@ void UMD_AsyncAction_PushScreenToLayer::FinishSuccess(UCommonActivatableWidget* 
 	}
 	bFinished = true;
 
-	// 완료된 로드 Handle 참조를 해제한 뒤 성공 화면을 전달한다.
-	StreamingHandle.Reset();
-	AfterPush.Broadcast(Screen);
-
-	// 성공 callback 이후 입력을 복구하고 GameInstance의 proxy 참조를 해제한다.
-	ReleaseInputSuspension();
-	SetReadyToDestroy();
-}
-
-void UMD_AsyncAction_PushScreenToLayer::FinishFailure(EMDUIPushFailure Failure, FText Message)
-{
-	// 성공, 실패, 취소 중 먼저 도착한 경로만 종료 처리를 소유한다.
-	if (bFinished == true)
+	// 요청 결과에 맞는 비동기 자원 정리와 Blueprint 이벤트를 수행한다.
+	switch (Result)
 	{
-		return;
+	case EMDAsyncScreenPushResult::Success:
+		// 완료된 로드 Handle 참조를 해제한 뒤 성공 화면을 전달한다.
+		StreamingHandle.Reset();
+		AfterPush.Broadcast(Screen);
+		break;
+
+	case EMDAsyncScreenPushResult::Failure:
+		// 실패한 요청의 비동기 로드를 정리하고 Blueprint에 실패 신호를 전달한다.
+		CancelStreaming();
+		Failed.Broadcast();
+		break;
+
+	case EMDAsyncScreenPushResult::Canceled:
+		// 취소된 요청의 로드를 중단한 뒤 식별 키를 전달한다.
+		CancelStreaming();
+		Canceled.Broadcast(CancellationKey);
+		break;
+
+	default:
+		// 정의되지 않은 종료 결과를 프로젝트 로그 카테고리에 기록한다.
+		UE_LOG(MarineDemolition, Error, TEXT("정의되지 않은 Async Screen Push 종료 결과입니다. Result=%d"), static_cast<int32>(Result));
+		break;
 	}
-	bFinished = true;
 
-	// 실패한 요청의 비동기 로드와 화면 입력 차단을 정리한다.
-	CancelStreaming();
-
-	// 로그에서 플레이어, Layer, 클래스, 요청 키와 실패 메시지를 함께 확인할 수 있게 기록한다.
-	APlayerController* ResolvedOwningPlayer = OwningPlayer.Get();
-	FString OwningPlayerName = GetNameSafe(ResolvedOwningPlayer);
-	FString LayerName = LayerTag.ToString();
-	FSoftObjectPath ResolvedScreenClassPath = ScreenClass.ToSoftObjectPath();
-	FString ScreenClassPath = ResolvedScreenClassPath.ToString();
-	FString RequestKeyName = RequestKey.ToString();
-	FString FailureMessage = Message.ToString();
-	UE_LOG(
-		MarineDemolition,
-		Warning,
-		TEXT("Async UI Push 실패: Player=%s Layer=%s Screen=%s RequestKey=%s Reason=%s"),
-		*OwningPlayerName,
-		*LayerName,
-		*ScreenClassPath,
-		*RequestKeyName,
-		*FailureMessage);
-
-	// Blueprint 실패 처리 이후 입력을 복구하고 proxy 수명을 종료한다.
-	Failed.Broadcast(Failure, Message);
-	ReleaseInputSuspension();
-	SetReadyToDestroy();
-}
-
-void UMD_AsyncAction_PushScreenToLayer::FinishCanceled()
-{
-	// 성공, 실패, 취소 중 먼저 도착한 경로만 종료 처리를 소유한다.
-	if (bFinished == true)
-	{
-		return;
-	}
-	bFinished = true;
-
-	// 취소된 요청의 로드 Handle을 중단한 뒤 Blueprint에 요청 키를 전달한다.
-	CancelStreaming();
-	Canceled.Broadcast(RequestKey);
-
-	// 취소 callback 이후 입력을 복구하고 proxy 수명을 종료한다.
-	ReleaseInputSuspension();
+	// 결과 이벤트 처리 이후 입력을 복구하고 proxy 수명을 종료한다.
+	ReleaseInputBlock();
 	SetReadyToDestroy();
 }
 
@@ -383,19 +324,19 @@ void UMD_AsyncAction_PushScreenToLayer::CancelStreaming()
 	}
 }
 
-void UMD_AsyncAction_PushScreenToLayer::ReleaseInputSuspension()
+void UMD_AsyncAction_PushScreenToLayer::ReleaseInputBlock()
 {
 	// 입력을 차단하지 않았거나 이미 복구한 요청은 Manager 카운트를 변경하지 않는다.
-	if (bInputSuspended == false)
+	if (bInputBlockedDuringPush == false)
 	{
 		return;
 	}
-	bInputSuspended = false;
+	bInputBlockedDuringPush = false;
 
 	// 요청을 시작한 Local UI Manager가 유지되는 경우에만 입력 차단을 해제한다.
 	UMD_LocalUIManager* ResolvedUIManager = UIManager.Get();
 	if (IsValid(ResolvedUIManager) == true)
 	{
-		ResolvedUIManager->ResumeInputForAsyncRequest();
+		ResolvedUIManager->UnblockInputAfterPush();
 	}
 }

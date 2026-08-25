@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/MD_LocalUIManager.h"
 
@@ -265,11 +265,11 @@ UCommonActivatableWidget* UMD_LocalUIManager::PushScreenToLayerInitialized(FGame
 	return PushedScreen;
 }
 
-void UMD_LocalUIManager::SuspendInputForAsyncRequest()
+void UMD_LocalUIManager::BlockInputDuringPush()
 {
 	// 병렬 요청이 있어도 첫 요청에서만 기존 Layout 활성 상태를 저장한다.
-	AsyncInputSuspensionCount++;
-	if (AsyncInputSuspensionCount > 1 || IsValid(PrimaryLayout) == false)
+	InputBlockRequestCount++;
+	if (InputBlockRequestCount > 1 || IsValid(PrimaryLayout) == false)
 	{
 		return;
 	}
@@ -285,17 +285,17 @@ void UMD_LocalUIManager::SuspendInputForAsyncRequest()
 	PrimaryLayout->SetIsEnabled(false);
 }
 
-void UMD_LocalUIManager::ResumeInputForAsyncRequest()
+void UMD_LocalUIManager::UnblockInputAfterPush()
 {
 	// 이미 모두 복구된 상태에서는 입력 활성 상태를 다시 변경하지 않는다.
-	if (AsyncInputSuspensionCount <= 0)
+	if (InputBlockRequestCount <= 0)
 	{
 		return;
 	}
 
 	// 마지막 요청이 완료될 때까지 PrimaryLayout 입력 차단을 유지한다.
-	AsyncInputSuspensionCount--;
-	if (AsyncInputSuspensionCount > 0)
+	InputBlockRequestCount--;
+	if (InputBlockRequestCount > 0)
 	{
 		return;
 	}
@@ -386,7 +386,7 @@ void UMD_LocalUIManager::HandleWorldBeginTearDown(UWorld* World)
 	RemoveWorldTravelWidgetsFromAllLayers();
 
 	// Travel 이후 새 Async 요청이 이전 요청의 입력 차단 횟수를 이어받지 않도록 초기화한다.
-	AsyncInputSuspensionCount = 0;
+	InputBlockRequestCount = 0;
 
 	// 새 World에서 생성할 Layout이 기본 활성 상태로 시작하도록 복구 기준을 초기화한다.
 	bPrimaryLayoutWasEnabled = true;
