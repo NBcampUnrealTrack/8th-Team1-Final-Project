@@ -129,6 +129,12 @@ private:
     // 같은 레벨 재로드 → 복원 경로에서 Day+1 진입
     void TravelToNextDay();
 
+    // 세션 절차를 거치지 않는 직접 ServerTravel 전에 모든 소유 클라이언트에 로딩 화면을 요청한다.
+    void PreparePlayersForTravel(const FText& Subtitle);
+
+    // 로딩 인트로가 화면을 완전히 덮은 뒤에 같은 레벨 재시작 트래블을 실행한다.
+    void RestartLevelAfterLoadingIntro();
+
     // 18:00 정산 시점의 인원 복귀 점수와 현장 미수거 점수를 적용하는 처리
     void FinalizeDailyScore();
 
