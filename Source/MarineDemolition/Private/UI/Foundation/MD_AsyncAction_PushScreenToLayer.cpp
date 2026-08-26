@@ -40,10 +40,10 @@ void UMD_AsyncAction_PushScreenToLayer::Activate()
 		return;
 	}
 
-	// 유효한 Manager의 PrimaryLayout 준비 상태와 Layer 등록 상태를 함께 검증한다.
-	if (ResolvedUIManager->IsPrimaryLayoutReady() == false || ResolvedUIManager->IsLayerRegistered(LayerTag) == false)
+	// 유효한 Manager의 PrimaryLayout 준비 상태를 검증한다.
+	if (ResolvedUIManager->IsPrimaryLayoutReady() == false)
 	{
-		UE_LOG(MarineDemolition, Error, TEXT("PrimaryLayout이 준비되고 요청한 UI Layer가 등록되어야 합니다. Layer=%s"), *LayerTag.ToString());
+		UE_LOG(MarineDemolition, Error, TEXT("PrimaryLayout이 준비되어야 Async Screen을 Push할 수 있습니다."));
 		FinishRequest(EMDAsyncScreenPushResult::Failure);
 		return;
 	}
@@ -124,7 +124,6 @@ void UMD_AsyncAction_PushScreenToLayer::Cancel()
 
 UMD_AsyncAction_PushScreenToLayer* UMD_AsyncAction_PushScreenToLayer::PushScreenToLayerAsync(
 	APlayerController* InOwningPlayer,
-	FGameplayTag Layer,
 	TSoftClassPtr<UCommonActivatableWidget> InScreenClass,
 	bool bBlockInputDuringPush,
 	FName CancellationKey)
@@ -134,7 +133,6 @@ UMD_AsyncAction_PushScreenToLayer* UMD_AsyncAction_PushScreenToLayer::PushScreen
 
 	// 실행 시점 검증과 비동기 로드에 사용할 요청 값을 proxy에 저장한다.
 	AsyncRequest->OwningPlayer = InOwningPlayer;
-	AsyncRequest->LayerTag = Layer;
 	AsyncRequest->ScreenClass = InScreenClass;
 	AsyncRequest->bBlockInputDuringPush = bBlockInputDuringPush;
 	AsyncRequest->CancellationKey = CancellationKey;
@@ -189,10 +187,15 @@ void UMD_AsyncAction_PushScreenToLayer::HandleScreenClassLoaded()
 		return;
 	}
 
-	// World 전환이나 Layout 구성 변경이 발생한 요청을 한 번에 취소한다.
-	if (ResolvedUIManager->IsWorldGenerationCurrent(RequestWorldGeneration) == false
-		|| ResolvedUIManager->IsPrimaryLayoutReady() == false
-		|| ResolvedUIManager->IsLayerRegistered(LayerTag) == false)
+	// World 전환이 발생한 요청은 현재 UI에 적용하지 않는다.
+	if (ResolvedUIManager->IsWorldGenerationCurrent(RequestWorldGeneration) == false)
+	{
+		FinishRequest(EMDAsyncScreenPushResult::Canceled);
+		return;
+	}
+
+	// 비동기 로드 중 PrimaryLayout 구성이 해제된 요청을 취소한다.
+	if (ResolvedUIManager->IsPrimaryLayoutReady() == false)
 	{
 		FinishRequest(EMDAsyncScreenPushResult::Canceled);
 		return;
@@ -218,23 +221,21 @@ void UMD_AsyncAction_PushScreenToLayer::HandleScreenClassLoaded()
 	}
 	TSubclassOf<UCommonActivatableWidget> LoadedActivatableClass = LoadedScreenClass;
 
-	// 같은 클래스가 레이어 최상단에 활성화되어 있으면 연속 클릭에 의한 중복 Push를 거부한다.
-	UCommonActivatableWidget* ActiveScreen = ResolvedUIManager->GetActiveScreen(LayerTag);
-	if (IsValid(ActiveScreen) == true && ActiveScreen->GetClass() == LoadedScreenClass)
-	{
-		FinishRequest(EMDAsyncScreenPushResult::Canceled);
-		return;
-	}
-
 	// Async proxy가 활성화 전 초기화 콜백까지 살아 있는지 안전하게 확인할 약한 참조를 만든다.
 	TWeakObjectPtr<UMD_AsyncAction_PushScreenToLayer> WeakRequest = this;
 
-	// Stack의 초기화 callback에서 Before Push를 실행한 뒤 같은 호출 안에서 화면을 활성화한다.
+	// 기존 활성 화면 반환과 새 화면 초기화를 구분하여 중복 Push 취소 동작을 유지한다.
+	bool bWasScreenInitialized = false;
+
+	// UISettings에서 Layer를 자동 결정하고 초기화 callback에서 Before Push를 실행한다.
 	UCommonActivatableWidget* PushedScreen = ResolvedUIManager->PushScreenToLayerInitialized(
-		LayerTag,
 		LoadedActivatableClass,
-		[WeakRequest](UCommonActivatableWidget& Screen)
+		[WeakRequest, &bWasScreenInitialized](UCommonActivatableWidget& Screen)
 		{
+			// 새 화면을 생성한 경우에만 실행되는 초기화 callback임을 기록한다.
+			bWasScreenInitialized = true;
+
+			// 요청이 유지되는 동안 Blueprint의 Before Push 이벤트를 전달한다.
 			UMD_AsyncAction_PushScreenToLayer* ResolvedRequest = WeakRequest.Get();
 			if (IsValid(ResolvedRequest) == true)
 			{
@@ -255,8 +256,15 @@ void UMD_AsyncAction_PushScreenToLayer::HandleScreenClassLoaded()
 	// 등록된 Stack이 화면을 정상적으로 생성했는지 검증한다.
 	if (IsValid(PushedScreen) == false)
 	{
-		UE_LOG(MarineDemolition, Error, TEXT("등록된 UI Layer에 Screen을 Push하지 못했습니다. Layer=%s Screen=%s"), *LayerTag.ToString(), *GetNameSafe(LoadedScreenClass));
+		UE_LOG(MarineDemolition, Error, TEXT("Project Settings에 등록된 UI Layer에 Screen을 Push하지 못했습니다. Screen=%s"), *GetNameSafe(LoadedScreenClass));
 		FinishRequest(EMDAsyncScreenPushResult::Failure);
+		return;
+	}
+
+	// 동일 클래스가 이미 최상단에 있어 기존 화면이 반환된 경우 요청을 취소 처리한다.
+	if (bWasScreenInitialized == false)
+	{
+		FinishRequest(EMDAsyncScreenPushResult::Canceled);
 		return;
 	}
 

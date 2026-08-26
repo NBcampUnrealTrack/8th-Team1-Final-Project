@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "UI/MD_LocalUIManager.h"
 
@@ -167,10 +167,10 @@ void UMD_LocalUIManager::UnregisterLayer(FGameplayTag LayerTag, UMD_WidgetStack*
 	LayerStacks.Remove(LayerTag);
 }
 
-UCommonActivatableWidget* UMD_LocalUIManager::PushScreenToLayer(FGameplayTag LayerTag, TSubclassOf<UCommonActivatableWidget> ScreenClass)
+UCommonActivatableWidget* UMD_LocalUIManager::PushScreenToLayer(TSubclassOf<UCommonActivatableWidget> ScreenClass)
 {
 	// 별도 초기화가 없는 동기 요청도 공통 Stack Push 경로를 사용한다.
-	UCommonActivatableWidget* PushedScreen = PushScreenToLayerInitialized(LayerTag, ScreenClass, [](UCommonActivatableWidget&) {});
+	UCommonActivatableWidget* PushedScreen = PushScreenToLayerInitialized(ScreenClass, [](UCommonActivatableWidget&) {});
 	return PushedScreen;
 }
 
@@ -244,18 +244,52 @@ bool UMD_LocalUIManager::IsLayerRegistered(FGameplayTag LayerTag) const
 	return bIsLayerRegistered;
 }
 
-UCommonActivatableWidget* UMD_LocalUIManager::PushScreenToLayerInitialized(FGameplayTag LayerTag, TSubclassOf<UCommonActivatableWidget> ScreenClass, TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen)
+UCommonActivatableWidget* UMD_LocalUIManager::PushScreenToLayerInitialized(TSubclassOf<UCommonActivatableWidget> ScreenClass, TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen)
 {
-	// PrimaryLayout이 등록한 대상 레이어 Stack을 찾는다.
-	UMD_WidgetStack* LayerStack = FindLayerStack(LayerTag);
-
-	// 생성할 화면 클래스 또는 등록된 레이어 Stack이 없으면 Stack을 변경하지 않는다.
-	if (LayerStack == nullptr || IsValid(ScreenClass) == false)
+	// 유효하지 않은 CommonActivatableWidget 클래스는 Project Settings에서 조회하지 않는다.
+	if (IsValid(ScreenClass) == false)
 	{
 		return nullptr;
 	}
 
-	if (LayerStack == nullptr)
+	// Project Settings에서 화면 클래스에 대응하는 유일한 Layer 태그를 찾는다.
+	FGameplayTag ResolvedLayerTag;
+	if (FindLayerTagForWidgetClass(ScreenClass, ResolvedLayerTag) == false)
+	{
+		UE_LOG(MarineDemolition, Error, TEXT("Widget Class가 Project Settings의 Layer Map에 유일하게 등록되어야 합니다. Screen=%s"), *GetNameSafe(ScreenClass.Get()));
+		return nullptr;
+	}
+
+	// PrimaryLayout에 설정된 목적지 Layer Stack이 실제로 등록됐는지 확인한다.
+	if (IsLayerRegistered(ResolvedLayerTag) == false)
+	{
+		UE_LOG(MarineDemolition, Error, TEXT("Widget Class에 등록된 UI Layer Stack이 준비되지 않았습니다. Layer=%s Screen=%s"), *ResolvedLayerTag.ToString(), *GetNameSafe(ScreenClass.Get()));
+		return nullptr;
+	}
+
+	// 같은 클래스가 이미 대상 Layer의 최상단에 있으면 중복 Push 없이 기존 화면을 반환한다.
+	UCommonActivatableWidget* ActiveScreen = GetActiveScreen(ResolvedLayerTag);
+	if (IsValid(ActiveScreen) == true && ActiveScreen->GetClass() == ScreenClass.Get())
+	{
+		return ActiveScreen;
+	}
+
+	// 결정된 Layer의 Stack 활성화 전에 호출자가 화면 데이터를 초기화할 수 있는 Push 경로를 사용한다.
+	UCommonActivatableWidget* PushedScreen = PushScreenToLayerInitializedByTag(ResolvedLayerTag, ScreenClass, InitializeScreen);
+	return PushedScreen;
+}
+
+UCommonActivatableWidget* UMD_LocalUIManager::PushScreenToLayerInitializedByTag(FGameplayTag LayerTag, TSubclassOf<UCommonActivatableWidget> ScreenClass, TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen)
+{
+	// 생성할 화면 클래스의 유효성을 먼저 확인한다.
+	if (IsValid(ScreenClass) == false)
+	{
+		return nullptr;
+	}
+
+	// PrimaryLayout이 등록한 대상 레이어 Stack을 찾는다.
+	UMD_WidgetStack* LayerStack = FindLayerStack(LayerTag);
+	if (IsValid(LayerStack) == false)
 	{
 		return nullptr;
 	}
@@ -411,6 +445,64 @@ bool UMD_LocalUIManager::IsSupportedLayerTag(FGameplayTag LayerTag) const
 	bool bIsLayerTag = LayerTag.MatchesTag(MDGameplayTags::UI_Layer);
 
 	return bIsLayerTag;
+}
+
+bool UMD_LocalUIManager::FindLayerTagForWidgetClass(TSubclassOf<UCommonActivatableWidget> WidgetClass, FGameplayTag& OutLayerTag) const
+{
+	// 실패 시 호출자에게 이전 조회 결과가 남지 않도록 출력 태그를 초기화한다.
+	OutLayerTag = FGameplayTag();
+
+	// 유효하지 않은 Widget 클래스는 설정 Map과 비교하지 않는다.
+	if (IsValid(WidgetClass) == false)
+	{
+		return false;
+	}
+
+	// 읽기 전용 Project Settings에서 Layer별 Widget 클래스 등록 정보를 가져온다.
+	const UMD_UISettings* UISettings = UMD_UISettings::Get();
+	if (IsValid(UISettings) == false)
+	{
+		return false;
+	}
+
+	// 로드된 요청 클래스를 Set과 동일한 소프트 클래스 키로 변환한다.
+	TSoftClassPtr<UCommonActivatableWidget> RequestedWidgetClass(WidgetClass.Get());
+
+	// 같은 클래스가 둘 이상의 Layer에 등록됐는지 검증하면서 일치 태그를 찾는다.
+	bool bFoundLayerTag = false;
+	for (const TPair<FGameplayTag, FMD_UILayerWidgetClasses>& LayerPair : UISettings->LayerWidgetClasses)
+	{
+		// 표준 UI Layer가 아닌 잘못된 Config 항목은 자동 Push 대상으로 사용하지 않는다.
+		if (IsSupportedLayerTag(LayerPair.Key) == false)
+		{
+			continue;
+		}
+
+		// 현재 Layer의 Set에 요청 클래스가 등록됐는지 해시로 조회한다.
+		if (LayerPair.Value.WidgetClasses.Contains(RequestedWidgetClass) == false)
+		{
+			continue;
+		}
+
+		// 첫 일치 항목의 Layer 태그를 출력 결과로 저장한다.
+		if (bFoundLayerTag == false)
+		{
+			OutLayerTag = LayerPair.Key;
+			bFoundLayerTag = true;
+			continue;
+		}
+
+		// 같은 클래스가 다른 Layer에도 등록된 경우 비결정적인 Push를 거부한다.
+		if (OutLayerTag != LayerPair.Key)
+		{
+			UE_LOG(MarineDemolition, Error, TEXT("Widget Class가 둘 이상의 UI Layer에 등록되었습니다. Screen=%s"), *GetNameSafe(WidgetClass.Get()));
+			OutLayerTag = FGameplayTag();
+			return false;
+		}
+	}
+
+	// 유일한 Layer를 찾았는지 호출자에게 반환한다.
+	return bFoundLayerTag;
 }
 
 UMD_WidgetStack* UMD_LocalUIManager::FindLayerStack(FGameplayTag LayerTag) const

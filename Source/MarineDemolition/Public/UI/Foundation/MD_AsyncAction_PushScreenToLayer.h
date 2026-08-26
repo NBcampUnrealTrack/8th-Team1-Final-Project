@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameplayTagContainer.h"
 #include "Kismet/BlueprintAsyncActionBase.h"
 #include "MD_AsyncAction_PushScreenToLayer.generated.h"
 
@@ -74,9 +73,6 @@ protected:
 	// 요청이 시작된 UI World 세대를 저장하여 같은 World 객체를 재사용하는 전환도 감지한다.
 	uint32 RequestWorldGeneration = 0;
 
-	// 목적지 Common UI Stack을 선택할 표준 UI Layer 태그를 보관한다.
-	FGameplayTag LayerTag;
-
 	// Asset Manager가 비동기로 로드할 Activatable Widget 소프트 클래스를 보관한다.
 	TSoftClassPtr<UCommonActivatableWidget> ScreenClass;
 
@@ -97,11 +93,10 @@ protected:
 
 public:
 	/**
-	 * 지정한 플레이어의 Layer에 Soft Screen Class를 비동기로 Push하는 Blueprint 노드를 생성한다.
+	 * 지정한 플레이어의 UISettings Layer에 Soft Screen Class를 비동기로 Push하는 Blueprint 노드를 생성한다.
 	 *
 	 * @param OwningPlayer UI 화면을 소유하며 대상 LocalPlayer와 World를 결정할 로컬 PlayerController다.
-	 * @param Layer Screen을 Push할 PrimaryLayout의 UI Layer GameplayTag다.
-	 * @param ScreenClass 비동기로 로드한 뒤 Layer에 생성할 CommonActivatableWidget 소프트 클래스다.
+	 * @param ScreenClass 비동기로 로드한 뒤 설정된 Layer에 생성할 CommonActivatableWidget 소프트 클래스다.
 	 * @param bBlockInputDuringPush true이면 클래스 로드와 Push가 끝날 때까지 PrimaryLayout 입력을 차단한다.
 	 * @param CancellationKey 취소된 요청을 Blueprint에서 식별할 때 사용하는 선택적 키다.
 	 * @return 성공, 실패, 취소 및 활성화 전 초기화 이벤트를 제공하는 Async Action proxy다.
@@ -109,10 +104,9 @@ public:
 	UFUNCTION(
 		BlueprintCallable,
 		Category = "MD | UI | Navigation",
-		meta = (BlueprintInternalUseOnly = "true", DisplayName = "Push UI Screen to Layer (Async)", GameplayTagFilter = "UI.Layer", AdvancedDisplay = "CancellationKey"))
+		meta = (BlueprintInternalUseOnly = "true", DisplayName = "Push UI Screen to Layer (Async)", AdvancedDisplay = "CancellationKey"))
 	static UMD_AsyncAction_PushScreenToLayer* PushScreenToLayerAsync(
 		APlayerController* OwningPlayer,
-		FGameplayTag Layer,
 		TSoftClassPtr<UCommonActivatableWidget> ScreenClass,
 		bool bBlockInputDuringPush = true,
 		FName CancellationKey = NAME_None);
