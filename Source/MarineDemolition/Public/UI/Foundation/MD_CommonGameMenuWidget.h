@@ -18,7 +18,4 @@ public:
 	virtual void NativeOnActivated() override;
 
 	virtual void NativeOnDeactivated() override;
-
-protected:
-	virtual void NativeOnInitialized() override;
 };

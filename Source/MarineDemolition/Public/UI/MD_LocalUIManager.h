@@ -65,9 +65,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI")
 	void UnregisterLayer(FGameplayTag LayerTag, UMD_WidgetStack* LayerStack);
 
-	// Project Settings에서 화면 클래스에 등록된 레이어를 찾아 CommonActivatableWidget 화면을 Push한다.
+	// 지정한 UI Layer에 CommonActivatableWidget 화면을 직접 Push한다.
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI", meta = (DeterminesOutputType = "ScreenClass"))
-	UCommonActivatableWidget* PushScreenToLayer(TSubclassOf<UCommonActivatableWidget> ScreenClass);
+	UCommonActivatableWidget* PushScreenToLayer(FGameplayTag LayerTag, TSubclassOf<UCommonActivatableWidget> ScreenClass);
+
+	// Project Settings의 화면 요청 태그로 Widget 클래스와 부모 UI Layer를 자동 결정하여 Push한다.
+	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI")
+	UCommonActivatableWidget* PushScreenToLayerByTag(FGameplayTag WidgetTag);
 
 	// 지정한 레이어의 최상단 화면을 Deactivate하여 Stack에서 Pop한다.
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI")
@@ -97,11 +101,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MarineDemolition|UI")
 	bool IsLayerRegistered(FGameplayTag LayerTag) const;
 
-	// Project Settings에서 레이어를 찾고 Stack 활성화 전에 화면 초기화 함수를 실행한다.
-	UCommonActivatableWidget* PushScreenToLayerInitialized(TSubclassOf<UCommonActivatableWidget> ScreenClass, TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen);
+	// 화면 요청 태그의 등록 클래스와 가장 가까운 부모 Layer Stack 태그를 C++ 호출자에게 반환한다.
+	bool ResolveWidgetRegistration(FGameplayTag WidgetTag, FGameplayTag& OutLayerTag, TSoftClassPtr<UCommonActivatableWidget>& OutWidgetClass) const;
 
-	// 이미 결정된 레이어를 사용하는 Async Action 내부 요청을 Stack에 Push한다.
-	UCommonActivatableWidget* PushScreenToLayerInitializedByTag(FGameplayTag LayerTag, TSubclassOf<UCommonActivatableWidget> ScreenClass, TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen);
+	// C++ 호출자가 지정한 Layer와 Widget Class를 사용하고 Stack 활성화 전에 화면 초기화 함수를 실행한다.
+	UCommonActivatableWidget* PushScreenToLayerInitialized(FGameplayTag LayerTag, TSubclassOf<UCommonActivatableWidget> ScreenClass, TFunctionRef<void(UCommonActivatableWidget&)> InitializeScreen);
 
 	// Async 화면 로드 중 PrimaryLayout의 중복 입력을 차단한다.
 	void BlockInputDuringPush();
@@ -134,6 +138,4 @@ protected:
 	// 요청 태그가 프로젝트에서 표준 UI 레이어인지 확인한다.
 	bool IsSupportedLayerTag(FGameplayTag LayerTag) const;
 
-	// Project Settings에서 화면 클래스가 유일하게 등록된 UI Layer 태그를 찾는다.
-	bool FindLayerTagForWidgetClass(TSubclassOf<UCommonActivatableWidget> WidgetClass, FGameplayTag& OutLayerTag) const;
 };

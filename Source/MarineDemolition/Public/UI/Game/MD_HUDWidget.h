@@ -17,8 +17,4 @@ class MARINEDEMOLITION_API UMD_HUDWidget : public UMD_CommonActivatableWidget
 public:
 	// GameHUD가 최상단 화면일 때 게임플레이 입력을 유지한다.
 	virtual TOptional<FUIInputConfig> GetDesiredInputConfig() const override;
-
-protected:
-	// HUD 화면이 Push될 표준 GameHUD 레이어를 초기화한다.
-	virtual void NativeOnInitialized() override;
 };

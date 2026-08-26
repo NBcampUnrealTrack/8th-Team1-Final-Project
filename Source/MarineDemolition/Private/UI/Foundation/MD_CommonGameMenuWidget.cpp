@@ -2,7 +2,6 @@
 
 
 #include "UI/Foundation/MD_CommonGameMenuWidget.h"
-#include "GameplayTags/MD_GameplayTags.h"
 
 void UMD_CommonGameMenuWidget::NativeOnActivated()
 {
@@ -38,11 +37,4 @@ void UMD_CommonGameMenuWidget::NativeOnDeactivated()
 	}
 
 	Super::NativeOnDeactivated();
-}
-
-void UMD_CommonGameMenuWidget::NativeOnInitialized()
-{
-	Super::NativeOnInitialized();
-
-	TargetLayerTag = MDGameplayTags::UI_Layer_GameMenu;
 }
