@@ -16,6 +16,7 @@
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "InputCoreTypes.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -108,6 +109,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	FirstPersonToolMesh->SetOwnerNoSee(false);
 	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FirstPersonToolMesh->SetCanEverAffectNavigation(false);
+
+	ConfigureFirstPersonRendering();
 
 	HoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HoldPoint"));
 	HoldPoint->SetupAttachment(Camera);
@@ -445,6 +448,9 @@ void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 기존 BP에 저장된 네이티브 컴포넌트 값이 C++ 기본값을 덮더라도
+	// 실제 플레이에서는 팔·도구의 데칼 수신과 월드 메시 관통을 줄이도록 다시 보정한다.
+	ConfigureFirstPersonRendering();
 	RefreshFirstPersonArmsTick();
 
 	// 사다리 진입과 이탈을 캐릭터 캡슐 기준으로 감지하기 위한 델리게이트 연결
@@ -484,6 +490,30 @@ void AMD_Character::BeginPlay()
 	{
 		EquipHotbarComponent->OnHotbarChanged.AddDynamic(this, &AMD_Character::HandleHotbarChanged);
 		HandleHotbarChanged();
+	}
+}
+
+void AMD_Character::ConfigureFirstPersonRendering()
+{
+	if (IsValid(FirstPersonMesh))
+	{
+		FirstPersonMesh->SetReceivesDecals(false);
+		FirstPersonMesh->SetFirstPersonPrimitiveType(
+			EFirstPersonPrimitiveType::FirstPerson);
+	}
+
+	if (IsValid(FirstPersonToolMesh))
+	{
+		FirstPersonToolMesh->SetReceivesDecals(false);
+		FirstPersonToolMesh->SetFirstPersonPrimitiveType(
+			EFirstPersonPrimitiveType::FirstPerson);
+	}
+
+	if (IsValid(Camera))
+	{
+		Camera->SetEnableFirstPersonScale(true);
+		Camera->SetFirstPersonScale(
+			FMath::Clamp(FirstPersonRenderScale, 0.1f, 1.0f));
 	}
 }
 
@@ -714,11 +744,16 @@ void AMD_Character::CalcCamera(
 	FMinimalViewInfo& OutResult)
 {
 	Super::CalcCamera(DeltaTime, OutResult);
-	if (IsValid(ScrapeToolComponent))
+	if (IsValid(ScrapeToolComponent)
+		&& ScrapeToolComponent->ApplyScrapeFocusCameraView(OutResult))
 	{
-		ScrapeToolComponent->ApplyScrapeFocusCameraView(OutResult);
+		// First Person 전용 FOV를 따로 쓰지 않는 동안에는 Focus FOV와 맞춰야
+		// 팔·도구가 Focus 시작 순간 갑자기 확대되거나 축소되지 않는다.
+		if (!IsValid(Camera) || !Camera->bEnableFirstPersonFieldOfView)
+		{
+			OutResult.FirstPersonFOV = OutResult.FOV;
+		}
 	}
-
 }
 
 void AMD_Character::OnRep_Controller()
@@ -1618,6 +1653,10 @@ void AMD_Character::RefreshCutterVFX()
 
 	if (IsValid(CutterVFXComponent))
 	{
+		CutterVFXComponent->SetFirstPersonPrimitiveType(
+			IsLocallyControlled()
+				? EFirstPersonPrimitiveType::FirstPerson
+				: EFirstPersonPrimitiveType::None);
 		CutterVFXComponent->Activate(true);
 		return;
 	}
@@ -1626,6 +1665,14 @@ void AMD_Character::RefreshCutterVFX()
 		CutterCutEffect, AttachMesh, CutterVFXSocketName,
 		FVector::ZeroVector, FRotator::ZeroRotator,
 		EAttachLocation::SnapToTarget, /*bAutoDestroy=*/false);
+	if (IsValid(CutterVFXComponent))
+	{
+		// 로컬 절단 이펙트도 GPU에서 이동한 1인칭 도구와 같은 변환을 받게 한다.
+		CutterVFXComponent->SetFirstPersonPrimitiveType(
+			IsLocallyControlled()
+				? EFirstPersonPrimitiveType::FirstPerson
+				: EFirstPersonPrimitiveType::None);
+	}
 }
 
 void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)

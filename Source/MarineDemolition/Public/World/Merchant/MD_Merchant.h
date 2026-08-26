@@ -42,6 +42,7 @@ public:
 	virtual bool RequiresServerInteraction_Implementation() const override { return false; }
 	virtual void Interact_Implementation(AActor* Interactor) override;
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+	virtual FText GetInteractionDisplayName_Implementation() const override;
 
 	/** WBP가 표시할 상인 이름 (`06` §4: 노라 브릭스) */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")

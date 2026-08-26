@@ -19,6 +19,16 @@ namespace MDGameplayTags
 		"Ability.WallScan",
 		"격벽 스캔 어빌리티");
 
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Ability_UtilityRepair_Foam,
+		"Ability.UtilityRepair.Foam",
+		"폼건 수도관 수리 능력");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Ability_UtilityRepair_Insulation,
+		"Ability.UtilityRepair.Insulation",
+		"절연테이프 배선 수리 능력");
+
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Storage_Content,

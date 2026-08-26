@@ -12,6 +12,7 @@
 #include "GameFramework/PlayerState.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
 #include "GameplayTagAssetInterface.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "GeometryCollection/GeometryCollectionComponent.h"
@@ -38,6 +39,11 @@ void UMD_InteractionComponent::SetInteractionDependencies(UCameraComponent* InCa
 	Camera = InCamera;
 	HoldPoint = InHoldPoint;
 	PhysicsHandle = InPhysicsHandle;
+}
+
+FText UMD_InteractionComponent::GetCurrentTargetDisplayName() const
+{
+	return UMD_InteractionPresentationLibrary::ResolveInteractionDisplayName(CurrentTarget.Get());
 }
 
 void UMD_InteractionComponent::BeginPlay()
@@ -113,6 +119,12 @@ void UMD_InteractionComponent::Interact()
 	// New interactables are server-authoritative by default. UI-only targets must explicitly opt out.
 	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
 	{
+		if (!IMD_Interactable::CanInteractWith(Target, OwnerPawn))
+		{
+			SetCurrentTarget(nullptr);
+			return;
+		}
+
 		const bool bRequiresServerInteraction =
 			IMD_Interactable::Execute_RequiresServerInteraction(Target);
 
@@ -186,6 +198,10 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 	}
 
 	if (!ValidateInteractionTarget(RequestedActor))
+	{
+		return;
+	}
+	if (!IMD_Interactable::CanInteractWith(RequestedActor, OwnerPawn))
 	{
 		return;
 	}
@@ -563,17 +579,22 @@ FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& Ho
 		static_cast<float>(Held->Bounds.SphereRadius) * HoldProbeRadiusScale);
 
 	// 폰과 다른 물리 프롭은 제외한다. 목표점을 막아야 할 건 월드 지오메트리뿐이다.
-	FCollisionObjectQueryParams ObjectParams;
-	ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
-	ObjectParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+	// 채널 스윕으로 양쪽 충돌 응답을 함께 확인해야 Overlap 감지 볼륨을 벽으로 오인하지 않는다.
+	FCollisionResponseParams ProbeResponses(ECR_Ignore);
+	ProbeResponses.CollisionResponse.SetResponse(
+		ECC_WorldStatic,
+		Held->GetCollisionResponseToChannel(ECC_WorldStatic));
+	ProbeResponses.CollisionResponse.SetResponse(
+		ECC_WorldDynamic,
+		Held->GetCollisionResponseToChannel(ECC_WorldDynamic));
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDHoldProbe), false, GetOwner());
 	QueryParams.AddIgnoredActor(Held->GetOwner());
 
 	FHitResult Hit;
-	const bool bBlocked = World->SweepSingleByObjectType(
-		Hit, Origin, Desired, FQuat::Identity, ObjectParams,
-		FCollisionShape::MakeSphere(ProbeRadius), QueryParams);
+	const bool bBlocked = World->SweepSingleByChannel(
+		Hit, Origin, Desired, FQuat::Identity, Held->GetCollisionObjectType(),
+		FCollisionShape::MakeSphere(ProbeRadius), QueryParams, ProbeResponses);
 
 	const FVector ToDesired = Desired - Origin;
 	const double DesiredDistance = ToDesired.Size();
@@ -713,7 +734,7 @@ void UMD_InteractionComponent::UpdateInteractionFocus()
 
 AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 {
-	const APawn* OwnerPawn = GetOwnerPawn();
+	APawn* OwnerPawn = GetOwnerPawn();
 	AController* Controller = IsValid(OwnerPawn) ? OwnerPawn->GetController() : nullptr;
 	if (!IsValid(Controller) || !GetWorld()) return nullptr;
 
@@ -749,6 +770,7 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 		return nullptr;
 	}
 	if (IsHeldByOtherPawn(HitActor)) return nullptr;
+	if (!IMD_Interactable::CanInteractWith(HitActor, OwnerPawn)) return nullptr;
 
 	return HitActor;
 }
@@ -848,9 +870,13 @@ bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor)
 
 void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)
 {
-	if (CurrentTarget.Get() == NewTarget) return;
+	AActor* PreviousTarget = GetCurrentTarget();
+	if (!CurrentTarget.IsStale() && PreviousTarget == NewTarget)
+	{
+		return;
+	}
 
-	if (AActor* PreviousTarget = CurrentTarget.Get())
+	if (PreviousTarget)
 	{
 		if (PreviousTarget->Implements<UMD_Interactable>())
 		{
@@ -864,6 +890,8 @@ void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)
 	{
 		IMD_Interactable::Execute_SetInteractionHighlighted(NewTarget, true);
 	}
+
+	OnInteractionTargetChanged.Broadcast(GetCurrentTarget());
 }
 
 APawn* UMD_InteractionComponent::GetOwnerPawn() const

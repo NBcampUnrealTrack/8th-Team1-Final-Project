@@ -138,6 +138,11 @@ void AMD_Merchant::SetInteractionHighlighted_Implementation(bool bHighlighted)
 	}
 }
 
+FText AMD_Merchant::GetInteractionDisplayName_Implementation() const
+{
+	return MerchantDisplayName;
+}
+
 void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 {
 	AMD_Character* InstigatorCharacter = Cast<AMD_Character>(Interactor);

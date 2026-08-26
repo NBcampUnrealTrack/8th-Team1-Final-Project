@@ -365,7 +365,34 @@ float AMD_CuttableWall::GetCutProgressRatio() const
 
 void AMD_CuttableWall::OnRep_CutProgress()
 {
-	OnCutProgressChanged.Broadcast(this, GetCutProgressRatio());
+	const float ProgressRatio = GetCutProgressRatio();
+	OnCutProgressChanged.Broadcast(this, ProgressRatio);
+
+	if (GEngine && GetNetMode() != NM_DedicatedServer)
+	{
+		const TCHAR* WallTypeLabel = WallType == EMD_WallType::Strut
+			? TEXT("Strut")
+			: TEXT("Partition");
+		const TCHAR* NetRoleLabel = HasAuthority()
+			? TEXT("Server")
+			: TEXT("Client");
+		const FColor ProgressColor = ProgressRatio >= 1.0f
+			? FColor::Green
+			: FColor::Cyan;
+
+		GEngine->AddOnScreenDebugMessage(
+			reinterpret_cast<uint64>(this),
+			0.35f,
+			ProgressColor,
+			FString::Printf(
+				TEXT("[Wall Cutting][%s] %s (%s) | %.1f%% | %.2f / %.2fs"),
+				NetRoleLabel,
+				*GetName(),
+				WallTypeLabel,
+				ProgressRatio * 100.0f,
+				CutProgressSeconds,
+				GetRequiredCutSeconds()));
+	}
 }
 
 void AMD_CuttableWall::SyncLegacySurfaceConfiguration()
