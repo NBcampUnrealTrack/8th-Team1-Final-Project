@@ -2,6 +2,7 @@
 
 #include "UI/MD_CommonButtonBase.h"
 #include "CommonTextBlock.h"
+#include "Components/Image.h"
 #include "Components/TextBlock.h"
 
 void UMD_CommonButtonBase::NativePreConstruct()
@@ -11,6 +12,9 @@ void UMD_CommonButtonBase::NativePreConstruct()
 
 	// 편집한 Text_ButtonText 값을 바인딩된 버튼 TextBlock의 Content에 반영한다.
 	SetContentText(Text_ButtonText);
+
+	// 편집한 Brush_ButtonImage 값을 바인딩된 버튼 Image의 Brush에 반영한다.
+	SetContentImage(Brush_ButtonImage);
 }
 
 void UMD_CommonButtonBase::NativeOnCurrentTextStyleChanged()
@@ -49,15 +53,6 @@ void UMD_CommonButtonBase::HandleFocusLost()
 	NativeOnUnhovered();
 }
 
-FText UMD_CommonButtonBase::GetContentText()
-{
-	// 디자인 타임과 런타임에 공통으로 사용하는 Content 값을 저장한다.
-	FText ContentText = Text_ButtonText;
-
-	// 저장한 Content를 호출자에게 반환한다.
-	return ContentText;
-}
-
 void UMD_CommonButtonBase::SetContentText(FText InContentText)
 {
 	// PreConstruct와 이후 TextBlock 재구성에서도 유지할 Content 값을 갱신한다.
@@ -71,6 +66,42 @@ void UMD_CommonButtonBase::SetContentText(FText InContentText)
 
 	// 버튼에 표시되는 TextBlock의 Content를 갱신한다.
 	Txt_ButtonText->SetText(InContentText);
+}
+
+void UMD_CommonButtonBase::SetContentImage(FSlateBrush InContentImage)
+{
+	// PreConstruct와 이후 Image 재구성에서도 유지할 Brush 값을 갱신한다.
+	Brush_ButtonImage = InContentImage;
+
+	// 갱신한 Brush를 바인딩된 Image에 적용한다.
+	ApplyContentImageBrush();
+}
+
+void UMD_CommonButtonBase::SetContentImageColor(FLinearColor InContentImageColor)
+{
+	// PreConstruct와 이후 Image 재구성에서도 유지하도록 Brush의 색상을 갱신한다.
+	Brush_ButtonImage.TintColor = FSlateColor(InContentImageColor);
+
+	// 갱신한 Brush를 바인딩된 Image에 적용한다.
+	ApplyContentImageBrush();
+}
+
+void UMD_CommonButtonBase::SetContentImageSize(FVector2D InContentImageSize)
+{
+	// Brush가 레이아웃에 제공할 이미지 크기를 갱신한다.
+	Brush_ButtonImage.SetImageSize(InContentImageSize);
+
+	// 갱신한 Brush를 바인딩된 Image에 적용한다.
+	ApplyContentImageBrush();
+}
+
+void UMD_CommonButtonBase::SetContentImageResourceObject(UObject* InContentImageResourceObject)
+{
+	// Texture 또는 Material과 같은 Brush 리소스를 갱신한다.
+	Brush_ButtonImage.SetResourceObject(InContentImageResourceObject);
+
+	// 갱신한 Brush를 바인딩된 Image에 적용한다.
+	ApplyContentImageBrush();
 }
 
 void UMD_CommonButtonBase::ApplyCommonTextStyleToTextBlock(UCommonTextStyle* TextStyle, UTextBlock* TextBlock)
@@ -110,4 +141,16 @@ void UMD_CommonButtonBase::ApplyCommonTextStyleToTextBlock(UCommonTextStyle* Tex
 		TextBlock->SetShadowOffset(FVector2D::ZeroVector);
 		TextBlock->SetShadowColorAndOpacity(FLinearColor::Transparent);
 	}
+}
+
+void UMD_CommonButtonBase::ApplyContentImageBrush()
+{
+	// Image가 바인딩되지 않은 버튼은 저장된 Brush 값만 유지한다.
+	if (IsValid(Img_ButtonImage) == false)
+	{
+		return;
+	}
+
+	// 저장된 Brush의 모든 변경 사항을 바인딩된 Image에 적용한다.
+	Img_ButtonImage->SetBrush(Brush_ButtonImage);
 }
