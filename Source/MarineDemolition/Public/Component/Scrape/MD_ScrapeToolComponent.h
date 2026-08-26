@@ -375,6 +375,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	virtual void TickComponent(
 		float DeltaTime,
@@ -669,7 +670,6 @@ private:
 	friend class FMD_ScrapeStage3PathTest;
 	friend class FMD_ScrapeReacquisitionTest;
 	friend class FMD_ScrapeNetworkSessionTest;
-
 	/** Stage3 권위 규칙. Blueprint에서 바꿀 수 없는 정확한 역오염 비율이다. */
 	static constexpr float SaturatedReverseContaminationRatio = 0.4f;
 
@@ -713,6 +713,17 @@ private:
 		float SampleDeltaTime,
 		bool bSequenceGapKnown,
 		int32 MissingAimSequences);
+	void ProcessLocalPredictedScrapeAim(
+		const FMD_ScrapeAimNetSample& Sample,
+		const FMD_ScrapeAimQueryResult& AimResult,
+		float SampleDeltaTime);
+	void ProcessAuthoritativeScrapeAimResult(
+		const FMD_ScrapeAimQueryResult& AimResult,
+		float SampleDeltaTime,
+		bool bSequenceGapKnown,
+		int32 MissingAimSequences,
+		uint64 FocusSessionId,
+		uint32 AimSequence);
 	void ApplyAimSequenceGapPolicy(
 		bool bSequenceGapKnown,
 		int32 MissingAimSequences,
@@ -747,13 +758,39 @@ private:
 		UMD_ScrapeSurfaceComponent* Surface,
 		const FMD_ScrapeResult& Result,
 		const FVector& ContactLocation);
+	void AccumulateAuthoritativeScrapePredictionResolution(
+		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta);
+	void SendScrapePredictionResolution(uint64 FocusSessionId, uint32 AimSequence);
+	void ResolveLocalScrapePredictions(
+		uint64 FocusSessionId,
+		uint32 AimSequence,
+		const TArray<FMD_ScrapeAuthoritativeVisualDelta>& Resolutions,
+		bool bRebuildIfPredictionMissing = false);
+	void UpdateLocalScrapePredictionResolution(double NowSeconds);
+	void ClearLocalScrapePredictions();
 
-	/** 소유자와 관찰자가 같은 서버 확정 셀/Load를 먼저 적용한 뒤 피드백을 재생한다. */
+	UFUNCTION(Client, Unreliable)
+	void ClientReceiveScrapeResult(
+		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
+		const FMD_ScrapeResult& Result,
+		FVector_NetQuantize10 ContactLocation);
+
+	UFUNCTION(Client, Reliable)
+	void ClientResolveScrapePrediction(
+		uint64 FocusSessionId,
+		uint32 AimSequence,
+		bool bFinalChunk,
+		const TArray<FMD_ScrapeAuthoritativeVisualDelta>& Resolutions);
+
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastReceiveScrapeFeedback(
 		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
 		const FMD_ScrapeResult& Result,
 		FVector_NetQuantize10 ContactLocation);
+	void ReceiveAuthoritativeScrapeResult(
+		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
+		const FMD_ScrapeResult& Result,
+		const FVector& ContactLocation);
 	bool ApplyAuthoritativeScrapeVisualDelta(
 		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta);
 
@@ -1094,6 +1131,25 @@ private:
 	FMD_ScrapeStrokePathState StrokePath;
 	FMD_ScrapeAimRecoveryState AimRecovery;
 	FMD_ScrapeContaminationPaintState ContaminationPaint;
+	struct FActiveAuthoritativeScrapePredictionResolution
+	{
+		FMD_ScrapeAuthoritativeVisualDelta VisualDelta;
+		TMap<int32, int32> CellStateIndices;
+	};
+	TArray<FActiveAuthoritativeScrapePredictionResolution>
+		ActiveAuthoritativeScrapePredictionResolutions;
+	uint64 ActiveAuthoritativeScrapePredictionSessionId = 0;
+	uint32 ActiveAuthoritativeScrapePredictionAimSequence = 0;
+	TArray<TWeakObjectPtr<UMD_ScrapeSurfaceComponent>> LocalPredictedScrapeSurfaces;
+	uint64 ActiveLocalScrapePredictionSessionId = 0;
+	uint32 ActiveLocalScrapePredictionAimSequence = 0;
+	TArray<FMD_ScrapeAuthoritativeVisualDelta>
+		PendingLocalScrapePredictionResolutionChunks;
+	uint64 PendingLocalScrapePredictionResolutionSessionId = 0;
+	uint32 PendingLocalScrapePredictionResolutionAimSequence = 0;
+	static constexpr int32
+		MaximumAuthoritativePredictionResolutionCellStates = 512;
+	static constexpr double LocalScrapePredictionTimeoutSeconds = 0.75;
 
 	UPROPERTY(Transient)
 	FVector ScrapeFocusViewOrigin = FVector::ZeroVector;

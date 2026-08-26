@@ -56,12 +56,14 @@ UMD_ScrapeSurfaceComponent::MakeContaminationMaskCell(
 	FMD_ScrapeSurfaceCell MaskCell;
 	MaskCell.InitialContamination = 1.0f;
 	MaskCell.RemainingContamination = 0.0f;
-	if (!ContaminationCells.IsValidIndex(CellIndex))
+	const TConstArrayView<FMD_ScrapeSurfaceCell> VisualCells =
+		GetVisualContaminationCells();
+	if (!VisualCells.IsValidIndex(CellIndex))
 	{
 		return MaskCell;
 	}
 
-	const FMD_ScrapeSurfaceCell& SourceCell = ContaminationCells[CellIndex];
+	const FMD_ScrapeSurfaceCell& SourceCell = VisualCells[CellIndex];
 	MaskCell.RemainingContamination =
 		FMD_ScrapeMaskAtlas::CalculateVisualMaskValue(
 			SourceCell.RemainingContamination,
@@ -82,9 +84,11 @@ bool UMD_ScrapeSurfaceComponent::InitializeContaminationMask()
 	FIntPoint AtlasDimensions = FIntPoint::ZeroValue;
 	TArray<uint8> AtlasPixels;
 	TArray<FMD_ScrapeSurfaceCell> MaskCells;
-	MaskCells.Reserve(ContaminationCells.Num());
+	const TConstArrayView<FMD_ScrapeSurfaceCell> VisualCells =
+		GetVisualContaminationCells();
+	MaskCells.Reserve(VisualCells.Num());
 	for (int32 CellIndex = 0;
-		CellIndex < ContaminationCells.Num();
+		CellIndex < VisualCells.Num();
 		++CellIndex)
 	{
 		MaskCells.Add(MakeContaminationMaskCell(CellIndex));
@@ -229,11 +233,13 @@ uint8 UMD_ScrapeSurfaceComponent::CalculateTransferredPaintMaskPixel(
 
 	int32 CellsPerFace = 0;
 	int32 TotalCellCount = 0;
+	const TConstArrayView<FMD_ScrapeSurfaceCell> VisualCells =
+		GetVisualContaminationCells();
 	if (!FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
 			ContaminationGridDimensions,
 			CellsPerFace,
 			TotalCellCount)
-		|| ContaminationCells.Num() != TotalCellCount)
+		|| VisualCells.Num() != TotalCellCount)
 	{
 		return 0;
 	}
@@ -275,13 +281,13 @@ uint8 UMD_ScrapeSurfaceComponent::CalculateTransferredPaintMaskPixel(
 					Face,
 					CellX + CellY * ContaminationGridDimensions.X,
 					CellsPerFace);
-			if (!ContaminationCells.IsValidIndex(CombinedCellIndex))
+			if (!VisualCells.IsValidIndex(CombinedCellIndex))
 			{
 				continue;
 			}
 
 			const FMD_ScrapeSurfaceCell& Cell =
-				ContaminationCells[CombinedCellIndex];
+				VisualCells[CombinedCellIndex];
 			const double CellPaintAmount = FMath::Clamp(
 				static_cast<double>(Cell.TransferredContamination),
 				0.0,
@@ -347,7 +353,7 @@ bool UMD_ScrapeSurfaceComponent::InitializeTransferredPaintMask()
 	TArray<uint8> AtlasPixels;
 	AtlasPixels.SetNumZeroed(static_cast<int32>(PixelCount64));
 	bool bHasTransferredPaint = false;
-	for (const FMD_ScrapeSurfaceCell& Cell : ContaminationCells)
+	for (const FMD_ScrapeSurfaceCell& Cell : GetVisualContaminationCells())
 	{
 		if (Cell.TransferredContamination > ScrapeSettings.CleanTolerance)
 		{
@@ -651,9 +657,11 @@ void UMD_ScrapeSurfaceComponent::UpdateContaminationMask(
 
 	// 값이 실제로 달라진 픽셀만 감싸는 최소 사각형을 모은다.
 	FIntRect ChangedRegion = FMD_ScrapeMaskAtlas::MakeEmptyAtlasRegion();
+	const TConstArrayView<FMD_ScrapeSurfaceCell> VisualCells =
+		GetVisualContaminationCells();
 	for (const FMD_ScrapeCellChange& CellChange : CellChanges)
 	{
-		if (!ContaminationCells.IsValidIndex(CellChange.CellIndex))
+		if (!VisualCells.IsValidIndex(CellChange.CellIndex))
 		{
 			continue;
 		}
@@ -701,6 +709,45 @@ void UMD_ScrapeSurfaceComponent::UpdateContaminationMask(
 		// 렌더 리소스가 잠시 유효하지 않다면 현재 CPU 전체 상태로 다시 만든다.
 		InitializeContaminationMask();
 	}
+}
+
+void UMD_ScrapeSurfaceComponent::BeginContaminationVisualUpdateBatch()
+{
+	if (ContaminationVisualUpdateBatchDepth == 0)
+	{
+		PendingBatchedContaminationVisualCellIndices.Reset();
+	}
+	++ContaminationVisualUpdateBatchDepth;
+}
+
+void UMD_ScrapeSurfaceComponent::EndContaminationVisualUpdateBatch()
+{
+	if (ContaminationVisualUpdateBatchDepth <= 0)
+	{
+		return;
+	}
+	--ContaminationVisualUpdateBatchDepth;
+	if (ContaminationVisualUpdateBatchDepth > 0)
+	{
+		return;
+	}
+
+	PendingBatchedContaminationVisualCellIndices.Sort();
+	TArray<FMD_ScrapeCellChange> CellChanges;
+	CellChanges.Reserve(PendingBatchedContaminationVisualCellIndices.Num());
+	int32 PreviousCellIndex = INDEX_NONE;
+	for (const int32 CellIndex : PendingBatchedContaminationVisualCellIndices)
+	{
+		if (CellIndex == PreviousCellIndex)
+		{
+			continue;
+		}
+		FMD_ScrapeCellChange& CellChange = CellChanges.AddDefaulted_GetRef();
+		CellChange.CellIndex = CellIndex;
+		PreviousCellIndex = CellIndex;
+	}
+	PendingBatchedContaminationVisualCellIndices.Reset();
+	UpdateContaminationMask(CellChanges);
 }
 
 

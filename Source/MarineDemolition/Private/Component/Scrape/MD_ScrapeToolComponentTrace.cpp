@@ -6,6 +6,7 @@
 #include "Camera/CameraTypes.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
+#include "Misc/ScopeExit.h"
 #include "World/Contamination/MD_Barnacle.h"
 #include "World/Wall/MD_CuttableWall.h"
 
@@ -348,6 +349,23 @@ bool UMD_ScrapeToolComponent::TryApplyResolvedScrapePath(
 	const FHitResult& CurrentHit,
 	const TArray<FMD_ScrapeToolPathSegment>& PathSegments)
 {
+	const bool bBatchAuthoritativeVisualUpdates =
+		IsValid(CurrentSurface)
+		&& IsValid(CurrentSurface->GetOwner())
+		&& CurrentSurface->GetOwner()->HasAuthority()
+		&& PathSegments.Num() > 1;
+	if (bBatchAuthoritativeVisualUpdates)
+	{
+		CurrentSurface->BeginContaminationVisualUpdateBatch();
+	}
+	ON_SCOPE_EXIT
+	{
+		if (bBatchAuthoritativeVisualUpdates && IsValid(CurrentSurface))
+		{
+			CurrentSurface->EndContaminationVisualUpdateBatch();
+		}
+	};
+
 	double EmittedTravelCm = 0.0;
 	for (const FMD_ScrapeToolPathSegment& PathSegment : PathSegments)
 	{
@@ -519,6 +537,10 @@ void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
 	ensureMsgf(
 		bBuiltVisualDelta,
 		TEXT("A successful scrape transaction could not build its visual delta."));
+	if (bBuiltVisualDelta)
+	{
+		AccumulateAuthoritativeScrapePredictionResolution(VisualDelta);
+	}
 
 	// 서버 게임 로직은 권한 인스턴스의 공통 표면 이벤트를 구독할 수 있다.
 	OnScrapeSurfaceApplied.Broadcast(Surface, Result);
@@ -529,9 +551,18 @@ void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
 		OnScrapeApplied.Broadcast(Wall, Result);
 	}
 
-	// 소유자와 관찰자에게 같은 서버 확정 셀과 Load를 먼저 보낸다.
 	if (bBuiltVisualDelta)
 	{
+		const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+		if (OwnerPawn
+			&& OwnerPawn->IsPlayerControlled()
+			&& !OwnerPawn->IsLocallyControlled())
+		{
+			ClientReceiveScrapeResult(
+				VisualDelta,
+				Result,
+				ContactLocation);
+		}
 		MulticastReceiveScrapeFeedback(
 			VisualDelta,
 			Result,
@@ -545,6 +576,38 @@ void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
 	{
 		EmitFeedback(Surface, Result, ContactLocation);
 	}
+}
+
+void UMD_ScrapeToolComponent::ClientReceiveScrapeResult_Implementation(
+	const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
+	const FMD_ScrapeResult& Result,
+	const FVector_NetQuantize10 ContactLocation)
+{
+	ReceiveAuthoritativeScrapeResult(VisualDelta, Result, ContactLocation);
+}
+
+void UMD_ScrapeToolComponent::ReceiveAuthoritativeScrapeResult(
+	const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
+	const FMD_ScrapeResult& Result,
+	const FVector& ContactLocation)
+{
+	if (!ApplyAuthoritativeScrapeVisualDelta(VisualDelta))
+	{
+		return;
+	}
+
+	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+	if (OwnerPawn && OwnerPawn->IsLocallyControlled())
+	{
+		OnScrapeSurfaceApplied.Broadcast(VisualDelta.Surface, Result);
+		if (AMD_CuttableWall* const Wall = VisualDelta.Surface
+			? Cast<AMD_CuttableWall>(VisualDelta.Surface->GetOwner())
+			: nullptr)
+		{
+			OnScrapeApplied.Broadcast(Wall, Result);
+		}
+	}
+	EmitFeedback(VisualDelta.Surface, Result, ContactLocation);
 }
 
 void UMD_ScrapeToolComponent::MulticastReceiveScrapeFeedback_Implementation(
@@ -572,24 +635,7 @@ void UMD_ScrapeToolComponent::MulticastReceiveScrapeFeedback_Implementation(
 		}
 		return;
 	}
-
-	if (!ApplyAuthoritativeScrapeVisualDelta(VisualDelta))
-	{
-		// 오래되거나 중복된 결과는 상태와 피드백을 함께 거부한다.
-		return;
-	}
-
-	if (bIsLocallyControlledOwner)
-	{
-		OnScrapeSurfaceApplied.Broadcast(VisualDelta.Surface, Result);
-		if (AMD_CuttableWall* const Wall = VisualDelta.Surface
-			? Cast<AMD_CuttableWall>(VisualDelta.Surface->GetOwner())
-			: nullptr)
-		{
-			OnScrapeApplied.Broadcast(Wall, Result);
-		}
-	}
-	EmitFeedback(VisualDelta.Surface, Result, ContactLocation);
+	ReceiveAuthoritativeScrapeResult(VisualDelta, Result, ContactLocation);
 }
 
 FMD_ScrapeAimQueryResult UMD_ScrapeToolComponent::QueryCurrentScrapeAim() const

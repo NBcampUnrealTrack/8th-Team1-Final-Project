@@ -423,6 +423,9 @@ void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 	bContaminationCompletionBroadcast = false;
 	bDeferredContaminationCompletionTransition = false;
 	ContaminationCells.Reset();
+	LocalScrapePredictions.Reset();
+	LocalPredictedContaminationCells.Reset();
+	PendingLocalScrapePredictionVisualCellIndices.Reset();
 	ContaminationGeneratedInitialAmounts.Reset();
 	PendingContaminationItemAmounts[0] = 0.0f;
 	PendingContaminationItemAmounts[1] = 0.0f;

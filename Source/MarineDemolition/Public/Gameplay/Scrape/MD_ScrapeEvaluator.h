@@ -5,6 +5,14 @@
 #include "CoreMinimal.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
 
+struct MARINEDEMOLITION_API FMD_ScrapeEvaluationScratch
+{
+	TBitArray<> TouchedCells;
+	TArray<float> RemainingBeforeStroke;
+	TArray<float> TransferredBeforeStroke;
+	TArray<float> CoveredFractionBeforeStroke;
+};
+
 /**
  * 헤라 이동 선분을 표면 격자에 적용하는 순수 C++ 판정기
  *
@@ -75,6 +83,14 @@ public:
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
 		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells);
+	static FMD_ScrapeResult ApplyStrokeToGrid(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FMD_ScrapeSettings& Settings,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		FMD_ScrapeEvaluationScratch& Scratch);
 
 	/**
 	 * 일반 제거 판정과 함께 헤라 경로가 각 셀에 요청한 작업량을 기록한다.
@@ -90,6 +106,15 @@ public:
 		const FVector2D& SurfaceSizeCm,
 		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
 		TArray<float>& OutRequestedRemovalAmounts);
+	static FMD_ScrapeResult ApplyStrokeToGridAndCaptureRequestedAmounts(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		const FMD_ScrapeSettings& Settings,
+		const FIntPoint& GridDimensions,
+		const FVector2D& SurfaceSizeCm,
+		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		TArray<float>& OutRequestedRemovalAmounts,
+		FMD_ScrapeEvaluationScratch& Scratch);
 
 	/**
 	 * 캡처한 헤라 경로를 새 오염 자국으로 도포한다.
@@ -257,7 +282,8 @@ private:
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
 		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
-		TArray<float>* OutRequestedRemovalAmounts);
+		TArray<float>* OutRequestedRemovalAmounts,
+		FMD_ScrapeEvaluationScratch* Scratch);
 
 	/**
 	 * 원형 헤라 브러시가 한 셀을 얼마나 덮는지 0~1 가중치로 근사

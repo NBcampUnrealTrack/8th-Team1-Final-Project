@@ -600,6 +600,13 @@ void UMD_ScrapeToolComponent::TerminateAuthoritativeScrapeFocus(
 void UMD_ScrapeToolComponent::ServerUpdateScrapeAim_Implementation(
 	const FMD_ScrapeAimNetSample& Sample)
 {
+	const bool bCanResolvePrediction = GetOwner()
+		&& GetOwner()->HasAuthority()
+		&& ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted
+		&& Sample.FocusSessionId != 0
+		&& Sample.Sequence != 0
+		&& Sample.FocusSessionId
+			== ScrapeFocusSession.ActiveScrapeFocusSessionId;
 	FMD_ScrapeAimQueryResult ValidatedAim;
 	float SampleDeltaTime = 0.0f;
 	int32 MissingSequences = 0;
@@ -617,6 +624,12 @@ void UMD_ScrapeToolComponent::ServerUpdateScrapeAim_Implementation(
 			MissingSequences))
 	{
 		// 잘못된 session, 초과 rate, 유효하지 않은 aim은 거부한다.
+		if (bCanResolvePrediction)
+		{
+			SendScrapePredictionResolution(
+				Sample.FocusSessionId,
+				Sample.Sequence);
+		}
 		return;
 	}
 
@@ -625,11 +638,13 @@ void UMD_ScrapeToolComponent::ServerUpdateScrapeAim_Implementation(
 		&& IsAuthoritativeFirstScrapeAimApproved(Sample.FocusSessionId);
 	if (bCanMutateWorld)
 	{
-		ProcessScrapeAimResult(
+		ProcessAuthoritativeScrapeAimResult(
 			ValidatedAim,
 			SampleDeltaTime,
 			true,
-			MissingSequences);
+			MissingSequences,
+			Sample.FocusSessionId,
+			Sample.Sequence);
 	}
 	else
 	{
@@ -639,6 +654,12 @@ void UMD_ScrapeToolComponent::ServerUpdateScrapeAim_Implementation(
 		if (MissingSequences > FMath::Max(MaxMissingAimSequences, 0))
 		{
 			ResetStrokeTracking();
+		}
+		if (!bIsScraping)
+		{
+			SendScrapePredictionResolution(
+				Sample.FocusSessionId,
+				Sample.Sequence);
 		}
 	}
 }
@@ -663,6 +684,7 @@ void UMD_ScrapeToolComponent::EndScrapeFocusInternal(
 	}
 
 	StopScraping();
+	ClearLocalScrapePredictions();
 	CurrentScrapeAim = FMD_ScrapeAimQueryResult();
 	SetScrapeFocusState(EMD_ScrapeFocusState::Free);
 	bHasScrapeFocusView = false;

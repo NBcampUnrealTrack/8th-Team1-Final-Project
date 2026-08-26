@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
 #include "Gameplay/Scrape/MD_ScrapeReplicationCodec.h"
 #include "Net/Serialization/FastArraySerializer.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
@@ -13,6 +14,7 @@ class UMaterialInterface;
 class UPrimitiveComponent;
 class UStaticMeshComponent;
 class UTexture2D;
+class UMD_ScrapeToolComponent;
 struct FMD_ScrapeDecalFaceLayout;
 class AMD_Barnacle;
 class AMD_ContaminationItem;
@@ -760,6 +762,8 @@ private:
 	static constexpr float MinimumFullCoverageFaceNormalDot = 0.05f;
 	static constexpr float ScrapeObstacleContactMarginCm = 0.05f;
 	static constexpr int32 MaximumContaminationDecalPatchesPerFace = 32;
+	static constexpr int32 MaximumLocalScrapePredictionBatches = 24;
+	static constexpr int32 MaximumLocalScrapePredictionStrokesPerBatch = 128;
 	/** TASK 7의 최대 재전송 window보다 넓게 유지하는 bounded dedupe history. */
 	static constexpr int32 MaximumRecentContaminationStampIdentities = 4096;
 
@@ -784,6 +788,31 @@ private:
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
 	TArray<FMD_ScrapeSurfaceCell> ContaminationCells;
+
+	struct FLocalScrapePredictionStroke
+	{
+		FMD_ScrapeStroke Stroke;
+		FMD_ScrapeToolSpec ToolSpec;
+	};
+
+	struct FLocalScrapePrediction
+	{
+		TWeakObjectPtr<UMD_ScrapeToolComponent> Owner;
+		uint64 FocusSessionId = 0;
+		uint32 AimSequence = 0;
+		double CreatedSeconds = 0.0;
+		TArray<FLocalScrapePredictionStroke> Strokes;
+		TMap<int32, FMD_ScrapeSurfaceCell> PredictedFinalCellStates;
+	};
+
+	TArray<FLocalScrapePrediction> LocalScrapePredictions;
+	TArray<FMD_ScrapeSurfaceCell> LocalPredictedContaminationCells;
+	TArray<FMD_ScrapeSurfaceCell> LocalScrapePredictionFaceScratch;
+	FMD_ScrapeEvaluationScratch ScrapeEvaluationScratch;
+	TArray<int32> PendingLocalScrapePredictionVisualCellIndices;
+	TBitArray<> PendingLocalScrapePredictionReconcileCells;
+	TArray<int32> PendingBatchedContaminationVisualCellIndices;
+	int32 ContaminationVisualUpdateBatchDepth = 0;
 
 	double PendingContaminationItemAmounts[2] = { 0.0, 0.0 };
 	/**
@@ -920,6 +949,37 @@ private:
 		EMD_ScrapeSurfaceFace Face);
 	TConstArrayView<FMD_ScrapeSurfaceCell> GetContaminationCellsForFace(
 		EMD_ScrapeSurfaceFace Face) const;
+	bool ApplyLocalScrapePrediction(
+		UMD_ScrapeToolComponent* PredictionOwner,
+		uint64 FocusSessionId,
+		uint32 AimSequence,
+		double CreatedSeconds,
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		bool bDeferVisualUpdate = false);
+	void ResolveLocalScrapePredictions(
+		UMD_ScrapeToolComponent* PredictionOwner,
+		uint64 FocusSessionId,
+		uint32 AimSequence,
+		const FMD_ScrapeAuthoritativeVisualDelta* Resolution = nullptr,
+		bool bRebuildIfPredictionMissing = false);
+	void ExpireLocalScrapePredictions(
+		UMD_ScrapeToolComponent* PredictionOwner,
+		double ExpireBeforeSeconds);
+	void ClearLocalScrapePredictions(UMD_ScrapeToolComponent* PredictionOwner);
+	bool HasLocalScrapePredictions(
+		const UMD_ScrapeToolComponent* PredictionOwner) const;
+	bool ApplyLocalScrapePredictionToShadow(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		TArray<int32>& OutChangedCellIndices);
+	void MarkLocalScrapePredictionReconcileCell(int32 CellIndex);
+	void FlushLocalScrapePredictionVisualUpdates();
+	void RebuildLocalScrapePredictionShadow();
+	bool DoesLocalScrapePredictionMatchResolution(
+		const FLocalScrapePrediction& Prediction,
+		const FMD_ScrapeAuthoritativeVisualDelta& Resolution) const;
+	static bool IsAimSequenceAtOrBefore(uint32 Candidate, uint32 Baseline);
 	FMD_ScrapeResult ApplyLocalScrapeStrokeInternal(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec,
@@ -943,9 +1003,12 @@ private:
 		float BaseInitialContamination);
 	bool InitializeContaminationMask();
 	void ReleaseContaminationMask();
+	TConstArrayView<FMD_ScrapeSurfaceCell> GetVisualContaminationCells() const;
 	FMD_ScrapeSurfaceCell MakeContaminationMaskCell(int32 CellIndex) const;
 	void UpdateContaminationMask(
 		const TArray<FMD_ScrapeCellChange>& CellChanges);
+	void BeginContaminationVisualUpdateBatch();
+	void EndContaminationVisualUpdateBatch();
 	bool UploadContaminationMaskRegion(const FIntRect& AtlasRegion);
 	bool InitializeTransferredPaintMask();
 	void ReleaseTransferredPaintMask();
@@ -1016,6 +1079,10 @@ private:
 		FMD_ScrapeAuthoritativeVisualDelta& OutDelta);
 	bool ApplyAuthoritativeVisualDelta(
 		const FMD_ScrapeAuthoritativeVisualDelta& Delta);
+	bool ApplyAuthoritativePredictionResolution(
+		const FMD_ScrapeAuthoritativeVisualDelta& Delta);
+	bool ValidateAuthoritativeVisualDeltaCells(
+		const FMD_ScrapeAuthoritativeVisualDelta& Delta) const;
 	void AdvanceContaminationVisualRevision();
 	static bool IsVisualRevisionNewer(uint32 Candidate, uint32 Baseline);
 

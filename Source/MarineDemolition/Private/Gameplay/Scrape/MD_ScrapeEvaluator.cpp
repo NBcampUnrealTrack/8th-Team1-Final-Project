@@ -336,7 +336,28 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
 		GridDimensions,
 		SurfaceSizeCm,
 		InOutSurfaceCells,
+		nullptr,
 		nullptr);
+}
+
+FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGrid(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FMD_ScrapeSettings& Settings,
+	const FIntPoint& GridDimensions,
+	const FVector2D& SurfaceSizeCm,
+	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+	FMD_ScrapeEvaluationScratch& Scratch)
+{
+	return ApplyStrokeToGridInternal(
+		Stroke,
+		ToolSpec,
+		Settings,
+		GridDimensions,
+		SurfaceSizeCm,
+		InOutSurfaceCells,
+		nullptr,
+		&Scratch);
 }
 
 FMD_ScrapeResult
@@ -356,7 +377,30 @@ FMD_ScrapeEvaluator::ApplyStrokeToGridAndCaptureRequestedAmounts(
 		GridDimensions,
 		SurfaceSizeCm,
 		InOutSurfaceCells,
-		&OutRequestedRemovalAmounts);
+		&OutRequestedRemovalAmounts,
+		nullptr);
+}
+
+FMD_ScrapeResult
+FMD_ScrapeEvaluator::ApplyStrokeToGridAndCaptureRequestedAmounts(
+	const FMD_ScrapeStroke& Stroke,
+	const FMD_ScrapeToolSpec& ToolSpec,
+	const FMD_ScrapeSettings& Settings,
+	const FIntPoint& GridDimensions,
+	const FVector2D& SurfaceSizeCm,
+	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+	TArray<float>& OutRequestedRemovalAmounts,
+	FMD_ScrapeEvaluationScratch& Scratch)
+{
+	return ApplyStrokeToGridInternal(
+		Stroke,
+		ToolSpec,
+		Settings,
+		GridDimensions,
+		SurfaceSizeCm,
+		InOutSurfaceCells,
+		&OutRequestedRemovalAmounts,
+		&Scratch);
 }
 
 FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
@@ -366,7 +410,8 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 	const FIntPoint& GridDimensions,
 	const FVector2D& SurfaceSizeCm,
 	TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
-	TArray<float>* const OutRequestedRemovalAmounts)
+	TArray<float>* const OutRequestedRemovalAmounts,
+	FMD_ScrapeEvaluationScratch* const Scratch)
 {
 	FMD_ScrapeResult Result;
 	Result.SurfaceFace = Stroke.SurfaceFace;
@@ -509,18 +554,26 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 	// 후보 셀 검색 범위를 브러시 형태의 표면 X/Y AABB로 계산
 
 	// 동일 셀이 여러 샘플과 겹쳐도 TouchedCellCount는 한 번만 증가해야 하므로 비트 배열을 사용
-	TBitArray<> TouchedCells(false, InOutSurfaceCells.Num());
+	FMD_ScrapeEvaluationScratch LocalScratch;
+	FMD_ScrapeEvaluationScratch& EvaluationScratch = Scratch
+		? *Scratch
+		: LocalScratch;
+	TBitArray<>& TouchedCells = EvaluationScratch.TouchedCells;
+	TouchedCells.Init(false, InOutSurfaceCells.Num());
 
 	// 변경 내역과 "이번 스트로크로 처음 깨끗해졌는가"를 마지막에 정확히 계산하기 위해
 	// 적용 전 잔여량을 별도 배열에 보관
-	TArray<float> RemainingBeforeStroke;
+	TArray<float>& RemainingBeforeStroke =
+		EvaluationScratch.RemainingBeforeStroke;
 	RemainingBeforeStroke.SetNumUninitialized(InOutSurfaceCells.Num());
-	TArray<float> TransferredBeforeStroke;
+	TArray<float>& TransferredBeforeStroke =
+		EvaluationScratch.TransferredBeforeStroke;
 	TransferredBeforeStroke.SetNumUninitialized(InOutSurfaceCells.Num());
 	// 시각 마스크는 잔여량과 피복률을 면적으로 가중합하므로, 잔여량이 그대로여도
 	// 피복률만 늘면 겉모습이 달라진다. 그런 셀도 변경 내역에 담아야 마스크가
 	// 갱신된다. 피복률은 단조 증가라 1에 포화되면 더는 변경을 만들지 않는다.
-	TArray<float> CoveredFractionBeforeStroke;
+	TArray<float>& CoveredFractionBeforeStroke =
+		EvaluationScratch.CoveredFractionBeforeStroke;
 	CoveredFractionBeforeStroke.SetNumUninitialized(InOutSurfaceCells.Num());
 
 	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)

@@ -291,7 +291,8 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 		return;
 	}
 
-	const bool bWasFullyRemoved = IsContaminationFullyRemoved();
+	bool bWasFullyRemoved = false;
+	bool bCapturedPreviousCompletion = false;
 	TArray<FMD_ScrapeCellChange> CellChanges;
 	CellChanges.Reserve(StateItems.Num());
 
@@ -384,6 +385,12 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 			continue;
 		}
 
+		if (!bCapturedPreviousCompletion)
+		{
+			bWasFullyRemoved = IsContaminationFullyRemoved();
+			bCapturedPreviousCompletion = true;
+		}
+
 		Cell.InitialContamination = TargetInitial;
 		Cell.RemainingContamination = TargetRemaining;
 		Cell.TransferredContamination = TargetTransferred;
@@ -423,8 +430,23 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 			&& TargetTransferred <= ScrapeSettings.CleanTolerance;
 	}
 
+	if (CellChanges.IsEmpty())
+	{
+		return;
+	}
+
 	RefreshContaminationCleanRatioCache();
-	UpdateContaminationMask(CellChanges);
+	if (LocalPredictedContaminationCells.IsEmpty())
+	{
+		UpdateContaminationMask(CellChanges);
+	}
+	else
+	{
+		for (const FMD_ScrapeCellChange& CellChange : CellChanges)
+		{
+			MarkLocalScrapePredictionReconcileCell(CellChange.CellIndex);
+		}
+	}
 
 	const bool bIsFullyRemoved = IsContaminationFullyRemoved();
 	if (!bWasFullyRemoved
@@ -532,6 +554,24 @@ bool UMD_ScrapeSurfaceComponent::BuildAuthoritativeVisualDelta(
 	return OutDelta.SurfaceVisualRevision != 0;
 }
 
+bool UMD_ScrapeSurfaceComponent::ValidateAuthoritativeVisualDeltaCells(
+	const FMD_ScrapeAuthoritativeVisualDelta& Delta) const
+{
+	TSet<int32> UniqueCellIndices;
+	UniqueCellIndices.Reserve(Delta.CellStates.Num());
+	for (const FMD_ReplicatedScrapeCellState& State : Delta.CellStates)
+	{
+		const int32 CellIndex = State.GetCellIndex();
+		if (!ContaminationCells.IsValidIndex(CellIndex)
+			|| UniqueCellIndices.Contains(CellIndex))
+		{
+			return false;
+		}
+		UniqueCellIndices.Add(CellIndex);
+	}
+	return true;
+}
+
 bool UMD_ScrapeSurfaceComponent::ApplyAuthoritativeVisualDelta(
 	const FMD_ScrapeAuthoritativeVisualDelta& Delta)
 {
@@ -547,29 +587,37 @@ bool UMD_ScrapeSurfaceComponent::ApplyAuthoritativeVisualDelta(
 		|| (LastAppliedContaminationVisualRevision != 0
 			&& IsVisualRevisionNewer(
 				LastAppliedContaminationVisualRevision,
-				Delta.SurfaceVisualRevision)))
+				Delta.SurfaceVisualRevision))
+		|| !ValidateAuthoritativeVisualDeltaCells(Delta))
 	{
 		return false;
-	}
-
-	// 잘못된 셀 하나 때문에 앞 셀만 적용되는 부분 transaction이 생기지 않게
-	// 전체 payload를 먼저 검사한다.
-	TSet<int32> UniqueCellIndices;
-	UniqueCellIndices.Reserve(Delta.CellStates.Num());
-	for (const FMD_ReplicatedScrapeCellState& State : Delta.CellStates)
-	{
-		const int32 CellIndex = State.GetCellIndex();
-		if (!ContaminationCells.IsValidIndex(CellIndex)
-			|| UniqueCellIndices.Contains(CellIndex))
-		{
-			return false;
-		}
-		UniqueCellIndices.Add(CellIndex);
 	}
 
 	ApplyReplicatedContaminationStates(Delta.CellStates, false);
 	LastAppliedContaminationVisualRevision = Delta.SurfaceVisualRevision;
 	LastConsumedContaminationVisualRevision = Delta.SurfaceVisualRevision;
+	return true;
+}
+
+bool UMD_ScrapeSurfaceComponent::ApplyAuthoritativePredictionResolution(
+	const FMD_ScrapeAuthoritativeVisualDelta& Delta)
+{
+	if (!bContaminationEnabled
+		|| !bContaminationSurfaceInitialized
+		|| HasAuthority()
+		|| Delta.Surface != this
+		|| Delta.SurfaceVisualRevision == 0
+		|| (LastAppliedContaminationVisualRevision != 0
+			&& IsVisualRevisionNewer(
+				LastAppliedContaminationVisualRevision,
+				Delta.SurfaceVisualRevision))
+		|| !ValidateAuthoritativeVisualDeltaCells(Delta))
+	{
+		return false;
+	}
+
+	ApplyReplicatedContaminationStates(Delta.CellStates, false);
+	LastAppliedContaminationVisualRevision = Delta.SurfaceVisualRevision;
 	return true;
 }
 

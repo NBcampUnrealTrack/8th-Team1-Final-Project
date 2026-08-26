@@ -227,6 +227,17 @@ void UMD_ScrapeToolComponent::SendLocalAimIfDue(const float DeltaTime)
 	FMD_ScrapeAimNetSample Sample;
 	if (BuildLocalAimSample(Sample))
 	{
+		const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+		if (bIsScraping
+			&& OwnerPawn
+			&& OwnerPawn->IsLocallyControlled()
+			&& !OwnerPawn->HasAuthority())
+		{
+			ProcessLocalPredictedScrapeAim(
+				Sample,
+				QueryCurrentScrapeAim(),
+				static_cast<float>(IntervalSeconds));
+		}
 		ServerUpdateScrapeAim(Sample);
 	}
 }
@@ -369,13 +380,15 @@ void UMD_ScrapeToolComponent::ReplayBufferedAuthoritativeAims()
 			SetTrackedBarnacle(nullptr);
 		}
 		CurrentScrapeAim = Buffered.ValidatedAim;
-		ProcessScrapeAimResult(
+		ProcessAuthoritativeScrapeAimResult(
 			Buffered.ValidatedAim,
 			bStartsNewAnchor ? 0.0f : SampleDeltaTime,
 			true,
 			bStartsNewAnchor
 				? FMath::Max(MaxMissingAimSequences, 0) + 1
-				: 0);
+				: 0,
+			Buffered.Sample.FocusSessionId,
+			Buffered.Sample.Sequence);
 		PreviousSequence = Buffered.Sample.Sequence;
 		PreviousClientSeconds = static_cast<double>(
 			Buffered.Sample.ClientMonotonicSeconds);

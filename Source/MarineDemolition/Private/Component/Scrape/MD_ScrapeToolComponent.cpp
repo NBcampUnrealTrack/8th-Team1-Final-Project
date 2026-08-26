@@ -173,6 +173,13 @@ void UMD_ScrapeToolComponent::BeginPlay()
 	SetComponentTickEnabled(false);
 }
 
+void UMD_ScrapeToolComponent::EndPlay(
+	const EEndPlayReason::Type EndPlayReason)
+{
+	ClearLocalScrapePredictions();
+	Super::EndPlay(EndPlayReason);
+}
+
 float UMD_ScrapeToolComponent::GetEffectiveScrapeReachCm() const
 {
 	return FMath::IsFinite(ScrapeToolSpec.ReachCm)
@@ -1029,6 +1036,7 @@ void UMD_ScrapeToolComponent::TickComponent(
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	UpdateScrapeLoopAudio();
+	UpdateLocalScrapePredictionResolution(GetScrapeMonotonicSeconds());
 
 	if (!IsScrapeFocusActive() && !bIsScraping)
 	{
@@ -1099,6 +1107,14 @@ void UMD_ScrapeToolComponent::TickComponent(
 	// 한 번 처리한다. 중앙/local query로 같은 이동을 Tick에서 다시 적용하지 않는다.
 	if (GetOwner() && GetOwner()->HasAuthority()
 		&& ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted)
+	{
+		return;
+	}
+	if (bLocallyControlled
+		&& bIsScraping
+		&& GetOwner()
+		&& !GetOwner()->HasAuthority()
+		&& IsScrapeFocusReady())
 	{
 		return;
 	}

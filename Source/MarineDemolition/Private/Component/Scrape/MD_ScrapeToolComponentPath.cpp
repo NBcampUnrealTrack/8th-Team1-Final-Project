@@ -817,6 +817,20 @@ bool UMD_ScrapeToolComponent::ApplyScrapePathSegment(
 					? AppliedWorldPosition
 					: FVector(CurrentHit.ImpactPoint));
 		}
+		else if (GetScrapeLoadStage() != EMD_ScrapeLoadStage::Stage3
+			&& ActiveLocalScrapePredictionSessionId != 0
+			&& ActiveLocalScrapePredictionAimSequence != 0
+			&& Surface->ApplyLocalScrapePrediction(
+				this,
+				ActiveLocalScrapePredictionSessionId,
+				ActiveLocalScrapePredictionAimSequence,
+				GetScrapeMonotonicSeconds(),
+				Stroke,
+				ScrapeToolSpec,
+				true))
+		{
+			LocalPredictedScrapeSurfaces.AddUnique(Surface);
+		}
 	}
 
 	if (!bBlocked)

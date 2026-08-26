@@ -1299,7 +1299,8 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 					ContaminationGridDimensions,
 					ResolvedContaminationSurfaceSizeCm,
 					FaceCells,
-					RequestedRemovalAmounts);
+					RequestedRemovalAmounts,
+					ScrapeEvaluationScratch);
 		}
 		else
 		{
@@ -1309,7 +1310,8 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 				EffectiveScrapeSettings,
 				ContaminationGridDimensions,
 				ResolvedContaminationSurfaceSizeCm,
-				FaceCells);
+				FaceCells,
+				ScrapeEvaluationScratch);
 		}
 	}
 
@@ -1631,7 +1633,18 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 
 	// 스트로크는 한 면만 건드리므로 그 면만 다시 계산한다.
 	RefreshContaminationCleanRatioCache(Stroke.SurfaceFace);
-	UpdateContaminationMask(SurfaceChanges);
+	if (ContaminationVisualUpdateBatchDepth > 0)
+	{
+		for (const FMD_ScrapeCellChange& SurfaceChange : SurfaceChanges)
+		{
+			PendingBatchedContaminationVisualCellIndices.Add(
+				SurfaceChange.CellIndex);
+		}
+	}
+	else
+	{
+		UpdateContaminationMask(SurfaceChanges);
+	}
 	PublishContaminationChanges(SurfaceChanges);
 
 	// MASS-004: 여기서는 표면 상태만 확정한다. Tool이 실제 Load 수용량을
