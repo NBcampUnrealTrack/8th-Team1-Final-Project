@@ -13,7 +13,6 @@ void UMD_AsyncAction_PushScreenToLayer::Activate()
 	// 활성화 검증 과정에서 사용할 객체를 조건부로 조회한다.
 	ULocalPlayer* OwningLocalPlayer = OwningPlayer.IsValid() == true ? OwningPlayer->GetLocalPlayer() : nullptr;
 	UMD_LocalUIManager* ResolvedUIManager = IsValid(OwningLocalPlayer) == true ? OwningLocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
-	FSoftObjectPath ScreenClassPath = ScreenClass.ToSoftObjectPath();
 	UWorld* ResolvedRequestWorld = OwningPlayer.IsValid() == true ? OwningPlayer->GetWorld() : nullptr;
 
 	// Factory에서 저장한 Player가 유효한 로컬 Controller인지 함께 확인한다.
@@ -48,10 +47,42 @@ void UMD_AsyncAction_PushScreenToLayer::Activate()
 		return;
 	}
 
+	// 직접 지정 노드만 Layer 태그와 등록 Stack을 비동기 로드 전에 검증한다.
+	if (bUseAutomaticLayer == false)
+	{
+		if (LayerTag.IsValid() == false)
+		{
+			UE_LOG(MarineDemolition, Error, TEXT("PushScreenToLayerAsync에는 유효한 UI Layer Tag가 필요합니다."));
+			FinishRequest(EMDAsyncScreenPushResult::Failure);
+			return;
+		}
+
+		// 직접 지정한 Layer가 PrimaryLayout에 등록됐는지 확인한다.
+		if (ResolvedUIManager->IsLayerRegistered(LayerTag) == false)
+		{
+			UE_LOG(MarineDemolition, Error, TEXT("PushScreenToLayerAsync의 UI Layer Stack이 등록되지 않았습니다. Layer=%s"), *LayerTag.ToString());
+			FinishRequest(EMDAsyncScreenPushResult::Failure);
+			return;
+		}
+	}
+	else
+	{
+		// 자동 노드는 화면 요청 태그에 등록된 클래스와 부모 Layer를 로드 전에 함께 결정한다.
+		if (ResolvedUIManager->ResolveWidgetRegistration(WidgetTag, LayerTag, ScreenClass) == false)
+		{
+			UE_LOG(MarineDemolition, Error, TEXT("PushScreenToLayerAutoAsync의 Widget 등록 정보 또는 부모 UI Layer Stack을 찾지 못했습니다. WidgetTag=%s"), *WidgetTag.ToString());
+			FinishRequest(EMDAsyncScreenPushResult::Failure);
+			return;
+		}
+	}
+
+	// 직접 지정 또는 자동 조회로 결정된 소프트 클래스 경로를 비동기 로드에 사용한다.
+	FSoftObjectPath ScreenClassPath = ScreenClass.ToSoftObjectPath();
+
 	// 비어 있거나 잘못된 Soft Class 경로를 Asset Manager에 전달하지 않는다.
 	if (ScreenClassPath.IsValid() == false)
 	{
-		UE_LOG(MarineDemolition, Error, TEXT("PushScreenToLayerAsync에는 유효한 CommonActivatableWidget Screen Class가 필요합니다."));
+		UE_LOG(MarineDemolition, Error, TEXT("Async Push 요청에서 유효한 CommonActivatableWidget Screen Class를 찾지 못했습니다. WidgetTag=%s"), *WidgetTag.ToString());
 		FinishRequest(EMDAsyncScreenPushResult::Failure);
 		return;
 	}
@@ -124,16 +155,42 @@ void UMD_AsyncAction_PushScreenToLayer::Cancel()
 
 UMD_AsyncAction_PushScreenToLayer* UMD_AsyncAction_PushScreenToLayer::PushScreenToLayerAsync(
 	APlayerController* InOwningPlayer,
+	FGameplayTag InLayerTag,
 	TSoftClassPtr<UCommonActivatableWidget> InScreenClass,
 	bool bBlockInputDuringPush,
 	FName CancellationKey)
 {
-	// Blueprint가 delegate를 연결한 뒤 Activate할 수 있도록 Async proxy를 생성한다.
+	// 공통 factory에서 생성한 요청에 직접 지정 Layer 정보를 저장한다.
+	UMD_AsyncAction_PushScreenToLayer* AsyncRequest = CreatePushRequest(InOwningPlayer, bBlockInputDuringPush, CancellationKey);
+	AsyncRequest->LayerTag = InLayerTag;
+	AsyncRequest->ScreenClass = InScreenClass;
+	AsyncRequest->bUseAutomaticLayer = false;
+	return AsyncRequest;
+}
+
+UMD_AsyncAction_PushScreenToLayer* UMD_AsyncAction_PushScreenToLayer::PushScreenToLayerAutoAsync(
+	APlayerController* InOwningPlayer,
+	FGameplayTag InWidgetTag,
+	bool bBlockInputDuringPush,
+	FName CancellationKey)
+{
+	// WidgetTag로 클래스와 부모 Layer를 결정할 자동 요청임을 공통 proxy에 저장한다.
+	UMD_AsyncAction_PushScreenToLayer* AsyncRequest = CreatePushRequest(InOwningPlayer, bBlockInputDuringPush, CancellationKey);
+	AsyncRequest->WidgetTag = InWidgetTag;
+	AsyncRequest->bUseAutomaticLayer = true;
+	return AsyncRequest;
+}
+
+UMD_AsyncAction_PushScreenToLayer* UMD_AsyncAction_PushScreenToLayer::CreatePushRequest(
+	APlayerController* InOwningPlayer,
+	bool bBlockInputDuringPush,
+	FName CancellationKey)
+{
+	// Blueprint가 delegate를 연결한 뒤 Activate할 수 있도록 공통 Async proxy를 생성한다.
 	UMD_AsyncAction_PushScreenToLayer* AsyncRequest = NewObject<UMD_AsyncAction_PushScreenToLayer>();
 
-	// 실행 시점 검증과 비동기 로드에 사용할 요청 값을 proxy에 저장한다.
+	// 실행 시점 검증과 비동기 로드에 사용할 공통 요청 값을 proxy에 저장한다.
 	AsyncRequest->OwningPlayer = InOwningPlayer;
-	AsyncRequest->ScreenClass = InScreenClass;
 	AsyncRequest->bBlockInputDuringPush = bBlockInputDuringPush;
 	AsyncRequest->CancellationKey = CancellationKey;
 
@@ -143,7 +200,7 @@ UMD_AsyncAction_PushScreenToLayer* UMD_AsyncAction_PushScreenToLayer::PushScreen
 		AsyncRequest->RegisterWithGameInstance(InOwningPlayer);
 	}
 
-	// 생성된 proxy를 Blueprint Async 노드에 반환한다.
+	// 공통 값이 준비된 proxy를 각 factory에 반환한다.
 	return AsyncRequest;
 }
 
@@ -227,21 +284,22 @@ void UMD_AsyncAction_PushScreenToLayer::HandleScreenClassLoaded()
 	// 기존 활성 화면 반환과 새 화면 초기화를 구분하여 중복 Push 취소 동작을 유지한다.
 	bool bWasScreenInitialized = false;
 
-	// UISettings에서 Layer를 자동 결정하고 초기화 callback에서 Before Push를 실행한다.
-	UCommonActivatableWidget* PushedScreen = ResolvedUIManager->PushScreenToLayerInitialized(
-		LoadedActivatableClass,
-		[WeakRequest, &bWasScreenInitialized](UCommonActivatableWidget& Screen)
-		{
-			// 새 화면을 생성한 경우에만 실행되는 초기화 callback임을 기록한다.
-			bWasScreenInitialized = true;
+	// 직접 지정과 자동 Layer 경로가 공유할 활성화 전 초기화 callback을 구성한다.
+	TFunction<void(UCommonActivatableWidget&)> InitializeScreen = [WeakRequest, &bWasScreenInitialized](UCommonActivatableWidget& Screen)
+	{
+		// 새 화면을 생성한 경우에만 실행되는 초기화 callback임을 기록한다.
+		bWasScreenInitialized = true;
 
-			// 요청이 유지되는 동안 Blueprint의 Before Push 이벤트를 전달한다.
-			UMD_AsyncAction_PushScreenToLayer* ResolvedRequest = WeakRequest.Get();
-			if (IsValid(ResolvedRequest) == true)
-			{
-				ResolvedRequest->HandleBeforePush(Screen);
-			}
-		});
+		// 요청이 유지되는 동안 Blueprint의 Before Push 이벤트를 전달한다.
+		UMD_AsyncAction_PushScreenToLayer* ResolvedRequest = WeakRequest.Get();
+		if (IsValid(ResolvedRequest) == true)
+		{
+			ResolvedRequest->HandleBeforePush(Screen);
+		}
+	};
+
+	// 직접 입력 또는 Widget 등록 정보에서 결정된 Layer와 클래스에 공통 초기화 경로로 Push한다.
+	UCommonActivatableWidget* PushedScreen = ResolvedUIManager->PushScreenToLayerInitialized(LayerTag, LoadedActivatableClass, InitializeScreen);
 
 	// Before Push에서 요청이 취소됐다면 방금 추가된 화면을 즉시 표준 Deactivate 경로로 닫는다.
 	if (bFinished == true)

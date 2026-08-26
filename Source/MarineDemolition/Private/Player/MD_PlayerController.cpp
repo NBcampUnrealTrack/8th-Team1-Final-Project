@@ -362,7 +362,7 @@ void AMD_PlayerController::InitializeGameplayHUD()
 	else
 	{
 		// HUD 생성과 활성화를 PrimaryLayout의 GameHUD Stack에 위임한다.
-		UCommonActivatableWidget* PushedScreen = LocalUIManager->PushScreenToLayer(HUDWidgetClass);
+		UCommonActivatableWidget* PushedScreen = LocalUIManager->PushScreenToLayer(MDGameplayTags::UI_Layer_GameHUD, HUDWidgetClass);
 		HUDWidgetInstance = Cast<UMD_HUDWidget>(PushedScreen);
 		if (IsValid(HUDWidgetInstance) == false)
 		{

@@ -10,18 +10,6 @@
 class UCommonActivatableWidget;
 class UUserWidget;
 
-/** 하나의 UI Layer에 등록할 CommonActivatableWidget 소프트 클래스를 보관한다. */
-USTRUCT(BlueprintType)
-struct FMD_UILayerWidgetClasses
-{
-	GENERATED_BODY()
-
-public:
-	// Layer에서 사용할 Widget Blueprint 클래스를 중복 없이 보관한다.
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Layer Map")
-	TSet<TSoftClassPtr<UCommonActivatableWidget>> WidgetClasses;
-};
-
 /** Project Settings에서 LocalPlayer PrimaryLayout 클래스를 지정하는 UI 설정이다. */
 UCLASS(config = Game, defaultconfig, meta = (DisplayName = "MD Common UI"))
 class MARINEDEMOLITION_API UMD_UISettings : public UDeveloperSettings
@@ -44,9 +32,9 @@ public:
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Primary Layout")
 	TSoftClassPtr<UUserWidget> InitialPrimaryLayoutClass;
 
-	// UI Layer GameplayTag별로 해당 Layer에서 사용할 ActivatableWidget 클래스를 지정한다.
-	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Layer Map", meta = (Categories = "UI.Layer"))
-	TMap<FGameplayTag, FMD_UILayerWidgetClasses> LayerWidgetClasses;
+	// 화면 요청 태그별로 생성할 ActivatableWidget 소프트 클래스를 지정한다.
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Widget Map", meta = (Categories = "UI.Layer"))
+	TMap<FGameplayTag, TSoftClassPtr<UCommonActivatableWidget>> WidgetClassMap;
 
 public:
 	// 읽기 전용 프로젝트 기본 UI 설정을 반환한다.

@@ -91,6 +91,7 @@ void AMD_TravelConsole::Interact_Implementation(AActor* Interactor)
 
 	// Stack 활성화 전에 현재 콘솔을 새 화면에 연결하면서 GameMenu 레이어에 Push한다.
 	UCommonActivatableWidget* PushedScreen = LocalUIManager->PushScreenToLayerInitialized(
+		MDGameplayTags::UI_Layer_GameMenu,
 		ConsoleWidgetClass,
 		[this](UCommonActivatableWidget& Screen)
 		{

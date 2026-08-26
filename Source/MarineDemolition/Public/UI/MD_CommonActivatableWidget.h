@@ -4,7 +4,6 @@
 
 #include "CoreMinimal.h"
 #include "CommonActivatableWidget.h"
-#include "GameplayTags.h"
 #include "MD_CommonActivatableWidget.generated.h"
 
 /** 프로젝트 화면의 공통 활성화 정책을 제공하는 Blueprint 기반 클래스다. */
@@ -14,18 +13,11 @@ class MARINEDEMOLITION_API UMD_CommonActivatableWidget : public UCommonActivatab
 	GENERATED_BODY()
 
 protected:
-	// 화면이 배치될 CommonUI 레이어를 자산별로 설정한다.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|UI|Navigation")
-	FGameplayTag TargetLayerTag;
-
 	// World Travel 시작 시 이 화면을 부모에서 제거할지 결정한다.
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|UI|Navigation")
 	bool RemoveOnWorldTravel = true;
 
 public:
-	UFUNCTION(BlueprintPure, Category = "MD|UI|Navigation")
-	FORCEINLINE FGameplayTag GetTargetLayerTag() const { return TargetLayerTag; }
-
 	// World Travel 시작 시 화면 제거 여부를 반환한다.
 	UFUNCTION(BlueprintPure, Category = "MD|UI|Navigation")
 	FORCEINLINE bool ShouldRemoveOnWorldTravel() const { return RemoveOnWorldTravel; }
