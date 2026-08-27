@@ -68,6 +68,10 @@ protected:
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
 
 protected:
+	/** 물속에서 바닥을 걸을 때 적용할 최대 이동 속도 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Movement|Swimming", meta = (ClampMin = "0.0"))
+	float MaxUnderwaterWalkSpeed = 200.0f;
+
 	/** 사다리 축을 따라 이동할 수 있는 최대 속도 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Movement|Ladder", meta = (ClampMin = "0.0"))
 	float MaxLadderSpeed = 200.0f;

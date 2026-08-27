@@ -275,6 +275,27 @@ void UMD_MultiplayManager::EndSession(const FString& MapPackagePath)
     }
 }
 
+bool UMD_MultiplayManager::IsSessionInProgress()
+{
+    // Session 모듈이 없는 경우 진행 중인 Session이 없다는 결과를 유지한다.
+    bool bIsSessionInProgress = false;
+    if (SessionInterface.IsValid() == false)
+    {
+        return bIsSessionInProgress;
+    }
+
+    // 프로젝트의 기본 GameSession에 기록된 Online Session 상태를 조회한다.
+    FNamedOnlineSession* CurrentSession = SessionInterface->GetNamedSession(NAME_GameSession);
+    if (CurrentSession == nullptr)
+    {
+        return bIsSessionInProgress;
+    }
+
+    // StartSession 완료 후 InProgress 상태인 경우에만 진행 중으로 판정한다.
+    bIsSessionInProgress = CurrentSession->SessionState == EOnlineSessionState::InProgress;
+    return bIsSessionInProgress;
+}
+
 void UMD_MultiplayManager::FindSessions(int32 MaxSearchResultCount, const FMD_SessionFindParams& SessionFindParams)
 {
     // Find Session 실패 시 반환될 검색 결과

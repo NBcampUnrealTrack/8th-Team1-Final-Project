@@ -124,6 +124,10 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
     void EndSession(const FString& MapPackagePath);
 
+    // 현재 GameSession이 시작되어 진행 중인지 반환하는 함수
+    UFUNCTION(BlueprintPure, Category = "Marine Demolition|Session")
+    bool IsSessionInProgress();
+
     // 최대 MaxSearchResultCount개의 Session을 검색하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
     void FindSessions(int32 MaxSearchResultCount, const FMD_SessionFindParams& SessionFindParams);
