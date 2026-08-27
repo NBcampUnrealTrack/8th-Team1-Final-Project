@@ -20,12 +20,12 @@ void UMD_QuestWidget::NativeConstruct()
 
 	if (APlayerController* PC = GetOwningPlayer())
 	{
-		PC->SetShowMouseCursor(true);
-		PC->SetInputMode(FInputModeUIOnly());
-		if (APawn* Pawn = PC->GetPawn())
-		{
-			Pawn->DisableInput(PC);
-		}
+		//PC->SetShowMouseCursor(true);
+		//PC->SetInputMode(FInputModeUIOnly());
+		//if (APawn* Pawn = PC->GetPawn())
+		//{
+		//	Pawn->DisableInput(PC);
+		//}
 	}
 
 	if (IsValid(BTN_TabMain))
@@ -64,13 +64,13 @@ void UMD_QuestWidget::NativeDestruct()
 	}
 	// 상인 메뉴가 남아 있으면 입력·커서 복구는 메뉴 쪽 NativeDestruct가 처리한다.
 	// 메뉴 없이 단독으로 띄운 경우에만 여기서 되돌린다 (상점 위젯과 동일 원칙).
-	else if (APlayerController* PC = GetOwningPlayer())
-	{
-		if (APawn* Pawn = PC->GetPawn())
-		{
-			Pawn->EnableInput(PC);
-		}
-	}
+	//else if (APlayerController* PC = GetOwningPlayer())
+	//{
+	//	if (APawn* Pawn = PC->GetPawn())
+	//	{
+	//		Pawn->EnableInput(PC);
+	//	}
+	//}
 
 	Super::NativeDestruct();
 }

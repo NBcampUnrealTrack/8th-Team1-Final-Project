@@ -37,3 +37,15 @@ FMD_GameData UMD_BlueprintFunctionLibrary::MakeMD_GameData(TSoftObjectPtr<UWorld
 	OutGameData.MapPackagePath = GameMap.ToSoftObjectPath().GetLongPackageName();
 	return OutGameData;
 }
+
+FString UMD_BlueprintFunctionLibrary::GetMapPackagePath(TSoftObjectPtr<UWorld> InMap)
+{
+	if(InMap.IsNull() == true)
+	{
+		return TEXT("");
+	}
+
+	FString MapPackagePath = InMap.ToSoftObjectPath().GetLongPackageName();
+	MapPackagePath = UWorld::RemovePIEPrefix(MapPackagePath);
+	return MapPackagePath;
+}
