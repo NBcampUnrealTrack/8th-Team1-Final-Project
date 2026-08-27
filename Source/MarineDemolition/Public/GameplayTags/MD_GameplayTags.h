@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -130,4 +130,21 @@ namespace MDGameplayTags
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_World);
 	// 저장된 게임 데이터로부터 영구 누적 로어 진행 정보를 얻는 키
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_Lore);
+
+	/* UI */
+	/** Common UI 레이어 분류의 공통 루트 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer);
+
+	/** 타이틀과 세션 탐색 화면을 배치하는 최하단 레이어 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer_Frontend);
+
+	/** 게임 플레이 중 HUD 루트를 유지하는 레이어 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer_GameHUD);
+
+	/** 일시정지와 상인 등 게임 메뉴 화면을 배치하는 레이어 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer_GameMenu);
+
+	/** 확인과 로딩 등 모든 화면보다 우선하는 최상단 레이어 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer_Modal);
+
 }
