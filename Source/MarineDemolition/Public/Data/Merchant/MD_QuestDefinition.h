@@ -31,6 +31,10 @@ struct MARINEDEMOLITION_API FMD_QuestPhaseData
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase", meta = (ClampMin = "1", UIMin = "1"))
 	int32 RequiredCount = 1;
 
+	/** 퀘스트 아이템을 생성할 지역 태그이며 비어 있으면 지역을 제한하지 않는 설정 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
+	FGameplayTag SpawnZoneTag;
+
 	/** 현재 페이즈 진행 중 HUD 퀘스트 카드에 표시할 목표 내용 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
 	FText HUDDescription;
@@ -107,6 +111,9 @@ public:
 
 	/** 현재 목표의 완료 요구 수량 반환 */
 	int32 GetRequiredCount(int32 PhaseIndex) const;
+
+	/** 현재 목표의 퀘스트 아이템 생성 지역 태그 반환 */
+	FGameplayTag GetSpawnZoneTag(int32 PhaseIndex) const;
 
 	/** 현재 목표의 HUD 설명 반환 */
 	FText GetHUDDescription(int32 PhaseIndex) const;
