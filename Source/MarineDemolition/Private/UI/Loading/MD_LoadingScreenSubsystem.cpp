@@ -4,16 +4,21 @@
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LevelStreaming.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
+#include "CommonActivatableWidget.h"
 #include "ContentStreaming.h"
 #include "GameFramework/PlayerController.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "MoviePlayer.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "TimerManager.h"
+#include "UI/MD_LocalUIManager.h"
 #include "UI/Loading/MD_LoadingScreenSettings.h"
 #include "UI/Loading/SMD_LoadingScreenWidget.h"
+#include "UI/MD_UISettings.h"
 #include "Util/MD_LogUtility.h"
 
 #define LOCTEXT_NAMESPACE "MDLoadingScreen"
@@ -98,6 +103,9 @@ void UMD_LoadingScreenSubsystem::BeginLoadingScreen(const FText& Subtitle)
 	// 이미 로딩 중이면 처음부터 다시 시작하지 않는다.
 	// (서버 로컬 호출과 자기 자신에게 온 Client RPC가 겹치는 경우가 있다.)
 	if (IsLoadingScreenActive()) { return; }
+
+	// Common UI Transition이 이미 인트로를 재생 중이면 같은 연출을 Slate에서 다시 시작하지 않는다.
+	if (IsCommonTransitionScreenActive() == true) { return; }
 
 	StartLoadingVisuals(Subtitle, /*bSkipIntro=*/false);
 	SetLoadingTimer(IntroTimerHandle, &ThisClass::HandleIntroAnimationFinished, MD_LoadingScreen::IntroDurationSeconds);
@@ -487,6 +495,51 @@ void UMD_LoadingScreenSubsystem::HandleIntroAnimationFinished()
 void UMD_LoadingScreenSubsystem::HandleOutroAnimationFinished()
 {
 	RemoveLoadingWidgets();
+}
+
+bool UMD_LoadingScreenSubsystem::IsCommonTransitionScreenActive() const
+{
+	// 현재 GameInstance의 첫 로컬 플레이어가 소유한 Common UI 관리자를 가져온다.
+	UGameInstance* GameInstance = GetGameInstance();
+	ULocalPlayer* LocalPlayer = IsValid(GameInstance) == true ? GameInstance->GetFirstGamePlayer() : nullptr;
+	UMD_LocalUIManager* LocalUIManager = IsValid(LocalPlayer) == true ? LocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
+	if (IsValid(LocalUIManager) == false)
+	{
+		return false;
+	}
+
+	// Modal 레이어에서 현재 표시 중인 화면을 확인한다.
+	UCommonActivatableWidget* ActiveModalScreen = LocalUIManager->GetActiveScreen(MDGameplayTags::UI_Layer_Modal);
+	if (IsValid(ActiveModalScreen) == false)
+	{
+		return false;
+	}
+
+	// Project Settings에 등록된 Transition 요청 태그를 안전하게 조회한다.
+	FGameplayTag TransitionWidgetTag = FGameplayTag::RequestGameplayTag(FName(TEXT("UI.Layer.Modal.Transition")), false);
+	if (TransitionWidgetTag.IsValid() == false)
+	{
+		return false;
+	}
+
+	// 현재 화면과 비교할 Transition 클래스를 Project Settings에서 가져온다.
+	const UMD_UISettings* UISettings = UMD_UISettings::Get();
+	if (IsValid(UISettings) == false)
+	{
+		return false;
+	}
+
+	// 활성 화면이 이미 클래스를 로드했으므로 Soft Class를 강제로 다시 로드하지 않는다.
+	TSoftClassPtr<UCommonActivatableWidget> TransitionScreenClass = UISettings->WidgetClassMap.FindRef(TransitionWidgetTag);
+	UClass* LoadedTransitionScreenClass = TransitionScreenClass.Get();
+	if (IsValid(LoadedTransitionScreenClass) == false)
+	{
+		return false;
+	}
+
+	// 활성 Modal 화면이 설정에 등록된 Transition 클래스인지 비교한다.
+	bool bIsTransitionScreenActive = ActiveModalScreen->GetClass() == LoadedTransitionScreenClass;
+	return bIsTransitionScreenActive;
 }
 
 // 세션 작업이 실패하면 트래블이 없어 준비 판정이 시작되지 않는다. 화면이 남으므로

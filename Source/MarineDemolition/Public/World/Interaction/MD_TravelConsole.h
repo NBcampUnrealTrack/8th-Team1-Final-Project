@@ -8,7 +8,7 @@
 #include "Types/Travel/MD_TravelTypes.h"
 #include "MD_TravelConsole.generated.h"
 
-class UMD_TravelConsoleWidget;
+class UMD_CommonTravelWidget;
 
 UCLASS()
 class MARINEDEMOLITION_API AMD_TravelConsole : public AActor, public IMD_Interactable
@@ -46,8 +46,5 @@ protected:
 	TArray<FMD_TravelSiteEntry> Sites;
 
 	UPROPERTY(EditDefaultsOnly, Category="Console")
-	TSubclassOf<UMD_TravelConsoleWidget> ConsoleWidgetClass;
-
-	// 열려 있는 위젯 (중복 생성 방지용)
-	TWeakObjectPtr<UMD_TravelConsoleWidget> ActiveWidget;
+	TSubclassOf<UMD_CommonTravelWidget> ConsoleWidgetClass;
 };

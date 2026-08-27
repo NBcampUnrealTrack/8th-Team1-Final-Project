@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -107,10 +107,6 @@ private:
 
     // 여러 플레이어의 보고서 버튼 요청이 같은 Day 전환을 중복 실행하지 않도록 하는 서버 상태
     bool bDayTransitionConfirmed = false;
-
-    // 마감 확정 후 출발 연출을 보여줄 시간
-    UPROPERTY(EditDefaultsOnly, Category = "Day")
-    float DepartTravelDelay = 3.f;
 
     // 클리어/게임오버 결과 화면을 보여줄 시간
     UPROPERTY(EditDefaultsOnly, Category = "Day")

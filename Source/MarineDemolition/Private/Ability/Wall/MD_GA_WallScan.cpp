@@ -8,6 +8,9 @@
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "TimerManager.h"
+#include "Audio/MD_AudioRelayComponent.h"
+#include "Audio/MD_AudioSubsystem.h"
+#include "Character/MD_Character.h"
 #include "World/Wall/MD_CuttableWall.h"
 
 UMD_GA_WallScan::UMD_GA_WallScan()
@@ -38,6 +41,11 @@ void UMD_GA_WallScan::PlayScanPulse()
 	StopScanPulse();
 
 	ScanPulseHandle = Audio->PlayEventAttached(ScanPulseSoundTag, Avatar->GetRootComponent());
+	// 어빌리티가 안 도는 머신에는 중계로 알린다
+	if (UMD_AudioRelayComponent* const Relay = GetAudioRelay())
+	{
+		Relay->PlayAttachedForAll(ScanPulseSoundTag);
+	}
 	if (!ScanPulseHandle.IsValid())
 	{
 		return;
@@ -66,6 +74,10 @@ void UMD_GA_WallScan::StopScanPulse()
 	if (UMD_AudioSubsystem* Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr)
 	{
 		Audio->StopHandle(ScanPulseHandle, ScanPulseFadeOutSeconds);
+		if (UMD_AudioRelayComponent* const Relay = GetAudioRelay())
+		{
+			Relay->StopAttachedForAll(ScanPulseSoundTag, ScanPulseFadeOutSeconds);
+		}
 	}
 
 	ScanPulseHandle = FMD_AudioHandle();
@@ -108,4 +120,10 @@ void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 	}
 
 	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+}
+
+UMD_AudioRelayComponent* UMD_GA_WallScan::GetAudioRelay() const
+{
+	const AMD_Character* const Avatar = Cast<AMD_Character>(GetAvatarActorFromActorInfo());
+	return Avatar ? Avatar->GetAudioRelayComponent() : nullptr;
 }

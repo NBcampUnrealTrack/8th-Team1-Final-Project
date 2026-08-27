@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "GameplayTags/MD_GameplayTags.h"
 
@@ -270,4 +270,31 @@ namespace MDGameplayTags
 		Save_Data_Lore,
 		"Save.Data.Lore",
 		"저장된 게임 데이터로부터 영구 누적 로어 진행 정보를 얻는 키");
+
+	// UI
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		UI_Layer,
+		"UI.Layer",
+		"Common UI 레이어 분류의 공통 루트");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		UI_Layer_Frontend,
+		"UI.Layer.Frontend",
+		"타이틀과 세션 탐색 화면 레이어");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		UI_Layer_GameHUD,
+		"UI.Layer.GameHUD",
+		"게임 플레이 HUD 루트 레이어");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		UI_Layer_GameMenu,
+		"UI.Layer.GameMenu",
+		"일시정지와 게임 메뉴 화면 레이어");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		UI_Layer_Modal,
+		"UI.Layer.Modal",
+		"확인과 로딩을 위한 최상단 레이어");
+
 }

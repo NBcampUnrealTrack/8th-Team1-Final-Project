@@ -434,6 +434,39 @@ void UMD_ScrapeToolComponent::StopScrapeLoopAudio()
 	}
 
 	ScrapeLoopHandle = FMD_AudioHandle();
+	bHasObservedRemoteContact = false;
+}
+
+bool UMD_ScrapeToolComponent::UpdateRemoteScrapeDragState(const double Now)
+{
+	if (!bHasLastContact)
+	{
+		// 날이 벽에서 떨어졌다. 다시 닿을 때 이전 위치와 비교하면 안 된다
+		bHasObservedRemoteContact = false;
+		return false;
+	}
+
+	if (!bHasObservedRemoteContact)
+	{
+		// 첫 접촉 프레임은 비교 대상이 없다. 소리는 다음 갱신부터
+		LastObservedRemoteContactLocation = LastContactWorldLocation;
+		bHasObservedRemoteContact = true;
+		LastScrapeTravelWorldSeconds = Now;
+		return true;
+	}
+
+	const double TravelCm =
+		FVector::Dist(LastContactWorldLocation, LastObservedRemoteContactLocation);
+	if (TravelCm > static_cast<double>(RemoteScrapeDragMinTravelCm))
+	{
+		LastObservedRemoteContactLocation = LastContactWorldLocation;
+		LastScrapeTravelWorldSeconds = Now;
+	}
+
+	// 유예는 로컬과 같은 값을 쓴다. 복제 간격이 프레임보다 길어
+	// 위치가 갱신되지 않는 구간을 이 유예가 메운다
+	return (Now - LastScrapeTravelWorldSeconds)
+		<= static_cast<double>(ScrapeLoopIdleGraceSeconds);
 }
 
 void UMD_ScrapeToolComponent::UpdateScrapeLoopAudio()
@@ -451,6 +484,25 @@ void UMD_ScrapeToolComponent::UpdateScrapeLoopAudio()
 	}
 
 	const double Now = World->GetTimeSeconds();
+
+	// 경로 누적은 조작 중인 클라이언트와 서버에만 쌓인다. 남의 화면에서는
+	// 그 값이 영원히 0 이라 드래그로 잡히지 않고, 결국 로컬과 호스트에서만
+	// 소리가 났다. 프록시는 복제되는 접촉 지점의 이동으로 대신 판정한다
+	const APawn* const AudioOwnerPawn = Cast<APawn>(GetOwner());
+	if (!AudioOwnerPawn || !AudioOwnerPawn->IsLocallyControlled())
+	{
+		const bool bRemoteDragging = UpdateRemoteScrapeDragState(Now);
+		DrawScrapeAudioDebug(Now, 0.0, 0.0, bRemoteDragging);
+		if (bRemoteDragging)
+		{
+			StartScrapeLoopAudio();
+		}
+		else
+		{
+			StopScrapeLoopAudio();
+		}
+		return;
+	}
 
 	// 커밋된 경로만 보면 안 된다. 이동량은 Pending 에 모였다가 임계값을 넘을 때
 	// 한 덩어리로 넘어오므로, 그것만 보면 스트로크 첫 구간에서 소리가 늦게 붙는다.

@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "UI/Game/MD_PlayerStatusWidget.h"
@@ -111,6 +111,13 @@ void UMD_PlayerStatusWidget::RefreshHealth()
 
 void UMD_PlayerStatusWidget::HandleOxygenChanged(const FOnAttributeChangeData& Data)
 {
+	// 주기 GE가 최대치에서 같은 값을 전달하면 불필요한 HUD 갱신을 생략한다.
+	if (FMath::IsNearlyEqual(Data.OldValue, Data.NewValue) == true)
+	{
+		return;
+	}
+
+	// 실제 산소량이 변경된 경우에만 게이지를 갱신한다.
 	RefreshOxygen();
 }
 
