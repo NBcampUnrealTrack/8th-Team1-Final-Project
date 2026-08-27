@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -44,6 +44,9 @@ protected:
     virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
     virtual void BeginPlay() override;
+
+	/** 복제된 플랫폼 닉네임을 캐릭터 이름표에 반영한다. */
+	virtual void OnRep_PlayerName() override;
 
 private:
     UPROPERTY(ReplicatedUsing = OnRep_ReturnStatus)

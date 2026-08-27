@@ -23,6 +23,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/BoxComponent.h"
+#include "Components/WidgetComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
@@ -44,6 +45,7 @@
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
+#include "UI/Customization/MD_NameTagWidget.h"
 
 namespace
 {
@@ -127,6 +129,15 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
 
 	OxygenComponent = CreateDefaultSubobject<UMD_OxygenComponent>(TEXT("OxygenComponent"));
+
+	// 캐릭터 머리 위에 원격 플레이어의 이름표를 배치한다.
+	NameTagWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NameTagWidgetComponent"));
+	NameTagWidgetComponent->SetupAttachment(GetRootComponent());
+	NameTagWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+	NameTagWidgetComponent->SetDrawAtDesiredSize(true);
+	NameTagWidgetComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 70.0f));
+	NameTagWidgetComponent->SetOwnerNoSee(false);
+	NameTagWidgetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void AMD_Character::ForceEnterWalkState()
@@ -451,6 +462,9 @@ void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 시작 시점에 이미 준비된 PlayerState의 이름을 이름표에 반영한다.
+	RefreshNameTag();
+
 	// 기존 BP에 저장된 네이티브 컴포넌트 값이 C++ 기본값을 덮더라도
 	// 실제 플레이에서는 팔·도구의 데칼 수신과 월드 메시 관통을 줄이도록 다시 보정한다.
 	ConfigureFirstPersonRendering();
@@ -701,6 +715,8 @@ void AMD_Character::PossessedBy(AController* NewController)
 	InitializeAbilitySystem();
 	GrantDefaultAbilities();
 	RefreshFirstPersonArmsTick();
+	// 서버에서 빙의가 완료된 PlayerState의 이름을 이름표에 반영한다.
+	RefreshNameTag();
 }
 
 void AMD_Character::UnPossessed()
@@ -740,6 +756,30 @@ void AMD_Character::OnRep_PlayerState()
 	Super::OnRep_PlayerState();
 
 	InitializeAbilitySystem();
+	// 클라이언트에 PlayerState가 복제된 뒤 플랫폼 닉네임을 이름표에 반영한다.
+	RefreshNameTag();
+}
+
+void AMD_Character::RefreshNameTag()
+{
+	// 이름표에 표시할 복제된 플레이어 정보를 가져온다.
+	// 이름표 컴포넌트가 준비되지 않은 경우 처리를 종료한다.
+	APlayerState* CurrentPlayerState = GetPlayerState();
+	if (IsValid(CurrentPlayerState) == false || IsValid(NameTagWidgetComponent) == false)
+	{
+		return;
+	}
+
+	// 설정된 이름표 UI 인스턴스를 프로젝트 위젯 형식으로 가져온다.
+	UMD_NameTagWidget* NameTagWidget = Cast<UMD_NameTagWidget>(NameTagWidgetComponent->GetUserWidgetObject());
+	if (IsValid(NameTagWidget) == false)
+	{
+		return;
+	}
+
+	// PlayerState가 모든 클라이언트에 복제한 플랫폼 닉네임을 표시한다.
+	FText PlayerName = FText::FromString(CurrentPlayerState->GetPlayerName());
+	NameTagWidget->SetTextContent(PlayerName);
 }
 
 void AMD_Character::CalcCamera(

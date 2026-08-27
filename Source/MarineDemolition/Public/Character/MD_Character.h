@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -29,6 +29,7 @@ class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
 class UMD_OxygenComponent;
+class UWidgetComponent;
 class UNiagaraSystem;
 class UNiagaraComponent;
 struct FMinimalViewInfo;
@@ -230,6 +231,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_OxygenComponent> OxygenComponent;
 
+	/** 원격 플레이어의 플랫폼 닉네임을 머리 위에 표시하는 이름표 컴포넌트 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UWidgetComponent> NameTagWidgetComponent;
+
 	/** 모선 리스폰 지점을 찾을 때 사용할 PlayerStart 태그 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Health")
 	FName MothershipRespawnTag = TEXT("MothershipRespawn");
@@ -255,6 +260,8 @@ protected:
 	//TSubclassOf<UGameplayAbility> WallScanAbilityClass;
 
 private:
+	// PlayerState의 이름 복제 알림이 이름표를 직접 갱신할 수 있게 접근을 허용한다.
+	friend class AMD_PlayerState;
 
 	void HandleMoveInput(const FInputActionValue& Value);
 	void HandleLookInput(const FInputActionValue& Value);
@@ -284,6 +291,7 @@ private:
 
 	void InitializeAbilitySystem();
 	void GrantDefaultAbilities();
+	void RefreshNameTag();
 
 	UFUNCTION()
 	void HandleHotbarChanged();
