@@ -291,7 +291,16 @@ void AMD_GameModeBase::ConfirmDayTransition(AMD_PlayerController* RequestingCont
 
     // 기존 판정별 딜레이 선택은 유지하고 시작 시점만 보고서 확인 이후로 제한하는 처리
     const bool bResultScreen = PendingResult == EMD_InspectionResult::ContractCleared || PendingResult == EMD_InspectionResult::GameOver;
-    GetWorldTimerManager().SetTimer(DepartTravelTimerHandle, this, &AMD_GameModeBase::ExecuteDayTransition, bResultScreen ? ResultTravelDelay : DepartTravelDelay, false);
+
+    // 일반적인 다음 날 전환은 추가 출발 연출 없이 즉시 실행한다.
+    if (bResultScreen == false)
+    {
+        ExecuteDayTransition();
+        return;
+    }
+
+    // 최종 결과 화면을 확인할 시간만 기존 타이머로 보장한다.
+    GetWorldTimerManager().SetTimer(DepartTravelTimerHandle, this, &AMD_GameModeBase::ExecuteDayTransition, ResultTravelDelay, false);
 }
 
 void AMD_GameModeBase::TravelToNextDay()
