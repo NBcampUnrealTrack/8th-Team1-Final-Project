@@ -27,60 +27,23 @@ void UMD_GA_WallScan::PlayScanPulse()
 		return;
 	}
 
-	UWorld* World = GetWorld();
-	UMD_AudioSubsystem* Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr;
-	AActor* Avatar = GetAvatarActorFromActorInfo();
-	if (!Audio || !IsValid(Avatar))
-	{
-		return;
-	}
-
-	// 이 어빌리티는 쿨다운이 없어 3초 안에 다시 스캔할 수 있다.
-	// 그대로 두면 펄스가 겹쳐 울리므로 직전 것을 먼저 끊는다.
-	// InstancedPerActor 라 핸들·타이머가 플레이어별로 유지된다 (MD_GA_WallBase 생성자).
-	StopScanPulse();
-
-	ScanPulseHandle = Audio->PlayEventAttached(ScanPulseSoundTag, Avatar->GetRootComponent());
-	// 어빌리티가 안 도는 머신에는 중계로 알린다
+	// 재생과 정지를 모두 중계 컴포넌트에 맡긴다.
+	//
+	// 예전에는 이 어빌리티가 직접 재생하고 자기 인스턴스에 3초 타이머를 걸었는데,
+	// 즉발 어빌리티라 EndAbility 직후 인스턴스가 회수되면 타이머만 조용히 죽어
+	// 펄스가 영원히 울렸다. 컴포넌트는 아바타와 수명을 같이하므로 안전하다.
 	if (UMD_AudioRelayComponent* const Relay = GetAudioRelay())
 	{
-		Relay->PlayAttachedForAll(ScanPulseSoundTag);
+		Relay->PlayAttachedForDuration(ScanPulseSoundTag, ScanDuration, ScanPulseFadeOutSeconds);
 	}
-	if (!ScanPulseHandle.IsValid())
-	{
-		return;
-	}
-
-	// 즉발 어빌리티라 곧 EndAbility 가 불리지만 어빌리티 인스턴스는 살아 있으므로
-	// 자기 타이머를 들고 있어도 된다. EndAbility 에서 끊지 않는 것은 의도다 —
-	// 하이라이트가 남아 있는 3초 동안 소리도 같이 가야 한다.
-	World->GetTimerManager().SetTimer(
-		ScanPulseStopTimer, this, &UMD_GA_WallScan::StopScanPulse, ScanDuration, /*bLoop*/ false);
 }
 
 void UMD_GA_WallScan::StopScanPulse()
 {
-	UWorld* World = GetWorld();
-	if (World)
+	if (UMD_AudioRelayComponent* const Relay = GetAudioRelay())
 	{
-		World->GetTimerManager().ClearTimer(ScanPulseStopTimer);
+		Relay->StopEverywhere(ScanPulseSoundTag, ScanPulseFadeOutSeconds);
 	}
-
-	if (!ScanPulseHandle.IsValid())
-	{
-		return;
-	}
-
-	if (UMD_AudioSubsystem* Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr)
-	{
-		Audio->StopHandle(ScanPulseHandle, ScanPulseFadeOutSeconds);
-		if (UMD_AudioRelayComponent* const Relay = GetAudioRelay())
-		{
-			Relay->StopAttachedForAll(ScanPulseSoundTag, ScanPulseFadeOutSeconds);
-		}
-	}
-
-	ScanPulseHandle = FMD_AudioHandle();
 }
 
 void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
