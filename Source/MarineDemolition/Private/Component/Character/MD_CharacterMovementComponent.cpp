@@ -114,6 +114,15 @@ float UMD_CharacterMovementComponent::GetMaxSpeed() const
 		return MaxLadderSpeed;
 	}
 
+	// 물속에서 바닥을 걷는 동안 수영과 구분된 느린 보행 속도 반환
+	if (MovementMode == MOVE_Walking)
+	{
+		if (IsInWater() == true)
+		{
+			return MaxUnderwaterWalkSpeed;
+		}
+	}
+
 	// 일반 이동과 수영의 기존 최대 속도 반환
 	return Super::GetMaxSpeed();
 }
