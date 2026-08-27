@@ -117,6 +117,13 @@ FVector AMD_Ladder::GetOutwardVector() const
 	return GetActorForwardVector().GetSafeNormal();
 }
 
+FVector AMD_Ladder::GetClimbRightVector() const
+{
+	// 사다리 정면을 바라볼 때의 오른쪽 방향이 되도록 바깥 방향과 등반 축의 외적 계산
+	FVector ClimbRightVector = FVector::CrossProduct(GetOutwardVector(), GetClimbUpVector()).GetSafeNormal();
+	return ClimbRightVector;
+}
+
 FVector AMD_Ladder::GetBottomClimbPointLocation() const
 {
 	// 배치된 하단 기준점이 유효한 경우 캡슐 중심 위치 반환
@@ -232,6 +239,32 @@ FVector AMD_Ladder::GetClosestClimbLocation(const FVector& WorldLocation, float 
 	// 사다리 축 투영과 캡슐 표면 간격을 결합한 최종 스냅 위치 반환
 	FVector ClosetLocationFromLadder = BottomLocation + (ClimbDelta * ClimbProgress) + (GetOutwardVector() * SafeStandOffDistance);
 	return ClosetLocationFromLadder;
+}
+
+FVector AMD_Ladder::GetClosestClimbPlaneLocation(const FVector& WorldLocation, float StandOffDistance) const
+{
+	// 등반 기준점과 사다리 평면을 구성하는 상하 및 좌우 축 계산
+	FVector BottomLocation = GetBottomClimbPointLocation();
+	FVector ClimbDelta = GetTopClimbPointLocation() - BottomLocation;
+	FVector ClimbRightVector = GetClimbRightVector();
+	float ClimbLengthSquared = ClimbDelta.SizeSquared();
+	float SafeStandOffDistance = FMath::Max(StandOffDistance, 0.0f);
+
+	// 길이가 없는 잘못된 사다리 배치의 안전한 평면 위치 반환
+	if (ClimbLengthSquared < 1.0f)
+	{
+		FVector BottomPlaneLocation = BottomLocation + GetOutwardVector() * SafeStandOffDistance;
+		return BottomPlaneLocation;
+	}
+
+	// 월드 위치의 상하 진행도는 사다리 범위로 제한하고 좌우 거리는 그대로 유지
+	FVector RelativeLocation = WorldLocation - BottomLocation;
+	float ClimbProgress = FMath::Clamp(FVector::DotProduct(RelativeLocation, ClimbDelta) / ClimbLengthSquared, 0.0f, 1.0f);
+	float RightDistance = FVector::DotProduct(RelativeLocation, ClimbRightVector);
+
+	// 상하·좌우 위치와 사다리 표면 간격을 결합한 사다리 평면 위치 반환
+	FVector ClosestPlaneLocation = BottomLocation + ClimbDelta * ClimbProgress + ClimbRightVector * RightDistance + GetOutwardVector() * SafeStandOffDistance;
+	return ClosestPlaneLocation;
 }
 
 bool AMD_Ladder::IsCharacterInsideTrigger(APawn* Pawn) const

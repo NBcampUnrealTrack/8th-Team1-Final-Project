@@ -69,6 +69,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Ladder")
 	FVector GetOutwardVector() const;
 
+	/** 사다리 정면을 바라보는 캐릭터 기준의 정규화된 오른쪽 방향 반환 함수 */
+	UFUNCTION(BlueprintPure, Category = "MD|Ladder")
+	FVector GetClimbRightVector() const;
+
 	/** 캐릭터 캡슐 중심용 최하단 월드 위치 반환 함수 */
 	UFUNCTION(BlueprintPure, Category = "MD|Ladder")
 	FVector GetBottomClimbPointLocation() const;
@@ -98,6 +102,10 @@ public:
 	/** 월드 위치를 등반 축에 맞추고 바깥 방향 간격을 적용한 스냅 위치 계산 함수 */
 	UFUNCTION(BlueprintPure, Category = "MD|Ladder")
 	FVector GetClosestClimbLocation(const FVector& WorldLocation, float StandOffDistance) const;
+
+	/** 좌우 위치를 유지하면서 월드 위치를 사다리 평면과 상하 범위에 맞춘 위치 계산 함수 */
+	UFUNCTION(BlueprintPure, Category = "MD|Ladder")
+	FVector GetClosestClimbPlaneLocation(const FVector& WorldLocation, float StandOffDistance) const;
 
 	/** 지정 캐릭터가 현재 등반 오버랩 공간 안에 있는지 확인하는 함수 */
 	UFUNCTION(BlueprintPure, Category = "MD|Ladder")

@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Component/Character/MD_CharacterMovementComponent.h"
@@ -151,7 +151,7 @@ float UMD_CharacterMovementComponent::GetMaxBrakingDeceleration() const
 	return Super::GetMaxBrakingDeceleration();
 }
 
-void UMD_CharacterMovementComponent::ApplyLadderMovementInput(float ForwardInput)
+void UMD_CharacterMovementComponent::ApplyLadderMovementInput(float ForwardInput, float RightInput)
 {
 	// 등반 상태, 상단 자동 이탈 상태, 소유 캐릭터 유효성을 함께 검사하여 적용할 수 없는 입력 차단
 	if (IsClimbing() == false || bIsTopDismounting == true || IsValid(CharacterOwner) == false)
@@ -166,8 +166,9 @@ void UMD_CharacterMovementComponent::ApplyLadderMovementInput(float ForwardInput
 	// 카메라가 바라보는 면에 따라 전진 입력의 사다리 이동 방향 결정
 	float LadderMovementDirection = CameraFacingDirection <= 0.0f ? 1.0f : -1.0f;
 
-	// 후진 입력은 결정된 전진 방향의 반대가 되도록 입력 부호를 유지한 사다리 이동 벡터 계산
+	// 카메라가 바라보는 면에 맞춰 전후 및 좌우 입력 방향을 함께 반전한 사다리 평면 이동 벡터 계산
 	FVector LadderInputVector = CurrentLadder->GetClimbUpVector() * ForwardInput * LadderMovementDirection;
+	LadderInputVector += CurrentLadder->GetClimbRightVector() * RightInput * LadderMovementDirection;
 
 	// 사다리 물리에서 소비할 이동 입력을 이동 컴포넌트에 누적
 	AddInputVector(LadderInputVector);
@@ -375,31 +376,31 @@ void UMD_CharacterMovementComponent::PhysLadder(float DeltaTime, int32 Iteration
 	}
 	// 사다리 타는 중
 
-	// 횡이동과 중력 속도를 제거하기 위한 사다리 축 계산
+	// 사다리 평면 밖 이동과 중력 속도를 제거하기 위한 상하 및 좌우 축 계산
 	FVector ClimbUpVector = CurrentLadder->GetClimbUpVector();
-	Acceleration = ClimbUpVector * FVector::DotProduct(Acceleration, ClimbUpVector);
-	Velocity = ClimbUpVector * FVector::DotProduct(Velocity, ClimbUpVector);
+	FVector ClimbRightVector = CurrentLadder->GetClimbRightVector();
+	Acceleration = ClimbUpVector * FVector::DotProduct(Acceleration, ClimbUpVector) + ClimbRightVector * FVector::DotProduct(Acceleration, ClimbRightVector);
+	Velocity = ClimbUpVector * FVector::DotProduct(Velocity, ClimbUpVector) + ClimbRightVector * FVector::DotProduct(Velocity, ClimbRightVector);
 
-	// 전용 최대 속도와 제동값을 사용하는 사다리 축 속도 계산
+	// 전용 최대 속도와 제동값을 사용하는 사다리 평면 속도 계산
 	CalcVelocity(DeltaTime, 0.0f, false, GetMaxBrakingDeceleration());
-	float UpwardSpeedOnLadder = FVector::DotProduct(Velocity, ClimbUpVector);
-	Velocity = ClimbUpVector * FMath::Clamp(UpwardSpeedOnLadder, -MaxLadderSpeed, MaxLadderSpeed);
+	Velocity = Velocity.GetClampedToMaxSize(MaxLadderSpeed);
 
 	// 경계 도달 방향 판정에 사용할 요청 속도 보존
 	float RequestedClimbSpeed = FVector::DotProduct(Velocity, ClimbUpVector);
 	FVector CurrentLocation = UpdatedComponent->GetComponentLocation();
 
 	// 프레임 간 축 오차를 서서히 제거하는 스냅 보정량 계산
-	FVector SnapLocation = CurrentLadder->GetClosestClimbLocation(CurrentLocation, GetLadderStandOffDistance());
+	FVector SnapLocation = CurrentLadder->GetClosestClimbPlaneLocation(CurrentLocation, GetLadderStandOffDistance());
 	// 사다리를 타는 위치를 향하여 보정되어야 하는 위치 값 차이(최대 값 제한 적용)
 	FVector SnapCorrection = (SnapLocation - CurrentLocation).GetClampedToMaxSize(LadderSnapSpeed * DeltaTime);
 
 	// 이동 예정 위치를 사다리 선분 안으로 제한하여 상하단 초과 방지
 	FVector UnclampedTargetLocation = CurrentLocation + Velocity * DeltaTime + SnapCorrection;	// 이동 예정 위치(미 보정)
-	FVector ClampedTargetLocation = CurrentLadder->GetClosestClimbLocation(UnclampedTargetLocation, GetLadderStandOffDistance()); // 이동 예정 위치(보정됨)
+	FVector ClampedTargetLocation = CurrentLadder->GetClosestClimbPlaneLocation(UnclampedTargetLocation, GetLadderStandOffDistance()); // 이동 예정 위치(보정됨)
 	FVector MoveDelta = ClampedTargetLocation - CurrentLocation;	// 이동되는 변화량
 
-	// Sweep 방식으로 사다리 축을 따라 이동
+	// Sweep 방식으로 사다리 평면을 따라 이동
 	FHitResult MoveHit;
 	SafeMoveUpdatedComponent(MoveDelta, UpdatedComponent->GetComponentQuat(), true, MoveHit);
 
@@ -416,14 +417,14 @@ void UMD_CharacterMovementComponent::PhysLadder(float DeltaTime, int32 Iteration
 		Velocity = FVector::ZeroVector;
 	}
 
-	// 실제 이동 결과를 사다리 축 속도로 환산하여 네트워크 보정 오차 축소
+	// 실제 이동 결과를 사다리 평면 속도로 환산하여 네트워크 보정 오차 축소
 	if (bJustTeleported == false && DeltaTime > MIN_TICK_TIME)
 	{
 		// 실제 위치 변화량을 시간으로 나누어 실제 속도 계산
 		FVector ActualMoveVelocity = (UpdatedComponent->GetComponentLocation() - CurrentLocation) / DeltaTime;
 
-		// 등반 방향의 속도 성분 계산 및 적용
-		Velocity = ClimbUpVector * FVector::DotProduct(ActualMoveVelocity, ClimbUpVector);
+		// 등반 상하 및 좌우 방향의 속도 성분 계산 및 적용
+		Velocity = ClimbUpVector * FVector::DotProduct(ActualMoveVelocity, ClimbUpVector) + ClimbRightVector * FVector::DotProduct(ActualMoveVelocity, ClimbRightVector);
 	}
 
 	// 상하단 판정에 사용할 사다리 길이와 정규화 허용 오차 계산

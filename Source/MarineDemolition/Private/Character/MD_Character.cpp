@@ -936,8 +936,8 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
 	if (IsValid(MDMovement) == true && MDMovement->IsClimbing() == true)
 	{
-		// 입력 축만 전달하고 사다리 이동 방향 결정은 이동 컴포넌트에 위임
-		MDMovement->ApplyLadderMovementInput(MoveInput.X);
+		// 전후 및 좌우 입력 축만 전달하고 사다리 이동 방향 결정은 이동 컴포넌트에 위임
+		MDMovement->ApplyLadderMovementInput(MoveInput.X, MoveInput.Y);
 		return;
 	}
 
