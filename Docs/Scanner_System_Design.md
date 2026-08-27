@@ -30,12 +30,34 @@
 - **변경안**: 스캐너 파동이 플레이어 위치에서부터 10미터 밖으로 퍼져나가는 방사형 연출로 머티리얼(PP_ScanXray 등) 수정.
 - `ScanCenter` 파라미터를 플레이어 위치로 설정하고, 반경 변수를 1000으로 할당해 스캔 효과가 반경 10m 밖으로 벗어나면 페이드아웃 되도록 처리.
 
+### 3.4. 사운드 (확정)
+
+다중 탐지로 바뀌면 "무엇을 잡았을 때 소리를 내는가"가 새로 문제가 된다. 세 가지를 확정한다.
+
+| # | 규칙 | 이유 |
+|---|---|---|
+| 1 | **대상 0개면 무음** | 허공에 쏘고 소리가 나면 결과 없는 피드백이 되어 "뭔가 잡혔나?"로 읽힌다. 소리 자체가 탐지 성공 신호여야 한다 |
+| 2 | **N개를 잡아도 펄스는 1회** | 대상마다 재생하면 벽이 몰린 구역에서 10겹으로 겹쳐 울린다. 펄스는 **스캔 행위 1회**에 대응하며 탐지 개수와 무관하다 |
+| 3 | **판정별 결과음을 넣지 않는다** | `10 효과음 리스트` #86(칸막이 안전) · #87(지주 위험)은 단일 대상 스캐너 전제로 설계된 항목이다. 다중 탐지에서는 한 번에 칸막이와 지주가 섞여 잡히므로 "무엇에 대한 판정음인지" 구분되지 않는다. 판정 전달은 **하이라이트 색**이 담당한다 |
+
+재생 태그는 `SFX.Tool.Scanner.PulseLoop` 하나만 쓴다 (`DA_MD_Audio_Tool`).
+루프 항목이라 `ScanDuration`(3.0s) 뒤에 직접 끊는다 — 상세는 `MD_GA_WallScan::PlayScanPulse`.
+
+> **현재 구현은 이미 세 규칙을 만족한다.** 격벽을 실제로 잡았을 때만 재생하고(1),
+> 단일 대상이라 1회이고(2), 결과음이 없다(3). 개편 시 **깨뜨리지 않아야 할 기준**으로 읽는다.
+>
+> 특히 (2)는 다중 루프에서 실수하기 쉽다 — `ScanHighlight` 루프 **안**에서
+> `PlayScanPulse()` 를 부르면 탐지 개수만큼 겹친다. 루프 **밖**에서 1회만 부르고,
+> 대상 수가 0이면 부르지 않는다.
+
 ## 4. 변경 대상 파일 (Affected Files)
 1. `Source/MarineDemolition/Private/Ability/Wall/MD_GA_WallScan.cpp`
    - 탐지 로직 (LineTrace -> SphereOverlap + DotProduct 필터링) 교체.
    - 다중 타겟 대상 `ScanHighlight` 루프 처리.
+   - **`PlayScanPulse()` 호출을 루프 밖 1회로 유지** (§3.4 규칙 2).
 2. `Source/MarineDemolition/Public/Ability/Wall/MD_GA_WallScan.h`
    - 기존 반경 및 원뿔 각도(ConeAngle) 프로퍼티 추가 (`EditDefaultsOnly`).
+   - 사운드 프로퍼티(`ScanPulseSoundTag`, `ScanPulseFadeOutSeconds`)는 **그대로 둔다**.
 3. 머티리얼 관련: `Content/VFX/03_Scanner/MPC_Scan` 파라미터 구조 변경 반영.
 
 ## 5. 알려진 이슈 및 렌더링 개선 (Rendering Fixes)
