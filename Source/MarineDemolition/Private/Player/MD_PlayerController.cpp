@@ -24,7 +24,6 @@
 
 #include "Engine/GameInstance.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
-#include "Misc/CoreDelegates.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
 
