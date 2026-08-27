@@ -6,6 +6,9 @@
 #include "OnlineSessionSettings.h"      // FOnlineSessionSettings
 #include "Online/OnlineSessionNames.h"  // NAME_GameSession
 #include "FindSessionsCallbackProxy.h"  // FBlueprintSessionResult
+#include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
 #include "GameFramework/GameModeBase.h"
 #include "UObject/UObjectGlobals.h"
 #include "Player/MD_PlayerController.h"
@@ -22,20 +25,6 @@ void UMD_MultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
 	Super::Initialize(Collection);
 
     InitOnlineSessionInterface();
-
-#if WITH_EDITOR
-    // 이전 PIE 종료 과정에서 비동기 제거가 완료되지 않은 로컬 NamedSession을 새 PIE에서 이어받지 않도록 정리한다.
-    if (SessionInterface.IsValid() == true)
-    {
-        // 동일한 이름의 Session이 남아 있는지 조회한다.
-        FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_GameSession);
-        if (ExistingSession != nullptr)
-        {
-            // 이전 PIE의 로컬 Session 기록을 제거하여 새 CreateSession 요청을 허용한다.
-            SessionInterface->RemoveNamedSession(NAME_GameSession);
-        }
-    }
-#endif
 
     // Session 초대 수락 처리 완료에 대한 이벤트 등록
     if (SessionInterface.IsValid() == true)
@@ -95,20 +84,6 @@ void UMD_MultiplayManager::Deinitialize()
         // Session 초대 수락 처리 완료에 대한 이벤트 연결 해제
         SessionInterface->OnSessionUserInviteAcceptedDelegates.RemoveAll(this);
 
-#if WITH_EDITOR
-        // PIE 종료 이후 OnlineSubsystem에 GameSession이 남지 않도록 정상 제거를 요청한다.
-        FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_GameSession);
-        if (ExistingSession != nullptr)
-        {
-            // 종료 중인 Subsystem 객체에 의존하지 않는 빈 완료 delegate로 Session 제거를 요청한다.
-            bool bDestroyRequestResult = SessionInterface->DestroySession(NAME_GameSession);
-            if (bDestroyRequestResult == false)
-            {
-                // 제거 요청 자체가 거부되면 다음 PIE를 막는 로컬 NamedSession 기록을 즉시 제거한다.
-                SessionInterface->RemoveNamedSession(NAME_GameSession);
-            }
-        }
-#endif
     }
 
     SessionDelegateHandle.Reset();
