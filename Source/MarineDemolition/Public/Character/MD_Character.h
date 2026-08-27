@@ -25,6 +25,7 @@ class UMD_InteractionComponent;
 class UMD_ScrapeToolComponent;
 class UGameplayAbility;
 class UMD_EquipHotbarComponent;
+class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
 class UMD_OxygenComponent;
@@ -86,6 +87,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	UMD_EquipHotbarComponent* GetHotbarComponent() const { return EquipHotbarComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Audio")
+	UMD_AudioRelayComponent* GetAudioRelayComponent() const { return AudioRelayComponent; }
 
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	UMD_InteractionComponent* GetInteractionComponent() const { return InteractionComponent; }
@@ -177,6 +181,10 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_EquipHotbarComponent> EquipHotbarComponent;
+
+	/** 도구 작업음을 다른 클라이언트에게 중계한다 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_AudioRelayComponent> AudioRelayComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_InteractionComponent> InteractionComponent;
