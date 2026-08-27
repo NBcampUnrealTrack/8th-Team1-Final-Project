@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -136,6 +136,9 @@ private:
 	bool bWantsToSwim = false;
 
 public:
+	/** 캐릭터 방향에 맞춘 사다리 상하 이동 입력을 적용하는 함수 */
+	void ApplyLadderMovementInput(float ForwardInput);
+
 	/** 지정 사다리로 스냅한 뒤 등반 상태에 진입하는 함수 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Movement|Ladder")
 	bool StartClimbing(AMD_Ladder* Ladder);

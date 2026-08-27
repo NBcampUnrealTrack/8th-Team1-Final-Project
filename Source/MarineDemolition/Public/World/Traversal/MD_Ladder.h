@@ -1,4 +1,4 @@
-﻿// 프로젝트 코드
+// 프로젝트 코드
 
 #pragma once
 
@@ -8,9 +8,6 @@
 
 class UArrowComponent;
 class UBoxComponent;
-
-/** 사다리와 캐릭터 사이의 오버랩 변화를 외부 이동 시스템에 전달하는 이벤트 형식 */
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMDLadderCharacterOverlapSignature, AMD_Ladder*, Ladder, AMD_Character*, Character);
 
 /** 등반 가능한 공간과 이동 기준점을 제공하는 사다리 월드 액터 */
 UCLASS(BlueprintType)
@@ -25,15 +22,6 @@ public:
 protected:
 	/** 캐릭터 오버랩 감지를 연결하는 초기화 함수 */
 	virtual void BeginPlay() override;
-
-public:
-	/** 캐릭터가 사다리 등반 공간에 진입했음을 서버에서 전달하는 이벤트 */
-	UPROPERTY(BlueprintAssignable, Category = "MD|Ladder|Event")
-	FMDLadderCharacterOverlapSignature OnCharacterEntered;
-
-	/** 캐릭터가 사다리 등반 공간에서 이탈했음을 서버에서 전달하는 이벤트 */
-	UPROPERTY(BlueprintAssignable, Category = "MD|Ladder|Event")
-	FMDLadderCharacterOverlapSignature OnCharacterExited;
 
 protected:
 	/** 사다리 구성요소의 공통 변환 기준을 제공하는 루트 컴포넌트 */
@@ -116,11 +104,11 @@ public:
 	bool IsCharacterInsideTrigger(APawn* Pawn) const;
 
 private:
-	/** 캡슐이 등반 공간에 들어온 캐릭터의 진입 이벤트를 전달하는 함수 */
+	/** 캡슐이 등반 공간에 들어온 캐릭터의 사다리 이동을 시작하는 함수 */
 	UFUNCTION()
 	void HandleClimbTriggerBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
-	/** 캡슐이 등반 공간에서 나간 캐릭터의 이탈 이벤트를 전달하는 함수 */
+	/** 캡슐이 등반 공간에서 나간 캐릭터의 사다리 이동을 종료하는 함수 */
 	UFUNCTION()
 	void HandleClimbTriggerEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex);
 };

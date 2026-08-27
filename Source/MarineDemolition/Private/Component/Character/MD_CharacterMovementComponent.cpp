@@ -151,6 +151,28 @@ float UMD_CharacterMovementComponent::GetMaxBrakingDeceleration() const
 	return Super::GetMaxBrakingDeceleration();
 }
 
+void UMD_CharacterMovementComponent::ApplyLadderMovementInput(float ForwardInput)
+{
+	// 등반 상태, 상단 자동 이탈 상태, 소유 캐릭터 유효성을 함께 검사하여 적용할 수 없는 입력 차단
+	if (IsClimbing() == false || bIsTopDismounting == true || IsValid(CharacterOwner) == false)
+	{
+		return;
+	}
+
+	// 사다리를 바라보면 상승하고 바깥을 바라보면 하강하도록 카메라 시선과 사다리 바깥 방향 비교
+	FVector CameraForwardDirection = CharacterOwner->GetViewRotation().Vector();
+	float CameraFacingDirection = FVector::DotProduct(CameraForwardDirection, CurrentLadder->GetOutwardVector());
+
+	// 카메라가 바라보는 면에 따라 전진 입력의 사다리 이동 방향 결정
+	float LadderMovementDirection = CameraFacingDirection <= 0.0f ? 1.0f : -1.0f;
+
+	// 후진 입력은 결정된 전진 방향의 반대가 되도록 입력 부호를 유지한 사다리 이동 벡터 계산
+	FVector LadderInputVector = CurrentLadder->GetClimbUpVector() * ForwardInput * LadderMovementDirection;
+
+	// 사다리 물리에서 소비할 이동 입력을 이동 컴포넌트에 누적
+	AddInputVector(LadderInputVector);
+}
+
 void UMD_CharacterMovementComponent::EnterSwimmingFromGround()
 {
 	bWantsToSwim = true;

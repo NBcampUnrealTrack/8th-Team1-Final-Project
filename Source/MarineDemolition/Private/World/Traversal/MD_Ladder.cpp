@@ -1,8 +1,9 @@
-﻿// 프로젝트 코드
+// 프로젝트 코드
 
 #include "World/Traversal/MD_Ladder.h"
 
 #include "Character/MD_Character.h"
+#include "Component/Character/MD_CharacterMovementComponent.h"
 #include "Components/ArrowComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/CapsuleComponent.h"
@@ -256,20 +257,18 @@ void AMD_Ladder::HandleClimbTriggerBeginOverlap(UPrimitiveComponent* OverlappedC
 	// 폰 오버랩 대상을 프로젝트 캐릭터로 제한하는 형식 확인
 	AMD_Character* MDCharacter = Cast<AMD_Character>(OtherActor);
 
-	// 프로젝트 캐릭터가 아닌 폰의 진입 이벤트 차단
-	if (IsValid(MDCharacter) == false)
+	// 프로젝트 캐릭터가 아니거나 캡슐 외 컴포넌트에서 발생한 중복 진입 이벤트 차단
+	if (IsValid(MDCharacter) == false || OtherComponent != MDCharacter->GetCapsuleComponent())
 	{
 		return;
 	}
 
-	// 메시와 부속 충돌체가 만드는 중복 이벤트를 캡슐 이벤트로 제한
-	if (OtherComponent != MDCharacter->GetCapsuleComponent())
+	// 캐릭터 이동 컴포넌트에 현재 사다리를 전달하여 등반 이동 모드 시작
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(MDCharacter->GetCharacterMovement());
+	if (IsValid(MDMovement) == true)
 	{
-		return;
+		MDMovement->StartClimbing(this);
 	}
-
-	// 실제 이동 상태 전환을 구독자에게 위임하는 서버 진입 사실 전달
-	OnCharacterEntered.Broadcast(this, MDCharacter);
 }
 
 void AMD_Ladder::HandleClimbTriggerEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex)
@@ -283,18 +282,29 @@ void AMD_Ladder::HandleClimbTriggerEndOverlap(UPrimitiveComponent* OverlappedCom
 	// 폰 오버랩 대상을 프로젝트 캐릭터로 제한하는 형식 확인
 	AMD_Character* MDCharacter = Cast<AMD_Character>(OtherActor);
 
-	// 프로젝트 캐릭터가 아닌 폰의 이탈 이벤트 차단
-	if (IsValid(MDCharacter) == false)
+	// 프로젝트 캐릭터가 아니거나 캡슐 외 컴포넌트에서 발생한 중복 이탈 이벤트 차단
+	if (IsValid(MDCharacter) == false || OtherComponent != MDCharacter->GetCapsuleComponent())
 	{
 		return;
 	}
 
-	// 메시와 부속 충돌체가 만드는 중복 이벤트를 캡슐 이벤트로 제한
-	if (OtherComponent != MDCharacter->GetCapsuleComponent())
+	// 유효한 이동 컴포넌트가 이 사다리를 이용 중인 경우에만 종료 처리
+	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(MDCharacter->GetCharacterMovement());
+	if (IsValid(MDMovement) == false || MDMovement->GetCurrentLadder() != this)
 	{
 		return;
 	}
 
-	// 실제 이동 상태 전환을 구독자에게 위임하는 서버 이탈 사실 전달
-	OnCharacterExited.Broadcast(this, MDCharacter);
+	// 하단 도달 시 오버랩 이탈보다 바닥 착지 판정을 우선 적용
+	float SpeedAtLadder = MDMovement->GetLadderClimbSpeed();
+	if (MDMovement->TryLeaveLadderAtBottom(SpeedAtLadder) == true)
+	{
+		return;
+	}
+
+	// 상단 자동 이탈 중이 아닌 경우 낙하 이동 모드로 복귀
+	if (MDMovement->IsTopDismounting() == false)
+	{
+		MDMovement->StopClimbing(MOVE_Falling);
+	}
 }
