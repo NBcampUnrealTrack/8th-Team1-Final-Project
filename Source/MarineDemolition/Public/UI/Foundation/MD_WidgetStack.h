@@ -6,17 +6,21 @@
 #include "Widgets/CommonActivatableWidgetContainer.h"
 #include "MD_WidgetStack.generated.h"
 
-/** 화면 제거 시 내부 위젯 풀까지 초기화할 수 있는 프로젝트 전용 Stack이다. */
+/** World Travel 제거 정책을 적용하는 프로젝트 전용 Stack이다. */
 UCLASS(Blueprintable)
 class MARINEDEMOLITION_API UMD_WidgetStack : public UCommonActivatableWidgetStack
 {
 	GENERATED_BODY()
 
 public:
-	// World Travel 제거 정책이 활성화된 화면만 Stack과 내부 풀에서 제거한다.
 	void RemoveWidgetsOnWorldTravel();
 
-	// 현재 화면을 즉시 제거하고 다음 Push가 새 위젯 인스턴스를 생성하도록 내부 풀을 초기화한다.
-	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI")
-	void ClearWidgetsAndResetPool();
+protected:
+	virtual void OnWidgetAddedToList(UCommonActivatableWidget& AddedWidget) override;
+
+private:
+	void ResetForWorldTravel();
+	void ResetTransitionState();
+
+	bool bVerifyNextWidgetActivation = false;
 };

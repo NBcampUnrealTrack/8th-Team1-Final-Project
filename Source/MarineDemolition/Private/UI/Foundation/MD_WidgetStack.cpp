@@ -16,13 +16,13 @@ void UMD_WidgetStack::RemoveWidgetsOnWorldTravel()
 	{
 		// 현재 위치의 화면이 프로젝트 제거 설정을 가진 화면인지 확인한다.
 		UMD_CommonActivatableWidget* MDWidget = Cast<UMD_CommonActivatableWidget>(Widgets[WidgetIndex]);
-		if (IsValid(MDWidget) == false)
+		if (!IsValid(MDWidget))
 		{
 			continue;
 		}
 
 		// 화면에 설정된 World Travel 제거 정책을 가져온다.
-		if (MDWidget->ShouldRemoveOnWorldTravel() == true)
+		if (MDWidget->ShouldRemoveOnWorldTravel())
 		{
 			continue;
 		}
@@ -35,24 +35,26 @@ void UMD_WidgetStack::RemoveWidgetsOnWorldTravel()
 	// 유지할 화면이 없으면 기존 전체 초기화 경로를 사용한다.
 	if (HighestRetainedWidgetIndex == INDEX_NONE)
 	{
-		ClearWidgetsAndResetPool();
+		ResetForWorldTravel();
 		return;
 	}
 
 	// 가장 위쪽 유지 화면으로 즉시 전환하며 그 위의 제거 대상 화면을 정리한다.
-	int32 RetainedSwitcherIndex = HighestRetainedWidgetIndex + 1;
+	const int32 RetainedSwitcherIndex = HighestRetainedWidgetIndex + 1;
 	SetSwitcherIndex(RetainedSwitcherIndex, true);
+	ResetTransitionState();
 
 	// 유지 화면 아래에 섞여 있는 제거 대상 화면을 개별적으로 정리한다.
 	for (int32 WidgetIndex = HighestRetainedWidgetIndex - 1; WidgetIndex >= 0; WidgetIndex--)
 	{
 		// 프로젝트 설정이 없는 현재 위치의 화면은 기존 동작처럼 Travel 시 제거한다.
-		UMD_CommonActivatableWidget* MDWidget = Cast<UMD_CommonActivatableWidget>(Widgets[WidgetIndex]);
+		UCommonActivatableWidget* Widget = Widgets[WidgetIndex].Get();
+		UMD_CommonActivatableWidget* MDWidget = Cast<UMD_CommonActivatableWidget>(Widget);
 		if (IsValid(MDWidget) == false)
 		{
-			if (MDWidget != nullptr)
+			if (IsValid(Widget) == true)
 			{
-				RemoveWidget(*MDWidget);
+				RemoveWidget(*Widget);
 			}
 			continue;
 		}
@@ -68,11 +70,54 @@ void UMD_WidgetStack::RemoveWidgetsOnWorldTravel()
 	}
 }
 
-void UMD_WidgetStack::ClearWidgetsAndResetPool()
+void UMD_WidgetStack::OnWidgetAddedToList(UCommonActivatableWidget& AddedWidget)
 {
-	// 전환 완료를 기다리지 않고 빈 슬롯으로 이동하여 표시 중인 화면을 Stack에서 제거한다.
+	const bool bShouldVerifyActivation = bVerifyNextWidgetActivation;
+	bVerifyNextWidgetActivation = false;
+
+	Super::OnWidgetAddedToList(AddedWidget);
+
+	if (bShouldVerifyActivation == false || MySwitcher.IsValid() == false || GetActiveWidget() != nullptr)
+	{
+		return;
+	}
+
+	SetSwitcherIndex(MySwitcher->GetNumWidgets() - 1, true);
+	ResetTransitionState();
+
+	ensure(GetActiveWidget() != nullptr);
+}
+
+void UMD_WidgetStack::ResetForWorldTravel()
+{
+	bVerifyNextWidgetActivation = false;
+
 	SetSwitcherIndex(0, true);
 
-	// 비활성 화면 UObject와 Slate 캐시 참조를 모두 해제하여 다음 Push에서 재생성을 보장한다.
+	if (WidgetList.IsEmpty() == false)
+	{
+		const TArray<TObjectPtr<UCommonActivatableWidget>> RemainingWidgets = WidgetList;
+		for (UCommonActivatableWidget* Widget : RemainingWidgets)
+		{
+			if (IsValid(Widget) == true)
+			{
+				RemoveWidget(*Widget);
+			}
+		}
+	}
+
+	ResetTransitionState();
+
+	if (ensure(WidgetList.IsEmpty()) == false)
+	{
+		return;
+	}
+
 	GeneratedWidgetsPool.ResetPool();
+	bVerifyNextWidgetActivation = true;
+}
+
+void UMD_WidgetStack::ResetTransitionState()
+{
+	SetTransitionDuration(GetTransitionDuration());
 }

@@ -5,6 +5,7 @@
 #include "UI/Foundation/MD_WidgetStack.h"
 #include "Blueprint/GameViewportSubsystem.h"
 #include "CommonActivatableWidget.h"
+#include "Engine/LocalPlayer.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Util/MD_LogUtility.h"
 #include "UI/MD_UISettings.h"
@@ -63,7 +64,7 @@ void UMD_LocalUIManager::PlayerControllerChanged(APlayerController* NewPlayerCon
 	if (IsValid(PrimaryLayout) == true)
 	{
 		UE_LOG(MarineDemolition, Log, TEXT("Local UI Manager가 기존 PrimaryLayout의 Owning Player Controller를 변경하였습니다."));
-		PrimaryLayout->SetOwningPlayer(NewPlayerController);
+		PrimaryLayout->SetPlayerContext(FLocalPlayerContext(NewPlayerController));
 
 		// 기존 Layout이 Viewport에 남아 있으면 추가 등록 없이 변경 처리를 완료한다.
 		if (IsPrimaryLayoutReady() == true)
