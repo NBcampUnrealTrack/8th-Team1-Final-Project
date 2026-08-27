@@ -7,6 +7,7 @@
 #include "Component/Character/MD_CharacterMovementComponent.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
@@ -93,6 +94,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	ScrapeToolComponent = CreateDefaultSubobject<UMD_ScrapeToolComponent>(TEXT("ScrapeToolComponent"));
 
 	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
+
+	AudioRelayComponent = CreateDefaultSubobject<UMD_AudioRelayComponent>(TEXT("AudioRelayComponent"));
 
 	ThirdPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ThirdPersonToolMesh"));
 	ThirdPersonToolMesh->SetupAttachment(GetMesh(), ToolAttachSocketName);

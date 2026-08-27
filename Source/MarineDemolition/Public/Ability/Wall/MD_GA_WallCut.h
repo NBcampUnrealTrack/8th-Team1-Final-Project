@@ -78,6 +78,9 @@ private:
 	void StartCutAudio();
 	void StopCutAudio();
 
+	/** 아바타의 중계 컴포넌트. 없으면 본인만 듣는다 */
+	class UMD_AudioRelayComponent* GetAudioRelay() const;
+
 	/** 아바타에 붙여 재생 중인 절단 루프 */
 	FMD_AudioHandle CutLoopHandle;
 
