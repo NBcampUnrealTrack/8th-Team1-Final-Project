@@ -163,12 +163,6 @@ void UMD_OxygenComponent::EvaluateBreathState()
 
 	ApplyBreathStateTag();
 
-	// 모선 갑판도 물 밖이라 이 조건에 자연히 포함된다.
-	if (NewState == EMD_BreathState::Surface)
-	{
-		RefillOxygen();
-	}
-
 	if (bLogBreathState)
 	{
 		const ACharacter* OwnerCharacter = Cast<ACharacter>(GetOwner());
@@ -219,9 +213,10 @@ void UMD_OxygenComponent::EnsureInitialized(UAbilitySystemComponent* ASC)
 		UMD_CharacterAttributeSet::GetOxygenAttribute())
 		.AddUObject(this, &UMD_OxygenComponent::HandleOxygenChanged);
 
-	// 두 GE는 여기서 한 번만 붙이고, 이후에는 태그로만 켜고 끈다.
+	// 지속 GE는 여기서 한 번만 붙이고, 이후에는 태그로만 켜고 끈다.
 	// 잠수할 때마다 Apply/Remove 하면 주기 타이머가 리셋돼 소모를 회피할 수 있다.
 	ApplyPassiveEffect(ASC, OxygenDrainEffectClass);
+	ApplyPassiveEffect(ASC, OxygenRecoveryEffectClass);
 	ApplyPassiveEffect(ASC, OxygenDepletedDamageEffectClass);
 
 	// ASC 준비 전에 구매한 확장 탱크 아이템이 존재하면 해당 효과를 적용
@@ -255,23 +250,28 @@ FActiveGameplayEffectHandle UMD_OxygenComponent::ApplyPassiveEffect(UAbilitySyst
 }
 void UMD_OxygenComponent::HandleOxygenChanged(const FOnAttributeChangeData& ChangeData)
 {
-	UAbilitySystemComponent* ASC = BoundASC.Get();
-	if (!IsValid(ASC))
+	// 최대치에서 반복 실행되는 주기 GE처럼 실제 값이 같으면 상태 처리를 생략한다.
+	bool bValueChanged = FMath::IsNearlyEqual(ChangeData.OldValue, ChangeData.NewValue) == false;
+	if (bValueChanged == false)
 	{
 		return;
 	}
 
-	const bool bDepleted = ChangeData.NewValue <= 0.0f;
+	UAbilitySystemComponent* ASC = BoundASC.Get();
+	if (IsValid(ASC) == false)
+	{
+		return;
+	}
 
-	// 같은 구간 안의 변동(200 → 199)에서는 태그를 다시 붙이지 않는다
+	// 산소 고갈 상태가 달라진 경우에만 관련 태그를 갱신한다.
+	bool bDepleted = ChangeData.NewValue <= 0.0f;
 	if (bDepleted == bOxygenDepleted)
 	{
 		return;
 	}
 
 	bOxygenDepleted = bDepleted;
-
-	if (bDepleted)
+	if (bDepleted == true)
 	{
 		ASC->AddLooseGameplayTag(MDGameplayTags::State_Oxygen_Depleted);
 	}
@@ -281,7 +281,7 @@ void UMD_OxygenComponent::HandleOxygenChanged(const FOnAttributeChangeData& Chan
 	}
 
 	UE_LOG(MarineDemolition, Log, TEXT("[Oxygen][Server] 질식 상태 %s (산소 %.1f)"),
-		bDepleted ? TEXT("진입") : TEXT("해제"), ChangeData.NewValue);
+		bDepleted == true ? TEXT("진입") : TEXT("해제"), ChangeData.NewValue);
 }
 
 void UMD_OxygenComponent::ApplyBreathStateTag()
