@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -29,6 +29,7 @@ class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
 class UMD_OxygenComponent;
+class UWidgetComponent;
 class UNiagaraSystem;
 class UNiagaraComponent;
 struct FMinimalViewInfo;
@@ -230,6 +231,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_OxygenComponent> OxygenComponent;
 
+	/** 원격 플레이어의 플랫폼 닉네임을 머리 위에 표시하는 이름표 컴포넌트 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UWidgetComponent> NameTagWidgetComponent;
+
 	/** 모선 리스폰 지점을 찾을 때 사용할 PlayerStart 태그 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Health")
 	FName MothershipRespawnTag = TEXT("MothershipRespawn");
@@ -255,6 +260,8 @@ protected:
 	//TSubclassOf<UGameplayAbility> WallScanAbilityClass;
 
 private:
+	// PlayerState의 이름 복제 알림이 이름표를 직접 갱신할 수 있게 접근을 허용한다.
+	friend class AMD_PlayerState;
 
 	void HandleMoveInput(const FInputActionValue& Value);
 	void HandleLookInput(const FInputActionValue& Value);
@@ -284,6 +291,7 @@ private:
 
 	void InitializeAbilitySystem();
 	void GrantDefaultAbilities();
+	void RefreshNameTag();
 
 	UFUNCTION()
 	void HandleHotbarChanged();
@@ -339,8 +347,11 @@ private:
 		const UStaticMesh* ToolMesh,
 		const UMD_ToolDefinition* Tool) const;
 
-	/** 1인칭 팔은 소유 클라이언트에만 보이므로 그 경우에만 틱한다. */
+	/** 로컬 1인칭 팔 또는 클라이언트 이름표 갱신이 필요한 경우 캐릭터 틱을 활성화한다. */
 	void RefreshFirstPersonArmsTick();
+
+	/** 월드 공간 이름표가 현재 로컬 카메라를 향하도록 회전시킨다. */
+	void UpdateNameTagRotation();
 
 	/** 팔·도구의 데칼 수신을 끄고 UE 전용 1인칭 렌더링을 적용한다. */
 	void ConfigureFirstPersonRendering();

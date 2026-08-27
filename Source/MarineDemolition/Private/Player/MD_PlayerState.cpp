@@ -1,7 +1,8 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Player/MD_PlayerState.h"
+#include "Character/MD_Character.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
@@ -44,6 +45,21 @@ void AMD_PlayerState::BeginPlay()
 	AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(CharacterAttributeSet->GetHealthAttribute()).AddUObject(this, &AMD_PlayerState::HandleHealthChanged);
 
 	CachedHealthState = GetHealthState();
+}
+
+void AMD_PlayerState::OnRep_PlayerName()
+{
+	Super::OnRep_PlayerName();
+
+	// 이름이 바뀐 PlayerState가 소유한 캐릭터를 가져온다.
+	AMD_Character* PlayerCharacter = Cast<AMD_Character>(GetPawn());
+	if (IsValid(PlayerCharacter) == false)
+	{
+		return;
+	}
+
+	// 새 플랫폼 닉네임을 캐릭터 머리 위 이름표에 즉시 반영한다.
+	PlayerCharacter->RefreshNameTag();
 }
 
 

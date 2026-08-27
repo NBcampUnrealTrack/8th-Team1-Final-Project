@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -181,6 +181,13 @@ protected:
 private:
 	/** Alt-Tab/창 비활성화로 입력 release를 잃기 전에 헤라 상호작용을 정리한다. */
 	void HandleApplicationWillDeactivate();
+
+	/** 로그인된 로컬 플랫폼 사용자의 닉네임을 서버 PlayerState에 제출한다. */
+	void SubmitPlatformNickname();
+
+	/** 소유 클라이언트가 확인한 플랫폼 닉네임을 서버의 PlayerState에 저장한다. */
+	UFUNCTION(Server, Reliable)
+	void ServerSubmitPlatformNickname(const FString& PlatformNickname);
 
 	FDelegateHandle ApplicationWillDeactivateHandle;
 
