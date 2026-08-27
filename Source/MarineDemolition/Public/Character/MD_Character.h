@@ -347,8 +347,11 @@ private:
 		const UStaticMesh* ToolMesh,
 		const UMD_ToolDefinition* Tool) const;
 
-	/** 1인칭 팔은 소유 클라이언트에만 보이므로 그 경우에만 틱한다. */
+	/** 로컬 1인칭 팔 또는 클라이언트 이름표 갱신이 필요한 경우 캐릭터 틱을 활성화한다. */
 	void RefreshFirstPersonArmsTick();
+
+	/** 월드 공간 이름표가 현재 로컬 카메라를 향하도록 회전시킨다. */
+	void UpdateNameTagRotation();
 
 	/** 팔·도구의 데칼 수신을 끄고 UE 전용 1인칭 렌더링을 적용한다. */
 	void ConfigureFirstPersonRendering();

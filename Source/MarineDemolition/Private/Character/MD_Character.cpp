@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/MD_Character.h"
@@ -133,10 +133,10 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	// 캐릭터 머리 위에 원격 플레이어의 이름표를 배치한다.
 	NameTagWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NameTagWidgetComponent"));
 	NameTagWidgetComponent->SetupAttachment(GetRootComponent());
-	NameTagWidgetComponent->SetWidgetSpace(EWidgetSpace::Screen);
+	NameTagWidgetComponent->SetWidgetSpace(EWidgetSpace::World);
 	NameTagWidgetComponent->SetDrawAtDesiredSize(true);
 	NameTagWidgetComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 70.0f));
-	NameTagWidgetComponent->SetOwnerNoSee(false);
+	NameTagWidgetComponent->SetOwnerNoSee(true);
 	NameTagWidgetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
@@ -550,22 +550,84 @@ void AMD_Character::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	UpdateFirstPersonArms(DeltaSeconds);
-	UpdateFirstPersonToolTransform();
+	// 월드 공간 이름표가 각 클라이언트의 현재 카메라를 계속 향하게 한다.
+	UpdateNameTagRotation();
+
+	// 1인칭 팔과 도구는 해당 캐릭터를 직접 조작하는 로컬 플레이어만 갱신한다.
+	if (IsLocallyControlled() == true)
+	{
+		UpdateFirstPersonArms(DeltaSeconds);
+		UpdateFirstPersonToolTransform();
+	}
 }
 
 void AMD_Character::RefreshFirstPersonArmsTick()
 {
-	const bool bNeedsTick = IsLocallyControlled();
+	// 로컬 캐릭터는 기존 1인칭 팔 갱신을 위해 틱한다.
+	bool bNeedsTick = IsLocallyControlled();
+
+	// 렌더링하지 않는 전용 서버를 제외하고 원격 캐릭터도 이름표 회전을 위해 틱한다.
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		if (IsValid(NameTagWidgetComponent) == true)
+		{
+			bNeedsTick = true;
+		}
+	}
+
 	SetActorTickEnabled(bNeedsTick);
 
-	if (!bNeedsTick)
+	if (bNeedsTick == false)
+	{
+		return;
+	}
+
+	// 원격 캐릭터는 이름표만 갱신하므로 1인칭 팔 초기화를 생략한다.
+	if (IsLocallyControlled() == false)
 	{
 		return;
 	}
 
 	BindFirstPersonArmsToBodyPose();
 	UpdateFirstPersonArms(0.f, /*bSnapToTarget=*/true);
+}
+
+void AMD_Character::UpdateNameTagRotation()
+{
+	// 렌더링하지 않는 전용 서버에서는 이름표 방향을 계산하지 않는다.
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// 이름표 컴포넌트가 준비되지 않은 경우 처리를 종료한다.
+	if (IsValid(NameTagWidgetComponent) == false)
+	{
+		return;
+	}
+
+	// 현재 클라이언트의 주 로컬 카메라를 소유한 컨트롤러를 가져온다.
+	APlayerController* LocalPlayerController = UGameplayStatics::GetPlayerController(this, 0);
+	if (IsValid(LocalPlayerController) == false)
+	{
+		return;
+	}
+
+	// 카메라 위치를 기준으로 이름표가 바라볼 월드 방향을 계산한다.
+	FVector CameraLocation = FVector::ZeroVector;
+	FRotator IgnoredCameraRotation = FRotator::ZeroRotator;
+	LocalPlayerController->GetPlayerViewPoint(CameraLocation, IgnoredCameraRotation);
+	FVector NameTagLocation = NameTagWidgetComponent->GetComponentLocation();
+	FVector CameraDirection = CameraLocation - NameTagLocation;
+	if (CameraDirection.IsNearlyZero() == true)
+	{
+		return;
+	}
+
+	// 위젯 평면의 정면이 카메라를 향하도록 회전하되 화면이 기울어지지 않게 Roll을 제거한다.
+	FRotator NameTagRotation = CameraDirection.Rotation();
+	NameTagRotation.Roll = 0.0f;
+	NameTagWidgetComponent->SetWorldRotation(NameTagRotation);
 }
 
 void AMD_Character::BindFirstPersonArmsToBodyPose()
