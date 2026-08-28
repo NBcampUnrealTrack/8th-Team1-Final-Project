@@ -220,7 +220,8 @@ protected:
 
 	/**
 	 * 따개비 타격 원샷 몽타주. 헤라 연속 긁기 포즈(AS_Scraper_Pose)와 별개이며,
-	 * DefaultSlot 에 한 번 재생된다. 비어 있으면 PlayBarnacleScrapeMontage 는 no-op.
+	 * DefaultSlot 에 한 번 재생된다. BP(또는 CDO)에서 할당한다. 비어 있으면
+	 * PlayBarnacleScrapeMontage 는 no-op.
 	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|Animation")
 	TObjectPtr<UAnimMontage> BarnacleScrapeMontage;

@@ -31,7 +31,6 @@
 #include "Engine/StaticMeshSocket.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
-#include "UObject/ConstructorHelpers.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
@@ -118,15 +117,6 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	FirstPersonToolMesh->SetCanEverAffectNavigation(false);
 
 	ConfigureFirstPersonRendering();
-
-	{
-		static ConstructorHelpers::FObjectFinder<UAnimMontage> BarnacleMontageFinder(
-			TEXT("/Game/Assets/Character/Shark/Anim/AnimSequence/Work/Scraper/AS_Scraper_Oneshot_Montage.AS_Scraper_Oneshot_Montage"));
-		if (BarnacleMontageFinder.Succeeded())
-		{
-			BarnacleScrapeMontage = BarnacleMontageFinder.Object;
-		}
-	}
 
 	HoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HoldPoint"));
 	HoldPoint->SetupAttachment(Camera);
