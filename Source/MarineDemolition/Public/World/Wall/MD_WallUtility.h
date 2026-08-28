@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/NetSerialization.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
@@ -52,7 +53,8 @@ protected:
 	void HandleHostWallCut(AMD_CuttableWall* Wall, AActor* Cutter);
 
 	// 절단자 시점 조준 레이가 이 인프라 메시를 관통했는지 (파이프 회피 컷 판정)
-	bool WasCutRayThroughMesh(AActor* Cutter) const;
+	// 관통 시 OutHit에 관통 지점/법선을 담는다 (파손 VFX 스폰 지점)
+	bool WasCutRayThroughMesh(AActor* Cutter, FHitResult& OutHit) const;
 
 	// 겹친 벽 스캔 시 호출. 스캐너가 로컬 조종 중인 머신에서만 실루엣을 Duration 초간 노출
 	UFUNCTION()
@@ -109,6 +111,14 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_UtilityState)
 	EMD_UtilityState UtilityState = EMD_UtilityState::Intact;
+
+	// 절단 레이가 메시를 관통한 지점 (서버가 파손 시 기록, BP가 파손 VFX 스폰 위치로 사용)
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "MD|Utility")
+	FVector_NetQuantize BreakLocation = FVector_NetQuantize(ForceInitToZero);
+
+	// 관통 지점의 표면 법선 (VFX +X=분출 규약에 맞춰 MakeRotFromX으로 회전 구성)
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "MD|Utility")
+	FVector_NetQuantizeNormal BreakNormal = FVector_NetQuantizeNormal(0.f, 0.f, 1.f);
 
 private:
 	// LinkTrigger와 겹치는 CuttableWall을 찾아 철거 델리게이트 구독 (서버)

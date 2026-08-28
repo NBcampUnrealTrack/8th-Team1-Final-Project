@@ -46,6 +46,8 @@ void AMD_WallUtility::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_WallUtility, UtilityState);
+	DOREPLIFETIME(AMD_WallUtility, BreakLocation);
+	DOREPLIFETIME(AMD_WallUtility, BreakNormal);
 }
 
 void AMD_WallUtility::BeginPlay()
@@ -100,19 +102,41 @@ void AMD_WallUtility::HandleHostWallCut(AMD_CuttableWall* Wall, AActor* Cutter)
 {
 	// 조준선이 이 인프라 메시를 실제로 관통했을 때만 파손한다.
 	// 파이프를 피해서 자르면 벽만 사라지고 인프라는 살아남는다.
-	if (!WasCutRayThroughMesh(Cutter))
+	FHitResult CutHit;
+	if (!WasCutRayThroughMesh(Cutter, CutHit))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s HandleHostWallCut: 조준선이 메시를 빗나감 → 생존"),
 			*GetName());
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s HandleHostWallCut: 메시 관통 → 파손"), *GetName());
+	// 파손 VFX 스폰 지점 기록. SetBroken보다 먼저 채워야 같은 복제 번치로 클라에 도착한다
+	if (CutHit.bBlockingHit)
+	{
+		BreakLocation = CutHit.ImpactPoint;
+		// 분출 방향 = 절단자 쪽 수평 방향. 눈높이가 관통 지점보다 높아 그대로 쓰면 위로 솟고,
+		// 표면 법선은 파이프 윗면 절단 시 위를 향하므로 둘 다 Z를 버리고 수평 성분만 쓴다
+		FVector ToCutter = CutHit.TraceStart - CutHit.ImpactPoint;
+		ToCutter.Z = 0.f;
+		ToCutter = ToCutter.GetSafeNormal();
+		BreakNormal = ToCutter.IsNearlyZero() ? FVector(CutHit.ImpactNormal) : ToCutter;
+	}
+	else
+	{
+		// 시점 재구성 실패로 보수적 파손된 경우 — 메시 중심으로 폴백
+		BreakLocation = IsValid(Mesh) ? Mesh->Bounds.Origin : GetActorLocation();
+		BreakNormal = GetActorUpVector();
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s HandleHostWallCut: 메시 관통 → 파손 (지점=%s, 법선=%s, 트레이스히트=%d)"),
+		*GetName(), *BreakLocation.ToCompactString(), *BreakNormal.ToCompactString(), CutHit.bBlockingHit ? 1 : 0);
 	SetBroken(Cutter);
 }
 
-bool AMD_WallUtility::WasCutRayThroughMesh(AActor* Cutter) const
+bool AMD_WallUtility::WasCutRayThroughMesh(AActor* Cutter, FHitResult& OutHit) const
 {
+	OutHit = FHitResult();
+
 	if (!IsValid(Mesh) || !IsValid(Cutter))
 	{
 		return false;
@@ -123,7 +147,7 @@ bool AMD_WallUtility::WasCutRayThroughMesh(AActor* Cutter) const
 	const AController* Controller = Pawn ? Pawn->GetController() : nullptr;
 	if (!Controller)
 	{
-		// 시점을 못 구하면 보수적으로 파손 (판정 불가 시 기존 동작 유지)
+		// 시점을 못 구하면 보수적으로 파손 (판정 불가 시 기존 동작 유지, OutHit은 비워 둔다)
 		return true;
 	}
 
@@ -134,9 +158,11 @@ bool AMD_WallUtility::WasCutRayThroughMesh(AActor* Cutter) const
 	const FVector End = ViewLoc + ViewRot.Vector() * CutRayDistance;
 
 	// 파이프 실제 형상으로 판정 (복합 콜리전 = 렌더 지오메트리)
-	FHitResult Hit;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(PipeCutRay), /*bTraceComplex=*/true);
-	return Mesh->LineTraceComponent(Hit, Start, End, Params);
+	const bool bHit = Mesh->LineTraceComponent(OutHit, Start, End, Params);
+	// LineTraceComponent가 OutHit.bBlockingHit을 안 채우는 경우가 있어 반환값으로 보정
+	OutHit.bBlockingHit = bHit;
+	return bHit;
 }
 
 void AMD_WallUtility::HandleHostWallScanned(AMD_CuttableWall* Wall, float Duration, AActor* Scanner)

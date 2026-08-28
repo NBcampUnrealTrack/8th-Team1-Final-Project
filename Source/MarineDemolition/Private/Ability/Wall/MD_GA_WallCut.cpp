@@ -14,6 +14,7 @@
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Player/MD_PlayerState.h"
 #include "Audio/MD_AudioSubsystem.h"
+#include "Audio/MD_AudioRelayComponent.h"
 #include "Components/SceneComponent.h"
 
 UMD_GA_WallCut::UMD_GA_WallCut()
@@ -36,16 +37,34 @@ void UMD_GA_WallCut::StartCutAudio()
 
 	USceneComponent* AttachTo = Avatar->GetRootComponent();
 
+	// 이 어빌리티는 남의 머신에서 돌지 않는다. 조작 중인 본인은 여기서 바로
+	// 재생하고(왕복 지연 없이), 다른 클라이언트에게는 중계로 알린다
+	UMD_AudioRelayComponent* const Relay = GetAudioRelay();
+
 	if (CutStartSoundTag.IsValid())
 	{
 		Audio->PlayEventAttached(CutStartSoundTag, AttachTo);
+		if (Relay)
+		{
+			Relay->PlayAttachedForAll(CutStartSoundTag);
+		}
 	}
 
 	// 루프는 핸들을 들고 있다가 EndAbility 에서 끈다
 	if (CutLoopSoundTag.IsValid() && !CutLoopHandle.IsValid())
 	{
 		CutLoopHandle = Audio->PlayEventAttached(CutLoopSoundTag, AttachTo);
+		if (Relay)
+		{
+			Relay->PlayAttachedForAll(CutLoopSoundTag);
+		}
 	}
+}
+
+UMD_AudioRelayComponent* UMD_GA_WallCut::GetAudioRelay() const
+{
+	const AMD_Character* const Avatar = Cast<AMD_Character>(GetAvatarActorFromActorInfo());
+	return Avatar ? Avatar->GetAudioRelayComponent() : nullptr;
 }
 
 void UMD_GA_WallCut::StopCutAudio()
@@ -58,10 +77,16 @@ void UMD_GA_WallCut::StopCutAudio()
 		return;
 	}
 
+	UMD_AudioRelayComponent* const Relay = GetAudioRelay();
+
 	if (CutLoopHandle.IsValid())
 	{
 		Audio->StopHandle(CutLoopHandle, CutLoopFadeOutSeconds);
 		CutLoopHandle = FMD_AudioHandle();
+	}
+	if (Relay && CutLoopSoundTag.IsValid())
+	{
+		Relay->StopAttachedForAll(CutLoopSoundTag, CutLoopFadeOutSeconds);
 	}
 
 	// 정지음은 아바타가 사라진 뒤에도 남을 수 있어 위치로 재생한다
@@ -70,6 +95,10 @@ void UMD_GA_WallCut::StopCutAudio()
 		if (const AActor* Avatar = GetAvatarActorFromActorInfo())
 		{
 			Audio->PlayEventAtLocation(CutStopSoundTag, Avatar->GetActorLocation());
+		}
+		if (Relay)
+		{
+			Relay->PlayAtOwnerLocationForAll(CutStopSoundTag);
 		}
 	}
 }

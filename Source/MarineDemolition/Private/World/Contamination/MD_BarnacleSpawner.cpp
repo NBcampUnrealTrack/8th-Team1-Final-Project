@@ -2,19 +2,37 @@
 
 #include "Components/BoxComponent.h"
 #include "Engine/World.h"
+#include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Math/RandomStream.h"
 #include "Math/RotationMatrix.h"
 #include "Util/MD_LogUtility.h"
 #include "World/Contamination/MD_Barnacle.h"
+#include "World/Contamination/MD_BarnaclePlacementPolicy.h"
 #include "World/Wall/MD_CuttableWall.h"
 
 namespace
 {
-	/**
-	 * 자리 하나당 최대 시도 횟수.
-	 * 볼륨이 허공을 크게 덮고 있으면 표면을 못 찾는 시도가 이어질 수 있어 상한을 둔다.
-	 */
-	constexpr int32 MaximumAttemptsPerBarnacle = 24;
+	/** 후보가 잘 나오지 않는 빈 볼륨에서도 탐색이 끝나도록 원점 샘플 수를 제한한다. */
+	constexpr int32 CandidateOriginAttemptMultiplier = 8;
+	constexpr int32 MinimumCandidatePoolSize = 64;
+	constexpr int32 MaximumCandidatePoolSize = 2048;
+	constexpr int32 MaximumCandidateOriginAttempts = 4096;
+	constexpr int32 MaximumStalledCandidateOriginAttempts = 256;
+	constexpr float CandidateDuplicateToleranceCm = 2.0f;
+	constexpr float SpawnVolumeSurfaceToleranceCm = 1.0f;
+	constexpr int32 MaximumSupportedBarnacleDurability = 1000000;
+	constexpr uint32 BarnacleDurabilitySeedSalt = 0x9E3779B9u;
+
+	/** 시드와 SpawnIndex의 비트가 고르게 섞이도록 고정된 32비트 믹서를 적용한다. */
+	uint32 MixDurabilitySeed(uint32 Value)
+	{
+		Value ^= Value >> 16;
+		Value *= 0x7FEB352Du;
+		Value ^= Value >> 15;
+		Value *= 0x846CA68Bu;
+		Value ^= Value >> 16;
+		return Value;
+	}
 
 	/** 볼륨 안 임의 지점에서 표면을 찾을 때 쏘아 보는 방향 */
 	const FVector SurfaceSearchDirections[] = {
@@ -76,6 +94,17 @@ int32 AMD_BarnacleSpawner::SpawnBarnacles()
 		return 0;
 	}
 
+	if (!bAllowFrontBackSurfaces
+		&& !bAllowLeftRightSurfaces
+		&& !bAllowTopBottomSurfaces)
+	{
+		UE_LOG(MarineDemolition, Log,
+			TEXT("%s: 앞/뒤, 좌/우 및 위/아래 표면이 모두 비활성화되어 "
+				"따개비를 붙이지 않았다."),
+			*GetName());
+		return 0;
+	}
+
 	// 초기 배치는 항상 0번부터 시작한다. Day가 바뀌어도 같은 시드·같은 순번이라
 	// 제거 목록으로 걸러 낼 수 있다.
 	NextSpawnIndex = 0;
@@ -97,10 +126,11 @@ int32 AMD_BarnacleSpawner::SpawnBarnacles()
 			TEXT("%s: 따개비 %d개를 붙여야 하나 %d개만 붙였다. 볼륨 안에 조건에 맞는 "
 				"표면이 부족하다. 확인 순서: (1) 볼륨이 벽에 닿아 있는가 "
 				"(2) 그 벽이 철거 대상 격벽은 아닌가 — 기획상 따개비를 붙이지 않는다 "
-				"(3) 표면에 충돌이 있는가 (4) MaximumSurfaceUpwardDot(%.2f)이 "
-				"바닥·천장만 걸러내고 있는가 (5) SurfaceSearchDistanceCm(%.0f)이 충분한가"),
+				"(3) 대상 컴포넌트가 BarnacleTrace를 Block하는가 "
+				"(4) SpawnVolume 로컬 X/Y/Z 축과 허용 플래그가 "
+				"대상 면에 맞는가 (5) SurfaceSearchDistanceCm(%.0f)이 충분한가"),
 			*GetName(), ExpectedCount, SpawnedCount,
-			MaximumSurfaceUpwardDot, SurfaceSearchDistanceCm);
+			SurfaceSearchDistanceCm);
 	}
 	else
 	{
@@ -117,7 +147,12 @@ int32 AMD_BarnacleSpawner::GrowBarnacles(
 	const int32 GrowthCount,
 	const int32 GrowthSeedOffset)
 {
-	if (!HasAuthority() || !BarnacleClass || GrowthCount <= 0)
+	if (!HasAuthority()
+		|| !BarnacleClass
+		|| GrowthCount <= 0
+		|| (!bAllowFrontBackSurfaces
+			&& !bAllowLeftRightSurfaces
+			&& !bAllowTopBottomSurfaces))
 	{
 		return 0;
 	}
@@ -201,7 +236,7 @@ int32 AMD_BarnacleSpawner::PlaceBarnacles(
 	const bool bSkipRemoved)
 {
 	UWorld* const World = GetWorld();
-	if (!World)
+	if (!World || RequestedCount <= 0)
 	{
 		return 0;
 	}
@@ -210,207 +245,383 @@ int32 AMD_BarnacleSpawner::PlaceBarnacles(
 	// 없지만, Day가 바뀌어 레벨을 다시 열어도 배치가 같아야 순번이 의미를 가진다.
 	FRandomStream RandomStream(PlacementSeedToUse);
 
-	TArray<FVector> PlacedLocations;
-	PlacedLocations.Reserve(BarnacleCount);
-
-	// 이미 붙인 따개비는 다음 트레이스에서 표면으로 잡히면 안 된다.
 	TArray<AActor*> IgnoredActors;
 	IgnoredActors.Add(this);
 
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.Owner = this;
-	SpawnParams.SpawnCollisionHandlingOverride =
-		ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	// 밤샘 증식도 기존 개체에서 멀리 떨어져야 한다. 위치와 면 법선을 정책 입력으로
+	// 넘기고, 트레이스에서는 따개비 자체를 표면으로 오인하지 않도록 무시한다.
+	TArray<FMD_BarnaclePlacementCandidate> ExistingPlacements;
+	for (const TWeakObjectPtr<AMD_Barnacle>& BarnaclePtr : SpawnedBarnacles)
+	{
+		AMD_Barnacle* const Barnacle = BarnaclePtr.Get();
+		if (!IsValid(Barnacle))
+		{
+			continue;
+		}
 
-	const int32 MinimumClusterSize = FMath::Max(1, ClusterSizeRange.X);
-	const int32 MaximumClusterSize =
-		FMath::Max(MinimumClusterSize, ClusterSizeRange.Y);
+		IgnoredActors.Add(Barnacle);
+		const EMD_BarnaclePlacementFace ExistingFace =
+			MDBarnaclePlacementPolicy::ClassifySurfaceFace(
+				Barnacle->GetActorUpVector(),
+				SpawnVolume->GetForwardVector(),
+				SpawnVolume->GetRightVector(),
+				SpawnVolume->GetUpVector(),
+				bAllowFrontBackSurfaces,
+				bAllowLeftRightSurfaces,
+				bAllowTopBottomSurfaces);
+		if (ExistingFace == EMD_BarnaclePlacementFace::Other)
+		{
+			continue;
+		}
+
+		FMD_BarnaclePlacementCandidate& ExistingPlacement =
+			ExistingPlacements.Emplace_GetRef();
+		ExistingPlacement.Location = Barnacle->GetActorLocation();
+		ExistingPlacement.SurfaceNormal = Barnacle->GetActorUpVector();
+		ExistingPlacement.Face = ExistingFace;
+	}
+
+	const int32 SafeCandidatesPerBarnacle = FMath::Clamp(
+		PlacementCandidatesPerBarnacle,
+		4,
+		64);
+	const int64 DesiredCandidateCount64 = FMath::Clamp<int64>(
+		static_cast<int64>(RequestedCount) * SafeCandidatesPerBarnacle,
+		MinimumCandidatePoolSize,
+		MaximumCandidatePoolSize);
+	const int32 DesiredCandidateCount = static_cast<int32>(DesiredCandidateCount64);
+
+	TArray<FHitResult> SurfaceCandidates;
+	GatherSurfaceCandidates(
+		RandomStream,
+		DesiredCandidateCount,
+		IgnoredActors,
+		SurfaceCandidates);
+	if (SurfaceCandidates.IsEmpty())
+	{
+		return 0;
+	}
+
+	TArray<FMD_BarnaclePlacementCandidate> PlacementCandidates;
+	PlacementCandidates.Reserve(SurfaceCandidates.Num());
+	for (int32 HitIndex = 0; HitIndex < SurfaceCandidates.Num(); ++HitIndex)
+	{
+		const EMD_BarnaclePlacementFace CandidateFace =
+			MDBarnaclePlacementPolicy::ClassifySurfaceFace(
+				SurfaceCandidates[HitIndex].ImpactNormal,
+				SpawnVolume->GetForwardVector(),
+				SpawnVolume->GetRightVector(),
+				SpawnVolume->GetUpVector(),
+				bAllowFrontBackSurfaces,
+				bAllowLeftRightSurfaces,
+				bAllowTopBottomSurfaces);
+		if (CandidateFace == EMD_BarnaclePlacementFace::Other)
+		{
+			continue;
+		}
+
+		FMD_BarnaclePlacementCandidate& Candidate =
+			PlacementCandidates.Emplace_GetRef();
+		Candidate.Location = SurfaceCandidates[HitIndex].ImpactPoint;
+		Candidate.SurfaceNormal = SurfaceCandidates[HitIndex].ImpactNormal;
+		Candidate.SourceIndex = HitIndex;
+		Candidate.Face = CandidateFace;
+	}
+
+	const FMD_BarnaclePlacementPlan PlacementPlan =
+		MDBarnaclePlacementPolicy::BuildPlan(
+			PlacementCandidates,
+			ExistingPlacements,
+			RequestedCount,
+			MinimumSeparationCm,
+			RandomStream);
+
+	if (PlacementPlan.bUsedFrontBackBalance)
+	{
+		UE_LOG(MarineDemolition, Log,
+			TEXT("%s: 앞/뒤 따개비 배치를 %d:%d로 계획했다."),
+			*GetName(),
+			PlacementPlan.FrontCount,
+			PlacementPlan.BackCount);
+	}
+	if (PlacementPlan.bUsedTopBottomBalance)
+	{
+		UE_LOG(MarineDemolition, Log,
+			TEXT("%s: 위/아래 따개비 배치를 %d:%d로 계획했다."),
+			*GetName(),
+			PlacementPlan.TopCount,
+			PlacementPlan.BottomCount);
+	}
+	if (PlacementPlan.bUsedLeftRightBalance)
+	{
+		UE_LOG(MarineDemolition, Log,
+			TEXT("%s: 좌/우 따개비 배치를 %d:%d로 계획했다."),
+			*GetName(),
+			PlacementPlan.LeftCount,
+			PlacementPlan.RightCount);
+	}
 
 	// 자리를 소비한 횟수와 실제로 붙인 개수를 따로 센다.
 	// 제거 목록에 걸려 건너뛰어도 자리는 소비해야 나머지 순번의 위치가 유지된다.
 	// 여기가 어긋나면 어제 3번이 있던 자리에 오늘 4번이 서고, 제거 목록이 무의미해진다.
 	int32 ProcessedCount = 0;
 	int32 SpawnedCount = 0;
-	int32 FailedClusterAttempts = 0;
-	while (ProcessedCount < RequestedCount
-		&& FailedClusterAttempts < MaximumAttemptsPerBarnacle)
+	for (const int32 HitIndex : PlacementPlan.OrderedCandidateIndices)
 	{
-		// 군집 중심부터 잡는다. 볼륨 전체에서 찾는다.
-		FHitResult ClusterAnchorHit;
-		if (!TryFindSurfaceSpot(
-				RandomStream,
-				FVector::ZeroVector,
-				0.0f,
-				PlacedLocations,
-				IgnoredActors,
-				ClusterAnchorHit))
+		if (!SurfaceCandidates.IsValidIndex(HitIndex))
 		{
-			++FailedClusterAttempts;
 			continue;
 		}
 
-		const int32 RemainingCount = RequestedCount - ProcessedCount;
-		const int32 ClusterSize = FMath::Min(
-			RemainingCount,
-			RandomStream.RandRange(MinimumClusterSize, MaximumClusterSize));
+		const FHitResult& SurfaceHit = SurfaceCandidates[HitIndex];
+		const int32 CurrentSpawnIndex = StartSpawnIndex + ProcessedCount;
+		const FTransform SpawnTransform =
+			MakeAttachedTransform(RandomStream, SurfaceHit);
 
-		int32 ClusterProcessedCount = 0;
-		for (int32 Member = 0; Member < ClusterSize; ++Member)
+		// 자리와 순번은 제거 여부와 관계없이 소비한다. 그래야 Day 저장의 SpawnIndex가
+		// 같은 시드에서 항상 같은 위치를 가리킨다.
+		++ProcessedCount;
+		NextSpawnIndex = FMath::Max(NextSpawnIndex, CurrentSpawnIndex + 1);
+
+		if (bSkipRemoved && RemovedSpawnIndices.Contains(CurrentSpawnIndex))
 		{
-			// 첫 개체는 중심에 그대로, 나머지는 중심 주변에서 다시 찾는다.
-			FHitResult MemberHit = ClusterAnchorHit;
-			if (Member > 0
-				&& !TryFindSurfaceSpot(
-					RandomStream,
-					ClusterAnchorHit.ImpactPoint,
-					ClusterRadiusCm,
-					PlacedLocations,
-					IgnoredActors,
-					MemberHit))
-			{
-				// 군집이 다 안 차도 남은 개수는 다음 군집이 가져간다.
-				break;
-			}
-
-			const int32 CurrentSpawnIndex = StartSpawnIndex + ProcessedCount;
-			const FTransform SpawnTransform =
-				MakeAttachedTransform(RandomStream, MemberHit);
-
-			// 자리와 순번은 어떤 경우에도 소비한다.
-			PlacedLocations.Add(MemberHit.ImpactPoint);
-			++ProcessedCount;
-			++ClusterProcessedCount;
-			NextSpawnIndex = FMath::Max(NextSpawnIndex, CurrentSpawnIndex + 1);
-
-			// 어제 떼어낸 것은 되살리지 않는다 (기획 03:101 강제 초기화 금지).
-			if (bSkipRemoved && RemovedSpawnIndices.Contains(CurrentSpawnIndex))
-			{
-				continue;
-			}
-
-			AMD_Barnacle* const Barnacle = World->SpawnActor<AMD_Barnacle>(
-				BarnacleClass,
-				SpawnTransform,
-				SpawnParams);
-			if (!Barnacle)
-			{
-				continue;
-			}
-
-			Barnacle->AssignSpawnerIdentity(this, CurrentSpawnIndex);
-
-			// 부착물이라는 관계를 씬 그래프에 남긴다. 벽이 사라지면 같이 사라진다.
-			if (bAttachToSurface && MemberHit.GetComponent())
-			{
-				Barnacle->AttachToComponent(
-					MemberHit.GetComponent(),
-					FAttachmentTransformRules::KeepWorldTransform);
-			}
-			// SpawnActor는 플레이 중인 월드에서 BeginPlay까지 실행한 뒤 반환한다.
-			// 따라서 BeginPlay 등록은 위 Attach보다 먼저일 수 있어 부착 완료 후 확정한다.
-			Barnacle->RegisterWithScrapeSurface();
-
-			IgnoredActors.Add(Barnacle);
-			SpawnedBarnacles.Add(Barnacle);
-			++SpawnedCount;
+			continue;
 		}
 
-		if (ClusterProcessedCount == 0)
+		const int32 MaximumDurability = GenerateDurabilityForSpawn(
+			PlacementSeedToUse,
+			CurrentSpawnIndex);
+
+		// 생성 완료 전에 신원과 내구도를 넣어 BeginPlay와 최초 복제가 기본값을
+		// 잠깐이라도 관찰하지 않게 한다.
+		AMD_Barnacle* const Barnacle = World->SpawnActorDeferred<AMD_Barnacle>(
+			BarnacleClass,
+			SpawnTransform,
+			this,
+			nullptr,
+			ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+		if (!Barnacle)
 		{
-			++FailedClusterAttempts;
+			continue;
 		}
+
+		Barnacle->InitializeFromSpawner(
+			this,
+			CurrentSpawnIndex,
+			MaximumDurability);
+		Barnacle->FinishSpawning(SpawnTransform);
+		if (!IsValid(Barnacle))
+		{
+			continue;
+		}
+
+		if (bAttachToSurface && SurfaceHit.GetComponent())
+		{
+			Barnacle->AttachToComponent(
+				SurfaceHit.GetComponent(),
+				FAttachmentTransformRules::KeepWorldTransform);
+		}
+		// SpawnActor는 BeginPlay 뒤 반환될 수 있으므로 부착이 끝난 뒤 표면 등록을 확정한다.
+		Barnacle->RegisterWithScrapeSurface();
+
+		SpawnedBarnacles.Add(Barnacle);
+		++SpawnedCount;
 	}
 
 	return SpawnedCount;
 }
 
-bool AMD_BarnacleSpawner::TryFindSurfaceSpot(
-	FRandomStream& RandomStream,
-	const FVector& SearchCenter,
-	const float SearchRadiusCm,
-	const TArray<FVector>& PlacedLocations,
-	const TArray<AActor*>& IgnoredActors,
-	FHitResult& OutHit) const
+FIntPoint AMD_BarnacleSpawner::GetSanitizedDurabilityRange() const
 {
-	OutHit = FHitResult();
+	const int32 ClampedMinimum = FMath::Clamp(
+		MinimumBarnacleDurability,
+		1,
+		MaximumSupportedBarnacleDurability);
+	const int32 ClampedMaximum = FMath::Clamp(
+		MaximumBarnacleDurability,
+		1,
+		MaximumSupportedBarnacleDurability);
+
+	return FIntPoint(
+		FMath::Min(ClampedMinimum, ClampedMaximum),
+		FMath::Max(ClampedMinimum, ClampedMaximum));
+}
+
+int32 AMD_BarnacleSpawner::GenerateDurabilityForSpawn(
+	const int32 PlacementSeedToUse,
+	const int32 SpawnIndex) const
+{
+	const FIntPoint DurabilityRange = GetSanitizedDurabilityRange();
+	const uint32 CombinedSeed =
+		static_cast<uint32>(PlacementSeedToUse)
+		^ (static_cast<uint32>(SpawnIndex) + BarnacleDurabilitySeedSalt);
+	FRandomStream DurabilityRandomStream(
+		static_cast<int32>(MixDurabilitySeed(CombinedSeed)));
+
+	return DurabilityRandomStream.RandRange(
+		DurabilityRange.X,
+		DurabilityRange.Y);
+}
+
+void AMD_BarnacleSpawner::GatherSurfaceCandidates(
+	FRandomStream& RandomStream,
+	const int32 DesiredCandidateCount,
+	const TArray<AActor*>& IgnoredActors,
+	TArray<FHitResult>& OutHits) const
+{
+	OutHits.Reset();
 
 	const UWorld* const World = GetWorld();
-	if (!World || !SpawnVolume)
+	if (!World || !SpawnVolume || DesiredCandidateCount <= 0)
 	{
-		return false;
+		return;
 	}
 
-	const FVector VolumeCenter = SpawnVolume->GetComponentLocation();
-	const FVector VolumeExtent = SpawnVolume->GetScaledBoxExtent();
-
-	const bool bSearchAroundCenter = SearchRadiusCm > 0.0f;
-	// 군집 안에서는 중심 근처만 훑으므로 멀리 쏠 이유가 없다.
-	const float SafeSearchDistanceCm = bSearchAroundCenter
-		? FMath::Max(10.0f, SearchRadiusCm * 2.0f)
-		: FMath::Max(10.0f, SurfaceSearchDistanceCm);
-	const float SafeSeparationCm = FMath::Max(0.0f, MinimumSeparationCm);
+	const FTransform VolumeTransform = SpawnVolume->GetComponentTransform();
+	const FVector VolumeExtent = SpawnVolume->GetUnscaledBoxExtent();
+	const float SafeSearchDistanceCm = FMath::IsFinite(SurfaceSearchDistanceCm)
+		? FMath::Max(10.0f, SurfaceSearchDistanceCm)
+		: 10.0f;
+	const int32 MaximumOriginAttempts = FMath::Min(
+		MaximumCandidateOriginAttempts,
+		FMath::Max(
+			DesiredCandidateCount,
+			DesiredCandidateCount * CandidateOriginAttemptMultiplier));
+	const double DuplicateToleranceSquared =
+		FMath::Square(static_cast<double>(CandidateDuplicateToleranceCm));
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MD_BarnacleSpawn), true);
 	QueryParams.AddIgnoredActors(IgnoredActors);
 
-	for (int32 Attempt = 0; Attempt < MaximumAttemptsPerBarnacle; ++Attempt)
+	int32 StalledOriginAttempts = 0;
+	for (int32 OriginAttempt = 0;
+		OriginAttempt < MaximumOriginAttempts && OutHits.Num() < DesiredCandidateCount;
+		++OriginAttempt)
 	{
-		const FVector SearchOrigin = bSearchAroundCenter
-			? SearchCenter
-				+ RandomStream.GetUnitVector()
-					* RandomStream.FRandRange(0.0f, SearchRadiusCm)
-			: VolumeCenter
-				+ FVector(
-					RandomStream.FRandRange(-VolumeExtent.X, VolumeExtent.X),
-					RandomStream.FRandRange(-VolumeExtent.Y, VolumeExtent.Y),
-					RandomStream.FRandRange(-VolumeExtent.Z, VolumeExtent.Z));
+		const int32 CandidateCountBeforeAttempt = OutHits.Num();
+		const FVector LocalSearchOrigin(
+			RandomStream.FRandRange(-VolumeExtent.X, VolumeExtent.X),
+			RandomStream.FRandRange(-VolumeExtent.Y, VolumeExtent.Y),
+			RandomStream.FRandRange(-VolumeExtent.Z, VolumeExtent.Z));
+		const FVector SearchOrigin = VolumeTransform.TransformPosition(LocalSearchOrigin);
 
-		// 방향을 매번 새로 섞는다. 한 방향만 쓰면 벽 한 면에만 몰린다.
+		// 시작 인덱스만 돌리면 +축이 -축보다 먼저 검사되는 5:1 편향이 생긴다.
+		// 여섯 방향 전체를 Fisher-Yates로 섞고, 각 방향의 유효 히트를 모두 후보로 모은다.
 		const int32 DirectionCount = UE_ARRAY_COUNT(SurfaceSearchDirections);
-		const int32 FirstDirection = RandomStream.RandRange(0, DirectionCount - 1);
-
-		for (int32 Offset = 0; Offset < DirectionCount; ++Offset)
+		int32 DirectionOrder[UE_ARRAY_COUNT(SurfaceSearchDirections)];
+		for (int32 DirectionIndex = 0; DirectionIndex < DirectionCount; ++DirectionIndex)
 		{
+			DirectionOrder[DirectionIndex] = DirectionIndex;
+		}
+		for (int32 DirectionIndex = DirectionCount - 1; DirectionIndex > 0; --DirectionIndex)
+		{
+			Swap(
+				DirectionOrder[DirectionIndex],
+				DirectionOrder[RandomStream.RandRange(0, DirectionIndex)]);
+		}
+
+		for (const int32 DirectionIndex : DirectionOrder)
+		{
+			const FVector& LocalSearchDirection =
+				SurfaceSearchDirections[DirectionIndex];
+			const bool bIsFrontBackDirection =
+				FMath::Abs(LocalSearchDirection.X) > 0.5;
+			const bool bIsLeftRightDirection =
+				FMath::Abs(LocalSearchDirection.Y) > 0.5;
+			const bool bIsTopBottomDirection =
+				FMath::Abs(LocalSearchDirection.Z) > 0.5;
+			if ((!bAllowFrontBackSurfaces && bIsFrontBackDirection)
+				|| (!bAllowLeftRightSurfaces && bIsLeftRightDirection)
+				|| (!bAllowTopBottomSurfaces && bIsTopBottomDirection)
+				|| (!bIsFrontBackDirection
+					&& !bIsLeftRightDirection
+					&& !bIsTopBottomDirection))
+			{
+				continue;
+			}
+
 			const FVector SearchDirection =
-				SurfaceSearchDirections[(FirstDirection + Offset) % DirectionCount];
+				VolumeTransform.TransformVectorNoScale(
+					LocalSearchDirection).GetSafeNormal();
 
 			FHitResult Hit;
+			// BarnacleTrace는 기본 Block이다. 벽·대형 장식물은 별도 설정 없이 찾고,
+			// 전구 같은 제외 소품은 Ignore로 설정해 후보와 가림에서 함께 뺀다.
 			if (!World->LineTraceSingleByChannel(
 					Hit,
 					SearchOrigin,
 					SearchOrigin + SearchDirection * SafeSearchDistanceCm,
-					ECC_Visibility,
+					MDCollisionChannels::BarnacleTrace,
 					QueryParams))
 			{
 				continue;
 			}
 
-			if (!IsAcceptableSurface(Hit))
+			if (!IsPointInsideSpawnVolume(Hit.ImpactPoint)
+				|| !IsAcceptableSurface(Hit))
 			{
 				continue;
 			}
 
-			bool bTooClose = false;
-			for (const FVector& PlacedLocation : PlacedLocations)
+			bool bDuplicateCandidate = false;
+			for (const FHitResult& ExistingHit : OutHits)
 			{
-				if (FVector::DistSquared(PlacedLocation, Hit.ImpactPoint)
-					< FMath::Square(SafeSeparationCm))
+				if (ExistingHit.GetComponent() == Hit.GetComponent()
+					&& FVector::DistSquared(ExistingHit.ImpactPoint, Hit.ImpactPoint)
+						< DuplicateToleranceSquared)
 				{
-					bTooClose = true;
+					bDuplicateCandidate = true;
 					break;
 				}
 			}
-			if (bTooClose)
+			if (bDuplicateCandidate)
 			{
 				continue;
 			}
 
-			OutHit = Hit;
-			return true;
+			OutHits.Add(Hit);
+			if (OutHits.Num() >= DesiredCandidateCount)
+			{
+				break;
+			}
+		}
+
+		if (OutHits.Num() == CandidateCountBeforeAttempt)
+		{
+			++StalledOriginAttempts;
+			if (StalledOriginAttempts >= MaximumStalledCandidateOriginAttempts)
+			{
+				break;
+			}
+		}
+		else
+		{
+			StalledOriginAttempts = 0;
 		}
 	}
+}
 
-	return false;
+bool AMD_BarnacleSpawner::IsPointInsideSpawnVolume(
+	const FVector& WorldLocation) const
+{
+	if (!SpawnVolume)
+	{
+		return false;
+	}
+
+	const FTransform VolumeTransform = SpawnVolume->GetComponentTransform();
+	const FVector LocalLocation = VolumeTransform.InverseTransformPosition(WorldLocation);
+	const FVector VolumeExtent = SpawnVolume->GetUnscaledBoxExtent();
+	const FVector AbsoluteScale = VolumeTransform.GetScale3D().GetAbs();
+	const FVector LocalTolerance(
+		SpawnVolumeSurfaceToleranceCm / FMath::Max(AbsoluteScale.X, UE_SMALL_NUMBER),
+		SpawnVolumeSurfaceToleranceCm / FMath::Max(AbsoluteScale.Y, UE_SMALL_NUMBER),
+		SpawnVolumeSurfaceToleranceCm / FMath::Max(AbsoluteScale.Z, UE_SMALL_NUMBER));
+	const FVector AllowedExtent = VolumeExtent + LocalTolerance;
+
+	return FMath::Abs(LocalLocation.X) <= AllowedExtent.X
+		&& FMath::Abs(LocalLocation.Y) <= AllowedExtent.Y
+		&& FMath::Abs(LocalLocation.Z) <= AllowedExtent.Z;
 }
 
 FTransform AMD_BarnacleSpawner::MakeAttachedTransform(
@@ -452,19 +663,24 @@ FTransform AMD_BarnacleSpawner::MakeAttachedTransform(
 
 bool AMD_BarnacleSpawner::IsAcceptableSurface(const FHitResult& Hit) const
 {
-	// 기획 02 §1: 따개비는 보통벽에만 붙는다. 내력·칸막이 세그먼트에는 두지 않는다.
+	// 벽과 가구는 모두 허용하지만 기존 기획 제약상 철거 대상 격벽은 기본 제외한다.
 	if (!bAllowCuttableWallSurfaces && Cast<AMD_CuttableWall>(Hit.GetActor()))
 	{
 		return false;
 	}
 
-	// 기획 02 §1: 따개비는 "보통벽에 붙은 부착물"이다. 바닥·천장은 각종 쓰레기 몫이다.
-	const float UpwardDot = FMath::Abs(
-		static_cast<float>(Hit.ImpactNormal.Z));
-	if (UpwardDot > FMath::Clamp(MaximumSurfaceUpwardDot, 0.0f, 1.0f))
+	if (!SpawnVolume)
 	{
 		return false;
 	}
 
-	return true;
+	return MDBarnaclePlacementPolicy::ClassifySurfaceFace(
+		Hit.ImpactNormal,
+		SpawnVolume->GetForwardVector(),
+		SpawnVolume->GetRightVector(),
+		SpawnVolume->GetUpVector(),
+		bAllowFrontBackSurfaces,
+		bAllowLeftRightSurfaces,
+		bAllowTopBottomSurfaces)
+		!= EMD_BarnaclePlacementFace::Other;
 }

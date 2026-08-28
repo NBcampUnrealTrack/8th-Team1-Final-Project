@@ -23,6 +23,7 @@
 #include "Player/MD_PlayerCameraManager.h"
 
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
@@ -31,6 +32,8 @@
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Character/MD_Character.h"
 #include "World/Merchant/MD_Merchant.h"
+#include "Interfaces/OnlineIdentityInterface.h"
+#include "OnlineSubsystem.h"
 
 AMD_PlayerController::AMD_PlayerController()
 {
@@ -71,6 +74,68 @@ void AMD_PlayerController::HandleApplicationWillDeactivate()
 	CancelScrapeInteraction();
 }
 
+void AMD_PlayerController::SubmitPlatformNickname()
+{
+	// 원격 컨트롤러와 전용 서버에는 제출할 로컬 플랫폼 사용자가 없다.
+	if (IsLocalController() == false)
+	{
+		return;
+	}
+
+	// 현재 플랫폼에 연결된 Online Subsystem을 가져온다.
+	IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
+	if (OnlineSubsystem == nullptr)
+	{
+		return;
+	}
+
+	// 로그인 사용자 정보에 접근할 Identity 인터페이스를 가져온다.
+	IOnlineIdentityPtr IdentityInterface = OnlineSubsystem->GetIdentityInterface();
+	if (IdentityInterface.IsValid() == false)
+	{
+		return;
+	}
+
+	// 플랫폼 로그인이 완료된 사용자만 닉네임을 제출한다.
+	if (IdentityInterface->GetLoginStatus(0) != ELoginStatus::LoggedIn)
+	{
+		return;
+	}
+
+	// 첫 번째 로컬 사용자의 Steam 등 플랫폼 표시 이름을 가져온다.
+	FString PlatformNickname = IdentityInterface->GetPlayerNickname(0);
+	PlatformNickname.TrimStartAndEndInline();
+	if (PlatformNickname.IsEmpty() == true)
+	{
+		return;
+	}
+
+	// 서버가 소유한 PlayerState에 플랫폼 닉네임을 저장하도록 요청한다.
+	ServerSubmitPlatformNickname(PlatformNickname);
+}
+
+void AMD_PlayerController::ServerSubmitPlatformNickname_Implementation(const FString& PlatformNickname)
+{
+	// 이름표와 네트워크 데이터가 과도하게 커지지 않도록 표시 이름 길이를 제한한다.
+	FString ValidatedPlatformNickname = PlatformNickname;
+	ValidatedPlatformNickname.TrimStartAndEndInline();
+	ValidatedPlatformNickname.LeftInline(32);
+	if (ValidatedPlatformNickname.IsEmpty() == true)
+	{
+		return;
+	}
+
+	// 현재 컨트롤러가 소유한 PlayerState만 변경해 다른 사용자의 이름 변경을 차단한다.
+	AMD_PlayerState* CurrentPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (IsValid(CurrentPlayerState) == false)
+	{
+		return;
+	}
+
+	// 엔진의 PlayerName 복제 경로를 사용해 모든 클라이언트에 플랫폼 닉네임을 전달한다.
+	CurrentPlayerState->SetPlayerName(ValidatedPlatformNickname);
+}
+
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console, int32 SiteIndex, EMD_Difficulty Difficulty)
 {
 	if (!IsValid(Console))
@@ -91,8 +156,11 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 		return;
 	}
 
-	// 클라가 보낸 건 인덱스뿐. 레벨은 서버가 자기 사본에서 읽고 잠긴 현장이면 빈 경로가 돌아온다
-	const FString MapPackage = Console->ResolveSiteLevel(SiteIndex).ToSoftObjectPath().GetLongPackageName();
+	// 클라가 보낸 건 인덱스뿐이며 레벨은 서버가 자기 사본에서 다시 조회한다.
+	FString MapPackage = Console->ResolveSiteLevel(SiteIndex).ToSoftObjectPath().GetLongPackageName();
+
+	// PIE에서 이미 방문한 World 참조에 붙은 UEDPIE 접두사를 실제 에셋 패키지 경로로 복원한다.
+	MapPackage = UWorld::RemovePIEPrefix(MapPackage);
 
 	if (MapPackage.IsEmpty())
 	{
@@ -575,6 +643,9 @@ void AMD_PlayerController::BeginPlay()
 		return;
 	}
 
+	// 플랫폼 로그인이 완료된 로컬 사용자의 닉네임을 서버에 제출한다.
+	SubmitPlatformNickname();
+
 	if (!ApplicationWillDeactivateHandle.IsValid())
 	{
 		ApplicationWillDeactivateHandle =
@@ -592,6 +663,7 @@ void AMD_PlayerController::BeginPlayingState()
 
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
+	SubmitPlatformNickname();
 
 	NotifyLoadingScreenPlayerReady();
 }
@@ -603,6 +675,7 @@ void AMD_PlayerController::PostSeamlessTravel()
 	CloseDailyReport();
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
+	SubmitPlatformNickname();
 
 	// Seamless travel은 BeginPlayingState를 거치지 않으므로 같은 알림을 여기서도 보낸다.
 	NotifyLoadingScreenPlayerReady();
