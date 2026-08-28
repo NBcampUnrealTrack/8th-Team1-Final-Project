@@ -6,6 +6,7 @@
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Online/Voice/MD_CharacterVOIPTalker.h"
 #include "AbilitySystemComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -151,6 +152,13 @@ AMD_PlayerState::AMD_PlayerState()
 UAbilitySystemComponent* AMD_PlayerState::GetAbilitySystemComponent() const
 {
 	return AbilitySystemComponent;
+}
+
+void AMD_PlayerState::SetVoiceVolumeMultiplier(float NewVoiceVolumeMultiplier)
+{
+	// 음성 채팅 UI와 Talker가 공유하는 허용 범위 적용
+	float ClampedVoiceVolumeMultiplier = FMath::Clamp(NewVoiceVolumeMultiplier, 0.0f, UMD_CharacterVOIPTalker::MaxVolumeMultiplier);
+	VoiceVolumeMultiplier = ClampedVoiceVolumeMultiplier;
 }
 
 EMD_HealthState AMD_PlayerState::GetHealthState() const

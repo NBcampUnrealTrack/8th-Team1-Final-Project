@@ -5,7 +5,7 @@
 
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
-#include "GameFramework/PlayerState.h"
+#include "Player/MD_PlayerState.h"
 #include "TimerManager.h"
 
 namespace
@@ -59,6 +59,15 @@ void UMD_CharacterVOIPTalker::TryRegisterWithOwnerPlayerState()
 
 	RegisterWithPlayerState(OwningState);
 	UVOIPStatics::SetMicThreshold(VoiceMicThreshold);
+
+	// Pawn 재생성 전 PlayerState에 저장된 로컬 음량 조회
+	AMD_PlayerState* ProjectPlayerState = Cast<AMD_PlayerState>(OwningState);
+	if (IsValid(ProjectPlayerState) == true)
+	{
+		float StoredVolumeMultiplier = ProjectPlayerState->GetVoiceVolumeMultiplier();
+		SetVolumeMuliplier(StoredVolumeMultiplier);
+	}
+
 	bVoiceRegistrationComplete = true;
 
 	if (UWorld* World = GetWorld())
@@ -88,7 +97,9 @@ void UMD_CharacterVOIPTalker::OnTalkingEnd()
 
 void UMD_CharacterVOIPTalker::SetVolumeMuliplier(float NewVolumeMultiplier)
 {
-	VolumeMultiplier = FMath::Clamp(NewVolumeMultiplier, 0, 4);
+	// UI 정규화 음량과 공통으로 사용하는 허용 배율 적용
+	float ClampedVolumeMultiplier = FMath::Clamp(NewVolumeMultiplier, 0.0f, MaxVolumeMultiplier);
+	VolumeMultiplier = ClampedVolumeMultiplier;
 
 	if (IsValid(ActiveVoiceAudioComponent) == true)
 	{

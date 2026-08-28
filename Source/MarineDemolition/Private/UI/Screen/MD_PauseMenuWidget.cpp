@@ -82,12 +82,8 @@ void UMD_PauseMenuWidget::BuildPlayerList()
 			continue;
 		}
 
-		// PlayerState에 복제된 플레이어 이름 조회
-		FString PlayerName = PlayerState->GetPlayerName();
-		// 플레이어 이름을 정보 카드 표시용 텍스트로 변환
-		FText PlayerNameText = FText::FromString(PlayerName);
-		// 플레이어 이름의 카드 본문과 그림자 동시 적용
-		PlayerInfoWidget->SetPlayerName(PlayerNameText);
+		// 플레이어 이름과 개별 음성 음량 제어에 사용할 PlayerState 할당
+		PlayerInfoWidget->SetPlayerState(PlayerState);
 
 		// 생성한 플레이어 정보 카드의 세로 목록 추가
 		UVerticalBoxSlot* PlayerInfoSlot = VB_PlayerList->AddChildToVerticalBox(PlayerInfoWidget);
