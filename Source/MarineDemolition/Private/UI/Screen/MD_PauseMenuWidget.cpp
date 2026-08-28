@@ -2,7 +2,6 @@
 
 #include "Components/TextBlock.h"
 #include "Components/VerticalBox.h"
-#include "Components/VerticalBoxSlot.h"
 #include "Engine/GameInstance.h"
 #include "Game/MD_GameStateBase.h"
 #include "GameFramework/PlayerController.h"
@@ -30,30 +29,9 @@ void UMD_PauseMenuWidget::NativeOnDeactivated()
 
 void UMD_PauseMenuWidget::BuildPlayerList()
 {
-	// 플레이어 목록 영역이 없는 변형 위젯의 목록 구성 중단
-	if (IsValid(VB_PlayerList) == false)
-	{
-		return;
-	}
-
-	// 플레이어 정보 카드 클래스가 없는 경우 목록 구성 중단
-	if (IsValid(PlayerInfoWidgetClass) == false)
-	{
-		return;
-	}
-
-	// 이전 접속 상태에서 생성한 플레이어 카드 목록 초기화
-	VB_PlayerList->ClearChildren();
-
 	// 현재 접속 플레이어를 관리하는 GameState 조회
 	UWorld* World = GetWorld();
-	if (IsValid(World) == false)
-	{
-		return;
-	}
-
-	// 현재 월드의 기본 GameState 조회
-	AGameStateBase* GameState = World->GetGameState();
+	AGameStateBase* GameState = IsValid(World) == true ? World->GetGameState() : nullptr;
 	if (IsValid(GameState) == false)
 	{
 		return;
@@ -61,16 +39,35 @@ void UMD_PauseMenuWidget::BuildPlayerList()
 
 	// 생성할 플레이어 정보 카드의 입력 소유자 조회
 	APlayerController* OwningPlayer = GetOwningPlayer();
-	if (IsValid(OwningPlayer) == false)
+	// 현재 로컬 플레이어 카드 제외를 위한 PlayerState 조회
+	APlayerState* OwningPlayerState = IsValid(OwningPlayer) == true ? OwningPlayer->GetPlayerState<APlayerState>() : nullptr;
+	if (IsValid(OwningPlayerState) == false)
 	{
 		return;
 	}
 
+	// 클라이언트 화면에서 카드 대상의 Session 호스트 여부를 판정할 관리자 조회
+	UGameInstance* GameInstance = GetGameInstance();
+	UMD_MultiplayManager* MultiplayManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MultiplayManager>() : nullptr;
+	if (IsValid(MultiplayManager) == false)
+	{
+		return;
+	}
+
+	// 목록 구성에 필요한 Widget과 클래스의 유효성 판단
+	if (IsValid(VB_PlayerList) == false || IsValid(PlayerInfoWidgetClass) == false)
+	{
+		return;
+	}
+
+	// 이전 접속 상태에서 생성한 플레이어 카드 목록 초기화
+	VB_PlayerList->ClearChildren();
+
 	// 현재 복제된 모든 PlayerState 순회
 	for (APlayerState* PlayerState : GameState->PlayerArray)
 	{
-		// 아직 유효하지 않은 PlayerState의 카드 생성 생략
-		if (IsValid(PlayerState) == false)
+		// 유효하지 않거나 일시 정지 메뉴를 연 로컬 플레이어의 카드 생성 생략
+		if (IsValid(PlayerState) == false || PlayerState == OwningPlayerState)
 		{
 			continue;
 		}
@@ -85,13 +82,24 @@ void UMD_PauseMenuWidget::BuildPlayerList()
 		// 플레이어 이름과 개별 음성 음량 제어에 사용할 PlayerState 할당
 		PlayerInfoWidget->SetPlayerState(PlayerState);
 
-		// 생성한 플레이어 정보 카드의 세로 목록 추가
-		UVerticalBoxSlot* PlayerInfoSlot = VB_PlayerList->AddChildToVerticalBox(PlayerInfoWidget);
-		// 목록 슬롯 생성 실패 시 다음 플레이어 처리
-		if (IsValid(PlayerInfoSlot) == false)
+		// 호스트 화면에서 원격 플레이어 카드의 강퇴 아이콘 적용
+		if (OwningPlayer->HasAuthority() == true)
 		{
-			continue;
+			PlayerInfoWidget->SetKickIcon();
 		}
+		// 클라이언트 화면에서 Session 소유자 카드의 호스트 아이콘 적용
+		else if (MultiplayManager->IsSessionHostPlayer(PlayerState) == true)
+		{
+			PlayerInfoWidget->SetHostIcon();
+		}
+		else
+		{
+			// 클라이언트 화면에서 일반 원격 플레이어 카드의 클라이언트 아이콘 적용
+			PlayerInfoWidget->SetClientIcon();
+		}
+
+		// 생성한 플레이어 정보 카드의 세로 목록 추가
+		VB_PlayerList->AddChildToVerticalBox(PlayerInfoWidget);
 	}
 }
 

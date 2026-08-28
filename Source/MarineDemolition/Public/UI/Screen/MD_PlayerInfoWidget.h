@@ -27,6 +27,10 @@ protected:
 	virtual void NativeDestruct() override;
 
 protected:
+	// 호스트 상태 또는 강퇴 동작 이미지
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+	TObjectPtr<UImage> Img_HostorKick;
+
 	// 플레이어 이름 본문
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_PlayerName;
@@ -52,11 +56,11 @@ protected:
 	TObjectPtr<APlayerState> AssignedPlayerState;
 
 	// 본문과 그림자에 함께 표시할 플레이어 이름
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Player Info")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance")
 	FText PlayerName;
 
 	// Slider와 음성 처리에 전달할 정규화된 볼륨 값
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Player Info", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Appearance", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float Volume = 1.0f;
 
 	// Slider에서 변경된 볼륨 값을 외부 플레이어 목록에 전달하는 이벤트
@@ -83,6 +87,18 @@ public:
 	// 플레이어 이름의 본문과 그림자 동시 적용
 	UFUNCTION(BlueprintCallable, Category = "MD|Player Info")
 	void SetPlayerName(FText InPlayerName);
+
+	// 호스트 플레이어를 나타내는 아이콘 적용
+	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category = "MD|Player Info")
+	void SetHostIcon();
+
+	// 강퇴 동작을 나타내는 아이콘 적용
+	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category = "MD|Player Info")
+	void SetKickIcon();
+
+	// 일반 클라이언트 플레이어를 나타내는 아이콘 적용
+	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category = "MD|Player Info")
+	void SetClientIcon();
 
 	// 정규화된 음성 볼륨의 저장과 Slider 및 실제 음성 재생 적용
 	UFUNCTION(BlueprintCallable, Category = "MD|Player Info")
