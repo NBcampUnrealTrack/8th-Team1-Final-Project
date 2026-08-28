@@ -2,7 +2,7 @@
 
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Components/ScrollBox.h"
-#include "Data/Merchant/MD_QuestDefinition.h"
+#include "Components/VerticalBox.h"
 #include "Engine/World.h"
 #include "Game/MD_GameStateBase.h"
 #include "TimerManager.h"
@@ -72,27 +72,37 @@ void UMD_HUDQuestWidget::TryBindMerchantComponent()
 	RefreshQuestDisplay();
 }
 
-void UMD_HUDQuestWidget::AddMainQuestCard(const FMD_MainQuestState& QuestState)
+bool UMD_HUDQuestWidget::AddMainQuestCard(const FMD_MainQuestState& QuestState)
 {
-	if (IsValid(SB_QuestList) == false || QuestCardClass.Get() == nullptr)
+	if (IsValid(SB_QuestList_Main) == false || QuestCardClass.Get() == nullptr)
 	{
-		return;
+		return false;
 	}
 
 	// 메인 퀘스트 상태 하나를 독립된 카드로 표시하기 위한 위젯 생성
 	UMD_HUDQuestCard* QuestCard = CreateWidget<UMD_HUDQuestCard>(this, QuestCardClass);
 	if (IsValid(QuestCard) == false)
 	{
-		return;
+		return false;
 	}
 
-	QuestCard->SetMainQuest(QuestState);
-	SB_QuestList->AddChild(QuestCard);
+	// 메인 퀘스트 표시 정보를 새 카드에 적용한 결과를 저장한다.
+	bool bSetResult = QuestCard->SetMainQuest(QuestState);
+	// 원본이 없거나 현재 페이즈가 잘못된 카드는 목록에 추가하지 않는다.
+	if (bSetResult == false)
+	{
+		return false;
+	}
+
+	// 메인 퀘스트 전용 목록에 카드를 추가한다.
+	SB_QuestList_Main->AddChild(QuestCard);
+	// 메인 퀘스트 카드가 목록에 추가되었음을 반환한다.
+	return true;
 }
 
 void UMD_HUDQuestWidget::AddRepeatQuestCard(const FMD_RepeatQuestState& QuestState)
 {
-	if (IsValid(SB_QuestList) == false || QuestCardClass.Get() == nullptr)
+	if (IsValid(SB_QuestList_Sub) == false || QuestCardClass.Get() == nullptr)
 	{
 		return;
 	}
@@ -104,23 +114,58 @@ void UMD_HUDQuestWidget::AddRepeatQuestCard(const FMD_RepeatQuestState& QuestSta
 		return;
 	}
 
-	QuestCard->SetRepeatQuest(QuestState);
-	SB_QuestList->AddChild(QuestCard);
-}
-
-void UMD_HUDQuestWidget::RefreshQuestDisplay()
-{
-	if (IsValid(SB_QuestList) == false || QuestCardClass.Get() == nullptr)
+	// 반복 퀘스트 표시 정보를 새 카드에 적용한 결과를 저장한다.
+	bool bSetResult = QuestCard->SetRepeatQuest(QuestState);
+	// 원본이 없거나 현재 페이즈가 잘못된 카드는 목록에 추가하지 않는다.
+	if (bSetResult == false)
 	{
 		return;
 	}
 
-	// 상태가 사라진 퀘스트 카드가 남지 않도록 현재 복제 상태 기준으로 목록 초기화
-	SB_QuestList->ClearChildren();
+	// 반복 퀘스트 전용 목록에 카드를 추가한다.
+	SB_QuestList_Sub->AddChild(QuestCard);
+}
+
+void UMD_HUDQuestWidget::UpdateQuestSectionVisibility()
+{
+	// 메인 퀘스트 카드 존재 여부를 한 번만 확인한다.
+	bool bHasMainQuest = SB_QuestList_Main->GetChildrenCount() > 0;
+	// 반복 퀘스트 카드 존재 여부를 한 번만 확인한다.
+	bool bHasRepeatQuest = SB_QuestList_Sub->GetChildrenCount() > 0;
+
+	// 메인 퀘스트가 없으면 해당 제목과 목록 섹션을 함께 숨긴다.
+	if (IsValid(VB_QuestContents_Main) == true)
+	{
+		VB_QuestContents_Main->SetVisibility(bHasMainQuest == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+
+	// 반복 퀘스트가 없으면 해당 제목과 목록 섹션을 함께 숨긴다.
+	if (IsValid(VB_QuestContents_Sub) == true)
+	{
+		VB_QuestContents_Sub->SetVisibility(bHasRepeatQuest == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+
+	// 표시할 퀘스트가 하나도 없으면 HUD 퀘스트 패널 전체를 숨긴다.
+	SetVisibility(bHasMainQuest == true || bHasRepeatQuest == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+}
+
+void UMD_HUDQuestWidget::RefreshQuestDisplay()
+{
+	if (IsValid(SB_QuestList_Main) == false || IsValid(SB_QuestList_Sub) == false || QuestCardClass.Get() == nullptr)
+	{
+		return;
+	}
+
+	// 상태가 사라진 메인 퀘스트 카드가 남지 않도록 목록을 초기화한다.
+	SB_QuestList_Main->ClearChildren();
+	// 상태가 사라진 반복 퀘스트 카드가 남지 않도록 목록을 초기화한다.
+	SB_QuestList_Sub->ClearChildren();
 
 	UMD_MerchantComponent* MerchantComponent = BoundMerchantComponent.Get();
 	if (IsValid(MerchantComponent) == false)
 	{
+		// 빈 목록을 기준으로 각 섹션과 전체 패널을 숨긴다.
+		UpdateQuestSectionVisibility();
 		return;
 	}
 
@@ -133,11 +178,15 @@ void UMD_HUDQuestWidget::RefreshQuestDisplay()
 			continue;
 		}
 
-		UMD_QuestDefinition* QuestDefinition = UMD_QuestDefinition::LoadDefinition(MainQuest.DefinitionId);
-		if (IsValid(QuestDefinition) == true)
+		// 원본을 조회할 수 있는 메인 퀘스트만 카드 생성을 시도한다.
+		if (MainQuest.HasValidDefinitionId() == true)
 		{
-			AddMainQuestCard(MainQuest);
-			break;
+			// 유효한 원본과 페이즈로 카드가 추가되었는지 확인한다.
+			bool bAddResult = AddMainQuestCard(MainQuest);
+			if (bAddResult == true)
+			{
+				break;
+			}
 		}
 	}
 
@@ -151,6 +200,6 @@ void UMD_HUDQuestWidget::RefreshQuestDisplay()
 		}
 	}
 
-	int32 CurrentQuestCount = SB_QuestList->GetChildrenCount();
-	SetVisibility(CurrentQuestCount <= 0 ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
+	// 새로 구성한 목록을 기준으로 각 섹션과 전체 패널을 갱신한다.
+	UpdateQuestSectionVisibility();
 }
