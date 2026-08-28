@@ -20,10 +20,13 @@ void UMD_PlayerInfoWidget::NativeConstruct()
 	// 현재 저장된 플레이어 이름의 본문과 그림자 동시 반영
 	ApplyPlayerName();
 
-	// 바인딩된 Slider의 현재 볼륨과 값 변경 이벤트 적용
+	// Blueprint의 전역 Material Parameter 변경 이벤트 제거와 C++ 개별 처리 준비
 	if (IsValid(Sd_Volume) == true)
 	{
+		Sd_Volume->OnValueChanged.Clear();
+		InitializeVolumeBarMaterial();
 		Sd_Volume->SetValue(Volume);
+		UpdateVolumeBarMaterial();
 		Sd_Volume->OnValueChanged.AddUniqueDynamic(this, &UMD_PlayerInfoWidget::HandleVolumeChanged);
 	}
 }
@@ -98,13 +101,17 @@ void UMD_PlayerInfoWidget::SetPlayerName(FText InPlayerName)
 void UMD_PlayerInfoWidget::SetVolume(float InVolume)
 {
 	// Slider 범위에 맞춘 새 볼륨 값 보정
-	Volume = FMath::Clamp(InVolume, 0.0f, 1.0f);
+	float ClampedVolume = FMath::Clamp(InVolume, 0.0f, 1.0f);
+	Volume = ClampedVolume;
 
 	// 바인딩된 Slider에 보정된 볼륨 값 반영
 	if (IsValid(Sd_Volume) == true)
 	{
 		Sd_Volume->SetValue(Volume);
 	}
+
+	// 카드 전용 Slider 바의 진행도 동기화
+	UpdateVolumeBarMaterial();
 
 	// 할당된 플레이어의 실제 음성 재생 배율 갱신
 	ApplyAssignedVoiceVolume();
@@ -146,6 +153,58 @@ void UMD_PlayerInfoWidget::ApplyAssignedVoiceVolume()
 
 	// 현재 또는 다음 음성 재생에 저장된 배율 적용
 	VoiceTalker->SetVolumeMuliplier(VolumeMultiplier);
+}
+
+void UMD_PlayerInfoWidget::InitializeVolumeBarMaterial()
+{
+	// 재활성화된 카드가 이미 보유한 동적 Material 재사용
+	if (IsValid(VolumeBarMaterialInstance) == true)
+	{
+		return;
+	}
+
+	// Slider가 없는 Blueprint 변형의 Material 생성 생략
+	if (IsValid(Sd_Volume) == false)
+	{
+		return;
+	}
+
+	// 현재 Slider Style의 기본 바 Material 조회
+	FSliderStyle SliderStyle = Sd_Volume->GetWidgetStyle();
+	UObject* BarResource = SliderStyle.NormalBarImage.GetResourceObject();
+	UMaterialInterface* BarMaterial = Cast<UMaterialInterface>(BarResource);
+	if (IsValid(BarMaterial) == false)
+	{
+		return;
+	}
+
+	// 다른 플레이어 카드와 Parameter를 공유하지 않는 동적 Material 생성
+	UMaterialInstanceDynamic* DynamicBarMaterial = UMaterialInstanceDynamic::Create(BarMaterial, this);
+	if (IsValid(DynamicBarMaterial) == false)
+	{
+		return;
+	}
+
+	// 모든 Slider 상태의 바 Brush에 같은 카드 전용 Material 적용
+	VolumeBarMaterialInstance = DynamicBarMaterial;
+	SliderStyle.NormalBarImage.SetResourceObject(VolumeBarMaterialInstance);
+	SliderStyle.HoveredBarImage.SetResourceObject(VolumeBarMaterialInstance);
+	SliderStyle.DisabledBarImage.SetResourceObject(VolumeBarMaterialInstance);
+	Sd_Volume->SetWidgetStyle(SliderStyle);
+}
+
+void UMD_PlayerInfoWidget::UpdateVolumeBarMaterial()
+{
+	// 동적 Material 생성 전 호출의 진행도 갱신 생략
+	if (IsValid(VolumeBarMaterialInstance) == false)
+	{
+		return;
+	}
+
+	// Slider Material의 정규화 진행도 Parameter 이름
+	FName VolumeBarValueParameterName(TEXT("Value"));
+	// 현재 카드의 정규화 볼륨을 바 진행도에 적용
+	VolumeBarMaterialInstance->SetScalarParameterValue(VolumeBarValueParameterName, Volume);
 }
 
 UMD_CharacterVOIPTalker* UMD_PlayerInfoWidget::GetAssignedVoiceTalker()

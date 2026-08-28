@@ -8,12 +8,6 @@
 #include "Player/MD_PlayerState.h"
 #include "TimerManager.h"
 
-namespace
-{
-	constexpr float PlayerStateRetryIntervalSeconds = 0.2f;
-	constexpr float VoiceMicThreshold = 0.003f;
-}
-
 void UMD_CharacterVOIPTalker::BeginPlay()
 {
 	Super::BeginPlay();
@@ -23,6 +17,8 @@ void UMD_CharacterVOIPTalker::BeginPlay()
 	{
 		if (UWorld* World = GetWorld())
 		{
+			// PlayerState 등록 재시도 주기
+			float PlayerStateRetryIntervalSeconds = 0.2f;
 			World->GetTimerManager().SetTimer(
 				PlayerStateRetryTimerHandle,
 				this,
@@ -45,19 +41,38 @@ void UMD_CharacterVOIPTalker::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void UMD_CharacterVOIPTalker::TryRegisterWithOwnerPlayerState()
 {
-	if (bVoiceRegistrationComplete)
+	// 이미 완료된 PlayerState 등록의 중복 처리 방지
+	if (bVoiceRegistrationComplete == true)
 	{
 		return;
 	}
 
-	const APawn* OwningPawn = Cast<APawn>(GetOwner());
-	APlayerState* OwningState = IsValid(OwningPawn) ? OwningPawn->GetPlayerState() : nullptr;
+	// 컴포넌트 소유 Pawn 준비 여부 확인
+	APawn* OwningPawn = Cast<APawn>(GetOwner());
+	if (IsValid(OwningPawn) == false)
+	{
+		return;
+	}
+
+	// 복제된 PlayerState 준비 여부 확인
+	APlayerState* OwningState = OwningPawn->GetPlayerState();
 	if (IsValid(OwningState) == false)
 	{
 		return;
 	}
 
+	// VOIP 등록에 필요한 플레이어 고유 식별자의 복제 완료 대기
+	FUniqueNetIdRepl OwningPlayerUniqueId = OwningState->GetUniqueId();
+	if (OwningPlayerUniqueId.IsValid() == false)
+	{
+		return;
+	}
+
+	// 고유 식별자가 준비된 PlayerState와 VOIP Talker 연결
 	RegisterWithPlayerState(OwningState);
+	// 프로젝트 공통 마이크 감도 값
+	float VoiceMicThreshold = 0.003f;
+	// 프로젝트 공통 마이크 감도 적용
 	UVOIPStatics::SetMicThreshold(VoiceMicThreshold);
 
 	// Pawn 재생성 전 PlayerState에 저장된 로컬 음량 조회
@@ -68,6 +83,7 @@ void UMD_CharacterVOIPTalker::TryRegisterWithOwnerPlayerState()
 		SetVolumeMuliplier(StoredVolumeMultiplier);
 	}
 
+	// PlayerState와 고유 식별자를 확인한 등록 완료 상태 저장
 	bVoiceRegistrationComplete = true;
 
 	if (UWorld* World = GetWorld())

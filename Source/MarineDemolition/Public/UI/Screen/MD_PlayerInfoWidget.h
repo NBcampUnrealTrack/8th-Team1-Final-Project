@@ -8,6 +8,7 @@ class APlayerState;
 class UHorizontalBox;
 class UImage;
 class UMD_CharacterVOIPTalker;
+class UMaterialInstanceDynamic;
 class UOverlay;
 class USlider;
 class UTextBlock;
@@ -118,6 +119,10 @@ protected:
 	UPROPERTY(BlueprintAssignable, Category = "MD|Player Info")
 	FMD_OnPlayerInfoVolumeChanged OnVolumeChanged;
 
+	// 카드별 Slider 진행도를 독립적으로 표시하는 동적 Material
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> VolumeBarMaterialInstance;
+
 public:
 	// 현재 플레이어 이름 반환
 	UFUNCTION(BlueprintPure, Category = "MD|Player Info")
@@ -145,6 +150,12 @@ protected:
 
 	// 정규화된 볼륨의 할당된 플레이어 음성 Talker 적용
 	void ApplyAssignedVoiceVolume();
+
+	// Slider 바 Brush에 카드 전용 동적 Material 적용
+	void InitializeVolumeBarMaterial();
+
+	// 카드 전용 동적 Material의 진행도 갱신
+	void UpdateVolumeBarMaterial();
 
 	// 할당된 PlayerState에 등록된 프로젝트 음성 Talker 조회
 	UMD_CharacterVOIPTalker* GetAssignedVoiceTalker();
