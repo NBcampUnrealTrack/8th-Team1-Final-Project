@@ -29,6 +29,8 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshSocket.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
@@ -1657,6 +1659,23 @@ void AMD_Character::SetCutterVFXActive(bool bActive)
 
 	bCutterVFXActive = bActive;
 	RefreshCutterVFX();
+}
+
+float AMD_Character::PlayBarnacleScrapeMontage()
+{
+	if (!IsValid(BarnacleScrapeMontage) || !IsValid(GetMesh()))
+	{
+		return 0.f;
+	}
+
+	UAnimInstance* const AnimInstance = GetMesh()->GetAnimInstance();
+	if (!IsValid(AnimInstance))
+	{
+		return 0.f;
+	}
+
+	// 같은 원샷이 아직 끝나기 전에 다시 타격하면 처음부터 다시 친다.
+	return AnimInstance->Montage_Play(BarnacleScrapeMontage);
 }
 
 void AMD_Character::OnRep_CutterVFXActive()

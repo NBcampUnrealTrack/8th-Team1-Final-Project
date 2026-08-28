@@ -32,6 +32,7 @@ class UMD_OxygenComponent;
 class UWidgetComponent;
 class UNiagaraSystem;
 class UNiagaraComponent;
+class UAnimMontage;
 struct FMinimalViewInfo;
 struct FGameplayTag;
 // 캡슐 오버랩 콜백 매개변수 형식 전방 선언
@@ -100,6 +101,14 @@ public:
 
 	// 절단 루프 VFX 토글. 어빌리티가 서버·소유 클라 양쪽에서 부르고, 사본 프록시는 복제로 따라온다
 	void SetCutterVFXActive(bool bActive);
+
+	/**
+	 * 따개비 타격용 원샷 몽타주(AS_Scraper_Oneshot_Montage)를 3인칭 메시에서 재생한다.
+	 * 클릭 제거/타격 연동·멀티캐스트는 이후 단계에서 붙인다.
+	 * @return Montage_Play 가 돌려준 길이. 재생하지 못하면 0.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Scrape|Animation")
+	float PlayBarnacleScrapeMontage();
 
 	/** UI·앱 비활성화·외부 시스템이 입력을 가져가기 전에 헤라 Ability와 Focus를 정리한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape")
@@ -208,6 +217,14 @@ protected:
 	/** 도구 스태틱 메시에서 절단 이펙트를 붙일 소켓. 없으면 메시 원점에 붙는다 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|VFX")
 	FName CutterVFXSocketName = TEXT("VFX_Blade");
+
+	/**
+	 * 따개비 타격 원샷 몽타주. 헤라 연속 긁기 포즈(AS_Scraper_Pose)와 별개이며,
+	 * DefaultSlot 에 한 번 재생된다. BP(또는 CDO)에서 할당한다. 비어 있으면
+	 * PlayBarnacleScrapeMontage 는 no-op.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|Animation")
+	TObjectPtr<UAnimMontage> BarnacleScrapeMontage;
 
 	/**
 	 * 도구 스태틱 메시에서 손에 닿을 지점을 표시하는 소켓 이름.
