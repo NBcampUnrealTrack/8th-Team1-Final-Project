@@ -112,8 +112,6 @@ struct FMD_ScrapeStrokePathState
 	/** Fixed-arc 경계 전의 실제 1D 이동 순서. 같은 방향 leg만 합치고 반전은 보존한다. */
 	TArray<FVector2D> PendingResolvedScrapePathPointsCm;
 	double PendingResolvedScrapePathTravelCm = 0.0;
-	/** 아직 fixed-arc segment로 방출되지 않은 경로가 보유한 승인 sample time. */
-	double PendingScrapePathSampleTimeSeconds = 0.0;
 	FVector2D LastEmittedScrapePathPositionCm = FVector2D::ZeroVector;
 	FVector2D LastEmittedBladeDepthAxis = FVector2D::ZeroVector;
 	FVector2D StableBladeDepthAxis = FVector2D::ZeroVector;
