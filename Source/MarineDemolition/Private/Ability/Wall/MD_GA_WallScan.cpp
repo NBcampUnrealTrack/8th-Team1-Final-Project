@@ -10,9 +10,7 @@
 #include "Kismet/KismetSystemLibrary.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
-#include "TimerManager.h"
 #include "Audio/MD_AudioRelayComponent.h"
-#include "Audio/MD_AudioSubsystem.h"
 #include "Character/MD_Character.h"
 #include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTags/MD_GameplayTags.h"
@@ -124,103 +122,23 @@ void UMD_GA_WallScan::PlayScanPulse()
 		return;
 	}
 
-	UWorld* World = GetWorld();
-	AActor* Avatar = GetAvatarActorFromActorInfo();
-	if (!World || !IsValid(Avatar))
+	// 재생과 정지를 모두 중계 컴포넌트에 맡긴다.
+	//
+	// 예전에는 이 어빌리티가 직접 재생하고 자기 인스턴스에 3초 타이머를 걸었는데,
+	// 즉발 어빌리티라 EndAbility 직후 인스턴스가 회수되면 타이머만 조용히 죽어
+	// 펄스가 영원히 울렸다. 컴포넌트는 아바타와 수명을 같이하므로 안전하다.
+	if (UMD_AudioRelayComponent* const Relay = GetAudioRelay())
 	{
-		return;
+		Relay->PlayAttachedForDuration(ScanPulseSoundTag, ScanDuration, ScanPulseFadeOutSeconds);
 	}
-
-	// 이 어빌리티는 쿨다운이 없어 3초 안에 다시 스캔할 수 있다.
-	// 그대로 두면 펄스가 겹쳐 울리므로 직전 것을 먼저 끊는다.
-	// InstancedPerActor 라 핸들·타이머가 플레이어별로 유지된다 (MD_GA_WallBase 생성자).
-	StopScanPulse();
-
-	UMD_AudioSubsystem* const Audio = World->GetSubsystem<UMD_AudioSubsystem>();
-	const APawn* const AvatarPawn = Cast<APawn>(Avatar);
-	if (Audio && AvatarPawn && AvatarPawn->IsLocallyControlled())
-	{
-		ScanPulseHandle = Audio->PlayEventAttached(ScanPulseSoundTag, Avatar->GetRootComponent());
-	}
-
-	UMD_AudioRelayComponent* const Relay = GetAudioRelay();
-	if (Relay && Avatar->HasAuthority())
-	{
-		Relay->PlayAttachedForAll(ScanPulseSoundTag);
-		bScanPulseRelayed = true;
-	}
-
-	if (!ScanPulseHandle.IsValid() && !bScanPulseRelayed)
-	{
-		return;
-	}
-
-	// EndAbility 는 이 어빌리티 객체에 바인딩된 타이머를 지운다. 따라서 일반 UObject
-	// 델리게이트 대신 약한 참조를 캡처한 람다를 써서 하이라이트 종료 시점까지 유지한다.
-	const TWeakObjectPtr<UMD_GA_WallScan> WeakAbility(this);
-	const TWeakObjectPtr<UMD_AudioSubsystem> WeakAudio(Audio);
-	const TWeakObjectPtr<UMD_AudioRelayComponent> WeakRelay(Relay);
-	const FMD_AudioHandle PulseHandle = ScanPulseHandle;
-	const bool bPulseRelayed = bScanPulseRelayed;
-	const FGameplayTag PulseSoundTag = ScanPulseSoundTag;
-	const float FadeOutSeconds = ScanPulseFadeOutSeconds;
-	World->GetTimerManager().SetTimer(
-		ScanPulseStopTimer,
-		FTimerDelegate::CreateLambda(
-			[WeakAbility, WeakAudio, WeakRelay, PulseHandle, bPulseRelayed, PulseSoundTag, FadeOutSeconds]()
-		{
-			if (UMD_GA_WallScan* Ability = WeakAbility.Get())
-			{
-				Ability->StopScanPulse();
-				return;
-			}
-
-			if (PulseHandle.IsValid())
-			{
-				if (UMD_AudioSubsystem* AudioSubsystem = WeakAudio.Get())
-				{
-					AudioSubsystem->StopHandle(PulseHandle, FadeOutSeconds);
-				}
-			}
-
-			if (bPulseRelayed)
-			{
-				if (UMD_AudioRelayComponent* AudioRelay = WeakRelay.Get())
-				{
-					AudioRelay->StopAttachedForAll(PulseSoundTag, FadeOutSeconds);
-				}
-			}
-		}),
-		ScanDuration,
-		/*bLoop*/ false);
 }
 
 void UMD_GA_WallScan::StopScanPulse()
 {
-	UWorld* World = GetWorld();
-	if (World)
+	if (UMD_AudioRelayComponent* const Relay = GetAudioRelay())
 	{
-		World->GetTimerManager().ClearTimer(ScanPulseStopTimer);
+		Relay->StopEverywhere(ScanPulseSoundTag, ScanPulseFadeOutSeconds);
 	}
-
-	if (ScanPulseHandle.IsValid())
-	{
-		if (UMD_AudioSubsystem* Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr)
-		{
-			Audio->StopHandle(ScanPulseHandle, ScanPulseFadeOutSeconds);
-		}
-	}
-
-	if (bScanPulseRelayed)
-	{
-		if (UMD_AudioRelayComponent* const Relay = GetAudioRelay())
-		{
-			Relay->StopAttachedForAll(ScanPulseSoundTag, ScanPulseFadeOutSeconds);
-		}
-	}
-
-	ScanPulseHandle = FMD_AudioHandle();
-	bScanPulseRelayed = false;
 }
 
 void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
