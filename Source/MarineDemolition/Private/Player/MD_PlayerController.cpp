@@ -23,6 +23,7 @@
 #include "Player/MD_PlayerCameraManager.h"
 
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
@@ -155,8 +156,11 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 		return;
 	}
 
-	// 클라가 보낸 건 인덱스뿐. 레벨은 서버가 자기 사본에서 읽고 잠긴 현장이면 빈 경로가 돌아온다
-	const FString MapPackage = Console->ResolveSiteLevel(SiteIndex).ToSoftObjectPath().GetLongPackageName();
+	// 클라가 보낸 건 인덱스뿐이며 레벨은 서버가 자기 사본에서 다시 조회한다.
+	FString MapPackage = Console->ResolveSiteLevel(SiteIndex).ToSoftObjectPath().GetLongPackageName();
+
+	// PIE에서 이미 방문한 World 참조에 붙은 UEDPIE 접두사를 실제 에셋 패키지 경로로 복원한다.
+	MapPackage = UWorld::RemovePIEPrefix(MapPackage);
 
 	if (MapPackage.IsEmpty())
 	{
