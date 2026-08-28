@@ -1,9 +1,10 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "GameplayTagContainer.h"
 #include "Audio/MD_AudioSubsystem.h"
+#include "Engine/EngineTypes.h"
 #include "MD_AudioRelayComponent.generated.h"
 
 /**
@@ -42,28 +43,54 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Audio", meta = (AutoCreateRefTerm = "EventTag"))
 	void PlayAtOwnerLocationForAll(const FGameplayTag& EventTag);
 
+	/**
+	 * 태그를 지정한 시간 동안 재생하고 스스로 끊는다.
+	 *
+	 * 정해진 시간 뒤에 멎어야 하는 루프는 **타이머를 어빌리티에 걸면 안 된다.**
+	 * 어빌리티 인스턴스는 발동이 끝나거나 도구가 회수될 때 사라질 수 있고,
+	 * 그러면 타이머만 조용히 죽어 소리가 영원히 남는다.
+	 * 이 컴포넌트는 아바타와 수명을 같이하므로 그런 일이 없다.
+	 *
+	 * 호출한 머신에서 바로 재생하고, 권한이 있으면 다른 머신에도 중계한다.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Audio", meta = (AutoCreateRefTerm = "EventTag"))
+	void PlayAttachedForDuration(const FGameplayTag& EventTag, float DurationSeconds, float FadeOutSeconds = -1.0f);
+
+	/** 이 태그의 루프를 이 머신과 (권한이 있으면) 다른 머신에서 함께 끊는다 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Audio", meta = (AutoCreateRefTerm = "EventTag"))
+	void StopEverywhere(const FGameplayTag& EventTag, float FadeOutSeconds = -1.0f);
+
 protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 private:
-	UFUNCTION(NetMulticast, Unreliable)
+	// 도구 조작은 초당 수십 번 오는 이벤트가 아니다. 대신 정지가 한 번 유실되면
+	// 루프가 영원히 남아 복구할 방법이 없으므로 셋 다 Reliable 로 둔다.
+	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_PlayAttached(const FGameplayTag EventTag);
 
-	UFUNCTION(NetMulticast, Unreliable)
+	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_StopAttached(const FGameplayTag EventTag, const float FadeOutSeconds);
 
-	UFUNCTION(NetMulticast, Unreliable)
+	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_PlayAtLocation(const FGameplayTag EventTag, const FVector_NetQuantize Location);
 
 	/**
-	 * 이 머신이 소리를 이미 직접 냈는지.
+	 * 이 머신이 이 소리를 이미 직접 냈는지.
 	 *
 	 * 조작 중인 본인은 어빌리티가 먼저 재생했으므로 멀티캐스트를 무시해야
-	 * 같은 소리가 두 번 겹치지 않는다.
+	 * 같은 소리가 두 번 겹치지 않는다. 서버가 어빌리티를 함께 돌린 경우도
+	 * 마찬가지라, 로컬 재생 목록을 같이 본다.
 	 */
-	bool ShouldIgnoreMulticast() const;
+	bool ShouldIgnoreMulticast(const FGameplayTag& EventTag) const;
 
 	UMD_AudioSubsystem* GetAudio() const;
+
+	/** 이 머신이 직접 시작한 루프. 중계로 받은 것과 구분한다 */
+	TMap<FGameplayTag, FMD_AudioHandle> LocalLoops;
+
+	/** PlayAttachedForDuration 이 건 자동 정지 타이머 */
+	TMap<FGameplayTag, FTimerHandle> AutoStopTimers;
 
 	/** 중계로 시작한 루프. 태그 하나당 하나만 유지한다 */
 	TMap<FGameplayTag, FMD_AudioHandle> RelayedLoops;
