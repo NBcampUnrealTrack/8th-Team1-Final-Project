@@ -78,8 +78,12 @@ private:
 	/** 재생 중인 펄스를 끊고 예약 타이머를 지운다. 타이머 콜백이면서 재진입 가드도 겸한다 */
 	void StopScanPulse();
 
+	/** 아바타의 중계 컴포넌트. 없으면 본인만 듣는다 */
+	class UMD_AudioRelayComponent* GetAudioRelay() const;
+
 	/** 재생 중인 펄스 루프. 즉발 어빌리티가 끝난 뒤에도 살아 있어야 한다 */
 	FMD_AudioHandle ScanPulseHandle;
+	bool bScanPulseRelayed = false;
 
 	FTimerHandle ScanPulseStopTimer;
 };

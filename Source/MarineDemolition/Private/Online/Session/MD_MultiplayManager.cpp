@@ -83,6 +83,7 @@ void UMD_MultiplayManager::Deinitialize()
 
         // Session 초대 수락 처리 완료에 대한 이벤트 연결 해제
         SessionInterface->OnSessionUserInviteAcceptedDelegates.RemoveAll(this);
+
     }
 
     SessionDelegateHandle.Reset();
@@ -1069,8 +1070,11 @@ void UMD_MultiplayManager::RecoverStartGameJoinability()
         return;
     }
 
+    // PIE 인스턴스 번호가 Session 광고에 포함되지 않도록 현재 World의 원본 패키지 경로를 복원한다.
+    FString CurrentMapPackagePath = UWorld::RemovePIEPrefix(World->GetPackage()->GetName());
+
     // 실패한 게임 맵 대신 실제로 유지 중인 로비 맵을 다시 광고하는 처리
-    FString CurrentSessionMapName = FPackageName::GetShortName(World->GetPackage()->GetName());
+    FString CurrentSessionMapName = FPackageName::GetShortName(CurrentMapPackagePath);
     UpdatedSessionSettings.Set(SETTING_MAPNAME, CurrentSessionMapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
     // 로비 참가 상태 복구 결과를 정리하고 최초 게임 시작 실패를 전달하기 위한 이벤트 등록
@@ -1334,7 +1338,11 @@ void UMD_MultiplayManager::RecoverEndGameSession(FName SessionName)
     // 복귀 이동 실패 후 현재 게임 맵과 진행 중 참가 제한을 다시 광고하기 위한 설정
     FOnlineSessionSettings UpdatedSessionSettings = ExistingSession->SessionSettings;
     UpdatedSessionSettings.bAllowJoinInProgress = false;
-    FString CurrentSessionMapName = FPackageName::GetShortName(World->GetPackage()->GetName());
+    // PIE 인스턴스 번호가 Session 광고에 포함되지 않도록 현재 World의 원본 패키지 경로를 복원한다.
+    FString CurrentMapPackagePath = UWorld::RemovePIEPrefix(World->GetPackage()->GetName());
+
+    // 복구된 원본 패키지 경로에서 Online Session이 광고할 짧은 맵 이름을 만든다.
+    FString CurrentSessionMapName = FPackageName::GetShortName(CurrentMapPackagePath);
     UpdatedSessionSettings.Set(SETTING_MAPNAME, CurrentSessionMapName, EOnlineDataAdvertisementType::ViaOnlineServiceAndPing);
 
     // 현재 게임 맵 정보 복구 완료 후 Ended Session 재시작을 이어가기 위한 이벤트 등록
@@ -1576,30 +1584,6 @@ void UMD_MultiplayManager::HandleDestroySessionComplete(FName SessionName, bool 
     {
         // 로그 출력
         UE_LOG(MarineDemolition, Warning, TEXT("%s 현재 GameSession 제거에 실패했습니다."), *UE_CALL_LOCATIONINFO);
-
-        // Session 제거 실패 이벤트 실행
-        OnDestroySessionComplete.Broadcast(false);
-        return;
-    }
-
-    // Map 이동 전 World 참조
-    UWorld* World = GetWorld();
-    if (IsValid(World) == false)
-    {
-        // 로그 출력
-        UE_LOG(MarineDemolition, Error, TEXT("%s Session 제거 후 네트워크 연결을 종료할 World가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
-
-        // Session 제거 실패 이벤트 실행
-        OnDestroySessionComplete.Broadcast(false);
-        return;
-    }
-
-    // 엔진의 연결 종료 처리를 사용하여 NetDriver를 닫고 프로젝트 기본 맵으로 복귀할 수 있는지 확인합니다.
-    UEngine* Engine = GEngine;
-    if (Engine == nullptr)
-    {
-        // 로그 출력
-        UE_LOG(MarineDemolition, Error, TEXT("%s Session 제거 후 네트워크 연결을 종료할 Engine이 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
 
         // Session 제거 실패 이벤트 실행
         OnDestroySessionComplete.Broadcast(false);

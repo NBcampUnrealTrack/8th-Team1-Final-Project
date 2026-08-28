@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/MD_Character.h"
@@ -7,6 +7,7 @@
 #include "Component/Character/MD_CharacterMovementComponent.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
@@ -22,6 +23,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/BoxComponent.h"
+#include "Components/WidgetComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
@@ -43,6 +45,7 @@
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
+#include "UI/Customization/MD_NameTagWidget.h"
 
 namespace
 {
@@ -94,6 +97,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 
 	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
 
+	AudioRelayComponent = CreateDefaultSubobject<UMD_AudioRelayComponent>(TEXT("AudioRelayComponent"));
+
 	ThirdPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ThirdPersonToolMesh"));
 	ThirdPersonToolMesh->SetupAttachment(GetMesh(), ToolAttachSocketName);
 	ThirdPersonToolMesh->SetOwnerNoSee(true);
@@ -124,6 +129,15 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
 
 	OxygenComponent = CreateDefaultSubobject<UMD_OxygenComponent>(TEXT("OxygenComponent"));
+
+	// 캐릭터 머리 위에 원격 플레이어의 이름표를 배치한다.
+	NameTagWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NameTagWidgetComponent"));
+	NameTagWidgetComponent->SetupAttachment(GetRootComponent());
+	NameTagWidgetComponent->SetWidgetSpace(EWidgetSpace::World);
+	NameTagWidgetComponent->SetDrawAtDesiredSize(true);
+	NameTagWidgetComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 70.0f));
+	NameTagWidgetComponent->SetOwnerNoSee(true);
+	NameTagWidgetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void AMD_Character::ForceEnterWalkState()
@@ -448,6 +462,9 @@ void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 시작 시점에 이미 준비된 PlayerState의 이름을 이름표에 반영한다.
+	RefreshNameTag();
+
 	// 기존 BP에 저장된 네이티브 컴포넌트 값이 C++ 기본값을 덮더라도
 	// 실제 플레이에서는 팔·도구의 데칼 수신과 월드 메시 관통을 줄이도록 다시 보정한다.
 	ConfigureFirstPersonRendering();
@@ -533,22 +550,84 @@ void AMD_Character::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	UpdateFirstPersonArms(DeltaSeconds);
-	UpdateFirstPersonToolTransform();
+	// 월드 공간 이름표가 각 클라이언트의 현재 카메라를 계속 향하게 한다.
+	UpdateNameTagRotation();
+
+	// 1인칭 팔과 도구는 해당 캐릭터를 직접 조작하는 로컬 플레이어만 갱신한다.
+	if (IsLocallyControlled() == true)
+	{
+		UpdateFirstPersonArms(DeltaSeconds);
+		UpdateFirstPersonToolTransform();
+	}
 }
 
 void AMD_Character::RefreshFirstPersonArmsTick()
 {
-	const bool bNeedsTick = IsLocallyControlled();
+	// 로컬 캐릭터는 기존 1인칭 팔 갱신을 위해 틱한다.
+	bool bNeedsTick = IsLocallyControlled();
+
+	// 렌더링하지 않는 전용 서버를 제외하고 원격 캐릭터도 이름표 회전을 위해 틱한다.
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		if (IsValid(NameTagWidgetComponent) == true)
+		{
+			bNeedsTick = true;
+		}
+	}
+
 	SetActorTickEnabled(bNeedsTick);
 
-	if (!bNeedsTick)
+	if (bNeedsTick == false)
+	{
+		return;
+	}
+
+	// 원격 캐릭터는 이름표만 갱신하므로 1인칭 팔 초기화를 생략한다.
+	if (IsLocallyControlled() == false)
 	{
 		return;
 	}
 
 	BindFirstPersonArmsToBodyPose();
 	UpdateFirstPersonArms(0.f, /*bSnapToTarget=*/true);
+}
+
+void AMD_Character::UpdateNameTagRotation()
+{
+	// 렌더링하지 않는 전용 서버에서는 이름표 방향을 계산하지 않는다.
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// 이름표 컴포넌트가 준비되지 않은 경우 처리를 종료한다.
+	if (IsValid(NameTagWidgetComponent) == false)
+	{
+		return;
+	}
+
+	// 현재 클라이언트의 주 로컬 카메라를 소유한 컨트롤러를 가져온다.
+	APlayerController* LocalPlayerController = UGameplayStatics::GetPlayerController(this, 0);
+	if (IsValid(LocalPlayerController) == false)
+	{
+		return;
+	}
+
+	// 카메라 위치를 기준으로 이름표가 바라볼 월드 방향을 계산한다.
+	FVector CameraLocation = FVector::ZeroVector;
+	FRotator IgnoredCameraRotation = FRotator::ZeroRotator;
+	LocalPlayerController->GetPlayerViewPoint(CameraLocation, IgnoredCameraRotation);
+	FVector NameTagLocation = NameTagWidgetComponent->GetComponentLocation();
+	FVector CameraDirection = CameraLocation - NameTagLocation;
+	if (CameraDirection.IsNearlyZero() == true)
+	{
+		return;
+	}
+
+	// 위젯 평면의 정면이 카메라를 향하도록 회전하되 화면이 기울어지지 않게 Roll을 제거한다.
+	FRotator NameTagRotation = CameraDirection.Rotation();
+	NameTagRotation.Roll = 0.0f;
+	NameTagWidgetComponent->SetWorldRotation(NameTagRotation);
 }
 
 void AMD_Character::BindFirstPersonArmsToBodyPose()
@@ -698,6 +777,8 @@ void AMD_Character::PossessedBy(AController* NewController)
 	InitializeAbilitySystem();
 	GrantDefaultAbilities();
 	RefreshFirstPersonArmsTick();
+	// 서버에서 빙의가 완료된 PlayerState의 이름을 이름표에 반영한다.
+	RefreshNameTag();
 }
 
 void AMD_Character::UnPossessed()
@@ -737,6 +818,30 @@ void AMD_Character::OnRep_PlayerState()
 	Super::OnRep_PlayerState();
 
 	InitializeAbilitySystem();
+	// 클라이언트에 PlayerState가 복제된 뒤 플랫폼 닉네임을 이름표에 반영한다.
+	RefreshNameTag();
+}
+
+void AMD_Character::RefreshNameTag()
+{
+	// 이름표에 표시할 복제된 플레이어 정보를 가져온다.
+	// 이름표 컴포넌트가 준비되지 않은 경우 처리를 종료한다.
+	APlayerState* CurrentPlayerState = GetPlayerState();
+	if (IsValid(CurrentPlayerState) == false || IsValid(NameTagWidgetComponent) == false)
+	{
+		return;
+	}
+
+	// 설정된 이름표 UI 인스턴스를 프로젝트 위젯 형식으로 가져온다.
+	UMD_NameTagWidget* NameTagWidget = Cast<UMD_NameTagWidget>(NameTagWidgetComponent->GetUserWidgetObject());
+	if (IsValid(NameTagWidget) == false)
+	{
+		return;
+	}
+
+	// PlayerState가 모든 클라이언트에 복제한 플랫폼 닉네임을 표시한다.
+	FText PlayerName = FText::FromString(CurrentPlayerState->GetPlayerName());
+	NameTagWidget->SetTextContent(PlayerName);
 }
 
 void AMD_Character::CalcCamera(

@@ -521,6 +521,16 @@ protected:
 		meta = (ClampMin = "0.0", ClampMax = "1.0", Units = "s"))
 	float ScrapeLoopIdleGraceSeconds = 0.25f;
 
+	/**
+	 * 남의 화면에서 드래그로 볼 접촉 지점 이동량(cm).
+	 *
+	 * 복제된 위치는 양자화돼 미세하게 떨리므로 로컬보다 문턱을 높게 잡는다.
+	 * 너무 낮으면 가만히 있어도 소리가 나고, 너무 높으면 천천히 긁을 때 끊긴다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback",
+		meta = (ClampMin = "0.0"))
+	float RemoteScrapeDragMinTravelCm = 0.5f;
+
 	/** 이 거리(cm) 이상 표면을 훑어야 드래그로 본다. 손떨림을 걸러낸다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback",
 		meta = (ClampMin = "0.0"))
@@ -967,6 +977,18 @@ private:
 
 	/** 직전 프레임의 경로 누적 길이 */
 	double LastObservedScrapePathArcLengthCm = 0.0;
+
+	/**
+	 * 시뮬레이티드 프록시용 드래그 판정.
+	 *
+	 * 경로 누적(StrokePath)은 조작 중인 클라이언트와 서버에만 존재한다.
+	 * 남의 화면에서는 복제되는 접촉 지점이 움직이는지로 대신 본다.
+	 */
+	bool UpdateRemoteScrapeDragState(double Now);
+
+	/** 원격 판정용 접촉 지점 캐시 */
+	FVector LastObservedRemoteContactLocation = FVector::ZeroVector;
+	bool bHasObservedRemoteContact = false;
 
 	void StartScrapeLoopAudio();
 	void StopScrapeLoopAudio();

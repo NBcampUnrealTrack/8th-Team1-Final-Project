@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -15,7 +15,6 @@ class AMD_SectorCloseoutMarker;
 class AMD_Merchant;
 class UMD_HUDWidget;
 class UMD_DailyReportWidget;
-class UMD_EquipHotbarWidget;
 class UMD_ScrapeFocusReticleWidget;
 class UMD_SiteDefinition;
 class UMD_MerchantSubsystem;
@@ -183,6 +182,13 @@ private:
 	/** Alt-Tab/창 비활성화로 입력 release를 잃기 전에 헤라 상호작용을 정리한다. */
 	void HandleApplicationWillDeactivate();
 
+	/** 로그인된 로컬 플랫폼 사용자의 닉네임을 서버 PlayerState에 제출한다. */
+	void SubmitPlatformNickname();
+
+	/** 소유 클라이언트가 확인한 플랫폼 닉네임을 서버의 PlayerState에 저장한다. */
+	UFUNCTION(Server, Reliable)
+	void ServerSubmitPlatformNickname(const FString& PlatformNickname);
+
 	FDelegateHandle ApplicationWillDeactivateHandle;
 
 	UPROPERTY(EditDefaultsOnly, Category = "HUD")
@@ -190,12 +196,6 @@ private:
 
 	UPROPERTY()
 	TObjectPtr<UMD_HUDWidget> HUDWidgetInstance;
-
-	UPROPERTY(EditDefaultsOnly, Category = "HUD")
-	TSubclassOf<UMD_EquipHotbarWidget> EquipHotbarWidgetClass;
-
-	UPROPERTY()
-	TObjectPtr<UMD_EquipHotbarWidget> EquipHotbarWidgetInstance;
 
 	/** Blueprint 자산이 없어도 동작하는 Focus 가상 포인터. */
 	UPROPERTY(EditDefaultsOnly, Category = "HUD|Scrape")
@@ -212,7 +212,7 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMD_DailyReportWidget> DailyReportWidgetInstance;
 
-	// 로컬 플레이어의 메인 HUD와 장비 핫바를 생성하거나 화면에 복구하는 처리
+	// 로컬 플레이어의 메인 HUD를 생성하거나 화면에 복구하는 처리
 	void InitializeGameplayHUD();
 
 	// 로컬 플레이어의 헤라 Focus 포인터를 생성하거나 화면에 복구하는 처리

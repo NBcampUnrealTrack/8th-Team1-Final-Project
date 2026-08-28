@@ -6,7 +6,9 @@
 #include "Character/MD_Character.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Components/StaticMeshComponent.h"
-#include "UI/Interaction/MD_TravelConsoleWidget.h"
+#include "GameplayTags/MD_GameplayTags.h"
+#include "UI/Interaction/MD_CommonTravelWidget.h"
+#include "UI/MD_LocalUIManager.h"
 
 
 AMD_TravelConsole::AMD_TravelConsole()
@@ -65,34 +67,42 @@ void AMD_TravelConsole::Interact_Implementation(AActor* Interactor)
 	}
 	
 	APlayerController* PC = Cast<APlayerController>(InstigatorCharacter->GetController());
-	
+
 	// UI는 로컬 플레이어에게만
 	if (!IsValid(PC) || !PC->IsLocalController())
 	{
 		return;
 	}
-
-	if (!ConsoleWidgetClass)
+	// GameMenu Stack에 화면을 Push할 로컬 UI 관리자를 저장한다.
+	// 설정된 UI 클래스가 실제 UObject 클래스인지 확인한다.
+	ULocalPlayer* LocalPlayer = PC->GetLocalPlayer();
+	UMD_LocalUIManager* LocalUIManager = IsValid(LocalPlayer) == true ? LocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
+	if (IsValid(LocalUIManager) == false || IsValid(ConsoleWidgetClass) == false)
 	{
 		return;
 	}
 
-	// 이미 열려 있으면 중복 생성하지 않음
-	if (ActiveWidget.IsValid() && ActiveWidget->IsInViewport())
+	// 이미 활성화된 같은 UI 화면이 있으면 중복 Push하지 않는다.
+	UCommonActivatableWidget* ActiveGameMenuWidget = LocalUIManager->GetActiveScreen(MDGameplayTags::UI_Layer_GameMenu);
+	if (IsValid(ActiveGameMenuWidget) == true && ActiveGameMenuWidget->IsA(ConsoleWidgetClass) == true)
 	{
 		return;
 	}
 
-	UMD_TravelConsoleWidget* Widget = CreateWidget<UMD_TravelConsoleWidget>(PC, ConsoleWidgetClass);
-	if (!IsValid(Widget))
-	{
-		return;
-	}
+	// Stack 활성화 전에 현재 콘솔을 새 화면에 연결하면서 GameMenu 레이어에 Push한다.
+	UCommonActivatableWidget* PushedScreen = LocalUIManager->PushScreenToLayerInitialized(
+		MDGameplayTags::UI_Layer_GameMenu,
+		ConsoleWidgetClass,
+		[this](UCommonActivatableWidget& Screen)
+		{
+			// 생성된 화면을 출항 전용 위젯으로 변환한다.
+			UMD_CommonTravelWidget* TravelWidget = Cast<UMD_CommonTravelWidget>(&Screen);
+			if (IsValid(TravelWidget) == false)
+			{
+				return;
+			}
 
-	Widget->SetOwningConsole(this);
-	Widget->AddToViewport();
-	ActiveWidget = Widget;
-
-	PC->SetShowMouseCursor(true);
-	PC->SetInputMode(FInputModeGameAndUI());
+			// 화면이 활성화되기 전에 현재 콘솔 데이터를 연결한다.
+			TravelWidget->SetOwningConsole(this);
+		});
 }

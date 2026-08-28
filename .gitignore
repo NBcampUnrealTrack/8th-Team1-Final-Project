@@ -71,6 +71,7 @@ Content/Python/
 .gemini/
 .codex/
 .kimi-code/
+antigravity.config.json
 
 # OS files
 .DS_Store

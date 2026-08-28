@@ -7,12 +7,15 @@
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
-#include "Gameplay/Scanning/MD_Scannable.h"
-#include "GameplayTags/MD_GameplayTags.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "TimerManager.h"
+#include "Audio/MD_AudioRelayComponent.h"
+#include "Audio/MD_AudioSubsystem.h"
+#include "Character/MD_Character.h"
+#include "Gameplay/Scanning/MD_Scannable.h"
+#include "GameplayTags/MD_GameplayTags.h"
 
 UMD_GA_WallScan::UMD_GA_WallScan()
 {
@@ -122,9 +125,8 @@ void UMD_GA_WallScan::PlayScanPulse()
 	}
 
 	UWorld* World = GetWorld();
-	UMD_AudioSubsystem* Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr;
 	AActor* Avatar = GetAvatarActorFromActorInfo();
-	if (!Audio || !IsValid(Avatar))
+	if (!World || !IsValid(Avatar))
 	{
 		return;
 	}
@@ -134,8 +136,21 @@ void UMD_GA_WallScan::PlayScanPulse()
 	// InstancedPerActor 라 핸들·타이머가 플레이어별로 유지된다 (MD_GA_WallBase 생성자).
 	StopScanPulse();
 
-	ScanPulseHandle = Audio->PlayEventAttached(ScanPulseSoundTag, Avatar->GetRootComponent());
-	if (!ScanPulseHandle.IsValid())
+	UMD_AudioSubsystem* const Audio = World->GetSubsystem<UMD_AudioSubsystem>();
+	const APawn* const AvatarPawn = Cast<APawn>(Avatar);
+	if (Audio && AvatarPawn && AvatarPawn->IsLocallyControlled())
+	{
+		ScanPulseHandle = Audio->PlayEventAttached(ScanPulseSoundTag, Avatar->GetRootComponent());
+	}
+
+	UMD_AudioRelayComponent* const Relay = GetAudioRelay();
+	if (Relay && Avatar->HasAuthority())
+	{
+		Relay->PlayAttachedForAll(ScanPulseSoundTag);
+		bScanPulseRelayed = true;
+	}
+
+	if (!ScanPulseHandle.IsValid() && !bScanPulseRelayed)
 	{
 		return;
 	}
@@ -144,24 +159,36 @@ void UMD_GA_WallScan::PlayScanPulse()
 	// 델리게이트 대신 약한 참조를 캡처한 람다를 써서 하이라이트 종료 시점까지 유지한다.
 	const TWeakObjectPtr<UMD_GA_WallScan> WeakAbility(this);
 	const TWeakObjectPtr<UMD_AudioSubsystem> WeakAudio(Audio);
+	const TWeakObjectPtr<UMD_AudioRelayComponent> WeakRelay(Relay);
 	const FMD_AudioHandle PulseHandle = ScanPulseHandle;
+	const bool bPulseRelayed = bScanPulseRelayed;
+	const FGameplayTag PulseSoundTag = ScanPulseSoundTag;
 	const float FadeOutSeconds = ScanPulseFadeOutSeconds;
 	World->GetTimerManager().SetTimer(
 		ScanPulseStopTimer,
-		FTimerDelegate::CreateLambda([WeakAbility, WeakAudio, PulseHandle, FadeOutSeconds]()
+		FTimerDelegate::CreateLambda(
+			[WeakAbility, WeakAudio, WeakRelay, PulseHandle, bPulseRelayed, PulseSoundTag, FadeOutSeconds]()
 		{
 			if (UMD_GA_WallScan* Ability = WeakAbility.Get())
 			{
-				if (Ability->ScanPulseHandle.Id == PulseHandle.Id)
+				Ability->StopScanPulse();
+				return;
+			}
+
+			if (PulseHandle.IsValid())
+			{
+				if (UMD_AudioSubsystem* AudioSubsystem = WeakAudio.Get())
 				{
-					Ability->StopScanPulse();
-					return;
+					AudioSubsystem->StopHandle(PulseHandle, FadeOutSeconds);
 				}
 			}
 
-			if (UMD_AudioSubsystem* AudioSubsystem = WeakAudio.Get())
+			if (bPulseRelayed)
 			{
-				AudioSubsystem->StopHandle(PulseHandle, FadeOutSeconds);
+				if (UMD_AudioRelayComponent* AudioRelay = WeakRelay.Get())
+				{
+					AudioRelay->StopAttachedForAll(PulseSoundTag, FadeOutSeconds);
+				}
 			}
 		}),
 		ScanDuration,
@@ -176,17 +203,24 @@ void UMD_GA_WallScan::StopScanPulse()
 		World->GetTimerManager().ClearTimer(ScanPulseStopTimer);
 	}
 
-	if (!ScanPulseHandle.IsValid())
+	if (ScanPulseHandle.IsValid())
 	{
-		return;
+		if (UMD_AudioSubsystem* Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr)
+		{
+			Audio->StopHandle(ScanPulseHandle, ScanPulseFadeOutSeconds);
+		}
 	}
 
-	if (UMD_AudioSubsystem* Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr)
+	if (bScanPulseRelayed)
 	{
-		Audio->StopHandle(ScanPulseHandle, ScanPulseFadeOutSeconds);
+		if (UMD_AudioRelayComponent* const Relay = GetAudioRelay())
+		{
+			Relay->StopAttachedForAll(ScanPulseSoundTag, ScanPulseFadeOutSeconds);
+		}
 	}
 
 	ScanPulseHandle = FMD_AudioHandle();
+	bScanPulseRelayed = false;
 }
 
 void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
@@ -200,7 +234,7 @@ void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 	}
 
 	APawn* Avatar = ActorInfo ? Cast<APawn>(ActorInfo->AvatarActor.Get()) : nullptr;
-	if (!Avatar || !Avatar->IsLocallyControlled())
+	if (!Avatar)
 	{
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
 		return;
@@ -212,33 +246,42 @@ void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 	FindScanTargets(ActorInfo, ScanTargets, ScanOrigin, ScanForward);
 	if (!ScanTargets.IsEmpty())
 	{
-		for (AActor* Target : ScanTargets)
+		if (Avatar->IsLocallyControlled())
 		{
-			// Execute 경로를 사용해야 Blueprint 전용 인터페이스 구현도 호출된다.
-			IMD_Scannable::Execute_OnScanned(Target, ScanDuration, Avatar);
-		}
-
-		// 펄스음은 실제 스캔 대상을 하나 이상 잡았을 때 한 번만 낸다 — 허공에 쏘고 소리가 나면
-		// 결과 없는 피드백이 되어 판정을 오해하게 만든다
-		PlayScanPulse();
-
-		// 스윕 연출 시작 — MPC는 월드 전역이라 스캔한 플레이어 로컬 머신에서만 세팅
-		if (ScanMPC)
-		{
-			if (UMaterialParameterCollectionInstance* MPCInst = GetWorld()->GetParameterCollectionInstance(ScanMPC))
+			for (AActor* Target : ScanTargets)
 			{
-				MPCInst->SetVectorParameterValue(TEXT("ScanCenter"), FLinearColor(ScanOrigin));
-				MPCInst->SetVectorParameterValue(TEXT("ScanForward"), FLinearColor(ScanForward));
-				MPCInst->SetScalarParameterValue(TEXT("ScanRadius"), ScanRadius);
-				const float ClampedHalfAngle = FMath::Clamp(ScanConeHalfAngleDegrees, 0.0f, 180.0f);
-				MPCInst->SetScalarParameterValue(
-					TEXT("ScanConeCosine"),
-					FMath::Cos(FMath::DegreesToRadians(ClampedHalfAngle)));
-				// 다른 파라미터를 모두 갱신한 뒤 머티리얼 Time 기준 시작 트리거를 마지막에 쓴다.
-				MPCInst->SetScalarParameterValue(TEXT("ScanStartTime"), GetWorld()->GetTimeSeconds());
+				// Execute 경로를 사용해야 Blueprint 전용 인터페이스 구현도 호출된다.
+				IMD_Scannable::Execute_OnScanned(Target, ScanDuration, Avatar);
+			}
+
+			// 스윕 연출 시작 — MPC는 월드 전역이라 스캔한 플레이어 로컬 머신에서만 세팅
+			if (ScanMPC)
+			{
+				if (UMaterialParameterCollectionInstance* MPCInst = GetWorld()->GetParameterCollectionInstance(ScanMPC))
+				{
+					MPCInst->SetVectorParameterValue(TEXT("ScanCenter"), FLinearColor(ScanOrigin));
+					MPCInst->SetVectorParameterValue(TEXT("ScanForward"), FLinearColor(ScanForward));
+					MPCInst->SetScalarParameterValue(TEXT("ScanRadius"), ScanRadius);
+					const float ClampedHalfAngle = FMath::Clamp(ScanConeHalfAngleDegrees, 0.0f, 180.0f);
+					MPCInst->SetScalarParameterValue(
+						TEXT("ScanConeCosine"),
+						FMath::Cos(FMath::DegreesToRadians(ClampedHalfAngle)));
+					// 다른 파라미터를 모두 갱신한 뒤 머티리얼 Time 기준 시작 트리거를 마지막에 쓴다.
+					MPCInst->SetScalarParameterValue(TEXT("ScanStartTime"), GetWorld()->GetTimeSeconds());
+				}
 			}
 		}
+
+		// 로컬에서는 즉시 재생하고, 서버 실행에서는 다른 클라이언트에 중계한다.
+		// 어느 쪽도 실제 스캔 대상이 있을 때만 시작한다.
+		PlayScanPulse();
 	}
 
 	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+}
+
+UMD_AudioRelayComponent* UMD_GA_WallScan::GetAudioRelay() const
+{
+	const AMD_Character* const Avatar = Cast<AMD_Character>(GetAvatarActorFromActorInfo());
+	return Avatar ? Avatar->GetAudioRelayComponent() : nullptr;
 }
