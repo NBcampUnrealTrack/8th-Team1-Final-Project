@@ -24,6 +24,8 @@ enum class EMD_WithdrawalPhase : uint8
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnScoreChanged, int32, NewScore);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnDayChanged, int32, NewDay);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnInspectionReport, const FMD_InspectionReport&, Report);
+// 접속 플레이어 구성 또는 표시 이름 변경을 활성 UI에 전달하는 네이티브 이벤트 선언
+DECLARE_MULTICAST_DELEGATE(FMD_OnPlayerListChanged);
 
 UCLASS()
 class MARINEDEMOLITION_API AMD_GameStateBase : public AGameStateBase
@@ -32,6 +34,13 @@ class MARINEDEMOLITION_API AMD_GameStateBase : public AGameStateBase
 
 public:
     AMD_GameStateBase();
+
+    virtual void AddPlayerState(APlayerState* PlayerState) override;
+
+    virtual void RemovePlayerState(APlayerState* PlayerState) override;
+
+    // 활성화된 플레이어 목록 UI가 구독하는 변경 이벤트 저장
+    FMD_OnPlayerListChanged OnPlayerListChanged;
 
     //Timer
     void StartGameTime();

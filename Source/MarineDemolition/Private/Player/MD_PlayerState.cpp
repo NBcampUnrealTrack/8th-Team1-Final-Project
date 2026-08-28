@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Player/MD_PlayerState.h"
@@ -51,14 +51,27 @@ void AMD_PlayerState::OnRep_PlayerName()
 {
 	Super::OnRep_PlayerName();
 
-	// 이름이 바뀐 PlayerState가 소유한 캐릭터를 가져온다.
+	// 플레이어 이름 변경을 목록 UI에 전달할 현재 프로젝트 GameState 조회
+	UWorld* World = GetWorld();
+	if (IsValid(World) == true)
+	{
+		// 접속 플레이어 목록 변경 이벤트를 제공하는 GameState 조회
+		AMD_GameStateBase* GameState = World->GetGameState<AMD_GameStateBase>();
+		if (IsValid(GameState) == true)
+		{
+			// 이름 복제가 완료된 PlayerArray 변경 알림
+			GameState->OnPlayerListChanged.Broadcast();
+		}
+	}
+
+	// 이름이 변경된 PlayerState 소유 캐릭터 조회
 	AMD_Character* PlayerCharacter = Cast<AMD_Character>(GetPawn());
 	if (IsValid(PlayerCharacter) == false)
 	{
 		return;
 	}
 
-	// 새 플랫폼 닉네임을 캐릭터 머리 위 이름표에 즉시 반영한다.
+	// 새 플랫폼 닉네임의 캐릭터 머리 위 이름표 반영
 	PlayerCharacter->RefreshNameTag();
 }
 
