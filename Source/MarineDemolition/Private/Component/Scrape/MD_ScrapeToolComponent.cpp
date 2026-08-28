@@ -82,7 +82,6 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	StrokePath.LastEmittedScrapePathArcLengthCm = 0.0;
 	StrokePath.PendingResolvedScrapePathPointsCm.Reset();
 	StrokePath.PendingResolvedScrapePathTravelCm = 0.0;
-	StrokePath.PendingScrapePathSampleTimeSeconds = 0.0;
 	StrokePath.LastEmittedScrapePathPositionCm = FVector2D::ZeroVector;
 	StrokePath.LastEmittedBladeDepthAxis = FVector2D::ZeroVector;
 	StrokePath.StableBladeDepthAxis = FVector2D::ZeroVector;
@@ -625,11 +624,13 @@ void UMD_ScrapeToolComponent::StartScraping()
 		if (AuthoritativeAim.bAuthoritativeFirstScrapeAimApproved)
 		{
 			ProcessScrapeAimResult(CurrentScrapeAim, 0.0f, true, 0);
+			ApplyBarnacleClick(CurrentScrapeAim);
 			ReplayBufferedAuthoritativeAims();
 		}
 		return;
 	}
 	ProcessScrapeTrace(0.0f);
+	ApplyBarnacleClick(CurrentScrapeAim);
 }
 
 void UMD_ScrapeToolComponent::StopScraping()
@@ -767,7 +768,6 @@ void UMD_ScrapeToolComponent::ResetStrokeTracking()
 	StrokePath.LockedStrokeAxis = FVector2D::ZeroVector;
 	StrokePath.PreviousSurface.Reset();
 	StrokePath.bHasLastScrapeSurfaceHit = false;
-	StrokePath.PendingScrapePathSampleTimeSeconds = 0.0;
 	ResetScrapePathAccumulator(FVector2D::ZeroVector);
 }
 

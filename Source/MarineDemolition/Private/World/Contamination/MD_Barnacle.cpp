@@ -39,6 +39,7 @@ void AMD_Barnacle::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLife
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
+	DOREPLIFETIME_CONDITION(AMD_Barnacle, RemovalWorkRequired, COND_InitialOnly);
 	DOREPLIFETIME(AMD_Barnacle, AccumulatedRemovalWork);
 }
 
@@ -172,25 +173,23 @@ float AMD_Barnacle::GetScrapeBlockRadiusCm() const
 	return static_cast<float>(PlanarRadius) * ScrapeBlockRadiusScale;
 }
 
-bool AMD_Barnacle::IsImpactOnCooldown() const
-{
-	const UWorld* const World = GetWorld();
-	if (!World || MinimumImpactIntervalSeconds <= 0.0f)
-	{
-		return false;
-	}
-
-	return World->GetTimeSeconds() - LastImpactWorldSeconds
-		< MinimumImpactIntervalSeconds;
-}
-
 float AMD_Barnacle::GetRemovalProgress() const
 {
-	const float SafeWorkRequired = FMath::IsFinite(RemovalWorkRequired)
-		? FMath::Max(UE_SMALL_NUMBER, RemovalWorkRequired)
-		: UE_SMALL_NUMBER;
+	const float SafeWorkRequired = GetMaximumDurability();
 
 	return FMath::Clamp(AccumulatedRemovalWork / SafeWorkRequired, 0.0f, 1.0f);
+}
+
+float AMD_Barnacle::GetMaximumDurability() const
+{
+	return FMath::IsFinite(RemovalWorkRequired)
+		? FMath::Max(1.0f, RemovalWorkRequired)
+		: 1.0f;
+}
+
+float AMD_Barnacle::GetCurrentDurability() const
+{
+	return FMath::Max(0.0f, GetMaximumDurability() - AccumulatedRemovalWork);
 }
 
 bool AMD_Barnacle::IsFullyRemoved() const
@@ -198,46 +197,43 @@ bool AMD_Barnacle::IsFullyRemoved() const
 	return GetRemovalProgress() >= 1.0f;
 }
 
-bool AMD_Barnacle::ApplyScrapeImpact(
-	const float ImpactWork,
-	const FVector& ImpactWorldDirection)
+bool AMD_Barnacle::ApplyScrapeClickDamage(
+	const float DurabilityDamage,
+	const FVector& WobbleWorldDirection)
 {
-	UWorld* const World = GetWorld();
-	if (!HasAuthority() || !World || IsFullyRemoved())
+	if (!HasAuthority() || IsFullyRemoved())
 	{
 		return false;
 	}
 
-	// NaN/무한대가 들어오면 진행도가 통째로 무너진다. 계산 전에 막는다.
-	// 음수 작업량은 진행도를 되돌려 버리므로 0과 함께 걸러 낸다.
-	const float SafeImpactWork =
-		(FMath::IsFinite(ImpactWork) && ImpactWork > 0.0f) ? ImpactWork : 0.0f;
-
-	if (IsImpactOnCooldown())
+	// NaN/무한대나 음수가 들어오면 진행도가 무너지거나 되돌아가므로 거부한다.
+	const float SafeDamage =
+		(FMath::IsFinite(DurabilityDamage) && DurabilityDamage > 0.0f)
+		? DurabilityDamage
+		: 0.0f;
+	if (SafeDamage <= 0.0f)
 	{
 		return false;
 	}
-
-	LastImpactWorldSeconds = World->GetTimeSeconds();
 
 	// 거의 다 떨어진 따개비가 더 크게 흔들려야 "이제 곧 떨어진다"가 읽힌다.
-	// 힘이 모자란 접촉(SafeImpactWork == 0)도 최소한의 흔들림은 남긴다.
-	const float StrengthFromWork = FMath::Clamp(SafeImpactWork * 4.0f, 0.0f, 1.0f);
+	// 도구 피해가 커질수록 같은 단계에서도 반응이 분명하게 보인다.
+	const float StrengthFromDamage = FMath::Clamp(
+		SafeDamage / GetMaximumDurability(),
+		0.0f,
+		1.0f);
 	const float NewWobbleScale = FMath::Clamp(
-		0.25f + 0.75f * StrengthFromWork * (0.4f + 0.6f * GetRemovalProgress()),
+		0.25f + 0.75f * StrengthFromDamage * (0.4f + 0.6f * GetRemovalProgress()),
 		0.0f,
 		1.0f);
 
 	MulticastPlayImpactWobble(
-		ImpactWorldDirection.GetSafeNormal(),
+		WobbleWorldDirection.GetSafeNormal(),
 		NewWobbleScale);
 
-	if (SafeImpactWork <= 0.0f)
-	{
-		return false;
-	}
-
-	AccumulatedRemovalWork += SafeImpactWork;
+	AccumulatedRemovalWork = FMath::Min(
+		AccumulatedRemovalWork + SafeDamage,
+		GetMaximumDurability());
 	ApplyRemovalProgressVisual();
 
 	if (!IsFullyRemoved())
@@ -250,6 +246,11 @@ bool AMD_Barnacle::ApplyScrapeImpact(
 }
 
 void AMD_Barnacle::OnRep_AccumulatedRemovalWork()
+{
+	ApplyRemovalProgressVisual();
+}
+
+void AMD_Barnacle::OnRep_RemovalWorkRequired()
 {
 	ApplyRemovalProgressVisual();
 }
@@ -359,12 +360,15 @@ void AMD_Barnacle::ApplyRemovalProgressVisual()
 	}
 }
 
-void AMD_Barnacle::AssignSpawnerIdentity(
+void AMD_Barnacle::InitializeFromSpawner(
 	AMD_BarnacleSpawner* const InSpawner,
-	const int32 InSpawnIndex)
+	const int32 InSpawnIndex,
+	const int32 InMaximumDurability)
 {
 	OwningSpawner = InSpawner;
 	SpawnIndex = InSpawnIndex;
+	RemovalWorkRequired = static_cast<float>(FMath::Max(1, InMaximumDurability));
+	AccumulatedRemovalWork = 0.0f;
 }
 
 void AMD_Barnacle::BreakOff()

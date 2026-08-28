@@ -44,6 +44,9 @@ namespace MDGameplayTags
 	 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Cuttable);
 
+	/** 전방 스캐너 후보 태그. 시각 반응을 위해 IMD_Scannable 구현도 필요하다. */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Scannable);
+
 	/** 상호작용한 대상을 월드의 물리 오브젝트로 운반하는 픽업 방식 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Pickup_Physics);
 

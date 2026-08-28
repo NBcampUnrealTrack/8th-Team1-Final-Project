@@ -296,6 +296,11 @@ void AMD_CuttableWall::ScanHighlight(float Duration, AActor* Scanner)
 	OnWallScanned.Broadcast(this, Duration, Scanner);
 }
 
+void AMD_CuttableWall::OnScanned_Implementation(float Duration, AActor* Scanner)
+{
+	ScanHighlight(Duration, Scanner);
+}
+
 void AMD_CuttableWall::AddCutProgress(float DeltaSeconds, AActor* Cutter)
 {
 	AddCutProgressInternal(DeltaSeconds, Cutter, nullptr);

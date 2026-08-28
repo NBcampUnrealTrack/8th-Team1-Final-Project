@@ -426,30 +426,15 @@ void UMD_ScrapeToolComponent::FlushPendingScrapePathApplication()
 
 	TArray<FMD_ScrapeToolPathSegment> TailSegments;
 	FlushResolvedScrapePathTail(StrokePath.PreviousSurfacePositionCm, TailSegments);
-	double TailTravelCm = 0.0;
-	for (const FMD_ScrapeToolPathSegment& TailSegment : TailSegments)
-	{
-		TailTravelCm += FMath::Max(
-			static_cast<double>(TailSegment.TravelDistanceCm), 0.0);
-	}
-	const double TailTimeSeconds = FMath::Max(
-		StrokePath.PendingScrapePathSampleTimeSeconds, 0.0);
-	StrokePath.PendingScrapePathSampleTimeSeconds = 0.0;
 	for (const FMD_ScrapeToolPathSegment& TailSegment : TailSegments)
 	{
 		FVector2D AppliedEndPositionCm = TailSegment.EndPositionCm;
 		AMD_Barnacle* BlockingBarnacle = nullptr;
-		const float TailSegmentDeltaTime = TailTravelCm > UE_DOUBLE_SMALL_NUMBER
-			? static_cast<float>(TailTimeSeconds
-				* (static_cast<double>(TailSegment.TravelDistanceCm)
-					/ TailTravelCm))
-			: 0.0f;
 		if (ApplyScrapePathSegment(
 				Surface,
 				StrokePath.PreviousSurfaceFace,
 				StrokePath.LastScrapeSurfaceHit,
 				TailSegment,
-				TailSegmentDeltaTime,
 				AppliedEndPositionCm,
 				BlockingBarnacle))
 		{
@@ -498,7 +483,6 @@ void UMD_ScrapeToolComponent::RebaseScrapePathAfterObstacle(
 	StrokePath.FurthestSurfacePositionCm = BlockedPositionCm;
 	StrokePath.LockedStrokeAxis = FVector2D::ZeroVector;
 	StrokePath.bHasLockedStrokeAxis = false;
-	StrokePath.PendingScrapePathSampleTimeSeconds = 0.0;
 	ResetScrapePathAccumulator(BlockedPositionCm);
 }
 
@@ -583,40 +567,11 @@ void UMD_ScrapeToolComponent::ApplyAuthoritativeScrapeStroke(
 	}
 }
 
-void UMD_ScrapeToolComponent::DeliverPathSegmentObstacleImpact(
-	UMD_ScrapeSurfaceComponent* const Surface,
-	const EMD_ScrapeSurfaceFace SurfaceFace,
-	const FMD_ScrapeToolPathSegment& PathSegment,
-	const float DeltaTime,
-	AMD_Barnacle* const BlockingBarnacle)
-{
-	FVector StrokeStartWorldPosition;
-	FVector StrokeEndWorldPosition;
-	FVector ImpactWorldDirection = FVector::ZeroVector;
-	if (Surface->TryGetScrapeSurfaceWorldPosition(
-			PathSegment.StartPositionCm,
-			SurfaceFace,
-			StrokeStartWorldPosition)
-		&& Surface->TryGetScrapeSurfaceWorldPosition(
-			PathSegment.EndPositionCm,
-			SurfaceFace,
-			StrokeEndWorldPosition))
-	{
-		ImpactWorldDirection = StrokeEndWorldPosition - StrokeStartWorldPosition;
-	}
-	SetTrackedBarnacle(BlockingBarnacle);
-	DeliverBarnacleImpact(
-		BlockingBarnacle,
-		CalculateImpactSpeedCmPerSecond(PathSegment.TravelDistanceCm, DeltaTime),
-		ImpactWorldDirection);
-}
-
 bool UMD_ScrapeToolComponent::ApplyScrapePathSegment(
 	UMD_ScrapeSurfaceComponent* const Surface,
 	const EMD_ScrapeSurfaceFace SurfaceFace,
 	const FHitResult& CurrentHit,
 	const FMD_ScrapeToolPathSegment& PathSegment,
-	const float DeltaTime,
 	FVector2D& OutAppliedEndPositionCm,
 	AMD_Barnacle*& OutBlockingBarnacle)
 {
@@ -704,12 +659,6 @@ bool UMD_ScrapeToolComponent::ApplyScrapePathSegment(
 		return false;
 	}
 
-	DeliverPathSegmentObstacleImpact(
-		Surface,
-		SurfaceFace,
-		PathSegment,
-		DeltaTime,
-		OutBlockingBarnacle);
 	return true;
 }
 
