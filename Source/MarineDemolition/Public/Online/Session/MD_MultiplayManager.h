@@ -9,6 +9,7 @@
 #include "MD_MultiplayManager.generated.h"
 
 class UMD_LoadingScreenSubsystem;
+class APlayerState;
 
 struct FBlueprintSessionResult;
 struct FMD_SessionCreateParams;     // Hosting Session 설정값
@@ -127,6 +128,9 @@ public:
     // 현재 GameSession이 시작되어 진행 중인지 반환하는 함수
     UFUNCTION(BlueprintPure, Category = "Marine Demolition|Session")
     bool IsSessionInProgress();
+
+    // 지정 PlayerState가 현재 Session 소유자인지 반환하는 함수
+    bool IsSessionHostPlayer(APlayerState* PlayerState);
 
     // 최대 MaxSearchResultCount개의 Session을 검색하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")

@@ -10,6 +10,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/GameModeBase.h"
+#include "GameFramework/PlayerState.h"
 #include "UObject/UObjectGlobals.h"
 #include "Player/MD_PlayerController.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
@@ -294,6 +295,42 @@ bool UMD_MultiplayManager::IsSessionInProgress()
     // StartSession 완료 후 InProgress 상태인 경우에만 진행 중으로 판정한다.
     bIsSessionInProgress = CurrentSession->SessionState == EOnlineSessionState::InProgress;
     return bIsSessionInProgress;
+}
+
+bool UMD_MultiplayManager::IsSessionHostPlayer(APlayerState* PlayerState)
+{
+    // Session 소유자 비교 실패 시 반환할 기본값
+    bool bIsSessionHostPlayer = false;
+
+    // 비교 대상 PlayerState 또는 Session 모듈이 없는 경우 처리 중단
+    if (IsValid(PlayerState) == false || SessionInterface.IsValid() == false)
+    {
+        return bIsSessionHostPlayer;
+    }
+
+    // 현재 GameSession의 소유자 정보 조회
+    FNamedOnlineSession* CurrentSession = SessionInterface->GetNamedSession(NAME_GameSession);
+    if (CurrentSession == nullptr || CurrentSession->OwningUserId.IsValid() == false)
+    {
+        return bIsSessionHostPlayer;
+    }
+
+    // 카드에 할당된 PlayerState의 Online 고유 식별자 조회
+    FUniqueNetIdRepl PlayerUniqueId = PlayerState->GetUniqueId();
+    if (PlayerUniqueId.IsValid() == false)
+    {
+        return bIsSessionHostPlayer;
+    }
+
+    // Session 소유자와 카드 대상 플레이어의 고유 식별자 비교
+    TSharedPtr<const FUniqueNetId> PlayerNetId = PlayerUniqueId.GetUniqueNetId();
+    if (PlayerNetId.IsValid() == false)
+    {
+        return bIsSessionHostPlayer;
+    }
+
+    bIsSessionHostPlayer = *CurrentSession->OwningUserId == *PlayerNetId;
+    return bIsSessionHostPlayer;
 }
 
 void UMD_MultiplayManager::FindSessions(int32 MaxSearchResultCount, const FMD_SessionFindParams& SessionFindParams)

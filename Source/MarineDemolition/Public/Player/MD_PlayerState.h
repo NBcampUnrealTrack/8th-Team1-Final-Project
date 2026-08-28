@@ -71,7 +71,17 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Attribute")
     TObjectPtr<UMD_CharacterAttributeSet> CharacterAttributeSet;
 
+	// 현재 클라이언트의 동일 PlayerState 수명 동안 유지되는 음성 재생 배율
+	UPROPERTY(Transient)
+	float VoiceVolumeMultiplier = 1.5f;
+
 public:
+	// 현재 클라이언트에 저장된 플레이어별 음성 재생 배율 반환
+	FORCEINLINE float GetVoiceVolumeMultiplier() { return VoiceVolumeMultiplier; }
+
+	// 현재 클라이언트의 플레이어별 음성 재생 배율 저장
+	void SetVoiceVolumeMultiplier(float NewVoiceVolumeMultiplier);
+
 	//상태 변경 알림 HUD, 이동속도 변경시 사용
 	UPROPERTY(BlueprintAssignable, Category = "MD|Health")
 	FMD_OnHealthStateChanged OnHealthStateChanged;
