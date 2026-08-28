@@ -92,6 +92,12 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> BubbleTexture;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> ShipTexture;
+
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> WaveTexture;
+
 	FTimerHandle IntroTimerHandle;
 	FTimerHandle WorldReadyTimerHandle;
 	FTimerHandle CompletionTimerHandle;

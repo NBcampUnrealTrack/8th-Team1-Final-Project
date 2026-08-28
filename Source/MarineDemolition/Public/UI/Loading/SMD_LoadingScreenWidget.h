@@ -24,6 +24,10 @@ public:
 		SLATE_ARGUMENT(TSharedPtr<FMD_LoadingVisualState>, VisualState)
 		/** 미지정이면 물방울을 그리지 않고 배경과 문구만 남는다. */
 		SLATE_ARGUMENT(UTexture2D*, BubbleTexture)
+		/** 미지정이면 파도형 진행 트랙만 그리고 배는 생략한다. */
+		SLATE_ARGUMENT(UTexture2D*, ShipTexture)
+		/** 미지정이면 수평선 아래 너울 띠를 생략한다. */
+		SLATE_ARGUMENT(UTexture2D*, WaveTexture)
 	SLATE_END_ARGS()
 
 	void Construct(const FArguments& InArgs);
@@ -56,6 +60,16 @@ private:
 		float Time, float Opacity) const;
 	void DrawCompletionCheck(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
 		float Progress, float Opacity) const;
+	void DrawVoyageProgress(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
+		float Time, float Progress, float Opacity) const;
+	void DrawSkyAndSea(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
+		float Opacity) const;
+	void DrawCloudBands(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
+		float Drift, float Opacity) const;
+	void DrawIslands(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
+		float Drift, float Opacity) const;
+	void DrawSeaSwell(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
+		float Drift, float Opacity) const;
 	void DrawCenteredText(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
 		const FTextLayer& Layer) const;
 
@@ -63,6 +77,8 @@ private:
 
 	TSharedPtr<FMD_LoadingVisualState> VisualState;
 	FSlateBrush BubbleBrush;
+	FSlateBrush ShipBrush;
+	FSlateBrush WaveBrush;
 	FSlateFontInfo TitleFont;
 	FSlateFontInfo SubtitleFont;
 };

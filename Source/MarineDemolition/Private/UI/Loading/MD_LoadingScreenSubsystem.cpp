@@ -154,6 +154,7 @@ void UMD_LoadingScreenSubsystem::HandlePreLoadMap(const FWorldContext& WorldCont
 	{
 		StartLoadingVisuals(FText::GetEmpty(), /*bSkipIntro=*/true);
 	}
+	if (VisualState.IsValid()) { VisualState->SetProgressFloor(MD_LoadingScreen::MapLoadStartProgress); }
 
 	// viewport에 직접 붙은 UMG는 소유 월드가 파괴된 뒤에도 하드 트래블을 살아서 넘어온다.
 	// 로딩층은 순수 Slate라 그것을 덮지 못하므로, 목적지에서 outro 아래로 옛 타이틀/일시정지
@@ -176,6 +177,7 @@ void UMD_LoadingScreenSubsystem::HandlePostLoadMap(UWorld* LoadedWorld)
 	// 동안 같은 위젯을 다시 붙여, 자동 종료 뒤 검정 프레임이 없게 한다.
 	DetachViewportLoadingWidget();
 	EnsureViewportLoadingWidget();
+	if (VisualState.IsValid()) { VisualState->SetProgressFloor(MD_LoadingScreen::MapLoadedProgress); }
 
 	// 타이머는 월드에 종속돼 옛 월드와 함께 사라진다. 인트로가 남았다면 남은 시간만큼
 	// 새 월드에서 다시 걸어야 트래블이 인트로를 잡아먹지 않는다.
@@ -278,7 +280,15 @@ void UMD_LoadingScreenSubsystem::TryFinishAfterWorldLoad()
 		return;
 	}
 
-	if (++ReadyStablePollCount < MD_LoadingScreen::RequiredReadyStablePolls) { return; }
+	// 안정 판정이 쌓이는 만큼 마지막 구간을 미리 채워, 종료 직전에 진행률이 한 번에 뛰지 않게 한다.
+	++ReadyStablePollCount;
+	if (VisualState.IsValid())
+	{
+		VisualState->SetProgressFloor(FMath::Lerp(MD_LoadingScreen::MapLoadedProgress,
+			MD_LoadingScreen::ReadyStableProgress,
+			static_cast<float>(ReadyStablePollCount) / MD_LoadingScreen::RequiredReadyStablePolls));
+	}
+	if (ReadyStablePollCount < MD_LoadingScreen::RequiredReadyStablePolls) { return; }
 
 	StopWorldReadyPolling();
 	FinishLoadingScreen();
@@ -385,20 +395,24 @@ void UMD_LoadingScreenSubsystem::ClearLoadingTimers()
 	}
 }
 
-// 텍스처는 Project Settings → Game → MD Loading Screen에서 지정한다.
-// 미지정이면 위젯이 물방울을 생략하고 배경과 문구만 그린다.
+// 텍스처는 Project Settings → Game → MD Loading Screen에서 지정한다. 미지정이면 위젯이
+// 해당 요소만 생략한다. 한 번 로드하면 UPROPERTY가 붙들고 있으므로 다음 로딩에서는 다시 읽지 않는다.
 TSharedRef<SWidget> UMD_LoadingScreenSubsystem::CreateLoadingWidget()
 {
-	if (!BubbleTexture)
+	if (!BubbleTexture || !ShipTexture || !WaveTexture)
 	{
 		if (const UMD_LoadingScreenSettings* Settings = UMD_LoadingScreenSettings::Get())
 		{
-			BubbleTexture = Settings->GetBubbleTexture();
+			if (!BubbleTexture) { BubbleTexture = Settings->GetBubbleTexture(); }
+			if (!ShipTexture) { ShipTexture = Settings->GetShipTexture(); }
+			if (!WaveTexture) { WaveTexture = Settings->GetWaveTexture(); }
 		}
 	}
 	return SNew(SMD_LoadingScreenWidget)
 		.VisualState(VisualState)
-		.BubbleTexture(BubbleTexture);
+		.BubbleTexture(BubbleTexture)
+		.ShipTexture(ShipTexture)
+		.WaveTexture(WaveTexture);
 }
 
 void UMD_LoadingScreenSubsystem::EnsureViewportLoadingWidget()
