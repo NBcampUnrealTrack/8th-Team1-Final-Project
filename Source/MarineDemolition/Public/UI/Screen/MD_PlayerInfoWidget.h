@@ -4,15 +4,11 @@
 #include "Blueprint/UserWidget.h"
 #include "MD_PlayerInfoWidget.generated.h"
 
-class APlayerState;
 class UHorizontalBox;
 class UImage;
 class UMD_CharacterVOIPTalker;
-class UMaterialInstanceDynamic;
-class UOverlay;
 class USlider;
 class UTextBlock;
-class UVerticalBox;
 
 // 플레이어별 음성 볼륨 변경을 외부 화면에 전달하는 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnPlayerInfoVolumeChanged, float, Volume);
@@ -31,26 +27,6 @@ protected:
 	virtual void NativeDestruct() override;
 
 protected:
-	// 플레이어 정보 카드의 전체 요소를 겹쳐 배치하는 최상위 영역
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UOverlay> Overlay_Root;
-
-	// 플레이어 정보 카드의 헤더와 볼륨 조절부를 세로로 배치하는 영역
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UVerticalBox> VB_Root;
-
-	// 호스트 상태, 플레이어 이름과 음성 아이콘을 가로로 배치하는 영역
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UHorizontalBox> HB_Header;
-
-	// 호스트 왕관 또는 강퇴 상태 이미지
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UImage> Img_HostorKick;
-
-	// 플레이어 이름 본문과 그림자를 겹쳐 표시하는 영역
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UOverlay> Ov_PlayerName;
-
 	// 플레이어 이름 본문
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_PlayerName;
@@ -59,45 +35,13 @@ protected:
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_PlayerName_Shadow;
 
-	// 현재 음성 출력 상태 아이콘 영역
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UHorizontalBox> HB_Icon_Volume;
-
-	// 음성 출력 아이콘
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UImage> Img_Icon_Volume;
-
 	// 음소거 상태 아이콘
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
 	TObjectPtr<UImage> Img_Icon_Mute;
 
-	// 음성 볼륨 이미지와 음소거 이미지를 겹쳐 표시하는 영역
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UOverlay> Overlay;
-
-	// 음성 아이콘 영역의 간격 이미지
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UImage> Img_Spacer;
-
 	// 음성 크기 단계 이미지를 나열하는 영역
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
 	TObjectPtr<UHorizontalBox> HB_VoumeIndicator;
-
-	// 첫 번째 음성 크기 단계
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UImage> Img_Icon_VolumeLine_1;
-
-	// 두 번째 음성 크기 단계
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UImage> Img_Icon_VolumeLine_2;
-
-	// 세 번째 음성 크기 단계
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UImage> Img_Icon_VolumeLine_3;
-
-	// 음성 볼륨 Slider를 카드 하단에 배치하는 영역
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UHorizontalBox> HB_Footer;
 
 	// 개별 플레이어의 음성 출력 크기 조절
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
@@ -156,6 +100,9 @@ protected:
 
 	// 카드 전용 동적 Material의 진행도 갱신
 	void UpdateVolumeBarMaterial();
+
+	// 정규화 볼륨에 따른 음성 단계와 음소거 아이콘 표시 갱신
+	void UpdateVolumeIndicator();
 
 	// 할당된 PlayerState에 등록된 프로젝트 음성 Talker 조회
 	UMD_CharacterVOIPTalker* GetAssignedVoiceTalker();

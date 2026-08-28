@@ -1,5 +1,7 @@
 ﻿#include "UI/Screen/MD_PlayerInfoWidget.h"
 
+#include "Components/HorizontalBox.h"
+#include "Components/Image.h"
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "Online/Voice/MD_CharacterVOIPTalker.h"
@@ -11,6 +13,8 @@ void UMD_PlayerInfoWidget::NativePreConstruct()
 
 	// 에디터 미리보기와 런타임 생성 전 저장된 플레이어 이름 반영
 	ApplyPlayerName();
+	// 에디터 미리보기와 런타임 생성 전 저장된 볼륨 표시 반영
+	UpdateVolumeIndicator();
 }
 
 void UMD_PlayerInfoWidget::NativeConstruct()
@@ -29,6 +33,9 @@ void UMD_PlayerInfoWidget::NativeConstruct()
 		UpdateVolumeBarMaterial();
 		Sd_Volume->OnValueChanged.AddUniqueDynamic(this, &UMD_PlayerInfoWidget::HandleVolumeChanged);
 	}
+
+	// 현재 볼륨에 맞춘 음성 단계와 음소거 아이콘 동기화
+	UpdateVolumeIndicator();
 }
 
 void UMD_PlayerInfoWidget::NativeDestruct()
@@ -112,6 +119,8 @@ void UMD_PlayerInfoWidget::SetVolume(float InVolume)
 
 	// 카드 전용 Slider 바의 진행도 동기화
 	UpdateVolumeBarMaterial();
+	// 음성 크기 단계와 음소거 아이콘 동기화
+	UpdateVolumeIndicator();
 
 	// 할당된 플레이어의 실제 음성 재생 배율 갱신
 	ApplyAssignedVoiceVolume();
@@ -205,6 +214,55 @@ void UMD_PlayerInfoWidget::UpdateVolumeBarMaterial()
 	FName VolumeBarValueParameterName(TEXT("Value"));
 	// 현재 카드의 정규화 볼륨을 바 진행도에 적용
 	VolumeBarMaterialInstance->SetScalarParameterValue(VolumeBarValueParameterName, Volume);
+}
+
+void UMD_PlayerInfoWidget::UpdateVolumeIndicator()
+{
+	// 음량 표시 구성 요소가 없는 Blueprint 변형의 갱신 생략
+	if (IsValid(Img_Icon_Mute) == false || IsValid(HB_VoumeIndicator) == false)
+	{
+		return;
+	}
+
+	// 음소거 상태의 아이콘 전환과 자식 표시 갱신 생략
+	if (Volume <= 0.0f)
+	{
+		Img_Icon_Mute->SetVisibility(ESlateVisibility::Visible);
+		HB_VoumeIndicator->SetVisibility(ESlateVisibility::Collapsed);
+		return;
+	}
+
+	// 음량이 있는 상태의 아이콘 전환
+	Img_Icon_Mute->SetVisibility(ESlateVisibility::Collapsed);
+	HB_VoumeIndicator->SetVisibility(ESlateVisibility::Visible);
+
+	// 0보다 큰 음량의 기본 표시 단계 수
+	int32 VisibleVolumeLineCount = 1;
+	if (Volume >= 0.5f)
+	{
+		// 높은 음량의 표시 단계 수 확장
+		VisibleVolumeLineCount = 3;
+	}
+	else if (Volume >= 0.25f)
+	{
+		// 중간 이상 음량의 표시 단계 수 확장
+		VisibleVolumeLineCount = 2;
+	}
+
+	// HorizontalBox의 자식 순서에 따른 음성 크기 단계 표시
+	int32 VolumeLineCount = HB_VoumeIndicator->GetChildrenCount();
+	for (int32 VolumeLineIndex = 0; VolumeLineIndex < VolumeLineCount; ++VolumeLineIndex)
+	{
+		// 계산된 단계 수에 따른 현재 자식의 표시 상태
+		ESlateVisibility VolumeLineVisibility =
+			VolumeLineIndex < VisibleVolumeLineCount ? ESlateVisibility::Visible : ESlateVisibility::Collapsed;
+		// 개별 변수 바인딩 없이 HorizontalBox 자식의 표시 상태 갱신
+		UWidget* VolumeLineWidget = HB_VoumeIndicator->GetChildAt(VolumeLineIndex);
+		if (IsValid(VolumeLineWidget) == true)
+		{
+			VolumeLineWidget->SetVisibility(VolumeLineVisibility);
+		}
+	}
 }
 
 UMD_CharacterVOIPTalker* UMD_PlayerInfoWidget::GetAssignedVoiceTalker()
