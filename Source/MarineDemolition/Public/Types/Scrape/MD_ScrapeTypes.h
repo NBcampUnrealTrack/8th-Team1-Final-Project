@@ -491,21 +491,6 @@ public:
 		meta = (ClampMin = "0.01", UIMin = "1.0"))
 	float BarnacleDamagePerClick;
 
-	/** 기존 속도 기반 따개비 타격 데이터의 직렬화 호환용 필드. 런타임에서는 사용하지 않는다. */
-	UPROPERTY(meta = (DeprecatedProperty,
-		DeprecationMessage = "Barnacles now take BarnacleDamagePerClick once per click."))
-	float BarnacleMinimumImpactSpeedCmPerSecond = 60.0f;
-
-	/** 기존 속도 기반 따개비 타격 데이터의 직렬화 호환용 필드. 런타임에서는 사용하지 않는다. */
-	UPROPERTY(meta = (DeprecatedProperty,
-		DeprecationMessage = "Barnacles now take BarnacleDamagePerClick once per click."))
-	float BarnacleMaximumImpactSpeedCmPerSecond = 600.0f;
-
-	/** 기존 속도 기반 따개비 타격 데이터의 직렬화 호환용 필드. 런타임에서는 사용하지 않는다. */
-	UPROPERTY(meta = (DeprecatedProperty,
-		DeprecationMessage = "Barnacles now take BarnacleDamagePerClick once per click."))
-	float BarnacleImpactWorkPerSpeedUnit = 0.0015f;
-
 	/** 판정기에 전달할 수 있는 유한한 양수 값인지 확인 */
 	bool IsValid() const
 	{
