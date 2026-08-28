@@ -45,9 +45,16 @@ public:
 		AActor* NewViewTarget,
 		FViewTargetTransitionParams TransitionParams = FViewTargetTransitionParams()) override;
 
+	// 강퇴된 소유 클라이언트의 Session 정리 처리
+	virtual void ClientWasKicked_Implementation(const FText& KickReason) override;
+
 	// 콘솔을 통째로 넘겨 서버가 자기 사본 Sites[SiteIndex]에서 레벨을 읽음 (클라 값 신뢰 안 함)
 	UFUNCTION(Server, Reliable)
 	void ServerRequestTravel(AMD_TravelConsole* Console, int32 SiteIndex, EMD_Difficulty Difficulty);
+
+	// 리슨 서버 호스트가 선택한 원격 플레이어의 강퇴 요청
+	UFUNCTION(Server, Reliable)
+	void ServerRequestKickPlayer(APlayerState* TargetPlayerState);
 
 	// 모선 하루 마감 콘솔 요청. 서버가 거리 검증 후 GameMode 마감 실행
 	UFUNCTION(Server, Reliable)
