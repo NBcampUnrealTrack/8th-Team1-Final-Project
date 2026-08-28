@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/NetSerialization.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
@@ -26,6 +27,10 @@ class MARINEDEMOLITION_API AMD_WallUtility : public AActor, public IMD_Interacta
 {
 	GENERATED_BODY()
 
+#if WITH_DEV_AUTOMATION_TESTS
+	friend class FMD_WallUtilityRepairPermissionSpec;
+#endif
+
 public:
 	AMD_WallUtility();
 
@@ -36,6 +41,7 @@ public:
 
 	// IMD_Interactable — 수리는 서버에서 검증
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
 	virtual bool RequiresServerInteraction_Implementation() const override { return true; }
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
@@ -47,7 +53,8 @@ protected:
 	void HandleHostWallCut(AMD_CuttableWall* Wall, AActor* Cutter);
 
 	// 절단자 시점 조준 레이가 이 인프라 메시를 관통했는지 (파이프 회피 컷 판정)
-	bool WasCutRayThroughMesh(AActor* Cutter) const;
+	// 관통 시 OutHit에 관통 지점/법선을 담는다 (파손 VFX 스폰 지점)
+	bool WasCutRayThroughMesh(AActor* Cutter, FHitResult& OutHit) const;
 
 	// 겹친 벽 스캔 시 호출. 스캐너가 로컬 조종 중인 머신에서만 실루엣을 Duration 초간 노출
 	UFUNCTION()
@@ -63,8 +70,7 @@ protected:
 	// 파생 클래스가 수리 결과(봉합/재점등)를 구현. 서버에서만 호출된다
 	virtual void OnRepaired(AActor* Repairer) {}
 
-	// 이 인프라를 수리할 수 있는 도구를 Interactor가 들고 있는지
-	// TODO: 장비/핫바 시스템과 연결해 RequiredRepairToolTag 소지 여부 확인 (폼건/절연테이프)
+	// 현재 장착 도구의 ToolAbilityTag가 RequiredRepairToolTag와 정확히 일치하는지 확인
 	virtual bool CanRepairWith(AActor* Interactor) const;
 
 	// 상태 전이 진입점 (중복 방지 + 복제 + 파생 훅 호출). 서버 전용
@@ -105,6 +111,14 @@ protected:
 
 	UPROPERTY(ReplicatedUsing = OnRep_UtilityState)
 	EMD_UtilityState UtilityState = EMD_UtilityState::Intact;
+
+	// 절단 레이가 메시를 관통한 지점 (서버가 파손 시 기록, BP가 파손 VFX 스폰 위치로 사용)
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "MD|Utility")
+	FVector_NetQuantize BreakLocation = FVector_NetQuantize(ForceInitToZero);
+
+	// 관통 지점의 표면 법선 (VFX +X=분출 규약에 맞춰 MakeRotFromX으로 회전 구성)
+	UPROPERTY(Replicated, BlueprintReadOnly, Category = "MD|Utility")
+	FVector_NetQuantizeNormal BreakNormal = FVector_NetQuantizeNormal(0.f, 0.f, 1.f);
 
 private:
 	// LinkTrigger와 겹치는 CuttableWall을 찾아 철거 델리게이트 구독 (서버)

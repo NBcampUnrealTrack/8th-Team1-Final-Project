@@ -12,7 +12,8 @@
 				"Engine",
 				"UMG",
 				"CoreUObject",
-				"DeveloperSettings"
+				"DeveloperSettings",
+				"CommonUI"
 			]
 		}
 	],
@@ -57,7 +58,15 @@
 			"Enabled": true
 		},
 		{
-			"Name": "SQLiteSupport",
+			"Name": "EditorToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "CommonUI",
+			"Enabled": true
+		},
+		{
+			"Name": "StructUtils",
 			"Enabled": true
 		}
 	]

@@ -1,14 +1,16 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameModeBase.h"
 #include "Types/Score/MD_ScoreTypes.h"
+#include "Types/Travel/MD_TravelTypes.h"
 #include "MD_GameModeBase.generated.h"
 
 class AMD_CuttableWall;
 class AMD_GameStateBase;
+class AMD_PlayerController;
 class UMD_SiteDefinition;
 class UWorld;
 
@@ -26,16 +28,35 @@ public:
     // 정식 하루 마감 진입점. 18:00 자동·모선 인터랙트·MD_EndDay 공용, 하루 1회만 동작
     void RequestEndDay();
 
+    // 일일 보고서 확인 버튼을 누른 플레이어의 서버 요청으로 보류 중인 Day 전환을 확정하는 진입점
+    void ConfirmDayTransition(AMD_PlayerController* RequestingController);
+
     virtual void RestartPlayer(AController* NewPlayer) override;
 
     virtual void Logout(AController* Exiting) override;
 
 protected:
+    virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
  //TimeAlarm
 private:
+    // 출발 요청 URL에서 검증한 계약 난이도를 GameState 생성 이후 적용하기 위한 임시 상태
+    EMD_Difficulty RequestedContractDifficulty = EMD_Difficulty::Standard;
+
+    // 직접 맵 실행과 Day 재시작을 출발 난이도 지정 계약과 구분하기 위한 옵션 존재 여부
+    bool bHasRequestedContractDifficulty = false;
+
+    // 출발 요청 URL에서 검증한 계약 인원수를 GameState 생성 이후 적용하기 위한 임시 상태
+    int32 RequestedContractCrewCount = 0;
+
+    // 직접 맵 실행과 Day 재시작을 출발 인원 지정 계약과 구분하기 위한 옵션 존재 여부
+    bool bHasRequestedContractCrewCount = false;
+
+    // 서버 GameState에 검증된 출발 난이도와 인원수를 계약 상태로 반영하는 처리
+    void ApplyRequestedContractSettings();
+
     FTimerHandle CheckGameTimeTimerHandle;
 
     // 새 게임 또는 불러오기 데이터를 World에 적용하는 함수
@@ -44,6 +65,9 @@ private:
     void CheckGameTimeEvents();
 
     void FinalizeReturnStatuses();
+
+    // Day 마감 시 복귀 구역 내부 샘플을 퀘스트 제출로 확정하는 처리
+    void FinalizeDeliveredSamples();
 
  //Collapse Score
 private:
@@ -68,11 +92,12 @@ private:
 
     void HandleGameOver();
 
-    // 대상 레벨로 리슨 트래블. 미지정이면 안전하게 현재 레벨 리스타트
+    // 게임 종료 세션 상태를 갱신한 뒤 대상 로비 레벨로 이동하는 함수
     void TravelToLevel(const TSoftObjectPtr<UWorld>& Level);
 
-    // 계약 시작(Day1 마감) 시점의 인원수를 GameState에 고정
-    void CaptureContractCrew();
+    bool DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld* World) const;
+
+    TSoftObjectPtr<UWorld> MakeWorldAssetReference(UWorld* World) const;
 
     // FinalizeDay 중복 실행 방지 플래그. 레벨 재시작 시 초기화
     bool bDayFinalized = false;
@@ -80,9 +105,8 @@ private:
     // ExecuteDayTransition이 참조할 직전 판정 결과
     EMD_InspectionResult PendingResult = EMD_InspectionResult::NotApplicable;
 
-    // 마감 확정 후 출발 연출을 보여줄 시간
-    UPROPERTY(EditDefaultsOnly, Category = "Day")
-    float DepartTravelDelay = 3.f;
+    // 여러 플레이어의 보고서 버튼 요청이 같은 Day 전환을 중복 실행하지 않도록 하는 서버 상태
+    bool bDayTransitionConfirmed = false;
 
     // 클리어/게임오버 결과 화면을 보여줄 시간
     UPROPERTY(EditDefaultsOnly, Category = "Day")
@@ -101,7 +125,13 @@ private:
     // 같은 레벨 재로드 → 복원 경로에서 Day+1 진입
     void TravelToNextDay();
 
-    // 18:00 정산 시점 요소 일괄 적용 (복귀·샘플 납품/미회수·현장 미수거)
+    // 세션 절차를 거치지 않는 직접 ServerTravel 전에 모든 소유 클라이언트에 로딩 화면을 요청한다.
+    void PreparePlayersForTravel(const FText& Subtitle);
+
+    // 로딩 인트로가 화면을 완전히 덮은 뒤에 같은 레벨 재시작 트래블을 실행한다.
+    void RestartLevelAfterLoadingIntro();
+
+    // 18:00 정산 시점의 인원 복귀 점수와 현장 미수거 점수를 적용하는 처리
     void FinalizeDailyScore();
 
     // Day2/3/4 점검 판정 + 경고/게임오버 상태 적용
@@ -125,7 +155,11 @@ private:
     UFUNCTION()
     void HandleGameDayChanged(int32 NewDay);
 
-    /** BP GameMode 또는 PlayerController DebugSite fallback보다 우선한다. */
+    /** 현재 맵을 키로 사용하여 현장 데이터를 직접 선택하기 위한 맵별 계약 목록 */
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+    TMap<TSoftObjectPtr<UWorld>, TObjectPtr<UMD_SiteDefinition>> ExpeditionSitesByMap;
+
+    /** 기존 BP 설정과 단일 현장 테스트를 유지하기 위한 호환 후보 */
     UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
     TObjectPtr<UMD_SiteDefinition> ExpeditionSite;
 

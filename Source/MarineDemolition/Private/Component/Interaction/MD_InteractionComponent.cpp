@@ -1,4 +1,4 @@
-#include "Component/Interaction/MD_InteractionComponent.h"
+﻿#include "Component/Interaction/MD_InteractionComponent.h"
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
@@ -12,12 +12,13 @@
 #include "GameFramework/PlayerState.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
 #include "GameplayTagAssetInterface.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "GeometryCollection/GeometryCollectionComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
-#include "World/Sample/MD_SampleItem.h"
+#include "World/Sample/MD_QuestItem.h"
 
 UMD_InteractionComponent::UMD_InteractionComponent()
 {
@@ -38,6 +39,11 @@ void UMD_InteractionComponent::SetInteractionDependencies(UCameraComponent* InCa
 	Camera = InCamera;
 	HoldPoint = InHoldPoint;
 	PhysicsHandle = InPhysicsHandle;
+}
+
+FText UMD_InteractionComponent::GetCurrentTargetDisplayName() const
+{
+	return UMD_InteractionPresentationLibrary::ResolveInteractionDisplayName(CurrentTarget.Get());
 }
 
 void UMD_InteractionComponent::BeginPlay()
@@ -113,6 +119,12 @@ void UMD_InteractionComponent::Interact()
 	// New interactables are server-authoritative by default. UI-only targets must explicitly opt out.
 	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
 	{
+		if (!IMD_Interactable::CanInteractWith(Target, OwnerPawn))
+		{
+			SetCurrentTarget(nullptr);
+			return;
+		}
+
 		const bool bRequiresServerInteraction =
 			IMD_Interactable::Execute_RequiresServerInteraction(Target);
 
@@ -189,6 +201,10 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 	{
 		return;
 	}
+	if (!IMD_Interactable::CanInteractWith(RequestedActor, OwnerPawn))
+	{
+		return;
+	}
 
 	// 핫바는 장비 전용 — 월드 오브젝트 픽업은 물리 운반만 허용 (기획 02 §2.5).
 	const IGameplayTagAssetInterface* TagAsset = Cast<IGameplayTagAssetInterface>(RequestedActor);
@@ -211,6 +227,10 @@ bool UMD_InteractionComponent::TryGrabPhysicsComponent(
 	{
 		return false;
 	}
+
+	// 물리를 켜기 전에 끊는다. SetSimulatePhysics 직후 첫 솔버 스텝부터 캡슐과의 접촉이
+	// 풀리기 시작하므로, 그랩이 끝난 뒤에 끊으면 이미 한 번 밀린 뒤가 된다.
+	BeginCarryCollisionIsolation(Component);
 
 	if (!Component->IsSimulatingPhysics())
 	{
@@ -268,7 +288,74 @@ bool UMD_InteractionComponent::TryGrabPhysicsComponent(
 	}
 
 	ApplyHoldProfile(DefaultHoldProfile);
+	EndCarryCollisionIsolation();
 	return false;
+}
+
+UPrimitiveComponent* UMD_InteractionComponent::GetOwnerCollisionComponent() const
+{
+	const APawn* OwnerPawn = GetOwnerPawn();
+	if (!IsValid(OwnerPawn))
+	{
+		return nullptr;
+	}
+
+	return Cast<UPrimitiveComponent>(OwnerPawn->GetRootComponent());
+}
+
+void UMD_InteractionComponent::BeginCarryCollisionIsolation(UPrimitiveComponent* Component)
+{
+	// 이전 운반이 정리되지 않은 채로 들어와도 상태가 겹치지 않게 한다.
+	EndCarryCollisionIsolation();
+
+	if (!IsValid(Component))
+	{
+		return;
+	}
+
+	CarryIsolatedPawnResponse = Component->GetCollisionResponseToChannel(ECC_Pawn);
+	bHasCarryCollisionIsolation = true;
+	CarryIsolatedComponent = Component;
+
+	// 이게 발사를 막는 본체다. MoveIgnoreComponents는 InitSweepCollisionParams를 타고
+	// CMC의 바닥 탐지에까지 반영되므로, 캐릭터가 운반물을 무브먼트 베이스로 삼지 못한다.
+	// 물체가 튕겨나가도 캐릭터를 끌고 갈 경로가 없어진다.
+	if (UPrimitiveComponent* OwnerCollision = GetOwnerCollisionComponent())
+	{
+		OwnerCollision->IgnoreComponentWhenMoving(Component, true);
+	}
+
+	// 솔버 접촉까지 끊는 건 기본적으로 하지 않는다. 끊으면 물체가 캐릭터를 통과해 머리 뒤로 빠진다.
+	if (bIsolateCarriedFromPawnChannel)
+	{
+		Component->SetCollisionResponseToChannel(ECC_Pawn, ECR_Ignore);
+	}
+}
+
+void UMD_InteractionComponent::EndCarryCollisionIsolation()
+{
+	if (!bHasCarryCollisionIsolation)
+	{
+		return;
+	}
+
+	bHasCarryCollisionIsolation = false;
+
+	UPrimitiveComponent* Component = CarryIsolatedComponent.Get();
+	CarryIsolatedComponent = nullptr;
+
+	// 운반 중 파괴된 물체는 되돌릴 대상이 없다. 플래그만 내리고 끝낸다.
+	if (!IsValid(Component))
+	{
+		return;
+	}
+
+	if (UPrimitiveComponent* OwnerCollision = GetOwnerCollisionComponent())
+	{
+		OwnerCollision->IgnoreComponentWhenMoving(Component, false);
+	}
+
+	Component->SetCollisionResponseToChannel(ECC_Pawn, CarryIsolatedPawnResponse);
 }
 
 bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
@@ -329,9 +416,9 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 	// Clients never move the carried actor from their local HoldPoint.
 
 	// PhysicsHandle이 HoldPoint로 급가속하는 첫 순간의 오탐 충격을 흡수한다.
-	if (AMD_SampleItem* Sample = Cast<AMD_SampleItem>(Target))
+	if (AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Target))
 	{
-		Sample->NotifyGrabbed();
+		QuestItem->NotifyGrabbed();
 	}
 
 	if (Target->Implements<UMD_Grabbable>())
@@ -423,6 +510,10 @@ void UMD_InteractionComponent::ReleaseHeldActor()
 {
 	APawn* OwnerPawn = GetOwnerPawn();
 	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()) return;
+
+	// 그립이 이미 사라진 경우(운반 중 대상 파괴 등)에도 끊어둔 충돌은 반드시 원복한다.
+	EndCarryCollisionIsolation();
+
 	if (!HeldActor && !HasAuthorityPhysicsGrip())
 	{
 		RefreshTickEnabled();
@@ -471,6 +562,56 @@ FTransform UMD_InteractionComponent::GetHoldPointTransform() const
 	return HoldPoint->GetRelativeTransform() * ViewTransform;
 }
 
+FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& HoldTransform) const
+{
+	const FVector Desired = HoldTransform.TransformPositionNoScale(HeldTargetOffset);
+
+	const UPrimitiveComponent* Held = IsValid(PhysicsHandle) ? PhysicsHandle->GetGrabbedComponent() : nullptr;
+	const UWorld* World = GetWorld();
+	if (!IsValid(Held) || !IsValid(Camera) || !World)
+	{
+		return Desired;
+	}
+
+	const FVector Origin = Camera->GetComponentLocation();
+	const float ProbeRadius = FMath::Max(
+		HoldProbeMinRadius,
+		static_cast<float>(Held->Bounds.SphereRadius) * HoldProbeRadiusScale);
+
+	// 폰과 다른 물리 프롭은 제외한다. 목표점을 막아야 할 건 월드 지오메트리뿐이다.
+	// 채널 스윕으로 양쪽 충돌 응답을 함께 확인해야 Overlap 감지 볼륨을 벽으로 오인하지 않는다.
+	FCollisionResponseParams ProbeResponses(ECR_Ignore);
+	ProbeResponses.CollisionResponse.SetResponse(
+		ECC_WorldStatic,
+		Held->GetCollisionResponseToChannel(ECC_WorldStatic));
+	ProbeResponses.CollisionResponse.SetResponse(
+		ECC_WorldDynamic,
+		Held->GetCollisionResponseToChannel(ECC_WorldDynamic));
+
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDHoldProbe), false, GetOwner());
+	QueryParams.AddIgnoredActor(Held->GetOwner());
+
+	FHitResult Hit;
+	const bool bBlocked = World->SweepSingleByChannel(
+		Hit, Origin, Desired, FQuat::Identity, Held->GetCollisionObjectType(),
+		FCollisionShape::MakeSphere(ProbeRadius), QueryParams, ProbeResponses);
+
+	const FVector ToDesired = Desired - Origin;
+	const double DesiredDistance = ToDesired.Size();
+
+	// 시작 지점이 이미 묻혀 있으면 Distance가 0이라 물체가 얼굴로 끌려온다. 기존 동작을 유지한다.
+	if (!bBlocked || Hit.bStartPenetrating || DesiredDistance <= UE_KINDA_SMALL_NUMBER)
+	{
+		return Desired;
+	}
+
+	// 하한이 상한을 넘지 않게 먼저 접는다. HoldMinDistance를 HoldPoint 거리보다 크게 잡아도 안전하다.
+	const double MinDistance = FMath::Min(static_cast<double>(HoldMinDistance), DesiredDistance);
+	const double ClampedDistance = FMath::Clamp(static_cast<double>(Hit.Distance), MinDistance, DesiredDistance);
+
+	return Origin + (ToDesired / DesiredDistance) * ClampedDistance;
+}
+
 void UMD_InteractionComponent::UpdateHeldTarget()
 {
 	const APawn* OwnerPawn = GetOwnerPawn();
@@ -478,7 +619,7 @@ void UMD_InteractionComponent::UpdateHeldTarget()
 		|| !HasAuthorityPhysicsGrip() || !IsValid(HoldPoint)) return;
 
 	const FTransform HoldTransform = GetHoldPointTransform();
-	const FVector TargetLocation = HoldTransform.TransformPositionNoScale(HeldTargetOffset);
+	const FVector TargetLocation = ResolveHoldTargetLocation(HoldTransform);
 
 	if (ActiveHoldProfile.bConstrainRotation)
 	{
@@ -509,8 +650,9 @@ void UMD_InteractionComponent::UpdateCarrySettle(float DeltaSeconds)
 
 	const FVector CurrentGrabPoint =
 		Component->GetComponentTransform().TransformPositionNoScale(HeldGrabPointOffset);
-	const FVector TargetLocation =
-		GetHoldPointTransform().TransformPositionNoScale(HeldTargetOffset);
+	// 정착 판정은 스프링이 실제로 쫓는 좌표와 같아야 한다. 보정 전 좌표로 재면
+	// 시선을 내린 채 집었을 때 영영 도달하지 못해 OnCarrySettled가 불리지 않는다.
+	const FVector TargetLocation = ResolveHoldTargetLocation(GetHoldPointTransform());
 
 	const bool bReachedTarget =
 		FVector::DistSquared(CurrentGrabPoint, TargetLocation) <= FMath::Square(CarrySettleTolerance);
@@ -592,7 +734,7 @@ void UMD_InteractionComponent::UpdateInteractionFocus()
 
 AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 {
-	const APawn* OwnerPawn = GetOwnerPawn();
+	APawn* OwnerPawn = GetOwnerPawn();
 	AController* Controller = IsValid(OwnerPawn) ? OwnerPawn->GetController() : nullptr;
 	if (!IsValid(Controller) || !GetWorld()) return nullptr;
 
@@ -628,6 +770,7 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 		return nullptr;
 	}
 	if (IsHeldByOtherPawn(HitActor)) return nullptr;
+	if (!IMD_Interactable::CanInteractWith(HitActor, OwnerPawn)) return nullptr;
 
 	return HitActor;
 }
@@ -727,9 +870,13 @@ bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor)
 
 void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)
 {
-	if (CurrentTarget.Get() == NewTarget) return;
+	AActor* PreviousTarget = GetCurrentTarget();
+	if (!CurrentTarget.IsStale() && PreviousTarget == NewTarget)
+	{
+		return;
+	}
 
-	if (AActor* PreviousTarget = CurrentTarget.Get())
+	if (PreviousTarget)
 	{
 		if (PreviousTarget->Implements<UMD_Interactable>())
 		{
@@ -743,6 +890,8 @@ void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)
 	{
 		IMD_Interactable::Execute_SetInteractionHighlighted(NewTarget, true);
 	}
+
+	OnInteractionTargetChanged.Broadcast(GetCurrentTarget());
 }
 
 APawn* UMD_InteractionComponent::GetOwnerPawn() const

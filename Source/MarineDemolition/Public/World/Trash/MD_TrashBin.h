@@ -9,22 +9,21 @@
 #include "MD_TrashBin.generated.h"
 
 class UBoxComponent;
+class UMD_TrashContentClaimSubsystem;
 class UPrimitiveComponent;
 class USceneComponent;
 class UStaticMeshComponent;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-	FMDOnTrashBinContentsChanged,
-	int32, ContentCount,
-	int32, MaxCapacity);
+struct FMD_CarryFrozenContent
+{
+	TWeakObjectPtr<AActor> Actor;
+	TEnumAsByte<ECollisionEnabled::Type> PreviousCollisionEnabled = ECollisionEnabled::QueryAndPhysics;
+};
+
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnTrashBinContentsChanged, int32, ContentCount);
 
 UCLASS()
-class MARINEDEMOLITION_API AMD_TrashBin
-	: public AActor
-	, public IGameplayTagAssetInterface
-	, public IMD_Grabbable
-	, public IMD_Interactable
-	, public IMD_TrashContainer
+class MARINEDEMOLITION_API AMD_TrashBin	: public AActor, public IGameplayTagAssetInterface, public IMD_Grabbable, public IMD_Interactable, public IMD_TrashContainer
 {
 	GENERATED_BODY()
 
@@ -33,6 +32,8 @@ public:
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override;
+
+	/** Implements IMD_Grabbable*/
 	virtual UPrimitiveComponent* GetGrabComponent_Implementation() const override;
 	virtual USceneComponent* GetGrabPoint_Implementation() const override;
 	virtual FVector GetHoldOffset_Implementation() const override;
@@ -40,6 +41,7 @@ public:
 	virtual void OnCarryStarted_Implementation() override;
 	virtual void OnCarrySettled_Implementation() override;
 	virtual void OnCarryEnded_Implementation() override;
+	/** ~Implements IMD_Grabbable*/
 
 	/** Implements IMD_Interactable*/
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
@@ -48,21 +50,16 @@ public:
 	/** Implements IMD_TrashContainer */
 	virtual TArray<AActor*> GetContainedActors_Implementation() const override;
 	virtual bool TryDrainContentsForSorting_Implementation(TArray<AActor*>& OutContents) override;
-	virtual bool TryRestoreDrainedContentsAfterFailedSort_Implementation(
-		const TArray<AActor*>& Contents) override;
 	/** ~Implements IMD_TrashContainer */
 
 	UFUNCTION(BlueprintPure, Category = "MD|Trash Bin")
 	int32 GetContentCount() const { return ContentCount; }
 
-	UFUNCTION(BlueprintPure, Category = "MD|Trash Bin")
-	int32 GetMaxCapacity() const { return FMath::Max(1, MaxCapacity); }
+	/** ClaimSubsystem이 이 통을 후보 소유자로 판단할 때 사용하는 수용 가능 여부 조회. */
+	bool CanAcceptContentClaim(AActor* Content) const;
 
-	UFUNCTION(BlueprintPure, Category = "MD|Trash Bin")
-	bool IsFull() const { return ContentCount >= GetMaxCapacity(); }
-
-	/** 분류 판정용 비파괴 C++ snapshot. 내부 collection 참조는 노출하지 않는다. */
-	void GetContentsSnapshot(TArray<AActor*>& OutContents) const;
+	/** ClaimSubsystem에서 이 통의 소유권이 확인된 내용물만 실제 입고 상태에 반영*/
+	bool TryApplyGrantedContentClaim(AActor* Content);
 
 	/** 현재 물리 overlap을 기준으로 서버의 내용물 목록을 다시 맞춘다. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Trash Bin")
@@ -73,9 +70,7 @@ public:
 	FMDOnTrashBinContentsChanged OnContentsChanged;
 
 protected:
-	/** 서버에서 내부 내용물의 진입과 이탈 추적을 시작 */
 	virtual void BeginPlay() override;
-	/** 오버랩 및 내용물 파괴 이벤트 연결을 정리 */
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash Bin")
@@ -93,25 +88,20 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Interaction")
 	FMD_HoldProfile HoldProfile;
 
-	/** 내부로 판정할 영역 */
+	/** 내부 판정 영역 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash Bin")
 	TObjectPtr<UBoxComponent> ContentsVolume;
 
-	/** 이 액터를 집을 때 사용할 물리 운반 방식 */
+	/** 픽업 태그 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Interaction",	meta = (Categories = "Interaction.Pickup.Physics"))
 	FGameplayTag PickupMethodTag;
 
-	/** 이 보관함이 수용할 내용물 분류 */
+	/** 쓰레기통이 수용할 내용물 분류 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Bin", meta = (Categories = "Resource.Storage.Content"))
 	FGameplayTagContainer AcceptedContentTags;
 
-	/** 고체 Actor 기준 최대 적재 수. 0은 허용하지 않는다 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Bin",
-		meta = (ClampMin = "1", UIMin = "1"))
-	int32 MaxCapacity = 12;
-
-	UPROPERTY(ReplicatedUsing = OnRep_ContentCount, VisibleInstanceOnly, BlueprintReadOnly,
-		Category = "MD|Trash Bin")
+	/** 현재 이 통이 단독 소유한 내용물 수. 적재 상한 x */
+	UPROPERTY(ReplicatedUsing = OnRep_ContentCount, VisibleInstanceOnly, BlueprintReadOnly,	Category = "MD|Trash Bin")
 	int32 ContentCount = 0;
 
 private:
@@ -127,35 +117,37 @@ private:
 	UFUNCTION()
 	void OnRep_ContentCount();
 
+	UFUNCTION()
+	void OnRep_CarryFrozenContents();
+
+	/** TSet의 내용물을 TArray로 이동하는 함수 */
+	void GetContentsSnapshot(TArray<AActor*>& OutContents) const;
 	bool IsAcceptedContent(const AActor* Actor) const;
 	bool TryAdmitContent(AActor* Actor);
 	bool RemoveAdmittedContent(AActor* Actor);
-	void AdmitWaitingContents();
-	void RebuildContentsFromOverlaps(bool bPreserveAdmissionOrder);
-	void RefreshContentsFromOverlapsPreservingAdmissions();
+	void RebuildContentsFromOverlaps();
 	void SyncContentCount();
+	UMD_TrashContentClaimSubsystem* GetContentClaimSubsystem() const;
 
-	/** 끌려가는 동안 내용물을 통에 붙인다. 안 그러면 통 벽이 때려 대부분 튀어나간다 */
+	/** 운반 시 동결 */
 	void FreezeContentsForCarry();
+	bool FreezeContentForCarry(AActor* Content);
 
 	/** 붙여둔 내용물을 떼고 물리·충돌을 되돌린다 */
-	void ReleaseContentsAfterCarry();
+	void ReleaseContentsAfterCarry(bool bRefreshContents = true);
+	void UnfreezeContentForCarry(AActor* Content);
+	void ApplyReplicatedCarryCollisionState();
+	void RemoveFrozenContentReferences(AActor* Content);
+
+	UPROPERTY(ReplicatedUsing = OnRep_CarryFrozenContents)
+	TArray<TObjectPtr<AActor>> ReplicatedCarryFrozenContents;
 
 	TSet<TWeakObjectPtr<AActor>> Contents;
-
-	/** Begin/End overlap을 actor 단위 ref-count로 합쳐 매 이벤트마다 전체 volume을 재조회하지 않는다. */
 	TMap<TWeakObjectPtr<AActor>, int32> ContentOverlapCounts;
-	TArray<TWeakObjectPtr<AActor>> ContentAdmissionOrder;
 
-	/** 통째 분류 drain은 서버 game thread에서 단 한 번만 성공한다. */
 	bool bSortingTransactionActive = false;
-
-	struct FMD_CarryFrozenContent
-	{
-		TWeakObjectPtr<AActor> Actor;
-		TEnumAsByte<ECollisionEnabled::Type> PreviousCollisionEnabled = ECollisionEnabled::QueryAndPhysics;
-	};
-
-	/** Contents와 따로 둔다. 붙어 있는 동안 오버랩이 흔들려도 되돌릴 대상은 남아야 한다 */
+	bool bDrainInProgress = false;
+	bool bCarryAccelerationActive = false;
 	TArray<FMD_CarryFrozenContent> CarryFrozenContents;
+	TMap<TWeakObjectPtr<AActor>, TEnumAsByte<ECollisionEnabled::Type>> ClientCarryCollisionOverrides;
 };

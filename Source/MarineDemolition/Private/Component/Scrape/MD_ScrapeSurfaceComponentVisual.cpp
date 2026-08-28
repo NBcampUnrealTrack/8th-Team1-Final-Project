@@ -51,6 +51,8 @@ FMD_ScrapeSurfaceCell
 UMD_ScrapeSurfaceComponent::MakeContaminationMaskCell(
 	const int32 CellIndex) const
 {
+	// 합성 셀은 게임플레이 상태가 아니라 텍셀에 그대로 들어갈 불투명도 신호를
+	// 담는다. 양자화가 InitialContamination으로 잘라내므로 1로 고정한다.
 	FMD_ScrapeSurfaceCell MaskCell;
 	MaskCell.InitialContamination = 1.0f;
 	MaskCell.RemainingContamination = 0.0f;
@@ -60,16 +62,12 @@ UMD_ScrapeSurfaceComponent::MakeContaminationMaskCell(
 	}
 
 	const FMD_ScrapeSurfaceCell& SourceCell = ContaminationCells[CellIndex];
-	const float GeneratedInitial =
-		ContaminationGeneratedInitialAmounts.IsValidIndex(CellIndex)
-		? ContaminationGeneratedInitialAmounts[CellIndex]
-		: SourceCell.InitialContamination;
-	const float TotalVisualContamination =
-		FMD_ScrapeMaskAtlas::CalculateRuntimeAwareVisualContamination(
+	MaskCell.RemainingContamination =
+		FMD_ScrapeMaskAtlas::CalculateVisualMaskValue(
 			SourceCell.RemainingContamination,
 			SourceCell.InitialContamination,
-			GeneratedInitial);
-	MaskCell.RemainingContamination = TotalVisualContamination;
+			SourceCell.CoveredFraction,
+			ContaminationVisualFilmOpacityGamma);
 	return MaskCell;
 }
 
@@ -1349,11 +1347,54 @@ void UMD_ScrapeSurfaceComponent::ApplyContaminationAppearanceParameters(
 	DecalMID.SetScalarParameterValue(
 		ContaminationOpacityParameterName,
 		OverallOpacity);
+	ApplyContaminationVisualMaskCurveParameters(DecalMID);
+}
+
+
+void UMD_ScrapeSurfaceComponent::ApplyContaminationVisualMaskCurveParameters(
+	UMaterialInstanceDynamic& DecalMID) const
+{
+	// 마스크 텍셀은 FMD_ScrapeMaskAtlas가 만든 0~1 불투명도 신호다. 자르는
+	// 구간을 0.5 기준으로 대칭으로 두면 보이는 경계가 부분 피복 50% 지점, 즉
+	// 실제 헤라 날 경계에 놓인다. 비대칭으로 두면 자국 폭이 날 폭과 달라진다.
+	const float EdgeSoftness = FMath::IsFinite(ContaminationVisualEdgeSoftness)
+		? FMath::Clamp(ContaminationVisualEdgeSoftness, 0.02f, 1.0f)
+		: 0.12f;
+	DecalMID.SetScalarParameterValue(
+		ContaminationEdgeMinParameterName,
+		0.5f - EdgeSoftness * 0.5f);
+	DecalMID.SetScalarParameterValue(
+		ContaminationEdgeMaxParameterName,
+		0.5f + EdgeSoftness * 0.5f);
+
+	// 노이즈는 구간 폭에 비례해서 넣는다. 절대값으로 두면 구간을 좁힐수록
+	// 노이즈가 경계를 한 칸씩 밀어내 톱니가 된다.
+	const float EdgeNoiseAmount =
+		FMath::IsFinite(ContaminationVisualEdgeNoiseAmount)
+		? FMath::Clamp(ContaminationVisualEdgeNoiseAmount, 0.0f, 1.0f)
+		: 0.0f;
+	DecalMID.SetScalarParameterValue(
+		ContaminationEdgeNoiseStrengthParameterName,
+		EdgeNoiseAmount * EdgeSoftness);
+
+	// 마스크 값은 CPU가 이미 불투명도 공간으로 만들어 두었다. 여기서 한 번 더
+	// 휘면 경계가 날 위치에서 밀리므로 중립값으로 고정한다.
+	DecalMID.SetScalarParameterValue(
+		ContaminationVisualMaskGammaParameterName,
+		1.0f);
 }
 
 
 void UMD_ScrapeSurfaceComponent::RefreshContaminationAppearance()
 {
+	// FilmOpacityGamma는 텍셀 값 자체를 바꾸므로 MID만 갱신하면 반영되지 않는다.
+	// 마스크가 이미 있을 때만 다시 만든다. 아직 없다면 표면 초기화가 만든다.
+	if (ContaminationMaskTexture)
+	{
+		InitializeContaminationMask();
+		return;
+	}
+
 	RefreshContaminationDecalMaterialParameters();
 }
 

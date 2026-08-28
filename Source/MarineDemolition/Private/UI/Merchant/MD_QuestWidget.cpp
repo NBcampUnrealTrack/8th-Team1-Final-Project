@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "UI/Merchant/MD_QuestWidget.h"
@@ -7,7 +7,9 @@
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
 #include "Components/Widget.h"
+#include "Data/Lore/MD_LoreCatalog.h"
 #include "GameFramework/Pawn.h"
+#include "UI/Merchant/MD_LoreQuestTabWidget.h"
 #include "UI/Merchant/MD_MainQuestRowWidget.h"
 #include "UI/Merchant/MD_QuestCardWidget.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
@@ -18,12 +20,12 @@ void UMD_QuestWidget::NativeConstruct()
 
 	if (APlayerController* PC = GetOwningPlayer())
 	{
-		PC->SetShowMouseCursor(true);
-		PC->SetInputMode(FInputModeUIOnly());
-		if (APawn* Pawn = PC->GetPawn())
-		{
-			Pawn->DisableInput(PC);
-		}
+		//PC->SetShowMouseCursor(true);
+		//PC->SetInputMode(FInputModeUIOnly());
+		//if (APawn* Pawn = PC->GetPawn())
+		//{
+		//	Pawn->DisableInput(PC);
+		//}
 	}
 
 	if (IsValid(BTN_TabMain))
@@ -49,6 +51,8 @@ void UMD_QuestWidget::NativeConstruct()
 		OwningMerchantMenu->SetMenuPanelVisible(false);
 	}
 
+	// 블루프린트 로어 패널을 전용 위젯으로 교체하기 위한 최초 생성
+	EnsureLoreTabWidget();
 	RefreshDisplay();
 }
 
@@ -60,13 +64,13 @@ void UMD_QuestWidget::NativeDestruct()
 	}
 	// 상인 메뉴가 남아 있으면 입력·커서 복구는 메뉴 쪽 NativeDestruct가 처리한다.
 	// 메뉴 없이 단독으로 띄운 경우에만 여기서 되돌린다 (상점 위젯과 동일 원칙).
-	else if (APlayerController* PC = GetOwningPlayer())
-	{
-		if (APawn* Pawn = PC->GetPawn())
-		{
-			Pawn->EnableInput(PC);
-		}
-	}
+	//else if (APlayerController* PC = GetOwningPlayer())
+	//{
+	//	if (APawn* Pawn = PC->GetPawn())
+	//	{
+	//		Pawn->EnableInput(PC);
+	//	}
+	//}
 
 	Super::NativeDestruct();
 }
@@ -81,6 +85,22 @@ void UMD_QuestWidget::SetRepeatQuests(const TArray<FMD_RepeatQuestState>& InRepe
 {
 	RepeatQuests = InRepeatQuests;
 	RefreshDisplay();
+}
+
+void UMD_QuestWidget::SetLoreProgress(const TArray<FMD_LoreSiteProgress>& InSiteProgressList)
+{
+	LoreSiteProgressList = InSiteProgressList;
+	RefreshLoreDisplay();
+}
+
+void UMD_QuestWidget::SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FMD_LoreSiteProgress>& InSiteProgressList)
+{
+	// 현재 탐사 현장의 정적 정의와 플레이어별 수집 원장을 함께 보관하는 처리
+	LoreCatalog = InLoreCatalog;
+	LoreSiteProgressList = InSiteProgressList;
+	// 이미 열린 UI에서 수집 변경을 즉시 반영하기 위한 전용 탭 갱신
+	EnsureLoreTabWidget();
+	RefreshLoreDisplay();
 }
 
 void UMD_QuestWidget::SelectTab(EMD_QuestTab InTab)
@@ -141,12 +161,13 @@ void UMD_QuestWidget::ApplyTabVisibility()
 	}
 	if (IsValid(TXT_LoreEmptyNotice))
 	{
-		const bool bShowLoreEmpty = SelectedTab == EMD_QuestTab::Lore;
-		TXT_LoreEmptyNotice->SetVisibility(bShowLoreEmpty ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-		if (bShowLoreEmpty)
-		{
-			TXT_LoreEmptyNotice->SetText(FText::FromString(TEXT("코덱스 데이터가 아직 연결되지 않았다.")));
-		}
+		const bool bShowLoreTab = SelectedTab == EMD_QuestTab::Lore && IsValid(LoreQuestTabWidget) == true;
+		TXT_LoreEmptyNotice->SetVisibility(bShowLoreTab ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		//TXT_LoreEmptyNotice->SetVisibility(bShowLoreEmpty ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		//if (bShowLoreEmpty)
+		//{
+		//	TXT_LoreEmptyNotice->SetText(FText::FromString(TEXT("코덱스 데이터가 아직 연결되지 않았다.")));
+		//}
 	}
 
 	// 패널 타이틀은 탭 공통으로 고정하지 않는다 — 로어 탭은 "퀘스트"가 아니라
@@ -166,6 +187,69 @@ void UMD_QuestWidget::ApplyTabVisibility()
 			break;
 		}
 	}
+}
+
+void UMD_QuestWidget::RefreshLoreDisplay()
+{
+	// 기존 로어 패널이 준비된 시점에만 전용 표시 경로를 사용하기 위한 생성 보장
+	EnsureLoreTabWidget();
+	if (IsValid(LoreQuestTabWidget) == true)
+	{
+		// 현재 카탈로그와 일치하는 현장 기록만 탭에 전달하기 위한 진행 정보
+		FMD_LoreSiteProgress SiteProgress;
+		if (IsValid(LoreCatalog) == true)
+		{
+			SiteProgress.SiteId = LoreCatalog->SiteId;
+			// 여러 현장 원장에서 현재 탐사 현장의 진행 정보를 찾기 위한 반복
+			for (const FMD_LoreSiteProgress& CurrentSiteProgress : LoreSiteProgressList)
+			{
+				if (CurrentSiteProgress.SiteId == LoreCatalog->SiteId)
+				{
+					SiteProgress = CurrentSiteProgress;
+					break;
+				}
+			}
+		}
+
+		LoreQuestTabWidget->SetLoreData(LoreCatalog, SiteProgress);
+		return;
+	}
+
+	if (IsValid(TXT_LoreEmptyNotice) == false)
+	{
+		return;
+	}
+
+	// 서로 다른 현장의 영구 수집 기록을 코덱스 전체 발견량으로 합산하는 누적값
+	int32 DiscoveredLoreCount = 0;
+	for (const FMD_LoreSiteProgress& SiteProgress : LoreSiteProgressList)
+	{
+		DiscoveredLoreCount += SiteProgress.DiscoveredLoreIds.Num();
+	}
+
+	// 현재 연결된 단일 텍스트 영역에서 영구 누적 로어 수집량을 즉시 확인하기 위한 표시
+	FText LoreProgressText = DiscoveredLoreCount > 0 ? FText::Format(FText::FromString(TEXT("수집한 기록물: {0}개")), FText::AsNumber(DiscoveredLoreCount)) : FText::FromString(TEXT("아직 수집한 기록물이 없다."));
+	TXT_LoreEmptyNotice->SetText(LoreProgressText);
+}
+
+void UMD_QuestWidget::EnsureLoreTabWidget()
+{
+	// 중복 생성과 불완전한 블루프린트 구성에서의 위젯 생성을 차단하는 검증
+	if (IsValid(LoreQuestTabWidget) == true || IsValid(PNL_LoreTab) == false || LoreQuestTabClass == nullptr)
+	{
+		return;
+	}
+
+	// 퀘스트 화면 수명 동안 재사용할 로어 전용 탭 인스턴스
+	LoreQuestTabWidget = CreateWidget<UMD_LoreQuestTabWidget>(this, LoreQuestTabClass);
+	if (IsValid(LoreQuestTabWidget) == false)
+	{
+		return;
+	}
+
+	// 기존 안내용 목업을 실제 로어 탭으로 교체하기 위한 패널 구성
+	PNL_LoreTab->ClearChildren();
+	PNL_LoreTab->AddChild(LoreQuestTabWidget);
 }
 
 void UMD_QuestWidget::RebuildMainQuestList()
@@ -220,8 +304,8 @@ void UMD_QuestWidget::RebuildRepeatQuestList()
 		TXT_RepeatEmptyNotice->SetVisibility(RepeatQuests.Num() > 0 ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
 		if (RepeatQuests.Num() == 0)
 		{
-			// `09` §4: 현장을 한 번 클리어해야 반복퀘가 열린다.
-			TXT_RepeatEmptyNotice->SetText(FText::FromString(TEXT("현장을 한 번 클리어하면 반복 퀘스트가 열린다.")));
+			// 유효한 후보가 없거나 현장의 추첨 수량이 0인 경우를 함께 안내하는 문구
+			TXT_RepeatEmptyNotice->SetText(FText::FromString(TEXT("현재 수령 가능한 반복 퀘스트가 없다.")));
 		}
 	}
 

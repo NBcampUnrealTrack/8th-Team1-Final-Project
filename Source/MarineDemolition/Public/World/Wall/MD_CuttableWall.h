@@ -1,8 +1,11 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Engine/TimerHandle.h"
 #include "GameFramework/Actor.h"
+#include "Gameplay/Scanning/MD_Scannable.h"
+#include "GameplayTagAssetInterface.h"
+#include "GameplayTagContainer.h"
 #include "MD_CuttableWall.generated.h"
 
 class UDecalComponent;
@@ -11,30 +14,15 @@ class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UStaticMeshComponent;
 class UMD_ScrapeSurfaceComponent;
+class UNiagaraSystem;
 class AMD_CuttableWall;
 class AMD_ContaminationItem;
 class AMD_WallPiece;
+struct FHitResult;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-	FMD_OnStrutCollapsed,
-	AMD_CuttableWall*,
-	Wall,
-	AActor*,
-	Cutter);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
-	FMD_OnWallDemolished,
-	AMD_CuttableWall*,
-	Wall,
-	AActor*,
-	Cutter);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
-	FMD_OnWallScanned,
-	AMD_CuttableWall*,
-	Wall,
-	float,
-	Duration,
-	AActor*,
-	Scanner);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnStrutCollapsed, AMD_CuttableWall*, Wall, AActor*, Cutter);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnWallDemolished, AMD_CuttableWall*, Wall,	AActor*, Cutter);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FMD_OnWallScanned, AMD_CuttableWall*, Wall, float, Duration, AActor*, Scanner);
 
 // 진행도 게이지 UI가 구독한다 (기획 §6)
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
@@ -57,12 +45,26 @@ enum class EMD_WallType : uint8
  * settings that have not been migrated to the component yet.
  */
 UCLASS()
-class MARINEDEMOLITION_API AMD_CuttableWall : public AActor
+class MARINEDEMOLITION_API AMD_CuttableWall : public AActor, public IGameplayTagAssetInterface, public IMD_Scannable
 {
 	GENERATED_BODY()
 
 public:
 	AMD_CuttableWall();
+
+	//~ IGameplayTagAssetInterface
+	/** 절단 어빌리티가 대상 여부를 이 태그로 판정한다 */
+	virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override
+	{
+		TagContainer.AppendTags(OwnedGameplayTags);
+	}
+
+	/**
+	 * 이 액터가 가진 태그. 기본으로 `Interaction.Cuttable` 이 들어 있어
+	 * 배치된 격벽은 추가 작업 없이 절단 대상이 된다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|태그")
+	FGameplayTagContainer OwnedGameplayTags;
 
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void GetLifetimeReplicatedProps(
@@ -96,15 +98,25 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
 	void Cut(AActor* Cutter);
 
+	/** 오염 상태와 무관하게 아직 파괴되지 않은 벽이면 절단할 수 있다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	bool CanCut() const;
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Wall")
 	void ScanHighlight(float Duration = 3.0f, AActor* Scanner = nullptr);
 
+	// IMD_Scannable — 기존 벽 스캔 델리게이트 경로로 연결한다.
+	virtual void OnScanned_Implementation(float Duration, AActor* Scanner) override;
+
 	// 절단 진행도 누적. 서버 전용. 100% 도달 시 Cut()을 호출한다
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Cut")
 	void AddCutProgress(float DeltaSeconds, AActor* Cutter);
+
+	/** 서버 GA의 마지막 벽 충돌면을 조각 배분까지 동기 전달한다. */
+	void AddCutProgressFromHit(
+		float DeltaSeconds,
+		AActor* Cutter,
+		const FHitResult& WallHit);
 
 	// 이 벽을 자르는 데 필요한 총 시간(초)
 	UFUNCTION(BlueprintPure, Category = "MD|Wall|Cut")
@@ -151,7 +163,8 @@ protected:
 	UPROPERTY(EditAnywhere, Replicated, Category = "MD|Wall")
 	bool bHasSupport = false;
 
-	UPROPERTY(EditAnywhere, Category = "MD|Wall")
+	UPROPERTY(EditAnywhere, Category = "MD|Wall",
+		meta = (ClampMin = "0"))
 	int32 PieceCount = 10;
 
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall")
@@ -178,13 +191,9 @@ protected:
 		Category = "MD|Wall|Contamination|Decal")
 	TObjectPtr<UMaterialInterface> ContaminationDecalMaterial;
 
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Contamination|Cut",
-		meta = (ClampMin = "0", ClampMax = "100"))
-	float PartitionCutGate = 0.0f;
-
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Contamination|Cut",
-		meta = (ClampMin = "0", ClampMax = "100"))
-	float StrutCutGate = 0.0f;
+	/** 철거 완료 순간 벽 중심에 재생할 원샷 버스트 (NS_Cutter_Finish) */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|VFX")
+	TObjectPtr<UNiagaraSystem> DemolishEffect;
 
 	// 기획 §2 — 애니메이션 1사이클(3.567초)의 정수배로 잡는다
 	UPROPERTY(EditAnywhere, Category = "MD|Wall|Cut",
@@ -202,14 +211,22 @@ private:
 	friend class FMD_BarnacleStrokeBlockingTest;
 
 	void SyncLegacySurfaceConfiguration();
+	void CutFromHit(AActor* Cutter, const FHitResult* WallHit);
+	float ResolveCutSurfaceCleanRatio(const FHitResult* WallHit);
+	void CompleteCutWithCleanRatio(AActor* Cutter, float CutSurfaceCleanRatio);
+	void AddCutProgressInternal(
+		float DeltaSeconds,
+		AActor* Cutter,
+		const FHitResult* WallHit);
 
-	void RestoreScanColor();
+	// 파괴 직전 서버가 쏘고 모든 클라이언트가 벽 중심에 원샷 재생한다
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlayDemolishEffect();
 
 	UFUNCTION()
 	void OnRep_CutProgress();
 
 	bool bCut = false;
-	FTimerHandle ScanTimerHandle;
 
 	//  누적 절단 시간. 감소하지 않으며 Day 간에도 유지된다 (기획 §3)
 	UPROPERTY(ReplicatedUsing = OnRep_CutProgress)

@@ -1,4 +1,5 @@
-#include "World/Wall/MD_CuttableWall.h"
+﻿#include "World/Wall/MD_CuttableWall.h"
+#include "GameplayTags/MD_GameplayTags.h"
 
 #include "TimerManager.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
@@ -9,6 +10,8 @@
 #include "Engine/Engine.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
 
@@ -22,6 +25,9 @@ AMD_CuttableWall::AMD_CuttableWall()
 	PrimaryActorTick.bCanEverTick = false;
 	// bHasSupport 복제용 (원격 클라이언트의 절단 판정 일치)
 	bReplicates = true;
+
+	// 배치된 격벽은 별도 설정 없이 절단 대상이 된다
+	OwnedGameplayTags.AddTag(MDGameplayTags::Interaction_Cuttable);
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
@@ -135,30 +141,67 @@ void AMD_CuttableWall::BeginPlay()
 
 void AMD_CuttableWall::Cut(AActor* Cutter)
 {
-	if (!HasAuthority() || bCut)
+	CutFromHit(Cutter, nullptr);
+}
+
+
+void AMD_CuttableWall::CutFromHit(
+	AActor* Cutter,
+	const FHitResult* WallHit)
+{
+	if (!HasAuthority() || !CanCut())
 	{
 		return;
 	}
 
-	// 전처리 미달이면 절단 잠김
-	if (!CanCut())
-	{
-		const float Gate = (WallType == EMD_WallType::Strut) ? StrutCutGate : PartitionCutGate;
-		if (GEngine)
-		{
-			GEngine->AddOnScreenDebugMessage(-1, 3.f, FColor::Yellow,
-				                                 FString::Printf(
-				                                 TEXT("전처리 미완료: %.0f%% / %.0f%%"),
-				                                 ScrapeSurface
-					                                 ? ScrapeSurface->GetContaminationDemolitionReadyRatio() * 100.0f
-					                                 : 0.0f,
-				                                 Gate));
-		}
-		return;
-	}
-
+	const float CutSurfaceCleanRatio = ResolveCutSurfaceCleanRatio(WallHit);
 	bCut = true;
+	CompleteCutWithCleanRatio(Cutter, CutSurfaceCleanRatio);
+}
 
+
+float AMD_CuttableWall::ResolveCutSurfaceCleanRatio(
+	const FHitResult* WallHit)
+{
+	if (!ScrapeSurface)
+	{
+		return 0.0f;
+	}
+
+	if (WallHit
+		&& WallHit->bBlockingHit
+		&& WallHit->GetActor() == this)
+	{
+		EMD_ScrapeSurfaceFace CutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
+		bool bResolvedFace = ScrapeSurface->TryGetScrapeSurfaceFaceFromHit(
+			*WallHit,
+			CutSurfaceFace);
+		if (!bResolvedFace)
+		{
+			// 모서리나 BP 추가 충돌 컴포넌트를 맞은 경우에도 GA 시점이
+			// 벽의 어느 쪽에 있는지로 한쪽 면을 결정한다.
+			bResolvedFace = ScrapeSurface->
+				TryResolveContaminationFaceFromWorldPosition(
+					WallHit->TraceStart,
+					CutSurfaceFace);
+		}
+
+		if (bResolvedFace)
+		{
+			return ScrapeSurface->GetContaminationCleanRatio(CutSurfaceFace);
+		}
+	}
+
+	// Hit이 없는 기존 Blueprint 직접 호출이나 기하 해석 불가 상태만
+	// 이전 동작과 동일한 양면 전체 값으로 안전하게 폴백한다.
+	return ScrapeSurface->GetContaminationCleanRatio();
+}
+
+
+void AMD_CuttableWall::CompleteCutWithCleanRatio(
+	AActor* Cutter,
+	const float CutSurfaceCleanRatio)
+{
 	if (WallType == EMD_WallType::Strut && !bHasSupport)
 	{
 		// 벽이 아니라 "절단자가 서 있는 섹터"가 무너진다
@@ -178,10 +221,12 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 		OnWallDemolished.Broadcast(this, Cutter);
 	}
 
-	// 파편 드랍: 제거율 비율로 깨끗/오염 배분 (기획 §2.5: 제거율 70% → 7:3)
-	const int32 CleanCount = FMath::RoundToInt(
-		static_cast<float>(PieceCount)
-		* ScrapeSurface->GetContaminationCleanRatio());
+	// 파편 드랍: GA가 타격한 한쪽 면의 남은 오염만으로 깨끗/오염 배분
+	// (기획 §2.5: 제거율 70% → 7:3)
+	const int32 SafePieceCount = FMath::Max(0, PieceCount);
+	const int32 CleanCount = FMD_ScrapeFaceProgress::CalculateCleanPieceCount(
+		SafePieceCount,
+		CutSurfaceCleanRatio);
 
 	const FVector Origin = GetActorLocation();
 	const FVector Extent = Mesh->Bounds.BoxExtent;
@@ -189,7 +234,7 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 	FActorSpawnParameters SpawnParams;
 	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
 
-	for (int32 i = 0; i < PieceCount; ++i)
+	for (int32 i = 0; i < SafePieceCount; ++i)
 	{
 		const FVector SpawnLoc(
 				Origin.X + FMath::FRandRange(-Extent.X, Extent.X) * 0.8f,
@@ -205,32 +250,31 @@ void AMD_CuttableWall::Cut(AActor* Cutter)
 		}
 	}
 
-	// 경로 개방 (조각이 벽 자리를 대체)
-	Destroy();
+	MulticastPlayDemolishEffect();
+
+	// 경로 개방 (조각이 벽 자리를 대체).
+	// 즉시 Destroy하면 방금 보낸 멀티캐스트가 채널과 함께 유실될 수 있어 잠깐 미룬다
+	SetActorHiddenInGame(true);
+	SetActorEnableCollision(false);
+	SetLifeSpan(0.2f);
+}
+
+void AMD_CuttableWall::MulticastPlayDemolishEffect_Implementation()
+{
+	if (GetNetMode() == NM_DedicatedServer || !DemolishEffect)
+	{
+		return;
+	}
+
+	// 액터 원점이 아니라 메시 바운드 중심에서 터뜨린다
+	UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+		this, DemolishEffect, Mesh->Bounds.Origin, GetActorRotation());
 }
 
 
 bool AMD_CuttableWall::CanCut() const
 {
-	// 초기화 실패 시 절단 금지
-	if (!ScrapeSurface
-		|| (ScrapeSurface->IsContaminationEnabled()
-			&& !ScrapeSurface->IsSurfaceInitialized()))
-	{
-		return false;
-	}
-
-	const float Gate = (WallType == EMD_WallType::Strut) ? StrutCutGate : PartitionCutGate;
-	const float SafeGate = FMath::IsFinite(Gate)
-		? FMath::Clamp(Gate, 0.0f, 100.0f)
-		: 100.0f;
-
-	return FMD_ScrapeFaceProgress::IsEitherFaceReadyForCut(
-		ScrapeSurface->GetContaminationCleanRatio(
-			EMD_ScrapeSurfaceFace::Front),
-		ScrapeSurface->GetContaminationCleanRatio(
-			EMD_ScrapeSurfaceFace::Back),
-		SafeGate / 100.0f);
+	return !bCut;
 }
 
 
@@ -242,28 +286,40 @@ void AMD_CuttableWall::ScanHighlight(float Duration, AActor* Scanner)
 		Duration = 3.f;
 	}
 
-	// 겹친 인프라(배관·배선)에 실루엣 노출 알림 (벽 MID 유무와 무관하게 먼저 방송)
+	// 벽 타입 확인용 디버그 로그 (화면 표시는 UI 담당)
+	UE_LOG(LogTemp, Log, TEXT("MD_CuttableWall::ScanHighlight - %s 스캔: %s, 지속 %.1fs"),
+			*GetName(),
+			WallType == EMD_WallType::Strut ? TEXT("지주격벽 (위험)") : TEXT("칸막이격벽 (자유 철거)"),
+			Duration);
+
+	// 겹친 인프라(배관·배선)에 실루엣 노출 알림. 벽 타입 표시는 UI 담당
 	OnWallScanned.Broadcast(this, Duration, Scanner);
+}
 
-	if (!MID)
-	{
-		return;
-	}
-	
-	const bool bStrut = (WallType == EMD_WallType::Strut);
-	MID->SetVectorParameterValue(TEXT("Color"),
-			bStrut ? FLinearColor(0.7f, 0.05f, 0.05f) : FLinearColor(0.05f, 0.6f, 0.1f));
-
-	if (GEngine)
-	{
-		GEngine->AddOnScreenDebugMessage(reinterpret_cast<uint64>(this), Duration, FColor::Cyan,
-				bStrut ? TEXT("스캔: 지주격벽 (위험)") : TEXT("스캔: 칸막이격벽 (자유 철거)"));
-	}
-	
-	GetWorldTimerManager().SetTimer(ScanTimerHandle, this, &AMD_CuttableWall::RestoreScanColor, Duration, false);
+void AMD_CuttableWall::OnScanned_Implementation(float Duration, AActor* Scanner)
+{
+	ScanHighlight(Duration, Scanner);
 }
 
 void AMD_CuttableWall::AddCutProgress(float DeltaSeconds, AActor* Cutter)
+{
+	AddCutProgressInternal(DeltaSeconds, Cutter, nullptr);
+}
+
+
+void AMD_CuttableWall::AddCutProgressFromHit(
+	const float DeltaSeconds,
+	AActor* Cutter,
+	const FHitResult& WallHit)
+{
+	AddCutProgressInternal(DeltaSeconds, Cutter, &WallHit);
+}
+
+
+void AMD_CuttableWall::AddCutProgressInternal(
+	const float DeltaSeconds,
+	AActor* Cutter,
+	const FHitResult* WallHit)
 {
 	// 협동 합산(기획 §4) 때문에 진행도는 벽이 소유하고 서버만 갱신한다.
 	// 여러 명이 같은 벽을 자르면 각자 이 함수를 불러 자연히 합산된다.
@@ -280,13 +336,22 @@ void AMD_CuttableWall::AddCutProgress(float DeltaSeconds, AActor* Cutter)
 	const float Required = GetRequiredCutSeconds();
 
 	CutProgressSeconds = FMath::Clamp(CutProgressSeconds + DeltaSeconds, 0.0f, Required);
+	const bool bCompletesCut = CutProgressSeconds >= Required;
+	const float CompletionCleanRatio = bCompletesCut
+		? ResolveCutSurfaceCleanRatio(WallHit)
+		: 0.0f;
+	if (bCompletesCut)
+	{
+		// 진행도 delegate의 재진입보다 먼저 파괴를 예약하고 비율을 고정한다.
+		bCut = true;
+	}
 
 	// 서버에는 OnRep이 오지 않으므로 직접 부른다
 	OnRep_CutProgress();
 
-	if (CutProgressSeconds >= Required)
+	if (bCompletesCut)
 	{
-		Cut(Cutter);
+		CompleteCutWithCleanRatio(Cutter, CompletionCleanRatio);
 	}
 }
 
@@ -303,17 +368,36 @@ float AMD_CuttableWall::GetCutProgressRatio() const
 }
 
 
-void AMD_CuttableWall::RestoreScanColor()
-{
-	if (MID)
-	{
-		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
-	}
-}
-
 void AMD_CuttableWall::OnRep_CutProgress()
 {
-	OnCutProgressChanged.Broadcast(this, GetCutProgressRatio());
+	const float ProgressRatio = GetCutProgressRatio();
+	OnCutProgressChanged.Broadcast(this, ProgressRatio);
+
+	if (GEngine && GetNetMode() != NM_DedicatedServer)
+	{
+		const TCHAR* WallTypeLabel = WallType == EMD_WallType::Strut
+			? TEXT("Strut")
+			: TEXT("Partition");
+		const TCHAR* NetRoleLabel = HasAuthority()
+			? TEXT("Server")
+			: TEXT("Client");
+		const FColor ProgressColor = ProgressRatio >= 1.0f
+			? FColor::Green
+			: FColor::Cyan;
+
+		GEngine->AddOnScreenDebugMessage(
+			reinterpret_cast<uint64>(this),
+			0.35f,
+			ProgressColor,
+			FString::Printf(
+				TEXT("[Wall Cutting][%s] %s (%s) | %.1f%% | %.2f / %.2fs"),
+				NetRoleLabel,
+				*GetName(),
+				WallTypeLabel,
+				ProgressRatio * 100.0f,
+				CutProgressSeconds,
+				GetRequiredCutSeconds()));
+	}
 }
 
 void AMD_CuttableWall::SyncLegacySurfaceConfiguration()

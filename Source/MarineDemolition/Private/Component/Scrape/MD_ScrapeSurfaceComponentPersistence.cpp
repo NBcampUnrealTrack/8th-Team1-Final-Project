@@ -101,6 +101,10 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 				Cell.InitialContamination = FMath::Max(
 					Cell.InitialContamination,
 					TargetRemaining);
+				// 새 오염이 덮이면 어제 긁어낸 면적은 다시 오염된 상태다.
+				// 남겨 두면 오늘 긁는 자국의 경계 신호가 어제 값에 포화되어
+				// 자국 경계가 격자 계단으로 돌아간다.
+				Cell.CoveredFraction = 0.0f;
 
 				FMD_ScrapeCellChange Change;
 				Change.CellIndex = CombinedCellIndex;
@@ -148,11 +152,31 @@ void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
 	TArray<float>& OutTransferredAmounts,
 	TArray<float>& OutTransferredPatternDensities) const
 {
+	TArray<float> IgnoredCoveredFractions;
+	ExportContaminationDeltas(
+		OutCellIndices,
+		OutInitialAmounts,
+		OutRemainingAmounts,
+		OutTransferredAmounts,
+		OutTransferredPatternDensities,
+		IgnoredCoveredFractions);
+}
+
+
+void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
+	TArray<int32>& OutCellIndices,
+	TArray<float>& OutInitialAmounts,
+	TArray<float>& OutRemainingAmounts,
+	TArray<float>& OutTransferredAmounts,
+	TArray<float>& OutTransferredPatternDensities,
+	TArray<float>& OutCoveredFractions) const
+{
 	OutCellIndices.Reset();
 	OutInitialAmounts.Reset();
 	OutRemainingAmounts.Reset();
 	OutTransferredAmounts.Reset();
 	OutTransferredPatternDensities.Reset();
+	OutCoveredFractions.Reset();
 	if (!bContaminationEnabled)
 	{
 		return;
@@ -178,6 +202,7 @@ void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
 			OutTransferredAmounts.Add(Cell.TransferredContamination);
 			OutTransferredPatternDensities.Add(
 				Cell.TransferredPaintPatternDensity);
+			OutCoveredFractions.Add(Cell.CoveredFraction);
 		}
 	}
 }
@@ -204,10 +229,29 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 	const TArray<float>& TransferredAmounts,
 	const TArray<float>& TransferredPatternDensities)
 {
+	RestoreContaminationCells(
+		CellIndices,
+		InitialAmounts,
+		RemainingAmounts,
+		TransferredAmounts,
+		TransferredPatternDensities,
+		TArray<float>());
+}
+
+
+void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
+	const TArray<int32>& CellIndices,
+	const TArray<float>& InitialAmounts,
+	const TArray<float>& RemainingAmounts,
+	const TArray<float>& TransferredAmounts,
+	const TArray<float>& TransferredPatternDensities,
+	const TArray<float>& CoveredFractions)
+{
 	const bool bHasInitialAmounts = !InitialAmounts.IsEmpty();
 	const bool bHasTransferredAmounts = !TransferredAmounts.IsEmpty();
 	const bool bHasTransferredPatternDensities =
 		!TransferredPatternDensities.IsEmpty();
+	const bool bHasCoveredFractions = !CoveredFractions.IsEmpty();
 	if (!bContaminationEnabled
 		|| !HasAuthority()
 		|| CellIndices.Num() != RemainingAmounts.Num()
@@ -215,7 +259,9 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 		|| (bHasTransferredAmounts
 			&& CellIndices.Num() != TransferredAmounts.Num())
 		|| (bHasTransferredPatternDensities
-			&& CellIndices.Num() != TransferredPatternDensities.Num()))
+			&& CellIndices.Num() != TransferredPatternDensities.Num())
+		|| (bHasCoveredFractions
+			&& CellIndices.Num() != CoveredFractions.Num()))
 	{
 		return;
 	}
@@ -272,6 +318,20 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 					0.0f,
 					1.0f)
 				: 1.0f);
+		// 구버전 스냅샷에는 피복률이 없다. 잔여량에서 역산하면 얇은 막과 부분
+		// 피복이 다시 한 값으로 뭉개져 이 변경 전의 겉모습이 되는데, 어제 저장한
+		// 상태를 그때 보였던 모습대로 되살리는 것이므로 이 쪽이 맞다.
+		Cell.CoveredFraction =
+			bHasCoveredFractions && FMath::IsFinite(CoveredFractions[i])
+			? FMath::Clamp(CoveredFractions[i], 0.0f, 1.0f)
+			: (Cell.InitialContamination > UE_SMALL_NUMBER
+				? FMath::Clamp(
+					1.0f
+						- Cell.RemainingContamination
+							/ Cell.InitialContamination,
+					0.0f,
+					1.0f)
+				: 0.0f);
 		Cell.Normalize();
 
 		FMD_ScrapeCellChange Change;

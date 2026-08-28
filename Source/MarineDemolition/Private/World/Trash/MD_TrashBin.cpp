@@ -3,7 +3,9 @@
 #include "Components/BoxComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
+#include "Gameplay/Trash/MD_TrashContentClaimSubsystem.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Net/UnrealNetwork.h"
 
@@ -20,18 +22,16 @@ AMD_TrashBin::AMD_TrashBin()
 	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
 	Mesh->SetSimulatePhysics(true);
 
-	// 메시 교체로 충돌 반응이 바뀌지 않도록 자동 계산 대신 기획 수치로 고정한다.
-	// Native CDO construction happens before GEngine is ready. Store the override
-	// directly in the body template so spawned physics bodies inherit it safely.
+	// 메시 교체로 충돌 반응이 바뀌지 않도록 자동 계산 대신 기획 수치로 고정
 	Mesh->BodyInstance.SetMassOverride(40.f, true);
 
-	// 손에서 놓은 뒤의 잔여 운동을 정리한다. 엔진 기본 AngularDamping 0은 계속 회전한다.
+	// 손에서 놓은 뒤의 잔여 운동을 정리. 엔진 기본 AngularDamping 0은 계속 회전
 	Mesh->SetLinearDamping(0.5f);
 	Mesh->SetAngularDamping(1.f);
 
 	GrabPoint = CreateDefaultSubobject<USceneComponent>(TEXT("GrabPoint"));
 	GrabPoint->SetupAttachment(Mesh);
-	// 임시 메시 기준 상단 중앙. 에셋 교체 시 Blueprint에서 조정한다.
+	// 임시 메시 기준 상단 중앙
 	GrabPoint->SetRelativeLocation(FVector(0.f, 0.f, 80.f));
 
 	// 회전만 캐릭터 기본값(1500/500)보다 완화해 큰 통을 든 무게감을 준다.
@@ -69,14 +69,29 @@ void AMD_TrashBin::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	if (IsValid(ContentsVolume))
 	{
-		ContentsVolume->OnComponentBeginOverlap.RemoveDynamic(
-			this, &AMD_TrashBin::HandleBeginOverlap);
-		ContentsVolume->OnComponentEndOverlap.RemoveDynamic(
-			this, &AMD_TrashBin::HandleEndOverlap);
+		ContentsVolume->OnComponentBeginOverlap.RemoveDynamic(this, &AMD_TrashBin::HandleBeginOverlap);
+		ContentsVolume->OnComponentEndOverlap.RemoveDynamic(this, &AMD_TrashBin::HandleEndOverlap);
 	}
 
 	// 운반 중에 통이 사라지면 내용물이 물리가 꺼진 채로 남는다
-	ReleaseContentsAfterCarry();
+	ReleaseContentsAfterCarry(/*bRefreshContents=*/false);
+
+	if (UMD_TrashContentClaimSubsystem* ClaimSubsystem = GetContentClaimSubsystem())
+	{
+		TSet<TWeakObjectPtr<AActor>> RegisteredContents;
+		for (const TPair<TWeakObjectPtr<AActor>, int32>& Pair : ContentOverlapCounts)
+		{
+			RegisteredContents.Add(Pair.Key);
+		}
+		RegisteredContents.Append(Contents);
+		for (const TWeakObjectPtr<AActor>& ContentPtr : RegisteredContents)
+		{
+			if (AActor* Content = ContentPtr.Get())
+			{
+				ClaimSubsystem->UnregisterOverlap(Content, this);
+			}
+		}
+	}
 
 	for (const TWeakObjectPtr<AActor>& ContentPtr : Contents)
 	{
@@ -87,17 +102,28 @@ void AMD_TrashBin::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 	Contents.Reset();
 	ContentOverlapCounts.Reset();
-	ContentAdmissionOrder.Reset();
+
+	for (const TPair<TWeakObjectPtr<AActor>, TEnumAsByte<ECollisionEnabled::Type>>& Pair : ClientCarryCollisionOverrides)
+	{
+		if (AActor* Content = Pair.Key.Get())
+		{
+			if (UPrimitiveComponent* ContentRoot = Cast<UPrimitiveComponent>(Content->GetRootComponent()))
+			{
+				ContentRoot->SetCollisionEnabled(Pair.Value);
+			}
+		}
+	}
+	ClientCarryCollisionOverrides.Reset();
 
 	Super::EndPlay(EndPlayReason);
 }
 
-void AMD_TrashBin::GetLifetimeReplicatedProps(
-	TArray<FLifetimeProperty>& OutLifetimeProps) const
+void AMD_TrashBin::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_TrashBin, ContentCount);
+	DOREPLIFETIME(AMD_TrashBin, ReplicatedCarryFrozenContents);
 }
 
 void AMD_TrashBin::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
@@ -138,72 +164,72 @@ TArray<AActor*> AMD_TrashBin::GetContainedActors_Implementation() const
 	return Snapshot;
 }
 
-bool AMD_TrashBin::TryDrainContentsForSorting_Implementation(
-	TArray<AActor*>& OutContents)
+bool AMD_TrashBin::TryDrainContentsForSorting_Implementation(TArray<AActor*>& OutContents)
 {
 	OutContents.Reset();
-	if (!HasAuthority() || bSortingTransactionActive || IsActorBeingDestroyed())
+	if (!HasAuthority() || bDrainInProgress || bSortingTransactionActive || IsActorBeingDestroyed())
 	{
 		return false;
 	}
 
-	// 같은 game-thread transaction 안에서 최신 overlap을 확정한 뒤 재진입을 먼저 막는다.
-	RefreshContentsFromOverlapsPreservingAdmissions();
+	// Refresh가 overlap notify를 발생시켜도 중첩 drain은 먼저 세운 guard에서 거부한다.
+	TGuardValue<bool> DrainGuard(bDrainInProgress, true);
+	RefreshContentsFromOverlaps();
+	UMD_TrashContentClaimSubsystem* ClaimSubsystem = GetContentClaimSubsystem();
+	if (!ClaimSubsystem)
+	{
+		return false;
+	}
+
 	bSortingTransactionActive = true;
 
 	if (IsValid(ContentsVolume))
 	{
 		ContentsVolume->SetGenerateOverlapEvents(false);
-		ContentsVolume->OnComponentBeginOverlap.RemoveDynamic(
-			this, &AMD_TrashBin::HandleBeginOverlap);
-		ContentsVolume->OnComponentEndOverlap.RemoveDynamic(
-			this, &AMD_TrashBin::HandleEndOverlap);
+		ContentsVolume->OnComponentBeginOverlap.RemoveDynamic(this, &AMD_TrashBin::HandleBeginOverlap);
+		ContentsVolume->OnComponentEndOverlap.RemoveDynamic(this, &AMD_TrashBin::HandleEndOverlap);
 	}
 
-	GetContentsSnapshot(OutContents);
-	for (AActor* Content : OutContents)
+	TArray<AActor*> CandidateContents;
+	GetContentsSnapshot(CandidateContents);
+	TSet<TWeakObjectPtr<AActor>> DrainedContentSet;
+	for (AActor* Content : CandidateContents)
 	{
-		if (IsValid(Content))
+		if (!IsValid(Content))
 		{
-			// Sorter가 곧 파괴한다. 파괴 callback이 빈 컨테이너를 다시 채우지 않게 연결을 먼저 끊는다.
-			Content->OnDestroyed.RemoveDynamic(this, &AMD_TrashBin::HandleContentDestroyed);
+			continue;
+		}
+
+		if (ClaimSubsystem->ConsumeForSorting(Content, this))
+		{
+			DrainedContentSet.Add(TWeakObjectPtr<AActor>(Content));
+			OutContents.Add(Content);
+		}
+		else
+		{
+			ensureMsgf(false,
+				TEXT("TrashBin '%s'의 내용물 '%s' 소유권이 drain 직전에 일치하지 않습니다."),
+				*GetNameSafe(this), *GetNameSafe(Content));
+		}
+
+		// Sorter가 곧 파괴한다. 파괴 callback이 빈 컨테이너를 다시 채우지 않게 연결을 먼저 끊는다.
+		Content->OnDestroyed.RemoveDynamic(this, &AMD_TrashBin::HandleContentDestroyed);
+	}
+	for (const TPair<TWeakObjectPtr<AActor>, int32>& Pair : ContentOverlapCounts)
+	{
+		if (!DrainedContentSet.Contains(Pair.Key))
+		{
+			if (AActor* Content = Pair.Key.Get())
+			{
+				ClaimSubsystem->UnregisterOverlap(Content, this);
+			}
 		}
 	}
 
 	Contents.Reset();
 	ContentOverlapCounts.Reset();
-	ContentAdmissionOrder.Reset();
-	SyncContentCount();
-	return true;
-}
-
-bool AMD_TrashBin::TryRestoreDrainedContentsAfterFailedSort_Implementation(
-	const TArray<AActor*>& DrainedContents)
-{
-	if (!HasAuthority() || !bSortingTransactionActive || IsActorBeingDestroyed()
-		|| !IsValid(ContentsVolume))
-	{
-		return false;
-	}
-
-	bSortingTransactionActive = false;
-	ContentsVolume->OnComponentBeginOverlap.AddUniqueDynamic(
-		this, &AMD_TrashBin::HandleBeginOverlap);
-	ContentsVolume->OnComponentEndOverlap.AddUniqueDynamic(
-		this, &AMD_TrashBin::HandleEndOverlap);
-	ContentsVolume->SetGenerateOverlapEvents(true);
-	ContentsVolume->UpdateOverlaps();
-
-	// 실패한 transaction이 넘긴 기존 소유물을 먼저 복구하고, 새 overlap은 이름순 후순위로 둔다.
-	ContentAdmissionOrder.Reset();
-	for (AActor* Content : DrainedContents)
-	{
-		if (IsAcceptedContent(Content))
-		{
-			ContentAdmissionOrder.AddUnique(TWeakObjectPtr<AActor>(Content));
-		}
-	}
-	RebuildContentsFromOverlaps(/*bPreserveAdmissionOrder=*/true);
+	// Sorter가 같은 호출 스택에서 통을 파괴하므로 빈 통 알림/복제는 발생시키지 않는다.
+	ContentCount = 0;
 	return true;
 }
 
@@ -229,23 +255,12 @@ void AMD_TrashBin::RefreshContentsFromOverlaps()
 
 	// 이벤트 순서와 무관하게 현재 위치 기준 overlap cache를 먼저 갱신한다.
 	ContentsVolume->UpdateOverlaps();
-	// 새로 발견한 후보는 BeginOverlap 발생 순서와 무관하게 ActorName 순으로 정한다.
-	RebuildContentsFromOverlaps(/*bPreserveAdmissionOrder=*/false);
-}
-
-void AMD_TrashBin::RefreshContentsFromOverlapsPreservingAdmissions()
-{
-	if (!HasAuthority() || bSortingTransactionActive || !IsValid(ContentsVolume))
-	{
-		return;
-	}
-
-	ContentsVolume->UpdateOverlaps();
-	RebuildContentsFromOverlaps(/*bPreserveAdmissionOrder=*/true);
+	RebuildContentsFromOverlaps();
 }
 
 void AMD_TrashBin::OnCarryStarted_Implementation()
 {
+	bCarryAccelerationActive = true;
 	FreezeContentsForCarry();
 }
 
@@ -264,34 +279,57 @@ void AMD_TrashBin::FreezeContentsForCarry()
 	if (!HasAuthority() || bSortingTransactionActive || !IsValid(Mesh)) return;
 
 	// 중복 lifecycle 통지가 와도 같은 액터를 두 번 attach하지 않는다.
-	if (!CarryFrozenContents.IsEmpty()) return;
-
 	for (const TWeakObjectPtr<AActor>& ContentPtr : Contents)
 	{
-		AActor* Content = ContentPtr.Get();
-		if (!IsValid(Content)) continue;
-
-		UPrimitiveComponent* ContentRoot = Cast<UPrimitiveComponent>(Content->GetRootComponent());
-		if (!IsValid(ContentRoot) || !ContentRoot->IsSimulatingPhysics()) continue;
-
-		FMD_CarryFrozenContent& Frozen = CarryFrozenContents.AddDefaulted_GetRef();
-		Frozen.Actor = ContentPtr;
-		Frozen.PreviousCollisionEnabled = ContentRoot->GetCollisionEnabled();
-
-		// bRepPhysics가 false로 바뀌면 클라이언트도 SyncReplicatedPhysicsSimulation으로 따라 끈다
-		ContentRoot->SetSimulatePhysics(false);
-
-		// 키네마틱은 질량이 무한대라 통 벽에 닿으면 통을 밀거나 가둔다.
-		// 쿼리는 남겨 ContentsVolume 오버랩 판정이 계속 돌게 한다
-		ContentRoot->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-
-		Content->AttachToComponent(Mesh, FAttachmentTransformRules::KeepWorldTransform);
+		FreezeContentForCarry(ContentPtr.Get());
 	}
 }
 
-void AMD_TrashBin::ReleaseContentsAfterCarry()
+bool AMD_TrashBin::FreezeContentForCarry(AActor* Content)
 {
-	if (CarryFrozenContents.IsEmpty()) return;
+	if (!HasAuthority() || !bCarryAccelerationActive || bSortingTransactionActive
+		|| !IsValid(Content) || !IsValid(Mesh))
+	{
+		return false;
+	}
+
+	const TWeakObjectPtr<AActor> ContentPtr(Content);
+	if (CarryFrozenContents.ContainsByPredicate([ContentPtr](const FMD_CarryFrozenContent& Frozen)
+		{
+			return Frozen.Actor == ContentPtr;
+		}))
+	{
+		return true;
+	}
+
+	UPrimitiveComponent* ContentRoot = Cast<UPrimitiveComponent>(Content->GetRootComponent());
+	if (!IsValid(ContentRoot) || !ContentRoot->IsSimulatingPhysics())
+	{
+		return false;
+	}
+
+	FMD_CarryFrozenContent& Frozen = CarryFrozenContents.AddDefaulted_GetRef();
+	Frozen.Actor = ContentPtr;
+	Frozen.PreviousCollisionEnabled = ContentRoot->GetCollisionEnabled();
+
+	ContentRoot->SetSimulatePhysics(false);
+	ContentRoot->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	Content->AttachToComponent(Mesh, FAttachmentTransformRules::KeepWorldTransform);
+
+	ReplicatedCarryFrozenContents.AddUnique(Content);
+	ForceNetUpdate();
+	return true;
+}
+
+void AMD_TrashBin::ReleaseContentsAfterCarry(const bool bRefreshContents)
+{
+	bCarryAccelerationActive = false;
+	if (!HasAuthority())
+	{
+		ReplicatedCarryFrozenContents.Reset();
+		ApplyReplicatedCarryCollisionState();
+		return;
+	}
 
 	for (const FMD_CarryFrozenContent& Frozen : CarryFrozenContents)
 	{
@@ -309,11 +347,119 @@ void AMD_TrashBin::ReleaseContentsAfterCarry()
 	}
 
 	CarryFrozenContents.Reset();
+	ReplicatedCarryFrozenContents.Reset();
+	ForceNetUpdate();
 
 	// 붙어 있는 동안 오버랩이 흔들렸을 수 있다. drain 중이면 새 입고를 재구성하지 않는다.
-	if (!bSortingTransactionActive)
+	if (bRefreshContents && !bSortingTransactionActive)
 	{
-		RefreshContentsFromOverlapsPreservingAdmissions();
+		RefreshContentsFromOverlaps();
+	}
+}
+
+void AMD_TrashBin::UnfreezeContentForCarry(AActor* Content)
+{
+	if (!HasAuthority() || !Content)
+	{
+		return;
+	}
+
+	const TWeakObjectPtr<AActor> ContentPtr(Content);
+	const int32 FrozenIndex = CarryFrozenContents.IndexOfByPredicate([ContentPtr](const FMD_CarryFrozenContent& Frozen)
+		{
+			return Frozen.Actor == ContentPtr;
+		});
+	if (FrozenIndex == INDEX_NONE)
+	{
+		return;
+	}
+
+	const FMD_CarryFrozenContent Frozen = CarryFrozenContents[FrozenIndex];
+	if (IsValid(Content))
+	{
+		Content->DetachFromActor(FDetachmentTransformRules::KeepWorldTransform);
+		if (UPrimitiveComponent* ContentRoot = Cast<UPrimitiveComponent>(Content->GetRootComponent()))
+		{
+			ContentRoot->SetCollisionEnabled(Frozen.PreviousCollisionEnabled);
+			ContentRoot->SetSimulatePhysics(true);
+		}
+	}
+
+	CarryFrozenContents.RemoveAtSwap(FrozenIndex);
+	ReplicatedCarryFrozenContents.Remove(Content);
+	ForceNetUpdate();
+}
+
+void AMD_TrashBin::ApplyReplicatedCarryCollisionState()
+{
+	if (HasAuthority())
+	{
+		return;
+	}
+
+	TSet<TWeakObjectPtr<AActor>> DesiredContents;
+	DesiredContents.Reserve(ReplicatedCarryFrozenContents.Num());
+	for (AActor* Content : ReplicatedCarryFrozenContents)
+	{
+		if (IsValid(Content))
+		{
+			DesiredContents.Add(TWeakObjectPtr<AActor>(Content));
+		}
+	}
+
+	for (auto OverrideIt = ClientCarryCollisionOverrides.CreateIterator(); OverrideIt; ++OverrideIt)
+	{
+		if (DesiredContents.Contains(OverrideIt.Key()))
+		{
+			continue;
+		}
+
+		if (AActor* Content = OverrideIt.Key().Get())
+		{
+			if (UPrimitiveComponent* ContentRoot =
+				Cast<UPrimitiveComponent>(Content->GetRootComponent()))
+			{
+				ContentRoot->SetCollisionEnabled(OverrideIt.Value());
+			}
+		}
+		OverrideIt.RemoveCurrent();
+	}
+
+	for (const TWeakObjectPtr<AActor>& ContentPtr : DesiredContents)
+	{
+		if (ClientCarryCollisionOverrides.Contains(ContentPtr))
+		{
+			continue;
+		}
+
+		AActor* Content = ContentPtr.Get();
+		UPrimitiveComponent* ContentRoot = IsValid(Content) ? Cast<UPrimitiveComponent>(Content->GetRootComponent()): nullptr;
+		if (!IsValid(ContentRoot))
+		{
+			continue;
+		}
+
+		ClientCarryCollisionOverrides.Add(ContentPtr, ContentRoot->GetCollisionEnabled());
+		ContentRoot->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	}
+}
+
+void AMD_TrashBin::RemoveFrozenContentReferences(AActor* Content)
+{
+	if (!Content)
+	{
+		return;
+	}
+
+	const TWeakObjectPtr<AActor> ContentPtr(Content);
+	CarryFrozenContents.RemoveAll(
+		[ContentPtr](const FMD_CarryFrozenContent& Frozen)
+		{
+			return Frozen.Actor == ContentPtr;
+		});
+	if (ReplicatedCarryFrozenContents.Remove(Content) > 0)
+	{
+		ForceNetUpdate();
 	}
 }
 
@@ -326,13 +472,7 @@ void AMD_TrashBin::SetInteractionHighlighted_Implementation(bool bHighlighted)
 	}
 }
 
-void AMD_TrashBin::HandleBeginOverlap(
-	UPrimitiveComponent* /*OverlappedComponent*/,
-	AActor* OtherActor,
-	UPrimitiveComponent* /*OtherComponent*/,
-	int32 /*OtherBodyIndex*/,
-	bool /*bFromSweep*/,
-	const FHitResult& /*SweepResult*/)
+void AMD_TrashBin::HandleBeginOverlap(UPrimitiveComponent* /*OverlappedComponent*/,	AActor* OtherActor,	UPrimitiveComponent* /*OtherComponent*/, int32 /*OtherBodyIndex*/, bool /*bFromSweep*/,	const FHitResult& /*SweepResult*/)
 {
 	if (!HasAuthority() || bSortingTransactionActive || !IsAcceptedContent(OtherActor))
 	{
@@ -341,23 +481,22 @@ void AMD_TrashBin::HandleBeginOverlap(
 
 	const TWeakObjectPtr<AActor> ContentPtr(OtherActor);
 	int32& OverlapCount = ContentOverlapCounts.FindOrAdd(ContentPtr);
-	if (OverlapCount == 0)
-	{
-		ContentAdmissionOrder.Add(ContentPtr);
-	}
+	const bool bFirstComponentOverlap = OverlapCount == 0;
 	++OverlapCount;
 
-	if (TryAdmitContent(OtherActor))
+	UMD_TrashContentClaimSubsystem* ClaimSubsystem = GetContentClaimSubsystem();
+	const bool bOwnsClaim = bFirstComponentOverlap? ClaimSubsystem && ClaimSubsystem->RegisterOverlap(OtherActor, this)	: ClaimSubsystem && ClaimSubsystem->IsOwnedBy(OtherActor, this);
+	if (bOwnsClaim && TryAdmitContent(OtherActor))
 	{
+		if (bCarryAccelerationActive)
+		{
+			FreezeContentForCarry(OtherActor);
+		}
 		SyncContentCount();
 	}
 }
 
-void AMD_TrashBin::HandleEndOverlap(
-	UPrimitiveComponent* /*OverlappedComponent*/,
-	AActor* OtherActor,
-	UPrimitiveComponent* /*OtherComponent*/,
-	int32 /*OtherBodyIndex*/)
+void AMD_TrashBin::HandleEndOverlap(UPrimitiveComponent* /*OverlappedComponent*/, AActor* OtherActor, UPrimitiveComponent* /*OtherComponent*/, int32 /*OtherBodyIndex*/)
 {
 	if (!HasAuthority() || bSortingTransactionActive || !OtherActor)
 	{
@@ -378,9 +517,11 @@ void AMD_TrashBin::HandleEndOverlap(
 	}
 
 	ContentOverlapCounts.Remove(ContentPtr);
-	ContentAdmissionOrder.Remove(ContentPtr);
 	const bool bRemoved = RemoveAdmittedContent(OtherActor);
-	AdmitWaitingContents();
+	if (UMD_TrashContentClaimSubsystem* ClaimSubsystem = GetContentClaimSubsystem())
+	{
+		ClaimSubsystem->UnregisterOverlap(OtherActor, this);
+	}
 	if (bRemoved)
 	{
 		SyncContentCount();
@@ -393,16 +534,17 @@ void AMD_TrashBin::HandleContentDestroyed(AActor* DestroyedActor)
 
 	const TWeakObjectPtr<AActor> ContentPtr(DestroyedActor);
 	ContentOverlapCounts.Remove(ContentPtr);
-	ContentAdmissionOrder.Remove(ContentPtr);
+	RemoveFrozenContentReferences(DestroyedActor);
 	if (Contents.Remove(ContentPtr) > 0)
 	{
-		AdmitWaitingContents();
 		SyncContentCount();
 	}
 }
 
 bool AMD_TrashBin::IsAcceptedContent(const AActor* Actor) const
 {
+	// 해당 액터가 쓰레기에 해당하는 지 검토
+
 	if (!IsValid(Actor) || AcceptedContentTags.IsEmpty())
 	{
 		return false;
@@ -419,8 +561,7 @@ bool AMD_TrashBin::IsAcceptedContent(const AActor* Actor) const
 
 	for (const FGameplayTag& AcceptedTag : AcceptedContentTags)
 	{
-		if (AcceptedTag.MatchesTag(MDGameplayTags::Resource_Storage_Content)
-			&& ActorTags.HasTag(AcceptedTag))
+		if (AcceptedTag.MatchesTag(MDGameplayTags::Resource_Storage_Content)	&& ActorTags.HasTag(AcceptedTag))
 		{
 			return true;
 		}
@@ -431,9 +572,8 @@ bool AMD_TrashBin::IsAcceptedContent(const AActor* Actor) const
 
 bool AMD_TrashBin::TryAdmitContent(AActor* Actor)
 {
-	if (!IsAcceptedContent(Actor)
-		|| Contents.Contains(TWeakObjectPtr<AActor>(Actor))
-		|| Contents.Num() >= GetMaxCapacity())
+	UMD_TrashContentClaimSubsystem* ClaimSubsystem = GetContentClaimSubsystem();
+	if (!IsAcceptedContent(Actor) || Contents.Contains(TWeakObjectPtr<AActor>(Actor)) || !ClaimSubsystem	|| !ClaimSubsystem->IsOwnedBy(Actor, this))
 	{
 		return false;
 	}
@@ -451,38 +591,12 @@ bool AMD_TrashBin::RemoveAdmittedContent(AActor* Actor)
 		return false;
 	}
 
+	UnfreezeContentForCarry(Actor);
 	Actor->OnDestroyed.RemoveDynamic(this, &AMD_TrashBin::HandleContentDestroyed);
 	return true;
 }
 
-void AMD_TrashBin::AdmitWaitingContents()
-{
-	for (int32 Index = 0;
-		Index < ContentAdmissionOrder.Num() && Contents.Num() < GetMaxCapacity();)
-	{
-		const TWeakObjectPtr<AActor> ContentPtr = ContentAdmissionOrder[Index];
-		AActor* Content = ContentPtr.Get();
-		const int32* OverlapCount = ContentOverlapCounts.Find(ContentPtr);
-		if (!IsValid(Content) || !OverlapCount || *OverlapCount <= 0)
-		{
-			ContentOverlapCounts.Remove(ContentPtr);
-			ContentAdmissionOrder.RemoveAt(Index);
-			continue;
-		}
-
-		if (!Contents.Contains(ContentPtr) && !IsAcceptedContent(Content))
-		{
-			ContentOverlapCounts.Remove(ContentPtr);
-			ContentAdmissionOrder.RemoveAt(Index);
-			continue;
-		}
-
-		TryAdmitContent(Content);
-		++Index;
-	}
-}
-
-void AMD_TrashBin::RebuildContentsFromOverlaps(const bool bPreserveAdmissionOrder)
+void AMD_TrashBin::RebuildContentsFromOverlaps()
 {
 	if (!HasAuthority() || bSortingTransactionActive || !IsValid(ContentsVolume))
 	{
@@ -495,52 +609,46 @@ void AMD_TrashBin::RebuildContentsFromOverlaps(const bool bPreserveAdmissionOrde
 	TMap<TWeakObjectPtr<AActor>, int32> NewOverlapCounts;
 	for (UPrimitiveComponent* OverlappingComponent : OverlappingComponents)
 	{
-		AActor* OverlappingActor = IsValid(OverlappingComponent)
-			? OverlappingComponent->GetOwner()
-			: nullptr;
+		AActor* OverlappingActor = IsValid(OverlappingComponent) ? OverlappingComponent->GetOwner()	: nullptr;
 		if (OverlappingActor != this && IsAcceptedContent(OverlappingActor))
 		{
 			++NewOverlapCounts.FindOrAdd(TWeakObjectPtr<AActor>(OverlappingActor));
 		}
 	}
 
-	// 기존 입고 순서를 보존하고 새로 발견한 액터만 뒤에 붙여 capacity 승격을 예측 가능하게 한다.
-	TArray<TWeakObjectPtr<AActor>> NewAdmissionOrder;
-	NewAdmissionOrder.Reserve(NewOverlapCounts.Num());
-	if (bPreserveAdmissionOrder)
+	TMap<TWeakObjectPtr<AActor>, int32> PreviousOverlapCounts = MoveTemp(ContentOverlapCounts);
+	ContentOverlapCounts = MoveTemp(NewOverlapCounts);
+	UMD_TrashContentClaimSubsystem* ClaimSubsystem = GetContentClaimSubsystem();
+	if (ClaimSubsystem)
 	{
-		for (const TWeakObjectPtr<AActor>& ContentPtr : ContentAdmissionOrder)
+		for (const TPair<TWeakObjectPtr<AActor>, int32>& Pair : PreviousOverlapCounts)
 		{
-			if (ContentPtr.IsValid() && NewOverlapCounts.Contains(ContentPtr))
+			if (!ContentOverlapCounts.Contains(Pair.Key))
 			{
-				NewAdmissionOrder.AddUnique(ContentPtr);
+				if (AActor* Content = Pair.Key.Get())
+				{
+					RemoveAdmittedContent(Content);
+					ClaimSubsystem->UnregisterOverlap(Content, this);
+				}
+			}
+		}
+		for (const TPair<TWeakObjectPtr<AActor>, int32>& Pair : ContentOverlapCounts)
+		{
+			if (AActor* Content = Pair.Key.Get())
+			{
+				ClaimSubsystem->RegisterOverlap(Content, this);
 			}
 		}
 	}
-	TArray<TWeakObjectPtr<AActor>> NewAdmissionCandidates;
-	for (const TPair<TWeakObjectPtr<AActor>, int32>& Pair : NewOverlapCounts)
-	{
-		if (Pair.Key.IsValid() && !NewAdmissionOrder.Contains(Pair.Key))
-		{
-			NewAdmissionCandidates.Add(Pair.Key);
-		}
-	}
-	NewAdmissionCandidates.Sort(
-		[](const TWeakObjectPtr<AActor>& Left, const TWeakObjectPtr<AActor>& Right)
-		{
-			return GetNameSafe(Left.Get()) < GetNameSafe(Right.Get());
-		});
-	NewAdmissionOrder.Append(NewAdmissionCandidates);
 
 	TSet<TWeakObjectPtr<AActor>> DesiredContents;
-	DesiredContents.Reserve(FMath::Min(NewAdmissionOrder.Num(), GetMaxCapacity()));
-	for (const TWeakObjectPtr<AActor>& ContentPtr : NewAdmissionOrder)
+	DesiredContents.Reserve(ContentOverlapCounts.Num());
+	for (const TPair<TWeakObjectPtr<AActor>, int32>& Pair : ContentOverlapCounts)
 	{
-		if (DesiredContents.Num() >= GetMaxCapacity())
+		if (AActor* Content = Pair.Key.Get(); ClaimSubsystem && IsValid(Content) && ClaimSubsystem->IsOwnedBy(Content, this))
 		{
-			break;
+			DesiredContents.Add(Pair.Key);
 		}
-		DesiredContents.Add(ContentPtr);
 	}
 
 	for (auto ContentIt = Contents.CreateIterator(); ContentIt; ++ContentIt)
@@ -551,6 +659,7 @@ void AMD_TrashBin::RebuildContentsFromOverlaps(const bool bPreserveAdmissionOrde
 		}
 		if (AActor* Content = ContentIt->Get())
 		{
+			UnfreezeContentForCarry(Content);
 			Content->OnDestroyed.RemoveDynamic(this, &AMD_TrashBin::HandleContentDestroyed);
 		}
 		ContentIt.RemoveCurrent();
@@ -561,13 +670,13 @@ void AMD_TrashBin::RebuildContentsFromOverlaps(const bool bPreserveAdmissionOrde
 		if (Contents.Contains(ContentPtr)) continue;
 		if (AActor* Content = ContentPtr.Get())
 		{
-			Contents.Add(ContentPtr);
-			Content->OnDestroyed.AddUniqueDynamic(this, &AMD_TrashBin::HandleContentDestroyed);
+			if (TryAdmitContent(Content) && bCarryAccelerationActive)
+			{
+				FreezeContentForCarry(Content);
+			}
 		}
 	}
 
-	ContentOverlapCounts = MoveTemp(NewOverlapCounts);
-	ContentAdmissionOrder = MoveTemp(NewAdmissionOrder);
 	SyncContentCount();
 }
 
@@ -577,11 +686,60 @@ void AMD_TrashBin::SyncContentCount()
 	if (ContentCount == NewCount) return;
 
 	ContentCount = NewCount;
-	OnContentsChanged.Broadcast(ContentCount, GetMaxCapacity());
+	OnContentsChanged.Broadcast(ContentCount);
 	ForceNetUpdate();
 }
 
 void AMD_TrashBin::OnRep_ContentCount()
 {
-	OnContentsChanged.Broadcast(ContentCount, GetMaxCapacity());
+	OnContentsChanged.Broadcast(ContentCount);
+}
+
+void AMD_TrashBin::OnRep_CarryFrozenContents()
+{
+	ApplyReplicatedCarryCollisionState();
+}
+
+UMD_TrashContentClaimSubsystem* AMD_TrashBin::GetContentClaimSubsystem() const
+{
+	UWorld* World = GetWorld();
+	return IsValid(World) ? World->GetSubsystem<UMD_TrashContentClaimSubsystem>() : nullptr;
+}
+
+bool AMD_TrashBin::CanAcceptContentClaim(AActor* Content) const
+{
+	if (!HasAuthority() || bSortingTransactionActive || IsActorBeingDestroyed()
+		|| !IsAcceptedContent(Content))
+	{
+		return false;
+	}
+
+	const int32* OverlapCount = ContentOverlapCounts.Find(TWeakObjectPtr<AActor>(Content));
+	return OverlapCount && *OverlapCount > 0;
+}
+
+bool AMD_TrashBin::TryApplyGrantedContentClaim(AActor* Content)
+{
+	UMD_TrashContentClaimSubsystem* ClaimSubsystem = GetContentClaimSubsystem();
+	if (!CanAcceptContentClaim(Content)	|| !ClaimSubsystem || !ClaimSubsystem->IsOwnedBy(Content, this))
+	{
+		return false;
+	}
+
+	const TWeakObjectPtr<AActor> ContentPtr(Content);
+	if (Contents.Contains(ContentPtr))
+	{
+		return true;
+	}
+	if (!TryAdmitContent(Content))
+	{
+		return false;
+	}
+
+	if (bCarryAccelerationActive)
+	{
+		FreezeContentForCarry(Content);
+	}
+	SyncContentCount();
+	return true;
 }

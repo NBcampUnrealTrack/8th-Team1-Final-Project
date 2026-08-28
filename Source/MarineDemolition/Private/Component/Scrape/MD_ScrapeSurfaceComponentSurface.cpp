@@ -8,12 +8,10 @@
 // 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 책임: 작업면 기하 해석 · 셀 초기화 · 좌표 변환
 
-bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromHit(
+bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceFaceFromHit(
 	const FHitResult& Hit,
-	FVector2D& OutSurfacePositionCm,
 	EMD_ScrapeSurfaceFace& OutSurfaceFace)
 {
-	OutSurfacePositionCm = FVector2D::ZeroVector;
 	OutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
 	if (!bContaminationEnabled)
 	{
@@ -28,7 +26,59 @@ bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromHit(
 		return false;
 	}
 
-	return TryGetContaminationFaceFromHit(Hit, OutSurfaceFace)
+	return TryGetContaminationFaceFromHit(Hit, OutSurfaceFace);
+}
+
+
+bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceWorldNormal(
+	const EMD_ScrapeSurfaceFace SurfaceFace,
+	FVector& OutWorldNormal)
+{
+	OutWorldNormal = FVector::ZeroVector;
+	if (!bContaminationEnabled)
+	{
+		return false;
+	}
+	if (!bContaminationSurfaceInitialized)
+	{
+		InitializeContaminationSurface();
+	}
+	if (!bContaminationSurfaceInitialized || !SurfaceMesh)
+	{
+		return false;
+	}
+
+	FVector HorizontalAxisLocal;
+	FVector FrontNormalLocal;
+	FVector VerticalAxisLocal;
+	if (!FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
+			ResolvedContaminationSurfaceNormalAxis,
+			HorizontalAxisLocal,
+			FrontNormalLocal,
+			VerticalAxisLocal))
+	{
+		return false;
+	}
+
+	OutWorldNormal = SurfaceMesh->GetComponentTransform()
+		.TransformVector(FrontNormalLocal)
+		.GetSafeNormal();
+	if (SurfaceFace == EMD_ScrapeSurfaceFace::Back)
+	{
+		OutWorldNormal = -OutWorldNormal;
+	}
+
+	return !OutWorldNormal.IsNearlyZero() && !OutWorldNormal.ContainsNaN();
+}
+
+
+bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromHit(
+	const FHitResult& Hit,
+	FVector2D& OutSurfacePositionCm,
+	EMD_ScrapeSurfaceFace& OutSurfaceFace)
+{
+	OutSurfacePositionCm = FVector2D::ZeroVector;
+	return TryGetScrapeSurfaceFaceFromHit(Hit, OutSurfaceFace)
 		&& TryProjectWorldPointToContaminationSurface(
 			Hit.ImpactPoint,
 			OutSurfacePositionCm);
@@ -273,6 +323,12 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 	bContaminationCompletionBroadcast = false;
 	CachedFrontContaminationCleanRatio = 0.0f;
 	CachedBackContaminationCleanRatio = 0.0f;
+	CachedFrontInitialContaminationAmount = 0.0;
+	CachedBackInitialContaminationAmount = 0.0;
+	CachedFrontCurrentContaminationAmount = 0.0;
+	CachedBackCurrentContaminationAmount = 0.0;
+	AppliedContaminationStampIdentities.Reset();
+	AppliedContaminationStampIdentityOrder.Reset();
 	ContaminationCells.Reset();
 	ContaminationGeneratedInitialAmounts.Reset();
 	// 표면을 새로 만들면 아직 덩어리가 되지 못한 제거량도 같이 버린다.
@@ -387,6 +443,7 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 		Cell.RemainingContamination = SafeInitialContamination;
 		Cell.TransferredContamination = 0.0f;
 		Cell.TransferredPaintPatternDensity = 0.0f;
+		Cell.CoveredFraction = 0.0f;
 	}
 	if (bUseProceduralContamination
 		&& !TryApplyProceduralInitialContamination(

@@ -5,9 +5,7 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
-#include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
-#include "GameplayTags/MD_GameplayTags.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -15,21 +13,15 @@
 
 AMD_SampleItem::AMD_SampleItem()
 {
-	PrimaryActorTick.bCanEverTick = false;
-	bReplicates = true;
-	SetReplicateMovement(true);
+	// 공통 부모의 파괴 불가 기본값을 샘플 전용 피해 허용 정책으로 전환하는 설정
+	SetCanBeDamaged(true);
+
+	// 샘플의 충격 강도에 따라 손상과 파괴를 구분하기 위한 임계값
 	BreakImpactSpeed = 800.0f;
 	DamageImpactSpeed = 400.0f;
 
-	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
-	SetRootComponent(Mesh);
-	Mesh->SetRelativeScale3D(FVector(0.4f));
-	Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
-	Mesh->SetCollisionObjectType(ECC_PhysicsBody);
-	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
-	Mesh->SetGenerateOverlapEvents(true);
+	// 샘플에서만 물리 충격 이벤트를 받아 파괴 기능을 추가하기 위한 설정
 	Mesh->SetNotifyRigidBodyCollision(true);
-	Mesh->SetSimulatePhysics(true);
 }
 
 void AMD_SampleItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -37,6 +29,18 @@ void AMD_SampleItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLi
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	
 	DOREPLIFETIME(AMD_SampleItem, bDamaged);
+}
+
+FGameplayTag AMD_SampleItem::GetQuestGradeTag() const
+{
+	FGameplayTag OutGradeTag = UMD_MerchantSubsystem::GradeTagFromSampleGrade(Grade);
+	return OutGradeTag;
+}
+
+bool AMD_SampleItem::IsQuestItemIntact() const
+{
+	bool bOutIntact = bDamaged == false;
+	return bOutIntact;
 }
 
 void AMD_SampleItem::OnRep_Damaged()
@@ -55,41 +59,24 @@ void AMD_SampleItem::ApplyDamagedVisual()
 	}
 }
 
-void AMD_SampleItem::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
-{
-	TagContainer.Reset();
-
-	if (PickupMethodTag.IsValid()
-		&& PickupMethodTag.MatchesTag(MDGameplayTags::Interaction_Pickup_Physics))
-	{
-		TagContainer.AddTag(PickupMethodTag);
-	}
-
-	if (StorageContentTag.IsValid()
-		&& StorageContentTag.MatchesTag(MDGameplayTags::Resource_Storage_Content))
-	{
-		TagContainer.AddTag(StorageContentTag);
-	}
-}
-
-void AMD_SampleItem::SetInteractionHighlighted_Implementation(bool bHighlighted)
-{
-	if (IsValid(Mesh))
-	{
-		Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
-		Mesh->SetRenderCustomDepth(bHighlighted);
-	}
-}
-
 void AMD_SampleItem::SetDamaged()
 {
-	if (bDamaged)
+	// 하위 클래스가 지정한 게임플레이 파괴 정책을 손상 상태에도 동일하게 적용하기 위한 결과
+	bool bCanBeDestroyed = CanBeDestroyedByGameplay();
+	if (bCanBeDestroyed == false || bDamaged == true)
 	{
 		return;
 	}
 	bDamaged = true;
 
 	ApplyDamagedVisual();
+}
+
+bool AMD_SampleItem::CanBeDestroyedByGameplay() const
+{
+	// 기존 일반 샘플의 손상·파괴 동작을 기본값으로 보존하기 위한 결과
+	bool bOutCanBeDestroyed = true;
+	return bOutCanBeDestroyed;
 }
 
 void AMD_SampleItem::MulticastSpawnBreakDebris_Implementation()
@@ -153,7 +140,7 @@ void AMD_SampleItem::BeginImpactProtection(float Duration)
 {
 	// 이미 더 길게 걸려 있는 보호를 짧은 요청이 덮어쓰지 않게 한다.
 	// (스폰 보호 3초 중에 선반 보호 0.5초가 들어오면 스폰 보호가 잘려버린다)
-	const float Remaining = GetWorldTimerManager().GetTimerRemaining(ImpactProtectionTimerHandle);
+	float Remaining = GetWorldTimerManager().GetTimerRemaining(ImpactProtectionTimerHandle);
 	if (bImpactProtected && Remaining > Duration)
 	{
 		return;
@@ -169,10 +156,11 @@ void AMD_SampleItem::EndImpactProtection()
 	bImpactProtected = false;
 }
 
-void AMD_SampleItem::OnAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType,
-	AController* InstigatedBy, AActor* DamageCauser)
+void AMD_SampleItem::OnAnyDamage(AActor* DamagedActor, float Damage, const UDamageType* DamageType, AController* InstigatedBy, AActor* DamageCauser)
 {
-	if (bImpactProtected || bDamaged)
+	// 파괴 불가 하위 클래스가 일반 피해로 손상되는 경로를 차단하기 위한 결과
+	bool bCanBeDestroyed = CanBeDestroyedByGameplay();
+	if (bCanBeDestroyed == false || bImpactProtected == true || bDamaged == true)
 	{
 		return;
 	}
@@ -185,14 +173,11 @@ void AMD_SampleItem::OnAnyDamage(AActor* DamagedActor, float Damage, const UDama
 	}
 }
 
-void AMD_SampleItem::HandleMeshHit(
-	UPrimitiveComponent* HitComponent,
-	AActor* OtherActor,
-	UPrimitiveComponent* OtherComponent,
-	FVector NormalImpulse,
-	const FHitResult& Hit)
+void AMD_SampleItem::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit)
 {
-	if (!HasAuthority() || IsActorBeingDestroyed())
+	// 파괴 불가 하위 클래스가 물리 충격으로 손상되거나 파괴되는 경로를 차단하기 위한 결과
+	bool bCanBeDestroyed = CanBeDestroyedByGameplay();
+	if (HasAuthority() == false || IsActorBeingDestroyed() == true || bCanBeDestroyed == false)
 	{
 		return;
 	}
@@ -208,13 +193,13 @@ void AMD_SampleItem::HandleMeshHit(
 		return;
 	}
 
-	const float SampleMass = Mesh->GetMass();
+	float SampleMass = Mesh->GetMass();
 	if (!FMath::IsFinite(SampleMass) || SampleMass <= UE_SMALL_NUMBER)
 	{
 		return;
 	}
 
-	const float ImpactSpeed = NormalImpulse.Size() / SampleMass;
+	float ImpactSpeed = NormalImpulse.Size() / SampleMass;
 	if (!FMath::IsFinite(ImpactSpeed))
 	{
 		return;
@@ -227,7 +212,7 @@ void AMD_SampleItem::HandleMeshHit(
 		{
 			if (UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>())
 			{
-				Merchant->NotifySampleDestroyed(Grade);
+				Merchant->NotifySampleDestroyed(QuestDefinitionId, Grade);
 			}
 		}
 

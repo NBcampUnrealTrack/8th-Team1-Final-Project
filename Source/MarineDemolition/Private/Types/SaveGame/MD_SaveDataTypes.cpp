@@ -2,7 +2,9 @@
 
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 
+#include "Data/Merchant/MD_SiteDefinition.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Types/Lore/MD_LoreTypes.h"
 
 const FGameplayTag FMD_GameStateData::DataFieldKey = MDGameplayTags::Save_Data_GameState;
 const FGameplayTag FMD_MerchantData::DataFieldKey = MDGameplayTags::Save_Data_Merchant;
@@ -11,13 +13,13 @@ const FGameplayTag FMD_WorldData::DataFieldKey = MDGameplayTags::Save_Data_World
 bool FMD_GameStateData::IsStructurallyValid() const
 {
 	// 계약 범위와 하루 길이를 벗어난 값이 시간·점검 로직을 오염시키지 않도록 하는 검사
-	return ElapsedDay >= 1 && ElapsedDay <= 4 && ElapsedSeconds >= 0.0 && FMath::IsFinite(ElapsedSeconds) == true && ContractCrewCount >= 0;
+	return ElapsedDay >= 1 && ElapsedDay <= 4 && ElapsedSeconds >= 0.0 && FMath::IsFinite(ElapsedSeconds) == true && ContractCrewCount >= 0 && ContractDifficulty >= EMD_Difficulty::Safe && ContractDifficulty <= EMD_Difficulty::Extreme;
 }
 
 bool FMD_MerchantData::IsStructurallyValid() const
 {
 	// 경제와 호감도 범위가 런타임 규칙에서 허용하는 범위인지 확인하는 검사
-	if (Credits < 0 || Affinity < -4.0f || Affinity > 5.0f || FMath::IsFinite(Affinity) == false || CurrentDay < 0 || CurrentDay > 4 || NextDepositMultiplier < 0.0f || FMath::IsFinite(NextDepositMultiplier) == false || QuestCompletions < 0)
+	if (Credits < 0 || DebtBalance < 0 || Affinity < -4.0f || Affinity > 5.0f || FMath::IsFinite(Affinity) == false || CurrentDay < 0 || CurrentDay > 4 || NextDepositMultiplier < 0.0f || FMath::IsFinite(NextDepositMultiplier) == false || QuestCompletions < 0)
 	{
 		return false;
 	}
@@ -26,6 +28,40 @@ bool FMD_MerchantData::IsStructurallyValid() const
 	if (CurrentSite.IsNull() == true && (CurrentDay > 0 || MainQuests.Num() > 0 || RepeatQuests.Num() > 0))
 	{
 		return false;
+	}
+
+	// 식별자가 없거나 수량이 유효하지 않은 구매 원장이 해금과 중복 구매 판정을 오염시키지 않도록 하는 검사
+	for (const TPair<FName, int32>& PurchasedItemEntry : PurchasedItemCounts)
+	{
+		if (PurchasedItemEntry.Key.IsNone() == true || PurchasedItemEntry.Value <= 0)
+		{
+			return false;
+		}
+	}
+
+	// 메인 퀘스트 상태가 원본 Primary Data Asset을 다시 찾을 식별자와 유효한 진행도를 갖는지 확인하는 검사
+	for (const FMD_MainQuestState& MainQuest : MainQuests)
+	{
+		bool bHasValidDefinitionId = MainQuest.HasValidDefinitionId();
+		if (bHasValidDefinitionId == false || MainQuest.UnlockDay <= 0)
+		{
+			return false;
+		}
+
+		if (MainQuest.CurrentPhaseIndex < 0 || MainQuest.CurrentProgress < 0)
+		{
+			return false;
+		}
+	}
+
+	// 반복 퀘스트 상태가 Primary Data Asset과 페이즈 진행을 다시 찾을 최소 식별 정보를 갖는지 확인하는 검사
+	for (const FMD_RepeatQuestState& RepeatQuest : RepeatQuests)
+	{
+		bool bHasValidDefinitionId = RepeatQuest.HasValidDefinitionId();
+		if (bHasValidDefinitionId == false || RepeatQuest.CurrentPhaseIndex < 0 || RepeatQuest.CurrentProgress < 0)
+		{
+			return false;
+		}
 	}
 
 	return true;
@@ -78,13 +114,64 @@ bool FMD_GameData::MigrateToCurrentVersion()
 		return false;
 	}
 
-	// 버전 필드가 없던 FInstancedStruct 기반 초기 슬롯을 동일한 필드 구조의 첫 정식 버전으로 승격하는 처리
-	if (SchemaVersion <= 0)
+	// 구형 반복 퀘스트 구조와 제거된 보상 수령 상태를 현재 의미로 오인하지 않고 안전하게 재선정하도록 비우는 마이그레이션
+	if (SchemaVersion < 4)
 	{
 		FMD_MerchantData MerchantData;
 		if (GetDataField(FMD_MerchantData::DataFieldKey, MerchantData) == true)
 		{
-			MerchantData.Affinity = FMath::Clamp(MerchantData.Affinity, -4.0f, 5.0f);
+			if (SchemaVersion <= 0)
+			{
+				MerchantData.Affinity = FMath::Clamp(MerchantData.Affinity, -4.0f, 5.0f);
+			}
+			MerchantData.RepeatQuests.Reset();
+			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
+		}
+	}
+
+	// 인라인 메인 퀘스트를 저장하던 슬롯은 현장 에셋의 일차별 PrimaryAssetId에 다시 연결한다.
+	if (SchemaVersion < 5)
+	{
+		FMD_MerchantData MerchantData;
+		if (GetDataField(FMD_MerchantData::DataFieldKey, MerchantData) == true && MerchantData.MainQuests.IsEmpty() == false)
+		{
+			const UMD_SiteDefinition* Site = MerchantData.CurrentSite.IsNull() == true ? nullptr : MerchantData.CurrentSite.LoadSynchronous();
+			bool bCanRelinkAllMainQuests = IsValid(Site) == true;
+			for (FMD_MainQuestState& MainQuest : MerchantData.MainQuests)
+			{
+				const int32 DefinitionIndex = MainQuest.UnlockDay - 1;
+				if (bCanRelinkAllMainQuests == false || Site->MainQuestLine.IsValidIndex(DefinitionIndex) == false
+					|| Site->MainQuestLine[DefinitionIndex].IsValid() == false)
+				{
+					bCanRelinkAllMainQuests = false;
+					break;
+				}
+
+				MainQuest.DefinitionId = Site->MainQuestLine[DefinitionIndex];
+			}
+
+			if (bCanRelinkAllMainQuests == false)
+			{
+				// 복원할 원본이 없으면 다음 월드 동기화에서 계약을 안전하게 재초기화하도록 비운다.
+				MerchantData.MainQuests.Reset();
+			}
+
+			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
+		}
+	}
+
+	// 통합 Definition에서 메인 역할도 다단계를 지원하므로 기존 슬롯을 첫 페이즈 상태로 명시하는 마이그레이션
+	if (SchemaVersion < 6)
+	{
+		FMD_MerchantData MerchantData;
+		// 기존 상인 데이터가 있을 때만 메인 퀘스트 단계 인덱스를 보정하기 위한 조회 결과
+		bool bHasMerchantData = GetDataField(FMD_MerchantData::DataFieldKey, MerchantData);
+		if (bHasMerchantData == true)
+		{
+			for (FMD_MainQuestState& MainQuest : MerchantData.MainQuests)
+			{
+				MainQuest.CurrentPhaseIndex = 0;
+			}
 			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
 		}
 	}
@@ -120,6 +207,16 @@ bool FMD_GameData::IsValidForLoad() const
 	{
 		FMD_WorldData WorldData;
 		if (GetDataField(FMD_WorldData::DataFieldKey, WorldData) == false || WorldData.IsStructurallyValid() == false)
+		{
+			return false;
+		}
+	}
+
+	// 로어 필드는 초기 슬롯 호환을 위해 선택 사항이지만 존재하면 정확한 타입과 구조를 요구하는 검사
+	if (DataFields.Contains(FMD_LoreData::DataFieldKey) == true)
+	{
+		FMD_LoreData LoreData;
+		if (GetDataField(FMD_LoreData::DataFieldKey, LoreData) == false || LoreData.IsStructurallyValid() == false)
 		{
 			return false;
 		}

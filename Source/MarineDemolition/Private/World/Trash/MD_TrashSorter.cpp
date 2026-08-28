@@ -15,6 +15,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Util/MD_LogUtility.h"
 #include "Util/MD_MaterialTintUtility.h"
+#include "World/Sample/MD_QuestItem.h"
 #include "World/Sample/MD_SampleItem.h"
 
 AMD_TrashSorter::AMD_TrashSorter()
@@ -119,6 +120,13 @@ void AMD_TrashSorter::JudgeAndSwallow(AActor* Item)
 		return;
 	}
 
+	AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Item);
+	if (IsValid(QuestItem) == true && QuestItem->CanBeDestroyedByGameplay() == false)
+	{
+		// 파괴 불가 퀘스트 아이템을 단일 투입 경로에서도 소비하지 않는 보호 처리
+		return;
+	}
+
 	AMD_GameStateBase* MDGameState = nullptr;
 	UMD_MerchantSubsystem* Merchant = nullptr;
 	FMD_TrashSortResult Result;
@@ -128,12 +136,12 @@ void AMD_TrashSorter::JudgeAndSwallow(AActor* Item)
 		return;
 	}
 
-	const FVector SwallowLocation = Item->GetActorLocation();
-	const TWeakObjectPtr<AActor> ItemPtr(Item);
+	FVector SwallowLocation = Item->GetActorLocation();
+	TWeakObjectPtr<AActor> ItemPtr(Item);
 	ActorsBeingProcessed.Add(ItemPtr);
 
 	int32 RefundCredits = 0;
-	const bool bConsumed = ConsumeSortable(Item, MDGameState, Result, RefundCredits);
+	bool bConsumed = ConsumeSortable(Item, MDGameState, Result, RefundCredits);
 	ActorsBeingProcessed.Remove(ItemPtr);
 	if (!bConsumed)
 	{
@@ -142,7 +150,8 @@ void AMD_TrashSorter::JudgeAndSwallow(AActor* Item)
 
 	if (RefundCredits > 0)
 	{
-		Merchant->AddCredits(RefundCredits);
+		// 정분류 환급을 일일 보고서의 분류 금액 행에 기록
+		Merchant->AddCredits(EMD_DailyReportCategory::Categorizing, RefundCredits);
 	}
 
 	ForceNetUpdate();
@@ -164,22 +173,9 @@ void AMD_TrashSorter::JudgeAndSwallowContainer(AActor* ContainerActor)
 		return;
 	}
 
-	// Drain 전에 모든 sortable descriptor를 검증한다. 잘못된 테이블 때문에 통 전체를 잃지 않는다.
-	const TArray<AActor*> PreviewContents =
-		IMD_TrashContainer::Execute_GetContainedActors(ContainerActor);
-	for (AActor* Content : PreviewContents)
-	{
-		if (!IsValid(Content) || !Content->Implements<UMD_TrashSortable>()) continue;
-
-		FMD_TrashSortResult PreviewResult;
-		if (!ResolveSortResult(Content, PreviewResult))
-		{
-			return;
-		}
-	}
-
-	const FVector SwallowLocation = ContainerActor->GetActorLocation();
-	const TWeakObjectPtr<AActor> ContainerPtr(ContainerActor);
+	// Drain이 최신 overlap을 반영한 최종 소비 목록을 반환한다.
+	FVector SwallowLocation = ContainerActor->GetActorLocation();
+	TWeakObjectPtr<AActor> ContainerPtr(ContainerActor);
 	ActorsBeingProcessed.Add(ContainerPtr);
 
 	TArray<AActor*> DrainedContents;
@@ -190,47 +186,11 @@ void AMD_TrashSorter::JudgeAndSwallowContainer(AActor* ContainerActor)
 		return;
 	}
 
-	// Drain 구현이 preview 이후 최신 overlap을 포함할 수 있으므로 실제 인수받은 집합도 파괴 전에 재검증한다.
-	TMap<TWeakObjectPtr<AActor>, FMD_TrashSortResult> ResolvedResults;
-	for (AActor* Content : DrainedContents)
-	{
-		if (!IsValid(Content) || !Content->Implements<UMD_TrashSortable>()) continue;
-
-		FMD_TrashSortResult Result;
-		if (!ResolveSortResult(Content, Result))
-		{
-			const bool bRestored =
-				IMD_TrashContainer::Execute_TryRestoreDrainedContentsAfterFailedSort(
-					ContainerActor, DrainedContents);
-			ActorsBeingProcessed.Remove(ContainerPtr);
-			UE_LOG(MarineDemolition, Error,
-				TEXT("'%s' 컨테이너의 '%s' 분류 정책 검증에 실패했다. Drain rollback=%s"),
-				*GetNameSafe(ContainerActor),
-				*GetNameSafe(Content),
-				bRestored ? TEXT("성공") : TEXT("실패"));
-			return;
-		}
-
-		ResolvedResults.Add(TWeakObjectPtr<AActor>(Content), Result);
-	}
-
-	// 통 자체는 점수/환급 대상이 아니며, 먼저 파괴에 성공해야 내용물 원장을 변경한다.
-	if (!ContainerActor->Destroy())
-	{
-		// Blueprint 알림 재진입이 이미 통을 파괴했다면 drain 소유권은 Sorter가 그대로 마무리한다.
-		if (!ContainerActor->IsActorBeingDestroyed())
-		{
-			const bool bRestored =
-				IMD_TrashContainer::Execute_TryRestoreDrainedContentsAfterFailedSort(
-					ContainerActor, DrainedContents);
-			ActorsBeingProcessed.Remove(ContainerPtr);
-			UE_LOG(MarineDemolition, Warning,
-				TEXT("'%s' 컨테이너 drain 후 파괴에 실패했다. rollback=%s"),
-				*GetNameSafe(ContainerActor),
-				bRestored ? TEXT("성공") : TEXT("실패"));
-			return;
-		}
-	}
+	// 정상적인 서버 TrashBin은 반드시 파괴된다. 실패는 복구 분기 대신 개발 중 invariant 위반으로 알린다.
+	bool bContainerDestroyed = ContainerActor->Destroy();
+	ensureMsgf(bContainerDestroyed,
+		TEXT("분류기에 들어온 컨테이너 '%s' 파괴에 실패했습니다."),
+		*GetNameSafe(ContainerActor));
 	ActorsBeingProcessed.Remove(ContainerPtr);
 
 	int32 CorrectCount = 0;
@@ -242,22 +202,31 @@ void AMD_TrashSorter::JudgeAndSwallowContainer(AActor* ContainerActor)
 	{
 		if (!IsValid(Content)) continue;
 
-		const TWeakObjectPtr<AActor> ContentPtr(Content);
+		TWeakObjectPtr<AActor> ContentPtr(Content);
 		if (ActorsBeingProcessed.Contains(ContentPtr)) continue;
 		ActorsBeingProcessed.Add(ContentPtr);
+
+		AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Content);
+		if (IsValid(QuestItem) == true && QuestItem->CanBeDestroyedByGameplay() == false)
+		{
+			// 컨테이너에서 배출된 파괴 불가 퀘스트 아이템을 월드에 남기는 보호 처리
+			ActorsBeingProcessed.Remove(ContentPtr);
+			continue;
+		}
 
 		if (!Content->Implements<UMD_TrashSortable>())
 		{
 			// 샘플처럼 분류 계약이 없는 내용물은 점수/환급 없이 소비한다.
-			const AMD_SampleItem* Sample = Cast<AMD_SampleItem>(Content);
-			const TOptional<EMD_SampleGrade> DestroyedSampleGrade = Sample
+			AMD_SampleItem* Sample = Cast<AMD_SampleItem>(Content);
+			TOptional<EMD_SampleGrade> DestroyedSampleGrade = Sample
 				? TOptional<EMD_SampleGrade>(Sample->Grade)
 				: TOptional<EMD_SampleGrade>();
+			FPrimaryAssetId DestroyedSampleQuestDefinitionId = Sample != nullptr ? Sample->QuestDefinitionId : FPrimaryAssetId();
 			if (Content->Destroy())
 			{
 				if (DestroyedSampleGrade.IsSet())
 				{
-					Merchant->NotifySampleDestroyed(DestroyedSampleGrade.GetValue());
+					Merchant->NotifySampleDestroyed(DestroyedSampleQuestDefinitionId, DestroyedSampleGrade.GetValue());
 				}
 				++DiscardedCount;
 			}
@@ -265,21 +234,34 @@ void AMD_TrashSorter::JudgeAndSwallowContainer(AActor* ContainerActor)
 			continue;
 		}
 
-		const FMD_TrashSortResult* Result = ResolvedResults.Find(ContentPtr);
-		int32 ItemRefundCredits = 0;
-		if (Result
-			&& ConsumeSortable(Content, MDGameState, *Result, ItemRefundCredits))
+		FMD_TrashSortResult Result;
+		if (!ResolveSortResult(Content, Result))
 		{
-			Result->bCorrectSort ? ++CorrectCount : ++MisSortCount;
+			UE_LOG(MarineDemolition, Error,
+				TEXT("'%s'의 분류 정책이 유효하지 않아 점수 없이 폐기합니다."),
+				*GetNameSafe(Content));
+			if (Content->Destroy())
+			{
+				++DiscardedCount;
+			}
+			ActorsBeingProcessed.Remove(ContentPtr);
+			continue;
+		}
+
+		int32 ItemRefundCredits = 0;
+		if (ConsumeSortable(Content, MDGameState, Result, ItemRefundCredits))
+		{
+			Result.bCorrectSort ? ++CorrectCount : ++MisSortCount;
 			TotalRefundCredits += ItemRefundCredits;
 		}
 		ActorsBeingProcessed.Remove(ContentPtr);
 	}
 
-	// 최대 12개가 들어와도 Merchant delegate/복제 갱신은 한 번만 일으킨다.
+	// 내용물 수와 무관하게 Merchant delegate/복제 갱신은 한 번만 일으킨다.
 	if (TotalRefundCredits > 0)
 	{
-		Merchant->AddCredits(TotalRefundCredits);
+		// 일괄 정분류 환급을 일일 보고서의 분류 금액 행에 기록
+		Merchant->AddCredits(EMD_DailyReportCategory::Categorizing, TotalRefundCredits);
 	}
 
 	ForceNetUpdate();

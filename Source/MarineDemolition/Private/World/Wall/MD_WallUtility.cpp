@@ -1,11 +1,15 @@
 #include "World/Wall/MD_WallUtility.h"
 
+#include "Character/MD_Character.h"
 #include "CollisionQueryParams.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/OverlapResult.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
+#include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "World/Wall/MD_CuttableWall.h"
@@ -22,6 +26,7 @@ AMD_WallUtility::AMD_WallUtility()
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(Root);
 	Mesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
+	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
 
 	LinkTrigger = CreateDefaultSubobject<UBoxComponent>(TEXT("LinkTrigger"));
 	LinkTrigger->SetupAttachment(Root);
@@ -41,6 +46,8 @@ void AMD_WallUtility::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_WallUtility, UtilityState);
+	DOREPLIFETIME(AMD_WallUtility, BreakLocation);
+	DOREPLIFETIME(AMD_WallUtility, BreakNormal);
 }
 
 void AMD_WallUtility::BeginPlay()
@@ -95,19 +102,41 @@ void AMD_WallUtility::HandleHostWallCut(AMD_CuttableWall* Wall, AActor* Cutter)
 {
 	// 조준선이 이 인프라 메시를 실제로 관통했을 때만 파손한다.
 	// 파이프를 피해서 자르면 벽만 사라지고 인프라는 살아남는다.
-	if (!WasCutRayThroughMesh(Cutter))
+	FHitResult CutHit;
+	if (!WasCutRayThroughMesh(Cutter, CutHit))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s HandleHostWallCut: 조준선이 메시를 빗나감 → 생존"),
 			*GetName());
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s HandleHostWallCut: 메시 관통 → 파손"), *GetName());
+	// 파손 VFX 스폰 지점 기록. SetBroken보다 먼저 채워야 같은 복제 번치로 클라에 도착한다
+	if (CutHit.bBlockingHit)
+	{
+		BreakLocation = CutHit.ImpactPoint;
+		// 분출 방향 = 절단자 쪽 수평 방향. 눈높이가 관통 지점보다 높아 그대로 쓰면 위로 솟고,
+		// 표면 법선은 파이프 윗면 절단 시 위를 향하므로 둘 다 Z를 버리고 수평 성분만 쓴다
+		FVector ToCutter = CutHit.TraceStart - CutHit.ImpactPoint;
+		ToCutter.Z = 0.f;
+		ToCutter = ToCutter.GetSafeNormal();
+		BreakNormal = ToCutter.IsNearlyZero() ? FVector(CutHit.ImpactNormal) : ToCutter;
+	}
+	else
+	{
+		// 시점 재구성 실패로 보수적 파손된 경우 — 메시 중심으로 폴백
+		BreakLocation = IsValid(Mesh) ? Mesh->Bounds.Origin : GetActorLocation();
+		BreakNormal = GetActorUpVector();
+	}
+
+	UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s HandleHostWallCut: 메시 관통 → 파손 (지점=%s, 법선=%s, 트레이스히트=%d)"),
+		*GetName(), *BreakLocation.ToCompactString(), *BreakNormal.ToCompactString(), CutHit.bBlockingHit ? 1 : 0);
 	SetBroken(Cutter);
 }
 
-bool AMD_WallUtility::WasCutRayThroughMesh(AActor* Cutter) const
+bool AMD_WallUtility::WasCutRayThroughMesh(AActor* Cutter, FHitResult& OutHit) const
 {
+	OutHit = FHitResult();
+
 	if (!IsValid(Mesh) || !IsValid(Cutter))
 	{
 		return false;
@@ -118,7 +147,7 @@ bool AMD_WallUtility::WasCutRayThroughMesh(AActor* Cutter) const
 	const AController* Controller = Pawn ? Pawn->GetController() : nullptr;
 	if (!Controller)
 	{
-		// 시점을 못 구하면 보수적으로 파손 (판정 불가 시 기존 동작 유지)
+		// 시점을 못 구하면 보수적으로 파손 (판정 불가 시 기존 동작 유지, OutHit은 비워 둔다)
 		return true;
 	}
 
@@ -129,9 +158,11 @@ bool AMD_WallUtility::WasCutRayThroughMesh(AActor* Cutter) const
 	const FVector End = ViewLoc + ViewRot.Vector() * CutRayDistance;
 
 	// 파이프 실제 형상으로 판정 (복합 콜리전 = 렌더 지오메트리)
-	FHitResult Hit;
 	FCollisionQueryParams Params(SCENE_QUERY_STAT(PipeCutRay), /*bTraceComplex=*/true);
-	return Mesh->LineTraceComponent(Hit, Start, End, Params);
+	const bool bHit = Mesh->LineTraceComponent(OutHit, Start, End, Params);
+	// LineTraceComponent가 OutHit.bBlockingHit을 안 채우는 경우가 있어 반환값으로 보정
+	OutHit.bBlockingHit = bHit;
+	return bHit;
 }
 
 void AMD_WallUtility::HandleHostWallScanned(AMD_CuttableWall* Wall, float Duration, AActor* Scanner)
@@ -199,6 +230,8 @@ void AMD_WallUtility::SetRepaired(AActor* Repairer)
 	}
 
 	UtilityState = EMD_UtilityState::Repaired;
+	UE_LOG(LogTemp, Display, TEXT("[MD_Utility] %s SetRepaired: UtilityState=Repaired, Repairer=%s"),
+		*GetName(), *GetNameSafe(Repairer));
 
 	OnRepaired(Repairer);
 
@@ -212,8 +245,32 @@ void AMD_WallUtility::OnRep_UtilityState()
 
 bool AMD_WallUtility::CanRepairWith(AActor* Interactor) const
 {
-	// TODO: Interactor의 장착 도구가 RequiredRepairToolTag와 일치하는지 확인
-	return true;
+	if (!RequiredRepairToolTag.IsValid())
+	{
+		return false;
+	}
+
+	const AMD_Character* Character = Cast<AMD_Character>(Interactor);
+	if (!IsValid(Character))
+	{
+		return false;
+	}
+
+	const UMD_EquipHotbarComponent* Hotbar = Character->GetHotbarComponent();
+	if (!IsValid(Hotbar))
+	{
+		return false;
+	}
+
+	const UMD_ToolDefinition* CurrentTool = Hotbar->GetCurrentTool();
+	return IsValid(CurrentTool)
+		&& CurrentTool->ToolAbilityTag.MatchesTagExact(RequiredRepairToolTag);
+}
+
+bool AMD_WallUtility::CanInteract_Implementation(AActor* Interactor) const
+{
+	return UtilityState == EMD_UtilityState::Broken
+		&& CanRepairWith(Interactor);
 }
 
 void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
@@ -223,8 +280,8 @@ void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
 		return;
 	}
 
-	// 파손 상태에서 올바른 수리 도구를 든 경우에만 수리
-	if (UtilityState == EMD_UtilityState::Broken && CanRepairWith(Interactor))
+	// 조준 이후 상태·장비가 바뀔 수 있으므로 실제 실행 직전에도 같은 규칙을 다시 확인한다.
+	if (CanInteract_Implementation(Interactor))
 	{
 		SetRepaired(Interactor);
 	}

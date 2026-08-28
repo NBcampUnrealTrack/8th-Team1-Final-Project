@@ -1,31 +1,34 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
-#include "GameplayTagAssetInterface.h"
-#include "Gameplay/Interaction/MD_Interactable.h"
 #include "Types/Score/MD_ScoreTypes.h"
+#include "World/Sample/MD_QuestItem.h"
 #include "MD_SampleItem.generated.h"
 
 class UPrimitiveComponent;
 class UStaticMeshComponent;
 
-// 샘플 스텁. 붕괴 피해를 받으면 손상되고 큰 물리 충격을 받으면 파괴된다.
+/** 파괴 불가 퀘스트 아이템에 등급·손상·충격 파괴 기능을 추가하는 샘플 클래스 */
 UCLASS()
-class MARINEDEMOLITION_API AMD_SampleItem
-	: public AActor
-	, public IGameplayTagAssetInterface
-	, public IMD_Interactable
+class MARINEDEMOLITION_API AMD_SampleItem : public AMD_QuestItem
 {
 	GENERATED_BODY()
 
 public:
+	/** 샘플 전용 파괴 임계값과 피해 허용 정책을 구성하는 생성자 */
 	AMD_SampleItem();
 
+	/** 손상 상태를 네트워크로 복제하기 위한 등록 함수 */
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override;
-	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+	/** 샘플 등급을 퀘스트 판정용 게임플레이 태그로 변환하는 함수 */
+	virtual FGameplayTag GetQuestGradeTag() const override;
+
+	/** 샘플의 손상 상태를 퀘스트 제출 조건으로 반환하는 함수 */
+	virtual bool IsQuestItemIntact() const override;
+
+	/** 샘플이 게임플레이 피해와 폐기 경로에서 파괴될 수 있음을 반환하는 함수 */
+	virtual bool CanBeDestroyedByGameplay() const override;
 
 	// 샘플 등급. 배치 시 인스턴스별 지정 (단가 조회 키)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Sample")
@@ -34,7 +37,7 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_Damaged, Category = "Sample")
 	bool bDamaged = false;
 
-	// 손상 상태 적용. 붕괴 피해와 Day 복원에서 공용
+	/** 붕괴 피해와 Day 복원에서 공용으로 사용하는 손상 상태 적용 함수 */
 	void SetDamaged();
 
 	/** 모든 머신에서 로컬로 파편 연출을 스폰. Destroy 직전에 서버가 호출 */
@@ -67,7 +70,7 @@ public:
 	float GrabProtectionDuration = 0.4f;
 
 	/** MD_InteractionComponent가 그랩 성공 직후 호출한다. */
-	void NotifyGrabbed();
+	virtual void NotifyGrabbed() override;
 
 	/**
 	 * 이 시간(초) 동안 손상·파괴 판정을 막는다.
@@ -76,7 +79,7 @@ public:
 	 * 들고 와야 하는 곳이라 접촉이 불가피한데, 그 접촉으로 깨지면 회수 자체가 불가능해진다.
 	 * 구역에 머무는 동안 주기적으로 갱신해서 쓴다.
 	 */
-	void SuppressImpactDamage(float Duration);
+	virtual void SuppressImpactDamage(float Duration) override;
 
 protected:
 	virtual void BeginPlay() override;
@@ -89,30 +92,11 @@ protected:
 	FTimerHandle ImpactProtectionTimerHandle;
 
 	UFUNCTION()
-	void OnAnyDamage(AActor* DamagedActor, float Damage, const class UDamageType* DamageType,
-		class AController* InstigatedBy, AActor* DamageCauser);
+	void OnAnyDamage(AActor* DamagedActor, float Damage, const class UDamageType* DamageType, class AController* InstigatedBy, AActor* DamageCauser);
 
 	/** 큰 물리 충격을 받으면 서버에서 샘플을 파괴한다. */
 	UFUNCTION()
-	void HandleMeshHit(
-		UPrimitiveComponent* HitComponent,
-		AActor* OtherActor,
-		UPrimitiveComponent* OtherComponent,
-		FVector NormalImpulse,
-		const FHitResult& Hit);
-
-	UPROPERTY(VisibleAnywhere, Category = "Sample")
-	TObjectPtr<UStaticMeshComponent> Mesh;
-
-	/** 이 액터를 집을 때 사용할 물리 운반 방식. Blueprint 기본값에서 지정한다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Interaction",
-		meta = (Categories = "Interaction.Pickup.Physics"))
-	FGameplayTag PickupMethodTag;
-
-	/** 보관함이 이 샘플을 식별할 때 사용할 내용물 분류 태그 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Resource",
-		meta = (Categories = "Resource.Storage.Content"))
-	FGameplayTag StorageContentTag;
+	void HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, FVector NormalImpulse, const FHitResult& Hit);
 
 	/**
 	 * 샘플을 파괴하는 최소 충격 속도(cm/s).

@@ -9,7 +9,6 @@
 #include "MD_TrashItem.generated.h"
 
 class UStaticMeshComponent;
-class UMaterialInstanceDynamic;
 
 /**
  * 기지 바닥에 산재한 각종 쓰레기 (기획 02 §1)
@@ -28,9 +27,9 @@ class MARINEDEMOLITION_API AMD_TrashItem
 public:
 	AMD_TrashItem();
 
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override;
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+	virtual FText GetInteractionDisplayName_Implementation() const override;
 
 	/** Implements IMD_TrashSortable */
 	/** 정답 칸은 배치 값이 아니라 종류 테이블에서 온다. 캔에 플라스틱 칸을 달아둘 수 없다 */
@@ -38,9 +37,6 @@ public:
 	virtual FGameplayTag GetSortScoreBonusTag_Implementation() const override;
 	virtual FMD_TrashSortDescriptor GetTrashSortDescriptor_Implementation() const override;
 	/** ~Implements IMD_TrashSortable */
-
-	/** 종류 지정 + 행 사양 적용. 런타임 스폰 직후 서버에서 호출 */
-	void SetTrashKindId(FName InTrashKindId);
 
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	FName GetTrashKindId() const { return TrashKindId; }
@@ -52,8 +48,11 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
-	/** 종류 테이블의 행 이름. 에디터에서는 테이블 행 목록이 드롭다운으로 나온다 */
-	UPROPERTY(ReplicatedUsing = OnRep_TrashKindId, EditAnywhere, BlueprintReadOnly,
+	/**
+	 * 종류 테이블의 행 이름. 에디터에서는 테이블 행 목록이 드롭다운으로 나온다.
+	 * 배치 값이라 서버·클라이언트가 각자 레벨에서 같은 값을 읽는다. 복제하지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,
 		Category = "MD|Trash", meta = (GetOptions = "GetTrashKindIdOptions"))
 	FName TrashKindId = TEXT("DrinkCan");
 
@@ -61,10 +60,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash")
 	bool bTintPlaceholderMeshByCategory = true;
 
-	/** 색을 넣을 벡터 파라미터 이름. 기본값은 배치용 M_MD_TrashTint의 Tint (M_Master_Opaque는 Color다) */
+	/**
+	 * 색을 넣을 Custom Primitive Data 인덱스. Vector4라 이 인덱스부터 4칸을 쓴다.
+	 * 머티리얼(M_MD_TrashTint / M_Master_Opaque)의 색 파라미터에서
+	 * "Use Custom Primitive Data"를 켜고 같은 인덱스를 지정해야 색이 들어온다.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash",
-		meta = (EditCondition = "bTintPlaceholderMeshByCategory"))
-	FName TintParameterName = TEXT("Tint");
+		meta = (EditCondition = "bTintPlaceholderMeshByCategory", ClampMin = "0", ClampMax = "28"))
+	int32 TintCustomDataIndex = 0;
 
 	/** 이 액터를 집을 때 사용할 물리 운반 방식 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Interaction",
@@ -81,17 +84,11 @@ private:
 	UFUNCTION()
 	TArray<FName> GetTrashKindIdOptions() const;
 
-	UFUNCTION()
-	void OnRep_TrashKindId();
-
 	/** 종류 행의 질량·메시·색을 메시 컴포넌트에 반영 */
 	void ApplyTrashKindRow();
 
-	/** OnConstruction/OnRep 중복 호출이 같은 메시를 다시 동기 로드하거나 MID를 누적하지 않게 한다 */
+	/** OnConstruction 재실행이 같은 메시를 다시 동기 로드하지 않게 한다 */
 	FName AppliedTrashKindId = NAME_None;
 	FGameplayTag AppliedCategory;
 	bool bHasAppliedTrashKind = false;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInstanceDynamic> TrashMID;
 };

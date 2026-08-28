@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -68,6 +68,10 @@ protected:
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
 
 protected:
+	/** 물속에서 바닥을 걸을 때 적용할 최대 이동 속도 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Movement|Swimming", meta = (ClampMin = "0.0"))
+	float MaxUnderwaterWalkSpeed = 200.0f;
+
 	/** 사다리 축을 따라 이동할 수 있는 최대 속도 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Movement|Ladder", meta = (ClampMin = "0.0"))
 	float MaxLadderSpeed = 200.0f;
@@ -132,6 +136,9 @@ private:
 	bool bWantsToSwim = false;
 
 public:
+	/** 카메라 방향에 맞춘 사다리 상하 및 좌우 이동 입력을 적용하는 함수 */
+	void ApplyLadderMovementInput(float ForwardInput, float RightInput);
+
 	/** 지정 사다리로 스냅한 뒤 등반 상태에 진입하는 함수 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Movement|Ladder")
 	bool StartClimbing(AMD_Ladder* Ladder);

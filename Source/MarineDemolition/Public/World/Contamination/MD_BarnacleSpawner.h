@@ -18,8 +18,8 @@ class UBoxComponent;
  * 배치는 시드 기반이라 같은 시드·같은 레벨이면 항상 같은 자리에 나온다.
  * 서버에서만 스폰하고 따개비 액터가 복제되므로 클라이언트와 어긋나지 않는다.
  *
- * 기획 02 §1의 "따개비는 보통벽에만 붙는다. 내력·칸막이 세그먼트에는 두지 않는다"를
- * 여기서 코드로 막는다. 손으로 붙일 때는 AMD_Barnacle::CheckForErrors가 경고만 낸다.
+ * 볼륨 안에서 BarnacleTrace를 Block하는 벽과 가구만 대상이 될 수 있다. 철거 대상
+ * 격벽은 기존 기획 제약을 유지해 기본적으로 제외하고, 허용된 로컬 면만 후보로 사용한다.
  */
 UCLASS()
 class MARINEDEMOLITION_API AMD_BarnacleSpawner : public AActor
@@ -77,37 +77,52 @@ protected:
 	 * 볼륨이 여러 개면 합이 그 수가 되게 나눠 적는다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner",
-		meta = (ClampMin = "0", UIMax = "30"))
+		meta = (ClampMin = "0", ClampMax = "30", UIMax = "30"))
 	int32 BarnacleCount = 5;
 
 	/** 배치 시드. 바꾸면 같은 개수로 다른 자리에 붙는다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner")
 	int32 PlacementSeed = 1337;
 
+	/** 생성되는 따개비 한 개의 최소 내구도. 최대값과 역전되면 실행 시 자동 정렬한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner|Durability",
+		meta = (ClampMin = "1", ClampMax = "1000000", UIMin = "1", UIMax = "10"))
+	int32 MinimumBarnacleDurability = 1;
+
+	/** 생성되는 따개비 한 개의 최대 내구도. 범위 양 끝을 포함해 무작위로 정한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner|Durability",
+		meta = (ClampMin = "1", ClampMax = "1000000", UIMin = "1", UIMax = "10"))
+	int32 MaximumBarnacleDurability = 3;
+
 	/** 볼륨 안 임의 지점에서 표면을 찾을 때 쏘는 거리 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner",
 		meta = (ClampMin = "10.0", Units = "cm"))
 	float SurfaceSearchDistanceCm = 400.0f;
 
-	/** 같은 군집 안에서도 이만큼은 떨어뜨린다. 메시가 서로 파묻히는 것만 막는 값이다 */
+	/**
+	 * 같은 면의 따개비 사이에 반드시 확보할 최소 거리.
+	 * 실제 배치는 이 하한만 만족하는 데 그치지 않고 후보 중 가장 먼 자리를 우선한다.
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner",
 		meta = (ClampMin = "0.0", Units = "cm"))
 	float MinimumSeparationCm = 18.0f;
 
 	/**
-	 * 한 군집에 몇 개를 붙일지의 범위.
-	 *
-	 * 따개비는 군집으로 자란다 (기획 06 §블룸 "변종 생물막·무기질 혼합체").
-	 * 균등하게 흩뿌리면 배치한 티가 나고 벽에 자란 것처럼 보이지 않는다.
-	 * X는 최소, Y는 최대다. (1,1)로 두면 예전처럼 하나씩 흩어진다.
+	 * 따개비 하나당 미리 수집할 표면 후보 수.
+	 * 높일수록 더 멀리 퍼질 가능성이 커지지만 레벨 시작 시 트레이스 수가 늘어난다.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner|Cluster",
-		meta = (ClampMin = "1"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner|Distribution",
+		meta = (ClampMin = "4", ClampMax = "64"))
+	int32 PlacementCandidatesPerBarnacle = 24;
+
+	/** 이전 군집 배치 에셋을 읽기 위한 값. 새 분산 배치에서는 사용하지 않는다. */
+	UPROPERTY(meta = (DeprecatedProperty,
+		DeprecationMessage = "군집 배치는 폐기됐으며 최대 거리 우선 분산 배치를 사용한다."))
 	FIntPoint ClusterSizeRange = FIntPoint(2, 4);
 
-	/** 군집 중심에서 이 반경 안에 붙인다 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner|Cluster",
-		meta = (ClampMin = "1.0", Units = "cm"))
+	/** 이전 군집 배치 에셋을 읽기 위한 값. 새 분산 배치에서는 사용하지 않는다. */
+	UPROPERTY(meta = (DeprecatedProperty,
+		DeprecationMessage = "군집 배치는 폐기됐으며 최대 거리 우선 분산 배치를 사용한다."))
 	float ClusterRadiusCm = 70.0f;
 
 	/**
@@ -144,12 +159,29 @@ protected:
 	bool bAttachToSurface = true;
 
 	/**
-	 * 면 법선의 Z 성분이 이 값을 넘으면 바닥·천장으로 보고 건너뛴다.
-	 * 따개비는 벽 부착물이다 (기획 02 §1 "보통벽에 붙은 부착물").
-	 * 1.0으로 두면 바닥에도 붙는다.
+	 * SpawnVolume 로컬 +X/-X 방향의 앞면·뒷면을 배치 대상으로 사용한다.
+	 * 기존 벽 스포너 동작을 유지하기 위해 기본값은 켜짐이다.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner",
-		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner|Surface Faces")
+	bool bAllowFrontBackSurfaces = true;
+
+	/**
+	 * SpawnVolume 로컬 +Y/-Y 방향의 오른쪽면·왼쪽면을 배치 대상으로 사용한다.
+	 * 기존 배치 시드와 면 구성을 유지하기 위해 기본값은 꺼짐이다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner|Surface Faces")
+	bool bAllowLeftRightSurfaces = false;
+
+	/**
+	 * SpawnVolume 로컬 +Z/-Z 방향의 윗면·아랫면을 배치 대상으로 사용한다.
+	 * 가구처럼 수평면에도 붙여야 하는 스포너에서 켠다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner|Surface Faces")
+	bool bAllowTopBottomSurfaces = false;
+
+	/** 이전 월드 Z 기반 필터 값을 읽기 위한 프로퍼티. 새 로컬 6면 정책에서는 사용하지 않는다. */
+	UPROPERTY(meta = (DeprecatedProperty,
+		DeprecationMessage = "앞/뒤, 좌/우 및 위/아래 허용 플래그가 로컬 면 판정을 대신한다."))
 	float MaximumSurfaceUpwardDot = 0.5f;
 
 	/**
@@ -179,25 +211,29 @@ private:
 	// 자동화 테스트가 배치 프로퍼티를 직접 세팅한다. 지우면 테스트가 컴파일되지 않는다
 	friend class FMD_BarnacleSpawnerTest;
 
-	/**
-	 * 표면 자리 하나를 찾는다. SearchCenter 주변 SearchRadiusCm 안에서 찾으며,
-	 * 반경이 0 이하면 볼륨 전체에서 찾는다. 못 찾으면 false.
-	 */
-	bool TryFindSurfaceSpot(
+	/** 회전·스케일을 반영한 볼륨 안에서 허용 가능한 표면 후보를 충분히 수집한다. */
+	void GatherSurfaceCandidates(
 		FRandomStream& RandomStream,
-		const FVector& SearchCenter,
-		float SearchRadiusCm,
-		const TArray<FVector>& PlacedLocations,
+		int32 DesiredCandidateCount,
 		const TArray<AActor*>& IgnoredActors,
-		FHitResult& OutHit) const;
+		TArray<FHitResult>& OutHits) const;
+
+	/** 트레이스가 맞은 지점이 실제 SpawnVolume 안에 있는지 확인한다. */
+	bool IsPointInsideSpawnVolume(const FVector& WorldLocation) const;
 
 	/** 히트를 "벽에 붙어 자란" 트랜스폼으로 바꾼다 */
 	FTransform MakeAttachedTransform(
 		FRandomStream& RandomStream,
 		const FHitResult& Hit) const;
 
-	/** 붙일 수 있는 면인지. 기획 02 §1 제약이 여기 모여 있다 */
+	/** 붙일 수 있는 액터와 로컬 면 방향인지 확인한다. */
 	bool IsAcceptableSurface(const FHitResult& Hit) const;
+
+	/** 잘못 입력된 Min-Max를 1 이상 오름차순 범위로 보정한다. */
+	FIntPoint GetSanitizedDurabilityRange() const;
+
+	/** 배치 RNG를 소비하지 않고 시드·순번만으로 개별 최대 내구도를 결정한다. */
+	int32 GenerateDurabilityForSpawn(int32 PlacementSeedToUse, int32 SpawnIndex) const;
 
 	/**
 	 * 배치 루프 본체. 초기 배치와 밤샘 증식이 공유한다.

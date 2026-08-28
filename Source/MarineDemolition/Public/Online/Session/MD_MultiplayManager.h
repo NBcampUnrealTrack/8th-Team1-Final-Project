@@ -3,11 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/EngineBaseTypes.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"      // Online Subsystem의 Session 관련 모듈 참조
 #include "Interfaces/OnlineExternalUIInterface.h"   // Online SubSystem의 플랫폼 제공 UI 관련 모듈 참조
 #include "MD_MultiplayManager.generated.h"
+
+class UMD_LoadingScreenSubsystem;
+class APlayerState;
 
 struct FBlueprintSessionResult;
 struct FMD_SessionCreateParams;     // Hosting Session 설정값
@@ -111,13 +113,24 @@ public:
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
     void CreateSession(const FString& ServerName, int32 MaxPlayerCount, const FMD_SessionCreateParams& SessionCreateParams);
 
-    // 호스트가 현재 Session을 시작 상태로 전환하고 모든 접속자를 지정 맵으로 이동시키는 함수
+    // 불러오기 여부와 현재 진행 데이터 존재 여부에 따라 게임 시작 방식을 결정하고 모든 접속자를 지정 맵으로 이동시키는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
-    void StartSession(const struct FMD_GameData& GameData);
+    void StartSession(const struct FMD_GameData& GameData, bool bLoadGame = false);
+
+    // 지정 맵과 URL 옵션을 사용하여 기존 Session의 게임 시작 및 모든 접속자의 맵 이동 절차를 실행하는 함수
+    UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
+    void StartSessionByMap(const FString& MapPackagePath, const FString& TravelOptions);
 
     // 호스트가 진행 중인 Session을 종료 상태로 전환하고 모든 접속자를 지정 맵으로 이동시키는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
     void EndSession(const FString& MapPackagePath);
+
+    // 현재 GameSession이 시작되어 진행 중인지 반환하는 함수
+    UFUNCTION(BlueprintPure, Category = "Marine Demolition|Session")
+    bool IsSessionInProgress();
+
+    // 지정 PlayerState가 현재 Session 소유자인지 반환하는 함수
+    bool IsSessionHostPlayer(APlayerState* PlayerState);
 
     // 최대 MaxSearchResultCount개의 Session을 검색하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
@@ -149,6 +162,21 @@ public:
     FMD_RoomCode ParseRoomCode(FString StringRoomCode);
     
 protected:
+	// 로컬 화면과 서버가 소유한 각 클라이언트 화면에 실제 로딩 시작을 전달하는 공통 처리
+	void BeginLoadingScreenForTravel(const FText& Subtitle);
+
+	// 로컬 인트로가 화면을 덮은 뒤에 블로킹 트래블/연결 종료를 실행한다.
+	void RunAfterLoadingIntro(TFunction<void()>&& Callback);
+
+	// Create/Start/EndGame 세 경로가 공유하는 인트로 게이트 + ServerTravel + 실패 처리
+	void ServerTravelAfterLoadingIntro(const FString& TravelURL, const FString& FailureMessage,
+		TFunction<void(UMD_MultiplayManager&)>&& OnFailed, TFunction<void(UMD_MultiplayManager&)>&& OnStarted);
+
+	// 인트로 뒤에 NetDriver 연결을 끊고 DestroySession 완료를 알린다.
+	void DisconnectAfterLoadingIntro();
+
+	UMD_LoadingScreenSubsystem* GetLoadingScreen() const;
+
     // Online Session Interface 객체를 초기화하는 함수
     void InitOnlineSessionInterface();
 
@@ -161,20 +189,38 @@ protected:
     // 요청된 Session에 실제로 참여하는 함수
     void JoinSessionInternal(const FOnlineSessionSearchResult& SessionSearchResult);
 
-    // 준비된 게임 데이터 작업을 유지한 채 Session 시작과 맵 이동 절차를 실행하는 함수
-    void StartGameInternal(const FString& GameMapPackagePath);
+    // 검증된 맵 광고 경로와 실제 이동 URL을 사용하여 Session 시작 절차를 실행하는 함수
+    void StartSessionInternal(const FString& MapPackagePath, const FString& TravelURL);
+
+    // 추가 참가를 닫은 GameSession에 실제 시작 요청을 전달하는 함수
+    void RequestStartSession(const FString& TravelURL);
+
+    // 게임 시작 준비 실패 이후 로비의 추가 참가 허용 상태를 복구하는 함수
+    void RecoverStartGameJoinability();
 
     // Online Session Interface에서 Create Session을 완료하였을 때 호출되는 함수
     void HandleCreateSessionComplete(FName SessionName, bool bWasSuccessful, const FString SessionMapPackagePath);
 
-    // Online Session Interface에서 Start Session을 완료하면 호스트의 지정 맵 이동을 처리하는 함수
-    void HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
+    // Online Session Interface에서 Start Session을 완료하면 호스트의 지정 URL 이동을 처리하는 함수
+    void HandleStartSessionComplete(FName SessionName, bool bWasSuccessful, const FString TravelURL);
 
-    // Online Session Interface에서 End Session을 완료하면 호스트의 지정 맵 이동을 처리하는 함수
+    // 게임 시작 전 추가 참가 차단 설정이 완료되면 실제 Session 시작을 요청하는 함수
+    void HandleStartGameJoinabilityUpdateComplete(FName SessionName, bool bWasSuccessful, const FString TravelURL);
+
+    // Online Session Interface에서 End Session을 완료하면 로비의 추가 참가 허용 설정을 요청하는 함수
     void HandleEndSessionComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
+
+    // 게임 종료 후 추가 참가 허용 설정이 완료되면 호스트의 지정 맵 이동을 처리하는 함수
+    void HandleEndGameJoinabilityUpdateComplete(FName SessionName, bool bWasSuccessful, const FString MapPackagePath);
 
     // EndSession 맵 이동 실패 이후 Ended Session을 진행 상태로 복구하는 함수
     void RecoverEndGameSession(FName SessionName);
+
+    // 게임 종료 복구용 세션 설정 갱신이 완료되면 Session 재시작을 요청하는 함수
+    void HandleRecoverEndGameSessionSettingsComplete(FName UpdatedSessionName, bool bWasSuccessful, FName SessionName);
+
+    // 현재 맵 정보가 복구된 Ended Session을 진행 상태로 되돌리는 함수
+    void RequestRecoverEndGameSessionStart(FName SessionName);
 
     // Online Session Interface에서 Find Sessions을 완료하였을 때 호출되는 함수
     void HandleFindSessionsComplete(bool bWasSuccessful, TSharedPtr<FOnlineSessionSearch> SessionSearch);

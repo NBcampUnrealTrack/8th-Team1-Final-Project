@@ -19,8 +19,12 @@ class MARINEDEMOLITION_API UMD_GameStateDayCycleAdapterComponent : public UActor
 public:
 	UMD_GameStateDayCycleAdapterComponent();
 
+	/**
+	 * When true, sky follows AMD_GameStateBase wall-clock (08:00→18:00).
+	 * Converted to sky hours where 12 = midnight (08:00 wall → 20).
+	 */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|DayCycle")
-	bool bDriveFromGameState = false;
+	bool bDriveFromGameState = true;
 
 	virtual bool IsDayCycleActive_Implementation() const override;
 	virtual float GetTimeOfDayHours_Implementation() const override;

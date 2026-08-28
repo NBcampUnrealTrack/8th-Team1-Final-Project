@@ -2,9 +2,11 @@
 
 
 #include "Player/MD_PlayerState.h"
+#include "Character/MD_Character.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Online/Voice/MD_CharacterVOIPTalker.h"
 #include "AbilitySystemComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -14,6 +16,20 @@ void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_PlayerState, ReturnStatus);
+	DOREPLIFETIME_CONDITION(AMD_PlayerState, PurchasedShopItemIds, COND_OwnerOnly);
+}
+
+void AMD_PlayerState::CopyProperties(APlayerState* PlayerState)
+{
+	Super::CopyProperties(PlayerState);
+
+	// Seamless Travel이나 플레이어 연결 해제 후 재접속 시 보존되어야 하는 데이터 복사
+	AMD_PlayerState* TargetPlayerState = Cast<AMD_PlayerState>(PlayerState);
+	if (IsValid(TargetPlayerState) == true)
+	{
+		// 장비 해금 조건을 유지하기 위하여 플레이어가 구매한 장비 목록 복사
+		TargetPlayerState->PurchasedShopItemIds = PurchasedShopItemIds;
+	}
 }
 
 void AMD_PlayerState::BeginPlay()
@@ -30,6 +46,34 @@ void AMD_PlayerState::BeginPlay()
 	AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(CharacterAttributeSet->GetHealthAttribute()).AddUObject(this, &AMD_PlayerState::HandleHealthChanged);
 
 	CachedHealthState = GetHealthState();
+}
+
+void AMD_PlayerState::OnRep_PlayerName()
+{
+	Super::OnRep_PlayerName();
+
+	// 플레이어 이름 변경을 목록 UI에 전달할 현재 프로젝트 GameState 조회
+	UWorld* World = GetWorld();
+	if (IsValid(World) == true)
+	{
+		// 접속 플레이어 목록 변경 이벤트를 제공하는 GameState 조회
+		AMD_GameStateBase* GameState = World->GetGameState<AMD_GameStateBase>();
+		if (IsValid(GameState) == true)
+		{
+			// 이름 복제가 완료된 PlayerArray 변경 알림
+			GameState->OnPlayerListChanged.Broadcast();
+		}
+	}
+
+	// 이름이 변경된 PlayerState 소유 캐릭터 조회
+	AMD_Character* PlayerCharacter = Cast<AMD_Character>(GetPawn());
+	if (IsValid(PlayerCharacter) == false)
+	{
+		return;
+	}
+
+	// 새 플랫폼 닉네임의 캐릭터 머리 위 이름표 반영
+	PlayerCharacter->RefreshNameTag();
 }
 
 
@@ -110,6 +154,13 @@ UAbilitySystemComponent* AMD_PlayerState::GetAbilitySystemComponent() const
 	return AbilitySystemComponent;
 }
 
+void AMD_PlayerState::SetVoiceVolumeMultiplier(float NewVoiceVolumeMultiplier)
+{
+	// 음성 채팅 UI와 Talker가 공유하는 허용 범위 적용
+	float ClampedVoiceVolumeMultiplier = FMath::Clamp(NewVoiceVolumeMultiplier, 0.0f, UMD_CharacterVOIPTalker::MaxVolumeMultiplier);
+	VoiceVolumeMultiplier = ClampedVoiceVolumeMultiplier;
+}
+
 EMD_HealthState AMD_PlayerState::GetHealthState() const
 {
 	if (!IsValid(CharacterAttributeSet))
@@ -130,6 +181,35 @@ EMD_HealthState AMD_PlayerState::GetHealthState() const
 	}
 
 	return EMD_HealthState::Healthy;
+}
+
+bool AMD_PlayerState::HasPurchasedShopItem(FName ItemId) const
+{
+	return ItemId.IsNone() == false && PurchasedShopItemIds.Contains(ItemId) == true;
+}
+
+bool AMD_PlayerState::RecordPurchasedShopItem(FName ItemId)
+{
+	// 클라이언트가 로컬 소유권을 조작하거나 잘못된 식별자가 기록되는 상황을 막기 위한 검사
+	if (HasAuthority() == false || ItemId.IsNone() == true || PurchasedShopItemIds.Contains(ItemId) == true)
+	{
+		return false;
+	}
+
+	// 복제 배열 순서를 일정하게 유지하여 불필요한 네트워크 변경을 줄이기 위한 정렬
+	PurchasedShopItemIds.Add(ItemId);
+	PurchasedShopItemIds.Sort(FNameLexicalLess());
+
+	// Listen Server환경 고려 상점 UI 갱신을 위한 UI 소유권 변화 이벤트 호출
+	OnRep_PurchasedShopItemIds();
+	ForceNetUpdate();
+	return true;
+}
+
+void AMD_PlayerState::OnRep_PurchasedShopItemIds()
+{
+	// 플레이어의 화면에 보여지는 상점 UI를 갱신하도록 UI 소유 플레이어 변경 이벤트 호출
+	OnShopOwnershipChanged.Broadcast();
 }
 
 void AMD_PlayerState::HandleHealthChanged(const FOnAttributeChangeData& ChangeData)

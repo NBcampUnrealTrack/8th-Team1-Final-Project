@@ -39,16 +39,4 @@ public:
 		return false;
 	}
 
-	/**
-	 * Drain 이후 Sorter의 검증 또는 컨테이너 파괴가 실패했을 때 소유권을 되돌린다.
-	 * 성공은 컨테이너가 다시 입고를 추적할 수 있는 정상 상태로 복구되었음을 뜻한다.
-	 */
-	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, BlueprintAuthorityOnly,
-		Category = "MD|Trash|Container")
-	bool TryRestoreDrainedContentsAfterFailedSort(const TArray<AActor*>& Contents);
-	virtual bool TryRestoreDrainedContentsAfterFailedSort_Implementation(
-		const TArray<AActor*>& Contents)
-	{
-		return false;
-	}
 };

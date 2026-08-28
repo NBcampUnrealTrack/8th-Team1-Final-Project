@@ -18,7 +18,7 @@ public class MarineDemolition : ModuleRules
 			// Online
 			"OnlineSubsystem", "OnlineSubsystemUtils",
 			//UI
-			"UMG",
+			"UMG", "CommonUI", "CommonInput",
 			// Landscape (editor import helper uses ALandscape::Import)
 			"Landscape",
 			"GeometryCollectionEngine",
@@ -28,14 +28,16 @@ public class MarineDemolition : ModuleRules
 
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
-			"ImageWrapper", "Slate", "SlateCore",
+			"ImageWrapper", "Slate", "SlateCore", "MoviePlayer",
 			"DeveloperSettings",
 			"ApplicationCore",
 			"CoreOnline",
-			// Database
-			"SQLiteCore", "SQLiteSupport",
 			// 오염 마스크 런타임 텍스처 업로드
-			"RHI"
+			"RHI",
+			// 절단·헤라 VFX
+			"Niagara",
+			// 수중 서브믹스 LPF (SubmixEffectFilterPreset)
+			"Synthesis", "AudioMixer"
 		});
 
 		if (Target.bBuildEditor)
