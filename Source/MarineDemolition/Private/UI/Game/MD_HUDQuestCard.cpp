@@ -4,19 +4,23 @@
 #include "Data/Merchant/MD_QuestDefinition.h"
 #include "UI/Merchant/MD_MerchantUITypes.h"
 
-void UMD_HUDQuestCard::SetMainQuest(const FMD_MainQuestState& QuestState)
+bool UMD_HUDQuestCard::SetMainQuest(const FMD_MainQuestState& QuestState)
 {
 	// 메인 퀘스트 상태에서 카드 표시에 필요한 공통 값만 전달한다.
-	SetQuest(QuestState.DefinitionId, QuestState.CurrentPhaseIndex, QuestState.CurrentProgress, EMD_QuestTab::Main);
+	bool bSetResult = SetQuest(QuestState.DefinitionId, QuestState.CurrentPhaseIndex, QuestState.CurrentProgress, EMD_QuestTab::Main);
+	// 메인 퀘스트 표시 정보 적용 결과를 반환한다.
+	return bSetResult;
 }
 
-void UMD_HUDQuestCard::SetRepeatQuest(const FMD_RepeatQuestState& QuestState)
+bool UMD_HUDQuestCard::SetRepeatQuest(const FMD_RepeatQuestState& QuestState)
 {
 	// 반복 퀘스트 상태에서 카드 표시에 필요한 공통 값만 전달한다.
-	SetQuest(QuestState.DefinitionId, QuestState.CurrentPhaseIndex, QuestState.CurrentProgress, EMD_QuestTab::Repeat);
+	bool bSetResult = SetQuest(QuestState.DefinitionId, QuestState.CurrentPhaseIndex, QuestState.CurrentProgress, EMD_QuestTab::Repeat);
+	// 반복 퀘스트 표시 정보 적용 결과를 반환한다.
+	return bSetResult;
 }
 
-void UMD_HUDQuestCard::SetQuest(FPrimaryAssetId DefinitionId, int32 PhaseIndex, int32 CurrentProgress, EMD_QuestTab QuestType)
+bool UMD_HUDQuestCard::SetQuest(FPrimaryAssetId DefinitionId, int32 PhaseIndex, int32 CurrentProgress, EMD_QuestTab QuestType)
 {
 	// 공통 식별자로 퀘스트 표시 원본을 불러온다.
 	UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(DefinitionId);
@@ -25,17 +29,8 @@ void UMD_HUDQuestCard::SetQuest(FPrimaryAssetId DefinitionId, int32 PhaseIndex, 
 	// 존재하지 않는 페이즈의 진행 정보는 카드에 적용하지 않는다.
 	if (IsValid(Definition) == false || Definition->HasPhase(PhaseIndex) == false)
 	{
-		return;
+		return false;
 	}
-
-	// 기본 종류 문구는 메인 퀘스트로 준비한다.
-	FText QuestKindText = FText::FromString(TEXT("메인"));
-	// 반복 퀘스트인 경우에만 종류 문구를 반복으로 교체한다.
-	if (QuestType == EMD_QuestTab::Repeat)
-	{
-		QuestKindText = FText::FromString(TEXT("반복"));
-	}
-	SetTextPair(Txt_QuestKind, Txt_QuestKind_Shadow, QuestKindText);
 
 	// 공통 퀘스트 제목을 본문과 그림자에 적용한다.
 	SetTextPair(Txt_QuestName, Txt_QuestName_Shadow, Definition->QuestName);
@@ -50,6 +45,9 @@ void UMD_HUDQuestCard::SetQuest(FPrimaryAssetId DefinitionId, int32 PhaseIndex, 
 
 	// Blueprint가 퀘스트 종류에 맞는 아이콘과 색상을 적용하도록 요청한다.
 	SetQuestCardType(QuestType);
+
+	// 카드에 퀘스트 표시 정보를 모두 적용했음을 반환한다.
+	return true;
 }
 
 void UMD_HUDQuestCard::SetTextPair(UTextBlock* TextWidget, UTextBlock* ShadowWidget, FText Text)
