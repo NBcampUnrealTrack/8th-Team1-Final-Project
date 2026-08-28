@@ -12,24 +12,7 @@ class UMD_ScrapeSurfaceComponent;
 class UStaticMeshComponent;
 class UMaterialInstanceDynamic;
 
-/**
- * 보통벽에 붙은 따개비 (기획 02 §1 청소 요소 표)
- *
- * 오염물과 별도 품목이며 보통벽에만 붙는다. 내력·칸막이 세그먼트에는 두지 않는다(02 §1).
- * 여기서 "보통벽"은 게임플레이 액터가 아니라 환경 아트 표면이므로, 이 액터는 무엇에도
- * 붙지 않는 자기 완결적 배치물이다. 레벨에 그냥 놓으면 된다.
- *
- * 오염물과 달리 격자·마스크·데칼을 쓰지 않는다. 내구도 숫자 하나와 입체 메시뿐이다.
- * 셀 격자에 넣으면 개별 내구도·도구 등급·개수 집계를 담을 수 없다.
- *
- * 손맛은 문지르기가 아니라 타격에서 나온다. 따개비는 벽에 붙어 자란 딱딱한
- * 부착물이라 벗겨지는 것이 아니라 톡 하고 떨어진다. 그래서 헤라가 닿는 시간이
- * 아니라 부딪히는 속도가 힘을 정하고, 여러 번 쳐야 떨어진다.
- *
- * 헤라 경로를 물리적으로 막기도 한다. 오염 표면에 붙어 있으면 그 자리를
- * 지나는 스트로크가 따개비에서 멈추므로, 뒤쪽 오염은 따개비를 떼기 전에는 못 지운다.
- * 그 등록은 벽 종류와 무관하게 UMD_ScrapeSurfaceComponent가 관리한다.
- */
+
 UCLASS()
 class MARINEDEMOLITION_API AMD_Barnacle : public AActor
 {
@@ -42,16 +25,16 @@ public:
 	virtual void Tick(float DeltaSeconds) override;
 
 	/**
-	 * 헤라에 맞은 충격만큼 내구도를 깎는다. 서버 전용.
+	 * 검증된 헤라 클릭의 피해만큼 내구도를 깎음
 	 *
-	 * 작업량이 0이어도 흔들림은 재생한다. 느리게 밀 때 "닿기는 했는데 힘이 모자란다"를
-	 * 화면으로 알려야 플레이어가 더 빠르게 그어야 한다는 것을 안다.
+	 * 양수 피해가 적용될 때마다 기존 메시 흔들림을 재생한다. 누른 채 움직이는 연속
+	 * 스트로크에서는 이 함수를 호출하지 않아 한 클릭에 한 번만 감소한다.
 	 *
-	 * @param ImpactWork            이번 타격이 깎을 정규화 작업량. 0이면 흔들림만 남는다
-	 * @param ImpactWorldDirection  헤라가 밀고 지나간 월드 방향. 흔들리는 방향을 정한다
+	 * @param DurabilityDamage      이번 클릭이 감소시킬 내구도
+	 * @param WobbleWorldDirection  클릭 피드백으로 메시가 기울 월드 방향
 	 * @return 이번 호출로 따개비가 떨어져 나갔으면 true
 	 */
-	bool ApplyScrapeImpact(float ImpactWork, const FVector& ImpactWorldDirection);
+	bool ApplyScrapeClickDamage(float DurabilityDamage,	const FVector& WobbleWorldDirection);
 
 	/**
 	 * 이 따개비가 벽면에서 헤라를 막는 반경(cm).
@@ -61,21 +44,30 @@ public:
 	 */
 	float GetScrapeBlockRadiusCm() const;
 
-	/** 마지막 타격 이후 아직 다음 타격을 받을 수 없는 상태인지. 서버에서만 의미가 있다 */
-	bool IsImpactOnCooldown() const;
-
 	/**
-	 * 배치기가 붙일 때 신원을 새긴다. 서버 전용.
+	 * 배치기가 붙일 때 신원과 최대 내구도를 함께 초기화한다. 서버 전용.
 	 *
 	 * Day가 바뀌면 레벨이 다시 로드되고 배치기가 같은 시드로 같은 자리에 다시 붙인다.
 	 * 어제 떼어낸 것이 되살아나지 않으려면 "몇 번째였는지"를 스냅샷에 남겨야 한다.
 	 * 런타임 스폰 액터라 FName이 세션마다 달라져서 이름으로는 식별할 수 없다.
+	 * FinishSpawning 전에 호출해 BeginPlay와 최초 복제가 최종 내구도를 보게 한다.
 	 */
-	void AssignSpawnerIdentity(AMD_BarnacleSpawner* InSpawner, int32 InSpawnIndex);
+	void InitializeFromSpawner(
+		AMD_BarnacleSpawner* InSpawner,
+		int32 InSpawnIndex,
+		int32 InMaximumDurability);
 
 	/** 배치기가 부여한 순번. 배치기가 붙인 것이 아니면 INDEX_NONE */
 	UFUNCTION(BlueprintPure, Category = "MD|Barnacle")
 	int32 GetSpawnIndex() const { return SpawnIndex; }
+
+	/** 이 개체가 완전히 붙어 있을 때의 최대 내구도 */
+	UFUNCTION(BlueprintPure, Category = "MD|Barnacle")
+	float GetMaximumDurability() const;
+
+	/** 현재 남아 있는 내구도. 기존 연속 작업량과 호환하기 위해 float로 반환한다 */
+	UFUNCTION(BlueprintPure, Category = "MD|Barnacle")
+	float GetCurrentDurability() const;
 
 	/** 0은 손대지 않은 상태, 1은 완전히 떨어진 상태 */
 	UFUNCTION(BlueprintPure, Category = "MD|Barnacle")
@@ -107,15 +99,16 @@ protected:
 	TSubclassOf<AMD_BarnacleItem> BarnacleItemClass;
 
 	/**
-	 * 떼어내는 데 필요한 총 작업량. 정규화 값이라 0~1로 둔다.
+	 * 떼어내는 데 필요한 최대 내구도.
 	 *
-	 * 기획서에 절대 수치가 없다. 08 §2는 도구 배율만 준다
-	 * (기본 헤라 1.0 / 광폭 x1.6 / 열선 x2.2 — 08 §2.1 IT-H0~H2).
-	 * 실제 타격 횟수는 이 값과 도구의 속도당 작업량, 그리고 플레이어가 얼마나 빠르게
-	 * 긋는지에 함께 달려 있다. 임시값이다.
+	 * 이름과 float 타입은 기존 Blueprint 직렬화 호환을 위해 유지한다. 스포너가 생성한
+	 * 개체에는 정수 Min-Max에서 뽑은 값이 들어가며, 손으로 배치한 개체는 이 값을 쓴다.
+	 * 서버가 개체별 값을 정하므로 클라이언트의 진행도 계산을 위해 최초 복제한다.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle",
-		meta = (ClampMin = "0.01", UIMin = "0.1"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,
+		ReplicatedUsing = OnRep_RemovalWorkRequired,
+		Category = "MD|Barnacle|Durability",
+		meta = (ClampMin = "1.0", UIMin = "1.0", DisplayName = "Maximum Durability"))
 	float RemovalWorkRequired = 1.0f;
 
 	/** 떨어진 산출물이 메시 안쪽에서 스폰돼 튀지 않도록 위로 밀어내는 거리 */
@@ -133,33 +126,22 @@ protected:
 	FName RemovalProgressParameterName = TEXT("RemovalProgress");
 
 	/**
-	 * 같은 따개비를 다시 때릴 수 있게 되기까지의 시간.
-	 *
-	 * 없으면 헤라를 대고 밀고 있는 동안 매 프레임 타격이 들어가 한순간에 떨어진다.
-	 * 플레이어가 헤라를 빼서 다시 긋는 리듬을 만드는 값이다.
+	 * 기존 속도 타격 방식의 직렬화 호환용 값. 클릭 방식에서는 사용하지 않는다.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Impact",
-		meta = (ClampMin = "0.0", Units = "s"))
+	UPROPERTY(meta = (DeprecatedProperty,
+		DeprecationMessage = "Barnacle damage is now gated by one validated click."))
 	float MinimumImpactIntervalSeconds = 0.2f;
 
 	/** 한 번 맞고 흔들리는 시간 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Impact",
-		meta = (ClampMin = "0.0", Units = "s"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Impact",	meta = (ClampMin = "0.0", Units = "s"))
 	float ImpactWobbleDurationSeconds = 0.35f;
 
 	/** 흔들림의 초당 진동 횟수 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Impact",
-		meta = (ClampMin = "0.1"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Impact",	meta = (ClampMin = "0.1"))
 	float ImpactWobbleFrequency = 11.0f;
 
-	/**
-	 * 흔들림이 기울어지는 최대 각도.
-	 *
-	 * 실제 각도는 여기에 타격 세기와 현재 진행도를 함께 곱한 값이다. 거의 다 떨어진
-	 * 따개비가 더 크게 흔들려야 "이제 곧 떨어진다"가 읽힌다.
-	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Impact",
-		meta = (ClampMin = "0.0", Units = "deg"))
+	/** 흔들림이 기울어지는 최대 각도 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Impact",	meta = (ClampMin = "0.0", Units = "deg"))
 	float ImpactWobbleMaximumTiltDegrees = 9.0f;
 
 	/**
@@ -172,7 +154,7 @@ protected:
 		meta = (ClampMin = "0.0"))
 	float ScrapeBlockRadiusScale = 1.0f;
 
-	/** 지금까지 누적된 작업량. 복제되어 클라이언트도 같은 진행도를 그린다 */
+	/** 지금까지 누적된 내구도 피해. 이름은 기존 직렬화 호환을 위해 유지한다 */
 	UPROPERTY(ReplicatedUsing = OnRep_AccumulatedRemovalWork, VisibleInstanceOnly,
 		BlueprintReadOnly, Category = "MD|Barnacle")
 	float AccumulatedRemovalWork = 0.0f;
@@ -186,6 +168,9 @@ private:
 
 	UFUNCTION()
 	void OnRep_AccumulatedRemovalWork();
+
+	UFUNCTION()
+	void OnRep_RemovalWorkRequired();
 
 	/**
 	 * 맞은 순간을 모든 클라이언트에서 재생한다.
@@ -218,9 +203,6 @@ private:
 
 	/** 배치기가 부여한 순번. 손으로 배치한 것은 INDEX_NONE */
 	int32 SpawnIndex = INDEX_NONE;
-
-	/** 마지막으로 타격을 받은 서버 시각. 연타 방지에 쓴다 */
-	double LastImpactWorldSeconds = TNumericLimits<double>::Lowest();
 
 	/** 흔들림 시작 이후 지난 시간. 음수면 흔들리고 있지 않다 */
 	float WobbleElapsedSeconds = -1.0f;

@@ -366,7 +366,6 @@ void UMD_ScrapeToolComponent::ReplayBufferedAuthoritativeAims()
 		{
 			ResetStrokeTracking();
 			ResetInvalidScrapeAim();
-			SetTrackedBarnacle(nullptr);
 		}
 		CurrentScrapeAim = Buffered.ValidatedAim;
 		ProcessScrapeAimResult(

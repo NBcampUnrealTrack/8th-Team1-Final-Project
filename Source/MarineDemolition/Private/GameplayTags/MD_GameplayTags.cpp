@@ -221,6 +221,10 @@ namespace MDGameplayTags
 		Interaction_Cuttable,
 		"Interaction.Cuttable",
 		"절단기로 자를 수 있는 대상. 이 태그가 있어야 절단 몽타주가 재생된다");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Interaction_Scannable,
+		"Interaction.Scannable",
+		"전방 스캐너 후보. 시각 반응은 IMD_Scannable 구현이 담당한다");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		State_Swimming,
