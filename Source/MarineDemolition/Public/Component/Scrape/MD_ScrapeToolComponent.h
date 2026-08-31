@@ -621,7 +621,7 @@ protected:
 		meta = (ClampMin = "0", ClampMax = "8"))
 	int32 MaxMissingAimSequences;
 
-	/** A continuously invalid Focus exits after this timeout. */
+	/** A continuously invalid aim ends only the current stroke/GA after this timeout; Focus remains FocusedReady until RMB toggles it off. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly,
 		Category = "MD|Scrape|Motion|Reacquisition",
 		meta = (ClampMin = "0.01", Units = "s"))
