@@ -49,13 +49,13 @@ namespace
 				return;
 			}
 
-			FWorldContext& WorldContext = GEngine->CreateNewWorldContext(
-				EWorldType::Game);
 			const FName WorldName = MakeUniqueObjectName(
 				nullptr,
 				UWorld::StaticClass(),
 				TEXT("MDScrapePoseTestWorld"),
 				EUniqueObjectNameOptions::GloballyUnique);
+			// Create the world before its context so a CreateWorld failure cannot
+			// leave an unaddressable null-world context in GEngine's WorldList.
 			World = UWorld::CreateWorld(
 				EWorldType::Game,
 				false,
@@ -67,6 +67,8 @@ namespace
 			}
 
 			World->AddToRoot();
+			FWorldContext& WorldContext = GEngine->CreateNewWorldContext(
+				EWorldType::Game);
 			WorldContext.SetCurrentWorld(World);
 			World->InitializeActorsForPlay(FURL());
 		}
@@ -258,11 +260,11 @@ bool FMDScrapeToolPoseSolverReachabilityTest::RunTest(
 }
 
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(
-	FMDScrapeToolPoseSolverTangentIdentityTest,
-	"MarineDemolition.Scrape.ToolPoseSolver.TangentIdentity",
+	FMDScrapeToolPoseSolverTangentValidationTest,
+	"MarineDemolition.Scrape.ToolPoseSolver.TangentAndInvalidInputs",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 
-bool FMDScrapeToolPoseSolverTangentIdentityTest::RunTest(
+bool FMDScrapeToolPoseSolverTangentValidationTest::RunTest(
 	const FString& Parameters)
 {
 	const FVector ContactNormal = FVector::UpVector;
@@ -308,21 +310,90 @@ bool FMDScrapeToolPoseSolverTangentIdentityTest::RunTest(
 			ResetTangent,
 			FVector::ForwardVector)
 			>= 1.0 - ScrapePoseDirectionTolerance);
+	FTransform RejectedContactWorld(
+		FRotator(15.0, 25.0, 35.0),
+		FVector(10.0, 20.0, 30.0),
+		FVector(2.0));
+	FVector RejectedStableTangent(4.0, 5.0, 6.0);
+	TestFalse(
+		TEXT("A zero contact normal is rejected"),
+		FMD_ScrapeToolPoseSolver::BuildContactWorldTransform(
+			FVector(1.0, 2.0, 3.0),
+			FVector::ZeroVector,
+			FVector::ForwardVector,
+			PreviousStableTangent,
+			FVector::OneVector,
+			RejectedContactWorld,
+			RejectedStableTangent));
+	TestTrue(
+		TEXT("A rejected contact frame clears its transform output"),
+		RejectedContactWorld.Equals(FTransform::Identity));
+	TestTrue(
+		TEXT("A rejected contact frame clears its tangent output"),
+		RejectedStableTangent.IsNearlyZero());
 
-	FMD_ScrapeVisualContactPose Pose;
-	Pose.FocusSessionId = 17;
-	Pose.LmbStrokeGeneration = 9;
-	Pose.UpdateGeneration = 31;
-	Pose.bValid = true;
-	Pose.bTangentValid = true;
-	Pose.bDirectionLocked = true;
-	Pose = FMD_ScrapeVisualContactPose();
-	TestEqual(TEXT("A reset pose clears its focus identity"), Pose.FocusSessionId, uint64(0));
-	TestEqual(TEXT("A reset pose clears its stroke identity"), Pose.LmbStrokeGeneration, uint32(0));
-	TestEqual(TEXT("A reset pose reserves update generation zero"), Pose.UpdateGeneration, uint32(0));
-	TestFalse(TEXT("A reset pose is invalid"), Pose.bValid);
-	TestFalse(TEXT("A reset pose has no tangent"), Pose.bTangentValid);
-	TestFalse(TEXT("A reset pose has no direction lock"), Pose.bDirectionLocked);
+	RejectedContactWorld = FTransform(FVector(100.0, 200.0, 300.0));
+	RejectedStableTangent = FVector::RightVector;
+	TestFalse(
+		TEXT("A tangent parallel to the surface normal is rejected"),
+		FMD_ScrapeToolPoseSolver::BuildContactWorldTransform(
+			FVector::ZeroVector,
+			FVector::UpVector,
+			FVector::UpVector,
+			FVector::ZeroVector,
+			FVector::OneVector,
+			RejectedContactWorld,
+			RejectedStableTangent));
+	TestTrue(
+		TEXT("A parallel tangent failure clears both outputs"),
+		RejectedContactWorld.Equals(FTransform::Identity)
+			&& RejectedStableTangent.IsNearlyZero());
+
+	RejectedContactWorld = FTransform(FVector(100.0, 200.0, 300.0));
+	RejectedStableTangent = FVector::RightVector;
+	TestFalse(
+		TEXT("A zero contact scale is rejected"),
+		FMD_ScrapeToolPoseSolver::BuildContactWorldTransform(
+			FVector::ZeroVector,
+			FVector::UpVector,
+			FVector::ForwardVector,
+			FVector::ZeroVector,
+			FVector(1.0, 0.0, 1.0),
+			RejectedContactWorld,
+			RejectedStableTangent));
+	TestTrue(
+		TEXT("A zero scale failure clears both outputs"),
+		RejectedContactWorld.Equals(FTransform::Identity)
+			&& RejectedStableTangent.IsNearlyZero());
+
+	FMD_ScrapeToolPoseSolution RejectedSolution;
+	RejectedSolution.ContactWorldTransform =
+		FTransform(FVector(1.0, 2.0, 3.0));
+	RejectedSolution.ToolWorldTransform =
+		FTransform(FVector(4.0, 5.0, 6.0));
+	RejectedSolution.ToolAttachSocketWorldTransform =
+		FTransform(FVector(7.0, 8.0, 9.0));
+	RejectedSolution.HandBoneWorldTransform =
+		FTransform(FVector(10.0, 11.0, 12.0));
+	TestFalse(
+		TEXT("A non-invertible blade contact transform is rejected"),
+		FMD_ScrapeToolPoseSolver::SolveHandBoneWorldTransform(
+			FTransform(
+				FQuat::Identity,
+				FVector::ZeroVector,
+				FVector(1.0, 0.0, 1.0)),
+			FTransform::Identity,
+			FTransform::Identity,
+			FTransform::Identity,
+			RejectedSolution));
+	TestTrue(
+		TEXT("A failed hand solve clears every partial solution output"),
+		RejectedSolution.ContactWorldTransform.Equals(FTransform::Identity)
+			&& RejectedSolution.ToolWorldTransform.Equals(FTransform::Identity)
+			&& RejectedSolution.ToolAttachSocketWorldTransform.Equals(
+				FTransform::Identity)
+			&& RejectedSolution.HandBoneWorldTransform.Equals(
+				FTransform::Identity));
 
 	return true;
 }
@@ -386,6 +457,9 @@ bool FMDScrapeAnimationInvalidPoseTest::RunTest(
 	TestEqual(TEXT("An invalid pose outputs zero alpha"), Alpha, 0.0f);
 	TestFalse(TEXT("An invalid pose leaves IK inactive"), bActive);
 	TestFalse(TEXT("An invalid pose is not reported reachable"), bReachable);
+	TestFalse(
+		TEXT("No published pose carries no teleport-or-snap event"),
+		bTeleportOrSnap);
 	TestTrue(
 		TEXT("An invalid pose clears the effector transform"),
 		EffectorTransformComponentSpace.Equals(FTransform::Identity));
