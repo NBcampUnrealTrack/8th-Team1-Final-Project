@@ -212,7 +212,6 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 		bHasScrapeAnimationBladeDirection = false;
 		LastScrapeAnimationTwistDegrees = 0.0f;
 		bHasScrapeAnimationTwist = false;
-		return;
 	}
 
 	if (!Active)
