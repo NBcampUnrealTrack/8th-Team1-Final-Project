@@ -3,8 +3,10 @@
 
 #include "World/Merchant/MD_Merchant.h"
 
+#include "CommonActivatableWidget.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
 #include "UObject/ConstructorHelpers.h"
 
 #include "Character/MD_Character.h"
@@ -22,6 +24,7 @@
 #include "Player/MD_PlayerController.h"
 #include "UI/Merchant/MD_LoanWidget.h"
 #include "Player/MD_PlayerState.h"
+#include "UI/MD_LocalUIManager.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
 #include "UI/Merchant/MD_QuestWidget.h"
 #include "UI/Merchant/MD_ShopWidget.h"
@@ -217,7 +220,7 @@ void AMD_Merchant::HandleMenuExitRequested()
 			InteractingPlayerState->OnShopOwnershipChanged.RemoveDynamic(this, &AMD_Merchant::HandlePlayerShopOwnershipChanged);
 		}
 
-		ActiveShopWidget->RemoveFromParent();
+		ActiveShopWidget->DeactivateWidget();
 		ActiveShopWidget.Reset();
 	}
 
@@ -250,46 +253,110 @@ void AMD_Merchant::HandleMenuExitRequested()
 
 void AMD_Merchant::HandleShopRequested()
 {
-	if (!ShopWidgetClass)
+	// Blueprint에서 지정한 상점 화면 요청 태그 유효성 확인
+	bool validShopWidgetTag = ShopWidgetTag.IsValid();
+	if (validShopWidgetTag == false)
 	{
 		return;
 	}
 
-	if (ActiveShopWidget.IsValid() && ActiveShopWidget->IsInViewport())
+	// 이미 활성화된 상점 화면의 중복 Push 방지
+	if (ActiveShopWidget.IsValid() == true)
 	{
-		return;
+		bool shopActivated = ActiveShopWidget->IsActivated();
+		if (shopActivated == true)
+		{
+			return;
+		}
 	}
 
 	// 메뉴를 연 플레이어를 그대로 쓴다. GetFirstPlayerController()를 쓰면
 	// 리슨 서버에서 클라이언트가 상인을 눌렀을 때 호스트 화면에 상점이 뜬다.
-	if (!ActiveMenuWidget.IsValid())
+	if (ActiveMenuWidget.IsValid() == false)
 	{
 		return;
 	}
 
-	APlayerController* PC = ActiveMenuWidget->GetOwningPlayer();
-	if (!IsValid(PC))
+	APlayerController* playerController = ActiveMenuWidget->GetOwningPlayer();
+	if (IsValid(playerController) == false)
 	{
 		return;
 	}
 
-	UMD_ShopWidget* ShopWidget = CreateWidget<UMD_ShopWidget>(PC, ShopWidgetClass);
-	if (!IsValid(ShopWidget))
+	// 상점 화면을 현재 로컬 플레이어의 공통 UI Stack에 추가할 관리자 조회
+	ULocalPlayer* localPlayer = playerController->GetLocalPlayer();
+	if (IsValid(localPlayer) == false)
 	{
 		return;
 	}
 
-	ShopWidget->SetCatalog(ShopCatalog);
+	UMD_LocalUIManager* localUIManager = localPlayer->GetSubsystem<UMD_LocalUIManager>();
+	if (IsValid(localUIManager) == false)
+	{
+		return;
+	}
 
-	ShopWidget->OnBackRequested.AddDynamic(this, &AMD_Merchant::HandleShopBackRequested);
-	ShopWidget->OnPurchaseRejected.AddDynamic(this, &AMD_Merchant::HandleShopPurchaseRejected);
-	ShopWidget->OnItemPurchaseRequested.AddDynamic(this, &AMD_Merchant::HandleShopItemPurchaseRequested);
+	// 태그에 등록된 상점 화면 클래스와 실제 부모 Layer 조회
+	FGameplayTag resolvedLayerTag;
+	TSoftClassPtr<UCommonActivatableWidget> registeredWidgetClass;
+	bool resolvedWidgetRegistration = localUIManager->ResolveWidgetRegistration(ShopWidgetTag, resolvedLayerTag, registeredWidgetClass);
+	if (resolvedWidgetRegistration == false)
+	{
+		return;
+	}
 
-	// 메뉴 위젯 자체는 살려둔다 — 파괴하면 입력 모드가 초기화되고 대사창도 함께 사라진다.
-	// 대신 메뉴 패널을 숨겨서 상점과 겹치지 않게 한다.
-	ShopWidget->SetOwningMerchantMenu(ActiveMenuWidget.Get());
-	ShopWidget->AddToViewport();
-	ActiveShopWidget = ShopWidget;
+	// 등록된 상점 화면 클래스를 UI Manager의 기존 초기화 Push에 전달할 수 있도록 로드
+	UClass* loadedWidgetClass = registeredWidgetClass.LoadSynchronous();
+	if (IsValid(loadedWidgetClass) == false)
+	{
+		return;
+	}
+
+	bool shopWidgetClass = loadedWidgetClass->IsChildOf(UMD_ShopWidget::StaticClass());
+	if (shopWidgetClass == false)
+	{
+		return;
+	}
+
+	// UI Manager가 화면을 활성화하기 전에 상점 데이터와 이벤트 연결
+	TSubclassOf<UCommonActivatableWidget> screenClass = loadedWidgetClass;
+	UCommonActivatableWidget* pushedScreen = localUIManager->PushScreenToLayerInitialized(
+		resolvedLayerTag,
+		screenClass,
+		[this](UCommonActivatableWidget& screen)
+		{
+			// 태그에 등록된 화면이 상점 위젯인지 확인
+			UMD_ShopWidget* shopWidget = Cast<UMD_ShopWidget>(&screen);
+			if (IsValid(shopWidget) == false)
+			{
+				return;
+			}
+
+			// 화면 활성화 전에 상점 카탈로그와 루트 메뉴 연결
+			shopWidget->SetCatalog(ShopCatalog);
+			shopWidget->SetOwningMerchantMenu(ActiveMenuWidget.Get());
+
+			// Stack에서 재사용된 화면에도 상인 이벤트를 중복 없이 연결
+			shopWidget->OnBackRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleShopBackRequested);
+			shopWidget->OnPurchaseRejected.AddUniqueDynamic(this, &AMD_Merchant::HandleShopPurchaseRejected);
+			shopWidget->OnItemPurchaseRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleShopItemPurchaseRequested);
+		});
+
+	// UI Manager가 생성하고 추가한 화면 유효성 확인
+	if (IsValid(pushedScreen) == false)
+	{
+		return;
+	}
+
+	// UI Manager가 생성한 상점 화면 타입 확인
+	UMD_ShopWidget* shopWidget = Cast<UMD_ShopWidget>(pushedScreen);
+	if (IsValid(shopWidget) == false)
+	{
+		return;
+	}
+
+	// 활성 상점 화면을 상태 갱신과 중복 생성 방지에 사용하도록 저장
+	ActiveShopWidget = shopWidget;
 
 	// 서버 원장의 복제 미러가 바뀌면 크레딧과 구매 가능 상태를 즉시 다시 계산하기 위한 구독
 	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
@@ -330,9 +397,9 @@ void AMD_Merchant::HandleShopBackRequested()
 
 	if (ActiveShopWidget.IsValid())
 	{
-		ActiveShopWidget->RemoveFromParent();
+		ActiveShopWidget->DeactivateWidget();
 		ActiveShopWidget.Reset();
-		// NativeDestruct에서 자동으로 메뉴 패널이 복구된다
+		// NativeOnDeactivated에서 자동으로 메뉴 패널 복구
 	}
 }
 

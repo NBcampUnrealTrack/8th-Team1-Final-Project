@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_Merchant.generated.h"
 
@@ -74,9 +75,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
 	TSubclassOf<UMD_MerchantMenuWidget> MenuWidgetClass;
 
-	/** 메뉴에서 '상점'을 눌렀을 때 열리는 화면 */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
-	TSubclassOf<UMD_ShopWidget> ShopWidgetClass;
+	/** 메뉴에서 '상점'을 눌렀을 때 UI Manager에 요청할 화면 태그 */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant", meta = (Categories = "UI.Layer.GameMenu"))
+	FGameplayTag ShopWidgetTag;
 
 	/** 가격·해금 데이터 (`07` §4). 없으면 상점이 빈 목록으로 열린다. */
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")

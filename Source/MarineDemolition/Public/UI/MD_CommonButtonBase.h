@@ -73,6 +73,7 @@ public:
 	void SetContentImageResourceObject(UObject* InContentImageResourceObject);
 
 protected:
+	UFUNCTION(BlueprintCallable)
 	void ApplyCommonTextStyleToTextBlock(UCommonTextStyle* TextStyle, UTextBlock* TextBlock);
 
 	// 저장된 Image Brush를 선택적으로 바인딩된 Image에 적용한다.
