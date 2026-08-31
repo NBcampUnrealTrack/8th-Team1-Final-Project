@@ -112,11 +112,6 @@ void UMD_MerchantMenuWidget::HandleTalkClicked()
 	OnTalkRequested.Broadcast();
 }
 
-void UMD_MerchantMenuWidget::HandleQuestClicked()
-{
-	OnQuestRequested.Broadcast();
-}
-
 void UMD_MerchantMenuWidget::HandleLoanClicked()
 {
 	OnLoanRequested.Broadcast();

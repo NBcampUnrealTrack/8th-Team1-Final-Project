@@ -26,7 +26,7 @@
 #include "Player/MD_PlayerState.h"
 #include "UI/MD_LocalUIManager.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
-#include "UI/Merchant/MD_QuestWidget.h"
+#include "UI/Merchant/MD_QuestScreenWidget.h"
 #include "UI/Merchant/MD_ShopWidget.h"
 
 namespace
@@ -211,7 +211,6 @@ void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 	// Push된 상인 메뉴에 소유 상인과 도메인 이벤트를 연결한다.
 	Widget->SetOwningMerchant(this);
 	Widget->OnExitRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleMenuExitRequested);
-	Widget->OnQuestRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleQuestRequested);
 
 	// 현재 상인 상태를 Push된 메뉴에 즉시 반영한다.
 	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
@@ -238,7 +237,6 @@ void AMD_Merchant::HandleMenuExitRequested()
 	{
 		// UIManager가 재사용할 수 있는 메뉴 인스턴스에서 현재 상인 연결을 제거한다.
 		MenuWidget->OnExitRequested.RemoveDynamic(this, &AMD_Merchant::HandleMenuExitRequested);
-		MenuWidget->OnQuestRequested.RemoveDynamic(this, &AMD_Merchant::HandleQuestRequested);
 		MenuWidget->OnLoanRequested.RemoveDynamic(this, &AMD_Merchant::HandleLoanRequested);
 	}
 
@@ -248,18 +246,10 @@ void AMD_Merchant::HandleMenuExitRequested()
 		ActiveShopWidget->DeactivateWidget();
 	}
 
-	if (ActiveQuestWidget.IsValid())
+	if (ActiveQuestWidget.IsValid() == true)
 	{
-		if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
-		{
-			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
-		}
-		if (UMD_LoreComponent* LoreComponent = GetLoreComponent())
-		{
-			LoreComponent->OnLoreProgressUpdated.RemoveDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
-		}
-		ActiveQuestWidget->RemoveFromParent();
-		ActiveQuestWidget.Reset();
+		// 실제 상태 정리는 퀘스트 화면의 공통 비활성화 이벤트에서 한 번만 처리한다.
+		ActiveQuestWidget->DeactivateWidget();
 	}
 
 	if (ActiveLoanWidget.IsValid() == true)
@@ -321,6 +311,55 @@ void AMD_Merchant::InitializePushedShop(UMD_ShopWidget* ShopWidget, UMD_Merchant
 
 	// 연결을 마친 상점 화면에 현재 복제 상태를 즉시 적용한다.
 	RefreshShopWidgetFromComponent();
+}
+
+void AMD_Merchant::InitializePushedQuest(UMD_QuestScreenWidget* QuestWidget, UMD_MerchantMenuWidget* MenuWidget)
+{
+	// Blueprint에서 전달한 퀘스트 화면의 유효성을 확인한다.
+	if (IsValid(QuestWidget) == false)
+	{
+		return;
+	}
+
+	// 퀘스트 화면을 연 메뉴의 유효성을 확인한다.
+	if (IsValid(MenuWidget) == false)
+	{
+		return;
+	}
+
+	// 이후 상태 조회가 Blueprint에서 전달한 메뉴와 퀘스트 화면을 사용하도록 저장한다.
+	ActiveMenuWidget = MenuWidget;
+	ActiveQuestWidget = QuestWidget;
+
+	// 퀘스트 화면 활성화 전에 루트 메뉴를 전달한다.
+	QuestWidget->SetOwningMerchantMenu(MenuWidget);
+
+	// Common UI Stack의 모든 퀘스트 화면 종료 경로에서 상태를 정리하도록 비활성화 이벤트를 연결한다.
+	QuestWidget->OnDeactivated().RemoveAll(this);
+	QuestWidget->OnDeactivated().AddUObject(this, &AMD_Merchant::HandleQuestBackRequested);
+
+	// 반복 퀘스트 요청을 실제 상인 처리에 중복 없이 연결한다.
+	QuestWidget->OnRepeatAcceptRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleRepeatAcceptRequested);
+	QuestWidget->OnRepeatDeclineRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleRepeatDeclineRequested);
+	QuestWidget->OnRepeatAbandonRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleRepeatAbandonRequested);
+
+	// 상인 퀘스트 상태가 바뀔 때 열린 화면을 갱신하도록 구독한다.
+	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (MerchantComponent != nullptr)
+	{
+		MerchantComponent->OnMerchantStateChanged.AddUniqueDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+	}
+
+	// 로어 수집 원장이 바뀔 때 열린 로어 탭을 갱신하도록 구독한다.
+	UMD_LoreComponent* LoreComponent = GetLoreComponent();
+	if (LoreComponent != nullptr)
+	{
+		LoreComponent->OnLoreProgressUpdated.AddUniqueDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
+	}
+
+	// 연결을 마친 퀘스트 화면에 현재 복제 상태를 즉시 적용한다.
+	RefreshQuestWidgetFromComponent();
+	RefreshLoreWidgetFromComponent();
 }
 
 void AMD_Merchant::HandleShopDeactivated()
@@ -575,77 +614,33 @@ void AMD_Merchant::ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResul
 	ActiveMenuWidget->ShowDialogueLine(InvalidPurchaseDialogue);
 }
 
-void AMD_Merchant::HandleQuestRequested()
-{
-	if (!QuestWidgetClass)
-	{
-		return;
-	}
-
-	if (ActiveQuestWidget.IsValid() && ActiveQuestWidget->IsInViewport())
-	{
-		return;
-	}
-
-	if (!ActiveMenuWidget.IsValid())
-	{
-		return;
-	}
-
-	APlayerController* PC = ActiveMenuWidget->GetOwningPlayer();
-	if (!IsValid(PC))
-	{
-		return;
-	}
-
-	UMD_QuestWidget* QuestWidget = CreateWidget<UMD_QuestWidget>(PC, QuestWidgetClass);
-	if (!IsValid(QuestWidget))
-	{
-		return;
-	}
-
-	QuestWidget->OnBackRequested.AddDynamic(this, &AMD_Merchant::HandleQuestBackRequested);
-	QuestWidget->OnRepeatAcceptRequested.AddDynamic(this, &AMD_Merchant::HandleRepeatAcceptRequested);
-	QuestWidget->OnRepeatDeclineRequested.AddDynamic(this, &AMD_Merchant::HandleRepeatDeclineRequested);
-	QuestWidget->OnRepeatAbandonRequested.AddDynamic(this, &AMD_Merchant::HandleRepeatAbandonRequested);
-
-	QuestWidget->SetOwningMerchantMenu(ActiveMenuWidget.Get());
-	QuestWidget->AddToViewport();
-	ActiveQuestWidget = QuestWidget;
-
-	// 상인 상태(수락·완료 등)가 바뀔 때마다 화면을 다시 그리도록 구독한다.
-	// 리슨 서버 호스트든 원격 클라이언트든 이 델리게이트 하나로 갱신된다 (`MD_MerchantComponent` 참고).
-	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
-	{
-		MerchantComponent->OnMerchantStateChanged.AddDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
-	}
-
-	// 로어 수집 정보가 변경될 때만 열린 코덱스 탭을 갱신하기 위한 전용 이벤트 구독
-	if (UMD_LoreComponent* LoreComponent = GetLoreComponent())
-	{
-		LoreComponent->OnLoreProgressUpdated.AddDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
-	}
-
-	RefreshQuestWidgetFromComponent();
-	RefreshLoreWidgetFromComponent();
-}
-
 void AMD_Merchant::HandleQuestBackRequested()
 {
-	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+	// 비활성화된 퀘스트 화면에 남아 있는 상인 연결을 제거한다.
+	UMD_QuestScreenWidget* QuestWidget = ActiveQuestWidget.Get();
+	if (IsValid(QuestWidget) == true)
+	{
+		QuestWidget->OnDeactivated().RemoveAll(this);
+		QuestWidget->OnRepeatAcceptRequested.RemoveDynamic(this, &AMD_Merchant::HandleRepeatAcceptRequested);
+		QuestWidget->OnRepeatDeclineRequested.RemoveDynamic(this, &AMD_Merchant::HandleRepeatDeclineRequested);
+		QuestWidget->OnRepeatAbandonRequested.RemoveDynamic(this, &AMD_Merchant::HandleRepeatAbandonRequested);
+	}
+
+	// 더 이상 표시되지 않는 퀘스트 화면에 상태를 전달하지 않도록 구독을 해제한다.
+	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (MerchantComponent != nullptr)
 	{
 		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
 	}
-	if (UMD_LoreComponent* LoreComponent = GetLoreComponent())
+
+	UMD_LoreComponent* LoreComponent = GetLoreComponent();
+	if (LoreComponent != nullptr)
 	{
 		LoreComponent->OnLoreProgressUpdated.RemoveDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
 	}
 
-	if (ActiveQuestWidget.IsValid())
-	{
-		ActiveQuestWidget->RemoveFromParent();
-		ActiveQuestWidget.Reset();
-	}
+	// 비활성화된 Stack 화면을 더 이상 활성 퀘스트 화면으로 취급하지 않는다.
+	ActiveQuestWidget.Reset();
 }
 
 void AMD_Merchant::HandleRepeatAcceptRequested(int32 QuestIndex)

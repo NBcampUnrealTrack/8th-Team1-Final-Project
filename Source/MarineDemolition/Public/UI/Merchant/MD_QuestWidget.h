@@ -4,201 +4,160 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Types/Lore/MD_LoreTypes.h"
+#include "Styling/SlateBrush.h"
 #include "Types/Merchant/MD_MerchantTypes.h"
-#include "UI/Merchant/MD_MerchantUITypes.h"
 
 #include "MD_QuestWidget.generated.h"
 
-class UButton;
-class UPanelWidget;
+class UImage;
+class UScrollBox;
 class UTextBlock;
-class UWidget;
-class UMD_MainQuestRowWidget;
+class UMD_CommonButtonBase;
 class UMD_QuestCardWidget;
-class UMD_LoreCatalog;
-class UMD_LoreQuestTabWidget;
-class UMD_MerchantMenuWidget;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_QuestBackRequest);
+// 반복 퀘스트 액션과 원본 배열 인덱스를 상위 화면에 전달하는 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_QuestRepeatActionRequest, int32, QuestIndex);
 
-/**
- * 퀘스트 목록 화면. 메인 / 반복 / 로어 3탭 (`04` §5.5).
- *
- * 탭마다 데이터 원천·리스트 형태·상호작용 모델이 다르다는 게 기획 확정 내용이라
- * 하나의 카드로 셋을 억지로 재사용하지 않는다. 메인은 UMD_MainQuestRowWidget,
- * 반복은 UMD_QuestCardWidget을 쓰고, 로어는 LoreComponent의 영구 수집 원장을 사용한다.
- *
- * 반복 퀘스트 수락/거절/포기 처리는 여기서 하지 않는다. 상점 위젯과 같은 원칙으로,
- * 요청만 델리게이트로 올리고 실제 서버 판정(AMD_PlayerController::ServerAcceptRepeat 등)은
- * 소유 액터(AMD_Merchant)가 맡는다.
- */
+/** 메인과 반복 퀘스트 목록 및 선택된 퀘스트 상세 정보를 표시하는 탭 */
 UCLASS()
 class MARINEDEMOLITION_API UMD_QuestWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
-public:
-	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
-	void SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget) { OwningMerchantMenu = InMenuWidget; }
-
-	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
-	void SetMainQuests(const TArray<FMD_MainQuestState>& InMainQuests);
-
-	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
-	void SetRepeatQuests(const TArray<FMD_RepeatQuestState>& InRepeatQuests);
-
-	/** 로어 전용 복제 원장에서 받은 현장별 수집 정보를 코덱스 탭에 적용하는 함수 */
-	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
-	void SetLoreProgress(const TArray<FMD_LoreSiteProgress>& InSiteProgressList);
-
-	/** 현재 현장의 카탈로그와 로어 수집 원장을 코덱스 탭에 함께 적용하는 함수 */
-	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
-	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FMD_LoreSiteProgress>& InSiteProgressList);
-
-	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
-	void SelectTab(EMD_QuestTab InTab);
-
-	UFUNCTION(BlueprintPure, Category = "MD|Quest")
-	EMD_QuestTab GetSelectedTab() const { return SelectedTab; }
-
-	/** 탭 표시 + 메인/반복 목록을 모두 다시 그린다. */
-	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
-	void RefreshDisplay();
-
-	UPROPERTY(BlueprintAssignable, Category = "MD|Quest")
-	FMD_QuestBackRequest OnBackRequested;
-
-	UPROPERTY(BlueprintAssignable, Category = "MD|Quest")
-	FMD_QuestRepeatActionRequest OnRepeatAcceptRequested;
-
-	UPROPERTY(BlueprintAssignable, Category = "MD|Quest")
-	FMD_QuestRepeatActionRequest OnRepeatDeclineRequested;
-
-	/** 백엔드에 파기 처리가 아직 없다 (`09` 김동연 TODO 대응). 요청만 올라가며 처리는 호출부가 안내로 대신한다. */
-	/** 반복 퀘스트 카드의 포기 요청을 상인 액터까지 전달하는 델리게이트 */
-	UPROPERTY(BlueprintAssignable, Category = "MD|Quest")
-	FMD_QuestRepeatActionRequest OnRepeatAbandonRequested;
-
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 
-	void RebuildMainQuestList();
-	void RebuildRepeatQuestList();
-	/** 전달받은 로어 수집 원장만 사용하여 코덱스 표시를 다시 구성하는 함수 */
-	void RefreshLoreDisplay();
-	/** 퀘스트 화면의 로어 패널에 전용 탭 위젯을 한 번만 생성하는 함수 */
-	void EnsureLoreTabWidget();
-	void ApplyTabVisibility();
+public:
+	// 선택된 반복 퀘스트의 수락 또는 보상 수령 요청 이벤트
+	UPROPERTY(BlueprintAssignable, Category = "MD|Quest")
+	FMD_QuestRepeatActionRequest OnRepeatAcceptRequested;
 
-	UFUNCTION()
-	void HandleTabMainClicked();
+	// 선택된 반복 퀘스트의 거절 요청 이벤트
+	UPROPERTY(BlueprintAssignable, Category = "MD|Quest")
+	FMD_QuestRepeatActionRequest OnRepeatDeclineRequested;
 
-	UFUNCTION()
-	void HandleTabRepeatClicked();
+	// 선택된 반복 퀘스트의 포기 요청 이벤트
+	UPROPERTY(BlueprintAssignable, Category = "MD|Quest")
+	FMD_QuestRepeatActionRequest OnRepeatAbandonRequested;
 
-	UFUNCTION()
-	void HandleTabLoreClicked();
+protected:
+	// 목록에 생성할 퀘스트 카드 Widget Blueprint 클래스
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest")
+	TSubclassOf<UMD_QuestCardWidget> QuestCardClass;
 
-	UFUNCTION()
-	void HandleBackClicked();
-
-	UFUNCTION()
-	void HandleCardAcceptRequested(int32 QuestIndex);
-
-	UFUNCTION()
-	void HandleCardDeclineRequested(int32 QuestIndex);
-
-	UFUNCTION()
-	void HandleCardAbandonRequested(int32 QuestIndex);
-
-	UPROPERTY()
-	TObjectPtr<UMD_MerchantMenuWidget> OwningMerchantMenu;
-
-	/** 메인퀘 Day 행으로 쓸 WBP */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
-	TSubclassOf<UMD_MainQuestRowWidget> MainQuestRowClass;
-
-	/** 반복퀘 카드로 쓸 WBP */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
-	TSubclassOf<UMD_QuestCardWidget> RepeatQuestCardClass;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest")
+	// 목록과 상세 화면에 표시할 메인 퀘스트 복제 상태
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	TArray<FMD_MainQuestState> MainQuests;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest")
+	// 목록과 상세 화면에 표시할 반복 퀘스트 복제 상태
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	TArray<FMD_RepeatQuestState> RepeatQuests;
 
-	/** 메인·반복 퀘스트와 분리된 코덱스 탭 표시용 현장별 수집 정보 */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
-	TArray<FMD_LoreSiteProgress> LoreSiteProgressList;
+	// 선택 상태 갱신과 재구성 후 선택 복원에 사용하는 생성 카드 목록
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMD_QuestCardWidget>> QuestCards;
 
-	/** 현재 퀘스트 화면에서 표시할 현장의 정적 로어 목록 */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
-	TObjectPtr<UMD_LoreCatalog> LoreCatalog;
+	// 우측 상세 패널에 현재 표시 중인 카드 참조
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "MD|Quest")
+	TObjectPtr<UMD_QuestCardWidget> SelectedQuestCard;
 
-	/** 기존 퀘스트 화면의 로어 패널에 생성할 전용 탭 위젯 클래스 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Lore")
-	TSubclassOf<UMD_LoreQuestTabWidget> LoreQuestTabClass;
+	// 디자이너가 지정한 메인 퀘스트 상세 아이콘 Brush
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Appearance")
+	FSlateBrush MainQuestIcon;
 
-	/** 화면이 열린 동안 수집 변경만 전달하기 위한 생성된 로어 탭 참조 */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
-	TObjectPtr<UMD_LoreQuestTabWidget> LoreQuestTabWidget;
+	// 디자이너가 지정한 반복 퀘스트 상세 아이콘 Brush
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Appearance")
+	FSlateBrush RepeatQuestIcon;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest")
-	EMD_QuestTab SelectedTab = EMD_QuestTab::Main;
+	// 동적으로 생성한 메인 및 반복 퀘스트 카드를 담는 스크롤 목록
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UScrollBox> SB_QuestList;
 
-	// ───────────────── 탭 3종 ─────────────────
-
+	// 선택된 퀘스트 종류에 맞는 아이콘을 표시하는 이미지
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UButton> BTN_TabMain;
+	TObjectPtr<UImage> Img_DetailType;
 
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UButton> BTN_TabRepeat;
+	// 선택된 퀘스트의 메인 또는 반복 종류를 표시하는 텍스트
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_DetailType;
 
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UButton> BTN_TabLore;
+	// 선택된 퀘스트 이름을 표시하는 텍스트
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_DetailName;
 
-	/** 탭마다 바뀐다 — "메인 퀘스트" / "반복 퀘스트" / "기록 보관함(코덱스)" (`04` §5.5 공통 주의) */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_PanelTitle;
+	// 선택된 퀘스트의 현재 진행 수량을 표시하는 텍스트
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_DetailProgress;
 
-	/** 세 탭 다 점검(Day2/3/4) 통과와 무관한 보너스라는 안내 (`04` §5.5 공통 주의) */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_NoInspectionImpactNotice;
+	// 선택된 퀘스트의 현재 목표 내용을 표시하는 텍스트
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_DetailDescription;
 
-	// ───────────────── 탭1: 메인퀘 ─────────────────
+	// 성공 보상 호감도 값을 표시하는 텍스트
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_AffinityReward;
 
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UPanelWidget> PNL_MainQuestList;
+	// 성공 보상 점수 값을 표시하는 텍스트
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_ScoreReward;
 
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_MainEmptyNotice;
+	// 성공 보상 크레딧 값을 표시하는 텍스트
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UTextBlock> Txt_CreditReward;
 
-	// ───────────────── 탭2: 반복퀘 ─────────────────
+	// 제시된 반복 퀘스트를 수락하는 공통 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UMD_CommonButtonBase> Btn_Accept;
 
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UPanelWidget> PNL_RepeatQuestList;
+	// 제시된 반복 퀘스트를 거절하는 공통 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UMD_CommonButtonBase> Btn_Reject;
 
-	/** 현재 수령 가능한 반복 퀘스트가 없을 때 표시하는 안내 */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_RepeatEmptyNotice;
+	// 목표를 달성한 반복 퀘스트의 보상을 수령하는 공통 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UMD_CommonButtonBase> Btn_Reward;
 
-	/** "샘플 납품 자체에는 점수도 돈도 없다. 퀘스트를 끝내야 받는다." (`04` §5) */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_RepeatDeliveryNotice;
+	// 진행 중인 반복 퀘스트를 포기하는 공통 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	TObjectPtr<UMD_CommonButtonBase> Btn_Giveup;
 
-	// ───────────────── 탭3: 로어퀘 (코덱스) ─────────────────
+public:
+	// 화면에 표시할 메인 퀘스트 상태를 적용하는 함수
+	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
+	void SetMainQuests(const TArray<FMD_MainQuestState>& InMainQuests);
 
-	/** 로어 전용 복제 원장의 수집 현황을 표시하는 코덱스 탭 패널 */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UPanelWidget> PNL_LoreTab;
+	// 화면에 표시할 반복 퀘스트 상태를 적용하는 함수
+	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
+	void SetRepeatQuests(const TArray<FMD_RepeatQuestState>& InRepeatQuests);
 
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_LoreEmptyNotice;
+	// 현재 퀘스트 목록과 선택 상세 정보를 다시 구성하는 함수
+	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
+	void RefreshDisplay();
 
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UButton> BTN_Back;
+	// 선택한 카드를 우측 상세 화면에 적용하는 함수
+	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
+	void SelectQuestCard(UMD_QuestCardWidget* QuestCard);
+
+protected:
+	// 메인과 반복 퀘스트 상태에서 카드 목록을 다시 생성하는 함수
+	void RebuildQuestList();
+
+	// 현재 선택 카드의 데이터로 우측 상세 및 액션 버튼을 갱신하는 함수
+	void RefreshQuestDetail();
+
+	// 공통 버튼 카드의 기본 클릭 이벤트를 선택 처리로 연결하는 함수
+	void HandleQuestCardClicked(UMD_QuestCardWidget* QuestCard);
+
+	// 선택된 반복 퀘스트의 수락 요청을 전달하는 함수
+	void HandleAcceptClicked();
+
+	// 선택된 반복 퀘스트의 거절 요청을 전달하는 함수
+	void HandleRejectClicked();
+
+	// 선택된 반복 퀘스트의 보상 수령 요청을 전달하는 함수
+	void HandleRewardClicked();
+
+	// 선택된 반복 퀘스트의 포기 요청을 전달하는 함수
+	void HandleGiveupClicked();
 };
