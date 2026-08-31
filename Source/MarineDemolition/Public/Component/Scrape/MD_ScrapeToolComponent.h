@@ -173,6 +173,18 @@ public:
 		return ScrapeFocusPointerNormalized;
 	}
 
+	/**
+	 * 로컬 animation-only 접촉 자세를 복사해 반환한다.
+	 *
+	 * false여도 OutPose에는 현재 invalid 스냅샷을 대입하므로 호출자가 이전
+	 * 프레임 값을 실수로 재사용하지 않는다. 반환값과 OutPose.bValid은 같다.
+	 */
+	bool GetScrapeVisualContactPose(FMD_ScrapeVisualContactPose& OutPose) const
+	{
+		OutPose = ScrapeVisualContactPose;
+		return OutPose.bValid;
+	}
+
 	/** Mouse2D 한 단위를 화면 폭 기준 이동량으로 바꾸는 Focus 감도. */
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Focus")
 	float GetScrapeFocusPointerSensitivity() const
@@ -1131,6 +1143,11 @@ private:
 	FMD_ScrapeStrokePathState StrokePath;
 	FMD_ScrapeAimRecoveryState AimRecovery;
 	FMD_ScrapeContaminationPaintState ContaminationPaint;
+	/**
+	 * 직렬화·복제하지 않는 로컬 animation snapshot. 이후 시각 갱신 경로만
+	 * 이 값을 쓰며 판정·예측 코드는 읽지 않는다.
+	 */
+	FMD_ScrapeVisualContactPose ScrapeVisualContactPose;
 	struct FActiveAuthoritativeScrapePredictionResolution
 	{
 		FMD_ScrapeAuthoritativeVisualDelta VisualDelta;

@@ -16,6 +16,34 @@ class UMD_ScrapeSurfaceComponent;
  * 멤버를 하나씩 대입하는 대신 구조체 하나를 새로 대입하면 된다.
  */
 
+/**
+ * 로컬 헤라 애니메이션만 소비하는 한 프레임의 접촉 자세.
+ *
+ * 판정·예측·오염 변경의 입력으로 사용하지 않으며 네트워크로 복제하지 않는다.
+ * bValid가 false면 접촉 위치와 노멀은 소비하지 않는다. 진행 방향은 180도
+ * 동치인 단위 축이며 bTangentValid가 true일 때만 소비한다. Ready 또는 방향
+ * lock 전에는 게시자가 기본/직전 유효 축을 제공할 수 있고, 축을 만들 수 없으면
+ * 영벡터와 bTangentValid=false를 게시해 소비자가 도구 기본 회전을 쓰게 한다.
+ */
+struct FMD_ScrapeVisualContactPose
+{
+	FVector ContactWorldLocation = FVector::ZeroVector;
+	FVector ContactWorldNormal = FVector::ZeroVector;
+	FVector StrokeWorldTangent = FVector::ZeroVector;
+	uint64 FocusSessionId = 0;
+	uint32 LmbStrokeGeneration = 0;
+	/** 마지막 갱신의 GFrameCounter. MAX_uint64는 아직 갱신되지 않았음을 뜻한다. */
+	uint64 LastUpdatedFrame = MAX_uint64;
+	/** 시각 pose를 새로 게시할 때 증가하는 세대. 0은 게시 전 상태로 예약한다. */
+	uint32 UpdateGeneration = 0;
+	bool bValid = false;
+	bool bTangentValid = false;
+	/** true면 유효 tangent가 현재 LMB stroke의 고정 방향축이며 bTangentValid도 true다. */
+	bool bDirectionLocked = false;
+	/** 소비자가 이전 pose와 보간하지 않고 즉시 새 기준점을 써야 한다. */
+	bool bTeleportOrSnap = false;
+};
+
 /** pending candidate가 다른 표면·spec으로 바뀌 후에도 생성 시점 정보를 보존한다. */
 struct FMD_PendingScrapeContaminationDab
 {
