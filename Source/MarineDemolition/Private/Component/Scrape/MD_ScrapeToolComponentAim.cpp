@@ -14,8 +14,13 @@
 FMD_ScrapeAimAuthorityCone UMD_ScrapeToolComponent::MakeAimAuthorityCone() const
 {
 	FMD_ScrapeAimAuthorityCone Cone;
-	Cone.HorizontalHalfTangent = ScrapeFocusSession.ScrapeFocusAuthorityHorizontalHalfTangent;
-	Cone.VerticalHalfTangent = ScrapeFocusSession.ScrapeFocusAuthorityVerticalHalfTangent;
+	// Continuous samples are validated against the server-owned cone frozen at
+	// Begin. On a listen host the local display latch owns the similarly named
+	// session fields and must never widen or otherwise overwrite authority.
+	Cone.HorizontalHalfTangent =
+		AuthoritativeScrapeFocusConeHorizontalHalfTangent;
+	Cone.VerticalHalfTangent =
+		AuthoritativeScrapeFocusConeVerticalHalfTangent;
 	Cone.PointerSafeMargin = ScrapeFocusPointerSafeMargin;
 	Cone.MarginDegrees = AimViewConeMarginDegrees;
 	return Cone;
@@ -454,7 +459,7 @@ bool UMD_ScrapeToolComponent::TryResolveAuthoritativeAimDirection(
 {
 	OutServerEyeLocation = FVector::ZeroVector;
 	OutWorldDirection = FVector::ZeroVector;
-	if (!IsScrapeToolCurrentlyEligible())
+	if (!IsAuthoritativeScrapeFocusToolCurrent())
 	{
 		TerminateAuthoritativeScrapeFocus(
 			EMD_ScrapeFocusTerminationReason::EligibilityLost);
@@ -472,8 +477,11 @@ bool UMD_ScrapeToolComponent::TryResolveAuthoritativeAimDirection(
 	// packet may temporarily restore the pre-Begin ControlRotation, so continuous
 	// samples validate their server-owned origin and session-relative direction
 	// without comparing against that independently ordered live rotation.
-	if (OutServerEyeLocation.ContainsNaN()
-		|| FVector::Distance(OutServerEyeLocation, ScrapeFocusViewOrigin)
+	if (!bHasAuthoritativeScrapeFocusView
+		|| OutServerEyeLocation.ContainsNaN()
+		|| FVector::Distance(
+			OutServerEyeLocation,
+			AuthoritativeScrapeFocusViewOrigin)
 			> FMath::Max(ScrapeFocusViewOriginDriftToleranceCm, 0.0f))
 	{
 		TerminateAuthoritativeScrapeFocus(
@@ -481,7 +489,7 @@ bool UMD_ScrapeToolComponent::TryResolveAuthoritativeAimDirection(
 		return false;
 	}
 
-	const FRotationMatrix Basis(ScrapeFocusViewRotation);
+	const FRotationMatrix Basis(AuthoritativeScrapeFocusViewRotation);
 	OutWorldDirection =
 		(Basis.GetScaledAxis(EAxis::X) * CameraRelativeDirection.X
 			+ Basis.GetScaledAxis(EAxis::Y) * CameraRelativeDirection.Y

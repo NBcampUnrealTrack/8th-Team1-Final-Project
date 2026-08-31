@@ -114,16 +114,31 @@ bool UMD_ScrapeToolComponent::CaptureScrapeFocusView()
 	ScrapeFocusSession.ScrapeFocusAuthorityHorizontalHalfTangent = HorizontalHalfTangent;
 	ScrapeFocusSession.ScrapeFocusAuthorityVerticalHalfTangent = VerticalHalfTangent;
 	ScrapeFocusViewportSize = FIntPoint(ViewportWidth, ViewportHeight);
-	ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
-	ResetScrapeFocusPointerStrokeConstraint();
+	FVector2D BootstrapPointer(0.5, 0.5);
+	float MouseX = 0.0f;
+	float MouseY = 0.0f;
+	if (PlayerController->GetMousePosition(MouseX, MouseY))
+	{
+		FVector2D NormalizedMousePointer;
+		if (FMD_ScrapeFocusProjection::TryNormalizeViewportPointer(
+				FVector2D(MouseX, MouseY),
+				ScrapeFocusViewportSize,
+				NormalizedMousePointer))
+		{
+			BootstrapPointer = NormalizedMousePointer;
+		}
+	}
+	ScrapeFocusPointerNormalized = BootstrapPointer;
 	bHasScrapeFocusView = true;
+	ClampScrapeFocusPointerToAuthorityCone();
+	ResetScrapeFocusPointerStrokeConstraint();
 	return true;
 }
 
 bool UMD_ScrapeToolComponent::ConsumeScrapeFocusLookInput(
 	const FVector2D& LookInput)
 {
-	if (!IsScrapeFocusActive())
+	if (!IsScrapeFocusViewActive())
 	{
 		return false;
 	}
@@ -371,7 +386,7 @@ float UMD_ScrapeToolComponent::GetScrapeFocusPointerAspectRatio() const
 bool UMD_ScrapeToolComponent::ApplyScrapeFocusCameraView(
 	FMinimalViewInfo& InOutViewInfo) const
 {
-	if (!IsScrapeFocusActive() || !bHasScrapeFocusView)
+	if (!IsScrapeFocusViewActive() || !bHasScrapeFocusView)
 	{
 		return false;
 	}

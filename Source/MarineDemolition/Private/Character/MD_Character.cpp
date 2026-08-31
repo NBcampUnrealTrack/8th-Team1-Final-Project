@@ -1140,7 +1140,7 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 		return;
 	}
 
-	if (IsValid(ScrapeToolComponent) && ScrapeToolComponent->IsScrapeFocusActive())
+	if (IsValid(ScrapeToolComponent) && ScrapeToolComponent->IsScrapeFocusViewActive())
 	{
 		return;
 	}
@@ -1275,7 +1275,7 @@ void AMD_Character::HandleScrapeFocusToggleInput()
 		return;
 	}
 
-	if (ScrapeToolComponent->IsScrapeFocusActive())
+	if (ScrapeToolComponent->IsScrapeFocusViewActive())
 	{
 		CancelActiveScrapeAbilityAndEndFocus();
 		return;

@@ -19,6 +19,7 @@ class AMD_Barnacle;
 class AMD_CuttableWall;
 class UPrimitiveComponent;
 class UMD_ScrapeSurfaceComponent;
+class UMD_ToolDefinition;
 class AMD_TrashBin;
 class UNiagaraSystem;
 class UParticleSystem;
@@ -91,7 +92,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
 	bool IsScraping() const { return bIsScraping; }
 
-	/** 중앙 ray가 유효할 때만 우클릭 Focus 진입을 시작한다. */
+	/** 로컬 화면/포인터 latch를 시작하고, 포인터가 유효한 대상에 닿으면 권위 세션을 1회 요청한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape|Focus")
 	bool TryBeginScrapeFocus();
 
@@ -103,6 +104,13 @@ public:
 	bool IsScrapeFocusActive() const
 	{
 		return ScrapeFocusState != EMD_ScrapeFocusState::Free;
+	}
+
+	/** 로컬 RMB가 고정한 표시 View. 권위 Focus state나 복제 상태를 뜻하지 않는다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Focus")
+	bool IsScrapeFocusViewActive() const
+	{
+		return bScrapeFocusViewActive;
 	}
 
 	/** 진입 승인이 끝난 Ready/Scraping 상태를 반환한다. */
@@ -844,8 +852,14 @@ private:
 	void NotifyScrapeLoadChanged();
 	void SetScrapeFocusState(EMD_ScrapeFocusState NewState);
 	void ResetScrapeFocusSessionState();
-	void EndScrapeFocusInternal(bool bSendServerEnd);
+	void ResetAuthoritativeScrapeFocusViewState();
+	void EndScrapeFocusInternal(
+		bool bSendServerEnd,
+		bool bPreserveLocalViewLatch = false);
 	bool CaptureScrapeFocusView();
+	bool TryBeginAuthoritativeScrapeFocusFromCurrentAim();
+	bool IsScrapeFocusViewToolCurrent() const;
+	bool IsAuthoritativeScrapeFocusToolCurrent() const;
 	bool TryGetAuthoritativeScrapeView(FMinimalViewInfo& OutViewInfo) const;
 	void RejectScrapeFocusBegin(
 		uint64 FocusSessionId,
@@ -859,7 +873,8 @@ private:
 		float RequestedFOV,
 		float RequestedAspectRatio,
 		float RequestedHorizontalHalfTangent,
-		float RequestedVerticalHalfTangent) const;
+		float RequestedVerticalHalfTangent,
+		const FVector& InitialCameraRelativeAimDirection) const;
 	FMD_ScrapeFocusBeginApproval EvaluateScrapeFocusBeginRequest(
 		const FMinimalViewInfo& ServerViewInfo,
 		const FRotator& RequestedViewRotation,
@@ -948,7 +963,8 @@ private:
 		float RequestedFOV,
 		float RequestedAspectRatio,
 		float RequestedHorizontalHalfTangent,
-		float RequestedVerticalHalfTangent);
+		float RequestedVerticalHalfTangent,
+		FVector_NetQuantizeNormal InitialCameraRelativeAimDirection);
 
 	UFUNCTION(Client, Reliable)
 	void ClientScrapeFocusBeginResult(
@@ -1215,6 +1231,29 @@ private:
 
 	UPROPERTY(Transient)
 	bool bHasScrapeFocusView = false;
+
+	/** RMB가 소유하는 비복제 로컬 표시 상태. auth Focus와 독립적으로 유지된다. */
+	UPROPERTY(Transient)
+	bool bScrapeFocusViewActive = false;
+
+	/** 한 RMB latch에서 Reliable Begin을 정확히 한 번만 보낸다. */
+	bool bScrapeFocusViewBeginAttemptConsumed = false;
+	bool bLastScrapeFocusViewAimActionable = false;
+	uint32 ScrapeFocusViewGeneration = 0;
+	uint32 PendingScrapeFocusViewGeneration = 0;
+	TWeakObjectPtr<UMD_ToolDefinition> ScrapeFocusViewTool;
+
+	/** listen host에서도 로컬 표시 basis를 덮지 않는 서버 전용 승인 view/cone. */
+	bool bHasAuthoritativeScrapeFocusView = false;
+	FVector AuthoritativeScrapeFocusViewOrigin = FVector::ZeroVector;
+	FRotator AuthoritativeScrapeFocusViewRotation = FRotator::ZeroRotator;
+	float AuthoritativeScrapeFocusViewFOV = 90.0f;
+	float AuthoritativeScrapeFocusAspectRatio = 16.0f / 9.0f;
+	float AuthoritativeScrapeFocusHorizontalHalfTangent = 1.0f;
+	float AuthoritativeScrapeFocusVerticalHalfTangent = 9.0f / 16.0f;
+	float AuthoritativeScrapeFocusConeHorizontalHalfTangent = 1.0f;
+	float AuthoritativeScrapeFocusConeVerticalHalfTangent = 9.0f / 16.0f;
+	TWeakObjectPtr<UMD_ToolDefinition> AuthoritativeScrapeFocusTool;
 
 	uint32 LmbStrokeGeneration = 0;
 	uint32 ScrapeToolSpecGeneration = 1;

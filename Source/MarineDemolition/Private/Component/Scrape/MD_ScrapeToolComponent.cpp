@@ -196,6 +196,8 @@ void UMD_ScrapeToolComponent::BeginPlay()
 void UMD_ScrapeToolComponent::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	// teardown 중에는 RPC를 만들지 않고 local latch와 auth state를 함께 폐기한다.
+	EndScrapeFocusInternal(false);
 	if (ACharacter* const OwnerCharacter = Cast<ACharacter>(GetOwner()))
 	{
 		if (USkeletalMeshComponent* const BodyMesh = OwnerCharacter->GetMesh())
@@ -1061,7 +1063,7 @@ void UMD_ScrapeToolComponent::StopScraping()
 		// Replicate the authoritative pose-off edge together with cleared contact.
 		GetOwner()->ForceNetUpdate();
 	}
-	SetComponentTickEnabled(IsScrapeFocusActive());
+	SetComponentTickEnabled(IsScrapeFocusActive() || IsScrapeFocusViewActive());
 }
 
 void UMD_ScrapeToolComponent::TickComponent(
@@ -1074,7 +1076,7 @@ void UMD_ScrapeToolComponent::TickComponent(
 	UpdateScrapeLoopAudio();
 	UpdateLocalScrapePredictionResolution(GetScrapeMonotonicSeconds());
 
-	if (!IsScrapeFocusActive() && !bIsScraping)
+	if (!IsScrapeFocusActive() && !IsScrapeFocusViewActive() && !bIsScraping)
 	{
 		return;
 	}
@@ -1082,7 +1084,7 @@ void UMD_ScrapeToolComponent::TickComponent(
 	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
 	const bool bLocallyControlled = OwnerPawn && OwnerPawn->IsLocallyControlled();
 	if (bLocallyControlled
-		&& IsScrapeFocusActive()
+		&& IsScrapeFocusViewActive()
 		&& !IsCurrentScrapeFocusViewportAspectCompatible())
 	{
 		// 비율이 달라진 첫 Tick에서 aim heartbeat/판정을 만들기 전에 정리한다.
@@ -1098,7 +1100,7 @@ void UMD_ScrapeToolComponent::TickComponent(
 		if (ScrapeFocusSession.FocusPendingElapsedSeconds
 			>= static_cast<double>(FMath::Max(BeginAckTimeoutSeconds, 0.01f)))
 		{
-			EndScrapeFocusInternal(true);
+			EndScrapeFocusInternal(true, true);
 			return;
 		}
 	}
@@ -1109,7 +1111,7 @@ void UMD_ScrapeToolComponent::TickComponent(
 	{
 		const double SilenceSeconds = GetScrapeMonotonicSeconds()
 			- AuthoritativeAim.LastAuthoritativeAimReceiveSeconds;
-		if (!IsScrapeToolCurrentlyEligible())
+		if (!IsAuthoritativeScrapeFocusToolCurrent())
 		{
 			TerminateAuthoritativeScrapeFocus(
 				EMD_ScrapeFocusTerminationReason::EligibilityLost);
@@ -1124,13 +1126,27 @@ void UMD_ScrapeToolComponent::TickComponent(
 		}
 	}
 
-	if (IsScrapeFocusActive() && bHasScrapeFocusView)
+	if ((IsScrapeFocusActive() || IsScrapeFocusViewActive())
+		&& (bHasScrapeFocusView || bHasAuthoritativeScrapeFocusView))
 	{
 		if (!IsScrapeFocusViewOriginValid())
 		{
 			// 허용치를 넘는 물리 밀림·서버 보정·텔레포트는 이전 점과 연결하지 않는다.
 			TerminateScrapeFocusFromComponent();
 			return;
+		}
+	}
+	if (bLocallyControlled && IsScrapeFocusViewActive())
+	{
+		if (!IsScrapeFocusViewToolCurrent())
+		{
+			TerminateScrapeFocusFromComponent();
+			return;
+		}
+		if (!IsScrapeFocusActive())
+		{
+			// Free latch도 실제 pointer ray를 관찰한다. begin-attempt guard가 RPC 중복을 막는다.
+			RefreshScrapeFocusAim();
 		}
 	}
 	if (bLocallyControlled)

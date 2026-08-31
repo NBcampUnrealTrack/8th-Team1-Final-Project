@@ -5,37 +5,37 @@
 #include "Gameplay/Scrape/MD_ScrapeFocusProjection.h"
 #include "Gameplay/Scrape/MD_ScrapeAimValidation.h"
 #include "Character/MD_Character.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Camera/CameraTypes.h"
+#include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 
 bool UMD_ScrapeToolComponent::TryBeginScrapeFocus()
 {
-	if (IsScrapeFocusActive())
+	if (IsScrapeFocusViewActive())
 	{
 		return true;
 	}
 
-	if (!IsScrapeToolCurrentlyEligible())
+	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+	const AMD_Character* const Character = Cast<AMD_Character>(GetOwner());
+	UMD_EquipHotbarComponent* const Hotbar = Character
+		? Character->GetHotbarComponent()
+		: nullptr;
+	UMD_ToolDefinition* const CurrentTool = Hotbar
+		? Hotbar->GetCurrentTool()
+		: nullptr;
+	if (!OwnerPawn
+		|| !OwnerPawn->IsLocallyControlled()
+		|| !IsScrapeToolCurrentlyEligible()
+		|| !IsValid(CurrentTool))
 	{
 		return false;
 	}
 
-	// 진입 실패는 기존 긁기와 카메라 상태를 포함해 아무 상태도 바꾸지 않는다.
-	const FMD_ScrapeAimQueryResult PreflightAim = QueryCurrentScrapeAim();
-	if (!PreflightAim.IsActionable())
-	{
-		UE_LOG(
-			LogTemp,
-			Log,
-			TEXT("[ScrapeFocus][Local][%s] Begin skipped: no actionable target (Blocked=%s, Component=%s)"),
-			*GetNameSafe(GetOwner()),
-			*GetNameSafe(PreflightAim.Hit.GetActor()),
-			*GetNameSafe(PreflightAim.Hit.GetComponent()));
-		return false;
-	}
 	if (!CaptureScrapeFocusView())
 	{
 		UE_LOG(
@@ -46,13 +46,69 @@ bool UMD_ScrapeToolComponent::TryBeginScrapeFocus()
 		return false;
 	}
 
+	bScrapeFocusViewActive = true;
+	ScrapeFocusViewTool = CurrentTool;
+	++ScrapeFocusViewGeneration;
+	if (ScrapeFocusViewGeneration == 0)
+	{
+		++ScrapeFocusViewGeneration;
+	}
+	PendingScrapeFocusViewGeneration = 0;
+	bScrapeFocusViewBeginAttemptConsumed = false;
+	bLastScrapeFocusViewAimActionable = false;
+	CurrentScrapeAim = FMD_ScrapeAimQueryResult();
+	ResetScrapeVisualContactTracking(true);
+	SetComponentTickEnabled(true);
+	RefreshScrapeFocusAim();
+	return IsScrapeFocusViewActive();
+}
+
+bool UMD_ScrapeToolComponent::TryBeginAuthoritativeScrapeFocusFromCurrentAim()
+{
+	if (!IsScrapeFocusViewActive()
+		|| !bHasScrapeFocusView
+		|| IsScrapeFocusActive()
+		|| bScrapeFocusViewBeginAttemptConsumed
+		|| !IsScrapeFocusViewToolCurrent()
+		|| !CurrentScrapeAim.IsActionable())
+	{
+		return false;
+	}
+
+	// latch generation 하나는 Reliable Begin을 최대 한 번만 소유한다.
+	bScrapeFocusViewBeginAttemptConsumed = true;
+	PendingScrapeFocusViewGeneration = ScrapeFocusViewGeneration;
+
+	const FVector InitialWorldDirection =
+		GetScrapeFocusVisualAimDirection().GetSafeNormal();
+	const FRotationMatrix ViewAxes(ScrapeFocusViewRotation);
+	const FVector InitialCameraRelativeAimDirection(
+		FVector::DotProduct(
+			InitialWorldDirection,
+			ViewAxes.GetScaledAxis(EAxis::X)),
+		FVector::DotProduct(
+			InitialWorldDirection,
+			ViewAxes.GetScaledAxis(EAxis::Y)),
+		FVector::DotProduct(
+			InitialWorldDirection,
+			ViewAxes.GetScaledAxis(EAxis::Z)));
+	const FVector SafeInitialCameraRelativeAimDirection =
+		InitialCameraRelativeAimDirection.GetSafeNormal();
+	if (InitialWorldDirection.IsNearlyZero()
+		|| InitialWorldDirection.ContainsNaN()
+		|| SafeInitialCameraRelativeAimDirection.IsNearlyZero()
+		|| SafeInitialCameraRelativeAimDirection.ContainsNaN())
+	{
+		TerminateScrapeFocusFromComponent();
+		return false;
+	}
+
 	if (bIsScraping)
 	{
 		// 과도기 호환 경로로 시작된 LMB 긁기가 있다면 유효한 Focus가 이를 인계한다.
 		StopScraping();
 	}
 
-	CurrentScrapeAim = PreflightAim;
 	ResetInvalidScrapeAim();
 	++ScrapeFocusSession.ScrapeFocusGeneration;
 	if (ScrapeFocusSession.ScrapeFocusGeneration == 0)
@@ -91,8 +147,33 @@ bool UMD_ScrapeToolComponent::TryBeginScrapeFocus()
 		ScrapeFocusViewFOV,
 		ScrapeFocusSession.ScrapeFocusAspectRatio,
 		ScrapeFocusSession.ScrapeFocusHorizontalHalfTangent,
-		ScrapeFocusSession.ScrapeFocusVerticalHalfTangent);
+		ScrapeFocusSession.ScrapeFocusVerticalHalfTangent,
+		FVector_NetQuantizeNormal(SafeInitialCameraRelativeAimDirection));
 	return true;
+}
+
+bool UMD_ScrapeToolComponent::IsScrapeFocusViewToolCurrent() const
+{
+	const AMD_Character* const Character = Cast<AMD_Character>(GetOwner());
+	const UMD_EquipHotbarComponent* const Hotbar = Character
+		? Character->GetHotbarComponent()
+		: nullptr;
+	return ScrapeFocusViewTool.IsValid()
+		&& Hotbar
+		&& Hotbar->GetCurrentTool() == ScrapeFocusViewTool.Get()
+		&& IsScrapeToolCurrentlyEligible();
+}
+
+bool UMD_ScrapeToolComponent::IsAuthoritativeScrapeFocusToolCurrent() const
+{
+	const AMD_Character* const Character = Cast<AMD_Character>(GetOwner());
+	const UMD_EquipHotbarComponent* const Hotbar = Character
+		? Character->GetHotbarComponent()
+		: nullptr;
+	return AuthoritativeScrapeFocusTool.IsValid()
+		&& Hotbar
+		&& Hotbar->GetCurrentTool() == AuthoritativeScrapeFocusTool.Get()
+		&& IsScrapeToolCurrentlyEligible();
 }
 
 bool UMD_ScrapeToolComponent::IsScrapeFocusBeginPayloadValid(
@@ -101,8 +182,11 @@ bool UMD_ScrapeToolComponent::IsScrapeFocusBeginPayloadValid(
 	const float RequestedFOV,
 	const float RequestedAspectRatio,
 	const float RequestedHorizontalHalfTangent,
-	const float RequestedVerticalHalfTangent) const
+	const float RequestedVerticalHalfTangent,
+	const FVector& InitialCameraRelativeAimDirection) const
 {
+	const double InitialDirectionSizeSquared =
+		InitialCameraRelativeAimDirection.SizeSquared();
 	if (FocusSessionId != 0
 		&& !RequestedViewRotation.ContainsNaN()
 		&& FMath::IsFinite(RequestedFOV)
@@ -112,6 +196,10 @@ bool UMD_ScrapeToolComponent::IsScrapeFocusBeginPayloadValid(
 		&& RequestedFOV > UE_SMALL_NUMBER
 		&& RequestedHorizontalHalfTangent > UE_SMALL_NUMBER
 		&& RequestedVerticalHalfTangent > UE_SMALL_NUMBER
+		&& !InitialCameraRelativeAimDirection.ContainsNaN()
+		&& FMath::IsFinite(InitialDirectionSizeSquared)
+		&& FMath::Abs(InitialDirectionSizeSquared - 1.0) <= 0.02
+		&& InitialCameraRelativeAimDirection.X > UE_SMALL_NUMBER
 		&& FMD_ScrapeFocusProjection::IsSupportedAspectRatio(RequestedAspectRatio))
 	{
 		return true;
@@ -200,50 +288,50 @@ FMD_ScrapeFocusBeginApproval UMD_ScrapeToolComponent::EvaluateScrapeFocusBeginRe
 		|| (FMD_ScrapeFocusProjection::TryCalculateHalfTangents(
 				LiveProjectionView,
 				DefaultAxisConstraint,
-				ScrapeFocusSession.ScrapeFocusAspectRatio,
+				AuthoritativeScrapeFocusAspectRatio,
 				IsLegacyMaintainYFOVProjectionEnabled(),
 				LiveHorizontalHalfTangent,
 				LiveVerticalHalfTangent)
 			&& FMath::Abs(LiveHorizontalHalfTangent
-					- ScrapeFocusSession.ScrapeFocusHorizontalHalfTangent)
+					- AuthoritativeScrapeFocusHorizontalHalfTangent)
 				<= ProjectionHalfTangentTolerance
 			&& FMath::Abs(LiveVerticalHalfTangent
-					- ScrapeFocusSession.ScrapeFocusVerticalHalfTangent)
+					- AuthoritativeScrapeFocusVerticalHalfTangent)
 				<= ProjectionHalfTangentTolerance);
 	const bool bAuthorityProjectionMatchesAgreedSession =
 		!bIsSameAcceptedSession
 		|| (bAuthorityProjectionPolicyValid
 			&& FMath::Abs(FMath::Min(
-					ScrapeFocusSession.ScrapeFocusHorizontalHalfTangent,
+					AuthoritativeScrapeFocusHorizontalHalfTangent,
 					AuthorityPolicyHorizontalHalfTangent)
-					- ScrapeFocusSession.ScrapeFocusAuthorityHorizontalHalfTangent)
+					- AuthoritativeScrapeFocusConeHorizontalHalfTangent)
 				<= ProjectionHalfTangentTolerance
 			&& FMath::Abs(FMath::Min(
-					ScrapeFocusSession.ScrapeFocusVerticalHalfTangent,
+					AuthoritativeScrapeFocusVerticalHalfTangent,
 					AuthorityPolicyVerticalHalfTangent)
-					- ScrapeFocusSession.ScrapeFocusAuthorityVerticalHalfTangent)
+					- AuthoritativeScrapeFocusConeVerticalHalfTangent)
 				<= ProjectionHalfTangentTolerance);
 	const bool bRequestedContractMatchesAgreedSession =
 		!bIsSameAcceptedSession
-		|| (FMath::Abs(RequestedAspectRatio - ScrapeFocusSession.ScrapeFocusAspectRatio)
+		|| (FMath::Abs(RequestedAspectRatio - AuthoritativeScrapeFocusAspectRatio)
 				<= FMath::Max(ScrapeFocusAspectRatioAbsoluteTolerance, 0.0f)
 			&& FMath::Abs(RequestedHorizontalHalfTangent
-					- ScrapeFocusSession.ScrapeFocusHorizontalHalfTangent)
+					- AuthoritativeScrapeFocusHorizontalHalfTangent)
 				<= ProjectionHalfTangentTolerance
 			&& FMath::Abs(RequestedVerticalHalfTangent
-					- ScrapeFocusSession.ScrapeFocusVerticalHalfTangent)
+					- AuthoritativeScrapeFocusVerticalHalfTangent)
 				<= ProjectionHalfTangentTolerance);
 	const bool bRequestedViewMatchesAgreedSession =
 		!bIsSameAcceptedSession
 		|| FMD_ScrapeAimValidation::CalculateRotatorErrorDegrees(
 			Approval.ApprovedViewRotation,
-			ScrapeFocusViewRotation)
+			AuthoritativeScrapeFocusViewRotation)
 			<= FMath::Max(BeginBasisRotationToleranceDegrees, 0.0f);
 	const bool bLiveViewMatchesAgreedSession = !bIsSameAcceptedSession
-		|| (bHasScrapeFocusView
-			&& FVector::Distance(ServerEyeLocation, ScrapeFocusViewOrigin)
+		|| (bHasAuthoritativeScrapeFocusView
+			&& FVector::Distance(ServerEyeLocation, AuthoritativeScrapeFocusViewOrigin)
 				<= FMath::Max(ScrapeFocusViewOriginDriftToleranceCm, 0.0f)
-			&& FMath::Abs(ServerFOV - ScrapeFocusViewFOV)
+			&& FMath::Abs(ServerFOV - AuthoritativeScrapeFocusViewFOV)
 				<= FMath::Max(BeginFOVToleranceDegrees, 0.0f)
 			&& bLiveProjectionMatchesAgreedSession);
 	Approval.bBasisMatches = !ServerEyeLocation.ContainsNaN()
@@ -304,19 +392,26 @@ void UMD_ScrapeToolComponent::AdoptApprovedScrapeFocusSession(
 	// same frozen Focus basis as a listen host, while origin/FOV/trace remain
 	// server authoritative.
 	OwnerController.SetControlRotation(Approval.ApprovedViewRotation);
-	ScrapeFocusViewOrigin = ServerViewInfo.Location;
-	ScrapeFocusViewRotation = Approval.ApprovedViewRotation;
-	ScrapeFocusViewFOV = ServerViewInfo.FOV;
-	ScrapeFocusSession.ScrapeFocusAspectRatio = RequestedAspectRatio;
-	ScrapeFocusSession.ScrapeFocusHorizontalHalfTangent =
+	AuthoritativeScrapeFocusViewOrigin = ServerViewInfo.Location;
+	AuthoritativeScrapeFocusViewRotation = Approval.ApprovedViewRotation;
+	AuthoritativeScrapeFocusViewFOV = ServerViewInfo.FOV;
+	AuthoritativeScrapeFocusAspectRatio = RequestedAspectRatio;
+	AuthoritativeScrapeFocusHorizontalHalfTangent =
 		Approval.RequestedProjectionHorizontalHalfTangent;
-	ScrapeFocusSession.ScrapeFocusVerticalHalfTangent =
+	AuthoritativeScrapeFocusVerticalHalfTangent =
 		Approval.RequestedProjectionVerticalHalfTangent;
-	ScrapeFocusSession.ScrapeFocusAuthorityHorizontalHalfTangent =
+	AuthoritativeScrapeFocusConeHorizontalHalfTangent =
 		Approval.ApprovedAuthorityHorizontalHalfTangent;
-	ScrapeFocusSession.ScrapeFocusAuthorityVerticalHalfTangent =
+	AuthoritativeScrapeFocusConeVerticalHalfTangent =
 		Approval.ApprovedAuthorityVerticalHalfTangent;
-	bHasScrapeFocusView = true;
+	const AMD_Character* const Character = Cast<AMD_Character>(GetOwner());
+	const UMD_EquipHotbarComponent* const Hotbar = Character
+		? Character->GetHotbarComponent()
+		: nullptr;
+	AuthoritativeScrapeFocusTool = Hotbar
+		? Hotbar->GetCurrentTool()
+		: nullptr;
+	bHasAuthoritativeScrapeFocusView = true;
 	CurrentScrapeAim = Preflight;
 	AuthoritativeAim.LastAuthoritativeAimReceiveSeconds =
 		AuthoritativeAim.LastAuthoritativeAimRateRefillSeconds;
@@ -354,6 +449,14 @@ void UMD_ScrapeToolComponent::RejectScrapeFocusBegin(
 		TerminateAuthoritativeScrapeFocus(SameSessionReason);
 		return;
 	}
+	if (SameSessionReason == EMD_ScrapeFocusTerminationReason::ProtocolViolation
+		|| SameSessionReason == EMD_ScrapeFocusTerminationReason::EligibilityLost)
+	{
+		// Malformed/tampered Begin data and an invalid tool contract are forced
+		// safety exits, not ordinary target races. Clear the owning local latch.
+		ClientTerminateScrapeFocus(FocusSessionId, SameSessionReason);
+		return;
+	}
 	ClientScrapeFocusBeginResult(
 		FocusSessionId,
 		EMD_ScrapeFocusBeginResult::Denied,
@@ -370,7 +473,8 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 	const float RequestedFOV,
 	const float RequestedAspectRatio,
 	const float RequestedHorizontalHalfTangent,
-	const float RequestedVerticalHalfTangent)
+	const float RequestedVerticalHalfTangent,
+	const FVector_NetQuantizeNormal InitialCameraRelativeAimDirection)
 {
 	if (!GetOwner() || !GetOwner()->HasAuthority())
 	{
@@ -387,7 +491,8 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 			RequestedFOV,
 			RequestedAspectRatio,
 			RequestedHorizontalHalfTangent,
-			RequestedVerticalHalfTangent))
+			RequestedVerticalHalfTangent,
+			FVector(InitialCameraRelativeAimDirection)))
 	{
 		RejectScrapeFocusBegin(
 			FocusSessionId,
@@ -397,7 +502,9 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 			90.0f);
 		return;
 	}
-	if (!IsScrapeToolCurrentlyEligible())
+	if (!IsScrapeToolCurrentlyEligible()
+		|| (bIsSameAcceptedSession
+			&& !IsAuthoritativeScrapeFocusToolCurrent()))
 	{
 		RejectScrapeFocusBegin(
 			FocusSessionId,
@@ -432,11 +539,38 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 		RequestedHorizontalHalfTangent,
 		RequestedVerticalHalfTangent,
 		bIsSameAcceptedSession);
-	const FMD_ScrapeAimQueryResult Preflight = Approval.bBasisMatches
-		? QueryScrapeAim(
-			ServerViewInfo.Location,
-			Approval.ApprovedViewRotation.Vector())
-		: FMD_ScrapeAimQueryResult();
+	FMD_ScrapeAimAuthorityCone BeginCone;
+	BeginCone.HorizontalHalfTangent =
+		Approval.ApprovedAuthorityHorizontalHalfTangent;
+	BeginCone.VerticalHalfTangent =
+		Approval.ApprovedAuthorityVerticalHalfTangent;
+	BeginCone.PointerSafeMargin = ScrapeFocusPointerSafeMargin;
+	BeginCone.MarginDegrees = AimViewConeMarginDegrees;
+	const FVector InitialRelativeDirection =
+		FVector(InitialCameraRelativeAimDirection).GetSafeNormal();
+	if (Approval.bBasisMatches
+		&& !FMD_ScrapeAimValidation::IsDirectionInsideCone(
+			InitialRelativeDirection,
+			BeginCone))
+	{
+		RejectScrapeFocusBegin(
+			FocusSessionId,
+			bIsSameAcceptedSession,
+			EMD_ScrapeFocusTerminationReason::ProtocolViolation,
+			ServerViewInfo.Rotation,
+			ServerViewInfo.FOV);
+		return;
+	}
+	const FRotationMatrix ApprovedBasis(Approval.ApprovedViewRotation);
+	const FVector InitialWorldDirection =
+		(ApprovedBasis.GetScaledAxis(EAxis::X) * InitialRelativeDirection.X
+			+ ApprovedBasis.GetScaledAxis(EAxis::Y) * InitialRelativeDirection.Y
+			+ ApprovedBasis.GetScaledAxis(EAxis::Z) * InitialRelativeDirection.Z)
+		.GetSafeNormal();
+	const FMD_ScrapeAimQueryResult Preflight =
+		Approval.bBasisMatches && !InitialWorldDirection.IsNearlyZero()
+			? QueryScrapeAim(ServerViewInfo.Location, InitialWorldDirection)
+			: FMD_ScrapeAimQueryResult();
 	if (!Approval.bBasisMatches || !Preflight.IsActionable())
 	{
 		UE_LOG(
@@ -467,10 +601,10 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 		ClientScrapeFocusBeginResult(
 			FocusSessionId,
 			EMD_ScrapeFocusBeginResult::Accepted,
-			ScrapeFocusViewRotation,
-			ScrapeFocusViewFOV,
-			ScrapeFocusSession.ScrapeFocusAuthorityHorizontalHalfTangent,
-			ScrapeFocusSession.ScrapeFocusAuthorityVerticalHalfTangent);
+			AuthoritativeScrapeFocusViewRotation,
+			AuthoritativeScrapeFocusViewFOV,
+			AuthoritativeScrapeFocusConeHorizontalHalfTangent,
+			AuthoritativeScrapeFocusConeVerticalHalfTangent);
 		return;
 	}
 	if (!OwnerController)
@@ -502,7 +636,20 @@ void UMD_ScrapeToolComponent::ClientScrapeFocusBeginResult_Implementation(
 	const float AgreedHorizontalHalfTangent,
 	const float AgreedVerticalHalfTangent)
 {
-	if (ScrapeFocusState != EMD_ScrapeFocusState::FocusPending
+	// A listen host adopts the authoritative session on this same component
+	// before its owning-client RPC is dispatched, so its state is already Ready.
+	// Remote owners must still be Pending; the generation/session checks below
+	// keep a late Ack from reviving an explicitly released local latch.
+	const bool bExpectedClientState =
+		ScrapeFocusState == EMD_ScrapeFocusState::FocusPending
+		|| (GetOwner()
+			&& GetOwner()->HasAuthority()
+			&& ScrapeFocusState == EMD_ScrapeFocusState::FocusedReady
+			&& ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted);
+	if (!IsScrapeFocusViewActive()
+		|| PendingScrapeFocusViewGeneration == 0
+		|| PendingScrapeFocusViewGeneration != ScrapeFocusViewGeneration
+		|| !bExpectedClientState
 		|| FocusSessionId == 0
 		|| FocusSessionId != ScrapeFocusSession.ActiveScrapeFocusSessionId)
 	{
@@ -522,7 +669,7 @@ void UMD_ScrapeToolComponent::ClientScrapeFocusBeginResult_Implementation(
 			> ScrapeFocusSession.ScrapeFocusVerticalHalfTangent
 				+ ProjectionHalfTangentTolerance)
 	{
-		EndScrapeFocusInternal(false);
+		EndScrapeFocusInternal(false, true);
 		return;
 	}
 	// 서버는 허용 오차 밖 basis를 거부하므로 Ack 값 적용은 가시적 snap을 만들지 않는다.
@@ -540,6 +687,7 @@ void UMD_ScrapeToolComponent::ClientScrapeFocusBeginResult_Implementation(
 	ScrapeFocusSession.FocusPendingElapsedSeconds = 0.0;
 	AuthoritativeAim.LocalAimSendAccumulatorSeconds = 0.0;
 	SetScrapeFocusState(EMD_ScrapeFocusState::FocusedReady);
+	PendingScrapeFocusViewGeneration = 0;
 	RefreshScrapeFocusAim();
 	// Ack basis와 authority clamp가 적용된 바로 이 frame의 표시 포인터를 다시 쏜다.
 	ForceRefreshLocalScrapeVisualContactPose(true);
@@ -565,7 +713,6 @@ void UMD_ScrapeToolComponent::ClientTerminateScrapeFocus_Implementation(
 	const uint64 FocusSessionId,
 	const EMD_ScrapeFocusTerminationReason Reason)
 {
-	(void)Reason;
 	if (FocusSessionId == 0 || FocusSessionId != ScrapeFocusSession.ActiveScrapeFocusSessionId)
 	{
 		return;
@@ -574,7 +721,9 @@ void UMD_ScrapeToolComponent::ClientTerminateScrapeFocus_Implementation(
 	{
 		Character->CancelScrapeAbilityForSession(FocusSessionId);
 	}
-	EndScrapeFocusInternal(false);
+	EndScrapeFocusInternal(
+		false,
+		Reason == EMD_ScrapeFocusTerminationReason::SessionTimeout);
 }
 
 void UMD_ScrapeToolComponent::TerminateAuthoritativeScrapeFocus(
@@ -598,7 +747,9 @@ void UMD_ScrapeToolComponent::TerminateAuthoritativeScrapeFocus(
 	StopScraping();
 	ResetStrokeTracking();
 	ClientTerminateScrapeFocus(EndingSessionId, Reason);
-	EndScrapeFocusInternal(false);
+	EndScrapeFocusInternal(
+		false,
+		Reason == EMD_ScrapeFocusTerminationReason::SessionTimeout);
 }
 
 void UMD_ScrapeToolComponent::ServerUpdateScrapeAim_Implementation(
@@ -674,12 +825,18 @@ void UMD_ScrapeToolComponent::EndScrapeFocus()
 }
 
 void UMD_ScrapeToolComponent::EndScrapeFocusInternal(
-	const bool bSendServerEnd)
+	const bool bSendServerEnd,
+	const bool bPreserveLocalViewLatch)
 {
 	const uint64 EndingSessionId = ScrapeFocusSession.ActiveScrapeFocusSessionId;
+	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+	const bool bKeepLocalViewLatch = bPreserveLocalViewLatch
+		&& OwnerPawn
+		&& OwnerPawn->IsLocallyControlled()
+		&& IsScrapeFocusViewActive()
+		&& bHasScrapeFocusView;
 	if (bSendServerEnd && EndingSessionId != 0)
 	{
-		const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
 		if (OwnerPawn && OwnerPawn->IsLocallyControlled()
 			&& (!GetOwner()->HasAuthority() || GetNetMode() != NM_Standalone))
 		{
@@ -689,9 +846,22 @@ void UMD_ScrapeToolComponent::EndScrapeFocusInternal(
 
 	StopScraping();
 	ClearLocalScrapePredictions();
-	CurrentScrapeAim = FMD_ScrapeAimQueryResult();
 	SetScrapeFocusState(EMD_ScrapeFocusState::Free);
+	PendingScrapeFocusViewGeneration = 0;
+	ResetScrapeFocusSessionState();
+	ResetScrapeVisualContactTracking(true);
+	if (bKeepLocalViewLatch)
+	{
+		SetComponentTickEnabled(true);
+		return;
+	}
+
+	CurrentScrapeAim = FMD_ScrapeAimQueryResult();
+	bScrapeFocusViewActive = false;
 	bHasScrapeFocusView = false;
+	bScrapeFocusViewBeginAttemptConsumed = false;
+	bLastScrapeFocusViewAimActionable = false;
+	ScrapeFocusViewTool.Reset();
 	ScrapeFocusViewOrigin = FVector::ZeroVector;
 	ScrapeFocusViewRotation = FRotator::ZeroRotator;
 	ScrapeFocusViewFOV = 90.0f;
@@ -703,8 +873,6 @@ void UMD_ScrapeToolComponent::EndScrapeFocusInternal(
 	ScrapeFocusViewportSize = FIntPoint::ZeroValue;
 	ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
 	ResetScrapeFocusPointerStrokeConstraint();
-	ResetScrapeFocusSessionState();
-	ResetScrapeVisualContactTracking(true);
 	SetComponentTickEnabled(false);
 }
 
@@ -717,6 +885,21 @@ void UMD_ScrapeToolComponent::ResetScrapeFocusSessionState()
 	ScrapeFocusSession.LocalFocusMonotonicStartSeconds = 0.0;
 	ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted = false;
 	ContaminationPaint.Stage3FocusSessionIdentityOverride = 0;
+	ResetAuthoritativeScrapeFocusViewState();
+}
+
+void UMD_ScrapeToolComponent::ResetAuthoritativeScrapeFocusViewState()
+{
+	bHasAuthoritativeScrapeFocusView = false;
+	AuthoritativeScrapeFocusViewOrigin = FVector::ZeroVector;
+	AuthoritativeScrapeFocusViewRotation = FRotator::ZeroRotator;
+	AuthoritativeScrapeFocusViewFOV = 90.0f;
+	AuthoritativeScrapeFocusAspectRatio = 16.0f / 9.0f;
+	AuthoritativeScrapeFocusHorizontalHalfTangent = 1.0f;
+	AuthoritativeScrapeFocusVerticalHalfTangent = 9.0f / 16.0f;
+	AuthoritativeScrapeFocusConeHorizontalHalfTangent = 1.0f;
+	AuthoritativeScrapeFocusConeVerticalHalfTangent = 9.0f / 16.0f;
+	AuthoritativeScrapeFocusTool.Reset();
 }
 
 void UMD_ScrapeToolComponent::SetScrapeFocusState(
@@ -727,21 +910,57 @@ void UMD_ScrapeToolComponent::SetScrapeFocusState(
 
 bool UMD_ScrapeToolComponent::RefreshScrapeFocusAim()
 {
-	if (!IsScrapeFocusActive() || !bHasScrapeFocusView)
+	if (!IsScrapeFocusViewActive() && !IsScrapeFocusActive())
 	{
 		CurrentScrapeAim = FMD_ScrapeAimQueryResult();
 		return false;
 	}
-	if (!IsCurrentScrapeFocusViewportAspectCompatible()
-		|| !IsScrapeFocusViewOriginValid())
+	if (IsScrapeFocusViewActive()
+		&& (!bHasScrapeFocusView
+			|| !IsCurrentScrapeFocusViewportAspectCompatible()
+			|| !IsScrapeFocusViewOriginValid()))
 	{
 		// 화면 비율이나 View 시작점이 바뀌면 새 ray를 보내기 전에 종료한다.
 		TerminateScrapeFocusFromComponent();
 		return false;
 	}
 
-	CurrentScrapeAim = QueryCurrentScrapeAim();
-	return CurrentScrapeAim.IsActionable();
+	if (IsScrapeFocusActive())
+	{
+		CurrentScrapeAim = QueryCurrentScrapeAim();
+	}
+	else
+	{
+		const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+		const AController* const OwnerController = OwnerPawn
+			? OwnerPawn->GetController()
+			: nullptr;
+		FVector LiveViewOrigin = FVector::ZeroVector;
+		FRotator IgnoredLiveViewRotation = FRotator::ZeroRotator;
+		if (OwnerController)
+		{
+			OwnerController->GetPlayerViewPoint(
+				LiveViewOrigin,
+				IgnoredLiveViewRotation);
+		}
+		CurrentScrapeAim = OwnerController && !LiveViewOrigin.ContainsNaN()
+			? QueryScrapeAim(
+				LiveViewOrigin,
+				GetScrapeFocusVisualAimDirection())
+			: FMD_ScrapeAimQueryResult();
+	}
+
+	const bool bAimActionable = CurrentScrapeAim.IsActionable();
+	const bool bBecameActionable = bAimActionable
+		&& !bLastScrapeFocusViewAimActionable;
+	bLastScrapeFocusViewAimActionable = bAimActionable;
+	if (IsScrapeFocusViewActive()
+		&& !IsScrapeFocusActive()
+		&& bBecameActionable)
+	{
+		TryBeginAuthoritativeScrapeFocusFromCurrentAim();
+	}
+	return bAimActionable;
 }
 
 bool UMD_ScrapeToolComponent::TryGetAuthoritativeScrapeView(
@@ -792,7 +1011,13 @@ bool UMD_ScrapeToolComponent::TryGetAuthoritativeScrapeView(
 
 bool UMD_ScrapeToolComponent::IsScrapeFocusViewOriginValid() const
 {
-	if (!IsScrapeFocusActive() || !bHasScrapeFocusView)
+	const bool bValidateLocalView = IsScrapeFocusViewActive()
+		&& bHasScrapeFocusView;
+	const bool bValidateAuthoritativeView = GetOwner()
+		&& GetOwner()->HasAuthority()
+		&& ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted
+		&& bHasAuthoritativeScrapeFocusView;
+	if (!bValidateLocalView && !bValidateAuthoritativeView)
 	{
 		return false;
 	}
@@ -806,29 +1031,41 @@ bool UMD_ScrapeToolComponent::IsScrapeFocusViewOriginValid() const
 		return false;
 	}
 
-	FVector CurrentViewLocation = FVector::ZeroVector;
-	if (GetOwner() && GetOwner()->HasAuthority())
+	const double DriftToleranceSquared = FMath::Square(static_cast<double>(
+		FMath::Max(ScrapeFocusViewOriginDriftToleranceCm, 0.0f)));
+	if (bValidateLocalView)
+	{
+		// A listen host still validates its displayed PlayerCameraManager view
+		// against the local capture. The raw CameraComponent below is the server
+		// authority source and can legitimately differ by camera modifiers.
+		FVector CurrentLocalViewLocation = FVector::ZeroVector;
+		FRotator CurrentViewRotation = FRotator::ZeroRotator;
+		OwnerController->GetPlayerViewPoint(
+			CurrentLocalViewLocation,
+			CurrentViewRotation);
+		if (CurrentLocalViewLocation.ContainsNaN()
+			|| FVector::DistSquared(
+				CurrentLocalViewLocation,
+				ScrapeFocusViewOrigin) > DriftToleranceSquared)
+		{
+			return false;
+		}
+	}
+	if (bValidateAuthoritativeView)
 	{
 		FMinimalViewInfo ServerViewInfo;
 		if (!TryGetAuthoritativeScrapeView(ServerViewInfo))
 		{
 			return false;
 		}
-		CurrentViewLocation = ServerViewInfo.Location;
+		if (FVector::DistSquared(
+				ServerViewInfo.Location,
+				AuthoritativeScrapeFocusViewOrigin) > DriftToleranceSquared)
+		{
+			return false;
+		}
 	}
-	else
-	{
-		FRotator CurrentViewRotation = FRotator::ZeroRotator;
-		OwnerController->GetPlayerViewPoint(
-			CurrentViewLocation,
-			CurrentViewRotation);
-	}
-	const float DriftToleranceCm = FMath::Max(
-		ScrapeFocusViewOriginDriftToleranceCm,
-		0.0f);
-	return !CurrentViewLocation.ContainsNaN()
-		&& FVector::DistSquared(CurrentViewLocation, ScrapeFocusViewOrigin)
-			<= FMath::Square(DriftToleranceCm);
+	return true;
 }
 
 void UMD_ScrapeToolComponent::TerminateScrapeFocusFromComponent()

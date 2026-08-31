@@ -9,6 +9,31 @@ bool FMD_ScrapeFocusProjection::IsSupportedAspectRatio(const float AspectRatio)
 		&& AspectRatio <= MaximumSupportedAspectRatio;
 }
 
+bool FMD_ScrapeFocusProjection::TryNormalizeViewportPointer(
+	const FVector2D& ViewportPixelPosition,
+	const FIntPoint& ViewportSize,
+	FVector2D& OutNormalizedPointer)
+{
+	OutNormalizedPointer = FVector2D(0.5, 0.5);
+	if (ViewportSize.X <= 0
+		|| ViewportSize.Y <= 0
+		|| !FMath::IsFinite(ViewportPixelPosition.X)
+		|| !FMath::IsFinite(ViewportPixelPosition.Y)
+		|| ViewportPixelPosition.X < 0.0
+		|| ViewportPixelPosition.Y < 0.0
+		|| ViewportPixelPosition.X > static_cast<double>(ViewportSize.X)
+		|| ViewportPixelPosition.Y > static_cast<double>(ViewportSize.Y))
+	{
+		return false;
+	}
+
+	OutNormalizedPointer = FVector2D(
+		ViewportPixelPosition.X / static_cast<double>(ViewportSize.X),
+		ViewportPixelPosition.Y / static_cast<double>(ViewportSize.Y));
+	return FMath::IsFinite(OutNormalizedPointer.X)
+		&& FMath::IsFinite(OutNormalizedPointer.Y);
+}
+
 bool FMD_ScrapeFocusProjection::TryCalculateHalfTangents(
 	const FMinimalViewInfo& ViewInfo,
 	const EAspectRatioAxisConstraint DefaultAxisConstraint,

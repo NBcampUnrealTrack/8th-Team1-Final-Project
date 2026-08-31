@@ -22,6 +22,12 @@ public:
 	/** 클라이언트가 요청한 종횡비가 지원 범위 안의 유한값인지 검사한다. */
 	static bool IsSupportedAspectRatio(float AspectRatio);
 
+	/** 같은 player viewport의 pixel 좌표를 0~1 포인터로 변환한다. 화면 밖 좌표는 거부한다. */
+	static bool TryNormalizeViewportPointer(
+		const FVector2D& ViewportPixelPosition,
+		const FIntPoint& ViewportSize,
+		FVector2D& OutNormalizedPointer);
+
 	/**
 	 * 카메라의 가로·세로 half-tangent를 구한다.
 	 *
