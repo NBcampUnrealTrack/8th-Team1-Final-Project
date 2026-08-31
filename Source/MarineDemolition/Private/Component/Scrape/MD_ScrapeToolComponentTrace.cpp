@@ -2,6 +2,7 @@
 
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 
+#include "Character/MD_Character.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Camera/CameraTypes.h"
 #include "GameFramework/Controller.h"
@@ -9,6 +10,26 @@
 #include "Misc/ScopeExit.h"
 #include "World/Contamination/MD_Barnacle.h"
 #include "World/Wall/MD_CuttableWall.h"
+
+namespace
+{
+void StopCurrentScrapeForPersistentInvalidAim(
+	UMD_ScrapeToolComponent& ScrapeTool)
+{
+	const uint64 FocusSessionId =
+		ScrapeTool.GetActiveScrapeFocusSessionId();
+	if (AMD_Character* const Character =
+		Cast<AMD_Character>(ScrapeTool.GetOwner()))
+	{
+		Character->CancelScrapeAbilityForSession(FocusSessionId);
+	}
+
+	// Ability cancellation normally reaches StopScraping through EndAbility.
+	// Keep this fallback so missing/stale GA registration cannot leave a stroke
+	// active across the invalid interval.
+	ScrapeTool.StopScraping();
+}
+}
 
 void UMD_ScrapeToolComponent::ProcessReadyScrapeAim(const float DeltaTime)
 {
@@ -19,6 +40,7 @@ void UMD_ScrapeToolComponent::ProcessReadyScrapeAimResult(
 	const FMD_ScrapeAimQueryResult& AimResult,
 	const float SampleDeltaTime)
 {
+	(void)SampleDeltaTime;
 	CurrentScrapeAim = AimResult;
 	if (AimResult.IsActionable())
 	{
@@ -29,7 +51,9 @@ void UMD_ScrapeToolComponent::ProcessReadyScrapeAimResult(
 
 	ClearCurrentScrapeContact();
 	SetTrackedBarnacle(nullptr);
-	HandleInvalidScrapeAim(SampleDeltaTime, false);
+	// Ready focus has no stroke to recover. Invalid aim only clears the
+	// actionable target; the accepted focus session remains available.
+	ResetInvalidScrapeAim();
 }
 
 void UMD_ScrapeToolComponent::BeginInvalidScrapeAim()
@@ -100,7 +124,7 @@ bool UMD_ScrapeToolComponent::HandleInvalidScrapeAim(
 			PersistentInvalidExitSeconds);
 	if (Evaluation.Decision == EMD_ScrapeReacquireDecision::TerminateFocus)
 	{
-		TerminateScrapeFocusFromComponent();
+		StopCurrentScrapeForPersistentInvalidAim(*this);
 		return true;
 	}
 
@@ -244,7 +268,7 @@ bool UMD_ScrapeToolComponent::PrepareReacquiredSurface(
 	}
 	if (Evaluation.Decision == EMD_ScrapeReacquireDecision::TerminateFocus)
 	{
-		TerminateScrapeFocusFromComponent();
+		StopCurrentScrapeForPersistentInvalidAim(*this);
 		return false;
 	}
 
