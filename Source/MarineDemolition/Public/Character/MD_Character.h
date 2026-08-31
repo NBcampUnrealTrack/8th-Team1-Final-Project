@@ -259,7 +259,7 @@ private:
 	void HandleInteractInput(const FInputActionValue& Value);
 	void HandleAbilityInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
-	void HandleScrapeFocusInputStarted();
+	void HandleScrapeFocusToggleInput();
 	void HandleScrapeFocusInputEnded();
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
 	void HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex);
@@ -405,11 +405,6 @@ private:
 	bool bScrapeAbilityInputCaptured = false;
 
 	bool bScrapeFocusInputContextAdded = false;
-
-	/** 0값 Triggered가 Focus를 해제하지 않도록 하는 이동 입력 deadzone. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Focus",
-		meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float ScrapeFocusMoveInputDeadzone = 0.1f;
 
 	/** 180도 동치 blade 축이 프레임마다 뒤집히지 않도록 마지막 부호를 보존한다. */
 	FVector LastScrapeAnimationBladeWorldDirection = FVector::ZeroVector;

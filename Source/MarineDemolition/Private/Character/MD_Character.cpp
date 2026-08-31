@@ -746,17 +746,7 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 			ScrapeFocusInputAction,
 			ETriggerEvent::Started,
 			this,
-			&AMD_Character::HandleScrapeFocusInputStarted);
-		EIC->BindAction(
-			ScrapeFocusInputAction,
-			ETriggerEvent::Completed,
-			this,
-			&AMD_Character::HandleScrapeFocusInputEnded);
-		EIC->BindAction(
-			ScrapeFocusInputAction,
-			ETriggerEvent::Canceled,
-			this,
-			&AMD_Character::HandleScrapeFocusInputEnded);
+			&AMD_Character::HandleScrapeFocusToggleInput);
 	}
 
 	if (!IsValid(InputConfig))
@@ -795,11 +785,12 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 		return;
 	}
 
-	const FVector2D MoveInput = Value.Get<FVector2D>();
-	if (MoveInput.SizeSquared() > FMath::Square(ScrapeFocusMoveInputDeadzone))
+	if (IsValid(ScrapeToolComponent) && ScrapeToolComponent->IsScrapeFocusActive())
 	{
-		HandleScrapeFocusInputEnded();
+		return;
 	}
+
+	const FVector2D MoveInput = Value.Get<FVector2D>();
 
 	// 사다리 타기 상태 확인
 	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
@@ -922,9 +913,20 @@ void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 	ASC->CancelAbilities(&AbilityTags);
 }
 
-void AMD_Character::HandleScrapeFocusInputStarted()
+void AMD_Character::HandleScrapeFocusToggleInput()
 {
-	if (!IsScrapeToolEquipped() || !IsValid(ScrapeToolComponent))
+	if (!IsValid(ScrapeToolComponent))
+	{
+		return;
+	}
+
+	if (ScrapeToolComponent->IsScrapeFocusActive())
+	{
+		CancelActiveScrapeAbilityAndEndFocus();
+		return;
+	}
+
+	if (!IsScrapeToolEquipped())
 	{
 		return;
 	}
