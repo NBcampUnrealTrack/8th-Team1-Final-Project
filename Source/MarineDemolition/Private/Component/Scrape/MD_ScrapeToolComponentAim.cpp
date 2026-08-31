@@ -335,20 +335,30 @@ void UMD_ScrapeToolComponent::PrepareBufferedAuthoritativeAimReplay(
 
 void UMD_ScrapeToolComponent::ReplayBufferedAuthoritativeAims()
 {
+	const uint64 ReplayFocusSessionId =
+		ScrapeFocusSession.ActiveScrapeFocusSessionId;
 	if (!bIsScraping
-		|| !AuthoritativeAim.bAuthoritativeFirstScrapeAimApproved
+		|| ReplayFocusSessionId == 0
+		|| !IsAuthoritativeFirstScrapeAimApproved(ReplayFocusSessionId)
 		|| AuthoritativeAim.AuthoritativeFirstAimSequence == 0)
 	{
 		return;
 	}
 
+	TArray<FMD_BufferedAuthoritativeScrapeAim> BufferedReplay =
+		MoveTemp(AuthoritativeAim.BufferedPreFirstAuthoritativeAims);
+	AuthoritativeAim.BufferedPreFirstAuthoritativeAims.Reset();
+	AuthoritativeAim.HighestDroppedPreFirstAimSequence = 0;
+	bool bForceNewAnchor =
+		AuthoritativeAim.bBufferedPreFirstAimReplayDiscontinuous;
+	AuthoritativeAim.bBufferedPreFirstAimReplayDiscontinuous = false;
+
 	uint32 PreviousSequence = AuthoritativeAim.AuthoritativeFirstAimSequence;
 	double PreviousClientSeconds =
 		AuthoritativeAim.AuthoritativeFirstAimClientSampleSeconds;
 	FMD_ScrapeAimQueryResult PreviousAim = CurrentScrapeAim;
-	bool bForceNewAnchor = AuthoritativeAim.bBufferedPreFirstAimReplayDiscontinuous;
 	for (const FMD_BufferedAuthoritativeScrapeAim& Buffered
-		: AuthoritativeAim.BufferedPreFirstAuthoritativeAims)
+		: BufferedReplay)
 	{
 		if (Buffered.Sample.Sequence <= PreviousSequence)
 		{
@@ -389,14 +399,20 @@ void UMD_ScrapeToolComponent::ReplayBufferedAuthoritativeAims()
 				: 0,
 			Buffered.Sample.FocusSessionId,
 			Buffered.Sample.Sequence);
+		if (!bIsScraping
+			|| !IsAuthoritativeFirstScrapeAimApproved(ReplayFocusSessionId)
+			|| ScrapeFocusSession.ActiveScrapeFocusSessionId
+				!= ReplayFocusSessionId)
+		{
+			break;
+		}
+
 		PreviousSequence = Buffered.Sample.Sequence;
 		PreviousClientSeconds = static_cast<double>(
 			Buffered.Sample.ClientMonotonicSeconds);
 		PreviousAim = Buffered.ValidatedAim;
 		bForceNewAnchor = false;
 	}
-	AuthoritativeAim.BufferedPreFirstAuthoritativeAims.Reset();
-	AuthoritativeAim.bBufferedPreFirstAimReplayDiscontinuous = false;
 }
 
 bool UMD_ScrapeToolComponent::TryAcceptAuthoritativeAimTiming(
