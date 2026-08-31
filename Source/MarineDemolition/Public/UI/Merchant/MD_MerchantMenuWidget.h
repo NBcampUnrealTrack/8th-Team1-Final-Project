@@ -105,6 +105,10 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Merchant", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_Name;
 
+	/** 현재 상인 호감도를 부호가 포함된 소수점 한 자리 값으로 표시한다. */
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Merchant", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Affinity;
+
 	/** 화면 중앙 대사창의 본문 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Merchant", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_Dialogue;

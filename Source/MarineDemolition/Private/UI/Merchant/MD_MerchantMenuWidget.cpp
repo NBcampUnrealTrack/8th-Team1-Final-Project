@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
@@ -40,6 +40,15 @@ void UMD_MerchantMenuWidget::RefreshDisplay()
 	{
 		Txt_Name->SetText(MenuInfo.DisplayName);
 	}
+
+	// 현재 호감도를 양수와 음수가 구분되도록 부호와 소수점 한 자리로 표시한다.
+	if (IsValid(Txt_Affinity) == true)
+	{
+		FString AffinitySign = MenuInfo.Affinity >= 0.f ? TEXT("+") : TEXT("-");
+		FString AffinityValue = FString::Printf(TEXT("호감도 %s%.1f"), *AffinitySign, FMath::Abs(MenuInfo.Affinity));
+		Txt_Affinity->SetText(FText::FromString(AffinityValue));
+	}
+
 	// 대사창은 인사말로 시작한다. '대화'를 누르면 TalkLines로 넘어간다.
 	ShowDialogueLine(MenuInfo.Greeting);
 }
