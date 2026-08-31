@@ -6,6 +6,7 @@
 #include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
 #include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraFunctionLibrary.h"
@@ -175,9 +176,16 @@ void UMD_ScrapeToolComponent::BeginPlay()
 	Super::BeginPlay();
 	if (ACharacter* const OwnerCharacter = Cast<ACharacter>(GetOwner()))
 	{
+		if (UCharacterMovementComponent* const CharacterMovement =
+			OwnerCharacter->GetCharacterMovement())
+		{
+			// 이동 완료 후 visual pose와 판정 Tick을 함께 갱신한다.
+			AddTickPrerequisiteComponent(CharacterMovement);
+		}
+
 		if (USkeletalMeshComponent* const BodyMesh = OwnerCharacter->GetMesh())
 		{
-			// 같은 TickGroup 안에서도 생산자 → AnimBP 순서를 명시한다.
+			// CharacterMovement → ScrapeTool → AnimBP 순서를 명시한다.
 			BodyMesh->AddTickPrerequisiteComponent(this);
 		}
 	}
@@ -193,6 +201,12 @@ void UMD_ScrapeToolComponent::EndPlay(
 		if (USkeletalMeshComponent* const BodyMesh = OwnerCharacter->GetMesh())
 		{
 			BodyMesh->RemoveTickPrerequisiteComponent(this);
+		}
+
+		if (UCharacterMovementComponent* const CharacterMovement =
+			OwnerCharacter->GetCharacterMovement())
+		{
+			RemoveTickPrerequisiteComponent(CharacterMovement);
 		}
 	}
 	ClearLocalScrapePredictions();
