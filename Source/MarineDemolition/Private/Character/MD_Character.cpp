@@ -29,11 +29,12 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshSocket.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameplayTags/MD_GameplayTags.h"
-#include "World/Traversal/MD_Ladder.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
@@ -469,14 +470,6 @@ void AMD_Character::BeginPlay()
 	// 실제 플레이에서는 팔·도구의 데칼 수신과 월드 메시 관통을 줄이도록 다시 보정한다.
 	ConfigureFirstPersonRendering();
 	RefreshFirstPersonArmsTick();
-
-	// 사다리 진입과 이탈을 캐릭터 캡슐 기준으로 감지하기 위한 델리게이트 연결
-	UCapsuleComponent* CharacterCapsule = GetCapsuleComponent();
-	if (IsValid(CharacterCapsule) == true)
-	{
-		CharacterCapsule->OnComponentBeginOverlap.AddUniqueDynamic(this, &AMD_Character::HandleCollisionBeginOverlap);
-		CharacterCapsule->OnComponentEndOverlap.AddUniqueDynamic(this, &AMD_Character::HandleCollisionEndOverlap);
-	}
 
 	if (IsValid(ScrapeToolComponent))
 	{
@@ -945,12 +938,8 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
 	if (IsValid(MDMovement) == true && MDMovement->IsClimbing() == true)
 	{
-		// 사용중인 사다리가 유효하고, 종료 지점으로 이동중이 아닌 경우 입력값 적용
-		AMD_Ladder* CurrentLadder = MDMovement->GetCurrentLadder();
-		if (IsValid(CurrentLadder) == true && MDMovement->IsTopDismounting() == false)
-		{
-			AddMovementInput(CurrentLadder->GetClimbUpVector(), MoveInput.X);
-		}
+		// 전후 및 좌우 입력 축만 전달하고 사다리 이동 방향 결정은 이동 컴포넌트에 위임
+		MDMovement->ApplyLadderMovementInput(MoveInput.X, MoveInput.Y);
 		return;
 	}
 
@@ -1150,50 +1139,6 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value)
 {
 	StopJumping();
-}
-
-void AMD_Character::HandleCollisionBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-	// 사다리 영역 진입 확인
-	AMD_Ladder* Ladder = Cast<AMD_Ladder>(OtherActor);
-	if (IsValid(Ladder) == false || OtherComponent != Ladder->GetClimbTrigger())
-	{
-		return;
-	}
-
-	// 사다리 타기 시작
-	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
-	if (IsValid(MDMovement) == true)
-	{
-		MDMovement->StartClimbing(Ladder);
-	}
-}
-
-void AMD_Character::HandleCollisionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex)
-{
-	// 사다리 영역 진입 확인
-	AMD_Ladder* Ladder = Cast<AMD_Ladder>(OtherActor);
-	if (IsValid(Ladder) == false || OtherComponent != Ladder->GetClimbTrigger())
-	{
-		return;
-	}
-
-	// 사다리 타기 종료 지점으로 이동중이 아닐 때, 낙하 모드로 복귀
-	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
-	if (IsValid(MDMovement) == true && MDMovement->GetCurrentLadder() == Ladder)
-	{
-		// 하단에 도달한 경우 오버랩 종료보다 바닥 착지 판정을 우선 적용
-		float SpeedAtLadder = MDMovement->GetLadderClimbSpeed();
-		if (MDMovement->TryLeaveLadderAtBottom(SpeedAtLadder) == true)
-		{
-			return;
-		}
-
-		if (MDMovement->IsTopDismounting() == false)
-		{
-			MDMovement->StopClimbing(MOVE_Falling);
-		}
-	}
 }
 
 void AMD_Character::ServerJumpOffLadder_Implementation()
@@ -1714,6 +1659,23 @@ void AMD_Character::SetCutterVFXActive(bool bActive)
 
 	bCutterVFXActive = bActive;
 	RefreshCutterVFX();
+}
+
+float AMD_Character::PlayBarnacleScrapeMontage()
+{
+	if (!IsValid(BarnacleScrapeMontage) || !IsValid(GetMesh()))
+	{
+		return 0.f;
+	}
+
+	UAnimInstance* const AnimInstance = GetMesh()->GetAnimInstance();
+	if (!IsValid(AnimInstance))
+	{
+		return 0.f;
+	}
+
+	// 같은 원샷이 아직 끝나기 전에 다시 타격하면 처음부터 다시 친다.
+	return AnimInstance->Montage_Play(BarnacleScrapeMontage);
 }
 
 void AMD_Character::OnRep_CutterVFXActive()

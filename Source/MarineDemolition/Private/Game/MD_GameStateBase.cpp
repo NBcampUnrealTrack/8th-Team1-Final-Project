@@ -1,6 +1,7 @@
 ﻿#include "Game/MD_GameStateBase.h"
 #include "Component/Lore/MD_LoreComponent.h"
 #include "Data/Score/MD_ScoreTableData.h"
+#include "GameFramework/PlayerState.h"
 #include "Net/UnrealNetwork.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
@@ -12,6 +13,40 @@ AMD_GameStateBase::AMD_GameStateBase()
 
     LoreComponent = CreateDefaultSubobject<UMD_LoreComponent>(TEXT("LoreComponent"));
     MerchantComponent = CreateDefaultSubobject<UMD_MerchantComponent>(TEXT("MerchantComponent"));
+}
+
+void AMD_GameStateBase::AddPlayerState(APlayerState* PlayerState)
+{
+    // 실제 배열 변경 여부 확인을 위한 추가 전 플레이어 수 저장
+    int32 PreviousPlayerCount = PlayerArray.Num();
+
+    Super::AddPlayerState(PlayerState);
+
+    // 중복 또는 비활성 PlayerState로 배열 개수가 유지된 경우 목록 갱신 생략
+    if (PlayerArray.Num() == PreviousPlayerCount)
+    {
+        return;
+    }
+
+    // 새 접속 플레이어가 반영된 PlayerArray 변경 알림
+    OnPlayerListChanged.Broadcast();
+}
+
+void AMD_GameStateBase::RemovePlayerState(APlayerState* PlayerState)
+{
+    // 실제 배열 변경 여부 확인을 위한 제거 전 플레이어 수 저장
+    int32 PreviousPlayerCount = PlayerArray.Num();
+
+    Super::RemovePlayerState(PlayerState);
+
+    // 대상이 없어 배열 개수가 유지된 경우 목록 갱신 생략
+    if (PlayerArray.Num() == PreviousPlayerCount)
+    {
+        return;
+    }
+
+    // 플레이어 퇴장이 반영된 PlayerArray 변경 알림
+    OnPlayerListChanged.Broadcast();
 }
 
 void AMD_GameStateBase::BeginPlay()

@@ -26,4 +26,14 @@ UTexture2D* UMD_LoadingScreenSettings::GetBubbleTexture() const
 	return BubbleTexture.LoadSynchronous();
 }
 
+UTexture2D* UMD_LoadingScreenSettings::GetShipTexture() const
+{
+	return ShipTexture.LoadSynchronous();
+}
+
+UTexture2D* UMD_LoadingScreenSettings::GetWaveTexture() const
+{
+	return WaveTexture.LoadSynchronous();
+}
+
 #undef LOCTEXT_NAMESPACE

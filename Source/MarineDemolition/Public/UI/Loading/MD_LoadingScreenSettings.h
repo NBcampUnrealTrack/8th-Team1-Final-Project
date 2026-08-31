@@ -31,6 +31,16 @@ public:
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading Screen")
 	TSoftObjectPtr<UTexture2D> BubbleTexture;
 
+	/** 파도형 진행 트랙 위를 이동하는 작업선 텍스처. 미지정이면 트랙만 그린다. */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading Screen")
+	TSoftObjectPtr<UTexture2D> ShipTexture;
+
+	/** 수평선 아래에 깔리는 너울 띠 텍스처. 미지정이면 너울을 생략한다. */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading Screen")
+	TSoftObjectPtr<UTexture2D> WaveTexture;
+
 	/** 미지정이면 nullptr. 로딩 시작 직전에 한 번만 동기 로드한다. */
 	UTexture2D* GetBubbleTexture() const;
+	UTexture2D* GetShipTexture() const;
+	UTexture2D* GetWaveTexture() const;
 };

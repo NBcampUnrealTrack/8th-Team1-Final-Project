@@ -1,7 +1,9 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "HAL/CriticalSection.h"
 #include "Layout/Geometry.h"
+#include "Misc/ScopeLock.h"
 #include "Templates/Atomic.h"
 #include "MD_LoadingScreenTypes.generated.h"
 
@@ -55,6 +57,39 @@ namespace MD_LoadingScreen
 	constexpr double CompletionDisplaySeconds = 0.85;
 	constexpr double LoadingLoopDurationSeconds = 2.15;
 	constexpr double OutroDurationSeconds = 1.10;
+	// 시각 진행률 단계. 실제 바이트 퍼센트는 하드 트래블 중 안전하게 조회할 수 없으므로,
+	// 확실히 지나간 단계마다 하한을 올리고 그 사이는 경과 시간으로 메운다.
+	/** 인트로가 끝나는 시점의 진행률. 시간 기반 추정이 여기서부터 이어진다. */
+	constexpr float IntroProgressShare = 0.08f;
+	/** PreLoadMap: 맵 로드가 실제로 시작됐다. */
+	constexpr float MapLoadStartProgress = 0.12f;
+	/** PostLoadMap: 새 월드가 올라왔다. */
+	constexpr float MapLoadedProgress = 0.90f;
+	/** 준비 판정이 요구 횟수만큼 연속으로 통과했다. */
+	constexpr float ReadyStableProgress = 0.98f;
+	/** 블로킹 구간의 시간 기반 추정이 점근하는 상한. 단계 하한 없이는 절대 넘지 않는다. */
+	constexpr float BlockingLoadProgressCeiling = 0.88f;
+	/** 상한에 접근하는 속도의 시간 상수(초). 클수록 천천히 찬다. */
+	constexpr float BlockingLoadProgressTimeConstant = 6.0f;
+	/** COMPLETE와 함께 남은 구간을 100%까지 채우는 시간. */
+	constexpr double CompletionProgressBlendSeconds = 0.38;
+
+	// 단계 하한은 0.12 → 0.90처럼 크게 뛴다. 그대로 반영하면 배가 트랙의 절반을 한 프레임에
+	// 건너뛰므로, 표시값이 목표까지 일정 속도로 따라붙게 한다. 지속 시간이 아니라 속도인 이유:
+	// 준비 판정이 0.05초마다 하한을 조금씩 올리는데 그때마다 지속 시간을 다시 잡으면 매번
+	// 처음부터 감속해 값이 기어가고, 결국 완료 블렌드가 남은 거리를 한 번에 삼킨다.
+	/** 표시 진행률이 목표를 따라붙는 속도(진행률/초). 배의 항해 속도라고 보면 된다. */
+	constexpr float FloorCatchUpRate = 0.70f;
+	// 하드 트래블 중에는 화면이 통째로 멈춰 1초 넘게 한 프레임도 그려지지 않는다. 정지한
+	// 시간을 그대로 더하면 풀리는 순간 한 프레임에 다 이동해 결국 순간이동으로 보이므로,
+	// 한 번 그릴 때 나아갈 수 있는 시간에 상한을 둔다(약 30fps 한 프레임).
+	/** 한 번의 그리기에서 따라붙을 수 있는 최대 시간(초). */
+	constexpr double MaxCatchUpStepSeconds = 0.033;
+
+	static_assert(IntroProgressShare < BlockingLoadProgressCeiling,
+		"시간 기반 추정은 인트로가 끝난 값에서 이어져야 한다");
+	static_assert(MapLoadStartProgress <= MapLoadedProgress && MapLoadedProgress <= ReadyStableProgress,
+		"단계 하한은 진행 순서대로 커져야 한다");
 
 	// 0.05초 x 10회 = 약 0.5초간 조건이 유지돼야 닫는다.
 	// 한 프레임만 만족했다가 곧바로 다시 로딩이 시작되는 경우를 거르기 위한 장치다.
@@ -103,7 +138,37 @@ struct FMD_LoadingVisualState
 	double GetElapsedSeconds() const { return SecondsSince(StartCycles); }
 	void BeginCompletion() { StampOnce(CompletionStartCycles); }
 	void BeginOutro() { StampOnce(OutroStartCycles); }
+	/**
+	 * 실제로 지나간 단계가 진행률의 목표를 올린다. 표시값을 곧바로 갈아끼우지는 않는다.
+	 * 실제 이동은 그리는 쪽이 한 프레임씩 따라붙으며 처리한다(AdvanceDisplayedFloor).
+	 * 게임 스레드만 호출한다.
+	 */
+	void SetProgressFloor(float Progress)
+	{
+		FScopeLock Lock(&FloorMutex);
+		FloorTarget = FMath::Max(FloorTarget, FMath::Clamp(Progress, 0.0f, 1.0f));
+	}
 	bool IsCompletionVisible() const { return CompletionStartCycles.Load() != 0; }
+
+	/**
+	 * MoviePlayer가 게임 스레드를 막은 동안에도 움직이는 단조 증가 시각 진행률.
+	 * 실제 바이트 퍼센트는 하드 트래블 중 안전하게 조회할 수 없으므로 경과 시간으로 상한까지
+	 * 점근하고, 맵 로드/월드 준비 단계가 올리는 하한이 남은 구간을 확정한다.
+	 */
+	float GetVisualProgress() const
+	{
+		float Progress = AdvanceDisplayedFloor();
+
+		// COMPLETE가 뜨면 남아 있던 구간을 채워 100%로 마무리한다.
+		const uint64 CompletionStamp = CompletionStartCycles.Load();
+		if (CompletionStamp != 0)
+		{
+			const float CompletionAlpha = FMath::SmoothStep(0.0f, 1.0f, FMath::Clamp(static_cast<float>(
+				SecondsSince(CompletionStamp) / MD_LoadingScreen::CompletionProgressBlendSeconds), 0.0f, 1.0f));
+			Progress = FMath::Lerp(Progress, 1.0f, CompletionAlpha);
+		}
+		return FMath::Clamp(Progress, 0.0f, 1.0f);
+	}
 
 	float GetCompletionElapsedSeconds() const
 	{
@@ -132,9 +197,59 @@ private:
 		if (Target.Load() == 0) { Target.Store(FPlatformTime::Cycles64()); }
 	}
 
+	/**
+	 * 완료 블렌드 이전의 진행률. 그릴 때마다 한 걸음씩 목표에 다가간다.
+	 *
+	 * 벽시계가 아니라 '그린 횟수'로 나아가는 이유: 하드 트래블 구간에서는 게임 스레드가
+	 * LoadMap 안에서 멈춰 1초 넘게 한 프레임도 그려지지 않는다. 그 정지 시간을 그대로
+	 * 반영하면 화면이 풀리는 첫 프레임에 이동이 전부 끝나 있어 결국 순간이동으로 보인다.
+	 * 그래서 한 걸음의 크기에 상한을 두고, 실제로 그려진 프레임 수만큼만 나아가게 한다.
+	 */
+	float AdvanceDisplayedFloor() const
+	{
+		FScopeLock Lock(&FloorMutex);
+
+		const uint64 Now = FPlatformTime::Cycles64();
+		const double SinceLastDraw = LastDrawCycles == 0
+			? 0.0 : FPlatformTime::ToSeconds64(Now - LastDrawCycles);
+		LastDrawCycles = Now;
+
+		// 시간 기반 추정은 언제나 표시값의 바닥이다.
+		DisplayedFloor = FMath::Max(DisplayedFloor, GetTimedProgress());
+		DisplayedFloor = FMath::Min(FloorTarget, DisplayedFloor + MD_LoadingScreen::FloorCatchUpRate
+			* static_cast<float>(FMath::Min(SinceLastDraw, MD_LoadingScreen::MaxCatchUpStepSeconds)));
+		return DisplayedFloor;
+	}
+
+	/**
+	 * 단계 정보 없이 경과 시간만으로 추정한 진행률. 인트로 구간에서는 인트로 진척만큼만 차오르고,
+	 * 그 뒤에는 상한을 향해 점근하기만 해 상한에 닿지 않는다. 로딩이 길어져도 100%에서
+	 * 멈춘 것처럼 보이지 않게 하려는 것이고, 마지막 구간은 실제 단계 하한이 담당한다.
+	 */
+	float GetTimedProgress() const
+	{
+		const double Elapsed = GetElapsedSeconds();
+		const float IntroProgress = MD_LoadingScreen::IntroProgressShare * FMath::Clamp(
+			static_cast<float>(Elapsed / MD_LoadingScreen::IntroDurationSeconds), 0.0f, 1.0f);
+		const float LoadingElapsed = FMath::Max(0.0f,
+			static_cast<float>(Elapsed - MD_LoadingScreen::IntroDurationSeconds));
+		return FMath::Max(IntroProgress, FMath::Lerp(MD_LoadingScreen::IntroProgressShare,
+			MD_LoadingScreen::BlockingLoadProgressCeiling,
+			1.0f - FMath::Exp(-LoadingElapsed / MD_LoadingScreen::BlockingLoadProgressTimeConstant)));
+	}
+
 	uint64 StartCycles;
 	TAtomic<uint64> CompletionStartCycles{0};
 	TAtomic<uint64> OutroStartCycles{0};
+
+	// 표시값은 그리는 쪽이 갱신하고 목표는 게임 스레드가 올린다. 세 값이 한 벌로 맞아야 해서
+	// 개별 atomic으로는 찢어진 읽기를 막을 수 없고, 임계 구역이 산술 몇 줄이라 잠금 비용은
+	// 무시할 만하다. viewport와 MoviePlayer 위젯이 같은 프레임에 둘 다 읽어도, 두 번째 호출은
+	// 직전 호출과의 간격이 사실상 0이라 걸음이 겹쳐 빨라지지 않는다.
+	mutable FCriticalSection FloorMutex;
+	float FloorTarget = 0.0f;
+	mutable float DisplayedFloor = 0.0f;
+	mutable uint64 LastDrawCycles = 0;
 };
 
 /** 로딩 루프 물방울 하나의 등장/상승 키값. 시간은 루프 안에서의 초 단위다. */

@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Engine/TimerHandle.h"
 #include "GameFramework/Actor.h"
+#include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTagAssetInterface.h"
 #include "GameplayTagContainer.h"
 #include "MD_CuttableWall.generated.h"
@@ -44,7 +45,7 @@ enum class EMD_WallType : uint8
  * settings that have not been migrated to the component yet.
  */
 UCLASS()
-class MARINEDEMOLITION_API AMD_CuttableWall : public AActor, public IGameplayTagAssetInterface
+class MARINEDEMOLITION_API AMD_CuttableWall : public AActor, public IGameplayTagAssetInterface, public IMD_Scannable
 {
 	GENERATED_BODY()
 
@@ -103,6 +104,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Wall")
 	void ScanHighlight(float Duration = 3.0f, AActor* Scanner = nullptr);
+
+	// IMD_Scannable — 기존 벽 스캔 델리게이트 경로로 연결한다.
+	virtual void OnScanned_Implementation(float Duration, AActor* Scanner) override;
 
 	// 절단 진행도 누적. 서버 전용. 100% 도달 시 Cut()을 호출한다
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Cut")
