@@ -423,6 +423,15 @@ FVector UMD_ScrapeToolComponent::GetScrapeFocusVisualAimDirection() const
 	return GetScrapeFocusAimDirectionForPointer(ScrapeFocusPointerNormalized);
 }
 
+void UMD_ScrapeToolComponent::ForceRefreshLocalScrapeVisualContactPose(
+	const bool bTeleportOrSnap)
+{
+	// 승인 clamp처럼 같은 frame의 앞선 visual trace를 의도적으로 폐기하는 경계다.
+	LastScrapeVisualContactTraceFrame = MAX_uint64;
+	bForceNextScrapeVisualContactSnap |= bTeleportOrSnap;
+	UpdateLocalScrapeVisualContactPose(0.0f);
+}
+
 void UMD_ScrapeToolComponent::MarkScrapeVisualContactPoseUpdated()
 {
 	++ScrapeVisualContactPose.UpdateGeneration;
@@ -465,6 +474,7 @@ void UMD_ScrapeToolComponent::ResetScrapeVisualContactTracking(
 	ScrapeVisualLockedLmbGeneration = 0;
 	ScrapeVisualInvalidElapsedSeconds = 0.0;
 	LastScrapeVisualContactTraceFrame = MAX_uint64;
+	bForceNextScrapeVisualContactSnap = false;
 	if (bPublishInvalidPose)
 	{
 		PublishInvalidScrapeVisualContactPose(true);
@@ -550,10 +560,22 @@ void UMD_ScrapeToolComponent::UpdateLocalScrapeVisualContactPose(
 	LastScrapeVisualContactTraceFrame = GFrameCounter;
 
 	const FVector VisualAimDirection = GetScrapeFocusVisualAimDirection();
-	FMD_ScrapeAimQueryResult VisualAim;
-	if (!VisualAimDirection.IsNearlyZero())
+	const AController* const OwnerController = OwnerPawn->GetController();
+	FVector VisualTraceOrigin = FVector::ZeroVector;
+	FRotator IgnoredCurrentViewRotation = FRotator::ZeroRotator;
+	if (OwnerController)
 	{
-		VisualAim = QueryScrapeAim(ScrapeFocusViewOrigin, VisualAimDirection);
+		OwnerController->GetPlayerViewPoint(
+			VisualTraceOrigin,
+			IgnoredCurrentViewRotation);
+	}
+	const bool bHasCurrentViewOrigin = OwnerController
+		&& IsFiniteScrapeVisualVector(VisualTraceOrigin);
+	FMD_ScrapeAimQueryResult VisualAim;
+	if (bHasCurrentViewOrigin && !VisualAimDirection.IsNearlyZero())
+	{
+		// 회전/FOV는 캡처 basis를 유지하고 원점만 판정 경로와 같은 live view다.
+		VisualAim = QueryScrapeAim(VisualTraceOrigin, VisualAimDirection);
 	}
 
 	FVector ContactNormal = VisualAim.WorldContactNormal;
@@ -579,7 +601,8 @@ void UMD_ScrapeToolComponent::UpdateLocalScrapeVisualContactPose(
 		ScrapeVisualInvalidElapsedSeconds += SafeDeltaTime;
 		const double GraceSeconds = static_cast<double>(
 			FMath::Max(TransientMissGraceSeconds, 0.0f));
-		if (ScrapeVisualContactPose.bValid
+		if (!bForceNextScrapeVisualContactSnap
+			&& ScrapeVisualContactPose.bValid
 			&& ScrapeVisualContactPose.FocusSessionId == FocusSessionId
 			&& ScrapeVisualInvalidElapsedSeconds <= GraceSeconds)
 		{
@@ -626,6 +649,7 @@ void UMD_ScrapeToolComponent::UpdateLocalScrapeVisualContactPose(
 			ScrapeVisualContactPose.ContactWorldNormal,
 			ContactNormal) < NormalSnapCosine;
 	const bool bTeleportOrSnap = bNewFocus
+		|| bForceNextScrapeVisualContactSnap
 		|| bSurfaceChanged
 		|| bLargePositionJump
 		|| bLargeNormalJump;
@@ -753,6 +777,7 @@ void UMD_ScrapeToolComponent::UpdateLocalScrapeVisualContactPose(
 	ScrapeVisualContactPose.bDirectionLocked = bDirectionLocked;
 	ScrapeVisualContactPose.bTeleportOrSnap = bTeleportOrSnap;
 	MarkScrapeVisualContactPoseUpdated();
+	bForceNextScrapeVisualContactSnap = false;
 
 	ScrapeVisualContactSurface = VisualAim.Surface.Get();
 	ScrapeVisualContactPrimitive = ContactPrimitive;

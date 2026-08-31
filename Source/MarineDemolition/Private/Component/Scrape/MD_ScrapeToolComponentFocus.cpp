@@ -541,6 +541,8 @@ void UMD_ScrapeToolComponent::ClientScrapeFocusBeginResult_Implementation(
 	AuthoritativeAim.LocalAimSendAccumulatorSeconds = 0.0;
 	SetScrapeFocusState(EMD_ScrapeFocusState::FocusedReady);
 	RefreshScrapeFocusAim();
+	// Ack basis와 authority clamp가 적용된 바로 이 frame의 표시 포인터를 다시 쏜다.
+	ForceRefreshLocalScrapeVisualContactPose(true);
 }
 
 void UMD_ScrapeToolComponent::ServerEndScrapeFocus_Implementation(

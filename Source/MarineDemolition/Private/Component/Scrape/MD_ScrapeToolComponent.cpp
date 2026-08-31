@@ -3,7 +3,9 @@
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
+#include "GameFramework/Character.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraFunctionLibrary.h"
@@ -113,6 +115,8 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
+	// AnimBP가 이 컴포넌트의 로컬 visual pose를 같은 프레임에 소비한다.
+	PrimaryComponentTick.TickGroup = TG_PrePhysics;
 }
 
 void UMD_ScrapeToolComponent::GetLifetimeReplicatedProps(
@@ -169,6 +173,14 @@ const TCHAR* UMD_ScrapeToolComponent::GetContactTypeLabel(
 void UMD_ScrapeToolComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	if (ACharacter* const OwnerCharacter = Cast<ACharacter>(GetOwner()))
+	{
+		if (USkeletalMeshComponent* const BodyMesh = OwnerCharacter->GetMesh())
+		{
+			// 같은 TickGroup 안에서도 생산자 → AnimBP 순서를 명시한다.
+			BodyMesh->AddTickPrerequisiteComponent(this);
+		}
+	}
 
 	SetComponentTickEnabled(false);
 }
@@ -176,6 +188,13 @@ void UMD_ScrapeToolComponent::BeginPlay()
 void UMD_ScrapeToolComponent::EndPlay(
 	const EEndPlayReason::Type EndPlayReason)
 {
+	if (ACharacter* const OwnerCharacter = Cast<ACharacter>(GetOwner()))
+	{
+		if (USkeletalMeshComponent* const BodyMesh = OwnerCharacter->GetMesh())
+		{
+			BodyMesh->RemoveTickPrerequisiteComponent(this);
+		}
+	}
 	ClearLocalScrapePredictions();
 	Super::EndPlay(EndPlayReason);
 }

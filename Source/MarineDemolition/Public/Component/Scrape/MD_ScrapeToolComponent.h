@@ -885,6 +885,7 @@ private:
 	FVector GetScrapeFocusAimDirection() const;
 	FVector GetScrapeFocusVisualAimDirection() const;
 	void UpdateLocalScrapeVisualContactPose(float DeltaTime);
+	void ForceRefreshLocalScrapeVisualContactPose(bool bTeleportOrSnap);
 	void ResetScrapeVisualContactTracking(bool bPublishInvalidPose);
 	void BeginScrapeVisualStroke();
 	void EndScrapeVisualStroke();
@@ -1176,6 +1177,7 @@ private:
 	uint32 ScrapeVisualLockedLmbGeneration = 0;
 	double ScrapeVisualInvalidElapsedSeconds = 0.0;
 	uint64 LastScrapeVisualContactTraceFrame = MAX_uint64;
+	bool bForceNextScrapeVisualContactSnap = false;
 	struct FActiveAuthoritativeScrapePredictionResolution
 	{
 		FMD_ScrapeAuthoritativeVisualDelta VisualDelta;
