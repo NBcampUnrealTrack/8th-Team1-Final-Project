@@ -95,6 +95,31 @@ public:
 		double DeltaTime,
 		FRotator& Swing);
 
+	/**
+	 * 로컬 헤라 visual pose를 오른팔 IK 목표로 한 번에 변환한다.
+	 *
+	 * EffectorTransformComponentSpace는 GetMesh()의 component space에 있는
+	 * hand_r 본 목표이고 JointTargetLocationComponentSpace도 같은 공간이다.
+	 * AnimBP의 BlueprintUpdateAnimation에서 프레임당 한 번 호출한 뒤 Two Bone
+	 * IK/Control Rig에 두 값을 같은 component-space 계약으로 전달한다.
+	 *
+	 * Active는 유효 pose와 실제 상완/하완 길이 검증을 모두 통과할 때만 true다.
+	 * Reachable은 유효 접촉 자세가 있었지만 팔 길이 때문에 거부됐는지 구분한다.
+	 * TeleportOrSnap은 세션/스트로크/세대 단절 또는 큰 위치 점프로 회전 보간도
+	 * 생략한 프레임이다. PoseGeneration은 visual snapshot의 UpdateGeneration이다.
+	 * 이 함수는 회전 완화 상태를 갱신하므로 BlueprintPure가 아니다.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "MD|Scrape|Animation")
+	void GetScrapeAnimationHandIK(
+		double DeltaTime,
+		FTransform& EffectorTransformComponentSpace,
+		FVector& JointTargetLocationComponentSpace,
+		float& Alpha,
+		bool& Active,
+		bool& Reachable,
+		bool& TeleportOrSnap,
+		int64& PoseGeneration);
+
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	UMD_EquipHotbarComponent* GetHotbarComponent() const { return EquipHotbarComponent; }
 
@@ -336,6 +361,13 @@ private:
 	FTransform GetToolAttachTransform(
 		const UStaticMesh* ToolMesh,
 		const UMD_ToolDefinition* Tool) const;
+	FTransform GetToolAttachTransformFromOffset(
+		const UStaticMesh* ToolMesh,
+		const FTransform& AttachOffset) const;
+
+	/** 로컬 visual IK가 도구 자세의 단일 작성자인 동안 legacy aim/twist를 막는다. */
+	bool ShouldSuppressLegacyScrapeAnimation() const;
+	void ResetScrapeAnimationHandIKState();
 
 	/** 1인칭 팔은 소유 클라이언트에만 보이므로 그 경우에만 틱한다. */
 	void RefreshFirstPersonArmsTick();
@@ -405,6 +437,52 @@ private:
 	bool bScrapeAbilityInputCaptured = false;
 
 	bool bScrapeFocusInputContextAdded = false;
+
+	/** StaticMesh contact frame. X=surface normal, Z=stroke tangent 계약이다. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK")
+	FName ScrapeBladeTipSocketName = TEXT("Blade_Tip");
+
+	/** 새 메시가 Blade_Tip 대신 명시적 접촉 이름을 쓸 때의 fallback. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK")
+	FName ScrapeBladeContactFallbackSocketName = TEXT("Blade_Contact");
+
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK")
+	FName ScrapeUpperArmBoneName = TEXT("upperarm_r");
+
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK")
+	FName ScrapeLowerArmBoneName = TEXT("lowerarm_r");
+
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK")
+	FName ScrapeHandBoneName = TEXT("hand_r");
+
+	/** 접촉 위치는 즉시 쓰고 접촉점 주위의 회전만 이 시간 상수로 완화한다. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK",
+		meta = (ClampMin = "0.0", ClampMax = "0.2", Units = "s"))
+	float ScrapeHandIKRotationSmoothingSeconds = 0.05f;
+
+	/** 이보다 큰 유효 접촉점 점프는 이전 회전을 잇지 않고 즉시 스냅한다. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK",
+		meta = (ClampMin = "0.0", Units = "cm"))
+	float ScrapeHandIKTeleportDistanceCm = 30.0f;
+
+	/** 실제 상완+하완 길이 중 IK가 쓸 수 있는 비율. 1을 넘어 stretch하지 않는다. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK",
+		meta = (ClampMin = "0.5", ClampMax = "1.0"))
+	float ScrapeHandIKMaximumReachRatio = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK",
+		meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float ScrapeHandIKAlpha = 1.0f;
+
+	FQuat ScrapeHandIKContactWorldRotation = FQuat::Identity;
+	FVector LastScrapeHandIKContactWorldLocation = FVector::ZeroVector;
+	FVector LastScrapeHandIKStableWorldTangent = FVector::ZeroVector;
+	FVector LastScrapeHandIKJointDirectionComponent = FVector::ZeroVector;
+	uint64 LastScrapeHandIKFocusSessionId = 0;
+	uint32 LastScrapeHandIKStrokeGeneration = 0;
+	uint32 LastScrapeHandIKUpdateGeneration = 0;
+	bool bLastScrapeHandIKDirectionLocked = false;
+	bool bHasScrapeHandIKPose = false;
 
 	/** 180도 동치 blade 축이 프레임마다 뒤집히지 않도록 마지막 부호를 보존한다. */
 	FVector LastScrapeAnimationBladeWorldDirection = FVector::ZeroVector;
