@@ -17,6 +17,7 @@
 class AController;
 class AMD_Barnacle;
 class AMD_CuttableWall;
+class UPrimitiveComponent;
 class UMD_ScrapeSurfaceComponent;
 class AMD_TrashBin;
 class UNiagaraSystem;
@@ -879,7 +880,16 @@ private:
 	void TerminateScrapeFocusFromComponent();
 	void TerminateAuthoritativeScrapeFocus(
 		EMD_ScrapeFocusTerminationReason Reason);
+	FVector GetScrapeFocusAimDirectionForPointer(
+		const FVector2D& PointerNormalized) const;
 	FVector GetScrapeFocusAimDirection() const;
+	FVector GetScrapeFocusVisualAimDirection() const;
+	void UpdateLocalScrapeVisualContactPose(float DeltaTime);
+	void ResetScrapeVisualContactTracking(bool bPublishInvalidPose);
+	void BeginScrapeVisualStroke();
+	void EndScrapeVisualStroke();
+	void PublishInvalidScrapeVisualContactPose(bool bTeleportOrSnap);
+	void MarkScrapeVisualContactPoseUpdated();
 	bool IsCurrentScrapeFocusViewportAspectCompatible() const;
 	bool IsScrapeToolCurrentlyEligible() const;
 	bool BuildLocalAimSample(FMD_ScrapeAimNetSample& OutSample);
@@ -1148,6 +1158,24 @@ private:
 	 * 이 값을 쓰며 판정·예측 코드는 읽지 않는다.
 	 */
 	FMD_ScrapeVisualContactPose ScrapeVisualContactPose;
+	/** 로컬 시각 trace의 마지막 대상. pose snap 판정 외에는 소비하지 않는다. */
+	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> ScrapeVisualContactSurface;
+	TWeakObjectPtr<UPrimitiveComponent> ScrapeVisualContactPrimitive;
+	EMD_ScrapeSurfaceFace ScrapeVisualContactSurfaceFace =
+		EMD_ScrapeSurfaceFace::Front;
+	/** 현재 LMB stroke가 시작된 접점. 화면축 lock 전 이동 방향을 보강한다. */
+	FVector ScrapeVisualStrokeAnchorWorldLocation = FVector::ZeroVector;
+	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> ScrapeVisualStrokeAnchorSurface;
+	TWeakObjectPtr<UPrimitiveComponent> ScrapeVisualStrokeAnchorPrimitive;
+	uint64 ScrapeVisualStrokeAnchorFocusSessionId = 0;
+	uint32 ScrapeVisualStrokeAnchorLmbGeneration = 0;
+	bool bHasScrapeVisualStrokeAnchor = false;
+	/** (FocusSessionId, LmbStrokeGeneration) 동안 유지하는 180도 동치 월드 축. */
+	FVector ScrapeVisualLockedWorldTangent = FVector::ZeroVector;
+	uint64 ScrapeVisualLockedFocusSessionId = 0;
+	uint32 ScrapeVisualLockedLmbGeneration = 0;
+	double ScrapeVisualInvalidElapsedSeconds = 0.0;
+	uint64 LastScrapeVisualContactTraceFrame = MAX_uint64;
 	struct FActiveAuthoritativeScrapePredictionResolution
 	{
 		FMD_ScrapeAuthoritativeVisualDelta VisualDelta;

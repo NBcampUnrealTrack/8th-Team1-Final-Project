@@ -982,6 +982,8 @@ void UMD_ScrapeToolComponent::StartScraping()
 	{
 		++LmbStrokeGeneration;
 	}
+	UpdateLocalScrapeVisualContactPose(0.0f);
+	BeginScrapeVisualStroke();
 	ContaminationPaint.Stage3SubStrokeGeneration = 0;
 	AdvanceStage3SubStrokeGeneration();
 	ContaminationPaint.Stage3SampleSequence = 0;
@@ -1012,6 +1014,7 @@ void UMD_ScrapeToolComponent::StopScraping()
 {
 	const bool bWasScraping = bIsScraping;
 	bIsScraping = false;
+	EndScrapeVisualStroke();
 	StopScrapeLoopAudio();
 	ResetScrapeFocusPointerStrokeConstraint();
 	ResetStrokeTracking();
@@ -1096,6 +1099,10 @@ void UMD_ScrapeToolComponent::TickComponent(
 			TerminateScrapeFocusFromComponent();
 			return;
 		}
+	}
+	if (bLocallyControlled)
+	{
+		UpdateLocalScrapeVisualContactPose(DeltaTime);
 	}
 
 	if (bLocallyControlled && IsScrapeFocusReady())

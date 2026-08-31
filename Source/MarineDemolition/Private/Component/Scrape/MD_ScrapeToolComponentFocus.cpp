@@ -81,6 +81,8 @@ bool UMD_ScrapeToolComponent::TryBeginScrapeFocus()
 		? static_cast<float>(ScrapeFocusViewportSize.X)
 			/ static_cast<float>(ScrapeFocusViewportSize.Y)
 		: 16.0f / 9.0f;
+	ResetScrapeVisualContactTracking(true);
+	UpdateLocalScrapeVisualContactPose(0.0f);
 	SetComponentTickEnabled(true);
 	ServerBeginScrapeFocus(
 		ScrapeFocusSession.ActiveScrapeFocusSessionId,
@@ -700,6 +702,7 @@ void UMD_ScrapeToolComponent::EndScrapeFocusInternal(
 	ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
 	ResetScrapeFocusPointerStrokeConstraint();
 	ResetScrapeFocusSessionState();
+	ResetScrapeVisualContactTracking(true);
 	SetComponentTickEnabled(false);
 }
 
