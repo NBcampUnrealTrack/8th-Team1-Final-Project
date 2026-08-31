@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -55,6 +55,10 @@ public:
 	/** 서버 구매 결과를 현재 로컬 상점과 대사창에 반영하는 함수 */
 	void ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResult Result);
 
+	/** Blueprint가 Push하기 전에 전달한 상점 화면에 상인 데이터와 도메인 이벤트를 연결한다. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
+	void InitializePushedShop(UMD_ShopWidget* ShopWidget, UMD_MerchantMenuWidget* MenuWidget);
+
 protected:
 	/**
 	 * 트랜스폼 기준점. Mesh를 루트로 쓰면 Mesh의 상대 트랜스폼이 곧 액터 트랜스폼이 되어
@@ -71,13 +75,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
 	FText MerchantDisplayName = FText::FromString(TEXT("노라 브릭스"));
 
-	/** 인터랙트 시 열리는 루트 메뉴 (대화/상점/퀘스트/대출/나가기) */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
-	TSubclassOf<UMD_MerchantMenuWidget> MenuWidgetClass;
-
-	/** 메뉴에서 '상점'을 눌렀을 때 UI Manager에 요청할 화면 태그 */
+	/** UIManager가 인터랙트 시 Push할 상인 메뉴 화면 요청 태그 */
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant", meta = (Categories = "UI.Layer.GameMenu"))
-	FGameplayTag ShopWidgetTag;
+	FGameplayTag MenuWidgetTag;
 
 	/** 가격·해금 데이터 (`07` §4). 없으면 상점이 빈 목록으로 열린다. */
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
@@ -136,13 +136,8 @@ private:
 	UFUNCTION()
 	void HandleMenuExitRequested();
 
-	/** 메뉴에서 '상점'을 눌렀을 때 */
-	UFUNCTION()
-	void HandleShopRequested();
-
-	/** 상점에서 '뒤로'를 눌렀을 때 — 메뉴는 아래에 그대로 살아 있다. */
-	UFUNCTION()
-	void HandleShopBackRequested();
+	/** Common UI Stack에서 상점이 비활성화되면 상태 구독과 활성 화면 참조를 정리한다. */
+	void HandleShopDeactivated();
 
 	/** 가득 찬 품목 구매를 막았을 때 — 메뉴의 대사창으로 이유를 알린다. */
 	UFUNCTION()

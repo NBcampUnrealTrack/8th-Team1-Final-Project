@@ -18,7 +18,6 @@ class UMD_CommonButtonBase;
 class UMD_MerchantMenuWidget;
 class UMD_ShopItemCardWidget;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_ShopBackRequest);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopPurchaseRequest, FName, ItemId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopPurchaseRejected, FName, ItemId);
 
@@ -68,9 +67,6 @@ public:
 	void RefreshDisplay();
 
 	UPROPERTY(BlueprintAssignable, Category = "MD|Shop")
-	FMD_ShopBackRequest OnBackRequested;
-
-	UPROPERTY(BlueprintAssignable, Category = "MD|Shop")
 	FMD_ShopPurchaseRequest OnItemPurchaseRequested;
 
 	UPROPERTY(BlueprintAssignable, Category = "MD|Shop")
@@ -86,8 +82,6 @@ protected:
 	void BuildCategoryButtons();
 
 	void RefreshSelectedItem();
-
-	void HandleBackClicked();
 
 	void HandleCategoryAllClicked();
 
@@ -136,9 +130,6 @@ protected:
 	// 현재 상세 패널에 표시 중인 품목 식별자
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop")
 	FName SelectedItemId;
-
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CommonButtonBase> Btn_Back;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_CommonButtonBase> Btn_Buy;

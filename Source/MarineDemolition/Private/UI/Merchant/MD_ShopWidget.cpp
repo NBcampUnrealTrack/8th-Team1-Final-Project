@@ -15,14 +15,7 @@ void UMD_ShopWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
 
-	// 공통 버튼의 현재 활성화 주기 클릭 처리를 등록
-	if (IsValid(Btn_Back) == true)
-	{
-		auto& clickedEvent = Btn_Back->OnClicked();
-		clickedEvent.RemoveAll(this);
-		clickedEvent.AddUObject(this, &UMD_ShopWidget::HandleBackClicked);
-	}
-
+	// 구매 버튼의 현재 활성화 주기 클릭 처리를 등록한다.
 	if (IsValid(Btn_Buy) == true)
 	{
 		auto& clickedEvent = Btn_Buy->OnClicked();
@@ -45,14 +38,10 @@ void UMD_ShopWidget::NativeOnActivated()
 
 void UMD_ShopWidget::NativeOnDeactivated()
 {
-	// 현재 상점 인스턴스가 등록한 버튼 연결 제거
-	TArray<UMD_CommonButtonBase*> buttons = { Btn_Back, Btn_Buy };
-	for (UMD_CommonButtonBase* button : buttons)
+	// 현재 상점 인스턴스가 등록한 구매 버튼 연결을 제거한다.
+	if (IsValid(Btn_Buy) == true)
 	{
-		if (IsValid(button) == true)
-		{
-			button->OnClicked().RemoveAll(this);
-		}
+		Btn_Buy->OnClicked().RemoveAll(this);
 	}
 
 	// 상점 종료 후 기존 상인 메뉴 패널 복원
@@ -367,12 +356,6 @@ void UMD_ShopWidget::BuildCategoryButtons()
 		categoryButton->OnClicked().AddUObject(this, &UMD_ShopWidget::HandleCategoryClicked, category);
 		SB_Categories->AddChild(categoryButton);
 	}
-}
-
-void UMD_ShopWidget::HandleBackClicked()
-{
-	// 상점 화면 닫기 요청 전달
-	OnBackRequested.Broadcast();
 }
 
 void UMD_ShopWidget::HandleCategoryAllClicked()
