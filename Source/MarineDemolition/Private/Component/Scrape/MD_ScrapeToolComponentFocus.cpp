@@ -481,10 +481,47 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 		return;
 	}
 
+	const uint64 ExistingFocusSessionId =
+		ScrapeFocusSession.ActiveScrapeFocusSessionId;
+	const bool bHasExistingServerFocusSession = ExistingFocusSessionId != 0
+		&& (ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted
+			|| ScrapeFocusState != EMD_ScrapeFocusState::Free);
 	const bool bIsSameAcceptedSession =
 		ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted
 		&& FocusSessionId != 0
-		&& FocusSessionId == ScrapeFocusSession.ActiveScrapeFocusSessionId;
+		&& FocusSessionId == ExistingFocusSessionId;
+	if (bHasExistingServerFocusSession
+		&& FocusSessionId != 0
+		&& FocusSessionId != ExistingFocusSessionId)
+	{
+		UE_LOG(
+			LogTemp,
+			Warning,
+			TEXT("[ScrapeFocus][Server][%s] Conflicting Begin rejected (Existing=%llu, Requested=%llu, State=%d)"),
+			*GetNameSafe(GetOwner()),
+			static_cast<unsigned long long>(ExistingFocusSessionId),
+			static_cast<unsigned long long>(FocusSessionId),
+			static_cast<int32>(ScrapeFocusState));
+		// A different id must never reach approval/adoption or mutate the frozen
+		// sequence. Treat it like a same-session protocol violation and terminate
+		// both possible owning-client identities (old latch or newly forged latch).
+		if (ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted)
+		{
+			TerminateAuthoritativeScrapeFocus(
+				EMD_ScrapeFocusTerminationReason::ProtocolViolation);
+		}
+		else
+		{
+			ClientTerminateScrapeFocus(
+				ExistingFocusSessionId,
+				EMD_ScrapeFocusTerminationReason::ProtocolViolation);
+			EndScrapeFocusInternal(false);
+		}
+		ClientTerminateScrapeFocus(
+			FocusSessionId,
+			EMD_ScrapeFocusTerminationReason::ProtocolViolation);
+		return;
+	}
 	if (!IsScrapeFocusBeginPayloadValid(
 			FocusSessionId,
 			RequestedViewRotation,
