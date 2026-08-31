@@ -174,10 +174,10 @@ void AMD_Character::GetScrapeAnimationAim(
 		: GetActorForwardVector().ToOrientationQuat();
 	AimDelta = (AimWorldDirection.ToOrientationQuat()
 		* CurrentHandAim.Inverse()).Rotator();
-	// 소유 클라이언트는 예측 상태를, 서버와 simulated proxy는 서버 확정 상태를 쓴다.
-	// bIsScraping은 non-owner에게만 복제되므로 FocusReady 접촉만으로 원격 긁기
-	// 포즈가 켜지지 않는다.
-	Active = ScrapeToolComponent->IsScraping();
+	// 소유 클라이언트의 FocusReady와 예측 긁기는 즉시 포즈에 반영한다.
+	// FocusReady는 복제되지 않으므로 simulated proxy는 서버 확정 긁기만 쓴다.
+	Active = ScrapeToolComponent->IsScraping()
+		|| ScrapeToolComponent->IsScrapeFocusReady();
 }
 
 void AMD_Character::UpdateScrapeAnimationBlade(
@@ -206,10 +206,13 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 		LastScrapeAnimationBladeWorldDirection = BladeWorldDirection;
 		bHasScrapeAnimationBladeDirection = !BladeWorldDirection.IsNearlyZero();
 	}
-	else if (!Active)
+	else
 	{
 		LastScrapeAnimationBladeWorldDirection = FVector::ZeroVector;
 		bHasScrapeAnimationBladeDirection = false;
+		LastScrapeAnimationTwistDegrees = 0.0f;
+		bHasScrapeAnimationTwist = false;
+		return;
 	}
 
 	if (!Active)
