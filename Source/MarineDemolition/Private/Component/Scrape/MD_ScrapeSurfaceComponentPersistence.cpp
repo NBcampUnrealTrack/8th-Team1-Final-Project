@@ -12,18 +12,18 @@
 
 namespace
 {
-	constexpr double RecoveryCarrierComparisonTolerance = 1.0e-9;
+	constexpr double PersistenceRecoveryCarrierComparisonTolerance = 1.0e-9;
 
 	bool AreRecoveryCarrierAmountsEqual(
 		const double A,
 		const double B)
 	{
 		return FMath::Abs(A - B)
-			<= RecoveryCarrierComparisonTolerance
+			<= PersistenceRecoveryCarrierComparisonTolerance
 				* FMath::Max(1.0, FMath::Max(FMath::Abs(A), FMath::Abs(B)));
 	}
 
-	bool TryAppendRecoveryLots(
+	bool TryAppendPersistenceRecoveryLots(
 		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
 		const TConstArrayView<FMD_ScrapeRecoveryLot> LotsToAppend)
 	{
@@ -665,7 +665,7 @@ int32 UMD_ScrapeSurfaceComponent::DropContaminationItems(const EMD_ScrapeSurface
 			return 0;
 		}
 	}
-	else if (!TryAppendRecoveryLots(IncomingRecoveryLots, RecoveryLots))
+	else if (!TryAppendPersistenceRecoveryLots(IncomingRecoveryLots, RecoveryLots))
 	{
 		return 0;
 	}
@@ -699,7 +699,7 @@ int32 UMD_ScrapeSurfaceComponent::DropContaminationItems(const EMD_ScrapeSurface
 	if (!TryReconcilePendingRecoveryLots(
 			WorkingPendingLots,
 			PendingAmount)
-		|| !TryAppendRecoveryLots(
+		|| !TryAppendPersistenceRecoveryLots(
 			WorkingPendingLots,
 			IncomingRecoveryLots))
 	{
@@ -788,7 +788,7 @@ int32 UMD_ScrapeSurfaceComponent::DropContaminationItems(const EMD_ScrapeSurface
 		if (!AreRecoveryCarrierAmountsEqual(
 				ItemCarrierAmount,
 				PendingCarrierCommittedToItem)
-			|| !TryAppendRecoveryLots(
+			|| !TryAppendPersistenceRecoveryLots(
 				SpawnedLotsAfterSpawn,
 				ItemRecoveryLots))
 		{
@@ -916,7 +916,7 @@ UMD_ScrapeSurfaceComponent::CommitContaminationPhysicalDrop(
 			return CommitResult;
 		}
 	}
-	else if (!TryAppendRecoveryLots(
+	else if (!TryAppendPersistenceRecoveryLots(
 		NetRecoveryLots,
 		ScrapeResult.NetRemovedRecoveryLots))
 	{
