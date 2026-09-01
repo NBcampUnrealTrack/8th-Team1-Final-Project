@@ -4,6 +4,7 @@
 #include "UI/Merchant/MD_ShopItemCardWidget.h"
 
 #include "Components/TextBlock.h"
+#include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/Texture2D.h"
 
 void UMD_ShopItemCardWidget::SetItem(const FMD_ShopItem& InItem, bool bInOwned)
@@ -30,10 +31,24 @@ void UMD_ShopItemCardWidget::RefreshDisplay()
 		Txt_CostCredit->SetText(priceText);
 	}
 
-	// 품목 아이콘을 동기 로드해 공통 버튼 이미지에 적용
-	UTexture2D* iconTexture = Item.Icon.LoadSynchronous();
+	// 장비 정의에 저장된 아이콘을 상점 카드의 단일 이미지 원본으로 조회
+	UTexture2D* iconTexture = nullptr;
+	if (IsValid(Item.EquipmentDefinition) == true)
+	{
+		iconTexture = Item.EquipmentDefinition->ToolIcon;
+	}
+
+	// 유효한 장비 아이콘을 공통 버튼 이미지에 적용
 	if (IsValid(iconTexture) == true)
 	{
-		SetContentImageResourceObject(iconTexture);
+		// 카드에 설정된 크기와 색상을 유지할 아이콘 Brush 복사
+		FSlateBrush itemIconBrush = GetContentImage();
+
+		// 아이템 아이콘을 카드 Brush의 이미지 리소스로 지정
+		itemIconBrush.SetResourceObject(iconTexture);
+		itemIconBrush.DrawAs = ESlateBrushDrawType::Image;
+
+		// 갱신한 Brush를 Brush_ButtonImage와 바인딩된 Image에 함께 적용
+		SetContentImage(itemIconBrush);
 	}
 }

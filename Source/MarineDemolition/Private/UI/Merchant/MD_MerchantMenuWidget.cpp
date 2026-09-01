@@ -4,21 +4,10 @@
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
 
 #include "Components/TextBlock.h"
-#include "Player/MD_PlayerController.h"
 
 void UMD_MerchantMenuWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
-
-	// 공통 GameMenu가 입력 모드를 관리하므로 상인 메뉴는 게임 HUD만 숨긴다.
-	if (APlayerController* PC = GetOwningPlayer())
-	{
-		// 메뉴가 화면을 덮는 동안 플레이 HUD를 숨긴다.
-		if (AMD_PlayerController* MDPlayerController = Cast<AMD_PlayerController>(PC))
-		{
-			MDPlayerController->SetGameplayHUDVisible(false);
-		}
-	}
 
 	RefreshDisplay();
 }
@@ -55,17 +44,6 @@ void UMD_MerchantMenuWidget::RefreshDisplay()
 
 void UMD_MerchantMenuWidget::CloseMenu()
 {
-	// 상인 메뉴를 실제로 닫을 때 게임 HUD를 복구한다.
-	APlayerController* PC = GetOwningPlayer();
-	if (IsValid(PC) == true)
-	{
-		AMD_PlayerController* MDPlayerController = Cast<AMD_PlayerController>(PC);
-		if (IsValid(MDPlayerController) == true)
-		{
-			MDPlayerController->SetGameplayHUDVisible(true);
-		}
-	}
-
 	// Common UI Stack의 표준 비활성화 경로로 상인 메뉴를 닫는다.
 	DeactivateWidget();
 }

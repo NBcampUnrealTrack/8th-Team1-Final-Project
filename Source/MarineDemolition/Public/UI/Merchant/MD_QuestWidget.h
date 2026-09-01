@@ -10,6 +10,7 @@
 #include "MD_QuestWidget.generated.h"
 
 class UImage;
+class UCommonButtonGroupBase;
 class UScrollBox;
 class UTextBlock;
 class UMD_CommonButtonBase;
@@ -57,6 +58,10 @@ protected:
 	// 선택 상태 갱신과 재구성 후 선택 복원에 사용하는 생성 카드 목록
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMD_QuestCardWidget>> QuestCards;
+
+	// 동적으로 생성한 퀘스트 카드 중 항상 하나만 선택되도록 관리하는 그룹
+	UPROPERTY(Transient)
+	TObjectPtr<UCommonButtonGroupBase> QuestCardButtonGroup;
 
 	// 우측 상세 패널에 현재 표시 중인 카드 참조
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "MD|Quest")

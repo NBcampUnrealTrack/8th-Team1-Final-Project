@@ -6,7 +6,9 @@
 #include "Components/Image.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
+#include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/Texture2D.h"
+#include "Groups/CommonButtonGroupBase.h"
 #include "UI/MD_CommonButtonBase.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
 #include "UI/Merchant/MD_ShopItemCardWidget.h"
@@ -130,6 +132,17 @@ void UMD_ShopWidget::RebuildItemList()
 		return;
 	}
 
+	// 모든 상점 카드를 동일한 선택 필수 그룹에 등록하기 위한 그룹 준비
+	if (IsValid(ItemCardButtonGroup) == false)
+	{
+		ItemCardButtonGroup = NewObject<UCommonButtonGroupBase>(this);
+	}
+	if (IsValid(ItemCardButtonGroup) == true)
+	{
+		ItemCardButtonGroup->RemoveAll();
+		ItemCardButtonGroup->SetSelectionRequired(true);
+	}
+
 	// 기존 동적 카드 제거
 	WB_ItemEntries->ClearChildren();
 
@@ -145,6 +158,9 @@ void UMD_ShopWidget::RebuildItemList()
 		RefreshSelectedItem();
 		return;
 	}
+
+	// 기존 상세 품목과 일치하는 카드의 선택 그룹 인덱스 저장
+	int32 selectedItemCardIndex = INDEX_NONE;
 
 	// 카탈로그 순서대로 현재 분류 품목 카드 생성
 	for (FMD_ShopItem item : Catalog->Items)
@@ -172,6 +188,11 @@ void UMD_ShopWidget::RebuildItemList()
 
 		// 카드 데이터 설정 후 기본 버튼 클릭에 품목 선택 처리 연결
 		itemCard->SetItem(item, ownedItem);
+		itemCard->SetIsSelectable(true);
+		if (IsValid(ItemCardButtonGroup) == true)
+		{
+			ItemCardButtonGroup->AddWidget(itemCard);
+		}
 		itemCard->OnClicked().AddUObject(this, &UMD_ShopWidget::HandleItemSelected, item.ItemId);
 		WB_ItemEntries->AddChild(itemCard);
 
@@ -179,6 +200,24 @@ void UMD_ShopWidget::RebuildItemList()
 		if (SelectedItemId.IsNone() == true)
 		{
 			SelectedItemId = item.ItemId;
+		}
+
+		// 상세 패널의 현재 품목과 같은 카드의 선택 인덱스 저장
+		if (item.ItemId == SelectedItemId)
+		{
+			if (IsValid(ItemCardButtonGroup) == true)
+			{
+				selectedItemCardIndex = ItemCardButtonGroup->FindButtonIndex(itemCard);
+			}
+		}
+	}
+
+	// 목록 재생성 전 상세 패널에 표시하던 품목 카드 선택 복원
+	if (IsValid(ItemCardButtonGroup) == true)
+	{
+		if (selectedItemCardIndex != INDEX_NONE)
+		{
+			ItemCardButtonGroup->SelectButtonAtIndex(selectedItemCardIndex, false);
 		}
 	}
 
@@ -263,7 +302,14 @@ void UMD_ShopWidget::RefreshSelectedItem()
 
 	if (IsValid(Img_DetailIcon) == true)
 	{
-		UTexture2D* iconTexture = selectedItem.Icon.LoadSynchronous();
+		// 선택 품목의 장비 정의에서 상세 패널 아이콘 조회
+		UTexture2D* iconTexture = nullptr;
+		if (IsValid(selectedItem.EquipmentDefinition) == true)
+		{
+			iconTexture = selectedItem.EquipmentDefinition->ToolIcon;
+		}
+
+		// 장비 정의에 아이콘이 없으면 기존 상세 아이콘 제거
 		Img_DetailIcon->SetBrushFromTexture(iconTexture);
 	}
 

@@ -6,7 +6,6 @@
 #include "Engine/DataAsset.h"
 #include "MD_ShopCatalog.generated.h"
 
-class UTexture2D;
 class UMD_ToolDefinition;
 
 /** 서버 구매 검증 결과를 클라이언트 UI에 전달하기 위한 상태 */
@@ -70,9 +69,6 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 	/** `04` §3: 아이템 카드에 "한 줄 기능 설명"이 필수다. 상세는 `08`. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop", meta = (MultiLine = "false"))
 	FText Description;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop")
-	TSoftObjectPtr<UTexture2D> Icon;
 
 	/** 구매 시 기존 핫바 슬롯의 장비를 교체하기 위한 장비 정의 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Equipment")

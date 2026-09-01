@@ -12,6 +12,7 @@
 #include "MD_ShopWidget.generated.h"
 
 class UImage;
+class UCommonButtonGroupBase;
 class UPanelWidget;
 class UTextBlock;
 class UMD_CommonButtonBase;
@@ -130,6 +131,10 @@ protected:
 	// 현재 상세 패널에 표시 중인 품목 식별자
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop")
 	FName SelectedItemId;
+
+	// 동적으로 생성한 상점 카드 중 항상 하나만 선택되도록 관리하는 그룹
+	UPROPERTY(Transient)
+	TObjectPtr<UCommonButtonGroupBase> ItemCardButtonGroup;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_CommonButtonBase> Btn_Buy;

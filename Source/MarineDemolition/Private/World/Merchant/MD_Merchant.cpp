@@ -699,7 +699,30 @@ void AMD_Merchant::RefreshQuestWidgetFromComponent()
 		return;
 	}
 
-	ActiveQuestWidget->SetMainQuests(MerchantComponent->GetMainQuests());
+	// 현재 일차와 일치하는 메인 퀘스트를 찾기 위한 복제 상태 조회
+	int32 CurrentDay = MerchantComponent->GetCurrentDay();
+	TArray<FMD_MainQuestState> MainQuests = MerchantComponent->GetMainQuests();
+	TArray<FMD_MainQuestState> CurrentDayMainQuests;
+
+	// 잠긴 미래 퀘스트와 이전 일차 퀘스트를 제외하고 당일 메인 퀘스트 한 건만 전달
+	for (FMD_MainQuestState& MainQuest : MainQuests)
+	{
+		if (MainQuest.UnlockDay != CurrentDay)
+		{
+			continue;
+		}
+
+		if (MainQuest.Status == EMD_MainQuestStatus::Locked)
+		{
+			continue;
+		}
+
+		CurrentDayMainQuests.Add(MainQuest);
+		break;
+	}
+
+	// 퀘스트 화면에는 당일 진행 대상 메인 퀘스트만 적용
+	ActiveQuestWidget->SetMainQuests(CurrentDayMainQuests);
 	ActiveQuestWidget->SetRepeatQuests(MerchantComponent->GetRepeatQuests());
 }
 

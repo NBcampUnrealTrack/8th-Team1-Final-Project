@@ -75,6 +75,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
 	void SetRepeatQuest(int32 InQuestIndex, const FMD_RepeatQuestState& InQuestState);
 
+	// 카드 종류 적용 후 Blueprint에서 추가 연출을 구현하는 이벤트
+	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category = "MD|Quest")
+	void SetQuestType(bool bInMainQuest);
+
 	// 현재 카드가 메인 퀘스트를 표시하는지 반환하는 함수
 	UFUNCTION(BlueprintPure, Category = "MD|Quest")
 	FORCEINLINE bool GetIsMainQuest() { return bMainQuest; }

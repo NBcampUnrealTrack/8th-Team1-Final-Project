@@ -88,4 +88,7 @@ void UMD_QuestCardWidget::RefreshDisplay()
 			Img_QuestType->SetBrush(QuestIcon);
 		}
 	}
+
+	// 네이티브 표시 갱신 후 Blueprint에서 종류별 추가 연출 실행
+	SetQuestType(bMainQuest);
 }

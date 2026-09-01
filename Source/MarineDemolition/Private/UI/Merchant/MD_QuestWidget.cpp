@@ -4,6 +4,7 @@
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
+#include "Groups/CommonButtonGroupBase.h"
 #include "UI/MD_CommonButtonBase.h"
 #include "UI/Merchant/MD_QuestCardWidget.h"
 
@@ -62,6 +63,12 @@ void UMD_QuestWidget::NativeDestruct()
 		}
 	}
 
+	// 위젯 수명 종료 후 생성 카드가 선택 그룹에 남지 않도록 참조 해제
+	if (IsValid(QuestCardButtonGroup) == true)
+	{
+		QuestCardButtonGroup->RemoveAll();
+	}
+
 	Super::NativeDestruct();
 }
 
@@ -98,13 +105,28 @@ void UMD_QuestWidget::SelectQuestCard(UMD_QuestCardWidget* QuestCard)
 		}
 	}
 
-	// 한 번에 하나의 카드만 선택 상태를 갖도록 전체 카드에 반영
-	for (UMD_QuestCardWidget* CurrentQuestCard : QuestCards)
+	// 선택 필수 그룹에서 대상 카드만 선택하여 나머지 카드를 자동 해제
+	if (IsValid(QuestCardButtonGroup) == true)
 	{
-		if (IsValid(CurrentQuestCard) == true)
+		if (IsValid(SelectedQuestCard) == true)
 		{
-			bool bSelected = CurrentQuestCard == SelectedQuestCard;
-			CurrentQuestCard->SetIsSelected(bSelected, false);
+			int32 QuestCardIndex = QuestCardButtonGroup->FindButtonIndex(SelectedQuestCard);
+			if (QuestCardIndex != INDEX_NONE)
+			{
+				QuestCardButtonGroup->SelectButtonAtIndex(QuestCardIndex, false);
+			}
+		}
+	}
+	else
+	{
+		// 그룹 생성 실패 시에도 기존 단일 선택 동작을 유지하는 예비 처리
+		for (UMD_QuestCardWidget* CurrentQuestCard : QuestCards)
+		{
+			if (IsValid(CurrentQuestCard) == true)
+			{
+				bool bSelected = CurrentQuestCard == SelectedQuestCard;
+				CurrentQuestCard->SetIsSelected(bSelected, false);
+			}
 		}
 	}
 
@@ -123,6 +145,17 @@ void UMD_QuestWidget::RebuildQuestList()
 	bool bHadSelection = IsValid(SelectedQuestCard) == true;
 	bool bSelectedMainQuest = bHadSelection == true ? SelectedQuestCard->GetIsMainQuest() : true;
 	int32 SelectedQuestIndex = bHadSelection == true ? SelectedQuestCard->GetQuestIndex() : INDEX_NONE;
+
+	// 모든 퀘스트 카드를 동일한 선택 필수 그룹에 등록하기 위한 그룹 준비
+	if (IsValid(QuestCardButtonGroup) == false)
+	{
+		QuestCardButtonGroup = NewObject<UCommonButtonGroupBase>(this);
+	}
+	if (IsValid(QuestCardButtonGroup) == true)
+	{
+		QuestCardButtonGroup->RemoveAll();
+		QuestCardButtonGroup->SetSelectionRequired(true);
+	}
 
 	// 기존 카드의 클릭 연결을 해제하고 디자이너 목업을 실제 데이터 카드로 교체
 	for (UMD_QuestCardWidget* QuestCard : QuestCards)
@@ -153,6 +186,11 @@ void UMD_QuestWidget::RebuildQuestList()
 		}
 
 		QuestCard->SetMainQuest(QuestIndex, MainQuests[QuestIndex]);
+		// 메인 퀘스트 카드를 단일 선택 그룹에 등록
+		if (IsValid(QuestCardButtonGroup) == true)
+		{
+			QuestCardButtonGroup->AddWidget(QuestCard);
+		}
 		QuestCard->OnClicked().AddUObject(this, &UMD_QuestWidget::HandleQuestCardClicked, QuestCard);
 		SB_QuestList->AddChild(QuestCard);
 		QuestCards.Add(QuestCard);
@@ -168,6 +206,11 @@ void UMD_QuestWidget::RebuildQuestList()
 		}
 
 		QuestCard->SetRepeatQuest(QuestIndex, RepeatQuests[QuestIndex]);
+		// 반복 퀘스트 카드를 메인 퀘스트 카드와 같은 단일 선택 그룹에 등록
+		if (IsValid(QuestCardButtonGroup) == true)
+		{
+			QuestCardButtonGroup->AddWidget(QuestCard);
+		}
 		QuestCard->OnClicked().AddUObject(this, &UMD_QuestWidget::HandleQuestCardClicked, QuestCard);
 		SB_QuestList->AddChild(QuestCard);
 		QuestCards.Add(QuestCard);
