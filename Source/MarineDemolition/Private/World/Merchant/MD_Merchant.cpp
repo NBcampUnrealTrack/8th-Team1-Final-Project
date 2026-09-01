@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "World/Merchant/MD_Merchant.h"
@@ -709,7 +709,7 @@ void AMD_Merchant::RefreshLoreWidgetFromComponent()
 	// 수집 원장의 식별자와 화면 표시 정의를 연결하기 위한 로어 카탈로그
 	UMD_LoreCatalog* LoreCatalog = IsValid(ExpeditionSite) == true ? ExpeditionSite->LoreCatalog : nullptr;
 
-	ActiveQuestWidget->SetLoreData(LoreCatalog, LoreComponent->GetSiteProgressList());
+	ActiveQuestWidget->SetLoreData(LoreCatalog, LoreComponent->GetDiscoveredLoreAssetIds());
 }
 
 void AMD_Merchant::RefreshShopWidgetFromComponent()

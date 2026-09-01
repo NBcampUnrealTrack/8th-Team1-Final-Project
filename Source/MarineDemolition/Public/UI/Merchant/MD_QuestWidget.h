@@ -49,19 +49,15 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
 	void SetRepeatQuests(const TArray<FMD_RepeatQuestState>& InRepeatQuests);
 
-	/** 로어 전용 복제 원장에서 받은 현장별 수집 정보를 코덱스 탭에 적용하는 함수 */
-	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
-	void SetLoreProgress(const TArray<FMD_LoreSiteProgress>& InSiteProgressList);
-
 	/** 현재 현장의 카탈로그와 로어 수집 원장을 코덱스 탭에 함께 적용하는 함수 */
 	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
-	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FMD_LoreSiteProgress>& InSiteProgressList);
+	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds);
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
 	void SelectTab(EMD_QuestTab InTab);
 
 	UFUNCTION(BlueprintPure, Category = "MD|Quest")
-	EMD_QuestTab GetSelectedTab() const { return SelectedTab; }
+	FORCEINLINE EMD_QuestTab GetSelectedTab() const { return SelectedTab; }
 
 	/** 탭 표시 + 메인/반복 목록을 모두 다시 그린다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
@@ -131,9 +127,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest")
 	TArray<FMD_RepeatQuestState> RepeatQuests;
 
-	/** 메인·반복 퀘스트와 분리된 코덱스 탭 표시용 현장별 수집 정보 */
+	/** 메인·반복 퀘스트와 분리된 코덱스 탭 표시용 전역 수집 정보 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
-	TArray<FMD_LoreSiteProgress> LoreSiteProgressList;
+	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds;
 
 	/** 현재 퀘스트 화면에서 표시할 현장의 정적 로어 목록 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
