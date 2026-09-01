@@ -32,8 +32,10 @@ namespace
 	 */
 	FText MakeCompletionSubtitle(const FText& Subtitle)
 	{
+		// static으로 두면 첫 호출 시점의 언어로 굳는다. 진행 문구는 호출부에서 매번 새로
+		// 만들어지므로, 여기만 굳으면 언어 변경 후 완료 문구만 옛 언어로 남는다.
 		struct FMapping { const TCHAR* Prefix; FText Completion; };
-		static const FMapping Mappings[] =
+		const FMapping Mappings[] =
 		{
 			{TEXT("CREW ASSEMBLING"),      LOCTEXT("CrewAssembled",  "CREW ASSEMBLED • 잠수팀 준비 완료")},
 			{TEXT("DIVE IN PROGRESS"),     LOCTEXT("DiveReady",      "DIVE READY • 잠수 준비 완료")},
@@ -105,7 +107,7 @@ void UMD_LoadingScreenSubsystem::BeginLoadingScreen(const FText& Subtitle)
 	if (IsLoadingScreenActive()) { return; }
 
 	// Common UI Transition이 이미 인트로를 재생 중이면 같은 연출을 Slate에서 다시 시작하지 않는다.
-	if (IsCommonTransitionScreenActive() == true) { return; }
+	if (IsCommonTransitionScreenActive()) { return; }
 
 	StartLoadingVisuals(Subtitle, /*bSkipIntro=*/false);
 	SetLoadingTimer(IntroTimerHandle, &ThisClass::HandleIntroAnimationFinished, MD_LoadingScreen::IntroDurationSeconds);

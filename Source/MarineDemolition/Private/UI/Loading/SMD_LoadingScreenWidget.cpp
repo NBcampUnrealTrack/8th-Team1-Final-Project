@@ -101,6 +101,31 @@ namespace
 	constexpr int32 VoyageLayerSpan = 5;
 	constexpr int32 TextLayer = VoyageLayer + VoyageLayerSpan;
 
+	// 인트로 두 단계. 배경이 먼저 화면을 덮고 그 위로 문구가 뒤따라 나타난다.
+	constexpr float BackgroundFadeEndSeconds = 0.62f;
+	constexpr float TextFadeStartSeconds = 0.56f;
+	constexpr float TextFadeEndSeconds = 0.84f;
+	// 완료 교차 전환. 진행 문구가 빠지는 사이 완료 문구가 겹쳐 올라오고 안착하며 한 번 부푼다.
+	constexpr float CompletionExitEndSeconds = 0.18f;
+	constexpr float CompletionEnterStartSeconds = 0.12f;
+	constexpr float CompletionEnterEndSeconds = 0.38f;
+	constexpr float CompletionPulseSeconds = 0.48f;
+	constexpr float CompletionPulseScale = 0.10f;
+
+	// 두 연출은 서브시스템이 정한 단계 길이 안에서 끝나야 한다. 문구가 다 나타나기 전에
+	// 트래블이 시작되면 블로킹 첫 프레임에 문구가 흐릿하고, 완료 연출이 표시 시간을 넘기면
+	// 안착하기도 전에 outro가 걷어간다.
+	static_assert(TextFadeEndSeconds <= MD_LoadingScreen::IntroDurationSeconds,
+		"인트로가 끝나기 전에 문구가 완전히 나타나 있어야 한다");
+	static_assert(CompletionEnterEndSeconds <= MD_LoadingScreen::CompletionDisplaySeconds
+		&& CompletionPulseSeconds <= MD_LoadingScreen::CompletionDisplaySeconds,
+		"완료 연출은 COMPLETE 표시 시간 안에 끝나야 한다");
+
+	// 진행/완료 문구는 같은 자리에서 교차 전환되므로 앵커와 제목 색을 한 벌만 둔다.
+	constexpr float TitleAnchorY = 0.78f;
+	constexpr float SubtitleAnchorY = 0.845f;
+	const FLinearColor TitleColor(0.98f, 1.0f, 1.0f);
+
 	// 상단의 옅은 하늘색이 수평선의 복숭아빛으로 이어지고, 바다는 맑은 청색으로 식도록 해
 	// 일출 직후의 밝기를 만든다. 팔레트는 알파 없이 정의하고 WithAlpha로 페이드만 얹는다.
 	const FLinearColor SkyTopColor(0.470f, 0.710f, 0.850f);
@@ -207,11 +232,11 @@ namespace
 void SMD_LoadingScreenWidget::Construct(const FArguments& InArgs)
 {
 	VisualState = InArgs._VisualState;
+	// ImageSize는 두지 않는다. 두 브러시 모두 그릴 때 PaintGeometry로 크기를 직접 넘기므로
+	// 브러시의 크기 값은 쓰이지 않고, 텍스처를 교체하면 오히려 어긋난 값으로 남는다.
 	ShipBrush.SetResourceObject(InArgs._ShipTexture);
-	ShipBrush.ImageSize = FVector2D(462.0f, 146.0f);
 	ShipBrush.DrawAs = ESlateBrushDrawType::Image;
 	BeaconBrush.SetResourceObject(InArgs._BeaconTexture);
-	BeaconBrush.ImageSize = FVector2D(128.0f, 128.0f);
 	BeaconBrush.DrawAs = ESlateBrushDrawType::Image;
 
 	TitleFont = InArgs._Font
@@ -251,8 +276,8 @@ int32 SMD_LoadingScreenWidget::OnPaint(
 	// 텍스트가 뒤이어 등장한다. 배경이 먼저 덮여야 트래블 순간이 가려진다.
 	const float Time = static_cast<float>(VisualState->GetElapsedSeconds());
 	const float OverallOpacity = VisualState->GetOverallOpacity();
-	const float BackgroundOpacity = SmoothRange(Time, 0.0f, 0.62f) * OverallOpacity;
-	const float TextOpacity = SmoothRange(Time, 0.56f, 0.84f) * OverallOpacity;
+	const float BackgroundOpacity = SmoothRange(Time, 0.0f, BackgroundFadeEndSeconds) * OverallOpacity;
+	const float TextOpacity = SmoothRange(Time, TextFadeStartSeconds, TextFadeEndSeconds) * OverallOpacity;
 
 	// 배경은 하늘/수평선/바다 그라데이션 위에 구름 띠와 수평선 아래 너울만 얹는다.
 	// 항로와 배는 배경 수평선보다 조금 아래에 두어 바다 위를 이동하는 모습으로 읽히게 한다.
@@ -271,21 +296,24 @@ int32 SMD_LoadingScreenWidget::OnPaint(
 	// 완료 연출은 교차 전환이다. 기존 문구가 위로 빠지고(LoadingExit) 완료 문구가
 	// 아래에서 올라와 안착한다(Entrance). Pulse는 안착 순간의 scale 보정.
 	const float CompletionElapsed = VisualState->GetCompletionElapsedSeconds();
-	const float LoadingExit = SmoothRange(CompletionElapsed, 0.0f, 0.18f);
-	const float Entrance = SmoothRange(CompletionElapsed, 0.12f, 0.38f);
-	const float Pulse = FMath::Sin(FMath::Clamp(CompletionElapsed / 0.48f, 0.0f, 1.0f) * PI) * 0.10f;
+	const float LoadingExit = SmoothRange(CompletionElapsed, 0.0f, CompletionExitEndSeconds);
+	const float Entrance = SmoothRange(CompletionElapsed, CompletionEnterStartSeconds, CompletionEnterEndSeconds);
+	const float Pulse = FMath::Sin(FMath::Clamp(CompletionElapsed / CompletionPulseSeconds, 0.0f, 1.0f) * PI)
+		* CompletionPulseScale;
 
 	const FTextLayer TextLayers[] =
 	{
 		{LOCTEXT("LoadingTitle", "LOADING"), TitleFont,
-			FLinearColor(0.98f, 1.0f, 1.0f, TextOpacity * (1.0f - LoadingExit)), 0.78f, 1.0f, -18.0f * LoadingExit},
+			WithAlpha(TitleColor, TextOpacity * (1.0f - LoadingExit)), TitleAnchorY, 1.0f, -18.0f * LoadingExit},
 		{VisualState->Subtitle, SubtitleFont,
-			FLinearColor(0.58f, 0.76f, 0.82f, 0.98f * TextOpacity * (1.0f - LoadingExit)), 0.845f, 1.0f, -12.0f * LoadingExit},
+			FLinearColor(0.58f, 0.76f, 0.82f, 0.98f * TextOpacity * (1.0f - LoadingExit)),
+			SubtitleAnchorY, 1.0f, -12.0f * LoadingExit},
 		{LOCTEXT("CompleteTitle", "ARRIVED"), TitleFont,
-			FLinearColor(0.98f, 1.0f, 1.0f, TextOpacity * Entrance), 0.78f, 0.86f + Entrance * 0.14f + Pulse,
+			WithAlpha(TitleColor, TextOpacity * Entrance), TitleAnchorY, 0.86f + Entrance * 0.14f + Pulse,
 			18.0f * (1.0f - Entrance)},
 		{VisualState->CompletionSubtitle, SubtitleFont,
-			FLinearColor(0.64f, 0.78f, 0.82f, 0.98f * TextOpacity * Entrance), 0.845f, 1.0f, 12.0f * (1.0f - Entrance)},
+			FLinearColor(0.64f, 0.78f, 0.82f, 0.98f * TextOpacity * Entrance),
+			SubtitleAnchorY, 1.0f, 12.0f * (1.0f - Entrance)},
 	};
 	for (const FTextLayer& Layer : TextLayers)
 	{
@@ -437,13 +465,18 @@ void SMD_LoadingScreenWidget::DrawVoyageProgress(const FMD_LoadingDesignSpace& S
 
 	// 완료/미완료 경로 모두 같은 TrackPointAt을 사용하고 같은 중심 두께로 그린다. 미래 점선은
 	// 현재 진행점 앞에서만 시작시켜 굵은 항적 아래에 겹치거나 배의 앞뒤 높이가 달라 보이지 않게 한다.
+	// 끊긴 선분은 MakeLines를 여러 번 부르는 수밖에 없으므로(점을 이어 버린다), 대신 점 버퍼
+	// 하나를 돌려 써서 프레임마다 스무 번씩 배열을 새로 잡지 않게 한다.
+	TArray<FVector2d> Dash;
+	Dash.SetNumUninitialized(2);
 	for (int32 Index = 0; Index < VoyageSegmentCount; Index += 4)
 	{
 		const int32 EndIndex = FMath::Min(Index + 2, VoyageSegmentCount);
 		const float DashStartAlpha = FMath::Max(Progress, static_cast<float>(Index) / VoyageSegmentCount);
 		const float DashEndAlpha = static_cast<float>(EndIndex) / VoyageSegmentCount;
 		if (DashEndAlpha <= DashStartAlpha) { continue; }
-		const TArray<FVector2d> Dash = {FVector2d(TrackPointAt(DashStartAlpha)), FVector2d(TrackPointAt(DashEndAlpha))};
+		Dash[0] = FVector2d(TrackPointAt(DashStartAlpha));
+		Dash[1] = FVector2d(TrackPointAt(DashEndAlpha));
 		FSlateDrawElement::MakeLines(DrawElements, LayerId, Space.Geometry.ToPaintGeometry(), Dash,
 			ESlateDrawEffect::None, RouteColor, true, 4.0f * Space.Scale);
 	}
