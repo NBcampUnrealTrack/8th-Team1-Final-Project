@@ -9,11 +9,16 @@
 #include "Engine/Engine.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 #include "World/Wall/MD_WallPiece.h"
 
 AMD_Sector::AMD_Sector()
 {
 	PrimaryActorTick.bCanEverTick = false;
+
+	// 붕괴 코스메틱 멀티캐스트용
+	bReplicates = true;
 
 	Volume = CreateDefaultSubobject<UBoxComponent>(TEXT("Volume"));
 	SetRootComponent(Volume);
@@ -132,15 +137,35 @@ void AMD_Sector::CollapseCeiling()
 		UGameplayStatics::ApplyDamage(Actor, CollapseDamage, nullptr, this, nullptr);
 	}
 
-	// 3. 카메라 쉐이크 (BP 에셋을 CollapseShakeClass에 지정)
-	if (CollapseShakeClass)
-	{
-		UGameplayStatics::PlayWorldCameraShake(this, CollapseShakeClass, Origin, 0.f, 8000.f);
-	}
+	// 3. 코스메틱(카메라 쉐이크 + 잔해 VFX)은 모든 클라이언트에서 재생
+	MulticastPlayCollapseFX();
 
 	if (GEngine)
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 5.f, FColor::Red,
 				FString::Printf(TEXT("!! 섹터 [%s] 천장 붕괴 !!"), *SectorName.ToString()));
+	}
+}
+
+void AMD_Sector::MulticastPlayCollapseFX_Implementation()
+{
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	const FVector Origin = Volume->GetComponentLocation();
+
+	// 카메라 쉐이크 (BP 에셋을 CollapseShakeClass에 지정)
+	if (CollapseShakeClass)
+	{
+		UGameplayStatics::PlayWorldCameraShake(this, CollapseShakeClass, Origin, 0.f, 8000.f);
+	}
+
+	// 볼륨 중심 기준 원샷 (NS_Sector_Collapse: 천장 먼지 낙하 + 파편 + 바닥 먼지 해일)
+	if (CollapseEffect)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+				this, CollapseEffect, Origin, GetActorRotation());
 	}
 }
