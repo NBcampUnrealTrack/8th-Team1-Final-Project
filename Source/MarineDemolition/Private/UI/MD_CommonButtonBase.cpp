@@ -26,7 +26,16 @@ void UMD_CommonButtonBase::NativeOnCurrentTextStyleChanged()
 		UCommonTextBlock* CommonTextBlock = Cast<UCommonTextBlock>(Txt_ButtonText);
 		if (IsValid(CommonTextBlock) == true)
 		{
+			// 디자이너가 지정한 TextBlock 폰트 크기 저장
+			FSlateFontInfo CurrentFont = CommonTextBlock->GetFont();
+
+			// 현재 버튼 상태의 CommonUI 텍스트 스타일 적용
 			CommonTextBlock->SetStyle(GetCurrentTextStyleClass());
+
+			// 스타일의 나머지 폰트 속성은 유지하면서 기존 크기 복원
+			FSlateFontInfo AppliedFont = CommonTextBlock->GetFont();
+			AppliedFont.Size = CurrentFont.Size;
+			CommonTextBlock->SetFont(AppliedFont);
 		}
 		else
 		{
@@ -113,8 +122,15 @@ void UMD_CommonButtonBase::ApplyCommonTextStyleToTextBlock(UCommonTextStyle* Tex
 		return;
 	}
 
-	// 일반 TextBlock에도 현재 스타일의 글꼴을 적용한다.
-	TextBlock->SetFont(TextStyle->Font);
+	// 디자이너가 지정한 TextBlock 폰트 크기 저장
+	FSlateFontInfo CurrentFont = TextBlock->GetFont();
+
+	// 스타일의 글꼴 속성에서 폰트 크기만 기존 값으로 교체
+	FSlateFontInfo AppliedFont = TextStyle->Font;
+	AppliedFont.Size = CurrentFont.Size;
+
+	// 일반 TextBlock에 크기를 제외한 현재 스타일의 글꼴 적용
+	TextBlock->SetFont(AppliedFont);
 
 	// 일반 TextBlock에도 현재 스타일의 글자 색상을 적용한다.
 	TextBlock->SetColorAndOpacity(TextStyle->Color);

@@ -63,6 +63,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	void InitializePushedQuest(UMD_QuestScreenWidget* QuestWidget, UMD_MerchantMenuWidget* MenuWidget);
 
+	/** Blueprint가 Push한 대출 화면에 상인 데이터와 도메인 이벤트를 연결하는 함수 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
+	void InitializePushedLoan(UMD_LoanWidget* LoanWidget, UMD_MerchantMenuWidget* MenuWidget);
+
 protected:
 	/**
 	 * 트랜스폼 기준점. Mesh를 루트로 쓰면 Mesh의 상대 트랜스폼이 곧 액터 트랜스폼이 되어
@@ -86,10 +90,6 @@ protected:
 	/** 가격·해금 데이터 (`07` §4). 없으면 상점이 빈 목록으로 열린다. */
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	TObjectPtr<UMD_ShopCatalog> ShopCatalog;
-
-	// 메뉴에서 대출을 눌렀을 때 열리는 서버 원장 연동 화면 클래스
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
-	TSubclassOf<UMD_LoanWidget> LoanWidgetClass;
 
 	/**
 	 * 이미 가득 찬 품목을 사려 할 때 브릭스가 하는 말.
@@ -155,16 +155,11 @@ private:
 	UFUNCTION()
 	void HandlePlayerShopOwnershipChanged();
 
-	// 상인 메뉴에서 대출 화면을 생성하고 복제 원장 갱신을 연결하는 함수
-	UFUNCTION()
-	void HandleLoanRequested();
-
 	/** Common UI Stack에서 퀘스트 화면이 비활성화되면 상태 구독과 활성 화면 참조를 정리한다. */
 	void HandleQuestBackRequested();
 
-	// 대출 화면을 닫고 상인 메뉴와 상태 변경 구독을 복구하는 함수
-	UFUNCTION()
-	void HandleLoanBackRequested();
+	/** Common UI Stack에서 대출 화면이 비활성화되면 상태 구독과 활성 화면 참조를 정리하는 함수 */
+	void HandleLoanDeactivated();
 
 	// 대출 화면의 금액 요청을 서버 권위 PlayerController로 전달하는 함수
 	UFUNCTION()

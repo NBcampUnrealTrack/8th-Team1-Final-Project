@@ -90,11 +90,6 @@ void UMD_MerchantMenuWidget::HandleTalkClicked()
 	OnTalkRequested.Broadcast();
 }
 
-void UMD_MerchantMenuWidget::HandleLoanClicked()
-{
-	OnLoanRequested.Broadcast();
-}
-
 void UMD_MerchantMenuWidget::HandleExitClicked()
 {
 	OnExitRequested.Broadcast();

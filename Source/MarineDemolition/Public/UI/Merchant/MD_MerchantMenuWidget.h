@@ -61,9 +61,6 @@ public:
 	FMD_MerchantMenuRequest OnTalkRequested;
 
 	UPROPERTY(BlueprintAssignable, Category = "MD|Merchant")
-	FMD_MerchantMenuRequest OnLoanRequested;
-
-	UPROPERTY(BlueprintAssignable, Category = "MD|Merchant")
 	FMD_MerchantMenuRequest OnExitRequested;
 
 protected:
@@ -71,9 +68,6 @@ protected:
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	void HandleTalkClicked();
-
-	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
-	void HandleLoanClicked();
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	void HandleExitClicked();

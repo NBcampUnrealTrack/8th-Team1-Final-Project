@@ -219,8 +219,6 @@ void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 		Widget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
 	}
 
-	Widget->OnLoanRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleLoanRequested);
-
 	// 대화는 메뉴 위젯이 자체 대사창으로 처리한다.
 	// 치료(70₡/회, `07` §2.5)는 대화 안에서 처리하기로 정해졌다 → 대화 화면 담당.
 
@@ -237,7 +235,6 @@ void AMD_Merchant::HandleMenuExitRequested()
 	{
 		// UIManager가 재사용할 수 있는 메뉴 인스턴스에서 현재 상인 연결을 제거한다.
 		MenuWidget->OnExitRequested.RemoveDynamic(this, &AMD_Merchant::HandleMenuExitRequested);
-		MenuWidget->OnLoanRequested.RemoveDynamic(this, &AMD_Merchant::HandleLoanRequested);
 	}
 
 	if (ActiveShopWidget.IsValid() == true)
@@ -254,12 +251,8 @@ void AMD_Merchant::HandleMenuExitRequested()
 
 	if (ActiveLoanWidget.IsValid() == true)
 	{
-		if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
-		{
-			MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
-		}
-		ActiveLoanWidget->RemoveFromParent();
-		ActiveLoanWidget.Reset();
+		// 실제 상태 정리는 대출 화면의 공통 비활성화 이벤트에서 한 번만 처리한다.
+		ActiveLoanWidget->DeactivateWidget();
 	}
 
 	ActiveMenuWidget.Reset();
@@ -362,6 +355,46 @@ void AMD_Merchant::InitializePushedQuest(UMD_QuestScreenWidget* QuestWidget, UMD
 	RefreshLoreWidgetFromComponent();
 }
 
+void AMD_Merchant::InitializePushedLoan(UMD_LoanWidget* LoanWidget, UMD_MerchantMenuWidget* MenuWidget)
+{
+	// Blueprint에서 전달한 대출 화면의 유효성 확인
+	if (IsValid(LoanWidget) == false)
+	{
+		return;
+	}
+
+	// 대출 화면을 연 상인 메뉴의 유효성 확인
+	if (IsValid(MenuWidget) == false)
+	{
+		return;
+	}
+
+	// 이후 상태 조회가 Blueprint에서 전달한 메뉴와 대출 화면을 사용하도록 저장
+	ActiveMenuWidget = MenuWidget;
+	ActiveLoanWidget = LoanWidget;
+
+	// 대출 화면 활성화 전에 루트 메뉴를 전달하여 배경 메뉴 패널 숨김
+	LoanWidget->SetOwningMerchantMenu(MenuWidget);
+
+	// Common UI Stack의 모든 대출 화면 종료 경로에서 상태를 정리하도록 비활성화 이벤트 연결
+	LoanWidget->OnDeactivated().RemoveAll(this);
+	LoanWidget->OnDeactivated().AddUObject(this, &AMD_Merchant::HandleLoanDeactivated);
+
+	// 대출과 상환 요청을 실제 상인 처리에 중복 없이 연결
+	LoanWidget->OnBorrowRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleBorrowRequested);
+	LoanWidget->OnRepayRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleRepayRequested);
+
+	// 복제 원장 변경을 현재 대출 화면과 상인 메뉴에 반영하도록 구독
+	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (MerchantComponent != nullptr)
+	{
+		MerchantComponent->OnMerchantStateChanged.AddUniqueDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+	}
+
+	// 연결을 마친 대출 화면에 현재 복제 상태를 즉시 적용
+	RefreshLoanWidgetFromComponent();
+}
+
 void AMD_Merchant::HandleShopDeactivated()
 {
 	// 비활성화된 상점에 남아 있는 상인 연결을 제거한다.
@@ -405,66 +438,38 @@ void AMD_Merchant::HandleNotReadyRequested()
 	}
 }
 
-void AMD_Merchant::HandleLoanRequested()
+void AMD_Merchant::HandleLoanDeactivated()
 {
-	if (IsValid(LoanWidgetClass) == false || ActiveMenuWidget.IsValid() == false)
+	// 비활성화된 대출 화면에 남아 있는 상인 연결 제거
+	UMD_LoanWidget* LoanWidget = ActiveLoanWidget.Get();
+	if (IsValid(LoanWidget) == true)
 	{
-		return;
+		LoanWidget->OnDeactivated().RemoveAll(this);
+		LoanWidget->OnBorrowRequested.RemoveDynamic(this, &AMD_Merchant::HandleBorrowRequested);
+		LoanWidget->OnRepayRequested.RemoveDynamic(this, &AMD_Merchant::HandleRepayRequested);
 	}
 
-	// 이미 생성된 UI가 있는 경우
-	if (ActiveLoanWidget.IsValid() == true)
-	{
-		// Viewport에 없으면 추가
-		if (ActiveLoanWidget->IsInViewport() == false)
-		{
-			ActiveLoanWidget->AddToViewport();
-		}
-		return;
-	}
-
-	// UI를 이용하는(소유하는) 플레이어의 Controller 얻기
-	APlayerController* PlayerController = ActiveMenuWidget->GetOwningPlayer();
-	if (IsValid(PlayerController) == false)
-	{
-		return;
-	}
-
-	// UI 생성
-	UMD_LoanWidget* LoanWidget = CreateWidget<UMD_LoanWidget>(PlayerController, LoanWidgetClass);
-	if (IsValid(LoanWidget) == false)
-	{
-		return;
-	}
-
-	// 초기 설정 진행
-	LoanWidget->SetOwningMerchantMenu(ActiveMenuWidget.Get());
-	LoanWidget->OnBackRequested.AddDynamic(this, &AMD_Merchant::HandleLoanBackRequested);
-	LoanWidget->OnBorrowRequested.AddDynamic(this, &AMD_Merchant::HandleBorrowRequested);
-	LoanWidget->OnRepayRequested.AddDynamic(this, &AMD_Merchant::HandleRepayRequested);
-	LoanWidget->AddToViewport();
-	ActiveLoanWidget = LoanWidget;
-
-	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
-	{
-		MerchantComponent->OnMerchantStateChanged.AddUniqueDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
-	}
-
-	RefreshLoanWidgetFromComponent();
-}
-
-void AMD_Merchant::HandleLoanBackRequested()
-{
-	if (UMD_MerchantComponent* MerchantComponent = GetMerchantComponent())
+	// 더 이상 표시되지 않는 대출 화면에 복제 상태를 전달하지 않도록 구독 해제
+	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (MerchantComponent != nullptr)
 	{
 		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
+
+		// 대출로 변경된 크레딧과 부채 정보를 다시 표시되는 상인 메뉴에 반영
+		if (ActiveMenuWidget.IsValid() == true)
+		{
+			ActiveMenuWidget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
+		}
 	}
 
-	if (ActiveLoanWidget.IsValid() == true)
+	// 다시 표시되는 상인 메뉴의 본문 패널 복구
+	if (ActiveMenuWidget.IsValid() == true)
 	{
-		ActiveLoanWidget->RemoveFromParent();
-		ActiveLoanWidget.Reset();
+		ActiveMenuWidget->SetMenuPanelVisible(true);
 	}
+
+	// 비활성화된 Stack 화면을 더 이상 활성 대출 화면으로 취급하지 않음
+	ActiveLoanWidget.Reset();
 }
 
 void AMD_Merchant::HandleBorrowRequested(int32 Amount)
