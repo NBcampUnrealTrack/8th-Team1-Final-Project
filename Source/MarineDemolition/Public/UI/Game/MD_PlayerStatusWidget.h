@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -25,8 +25,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (BindWidgetOptional))
 	TObjectPtr<UProgressBar> HealthBar;
 
+	// 현재 공통 상태 UI의 산소 단계 위젯 컨테이너 바인딩
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, meta = (BindWidgetOptional))
-	TObjectPtr<UHorizontalBox> HB_Oxygen;
+	TObjectPtr<UHorizontalBox> HB_OxygenContainer;
 
 	// 직전 산소 단계와 비교하여 감소한 Child에만 Pop 애니메이션을 재생한다.
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)

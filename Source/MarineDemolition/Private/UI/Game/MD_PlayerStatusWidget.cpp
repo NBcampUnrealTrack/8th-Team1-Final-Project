@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "UI/Game/MD_PlayerStatusWidget.h"
@@ -128,7 +128,14 @@ void UMD_PlayerStatusWidget::RefreshOxygen()
 	const UMD_CharacterAttributeSet* Attributes =
 		IsValid(MDPlayerState) ? MDPlayerState->GetCharacterAttributeSet() : nullptr;
 
-	if (!IsValid(HB_Oxygen) || !IsValid(Attributes))
+	// 산소 단계 컨테이너가 바인딩되지 않은 경우 갱신 중단
+	if (IsValid(HB_OxygenContainer) == false)
+	{
+		return;
+	}
+
+	// 산소 어트리뷰트가 준비되지 않은 경우 갱신 중단
+	if (IsValid(Attributes) == false)
 	{
 		return;
 	}
@@ -141,7 +148,7 @@ void UMD_PlayerStatusWidget::RefreshOxygen()
 	OxygenRatio = FMath::Clamp(OxygenRatio, 0.0f, 1.0f);
 
 	// 현재 구성된 산소 위젯 개수를 저장한다.
-	int32 OxygenWidgetCount = HB_Oxygen->GetChildrenCount();
+	int32 OxygenWidgetCount = HB_OxygenContainer->GetChildrenCount();
 
 	// 표시할 산소 위젯이 없는 경우 갱신을 종료한다.
 	if (OxygenWidgetCount <= 0)
