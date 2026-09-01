@@ -7,6 +7,7 @@
 class UHorizontalBox;
 class UImage;
 class UMD_CharacterVOIPTalker;
+class UButton;
 class USlider;
 class UTextBlock;
 
@@ -30,6 +31,10 @@ protected:
 	// 호스트 상태 또는 강퇴 동작 이미지
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
 	TObjectPtr<UImage> Img_HostorKick;
+
+	// 할당된 원격 플레이어의 강퇴 요청 버튼
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
+	TObjectPtr<UButton> Btn_Kick;
 
 	// 플레이어 이름 본문
 	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional))
@@ -99,6 +104,10 @@ public:
 	// 일반 클라이언트 플레이어를 나타내는 아이콘 적용
 	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category = "MD|Player Info")
 	void SetClientIcon();
+
+	// 카드에 할당된 원격 플레이어의 서버 강퇴 요청
+	UFUNCTION(BlueprintCallable, Category = "MD|Player Info")
+	void KickAssignedPlayer();
 
 	// 정규화된 음성 볼륨의 저장과 Slider 및 실제 음성 재생 적용
 	UFUNCTION(BlueprintCallable, Category = "MD|Player Info")

@@ -8,6 +8,7 @@
 
 class UBoxComponent;
 class UCameraShakeBase;
+class UNiagaraSystem;
 class AMD_WallPiece;
 
 // 방 단위 섹터 볼륨. 내부 폰을 추적하고 천장 붕괴를 실행
@@ -44,6 +45,10 @@ protected:
 	void OnVolumeEndOverlap(UPrimitiveComponent* OverlappedComp, AActor* OtherActor,
 	                        UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
+	// 붕괴 순간 서버가 쏘고 모든 클라이언트가 코스메틱(쉐이크 + VFX)을 재생한다
+	UFUNCTION(NetMulticast, Unreliable)
+	void MulticastPlayCollapseFX();
+
 	UPROPERTY(VisibleAnywhere, Category = "Sector")
 	TObjectPtr<UBoxComponent> Volume;
 
@@ -70,6 +75,10 @@ protected:
 	// 붕괴 연출용 카메라 쉐이크. BP 에셋을 에디터에서 지정
 	UPROPERTY(EditAnywhere, Category = "Collapse")
 	TSubclassOf<UCameraShakeBase> CollapseShakeClass;
+
+	// 붕괴 순간 볼륨 중심에 원샷 재생할 잔해 VFX (NS_Sector_Collapse)
+	UPROPERTY(EditAnywhere, Category = "Collapse")
+	TObjectPtr<UNiagaraSystem> CollapseEffect;
 
 	UPROPERTY(Transient)
 	TSet<TObjectPtr<AActor>> ActorsInside;
