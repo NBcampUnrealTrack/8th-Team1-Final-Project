@@ -36,6 +36,24 @@ bool UMD_ScrapeToolComponent::TryBeginScrapeFocus()
 		return false;
 	}
 
+	const AController* const OwnerController = OwnerPawn->GetController();
+	if (!OwnerController)
+	{
+		return false;
+	}
+	FVector CenterViewLocation = FVector::ZeroVector;
+	FRotator CenterViewRotation = FRotator::ZeroRotator;
+	OwnerController->GetPlayerViewPoint(CenterViewLocation, CenterViewRotation);
+	// 로컬 latch·커서·session을 바꾸기 전에 진입 후 실제 시작점인
+	// viewport center ray를 GA와 동일 공통 query에 넣어 거리·surface를 검증한다.
+	const FMD_ScrapeAimQueryResult InitialAim = QueryScrapeAim(
+		CenterViewLocation,
+		CenterViewRotation.Vector());
+	if (!InitialAim.IsActionable())
+	{
+		return false;
+	}
+
 	if (!CaptureScrapeFocusView())
 	{
 		UE_LOG(
@@ -55,12 +73,11 @@ bool UMD_ScrapeToolComponent::TryBeginScrapeFocus()
 	}
 	PendingScrapeFocusViewGeneration = 0;
 	bScrapeFocusViewBeginAttemptConsumed = false;
-	bLastScrapeFocusViewAimActionable = false;
-	CurrentScrapeAim = FMD_ScrapeAimQueryResult();
+	bLastScrapeFocusViewAimActionable = true;
+	CurrentScrapeAim = InitialAim;
 	ResetScrapeVisualContactTracking(true);
 	SetComponentTickEnabled(true);
-	RefreshScrapeFocusAim();
-	return IsScrapeFocusViewActive();
+	return TryBeginAuthoritativeScrapeFocusFromCurrentAim();
 }
 
 bool UMD_ScrapeToolComponent::TryBeginAuthoritativeScrapeFocusFromCurrentAim()

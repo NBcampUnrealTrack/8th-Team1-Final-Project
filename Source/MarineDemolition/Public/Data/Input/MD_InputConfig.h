@@ -29,6 +29,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> AbilityAction;
 
+	// 헤라 Focus 진입/해제 토글. 키 매핑은 PlayerMappingContext에서 설정한다.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> ScrapeFocusAction;
+
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> SwapEquipmentAction;
 

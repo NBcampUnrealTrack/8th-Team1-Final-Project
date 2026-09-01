@@ -92,7 +92,7 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
 	bool IsScraping() const { return bIsScraping; }
 
-	/** 로컬 화면/포인터 latch를 시작하고, 포인터가 유효한 대상에 닿으면 권위 세션을 1회 요청한다. */
+	/** 현재 화면 중앙 ray가 actionable 헤라 대상일 때만 로컬 latch와 권위 세션을 시작한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape|Focus")
 	bool TryBeginScrapeFocus();
 

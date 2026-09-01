@@ -12,7 +12,6 @@
 
 class UMD_InputConfig;
 class UInputMappingContext;
-class UInputAction;
 class UEnhancedInputLocalPlayerSubsystem;
 class UCameraComponent;
 class UStaticMesh;
@@ -78,17 +77,11 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Scrape|Unload")
 	float TryUnloadScrapeLoad(float RequestedAmount);
 
-	/**
-	 * 서버/로컬이 확정한 접촉 자세를 기존 ABP 입력 형식으로 변환한다.
-	 * 카메라 중앙을 다시 Trace하지 않으며 원격 Pawn도 복제 pose만 소비한다.
-	 */
+	/** 기존 AnimBP 호환용 출력. 3인칭 포인터 조준은 사용하지 않으므로 항상 비활성이다. */
 	UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "MD|Scrape|Animation")
 	void GetScrapeAnimationAim(FRotator& AimDelta, bool& Active);
 
-	/**
-	 * 명시적 blade 진행축을 도구의 소켓 기준 twist로 적용한다.
-	 * ControlRotation 변화량으로 가로/세로를 재추정하지 않는다.
-	 */
+	/** 기존 AnimBP 호환용 갱신. 3인칭 도구를 기본 손 소켓 자세로 유지한다. */
 	UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "MD|Scrape|Animation")
 	void UpdateScrapeAnimationBlade(
 		bool Active,
@@ -96,18 +89,8 @@ public:
 		FRotator& Swing);
 
 	/**
-	 * 로컬 헤라 visual pose를 오른팔 IK 목표로 한 번에 변환한다.
-	 *
-	 * EffectorTransformComponentSpace는 GetMesh()의 component space에 있는
-	 * hand_r 본 목표이고 JointTargetLocationComponentSpace도 같은 공간이다.
-	 * AnimBP의 BlueprintUpdateAnimation에서 프레임당 한 번 호출한 뒤 Two Bone
-	 * IK/Control Rig에 두 값을 같은 component-space 계약으로 전달한다.
-	 *
-	 * Active는 유효 pose와 실제 상완/하완 길이 검증을 모두 통과할 때만 true다.
-	 * Reachable은 유효 접촉 자세가 있었지만 팔 길이 때문에 거부됐는지 구분한다.
-	 * TeleportOrSnap은 세션/스트로크/세대 단절 또는 큰 위치 점프로 회전 보간도
-	 * 생략한 프레임이다. PoseGeneration은 visual snapshot의 UpdateGeneration이다.
-	 * 이 함수는 회전 완화 상태를 갱신하므로 BlueprintPure가 아니다.
+	 * 기존 AnimBP 호환용 출력. 3인칭은 접촉 IK를 사용하지 않으므로 항상 비활성이다.
+	 * AnimBP에서 오른팔 IK 노드를 제거한 뒤 후속 정리에서 함께 삭제할 수 있다.
 	 */
 	UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "MD|Scrape|Animation")
 	void GetScrapeAnimationHandIK(
@@ -331,14 +314,11 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UNiagaraComponent> CutterVFXComponent;
 
-	/** 우클릭 헤라 포커스 입력용 런타임 액션/컨텍스트를 필요할 때 생성한다. */
-	void EnsureScrapeFocusInputObjects();
+	/** 장비 identity 변경 시 이전 헤라 입력 소유권과 Focus를 정리한다. */
+	void RefreshScrapeFocusInputState();
 
-	/** 현재 장착 도구에 맞춰 로컬 플레이어의 헤라 포커스 입력 컨텍스트를 갱신한다. */
-	void RefreshScrapeFocusInputContext();
-
-	/** 컨텍스트 제거 전에 진행 중인 헤라 포커스를 항상 종료한다. */
-	void RemoveScrapeFocusInputContext();
+	/** 빙의/종료 경계에서 진행 중인 헤라 입력과 장비 identity를 초기화한다. */
+	void ResetScrapeFocusInputState();
 
 	/** 이번 LMB 입력으로 정확히 활성화한 헤라 Ability만 취소한다. */
 	void CancelActiveScrapeAbility();
@@ -365,10 +345,6 @@ private:
 		const UStaticMesh* ToolMesh,
 		const FTransform& AttachOffset) const;
 
-	/** 로컬 visual IK가 도구 자세의 단일 작성자인 동안 legacy aim/twist를 막는다. */
-	bool ShouldSuppressLegacyScrapeAnimation() const;
-	void ResetScrapeAnimationHandIKState();
-
 	/** 1인칭 팔은 소유 클라이언트에만 보이므로 그 경우에만 틱한다. */
 	void RefreshFirstPersonArmsTick();
 
@@ -378,16 +354,18 @@ private:
 	void UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget = false);
 
 	/**
-	 * 1인칭 도구 메시를 본체 포즈에서 직접 배치한다.
+	 * 1인칭 도구를 Focus viewmodel 또는 기본 팔 소켓 경로로 배치한다.
 	 *
-	 * FirstPersonMesh 는 SetLeaderPoseComponent 팔로워라 자기 본 갱신 경로를
-	 * 건너뛴다. 그래서 그 본 소켓에 붙은 자식 컴포넌트는 본 단위 회전(날 비틀기)을
-	 * 받지 못하고, 1인칭에서만 도구가 안 도는 현상이 생긴다.
-	 * 본체의 컴포넌트 공간 소켓 트랜스폼을 1인칭 팔의 컴포넌트 트랜스폼에 얹는다.
+	 * Focus 중에는 Blade_Tip을 가상 포인터에 맞추고, Focus 해제 후에는
+	 * 본체의 컴포넌트 공간 ToolSocket을 1인칭 팔 월드 변환에 합성한다.
 	 */
-	void UpdateFirstPersonToolTransform();
+	void UpdateFirstPersonToolTransform(float DeltaSeconds);
 
+	/** Focus 진입/해제 경계에서 1인칭 헤라를 팔 부착과 독립 뷰모델 사이로 전환한다. */
+	void SetFirstPersonScrapeViewModelActive(bool bActive);
 
+	/** 가상 포인터를 카메라 앞 평면으로 투영해 Blade_Tip을 그 위치에 배치한다. */
+	bool UpdateFirstPersonScrapeViewModel(float DeltaSeconds);
 private:
 	UFUNCTION()
 	void HandleHealthStateChanged(EMD_HealthState NewState);
@@ -407,19 +385,8 @@ private:
 	/** 직전에 사망 상태였는지. 부활 전이 판별용 */
 	bool bWasDeadState = false;
 
-	/** 에셋 의존 없이 우클릭 포커스를 바인딩하는 런타임 전용 입력 액션. */
-	UPROPERTY(Transient)
-	TObjectPtr<UInputAction> ScrapeFocusInputAction;
-
-	/** 헤라를 장착한 동안에만 로컬 플레이어에게 추가하는 입력 오버레이. */
-	UPROPERTY(Transient)
-	TObjectPtr<UInputMappingContext> ScrapeFocusInputMappingContext;
-
-	/** 컨트롤러 교체 뒤에도 이전 로컬 플레이어에서 컨텍스트를 제거하기 위한 약한 참조. */
-	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> ScrapeFocusInputSubsystem;
-
-	/** 수량 변경과 실제 장비 교체를 구분하기 위해 컨텍스트 적용 당시의 도구를 기억한다. */
-	TWeakObjectPtr<UMD_ToolDefinition> ScrapeFocusContextTool;
+	/** 수량 변경과 실제 장비 교체를 구분하기 위해 마지막 장착 도구를 기억한다. */
+	TWeakObjectPtr<UMD_ToolDefinition> ScrapeFocusInputTool;
 
 	/** 서버가 현재 ScrapeTool runtime snapshot에 적용한 기본 Profile의 도구 identity. */
 	TWeakObjectPtr<UMD_ToolDefinition> AppliedScrapeProfileTool;
@@ -436,82 +403,47 @@ private:
 	/** 장비 변경이 LMB release보다 빨라도 release가 새 도구를 취소하지 않도록 입력 소유권을 유지한다. */
 	bool bScrapeAbilityInputCaptured = false;
 
-	bool bScrapeFocusInputContextAdded = false;
-
-	/** StaticMesh contact frame. X=surface normal, Z=stroke tangent 계약이다. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK")
+	/** StaticMesh contact frame. X=화면을 향한 normal, Z=포인터 진행 방향 계약이다. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel")
 	FName ScrapeBladeTipSocketName = TEXT("Blade_Tip");
 
 	/** 새 메시가 Blade_Tip 대신 명시적 접촉 이름을 쓸 때의 fallback. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK")
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel")
 	FName ScrapeBladeContactFallbackSocketName = TEXT("Blade_Contact");
 
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK")
-	FName ScrapeUpperArmBoneName = TEXT("upperarm_r");
+	/** 화면 중앙 기준으로 헤라 접촉 소켓을 놓는 카메라 전방 거리. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
+		meta = (ClampMin = "10.0", ClampMax = "200.0", Units = "cm"))
+	float ScrapeViewModelDistanceCm = 75.0f;
 
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK")
-	FName ScrapeLowerArmBoneName = TEXT("lowerarm_r");
+	/** 접촉 소켓을 pivot으로 적용하는 1인칭 헤라 시각 회전 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
+		meta = (UIMin = "-180.0", UIMax = "180.0",
+			ToolTip = "Visual rotation in the Blade_Tip/Blade_Contact local contact frame."))
+	FRotator ScrapeViewModelRotationOffset = FRotator::ZeroRotator;
 
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK")
-	FName ScrapeHandBoneName = TEXT("hand_r");
+	/** 접촉 소켓을 pivot으로 적용하는 1인칭 헤라 uniform 크기 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
+		meta = (ClampMin = "0.01", UIMin = "0.25", UIMax = "2.0"))
+	float ScrapeViewModelScaleMultiplier = 1.0f;
 
-	/** 접촉 위치는 즉시 쓰고 접촉점 주위의 회전만 이 시간 상수로 완화한다. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK",
+	/** 위치는 즉시 따라가고 헤라 회전만 이 시간 동안 완화한다. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
 		meta = (ClampMin = "0.0", ClampMax = "0.2", Units = "s"))
-	float ScrapeHandIKRotationSmoothingSeconds = 0.05f;
+	float ScrapeViewModelRotationSmoothingSeconds = 0.04f;
 
-	/** 이보다 큰 유효 접촉점 점프는 이전 회전을 잇지 않고 즉시 스냅한다. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK",
-		meta = (ClampMin = "0.0", Units = "cm"))
-	float ScrapeHandIKTeleportDistanceCm = 30.0f;
-
-	/** 실제 상완+하완 길이 중 IK가 쓸 수 있는 비율. 1을 넘어 stretch하지 않는다. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK",
-		meta = (ClampMin = "0.5", ClampMax = "1.0"))
-	float ScrapeHandIKMaximumReachRatio = 1.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation|IK",
-		meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float ScrapeHandIKAlpha = 1.0f;
-
-	FQuat ScrapeHandIKContactWorldRotation = FQuat::Identity;
-	FVector LastScrapeHandIKContactWorldLocation = FVector::ZeroVector;
-	FVector LastScrapeHandIKStableWorldTangent = FVector::ZeroVector;
-	FVector LastScrapeHandIKJointDirectionComponent = FVector::ZeroVector;
-	uint64 LastScrapeHandIKFocusSessionId = 0;
-	uint32 LastScrapeHandIKStrokeGeneration = 0;
-	uint32 LastScrapeHandIKUpdateGeneration = 0;
-	bool bLastScrapeHandIKDirectionLocked = false;
-	bool bHasScrapeHandIKPose = false;
-
-	/** 180도 동치 blade 축이 프레임마다 뒤집히지 않도록 마지막 부호를 보존한다. */
-	FVector LastScrapeAnimationBladeWorldDirection = FVector::ZeroVector;
-
-	/** 현재 메시에서 날 축에 대응하는 component-space 기준 방향. */
-	FVector ScrapeAnimationBladeReferenceDirection = FVector::ZeroVector;
-	FVector ScrapeAnimationToolTwistAxis = FVector::ZeroVector;
-
-	TWeakObjectPtr<UStaticMesh> ScrapeAnimationBladeReferenceMesh;
+	FVector2D LastScrapeViewModelPointerNormalized = FVector2D(0.5, 0.5);
+	FVector2D ScrapeViewModelScreenDirection = FVector2D(0.0, -1.0);
+	FVector LastScrapeViewModelStableWorldTangent = FVector::ZeroVector;
+	FQuat ScrapeViewModelWorldRotation = FQuat::Identity;
+	FVector ScrapeViewModelWorldScale = FVector::OneVector;
+	bool bFirstPersonScrapeViewModelActive = false;
+	bool bFirstPersonArmsWereVisible = true;
+	bool bScrapeViewModelDirectionLocked = false;
+	bool bWasScrapingForViewModel = false;
+	bool bHasScrapeViewModelRotation = false;
 
 	/** 접촉이 끊길 때 도구 회전을 AttachOffset으로 부드럽게 복귀시키는 현재 값. */
 	FRotator ScrapeAnimationToolRelativeRotation = FRotator::ZeroRotator;
 
-	/**
-	 * 날 축 twist 를 정의된 값으로 인정하는 최소 투영 길이. 투영 길이는 스트로크
-	 * 방향과 날 긴 축이 이루는 각의 sin 이므로, 이 값은 "축에서 몇 도 이상
-	 * 떨어져야 회전을 신뢰하는가"를 뜻한다. 0.25 ≈ 14.5도.
-	 */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation",
-		meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float ScrapeBladeTwistMinProjection = 0.25f;
-
-	/**
-	 * 마지막으로 정의된 날 축 twist(도). 스트로크 방향이 날 축과 평행해지는
-	 * 특이점 구간에서는 새로 계산하지 않고 이 값을 유지한다 — AttachOffset 으로
-	 * 되돌리면 프레임마다 70~80도를 왕복한다.
-	 */
-	float LastScrapeAnimationTwistDegrees = 0.0f;
-
-	bool bHasScrapeAnimationBladeDirection = false;
-	bool bHasScrapeAnimationTwist = false;
 };

@@ -114,21 +114,8 @@ bool UMD_ScrapeToolComponent::CaptureScrapeFocusView()
 	ScrapeFocusSession.ScrapeFocusAuthorityHorizontalHalfTangent = HorizontalHalfTangent;
 	ScrapeFocusSession.ScrapeFocusAuthorityVerticalHalfTangent = VerticalHalfTangent;
 	ScrapeFocusViewportSize = FIntPoint(ViewportWidth, ViewportHeight);
-	FVector2D BootstrapPointer(0.5, 0.5);
-	float MouseX = 0.0f;
-	float MouseY = 0.0f;
-	if (PlayerController->GetMousePosition(MouseX, MouseY))
-	{
-		FVector2D NormalizedMousePointer;
-		if (FMD_ScrapeFocusProjection::TryNormalizeViewportPointer(
-				FVector2D(MouseX, MouseY),
-				ScrapeFocusViewportSize,
-				NormalizedMousePointer))
-		{
-			BootstrapPointer = NormalizedMousePointer;
-		}
-	}
-	ScrapeFocusPointerNormalized = BootstrapPointer;
+	PlayerController->SetMouseLocation(ViewportWidth / 2, ViewportHeight / 2);
+	ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
 	bHasScrapeFocusView = true;
 	ClampScrapeFocusPointerToAuthorityCone();
 	ResetScrapeFocusPointerStrokeConstraint();
