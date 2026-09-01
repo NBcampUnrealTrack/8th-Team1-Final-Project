@@ -8,6 +8,7 @@
 
 class APlayerController;
 class SWidget;
+class UFont;
 class UTexture2D;
 struct FWorldContext;
 
@@ -81,8 +82,6 @@ private:
 	void FlushPendingIntroCallbacks();
 	void RemoveLoadingWidgets();
 	void HandleIntroAnimationFinished();
-	void HandleCompletionDisplayFinished();
-	void HandleOutroAnimationFinished();
 	// Common UI의 기존 Transition 화면이 인트로를 재생 중인지 확인한다.
 	bool IsCommonTransitionScreenActive() const;
 
@@ -90,13 +89,11 @@ private:
 	void HandleSessionOperationComplete(bool bWasSuccessful);
 
 	UPROPERTY(Transient)
-	TObjectPtr<UTexture2D> BubbleTexture;
-
-	UPROPERTY(Transient)
 	TObjectPtr<UTexture2D> ShipTexture;
-
 	UPROPERTY(Transient)
-	TObjectPtr<UTexture2D> WaveTexture;
+	TObjectPtr<UTexture2D> BeaconTexture;
+	UPROPERTY(Transient)
+	TObjectPtr<UFont> LoadingFont;
 
 	FTimerHandle IntroTimerHandle;
 	FTimerHandle WorldReadyTimerHandle;

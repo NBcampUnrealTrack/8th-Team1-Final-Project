@@ -324,13 +324,7 @@ void UMD_LoadingScreenSubsystem::FinishLoadingScreen(bool bShowCompletion)
 
 	Phase = EMD_LoadingPhase::Completion;
 	VisualState->BeginCompletion();
-	SetLoadingTimer(CompletionTimerHandle, &ThisClass::HandleCompletionDisplayFinished,
-		MD_LoadingScreen::CompletionDisplaySeconds);
-}
-
-void UMD_LoadingScreenSubsystem::HandleCompletionDisplayFinished()
-{
-	BeginOutro();
+	SetLoadingTimer(CompletionTimerHandle, &ThisClass::BeginOutro, MD_LoadingScreen::CompletionDisplaySeconds);
 }
 
 void UMD_LoadingScreenSubsystem::BeginOutro()
@@ -349,7 +343,8 @@ void UMD_LoadingScreenSubsystem::BeginOutro()
 		VisualState->BeginOutro();
 	}
 
-	SetLoadingTimer(OutroTimerHandle, &ThisClass::HandleOutroAnimationFinished, MD_LoadingScreen::OutroDurationSeconds);
+	// outro가 끝나면 위젯과 상태를 통째로 되돌린다.
+	SetLoadingTimer(OutroTimerHandle, &ThisClass::RemoveLoadingWidgets, MD_LoadingScreen::OutroDurationSeconds);
 }
 
 // 연출 상태를 만들고 화면을 덮는다. bSkipIntro는 인트로를 기다릴 수 없는 fallback 경로용이다.
@@ -359,7 +354,9 @@ void UMD_LoadingScreenSubsystem::StartLoadingVisuals(const FText& Subtitle, bool
 	// outro 도중 다음 로딩이 시작되는 경우가 있어 여기서 먼저 걷어낸다.
 	RemoveLoadingWidgets();
 
-	const FText Resolved = Subtitle.IsEmpty() ? LOCTEXT("DefaultSubtitle", "Preparing expedition...") : Subtitle;
+	const FText Resolved = Subtitle.IsEmpty()
+		? LOCTEXT("DefaultSubtitle", "PREPARING EXPEDITION • 원정 준비 중")
+		: Subtitle;
 
 	Phase = bSkipIntro ? EMD_LoadingPhase::Loading : EMD_LoadingPhase::Intro;
 	PendingFinish = EMD_LoadingFinishRequest::None;
@@ -395,24 +392,24 @@ void UMD_LoadingScreenSubsystem::ClearLoadingTimers()
 	}
 }
 
-// 텍스처는 Project Settings → Game → MD Loading Screen에서 지정한다. 미지정이면 위젯이
-// 해당 요소만 생략한다. 한 번 로드하면 UPROPERTY가 붙들고 있으므로 다음 로딩에서는 다시 읽지 않는다.
+// 작업선 텍스처는 Project Settings → Game → MD Loading Screen에서 지정한다.
+// 한 번 로드하면 UPROPERTY가 붙들고 있으므로 다음 로딩에서는 다시 읽지 않는다.
 TSharedRef<SWidget> UMD_LoadingScreenSubsystem::CreateLoadingWidget()
 {
-	if (!BubbleTexture || !ShipTexture || !WaveTexture)
+	if (!ShipTexture || !BeaconTexture || !LoadingFont)
 	{
 		if (const UMD_LoadingScreenSettings* Settings = UMD_LoadingScreenSettings::Get())
 		{
-			if (!BubbleTexture) { BubbleTexture = Settings->GetBubbleTexture(); }
 			if (!ShipTexture) { ShipTexture = Settings->GetShipTexture(); }
-			if (!WaveTexture) { WaveTexture = Settings->GetWaveTexture(); }
+			if (!BeaconTexture) { BeaconTexture = Settings->GetBeaconTexture(); }
+			if (!LoadingFont) { LoadingFont = Settings->GetFont(); }
 		}
 	}
 	return SNew(SMD_LoadingScreenWidget)
 		.VisualState(VisualState)
-		.BubbleTexture(BubbleTexture)
 		.ShipTexture(ShipTexture)
-		.WaveTexture(WaveTexture);
+		.BeaconTexture(BeaconTexture)
+		.Font(LoadingFont);
 }
 
 void UMD_LoadingScreenSubsystem::EnsureViewportLoadingWidget()
@@ -506,54 +503,23 @@ void UMD_LoadingScreenSubsystem::HandleIntroAnimationFinished()
 	FlushPendingIntroCallbacks();
 }
 
-void UMD_LoadingScreenSubsystem::HandleOutroAnimationFinished()
-{
-	RemoveLoadingWidgets();
-}
-
 bool UMD_LoadingScreenSubsystem::IsCommonTransitionScreenActive() const
 {
-	// 현재 GameInstance의 첫 로컬 플레이어가 소유한 Common UI 관리자를 가져온다.
-	UGameInstance* GameInstance = GetGameInstance();
-	ULocalPlayer* LocalPlayer = IsValid(GameInstance) == true ? GameInstance->GetFirstGamePlayer() : nullptr;
-	UMD_LocalUIManager* LocalUIManager = IsValid(LocalPlayer) == true ? LocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
-	if (IsValid(LocalUIManager) == false)
-	{
-		return false;
-	}
-
-	// Modal 레이어에서 현재 표시 중인 화면을 확인한다.
-	UCommonActivatableWidget* ActiveModalScreen = LocalUIManager->GetActiveScreen(MDGameplayTags::UI_Layer_Modal);
-	if (IsValid(ActiveModalScreen) == false)
-	{
-		return false;
-	}
-
-	// Project Settings에 등록된 Transition 요청 태그를 안전하게 조회한다.
-	FGameplayTag TransitionWidgetTag = FGameplayTag::RequestGameplayTag(FName(TEXT("UI.Layer.Modal.Transition")), false);
-	if (TransitionWidgetTag.IsValid() == false)
-	{
-		return false;
-	}
-
-	// 현재 화면과 비교할 Transition 클래스를 Project Settings에서 가져온다.
+	ULocalPlayer* LocalPlayer = GetGameInstance()->GetFirstGamePlayer();
+	UMD_LocalUIManager* LocalUIManager = IsValid(LocalPlayer)
+		? LocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
 	const UMD_UISettings* UISettings = UMD_UISettings::Get();
-	if (IsValid(UISettings) == false)
-	{
-		return false;
-	}
+	if (!IsValid(LocalUIManager) || !IsValid(UISettings)) { return false; }
+
+	UCommonActivatableWidget* ActiveModalScreen = LocalUIManager->GetActiveScreen(MDGameplayTags::UI_Layer_Modal);
+	const FGameplayTag TransitionTag =
+		FGameplayTag::RequestGameplayTag(FName(TEXT("UI.Layer.Modal.Transition")), /*ErrorIfNotFound=*/false);
+	if (!IsValid(ActiveModalScreen) || !TransitionTag.IsValid()) { return false; }
 
 	// 활성 화면이 이미 클래스를 로드했으므로 Soft Class를 강제로 다시 로드하지 않는다.
-	TSoftClassPtr<UCommonActivatableWidget> TransitionScreenClass = UISettings->WidgetClassMap.FindRef(TransitionWidgetTag);
-	UClass* LoadedTransitionScreenClass = TransitionScreenClass.Get();
-	if (IsValid(LoadedTransitionScreenClass) == false)
-	{
-		return false;
-	}
-
-	// 활성 Modal 화면이 설정에 등록된 Transition 클래스인지 비교한다.
-	bool bIsTransitionScreenActive = ActiveModalScreen->GetClass() == LoadedTransitionScreenClass;
-	return bIsTransitionScreenActive;
+	// 아직 로드되지 않았다면 그 화면일 리 없으므로 false로 떨어지는 것이 맞다.
+	const UClass* TransitionScreenClass = UISettings->WidgetClassMap.FindRef(TransitionTag).Get();
+	return TransitionScreenClass && ActiveModalScreen->GetClass() == TransitionScreenClass;
 }
 
 // 세션 작업이 실패하면 트래블이 없어 준비 판정이 시작되지 않는다. 화면이 남으므로
