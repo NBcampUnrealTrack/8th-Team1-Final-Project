@@ -19,6 +19,8 @@ class UMD_ScrapeFocusReticleWidget;
 class UMD_SiteDefinition;
 class UMD_MerchantSubsystem;
 class UGameplayEffect;
+class AMD_CuttableWall;
+class AMD_WallUtility;
 
 UCLASS()
 class MARINEDEMOLITION_API AMD_PlayerController : public APlayerController
@@ -238,6 +240,9 @@ private:
 	/* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 private:
 	
+	/** 치트가 조준선·주변에서 대상을 찾는 기본 반경 (20m) */
+	static constexpr float DefaultCheatSearchRadiusCm = 2000.0f;
+
 	UMD_MerchantSubsystem* GetMerchantSubsystem() const;
 
 	UFUNCTION(Server, Reliable)
@@ -248,6 +253,32 @@ private:
 
 	UFUNCTION(Server, Reliable)
 	void ServerBeginDay(int32 Day);
+
+	/**
+	 * 조준한 격벽(없으면 가장 가까운 오염된 격벽) 하나의 오염을 100% 제거한다.
+	 * 명령 1회당 벽 1개. 헤라질을 건너뛰고 다음 단계를 확인할 때 쓴다.
+	 */
+	UFUNCTION(Exec)
+	void MD_CleanWall();
+
+	UFUNCTION(Server, Reliable)
+	void ServerCleanWall(AMD_CuttableWall* Wall);
+
+	/** 조준선 우선, 실패하면 반경 내 가장 가까운 오염된 격벽을 찾는다 */
+	AMD_CuttableWall* FindWallToClean(float SearchRadiusCm = DefaultCheatSearchRadiusCm) const;
+
+	/**
+	 * 조준한 인프라(없으면 가장 가까운 파손된 인프라) 하나를 수리 상태로 만든다.
+	 * 명령 1회당 1개. 배관벽은 배관을 4개 품으므로 여러 번 불러야 할 수 있다.
+	 */
+	UFUNCTION(Exec)
+	void MD_RepairUtility();
+
+	UFUNCTION(Server, Reliable)
+	void ServerRepairUtility(AMD_WallUtility* Utility);
+
+	/** 조준선 우선, 실패하면 반경 내 가장 가까운 파손된 인프라를 찾는다 */
+	AMD_WallUtility* FindUtilityToRepair(float SearchRadiusCm = DefaultCheatSearchRadiusCm) const;
 
 	UFUNCTION(Exec)
 	void MD_AcceptRepeat(int32 Index);
