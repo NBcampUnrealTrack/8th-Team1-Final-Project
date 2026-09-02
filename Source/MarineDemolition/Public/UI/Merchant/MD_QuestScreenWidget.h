@@ -56,9 +56,9 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
 	TObjectPtr<UMD_LoreCatalog> LoreCatalog;
 
-	// 로어 탭에 전달할 플레이어의 현장별 수집 원장
+	// 로어 탭에 전달할 플레이어의 전역 수집 원장
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
-	TArray<FMD_LoreSiteProgress> LoreSiteProgressList;
+	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds;
 
 	// 현재 로어 탭을 표시 중인지 저장하는 선택 상태
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
@@ -95,7 +95,7 @@ public:
 
 	// 현재 현장의 카탈로그와 로어 수집 원장을 함께 적용하는 함수
 	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
-	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FMD_LoreSiteProgress>& InSiteProgressList);
+	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds);
 
 	// 퀘스트 하위 위젯과 로어 하위 위젯을 현재 캐시로 갱신하는 함수
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")

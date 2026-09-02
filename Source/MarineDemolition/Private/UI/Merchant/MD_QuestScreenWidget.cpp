@@ -105,31 +105,16 @@ void UMD_QuestScreenWidget::SetRepeatQuests(const TArray<FMD_RepeatQuestState>& 
 	}
 }
 
-void UMD_QuestScreenWidget::SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FMD_LoreSiteProgress>& InSiteProgressList)
+void UMD_QuestScreenWidget::SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds)
 {
-	// 현재 현장의 정적 로어 정의와 플레이어별 수집 원장 저장
+	// 현재 현장의 정적 로어 정의와 플레이어별 전역 수집 원장 저장
 	LoreCatalog = InLoreCatalog;
-	LoreSiteProgressList = InSiteProgressList;
+	DiscoveredLoreAssetIds = InDiscoveredLoreAssetIds;
 
-	// 현재 카탈로그와 일치하는 현장 진행 정보 선택
-	FMD_LoreSiteProgress SiteProgress;
-	if (IsValid(LoreCatalog) == true)
-	{
-		SiteProgress.SiteId = LoreCatalog->SiteId;
-		for (FMD_LoreSiteProgress& CurrentSiteProgress : LoreSiteProgressList)
-		{
-			if (CurrentSiteProgress.SiteId == LoreCatalog->SiteId)
-			{
-				SiteProgress = CurrentSiteProgress;
-				break;
-			}
-		}
-	}
-
-	// 디자이너 로어 탭이 준비된 경우 선택된 현장 데이터 즉시 반영
+	// 디자이너 로어 탭이 준비된 경우 현재 카탈로그와 전역 원장을 즉시 반영
 	if (IsValid(WBP_MD_LoreTab) == true)
 	{
-		WBP_MD_LoreTab->SetLoreData(LoreCatalog, SiteProgress);
+		WBP_MD_LoreTab->SetLoreData(LoreCatalog, DiscoveredLoreAssetIds);
 	}
 }
 
@@ -142,7 +127,7 @@ void UMD_QuestScreenWidget::RefreshDisplay()
 		WBP_MD_QuestTab->SetRepeatQuests(RepeatQuests);
 	}
 	// 현재 로어 카탈로그와 수집 원장을 하위 로어 탭에 다시 적용
-	SetLoreData(LoreCatalog, LoreSiteProgressList);
+	SetLoreData(LoreCatalog, DiscoveredLoreAssetIds);
 }
 
 void UMD_QuestScreenWidget::ShowQuestTab()

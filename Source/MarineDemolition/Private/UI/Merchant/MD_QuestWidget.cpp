@@ -89,15 +89,25 @@ void UMD_QuestWidget::SetRepeatQuests(const TArray<FMD_RepeatQuestState>& InRepe
 	RefreshDisplay();
 }
 
-void UMD_QuestWidget::SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds)
+void UMD_QuestWidget::RefreshDisplay()
 {
-	// 현재 탐사 현장의 정적 정의와 플레이어별 수집 원장을 함께 보관하는 처리
-	LoreCatalog = InLoreCatalog;
-	DiscoveredLoreAssetIds = InDiscoveredLoreAssetIds;
-	// 이미 열린 UI에서 수집 변경을 즉시 반영하기 위한 전용 탭 갱신
-	EnsureLoreTabWidget();
-	RefreshLoreDisplay();
+	// 목록 재구성과 선택 상세 갱신을 동일 데이터 시점에 수행
+	RebuildQuestList();
 }
+
+
+void UMD_QuestWidget::SelectQuestCard(UMD_QuestCardWidget* QuestCard)
+{
+	// 현재 목록에 속하지 않은 카드가 상세 화면을 변경하지 못하도록 검증
+	SelectedQuestCard = nullptr;
+	if (IsValid(QuestCard) == true)
+	{
+		bool bContainsQuestCard = QuestCards.Contains(QuestCard);
+		if (bContainsQuestCard == true)
+		{
+			SelectedQuestCard = QuestCard;
+		}
+	}
 
 	// 선택 필수 그룹에서 대상 카드만 선택하여 나머지 카드를 자동 해제
 	if (IsValid(QuestCardButtonGroup) == true)
@@ -264,9 +274,43 @@ void UMD_QuestWidget::RefreshQuestDetail()
 	bool bMainQuest = false;
 	if (IsValid(SelectedQuestCard) == true)
 	{
-		// 카탈로그가 자신의 항목만 골라 표시하도록 전역 발견 원장을 그대로 전달한다.
-		LoreQuestTabWidget->SetLoreData(LoreCatalog, DiscoveredLoreAssetIds);
-		return;
+		bMainQuest = SelectedQuestCard->GetIsMainQuest();
+		if (bMainQuest == true)
+		{
+			FMD_MainQuestState QuestState = SelectedQuestCard->GetMainQuestState();
+			Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+			PhaseIndex = QuestState.CurrentPhaseIndex;
+			CurrentProgress = QuestState.CurrentProgress;
+			QuestTypeText = FText::FromString(TEXT("메인 퀘스트"));
+		}
+		else
+		{
+			FMD_RepeatQuestState QuestState = SelectedQuestCard->GetRepeatQuestState();
+			Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+			PhaseIndex = QuestState.CurrentPhaseIndex;
+			CurrentProgress = QuestState.CurrentProgress;
+			QuestTypeText = FText::FromString(TEXT("반복 퀘스트"));
+
+			// 반복 퀘스트 상태와 목표 달성 여부에 맞는 액션 버튼 구성
+			bool bHasDefinition = IsValid(Definition);
+			if (bHasDefinition == true)
+			{
+				bHasDefinition = Definition->HasPhase(PhaseIndex);
+			}
+			bool bObjectiveComplete = false;
+			if (bHasDefinition == true)
+			{
+				bObjectiveComplete = Definition->IsObjectiveComplete(PhaseIndex, CurrentProgress);
+			}
+			bShowAccept = QuestState.Status == EMD_RepeatQuestStatus::Offered;
+			bShowReject = QuestState.Status == EMD_RepeatQuestStatus::Offered;
+			bool bAccepted = QuestState.Status == EMD_RepeatQuestStatus::Accepted;
+			if (bAccepted == true)
+			{
+				bShowReward = bObjectiveComplete;
+				bShowGiveup = bObjectiveComplete == false;
+			}
+		}
 	}
 
 	// 유효한 현재 페이즈에서 상세 본문과 성공 보상 계산
@@ -275,9 +319,16 @@ void UMD_QuestWidget::RefreshQuestDetail()
 	{
 		bHasDefinition = Definition->HasPhase(PhaseIndex);
 	}
-
-	// 전역 로어 원장의 영구 누적 수집량을 안내에 사용한다.
-	int32 DiscoveredLoreCount = DiscoveredLoreAssetIds.Num();
+	if (bHasDefinition == true)
+	{
+		int32 RequiredCount = Definition->GetRequiredCount(PhaseIndex);
+		QuestNameText = Definition->QuestName;
+		QuestProgressText = FText::FromString(FString::Printf(TEXT("%d / %d"), CurrentProgress, RequiredCount));
+		QuestDescriptionText = Definition->GetHUDDescription(PhaseIndex);
+		AffinityRewardText = FText::FromString(FString::Printf(TEXT("%+.1f"), Definition->SuccessReward.Affinity));
+		ScoreRewardText = FText::AsNumber(Definition->SuccessReward.Score);
+		CreditRewardText = FText::AsNumber(Definition->SuccessReward.Credits);
+	}
 
 	// 계산된 상세 텍스트를 실제 디자이너 위젯에 반영
 	if (IsValid(Txt_DetailType) == true)
