@@ -5,6 +5,7 @@
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Net/UnrealNetwork.h"
 
 AMD_TrashItem::AMD_TrashItem()
 {
@@ -28,6 +29,13 @@ AMD_TrashItem::AMD_TrashItem()
 	// 산재 쓰레기는 종류와 무관하게 태그가 같으므로 코드에서 기본값을 준다
 	PickupMethodTag = MDGameplayTags::Interaction_Pickup_Physics;
 	StorageContentTag = MDGameplayTags::Resource_Storage_Content_Trash;
+}
+
+void AMD_TrashItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AMD_TrashItem, TrashKindId);
 }
 
 void AMD_TrashItem::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
@@ -81,6 +89,18 @@ FMD_TrashSortDescriptor AMD_TrashItem::GetTrashSortDescriptor_Implementation() c
 	return Descriptor;
 }
 
+void AMD_TrashItem::SetTrashKindId(const FName NewTrashKindId)
+{
+	if (TrashKindId == NewTrashKindId)
+	{
+		return;
+	}
+
+	TrashKindId = NewTrashKindId;
+	ApplyTrashKindRow();
+	ForceNetUpdate();
+}
+
 void AMD_TrashItem::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
@@ -91,6 +111,11 @@ void AMD_TrashItem::OnConstruction(const FTransform& Transform)
 TArray<FName> AMD_TrashItem::GetTrashKindIdOptions() const
 {
 	return UMD_TrashLibrary::GetTrashKindIds();
+}
+
+void AMD_TrashItem::OnRep_TrashKindId()
+{
+	ApplyTrashKindRow();
 }
 
 void AMD_TrashItem::ApplyTrashKindRow()

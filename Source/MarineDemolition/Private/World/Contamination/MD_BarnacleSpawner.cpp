@@ -5,6 +5,7 @@
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Math/RandomStream.h"
 #include "Math/RotationMatrix.h"
+#include "Misc/Guid.h"
 #include "Util/MD_LogUtility.h"
 #include "World/Contamination/MD_Barnacle.h"
 #include "World/Contamination/MD_BarnaclePlacementPolicy.h"
@@ -62,7 +63,16 @@ void AMD_BarnacleSpawner::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (bSpawnOnBeginPlay && HasAuthority())
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	// Blueprint가 초기 스폰을 나중에 호출하더라도 첫 자동 저장에는 새 게임 시드가
+	// 반드시 들어가야 하므로 서버 BeginPlay에서 먼저 확정한다.
+	InitializeRuntimePlacementSeed();
+
+	if (bSpawnOnBeginPlay)
 	{
 		SpawnBarnacles();
 	}
@@ -71,6 +81,13 @@ void AMD_BarnacleSpawner::BeginPlay()
 int32 AMD_BarnacleSpawner::SpawnBarnacles()
 {
 	if (!HasAuthority())
+	{
+		return 0;
+	}
+
+	// 초기 배치는 한 번만 구성한다. Blueprint에서 실수로 다시 호출해 기존 액터를
+	// 추적 목록 밖에 남기거나 Trace 후보를 오염시키지 않게 한다.
+	if (bHasSpawnedInitialPlacement)
 	{
 		return 0;
 	}
@@ -105,6 +122,8 @@ int32 AMD_BarnacleSpawner::SpawnBarnacles()
 		return 0;
 	}
 
+	bHasSpawnedInitialPlacement = true;
+
 	// 초기 배치는 항상 0번부터 시작한다. Day가 바뀌어도 같은 시드·같은 순번이라
 	// 제거 목록으로 걸러 낼 수 있다.
 	NextSpawnIndex = 0;
@@ -112,7 +131,7 @@ int32 AMD_BarnacleSpawner::SpawnBarnacles()
 
 	const int32 SpawnedCount = PlaceBarnacles(
 		BarnacleCount,
-		PlacementSeed,
+		GetEffectivePlacementSeed(),
 		0,
 		true);
 
@@ -149,6 +168,7 @@ int32 AMD_BarnacleSpawner::GrowBarnacles(
 {
 	if (!HasAuthority()
 		|| !BarnacleClass
+		|| !bHasSpawnedInitialPlacement
 		|| GrowthCount <= 0
 		|| (!bAllowFrontBackSurfaces
 			&& !bAllowLeftRightSurfaces
@@ -171,9 +191,12 @@ int32 AMD_BarnacleSpawner::GrowBarnacles(
 	// 시드를 어긋내야 초기 배치와 다른 자리에 돋는다. 같은 시드면 제거 목록에
 	// 걸려 아무 데도 못 붙는다.
 	// 증식분은 제거 목록을 보지 않는다. 새로 돋는 것이지 되살아나는 것이 아니다.
+	const uint32 GrowthPlacementSeed =
+		static_cast<uint32>(GetEffectivePlacementSeed())
+		+ static_cast<uint32>(GrowthSeedOffset);
 	return PlaceBarnacles(
 		AllowedCount,
-		PlacementSeed + GrowthSeedOffset,
+		static_cast<int32>(GrowthPlacementSeed),
 		NextSpawnIndex,
 		false);
 }
@@ -207,6 +230,108 @@ void AMD_BarnacleSpawner::RestoreRemovedSpawnIndices(
 			Barnacle->Destroy();
 		}
 	}
+}
+
+bool AMD_BarnacleSpawner::TryGetRuntimePlacementSeed(
+	int32& OutRuntimePlacementSeed) const
+{
+	if (PlacementSeedMode != EMD_BarnaclePlacementSeedMode::RandomPerNewGame
+		|| !bHasRuntimePlacementSeed)
+	{
+		return false;
+	}
+
+	OutRuntimePlacementSeed = RuntimePlacementSeed;
+	return true;
+}
+
+void AMD_BarnacleSpawner::RestorePersistentState(
+	const TArray<int32>& InRemovedSpawnIndices,
+	const bool bHasSavedRuntimePlacementSeed,
+	const int32 SavedRuntimePlacementSeed)
+{
+	if (!HasAuthority())
+	{
+		return;
+	}
+
+	if (PlacementSeedMode == EMD_BarnaclePlacementSeedMode::RandomPerNewGame)
+	{
+		// 구버전 기록에는 런타임 시드가 없다. 당시 배치는 PlacementSeed 고정값을
+		// 사용했으므로 그 값을 최초 런타임 시드로 승격해야 제거 순번이 어긋나지 않는다.
+		RuntimePlacementSeed = bHasSavedRuntimePlacementSeed
+			? SavedRuntimePlacementSeed
+			: PlacementSeed;
+		bHasRuntimePlacementSeed = true;
+	}
+	else
+	{
+		// Fixed는 세이브 값보다 현재 레벨의 에디터 설정을 정본으로 사용한다.
+		RuntimePlacementSeed = 0;
+		bHasRuntimePlacementSeed = false;
+	}
+
+	RemovedSpawnIndices.Reset();
+	for (const int32 RemovedSpawnIndex : InRemovedSpawnIndices)
+	{
+		if (RemovedSpawnIndex != INDEX_NONE)
+		{
+			RemovedSpawnIndices.Add(RemovedSpawnIndex);
+		}
+	}
+
+	// bSpawnOnBeginPlay=false인 Blueprint가 아직 초기 배치를 요청하지 않았다면
+	// 저장 상태만 주입하고, 나중의 첫 SpawnBarnacles 호출이 그 시드를 사용하게 한다.
+	if (!bHasSpawnedInitialPlacement)
+	{
+		return;
+	}
+
+	DestroySpawnedBarnaclesForRebuild();
+	bHasSpawnedInitialPlacement = false;
+	SpawnBarnacles();
+}
+
+void AMD_BarnacleSpawner::InitializeRuntimePlacementSeed()
+{
+	if (!HasAuthority()
+		|| PlacementSeedMode != EMD_BarnaclePlacementSeedMode::RandomPerNewGame
+		|| bHasRuntimePlacementSeed)
+	{
+		return;
+	}
+
+	// 게임 전역 RNG를 소비하면 다른 절차 생성 결과가 호출 순서에 따라 달라진다.
+	// GUID 해시는 이 스포너의 새 게임 시드만 독립적으로 만든다.
+	RuntimePlacementSeed = static_cast<int32>(GetTypeHash(FGuid::NewGuid()));
+	bHasRuntimePlacementSeed = true;
+}
+
+int32 AMD_BarnacleSpawner::GetEffectivePlacementSeed()
+{
+	if (PlacementSeedMode == EMD_BarnaclePlacementSeedMode::Fixed)
+	{
+		return PlacementSeed;
+	}
+
+	InitializeRuntimePlacementSeed();
+	return bHasRuntimePlacementSeed ? RuntimePlacementSeed : PlacementSeed;
+}
+
+void AMD_BarnacleSpawner::DestroySpawnedBarnaclesForRebuild()
+{
+	for (const TWeakObjectPtr<AMD_Barnacle>& BarnaclePtr : SpawnedBarnacles)
+	{
+		if (AMD_Barnacle* const Barnacle = BarnaclePtr.Get(); IsValid(Barnacle))
+		{
+			// Destroy가 프레임 끝에 마무리되더라도 이어지는 재배치 Trace를 막지 않게 한다.
+			Barnacle->SetActorEnableCollision(false);
+			Barnacle->Destroy();
+		}
+	}
+
+	SpawnedBarnacles.Reset();
+	NextSpawnIndex = 0;
 }
 
 int32 AMD_BarnacleSpawner::CountAliveBarnacles() const
@@ -405,10 +530,14 @@ int32 AMD_BarnacleSpawner::PlaceBarnacles(
 			continue;
 		}
 
-		Barnacle->InitializeFromSpawner(
-			this,
-			CurrentSpawnIndex,
-			MaximumDurability);
+		if (!Barnacle->InitializeFromSpawner(
+				this,
+				CurrentSpawnIndex,
+				MaximumDurability))
+		{
+			Barnacle->Destroy();
+			continue;
+		}
 		Barnacle->FinishSpawning(SpawnTransform);
 		if (!IsValid(Barnacle))
 		{
@@ -421,8 +550,6 @@ int32 AMD_BarnacleSpawner::PlaceBarnacles(
 				SurfaceHit.GetComponent(),
 				FAttachmentTransformRules::KeepWorldTransform);
 		}
-		// SpawnActor는 BeginPlay 뒤 반환될 수 있으므로 부착이 끝난 뒤 표면 등록을 확정한다.
-		Barnacle->RegisterWithScrapeSurface();
 
 		SpawnedBarnacles.Add(Barnacle);
 		++SpawnedCount;

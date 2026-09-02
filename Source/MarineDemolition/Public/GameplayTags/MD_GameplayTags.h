@@ -62,6 +62,9 @@ namespace MDGameplayTags
 
 	// ===== 평가 점수 이벤트 (기획 05 §1, 단가는 UMD_ScoreTableData) =====
 
+	/** 모든 쓰레기 정분류 카테고리의 공통 루트 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting);
+
 	/** 분리 정분류 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_Metal);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_General);

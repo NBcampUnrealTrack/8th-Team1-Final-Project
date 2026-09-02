@@ -1,14 +1,11 @@
 #include "World/Contamination/MD_Barnacle.h"
 
-#include "CollisionQueryParams.h"
-#include "CollisionShape.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Engine/OverlapResult.h"
 #include "Engine/World.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
+#include "Types/Material/MD_MaterialParameterNames.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "Util/MD_MaterialTintUtility.h"
 #include "World/Contamination/MD_BarnacleItem.h"
@@ -47,130 +44,7 @@ void AMD_Barnacle::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (IsValid(Mesh))
-	{
-		// 흔들림은 이 회전을 기준으로 오간다. 배치기가 법선 축으로 돌려 붙이므로
-		// 액터 회전이 아니라 메시의 부착 회전을 기준으로 잡아야 한다.
-		MeshRestRelativeRotation = Mesh->GetRelativeRotation();
-	}
-
 	ApplyRemovalProgressVisual();
-	RegisterWithScrapeSurface();
-}
-
-void AMD_Barnacle::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-	// 떨어져 나갔든 레벨이 내려갔든 표면에 남은 등록은 지운다.
-	// 남겨 두면 없는 따개비가 헤라를 계속 막는다.
-	UnregisterFromScrapeSurface();
-
-	Super::EndPlay(EndPlayReason);
-}
-
-bool AMD_Barnacle::RegisterWithScrapeSurface(
-	UMD_ScrapeSurfaceComponent* const PreferredSurface)
-{
-	UMD_ScrapeSurfaceComponent* const ExistingSurface =
-		RegisteredScrapeSurface.Get();
-	if (IsValid(ExistingSurface)
-		&& (!IsValid(PreferredSurface)
-			|| ExistingSurface == PreferredSurface))
-	{
-		return true;
-	}
-
-	UMD_ScrapeSurfaceComponent* Surface = PreferredSurface;
-	if (!IsValid(Surface))
-	{
-		// 배치기가 맞은 컴포넌트에 붙이므로 부착 부모가 가장 확실한 단서다.
-		const USceneComponent* const AttachParentComponent = GetRootComponent()
-			? GetRootComponent()->GetAttachParent()
-			: nullptr;
-		Surface = UMD_ScrapeSurfaceComponent::FindForPrimitiveComponent(
-			Cast<UPrimitiveComponent>(AttachParentComponent));
-	}
-
-	if (!Surface && IsValid(Mesh) && GetWorld())
-	{
-		// 손으로 놓은 따개비는 붙어 있지 않다. 밑동이 닿아 있을 만한 범위만 훑는다.
-		const float SearchRadius = FMath::Max(
-			1.0f,
-			static_cast<float>(Mesh->Bounds.SphereRadius));
-
-		TArray<FOverlapResult> Overlaps;
-		FCollisionObjectQueryParams ObjectQueryParams;
-		ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldStatic);
-		ObjectQueryParams.AddObjectTypesToQuery(ECC_WorldDynamic);
-
-		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MD_BarnacleSurfaceSearch), false);
-		QueryParams.AddIgnoredActor(this);
-
-		if (GetWorld()->OverlapMultiByObjectType(
-				Overlaps,
-				GetActorLocation(),
-				FQuat::Identity,
-				ObjectQueryParams,
-				FCollisionShape::MakeSphere(SearchRadius),
-				QueryParams))
-		{
-			for (const FOverlapResult& Overlap : Overlaps)
-			{
-				if (UMD_ScrapeSurfaceComponent* const OverlappedSurface =
-						UMD_ScrapeSurfaceComponent::FindForPrimitiveComponent(
-							Overlap.GetComponent()))
-				{
-					Surface = OverlappedSurface;
-					break;
-				}
-			}
-		}
-	}
-
-	if (Surface && Surface->RegisterScrapeObstacle(this))
-	{
-		if (IsValid(ExistingSurface) && ExistingSurface != Surface)
-		{
-			ExistingSurface->UnregisterScrapeObstacle(this);
-		}
-		RegisteredScrapeSurface = Surface;
-		return true;
-	}
-
-	return false;
-}
-
-void AMD_Barnacle::UnregisterFromScrapeSurface()
-{
-	if (UMD_ScrapeSurfaceComponent* const Surface =
-		RegisteredScrapeSurface.Get())
-	{
-		Surface->UnregisterScrapeObstacle(this);
-	}
-
-	RegisteredScrapeSurface.Reset();
-}
-
-float AMD_Barnacle::GetScrapeBlockRadiusCm() const
-{
-	if (!IsValid(Mesh)
-		|| !FMath::IsFinite(ScrapeBlockRadiusScale)
-		|| ScrapeBlockRadiusScale <= 0.0f)
-	{
-		return 0.0f;
-	}
-
-	// 벽면에 드리우는 크기는 법선 축을 뺀 나머지가 정한다. 구 반경을 그대로 쓰면
-	// 벽 밖으로 튀어나온 높이까지 막는 폭에 들어가 실제보다 넓게 막힌다.
-	const FVector BoxExtent = Mesh->Bounds.BoxExtent;
-	const double AlongNormal = FVector::DotProduct(
-		BoxExtent,
-		GetActorUpVector().GetAbs());
-
-	const double PlanarRadius = FMath::Sqrt(FMath::Max(
-		BoxExtent.SizeSquared() - AlongNormal * AlongNormal,
-		0.0));
-
-	return static_cast<float>(PlanarRadius) * ScrapeBlockRadiusScale;
 }
 
 float AMD_Barnacle::GetRemovalProgress() const
@@ -197,9 +71,7 @@ bool AMD_Barnacle::IsFullyRemoved() const
 	return GetRemovalProgress() >= 1.0f;
 }
 
-bool AMD_Barnacle::ApplyScrapeClickDamage(
-	const float DurabilityDamage,
-	const FVector& WobbleWorldDirection)
+bool AMD_Barnacle::ApplyScrapeClickDamage(const float DurabilityDamage)
 {
 	if (!HasAuthority() || IsFullyRemoved())
 	{
@@ -216,20 +88,8 @@ bool AMD_Barnacle::ApplyScrapeClickDamage(
 		return false;
 	}
 
-	// 거의 다 떨어진 따개비가 더 크게 흔들려야 "이제 곧 떨어진다"가 읽힌다.
-	// 도구 피해가 커질수록 같은 단계에서도 반응이 분명하게 보인다.
-	const float StrengthFromDamage = FMath::Clamp(
-		SafeDamage / GetMaximumDurability(),
-		0.0f,
-		1.0f);
-	const float NewWobbleScale = FMath::Clamp(
-		0.25f + 0.75f * StrengthFromDamage * (0.4f + 0.6f * GetRemovalProgress()),
-		0.0f,
-		1.0f);
-
-	MulticastPlayImpactWobble(
-		WobbleWorldDirection.GetSafeNormal(),
-		NewWobbleScale);
+	// 헤라 종류, 제거 진행도와 플레이어 방향에 관계없이 같은 피드백을 재생한다.
+	MulticastPlayImpactWobble();
 
 	AccumulatedRemovalWork = FMath::Min(
 		AccumulatedRemovalWork + SafeDamage,
@@ -255,49 +115,37 @@ void AMD_Barnacle::OnRep_RemovalWorkRequired()
 	ApplyRemovalProgressVisual();
 }
 
-void AMD_Barnacle::MulticastPlayImpactWobble_Implementation(
-	const FVector_NetQuantizeNormal ImpactWorldDirection,
-	const float InWobbleScale)
+void AMD_Barnacle::MulticastPlayImpactWobble_Implementation()
 {
-	StartImpactWobble(ImpactWorldDirection, InWobbleScale);
+	StartImpactWobble();
 }
 
-void AMD_Barnacle::StartImpactWobble(
-	const FVector& ImpactWorldDirection,
-	const float InWobbleScale)
+void AMD_Barnacle::StartImpactWobble()
 {
 	if (!IsValid(Mesh)
-		|| !FMath::IsFinite(InWobbleScale)
-		|| InWobbleScale <= 0.0f
-		|| ImpactWobbleDurationSeconds <= 0.0f)
+		|| !FMath::IsFinite(ImpactWobbleDurationSeconds)
+		|| ImpactWobbleDurationSeconds <= 0.0f
+		|| !FMath::IsFinite(ImpactWobbleFrequency)
+		|| ImpactWobbleFrequency <= 0.0f
+		|| !FMath::IsFinite(ImpactWobbleMaximumTiltDegrees)
+		|| ImpactWobbleMaximumTiltDegrees <= 0.0f)
 	{
 		return;
 	}
 
-	// 밑동이 벽에 붙어 있으므로 밀린 방향으로 미끄러지는 것이 아니라 기울어진다.
-	// 회전축은 부착 법선과 밀린 방향 둘 다에 수직인 축이다.
-	const FVector UpVector = GetActorUpVector();
-	const FVector PushDirection = ImpactWorldDirection.GetSafeNormal();
-	const FVector WorldAxis = FVector::CrossProduct(UpVector, PushDirection);
-
-	if (WorldAxis.IsNearlyZero())
+	if (WobbleElapsedSeconds < 0.0f)
 	{
-		// 정면에서 밀면 기울 방향이 정해지지 않는다. 흔들 이유가 없다.
-		return;
+		// 스포너는 FinishSpawning 뒤 표면에 부착한다. 첫 타격 시점에 최종 부착 회전을
+		// 잡아야 움직이는 부모나 회전된 가구에서도 정확한 자세로 돌아온다.
+		MeshRestRelativeRotation = Mesh->GetRelativeRotation();
+	}
+	else
+	{
+		// 연속 클릭도 항상 같은 기준 자세와 같은 곡선에서 다시 시작한다.
+		Mesh->SetRelativeRotation(MeshRestRelativeRotation);
 	}
 
-	// 상대 회전과 같은 프레임(부착 부모)으로 옮겨 둔다. 액터 자신의 현재 회전을
-	// 기준으로 잡으면 이미 기울어져 있는 동안 맞았을 때 축이 조금씩 어긋난다.
-	const USceneComponent* const AttachParent = Mesh->GetAttachParent();
-	const FQuat ParentWorldRotation = AttachParent
-		? AttachParent->GetSocketQuaternion(Mesh->GetAttachSocketName())
-		: FQuat::Identity;
-
-	WobbleLocalAxis =
-		ParentWorldRotation.Inverse().RotateVector(WorldAxis).GetSafeNormal();
-	WobbleScale = FMath::Clamp(InWobbleScale, 0.0f, 1.0f);
 	WobbleElapsedSeconds = 0.0f;
-
 	SetActorTickEnabled(true);
 }
 
@@ -332,15 +180,18 @@ void AMD_Barnacle::Tick(const float DeltaSeconds)
 		2.0f * UE_PI * ImpactWobbleFrequency * WobbleElapsedSeconds);
 
 	const float TiltDegrees =
-		ImpactWobbleMaximumTiltDegrees * WobbleScale * Decay * Decay * Oscillation;
+		ImpactWobbleMaximumTiltDegrees * Decay * Decay * Oscillation;
 
-	const FQuat WobbleQuat(WobbleLocalAxis, FMath::DegreesToRadians(TiltDegrees));
+	// 메시의 휴식 자세 기준 로컬 오른쪽 축을 사용해 타격 방향과 무관하게 흔든다.
+	const FQuat RestRotation = MeshRestRelativeRotation.Quaternion();
+	const FVector WobbleAxis = RestRotation.RotateVector(FVector::RightVector);
+	const FQuat WobbleQuat(WobbleAxis, FMath::DegreesToRadians(TiltDegrees));
 	Mesh->SetRelativeRotation(WobbleQuat * MeshRestRelativeRotation.Quaternion());
 }
 
 void AMD_Barnacle::ApplyRemovalProgressVisual()
 {
-	if (!IsValid(Mesh) || RemovalProgressParameterName.IsNone())
+	if (!IsValid(Mesh))
 	{
 		return;
 	}
@@ -355,20 +206,32 @@ void AMD_Barnacle::ApplyRemovalProgressVisual()
 		// 코드는 0~1 숫자 하나만 넘긴다. 어떻게 벗겨 보일지는 머티리얼이 정한다.
 		MDMaterialTint::SetScalarParameterChecked(
 			MeshMID,
-			RemovalProgressParameterName,
+			MDMaterialParameterNames::Barnacle::RemovalProgress,
 			GetRemovalProgress());
 	}
 }
 
-void AMD_Barnacle::InitializeFromSpawner(
+bool AMD_Barnacle::InitializeFromSpawner(
 	AMD_BarnacleSpawner* const InSpawner,
 	const int32 InSpawnIndex,
 	const int32 InMaximumDurability)
 {
+	if (!HasAuthority()
+		|| HasActorBegunPlay()
+		|| bInitializedFromSpawner
+		|| !IsValid(InSpawner)
+		|| InSpawnIndex < 0
+		|| InMaximumDurability < 1)
+	{
+		return false;
+	}
+
 	OwningSpawner = InSpawner;
 	SpawnIndex = InSpawnIndex;
-	RemovalWorkRequired = static_cast<float>(FMath::Max(1, InMaximumDurability));
+	RemovalWorkRequired = static_cast<float>(InMaximumDurability);
 	AccumulatedRemovalWork = 0.0f;
+	bInitializedFromSpawner = true;
+	return true;
 }
 
 void AMD_Barnacle::BreakOff()
@@ -421,8 +284,6 @@ void AMD_Barnacle::CheckForErrors()
 		return;
 	}
 
-	// 기획 02 §1: 따개비는 보통벽에만 붙는다. 내력·칸막이 세그먼트에는 두지 않는다.
-	// 배치를 잘못해도 게임은 정상 동작하므로 눈으로는 잡히지 않는다.
 	TArray<AActor*> OverlappingActors;
 	Mesh->GetOverlappingActors(OverlappingActors, AMD_CuttableWall::StaticClass());
 	if (OverlappingActors.IsEmpty())
