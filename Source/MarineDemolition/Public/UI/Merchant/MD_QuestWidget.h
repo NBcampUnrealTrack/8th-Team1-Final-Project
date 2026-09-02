@@ -25,9 +25,32 @@ class MARINEDEMOLITION_API UMD_QuestWidget : public UUserWidget
 {
 	GENERATED_BODY()
 
-protected:
-	virtual void NativeConstruct() override;
-	virtual void NativeDestruct() override;
+public:
+	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
+	void SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget) { OwningMerchantMenu = InMenuWidget; }
+
+	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
+	void SetMainQuests(const TArray<FMD_MainQuestState>& InMainQuests);
+
+	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
+	void SetRepeatQuests(const TArray<FMD_RepeatQuestState>& InRepeatQuests);
+
+	/** 현재 현장의 카탈로그와 로어 수집 원장을 코덱스 탭에 함께 적용하는 함수 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
+	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds);
+
+	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
+	void SelectTab(EMD_QuestTab InTab);
+
+	UFUNCTION(BlueprintPure, Category = "MD|Quest")
+	FORCEINLINE EMD_QuestTab GetSelectedTab() const { return SelectedTab; }
+
+	/** 탭 표시 + 메인/반복 목록을 모두 다시 그린다. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
+	void RefreshDisplay();
+
+	UPROPERTY(BlueprintAssignable, Category = "MD|Quest")
+	FMD_QuestBackRequest OnBackRequested;
 
 public:
 	// 선택된 반복 퀘스트의 수락 또는 보상 수령 요청 이벤트
@@ -83,9 +106,9 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UImage> Img_DetailType;
 
-	// 선택된 퀘스트의 메인 또는 반복 종류를 표시하는 텍스트
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
-	TObjectPtr<UTextBlock> Txt_DetailType;
+	/** 메인·반복 퀘스트와 분리된 코덱스 탭 표시용 전역 수집 정보 */
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
+	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds;
 
 	// 선택된 퀘스트 이름을 표시하는 텍스트
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))

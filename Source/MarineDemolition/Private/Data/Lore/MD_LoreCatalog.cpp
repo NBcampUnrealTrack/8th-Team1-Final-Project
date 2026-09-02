@@ -1,53 +1,69 @@
-﻿#include "Data/Lore/MD_LoreCatalog.h"
+#include "Data/Lore/MD_LoreCatalog.h"
 
-bool FMD_LoreDefinition::IsValidDefinition() const
-{
-	return LoreId.IsNone() == false && EntryName.IsEmpty() == false && EntryContent.IsEmpty() == false;
-}
+#include "Data/Lore/MD_LoreDefinition.h"
 
-bool UMD_LoreCatalog::FindLore(FName LoreId, FMD_LoreDefinition& OutLore) const
+UMD_LoreDefinition* UMD_LoreCatalog::GetLoreDefinition(int32 LoreIndex) const
 {
-	// 유효한 정의만 외부로 전달하여 잘못 입력된 카탈로그 데이터의 런타임 확산 방지
-	const FMD_LoreDefinition* FoundLore = FindLoreDefinition(LoreId);
-	if (FoundLore == nullptr || FoundLore->IsValidDefinition() == false)
+	// 카탈로그 범위를 벗어난 UI 인덱스가 Asset Manager 조회로 이어지지 않게 한다.
+	if (LoreEntries.IsValidIndex(LoreIndex) == false)
 	{
-		OutLore = FMD_LoreDefinition();
-		return false;
+		return nullptr;
 	}
 
-	OutLore = *FoundLore;
-	return true;
+	// 저장된 Asset ID를 공통 조회 경로에서 정의 에셋으로 해석한다.
+	FPrimaryAssetId LoreAssetId = LoreEntries[LoreIndex];
+	UMD_LoreDefinition* LoreDefinition = FindLoreByAssetId(LoreAssetId);
+	return LoreDefinition;
 }
 
-int32 UMD_LoreCatalog::GetLoreCount() const
+UMD_LoreDefinition* UMD_LoreCatalog::FindLoreByAssetId(FPrimaryAssetId LoreAssetId) const
 {
-	return LoreEntries.Num();
+	// 모든 호출부가 동일한 Asset Manager 조회 규칙을 사용하도록 정의 클래스의 공통 함수를 호출한다.
+	UMD_LoreDefinition* LoreDefinition = UMD_LoreDefinition::LoadDefinition(LoreAssetId);
+	return LoreDefinition;
 }
 
-EMD_LoreEntryState UMD_LoreCatalog::ResolveLoreState(FName LoreId, const TArray<FName>& DiscoveredLoreIds) const
+EMD_LoreEntryState UMD_LoreCatalog::ResolveLoreState(FPrimaryAssetId LoreAssetId, const TArray<FPrimaryAssetId>& DiscoveredLoreAssetIds) const
 {
-	// 수집되지 않은 식별자는 코덱스에서 이름과 본문을 숨기는 미발견 상태
-	if (LoreId.IsNone() == true || DiscoveredLoreIds.Contains(LoreId) == false)
-	{
-		return EMD_LoreEntryState::Undiscovered;
-	}
-
-	const FMD_LoreDefinition* FoundLore = FindLoreDefinition(LoreId);
-	if (FoundLore == nullptr || FoundLore->IsValidDefinition() == false)
+	// 수집되지 않은 에셋은 코덱스에서 이름과 본문을 숨기는 미발견 상태로 처리한다.
+	if (LoreAssetId.IsValid() == false)
 	{
 		return EMD_LoreEntryState::Undiscovered;
 	}
 
-	// 암호화 조건이 없는 일반 기록물의 발견 즉시 전체 공개 상태
-	if (FoundLore->bEncryptedUntilPrerequisitesComplete == false)
+	if (DiscoveredLoreAssetIds.Contains(LoreAssetId) == false)
+	{
+		return EMD_LoreEntryState::Undiscovered;
+	}
+
+	// 발견된 태그가 유효한 정의 에셋과 연결되지 않으면 공개하지 않는다.
+	UMD_LoreDefinition* FoundLore = FindLoreByAssetId(LoreAssetId);
+	if (IsValid(FoundLore) == false)
+	{
+		return EMD_LoreEntryState::Undiscovered;
+	}
+
+	if (FoundLore->IsValidDefinition() == false)
+	{
+		return EMD_LoreEntryState::Undiscovered;
+	}
+
+	// 선행 Asset ID가 하나도 없으면 발견 즉시 전체 내용을 공개한다.
+	if (FoundLore->DecryptionPrerequisiteLoreIds.Num() <= 0)
 	{
 		return EMD_LoreEntryState::Decrypted;
 	}
 
-	// 하나라도 빠진 선행 기록이 있으면 본문을 계속 보호하는 암호화 상태
-	for (const FName PrerequisiteLoreId : FoundLore->DecryptionPrerequisiteLoreIds)
+	// 선행 로어 Asset ID가 하나라도 발견되지 않았으면 본문을 계속 보호한다.
+	for (FPrimaryAssetId PrerequisiteLoreAssetId : FoundLore->DecryptionPrerequisiteLoreIds)
 	{
-		if (DiscoveredLoreIds.Contains(PrerequisiteLoreId) == false)
+		UMD_LoreDefinition* PrerequisiteLore = FindLoreByAssetId(PrerequisiteLoreAssetId);
+		if (IsValid(PrerequisiteLore) == false)
+		{
+			return EMD_LoreEntryState::Encrypted;
+		}
+
+		if (DiscoveredLoreAssetIds.Contains(PrerequisiteLoreAssetId) == false)
 		{
 			return EMD_LoreEntryState::Encrypted;
 		}
@@ -58,101 +74,92 @@ EMD_LoreEntryState UMD_LoreCatalog::ResolveLoreState(FName LoreId, const TArray<
 
 bool UMD_LoreCatalog::ValidateCatalog(TArray<FText>& OutErrors) const
 {
+	// 이전 검증 결과가 다음 호출에 섞이지 않도록 출력 배열을 초기화한다.
 	OutErrors.Reset();
 
-	// 저장 키와 화면 제목을 안정적으로 제공하기 위한 현장 메타데이터 검사
-	if (SiteId.IsNone() == true)
-	{
-		OutErrors.Add(NSLOCTEXT("MDLoreValidation", "MissingSiteId", "로어 카탈로그의 SiteId가 비어 있습니다."));
-	}
+	// 코덱스 화면 제목을 안정적으로 제공하기 위한 현장 메타데이터를 검사한다.
 	if (SiteDisplayName.IsEmpty() == true)
 	{
 		OutErrors.Add(NSLOCTEXT("MDLoreValidation", "MissingSiteDisplayName", "로어 카탈로그의 현장 이름이 비어 있습니다."));
 	}
+
 	if (LoreEntries.Num() <= 0)
 	{
 		OutErrors.Add(NSLOCTEXT("MDLoreValidation", "EmptyLoreEntries", "로어 카탈로그에 기록물이 없습니다."));
 	}
-	// 에디터 메타데이터 범위를 우회한 음수 완성 보상이 원장에 적용되지 않도록 하는 검사
-	if (CompletionRewardCredits < 0)
-	{
-		OutErrors.Add(NSLOCTEXT("MDLoreValidation", "InvalidCompletionReward", "로어 카탈로그의 완성 보상이 음수입니다."));
-	}
 
-	// 선행 참조가 배열 순서와 무관하게 같은 카탈로그 항목을 가리키는지 확인하기 위한 식별자 집합
-	TSet<FName> KnownLoreIds;
-	for (const FMD_LoreDefinition& LoreEntry : LoreEntries)
+	// 중복 Asset ID를 검증하기 위한 집합을 구성한다.
+	TSet<FPrimaryAssetId> KnownLoreAssetIds;
+	for (FPrimaryAssetId LoreAssetId : LoreEntries)
 	{
-		if (LoreEntry.LoreId.IsNone() == true)
+		if (LoreAssetId.IsValid() == false)
 		{
-			OutErrors.Add(NSLOCTEXT("MDLoreValidation", "MissingLoreId", "식별자가 비어 있는 로어 기록물이 있습니다."));
+			OutErrors.Add(NSLOCTEXT("MDLoreValidation", "MissingLoreAssetId", "로어 카탈로그에 비어 있는 기록물 Asset ID가 있습니다."));
 			continue;
 		}
 
-		if (KnownLoreIds.Contains(LoreEntry.LoreId) == true)
+		if (KnownLoreAssetIds.Contains(LoreAssetId) == true)
 		{
-			OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "DuplicateLoreId", "중복된 로어 식별자입니다: {0}"), FText::FromName(LoreEntry.LoreId)));
+			OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "DuplicateLoreAssetId", "중복된 로어 Asset ID입니다: {0}"), FText::FromString(LoreAssetId.ToString())));
 			continue;
 		}
 
-		KnownLoreIds.Add(LoreEntry.LoreId);
+		KnownLoreAssetIds.Add(LoreAssetId);
+
+		UMD_LoreDefinition* LoreEntry = FindLoreByAssetId(LoreAssetId);
+		if (IsValid(LoreEntry) == false)
+		{
+			OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "MissingLoreDefinition", "등록된 Asset ID의 로어 정의를 찾을 수 없습니다: {0}"), FText::FromString(LoreAssetId.ToString())));
+			continue;
+		}
+
+		if (LoreEntry->IsValidDefinition() == false)
+		{
+			OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "InvalidLoreDefinition", "필수 데이터가 잘못된 로어 기록물입니다: {0}"), FText::FromString(LoreAssetId.ToString())));
+			continue;
+		}
+
 	}
 
-	// 표시 데이터와 암호화 설정이 런타임 상태 계산에 사용 가능한지 확인하는 항목별 검사
-	for (const FMD_LoreDefinition& LoreEntry : LoreEntries)
+	// 각 선행 Asset ID가 같은 카탈로그의 다른 로어 정의를 가리키는지 검사한다.
+	for (FPrimaryAssetId LoreAssetId : LoreEntries)
 	{
-		if (LoreEntry.IsValidDefinition() == false)
+		UMD_LoreDefinition* LoreEntry = FindLoreByAssetId(LoreAssetId);
+		if (IsValid(LoreEntry) == false)
 		{
-			OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "InvalidLoreDefinition", "필수 데이터가 잘못된 로어 기록물입니다: {0}"), FText::FromName(LoreEntry.LoreId)));
+			continue;
 		}
 
-		// 에디터 제한을 우회한 음수 개별 보상이 팀 크레딧을 차감하지 못하도록 하는 검사
-		if (LoreEntry.RewardCredits < 0)
+		TSet<FPrimaryAssetId> KnownPrerequisiteAssetIds;
+		for (FPrimaryAssetId PrerequisiteLoreAssetId : LoreEntry->DecryptionPrerequisiteLoreIds)
 		{
-			OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "InvalidLoreReward", "개별 보상이 음수인 로어 기록물입니다: {0}"), FText::FromName(LoreEntry.LoreId)));
-		}
-
-		if (LoreEntry.bEncryptedUntilPrerequisitesComplete == true && LoreEntry.DecryptionPrerequisiteLoreIds.Num() <= 0)
-		{
-			OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "MissingDecryptionPrerequisite", "암호화 선행 기록이 없는 로어 기록물입니다: {0}"), FText::FromName(LoreEntry.LoreId)));
-		}
-
-		if (LoreEntry.bEncryptedUntilPrerequisitesComplete == false && LoreEntry.DecryptionPrerequisiteLoreIds.Num() > 0)
-		{
-			OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "UnusedDecryptionPrerequisite", "암호화가 꺼져 있지만 선행 기록이 지정된 로어 기록물입니다: {0}"), FText::FromName(LoreEntry.LoreId)));
-		}
-
-		for (const FName PrerequisiteLoreId : LoreEntry.DecryptionPrerequisiteLoreIds)
-		{
-			if (PrerequisiteLoreId == LoreEntry.LoreId)
+			if (PrerequisiteLoreAssetId.IsValid() == false)
 			{
-				OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "SelfDecryptionPrerequisite", "자기 자신을 암호화 선행 기록으로 지정한 로어 기록물입니다: {0}"), FText::FromName(LoreEntry.LoreId)));
+				OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "MissingDecryptionPrerequisite", "비어 있는 암호화 선행 Asset ID가 있습니다: {0}"), FText::FromString(LoreAssetId.ToString())));
+				continue;
 			}
-			else if (KnownLoreIds.Contains(PrerequisiteLoreId) == false)
+
+			if (PrerequisiteLoreAssetId == LoreAssetId)
 			{
-				OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "UnknownDecryptionPrerequisite", "존재하지 않는 암호화 선행 기록입니다: {0} -> {1}"), FText::FromName(LoreEntry.LoreId), FText::FromName(PrerequisiteLoreId)));
+				OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "SelfDecryptionPrerequisite", "자기 자신을 암호화 선행 기록으로 지정했습니다: {0}"), FText::FromString(LoreAssetId.ToString())));
+				continue;
+			}
+
+			if (KnownPrerequisiteAssetIds.Contains(PrerequisiteLoreAssetId) == true)
+			{
+				OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "DuplicateDecryptionPrerequisite", "중복된 암호화 선행 Asset ID입니다: {0} -> {1}"), FText::FromString(LoreAssetId.ToString()), FText::FromString(PrerequisiteLoreAssetId.ToString())));
+				continue;
+			}
+
+			KnownPrerequisiteAssetIds.Add(PrerequisiteLoreAssetId);
+			if (KnownLoreAssetIds.Contains(PrerequisiteLoreAssetId) == false)
+			{
+				OutErrors.Add(FText::Format(NSLOCTEXT("MDLoreValidation", "UnknownDecryptionPrerequisite", "카탈로그에 없는 암호화 선행 Asset ID입니다: {0} -> {1}"), FText::FromString(LoreAssetId.ToString()), FText::FromString(PrerequisiteLoreAssetId.ToString())));
 			}
 		}
 	}
 
-	return OutErrors.Num() == 0;
-}
-
-const FMD_LoreDefinition* UMD_LoreCatalog::FindLoreDefinition(FName LoreId) const
-{
-	// 빈 식별자는 어떤 기록물도 대표하지 않으므로 배열 순회 전 조기 종료
-	if (LoreId.IsNone() == true)
-	{
-		return nullptr;
-	}
-
-	for (const FMD_LoreDefinition& LoreEntry : LoreEntries)
-	{
-		if (LoreEntry.LoreId == LoreId)
-		{
-			return &LoreEntry;
-		}
-	}
-
-	return nullptr;
+	// 검증 오류가 하나도 없을 때만 카탈로그를 사용할 수 있도록 결과를 반환한다.
+	bool bIsValidCatalog = OutErrors.Num() == 0;
+	return bIsValidCatalog;
 }
