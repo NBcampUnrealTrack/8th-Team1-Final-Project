@@ -96,6 +96,10 @@ namespace MDGameplayTags
 		"S급샘플. 퀘스트 보상 450 기준");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Score_Sorting,
+		"Score.Sorting",
+		"모든 쓰레기 정분류 카테고리의 공통 루트");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Score_Sorting_Metal,
 		"Score.Sorting.Metal",
 		"금속 정분류");
