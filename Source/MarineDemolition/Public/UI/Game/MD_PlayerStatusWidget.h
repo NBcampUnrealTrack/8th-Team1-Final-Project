@@ -33,6 +33,13 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadWrite)
 	int32 PreviousOxygenIndex = INDEX_NONE;
 
+	// 다음 감소 인덱스 경계부터 경고 애니메이션을 시작할 연속 인덱스 오차
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Oxygen", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	float OxygenDangerIndexThreshold = 0.2f;
+
+	// 반복 경고 애니메이션이 재생 중인 산소 위젯 인덱스
+	int32 DangerOxygenIndex = INDEX_NONE;
+
 protected:
 	// PlayerState/ASC 준비 전이면 0.5초 후 재시도
 	void TryBindToAbilitySystem();
@@ -43,10 +50,10 @@ protected:
 
 	void HandleOxygenChanged(const FOnAttributeChangeData& Data);
 
-	void RefreshOxygen();
+	void RefreshOxygen(bool bOxygenDecreasing);
 
 	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent)
-	void UpdateOxygenWidget(int32 NewOxygenIndex);
+	void UpdateOxygenWidget(int32 NewOxygenIndex, bool bPlayDangerAnimation);
 
 	FTimerHandle BindRetryTimerHandle;
 
