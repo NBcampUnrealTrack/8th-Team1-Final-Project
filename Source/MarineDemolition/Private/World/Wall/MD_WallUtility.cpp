@@ -222,6 +222,11 @@ void AMD_WallUtility::SetBroken(AActor* Cutter)
 	OnRep_UtilityState();
 }
 
+void AMD_WallUtility::DebugForceRepair(AActor* Repairer)
+{
+	SetRepaired(Repairer);
+}
+
 void AMD_WallUtility::SetRepaired(AActor* Repairer)
 {
 	if (!HasAuthority() || UtilityState != EMD_UtilityState::Broken)
@@ -241,6 +246,7 @@ void AMD_WallUtility::SetRepaired(AActor* Repairer)
 void AMD_WallUtility::OnRep_UtilityState()
 {
 	OnUtilityStateChangedVisual(UtilityState);
+	OnUtilityStateChangedLocal(UtilityState);
 }
 
 bool AMD_WallUtility::CanRepairWith(AActor* Interactor) const

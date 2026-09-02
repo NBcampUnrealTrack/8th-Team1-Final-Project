@@ -6,6 +6,44 @@
 AMD_PowerConduit::AMD_PowerConduit()
 {
 	RequiredRepairToolTag = MDGameplayTags::Ability_UtilityRepair_Insulation;
+
+	CutSoundTag = FGameplayTag::RequestGameplayTag(
+		TEXT("SFX.Hazard.Cable.Cut"), /*ErrorIfNotFound*/ false);
+	SparkLoopSoundTag = FGameplayTag::RequestGameplayTag(
+		TEXT("SFX.Hazard.Cable.SparkLoop"), /*ErrorIfNotFound*/ false);
+}
+
+void AMD_PowerConduit::OnUtilityStateChangedLocal(const EMD_UtilityState NewState)
+{
+	UWorld* const World = GetWorld();
+	UMD_AudioSubsystem* const Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr;
+	if (!Audio)
+	{
+		return;
+	}
+
+	if (NewState != EMD_UtilityState::Broken)
+	{
+		// 수리·초기 상태. 스파크가 돌고 있으면 끊는다. 무효 핸들이면 StopHandle 이 무시한다.
+		Audio->StopHandle(SparkLoopHandle, SparkStopFadeSeconds);
+		SparkLoopHandle = FMD_AudioHandle();
+		return;
+	}
+
+	// 파열 지점에서 재생한다. BreakLocation 은 복제 속성이고 RepNotify 보다 먼저 적용된다.
+	const FVector BreakWorldLocation = BreakLocation;
+
+	if (CutSoundTag.IsValid())
+	{
+		Audio->PlayEventAtLocation(CutSoundTag, BreakWorldLocation);
+	}
+
+	if (SparkLoopSoundTag.IsValid())
+	{
+		// 이미 돌고 있으면 겹치지 않게 먼저 끊는다.
+		Audio->StopHandle(SparkLoopHandle, 0.0f);
+		SparkLoopHandle = Audio->PlayEventAtLocation(SparkLoopSoundTag, BreakWorldLocation);
+	}
 }
 
 void AMD_PowerConduit::OnBroken(AActor* Cutter)
