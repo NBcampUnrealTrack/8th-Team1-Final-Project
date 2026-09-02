@@ -300,6 +300,9 @@ bool AMD_TrashSorter::ConsumeSortable(
 		return false;
 	}
 
+	// Destroy 뒤에는 Item을 읽을 수 없으므로 방송에 실을 값을 미리 잡아 둔다.
+	const TSubclassOf<AActor> ItemClass = Item->GetClass();
+
 	// Actor 소비가 실패하면 점수와 환급을 주지 않아 같은 물건의 중복 지급을 막는다.
 	if (!Item->Destroy())
 	{
@@ -313,6 +316,7 @@ bool AMD_TrashSorter::ConsumeSortable(
 	}
 
 	++SortedCount;
+	OnTrashSorted.Broadcast(ItemClass, Result.bCorrectSort, AcceptedCategory);
 	OutRefundCredits = Result.bCorrectSort ? FMath::Max(0, Result.RefundCredits) : 0;
 	return true;
 }

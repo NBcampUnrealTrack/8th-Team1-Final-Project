@@ -3,86 +3,88 @@
 
 #include "UI/Merchant/MD_QuestWidget.h"
 
-#include "Components/Button.h"
-#include "Components/PanelWidget.h"
+#include "Components/Image.h"
+#include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
-#include "Components/Widget.h"
-#include "Data/Lore/MD_LoreCatalog.h"
-#include "GameFramework/Pawn.h"
-#include "UI/Merchant/MD_LoreQuestTabWidget.h"
-#include "UI/Merchant/MD_MainQuestRowWidget.h"
+#include "Data/Merchant/MD_QuestDefinition.h"
+#include "Groups/CommonButtonGroupBase.h"
+#include "UI/MD_CommonButtonBase.h"
 #include "UI/Merchant/MD_QuestCardWidget.h"
-#include "UI/Merchant/MD_MerchantMenuWidget.h"
 
 void UMD_QuestWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	if (APlayerController* PC = GetOwningPlayer())
+	// 상세 패널 액션 버튼을 퀘스트 탭의 단일 처리 함수에 연결
+	if (IsValid(Btn_Accept) == true)
 	{
-		//PC->SetShowMouseCursor(true);
-		//PC->SetInputMode(FInputModeUIOnly());
-		//if (APawn* Pawn = PC->GetPawn())
-		//{
-		//	Pawn->DisableInput(PC);
-		//}
+		Btn_Accept->OnClicked().AddUObject(this, &UMD_QuestWidget::HandleAcceptClicked);
+	}
+	if (IsValid(Btn_Reject) == true)
+	{
+		Btn_Reject->OnClicked().AddUObject(this, &UMD_QuestWidget::HandleRejectClicked);
+	}
+	if (IsValid(Btn_Reward) == true)
+	{
+		Btn_Reward->OnClicked().AddUObject(this, &UMD_QuestWidget::HandleRewardClicked);
+	}
+	if (IsValid(Btn_Giveup) == true)
+	{
+		Btn_Giveup->OnClicked().AddUObject(this, &UMD_QuestWidget::HandleGiveupClicked);
 	}
 
-	if (IsValid(BTN_TabMain))
-	{
-		BTN_TabMain->OnClicked.AddDynamic(this, &UMD_QuestWidget::HandleTabMainClicked);
-	}
-	if (IsValid(BTN_TabRepeat))
-	{
-		BTN_TabRepeat->OnClicked.AddDynamic(this, &UMD_QuestWidget::HandleTabRepeatClicked);
-	}
-	if (IsValid(BTN_TabLore))
-	{
-		BTN_TabLore->OnClicked.AddDynamic(this, &UMD_QuestWidget::HandleTabLoreClicked);
-	}
-	if (IsValid(BTN_Back))
-	{
-		BTN_Back->OnClicked.AddDynamic(this, &UMD_QuestWidget::HandleBackClicked);
-	}
-
-	// 퀘스트 화면이 열릴 때 메뉴 패널을 숨긴다 (상점과 동일 원칙).
-	if (IsValid(OwningMerchantMenu))
-	{
-		OwningMerchantMenu->SetMenuPanelVisible(false);
-	}
-
-	// 블루프린트 로어 패널을 전용 위젯으로 교체하기 위한 최초 생성
-	EnsureLoreTabWidget();
+	// 에디터 기본값 또는 화면 생성 직후 전달된 데이터로 최초 목록 구성
 	RefreshDisplay();
 }
 
 void UMD_QuestWidget::NativeDestruct()
 {
-	if (IsValid(OwningMerchantMenu))
+	// 풀링 또는 재생성 시 동일 클릭 함수가 중복 연결되지 않도록 해제
+	if (IsValid(Btn_Accept) == true)
 	{
-		OwningMerchantMenu->SetMenuPanelVisible(true);
+		Btn_Accept->OnClicked().RemoveAll(this);
 	}
-	// 상인 메뉴가 남아 있으면 입력·커서 복구는 메뉴 쪽 NativeDestruct가 처리한다.
-	// 메뉴 없이 단독으로 띄운 경우에만 여기서 되돌린다 (상점 위젯과 동일 원칙).
-	//else if (APlayerController* PC = GetOwningPlayer())
-	//{
-	//	if (APawn* Pawn = PC->GetPawn())
-	//	{
-	//		Pawn->EnableInput(PC);
-	//	}
-	//}
+	if (IsValid(Btn_Reject) == true)
+	{
+		Btn_Reject->OnClicked().RemoveAll(this);
+	}
+	if (IsValid(Btn_Reward) == true)
+	{
+		Btn_Reward->OnClicked().RemoveAll(this);
+	}
+	if (IsValid(Btn_Giveup) == true)
+	{
+		Btn_Giveup->OnClicked().RemoveAll(this);
+	}
+
+	// 생성 카드가 보관한 탭 참조를 위젯 수명 종료 전에 해제
+	for (UMD_QuestCardWidget* QuestCard : QuestCards)
+	{
+		if (IsValid(QuestCard) == true)
+		{
+			QuestCard->OnClicked().RemoveAll(this);
+		}
+	}
+
+	// 위젯 수명 종료 후 생성 카드가 선택 그룹에 남지 않도록 참조 해제
+	if (IsValid(QuestCardButtonGroup) == true)
+	{
+		QuestCardButtonGroup->RemoveAll();
+	}
 
 	Super::NativeDestruct();
 }
 
 void UMD_QuestWidget::SetMainQuests(const TArray<FMD_MainQuestState>& InMainQuests)
 {
+	// 복제된 메인 퀘스트 상태를 화면 데이터로 교체
 	MainQuests = InMainQuests;
 	RefreshDisplay();
 }
 
 void UMD_QuestWidget::SetRepeatQuests(const TArray<FMD_RepeatQuestState>& InRepeatQuests)
 {
+	// 복제된 반복 퀘스트 상태를 화면 데이터로 교체
 	RepeatQuests = InRepeatQuests;
 	RefreshDisplay();
 }
@@ -97,246 +99,330 @@ void UMD_QuestWidget::SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<F
 	RefreshLoreDisplay();
 }
 
-void UMD_QuestWidget::SelectTab(EMD_QuestTab InTab)
-{
-	SelectedTab = InTab;
-	RefreshDisplay();
-}
-
-void UMD_QuestWidget::RefreshDisplay()
-{
-	if (IsValid(TXT_NoInspectionImpactNotice))
+	// 선택 필수 그룹에서 대상 카드만 선택하여 나머지 카드를 자동 해제
+	if (IsValid(QuestCardButtonGroup) == true)
 	{
-		// 세 탭 다 점검 통과와 무관한 보너스다 (`04` §5.5 공통 주의, `09` §0 원칙1).
-		TXT_NoInspectionImpactNotice->SetText(FText::FromString(TEXT("점검엔 영향 없음 — 전부 보너스")));
-	}
-
-	RebuildMainQuestList();
-	RebuildRepeatQuestList();
-	ApplyTabVisibility();
-}
-
-void UMD_QuestWidget::ApplyTabVisibility()
-{
-	if (IsValid(PNL_MainQuestList))
-	{
-		PNL_MainQuestList->SetVisibility(
-			SelectedTab == EMD_QuestTab::Main ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
-	if (IsValid(PNL_RepeatQuestList))
-	{
-		PNL_RepeatQuestList->SetVisibility(
-			SelectedTab == EMD_QuestTab::Repeat ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
-	if (IsValid(TXT_RepeatDeliveryNotice))
-	{
-		TXT_RepeatDeliveryNotice->SetVisibility(
-			SelectedTab == EMD_QuestTab::Repeat ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
-	if (IsValid(PNL_LoreTab))
-	{
-		PNL_LoreTab->SetVisibility(
-			SelectedTab == EMD_QuestTab::Lore ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-	}
-
-	if (IsValid(TXT_MainEmptyNotice))
-	{
-		TXT_MainEmptyNotice->SetVisibility(
-			SelectedTab == EMD_QuestTab::Main && MainQuests.Num() == 0
-				? ESlateVisibility::Visible
-				: ESlateVisibility::Collapsed);
-	}
-	if (IsValid(TXT_RepeatEmptyNotice))
-	{
-		TXT_RepeatEmptyNotice->SetVisibility(
-			SelectedTab == EMD_QuestTab::Repeat && RepeatQuests.Num() == 0
-				? ESlateVisibility::Visible
-				: ESlateVisibility::Collapsed);
-	}
-	if (IsValid(TXT_LoreEmptyNotice))
-	{
-		const bool bShowLoreTab = SelectedTab == EMD_QuestTab::Lore && IsValid(LoreQuestTabWidget) == true;
-		TXT_LoreEmptyNotice->SetVisibility(bShowLoreTab ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-		//TXT_LoreEmptyNotice->SetVisibility(bShowLoreEmpty ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
-		//if (bShowLoreEmpty)
-		//{
-		//	TXT_LoreEmptyNotice->SetText(FText::FromString(TEXT("코덱스 데이터가 아직 연결되지 않았다.")));
-		//}
-	}
-
-	// 패널 타이틀은 탭 공통으로 고정하지 않는다 — 로어 탭은 "퀘스트"가 아니라
-	// "수집물 목록"에 가깝게 표기한다 (`04` §5.5 공통 주의).
-	if (IsValid(TXT_PanelTitle))
-	{
-		switch (SelectedTab)
+		if (IsValid(SelectedQuestCard) == true)
 		{
-		case EMD_QuestTab::Main:
-			TXT_PanelTitle->SetText(FText::FromString(TEXT("메인 퀘스트")));
-			break;
-		case EMD_QuestTab::Repeat:
-			TXT_PanelTitle->SetText(FText::FromString(TEXT("반복 퀘스트")));
-			break;
-		case EMD_QuestTab::Lore:
-			TXT_PanelTitle->SetText(FText::FromString(TEXT("기록 보관함 (코덱스)")));
-			break;
+			int32 QuestCardIndex = QuestCardButtonGroup->FindButtonIndex(SelectedQuestCard);
+			if (QuestCardIndex != INDEX_NONE)
+			{
+				QuestCardButtonGroup->SelectButtonAtIndex(QuestCardIndex, false);
+			}
 		}
 	}
+	else
+	{
+		// 그룹 생성 실패 시에도 기존 단일 선택 동작을 유지하는 예비 처리
+		for (UMD_QuestCardWidget* CurrentQuestCard : QuestCards)
+		{
+			if (IsValid(CurrentQuestCard) == true)
+			{
+				bool bSelected = CurrentQuestCard == SelectedQuestCard;
+				CurrentQuestCard->SetIsSelected(bSelected, false);
+			}
+		}
+	}
+
+	RefreshQuestDetail();
 }
 
-void UMD_QuestWidget::RefreshLoreDisplay()
+void UMD_QuestWidget::RebuildQuestList()
 {
-	// 기존 로어 패널이 준비된 시점에만 전용 표시 경로를 사용하기 위한 생성 보장
-	EnsureLoreTabWidget();
-	if (IsValid(LoreQuestTabWidget) == true)
+	// 디자이너 필수 스크롤 목록이 유효하지 않으면 생성 작업 중단
+	if (IsValid(SB_QuestList) == false)
+	{
+		return;
+	}
+
+	// 데이터 갱신 후에도 같은 종류와 인덱스의 선택을 복원하기 위한 값 보관
+	bool bHadSelection = IsValid(SelectedQuestCard) == true;
+	bool bSelectedMainQuest = bHadSelection == true ? SelectedQuestCard->GetIsMainQuest() : true;
+	int32 SelectedQuestIndex = bHadSelection == true ? SelectedQuestCard->GetQuestIndex() : INDEX_NONE;
+
+	// 모든 퀘스트 카드를 동일한 선택 필수 그룹에 등록하기 위한 그룹 준비
+	if (IsValid(QuestCardButtonGroup) == false)
+	{
+		QuestCardButtonGroup = NewObject<UCommonButtonGroupBase>(this);
+	}
+	if (IsValid(QuestCardButtonGroup) == true)
+	{
+		QuestCardButtonGroup->RemoveAll();
+		QuestCardButtonGroup->SetSelectionRequired(true);
+	}
+
+	// 기존 카드의 클릭 연결을 해제하고 디자이너 목업을 실제 데이터 카드로 교체
+	for (UMD_QuestCardWidget* QuestCard : QuestCards)
+	{
+		if (IsValid(QuestCard) == true)
+		{
+			QuestCard->OnClicked().RemoveAll(this);
+		}
+	}
+	SB_QuestList->ClearChildren();
+	QuestCards.Empty();
+	SelectedQuestCard = nullptr;
+
+	// 카드 클래스가 지정되지 않은 화면에서는 빈 목록과 상세 상태 유지
+	if (QuestCardClass == nullptr)
+	{
+		RefreshQuestDetail();
+		return;
+	}
+
+	// 메인 퀘스트를 원본 배열 순서대로 목록 앞부분에 생성
+	for (int32 QuestIndex = 0; QuestIndex < MainQuests.Num(); ++QuestIndex)
+	{
+		UMD_QuestCardWidget* QuestCard = CreateWidget<UMD_QuestCardWidget>(this, QuestCardClass);
+		if (IsValid(QuestCard) == false)
+		{
+			continue;
+		}
+
+		QuestCard->SetMainQuest(QuestIndex, MainQuests[QuestIndex]);
+		// 메인 퀘스트 카드를 단일 선택 그룹에 등록
+		if (IsValid(QuestCardButtonGroup) == true)
+		{
+			QuestCardButtonGroup->AddWidget(QuestCard);
+		}
+		QuestCard->OnClicked().AddUObject(this, &UMD_QuestWidget::HandleQuestCardClicked, QuestCard);
+		SB_QuestList->AddChild(QuestCard);
+		QuestCards.Add(QuestCard);
+	}
+
+	// 반복 퀘스트를 원본 배열 순서대로 메인 퀘스트 뒤에 생성
+	for (int32 QuestIndex = 0; QuestIndex < RepeatQuests.Num(); ++QuestIndex)
+	{
+		UMD_QuestCardWidget* QuestCard = CreateWidget<UMD_QuestCardWidget>(this, QuestCardClass);
+		if (IsValid(QuestCard) == false)
+		{
+			continue;
+		}
+
+		QuestCard->SetRepeatQuest(QuestIndex, RepeatQuests[QuestIndex]);
+		// 반복 퀘스트 카드를 메인 퀘스트 카드와 같은 단일 선택 그룹에 등록
+		if (IsValid(QuestCardButtonGroup) == true)
+		{
+			QuestCardButtonGroup->AddWidget(QuestCard);
+		}
+		QuestCard->OnClicked().AddUObject(this, &UMD_QuestWidget::HandleQuestCardClicked, QuestCard);
+		SB_QuestList->AddChild(QuestCard);
+		QuestCards.Add(QuestCard);
+	}
+
+	// 이전 선택과 같은 카드가 남아 있으면 우선 복원
+	UMD_QuestCardWidget* QuestCardToSelect = nullptr;
+	for (UMD_QuestCardWidget* QuestCard : QuestCards)
+	{
+		if (IsValid(QuestCard) == false)
+		{
+			continue;
+		}
+		bool bMainQuestCard = QuestCard->GetIsMainQuest();
+		if (bMainQuestCard == bSelectedMainQuest)
+		{
+			int32 QuestIndex = QuestCard->GetQuestIndex();
+			if (QuestIndex == SelectedQuestIndex)
+			{
+				QuestCardToSelect = QuestCard;
+				break;
+			}
+		}
+	}
+
+	// 복원할 선택이 없으면 첫 번째 퀘스트를 기본 상세 대상으로 사용
+	if (IsValid(QuestCardToSelect) == false)
+	{
+		int32 QuestCardCount = QuestCards.Num();
+		if (QuestCardCount > 0)
+		{
+			QuestCardToSelect = QuestCards[0];
+		}
+	}
+	SelectQuestCard(QuestCardToSelect);
+}
+
+void UMD_QuestWidget::RefreshQuestDetail()
+{
+	// 선택된 카드가 없을 때 사용할 빈 상세 표시 값
+	FText QuestTypeText = FText::GetEmpty();
+	FText QuestNameText = FText::FromString(TEXT("선택된 퀘스트 없음"));
+	FText QuestProgressText = FText::GetEmpty();
+	FText QuestDescriptionText = FText::FromString(TEXT("퀘스트를 선택하면 상세 정보가 표시됩니다."));
+	FText AffinityRewardText = FText::FromString(TEXT("-"));
+	FText ScoreRewardText = FText::FromString(TEXT("-"));
+	FText CreditRewardText = FText::FromString(TEXT("-"));
+	bool bShowAccept = false;
+	bool bShowReject = false;
+	bool bShowReward = false;
+	bool bShowGiveup = false;
+
+	// 선택 카드의 종류에 맞는 상태와 원본 퀘스트 정의 조회
+	UMD_QuestDefinition* Definition = nullptr;
+	int32 PhaseIndex = 0;
+	int32 CurrentProgress = 0;
+	bool bMainQuest = false;
+	if (IsValid(SelectedQuestCard) == true)
 	{
 		// 카탈로그가 자신의 항목만 골라 표시하도록 전역 발견 원장을 그대로 전달한다.
 		LoreQuestTabWidget->SetLoreData(LoreCatalog, DiscoveredLoreAssetIds);
 		return;
 	}
 
-	if (IsValid(TXT_LoreEmptyNotice) == false)
+	// 유효한 현재 페이즈에서 상세 본문과 성공 보상 계산
+	bool bHasDefinition = IsValid(Definition);
+	if (bHasDefinition == true)
 	{
-		return;
+		bHasDefinition = Definition->HasPhase(PhaseIndex);
 	}
 
 	// 전역 로어 원장의 영구 누적 수집량을 안내에 사용한다.
 	int32 DiscoveredLoreCount = DiscoveredLoreAssetIds.Num();
 
-	// 현재 연결된 단일 텍스트 영역에서 영구 누적 로어 수집량을 즉시 확인하기 위한 표시
-	FText LoreProgressText = DiscoveredLoreCount > 0 ? FText::Format(FText::FromString(TEXT("수집한 기록물: {0}개")), FText::AsNumber(DiscoveredLoreCount)) : FText::FromString(TEXT("아직 수집한 기록물이 없다."));
-	TXT_LoreEmptyNotice->SetText(LoreProgressText);
-}
-
-void UMD_QuestWidget::EnsureLoreTabWidget()
-{
-	// 중복 생성과 불완전한 블루프린트 구성에서의 위젯 생성을 차단하는 검증
-	if (IsValid(LoreQuestTabWidget) == true || IsValid(PNL_LoreTab) == false || LoreQuestTabClass == nullptr)
+	// 계산된 상세 텍스트를 실제 디자이너 위젯에 반영
+	if (IsValid(Txt_DetailType) == true)
 	{
-		return;
+		Txt_DetailType->SetText(QuestTypeText);
+	}
+	if (IsValid(Txt_DetailName) == true)
+	{
+		Txt_DetailName->SetText(QuestNameText);
+	}
+	if (IsValid(Txt_DetailProgress) == true)
+	{
+		Txt_DetailProgress->SetText(QuestProgressText);
+	}
+	if (IsValid(Txt_DetailDescription) == true)
+	{
+		Txt_DetailDescription->SetText(QuestDescriptionText);
+	}
+	if (IsValid(Txt_AffinityReward) == true)
+	{
+		Txt_AffinityReward->SetText(AffinityRewardText);
+	}
+	if (IsValid(Txt_ScoreReward) == true)
+	{
+		Txt_ScoreReward->SetText(ScoreRewardText);
+	}
+	if (IsValid(Txt_CreditReward) == true)
+	{
+		Txt_CreditReward->SetText(CreditRewardText);
 	}
 
-	// 퀘스트 화면 수명 동안 재사용할 로어 전용 탭 인스턴스
-	LoreQuestTabWidget = CreateWidget<UMD_LoreQuestTabWidget>(this, LoreQuestTabClass);
-	if (IsValid(LoreQuestTabWidget) == false)
+	// 디자이너가 종류별 아이콘을 지정한 경우에만 상세 아이콘 교체
+	if (IsValid(Img_DetailType) == true)
 	{
-		return;
-	}
-
-	// 기존 안내용 목업을 실제 로어 탭으로 교체하기 위한 패널 구성
-	PNL_LoreTab->ClearChildren();
-	PNL_LoreTab->AddChild(LoreQuestTabWidget);
-}
-
-void UMD_QuestWidget::RebuildMainQuestList()
-{
-	if (!IsValid(PNL_MainQuestList))
-	{
-		return;
-	}
-
-	PNL_MainQuestList->ClearChildren();
-
-	if (IsValid(TXT_MainEmptyNotice))
-	{
-		TXT_MainEmptyNotice->SetVisibility(MainQuests.Num() > 0 ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
-		if (MainQuests.Num() == 0)
+		if (IsValid(SelectedQuestCard) == true)
 		{
-			TXT_MainEmptyNotice->SetText(FText::FromString(TEXT("아직 계약이 시작되지 않았다.")));
+			FSlateBrush QuestIcon = bMainQuest == true ? MainQuestIcon : RepeatQuestIcon;
+			UObject* QuestIconResource = QuestIcon.GetResourceObject();
+			if (IsValid(QuestIconResource) == true)
+			{
+				Img_DetailType->SetBrush(QuestIcon);
+			}
 		}
 	}
 
-	if (!MainQuestRowClass)
+	// 선택된 반복 퀘스트 상태에 맞는 액션만 노출
+	if (IsValid(Btn_Accept) == true)
+	{
+		Btn_Accept->SetVisibility(bShowAccept == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (IsValid(Btn_Reject) == true)
+	{
+		Btn_Reject->SetVisibility(bShowReject == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (IsValid(Btn_Reward) == true)
+	{
+		Btn_Reward->SetVisibility(bShowReward == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+	if (IsValid(Btn_Giveup) == true)
+	{
+		Btn_Giveup->SetVisibility(bShowGiveup == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+	}
+}
+
+void UMD_QuestWidget::HandleQuestCardClicked(UMD_QuestCardWidget* QuestCard)
+{
+	SelectQuestCard(QuestCard);
+}
+
+void UMD_QuestWidget::HandleAcceptClicked()
+{
+	// 메인 퀘스트 또는 제시 상태가 아닌 반복 퀘스트의 수락 요청 차단
+	if (IsValid(SelectedQuestCard) == false)
 	{
 		return;
 	}
-
-	// 배열 순서 = Day 순서 (기획 `09` §1: Day1→2→3). 항상 세로 전체를 나열하고
-	// 각 행이 자기 상태(잠김/진행중/완료)에 맞춰 펼침 여부를 스스로 결정한다.
-	for (const FMD_MainQuestState& MainQuest : MainQuests)
-	{
-		UMD_MainQuestRowWidget* Row = CreateWidget<UMD_MainQuestRowWidget>(this, MainQuestRowClass);
-		if (!IsValid(Row))
-		{
-			continue;
-		}
-
-		Row->SetMainQuest(MainQuest);
-		PNL_MainQuestList->AddChild(Row);
-	}
-}
-
-void UMD_QuestWidget::RebuildRepeatQuestList()
-{
-	if (!IsValid(PNL_RepeatQuestList))
+	bool bMainQuest = SelectedQuestCard->GetIsMainQuest();
+	if (bMainQuest == true)
 	{
 		return;
 	}
-
-	PNL_RepeatQuestList->ClearChildren();
-
-	if (IsValid(TXT_RepeatEmptyNotice))
-	{
-		TXT_RepeatEmptyNotice->SetVisibility(RepeatQuests.Num() > 0 ? ESlateVisibility::Collapsed : ESlateVisibility::Visible);
-		if (RepeatQuests.Num() == 0)
-		{
-			// 유효한 후보가 없거나 현장의 추첨 수량이 0인 경우를 함께 안내하는 문구
-			TXT_RepeatEmptyNotice->SetText(FText::FromString(TEXT("현재 수령 가능한 반복 퀘스트가 없다.")));
-		}
-	}
-
-	if (!RepeatQuestCardClass)
+	FMD_RepeatQuestState QuestState = SelectedQuestCard->GetRepeatQuestState();
+	if (QuestState.Status != EMD_RepeatQuestStatus::Offered)
 	{
 		return;
 	}
+	OnRepeatAcceptRequested.Broadcast(SelectedQuestCard->GetQuestIndex());
+}
 
-	for (int32 Index = 0; Index < RepeatQuests.Num(); ++Index)
+void UMD_QuestWidget::HandleRejectClicked()
+{
+	// 제시된 반복 퀘스트에서만 거절 요청 전달
+	if (IsValid(SelectedQuestCard) == false)
 	{
-		UMD_QuestCardWidget* Card = CreateWidget<UMD_QuestCardWidget>(this, RepeatQuestCardClass);
-		if (!IsValid(Card))
-		{
-			continue;
-		}
-
-		Card->SetQuest(Index, RepeatQuests[Index]);
-		Card->OnAcceptRequested.AddDynamic(this, &UMD_QuestWidget::HandleCardAcceptRequested);
-		Card->OnDeclineRequested.AddDynamic(this, &UMD_QuestWidget::HandleCardDeclineRequested);
-		Card->OnAbandonRequested.AddDynamic(this, &UMD_QuestWidget::HandleCardAbandonRequested);
-
-		PNL_RepeatQuestList->AddChild(Card);
+		return;
 	}
+	bool bMainQuest = SelectedQuestCard->GetIsMainQuest();
+	if (bMainQuest == true)
+	{
+		return;
+	}
+	FMD_RepeatQuestState QuestState = SelectedQuestCard->GetRepeatQuestState();
+	if (QuestState.Status != EMD_RepeatQuestStatus::Offered)
+	{
+		return;
+	}
+	OnRepeatDeclineRequested.Broadcast(SelectedQuestCard->GetQuestIndex());
 }
 
-void UMD_QuestWidget::HandleTabMainClicked()
+void UMD_QuestWidget::HandleRewardClicked()
 {
-	SelectTab(EMD_QuestTab::Main);
+	// 수락 상태의 반복 퀘스트만 기존 서버 정산 요청 경로로 전달
+	if (IsValid(SelectedQuestCard) == false)
+	{
+		return;
+	}
+	bool bMainQuest = SelectedQuestCard->GetIsMainQuest();
+	if (bMainQuest == true)
+	{
+		return;
+	}
+	FMD_RepeatQuestState QuestState = SelectedQuestCard->GetRepeatQuestState();
+	if (QuestState.Status != EMD_RepeatQuestStatus::Accepted)
+	{
+		return;
+	}
+	OnRepeatAcceptRequested.Broadcast(SelectedQuestCard->GetQuestIndex());
 }
 
-void UMD_QuestWidget::HandleTabRepeatClicked()
+void UMD_QuestWidget::HandleGiveupClicked()
 {
-	SelectTab(EMD_QuestTab::Repeat);
-}
-
-void UMD_QuestWidget::HandleTabLoreClicked()
-{
-	SelectTab(EMD_QuestTab::Lore);
-}
-
-void UMD_QuestWidget::HandleBackClicked()
-{
-	OnBackRequested.Broadcast();
-}
-
-void UMD_QuestWidget::HandleCardAcceptRequested(int32 QuestIndex)
-{
-	OnRepeatAcceptRequested.Broadcast(QuestIndex);
-}
-
-void UMD_QuestWidget::HandleCardDeclineRequested(int32 QuestIndex)
-{
-	OnRepeatDeclineRequested.Broadcast(QuestIndex);
-}
-
-void UMD_QuestWidget::HandleCardAbandonRequested(int32 QuestIndex)
-{
-	OnRepeatAbandonRequested.Broadcast(QuestIndex);
+	// 진행 중인 반복 퀘스트에서만 포기 요청 전달
+	if (IsValid(SelectedQuestCard) == false)
+	{
+		return;
+	}
+	bool bMainQuest = SelectedQuestCard->GetIsMainQuest();
+	if (bMainQuest == true)
+	{
+		return;
+	}
+	FMD_RepeatQuestState QuestState = SelectedQuestCard->GetRepeatQuestState();
+	if (QuestState.Status != EMD_RepeatQuestStatus::Accepted)
+	{
+		return;
+	}
+	OnRepeatAbandonRequested.Broadcast(SelectedQuestCard->GetQuestIndex());
 }

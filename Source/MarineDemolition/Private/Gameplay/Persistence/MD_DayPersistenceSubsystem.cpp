@@ -190,18 +190,26 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         }
     }
 
-    // 어제 떼어낸 따개비 순번. 배치기는 레벨 배치 액터라 이름이 안정적이다
+    // 새 게임별 런타임 시드와 어제 떼어낸 순번. 배치기는 레벨 배치 액터라 이름이
+    // 안정적이다. 랜덤 시드는 제거된 따개비가 없어도 반드시 기록해야 재방문 때
+    // 같은 배치를 재구성할 수 있다.
     for (TActorIterator<AMD_BarnacleSpawner> It(World); It; ++It)
     {
         const TSet<int32>& RemovedIndices = It->GetRemovedSpawnIndices();
-        if (RemovedIndices.IsEmpty())
+        int32 RuntimePlacementSeed = 0;
+        const bool bHasRuntimePlacementSeed =
+            It->TryGetRuntimePlacementSeed(RuntimePlacementSeed);
+        if (RemovedIndices.IsEmpty() && !bHasRuntimePlacementSeed)
         {
             continue;
         }
 
         FMD_BarnacleRemovalRecord RemovalRecord;
         RemovalRecord.SpawnerName = It->GetFName();
+        RemovalRecord.bHasRuntimePlacementSeed = bHasRuntimePlacementSeed;
+        RemovalRecord.RuntimePlacementSeed = RuntimePlacementSeed;
         RemovalRecord.RemovedSpawnIndices = RemovedIndices.Array();
+        RemovalRecord.RemovedSpawnIndices.Sort();
         Snapshot.BarnacleRemovals.Add(RemovalRecord);
     }
 
@@ -250,6 +258,34 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
 	if (IsValid(World) == false || World->GetNetMode() == NM_Client || WorldData.IsStructurallyValid() == false)
     {
         return false;
+    }
+
+    // 저장 시드는 초기 레벨 지오메트리가 그대로 있을 때 먼저 적용한다. 철거된 벽이나
+    // 동적 액터를 복원한 뒤 재배치하면 같은 시드라도 Trace 후보가 달라질 수 있다.
+    TMap<FName, const FMD_BarnacleRemovalRecord*> BarnacleStatesBySpawnerName;
+    for (const FMD_BarnacleRemovalRecord& Record : WorldData.BarnacleRemovals)
+    {
+        BarnacleStatesBySpawnerName.Add(Record.SpawnerName, &Record);
+    }
+
+    for (TActorIterator<AMD_BarnacleSpawner> It(World); It; ++It)
+    {
+        if (const FMD_BarnacleRemovalRecord* const* Record =
+                BarnacleStatesBySpawnerName.Find(It->GetFName());
+            Record != nullptr)
+        {
+            It->RestorePersistentState(
+                (*Record)->RemovedSpawnIndices,
+                (*Record)->bHasRuntimePlacementSeed,
+                (*Record)->RuntimePlacementSeed);
+        }
+        else
+        {
+            // 구버전 세이브는 제거가 없던 스포너 레코드를 만들지 않았다. 새 게임과
+            // 달리 WorldData를 적용하는 상황이므로 기존 에디터 시드로 고정해 같은
+            // 구형 세이브를 반복 로드할 때마다 위치가 바뀌지 않게 한다.
+            It->RestorePersistentState({}, false, 0);
+        }
     }
 
     // 다른 레벨(모선 등)에서는 적용하지 않음
@@ -368,25 +404,6 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
         {
             Piece->SetActorScale3D(Record.Transform.GetScale3D());
             Piece->SetContaminated(Record.bContaminated);
-        }
-    }
-
-    // 어제 떼어낸 따개비는 되살리지 않는다 (기획 03:101 강제 초기화 금지).
-    // 배치기가 BeginPlay에 이미 다 붙여 놓은 뒤이므로 목록에 든 것을 지운다.
-    if (WorldData.BarnacleRemovals.IsEmpty() == false)
-    {
-        TMap<FName, const FMD_BarnacleRemovalRecord*> RemovalsBySpawnerName;
-        for (const FMD_BarnacleRemovalRecord& Record : WorldData.BarnacleRemovals)
-        {
-            RemovalsBySpawnerName.Add(Record.SpawnerName, &Record);
-        }
-
-        for (TActorIterator<AMD_BarnacleSpawner> It(World); It; ++It)
-        {
-            if (const FMD_BarnacleRemovalRecord* const* Record = RemovalsBySpawnerName.Find(It->GetFName()); Record != nullptr)
-            {
-                It->RestoreRemovedSpawnIndices((*Record)->RemovedSpawnIndices);
-            }
         }
     }
 

@@ -2,55 +2,40 @@
 
 #include "UI/Merchant/MD_LoanWidget.h"
 
-#include "Components/Button.h"
 #include "Components/EditableText.h"
 #include "Components/TextBlock.h"
+#include "UI/MD_CommonButtonBase.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
 
-void UMD_LoanWidget::NativeConstruct()
+void UMD_LoanWidget::NativeOnActivated()
 {
-	Super::NativeConstruct();
+	Super::NativeOnActivated();
 
-	if (IsValid(Btn_LoanApplyButton) == true)
+	// 대출 화면이 활성화된 동안 배경 상인 메뉴 패널 숨김
+	if (IsValid(OwningMerchantMenu) == true)
 	{
-		Btn_LoanApplyButton->OnClicked.AddUniqueDynamic(this, &UMD_LoanWidget::HandleBorrowClicked);
+		OwningMerchantMenu->SetMenuPanelVisible(false);
 	}
 
-	if (IsValid(Btn_LoanRepayButton) == true)
-	{
-		Btn_LoanRepayButton->OnClicked.AddUniqueDynamic(this, &UMD_LoanWidget::HandleRepayClicked);
-	}
-
-	if (IsValid(Btn_RepayAll) == true)
-	{
-		Btn_RepayAll->OnClicked.AddUniqueDynamic(this, &UMD_LoanWidget::HandleRepayAllClicked);
-	}
-
-	if (IsValid(Btn_Back) == true)
-	{
-		Btn_Back->OnClicked.AddUniqueDynamic(this, &UMD_LoanWidget::HandleBackClicked);
-	}
-
+	// 현재 대출 원장을 활성화된 화면에 반영
 	RefreshDisplay();
 }
 
-void UMD_LoanWidget::NativeDestruct()
+void UMD_LoanWidget::NativeOnDeactivated()
 {
+	// 대출 화면 비활성화 후 배경 상인 메뉴 패널 복원
 	if (IsValid(OwningMerchantMenu) == true)
 	{
 		OwningMerchantMenu->SetMenuPanelVisible(true);
 	}
 
-	Super::NativeDestruct();
+	Super::NativeOnDeactivated();
 }
 
 void UMD_LoanWidget::SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget)
 {
+	// 활성화와 비활성화에서 제어할 배경 상인 메뉴 저장
 	OwningMerchantMenu = InMenuWidget;
-	if (IsValid(OwningMerchantMenu) == true)
-	{
-		OwningMerchantMenu->SetMenuPanelVisible(false);
-	}
 }
 
 void UMD_LoanWidget::SetLoanInfo(const FMD_MerchantMenuInfo& InLoanInfo)
@@ -64,60 +49,61 @@ void UMD_LoanWidget::RefreshDisplay()
 	int32 AvailableLoanAmount = FMath::Max(0, LoanInfo.LoanLimit - LoanInfo.DebtBalance);
 	int32 NextInterestAmount = FMath::RoundToInt(LoanInfo.DebtBalance * LoanInfo.DailyInterestRate);
 
-	if (IsValid(Txt_CurrentdebtNum) == true)
+	if (IsValid(Txt_DebtValue) == true)
 	{
-		FText DebtText = ToLoanCreditText(LoanInfo.DebtBalance);
-		Txt_CurrentdebtNum->SetText(DebtText);
+		// 별도 크레딧 아이콘 옆에 현재 부채 숫자만 표시
+		FText DebtText = FText::AsNumber(LoanInfo.DebtBalance);
+		Txt_DebtValue->SetText(DebtText);
 	}
 
-	if (IsValid(Txt_LoanInterestNum) == true)
+	if (IsValid(Txt_InterestValue) == true)
 	{
-		FText LoanInterestText = ToLoanCreditText(NextInterestAmount);
-		Txt_LoanInterestNum->SetText(LoanInterestText);
+		// 별도 크레딧 아이콘 옆에 다음 정산 예상 이자 숫자만 표시
+		FText LoanInterestText = FText::AsNumber(NextInterestAmount);
+		Txt_InterestValue->SetText(LoanInterestText);
 	}
 
-	if (IsValid(Txt_CreditsNum) == true)
+	if (IsValid(Txt_ValidLimitValue) == true)
 	{
-		FText CreditText = ToLoanCreditText(LoanInfo.Credits);
-		Txt_CreditsNum->SetText(CreditText);
+		// 현재 부채를 제외한 추가 대출 가능액 표시
+		FText AvailableLoanText = FText::AsNumber(AvailableLoanAmount);
+		Txt_ValidLimitValue->SetText(AvailableLoanText);
 	}
 
-	if (IsValid(Txt_AvailableLoanNum) == true)
+	if (IsValid(Txt_MaxLimitValue) == true)
 	{
-		FText CreditText = ToLoanCreditText(AvailableLoanAmount);
-		Txt_AvailableLoanNum->SetText(CreditText);
+		// 현재 호감도 구간에서 허용되는 총 대출 한도 표시
+		FText LoanLimitText = FText::AsNumber(LoanInfo.LoanLimit);
+		Txt_MaxLimitValue->SetText(LoanLimitText);
 	}
 
-	if (IsValid(Txt_LoanLimitNum) == true)
+	if (IsValid(Btn_Loan) == true)
 	{
-		FText CreditText = ToLoanCreditText(LoanInfo.LoanLimit);
-		Txt_LoanLimitNum->SetText(CreditText);
+		// 추가 대출 여지가 남은 경우에만 대출 버튼 활성화
+		Btn_Loan->SetIsEnabled(AvailableLoanAmount > 0);
 	}
 
-	if (IsValid(Btn_LoanApplyButton) == true)
+	if (IsValid(Btn_Repay) == true)
 	{
-		Btn_LoanApplyButton->SetIsEnabled(AvailableLoanAmount > 0);
-	}
-
-	if (IsValid(Btn_LoanRepayButton) == true)
-	{
-		Btn_LoanRepayButton->SetIsEnabled(LoanInfo.DebtBalance > 0 && LoanInfo.Credits > 0);
-	}
-
-	if (IsValid(Btn_RepayAll) == true)
-	{
-		Btn_RepayAll->SetIsEnabled(LoanInfo.DebtBalance > 0 && LoanInfo.Credits >= LoanInfo.DebtBalance);
+		// 부채와 상환 가능 크레딧이 모두 남은 경우에만 상환 버튼 활성화
+		bool bCanRepay = LoanInfo.DebtBalance > 0;
+		if (bCanRepay == true)
+		{
+			bCanRepay = LoanInfo.Credits > 0;
+		}
+		Btn_Repay->SetIsEnabled(bCanRepay);
 	}
 }
 
 int32 UMD_LoanWidget::GetRequestedAmount() const
 {
-	if (IsValid(Et_Repayment) == false)
+	if (IsValid(InputField_Amount) == false)
 	{
 		return 0;
 	}
 
-	FString AmountText = Et_Repayment->GetText().ToString().TrimStartAndEnd();
+	// 현재 레이아웃의 공용 금액 입력 문자열 정리
+	FString AmountText = InputField_Amount->GetText().ToString().TrimStartAndEnd();
 	if (AmountText.IsNumeric() == false)
 	{
 		return 0;
@@ -150,23 +136,4 @@ void UMD_LoanWidget::HandleRepayClicked()
 	{
 		OnRepayRequested.Broadcast(RequestedAmount);
 	}
-}
-
-void UMD_LoanWidget::HandleRepayAllClicked()
-{
-	if (LoanInfo.DebtBalance > 0 && LoanInfo.Credits >= LoanInfo.DebtBalance)
-	{
-		OnRepayRequested.Broadcast(LoanInfo.DebtBalance);
-	}
-}
-
-void UMD_LoanWidget::HandleBackClicked()
-{
-	OnBackRequested.Broadcast();
-}
-
-FText UMD_LoanWidget::ToLoanCreditText(int32 Amount)
-{
-	FString CreditString = FString::Printf(TEXT("%d₡"), Amount);
-	return FText::FromString(CreditString);
 }
