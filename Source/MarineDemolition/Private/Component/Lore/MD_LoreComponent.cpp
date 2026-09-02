@@ -1,4 +1,4 @@
-﻿#include "Component/Lore/MD_LoreComponent.h"
+#include "Component/Lore/MD_LoreComponent.h"
 
 #include "Engine/GameInstance.h"
 #include "Gameplay/Lore/MD_LoreSubsystem.h"
@@ -15,7 +15,7 @@ void UMD_LoreComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Ou
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	// 영구 누적 로어는 팀 공유 정보이므로 모든 접속자에게 전달하는 복제 등록
-	DOREPLIFETIME(UMD_LoreComponent, SiteProgressList);
+	DOREPLIFETIME(UMD_LoreComponent, DiscoveredLoreAssetIds);
 }
 
 void UMD_LoreComponent::BeginPlay()
@@ -50,51 +50,25 @@ void UMD_LoreComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-bool UMD_LoreComponent::GetSiteProgress(FName SiteId, FMD_LoreSiteProgress& OutSiteProgress) const
+EMD_LoreEntryState UMD_LoreComponent::GetLoreState(const UMD_LoreCatalog* LoreCatalog, FPrimaryAssetId LoreAssetId) const
 {
-	for (const FMD_LoreSiteProgress& SiteProgress : SiteProgressList)
-	{
-		if (SiteProgress.SiteId == SiteId)
-		{
-			OutSiteProgress = SiteProgress;
-			return true;
-		}
-	}
-
-	OutSiteProgress = FMD_LoreSiteProgress();
-	return false;
-}
-
-EMD_LoreEntryState UMD_LoreComponent::GetLoreState(const UMD_LoreCatalog* LoreCatalog, FName LoreId) const
-{
-	if (IsValid(LoreCatalog) == false || LoreId.IsNone() == true)
+	if (IsValid(LoreCatalog) == false || LoreAssetId.IsValid() == false)
 	{
 		return EMD_LoreEntryState::Undiscovered;
 	}
 
-	FMD_LoreSiteProgress SiteProgress;
-	if (GetSiteProgress(LoreCatalog->SiteId, SiteProgress) == false)
-	{
-		return EMD_LoreEntryState::Undiscovered;
-	}
-
-	return LoreCatalog->ResolveLoreState(LoreId, SiteProgress.DiscoveredLoreIds);
+	EMD_LoreEntryState LoreState = LoreCatalog->ResolveLoreState(LoreAssetId, DiscoveredLoreAssetIds);
+	return LoreState;
 }
 
-bool UMD_LoreComponent::HasDiscoveredLore(FName SiteId, FName LoreId) const
+bool UMD_LoreComponent::HasDiscoveredLore(FPrimaryAssetId LoreAssetId) const
 {
-	if (SiteId.IsNone() == true || LoreId.IsNone() == true)
+	if (LoreAssetId.IsValid() == false)
 	{
 		return false;
 	}
 
-	FMD_LoreSiteProgress SiteProgress;
-	if (GetSiteProgress(SiteId, SiteProgress) == false)
-	{
-		return false;
-	}
-
-	bool bIsDiscovered = SiteProgress.DiscoveredLoreIds.Contains(LoreId);
+	bool bIsDiscovered = DiscoveredLoreAssetIds.Contains(LoreAssetId);
 
 	return bIsDiscovered;
 }
@@ -108,7 +82,7 @@ void UMD_LoreComponent::RefreshFromSubsystem()
 		return;
 	}
 
-	SiteProgressList = LoreSubsystem->GetSiteProgressList();
+	DiscoveredLoreAssetIds = LoreSubsystem->GetDiscoveredLoreAssetIds();
 	Owner->ForceNetUpdate();
 
 	// Listen Server 환경을 고려하여 직접 알림
