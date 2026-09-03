@@ -39,6 +39,6 @@ public:
 	// InstancedStruct에 저장된 값을 현재 카테고리에 복원한다.
 	virtual bool LoadSaveData(FInstancedStruct SaveData) PURE_VIRTUAL(UMD_SettingCategoryBase::LoadSaveData, return false;);
 
-	// 매니저의 저장 이벤트를 받아 현재 카테고리 데이터를 저장 Map에 등록한다.
-	void HandleSaveRequested();
+	// 매니저의 저장 이벤트를 받아 요청 대상이면 현재 카테고리 데이터를 저장 Map에 등록한다.
+	void HandleSaveRequested(EMD_SettingsCategory RequestedCategory);
 };

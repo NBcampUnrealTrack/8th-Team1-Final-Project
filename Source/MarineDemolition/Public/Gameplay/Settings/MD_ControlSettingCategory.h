@@ -31,4 +31,17 @@ public:
 	// 현재 편집 중인 조작 설정값을 보관한다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MarineDemolition|Settings|Controls")
 	FMD_ControlSettings Settings;
+
+protected:
+	// 적용 버튼을 통해 실제 입력에 반영된 조작 설정값을 보관한다.
+	UPROPERTY(Transient)
+	FMD_ControlSettings AppliedSettings;
+
+public:
+	// 현재 실제 입력에서 사용하는 조작 설정값을 반환한다.
+	UFUNCTION(BlueprintPure, Category = "MarineDemolition|Settings|Controls")
+	FORCEINLINE FMD_ControlSettings GetAppliedSettings()
+	{
+		return AppliedSettings;
+	}
 };

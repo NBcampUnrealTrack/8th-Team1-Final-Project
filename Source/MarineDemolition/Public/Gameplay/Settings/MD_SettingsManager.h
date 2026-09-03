@@ -14,8 +14,8 @@ class UMD_SettingCategoryBase;
 // 특정 카테고리의 설정이 적용된 시점을 UI와 런타임 시스템에 알린다.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnSettingsApplied, EMD_SettingsCategory, Category);
 
-// 저장 직전에 각 설정 인스턴스가 자신의 데이터를 Map에 등록하도록 알린다.
-DECLARE_MULTICAST_DELEGATE(FMD_OnSettingsSaveRequested);
+// 저장 직전에 요청한 카테고리 인스턴스가 자신의 데이터를 Map에 등록하도록 알린다.
+DECLARE_MULTICAST_DELEGATE_OneParam(FMD_OnSettingsSaveRequested, EMD_SettingsCategory);
 
 // UObject 설정 인스턴스의 생성, 적용 이벤트 및 InstancedStruct 저장을 통합 관리한다.
 UCLASS()
@@ -35,7 +35,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MarineDemolition|Settings")
 	FMD_OnSettingsApplied OnSettingsApplied;
 
-	// 저장 요청 시 모든 카테고리 인스턴스가 데이터를 등록하도록 호출한다.
+	// 저장 요청 시 지정한 카테고리 인스턴스가 데이터를 등록하도록 호출한다.
 	FMD_OnSettingsSaveRequested OnSaveRequested;
 
 protected:
@@ -76,9 +76,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|Settings")
 	void ApplyAllSettings();
 
-	// 저장 이벤트를 호출하여 모든 카테고리 데이터를 수집한 뒤 슬롯에 저장한다.
+	// 지정한 카테고리만 적용하고 저장 이벤트로 해당 데이터를 수집한 뒤 슬롯에 저장한다.
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|Settings")
-	bool SaveSettings();
+	bool SaveSettings(EMD_SettingsCategory Category);
 
 	// 지정한 카테고리를 프로젝트 기본값으로 되돌리고 적용한다.
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|Settings")

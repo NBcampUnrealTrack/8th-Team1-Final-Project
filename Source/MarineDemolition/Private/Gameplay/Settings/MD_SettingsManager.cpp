@@ -119,15 +119,13 @@ void UMD_SettingsManager::ApplyAllSettings()
 	}
 }
 
-bool UMD_SettingsManager::SaveSettings()
+bool UMD_SettingsManager::SaveSettings(EMD_SettingsCategory Category)
 {
-	// 저장 전에 모든 카테고리 값을 검증하고 실제 시스템에 적용한다.
-	ApplyAllSettings();
-	// 현재 인스턴스들에서 새 데이터를 수집하기 전에 기존 Map을 비운다.
-	SettingDataMap.Empty();
-	// 각 설정 인스턴스가 자신의 데이터를 Map에 등록하도록 저장 이벤트를 호출한다.
-	OnSaveRequested.Broadcast();
-	// 모든 인스턴스가 등록한 설정 데이터 Map을 로컬 슬롯에 저장한다.
+	// 저장 전에 현재 탭의 카테고리 값만 검증하고 실제 시스템에 적용한다.
+	ApplyCategory(Category);
+	// 요청한 카테고리 인스턴스만 자신의 데이터를 Map에 갱신하도록 저장 이벤트를 호출한다.
+	OnSaveRequested.Broadcast(Category);
+	// 변경한 카테고리와 기존 카테고리 데이터가 포함된 Map을 로컬 슬롯에 저장한다.
 	bool bSaveSucceeded = SaveSettingDataMap();
 	// 저장 성공 여부를 호출부에 전달한다.
 	return bSaveSucceeded;
@@ -144,8 +142,8 @@ void UMD_SettingsManager::ResetCategoryToDefaults(EMD_SettingsCategory Category)
 	}
 	// 공통 가상 함수를 통해 카테고리 고유 기본값을 복원한다.
 	SettingCategory->ResetToDefaults();
-	// 매니저 저장 이벤트를 통해 기본값 적용과 모든 카테고리 저장을 함께 실행한다.
-	bool bSaveSucceeded = SaveSettings();
+	// 매니저 저장 이벤트를 통해 기본값 적용과 현재 카테고리 저장을 함께 실행한다.
+	bool bSaveSucceeded = SaveSettings(Category);
 	// 저장 결과는 기본값 복원 흐름에서 명시적으로 소비한다.
 	(void)bSaveSucceeded;
 }

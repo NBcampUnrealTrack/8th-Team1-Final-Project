@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GenericPlatform/GenericWindow.h"
 #include "MD_SettingsTypes.generated.h"
 
 // 통합 설정 화면에서 관리하는 카테고리를 구분한다.
@@ -23,9 +24,29 @@ struct MARINEDEMOLITION_API FMD_GraphicsSettings
 {
 	GENERATED_BODY()
 
+	// 게임 화면을 표시할 창 모드를 저장한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "그래픽")
+	TEnumAsByte<EWindowMode::Type> WindowMode = EWindowMode::WindowedFullscreen;
+
+	// 게임 화면에 적용할 출력 해상도를 저장한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "그래픽")
+	FIntPoint ScreenResolution = FIntPoint(1920, 1080);
+
 	// 전체 그래픽 품질 단계를 저장한다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "그래픽", meta = (ClampMin = "0", ClampMax = "4"))
 	int32 OverallQuality = 3;
+
+	// 그림자 렌더링 품질 단계를 저장한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "그래픽", meta = (ClampMin = "0", ClampMax = "4"))
+	int32 ShadowQuality = 3;
+
+	// 파티클과 시각 효과의 품질 단계를 저장한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "그래픽", meta = (ClampMin = "0", ClampMax = "4"))
+	int32 EffectsQuality = 3;
+
+	// 화면 후처리 효과의 품질 단계를 저장한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "그래픽", meta = (ClampMin = "0", ClampMax = "4"))
+	int32 PostProcessQuality = 3;
 
 	// 화면 찢어짐을 줄이는 수직 동기화 사용 여부를 저장한다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "그래픽")
@@ -41,6 +62,14 @@ USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_AudioUserSettings
 {
 	GENERATED_BODY()
+
+	// 게임 소리를 재생할 출력 장치 ID를 저장하며 빈 값은 시스템 기본 장치를 의미한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리")
+	FString OutputDeviceId;
+
+	// 음성 입력에 사용할 장치 ID를 저장하며 빈 값은 시스템 기본 장치를 의미한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리")
+	FString InputDeviceId;
 
 	// 모든 소리에 공통으로 적용할 전체 음량을 저장한다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리", meta = (ClampMin = "0.0", ClampMax = "1.0"))
