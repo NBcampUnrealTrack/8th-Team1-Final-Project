@@ -6,6 +6,12 @@ void UMD_GraphicsSettingCategory::ApplySettings()
 {
 	// 그래픽 품질 단계를 엔진이 지원하는 범위로 제한한다.
 	Settings.OverallQuality = FMath::Clamp(Settings.OverallQuality, 0, 4);
+	// 그림자 품질 단계를 엔진이 지원하는 범위로 제한한다.
+	Settings.ShadowQuality = FMath::Clamp(Settings.ShadowQuality, 0, 4);
+	// 효과 품질 단계를 엔진이 지원하는 범위로 제한한다.
+	Settings.EffectsQuality = FMath::Clamp(Settings.EffectsQuality, 0, 4);
+	// 후처리 품질 단계를 엔진이 지원하는 범위로 제한한다.
+	Settings.PostProcessQuality = FMath::Clamp(Settings.PostProcessQuality, 0, 4);
 	// 프레임 제한을 무제한 또는 지원 범위 안의 값으로 정리한다.
 	Settings.FrameRateLimit = FMath::Clamp(Settings.FrameRateLimit, 0.0f, 360.0f);
 	// 현재 플랫폼의 엔진 사용자 설정 객체를 찾는다.
@@ -15,8 +21,28 @@ void UMD_GraphicsSettingCategory::ApplySettings()
 	{
 		return;
 	}
+	// 선택한 창 모드를 엔진 사용자 설정에 적용한다.
+	GameUserSettings->SetFullscreenMode(Settings.WindowMode);
+	// 설정된 해상도의 가로 값이 유효한지 확인한다.
+	bool bIsResolutionWidthValid = Settings.ScreenResolution.X > 0;
+	// 설정된 해상도의 세로 값이 유효한지 확인한다.
+	bool bIsResolutionHeightValid = Settings.ScreenResolution.Y > 0;
+	// 가로와 세로 해상도가 모두 유효한 경우에만 출력 해상도를 적용한다.
+	if (bIsResolutionWidthValid == true)
+	{
+		if (bIsResolutionHeightValid == true)
+		{
+			GameUserSettings->SetScreenResolution(Settings.ScreenResolution);
+		}
+	}
 	// 선택한 전체 품질 단계를 모든 확장성 항목에 적용한다.
 	GameUserSettings->SetOverallScalabilityLevel(Settings.OverallQuality);
+	// 전체 품질과 별도로 선택한 그림자 품질 단계를 적용한다.
+	GameUserSettings->SetShadowQuality(Settings.ShadowQuality);
+	// 전체 품질과 별도로 선택한 효과 품질 단계를 적용한다.
+	GameUserSettings->SetVisualEffectQuality(Settings.EffectsQuality);
+	// 전체 품질과 별도로 선택한 후처리 품질 단계를 적용한다.
+	GameUserSettings->SetPostProcessingQuality(Settings.PostProcessQuality);
 	// 선택한 수직 동기화 사용 여부를 적용한다.
 	GameUserSettings->SetVSyncEnabled(Settings.bUseVSync);
 	// 선택한 최대 프레임 속도를 적용한다.

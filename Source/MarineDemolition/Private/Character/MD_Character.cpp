@@ -37,6 +37,8 @@
 #include "GameFramework/PlayerStart.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
+#include "Gameplay/Settings/MD_ControlSettingCategory.h"
+#include "Gameplay/Settings/MD_SettingsManager.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/GameplayAbility.h"
@@ -958,7 +960,30 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 {
-	const FVector2D LookInput = Value.Get<FVector2D>();
+	// 설정 매니저를 찾지 못한 경우 사용할 기본 조작 설정을 준비한다.
+	FMD_ControlSettings AppliedControlSettings;
+	// 현재 게임 인스턴스가 관리하는 설정 매니저를 찾는다.
+	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	// 유효한 설정 매니저가 있으면 조작 카테고리 인스턴스를 조회한다.
+	if (IsValid(SettingsManager) == true)
+	{
+		// 실제 입력에 반영된 조작 설정을 가진 카테고리를 찾는다.
+		UMD_ControlSettingCategory* ControlSettings = SettingsManager->GetControlSettings();
+		// 유효한 조작 설정 인스턴스가 있으면 적용된 값을 사용한다.
+		if (IsValid(ControlSettings) == true)
+		{
+			// UI에서 편집 중인 값이 아닌 마지막으로 적용된 설정을 가져온다.
+			AppliedControlSettings = ControlSettings->GetAppliedSettings();
+		}
+	}
+	// 원본 시점 입력에 적용된 감도 배율을 반영한다.
+	FVector2D LookInput = Value.Get<FVector2D>() * AppliedControlSettings.MouseSensitivity;
+	// 세로 시점 반전이 활성화되면 상하 입력 방향을 뒤집는다.
+	if (AppliedControlSettings.bInvertVerticalLook == true)
+	{
+		// 가로 입력에는 영향을 주지 않고 세로 입력에만 반대 부호를 적용한다.
+		LookInput.Y *= -1.0f;
+	}
 	if (IsValid(ScrapeToolComponent)
 		&& ScrapeToolComponent->ConsumeScrapeFocusLookInput(LookInput))
 	{

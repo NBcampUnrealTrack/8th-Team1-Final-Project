@@ -10,7 +10,7 @@ void UMD_SettingCategoryBase::InitializeCategory(UMD_SettingsManager* InSettings
 	SettingsManager->OnSaveRequested.AddUObject(this, &UMD_SettingCategoryBase::HandleSaveRequested);
 }
 
-void UMD_SettingCategoryBase::HandleSaveRequested()
+void UMD_SettingCategoryBase::HandleSaveRequested(EMD_SettingsCategory RequestedCategory)
 {
 	// 저장 데이터를 받을 설정 매니저가 유효한지 확인한다.
 	if (IsValid(SettingsManager) == false)
@@ -19,6 +19,11 @@ void UMD_SettingCategoryBase::HandleSaveRequested()
 	}
 	// 현재 인스턴스의 카테고리 식별자를 가져온다.
 	EMD_SettingsCategory Category = GetCategory();
+	// 현재 인스턴스가 저장 요청 대상이 아니면 데이터를 등록하지 않는다.
+	if (Category != RequestedCategory)
+	{
+		return;
+	}
 	// 현재 카테고리 설정을 실제 구조체 타입과 함께 생성한다.
 	FInstancedStruct SettingData = MakeSaveData();
 	// 생성한 설정 데이터를 매니저의 카테고리 Map에 등록한다.

@@ -4,6 +4,8 @@ void UMD_ControlSettingCategory::ApplySettings()
 {
 	// 마우스 감도 배율을 게임에서 지원하는 범위로 제한한다.
 	Settings.MouseSensitivity = FMath::Clamp(Settings.MouseSensitivity, 0.1f, 10.0f);
+	// 검증이 끝난 조작 설정을 실제 입력에서 사용할 값으로 반영한다.
+	AppliedSettings = Settings;
 }
 
 void UMD_ControlSettingCategory::ResetToDefaults()
