@@ -211,9 +211,11 @@ private:
 			? 0.0 : FPlatformTime::ToSeconds64(Now - LastDrawCycles);
 		LastDrawCycles = Now;
 
-		// 시간 기반 추정은 언제나 표시값의 바닥이다.
-		DisplayedFloor = FMath::Max(DisplayedFloor, GetTimedProgress());
-		DisplayedFloor = FMath::Min(FloorTarget, DisplayedFloor + MD_LoadingScreen::FloorCatchUpRate
+		// 단계 하한과 시간 추정 중 큰 쪽이 목표다. 시간 추정을 FloorTarget으로 깎으면
+		// 표시값이 단계 하한 그 자체(0 → 0.12 → 0.90 계단)가 되고, 하한이 올라가기 전까지
+		// 진행률이 한 자리에 멈춰 있다가 다음 단계에서 한 번에 뛴다.
+		const float Target = FMath::Max(FloorTarget, GetTimedProgress());
+		DisplayedFloor = FMath::Min(Target, DisplayedFloor + MD_LoadingScreen::FloorCatchUpRate
 			* static_cast<float>(FMath::Min(SinceLastDraw, MD_LoadingScreen::MaxCatchUpStepSeconds)));
 		return DisplayedFloor;
 	}

@@ -683,13 +683,8 @@ protected:
 	int32 ContaminationDecalSortOrder;
 
 private:
-	friend class FMD_ScrapeFootprintCharacterizationTest;
 	friend struct FMD_ReplicatedScrapeCellStateArray;
 	friend class AMD_CuttableWall;
-	friend class FMD_CuttableWallScrapeIntegrationTest;
-	friend class FMD_CuttableWallArbitraryMeshTest;
-	friend class FMD_BarnacleSpawnerTest;
-	friend class FMD_BarnacleStrokeBlockingTest;
 
 	static constexpr int32 MaximumContaminationGridAxis = 256;
 	static constexpr float MaximumContaminationCellSizeForPaintCm = 2.5f;
