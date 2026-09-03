@@ -27,9 +27,11 @@ class MARINEDEMOLITION_API AMD_TrashItem
 public:
 	AMD_TrashItem();
 
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override;
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 	virtual FText GetInteractionDisplayName_Implementation() const override;
+	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const override;
 
 	/** Implements IMD_TrashSortable */
 	/** 정답 칸은 배치 값이 아니라 종류 테이블에서 온다. 캔에 플라스틱 칸을 달아둘 수 없다 */
@@ -41,6 +43,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	FName GetTrashKindId() const { return TrashKindId; }
 
+	/** 동적 스폰 전에 종류를 지정한다. 서버에서 바꾼 값은 클라이언트에도 복제된다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Trash")
+	void SetTrashKindId(FName NewTrashKindId);
+
 protected:
 	/** 배치 인스턴스에서 종류를 바꿔도 에디터에 바로 반영되게 한다 */
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -50,9 +56,9 @@ protected:
 
 	/**
 	 * 종류 테이블의 행 이름. 에디터에서는 테이블 행 목록이 드롭다운으로 나온다.
-	 * 배치 값이라 서버·클라이언트가 각자 레벨에서 같은 값을 읽는다. 복제하지 않는다.
+	 * 배치 인스턴스는 레벨 값을 사용하고, 동적 스폰 인스턴스는 서버 값을 복제한다.
 	 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly,
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_TrashKindId,
 		Category = "MD|Trash", meta = (GetOptions = "GetTrashKindIdOptions"))
 	FName TrashKindId = TEXT("DrinkCan");
 
@@ -80,6 +86,9 @@ protected:
 	FGameplayTag StorageContentTag;
 
 private:
+	UFUNCTION()
+	void OnRep_TrashKindId();
+
 	/** TrashKindId 드롭다운 항목. 디테일 패널이 리플렉션으로 호출한다 */
 	UFUNCTION()
 	TArray<FName> GetTrashKindIdOptions() const;

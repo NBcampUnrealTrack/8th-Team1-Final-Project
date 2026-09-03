@@ -652,13 +652,6 @@ protected:
 	float ReadyAimHeartbeatRateHz;
 
 private:
-	friend class FMD_ScrapeFootprintCharacterizationTest;
-	friend class FMD_ScrapeFocusCameraLockTest;
-	friend class FMD_ScrapeToolBarnacleOcclusionTest;
-	friend class FMD_ScrapeLoadTest;
-	friend class FMD_ScrapeStage3PathTest;
-	friend class FMD_ScrapeReacquisitionTest;
-	friend class FMD_ScrapeNetworkSessionTest;
 
 	/** 디버그 표시용 접촉 종류 문자열. 이 컴포넌트에서만 사용한다. */
 	static const TCHAR* GetContactTypeLabel(EMD_ScrapeContactType ContactType);
@@ -688,7 +681,7 @@ private:
 		EMD_ScrapeSurfaceFace CurrentSurfaceFace,
 		const FVector2D& RawSurfacePositionCm,
 		const FHitResult& CurrentHit);
-	bool TryApplyResolvedScrapePath(
+	void ApplyResolvedScrapePath(
 		UMD_ScrapeSurfaceComponent* CurrentSurface,
 		EMD_ScrapeSurfaceFace CurrentSurfaceFace,
 		const FHitResult& CurrentHit,
@@ -850,18 +843,13 @@ private:
 	UFUNCTION(Server, Unreliable)
 	void ServerUpdateScrapeAim(const FMD_ScrapeAimNetSample& Sample);
 
-	bool TryGetCurrentSurfaceHit(
-		FHitResult& OutHit,
-		UMD_ScrapeSurfaceComponent*& OutSurface,
-		AMD_Barnacle*& OutOccludingBarnacle,
-		FHitResult& OutBarnacleHit) const;
 	bool TryTraceScrapeTarget(
 		const FVector& TraceStart,
 		const FVector& TraceEnd,
 		const AActor* IgnoredActor,
 		FHitResult& OutHit,
 		UMD_ScrapeSurfaceComponent*& OutSurface,
-		AMD_Barnacle*& OutOccludingBarnacle,
+		AMD_Barnacle*& OutFirstHitBarnacle,
 		FHitResult& OutBarnacleHit) const;
 	void BeginStrokeTracking(
 		UMD_ScrapeSurfaceComponent* Surface,
@@ -891,23 +879,17 @@ private:
 	void FlushPendingScrapePathApplication();
 	void SplitScrapeSubStrokeAtCorner(const FVector2D& CornerPositionCm);
 	void ResetScrapePathAccumulator(const FVector2D& StartPositionCm);
-	void RebaseScrapePathAfterObstacle(const FVector2D& BlockedPositionCm);
 	void UpdateStableBladeAxis(double ArcStepCm);
-	bool ApplyScrapePathSegment(
+	void ApplyScrapePathSegment(
 		UMD_ScrapeSurfaceComponent* Surface,
 		EMD_ScrapeSurfaceFace SurfaceFace,
 		const FHitResult& CurrentHit,
-		const FMD_ScrapeToolPathSegment& PathSegment,
-		FVector2D& OutAppliedEndPositionCm,
-		AMD_Barnacle*& OutBlockingBarnacle);
+		const FMD_ScrapeToolPathSegment& PathSegment);
 	void ApplyAuthoritativeScrapeStroke(
 		UMD_ScrapeSurfaceComponent* Surface,
 		EMD_ScrapeSurfaceFace SurfaceFace,
 		const FMD_ScrapeToolPathSegment& PathSegment,
 		const FMD_ScrapeStroke& Stroke,
-		double AppliedRatio,
-		const FVector2D& AppliedEndPositionCm,
-		const FVector2D& AppliedEndBladeAxis,
 		const FVector& FeedbackLocation);
 	void KeepAimOnScrapePosition(
 		const FVector& ViewLocation,
@@ -929,8 +911,7 @@ private:
 	void AccumulateStage3PathSegment(
 		UMD_ScrapeSurfaceComponent* Surface,
 		EMD_ScrapeSurfaceFace SurfaceFace,
-		const FMD_ScrapeToolPathSegment& PathSegment,
-		double AppliedRatio);
+		const FMD_ScrapeToolPathSegment& PathSegment);
 	void CommitProtectedStage3Dabs();
 	void FlushStage3PathTail();
 	void ResetStage3PathAccumulator();
@@ -957,9 +938,6 @@ private:
 	 * 클라이언트 예측 경로에서는 권위 검사를 통과하지 못하므로 상태를 변경하지 않는다.
 	 */
 	void ApplyBarnacleClick(const FMD_ScrapeAimQueryResult& FirstAim);
-	static FVector ResolveBarnacleClickWobbleDirection(
-		const FHitResult& BarnacleHit,
-		const AMD_Barnacle& Barnacle);
 
 	/**
 	 * Local prediction on the owning client and authoritative state on the server.

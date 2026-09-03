@@ -19,11 +19,16 @@
 #include "GameplayEffect.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+#include "EngineUtils.h"
+#include "World/Wall/MD_CuttableWall.h"
+#include "World/Wall/MD_WallUtility.h"
 #include "Player/MD_PlayerState.h"
 #include "Player/MD_PlayerCameraManager.h"
 
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameFramework/GameSession.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
@@ -34,6 +39,7 @@
 #include "World/Merchant/MD_Merchant.h"
 #include "Interfaces/OnlineIdentityInterface.h"
 #include "OnlineSubsystem.h"
+#include "Util/MD_LogUtility.h"
 
 AMD_PlayerController::AMD_PlayerController()
 {
@@ -67,6 +73,23 @@ void AMD_PlayerController::SetViewTarget(
 		CancelScrapeInteraction();
 	}
 	Super::SetViewTarget(NewViewTarget, TransitionParams);
+}
+
+void AMD_PlayerController::ClientWasKicked_Implementation(const FText& KickReason)
+{
+	Super::ClientWasKicked_Implementation(KickReason);
+
+	// 강퇴된 클라이언트의 로컬 Named Session 정리를 위한 관리자 조회
+	UGameInstance* GameInstance = GetGameInstance();
+	UMD_MultiplayManager* MultiplayManager =
+		IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MultiplayManager>() : nullptr;
+	if (IsValid(MultiplayManager) == false)
+	{
+		return;
+	}
+
+	// 기존 Session 제거와 Title 복귀 절차 시작
+	MultiplayManager->DestroySession();
 }
 
 void AMD_PlayerController::HandleApplicationWillDeactivate()
@@ -209,6 +232,52 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 
 	// Session 갱신과 ServerTravel 실행은 MultiplayManager에 위임하는 처리
 	MultiplayManager->StartSessionByMap(MapPackage, TravelOptions);
+}
+
+void AMD_PlayerController::ServerRequestKickPlayer_Implementation(APlayerState* TargetPlayerState)
+{
+	// 리슨 서버의 로컬 호스트가 아닌 원격 클라이언트 요청 거부
+	if (IsLocalController() == false)
+	{
+		return;
+	}
+
+	// 요청한 호스트의 PlayerState 조회
+	APlayerState* RequestingPlayerState = GetPlayerState<APlayerState>();
+	if (IsValid(RequestingPlayerState) == false)
+	{
+		return;
+	}
+
+	// 유효하지 않거나 호스트 자신을 대상으로 한 강퇴 요청 거부
+	if (IsValid(TargetPlayerState) == false || TargetPlayerState == RequestingPlayerState)
+	{
+		return;
+	}
+
+	// 서버에 존재하는 대상 PlayerController 조회
+	APlayerController* TargetPlayerController = TargetPlayerState->GetPlayerController();
+	if (IsValid(TargetPlayerController) == false)
+	{
+		return;
+	}
+
+	// 강퇴를 수행할 현재 서버 GameMode 조회
+	UWorld* World = GetWorld();
+	AGameModeBase* GameMode = IsValid(World) == true ? World->GetAuthGameMode() : nullptr;
+	if (IsValid(GameMode) == false || IsValid(GameMode->GameSession) == false)
+	{
+		return;
+	}
+
+	// 대상 클라이언트에 전달할 강퇴 사유
+	FText KickReason = NSLOCTEXT("MDPlayerKick", "KickedByHost", "호스트에 의해 강퇴되었습니다");
+	// 엔진 GameSession을 통한 대상 접속 해제와 PlayerController 제거
+	bool bWasKicked = GameMode->GameSession->KickPlayer(TargetPlayerController, KickReason);
+	if (bWasKicked == false)
+	{
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 선택한 플레이어의 강퇴에 실패했습니다"), *UE_CALL_LOCATIONINFO);
+	}
 }
 
 void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole* Console)
@@ -813,6 +882,185 @@ void AMD_PlayerController::ServerBeginContract_Implementation()
 void AMD_PlayerController::MD_BeginDay(int32 Day)
 {
 	ServerBeginDay(Day);
+}
+
+AMD_CuttableWall* AMD_PlayerController::FindWallToClean(const float SearchRadiusCm) const
+{
+	UWorld* const World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	auto NeedsCleaning = [](const AMD_CuttableWall* Wall) -> bool
+	{
+		const UMD_ScrapeSurfaceComponent* const Surface =
+			Wall ? Wall->GetScrapeSurfaceComponent() : nullptr;
+		return Surface && Surface->IsContaminationEnabled();
+	};
+
+	// 1) 조준선 우선. 여러 벽이 붙어 있을 때 어느 것을 지웠는지 헷갈리지 않게 한다.
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	FHitResult Hit;
+	FCollisionQueryParams Params;
+	if (const APawn* const OwnPawn = GetPawn())
+	{
+		Params.AddIgnoredActor(OwnPawn);
+	}
+	if (World->LineTraceSingleByChannel(
+			Hit,
+			ViewLocation,
+			ViewLocation + ViewRotation.Vector() * SearchRadiusCm,
+			ECC_Visibility,
+			Params))
+	{
+		if (AMD_CuttableWall* const AimedWall = Cast<AMD_CuttableWall>(Hit.GetActor()))
+		{
+			return AimedWall;
+		}
+	}
+
+	// 2) 조준이 빗나갔으면 반경 안에서 아직 오염이 남은 가장 가까운 벽.
+	AMD_CuttableWall* Closest = nullptr;
+	float ClosestDistanceSquared = FMath::Square(SearchRadiusCm);
+	for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
+	{
+		AMD_CuttableWall* const Wall = *It;
+		if (!NeedsCleaning(Wall))
+		{
+			continue;
+		}
+
+		const float DistanceSquared =
+			FVector::DistSquared(Wall->GetActorLocation(), ViewLocation);
+		if (DistanceSquared < ClosestDistanceSquared)
+		{
+			ClosestDistanceSquared = DistanceSquared;
+			Closest = Wall;
+		}
+	}
+	return Closest;
+}
+
+void AMD_PlayerController::MD_CleanWall()
+{
+	AMD_CuttableWall* const Wall = FindWallToClean();
+	if (!Wall)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("MD_CleanWall: 조준선과 주변 20m 안에 오염된 격벽이 없다"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("MD_CleanWall: %s 오염 제거 요청"), *Wall->GetName());
+	ServerCleanWall(Wall);
+}
+
+void AMD_PlayerController::ServerCleanWall_Implementation(AMD_CuttableWall* Wall)
+{
+	UMD_ScrapeSurfaceComponent* const Surface =
+		IsValid(Wall) ? Wall->GetScrapeSurfaceComponent() : nullptr;
+	if (!Surface)
+	{
+		return;
+	}
+
+	// 셀 배열을 직접 0으로 쓰지 않고 공개 API 를 쓴다. 오염 셀·마스크 아틀라스·복제 상태가
+	// 컴포넌트 내부에서 다섯 파일에 걸쳐 맞물려 있어서, 밖에서 손대면 조용히 어긋난다.
+	// 이 스위치는 제거율 1.0 · 완전제거 판정 true · 데칼 0장을 모두 성립시킨다.
+	Surface->SetContaminationEnabled(false);
+
+	UE_LOG(LogTemp, Log, TEXT("MD_CleanWall: %s 오염 제거 완료 (제거율 %.2f)"),
+		*Wall->GetName(), Surface->GetContaminationCleanRatio());
+}
+
+AMD_WallUtility* AMD_PlayerController::FindUtilityToRepair(const float SearchRadiusCm) const
+{
+	UWorld* const World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	// 1) 조준선 우선. 배관이 여러 개 붙어 있을 때 어느 것을 고쳤는지 헷갈리지 않게 한다.
+	FHitResult Hit;
+	FCollisionQueryParams Params;
+	if (const APawn* const OwnPawn = GetPawn())
+	{
+		Params.AddIgnoredActor(OwnPawn);
+	}
+	if (World->LineTraceSingleByChannel(
+			Hit,
+			ViewLocation,
+			ViewLocation + ViewRotation.Vector() * SearchRadiusCm,
+			ECC_Visibility,
+			Params))
+	{
+		AMD_WallUtility* const Aimed = Cast<AMD_WallUtility>(Hit.GetActor());
+		if (Aimed && Aimed->GetUtilityState() == EMD_UtilityState::Broken)
+		{
+			return Aimed;
+		}
+	}
+
+	// 2) 조준이 빗나갔으면 반경 안에서 가장 가까운 파손된 인프라.
+	//    파손된 것만 고르므로 명령을 반복해 4개를 차례로 고칠 수 있다.
+	AMD_WallUtility* Closest = nullptr;
+	float ClosestDistanceSquared = FMath::Square(SearchRadiusCm);
+	for (TActorIterator<AMD_WallUtility> It(World); It; ++It)
+	{
+		AMD_WallUtility* const Utility = *It;
+		if (!Utility || Utility->GetUtilityState() != EMD_UtilityState::Broken)
+		{
+			continue;
+		}
+
+		const float DistanceSquared =
+			FVector::DistSquared(Utility->GetActorLocation(), ViewLocation);
+		if (DistanceSquared < ClosestDistanceSquared)
+		{
+			ClosestDistanceSquared = DistanceSquared;
+			Closest = Utility;
+		}
+	}
+	return Closest;
+}
+
+void AMD_PlayerController::MD_RepairUtility()
+{
+	AMD_WallUtility* const Utility = FindUtilityToRepair();
+	if (!Utility)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("MD_RepairUtility: 조준선과 주변 20m 안에 파손된 배관·전선이 없다"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("MD_RepairUtility: %s 수리 요청"), *Utility->GetName());
+	ServerRepairUtility(Utility);
+}
+
+void AMD_PlayerController::ServerRepairUtility_Implementation(AMD_WallUtility* Utility)
+{
+	if (!IsValid(Utility))
+	{
+		return;
+	}
+
+	// 장착 도구 검사를 건너뛰는 치트 경로. 정상 수리는 Interact 가 도구 태그를 확인한다.
+	Utility->DebugForceRepair(GetPawn());
+
+	UE_LOG(LogTemp, Log, TEXT("MD_RepairUtility: %s 상태 = %s"),
+		*Utility->GetName(),
+		*StaticEnum<EMD_UtilityState>()->GetNameStringByValue(
+			static_cast<int64>(Utility->GetUtilityState())));
 }
 
 void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)

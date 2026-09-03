@@ -27,10 +27,6 @@ class MARINEDEMOLITION_API AMD_WallUtility : public AActor, public IMD_Interacta
 {
 	GENERATED_BODY()
 
-#if WITH_DEV_AUTOMATION_TESTS
-	friend class FMD_WallUtilityRepairPermissionSpec;
-#endif
-
 public:
 	AMD_WallUtility();
 
@@ -38,6 +34,14 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Utility")
 	EMD_UtilityState GetUtilityState() const { return UtilityState; }
+
+	/**
+	 * 치트·디버그용. 장착 도구 검사를 건너뛰고 파손 상태를 곧바로 수리로 넘긴다.
+	 * 정상 경로는 IMD_Interactable::Interact 이며 그쪽 규칙(RequiredRepairToolTag)은 그대로다.
+	 * 파손 상태가 아니면 아무 일도 하지 않는다 — SetRepaired 가 그 조건을 이미 검사한다.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Utility|Debug")
+	void DebugForceRepair(AActor* Repairer);
 
 	// IMD_Interactable — 수리는 서버에서 검증
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
@@ -83,6 +87,15 @@ protected:
 	// BP 연출 훅 (파티클·소리·조명). 각 머신에서 상태 반영 시 호출
 	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Utility")
 	void OnUtilityStateChangedVisual(EMD_UtilityState NewState);
+
+	/**
+	 * 상태가 각 머신에 반영될 때 호출된다 (서버는 직접, 클라이언트는 OnRep 경로).
+	 *
+	 * 파티클·조명처럼 아트가 잡는 연출은 위 BP 이벤트가 맡고,
+	 * 사운드처럼 코드가 소유해야 하는 것은 여기서 처리한다 —
+	 * 사운드는 데이터 에셋+태그를 거쳐야 하고(프로젝트 규칙) 그 진입점이 C++ 에만 있다.
+	 */
+	virtual void OnUtilityStateChangedLocal(EMD_UtilityState NewState) {}
 
 	UPROPERTY(VisibleAnywhere, Category = "MD|Utility")
 	TObjectPtr<USceneComponent> Root;

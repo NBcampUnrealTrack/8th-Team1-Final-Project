@@ -3,18 +3,31 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
+#include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_TrashSorter.generated.h"
 
 class UBoxComponent;
 class UMaterialInstanceDynamic;
-class UPrimitiveComponent;
 class UStaticMeshComponent;
 class AMD_GameStateBase;
 class UMD_MerchantSubsystem;
 struct FMD_TrashSortResult;
 
+/**
+ * 한 품목이 실제로 소비된 뒤 서버에서 한 번 방송한다. 통째 투입이면 품목 수만큼 나온다.
+ * 액터가 이미 파괴된 뒤라 포인터 대신 클래스를 넘긴다.
+ * SorterCategory는 이 분류기가 담당하는 칸이다 — bCorrectSort가 true면 품목의 칸과 같다.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+	FMD_OnTrashSorted,
+	TSubclassOf<AActor>, ItemClass,
+	bool, bCorrectSort,
+	FGameplayTag, SorterCategory);
+
 UCLASS()
-class MARINEDEMOLITION_API AMD_TrashSorter : public AActor
+class MARINEDEMOLITION_API AMD_TrashSorter
+	: public AActor
+	, public IMD_Interactable
 {
 	GENERATED_BODY()
 
@@ -22,6 +35,14 @@ public:
 	AMD_TrashSorter();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	/** Implements IMD_Interactable */
+	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const override;
+	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
+	virtual bool SupportsHeldActorInteraction_Implementation() const override { return true; }
+	virtual void Interact_Implementation(AActor* Interactor) override;
+	/** ~Implements IMD_Interactable */
 
 	/** 이 분류기가 정분류로 인정하는 칸 */
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
@@ -31,12 +52,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	int32 GetSortedCount() const { return SortedCount; }
 
+	/** 품목이 소비될 때마다 서버에서 방송. 튜토리얼 진행 판정이 구독한다 */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Trash")
+	FMD_OnTrashSorted OnTrashSorted;
+
 protected:
 	/** 배치 인스턴스에서 칸을 바꿔도 에디터에 바로 색이 반영되게 한다 */
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	virtual void BeginPlay() override;
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** 삼킬 때 연출 훅. 소리 없이 사라지면 버그와 구분이 안 된다 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Trash")
@@ -80,10 +104,6 @@ protected:
 	TObjectPtr<UMaterialInstanceDynamic> SorterMID;
 
 private:
-	UFUNCTION()
-	void HandleBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-		UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
 	/** 액터는 서버에서 파괴되므로 위치를 실어 보낸다 */
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastItemSwallowed(bool bCorrectSort, FVector Location);
@@ -109,6 +129,7 @@ private:
 	bool GetServerLedgers(
 		AMD_GameStateBase*& OutGameState,
 		UMD_MerchantSubsystem*& OutMerchant) const;
+	AActor* GetHeldSortableForInteractor(AActor* Interactor) const;
 
 	TSet<TWeakObjectPtr<AActor>> ActorsBeingProcessed;
 

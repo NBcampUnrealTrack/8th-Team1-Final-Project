@@ -1,16 +1,17 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
+#include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_Merchant.generated.h"
 
 class UMD_MerchantMenuWidget;
 class UMD_ShopCatalog;
 class UMD_ShopWidget;
-class UMD_QuestWidget;
+class UMD_QuestScreenWidget;
 class UMD_LoanWidget;
 class UMD_LoreComponent;
 class UMD_MerchantComponent;
@@ -54,6 +55,18 @@ public:
 	/** 서버 구매 결과를 현재 로컬 상점과 대사창에 반영하는 함수 */
 	void ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResult Result);
 
+	/** Blueprint가 Push하기 전에 전달한 상점 화면에 상인 데이터와 도메인 이벤트를 연결한다. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
+	void InitializePushedShop(UMD_ShopWidget* ShopWidget, UMD_MerchantMenuWidget* MenuWidget);
+
+	/** Blueprint가 Push한 퀘스트 화면에 상인 데이터와 도메인 이벤트를 연결한다. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
+	void InitializePushedQuest(UMD_QuestScreenWidget* QuestWidget, UMD_MerchantMenuWidget* MenuWidget);
+
+	/** Blueprint가 Push한 대출 화면에 상인 데이터와 도메인 이벤트를 연결하는 함수 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
+	void InitializePushedLoan(UMD_LoanWidget* LoanWidget, UMD_MerchantMenuWidget* MenuWidget);
+
 protected:
 	/**
 	 * 트랜스폼 기준점. Mesh를 루트로 쓰면 Mesh의 상대 트랜스폼이 곧 액터 트랜스폼이 되어
@@ -70,25 +83,13 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
 	FText MerchantDisplayName = FText::FromString(TEXT("노라 브릭스"));
 
-	/** 인터랙트 시 열리는 루트 메뉴 (대화/상점/퀘스트/대출/나가기) */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
-	TSubclassOf<UMD_MerchantMenuWidget> MenuWidgetClass;
-
-	/** 메뉴에서 '상점'을 눌렀을 때 열리는 화면 */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
-	TSubclassOf<UMD_ShopWidget> ShopWidgetClass;
+	/** UIManager가 인터랙트 시 Push할 상인 메뉴 화면 요청 태그 */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant", meta = (Categories = "UI.Layer.GameMenu"))
+	FGameplayTag MenuWidgetTag;
 
 	/** 가격·해금 데이터 (`07` §4). 없으면 상점이 빈 목록으로 열린다. */
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	TObjectPtr<UMD_ShopCatalog> ShopCatalog;
-
-	/** 메뉴에서 '퀘스트'를 눌렀을 때 열리는 화면 (메인/반복/로어 3탭, `04` §5.5) */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
-	TSubclassOf<UMD_QuestWidget> QuestWidgetClass;
-
-	// 메뉴에서 대출을 눌렀을 때 열리는 서버 원장 연동 화면 클래스
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
-	TSubclassOf<UMD_LoanWidget> LoanWidgetClass;
 
 	/**
 	 * 이미 가득 찬 품목을 사려 할 때 브릭스가 하는 말.
@@ -125,7 +126,7 @@ protected:
 
 	TWeakObjectPtr<UMD_ShopWidget> ActiveShopWidget;
 
-	TWeakObjectPtr<UMD_QuestWidget> ActiveQuestWidget;
+	TWeakObjectPtr<UMD_QuestScreenWidget> ActiveQuestWidget;
 
 	// 중복 생성 방지와 복제 상태 갱신에 사용하는 현재 대출 화면 참조
 	TWeakObjectPtr<UMD_LoanWidget> ActiveLoanWidget;
@@ -135,13 +136,8 @@ private:
 	UFUNCTION()
 	void HandleMenuExitRequested();
 
-	/** 메뉴에서 '상점'을 눌렀을 때 */
-	UFUNCTION()
-	void HandleShopRequested();
-
-	/** 상점에서 '뒤로'를 눌렀을 때 — 메뉴는 아래에 그대로 살아 있다. */
-	UFUNCTION()
-	void HandleShopBackRequested();
+	/** Common UI Stack에서 상점이 비활성화되면 상태 구독과 활성 화면 참조를 정리한다. */
+	void HandleShopDeactivated();
 
 	/** 가득 찬 품목 구매를 막았을 때 — 메뉴의 대사창으로 이유를 알린다. */
 	UFUNCTION()
@@ -159,21 +155,11 @@ private:
 	UFUNCTION()
 	void HandlePlayerShopOwnershipChanged();
 
-	/** 메뉴에서 '퀘스트'를 눌렀을 때 */
-	UFUNCTION()
-	void HandleQuestRequested();
-
-	// 상인 메뉴에서 대출 화면을 생성하고 복제 원장 갱신을 연결하는 함수
-	UFUNCTION()
-	void HandleLoanRequested();
-
-	/** 퀘스트 화면에서 '뒤로'를 눌렀을 때 */
-	UFUNCTION()
+	/** Common UI Stack에서 퀘스트 화면이 비활성화되면 상태 구독과 활성 화면 참조를 정리한다. */
 	void HandleQuestBackRequested();
 
-	// 대출 화면을 닫고 상인 메뉴와 상태 변경 구독을 복구하는 함수
-	UFUNCTION()
-	void HandleLoanBackRequested();
+	/** Common UI Stack에서 대출 화면이 비활성화되면 상태 구독과 활성 화면 참조를 정리하는 함수 */
+	void HandleLoanDeactivated();
 
 	// 대출 화면의 금액 요청을 서버 권위 PlayerController로 전달하는 함수
 	UFUNCTION()

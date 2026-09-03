@@ -8,6 +8,17 @@
 class AMD_Barnacle;
 class UBoxComponent;
 
+/** 따개비 초기 배치에 사용할 시드의 수명 정책 */
+UENUM(BlueprintType)
+enum class EMD_BarnaclePlacementSeedMode : uint8
+{
+	/** 에디터에 입력한 PlacementSeed를 항상 사용한다. */
+	Fixed,
+
+	/** 새 게임에서 서버가 한 번 생성하고 세이브와 Day 스냅샷이 보존한다. */
+	RandomPerNewGame
+};
+
 /**
  * 따개비를 범위 안 표면에 흩뿌리는 배치기 (기획 03 §1.5 폐기물 배치 예산)
  *
@@ -15,8 +26,10 @@ class UBoxComponent;
  * (X-7 10개 / TR-9 14개, 05 §3A.1·§3B.1). 하나씩 손으로 붙이는 대신
  * 볼륨을 놓고 개수를 적으면 표면을 찾아 붙인다.
  *
- * 배치는 시드 기반이라 같은 시드·같은 레벨이면 항상 같은 자리에 나온다.
- * 서버에서만 스폰하고 따개비 액터가 복제되므로 클라이언트와 어긋나지 않는다.
+ * 배치는 시드 기반이다. Fixed는 에디터 시드를, RandomPerNewGame은 서버가 새 게임에
+ * 한 번 생성한 런타임 시드를 사용한다. 런타임 시드는 저장되므로 같은 세이브를 다시
+ * 불러오거나 레벨을 재방문해도 같은 자리에 나온다. 서버에서만 스폰하고 따개비 액터가
+ * 복제되므로 클라이언트와 어긋나지 않는다.
  *
  * 볼륨 안에서 BarnacleTrace를 Block하는 벽과 가구만 대상이 될 수 있다. 철거 대상
  * 격벽은 기존 기획 제약을 유지해 기본적으로 제외하고, 허용된 로컬 면만 후보로 사용한다.
@@ -54,6 +67,18 @@ public:
 	/** Day 스냅샷이 저장할 목록 */
 	const TSet<int32>& GetRemovedSpawnIndices() const { return RemovedSpawnIndices; }
 
+	/** RandomPerNewGame 모드에서 저장할 서버 런타임 시드를 반환한다. */
+	bool TryGetRuntimePlacementSeed(int32& OutRuntimePlacementSeed) const;
+
+	/**
+	 * 세이브 또는 Day 스냅샷의 시드와 제거 순번을 함께 복원한다. 서버 전용.
+	 * BeginPlay에서 임시 배치가 끝난 뒤 호출돼도 저장 시드로 전체 배치를 다시 구성한다.
+	 */
+	void RestorePersistentState(
+		const TArray<int32>& InRemovedSpawnIndices,
+		bool bHasSavedRuntimePlacementSeed,
+		int32 SavedRuntimePlacementSeed);
+
 	/**
 	 * Day 스냅샷에서 복원한다. 서버 전용.
 	 * 목록에 든 순번의 따개비를 월드에서 지운다. 배치기가 이미 다 붙인 뒤에 불러야 한다.
@@ -80,8 +105,15 @@ protected:
 		meta = (ClampMin = "0", ClampMax = "30", UIMax = "30"))
 	int32 BarnacleCount = 5;
 
-	/** 배치 시드. 바꾸면 같은 개수로 다른 자리에 붙는다 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner")
+	/** 초기 배치 시드를 에디터 고정값과 새 게임별 런타임 값 중에서 선택한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner|Seed")
+	EMD_BarnaclePlacementSeedMode PlacementSeedMode =
+		EMD_BarnaclePlacementSeedMode::Fixed;
+
+	/** Fixed 모드의 배치 시드. 구버전 세이브의 배치를 복원할 때도 대체값으로 사용한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner|Seed",
+		meta = (EditCondition = "PlacementSeedMode == EMD_BarnaclePlacementSeedMode::Fixed",
+			EditConditionHides))
 	int32 PlacementSeed = 1337;
 
 	/** 생성되는 따개비 한 개의 최소 내구도. 최대값과 역전되면 실행 시 자동 정렬한다. */
@@ -208,9 +240,6 @@ protected:
 	int32 MaximumAliveBarnacleCount = 0;
 
 private:
-	// 자동화 테스트가 배치 프로퍼티를 직접 세팅한다. 지우면 테스트가 컴파일되지 않는다
-	friend class FMD_BarnacleSpawnerTest;
-
 	/** 회전·스케일을 반영한 볼륨 안에서 허용 가능한 표면 후보를 충분히 수집한다. */
 	void GatherSurfaceCandidates(
 		FRandomStream& RandomStream,
@@ -234,6 +263,15 @@ private:
 
 	/** 배치 RNG를 소비하지 않고 시드·순번만으로 개별 최대 내구도를 결정한다. */
 	int32 GenerateDurabilityForSpawn(int32 PlacementSeedToUse, int32 SpawnIndex) const;
+
+	/** RandomPerNewGame 모드라면 서버 런타임 시드를 정확히 한 번 준비한다. */
+	void InitializeRuntimePlacementSeed();
+
+	/** 현재 모드에서 초기 배치와 증식에 공통으로 사용할 시드를 반환한다. */
+	int32 GetEffectivePlacementSeed();
+
+	/** 저장 시드 재배치 전에 현재 런타임 따개비를 아이템 드롭 없이 제거한다. */
+	void DestroySpawnedBarnaclesForRebuild();
 
 	/**
 	 * 배치 루프 본체. 초기 배치와 밤샘 증식이 공유한다.
@@ -264,4 +302,16 @@ private:
 
 	/** 이 배치기가 붙인 따개비. 상한 계산과 복원에 쓴다 */
 	TArray<TWeakObjectPtr<AMD_Barnacle>> SpawnedBarnacles;
+
+	/** RandomPerNewGame 모드에서 서버가 생성하거나 세이브에서 복원한 활성 시드 */
+	UPROPERTY(Transient)
+	int32 RuntimePlacementSeed = 0;
+
+	/** RuntimePlacementSeed가 현재 새 게임 또는 복원 상태에 맞게 준비됐는지 */
+	UPROPERTY(Transient)
+	bool bHasRuntimePlacementSeed = false;
+
+	/** BeginPlay 또는 Blueprint가 초기 배치를 이미 요청했는지 */
+	UPROPERTY(Transient)
+	bool bHasSpawnedInitialPlacement = false;
 };

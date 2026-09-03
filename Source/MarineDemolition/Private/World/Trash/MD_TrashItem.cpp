@@ -1,10 +1,12 @@
 #include "World/Trash/MD_TrashItem.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "Engine/EngineTypes.h"
 #include "Engine/StaticMesh.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Net/UnrealNetwork.h"
 
 AMD_TrashItem::AMD_TrashItem()
 {
@@ -16,6 +18,10 @@ AMD_TrashItem::AMD_TrashItem()
 	SetRootComponent(Mesh);
 	Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
 	Mesh->SetCollisionObjectType(ECC_PhysicsBody);
+	// 캐릭터와의 물리 충돌은 유지하되 작은 쓰레기를 발판이나 계단으로 판정하지 않는다
+	Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	Mesh->CanCharacterStepUpOn = ECB_No;
+	Mesh->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Unwalkable, 0.f));
 	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
 	// 쓰레기통이 오버랩으로 내용물을 세므로 꺼서는 안 된다
 	Mesh->SetGenerateOverlapEvents(true);
@@ -28,6 +34,13 @@ AMD_TrashItem::AMD_TrashItem()
 	// 산재 쓰레기는 종류와 무관하게 태그가 같으므로 코드에서 기본값을 준다
 	PickupMethodTag = MDGameplayTags::Interaction_Pickup_Physics;
 	StorageContentTag = MDGameplayTags::Resource_Storage_Content_Trash;
+}
+
+void AMD_TrashItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+
+	DOREPLIFETIME(AMD_TrashItem, TrashKindId);
 }
 
 void AMD_TrashItem::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
@@ -64,6 +77,12 @@ FText AMD_TrashItem::GetInteractionDisplayName_Implementation() const
 		: FText::GetEmpty();
 }
 
+FText AMD_TrashItem::GetInteractionPrompt_Implementation(AActor* Interactor) const
+{
+	static_cast<void>(Interactor);
+	return NSLOCTEXT("MDInteraction", "TrashItemPickupPrompt", "[E] 줍기");
+}
+
 FGameplayTag AMD_TrashItem::GetTrashCategory_Implementation() const
 {
 	return UMD_TrashLibrary::GetTrashKindCategory(TrashKindId);
@@ -81,6 +100,18 @@ FMD_TrashSortDescriptor AMD_TrashItem::GetTrashSortDescriptor_Implementation() c
 	return Descriptor;
 }
 
+void AMD_TrashItem::SetTrashKindId(const FName NewTrashKindId)
+{
+	if (TrashKindId == NewTrashKindId)
+	{
+		return;
+	}
+
+	TrashKindId = NewTrashKindId;
+	ApplyTrashKindRow();
+	ForceNetUpdate();
+}
+
 void AMD_TrashItem::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
@@ -91,6 +122,11 @@ void AMD_TrashItem::OnConstruction(const FTransform& Transform)
 TArray<FName> AMD_TrashItem::GetTrashKindIdOptions() const
 {
 	return UMD_TrashLibrary::GetTrashKindIds();
+}
+
+void AMD_TrashItem::OnRep_TrashKindId()
+{
+	ApplyTrashKindRow();
 }
 
 void AMD_TrashItem::ApplyTrashKindRow()

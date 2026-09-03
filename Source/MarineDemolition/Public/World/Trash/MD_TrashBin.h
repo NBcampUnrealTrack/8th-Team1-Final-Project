@@ -45,6 +45,7 @@ public:
 
 	/** Implements IMD_Interactable*/
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const override;
 	/** ~Implements IMD_Interactable*/
 
 	/** Implements IMD_TrashContainer */

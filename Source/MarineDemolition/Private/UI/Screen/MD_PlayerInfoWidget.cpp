@@ -1,10 +1,12 @@
 ﻿#include "UI/Screen/MD_PlayerInfoWidget.h"
 
+#include "Components/Button.h"
 #include "Components/HorizontalBox.h"
 #include "Components/Image.h"
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
 #include "Online/Voice/MD_CharacterVOIPTalker.h"
+#include "Player/MD_PlayerController.h"
 #include "Player/MD_PlayerState.h"
 
 void UMD_PlayerInfoWidget::NativePreConstruct()
@@ -24,6 +26,12 @@ void UMD_PlayerInfoWidget::NativeConstruct()
 	// 현재 저장된 플레이어 이름의 본문과 그림자 동시 반영
 	ApplyPlayerName();
 
+	// 강퇴 버튼 클릭 시 현재 카드 대상의 서버 강퇴 요청 연결
+	if (IsValid(Btn_Kick) == true)
+	{
+		Btn_Kick->OnClicked.AddUniqueDynamic(this, &UMD_PlayerInfoWidget::KickAssignedPlayer);
+	}
+
 	// Blueprint의 전역 Material Parameter 변경 이벤트 제거와 C++ 개별 처리 준비
 	if (IsValid(Sd_Volume) == true)
 	{
@@ -40,6 +48,12 @@ void UMD_PlayerInfoWidget::NativeConstruct()
 
 void UMD_PlayerInfoWidget::NativeDestruct()
 {
+	// 제거된 위젯의 강퇴 버튼 클릭 이벤트 연결 해제
+	if (IsValid(Btn_Kick) == true)
+	{
+		Btn_Kick->OnClicked.RemoveDynamic(this, &UMD_PlayerInfoWidget::KickAssignedPlayer);
+	}
+
 	// 제거된 위젯의 Slider 값 변경 이벤트 연결 해제
 	if (IsValid(Sd_Volume) == true)
 	{
@@ -103,6 +117,25 @@ void UMD_PlayerInfoWidget::SetPlayerName(FText InPlayerName)
 	PlayerName = InPlayerName;
 	// 변경된 플레이어 이름의 본문과 그림자 동시 반영
 	ApplyPlayerName();
+}
+
+void UMD_PlayerInfoWidget::KickAssignedPlayer()
+{
+	// 강퇴할 카드 대상이 없는 경우 요청 생략
+	if (IsValid(AssignedPlayerState) == false)
+	{
+		return;
+	}
+
+	// 강퇴 요청을 서버로 전달할 프로젝트 PlayerController 조회
+	AMD_PlayerController* OwningPlayerController = Cast<AMD_PlayerController>(GetOwningPlayer());
+	if (IsValid(OwningPlayerController) == false)
+	{
+		return;
+	}
+
+	// 서버 권한 검증에 사용할 카드 대상 PlayerState 전달
+	OwningPlayerController->ServerRequestKickPlayer(AssignedPlayerState);
 }
 
 void UMD_PlayerInfoWidget::SetVolume(float InVolume)

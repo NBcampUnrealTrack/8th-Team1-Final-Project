@@ -51,11 +51,10 @@ enum class EMD_LoadingReadinessBlocker : uint8
 
 namespace MD_LoadingScreen
 {
-	// 연출 순서: Intro 0.90초(화면을 완전히 덮음) → Loading loop 2.15초 무한 반복
+	// 연출 순서: Intro 0.90초(화면을 완전히 덮음) → 준비될 때까지 항해 루프
 	// → 준비 완료 시 Completion 0.85초 → Outro 1.10초 fade-out.
 	constexpr double IntroDurationSeconds = 0.90;
 	constexpr double CompletionDisplaySeconds = 0.85;
-	constexpr double LoadingLoopDurationSeconds = 2.15;
 	constexpr double OutroDurationSeconds = 1.10;
 	// 시각 진행률 단계. 실제 바이트 퍼센트는 하드 트래블 중 안전하게 조회할 수 없으므로,
 	// 확실히 지나간 단계마다 하한을 올리고 그 사이는 경과 시간으로 메운다.
@@ -148,8 +147,6 @@ struct FMD_LoadingVisualState
 		FScopeLock Lock(&FloorMutex);
 		FloorTarget = FMath::Max(FloorTarget, FMath::Clamp(Progress, 0.0f, 1.0f));
 	}
-	bool IsCompletionVisible() const { return CompletionStartCycles.Load() != 0; }
-
 	/**
 	 * MoviePlayer가 게임 스레드를 막은 동안에도 움직이는 단조 증가 시각 진행률.
 	 * 실제 바이트 퍼센트는 하드 트래블 중 안전하게 조회할 수 없으므로 경과 시간으로 상한까지
@@ -214,9 +211,11 @@ private:
 			? 0.0 : FPlatformTime::ToSeconds64(Now - LastDrawCycles);
 		LastDrawCycles = Now;
 
-		// 시간 기반 추정은 언제나 표시값의 바닥이다.
-		DisplayedFloor = FMath::Max(DisplayedFloor, GetTimedProgress());
-		DisplayedFloor = FMath::Min(FloorTarget, DisplayedFloor + MD_LoadingScreen::FloorCatchUpRate
+		// 단계 하한과 시간 추정 중 큰 쪽이 목표다. 시간 추정을 FloorTarget으로 깎으면
+		// 표시값이 단계 하한 그 자체(0 → 0.12 → 0.90 계단)가 되고, 하한이 올라가기 전까지
+		// 진행률이 한 자리에 멈춰 있다가 다음 단계에서 한 번에 뛴다.
+		const float Target = FMath::Max(FloorTarget, GetTimedProgress());
+		DisplayedFloor = FMath::Min(Target, DisplayedFloor + MD_LoadingScreen::FloorCatchUpRate
 			* static_cast<float>(FMath::Min(SinceLastDraw, MD_LoadingScreen::MaxCatchUpStepSeconds)));
 		return DisplayedFloor;
 	}
@@ -250,14 +249,6 @@ private:
 	float FloorTarget = 0.0f;
 	mutable float DisplayedFloor = 0.0f;
 	mutable uint64 LastDrawCycles = 0;
-};
-
-/** 로딩 루프 물방울 하나의 등장/상승 키값. 시간은 루프 안에서의 초 단위다. */
-struct FMD_LoadingBubbleMotion
-{
-	FVector2D Position, Size;
-	float FadeInStart, FadeInEnd, FadeOutEnd;
-	float RiseMidTime, RiseMidY, RiseEndTime, RiseEndY;
 };
 
 /**
