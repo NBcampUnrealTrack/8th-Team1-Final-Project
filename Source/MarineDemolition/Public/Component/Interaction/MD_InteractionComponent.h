@@ -129,11 +129,6 @@ protected:
 	bool bIsolateCarriedFromPawnChannel = false;
 
 private:
-#if WITH_DEV_AUTOMATION_TESTS
-	friend class FMD_InteractionHoldProbeSpec;
-	friend class FMD_InteractionTargetChangedSpec;
-#endif
-
 	UFUNCTION(Server, Reliable)
 	void ServerInteract(AActor* RequestedActor);
 

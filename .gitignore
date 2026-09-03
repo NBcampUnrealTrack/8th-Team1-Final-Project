@@ -207,11 +207,6 @@ fabric.properties
 SourceArt/**/*.png
 SourceArt/**/*.tga
 
-# Local-only automation/test sources. They remain available in this workspace
-# but are intentionally excluded from version control.
-/Source/MarineDemolition/Private/Tests/
-/Source/MarineDemolition/Public/Tests/
-
 # Binary Files
 Binaries/*
 Plugins/*/Binaries/*
