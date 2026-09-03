@@ -11,6 +11,7 @@
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
+#include "Component/Comfort/MD_ComfortComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -126,6 +127,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 
 	InteractionComponent = CreateDefaultSubobject<UMD_InteractionComponent>(TEXT("InteractionComponent"));
 	InteractionComponent->SetInteractionDependencies(Camera, HoldPoint, PhysicsHandle);
+
+	ComfortComponent = CreateDefaultSubobject<UMD_ComfortComponent>(TEXT("ComfortComponent"));
 
 	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
 
@@ -963,8 +966,14 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 		return;
 	}
 
-	AddControllerYawInput(LookInput.X);
-	AddControllerPitchInput(LookInput.Y);
+	// 멀미 완화 응답 커브를 먹인다. 스무딩이 켜져 있으면 컴포넌트가 누적분을 직접 흘려보내므로
+	// 여기서는 빈 값이 돌아오고, 꺼져 있으면 지연 없이 그대로 돌아온다.
+	const FVector2D ShapedLookInput = IsValid(ComfortComponent)
+		? ComfortComponent->ShapeLookInput(LookInput)
+		: LookInput;
+
+	AddControllerYawInput(ShapedLookInput.X);
+	AddControllerPitchInput(ShapedLookInput.Y);
 }
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
