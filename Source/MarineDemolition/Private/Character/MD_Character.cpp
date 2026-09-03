@@ -493,12 +493,14 @@ void AMD_Character::SetFirstPersonScrapeViewModelActive(const bool bActive)
 		LastScrapeViewModelPointerNormalized = IsValid(ScrapeToolComponent)
 			? ScrapeToolComponent->GetScrapeFocusPointerNormalized()
 			: FVector2D(0.5, 0.5);
-		ScrapeViewModelScreenDirection = FVector2D(0.0, -1.0);
-		LastScrapeViewModelStableWorldTangent = FVector::ZeroVector;
-		ScrapeViewModelWorldRotation = FQuat::Identity;
-		bScrapeViewModelDirectionLocked = false;
+		ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+		LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+		ScrapePointerViewModelWorldRotation = FQuat::Identity;
+		ScrapeStrokeViewModelWorldRotation = FQuat::Identity;
+		bScrapeStrokeViewModelDirectionLocked = false;
 		bWasScrapingForViewModel = false;
-		bHasScrapeViewModelRotation = false;
+		bHasScrapePointerViewModelRotation = false;
+		bHasScrapeStrokeViewModelRotation = false;
 		return;
 	}
 
@@ -507,13 +509,15 @@ void AMD_Character::SetFirstPersonScrapeViewModelActive(const bool bActive)
 		FirstPersonMesh->SetVisibility(bFirstPersonArmsWereVisible, true);
 	}
 	LastScrapeViewModelPointerNormalized = FVector2D(0.5, 0.5);
-	ScrapeViewModelScreenDirection = FVector2D(0.0, -1.0);
-	LastScrapeViewModelStableWorldTangent = FVector::ZeroVector;
-	ScrapeViewModelWorldRotation = FQuat::Identity;
+	ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+	LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+	ScrapePointerViewModelWorldRotation = FQuat::Identity;
+	ScrapeStrokeViewModelWorldRotation = FQuat::Identity;
 	ScrapeViewModelWorldScale = FVector::OneVector;
-	bScrapeViewModelDirectionLocked = false;
+	bScrapeStrokeViewModelDirectionLocked = false;
 	bWasScrapingForViewModel = false;
-	bHasScrapeViewModelRotation = false;
+	bHasScrapePointerViewModelRotation = false;
+	bHasScrapeStrokeViewModelRotation = false;
 }
 
 bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
@@ -560,34 +564,38 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 		return false;
 	}
 
-	const FVector2D PointerDeltaPixels(
-		(PointerNormalized.X - LastScrapeViewModelPointerNormalized.X)
-			* static_cast<double>(ViewportWidth),
-		(PointerNormalized.Y - LastScrapeViewModelPointerNormalized.Y)
-			* static_cast<double>(ViewportHeight));
 	const bool bScraping = ScrapeToolComponent->IsScraping();
+	const bool bScrapeModeChanged = bScraping != bWasScrapingForViewModel;
+	const FVector2D PointerDeltaPixels = bScrapeModeChanged
+		? FVector2D(0.0, 0.0)
+		: FVector2D(
+			(PointerNormalized.X - LastScrapeViewModelPointerNormalized.X)
+				* static_cast<double>(ViewportWidth),
+			(PointerNormalized.Y - LastScrapeViewModelPointerNormalized.Y)
+				* static_cast<double>(ViewportHeight));
 	if (!bScraping)
 	{
-		// Focus Ready에서는 포인터 위치만 따라가고 헤라 회전은 기본
-		// contact frame을 유지한다. 직전 stroke의 부호도 기본 축에 영향을 주지 않는다.
-		ScrapeViewModelScreenDirection = FVector2D(0.0, -1.0);
-		bScrapeViewModelDirectionLocked = false;
 		if (bWasScrapingForViewModel)
 		{
-			LastScrapeViewModelStableWorldTangent = FVector::ZeroVector;
+			// 포인터 추적 모드로 돌아갈 때 직전 stroke의 방향 상태를 버린다.
+			ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+			LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+			bScrapeStrokeViewModelDirectionLocked = false;
 		}
 	}
 	else
 	{
 		if (!bWasScrapingForViewModel)
 		{
-			// 새 LMB stroke의 방향 lock은 ScrapeToolComponent가 다시 결정한다.
-			bScrapeViewModelDirectionLocked = false;
+			// 새 stroke는 포인터 추적 중의 이동량이나 접선 상태를 상속하지 않는다.
+			ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+			LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+			bScrapeStrokeViewModelDirectionLocked = false;
 		}
-		if (!bScrapeViewModelDirectionLocked
+		if (!bScrapeStrokeViewModelDirectionLocked
 			&& PointerDeltaPixels.SizeSquared() >= 0.25)
 		{
-			ScrapeViewModelScreenDirection = PointerDeltaPixels.GetSafeNormal();
+			ScrapeStrokeViewModelScreenDirection = PointerDeltaPixels.GetSafeNormal();
 		}
 	}
 	bWasScrapingForViewModel = bScraping;
@@ -633,9 +641,12 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 		return false;
 	}
 
+	const float ConfiguredDistanceCm = bScraping
+		? ScrapeStrokeViewModelDistanceCm
+		: ScrapeViewModelDistanceCm;
 	const FVector ViewPlanePoint = ViewLocation
 		+ ViewForward * static_cast<double>(
-			FMath::Max(ScrapeViewModelDistanceCm, 10.0f));
+			FMath::Max(ConfiguredDistanceCm, 10.0f));
 	const double RayDistance = FVector::DotProduct(
 		ViewPlanePoint - RayOrigin,
 		ViewForward) / RayPlaneDenominator;
@@ -659,48 +670,57 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 		ContactWorldTangent = FVector::VectorPlaneProject(
 			VisualContactPose.StrokeWorldTangent,
 			-ViewForward).GetSafeNormal();
-		bScrapeViewModelDirectionLocked = !ContactWorldTangent.IsNearlyZero();
+		bScrapeStrokeViewModelDirectionLocked = !ContactWorldTangent.IsNearlyZero();
 	}
 	if (bScraping
 		&& ContactWorldTangent.IsNearlyZero()
-		&& bScrapeViewModelDirectionLocked)
+		&& bScrapeStrokeViewModelDirectionLocked)
 	{
 		// 잠깐 visual trace가 비어도 현재 stroke에서 이미 고정한 축은 유지한다.
-		ContactWorldTangent = LastScrapeViewModelStableWorldTangent;
+		ContactWorldTangent = LastScrapeStrokeViewModelStableWorldTangent;
 	}
 	if (bScraping && ContactWorldTangent.IsNearlyZero())
 	{
-		ContactWorldTangent = ViewRight * ScrapeViewModelScreenDirection.X
-			- ViewUp * ScrapeViewModelScreenDirection.Y;
+		ContactWorldTangent = ViewRight * ScrapeStrokeViewModelScreenDirection.X
+			- ViewUp * ScrapeStrokeViewModelScreenDirection.Y;
 		ContactWorldTangent = FVector::VectorPlaneProject(
 			ContactWorldTangent,
 			-ViewForward).GetSafeNormal();
 	}
-	if (ContactWorldTangent.IsNearlyZero())
+	if (bScraping && ContactWorldTangent.IsNearlyZero())
 	{
-		ContactWorldTangent = LastScrapeViewModelStableWorldTangent;
+		ContactWorldTangent = LastScrapeStrokeViewModelStableWorldTangent;
 	}
 	if (ContactWorldTangent.IsNearlyZero())
 	{
 		ContactWorldTangent = ViewUp;
 	}
 	if (bScraping
-		&& !LastScrapeViewModelStableWorldTangent.IsNearlyZero()
-		&& !LastScrapeViewModelStableWorldTangent.ContainsNaN()
+		&& !LastScrapeStrokeViewModelStableWorldTangent.IsNearlyZero()
+		&& !LastScrapeStrokeViewModelStableWorldTangent.ContainsNaN()
 		&& !ContactWorldTangent.ContainsNaN()
 		&& FVector::DotProduct(
-			LastScrapeViewModelStableWorldTangent,
+			LastScrapeStrokeViewModelStableWorldTangent,
 			ContactWorldTangent) < 0.0)
 	{
 		// 헤라 날의 진행 축은 180도 동치이므로, locked pose를 포함한
 		// 새 tangent를 직전 안정 축과 같은 부호로 맞춰 한 프레임 flip을 막는다.
 		ContactWorldTangent *= -1.0;
 	}
-	LastScrapeViewModelStableWorldTangent = ContactWorldTangent;
+	if (bScraping)
+	{
+		LastScrapeStrokeViewModelStableWorldTangent = ContactWorldTangent;
+	}
 
 	const FQuat TargetContactRotation = FRotationMatrix::MakeFromXZ(
 		-ViewForward,
 		ContactWorldTangent).ToQuat();
+	FQuat& CachedWorldRotation = bScraping
+		? ScrapeStrokeViewModelWorldRotation
+		: ScrapePointerViewModelWorldRotation;
+	bool& bHasCachedWorldRotation = bScraping
+		? bHasScrapeStrokeViewModelRotation
+		: bHasScrapePointerViewModelRotation;
 	FQuat ContactRotation = TargetContactRotation;
 	const double SafeDeltaSeconds = FMath::IsFinite(DeltaSeconds)
 		? FMath::Max(static_cast<double>(DeltaSeconds), 0.0)
@@ -708,18 +728,18 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 	const double SmoothingSeconds = FMath::Max(
 		static_cast<double>(ScrapeViewModelRotationSmoothingSeconds),
 		0.0);
-	if (bHasScrapeViewModelRotation
+	if (bHasCachedWorldRotation
 		&& SmoothingSeconds > UE_DOUBLE_SMALL_NUMBER)
 	{
 		const double RotationBlend = 1.0 - FMath::Exp(
 			-SafeDeltaSeconds / SmoothingSeconds);
 		ContactRotation = FQuat::Slerp(
-			ScrapeViewModelWorldRotation,
+			CachedWorldRotation,
 			TargetContactRotation,
 			FMath::Clamp(RotationBlend, 0.0, 1.0)).GetNormalized();
 	}
-	ScrapeViewModelWorldRotation = ContactRotation;
-	bHasScrapeViewModelRotation = true;
+	CachedWorldRotation = ContactRotation;
+	bHasCachedWorldRotation = true;
 
 	// StaticMesh socket scale은 배치 계약에 쓰지 않는다. 현재 viewmodel world scale을
 	// 보존하면서 Blade_Tip/Blade_Contact의 역변환으로 접점을 정확히 맞춘다.
@@ -730,14 +750,20 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 		ContactRotation,
 		ContactWorldLocation,
 		ScrapeViewModelWorldScale);
-	const FRotator SafeRotationOffset = ScrapeViewModelRotationOffset.ContainsNaN()
-		? FRotator::ZeroRotator
+	const FRotator ConfiguredRotationOffset = bScraping
+		? ScrapeStrokeViewModelRotationOffset
 		: ScrapeViewModelRotationOffset;
+	const FRotator SafeRotationOffset = ConfiguredRotationOffset.ContainsNaN()
+		? FRotator::ZeroRotator
+		: ConfiguredRotationOffset;
+	const float ConfiguredScaleMultiplier = bScraping
+		? ScrapeStrokeViewModelScaleMultiplier
+		: ScrapeViewModelScaleMultiplier;
 	const bool bScaleMultiplierUsable =
-		FMath::IsFinite(ScrapeViewModelScaleMultiplier)
-		&& ScrapeViewModelScaleMultiplier > UE_KINDA_SMALL_NUMBER;
+		FMath::IsFinite(ConfiguredScaleMultiplier)
+		&& ConfiguredScaleMultiplier > UE_KINDA_SMALL_NUMBER;
 	const float SafeScaleMultiplier = bScaleMultiplierUsable
-		? ScrapeViewModelScaleMultiplier
+		? ConfiguredScaleMultiplier
 		: 1.0f;
 	const FTransform LocalVisualOffset(
 		SafeRotationOffset.Quaternion(),
@@ -805,10 +831,13 @@ void AMD_Character::UpdateFirstPersonToolTransform(const float DeltaSeconds)
 		{
 			return;
 		}
-		if (bHasScrapeViewModelRotation)
+		const bool bHasCurrentModeRotation = ScrapeToolComponent->IsScraping()
+			? bHasScrapeStrokeViewModelRotation
+			: bHasScrapePointerViewModelRotation;
+		if (bHasCurrentModeRotation)
 		{
-			// Viewport/deproject가 일시적으로 안 나오면 이전에 성공한
-			// viewmodel pose만 유지하고 기본 소켓으로 튀지 않는다.
+			// Viewport/deproject가 일시적으로 안 나오면 현재 모드에서 성공한
+			// viewmodel pose만 유지하고 다른 모드나 기본 소켓으로 튀지 않는다.
 			return;
 		}
 

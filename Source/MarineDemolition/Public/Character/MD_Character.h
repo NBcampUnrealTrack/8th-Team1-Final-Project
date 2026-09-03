@@ -447,21 +447,37 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel")
 	FName ScrapeBladeContactFallbackSocketName = TEXT("Blade_Contact");
 
-	/** 화면 중앙 기준으로 헤라 접촉 소켓을 놓는 카메라 전방 거리. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
+	/** Focus Ready에서 포인터를 따라가는 헤라의 카메라 전방 거리. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Pointer",
 		meta = (ClampMin = "10.0", ClampMax = "200.0", Units = "cm"))
 	float ScrapeViewModelDistanceCm = 75.0f;
 
-	/** 접촉 소켓을 pivot으로 적용하는 1인칭 헤라 시각 회전 보정. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
+	/** Focus Ready에서 접촉 소켓을 pivot으로 적용하는 시각 회전 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Pointer",
 		meta = (UIMin = "-180.0", UIMax = "180.0",
-			ToolTip = "Visual rotation in the Blade_Tip/Blade_Contact local contact frame."))
+			ToolTip = "Pointer-follow rotation in the Blade_Tip/Blade_Contact local contact frame."))
 	FRotator ScrapeViewModelRotationOffset = FRotator::ZeroRotator;
 
-	/** 접촉 소켓을 pivot으로 적용하는 1인칭 헤라 uniform 크기 보정. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
+	/** Focus Ready에서 접촉 소켓을 pivot으로 적용하는 uniform 크기 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Pointer",
 		meta = (ClampMin = "0.01", UIMin = "0.25", UIMax = "2.0"))
 	float ScrapeViewModelScaleMultiplier = 1.0f;
+
+	/** 실제 LMB 긁기 중에만 쓰는 독립 카메라 전방 거리. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Stroke",
+		meta = (ClampMin = "10.0", ClampMax = "200.0", Units = "cm"))
+	float ScrapeStrokeViewModelDistanceCm = 75.0f;
+
+	/** 실제 LMB 긁기 중에만 쓰는 독립 시각 회전 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Stroke",
+		meta = (UIMin = "-180.0", UIMax = "180.0",
+			ToolTip = "Active-stroke rotation in the Blade_Tip/Blade_Contact local contact frame."))
+	FRotator ScrapeStrokeViewModelRotationOffset = FRotator::ZeroRotator;
+
+	/** 실제 LMB 긁기 중에만 쓰는 독립 uniform 크기 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Stroke",
+		meta = (ClampMin = "0.01", UIMin = "0.25", UIMax = "2.0"))
+	float ScrapeStrokeViewModelScaleMultiplier = 0.25f;
 
 	/** 위치는 즉시 따라가고 헤라 회전만 이 시간 동안 완화한다. */
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
@@ -469,15 +485,17 @@ private:
 	float ScrapeViewModelRotationSmoothingSeconds = 0.04f;
 
 	FVector2D LastScrapeViewModelPointerNormalized = FVector2D(0.5, 0.5);
-	FVector2D ScrapeViewModelScreenDirection = FVector2D(0.0, -1.0);
-	FVector LastScrapeViewModelStableWorldTangent = FVector::ZeroVector;
-	FQuat ScrapeViewModelWorldRotation = FQuat::Identity;
+	FVector2D ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+	FVector LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+	FQuat ScrapePointerViewModelWorldRotation = FQuat::Identity;
+	FQuat ScrapeStrokeViewModelWorldRotation = FQuat::Identity;
 	FVector ScrapeViewModelWorldScale = FVector::OneVector;
 	bool bFirstPersonScrapeViewModelActive = false;
 	bool bFirstPersonArmsWereVisible = true;
-	bool bScrapeViewModelDirectionLocked = false;
+	bool bScrapeStrokeViewModelDirectionLocked = false;
 	bool bWasScrapingForViewModel = false;
-	bool bHasScrapeViewModelRotation = false;
+	bool bHasScrapePointerViewModelRotation = false;
+	bool bHasScrapeStrokeViewModelRotation = false;
 
 	/** 접촉이 끊길 때 도구 회전을 AttachOffset으로 부드럽게 복귀시키는 현재 값. */
 	FRotator ScrapeAnimationToolRelativeRotation = FRotator::ZeroRotator;
