@@ -27,10 +27,6 @@ class MARINEDEMOLITION_API AMD_WallUtility : public AActor, public IMD_Interacta
 {
 	GENERATED_BODY()
 
-#if WITH_DEV_AUTOMATION_TESTS
-	friend class FMD_WallUtilityRepairPermissionSpec;
-#endif
-
 public:
 	AMD_WallUtility();
 

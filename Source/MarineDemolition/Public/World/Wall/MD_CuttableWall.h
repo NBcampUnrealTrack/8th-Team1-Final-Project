@@ -205,10 +205,6 @@ protected:
 	float StrutCutSeconds = 14.4f;          // 4사이클
 
 private:
-	friend class FMD_CuttableWallScrapeIntegrationTest;
-	friend class FMD_CuttableWallArbitraryMeshTest;
-	friend class FMD_BarnacleSpawnerTest;
-	friend class FMD_BarnacleStrokeBlockingTest;
 
 	void SyncLegacySurfaceConfiguration();
 	void CutFromHit(AActor* Cutter, const FHitResult* WallHit);

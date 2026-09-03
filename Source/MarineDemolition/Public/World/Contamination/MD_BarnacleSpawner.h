@@ -240,9 +240,6 @@ protected:
 	int32 MaximumAliveBarnacleCount = 0;
 
 private:
-	// 자동화 테스트가 배치 프로퍼티를 직접 세팅한다. 지우면 테스트가 컴파일되지 않는다
-	friend class FMD_BarnacleSpawnerTest;
-
 	/** 회전·스케일을 반영한 볼륨 안에서 허용 가능한 표면 후보를 충분히 수집한다. */
 	void GatherSurfaceCandidates(
 		FRandomStream& RandomStream,
