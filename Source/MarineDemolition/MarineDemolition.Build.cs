@@ -32,7 +32,8 @@ public class MarineDemolition : ModuleRules
 			"DeveloperSettings",
 			"ApplicationCore",
 			"CoreOnline",
-			"VoiceChat",
+			// 기존 온라인 음성 캡처와 입출력 장치 런타임 제어
+			"Voice", "AudioCaptureCore", "AudioMixerCore", "SignalProcessing",
 			// 오염 마스크 런타임 텍스처 업로드
 			"RHI",
 			// 절단·헤라 VFX

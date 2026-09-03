@@ -2,6 +2,8 @@
 
 #include "Data/Audio/MD_AudioCategoryData.h"
 #include "Data/Audio/MD_AudioSettings.h"
+#include "Gameplay/Settings/MD_AudioSettingCategory.h"
+#include "Gameplay/Settings/MD_SettingsManager.h"
 
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
@@ -15,6 +17,9 @@
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
 #include "Sound/SoundBase.h"
+#include "Sound/AudioSettings.h"
+#include "Sound/SoundClass.h"
+#include "Sound/SoundMix.h"
 #include "Sound/SoundSubmix.h"
 #include "Sound/SoundAttenuation.h"
 #include "Sound/SoundConcurrency.h"
@@ -98,6 +103,28 @@ namespace MD_AudioPrivate
 			Entry.Space == EMD_AudioSpace::Underwater, Entry.bDepthPitch, Entry.EventTag);
 	}
 
+	float GetUserVolume(FGameplayTag EventTag, float MusicVolume, float EffectsVolume)
+	{
+		// 배경 음악 역할의 앰비언스 최상위 태그 조회
+		FGameplayTag AmbienceRoot = GetAmbienceRootTag();
+		// 기본 효과음 배율을 기준으로 한 결과값
+		float UserVolume = EffectsVolume;
+		// 앰비언스 항목의 배경 음악 음량 반환
+		bool bHasAmbienceRoot = AmbienceRoot.IsValid();
+		if (bHasAmbienceRoot == true)
+		{
+			// 현재 이벤트의 앰비언스 계층 포함 여부
+			bool bIsAmbience = EventTag.MatchesTag(AmbienceRoot);
+			if (bIsAmbience == true)
+			{
+				UserVolume = MusicVolume;
+			}
+		}
+
+		// 판별된 사용자 카테고리 음량 반환
+		return UserVolume;
+	}
+
 	/** 옥타브(로그) 공간 보간. 사람 지각이 로그라 깊이 변화가 균일하게 들린다 */
 	float BlendCutoff(float Surface, float Deep, float Alpha, bool bLogarithmic)
 	{
@@ -138,6 +165,20 @@ void UMD_AudioSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	CurrentCutoffHz = Settings.CutoffAtSurface;
 	CachedFilter = Settings.UnderwaterFilter.LoadSynchronous();
 
+	// 게임 인스턴스에 복원된 사용자 음량 조회
+	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	if (IsValid(SettingsManager) == true)
+	{
+		// 현재 오디오 설정 인스턴스 조회
+		UMD_AudioSettingCategory* AudioCategory = SettingsManager->GetAudioSettings();
+		if (IsValid(AudioCategory) == true)
+		{
+			// 새 월드에서 재생될 소리에 저장된 카테고리별 배율 적용
+			ApplyUserVolumes(AudioCategory->Settings.MasterVolume, AudioCategory->Settings.MusicVolume,
+				AudioCategory->Settings.EffectsVolume);
+		}
+	}
+
 	if (!CachedFilter)
 	{
 		UE_LOG(LogTemp, Warning,
@@ -147,6 +188,12 @@ void UMD_AudioSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UMD_AudioSubsystem::Deinitialize()
 {
+	// 월드 종료 시 사용자 음량 믹스 등록 해제
+	if (bUserVolumeMixPushed == true)
+	{
+		UGameplayStatics::PopSoundMixModifier(this, UserVolumeMix);
+		bUserVolumeMixPushed = false;
+	}
 	for (const FActiveSound& Active : ActiveSounds)
 	{
 		if (UAudioComponent* Component = Active.Component.Get())
@@ -166,6 +213,38 @@ void UMD_AudioSubsystem::Deinitialize()
 	}
 
 	Super::Deinitialize();
+}
+
+void UMD_AudioSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+
+	// 맵 로딩 중 초기화될 수 있는 오디오 믹스의 중복 등록 제거
+	if (bUserVolumeMixPushed == true)
+	{
+		UGameplayStatics::PopSoundMixModifier(this, UserVolumeMix);
+		bUserVolumeMixPushed = false;
+	}
+
+	// 월드 서브시스템 생성 이후 연결된 게임 인스턴스의 사용자 설정 조회
+	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	if (IsValid(SettingsManager) == true)
+	{
+		// PIE 월드 생성 순서와 무관한 오디오 설정 복원
+		UMD_AudioSettingCategory* AudioCategory = SettingsManager->GetAudioSettings();
+		if (IsValid(AudioCategory) == true)
+		{
+			// 초기화 중 얻지 못한 전체 및 배경 및 효과음 음량 보완
+			CurrentMasterVolume = AudioCategory->Settings.MasterVolume;
+			CurrentMusicVolume = AudioCategory->Settings.MusicVolume;
+			CurrentEffectsVolume = AudioCategory->Settings.EffectsVolume;
+			// 새 월드의 실제 출력 장치와 온라인 입력 캡처에 확정된 선택 복원
+			AudioCategory->RefreshAudioDevices();
+		}
+	}
+
+	// 월드 오디오 장치 준비 후 최근 사용자 음량 재적용
+	ApplyUserVolumes(CurrentMasterVolume, CurrentMusicVolume, CurrentEffectsVolume);
 }
 
 TStatId UMD_AudioSubsystem::GetStatId() const
@@ -359,13 +438,17 @@ UAudioComponent* UMD_AudioSubsystem::SpawnForEntry(const FMD_AudioEntry& Entry, 
 	const bool bPlay2D = bForce2D || Entry.b2D || Entry.Space == EMD_AudioSpace::UI;
 
 	UAudioComponent* Component = nullptr;
+	// 태그 카테고리에 적용된 사용자 음량 조회
+	float UserVolume = MD_AudioPrivate::GetUserVolume(Entry.EventTag, CurrentMusicVolume, CurrentEffectsVolume);
+	// 원본 항목 음량에 사용자 배율을 결합한 재생 음량
+	float PlaybackVolume = Entry.VolumeMultiplier * UserVolume;
 
 	if (bPlay2D)
 	{
 		// 보이스가 시작된 뒤에 필터를 켜면 반영되지 않는 경우가 있다.
 		// 컴포넌트를 먼저 만들고 필터를 설정한 다음 재생한다.
 		Component = UGameplayStatics::CreateSound2D(
-			World, Sound, Entry.VolumeMultiplier, Entry.PitchMultiplier,
+			World, Sound, PlaybackVolume, Entry.PitchMultiplier,
 			0.0f, Concurrency, /*bPersistAcrossLevelTransition*/ false, /*bAutoDestroy*/ !Entry.bLooping);
 
 		if (Component && MD_AudioPrivate::ShouldApplyDepthFilter(Entry))
@@ -391,14 +474,14 @@ UAudioComponent* UMD_AudioSubsystem::SpawnForEntry(const FMD_AudioEntry& Entry, 
 	{
 		Component = UGameplayStatics::SpawnSoundAttached(
 			Sound, AttachTo, SocketName, FVector::ZeroVector, EAttachLocation::KeepRelativeOffset,
-			/*bStopWhenAttachedToDestroyed*/ true, Entry.VolumeMultiplier, Entry.PitchMultiplier,
+			/*bStopWhenAttachedToDestroyed*/ true, PlaybackVolume, Entry.PitchMultiplier,
 			0.0f, Attenuation, Concurrency, /*bAutoDestroy*/ !Entry.bLooping);
 	}
 	else
 	{
 		Component = UGameplayStatics::SpawnSoundAtLocation(
 			World, Sound, Location, FRotator::ZeroRotator,
-			Entry.VolumeMultiplier, Entry.PitchMultiplier, 0.0f,
+			PlaybackVolume, Entry.PitchMultiplier, 0.0f,
 			Attenuation, Concurrency, /*bAutoDestroy*/ !Entry.bLooping);
 	}
 
@@ -418,7 +501,8 @@ UAudioComponent* UMD_AudioSubsystem::SpawnForEntry(const FMD_AudioEntry& Entry, 
 	// 앞선 소리와 겹쳐 들려야 하는 항목은 짧게 페이드 인해 어택 충돌을 피한다
 	if (Component && Entry.FadeInSeconds > 0.0f)
 	{
-		Component->FadeIn(Entry.FadeInSeconds, 1.0f);
+		// 항목 기본 음량과 사용자 카테고리 음량을 보존한 페이드 적용
+		Component->FadeIn(Entry.FadeInSeconds, PlaybackVolume);
 	}
 
 	return Component;
@@ -429,23 +513,29 @@ FMD_AudioHandle UMD_AudioSubsystem::PlayResolved(const FMD_AudioEntry& Entry, co
 {
 	UAudioComponent* Component = SpawnForEntry(Entry, Location, AttachTo, SocketName, bForce2D);
 
-	// 루프가 아니면 핸들을 발급하지 않는다. 원샷은 끝나면 스스로 사라진다
-	if (!Entry.bLooping)
+	// 루프 항목에만 외부 정지용 핸들 발급
+	FMD_AudioHandle Handle;
+	if (Entry.bLooping == true)
 	{
-		return FMD_AudioHandle();
+		Handle.Id = NextHandleId++;
 	}
 
-	FMD_AudioHandle Handle;
-	Handle.Id = NextHandleId++;
-
+	// 재생 중 카테고리 음량 변경을 위한 컴포넌트 정보 구성
 	FActiveSound Active;
 	Active.Id = Handle.Id;
 	Active.EventTag = Entry.EventTag;
 	Active.Component = Component;
-	Active.bAutoManage = Entry.bStopWhenConditionsFail;
+	Active.bAutoManage = false;
+	// 루프 항목에서만 조건 기반 자동 관리 설정 반영
+	if (Entry.bLooping == true)
+	{
+		Active.bAutoManage = Entry.bStopWhenConditionsFail;
+	}
 	Active.bUnderwater = (Entry.Space == EMD_AudioSpace::Underwater);
 	Active.bDepthPitch = Entry.bDepthPitch;
 	Active.BasePitch = Entry.PitchMultiplier;
+	// 실행 중 사용자 음량 변경을 위한 원본 항목 음량 보관
+	Active.BaseVolume = Entry.VolumeMultiplier;
 	Active.FadeOutSeconds = Entry.FadeOutSeconds;
 	Active.AttachTo = AttachTo;
 	Active.SocketName = SocketName;
@@ -453,8 +543,7 @@ FMD_AudioHandle UMD_AudioSubsystem::PlayResolved(const FMD_AudioEntry& Entry, co
 	Active.bForce2D = bForce2D;
 	ActiveSounds.Add(Active);
 
-	// 조건이 아직 성립하지 않아 스폰이 실패했어도 요청은 남긴다.
-	// 물에 들어가면 EnforceLoopConditions 가 알아서 시작한다.
+	// 루프 여부에 따른 유효 핸들 또는 기본 핸들 반환
 	return Handle;
 }
 
@@ -562,6 +651,65 @@ void UMD_AudioSubsystem::StopEvent(const FGameplayTag& EventTag, float FadeOutSe
 		}
 
 		ActiveSounds.RemoveAtSwap(Index);
+	}
+}
+
+void UMD_AudioSubsystem::ApplyUserVolumes(float MasterVolume, float MusicVolume, float EffectsVolume)
+{
+	// 사용자 음량의 정규화 범위 보정
+	CurrentMasterVolume = FMath::Clamp(MasterVolume, 0.0f, 1.0f);
+	CurrentMusicVolume = FMath::Clamp(MusicVolume, 0.0f, 1.0f);
+	CurrentEffectsVolume = FMath::Clamp(EffectsVolume, 0.0f, 1.0f);
+
+	// 에셋 변경 없는 사용자 전체 음량 전용 믹스 생성
+	if (IsValid(UserVolumeMix) == false)
+	{
+		UserVolumeMix = NewObject<USoundMix>(this, NAME_None, RF_Transient);
+		// 사용자가 적용한 전체 음량의 즉시 반영과 명시적 해제까지 유지
+		UserVolumeMix->FadeInTime = 0.0f;
+		UserVolumeMix->FadeOutTime = 0.0f;
+		UserVolumeMix->Duration = -1.0f;
+		UserVolumeMix->bApplyEQ = false;
+	}
+
+	// 기본 사운드 클래스와 자식 계층의 전체 음량 적용
+	const UAudioSettings* EngineAudioSettings = GetDefault<UAudioSettings>();
+	USoundClass* MasterSoundClass = EngineAudioSettings->GetDefaultSoundClass();
+	if (IsValid(MasterSoundClass) == true)
+	{
+		UGameplayStatics::SetSoundMixClassOverride(this, UserVolumeMix, MasterSoundClass,
+			CurrentMasterVolume, 1.0f, 0.0f, true);
+		// 현재 월드의 오디오 장치 준비 여부 확인
+		UWorld* World = GetWorld();
+		if (IsValid(World) == true)
+		{
+			FAudioDevice* AudioDevice = World->GetAudioDeviceRaw();
+			if (AudioDevice != nullptr)
+			{
+				// 반복 적용 시 믹스 참조 횟수가 누적되지 않는 단일 등록
+				if (bUserVolumeMixPushed == false)
+				{
+					UGameplayStatics::PushSoundMixModifier(this, UserVolumeMix);
+					bUserVolumeMixPushed = true;
+				}
+			}
+		}
+	}
+
+	// 이미 재생 중인 관리 대상의 카테고리별 음량 즉시 갱신
+	for (FActiveSound& Active : ActiveSounds)
+	{
+		// 현재 관리 대상의 오디오 컴포넌트 조회
+		UAudioComponent* Component = Active.Component.Get();
+		if (IsValid(Component) == false)
+		{
+			continue;
+		}
+
+		// 원본 항목 음량과 사용자 카테고리 배율의 결합
+		float UserVolume = MD_AudioPrivate::GetUserVolume(
+			Active.EventTag, CurrentMusicVolume, CurrentEffectsVolume);
+		Component->SetVolumeMultiplier(Active.BaseVolume * UserVolume);
 	}
 }
 
@@ -845,8 +993,13 @@ void UMD_AudioSubsystem::EnforceLoopConditions()
 				*Entry, Active.Location, Active.AttachTo.Get(), Active.SocketName, Active.bForce2D);
 			if (Restarted)
 			{
-				Restarted->FadeIn(FadeSecondsOnConditionChange, 1.0f);
+				// 조건 복구 후에도 현재 사용자 카테고리 음량을 유지하는 페이드 목표값
+				float UserVolume = MD_AudioPrivate::GetUserVolume(Entry->EventTag, CurrentMusicVolume, CurrentEffectsVolume);
+				float TargetVolume = Entry->VolumeMultiplier * UserVolume;
+				Restarted->FadeIn(FadeSecondsOnConditionChange, TargetVolume);
 				Active.Component = Restarted;
+				// 조건에 따라 선택된 최신 항목의 원본 음량 보관
+				Active.BaseVolume = Entry->VolumeMultiplier;
 				if (MD_AudioPrivate::ShouldApplyDepthFilter(*Entry))
 				{
 					ApplyUnderwaterFilter(Restarted);

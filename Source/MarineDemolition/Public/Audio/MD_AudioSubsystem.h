@@ -8,6 +8,7 @@
 
 class UAudioComponent;
 class USoundBase;
+class USoundMix;
 class USubmixEffectFilterPreset;
 
 /** 루프 사운드를 나중에 멈추기 위한 핸들 */
@@ -39,6 +40,7 @@ class MARINEDEMOLITION_API UMD_AudioSubsystem : public UTickableWorldSubsystem
 public:
 	//~ USubsystem
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
 	//~ FTickableGameObject
@@ -86,6 +88,10 @@ public:
 	/** 카탈로그를 다시 읽어 태그 인덱스를 재구성한다. 데이터 에셋 편집 후 호출 */
 	UFUNCTION(BlueprintCallable, Category = "MD|Audio")
 	void RebuildIndex();
+
+	/** 사용자 설정의 전체 및 배경 음악 및 효과음 배율 적용 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Audio")
+	void ApplyUserVolumes(float MasterVolume, float MusicVolume, float EffectsVolume);
 
 private:
 	/** 상태·환경 조건을 만족하는 항목 중 가장 구체적인 것을 고른다 */
@@ -176,6 +182,9 @@ private:
 		/** 항목이 지정한 기본 피치. 깊이 배율을 여기에 곱한다 */
 		float BasePitch = 1.0f;
 
+		/** 항목 데이터에 지정된 사용자 설정 적용 전 기본 음량 */
+		float BaseVolume = 1.0f;
+
 		/** 항목이 지정한 기본 정지 페이드. StopHandle 에 음수를 넘기면 이 값을 쓴다 */
 		float FadeOutSeconds = 0.1f;
 
@@ -191,8 +200,21 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<USubmixEffectFilterPreset> CachedFilter;
 
+	// 카메라 페이드와 독립적인 사용자 전체 음량용 런타임 믹스
+	UPROPERTY(Transient)
+	TObjectPtr<USoundMix> UserVolumeMix;
+
+	// 런타임 믹스 중복 등록 방지 상태
+	bool bUserVolumeMixPushed = false;
+
 	float CurrentCutoffHz = 2000.0f;
 	float CurrentDepthPitch = 1.0f;
+	// 새 재생과 월드 시작 시 사용하는 최근 적용 전체 음량
+	float CurrentMasterVolume = 1.0f;
+	// 새 배경 재생에 사용하는 최근 적용 음량
+	float CurrentMusicVolume = 1.0f;
+	// 새 효과음 재생에 사용하는 최근 적용 음량
+	float CurrentEffectsVolume = 1.0f;
 	int32 LastAppliedCount = 0;
 	int32 LastLpfAppliedCount = 0;
 	int32 LastPitchAppliedCount = 0;
