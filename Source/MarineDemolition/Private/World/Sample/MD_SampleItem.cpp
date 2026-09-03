@@ -3,6 +3,7 @@
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
+#include "Engine/EngineTypes.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
@@ -20,8 +21,23 @@ AMD_SampleItem::AMD_SampleItem()
 	BreakImpactSpeed = 800.0f;
 	DamageImpactSpeed = 400.0f;
 
+	// 캐릭터와의 물리 충돌은 유지하되 작은 샘플을 발판이나 계단으로 판정하지 않는다
+	Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	Mesh->CanCharacterStepUpOn = ECB_No;
+	Mesh->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Unwalkable, 0.f));
+
+	// 가벼운 샘플이 캐릭터와 접촉한 뒤 오래 튀거나 회전하지 않도록 잔여 운동을 줄인다
+	Mesh->SetLinearDamping(0.5f);
+	Mesh->SetAngularDamping(1.f);
+
 	// 샘플에서만 물리 충격 이벤트를 받아 파괴 기능을 추가하기 위한 설정
 	Mesh->SetNotifyRigidBodyCollision(true);
+}
+
+FText AMD_SampleItem::GetInteractionPrompt_Implementation(AActor* Interactor) const
+{
+	static_cast<void>(Interactor);
+	return NSLOCTEXT("MDInteraction", "SampleCarryPrompt", "[E] 들기");
 }
 
 void AMD_SampleItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

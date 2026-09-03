@@ -4,13 +4,69 @@
 #include "Components/TextBlock.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
-#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
+
+namespace
+{
+	struct FInteractionPromptParts
+	{
+		FText DisplayName;
+		FText Key;
+		FText Action;
+		bool bHasAction = false;
+	};
+
+	FInteractionPromptParts ParseInteractionPrompt(const FText& PromptText)
+	{
+		FInteractionPromptParts Parts;
+		const FString PromptString = PromptText.ToString();
+		FString DisplayNameString;
+		FString ActionPromptString;
+
+		if (!PromptString.Split(
+				TEXT("\n"),
+				&DisplayNameString,
+				&ActionPromptString,
+				ESearchCase::CaseSensitive,
+				ESearchDir::FromStart))
+		{
+			if (PromptString.StartsWith(TEXT("[")))
+			{
+				ActionPromptString = PromptString;
+			}
+			else
+			{
+				DisplayNameString = PromptString;
+			}
+		}
+
+		Parts.DisplayName = FText::FromString(DisplayNameString);
+		ActionPromptString.TrimStartAndEndInline();
+		Parts.bHasAction = !ActionPromptString.IsEmpty();
+
+		int32 ClosingBracketIndex = INDEX_NONE;
+		if (ActionPromptString.StartsWith(TEXT("["))
+			&& ActionPromptString.FindChar(TEXT(']'), ClosingBracketIndex)
+			&& ClosingBracketIndex > 1)
+		{
+			Parts.Key = FText::FromString(
+				ActionPromptString.Mid(1, ClosingBracketIndex - 1));
+			Parts.Action = FText::FromString(
+				ActionPromptString.Mid(ClosingBracketIndex + 1).TrimStartAndEnd());
+		}
+		else
+		{
+			Parts.Action = FText::FromString(ActionPromptString);
+		}
+
+		return Parts;
+	}
+}
 
 void UMD_InteractionPromptWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
 
-	SetInfoText(FText::GetEmpty());
+	ApplyPromptText(FText::GetEmpty());
 	SetVisibility(ESlateVisibility::Collapsed);
 
 	APlayerController* OwningController = GetOwningPlayer();
@@ -44,12 +100,10 @@ void UMD_InteractionPromptWidget::HandlePossessedPawnChanged(APawn* OldPawn, APa
 	BindToPawn(NewPawn);
 }
 
-void UMD_InteractionPromptWidget::HandleInteractionTargetChanged(AActor* NewTarget)
+void UMD_InteractionPromptWidget::HandleInteractionPromptChanged(FText PromptText)
 {
-	const FText DisplayName =
-		UMD_InteractionPresentationLibrary::ResolveInteractionDisplayName(NewTarget);
-	SetInfoText(DisplayName);
-	SetVisibility(DisplayName.IsEmpty()
+	ApplyPromptText(PromptText);
+	SetVisibility(PromptText.IsEmpty()
 		? ESlateVisibility::Collapsed
 		: ESlateVisibility::HitTestInvisible);
 }
@@ -66,26 +120,34 @@ void UMD_InteractionPromptWidget::BindToPawn(APawn* NewPawn)
 
 	if (IsValid(BoundInteractionComponent))
 	{
-		BoundInteractionComponent->OnInteractionTargetChanged.AddUniqueDynamic(
+		BoundInteractionComponent->OnInteractionPromptChanged.AddUniqueDynamic(
 			this,
-			&UMD_InteractionPromptWidget::HandleInteractionTargetChanged);
-		HandleInteractionTargetChanged(BoundInteractionComponent->GetCurrentTarget());
+			&UMD_InteractionPromptWidget::HandleInteractionPromptChanged);
+		HandleInteractionPromptChanged(
+			BoundInteractionComponent->GetCurrentInteractionPrompt());
 		return;
 	}
 
-	HandleInteractionTargetChanged(nullptr);
+	HandleInteractionPromptChanged(FText::GetEmpty());
 }
 
 void UMD_InteractionPromptWidget::UnbindInteractionComponent()
 {
 	if (IsValid(BoundInteractionComponent))
 	{
-		BoundInteractionComponent->OnInteractionTargetChanged.RemoveDynamic(
+		BoundInteractionComponent->OnInteractionPromptChanged.RemoveDynamic(
 			this,
-			&UMD_InteractionPromptWidget::HandleInteractionTargetChanged);
+			&UMD_InteractionPromptWidget::HandleInteractionPromptChanged);
 	}
 
 	BoundInteractionComponent = nullptr;
+}
+
+void UMD_InteractionPromptWidget::ApplyPromptText(const FText& PromptText)
+{
+	const FInteractionPromptParts Parts = ParseInteractionPrompt(PromptText);
+	SetInfoText(Parts.DisplayName);
+	SetActionText(Parts.Key, Parts.Action, Parts.bHasAction);
 }
 
 void UMD_InteractionPromptWidget::SetInfoText(const FText& NewText)
@@ -99,4 +161,34 @@ void UMD_InteractionPromptWidget::SetInfoText(const FText& NewText)
 	{
 		Txt_Info_Shadow->SetText(NewText);
 	}
+}
+
+void UMD_InteractionPromptWidget::SetActionText(
+	const FText& NewKeyText,
+	const FText& NewActionText,
+	const bool bVisible)
+{
+	const ESlateVisibility ActionVisibility = bVisible
+		? ESlateVisibility::HitTestInvisible
+		: ESlateVisibility::Collapsed;
+
+	const auto UpdateActionTextBlock = [ActionVisibility](
+		UTextBlock* TextBlock,
+		const FText& NewText)
+	{
+		if (IsValid(TextBlock))
+		{
+			TextBlock->SetText(NewText);
+			TextBlock->SetVisibility(ActionVisibility);
+		}
+	};
+
+	UpdateActionTextBlock(Txt_Key, NewKeyText);
+	UpdateActionTextBlock(Txt_Key_Shadow, NewKeyText);
+	UpdateActionTextBlock(Txt_Action, NewActionText);
+	UpdateActionTextBlock(Txt_Action_Shadow, NewActionText);
+	UpdateActionTextBlock(Txt_Sign_Left, FText::FromString(TEXT("[")));
+	UpdateActionTextBlock(Txt_Sign_Left_Shadow, FText::FromString(TEXT("[")));
+	UpdateActionTextBlock(Txt_Sign_Right, FText::FromString(TEXT("]")));
+	UpdateActionTextBlock(Txt_Sign_Right_Shadow, FText::FromString(TEXT("]")));
 }

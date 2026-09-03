@@ -48,6 +48,12 @@ AMD_TrashBin::AMD_TrashBin()
 	ContentsVolume->SetCanEverAffectNavigation(false);
 }
 
+FText AMD_TrashBin::GetInteractionPrompt_Implementation(AActor* Interactor) const
+{
+	static_cast<void>(Interactor);
+	return NSLOCTEXT("MDInteraction", "TrashBinCarryPrompt", "[E] 들기");
+}
+
 void AMD_TrashBin::BeginPlay()
 {
 	Super::BeginPlay();

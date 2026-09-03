@@ -21,6 +21,9 @@ public:
 	/** 손상 상태를 네트워크로 복제하기 위한 등록 함수 */
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+	/** 샘플 조준 시 두 번째 줄에 표시할 운반 상호작용 문구를 반환한다. */
+	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const override;
+
 	/** 샘플 등급을 퀘스트 판정용 게임플레이 태그로 변환하는 함수 */
 	virtual FGameplayTag GetQuestGradeTag() const override;
 
