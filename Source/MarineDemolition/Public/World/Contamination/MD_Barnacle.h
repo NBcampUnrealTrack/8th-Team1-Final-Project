@@ -96,10 +96,6 @@ protected:
 	float AccumulatedRemovalWork = 0.0f;
 
 private:
-	// 자동화 테스트가 배치 프로퍼티를 직접 세팅한다. 지우면 테스트가 컴파일되지 않는다
-	friend class FMD_BarnacleRemovalTest;
-	friend class FMD_ScrapeLoadTest;
-
 	UFUNCTION()
 	void OnRep_AccumulatedRemovalWork();
 

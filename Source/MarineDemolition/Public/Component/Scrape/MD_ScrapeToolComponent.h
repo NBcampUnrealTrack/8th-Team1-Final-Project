@@ -652,13 +652,6 @@ protected:
 	float ReadyAimHeartbeatRateHz;
 
 private:
-	friend class FMD_ScrapeFootprintCharacterizationTest;
-	friend class FMD_ScrapeFocusCameraLockTest;
-	friend class FMD_ScrapeToolBarnacleOcclusionTest;
-	friend class FMD_ScrapeLoadTest;
-	friend class FMD_ScrapeStage3PathTest;
-	friend class FMD_ScrapeReacquisitionTest;
-	friend class FMD_ScrapeNetworkSessionTest;
 
 	/** 디버그 표시용 접촉 종류 문자열. 이 컴포넌트에서만 사용한다. */
 	static const TCHAR* GetContactTypeLabel(EMD_ScrapeContactType ContactType);
