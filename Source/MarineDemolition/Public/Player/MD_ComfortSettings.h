@@ -64,6 +64,9 @@ public:
 	 * 마우스 입력 응답 커브 지수. 1이면 선형이라 엔진 기본 동작과 완전히 같다.
 	 * 1보다 크면 작게 움직일 때 더 천천히(정밀하게), 크게 움직일 때는 그대로 돌아간다.
 	 * 프레임 지연을 만들지 않으므로 멀미를 늘리지 않는다.
+	 *
+	 * 프로젝트 기본값은 DefaultGame.ini에서 1.0(꺼짐)으로 지정한다.
+	 * 체감 비교에서 감도가 무겁게 느껴져 껐고, 부드러움은 LookSmoothingHalfLife가 담당한다.
 	 */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Look",
 		meta = (ClampMin = "1.0", ClampMax = "2.5", UIMin = "1.0", UIMax = "2.0"))
@@ -72,6 +75,10 @@ public:
 	/**
 	 * 응답 커브에서 '전속' 취급할 프레임당 입력 크기. 이 값 이상은 커브가 감쇠하지 않는다.
 	 * 마우스 감도와 DPI에 따라 적정값이 달라지므로, 정밀 구간이 너무 무겁게 느껴지면 낮춘다.
+	 *
+	 * 이 선언의 4.0은 실측 없이 잡은 값이라 실제 입력 규모보다 10배쯤 컸다.
+	 * PIE 실측에서 일반 조준 시 프레임당 입력이 0.3 내외로 나왔으므로,
+	 * DefaultGame.ini에서 0.4로 지정한다. LookResponseExponent가 1.0인 동안은 무효값이다.
 	 */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Look",
 		meta = (ClampMin = "0.1", UIMin = "0.5", UIMax = "20.0"))
@@ -79,8 +86,12 @@ public:
 
 	/**
 	 * 시간 기반 시야 스무딩의 반감기(초). 0이면 끈다.
+	 * 총 회전량은 보존되므로 조준 위치가 밀리지는 않는다.
+	 *
 	 * 주의: 이 값을 올리면 카메라는 부드러워지지만 입력 지연이 생겨 오히려 멀미가 늘 수 있다.
-	 * 총 회전량은 보존되므로 조준 위치가 밀리지는 않는다. 0.02~0.06부터 시도할 것.
+	 * 그래서 코드 기본값은 0(꺼짐)이고, 프로젝트 기본값은 체감 비교를 거쳐
+	 * DefaultGame.ini의 [/Script/MarineDemolition.MD_ComfortSettings]에서 0.03으로 지정한다.
+	 * 즉 이 선언의 0.f는 '설정이 없을 때의 안전한 기본값'이고 실제 적용값은 ini를 따른다.
 	 */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Look",
 		meta = (ClampMin = "0.0", ClampMax = "0.25", UIMin = "0.0", UIMax = "0.1"))
