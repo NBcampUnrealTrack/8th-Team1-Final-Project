@@ -333,6 +333,13 @@ void AMD_CuttableWall::AddCutProgressInternal(
 		return;
 	}
 
+	// 지점 제한이 걸린 벽(튜토리얼)은 허용된 자리를 쳤을 때만 진행도가 쌓인다.
+	// 거부해도 어빌리티는 계속 돌아간다 — 절단기가 "안 먹는" 것으로 보이는 게 의도다.
+	if (CutLocationFilter.IsBound() && !CutLocationFilter.Execute(WallHit))
+	{
+		return;
+	}
+
 	const float Required = GetRequiredCutSeconds();
 
 	CutProgressSeconds = FMath::Clamp(CutProgressSeconds + DeltaSeconds, 0.0f, Required);

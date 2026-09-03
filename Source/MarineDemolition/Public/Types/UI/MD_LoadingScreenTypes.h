@@ -51,11 +51,10 @@ enum class EMD_LoadingReadinessBlocker : uint8
 
 namespace MD_LoadingScreen
 {
-	// 연출 순서: Intro 0.90초(화면을 완전히 덮음) → Loading loop 2.15초 무한 반복
+	// 연출 순서: Intro 0.90초(화면을 완전히 덮음) → 준비될 때까지 항해 루프
 	// → 준비 완료 시 Completion 0.85초 → Outro 1.10초 fade-out.
 	constexpr double IntroDurationSeconds = 0.90;
 	constexpr double CompletionDisplaySeconds = 0.85;
-	constexpr double LoadingLoopDurationSeconds = 2.15;
 	constexpr double OutroDurationSeconds = 1.10;
 	// 시각 진행률 단계. 실제 바이트 퍼센트는 하드 트래블 중 안전하게 조회할 수 없으므로,
 	// 확실히 지나간 단계마다 하한을 올리고 그 사이는 경과 시간으로 메운다.
@@ -148,8 +147,6 @@ struct FMD_LoadingVisualState
 		FScopeLock Lock(&FloorMutex);
 		FloorTarget = FMath::Max(FloorTarget, FMath::Clamp(Progress, 0.0f, 1.0f));
 	}
-	bool IsCompletionVisible() const { return CompletionStartCycles.Load() != 0; }
-
 	/**
 	 * MoviePlayer가 게임 스레드를 막은 동안에도 움직이는 단조 증가 시각 진행률.
 	 * 실제 바이트 퍼센트는 하드 트래블 중 안전하게 조회할 수 없으므로 경과 시간으로 상한까지
@@ -250,14 +247,6 @@ private:
 	float FloorTarget = 0.0f;
 	mutable float DisplayedFloor = 0.0f;
 	mutable uint64 LastDrawCycles = 0;
-};
-
-/** 로딩 루프 물방울 하나의 등장/상승 키값. 시간은 루프 안에서의 초 단위다. */
-struct FMD_LoadingBubbleMotion
-{
-	FVector2D Position, Size;
-	float FadeInStart, FadeInEnd, FadeOutEnd;
-	float RiseMidTime, RiseMidY, RiseEndTime, RiseEndY;
 };
 
 /**

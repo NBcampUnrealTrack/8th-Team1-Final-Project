@@ -3,22 +3,22 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Blueprint/UserWidget.h"
 
 // 둘 다 값으로 쓰는 타입이라 전방 선언이 안 된다 (EMD_ShopCategory, FMD_ShopItem,
 // FMD_MerchantMenuInfo). 대신 위젯 헤더가 아닌 타입 전용 헤더만 끌어온다.
 #include "Data/Shop/MD_ShopCatalog.h"
+#include "UI/Foundation/MD_CommonGameMenuWidget.h"
 #include "UI/Merchant/MD_MerchantUITypes.h"
-
 #include "MD_ShopWidget.generated.h"
 
-class UButton;
+class UImage;
+class UCommonButtonGroupBase;
 class UPanelWidget;
 class UTextBlock;
-class UMD_ShopItemCardWidget;
+class UMD_CommonButtonBase;
 class UMD_MerchantMenuWidget;
+class UMD_ShopItemCardWidget;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_ShopBackRequest);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopPurchaseRequest, FName, ItemId);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopPurchaseRejected, FName, ItemId);
 
@@ -32,13 +32,13 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopPurchaseRejected, FName, Ite
  * OnItemPurchaseRequested만 브로드캐스트하고, 시스템이 붙으면 거기서 받는다.
  */
 UCLASS()
-class MARINEDEMOLITION_API UMD_ShopWidget : public UUserWidget
+class MARINEDEMOLITION_API UMD_ShopWidget : public UMD_CommonGameMenuWidget
 {
 	GENERATED_BODY()
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
-	void SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget) { OwningMerchantMenu = InMenuWidget; }
+	void SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget);
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void SetCatalog(UMD_ShopCatalog* InCatalog);
@@ -64,50 +64,35 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void SelectCategory(EMD_ShopCategory InCategory);
 
-	UFUNCTION(BlueprintPure, Category = "MD|Shop")
-	EMD_ShopCategory GetSelectedCategory() const { return SelectedCategory; }
-
-	/** 헤더 정보 + 아이템 목록을 모두 다시 그린다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void RefreshDisplay();
 
 	UPROPERTY(BlueprintAssignable, Category = "MD|Shop")
-	FMD_ShopBackRequest OnBackRequested;
-
-	UPROPERTY(BlueprintAssignable, Category = "MD|Shop")
 	FMD_ShopPurchaseRequest OnItemPurchaseRequested;
 
-	/** 이미 가득 차서 구매를 막았을 때. 상인이 받아 대사로 알린다. */
 	UPROPERTY(BlueprintAssignable, Category = "MD|Shop")
 	FMD_ShopPurchaseRejected OnPurchaseRejected;
 
 protected:
-	virtual void NativeConstruct() override;
-	virtual void NativeDestruct() override;
+	virtual void NativeOnActivated() override;
+
+	virtual void NativeOnDeactivated() override;
 
 	void RebuildItemList();
 
-	UFUNCTION()
-	void HandleBackClicked();
+	void BuildCategoryButtons();
 
-	UFUNCTION()
-	void HandleCategoryToolClicked();
+	void RefreshSelectedItem();
 
-	UFUNCTION()
-	void HandleCategorySafetyClicked();
+	void HandleCategoryAllClicked();
 
-	UFUNCTION()
-	void HandleCategoryUtilityRepairClicked();
+	void HandleCategoryClicked(EMD_ShopCategory Category);
 
-	UFUNCTION()
-	void HandleCategorySurvivalClicked();
+	void HandleItemSelected(FName ItemId);
 
-	UFUNCTION()
-	void HandleCategoryRecoveryClicked();
+	void HandleBuyClicked();
 
-	UFUNCTION()
-	void HandleCardBuyRequested(FName ItemId);
-
+	// 상점 화면을 연 상인 메뉴
 	UPROPERTY()
 	TObjectPtr<UMD_MerchantMenuWidget> OwningMerchantMenu;
 
@@ -118,6 +103,10 @@ protected:
 	/** 아이템 카드로 쓸 WBP */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Shop")
 	TSubclassOf<UMD_ShopItemCardWidget> ItemCardClass;
+
+	// 동적으로 생성할 카테고리 버튼 클래스
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Shop")
+	TSubclassOf<UMD_CommonButtonBase> CategoryButtonClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
 	FMD_MerchantMenuInfo ShopInfo;
@@ -135,68 +124,46 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
 	EMD_ShopCategory SelectedCategory = EMD_ShopCategory::Tool;
 
-	// ───────────────── 카테고리 탭 5종 ─────────────────
+	// 모든 아이템 카테고리를 함께 표시하는 상태
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
+	bool bShowAllCategories = true;
+
+	// 현재 상세 패널에 표시 중인 품목 식별자
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop")
+	FName SelectedItemId;
+
+	// 동적으로 생성한 상점 카드 중 항상 하나만 선택되도록 관리하는 그룹
+	UPROPERTY(Transient)
+	TObjectPtr<UCommonButtonGroupBase> ItemCardButtonGroup;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UButton> BTN_CatTool;
+	TObjectPtr<UMD_CommonButtonBase> Btn_Buy;
 
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UButton> BTN_CatSafety;
-
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UButton> BTN_CatUtilityRepair;
-
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UButton> BTN_CatSurvival;
-
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UButton> BTN_CatRecovery;
-
-	/** 선택된 카테고리 이름 (enum DisplayName을 그대로 쓴다) */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_CategoryTitle;
-
-	// ───────────────── 아이템 목록 ─────────────────
-
-	/**
+	/*
 	 * 카드가 들어갈 컨테이너. ScrollBox·WrapBox·VerticalBox 아무거나 가능하도록
 	 * UPanelWidget으로 받는다 — 레이아웃 선택을 디자이너에게 남긴다.
 	 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UPanelWidget> PNL_ItemList;
-
-	/** 해당 카테고리에 품목이 없을 때 */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_EmptyCategory;
-
-	// ───────────────── 헤더 정보 (`07` §8) ─────────────────
+	TObjectPtr<UPanelWidget> SB_Categories;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_Credits;
+	TObjectPtr<UPanelWidget> WB_ItemEntries;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_DailyAdvance;
+	TObjectPtr<UTextBlock> Txt_Credits;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_Affinity;
+	TObjectPtr<UTextBlock> Txt_DetailName;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_AffinityToNextUnlock;
-
-	/** 활성 퀘스트 보수 미리보기 (`07` §8) */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_ActiveQuestReward;
-
-	// ───────────────── 안내 문구 ─────────────────
-
-	/** `04` §3: 쓰레기통은 상점 비매품 — 폐기물 대기장 무한 보급 */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_TrashBinNotice;
-
-	/** `07` §8: 소모품 권장 일일 구매량 힌트 */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_ConsumableHint;
+	TObjectPtr<UTextBlock> Txt_DetailDescription;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UButton> BTN_Back;
+	TObjectPtr<UTextBlock> Txt_DetailPrice;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Owned;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
+	TObjectPtr<UImage> Img_DetailIcon;
 };

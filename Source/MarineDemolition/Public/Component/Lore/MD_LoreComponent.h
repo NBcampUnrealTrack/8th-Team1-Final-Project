@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
@@ -33,29 +33,25 @@ public:
 	FMD_OnLoreProgressUpdated OnLoreProgressUpdated;
 
 protected:
-	/** 코덱스와 월드 수집물 표현에 제공하는 복제된 현장별 진행 목록 */
+	/** 코덱스와 월드 수집물 표현에 제공하는 복제된 전역 로어 발견 목록 */
 	UPROPERTY(ReplicatedUsing = OnRep_LoreProgress)
-	TArray<FMD_LoreSiteProgress> SiteProgressList;
+	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds;
 
 	/** 컴포넌트 종료 시 정확한 서버 원장 이벤트를 해제하기 위한 구독 핸들 */
 	FDelegateHandle SubsystemChangedHandle;
 
 public:
-	/** 현장의 진행 상태를 조회하는 함수 */
-	UFUNCTION(BlueprintPure, Category = "MD|Lore")
-	bool GetSiteProgress(FName SiteId, FMD_LoreSiteProgress& OutSiteProgress) const;
-
 	/** 복제된 발견 목록과 카탈로그 선행 조건으로 공개 상태를 계산하는 함수 */
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
-	EMD_LoreEntryState GetLoreState(const UMD_LoreCatalog* LoreCatalog, FName LoreId) const;
+	EMD_LoreEntryState GetLoreState(const UMD_LoreCatalog* LoreCatalog, FPrimaryAssetId LoreAssetId) const;
 
 	/** 서버의 원장에서 지정한 로어의 최초 발견 여부를 확인하는 함수 */
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
-	bool HasDiscoveredLore(FName SiteId, FName LoreId) const;
+	bool HasDiscoveredLore(FPrimaryAssetId LoreAssetId) const;
 
-	/** 열린 코덱스 UI가 모든 현장의 수집 정보를 한 번에 복사하기 위한 조회 함수 */
+	/** 열린 코덱스 UI가 전역 로어 수집 정보를 복사하기 위한 조회 함수 */
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
-	TArray<FMD_LoreSiteProgress> GetSiteProgressList() const { return SiteProgressList; }
+	FORCEINLINE TArray<FPrimaryAssetId> GetDiscoveredLoreAssetIds() const { return DiscoveredLoreAssetIds; }
 
 protected:
 	/** 서버 원장 전체를 복제 배열로 복사하고 즉시 전파하는 함수 */

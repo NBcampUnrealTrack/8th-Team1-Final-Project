@@ -13,6 +13,17 @@ class AMD_GameStateBase;
 class UMD_MerchantSubsystem;
 struct FMD_TrashSortResult;
 
+/**
+ * 한 품목이 실제로 소비된 뒤 서버에서 한 번 방송한다. 통째 투입이면 품목 수만큼 나온다.
+ * 액터가 이미 파괴된 뒤라 포인터 대신 클래스를 넘긴다.
+ * SorterCategory는 이 분류기가 담당하는 칸이다 — bCorrectSort가 true면 품목의 칸과 같다.
+ */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
+	FMD_OnTrashSorted,
+	TSubclassOf<AActor>, ItemClass,
+	bool, bCorrectSort,
+	FGameplayTag, SorterCategory);
+
 UCLASS()
 class MARINEDEMOLITION_API AMD_TrashSorter : public AActor
 {
@@ -30,6 +41,10 @@ public:
 	/** 지금까지 삼킨 물건 수. 정분류·오분류를 가리지 않는다 */
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	int32 GetSortedCount() const { return SortedCount; }
+
+	/** 품목이 소비될 때마다 서버에서 방송. 튜토리얼 진행 판정이 구독한다 */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Trash")
+	FMD_OnTrashSorted OnTrashSorted;
 
 protected:
 	/** 배치 인스턴스에서 칸을 바꿔도 에디터에 바로 색이 반영되게 한다 */
