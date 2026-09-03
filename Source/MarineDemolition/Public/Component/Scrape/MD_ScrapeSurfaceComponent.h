@@ -377,6 +377,17 @@ public:
 		FVector2D& OutSurfacePositionCm,
 		EMD_ScrapeSurfaceFace& OutSurfaceFace);
 
+	/** 조준 충돌점이 속한 단일 셀의 현재 오염 여부를 반환한다. */
+	bool TryGetContaminationStateFromHit(
+		const FHitResult& Hit,
+		bool& OutContaminated);
+
+	/** 이미 변환된 표면 좌표가 속한 단일 셀의 현재 오염 여부를 반환한다. */
+	bool TryGetContaminationStateAtSurfacePosition(
+		const FVector2D& SurfacePositionCm,
+		EMD_ScrapeSurfaceFace SurfaceFace,
+		bool& OutContaminated) const;
+
 	/** Resolves a world-space receiver point to the same face/2D coordinates used by scraping. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape Surface")
 	bool TryGetScrapeSurfacePositionFromWorldPoint(

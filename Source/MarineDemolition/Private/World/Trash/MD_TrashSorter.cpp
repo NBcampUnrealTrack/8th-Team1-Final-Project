@@ -2,8 +2,10 @@
 
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Component/Interaction/MD_InteractionComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
@@ -37,7 +39,7 @@ AMD_TrashSorter::AMD_TrashSorter()
 	IntakeVolume->SetCollisionObjectType(ECC_WorldDynamic);
 	IntakeVolume->SetCollisionResponseToAllChannels(ECR_Ignore);
 	IntakeVolume->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Overlap);
-	IntakeVolume->SetGenerateOverlapEvents(true);
+	IntakeVolume->SetGenerateOverlapEvents(false);
 	IntakeVolume->SetCanEverAffectNavigation(false);
 }
 
@@ -67,50 +69,78 @@ void AMD_TrashSorter::BeginPlay()
 			*GetName(), *AcceptedCategory.ToString());
 		return;
 	}
+}
 
+void AMD_TrashSorter::SetInteractionHighlighted_Implementation(bool bHighlighted)
+{
+	if (!IsValid(Mesh))
+	{
+		return;
+	}
+
+	Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
+	Mesh->SetRenderCustomDepth(bHighlighted);
+}
+
+FText AMD_TrashSorter::GetInteractionPrompt_Implementation(AActor* Interactor) const
+{
+	return IsValid(GetHeldSortableForInteractor(Interactor))
+		? NSLOCTEXT("MDInteraction", "TrashSorterInsertPrompt", "[E] 넣기")
+		: FText::GetEmpty();
+}
+
+bool AMD_TrashSorter::CanInteract_Implementation(AActor* Interactor) const
+{
+	return IsValid(GetHeldSortableForInteractor(Interactor));
+}
+
+AActor* AMD_TrashSorter::GetHeldSortableForInteractor(AActor* Interactor) const
+{
+	const APawn* Pawn = Cast<APawn>(Interactor);
+	const UMD_InteractionComponent* Interaction = IsValid(Pawn)
+		? Pawn->FindComponentByClass<UMD_InteractionComponent>()
+		: nullptr;
+	AActor* HeldActor = IsValid(Interaction)
+		? Interaction->GetHeldActor()
+		: nullptr;
+	if (!IsValid(HeldActor) || HeldActor->IsActorBeingDestroyed())
+	{
+		return nullptr;
+	}
+
+	return HeldActor->Implements<UMD_TrashContainer>()
+		|| HeldActor->Implements<UMD_TrashSortable>()
+		? HeldActor
+		: nullptr;
+}
+
+void AMD_TrashSorter::Interact_Implementation(AActor* Interactor)
+{
 	if (!HasAuthority())
 	{
-		IntakeVolume->SetGenerateOverlapEvents(false);
 		return;
 	}
 
-	IntakeVolume->OnComponentBeginOverlap.AddDynamic(this, &AMD_TrashSorter::HandleBeginOverlap);
-}
-
-void AMD_TrashSorter::EndPlay(const EEndPlayReason::Type EndPlayReason)
-{
-	if (IsValid(IntakeVolume))
+	APawn* Pawn = Cast<APawn>(Interactor);
+	UMD_InteractionComponent* Interaction = IsValid(Pawn)
+		? Pawn->FindComponentByClass<UMD_InteractionComponent>()
+		: nullptr;
+	AActor* HeldActor = GetHeldSortableForInteractor(Interactor);
+	if (!IsValid(Interaction) || !IsValid(HeldActor))
 	{
-		IntakeVolume->OnComponentBeginOverlap.RemoveDynamic(this, &AMD_TrashSorter::HandleBeginOverlap);
-	}
-
-	Super::EndPlay(EndPlayReason);
-}
-
-void AMD_TrashSorter::HandleBeginOverlap(
-	UPrimitiveComponent* /*OverlappedComponent*/,
-	AActor* OtherActor,
-	UPrimitiveComponent* /*OtherComponent*/,
-	int32 /*OtherBodyIndex*/,
-	bool /*bFromSweep*/,
-	const FHitResult& /*SweepResult*/)
-{
-	if (!HasAuthority() || !IsValid(OtherActor)) return;
-
-	// 컴포넌트가 여러 개면 콜백이 연달아 온다. 첫 번째에서 이미 삼켰다
-	if (OtherActor->IsActorBeingDestroyed()) return;
-
-	if (OtherActor->Implements<UMD_TrashContainer>())
-	{
-		JudgeAndSwallowContainer(OtherActor);
 		return;
 	}
 
-	// 분리 대상이 아닌 것(떨어뜨린 도구 등)은 통과
-	if (OtherActor->Implements<UMD_TrashSortable>())
+	// 물리 핸들이 파괴될 액터를 계속 붙잡지 않도록 먼저 정상 해제한다.
+	Interaction->ReleaseHeldActor();
+
+	if (HeldActor->Implements<UMD_TrashContainer>())
 	{
-		JudgeAndSwallow(OtherActor);
+		JudgeAndSwallowContainer(HeldActor);
+		return;
 	}
+
+	JudgeAndSwallow(HeldActor);
 }
 
 void AMD_TrashSorter::JudgeAndSwallow(AActor* Item)
