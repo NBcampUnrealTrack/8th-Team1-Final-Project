@@ -16,18 +16,8 @@ class UStaticMeshComponent;
 class UTexture2D;
 class UMD_ScrapeToolComponent;
 struct FMD_ScrapeDecalFaceLayout;
-class AMD_Barnacle;
 class AMD_ContaminationItem;
 class UMD_ScrapeSurfaceComponent;
-
-/** One solid object that can block a scrape stroke on this surface. */
-struct FMD_ScrapeSurfaceObstacle
-{
-	TWeakObjectPtr<AMD_Barnacle> Barnacle;
-	EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
-	FVector2D CenterCm = FVector2D::ZeroVector;
-	float RadiusCm = 0.0f;
-};
 
 /** A compact replicated cell delta with base and transferred-paint state. */
 USTRUCT()
@@ -219,7 +209,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
  * Reusable contamination surface behavior.
  *
  * The owner supplies a static mesh surface. The component owns scrape cells,
- * replication, mask/decal state, barnacle obstacles, debris drops, and Day
+ * replication, mask/decal state, debris drops, and Day
  * persistence data. It deliberately does not know whether its owner is a wall,
  * floor, or piece of equipment. In network play the owner actor must replicate
  * so this replicated component has a network channel.
@@ -436,28 +426,6 @@ public:
 		EMD_ScrapeSurfaceFace SurfaceFace,
 		const FVector& ReferenceWorldPosition,
 		FVector& OutWorldPosition) const;
-
-	bool RegisterScrapeObstacle(AMD_Barnacle* Barnacle);
-	void UnregisterScrapeObstacle(AMD_Barnacle* Barnacle);
-
-	/**
-	 * 명시적 blade basis와 실제 BladeWidth x BladeDepth 사각 footprint로
-	 * 스트로크를 따개비 앞에 제한한다.
-	 */
-	bool TryClampScrapeStrokeAgainstObstacles(
-		const FMD_ScrapeStroke& Stroke,
-		const FMD_ScrapeToolSpec& ToolSpec,
-		FVector2D& OutClampedEndPositionCm,
-		AMD_Barnacle*& OutBlockingBarnacle) const;
-
-	/** Legacy 원형 확장 판정. 기존 호출과 테스트 호환을 위해 유지한다. */
-	bool TryClampScrapeStrokeAgainstObstacles(
-		EMD_ScrapeSurfaceFace SurfaceFace,
-		const FVector2D& StartPositionCm,
-		const FVector2D& EndPositionCm,
-		float ToolHalfWidthCm,
-		FVector2D& OutClampedEndPositionCm,
-		AMD_Barnacle*& OutBlockingBarnacle) const;
 
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
 	float GetContaminationCleanRatio() const;
@@ -760,7 +728,6 @@ private:
 	static constexpr int32 MaximumTransferredPaintMaskAxis = 1024;
 	static constexpr float MinimumContaminationFaceNormalDot = 0.5f;
 	static constexpr float MinimumFullCoverageFaceNormalDot = 0.05f;
-	static constexpr float ScrapeObstacleContactMarginCm = 0.05f;
 	static constexpr int32 MaximumContaminationDecalPatchesPerFace = 32;
 	static constexpr int32 MaximumLocalScrapePredictionBatches = 24;
 	static constexpr int32 MaximumLocalScrapePredictionStrokesPerBatch = 128;
@@ -777,8 +744,6 @@ private:
 
 	UFUNCTION()
 	void OnRep_ContaminationEnabled();
-
-	TArray<FMD_ScrapeSurfaceObstacle> ScrapeObstacles;
 
 	TSet<FMD_ScrapeContaminationStampIdentity>
 		AppliedContaminationStampIdentities;

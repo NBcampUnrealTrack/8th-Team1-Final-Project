@@ -164,7 +164,7 @@ struct FMD_WallContaminationRecord
 };
 
 /**
- * 배치기별로 어제 떼어낸 따개비 순번 (기획 03 §3)
+ * 배치기별 런타임 시드와 어제 떼어낸 따개비 순번 (기획 03 §3)
  *
  * 따개비는 배치기가 시드로 흩뿌리는 런타임 스폰 액터라 FName이 세션마다 달라진다.
  * 벽·샘플처럼 이름으로 식별할 수 없어 "몇 번째였는지"를 남긴다.
@@ -178,6 +178,14 @@ struct FMD_BarnacleRemovalRecord
       // 배치기는 레벨 배치 액터라 이름이 안정적이다
       UPROPERTY()
       FName SpawnerName = NAME_None;
+
+      // RandomPerNewGame 모드의 시드가 유효한지. int32의 0도 정상 시드라 별도 표시한다
+      UPROPERTY()
+      bool bHasRuntimePlacementSeed = false;
+
+      // 새 게임에서 서버가 생성하고 같은 세이브·레벨 재방문에 재사용하는 시드
+      UPROPERTY()
+      int32 RuntimePlacementSeed = 0;
 
       UPROPERTY()
       TArray<int32> RemovedSpawnIndices;

@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "GameplayTags/MD_GameplayTags.h"
 
@@ -18,6 +18,16 @@ namespace MDGameplayTags
 		Ability_WallScan,
 		"Ability.WallScan",
 		"격벽 스캔 어빌리티");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Ability_UtilityRepair_Foam,
+		"Ability.UtilityRepair.Foam",
+		"폼건 수도관 수리 능력");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Ability_UtilityRepair_Insulation,
+		"Ability.UtilityRepair.Insulation",
+		"절연테이프 배선 수리 능력");
 
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
@@ -85,6 +95,10 @@ namespace MDGameplayTags
 		"Resource.Sample.Grade.S",
 		"S급샘플. 퀘스트 보상 450 기준");
 
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Score_Sorting,
+		"Score.Sorting",
+		"모든 쓰레기 정분류 카테고리의 공통 루트");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Score_Sorting_Metal,
 		"Score.Sorting.Metal",
@@ -211,6 +225,10 @@ namespace MDGameplayTags
 		Interaction_Cuttable,
 		"Interaction.Cuttable",
 		"절단기로 자를 수 있는 대상. 이 태그가 있어야 절단 몽타주가 재생된다");
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Interaction_Scannable,
+		"Interaction.Scannable",
+		"전방 스캐너 후보. 시각 반응은 IMD_Scannable 구현이 담당한다");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		State_Swimming,
@@ -260,4 +278,31 @@ namespace MDGameplayTags
 		Save_Data_Lore,
 		"Save.Data.Lore",
 		"저장된 게임 데이터로부터 영구 누적 로어 진행 정보를 얻는 키");
+
+	// UI
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		UI_Layer,
+		"UI.Layer",
+		"Common UI 레이어 분류의 공통 루트");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		UI_Layer_Frontend,
+		"UI.Layer.Frontend",
+		"타이틀과 세션 탐색 화면 레이어");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		UI_Layer_GameHUD,
+		"UI.Layer.GameHUD",
+		"게임 플레이 HUD 루트 레이어");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		UI_Layer_GameMenu,
+		"UI.Layer.GameMenu",
+		"일시정지와 게임 메뉴 화면 레이어");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		UI_Layer_Modal,
+		"UI.Layer.Modal",
+		"확인과 로딩을 위한 최상단 레이어");
+
 }

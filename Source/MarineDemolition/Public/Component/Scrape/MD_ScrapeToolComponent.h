@@ -562,6 +562,16 @@ protected:
 		meta = (ClampMin = "0.0", ClampMax = "1.0", Units = "s"))
 	float ScrapeLoopIdleGraceSeconds = 0.25f;
 
+	/**
+	 * 남의 화면에서 드래그로 볼 접촉 지점 이동량(cm).
+	 *
+	 * 복제된 위치는 양자화돼 미세하게 떨리므로 로컬보다 문턱을 높게 잡는다.
+	 * 너무 낮으면 가만히 있어도 소리가 나고, 너무 높으면 천천히 긁을 때 끊긴다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback",
+		meta = (ClampMin = "0.0"))
+	float RemoteScrapeDragMinTravelCm = 0.5f;
+
 	/** 이 거리(cm) 이상 표면을 훑어야 드래그로 본다. 손떨림을 걸러낸다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Feedback",
 		meta = (ClampMin = "0.0"))
@@ -756,7 +766,7 @@ private:
 		EMD_ScrapeSurfaceFace CurrentSurfaceFace,
 		const FVector2D& RawSurfacePositionCm,
 		const FHitResult& CurrentHit);
-	bool TryApplyResolvedScrapePath(
+	void ApplyResolvedScrapePath(
 		UMD_ScrapeSurfaceComponent* CurrentSurface,
 		EMD_ScrapeSurfaceFace CurrentSurfaceFace,
 		const FHitResult& CurrentHit,
@@ -986,18 +996,13 @@ private:
 	UFUNCTION(Server, Unreliable)
 	void ServerUpdateScrapeAim(const FMD_ScrapeAimNetSample& Sample);
 
-	bool TryGetCurrentSurfaceHit(
-		FHitResult& OutHit,
-		UMD_ScrapeSurfaceComponent*& OutSurface,
-		AMD_Barnacle*& OutOccludingBarnacle,
-		FHitResult& OutBarnacleHit) const;
 	bool TryTraceScrapeTarget(
 		const FVector& TraceStart,
 		const FVector& TraceEnd,
 		const AActor* IgnoredActor,
 		FHitResult& OutHit,
 		UMD_ScrapeSurfaceComponent*& OutSurface,
-		AMD_Barnacle*& OutOccludingBarnacle,
+		AMD_Barnacle*& OutFirstHitBarnacle,
 		FHitResult& OutBarnacleHit) const;
 	void BeginStrokeTracking(
 		UMD_ScrapeSurfaceComponent* Surface,
@@ -1027,34 +1032,21 @@ private:
 	void FlushPendingScrapePathApplication();
 	void SplitScrapeSubStrokeAtCorner(const FVector2D& CornerPositionCm);
 	void ResetScrapePathAccumulator(const FVector2D& StartPositionCm);
-	void RebaseScrapePathAfterObstacle(const FVector2D& BlockedPositionCm);
 	void UpdateStableBladeAxis(double ArcStepCm);
-	bool ApplyScrapePathSegment(
+	void ApplyScrapePathSegment(
 		UMD_ScrapeSurfaceComponent* Surface,
 		EMD_ScrapeSurfaceFace SurfaceFace,
 		const FHitResult& CurrentHit,
-		const FMD_ScrapeToolPathSegment& PathSegment,
-		float DeltaTime,
-		FVector2D& OutAppliedEndPositionCm,
-		AMD_Barnacle*& OutBlockingBarnacle);
-	bool ApplyAuthoritativeScrapeStroke(
+		const FMD_ScrapeToolPathSegment& PathSegment);
+	void ApplyAuthoritativeScrapeStroke(
 		UMD_ScrapeSurfaceComponent* Surface,
 		EMD_ScrapeSurfaceFace SurfaceFace,
 		const FMD_ScrapeToolPathSegment& PathSegment,
 		const FMD_ScrapeStroke& Stroke,
-		double AppliedRatio,
-		const FVector2D& AppliedEndPositionCm,
-		const FVector2D& AppliedEndBladeAxis,
 		const FVector& FeedbackLocation);
 	FMD_ScrapeResult ApplyScrapeStrokeForCurrentLoad(
 		UMD_ScrapeSurfaceComponent* Surface,
 		const FMD_ScrapeStroke& Stroke) const;
-	void DeliverPathSegmentObstacleImpact(
-		UMD_ScrapeSurfaceComponent* Surface,
-		EMD_ScrapeSurfaceFace SurfaceFace,
-		const FMD_ScrapeToolPathSegment& PathSegment,
-		float DeltaTime,
-		AMD_Barnacle* BlockingBarnacle);
 	void KeepAimOnScrapePosition(
 		const FVector& ViewLocation,
 		const FVector& CurrentAimWorldPosition,
@@ -1075,8 +1067,7 @@ private:
 	void AccumulateStage3PathSegment(
 		UMD_ScrapeSurfaceComponent* Surface,
 		EMD_ScrapeSurfaceFace SurfaceFace,
-		const FMD_ScrapeToolPathSegment& PathSegment,
-		double AppliedRatio);
+		const FMD_ScrapeToolPathSegment& PathSegment);
 	void CommitProtectedStage3Dabs();
 	void FlushStage3PathTail();
 	void ResetStage3PathAccumulator();
@@ -1097,40 +1088,12 @@ private:
 		const FVector& ContactLocation);
 
 	/**
-	 * 따개비를 직접 겨냥해 긁을 때의 타격 경로. 벽과 완전히 다른 계통이다.
+	 * 서버가 승인한 LMB 첫 조준에 따개비가 있으면 클릭 피해를 정확히 한 번 적용한다.
 	 *
-	 * 벽은 표면형이라 2D 투영·면 판정·축 고정·조준 보정이 필요하지만, 따개비는
-	 * 물체형이라 내구도 숫자 하나뿐이다. 두 경로를 한 인터페이스로 묶으면 따개비가
-	 * 쓰지도 않는 기계장치를 끌고 다니게 된다.
-	 *
-	 * 따개비 메시를 직접 맞히면 뒤 표면의 종류와 무관하게 이 경로를 탄다.
+	 * DirectBarnacleOnly뿐 아니라 따개비 뒤에서 표면을 찾은 SurfaceHit도 처리한다.
+	 * 클라이언트 예측 경로에서는 권위 검사를 통과하지 못하므로 상태를 변경하지 않는다.
 	 */
-	void ProcessDirectBarnacleContact(
-		AMD_Barnacle* Barnacle,
-		const FHitResult& Hit,
-		float DeltaTime);
-
-	/**
-	 * 헤라 속도를 따개비 타격으로 바꿔 전달한다. 직접 접촉과 경로 차단이 공유한다.
-	 *
-	 * 한 번 때리면 스윙이 끝나 속도가 충분히 떨어질 때까지 다시 때리지 않는다.
-	 * 이것이 없으면 헤라를 대고 미는 동안 매 프레임 타격이 들어가 한순간에 떨어진다.
-	 */
-	void DeliverBarnacleImpact(
-		AMD_Barnacle* Barnacle,
-		float ImpactSpeedCmPerSecond,
-		const FVector& ImpactWorldDirection);
-
-	/**
-	 * 지금 상대하고 있는 따개비를 바꾼다.
-	 *
-	 * 대상이 바뀌면 타격 준비 상태와 기준점을 함께 초기화한다. 안 그러면 따개비 A에서
-	 * 벽을 거쳐 따개비 B로 옮길 때 그 사이 이동이 B에 들어간다.
-	 */
-	void SetTrackedBarnacle(AMD_Barnacle* Barnacle);
-
-	/** 프레임 간 이동 거리를 속도로 바꾼다. DeltaTime이 0인 첫 프레임은 0을 반환한다 */
-	static float CalculateImpactSpeedCmPerSecond(float TravelCentimeters, float DeltaTime);
+	void ApplyBarnacleClick(const FMD_ScrapeAimQueryResult& FirstAim);
 
 	/**
 	 * Local prediction on the owning client and authoritative state on the server.
@@ -1148,6 +1111,18 @@ private:
 
 	/** 직전 프레임의 경로 누적 길이 */
 	double LastObservedScrapePathArcLengthCm = 0.0;
+
+	/**
+	 * 시뮬레이티드 프록시용 드래그 판정.
+	 *
+	 * 경로 누적(StrokePath)은 조작 중인 클라이언트와 서버에만 존재한다.
+	 * 남의 화면에서는 복제되는 접촉 지점이 움직이는지로 대신 본다.
+	 */
+	bool UpdateRemoteScrapeDragState(double Now);
+
+	/** 원격 판정용 접촉 지점 캐시 */
+	FVector LastObservedRemoteContactLocation = FVector::ZeroVector;
+	bool bHasObservedRemoteContact = false;
 
 	void StartScrapeLoopAudio();
 	void StopScrapeLoopAudio();
@@ -1273,16 +1248,6 @@ private:
 
 	UPROPERTY(Replicated)
 	bool bHasLastContactBladeDirection = false;
-
-	/** 지금 때리고 있는 따개비. 직접 겨냥한 것이든 경로를 막은 것이든 여기 담긴다 */
-	TWeakObjectPtr<AMD_Barnacle> TrackedBarnacle;
-
-	/** 직접 접촉에서 속도를 재는 기준점 */
-	FVector PreviousBarnacleHitLocation = FVector::ZeroVector;
-	bool bHasPreviousBarnacleHitLocation = false;
-
-	/** 다음 타격을 넣을 수 있는 상태인지. 한 스윙에 한 번만 때리게 하는 빗장이다 */
-	bool bBarnacleImpactArmed = true;
 
 	double LastFeedbackWorldSeconds;
 };

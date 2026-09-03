@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Engine/TimerHandle.h"
 #include "GameFramework/Actor.h"
+#include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTagAssetInterface.h"
 #include "GameplayTagContainer.h"
 #include "MD_CuttableWall.generated.h"
@@ -29,6 +30,13 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	AMD_CuttableWall*, Wall,
 	float, ProgressRatio);
 
+/**
+ * 절단 가능 지점을 제한하는 선택적 필터. false를 반환하면 그 타격은 진행도를 쌓지 않는다.
+ * 인자는 null일 수 있다 (히트 정보 없이 진행도만 더하는 경로).
+ * 튜토리얼이 "배관 자리만 자를 수 있다"를 구현하는 데 쓴다.
+ */
+DECLARE_DELEGATE_RetVal_OneParam(bool, FMD_CutLocationFilter, const FHitResult*);
+
 UENUM(BlueprintType)
 enum class EMD_WallType : uint8
 {
@@ -44,7 +52,7 @@ enum class EMD_WallType : uint8
  * settings that have not been migrated to the component yet.
  */
 UCLASS()
-class MARINEDEMOLITION_API AMD_CuttableWall : public AActor, public IGameplayTagAssetInterface
+class MARINEDEMOLITION_API AMD_CuttableWall : public AActor, public IGameplayTagAssetInterface, public IMD_Scannable
 {
 	GENERATED_BODY()
 
@@ -104,6 +112,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Wall")
 	void ScanHighlight(float Duration = 3.0f, AActor* Scanner = nullptr);
 
+	// IMD_Scannable — 기존 벽 스캔 델리게이트 경로로 연결한다.
+	virtual void OnScanned_Implementation(float Duration, AActor* Scanner) override;
+
 	// 절단 진행도 누적. 서버 전용. 100% 도달 시 Cut()을 호출한다
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Cut")
 	void AddCutProgress(float DeltaSeconds, AActor* Cutter);
@@ -124,6 +135,12 @@ public:
 
 	UPROPERTY(BlueprintAssignable, Category = "MD|Wall|Cut")
 	FMD_OnCutProgressChanged OnCutProgressChanged;
+
+	/**
+	 * 비어 있으면 어디를 쳐도 잘린다 — 배치된 벽의 기본 상태다.
+	 * 바인딩하는 쪽이 벽보다 오래 살아야 한다. 서버에서만 평가된다.
+	 */
+	FMD_CutLocationFilter CutLocationFilter;
 
 protected:
 	virtual void BeginPlay() override;

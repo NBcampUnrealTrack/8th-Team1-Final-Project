@@ -5,9 +5,9 @@
 #include "UI/Game/MD_HUDWidget.h"
 #include "UI/Game/MD_DailyReportWidget.h"
 #include "UI/Game/MD_ScrapeFocusReticleWidget.h"
-#include "UI/Equipment/MD_EquipHotbarWidget.h"
+#include "UI/MD_LocalUIManager.h"
 
-#include "Engine/World.h"
+#include "CommonActivatableWidget.h"
 #include "World/Interaction/MD_TravelConsole.h"
 #include "World/Interaction/MD_DayEndConsole.h"
 #include "World/Interaction/MD_SectorCloseoutMarker.h"
@@ -19,12 +19,17 @@
 #include "GameplayEffect.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+#include "EngineUtils.h"
+#include "World/Wall/MD_CuttableWall.h"
+#include "World/Wall/MD_WallUtility.h"
 #include "Player/MD_PlayerState.h"
 #include "Player/MD_PlayerCameraManager.h"
 
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
+#include "GameFramework/GameSession.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
-#include "Misc/CoreDelegates.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
 
@@ -32,6 +37,9 @@
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Character/MD_Character.h"
 #include "World/Merchant/MD_Merchant.h"
+#include "Interfaces/OnlineIdentityInterface.h"
+#include "OnlineSubsystem.h"
+#include "Util/MD_LogUtility.h"
 
 AMD_PlayerController::AMD_PlayerController()
 {
@@ -67,9 +75,88 @@ void AMD_PlayerController::SetViewTarget(
 	Super::SetViewTarget(NewViewTarget, TransitionParams);
 }
 
+void AMD_PlayerController::ClientWasKicked_Implementation(const FText& KickReason)
+{
+	Super::ClientWasKicked_Implementation(KickReason);
+
+	// 강퇴된 클라이언트의 로컬 Named Session 정리를 위한 관리자 조회
+	UGameInstance* GameInstance = GetGameInstance();
+	UMD_MultiplayManager* MultiplayManager =
+		IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MultiplayManager>() : nullptr;
+	if (IsValid(MultiplayManager) == false)
+	{
+		return;
+	}
+
+	// 기존 Session 제거와 Title 복귀 절차 시작
+	MultiplayManager->DestroySession();
+}
+
 void AMD_PlayerController::HandleApplicationWillDeactivate()
 {
 	CancelScrapeInteraction();
+}
+
+void AMD_PlayerController::SubmitPlatformNickname()
+{
+	// 원격 컨트롤러와 전용 서버에는 제출할 로컬 플랫폼 사용자가 없다.
+	if (IsLocalController() == false)
+	{
+		return;
+	}
+
+	// 현재 플랫폼에 연결된 Online Subsystem을 가져온다.
+	IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
+	if (OnlineSubsystem == nullptr)
+	{
+		return;
+	}
+
+	// 로그인 사용자 정보에 접근할 Identity 인터페이스를 가져온다.
+	IOnlineIdentityPtr IdentityInterface = OnlineSubsystem->GetIdentityInterface();
+	if (IdentityInterface.IsValid() == false)
+	{
+		return;
+	}
+
+	// 플랫폼 로그인이 완료된 사용자만 닉네임을 제출한다.
+	if (IdentityInterface->GetLoginStatus(0) != ELoginStatus::LoggedIn)
+	{
+		return;
+	}
+
+	// 첫 번째 로컬 사용자의 Steam 등 플랫폼 표시 이름을 가져온다.
+	FString PlatformNickname = IdentityInterface->GetPlayerNickname(0);
+	PlatformNickname.TrimStartAndEndInline();
+	if (PlatformNickname.IsEmpty() == true)
+	{
+		return;
+	}
+
+	// 서버가 소유한 PlayerState에 플랫폼 닉네임을 저장하도록 요청한다.
+	ServerSubmitPlatformNickname(PlatformNickname);
+}
+
+void AMD_PlayerController::ServerSubmitPlatformNickname_Implementation(const FString& PlatformNickname)
+{
+	// 이름표와 네트워크 데이터가 과도하게 커지지 않도록 표시 이름 길이를 제한한다.
+	FString ValidatedPlatformNickname = PlatformNickname;
+	ValidatedPlatformNickname.TrimStartAndEndInline();
+	ValidatedPlatformNickname.LeftInline(32);
+	if (ValidatedPlatformNickname.IsEmpty() == true)
+	{
+		return;
+	}
+
+	// 현재 컨트롤러가 소유한 PlayerState만 변경해 다른 사용자의 이름 변경을 차단한다.
+	AMD_PlayerState* CurrentPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (IsValid(CurrentPlayerState) == false)
+	{
+		return;
+	}
+
+	// 엔진의 PlayerName 복제 경로를 사용해 모든 클라이언트에 플랫폼 닉네임을 전달한다.
+	CurrentPlayerState->SetPlayerName(ValidatedPlatformNickname);
 }
 
 void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole* Console, int32 SiteIndex, EMD_Difficulty Difficulty)
@@ -92,8 +179,11 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 		return;
 	}
 
-	// 클라가 보낸 건 인덱스뿐. 레벨은 서버가 자기 사본에서 읽고 잠긴 현장이면 빈 경로가 돌아온다
-	const FString MapPackage = Console->ResolveSiteLevel(SiteIndex).ToSoftObjectPath().GetLongPackageName();
+	// 클라가 보낸 건 인덱스뿐이며 레벨은 서버가 자기 사본에서 다시 조회한다.
+	FString MapPackage = Console->ResolveSiteLevel(SiteIndex).ToSoftObjectPath().GetLongPackageName();
+
+	// PIE에서 이미 방문한 World 참조에 붙은 UEDPIE 접두사를 실제 에셋 패키지 경로로 복원한다.
+	MapPackage = UWorld::RemovePIEPrefix(MapPackage);
 
 	if (MapPackage.IsEmpty())
 	{
@@ -142,6 +232,52 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 
 	// Session 갱신과 ServerTravel 실행은 MultiplayManager에 위임하는 처리
 	MultiplayManager->StartSessionByMap(MapPackage, TravelOptions);
+}
+
+void AMD_PlayerController::ServerRequestKickPlayer_Implementation(APlayerState* TargetPlayerState)
+{
+	// 리슨 서버의 로컬 호스트가 아닌 원격 클라이언트 요청 거부
+	if (IsLocalController() == false)
+	{
+		return;
+	}
+
+	// 요청한 호스트의 PlayerState 조회
+	APlayerState* RequestingPlayerState = GetPlayerState<APlayerState>();
+	if (IsValid(RequestingPlayerState) == false)
+	{
+		return;
+	}
+
+	// 유효하지 않거나 호스트 자신을 대상으로 한 강퇴 요청 거부
+	if (IsValid(TargetPlayerState) == false || TargetPlayerState == RequestingPlayerState)
+	{
+		return;
+	}
+
+	// 서버에 존재하는 대상 PlayerController 조회
+	APlayerController* TargetPlayerController = TargetPlayerState->GetPlayerController();
+	if (IsValid(TargetPlayerController) == false)
+	{
+		return;
+	}
+
+	// 강퇴를 수행할 현재 서버 GameMode 조회
+	UWorld* World = GetWorld();
+	AGameModeBase* GameMode = IsValid(World) == true ? World->GetAuthGameMode() : nullptr;
+	if (IsValid(GameMode) == false || IsValid(GameMode->GameSession) == false)
+	{
+		return;
+	}
+
+	// 대상 클라이언트에 전달할 강퇴 사유
+	FText KickReason = NSLOCTEXT("MDPlayerKick", "KickedByHost", "호스트에 의해 강퇴되었습니다");
+	// 엔진 GameSession을 통한 대상 접속 해제와 PlayerController 제거
+	bool bWasKicked = GameMode->GameSession->KickPlayer(TargetPlayerController, KickReason);
+	if (bWasKicked == false)
+	{
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 선택한 플레이어의 강퇴에 실패했습니다"), *UE_CALL_LOCATIONINFO);
+	}
 }
 
 void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole* Console)
@@ -361,42 +497,39 @@ void AMD_PlayerController::InitializeGameplayHUD()
 		return;
 	}
 
-	if (IsValid(HUDWidgetClass) == true)
+	// 설정되지 않은 HUD 클래스는 Stack에 전달하지 않는다.
+	if (IsValid(HUDWidgetClass) == false)
 	{
-		if (IsValid(HUDWidgetInstance) == false)
-		{
-			// Pawn 소유가 확정된 컨트롤러에 플레이어 상태를 참조할 메인 HUD 생성
-			HUDWidgetInstance = CreateWidget<UMD_HUDWidget>(this, HUDWidgetClass);
-		}
-
-		if (IsValid(HUDWidgetInstance) == true)
-		{
-			if (HUDWidgetInstance->IsInViewport() == false)
-			{
-				// 맵 전환 과정에서 화면에서 제거된 메인 HUD 재연결
-				HUDWidgetInstance->AddToViewport();
-			}
-			HUDWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-		}
+		return;
 	}
 
-	if (IsValid(EquipHotbarWidgetClass) == true)
+	// LocalPlayer의 중앙 UI 관리자를 가져온다.
+	ULocalPlayer* OwningLocalPlayer = GetLocalPlayer();
+	UMD_LocalUIManager* LocalUIManager = IsValid(OwningLocalPlayer) == true ? OwningLocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
+	if (IsValid(LocalUIManager) == false)
 	{
-		if (IsValid(EquipHotbarWidgetInstance) == false)
+		return;
+	}
+
+	// 여러 초기화 진입점이 호출되어도 이미 활성화된 HUD를 중복 Push하지 않는다.
+	UCommonActivatableWidget* ActiveScreen = LocalUIManager->GetActiveScreen(MDGameplayTags::UI_Layer_GameHUD);
+	UMD_HUDWidget* ActiveHUDWidget = Cast<UMD_HUDWidget>(ActiveScreen);
+	if (IsValid(ActiveHUDWidget) == true)
+	{
+		HUDWidgetInstance = ActiveHUDWidget;
+	}
+	else
+	{
+		// HUD 생성과 활성화를 PrimaryLayout의 GameHUD Stack에 위임한다.
+		UCommonActivatableWidget* PushedScreen = LocalUIManager->PushScreenToLayer(MDGameplayTags::UI_Layer_GameHUD, HUDWidgetClass);
+		HUDWidgetInstance = Cast<UMD_HUDWidget>(PushedScreen);
+		if (IsValid(HUDWidgetInstance) == false)
 		{
-			// 소유 Pawn의 장비 상태를 참조할 핫바 생성
-			EquipHotbarWidgetInstance = CreateWidget<UMD_EquipHotbarWidget>(this, EquipHotbarWidgetClass);
+			return;
 		}
 
-		if (IsValid(EquipHotbarWidgetInstance) == true)
-		{
-			if (EquipHotbarWidgetInstance->IsInViewport() == false)
-			{
-				// 맵 전환 과정에서 화면에서 제거된 핫바 재연결
-				EquipHotbarWidgetInstance->AddToViewport();
-			}
-			EquipHotbarWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-		}
+		// Project Settings에서 자동 결정한 Layer에 생성된 HUD의 입력 정책을 적용한다.
+		HUDWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	}
 }
 
@@ -579,6 +712,9 @@ void AMD_PlayerController::BeginPlay()
 		return;
 	}
 
+	// 플랫폼 로그인이 완료된 로컬 사용자의 닉네임을 서버에 제출한다.
+	SubmitPlatformNickname();
+
 	if (!ApplicationWillDeactivateHandle.IsValid())
 	{
 		ApplicationWillDeactivateHandle =
@@ -596,6 +732,7 @@ void AMD_PlayerController::BeginPlayingState()
 
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
+	SubmitPlatformNickname();
 
 	NotifyLoadingScreenPlayerReady();
 }
@@ -607,6 +744,7 @@ void AMD_PlayerController::PostSeamlessTravel()
 	CloseDailyReport();
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
+	SubmitPlatformNickname();
 
 	// Seamless travel은 BeginPlayingState를 거치지 않으므로 같은 알림을 여기서도 보낸다.
 	NotifyLoadingScreenPlayerReady();
@@ -648,18 +786,13 @@ void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
 {
 	// Collapsed로 두면 레이아웃 계산에서도 빠지고, 되돌릴 때 SelfHitTestInvisible이라
-	// HUD가 마우스 입력을 가로채지 않는다 (원래 AddToViewport 기본 동작과 동일).
+	// GameHUD Stack 내부의 HUD가 마우스 입력을 가로채지 않는다.
 	const ESlateVisibility Target =
 		bVisible ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed;
 
 	if (IsValid(HUDWidgetInstance))
 	{
 		HUDWidgetInstance->SetVisibility(Target);
-	}
-
-	if (IsValid(EquipHotbarWidgetInstance))
-	{
-		EquipHotbarWidgetInstance->SetVisibility(Target);
 	}
 }
 
@@ -749,6 +882,185 @@ void AMD_PlayerController::ServerBeginContract_Implementation()
 void AMD_PlayerController::MD_BeginDay(int32 Day)
 {
 	ServerBeginDay(Day);
+}
+
+AMD_CuttableWall* AMD_PlayerController::FindWallToClean(const float SearchRadiusCm) const
+{
+	UWorld* const World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	auto NeedsCleaning = [](const AMD_CuttableWall* Wall) -> bool
+	{
+		const UMD_ScrapeSurfaceComponent* const Surface =
+			Wall ? Wall->GetScrapeSurfaceComponent() : nullptr;
+		return Surface && Surface->IsContaminationEnabled();
+	};
+
+	// 1) 조준선 우선. 여러 벽이 붙어 있을 때 어느 것을 지웠는지 헷갈리지 않게 한다.
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	FHitResult Hit;
+	FCollisionQueryParams Params;
+	if (const APawn* const OwnPawn = GetPawn())
+	{
+		Params.AddIgnoredActor(OwnPawn);
+	}
+	if (World->LineTraceSingleByChannel(
+			Hit,
+			ViewLocation,
+			ViewLocation + ViewRotation.Vector() * SearchRadiusCm,
+			ECC_Visibility,
+			Params))
+	{
+		if (AMD_CuttableWall* const AimedWall = Cast<AMD_CuttableWall>(Hit.GetActor()))
+		{
+			return AimedWall;
+		}
+	}
+
+	// 2) 조준이 빗나갔으면 반경 안에서 아직 오염이 남은 가장 가까운 벽.
+	AMD_CuttableWall* Closest = nullptr;
+	float ClosestDistanceSquared = FMath::Square(SearchRadiusCm);
+	for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
+	{
+		AMD_CuttableWall* const Wall = *It;
+		if (!NeedsCleaning(Wall))
+		{
+			continue;
+		}
+
+		const float DistanceSquared =
+			FVector::DistSquared(Wall->GetActorLocation(), ViewLocation);
+		if (DistanceSquared < ClosestDistanceSquared)
+		{
+			ClosestDistanceSquared = DistanceSquared;
+			Closest = Wall;
+		}
+	}
+	return Closest;
+}
+
+void AMD_PlayerController::MD_CleanWall()
+{
+	AMD_CuttableWall* const Wall = FindWallToClean();
+	if (!Wall)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("MD_CleanWall: 조준선과 주변 20m 안에 오염된 격벽이 없다"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("MD_CleanWall: %s 오염 제거 요청"), *Wall->GetName());
+	ServerCleanWall(Wall);
+}
+
+void AMD_PlayerController::ServerCleanWall_Implementation(AMD_CuttableWall* Wall)
+{
+	UMD_ScrapeSurfaceComponent* const Surface =
+		IsValid(Wall) ? Wall->GetScrapeSurfaceComponent() : nullptr;
+	if (!Surface)
+	{
+		return;
+	}
+
+	// 셀 배열을 직접 0으로 쓰지 않고 공개 API 를 쓴다. 오염 셀·마스크 아틀라스·복제 상태가
+	// 컴포넌트 내부에서 다섯 파일에 걸쳐 맞물려 있어서, 밖에서 손대면 조용히 어긋난다.
+	// 이 스위치는 제거율 1.0 · 완전제거 판정 true · 데칼 0장을 모두 성립시킨다.
+	Surface->SetContaminationEnabled(false);
+
+	UE_LOG(LogTemp, Log, TEXT("MD_CleanWall: %s 오염 제거 완료 (제거율 %.2f)"),
+		*Wall->GetName(), Surface->GetContaminationCleanRatio());
+}
+
+AMD_WallUtility* AMD_PlayerController::FindUtilityToRepair(const float SearchRadiusCm) const
+{
+	UWorld* const World = GetWorld();
+	if (!World)
+	{
+		return nullptr;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	// 1) 조준선 우선. 배관이 여러 개 붙어 있을 때 어느 것을 고쳤는지 헷갈리지 않게 한다.
+	FHitResult Hit;
+	FCollisionQueryParams Params;
+	if (const APawn* const OwnPawn = GetPawn())
+	{
+		Params.AddIgnoredActor(OwnPawn);
+	}
+	if (World->LineTraceSingleByChannel(
+			Hit,
+			ViewLocation,
+			ViewLocation + ViewRotation.Vector() * SearchRadiusCm,
+			ECC_Visibility,
+			Params))
+	{
+		AMD_WallUtility* const Aimed = Cast<AMD_WallUtility>(Hit.GetActor());
+		if (Aimed && Aimed->GetUtilityState() == EMD_UtilityState::Broken)
+		{
+			return Aimed;
+		}
+	}
+
+	// 2) 조준이 빗나갔으면 반경 안에서 가장 가까운 파손된 인프라.
+	//    파손된 것만 고르므로 명령을 반복해 4개를 차례로 고칠 수 있다.
+	AMD_WallUtility* Closest = nullptr;
+	float ClosestDistanceSquared = FMath::Square(SearchRadiusCm);
+	for (TActorIterator<AMD_WallUtility> It(World); It; ++It)
+	{
+		AMD_WallUtility* const Utility = *It;
+		if (!Utility || Utility->GetUtilityState() != EMD_UtilityState::Broken)
+		{
+			continue;
+		}
+
+		const float DistanceSquared =
+			FVector::DistSquared(Utility->GetActorLocation(), ViewLocation);
+		if (DistanceSquared < ClosestDistanceSquared)
+		{
+			ClosestDistanceSquared = DistanceSquared;
+			Closest = Utility;
+		}
+	}
+	return Closest;
+}
+
+void AMD_PlayerController::MD_RepairUtility()
+{
+	AMD_WallUtility* const Utility = FindUtilityToRepair();
+	if (!Utility)
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("MD_RepairUtility: 조준선과 주변 20m 안에 파손된 배관·전선이 없다"));
+		return;
+	}
+
+	UE_LOG(LogTemp, Log, TEXT("MD_RepairUtility: %s 수리 요청"), *Utility->GetName());
+	ServerRepairUtility(Utility);
+}
+
+void AMD_PlayerController::ServerRepairUtility_Implementation(AMD_WallUtility* Utility)
+{
+	if (!IsValid(Utility))
+	{
+		return;
+	}
+
+	// 장착 도구 검사를 건너뛰는 치트 경로. 정상 수리는 Interact 가 도구 태그를 확인한다.
+	Utility->DebugForceRepair(GetPawn());
+
+	UE_LOG(LogTemp, Log, TEXT("MD_RepairUtility: %s 상태 = %s"),
+		*Utility->GetName(),
+		*StaticEnum<EMD_UtilityState>()->GetNameStringByValue(
+			static_cast<int64>(Utility->GetUtilityState())));
 }
 
 void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)

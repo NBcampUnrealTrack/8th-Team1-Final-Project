@@ -52,7 +52,7 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MD|Oxygen")
 	FMD_OnBreathStateChanged OnBreathStateChanged;
 
-	/** 산소를 즉시 만충. 수면 복귀와 산소 캔 양쪽에서 쓴다. 서버 전용 */
+	/** 산소를 즉시 만충하는 외부 호출용 함수. 서버 전용 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Oxygen")
 	void RefillOxygen();
 
@@ -69,6 +69,10 @@ protected:
 	/** 잠수 중 산소를 깎는 지속 GE. Ongoing 조건 = State.Submerged */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen")
 	TSubclassOf<UGameplayEffect> OxygenDrainEffectClass;
+
+	/** 수면 위에서 산소를 순차적으로 회복하는 지속 GE. Ongoing 차단 조건 = State.Submerged */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen")
+	TSubclassOf<UGameplayEffect> OxygenRecoveryEffectClass;
 
 	/** 산소 0 + 잠수 중 HP를 깎는 지속 GE. Ongoing 조건 = State.Submerged + State.Oxygen.Depleted */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen")
@@ -109,12 +113,12 @@ protected:
 	/** 물에 잠긴 정도로 상태를 계산한다 */
 	EMD_BreathState CalculateBreathState() const;
 
-	/** ASC가 유효해진 첫 순간에 지속 GE 두 개와 어트리뷰트 구독을 한 번만 건다 */
+	/** ASC가 유효해진 첫 순간에 지속 GE와 어트리뷰트 구독을 한 번만 건다 */
 	void EnsureInitialized(UAbilitySystemComponent* ASC);
 
 	FActiveGameplayEffectHandle ApplyPassiveEffect(UAbilitySystemComponent* ASC, const TSubclassOf<UGameplayEffect>& EffectClass);
 	
-	/** 산소가 0을 오갈 때만 태그를 토글한다 */
+	/** 산소가 실제로 변경될 때 고갈 상태 태그를 갱신한다 */
 	void HandleOxygenChanged(const FOnAttributeChangeData& ChangeData);
 
 	/** 서버·클라이언트가 같은 태그 상태를 갖도록 한 곳에서 처리한다 */

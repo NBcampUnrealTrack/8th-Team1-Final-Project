@@ -1,11 +1,11 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/AssetManagerTypes.h"
 #include "GameFramework/Actor.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_LoreActor.generated.h"
 
-class UMD_LoreCatalog;
 class UMD_LoreSubsystem;
 class USphereComponent;
 
@@ -28,6 +28,9 @@ public:
 	/** 현재 조준 중인 기록물 메시를 하이라이트하는 표시 함수 */
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 
+	/** 할당된 로어 정의 에셋의 기록물 이름을 상호작용 HUD에 제공한다. */
+	virtual FText GetInteractionDisplayName_Implementation() const override;
+
 protected:
 	/** 서버 원장 변경을 구독하고 이미 발견된 배치물을 제거하는 초기화 함수 */
 	virtual void BeginPlay() override;
@@ -48,13 +51,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Lore|Interaction", meta = (ClampMin = "1.0", Units = "cm"))
 	float InteractionRadius = 35.0f;
 
-	/** 기록물 정의와 보상 및 해독 조건을 제공하는 현장 로어 카탈로그 */
-	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "MD|Lore")
-	TObjectPtr<UMD_LoreCatalog> LoreCatalog;
-
-	/** 배치 액터를 카탈로그의 한 기록물 정의와 연결하는 고유 식별자 */
-	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "MD|Lore")
-	FName LoreId;
+	/** 배치 액터에 할당된 독립 로어 정의 에셋의 Primary Asset ID */
+	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "MD|Lore", meta = (AllowedTypes = "Quest"))
+	FPrimaryAssetId LoreAssetId;
 
 	/** 직접 호출된 상호작용도 원거리 수집으로 악용되지 않도록 제한하는 서버 거리 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Lore|Interaction", meta = (ClampMin = "1.0", Units = "cm"))
@@ -65,19 +64,15 @@ private:
 	FDelegateHandle LoreProgressChangedHandle;
 
 public:
-	/** 레벨 배치 검증과 UI에서 사용할 로어 식별자 반환 함수 */
+	/** 레벨 배치 검증과 UI에서 사용할 로어 Asset ID 반환 함수 */
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
-	FName GetLoreId() const;
-
-	/** 레벨 배치 검증과 UI에서 사용할 로어 카탈로그 반환 함수 */
-	UFUNCTION(BlueprintPure, Category = "MD|Lore")
-	UMD_LoreCatalog* GetLoreCatalog() const;
+	FORCEINLINE FPrimaryAssetId GetLoreAssetId() const { return LoreAssetId; }
 
 private:
 	/** 서버가 신뢰할 수 있는 플레이어와 기록물 설정 및 거리인지 확인하는 함수 */
 	bool CanCollectLore(APawn* InteractorPawn) const;
 
-	/** 빈 식별자와 카탈로그 누락 및 잘못된 참조를 차단하는 배치 설정 검사 */
+	/** 빈 Asset ID와 잘못된 정의 에셋 참조를 차단하는 배치 설정 검사 */
 	bool IsLoreConfigurationValid() const;
 
 	/** 현재 게임 인스턴스에서 영구 누적 서버 로어 원장을 조회하는 함수 */

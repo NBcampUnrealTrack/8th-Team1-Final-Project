@@ -50,10 +50,7 @@ void UMD_ScrapeToolComponent::ProcessReadyScrapeAimResult(
 	}
 
 	ClearCurrentScrapeContact();
-	SetTrackedBarnacle(nullptr);
-	// Ready focus has no stroke to recover. Invalid aim only clears the
-	// actionable target; the accepted focus session remains available.
-	ResetInvalidScrapeAim();
+	HandleInvalidScrapeAim(SampleDeltaTime, false);
 }
 
 void UMD_ScrapeToolComponent::BeginInvalidScrapeAim()
@@ -140,7 +137,6 @@ bool UMD_ScrapeToolComponent::ValidateReconnectBridge(
 		|| !IsValid(Surface)
 		|| AimRecovery.ScrapeReconnectSurface.Get() != Surface
 		|| AimRecovery.ScrapeReconnectSurfaceFace != AimResult.SurfaceFace
-		|| IsValid(AimResult.Barnacle)
 		|| !FMath::IsFinite(EffectiveBridgeMaxCm)
 		|| EffectiveBridgeMaxCm <= UE_SMALL_NUMBER)
 	{
@@ -201,7 +197,6 @@ bool UMD_ScrapeToolComponent::ValidateReconnectBridge(
 	return MidpointAim.Type == EMD_ScrapeAimQueryType::SurfaceHit
 		&& MidpointAim.Surface == Surface
 		&& MidpointAim.SurfaceFace == AimResult.SurfaceFace
-		&& !IsValid(MidpointAim.Barnacle)
 		&& FVector2D::Distance(
 			MidpointAim.SurfacePositionCm,
 			MidpointCm) <= PositionToleranceCm;
@@ -300,7 +295,6 @@ void UMD_ScrapeToolComponent::ApplyAimSequenceGapPolicy(
 		// 유실 구간을 작은 공간 jump라는 이유로 연결하지 않는다.
 		ResetStrokeTracking();
 		ResetInvalidScrapeAim();
-		SetTrackedBarnacle(nullptr);
 	}
 	else if (bSequenceGapKnown
 		&& MissingAimSequences > 0
@@ -367,7 +361,7 @@ bool UMD_ScrapeToolComponent::TryStartNewSurfaceStroke(
 	return bNeedsNewStroke;
 }
 
-bool UMD_ScrapeToolComponent::TryApplyResolvedScrapePath(
+void UMD_ScrapeToolComponent::ApplyResolvedScrapePath(
 	UMD_ScrapeSurfaceComponent* CurrentSurface,
 	const EMD_ScrapeSurfaceFace CurrentSurfaceFace,
 	const FHitResult& CurrentHit,
@@ -389,30 +383,6 @@ bool UMD_ScrapeToolComponent::TryApplyResolvedScrapePath(
 			CurrentSurface->EndContaminationVisualUpdateBatch();
 		}
 	};
-
-	double EmittedTravelCm = 0.0;
-	for (const FMD_ScrapeToolPathSegment& PathSegment : PathSegments)
-	{
-		if (!PathSegment.bStartsNewSubStroke)
-		{
-			EmittedTravelCm += FMath::Max(
-				static_cast<double>(PathSegment.TravelDistanceCm), 0.0);
-		}
-	}
-	const double RemainingTravelCm = StrokePath.bHasStableBladeDepthAxis
-		? FMath::Max(
-			StrokePath.ScrapePathArcLengthCm - StrokePath.LastEmittedScrapePathArcLengthCm,
-			0.0)
-		: FMath::Max(StrokePath.PendingScrapePathArcLengthCm, 0.0);
-	const double TimedTravelCm = EmittedTravelCm + RemainingTravelCm;
-	const double AvailablePathTimeSeconds = FMath::Max(
-		StrokePath.PendingScrapePathSampleTimeSeconds, 0.0);
-	const double EmittedTimeSeconds = TimedTravelCm > UE_DOUBLE_SMALL_NUMBER
-		? AvailablePathTimeSeconds * (EmittedTravelCm / TimedTravelCm)
-		: 0.0;
-	StrokePath.PendingScrapePathSampleTimeSeconds = FMath::Max(
-		AvailablePathTimeSeconds - EmittedTimeSeconds, 0.0);
-
 	for (const FMD_ScrapeToolPathSegment& PathSegment : PathSegments)
 	{
 		if (PathSegment.bStartsNewSubStroke)
@@ -421,33 +391,18 @@ bool UMD_ScrapeToolComponent::TryApplyResolvedScrapePath(
 			continue;
 		}
 
-		FVector2D AppliedEndPositionCm = PathSegment.EndPositionCm;
-		AMD_Barnacle* BlockingBarnacle = nullptr;
-		const float SegmentDeltaTime = EmittedTravelCm > UE_DOUBLE_SMALL_NUMBER
-			? static_cast<float>(EmittedTimeSeconds
-				* (static_cast<double>(PathSegment.TravelDistanceCm)
-					/ EmittedTravelCm))
-			: 0.0f;
 		SetCurrentScrapeBladeDirection(
 			CurrentSurface,
 			CurrentSurfaceFace,
 			PathSegment.EndPositionCm,
 			PathSegment.EndBladeDepthAxis,
 			CurrentHit.ImpactPoint);
-		if (ApplyScrapePathSegment(
-				CurrentSurface,
-				CurrentSurfaceFace,
-				CurrentHit,
-				PathSegment,
-				SegmentDeltaTime,
-				AppliedEndPositionCm,
-				BlockingBarnacle))
-		{
-			RebaseScrapePathAfterObstacle(AppliedEndPositionCm);
-			return true;
-		}
+		ApplyScrapePathSegment(
+			CurrentSurface,
+			CurrentSurfaceFace,
+			CurrentHit,
+			PathSegment);
 	}
-	return false;
 }
 
 void UMD_ScrapeToolComponent::ProcessScrapeAimResult(
@@ -472,10 +427,6 @@ void UMD_ScrapeToolComponent::ProcessScrapeAimResult(
 		// the previous surface path.
 		ResetStrokeTracking();
 		ResetInvalidScrapeAim();
-		ProcessDirectBarnacleContact(
-			AimResult.Barnacle,
-			AimResult.BarnacleHit,
-			SampleDeltaTime);
 		return;
 	}
 
@@ -484,14 +435,18 @@ void UMD_ScrapeToolComponent::ProcessScrapeAimResult(
 		|| !IsValid(AimResult.Surface))
 	{
 		ClearCurrentScrapeContact();
-		SetTrackedBarnacle(nullptr);
 		HandleInvalidScrapeAim(SampleDeltaTime, true);
 		return;
 	}
 
 	FHitResult CurrentHit = AimResult.Hit;
 	UMD_ScrapeSurfaceComponent* const CurrentSurface = AimResult.Surface;
-	AMD_Barnacle* const OccludingBarnacle = AimResult.Barnacle;
+	if (!IsValid(CurrentSurface))
+	{
+		ClearCurrentScrapeContact();
+		HandleInvalidScrapeAim(SampleDeltaTime, true);
+		return;
+	}
 
 	if (!PrepareReacquiredSurface(
 			AimResult,
@@ -503,13 +458,6 @@ void UMD_ScrapeToolComponent::ProcessScrapeAimResult(
 
 	ResetStrokeOnDiscontinuousSurfaceJump(AimResult);
 	SetCurrentScrapeContact(CurrentHit.ImpactPoint);
-
-	if (IsValid(OccludingBarnacle))
-	{
-		// 클라이언트에서 부착 복제가 BeginPlay보다 늦어도 직접 맞은 순간 복구한다.
-		// 장애물 등록이 있어야 아래 경로 차단과 조준 보정이 함께 작동한다.
-		OccludingBarnacle->RegisterWithScrapeSurface(CurrentSurface);
-	}
 
 	const FVector2D RawSurfacePositionCm = AimResult.SurfacePositionCm;
 	const EMD_ScrapeSurfaceFace CurrentSurfaceFace = AimResult.SurfaceFace;
@@ -523,27 +471,18 @@ void UMD_ScrapeToolComponent::ProcessScrapeAimResult(
 	}
 
 	TArray<FMD_ScrapeToolPathSegment> PathSegments;
-	if (FMath::IsFinite(SampleDeltaTime) && SampleDeltaTime > 0.0f)
-	{
-		StrokePath.PendingScrapePathSampleTimeSeconds +=
-			static_cast<double>(SampleDeltaTime);
-	}
 	if (!ConsumeRawScrapePathPoint(RawSurfacePositionCm, PathSegments))
 	{
 		StrokePath.PreviousSurfacePositionCm = RawSurfacePositionCm;
 		return;
 	}
 
-	if (TryApplyResolvedScrapePath(
-			CurrentSurface,
-			CurrentSurfaceFace,
-			CurrentHit,
-			PathSegments))
-	{
-		return;
-	}
+	ApplyResolvedScrapePath(
+		CurrentSurface,
+		CurrentSurfaceFace,
+		CurrentHit,
+		PathSegments);
 
-	SetTrackedBarnacle(nullptr);
 	StrokePath.PreviousSurfacePositionCm = RawSurfacePositionCm;
 }
 
@@ -767,37 +706,18 @@ FMD_ScrapeAimQueryResult UMD_ScrapeToolComponent::QueryScrapeAim(
 	return Result;
 }
 
-bool UMD_ScrapeToolComponent::TryGetCurrentSurfaceHit(
-	FHitResult& OutHit,
-	UMD_ScrapeSurfaceComponent*& OutSurface,
-	AMD_Barnacle*& OutOccludingBarnacle,
-	FHitResult& OutBarnacleHit) const
-{
-	OutHit = FHitResult();
-	OutSurface = nullptr;
-	OutOccludingBarnacle = nullptr;
-	OutBarnacleHit = FHitResult();
-
-	const FMD_ScrapeAimQueryResult Result = QueryCurrentScrapeAim();
-	OutHit = Result.Hit;
-	OutSurface = Result.Surface;
-	OutOccludingBarnacle = Result.Barnacle;
-	OutBarnacleHit = Result.BarnacleHit;
-	return Result.Type == EMD_ScrapeAimQueryType::SurfaceHit;
-}
-
 bool UMD_ScrapeToolComponent::TryTraceScrapeTarget(
 	const FVector& TraceStart,
 	const FVector& TraceEnd,
 	const AActor* const IgnoredActor,
 	FHitResult& OutHit,
 	UMD_ScrapeSurfaceComponent*& OutSurface,
-	AMD_Barnacle*& OutOccludingBarnacle,
+	AMD_Barnacle*& OutFirstHitBarnacle,
 	FHitResult& OutBarnacleHit) const
 {
 	OutHit = FHitResult();
 	OutSurface = nullptr;
-	OutOccludingBarnacle = nullptr;
+	OutFirstHitBarnacle = nullptr;
 	OutBarnacleHit = FHitResult();
 	if (!GetWorld() || TraceStart.ContainsNaN() || TraceEnd.ContainsNaN())
 	{
@@ -826,16 +746,16 @@ bool UMD_ScrapeToolComponent::TryTraceScrapeTarget(
 		return true;
 	}
 
-	OutOccludingBarnacle = Cast<AMD_Barnacle>(FirstHit.GetActor());
-	if (!IsValid(OutOccludingBarnacle))
+	OutFirstHitBarnacle = Cast<AMD_Barnacle>(FirstHit.GetActor());
+	if (!IsValid(OutFirstHitBarnacle))
 	{
 		return false;
 	}
 	OutBarnacleHit = FirstHit;
 
-	// 따개비가 Visibility를 막아도 그 뒤의 작업면 좌표가 있어야 헤라 경로를
-	// 따개비 앞에서 자를 수 있다. 첫 따개비만 무시하고 같은 선을 다시 쏜다.
-	QueryParams.AddIgnoredActor(OutOccludingBarnacle);
+	// 한 번의 입력에서 따개비 클릭과 뒤 작업면의 오염 처리를 함께 판정한다.
+	// 첫 따개비만 무시하고 같은 선을 다시 쏴 작업면 좌표를 얻는다.
+	QueryParams.AddIgnoredActor(OutFirstHitBarnacle);
 	FHitResult SurfaceHit;
 	if (!GetWorld()->LineTraceSingleByChannel(
 			SurfaceHit,
@@ -858,110 +778,26 @@ bool UMD_ScrapeToolComponent::TryTraceScrapeTarget(
 	return true;
 }
 
-void UMD_ScrapeToolComponent::ProcessDirectBarnacleContact(
-	AMD_Barnacle* Barnacle,
-	const FHitResult& Hit,
-	const float DeltaTime)
+void UMD_ScrapeToolComponent::ApplyBarnacleClick(
+	const FMD_ScrapeAimQueryResult& FirstAim)
 {
-	if (!IsValid(Barnacle) || Barnacle->IsFullyRemoved())
-	{
-		SetTrackedBarnacle(nullptr);
-		return;
-	}
-
-	SetTrackedBarnacle(Barnacle);
-
-	// 처음 맞췄으면 기준점만 잡는다. 옮겨오는 동안의 시선 이동을 속도로 세면
-	// 겨냥하는 것만으로 첫 타격이 들어간다.
-	if (!bHasPreviousBarnacleHitLocation)
-	{
-		PreviousBarnacleHitLocation = Hit.ImpactPoint;
-		bHasPreviousBarnacleHitLocation = true;
-		return;
-	}
-
-	const FVector TravelDelta = Hit.ImpactPoint - PreviousBarnacleHitLocation;
-	const float TravelCentimeters = static_cast<float>(TravelDelta.Size());
-
-	// 속도는 프레임 간 변화량이므로 문턱 미만이어도 기준점을 매 프레임 갱신한다.
-	// 갱신을 미루면 여러 프레임이 한 프레임의 이동으로 뭉쳐 속도가 부풀려진다.
-	PreviousBarnacleHitLocation = Hit.ImpactPoint;
-
-	DeliverBarnacleImpact(
-		Barnacle,
-		CalculateImpactSpeedCmPerSecond(TravelCentimeters, DeltaTime),
-		TravelDelta);
-}
-
-void UMD_ScrapeToolComponent::DeliverBarnacleImpact(
-	AMD_Barnacle* Barnacle,
-	const float ImpactSpeedCmPerSecond,
-	const FVector& ImpactWorldDirection)
-{
-	const float MinimumImpactSpeed = FMath::Max(
-		0.0f,
-		ScrapeToolSpec.BarnacleMinimumImpactSpeedCmPerSecond);
-
-	// 스윙이 끝나 속도가 충분히 떨어지면 다음 타격을 준비한다. 최소 속도를 그대로
-	// 빗장으로 쓰면 그 근처에서 진동할 때 준비와 발사가 매 프레임 번갈아 일어난다.
-	if (ImpactSpeedCmPerSecond <= MinimumImpactSpeed * 0.5f)
-	{
-		bBarnacleImpactArmed = true;
-	}
-
-	if (!IsValid(Barnacle)
-		|| !bBarnacleImpactArmed
-		|| ImpactSpeedCmPerSecond < MinimumImpactSpeed)
+	AMD_Barnacle* const Barnacle = FirstAim.Barnacle;
+	if (!bIsScraping
+		|| !GetOwner()
+		|| !GetOwner()->HasAuthority()
+		|| !IsValid(Barnacle)
+		|| Barnacle->IsFullyRemoved()
+		|| !FirstAim.BarnacleHit.bBlockingHit
+		|| FirstAim.BarnacleHit.GetActor() != Barnacle
+		|| (FirstAim.Type != EMD_ScrapeAimQueryType::DirectBarnacleOnly
+			&& FirstAim.Type != EMD_ScrapeAimQueryType::SurfaceHit))
 	{
 		return;
 	}
 
-	if (!GetOwner() || !GetOwner()->HasAuthority())
-	{
-		// 클라이언트에서도 빗장은 걸어 둔다. 서버로 옮겨도 리듬이 같아야 한다.
-		bBarnacleImpactArmed = false;
-		return;
-	}
-
-	bBarnacleImpactArmed = false;
-
-	if (Barnacle->ApplyScrapeImpact(
-			ScrapeToolSpec.CalculateBarnacleImpactWork(ImpactSpeedCmPerSecond),
-			ImpactWorldDirection))
+	if (Barnacle->ApplyScrapeClickDamage(
+			ScrapeToolSpec.BarnacleDamagePerClick))
 	{
 		AddScrapeLoad(ScrapeLoadPerRemovedBarnacle);
-
-		// 떨어져 나가면 액터가 파괴되므로 추적을 끊는다.
-		SetTrackedBarnacle(nullptr);
 	}
-}
-
-void UMD_ScrapeToolComponent::SetTrackedBarnacle(AMD_Barnacle* Barnacle)
-{
-	if (TrackedBarnacle.Get() == Barnacle)
-	{
-		return;
-	}
-
-	TrackedBarnacle = Barnacle;
-	PreviousBarnacleHitLocation = FVector::ZeroVector;
-	bHasPreviousBarnacleHitLocation = false;
-	bBarnacleImpactArmed = true;
-}
-
-float UMD_ScrapeToolComponent::CalculateImpactSpeedCmPerSecond(
-	const float TravelCentimeters,
-	const float DeltaTime)
-{
-	// StartScraping이 첫 프레임을 DeltaTime 0으로 부른다. 여기서 막지 않으면
-	// 입력을 누른 순간 무한대 속도로 따개비가 떨어진다.
-	if (!FMath::IsFinite(TravelCentimeters)
-		|| TravelCentimeters <= 0.0f
-		|| !FMath::IsFinite(DeltaTime)
-		|| DeltaTime <= UE_SMALL_NUMBER)
-	{
-		return 0.0f;
-	}
-
-	return TravelCentimeters / DeltaTime;
 }

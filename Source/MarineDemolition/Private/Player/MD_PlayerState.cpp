@@ -2,9 +2,11 @@
 
 
 #include "Player/MD_PlayerState.h"
+#include "Character/MD_Character.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Online/Voice/MD_CharacterVOIPTalker.h"
 #include "AbilitySystemComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
@@ -44,6 +46,34 @@ void AMD_PlayerState::BeginPlay()
 	AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(CharacterAttributeSet->GetHealthAttribute()).AddUObject(this, &AMD_PlayerState::HandleHealthChanged);
 
 	CachedHealthState = GetHealthState();
+}
+
+void AMD_PlayerState::OnRep_PlayerName()
+{
+	Super::OnRep_PlayerName();
+
+	// 플레이어 이름 변경을 목록 UI에 전달할 현재 프로젝트 GameState 조회
+	UWorld* World = GetWorld();
+	if (IsValid(World) == true)
+	{
+		// 접속 플레이어 목록 변경 이벤트를 제공하는 GameState 조회
+		AMD_GameStateBase* GameState = World->GetGameState<AMD_GameStateBase>();
+		if (IsValid(GameState) == true)
+		{
+			// 이름 복제가 완료된 PlayerArray 변경 알림
+			GameState->OnPlayerListChanged.Broadcast();
+		}
+	}
+
+	// 이름이 변경된 PlayerState 소유 캐릭터 조회
+	AMD_Character* PlayerCharacter = Cast<AMD_Character>(GetPawn());
+	if (IsValid(PlayerCharacter) == false)
+	{
+		return;
+	}
+
+	// 새 플랫폼 닉네임의 캐릭터 머리 위 이름표 반영
+	PlayerCharacter->RefreshNameTag();
 }
 
 
@@ -122,6 +152,13 @@ AMD_PlayerState::AMD_PlayerState()
 UAbilitySystemComponent* AMD_PlayerState::GetAbilitySystemComponent() const
 {
 	return AbilitySystemComponent;
+}
+
+void AMD_PlayerState::SetVoiceVolumeMultiplier(float NewVoiceVolumeMultiplier)
+{
+	// 음성 채팅 UI와 Talker가 공유하는 허용 범위 적용
+	float ClampedVoiceVolumeMultiplier = FMath::Clamp(NewVoiceVolumeMultiplier, 0.0f, UMD_CharacterVOIPTalker::MaxVolumeMultiplier);
+	VoiceVolumeMultiplier = ClampedVoiceVolumeMultiplier;
 }
 
 EMD_HealthState AMD_PlayerState::GetHealthState() const

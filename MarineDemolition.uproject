@@ -1,4 +1,4 @@
-{
+﻿{
 	"FileVersion": 3,
 	"EngineAssociation": "5.8",
 	"Category": "",
@@ -12,7 +12,8 @@
 				"Engine",
 				"UMG",
 				"CoreUObject",
-				"DeveloperSettings"
+				"DeveloperSettings",
+				"CommonUI"
 			]
 		}
 	],
@@ -58,6 +59,14 @@
 		},
 		{
 			"Name": "EditorToolset",
+			"Enabled": true
+		},
+		{
+			"Name": "CommonUI",
+			"Enabled": true
+		},
+		{
+			"Name": "StructUtils",
 			"Enabled": true
 		}
 	]

@@ -233,6 +233,10 @@ bool FMD_GameData::MigrateToCurrentVersion()
 		}
 	}
 
+	// 버전 7은 따개비 배치기 기록에 새 게임별 런타임 시드를 추가한다.
+	// 구형 레코드는 새 유효성 플래그가 false로 역직렬화되며, 복원 시 기존
+	// PlacementSeed를 사용하므로 별도의 배열 변환이 필요 없다.
+
 	SchemaVersion = CurrentSchemaVersion;
 	return true;
 }

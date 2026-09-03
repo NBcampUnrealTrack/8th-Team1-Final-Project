@@ -26,6 +26,9 @@ public:
 	/** 조준 중인 퀘스트 아이템의 외곽선 표시를 제어하는 함수 */
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 
+	/** 귀속된 퀘스트 정의의 이름을 상호작용 HUD에 제공한다. */
+	virtual FText GetInteractionDisplayName_Implementation() const override;
+
 	/** 등급 조건을 적용하지 않는 기본 퀘스트 아이템의 빈 등급 태그 반환 함수 */
 	virtual FGameplayTag GetQuestGradeTag() const;
 
