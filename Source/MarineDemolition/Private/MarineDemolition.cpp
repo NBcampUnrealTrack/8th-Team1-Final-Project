@@ -1,14 +1,12 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MarineDemolition.h"
 #include "Modules/ModuleManager.h"
 
-// 에디터 전용 캐러셀 디테일 등록 의존성 분리
 #if WITH_EDITOR
-// 디테일 커스터마이징 등록과 해제 지원
 #include "PropertyEditorModule.h"
-// 캐러셀 Enum 타입과 값 선택기 등록
 #include "UI/Foundation/Editor/MD_CarouselWidgetCustomization.h"
+#include "UI/Foundation/Editor/MD_FilledSliderCustomization.h"
 #endif
 
 // 기존 게임 모듈 동작에 에디터 전용 캐러셀 디테일 등록 추가
@@ -31,6 +29,8 @@ void FMarineDemolitionModule::StartupModule()
 	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
 	// 캐러셀 타입의 전용 디테일 구성 등록
 	PropertyEditor.RegisterCustomClassLayout(TEXT("MD_CarouselWidget"), FOnGetDetailCustomizationInstance::CreateStatic(&FMD_CarouselWidgetCustomization::MakeInstance));
+	// 기존 Slider Style 내부의 채움 이미지 편집 행 등록
+	PropertyEditor.RegisterCustomClassLayout(TEXT("MD_FilledSlider"), FOnGetDetailCustomizationInstance::CreateStatic(&FMD_FilledSliderCustomization::MakeInstance));
 #endif
 }
 
@@ -47,6 +47,8 @@ void FMarineDemolitionModule::ShutdownModule()
 		FPropertyEditorModule& PropertyEditor = FModuleManager::GetModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
 		// 캐러셀 디테일 등록 해제
 		PropertyEditor.UnregisterCustomClassLayout(TEXT("MD_CarouselWidget"));
+		// 채움 슬라이더 디테일 등록 해제
+		PropertyEditor.UnregisterCustomClassLayout(TEXT("MD_FilledSlider"));
 	}
 #endif
 	// 기본 게임 모듈 종료 유지

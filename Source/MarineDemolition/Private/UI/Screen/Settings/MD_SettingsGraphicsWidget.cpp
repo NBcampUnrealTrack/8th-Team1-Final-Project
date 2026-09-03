@@ -9,6 +9,12 @@
 
 void UMD_SettingsGraphicsWidget::NativeConstruct()
 {
+	// 전체 품질 컨트롤을 포함한 화면의 사용자 선택 구독
+	if (IsValid(Carousel_OverallQuality) == true)
+	{
+		// 화면 재생성 시 중복 구독 없는 품질 동기화 연결
+		Carousel_OverallQuality->OnEnumSelectionChanged.AddUniqueDynamic(this, &UMD_SettingsGraphicsWidget::HandleOverallQualityChanged);
+	}
 	// Blueprint 생성 이벤트 실행 전 현재 카테고리 값 표시
 	bool bLoaded = ReloadSettings();
 	// 게임 인스턴스가 없는 미리보기의 프로젝트 기본값 표시
@@ -18,6 +24,17 @@ void UMD_SettingsGraphicsWidget::NativeConstruct()
 		RefreshDisplay();
 	}
 	Super::NativeConstruct();
+}
+
+void UMD_SettingsGraphicsWidget::NativeDestruct()
+{
+	// 화면 종료 시 기존 전체 품질 컨트롤의 구독 정리
+	if (IsValid(Carousel_OverallQuality) == true)
+	{
+		// 종료한 화면으로 전달되는 품질 변경 이벤트 차단
+		Carousel_OverallQuality->OnEnumSelectionChanged.RemoveDynamic(this, &UMD_SettingsGraphicsWidget::HandleOverallQualityChanged);
+	}
+	Super::NativeDestruct();
 }
 
 bool UMD_SettingsGraphicsWidget::ReloadSettings()
@@ -215,6 +232,41 @@ FText UMD_SettingsGraphicsWidget::GetQualityDisplayName(int32 NameIndex)
 	}
 	// Enum 런타임 표시 콜백의 현지화 문구 반환
 	return DisplayName;
+}
+
+void UMD_SettingsGraphicsWidget::HandleOverallQualityChanged(UEnum* EnumType, int64 EnumValue, FText SelectedOption)
+{
+	// Enum이 없는 선택 알림의 품질 변경 방지
+	if (IsValid(EnumType) == false)
+	{
+		return;
+	}
+	// 엔진 품질 범위보다 작은 실제 Enum 값 제외
+	if (EnumValue < 0)
+	{
+		return;
+	}
+	// 엔진 품질 범위를 벗어난 실제 Enum 값 제외
+	if (EnumValue > 4)
+	{
+		return;
+	}
+	// 표시 인덱스와 구분되는 실제 전체 품질 단계 보관
+	int32 Quality = static_cast<int32>(EnumValue);
+	// 실제 카테고리와 분리된 전체 품질 편집값 갱신
+	PendingSettings.OverallQuality = Quality;
+	// 컨트롤 생략 시에도 적용할 그림자 품질 편집값 갱신
+	PendingSettings.ShadowQuality = Quality;
+	// 컨트롤 생략 시에도 적용할 효과 품질 편집값 갱신
+	PendingSettings.EffectsQuality = Quality;
+	// 컨트롤 생략 시에도 적용할 후처리 품질 편집값 갱신
+	PendingSettings.PostProcessQuality = Quality;
+	// 변경 이벤트 재호출 없는 그림자 품질 선택 동기화
+	RefreshQualityCarousel(Carousel_ShadowQuality, Quality);
+	// 변경 이벤트 재호출 없는 효과 품질 선택 동기화
+	RefreshQualityCarousel(Carousel_EffectQuality, Quality);
+	// 해상도와 프레임 등 다른 편집값을 유지한 후처리 품질 선택 동기화
+	RefreshQualityCarousel(Carousel_PPQuality, Quality);
 }
 
 void UMD_SettingsGraphicsWidget::RefreshDisplay()

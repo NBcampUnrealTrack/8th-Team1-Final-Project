@@ -57,6 +57,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
 	void StartTalking();
 
+	// PTT 키 해제 시 송신 중지, 항상 켜기 모드에서는 송신 유지
 	UFUNCTION(BlueprintCallable, Category = "Voice Chat")
 	void StopTalking();
 
@@ -69,5 +70,11 @@ public:
 	bool IsRemotePlayerMuted(APlayerState* TargetPlayerState) const;
 
 protected:
+	// 설정 카테고리에서 현재 Push to Talk 모드 복원
+	void ApplySavedPushToTalkSetting();
+
+	// 컴포넌트 수명 주기에서 사용하는 강제 송신 중지
+	void StopTalkingInternal();
+
 	bool CanModifyRemotePlayerMute(APlayerState* TargetPlayerState) const;
 };

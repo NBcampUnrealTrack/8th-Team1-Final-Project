@@ -83,9 +83,13 @@ struct MARINEDEMOLITION_API FMD_AudioUserSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리", meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float EffectsVolume = 1.0f;
 
-	// 음성 재생에 적용할 음량을 저장한다.
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float VoiceVolume = 1.0f;
+	// 음성 입력 처리에 사용할 정규화 감도값 보관
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리", meta = (DisplayName = "음성 입력 감도", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
+	float VoiceInputSensitivity = 0.5f;
+
+	// 지정된 키를 누르는 동안만 음성을 전송할지 선택하는 설정값
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리", meta = (DisplayName = "Push to Talk"))
+	bool bUsePushToTalk = true;
 };
 
 // 플레이어의 시점 조작에 사용되는 설정값을 묶는다.

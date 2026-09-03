@@ -70,11 +70,6 @@ void UMD_CharacterVOIPTalker::TryRegisterWithOwnerPlayerState()
 
 	// 고유 식별자가 준비된 PlayerState와 VOIP Talker 연결
 	RegisterWithPlayerState(OwningState);
-	// 프로젝트 공통 마이크 감도 값
-	float VoiceMicThreshold = 0.003f;
-	// 프로젝트 공통 마이크 감도 적용
-	UVOIPStatics::SetMicThreshold(VoiceMicThreshold);
-
 	// Pawn 재생성 전 PlayerState에 저장된 로컬 음량 조회
 	AMD_PlayerState* ProjectPlayerState = Cast<AMD_PlayerState>(OwningState);
 	if (IsValid(ProjectPlayerState) == true)

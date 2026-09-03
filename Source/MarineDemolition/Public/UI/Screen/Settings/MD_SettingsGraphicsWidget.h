@@ -1,18 +1,13 @@
-﻿// 그래픽 설정 화면 선언의 중복 포함 방지
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
 #include "Gameplay/Settings/MD_SettingsTypes.h"
 #include "MD_SettingsGraphicsWidget.generated.h"
 
-// 화면 모드와 해상도 선택 컨트롤 참조
 class UComboBoxString;
-// 수직 동기화 선택 컨트롤 참조
 class UCheckBox;
-// 그래픽 설정의 적용과 변경 취소 및 기본값 복원용 Common UI 버튼 참조
 class UCommonButtonBase;
-// 기존 공용 캐러셀의 목록과 선택 기능 재사용
 class UMD_CarouselWidget;
 
 // BP 캐러셀에서 선택 가능한 엔진 확장성 품질 타입
@@ -39,6 +34,7 @@ class MARINEDEMOLITION_API UMD_SettingsGraphicsWidget : public UUserWidget
 
 protected:
 	virtual void NativeConstruct() override;
+	virtual void NativeDestruct() override;
 
 protected:
 	// 전체 화면과 창 모드 선택
@@ -118,6 +114,10 @@ public:
 	static FText GetQualityDisplayName(int32 NameIndex);
 
 protected:
+	// 전체 품질 선택에 맞춘 개별 품질의 미적용 편집값 동기화
+	UFUNCTION()
+	void HandleOverallQualityChanged(UEnum* EnumType, int64 EnumValue, FText SelectedOption);
+
 	// 화면 기준값에 맞춘 목록과 선택 표시의 무저장 갱신
 	void RefreshDisplay();
 
