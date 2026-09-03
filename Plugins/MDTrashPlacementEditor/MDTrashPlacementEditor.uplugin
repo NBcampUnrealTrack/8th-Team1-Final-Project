@@ -1,0 +1,18 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.1.0",
+	"FriendlyName": "MD Trash Placement Editor",
+	"Description": "Editor-only tools for designer-authored gameplay trash placement.",
+	"Category": "Editor",
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "MDTrashPlacementEditor",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}
