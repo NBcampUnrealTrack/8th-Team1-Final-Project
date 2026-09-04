@@ -5,6 +5,8 @@
 #include "Gameplay/Settings/MD_SettingsTypes.h"
 #include "MD_ControlSettingCategory.generated.h"
 
+class UInputMappingContext;
+
 // 조작 설정 데이터와 유효 범위 검증을 담당한다.
 UCLASS(BlueprintType)
 class MARINEDEMOLITION_API UMD_ControlSettingCategory : public UMD_SettingCategoryBase
@@ -37,6 +39,14 @@ protected:
 	UPROPERTY(Transient)
 	FMD_ControlSettings AppliedSettings;
 
+	// 런타임 복제본의 원본으로 사용한 플레이어 입력 매핑 컨텍스트
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> SourceMappingContext;
+
+	// 사용자 선택 키를 적용하고 원본 에셋과 분리한 런타임 입력 매핑 컨텍스트
+	UPROPERTY(Transient)
+	TObjectPtr<UInputMappingContext> RuntimeMappingContext;
+
 public:
 	// 현재 실제 입력에서 사용하는 조작 설정값을 반환한다.
 	UFUNCTION(BlueprintPure, Category = "MarineDemolition|Settings|Controls")
@@ -44,4 +54,17 @@ public:
 	{
 		return AppliedSettings;
 	}
+
+	// 현재 적용값을 반영한 플레이어 입력 매핑 컨텍스트 준비
+	UInputMappingContext* PrepareInputMappingContext(UInputMappingContext* InputMappingContext);
+
+protected:
+	// 저장 데이터나 직접 편집으로 들어온 무효 키와 핫바 개수 보정
+	void NormalizeSettings();
+
+	// 런타임 입력 매핑 컨텍스트의 비이동 액션 키 갱신
+	void RefreshInputMappingContext();
+
+	// 입력 액션 이름에 대응하는 현재 적용 키 조회
+	FKey GetConfiguredKey(FName ActionName, FKey PreviousKey);
 };

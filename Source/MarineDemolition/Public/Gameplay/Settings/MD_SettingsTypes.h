@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "GenericPlatform/GenericWindow.h"
+#include "InputCoreTypes.h"
 #include "MD_SettingsTypes.generated.h"
 
 // 통합 설정 화면에서 관리하는 카테고리를 구분한다.
@@ -71,17 +72,17 @@ struct MARINEDEMOLITION_API FMD_AudioUserSettings
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리")
 	FString InputDeviceId;
 
-	// 모든 소리에 공통으로 적용할 전체 음량을 저장한다.
+	// 모든 소리에 공통으로 적용할 50% 기본 전체 음량
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MasterVolume = 1.0f;
+	float MasterVolume = 0.5f;
 
-	// 배경 음악에 적용할 음량을 저장한다.
+	// 배경 음악에 적용할 50% 기본 음량
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float MusicVolume = 1.0f;
+	float MusicVolume = 0.5f;
 
-	// 게임 효과음에 적용할 음량을 저장한다.
+	// 게임 효과음에 적용할 50% 기본 음량
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리", meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float EffectsVolume = 1.0f;
+	float EffectsVolume = 0.5f;
 
 	// 음성 입력 처리에 사용할 정규화 감도값 보관
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "소리", meta = (DisplayName = "음성 입력 감도", ClampMin = "0.0", ClampMax = "1.0", UIMin = "0.0", UIMax = "1.0"))
@@ -97,6 +98,30 @@ USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_ControlSettings
 {
 	GENERATED_BODY()
+
+	// 점프와 수영 상승에 사용할 입력 키
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "조작")
+	FKey JumpKey = EKeys::SpaceBar;
+
+	// 대상 상호작용에 사용할 입력 키
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "조작")
+	FKey InteractKey = EKeys::E;
+
+	// 현재 장비의 능력 사용에 사용할 입력 키
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "조작")
+	FKey AbilityKey = EKeys::LeftMouseButton;
+
+	// 다음 장비 교체에 사용할 입력 키
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "조작")
+	FKey SwapEquipmentKey = EKeys::MouseWheelAxis;
+
+	// 음성 채팅 송신에 사용할 입력 키
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "조작")
+	FKey VoiceChatKey = EKeys::M;
+
+	// 여섯 개 핫바 슬롯의 직접 선택에 사용할 입력 키 목록
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "조작")
+	TArray<FKey> HotbarSlotKeys = {EKeys::One, EKeys::Two, EKeys::Three, EKeys::Four, EKeys::Five, EKeys::Six};
 
 	// 마우스 입력에 곱할 감도 배율을 저장한다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "조작", meta = (ClampMin = "0.1", ClampMax = "10.0"))

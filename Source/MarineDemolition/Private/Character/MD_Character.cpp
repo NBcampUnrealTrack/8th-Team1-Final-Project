@@ -490,9 +490,13 @@ void AMD_Character::BeginPlay()
 	{
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = GetEnhancedInputSubsystem())
 		{
-			if (IsValid(PlayerMappingContext))
+			// 조작 설정 키가 반영된 런타임 입력 컨텍스트 조회
+			UInputMappingContext* MappingContext = ResolvePlayerMappingContext();
+			// 준비된 입력 컨텍스트에 한정한 로컬 플레이어 등록
+			if (IsValid(MappingContext) == true)
 			{
-				Subsystem->AddMappingContext(PlayerMappingContext, 0);
+				// 이동 키와 설정된 비이동 액션 키를 포함한 입력 컨텍스트 활성화
+				Subsystem->AddMappingContext(MappingContext, 0);
 			}
 		}
 
@@ -799,9 +803,13 @@ void AMD_Character::PawnClientRestart()
 
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = GetEnhancedInputSubsystem())
 	{
-		if (IsValid(PlayerMappingContext))
+		// 재시작 이후 다시 사용할 런타임 입력 컨텍스트 조회
+		UInputMappingContext* MappingContext = ResolvePlayerMappingContext();
+		// 준비된 입력 컨텍스트에 한정한 로컬 플레이어 재등록
+		if (IsValid(MappingContext) == true)
 		{
-			Subsystem->AddMappingContext(PlayerMappingContext, 0);
+			// 현재 조작 설정 키가 반영된 입력 컨텍스트 활성화
+			Subsystem->AddMappingContext(MappingContext, 0);
 		}
 	}
 
@@ -921,6 +929,41 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		}
 		EIC->BindAction(SlotAction,ETriggerEvent::Started,this,&AMD_Character::HandleSelectHotbarSlotInput,SlotIndex);
 	}
+}
+
+UInputMappingContext* AMD_Character::ResolvePlayerMappingContext()
+{
+	// 설정 매니저나 카테고리를 찾지 못할 때 사용할 원본 입력 컨텍스트
+	UInputMappingContext* ResolvedMappingContext = PlayerMappingContext;
+	// 캐릭터에 원본 입력 컨텍스트가 없는 경우의 빈 결과 반환
+	if (IsValid(ResolvedMappingContext) == false)
+	{
+		return ResolvedMappingContext;
+	}
+	// 현재 게임 인스턴스의 설정 매니저 조회
+	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	// 설정 시스템이 없는 환경의 원본 입력 컨텍스트 유지
+	if (IsValid(SettingsManager) == false)
+	{
+		return ResolvedMappingContext;
+	}
+	// 현재 적용된 조작 설정과 런타임 매핑을 소유한 카테고리 조회
+	UMD_ControlSettingCategory* ControlCategory = SettingsManager->GetControlSettings();
+	// 조작 카테고리가 없는 환경의 원본 입력 컨텍스트 유지
+	if (IsValid(ControlCategory) == false)
+	{
+		return ResolvedMappingContext;
+	}
+	// 원본의 트리거와 모디파이어를 보존한 설정 전용 복제본 준비
+	UInputMappingContext* ConfiguredMappingContext = ControlCategory->PrepareInputMappingContext(PlayerMappingContext);
+	// 복제본 생성 성공에 한정한 반환 컨텍스트 교체
+	if (IsValid(ConfiguredMappingContext) == true)
+	{
+		// 사용자 선택 키가 반영된 런타임 입력 컨텍스트 보관
+		ResolvedMappingContext = ConfiguredMappingContext;
+	}
+	// 로컬 플레이어 서브시스템에 등록할 입력 컨텍스트 반환
+	return ResolvedMappingContext;
 }
 
 void AMD_Character::HandleMoveInput(const FInputActionValue& Value)

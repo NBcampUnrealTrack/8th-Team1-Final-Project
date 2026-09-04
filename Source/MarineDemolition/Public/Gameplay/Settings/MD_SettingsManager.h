@@ -10,6 +10,7 @@ class UMD_AudioSettingCategory;
 class UMD_ControlSettingCategory;
 class UMD_GraphicsSettingCategory;
 class UMD_SettingCategoryBase;
+class UMD_SettingsCategoryWidgetBase;
 
 // 특정 카테고리의 설정이 적용된 시점을 UI와 런타임 시스템에 알린다.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnSettingsApplied, EMD_SettingsCategory, Category);
@@ -47,6 +48,9 @@ protected:
 	UPROPERTY(Transient)
 	TMap<EMD_SettingsCategory, FInstancedStruct> SettingDataMap;
 
+	// 카테고리별 미적용 편집값을 제공하는 현재 화면의 약한 참조
+	TMap<EMD_SettingsCategory, TWeakObjectPtr<UMD_SettingsCategoryWidgetBase>> SettingsWidgets;
+
 public:
 	// 월드에서 현재 게임 인스턴스의 설정 매니저를 찾는다.
 	UFUNCTION(BlueprintPure, Category = "MarineDemolition|Settings", meta = (WorldContext = "WorldContextObject"))
@@ -80,9 +84,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|Settings")
 	bool SaveSettings(EMD_SettingsCategory Category);
 
-	// 지정한 카테고리를 프로젝트 기본값으로 되돌리고 적용한다.
+	// 지정한 카테고리 화면의 미적용 변경을 현재 카테고리 값으로 복원
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|Settings")
-	void ResetCategoryToDefaults(EMD_SettingsCategory Category);
+	bool RevertSettings(EMD_SettingsCategory Category);
+
+	// 지정한 카테고리 화면의 미적용 편집값만 프로젝트 기본값으로 복원
+	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|Settings")
+	bool ResetSettings(EMD_SettingsCategory Category);
+
+	// 카테고리별 현재 편집 화면의 매니저 연결
+	void RegisterSettingsWidget(EMD_SettingsCategory Category, UMD_SettingsCategoryWidgetBase* SettingsWidget);
+
+	// 종료된 편집 화면의 카테고리 연결 해제
+	void UnregisterSettingsWidget(EMD_SettingsCategory Category, UMD_SettingsCategoryWidgetBase* SettingsWidget);
 
 	// 설정 인스턴스가 생성한 카테고리 데이터를 저장 Map에 등록한다.
 	void RegisterSettingData(EMD_SettingsCategory Category, FInstancedStruct SettingData);
@@ -96,4 +110,7 @@ protected:
 
 	// 현재 InstancedStruct 맵을 설정 전용 슬롯에 저장한다.
 	bool SaveSettingDataMap();
+
+	// 지정한 카테고리에 등록된 유효한 편집 화면 반환
+	UMD_SettingsCategoryWidgetBase* GetSettingsWidget(EMD_SettingsCategory Category);
 };
