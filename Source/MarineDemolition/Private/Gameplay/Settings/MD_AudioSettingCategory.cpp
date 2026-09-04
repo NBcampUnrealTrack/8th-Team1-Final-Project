@@ -36,6 +36,9 @@ void UMD_AudioSettingCategory::ApplySettings()
 	Settings.EffectsVolume = FMath::Clamp(Settings.EffectsVolume, 0.0f, 1.0f);
 	// 구조체 직접 편집값과 저장 데이터의 입력 감도 범위 보정
 	Settings.VoiceInputSensitivity = FMath::Clamp(Settings.VoiceInputSensitivity, 0.0f, 1.0f);
+	// 출력 장치 적용 요청과 함께 확인할 사용자 설정값 기록
+	UE_LOG(MarineDemolition, Display, TEXT("Audio settings apply requested: output='%s', input='%s', master=%.2f, music=%.2f, effects=%.2f"),
+		*Settings.OutputDeviceId, *Settings.InputDeviceId, Settings.MasterVolume, Settings.MusicVolume, Settings.EffectsVolume);
 	// 현재 월드의 오디오 처리 서브시스템 조회
 	UWorld* World = GetWorld();
 	// 전체 음량과 태그 기반 배경 음악 및 효과음의 개별 음량 적용
@@ -215,6 +218,8 @@ void UMD_AudioSettingCategory::RefreshAudioDevices()
 	bOutputDeviceRequestAccepted = false;
 	// 제한 시간 기준 시각 보관
 	OutputDeviceRequestStartTime = FPlatformTime::Seconds();
+	// 비동기 출력 전환 시작 상태 기록
+	UE_LOG(MarineDemolition, Display, TEXT("Audio output device refresh started: requested='%s'"), *ActiveOutputDeviceId);
 	// 기존 출력 틱의 중복 등록 제거
 	FTSTicker::GetCoreTicker().RemoveTicker(OutputDeviceTickerHandle);
 	// 일시정지 UI에서도 동작하는 출력 완료 확인 등록
@@ -403,8 +408,8 @@ bool UMD_AudioSettingCategory::TickOutputDeviceSwap(float DeltaTime)
 							// 이미 접수된 요청은 완료까지 조회만 수행
 							if (bAccepted == false)
 							{
-								// 일시적 엔진 요청 거절은 다음 틱에서 재시도
-								bAccepted = Platform->RequestDeviceSwap(RequestedDeviceId, false, TEXT("MD user audio settings"));
+								// 직렬화된 사용자 선택과 엔진 장치 이벤트의 경합을 해소하는 확정 전환
+								bAccepted = Platform->RequestDeviceSwap(RequestedDeviceId, true, TEXT("MD user audio settings"));
 							}
 						}
 					}
@@ -457,6 +462,22 @@ void UMD_AudioSettingCategory::HandleOutputDeviceChecked(uint32 RequestSerial, b
 			// 이전 선택의 완료 이벤트 생략
 			return;
 		}
+		// 새 출력 스트림에 대한 전체 및 카테고리 음량 상태 재적용
+		UWorld* World = GetWorld();
+		// 유효한 게임 월드에 한정한 음량 재적용
+		if (IsValid(World) == true)
+		{
+			// 현재 월드의 오디오 처리 서브시스템 조회
+			UMD_AudioSubsystem* AudioSubsystem = World->GetSubsystem<UMD_AudioSubsystem>();
+			// 준비된 오디오 처리 서브시스템의 사용자 음량 복원
+			if (IsValid(AudioSubsystem) == true)
+			{
+				// 전환 완료 장치의 기존 재생 소리와 신규 소리에 대한 사용자 음량 복원
+				AudioSubsystem->ApplyUserVolumes(Settings.MasterVolume, Settings.MusicVolume, Settings.EffectsVolume);
+			}
+		}
+		// 실제 출력 장치 전환 완료 상태 기록
+		UE_LOG(MarineDemolition, Display, TEXT("Audio output device refresh completed: current='%s'"), *CurrentDeviceId);
 		// 전환 완료 시점의 실제 장치 ID 전달
 		OnOutputDeviceChanged.Broadcast(true, CurrentDeviceId);
 	}

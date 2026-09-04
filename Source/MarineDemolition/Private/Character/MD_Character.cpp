@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/MD_Character.h"
@@ -17,7 +17,6 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
-#include "InputCoreTypes.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -26,9 +25,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Camera/CameraComponent.h"
-#include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
-#include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshSocket.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
