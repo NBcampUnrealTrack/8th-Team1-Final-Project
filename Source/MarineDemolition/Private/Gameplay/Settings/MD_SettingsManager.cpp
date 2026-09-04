@@ -7,6 +7,7 @@
 #include "Gameplay/Settings/MD_SettingCategoryBase.h"
 #include "Gameplay/Settings/MD_SettingsSaveGame.h"
 #include "Kismet/GameplayStatics.h"
+#include "UI/Screen/Settings/MD_SettingsCategoryWidgetBase.h"
 
 namespace MDSettingsManager
 {
@@ -34,6 +35,8 @@ void UMD_SettingsManager::Deinitialize()
 	OnSaveRequested.Clear();
 	// 관리 중인 설정 인스턴스 참조를 비운다.
 	SettingCategories.Empty();
+	// 종료된 게임 인스턴스의 카테고리 화면 연결을 비운다.
+	SettingsWidgets.Empty();
 	// 상위 서브시스템 종료 흐름을 실행한다.
 	Super::Deinitialize();
 }
@@ -121,31 +124,111 @@ void UMD_SettingsManager::ApplyAllSettings()
 
 bool UMD_SettingsManager::SaveSettings(EMD_SettingsCategory Category)
 {
+	// 선택한 카테고리에 등록된 현재 편집 화면 조회
+	UMD_SettingsCategoryWidgetBase* SettingsWidget = GetSettingsWidget(Category);
+	// 화면이 등록된 카테고리에 한정한 미적용 선택값 수집
+	if (IsValid(SettingsWidget) == true)
+	{
+		// 현재 화면 선택값의 카테고리 인스턴스 전달 결과 확인
+		bool bCommitted = SettingsWidget->CommitPendingSettings();
+		// 화면 편집값을 전달하지 못한 경우 기존 카테고리의 오적용 방지
+		if (bCommitted == false)
+		{
+			// 현재 카테고리의 저장 실패 결과 준비
+			bool bSaved = false;
+			// 적용과 저장 없는 실패 반환
+			return bSaved;
+		}
+	}
 	// 저장 전에 현재 탭의 카테고리 값만 검증하고 실제 시스템에 적용한다.
 	ApplyCategory(Category);
 	// 요청한 카테고리 인스턴스만 자신의 데이터를 Map에 갱신하도록 저장 이벤트를 호출한다.
 	OnSaveRequested.Broadcast(Category);
 	// 변경한 카테고리와 기존 카테고리 데이터가 포함된 Map을 로컬 슬롯에 저장한다.
 	bool bSaveSucceeded = SaveSettingDataMap();
+	// 적용 과정의 범위 보정값을 현재 카테고리 화면에 다시 표시
+	if (IsValid(SettingsWidget) == true)
+	{
+		// 실제 카테고리 기준값으로 미적용 화면 상태 동기화
+		bool bReloaded = SettingsWidget->ReloadPendingSettings();
+		// 화면 동기화 결과의 명시적 소비
+		(void)bReloaded;
+	}
 	// 저장 성공 여부를 호출부에 전달한다.
 	return bSaveSucceeded;
 }
 
-void UMD_SettingsManager::ResetCategoryToDefaults(EMD_SettingsCategory Category)
+bool UMD_SettingsManager::RevertSettings(EMD_SettingsCategory Category)
 {
-	// 카테고리 맵에서 초기화할 설정 인스턴스를 찾는다.
-	UMD_SettingCategoryBase* SettingCategory = GetSettingCategory(Category);
-	// 등록된 설정 인스턴스가 없으면 초기화를 중단한다.
-	if (IsValid(SettingCategory) == false)
+	// 선택한 카테고리에 등록된 현재 편집 화면 조회
+	UMD_SettingsCategoryWidgetBase* SettingsWidget = GetSettingsWidget(Category);
+	// 표시 화면이 없는 카테고리의 변경 취소 실패
+	if (IsValid(SettingsWidget) == false)
+	{
+		// 변경 취소 실패 결과 준비
+		bool bReverted = false;
+		// 기존 카테고리와 저장 데이터 변경 없는 실패 반환
+		return bReverted;
+	}
+	// 현재 카테고리 값으로 화면의 미적용 선택을 교체한 결과 반환
+	bool bReverted = SettingsWidget->ReloadPendingSettings();
+	// 변경 취소 성공 여부 반환
+	return bReverted;
+}
+
+bool UMD_SettingsManager::ResetSettings(EMD_SettingsCategory Category)
+{
+	// 선택한 카테고리에 등록된 현재 편집 화면 조회
+	UMD_SettingsCategoryWidgetBase* SettingsWidget = GetSettingsWidget(Category);
+	// 표시 화면이 없는 카테고리의 화면 초기화 실패
+	if (IsValid(SettingsWidget) == false)
+	{
+		// 초기화 실패 결과 준비
+		bool bReset = false;
+		// 실제 카테고리와 저장 데이터 변경 없는 실패 반환
+		return bReset;
+	}
+	// Save 호출 전까지 화면의 미적용 편집값만 기본값으로 교체
+	SettingsWidget->ResetPendingSettings();
+	// 화면 기본값 복원 성공 결과 준비
+	bool bReset = true;
+	// 초기화 성공 반환
+	return bReset;
+}
+
+void UMD_SettingsManager::RegisterSettingsWidget(EMD_SettingsCategory Category, UMD_SettingsCategoryWidgetBase* SettingsWidget)
+{
+	// 파괴 중이거나 유효하지 않은 카테고리 화면의 등록 방지
+	if (IsValid(SettingsWidget) == false)
 	{
 		return;
 	}
-	// 공통 가상 함수를 통해 카테고리 고유 기본값을 복원한다.
-	SettingCategory->ResetToDefaults();
-	// 매니저 저장 이벤트를 통해 기본값 적용과 현재 카테고리 저장을 함께 실행한다.
-	bool bSaveSucceeded = SaveSettings(Category);
-	// 저장 결과는 기본값 복원 흐름에서 명시적으로 소비한다.
-	(void)bSaveSucceeded;
+	// 동일 카테고리의 최신 화면을 약한 참조로 등록
+	SettingsWidgets.Add(Category, SettingsWidget);
+}
+
+void UMD_SettingsManager::UnregisterSettingsWidget(EMD_SettingsCategory Category, UMD_SettingsCategoryWidgetBase* SettingsWidget)
+{
+	// 카테고리에 등록된 화면 약한 참조 조회
+	TWeakObjectPtr<UMD_SettingsCategoryWidgetBase>* FoundWidget = SettingsWidgets.Find(Category);
+	// 등록되지 않은 카테고리의 해제 생략
+	if (FoundWidget == nullptr)
+	{
+		return;
+	}
+	// 현재 카테고리에 등록된 실제 화면 조회
+	UMD_SettingsCategoryWidgetBase* RegisteredWidget = FoundWidget->Get();
+	// 유효한 다른 화면이 교체 등록된 경우 해당 연결 보존
+	if (IsValid(RegisteredWidget) == true)
+	{
+		// 종료 대상과 현재 등록 화면의 동일성 확인
+		if (RegisteredWidget != SettingsWidget)
+		{
+			return;
+		}
+	}
+	// 종료 화면 또는 만료된 약한 참조의 카테고리 연결 제거
+	SettingsWidgets.Remove(Category);
 }
 
 void UMD_SettingsManager::RegisterSettingData(EMD_SettingsCategory Category, FInstancedStruct SettingData)
@@ -238,4 +321,29 @@ bool UMD_SettingsManager::SaveSettingDataMap()
 	bool bSaveSucceeded = UGameplayStatics::SaveGameToSlot(SettingsSaveGame, MDSettingsManager::SlotName, MDSettingsManager::UserIndex);
 	// 저장 성공 여부를 호출부에 전달한다.
 	return bSaveSucceeded;
+}
+
+UMD_SettingsCategoryWidgetBase* UMD_SettingsManager::GetSettingsWidget(EMD_SettingsCategory Category)
+{
+	// 카테고리에 등록된 화면 약한 참조 조회
+	TWeakObjectPtr<UMD_SettingsCategoryWidgetBase>* FoundWidget = SettingsWidgets.Find(Category);
+	// 등록되지 않은 카테고리의 빈 결과 반환
+	if (FoundWidget == nullptr)
+	{
+		return nullptr;
+	}
+	// 약한 참조가 현재 유효한지 확인
+	bool bWidgetValid = FoundWidget->IsValid();
+	// 파괴된 화면의 만료된 연결 정리
+	if (bWidgetValid == false)
+	{
+		// 다음 조회에서 반복되지 않도록 카테고리 연결 제거
+		SettingsWidgets.Remove(Category);
+		// 유효한 화면이 없는 결과 반환
+		return nullptr;
+	}
+	// 등록된 현재 카테고리 화면 조회
+	UMD_SettingsCategoryWidgetBase* SettingsWidget = FoundWidget->Get();
+	// 유효한 편집 화면 반환
+	return SettingsWidget;
 }

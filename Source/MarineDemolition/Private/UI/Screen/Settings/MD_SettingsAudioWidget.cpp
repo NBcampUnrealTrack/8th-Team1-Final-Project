@@ -12,7 +12,7 @@ void UMD_SettingsAudioWidget::NativeConstruct()
 	// 다시 열린 화면의 장치 목록 응답 허용
 	bAcceptDeviceResults = true;
 	// Blueprint 생성 이벤트 실행 전 현재 카테고리 값 조회
-	bool bLoaded = ReloadSettings();
+	bool bLoaded = ReloadPendingSettings();
 	// 게임 인스턴스가 없는 상태의 기본 표시 준비
 	if (bLoaded == false)
 	{
@@ -31,7 +31,7 @@ void UMD_SettingsAudioWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
-bool UMD_SettingsAudioWidget::ReloadSettings()
+bool UMD_SettingsAudioWidget::ReloadPendingSettings()
 {
 	// 현재 화면의 게임 인스턴스에 속한 설정 매니저 조회
 	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
@@ -63,43 +63,41 @@ bool UMD_SettingsAudioWidget::ReloadSettings()
 	return bLoaded;
 }
 
-bool UMD_SettingsAudioWidget::SaveSettings()
+bool UMD_SettingsAudioWidget::CommitPendingSettings()
 {
 	// 현재 오디오 탭의 설정 매니저 조회
 	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
-	// 게임 인스턴스 없는 화면의 적용과 저장 방지
+	// 게임 인스턴스 없는 화면의 카테고리 변경 방지
 	if (IsValid(SettingsManager) == false)
 	{
-		// 저장 실패값 준비
-		bool bSaved = false;
+		// 편집값 전달 실패값 준비
+		bool bCommitted = false;
 		// 카테고리 변경 없는 실패 반환
-		return bSaved;
+		return bCommitted;
 	}
-	// 저장 대상 오디오 카테고리 조회
+	// 편집값 전달 대상 오디오 카테고리 조회
 	UMD_AudioSettingCategory* AudioCategory = SettingsManager->GetAudioSettings();
-	// 준비되지 않은 카테고리의 저장 방지
+	// 준비되지 않은 카테고리의 편집값 전달 방지
 	if (IsValid(AudioCategory) == false)
 	{
-		// 저장 실패값 준비
-		bool bSaved = false;
+		// 편집값 전달 실패값 준비
+		bool bCommitted = false;
 		// 카테고리 변경 없는 실패 반환
-		return bSaved;
+		return bCommitted;
 	}
-	// 적용 버튼 시점의 화면 선택값 수집
+	// 매니저 저장 시점의 화면 선택값 수집
 	FMD_AudioUserSettings SelectedSettings = GetPendingSettings();
 	// 오디오 카테고리에 한정한 편집값 반영
 	AudioCategory->Settings = SelectedSettings;
-	// 기존 매니저의 오디오 전용 적용 및 저장 이벤트 실행
-	bool bSaved = SettingsManager->SaveSettings(EMD_SettingsCategory::Audio);
-	// 범위 보정이 반영된 카테고리 값 보관
-	PendingSettings = AudioCategory->Settings;
-	// 저장 시점의 적용값 표시
-	RefreshDisplay();
-	// 파일 저장 성공 여부 반환
-	return bSaved;
+	// 화면 기준값도 같은 미적용 선택으로 동기화
+	PendingSettings = SelectedSettings;
+	// 편집값 전달 성공 결과 준비
+	bool bCommitted = true;
+	// 매니저의 적용과 저장을 허용하는 성공 반환
+	return bCommitted;
 }
 
-void UMD_SettingsAudioWidget::ResetToDefaults()
+void UMD_SettingsAudioWidget::ResetPendingSettings()
 {
 	// 실제 카테고리와 분리된 기본값 준비
 	PendingSettings = FMD_AudioUserSettings();

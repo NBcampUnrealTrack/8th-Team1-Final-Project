@@ -1,13 +1,12 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
-#include "Blueprint/UserWidget.h"
 #include "Gameplay/Settings/MD_SettingsTypes.h"
+#include "UI/Screen/Settings/MD_SettingsCategoryWidgetBase.h"
 #include "MD_SettingsGraphicsWidget.generated.h"
 
 class UComboBoxString;
 class UCheckBox;
-class UCommonButtonBase;
 class UMD_CarouselWidget;
 
 // BP 캐러셀에서 선택 가능한 엔진 확장성 품질 타입
@@ -28,13 +27,17 @@ enum class EMD_GraphicsQuality : uint8
 
 // 그래픽 설정 표시와 현재 화면 선택값의 카테고리별 저장 지원
 UCLASS(Blueprintable)
-class MARINEDEMOLITION_API UMD_SettingsGraphicsWidget : public UUserWidget
+class MARINEDEMOLITION_API UMD_SettingsGraphicsWidget : public UMD_SettingsCategoryWidgetBase
 {
 	GENERATED_BODY()
 
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+	FORCEINLINE virtual EMD_SettingsCategory GetSettingsCategory() override { return EMD_SettingsCategory::Graphics; }
+	virtual bool CommitPendingSettings() override;
+	virtual bool ReloadPendingSettings() override;
+	virtual void ResetPendingSettings() override;
 
 protected:
 	// 전체 화면과 창 모드 선택
@@ -69,18 +72,6 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_CarouselWidget> Carousel_PPQuality;
 
-	// 그래픽 설정 적용 버튼의 선택적 바인딩
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
-	TObjectPtr<UCommonButtonBase> Btn_Apply;
-
-	// 미적용 그래픽 설정 변경 취소 버튼의 선택적 바인딩
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
-	TObjectPtr<UCommonButtonBase> Btn_Revert;
-
-	// 그래픽 설정 기본값 복원 버튼의 선택적 바인딩
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
-	TObjectPtr<UCommonButtonBase> Btn_Reset;
-
 	// 저장 전까지 카테고리 원본과 분리할 화면 기준값
 	UPROPERTY(Transient)
 	FMD_GraphicsSettings PendingSettings;
@@ -94,18 +85,6 @@ protected:
 	TArray<float> FrameRateOptions;
 
 public:
-	// 카테고리의 현재 값으로 미저장 편집 취소 및 화면 갱신
-	UFUNCTION(BlueprintCallable, Category = "MD|Settings|Graphics")
-	bool ReloadSettings();
-
-	// 적용 버튼에서 호출할 그래픽 카테고리 전용 적용과 저장 및 저장 성공 여부 반환
-	UFUNCTION(BlueprintCallable, Category = "MD|Settings|Graphics")
-	bool SaveSettings();
-
-	// 저장과 실제 시스템 적용 없이 화면 선택만 프로젝트 기본값으로 복원
-	UFUNCTION(BlueprintCallable, Category = "MD|Settings|Graphics")
-	void ResetToDefaults();
-
 	// 바인딩된 컨트롤의 현재 선택값과 생략한 컨트롤의 기존 값 반환
 	UFUNCTION(BlueprintPure, Category = "MD|Settings|Graphics")
 	FMD_GraphicsSettings GetPendingSettings();

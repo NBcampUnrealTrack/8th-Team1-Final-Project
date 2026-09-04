@@ -1,14 +1,13 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "AudioCaptureBlueprintLibrary.h"
 #include "AudioMixerBlueprintLibrary.h"
-#include "Blueprint/UserWidget.h"
 #include "Gameplay/Settings/MD_SettingsTypes.h"
+#include "UI/Screen/Settings/MD_SettingsCategoryWidgetBase.h"
 #include "MD_SettingsAudioWidget.generated.h"
 
 class UComboBoxString;
-class UCommonButtonBase;
 class UMD_CarouselWidget;
 class USlider;
 
@@ -24,13 +23,17 @@ enum class EMD_VoiceInputMode : uint8
 
 // 오디오 설정의 미적용 편집값과 카테고리별 저장을 관리하는 화면
 UCLASS(Blueprintable)
-class MARINEDEMOLITION_API UMD_SettingsAudioWidget : public UUserWidget
+class MARINEDEMOLITION_API UMD_SettingsAudioWidget : public UMD_SettingsCategoryWidgetBase
 {
 	GENERATED_BODY()
 
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
+	FORCEINLINE virtual EMD_SettingsCategory GetSettingsCategory() override { return EMD_SettingsCategory::Audio; }
+	virtual bool CommitPendingSettings() override;
+	virtual bool ReloadPendingSettings() override;
+	virtual void ResetPendingSettings() override;
 
 protected:
 	// 전체 음량의 선택적 바인딩
@@ -60,18 +63,6 @@ protected:
 	// BP에서 EMD_VoiceInputMode 타입을 지정할 캐러셀
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Audio", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_CarouselWidget> Carousel_VoiceInputMode;
-
-	// BP에서 SaveSettings를 연결할 적용 버튼
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Audio", meta = (BindWidgetOptional))
-	TObjectPtr<UCommonButtonBase> Btn_Apply;
-
-	// BP에서 ReloadSettings를 연결할 변경 취소 버튼
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Audio", meta = (BindWidgetOptional))
-	TObjectPtr<UCommonButtonBase> Btn_Revert;
-
-	// BP에서 ResetToDefaults를 연결할 기본값 버튼
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Audio", meta = (BindWidgetOptional))
-	TObjectPtr<UCommonButtonBase> Btn_Reset;
 
 	// 적용 전까지 실제 카테고리와 분리된 화면 기준값
 	UPROPERTY(Transient)
@@ -103,18 +94,6 @@ protected:
 	bool bInputDeviceRequestPending = false;
 
 public:
-	// 현재 카테고리 값으로 미저장 편집 취소 및 화면 갱신
-	UFUNCTION(BlueprintCallable, Category = "MD|Settings|Audio")
-	bool ReloadSettings();
-
-	// 현재 오디오 화면의 값만 카테고리에 반영하고 적용 및 저장
-	UFUNCTION(BlueprintCallable, Category = "MD|Settings|Audio")
-	bool SaveSettings();
-
-	// 실제 적용과 저장 없이 화면 선택만 프로젝트 기본값으로 복원
-	UFUNCTION(BlueprintCallable, Category = "MD|Settings|Audio")
-	void ResetToDefaults();
-
 	// 생략된 컨트롤의 기준값을 보존한 현재 화면 선택값 수집
 	UFUNCTION(BlueprintPure, Category = "MD|Settings|Audio")
 	FMD_AudioUserSettings GetPendingSettings();

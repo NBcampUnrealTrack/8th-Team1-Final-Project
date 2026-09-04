@@ -16,7 +16,7 @@ void UMD_SettingsGraphicsWidget::NativeConstruct()
 		Carousel_OverallQuality->OnEnumSelectionChanged.AddUniqueDynamic(this, &UMD_SettingsGraphicsWidget::HandleOverallQualityChanged);
 	}
 	// Blueprint 생성 이벤트 실행 전 현재 카테고리 값 표시
-	bool bLoaded = ReloadSettings();
+	bool bLoaded = ReloadPendingSettings();
 	// 게임 인스턴스가 없는 미리보기의 프로젝트 기본값 표시
 	if (bLoaded == false)
 	{
@@ -37,7 +37,7 @@ void UMD_SettingsGraphicsWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
-bool UMD_SettingsGraphicsWidget::ReloadSettings()
+bool UMD_SettingsGraphicsWidget::ReloadPendingSettings()
 {
 	// 현재 위젯 월드의 설정 매니저 조회
 	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
@@ -69,43 +69,41 @@ bool UMD_SettingsGraphicsWidget::ReloadSettings()
 	return bLoaded;
 }
 
-bool UMD_SettingsGraphicsWidget::SaveSettings()
+bool UMD_SettingsGraphicsWidget::CommitPendingSettings()
 {
 	// 현재 화면에 대응하는 설정 매니저 조회
 	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
-	// 설정 매니저가 없는 상태의 저장과 화면 적용 방지
+	// 설정 매니저가 없는 상태의 카테고리 변경 방지
 	if (IsValid(SettingsManager) == false)
 	{
-		// 매니저 부재의 저장 실패값 준비
-		bool bSaved = false;
-		// 저장 실패 반환
-		return bSaved;
+		// 매니저 부재의 전달 실패값 준비
+		bool bCommitted = false;
+		// 카테고리 변경 없는 실패 반환
+		return bCommitted;
 	}
-	// 저장 대상 그래픽 카테고리 조회
+	// 편집값 전달 대상 그래픽 카테고리 조회
 	UMD_GraphicsSettingCategory* GraphicsCategory = SettingsManager->GetGraphicsSettings();
-	// 준비되지 않은 카테고리의 저장 방지
+	// 준비되지 않은 카테고리의 편집값 전달 방지
 	if (IsValid(GraphicsCategory) == false)
 	{
-		// 그래픽 카테고리 부재의 실패값 준비
-		bool bSaved = false;
-		// 저장 실패 반환
-		return bSaved;
+		// 그래픽 카테고리 부재의 전달 실패값 준비
+		bool bCommitted = false;
+		// 카테고리 변경 없는 실패 반환
+		return bCommitted;
 	}
-	// 적용 버튼 시점의 모든 그래픽 컨트롤 선택 수집
+	// 매니저 저장 시점의 모든 그래픽 컨트롤 선택 수집
 	FMD_GraphicsSettings SelectedSettings = GetPendingSettings();
 	// 다른 카테고리 값의 변경 없이 그래픽 값만 갱신
 	GraphicsCategory->Settings = SelectedSettings;
-	// 기존 매니저의 그래픽 전용 적용과 저장 이벤트 실행
-	bool bSaved = SettingsManager->SaveSettings(EMD_SettingsCategory::Graphics);
-	// 엔진 적용 과정에서 보정된 실제 카테고리 값 보관
-	PendingSettings = GraphicsCategory->Settings;
-	// 저장 성공 여부와 무관하게 실제 적용값 표시 동기화
-	RefreshDisplay();
-	// 파일 저장 실패를 상위 화면에 전달할 결과 반환
-	return bSaved;
+	// 화면 기준값도 같은 미적용 선택으로 동기화
+	PendingSettings = SelectedSettings;
+	// 편집값 전달 성공 결과 준비
+	bool bCommitted = true;
+	// 매니저의 적용과 저장을 허용하는 성공 반환
+	return bCommitted;
 }
 
-void UMD_SettingsGraphicsWidget::ResetToDefaults()
+void UMD_SettingsGraphicsWidget::ResetPendingSettings()
 {
 	// 실제 카테고리 변경 없는 프로젝트 기본값 준비
 	PendingSettings = FMD_GraphicsSettings();
