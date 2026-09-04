@@ -3,9 +3,12 @@
 #include "Data/Audio/MD_AudioCategoryData.h"
 #include "Data/Audio/MD_AudioSettings.h"
 
+#include "UI/Loading/MD_LoadingScreenSubsystem.h"
+
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "HAL/IConsoleManager.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
@@ -145,6 +148,39 @@ void UMD_AudioSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	}
 }
 
+void UMD_AudioSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+
+	const UMD_AudioSettings& Settings = UMD_AudioSettings::Get();
+
+	// PIE 는 맵 이름에 UEDPIE_0_ 같은 접두사를 붙인다.
+	// 붙은 채로 비교하면 패키지에서만 울리고 에디터에서는 조용해진다
+	FString CurrentMap = InWorld.GetMapName();
+	CurrentMap.RemoveFromStart(InWorld.StreamingLevelsPrefix);
+
+	for (const FMD_AudioAutoPlayEntry& Candidate : Settings.AutoPlayOnWorldReady)
+	{
+		if (!Candidate.EventTag.IsValid())
+		{
+			continue;
+		}
+
+		const FString TargetMap = Candidate.Map.GetAssetName();
+		if (!TargetMap.IsEmpty() && TargetMap != CurrentMap)
+		{
+			continue;
+		}
+
+		PendingAutoPlay = Candidate;
+		AutoPlayDelayRemaining = Candidate.StartDelaySeconds;
+
+		UE_LOG(LogTemp, Log, TEXT("[MD_Audio] '%s' 자동 재생 예약: %s"),
+			*CurrentMap, *Candidate.EventTag.ToString());
+		break;
+	}
+}
+
 void UMD_AudioSubsystem::Deinitialize()
 {
 	for (const FActiveSound& Active : ActiveSounds)
@@ -177,10 +213,61 @@ void UMD_AudioSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	UpdateAutoPlay(DeltaTime);
 	UpdateUnderwaterCutoff(DeltaTime);
 	EnforceLoopConditions();
 	PruneFinished();
 	DrawDebugInfo();
+}
+
+// ----------------------------------------------------------------- 자동 재생
+
+bool UMD_AudioSubsystem::IsLoadingScreenBlocking() const
+{
+	UWorld* World = GetWorld();
+	UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
+	if (!GameInstance)
+	{
+		return false;
+	}
+
+	const UMD_LoadingScreenSubsystem* LoadingScreen =
+		GameInstance->GetSubsystem<UMD_LoadingScreenSubsystem>();
+
+	return LoadingScreen && LoadingScreen->IsLoadingScreenActive();
+}
+
+void UMD_AudioSubsystem::UpdateAutoPlay(float DeltaTime)
+{
+	if (!PendingAutoPlay.IsSet())
+	{
+		return;
+	}
+
+	// 로딩 화면이 아직 덮고 있으면 지연 시간도 흐르지 않는다.
+	// 화면이 걷히는 시점 기준으로 지연을 세야 매번 같은 타이밍이 나온다
+	if (PendingAutoPlay->bWaitForLoadingScreen && IsLoadingScreenBlocking())
+	{
+		return;
+	}
+
+	AutoPlayDelayRemaining -= DeltaTime;
+	if (AutoPlayDelayRemaining > 0.0f)
+	{
+		return;
+	}
+
+	// 한 월드에 한 번만 건다. 재생 실패든 성공이든 다시 시도하지 않는다
+	const FGameplayTag EventTag = PendingAutoPlay->EventTag;
+	PendingAutoPlay.Reset();
+
+	if (!PlayEvent2D(EventTag).IsValid())
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[MD_Audio] 자동 재생 %s 에서 핸들이 돌아오지 않았습니다. ")
+			TEXT("카탈로그에 항목이 있는지, bLooping 이 켜져 있는지 확인하세요."),
+			*EventTag.ToString());
+	}
 }
 
 // ---------------------------------------------------------------------- 인덱스

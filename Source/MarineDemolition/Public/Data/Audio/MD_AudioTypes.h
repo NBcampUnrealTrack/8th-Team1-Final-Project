@@ -7,6 +7,7 @@
 class USoundBase;
 class USoundAttenuation;
 class USoundConcurrency;
+class UWorld;
 
 /**
  * 효과음 카테고리. `Docs/공통 기획서/10 효과음 리스트.md` 의 A~L 코드와 1:1 대응하며,
@@ -180,4 +181,39 @@ public:
 	{
 		return EventTag.IsValid() && !Sound.IsNull();
 	}
+};
+
+/**
+ * 월드가 준비되면 스스로 시작하는 항목. 타이틀 BGM처럼 "그 맵에 들어가면 그냥 흘러야 하는"
+ * 소리를 레벨 블루프린트 수정이나 액터 배치 없이 데이터로만 거는 용도다.
+ *
+ * 재생은 일반 이벤트와 똑같이 태그로 나가므로, 실제 소재·루프·믹스는
+ * 카탈로그의 `FMD_AudioEntry` 가 그대로 결정한다. 여기서 정하는 것은 **언제 트는가**뿐이다.
+ */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_AudioAutoPlayEntry
+{
+	GENERATED_BODY()
+
+	/** 이 맵에서만 재생한다. 비우면 모든 맵에서 걸리므로 보통은 지정한다 */
+	UPROPERTY(EditAnywhere, Config, BlueprintReadOnly, Category = "MD|Audio")
+	TSoftObjectPtr<UWorld> Map;
+
+	/** 재생할 이벤트 태그. 카탈로그에 같은 태그의 항목이 있어야 한다 */
+	UPROPERTY(EditAnywhere, Config, BlueprintReadOnly, Category = "MD|Audio")
+	FGameplayTag EventTag;
+
+	/**
+	 * 로딩 화면이 걷히기 시작할 때까지 기다린다.
+	 *
+	 * `UMD_LoadingScreenSubsystem` 은 outro(페이드아웃) 구간을 이미 "활성"으로 보지 않으므로,
+	 * 음악은 화면이 걷히는 동안 밑에서 올라온다. 타이틀로 처음 부팅할 때처럼
+	 * 로딩 화면이 아예 없었던 경우에는 기다릴 것이 없어 곧바로 시작한다.
+	 */
+	UPROPERTY(EditAnywhere, Config, BlueprintReadOnly, Category = "MD|Audio")
+	bool bWaitForLoadingScreen = true;
+
+	/** 조건이 만족된 뒤 추가로 기다리는 시간(초). 화면 전환과 겹치는 것을 피할 때 쓴다 */
+	UPROPERTY(EditAnywhere, Config, BlueprintReadOnly, Category = "MD|Audio", meta = (ClampMin = "0.0", ClampMax = "10.0"))
+	float StartDelaySeconds = 0.0f;
 };

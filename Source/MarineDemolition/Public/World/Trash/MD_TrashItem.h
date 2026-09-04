@@ -31,6 +31,7 @@ public:
 	virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override;
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 	virtual FText GetInteractionDisplayName_Implementation() const override;
+	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const override;
 
 	/** Implements IMD_TrashSortable */
 	/** 정답 칸은 배치 값이 아니라 종류 테이블에서 온다. 캔에 플라스틱 칸을 달아둘 수 없다 */
