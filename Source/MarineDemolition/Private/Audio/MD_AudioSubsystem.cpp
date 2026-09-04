@@ -747,6 +747,12 @@ void UMD_AudioSubsystem::ApplyUserVolumes(float MasterVolume, float MusicVolume,
 	CurrentMasterVolume = FMath::Clamp(MasterVolume, 0.0f, 1.0f);
 	CurrentMusicVolume = FMath::Clamp(MusicVolume, 0.0f, 1.0f);
 	CurrentEffectsVolume = FMath::Clamp(EffectsVolume, 0.0f, 1.0f);
+	// 프로젝트 전체 출력 보정값 조회
+	const UMD_AudioSettings& AudioSettings = UMD_AudioSettings::Get();
+	// 데시벨 단위 출력 보정값의 선형 배율 변환
+	float OutputGainMultiplier = FMath::Pow(10.0f, AudioSettings.OutputGainDecibels / 20.0f);
+	// 사용자 전체 음량과 프로젝트 출력 보정값의 결합
+	float AdjustedMasterVolume = CurrentMasterVolume * OutputGainMultiplier;
 
 	// 에셋 변경 없는 사용자 전체 음량 전용 믹스 생성
 	if (IsValid(UserVolumeMix) == false)
@@ -765,7 +771,7 @@ void UMD_AudioSubsystem::ApplyUserVolumes(float MasterVolume, float MusicVolume,
 	if (IsValid(MasterSoundClass) == true)
 	{
 		UGameplayStatics::SetSoundMixClassOverride(this, UserVolumeMix, MasterSoundClass,
-			CurrentMasterVolume, 1.0f, 0.0f, true);
+			AdjustedMasterVolume, 1.0f, 0.0f, true);
 		// 현재 월드의 오디오 장치 준비 여부 확인
 		UWorld* World = GetWorld();
 		if (IsValid(World) == true)
