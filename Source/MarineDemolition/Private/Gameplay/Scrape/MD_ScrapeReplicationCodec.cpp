@@ -1,24 +1,27 @@
 #include "Gameplay/Scrape/MD_ScrapeReplicationCodec.h"
 
+#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
+
 bool FMD_ScrapeReplicationCodec::TryEncodeCellIndex(
 	const int32 CellIndex,
-	uint16& OutEncodedCellIndex)
+	uint32& OutEncodedCellIndex)
 {
 	OutEncodedCellIndex = InvalidCellIndex;
 	if (CellIndex < 0
-		|| CellIndex >= static_cast<int32>(InvalidCellIndex))
+		|| CellIndex >= FMD_ScrapeSurfaceLayout::MaximumCombinedCellCount)
 	{
 		return false;
 	}
 
-	OutEncodedCellIndex = static_cast<uint16>(CellIndex);
+	OutEncodedCellIndex = static_cast<uint32>(CellIndex);
 	return true;
 }
 
 int32 FMD_ScrapeReplicationCodec::DecodeCellIndex(
-	const uint16 EncodedCellIndex)
+	const uint32 EncodedCellIndex)
 {
-	return EncodedCellIndex == InvalidCellIndex
+	return EncodedCellIndex >= static_cast<uint32>(
+		FMD_ScrapeSurfaceLayout::MaximumCombinedCellCount)
 		? INDEX_NONE
 		: static_cast<int32>(EncodedCellIndex);
 }

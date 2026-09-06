@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 using UnrealBuildTool;
 
@@ -33,7 +33,7 @@ public class MarineDemolition : ModuleRules
 			"ApplicationCore",
 			"CoreOnline",
 			// 오염 마스크 런타임 텍스처 업로드
-			"RHI",
+			"RHI", "RenderCore",
 			// 절단·헤라 VFX
 			"Niagara",
 			// 수중 서브믹스 LPF (SubmixEffectFilterPreset)
@@ -42,7 +42,7 @@ public class MarineDemolition : ModuleRules
 
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.Add("UnrealEd");
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "MeshDescription", "StaticMeshDescription", "GeometryCore", "MeshConversion" });
 		}
 
         DynamicallyLoadedModuleNames.Add("OnlineSubsystemSteam");

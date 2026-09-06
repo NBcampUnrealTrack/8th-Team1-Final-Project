@@ -1,4 +1,5 @@
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
+#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "EngineUtils.h"
@@ -357,6 +358,10 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         ContaminationRecord.WallName = SurfaceOwner->GetFName();
         ContaminationRecord.SurfaceComponentName =
             GetPersistentSurfaceComponentName(Surface);
+        ContaminationRecord.LayoutVersion = Surface->GetContaminationLayoutVersion();
+        ContaminationRecord.LayoutId = Surface->GetContaminationLayoutId();
+        ContaminationRecord.CarrierScale = Surface->GetContaminationCarrierWeightScale();
+        ContaminationRecord.GridDimensions = Surface->GetContaminationGridDimensions();
         Surface->ExportContaminationDeltas(
             ContaminationRecord.CellIndices,
             ContaminationRecord.InitialAmounts,
@@ -567,6 +572,16 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
     {
         if (UMD_ScrapeSurfaceComponent* const Surface = FindSavedScrapeSurface(Record, WallsByName, SurfacesByOwnerName); Surface != nullptr)
         {
+            if (!Surface->CanRestoreContaminationLayout(
+                    Record.LayoutVersion, Record.LayoutId, Record.GridDimensions)
+                || (Record.LayoutVersion == 1 && !FMD_ScrapeSurfaceLayout::AreCarrierScalesCompatible(
+                    Record.CarrierScale, Surface->GetContaminationCarrierWeightScale())))
+            {
+                UE_LOG(LogTemp, Warning,
+                    TEXT("Skipped contamination restore for %s/%s: saved surface layout no longer matches."),
+                    *Record.WallName.ToString(), *Record.SurfaceComponentName.ToString());
+                continue;
+            }
             Surface->RestoreContaminationCells(
                 Record.CellIndices,
                 Record.InitialAmounts,

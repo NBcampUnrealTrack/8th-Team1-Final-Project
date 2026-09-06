@@ -13,6 +13,7 @@
 #include "NiagaraSystem.h"
 #include "Audio/MD_AudioSubsystem.h"
 #include "Net/UnrealNetwork.h"
+#include "World/Contamination/MD_Barnacle.h"
 
 namespace
 {
@@ -800,7 +801,7 @@ void UMD_ScrapeToolComponent::SetCurrentScrapeBladeDirection(
 	const FVector& ReferenceWorldPosition)
 {
 	const FVector2D SafeAxis = BladeDepthAxis.GetSafeNormal();
-	if (!IsValid(Surface) || SafeAxis.IsNearlyZero())
+	if (!IsValid(Surface) || Surface->UsesMeshUVSurface() || SafeAxis.IsNearlyZero())
 	{
 		return;
 	}
@@ -1052,6 +1053,9 @@ void UMD_ScrapeToolComponent::StartScraping()
 		return;
 	}
 
+	bBarnacleClickStroke = IsValid(CurrentScrapeAim.Barnacle)
+		&& CurrentScrapeAim.BarnacleHit.bBlockingHit
+		&& CurrentScrapeAim.BarnacleHit.GetActor() == CurrentScrapeAim.Barnacle.Get();
 	bIsScraping = true;
 	LastObservedScrapePathArcLengthCm =
 		StrokePath.ScrapePathArcLengthCm + StrokePath.PendingScrapePathArcLengthCm;
@@ -1102,6 +1106,7 @@ void UMD_ScrapeToolComponent::StopScraping()
 {
 	const bool bWasScraping = bIsScraping;
 	bIsScraping = false;
+	bBarnacleClickStroke = false;
 	EndScrapeVisualStroke();
 	StopScrapeLoopAudio();
 	ResetScrapeFocusPointerStrokeConstraint();
@@ -1311,7 +1316,9 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 		// 이펙트 로컬 +X가 벽 법선을 향하도록 정렬한다. 법선을 못 구하면 기존처럼 무회전.
 		FVector ContactNormal = FVector::ZeroVector;
 		const FRotator EffectRotation =
-			Surface->TryGetScrapeSurfaceWorldNormal(Result.SurfaceFace, ContactNormal)
+			Surface->TryGetScrapeSurfaceWorldNormalAtPosition(
+				CurrentScrapeAim.Surface == Surface ? CurrentScrapeAim.SurfacePositionCm : StrokePath.PreviousSurfacePositionCm,
+				Result.SurfaceFace, ContactNormal)
 				? ContactNormal.Rotation()
 				: FRotator::ZeroRotator;
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(

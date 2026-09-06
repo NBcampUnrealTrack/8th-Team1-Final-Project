@@ -39,6 +39,10 @@ namespace MD_ScrapeSurfaceComponentInternal
 	const FName ContaminationPatchUVScaleVParameterName(TEXT("PatchUVScaleV"));
 	const FName ContaminationPatchUVOffsetVParameterName(TEXT("PatchUVOffsetV"));
 	const FName ContaminationSurfaceWidthParameterName(TEXT("SurfaceWidthCm"));
+	const FName ContaminationPlanarSurfaceWidthParameterName(
+		TEXT("PlanarSurfaceWidthCm"));
+	const FName ContaminationUseCylindricalCanonicalUParameterName(
+		TEXT("UseCylindricalCanonicalU"));
 	const FName ContaminationSurfaceHeightParameterName(TEXT("SurfaceHeightCm"));
 	const FName ContaminationSurfaceThicknessParameterName(
 		TEXT("SurfaceThicknessCm"));
@@ -64,6 +68,15 @@ namespace MD_ScrapeSurfaceComponentInternal
 		TEXT("SurfaceTangentUWS"));
 	const FName ContaminationSurfaceTangentVParameterName(
 		TEXT("SurfaceTangentVWS"));
+	const FName ContaminationCurveCenterParameterName(TEXT("CurveCenterWS"));
+	const FName ContaminationCurveAxisParameterName(TEXT("CurveAxisWS"));
+	const FName ContaminationCurveStartDirectionParameterName(
+		TEXT("CurveStartDirectionWS"));
+	const FName ContaminationCurveSweepRadiansParameterName(
+		TEXT("CurveSweepRadians"));
+	const FName ContaminationCurveRadiusParameterName(TEXT("CurveRadiusCm"));
+	const FName ContaminationCurveFrontIsOuterParameterName(
+		TEXT("CurveFrontIsOuter"));
 }
 
 UMD_ScrapeSurfaceComponent::UMD_ScrapeSurfaceComponent()
@@ -423,9 +436,11 @@ void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 	bContaminationCompletionBroadcast = false;
 	bDeferredContaminationCompletionTransition = false;
 	ContaminationCells.Reset();
-	LocalScrapePredictions.Reset();
-	LocalPredictedContaminationCells.Reset();
-	PendingLocalScrapePredictionVisualCellIndices.Reset();
+	LocalScrapePredictions.Empty();
+	LocalPredictedContaminationCells.Empty();
+	LocalScrapePredictionFaceScratch.Empty();
+	PendingLocalScrapePredictionVisualCellIndices.Empty();
+	PendingLocalScrapePredictionReconcileCells.Empty();
 	ContaminationGeneratedInitialAmounts.Reset();
 	PendingContaminationItemAmounts[0] = 0.0f;
 	PendingContaminationItemAmounts[1] = 0.0f;

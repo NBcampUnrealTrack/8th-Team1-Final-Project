@@ -567,7 +567,7 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 		return false;
 	}
 
-	const bool bScraping = ScrapeToolComponent->IsScraping();
+	const bool bScraping = ScrapeToolComponent->IsSurfaceScrapeVisualStrokeActive();
 	const bool bScrapeModeChanged = bScraping != bWasScrapingForViewModel;
 	const FVector2D PointerDeltaPixels = bScrapeModeChanged
 		? FVector2D(0.0, 0.0)
@@ -834,7 +834,7 @@ void AMD_Character::UpdateFirstPersonToolTransform(const float DeltaSeconds)
 		{
 			return;
 		}
-		const bool bHasCurrentModeRotation = ScrapeToolComponent->IsScraping()
+		const bool bHasCurrentModeRotation = ScrapeToolComponent->IsSurfaceScrapeVisualStrokeActive()
 			? bHasScrapeStrokeViewModelRotation
 			: bHasScrapePointerViewModelRotation;
 		if (bHasCurrentModeRotation)

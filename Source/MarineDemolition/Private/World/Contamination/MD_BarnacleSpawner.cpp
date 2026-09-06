@@ -1,6 +1,7 @@
 #include "World/Contamination/MD_BarnacleSpawner.h"
 
 #include "Components/BoxComponent.h"
+#include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Math/RandomStream.h"
@@ -13,6 +14,11 @@
 
 namespace
 {
+	// Separate editor/PIE/client worlds must never grant each other a focus target.
+	// Only lifecycle registration visits this map; aiming visits its current-world list.
+	TMap<TWeakObjectPtr<UWorld>, TArray<TWeakObjectPtr<AMD_BarnacleSpawner>>>
+		ActiveBarnacleSpawnersByWorld;
+
 	/** 후보가 잘 나오지 않는 빈 볼륨에서도 탐색이 끝나도록 원점 샘플 수를 제한한다. */
 	constexpr int32 CandidateOriginAttemptMultiplier = 8;
 	constexpr int32 MinimumCandidatePoolSize = 64;
@@ -63,6 +69,13 @@ void AMD_BarnacleSpawner::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// Placed non-replicated spawners also exist on clients. Register before the
+	// authority gate so local focus preflight and server validation share rules.
+	if (UWorld* const World = GetWorld())
+	{
+		ActiveBarnacleSpawnersByWorld.FindOrAdd(World).AddUnique(this);
+	}
+
 	if (!HasAuthority())
 	{
 		return;
@@ -76,6 +89,79 @@ void AMD_BarnacleSpawner::BeginPlay()
 	{
 		SpawnBarnacles();
 	}
+}
+
+void AMD_BarnacleSpawner::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	const TWeakObjectPtr<UWorld> WorldKey(GetWorld());
+	if (TArray<TWeakObjectPtr<AMD_BarnacleSpawner>>* const Spawners =
+		ActiveBarnacleSpawnersByWorld.Find(WorldKey))
+	{
+		Spawners->RemoveAll([this](const TWeakObjectPtr<AMD_BarnacleSpawner>& Entry)
+		{
+			return !Entry.IsValid() || Entry.Get() == this;
+		});
+		if (Spawners->IsEmpty())
+		{
+			ActiveBarnacleSpawnersByWorld.Remove(WorldKey);
+		}
+	}
+	Super::EndPlay(EndPlayReason);
+}
+
+bool AMD_BarnacleSpawner::IsSpawnerSurfaceHit(const FHitResult& Hit)
+{
+	const UPrimitiveComponent* const HitComponent = Hit.GetComponent();
+	const AActor* const HitActor = Hit.GetActor();
+	if (!Hit.bBlockingHit
+		|| !IsValid(HitComponent)
+		|| !IsValid(HitActor)
+		|| HitComponent->GetOwner() != HitActor
+		|| !HitComponent->IsQueryCollisionEnabled()
+		|| HitComponent->GetCollisionResponseToChannel(MDCollisionChannels::BarnacleTrace) != ECR_Block
+		|| Hit.ImpactPoint.ContainsNaN()
+		|| Hit.ImpactNormal.ContainsNaN()
+		|| Hit.ImpactNormal.IsNearlyZero())
+	{
+		return false;
+	}
+
+	UWorld* const World = HitComponent->GetWorld();
+	const TArray<TWeakObjectPtr<AMD_BarnacleSpawner>>* const Spawners =
+		ActiveBarnacleSpawnersByWorld.Find(World);
+	if (!World || !Spawners)
+	{
+		return false;
+	}
+
+	for (const TWeakObjectPtr<AMD_BarnacleSpawner>& Entry : *Spawners)
+	{
+		const AMD_BarnacleSpawner* const Spawner = Entry.Get();
+		if (!IsValid(Spawner)
+			|| Spawner->GetWorld() != World
+			|| Spawner->IsActorBeingDestroyed()
+			|| !Spawner->HasActorBegunPlay()
+			|| !Spawner->BarnacleClass
+			|| Spawner->GetEffectiveMaximumAliveCount() <= 0
+			|| !IsValid(Spawner->SpawnVolume)
+			|| !Spawner->SpawnVolume->IsRegistered())
+		{
+			continue;
+		}
+
+		const FTransform VolumeTransform = Spawner->SpawnVolume->GetComponentTransform();
+		if (!VolumeTransform.IsValid()
+			|| VolumeTransform.GetScale3D().GetAbs().GetMin() <= UE_SMALL_NUMBER)
+		{
+			continue;
+		}
+		if (Spawner->IsPointInsideSpawnVolume(Hit.ImpactPoint)
+			&& Spawner->IsAcceptableSurface(Hit))
+		{
+			return true;
+		}
+	}
+	return false;
 }
 
 int32 AMD_BarnacleSpawner::SpawnBarnacles()

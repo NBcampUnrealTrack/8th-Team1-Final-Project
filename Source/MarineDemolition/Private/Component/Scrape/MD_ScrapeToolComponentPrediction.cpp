@@ -4,6 +4,7 @@
 
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "GameFramework/Pawn.h"
+#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 
 void UMD_ScrapeToolComponent::ProcessLocalPredictedScrapeAim(
 	const FMD_ScrapeAimNetSample& Sample,
@@ -125,6 +126,23 @@ void UMD_ScrapeToolComponent::SendScrapePredictionResolution(
 		|| FocusSessionId == 0
 		|| AimSequence == 0)
 	{
+		return;
+	}
+
+	int64 ImmediateCellCount = 0;
+	bool bHasMeshUVResolution = false;
+	for (const FActiveAuthoritativeScrapePredictionResolution& Resolution
+		: ActiveAuthoritativeScrapePredictionResolutions)
+	{
+		ImmediateCellCount += Resolution.VisualDelta.CellStates.Num();
+		bHasMeshUVResolution |= IsValid(Resolution.VisualDelta.Surface)
+			&& Resolution.VisualDelta.Surface->UsesMeshUVSurface();
+	}
+	if (bHasMeshUVResolution && ImmediateCellCount > MaximumImmediateMeshUVCellStates)
+	{
+		// Resolve local prediction without flooding the reliable queue. The surface's
+		// immutable, acknowledged snapshot carries the authoritative large edit.
+		ClientResolveScrapePrediction(FocusSessionId, AimSequence, true, {});
 		return;
 	}
 
@@ -339,7 +357,7 @@ void UMD_ScrapeToolComponent::ClientResolveScrapePrediction_Implementation(
 		if (PendingResolution->SurfaceVisualRevision
 				!= Resolution.SurfaceVisualRevision
 			|| PendingResolution->CellStates.Num()
-					> static_cast<int32>(MAX_uint16)
+					> FMD_ScrapeSurfaceLayout::MaximumCombinedCellCount
 						- Resolution.CellStates.Num())
 		{
 			PendingLocalScrapePredictionResolutionChunks.Reset();

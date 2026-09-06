@@ -33,6 +33,8 @@ struct FMD_ScrapeToolPathSegment
 	FVector2D EndPositionCm = FVector2D::ZeroVector;
 	FVector2D StartBladeDepthAxis = FVector2D::ZeroVector;
 	FVector2D EndBladeDepthAxis = FVector2D::ZeroVector;
+	FVector StartWorldBladeDepthAxis = FVector::ZeroVector;
+	FVector EndWorldBladeDepthAxis = FVector::ZeroVector;
 	float TravelDistanceCm = 0.0f;
 	/** 이 segment를 적용하기 직전, 이전 generation tail을 flush할 경계. */
 	bool bStartsNewSubStroke = false;
@@ -92,7 +94,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
 	bool IsScraping() const { return bIsScraping; }
 
-	/** 현재 화면 중앙 ray가 actionable 헤라 대상일 때만 로컬 latch와 권위 세션을 시작한다. */
+	/** Barnacle-first clicks retain the pointer pose until release, even after removal. */
+	bool IsSurfaceScrapeVisualStrokeActive() const
+	{
+		return bIsScraping && !bBarnacleClickStroke;
+	}
+
+	/** 현재 화면 중앙 ray가 작업면·따개비·허용 배치 표면일 때 로컬 latch와 권위 세션을 시작한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape|Focus")
 	bool TryBeginScrapeFocus();
 
@@ -1098,6 +1106,9 @@ private:
 	UPROPERTY(Replicated)
 	bool bIsScraping;
 
+	/** First-click visual intent is retained after the target is removed. */
+	bool bBarnacleClickStroke = false;
+
 	/** 긁는 동안 살아 있는 지속음 핸들 */
 	FMD_AudioHandle ScrapeLoopHandle;
 
@@ -1182,6 +1193,7 @@ private:
 	uint32 PendingLocalScrapePredictionResolutionAimSequence = 0;
 	static constexpr int32
 		MaximumAuthoritativePredictionResolutionCellStates = 512;
+	static constexpr int32 MaximumImmediateMeshUVCellStates = 256;
 	static constexpr double LocalScrapePredictionTimeoutSeconds = 0.75;
 
 	UPROPERTY(Transient)

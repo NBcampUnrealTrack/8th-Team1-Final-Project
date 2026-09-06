@@ -5,6 +5,8 @@
 #include "Gameplay/Scrape/MD_ScrapeBladeAxis.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
+#include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
+#include "Components/StaticMeshComponent.h"
 
 void UMD_ScrapeToolComponent::BeginStrokeTracking(
 	UMD_ScrapeSurfaceComponent* Surface,
@@ -34,6 +36,36 @@ bool UMD_ScrapeToolComponent::ConsumeRawScrapePathPoint(
 	if (!StrokePath.bHasPreviousSurfacePosition || RawSurfacePositionCm.ContainsNaN())
 	{
 		return false;
+	}
+
+	if (UMD_ScrapeSurfaceComponent* Surface = StrokePath.PreviousSurface.Get(); Surface && Surface->UsesMeshUVSurface())
+	{
+		FMD_ScrapeStroke AddressStroke;
+		AddressStroke.SurfaceFace = StrokePath.PreviousSurfaceFace;
+		AddressStroke.StartPositionCm = StrokePath.PreviousSurfacePositionCm;
+		AddressStroke.EndPositionCm = RawSurfacePositionCm;
+		FMD_ScrapeMeshUVStroke WorldStroke;
+		if (!Surface->TryBuildMeshUVStroke(AddressStroke, WorldStroke))
+		{
+			return false;
+		}
+		const FVector Delta = WorldStroke.EndWorldPosition - WorldStroke.StartWorldPosition;
+		const double Travel = Delta.Size();
+		if (!FMath::IsFinite(Travel) || Travel <= UE_SMALL_NUMBER)
+		{
+			return false;
+		}
+		FMD_ScrapeToolPathSegment& Segment = OutSegments.AddDefaulted_GetRef();
+		Segment.StartPositionCm = AddressStroke.StartPositionCm;
+		Segment.EndPositionCm = AddressStroke.EndPositionCm;
+		Segment.TravelDistanceCm = static_cast<float>(Travel);
+		Segment.StartWorldBladeDepthAxis = FVector::VectorPlaneProject(Delta, WorldStroke.StartWorldNormal).GetSafeNormal();
+		Segment.EndWorldBladeDepthAxis = FVector::VectorPlaneProject(Delta, WorldStroke.EndWorldNormal).GetSafeNormal();
+		StrokePath.ScrapePathArcLengthCm += Travel;
+		// Raw contacts are already physical segments. Atlas seams must not enter the 2D resampler.
+		StrokePath.bHasLockedStrokeAxis = false;
+		StrokePath.LockedStrokeAxis = FVector2D::ZeroVector;
+		return true;
 	}
 
 	const FVector2D RawDelta =
@@ -671,15 +703,17 @@ void UMD_ScrapeToolComponent::ApplyScrapePathSegment(
 	Stroke.StartPositionCm = PathSegment.StartPositionCm;
 	Stroke.EndPositionCm = PathSegment.EndPositionCm;
 	Stroke.TravelDistanceCm = PathSegment.TravelDistanceCm;
+	Stroke.StartWorldBladeDepthAxis = PathSegment.StartWorldBladeDepthAxis;
+	Stroke.EndWorldBladeDepthAxis = PathSegment.EndWorldBladeDepthAxis;
 	Stroke.StartBladeBasis = FMD_ScrapeBladeAxis::MakeBasis(
 		PathSegment.StartBladeDepthAxis);
 	Stroke.EndBladeBasis = FMD_ScrapeBladeAxis::MakeBasis(
 		PathSegment.EndBladeDepthAxis);
-	const double SegmentChordCm = FVector2D::Distance(
-		PathSegment.StartPositionCm,
-		PathSegment.EndPositionCm);
+	const double SegmentChordCm = Surface->UsesMeshUVSurface()
+		? static_cast<double>(PathSegment.TravelDistanceCm)
+		: FVector2D::Distance(PathSegment.StartPositionCm, PathSegment.EndPositionCm);
 	StrokePath.LockedStrokeAxis = PathSegment.EndBladeDepthAxis;
-	StrokePath.bHasLockedStrokeAxis = !StrokePath.LockedStrokeAxis.IsNearlyZero();
+	StrokePath.bHasLockedStrokeAxis = !Surface->UsesMeshUVSurface() && !StrokePath.LockedStrokeAxis.IsNearlyZero();
 
 	FVector EndWorldPosition = CurrentHit.ImpactPoint;
 	const bool bHasEndWorldPosition =
@@ -906,10 +940,36 @@ UMD_ScrapeToolComponent::BuildStage3DabAtArcLength(
 	Dab.Identity.LmbStrokeGeneration = LmbStrokeGeneration;
 	Dab.Identity.SubStrokeGeneration = ContaminationPaint.Stage3SubStrokeGeneration;
 	Dab.Identity.DistanceBin = DistanceBin;
+	if (UMD_ScrapeSurfaceComponent* Surface = ContaminationPaint.Stage3PathSurface.Get(); Surface && Surface->UsesMeshUVSurface())
+	{
+		FMD_ScrapeStroke AddressStroke;
+		AddressStroke.SurfaceFace = SurfaceFace;
+		AddressStroke.StartPositionCm = PathSegment.StartPositionCm;
+		AddressStroke.EndPositionCm = PathSegment.EndPositionCm;
+		AddressStroke.StartWorldBladeDepthAxis = PathSegment.StartWorldBladeDepthAxis;
+		AddressStroke.EndWorldBladeDepthAxis = PathSegment.EndWorldBladeDepthAxis;
+		FMD_ScrapeMeshUVStroke WorldStroke;
+		FMD_ScrapeMeshUVSample Sample;
+		FVector WorldAxis;
+		const UMD_ScrapeMeshUVData* Data = Surface->GetContaminationMeshUVData();
+		if (!Data || !Surface->GetSurfaceMesh() || !Surface->TryBuildMeshUVStroke(AddressStroke, WorldStroke)
+			|| !FMD_ScrapeEvaluator::TryInterpolateMeshUVStroke(*Data, Surface->GetSurfaceMesh()->GetComponentTransform(),
+				WorldStroke, Alpha, Sample, WorldAxis))
+		{
+			return FMD_ScrapeContaminationDab();
+		}
+		const FVector2D AddressSize(Data->AtlasDimensions.X * Data->TargetCellSizeCm,
+			Data->AtlasDimensions.Y * Data->TargetCellSizeCm);
+		Dab.PositionCm = (Sample.CanonicalUV - FVector2D(0.5, 0.5)) * AddressSize;
+		Dab.WorldBladeDepthAxis = WorldAxis;
+	}
+	else
+	{
 	Dab.PositionCm = FMath::Lerp(
 		PathSegment.StartPositionCm,
 		PathSegment.EndPositionCm,
 		Alpha);
+	}
 	Dab.BladeBasis = FMD_ScrapeBladeAxis::MakeBasis(BladeDepthAxis);
 	Dab.SurfaceFace = SurfaceFace;
 	Dab.ArcLengthCm = CandidateArcCm;

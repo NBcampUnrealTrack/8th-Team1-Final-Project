@@ -130,6 +130,22 @@ struct FMD_WallContaminationRecord
       UPROPERTY()
       FName SurfaceComponentName = NAME_None;
 
+      /** 0: legacy/analytic surface, 1: baked mesh UV. Old records retain version 0. */
+      UPROPERTY()
+      int32 LayoutVersion = 0;
+
+      /** Deterministic bake identity. Required for MeshUV; invalid for analytic surfaces. */
+      UPROPERTY()
+      FGuid LayoutId;
+
+      /** Prevents interpreting saved rows at a new grid width. Zero is legacy only. */
+      UPROPERTY()
+      FIntPoint GridDimensions = FIntPoint::ZeroValue;
+
+      /** MeshUV carrier ledger is tied to the initialized world scale. Zero denotes legacy. */
+      UPROPERTY()
+      FVector CarrierScale = FVector::ZeroVector;
+
       UPROPERTY()
       TArray<int32> CellIndices;
 

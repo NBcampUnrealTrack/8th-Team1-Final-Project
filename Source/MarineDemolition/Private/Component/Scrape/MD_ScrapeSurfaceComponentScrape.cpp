@@ -3,6 +3,9 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 #include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
+#include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
+#include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
+#include "Components/StaticMeshComponent.h"
 
 // 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 책임: 긁기 스트로크 적용 · 제거율 조회
@@ -294,6 +297,12 @@ void UMD_ScrapeSurfaceComponent::FlushLocalContaminationPaintTail(
 	const float StampSpacingCm,
 	const int32 StampPatternSeed)
 {
+	// MeshUV uses the atomic requested-footprint stamp; no 2D delayed paint tail exists.
+	if (UsesMeshUVSurface())
+	{
+		return;
+	}
+
 	if (!bContaminationEnabled
 		|| !HasAuthority()
 		|| !FMath::IsFinite(StampRatio)
@@ -413,7 +422,26 @@ float UMD_ScrapeSurfaceComponent::ApplyLocalContaminationDab(
 	}
 
 	TArray<FMD_ScrapeCellChange> StampChanges;
-	const float AddedAmount = FMD_ScrapeEvaluator::ApplyContaminationDabToGrid(
+	float AddedAmount = 0.0f;
+	if (UsesMeshUVSurface())
+	{
+		FMD_ScrapeStroke Contact;
+		Contact.SurfaceFace = Dab.SurfaceFace;
+		Contact.StartPositionCm = Contact.EndPositionCm = Dab.PositionCm;
+		Contact.StartWorldBladeDepthAxis = Contact.EndWorldBladeDepthAxis = Dab.WorldBladeDepthAxis;
+		FMD_ScrapeMeshUVStroke MeshContact;
+		const UMD_ScrapeMeshUVData* Data = GetContaminationMeshUVData();
+		if (!Data || !SurfaceMesh || !TryBuildMeshUVStroke(Contact, MeshContact))
+		{
+			return 0.0f;
+		}
+		AddedAmount = FMD_ScrapeEvaluator::ApplyContaminationDabToMeshUVGrid(*Data,
+			SurfaceMesh->GetComponentTransform(), MeshContact, ToolSpec, StampAmount,
+			StampDepthCm, FaceCells, StampChanges, ContaminationCellCarrierWeights);
+	}
+	else
+	{
+		AddedAmount = FMD_ScrapeEvaluator::ApplyContaminationDabToGrid(
 		Dab,
 		ToolSpec,
 		ContaminationGridDimensions,
@@ -422,6 +450,8 @@ float UMD_ScrapeSurfaceComponent::ApplyLocalContaminationDab(
 		StampDepthCm,
 		FaceCells,
 		StampChanges);
+	}
+
 	if (AddedAmount > 0.0f)
 	{
 		// 독립 dab은 제거 provenance를 승계하지 않으므로 reward 0이다.
@@ -433,10 +463,10 @@ float UMD_ScrapeSurfaceComponent::ApplyLocalContaminationDab(
 			bRecorded,
 			TEXT("Contamination dab could not be recorded in recovery ledger."));
 		double FinalTransferredCarrierAmount = 0.0;
-		for (const FMD_ScrapeSurfaceCell& Cell : FaceCells)
+		for (int32 LocalIndex = 0; LocalIndex < FaceCells.Num(); ++LocalIndex)
 		{
-			FinalTransferredCarrierAmount +=
-				static_cast<double>(Cell.TransferredContamination);
+			FinalTransferredCarrierAmount += static_cast<double>(FaceCells[LocalIndex].TransferredContamination)
+                * GetContaminationCellCarrierWeight(FaceSlot * FaceCells.Num() + LocalIndex);
 		}
 		const bool bReconciled = bRecorded
 			&& FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
@@ -465,6 +495,8 @@ float UMD_ScrapeSurfaceComponent::ApplyLocalContaminationDab(
 
 	if (StampChanges.IsEmpty())
 	{
+		// A sub-threshold MeshUV dab can still change raw cell density.
+		if (UsesMeshUVSurface()) { RefreshContaminationCleanRatioCache(Dab.SurfaceFace); }
 		return AddedAmount;
 	}
 
@@ -488,6 +520,13 @@ double UMD_ScrapeSurfaceComponent::GetContaminationPaintProtectionDistanceCm(
 	const FMD_ScrapeToolSpec& ToolSpec,
 	const float StampDepthCm) const
 {
+	if (UsesMeshUVSurface() && GetContaminationMeshUVData() && SurfaceMesh)
+	{
+		return 0.5 * FMath::Sqrt(FMath::Square(ToolSpec.BladeWidthCm) + FMath::Square(ToolSpec.BladeDepthCm))
+			+ 0.5 * FMath::Max(0.0f, StampDepthCm)
+			+ GetContaminationMeshUVData()->TargetCellSizeCm * SurfaceMesh->GetComponentTransform().GetMaximumAxisScale() * FMath::Sqrt(2.0);
+	}
+
 	return FMD_ScrapeEvaluator::CalculateContaminationPaintProtectionDistanceCm(
 		ToolSpec,
 		ContaminationGridDimensions,
@@ -499,6 +538,14 @@ double UMD_ScrapeSurfaceComponent::GetContaminationPaintProtectionDistanceCm(
 double UMD_ScrapeSurfaceComponent::GetScrapeSampleSpacingCm(
 	const FMD_ScrapeToolSpec& ToolSpec) const
 {
+	if (UsesMeshUVSurface() && GetContaminationMeshUVData() && SurfaceMesh)
+	{
+		return FMath::Min3(GetContaminationMeshUVData()->TargetCellSizeCm
+			* SurfaceMesh->GetComponentScale().GetAbsMin() * ScrapeSettings.SampleSpacingRatioOfSmallestCell,
+			static_cast<double>(ScrapeSettings.MaximumSampleSpacingCm),
+			0.5 * FMath::Min(ToolSpec.BladeWidthCm, ToolSpec.BladeDepthCm));
+	}
+
 	return FMD_ScrapeEvaluator::CalculateStrokeSampleSpacingCm(
 		ToolSpec,
 		ScrapeSettings,
@@ -609,7 +656,7 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	}
 
 	const bool bApplyExactRequestedAmountStamp =
-		bUseExactRequestedAmountStamp
+		(bUseExactRequestedAmountStamp || UsesMeshUVSurface())
 		&& FMath::IsFinite(StampRatio)
 		&& StampRatio > 0.0f;
 	TArray<FMD_ScrapeSurfaceCell> OriginalFaceCells;
@@ -620,10 +667,31 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 		OriginalFaceCells.Append(FaceCells.GetData(), FaceCells.Num());
 	}
 	FMD_ScrapeResult Result;
+	FMD_ScrapeMeshUVProgress MeshUVProgressAfter;
 	TArray<float> RequestedRemovalAmounts;
 	{
 		SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeEvaluate);
-		if (bApplyExactRequestedAmountStamp)
+		if (UsesMeshUVSurface())
+		{
+			FMD_ScrapeMeshUVStroke MeshStroke;
+			const UMD_ScrapeMeshUVData* Data = GetContaminationMeshUVData();
+			if (!Data || !SurfaceMesh || !TryBuildMeshUVStroke(Stroke, MeshStroke))
+			{
+				Result.SurfaceFace = Stroke.SurfaceFace;
+				return Result;
+			}
+			// Every committed authoritative mutation refreshes these totals. Prediction
+			// uses a different cell state and must continue computing its own progress.
+			const FMD_ScrapeMeshUVProgress ProgressBefore = {
+				CachedFrontInitialContaminationAmount, CachedFrontCurrentContaminationAmount, true };
+			Result = FMD_ScrapeEvaluator::ApplyStrokeToMeshUVGrid(*Data,
+				SurfaceMesh->GetComponentTransform(), MeshStroke, ToolSpec,
+				EffectiveScrapeSettings, FaceCells,
+				bApplyExactRequestedAmountStamp ? &RequestedRemovalAmounts : nullptr,
+				&ScrapeEvaluationScratch, ContaminationCellCarrierWeights,
+				bApplyExactRequestedAmountStamp ? nullptr : &ProgressBefore, &MeshUVProgressAfter);
+		}
+		else if (bApplyExactRequestedAmountStamp)
 		{
 			Result =
 				FMD_ScrapeEvaluator::ApplyStrokeToGridAndCaptureRequestedAmounts(
@@ -668,7 +736,8 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 			StampRatio,
 			FaceCells,
 			StampChanges,
-			AddedContaminationAmount))
+			AddedContaminationAmount,
+            UsesMeshUVSurface() ? TConstArrayView<double>(ContaminationCellCarrierWeights) : TConstArrayView<double>()))
 		{
 			for (int32 CellIndex = 0; CellIndex < FaceCells.Num(); ++CellIndex)
 			{
@@ -758,12 +827,11 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 		RemovedTransferredLots);
 	double FinalBaseCarrierAmount = 0.0;
 	double FinalTransferredCarrierAmount = 0.0;
-	for (const FMD_ScrapeSurfaceCell& Cell : FaceCells)
+	for (int32 LocalIndex = 0; LocalIndex < FaceCells.Num(); ++LocalIndex)
 	{
-		FinalBaseCarrierAmount +=
-			static_cast<double>(Cell.RemainingContamination);
-		FinalTransferredCarrierAmount +=
-			static_cast<double>(Cell.TransferredContamination);
+        const double Weight = GetContaminationCellCarrierWeight(FaceSlot * FaceCells.Num() + LocalIndex);
+		FinalBaseCarrierAmount += static_cast<double>(FaceCells[LocalIndex].RemainingContamination) * Weight;
+		FinalTransferredCarrierAmount += static_cast<double>(FaceCells[LocalIndex].TransferredContamination) * Weight;
 	}
 	const double FinalTransferredCarrierBeforeStamp = FMath::Max(
 		0.0,
@@ -795,6 +863,12 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 				FaceCells[CellIndex] = OriginalFaceCells[CellIndex];
 			}
 		}
+		else
+		{
+			// This existing rejection path retains the evaluator's cell mutations.
+			// Keep the progress cache current for the next authoritative stroke.
+			RefreshContaminationCleanRatioCache(Stroke.SurfaceFace);
+		}
 		FMD_ScrapeResult RejectedResult;
 		RejectedResult.SurfaceFace = Stroke.SurfaceFace;
 		return RejectedResult;
@@ -816,6 +890,12 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 			{
 				FaceCells[CellIndex] = OriginalFaceCells[CellIndex];
 			}
+		}
+		else
+		{
+			// This existing rejection path retains the evaluator's cell mutations.
+			// Keep the progress cache current for the next authoritative stroke.
+			RefreshContaminationCleanRatioCache(Stroke.SurfaceFace);
 		}
 		FMD_ScrapeResult RejectedResult;
 		RejectedResult.SurfaceFace = Stroke.SurfaceFace;
@@ -844,6 +924,12 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 				FaceCells[CellIndex] = OriginalFaceCells[CellIndex];
 			}
 		}
+		else
+		{
+			// This existing rejection path retains the evaluator's cell mutations.
+			// Keep the progress cache current for the next authoritative stroke.
+			RefreshContaminationCleanRatioCache(Stroke.SurfaceFace);
+		}
 		FMD_ScrapeResult RejectedResult;
 		RejectedResult.SurfaceFace = Stroke.SurfaceFace;
 		return RejectedResult;
@@ -861,6 +947,12 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 			{
 				FaceCells[CellIndex] = OriginalFaceCells[CellIndex];
 			}
+		}
+		else
+		{
+			// This existing rejection path retains the evaluator's cell mutations.
+			// Keep the progress cache current for the next authoritative stroke.
+			RefreshContaminationCleanRatioCache(Stroke.SurfaceFace);
 		}
 		FMD_ScrapeResult RejectedResult;
 		RejectedResult.SurfaceFace = Stroke.SurfaceFace;
@@ -965,8 +1057,18 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	Result.CellChanges = SurfaceChanges;
 	Result.ModifiedCellCount = SurfaceChanges.Num();
 
-	// 스트로크는 한 면만 건드리므로 그 면만 다시 계산한다.
-	RefreshContaminationCleanRatioCache(Stroke.SurfaceFace);
+	if (UsesMeshUVSurface() && !bApplyExactRequestedAmountStamp && MeshUVProgressAfter.bIsValid)
+	{
+		// No stamp has changed the evaluator's final cells. Reuse its exact full
+		// weighted sum instead of scanning the same final state a second time.
+		CachedFrontInitialContaminationAmount = MeshUVProgressAfter.InitialCarrierAmount;
+		CachedFrontCurrentContaminationAmount = MeshUVProgressAfter.CurrentCarrierAmount;
+		CachedFrontContaminationCleanRatio = Result.CleanRatioAfter;
+	}
+	else
+	{
+		RefreshContaminationCleanRatioCache(Stroke.SurfaceFace);
+	}
 	if (ContaminationVisualUpdateBatchDepth > 0)
 	{
 		for (const FMD_ScrapeCellChange& SurfaceChange : SurfaceChanges)
@@ -1032,6 +1134,10 @@ float UMD_ScrapeSurfaceComponent::GetContaminationCleanRatio() const
 		return 0.0f;
 	}
 
+	if (UsesMeshUVSurface())
+	{
+		return FMath::Clamp(CachedFrontContaminationCleanRatio, 0.0f, 1.0f);
+	}
 	const double TotalInitialContaminationAmount =
 		CachedFrontInitialContaminationAmount
 		+ CachedBackInitialContaminationAmount;
@@ -1082,8 +1188,9 @@ bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved() const
 		return true;
 	}
 
-	return IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace::Front)
-		|| IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace::Back);
+	return FMD_ScrapeFaceProgress::IsSurfaceComplete(
+		IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace::Front),
+		IsContaminationFullyRemoved(EMD_ScrapeSurfaceFace::Back), UsesMeshUVSurface());
 }
 
 bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved(
@@ -1092,6 +1199,11 @@ bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved(
 	if (!bContaminationEnabled)
 	{
 		return true;
+	}
+	if (UsesMeshUVSurface() && Face == EMD_ScrapeSurfaceFace::Back)
+	{
+		// Physical back faces use canonical Front atlas addresses; no second state exists.
+		return bContaminationSurfaceInitialized;
 	}
 
 	const TConstArrayView<FMD_ScrapeSurfaceCell> FaceCells =
@@ -1148,8 +1260,24 @@ void UMD_ScrapeSurfaceComponent::RefreshContaminationCleanRatioCache(
 		Face == EMD_ScrapeSurfaceFace::Back
 		? CachedBackCurrentContaminationAmount
 		: CachedFrontCurrentContaminationAmount;
-	CachedCleanRatio = FMD_ScrapeEvaluator::CalculateCurrentCleanRatio(
-		GetContaminationCellsForFace(Face),
-		CachedInitialContaminationAmount,
-		CachedCurrentContaminationAmount);
+	if (UsesMeshUVSurface())
+	{
+        CachedInitialContaminationAmount = CachedCurrentContaminationAmount = 0.0;
+        if (Face == EMD_ScrapeSurfaceFace::Front)
+        {
+            double Base = 0.0, Transferred = 0.0;
+            FMD_ScrapeFaceProgress::CalculateWeightedCarrierAmounts(GetContaminationCellsForFace(Face),
+                ContaminationCellCarrierWeights, CachedInitialContaminationAmount, Base, Transferred);
+            CachedCurrentContaminationAmount = Base + Transferred;
+        }
+        CachedCleanRatio = FMD_ScrapeEvaluator::CalculateCurrentCleanRatio(
+            CachedInitialContaminationAmount, CachedCurrentContaminationAmount);
+	}
+	else
+	{
+		CachedCleanRatio = FMD_ScrapeEvaluator::CalculateCurrentCleanRatio(
+			GetContaminationCellsForFace(Face),
+			CachedInitialContaminationAmount,
+			CachedCurrentContaminationAmount);
+	}
 }

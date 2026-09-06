@@ -5,8 +5,8 @@
 /**
  * 오염 셀 상태를 복제용 최소 바이트로 줄이는 순수 계산 유틸리티.
  *
- * 셀 번호는 uint16, 초기 오염량과 잔여 오염량은 각각 uint8로 보낸다.
- * 한 셀 상태는 핵심 데이터 4바이트로 표현된다.
+ * 셀 번호는 uint32, 초기 오염량과 잔여 오염량은 각각 uint8로 보낸다.
+ * 셀 번호를 확장하되 런타임 셀 수는 SurfaceLayout의 메모리 상한으로 제한한다.
  *
  * 잔여 오염량 양자화에서 0은 "깨끗함" 전용으로 예약한다. 양자화 간격
  * 1/255는 기본 CleanTolerance 0.001보다 네 배 가까이 크기 때문에, 단순
@@ -17,21 +17,20 @@ class MARINEDEMOLITION_API FMD_ScrapeReplicationCodec final
 {
 public:
 	/** 유효하지 않은 셀 번호를 뜻하는 예약값. */
-	static constexpr uint16 InvalidCellIndex = MAX_uint16;
+	static constexpr uint32 InvalidCellIndex = MAX_uint32;
 
 	/** 잔여 오염량 양자화 최대 단계. 0은 깨끗함 전용이라 오염 단계는 1~255다. */
 	static constexpr int32 QuantizationSteps = static_cast<int32>(MAX_uint8);
 
 	/**
-	 * 앞뒤 통합 셀 번호를 복제용 uint16으로 바꾼다.
+	 * 앞뒤 통합 셀 번호를 복제용 uint32로 바꾼다.
 	 *
-	 * 총 셀 수 상한이 MAX_uint16이므로 유효 번호는 0 ~ MAX_uint16 - 1이고
-	 * MAX_uint16은 무효값으로 남는다. 범위를 벗어나면 실패한다.
+	 * 예약값과 SurfaceLayout의 메모리 상한을 벗어난 번호는 실패한다.
 	 */
-	static bool TryEncodeCellIndex(int32 CellIndex, uint16& OutEncodedCellIndex);
+	static bool TryEncodeCellIndex(int32 CellIndex, uint32& OutEncodedCellIndex);
 
-	/** 복제로 받은 uint16을 통합 셀 번호로 되돌린다. 예약값이면 INDEX_NONE. */
-	static int32 DecodeCellIndex(uint16 EncodedCellIndex);
+	/** 복제로 받은 uint32를 통합 셀 번호로 되돌린다. 범위 밖이면 INDEX_NONE. */
+	static int32 DecodeCellIndex(uint32 EncodedCellIndex);
 
 	/**
 	 * 잔여 오염량을 0~255로 양자화한다.

@@ -4,11 +4,22 @@
 #include "GameFramework/Actor.h"
 #include "Gameplay/Scrape/MD_ScrapeReplicationCodec.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
+#include "Gameplay/Scrape/MD_ScrapeMeshUVSyncSubsystem.h"
+#include "Engine/World.h"
 
 // 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 책임: Fast Array 셀 복제 · 수신 상태 반영
 
 using namespace MD_ScrapeSurfaceComponentInternal;
+
+
+bool FMD_ReplicatedScrapeCellStateArray::NetDeltaSerialize(FNetDeltaSerializeInfo& DeltaParameters)
+{
+	// MeshUV uses the bounded connection transport, including initial relevance/JIP.
+	if (DeltaParameters.Writer && Owner && Owner->UsesMeshUVSurface()) { return false; }
+	return FastArrayDeltaSerialize<FMD_ReplicatedScrapeCellState,
+		FMD_ReplicatedScrapeCellStateArray>(Items, DeltaParameters, *this);
+}
 
 void FMD_ReplicatedScrapeCellStateArray::SetOwner(
 	UMD_ScrapeSurfaceComponent* InOwner)
@@ -29,7 +40,7 @@ void FMD_ReplicatedScrapeCellStateArray::SetOwner(
 void FMD_ReplicatedScrapeCellStateArray::SetCellState(
 	const int32 CellIndex)
 {
-	if (!Owner || !Owner->HasAuthority())
+	if (!Owner || !Owner->HasAuthority() || Owner->UsesMeshUVSurface())
 	{
 		return;
 	}
@@ -110,12 +121,12 @@ bool UMD_ScrapeSurfaceComponent::TryBuildReplicatedCellState(
 {
 	OutState = FMD_ReplicatedScrapeCellState();
 	bOutMatchesGeneratedState = false;
-	if (!ContaminationCells.IsValidIndex(CellIndex))
+	if (!IsContaminationCellActive(CellIndex))
 	{
 		return false;
 	}
 
-	uint16 EncodedCellIndex = FMD_ScrapeReplicationCodec::InvalidCellIndex;
+	uint32 EncodedCellIndex = FMD_ScrapeReplicationCodec::InvalidCellIndex;
 	if (!FMD_ScrapeReplicationCodec::TryEncodeCellIndex(
 			CellIndex,
 			EncodedCellIndex))
@@ -245,6 +256,7 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 	const TConstArrayView<int32> StateItemIndices,
 	const bool bResetToInitial)
 {
+	if (UsesMeshUVSurface()) { return; }
 	if (ReplicatedContaminationVisualRevision != 0
 		&& LastAppliedContaminationVisualRevision != 0
 		&& IsVisualRevisionNewer(
@@ -299,7 +311,7 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 	for (const FMD_ReplicatedScrapeCellState& StateItem : StateItems)
 	{
 		const int32 StateCellIndex = StateItem.GetCellIndex();
-		if (!ContaminationCells.IsValidIndex(StateCellIndex))
+		if (!IsContaminationCellActive(StateCellIndex))
 		{
 			continue;
 		}
@@ -400,8 +412,8 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 
 		EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
 		int32 LocalCellIndex = INDEX_NONE;
-		const int32 CellsPerFace = ContaminationCells.Num()
-			/ FMD_ScrapeSurfaceLayout::FaceCount;
+		const int32 CellsPerFace = ContaminationGridDimensions.X
+			* ContaminationGridDimensions.Y;
 		if (!FMD_ScrapeSurfaceLayout::TryDecodeCombinedCellIndex(
 				StateCellIndex,
 				CellsPerFace,
@@ -422,6 +434,7 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 			+ FMath::Max(
 				0.0f,
 				PreviousTransferred - TargetTransferred);
+		CellChange.RemovedAmount *= static_cast<float>(GetContaminationCellCarrierWeight(StateCellIndex));
 		CellChange.RemainingAmountAfter = TargetRemaining;
 		CellChange.bBecameClean =
 			(PreviousRemaining > ScrapeSettings.CleanTolerance
@@ -483,6 +496,8 @@ void UMD_ScrapeSurfaceComponent::AdvanceContaminationVisualRevision()
 
 void UMD_ScrapeSurfaceComponent::OnRep_ContaminationVisualRevision()
 {
+	// MeshUV revision is only an advertisement; bounded snapshots own canonical state.
+	if (UsesMeshUVSurface()) { return; }
 	if (ReplicatedContaminationVisualRevision != 0
 		&& (LastAppliedContaminationVisualRevision == 0
 			|| IsVisualRevisionNewer(
@@ -562,7 +577,7 @@ bool UMD_ScrapeSurfaceComponent::ValidateAuthoritativeVisualDeltaCells(
 	for (const FMD_ReplicatedScrapeCellState& State : Delta.CellStates)
 	{
 		const int32 CellIndex = State.GetCellIndex();
-		if (!ContaminationCells.IsValidIndex(CellIndex)
+		if (!IsContaminationCellActive(CellIndex)
 			|| UniqueCellIndices.Contains(CellIndex))
 		{
 			return false;
@@ -593,6 +608,11 @@ bool UMD_ScrapeSurfaceComponent::ApplyAuthoritativeVisualDelta(
 		return false;
 	}
 
+	if (UsesMeshUVSurface())
+	{
+		if (UMD_ScrapeMeshUVSyncSubsystem* Sync = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>())
+		{ Sync->RecordClientVisualDelta(Delta); }
+	}
 	ApplyReplicatedContaminationStates(Delta.CellStates, false);
 	LastAppliedContaminationVisualRevision = Delta.SurfaceVisualRevision;
 	LastConsumedContaminationVisualRevision = Delta.SurfaceVisualRevision;
@@ -616,6 +636,11 @@ bool UMD_ScrapeSurfaceComponent::ApplyAuthoritativePredictionResolution(
 		return false;
 	}
 
+	if (UsesMeshUVSurface())
+	{
+		if (UMD_ScrapeMeshUVSyncSubsystem* Sync = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>())
+		{ Sync->RecordClientVisualDelta(Delta); }
+	}
 	ApplyReplicatedContaminationStates(Delta.CellStates, false);
 	LastAppliedContaminationVisualRevision = Delta.SurfaceVisualRevision;
 	return true;
@@ -624,7 +649,7 @@ bool UMD_ScrapeSurfaceComponent::ApplyAuthoritativePredictionResolution(
 
 void UMD_ScrapeSurfaceComponent::ApplyAllReplicatedContaminationState()
 {
-	if (!bContaminationEnabled)
+	if (!bContaminationEnabled || UsesMeshUVSurface())
 	{
 		return;
 	}
@@ -661,9 +686,10 @@ void UMD_ScrapeSurfaceComponent::PublishContaminationChanges(
 	bool bPublishedAnyCell = false;
 	for (const FMD_ScrapeCellChange& CellChange : CellChanges)
 	{
-		if (ContaminationCells.IsValidIndex(CellChange.CellIndex))
+		if (IsContaminationCellActive(CellChange.CellIndex))
 		{
-			ReplicatedContaminationState.SetCellState(CellChange.CellIndex);
+			if (!UsesMeshUVSurface())
+			{ ReplicatedContaminationState.SetCellState(CellChange.CellIndex); }
 			bPublishedAnyCell = true;
 		}
 	}
@@ -672,6 +698,11 @@ void UMD_ScrapeSurfaceComponent::PublishContaminationChanges(
 		return;
 	}
 	AdvanceContaminationVisualRevision();
+	if (UsesMeshUVSurface())
+	{
+		if (UMD_ScrapeMeshUVSyncSubsystem* Sync = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>())
+		{ Sync->RecordSurfaceChanges(*this, CellChanges); }
+	}
 
 	if (AActor* const OwnerActor = GetOwner())
 	{

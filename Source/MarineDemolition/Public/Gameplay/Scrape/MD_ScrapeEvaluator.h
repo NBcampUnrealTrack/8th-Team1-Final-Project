@@ -5,8 +5,36 @@
 #include "CoreMinimal.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
 
+class UMD_ScrapeMeshUVData;
+struct FMD_ScrapeMeshUVSample;
+
+/** Physical source-surface contacts; packed atlas addresses are never motion coordinates. */
+struct MARINEDEMOLITION_API FMD_ScrapeMeshUVStroke
+{
+	FVector StartWorldPosition = FVector::ZeroVector;
+	FVector EndWorldPosition = FVector::ZeroVector;
+	FVector StartWorldNormal = FVector::ZeroVector;
+	FVector EndWorldNormal = FVector::ZeroVector;
+	FVector StartWorldDepthAxis = FVector::ZeroVector;
+	FVector EndWorldDepthAxis = FVector::ZeroVector;
+	int32 StartTriangleIndex = INDEX_NONE;
+	int32 EndTriangleIndex = INDEX_NONE;
+	EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
+	float TravelDistanceCm = 0.0f;
+};
+
+/** Exact weighted progress for one unchanged cell state; callers own cache freshness. */
+struct MARINEDEMOLITION_API FMD_ScrapeMeshUVProgress
+{
+	double InitialCarrierAmount = 0.0;
+	double CurrentCarrierAmount = 0.0;
+	bool bIsValid = false;
+};
+
 struct MARINEDEMOLITION_API FMD_ScrapeEvaluationScratch
 {
+	/** Per-evaluation diagnostic: atlas candidates tested by the physical MeshUV footprint. */
+	int64 MeshUVVisitedCellCount = 0;
 	TBitArray<> TouchedCells;
 	TArray<float> RemainingBeforeStroke;
 	TArray<float> TransferredBeforeStroke;
@@ -33,6 +61,32 @@ struct MARINEDEMOLITION_API FMD_ScrapeEvaluationScratch
 class MARINEDEMOLITION_API FMD_ScrapeEvaluator final
 {
 public:
+	/** Follow connected source geometry. Amounts use density * world cell area / target cell area; stored cells remain densities.
+	 * Optional carrier weights must have been built for this data and current transform scale. */
+	static FMD_ScrapeResult ApplyStrokeToMeshUVGrid(
+		const UMD_ScrapeMeshUVData& Data, const FTransform& MeshToWorld,
+		const FMD_ScrapeMeshUVStroke& Stroke, const FMD_ScrapeToolSpec& ToolSpec,
+		const FMD_ScrapeSettings& Settings, TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		TArray<float>* OutRequestedRemovalAmounts = nullptr,
+		FMD_ScrapeEvaluationScratch* Scratch = nullptr,
+		TConstArrayView<double> CachedCellCarrierWeights = {},
+		const FMD_ScrapeMeshUVProgress* CachedProgressBefore = nullptr,
+		FMD_ScrapeMeshUVProgress* OutProgressAfter = nullptr);
+
+	/** Interpolate on connected source geometry; never interpolate packed atlas UVs. */
+	static bool TryInterpolateMeshUVStroke(
+		const UMD_ScrapeMeshUVData& Data, const FTransform& MeshToWorld,
+		const FMD_ScrapeMeshUVStroke& Stroke, double Alpha,
+		FMD_ScrapeMeshUVSample& OutSample, FVector& OutWorldDepthAxis);
+
+	/** A stationary ordered dab using the same footprint and optional validated carrier weights as removal. */
+	static float ApplyContaminationDabToMeshUVGrid(
+		const UMD_ScrapeMeshUVData& Data, const FTransform& MeshToWorld,
+		const FMD_ScrapeMeshUVStroke& PointContact, const FMD_ScrapeToolSpec& ToolSpec,
+		float StampAmount, float StampDepthCm, TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		TArray<FMD_ScrapeCellChange>& OutCellChanges,
+		TConstArrayView<double> CachedCellCarrierWeights = {});
+
 	/** Returns the exact movement spacing used to subdivide one scrape sweep. */
 	static double CalculateStrokeSampleSpacingCm(
 		const FMD_ScrapeToolSpec& ToolSpec,
@@ -129,7 +183,8 @@ public:
 		float StampRatio,
 		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
 		TArray<FMD_ScrapeCellChange>& OutCellChanges,
-		float& OutAddedContaminationAmount);
+		float& OutAddedContaminationAmount,
+		TConstArrayView<double> CellCarrierWeights = {});
 
 	/**
 	 * Stage3 ordered path가 확정한 하나의 dab을 저장된 위치·basis 그대로 적용한다.

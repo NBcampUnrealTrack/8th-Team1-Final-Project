@@ -3,6 +3,8 @@
 #include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
 
 #include "Containers/BitArray.h"
+#include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
+#include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
 
 #include "Util/MD_LogUtility.h"
 
@@ -264,6 +266,598 @@ namespace
 		// 반대쪽 끝으로 갈수록 약 96%까지 조밀해진다.
 		return 0.50 + 0.46 * SmoothedWidth;
 	}
+	void ApplyScrapeCoverageSample(
+		FMD_ScrapeSurfaceCell& Cell, const double CoverageWeight,
+		const double FullContactCoverageWeight, const double TravelDistancePerSampleCm,
+		const FMD_ScrapeToolSpec& ToolSpec, const FMD_ScrapeSettings& Settings,
+		FMD_ScrapeResult& Result, bool& bRemovedAnyContamination,
+		float* OutRequestedRemovalAmount)
+	{
+		const double NormalizedCoverageWeight =
+			FullContactCoverageWeight > UE_SMALL_NUMBER
+			? FMath::Min(
+				1.0,
+				CoverageWeight / FullContactCoverageWeight)
+			: 1.0;
+		Cell.CoveredFraction = FMath::Max(
+			Cell.CoveredFraction,
+			static_cast<float>(NormalizedCoverageWeight));
+
+		const double BaseRemainingBeforeSample =
+			static_cast<double>(Cell.RemainingContamination);
+		const double PaintRemainingBeforeSample =
+			static_cast<double>(Cell.TransferredContamination);
+		const double TotalRemainingBeforeSample =
+			BaseRemainingBeforeSample + PaintRemainingBeforeSample;
+
+		// 제거량은 Tick 횟수나 DeltaTime이 아니라 실제 이동 거리 기준
+		// 따라서 30fps와 120fps에서 같은 거리로 움직인 헤라는 거의 같은 결과
+		const double RequestedRemovalAmount =
+			static_cast<double>(ToolSpec.RemovalPerTravelCentimeter)
+			* TravelDistancePerSampleCm
+			* CoverageWeight;
+		if (OutRequestedRemovalAmount)
+		{
+			*OutRequestedRemovalAmount +=
+				static_cast<float>(RequestedRemovalAmount);
+		}
+
+		// 이미 깨끗한 셀에 작업량이 가해지면 모든 힘이 맨 벽면으로 전달
+		if (TotalRemainingBeforeSample
+			<= static_cast<double>(Settings.CleanTolerance))
+		{
+			Result.bTouchedBareSurface = true;
+			return;
+		}
+
+		// 셀을 일부만 덮은 헤라는 덮은 면적만큼만 벗겨낼 수 있다
+		// 이 하한이 없으면 살짝 걸친 셀도 반복 접촉으로 결국 0까지 깎이고,
+		// 마스크가 셀 단위 0/1로만 남아 자국 경계가 격자 계단 모양이 된다
+		const double ReferenceContamination =
+			static_cast<double>(Cell.InitialContamination);
+		const double UncoveredContamination = ReferenceContamination
+			* (1.0 - NormalizedCoverageWeight);
+		const double CoverageLimitedRemainingFloor =
+			UncoveredContamination
+				>= ReferenceContamination
+					* MinimumVisibleContaminationFraction
+			? UncoveredContamination
+			: 0.0;
+		const double RemovableTotalAmount = FMath::Max(
+			0.0,
+			TotalRemainingBeforeSample
+				- CoverageLimitedRemainingFloor);
+		const double AllowedRemovalAmount = FMath::Min(
+			RequestedRemovalAmount,
+			RemovableTotalAmount);
+
+		const double RemovedTransferredAmount = FMath::Min(
+			PaintRemainingBeforeSample,
+			AllowedRemovalAmount);
+		const double RemainingRemovalBudget = FMath::Max(
+			0.0,
+			AllowedRemovalAmount - RemovedTransferredAmount);
+		const double RemovedBaseAmount = FMath::Min(
+			BaseRemainingBeforeSample,
+			RemainingRemovalBudget);
+		const double ActualRemovedAmount =
+			RemovedTransferredAmount + RemovedBaseAmount;
+
+		Cell.RemainingContamination = static_cast<float>(
+			FMath::Max(0.0, BaseRemainingBeforeSample - RemovedBaseAmount));
+		Cell.TransferredContamination = static_cast<float>(
+			FMath::Max(
+				0.0,
+				PaintRemainingBeforeSample - RemovedTransferredAmount));
+
+		// 허용 오차보다 작은 찌꺼기는 0으로 스냅해 완료 판정과 시각 마스크를 일치
+		if (Cell.RemainingContamination <= Settings.CleanTolerance)
+		{
+			Cell.RemainingContamination = 0.0f;
+		}
+		// 날에 완전히 덮인 셀에 마스크가 표현할 수 없을 만큼 얇은 막만
+		// 남았다면 끝낸 것으로 본다. 안 그러면 깨끗해 보이는데 완료만
+		// 막히는 셀이 남는다. 부분 피복 셀은 제외해야 자국 경계의 피복
+		// 램프에 구멍이 생기지 않는다.
+		if (Cell.CoveredFraction >= FullCoverageFilmCleanupFraction
+			&& Cell.RemainingContamination
+				<= Cell.InitialContamination
+					* FMath::Max(0.0f, Settings.NegligibleFilmFraction))
+		{
+			Cell.RemainingContamination = 0.0f;
+		}
+		if (Cell.TransferredContamination <= Settings.CleanTolerance)
+		{
+			Cell.TransferredContamination = 0.0f;
+			Cell.TransferredPaintPatternDensity = 0.0f;
+		}
+
+		if (ActualRemovedAmount > UE_SMALL_NUMBER)
+		{
+			bRemovedAnyContamination = true;
+		}
+
+		// 요청 작업량이 덮은 면적에서 벗겨낼 수 있는 양보다 컸다면
+		// 그 자리의 오염막을 다 벗긴 뒤에도 힘이 남은 상태
+		// 그 여분의 작업량은 맨 벽면을 긁은 것으로 분류해 위험한 피드백의 근거로 기록
+		if (RequestedRemovalAmount
+			> RemovableTotalAmount
+				+ static_cast<double>(Settings.CleanTolerance))
+		{
+			Result.bTouchedBareSurface = true;
+		}
+	}
+
+	void FinalizeScrapeEvaluation(
+		const FIntPoint& GridDimensions, const FMD_ScrapeSettings& Settings,
+		const TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		const FMD_ScrapeEvaluationScratch& Scratch,
+		const bool bRemovedAnyContamination, FMD_ScrapeResult& Result,
+		const TConstArrayView<double> CellCarrierWeights = {},
+		FMD_ScrapeMeshUVProgress* OutProgressAfter = nullptr)
+	{
+		const TBitArray<>& TouchedCells = Scratch.TouchedCells;
+		const TArray<float>& RemainingBeforeStroke = Scratch.RemainingBeforeStroke;
+		const TArray<float>& TransferredBeforeStroke = Scratch.TransferredBeforeStroke;
+		const TArray<float>& CoveredFractionBeforeStroke = Scratch.CoveredFractionBeforeStroke;
+		for (TConstSetBitIterator<> It(TouchedCells); It; ++It)
+		{
+			const int32 CellIndex = It.GetIndex();
+			++Result.TouchedCellCount;
+
+			const FMD_ScrapeSurfaceCell& CellAfterStroke =
+				InOutSurfaceCells[CellIndex];
+			const float RemovedBaseAmount = FMath::Max(
+				0.0f,
+				RemainingBeforeStroke[CellIndex]
+					- CellAfterStroke.RemainingContamination);
+			const float RemovedTransferredAmount = FMath::Max(
+				0.0f,
+				TransferredBeforeStroke[CellIndex]
+					- CellAfterStroke.TransferredContamination);
+			const float RemovedAmount =
+				RemovedBaseAmount + RemovedTransferredAmount;
+			const float AddedCoveredFraction = FMath::Max(
+				0.0f,
+				CellAfterStroke.CoveredFraction
+					- CoveredFractionBeforeStroke[CellIndex]);
+
+			// 부동소수점 연산 중 생길 수 있는 무의미한 극소 차이는 변경 내역에서 제외
+			if (RemovedAmount <= UE_SMALL_NUMBER
+				&& AddedCoveredFraction <= UE_SMALL_NUMBER)
+			{
+				continue;
+			}
+
+			FMD_ScrapeCellChange& CellChange = Result.CellChanges.AddDefaulted_GetRef();
+			CellChange.CellIndex = CellIndex;
+			CellChange.GridCoordinate = FIntPoint(
+				CellIndex % GridDimensions.X,
+				CellIndex / GridDimensions.X);
+			const double CarrierWeight = CellCarrierWeights.IsEmpty() ? 1.0 : CellCarrierWeights[CellIndex];
+			CellChange.RemovedAmount = static_cast<float>(RemovedAmount * CarrierWeight);
+			CellChange.RemainingAmountAfter =
+				CellAfterStroke.RemainingContamination;
+			CellChange.bBecameClean =
+				(RemainingBeforeStroke[CellIndex] > Settings.CleanTolerance
+					|| TransferredBeforeStroke[CellIndex] > Settings.CleanTolerance)
+				&& CellAfterStroke.RemainingContamination <= Settings.CleanTolerance
+				&& CellAfterStroke.TransferredContamination <= Settings.CleanTolerance;
+
+			// Surface의 보상 provenance 원장은 base와 Stage3 transferred를
+			// 서로 다른 layer로 보존한다. RPC/Blueprint에는 노출하지 않는
+			// server-only 합계만 기록해 실제 제거 비율대로 lot을 옮길 수 있게 한다.
+			Result.RemovedBaseContaminationAmount += static_cast<float>(RemovedBaseAmount * CarrierWeight);
+			Result.RemovedTransferredContaminationAmount +=
+				static_cast<float>(RemovedTransferredAmount * CarrierWeight);
+			Result.RemovedContaminationAmount += CellChange.RemovedAmount;
+
+			if (CellChange.bBecameClean)
+			{
+				++Result.NewlyCleanedCellCount;
+			}
+		}
+
+		Result.ModifiedCellCount = Result.CellChanges.Num();
+		if (CellCarrierWeights.IsEmpty())
+		{
+			Result.CleanRatioAfter = FMD_ScrapeEvaluator::CalculateCleanRatio(InOutSurfaceCells);
+		}
+		else
+		{
+			double Initial = 0.0, Base = 0.0, Transferred = 0.0;
+			const bool bValidAmounts = FMD_ScrapeFaceProgress::CalculateWeightedCarrierAmounts(
+				InOutSurfaceCells, CellCarrierWeights, Initial, Base, Transferred);
+			Result.CleanRatioAfter = FMD_ScrapeEvaluator::CalculateCurrentCleanRatio(Initial, Base + Transferred);
+			if (OutProgressAfter && bValidAmounts)
+			{
+				OutProgressAfter->InitialCarrierAmount = Initial;
+				OutProgressAfter->CurrentCarrierAmount = Base + Transferred;
+				OutProgressAfter->bIsValid = true;
+			}
+		}
+		Result.CleanRatioDelta = FMath::Max(
+			0.0f,
+			Result.CleanRatioAfter - Result.CleanRatioBefore);
+		// 순수 제거 판정에는 아직 역오염 단계가 없으므로 gross와 net이 같다.
+		// Surface가 같은 트랜잭션에서 역오염을 더하면 두 net 필드만 다시 줄인다.
+		Result.NetRemovedContaminationAmount =
+			Result.RemovedContaminationAmount;
+		Result.NetRemovedCleanRatioDelta = Result.CleanRatioDelta;
+		Result.bIsSurfaceFullyClean = FMD_ScrapeEvaluator::IsSurfaceFullyClean(
+			InOutSurfaceCells,
+			Settings.CleanTolerance);
+
+		// 접촉 종류는 실제 제거가 있었는지와 맨 벽면 접촉이 있었는지의 조합으로 결정
+		// 이 분류 자체는 감점을 발생시키지 않으며 다음 계층이 피드백/규칙을 선택
+		if (!Result.bHadSurfaceContact)
+		{
+			Result.ContactType = EMD_ScrapeContactType::None;
+		}
+		else if (bRemovedAnyContamination && Result.bTouchedBareSurface)
+		{
+			Result.ContactType = EMD_ScrapeContactType::Mixed;
+		}
+		else if (bRemovedAnyContamination)
+		{
+			Result.ContactType = EMD_ScrapeContactType::ContaminationOnly;
+		}
+		else
+		{
+			Result.ContactType = EMD_ScrapeContactType::BareSurfaceOnly;
+		}
+	}
+
+	FVector MeshUVWorldNormal(const FTransform& Transform, const FVector& LocalNormal)
+	{
+		return Transform.TransformVectorNoScale(LocalNormal / Transform.GetScale3D()).GetSafeNormal();
+	}
+
+	bool IsMeshUVContactValid(const UMD_ScrapeMeshUVData& Data,
+		const FTransform& Transform, const FMD_ScrapeMeshUVStroke& Stroke)
+	{
+		const FVector Scale = Transform.GetScale3D();
+		return FMath::IsFinite(Data.TargetCellSizeCm) && Data.TargetCellSizeCm > 0.0
+			&& !Transform.ContainsNaN() && FMath::Abs(Scale.X) > UE_SMALL_NUMBER
+			&& FMath::Abs(Scale.Y) > UE_SMALL_NUMBER && FMath::Abs(Scale.Z) > UE_SMALL_NUMBER
+			&& !Stroke.StartWorldPosition.ContainsNaN() && !Stroke.EndWorldPosition.ContainsNaN()
+			&& !Stroke.StartWorldNormal.ContainsNaN() && !Stroke.EndWorldNormal.ContainsNaN()
+			&& !Stroke.StartWorldDepthAxis.ContainsNaN() && !Stroke.EndWorldDepthAxis.ContainsNaN()
+			&& !Stroke.StartWorldNormal.IsNearlyZero() && !Stroke.EndWorldNormal.IsNearlyZero()
+			&& Data.Triangles.IsValidIndex(Stroke.StartTriangleIndex)
+			&& Data.Triangles.IsValidIndex(Stroke.EndTriangleIndex)
+			&& Data.Triangles[Stroke.StartTriangleIndex].bCleanable
+			&& Data.Triangles[Stroke.EndTriangleIndex].bCleanable;
+	}
+
+	bool FindDirectMeshUVSeamPath(const UMD_ScrapeMeshUVData& Data, const FTransform& Transform,
+		const FMD_ScrapeMeshUVStroke& Stroke, FVector& OutCrossing,
+		double& OutStartDistance, double& OutEndDistance)
+	{
+		if (Stroke.StartTriangleIndex == Stroke.EndTriangleIndex
+			|| !Data.Triangles.IsValidIndex(Stroke.StartTriangleIndex))
+		{
+			return false;
+		}
+		const FMD_ScrapeMeshUVTriangle& Triangle = Data.Triangles[Stroke.StartTriangleIndex];
+        bool bFound = false;
+        double BestLength = TNumericLimits<double>::Max();
+        const auto ConsiderPortal = [&](const FVector& LocalA, const FVector& LocalB)
+        {
+            const FVector A = Transform.TransformPosition(LocalA);
+            const FVector B = Transform.TransformPosition(LocalB);
+			const auto LengthThrough = [&](const double T)
+			{
+				const FVector Point = FMath::Lerp(A, B, T);
+				return FVector::Distance(Stroke.StartWorldPosition, Point) + FVector::Distance(Point, Stroke.EndWorldPosition);
+			};
+			double Low = 0.0, High = 1.0;
+			// The sum of distances along one edge is convex, including an endpoint minimum.
+			for (int32 Iteration = 0; Iteration < 48; ++Iteration)
+			{
+				const double First = (Low * 2.0 + High) / 3.0;
+				const double Second = (Low + High * 2.0) / 3.0;
+				if (LengthThrough(First) < LengthThrough(Second)) { High = Second; }
+				else { Low = First; }
+			}
+            const FVector Crossing = FMath::Lerp(A, B, (Low + High) * 0.5);
+            const double StartDistance = FVector::Distance(Stroke.StartWorldPosition, Crossing);
+            const double EndDistance = FVector::Distance(Crossing, Stroke.EndWorldPosition);
+            if (StartDistance + EndDistance < BestLength)
+            {
+                BestLength = StartDistance + EndDistance; bFound = true;
+                OutCrossing = Crossing; OutStartDistance = StartDistance; OutEndDistance = EndDistance;
+            }
+        };
+        if (!Triangle.Neighbors.IsEmpty())
+        {
+            for (const FMD_ScrapeMeshUVNeighbor& Neighbor : Triangle.Neighbors)
+            {
+                if (Neighbor.TriangleIndex == Stroke.EndTriangleIndex)
+                { ConsiderPortal(Neighbor.SharedEdgeA, Neighbor.SharedEdgeB); }
+            }
+        }
+        else
+        {
+            const FVector Vertices[] = {Triangle.A, Triangle.B, Triangle.C};
+            for (int32 Edge = 0; Edge < 3; ++Edge)
+            {
+                if (Triangle.AdjacentTriangles[Edge] == Stroke.EndTriangleIndex)
+                { ConsiderPortal(Vertices[Edge], Vertices[(Edge + 1) % 3]); }
+            }
+        }
+        return bFound;
+	}
+
+	void GatherConnectedMeshUVTriangles(const UMD_ScrapeMeshUVData& Data,
+		const FTransform& Transform, const int32 Seed, const FVector& Center,
+		const FVector& ContactNormal, const double Radius, TArray<int32>& OutTriangles)
+	{
+		OutTriangles.Reset();
+		TBitArray<> Visited(false, Data.Triangles.Num());
+		TArray<int32, TInlineAllocator<64>> Pending;
+		Pending.Add(Seed);
+		for (int32 QueueIndex = 0; QueueIndex < Pending.Num(); ++QueueIndex)
+		{
+			const int32 Index = Pending[QueueIndex];
+			if (!Data.Triangles.IsValidIndex(Index) || Visited[Index])
+			{
+				continue;
+			}
+			Visited[Index] = true;
+			const FMD_ScrapeMeshUVTriangle& Triangle = Data.Triangles[Index];
+			// Do not wrap around a thin wall or cross an excluded cap to reach another face.
+			if (!Triangle.bCleanable
+				|| FVector::DotProduct(MeshUVWorldNormal(Transform, Triangle.NormalLocal), ContactNormal) < 0.1)
+			{
+				continue;
+			}
+            FVector Closest;
+            if (!FMD_ScrapeMeshUVGeometry::ClosestPointOnSourceTriangle(Triangle, Transform, Center, Closest)) { continue; }
+			if (FVector::DistSquared(Closest, Center) > FMath::Square(Radius))
+			{
+				continue;
+			}
+			OutTriangles.Add(Index);
+            if (!Triangle.Neighbors.IsEmpty())
+            {
+                for (const FMD_ScrapeMeshUVNeighbor& Neighbor : Triangle.Neighbors)
+                {
+                    if (!Data.Triangles.IsValidIndex(Neighbor.TriangleIndex) || Visited[Neighbor.TriangleIndex]) { continue; }
+                    const FVector A = Transform.TransformPosition(Neighbor.SharedEdgeA);
+                    const FVector B = Transform.TransformPosition(Neighbor.SharedEdgeB);
+                    const FVector Edge = B - A;
+                    const double T = Edge.SizeSquared() > 0.0
+                        ? FMath::Clamp(FVector::DotProduct(Center - A, Edge) / Edge.SizeSquared(), 0.0, 1.0) : 0.0;
+                    // A nearby triangle is reachable only through a shared portion inside the brush neighborhood.
+                    if (FVector::DistSquared(Center, A + Edge * T) <= FMath::Square(Radius))
+                    { Pending.Add(Neighbor.TriangleIndex); }
+                }
+            }
+            else
+            {
+                for (int32 Edge = 0; Edge < 3; ++Edge)
+                {
+                    const int32 Neighbor = Triangle.AdjacentTriangles[Edge];
+                    if (Data.Triangles.IsValidIndex(Neighbor) && !Visited[Neighbor]) { Pending.Add(Neighbor); }
+                }
+            }
+		}
+	}
+
+	double MeshUVPolygonArea(const TArray<FVector2D>& Polygon)
+	{
+		double TwiceArea = 0.0;
+		for (int32 I = 1; I + 1 < Polygon.Num(); ++I)
+		{
+			TwiceArea += FVector2D::CrossProduct(Polygon[I] - Polygon[0], Polygon[I + 1] - Polygon[0]);
+		}
+		return FMath::Abs(TwiceArea) * 0.5;
+	}
+
+	void ClipMeshUVBarycentricPolygon(TArray<FVector2D>& Polygon,
+		const FVector2D& BarycentricCenter, const FVector2D& CellCenterOnBrush,
+		const FVector2D& ProjectedEdgeB, const FVector2D& ProjectedEdgeC,
+		const FVector2D& A, const FVector2D& B)
+	{
+		if (Polygon.IsEmpty())
+		{
+			return;
+		}
+		TArray<FVector2D> Clipped;
+		Clipped.Reserve(Polygon.Num() + 1);
+		const FVector2D Edge = B - A;
+		const double CenterDistance = FVector2D::CrossProduct(Edge, CellCenterOnBrush - A);
+		const FVector2D Coefficients(FVector2D::CrossProduct(Edge, ProjectedEdgeB),
+			FVector2D::CrossProduct(Edge, ProjectedEdgeC));
+		const auto SignedDistance = [&](const FVector2D& Point)
+		{
+			return CenterDistance + FVector2D::DotProduct(Coefficients, Point - BarycentricCenter);
+		};
+		FVector2D Previous = Polygon.Last();
+		double PreviousDistance = SignedDistance(Previous);
+		for (const FVector2D& Current : Polygon)
+		{
+			const double CurrentDistance = SignedDistance(Current);
+			if ((CurrentDistance >= 0.0) != (PreviousDistance >= 0.0))
+			{
+				Clipped.Add(FMath::Lerp(Previous, Current, PreviousDistance / (PreviousDistance - CurrentDistance)));
+			}
+			if (CurrentDistance >= 0.0)
+			{
+				Clipped.Add(Current);
+			}
+			Previous = Current;
+			PreviousDistance = CurrentDistance;
+		}
+		Polygon = MoveTemp(Clipped);
+	}
+
+	struct FMeshUVCellCoverage
+	{
+		int32 CellIndex = INDEX_NONE;
+		double Fraction = 0.0;
+		double WidthCoordinateCm = 0.0;
+	};
+
+	bool GetMeshUVBrushCellBounds(const UMD_ScrapeMeshUVData& Data,
+		const FTransform& Transform, const FMD_ScrapeMeshUVTriangle& Triangle,
+		const FVector& WorldCenter, const double Radius, FIntPoint& OutMinimum, FIntPoint& OutMaximum)
+	{
+		const FVector2D UV0 = Triangle.UVB - Triangle.UVA, UV1 = Triangle.UVC - Triangle.UVA;
+		const double Determinant = FVector2D::CrossProduct(UV0, UV1);
+		if (!FMath::IsFinite(Determinant) || Determinant == 0.0)
+		{
+			return false;
+		}
+		const FVector E0 = Triangle.B - Triangle.A, E1 = Triangle.C - Triangle.A;
+		const FVector CellU = (E0 * UV1.Y - E1 * UV0.Y) / (Determinant * Data.AtlasDimensions.X);
+		const FVector CellV = (E1 * UV0.X - E0 * UV1.X) / (Determinant * Data.AtlasDimensions.Y);
+		// Any clipped cell's centroid-to-corner support fits inside its full atlas-cell diagonal.
+		// This bound includes every cell the existing center/support sphere test could retain.
+		const double MaximumSupport = FMath::Max((CellU + CellV).Size(), (CellU - CellV).Size())
+			* Transform.GetMaximumAxisScale();
+		const double SearchRadius = Radius + MaximumSupport;
+		const FVector LocalCenter = Transform.InverseTransformPosition(WorldCenter);
+		const auto UVAt = [&](const FVector& Position, FVector2D& OutUV)
+		{
+			FVector Barycentric;
+			if (!FMD_ScrapeMeshUVGeometry::TryCalculateBarycentric(Triangle, Position, Barycentric)) { return false; }
+			OutUV = Triangle.UVA * Barycentric.X + Triangle.UVB * Barycentric.Y + Triangle.UVC * Barycentric.Z;
+			return !OutUV.ContainsNaN();
+		};
+		FVector2D CenterUV, DX, DY, DZ;
+		if (!UVAt(LocalCenter, CenterUV)
+			|| !UVAt(LocalCenter + Transform.InverseTransformVector(FVector::XAxisVector), DX)
+			|| !UVAt(LocalCenter + Transform.InverseTransformVector(FVector::YAxisVector), DY)
+			|| !UVAt(LocalCenter + Transform.InverseTransformVector(FVector::ZAxisVector), DZ))
+		{
+			return false;
+		}
+		DX -= CenterUV; DY -= CenterUV; DZ -= CenterUV;
+		const FVector2D Extent(FVector(DX.X, DY.X, DZ.X).Size() * SearchRadius,
+			FVector(DX.Y, DY.Y, DZ.Y).Size() * SearchRadius);
+		const FVector2D Minimum = CenterUV - Extent, Maximum = CenterUV + Extent;
+		if (Minimum.ContainsNaN() || Maximum.ContainsNaN()
+			|| Maximum.X < 0.0 || Maximum.Y < 0.0 || Minimum.X > 1.0 || Minimum.Y > 1.0)
+		{
+			return false;
+		}
+		OutMinimum = FIntPoint(
+			FMath::Max(0, FMath::FloorToInt32(FMath::Clamp(Minimum.X, 0.0, 1.0) * Data.AtlasDimensions.X) - 1),
+			FMath::Max(0, FMath::FloorToInt32(FMath::Clamp(Minimum.Y, 0.0, 1.0) * Data.AtlasDimensions.Y) - 1));
+		OutMaximum = FIntPoint(
+			FMath::Min(Data.AtlasDimensions.X - 1, FMath::FloorToInt32(FMath::Clamp(Maximum.X, 0.0, 1.0) * Data.AtlasDimensions.X) + 1),
+			FMath::Min(Data.AtlasDimensions.Y - 1, FMath::FloorToInt32(FMath::Clamp(Maximum.Y, 0.0, 1.0) * Data.AtlasDimensions.Y) + 1));
+		// A thin triangle can have a very large inverse-UV search radius. Only its
+		// own chart can own candidate cells; retain the same one-pixel boundary margin.
+		const FVector2D TriangleMinimum(FMath::Min3(Triangle.UVA.X, Triangle.UVB.X, Triangle.UVC.X),
+			FMath::Min3(Triangle.UVA.Y, Triangle.UVB.Y, Triangle.UVC.Y));
+		const FVector2D TriangleMaximum(FMath::Max3(Triangle.UVA.X, Triangle.UVB.X, Triangle.UVC.X),
+			FMath::Max3(Triangle.UVA.Y, Triangle.UVB.Y, Triangle.UVC.Y));
+		OutMinimum.X = FMath::Max(OutMinimum.X, FMath::FloorToInt32(TriangleMinimum.X * Data.AtlasDimensions.X) - 1);
+		OutMinimum.Y = FMath::Max(OutMinimum.Y, FMath::FloorToInt32(TriangleMinimum.Y * Data.AtlasDimensions.Y) - 1);
+		OutMaximum.X = FMath::Min(OutMaximum.X, FMath::FloorToInt32(TriangleMaximum.X * Data.AtlasDimensions.X) + 1);
+		OutMaximum.Y = FMath::Min(OutMaximum.Y, FMath::FloorToInt32(TriangleMaximum.Y * Data.AtlasDimensions.Y) + 1);
+		return OutMinimum.X <= OutMaximum.X && OutMinimum.Y <= OutMaximum.Y;
+	}
+
+	void CollectMeshUVFootprint(const UMD_ScrapeMeshUVData& Data,
+		const FTransform& Transform, const FMD_ScrapeMeshUVSample& Sample,
+		const FVector& WorldDepthAxis, const FMD_ScrapeToolSpec& Tool,
+		TArray<FMeshUVCellCoverage>& OutCoverage, int64* OutVisitedCellCount = nullptr)
+	{
+		OutCoverage.Reset();
+		const FVector Center = Transform.TransformPosition(Sample.PositionLocal);
+		const FVector Normal = MeshUVWorldNormal(Transform, Sample.NormalLocal);
+		const FVector Depth = FVector::VectorPlaneProject(WorldDepthAxis, Normal).GetSafeNormal();
+		const FVector Width = FVector::CrossProduct(Normal, Depth).GetSafeNormal();
+		if (Depth.IsNearlyZero() || Width.IsNearlyZero())
+		{
+			return;
+		}
+		const double HalfWidth = Tool.BladeWidthCm * 0.5;
+		const double HalfDepth = Tool.BladeDepthCm * 0.5;
+		const double Radius = Tool.BrushShape == EMD_ScrapeBrushShape::Circle
+			? HalfWidth : FMath::Sqrt(HalfWidth * HalfWidth + HalfDepth * HalfDepth);
+		TArray<int32> Triangles;
+		GatherConnectedMeshUVTriangles(Data, Transform, Sample.TriangleIndex, Center, Normal, Radius, Triangles);
+		TArray<FVector2D> Blade;
+		if (Tool.BrushShape == EMD_ScrapeBrushShape::Circle)
+		{
+			// An inscribed 64-gon keeps the error below 0.13% of the circle radius.
+			for (int32 I = 0; I < 64; ++I)
+			{
+				const double Angle = 2.0 * UE_PI * I / 64.0;
+				Blade.Add(FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * HalfWidth);
+			}
+		}
+		else
+		{
+			Blade = { FVector2D(-HalfWidth, -HalfDepth), FVector2D(HalfWidth, -HalfDepth),
+				FVector2D(HalfWidth, HalfDepth), FVector2D(-HalfWidth, HalfDepth) };
+		}
+		for (const int32 TriangleIndex : Triangles)
+		{
+			FIntPoint Minimum, Maximum;
+			if (!GetMeshUVBrushCellBounds(Data, Transform, Data.Triangles[TriangleIndex], Center, Radius, Minimum, Maximum))
+			{
+				continue;
+			}
+			for (int32 Y = Minimum.Y; Y <= Maximum.Y; ++Y)
+			{
+				for (int32 X = Minimum.X; X <= Maximum.X; ++X)
+				{
+					const int32 CellIndex = X + Y * Data.AtlasDimensions.X;
+					if (OutVisitedCellCount) { ++*OutVisitedCellCount; }
+					if (!Data.IsActiveCell(CellIndex) || Data.Cells[CellIndex].TriangleIndex != TriangleIndex)
+					{
+						continue;
+					}
+					const FMD_ScrapeMeshUVCell& Cell = Data.Cells[CellIndex];
+					const FVector Offset = Transform.TransformVector(Cell.PositionLocal - Sample.PositionLocal);
+					if (Offset.Size() > Radius + Cell.SupportRadiusCm * Transform.GetMaximumAxisScale())
+					{
+						continue;
+					}
+					TArray<FVector> BarycentricPolygon;
+					if (!FMD_ScrapeMeshUVGeometry::GetCellPolygonBarycentric(Data, CellIndex, BarycentricPolygon))
+					{
+						continue;
+					}
+					TArray<FVector2D> Polygon;
+					for (const FVector& Point : BarycentricPolygon) Polygon.Add(FVector2D(Point.Y, Point.Z));
+					const FMD_ScrapeMeshUVTriangle& SourceTriangle = Data.Triangles[TriangleIndex];
+					const FVector EdgeB = Transform.TransformVector(SourceTriangle.B - SourceTriangle.A);
+					const FVector EdgeC = Transform.TransformVector(SourceTriangle.C - SourceTriangle.A);
+					const FVector2D ProjectedEdgeB(FVector::DotProduct(EdgeB, Width), FVector::DotProduct(EdgeB, Depth));
+					const FVector2D ProjectedEdgeC(FVector::DotProduct(EdgeC, Width), FVector::DotProduct(EdgeC, Depth));
+					const FVector2D BarycentricCenter(Cell.Barycentric.Y, Cell.Barycentric.Z);
+					const FVector2D CellCenterOnBrush(FVector::DotProduct(Offset, Width), FVector::DotProduct(Offset, Depth));
+					// Keep the polygon in source simplex space. The cm-space blade boundary
+					// remains an affine inequality here, so its area ratio is unchanged while
+					// tiny positive cells cannot collapse through world-coordinate subtraction.
+					const double FullArea = MeshUVPolygonArea(Polygon);
+					// Every positive baked cell must remain cleanable, including float-UV boundary slivers.
+					if (!FMath::IsFinite(FullArea) || FullArea <= 0.0)
+					{
+						continue;
+					}
+					for (int32 I = 0; I < Blade.Num() && !Polygon.IsEmpty(); ++I)
+					{
+						ClipMeshUVBarycentricPolygon(Polygon, BarycentricCenter, CellCenterOnBrush,
+							ProjectedEdgeB, ProjectedEdgeC, Blade[I], Blade[(I + 1) % Blade.Num()]);
+					}
+					const double Fraction = FMath::Clamp(MeshUVPolygonArea(Polygon) / FullArea, 0.0, 1.0);
+					if (Fraction > UE_SMALL_NUMBER)
+					{
+						OutCoverage.Add({ CellIndex, Fraction, FVector::DotProduct(Offset, Width) });
+					}
+				}
+			}
+		}
+	}
+
 }
 
 double FMD_ScrapeEvaluator::CalculateStrokeSampleSpacingCm(
@@ -711,217 +1305,333 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToGridInternal(
 				// 아래 하한 계산과 같은 정규화 피복률을 시각용으로 누적한다.
 				// 이미 깨끗한 셀도 갱신해야 한다. 그래야 나중에 오염이 다시
 				// 쌓였을 때 "얼마나 덮였는지"가 이 스트로크까지 반영된다.
-				const double NormalizedCoverageWeight =
-					FullContactCoverageWeight > UE_SMALL_NUMBER
-					? FMath::Min(
-						1.0,
-						CoverageWeight / FullContactCoverageWeight)
-					: 1.0;
-				Cell.CoveredFraction = FMath::Max(
-					Cell.CoveredFraction,
-					static_cast<float>(NormalizedCoverageWeight));
-
-				const double BaseRemainingBeforeSample =
-					static_cast<double>(Cell.RemainingContamination);
-				const double PaintRemainingBeforeSample =
-					static_cast<double>(Cell.TransferredContamination);
-				const double TotalRemainingBeforeSample =
-					BaseRemainingBeforeSample + PaintRemainingBeforeSample;
-
-				// 제거량은 Tick 횟수나 DeltaTime이 아니라 실제 이동 거리 기준
-				// 따라서 30fps와 120fps에서 같은 거리로 움직인 헤라는 거의 같은 결과
-				const double RequestedRemovalAmount =
-					static_cast<double>(ToolSpec.RemovalPerTravelCentimeter)
-					* TravelDistancePerSampleCm
-					* CoverageWeight;
-				if (OutRequestedRemovalAmounts
-					&& OutRequestedRemovalAmounts->IsValidIndex(CellIndex))
-				{
-					(*OutRequestedRemovalAmounts)[CellIndex] +=
-						static_cast<float>(RequestedRemovalAmount);
-				}
-
-				// 이미 깨끗한 셀에 작업량이 가해지면 모든 힘이 맨 벽면으로 전달
-				if (TotalRemainingBeforeSample
-					<= static_cast<double>(Settings.CleanTolerance))
-				{
-					Result.bTouchedBareSurface = true;
-					continue;
-				}
-
-				// 셀을 일부만 덮은 헤라는 덮은 면적만큼만 벗겨낼 수 있다
-				// 이 하한이 없으면 살짝 걸친 셀도 반복 접촉으로 결국 0까지 깎이고,
-				// 마스크가 셀 단위 0/1로만 남아 자국 경계가 격자 계단 모양이 된다
-				const double ReferenceContamination =
-					static_cast<double>(Cell.InitialContamination);
-				const double UncoveredContamination = ReferenceContamination
-					* (1.0 - NormalizedCoverageWeight);
-				const double CoverageLimitedRemainingFloor =
-					UncoveredContamination
-						>= ReferenceContamination
-							* MinimumVisibleContaminationFraction
-					? UncoveredContamination
-					: 0.0;
-				const double RemovableTotalAmount = FMath::Max(
-					0.0,
-					TotalRemainingBeforeSample
-						- CoverageLimitedRemainingFloor);
-				const double AllowedRemovalAmount = FMath::Min(
-					RequestedRemovalAmount,
-					RemovableTotalAmount);
-
-				const double RemovedTransferredAmount = FMath::Min(
-					PaintRemainingBeforeSample,
-					AllowedRemovalAmount);
-				const double RemainingRemovalBudget = FMath::Max(
-					0.0,
-					AllowedRemovalAmount - RemovedTransferredAmount);
-				const double RemovedBaseAmount = FMath::Min(
-					BaseRemainingBeforeSample,
-					RemainingRemovalBudget);
-				const double ActualRemovedAmount =
-					RemovedTransferredAmount + RemovedBaseAmount;
-
-				Cell.RemainingContamination = static_cast<float>(
-					FMath::Max(0.0, BaseRemainingBeforeSample - RemovedBaseAmount));
-				Cell.TransferredContamination = static_cast<float>(
-					FMath::Max(
-						0.0,
-						PaintRemainingBeforeSample - RemovedTransferredAmount));
-
-				// 허용 오차보다 작은 찌꺼기는 0으로 스냅해 완료 판정과 시각 마스크를 일치
-				if (Cell.RemainingContamination <= Settings.CleanTolerance)
-				{
-					Cell.RemainingContamination = 0.0f;
-				}
-				// 날에 완전히 덮인 셀에 마스크가 표현할 수 없을 만큼 얇은 막만
-				// 남았다면 끝낸 것으로 본다. 안 그러면 깨끗해 보이는데 완료만
-				// 막히는 셀이 남는다. 부분 피복 셀은 제외해야 자국 경계의 피복
-				// 램프에 구멍이 생기지 않는다.
-				if (Cell.CoveredFraction >= FullCoverageFilmCleanupFraction
-					&& Cell.RemainingContamination
-						<= Cell.InitialContamination
-							* FMath::Max(0.0f, Settings.NegligibleFilmFraction))
-				{
-					Cell.RemainingContamination = 0.0f;
-				}
-				if (Cell.TransferredContamination <= Settings.CleanTolerance)
-				{
-					Cell.TransferredContamination = 0.0f;
-					Cell.TransferredPaintPatternDensity = 0.0f;
-				}
-
-				if (ActualRemovedAmount > UE_SMALL_NUMBER)
-				{
-					bRemovedAnyContamination = true;
-				}
-
-				// 요청 작업량이 덮은 면적에서 벗겨낼 수 있는 양보다 컸다면
-				// 그 자리의 오염막을 다 벗긴 뒤에도 힘이 남은 상태
-				// 그 여분의 작업량은 맨 벽면을 긁은 것으로 분류해 위험한 피드백의 근거로 기록
-				if (RequestedRemovalAmount
-					> RemovableTotalAmount
-						+ static_cast<double>(Settings.CleanTolerance))
-				{
-					Result.bTouchedBareSurface = true;
-				}
+				ApplyScrapeCoverageSample(Cell, CoverageWeight, FullContactCoverageWeight,
+					TravelDistancePerSampleCm, ToolSpec, Settings, Result,
+					bRemovedAnyContamination, OutRequestedRemovalAmounts
+						? &(*OutRequestedRemovalAmounts)[CellIndex] : nullptr);
 			}
 		}
 	}
 
-	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)
+	FinalizeScrapeEvaluation(GridDimensions, Settings, InOutSurfaceCells,
+		EvaluationScratch, bRemovedAnyContamination, Result);
+
+	return Result;
+}
+
+
+bool FMD_ScrapeEvaluator::TryInterpolateMeshUVStroke(
+	const UMD_ScrapeMeshUVData& Data, const FTransform& MeshToWorld,
+	const FMD_ScrapeMeshUVStroke& Stroke, const double Alpha,
+	FMD_ScrapeMeshUVSample& OutSample, FVector& OutWorldDepthAxis)
+{
+	OutSample = FMD_ScrapeMeshUVSample();
+	OutWorldDepthAxis = FVector::ZeroVector;
+	if (!IsMeshUVContactValid(Data, MeshToWorld, Stroke) || !FMath::IsFinite(Alpha)
+		|| Alpha < 0.0 || Alpha > 1.0)
 	{
-		if (TouchedCells[CellIndex])
+		return false;
+	}
+	// A common endpoint hemisphere lets a contact move around a corner without admitting a reverse face.
+	if (FVector::DotProduct(Stroke.StartWorldNormal.GetSafeNormal(), Stroke.EndWorldNormal.GetSafeNormal()) < -0.5)
+	{
+		return false;
+	}
+	FVector Desired = FMath::Lerp(Stroke.StartWorldPosition, Stroke.EndWorldPosition, Alpha);
+	FVector Crossing;
+	double StartDistance = 0.0, EndDistance = 0.0;
+	if (FindDirectMeshUVSeamPath(Data, MeshToWorld, Stroke, Crossing, StartDistance, EndDistance))
+	{
+		const double Arc = Alpha * (StartDistance + EndDistance);
+		Desired = Arc <= StartDistance && StartDistance > UE_SMALL_NUMBER
+			? FMath::Lerp(Stroke.StartWorldPosition, Crossing, Arc / StartDistance)
+			: FMath::Lerp(Crossing, Stroke.EndWorldPosition,
+				EndDistance > UE_SMALL_NUMBER ? FMath::Clamp((Arc - StartDistance) / EndDistance, 0.0, 1.0) : 1.0);
+	}
+	const FVector Normal = (Stroke.StartWorldNormal.GetSafeNormal() + Stroke.EndWorldNormal.GetSafeNormal()).GetSafeNormal();
+	if (Normal.IsNearlyZero())
+	{
+		return false;
+	}
+	const double Chord = FVector::Distance(Stroke.StartWorldPosition, Stroke.EndWorldPosition);
+	const double CellSize = Data.TargetCellSizeCm * MeshToWorld.GetMaximumAxisScale();
+	TArray<int32> Candidates;
+	GatherConnectedMeshUVTriangles(Data, MeshToWorld, Stroke.StartTriangleIndex,
+		Desired, Normal, Chord + CellSize * 2.0, Candidates);
+	if (Alpha >= 1.0 && !Candidates.Contains(Stroke.EndTriangleIndex))
+	{
+		return false;
+	}
+	double BestDistanceSq = TNumericLimits<double>::Max();
+	FVector BestWorldPoint = FVector::ZeroVector;
+	for (const int32 Index : Candidates)
+	{
+		const FMD_ScrapeMeshUVTriangle& Triangle = Data.Triangles[Index];
+        FVector Point;
+        if (!FMD_ScrapeMeshUVGeometry::ClosestPointOnSourceTriangle(Triangle, MeshToWorld, Desired, Point)) { continue; }
+		const double DistanceSq = FVector::DistSquared(Point, Desired);
+		if (DistanceSq < BestDistanceSq)
 		{
-			++Result.TouchedCellCount;
-		}
-
-		const FMD_ScrapeSurfaceCell& CellAfterStroke =
-			InOutSurfaceCells[CellIndex];
-		const float RemovedBaseAmount = FMath::Max(
-			0.0f,
-			RemainingBeforeStroke[CellIndex]
-				- CellAfterStroke.RemainingContamination);
-		const float RemovedTransferredAmount = FMath::Max(
-			0.0f,
-			TransferredBeforeStroke[CellIndex]
-				- CellAfterStroke.TransferredContamination);
-		const float RemovedAmount =
-			RemovedBaseAmount + RemovedTransferredAmount;
-		const float AddedCoveredFraction = FMath::Max(
-			0.0f,
-			CellAfterStroke.CoveredFraction
-				- CoveredFractionBeforeStroke[CellIndex]);
-
-		// 부동소수점 연산 중 생길 수 있는 무의미한 극소 차이는 변경 내역에서 제외
-		if (RemovedAmount <= UE_SMALL_NUMBER
-			&& AddedCoveredFraction <= UE_SMALL_NUMBER)
-		{
-			continue;
-		}
-
-		FMD_ScrapeCellChange& CellChange = Result.CellChanges.AddDefaulted_GetRef();
-		CellChange.CellIndex = CellIndex;
-		CellChange.GridCoordinate = FIntPoint(
-			CellIndex % GridDimensions.X,
-			CellIndex / GridDimensions.X);
-		CellChange.RemovedAmount = RemovedAmount;
-		CellChange.RemainingAmountAfter =
-			CellAfterStroke.RemainingContamination;
-		CellChange.bBecameClean =
-			(RemainingBeforeStroke[CellIndex] > Settings.CleanTolerance
-				|| TransferredBeforeStroke[CellIndex] > Settings.CleanTolerance)
-			&& CellAfterStroke.RemainingContamination <= Settings.CleanTolerance
-			&& CellAfterStroke.TransferredContamination <= Settings.CleanTolerance;
-
-		// Surface의 보상 provenance 원장은 base와 Stage3 transferred를
-		// 서로 다른 layer로 보존한다. RPC/Blueprint에는 노출하지 않는
-		// server-only 합계만 기록해 실제 제거 비율대로 lot을 옮길 수 있게 한다.
-		Result.RemovedBaseContaminationAmount += RemovedBaseAmount;
-		Result.RemovedTransferredContaminationAmount +=
-			RemovedTransferredAmount;
-		Result.RemovedContaminationAmount += RemovedAmount;
-
-		if (CellChange.bBecameClean)
-		{
-			++Result.NewlyCleanedCellCount;
+			BestDistanceSq = DistanceSq;
+			BestWorldPoint = Point;
+			OutSample.TriangleIndex = Index;
 		}
 	}
-
-	Result.ModifiedCellCount = Result.CellChanges.Num();
-	Result.CleanRatioAfter = CalculateCleanRatio(InOutSurfaceCells);
-	Result.CleanRatioDelta = FMath::Max(
-		0.0f,
-		Result.CleanRatioAfter - Result.CleanRatioBefore);
-	// 순수 제거 판정에는 아직 역오염 단계가 없으므로 gross와 net이 같다.
-	// Surface가 같은 트랜잭션에서 역오염을 더하면 두 net 필드만 다시 줄인다.
-	Result.NetRemovedContaminationAmount =
-		Result.RemovedContaminationAmount;
-	Result.NetRemovedCleanRatioDelta = Result.CleanRatioDelta;
-	Result.bIsSurfaceFullyClean = IsSurfaceFullyClean(
-		InOutSurfaceCells,
-		Settings.CleanTolerance);
-
-	// 접촉 종류는 실제 제거가 있었는지와 맨 벽면 접촉이 있었는지의 조합으로 결정
-	// 이 분류 자체는 감점을 발생시키지 않으며 다음 계층이 피드백/규칙을 선택
-	if (!Result.bHadSurfaceContact)
+	if (OutSample.TriangleIndex == INDEX_NONE
+		|| BestDistanceSq > FMath::Square(FMath::Max(CellSize * 2.0, Chord * 0.1)))
 	{
-		Result.ContactType = EMD_ScrapeContactType::None;
+		return false;
 	}
-	else if (bRemovedAnyContamination && Result.bTouchedBareSurface)
+	const FMD_ScrapeMeshUVTriangle& Triangle = Data.Triangles[OutSample.TriangleIndex];
+	OutSample.PositionLocal = MeshToWorld.InverseTransformPosition(BestWorldPoint);
+	OutSample.NormalLocal = Triangle.NormalLocal;
+	OutSample.DistanceCm = FMath::Sqrt(BestDistanceSq);
+	if (!FMD_ScrapeMeshUVGeometry::TryCalculateBarycentric(Triangle,
+		OutSample.PositionLocal, OutSample.Barycentric))
 	{
-		Result.ContactType = EMD_ScrapeContactType::Mixed;
+		return false;
 	}
-	else if (bRemovedAnyContamination)
+	OutSample.CanonicalUV = Triangle.UVA * OutSample.Barycentric.X
+		+ Triangle.UVB * OutSample.Barycentric.Y + Triangle.UVC * OutSample.Barycentric.Z;
+	FVector StartAxis = Stroke.StartWorldDepthAxis;
+	FVector EndAxis = Stroke.EndWorldDepthAxis;
+	if (StartAxis.IsNearlyZero())
 	{
-		Result.ContactType = EMD_ScrapeContactType::ContaminationOnly;
+		StartAxis = EndAxis.IsNearlyZero() ? Stroke.EndWorldPosition - Stroke.StartWorldPosition : EndAxis;
+	}
+	if (EndAxis.IsNearlyZero())
+	{
+		EndAxis = StartAxis;
+	}
+	if (FVector::DotProduct(StartAxis, EndAxis) < 0.0)
+	{
+		EndAxis *= -1.0;
+	}
+	const FVector WorldNormal = MeshUVWorldNormal(MeshToWorld, Triangle.NormalLocal);
+	OutWorldDepthAxis = FVector::VectorPlaneProject(FMath::Lerp(StartAxis, EndAxis, Alpha), WorldNormal).GetSafeNormal();
+	if (OutWorldDepthAxis.IsNearlyZero())
+	{
+		OutWorldDepthAxis = FVector::VectorPlaneProject(
+			MeshToWorld.TransformVector(Triangle.B - Triangle.A), WorldNormal).GetSafeNormal();
+	}
+	return !OutWorldDepthAxis.IsNearlyZero();
+}
+
+FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToMeshUVGrid(
+	const UMD_ScrapeMeshUVData& Data, const FTransform& MeshToWorld,
+	const FMD_ScrapeMeshUVStroke& Stroke, const FMD_ScrapeToolSpec& ToolSpec,
+	const FMD_ScrapeSettings& Settings, const TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+	TArray<float>* OutRequestedRemovalAmounts, FMD_ScrapeEvaluationScratch* Scratch,
+	const TConstArrayView<double> CachedCellCarrierWeights,
+	const FMD_ScrapeMeshUVProgress* CachedProgressBefore,
+	FMD_ScrapeMeshUVProgress* OutProgressAfter)
+{
+	const FMD_ScrapeMeshUVProgress ProgressBefore = CachedProgressBefore
+		? *CachedProgressBefore : FMD_ScrapeMeshUVProgress();
+	if (OutProgressAfter) { *OutProgressAfter = FMD_ScrapeMeshUVProgress(); }
+	FMD_ScrapeResult Result;
+	Result.SurfaceFace = Stroke.SurfaceFace;
+	if (OutRequestedRemovalAmounts)
+	{
+		OutRequestedRemovalAmounts->Reset();
+	}
+	FMD_ScrapeStroke ValidationStroke;
+	ValidationStroke.SurfaceFace = Stroke.SurfaceFace;
+	ValidationStroke.TravelDistanceCm = Stroke.TravelDistanceCm;
+	if (!IsMeshUVContactValid(Data, MeshToWorld, Stroke)
+		|| InOutSurfaceCells.Num() != Data.Cells.Num()
+		|| !IsEvaluationInputValid(ValidationStroke, ToolSpec, Settings, Data.AtlasDimensions,
+			FVector2D(1.0, 1.0), InOutSurfaceCells))
+	{
+		return Result;
+	}
+	TArray<double> BuiltCellCarrierWeights;
+	TConstArrayView<double> CellCarrierWeights = CachedCellCarrierWeights;
+	if (CellCarrierWeights.IsEmpty())
+	{
+		if (!FMD_ScrapeFaceProgress::BuildMeshUVCellCarrierWeights(Data, MeshToWorld, BuiltCellCarrierWeights))
+		{
+			return Result;
+		}
+		CellCarrierWeights = MakeArrayView(BuiltCellCarrierWeights);
+	}
+	if (CellCarrierWeights.Num() != InOutSurfaceCells.Num())
+	{
+		return Result;
+	}
+	const double Chord = FVector::Distance(Stroke.StartWorldPosition, Stroke.EndWorldPosition);
+	FVector Crossing;
+	double StartDistance = 0.0, EndDistance = 0.0;
+	const bool bHasDirectSeam = FindDirectMeshUVSeamPath(Data, MeshToWorld, Stroke, Crossing, StartDistance, EndDistance);
+	const double PathLength = bHasDirectSeam ? StartDistance + EndDistance : Chord;
+	const double MinWorldScale = MeshToWorld.GetScale3D().GetAbsMin();
+	const double SampleSpacing = FMath::Min3(Data.TargetCellSizeCm * MinWorldScale
+		* Settings.SampleSpacingRatioOfSmallestCell, static_cast<double>(Settings.MaximumSampleSpacingCm),
+		0.5 * FMath::Min(ToolSpec.BladeWidthCm, ToolSpec.BladeDepthCm));
+	if (!FMath::IsFinite(SampleSpacing) || SampleSpacing <= UE_SMALL_NUMBER
+		|| PathLength / SampleSpacing > 4096.0)
+	{
+		return Result;
+	}
+	Result.bIsInputValid = true;
+	if (ProgressBefore.bIsValid
+		&& FMath::IsFinite(ProgressBefore.InitialCarrierAmount) && ProgressBefore.InitialCarrierAmount >= 0.0
+		&& FMath::IsFinite(ProgressBefore.CurrentCarrierAmount) && ProgressBefore.CurrentCarrierAmount >= 0.0)
+	{
+		Result.CleanRatioBefore = CalculateCurrentCleanRatio(
+			ProgressBefore.InitialCarrierAmount, ProgressBefore.CurrentCarrierAmount);
 	}
 	else
 	{
-		Result.ContactType = EMD_ScrapeContactType::BareSurfaceOnly;
+		double InitialCarrier = 0.0, BaseCarrier = 0.0, TransferredCarrier = 0.0;
+		FMD_ScrapeFaceProgress::CalculateWeightedCarrierAmounts(InOutSurfaceCells, CellCarrierWeights,
+			InitialCarrier, BaseCarrier, TransferredCarrier);
+		Result.CleanRatioBefore = CalculateCurrentCleanRatio(InitialCarrier, BaseCarrier + TransferredCarrier);
+	}
+	Result.CleanRatioAfter = Result.CleanRatioBefore;
+	Result.bIsSurfaceFullyClean = IsSurfaceFullyClean(InOutSurfaceCells, Settings.CleanTolerance);
+	if (Chord <= UE_SMALL_NUMBER || (Stroke.TravelDistanceCm <= 0.0f && Chord < Settings.MinimumTravelDistanceCm))
+	{
+		return Result;
+	}
+	const FVector StartAxis = Stroke.StartWorldDepthAxis.GetSafeNormal();
+	const FVector EndAxis = Stroke.EndWorldDepthAxis.GetSafeNormal();
+	const double RotationDegrees = !StartAxis.IsNearlyZero() && !EndAxis.IsNearlyZero()
+		? FMath::RadiansToDegrees(FMath::Acos(FMath::Clamp(FMath::Abs(FVector::DotProduct(StartAxis, EndAxis)), 0.0, 1.0))) : 0.0;
+	const int32 SampleCount = FMath::Max3(1, FMath::CeilToInt32(PathLength / SampleSpacing),
+		FMath::CeilToInt32(RotationDegrees / Settings.MaximumBladeRotationDegreesPerSample));
+	if (SampleCount > 4096)
+	{
+		Result.bIsInputValid = false;
+		return Result;
+	}
+	TArray<FMD_ScrapeMeshUVSample> Samples;
+	TArray<FVector> DepthAxes;
+	Samples.SetNum(SampleCount * 2 + 1);
+	DepthAxes.SetNum(SampleCount * 2 + 1);
+	// Validate the whole connected path before mutating any contamination state.
+	for (int32 I = 0; I <= SampleCount * 2; ++I)
+	{
+		if (!TryInterpolateMeshUVStroke(Data, MeshToWorld, Stroke,
+			static_cast<double>(I) / (SampleCount * 2), Samples[I], DepthAxes[I]))
+		{
+			Result.bIsInputValid = false;
+			return Result;
+		}
+	}
+	FMD_ScrapeEvaluationScratch LocalScratch;
+	FMD_ScrapeEvaluationScratch& State = Scratch ? *Scratch : LocalScratch;
+	State.MeshUVVisitedCellCount = 0;
+	State.TouchedCells.Init(false, InOutSurfaceCells.Num());
+	State.RemainingBeforeStroke.SetNumUninitialized(InOutSurfaceCells.Num());
+	State.TransferredBeforeStroke.SetNumUninitialized(InOutSurfaceCells.Num());
+	State.CoveredFractionBeforeStroke.SetNumUninitialized(InOutSurfaceCells.Num());
+	if (OutRequestedRemovalAmounts)
+	{
+		OutRequestedRemovalAmounts->SetNumZeroed(InOutSurfaceCells.Num());
 	}
 
+	Result.bWasStrokeLongEnough = true;
+	bool bRemovedAny = false;
+	TArray<FMeshUVCellCoverage> Coverage;
+	for (int32 I = 0; I < SampleCount; ++I)
+	{
+		const double Travel = bHasDirectSeam ? PathLength / SampleCount
+			: FVector::Distance(MeshToWorld.TransformPosition(Samples[I * 2].PositionLocal),
+			MeshToWorld.TransformPosition(Samples[I * 2 + 1].PositionLocal))
+			+ FVector::Distance(MeshToWorld.TransformPosition(Samples[I * 2 + 1].PositionLocal),
+				MeshToWorld.TransformPosition(Samples[I * 2 + 2].PositionLocal));
+		CollectMeshUVFootprint(Data, MeshToWorld, Samples[I * 2 + 1], DepthAxes[I * 2 + 1], ToolSpec, Coverage, &State.MeshUVVisitedCellCount);
+		for (const FMeshUVCellCoverage& Hit : Coverage)
+		{
+			FMD_ScrapeSurfaceCell& Cell = InOutSurfaceCells[Hit.CellIndex];
+			if (!State.TouchedCells[Hit.CellIndex])
+			{
+				State.RemainingBeforeStroke[Hit.CellIndex] = Cell.RemainingContamination;
+				State.TransferredBeforeStroke[Hit.CellIndex] = Cell.TransferredContamination;
+				State.CoveredFractionBeforeStroke[Hit.CellIndex] = Cell.CoveredFraction;
+			}
+			Cell.Normalize();
+			State.TouchedCells[Hit.CellIndex] = true;
+			Result.bHadSurfaceContact = true;
+			ApplyScrapeCoverageSample(Cell, Hit.Fraction, 1.0, Travel, ToolSpec, Settings,
+				Result, bRemovedAny, OutRequestedRemovalAmounts ? &(*OutRequestedRemovalAmounts)[Hit.CellIndex] : nullptr);
+		}
+	}
+	if (OutRequestedRemovalAmounts)
+	{
+		for (TConstSetBitIterator<> It(State.TouchedCells); It; ++It)
+		{
+			const int32 Index = It.GetIndex();
+			(*OutRequestedRemovalAmounts)[Index] = static_cast<float>((*OutRequestedRemovalAmounts)[Index] * CellCarrierWeights[Index]);
+		}
+	}
+	FinalizeScrapeEvaluation(Data.AtlasDimensions, Settings, InOutSurfaceCells, State, bRemovedAny,
+		Result, CellCarrierWeights, OutProgressAfter);
 	return Result;
+}
+
+float FMD_ScrapeEvaluator::ApplyContaminationDabToMeshUVGrid(
+	const UMD_ScrapeMeshUVData& Data, const FTransform& MeshToWorld,
+	const FMD_ScrapeMeshUVStroke& PointContact, const FMD_ScrapeToolSpec& ToolSpec,
+	const float StampAmount, const float StampDepthCm,
+	const TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+	TArray<FMD_ScrapeCellChange>& OutCellChanges,
+	const TConstArrayView<double> CachedCellCarrierWeights)
+{
+	OutCellChanges.Reset();
+	if (!ToolSpec.IsValid() || InOutSurfaceCells.Num() != Data.Cells.Num()
+		|| !FMath::IsFinite(StampAmount) || StampAmount <= 0.0f
+		|| !FMath::IsFinite(StampDepthCm) || StampDepthCm <= 0.0f)
+	{
+		return 0.0f;
+	}
+	FMD_ScrapeMeshUVSample Sample;
+	FVector Depth;
+	if (!TryInterpolateMeshUVStroke(Data, MeshToWorld, PointContact, 0.0, Sample, Depth))
+	{
+		return 0.0f;
+	}
+	TArray<double> BuiltCellCarrierWeights;
+	TConstArrayView<double> CellCarrierWeights = CachedCellCarrierWeights;
+	if (CellCarrierWeights.IsEmpty())
+	{
+		if (!FMD_ScrapeFaceProgress::BuildMeshUVCellCarrierWeights(Data, MeshToWorld, BuiltCellCarrierWeights))
+		{
+			return 0.0f;
+		}
+		CellCarrierWeights = MakeArrayView(BuiltCellCarrierWeights);
+	}
+	if (CellCarrierWeights.Num() != InOutSurfaceCells.Num())
+	{
+		return 0.0f;
+	}
+	FMD_ScrapeToolSpec StampTool = ToolSpec;
+	StampTool.BladeDepthCm = StampDepthCm;
+	TArray<FMeshUVCellCoverage> Coverage;
+	CollectMeshUVFootprint(Data, MeshToWorld, Sample, Depth, StampTool, Coverage);
+	double Added = 0.0;
+	for (const FMeshUVCellCoverage& Hit : Coverage)
+	{
+		FMD_ScrapeSurfaceCell& Cell = InOutSurfaceCells[Hit.CellIndex];
+		const float Before = Cell.TransferredContamination;
+		const float PatternBefore = Cell.TransferredPaintPatternDensity;
+		Cell.TransferredContamination = FMath::Clamp(Before + StampAmount * static_cast<float>(Hit.Fraction), 0.0f, 1.0f);
+		Cell.TransferredPaintPatternDensity = FMath::Max(PatternBefore,
+			ToolSpec.BrushShape == EMD_ScrapeBrushShape::Rectangle
+			? static_cast<float>(CalculateTransferredPaintPatternDensity(FVector2D(Hit.WidthCoordinateCm, 0),
+				FVector2D(1, 0), ToolSpec.BladeWidthCm * 0.5)) : 1.0f);
+		if (Cell.TransferredContamination > Before + UE_SMALL_NUMBER
+			|| Cell.TransferredPaintPatternDensity > PatternBefore + UE_SMALL_NUMBER)
+		{
+			Added += (Cell.TransferredContamination - Before) * CellCarrierWeights[Hit.CellIndex];
+			FMD_ScrapeCellChange& Change = OutCellChanges.AddDefaulted_GetRef();
+			Change.CellIndex = Hit.CellIndex;
+			Change.GridCoordinate = FIntPoint(Hit.CellIndex % Data.AtlasDimensions.X, Hit.CellIndex / Data.AtlasDimensions.X);
+			Change.RemainingAmountAfter = Cell.RemainingContamination;
+		}
+	}
+	return static_cast<float>(Added);
 }
 
 bool FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
@@ -930,7 +1640,8 @@ bool FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
 	const float StampRatio,
 	const TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
 	TArray<FMD_ScrapeCellChange>& OutCellChanges,
-	float& OutAddedContaminationAmount)
+	float& OutAddedContaminationAmount,
+	const TConstArrayView<double> CellCarrierWeights)
 {
 	OutCellChanges.Reset();
 	OutAddedContaminationAmount = 0.0f;
@@ -943,12 +1654,15 @@ bool FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
 		|| ExpectedCellCount > MAX_int32
 		|| RequestedRemovalAmounts.Num() != ExpectedCellCount
 		|| InOutSurfaceCells.Num() != ExpectedCellCount
+		|| (!CellCarrierWeights.IsEmpty() && CellCarrierWeights.Num() != ExpectedCellCount)
 		|| !FMath::IsFinite(StampRatio)
 		|| StampRatio <= 0.0f)
 	{
 		return false;
 	}
 
+    // Weighted requests are carrier units: even a tiny positive carrier can represent a full-density cell.
+    const float RequestThreshold = CellCarrierWeights.IsEmpty() ? UE_SMALL_NUMBER : 0.0f;
 	const float SafeStampRatio = FMath::Clamp(StampRatio, 0.0f, 1.0f);
 	const auto GetSafeCurrentTransferred =
 		[](const float CurrentTransferred)
@@ -960,10 +1674,10 @@ bool FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
 	const auto CalculateTargetTransferred =
 		[SafeStampRatio](
 			const float CurrentTransferred,
-			const float RequestedRemovalAmount)
+			const float RequestedRemovalAmount, const double CarrierWeight)
 		{
 			return CurrentTransferred
-				+ RequestedRemovalAmount * SafeStampRatio;
+				+ static_cast<float>(RequestedRemovalAmount * static_cast<double>(SafeStampRatio) / CarrierWeight);
 		};
 
 	// DEC-020: 어느 한 셀이라도 목표 역오염을 전부 담지 못하면 전체 segment를
@@ -971,12 +1685,15 @@ bool FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
 	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)
 	{
 		const float RequestedRemovalAmount = RequestedRemovalAmounts[CellIndex];
-		if (!FMath::IsFinite(RequestedRemovalAmount)
+		const double CarrierWeight = CellCarrierWeights.IsEmpty() ? 1.0 : CellCarrierWeights[CellIndex];
+		if (!FMath::IsFinite(CarrierWeight) || CarrierWeight < 0.0
+			|| (RequestedRemovalAmount > RequestThreshold && CarrierWeight <= 0.0)
+			|| !FMath::IsFinite(RequestedRemovalAmount)
 			|| RequestedRemovalAmount < 0.0f)
 		{
 			return false;
 		}
-		if (RequestedRemovalAmount <= UE_SMALL_NUMBER)
+		if (RequestedRemovalAmount <= RequestThreshold)
 		{
 			continue;
 		}
@@ -984,7 +1701,7 @@ bool FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
 		const float TargetTransferred = CalculateTargetTransferred(
 			GetSafeCurrentTransferred(
 				InOutSurfaceCells[CellIndex].TransferredContamination),
-			RequestedRemovalAmount);
+			RequestedRemovalAmount, CarrierWeight);
 		if (!FMath::IsFinite(TargetTransferred)
 			|| TargetTransferred > 1.0f)
 		{
@@ -995,7 +1712,8 @@ bool FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
 	for (int32 CellIndex = 0; CellIndex < InOutSurfaceCells.Num(); ++CellIndex)
 	{
 		const float RequestedRemovalAmount = RequestedRemovalAmounts[CellIndex];
-		if (RequestedRemovalAmount <= UE_SMALL_NUMBER)
+		const double CarrierWeight = CellCarrierWeights.IsEmpty() ? 1.0 : CellCarrierWeights[CellIndex];
+		if (RequestedRemovalAmount <= RequestThreshold)
 		{
 			continue;
 		}
@@ -1005,7 +1723,7 @@ bool FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
 			GetSafeCurrentTransferred(Cell.TransferredContamination);
 		const float TargetTransferred = CalculateTargetTransferred(
 			PreviousTransferred,
-			RequestedRemovalAmount);
+			RequestedRemovalAmount, CarrierWeight);
 		if (TargetTransferred <= PreviousTransferred + UE_SMALL_NUMBER)
 		{
 			continue;
@@ -1025,7 +1743,7 @@ bool FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
 		Change.bBecameClean = false;
 
 		OutAddedContaminationAmount +=
-			TargetTransferred - PreviousTransferred;
+			static_cast<float>((TargetTransferred - PreviousTransferred) * CarrierWeight);
 	}
 
 	return true;
