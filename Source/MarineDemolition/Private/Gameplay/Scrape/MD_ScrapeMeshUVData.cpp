@@ -1,6 +1,7 @@
 #include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
 
 #include "Engine/StaticMesh.h"
+#include "Gameplay/Scrape/MD_ScrapeMeshUVSeam.h"
 
 namespace
 {
@@ -158,6 +159,8 @@ const TMultiMap<int32, int32>& UMD_ScrapeMeshUVData::GetVisualDependents() const
 				CachedVisualDependents.Add(Source, Index);
 			}
 		}
+        MD_ScrapeMeshUVSeam::Build(*this, CachedVisualSeamOffsets, CachedVisualSeamSamples,
+            CachedVisualSeamDependentOffsets, CachedVisualSeamDependents);
 		VisualDependentsLayoutId = LayoutId;
 		VisualDependentsAtlasDimensions = AtlasDimensions;
 		VisualDependentsCellCount = Cells.Num();
@@ -165,9 +168,32 @@ const TMultiMap<int32, int32>& UMD_ScrapeMeshUVData::GetVisualDependents() const
 	return CachedVisualDependents;
 }
 
+TConstArrayView<FMD_ScrapeMeshUVVisualSample> UMD_ScrapeMeshUVData::GetVisualSeamSamples(int32 PixelIndex) const
+{
+    GetVisualDependents();
+    if (PixelIndex < 0 || PixelIndex + 1 >= CachedVisualSeamOffsets.Num()) return {};
+    const int32 Begin = CachedVisualSeamOffsets[PixelIndex];
+    const int32 Count = CachedVisualSeamOffsets[PixelIndex + 1] - Begin;
+    return Count > 0 ? TConstArrayView<FMD_ScrapeMeshUVVisualSample>(CachedVisualSeamSamples.GetData() + Begin, Count)
+        : TConstArrayView<FMD_ScrapeMeshUVVisualSample>();
+}
+
+TConstArrayView<int32> UMD_ScrapeMeshUVData::GetVisualSeamDependents(int32 SourceCellIndex) const
+{
+    GetVisualDependents();
+    if (SourceCellIndex < 0 || SourceCellIndex + 1 >= CachedVisualSeamDependentOffsets.Num()) return {};
+    const int32 Begin = CachedVisualSeamDependentOffsets[SourceCellIndex];
+    const int32 Count = CachedVisualSeamDependentOffsets[SourceCellIndex + 1] - Begin;
+    return Count > 0 ? MakeArrayView(CachedVisualSeamDependents.GetData() + Begin, Count) : TConstArrayView<int32>();
+}
+
 void UMD_ScrapeMeshUVData::InvalidateVisualDependentsCache() const
 {
 	CachedVisualDependents.Empty();
+    CachedVisualSeamOffsets.Empty();
+    CachedVisualSeamDependentOffsets.Empty();
+    CachedVisualSeamDependents.Empty();
+    CachedVisualSeamSamples.Empty();
 	VisualDependentsLayoutId.Invalidate();
 	VisualDependentsAtlasDimensions = FIntPoint::ZeroValue;
 	VisualDependentsCellCount = INDEX_NONE;

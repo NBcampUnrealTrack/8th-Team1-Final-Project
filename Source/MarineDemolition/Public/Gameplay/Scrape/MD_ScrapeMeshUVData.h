@@ -6,6 +6,13 @@
 
 class UStaticMesh;
 
+/** Immutable display weight; gameplay ownership remains in the baked Cells. */
+struct FMD_ScrapeMeshUVVisualSample
+{
+    int32 CellIndex = INDEX_NONE;
+    float Weight = 0.0f;
+};
+
 /** A real shared subsegment; a T-junction can have several neighbors along one triangle edge. */
 USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_ScrapeMeshUVNeighbor
@@ -141,11 +148,18 @@ public:
 	bool IsActiveCell(int32 CellIndex) const;
 	/** Game-thread-only lookup shared by every wall using this immutable baked profile. */
 	const TMultiMap<int32, int32>& GetVisualDependents() const;
+    /** Empty means the original single-source texel. Never serialized. */
+    TConstArrayView<FMD_ScrapeMeshUVVisualSample> GetVisualSeamSamples(int32 PixelIndex) const;
+    TConstArrayView<int32> GetVisualSeamDependents(int32 SourceCellIndex) const;
 
 private:
 	void InvalidateVisualDependentsCache() const;
 	// Derived runtime data: never serialized, cooked, or expanded by the Details panel.
 	mutable TMultiMap<int32, int32> CachedVisualDependents;
+    mutable TArray<int32> CachedVisualSeamOffsets;
+    mutable TArray<int32> CachedVisualSeamDependentOffsets;
+    mutable TArray<int32> CachedVisualSeamDependents;
+    mutable TArray<FMD_ScrapeMeshUVVisualSample> CachedVisualSeamSamples;
 	mutable FGuid VisualDependentsLayoutId;
 	mutable FIntPoint VisualDependentsAtlasDimensions = FIntPoint::ZeroValue;
 	mutable int32 VisualDependentsCellCount = INDEX_NONE;

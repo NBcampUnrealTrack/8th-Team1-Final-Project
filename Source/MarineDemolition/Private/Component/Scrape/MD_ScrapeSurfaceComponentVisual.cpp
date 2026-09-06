@@ -63,6 +63,22 @@ UMD_ScrapeSurfaceComponent::MakeContaminationMaskCell(
     {
         if (!ContaminationMeshUVData || !ContaminationMeshUVData->Cells.IsValidIndex(CellIndex))
         { return MaskCell; }
+        const TConstArrayView<FMD_ScrapeMeshUVVisualSample> Samples =
+            ContaminationMeshUVData->GetVisualSeamSamples(CellIndex);
+        if (!Samples.IsEmpty())
+        {
+            double Signal = 0.0;
+            for (const FMD_ScrapeMeshUVVisualSample& Sample : Samples)
+            {
+                if (!VisualCells.IsValidIndex(Sample.CellIndex)) continue;
+                const FMD_ScrapeSurfaceCell& Cell = VisualCells[Sample.CellIndex];
+                Signal += Sample.Weight * FMD_ScrapeMaskAtlas::CalculateVisualMaskValue(
+                    Cell.RemainingContamination, Cell.InitialContamination,
+                    Cell.CoveredFraction, ContaminationVisualFilmOpacityGamma);
+            }
+            MaskCell.RemainingContamination = static_cast<float>(FMath::Clamp(Signal, 0.0, 1.0));
+            return MaskCell;
+        }
         CellIndex = ContaminationMeshUVData->Cells[CellIndex].VisualSourceCellIndex;
     }
 	if (!VisualCells.IsValidIndex(CellIndex))
@@ -709,7 +725,7 @@ void UMD_ScrapeSurfaceComponent::UpdateContaminationMask(
     TArray<FMD_ScrapeCellChange> ExpandedChanges;
     const TArray<FMD_ScrapeCellChange>* VisualChanges = &CellChanges;
     const UMD_ScrapeMeshUVData* VisualData = GetContaminationMeshUVData();
-    if (VisualData && !VisualData->GetVisualDependents().IsEmpty())
+    if (VisualData)
     {
         const TMultiMap<int32, int32>& VisualDependents = VisualData->GetVisualDependents();
         ExpandedChanges = CellChanges;
@@ -717,6 +733,16 @@ void UMD_ScrapeSurfaceComponent::UpdateContaminationMask(
         for (const FMD_ScrapeCellChange& Change : CellChanges) { Added.Add(Change.CellIndex); }
         for (const FMD_ScrapeCellChange& Change : CellChanges)
         {
+            for (const int32 Pixel : VisualData->GetVisualSeamDependents(Change.CellIndex))
+            {
+                if (!Added.Contains(Pixel))
+                {
+                    Added.Add(Pixel);
+                    FMD_ScrapeCellChange Copy;
+                    Copy.CellIndex = Pixel;
+                    ExpandedChanges.Add(Copy);
+                }
+            }
             for (auto It = VisualDependents.CreateConstKeyIterator(Change.CellIndex); It; ++It)
             {
                 if (!Added.Contains(It.Value()))
