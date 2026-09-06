@@ -962,11 +962,6 @@ UMD_ScrapeSurfaceComponent::CommitContaminationPhysicalDrop(
 	if (bAcceptedToLedger)
 	{
 		CommitResult.Status = EPhysicalCommitStatus::AcceptedPending;
-		CommitResult.CommittedRawAmount = PhysicalDropAmount;
-		CommitResult.CommittedRecoveryLots = MoveTemp(PhysicalRecoveryLots);
-		CommitResult.CommittedRewardUnits =
-			FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
-				CommitResult.CommittedRecoveryLots);
 	}
 	return CommitResult;
 }

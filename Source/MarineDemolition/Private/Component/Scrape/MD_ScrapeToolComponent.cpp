@@ -93,13 +93,8 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
 	bHasScrapeFocusView = false;
 	StrokePath.bHasPreviousSurfacePosition = false;
-	StrokePath.bHasLockedStrokeAxis = false;
-	ContaminationPaint.SaturatedContaminationStampPatternSeed = 7319;
 	StrokePath.PreviousSurfacePositionCm = FVector2D::ZeroVector;
 	StrokePath.PreviousSurfaceFace = EMD_ScrapeSurfaceFace::Front;
-	StrokePath.StrokeAnchorPositionCm = FVector2D::ZeroVector;
-	StrokePath.FurthestSurfacePositionCm = FVector2D::ZeroVector;
-	StrokePath.LockedStrokeAxis = FVector2D::ZeroVector;
 	StrokePath.PendingScrapePathArcLengthCm = 0.0;
 	StrokePath.ScrapePathArcLengthCm = 0.0;
 	StrokePath.LastEmittedScrapePathArcLengthCm = 0.0;
@@ -235,11 +230,6 @@ bool UMD_ScrapeToolComponent::SetScrapeToolSpec(
 	// 성능이 바뀐 프레임에 이전 위치부터 새 범위를 소급 적용하지 않도록 경로를 끊는다.
 	ResetStrokeTracking();
 	ScrapeToolSpec = NewToolSpec;
-	++ScrapeToolSpecGeneration;
-	if (ScrapeToolSpecGeneration == 0)
-	{
-		++ScrapeToolSpecGeneration;
-	}
 	GetOwner()->ForceNetUpdate();
 	return true;
 }
@@ -248,11 +238,6 @@ void UMD_ScrapeToolComponent::OnRep_ScrapeToolSpec()
 {
 	// 서버에서 새 스펙을 받은 프레임에 이전 로컬 위치부터 새 범위를 잇지 않는다.
 	ResetStrokeTracking();
-	++ScrapeToolSpecGeneration;
-	if (ScrapeToolSpecGeneration == 0)
-	{
-		++ScrapeToolSpecGeneration;
-	}
 }
 
 bool UMD_ScrapeToolComponent::SetScrapeBladeWidthCm(
@@ -276,7 +261,7 @@ EMD_ScrapeLoadStage UMD_ScrapeToolComponent::CalculateScrapeLoadStage(
 		return EMD_ScrapeLoadStage::Stage1;
 	}
 
-	if (Load < ScrapeLoadStage3Threshold)
+	if (Load <= ScrapeLoadStage3Threshold)
 	{
 		return EMD_ScrapeLoadStage::Stage2;
 	}
@@ -681,14 +666,6 @@ bool UMD_ScrapeToolComponent::CommitScrapeLoadStateInternal(
 	}
 
 	const float PreviousLoad = GetScrapeLoad();
-	if (CalculateScrapeLoadStage(PreviousLoad) == EMD_ScrapeLoadStage::Stage3
-		&& CalculateScrapeLoadStage(NewLoad) != EMD_ScrapeLoadStage::Stage3)
-	{
-		// 이전 spec/generation으로 생성한 tail을 먼저 확정한다.
-		FlushStage3PathTail();
-		AdvanceStage3SubStrokeGeneration();
-	}
-
 	ScrapeLoad = NewLoad;
 	ScrapeLoadRecoveryLots = MoveTemp(NewRecoveryLots);
 	++ScrapeLoadStateRevision;
@@ -1074,10 +1051,6 @@ void UMD_ScrapeToolComponent::StartScraping()
 	}
 	UpdateLocalScrapeVisualContactPose(0.0f);
 	BeginScrapeVisualStroke();
-	ContaminationPaint.Stage3SubStrokeGeneration = 0;
-	AdvanceStage3SubStrokeGeneration();
-	ContaminationPaint.Stage3SampleSequence = 0;
-	ContaminationPaint.CommittedStage3Dabs.Reset();
 	if (ScrapeFocusState == EMD_ScrapeFocusState::FocusedReady)
 	{
 		SetScrapeFocusState(EMD_ScrapeFocusState::FocusedScraping);
@@ -1245,25 +1218,11 @@ void UMD_ScrapeToolComponent::TickComponent(
 
 void UMD_ScrapeToolComponent::ResetStrokeTracking()
 {
-	const bool bHadTrackedSubStroke =
-		StrokePath.bHasPreviousSurfacePosition || ContaminationPaint.bStage3PathActive;
-	const uint32 GenerationBeforeFlush = ContaminationPaint.Stage3SubStrokeGeneration;
 	FlushPendingScrapePathApplication();
-	const bool bHadOrBuiltStage3Path = ContaminationPaint.bStage3PathActive;
-	FlushPendingContaminationPaintTail();
-	if ((bHadTrackedSubStroke || bHadOrBuiltStage3Path)
-		&& ContaminationPaint.Stage3SubStrokeGeneration == GenerationBeforeFlush)
-	{
-		AdvanceStage3SubStrokeGeneration();
-	}
 	ClearCurrentScrapeContact();
 	StrokePath.bHasPreviousSurfacePosition = false;
-	StrokePath.bHasLockedStrokeAxis = false;
 	StrokePath.PreviousSurfacePositionCm = FVector2D::ZeroVector;
 	StrokePath.PreviousSurfaceFace = EMD_ScrapeSurfaceFace::Front;
-	StrokePath.StrokeAnchorPositionCm = FVector2D::ZeroVector;
-	StrokePath.FurthestSurfacePositionCm = FVector2D::ZeroVector;
-	StrokePath.LockedStrokeAxis = FVector2D::ZeroVector;
 	StrokePath.PreviousSurface.Reset();
 	StrokePath.bHasLastScrapeSurfaceHit = false;
 	ResetScrapePathAccumulator(FVector2D::ZeroVector);

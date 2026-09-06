@@ -95,38 +95,6 @@ bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceFaceFromHit(
 }
 
 
-bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceWorldNormal(
-	const EMD_ScrapeSurfaceFace SurfaceFace,
-	FVector& OutWorldNormal)
-{
-	OutWorldNormal = FVector::ZeroVector;
-	if (!bContaminationEnabled)
-	{
-		return false;
-	}
-	if (!bContaminationSurfaceInitialized)
-	{
-		InitializeContaminationSurface();
-	}
-	if (!bContaminationSurfaceInitialized || !SurfaceMesh)
-	{
-		return false;
-	}
-
-	// An atlas has no single normal; callers must provide the surface position.
-	if (UsesMeshUVSurface()) { return false; }
-
-	return FMD_ScrapeSurfaceGeometry::TryCalculateSurfaceWorldNormal(
-		FVector2D::ZeroVector,
-		SurfaceFace,
-		SurfaceMesh->GetComponentTransform(),
-		ResolvedContaminationSurfaceNormalAxis,
-		ContaminationSurfaceMapping,
-		ResolvedContaminationSurfaceSizeCm,
-		OutWorldNormal);
-}
-
-
 bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromHit(
 	const FHitResult& Hit,
 	FVector2D& OutSurfacePositionCm,
@@ -624,8 +592,7 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 	CachedBackInitialContaminationAmount = 0.0;
 	CachedFrontCurrentContaminationAmount = 0.0;
 	CachedBackCurrentContaminationAmount = 0.0;
-	AppliedContaminationStampIdentities.Reset();
-	AppliedContaminationStampIdentityOrder.Reset();
+	CachedMeshUVProgress = FMD_ScrapeMeshUVProgress();
 	ContaminationCells.Reset();
 	ContaminationGeneratedInitialAmounts.Reset();
 	// 표면을 새로 만들면 아직 덩어리가 되지 못한 제거량도 같이 버린다.

@@ -138,6 +138,7 @@ UMD_ScrapeSurfaceComponent::UMD_ScrapeSurfaceComponent()
 	CachedBackInitialContaminationAmount = 0.0;
 	CachedFrontCurrentContaminationAmount = 0.0;
 	CachedBackCurrentContaminationAmount = 0.0;
+	CachedMeshUVProgress = FMD_ScrapeMeshUVProgress();
 	ContaminationMaskAtlasDimensions = FIntPoint::ZeroValue;
 	TransferredPaintMaskAtlasDimensions = FIntPoint::ZeroValue;
 	bContaminationDecalsConfigured = false;
@@ -424,8 +425,6 @@ void UMD_ScrapeSurfaceComponent::InitializeRuntimeState()
 
 void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 {
-	AppliedContaminationStampIdentities.Reset();
-	AppliedContaminationStampIdentityOrder.Reset();
 	SetContaminationDecalsVisible(false);
 	ReleaseContaminationMask();
 	DestroyAdditionalContaminationDecalPatches();
@@ -458,6 +457,7 @@ void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 	CachedBackInitialContaminationAmount = 0.0;
 	CachedFrontCurrentContaminationAmount = 0.0;
 	CachedBackCurrentContaminationAmount = 0.0;
+	CachedMeshUVProgress = FMD_ScrapeMeshUVProgress();
 }
 
 void UMD_ScrapeSurfaceComponent::InitializeSurface()

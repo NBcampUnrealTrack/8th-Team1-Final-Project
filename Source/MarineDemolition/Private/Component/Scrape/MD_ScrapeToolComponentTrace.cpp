@@ -430,7 +430,6 @@ void UMD_ScrapeToolComponent::ApplyResolvedScrapePath(
 	{
 		if (PathSegment.bStartsNewSubStroke)
 		{
-			SplitScrapeSubStrokeAtCorner(PathSegment.StartPositionCm);
 			continue;
 		}
 

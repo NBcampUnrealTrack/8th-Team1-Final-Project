@@ -5,8 +5,6 @@
 #include "Gameplay/Scrape/MD_ScrapeBladeAxis.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
-#include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
-#include "Components/StaticMeshComponent.h"
 
 void UMD_ScrapeToolComponent::BeginStrokeTracking(
 	UMD_ScrapeSurfaceComponent* Surface,
@@ -14,17 +12,10 @@ void UMD_ScrapeToolComponent::BeginStrokeTracking(
 	const EMD_ScrapeSurfaceFace SurfaceFace)
 {
 	FlushPendingScrapePathApplication();
-	FlushPendingContaminationPaintTail();
 	StrokePath.bHasPreviousSurfacePosition = true;
-	StrokePath.bHasLockedStrokeAxis = false;
 	StrokePath.PreviousSurfacePositionCm = SurfacePositionCm;
 	StrokePath.PreviousSurfaceFace = SurfaceFace;
-	StrokePath.StrokeAnchorPositionCm = SurfacePositionCm;
-	StrokePath.FurthestSurfacePositionCm = SurfacePositionCm;
-	StrokePath.LockedStrokeAxis = FVector2D::ZeroVector;
 	StrokePath.PreviousSurface = Surface;
-	// 최초 anchor는 현재 generation을 그대로 쓴다. 표면·면 hard 전환은
-	// 이전 tracking을 정리하는 경로에서 새 generation을 이미 발급한다.
 	ResetScrapePathAccumulator(SurfacePositionCm);
 }
 
@@ -63,8 +54,6 @@ bool UMD_ScrapeToolComponent::ConsumeRawScrapePathPoint(
 		Segment.EndWorldBladeDepthAxis = FVector::VectorPlaneProject(Delta, WorldStroke.EndWorldNormal).GetSafeNormal();
 		StrokePath.ScrapePathArcLengthCm += Travel;
 		// Raw contacts are already physical segments. Atlas seams must not enter the 2D resampler.
-		StrokePath.bHasLockedStrokeAxis = false;
-		StrokePath.LockedStrokeAxis = FVector2D::ZeroVector;
 		return true;
 	}
 
@@ -172,10 +161,6 @@ void UMD_ScrapeToolComponent::ResolvePendingScrapePath(
 	}
 
 	StrokePath.bHasStableBladeDepthAxis = true;
-	StrokePath.LockedStrokeAxis = StrokePath.StableBladeDepthAxis;
-	StrokePath.bHasLockedStrokeAxis = true;
-	StrokePath.StrokeAnchorPositionCm = StrokePath.PendingScrapePolylineCm[0];
-	StrokePath.FurthestSurfacePositionCm = StrokePath.StrokeAnchorPositionCm;
 	StrokePath.BladeAxisWindow.Reset();
 	StrokePath.ScrapePathArcLengthCm = 0.0;
 	StrokePath.BladeAxisWindow.AddSample(
@@ -467,15 +452,6 @@ void UMD_ScrapeToolComponent::FlushPendingScrapePathApplication()
 	}
 }
 
-void UMD_ScrapeToolComponent::SplitScrapeSubStrokeAtCorner(
-	const FVector2D& CornerPositionCm)
-{
-	FlushPendingContaminationPaintTail();
-	AdvanceStage3SubStrokeGeneration();
-	StrokePath.StrokeAnchorPositionCm = CornerPositionCm;
-	StrokePath.FurthestSurfacePositionCm = CornerPositionCm;
-}
-
 void UMD_ScrapeToolComponent::ResetScrapePathAccumulator(
 	const FVector2D& StartPositionCm)
 {
@@ -516,8 +492,6 @@ void UMD_ScrapeToolComponent::UpdateStableBladeAxis(const double ArcStepCm)
 		StrokePath.StableBladeDepthAxis,
 		Candidate,
 		MaximumRadians);
-	StrokePath.LockedStrokeAxis = StrokePath.StableBladeDepthAxis;
-	StrokePath.bHasLockedStrokeAxis = true;
 }
 
 void UMD_ScrapeToolComponent::ApplyAuthoritativeScrapeStroke(
@@ -527,10 +501,11 @@ void UMD_ScrapeToolComponent::ApplyAuthoritativeScrapeStroke(
 	const FMD_ScrapeStroke& Stroke,
 	const FVector& FeedbackLocation)
 {
-	// Exact Stage3 transfer is completed inside the Surface transaction. The
-	// ordered-path argument remains part of the caller contract for consistency.
-	(void)PathSegment;
-
+	if (!FMath::IsFinite(PathSegment.TravelDistanceCm)
+		|| PathSegment.TravelDistanceCm <= 0.0f)
+	{
+		return;
+	}
 	const double CurrentRecoveryCarrierAmount =
 		FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(
 			ScrapeLoadRecoveryLots);
@@ -712,8 +687,6 @@ void UMD_ScrapeToolComponent::ApplyScrapePathSegment(
 	const double SegmentChordCm = Surface->UsesMeshUVSurface()
 		? static_cast<double>(PathSegment.TravelDistanceCm)
 		: FVector2D::Distance(PathSegment.StartPositionCm, PathSegment.EndPositionCm);
-	StrokePath.LockedStrokeAxis = PathSegment.EndBladeDepthAxis;
-	StrokePath.bHasLockedStrokeAxis = !Surface->UsesMeshUVSurface() && !StrokePath.LockedStrokeAxis.IsNearlyZero();
 
 	FVector EndWorldPosition = CurrentHit.ImpactPoint;
 	const bool bHasEndWorldPosition =
@@ -726,17 +699,6 @@ void UMD_ScrapeToolComponent::ApplyScrapePathSegment(
 	if (SegmentChordCm <= UE_SMALL_NUMBER)
 	{
 		return;
-	}
-
-	if (StrokePath.bHasLockedStrokeAxis
-		&& FVector2D::DotProduct(
-			PathSegment.EndPositionCm - StrokePath.StrokeAnchorPositionCm,
-			StrokePath.LockedStrokeAxis)
-			> FVector2D::DotProduct(
-				StrokePath.FurthestSurfacePositionCm - StrokePath.StrokeAnchorPositionCm,
-				StrokePath.LockedStrokeAxis))
-	{
-		StrokePath.FurthestSurfacePositionCm = PathSegment.EndPositionCm;
 	}
 
 	if (GetOwner() && GetOwner()->HasAuthority())
@@ -764,334 +726,4 @@ void UMD_ScrapeToolComponent::ApplyScrapePathSegment(
 	{
 		LocalPredictedScrapeSurfaces.AddUnique(Surface);
 	}
-}
-void UMD_ScrapeToolComponent::StartStage3PathAccumulator(
-	UMD_ScrapeSurfaceComponent* const Surface,
-	const EMD_ScrapeSurfaceFace SurfaceFace,
-	const FVector2D& StartPositionCm,
-	const FVector2D& StartBladeDepthAxis)
-{
-	if (!IsValid(Surface)
-		|| StartPositionCm.ContainsNaN()
-		|| StartBladeDepthAxis.ContainsNaN())
-	{
-		return;
-	}
-	if (ContaminationPaint.bStage3PathActive)
-	{
-		FlushStage3PathTail();
-	}
-	if (LmbStrokeGeneration == 0)
-	{
-		LmbStrokeGeneration = 1;
-	}
-	if (ContaminationPaint.Stage3SubStrokeGeneration == 0)
-	{
-		ContaminationPaint.Stage3SubStrokeGeneration = 1;
-	}
-	if (ScrapeToolSpecGeneration == 0)
-	{
-		ScrapeToolSpecGeneration = 1;
-	}
-
-	ContaminationPaint.bStage3PathActive = true;
-	ContaminationPaint.Stage3PathArcLengthCm = 0.0;
-	ContaminationPaint.Stage3NextDistanceBin = 0;
-	ContaminationPaint.Stage3PathSurface = Surface;
-	ContaminationPaint.Stage3PathSurfaceFace = SurfaceFace;
-	ContaminationPaint.Stage3PathToolSpec = ScrapeToolSpec;
-	ContaminationPaint.Stage3PathStartPositionCm = StartPositionCm;
-	ContaminationPaint.Stage3PathStartBladeBasis = FMD_ScrapeBladeAxis::MakeBasis(StartBladeDepthAxis);
-	ContaminationPaint.Stage3ProtectionDistanceCm =
-		Surface->GetContaminationPaintProtectionDistanceCm(
-			ContaminationPaint.Stage3PathToolSpec,
-			GetSaturatedContaminationStampDepthCm());
-	ContaminationPaint.PendingStage3Dabs.Reset();
-}
-
-void UMD_ScrapeToolComponent::AccumulateStage3PathSegment(
-	UMD_ScrapeSurfaceComponent* const Surface,
-	const EMD_ScrapeSurfaceFace SurfaceFace,
-	const FMD_ScrapeToolPathSegment& PathSegment)
-{
-	if (!IsValid(Surface) || PathSegment.bStartsNewSubStroke)
-	{
-		return;
-	}
-	if (ContaminationPaint.bStage3PathActive
-		&& (ContaminationPaint.Stage3PathSurface.Get() != Surface
-			|| ContaminationPaint.Stage3PathSurfaceFace != SurfaceFace))
-	{
-		FlushStage3PathTail();
-		AdvanceStage3SubStrokeGeneration();
-	}
-	if (!ContaminationPaint.bStage3PathActive)
-	{
-		StartStage3PathAccumulator(
-			Surface,
-			SurfaceFace,
-			PathSegment.StartPositionCm,
-			PathSegment.StartBladeDepthAxis);
-	}
-	if (!ContaminationPaint.bStage3PathActive)
-	{
-		return;
-	}
-
-	const double SegmentTravelCm =
-		static_cast<double>(PathSegment.TravelDistanceCm);
-	if (!FMath::IsFinite(SegmentTravelCm)
-		|| SegmentTravelCm <= UE_SMALL_NUMBER)
-	{
-		return;
-	}
-
-	const double SegmentStartArcCm = ContaminationPaint.Stage3PathArcLengthCm;
-	const double SegmentEndArcCm = SegmentStartArcCm + SegmentTravelCm;
-	++ContaminationPaint.Stage3SampleSequence;
-	if (ContaminationPaint.Stage3SampleSequence == 0)
-	{
-		++ContaminationPaint.Stage3SampleSequence;
-	}
-	const int32 ResolvedPatternSeed =
-		Surface->ResolveContaminationPaintPatternSeed(
-			SurfaceFace,
-			ContaminationPaint.SaturatedContaminationStampPatternSeed);
-	const float StampDepthCm = GetSaturatedContaminationStampDepthCm();
-	const float StampSpacingCm = GetSaturatedContaminationStampSpacingCm();
-
-	while (ContaminationPaint.Stage3NextDistanceBin < MAX_int32)
-	{
-		FMD_ScrapeContaminationStampIdentity Identity;
-		Identity.FocusSessionGeneration = GetStage3FocusSessionIdentity();
-		Identity.LmbStrokeGeneration = LmbStrokeGeneration;
-		Identity.SubStrokeGeneration = ContaminationPaint.Stage3SubStrokeGeneration;
-		Identity.DistanceBin = ContaminationPaint.Stage3NextDistanceBin;
-		const double CandidateArcCm =
-			FMD_ScrapeEvaluator::CalculateContaminationDabArcLengthCm(
-				Identity,
-				StampDepthCm,
-				StampSpacingCm,
-				ResolvedPatternSeed);
-		if (!FMath::IsFinite(CandidateArcCm)
-			|| CandidateArcCm > SegmentEndArcCm + UE_KINDA_SMALL_NUMBER)
-		{
-			break;
-		}
-
-		const int32 CandidateDistanceBin = ContaminationPaint.Stage3NextDistanceBin;
-		++ContaminationPaint.Stage3NextDistanceBin;
-		// 시작점 제외/끝점 포함으로 frame 경계의 중복을 막는다.
-		if (CandidateArcCm
-			<= SegmentStartArcCm + UE_KINDA_SMALL_NUMBER)
-		{
-			continue;
-		}
-		Identity.DistanceBin = CandidateDistanceBin;
-		if (!FMD_ScrapeEvaluator::ShouldSelectContaminationDab(
-				Identity,
-				GetSaturatedContaminationStampCoverage(),
-				ResolvedPatternSeed))
-		{
-			continue;
-		}
-
-		FMD_PendingScrapeContaminationDab& Pending =
-			ContaminationPaint.PendingStage3Dabs.AddDefaulted_GetRef();
-		Pending.Dab = BuildStage3DabAtArcLength(
-			PathSegment,
-			SegmentStartArcCm,
-			SegmentTravelCm,
-			CandidateArcCm,
-			CandidateDistanceBin,
-			SurfaceFace);
-		Pending.Surface = Surface;
-		Pending.ToolSpec = ContaminationPaint.Stage3PathToolSpec;
-		Pending.StampAmount = GetSaturatedContaminationStampRatio();
-		Pending.StampDepthCm = StampDepthCm;
-	}
-
-	ContaminationPaint.Stage3PathArcLengthCm = SegmentEndArcCm;
-	CommitProtectedStage3Dabs();
-}
-
-FMD_ScrapeContaminationDab
-UMD_ScrapeToolComponent::BuildStage3DabAtArcLength(
-	const FMD_ScrapeToolPathSegment& PathSegment,
-	const double SegmentStartArcCm,
-	const double SegmentTravelCm,
-	const double CandidateArcCm,
-	const int32 DistanceBin,
-	const EMD_ScrapeSurfaceFace SurfaceFace)
-{
-	const double Alpha = SegmentTravelCm > UE_SMALL_NUMBER
-		? FMath::Clamp(
-			(CandidateArcCm - SegmentStartArcCm) / SegmentTravelCm,
-			0.0,
-			1.0)
-		: 0.0;
-	const FVector2D BladeDepthAxis = FMD_ScrapeBladeAxis::Interpolate(
-		PathSegment.StartBladeDepthAxis,
-		PathSegment.EndBladeDepthAxis,
-		Alpha);
-
-	FMD_ScrapeContaminationDab Dab;
-	Dab.Identity.FocusSessionGeneration = GetStage3FocusSessionIdentity();
-	Dab.Identity.LmbStrokeGeneration = LmbStrokeGeneration;
-	Dab.Identity.SubStrokeGeneration = ContaminationPaint.Stage3SubStrokeGeneration;
-	Dab.Identity.DistanceBin = DistanceBin;
-	if (UMD_ScrapeSurfaceComponent* Surface = ContaminationPaint.Stage3PathSurface.Get(); Surface && Surface->UsesMeshUVSurface())
-	{
-		FMD_ScrapeStroke AddressStroke;
-		AddressStroke.SurfaceFace = SurfaceFace;
-		AddressStroke.StartPositionCm = PathSegment.StartPositionCm;
-		AddressStroke.EndPositionCm = PathSegment.EndPositionCm;
-		AddressStroke.StartWorldBladeDepthAxis = PathSegment.StartWorldBladeDepthAxis;
-		AddressStroke.EndWorldBladeDepthAxis = PathSegment.EndWorldBladeDepthAxis;
-		FMD_ScrapeMeshUVStroke WorldStroke;
-		FMD_ScrapeMeshUVSample Sample;
-		FVector WorldAxis;
-		const UMD_ScrapeMeshUVData* Data = Surface->GetContaminationMeshUVData();
-		if (!Data || !Surface->GetSurfaceMesh() || !Surface->TryBuildMeshUVStroke(AddressStroke, WorldStroke)
-			|| !FMD_ScrapeEvaluator::TryInterpolateMeshUVStroke(*Data, Surface->GetSurfaceMesh()->GetComponentTransform(),
-				WorldStroke, Alpha, Sample, WorldAxis))
-		{
-			return FMD_ScrapeContaminationDab();
-		}
-		const FVector2D AddressSize(Data->AtlasDimensions.X * Data->TargetCellSizeCm,
-			Data->AtlasDimensions.Y * Data->TargetCellSizeCm);
-		Dab.PositionCm = (Sample.CanonicalUV - FVector2D(0.5, 0.5)) * AddressSize;
-		Dab.WorldBladeDepthAxis = WorldAxis;
-	}
-	else
-	{
-	Dab.PositionCm = FMath::Lerp(
-		PathSegment.StartPositionCm,
-		PathSegment.EndPositionCm,
-		Alpha);
-	}
-	Dab.BladeBasis = FMD_ScrapeBladeAxis::MakeBasis(BladeDepthAxis);
-	Dab.SurfaceFace = SurfaceFace;
-	Dab.ArcLengthCm = CandidateArcCm;
-	Dab.SampleSequence = ContaminationPaint.Stage3SampleSequence;
-	Dab.ToolSpecGeneration = ScrapeToolSpecGeneration;
-	return Dab;
-}
-
-void UMD_ScrapeToolComponent::CommitProtectedStage3Dabs()
-{
-	const double CommitThroughArcCm =
-		ContaminationPaint.Stage3PathArcLengthCm - FMath::Max(ContaminationPaint.Stage3ProtectionDistanceCm, 0.0);
-	int32 CommitCount = 0;
-	while (CommitCount < ContaminationPaint.PendingStage3Dabs.Num()
-		&& ContaminationPaint.PendingStage3Dabs[CommitCount].Dab.ArcLengthCm
-			<= CommitThroughArcCm + UE_KINDA_SMALL_NUMBER)
-	{
-		FMD_PendingScrapeContaminationDab& Pending =
-			ContaminationPaint.PendingStage3Dabs[CommitCount];
-		if (UMD_ScrapeSurfaceComponent* const Surface = Pending.Surface.Get())
-		{
-			Surface->ApplyLocalContaminationDab(
-				Pending.Dab,
-				Pending.ToolSpec,
-				Pending.StampAmount,
-				Pending.StampDepthCm);
-		}
-		ContaminationPaint.CommittedStage3Dabs.Add(Pending.Dab);
-		++CommitCount;
-	}
-	if (CommitCount > 0)
-	{
-		ContaminationPaint.PendingStage3Dabs.RemoveAt(
-			0,
-			CommitCount,
-			EAllowShrinking::No);
-	}
-}
-
-void UMD_ScrapeToolComponent::FlushStage3PathTail()
-{
-	if (!ContaminationPaint.bStage3PathActive)
-	{
-		return;
-	}
-	UMD_ScrapeSurfaceComponent* const FinalizedSurface =
-		ContaminationPaint.Stage3PathSurface.Get();
-	for (FMD_PendingScrapeContaminationDab& Pending : ContaminationPaint.PendingStage3Dabs)
-	{
-		if (UMD_ScrapeSurfaceComponent* const Surface = Pending.Surface.Get())
-		{
-			Surface->ApplyLocalContaminationDab(
-				Pending.Dab,
-				Pending.ToolSpec,
-				Pending.StampAmount,
-				Pending.StampDepthCm);
-		}
-		ContaminationPaint.CommittedStage3Dabs.Add(Pending.Dab);
-	}
-	if (IsValid(FinalizedSurface))
-	{
-		FinalizedSurface->FinalizeLocalContaminationPath();
-	}
-	ResetStage3PathAccumulator();
-}
-
-void UMD_ScrapeToolComponent::ResetStage3PathAccumulator()
-{
-	ContaminationPaint.bStage3PathActive = false;
-	ContaminationPaint.Stage3PathArcLengthCm = 0.0;
-	ContaminationPaint.Stage3NextDistanceBin = 0;
-	ContaminationPaint.Stage3ProtectionDistanceCm = 0.0;
-	ContaminationPaint.Stage3PathSurface.Reset();
-	ContaminationPaint.Stage3PathSurfaceFace = EMD_ScrapeSurfaceFace::Front;
-	ContaminationPaint.Stage3PathToolSpec = FMD_ScrapeToolSpec();
-	ContaminationPaint.Stage3PathStartPositionCm = FVector2D::ZeroVector;
-	ContaminationPaint.Stage3PathStartBladeBasis = FMD_ScrapeBladeBasis();
-	ContaminationPaint.PendingStage3Dabs.Reset();
-}
-
-void UMD_ScrapeToolComponent::AdvanceStage3SubStrokeGeneration()
-{
-	++ContaminationPaint.Stage3SubStrokeGeneration;
-	if (ContaminationPaint.Stage3SubStrokeGeneration == 0)
-	{
-		++ContaminationPaint.Stage3SubStrokeGeneration;
-	}
-}
-
-void UMD_ScrapeToolComponent::BreakStage3SubStroke()
-{
-	if (!ContaminationPaint.bStage3PathActive)
-	{
-		return;
-	}
-	FlushStage3PathTail();
-	AdvanceStage3SubStrokeGeneration();
-}
-
-uint64 UMD_ScrapeToolComponent::GetStage3FocusSessionIdentity() const
-{
-	if (ContaminationPaint.Stage3FocusSessionIdentityOverride != 0)
-	{
-		return ContaminationPaint.Stage3FocusSessionIdentityOverride;
-	}
-
-	// TASK 7의 서버 권위 session id가 붙기 전에도 다른 플레이어의 로컬
-	// generation이 같은 Surface dedupe key로 충돌하지 않도록 source를 상위 32bit에 싣는다.
-	const UObject* const IdentitySource = GetOwner()
-		? static_cast<const UObject*>(GetOwner())
-		: static_cast<const UObject*>(this);
-	const uint32 SourceIdentity = IdentitySource
-		? static_cast<uint32>(IdentitySource->GetUniqueID())
-		: 1u;
-	const uint32 LocalGeneration = ScrapeFocusSession.ScrapeFocusGeneration != 0
-		? ScrapeFocusSession.ScrapeFocusGeneration
-		: 1u;
-	return (static_cast<uint64>(SourceIdentity) << 32)
-		| static_cast<uint64>(LocalGeneration);
-}
-
-void UMD_ScrapeToolComponent::FlushPendingContaminationPaintTail()
-{
-	FlushStage3PathTail();
 }

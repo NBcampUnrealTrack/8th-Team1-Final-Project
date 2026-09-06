@@ -326,76 +326,30 @@ public:
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec);
 
-	/** Stage3 ordered path가 tail을 확정할 때까지 완전 제거 이벤트만 유예한다. */
+	/** Tool이 제거 질량을 Load와 물리 원장에 커밋할 때까지 완료 이벤트를 유예한다. */
 	FMD_ScrapeResult ApplyLocalScrapeStrokeWithDeferredCompletion(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec);
 
-	/** 유예한 Stage3 제거와 pending dab이 모두 끝난 후 완료 전환을 확정한다. */
+	/** Tool의 질량 커밋이 끝난 후 유예한 완료 전환을 확정한다. */
 	void FinalizeLocalContaminationPath();
 
-	/** 서버에서 정상 제거 후 같은 셀별 제거 시도량의 일정 비율을 정확히 되묻힌다. */
+	/** Uniform residue over every actual blade contact. */
 	FMD_ScrapeResult ApplyLocalScrapeStrokeWithContaminationStamp(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec,
 		float StampRatio,
 		float& OutRemovedCleanRatioDelta,
 		bool bDeferCompletionBroadcast = false);
-
-	FMD_ScrapeResult ApplyLocalScrapeStrokeWithContaminationStamp(
-		const FMD_ScrapeStroke& Stroke,
-		const FMD_ScrapeToolSpec& ToolSpec,
-		const FVector2D& StampPathStartPositionCm,
-		const FVector2D& StampPathAxis,
-		float StampRatio,
-		float StampCoverage,
-		float StampDepthCm,
-		float StampSpacingCm,
-		int32 StampPatternSeed,
-		float& OutRemovedCleanRatioDelta,
-		bool bDeferCompletionBroadcast = false);
-
-	/** 입력 종료 시 보호 거리 뒤에 남겨 둔 마지막 오염 도장 구간을 적용한다. */
-	void FlushLocalContaminationPaintTail(
-		const FMD_ScrapeStroke& FullPathStroke,
-		const FVector2D& StampPathAxis,
-		const FMD_ScrapeToolSpec& ToolSpec,
-		float StampRatio,
-		float StampCoverage,
-		float StampDepthCm,
-		float StampSpacingCm,
-		int32 StampPatternSeed);
-
-	/** ordered Stage3 path의 exact-position dab을 identity dedupe 후 적용한다. */
-	float ApplyLocalContaminationDab(
-		const FMD_ScrapeContaminationDab& Dab,
-		const FMD_ScrapeToolSpec& ToolSpec,
-		float StampAmount,
-		float StampDepthCm);
-
-	/** 현재 격자와 도구 footprint에 맞는 Stage3 causal delay 거리. */
-	double GetContaminationPaintProtectionDistanceCm(
-		const FMD_ScrapeToolSpec& ToolSpec,
-		float StampDepthCm) const;
 
 	/** Exact movement spacing used by the evaluator for this surface and tool. */
 	double GetScrapeSampleSpacingCm(
 		const FMD_ScrapeToolSpec& ToolSpec) const;
 
-	/** 표면·면 salt를 기존 Stage3 pattern seed에 결합한다. */
-	int32 ResolveContaminationPaintPatternSeed(
-		EMD_ScrapeSurfaceFace SurfaceFace,
-		int32 PatternSeed) const;
-
 	/** 스크래핑과 동일한 충돌 기준으로 앞면/뒷면만 판정한다. */
 	bool TryGetScrapeSurfaceFaceFromHit(
 		const FHitResult& Hit,
 		EMD_ScrapeSurfaceFace& OutSurfaceFace);
-
-	/** 지정한 앞/뒤 면의 월드 법선을 반환한다. 접촉 이펙트 방향 정렬용. */
-	bool TryGetScrapeSurfaceWorldNormal(
-		EMD_ScrapeSurfaceFace SurfaceFace,
-		FVector& OutWorldNormal);
 
 	bool TryGetScrapeSurfacePositionFromHit(
 		const FHitResult& Hit,
@@ -772,8 +726,6 @@ private:
 	static constexpr int32 MaximumContaminationDecalPatchesPerFace = 32;
 	static constexpr int32 MaximumLocalScrapePredictionBatches = 24;
 	static constexpr int32 MaximumLocalScrapePredictionStrokesPerBatch = 128;
-	/** TASK 7의 최대 재전송 window보다 넓게 유지하는 bounded dedupe history. */
-	static constexpr int32 MaximumRecentContaminationStampIdentities = 4096;
 
 	bool HasAuthority() const;
 	void ResolveSurfaceMeshFromOwner();
@@ -785,11 +737,6 @@ private:
 
 	UFUNCTION()
 	void OnRep_ContaminationEnabled();
-
-	TSet<FMD_ScrapeContaminationStampIdentity>
-		AppliedContaminationStampIdentities;
-	TArray<FMD_ScrapeContaminationStampIdentity>
-		AppliedContaminationStampIdentityOrder;
 
 	// Runtime atlases can contain over a million cells. Keep Blueprint access, but never
 	// generate per-cell Details rows when a PIE/SIE wall instance is selected.
@@ -953,6 +900,8 @@ private:
 	double CachedBackInitialContaminationAmount;
 	double CachedFrontCurrentContaminationAmount;
 	double CachedBackCurrentContaminationAmount;
+	/** Canonical MeshUV totals and completion counts; refreshed by every bulk state replacement. */
+	FMD_ScrapeMeshUVProgress CachedMeshUVProgress;
 
 	bool bContaminationSurfaceInitialized;
 	bool bContaminationCompletionBroadcast;
@@ -1000,17 +949,11 @@ private:
 	FMD_ScrapeResult ApplyLocalScrapeStrokeInternal(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec,
-		const FVector2D& StampPathStartPositionCm,
-		const FVector2D& StampPathAxis,
 		float StampRatio,
-		float StampCoverage,
-		float StampDepthCm,
-		float StampSpacingCm,
-		int32 StampPatternSeed,
 		float& OutRemovedCleanRatioDelta,
-		bool bDeferCompletionBroadcast = false,
-		bool bUseExactRequestedAmountStamp = false);
+		bool bDeferCompletionBroadcast = false);
 
+	void CommitContaminationMeshUVProgressCache(const FMD_ScrapeMeshUVProgress& Progress);
 	void RefreshContaminationCleanRatioCache();
 	void RefreshContaminationCleanRatioCache(EMD_ScrapeSurfaceFace Face);
 	bool ResolveContaminationSurfaceGeometry();
@@ -1139,9 +1082,6 @@ private:
 	struct FPhysicalCommitResult
 	{
 		EPhysicalCommitStatus Status = EPhysicalCommitStatus::Rejected;
-		double CommittedRawAmount = 0.0;
-		double CommittedRewardUnits = 0.0;
-		TArray<FMD_ScrapeRecoveryLot> CommittedRecoveryLots;
 		int32 SpawnedCount = 0;
 
 		bool IsAccepted() const

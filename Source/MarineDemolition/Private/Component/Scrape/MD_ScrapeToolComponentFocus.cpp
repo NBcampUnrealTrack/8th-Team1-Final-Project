@@ -432,7 +432,6 @@ void UMD_ScrapeToolComponent::AdoptApprovedScrapeFocusSession(
 	CurrentScrapeAim = Preflight;
 	AuthoritativeAim.LastAuthoritativeAimReceiveSeconds =
 		AuthoritativeAim.LastAuthoritativeAimRateRefillSeconds;
-	ContaminationPaint.Stage3FocusSessionIdentityOverride = FocusSessionId;
 	SetScrapeFocusState(EMD_ScrapeFocusState::FocusedReady);
 	SetComponentTickEnabled(true);
 	ProcessReadyScrapeAimResult(Preflight, 0.0f);
@@ -938,7 +937,6 @@ void UMD_ScrapeToolComponent::ResetScrapeFocusSessionState()
 	ScrapeFocusSession.FocusPendingElapsedSeconds = 0.0;
 	ScrapeFocusSession.LocalFocusMonotonicStartSeconds = 0.0;
 	ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted = false;
-	ContaminationPaint.Stage3FocusSessionIdentityOverride = 0;
 	ResetAuthoritativeScrapeFocusViewState();
 }
 

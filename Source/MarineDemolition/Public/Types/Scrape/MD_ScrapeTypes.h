@@ -193,10 +193,10 @@ enum class EMD_ScrapeLoadStage : uint8
 	/** 0보다 크고 34보다 작은 상태 */
 	Stage1 = 1 UMETA(DisplayName = "1단계 - 얇은 코팅"),
 
-	/** 34 이상 67 미만인 포화 직전 상태 */
+	/** 34 이상 67 이하인 포화 직전 상태 */
 	Stage2 = 2 UMETA(DisplayName = "2단계 - 처짐과 방울"),
 
-	/** 67 이상인 포화 상태 */
+	/** 67 초과인 포화 상태 */
 	Stage3 = 3 UMETA(DisplayName = "3단계 - 포화")
 };
 
@@ -351,102 +351,6 @@ public:
 	{
 		return DepthAxis.IsNearlyZero() && WidthAxis.IsNearlyZero();
 	}
-};
-
-/**
- * Stage3 역오염 dab의 논리적 식별자.
- *
- * DistanceBin은 월드 좌표나 진행축 투영값이 아니라, 해당
- * sub-stroke의 서버 승인 누적 arc length에서 계산한 고정 간격 bin이다.
- * 네트워크 batch를 재전송해도 이 네 값이 같으면 같은 dab이다.
- */
-USTRUCT()
-struct MARINEDEMOLITION_API FMD_ScrapeContaminationStampIdentity
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY()
-	uint64 FocusSessionGeneration = 0;
-
-	UPROPERTY()
-	uint32 LmbStrokeGeneration = 0;
-
-	UPROPERTY()
-	uint32 SubStrokeGeneration = 0;
-
-	UPROPERTY()
-	int32 DistanceBin = INDEX_NONE;
-
-	bool IsValid() const
-	{
-		return FocusSessionGeneration != 0
-			&& LmbStrokeGeneration != 0
-			&& SubStrokeGeneration != 0
-			&& DistanceBin >= 0;
-	}
-
-	bool operator==(const FMD_ScrapeContaminationStampIdentity& Other) const
-	{
-		return FocusSessionGeneration == Other.FocusSessionGeneration
-			&& LmbStrokeGeneration == Other.LmbStrokeGeneration
-			&& SubStrokeGeneration == Other.SubStrokeGeneration
-			&& DistanceBin == Other.DistanceBin;
-	}
-
-	bool operator!=(const FMD_ScrapeContaminationStampIdentity& Other) const
-	{
-		return !(*this == Other);
-	}
-
-	friend uint32 GetTypeHash(
-		const FMD_ScrapeContaminationStampIdentity& Identity)
-	{
-		uint32 Hash = HashCombineFast(
-			GetTypeHash(Identity.FocusSessionGeneration),
-			GetTypeHash(Identity.LmbStrokeGeneration));
-		Hash = HashCombineFast(Hash, GetTypeHash(Identity.SubStrokeGeneration));
-		return HashCombineFast(Hash, GetTypeHash(Identity.DistanceBin));
-	}
-};
-
-/**
- * ordered Stage3 path에서 확정된 exact-position dab.
- *
- * 위치와 blade basis는 candidate 생성 시점의 값을 저장한다. tail flush나
- * 재전송 시점의 현재 tangent로 다시 계산하지 않는다.
- */
-USTRUCT()
-struct MARINEDEMOLITION_API FMD_ScrapeContaminationDab
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY()
-	FMD_ScrapeContaminationStampIdentity Identity;
-
-	UPROPERTY()
-	FVector2D PositionCm = FVector2D::ZeroVector;
-
-	UPROPERTY()
-	FMD_ScrapeBladeBasis BladeBasis;
-
-	/** World tangent used only by the baked MeshUV surface path. */
-	UPROPERTY()
-	FVector WorldBladeDepthAxis = FVector::ZeroVector;
-
-	UPROPERTY()
-	EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
-
-	UPROPERTY()
-	double ArcLengthCm = 0.0;
-
-	/** TASK 7 RPC sequence가 붙기 전에는 서버 로컬 승인 순번을 사용한다. */
-	UPROPERTY()
-	uint64 SampleSequence = 0;
-
-	UPROPERTY()
-	uint32 ToolSpecGeneration = 0;
 };
 
 /**
@@ -1069,6 +973,9 @@ public:
 		, bTouchedBareSurface(false)
 	{
 	}
+
+	/** Native path feedback only: distance actually sampled along the source surface. */
+	double EvaluatedTravelDistanceCm = 0.0;
 
 	/** 이번 결과가 평가한 앞면 또는 뒷면. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")

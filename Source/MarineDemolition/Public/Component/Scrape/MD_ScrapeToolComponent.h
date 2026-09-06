@@ -243,12 +243,6 @@ public:
 		FVector& OutWorldLocation,
 		FVector& OutBladeWorldDirection) const;
 
-	/**
-	 * legacy non-Focus 호출에서 잠긴 임의 축과 다른 방향의 시선 입력을 제거한다.
-	 * Focus 중 입력은 ConsumeScrapeFocusLookInput이 포인터 공간에서 직접 처리한다.
-	 */
-	FVector2D ConstrainLookInput(const FVector2D& LookInput) const;
-
 	/** 현재 장착한 헤라의 판정 성능을 반환한다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool")
 	FMD_ScrapeToolSpec GetScrapeToolSpec() const { return ScrapeToolSpec; }
@@ -293,8 +287,9 @@ public:
 		return CalculateScrapeLoadStage(GetScrapeLoad());
 	}
 
-	/** 3단계 헤라의 직사각형 도장 한 번이 더하는 최대 오염량을 0~1로 반환한다. */
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	/** Legacy asset compatibility only; unused by path deposition. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Legacy",
+		meta = (DeprecatedFunction, DeprecationMessage = "Legacy random dabs are retired; Stage3 uses blade-contact path deposition."))
 	float GetSaturatedContaminationStampRatio() const
 	{
 		return FMath::IsFinite(SaturatedContaminationStampRatio)
@@ -302,8 +297,9 @@ public:
 			: 0.0f;
 	}
 
-	/** 3단계 헤라의 무작위 도장 후보 간격을 cm로 반환한다. */
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	/** Legacy asset compatibility only; unused by path deposition. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Legacy",
+		meta = (DeprecatedFunction, DeprecationMessage = "Legacy random dabs are retired; Stage3 uses blade-contact path deposition."))
 	float GetSaturatedContaminationStampSpacingCm() const
 	{
 		return FMath::IsFinite(SaturatedContaminationStampSpacingCm)
@@ -311,8 +307,9 @@ public:
 			: 0.1f;
 	}
 
-	/** 3단계 헤라가 남기는 직사각형 오염 도장의 진행 방향 깊이를 cm로 반환한다. */
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	/** Legacy asset compatibility only; unused by path deposition. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Legacy",
+		meta = (DeprecatedFunction, DeprecationMessage = "Legacy random dabs are retired; Stage3 uses blade-contact path deposition."))
 	float GetSaturatedContaminationStampDepthCm() const
 	{
 		return FMath::IsFinite(SaturatedContaminationStampDepthCm)
@@ -320,34 +317,15 @@ public:
 			: 0.1f;
 	}
 
-	/** 3단계 헤라의 각 도장 후보가 실제 자국이 될 확률을 0~1로 반환한다. */
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	/** Legacy asset compatibility only; unused by path deposition. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Legacy",
+		meta = (DeprecatedFunction, DeprecationMessage = "Legacy random dabs are retired; Stage3 uses blade-contact path deposition."))
 	float GetSaturatedContaminationStampCoverage() const
 	{
 		return FMath::IsFinite(SaturatedContaminationStampCoverage)
 			? FMath::Clamp(SaturatedContaminationStampCoverage, 0.0f, 1.0f)
 			: 0.0f;
 	}
-
-	/**
-	 * 조준 보정으로 이번 프레임에 적용할 컨트롤 회전을 계산한다.
-	 *
-	 * 지금 조준하고 있는 방향과 목표 방향 사이의 각도 오차에서, 매 프레임
-	 * 일정 비율만 없앤다. 오차를 한 번에 전부 없애거나 임계값 미만에서 아예
-	 * 보정을 멈추면, 프레임마다 "보정함 / 안 함"이 번갈아 나타나면서 시선이
-	 * 빨라졌다 느려졌다 하는 떨림이 생긴다. 비율 보정은 그 경계가 없다.
-	 *
-	 * 보정량은 항상 오차보다 작으므로 목표를 지나치지 않는다.
-	 * 오차가 MaximumErrorDegrees보다 크면 시선이 표면을 너무 스치는 각도라
-	 * 조금만 돌려도 조준점이 크게 튀므로 그 프레임은 보정하지 않는다.
-	 */
-	static FRotator CalculateAimCorrectionRotation(
-		const FRotator& CurrentControlRotation,
-		const FVector& ViewToCurrentAim,
-		const FVector& ViewToTarget,
-		float CorrectionRatio,
-		float MaximumStepDegrees,
-		float MaximumErrorDegrees);
 
 	/**
 	 * 업그레이드 시스템이 새 헤라 성능을 적용한다.
@@ -446,29 +424,29 @@ protected:
 		meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float ScrapeLoadPerRemovedBarnacle;
 
-	/** 선택된 직사각형 도장 한 번이 셀에 더하는 최대 오염량. 덧칠하면 1까지 누적된다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Scrape|Tool|Load",
+	/** Serialized legacy dab setting; no effect on current path deposition. */
+	UPROPERTY(BlueprintReadOnly,
+		Category = "MD|Scrape|Legacy",
 		meta = (ClampMin = "0.0", ClampMax = "1.0",
 			UIMin = "0.0", UIMax = "1.0"))
 	float SaturatedContaminationStampRatio;
 
-	/** 경로의 각 무작위 도장 후보가 실제 오염 자국이 될 확률. 나머지는 빈 간격으로 남긴다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Scrape|Tool|Load",
+	/** Serialized legacy dab setting; no effect on current path deposition. */
+	UPROPERTY(BlueprintReadOnly,
+		Category = "MD|Scrape|Legacy",
 		meta = (ClampMin = "0.0", ClampMax = "1.0",
 			UIMin = "0.0", UIMax = "1.0"))
 	float SaturatedContaminationStampCoverage;
 
-	/** 오염 도장의 진행 방향 깊이. 폭은 장착한 헤라 폭을 그대로 사용한다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Scrape|Tool|Load",
+	/** Serialized legacy dab setting; no effect on current path deposition. */
+	UPROPERTY(BlueprintReadOnly,
+		Category = "MD|Scrape|Legacy",
 		meta = (ClampMin = "0.1", UIMin = "1.0", Units = "cm"))
 	float SaturatedContaminationStampDepthCm;
 
-	/** 경로를 따라 무작위 도장 후보를 배치하는 기준 간격. 각 후보는 약간 위치가 흔들린다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Scrape|Tool|Load",
+	/** Serialized legacy dab setting; no effect on current path deposition. */
+	UPROPERTY(BlueprintReadOnly,
+		Category = "MD|Scrape|Legacy",
 		meta = (ClampMin = "0.1", UIMin = "1.0", Units = "cm"))
 	float SaturatedContaminationStampSpacingCm;
 
@@ -705,7 +683,7 @@ private:
 	friend class FMD_ScrapeFocusCameraLockTest;
 	friend class FMD_ScrapeNetworkSessionTest;
 	/** Stage3 권위 규칙. Blueprint에서 바꿀 수 없는 정확한 역오염 비율이다. */
-	static constexpr float SaturatedReverseContaminationRatio = 0.4f;
+	static constexpr float SaturatedReverseContaminationRatio = 0.1f;
 
 	/** Load와 함께 이동하지만 저장·복제하지 않는 서버 권위 보상 provenance 원장. */
 	TArray<FMD_ScrapeRecoveryLot> ScrapeLoadRecoveryLots;
@@ -1033,7 +1011,6 @@ private:
 		const FVector2D& EndPositionCm,
 		TArray<FMD_ScrapeToolPathSegment>& OutSegments);
 	void FlushPendingScrapePathApplication();
-	void SplitScrapeSubStrokeAtCorner(const FVector2D& CornerPositionCm);
 	void ResetScrapePathAccumulator(const FVector2D& StartPositionCm);
 	void UpdateStableBladeAxis(double ArcStepCm);
 	void ApplyScrapePathSegment(
@@ -1050,40 +1027,6 @@ private:
 	FMD_ScrapeResult ApplyScrapeStrokeForCurrentLoad(
 		UMD_ScrapeSurfaceComponent* Surface,
 		const FMD_ScrapeStroke& Stroke) const;
-	void KeepAimOnScrapePosition(
-		const FVector& ViewLocation,
-		const FVector& CurrentAimWorldPosition,
-		const FVector& TargetWorldPosition,
-		float DeltaTime) const;
-
-	/** 보정 목표가 다른 표면에 가려지지 않고 시점에서 바로 보이는지 확인한다. */
-	bool IsAimCorrectionTargetVisible(
-		const FVector& ViewLocation,
-		const FVector& WorldPosition,
-		const AActor* IgnoredActor = nullptr) const;
-	void FlushPendingContaminationPaintTail();
-	void StartStage3PathAccumulator(
-		UMD_ScrapeSurfaceComponent* Surface,
-		EMD_ScrapeSurfaceFace SurfaceFace,
-		const FVector2D& StartPositionCm,
-		const FVector2D& StartBladeDepthAxis);
-	void AccumulateStage3PathSegment(
-		UMD_ScrapeSurfaceComponent* Surface,
-		EMD_ScrapeSurfaceFace SurfaceFace,
-		const FMD_ScrapeToolPathSegment& PathSegment);
-	void CommitProtectedStage3Dabs();
-	void FlushStage3PathTail();
-	void ResetStage3PathAccumulator();
-	void AdvanceStage3SubStrokeGeneration();
-	void BreakStage3SubStroke();
-	uint64 GetStage3FocusSessionIdentity() const;
-	FMD_ScrapeContaminationDab BuildStage3DabAtArcLength(
-		const FMD_ScrapeToolPathSegment& PathSegment,
-		double SegmentStartArcCm,
-		double SegmentTravelCm,
-		double CandidateArcCm,
-		int32 DistanceBin,
-		EMD_ScrapeSurfaceFace SurfaceFace);
 	void ResetStrokeTracking();
 	void EmitFeedback(
 		UMD_ScrapeSurfaceComponent* Surface,
@@ -1150,7 +1093,6 @@ private:
 	FMD_ScrapeAuthoritativeAimState AuthoritativeAim;
 	FMD_ScrapeStrokePathState StrokePath;
 	FMD_ScrapeAimRecoveryState AimRecovery;
-	FMD_ScrapeContaminationPaintState ContaminationPaint;
 	/**
 	 * 직렬화·복제하지 않는 로컬 animation snapshot. 이후 시각 갱신 경로만
 	 * 이 값을 쓰며 판정·예측 코드는 읽지 않는다.
@@ -1238,7 +1180,6 @@ private:
 	TWeakObjectPtr<UMD_ToolDefinition> AuthoritativeScrapeFocusTool;
 
 	uint32 LmbStrokeGeneration = 0;
-	uint32 ScrapeToolSpecGeneration = 1;
 	uint64 LastScrapePoseNetUpdateFrame = MAX_uint64;
 
 	/** 마지막으로 표면에 닿은 월드 위치. 접촉이 끊기면 무효로 표시한다. */
