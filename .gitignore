@@ -843,3 +843,7 @@ Content/Assets/Stylized_Cemetery/**
 !Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Dirt_Islands_BaseColor.uasset
 !Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Dirt_Islands_Normal.uasset
 !Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Dirt_Islands_ORM.uasset
+
+# Local-only automation/test sources; retained for local validation.
+/Source/MarineDemolition/Private/Tests/
+/Source/MarineDemolition/Public/Tests/
