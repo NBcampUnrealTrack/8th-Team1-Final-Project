@@ -132,6 +132,107 @@ bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromHit(
 			OutSurfacePositionCm);
 }
 
+bool UMD_ScrapeSurfaceComponent::TryGetContaminationStateFromHit(
+	const FHitResult& Hit,
+	bool& OutContaminated)
+{
+	OutContaminated = false;
+	if (!SurfaceMesh
+		|| !Hit.bBlockingHit
+		|| Hit.GetActor() != GetOwner()
+		|| Hit.ImpactPoint.ContainsNaN()
+		|| Hit.ImpactNormal.ContainsNaN())
+	{
+		return false;
+	}
+
+	if (!bContaminationEnabled)
+	{
+		return true;
+	}
+
+	if (!bContaminationSurfaceInitialized)
+	{
+		InitializeContaminationSurface();
+	}
+	if (!bContaminationSurfaceInitialized)
+	{
+		return false;
+	}
+
+	EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
+	FVector2D SurfacePositionCm = FVector2D::ZeroVector;
+	return TryResolveContaminationFace(
+			Hit.ImpactPoint,
+			Hit.ImpactNormal,
+			SurfaceFace)
+		&& TryProjectWorldPointToContaminationSurface(
+			Hit.ImpactPoint,
+			SurfacePositionCm)
+		&& TryGetContaminationStateAtSurfacePosition(
+			SurfacePositionCm,
+			SurfaceFace,
+			OutContaminated);
+}
+
+bool UMD_ScrapeSurfaceComponent::TryGetContaminationStateAtSurfacePosition(
+	const FVector2D& SurfacePositionCm,
+	const EMD_ScrapeSurfaceFace SurfaceFace,
+	bool& OutContaminated) const
+{
+	OutContaminated = false;
+	if (!bContaminationEnabled)
+	{
+		return true;
+	}
+	if (!bContaminationSurfaceInitialized
+		|| SurfacePositionCm.ContainsNaN()
+		|| ContaminationGridDimensions.X <= 0
+		|| ContaminationGridDimensions.Y <= 0
+		|| ResolvedContaminationSurfaceSizeCm.X <= UE_SMALL_NUMBER
+		|| ResolvedContaminationSurfaceSizeCm.Y <= UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const FVector2D SurfaceHalfSizeCm =
+		ResolvedContaminationSurfaceSizeCm * 0.5;
+	const FVector2D NormalizedPosition(
+		(SurfacePositionCm.X + SurfaceHalfSizeCm.X)
+			/ ResolvedContaminationSurfaceSizeCm.X,
+		(SurfacePositionCm.Y + SurfaceHalfSizeCm.Y)
+			/ ResolvedContaminationSurfaceSizeCm.Y);
+	if (NormalizedPosition.X < -UE_KINDA_SMALL_NUMBER
+		|| NormalizedPosition.X > 1.0 + UE_KINDA_SMALL_NUMBER
+		|| NormalizedPosition.Y < -UE_KINDA_SMALL_NUMBER
+		|| NormalizedPosition.Y > 1.0 + UE_KINDA_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const int32 CellX = FMath::Clamp(
+		FMath::FloorToInt(NormalizedPosition.X * ContaminationGridDimensions.X),
+		0,
+		ContaminationGridDimensions.X - 1);
+	const int32 CellY = FMath::Clamp(
+		FMath::FloorToInt(NormalizedPosition.Y * ContaminationGridDimensions.Y),
+		0,
+		ContaminationGridDimensions.Y - 1);
+	const int32 CellIndex = CellX + CellY * ContaminationGridDimensions.X;
+	const TConstArrayView<FMD_ScrapeSurfaceCell> FaceCells =
+		GetContaminationCellsForFace(SurfaceFace);
+	if (!FaceCells.IsValidIndex(CellIndex))
+	{
+		return false;
+	}
+
+	const FMD_ScrapeSurfaceCell& Cell = FaceCells[CellIndex];
+	OutContaminated =
+		Cell.RemainingContamination > ScrapeSettings.CleanTolerance
+		|| Cell.TransferredContamination > ScrapeSettings.CleanTolerance;
+	return true;
+}
+
 
 bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfacePositionFromWorldPoint(
 	const FVector& WorldPoint,

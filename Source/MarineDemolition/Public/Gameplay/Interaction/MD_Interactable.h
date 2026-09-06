@@ -34,6 +34,17 @@ public:
 	virtual FText GetInteractionDisplayName_Implementation() const { return FText::GetEmpty(); }
 
 	/**
+	 * 현재 Interactor에게 두 번째 줄로 보여 줄 키와 행동 문구.
+	 * 대상 이름은 별도로 해석해 첫 번째 줄에 표시하며, 이 값이 비면 이름만 표시한다.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
+	FText GetInteractionPrompt(AActor* Interactor) const;
+	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const
+	{
+		return FText::GetEmpty();
+	}
+
+	/**
 	 * 이 Interactor가 현재 대상과 상호작용할 수 있는지.
 	 * 매 프레임과 서버 검증에서 반복 호출될 수 있으므로 상태를 바꾸지 않는 빠른 판정이어야 한다.
 	 * 기본값은 기존 상호작용 동작을 보존하는 true다.
@@ -64,6 +75,14 @@ public:
 	{
 		return false;
 	}
+
+	/**
+	 * 물리 오브젝트를 든 상태에서도 이 대상을 조준하고 Interact를 전달할지 여부.
+	 * 기본값 false는 기존의 E 놓기 동작을 보존한다.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
+	bool SupportsHeldActorInteraction() const;
+	virtual bool SupportsHeldActorInteraction_Implementation() const { return false; }
 
 	/** 플레이어의 상호작용 입력을 액터에 전달한다. */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")

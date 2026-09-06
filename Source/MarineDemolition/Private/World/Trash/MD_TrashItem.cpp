@@ -1,6 +1,7 @@
 #include "World/Trash/MD_TrashItem.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "Engine/EngineTypes.h"
 #include "Engine/StaticMesh.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Trash/MD_TrashLibrary.h"
@@ -17,6 +18,10 @@ AMD_TrashItem::AMD_TrashItem()
 	SetRootComponent(Mesh);
 	Mesh->SetCollisionProfileName(TEXT("PhysicsActor"));
 	Mesh->SetCollisionObjectType(ECC_PhysicsBody);
+	// 캐릭터와의 물리 충돌은 유지하되 작은 쓰레기를 발판이나 계단으로 판정하지 않는다
+	Mesh->SetCollisionResponseToChannel(ECC_Pawn, ECR_Block);
+	Mesh->CanCharacterStepUpOn = ECB_No;
+	Mesh->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Unwalkable, 0.f));
 	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
 	// 쓰레기통이 오버랩으로 내용물을 세므로 꺼서는 안 된다
 	Mesh->SetGenerateOverlapEvents(true);
@@ -70,6 +75,12 @@ FText AMD_TrashItem::GetInteractionDisplayName_Implementation() const
 	return UMD_TrashLibrary::FindTrashKindRow(TrashKindId, TrashKind)
 		? TrashKind.DisplayName
 		: FText::GetEmpty();
+}
+
+FText AMD_TrashItem::GetInteractionPrompt_Implementation(AActor* Interactor) const
+{
+	static_cast<void>(Interactor);
+	return NSLOCTEXT("MDInteraction", "TrashItemPickupPrompt", "[E] 줍기");
 }
 
 FGameplayTag AMD_TrashItem::GetTrashCategory_Implementation() const

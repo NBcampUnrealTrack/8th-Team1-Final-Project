@@ -3,11 +3,11 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
+#include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_TrashSorter.generated.h"
 
 class UBoxComponent;
 class UMaterialInstanceDynamic;
-class UPrimitiveComponent;
 class UStaticMeshComponent;
 class AMD_GameStateBase;
 class UMD_MerchantSubsystem;
@@ -25,7 +25,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(
 	FGameplayTag, SorterCategory);
 
 UCLASS()
-class MARINEDEMOLITION_API AMD_TrashSorter : public AActor
+class MARINEDEMOLITION_API AMD_TrashSorter
+	: public AActor
+	, public IMD_Interactable
 {
 	GENERATED_BODY()
 
@@ -33,6 +35,14 @@ public:
 	AMD_TrashSorter();
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+
+	/** Implements IMD_Interactable */
+	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const override;
+	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
+	virtual bool SupportsHeldActorInteraction_Implementation() const override { return true; }
+	virtual void Interact_Implementation(AActor* Interactor) override;
+	/** ~Implements IMD_Interactable */
 
 	/** 이 분류기가 정분류로 인정하는 칸 */
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
@@ -51,7 +61,6 @@ protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	virtual void BeginPlay() override;
-	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** 삼킬 때 연출 훅. 소리 없이 사라지면 버그와 구분이 안 된다 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Trash")
@@ -95,10 +104,6 @@ protected:
 	TObjectPtr<UMaterialInstanceDynamic> SorterMID;
 
 private:
-	UFUNCTION()
-	void HandleBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
-		UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
 	/** 액터는 서버에서 파괴되므로 위치를 실어 보낸다 */
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastItemSwallowed(bool bCorrectSort, FVector Location);
@@ -124,6 +129,7 @@ private:
 	bool GetServerLedgers(
 		AMD_GameStateBase*& OutGameState,
 		UMD_MerchantSubsystem*& OutMerchant) const;
+	AActor* GetHeldSortableForInteractor(AActor* Interactor) const;
 
 	TSet<TWeakObjectPtr<AActor>> ActorsBeingProcessed;
 

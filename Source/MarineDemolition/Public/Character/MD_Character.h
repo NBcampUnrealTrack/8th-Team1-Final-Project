@@ -28,6 +28,7 @@ class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
 class UMD_OxygenComponent;
+class UMD_ComfortComponent;
 class UWidgetComponent;
 class UNiagaraSystem;
 class UNiagaraComponent;
@@ -217,6 +218,13 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_InteractionComponent> InteractionComponent;
+
+	/**
+	 * 3D 멀미 완화 담당. 수치는 Project Settings -> Game -> MD Comfort에 있고,
+	 * 로컬 플레이어에게만 동작한다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_ComfortComponent> ComfortComponent;
 
 	/** 다른 플레이어가 보는 전체 도구 메시. 적재 단계가 바뀌면 메시 자체를 교체한다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
