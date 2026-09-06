@@ -334,7 +334,7 @@ public:
 	/** Tool의 질량 커밋이 끝난 후 유예한 완료 전환을 확정한다. */
 	void FinalizeLocalContaminationPath();
 
-	/** Uniform residue over every actual blade contact. */
+	/** Uniform residue over every actual blade contact. A positive ratio deposits without removing existing contamination. */
 	FMD_ScrapeResult ApplyLocalScrapeStrokeWithContaminationStamp(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec,

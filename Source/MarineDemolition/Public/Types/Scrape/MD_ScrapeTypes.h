@@ -193,10 +193,10 @@ enum class EMD_ScrapeLoadStage : uint8
 	/** 0보다 크고 34보다 작은 상태 */
 	Stage1 = 1 UMETA(DisplayName = "1단계 - 얇은 코팅"),
 
-	/** 34 이상 67 이하인 포화 직전 상태 */
+	/** 34 이상 67 미만인 포화 직전 상태 */
 	Stage2 = 2 UMETA(DisplayName = "2단계 - 처짐과 방울"),
 
-	/** 67 초과인 포화 상태 */
+	/** 67 이상인 포화 상태 */
 	Stage3 = 3 UMETA(DisplayName = "3단계 - 포화")
 };
 

@@ -261,7 +261,7 @@ EMD_ScrapeLoadStage UMD_ScrapeToolComponent::CalculateScrapeLoadStage(
 		return EMD_ScrapeLoadStage::Stage1;
 	}
 
-	if (Load <= ScrapeLoadStage3Threshold)
+	if (Load < ScrapeLoadStage3Threshold)
 	{
 		return EMD_ScrapeLoadStage::Stage2;
 	}

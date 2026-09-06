@@ -328,6 +328,7 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 		EffectiveScrapeSettings.CleanTolerance = 0.0f;
 	}
 
+	// Saturated scraping deposits requested work only; it never removes either existing layer.
 	const bool bApplyExactRequestedAmountStamp =
 		FMath::IsFinite(StampRatio)
 		&& StampRatio > 0.0f;
@@ -356,7 +357,8 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 				SurfaceMesh->GetComponentTransform(), MeshStroke, ToolSpec,
 				EffectiveScrapeSettings, FaceCells, nullptr,
 				&ScrapeEvaluationScratch, ContaminationCellCarrierWeights,
-				&CachedMeshUVProgress, &MeshUVProgressAfter, bApplyExactRequestedAmountStamp);
+				&CachedMeshUVProgress, &MeshUVProgressAfter, bApplyExactRequestedAmountStamp,
+				!bApplyExactRequestedAmountStamp);
 		}
 		else if (bApplyExactRequestedAmountStamp)
 		{
@@ -369,7 +371,8 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 					ResolvedContaminationSurfaceSizeCm,
 					FaceCells,
 					RequestedRemovalAmounts,
-					ScrapeEvaluationScratch);
+					ScrapeEvaluationScratch,
+					false);
 		}
 		else
 		{

@@ -81,7 +81,8 @@ class MARINEDEMOLITION_API FMD_ScrapeEvaluator final
 public:
 	/** Follow connected source geometry. Amounts use density * world cell area / target cell area; stored cells remain densities.
 	 * Optional carrier weights must have been built for this data and current transform scale.
-	 * Sparse capture stores requested densities in Scratch.MeshUVTouchedCells, including bare contacts. */
+	 * Sparse capture stores requested densities in Scratch.MeshUVTouchedCells, including bare contacts.
+	 * bApplyRemoval=false captures contact work without changing any cell, including coverage and thin films. */
 	static FMD_ScrapeResult ApplyStrokeToMeshUVGrid(
 		const UMD_ScrapeMeshUVData& Data, const FTransform& MeshToWorld,
 		const FMD_ScrapeMeshUVStroke& Stroke, const FMD_ScrapeToolSpec& ToolSpec,
@@ -91,7 +92,8 @@ public:
 		TConstArrayView<double> CachedCellCarrierWeights = {},
 		const FMD_ScrapeMeshUVProgress* CachedProgressBefore = nullptr,
 		FMD_ScrapeMeshUVProgress* OutProgressAfter = nullptr,
-		bool bCaptureTouchedRequestedAmounts = false);
+		bool bCaptureTouchedRequestedAmounts = false,
+		bool bApplyRemoval = true);
 
 	/** Interpolate on connected source geometry; never interpolate packed atlas UVs. */
 	static bool TryInterpolateMeshUVStroke(
@@ -159,7 +161,8 @@ public:
 		FMD_ScrapeEvaluationScratch& Scratch);
 
 	/**
-	 * 일반 제거 판정과 함께 헤라 경로가 각 셀에 요청한 작업량을 기록한다.
+	 * 헤라 경로가 각 셀에 요청한 작업량을 기록한다.
+	 * bApplyRemoval=false이면 제거·정규화·피복 갱신 없이 접촉 작업량만 계산한다.
 	 *
 	 * 오염이 이미 없는 셀도 경로 기록에는 포함된다. 따라서 포화 헤라가
 	 * 깨끗한 곳을 지나갈 때도 같은 모양의 새 오염 자국을 만들 수 있다.
@@ -171,7 +174,8 @@ public:
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
 		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
-		TArray<float>& OutRequestedRemovalAmounts);
+		TArray<float>& OutRequestedRemovalAmounts,
+		bool bApplyRemoval = true);
 	static FMD_ScrapeResult ApplyStrokeToGridAndCaptureRequestedAmounts(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec,
@@ -180,7 +184,8 @@ public:
 		const FVector2D& SurfaceSizeCm,
 		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
 		TArray<float>& OutRequestedRemovalAmounts,
-		FMD_ScrapeEvaluationScratch& Scratch);
+		FMD_ScrapeEvaluationScratch& Scratch,
+		bool bApplyRemoval = true);
 
 	/**
 	 * 캡처한 헤라 경로를 새 오염 자국으로 도포한다.
@@ -299,7 +304,8 @@ private:
 		const FVector2D& SurfaceSizeCm,
 		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
 		TArray<float>* OutRequestedRemovalAmounts,
-		FMD_ScrapeEvaluationScratch* Scratch);
+		FMD_ScrapeEvaluationScratch* Scratch,
+		bool bApplyRemoval = true);
 
 	/**
 	 * 원형 헤라 브러시가 한 셀을 얼마나 덮는지 0~1 가중치로 근사
