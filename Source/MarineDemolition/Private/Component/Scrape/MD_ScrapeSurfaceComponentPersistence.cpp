@@ -91,11 +91,10 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 	const int32 GridHeight = ContaminationGridDimensions.Y;
 	int32 CellsPerFace = 0;
 	int32 TotalCellCount = 0;
-	if (ContaminationCells.Num() == 0
+	if (!AreContaminationCarrierWeightsCurrent() || ContaminationCells.Num() == 0
 		|| GridWidth <= 0
 		|| GridHeight <= 0
-		|| !FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
-			ContaminationGridDimensions,
+		|| !TryCalculateContaminationCellCounts(
 			CellsPerFace,
 			TotalCellCount)
 		|| ContaminationCells.Num() != TotalCellCount)
@@ -146,7 +145,7 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 						TargetFace,
 						X + Y * GridWidth,
 						CellsPerFace);
-				if (!ContaminationCells.IsValidIndex(CombinedCellIndex))
+				if (!IsContaminationCellActive(CombinedCellIndex))
 				{
 					continue;
 				}
@@ -175,7 +174,7 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 				// 자국 경계가 격자 계단으로 돌아간다.
 				Cell.CoveredFraction = 0.0f;
 				AddedBaseCarrierAmounts[FaceSlot] += static_cast<double>(
-					TargetRemaining - PreviousRemaining);
+					TargetRemaining - PreviousRemaining) * GetContaminationCellCarrierWeight(CombinedCellIndex);
 
 				FMD_ScrapeCellChange Change;
 				Change.CellIndex = CombinedCellIndex;
@@ -270,6 +269,10 @@ void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
 
 	for (int32 Index = 0; Index < ContaminationCells.Num(); ++Index)
 	{
+		if (!IsContaminationCellActive(Index))
+		{
+			continue;
+		}
 		const FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
 		const bool bScraped = Cell.RemainingContamination != Cell.InitialContamination;
 
@@ -358,21 +361,27 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 	}
 
 	const int32 GridWidth = ContaminationGridDimensions.X;
-	if (ContaminationCells.Num() == 0 || GridWidth <= 0)
+	if (!AreContaminationCarrierWeightsCurrent() || ContaminationCells.Num() == 0 || GridWidth <= 0)
 	{
 		return;
 	}
 
+	// Validate the whole record before mutating any cell; never partially read a new layout.
+	TSet<int32> UniqueCellIndices;
+	for (const int32 Index : CellIndices)
+	{
+		if (!IsContaminationCellActive(Index) || UniqueCellIndices.Contains(Index))
+		{
+			UE_LOG(LogTemp, Warning, TEXT("Rejected contamination restore for %s: invalid, inactive or repeated cell %d."),
+				*GetPathName(), Index);
+			return;
+		}
+		UniqueCellIndices.Add(Index);
+	}
 	TArray<FMD_ScrapeCellChange> Changes;
 	for (int32 i = 0; i < CellIndices.Num(); ++i)
 	{
 		const int32 Index = CellIndices[i];
-		// 그리드 크기가 바뀐 구세션 스냅샷의 셀은 무시
-		if (!ContaminationCells.IsValidIndex(Index))
-		{
-			continue;
-		}
-
 		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
 
 		if (bHasInitialAmounts && FMath::IsFinite(InitialAmounts[i]))
@@ -446,12 +455,11 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 			GetContaminationCellsForFace(Face);
 		double BaseCarrierAmount = 0.0;
 		double TransferredCarrierAmount = 0.0;
-		for (const FMD_ScrapeSurfaceCell& Cell : FaceCells)
+		for (int32 LocalIndex = 0; LocalIndex < FaceCells.Num(); ++LocalIndex)
 		{
-			BaseCarrierAmount +=
-				static_cast<double>(Cell.RemainingContamination);
-			TransferredCarrierAmount +=
-				static_cast<double>(Cell.TransferredContamination);
+            const double Weight = GetContaminationCellCarrierWeight(FaceSlot * FaceCells.Num() + LocalIndex);
+			BaseCarrierAmount += static_cast<double>(FaceCells[LocalIndex].RemainingContamination) * Weight;
+			TransferredCarrierAmount += static_cast<double>(FaceCells[LocalIndex].TransferredContamination) * Weight;
 		}
 		const bool bRecordedBase = BaseCarrierAmount <= 0.0
 			|| FMD_ScrapeRecoveryLedger::AppendZeroRewardCarrier(
@@ -487,35 +495,20 @@ bool UMD_ScrapeSurfaceComponent::TryCalculateContaminationItemSpawnTransform(
 		return false;
 	}
 
-	const FTransform SurfaceTransform = SurfaceMesh->GetComponentTransform();
-
 	FVector WorldPosition = FVector::ZeroVector;
-	FVector HorizontalAxis = FVector::ZeroVector;
-	FVector FrontNormalLocal = FVector::ZeroVector;
-	FVector VerticalAxis = FVector::ZeroVector;
-	if (!FMD_ScrapeSurfaceGeometry::TryCalculateSurfaceWorldPosition(
+	FVector OutwardNormal = FVector::ZeroVector;
+	if (!TryGetScrapeSurfaceWorldPosition(
 			SurfacePositionCm,
 			SurfaceFace,
-			SurfaceTransform,
-			ResolvedContaminationSurfaceNormalAxis,
-			ContaminationSurfaceCenterLocal,
-			ContaminationMeshLocalBoundsMinimum,
-			ContaminationMeshLocalBoundsMaximum,
 			WorldPosition)
-		|| !FMD_ScrapeSurfaceGeometry::TryGetSurfaceLocalAxes(
-			ResolvedContaminationSurfaceNormalAxis,
-			HorizontalAxis,
-			FrontNormalLocal,
-			VerticalAxis))
+		|| !TryGetScrapeSurfaceWorldNormalAtPosition(
+			SurfacePositionCm,
+			SurfaceFace,
+			OutwardNormal))
 	{
 		return false;
 	}
 
-	const FVector OutwardNormal =
-		SurfaceTransform.TransformVectorNoScale(
-			SurfaceFace == EMD_ScrapeSurfaceFace::Back
-				? -FrontNormalLocal
-				: FrontNormalLocal).GetSafeNormal();
 	if (OutwardNormal.IsNearlyZero())
 	{
 		return false;
@@ -534,8 +527,11 @@ bool UMD_ScrapeSurfaceComponent::TryCalculateContaminationItemSpawnTransform(
 bool UMD_ScrapeSurfaceComponent::CanAcceptRecoveryTransaction(
 	const EMD_ScrapeSurfaceFace SurfaceFace) const
 {
+	if (!AreContaminationCarrierWeightsCurrent()) { return false; }
 	if (!bContaminationEnabled
 		|| !HasAuthority()
+		|| (GetContaminationLayoutVersion() == 1
+			&& SurfaceFace != EMD_ScrapeSurfaceFace::Front)
 		|| (SurfaceFace != EMD_ScrapeSurfaceFace::Front
 			&& SurfaceFace != EMD_ScrapeSurfaceFace::Back))
 	{
@@ -642,7 +638,8 @@ int32 UMD_ScrapeSurfaceComponent::DropContaminationItems(const EMD_ScrapeSurface
 		*bOutAcceptedToLedger = false;
 	}
 	const int32 FaceSlot = SurfaceFace == EMD_ScrapeSurfaceFace::Back ? 1 : 0;
-	if (SurfaceFace != EMD_ScrapeSurfaceFace::Front	&& SurfaceFace != EMD_ScrapeSurfaceFace::Back)
+	if ((SurfaceFace != EMD_ScrapeSurfaceFace::Front && SurfaceFace != EMD_ScrapeSurfaceFace::Back)
+		|| (GetContaminationLayoutVersion() == 1 && SurfaceFace != EMD_ScrapeSurfaceFace::Front))
 	{
 		return 0;
 	}
@@ -726,7 +723,13 @@ int32 UMD_ScrapeSurfaceComponent::DropContaminationItems(const EMD_ScrapeSurface
 		return 0;
 	}
 
-	const double AmountPerItem = static_cast<double>(CellsPerFace)
+	double FullFaceCarrierCapacity = static_cast<double>(CellsPerFace);
+    if (UsesMeshUVSurface())
+    {
+        FullFaceCarrierCapacity = 0.0;
+        for (const double Weight : ContaminationCellCarrierWeights) { FullFaceCarrierCapacity += Weight; }
+    }
+	const double AmountPerItem = FullFaceCarrierCapacity
 		/ static_cast<double>(ContaminationItemsPerFace);
 	if (!FMath::IsFinite(AmountPerItem)
 		|| AmountPerItem <= UE_KINDA_SMALL_NUMBER)
@@ -959,11 +962,6 @@ UMD_ScrapeSurfaceComponent::CommitContaminationPhysicalDrop(
 	if (bAcceptedToLedger)
 	{
 		CommitResult.Status = EPhysicalCommitStatus::AcceptedPending;
-		CommitResult.CommittedRawAmount = PhysicalDropAmount;
-		CommitResult.CommittedRecoveryLots = MoveTemp(PhysicalRecoveryLots);
-		CommitResult.CommittedRewardUnits =
-			FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
-				CommitResult.CommittedRecoveryLots);
 	}
 	return CommitResult;
 }

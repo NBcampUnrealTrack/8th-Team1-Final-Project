@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -31,9 +31,9 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Lore")
 	TSubclassOf<UMD_LoreCardWidget> LoreCardClass;
 
-	// 현재 카탈로그의 발견 상태를 카드와 상세 화면에 적용하기 위한 진행 정보
+	// 현재 카탈로그의 발견 상태를 카드와 상세 화면에 적용하기 위한 전역 로어 원장
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
-	FMD_LoreSiteProgress LoreProgress;
+	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds;
 
 	// 카드 선택과 상세 정보 표시를 연결하기 위한 카탈로그 배열 인덱스
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
@@ -67,13 +67,9 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidget, AllowPrivateAccess = "true"))
 	TObjectPtr<UTextBlock> TXT_DetailBody;
 
-	// 선택된 기록물의 수집 보상을 안내하기 위한 보상 텍스트 참조
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidget, AllowPrivateAccess = "true"))
-	TObjectPtr<UTextBlock> TXT_DetailReward;
-
 public:
-	// 카탈로그와 해당 현장의 복제 진행 상태를 목록 및 상세 화면에 적용하는 함수
-	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const FMD_LoreSiteProgress& InLoreProgress);
+	// 카탈로그와 복제된 전역 로어 원장을 목록 및 상세 화면에 적용하는 함수
+	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds);
 
 protected:
 	// 카탈로그 순서대로 카드 위젯을 다시 생성하는 함수
@@ -82,7 +78,7 @@ protected:
 	// 현장 이름과 수집 수량 및 진행 막대를 갱신하는 함수
 	void RefreshLoreHeader();
 
-	// 선택된 공개 상태에 따라 제목과 본문 및 보상을 갱신하는 함수
+	// 선택된 공개 상태에 따라 제목과 본문을 갱신하는 함수
 	void RefreshLoreDetails();
 
 	// 카드 선택 인덱스를 상세 화면에 반영하는 콜백

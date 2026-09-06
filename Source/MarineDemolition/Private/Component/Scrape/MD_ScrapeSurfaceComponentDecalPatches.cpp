@@ -43,6 +43,98 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalPatchesForFace(
 			ContaminationDecalSurfaceOffsetCm,
 			FullCoverageContaminationDecalOuterMarginCm)
 		: ContaminationDecalSurfaceOffsetCm;
+	const bool bCurvedFrontPlanarBack = ContaminationSurfaceMapping.Mode
+		== EMD_ScrapeSurfaceMappingMode::CurvedFrontPlanarBack;
+	const bool bUseCylindricalPatchLayout =
+		ContaminationSurfaceMapping.Mode
+			== EMD_ScrapeSurfaceMappingMode::CylindricalArc
+		|| (bCurvedFrontPlanarBack
+			&& Face == EMD_ScrapeSurfaceFace::Front);
+	if (bUseCylindricalPatchLayout)
+	{
+		FMD_ScrapeCylindricalSurfaceFrame CurveFrame;
+		if (!FMD_ScrapeSurfaceGeometry::TryResolveCylindricalSurfaceFrame(
+				SurfaceMesh->GetComponentTransform(),
+				ContaminationSurfaceMapping,
+				CurveFrame))
+		{
+			return false;
+		}
+
+		// Wall_Inter_A prototype: the 180-degree curved front is covered by two
+		// independently rotated 90-degree projection boxes.
+		constexpr int32 CurvePatchCount = 2;
+		const float CurveBaseInwardDepthCm = FMath::Max(
+			static_cast<float>(CurveFrame.ThicknessCm),
+			FMath::Max(
+				ContaminationDecalProjectionDepthCm,
+				ContaminationDecalDepthFitMarginCm));
+		TArray<FMD_ScrapeDecalFaceLayout> CurvePatchLayouts;
+		CurvePatchLayouts.Reserve(CurvePatchCount);
+		double MaximumAppliedInwardDepthCm = 0.0;
+		for (int32 PatchIndex = 0;
+			PatchIndex < CurvePatchCount;
+			++PatchIndex)
+		{
+			FMD_ScrapeDecalFaceLayout PatchLayout;
+			if (!FMD_ScrapeDecalLayout::TryCalculateCylindricalPatchLayout(
+					Face,
+					SurfaceMesh->GetComponentTransform(),
+					ContaminationSurfaceCenterLocal,
+					ResolvedContaminationSurfaceSizeCm,
+					CurveFrame,
+					CurveBaseInwardDepthCm,
+					ContaminationDecalSurfaceOffsetCm,
+					ContaminationDecalEdgeInsetCm,
+					PatchIndex,
+					CurvePatchCount,
+					PatchLayout))
+			{
+				return false;
+			}
+			MaximumAppliedInwardDepthCm = FMath::Max(
+				MaximumAppliedInwardDepthCm,
+				PatchLayout.AppliedInwardDepthCm);
+			CurvePatchLayouts.Add(PatchLayout);
+		}
+
+		ResolvedDepthCm =
+			static_cast<float>(MaximumAppliedInwardDepthCm);
+		ResolvedContaminationDecalEdgeInsetCm = static_cast<float>(
+			CurvePatchLayouts[0].AppliedEdgeInsetCm);
+		OutPatchComponents.Reserve(CurvePatchCount);
+		OutPatchMIDs.Reserve(CurvePatchCount);
+		for (int32 PatchIndex = 0;
+			PatchIndex < CurvePatchCount;
+			++PatchIndex)
+		{
+			UDecalComponent* const DecalComponent = PatchIndex == 0
+				? BaseDecalComponent
+				: CreateAdditionalContaminationDecalPatch(
+					Face,
+					PatchIndex);
+			if (!DecalComponent)
+			{
+				return false;
+			}
+			OutPatchComponents.Add(DecalComponent);
+
+			TObjectPtr<UMaterialInstanceDynamic> PatchMID;
+			if (!ConfigureContaminationDecalPatch(
+					DecalComponent,
+					Face,
+					CurvePatchLayouts[PatchIndex],
+					PatchMID))
+			{
+				return false;
+			}
+			OutPatchMIDs.Add(PatchMID);
+		}
+
+		return OutPatchComponents.Num() == CurvePatchCount
+			&& OutPatchMIDs.Num() == CurvePatchCount;
+	}
+
 	FMD_ScrapeDecalFaceLayout TraceFaceLayout;
 	if (!FMD_ScrapeDecalLayout::TryCalculateFaceLayout(
 			Face,
@@ -107,12 +199,14 @@ bool UMD_ScrapeSurfaceComponent::ConfigureContaminationDecalPatchesForFace(
 	ResolvedContaminationDecalEdgeInsetCm =
 		static_cast<float>(TraceFaceLayout.AppliedEdgeInsetCm);
 
-	const int32 PatchCount = bResolvedFullCoverageContaminationDecals
-		? 1
-		: FMD_ScrapeDecalLayout::CalculateHorizontalPatchCount(
-			TraceFaceLayout.DecalSize.Z * 2.0,
-			ContaminationDecalPatchWidthCm,
-			MaximumContaminationDecalPatchesPerFace);
+	const int32 PatchCount = bCurvedFrontPlanarBack
+		? 2
+		: (bResolvedFullCoverageContaminationDecals
+			? 1
+			: FMD_ScrapeDecalLayout::CalculateHorizontalPatchCount(
+				TraceFaceLayout.DecalSize.Z * 2.0,
+				ContaminationDecalPatchWidthCm,
+				MaximumContaminationDecalPatchesPerFace));
 	if (PatchCount <= 0)
 	{
 		return false;

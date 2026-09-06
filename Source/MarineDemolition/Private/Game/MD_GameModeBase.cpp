@@ -291,7 +291,16 @@ void AMD_GameModeBase::ConfirmDayTransition(AMD_PlayerController* RequestingCont
 
     // 기존 판정별 딜레이 선택은 유지하고 시작 시점만 보고서 확인 이후로 제한하는 처리
     const bool bResultScreen = PendingResult == EMD_InspectionResult::ContractCleared || PendingResult == EMD_InspectionResult::GameOver;
-    GetWorldTimerManager().SetTimer(DepartTravelTimerHandle, this, &AMD_GameModeBase::ExecuteDayTransition, bResultScreen ? ResultTravelDelay : DepartTravelDelay, false);
+
+    // 일반적인 다음 날 전환은 추가 출발 연출 없이 즉시 실행한다.
+    if (bResultScreen == false)
+    {
+        ExecuteDayTransition();
+        return;
+    }
+
+    // 최종 결과 화면을 확인할 시간만 기존 타이머로 보장한다.
+    GetWorldTimerManager().SetTimer(DepartTravelTimerHandle, this, &AMD_GameModeBase::ExecuteDayTransition, ResultTravelDelay, false);
 }
 
 void AMD_GameModeBase::TravelToNextDay()
@@ -804,24 +813,32 @@ EMD_InspectionResult AMD_GameModeBase::EvaluateInspection()
     {
         Result = EMD_InspectionResult::WarningIssued;
     }
-    else if (Day == 3 && !MDGameState->IsInspectionWarned())
+    else if (Day == 3)
     {
-        Result = EMD_InspectionResult::EmergencyDayOpened;
+        // 2일차 실패 경고가 남아 있으면 3일차 재실패를 게임 오버로 확정한다.
+        if (MDGameState->IsInspectionWarned() == true)
+        {
+            Result = EMD_InspectionResult::GameOver;
+        }
+        else
+        {
+            // 2일차 점검을 통과한 계약에는 비상 4일차 기회를 부여한다.
+            Result = EMD_InspectionResult::EmergencyDayOpened;
+        }
     }
     else
     {
         Result = EMD_InspectionResult::GameOver;
     }
 
-    // 경고 부여: 감점 + 다음 점검 기준 배율 상승
-    if (Result == EMD_InspectionResult::WarningIssued
-        || Result == EMD_InspectionResult::EmergencyDayOpened)
+    // 2일차 점검 실패에만 경고 감점과 다음 점검 기준 상승을 적용한다.
+    if (Result == EMD_InspectionResult::WarningIssued)
     {
         MDGameState->AddScoreEvent(MDGameplayTags::Score_Penalty_Warning);
         MDGameState->SetInspectionWarned(true);
     }
 
-    // 비상 4일차 개방 표시 (Day 간 유지)
+    // 경고 없이 3일차 점검에 실패한 경우 비상 4일차 개방 상태만 유지한다.
     if (Result == EMD_InspectionResult::EmergencyDayOpened)
     {
         MDGameState->SetEmergencyDay(true);

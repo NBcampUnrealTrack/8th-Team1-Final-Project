@@ -155,6 +155,7 @@ public:
 	virtual bool ShouldPrioritizeInteractionOverPhysicsPickup_Implementation(
 		AActor* Interactor) const override;
 	virtual void Interact_Implementation(AActor* Interactor) override;
+	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const override;
 	/** ~Implements IMD_Interactable*/
 
 	/** Implements IMD_TrashContainer */

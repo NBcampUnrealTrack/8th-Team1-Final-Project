@@ -102,6 +102,15 @@ void AMD_TrashDispenser::SetInteractionHighlighted_Implementation(bool bHighligh
 	Mesh->SetRenderCustomDepth(bHighlighted);
 }
 
+FText AMD_TrashDispenser::GetInteractionPrompt_Implementation(AActor* Interactor) const
+{
+	static_cast<void>(Interactor);
+	return NSLOCTEXT(
+		"MDInteraction",
+		"TrashDispenserPrompt",
+		"[E] 쓰레기 통 소환");
+}
+
 void AMD_TrashDispenser::Interact_Implementation(AActor* Interactor)
 {
 	if (!HasAuthority()) return;

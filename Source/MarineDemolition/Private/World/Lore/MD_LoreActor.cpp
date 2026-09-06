@@ -1,7 +1,7 @@
-﻿#include "World/Lore/MD_LoreActor.h"
+#include "World/Lore/MD_LoreActor.h"
 
 #include "Components/SphereComponent.h"
-#include "Data/Lore/MD_LoreCatalog.h"
+#include "Data/Lore/MD_LoreDefinition.h"
 #include "Engine/GameInstance.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Lore/MD_LoreSubsystem.h"
@@ -45,8 +45,8 @@ void AMD_LoreActor::Interact_Implementation(AActor* Interactor)
 		return;
 	}
 
-	// 서버 원장이 최초 발견과 개별 및 완성 보상의 단일 확정 지점인 수집 요청
-	if (LoreSubsystem->TryDiscoverLore(LoreCatalog, LoreId) == false)
+	// 서버 원장에 최초 발견을 기록하는 수집 요청
+	if (LoreSubsystem->TryDiscoverLore(LoreAssetId) == false)
 	{
 		RefreshCollectionState();
 	}
@@ -61,6 +61,15 @@ void AMD_LoreActor::SetInteractionHighlighted_Implementation(bool bHighlighted)
 
 	Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
 	Mesh->SetRenderCustomDepth(bHighlighted);
+}
+
+FText AMD_LoreActor::GetInteractionDisplayName_Implementation() const
+{
+	// 할당된 Asset ID에서 상호작용 이름을 제공할 독립 정의 에셋을 찾는다.
+	UMD_LoreSubsystem* LoreSubsystem = GetLoreSubsystem();
+	UMD_LoreDefinition* LoreDefinition = IsValid(LoreSubsystem) == true ? LoreSubsystem->GetLoreDefinition(LoreAssetId) : nullptr;
+	FText InteractionDisplayName = IsValid(LoreDefinition) == true ? LoreDefinition->EntryName : FText::GetEmpty();
+	return InteractionDisplayName;
 }
 
 void AMD_LoreActor::BeginPlay()
@@ -107,16 +116,6 @@ void AMD_LoreActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	Super::EndPlay(EndPlayReason);
 }
 
-FName AMD_LoreActor::GetLoreId() const
-{
-	return LoreId;
-}
-
-UMD_LoreCatalog* AMD_LoreActor::GetLoreCatalog() const
-{
-	return LoreCatalog;
-}
-
 bool AMD_LoreActor::CanCollectLore(APawn* InteractorPawn) const
 {
 	if (HasAuthority() == false || IsActorBeingDestroyed() == true || IsValid(InteractorPawn) == false || InteractorPawn->HasAuthority() == false)
@@ -144,25 +143,44 @@ bool AMD_LoreActor::CanCollectLore(APawn* InteractorPawn) const
 	}
 
 	UMD_LoreSubsystem* LoreSubsystem = GetLoreSubsystem();
-	return IsValid(LoreSubsystem) == true && LoreSubsystem->HasDiscoveredLore(LoreCatalog->SiteId, LoreId) == false;
+	if (IsValid(LoreSubsystem) == false)
+	{
+		return false;
+	}
+
+	// 할당된 에셋 ID로 전역 원장의 중복 수집을 차단한다.
+	UMD_LoreDefinition* LoreDefinition = LoreSubsystem->GetLoreDefinition(LoreAssetId);
+	if (IsValid(LoreDefinition) == false)
+	{
+		return false;
+	}
+
+	bool bCanCollectLore = LoreSubsystem->HasDiscoveredLore(LoreAssetId) == false;
+	return bCanCollectLore;
 }
 
 bool AMD_LoreActor::IsLoreConfigurationValid() const
 {
-	if (IsValid(LoreCatalog) == false || LoreId.IsNone() == true)
+	// 비어 있는 Asset ID는 어떤 로어 정의도 나타내지 않는다.
+	if (LoreAssetId.IsValid() == false)
 	{
 		return false;
 	}
 
-	TArray<FText> ValidationErrors;
-	if (LoreCatalog->ValidateCatalog(ValidationErrors) == false)
+	UMD_LoreSubsystem* LoreSubsystem = GetLoreSubsystem();
+	if (IsValid(LoreSubsystem) == false)
 	{
 		return false;
 	}
 
-	// 카탈로그의 실제 정의가 배치 식별자와 연결되는지 확인하는 참조 검사
-	FMD_LoreDefinition LoreDefinition;
-	return LoreCatalog->FindLore(LoreId, LoreDefinition) == true;
+	// 할당된 Asset ID가 유효한 로어 정의로 해석되는지 확인한다.
+	UMD_LoreDefinition* LoreDefinition = LoreSubsystem->GetLoreDefinition(LoreAssetId);
+	bool bHasValidLoreDefinition = IsValid(LoreDefinition) == true;
+	if (bHasValidLoreDefinition == true)
+	{
+		bHasValidLoreDefinition = LoreDefinition->IsValidDefinition();
+	}
+	return bHasValidLoreDefinition;
 }
 
 UMD_LoreSubsystem* AMD_LoreActor::GetLoreSubsystem() const
@@ -179,7 +197,19 @@ void AMD_LoreActor::RefreshCollectionState()
 	}
 
 	UMD_LoreSubsystem* LoreSubsystem = GetLoreSubsystem();
-	if (IsValid(LoreSubsystem) == false || LoreSubsystem->HasDiscoveredLore(LoreCatalog->SiteId, LoreId) == false)
+	if (IsValid(LoreSubsystem) == false)
+	{
+		return;
+	}
+
+	// 할당된 로어 에셋 ID가 전역 진행 원장에 있는지 확인한다.
+	UMD_LoreDefinition* LoreDefinition = LoreSubsystem->GetLoreDefinition(LoreAssetId);
+	if (IsValid(LoreDefinition) == false)
+	{
+		return;
+	}
+
+	if (LoreSubsystem->HasDiscoveredLore(LoreAssetId) == false)
 	{
 		return;
 	}

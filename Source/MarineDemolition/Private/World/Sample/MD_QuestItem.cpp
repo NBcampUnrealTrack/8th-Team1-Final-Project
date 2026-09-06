@@ -1,6 +1,7 @@
 #include "World/Sample/MD_QuestItem.h"
 
 #include "Components/StaticMeshComponent.h"
+#include "Data/Merchant/MD_QuestDefinition.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "GameplayTags/MD_GameplayTags.h"
 
@@ -51,6 +52,13 @@ void AMD_QuestItem::SetInteractionHighlighted_Implementation(bool bHighlighted)
 	// 상호작용 가능 대상을 구분하기 위한 외곽선 표시
 	Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
 	Mesh->SetRenderCustomDepth(bHighlighted);
+}
+
+FText AMD_QuestItem::GetInteractionDisplayName_Implementation() const
+{
+	const UMD_QuestDefinition* Definition =
+		UMD_QuestDefinition::LoadDefinition(QuestDefinitionId);
+	return IsValid(Definition) ? Definition->QuestName : FText::GetEmpty();
 }
 
 FGameplayTag AMD_QuestItem::GetQuestGradeTag() const

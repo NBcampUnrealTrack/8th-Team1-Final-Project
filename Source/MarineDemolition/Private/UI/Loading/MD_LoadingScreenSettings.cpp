@@ -1,6 +1,7 @@
 ﻿#include "UI/Loading/MD_LoadingScreenSettings.h"
 
 #include "Engine/Texture2D.h"
+#include "Engine/Font.h"
 
 #define LOCTEXT_NAMESPACE "MD_LoadingScreen"
 
@@ -21,9 +22,19 @@ FText UMD_LoadingScreenSettings::GetSectionDescription() const
 }
 #endif
 
-UTexture2D* UMD_LoadingScreenSettings::GetBubbleTexture() const
+UTexture2D* UMD_LoadingScreenSettings::GetShipTexture() const
 {
-	return BubbleTexture.LoadSynchronous();
+	return ShipTexture.LoadSynchronous();
+}
+
+UTexture2D* UMD_LoadingScreenSettings::GetBeaconTexture() const
+{
+	return BeaconTexture.LoadSynchronous();
+}
+
+UFont* UMD_LoadingScreenSettings::GetFont() const
+{
+	return Font.LoadSynchronous();
 }
 
 #undef LOCTEXT_NAMESPACE

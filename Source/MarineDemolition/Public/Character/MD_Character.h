@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -24,11 +24,15 @@ class UMD_InteractionComponent;
 class UMD_ScrapeToolComponent;
 class UGameplayAbility;
 class UMD_EquipHotbarComponent;
+class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
 class UMD_OxygenComponent;
+class UMD_ComfortComponent;
+class UWidgetComponent;
 class UNiagaraSystem;
 class UNiagaraComponent;
+class UAnimMontage;
 struct FMinimalViewInfo;
 struct FGameplayTag;
 // 캡슐 오버랩 콜백 매개변수 형식 전방 선언
@@ -106,6 +110,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	UMD_EquipHotbarComponent* GetHotbarComponent() const { return EquipHotbarComponent; }
 
+	UFUNCTION(BlueprintPure, Category = "MD|Audio")
+	UMD_AudioRelayComponent* GetAudioRelayComponent() const { return AudioRelayComponent; }
+
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	UMD_InteractionComponent* GetInteractionComponent() const { return InteractionComponent; }
 
@@ -114,6 +121,14 @@ public:
 
 	// 절단 루프 VFX 토글. 어빌리티가 서버·소유 클라 양쪽에서 부르고, 사본 프록시는 복제로 따라온다
 	void SetCutterVFXActive(bool bActive);
+
+	/**
+	 * 따개비 타격용 원샷 몽타주(AS_Scraper_Oneshot_Montage)를 3인칭 메시에서 재생한다.
+	 * 클릭 제거/타격 연동·멀티캐스트는 이후 단계에서 붙인다.
+	 * @return Montage_Play 가 돌려준 길이. 재생하지 못하면 0.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Scrape|Animation")
+	float PlayBarnacleScrapeMontage();
 
 	/** UI·앱 비활성화·외부 시스템이 입력을 가져가기 전에 헤라 Ability와 Focus를 정리한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape")
@@ -186,14 +201,30 @@ protected:
 		meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float FirstPersonArmsFollowSpeed = 0.f;
 
+	/** 월드 메시 관통을 줄이도록 팔·도구를 카메라 쪽으로 당겨 그리는 비율. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "MD|FirstPerson",
+		meta = (ClampMin = "0.1", ClampMax = "1.0", UIMin = "0.1", UIMax = "1.0"))
+	float FirstPersonRenderScale = 0.8f;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_ScrapeToolComponent> ScrapeToolComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_EquipHotbarComponent> EquipHotbarComponent;
 
+	/** 도구 작업음을 다른 클라이언트에게 중계한다 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_AudioRelayComponent> AudioRelayComponent;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_InteractionComponent> InteractionComponent;
+
+	/**
+	 * 3D 멀미 완화 담당. 수치는 Project Settings -> Game -> MD Comfort에 있고,
+	 * 로컬 플레이어에게만 동작한다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_ComfortComponent> ComfortComponent;
 
 	/** 다른 플레이어가 보는 전체 도구 메시. 적재 단계가 바뀌면 메시 자체를 교체한다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -213,6 +244,14 @@ protected:
 	/** 도구 스태틱 메시에서 절단 이펙트를 붙일 소켓. 없으면 메시 원점에 붙는다 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|VFX")
 	FName CutterVFXSocketName = TEXT("VFX_Blade");
+
+	/**
+	 * 따개비 타격 원샷 몽타주. 헤라 연속 긁기 포즈(AS_Scraper_Pose)와 별개이며,
+	 * DefaultSlot 에 한 번 재생된다. BP(또는 CDO)에서 할당한다. 비어 있으면
+	 * PlayBarnacleScrapeMontage 는 no-op.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|Animation")
+	TObjectPtr<UAnimMontage> BarnacleScrapeMontage;
 
 	/**
 	 * 도구 스태틱 메시에서 손에 닿을 지점을 표시하는 소켓 이름.
@@ -235,6 +274,10 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_OxygenComponent> OxygenComponent;
+
+	/** 원격 플레이어의 플랫폼 닉네임을 머리 위에 표시하는 이름표 컴포넌트 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UWidgetComponent> NameTagWidgetComponent;
 
 	/** 모선 리스폰 지점을 찾을 때 사용할 PlayerStart 태그 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Health")
@@ -261,6 +304,8 @@ protected:
 	//TSubclassOf<UGameplayAbility> WallScanAbilityClass;
 
 private:
+	// PlayerState의 이름 복제 알림이 이름표를 직접 갱신할 수 있게 접근을 허용한다.
+	friend class AMD_PlayerState;
 
 	void HandleMoveInput(const FInputActionValue& Value);
 	void HandleLookInput(const FInputActionValue& Value);
@@ -274,14 +319,6 @@ private:
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
 
-	// 사다리 진입을 처리하는 캡슐 오버랩 시작 콜백
-	UFUNCTION()
-	void HandleCollisionBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
-
-	// 사다리 이탈을 처리하는 캡슐 오버랩 종료 콜백
-	UFUNCTION()
-	void HandleCollisionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex);
-
 	// 클라이언트의 사다리 점프 이탈을 서버에 반영하는 요청
 	UFUNCTION(Server, Reliable)
 	void ServerJumpOffLadder();
@@ -290,6 +327,7 @@ private:
 
 	void InitializeAbilitySystem();
 	void GrantDefaultAbilities();
+	void RefreshNameTag();
 
 	UFUNCTION()
 	void HandleHotbarChanged();
@@ -345,8 +383,14 @@ private:
 		const UStaticMesh* ToolMesh,
 		const FTransform& AttachOffset) const;
 
-	/** 1인칭 팔은 소유 클라이언트에만 보이므로 그 경우에만 틱한다. */
+	/** 로컬 1인칭 팔 또는 클라이언트 이름표 갱신이 필요한 경우 캐릭터 틱을 활성화한다. */
 	void RefreshFirstPersonArmsTick();
+
+	/** 월드 공간 이름표가 현재 로컬 카메라를 향하도록 회전시킨다. */
+	void UpdateNameTagRotation();
+
+	/** 팔·도구의 데칼 수신을 끄고 UE 전용 1인칭 렌더링을 적용한다. */
+	void ConfigureFirstPersonRendering();
 
 	/** 1인칭 팔이 3인칭 메시의 포즈를 따라가도록 Leader Pose를 건다. */
 	void BindFirstPersonArmsToBodyPose();
@@ -411,21 +455,37 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel")
 	FName ScrapeBladeContactFallbackSocketName = TEXT("Blade_Contact");
 
-	/** 화면 중앙 기준으로 헤라 접촉 소켓을 놓는 카메라 전방 거리. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
+	/** Focus Ready에서 포인터를 따라가는 헤라의 카메라 전방 거리. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Pointer",
 		meta = (ClampMin = "10.0", ClampMax = "200.0", Units = "cm"))
 	float ScrapeViewModelDistanceCm = 75.0f;
 
-	/** 접촉 소켓을 pivot으로 적용하는 1인칭 헤라 시각 회전 보정. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
+	/** Focus Ready에서 접촉 소켓을 pivot으로 적용하는 시각 회전 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Pointer",
 		meta = (UIMin = "-180.0", UIMax = "180.0",
-			ToolTip = "Visual rotation in the Blade_Tip/Blade_Contact local contact frame."))
+			ToolTip = "Pointer-follow rotation in the Blade_Tip/Blade_Contact local contact frame."))
 	FRotator ScrapeViewModelRotationOffset = FRotator::ZeroRotator;
 
-	/** 접촉 소켓을 pivot으로 적용하는 1인칭 헤라 uniform 크기 보정. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
+	/** Focus Ready에서 접촉 소켓을 pivot으로 적용하는 uniform 크기 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Pointer",
 		meta = (ClampMin = "0.01", UIMin = "0.25", UIMax = "2.0"))
 	float ScrapeViewModelScaleMultiplier = 1.0f;
+
+	/** 실제 LMB 긁기 중에만 쓰는 독립 카메라 전방 거리. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Stroke",
+		meta = (ClampMin = "10.0", ClampMax = "200.0", Units = "cm"))
+	float ScrapeStrokeViewModelDistanceCm = 75.0f;
+
+	/** 실제 LMB 긁기 중에만 쓰는 독립 시각 회전 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Stroke",
+		meta = (UIMin = "-180.0", UIMax = "180.0",
+			ToolTip = "Active-stroke rotation in the Blade_Tip/Blade_Contact local contact frame."))
+	FRotator ScrapeStrokeViewModelRotationOffset = FRotator::ZeroRotator;
+
+	/** 실제 LMB 긁기 중에만 쓰는 독립 uniform 크기 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Stroke",
+		meta = (ClampMin = "0.01", UIMin = "0.25", UIMax = "2.0"))
+	float ScrapeStrokeViewModelScaleMultiplier = 0.25f;
 
 	/** 위치는 즉시 따라가고 헤라 회전만 이 시간 동안 완화한다. */
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
@@ -433,15 +493,17 @@ private:
 	float ScrapeViewModelRotationSmoothingSeconds = 0.04f;
 
 	FVector2D LastScrapeViewModelPointerNormalized = FVector2D(0.5, 0.5);
-	FVector2D ScrapeViewModelScreenDirection = FVector2D(0.0, -1.0);
-	FVector LastScrapeViewModelStableWorldTangent = FVector::ZeroVector;
-	FQuat ScrapeViewModelWorldRotation = FQuat::Identity;
+	FVector2D ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+	FVector LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+	FQuat ScrapePointerViewModelWorldRotation = FQuat::Identity;
+	FQuat ScrapeStrokeViewModelWorldRotation = FQuat::Identity;
 	FVector ScrapeViewModelWorldScale = FVector::OneVector;
 	bool bFirstPersonScrapeViewModelActive = false;
 	bool bFirstPersonArmsWereVisible = true;
-	bool bScrapeViewModelDirectionLocked = false;
+	bool bScrapeStrokeViewModelDirectionLocked = false;
 	bool bWasScrapingForViewModel = false;
-	bool bHasScrapeViewModelRotation = false;
+	bool bHasScrapePointerViewModelRotation = false;
+	bool bHasScrapeStrokeViewModelRotation = false;
 
 	/** 접촉이 끊길 때 도구 회전을 AttachOffset으로 부드럽게 복귀시키는 현재 값. */
 	FRotator ScrapeAnimationToolRelativeRotation = FRotator::ZeroRotator;

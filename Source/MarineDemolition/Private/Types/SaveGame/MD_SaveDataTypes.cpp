@@ -4,6 +4,7 @@
 
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Types/Lore/MD_LoreTypes.h"
 #include "World/Trash/MD_TrashBin.h"
 
@@ -136,13 +137,46 @@ bool FMD_WorldData::IsStructurallyValid() const
 		const bool bTransferredPatternDensitiesValid =
 			ContaminationRecord.TransferredPatternDensities.IsEmpty()
 			|| ContaminationRecord.TransferredPatternDensities.Num() == CellCount;
+		const bool bCoveredFractionsValid = ContaminationRecord.CoveredFractions.IsEmpty()
+			|| ContaminationRecord.CoveredFractions.Num() == CellCount;
 		if (ContaminationRecord.WallName.IsNone() == true
+			|| !FMD_ScrapeSurfaceLayout::IsLayoutMetadataValid(
+				ContaminationRecord.LayoutVersion, ContaminationRecord.LayoutId,
+				ContaminationRecord.GridDimensions)
+            || (ContaminationRecord.LayoutVersion == 1
+                && !FMD_ScrapeSurfaceLayout::IsCarrierScaleValid(ContaminationRecord.CarrierScale))
+			|| CellCount > FMD_ScrapeSurfaceLayout::MaximumCombinedCellCount
+			|| !bCoveredFractionsValid
 			|| CellCount != ContaminationRecord.InitialAmounts.Num()
 			|| CellCount != ContaminationRecord.RemainingAmounts.Num()
 			|| bTransferredAmountsValid == false
 			|| bTransferredPatternDensitiesValid == false)
 		{
 			return false;
+		}
+		TSet<int32> UniqueCellIndices;
+		int32 MaximumCellCount = FMD_ScrapeSurfaceLayout::LegacyMaximumCombinedCellCount;
+		if (ContaminationRecord.GridDimensions != FIntPoint::ZeroValue)
+		{
+			int32 CellsPerFace = 0;
+			if (!FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
+				ContaminationRecord.GridDimensions, CellsPerFace, MaximumCellCount))
+			{
+				return false;
+			}
+			if (ContaminationRecord.LayoutVersion == 1)
+			{
+				MaximumCellCount = CellsPerFace;
+			}
+		}
+		for (const int32 CellIndex : ContaminationRecord.CellIndices)
+		{
+			if (CellIndex < 0 || CellIndex >= MaximumCellCount
+				|| UniqueCellIndices.Contains(CellIndex))
+			{
+				return false;
+			}
+			UniqueCellIndices.Add(CellIndex);
 		}
 	}
 
@@ -233,6 +267,13 @@ bool FMD_GameData::MigrateToCurrentVersion()
 		}
 	}
 
+	// 버전 7은 따개비 배치기 기록에 새 게임별 런타임 시드를 추가한다.
+	// 구형 레코드는 새 유효성 플래그가 false로 역직렬화되며, 복원 시 기존
+	// PlacementSeed를 사용하므로 별도의 배열 변환이 필요 없다.
+
+	// 버전 8은 오염 주소의 bake ID와 격자 크기를 추가한다. 이전 기록은
+	// LayoutVersion=0 / invalid ID / zero grid를 유지하여 MeshUV에 적용하지 않는다.
+	// CellIndices는 이전부터 int32 UPROPERTY이므로 배열 원소 폭은 바뀌지 않는다.
 	SchemaVersion = CurrentSchemaVersion;
 	return true;
 }

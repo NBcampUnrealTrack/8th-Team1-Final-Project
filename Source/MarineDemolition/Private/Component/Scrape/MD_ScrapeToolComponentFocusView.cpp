@@ -584,8 +584,8 @@ void UMD_ScrapeToolComponent::UpdateLocalScrapeVisualContactPose(
 	if (VisualAim.Surface)
 	{
 		FVector CanonicalSurfaceNormal = FVector::ZeroVector;
-		if (VisualAim.Surface->TryGetScrapeSurfaceWorldNormal(
-			VisualAim.SurfaceFace,
+		if (VisualAim.Surface->TryGetScrapeSurfaceWorldNormalAtPosition(
+			VisualAim.SurfacePositionCm, VisualAim.SurfaceFace,
 			CanonicalSurfaceNormal))
 		{
 			ContactNormal = CanonicalSurfaceNormal;

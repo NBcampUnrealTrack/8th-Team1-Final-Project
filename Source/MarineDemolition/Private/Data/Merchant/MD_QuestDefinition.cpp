@@ -119,6 +119,14 @@ int32 UMD_QuestDefinition::GetRequiredCount(int32 PhaseIndex) const
 	return OutRequiredCount;
 }
 
+FGameplayTag UMD_QuestDefinition::GetSpawnZoneTag(int32 PhaseIndex) const
+{
+	// 유효하지 않은 페이즈는 지역 제한이 없는 값으로 처리한다.
+	const FMD_QuestPhaseData* Phase = GetPhase(PhaseIndex);
+	FGameplayTag OutSpawnZoneTag = Phase != nullptr ? Phase->SpawnZoneTag : FGameplayTag();
+	return OutSpawnZoneTag;
+}
+
 FText UMD_QuestDefinition::GetHUDDescription(int32 PhaseIndex) const
 {
 	const FMD_QuestPhaseData* Phase = GetPhase(PhaseIndex);

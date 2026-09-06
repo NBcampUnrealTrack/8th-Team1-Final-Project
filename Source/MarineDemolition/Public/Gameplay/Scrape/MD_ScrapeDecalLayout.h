@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
 
+struct FMD_ScrapeCylindricalSurfaceFrame;
+
 /** 한 면의 Deferred Decal 배치와 마스크 아틀라스 선택값. */
 struct MARINEDEMOLITION_API FMD_ScrapeDecalFaceLayout
 {
@@ -80,6 +82,20 @@ public:
 		const FMD_ScrapeDecalFaceLayout& FaceLayout,
 		EMD_ScrapeSurfaceNormalAxis SurfaceNormalAxis,
 		const FVector& MeshAbsoluteScale,
+		int32 PatchIndex,
+		int32 PatchCount,
+		FMD_ScrapeDecalFaceLayout& OutPatchLayout);
+
+	/** 곡면의 한 구간을 담당하도록 중심 법선에 맞춰 회전한 투영 상자를 계산한다. */
+	static bool TryCalculateCylindricalPatchLayout(
+		EMD_ScrapeSurfaceFace Face,
+		const FTransform& SurfaceTransform,
+		const FVector& SurfaceCenterLocal,
+		const FVector2D& SurfaceSizeCm,
+		const FMD_ScrapeCylindricalSurfaceFrame& CurveFrame,
+		float RequestedInwardDepthCm,
+		float RequestedOutwardMarginCm,
+		float RequestedEdgeInsetCm,
 		int32 PatchIndex,
 		int32 PatchCount,
 		FMD_ScrapeDecalFaceLayout& OutPatchLayout);

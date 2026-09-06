@@ -13,6 +13,9 @@ class UPhysicsHandleComponent;
 class UPrimitiveComponent;
 class USceneComponent;
 
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnInteractionTargetChanged, AActor*, NewTarget);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnInteractionPromptChanged, FText, PromptText);
+
 /**
  * 플레이어의 조준 상호작용과 물리 오브젝트 운반을 담당
  */
@@ -53,6 +56,26 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	AActor* GetHeldActor() const { return HeldActor; }
 
+	/** 로컬 플레이어가 현재 조준 중인 상호작용 가능 대상. */
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
+	AActor* GetCurrentTarget() const { return CurrentTarget.Get(); }
+
+	/** 현재 대상의 데이터 기반 표시 이름. 대상이나 이름이 없으면 빈 텍스트. */
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
+	FText GetCurrentTargetDisplayName() const;
+
+	/** 일반 E 상호작용과 현재 장착 도구의 GA 조준을 합친 최종 HUD 문구. */
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
+	FText GetCurrentInteractionPrompt() const { return CurrentInteractionPrompt; }
+
+	/** 로컬 플레이어가 조준하는 상호작용 가능 대상이 바뀔 때 방송한다. */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Interaction")
+	FMDOnInteractionTargetChanged OnInteractionTargetChanged;
+
+	/** 대상·도구·중앙 셀 상태 중 하나가 바뀌어 최종 HUD 문구가 달라질 때 방송한다. */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Interaction")
+	FMDOnInteractionPromptChanged OnInteractionPromptChanged;
+
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	bool IsHolding() const;
 
@@ -62,6 +85,10 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "MD|Interaction", meta = (ClampMin = "0.0", Units = "cm"))
 	float InteractTraceDistance = 200.f;
+
+	/** 커팅·스캔 도구의 중앙 조준 프롬프트가 확인할 거리. GA 기본 TraceDistance와 같다. */
+	UPROPERTY(EditAnywhere, Category = "MD|Interaction", meta = (ClampMin = "0.0", Units = "cm"))
+	float AbilityPromptTraceDistance = 200.f;
 
 	/** 서버에서 새 상호작용 요청을 받아들이는 최소 간격. 운반 해제 요청에는 적용하지 않는다. */
 	UPROPERTY(EditAnywhere, Category = "MD|Interaction",
@@ -154,7 +181,12 @@ private:
 	void CaptureDefaultHoldProfile();
 	void ApplyHoldProfile(const FMD_HoldProfile& Profile);
 	void UpdateInteractionFocus();
+	void UpdateInteractionPrompt();
 	AActor* TraceInteractionTarget() const;
+	FText ResolveCurrentInteractionPrompt() const;
+	FText ResolveAbilityInteractionPrompt() const;
+	bool TryTraceAimedWall(class AMD_CuttableWall*& OutWall, FHitResult& OutHit) const;
+	void SetCurrentInteractionPrompt(const FText& NewPrompt);
 	void SetCurrentTarget(AActor* NewTarget);
 	FTransform GetHoldPointTransform() const;
 	void UpdateCarrySettle(float DeltaSeconds);
@@ -173,6 +205,9 @@ private:
 	TObjectPtr<UPhysicsHandleComponent> PhysicsHandle;
 
 	TWeakObjectPtr<AActor> CurrentTarget;
+
+	UPROPERTY(Transient)
+	FText CurrentInteractionPrompt;
 
 	/** 서버가 잡은 대상. 운반 상태 UI를 위해 복제하며 위치는 대상 액터의 서버 이동 복제를 따른다. */
 	UPROPERTY(ReplicatedUsing = OnRep_HeldActor)

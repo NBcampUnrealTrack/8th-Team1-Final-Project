@@ -49,7 +49,7 @@ bool UMD_ScrapeToolComponent::TryBeginScrapeFocus()
 	const FMD_ScrapeAimQueryResult InitialAim = QueryScrapeAim(
 		CenterViewLocation,
 		CenterViewRotation.Vector());
-	if (!InitialAim.IsActionable())
+	if (!InitialAim.CanEnterFocus())
 	{
 		return false;
 	}
@@ -87,7 +87,7 @@ bool UMD_ScrapeToolComponent::TryBeginAuthoritativeScrapeFocusFromCurrentAim()
 		|| IsScrapeFocusActive()
 		|| bScrapeFocusViewBeginAttemptConsumed
 		|| !IsScrapeFocusViewToolCurrent()
-		|| !CurrentScrapeAim.IsActionable())
+		|| !CurrentScrapeAim.CanEnterFocus())
 	{
 		return false;
 	}
@@ -432,7 +432,6 @@ void UMD_ScrapeToolComponent::AdoptApprovedScrapeFocusSession(
 	CurrentScrapeAim = Preflight;
 	AuthoritativeAim.LastAuthoritativeAimReceiveSeconds =
 		AuthoritativeAim.LastAuthoritativeAimRateRefillSeconds;
-	ContaminationPaint.Stage3FocusSessionIdentityOverride = FocusSessionId;
 	SetScrapeFocusState(EMD_ScrapeFocusState::FocusedReady);
 	SetComponentTickEnabled(true);
 	ProcessReadyScrapeAimResult(Preflight, 0.0f);
@@ -625,7 +624,7 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 		Approval.bBasisMatches && !InitialWorldDirection.IsNearlyZero()
 			? QueryScrapeAim(ServerViewInfo.Location, InitialWorldDirection)
 			: FMD_ScrapeAimQueryResult();
-	if (!Approval.bBasisMatches || !Preflight.IsActionable())
+	if (!Approval.bBasisMatches || !Preflight.CanEnterFocus())
 	{
 		UE_LOG(
 			LogTemp,
@@ -633,7 +632,7 @@ void UMD_ScrapeToolComponent::ServerBeginScrapeFocus_Implementation(
 			TEXT("[ScrapeFocus][Server][%s] Begin denied: Basis=%d Target=%d RotationError=%.2f FOV(client/server)=%.2f/%.2f Aspect=%.4f"),
 			*GetNameSafe(GetOwner()),
 			Approval.bBasisMatches ? 1 : 0,
-			Preflight.IsActionable() ? 1 : 0,
+			Preflight.CanEnterFocus() ? 1 : 0,
 			FMD_ScrapeAimValidation::CalculateRotatorErrorDegrees(
 				Approval.ApprovedViewRotation,
 				ServerViewInfo.Rotation),
@@ -938,7 +937,6 @@ void UMD_ScrapeToolComponent::ResetScrapeFocusSessionState()
 	ScrapeFocusSession.FocusPendingElapsedSeconds = 0.0;
 	ScrapeFocusSession.LocalFocusMonotonicStartSeconds = 0.0;
 	ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted = false;
-	ContaminationPaint.Stage3FocusSessionIdentityOverride = 0;
 	ResetAuthoritativeScrapeFocusViewState();
 }
 
@@ -1004,7 +1002,7 @@ bool UMD_ScrapeToolComponent::RefreshScrapeFocusAim()
 			: FMD_ScrapeAimQueryResult();
 	}
 
-	const bool bAimActionable = CurrentScrapeAim.IsActionable();
+	const bool bAimActionable = CurrentScrapeAim.CanEnterFocus();
 	const bool bBecameActionable = bAimActionable
 		&& !bLastScrapeFocusViewAimActionable;
 	bLastScrapeFocusViewAimActionable = bAimActionable;

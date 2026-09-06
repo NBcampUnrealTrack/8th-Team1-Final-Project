@@ -105,6 +105,191 @@ bool FMD_ScrapeDecalLayout::TryCalculateHorizontalPatchLayout(
 	return true;
 }
 
+bool FMD_ScrapeDecalLayout::TryCalculateCylindricalPatchLayout(
+	const EMD_ScrapeSurfaceFace Face,
+	const FTransform& SurfaceTransform,
+	const FVector& SurfaceCenterLocal,
+	const FVector2D& SurfaceSizeCm,
+	const FMD_ScrapeCylindricalSurfaceFrame& CurveFrame,
+	const float RequestedInwardDepthCm,
+	const float RequestedOutwardMarginCm,
+	const float RequestedEdgeInsetCm,
+	const int32 PatchIndex,
+	const int32 PatchCount,
+	FMD_ScrapeDecalFaceLayout& OutPatchLayout)
+{
+	OutPatchLayout = FMD_ScrapeDecalFaceLayout();
+
+	const bool bIsFront = Face == EMD_ScrapeSurfaceFace::Front;
+	const bool bIsBack = Face == EMD_ScrapeSurfaceFace::Back;
+	if ((!bIsFront && !bIsBack)
+		|| PatchCount <= 0
+		|| PatchIndex < 0
+		|| PatchIndex >= PatchCount
+		|| SurfaceTransform.ContainsNaN()
+		|| SurfaceCenterLocal.ContainsNaN()
+		|| !FMath::IsFinite(SurfaceSizeCm.X)
+		|| !FMath::IsFinite(SurfaceSizeCm.Y)
+		|| SurfaceSizeCm.X <= UE_SMALL_NUMBER
+		|| SurfaceSizeCm.Y <= UE_SMALL_NUMBER
+		|| CurveFrame.CenterWorld.ContainsNaN()
+		|| CurveFrame.AxisWorld.ContainsNaN()
+		|| CurveFrame.StartDirectionWorld.ContainsNaN()
+		|| CurveFrame.TangentDirectionWorld.ContainsNaN()
+		|| CurveFrame.AxisWorld.IsNearlyZero()
+		|| CurveFrame.StartDirectionWorld.IsNearlyZero()
+		|| CurveFrame.TangentDirectionWorld.IsNearlyZero()
+		|| !FMath::IsFinite(CurveFrame.SweepRadians)
+		|| FMath::Abs(CurveFrame.SweepRadians) <= UE_SMALL_NUMBER
+		|| !FMath::IsFinite(CurveFrame.RadiusCm)
+		|| CurveFrame.RadiusCm <= UE_SMALL_NUMBER
+		|| !FMath::IsFinite(CurveFrame.ThicknessCm)
+		|| CurveFrame.ThicknessCm < 0.0
+		|| !FMath::IsFinite(RequestedInwardDepthCm)
+		|| RequestedInwardDepthCm <= UE_SMALL_NUMBER
+		|| !FMath::IsFinite(RequestedOutwardMarginCm)
+		|| RequestedOutwardMarginCm < 0.0f
+		|| !FMath::IsFinite(RequestedEdgeInsetCm)
+		|| RequestedEdgeInsetCm < 0.0f)
+	{
+		return false;
+	}
+
+	const bool bFaceIsOuter =
+		(bIsFront && CurveFrame.bFrontIsOuter)
+		|| (bIsBack && !CurveFrame.bFrontIsOuter);
+	const double FaceRadiusCm = CurveFrame.RadiusCm
+		+ (bFaceIsOuter ? 0.5 : -0.5) * CurveFrame.ThicknessCm;
+	if (!FMath::IsFinite(FaceRadiusCm)
+		|| FaceRadiusCm <= UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const double AppliedEdgeInsetCm = ClampEdgeInsetCm(
+		SurfaceSizeCm,
+		RequestedEdgeInsetCm);
+	const double MaximumAngularInset = FMath::Abs(
+		CurveFrame.SweepRadians) * 0.25
+		/ static_cast<double>(PatchCount);
+	const double AngularInset = FMath::Min(
+		AppliedEdgeInsetCm / FaceRadiusCm,
+		MaximumAngularInset);
+	const double SweepDirection = FMath::Sign(CurveFrame.SweepRadians);
+	double PatchStartAngle = CurveFrame.SweepRadians
+		* static_cast<double>(PatchIndex)
+		/ static_cast<double>(PatchCount);
+	double PatchEndAngle = CurveFrame.SweepRadians
+		* static_cast<double>(PatchIndex + 1)
+		/ static_cast<double>(PatchCount);
+	if (PatchIndex == 0)
+	{
+		PatchStartAngle += SweepDirection * AngularInset;
+	}
+	if (PatchIndex == PatchCount - 1)
+	{
+		PatchEndAngle -= SweepDirection * AngularInset;
+	}
+
+	const double PatchCenterAngle =
+		(PatchStartAngle + PatchEndAngle) * 0.5;
+	const double PatchHalfAngle =
+		FMath::Abs(PatchEndAngle - PatchStartAngle) * 0.5;
+	if (!FMath::IsFinite(PatchCenterAngle)
+		|| !FMath::IsFinite(PatchHalfAngle)
+		|| PatchHalfAngle <= UE_SMALL_NUMBER
+		|| PatchHalfAngle >= UE_HALF_PI)
+	{
+		return false;
+	}
+
+	const FVector RadialDirection = (
+		CurveFrame.StartDirectionWorld * FMath::Cos(PatchCenterAngle)
+		+ CurveFrame.TangentDirectionWorld
+			* FMath::Sin(PatchCenterAngle)).GetSafeNormal();
+	const FVector OutwardNormal = bFaceIsOuter
+		? RadialDirection
+		: -RadialDirection;
+	const FVector ProjectionDirection = -OutwardNormal;
+	if (RadialDirection.IsNearlyZero()
+		|| ProjectionDirection.IsNearlyZero())
+	{
+		return false;
+	}
+
+	// A tangent box needs the sagitta on the concave side of its center plane.
+	// Outer faces bend into the projection depth; inner faces bend into the
+	// exterior margin. The material's radial gates keep that larger box on the
+	// intended shell and face.
+	const double PatchSagittaCm = FaceRadiusCm
+		* (1.0 - FMath::Cos(PatchHalfAngle));
+	double InwardDepthCm = RequestedInwardDepthCm;
+	double OutwardMarginCm = RequestedOutwardMarginCm;
+	if (bFaceIsOuter)
+	{
+		InwardDepthCm += PatchSagittaCm;
+	}
+	else
+	{
+		OutwardMarginCm += PatchSagittaCm;
+	}
+	const double ProjectionHalfExtentCm =
+		(InwardDepthCm + OutwardMarginCm) * 0.5;
+	const double TangentHalfWidthCm =
+		FaceRadiusCm * FMath::Sin(PatchHalfAngle);
+	const double VerticalHalfHeightCm =
+		SurfaceSizeCm.Y * 0.5 - AppliedEdgeInsetCm;
+	if (!FMath::IsFinite(PatchSagittaCm)
+		|| !FMath::IsFinite(ProjectionHalfExtentCm)
+		|| !FMath::IsFinite(TangentHalfWidthCm)
+		|| !FMath::IsFinite(VerticalHalfHeightCm)
+		|| ProjectionHalfExtentCm <= UE_SMALL_NUMBER
+		|| TangentHalfWidthCm <= UE_SMALL_NUMBER
+		|| VerticalHalfHeightCm <= UE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const FVector SurfaceOriginWorld =
+		SurfaceTransform.TransformPosition(SurfaceCenterLocal);
+	const FVector AxisOriginWorld = CurveFrame.CenterWorld
+		+ CurveFrame.AxisWorld * FVector::DotProduct(
+			SurfaceOriginWorld - CurveFrame.CenterWorld,
+			CurveFrame.AxisWorld);
+	const FVector PatchSurfaceCenterWorld = AxisOriginWorld
+		+ RadialDirection * FaceRadiusCm;
+	const double VolumeCenterFromSurfaceCm =
+		(OutwardMarginCm - InwardDepthCm) * 0.5;
+	const FVector VolumeCenterWorld = PatchSurfaceCenterWorld
+		+ OutwardNormal * VolumeCenterFromSurfaceCm;
+	const FQuat WorldRotation = FRotationMatrix::MakeFromXY(
+		ProjectionDirection,
+		CurveFrame.AxisWorld).ToQuat();
+
+	OutPatchLayout.RelativeLocation =
+		SurfaceTransform.InverseTransformPosition(VolumeCenterWorld);
+	OutPatchLayout.RelativeRotation = (
+		SurfaceTransform.GetRotation().Inverse()
+		* WorldRotation).GetNormalized();
+	OutPatchLayout.DecalSize = FVector(
+		ProjectionHalfExtentCm,
+		VerticalHalfHeightCm,
+		TangentHalfWidthCm);
+	OutPatchLayout.MaskVOffset = bIsFront ? 0.0f : 0.5f;
+	OutPatchLayout.MaskUFlip = bIsFront ? 1.0f : 0.0f;
+	OutPatchLayout.PatchUVScaleU =
+		1.0f / static_cast<float>(PatchCount);
+	OutPatchLayout.PatchUVOffsetU =
+		static_cast<float>(PatchIndex)
+		* OutPatchLayout.PatchUVScaleU;
+	OutPatchLayout.AppliedInwardDepthCm = InwardDepthCm;
+	OutPatchLayout.AppliedOutwardMarginCm = OutwardMarginCm;
+	OutPatchLayout.AppliedEdgeInsetCm = AppliedEdgeInsetCm;
+	return !OutPatchLayout.RelativeLocation.ContainsNaN()
+		&& !OutPatchLayout.RelativeRotation.ContainsNaN()
+		&& !OutPatchLayout.DecalSize.ContainsNaN();
+}
+
 bool FMD_ScrapeDecalLayout::TryCalculateMaskHalfTexelUV(
 	const FIntPoint& AtlasDimensions,
 	const FVector2D& SurfaceSizeCm,

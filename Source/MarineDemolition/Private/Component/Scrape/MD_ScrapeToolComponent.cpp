@@ -13,6 +13,7 @@
 #include "NiagaraSystem.h"
 #include "Audio/MD_AudioSubsystem.h"
 #include "Net/UnrealNetwork.h"
+#include "World/Contamination/MD_Barnacle.h"
 
 namespace
 {
@@ -92,19 +93,13 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
 	bHasScrapeFocusView = false;
 	StrokePath.bHasPreviousSurfacePosition = false;
-	StrokePath.bHasLockedStrokeAxis = false;
-	ContaminationPaint.SaturatedContaminationStampPatternSeed = 7319;
 	StrokePath.PreviousSurfacePositionCm = FVector2D::ZeroVector;
 	StrokePath.PreviousSurfaceFace = EMD_ScrapeSurfaceFace::Front;
-	StrokePath.StrokeAnchorPositionCm = FVector2D::ZeroVector;
-	StrokePath.FurthestSurfacePositionCm = FVector2D::ZeroVector;
-	StrokePath.LockedStrokeAxis = FVector2D::ZeroVector;
 	StrokePath.PendingScrapePathArcLengthCm = 0.0;
 	StrokePath.ScrapePathArcLengthCm = 0.0;
 	StrokePath.LastEmittedScrapePathArcLengthCm = 0.0;
 	StrokePath.PendingResolvedScrapePathPointsCm.Reset();
 	StrokePath.PendingResolvedScrapePathTravelCm = 0.0;
-	StrokePath.PendingScrapePathSampleTimeSeconds = 0.0;
 	StrokePath.LastEmittedScrapePathPositionCm = FVector2D::ZeroVector;
 	StrokePath.LastEmittedBladeDepthAxis = FVector2D::ZeroVector;
 	StrokePath.StableBladeDepthAxis = FVector2D::ZeroVector;
@@ -235,11 +230,6 @@ bool UMD_ScrapeToolComponent::SetScrapeToolSpec(
 	// 성능이 바뀐 프레임에 이전 위치부터 새 범위를 소급 적용하지 않도록 경로를 끊는다.
 	ResetStrokeTracking();
 	ScrapeToolSpec = NewToolSpec;
-	++ScrapeToolSpecGeneration;
-	if (ScrapeToolSpecGeneration == 0)
-	{
-		++ScrapeToolSpecGeneration;
-	}
 	GetOwner()->ForceNetUpdate();
 	return true;
 }
@@ -248,11 +238,6 @@ void UMD_ScrapeToolComponent::OnRep_ScrapeToolSpec()
 {
 	// 서버에서 새 스펙을 받은 프레임에 이전 로컬 위치부터 새 범위를 잇지 않는다.
 	ResetStrokeTracking();
-	++ScrapeToolSpecGeneration;
-	if (ScrapeToolSpecGeneration == 0)
-	{
-		++ScrapeToolSpecGeneration;
-	}
 }
 
 bool UMD_ScrapeToolComponent::SetScrapeBladeWidthCm(
@@ -681,14 +666,6 @@ bool UMD_ScrapeToolComponent::CommitScrapeLoadStateInternal(
 	}
 
 	const float PreviousLoad = GetScrapeLoad();
-	if (CalculateScrapeLoadStage(PreviousLoad) == EMD_ScrapeLoadStage::Stage3
-		&& CalculateScrapeLoadStage(NewLoad) != EMD_ScrapeLoadStage::Stage3)
-	{
-		// 이전 spec/generation으로 생성한 tail을 먼저 확정한다.
-		FlushStage3PathTail();
-		AdvanceStage3SubStrokeGeneration();
-	}
-
 	ScrapeLoad = NewLoad;
 	ScrapeLoadRecoveryLots = MoveTemp(NewRecoveryLots);
 	++ScrapeLoadStateRevision;
@@ -801,7 +778,7 @@ void UMD_ScrapeToolComponent::SetCurrentScrapeBladeDirection(
 	const FVector& ReferenceWorldPosition)
 {
 	const FVector2D SafeAxis = BladeDepthAxis.GetSafeNormal();
-	if (!IsValid(Surface) || SafeAxis.IsNearlyZero())
+	if (!IsValid(Surface) || Surface->UsesMeshUVSurface() || SafeAxis.IsNearlyZero())
 	{
 		return;
 	}
@@ -897,6 +874,39 @@ void UMD_ScrapeToolComponent::StopScrapeLoopAudio()
 	}
 
 	ScrapeLoopHandle = FMD_AudioHandle();
+	bHasObservedRemoteContact = false;
+}
+
+bool UMD_ScrapeToolComponent::UpdateRemoteScrapeDragState(const double Now)
+{
+	if (!bHasLastContact)
+	{
+		// 날이 벽에서 떨어졌다. 다시 닿을 때 이전 위치와 비교하면 안 된다
+		bHasObservedRemoteContact = false;
+		return false;
+	}
+
+	if (!bHasObservedRemoteContact)
+	{
+		// 첫 접촉 프레임은 비교 대상이 없다. 소리는 다음 갱신부터
+		LastObservedRemoteContactLocation = LastContactWorldLocation;
+		bHasObservedRemoteContact = true;
+		LastScrapeTravelWorldSeconds = Now;
+		return true;
+	}
+
+	const double TravelCm =
+		FVector::Dist(LastContactWorldLocation, LastObservedRemoteContactLocation);
+	if (TravelCm > static_cast<double>(RemoteScrapeDragMinTravelCm))
+	{
+		LastObservedRemoteContactLocation = LastContactWorldLocation;
+		LastScrapeTravelWorldSeconds = Now;
+	}
+
+	// 유예는 로컬과 같은 값을 쓴다. 복제 간격이 프레임보다 길어
+	// 위치가 갱신되지 않는 구간을 이 유예가 메운다
+	return (Now - LastScrapeTravelWorldSeconds)
+		<= static_cast<double>(ScrapeLoopIdleGraceSeconds);
 }
 
 void UMD_ScrapeToolComponent::UpdateScrapeLoopAudio()
@@ -914,6 +924,25 @@ void UMD_ScrapeToolComponent::UpdateScrapeLoopAudio()
 	}
 
 	const double Now = World->GetTimeSeconds();
+
+	// 경로 누적은 조작 중인 클라이언트와 서버에만 쌓인다. 남의 화면에서는
+	// 그 값이 영원히 0 이라 드래그로 잡히지 않고, 결국 로컬과 호스트에서만
+	// 소리가 났다. 프록시는 복제되는 접촉 지점의 이동으로 대신 판정한다
+	const APawn* const AudioOwnerPawn = Cast<APawn>(GetOwner());
+	if (!AudioOwnerPawn || !AudioOwnerPawn->IsLocallyControlled())
+	{
+		const bool bRemoteDragging = UpdateRemoteScrapeDragState(Now);
+		DrawScrapeAudioDebug(Now, 0.0, 0.0, bRemoteDragging);
+		if (bRemoteDragging)
+		{
+			StartScrapeLoopAudio();
+		}
+		else
+		{
+			StopScrapeLoopAudio();
+		}
+		return;
+	}
 
 	// 커밋된 경로만 보면 안 된다. 이동량은 Pending 에 모였다가 임계값을 넘을 때
 	// 한 덩어리로 넘어오므로, 그것만 보면 스트로크 첫 구간에서 소리가 늦게 붙는다.
@@ -1001,6 +1030,9 @@ void UMD_ScrapeToolComponent::StartScraping()
 		return;
 	}
 
+	bBarnacleClickStroke = IsValid(CurrentScrapeAim.Barnacle)
+		&& CurrentScrapeAim.BarnacleHit.bBlockingHit
+		&& CurrentScrapeAim.BarnacleHit.GetActor() == CurrentScrapeAim.Barnacle.Get();
 	bIsScraping = true;
 	LastObservedScrapePathArcLengthCm =
 		StrokePath.ScrapePathArcLengthCm + StrokePath.PendingScrapePathArcLengthCm;
@@ -1019,10 +1051,6 @@ void UMD_ScrapeToolComponent::StartScraping()
 	}
 	UpdateLocalScrapeVisualContactPose(0.0f);
 	BeginScrapeVisualStroke();
-	ContaminationPaint.Stage3SubStrokeGeneration = 0;
-	AdvanceStage3SubStrokeGeneration();
-	ContaminationPaint.Stage3SampleSequence = 0;
-	ContaminationPaint.CommittedStage3Dabs.Reset();
 	if (ScrapeFocusState == EMD_ScrapeFocusState::FocusedReady)
 	{
 		SetScrapeFocusState(EMD_ScrapeFocusState::FocusedScraping);
@@ -1038,17 +1066,20 @@ void UMD_ScrapeToolComponent::StartScraping()
 		if (AuthoritativeAim.bAuthoritativeFirstScrapeAimApproved)
 		{
 			ProcessScrapeAimResult(CurrentScrapeAim, 0.0f, true, 0);
+			ApplyBarnacleClick(CurrentScrapeAim);
 			ReplayBufferedAuthoritativeAims();
 		}
 		return;
 	}
 	ProcessScrapeTrace(0.0f);
+	ApplyBarnacleClick(CurrentScrapeAim);
 }
 
 void UMD_ScrapeToolComponent::StopScraping()
 {
 	const bool bWasScraping = bIsScraping;
 	bIsScraping = false;
+	bBarnacleClickStroke = false;
 	EndScrapeVisualStroke();
 	StopScrapeLoopAudio();
 	ResetScrapeFocusPointerStrokeConstraint();
@@ -1187,28 +1218,13 @@ void UMD_ScrapeToolComponent::TickComponent(
 
 void UMD_ScrapeToolComponent::ResetStrokeTracking()
 {
-	const bool bHadTrackedSubStroke =
-		StrokePath.bHasPreviousSurfacePosition || ContaminationPaint.bStage3PathActive;
-	const uint32 GenerationBeforeFlush = ContaminationPaint.Stage3SubStrokeGeneration;
 	FlushPendingScrapePathApplication();
-	const bool bHadOrBuiltStage3Path = ContaminationPaint.bStage3PathActive;
-	FlushPendingContaminationPaintTail();
-	if ((bHadTrackedSubStroke || bHadOrBuiltStage3Path)
-		&& ContaminationPaint.Stage3SubStrokeGeneration == GenerationBeforeFlush)
-	{
-		AdvanceStage3SubStrokeGeneration();
-	}
 	ClearCurrentScrapeContact();
 	StrokePath.bHasPreviousSurfacePosition = false;
-	StrokePath.bHasLockedStrokeAxis = false;
 	StrokePath.PreviousSurfacePositionCm = FVector2D::ZeroVector;
 	StrokePath.PreviousSurfaceFace = EMD_ScrapeSurfaceFace::Front;
-	StrokePath.StrokeAnchorPositionCm = FVector2D::ZeroVector;
-	StrokePath.FurthestSurfacePositionCm = FVector2D::ZeroVector;
-	StrokePath.LockedStrokeAxis = FVector2D::ZeroVector;
 	StrokePath.PreviousSurface.Reset();
 	StrokePath.bHasLastScrapeSurfaceHit = false;
-	StrokePath.PendingScrapePathSampleTimeSeconds = 0.0;
 	ResetScrapePathAccumulator(FVector2D::ZeroVector);
 }
 
@@ -1259,7 +1275,9 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 		// 이펙트 로컬 +X가 벽 법선을 향하도록 정렬한다. 법선을 못 구하면 기존처럼 무회전.
 		FVector ContactNormal = FVector::ZeroVector;
 		const FRotator EffectRotation =
-			Surface->TryGetScrapeSurfaceWorldNormal(Result.SurfaceFace, ContactNormal)
+			Surface->TryGetScrapeSurfaceWorldNormalAtPosition(
+				CurrentScrapeAim.Surface == Surface ? CurrentScrapeAim.SurfacePositionCm : StrokePath.PreviousSurfacePositionCm,
+				Result.SurfaceFace, ContactNormal)
 				? ContactNormal.Rotation()
 				: FRotator::ZeroRotator;
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(

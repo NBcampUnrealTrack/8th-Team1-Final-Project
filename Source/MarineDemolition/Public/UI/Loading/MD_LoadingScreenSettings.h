@@ -5,6 +5,7 @@
 #include "MD_LoadingScreenSettings.generated.h"
 
 class UTexture2D;
+class UFont;
 
 /**
  * Project Settings → Game → MD Loading Screen.
@@ -27,10 +28,20 @@ public:
 	virtual FText GetSectionDescription() const override;
 #endif
 
-	/** 로딩 중 떠오르는 물방울 텍스처. 미지정이면 물방울 없이 배경과 문구만 그린다. */
+	/** 파도형 진행 트랙 위를 이동하는 작업선 텍스처. 미지정이면 트랙만 그린다. */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading Screen")
-	TSoftObjectPtr<UTexture2D> BubbleTexture;
+	TSoftObjectPtr<UTexture2D> ShipTexture;
 
-	/** 미지정이면 nullptr. 로딩 시작 직전에 한 번만 동기 로드한다. */
-	UTexture2D* GetBubbleTexture() const;
+	/** PEAK식 항로 종점에 표시할 등대 아이콘. 투명 배경 PNG를 사용한다. */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading Screen")
+	TSoftObjectPtr<UTexture2D> BeaconTexture;
+
+	/** 로딩 화면 제목과 부제에 사용할 폰트. */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading Screen")
+	TSoftObjectPtr<UFont> Font;
+
+	// 미지정이면 nullptr. 로딩 시작 직전에 한 번만 동기 로드하고 서브시스템이 붙들고 있는다.
+	UTexture2D* GetShipTexture() const;
+	UTexture2D* GetBeaconTexture() const;
+	UFont* GetFont() const;
 };

@@ -4,16 +4,21 @@
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LevelStreaming.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/Texture2D.h"
 #include "Engine/World.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
+#include "CommonActivatableWidget.h"
 #include "ContentStreaming.h"
 #include "GameFramework/PlayerController.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "MoviePlayer.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "TimerManager.h"
+#include "UI/MD_LocalUIManager.h"
 #include "UI/Loading/MD_LoadingScreenSettings.h"
 #include "UI/Loading/SMD_LoadingScreenWidget.h"
+#include "UI/MD_UISettings.h"
 #include "Util/MD_LogUtility.h"
 
 #define LOCTEXT_NAMESPACE "MDLoadingScreen"
@@ -27,8 +32,10 @@ namespace
 	 */
 	FText MakeCompletionSubtitle(const FText& Subtitle)
 	{
+		// static으로 두면 첫 호출 시점의 언어로 굳는다. 진행 문구는 호출부에서 매번 새로
+		// 만들어지므로, 여기만 굳으면 언어 변경 후 완료 문구만 옛 언어로 남는다.
 		struct FMapping { const TCHAR* Prefix; FText Completion; };
-		static const FMapping Mappings[] =
+		const FMapping Mappings[] =
 		{
 			{TEXT("CREW ASSEMBLING"),      LOCTEXT("CrewAssembled",  "CREW ASSEMBLED • 잠수팀 준비 완료")},
 			{TEXT("DIVE IN PROGRESS"),     LOCTEXT("DiveReady",      "DIVE READY • 잠수 준비 완료")},
@@ -99,6 +106,9 @@ void UMD_LoadingScreenSubsystem::BeginLoadingScreen(const FText& Subtitle)
 	// (서버 로컬 호출과 자기 자신에게 온 Client RPC가 겹치는 경우가 있다.)
 	if (IsLoadingScreenActive()) { return; }
 
+	// Common UI Transition이 이미 인트로를 재생 중이면 같은 연출을 Slate에서 다시 시작하지 않는다.
+	if (IsCommonTransitionScreenActive()) { return; }
+
 	StartLoadingVisuals(Subtitle, /*bSkipIntro=*/false);
 	SetLoadingTimer(IntroTimerHandle, &ThisClass::HandleIntroAnimationFinished, MD_LoadingScreen::IntroDurationSeconds);
 }
@@ -146,6 +156,7 @@ void UMD_LoadingScreenSubsystem::HandlePreLoadMap(const FWorldContext& WorldCont
 	{
 		StartLoadingVisuals(FText::GetEmpty(), /*bSkipIntro=*/true);
 	}
+	if (VisualState.IsValid()) { VisualState->SetProgressFloor(MD_LoadingScreen::MapLoadStartProgress); }
 
 	// viewport에 직접 붙은 UMG는 소유 월드가 파괴된 뒤에도 하드 트래블을 살아서 넘어온다.
 	// 로딩층은 순수 Slate라 그것을 덮지 못하므로, 목적지에서 outro 아래로 옛 타이틀/일시정지
@@ -168,6 +179,7 @@ void UMD_LoadingScreenSubsystem::HandlePostLoadMap(UWorld* LoadedWorld)
 	// 동안 같은 위젯을 다시 붙여, 자동 종료 뒤 검정 프레임이 없게 한다.
 	DetachViewportLoadingWidget();
 	EnsureViewportLoadingWidget();
+	if (VisualState.IsValid()) { VisualState->SetProgressFloor(MD_LoadingScreen::MapLoadedProgress); }
 
 	// 타이머는 월드에 종속돼 옛 월드와 함께 사라진다. 인트로가 남았다면 남은 시간만큼
 	// 새 월드에서 다시 걸어야 트래블이 인트로를 잡아먹지 않는다.
@@ -270,7 +282,15 @@ void UMD_LoadingScreenSubsystem::TryFinishAfterWorldLoad()
 		return;
 	}
 
-	if (++ReadyStablePollCount < MD_LoadingScreen::RequiredReadyStablePolls) { return; }
+	// 안정 판정이 쌓이는 만큼 마지막 구간을 미리 채워, 종료 직전에 진행률이 한 번에 뛰지 않게 한다.
+	++ReadyStablePollCount;
+	if (VisualState.IsValid())
+	{
+		VisualState->SetProgressFloor(FMath::Lerp(MD_LoadingScreen::MapLoadedProgress,
+			MD_LoadingScreen::ReadyStableProgress,
+			static_cast<float>(ReadyStablePollCount) / MD_LoadingScreen::RequiredReadyStablePolls));
+	}
+	if (ReadyStablePollCount < MD_LoadingScreen::RequiredReadyStablePolls) { return; }
 
 	StopWorldReadyPolling();
 	FinishLoadingScreen();
@@ -306,13 +326,7 @@ void UMD_LoadingScreenSubsystem::FinishLoadingScreen(bool bShowCompletion)
 
 	Phase = EMD_LoadingPhase::Completion;
 	VisualState->BeginCompletion();
-	SetLoadingTimer(CompletionTimerHandle, &ThisClass::HandleCompletionDisplayFinished,
-		MD_LoadingScreen::CompletionDisplaySeconds);
-}
-
-void UMD_LoadingScreenSubsystem::HandleCompletionDisplayFinished()
-{
-	BeginOutro();
+	SetLoadingTimer(CompletionTimerHandle, &ThisClass::BeginOutro, MD_LoadingScreen::CompletionDisplaySeconds);
 }
 
 void UMD_LoadingScreenSubsystem::BeginOutro()
@@ -331,7 +345,8 @@ void UMD_LoadingScreenSubsystem::BeginOutro()
 		VisualState->BeginOutro();
 	}
 
-	SetLoadingTimer(OutroTimerHandle, &ThisClass::HandleOutroAnimationFinished, MD_LoadingScreen::OutroDurationSeconds);
+	// outro가 끝나면 위젯과 상태를 통째로 되돌린다.
+	SetLoadingTimer(OutroTimerHandle, &ThisClass::RemoveLoadingWidgets, MD_LoadingScreen::OutroDurationSeconds);
 }
 
 // 연출 상태를 만들고 화면을 덮는다. bSkipIntro는 인트로를 기다릴 수 없는 fallback 경로용이다.
@@ -341,7 +356,9 @@ void UMD_LoadingScreenSubsystem::StartLoadingVisuals(const FText& Subtitle, bool
 	// outro 도중 다음 로딩이 시작되는 경우가 있어 여기서 먼저 걷어낸다.
 	RemoveLoadingWidgets();
 
-	const FText Resolved = Subtitle.IsEmpty() ? LOCTEXT("DefaultSubtitle", "Preparing expedition...") : Subtitle;
+	const FText Resolved = Subtitle.IsEmpty()
+		? LOCTEXT("DefaultSubtitle", "PREPARING EXPEDITION • 원정 준비 중")
+		: Subtitle;
 
 	Phase = bSkipIntro ? EMD_LoadingPhase::Loading : EMD_LoadingPhase::Intro;
 	PendingFinish = EMD_LoadingFinishRequest::None;
@@ -377,20 +394,24 @@ void UMD_LoadingScreenSubsystem::ClearLoadingTimers()
 	}
 }
 
-// 텍스처는 Project Settings → Game → MD Loading Screen에서 지정한다.
-// 미지정이면 위젯이 물방울을 생략하고 배경과 문구만 그린다.
+// 작업선 텍스처는 Project Settings → Game → MD Loading Screen에서 지정한다.
+// 한 번 로드하면 UPROPERTY가 붙들고 있으므로 다음 로딩에서는 다시 읽지 않는다.
 TSharedRef<SWidget> UMD_LoadingScreenSubsystem::CreateLoadingWidget()
 {
-	if (!BubbleTexture)
+	if (!ShipTexture || !BeaconTexture || !LoadingFont)
 	{
 		if (const UMD_LoadingScreenSettings* Settings = UMD_LoadingScreenSettings::Get())
 		{
-			BubbleTexture = Settings->GetBubbleTexture();
+			if (!ShipTexture) { ShipTexture = Settings->GetShipTexture(); }
+			if (!BeaconTexture) { BeaconTexture = Settings->GetBeaconTexture(); }
+			if (!LoadingFont) { LoadingFont = Settings->GetFont(); }
 		}
 	}
 	return SNew(SMD_LoadingScreenWidget)
 		.VisualState(VisualState)
-		.BubbleTexture(BubbleTexture);
+		.ShipTexture(ShipTexture)
+		.BeaconTexture(BeaconTexture)
+		.Font(LoadingFont);
 }
 
 void UMD_LoadingScreenSubsystem::EnsureViewportLoadingWidget()
@@ -484,9 +505,23 @@ void UMD_LoadingScreenSubsystem::HandleIntroAnimationFinished()
 	FlushPendingIntroCallbacks();
 }
 
-void UMD_LoadingScreenSubsystem::HandleOutroAnimationFinished()
+bool UMD_LoadingScreenSubsystem::IsCommonTransitionScreenActive() const
 {
-	RemoveLoadingWidgets();
+	ULocalPlayer* LocalPlayer = GetGameInstance()->GetFirstGamePlayer();
+	UMD_LocalUIManager* LocalUIManager = IsValid(LocalPlayer)
+		? LocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
+	const UMD_UISettings* UISettings = UMD_UISettings::Get();
+	if (!IsValid(LocalUIManager) || !IsValid(UISettings)) { return false; }
+
+	UCommonActivatableWidget* ActiveModalScreen = LocalUIManager->GetActiveScreen(MDGameplayTags::UI_Layer_Modal);
+	const FGameplayTag TransitionTag =
+		FGameplayTag::RequestGameplayTag(FName(TEXT("UI.Layer.Modal.Transition")), /*ErrorIfNotFound=*/false);
+	if (!IsValid(ActiveModalScreen) || !TransitionTag.IsValid()) { return false; }
+
+	// 활성 화면이 이미 클래스를 로드했으므로 Soft Class를 강제로 다시 로드하지 않는다.
+	// 아직 로드되지 않았다면 그 화면일 리 없으므로 false로 떨어지는 것이 맞다.
+	const UClass* TransitionScreenClass = UISettings->WidgetClassMap.FindRef(TransitionTag).Get();
+	return TransitionScreenClass && ActiveModalScreen->GetClass() == TransitionScreenClass;
 }
 
 // 세션 작업이 실패하면 트래블이 없어 준비 판정이 시작되지 않는다. 화면이 남으므로

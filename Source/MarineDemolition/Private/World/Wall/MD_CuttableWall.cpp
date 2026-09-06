@@ -296,6 +296,11 @@ void AMD_CuttableWall::ScanHighlight(float Duration, AActor* Scanner)
 	OnWallScanned.Broadcast(this, Duration, Scanner);
 }
 
+void AMD_CuttableWall::OnScanned_Implementation(float Duration, AActor* Scanner)
+{
+	ScanHighlight(Duration, Scanner);
+}
+
 void AMD_CuttableWall::AddCutProgress(float DeltaSeconds, AActor* Cutter)
 {
 	AddCutProgressInternal(DeltaSeconds, Cutter, nullptr);
@@ -324,6 +329,13 @@ void AMD_CuttableWall::AddCutProgressInternal(
 	}
 
 	if (!CanCut())
+	{
+		return;
+	}
+
+	// 지점 제한이 걸린 벽(튜토리얼)은 허용된 자리를 쳤을 때만 진행도가 쌓인다.
+	// 거부해도 어빌리티는 계속 돌아간다 — 절단기가 "안 먹는" 것으로 보이는 게 의도다.
+	if (CutLocationFilter.IsBound() && !CutLocationFilter.Execute(WallHit))
 	{
 		return;
 	}
@@ -365,7 +377,34 @@ float AMD_CuttableWall::GetCutProgressRatio() const
 
 void AMD_CuttableWall::OnRep_CutProgress()
 {
-	OnCutProgressChanged.Broadcast(this, GetCutProgressRatio());
+	const float ProgressRatio = GetCutProgressRatio();
+	OnCutProgressChanged.Broadcast(this, ProgressRatio);
+
+	if (GEngine && GetNetMode() != NM_DedicatedServer)
+	{
+		const TCHAR* WallTypeLabel = WallType == EMD_WallType::Strut
+			? TEXT("Strut")
+			: TEXT("Partition");
+		const TCHAR* NetRoleLabel = HasAuthority()
+			? TEXT("Server")
+			: TEXT("Client");
+		const FColor ProgressColor = ProgressRatio >= 1.0f
+			? FColor::Green
+			: FColor::Cyan;
+
+		GEngine->AddOnScreenDebugMessage(
+			reinterpret_cast<uint64>(this),
+			0.35f,
+			ProgressColor,
+			FString::Printf(
+				TEXT("[Wall Cutting][%s] %s (%s) | %.1f%% | %.2f / %.2fs"),
+				NetRoleLabel,
+				*GetName(),
+				WallTypeLabel,
+				ProgressRatio * 100.0f,
+				CutProgressSeconds,
+				GetRequiredCutSeconds()));
+	}
 }
 
 void AMD_CuttableWall::SyncLegacySurfaceConfiguration()

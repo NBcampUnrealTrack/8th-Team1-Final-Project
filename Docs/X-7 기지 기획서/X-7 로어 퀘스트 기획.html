@@ -1,0 +1,1074 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>X-7 로어 퀘스트 기획</title>
+<style>
+:root{
+  --bg:#0e1116; --bg2:#151a21; --bg3:#1b222b;
+  --line:#2a333f; --line2:#374453;
+  --tx:#dfe6ee; --tx2:#9fb0c3; --tx3:#6d7f93;
+  --lore:#b478ff; --lore-dim:#7b4fb3;
+  --warn:#f5c400; --hold:#ffa02c; --bad:#ff6b6b; --ok:#4fd6a8;
+  --mono:ui-monospace,"Cascadia Mono","D2Coding",Consolas,monospace;
+  --sans:"Pretendard","Noto Sans KR","Malgun Gothic",-apple-system,system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:74px}
+body{margin:0;background:var(--bg);color:var(--tx);font-family:var(--sans);
+  font-size:15px;line-height:1.75;-webkit-font-smoothing:antialiased}
+
+/* ── nav ── */
+nav{position:sticky;top:0;z-index:50;background:rgba(14,17,22,.94);
+  backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.navin{max-width:1180px;margin:0 auto;padding:12px 24px;display:flex;
+  align-items:center;gap:18px;flex-wrap:wrap}
+.navttl{font-weight:800;letter-spacing:-.02em;white-space:nowrap}
+.navttl b{color:var(--lore)}
+nav a{color:var(--tx2);text-decoration:none;font-size:13px;padding:4px 9px;
+  border-radius:6px;white-space:nowrap}
+nav a:hover{color:var(--tx);background:var(--bg3)}
+
+/* ── layout ── */
+main{max-width:1180px;margin:0 auto;padding:0 24px 120px}
+section{padding-top:56px}
+h1{font-size:34px;letter-spacing:-.03em;margin:44px 0 6px;font-weight:800}
+h2{font-size:23px;letter-spacing:-.02em;margin:0 0 6px;font-weight:750;
+  padding-bottom:10px;border-bottom:2px solid var(--line)}
+h2 .num{color:var(--lore);font-family:var(--mono);font-size:16px;margin-right:10px}
+h3{font-size:17px;margin:34px 0 10px;font-weight:700}
+h4{font-size:14px;margin:22px 0 8px;color:var(--tx2);font-weight:700;
+  letter-spacing:.04em;text-transform:uppercase}
+p{margin:10px 0}
+.lead{color:var(--tx2);font-size:15px;margin:14px 0 22px}
+code{font-family:var(--mono);font-size:.88em;background:var(--bg3);
+  padding:2px 6px;border-radius:4px;color:#c9d6e4}
+strong{color:#fff;font-weight:700}
+em{color:var(--tx2);font-style:italic}
+hr{border:0;border-top:1px solid var(--line);margin:40px 0}
+a.ref{color:var(--lore);text-decoration:none;border-bottom:1px dotted var(--lore-dim)}
+
+/* ── meta header ── */
+.meta{background:var(--bg2);border:1px solid var(--line);border-radius:12px;
+  padding:18px 22px;margin:22px 0 8px;font-size:13.5px;color:var(--tx2)}
+.meta div{margin:5px 0}
+.meta b{color:var(--tx)}
+
+/* ── tables ── */
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:13.5px}
+th,td{padding:10px 13px;border-bottom:1px solid var(--line);
+  text-align:left;vertical-align:top}
+th{background:var(--bg2);color:var(--tx2);font-weight:700;font-size:12.5px;
+  letter-spacing:.03em;white-space:nowrap}
+tbody tr:hover{background:rgba(180,120,255,.05)}
+td.c{text-align:center}td.r{text-align:right;font-family:var(--mono)}
+table.tight td,table.tight th{padding:7px 11px}
+
+/* ── callouts ── */
+.note,.hold,.danger,.good{border-radius:10px;padding:14px 18px;margin:18px 0;
+  font-size:14px;border-left:3px solid}
+.note{background:rgba(180,120,255,.07);border-color:var(--lore)}
+.hold{background:rgba(255,160,44,.09);border-color:var(--hold)}
+.danger{background:rgba(255,107,107,.08);border-color:var(--bad)}
+.good{background:rgba(79,214,168,.07);border-color:var(--ok)}
+.note b,.hold b,.danger b,.good b{color:#fff}
+.tag{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.06em;
+  padding:2px 8px;border-radius:20px;vertical-align:middle}
+.t-hold{background:rgba(255,160,44,.18);color:var(--hold)}
+.t-lore{background:rgba(180,120,255,.18);color:var(--lore)}
+
+/* ── lore cards ── */
+.lore{background:var(--bg2);border:1px solid var(--line);border-radius:14px;
+  margin:26px 0;overflow:hidden}
+.lore.held{border-color:rgba(255,160,44,.4)}
+.lhead{display:flex;align-items:flex-start;gap:16px;padding:18px 22px;
+  background:linear-gradient(180deg,var(--bg3),var(--bg2));
+  border-bottom:1px solid var(--line)}
+.lnum{font-family:var(--mono);font-size:26px;font-weight:800;color:var(--lore);
+  line-height:1;min-width:34px}
+.lttl{flex:1}
+.lttl h3{margin:0 0 4px;font-size:19px}
+.lid{font-family:var(--mono);font-size:12px;color:var(--tx3)}
+.lroom{font-size:13px;color:var(--tx2);margin-top:3px}
+.hide{text-align:center;min-width:82px}
+.hide .n{font-family:var(--mono);font-size:22px;font-weight:800;line-height:1}
+.hide .l{font-size:10.5px;color:var(--tx3);letter-spacing:.08em;margin-top:2px}
+.h1c{color:#7fd6ff}.h2c{color:#ffd166}.h3c{color:#ff9f6b}.h4c{color:#ff6b9d}
+.lbody{padding:6px 22px 20px}
+.lgrid{display:grid;grid-template-columns:96px 1fr;gap:0 16px;font-size:13.5px}
+.lgrid dt{color:var(--tx3);padding:8px 0;border-bottom:1px solid var(--line);
+  font-size:12.5px;letter-spacing:.02em}
+.lgrid dd{margin:0;padding:8px 0;border-bottom:1px solid var(--line)}
+.lgrid dt:last-of-type,.lgrid dd:last-of-type{border-bottom:0}
+
+/* ── in-world document ── */
+.doc{background:#12161c;border:1px solid var(--line2);border-radius:10px;
+  padding:22px 26px;margin:16px 0 4px;position:relative;
+  font-size:14px;line-height:1.95;color:#c8d4e0}
+.doc::before{content:"기록물 본문 — 코덱스 표시 텍스트";position:absolute;top:-9px;left:18px;
+  background:var(--bg2);padding:0 9px;font-size:10.5px;letter-spacing:.1em;
+  color:var(--tx3);font-weight:700}
+.doc .dt{font-weight:800;color:#fff;font-size:15px;margin:0 0 14px;
+  letter-spacing:-.01em}
+.doc p{margin:11px 0}
+.doc .sep{color:var(--tx3);font-size:12.5px;margin:18px 0 10px;letter-spacing:.03em}
+.doc .hand{color:#a8b8c9;font-style:italic}
+.doc .sign{color:var(--tx3);font-size:13px;margin-top:16px;text-align:right}
+.doc .num{color:var(--lore);font-weight:700}
+
+/* ── thread grid ── */
+.thread{display:grid;gap:10px;margin:18px 0}
+.trow{display:grid;grid-template-columns:150px 1fr;gap:14px;align-items:start;
+  background:var(--bg2);border:1px solid var(--line);border-radius:10px;padding:14px 16px}
+.tname{font-weight:750;font-size:14px}
+.tname span{display:block;font-size:11.5px;color:var(--tx3);font-weight:500;margin-top:2px}
+.dots{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:8px}
+.dot{font-family:var(--mono);font-size:11px;padding:3px 9px;border-radius:6px;
+  background:var(--bg3);color:var(--tx3);border:1px solid var(--line)}
+.dot.on{background:rgba(180,120,255,.2);color:var(--lore);border-color:var(--lore-dim)}
+.dot.key{background:var(--lore);color:#14101c;font-weight:800;border-color:var(--lore)}
+
+/* ── dialogue ── */
+.dlg{background:#12161c;border:1px solid var(--line2);border-radius:10px;
+  padding:18px 22px;margin:14px 0;font-size:14px;line-height:1.9}
+.dlg .who{color:var(--lore);font-weight:750;font-size:13px;margin-bottom:6px}
+.dlg .act{color:var(--tx3);font-style:italic;font-size:13px}
+.dlg .pc{color:#8fd0ff}
+.choice{display:flex;gap:12px;margin:14px 0;flex-wrap:wrap}
+.btn{border:1px solid var(--line2);background:var(--bg3);border-radius:8px;
+  padding:10px 18px;font-size:13.5px;font-weight:700}
+
+/* misc */
+details{background:var(--bg2);border:1px solid var(--line);border-radius:10px;
+  padding:12px 18px;margin:14px 0}
+summary{cursor:pointer;font-weight:700;font-size:14px;color:var(--tx2)}
+summary:hover{color:var(--tx)}
+pre{background:#0b0e13;border:1px solid var(--line);border-radius:8px;
+  padding:14px 16px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;
+  line-height:1.65;color:#b8c6d4}
+ul,ol{padding-left:22px}li{margin:6px 0}
+footer{border-top:1px solid var(--line);margin-top:70px;padding:24px 0;
+  color:var(--tx3);font-size:12.5px}
+@media print{
+  nav{display:none}body{background:#fff;color:#111}
+  .lore,.meta,.doc,.dlg,.trow,details{background:#fff;border-color:#ccc}
+  h2{border-color:#111}
+}
+@media(max-width:720px){
+  .lgrid{grid-template-columns:1fr}.lgrid dt{border:0;padding-bottom:0}
+  .trow{grid-template-columns:1fr}.lhead{flex-wrap:wrap}
+}
+</style>
+</head>
+<body>
+
+<nav><div class="navin">
+  <div class="navttl">X-7 <b>로어 퀘스트</b></div>
+  <a href="#sum">한눈에</a>
+  <a href="#flow">이야기 흐름</a>
+  <a href="#lore">기록물 7종</a>
+  <a href="#hide">은닉 설계</a>
+  <a href="#end">완성 시</a>
+  <a href="#multi">멀티플레이</a>
+  <a href="#ui">UI</a>
+  <a href="#art">에셋</a>
+  <a href="#open">보류 · 미결정</a>
+</div></nav>
+
+<main>
+
+<h1>X-7 로어 퀘스트 기획</h1>
+<p class="lead">해저 연구기지 X-7에 남은 기록물 7종. 무엇을 놓고, 어떻게 숨기고, 무슨 이야기를 하는가.</p>
+
+<div class="meta">
+  <div><b>정본 문서</b> · <code>Docs/X-7 기지 기획서/06 X-7 로어 폴리싱 (동선·UI·에셋).md</code> (Develop v12)</div>
+  <div><b>도면</b> · <code>02 X-7 레벨 배치</code> v7 — 1F 8실 + B1 7실 + 해치 2</div>
+  <div><b>멀티 저장 규칙</b> · <code>04 X-7 로어 퀘스트 기획</code> §6 (Develop v12 — 조사 시 전원 저장)</div>
+  <div><b>프레임워크</b> · <code>공통 기획서/09 퀘스트 기획</code> §5</div>
+  <div style="margin-top:12px;color:var(--tx3)">이 HTML은 읽기용 요약본입니다. 수치·규칙이 충돌하면 위 마크다운 문서가 정본입니다.</div>
+</div>
+
+<!-- ══════════════════ 1 ══════════════════ -->
+<section id="sum">
+<h2><span class="num">01</span>한눈에</h2>
+
+<div class="note">
+<b>방 이름이 곧 그 방이 남긴 기록이다.</b><br>
+분석실에서는 분석 결과가, 배양실에서는 배양 로그가, 정비실에서는 정비 일지가 나온다.
+로어를 "아무 방에나 놓인 이야기 조각"이 아니라 <b>그 방에서 실제로 일하던 사람이 남기고 간 업무 문서</b>로 만든다.
+</div>
+
+<table>
+<thead><tr><th>#</th><th>이름</th><th>방</th><th>대상물</th><th class="c">은닉</th><th>이 방이 하던 일</th></tr></thead>
+<tbody>
+<tr><td class="c">1</td><td><b>라운지 게시판</b><br><span class="lid">X7-L01</span></td><td>1F <b>03 연구 라운지</b></td><td>게시판 종이 뭉치</td><td class="c h1c"><b>1</b></td><td>쉬고, 교대하고, 떠들던 방</td></tr>
+<tr><td class="c">2</td><td><b>표본 분석 보고서</b><br><span class="lid">X7-L02</span></td><td>1F <b>04 표본 분석실</b></td><td>분석 콘솔 태블릿</td><td class="c h2c"><b>2</b></td><td>이게 뭔지 재는 방</td></tr>
+<tr><td class="c">3</td><td><b>배양 라인 일지</b><br><span class="lid">X7-L03</span></td><td>B1 <b>B1-02 생물 실험실</b></td><td>배양 로그 카트리지</td><td class="c h1c"><b>1</b></td><td>키워서 관찰하는 방</td></tr>
+<tr><td class="c">4</td><td><b>유전자 해석 결과</b><br><span class="lid">X7-L04</span></td><td>B1 <b>B1-01 유전자 분석실</b></td><td>해석 데이터 코어</td><td class="c h3c"><b>3</b></td><td>어디서 왔는지 묻는 방</td></tr>
+<tr><td class="c">5</td><td><b>정비 일지와 인수증</b><br><span class="lid">X7-L05</span></td><td>B1 <b>B1-07 유지 보수실</b></td><td>정비 바인더 + 인수증</td><td class="c h3c"><b>3</b></td><td>기지가 버티는지 보는 방</td></tr>
+<tr><td class="c">6</td><td><b>억제제 합성 시험</b><br><span class="lid">X7-L06</span></td><td>B1 <b>B1-03 화학 합성실</b></td><td>시험 노트 + 채집통 태그</td><td class="c h2c"><b>2</b></td><td>막을 방법을 만드는 방</td></tr>
+<tr><td class="c">7</td><td><b>심해 신호 기록</b> <span class="tag t-lore">암호화</span><br><span class="lid">X7-L07</span></td><td><b>땅굴</b> <span class="tag t-hold">보류</span></td><td>휴대 무전기</td><td class="c h4c"><b>4</b></td><td>도면에 없는 방</td></tr>
+</tbody></table>
+
+<h3>기본 규칙</h3>
+<table class="tight">
+<tbody>
+<tr><th>완료 조건</th><td><b>기록물 조사 1회.</b> 섹터 청소 % 아님</td></tr>
+<tr><th>운반</th><td><b>없다.</b> 조사 즉시 코덱스 등록, 오브젝트 소멸</td></tr>
+<tr><th>보상</th><td><b>없다.</b> 평가 점수 · 크레딧 · 호감도 어디에도 붙지 않는다</td></tr>
+<tr><th>점검 영향</th><td><b>없다.</b> 완전 보너스 트랙</td></tr>
+<tr><th>실패</th><td><b>개념 자체가 없다.</b> 놓쳐도 재방문하면 그대로 있다</td></tr>
+<tr><th>발견 순서</th><td><b>자유.</b> L07만 암호화 (L01~L06 선행)</td></tr>
+<tr><th>기믹</th><td>헤라 2 · 철거 2 · 쓰레기 치움 1 · 공간 1 — <b>접근을 막는 것이지 목표가 아니다</b></td></tr>
+</tbody></table>
+
+<div class="danger">
+<b>로어는 게임에 어떤 영향도 주지 않는다.</b><br>
+상점·호감도·해금·상인 태도·현장 언락 어디에도 반영하지 않는다. <b>코덱스를 다 채워도 게임 상태는 바뀌지 않는다.</b>
+</div>
+
+<div class="hold">
+<b>⏸ 브릭스 대면 선택지 — 개발 범위 밖 (v11)</b><br><br>
+개발 범위가 넓어 <b>선택지 트랙을 통째로 뺐다.</b><br><br>
+<b>빼는 것</b> — A/B 선택 UI · 재선택 창 · <code>ToldBriggsAboutX7</code> 플래그 · 대면 대사 · 보류 상태 UI 힌트 · 멀티 플래그 병합<br>
+<b>남는 것</b> — <b>7종 수집 · 코덱스 열람 · L07 해독.</b> 구현할 것은 이 셋뿐이다.<br><br>
+설계와 대사는 완성돼 있으니 <a class="ref" href="#end">「완성 시」 섹션</a>에 접어서 보존했다. 범위가 열리면 그대로 쓰면 된다.
+</div>
+</section>
+
+<!-- ══════════════════ 2 ══════════════════ -->
+<section id="flow">
+<h2><span class="num">02</span>이야기 흐름</h2>
+<p class="lead">7종이 독립된 조각이 아니라, 세 가닥이 관통한다.</p>
+
+<div class="thread">
+  <div class="trow">
+    <div class="tname">A. 왜 침수됐나<span>완결됨</span></div>
+    <div>
+      <div class="dots">
+        <span class="dot">1 라운지</span><span class="dot on">2 부식 가속</span><span class="dot on">3 격리 누출</span>
+        <span class="dot">4 유전자</span><span class="dot key">5 보수 연기</span><span class="dot on">6 억제 실패</span><span class="dot">7 땅굴</span>
+      </div>
+      블룸이 구조를 먹는다(2) → 격리 밖에서도 자란다(3) → <b>보수 자재 반입이 계속 밀리고 대신 실험 장비가 먼저 들어왔다(5)</b> → 억제 시도는 지연 효과뿐이었다(6).<br>
+      <b>7/7이면 답이 나온다.</b> 사고는 갑자기 터진 게 아니라 <b>고칠 수 있었는데 안 고친 결과</b>다.
+    </div>
+  </div>
+  <div class="trow">
+    <div class="tname">B. 연구자들이 뭘 했나<span>완결됨</span></div>
+    <div>
+      <div class="dots">
+        <span class="dot on">1 사람·명명</span><span class="dot key">2 측정</span><span class="dot key">3 배양</span>
+        <span class="dot key">4 해석</span><span class="dot">5 정비</span><span class="dot key">6 합성</span><span class="dot">7 땅굴</span>
+      </div>
+      방 이름 그대로다. 재고(2) → 키우고(3) → 뜯어보고(4) → 막아보고(6). 라운지(1)가 그 일을 한 <b>사람들</b>을 준다.<br>
+      이 가닥이 있어야 X-7이 "괴담이 있는 폐허"가 아니라 <b>사람이 일하던 직장</b>으로 읽힌다.
+    </div>
+  </div>
+  <div class="trow">
+    <div class="tname">C. 노라는 누구인가<span>완결되지 않음 — 의도</span></div>
+    <div>
+      <div class="dots">
+        <span class="dot on">1 직함만</span><span class="dot">2</span><span class="dot">3</span>
+        <span class="dot on">4 "반입분"</span><span class="dot key">5 N.B. 서명</span><span class="dot">6</span><span class="dot on">7 여운</span>
+      </div>
+      명단에 물자·보급 담당 한 명(1) → 반입분이라는 단어가 무게를 갖고(4) → <b>인수증에 이니셜 N.B.와 "6일 조기 반입"(5)</b>.<br>
+      <b>코덱스는 여기서 멈춘다.</b> "N.B.가 브릭스"라는 연결은 플레이어가 하고, 확인은 대면에서만 이루어진다.
+    </div>
+  </div>
+</div>
+
+<h3>답을 주지 않는 것</h3>
+<table class="tight">
+<thead><tr><th>질문</th><th>이 현장에서</th></tr></thead>
+<tbody>
+<tr><td>블룸은 어디서 생겼나</td><td><b>답 없음.</b> 계통 불일치까지만 (4)</td></tr>
+<tr><td>누가 일정을 앞당기라 했나</td><td><b>답 없음.</b> "승인 회신 추후 첨부"까지만 (5)</td></tr>
+<tr><td>상부 · 케른은 무엇인가</td><td><b>등장하지 않음</b></td></tr>
+<tr><td>땅굴은 누가 팠나</td><td><b>답 없음.</b> 신원 흔적을 하나도 남기지 않는다 (7)</td></tr>
+<tr><td>N.B.는 브릭스인가</td><td><b>코덱스는 말하지 않음.</b> 대면에서만</td></tr>
+</tbody></table>
+
+<div class="note">
+<b>읽는 순서 (강제 아님).</b> 코덱스 배열 순서 = 도면 번호 순 = 사건이 진행된 순서로 맞춰 뒀다.<br><br>
+사람들이 있었고<b>(1)</b> → 이상한 걸 발견해 이름 붙이고 재봤고<b>(2)</b> → 키워봤고<b>(3)</b> → 정체를 물었고<b>(4)</b> →
+그동안 기지는 삭고 있었고 보수는 밀렸고<b>(5)</b> → 뒤늦게 막아보려 했지만 늦었고<b>(6)</b> → 누군가는 밖으로 나가는 굴을 팠다<b>(7)</b>.
+</div>
+</section>
+
+<!-- ══════════════════ 3 ══════════════════ -->
+<section id="lore">
+<h2><span class="num">03</span>기록물 7종</h2>
+
+<!-- L01 -->
+<article class="lore">
+  <div class="lhead">
+    <div class="lnum">01</div>
+    <div class="lttl">
+      <h3>라운지 게시판</h3>
+      <div class="lid">X7-L01</div>
+      <div class="lroom">1F · 03 연구 라운지 — 쉬고, 교대하고, 떠들던 방</div>
+    </div>
+    <div class="hide"><div class="n h1c">1</div><div class="l">가림</div></div>
+  </div>
+  <div class="lbody">
+    <dl class="lgrid">
+      <dt>위치</dt><dd>출입문 정면 벽의 직원 게시판. <b>문은 중앙 해치 쪽으로 나 있고 처음부터 열려 있다</b> — 해치를 오르내리면 문 너머로 보인다</dd>
+      <dt>은닉</dt><dd>일정표·안전수칙·사진 등 종이 12~15장이 <b>겹쳐 압정으로</b> 꽂혀 있고, 로어는 그중 한 장이다. 다른 종이 뒤로 모서리만 나와 있다</dd>
+      <dt>찾는 단서</dt><dd>라운지에서 유일하게 <b>흰 면적이 큰 물체</b>. 로어 종이 가장자리에만 극히 약한 보라 림</dd>
+      <dt>접근</dt><dd>기믹 없음 — <b>겹친 종이 중에서 골라 조준하는 것 자체가 기믹</b></dd>
+      <dt>역할</dt><dd>가닥 <b>B 도입</b> (사람·명명) · 가닥 C 스치듯 (직함만)</dd>
+      <dt>의도</dt><dd><b>첫 로어는 사건이 아니라 사람을 준다.</b> 세계를 바꾼 발견의 이름이 라운지 농담에서 나왔다는 것, 그리고 그 명단에 연구자가 아닌 한 명이 섞여 있다는 것 — 둘 다 그때는 아무 의미가 없었다</dd>
+    </dl>
+    <div class="doc">
+      <div class="dt">3분기 야간 교대 안내 — 뒷면</div>
+      <p>교대표는 앞면에 있다. 뒷면은 내가 쓴다.</p>
+      <p>3주 전에 07 벽에서 긁어온 회색 덩어리 말인데, 위에서 정식 명칭을 정하라고 내려왔다. 서류에 뭐라고 적을지 정하라는 뜻이다. 그래서 여기서 정했다. 회의실이 아니라 라운지에서, 커피 마시면서.</p>
+      <p>후보가 넷이었고 <span class="num">9대 3</span>으로 '그레이 블룸'이 됐다. '회색 곰팡이'를 밀던 사람들은 아직도 억울해한다. 물자 담당이 커피 타러 들어왔다가 한 표 보태고 나갔는데, 본인은 뭘 뽑았는지도 모를 거다.</p>
+      <p>어차피 현장에서는 다들 그냥 '때'라고 부른다. 서류에만 그레이 블룸이다.</p>
+      <p>야간 교대는 배양 라인 점검 포함. 라인 D는 손대지 말 것. 이유는 배양 쪽에 물어봐라.</p>
+      <div class="sep">─ 아래쪽, 다른 필체. 잉크가 번져 있다 ─</div>
+      <p class="hand">전원 대피선 집결. 개인 물품 두고 갈 것.</p>
+    </div>
+  </div>
+</article>
+
+<!-- L02 -->
+<article class="lore">
+  <div class="lhead">
+    <div class="lnum">02</div>
+    <div class="lttl">
+      <h3>표본 분석 보고서</h3>
+      <div class="lid">X7-L02</div>
+      <div class="lroom">1F · 04 표본 분석실 — 이게 뭔지 재는 방</div>
+    </div>
+    <div class="hide"><div class="n h2c">2</div><div class="l">표면</div></div>
+  </div>
+  <div class="lbody">
+    <dl class="lgrid">
+      <dt>위치</dt><dd>창가 쪽 분석 콘솔 3번대</dd>
+      <dt>은닉</dt><dd>거치된 태블릿 <b>화면 전면이 블룸 막에 덮여</b> 있다. 덮인 상태에서는 조사 프롬프트가 안 뜬다</dd>
+      <dt>찾는 단서</dt><dd>콘솔 4대 중 <b>한 대만 표면이 회녹색</b>. 나머지는 깨끗하다</dd>
+      <dt>접근</dt><dd><b>헤라 긁기 8~10초</b> (헤라 적재 +1단계 이내)</dd>
+      <dt>역할</dt><dd>가닥 <b>B 결정적</b> (측정) · 가닥 <b>A 기여</b> (부식 가속 = 침수의 물리적 원인)</dd>
+      <dt>의도</dt><dd>1F에서 <b>헤라 기믹을 가르치고</b>, 동시에 "이게 왜 위험한가"의 <b>숫자</b>를 준다. 감정이 아니라 계수로 무섭게 만든다. 04는 1F 막다른 끝이라 여기까지 오는 이유는 이 로어뿐이다</dd>
+    </dl>
+    <div class="doc">
+      <div class="dt">표본 분석 보고 · 그레이 블룸 / 3차</div>
+      <p>성분은 지난 보고와 같습니다. 생물막에 무기질이 섞여 침착하는 형태고, 저온·고압에서만 표면이 자랍니다. 여기까지는 새로울 게 없습니다.</p>
+      <p>새로운 건 부식 계수입니다. 강재 시편 부식 속도가 대조군의 <span class="num">11.4배</span>로 나왔습니다. 콘크리트는 <span class="num">6.8배</span>입니다. 재측정을 두 번 했고 값은 흔들리지 않았습니다.</p>
+      <p>이 숫자를 어떻게 읽어야 하는지 적겠습니다. 우리가 지금 서 있는 격벽은 <span class="num">30년</span>을 버티도록 설계됐습니다. 이 계수를 그대로 적용하면 <span class="num">3년</span>이 안 됩니다. 그리고 이게 여기 몇 년째 붙어 있었는지는 아무도 모릅니다.</p>
+      <p>격리 등급을 B에서 C로 올려야 합니다. 배양 라인을 늘릴 계획이라면 전 라인을 다시 검증해야 합니다. 이건 권고가 아니라 요청입니다.</p>
+      <p>세 번째 보냅니다. 아직 회신을 받지 못했습니다.</p>
+      <div class="sign">— 표본 분석실 rev.0.4</div>
+    </div>
+  </div>
+</article>
+
+<!-- L03 -->
+<article class="lore">
+  <div class="lhead">
+    <div class="lnum">03</div>
+    <div class="lttl">
+      <h3>배양 라인 일지</h3>
+      <div class="lid">X7-L03</div>
+      <div class="lroom">B1 · B1-02 생물 실험실 — 키워서 관찰하는 방</div>
+    </div>
+    <div class="hide"><div class="n h1c">1</div><div class="l">가림</div></div>
+  </div>
+  <div class="lbody">
+    <dl class="lgrid">
+      <dt>위치</dt><dd>배양 챔버 열 D번 앞</dd>
+      <dt>은닉</dt><dd>넘어진 <b>이동식 랙과 산재 쓰레기 4~5점</b> 아래에 카트리지가 깔려 있다. 라벨 면만 삐져나와 있다</dd>
+      <dt>찾는 단서</dt><dd>카트리지 측면 <b>보라 상태등</b>이 쓰레기 틈으로 새어 나온다</dd>
+      <dt>접근</dt><dd><b>가림 쓰레기 치움 5~7초</b> (반복 퀘스트 스폰과 무관한 일반 산재 쓰레기)</dd>
+      <dt>역할</dt><dd>가닥 <b>B 결정적</b> (배양) · 가닥 <b>A 기여</b> (격리 누출의 첫 징후)</dd>
+      <dt>의도</dt><dd>B1 첫 로어. <b>여기서 "격리가 새고 있었다"가 처음 나온다.</b> 사고 당일이 아니라 <b>몇 주 전부터</b>였다는 게 핵심</dd>
+    </dl>
+    <div class="danger" style="margin:14px 0 0">
+      <b>주의 — 메인 M01의 서버 카트리지와 시각적으로 구분해야 한다.</b> 색·비율·발광 셋 다 다르게 간다 (가로형 크림색 vs 서버 카트리지).
+    </div>
+    <div class="doc">
+      <div class="dt">배양 라인 일지 · 라인 A–F</div>
+      <p><b>D-09.</b> 재현 조건 4 ℃, 240 bar 유지. A부터 C까지는 예상대로 자란다. E와 F는 거의 안 자란다. 조건 편차를 보고 있다.</p>
+      <p><b>D-11.</b> 라인 D 증식률이 기준의 <span class="num">세 배</span>다. 챔버 압력 정상. 온도도 정상. 왜 D만 다른지 모르겠다.</p>
+      <p><b>D-14.</b> 챔버 밖 거치대에 남겨둔 시료에서도 자랐다. 밀폐는 이상 없다. 그러니까 새어 나온 게 아니라, 그냥 밖에서도 자란다는 뜻이다.</p>
+      <p><b>D-16.</b> 복도 쪽 벽을 긁어서 확인했다. 거기서도 자란다. 우리가 챔버 안에서 재현하려고 애쓰던 조건이, 여기서는 그냥 기본값이다.</p>
+      <p><b>D-19.</b> 격리 A 외벽을 눈으로 확인해 달라고 올렸다. 회신 대기.</p>
+      <p>라인 D는 접근 제한한다. 야간 교대 점검 대상에서 뺐다. 모르고 여는 사람이 없도록 문에도 적어 뒀다.</p>
+      <div class="sign">— 배양 로그 카트리지 #D</div>
+    </div>
+  </div>
+</article>
+
+<!-- L04 -->
+<article class="lore">
+  <div class="lhead">
+    <div class="lnum">04</div>
+    <div class="lttl">
+      <h3>유전자 해석 결과</h3>
+      <div class="lid">X7-L04</div>
+      <div class="lroom">B1 · B1-01 유전자 분석실 — 어디서 왔는지 묻는 방</div>
+    </div>
+    <div class="hide"><div class="n h3c">3</div><div class="l">구조</div></div>
+  </div>
+  <div class="lbody">
+    <dl class="lgrid">
+      <dt>위치</dt><dd>벽면 시퀀서 본체 <b>안 슬롯</b>에 꽂힌 채</dd>
+      <dt>은닉</dt><dd>시퀀서 <b>전면 패널이 부식으로 봉인</b>돼 있다. 철거 전에는 보이지도 조준되지도 않는다</dd>
+      <dt>찾는 단서</dt><dd>시퀀서 전면 패널만 <b>부식 패턴이 다르고</b>, 슬롯 틈으로 보라 점광이 샌다. 스캐너 반응(선택)</dd>
+      <dt>접근</dt><dd><b>패널 1세그먼트 철거 12~18초</b></dd>
+      <dt>역할</dt><dd>가닥 <b>B 결정적</b> (해석) · 가닥 <b>C 기여</b> ("반입분"이 처음 무게를 갖는다)</dd>
+      <dt>의도</dt><dd><b>블룸의 정체에 가장 가까이 가는 로어이자, 답을 주지 않는 로어.</b> "알려진 계통에 넣을 자리가 없다"까지만 간다. 대신 여기서 <b>자체 채집분 ≠ 반입분</b>이라는 사실이 조용히 놓인다 — 5번을 읽기 전에는 그냥 실험 조건 차이로 읽힌다</dd>
+    </dl>
+    <div class="danger" style="margin:14px 0 0">
+      <b>주의 — 이 방에는 데이터 코어가 둘이다.</b> 반복 퀘스트 R11의 A급 코어는 <b>작업대 위</b>, 로어 해석 코어는 <b>시퀀서 안</b>.
+      놓인 자리와 발광으로 갈라야 오조준이 안 난다. <em>시간이 부족하면 둘 중 하나를 고르는 선택압이 생긴다 — 의도된 것.</em>
+    </div>
+    <div class="doc">
+      <div class="dt">계통 해석 결과 · 대조 2군</div>
+      <p>결론부터 적는다. 계통도에 넣을 자리가 없다.</p>
+      <p>기존 심해 생물막 계통과 전부 대조했고 일치하는 게 없다. 근연군도 못 잡는다. 무기질 침착부와 생물막부의 대사 경로가 아예 따로 논다. 단일 종이라고 기술서에 쓸 수가 없다. 둘이 붙어 있는 건지 원래 그런 건지도 모르겠다.</p>
+      <p>그리고 이건 본문에 넣을지 고민하다 여기 적어 둔다.</p>
+      <p>시료를 두 군으로 나눠 돌렸다. 우리가 외벽에서 직접 긁어온 것과, 반입분에 딸려 들어온 것. 같은 물질이라고 알고 시작했는데 증식 지수가 <span class="num">1.0</span> 대 <span class="num">2.7</span>로 벌어진다. 계통 마커도 안 맞는다.</p>
+      <p>배양 조건 차이일 수도 있다. 그러길 바란다. 아니라면 우리는 서로 다른 두 가지를 하나로 부르고 있었던 거다.</p>
+      <p>반입 경위를 알아야 판단이 된다. 물자 기록 조회를 요청했다.</p>
+      <div class="sign">— 해석 코어 덤프</div>
+    </div>
+  </div>
+</article>
+
+<!-- L05 -->
+<article class="lore">
+  <div class="lhead">
+    <div class="lnum">05</div>
+    <div class="lttl">
+      <h3>정비 일지와 인수증</h3>
+      <div class="lid">X7-L05</div>
+      <div class="lroom">B1 · B1-07 유지 보수실 — 기지가 버티는지 보는 방</div>
+    </div>
+    <div class="hide"><div class="n h3c">3</div><div class="l">구조</div></div>
+  </div>
+  <div class="lbody">
+    <dl class="lgrid">
+      <dt>위치</dt><dd>정비 패널이 늘어선 안쪽 벽, <b>벽 공동 안 정비 로커</b></dd>
+      <dt>은닉</dt><dd>앞을 정비 패널이 막고 있다. 철거 전에는 보이지 않는다</dd>
+      <dt>찾는 단서</dt><dd>해당 패널만 <b>고정 볼트 배열이 다르고</b>, 이음매에 최근 작업 흔적 데칼. 스캐너 반응(선택)</dd>
+      <dt>접근</dt><dd><b>패널 1세그먼트 철거 12~18초.</b> 내력벽으로 만들지 않는다 — 로어 때문에 죽는 설계는 안 만든다</dd>
+      <dt>역할</dt><dd>가닥 <b>A 결정적</b> (침수 이유) · 가닥 <b>C 결정적</b> (N.B.)</dd>
+      <dt>의도</dt><dd><b>7종 중 가장 무거운 조각.</b> 침수 이유와 노라의 정체를 한 물건이 동시에 친다. 정비실이라는 방이 "왜 무너졌나"를 말하기에 가장 자연스럽다</dd>
+      <dt>경계선</dt><dd>인수증에 있는 건 <b>이니셜 두 글자와 날짜뿐</b>이다. 승인 라인 이름도, 앞당기라고 한 주체도 적혀 있지 않다. <b>브릭스라고 단정할 수 없다</b></dd>
+    </dl>
+    <div class="doc">
+      <div class="dt">구조 정비 일지 · 발췌</div>
+      <p><b>W-31.</b> 격벽 3, 7, 11 부식 진행. 보수 자재 청구서 올림.</p>
+      <p><b>W-33.</b> 청구분이 안 왔다. 다음 배차로 넘어갔다고 한다.</p>
+      <p><b>W-35.</b> 격벽 7에 균열. 길이 <span class="num">40 cm</span>. 재청구. 우선순위를 올려 달라고 따로 적어 보냈다.</p>
+      <p><b>W-36.</b> 또 안 왔다. <span class="num">세 번째</span>다. 우선순위가 조정됐다는 말만 들었다. 누가 조정했는지는 안 알려준다.</p>
+      <p><b>W-38.</b> 격벽 7 균열 <span class="num">82 cm</span>. 두 달 만에 두 배가 됐다. 임시로 지지만 대 놨다. 제대로 된 자재가 없다.</p>
+      <p><b>W-39.</b> 배가 왔다.</p>
+      <p>내려온 건 실험 장비 세 점하고 배양 부자재였다. 보수 자재는 없었다. 예정보다 <span class="num">엿새</span> 당겨서 들어왔다고 한다. 우리 것보다 급했던 모양이다.</p>
+      <div class="sep">─ 일지 사이에 인수증 사본이 끼워져 있다 ─</div>
+      <p style="padding-left:14px;border-left:2px solid var(--line2)">
+        <b>반입 인수 확인서</b><br>
+        실험 장비 3점 · 배양 부자재 1식<br>
+        예정 대비 6일 조기 반입<br>
+        정식 승인 회신 — 추후 첨부<br>
+        인수 — <b style="color:var(--lore)">N.B.</b>
+      </p>
+      <div class="sep">─ 일지로 돌아온다. 필체가 흐트러져 있다 ─</div>
+      <p>이 종이는 일지에 끼워 둔다. 나중에 누가 와서 왜 이렇게 됐냐고 물으면, 나는 세 번 썼다고 말할 거다. 종이도 있다.</p>
+      <div class="sign">— 정비 바인더</div>
+    </div>
+  </div>
+</article>
+
+<!-- L06 -->
+<article class="lore">
+  <div class="lhead">
+    <div class="lnum">06</div>
+    <div class="lttl">
+      <h3>억제제 합성 시험</h3>
+      <div class="lid">X7-L06</div>
+      <div class="lroom">B1 · B1-03 화학 합성실 — 막을 방법을 만드는 방</div>
+    </div>
+    <div class="hide"><div class="n h2c">2</div><div class="l">표면</div></div>
+  </div>
+  <div class="lbody">
+    <dl class="lgrid">
+      <dt>위치</dt><dd>흄후드 내부 선반 (시험 노트 + 채집통)</dd>
+      <dt>은닉</dt><dd><b>후드 유리 안쪽 전면에 블룸이 자라</b> 내부가 흐리고 조사 판정이 막힌다</dd>
+      <dt>찾는 단서</dt><dd>합성실에서 <b>유일하게 안쪽에서 빛나는 물체</b> — 흐린 유리 너머 보라 점광이 번져 보인다</dd>
+      <dt>접근</dt><dd><b>헤라로 유리 긁기 10~12초</b> (같은 동사의 마지막 반복이라 가장 무겁다)</dd>
+      <dt>역할</dt><dd>가닥 <b>B 결정적</b> (합성) · 가닥 <b>A 기여</b> (억제 실패 = 격리 실패 확정)</dd>
+      <dt>의도</dt><dd><b>"막으려고는 했다"를 준다.</b> 이 로어가 없으면 연구팀이 손 놓고 있다가 당한 걸로 읽힌다. 실패했지만 시도는 있었다는 게 톤을 지킨다</dd>
+    </dl>
+    <div class="note" style="margin:14px 0 0">
+      <b>복선.</b> 이 방은 땅굴 입구가 있는 <b>B1-05 냉각 시스템실의 옆방</b>이다. "밖에도 있다"를 읽은 직후 옆방에 밖으로 나가는 굴이 있다.
+    </div>
+    <div class="doc">
+      <div class="dt">억제제 합성 시험 · 후보 1–7</div>
+      <p>일곱 개 만들었다. 1번부터 4번까지는 아무 반응이 없었다. 5번은 표면이 잠깐 물러졌다가 하루 만에 원래대로 돌아왔다.</p>
+      <p>6번이 제일 나았다. 성장이 완전히 멈췄고 <span class="num">19시간</span> 유지됐다. 19시간이다. 하루도 못 간다.</p>
+      <p>7번은 효과가 있었지만 용매 독성이 기준을 넘었다. 사람이 들어가는 구역에는 못 쓴다.</p>
+      <p>현장 시험으로 격리 A 외벽에 6번을 발라 봤다. 하루 지나니 다시 자라기 시작했고, 이틀째에는 바르기 전이랑 구분이 안 됐다.</p>
+      <p>결론을 적는다. 늦출 수는 있고, 없앨 수는 없다. 결국 격리를 유지하는 것 말고는 방법이 없고, 격리를 유지하려면 구조부터 멀쩡해야 한다. 그건 우리 일이 아니다.</p>
+      <p>그리고 어제 외벽 채집분 결과가 왔다. 통째로 후드 안에 넣어 뒀다.</p>
+      <div class="sep">─ 후드 안 채집통 태그 ─</div>
+      <p class="hand">외벽 채집 포인트 3 / 표류 유기막 동일 스펙트럼<br>
+      '시설 내부 한정' 가설과 불일치. 채집 범위 확대 요청 — 회신 없음</p>
+      <p>기지 밖 표류물에서도 같은 게 나온다. 안에서 막는 게 무슨 의미가 있는지 모르겠다.</p>
+    </div>
+  </div>
+</article>
+
+<!-- L07 -->
+<article class="lore held">
+  <div class="lhead">
+    <div class="lnum">07</div>
+    <div class="lttl">
+      <h3>심해 신호 기록 <span class="tag t-lore">암호화</span> <span class="tag t-hold">배치 보류</span></h3>
+      <div class="lid">X7-L07</div>
+      <div class="lroom">땅굴 (B1-05 냉각 시스템실 → 외부) — 도면에 없는 방</div>
+    </div>
+    <div class="hide"><div class="n h4c">4</div><div class="l">공간</div></div>
+  </div>
+  <div class="lbody">
+    <div class="hold" style="margin:14px 0">
+      <b>땅굴 미정으로 이 항목만 보류다.</b> 본문·이름·암호화 설정은 확정이므로 <code>DA_Lore_X7</code>에는 미리 넣는다 —
+      액터만 배치하지 않으면 코덱스에 <code>???</code>로 남고 나머지 6종은 정상 동작한다.<br>
+      <b>다만 그동안 7/7이 성립하지 않아</b> L07 해독 연출을 테스트할 수 없다. 검증하려면 디버그 강제 획득 경로가 필요하다.
+    </div>
+    <dl class="lgrid">
+      <dt>위치</dt><dd>땅굴 종단부(외부 개구 직전)의 작업 캠프</dd>
+      <dt>은닉</dt><dd><b>땅굴 자체가 공식 도면에 없다.</b> 입구는 B1-05 안쪽, 냉각 배관 뱅크 뒤 정비 패널</dd>
+      <dt>찾는 단서</dt><dd>냉각 시스템실 바닥에 배관과 무관한 <b>굴착 잔토·발자국 데칼</b>이 패널 쪽으로 이어진다. 이게 전부다</dd>
+      <dt>접근</dt><dd>① 입구 패널 철거 → ② 땅굴 통과(중간 <b>완전 침수 구간 수영</b>) → ③ 종단부 도착 후 바로 조사</dd>
+      <dt>암호화</dt><dd>L01~L06 전부 발견 시 자동 해독</dd>
+      <dt>의도</dt><dd>마지막 조각을 <b>기지가 인정하지 않는 공간</b>에서 얻게 한다. 무전기를 조사 대상으로 삼으면 <b>"이 사람은 대피 방송을 듣고도 나가지 않았다"</b>가 물건 하나로 전달된다</dd>
+      <dt>안 주는 것</dt><dd>누가 팠는가. 캠프 흔적(접이식 작업대·소진된 산소통·개인 담요·손그림 지도)만 남기고 <b>신원은 어디에도 없다</b></dd>
+    </dl>
+    <div class="doc">
+      <div class="dt">휴대 무전기 · 메모리 덤프</div>
+      <div class="sep">─ 수신 로그 ─</div>
+      <p class="hand">…전 구역. 압력 이상. 배양 쪽 경보.<br>
+      …대피선으로. 물자 담당은?<br>
+      …이미 나갔대. 기록은 나중에.</p>
+      <p style="color:var(--tx3)">이후 수신 없음.</p>
+      <div class="sep">─ 같은 기기에 저장된 음성 메모, 전사 ─</div>
+      <p>방송은 세 번 나왔다. 마지막이 언제였는지는 적어 두지 않았다.</p>
+      <p>여기는 조용하다. 안에서는 구조 잡음 때문에 아무것도 못 잡았는데, 굴을 파고 들어오니까 감도가 올라간다. 벽 하나 차이가 아니라 방향 문제였던 것 같다.</p>
+      <p>같은 패턴이 계속 반복된다. 예상보다 훨씬 얕은 대역이다. 이 깊이에서 이런 게 나올 이유가 없다. 자연 변동으로 설명해 보려고 사흘을 붙잡고 있었는데 안 된다.</p>
+      <p>채집 기록이랑 맞춰 보면 퍼진 범위가 보고서보다 넓다. 보고서가 틀렸거나, 보고서를 쓴 시점보다 지금이 더 나빠졌거나 둘 중 하나다.</p>
+      <p>여기서 더는 못 간다. 다른 지점이 필요하다.</p>
+      <p>누가 일정을 밀었는지는, 여기에는 없다.</p>
+    </div>
+  </div>
+</article>
+</section>
+
+<!-- ══════════════════ 4 ══════════════════ -->
+<section id="hide">
+<h2><span class="num">04</span>은닉 설계</h2>
+<p class="lead">"어떻게 숨길지"를 매번 즉흥으로 정하지 않기 위한 5단계 척도.</p>
+
+<table>
+<thead><tr><th class="c">등급</th><th>이름</th><th>정의</th><th>해야 하는 일</th><th class="r">소요</th><th>이번 현장</th></tr></thead>
+<tbody>
+<tr><td class="c"><b>0</b></td><td>노출</td><td>들어가면 바로 보인다</td><td>없음</td><td class="r">0초</td><td style="color:var(--tx3)">사용 안 함</td></tr>
+<tr><td class="c h1c"><b>1</b></td><td>가림</td><td>다른 물체 뒤·아래에 있다. <b>"뭔가 있다"는 읽힌다</b></td><td>시선 이동 또는 잡동사니 치움</td><td class="r">3~8초</td><td>L01 · L03</td></tr>
+<tr><td class="c h2c"><b>2</b></td><td>표면</td><td>대상물은 보이는데 <b>표면이 덮여</b> 조사가 안 된다</td><td>헤라 긁기</td><td class="r">8~12초</td><td>L02 · L06</td></tr>
+<tr><td class="c h3c"><b>3</b></td><td>구조</td><td><b>구조물 안</b>에 있어 보이지 않는다. 단서는 표면 흔적뿐</td><td>패널·칸막이 철거 1세그먼트</td><td class="r">12~18초</td><td>L04 · L05</td></tr>
+<tr><td class="c h4c"><b>4</b></td><td>공간</td><td><b>공간 자체가 도면에 없다</b></td><td>입구를 찾고, 통과하고, 끝까지 감</td><td class="r">60초+</td><td>L07</td></tr>
+</tbody></table>
+
+<div class="note">
+<b>등급은 난이도가 아니라 리듬이다.</b> 1F가 낮고, B1이 높고, 땅굴이 최고다.<br>
+<b>4등급은 현장당 1개만.</b> 둘 이상이면 탐험이 아니라 노가다가 된다.<br>
+<b>0등급은 쓰지 않는다.</b> 구판의 "대놓고 배치"는 4등급 안쪽으로 흡수됐다 — 땅굴 끝에서는 대놓고 놓여 있지만, 거기까지 가는 게 은닉이다.
+</div>
+
+<h3>은닉에 쓰지 않는 것</h3>
+<table class="tight">
+<thead><tr><th>안 쓰는 것</th><th>이유</th></tr></thead>
+<tbody>
+<tr><td>잠긴 문 · 키카드</td><td>로어가 진행을 막으면 보너스 트랙이 아니다</td></tr>
+<tr><td>퍼즐 · 코드 입력</td><td>코어 루프에 없는 동사를 로어만을 위해 추가하지 않는다</td></tr>
+<tr><td>스캐너 필수화</td><td>스캐너는 유료 도구다. 로어가 상점 구매를 강제하면 안 된다 — <b>선택 힌트로만</b></td></tr>
+<tr><td>랜덤 배치</td><td>로어는 고정물이다. 재방문 시 같은 자리에 있어야 한다</td></tr>
+<tr><td>시간대 조건</td><td>17:40 이후에만 보이는 배치는 샘플 쪽 장치다</td></tr>
+<tr><td>붕괴 리스크 세그먼트</td><td>로어 때문에 죽는 설계는 안 만든다</td></tr>
+</tbody></table>
+
+<h3>배치 검증 — 이게 전부다</h3>
+<p>로어는 세션 진행에 영향이 없다. <b>왕복 초 예산 · Day별 조우 강제 · "7종을 5분에 돈다" 같은 시간 설계는 쓰지 않는다.</b> 남는 요구는 셋뿐이다.</p>
+<table class="tight">
+<thead><tr><th class="c">#</th><th>요구</th><th>판정</th></tr></thead>
+<tbody>
+<tr><td class="c"><b>1</b></td><td><b>찾을 수 있어야 한다</b></td><td>그 방에 들어간 플레이어가 6 m 거리에서 유도 요소를 보고 대상물에 닿을 수 있는가</td></tr>
+<tr><td class="c"><b>2</b></td><td><b>조사되어야 한다</b></td><td>조준 → 프롬프트 → 1회 입력 → 코덱스 등록 → 소멸이 정상 동작하는가</td></tr>
+<tr><td class="c"><b>3</b></td><td><b>다른 트랙을 방해하지 않아야 한다</b></td><td>반복 스폰물과 오조준이 안 나는가, 로어 때문에 죽지 않는가</td></tr>
+</tbody></table>
+
+<div class="note">
+<b>로어 트랙의 존재를 알리는 장치 하나.</b><br>
+Day1 동선(01 진입구 → 중앙 해치 → 하강)은 1F 방을 하나도 지나지 않는다. 그대로 두면 1회차 플레이어가 <b>로어라는 트랙이 있다는 것 자체를</b> 모른 채 계약을 끝낼 수 있다.<br><br>
+→ <b>03 연구 라운지 출입문을 중앙 해치 쪽으로 내고, 게시판을 문 정면 벽에</b> 붙인다. 문은 처음부터 열려 있다. 해치를 오르내리며 문 너머로 <b>흰 사각형</b>이 보인다. 들어가는 건 플레이어 선택.<br><br>
+<b>이 장치는 L01 하나에만 건다.</b> "첫 로어를 공짜로 준다"가 아니라 <b>"트랙이 있다는 걸 공짜로 알린다"</b>가 목적이다.
+</div>
+</section>
+
+<!-- ══════════════════ 5 ══════════════════ -->
+<section id="end">
+<h2><span class="num">05</span>완성 시 — 무슨 일이 일어나는가</h2>
+
+<h3>확정 — 코덱스가 종결점이다</h3>
+<table class="tight">
+<thead><tr><th style="width:170px">시점</th><th>일어나는 일</th></tr></thead>
+<tbody>
+<tr><td>6/7 (L01~L06 확보)</td><td>L07이 <b>자동 해독</b>된다. L07을 아직 못 주웠으면 목록에 <code>???</code> 미발견으로 남는다</td></tr>
+<tr><td><b>7/7</b></td><td>코덱스 100%. 토스트 <code>X-7 기록 보관함 완성 — 암호가 해독되었습니다</code> 1회</td></tr>
+<tr><td>그 뒤</td><td style="color:var(--hold)"><b>아무것도 없다.</b> 열리는 화면·대화·해금이 없다</td></tr>
+</tbody></table>
+
+<div class="note">
+<b>이야기의 종결은 L07 본문이 진다.</b><br><br>
+<em style="color:var(--tx);font-size:15px">"여기서 더는 못 간다. 다른 지점이 필요하다.<br>누가 일정을 밀었는지는, 여기에는 없다."</em><br><br>
+이 두 줄이 <b>다음 현장으로 넘기는 훅</b>이다. 브릭스가 없어도 성립한다 — 오히려 답을 줄 사람이 아무도 없다는 게 더 정확한 상태다.<br><br>
+<b>코덱스 헤더에도 대면 안내를 넣지 않는다.</b> 7/7 상태는 그냥 <code>기록물 7 / 7</code>이고, 보조 문구는 평소와 같이 <code>점검엔 영향 없습니다.</code>
+</div>
+
+<div class="hold">
+<b>⏸ 아래는 개발 범위 밖이다.</b> 브릭스 대면 선택지는 구현하지 않는다.
+설계·대사는 완성돼 있으니 <b>나중에 붙일 자리</b>로 접어서 보존한다.
+</div>
+
+<details>
+<summary><b>보존 — 브릭스 대면 설계 전문 (현재 범위 밖 · 펼치기)</b></summary>
+
+<h3>언제 뜨는가 — 셋 다 만족해야 한다</h3>
+<table class="tight">
+<tbody>
+<tr><th style="width:150px">1 · 코덱스</th><td><b>X-7 7/7</b> (내 로컬 기준 — v12부터 참가자 코덱스가 세션 중 같아지므로 합집합 판정이 불필요)</td></tr>
+<tr><th>2 · 현장</th><td><b>X-7 계약</b>이어야 한다. TR-9·SS 벨몬트를 클리어해도 뜨지 않는다</td></tr>
+<tr><th>3 · 결과</th><td><b>클리어.</b> Day3 최종 점검 통과, 또는 Day3 무경고 실패 후 들어간 비상 Day4 통과</td></tr>
+<tr><th>위치</th><td><b>클리어 요약 화면 직후</b>, 다음 계약 준비로 넘어가기 전</td></tr>
+</tbody></table>
+
+<table class="tight">
+<thead><tr><th>상황</th><th>결과</th></tr></thead>
+<tbody>
+<tr><td><b>X-7</b> 7/7 + Day3 통과</td><td style="color:var(--ok)"><b>선택지</b></td></tr>
+<tr><td><b>X-7</b> 7/7 + Day3 실패(무경고) → Day4 통과</td><td style="color:var(--ok)"><b>선택지</b></td></tr>
+<tr><td>X-7 7/7 + 게임오버</td><td>없음. 런 종료</td></tr>
+<tr><td>7/7 미달 + X-7 클리어</td><td>없음. 코덱스 열람만</td></tr>
+<tr><td>X-7 Day1·Day2 중 7/7 달성</td><td>없음. <b>그 계약을 클리어할 때까지 기다린다</b></td></tr>
+<tr><td><b>X-7 7/7 상태로 TR-9를 클리어</b></td><td>없음. X-7 이야기는 X-7에서 돌아온 자리에서만 꺼낸다</td></tr>
+<tr><td>X-7 7/7 후 그 세션 실패 → 다음에 X-7 재계약 클리어</td><td style="color:var(--ok)"><b>선택지.</b> 코덱스는 로컬에 남으므로 다시 모을 필요 없다</td></tr>
+</tbody></table>
+
+<div class="note">
+<b>왜 클리어에 묶는가.</b> 계약을 무사히 끝낸 자리의 대화이기 때문이다. 정산이 끝나고 브릭스가 돌아서려는 순간이라는 장면이 있어야 "…뭐 더 있나?"가 성립한다.<br>
+<b>왜 X-7에만 묶는가.</b> X-7 자료를 X-7에서 막 들고 나온 자리여야 대화가 성립한다.<br><br>
+<b>보류 상태 UI 힌트.</b> 7/7인데 아직 선택하지 않았다면 <b>코덱스 탭 헤더</b>에 <code>X-7 계약을 마치고 브릭스에게 보여줄 수 있습니다.</code>,
+<b>현장 선택 X-7 카드</b>에 작은 표식 <code>기록 보관함 완성</code>. 느낌표·강조색은 쓰지 않는다 — 할 일 목록이 아니다.
+</div>
+
+<h3>대화</h3>
+<div class="dlg">
+  <div class="who">브릭스</div>
+  <p>"계약 완료. 다음 구역 준비해."</p>
+  <p class="act">(돌아서려다 멈춘다)</p>
+  <p>"…뭐 더 있나?"</p>
+</div>
+
+<div class="choice">
+  <div class="btn">A · 기록을 보여준다</div>
+  <div class="btn">B · 아무 말도 하지 않는다</div>
+</div>
+<p style="color:var(--tx3);font-size:13px">제3 선택 없음. <b>확인 팝업도 없다</b> — 경고를 달면 이 선택이 성공/실패처럼 읽힌다.</p>
+
+<h4>A — 알린다 <code>Told</code></h4>
+<div class="dlg">
+  <p class="pc">"정비 일지 봤어. 격벽 보수 청구가 세 번 밀려 있더라."</p>
+  <p class="pc">"그 다음에 들어온 건 보수 자재가 아니라 실험 장비였고. 엿새 당겨서."</p>
+  <p class="pc">"인수증에 N.B."</p>
+  <div class="who" style="margin-top:14px">브릭스</div>
+  <p class="act">(짧은 정적)</p>
+  <p>"…알아서 뭐 하게."</p>
+  <p>"그건 네 일 아냐. 다음 목록이나 봐."</p>
+</div>
+
+<h4>B — 알리지 않는다 <code>Withheld</code></h4>
+<div class="dlg">
+  <div class="who">브릭스</div>
+  <p>"그래. 수고했다."</p>
+  <p>"다음 구역 준비해."</p>
+</div>
+
+<h4>B 이후 재선택 — 다음 세션 출발 전 모선 허브에서 1회만</h4>
+<div class="dlg">
+  <div class="who">브릭스</div>
+  <p>"…그때 X-7 자료, 잘 챙겼더라."</p>
+  <div class="choice" style="margin:12px 0 0">
+    <div class="btn">지금 보여준다 → <code>ToldLate</code></div>
+    <div class="btn">그냥 둔다 → <code>Withheld</code> 확정</div>
+  </div>
+  <p style="margin-top:12px">"…지금까지 말 안 했구나."</p>
+</div>
+
+<h3>결과 — 없다</h3>
+<div class="danger">
+<b>이 선택은 게임에 어떤 영향도 주지 않는다.</b><br><br>
+<b>바꾸는 것</b> — 그 장면의 대사뿐. 그리고 <code>ToldBriggsAboutX7</code> 플래그가 저장된다(읽는 곳은 재선택 창 하나뿐).<br>
+<b>바꾸지 않는 것</b> — 상점 가격·해금·재고 / 호감도·착수금·대출 / 점검 기준·퀘스트 구성 / <b>다음 세션의 브릭스 대사 전부</b>.<br><br>
+브릭스 대사 테이블에 <b>분기 세트를 만들지 않는다.</b> 플래그를 읽어 대사를 고르는 코드도 넣지 않는다.
+</div>
+
+<div class="note">
+<b>A와 B는 게임적으로 완전히 동일하다.</b> 이건 결함이 아니라 확정된 설계다.<br><br>
+남는 차이는 <b>플레이어가 그 장면에서 무엇을 봤는가</b>뿐이다 — <code>Told</code>는 브릭스가 침묵하고 선을 그어 버리는 걸, <code>Withheld</code>는 아무 일도 없이 계약이 끝나는 걸, <code>ToldLate</code>는 늦게 말했을 때의 어색함을.<br><br>
+약한 선택처럼 보인다면 <b>해결책은 게임 효과를 붙이는 게 아니라 그 장면을 잘 쓰는 것이다.</b> 효과를 붙이는 순간 로어가 최적화 대상이 되고, "어느 쪽이 이득이지?"가 "무슨 이야기지?"를 덮는다.<br><br>
+<b>케른은 여전히 열려 있다.</b> 플래그만 남아 있으면 후반 콘텐츠에서 되살릴 수 있다. 지금 할 일이 아닐 뿐이다.
+</div>
+
+<pre>[X-7 계약 클리어 요약 종료 시]
+    if (CurrentSiteId == "X7"                    // ← 현장을 본다
+        &amp;&amp; 내로컬(X7 로어) == 7                     // v12: 합집합 판정 불필요
+        &amp;&amp; ToldBriggsAboutX7 == None)
+        → A/B 선택 UI → 플래그 확정(확정자 로컬에만 기록) → 그 자리의 대사 재생. 끝.
+
+[모선 허브 진입 시]
+    if (ToldBriggsAboutX7 == Withheld &amp;&amp; 재선택_미소모)  → 재선택 UI
+    if (X7 로어 == 7 &amp;&amp; ToldBriggsAboutX7 == None)      → 보류 힌트 표시
+
+[브릭스 대사 조회 시]
+    대사세트 = 기본                               // 분기 없음. 플래그를 읽지 않는다</pre>
+
+</details>
+</section>
+
+<!-- ══════════════════ 6 ══════════════════ -->
+<section id="multi">
+<h2><span class="num">06</span>멀티플레이</h2>
+<p class="lead">한 명이 조사하면 팀원 전원의 로컬에 저장된다. 같이 플레이하면 같이 얻는다.</p>
+
+<pre>각자 로컬 ──교집합──▶ 맵 판정 (전원이 가진 것만 제거)
+                          │
+                          │  누군가 조사 1회
+                          ▼
+                  참가자 전원 로컬에 append</pre>
+
+<table class="tight">
+<thead><tr><th>항목</th><th>규칙</th></tr></thead>
+<tbody>
+<tr><td>누가 집나</td><td><b>아무 플레이어나</b> 조사 1회</td></tr>
+<tr><td><b>로컬</b></td><td><b>참가자 전원</b>의 세이브에 해당 LoreId 추가</td></tr>
+<tr><td><b>맵 스폰</b></td><td><b>참가자 교집합 판정</b> — 한 명이라도 미보유면 맵에 있다</td></tr>
+<tr><td>코덱스 UI</td><td><b>내 로컬 기준.</b> 세션 중이든 아니든 같은 화면</td></tr>
+<tr><td>완성률</td><td><b>N/7 하나뿐.</b> 세션 수치와 로컬 수치를 병기하지 않는다</td></tr>
+<tr><td>참가 시</td><td><b>아무것도 복사하지 않는다.</b> 세션 중 새로 조사한 것만 전원에게 저장된다</td></tr>
+<tr><td>알림</td><td>전원을 향해 짧은 토스트</td></tr>
+</tbody></table>
+
+<div class="note">
+<b>왜 맵 판정이 교집합인가.</b> 구판(합집합 기준 제거)을 그대로 두면 신 규칙에 구멍이 생긴다 —
+7/7인 A와 0개인 C가 같이 들어가면 <b>맵에 로어가 하나도 없고 C는 아무것도 못 얻는다.</b>
+교집합으로 바꾸면 C가 없는 7개가 맵에 나오고, 누가 줍든 둘 다 저장된다.<br><br>
+<b>부수 효과 — 친구 도와주기가 성립한다.</b> 다 모은 사람이 안 모은 친구와 들어가면 로어가 다시 보이고, 한 번씩 조사해 주면 친구 코덱스가 채워진다.
+</div>
+
+<h3>파티가 바뀌면</h3>
+<p>예: <b>A + B</b>가 L01~L04를 집음. 누가 집었든 <b>둘 다 4개</b>를 갖고 나온다.</p>
+<table class="tight">
+<tbody>
+<tr><th style="width:150px">A 로컬</th><td>L01~L04</td></tr>
+<tr><th>B 로컬</th><td>L01~L04 <em>(같이 했으므로 동일)</em></td></tr>
+<tr><th>다음 A + C (C는 0개)</th><td>교집합 = ∅ → <b>7개 전부 맵에 있다.</b> 조사하면 A·C 둘 다 저장 → 세션이 끝나면 <b>A 7개 / C 7개</b></td></tr>
+<tr><th>B 혼자</th><td>여전히 4개. 나머지 3개는 직접 가거나 다른 파티와 가서 얻는다</td></tr>
+</tbody></table>
+
+<div class="danger">
+<b>경계선 — 방에 들어간 것만으로 받지는 않는다.</b><br>
+7/7인 A와 0개인 C가 만나도 C의 코덱스가 곧바로 7이 되지 않는다. <b>맵에 나온 7개를 실제로 조사해야</b> 채워진다.
+"같이 플레이하면 같이 얻는다"이지 "같은 방에 있으면 받는다"가 아니다.
+</div>
+
+<h3>UI에서 사라진 것</h3>
+<p>"보이는 개수"와 "가진 개수"가 항상 같으므로 구분 표시가 전부 불필요해졌다.</p>
+<table class="tight">
+<thead><tr><th>삭제</th><th>이유</th></tr></thead>
+<tbody>
+<tr><td><code>기록물 5 / 7 · 내 기록 3</code> 병기</td><td>두 수치가 갈리지 않는다</td></tr>
+<tr><td>카드 우상단 <code>공유</code> 표식</td><td>소유가 갈리지 않는다</td></tr>
+<tr><td><code>공유</code> 툴팁 (<em>"내 보관함에는 남지 않습니다"</em>)</td><td>남는다</td></tr>
+<tr><td>세션 종료 정산 <code>내 보관함에 N건 추가</code></td><td>세션 중 이미 들어갔다</td></tr>
+</tbody></table>
+<p style="color:var(--tx2)"><b>UI가 줄어든 게 이 개정의 실익이다.</b> 구판은 "왜 내 개수가 다른가"를 표식·툴팁·정산 문구 세 곳에서 계속 설명해야 했다.</p>
+
+<h3>대신 추가되는 것</h3>
+<table class="tight">
+<tbody>
+<tr><th style="width:190px">이미 확보한 로어 조준</th><td>프롬프트 <code>F  조사</code> + 작게 <b><code>이미 확보한 기록</code></b></td></tr>
+<tr><th>그걸 조사했을 때</th><td>확보 토스트는 <b>미보유 팀원에게만</b>. 조사자 본인에게는 안 띄운다</td></tr>
+</tbody></table>
+<p style="color:var(--tx3);font-size:13px"><b>대면 관련 멀티 규칙(선택 주체·플래그 병합)은 ⏸ 범위 밖이다.</b></p>
+</section>
+
+<!-- ══════════════════ 7 ══════════════════ -->
+<section id="ui">
+<h2><span class="num">07</span>UI</h2>
+
+<h3>코덱스 탭 — 카드 3상태</h3>
+<table class="tight">
+<thead><tr><th>상태</th><th>번호</th><th>제목</th><th>상태 텍스트</th><th>시각</th></tr></thead>
+<tbody>
+<tr><td>미발견</td><td><code>01</code></td><td><code>???</code></td><td><code>미발견</code></td><td>40% 불투명, 자물쇠</td></tr>
+<tr><td>발견 · 암호화</td><td><code>07</code></td><td>심해 신호 기록</td><td><code>암호화됨</code></td><td>상태 텍스트 보라</td></tr>
+<tr><td>해독됨</td><td><code>03</code></td><td>배양 라인 일지</td><td>(빈칸)</td><td>정상</td></tr>
+</tbody></table>
+<p style="color:var(--tx3);font-size:13px">해독 상태에 배지를 안 다는 이유: 7개 중 6개가 늘 그 상태라 정보가 아니라 노이즈다. <b>예외 상태만 라벨을 단다.</b></p>
+
+<h3>미발견 힌트 — 방까지만, 방법은 말하지 않는다</h3>
+<table class="tight">
+<tbody>
+<tr><th style="width:90px">X7-L01</th><td><code>1층 연구 라운지.</code></td></tr>
+<tr><th>X7-L02</th><td><code>1층 표본 분석실.</code></td></tr>
+<tr><th>X7-L03</th><td><code>B1 생물 실험실.</code></td></tr>
+<tr><th>X7-L04</th><td><code>B1 유전자 분석실. 장비 안에 남아 있을 수 있습니다.</code></td></tr>
+<tr><th>X7-L05</th><td><code>B1 유지 보수실. 벽 너머에 공간이 있다는 보고가 있습니다.</code></td></tr>
+<tr><th>X7-L06</th><td><code>B1 화학 합성실.</code></td></tr>
+<tr><th>X7-L07</th><td><code>공식 도면에 없는 구역.</code></td></tr>
+</tbody></table>
+<p style="color:var(--tx3);font-size:13px"><b>L07 힌트가 방 이름이 아닌 이유.</b> 땅굴은 도면에 없으니 이름을 댈 수 없다. 이 한 줄이 미발견 상태에서도 미스터리를 던지는 유일한 카피가 된다.</p>
+
+<h3>암호화 상태 본문 (고정 문안)</h3>
+<pre>암호화된 기록입니다.
+
+이 현장의 다른 기록물을 모두 확보하면 자동으로 해독됩니다.
+남은 기록물: 2</pre>
+<p style="color:var(--tx3);font-size:13px">마지막 줄 숫자는 미발견 선행 개수를 실시간 계산. "왜 못 읽는가 / 뭘 하면 읽히는가 / 얼마나 남았는가"를 한 화면에서 다 준다.</p>
+
+<h3>현장 토스트 · 프롬프트</h3>
+<table class="tight">
+<thead><tr><th>상황</th><th>문구</th><th class="r">지속</th></tr></thead>
+<tbody>
+<tr><td>조준 프롬프트</td><td><code>F  조사</code> + (작게) 기록물 이름</td><td class="r">상시</td></tr>
+<tr><td>접근 기믹이 남았을 때</td><td><b>프롬프트 없음.</b> 덮개·쓰레기·패널이 먼저다</td><td class="r">—</td></tr>
+<tr><td>조사 성공</td><td><code>기록물 확보 — 배양 라인 일지  (3/7)</code></td><td class="r">3초</td></tr>
+<tr><td>팀원이 조사</td><td><code>스플래시가 기록물을 확보했습니다 — 배양 라인 일지  (3/7)</code></td><td class="r">3초</td></tr>
+<tr><td><b>7/7 달성</b></td><td><code>X-7 기록 보관함 완성 — 암호가 해독되었습니다</code></td><td class="r">4초</td></tr>
+<tr><td>이미 확보한 로어 조준</td><td>프롬프트에 작게 <code>이미 확보한 기록</code></td><td class="r">상시</td></tr>
+<tr><td>땅굴 최초 진입</td><td><code>미등록 구역</code> — 화면 하단 작게</td><td class="r">2초</td></tr>
+</tbody></table>
+<p style="color:var(--tx3);font-size:13px">토스트에 <b>점수·₡·호감도를 넣지 않는다.</b> <code>(3/7)</code>은 내 로컬 기준이고, 조사하면 전원 로컬에 들어가므로 <b>팀 전원이 같은 수치를 본다</b>.</p>
+
+<h3>헤더 · 진행률</h3>
+<table class="tight">
+<tbody>
+<tr><th style="width:150px">탭 이름</th><td><code>기록 보관함</code> — "로어퀘"라고 쓰지 않는다</td></tr>
+<tr><th>완성률</th><td><code>기록물 3 / 7</code> — <b>싱글·멀티 동일</b> (v12)</td></tr>
+<tr><th>진행 바</th><td>보라 <code>#B478FF</code>, 배경 무채색</td></tr>
+<tr><th>보조 문구</th><td><code>점검엔 영향 없습니다.</code></td></tr>
+</tbody></table>
+
+<div class="danger">
+<b>상세 패널에 <code>ScrollBox</code>가 필요하다.</b> 본문이 이야기 형식(8~16줄)이라 고정 높이 텍스트 블록에 넣으면 잘린다.
+카드 목록과 상세 패널이 <b>각각 독립 스크롤</b>이어야 한다.
+</div>
+
+<h3>카피 금지어</h3>
+<table class="tight">
+<thead><tr><th>금지</th><th>대체</th></tr></thead>
+<tbody>
+<tr><td><code>해금</code> · <code>언락</code></td><td><code>해독</code></td></tr>
+<tr><td><code>보상</code> · <code>획득 보상</code></td><td>표기 자체를 뺀다</td></tr>
+<tr><td><code>실패</code> · <code>놓침</code></td><td><code>미발견</code></td></tr>
+<tr><td><code>수집률 100% 달성!</code> 류 느낌표</td><td><code>기록 보관함 완성</code></td></tr>
+<tr><td><code>공포</code> · <code>괴물</code> · <code>침입</code> 어휘</td><td>업무 어휘</td></tr>
+</tbody></table>
+</section>
+
+<!-- ══════════════════ 8 ══════════════════ -->
+<section id="art">
+<h2><span class="num">08</span>에셋</h2>
+
+<h3>공통 아트 디렉션</h3>
+<table class="tight">
+<tbody>
+<tr><th style="width:130px">스타일</th><td>스타일라이즈드 로우폴리. 평평한 색면, 굵은 베벨. POLYGON 계열과 섞여도 안 튄다</td></tr>
+<tr><th>폴리 예산</th><td>개당 <b>300~900 tris</b> (종이류 200 이하)</td></tr>
+<tr><th>머티리얼</th><td><code>M_MD_StylizedSurface</code> 계열 재사용. <b>메시별 유니크 베이크 금지</b></td></tr>
+<tr><th>강조색</th><td><b style="color:var(--lore)">보라 #B478FF</b></td></tr>
+<tr><th>크기</th><td>6 m에서 실루엣이 읽히게 <b>최소 변 20 cm 이상</b> (종이류는 흰색 대비로 읽힌다)</td></tr>
+<tr><th>높이</th><td>바닥에 놓지 않는다. 허리 높이(80~120 cm) 또는 벽면</td></tr>
+<tr><th>상태</th><td>방치 1년 이상. 옅은 블룸 얼룩·부식. 단 <b>로어가 오염물로 보이면 안 된다</b></td></tr>
+</tbody></table>
+
+<div class="note">
+<b>왜 보라인가.</b> HUD·스캔 색이 이미 다 잡혀 있다 — 전선=앰버, 수도관=시안, 오염=노랑 <code>#F5C400</code>, 붕괴=적색.
+수중 청록에서 대비가 가장 큰 미사용 색이 보라다.
+</div>
+
+<h3>메시 목록</h3>
+<table class="tight">
+<thead><tr><th>에셋</th><th>실루엣</th><th class="r">치수</th><th>발광</th></tr></thead>
+<tbody>
+<tr><td><code>SM_MD_Lore_X7_01_NoticeBoard</code><br><code>..._01_Sheet</code></td><td>벽걸이 코르크/펠트 게시판 + 겹쳐 꽂힌 종이 다발</td><td class="r">120×80 cm<br>종이 A4</td><td>로어 종이 가장자리에만 극약한 보라 림</td></tr>
+<tr><td><code>SM_MD_Lore_X7_02_Tablet</code><br><code>..._02_Crust</code></td><td>러기드 태블릿 (콘솔 거치대 20° 기울기) + 오염 덮개</td><td class="r">26×18×3 cm</td><td>화면 저휘도 상시, 막 너머로 번짐</td></tr>
+<tr><td><code>SM_MD_Lore_X7_03_LogCartridge</code></td><td>납작한 <b>가로형</b> 카트리지, 크림색, 라벨창에 손글씨 <code>D</code></td><td class="r">14×9×2.5 cm</td><td>측면 보라 LED 1점, 느린 호흡</td></tr>
+<tr><td><code>SM_MD_Lore_X7_04_DataCore</code><br><code>..._04_SequencerPanel</code></td><td>육각 기둥 코어가 시퀀서 슬롯에 절반 꽂힘 + 부식 봉인 패널</td><td class="r">Ø18×32 cm<br>시퀀서 140×80×60</td><td>상단 링 보라 3점, 슬롯 틈으로 샘</td></tr>
+<tr><td><code>SM_MD_Lore_X7_05_Binder</code><br><code>..._05_Manifest</code> · <code>..._05_Panel</code></td><td>겨자색 링 바인더 + <b>유독 깨끗한</b> 흰 방수 봉투가 삐져나옴</td><td class="r">32×26×6 cm</td><td>없음 — 흰 봉투 대비로만</td></tr>
+<tr><td><code>SM_MD_Lore_X7_06_FumeHood</code><br><code>..._06_Canister</code> · <code>..._06_Notebook</code> · <code>..._06_GlassCrust</code></td><td>흄후드 + 젖빛 채집통 + 검은 노트 / 유리 안쪽 블룸</td><td class="r">후드 120×70<br>통 Ø24×40</td><td>통 내부 보라 점광, 흐린 유리 너머 번짐</td></tr>
+<tr><td><code>SM_MD_Lore_X7_07_Radio</code> <span class="tag t-hold">보류</span><br><code>..._07_CampSet</code></td><td>핸드헬드 무전기 (검정 고무 + 노란 상단 밴드). <b>7종 중 가장 멀쩡하다</b></td><td class="r">22×7×4 cm<br>(안테나 포함 30)</td><td>보라 백라이트 LCD, 배터리 1칸</td></tr>
+</tbody></table>
+
+<h4>부속</h4>
+<table class="tight">
+<tbody>
+<tr><th style="width:230px"><code>..._02/06_Crust</code></th><td>헤라 제거 대상 덮개 2종. 기존 오염/따개비 에셋 재사용 가능하면 신규 제작 안 함</td></tr>
+<tr><th><code>DC_MD_Lore_WallSeam</code></th><td>L04 시퀀서 패널 · L05 정비 패널 이음매 데칼 (스캐너 힌트)</td></tr>
+<tr><th><code>DC_MD_Lore_TunnelSpoil</code></th><td>땅굴 입구 굴착 잔토 · 발자국 데칼 <span class="tag t-hold">보류</span></td></tr>
+<tr><th><code>NS_MD_Lore_Dissolve</code></th><td>조사 후 소멸 — 보라 파티클 상승 0.4초</td></tr>
+<tr><th><code>MI_MD_Lore_Highlight</code></th><td>조준 림라이트 (상호작용 하이라이트의 보라 변형)</td></tr>
+</tbody></table>
+
+<h3>아트 검수</h3>
+<ul>
+<li>7개를 한 줄로 세워 봤을 때 <b>서로 다른 물건</b>으로 읽히는가</li>
+<li><b>L03 카트리지가 M01 서버 카트리지와 확실히 다른가</b> (색·비율·발광)</li>
+<li><b>L05 바인더는 낡고 인수증만 깨끗한가</b></li>
+<li><b>L07 무전기가 유일하게 멀쩡해 보이는가</b></li>
+<li>수중 조도 + B1 안개 상태로 <b>6 m에서 유도 요소가 읽히는가</b></li>
+<li>보라 발광이 <b>오염 노랑·전선 앰버·수도관 시안</b>과 혼동되지 않는가</li>
+<li>덮개 2종이 <b>덮인 상태 / 벗긴 상태</b> 모두 자연스러운가</li>
+</ul>
+
+<details>
+<summary>레퍼런스 이미지 생성 프롬프트 (영문) — 펼치기</summary>
+<p style="font-size:13px;color:var(--tx2);margin-top:12px">모든 프롬프트 뒤에 공통 접미를 붙인다.</p>
+<pre>stylized low-poly game asset, flat shaded, chunky bevels, PBR-lite,
+neutral grey studio background, orthographic 4-view sheet (front / side / top / three-quarter),
+no text overlays, no watermark, consistent scale reference</pre>
+
+<h4>L01 · 라운지 게시판</h4>
+<pre>A wall-mounted office notice board, aluminium frame with dark blue-grey felt backing, about a
+dozen overlapping sheets of paper pinned with metal push pins, several sheets curling and
+swollen from water damage, one sheet hanging by a single pin, a couple of small photographs
+and a duty roster grid among them. Illegible printed text rendered as abstract line blocks.
+Abandoned underwater facility prop.</pre>
+
+<h4>L02 · 분석 콘솔 태블릿</h4>
+<pre>A rugged industrial tablet seated in a console dock tilted at a slight angle, dark blue-grey
+polymer body with yellow rubber bumper corners, dim pale screen, one spider-web crack in the
+lower right glass. A separate grey-green translucent biofilm crust layer covering the entire
+screen face, uneven and lumpy.</pre>
+
+<h4>L03 · 배양 로그 카트리지</h4>
+<pre>A palm-sized flat data cartridge, matte cream-white housing with a dark grey connector cap at
+one end and a small recessed label window on top showing a single handwritten letter, one
+violet status LED on the side edge. Horizontal wide proportions. Light grey-green staining
+along the corners.</pre>
+
+<h4>L04 · 해석 데이터 코어 + 시퀀서</h4>
+<pre>A hexagonal research data core cylinder, matte white ceramic shell with brushed aluminium top
+and bottom rings and three small violet indicator lights, half-inserted into a slot on the
+front of a large light-grey laboratory sequencer cabinet. The cabinet's front access panel is
+heavily corroded and sealed shut, bolts crusted over, violet light leaking from the slot gap.</pre>
+
+<h4>L05 · 정비 바인더 + 인수증</h4>
+<pre>A thick mustard-yellow hard-cover ring binder standing in a narrow wall locker, cover warped
+and swollen from water, metal rings rusted. A single clean white waterproof document envelope
+wedged between the pages and sticking out at an angle, noticeably newer than the binder.
+Hidden inside a wall cavity behind a maintenance panel.</pre>
+
+<h4>L06 · 흄후드 + 채집통 + 노트</h4>
+<pre>A stainless steel laboratory fume hood with a glass sash. Inside on the shelf, a cylindrical
+deep-sea sample canister of frosted translucent polycarbonate with two reflective stripes and
+a small stamped metal tag on its rim, plus an open black-covered field notebook lying flat in
+front of it. Barnacle and grey biofilm growth on the canister. The inside face of the hood
+glass is coated with an uneven grey-green film, blurring what is behind it.</pre>
+
+<h4>L07 · 휴대 무전기 (보류)</h4>
+<pre>A handheld two-way radio, matte black rubberised body with a yellow band across the top, short
+stubby rubber antenna, a rotary knob on top and a large side push-to-talk button, small violet
+backlit LCD still glowing with a single battery bar. A wrist strap wrapped around the leg of a
+folding field table. Noticeably cleaner and better preserved than everything around it.</pre>
+
+<h4>땅굴 환경 (보류)</h4>
+<pre>A rough hand-dug underwater tunnel through dark rock, roughly two metres wide, irregular
+chisel-marked walls, improvised timber and steel shoring frames spaced along its length, two
+temporary work lamps still lit and one dark, loose rubble along the floor. Not an engineered
+corridor — clearly dug by hand over a long time.</pre>
+</details>
+</section>
+
+<!-- ══════════════════ 9 ══════════════════ -->
+<section id="open">
+<h2><span class="num">09</span>보류 · 미결정</h2>
+
+<div class="hold">
+<b>🟡 땅굴 — 착수 금지</b><br><br>
+어떻게 할지 <b>미정</b>이다. 블록아웃·에셋·구현을 시작하지 않는다.<br><br>
+<b>막히는 것은 X7-L07 하나뿐이다.</b> L01~L06 · 코덱스 UI · 에셋 · 본문은 전부 진행 가능하다.
+L07 엔트리는 <code>DA_Lore_X7</code>에 미리 넣고 <b>액터만 배치하지 않으면</b> 코덱스에 <code>???</code>로 남는다.<br><br>
+<b>미결정 4건</b> — ① 땅굴을 만들지 여부 자체 ② 출구 일방/양방 ③ 산소 예산 ④ 외벽 불가침의 두 번째 예외를 열지<br><br>
+<b>축소안</b> — L07을 기지 내부(예: B1-05 안쪽 폐쇄 구획)로 옮기고 은닉을 3등급으로 낮출 수 있다.
+그 경우 "도면에 없는 공간"이라는 서사와 <code>미등록 구역</code> UI 카피를 함께 조정해야 한다.
+</div>
+
+<h3>구현 불일치 (코드 확인 필요)</h3>
+<table class="tight">
+<thead><tr><th class="c">#</th><th>항목</th><th>문서</th><th>현재 코드</th><th>제안</th></tr></thead>
+<tbody>
+<tr><td class="c">1</td><td>크레딧 보상</td><td>₡·점수·호감도 트랙 없음</td><td><code>RewardCredits = 30</code> 기본값</td><td>에셋에서 전부 0, <code>TXT_DetailReward</code>는 0이면 숨김</td></tr>
+<tr style="opacity:.55"><td class="c">2</td><td><s>저장 범위</s></td><td><b>참가자 전원 로컬</b></td><td><code>FMD_LoreSiteProgress</code> 주석이 "팀 공유"</td><td><b>해소 (v12).</b> 남은 확인 1건 — 세션 종료 시 원장이 <b>전원 세이브로 내려가는가</b></td></tr>
+<tr><td class="c">2-b</td><td><b>맵 스폰 판정</b></td><td><b>참가자 교집합</b> — 한 명이라도 미보유면 스폰</td><td><code>RefreshCollectionState()</code>가 원장 조회 1회로 판단</td><td><b>신규 구현 필요.</b> 참가자별 보유 여부를 모아 판단해야 한다</td></tr>
+<tr style="opacity:.55"><td class="c">3</td><td><s><code>ToldBriggsAboutX7</code></s></td><td>—</td><td>코드에서 미발견</td><td><b>불일치 아님</b> — 대면이 범위 밖이라 구현하지 않는다</td></tr>
+<tr><td class="c">4</td><td><code>EntryContent</code> 서식</td><td>구분선·소제목이 들어간다</td><td><code>FText</code> MultiLine 단일 필드</td><td>리치 텍스트가 아니면 <b>구분선(─)·빈 줄·들여쓰기만</b>으로 표현</td></tr>
+<tr><td class="c">5</td><td>B1-01 코어 2종</td><td>R11 A급 / L04 해석 코어</td><td>—</td><td>자리·발광으로 갈랐지만 <b>실기 확인 필요</b></td></tr>
+</tbody></table>
+
+<h3>작업 순서</h3>
+<table class="tight">
+<thead><tr><th class="c">#</th><th>작업</th><th>선행</th><th>상태</th></tr></thead>
+<tbody>
+<tr><td class="c">0</td><td>방 번호 불일치 해소 — <code>01</code>·<code>02</code>·<code>03</code>·<code>05</code> 도면 기준 재작성</td><td>—</td><td style="color:var(--ok)"><b>완료</b></td></tr>
+<tr><td class="c">1</td><td><code>04</code> 절별 정본 정리 (폐기 배너 + 트리거 갱신)</td><td>—</td><td style="color:var(--ok)"><b>완료</b></td></tr>
+<tr><td class="c">2</td><td><code>DA_Lore_X7</code> 값 입력 — 본문은 이야기 형식</td><td>1</td><td>대기</td></tr>
+<tr><td class="c">3</td><td>레퍼런스 이미지 <b>6종</b> 생성 (L01~L06)</td><td>—</td><td>대기</td></tr>
+<tr><td class="c">4</td><td>메시 제작 → UE 임포트</td><td>3</td><td>대기</td></tr>
+<tr><td class="c">5</td><td><s>땅굴 공간 블록아웃</s></td><td>—</td><td style="color:var(--hold)"><b>🟡 보류</b></td></tr>
+<tr><td class="c">6</td><td><code>AMD_LoreActor</code> <b>6개</b> 배치 (L07 제외)</td><td>2·4</td><td>대기</td></tr>
+<tr><td class="c">7</td><td>배치 검증 (PIE 실측) — 땅굴 항목 제외</td><td>6</td><td>대기</td></tr>
+<tr><td class="c">8</td><td><b>상세 패널 스크롤 대응</b> + 코덱스 UI 카피</td><td>2</td><td>대기</td></tr>
+<tr><td class="c">9</td><td>토스트·프롬프트</td><td>6</td><td>대기</td></tr>
+<tr><td class="c">10</td><td>SFX 5종 (<code>Content/SFX/Lore</code>)</td><td>—</td><td>대기</td></tr>
+<tr style="opacity:.55"><td class="c">11</td><td><s>브릭스 대면 UI</s></td><td>—</td><td style="color:var(--hold)"><b>⏸ 범위 밖</b></td></tr>
+</tbody></table>
+
+<p style="color:var(--tx2)"><b>0·1이 끝났으므로 2·3이 바로 시작 가능하다.</b> <b>2~9까지가 로어 트랙 전부다.</b> 10(SFX)은 그 다음이고, 11은 범위 밖이다.</p>
+
+<h3>신규 SFX</h3>
+<table class="tight">
+<thead><tr><th>SFX ID</th><th>용도</th><th>톤</th></tr></thead>
+<tbody>
+<tr><td><code>SFX_Lore_Investigate</code></td><td>조사 성공</td><td>짧은 데이터 비프 2음, 상승</td></tr>
+<tr><td><code>SFX_Lore_Registered</code></td><td>코덱스 등록 토스트</td><td>부드러운 클릭 + 짧은 벨</td></tr>
+<tr><td><code>SFX_Lore_Decrypted</code></td><td>L07 해독 (계약당 최대 1회)</td><td>리버브 스팅어 2초. <b>공포 톤 금지</b></td></tr>
+<tr><td><code>SFX_Lore_Radio_Loop</code></td><td>L07 무전기 저노이즈 루프 (감쇠 3 m)</td><td>아주 낮은 화이트노이즈, 간헐 크래클</td></tr>
+<tr><td><code>SFX_Amb_Tunnel_Loop</code></td><td>땅굴 앰비언스 <span class="tag t-hold">보류</span></td><td>좁은 공간 반향, 물방울, 지보 삐걱임</td></tr>
+</tbody></table>
+<p style="color:var(--tx3);font-size:13px">재생은 전부 <code>MD_AudioSubsystem</code> 경유, 데이터 에셋+태그로만. <b>경로 하드코딩 금지.</b></p>
+</section>
+
+<footer>
+X-7 로어 퀘스트 기획 — 읽기용 요약본<br>
+정본: <code>Docs/X-7 기지 기획서/06 X-7 로어 폴리싱 (동선·UI·에셋).md</code> (Develop v12) ·
+멀티 저장 규칙: <code>04</code> §6 v12 · 도면: <code>02</code> v7<br>
+구현 범위: <b>7종 수집 · 코덱스 열람 · L07 해독</b> — 브릭스 대면 선택지와 땅굴은 범위 밖
+</footer>
+
+</main>
+</body>
+</html>

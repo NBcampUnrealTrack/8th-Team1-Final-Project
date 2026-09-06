@@ -1,4 +1,4 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
@@ -9,6 +9,12 @@ namespace MDGameplayTags
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Scrape);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_WallCut);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_WallScan);
+
+	/** 폼건으로 수도관을 수리할 수 있음을 식별하는 태그 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_UtilityRepair_Foam);
+
+	/** 절연테이프로 배선을 수리할 수 있음을 식별하는 태그 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_UtilityRepair_Insulation);
 
 
 	/** 물리 보관함에 담을 수 있는 내용물 분류의 공통 루트 */
@@ -38,6 +44,9 @@ namespace MDGameplayTags
 	 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Cuttable);
 
+	/** 전방 스캐너 후보 태그. 시각 반응을 위해 IMD_Scannable 구현도 필요하다. */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Scannable);
+
 	/** 상호작용한 대상을 월드의 물리 오브젝트로 운반하는 픽업 방식 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Pickup_Physics);
 
@@ -52,6 +61,9 @@ namespace MDGameplayTags
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Sample_Grade_S);
 
 	// ===== 평가 점수 이벤트 (기획 05 §1, 단가는 UMD_ScoreTableData) =====
+
+	/** 모든 쓰레기 정분류 카테고리의 공통 루트 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting);
 
 	/** 분리 정분류 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Sorting_Metal);
@@ -124,4 +136,21 @@ namespace MDGameplayTags
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_World);
 	// 저장된 게임 데이터로부터 영구 누적 로어 진행 정보를 얻는 키
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_Lore);
+
+	/* UI */
+	/** Common UI 레이어 분류의 공통 루트 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer);
+
+	/** 타이틀과 세션 탐색 화면을 배치하는 최하단 레이어 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer_Frontend);
+
+	/** 게임 플레이 중 HUD 루트를 유지하는 레이어 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer_GameHUD);
+
+	/** 일시정지와 상인 등 게임 메뉴 화면을 배치하는 레이어 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer_GameMenu);
+
+	/** 확인과 로딩 등 모든 화면보다 우선하는 최상단 레이어 */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(UI_Layer_Modal);
+
 }

@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/MD_Character.h"
@@ -7,29 +7,35 @@
 #include "Component/Character/MD_CharacterMovementComponent.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
+#include "Component/Comfort/MD_ComfortComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
+#include "InputCoreTypes.h"
+#include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/CapsuleComponent.h"
 #include "Components/BoxComponent.h"
+#include "Components/WidgetComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshSocket.h"
+#include "Animation/AnimInstance.h"
+#include "Animation/AnimMontage.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerStart.h"
 #include "GameplayTags/MD_GameplayTags.h"
-#include "World/Traversal/MD_Ladder.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
@@ -41,6 +47,7 @@
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
+#include "UI/Customization/MD_NameTagWidget.h"
 
 // Sets default values
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
@@ -87,6 +94,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 
 	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
 
+	AudioRelayComponent = CreateDefaultSubobject<UMD_AudioRelayComponent>(TEXT("AudioRelayComponent"));
+
 	ThirdPersonToolMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("ThirdPersonToolMesh"));
 	ThirdPersonToolMesh->SetupAttachment(GetMesh(), ToolAttachSocketName);
 	ThirdPersonToolMesh->SetOwnerNoSee(true);
@@ -103,6 +112,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FirstPersonToolMesh->SetCanEverAffectNavigation(false);
 
+	ConfigureFirstPersonRendering();
+
 	HoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HoldPoint"));
 	HoldPoint->SetupAttachment(Camera);
 	HoldPoint->SetRelativeLocation(FVector(150.f, 0.f, 0.f));
@@ -112,9 +123,20 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	InteractionComponent = CreateDefaultSubobject<UMD_InteractionComponent>(TEXT("InteractionComponent"));
 	InteractionComponent->SetInteractionDependencies(Camera, HoldPoint, PhysicsHandle);
 
+	ComfortComponent = CreateDefaultSubobject<UMD_ComfortComponent>(TEXT("ComfortComponent"));
+
 	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
 
 	OxygenComponent = CreateDefaultSubobject<UMD_OxygenComponent>(TEXT("OxygenComponent"));
+
+	// 캐릭터 머리 위에 원격 플레이어의 이름표를 배치한다.
+	NameTagWidgetComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("NameTagWidgetComponent"));
+	NameTagWidgetComponent->SetupAttachment(GetRootComponent());
+	NameTagWidgetComponent->SetWidgetSpace(EWidgetSpace::World);
+	NameTagWidgetComponent->SetDrawAtDesiredSize(true);
+	NameTagWidgetComponent->SetRelativeLocation(FVector(0.0f, 0.0f, 70.0f));
+	NameTagWidgetComponent->SetOwnerNoSee(true);
+	NameTagWidgetComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 }
 
 void AMD_Character::ForceEnterWalkState()
@@ -267,15 +289,13 @@ void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
 
-	RefreshFirstPersonArmsTick();
+	// 시작 시점에 이미 준비된 PlayerState의 이름을 이름표에 반영한다.
+	RefreshNameTag();
 
-	// 사다리 진입과 이탈을 캐릭터 캡슐 기준으로 감지하기 위한 델리게이트 연결
-	UCapsuleComponent* CharacterCapsule = GetCapsuleComponent();
-	if (IsValid(CharacterCapsule) == true)
-	{
-		CharacterCapsule->OnComponentBeginOverlap.AddUniqueDynamic(this, &AMD_Character::HandleCollisionBeginOverlap);
-		CharacterCapsule->OnComponentEndOverlap.AddUniqueDynamic(this, &AMD_Character::HandleCollisionEndOverlap);
-	}
+	// 기존 BP에 저장된 네이티브 컴포넌트 값이 C++ 기본값을 덮더라도
+	// 실제 플레이에서는 팔·도구의 데칼 수신과 월드 메시 관통을 줄이도록 다시 보정한다.
+	ConfigureFirstPersonRendering();
+	RefreshFirstPersonArmsTick();
 
 	if (IsValid(ScrapeToolComponent))
 	{
@@ -309,6 +329,30 @@ void AMD_Character::BeginPlay()
 	}
 }
 
+void AMD_Character::ConfigureFirstPersonRendering()
+{
+	if (IsValid(FirstPersonMesh))
+	{
+		FirstPersonMesh->SetReceivesDecals(false);
+		FirstPersonMesh->SetFirstPersonPrimitiveType(
+			EFirstPersonPrimitiveType::FirstPerson);
+	}
+
+	if (IsValid(FirstPersonToolMesh))
+	{
+		FirstPersonToolMesh->SetReceivesDecals(false);
+		FirstPersonToolMesh->SetFirstPersonPrimitiveType(
+			EFirstPersonPrimitiveType::FirstPerson);
+	}
+
+	if (IsValid(Camera))
+	{
+		Camera->SetEnableFirstPersonScale(true);
+		Camera->SetFirstPersonScale(
+			FMath::Clamp(FirstPersonRenderScale, 0.1f, 1.0f));
+	}
+}
+
 void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	ResetScrapeFocusInputState();
@@ -325,22 +369,84 @@ void AMD_Character::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 
-	UpdateFirstPersonArms(DeltaSeconds);
-	UpdateFirstPersonToolTransform(DeltaSeconds);
+	// 월드 공간 이름표가 각 클라이언트의 현재 카메라를 계속 향하게 한다.
+	UpdateNameTagRotation();
+
+	// 1인칭 팔과 도구는 해당 캐릭터를 직접 조작하는 로컬 플레이어만 갱신한다.
+	if (IsLocallyControlled() == true)
+	{
+		UpdateFirstPersonArms(DeltaSeconds);
+		UpdateFirstPersonToolTransform(DeltaSeconds);
+	}
 }
 
 void AMD_Character::RefreshFirstPersonArmsTick()
 {
-	const bool bNeedsTick = IsLocallyControlled();
+	// 로컬 캐릭터는 기존 1인칭 팔 갱신을 위해 틱한다.
+	bool bNeedsTick = IsLocallyControlled();
+
+	// 렌더링하지 않는 전용 서버를 제외하고 원격 캐릭터도 이름표 회전을 위해 틱한다.
+	if (GetNetMode() != NM_DedicatedServer)
+	{
+		if (IsValid(NameTagWidgetComponent) == true)
+		{
+			bNeedsTick = true;
+		}
+	}
+
 	SetActorTickEnabled(bNeedsTick);
 
-	if (!bNeedsTick)
+	if (bNeedsTick == false)
+	{
+		return;
+	}
+
+	// 원격 캐릭터는 이름표만 갱신하므로 1인칭 팔 초기화를 생략한다.
+	if (IsLocallyControlled() == false)
 	{
 		return;
 	}
 
 	BindFirstPersonArmsToBodyPose();
 	UpdateFirstPersonArms(0.f, /*bSnapToTarget=*/true);
+}
+
+void AMD_Character::UpdateNameTagRotation()
+{
+	// 렌더링하지 않는 전용 서버에서는 이름표 방향을 계산하지 않는다.
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// 이름표 컴포넌트가 준비되지 않은 경우 처리를 종료한다.
+	if (IsValid(NameTagWidgetComponent) == false)
+	{
+		return;
+	}
+
+	// 현재 클라이언트의 주 로컬 카메라를 소유한 컨트롤러를 가져온다.
+	APlayerController* LocalPlayerController = UGameplayStatics::GetPlayerController(this, 0);
+	if (IsValid(LocalPlayerController) == false)
+	{
+		return;
+	}
+
+	// 카메라 위치를 기준으로 이름표가 바라볼 월드 방향을 계산한다.
+	FVector CameraLocation = FVector::ZeroVector;
+	FRotator IgnoredCameraRotation = FRotator::ZeroRotator;
+	LocalPlayerController->GetPlayerViewPoint(CameraLocation, IgnoredCameraRotation);
+	FVector NameTagLocation = NameTagWidgetComponent->GetComponentLocation();
+	FVector CameraDirection = CameraLocation - NameTagLocation;
+	if (CameraDirection.IsNearlyZero() == true)
+	{
+		return;
+	}
+
+	// 위젯 평면의 정면이 카메라를 향하도록 회전하되 화면이 기울어지지 않게 Roll을 제거한다.
+	FRotator NameTagRotation = CameraDirection.Rotation();
+	NameTagRotation.Roll = 0.0f;
+	NameTagWidgetComponent->SetWorldRotation(NameTagRotation);
 }
 
 void AMD_Character::BindFirstPersonArmsToBodyPose()
@@ -390,12 +496,14 @@ void AMD_Character::SetFirstPersonScrapeViewModelActive(const bool bActive)
 		LastScrapeViewModelPointerNormalized = IsValid(ScrapeToolComponent)
 			? ScrapeToolComponent->GetScrapeFocusPointerNormalized()
 			: FVector2D(0.5, 0.5);
-		ScrapeViewModelScreenDirection = FVector2D(0.0, -1.0);
-		LastScrapeViewModelStableWorldTangent = FVector::ZeroVector;
-		ScrapeViewModelWorldRotation = FQuat::Identity;
-		bScrapeViewModelDirectionLocked = false;
+		ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+		LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+		ScrapePointerViewModelWorldRotation = FQuat::Identity;
+		ScrapeStrokeViewModelWorldRotation = FQuat::Identity;
+		bScrapeStrokeViewModelDirectionLocked = false;
 		bWasScrapingForViewModel = false;
-		bHasScrapeViewModelRotation = false;
+		bHasScrapePointerViewModelRotation = false;
+		bHasScrapeStrokeViewModelRotation = false;
 		return;
 	}
 
@@ -404,13 +512,15 @@ void AMD_Character::SetFirstPersonScrapeViewModelActive(const bool bActive)
 		FirstPersonMesh->SetVisibility(bFirstPersonArmsWereVisible, true);
 	}
 	LastScrapeViewModelPointerNormalized = FVector2D(0.5, 0.5);
-	ScrapeViewModelScreenDirection = FVector2D(0.0, -1.0);
-	LastScrapeViewModelStableWorldTangent = FVector::ZeroVector;
-	ScrapeViewModelWorldRotation = FQuat::Identity;
+	ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+	LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+	ScrapePointerViewModelWorldRotation = FQuat::Identity;
+	ScrapeStrokeViewModelWorldRotation = FQuat::Identity;
 	ScrapeViewModelWorldScale = FVector::OneVector;
-	bScrapeViewModelDirectionLocked = false;
+	bScrapeStrokeViewModelDirectionLocked = false;
 	bWasScrapingForViewModel = false;
-	bHasScrapeViewModelRotation = false;
+	bHasScrapePointerViewModelRotation = false;
+	bHasScrapeStrokeViewModelRotation = false;
 }
 
 bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
@@ -457,34 +567,38 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 		return false;
 	}
 
-	const FVector2D PointerDeltaPixels(
-		(PointerNormalized.X - LastScrapeViewModelPointerNormalized.X)
-			* static_cast<double>(ViewportWidth),
-		(PointerNormalized.Y - LastScrapeViewModelPointerNormalized.Y)
-			* static_cast<double>(ViewportHeight));
-	const bool bScraping = ScrapeToolComponent->IsScraping();
+	const bool bScraping = ScrapeToolComponent->IsSurfaceScrapeVisualStrokeActive();
+	const bool bScrapeModeChanged = bScraping != bWasScrapingForViewModel;
+	const FVector2D PointerDeltaPixels = bScrapeModeChanged
+		? FVector2D(0.0, 0.0)
+		: FVector2D(
+			(PointerNormalized.X - LastScrapeViewModelPointerNormalized.X)
+				* static_cast<double>(ViewportWidth),
+			(PointerNormalized.Y - LastScrapeViewModelPointerNormalized.Y)
+				* static_cast<double>(ViewportHeight));
 	if (!bScraping)
 	{
-		// Focus Ready에서는 포인터 위치만 따라가고 헤라 회전은 기본
-		// contact frame을 유지한다. 직전 stroke의 부호도 기본 축에 영향을 주지 않는다.
-		ScrapeViewModelScreenDirection = FVector2D(0.0, -1.0);
-		bScrapeViewModelDirectionLocked = false;
 		if (bWasScrapingForViewModel)
 		{
-			LastScrapeViewModelStableWorldTangent = FVector::ZeroVector;
+			// 포인터 추적 모드로 돌아갈 때 직전 stroke의 방향 상태를 버린다.
+			ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+			LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+			bScrapeStrokeViewModelDirectionLocked = false;
 		}
 	}
 	else
 	{
 		if (!bWasScrapingForViewModel)
 		{
-			// 새 LMB stroke의 방향 lock은 ScrapeToolComponent가 다시 결정한다.
-			bScrapeViewModelDirectionLocked = false;
+			// 새 stroke는 포인터 추적 중의 이동량이나 접선 상태를 상속하지 않는다.
+			ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+			LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+			bScrapeStrokeViewModelDirectionLocked = false;
 		}
-		if (!bScrapeViewModelDirectionLocked
+		if (!bScrapeStrokeViewModelDirectionLocked
 			&& PointerDeltaPixels.SizeSquared() >= 0.25)
 		{
-			ScrapeViewModelScreenDirection = PointerDeltaPixels.GetSafeNormal();
+			ScrapeStrokeViewModelScreenDirection = PointerDeltaPixels.GetSafeNormal();
 		}
 	}
 	bWasScrapingForViewModel = bScraping;
@@ -530,9 +644,12 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 		return false;
 	}
 
+	const float ConfiguredDistanceCm = bScraping
+		? ScrapeStrokeViewModelDistanceCm
+		: ScrapeViewModelDistanceCm;
 	const FVector ViewPlanePoint = ViewLocation
 		+ ViewForward * static_cast<double>(
-			FMath::Max(ScrapeViewModelDistanceCm, 10.0f));
+			FMath::Max(ConfiguredDistanceCm, 10.0f));
 	const double RayDistance = FVector::DotProduct(
 		ViewPlanePoint - RayOrigin,
 		ViewForward) / RayPlaneDenominator;
@@ -556,48 +673,57 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 		ContactWorldTangent = FVector::VectorPlaneProject(
 			VisualContactPose.StrokeWorldTangent,
 			-ViewForward).GetSafeNormal();
-		bScrapeViewModelDirectionLocked = !ContactWorldTangent.IsNearlyZero();
+		bScrapeStrokeViewModelDirectionLocked = !ContactWorldTangent.IsNearlyZero();
 	}
 	if (bScraping
 		&& ContactWorldTangent.IsNearlyZero()
-		&& bScrapeViewModelDirectionLocked)
+		&& bScrapeStrokeViewModelDirectionLocked)
 	{
 		// 잠깐 visual trace가 비어도 현재 stroke에서 이미 고정한 축은 유지한다.
-		ContactWorldTangent = LastScrapeViewModelStableWorldTangent;
+		ContactWorldTangent = LastScrapeStrokeViewModelStableWorldTangent;
 	}
 	if (bScraping && ContactWorldTangent.IsNearlyZero())
 	{
-		ContactWorldTangent = ViewRight * ScrapeViewModelScreenDirection.X
-			- ViewUp * ScrapeViewModelScreenDirection.Y;
+		ContactWorldTangent = ViewRight * ScrapeStrokeViewModelScreenDirection.X
+			- ViewUp * ScrapeStrokeViewModelScreenDirection.Y;
 		ContactWorldTangent = FVector::VectorPlaneProject(
 			ContactWorldTangent,
 			-ViewForward).GetSafeNormal();
 	}
-	if (ContactWorldTangent.IsNearlyZero())
+	if (bScraping && ContactWorldTangent.IsNearlyZero())
 	{
-		ContactWorldTangent = LastScrapeViewModelStableWorldTangent;
+		ContactWorldTangent = LastScrapeStrokeViewModelStableWorldTangent;
 	}
 	if (ContactWorldTangent.IsNearlyZero())
 	{
 		ContactWorldTangent = ViewUp;
 	}
 	if (bScraping
-		&& !LastScrapeViewModelStableWorldTangent.IsNearlyZero()
-		&& !LastScrapeViewModelStableWorldTangent.ContainsNaN()
+		&& !LastScrapeStrokeViewModelStableWorldTangent.IsNearlyZero()
+		&& !LastScrapeStrokeViewModelStableWorldTangent.ContainsNaN()
 		&& !ContactWorldTangent.ContainsNaN()
 		&& FVector::DotProduct(
-			LastScrapeViewModelStableWorldTangent,
+			LastScrapeStrokeViewModelStableWorldTangent,
 			ContactWorldTangent) < 0.0)
 	{
 		// 헤라 날의 진행 축은 180도 동치이므로, locked pose를 포함한
 		// 새 tangent를 직전 안정 축과 같은 부호로 맞춰 한 프레임 flip을 막는다.
 		ContactWorldTangent *= -1.0;
 	}
-	LastScrapeViewModelStableWorldTangent = ContactWorldTangent;
+	if (bScraping)
+	{
+		LastScrapeStrokeViewModelStableWorldTangent = ContactWorldTangent;
+	}
 
 	const FQuat TargetContactRotation = FRotationMatrix::MakeFromXZ(
 		-ViewForward,
 		ContactWorldTangent).ToQuat();
+	FQuat& CachedWorldRotation = bScraping
+		? ScrapeStrokeViewModelWorldRotation
+		: ScrapePointerViewModelWorldRotation;
+	bool& bHasCachedWorldRotation = bScraping
+		? bHasScrapeStrokeViewModelRotation
+		: bHasScrapePointerViewModelRotation;
 	FQuat ContactRotation = TargetContactRotation;
 	const double SafeDeltaSeconds = FMath::IsFinite(DeltaSeconds)
 		? FMath::Max(static_cast<double>(DeltaSeconds), 0.0)
@@ -605,18 +731,18 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 	const double SmoothingSeconds = FMath::Max(
 		static_cast<double>(ScrapeViewModelRotationSmoothingSeconds),
 		0.0);
-	if (bHasScrapeViewModelRotation
+	if (bHasCachedWorldRotation
 		&& SmoothingSeconds > UE_DOUBLE_SMALL_NUMBER)
 	{
 		const double RotationBlend = 1.0 - FMath::Exp(
 			-SafeDeltaSeconds / SmoothingSeconds);
 		ContactRotation = FQuat::Slerp(
-			ScrapeViewModelWorldRotation,
+			CachedWorldRotation,
 			TargetContactRotation,
 			FMath::Clamp(RotationBlend, 0.0, 1.0)).GetNormalized();
 	}
-	ScrapeViewModelWorldRotation = ContactRotation;
-	bHasScrapeViewModelRotation = true;
+	CachedWorldRotation = ContactRotation;
+	bHasCachedWorldRotation = true;
 
 	// StaticMesh socket scale은 배치 계약에 쓰지 않는다. 현재 viewmodel world scale을
 	// 보존하면서 Blade_Tip/Blade_Contact의 역변환으로 접점을 정확히 맞춘다.
@@ -627,14 +753,20 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 		ContactRotation,
 		ContactWorldLocation,
 		ScrapeViewModelWorldScale);
-	const FRotator SafeRotationOffset = ScrapeViewModelRotationOffset.ContainsNaN()
-		? FRotator::ZeroRotator
+	const FRotator ConfiguredRotationOffset = bScraping
+		? ScrapeStrokeViewModelRotationOffset
 		: ScrapeViewModelRotationOffset;
+	const FRotator SafeRotationOffset = ConfiguredRotationOffset.ContainsNaN()
+		? FRotator::ZeroRotator
+		: ConfiguredRotationOffset;
+	const float ConfiguredScaleMultiplier = bScraping
+		? ScrapeStrokeViewModelScaleMultiplier
+		: ScrapeViewModelScaleMultiplier;
 	const bool bScaleMultiplierUsable =
-		FMath::IsFinite(ScrapeViewModelScaleMultiplier)
-		&& ScrapeViewModelScaleMultiplier > UE_KINDA_SMALL_NUMBER;
+		FMath::IsFinite(ConfiguredScaleMultiplier)
+		&& ConfiguredScaleMultiplier > UE_KINDA_SMALL_NUMBER;
 	const float SafeScaleMultiplier = bScaleMultiplierUsable
-		? ScrapeViewModelScaleMultiplier
+		? ConfiguredScaleMultiplier
 		: 1.0f;
 	const FTransform LocalVisualOffset(
 		SafeRotationOffset.Quaternion(),
@@ -702,10 +834,13 @@ void AMD_Character::UpdateFirstPersonToolTransform(const float DeltaSeconds)
 		{
 			return;
 		}
-		if (bHasScrapeViewModelRotation)
+		const bool bHasCurrentModeRotation = ScrapeToolComponent->IsSurfaceScrapeVisualStrokeActive()
+			? bHasScrapeStrokeViewModelRotation
+			: bHasScrapePointerViewModelRotation;
+		if (bHasCurrentModeRotation)
 		{
-			// Viewport/deproject가 일시적으로 안 나오면 이전에 성공한
-			// viewmodel pose만 유지하고 기본 소켓으로 튀지 않는다.
+			// Viewport/deproject가 일시적으로 안 나오면 현재 모드에서 성공한
+			// viewmodel pose만 유지하고 다른 모드나 기본 소켓으로 튀지 않는다.
 			return;
 		}
 
@@ -836,6 +971,8 @@ void AMD_Character::PossessedBy(AController* NewController)
 	InitializeAbilitySystem();
 	GrantDefaultAbilities();
 	RefreshFirstPersonArmsTick();
+	// 서버에서 빙의가 완료된 PlayerState의 이름을 이름표에 반영한다.
+	RefreshNameTag();
 }
 
 void AMD_Character::UnPossessed()
@@ -875,6 +1012,30 @@ void AMD_Character::OnRep_PlayerState()
 	Super::OnRep_PlayerState();
 
 	InitializeAbilitySystem();
+	// 클라이언트에 PlayerState가 복제된 뒤 플랫폼 닉네임을 이름표에 반영한다.
+	RefreshNameTag();
+}
+
+void AMD_Character::RefreshNameTag()
+{
+	// 이름표에 표시할 복제된 플레이어 정보를 가져온다.
+	// 이름표 컴포넌트가 준비되지 않은 경우 처리를 종료한다.
+	APlayerState* CurrentPlayerState = GetPlayerState();
+	if (IsValid(CurrentPlayerState) == false || IsValid(NameTagWidgetComponent) == false)
+	{
+		return;
+	}
+
+	// 설정된 이름표 UI 인스턴스를 프로젝트 위젯 형식으로 가져온다.
+	UMD_NameTagWidget* NameTagWidget = Cast<UMD_NameTagWidget>(NameTagWidgetComponent->GetUserWidgetObject());
+	if (IsValid(NameTagWidget) == false)
+	{
+		return;
+	}
+
+	// PlayerState가 모든 클라이언트에 복제한 플랫폼 닉네임을 표시한다.
+	FText PlayerName = FText::FromString(CurrentPlayerState->GetPlayerName());
+	NameTagWidget->SetTextContent(PlayerName);
 }
 
 void AMD_Character::CalcCamera(
@@ -882,11 +1043,16 @@ void AMD_Character::CalcCamera(
 	FMinimalViewInfo& OutResult)
 {
 	Super::CalcCamera(DeltaTime, OutResult);
-	if (IsValid(ScrapeToolComponent))
+	if (IsValid(ScrapeToolComponent)
+		&& ScrapeToolComponent->ApplyScrapeFocusCameraView(OutResult))
 	{
-		ScrapeToolComponent->ApplyScrapeFocusCameraView(OutResult);
+		// First Person 전용 FOV를 따로 쓰지 않는 동안에는 Focus FOV와 맞춰야
+		// 팔·도구가 Focus 시작 순간 갑자기 확대되거나 축소되지 않는다.
+		if (!IsValid(Camera) || !Camera->bEnableFirstPersonFieldOfView)
+		{
+			OutResult.FirstPersonFOV = OutResult.FOV;
+		}
 	}
-
 }
 
 void AMD_Character::OnRep_Controller()
@@ -963,12 +1129,8 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
 	if (IsValid(MDMovement) == true && MDMovement->IsClimbing() == true)
 	{
-		// 사용중인 사다리가 유효하고, 종료 지점으로 이동중이 아닌 경우 입력값 적용
-		AMD_Ladder* CurrentLadder = MDMovement->GetCurrentLadder();
-		if (IsValid(CurrentLadder) == true && MDMovement->IsTopDismounting() == false)
-		{
-			AddMovementInput(CurrentLadder->GetClimbUpVector(), MoveInput.X);
-		}
+		// 전후 및 좌우 입력 축만 전달하고 사다리 이동 방향 결정은 이동 컴포넌트에 위임
+		MDMovement->ApplyLadderMovementInput(MoveInput.X, MoveInput.Y);
 		return;
 	}
 
@@ -992,8 +1154,14 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 		return;
 	}
 
-	AddControllerYawInput(LookInput.X);
-	AddControllerPitchInput(LookInput.Y);
+	// 멀미 완화 응답 커브를 먹인다. 스무딩이 켜져 있으면 컴포넌트가 누적분을 직접 흘려보내므로
+	// 여기서는 빈 값이 돌아오고, 꺼져 있으면 지연 없이 그대로 돌아온다.
+	const FVector2D ShapedLookInput = IsValid(ComfortComponent)
+		? ComfortComponent->ShapeLookInput(LookInput)
+		: LookInput;
+
+	AddControllerYawInput(ShapedLookInput.X);
+	AddControllerPitchInput(ShapedLookInput.Y);
 }
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
@@ -1179,50 +1347,6 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value)
 {
 	StopJumping();
-}
-
-void AMD_Character::HandleCollisionBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-	// 사다리 영역 진입 확인
-	AMD_Ladder* Ladder = Cast<AMD_Ladder>(OtherActor);
-	if (IsValid(Ladder) == false || OtherComponent != Ladder->GetClimbTrigger())
-	{
-		return;
-	}
-
-	// 사다리 타기 시작
-	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
-	if (IsValid(MDMovement) == true)
-	{
-		MDMovement->StartClimbing(Ladder);
-	}
-}
-
-void AMD_Character::HandleCollisionEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex)
-{
-	// 사다리 영역 진입 확인
-	AMD_Ladder* Ladder = Cast<AMD_Ladder>(OtherActor);
-	if (IsValid(Ladder) == false || OtherComponent != Ladder->GetClimbTrigger())
-	{
-		return;
-	}
-
-	// 사다리 타기 종료 지점으로 이동중이 아닐 때, 낙하 모드로 복귀
-	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
-	if (IsValid(MDMovement) == true && MDMovement->GetCurrentLadder() == Ladder)
-	{
-		// 하단에 도달한 경우 오버랩 종료보다 바닥 착지 판정을 우선 적용
-		float SpeedAtLadder = MDMovement->GetLadderClimbSpeed();
-		if (MDMovement->TryLeaveLadderAtBottom(SpeedAtLadder) == true)
-		{
-			return;
-		}
-
-		if (MDMovement->IsTopDismounting() == false)
-		{
-			MDMovement->StopClimbing(MOVE_Falling);
-		}
-	}
 }
 
 void AMD_Character::ServerJumpOffLadder_Implementation()
@@ -1721,6 +1845,23 @@ void AMD_Character::SetCutterVFXActive(bool bActive)
 	RefreshCutterVFX();
 }
 
+float AMD_Character::PlayBarnacleScrapeMontage()
+{
+	if (!IsValid(BarnacleScrapeMontage) || !IsValid(GetMesh()))
+	{
+		return 0.f;
+	}
+
+	UAnimInstance* const AnimInstance = GetMesh()->GetAnimInstance();
+	if (!IsValid(AnimInstance))
+	{
+		return 0.f;
+	}
+
+	// 같은 원샷이 아직 끝나기 전에 다시 타격하면 처음부터 다시 친다.
+	return AnimInstance->Montage_Play(BarnacleScrapeMontage);
+}
+
 void AMD_Character::OnRep_CutterVFXActive()
 {
 	RefreshCutterVFX();
@@ -1763,6 +1904,10 @@ void AMD_Character::RefreshCutterVFX()
 
 	if (IsValid(CutterVFXComponent))
 	{
+		CutterVFXComponent->SetFirstPersonPrimitiveType(
+			IsLocallyControlled()
+				? EFirstPersonPrimitiveType::FirstPerson
+				: EFirstPersonPrimitiveType::None);
 		CutterVFXComponent->Activate(true);
 		return;
 	}
@@ -1771,6 +1916,14 @@ void AMD_Character::RefreshCutterVFX()
 		CutterCutEffect, AttachMesh, CutterVFXSocketName,
 		FVector::ZeroVector, FRotator::ZeroRotator,
 		EAttachLocation::SnapToTarget, /*bAutoDestroy=*/false);
+	if (IsValid(CutterVFXComponent))
+	{
+		// 로컬 절단 이펙트도 GPU에서 이동한 1인칭 도구와 같은 변환을 받게 한다.
+		CutterVFXComponent->SetFirstPersonPrimitiveType(
+			IsLocallyControlled()
+				? EFirstPersonPrimitiveType::FirstPerson
+				: EFirstPersonPrimitiveType::None);
+	}
 }
 
 void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)

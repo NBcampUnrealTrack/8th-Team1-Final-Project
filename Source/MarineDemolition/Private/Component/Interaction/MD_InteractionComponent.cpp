@@ -3,8 +3,12 @@
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
 #include "Camera/CameraComponent.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+#include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
+#include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameStateBase.h"
@@ -12,12 +16,30 @@
 #include "GameFramework/PlayerState.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
 #include "GameplayTagAssetInterface.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "GeometryCollection/GeometryCollectionComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "World/Sample/MD_QuestItem.h"
+#include "World/Wall/MD_CuttableWall.h"
+
+namespace
+{
+	FText MakeWallInteractionPrompt(
+		const bool bContaminated,
+		const FText& ActionText)
+	{
+		const FText WallStateText = bContaminated
+			? NSLOCTEXT("MDInteraction", "ContaminatedWall", "오염된 벽")
+			: NSLOCTEXT("MDInteraction", "CleanWall", "깨끗한 벽");
+		return FText::Format(
+			NSLOCTEXT("MDInteraction", "WallPromptFormat", "{0}\n{1}"),
+			WallStateText,
+			ActionText);
+	}
+}
 
 UMD_InteractionComponent::UMD_InteractionComponent()
 {
@@ -38,6 +60,206 @@ void UMD_InteractionComponent::SetInteractionDependencies(UCameraComponent* InCa
 	Camera = InCamera;
 	HoldPoint = InHoldPoint;
 	PhysicsHandle = InPhysicsHandle;
+}
+
+FText UMD_InteractionComponent::GetCurrentTargetDisplayName() const
+{
+	return UMD_InteractionPresentationLibrary::ResolveInteractionDisplayName(CurrentTarget.Get());
+}
+
+FText UMD_InteractionComponent::ResolveCurrentInteractionPrompt() const
+{
+	APawn* OwnerPawn = GetOwnerPawn();
+	if (!IsValid(OwnerPawn)
+		|| !OwnerPawn->IsLocallyControlled()
+		|| !CanOwnerInteract())
+	{
+		return FText::GetEmpty();
+	}
+
+	const UMD_ScrapeToolComponent* ScrapeTool =
+		OwnerPawn->FindComponentByClass<UMD_ScrapeToolComponent>();
+	if (IsValid(ScrapeTool) && ScrapeTool->IsScrapeFocusActive())
+	{
+		// Focus 진입 뒤에는 가상 포인터와 작업 화면이 조작을 안내하므로 중앙 HUD를 비운다.
+		return FText::GetEmpty();
+	}
+
+	const FText AbilityPrompt = ResolveAbilityInteractionPrompt();
+	if (!AbilityPrompt.IsEmpty())
+	{
+		return AbilityPrompt;
+	}
+
+	AActor* Target = CurrentTarget.Get();
+	if (!IsValid(Target) || !Target->Implements<UMD_Interactable>())
+	{
+		return FText::GetEmpty();
+	}
+
+	const FText TargetDisplayName =
+		UMD_InteractionPresentationLibrary::ResolveInteractionDisplayName(Target);
+	const FText TargetActionPrompt =
+		IMD_Interactable::Execute_GetInteractionPrompt(Target, OwnerPawn);
+	if (TargetActionPrompt.IsEmpty())
+	{
+		return TargetDisplayName;
+	}
+
+	if (TargetDisplayName.IsEmpty())
+	{
+		return TargetActionPrompt;
+	}
+
+	return FText::Format(
+		NSLOCTEXT("MDInteraction", "TargetActionPromptFormat", "{0}\n{1}"),
+		TargetDisplayName,
+		TargetActionPrompt);
+}
+
+FText UMD_InteractionComponent::ResolveAbilityInteractionPrompt() const
+{
+	if (IsHolding())
+	{
+		return FText::GetEmpty();
+	}
+
+	const APawn* OwnerPawn = GetOwnerPawn();
+	const UMD_EquipHotbarComponent* Hotbar = IsValid(OwnerPawn)
+		? OwnerPawn->FindComponentByClass<UMD_EquipHotbarComponent>()
+		: nullptr;
+	const UMD_ToolDefinition* Tool = IsValid(Hotbar)
+		? Hotbar->GetCurrentTool()
+		: nullptr;
+	if (!IsValid(Tool) || !Tool->ToolAbilityTag.IsValid())
+	{
+		return FText::GetEmpty();
+	}
+
+	if (Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_Scrape))
+	{
+		const UMD_ScrapeToolComponent* ScrapeTool =
+			OwnerPawn->FindComponentByClass<UMD_ScrapeToolComponent>();
+		if (!IsValid(ScrapeTool))
+		{
+			return FText::GetEmpty();
+		}
+
+		const FMD_ScrapeAimQueryResult Aim = ScrapeTool->QueryCurrentScrapeAim();
+		if (Aim.Type != EMD_ScrapeAimQueryType::SurfaceHit
+			|| !IsValid(Aim.Surface)
+			|| !IsValid(Cast<AMD_CuttableWall>(Aim.Surface->GetOwner())))
+		{
+			return FText::GetEmpty();
+		}
+
+		bool bContaminated = false;
+		if (!Aim.Surface->TryGetContaminationStateAtSurfacePosition(
+				Aim.SurfacePositionCm,
+				Aim.SurfaceFace,
+				bContaminated))
+		{
+			return FText::GetEmpty();
+		}
+
+		return MakeWallInteractionPrompt(
+			bContaminated,
+			NSLOCTEXT("MDInteraction", "ScrapeWallAction", "[RMB] 오염물 제거"));
+	}
+
+	const bool bCutTool =
+		Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_WallCut);
+	const bool bScanTool =
+		Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_WallScan);
+	if (!bCutTool && !bScanTool)
+	{
+		return FText::GetEmpty();
+	}
+
+	AMD_CuttableWall* Wall = nullptr;
+	FHitResult WallHit;
+	if (!TryTraceAimedWall(Wall, WallHit)
+		|| !IsValid(Wall)
+		|| (bCutTool && !Wall->CanCut()))
+	{
+		return FText::GetEmpty();
+	}
+
+	UMD_ScrapeSurfaceComponent* Surface = Wall->GetScrapeSurfaceComponent();
+	bool bContaminated = false;
+	if (!IsValid(Surface)
+		|| !Surface->TryGetContaminationStateFromHit(
+			WallHit,
+			bContaminated))
+	{
+		return FText::GetEmpty();
+	}
+
+	return MakeWallInteractionPrompt(
+		bContaminated,
+		bCutTool
+			? NSLOCTEXT("MDInteraction", "CutWallAction", "[LMB] 파괴")
+			: NSLOCTEXT("MDInteraction", "ScanWallAction", "[LMB] 스캔"));
+}
+
+bool UMD_InteractionComponent::TryTraceAimedWall(
+	AMD_CuttableWall*& OutWall,
+	FHitResult& OutHit) const
+{
+	OutWall = nullptr;
+	OutHit = FHitResult();
+
+	const APawn* OwnerPawn = GetOwnerPawn();
+	const AController* Controller = IsValid(OwnerPawn)
+		? OwnerPawn->GetController()
+		: nullptr;
+	const UWorld* World = GetWorld();
+	if (!IsValid(Controller) || !World)
+	{
+		return false;
+	}
+
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	FCollisionQueryParams QueryParams(
+		SCENE_QUERY_STAT(MDAbilityInteractionPrompt),
+		false,
+		OwnerPawn);
+	if (!World->LineTraceSingleByChannel(
+			OutHit,
+			ViewLocation,
+			ViewLocation + ViewRotation.Vector() * AbilityPromptTraceDistance,
+			ECC_Visibility,
+			QueryParams))
+	{
+		return false;
+	}
+
+	OutWall = Cast<AMD_CuttableWall>(OutHit.GetActor());
+	if (!IsValid(OutWall) && IsValid(OutHit.GetComponent()))
+	{
+		OutWall = Cast<AMD_CuttableWall>(OutHit.GetComponent()->GetOwner());
+	}
+	return IsValid(OutWall);
+}
+
+void UMD_InteractionComponent::UpdateInteractionPrompt()
+{
+	SetCurrentInteractionPrompt(ResolveCurrentInteractionPrompt());
+}
+
+void UMD_InteractionComponent::SetCurrentInteractionPrompt(
+	const FText& NewPrompt)
+{
+	if (CurrentInteractionPrompt.EqualTo(NewPrompt))
+	{
+		return;
+	}
+
+	CurrentInteractionPrompt = NewPrompt;
+	OnInteractionPromptChanged.Broadcast(CurrentInteractionPrompt);
 }
 
 void UMD_InteractionComponent::BeginPlay()
@@ -61,6 +283,7 @@ void UMD_InteractionComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	APawn* OwnerPawn = GetOwnerPawn();
 	if (!IsValid(OwnerPawn))
 	{
+		SetCurrentInteractionPrompt(FText::GetEmpty());
 		SetComponentTickEnabled(false);
 		return;
 	}
@@ -68,6 +291,7 @@ void UMD_InteractionComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	if (!CanOwnerInteract())
 	{
 		SetCurrentTarget(nullptr);
+		SetCurrentInteractionPrompt(FText::GetEmpty());
 
 		if (OwnerPawn->HasAuthority() && (HeldActor || HasAuthorityPhysicsGrip()))
 		{
@@ -83,6 +307,7 @@ void UMD_InteractionComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	if (OwnerPawn->IsLocallyControlled())
 	{
 		UpdateInteractionFocus();
+		UpdateInteractionPrompt();
 	}
 
 	if (OwnerPawn->HasAuthority() && (HeldActor || HasAuthorityPhysicsGrip()))
@@ -113,6 +338,12 @@ void UMD_InteractionComponent::Interact()
 	// New interactables are server-authoritative by default. UI-only targets must explicitly opt out.
 	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
 	{
+		if (!IMD_Interactable::CanInteractWith(Target, OwnerPawn))
+		{
+			SetCurrentTarget(nullptr);
+			return;
+		}
+
 		const bool bRequiresServerInteraction =
 			IMD_Interactable::Execute_RequiresServerInteraction(Target);
 
@@ -129,6 +360,7 @@ void UMD_InteractionComponent::Interact()
 void UMD_InteractionComponent::CancelInteraction()
 {
 	SetCurrentTarget(nullptr);
+	SetCurrentInteractionPrompt(FText::GetEmpty());
 
 	const APawn* OwnerPawn = GetOwnerPawn();
 	if (IsValid(OwnerPawn) && OwnerPawn->HasAuthority())
@@ -161,6 +393,16 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 
 	if (HeldActor || HasAuthorityPhysicsGrip())
 	{
+		if (IsValid(RequestedActor)
+			&& RequestedActor->Implements<UMD_Interactable>()
+			&& IMD_Interactable::Execute_SupportsHeldActorInteraction(RequestedActor)
+			&& ValidateInteractionTarget(RequestedActor)
+			&& IMD_Interactable::CanInteractWith(RequestedActor, OwnerPawn))
+		{
+			IMD_Interactable::Execute_Interact(RequestedActor, OwnerPawn);
+			return;
+		}
+
 		ReleaseHeldActor();
 		return;
 	}
@@ -186,6 +428,10 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 	}
 
 	if (!ValidateInteractionTarget(RequestedActor))
+	{
+		return;
+	}
+	if (!IMD_Interactable::CanInteractWith(RequestedActor, OwnerPawn))
 	{
 		return;
 	}
@@ -579,17 +825,22 @@ FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& Ho
 		static_cast<float>(Held->Bounds.SphereRadius) * HoldProbeRadiusScale);
 
 	// 폰과 다른 물리 프롭은 제외한다. 목표점을 막아야 할 건 월드 지오메트리뿐이다.
-	FCollisionObjectQueryParams ObjectParams;
-	ObjectParams.AddObjectTypesToQuery(ECC_WorldStatic);
-	ObjectParams.AddObjectTypesToQuery(ECC_WorldDynamic);
+	// 채널 스윕으로 양쪽 충돌 응답을 함께 확인해야 Overlap 감지 볼륨을 벽으로 오인하지 않는다.
+	FCollisionResponseParams ProbeResponses(ECR_Ignore);
+	ProbeResponses.CollisionResponse.SetResponse(
+		ECC_WorldStatic,
+		Held->GetCollisionResponseToChannel(ECC_WorldStatic));
+	ProbeResponses.CollisionResponse.SetResponse(
+		ECC_WorldDynamic,
+		Held->GetCollisionResponseToChannel(ECC_WorldDynamic));
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDHoldProbe), false, GetOwner());
 	QueryParams.AddIgnoredActor(Held->GetOwner());
 
 	FHitResult Hit;
-	const bool bBlocked = World->SweepSingleByObjectType(
-		Hit, Origin, Desired, FQuat::Identity, ObjectParams,
-		FCollisionShape::MakeSphere(ProbeRadius), QueryParams);
+	const bool bBlocked = World->SweepSingleByChannel(
+		Hit, Origin, Desired, FQuat::Identity, Held->GetCollisionObjectType(),
+		FCollisionShape::MakeSphere(ProbeRadius), QueryParams, ProbeResponses);
 
 	const FVector ToDesired = Desired - Origin;
 	const double DesiredDistance = ToDesired.Size();
@@ -717,19 +968,12 @@ void UMD_InteractionComponent::UpdateInteractionFocus()
 		return;
 	}
 
-	// 들고 있는 물체 너머의 대상이 반짝이지 않게 하고, 놓기는 대상이 없어도 서버 RPC로 처리한다.
-	if (HeldActor)
-	{
-		SetCurrentTarget(nullptr);
-		return;
-	}
-
 	SetCurrentTarget(TraceInteractionTarget());
 }
 
 AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 {
-	const APawn* OwnerPawn = GetOwnerPawn();
+	APawn* OwnerPawn = GetOwnerPawn();
 	AController* Controller = IsValid(OwnerPawn) ? OwnerPawn->GetController() : nullptr;
 	if (!IsValid(Controller) || !GetWorld()) return nullptr;
 
@@ -743,6 +987,10 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 	FHitResult Hit;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(InteractTrace), /*bTraceComplex*/ false);
 	QueryParams.AddIgnoredActor(OwnerPawn);
+	if (IsValid(HeldActor))
+	{
+		QueryParams.AddIgnoredActor(HeldActor);
+	}
 
 	if (!GetWorld()->LineTraceSingleByChannel(
 		Hit,
@@ -764,7 +1012,13 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 	{
 		return nullptr;
 	}
+	if (IsHolding()
+		&& !IMD_Interactable::Execute_SupportsHeldActorInteraction(HitActor))
+	{
+		return nullptr;
+	}
 	if (IsHeldByOtherPawn(HitActor)) return nullptr;
+	if (!IMD_Interactable::CanInteractWith(HitActor, OwnerPawn)) return nullptr;
 
 	return HitActor;
 }
@@ -864,9 +1118,13 @@ bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor)
 
 void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)
 {
-	if (CurrentTarget.Get() == NewTarget) return;
+	AActor* PreviousTarget = GetCurrentTarget();
+	if (!CurrentTarget.IsStale() && PreviousTarget == NewTarget)
+	{
+		return;
+	}
 
-	if (AActor* PreviousTarget = CurrentTarget.Get())
+	if (PreviousTarget)
 	{
 		if (PreviousTarget->Implements<UMD_Interactable>())
 		{
@@ -880,6 +1138,8 @@ void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)
 	{
 		IMD_Interactable::Execute_SetInteractionHighlighted(NewTarget, true);
 	}
+
+	OnInteractionTargetChanged.Broadcast(GetCurrentTarget());
 }
 
 APawn* UMD_InteractionComponent::GetOwnerPawn() const

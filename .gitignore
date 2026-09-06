@@ -71,6 +71,7 @@ Content/Python/
 .gemini/
 .codex/
 .kimi-code/
+antigravity.config.json
 
 # OS files
 .DS_Store
@@ -205,11 +206,6 @@ fabric.properties
 # Precompiled Assets
 SourceArt/**/*.png
 SourceArt/**/*.tga
-
-# Local-only automation/test sources. They remain available in this workspace
-# but are intentionally excluded from version control.
-/Source/MarineDemolition/Private/Tests/
-/Source/MarineDemolition/Public/Tests/
 
 # Binary Files
 Binaries/*
@@ -847,3 +843,7 @@ Content/Assets/Stylized_Cemetery/**
 !Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Dirt_Islands_BaseColor.uasset
 !Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Dirt_Islands_Normal.uasset
 !Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Dirt_Islands_ORM.uasset
+
+# Local-only automation/test sources; retained for local validation.
+/Source/MarineDemolition/Private/Tests/
+/Source/MarineDemolition/Public/Tests/
