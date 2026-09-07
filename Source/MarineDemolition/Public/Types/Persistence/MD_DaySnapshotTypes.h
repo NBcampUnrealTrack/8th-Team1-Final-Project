@@ -1,9 +1,11 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Templates/SubclassOf.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
+#include "Types/Persistence/MD_ContaminationSavePayload.h"
+#include "Types/Scrape/MD_ContaminationPendingDrop.h"
 #include "MD_DaySnapshotTypes.generated.h"
 
 class AMD_SupportBrace;
@@ -112,7 +114,7 @@ struct MARINEDEMOLITION_API FMD_TrashBinRecord
 
 // 표면별 오염 셀 상태. 생성 기준값과 달라진 셀만 저장한다
 USTRUCT()
-struct FMD_WallContaminationRecord
+struct MARINEDEMOLITION_API FMD_WallContaminationRecord
 {
       GENERATED_BODY()
 
@@ -177,6 +179,22 @@ struct FMD_WallContaminationRecord
        */
       UPROPERTY()
       TArray<float> CoveredFractions;
+
+      /** New records share immutable compressed chunks; old array property names remain readable. */
+      UPROPERTY()
+      FMD_ContaminationSavePayload CellPayload;
+
+      bool CompactCells();
+      bool ExpandCells(FMD_WallContaminationRecord& Out) const;
+      bool ValidateCellIndices(int32 MaximumCellCount) const;
+      int32 GetCellCount() const { return CellPayload.Num() ? CellPayload.Num() : CellIndices.Num(); }
+      void PostSerialize(const FArchive& Ar);
+};
+
+template<> struct TStructOpsTypeTraits<FMD_WallContaminationRecord>
+    : TStructOpsTypeTraitsBase2<FMD_WallContaminationRecord>
+{
+      enum { WithPostSerialize = true, WithCopy = true };
 };
 
 /**
@@ -267,6 +285,10 @@ struct FMD_DaySnapshot
       // 이름은 하위 호환을 위해 유지하지만 일반 표면 컴포넌트도 포함한다
       UPROPERTY()
       TArray<FMD_WallContaminationRecord> WallContaminations;
+
+      /** Detached debris mass/recovery state survives source destruction and day travel. */
+      UPROPERTY()
+      TArray<FMD_ContaminationPendingDrop> PendingContaminationDrops;
 
       // 마감 완료된 섹터 마감 마커 (레벨 배치 액터라 이름으로 식별)
       UPROPERTY()

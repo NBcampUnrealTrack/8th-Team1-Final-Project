@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 
@@ -115,6 +115,13 @@ bool FMD_MerchantData::IsStructurallyValid() const
 
 bool FMD_WorldData::IsStructurallyValid() const
 {
+    TSet<FGuid> PendingBatchIds;
+    for (const FMD_ContaminationPendingDrop& Drop : PendingContaminationDrops)
+    {
+        if (!Drop.IsStructurallyValid() || PendingBatchIds.Contains(Drop.BatchId)) return false;
+        PendingBatchIds.Add(Drop.BatchId);
+    }
+
 	// 같은 stable ID가 두 record를 가리키거나 lot 합이 요약과 다르면 일부만 복원하지 않는다.
 	TSet<FGuid> SavedTrashBinIds;
 	for (const FMD_TrashBinRecord& TrashBinRecord : TrashBins)
@@ -130,54 +137,24 @@ bool FMD_WorldData::IsStructurallyValid() const
 	// 오염 셀의 병렬 배열 길이가 다르면 잘못된 인덱스 복원을 수행하지 않기 위한 검사
 	for (const FMD_WallContaminationRecord& ContaminationRecord : WallContaminations)
 	{
-		const int32 CellCount = ContaminationRecord.CellIndices.Num();
-		const bool bTransferredAmountsValid =
-			ContaminationRecord.TransferredAmounts.IsEmpty()
-			|| ContaminationRecord.TransferredAmounts.Num() == CellCount;
-		const bool bTransferredPatternDensitiesValid =
-			ContaminationRecord.TransferredPatternDensities.IsEmpty()
-			|| ContaminationRecord.TransferredPatternDensities.Num() == CellCount;
-		const bool bCoveredFractionsValid = ContaminationRecord.CoveredFractions.IsEmpty()
-			|| ContaminationRecord.CoveredFractions.Num() == CellCount;
-		if (ContaminationRecord.WallName.IsNone() == true
-			|| !FMD_ScrapeSurfaceLayout::IsLayoutMetadataValid(
-				ContaminationRecord.LayoutVersion, ContaminationRecord.LayoutId,
-				ContaminationRecord.GridDimensions)
+        int32 MaximumCellCount = FMD_ScrapeSurfaceLayout::LegacyMaximumCombinedCellCount;
+        if (ContaminationRecord.WallName.IsNone()
+            || !FMD_ScrapeSurfaceLayout::IsLayoutMetadataValid(
+                ContaminationRecord.LayoutVersion, ContaminationRecord.LayoutId,
+                ContaminationRecord.GridDimensions)
             || (ContaminationRecord.LayoutVersion == 1
-                && !FMD_ScrapeSurfaceLayout::IsCarrierScaleValid(ContaminationRecord.CarrierScale))
-			|| CellCount > FMD_ScrapeSurfaceLayout::MaximumCombinedCellCount
-			|| !bCoveredFractionsValid
-			|| CellCount != ContaminationRecord.InitialAmounts.Num()
-			|| CellCount != ContaminationRecord.RemainingAmounts.Num()
-			|| bTransferredAmountsValid == false
-			|| bTransferredPatternDensitiesValid == false)
-		{
-			return false;
-		}
-		TSet<int32> UniqueCellIndices;
-		int32 MaximumCellCount = FMD_ScrapeSurfaceLayout::LegacyMaximumCombinedCellCount;
-		if (ContaminationRecord.GridDimensions != FIntPoint::ZeroValue)
-		{
-			int32 CellsPerFace = 0;
-			if (!FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
-				ContaminationRecord.GridDimensions, CellsPerFace, MaximumCellCount))
-			{
-				return false;
-			}
-			if (ContaminationRecord.LayoutVersion == 1)
-			{
-				MaximumCellCount = CellsPerFace;
-			}
-		}
-		for (const int32 CellIndex : ContaminationRecord.CellIndices)
-		{
-			if (CellIndex < 0 || CellIndex >= MaximumCellCount
-				|| UniqueCellIndices.Contains(CellIndex))
-			{
-				return false;
-			}
-			UniqueCellIndices.Add(CellIndex);
-		}
+                && !FMD_ScrapeSurfaceLayout::IsCarrierScaleValid(ContaminationRecord.CarrierScale)))
+        {
+            return false;
+        }
+        if (ContaminationRecord.GridDimensions != FIntPoint::ZeroValue)
+        {
+            int32 CellsPerFace = 0;
+            if (!FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
+                ContaminationRecord.GridDimensions, CellsPerFace, MaximumCellCount)) return false;
+            if (ContaminationRecord.LayoutVersion == 1) MaximumCellCount = CellsPerFace;
+        }
+        if (!ContaminationRecord.ValidateCellIndices(MaximumCellCount)) return false;
 	}
 
 	// 배치기 식별자가 없는 따개비 기록을 다른 액터에 적용하지 않기 위한 검사
@@ -190,6 +167,23 @@ bool FMD_WorldData::IsStructurallyValid() const
 	}
 
 	return true;
+}
+
+bool FMD_GameData::Serialize(FArchive& Ar)
+{
+    if ((!Ar.IsLoading() && !Ar.IsSaving()) || Ar.WantBinaryPropertySerialization())
+    {
+        StaticStruct()->SerializeBin(Ar, reinterpret_cast<uint8*>(this));
+        return true;
+    }
+    const int64 Start = Ar.Tell();
+    StaticStruct()->SerializeTaggedProperties(Ar, reinterpret_cast<uint8*>(this), StaticStruct(), nullptr);
+    if (Ar.IsLoading() && !Ar.IsError() && Ar.GetArchiveName() == TEXT("MDLegacySlotIndex"))
+    {
+        LegacyDataOffset = Start;
+        LegacyDataBytes = Ar.Tell() - Start;
+    }
+    return true;
 }
 
 bool FMD_GameData::IsEmpty() const
@@ -281,7 +275,7 @@ bool FMD_GameData::MigrateToCurrentVersion()
 bool FMD_GameData::IsValidForLoad() const
 {
 	// 슬롯 식별자와 프로젝트 맵 경로가 없으면 안전한 적용 대상을 결정할 수 없으므로 거부하는 검사
-	if (SchemaVersion != CurrentSchemaVersion || IsEmpty() == true || MapPackagePath.StartsWith(TEXT("/Game/")) == false)
+	if (bIsSlotSummary || SchemaVersion != CurrentSchemaVersion || IsEmpty() == true || MapPackagePath.StartsWith(TEXT("/Game/")) == false)
 	{
 		return false;
 	}
@@ -303,8 +297,9 @@ bool FMD_GameData::IsValidForLoad() const
 	// 월드 필드는 초기 슬롯 호환을 위해 선택 사항이지만 존재하면 정확한 타입과 구조를 요구하는 검사
 	if (DataFields.Contains(FMD_WorldData::DataFieldKey) == true)
 	{
-		FMD_WorldData WorldData;
-		if (GetDataField(FMD_WorldData::DataFieldKey, WorldData) == false || WorldData.IsStructurallyValid() == false)
+        const FInstancedStruct& WorldField = DataFields.FindChecked(FMD_WorldData::DataFieldKey);
+        const FMD_WorldData* WorldData = WorldField.GetPtr<FMD_WorldData>();
+        if (!WorldData || !WorldData->IsStructurallyValid())
 		{
 			return false;
 		}

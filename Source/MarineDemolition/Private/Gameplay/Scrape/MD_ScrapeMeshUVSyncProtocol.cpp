@@ -1,6 +1,30 @@
 #include "Gameplay/Scrape/MD_ScrapeMeshUVSyncProtocol.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Misc/Compression.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
+
+
+namespace
+{
+    bool ValidateUniqueCellIndices(const TArray<FMD_ReplicatedScrapeCellState>& States)
+    {
+        bool bSorted = true;
+        for (int32 Index = 1; Index < States.Num(); ++Index)
+        {
+            if (States[Index].EncodedCellIndex == States[Index - 1].EncodedCellIndex) { return false; }
+            bSorted &= States[Index].EncodedCellIndex > States[Index - 1].EncodedCellIndex;
+        }
+        if (bSorted) { return true; }
+        // Legacy unordered payloads remain accepted without a node-heavy TSet.
+        TArray<uint32> Indices;
+        Indices.Reserve(States.Num());
+        for (const auto& State : States) { Indices.Add(State.EncodedCellIndex); }
+        Indices.Sort();
+        for (int32 Index = 1; Index < Indices.Num(); ++Index)
+        { if (Indices[Index] == Indices[Index - 1]) { return false; } }
+        return true;
+    }
+}
 
 bool FMD_ScrapeMeshUVSnapshotDescriptor::operator==(const FMD_ScrapeMeshUVSnapshotDescriptor& Other) const
 {
@@ -10,6 +34,13 @@ bool FMD_ScrapeMeshUVSnapshotDescriptor::operator==(const FMD_ScrapeMeshUVSnapsh
         && ContentHash == Other.ContentHash && PayloadBytes == Other.PayloadBytes
         && PayloadHash == Other.PayloadHash && bCompressed == Other.bCompressed
         && bFullSnapshot == Other.bFullSnapshot;
+}
+
+uint64 FMD_ScrapeMeshUVSyncProtocol::GetSnapshotMemoryReservation(const int32 ActiveCells)
+{
+    if (ActiveCells < 0 || ActiveCells > MaximumSnapshotStates) { return MAX_uint64; }
+    return static_cast<uint64>(ActiveCells)
+        * (sizeof(FMD_ReplicatedScrapeCellState) + 2 * BytesPerCell + sizeof(uint32)) + 128 * 1024;
 }
 
 bool FMD_ScrapeMeshUVSyncProtocol::IsDescriptorValid(const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor)
@@ -42,7 +73,8 @@ bool FMD_ScrapeMeshUVSyncProtocol::EncodePayload(
     const TConstArrayView<FMD_ReplicatedScrapeCellState> States,
     FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, TArray<uint8>& OutPayload)
 {
-    OutPayload.Reset();
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_EncodeSnapshot);
+    OutPayload.Empty();
     if (States.Num() > MaximumSnapshotStates) { return false; }
     Descriptor.TotalStates = States.Num(); Descriptor.bCompressed = false;
     EncodeStates(States, OutPayload);
@@ -61,15 +93,25 @@ bool FMD_ScrapeMeshUVSyncProtocol::EncodePayload(
                 for (int32 Cell = 0; Cell < States.Num(); ++Cell)
                 { Planes[Byte * States.Num() + Cell] = OutPayload[Cell * BytesPerCell + Byte]; }
             }
+            const int32 RawBytes = OutPayload.Num();
+            OutPayload.Empty(); // Planes now own the raw bytes; do not overlap a third full buffer.
             TArray<uint8> Compressed;
             Compressed.SetNumUninitialized(static_cast<int32>(Bound));
             int64 CompressedBytes = Bound;
             if (FCompression::CompressMemory(NAME_Zlib, Compressed.GetData(), CompressedBytes,
                 Planes.GetData(), static_cast<int64>(Planes.Num()))
-                && CompressedBytes > 0 && CompressedBytes < OutPayload.Num())
+                && CompressedBytes > 0 && CompressedBytes < RawBytes)
             {
-                Compressed.SetNum(static_cast<int32>(CompressedBytes), EAllowShrinking::Yes);
-                OutPayload = MoveTemp(Compressed); Descriptor.bCompressed = true;
+                // Avoid a large realloc retaining old/new buffers alongside planes.
+                Planes.Empty();
+                OutPayload.Reserve(static_cast<int32>(CompressedBytes));
+                OutPayload.Append(Compressed.GetData(), static_cast<int32>(CompressedBytes));
+                Descriptor.bCompressed = true;
+            }
+            else
+            {
+                Compressed.Empty(); Planes.Empty();
+                EncodeStates(States, OutPayload);
             }
         }
     }
@@ -81,28 +123,38 @@ bool FMD_ScrapeMeshUVSyncProtocol::DecodePayload(
     const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, const TConstArrayView<uint8> Payload,
     TArray<FMD_ReplicatedScrapeCellState>& OutStates)
 {
-    OutStates.Reset();
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_DecodeSnapshot);
+    OutStates.Empty();
     if (!IsDescriptorValid(Descriptor) || Payload.Num() != Descriptor.PayloadBytes
         || HashBytes(Payload) != Descriptor.PayloadHash) { return false; }
-    TArray<uint8> Decoded;
-    TArray<uint8> Interleaved;
-    TConstArrayView<uint8> Raw = Payload;
-    if (Descriptor.bCompressed)
+    if (!Descriptor.bCompressed)
+    { return HashBytes(Payload) == Descriptor.ContentHash && DecodeStates(Payload, Descriptor.Grid, OutStates); }
+    TArray<uint8> Planes;
+    Planes.SetNumUninitialized(Descriptor.TotalStates * BytesPerCell);
+    if (!FCompression::UncompressMemory(NAME_Zlib, Planes.GetData(), static_cast<int64>(Planes.Num()),
+        Payload.GetData(), static_cast<int64>(Payload.Num()))) { return false; }
+    OutStates.Reserve(Descriptor.TotalStates);
+    uint32 ContentHash = 2166136261u;
+    const uint32 PerFace = static_cast<uint32>(static_cast<int64>(Descriptor.Grid.X) * Descriptor.Grid.Y);
+    for (int32 Cell = 0; Cell < Descriptor.TotalStates; ++Cell)
     {
-        // The descriptor has bounded the exact output size before any decompression allocation.
-        Decoded.SetNumZeroed(Descriptor.TotalStates * BytesPerCell);
-        if (!FCompression::UncompressMemory(NAME_Zlib, Decoded.GetData(), static_cast<int64>(Decoded.Num()),
-            Payload.GetData(), static_cast<int64>(Payload.Num()))) { return false; }
-        Interleaved.SetNumUninitialized(Decoded.Num());
+        uint8 Bytes[BytesPerCell];
         for (int32 Byte = 0; Byte < BytesPerCell; ++Byte)
         {
-            for (int32 Cell = 0; Cell < Descriptor.TotalStates; ++Cell)
-            { Interleaved[Cell * BytesPerCell + Byte] = Decoded[Byte * Descriptor.TotalStates + Cell]; }
+            Bytes[Byte] = Planes[Byte * Descriptor.TotalStates + Cell];
+            ContentHash = (ContentHash ^ Bytes[Byte]) * 16777619u;
         }
-        Decoded.Empty();
-        Raw = Interleaved;
+        uint32 Index = 0;
+        for (int32 Byte = 0; Byte < 4; ++Byte)
+        { Index |= static_cast<uint32>(Bytes[Byte]) << (8 * Byte); }
+        if (Index >= PerFace) { OutStates.Empty(); return false; }
+        OutStates.Emplace(Index, Bytes[4], Bytes[5], Bytes[6], Bytes[7], Bytes[8]);
     }
-    return HashBytes(Raw) == Descriptor.ContentHash && DecodeStates(Raw, Descriptor.Grid, OutStates);
+    // No interleaved full-size copy. Release planes before unordered duplicate scratch.
+    Planes.Empty();
+    if (ContentHash != Descriptor.ContentHash || !ValidateUniqueCellIndices(OutStates))
+    { OutStates.Empty(); return false; }
+    return true;
 }
 
 void FMD_ScrapeMeshUVSendBudget::Refill(const double NowSeconds, const int32 ConnectionBytesPerSecond)
@@ -159,20 +211,20 @@ bool FMD_ScrapeMeshUVSyncProtocol::DecodeStates(
     int32 PerFace = 0, Total = 0;
     if (Bytes.Num() % BytesPerCell != 0
         || !FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(Grid, PerFace, Total)
-        || Bytes.Num() / BytesPerCell > PerFace) { return false; }
-    TSet<uint32> Unique;
+        || Bytes.Num() / BytesPerCell > PerFace
+        || Bytes.Num() / BytesPerCell > MaximumSnapshotStates) { return false; }
     OutStates.Reserve(Bytes.Num() / BytesPerCell);
     for (int32 Offset = 0; Offset < Bytes.Num(); Offset += BytesPerCell)
     {
         uint32 Index = 0;
         for (int32 Byte = 0; Byte < 4; ++Byte)
         { Index |= static_cast<uint32>(Bytes[Offset + Byte]) << (Byte * 8); }
-        if (Index >= static_cast<uint32>(PerFace) || Unique.Contains(Index))
+        if (Index >= static_cast<uint32>(PerFace))
         { OutStates.Reset(); return false; }
-        Unique.Add(Index);
         OutStates.Emplace(Index, Bytes[Offset + 4], Bytes[Offset + 5],
             Bytes[Offset + 6], Bytes[Offset + 7], Bytes[Offset + 8]);
     }
+    if (!ValidateUniqueCellIndices(OutStates)) { OutStates.Empty(); return false; }
     return true;
 }
 

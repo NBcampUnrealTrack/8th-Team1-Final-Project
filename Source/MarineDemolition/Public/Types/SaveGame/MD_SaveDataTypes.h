@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -176,6 +176,9 @@ public:
 	UPROPERTY()
 	TArray<FMD_WallContaminationRecord> WallContaminations;
 
+    UPROPERTY()
+    TArray<FMD_ContaminationPendingDrop> PendingContaminationDrops;
+
 	// 새 게임별 배치 시드와 제거 순번을 함께 복원하기 위한 배치기 상태 목록
 	UPROPERTY()
 	TArray<FMD_BarnacleRemovalRecord> BarnacleRemovals;
@@ -199,7 +202,7 @@ struct MARINEDEMOLITION_API FMD_GameData
 
 public:
 	// 이후 필드 변경을 안전하게 마이그레이션하기 위한 현재 스키마 버전
-	static constexpr int32 CurrentSchemaVersion = 8;
+	static constexpr int32 CurrentSchemaVersion = 9;
 
 	// 저장된 필드 배치를 판별하기 위한 슬롯 데이터 버전
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
@@ -217,6 +220,26 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	FDateTime SaveTime;
 
+    /** A list row is resolved from its immutable file/legacy range before any world application. */
+    UPROPERTY()
+    bool bIsSlotSummary = false;
+
+    UPROPERTY()
+    FString SlotPayloadId;
+
+    UPROPERTY()
+    int64 LegacyDataOffset = 0;
+
+    UPROPERTY()
+    int64 LegacyDataBytes = 0;
+
+    UPROPERTY()
+    int64 LegacyFileBytes = 0;
+
+    UPROPERTY()
+    FDateTime LegacyFileTime;
+
+
 	// 기능별 구조체를 태그로 식별하여 확장하기 위한 데이터 필드 컨테이너
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TMap<FGameplayTag, FInstancedStruct> DataFields;
@@ -226,6 +249,9 @@ public:
 	TMap<FString, FMD_PlayerData> PlayerFields;
 
 public:
+    /** Keep tagged properties while exposing bounded legacy record ranges to the summary reader. */
+    bool Serialize(FArchive& Ar);
+
 	// 새 게임 입력과 저장 슬롯을 구분하기 위한 최소 식별 정보 검사 함수
 	bool IsEmpty() const;
 
@@ -273,6 +299,11 @@ public:
 
 		return true;
 	}
+};
+
+template<> struct TStructOpsTypeTraits<FMD_GameData> : TStructOpsTypeTraitsBase2<FMD_GameData>
+{
+    enum { WithSerializer = true, WithCopy = true };
 };
 
 /**

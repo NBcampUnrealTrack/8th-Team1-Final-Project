@@ -1,5 +1,6 @@
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
+#include "Gameplay/Scrape/MD_ContaminationDebrisSubsystem.h"
 
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "EngineUtils.h"
@@ -371,7 +372,12 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
             ContaminationRecord.CoveredFractions);
         if (ContaminationRecord.CellIndices.Num() > 0)
         {
-            Snapshot.WallContaminations.Add(ContaminationRecord);
+            if (!ContaminationRecord.CompactCells())
+            {
+                Snapshot = FMD_DaySnapshot();
+                return;
+            }
+            Snapshot.WallContaminations.Add(MoveTemp(ContaminationRecord));
         }
     }
 
@@ -443,6 +449,10 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         Snapshot.BarnacleRemovals.Add(RemovalRecord);
     }
 
+    if (const UMD_ContaminationDebrisSubsystem* Debris = World->GetSubsystem<UMD_ContaminationDebrisSubsystem>())
+    {
+        Debris->CapturePendingDrops(Snapshot.PendingContaminationDrops);
+    }
     Snapshot.bValid = true;
 }
 
@@ -455,7 +465,7 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
     }
 
     // 파일 저장 수집이 일차 경계용 메모리 스냅샷을 변경하지 않도록 하는 임시 보존
-    FMD_DaySnapshot PreservedSnapshot = Snapshot;
+    FMD_DaySnapshot PreservedSnapshot = MoveTemp(Snapshot);
     Snapshot = FMD_DaySnapshot();
     CaptureSnapshot(World);
 
@@ -467,15 +477,16 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
 
     // 파일 직렬화 구조에 현재 월드 변경 상태를 복사하는 처리
     OutWorldData = FMD_WorldData();
-    OutWorldData.SurvivingWallNames = Snapshot.SurvivingWallNames;
-    OutWorldData.SupportedWallNames = Snapshot.SupportedWallNames;
-    OutWorldData.Braces = Snapshot.Braces;
-    OutWorldData.Samples = Snapshot.Samples;
-    OutWorldData.Pieces = Snapshot.Pieces;
-	OutWorldData.TrashBins = Snapshot.TrashBins;
-    OutWorldData.WallContaminations = Snapshot.WallContaminations;
-    OutWorldData.BarnacleRemovals = Snapshot.BarnacleRemovals;
-    OutWorldData.ClosedMarkerNames = Snapshot.ClosedMarkerNames;
+    OutWorldData.SurvivingWallNames = MoveTemp(Snapshot.SurvivingWallNames);
+    OutWorldData.SupportedWallNames = MoveTemp(Snapshot.SupportedWallNames);
+    OutWorldData.Braces = MoveTemp(Snapshot.Braces);
+    OutWorldData.Samples = MoveTemp(Snapshot.Samples);
+    OutWorldData.Pieces = MoveTemp(Snapshot.Pieces);
+	OutWorldData.TrashBins = MoveTemp(Snapshot.TrashBins);
+    OutWorldData.WallContaminations = MoveTemp(Snapshot.WallContaminations);
+    OutWorldData.PendingContaminationDrops = MoveTemp(Snapshot.PendingContaminationDrops);
+    OutWorldData.BarnacleRemovals = MoveTemp(Snapshot.BarnacleRemovals);
+    OutWorldData.ClosedMarkerNames = MoveTemp(Snapshot.ClosedMarkerNames);
 
     // 일차 경계 복원 흐름이 기존 상태를 계속 사용하도록 하는 메모리 스냅샷 복구
     Snapshot = MoveTemp(PreservedSnapshot);
@@ -582,13 +593,16 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
                     *Record.WallName.ToString(), *Record.SurfaceComponentName.ToString());
                 continue;
             }
+            // Restore scratch belongs to this wall only, never all walls or all save slots.
+            FMD_WallContaminationRecord Expanded;
+            if (!Record.ExpandCells(Expanded)) return false;
             Surface->RestoreContaminationCells(
-                Record.CellIndices,
-                Record.InitialAmounts,
-                Record.RemainingAmounts,
-                Record.TransferredAmounts,
-                Record.TransferredPatternDensities,
-                Record.CoveredFractions);
+                Expanded.CellIndices,
+                Expanded.InitialAmounts,
+                Expanded.RemainingAmounts,
+                Expanded.TransferredAmounts,
+                Expanded.TransferredPatternDensities,
+                Expanded.CoveredFractions);
         }
     }
 
@@ -675,6 +689,12 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
 		return false;
 	}
 
+    if (UMD_ContaminationDebrisSubsystem* Debris = World->GetSubsystem<UMD_ContaminationDebrisSubsystem>())
+    {
+        if (!Debris->RestorePendingDrops(WorldData.PendingContaminationDrops)) return false;
+    }
+    else if (!WorldData.PendingContaminationDrops.IsEmpty()) return false;
+
     // 점수 캐리오버 + Day 진행
     return true;
 }
@@ -702,6 +722,7 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     WorldData.Pieces = Snapshot.Pieces;
 	WorldData.TrashBins = Snapshot.TrashBins;
     WorldData.WallContaminations = Snapshot.WallContaminations;
+    WorldData.PendingContaminationDrops = Snapshot.PendingContaminationDrops;
     WorldData.BarnacleRemovals = Snapshot.BarnacleRemovals;
     WorldData.ClosedMarkerNames = Snapshot.ClosedMarkerNames;
 

@@ -502,7 +502,7 @@ void UMD_ScrapeMeshUVData::BakeSourceMesh()
 	Triangles = MoveTemp(Working->Triangles);
 	Cells = MoveTemp(Working->Cells);
 	// An identical layout can still have newly authored gutter data after a rebake.
-	InvalidateVisualDependentsCache();
+	InvalidateRuntimeCaches();
 	LastBakeReport = FString::Printf(TEXT("Baked %d source triangles as %d geometry fragments, %d cleanable cells, %.3f m2 into %dx%d at %.3f local cm/cell. UV%d is canonical; original UVs/material slots preserved; Nanite off. Layout %s. Source asset unchanged; %d shared edges (weld tolerance %.6f cm)."),
 		OriginalTriangleCount, Triangles.Num(), ValidCellCount, CleanableAreaCm2 / 10000.0,
 		AtlasDimensions.X, AtlasDimensions.Y, TargetCellSizeCm, CanonicalUVChannel, *LayoutId.ToString(), ConnectedEdgeCount, AdjacencyWeldToleranceCm);

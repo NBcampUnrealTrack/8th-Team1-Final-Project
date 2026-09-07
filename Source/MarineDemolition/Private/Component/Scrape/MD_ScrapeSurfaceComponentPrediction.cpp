@@ -10,6 +10,8 @@
 
 namespace
 {
+	TMap<TWeakObjectPtr<UMD_ScrapeSurfaceComponent>, uint64> PredictionAllocations;
+
 	bool HaveSameVisualState(
 		const FMD_ScrapeSurfaceCell& Left,
 		const FMD_ScrapeSurfaceCell& Right)
@@ -37,15 +39,60 @@ namespace
 	}
 }
 
-TConstArrayView<FMD_ScrapeSurfaceCell>
+SIZE_T UMD_ScrapeSurfaceComponent::GetLocalScrapePredictionAllocatedBytes() const
+{
+    SIZE_T Bytes = LocalScrapePredictions.GetAllocatedSize()
+        + LocalPredictedPagedCells.GetAllocatedSize()
+        + LocalPredictedContaminationCells.GetAllocatedSize()
+        + LocalScrapePredictionFaceScratch.GetAllocatedSize()
+        + PendingLocalScrapePredictionVisualCellIndices.GetAllocatedSize()
+        + PendingLocalScrapePredictionReconcileCells.GetAllocatedSize();
+    for (const FLocalScrapePrediction& Prediction : LocalScrapePredictions)
+    {
+        Bytes += Prediction.Strokes.GetAllocatedSize() + Prediction.PredictedFinalCellStates.GetAllocatedSize();
+    }
+    return Bytes;
+}
+
+bool UMD_ScrapeSurfaceComponent::UpdateLocalScrapePredictionMemoryBudget()
+{
+    const uint64 Bytes = GetLocalScrapePredictionAllocatedBytes();
+    uint64 WorldBytes = Bytes;
+    for (auto It = PredictionAllocations.CreateIterator(); It; ++It)
+    {
+        UMD_ScrapeSurfaceComponent* Surface = It.Key().Get();
+        if (!IsValid(Surface)) { It.RemoveCurrent(); continue; }
+        // Re-read actual COW ownership: authoritative writes can detach a shared page.
+        It.Value() = Surface->GetLocalScrapePredictionAllocatedBytes();
+        if (Surface != this && Surface->GetWorld() == GetWorld()) { WorldBytes += It.Value(); }
+    }
+    if (Bytes > MaximumLocalScrapePredictionBytes || WorldBytes > MaximumWorldScrapePredictionBytes) { return false; }
+    PredictionAllocations.FindOrAdd(this) = Bytes;
+    return true;
+}
+
+void UMD_ScrapeSurfaceComponent::ReleaseLocalScrapePredictionMemoryBudget()
+{
+    PredictionAllocations.Remove(this);
+}
+
+FMD_ScrapeConstCellView
 UMD_ScrapeSurfaceComponent::GetVisualContaminationCells() const
 {
-	if (!LocalPredictedContaminationCells.IsEmpty()
-		&& LocalPredictedContaminationCells.Num() == ContaminationCells.Num())
+	if (UsesMeshUVSurface())
 	{
-		return MakeArrayView(LocalPredictedContaminationCells);
+		if (!LocalPredictedPagedCells.IsEmpty()
+			&& LocalPredictedPagedCells.Num() == GetContaminationStorageCellCount())
+		{
+			return FMD_ScrapeConstCellView(&LocalPredictedPagedCells, ContaminationCellLayout.Get());
+		}
 	}
-	return MakeArrayView(ContaminationCells);
+	else if (!LocalPredictedContaminationCells.IsEmpty()
+		&& LocalPredictedContaminationCells.Num() == GetContaminationStorageCellCount())
+	{
+		return FMD_ScrapeConstCellView(MakeArrayView(LocalPredictedContaminationCells));
+	}
+	return GetContaminationCellView();
 }
 
 bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePrediction(
@@ -82,7 +129,22 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePrediction(
 		return false;
 	}
 
-	if (LocalPredictedContaminationCells.Num() != ContaminationCells.Num())
+	if (!UpdateLocalScrapePredictionMemoryBudget())
+    {
+        for (FLocalScrapePrediction& Pending : LocalScrapePredictions) { Pending.Owner.Reset(); }
+        RebuildLocalScrapePredictionShadow();
+        return false;
+    }
+
+	if (UsesMeshUVSurface())
+	{
+		if (LocalPredictedPagedCells.Num() != GetContaminationStorageCellCount())
+		{
+			// Fork the current pages; either writer separates only a changed page.
+			LocalPredictedPagedCells = ContaminationPagedCells;
+		}
+	}
+	else if (LocalPredictedContaminationCells.Num() != GetContaminationStorageCellCount())
 	{
 		LocalPredictedContaminationCells = ContaminationCells;
 	}
@@ -95,12 +157,24 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePrediction(
 	{
 		if (LocalScrapePredictions.IsEmpty())
 		{
+			LocalPredictedPagedCells.Reset();
 			LocalPredictedContaminationCells.Empty();
 			LocalScrapePredictionFaceScratch.Empty();
 		}
 		return false;
 	}
 
+    // Conservative map growth headroom prevents a single wide stroke from
+    // constructing an oversized retained per-batch state map before admission.
+    if (GetLocalScrapePredictionAllocatedBytes()
+        + static_cast<uint64>(ChangedCellIndices.Num()) * 128 + sizeof(FLocalScrapePredictionStroke)
+        > MaximumLocalScrapePredictionBytes)
+    {
+        PendingLocalScrapePredictionVisualCellIndices.Append(ChangedCellIndices);
+        for (FLocalScrapePrediction& Pending : LocalScrapePredictions) { Pending.Owner.Reset(); }
+        RebuildLocalScrapePredictionShadow();
+        return false;
+    }
 	if (!Prediction)
 	{
 		Prediction = &LocalScrapePredictions.AddDefaulted_GetRef();
@@ -115,13 +189,25 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePrediction(
 	PredictedStroke.ToolSpec = ToolSpec;
 	for (const int32 CellIndex : ChangedCellIndices)
 	{
-		if (LocalPredictedContaminationCells.IsValidIndex(CellIndex))
+		const int32 StorageIndex = GetContaminationStorageIndex(CellIndex);
+		if (UsesMeshUVSurface() ? LocalPredictedPagedCells.IsValidIndex(StorageIndex)
+			: LocalPredictedContaminationCells.IsValidIndex(StorageIndex))
 		{
-			Prediction->PredictedFinalCellStates.FindOrAdd(CellIndex) =
-				LocalPredictedContaminationCells[CellIndex];
+			Prediction->PredictedFinalCellStates.FindOrAdd(CellIndex) = UsesMeshUVSurface()
+				? LocalPredictedPagedCells.Read(StorageIndex)
+				: LocalPredictedContaminationCells[StorageIndex];
 		}
 	}
 	PendingLocalScrapePredictionVisualCellIndices.Append(ChangedCellIndices);
+    if (!UpdateLocalScrapePredictionMemoryBudget())
+    {
+        // Input still reaches the server. Drop only speculative visuals, including
+        // this stroke's addresses, so the fallback restores the authoritative mask.
+        for (FLocalScrapePrediction& Pending : LocalScrapePredictions) { Pending.Owner.Reset(); }
+        RebuildLocalScrapePredictionShadow();
+        return false;
+    }
+
 	if (!bDeferVisualUpdate)
 	{
 		FlushLocalScrapePredictionVisualUpdates();
@@ -134,13 +220,16 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePredictionToShadow(
 	const FMD_ScrapeToolSpec& ToolSpec,
 	TArray<int32>& OutChangedCellIndices)
 {
+	FMD_ScrapeEvaluationScratch LocalEvaluationScratch;
+	TArray<FMD_ScrapeSurfaceCell> PredictionFaceScratch;
 	OutChangedCellIndices.Reset();
 	int32 CellsPerFace = 0;
 	int32 TotalCellCount = 0;
 	if (!TryCalculateContaminationCellCounts(
 			CellsPerFace,
 			TotalCellCount)
-		|| LocalPredictedContaminationCells.Num() != TotalCellCount
+		|| (UsesMeshUVSurface() ? LocalPredictedPagedCells.Num()
+			: LocalPredictedContaminationCells.Num()) != GetContaminationStorageCellCount()
 		|| (UsesMeshUVSurface() && Stroke.SurfaceFace != EMD_ScrapeSurfaceFace::Front))
 	{
 		return false;
@@ -150,13 +239,14 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePredictionToShadow(
 		Stroke.SurfaceFace == EMD_ScrapeSurfaceFace::Back
 			? CellsPerFace
 			: 0;
-	TArrayView<FMD_ScrapeSurfaceCell> FaceCells(
-		LocalPredictedContaminationCells.GetData() + FaceOffset,
-		CellsPerFace);
-	LocalScrapePredictionFaceScratch.Reset();
-	LocalScrapePredictionFaceScratch.Append(
-		FaceCells.GetData(),
-		FaceCells.Num());
+	FMD_ScrapeCellView FaceCells = (UsesMeshUVSurface()
+		? FMD_ScrapeCellView(&LocalPredictedPagedCells, ContaminationCellLayout.Get())
+		: FMD_ScrapeCellView(MakeArrayView(LocalPredictedContaminationCells))).Slice(FaceOffset, CellsPerFace);
+    PredictionFaceScratch.Reset();
+    if (!UsesMeshUVSurface())
+    {
+        PredictionFaceScratch.Append(FaceCells.GetData(), FaceCells.Num());
+    }
 
 	FMD_ScrapeResult Result;
 	if (UsesMeshUVSurface())
@@ -169,8 +259,8 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePredictionToShadow(
 		}
 		Result = FMD_ScrapeEvaluator::ApplyStrokeToMeshUVGrid(*Data,
 			SurfaceMesh->GetComponentTransform(), MeshStroke, ToolSpec, ScrapeSettings,
-			MakeArrayView(LocalScrapePredictionFaceScratch), nullptr, &ScrapeEvaluationScratch,
-			ContaminationCellCarrierWeights);
+			FaceCells, nullptr, &LocalEvaluationScratch,
+			GetContaminationCellCarrierWeights());
 	}
 	else
 	{
@@ -180,27 +270,72 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePredictionToShadow(
 		ScrapeSettings,
 		ContaminationGridDimensions,
 		ResolvedContaminationSurfaceSizeCm,
-		MakeArrayView(LocalScrapePredictionFaceScratch),
-		ScrapeEvaluationScratch);
+		MakeArrayView(PredictionFaceScratch),
+		LocalEvaluationScratch);
 	}
 
+    if (UsesMeshUVSurface())
+    {
+        // Whole-path validation and first-contact snapshots retain rollback using O(K)
+        // touched state. No face-sized working copy is needed for MeshUV prediction.
+        TArray<int32, TInlineAllocator<8>> RestoredPageIndices;
+        int32 PreviousRestoredPage = INDEX_NONE;
+        const auto RestoreCell = [&](const FMD_ScrapeTouchedCell& Touched)
+        {
+            const int32 StorageIndex = GetContaminationStorageIndex(Touched.CellIndex);
+            LocalPredictedPagedCells.Set(StorageIndex, Touched.Before);
+            const int32 PageIndex = StorageIndex / FMD_ScrapePagedState::PageSize;
+            // Touched atlas IDs and their active storage indices are ascending.
+            if (PageIndex != PreviousRestoredPage)
+            {
+                RestoredPageIndices.Add(StorageIndex);
+                PreviousRestoredPage = PageIndex;
+            }
+        };
+        for (const FMD_ScrapeTouchedCell& Touched : LocalEvaluationScratch.MeshUVTouchedCells)
+        {
+            if (!Result.bIsInputValid || !Result.bWasStrokeLongEnough)
+            {
+                RestoreCell(Touched);
+            }
+            else if (!HaveSameVisualState(FaceCells.Read(Touched.CellIndex), Touched.Before))
+            {
+                OutChangedCellIndices.Add(Touched.CellIndex);
+            }
+            else
+            {
+                // The former scratch-copy path discarded changes below its visual
+                // comparison tolerance. Preserve that exact commit predicate.
+                RestoreCell(Touched);
+            }
+        }
+        // Finish every write first, then release only exactly restored touched pages.
+        for (const int32 StorageIndex : RestoredPageIndices)
+        {
+            if (LocalPredictedPagedCells.IsValidIndex(StorageIndex))
+            {
+                LocalPredictedPagedCells.CompactUnchangedPageForIndex(StorageIndex);
+            }
+        }
+        return !OutChangedCellIndices.IsEmpty();
+    }
 	if (!Result.bIsInputValid || !Result.bWasStrokeLongEnough)
 	{
 		return false;
 	}
 
 	for (int32 LocalCellIndex = 0;
-		LocalCellIndex < LocalScrapePredictionFaceScratch.Num();
+		LocalCellIndex < PredictionFaceScratch.Num();
 		++LocalCellIndex)
 	{
 		if (HaveSameVisualState(
-				FaceCells[LocalCellIndex],
-				LocalScrapePredictionFaceScratch[LocalCellIndex]))
+				FaceCells.Read(LocalCellIndex),
+				PredictionFaceScratch[LocalCellIndex]))
 		{
 			continue;
 		}
-		FaceCells[LocalCellIndex] =
-			LocalScrapePredictionFaceScratch[LocalCellIndex];
+		FaceCells.Set(LocalCellIndex,
+			PredictionFaceScratch[LocalCellIndex]);
 		OutChangedCellIndices.Add(
 			FMD_ScrapeSurfaceLayout::ToCombinedCellIndex(
 				Stroke.SurfaceFace,
@@ -213,16 +348,16 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePredictionToShadow(
 void UMD_ScrapeSurfaceComponent::MarkLocalScrapePredictionReconcileCell(
 	const int32 CellIndex)
 {
-	if (!ContaminationCells.IsValidIndex(CellIndex))
+	if (GetContaminationStorageIndex(CellIndex) == INDEX_NONE)
 	{
 		return;
 	}
 	if (PendingLocalScrapePredictionReconcileCells.Num()
-		!= ContaminationCells.Num())
+		!= GetContaminationAtlasCellCount())
 	{
 		PendingLocalScrapePredictionReconcileCells.Init(
 			false,
-			ContaminationCells.Num());
+			GetContaminationAtlasCellCount());
 	}
 	PendingLocalScrapePredictionReconcileCells[CellIndex] = true;
 }
@@ -444,7 +579,7 @@ void UMD_ScrapeSurfaceComponent::RebuildLocalScrapePredictionShadow()
 		for (TConstSetBitIterator<> It(PendingLocalScrapePredictionReconcileCells); It; ++It)
 		{
 			const int32 CellIndex = It.GetIndex();
-			if (!ContaminationCells.IsValidIndex(CellIndex))
+			if (GetContaminationStorageIndex(CellIndex) == INDEX_NONE)
 			{
 				continue;
 			}
@@ -453,15 +588,24 @@ void UMD_ScrapeSurfaceComponent::RebuildLocalScrapePredictionShadow()
 			CellChange.CellIndex = CellIndex;
 		}
 		PendingLocalScrapePredictionReconcileCells.Empty();
+		LocalPredictedPagedCells.Reset();
 		LocalPredictedContaminationCells.Empty();
 		LocalScrapePredictionFaceScratch.Empty();
 		PendingLocalScrapePredictionVisualCellIndices.Empty();
 		LocalScrapePredictions.Empty();
+		ReleaseLocalScrapePredictionMemoryBudget();
 		UpdateContaminationMask(CellChanges);
 		return;
 	}
 
-	LocalPredictedContaminationCells = ContaminationCells;
+	if (UsesMeshUVSurface())
+	{
+		LocalPredictedPagedCells = ContaminationPagedCells;
+	}
+	else
+	{
+		LocalPredictedContaminationCells = ContaminationCells;
+	}
 	TArray<int32> ChangedCellIndices;
 	for (FLocalScrapePrediction& Prediction : LocalScrapePredictions)
 	{
@@ -478,17 +622,26 @@ void UMD_ScrapeSurfaceComponent::RebuildLocalScrapePredictionShadow()
 			}
 			for (const int32 CellIndex : ChangedCellIndices)
 			{
-				if (LocalPredictedContaminationCells.IsValidIndex(CellIndex))
+				const int32 StorageIndex = GetContaminationStorageIndex(CellIndex);
+				if (UsesMeshUVSurface() ? LocalPredictedPagedCells.IsValidIndex(StorageIndex)
+					: LocalPredictedContaminationCells.IsValidIndex(StorageIndex))
 				{
-					Prediction.PredictedFinalCellStates.FindOrAdd(CellIndex) =
-						LocalPredictedContaminationCells[CellIndex];
+					Prediction.PredictedFinalCellStates.FindOrAdd(CellIndex) = UsesMeshUVSurface()
+						? LocalPredictedPagedCells.Read(StorageIndex)
+						: LocalPredictedContaminationCells[StorageIndex];
 					MarkLocalScrapePredictionReconcileCell(CellIndex);
 				}
 			}
 		}
 	}
 
-	const TConstArrayView<FMD_ScrapeSurfaceCell> CurrentVisual =
+    if (!UpdateLocalScrapePredictionMemoryBudget())
+    {
+        for (FLocalScrapePrediction& Pending : LocalScrapePredictions) { Pending.Owner.Reset(); }
+        RebuildLocalScrapePredictionShadow();
+        return;
+    }
+	const FMD_ScrapeConstCellView CurrentVisual =
 		GetVisualContaminationCells();
 	if (PreviousVisualCellCount != CurrentVisual.Num())
 	{

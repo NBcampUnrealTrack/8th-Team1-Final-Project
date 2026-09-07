@@ -143,19 +143,4 @@ protected:
 	// 저장 슬롯과 저장되지 않은 현재 회차에 필요한 검증 기준을 구분하여 World에 적용하는 함수
 	bool ApplyGameDataToWorldInternal(const FMD_GameData& GameData, bool bRequireSavedSlotIdentity);
 
-	// 요청 시점에 수집된 게임 데이터를 지정된 세이브 파일 목록에 추가하는 함수
-	bool InsertGameDataToSaveFile(UMD_SaveGame* SaveFile, const FMD_GameData& GameData, bool bIsAuto);
-
-	// 비동기 방식으로 게임 데이터 저장을 위한 세이브 파일 불러오기가 완료된 경우의 콜백 함수
-	UFUNCTION()
-	void HandleLoadGameToSaveDataComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FMD_GameData CollectedGameData, const bool bIsAuto, const FOnSaveMDGameDataComplete SaveCompletionDelegate);
-
-	// 비동기 방식으로 게임 데이터 제거를 위한 세이브 파일 불러오기가 완료된 경우의 콜백 함수
-	UFUNCTION()
-	void HandleLoadGameToRemoveDataComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FMD_GameData GameDataToRemove, const FOnRemoveMDGameDataComplete RemoveCompletionDelegate);
-
-	// 비동기 방식으로 게임 데이터 목록을 불러오기 위한 세이브 파일 불러오기가 완료된 경우의 콜백 함수
-	UFUNCTION()
-	void HandleLoadGameToLoadDataListComplete(const FString& LoadedSlotName, const int32 UserIndex, USaveGame* LoadedSaveGame, const FOnLoadMDGameDataListComplete LoadCompletionDelegate);
-
 };

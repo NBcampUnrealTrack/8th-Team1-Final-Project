@@ -1,7 +1,11 @@
 #include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
 
 #include "Engine/StaticMesh.h"
+#include "UObject/Package.h"
 #include "Gameplay/Scrape/MD_ScrapeMeshUVSeam.h"
+#include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
+#include "Gameplay/Scrape/MD_ScrapeCellView.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 namespace
 {
@@ -150,6 +154,7 @@ const TMultiMap<int32, int32>& UMD_ScrapeMeshUVData::GetVisualDependents() const
 		|| VisualDependentsAtlasDimensions != AtlasDimensions
 		|| VisualDependentsCellCount != Cells.Num())
 	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_BuildVisualSeamCache);
 		CachedVisualDependents.Reset();
 		for (int32 Index = 0; Index < Cells.Num(); ++Index)
 		{
@@ -178,6 +183,12 @@ TConstArrayView<FMD_ScrapeMeshUVVisualSample> UMD_ScrapeMeshUVData::GetVisualSea
         : TConstArrayView<FMD_ScrapeMeshUVVisualSample>();
 }
 
+FMD_ScrapeMeshUVVisualSeamView UMD_ScrapeMeshUVData::GetVisualSeamView() const
+{
+    GetVisualDependents();
+    return {MakeArrayView(CachedVisualSeamOffsets), MakeArrayView(CachedVisualSeamSamples)};
+}
+
 TConstArrayView<int32> UMD_ScrapeMeshUVData::GetVisualSeamDependents(int32 SourceCellIndex) const
 {
     GetVisualDependents();
@@ -189,6 +200,9 @@ TConstArrayView<int32> UMD_ScrapeMeshUVData::GetVisualSeamDependents(int32 Sourc
 
 void UMD_ScrapeMeshUVData::InvalidateVisualDependentsCache() const
 {
+    CarrierWeightCache.Empty();
+    CarrierWeightsCellCount = INDEX_NONE;
+    CachedCellLayout.Reset();
 	CachedVisualDependents.Empty();
     CachedVisualSeamOffsets.Empty();
     CachedVisualSeamDependentOffsets.Empty();
@@ -211,8 +225,84 @@ bool UMD_ScrapeMeshUVData::IsValidForMesh(const UStaticMesh* Mesh) const
 		&& Cells.Num() == static_cast<int64>(AtlasDimensions.X) * AtlasDimensions.Y;
 }
 
+bool UMD_ScrapeMeshUVData::FRuntimeValidationKey::Matches(const UMD_ScrapeMeshUVData& Data) const
+{
+    return Source == Data.SourceMesh && RenderMesh == Data.BakedRenderMesh
+        && CellData == Data.Cells.GetData() && TriangleData == Data.Triangles.GetData()
+        && CellCount == Data.Cells.Num() && TriangleCount == Data.Triangles.Num()
+        && ActiveCount == Data.ValidCellCount && UVChannel == Data.CanonicalUVChannel
+        && Dimensions == Data.AtlasDimensions && Layout == Data.LayoutId
+        && SourceGuid == Data.SourceMeshLightingGuid && Area == Data.CleanableAreaCm2
+        && WeldTolerance == Data.AdjacencyWeldToleranceCm && CellSize == Data.TargetCellSizeCm;
+}
+
+void UMD_ScrapeMeshUVData::FRuntimeValidationKey::Capture(const UMD_ScrapeMeshUVData& Data)
+{
+    Source = Data.SourceMesh; RenderMesh = Data.BakedRenderMesh;
+    CellData = Data.Cells.GetData(); TriangleData = Data.Triangles.GetData();
+    CellCount = Data.Cells.Num(); TriangleCount = Data.Triangles.Num();
+    ActiveCount = Data.ValidCellCount; UVChannel = Data.CanonicalUVChannel;
+    Dimensions = Data.AtlasDimensions; Layout = Data.LayoutId; SourceGuid = Data.SourceMeshLightingGuid;
+    Area = Data.CleanableAreaCm2; WeldTolerance = Data.AdjacencyWeldToleranceCm; CellSize = Data.TargetCellSizeCm;
+}
+
+void UMD_ScrapeMeshUVData::InvalidateRuntimeCaches() const
+{
+    ++RuntimeCacheRevision;
+    bRuntimeValidationCached = false;
+    RuntimeValidationKey = FRuntimeValidationKey();
+    InvalidateVisualDependentsCache();
+}
+
+void UMD_ScrapeMeshUVData::PostLoad()
+{
+    Super::PostLoad();
+    InvalidateRuntimeCaches();
+}
+
+#if WITH_EDITOR
+void UMD_ScrapeMeshUVData::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+    InvalidateRuntimeCaches();
+    Super::PostEditChangeProperty(PropertyChangedEvent);
+}
+
+void UMD_ScrapeMeshUVData::PostEditUndo()
+{
+    Super::PostEditUndo();
+    InvalidateRuntimeCaches();
+}
+#endif
+
+bool UMD_ScrapeMeshUVData::ValidateForRuntime(FString* OutError) const
+{
+    check(IsInGameThread());
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_ValidateForRuntime);
+    const UPackage* Package = GetOutermost();
+    const bool bCanCache = HasAnyFlags(RF_WasLoaded) && !HasAnyFlags(RF_Transient)
+        && !IsTemplate() && Package && Package != GetTransientPackage()
+        && !Package->HasAnyPackageFlags(PKG_NewlyCreated) && !Package->IsDirty();
+    if (!bCanCache)
+    {
+        // A dirty/transient edit must not leave an earlier successful result reusable later.
+        bRuntimeValidationCached = false;
+        return Validate(OutError);
+    }
+    if (bRuntimeValidationCached && RuntimeValidationKey.Matches(*this))
+    {
+        if (OutError) OutError->Reset();
+        return true;
+    }
+    bRuntimeValidationCached = false;
+    if (!Validate(OutError)) return false;
+    RuntimeValidationKey.Capture(*this);
+    bRuntimeValidationCached = true;
+    return true;
+}
+
 bool UMD_ScrapeMeshUVData::Validate(FString* OutError) const
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_ValidateFull);
 	auto Fail = [OutError](const TCHAR* Error)
 	{
 		if (OutError) *OutError = Error;
@@ -511,4 +601,63 @@ bool FMD_ScrapeMeshUVGeometry::GetCellPolygonLocal(const UMD_ScrapeMeshUVData& D
     for (const FVector& Barycentric : BarycentricPolygon)
     { OutPolygon.Add(Triangle.A + (Triangle.B - Triangle.A) * Barycentric.Y + (Triangle.C - Triangle.A) * Barycentric.Z); }
     return true;
+}
+
+TSharedPtr<const FMD_ScrapeCarrierWeights> UMD_ScrapeMeshUVData::GetSharedCellCarrierWeights(
+    const FTransform& Transform) const
+{
+    check(IsInGameThread());
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_ScrapeSharedCarrierWeights);
+    if (Transform.ContainsNaN()) { return nullptr; }
+    if (CarrierWeightsLayoutId != LayoutId || CarrierWeightsAtlasDimensions != AtlasDimensions
+        || CarrierWeightsCellCount != Cells.Num() || CarrierWeightsTriangleCount != Triangles.Num()
+        || CarrierWeightsTargetCellSize != TargetCellSizeCm)
+    {
+        CarrierWeightCache.Empty();
+        CarrierWeightsLayoutId = LayoutId;
+        CarrierWeightsAtlasDimensions = AtlasDimensions;
+        CarrierWeightsCellCount = Cells.Num();
+        CarrierWeightsTriangleCount = Triangles.Num();
+        CarrierWeightsTargetCellSize = TargetCellSizeCm;
+    }
+    const FVector Scale = Transform.GetScale3D();
+    for (int32 Index = CarrierWeightCache.Num() - 1; Index >= 0; --Index)
+    {
+        TSharedPtr<const FMD_ScrapeCarrierWeights> Existing = CarrierWeightCache[Index].Weights.Pin();
+        if (!Existing) { CarrierWeightCache.RemoveAtSwap(Index); }
+        else if (CarrierWeightCache[Index].Scale == Scale) { return Existing; }
+    }
+    TSharedRef<FMD_ScrapeCarrierWeights> Weights = MakeShared<FMD_ScrapeCarrierWeights>();
+    if (!Weights->Initialize(*this, Transform))
+    {
+        return nullptr;
+    }
+    FCarrierWeightCacheEntry& Entry = CarrierWeightCache.AddDefaulted_GetRef();
+    Entry.Scale = Scale;
+    Entry.Weights = Weights;
+    return Weights;
+}
+
+TSharedPtr<const FMD_ScrapeCellLayout> UMD_ScrapeMeshUVData::GetSharedCellLayout() const
+{
+    check(IsInGameThread());
+    if (!CachedCellLayout || CellLayoutId != LayoutId || CellLayoutAtlasDimensions != AtlasDimensions
+        || CachedCellLayout->AtlasToActive.Num() != Cells.Num())
+    {
+        TRACE_CPUPROFILER_EVENT_SCOPE(MD_ScrapeSharedCellLayout);
+        TSharedRef<FMD_ScrapeCellLayout> Layout = MakeShared<FMD_ScrapeCellLayout>();
+        Layout->AtlasToActive.Init(INDEX_NONE, Cells.Num());
+        Layout->ActiveToAtlas.Reserve(ValidCellCount);
+        for (int32 AtlasId = 0; AtlasId < Cells.Num(); ++AtlasId)
+        {
+            if (Cells[AtlasId].IsActive())
+            {
+                Layout->AtlasToActive[AtlasId] = Layout->ActiveToAtlas.Add(AtlasId);
+            }
+        }
+        CachedCellLayout = Layout;
+        CellLayoutId = LayoutId;
+        CellLayoutAtlasDimensions = AtlasDimensions;
+    }
+    return CachedCellLayout;
 }

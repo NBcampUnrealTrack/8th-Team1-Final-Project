@@ -22,6 +22,8 @@ public class MarineDemolition : ModuleRules
 			// Landscape (editor import helper uses ALandscape::Import)
 			"Landscape",
 			"GeometryCollectionEngine",
+			// Solid geometry bounds are exposed by the runtime visual component header.
+			"GeometryCore",
 			// FInstancedStruct
 			"StructUtils"
         });
@@ -34,6 +36,10 @@ public class MarineDemolition : ModuleRules
 			"CoreOnline",
 			// 오염 마스크 런타임 텍스처 업로드
 			"RHI", "RenderCore",
+            // Bounded runtime solid-contamination geometry (no editor dependency).
+            "GeometryFramework",
+            // Shared solid templates, GPU displacement and sparse GPU updates.
+            "MDSolidRendering",
 			// 절단·헤라 VFX
 			"Niagara",
 			// 수중 서브믹스 LPF (SubmixEffectFilterPreset)
@@ -42,7 +48,7 @@ public class MarineDemolition : ModuleRules
 
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "MeshDescription", "StaticMeshDescription", "GeometryCore", "MeshConversion" });
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "MeshDescription", "StaticMeshDescription", "MeshConversion" });
 		}
 
         DynamicallyLoadedModuleNames.Add("OnlineSubsystemSteam");

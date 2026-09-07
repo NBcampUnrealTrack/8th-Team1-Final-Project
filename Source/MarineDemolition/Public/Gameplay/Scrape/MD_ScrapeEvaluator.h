@@ -3,6 +3,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Gameplay/Scrape/MD_ScrapeCellView.h"
+#include "Gameplay/Scrape/MD_ScrapeCarrierWeights.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
 
 class UMD_ScrapeMeshUVData;
@@ -49,7 +51,7 @@ struct MARINEDEMOLITION_API FMD_ScrapeEvaluationScratch
 {
 	/** Per-evaluation diagnostic: atlas candidates tested by the physical MeshUV footprint. */
 	int64 MeshUVVisitedCellCount = 0;
-	/** MeshUV only: ascending unique records after evaluation; slots reset only for previous contacts. */
+	/** MeshUV only: ascending unique contact snapshots after evaluation. */
 	TArray<FMD_ScrapeTouchedCell> MeshUVTouchedCells;
 	TArray<int32> MeshUVTouchedCellSlots;
 	/** Legacy planar scratch; released when this scratch is used for MeshUV. */
@@ -86,10 +88,10 @@ public:
 	static FMD_ScrapeResult ApplyStrokeToMeshUVGrid(
 		const UMD_ScrapeMeshUVData& Data, const FTransform& MeshToWorld,
 		const FMD_ScrapeMeshUVStroke& Stroke, const FMD_ScrapeToolSpec& ToolSpec,
-		const FMD_ScrapeSettings& Settings, TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		const FMD_ScrapeSettings& Settings, FMD_ScrapeCellView InOutSurfaceCells,
 		TArray<float>* OutRequestedRemovalAmounts = nullptr,
 		FMD_ScrapeEvaluationScratch* Scratch = nullptr,
-		TConstArrayView<double> CachedCellCarrierWeights = {},
+		FMD_ScrapeCarrierWeightView CachedCellCarrierWeights = {},
 		const FMD_ScrapeMeshUVProgress* CachedProgressBefore = nullptr,
 		FMD_ScrapeMeshUVProgress* OutProgressAfter = nullptr,
 		bool bCaptureTouchedRequestedAmounts = false,
@@ -137,7 +139,7 @@ public:
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells);
+		FMD_ScrapeCellView InOutSurfaceCells);
 
 	/**
 	 * 장착한 헤라의 형태와 성능을 명시하여 한 번의 이동을 격자에 적용
@@ -150,14 +152,14 @@ public:
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells);
+		FMD_ScrapeCellView InOutSurfaceCells);
 	static FMD_ScrapeResult ApplyStrokeToGrid(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec,
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		FMD_ScrapeCellView InOutSurfaceCells,
 		FMD_ScrapeEvaluationScratch& Scratch);
 
 	/**
@@ -173,7 +175,7 @@ public:
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		FMD_ScrapeCellView InOutSurfaceCells,
 		TArray<float>& OutRequestedRemovalAmounts,
 		bool bApplyRemoval = true);
 	static FMD_ScrapeResult ApplyStrokeToGridAndCaptureRequestedAmounts(
@@ -182,7 +184,7 @@ public:
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		FMD_ScrapeCellView InOutSurfaceCells,
 		TArray<float>& OutRequestedRemovalAmounts,
 		FMD_ScrapeEvaluationScratch& Scratch,
 		bool bApplyRemoval = true);
@@ -198,10 +200,10 @@ public:
 		const FIntPoint& GridDimensions,
 		TConstArrayView<float> RequestedRemovalAmounts,
 		float StampRatio,
-		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		FMD_ScrapeCellView InOutSurfaceCells,
 		TArray<FMD_ScrapeCellChange>& OutCellChanges,
 		float& OutAddedContaminationAmount,
-		TConstArrayView<double> CellCarrierWeights = {});
+		FMD_ScrapeCarrierWeightView CellCarrierWeights = {});
 
 	/** MeshUV sparse stamp: strictly ascending unique records, atomic O(K) preflight and apply.
 	 * RequestedRemovalAmount is density, whereas OutAddedContaminationAmount is weighted carrier. */
@@ -209,15 +211,15 @@ public:
 		const FIntPoint& GridDimensions,
 		TConstArrayView<FMD_ScrapeTouchedCell> TouchedCells,
 		float StampRatio,
-		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		FMD_ScrapeCellView InOutSurfaceCells,
 		TArray<FMD_ScrapeCellChange>& OutCellChanges,
 		float& OutAddedContaminationAmount,
-		TConstArrayView<double> CellCarrierWeights = {});
+		FMD_ScrapeCarrierWeightView CellCarrierWeights = {});
 
 	/** Full scan for initialization/general callers; no cells are mutated. */
 	static bool CalculateMeshUVProgress(
-		TConstArrayView<FMD_ScrapeSurfaceCell> Cells,
-		TConstArrayView<double> CellCarrierWeights,
+		FMD_ScrapeConstCellView Cells,
+		FMD_ScrapeCarrierWeightView CellCarrierWeights,
 		float CleanTolerance,
 		FMD_ScrapeMeshUVProgress& OutProgress);
 
@@ -227,8 +229,8 @@ public:
 	static bool UpdateMeshUVProgressFromTouchedCells(
 		const FMD_ScrapeMeshUVProgress& ProgressBefore,
 		TConstArrayView<FMD_ScrapeTouchedCell> TouchedCells,
-		TConstArrayView<FMD_ScrapeSurfaceCell> Cells,
-		TConstArrayView<double> CellCarrierWeights,
+		FMD_ScrapeConstCellView Cells,
+		FMD_ScrapeCarrierWeightView CellCarrierWeights,
 		FMD_ScrapeMeshUVProgress& OutProgress);
 
 	/**
@@ -243,7 +245,7 @@ public:
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
+		FMD_ScrapeConstCellView SurfaceCells,
 		FString* OutErrorMessage = nullptr);
 
 	/** 장착한 헤라 스펙을 포함하여 판정 입력을 검사 */
@@ -253,7 +255,7 @@ public:
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
+		FMD_ScrapeConstCellView SurfaceCells,
 		FString* OutErrorMessage = nullptr);
 
 	/**
@@ -266,16 +268,16 @@ public:
 	 * 표면 전체가 처음부터 깨끗했다면 별도 작업이 필요 없으므로 1을 반환
 	 */
 	static float CalculateCleanRatio(
-		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells);
+		FMD_ScrapeConstCellView SurfaceCells);
 
 	/**
 	 * 벽 조각 배분에 사용할 현재 제거율을 계산한다.
 	 * 기본 오염뿐 아니라 포화된 헤라가 다시 묻힌 오염도 남은 양에 포함한다.
 	 */
 	static float CalculateCurrentCleanRatio(
-		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells);
+		FMD_ScrapeConstCellView SurfaceCells);
 	static float CalculateCurrentCleanRatio(
-		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
+		FMD_ScrapeConstCellView SurfaceCells,
 		double& OutInitialContaminationAmount,
 		double& OutCurrentContaminationAmount);
 	static float CalculateCurrentCleanRatio(
@@ -289,7 +291,7 @@ public:
 	 * 한 셀에 오염이 남았는데 UI 반올림 때문에 완료되는 오류를 차단
 	 */
 	static bool IsSurfaceFullyClean(
-		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
+		FMD_ScrapeConstCellView SurfaceCells,
 		float CleanTolerance);
 
 private:
@@ -302,7 +304,7 @@ private:
 		const FMD_ScrapeSettings& Settings,
 		const FIntPoint& GridDimensions,
 		const FVector2D& SurfaceSizeCm,
-		TArrayView<FMD_ScrapeSurfaceCell> InOutSurfaceCells,
+		FMD_ScrapeCellView InOutSurfaceCells,
 		TArray<float>* OutRequestedRemovalAmounts,
 		FMD_ScrapeEvaluationScratch* Scratch,
 		bool bApplyRemoval = true);
