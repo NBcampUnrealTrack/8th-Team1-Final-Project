@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -95,6 +95,10 @@ public:
 	/** 서버 이동 전에 각 소유 클라이언트에서 실제 로딩 화면을 시작한다. */
 	UFUNCTION(Client, Reliable)
 	void ClientPrepareLoadingTransition(const FText& Subtitle);
+
+	// 서버의 참여 및 퇴장 알림을 소유 클라이언트 HUD에 전달
+	UFUNCTION(Client, Reliable)
+	void ClientNotifyPlayerJoinAndExit(const FText& PlayerName, bool bIsJoin);
 
 	/** 로딩 화면에 조작 주체 준비 완료를 알린다(하드 트래블/seamless travel 공용). */
 	void NotifyLoadingScreenPlayerReady();

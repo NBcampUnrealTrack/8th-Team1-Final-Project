@@ -1,9 +1,20 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "UI/MD_CommonButtonBase.h"
+#include "Audio/MD_AudioSubsystem.h"
 #include "CommonTextBlock.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
+#include "Engine/World.h"
+
+UMD_CommonButtonBase::UMD_CommonButtonBase()
+{
+	// 클릭음은 모든 버튼 공통이라 기본값을 넣어 배치 즉시 동작하게 한다.
+	ClickSoundTag = FGameplayTag::RequestGameplayTag(
+		TEXT("SFX.UI.Click"), /*ErrorIfNotFound*/ false);
+
+	// Hover 음은 기본값을 넣지 않는다. 타이틀 화면 전용이라 그 버튼 인스턴스에서만 지정한다.
+}
 
 void UMD_CommonButtonBase::NativePreConstruct()
 {
@@ -26,16 +37,20 @@ void UMD_CommonButtonBase::NativeOnCurrentTextStyleChanged()
 		UCommonTextBlock* CommonTextBlock = Cast<UCommonTextBlock>(Txt_ButtonText);
 		if (IsValid(CommonTextBlock) == true)
 		{
-			// 디자이너가 지정한 TextBlock 폰트 크기 저장
+			// 스타일의 폰트 크기를 제외할 때 복원할 현재 TextBlock 폰트 정보를 저장한다.
 			FSlateFontInfo CurrentFont = CommonTextBlock->GetFont();
 
-			// 현재 버튼 상태의 CommonUI 텍스트 스타일 적용
+			// 현재 버튼 상태의 CommonUI 텍스트 스타일을 모든 폰트 속성과 함께 적용한다.
 			CommonTextBlock->SetStyle(GetCurrentTextStyleClass());
 
-			// 스타일의 나머지 폰트 속성은 유지하면서 기존 크기 복원
-			FSlateFontInfo AppliedFont = CommonTextBlock->GetFont();
-			AppliedFont.Size = CurrentFont.Size;
-			CommonTextBlock->SetFont(AppliedFont);
+			// 스타일 폰트 크기를 사용하지 않으면 TextBlock에 지정된 기존 크기를 복원한다.
+			if (bApplyTextStyleFontSize == false)
+			{
+				// 스타일의 나머지 폰트 속성은 유지하면서 기존 크기만 교체한다.
+				FSlateFontInfo AppliedFont = CommonTextBlock->GetFont();
+				AppliedFont.Size = CurrentFont.Size;
+				CommonTextBlock->SetFont(AppliedFont);
+			}
 		}
 		else
 		{
@@ -60,6 +75,60 @@ void UMD_CommonButtonBase::HandleFocusLost()
 
 	// 키보드나 게임패드 포커스도 마우스 UnHover와 같은 이벤트 경로로 전달한다.
 	NativeOnUnhovered();
+}
+
+void UMD_CommonButtonBase::NativeOnHovered()
+{
+	Super::NativeOnHovered();
+
+	// 마우스 Hover와 포커스 획득이 같은 경로로 들어오므로 이미 울린 상태에서는 넘긴다.
+	if (bHoverSoundPlaying == true)
+	{
+		return;
+	}
+
+	// 다음 UnHover 까지 Hover 음을 다시 내지 않도록 표시한다.
+	bHoverSoundPlaying = true;
+
+	PlayButtonSound(HoverSoundTag);
+}
+
+void UMD_CommonButtonBase::NativeOnUnhovered()
+{
+	Super::NativeOnUnhovered();
+
+	// 다시 올려놓으면 Hover 음이 울려야 하므로 표시를 지운다.
+	bHoverSoundPlaying = false;
+}
+
+void UMD_CommonButtonBase::NativeOnClicked()
+{
+	Super::NativeOnClicked();
+
+	PlayButtonSound(ClickSoundTag);
+}
+
+void UMD_CommonButtonBase::SetIsEnabled(bool bInIsEnabled)
+{
+	Super::SetIsEnabled(bInIsEnabled);
+
+	// 마우스가 올라간 채로 비활성화되면 언호버가 오지 않을 수 있다.
+	// 표시를 남겨 두면 다시 활성화한 뒤 Hover 음이 나지 않는다.
+	if (bInIsEnabled == false)
+	{
+		bHoverSoundPlaying = false;
+	}
+}
+
+void UMD_CommonButtonBase::SetVisibility(ESlateVisibility InVisibility)
+{
+	Super::SetVisibility(InVisibility);
+
+	// Visible 이 아니면 버튼이 히트 테스트에서 빠져 언호버가 오지 않을 수 있다.
+	if (InVisibility != ESlateVisibility::Visible)
+	{
+		bHoverSoundPlaying = false;
+	}
 }
 
 void UMD_CommonButtonBase::SetContentText(FText InContentText)
@@ -122,14 +191,20 @@ void UMD_CommonButtonBase::ApplyCommonTextStyleToTextBlock(UCommonTextStyle* Tex
 		return;
 	}
 
-	// 디자이너가 지정한 TextBlock 폰트 크기 저장
+	// 스타일의 폰트 크기를 제외할 때 사용할 현재 TextBlock 폰트 정보를 저장한다.
 	FSlateFontInfo CurrentFont = TextBlock->GetFont();
 
-	// 스타일의 글꼴 속성에서 폰트 크기만 기존 값으로 교체
+	// 일반 TextBlock에 적용할 TextStyle의 전체 폰트 정보를 준비한다.
 	FSlateFontInfo AppliedFont = TextStyle->Font;
-	AppliedFont.Size = CurrentFont.Size;
 
-	// 일반 TextBlock에 크기를 제외한 현재 스타일의 글꼴 적용
+	// 스타일 폰트 크기를 사용하지 않으면 TextBlock에 지정된 기존 크기로 교체한다.
+	if (bApplyTextStyleFontSize == false)
+	{
+		// 다른 스타일 속성은 유지하고 폰트 크기만 기존 값으로 보존한다.
+		AppliedFont.Size = CurrentFont.Size;
+	}
+
+	// 선택한 폰트 크기 정책이 반영된 현재 스타일의 글꼴을 적용한다.
 	TextBlock->SetFont(AppliedFont);
 
 	// 일반 TextBlock에도 현재 스타일의 글자 색상을 적용한다.
@@ -169,4 +244,27 @@ void UMD_CommonButtonBase::ApplyContentImageBrush()
 
 	// 저장된 Brush의 모든 변경 사항을 바인딩된 Image에 적용한다.
 	Img_ButtonImage->SetBrush(Brush_ButtonImage);
+}
+
+void UMD_CommonButtonBase::PlayButtonSound(const FGameplayTag& EventTag) const
+{
+	// 태그를 비워 둔 버튼은 소리를 내지 않는다.
+	if (EventTag.IsValid() == false)
+	{
+		return;
+	}
+
+	// 에디터 미리보기에서 마우스를 올릴 때 소리가 나지 않게 한다.
+	if (IsDesignTime() == true)
+	{
+		return;
+	}
+
+	// 소리 재생은 태그만 넘기고 소재 선택은 데이터가 맡는다.
+	const UWorld* World = GetWorld();
+	UMD_AudioSubsystem* AudioSubsystem = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr;
+	if (IsValid(AudioSubsystem) == true)
+	{
+		AudioSubsystem->PlayEvent2D(EventTag);
+	}
 }
