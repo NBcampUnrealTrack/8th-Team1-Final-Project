@@ -203,6 +203,12 @@ private:
 		/** 항목이 지정한 기본 정지 페이드. StopHandle 에 음수를 넘기면 이 값을 쓴다 */
 		float FadeOutSeconds = 0.1f;
 
+		/**
+		 * 월드가 내려갈 때 멈추지 않고 끝까지 재생한다.
+		 * Deinitialize 가 이 표시를 보고 건너뛰지 않으면 레벨 전환 순간 잘린다.
+		 */
+		bool bPersistAcrossLevelTransition = false;
+
 		// 재개에 필요한 재생 위치 정보
 		TWeakObjectPtr<USceneComponent> AttachTo;
 		FName SocketName = NAME_None;

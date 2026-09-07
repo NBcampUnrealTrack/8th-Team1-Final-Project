@@ -1,9 +1,20 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "UI/MD_CommonButtonBase.h"
+#include "Audio/MD_AudioSubsystem.h"
 #include "CommonTextBlock.h"
 #include "Components/Image.h"
 #include "Components/TextBlock.h"
+#include "Engine/World.h"
+
+UMD_CommonButtonBase::UMD_CommonButtonBase()
+{
+	// 클릭음은 모든 버튼 공통이라 기본값을 넣어 배치 즉시 동작하게 한다.
+	ClickSoundTag = FGameplayTag::RequestGameplayTag(
+		TEXT("SFX.UI.Click"), /*ErrorIfNotFound*/ false);
+
+	// Hover 음은 기본값을 넣지 않는다. 타이틀 화면 전용이라 그 버튼 인스턴스에서만 지정한다.
+}
 
 void UMD_CommonButtonBase::NativePreConstruct()
 {
@@ -64,6 +75,37 @@ void UMD_CommonButtonBase::HandleFocusLost()
 
 	// 키보드나 게임패드 포커스도 마우스 UnHover와 같은 이벤트 경로로 전달한다.
 	NativeOnUnhovered();
+}
+
+void UMD_CommonButtonBase::NativeOnHovered()
+{
+	Super::NativeOnHovered();
+
+	// 마우스 Hover와 포커스 획득이 같은 경로로 들어오므로 이미 울린 상태에서는 넘긴다.
+	if (bHoverSoundPlaying == true)
+	{
+		return;
+	}
+
+	// 다음 UnHover 까지 Hover 음을 다시 내지 않도록 표시한다.
+	bHoverSoundPlaying = true;
+
+	PlayButtonSound(HoverSoundTag);
+}
+
+void UMD_CommonButtonBase::NativeOnUnhovered()
+{
+	Super::NativeOnUnhovered();
+
+	// 다시 올려놓으면 Hover 음이 울려야 하므로 표시를 지운다.
+	bHoverSoundPlaying = false;
+}
+
+void UMD_CommonButtonBase::NativeOnClicked()
+{
+	Super::NativeOnClicked();
+
+	PlayButtonSound(ClickSoundTag);
 }
 
 void UMD_CommonButtonBase::SetContentText(FText InContentText)
@@ -179,4 +221,27 @@ void UMD_CommonButtonBase::ApplyContentImageBrush()
 
 	// 저장된 Brush의 모든 변경 사항을 바인딩된 Image에 적용한다.
 	Img_ButtonImage->SetBrush(Brush_ButtonImage);
+}
+
+void UMD_CommonButtonBase::PlayButtonSound(const FGameplayTag& EventTag) const
+{
+	// 태그를 비워 둔 버튼은 소리를 내지 않는다.
+	if (EventTag.IsValid() == false)
+	{
+		return;
+	}
+
+	// 에디터 미리보기에서 마우스를 올릴 때 소리가 나지 않게 한다.
+	if (IsDesignTime() == true)
+	{
+		return;
+	}
+
+	// 소리 재생은 태그만 넘기고 소재 선택은 데이터가 맡는다.
+	const UWorld* World = GetWorld();
+	UMD_AudioSubsystem* AudioSubsystem = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr;
+	if (IsValid(AudioSubsystem) == true)
+	{
+		AudioSubsystem->PlayEvent2D(EventTag);
+	}
 }

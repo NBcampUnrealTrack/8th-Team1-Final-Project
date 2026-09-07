@@ -128,6 +128,15 @@ namespace MD_AudioPrivate
 		return UserVolume;
 	}
 
+	/**
+	 * UI 원샷은 버튼을 누른 직후 레벨이 바뀌어도 끝까지 들려야 한다 (타이틀의 게임 시작 버튼).
+	 * 루프는 제외한다 — 타이틀 음악이 다음 레벨까지 따라와 계속 울린다.
+	 */
+	bool ShouldPersistAcrossLevelTransition(const FMD_AudioEntry& Entry)
+	{
+		return Entry.Space == EMD_AudioSpace::UI && !Entry.bLooping;
+	}
+
 	/** 옥타브(로그) 공간 보간. 사람 지각이 로그라 깊이 변화가 균일하게 들린다 */
 	float BlendCutoff(float Surface, float Deep, float Alpha, bool bLogarithmic)
 	{
@@ -257,6 +266,13 @@ void UMD_AudioSubsystem::Deinitialize()
 	}
 	for (const FActiveSound& Active : ActiveSounds)
 	{
+		// 레벨 전환을 넘겨 재생하도록 만든 항목은 여기서 끊지 않는다.
+		// 스스로 끝나고 파괴되며, 이 배열이 비워지므로 추적만 놓는다.
+		if (Active.bPersistAcrossLevelTransition == true)
+		{
+			continue;
+		}
+
 		if (UAudioComponent* Component = Active.Component.Get())
 		{
 			Component->Stop();
@@ -565,7 +581,9 @@ UAudioComponent* UMD_AudioSubsystem::SpawnForEntry(const FMD_AudioEntry& Entry, 
 		// 컴포넌트를 먼저 만들고 필터를 설정한 다음 재생한다.
 		Component = UGameplayStatics::CreateSound2D(
 			World, Sound, PlaybackVolume, Entry.PitchMultiplier,
-			0.0f, Concurrency, /*bPersistAcrossLevelTransition*/ false, /*bAutoDestroy*/ !Entry.bLooping);
+			0.0f, Concurrency,
+			MD_AudioPrivate::ShouldPersistAcrossLevelTransition(Entry),
+			/*bAutoDestroy*/ !Entry.bLooping);
 
 		if (Component && MD_AudioPrivate::ShouldApplyDepthFilter(Entry))
 		{
@@ -652,6 +670,8 @@ FMD_AudioHandle UMD_AudioSubsystem::PlayResolved(const FMD_AudioEntry& Entry, co
 	Active.BasePitch = Entry.PitchMultiplier;
 	// 실행 중 사용자 음량 변경을 위한 원본 항목 음량 보관
 	Active.BaseVolume = Entry.VolumeMultiplier;
+	// 레벨 전환에도 살아남을 항목 표시. Deinitialize 가 이걸 보고 건너뛴다
+	Active.bPersistAcrossLevelTransition = MD_AudioPrivate::ShouldPersistAcrossLevelTransition(Entry);
 	Active.FadeOutSeconds = Entry.FadeOutSeconds;
 	Active.AttachTo = AttachTo;
 	Active.SocketName = SocketName;
