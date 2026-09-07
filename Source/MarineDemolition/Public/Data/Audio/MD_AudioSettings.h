@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "Data/Audio/MD_AudioTypes.h"
 #include "MD_AudioSettings.generated.h"
 
 class UMD_AudioLibrary;
@@ -26,6 +27,15 @@ public:
 	/** 이벤트 태그 인덱스를 만들 카탈로그 */
 	UPROPERTY(EditAnywhere, Config, Category = "카탈로그", meta = (AllowedClasses = "/Script/MarineDemolition.MD_AudioLibrary"))
 	TSoftObjectPtr<UMD_AudioLibrary> AudioLibrary;
+
+	/**
+	 * 월드가 준비되면 스스로 시작할 항목들. 타이틀 BGM 등.
+	 *
+	 * 레벨이나 플레이어 컨트롤러를 고치지 않고 여기에만 등록하면 되므로,
+	 * 다른 작업자의 맵·블루프린트와 충돌하지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "자동 재생", meta = (TitleProperty = "EventTag"))
+	TArray<FMD_AudioAutoPlayEntry> AutoPlayOnWorldReady;
 
 	UPROPERTY(EditAnywhere, Config, Category = "서브믹스")
 	TSoftObjectPtr<USoundSubmix> UnderwaterSubmix;

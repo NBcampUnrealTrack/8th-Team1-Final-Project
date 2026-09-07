@@ -1,8 +1,9 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "GameplayTagContainer.h"
+#include "Misc/Optional.h"
 #include "Data/Audio/MD_AudioTypes.h"
 #include "MD_AudioSubsystem.generated.h"
 
@@ -40,9 +41,10 @@ class MARINEDEMOLITION_API UMD_AudioSubsystem : public UTickableWorldSubsystem
 public:
 	//~ USubsystem
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	virtual void Deinitialize() override;
 	virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
+	//~ UWorldSubsystem
+	virtual void OnWorldBeginPlay(UWorld& InWorld) override;
 	//~ FTickableGameObject
 	virtual void Tick(float DeltaTime) override;
 	virtual TStatId GetStatId() const override;
@@ -93,6 +95,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Audio")
 	void ApplyUserVolumes(float MasterVolume, float MusicVolume, float EffectsVolume);
 
+protected:
+	// 월드 시작 시 사용자 음량과 입출력 장치 복원
+	void RestoreWorldAudioSettings();
+
+	// 현재 맵에 대응하는 자동 재생 항목 예약
+	void ScheduleWorldAutoPlay(UWorld& InWorld);
+
 private:
 	/** 상태·환경 조건을 만족하는 항목 중 가장 구체적인 것을 고른다 */
 	const FMD_AudioEntry* ResolveEntry(const FGameplayTag& EventTag) const;
@@ -105,6 +114,12 @@ private:
 
 	/** md.Audio.Debug 1 일 때 화면에 상태를 찍는다 */
 	void DrawDebugInfo();
+
+	/** 등록된 자동 재생 항목의 대기 조건을 보고, 만족하면 시작한다 */
+	void UpdateAutoPlay(float DeltaTime);
+
+	/** 로딩 화면이 아직 화면을 덮고 있는지. outro 는 덮은 것으로 보지 않는다 */
+	bool IsLoadingScreenBlocking() const;
 
 	/** 살아 있는 수중 사운드에 현재 컷오프를 적용한다 */
 	void ApplyCutoffToActiveSounds();
@@ -199,6 +214,15 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<USubmixEffectFilterPreset> CachedFilter;
+
+	/**
+	 * 이 월드에서 아직 시작하지 못한 자동 재생 항목. 시작하면 비운다.
+	 * 월드 서브시스템이라 맵을 바꾸면 자연히 새로 뽑힌다.
+	 */
+	TOptional<FMD_AudioAutoPlayEntry> PendingAutoPlay;
+
+	/** 대기 조건이 풀린 뒤 남은 지연(초) */
+	float AutoPlayDelayRemaining = 0.0f;
 
 	// 카메라 페이드와 독립적인 사용자 전체 음량용 런타임 믹스
 	UPROPERTY(Transient)

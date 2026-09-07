@@ -1,13 +1,16 @@
-﻿#include "Audio/MD_AudioSubsystem.h"
+#include "Audio/MD_AudioSubsystem.h"
 
 #include "Data/Audio/MD_AudioCategoryData.h"
 #include "Data/Audio/MD_AudioSettings.h"
 #include "Gameplay/Settings/MD_AudioSettingCategory.h"
 #include "Gameplay/Settings/MD_SettingsManager.h"
 
+#include "UI/Loading/MD_LoadingScreenSubsystem.h"
+
 #include "Components/AudioComponent.h"
 #include "Engine/World.h"
 #include "Engine/Engine.h"
+#include "Engine/GameInstance.h"
 #include "HAL/IConsoleManager.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/PlayerCameraManager.h"
@@ -186,6 +189,64 @@ void UMD_AudioSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 	}
 }
 
+void UMD_AudioSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+{
+	Super::OnWorldBeginPlay(InWorld);
+
+	// 첫 자동 재생에 앞선 사용자 음량과 장치 복원
+	RestoreWorldAudioSettings();
+	// 음량 복원 이후 현재 맵의 자동 재생 예약
+	ScheduleWorldAutoPlay(InWorld);
+}
+
+void UMD_AudioSubsystem::ScheduleWorldAutoPlay(UWorld& InWorld)
+{
+	// 자동 재생 목록을 보유한 프로젝트 오디오 설정 조회
+	const UMD_AudioSettings& Settings = UMD_AudioSettings::Get();
+
+	// 자동 재생 항목과 비교할 현재 맵 이름 조회
+	FString CurrentMap = InWorld.GetMapName();
+	// 에디터와 패키징 환경의 동일한 맵 비교를 위한 PIE 접두사 제거
+	CurrentMap.RemoveFromStart(InWorld.StreamingLevelsPrefix);
+
+	// 목록 우선순위에 따른 자동 재생 후보 순회
+	for (const FMD_AudioAutoPlayEntry& Candidate : Settings.AutoPlayOnWorldReady)
+	{
+		// 후보 이벤트 태그의 유효성 확인
+		bool bValidEventTag = Candidate.EventTag.IsValid();
+		// 재생할 이벤트가 없는 후보 제외
+		if (bValidEventTag == false)
+		{
+			continue;
+		}
+
+		// 후보 항목의 대상 맵 이름 조회
+		FString TargetMap = Candidate.Map.GetAssetName();
+		// 모든 맵에서 재생 가능한 후보 여부 확인
+		bool bAnyMap = TargetMap.IsEmpty();
+		// 특정 맵 전용 후보의 대상 비교
+		if (bAnyMap == false)
+		{
+			// 현재 맵과 다른 후보 제외
+			if (TargetMap != CurrentMap)
+			{
+				continue;
+			}
+		}
+
+		// 로딩 화면 해제 후 재생할 후보 보관
+		PendingAutoPlay = Candidate;
+		// 후보에 지정된 재생 대기 시간 적용
+		AutoPlayDelayRemaining = Candidate.StartDelaySeconds;
+
+		// 현재 맵에 예약된 자동 재생 이벤트 기록
+		UE_LOG(LogTemp, Log, TEXT("[MD_Audio] '%s' 자동 재생 예약: %s"),
+			*CurrentMap, *Candidate.EventTag.ToString());
+		// 최초 일치 항목의 단일 예약 확정
+		break;
+	}
+}
+
 void UMD_AudioSubsystem::Deinitialize()
 {
 	// 월드 종료 시 사용자 음량 믹스 등록 해제
@@ -215,28 +276,32 @@ void UMD_AudioSubsystem::Deinitialize()
 	Super::Deinitialize();
 }
 
-void UMD_AudioSubsystem::OnWorldBeginPlay(UWorld& InWorld)
+void UMD_AudioSubsystem::RestoreWorldAudioSettings()
 {
-	Super::OnWorldBeginPlay(InWorld);
-
 	// 맵 로딩 중 초기화될 수 있는 오디오 믹스의 중복 등록 제거
 	if (bUserVolumeMixPushed == true)
 	{
+		// 기존 사용자 믹스 참조 해제
 		UGameplayStatics::PopSoundMixModifier(this, UserVolumeMix);
+		// 새 월드 장치의 믹스 재등록 허용
 		bUserVolumeMixPushed = false;
 	}
 
 	// 월드 서브시스템 생성 이후 연결된 게임 인스턴스의 사용자 설정 조회
 	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	// 설정 매니저가 준비된 경우의 저장값 복원
 	if (IsValid(SettingsManager) == true)
 	{
 		// PIE 월드 생성 순서와 무관한 오디오 설정 복원
 		UMD_AudioSettingCategory* AudioCategory = SettingsManager->GetAudioSettings();
+		// 유효한 오디오 카테고리의 적용값 수집
 		if (IsValid(AudioCategory) == true)
 		{
 			// 초기화 중 얻지 못한 전체 및 배경 및 효과음 음량 보완
 			CurrentMasterVolume = AudioCategory->Settings.MasterVolume;
+			// 배경 음악의 저장 음량 복원
 			CurrentMusicVolume = AudioCategory->Settings.MusicVolume;
+			// 효과음의 저장 음량 복원
 			CurrentEffectsVolume = AudioCategory->Settings.EffectsVolume;
 			// 새 월드의 실제 출력 장치와 온라인 입력 캡처에 확정된 선택 복원
 			AudioCategory->RefreshAudioDevices();
@@ -256,10 +321,61 @@ void UMD_AudioSubsystem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
+	UpdateAutoPlay(DeltaTime);
 	UpdateUnderwaterCutoff(DeltaTime);
 	EnforceLoopConditions();
 	PruneFinished();
 	DrawDebugInfo();
+}
+
+// ----------------------------------------------------------------- 자동 재생
+
+bool UMD_AudioSubsystem::IsLoadingScreenBlocking() const
+{
+	UWorld* World = GetWorld();
+	UGameInstance* GameInstance = World ? World->GetGameInstance() : nullptr;
+	if (!GameInstance)
+	{
+		return false;
+	}
+
+	const UMD_LoadingScreenSubsystem* LoadingScreen =
+		GameInstance->GetSubsystem<UMD_LoadingScreenSubsystem>();
+
+	return LoadingScreen && LoadingScreen->IsLoadingScreenActive();
+}
+
+void UMD_AudioSubsystem::UpdateAutoPlay(float DeltaTime)
+{
+	if (!PendingAutoPlay.IsSet())
+	{
+		return;
+	}
+
+	// 로딩 화면이 아직 덮고 있으면 지연 시간도 흐르지 않는다.
+	// 화면이 걷히는 시점 기준으로 지연을 세야 매번 같은 타이밍이 나온다
+	if (PendingAutoPlay->bWaitForLoadingScreen && IsLoadingScreenBlocking())
+	{
+		return;
+	}
+
+	AutoPlayDelayRemaining -= DeltaTime;
+	if (AutoPlayDelayRemaining > 0.0f)
+	{
+		return;
+	}
+
+	// 한 월드에 한 번만 건다. 재생 실패든 성공이든 다시 시도하지 않는다
+	const FGameplayTag EventTag = PendingAutoPlay->EventTag;
+	PendingAutoPlay.Reset();
+
+	if (!PlayEvent2D(EventTag).IsValid())
+	{
+		UE_LOG(LogTemp, Warning,
+			TEXT("[MD_Audio] 자동 재생 %s 에서 핸들이 돌아오지 않았습니다. ")
+			TEXT("카탈로그에 항목이 있는지, bLooping 이 켜져 있는지 확인하세요."),
+			*EventTag.ToString());
+	}
 }
 
 // ---------------------------------------------------------------------- 인덱스
