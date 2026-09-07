@@ -35,6 +35,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MD|UI")
 	TObjectPtr<UTextBlock> Txt_ButtonText;
 
+	// 활성화하면 버튼 상태별 TextStyle에 정의된 폰트 크기도 TextBlock에 적용한다.
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+	bool bApplyTextStyleFontSize = false;
+
 	// Blueprint에서 값이 변경되면 전용 Getter와 Setter를 통해 Image에 반영할 Brush를 보관한다.
 	UPROPERTY(EditAnywhere, BlueprintGetter = GetContentImage, BlueprintSetter = SetContentImage, Category = "Appearance")
 	FSlateBrush Brush_ButtonImage;
