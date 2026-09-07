@@ -1,23 +1,23 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Blueprint/UserWidget.h"
+#include "UI/Foundation/MD_CommonGameMenuWidget.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "MD_DailyReportWidget.generated.h"
 
-class UButton;
+class UMD_CommonButtonBase;
 class UTextBlock;
 
 // 일일 보고서의 다음 전환 요청을 소유 PlayerController에 전달하는 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_OnDailyReportContinueRequested);
 
 /**
- * WBP_DailyReport의 정산 데이터 표시와 확인 버튼 입력을 담당하는 전용 위젯 클래스
+ * GameMenu 레이어에서 정산 데이터와 확인 입력을 처리하는 위젯 클래스
  */
 UCLASS()
-class MARINEDEMOLITION_API UMD_DailyReportWidget : public UUserWidget
+class MARINEDEMOLITION_API UMD_DailyReportWidget : public UMD_CommonGameMenuWidget
 {
 	GENERATED_BODY()
 
@@ -39,70 +39,88 @@ public:
 	FMD_OnDailyReportContinueRequested OnContinueRequested;
 
 protected:
-	virtual void NativeOnInitialized() override;
+	virtual void NativeConstruct() override;
 
 	virtual void NativeDestruct() override;
+
+protected:
+	// 양수와 영점 정산 숫자에 적용할 색상
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+	FLinearColor PositiveAmountTextColor = FLinearColor(FColor(7, 142, 230));
+
+	// 음수 정산 숫자에 적용할 색상
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
+	FLinearColor NegativeAmountTextColor = FLinearColor(FColor(234, 107, 114));
+
+	// BP에서 잔업 입력을 연결하는 공통 버튼
+	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MD|Daily Report")
+	TObjectPtr<UMD_CommonButtonBase> Btn_Resume;
 
 private:
 	// 다음 Day 또는 결과 맵 전환 확인 입력을 받는 버튼
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UButton> Btn_Nextday;
+	TObjectPtr<UMD_CommonButtonBase> Btn_EndDay;
 
-	// 현재 정산 Day와 판정 결과를 표시하는 제목
+	// 현재 정산 Day를 표시하는 부제목
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_tHeader;
+	TObjectPtr<UTextBlock> Txt_ReportHeader;
 
-	// 판정 결과에 맞는 확인 버튼 문구 표시 영역
+	// 현재 점검 결과를 표시하는 상태 배지
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_Nextday;
+	TObjectPtr<UTextBlock> Txt_Badge;
 
 	// 분류 점수 값 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_CategorizingScore_Value;
+	TObjectPtr<UTextBlock> Txt_Score_Categorizing;
 
 	// 복귀 점수 값 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_ReturnScore_Value;
+	TObjectPtr<UTextBlock> Txt_Score_Return;
 
 	// 사고·기타 점수 값 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_AccidentScore_Value;
+	TObjectPtr<UTextBlock> Txt_Score_Accident;
 
 	// 퀘스트 점수 값 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_QuestScore_Value;
+	TObjectPtr<UTextBlock> Txt_Score_Quest;
 
 	// 당일 총점 값 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_TotalScore_Value;
+	TObjectPtr<UTextBlock> Txt_Score_Total;
 
 	// 착수금 값 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_RetainerCredit_Value;
+	TObjectPtr<UTextBlock> Txt_Credit_Retainer;
 
 	// 분류 환급 값 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_CategorizingCredit_Value;
+	TObjectPtr<UTextBlock> Txt_Credit_Categorizing;
 
 	// 사고·기타 조정 값 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_AccidentCredit_Value;
+	TObjectPtr<UTextBlock> Txt_Credit_Accident;
 
 	// 평가 보상 값 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_EvaluationCredit_Value;
+	TObjectPtr<UTextBlock> Txt_Credit_Evaluation;
 
 	// 퀘스트 금액 값 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_QuestCredit_Value;
-
-	// 구매·대출·상환 등 기타 금액 값 표시 영역
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_OtherCredit_Value;
+	TObjectPtr<UTextBlock> Txt_Credit_Quest;
 
 	// 당일 최종 크레딧 변동 합계 표시 영역
 	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_TotalCredit_Value;
+	TObjectPtr<UTextBlock> Txt_Credit_Total;
+
+	// 원장 배열에서 요청한 분류의 정산 값 조회
+	static int32 FindDailyReportValue(const TArray<FMD_DailyReportValue>& Values, EMD_DailyReportCategory Category);
+
+	// 부호와 천 단위 구분을 적용하고 최종 크레딧에만 통화 기호 추가
+	static FText FormatDailyReportAmount(int32 Amount, bool bIncludeCreditUnit);
+
+	// 정산 숫자의 부호에 따른 색상 적용
+	void ApplyAmountTextColor(UTextBlock* AmountTextBlock, int32 Amount);
 
 	// WBP 버튼 클릭을 외부 전환 요청 이벤트로 변환하는 처리
 	UFUNCTION()
