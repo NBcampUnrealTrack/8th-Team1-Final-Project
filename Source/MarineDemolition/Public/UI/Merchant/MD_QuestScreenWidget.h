@@ -56,6 +56,10 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
 	TObjectPtr<UMD_LoreCatalog> LoreCatalog;
 
+	// 선택한 사이트의 이름을 위젯 재구성 이후에도 유지하기 위한 보관
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
+	FText LoreSiteName;
+
 	// 로어 탭에 전달할 플레이어의 전역 수집 원장
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
 	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds;
@@ -69,7 +73,7 @@ protected:
 	TObjectPtr<UMD_CommonButtonBase> Btn_QuestTab;
 
 	// 로어 탭 선택과 화면 전환에 사용하는 공통 버튼
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_CommonButtonBase> Btn_LoreTab;
 
 	// 퀘스트 목록과 상세 정보를 표시하는 디자이너 하위 위젯
@@ -77,7 +81,7 @@ protected:
 	TObjectPtr<UMD_QuestWidget> WBP_MD_QuestTab;
 
 	// 수집한 로어 목록과 상세 정보를 표시하는 디자이너 하위 위젯
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidget))
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_LoreQuestTabWidget> WBP_MD_LoreTab;
 
 public:
@@ -95,7 +99,7 @@ public:
 
 	// 현재 현장의 카탈로그와 로어 수집 원장을 함께 적용하는 함수
 	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
-	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds);
+	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds, FText InSiteName);
 
 	// 퀘스트 하위 위젯과 로어 하위 위젯을 현재 캐시로 갱신하는 함수
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")

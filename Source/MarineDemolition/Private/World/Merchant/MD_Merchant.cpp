@@ -753,7 +753,18 @@ void AMD_Merchant::RefreshLoreWidgetFromComponent()
 	// 수집 원장의 식별자와 화면 표시 정의를 연결하기 위한 로어 카탈로그
 	UMD_LoreCatalog* LoreCatalog = IsValid(ExpeditionSite) == true ? ExpeditionSite->LoreCatalog : nullptr;
 
-	ActiveQuestWidget->SetLoreData(LoreCatalog, LoreComponent->GetDiscoveredLoreAssetIds());
+	// 탐사 현장이 없는 경우 사용할 빈 이름 준비
+	FText SiteName = FText::GetEmpty();
+	// 선택한 사이트 정의의 유효성 확인
+	if (IsValid(ExpeditionSite) == true)
+	{
+		// 카탈로그와 별도로 관리되는 실제 사이트 이름 조회
+		SiteName = ExpeditionSite->SiteName;
+	}
+	// 화면에 전달할 획득 원장 조회
+	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds = LoreComponent->GetDiscoveredLoreAssetIds();
+	// 선택 사이트 이름과 로어 데이터를 함께 전달
+	ActiveQuestWidget->SetLoreData(LoreCatalog, DiscoveredLoreAssetIds, SiteName);
 }
 
 void AMD_Merchant::RefreshShopWidgetFromComponent()

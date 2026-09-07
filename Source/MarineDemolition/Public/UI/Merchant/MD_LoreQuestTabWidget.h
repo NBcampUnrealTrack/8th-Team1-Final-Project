@@ -1,19 +1,29 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
+// 중복 헤더 포함 방지
 #pragma once
 
+// 기본 엔진 타입 사용
 #include "CoreMinimal.h"
+// 탭 위젯 기반 클래스 사용
 #include "Blueprint/UserWidget.h"
+// 로어 식별자 타입 사용
 #include "Types/Lore/MD_LoreTypes.h"
+// 리플렉션 생성 코드 포함
 #include "MD_LoreQuestTabWidget.generated.h"
 
+// 수집 진행률 표시 타입 전방 선언
 class UProgressBar;
+// 카드 목록 컨테이너 타입 전방 선언
 class UScrollBox;
+// 현장명과 진행 수량 표시 타입 전방 선언
 class UTextBlock;
+// 반복 생성할 로어 카드 타입 전방 선언
 class UMD_LoreCardWidget;
+// 현장별 로어 목록 타입 전방 선언
 class UMD_LoreCatalog;
 
-// 현장별 로어 수집 목록과 선택 기록물의 상세 내용을 표시하는 탭 클래스
+// 현장별 로어의 획득 여부와 수집 진행률을 표시하는 탭 클래스
 UCLASS()
 class MARINEDEMOLITION_API UMD_LoreQuestTabWidget : public UUserWidget
 {
@@ -23,65 +33,46 @@ public:
 	virtual void NativeConstruct() override;
 
 protected:
-	// 정적 정의와 복제 진행 상태를 결합하기 위한 현재 로어 카탈로그
+	// 현재 표시할 현장의 정적 목록 보관
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
 	TObjectPtr<UMD_LoreCatalog> LoreCatalog;
 
-	// 스크롤 목록에 반복 생성할 로어 카드 위젯 클래스
+	// 선택한 사이트의 이름을 위젯 재구성 이후에도 유지하기 위한 보관
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
+	FText LoreSiteName;
+
+	// 스크롤 목록에 반복 생성할 카드 클래스 설정
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Lore")
 	TSubclassOf<UMD_LoreCardWidget> LoreCardClass;
 
-	// 현재 카탈로그의 발견 상태를 카드와 상세 화면에 적용하기 위한 전역 로어 원장
+	// 카드별 획득 여부 판단을 위한 전역 획득 원장 보관
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
 	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds;
 
-	// 카드 선택과 상세 정보 표시를 연결하기 위한 카탈로그 배열 인덱스
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
-	int32 SelectedLoreIndex = INDEX_NONE;
-
-	// 현재 열람 중인 현장을 식별하기 위한 현장 이름 텍스트 참조
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidget, AllowPrivateAccess = "true"))
+	// 현장 이름 표시용 텍스트 바인딩
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> TXT_SiteName;
 
-	// 전체 기록물 대비 수집 완료 수량을 표시하기 위한 진행 텍스트 참조
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidget, AllowPrivateAccess = "true"))
+	// 전체 기록물 대비 획득 수량 표시용 텍스트 바인딩
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> TXT_LoreProgress;
 
-	// 로어 수집 비율을 시각적으로 표시하기 위한 진행 막대 참조
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidget, AllowPrivateAccess = "true"))
+	// 로어 수집 비율 표시용 진행 막대 바인딩
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidgetOptional))
 	TObjectPtr<UProgressBar> PB_LoreProgress;
 
-	// 기록물 카드를 세로 목록으로 제공하기 위한 스크롤 영역 참조
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidget, AllowPrivateAccess = "true"))
+	// 로어 카드 목록 표시용 스크롤 영역 바인딩
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidgetOptional))
 	TObjectPtr<UScrollBox> SL_LoreList;
 
-	// 선택된 기록물의 이름을 강조하기 위한 상세 제목 텍스트 참조
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidget, AllowPrivateAccess = "true"))
-	TObjectPtr<UTextBlock> TXT_DetailTitle;
-
-	// 선택된 기록물의 번호와 발견 위치를 안내하기 위한 상세 정보 텍스트 참조
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidget, AllowPrivateAccess = "true"))
-	TObjectPtr<UTextBlock> TXT_DetailMeta;
-
-	// 선택된 기록물의 로어 내용을 출력하기 위한 상세 본문 텍스트 참조
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidget, AllowPrivateAccess = "true"))
-	TObjectPtr<UTextBlock> TXT_DetailBody;
-
 public:
-	// 카탈로그와 복제된 전역 로어 원장을 목록 및 상세 화면에 적용하는 함수
-	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds);
+	// 카탈로그와 복제된 획득 원장을 목록과 진행률에 적용하는 함수
+	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds, FText InSiteName);
 
 protected:
-	// 카탈로그 순서대로 카드 위젯을 다시 생성하는 함수
+	// 카탈로그 순서대로 획득 여부를 표시하는 카드 생성
 	void RebuildLoreList();
 
-	// 현장 이름과 수집 수량 및 진행 막대를 갱신하는 함수
+	// 현장 이름과 획득 수량 및 진행 막대 갱신
 	void RefreshLoreHeader();
-
-	// 선택된 공개 상태에 따라 제목과 본문을 갱신하는 함수
-	void RefreshLoreDetails();
-
-	// 카드 선택 인덱스를 상세 화면에 반영하는 콜백
-	UFUNCTION()
-	void HandleLoreCardSelected(int32 LoreIndex);
 };
