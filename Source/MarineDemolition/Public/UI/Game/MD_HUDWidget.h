@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -36,6 +36,9 @@ protected:
 	TSoftClassPtr<UMD_TalkNotificationWidget> TalkNotificationClass;
 
 public:
+	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent)
+	void HandlePlayerJoinAndExit(const FText& PlayerName, bool bIsJoin);
+
 	// 알림 위젯을 생성하여 HUD 목록에 추가한 후 반환
 	UMD_TalkNotificationWidget* CreateTalkNotification();
 };
