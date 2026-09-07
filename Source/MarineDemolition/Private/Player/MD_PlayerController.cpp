@@ -27,6 +27,7 @@
 #include "Player/MD_PlayerCameraManager.h"
 
 #include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "GameFramework/GameSession.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
@@ -531,6 +532,37 @@ void AMD_PlayerController::InitializeGameplayHUD()
 		// Project Settings에서 자동 결정한 Layer에 생성된 HUD의 입력 정책을 적용한다.
 		HUDWidgetInstance->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
 	}
+}
+
+void AMD_PlayerController::ClientNotifyPlayerJoinAndExit_Implementation(const FText& PlayerName, bool bIsJoin)
+{
+	// 수신 컨트롤러의 로컬 UI 관리자 조회
+	ULocalPlayer* LocalPlayer = GetLocalPlayer();
+	// 로컬 플레이어가 없으면 알림 생략
+	if (IsValid(LocalPlayer) == false)
+	{
+		return;
+	}
+	// 수신 플레이어별 GameHUD 검색을 위한 관리자 참조
+	UMD_LocalUIManager* UIManager = LocalPlayer->GetSubsystem<UMD_LocalUIManager>();
+	// UI 관리자가 없으면 알림 생략
+	if (IsValid(UIManager) == false)
+	{
+		return;
+	}
+
+	// GameHUD 레이어에서 현재 표시 중인 HUD 선택
+	UCommonActivatableWidget* ActiveScreen = UIManager->GetActiveScreen(MDGameplayTags::UI_Layer_GameHUD);
+	// HUD 전용 참여 및 퇴장 이벤트 접근을 위한 형변환
+	UMD_HUDWidget* HUD = Cast<UMD_HUDWidget>(ActiveScreen);
+	// 활성 HUD가 없으면 보관 없이 알림 생략
+	if (IsValid(HUD) == false)
+	{
+		return;
+	}
+
+	// 수신 시점에 존재하는 HUD의 Blueprint 이벤트로 즉시 전달
+	HUD->HandlePlayerJoinAndExit(PlayerName, bIsJoin);
 }
 
 void AMD_PlayerController::InitializeScrapeFocusReticle()
