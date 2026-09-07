@@ -16,18 +16,26 @@
 #include "UI/Game/MD_HUDWidget.h"
 #include "UI/Game/MD_TalkNotificationWidget.h"
 #include "Online/Voice/MD_VoiceChatComponent.h"
+#include "Net/OnlineEngineInterface.h"
+#include "Net/VoiceDataCommon.h"
+#include "Util/MD_LogUtility.h"
+
+UMD_CharacterVOIPTalker::UMD_CharacterVOIPTalker(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	// 프레임 끝에 비워지는 음성 패킷을 관찰하기 위한 Tick 활성화
+	PrimaryComponentTick.bCanEverTick = true;
+	// 플레이 시작부터 패킷 관찰 실행
+	PrimaryComponentTick.bStartWithTickEnabled = true;
+	// 네트워크 전송 및 패킷 정리 이전에 크기 확인
+	PrimaryComponentTick.TickGroup = TG_PrePhysics;
+}
 
 void UMD_CharacterVOIPTalker::BeginPlay()
 {
 	Super::BeginPlay();
 
 	TryRegisterWithOwnerPlayerState();
-	// 소유권과 음성 컴포넌트의 늦은 준비를 포함한 로컬 송신 상태 확인 등록
-	UWorld* VoiceWorld = GetWorld();
-	if (IsValid(VoiceWorld) == true)
-	{
-		VoiceWorld->GetTimerManager().SetTimer(LocalVoiceStateTimer, this, &UMD_CharacterVOIPTalker::UpdateLocalVoiceState, 0.1f, true);
-	}
 	if (bVoiceRegistrationComplete == false)
 	{
 		if (UWorld* World = GetWorld())
@@ -52,11 +60,16 @@ void UMD_CharacterVOIPTalker::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (UWorld* World = GetWorld())
 	{
 		World->GetTimerManager().ClearTimer(PlayerStateRetryTimerHandle);
-		// 컴포넌트 제거 이후 로컬 송신 상태 확인 중단
-		World->GetTimerManager().ClearTimer(LocalVoiceStateTimer);
 	}
 
 	Super::EndPlay(EndPlayReason);
+}
+
+void UMD_CharacterVOIPTalker::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	// 입력 및 송신 상태를 변경하지 않고 로컬 송신 대기 패킷 확인
+	UpdateLocalVoiceState();
 }
 
 void UMD_CharacterVOIPTalker::TryRegisterWithOwnerPlayerState()
@@ -153,7 +166,9 @@ void UMD_CharacterVOIPTalker::UpdateLocalVoiceState()
 {
 	// 현재 소유 Pawn을 기준으로 로컬 플레이어 여부 확인
 	APawn* OwningPawn = Cast<APawn>(GetOwner());
-	if (IsValid(OwningPawn) == false)
+	// 패킷 감지 유지 시간을 계산할 월드 참조
+	UWorld* VoiceWorld = GetWorld();
+	if (IsValid(OwningPawn) == false || IsValid(VoiceWorld) == false)
 	{
 		return;
 	}
@@ -175,22 +190,84 @@ void UMD_CharacterVOIPTalker::UpdateLocalVoiceState()
 	bool bLocalVoiceActive = false;
 	if (IsValid(VoiceChat) == true)
 	{
-		// 실제 로컬 마이크 활성 플래그 조회
-		bLocalVoiceActive = VoiceChat->IsVoiceActivated();
+		// 송신을 중지한 경우 이전 패킷의 유지 시간도 적용하지 않도록 확인
+		bool bMicrophoneActive = VoiceChat->IsVoiceActivated();
+		if (bMicrophoneActive == true)
+		{
+			// 엔진이 인코딩하여 송신 대기 중인 음성 데이터 크기 조회
+			uint16 AvailableBytes = GetLocalVoicePacketBytes(PlayerController);
+			// 마지막 패킷 이후 경과 시간 판정을 위한 월드 시각 조회
+			double CurrentTime = VoiceWorld->GetTimeSeconds();
+			if (AvailableBytes > 1)
+			{
+				// 실제 패킷 감지 시 표시 시작 및 패킷 사이의 짧은 유지 시간 갱신
+				LocalVoicePacketDisplayUntil = CurrentTime + FMath::Max(LocalVoicePacketHoldSeconds, 0.0f);
+				bLocalVoiceActive = true;
+				if (bIsTalking == false)
+				{
+					// UI 표시를 시작한 패킷 크기 기록
+					UE_LOG(MarineDemolition, Log, TEXT("[VoiceHUD] Local packet detected: AvailableBytes=%u"), static_cast<uint32>(AvailableBytes));
+				}
+			}
+			else
+			{
+				// 패킷 간 공백으로 알림이 매 프레임 제거되는 현상 방지
+				bLocalVoiceActive = CurrentTime < LocalVoicePacketDisplayUntil;
+			}
+		}
+	}
+	// 마이크 중지 또는 유지 시간 만료 이후 이전 패킷 상태 제거
+	if (bLocalVoiceActive == false)
+	{
+		LocalVoicePacketDisplayUntil = 0.0;
 	}
 	// 변경되지 않은 상태의 반복 생성과 제거 방지
 	if (bLocalVoiceActive == bIsTalking)
 	{
 		return;
 	}
-	// 자기 자신의 마이크 활성 상태에 따른 표시 시작
+	// 1바이트를 초과하는 음성 패킷 감지 이후 알림 표시
 	if (bLocalVoiceActive == true)
 	{
 		StartTalkNotification();
 		return;
 	}
-	// 로컬 송신이 끝난 경우 자신의 알림 제거
+	// 유효 패킷이 일정 시간 없거나 마이크가 꺼진 경우 알림 제거
 	StopTalkNotification();
+}
+
+uint16 UMD_CharacterVOIPTalker::GetLocalVoicePacketBytes(APlayerController* PlayerController)
+{
+	// 패킷 조회가 불가능한 경우 반환할 기본 크기
+	uint16 AvailableBytes = 0;
+	// 소유 로컬 사용자 및 현재 월드 조회
+	ULocalPlayer* LocalPlayer = PlayerController->GetLocalPlayer();
+	UWorld* VoiceWorld = GetWorld();
+	if (IsValid(LocalPlayer) == false || IsValid(VoiceWorld) == false)
+	{
+		return AvailableBytes;
+	}
+	// 엔진 송신 사용자에 대응하는 컨트롤러 식별자 확인
+	int32 LocalUserNum = LocalPlayer->GetControllerId();
+	if (LocalUserNum < 0 || LocalUserNum > MAX_uint8)
+	{
+		return AvailableBytes;
+	}
+	// 네트워크 드라이버와 동일한 음성 패킷 접근 경로 사용
+	UOnlineEngineInterface* OnlineEngine = UOnlineEngineInterface::Get();
+	if (IsValid(OnlineEngine) == false)
+	{
+		return AvailableBytes;
+	}
+	// 송신 원본을 소비하지 않는 참조 카운트 복사본 조회
+	TSharedPtr<FVoicePacket> VoicePacket = OnlineEngine->GetLocalPacket(VoiceWorld, static_cast<uint8>(LocalUserNum));
+	if (VoicePacket.IsValid() == true)
+	{
+		// 네트워크 헤더를 제외한 인코딩 음성 버퍼 크기 조회
+		AvailableBytes = VoicePacket->GetBufferSize();
+	}
+	// 실제 송신 대기 음성 데이터 크기 반환
+	return AvailableBytes;
 }
 
 void UMD_CharacterVOIPTalker::StartTalkNotification()
