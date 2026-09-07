@@ -35,10 +35,15 @@ public:
 
     virtual void Logout(AController* Exiting) override;
 
+    virtual void PostLogin(APlayerController* NewPlayer) override;
+
 protected:
     virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+    // 참여 또는 퇴장한 플레이어의 이름을 각 소유 클라이언트에 전달
+    void NotifyPlayerJoinAndExit(AController* ChangedPlayer, bool bIsJoin);
 
  //TimeAlarm
 private:

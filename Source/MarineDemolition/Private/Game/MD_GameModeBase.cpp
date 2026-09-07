@@ -152,6 +152,9 @@ void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
 
 void AMD_GameModeBase::Logout(AController* Exiting)
 {
+    // PlayerState 제거 전에 퇴장 이름을 남은 플레이어에게 전달
+    NotifyPlayerJoinAndExit(Exiting, false);
+
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
     if (IsValid(SaveSlotManager) == true && IsValid(Exiting) == true)
@@ -160,6 +163,50 @@ void AMD_GameModeBase::Logout(AController* Exiting)
     }
 
     Super::Logout(Exiting);
+}
+
+void AMD_GameModeBase::PostLogin(APlayerController* NewPlayer)
+{
+    Super::PostLogin(NewPlayer);
+
+    // 로그인 완료 후 참여자 본인을 포함한 모든 플레이어에게 전달
+    NotifyPlayerJoinAndExit(NewPlayer, true);
+}
+
+void AMD_GameModeBase::NotifyPlayerJoinAndExit(AController* ChangedPlayer, bool bIsJoin)
+{
+    // 접속 변경 주체가 없는 경우 알림 생략
+    if (IsValid(ChangedPlayer) == false)
+    {
+        return;
+    }
+
+    // 퇴장 이후에도 사용할 이름을 복사하기 위한 상태 및 월드 참조
+    APlayerState* ChangedPlayerState = ChangedPlayer->PlayerState;
+    UWorld* World = GetWorld();
+    // 이름 또는 수신자 조회가 불가능한 경우 알림 생략
+    if (IsValid(ChangedPlayerState) == false || IsValid(World) == false)
+    {
+        return;
+    }
+
+    // 액터 수명과 독립적인 알림용 이름 스냅샷 생성
+    FString PlayerName = ChangedPlayerState->GetPlayerName();
+    FText PlayerNameText = FText::FromString(PlayerName);
+    // 서버의 각 컨트롤러를 통해 해당 소유 클라이언트로 전달
+    for (FConstPlayerControllerIterator It = World->GetPlayerControllerIterator(); It; ++It)
+    {
+        // 프로젝트 HUD를 사용하는 수신자 선택
+        AMD_PlayerController* Recipient = Cast<AMD_PlayerController>(It->Get());
+        // 무효한 수신자와 연결을 종료하는 당사자 제외
+        if (IsValid(Recipient) == false || (bIsJoin == false && Recipient == ChangedPlayer))
+        {
+            continue;
+        }
+
+        // 원격 클라이언트 및 리슨 서버 호스트의 로컬 HUD로 전달
+        Recipient->ClientNotifyPlayerJoinAndExit(PlayerNameText, bIsJoin);
+    }
 }
 
 void AMD_GameModeBase::HandleStrutCollapsed(AMD_CuttableWall* Wall, AActor* Cutter)
