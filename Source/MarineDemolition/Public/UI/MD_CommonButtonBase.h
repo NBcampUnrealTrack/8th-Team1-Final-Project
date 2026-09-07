@@ -24,6 +24,11 @@ public:
 
 	virtual void NativeOnCurrentTextStyleChanged() override;
 
+	// 부모와 같은 public 접근을 유지해야 한다. protected 로 좁히면 외부 호출자가 전부 막힌다.
+	virtual void SetIsEnabled(bool bInIsEnabled) override;
+
+	virtual void SetVisibility(ESlateVisibility InVisibility) override;
+
 protected:
 	virtual void HandleFocusReceived() override;
 
@@ -117,6 +122,10 @@ private:
 	 * Hover 음이 이미 울린 상태.
 	 * 마우스 Hover와 포커스 획득이 둘 다 NativeOnHovered 로 들어와서, 이 표시가 없으면
 	 * 버튼을 클릭할 때 Hover 음이 두 번 난다 (HandleFocusReceived 가 다시 부른다).
+	 *
+	 * NativeOnUnhovered 로만 지우면 실제 Hover 상태와 어긋날 수 있다. 마우스가 올라간 채로
+	 * 버튼이 비활성화되거나 숨겨지면 언호버가 오지 않아 표시가 남고, 그러면 다시 켠 뒤에
+	 * Hover 음이 영구히 죽는다. 그래서 SetIsEnabled / SetVisibility 에서도 지운다.
 	 */
 	bool bHoverSoundPlaying = false;
 };

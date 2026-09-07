@@ -108,6 +108,29 @@ void UMD_CommonButtonBase::NativeOnClicked()
 	PlayButtonSound(ClickSoundTag);
 }
 
+void UMD_CommonButtonBase::SetIsEnabled(bool bInIsEnabled)
+{
+	Super::SetIsEnabled(bInIsEnabled);
+
+	// 마우스가 올라간 채로 비활성화되면 언호버가 오지 않을 수 있다.
+	// 표시를 남겨 두면 다시 활성화한 뒤 Hover 음이 나지 않는다.
+	if (bInIsEnabled == false)
+	{
+		bHoverSoundPlaying = false;
+	}
+}
+
+void UMD_CommonButtonBase::SetVisibility(ESlateVisibility InVisibility)
+{
+	Super::SetVisibility(InVisibility);
+
+	// Visible 이 아니면 버튼이 히트 테스트에서 빠져 언호버가 오지 않을 수 있다.
+	if (InVisibility != ESlateVisibility::Visible)
+	{
+		bHoverSoundPlaying = false;
+	}
+}
+
 void UMD_CommonButtonBase::SetContentText(FText InContentText)
 {
 	// PreConstruct와 이후 TextBlock 재구성에서도 유지할 Content 값을 갱신한다.
