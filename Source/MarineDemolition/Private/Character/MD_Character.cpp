@@ -10,6 +10,7 @@
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
+#include "Component/Equipment/MD_FoamGunComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Comfort/MD_ComfortComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
@@ -130,6 +131,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	ComfortComponent = CreateDefaultSubobject<UMD_ComfortComponent>(TEXT("ComfortComponent"));
 
 	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
+
+	FoamGunComponent = CreateDefaultSubobject<UMD_FoamGunComponent>(TEXT("FoamGunComponent"));
 
 	OxygenComponent = CreateDefaultSubobject<UMD_OxygenComponent>(TEXT("OxygenComponent"));
 
@@ -976,7 +979,8 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 	const FVector2D MoveInput = Value.Get<FVector2D>();
 	if (MoveInput.SizeSquared() > FMath::Square(ScrapeFocusMoveInputDeadzone))
 	{
-		HandleScrapeFocusInputEnded();
+		// 이동 시 해제는 헤라 포커스 규칙. 폼건 RMB 조준은 이동 중에도 유지한다
+		CancelActiveScrapeAbilityAndEndFocus();
 	}
 
 	// 사다리 타기 상태 확인
@@ -1051,7 +1055,8 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 {
-	HandleScrapeFocusInputEnded();
+	// 상호작용 시 해제도 헤라 포커스만. 폼건 조준은 RMB 릴리즈로만 풀린다
+	CancelActiveScrapeAbilityAndEndFocus();
 
 	if (IsValid(InteractionComponent))
 	{
@@ -1135,6 +1140,16 @@ void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleScrapeFocusInputStarted()
 {
+	// 폼건: RMB를 누르는 동안 조준 궤적 표시
+	if (IsFoamGunEquipped())
+	{
+		if (IsValid(FoamGunComponent))
+		{
+			FoamGunComponent->SetAimHeld(true);
+		}
+		return;
+	}
+
 	if (!IsScrapeToolEquipped() || !IsValid(ScrapeToolComponent))
 	{
 		return;
@@ -1145,6 +1160,12 @@ void AMD_Character::HandleScrapeFocusInputStarted()
 
 void AMD_Character::HandleScrapeFocusInputEnded()
 {
+	// 도구 전환·컨텍스트 제거 경로에서도 호출되므로 조준 상태를 항상 정리한다
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(false);
+	}
+
 	CancelActiveScrapeAbilityAndEndFocus();
 }
 
@@ -1457,6 +1478,18 @@ bool AMD_Character::IsScrapeToolEquipped() const
 		&& CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_Scrape);
 }
 
+bool AMD_Character::IsFoamGunEquipped() const
+{
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return false;
+	}
+
+	const UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+	return IsValid(CurrentTool)
+		&& CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Foam);
+}
+
 UEnhancedInputLocalPlayerSubsystem* AMD_Character::GetEnhancedInputSubsystem() const
 {
 	APlayerController* PlayerController = Cast<APlayerController>(GetController());
@@ -1480,7 +1513,8 @@ void AMD_Character::RefreshScrapeFocusInputContext()
 		// 장비 identity가 실제로 바뀐 HandleHotbarChanged 또는 명시적 종료 사건이 맡는다.
 		return;
 	}
-	if (!IsScrapeToolEquipped())
+	// RMB 컨텍스트는 헤라(포커스)와 폼건(조준 궤적)이 공유한다
+	if (!IsScrapeToolEquipped() && !IsFoamGunEquipped())
 	{
 		RemoveScrapeFocusInputContext();
 		return;

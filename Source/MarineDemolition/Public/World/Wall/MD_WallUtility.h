@@ -43,6 +43,18 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Utility|Debug")
 	void DebugForceRepair(AActor* Repairer);
 
+	/**
+	 * 발사체 등 외부 시스템의 원격 수리 진입점 (폼건 착탄 밀봉).
+	 * Interact 경로는 "현재 장착 도구"를 검사하지만, 발사체는 착탄 시점에 장착
+	 * 상태를 보장할 수 없으므로 호출측이 도구 태그를 직접 증명한다.
+	 * 파손 상태 + 태그 일치일 때만 수리하고 성공 시 true. 서버 전용
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Utility")
+	bool TryExternalRepair(AActor* Repairer, FGameplayTag RepairToolTag);
+
+	FVector GetBreakLocation() const { return BreakLocation; }
+	FVector GetBreakNormal() const { return BreakNormal; }
+
 	// IMD_Interactable — 수리는 서버에서 검증
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
