@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/MD_Character.h"
@@ -1000,6 +1000,20 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 {
+	// 카메라 감도와 축 반전 적용 전의 원본 시점 입력 보관
+	FVector2D RawLookInput = Value.Get<FVector2D>();
+	// 헤라 포커스의 원본 입력 우선 처리
+	if (IsValid(ScrapeToolComponent) == true)
+	{
+		// 헤라 전용 감도와 제스처 방향을 유지한 입력 전달
+		bool bConsumed = ScrapeToolComponent->ConsumeScrapeFocusLookInput(RawLookInput);
+		// 포커스에서 소비한 입력의 카메라 중복 처리 차단
+		if (bConsumed == true)
+		{
+			return;
+		}
+	}
+
 	// 설정 매니저를 찾지 못한 경우 사용할 기본 조작 설정을 준비한다.
 	FMD_ControlSettings AppliedControlSettings;
 	// 현재 게임 인스턴스가 관리하는 설정 매니저를 찾는다.
@@ -1016,19 +1030,13 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 			AppliedControlSettings = ControlSettings->GetAppliedSettings();
 		}
 	}
-	// 원본 시점 입력에 적용된 감도 배율을 반영한다.
-	FVector2D LookInput = Value.Get<FVector2D>() * AppliedControlSettings.MouseSensitivity;
-	// 세로 시점 반전이 활성화되면 상하 입력 방향을 뒤집는다.
+	// 헤라에서 소비되지 않은 카메라 입력에 사용자 감도 적용
+	FVector2D LookInput = RawLookInput * AppliedControlSettings.MouseSensitivity;
+	// 카메라 상하 반전 설정의 적용 여부 확인
 	if (AppliedControlSettings.bInvertVerticalLook == true)
 	{
-		// 가로 입력에는 영향을 주지 않고 세로 입력에만 반대 부호를 적용한다.
+		// 카메라 세로 입력에 한정한 방향 반전
 		LookInput.Y *= -1.0f;
-	}
-	if (IsValid(ScrapeToolComponent)
-		&& ScrapeToolComponent->ConsumeScrapeFocusLookInput(LookInput))
-	{
-		// Focus 중에는 같은 입력을 가상 포인터에만 사용하고 카메라에는 전달하지 않는다.
-		return;
 	}
 
 	// 멀미 완화 응답 커브를 먹인다. 스무딩이 켜져 있으면 컴포넌트가 누적분을 직접 흘려보내므로

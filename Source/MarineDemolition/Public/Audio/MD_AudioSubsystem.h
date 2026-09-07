@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
@@ -94,6 +94,13 @@ public:
 	/** 사용자 설정의 전체 및 배경 음악 및 효과음 배율 적용 */
 	UFUNCTION(BlueprintCallable, Category = "MD|Audio")
 	void ApplyUserVolumes(float MasterVolume, float MusicVolume, float EffectsVolume);
+
+protected:
+	// 월드 시작 시 사용자 음량과 입출력 장치 복원
+	void RestoreWorldAudioSettings();
+
+	// 현재 맵에 대응하는 자동 재생 항목 예약
+	void ScheduleWorldAutoPlay(UWorld& InWorld);
 
 private:
 	/** 상태·환경 조건을 만족하는 항목 중 가장 구체적인 것을 고른다 */
