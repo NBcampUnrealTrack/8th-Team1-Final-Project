@@ -1,23 +1,15 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-// 로어 탭 선언 포함
 #include "UI/Merchant/MD_LoreQuestTabWidget.h"
-// 진행률 갱신 기능 사용
 #include "Components/ProgressBar.h"
-// 카드 목록 구성 기능 사용
 #include "Components/ScrollBox.h"
-// 현장명과 진행 문구 갱신 기능 사용
 #include "Components/TextBlock.h"
-// 현장별 로어 식별자 목록 사용
 #include "Data/Lore/MD_LoreCatalog.h"
-// 카드 제목 조회 기능 사용
 #include "Data/Lore/MD_LoreDefinition.h"
-// 획득 여부 카드 생성 기능 사용
 #include "UI/Merchant/MD_LoreCardWidget.h"
 
 void UMD_LoreQuestTabWidget::NativeConstruct()
 {
-	// 부모 위젯 초기화
 	Super::NativeConstruct();
 	// 현재 획득 원장으로 카드 구성
 	RebuildLoreList();
@@ -27,15 +19,26 @@ void UMD_LoreQuestTabWidget::NativeConstruct()
 
 void UMD_LoreQuestTabWidget::SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds, FText InSiteName)
 {
-	// 표시 대상 카탈로그 저장
-	LoreCatalog = InLoreCatalog;
-	// 선택한 사이트 정의의 표시 이름 저장
+	// 동일한 원장 갱신에서 카드 전체 재생성을 피하기 위한 변경 확인
+	bool bListChanged = LoreCatalog != InLoreCatalog || DiscoveredLoreAssetIds != InDiscoveredLoreAssetIds;
+	// 현장명까지 동일하면 하위 텍스트 및 진행률 갱신 생략
+	if (bListChanged == false && LoreSiteName.EqualTo(InSiteName) == true)
+	{
+		return;
+	}
+	// 현재 현장명 보관
 	LoreSiteName = InSiteName;
-	// 복제된 획득 원장 저장
-	DiscoveredLoreAssetIds = InDiscoveredLoreAssetIds;
-	// 변경된 획득 상태를 카드 목록에 반영
-	RebuildLoreList();
-	// 변경된 획득 수량을 진행률에 반영
+	// 카탈로그 또는 획득 원장이 바뀐 경우에만 카드 구성
+	if (bListChanged == true)
+	{
+		// 변경된 카탈로그 적용
+		LoreCatalog = InLoreCatalog;
+		// 복제된 획득 원장 갱신
+		DiscoveredLoreAssetIds = InDiscoveredLoreAssetIds;
+		// 변경된 데이터에 대한 카드 재구성
+		RebuildLoreList();
+	}
+	// 변경된 현장명과 수집 진행률 반영
 	RefreshLoreHeader();
 }
 
@@ -50,18 +53,10 @@ void UMD_LoreQuestTabWidget::RebuildLoreList()
 
 	// 목업 또는 이전 카탈로그 카드 제거
 	SL_LoreList->ClearChildren();
-	// 카탈로그 누락 여부 확인
-	if (IsValid(LoreCatalog) == false)
+	// 목록 생성에 필요한 카탈로그와 카드 클래스 확인
+	if (IsValid(LoreCatalog) == false || IsValid(LoreCardClass.Get()) == false)
 	{
-		// 카탈로그 부재로 빈 목록 유지
-		return;
-	}
-	// 생성할 카드 클래스 조회
-	UClass* CardWidgetClass = LoreCardClass.Get();
-	// 카드 클래스 누락 여부 확인
-	if (IsValid(CardWidgetClass) == false)
-	{
-		// 생성 클래스 부재로 빈 목록 유지
+		// 생성 데이터 부재로 빈 목록 유지
 		return;
 	}
 
@@ -115,10 +110,8 @@ void UMD_LoreQuestTabWidget::RefreshLoreHeader()
 	// 집계할 카탈로그 유효성 확인
 	if (IsValid(LoreCatalog) == true)
 	{
-		// 사이트 이름이 전달되지 않은 경우 기존 카탈로그 표시명 사용
-		bool bSiteNameEmpty = SiteName.IsEmpty();
 		// 사이트 표시명 누락 여부 확인
-		if (bSiteNameEmpty == true)
+		if (SiteName.IsEmpty() == true)
 		{
 			// 카탈로그 표시명으로 보완
 			SiteName = LoreCatalog->SiteDisplayName;
@@ -128,10 +121,8 @@ void UMD_LoreQuestTabWidget::RefreshLoreHeader()
 		// 현재 현장에 등록된 식별자만 획득 수량에 반영
 		for (FPrimaryAssetId LoreAssetId : LoreCatalog->LoreEntries)
 		{
-			// 카드와 동일한 획득 원장 기준 확인
-			bool bIsAcquired = DiscoveredLoreAssetIds.Contains(LoreAssetId);
 			// 획득한 항목만 집계
-			if (bIsAcquired == true)
+			if (DiscoveredLoreAssetIds.Contains(LoreAssetId) == true)
 			{
 				// 현장 내 획득 수량 증가
 				++AcquiredLoreCount;
@@ -139,10 +130,8 @@ void UMD_LoreQuestTabWidget::RefreshLoreHeader()
 		}
 	}
 
-	// 모든 데이터의 표시명이 비어 있는지 확인
-	bool bDisplayNameEmpty = SiteName.IsEmpty();
 	// 빈 제목 표시 방지
-	if (bDisplayNameEmpty == true)
+	if (SiteName.IsEmpty() == true)
 	{
 		// 표시할 사이트 이름이 없는 경우 기본 제목 사용
 		SiteName = FText::FromString(TEXT("로어 기록 보관함"));
@@ -157,19 +146,13 @@ void UMD_LoreQuestTabWidget::RefreshLoreHeader()
 	// 진행 수량 표시 대상 확인
 	if (IsValid(TXT_LoreProgress) == true)
 	{
-		// 획득 수량과 전체 수량을 진행 문구로 변환
-		FString ProgressString = FString::Printf(TEXT("수집 진행  %d / %d"), AcquiredLoreCount, TotalLoreCount);
-		// 진행 문구 표시용 텍스트 생성
-		FText ProgressText = FText::FromString(ProgressString);
 		// 수집 진행 수량 갱신
-		TXT_LoreProgress->SetText(ProgressText);
+		TXT_LoreProgress->SetText(FText::FromString(FString::Printf(TEXT("수집 진행  %d / %d"), AcquiredLoreCount, TotalLoreCount)));
 	}
 	// 진행 막대 표시 대상 확인
 	if (IsValid(PB_LoreProgress) == true)
 	{
-		// 빈 카탈로그의 0 나누기를 방지하는 수집 비율 계산
-		float ProgressRatio = TotalLoreCount > 0 ? static_cast<float>(AcquiredLoreCount) / static_cast<float>(TotalLoreCount) : 0.0f;
 		// 수집 진행률 갱신
-		PB_LoreProgress->SetPercent(ProgressRatio);
+		PB_LoreProgress->SetPercent((TotalLoreCount > 0 ? static_cast<float>(AcquiredLoreCount) / static_cast<float>(TotalLoreCount) : 0.0f));
 	}
 }

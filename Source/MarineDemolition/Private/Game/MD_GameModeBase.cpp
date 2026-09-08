@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Game/MD_GameModeBase.h"
@@ -267,11 +267,12 @@ void AMD_GameModeBase::CheckGameTimeEvents()
     if (CurrentPhase == EMD_WithdrawalPhase::Warning
         && MDGameState->HasReachedTime(18, 0))
     {
-        RequestEndDay();
+        // 제한 시간 도달 원인을 보고서까지 전달
+        RequestEndDay(EMD_DayEndReason::TimeExpired);
     }
 }
 
-void AMD_GameModeBase::RequestEndDay()
+void AMD_GameModeBase::RequestEndDay(EMD_DayEndReason EndReason)
 {
     // 18:00 자동 마감과 인터랙트가 겹쳐도 1회만 실행
     if (bDayFinalized)
@@ -281,73 +282,8 @@ void AMD_GameModeBase::RequestEndDay()
 
     GetWorldTimerManager().ClearTimer(CheckGameTimeTimerHandle);
 
-    const EMD_InspectionResult Result = FinalizeDay();
-
-    RouteAfterDay(Result);
-}
-
-void AMD_GameModeBase::ConfirmDayTransition(AMD_PlayerController* RequestingController)
-{
-    // EndDay 정산이 확정되기 전에 임의 전환 요청을 실행하지 않도록 하는 검사
-    if (bDayFinalized == false)
-    {
-        return;
-    }
-
-    // 먼저 도착한 확인 요청만 실제 전환을 실행하도록 하는 중복 검사
-    if (bDayTransitionConfirmed == true)
-    {
-        return;
-    }
-
-    // 유효하지 않은 컨트롤러를 통한 전환 요청을 거부하는 검사
-    if (IsValid(RequestingController) == false)
-    {
-        return;
-    }
-
-    // 이전 월드나 다른 월드의 컨트롤러 요청이 현재 전환에 섞이지 않도록 하는 검사
-    if (RequestingController->GetWorld() != GetWorld())
-    {
-        return;
-    }
-
-    // 동시에 도착한 여러 플레이어의 확인 RPC가 맵 이동을 중복 호출하지 않도록 하는 선점 상태
-    bDayTransitionConfirmed = true;
-
-    // 보고서 확인으로 전환이 확정된 시점부터 모든 클라이언트의 출발 연출을 시작하기 위한 상태 변경
-    AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
-    if (IsValid(MDGameState) == true)
-    {
-        MDGameState->SetWithdrawalPhase(EMD_WithdrawalPhase::Departed);
-    }
-
-    // 판정 종류와 관계없이 보고서를 닫고 동일한 출발 연출을 노출하도록 하는 클라이언트 상태 변경
-    UWorld* World = GetWorld();
-    if (IsValid(World) == true)
-    {
-        for (FConstPlayerControllerIterator ControllerIterator = World->GetPlayerControllerIterator(); ControllerIterator; ++ControllerIterator)
-        {
-            AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(ControllerIterator->Get());
-            if (IsValid(PlayerController) == true)
-            {
-                PlayerController->ClientCloseDailyReport();
-            }
-        }
-    }
-
-    // 기존 판정별 딜레이 선택은 유지하고 시작 시점만 보고서 확인 이후로 제한하는 처리
-    const bool bResultScreen = PendingResult == EMD_InspectionResult::ContractCleared || PendingResult == EMD_InspectionResult::GameOver;
-
-    // 일반적인 다음 날 전환은 추가 출발 연출 없이 즉시 실행한다.
-    if (bResultScreen == false)
-    {
-        ExecuteDayTransition();
-        return;
-    }
-
-    // 최종 결과 화면을 확인할 시간만 기존 타이머로 보장한다.
-    GetWorldTimerManager().SetTimer(DepartTravelTimerHandle, this, &AMD_GameModeBase::ExecuteDayTransition, ResultTravelDelay, false);
+    // 정산 결과와 요청 원인을 함께 반영
+    RouteAfterDay(FinalizeDay(), EndReason);
 }
 
 void AMD_GameModeBase::TravelToNextDay()
@@ -515,7 +451,7 @@ TSoftObjectPtr<UWorld> AMD_GameModeBase::MakeWorldAssetReference(UWorld* World) 
     return OutWorldReference;
 }
 
-void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result)
+void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReason EndReason)
 {
     AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>();
     const int32 Day = IsValid(GS) == true ? GS->GetCurrentDay() : 0;
@@ -527,10 +463,9 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result)
     }
 
     PendingResult = Result;
-    bDayTransitionConfirmed = false;
 
-    // 경고 상태와 보고서 크레딧에 사용할 서버 상인 원장 참조
     UGameInstance* GameInstance = GetGameInstance();
+    // 유효성 검사와 서브시스템 조회에 동일 인스턴스 재사용
     UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
 
     // 경고/비상 경제 컨텍스트를 다음 Day로 전달
@@ -566,34 +501,34 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result)
         DailyReport.bValid = true;
         DailyReport.Day = Day;
         DailyReport.Result = Result;
+        // 콘솔 확인과 시간 종료를 구분할 서버 마감 원인 보존
+        DailyReport.EndReason = EndReason;
         DailyReport.DailyScore = GS->GetScoreForDay(Day);
         // 일일 보고서가 서버 점수 Map을 그대로 전달받도록 구성
         DailyReport.DailyScoreTotals = GS->GetDailyScoreTotals();
 
-        // 서버 크레딧 원장이 존재할 때 당일 착수금·기타 변동·현재 잔액을 함께 기록
-        bool bMerchantValid = IsValid(Merchant);
-        if (bMerchantValid == true)
+        if (IsValid(Merchant) == true)
         {
             DailyReport.DailyCreditTotals = Merchant->GetDailyCreditTotals();
         }
         GS->SetInspectionReport(DailyReport);
     }
 
-    // 서버가 확정한 동일한 결과 화면을 각 로컬 플레이어에게 생성하도록 하는 클라이언트 알림
-    UWorld* World = GetWorld();
-    if (IsValid(World) == false)
+    // 하루 마감 진입점의 단일 실행 보장 이후 출발 상태 반영
+    if (IsValid(GS) == true)
     {
+        // 모든 클라이언트에 출발 단계 전달
+        GS->SetWithdrawalPhase(EMD_WithdrawalPhase::Departed);
+    }
+    // 일반 정산은 다음 작업일로 즉시 전환
+    if (Result != EMD_InspectionResult::ContractCleared && Result != EMD_InspectionResult::GameOver)
+    {
+        // 확정된 정산의 일반 일차 전환 실행
+        ExecuteDayTransition();
         return;
     }
-
-    for (FConstPlayerControllerIterator ControllerIterator = World->GetPlayerControllerIterator(); ControllerIterator; ++ControllerIterator)
-    {
-        AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(ControllerIterator->Get());
-        if (IsValid(PlayerController) == true)
-        {
-            PlayerController->ClientShowDailyReport(DailyReport);
-        }
-    }
+    // 최종 판정의 기존 결과 표시 시간 유지
+    GetWorldTimerManager().SetTimer(DepartTravelTimerHandle, this, &AMD_GameModeBase::ExecuteDayTransition, ResultTravelDelay, false);
 }
 
 void AMD_GameModeBase::ExecuteDayTransition()

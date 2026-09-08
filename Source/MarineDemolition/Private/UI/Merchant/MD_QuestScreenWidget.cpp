@@ -75,7 +75,6 @@ void UMD_QuestScreenWidget::NativeOnDeactivated()
 		OwningMerchantMenu->SetMenuPanelVisible(true);
 	}
 
-	// Common UI Stack이 비활성화 델리게이트를 전달하도록 공통 처리를 실행한다.
 	Super::NativeOnDeactivated();
 }
 
@@ -128,8 +127,12 @@ void UMD_QuestScreenWidget::RefreshDisplay()
 		WBP_MD_QuestTab->SetMainQuests(MainQuests);
 		WBP_MD_QuestTab->SetRepeatQuests(RepeatQuests);
 	}
-	// 현재 로어 카탈로그와 수집 원장을 하위 로어 탭에 다시 적용
-	SetLoreData(LoreCatalog, DiscoveredLoreAssetIds, LoreSiteName);
+	// 화면의 캐시를 다시 복사하지 않고 로어 탭에 직접 전달
+	if (IsValid(WBP_MD_LoreTab) == true)
+	{
+		// 현재 현장의 카탈로그와 획득 원장 적용
+		WBP_MD_LoreTab->SetLoreData(LoreCatalog, DiscoveredLoreAssetIds, LoreSiteName);
+	}
 }
 
 void UMD_QuestScreenWidget::ShowQuestTab()

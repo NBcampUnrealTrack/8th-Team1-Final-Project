@@ -7,11 +7,9 @@
 #include "Types/Score/MD_ScoreTypes.h"
 #include "MD_DailyReportWidget.generated.h"
 
-class UMD_CommonButtonBase;
 class UTextBlock;
-
-// 일일 보고서의 다음 전환 요청을 소유 PlayerController에 전달하는 이벤트
-DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_OnDailyReportContinueRequested);
+class AMD_DayEndConsole;
+class AMD_PlayerController;
 
 /**
  * GameMenu 레이어에서 정산 데이터와 확인 입력을 처리하는 위젯 클래스
@@ -26,24 +24,34 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Daily Report")
 	void SetReport(const FMD_InspectionReport& Report);
 
-	// 전환 요청 이후 중복 클릭 여부를 WBP 내부에서 제어하는 처리
-	UFUNCTION(BlueprintCallable, Category = "MD|Daily Report")
+	// Blueprint 그래프에서 전환 버튼의 입력 상태 제어
+	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category = "MD|Daily Report")
 	void SetContinueEnabled(bool bEnabled);
 
-	// 기본 버튼이 없는 파생 WBP에서도 Blueprint 입력으로 동일한 전환 요청을 발생시키는 진입점
+	// Blueprint 버튼 이벤트에서 서버의 하루 마감 요청 호출
 	UFUNCTION(BlueprintCallable, Category = "MD|Daily Report")
 	void RequestContinue();
 
-	// 확인 버튼 입력을 실제 서버 전환 요청과 분리하여 외부 소유자에게 전달하는 이벤트
-	UPROPERTY(BlueprintAssignable, Category = "MD|Daily Report")
-	FMD_OnDailyReportContinueRequested OnContinueRequested;
+    // UI를 연 콘솔을 서버 마감 검증 대상으로 전달
+    UFUNCTION(BlueprintCallable, Category = "MD|Daily Report")
+    void SetOwningConsole(AMD_DayEndConsole* InConsole);
 
 protected:
-	virtual void NativeConstruct() override;
+	virtual void NativeOnActivated() override;
 
-	virtual void NativeDestruct() override;
+	virtual void NativeOnDeactivated() override;
 
 protected:
+    // 활성화 기간에 응답 RPC를 구독할 소유 컨트롤러
+    TWeakObjectPtr<AMD_PlayerController> LedgerController;
+
+    // 퇴근 입력의 서버 거리 검증에 사용할 콘솔 참조
+    TWeakObjectPtr<AMD_DayEndConsole> OwningConsole;
+
+    // 서버 응답으로 받은 점수와 크레딧 기록 표시
+    UFUNCTION()
+    void HandleDailyLedgerReceived(FMD_InspectionReport Report);
+
 	// 양수와 영점 정산 숫자에 적용할 색상
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
 	FLinearColor PositiveAmountTextColor = FLinearColor(FColor(7, 142, 230));
@@ -51,15 +59,6 @@ protected:
 	// 음수 정산 숫자에 적용할 색상
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Appearance")
 	FLinearColor NegativeAmountTextColor = FLinearColor(FColor(234, 107, 114));
-
-	// BP에서 잔업 입력을 연결하는 공통 버튼
-	UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MD|Daily Report")
-	TObjectPtr<UMD_CommonButtonBase> Btn_Resume;
-
-private:
-	// 다음 Day 또는 결과 맵 전환 확인 입력을 받는 버튼
-	UPROPERTY(meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CommonButtonBase> Btn_EndDay;
 
 	// 현재 정산 Day를 표시하는 부제목
 	UPROPERTY(meta = (BindWidgetOptional))
@@ -113,17 +112,23 @@ private:
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_Credit_Total;
 
+	// 점수 영역의 분류별 값과 당일 총점 및 부호 색상 적용
+	void SetScoreValues(const FMD_InspectionReport& Report);
+
+	// 크레딧 영역의 분류별 값과 전체 변동 합계 및 부호 색상 적용
+	void SetCreditValues(const FMD_InspectionReport& Report);
+
 	// 원장 배열에서 요청한 분류의 정산 값 조회
 	static int32 FindDailyReportValue(const TArray<FMD_DailyReportValue>& Values, EMD_DailyReportCategory Category);
 
-	// 부호와 천 단위 구분을 적용하고 최종 크레딧에만 통화 기호 추가
-	static FText FormatDailyReportAmount(int32 Amount, bool bIncludeCreditUnit);
+	// 점수와 크레딧에 부호 및 천 단위 구분 적용
+	static FText FormatDailyReportAmount(int32 Amount);
 
-	// 정산 숫자의 부호에 따른 색상 적용
-	void ApplyAmountTextColor(UTextBlock* AmountTextBlock, int32 Amount);
+	// 정산 숫자의 서식과 부호 색상을 공통 경로로 적용
+	void SetAmountText(UTextBlock* AmountTextBlock, int32 Amount);
 
-	// WBP 버튼 클릭을 외부 전환 요청 이벤트로 변환하는 처리
-	UFUNCTION()
-	void HandleContinueClicked();
+	// Blueprint 그래프에서 정산 결과에 맞는 전환 문구 표시
+	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Daily Report")
+	void SetContinueText(const FText& ButtonText);
 
 };

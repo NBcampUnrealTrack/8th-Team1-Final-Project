@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -9,18 +9,21 @@
 #include "Types/Travel/MD_TravelTypes.h"
 #include "MD_PlayerController.generated.h"
 
+class AMD_GameStateBase;
 class AMD_TravelConsole;
 class AMD_DayEndConsole;
 class AMD_SectorCloseoutMarker;
 class AMD_Merchant;
 class UMD_HUDWidget;
-class UMD_DailyReportWidget;
 class UMD_ScrapeFocusReticleWidget;
 class UMD_SiteDefinition;
 class UMD_MerchantSubsystem;
 class UGameplayEffect;
 class AMD_CuttableWall;
 class AMD_WallUtility;
+
+// 서버에서 수신한 점수와 크레딧 기록을 로컬 UI에 전달하는 이벤트
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnDailyLedgerReceived, FMD_InspectionReport, Report);
 
 UCLASS()
 class MARINEDEMOLITION_API AMD_PlayerController : public APlayerController
@@ -29,6 +32,46 @@ class MARINEDEMOLITION_API AMD_PlayerController : public APlayerController
 
 public:
 	AMD_PlayerController();
+
+    // 응답 RPC를 구독하는 로컬 UI 이벤트
+    UPROPERTY(BlueprintAssignable, Category = "MD|Score")
+    FMD_OnDailyLedgerReceived OnDailyLedgerReceived;
+
+    // 늦게 도착한 이전 화면 응답을 구분하는 로컬 요청 번호
+    int32 DailyLedgerRequestId = 0;
+
+    // 현재 서버에서 구독 중인 요청 번호
+    int32 ServerDailyLedgerRequestId = 0;
+
+    // RPC 응답에 필요한 서버 원장 구독 대상
+    TWeakObjectPtr<AMD_GameStateBase> DailyLedgerSource;
+
+    // 로컬 UI의 점수와 크레딧 기록 요청 시작
+    UFUNCTION(BlueprintCallable, Category = "MD|Score")
+    void RequestDailyLedger();
+
+    // 화면 종료 시 서버 원장 구독과 이전 응답 무효화
+    UFUNCTION(BlueprintCallable, Category = "MD|Score")
+    void StopDailyLedger();
+
+    // 소유 클라이언트가 요청한 서버 원장 조회
+    UFUNCTION(Server, Reliable)
+    void ServerRequestDailyLedger(int32 RequestId);
+
+    // 닫힌 화면의 원장 변경 전송 중단
+    UFUNCTION(Server, Reliable)
+    void ServerStopDailyLedger(int32 RequestId);
+
+    // 요청자에게만 점수와 크레딧 기록 반환
+    UFUNCTION(Client, Reliable)
+    void ClientReceiveDailyLedger(int32 RequestId, FMD_InspectionReport Report);
+
+    // 변경된 서버 원장을 현재 요청자에게 전송
+    void SendDailyLedger();
+
+    // 서버 원장 이벤트 연결 정리
+    void UnbindDailyLedger();
+
 
 	/**
 	 * 입력 모드를 바꾸기 전에 진행 중인 헤라 Focus와 Ability를 함께 정리한다.
@@ -47,7 +90,6 @@ public:
 		AActor* NewViewTarget,
 		FViewTargetTransitionParams TransitionParams = FViewTargetTransitionParams()) override;
 
-	// 강퇴된 소유 클라이언트의 Session 정리 처리
 	virtual void ClientWasKicked_Implementation(const FText& KickReason) override;
 
 	// 콘솔을 통째로 넘겨 서버가 자기 사본 Sites[SiteIndex]에서 레벨을 읽음 (클라 값 신뢰 안 함)
@@ -84,14 +126,6 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveShopPurchaseResult(AMD_Merchant* Merchant, FName ItemId, EMD_ShopPurchaseResult Result);
 
-	// 서버가 확정한 Day 결과를 로컬 WBP_DailyReport에 표시하는 응답 진입점
-	UFUNCTION(Client, Reliable)
-	void ClientShowDailyReport(FMD_InspectionReport Report);
-
-	// 서버가 전환을 승인한 뒤 모든 로컬 보고서와 전용 입력 상태를 정리하는 응답
-	UFUNCTION(Client, Reliable)
-	void ClientCloseDailyReport();
-
 	/** 서버 이동 전에 각 소유 클라이언트에서 실제 로딩 화면을 시작한다. */
 	UFUNCTION(Client, Reliable)
 	void ClientPrepareLoadingTransition(const FText& Subtitle);
@@ -102,10 +136,6 @@ public:
 
 	/** 로딩 화면에 조작 주체 준비 완료를 알린다(하드 트래블/seamless travel 공용). */
 	void NotifyLoadingScreenPlayerReady();
-
-	// 일일 보고서 확인 버튼 입력을 서버의 보류 중인 Day 전환에 전달하는 요청
-	UFUNCTION(Server, Reliable)
-	void ServerConfirmDayTransition();
 
 	// 서버에서 반복 퀘스트 포기와 관련 페널티를 처리하도록 요청하는 함수
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
@@ -178,17 +208,13 @@ public:
 	void SetGameplayHUDVisible(bool bVisible);
 
 protected:
-	// 컨트롤러 시작 이후 이미 소유된 Pawn을 기준으로 HUD를 초기화하는 진입점
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
-	// 플레이 상태 전환 이후 Pawn 기반 HUD를 복구하는 진입점
 	virtual void BeginPlayingState() override;
 
-	// Seamless Travel 완료 이후 새 뷰포트에 HUD를 복구하는 진입점
 	virtual void PostSeamlessTravel() override;
 
-	// 서버 소유 및 클라이언트 복제로 Pawn이 확정될 때 HUD를 초기화하는 진입점
 	virtual void SetPawn(APawn* InPawn) override;
 
 private:
@@ -217,29 +243,11 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetInstance;
 
-	// EndDay 결과를 표시하고 다음 전환 확인 입력을 받는 기존 WBP_DailyReport 클래스
-	UPROPERTY(EditDefaultsOnly, Category = "HUD|Daily Report")
-	TSubclassOf<UMD_DailyReportWidget> DailyReportWidgetClass;
-
-	// 같은 EndDay 알림이 중복 도착해도 하나의 보고서 화면만 유지하기 위한 로컬 인스턴스
-	UPROPERTY()
-	TObjectPtr<UMD_DailyReportWidget> DailyReportWidgetInstance;
-
 	// 로컬 플레이어의 메인 HUD를 생성하거나 화면에 복구하는 처리
 	void InitializeGameplayHUD();
 
 	// 로컬 플레이어의 헤라 Focus 포인터를 생성하거나 화면에 복구하는 처리
 	void InitializeScrapeFocusReticle();
-
-	// WBP_DailyReport의 확인 버튼을 서버 전환 요청으로 연결하는 로컬 처리
-	UFUNCTION()
-	void HandleDailyReportContinueClicked();
-
-	// 맵 전환 전 보고서와 전용 입력 상태를 원래 게임플레이 상태로 복구하는 처리
-	void CloseDailyReport();
-
-	// 보고서 인스턴스와 외부 버튼 이벤트 연결을 정리하고 실제 제거 여부를 반환하는 공통 처리
-	bool RemoveDailyReportWidget();
 
 	/* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 private:

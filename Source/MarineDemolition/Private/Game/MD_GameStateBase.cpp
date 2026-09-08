@@ -1,4 +1,4 @@
-﻿#include "Game/MD_GameStateBase.h"
+#include "Game/MD_GameStateBase.h"
 #include "Component/Lore/MD_LoreComponent.h"
 #include "Data/Score/MD_ScoreTableData.h"
 #include "GameFramework/PlayerState.h"
@@ -6,6 +6,8 @@
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
+#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+#include "Engine/GameInstance.h"
 
 AMD_GameStateBase::AMD_GameStateBase()
 {
@@ -56,6 +58,8 @@ void AMD_GameStateBase::BeginPlay()
     if (HasAuthority())
     {
         StartGameTime();
+        // 초기 착수금과 현재 일차의 보고서 구성
+        RefreshDailyLedger();
     }
 }
 
@@ -275,23 +279,6 @@ void AMD_GameStateBase::AddScoreEvent(FGameplayTag EventTag, int32 Count, bool b
     RecordScore(Category, EventTag, Delta);
 }
 
-void AMD_GameStateBase::AddSampleScoreEvent(EMD_SampleGrade Grade, EMD_SampleScoreType Type)
-{
-    if (HasAuthority() == false || IsValid(ScoreTable) == false)
-    {
-        return;
-    }
-
-    const int32 Delta = ScoreTable->GetSampleValue(Grade, Type);
-    if (Delta == 0)
-    {
-        return;
-    }
-
-    // 샘플 점수는 현재 구성에서 사고·기타 점수로 기록
-    RecordScore(EMD_DailyReportCategory::Accident, FGameplayTag(), Delta);
-}
-
 EMD_DailyReportCategory AMD_GameStateBase::ResolveScoreCategory(FGameplayTag EventTag) const
 {
     // GameplayTag를 한 번만 문자열로 변환하여 정산 분류를 결정
@@ -354,13 +341,13 @@ void AMD_GameStateBase::RecordScore(EMD_DailyReportCategory Category, FGameplayT
     // 일차별 총점 계산과 원인 추적을 위한 기존 로그 유지
     ScoreLog.Add({EventTag, Delta, CurrentDay});
 
-    // 상세 보고서가 문자열 재분류 없이 조회하도록 Enum Map에 누적
-    int64& CategoryTotal = DailyScoreTotals.FindOrAdd(Category);
-    CategoryTotal += Delta;
+    DailyScoreTotals.FindOrAdd(Category) += Delta;
 
     // 누적 점수와 리슨 서버 UI를 동일한 기록 경로에서 갱신
     Score += Delta;
     OnRep_Score();
+    // 당일 점수 증감을 열린 보고서와 클라이언트에 반영
+    RefreshDailyLedger();
 }
 
 int32 AMD_GameStateBase::GetInspectionThreshold(int32 Day) const
@@ -439,6 +426,8 @@ void AMD_GameStateBase::SetInspectionReport(const FMD_InspectionReport& Report)
     }
 
     LastInspectionReport = Report;
+    // 확정된 점검 결과와 당일 원장의 일치 보장
+    RefreshDailyLedger();
     // 리슨 서버는 OnRep이 안 오므로 직접 방송
     OnRep_InspectionReport();
 }
@@ -459,6 +448,8 @@ void AMD_GameStateBase::SetCurrentDay(int32 NewDay)
         DailyScoreTotals.Reset();
     }
     CurrentDay = NewDay;
+    // 이전 일자의 원장을 새 보고서에 표시하지 않도록 갱신
+    RefreshDailyLedger();
     // 리슨 서버 호스트는 OnRep이 안 오므로 직접 방송
     OnRep_CurrentDay();
 }
@@ -507,6 +498,8 @@ bool AMD_GameStateBase::ApplyGameStateSaveData(const FMD_GameStateData& SaveData
     ContractDifficulty = SaveData.ContractDifficulty;
     CurrentDay = SaveData.ElapsedDay;
     Score = SaveData.Score;
+    // 저장 복원 후 현재 일자 기준 보고서 재구성
+    RefreshDailyLedger();
 
     // 리슨 서버와 접속 클라이언트가 같은 복원 결과를 즉시 관찰하도록 하는 알림과 복제 요청
     OnRep_Score();
@@ -561,4 +554,56 @@ void AMD_GameStateBase::HandleWithdrawalPhaseChanged()
     default:
         break;
     }
+}
+
+
+void AMD_GameStateBase::RefreshDailyLedger()
+{
+    // 서버에서만 원장 응답 데이터 구성
+    if (HasAuthority() == false)
+    {
+        return;
+    }
+    // 이전 일자 점검 결과가 남지 않는 새 보고서 구성
+    FMD_InspectionReport Report;
+    // 현재 일자와 확정 여부를 함께 확인한 점검 결과 재사용
+    if (LastInspectionReport.Day == CurrentDay && LastInspectionReport.bValid == true)
+    {
+        // 확정된 상태 배지와 기준 점수 보존
+        Report = LastInspectionReport;
+    }
+    // 당일 기록 조회에 필요한 일차 반영
+    Report.Day = CurrentDay;
+    // 마감 이전에도 조회 가능한 원장임을 표시
+    Report.bValid = true;
+    // 계약 누적 점수와 당일 점수 분리
+    Report.Score = Score;
+    // 당일 점수 로그 합계 조회
+    Report.DailyScore = GetScoreForDay(CurrentDay);
+    // 분류별 점수 원장 조회
+    Report.DailyScoreTotals = GetDailyScoreTotals();
+    // 이전 보고서의 크레딧 원장 제거
+    Report.DailyCreditTotals.Reset();
+    // 현재 월드의 서버 상인 원장 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    if (IsValid(GameInstance) == true)
+    {
+        // 서버 크레딧 로그를 보관하는 서브시스템 조회
+        UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+        // 유효한 서버 원장의 현재 일차 기록만 반영
+        if (IsValid(Merchant) == true && Merchant->GetCurrentDay() == CurrentDay)
+        {
+            // 실제 잔액 변동을 반영한 분류별 크레딧 기록 조회
+            Report.DailyCreditTotals = Merchant->GetDailyCreditTotals();
+        }
+    }
+    // 값이 같으면 구독 중인 모든 클라이언트의 중복 응답 전송 생략
+    if (FMD_InspectionReport::StaticStruct()->CompareScriptStruct(&DailyLedger, &Report, 0) == true)
+    {
+        return;
+    }
+    // 완성된 배열의 소유권을 서버 캐시로 이전
+    DailyLedger = MoveTemp(Report);
+    // 변경된 원장만 구독 컨트롤러에 알림
+    OnDailyLedgerChanged.Broadcast();
 }

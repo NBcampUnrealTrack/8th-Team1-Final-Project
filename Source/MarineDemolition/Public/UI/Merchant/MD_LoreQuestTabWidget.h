@@ -1,26 +1,16 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
-// 중복 헤더 포함 방지
 #pragma once
 
-// 기본 엔진 타입 사용
 #include "CoreMinimal.h"
-// 탭 위젯 기반 클래스 사용
+#include "UObject/PrimaryAssetId.h"
 #include "Blueprint/UserWidget.h"
-// 로어 식별자 타입 사용
-#include "Types/Lore/MD_LoreTypes.h"
-// 리플렉션 생성 코드 포함
 #include "MD_LoreQuestTabWidget.generated.h"
 
-// 수집 진행률 표시 타입 전방 선언
 class UProgressBar;
-// 카드 목록 컨테이너 타입 전방 선언
 class UScrollBox;
-// 현장명과 진행 수량 표시 타입 전방 선언
 class UTextBlock;
-// 반복 생성할 로어 카드 타입 전방 선언
 class UMD_LoreCardWidget;
-// 현장별 로어 목록 타입 전방 선언
 class UMD_LoreCatalog;
 
 // 현장별 로어의 획득 여부와 수집 진행률을 표시하는 탭 클래스

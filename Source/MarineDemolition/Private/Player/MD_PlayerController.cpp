@@ -1,9 +1,8 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Player/MD_PlayerController.h"
 #include "UI/Game/MD_HUDWidget.h"
-#include "UI/Game/MD_DailyReportWidget.h"
 #include "UI/Game/MD_ScrapeFocusReticleWidget.h"
 #include "UI/MD_LocalUIManager.h"
 
@@ -333,66 +332,6 @@ void AMD_PlayerController::ClientReceiveShopPurchaseResult_Implementation(AMD_Me
 	}
 }
 
-void AMD_PlayerController::ClientShowDailyReport_Implementation(FMD_InspectionReport Report)
-{
-	// 서버 전용 컨트롤러 사본에서 로컬 UI 생성을 시도하지 않도록 하는 검사
-	if (IsLocalController() == false)
-	{
-		return;
-	}
-
-	// 보고서 클래스를 지정하지 않은 구성에서도 기존처럼 즉시 전환 딜레이를 시작하기 위한 대체 요청
-	if (DailyReportWidgetClass == nullptr)
-	{
-		ServerConfirmDayTransition();
-		return;
-	}
-
-	if (IsValid(DailyReportWidgetInstance) == false)
-	{
-		// EndDay마다 기존 디자인의 단일 보고서 화면을 생성하기 위한 로컬 인스턴스
-		DailyReportWidgetInstance = CreateWidget<UMD_DailyReportWidget>(this, DailyReportWidgetClass);
-		if (IsValid(DailyReportWidgetInstance) == true)
-		{
-			// 새 인스턴스에서 발생한 확인 이벤트를 현재 소유 컨트롤러에 한 번만 연결하는 처리
-			DailyReportWidgetInstance->OnContinueRequested.AddDynamic(this, &AMD_PlayerController::HandleDailyReportContinueClicked);
-		}
-	}
-
-	if (IsValid(DailyReportWidgetInstance) == false)
-	{
-		// 위젯 생성 실패로 전환 확인 입력을 받을 수 없는 경우에도 진행을 보장하기 위한 대체 요청
-		ServerConfirmDayTransition();
-		return;
-	}
-
-	// 전용 위젯이 표시 데이터와 내부 버튼을 관리하고 PlayerController는 화면 상태만 조정하는 구조
-	DailyReportWidgetInstance->SetContinueEnabled(true);
-	DailyReportWidgetInstance->SetReport(Report);
-
-	if (DailyReportWidgetInstance->IsInViewport() == false)
-	{
-		// 다른 HUD보다 앞에서 전환 확인을 받도록 하는 최상위 화면 배치
-		DailyReportWidgetInstance->AddToViewport(1000);
-	}
-
-	DailyReportWidgetInstance->SetVisibility(ESlateVisibility::Visible);
-	SetGameplayHUDVisible(false);
-
-	// 보고서 확인 외 게임플레이 입력을 막고 버튼 조작에 포커스를 고정하기 위한 입력 모드
-	FInputModeUIOnly DailyReportInputMode;
-	DailyReportInputMode.SetWidgetToFocus(DailyReportWidgetInstance->TakeWidget());
-	SetInputMode(DailyReportInputMode);
-	bShowMouseCursor = true;
-	SetIgnoreMoveInput(true);
-	SetIgnoreLookInput(true);
-}
-
-void AMD_PlayerController::ClientCloseDailyReport_Implementation()
-{
-	CloseDailyReport();
-}
-
 // 서버가 트래블하기 직전에 각 소유 클라이언트에서 로딩 화면을 시작시킨다.
 // 서버 화면만 덮으면 원격 클라이언트는 아무 예고 없이 멈춘 것처럼 보인다.
 void AMD_PlayerController::ClientPrepareLoadingTransition_Implementation(const FText& Subtitle)
@@ -412,66 +351,6 @@ void AMD_PlayerController::NotifyLoadingScreenPlayerReady()
 	{
 		LoadingScreen->NotifyPlayerReady(this);
 	}
-}
-
-void AMD_PlayerController::ServerConfirmDayTransition_Implementation()
-{
-	// 실제 전환 분기와 중복 실행 방지는 서버 전용 GameMode가 최종 결정하는 구조
-	AMD_GameModeBase* MDGameMode = IsValid(GetWorld()) == true ? GetWorld()->GetAuthGameMode<AMD_GameModeBase>() : nullptr;
-	if (IsValid(MDGameMode) == true)
-	{
-		MDGameMode->ConfirmDayTransition(this);
-	}
-}
-
-void AMD_PlayerController::HandleDailyReportContinueClicked()
-{
-	// 연속 클릭으로 같은 서버 RPC가 반복 전송되지 않도록 즉시 버튼을 잠그는 처리
-	if (IsValid(DailyReportWidgetInstance) == true)
-	{
-		DailyReportWidgetInstance->SetContinueEnabled(false);
-	}
-
-	ServerConfirmDayTransition();
-}
-
-void AMD_PlayerController::CloseDailyReport()
-{
-	if (IsLocalController() == false)
-	{
-		return;
-	}
-
-	// 실제 보고서가 열린 경우에만 전용 입력 상태를 복구하기 위한 제거 결과 검사
-	if (RemoveDailyReportWidget() == false)
-	{
-		return;
-	}
-
-	// 보고서 전용 UI 입력과 숨긴 HUD를 다음 맵의 정상 게임플레이 상태로 복구하는 처리
-	SetGameplayHUDVisible(true);
-	SetInputMode(FInputModeGameOnly());
-	bShowMouseCursor = false;
-	ResetIgnoreMoveInput();
-	ResetIgnoreLookInput();
-}
-
-bool AMD_PlayerController::RemoveDailyReportWidget()
-{
-	// 호출자가 입력 상태 복구 필요 여부를 판단할 수 있도록 하는 제거 결과
-	bool bWasRemoved = false;
-
-	if (IsValid(DailyReportWidgetInstance) == false)
-	{
-		return bWasRemoved;
-	}
-
-	// 재생성 또는 맵 전환 전에 외부 이벤트와 뷰포트 소유권을 한 번에 정리하는 처리
-	DailyReportWidgetInstance->OnContinueRequested.RemoveDynamic(this, &AMD_PlayerController::HandleDailyReportContinueClicked);
-	DailyReportWidgetInstance->RemoveFromParent();
-	DailyReportWidgetInstance = nullptr;
-	bWasRemoved = true;
-	return bWasRemoved;
 }
 
 void AMD_PlayerController::ServerRequestSectorCloseout_Implementation(AMD_SectorCloseoutMarker* Marker)
@@ -773,7 +652,6 @@ void AMD_PlayerController::PostSeamlessTravel()
 {
 	Super::PostSeamlessTravel();
 
-	CloseDailyReport();
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
 	SubmitPlatformNickname();
@@ -796,6 +674,8 @@ void AMD_PlayerController::SetPawn(APawn* InPawn)
 
 void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    // 월드 종료 후 원장 변경 응답이 발생하지 않도록 구독 정리
+    UnbindDailyLedger();
 	if (ApplicationWillDeactivateHandle.IsValid())
 	{
 		FCoreDelegates::ApplicationWillDeactivateDelegate.Remove(
@@ -809,7 +689,6 @@ void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 		ScrapeFocusReticleWidgetInstance = nullptr;
 	}
 
-	RemoveDailyReportWidget();
 
 	CancelScrapeInteraction();
 	Super::EndPlay(EndPlayReason);
@@ -1191,4 +1070,110 @@ void AMD_PlayerController::ServerFinalizeContract_Implementation()
 	{
 		Merchant->FinalizeContract();
 	}
+}
+
+
+void AMD_PlayerController::RequestDailyLedger()
+{
+    // 로컬 화면 요청만 서버 원장 조회로 전달
+    if (IsLocalController() == false)
+    {
+        return;
+    }
+    // 이전 활성화의 지연 응답을 구분할 요청 번호 갱신
+    DailyLedgerRequestId = DailyLedgerRequestId == MAX_int32 ? 1 : DailyLedgerRequestId + 1;
+    // 서버 원장 조회와 변경 구독 요청
+    ServerRequestDailyLedger(DailyLedgerRequestId);
+}
+
+void AMD_PlayerController::StopDailyLedger()
+{
+    // 로컬 화면에서 시작한 구독만 종료
+    if (IsLocalController() == false)
+    {
+        return;
+    }
+    // 정리할 서버 구독의 요청 번호 보관
+    int32 PreviousRequestId = DailyLedgerRequestId;
+    // 전송 중이던 응답을 로컬에서 먼저 무효화
+    DailyLedgerRequestId = DailyLedgerRequestId == MAX_int32 ? 1 : DailyLedgerRequestId + 1;
+    // 서버의 해당 구독만 종료
+    ServerStopDailyLedger(PreviousRequestId);
+}
+
+void AMD_PlayerController::ServerRequestDailyLedger_Implementation(int32 RequestId)
+{
+    // 동일 컨트롤러의 이전 구독 정리
+    UnbindDailyLedger();
+    // 새 응답의 요청 번호 저장
+    ServerDailyLedgerRequestId = RequestId;
+    // 현재 서버 월드 조회
+    UWorld* World = GetWorld();
+    if (IsValid(World) == false)
+    {
+        return;
+    }
+    // 점수와 크레딧 원장을 조합하는 서버 소유자 조회
+    AMD_GameStateBase* GameState = World->GetGameState<AMD_GameStateBase>();
+    if (IsValid(GameState) == false)
+    {
+        return;
+    }
+    // 최초 응답 전에 최신 원장 구성
+    GameState->RefreshDailyLedger();
+    // 이후 원장 변경에 대한 응답 RPC 연결
+    GameState->OnDailyLedgerChanged.AddUObject(this, &AMD_PlayerController::SendDailyLedger);
+    // 구독 해제와 응답 조회에 사용할 서버 원장 보관
+    DailyLedgerSource = GameState;
+    // 현재 원장의 최초 응답 전송
+    SendDailyLedger();
+}
+
+void AMD_PlayerController::ServerStopDailyLedger_Implementation(int32 RequestId)
+{
+    // 오래된 종료 요청이 새 활성화의 구독을 해제하지 않도록 검사
+    if (RequestId != ServerDailyLedgerRequestId)
+    {
+        return;
+    }
+    // 현재 화면 요청의 구독 정리
+    UnbindDailyLedger();
+}
+
+void AMD_PlayerController::SendDailyLedger()
+{
+    // 서버에서 연결한 원장 소유자 조회
+    AMD_GameStateBase* GameState = DailyLedgerSource.Get();
+    if (IsValid(GameState) == false)
+    {
+        return;
+    }
+    // 요청한 플레이어의 소유 연결에만 데이터 전달
+    ClientReceiveDailyLedger(ServerDailyLedgerRequestId, GameState->GetDailyLedger());
+}
+
+void AMD_PlayerController::ClientReceiveDailyLedger_Implementation(int32 RequestId, FMD_InspectionReport Report)
+{
+    // 닫혔거나 재활성화된 화면의 이전 응답 폐기
+    if (RequestId != DailyLedgerRequestId)
+    {
+        return;
+    }
+    // 로컬 UI는 RPC 응답으로 받은 기록만 표시
+    OnDailyLedgerReceived.Broadcast(Report);
+}
+
+void AMD_PlayerController::UnbindDailyLedger()
+{
+    // 서버 원장 이벤트 구독 대상 조회
+    AMD_GameStateBase* GameState = DailyLedgerSource.Get();
+    if (IsValid(GameState) == true)
+    {
+        // 현재 컨트롤러의 원장 변경 수신 해제
+        GameState->OnDailyLedgerChanged.RemoveAll(this);
+    }
+    // 이전 월드와 구독 번호 정리
+    DailyLedgerSource.Reset();
+    // 전송할 활성 요청이 없는 상태 표시
+    ServerDailyLedgerRequestId = 0;
 }
