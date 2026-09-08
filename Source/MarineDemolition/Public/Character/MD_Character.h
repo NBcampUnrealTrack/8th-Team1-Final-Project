@@ -318,6 +318,8 @@ private:
 	void HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
+	// 조작 설정 키가 반영된 런타임 플레이어 입력 컨텍스트 조회
+	UInputMappingContext* ResolvePlayerMappingContext();
 
 	// 클라이언트의 사다리 점프 이탈을 서버에 반영하는 요청
 	UFUNCTION(Server, Reliable)

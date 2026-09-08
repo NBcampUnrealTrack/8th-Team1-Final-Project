@@ -17,7 +17,6 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
-#include "InputCoreTypes.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -26,9 +25,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Camera/CameraComponent.h"
-#include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
-#include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshSocket.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -37,6 +34,8 @@
 #include "GameFramework/PlayerStart.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
+#include "Gameplay/Settings/MD_ControlSettingCategory.h"
+#include "Gameplay/Settings/MD_SettingsManager.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/GameplayAbility.h"
@@ -314,9 +313,13 @@ void AMD_Character::BeginPlay()
 	{
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = GetEnhancedInputSubsystem())
 		{
-			if (IsValid(PlayerMappingContext))
+			// 조작 설정 키가 반영된 런타임 입력 컨텍스트 조회
+			UInputMappingContext* MappingContext = ResolvePlayerMappingContext();
+			// 준비된 입력 컨텍스트에 한정한 로컬 플레이어 등록
+			if (IsValid(MappingContext) == true)
 			{
-				Subsystem->AddMappingContext(PlayerMappingContext, 0);
+				// 이동 키와 설정된 비이동 액션 키를 포함한 입력 컨텍스트 활성화
+				Subsystem->AddMappingContext(MappingContext, 0);
 			}
 		}
 
@@ -998,9 +1001,13 @@ void AMD_Character::PawnClientRestart()
 
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = GetEnhancedInputSubsystem())
 	{
-		if (IsValid(PlayerMappingContext))
+		// 재시작 이후 다시 사용할 런타임 입력 컨텍스트 조회
+		UInputMappingContext* MappingContext = ResolvePlayerMappingContext();
+		// 준비된 입력 컨텍스트에 한정한 로컬 플레이어 재등록
+		if (IsValid(MappingContext) == true)
 		{
-			Subsystem->AddMappingContext(PlayerMappingContext, 0);
+			// 현재 조작 설정 키가 반영된 입력 컨텍스트 활성화
+			Subsystem->AddMappingContext(MappingContext, 0);
 		}
 	}
 
@@ -1111,6 +1118,41 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	}
 }
 
+UInputMappingContext* AMD_Character::ResolvePlayerMappingContext()
+{
+	// 설정 매니저나 카테고리를 찾지 못할 때 사용할 원본 입력 컨텍스트
+	UInputMappingContext* ResolvedMappingContext = PlayerMappingContext;
+	// 캐릭터에 원본 입력 컨텍스트가 없는 경우의 빈 결과 반환
+	if (IsValid(ResolvedMappingContext) == false)
+	{
+		return ResolvedMappingContext;
+	}
+	// 현재 게임 인스턴스의 설정 매니저 조회
+	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	// 설정 시스템이 없는 환경의 원본 입력 컨텍스트 유지
+	if (IsValid(SettingsManager) == false)
+	{
+		return ResolvedMappingContext;
+	}
+	// 현재 적용된 조작 설정과 런타임 매핑을 소유한 카테고리 조회
+	UMD_ControlSettingCategory* ControlCategory = SettingsManager->GetControlSettings();
+	// 조작 카테고리가 없는 환경의 원본 입력 컨텍스트 유지
+	if (IsValid(ControlCategory) == false)
+	{
+		return ResolvedMappingContext;
+	}
+	// 원본의 트리거와 모디파이어를 보존한 설정 전용 복제본 준비
+	UInputMappingContext* ConfiguredMappingContext = ControlCategory->PrepareInputMappingContext(PlayerMappingContext);
+	// 복제본 생성 성공에 한정한 반환 컨텍스트 교체
+	if (IsValid(ConfiguredMappingContext) == true)
+	{
+		// 사용자 선택 키가 반영된 런타임 입력 컨텍스트 보관
+		ResolvedMappingContext = ConfiguredMappingContext;
+	}
+	// 로컬 플레이어 서브시스템에 등록할 입력 컨텍스트 반환
+	return ResolvedMappingContext;
+}
+
 void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 {
 	if (!Controller)
@@ -1146,12 +1188,43 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 {
-	const FVector2D LookInput = Value.Get<FVector2D>();
-	if (IsValid(ScrapeToolComponent)
-		&& ScrapeToolComponent->ConsumeScrapeFocusLookInput(LookInput))
+	// 카메라 감도와 축 반전 적용 전의 원본 시점 입력 보관
+	FVector2D RawLookInput = Value.Get<FVector2D>();
+	// 헤라 포커스의 원본 입력 우선 처리
+	if (IsValid(ScrapeToolComponent) == true)
 	{
-		// Focus 중에는 같은 입력을 가상 포인터에만 사용하고 카메라에는 전달하지 않는다.
-		return;
+		// 헤라 전용 감도와 제스처 방향을 유지한 입력 전달
+		bool bConsumed = ScrapeToolComponent->ConsumeScrapeFocusLookInput(RawLookInput);
+		// 포커스에서 소비한 입력의 카메라 중복 처리 차단
+		if (bConsumed == true)
+		{
+			return;
+		}
+	}
+
+	// 설정 매니저를 찾지 못한 경우 사용할 기본 조작 설정을 준비한다.
+	FMD_ControlSettings AppliedControlSettings;
+	// 현재 게임 인스턴스가 관리하는 설정 매니저를 찾는다.
+	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	// 유효한 설정 매니저가 있으면 조작 카테고리 인스턴스를 조회한다.
+	if (IsValid(SettingsManager) == true)
+	{
+		// 실제 입력에 반영된 조작 설정을 가진 카테고리를 찾는다.
+		UMD_ControlSettingCategory* ControlSettings = SettingsManager->GetControlSettings();
+		// 유효한 조작 설정 인스턴스가 있으면 적용된 값을 사용한다.
+		if (IsValid(ControlSettings) == true)
+		{
+			// UI에서 편집 중인 값이 아닌 마지막으로 적용된 설정을 가져온다.
+			AppliedControlSettings = ControlSettings->GetAppliedSettings();
+		}
+	}
+	// 헤라에서 소비되지 않은 카메라 입력에 사용자 감도 적용
+	FVector2D LookInput = RawLookInput * AppliedControlSettings.MouseSensitivity;
+	// 카메라 상하 반전 설정의 적용 여부 확인
+	if (AppliedControlSettings.bInvertVerticalLook == true)
+	{
+		// 카메라 세로 입력에 한정한 방향 반전
+		LookInput.Y *= -1.0f;
 	}
 
 	// 멀미 완화 응답 커브를 먹인다. 스무딩이 켜져 있으면 컴포넌트가 누적분을 직접 흘려보내므로
