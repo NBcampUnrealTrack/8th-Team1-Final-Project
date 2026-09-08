@@ -27,6 +27,7 @@ class UMD_EquipHotbarComponent;
 class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
+class UMD_FoamGunComponent;
 class UMD_OxygenComponent;
 class UMD_ComfortComponent;
 class UWidgetComponent;
@@ -118,6 +119,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Oxygen")
 	UMD_OxygenComponent* GetOxygenComponent() const { return OxygenComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
+	UMD_FoamGunComponent* GetFoamGunComponent() const { return FoamGunComponent; }
 
 	// 절단 루프 VFX 토글. 어빌리티가 서버·소유 클라 양쪽에서 부르고, 사본 프록시는 복제로 따라온다
 	void SetCutterVFXActive(bool bActive);
@@ -272,6 +276,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_SupplyComponent> SupplyComponent;
 
+	/** 폼건 충전·탄도 정본·조준 궤적 프리뷰 (기획 08 §4.2) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_FoamGunComponent> FoamGunComponent;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_OxygenComponent> OxygenComponent;
 
@@ -372,6 +380,9 @@ private:
 		UMD_ToolDefinition* SourceTool);
 
 	bool IsScrapeToolEquipped() const;
+
+	/** 현재 슬롯이 폼건인지. RMB 조준 컨텍스트 유지 판정에 쓴다 */
+	bool IsFoamGunEquipped() const;
 	UEnhancedInputLocalPlayerSubsystem* GetEnhancedInputSubsystem() const;
 
 	/**
