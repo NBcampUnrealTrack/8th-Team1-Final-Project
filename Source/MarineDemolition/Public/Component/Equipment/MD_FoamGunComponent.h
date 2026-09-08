@@ -51,6 +51,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|FoamGun")
 	void AddCharge(int32 Amount);
 
+	// 카트리지 1개 = 사격 1회분(기획 08 §4.3). 상점 충전량 산정에 쓴다
+	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
+	int32 GetShotCost() const { return ShotCost; }
+
 	// 발사 원점. 조준선과 탄도가 어긋나지 않도록 카메라 시점 기준으로 계산한다 (서버·클라 동일 산식)
 	FVector GetLaunchOrigin() const;
 

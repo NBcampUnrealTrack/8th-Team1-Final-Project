@@ -11,6 +11,7 @@
 
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Equipment/MD_FoamGunComponent.h"
 #include "Component/Lore/MD_LoreComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
@@ -36,6 +37,9 @@ namespace
 
 	/** 산소 확장 탱크 구매 직후 패시브 효과를 장착하기 위한 품목 식별자 */
 	const FName OxygenTankItemId(TEXT("IT-O2"));
+
+	/** 폼 카트리지 구매를 폼건 충전 게이지로 전달하기 위한 품목 식별자 */
+	const FName FoamCartridgeItemId(TEXT("IT-FG1"));
 
 	/**
 	 * 캐릭터 에셋 대체용 큐브를 사람 크기(60×60×180cm)로 맞추는 값.
@@ -71,6 +75,20 @@ namespace
 			}
 
 			SupplyComponent->AddSupport(1);
+			PurchasingCharacter->ForceNetUpdate();
+			return true;
+		}
+
+		// 폼 카트리지는 핫바 품목이 아니라 폼건 충전 게이지에 직접 지급하는 처리 (기획 08 §4.3)
+		if (ShopItem.ItemId == FoamCartridgeItemId)
+		{
+			UMD_FoamGunComponent* FoamGunComponent = PurchasingCharacter->FindComponentByClass<UMD_FoamGunComponent>();
+			if (IsValid(FoamGunComponent) == false || FoamGunComponent->IsChargeFull() == true)
+			{
+				return false;
+			}
+
+			FoamGunComponent->AddCharge(FoamGunComponent->GetShotCost());
 			PurchasingCharacter->ForceNetUpdate();
 			return true;
 		}
@@ -540,23 +558,41 @@ EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCh
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
 
+	// 지지대·폼 카트리지는 핫바를 거치지 않고 전용 컴포넌트로 직접 지급되는 품목
+	const bool bHotbarItem = ShopItem.ItemId != SupportItemId && ShopItem.ItemId != FoamCartridgeItemId;
+
 	// 상점 거래 식별자를 Hotbar 품목 데이터인 ToolDefinition으로 변환하는 처리
 	UMD_ToolDefinition* PurchasedToolDefinition = ShopItem.EquipmentDefinition.Get();
-	if (ShopItem.ItemId != SupportItemId && IsValid(PurchasedToolDefinition) == false)
+	if (bHotbarItem == true && IsValid(PurchasedToolDefinition) == false)
 	{
 		return EMD_ShopPurchaseResult::InvalidItem;
 	}
 
 	// 일회성 품목의 동일 계열 교체에 필요한 GameplayTag 유효성 검사
-	if (ShopItem.ItemId != SupportItemId && ShopItem.bPricePerUnit == false && PurchasedToolDefinition->ToolAbilityTag.IsValid() == false)
+	if (bHotbarItem == true && ShopItem.bPricePerUnit == false && PurchasedToolDefinition->ToolAbilityTag.IsValid() == false)
 	{
 		return EMD_ShopPurchaseResult::InvalidItem;
 	}
 
 	// ToolDefinition 하나로 수량 증가, 동일 태그 교체, 빈 항목 추가 가능성을 결제 전에 확인하는 검사
-	if (ShopItem.ItemId != SupportItemId && (HotbarComponent->CanAddTool(PurchasedToolDefinition) == false || (ShopItem.bPricePerUnit == true && HotbarComponent->GetToolCount(PurchasedToolDefinition) >= MAX_int32)))
+	if (bHotbarItem == true && (HotbarComponent->CanAddTool(PurchasedToolDefinition) == false || (ShopItem.bPricePerUnit == true && HotbarComponent->GetToolCount(PurchasedToolDefinition) >= MAX_int32)))
 	{
 		return EMD_ShopPurchaseResult::FullyStocked;
+	}
+
+	// 만충이면 상인이 카트리지 판매를 거절한다 — 결제 전에 걸러 크레딧이 빠지지 않게 한다 (기획 08 §4.3)
+	if (ShopItem.ItemId == FoamCartridgeItemId)
+	{
+		UMD_FoamGunComponent* FoamGunComponent = PurchasingCharacter->FindComponentByClass<UMD_FoamGunComponent>();
+		if (IsValid(FoamGunComponent) == false)
+		{
+			return EMD_ShopPurchaseResult::InvalidRequest;
+		}
+
+		if (FoamGunComponent->IsChargeFull() == true)
+		{
+			return EMD_ShopPurchaseResult::FullyStocked;
+		}
 	}
 
 	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
