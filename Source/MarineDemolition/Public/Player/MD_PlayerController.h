@@ -66,6 +66,14 @@ public:
     UFUNCTION(Client, Reliable)
     void ClientReceiveDailyLedger(int32 RequestId, FMD_InspectionReport Report);
 
+    // 서버 확정 보고서를 각 소유 클라이언트의 UI Manager에 전달
+    UFUNCTION(Client, Reliable)
+    void ClientShowDayEndReport(FGameplayTag ReportWidgetTag, FMD_InspectionReport Report, double EndServerTime);
+
+    // 서버의 5초 표시 종료를 각 소유 클라이언트에 전달
+    UFUNCTION(Client, Reliable)
+    void ClientCloseDayEndReport();
+
     // 변경된 서버 원장을 현재 요청자에게 전송
     void SendDailyLedger();
 
@@ -161,6 +169,7 @@ private:
 	//Attrivbute Health 확인용 콘솔 커맨드. UI연결되면 삭제
 	UFUNCTION(Exec)
 	void MD_ShowHealth();
+
 
 	UFUNCTION(Server,Reliable)
 	void ServerApplyTestDamage();

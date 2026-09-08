@@ -272,7 +272,7 @@ void AMD_GameModeBase::CheckGameTimeEvents()
     }
 }
 
-void AMD_GameModeBase::RequestEndDay(EMD_DayEndReason EndReason)
+void AMD_GameModeBase::RequestEndDay(EMD_DayEndReason EndReason, FGameplayTag ReportWidgetTag)
 {
     // 18:00 자동 마감과 인터랙트가 겹쳐도 1회만 실행
     if (bDayFinalized)
@@ -283,7 +283,7 @@ void AMD_GameModeBase::RequestEndDay(EMD_DayEndReason EndReason)
     GetWorldTimerManager().ClearTimer(CheckGameTimeTimerHandle);
 
     // 정산 결과와 요청 원인을 함께 반영
-    RouteAfterDay(FinalizeDay(), EndReason);
+    RouteAfterDay(FinalizeDay(), EndReason, ReportWidgetTag);
 }
 
 void AMD_GameModeBase::TravelToNextDay()
@@ -451,7 +451,7 @@ TSoftObjectPtr<UWorld> AMD_GameModeBase::MakeWorldAssetReference(UWorld* World) 
     return OutWorldReference;
 }
 
-void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReason EndReason)
+void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReason EndReason, FGameplayTag ReportWidgetTag)
 {
     AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>();
     const int32 Day = IsValid(GS) == true ? GS->GetCurrentDay() : 0;
@@ -520,15 +520,44 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReas
         // 모든 클라이언트에 출발 단계 전달
         GS->SetWithdrawalPhase(EMD_WithdrawalPhase::Departed);
     }
-    // 일반 정산은 다음 작업일로 즉시 전환
-    if (Result != EMD_InspectionResult::ContractCleared && Result != EMD_InspectionResult::GameOver)
+    // 시간 종료 등 콘솔이 없는 요청에는 등록된 기본 보고서 태그 사용
+    if (ReportWidgetTag.IsValid() == false)
     {
-        // 확정된 정산의 일반 일차 전환 실행
-        ExecuteDayTransition();
-        return;
+        // UI Manager 설정에 등록된 보고서 조회 태그
+        ReportWidgetTag = FGameplayTag::RequestGameplayTag(TEXT("UI.Layer.GameMenu.Report"));
     }
-    // 최종 판정의 기존 결과 표시 시간 유지
-    GetWorldTimerManager().SetTimer(DepartTravelTimerHandle, this, &AMD_GameModeBase::ExecuteDayTransition, ResultTravelDelay, false);
+    // 클라이언트의 남은 시간 계산에 사용할 서버 종료 시각
+    double EndServerTime = GetWorld()->GetTimeSeconds() + 5.0;
+    // 현재 접속한 각 플레이어의 소유 연결에 동일한 최종 정산 전달
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        // 소유 클라이언트 RPC를 제공하는 플레이어 선택
+        AMD_PlayerController* Controller = Cast<AMD_PlayerController>(It->Get());
+        if (IsValid(Controller) == true)
+        {
+            // 보고서 미표시 플레이어도 서버 정산 화면 생성
+            Controller->ClientShowDayEndReport(ReportWidgetTag, DailyReport, EndServerTime);
+        }
+    }
+    // 재클릭으로 연장되지 않는 서버 기준 5초 정산 표시
+    GetWorldTimerManager().SetTimer(DepartTravelTimerHandle, this, &AMD_GameModeBase::FinishDayEndReport, 5.0f, false);
+}
+
+void AMD_GameModeBase::FinishDayEndReport()
+{
+    // 로딩 및 맵 이동 전에 모든 소유 클라이언트의 정산 화면 종료
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        // 종료 RPC를 받을 접속 플레이어 확인
+        AMD_PlayerController* Controller = Cast<AMD_PlayerController>(It->Get());
+        if (IsValid(Controller) == true)
+        {
+            // 각 UI Manager가 보관한 정산 화면만 비활성화
+            Controller->ClientCloseDayEndReport();
+        }
+    }
+    // 일반 결과는 다음 일자, 최종 판정은 기존 결과 이동 실행
+    ExecuteDayTransition();
 }
 
 void AMD_GameModeBase::ExecuteDayTransition()
@@ -1020,4 +1049,31 @@ void AMD_GameModeBase::MD_SetWarned(int32 bWarned)
     {
         GS->SetInspectionWarned(bWarned != 0);
     }
+}
+
+void AMD_GameModeBase::MD_SetTime(int32 Hour)
+{
+    // 이미 정산 중인 날짜의 시간 변경 차단
+    if (bDayFinalized == true)
+    {
+        return;
+    }
+    // 현재 일자의 시간을 관리하는 서버 상태 조회
+    AMD_GameStateBase* State = GetGameState<AMD_GameStateBase>();
+    if (IsValid(State) == false)
+    {
+        return;
+    }
+    // 현재 일자는 유지하고 지정한 시의 정각으로 변경
+    bool bApplied = State->SetGameTimeHour(Hour);
+    if (bApplied == false)
+    {
+        // 설정 범위와 마감 상태 확인을 위한 실패 안내
+        UE_LOG(LogTemp, Warning, TEXT("[Time] 시각 설정 실패 %d시 작업 시간 범위와 마감 상태 확인"), Hour);
+        return;
+    }
+    // 적용된 정각 표시
+    UE_LOG(LogTemp, Display, TEXT("[Time] 현재 일자 시각 변경 %02d:00"), Hour);
+    // 기존 알림 및 시간 종료 처리 경로로 진입
+    CheckGameTimeEvents();
 }

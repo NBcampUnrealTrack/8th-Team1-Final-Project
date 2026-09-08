@@ -33,4 +33,7 @@ protected:
 
 	// 열려 있는 위젯 (중복 생성 방지용)
 	TWeakObjectPtr<UCommonActivatableWidget> ActiveWidget;
+public:
+    // 서버가 콘솔 BP에 설정된 보고서 태그를 조회하는 진입점
+    FORCEINLINE FGameplayTag GetConsoleWidgetTag() { return ConsoleWidgetTag; }
 };

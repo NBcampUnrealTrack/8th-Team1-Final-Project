@@ -4,6 +4,7 @@
 #include "World/Interaction/MD_DayEndConsole.h"
 #include "Player/MD_PlayerController.h"
 #include "Components/TextBlock.h"
+#include "GameFramework/GameStateBase.h"
 
 int32 UMD_DailyReportWidget::FindDailyReportValue(const TArray<FMD_DailyReportValue>& Values, EMD_DailyReportCategory Category)
 {
@@ -56,6 +57,27 @@ void UMD_DailyReportWidget::SetAmountText(UTextBlock* AmountTextBlock, int32 Amo
 void UMD_DailyReportWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
+    // 서버 확정 화면은 초기화 및 별도 원장 조회 없이 유지
+    if (bShowingFinalReport == true)
+    {
+        // 활성화 이벤트 이후에도 두 버튼 입력 잠금 유지
+        SetContinueEnabled(false);
+        // 활성화 이벤트 이후에도 이동 대기 버튼 숨김 유지
+        SetContinueVisibility(ESlateVisibility::Collapsed);
+        return;
+    }
+    // 마감 전 확인 화면에는 이전 카운트다운 표시 제거
+    if (IsValid(Txt_TravelTimer) == true)
+    {
+        // 풀에 남은 이전 보고서의 이동 문구 초기화
+        Txt_TravelTimer->SetText(FText::GetEmpty());
+        // 카운트다운 시작 전 전용 표시 영역 숨김
+        Txt_TravelTimer->SetVisibility(ESlateVisibility::Collapsed);
+    }
+    // 콘솔을 통해 연 확인 화면에만 잔업 버튼 표시
+    SetResumeVisibility(OwningConsole.IsValid() == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+    // 일반 확인 화면으로 재사용할 때 퇴근 버튼 표시 복원
+    SetContinueVisibility(ESlateVisibility::Visible);
     // 풀 재사용으로 남은 버튼 잠금 해제
     SetContinueEnabled(true);
     // 이전 활성화의 기록을 새 응답으로 오인하지 않도록 초기화
@@ -70,8 +92,6 @@ void UMD_DailyReportWidget::NativeOnActivated()
         Controller->OnDailyLedgerReceived.RemoveDynamic(this, &UMD_DailyReportWidget::HandleDailyLedgerReceived);
         // 최초 응답 전에 수신 이벤트 연결
         Controller->OnDailyLedgerReceived.AddDynamic(this, &UMD_DailyReportWidget::HandleDailyLedgerReceived);
-        // 비활성화 시 응답 구독을 정리할 컨트롤러 보관
-        LedgerController = Controller;
         // 서버 점수와 크레딧 기록 요청
         Controller->RequestDailyLedger();
     }
@@ -79,17 +99,10 @@ void UMD_DailyReportWidget::NativeOnActivated()
 
 void UMD_DailyReportWidget::NativeOnDeactivated()
 {
-    // 현재 화면의 RPC 응답 구독 대상 조회
-    AMD_PlayerController* Controller = LedgerController.Get();
-    if (IsValid(Controller) == true)
-    {
-        // 닫힌 화면으로 전달되는 응답 구독 정리
-        Controller->OnDailyLedgerReceived.RemoveDynamic(this, &UMD_DailyReportWidget::HandleDailyLedgerReceived);
-        // 서버의 원장 변경 전송과 이전 응답 중단
-        Controller->StopDailyLedger();
-    }
-    // 이전 소유 플레이어 참조 해제
-    LedgerController.Reset();
+    // 화면 수명에 맞춰 실시간 원장 응답 정리
+    StopLedgerUpdates();
+    // 풀 재사용 시 일반 콘솔 보고서로 초기화
+    bShowingFinalReport = false;
     // 닫힌 보고서가 이전 콘솔 참조를 재사용하지 않도록 정리
     OwningConsole.Reset();
 	Super::NativeOnDeactivated();
@@ -187,12 +200,14 @@ void UMD_DailyReportWidget::SetOwningConsole(AMD_DayEndConsole* InConsole)
 {
     // 풀 재사용 시 이전 콘솔 대신 현재 상호작용 대상 저장
     OwningConsole = InConsole;
+    // 활성 화면 재사용 시에도 콘솔 진입 여부에 맞는 버튼 표시
+    SetResumeVisibility(OwningConsole.IsValid() == true && bShowingFinalReport == false ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 }
 
 void UMD_DailyReportWidget::RequestContinue()
 {
     // 활성 보고서 입력만 하루 마감 요청으로 전달
-    if (IsActivated() == false)
+    if (IsActivated() == false || bShowingFinalReport == true)
     {
         return;
     }
@@ -211,10 +226,107 @@ void UMD_DailyReportWidget::RequestContinue()
 void UMD_DailyReportWidget::HandleDailyLedgerReceived(FMD_InspectionReport Report)
 {
     // 비활성 화면에 도착한 원장 응답 제외
-    if (IsActivated() == false)
+    if (IsActivated() == false || bShowingFinalReport == true)
     {
         return;
     }
     // 기존 숫자 서식과 부호별 색상을 유지한 서버 기록 표시
     SetReport(Report);
+}
+
+void UMD_DailyReportWidget::StopLedgerUpdates()
+{
+    // 현재 화면의 RPC 응답 구독 대상 조회
+    AMD_PlayerController* Controller = Cast<AMD_PlayerController>(GetOwningPlayer());
+    if (IsValid(Controller) == true && Controller->OnDailyLedgerReceived.IsAlreadyBound(this, &UMD_DailyReportWidget::HandleDailyLedgerReceived) == true)
+    {
+        // 닫힌 화면으로 전달되는 응답 구독 정리
+        Controller->OnDailyLedgerReceived.RemoveDynamic(this, &UMD_DailyReportWidget::HandleDailyLedgerReceived);
+        // 서버의 원장 변경 전송과 이전 응답 중단
+        Controller->StopDailyLedger();
+    }
+}
+
+void UMD_DailyReportWidget::SetFinalReport(FMD_InspectionReport& Report, double EndServerTime)
+{
+    // 최종 정산을 서버 표시 시간이 끝날 때까지 고정
+    bShowingFinalReport = true;
+    // 네트워크 전달 지연을 포함하는 서버 종료 시각 보관
+    ReportEndServerTime = EndServerTime;
+    // 새 확정 보고서의 최초 카운트다운 표시 허용
+    DisplayedRemainingSeconds = INDEX_NONE;
+    // 최종 정산에서는 잔업 버튼과 차지하던 공간 제거
+    SetResumeVisibility(ESlateVisibility::Collapsed);
+    // 이미 열린 콘솔 화면의 실시간 구독 종료
+    StopLedgerUpdates();
+    // 다시 마감을 요청할 콘솔 연결 해제
+    OwningConsole.Reset();
+    // 모든 플레이어가 동일한 서버 정산 값 표시
+    SetReport(Report);
+    // 퇴근 및 잔업 버튼의 수동 입력 차단
+    SetContinueEnabled(false);
+    // 이동 대기 중 퇴근 버튼과 차지하던 공간 제거
+    SetContinueVisibility(ESlateVisibility::Collapsed);
+    // 확정 보고서에서만 남은 시간 영역 표시
+    if (IsValid(Txt_TravelTimer) == true)
+    {
+        // 전용 텍스트 영역의 레이아웃 복원
+        Txt_TravelTimer->SetVisibility(ESlateVisibility::HitTestInvisible);
+    }
+    // 첫 프레임부터 실제 남은 시간 표시
+    UpdateRemainingTime();
+}
+
+bool UMD_DailyReportWidget::NativeOnHandleBackAction()
+{
+    // 5초 자동 종료 전에는 뒤로가기를 소비하여 화면 유지
+    if (bShowingFinalReport == true)
+    {
+        return true;
+    }
+    bool bHandled = Super::NativeOnHandleBackAction();
+    return bHandled;
+}
+
+void UMD_DailyReportWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+    Super::NativeTick(MyGeometry, InDeltaTime);
+    // 서버 확정 화면에서만 전환 시간 갱신
+    if (bShowingFinalReport == true)
+    {
+        UpdateRemainingTime();
+    }
+}
+
+void UMD_DailyReportWidget::UpdateRemainingTime()
+{
+    // 전용 시간 영역이 없는 보고서의 표시 갱신 생략
+    if (IsValid(Txt_TravelTimer) == false)
+    {
+        return;
+    }
+    // 서버와 동기화된 월드 시각을 제공하는 게임 상태 조회
+    AGameStateBase* State = GetWorld()->GetGameState();
+    // 게임 상태가 없는 검증 환경에서는 현재 월드 시각 사용
+    double ServerTime = IsValid(State) == true ? State->GetServerWorldTimeSeconds() : GetWorld()->GetTimeSeconds();
+    // 종료 직전까지 올림 표시하고 지연된 종료 응답에서는 영점 유지
+    int32 RemainingSeconds = FMath::Max(0, FMath::CeilToInt(ReportEndServerTime - ServerTime));
+    // 표시할 초가 달라진 경우에만 남은 시간 텍스트 갱신
+    if (DisplayedRemainingSeconds != RemainingSeconds)
+    {
+        // 다음 프레임의 중복 갱신 방지
+        DisplayedRemainingSeconds = RemainingSeconds;
+        // 남은 시간을 지정된 전용 텍스트 영역에 반영
+        Txt_TravelTimer->SetText(FText::Format(NSLOCTEXT("MDDailyReport", "RemainingTime", "{0}초 후 이동"), FText::AsNumber(RemainingSeconds)));
+    }
+}
+
+void UMD_DailyReportWidget::CloseFinalReport()
+{
+    // 일반 콘솔 확인 화면을 제외한 서버 확정 보고서만 종료
+    if (bShowingFinalReport == true)
+    {
+        // Common UI 활성화 수명에 따른 화면 및 구독 정리
+        DeactivateWidget();
+    }
 }

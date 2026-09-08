@@ -47,6 +47,9 @@ public:
     //Timer
     void StartGameTime();
 
+    // 현재 일자의 인게임 시각을 지정한 시의 정각으로 설정
+    bool SetGameTimeHour(int32 Hour);
+
     UFUNCTION(BlueprintPure, Category = "Game Time")
     double GetElapsedRealSeconds() const;
 

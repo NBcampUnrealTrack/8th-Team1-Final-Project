@@ -5,6 +5,7 @@
 #include "UI/Game/MD_HUDWidget.h"
 #include "UI/Game/MD_ScrapeFocusReticleWidget.h"
 #include "UI/MD_LocalUIManager.h"
+#include "UI/Game/MD_DailyReportWidget.h"
 
 #include "CommonActivatableWidget.h"
 #include "World/Interaction/MD_TravelConsole.h"
@@ -296,7 +297,8 @@ void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole*
 
 	if (AMD_GameModeBase* GM = GetWorld()->GetAuthGameMode<AMD_GameModeBase>())
 	{
-		GM->RequestEndDay();
+		// 서버 콘솔에 설정된 보고서를 모든 접속 플레이어에게 표시
+		GM->RequestEndDay(EMD_DayEndReason::Console, Console->GetConsoleWidgetTag());
 	}
 }
 
@@ -1176,4 +1178,87 @@ void AMD_PlayerController::UnbindDailyLedger()
     DailyLedgerSource.Reset();
     // 전송할 활성 요청이 없는 상태 표시
     ServerDailyLedgerRequestId = 0;
+}
+
+void AMD_PlayerController::ClientShowDayEndReport_Implementation(FGameplayTag ReportWidgetTag, FMD_InspectionReport Report, double EndServerTime)
+{
+    // 실제 화면을 소유한 로컬 플레이어만 UI 처리
+    if (IsLocalController() == false || IsValid(GetLocalPlayer()) == false)
+    {
+        return;
+    }
+    // 화면 등록 및 생성에 필요한 범용 레이어 관리자 조회
+    UMD_LocalUIManager* UIManager = GetLocalPlayer()->GetSubsystem<UMD_LocalUIManager>();
+    if (IsValid(UIManager) == false)
+    {
+        return;
+    }
+    // BP 태그가 지정한 화면 클래스와 실제 부모 레이어 조회
+    FGameplayTag LayerTag;
+    // 등록된 보고서 클래스의 동기 로드 대상
+    TSoftClassPtr<UCommonActivatableWidget> RegisteredClass;
+    if (UIManager->ResolveWidgetRegistration(ReportWidgetTag, LayerTag, RegisteredClass) == false)
+    {
+        return;
+    }
+    // 최종 정산 데이터를 받을 보고서 클래스만 사용
+    UClass* ReportClass = RegisteredClass.LoadSynchronous();
+    if (IsValid(ReportClass) == false || ReportClass->IsChildOf(UMD_DailyReportWidget::StaticClass()) == false)
+    {
+        return;
+    }
+    // 새 화면과 최상단 재사용 화면의 초기화 중복 방지
+    bool bReportInitialized = false;
+    // 활성화 전에 실시간 원장 요청을 멈추고 확정된 보고서 구성
+    auto InitializeReport = [&Report, &bReportInitialized, EndServerTime](UCommonActivatableWidget& Screen)
+    {
+        // 확인된 보고서 클래스의 실제 인스턴스 조회
+        UMD_DailyReportWidget* ReportWidget = Cast<UMD_DailyReportWidget>(&Screen);
+        if (IsValid(ReportWidget) == true)
+        {
+            // 최종 보고서 입력 잠금과 표시 데이터 적용
+            ReportWidget->SetFinalReport(Report, EndServerTime);
+            // 활성화 전 초기화 완료 표시
+            bReportInitialized = true;
+        }
+    };
+    // 요청자가 이미 열어둔 보고서는 재사용하고 다른 플레이어는 생성
+    UCommonActivatableWidget* Screen = UIManager->PushScreenToLayerInitialized(LayerTag, ReportClass, InitializeReport);
+    if (IsValid(Screen) == false)
+    {
+        return;
+    }
+    // UI Manager가 최상단을 재사용하여 콜백을 생략한 경우 보완
+    if (bReportInitialized == false)
+    {
+        // 기존 화면도 같은 서버 확정 보고서로 전환
+        InitializeReport(*Screen);
+    }
+}
+
+void AMD_PlayerController::ClientCloseDayEndReport_Implementation()
+{
+    // 서버 전용 컨트롤러의 UI 접근 제외
+    if (IsLocalController() == false || IsValid(GetLocalPlayer()) == false)
+    {
+        return;
+    }
+    // 화면 등록 및 생성에 필요한 범용 레이어 관리자 조회
+    UMD_LocalUIManager* UIManager = GetLocalPlayer()->GetSubsystem<UMD_LocalUIManager>();
+    if (IsValid(UIManager) == false)
+    {
+        return;
+    }
+    // 범용 조회 결과에서 이 플레이어의 확정 보고서만 선택
+    for (UCommonActivatableWidget* Screen : UIManager->GetActiveScreens())
+    {
+        // 일반 메뉴와 보고서 화면 구분
+        UMD_DailyReportWidget* ReportWidget = Cast<UMD_DailyReportWidget>(Screen);
+        // 콘솔 확인 화면은 유지하고 확정 보고서만 종료
+        if (IsValid(ReportWidget) == true)
+        {
+            // Common UI의 표준 비활성화 및 레이어 제거 처리
+            ReportWidget->CloseFinalReport();
+        }
+    }
 }

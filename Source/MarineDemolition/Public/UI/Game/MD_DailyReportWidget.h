@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -9,7 +9,6 @@
 
 class UTextBlock;
 class AMD_DayEndConsole;
-class AMD_PlayerController;
 
 /**
  * GameMenu 레이어에서 정산 데이터와 확인 입력을 처리하는 위젯 클래스
@@ -36,14 +35,44 @@ public:
     UFUNCTION(BlueprintCallable, Category = "MD|Daily Report")
     void SetOwningConsole(AMD_DayEndConsole* InConsole);
 
+    // 서버가 확정한 보고서를 입력 잠금 상태로 표시
+    void SetFinalReport(FMD_InspectionReport& Report, double EndServerTime);
+
+    // 서버 종료 신호에 따른 확정 보고서 비활성화
+    void CloseFinalReport();
+
 protected:
+    virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+
+    virtual bool NativeOnHandleBackAction() override;
+
 	virtual void NativeOnActivated() override;
 
 	virtual void NativeOnDeactivated() override;
 
 protected:
-    // 활성화 기간에 응답 RPC를 구독할 소유 컨트롤러
-    TWeakObjectPtr<AMD_PlayerController> LedgerController;
+    // 서버 표시 시간 동안 실시간 갱신 및 수동 닫기 차단
+    bool bShowingFinalReport = false;
+
+    // 서버가 보고서를 닫고 이동을 시작할 월드 시각
+    double ReportEndServerTime = 0.0;
+
+    // 같은 초의 남은 시간 문구를 반복 적용하지 않기 위한 캐시
+    int32 DisplayedRemainingSeconds = INDEX_NONE;
+
+    // 서버 기준 남은 시간을 전용 텍스트에 표시
+    void UpdateRemainingTime();
+
+    // Blueprint가 소유한 잔업 버튼의 표시 상태 제어
+    UFUNCTION(BlueprintImplementableEvent, Category = "MD|Daily Report")
+    void SetResumeVisibility(ESlateVisibility ResumeVisibility);
+
+    // 이동 대기 상태에 따른 퇴근 버튼 표시 제어
+    UFUNCTION(BlueprintImplementableEvent, Category = "MD|Daily Report")
+    void SetContinueVisibility(ESlateVisibility ContinueVisibility);
+
+    // 이전 실시간 원장 구독을 해제하는 공통 정리
+    void StopLedgerUpdates();
 
     // 퇴근 입력의 서버 거리 검증에 사용할 콘솔 참조
     TWeakObjectPtr<AMD_DayEndConsole> OwningConsole;
@@ -63,6 +92,10 @@ protected:
 	// 현재 정산 Day를 표시하는 부제목
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_ReportHeader;
+
+    // 다음 일자 이동까지 남은 시간 표시 영역
+    UPROPERTY(meta = (BindWidgetOptional))
+    TObjectPtr<UTextBlock> Txt_TravelTimer;
 
 	// 현재 점검 결과를 표시하는 상태 배지
 	UPROPERTY(meta = (BindWidgetOptional))

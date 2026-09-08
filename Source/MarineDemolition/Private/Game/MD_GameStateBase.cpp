@@ -607,3 +607,51 @@ void AMD_GameStateBase::RefreshDailyLedger()
     // 변경된 원장만 구독 컨트롤러에 알림
     OnDailyLedgerChanged.Broadcast();
 }
+
+
+bool AMD_GameStateBase::SetGameTimeHour(int32 Hour)
+{
+    // 시간 기준 변경 권한을 가진 서버 여부 확인
+    bool bAuthority = HasAuthority();
+    if (bAuthority == false)
+    {
+        return false;
+    }
+    // 이미 마감된 날짜의 정산 및 이동 상태 보존
+    if (WithdrawalPhase == EMD_WithdrawalPhase::Departed)
+    {
+        return false;
+    }
+    // 설정 가능한 작업 시간 범위의 시작 시각 확인
+    if (Hour < StartHour)
+    {
+        return false;
+    }
+    if (Hour > EndHour)
+    {
+        return false;
+    }
+    // 시간 환산에 필요한 실제 하루 길이 확인
+    if (RealDayDurationSeconds <= 0.0)
+    {
+        return false;
+    }
+    // 인게임 하루 길이가 양수인 설정만 허용
+    double TotalGameSeconds = static_cast<double>(EndHour - StartHour) * 3600.0;
+    if (TotalGameSeconds <= 0.0)
+    {
+        return false;
+    }
+    // 지정한 시각을 작업 시작 이후의 인게임 경과 초로 환산
+    double TargetGameSeconds = static_cast<double>(Hour - StartHour) * 3600.0;
+    // 기존 시간 진행 속도에 맞춘 서버 시작 시각 역산
+    GameStartServerTime = GetServerWorldTimeSeconds() - TargetGameSeconds * RealDayDurationSeconds / TotalGameSeconds;
+    // 시작 전에도 지정한 시각부터 시간 진행 허용
+    bGameTimeStarted = true;
+    // 시간을 되돌린 경우에도 기존 알림과 자동 마감 순서 재평가
+    SetWithdrawalPhase(EMD_WithdrawalPhase::None);
+    // 변경된 시간 기준과 출발 단계를 접속 플레이어에게 전송
+    ForceNetUpdate();
+    // 설정 요청의 정상 적용 결과 반환
+    return true;
+}
