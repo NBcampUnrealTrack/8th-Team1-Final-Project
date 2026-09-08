@@ -321,6 +321,7 @@ private:
 	void HandleAbilityInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
 	void HandleScrapeFocusToggleInput();
+	void HandleScrapeFocusReleasedInput();
 	void HandleScrapeFocusInputEnded();
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
 	void HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex);

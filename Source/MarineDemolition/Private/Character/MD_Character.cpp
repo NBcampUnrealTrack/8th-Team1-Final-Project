@@ -1095,6 +1095,16 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 			ETriggerEvent::Started,
 			this,
 			&AMD_Character::HandleScrapeFocusToggleInput);
+		EIC->BindAction(
+			InputConfig->ScrapeFocusAction,
+			ETriggerEvent::Completed,
+			this,
+			&AMD_Character::HandleScrapeFocusReleasedInput);
+		EIC->BindAction(
+			InputConfig->ScrapeFocusAction,
+			ETriggerEvent::Canceled,
+			this,
+			&AMD_Character::HandleScrapeFocusReleasedInput);
 	}
 
 	EIC->BindAction(InputConfig->MoveAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleMoveInput);
@@ -1354,6 +1364,15 @@ void AMD_Character::HandleScrapeFocusToggleInput()
 	}
 
 	ScrapeToolComponent->TryBeginScrapeFocus();
+}
+
+void AMD_Character::HandleScrapeFocusReleasedInput()
+{
+	// 폼건 조준만 홀드 방식이라 release에서 정리한다. 헤라 포커스는 토글이므로 여기서 건드리지 않는다
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(false);
+	}
 }
 
 void AMD_Character::HandleScrapeFocusInputEnded()
