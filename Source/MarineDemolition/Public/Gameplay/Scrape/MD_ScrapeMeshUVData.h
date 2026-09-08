@@ -5,12 +5,29 @@
 #include "MD_ScrapeMeshUVData.generated.h"
 
 class UStaticMesh;
+struct FMD_ScrapeCellLayout;
+class FMD_ScrapeCarrierWeights;
 
 /** Immutable display weight; gameplay ownership remains in the baked Cells. */
 struct FMD_ScrapeMeshUVVisualSample
 {
     int32 CellIndex = INDEX_NONE;
     float Weight = 0.0f;
+};
+
+/** Borrowed immutable seam addressing for one synchronous game-thread rebuild.
+ *  Never retain across profile mutation/cache invalidation; contains no UObject access. */
+struct FMD_ScrapeMeshUVVisualSeamView
+{
+    TConstArrayView<int32> Offsets;
+    TConstArrayView<FMD_ScrapeMeshUVVisualSample> Samples;
+    TConstArrayView<FMD_ScrapeMeshUVVisualSample> GetSamples(const int32 PixelIndex) const
+    {
+        if (PixelIndex < 0 || PixelIndex + 1 >= Offsets.Num()) return {};
+        const int32 Begin = Offsets[PixelIndex];
+        const int32 Count = Offsets[PixelIndex + 1] - Begin;
+        return Count > 0 ? Samples.Slice(Begin, Count) : TConstArrayView<FMD_ScrapeMeshUVVisualSample>();
+    }
 };
 
 /** A real shared subsegment; a T-junction can have several neighbors along one triangle edge. */
@@ -143,16 +160,73 @@ public:
 
 
 	UFUNCTION(CallInEditor, Category="Scrape|Bake") void BakeSourceMesh();
-	bool Validate(FString* OutError = nullptr) const;
+    /** Always performs the complete payload validation, including for loaded/cached assets. */
+    bool Validate(FString* OutError = nullptr) const;
+    /** Reuses successful validation only for clean, immutable loaded assets on the game thread. */
+    bool ValidateForRuntime(FString* OutError = nullptr) const;
+    /**
+     * Call before directly editing Cells/Triangles or derived metadata, even when sizes/LayoutId
+     * stay unchanged. Reinitialize live consumers after edits; change LayoutId for a new layout.
+     * Bake/editor/load hooks do this automatically. Raw writes are not detected by a cheap cache key.
+     */
+    void InvalidateRuntimeCaches() const;
+    uint64 GetRuntimeCacheRevision() const { return RuntimeCacheRevision; }
+    virtual void PostLoad() override;
+#if WITH_EDITOR
+    virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+    virtual void PostEditUndo() override;
+#endif
 	bool IsValidForMesh(const UStaticMesh* Mesh) const;
 	bool IsActiveCell(int32 CellIndex) const;
+    /** Baked portals plus unambiguous exact edges and shared-source fragment portals. Never serialized. */
+    TConstArrayView<FMD_ScrapeMeshUVNeighbor> GetTriangleNeighbors(int32 TriangleIndex) const;
 	/** Game-thread-only lookup shared by every wall using this immutable baked profile. */
 	const TMultiMap<int32, int32>& GetVisualDependents() const;
     /** Empty means the original single-source texel. Never serialized. */
     TConstArrayView<FMD_ScrapeMeshUVVisualSample> GetVisualSeamSamples(int32 PixelIndex) const;
+    /** Validate/build shared caches once, then borrow their arrays for this call only. */
+    FMD_ScrapeMeshUVVisualSeamView GetVisualSeamView() const;
     TConstArrayView<int32> GetVisualSeamDependents(int32 SourceCellIndex) const;
+    TSharedPtr<const FMD_ScrapeCellLayout> GetSharedCellLayout() const;
+    /** Game thread only. Exact scale determines area; rotation/translation do not. */
+    TSharedPtr<const FMD_ScrapeCarrierWeights> GetSharedCellCarrierWeights(const FTransform& Transform) const;
 
 private:
+    mutable uint64 RuntimeCacheRevision = 0;
+    void BuildExactAdjacencyCache() const;
+    mutable TMap<int32, TArray<FMD_ScrapeMeshUVNeighbor>> ExactAdjacencyOverrides;
+    mutable const FMD_ScrapeMeshUVTriangle* ExactAdjacencyTriangleData = nullptr;
+    mutable int32 ExactAdjacencyTriangleCount = INDEX_NONE;
+    mutable FGuid ExactAdjacencyLayoutId;
+    struct FRuntimeValidationKey
+    {
+        const UStaticMesh* Source = nullptr;
+        const UStaticMesh* RenderMesh = nullptr;
+        const FMD_ScrapeMeshUVCell* CellData = nullptr;
+        const FMD_ScrapeMeshUVTriangle* TriangleData = nullptr;
+        int32 CellCount = 0, TriangleCount = 0, ActiveCount = 0, UVChannel = 0;
+        FIntPoint Dimensions = FIntPoint::ZeroValue;
+        FGuid Layout, SourceGuid;
+        double Area = 0.0, WeldTolerance = 0.0, CellSize = 0.0;
+        bool Matches(const UMD_ScrapeMeshUVData& Data) const;
+        void Capture(const UMD_ScrapeMeshUVData& Data);
+    };
+    mutable FRuntimeValidationKey RuntimeValidationKey;
+    mutable bool bRuntimeValidationCached = false;
+    mutable TSharedPtr<const FMD_ScrapeCellLayout> CachedCellLayout;
+    mutable FGuid CellLayoutId;
+    mutable FIntPoint CellLayoutAtlasDimensions = FIntPoint::ZeroValue;
+    struct FCarrierWeightCacheEntry
+    {
+        FVector Scale = FVector::ZeroVector;
+        TWeakPtr<const FMD_ScrapeCarrierWeights> Weights;
+    };
+    mutable TArray<FCarrierWeightCacheEntry> CarrierWeightCache;
+    mutable FGuid CarrierWeightsLayoutId;
+    mutable FIntPoint CarrierWeightsAtlasDimensions = FIntPoint::ZeroValue;
+    mutable int32 CarrierWeightsCellCount = INDEX_NONE;
+    mutable int32 CarrierWeightsTriangleCount = INDEX_NONE;
+    mutable double CarrierWeightsTargetCellSize = 0.0;
 	void InvalidateVisualDependentsCache() const;
 	// Derived runtime data: never serialized, cooked, or expanded by the Details panel.
 	mutable TMultiMap<int32, int32> CachedVisualDependents;

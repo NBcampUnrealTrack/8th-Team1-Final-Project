@@ -33,7 +33,7 @@ bool UMD_ScrapeSurfaceComponent::TryCalculateContaminationCellCounts(
         return false;
     }
     // All exposed physical faces already have unique addresses in the first atlas.
-    // Preserve those addresses and the legacy two-slot GPU/save layout contract.
+    // Preserve these external atlas addresses, including save and network layout IDs.
     if (UsesMeshUVSurface())
     {
         OutStateCellCount = OutCellsPerFace;
@@ -48,7 +48,7 @@ const UMD_ScrapeMeshUVData* UMD_ScrapeSurfaceComponent::GetContaminationMeshUVDa
 
 bool UMD_ScrapeSurfaceComponent::IsContaminationCellActive(const int32 CellIndex) const
 {
-    if (!ContaminationCells.IsValidIndex(CellIndex))
+    if (GetContaminationStorageIndex(CellIndex) == INDEX_NONE)
     {
         return false;
     }
@@ -155,31 +155,118 @@ bool UMD_ScrapeSurfaceComponent::TryBuildMeshUVStroke(
 
 bool UMD_ScrapeSurfaceComponent::InitializeContaminationCellCarrierWeights()
 {
-    ContaminationCellCarrierWeights.Reset();
+    SharedContaminationCellCarrierWeights.Reset();
     ContaminationCarrierWeightScale = FVector::OneVector;
     if (!UsesMeshUVSurface()) { return true; }
-    if (!SurfaceMesh || !ContaminationMeshUVData
-        || !FMD_ScrapeFaceProgress::BuildMeshUVCellCarrierWeights(*ContaminationMeshUVData,
-            SurfaceMesh->GetComponentTransform(), ContaminationCellCarrierWeights)) { return false; }
+    if (!SurfaceMesh || !ContaminationMeshUVData) { return false; }
+    SharedContaminationCellCarrierWeights = ContaminationMeshUVData->GetSharedCellCarrierWeights(
+        SurfaceMesh->GetComponentTransform());
+    if (!SharedContaminationCellCarrierWeights) { return false; }
     ContaminationCarrierWeightScale = SurfaceMesh->GetComponentScale();
     return true;
+}
+
+FMD_ScrapeCarrierWeightView UMD_ScrapeSurfaceComponent::GetContaminationCellCarrierWeights() const
+{
+    return SharedContaminationCellCarrierWeights
+        ? SharedContaminationCellCarrierWeights->GetView() : FMD_ScrapeCarrierWeightView();
 }
 
 double UMD_ScrapeSurfaceComponent::GetContaminationCellCarrierWeight(const int32 CellIndex) const
 {
     if (!UsesMeshUVSurface()) { return ContaminationCells.IsValidIndex(CellIndex) ? 1.0 : 0.0; }
-    return ContaminationCellCarrierWeights.IsValidIndex(CellIndex) ? ContaminationCellCarrierWeights[CellIndex] : 0.0;
+    const FMD_ScrapeCarrierWeightView Weights = GetContaminationCellCarrierWeights();
+    return Weights.IsValidIndex(CellIndex) ? Weights[CellIndex] : 0.0;
 }
 
 bool UMD_ScrapeSurfaceComponent::AreContaminationCarrierWeightsCurrent() const
 {
     return !UsesMeshUVSurface() || (SurfaceMesh && ContaminationMeshUVData
-        && ContaminationCellCarrierWeights.Num() == ContaminationMeshUVData->Cells.Num()
-        && !ContaminationCellCarrierWeights.IsEmpty()
+        && GetContaminationCellCarrierWeights().Num() == ContaminationMeshUVData->Cells.Num()
+        && !GetContaminationCellCarrierWeights().IsEmpty()
         && SurfaceMesh->GetComponentScale().Equals(ContaminationCarrierWeightScale, 1.0e-4));
 }
 
 FVector UMD_ScrapeSurfaceComponent::GetContaminationCarrierWeightScale() const
 {
     return UsesMeshUVSurface() ? ContaminationCarrierWeightScale : FVector::OneVector;
+}
+
+int32 UMD_ScrapeSurfaceComponent::GetContaminationAtlasCellCount() const
+{
+    return ContaminationCellLayout ? ContaminationCellLayout->AtlasToActive.Num() : ContaminationCells.Num();
+}
+
+int32 UMD_ScrapeSurfaceComponent::GetContaminationStorageIndex(const int32 AtlasCellIndex) const
+{
+    if (!ContaminationCellLayout)
+    {
+        return ContaminationCells.IsValidIndex(AtlasCellIndex) ? AtlasCellIndex : INDEX_NONE;
+    }
+    const int32 Slot = ContaminationCellLayout->AtlasToActive.IsValidIndex(AtlasCellIndex)
+        ? ContaminationCellLayout->AtlasToActive[AtlasCellIndex] : INDEX_NONE;
+    return Slot >= 0 && Slot < GetContaminationStorageCellCount() ? Slot : INDEX_NONE;
+}
+
+int32 UMD_ScrapeSurfaceComponent::GetContaminationStorageCellCount() const
+{
+    return !ContaminationPagedCells.IsEmpty() ? ContaminationPagedCells.Num() : ContaminationCells.Num();
+}
+
+FMD_ScrapeSurfaceCell UMD_ScrapeSurfaceComponent::ReadContaminationStorageCell(const int32 Index) const
+{
+    return !ContaminationPagedCells.IsEmpty() ? ContaminationPagedCells.Read(Index) : ContaminationCells[Index];
+}
+
+FMD_ScrapeSurfaceCell& UMD_ScrapeSurfaceComponent::EditContaminationStorageCell(const int32 Index)
+{
+    return !ContaminationPagedCells.IsEmpty() ? ContaminationPagedCells.Edit(Index) : ContaminationCells[Index];
+}
+
+void UMD_ScrapeSurfaceComponent::SetContaminationStorageCell(const int32 Index, const FMD_ScrapeSurfaceCell& Cell)
+{
+    if (!ContaminationPagedCells.IsEmpty()) { ContaminationPagedCells.Set(Index, Cell); }
+    else { ContaminationCells[Index] = Cell; }
+}
+
+bool UMD_ScrapeSurfaceComponent::HasGeneratedInitialContamination(const int32 Index) const
+{
+    return !ContaminationPagedCells.IsEmpty() ? ContaminationPagedCells.IsValidIndex(Index)
+        : ContaminationGeneratedInitialAmounts.IsValidIndex(Index);
+}
+
+float UMD_ScrapeSurfaceComponent::GetGeneratedInitialContamination(const int32 Index) const
+{
+    if (!HasGeneratedInitialContamination(Index)) { return 0.0f; }
+    return !ContaminationPagedCells.IsEmpty() ? ContaminationPagedCells.GetInitialCell(Index).InitialContamination
+        : ContaminationGeneratedInitialAmounts[Index];
+}
+
+bool UMD_ScrapeSurfaceComponent::HasLocalPredictedContaminationState() const
+{
+    return !LocalPredictedPagedCells.IsEmpty() || !LocalPredictedContaminationCells.IsEmpty();
+}
+
+FMD_ScrapeCellView UMD_ScrapeSurfaceComponent::GetContaminationCellView()
+{
+    return !ContaminationPagedCells.IsEmpty()
+        ? FMD_ScrapeCellView(&ContaminationPagedCells, ContaminationCellLayout.Get())
+        : FMD_ScrapeCellView(MakeArrayView(ContaminationCells), ContaminationCellLayout.Get());
+}
+
+FMD_ScrapeConstCellView UMD_ScrapeSurfaceComponent::GetContaminationCellView() const
+{
+    return !ContaminationPagedCells.IsEmpty()
+        ? FMD_ScrapeConstCellView(&ContaminationPagedCells, ContaminationCellLayout.Get())
+        : FMD_ScrapeConstCellView(MakeArrayView(ContaminationCells), ContaminationCellLayout.Get());
+}
+
+bool UMD_ScrapeSurfaceComponent::GetContaminationCellState(const int32 AtlasCellIndex, FMD_ScrapeSurfaceCell& OutCell) const
+{
+    const int32 StorageIndex = GetContaminationStorageIndex(AtlasCellIndex);
+    OutCell = FMD_ScrapeSurfaceCell();
+    OutCell.InitialContamination = OutCell.RemainingContamination = 0.0f;
+    if (StorageIndex < 0 || StorageIndex >= GetContaminationStorageCellCount()) { return false; }
+    OutCell = ReadContaminationStorageCell(StorageIndex);
+    return true;
 }

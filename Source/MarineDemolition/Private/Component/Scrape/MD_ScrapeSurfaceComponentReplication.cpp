@@ -134,7 +134,8 @@ bool UMD_ScrapeSurfaceComponent::TryBuildReplicatedCellState(
 		return false;
 	}
 
-	const FMD_ScrapeSurfaceCell& Cell = ContaminationCells[CellIndex];
+	const int32 StorageIndex = GetContaminationStorageIndex(CellIndex);
+	const FMD_ScrapeSurfaceCell Cell = ReadContaminationStorageCell(StorageIndex);
 	const float InitialContamination = FMath::Clamp(
 		Cell.InitialContamination,
 		0.0f,
@@ -155,9 +156,9 @@ bool UMD_ScrapeSurfaceComponent::TryBuildReplicatedCellState(
 			1.0f)
 		: 0.0f;
 	const float GeneratedInitial =
-		ContaminationGeneratedInitialAmounts.IsValidIndex(CellIndex)
+		HasGeneratedInitialContamination(StorageIndex)
 		? FMath::Clamp(
-			ContaminationGeneratedInitialAmounts[CellIndex],
+			GetGeneratedInitialContamination(StorageIndex),
 			0.0f,
 			1.0f)
 		: InitialContamination;
@@ -307,6 +308,7 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 	bool bCapturedPreviousCompletion = false;
 	TArray<FMD_ScrapeCellChange> CellChanges;
 	CellChanges.Reserve(StateItems.Num());
+	TSet<int32> ResetPages;
 
 	for (const FMD_ReplicatedScrapeCellState& StateItem : StateItems)
 	{
@@ -316,7 +318,8 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 			continue;
 		}
 
-		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[StateCellIndex];
+		const int32 StorageIndex = GetContaminationStorageIndex(StateCellIndex);
+		FMD_ScrapeSurfaceCell Cell = ReadContaminationStorageCell(StorageIndex);
 		const float PreviousInitial = Cell.InitialContamination;
 		const float PreviousRemaining = Cell.RemainingContamination;
 		const float PreviousTransferred = Cell.TransferredContamination;
@@ -324,9 +327,9 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 			Cell.TransferredPaintPatternDensity;
 		const float PreviousCoveredFraction = Cell.CoveredFraction;
 		const float GeneratedInitial =
-			ContaminationGeneratedInitialAmounts.IsValidIndex(StateCellIndex)
+			HasGeneratedInitialContamination(StorageIndex)
 			? FMath::Clamp(
-				ContaminationGeneratedInitialAmounts[StateCellIndex],
+				GetGeneratedInitialContamination(StorageIndex),
 				0.0f,
 				1.0f)
 			: PreviousInitial;
@@ -409,6 +412,11 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 		Cell.TransferredPaintPatternDensity =
 			TargetTransferredPatternDensity;
 		Cell.CoveredFraction = TargetCoveredFraction;
+		SetContaminationStorageCell(StorageIndex, Cell);
+		if (bResetToInitial && !ContaminationPagedCells.IsEmpty())
+		{
+			ResetPages.Add(StorageIndex / FMD_ScrapePagedState::PageSize);
+		}
 
 		EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
 		int32 LocalCellIndex = INDEX_NONE;
@@ -443,13 +451,17 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 			&& TargetTransferred <= ScrapeSettings.CleanTolerance;
 	}
 
+	for (const int32 PageIndex : ResetPages)
+	{
+		ContaminationPagedCells.CompactUnchangedPageForIndex(PageIndex * FMD_ScrapePagedState::PageSize);
+	}
 	if (CellChanges.IsEmpty())
 	{
 		return;
 	}
 
 	RefreshContaminationCleanRatioCache();
-	if (LocalPredictedContaminationCells.IsEmpty())
+	if (!HasLocalPredictedContaminationState())
 	{
 		UpdateContaminationMask(CellChanges);
 	}

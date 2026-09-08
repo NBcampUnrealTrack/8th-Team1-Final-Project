@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Gameplay/Scrape/MD_ScrapeCellView.h"
+#include "Gameplay/Scrape/MD_ScrapeCarrierWeights.h"
 
 struct FMD_ScrapeSurfaceCell;
 class UMD_ScrapeMeshUVData;
@@ -18,12 +20,12 @@ public:
 	/** Density stays 0..1; carrier weight is world area / target cell area. Inactive weights are zero. */
 	static bool BuildMeshUVCellCarrierWeights(const UMD_ScrapeMeshUVData& SurfaceData,
 		const FTransform& SurfaceTransform, TArray<double>& OutWeights);
-	static bool CalculateWeightedCarrierAmounts(TConstArrayView<FMD_ScrapeSurfaceCell> Cells,
-		TConstArrayView<double> Weights, double& OutInitial, double& OutBase, double& OutTransferred);
+	static bool CalculateWeightedCarrierAmounts(FMD_ScrapeConstCellView Cells,
+		FMD_ScrapeCarrierWeightView Weights, double& OutInitial, double& OutBase, double& OutTransferred);
 
 	/** Clean progress uses the same physical carrier measure as removal/recovery. */
 	static float CalculateAreaWeightedCleanRatio(
-		TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
+		FMD_ScrapeConstCellView SurfaceCells,
 		const UMD_ScrapeMeshUVData& SurfaceData,
 		const FTransform& SurfaceTransform);
 

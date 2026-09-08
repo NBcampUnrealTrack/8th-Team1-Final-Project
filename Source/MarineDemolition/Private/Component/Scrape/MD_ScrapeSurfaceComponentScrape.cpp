@@ -237,6 +237,8 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	const bool bDeferCompletionBroadcast)
 {
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeStrokeTotal);
+	// Contact snapshots are released on every transaction exit.
+	FMD_ScrapeEvaluationScratch LocalEvaluationScratch;
 	OutRemovedCleanRatioDelta = 0.0f;
 
 	if (!bContaminationEnabled || !HasAuthority())
@@ -284,7 +286,7 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 		bWasFullyRemoved = IsContaminationFullyRemoved();
 	}
 
-	TArrayView<FMD_ScrapeSurfaceCell> FaceCells =
+	FMD_ScrapeCellView FaceCells =
 		GetContaminationCellsForFace(Stroke.SurfaceFace);
 	if (FaceCells.IsEmpty())
 	{
@@ -356,7 +358,7 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 			Result = FMD_ScrapeEvaluator::ApplyStrokeToMeshUVGrid(*Data,
 				SurfaceMesh->GetComponentTransform(), MeshStroke, ToolSpec,
 				EffectiveScrapeSettings, FaceCells, nullptr,
-				&ScrapeEvaluationScratch, ContaminationCellCarrierWeights,
+				&LocalEvaluationScratch, GetContaminationCellCarrierWeights(),
 				&CachedMeshUVProgress, &MeshUVProgressAfter, bApplyExactRequestedAmountStamp,
 				!bApplyExactRequestedAmountStamp);
 		}
@@ -371,7 +373,7 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 					ResolvedContaminationSurfaceSizeCm,
 					FaceCells,
 					RequestedRemovalAmounts,
-					ScrapeEvaluationScratch,
+					LocalEvaluationScratch,
 					false);
 		}
 		else
@@ -383,7 +385,7 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 				ContaminationGridDimensions,
 				ResolvedContaminationSurfaceSizeCm,
 				FaceCells,
-				ScrapeEvaluationScratch);
+				LocalEvaluationScratch);
 		}
 	}
 
@@ -401,16 +403,26 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	{
 		if (bMeshUVSurface)
 		{
-			for (const FMD_ScrapeTouchedCell& Touched : ScrapeEvaluationScratch.MeshUVTouchedCells)
+			for (const FMD_ScrapeTouchedCell& Touched : LocalEvaluationScratch.MeshUVTouchedCells)
 			{
-				FaceCells[Touched.CellIndex] = Touched.Before;
+				FaceCells.Set(Touched.CellIndex, Touched.Before);
 			}
+            // Only pages touched by this rejected transaction can have returned to initial.
+            TSet<int32> RestoredPages;
+            for (const FMD_ScrapeTouchedCell& Touched : LocalEvaluationScratch.MeshUVTouchedCells)
+            {
+                const int32 StorageIndex = GetContaminationStorageIndex(Touched.CellIndex);
+                if (StorageIndex != INDEX_NONE && !ContaminationPagedCells.IsEmpty())
+                    RestoredPages.Add(StorageIndex / FMD_ScrapePagedState::PageSize);
+            }
+            for (const int32 Page : RestoredPages)
+                ContaminationPagedCells.CompactUnchangedPageForIndex(Page * FMD_ScrapePagedState::PageSize);
 		}
 		else
 		{
 			for (int32 CellIndex = 0; CellIndex < FaceCells.Num(); ++CellIndex)
 			{
-				FaceCells[CellIndex] = OriginalFaceCells[CellIndex];
+				FaceCells.Set(CellIndex, OriginalFaceCells[CellIndex]);
 			}
 		}
 	};
@@ -432,14 +444,14 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	TArray<FMD_ScrapeCellChange> StampChanges;
 	float AddedContaminationAmount = 0.0f;
 	if (bApplyExactRequestedAmountStamp && Result.bWasStrokeLongEnough
-		&& (bMeshUVSurface ? !ScrapeEvaluationScratch.MeshUVTouchedCells.IsEmpty()
+		&& (bMeshUVSurface ? !LocalEvaluationScratch.MeshUVTouchedCells.IsEmpty()
 			: !RequestedRemovalAmounts.IsEmpty()))
 	{
 		const bool bAcceptedStamp = bMeshUVSurface
 			? FMD_ScrapeEvaluator::TryApplyContaminationStampToTouchedCells(
-				ContaminationGridDimensions, ScrapeEvaluationScratch.MeshUVTouchedCells,
+				ContaminationGridDimensions, LocalEvaluationScratch.MeshUVTouchedCells,
 				StampRatio, FaceCells, StampChanges, AddedContaminationAmount,
-				ContaminationCellCarrierWeights)
+				GetContaminationCellCarrierWeights())
 			: FMD_ScrapeEvaluator::TryApplyContaminationStampToGrid(
 				ContaminationGridDimensions, RequestedRemovalAmounts, StampRatio,
 				FaceCells, StampChanges, AddedContaminationAmount);
@@ -455,8 +467,8 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	FMD_ScrapeMeshUVProgress FinalMeshUVProgress = MeshUVProgressAfter;
 	if (bMeshUVSurface && (!FinalMeshUVProgress.bIsValid
 		|| (!StampChanges.IsEmpty() && !FMD_ScrapeEvaluator::UpdateMeshUVProgressFromTouchedCells(
-			CachedMeshUVProgress, ScrapeEvaluationScratch.MeshUVTouchedCells,
-			FaceCells, ContaminationCellCarrierWeights, FinalMeshUVProgress))))
+			CachedMeshUVProgress, LocalEvaluationScratch.MeshUVTouchedCells,
+			FaceCells, GetContaminationCellCarrierWeights(), FinalMeshUVProgress))))
 	{
 		if (bApplyExactRequestedAmountStamp) { RestoreResidueTransaction(); }
 		else { KeepUnstampedEvaluationProgress(); }
@@ -663,11 +675,11 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 			}
 
 			CellChange.RemainingAmountAfter =
-				FaceCells[CellChange.CellIndex].RemainingContamination;
+				FaceCells.Read(CellChange.CellIndex).RemainingContamination;
 			CellChange.bBecameClean = CellChange.bBecameClean
 				&& CellChange.RemainingAmountAfter
 					<= EffectiveCompletionTolerance
-				&& FaceCells[CellChange.CellIndex].TransferredContamination
+				&& FaceCells.Read(CellChange.CellIndex).TransferredContamination
 					<= EffectiveCompletionTolerance;
 			if (CellChange.bBecameClean)
 			{
@@ -866,7 +878,7 @@ bool UMD_ScrapeSurfaceComponent::IsContaminationFullyRemoved(
 		return bContaminationSurfaceInitialized;
 	}
 
-	const TConstArrayView<FMD_ScrapeSurfaceCell> FaceCells =
+	const FMD_ScrapeConstCellView FaceCells =
 		GetContaminationCellsForFace(Face);
 	const int32 FaceSlot = Face == EMD_ScrapeSurfaceFace::Back ? 1 : 0;
 	const double RemainingRewardUnits =
@@ -948,7 +960,7 @@ void UMD_ScrapeSurfaceComponent::RefreshContaminationCleanRatioCache(
 		{
 			FMD_ScrapeMeshUVProgress Progress;
 			FMD_ScrapeEvaluator::CalculateMeshUVProgress(GetContaminationCellsForFace(Face),
-				ContaminationCellCarrierWeights, ScrapeSettings.CleanTolerance, Progress);
+				GetContaminationCellCarrierWeights(), ScrapeSettings.CleanTolerance, Progress);
 			CommitContaminationMeshUVProgressCache(Progress);
 		}
 		else

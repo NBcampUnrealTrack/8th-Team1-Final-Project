@@ -164,8 +164,9 @@ namespace
                     || !PortalTouchesPixel(Frame.Project(A) - Origin, Frame.Project(B) - Origin)) return;
                 Queue.Add(Neighbor);
             };
-            if (!T.Neighbors.IsEmpty())
-                for (const FMD_ScrapeMeshUVNeighbor& N : T.Neighbors) Visit(N.TriangleIndex, N.SharedEdgeA, N.SharedEdgeB);
+            const TConstArrayView<FMD_ScrapeMeshUVNeighbor> Neighbors = Data.GetTriangleNeighbors(TriangleIndex);
+            if (!Neighbors.IsEmpty())
+                for (const FMD_ScrapeMeshUVNeighbor& N : Neighbors) Visit(N.TriangleIndex, N.SharedEdgeA, N.SharedEdgeB);
             else
             {
                 const FVector Points[] = {T.A, T.B, T.C};

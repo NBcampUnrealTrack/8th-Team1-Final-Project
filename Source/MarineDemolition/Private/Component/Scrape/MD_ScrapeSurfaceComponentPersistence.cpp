@@ -6,6 +6,7 @@
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Math/RotationMatrix.h"
 #include "World/Contamination/MD_ContaminationItem.h"
+#include "Gameplay/Scrape/MD_ContaminationDebrisSubsystem.h"
 
 // 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 책임: 밤샘 악화 · Day 스냅샷 입출력 · 오염물 드롭
@@ -91,13 +92,13 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 	const int32 GridHeight = ContaminationGridDimensions.Y;
 	int32 CellsPerFace = 0;
 	int32 TotalCellCount = 0;
-	if (!AreContaminationCarrierWeightsCurrent() || ContaminationCells.Num() == 0
+	if (!AreContaminationCarrierWeightsCurrent() || GetContaminationAtlasCellCount() == 0
 		|| GridWidth <= 0
 		|| GridHeight <= 0
 		|| !TryCalculateContaminationCellCounts(
 			CellsPerFace,
 			TotalCellCount)
-		|| ContaminationCells.Num() != TotalCellCount)
+		|| GetContaminationAtlasCellCount() != TotalCellCount)
 	{
 		return;
 	}
@@ -150,8 +151,8 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 					continue;
 				}
 
-				FMD_ScrapeSurfaceCell& Cell =
-					ContaminationCells[CombinedCellIndex];
+				const int32 StorageIndex = GetContaminationStorageIndex(CombinedCellIndex);
+				FMD_ScrapeSurfaceCell Cell = ReadContaminationStorageCell(StorageIndex);
 				const float PreviousRemaining = Cell.RemainingContamination;
 				const float TargetRemaining = FMath::Clamp(
 					PreviousRemaining + SafeAmount,
@@ -173,6 +174,7 @@ void UMD_ScrapeSurfaceComponent::ReapplyContaminationPatch(float Amount, int32 P
 				// 남겨 두면 오늘 긁는 자국의 경계 신호가 어제 값에 포화되어
 				// 자국 경계가 격자 계단으로 돌아간다.
 				Cell.CoveredFraction = 0.0f;
+				SetContaminationStorageCell(StorageIndex, Cell);
 				AddedBaseCarrierAmounts[FaceSlot] += static_cast<double>(
 					TargetRemaining - PreviousRemaining) * GetContaminationCellCarrierWeight(CombinedCellIndex);
 
@@ -267,19 +269,20 @@ void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
 		return;
 	}
 
-	for (int32 Index = 0; Index < ContaminationCells.Num(); ++Index)
+	for (int32 Index = 0; Index < GetContaminationAtlasCellCount(); ++Index)
 	{
 		if (!IsContaminationCellActive(Index))
 		{
 			continue;
 		}
-		const FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
+		const int32 StorageIndex = GetContaminationStorageIndex(Index);
+		const FMD_ScrapeSurfaceCell Cell = ReadContaminationStorageCell(StorageIndex);
 		const bool bScraped = Cell.RemainingContamination != Cell.InitialContamination;
 
 		const bool bBurstSinceGeneration =
-			ContaminationGeneratedInitialAmounts.IsValidIndex(Index)
+			HasGeneratedInitialContamination(StorageIndex)
 			&& Cell.InitialContamination
-				!= ContaminationGeneratedInitialAmounts[Index];
+				!= GetGeneratedInitialContamination(StorageIndex);
 
 		const bool bHasTransferredPaint =
 			Cell.TransferredContamination > UE_SMALL_NUMBER;
@@ -361,7 +364,7 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 	}
 
 	const int32 GridWidth = ContaminationGridDimensions.X;
-	if (!AreContaminationCarrierWeightsCurrent() || ContaminationCells.Num() == 0 || GridWidth <= 0)
+	if (!AreContaminationCarrierWeightsCurrent() || GetContaminationAtlasCellCount() == 0 || GridWidth <= 0)
 	{
 		return;
 	}
@@ -379,10 +382,12 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 		UniqueCellIndices.Add(Index);
 	}
 	TArray<FMD_ScrapeCellChange> Changes;
+	TSet<int32> RestoredPages;
 	for (int32 i = 0; i < CellIndices.Num(); ++i)
 	{
 		const int32 Index = CellIndices[i];
-		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[Index];
+		const int32 StorageIndex = GetContaminationStorageIndex(Index);
+		FMD_ScrapeSurfaceCell Cell = ReadContaminationStorageCell(StorageIndex);
 
 		if (bHasInitialAmounts && FMath::IsFinite(InitialAmounts[i]))
 		{
@@ -428,12 +433,21 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 					1.0f)
 				: 0.0f);
 		Cell.Normalize();
+		SetContaminationStorageCell(StorageIndex, Cell);
+		if (!ContaminationPagedCells.IsEmpty())
+		{
+			RestoredPages.Add(StorageIndex / FMD_ScrapePagedState::PageSize);
+		}
 
 		FMD_ScrapeCellChange Change;
 		Change.CellIndex = Index;
 		Change.GridCoordinate = FIntPoint(Index % GridWidth, Index / GridWidth);
 		Change.RemainingAmountAfter = Cell.RemainingContamination;
 		Changes.Add(Change);
+	}
+	for (const int32 PageIndex : RestoredPages)
+	{
+		ContaminationPagedCells.CompactUnchangedPageForIndex(PageIndex * FMD_ScrapePagedState::PageSize);
 	}
 
 	if (Changes.IsEmpty())
@@ -451,7 +465,7 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 		const EMD_ScrapeSurfaceFace Face = FaceSlot == 0
 			? EMD_ScrapeSurfaceFace::Front
 			: EMD_ScrapeSurfaceFace::Back;
-		const TConstArrayView<FMD_ScrapeSurfaceCell> FaceCells =
+		const FMD_ScrapeConstCellView FaceCells =
 			GetContaminationCellsForFace(Face);
 		double BaseCarrierAmount = 0.0;
 		double TransferredCarrierAmount = 0.0;
@@ -710,115 +724,58 @@ int32 UMD_ScrapeSurfaceComponent::DropContaminationItems(const EMD_ScrapeSurface
 	{
 		*bOutAcceptedToLedger = true;
 	}
-	if (ContaminationItemsPerFace <= 0)
-	{
-		return 0;
-	}
+    PendingContaminationDropPositions[FaceSlot] = SurfacePositionCm;
+    return TransferPendingContaminationDrop(FaceSlot, SurfacePositionCm);
+}
 
-	int32 CellsPerFace = 0;
-	int32 TotalCellCount = 0;
-	if (!FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(ContaminationGridDimensions,
-			CellsPerFace,TotalCellCount) || CellsPerFace <= 0)
-	{
-		return 0;
-	}
-
-	double FullFaceCarrierCapacity = static_cast<double>(CellsPerFace);
-    if (UsesMeshUVSurface())
+int32 UMD_ScrapeSurfaceComponent::TransferPendingContaminationDrop(
+    const int32 FaceSlot, const FVector2D& SurfacePositionCm)
+{
+    if (FaceSlot < 0 || FaceSlot > 1 || !HasAuthority()) return 0;
+    UWorld* World = GetWorld();
+    auto* Queue = World ? World->GetSubsystem<UMD_ContaminationDebrisSubsystem>() : nullptr;
+    if (!Queue) return 0;
+    FMD_ContaminationPendingDrop Drop;
+    Drop.BatchId = FGuid::NewGuid();
+    Drop.SourceActorName = GetOwner() ? GetOwner()->GetFName() : NAME_None;
+    Drop.SourceComponentName = GetFName();
+    Drop.SurfaceFace = FaceSlot == 1 ? EMD_ScrapeSurfaceFace::Back : EMD_ScrapeSurfaceFace::Front;
+    Drop.PendingCarrierAmount = PendingContaminationItemAmounts[FaceSlot];
+    Drop.RecoveryLots = PendingPhysicalRecoveryLots[FaceSlot];
+    if (!TryReconcilePendingRecoveryLots(Drop.RecoveryLots, Drop.PendingCarrierAmount)) return 0;
+    Drop.ItemClass = ContaminationItemClass;
+    int32 CellsPerFace = 0, TotalCellCount = 0;
+    const bool bHasCounts = FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
+        ContaminationGridDimensions, CellsPerFace, TotalCellCount) && CellsPerFace > 0;
+    const double Capacity = UsesMeshUVSurface()
+        ? (SharedContaminationCellCarrierWeights ? SharedContaminationCellCarrierWeights->GetTotalWeight() : 0.0)
+        : static_cast<double>(CellsPerFace);
+    if (ContaminationItemsPerFace > 0 && bHasCounts)
+        Drop.CarrierAmountPerItem = Capacity / static_cast<double>(ContaminationItemsPerFace);
+    const bool bPoseValid = TryCalculateContaminationItemSpawnTransform(Drop.SurfaceFace, SurfacePositionCm, Drop.SpawnTransform);
+    if (!bPoseValid) Drop.SpawnTransform = FTransform::Identity;
+    Drop.bSpawnConfigurationReady = bPoseValid && !Drop.ItemClass.IsNull()
+        && FMath::IsFinite(Drop.CarrierAmountPerItem) && Drop.CarrierAmountPerItem > UE_KINDA_SMALL_NUMBER;
+    if (!FMath::IsFinite(Drop.CarrierAmountPerItem) || Drop.CarrierAmountPerItem < 0.0) Drop.CarrierAmountPerItem = 0.0;
+    Queue->UpdateSourceConfiguration(Drop);
+    if (Drop.PendingCarrierAmount <= 0.0) return 0;
+    // Give up local ownership before spawning can run user callbacks (including teardown).
+    PendingContaminationItemAmounts[FaceSlot] = 0.0;
+    PendingPhysicalRecoveryLots[FaceSlot].Empty();
+    int32 SpawnedCount = 0;
+    if (!Queue->EnqueuePendingDrop(Drop, SpawnedCount))
     {
-        FullFaceCarrierCapacity = 0.0;
-        for (const double Weight : ContaminationCellCarrierWeights) { FullFaceCarrierCapacity += Weight; }
+        // Rejection occurs before queue mutation or callbacks, so restore the exact ledger.
+        PendingContaminationItemAmounts[FaceSlot] = Drop.PendingCarrierAmount;
+        PendingPhysicalRecoveryLots[FaceSlot] = MoveTemp(Drop.RecoveryLots);
     }
-	const double AmountPerItem = FullFaceCarrierCapacity
-		/ static_cast<double>(ContaminationItemsPerFace);
-	if (!FMath::IsFinite(AmountPerItem)
-		|| AmountPerItem <= UE_KINDA_SMALL_NUMBER)
-	{
-		return 0;
-	}
+    return SpawnedCount;
+}
 
-
-	const double ItemThreshold =
-		AmountPerItem - static_cast<double>(UE_KINDA_SMALL_NUMBER);
-
-	if (PendingAmount < ItemThreshold)
-	{
-		return 0;
-	}
-	// 클래스나 월드가 잠시 준비되지 않아도 질량 원장에는 이미 남겼다.
-	// 나중 커밋이 임계값을 다시 확인해 스폰할 수 있으므로 조용히 유실하지 않는다.
-	if (!ContaminationItemClass)
-	{
-		return 0;
-	}
-
-	FTransform SpawnTransform = FTransform::Identity;
-	if (!TryCalculateContaminationItemSpawnTransform(
-			SurfaceFace,
-			SurfacePositionCm,
-			SpawnTransform))
-	{
-		return 0;
-	}
-
-	UWorld* const World = GetWorld();
-	if (!World)
-	{
-		return 0;
-	}
-
-	FActorSpawnParameters SpawnParams;
-	SpawnParams.Owner = GetOwner();
-	SpawnParams.SpawnCollisionHandlingOverride =
-		ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
-
-	int32 SpawnedCount = 0;
-	while (PendingAmount >= ItemThreshold)
-	{
-		TArray<FMD_ScrapeRecoveryLot> PendingLotsAfterSpawn =
-			PendingPhysicalRecoveryLots[FaceSlot];
-		TArray<FMD_ScrapeRecoveryLot> SpawnedLotsAfterSpawn =
-			SpawnedPhysicalRecoveryLotsAwaitingCarrier[FaceSlot];
-		TArray<FMD_ScrapeRecoveryLot> ItemRecoveryLots;
-		const double PendingCarrierCommittedToItem = FMath::Min(
-			PendingAmount,
-			AmountPerItem);
-		const double ItemCarrierAmount =
-			FMD_ScrapeRecoveryLedger::ExtractProportional(
-				PendingLotsAfterSpawn,
-				PendingCarrierCommittedToItem,
-				ItemRecoveryLots);
-		if (!AreRecoveryCarrierAmountsEqual(
-				ItemCarrierAmount,
-				PendingCarrierCommittedToItem)
-			|| !TryAppendPersistenceRecoveryLots(
-				SpawnedLotsAfterSpawn,
-				ItemRecoveryLots))
-		{
-			break;
-		}
-		if (World->SpawnActor<AMD_ContaminationItem>(
-				ContaminationItemClass,
-				SpawnTransform,
-				SpawnParams))
-		{
-			PendingAmount = FMath::Max(
-				0.0,
-				PendingAmount - AmountPerItem);
-			PendingPhysicalRecoveryLots[FaceSlot] =
-				MoveTemp(PendingLotsAfterSpawn);
-			SpawnedPhysicalRecoveryLotsAwaitingCarrier[FaceSlot] =
-				MoveTemp(SpawnedLotsAfterSpawn);
-			++SpawnedCount;
-			continue;
-		}
-
-		// Spawn 실패는 질량을 버리는 이유가 아니다. 대기량을 보존하고
-		// 다음 유효 커밋에서 다시 시도한다.
-		break;
-	}
-
-	return SpawnedCount;
+void UMD_ScrapeSurfaceComponent::PreservePendingContaminationDrops()
+{
+    for (int32 FaceSlot = 0; FaceSlot < 2; ++FaceSlot)
+        TransferPendingContaminationDrop(FaceSlot, PendingContaminationDropPositions[FaceSlot]);
 }
 
 UMD_ScrapeSurfaceComponent::FPhysicalCommitResult

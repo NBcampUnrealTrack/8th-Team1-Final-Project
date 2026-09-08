@@ -3,6 +3,8 @@
 #include "Components/DecalComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Materials/MaterialInterface.h"
+#include "UObject/ConstructorHelpers.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
 
 DEFINE_STAT(STAT_MD_ScrapeStrokeTotal);
@@ -84,6 +86,9 @@ UMD_ScrapeSurfaceComponent::UMD_ScrapeSurfaceComponent()
 	PrimaryComponentTick.bCanEverTick = false;
 	SetIsReplicatedByDefault(true);
 	bContaminationEnabled = true;
+    DefaultContaminationSolidMaterial = TSoftObjectPtr<UMaterialInterface>(FSoftObjectPath(
+        TEXT("/Game/Materials/Wall/M_Contamination_Solid.M_Contamination_Solid")));
+    ContaminationSolidMaterial = nullptr;
 
 	// 12 x 4cm 헤라 도장을 실제 벽에서도 넓은 직사각형으로 표현할 수 있는 해상도.
 	// 양면 아틀라스는 128 x 128(16,384셀)로 uint16 복제 인덱스 범위 안에 있다.
@@ -285,7 +290,7 @@ void UMD_ScrapeSurfaceComponent::EnsureVisualizationComponents()
 	ResolveSurfaceMeshFromOwner();
 	AActor* const OwnerActor = GetOwner();
 	UWorld* const World = GetWorld();
-	if (!OwnerActor || !World || !SurfaceMesh)
+	if (!OwnerActor || !World || !SurfaceMesh || World->GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
@@ -345,6 +350,15 @@ void UMD_ScrapeSurfaceComponent::DestroyOwnedVisualizationComponents()
 
 	bOwnsFrontContaminationDecal = false;
 	bOwnsBackContaminationDecal = false;
+}
+
+void UMD_ScrapeSurfaceComponent::BeginDestroy()
+{
+    // Also cover initialized components that were never registered: final UObject
+    // destruction may run in parallel, but these state owners are game-thread-only.
+    ContaminationPagedCells.Reset();
+    LocalPredictedPagedCells.Reset();
+    Super::BeginDestroy();
 }
 
 void UMD_ScrapeSurfaceComponent::OnRegister()
@@ -425,8 +439,13 @@ void UMD_ScrapeSurfaceComponent::InitializeRuntimeState()
 
 void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 {
+    PreservePendingContaminationDrops();
+	ReleaseSolidContaminationVisual();
 	SetContaminationDecalsVisible(false);
 	ReleaseContaminationMask();
+    ReleaseContaminationMeshUVOverlay();
+    PendingBatchedContaminationVisualCellIndices.Empty();
+    ContaminationVisualUpdateBatchDepth = 0;
 	DestroyAdditionalContaminationDecalPatches();
 	FrontContaminationDecalMID = nullptr;
 	BackContaminationDecalMID = nullptr;
@@ -434,21 +453,27 @@ void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 	bContaminationSurfaceInitialized = false;
 	bContaminationCompletionBroadcast = false;
 	bDeferredContaminationCompletionTransition = false;
-	ContaminationCells.Reset();
+	ContaminationCells.Empty();
+    ContaminationPagedCells.Reset();
+	SharedContaminationCellCarrierWeights.Reset();
+    ContaminationCellLayout.Reset();
 	LocalScrapePredictions.Empty();
+	ReleaseLocalScrapePredictionMemoryBudget();
+	ScrapeEvaluationScratch = FMD_ScrapeEvaluationScratch();
 	LocalPredictedContaminationCells.Empty();
+    LocalPredictedPagedCells.Reset();
 	LocalScrapePredictionFaceScratch.Empty();
 	PendingLocalScrapePredictionVisualCellIndices.Empty();
 	PendingLocalScrapePredictionReconcileCells.Empty();
-	ContaminationGeneratedInitialAmounts.Reset();
+	ContaminationGeneratedInitialAmounts.Empty();
 	PendingContaminationItemAmounts[0] = 0.0f;
 	PendingContaminationItemAmounts[1] = 0.0f;
 	for (int32 FaceSlot = 0; FaceSlot < 2; ++FaceSlot)
 	{
-		BaseContaminationRecoveryLots[FaceSlot].Reset();
-		TransferredContaminationRecoveryLots[FaceSlot].Reset();
-		PendingPhysicalRecoveryLots[FaceSlot].Reset();
-		SpawnedPhysicalRecoveryLotsAwaitingCarrier[FaceSlot].Reset();
+		BaseContaminationRecoveryLots[FaceSlot].Empty();
+		TransferredContaminationRecoveryLots[FaceSlot].Empty();
+		PendingPhysicalRecoveryLots[FaceSlot].Empty();
+		SpawnedPhysicalRecoveryLotsAwaitingCarrier[FaceSlot].Empty();
 		CanonicalInitialContaminationCarrierAmounts[FaceSlot] = 0.0;
 	}
 	CachedFrontContaminationCleanRatio = 0.0f;
@@ -475,11 +500,28 @@ void UMD_ScrapeSurfaceComponent::InitializeSurface()
 
 bool UMD_ScrapeSurfaceComponent::RefreshSurfaceGeometry()
 {
+#if WITH_EDITOR
+    // Construction can run continuously while a wall is resized. Retire the explicit
+    // preview instead of rebuilding its large mesh on every editor interaction.
+    if (bEditorSolidPreview && GetWorld() && !GetWorld()->IsGameWorld())
+    {
+        ClearSolidContaminationPreview();
+    }
+#endif
 	if (!bContaminationEnabled)
 	{
+        ReleaseSolidContaminationVisual();
 		return false;
 	}
 
 	ResolveSurfaceMeshFromOwner();
-	return ResolveContaminationSurfaceGeometry();
+    const bool bResolved = ResolveContaminationSurfaceGeometry();
+    if (ContaminationSolidVisual)
+    {
+        // This explicit runtime refresh also updates the scale-dependent display
+        // cache and contact height without resetting authoritative cleaning state.
+        if (bResolved) ConfigureSolidContaminationVisual();
+        else ReleaseSolidContaminationVisual();
+    }
+    return bResolved;
 }

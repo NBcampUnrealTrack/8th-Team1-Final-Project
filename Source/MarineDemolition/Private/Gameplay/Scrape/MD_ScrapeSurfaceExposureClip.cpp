@@ -2,14 +2,14 @@
 
 namespace
 {
-    using FPolygon = TArray<FVector2D>;
+    using FExposurePolygon = TArray<FVector2D>;
     constexpr double DepthTieToleranceCm = 1e-9;
     constexpr double DuplicatePointToleranceSquared = 1e-24;
 
     struct FPlaneVertex { FVector2D Point; double Depth; };
     struct FClipRegion
     {
-        FPolygon Points;
+        FExposurePolygon Points;
         EMD_ScrapeExposureReason Reason;
     };
     struct FSourcePlane
@@ -22,14 +22,14 @@ namespace
     };
     struct FClassifiedPolygon
     {
-        FPolygon Points;
+        FExposurePolygon Points;
         EMD_ScrapeExposureReason Reason;
     };
 
     double Cross(const FVector2D& A, const FVector2D& B)
     { return A.X * B.Y - A.Y * B.X; }
 
-    double SignedDoubleArea(const FPolygon& Points)
+    double SignedDoubleArea(const FExposurePolygon& Points)
     {
         double Result = 0;
         for (int32 I = 1; I + 1 < Points.Num(); ++I)
@@ -37,13 +37,13 @@ namespace
         return Result;
     }
 
-    void AddUnique(FPolygon& Polygon, const FVector2D& Point)
+    void AddUnique(FExposurePolygon& Polygon, const FVector2D& Point)
     {
         if (Polygon.IsEmpty() || (Polygon.Last() - Point).SizeSquared() > DuplicatePointToleranceSquared)
         { Polygon.Add(Point); }
     }
 
-    void ClosePolygon(FPolygon& Polygon)
+    void ClosePolygon(FExposurePolygon& Polygon)
     {
         if (Polygon.Num() > 1 && (Polygon[0] - Polygon.Last()).SizeSquared() <= DuplicatePointToleranceSquared)
         { Polygon.Pop(EAllowShrinking::No); }
@@ -51,8 +51,8 @@ namespace
     }
 
     // Both half planes retain their common edge. Its area is zero; their interiors never overlap.
-    void SplitPolygon(const FPolygon& Polygon, const FVector2D& A, const FVector2D& B,
-        FPolygon& Inside, FPolygon& Outside)
+    void SplitPolygon(const FExposurePolygon& Polygon, const FVector2D& A, const FVector2D& B,
+        FExposurePolygon& Inside, FExposurePolygon& Outside)
     {
         Inside.Reset(); Outside.Reset();
         if (Polygon.IsEmpty()) { return; }
@@ -247,19 +247,19 @@ bool FMD_ScrapeSurfaceExposureClip::SplitAndClassify(
                 { Next.Add(MoveTemp(Polygon)); continue; }
                 // Do not subdivide geometry merely because it crosses an infinite clip-edge line.
                 // First establish a positive-area intersection with the finite opposing triangle.
-                FPolygon Covered = Polygon.Points;
+                FExposurePolygon Covered = Polygon.Points;
                 for (int32 Edge = 0; Edge < Region.Points.Num() && !Covered.IsEmpty(); ++Edge)
                 {
-                    FPolygon Inside, Outside;
+                    FExposurePolygon Inside, Outside;
                     SplitPolygon(Covered, Region.Points[Edge],
                         Region.Points[(Edge + 1) % Region.Points.Num()], Inside, Outside);
                     Covered = MoveTemp(Inside);
                 }
                 if (Covered.IsEmpty()) { Next.Add(MoveTemp(Polygon)); continue; }
-                FPolygon Remaining = MoveTemp(Polygon.Points);
+                FExposurePolygon Remaining = MoveTemp(Polygon.Points);
                 for (int32 Edge = 0; Edge < Region.Points.Num() && !Remaining.IsEmpty(); ++Edge)
                 {
-                    FPolygon Inside, Outside;
+                    FExposurePolygon Inside, Outside;
                     SplitPolygon(Remaining, Region.Points[Edge],
                         Region.Points[(Edge + 1) % Region.Points.Num()], Inside, Outside);
                     if (!Outside.IsEmpty()) { Next.Add({MoveTemp(Outside), EMD_ScrapeExposureReason::Exposed}); }

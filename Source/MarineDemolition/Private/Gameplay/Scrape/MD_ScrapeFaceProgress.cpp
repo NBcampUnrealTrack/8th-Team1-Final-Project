@@ -29,8 +29,10 @@ bool FMD_ScrapeFaceProgress::BuildMeshUVCellCarrierWeights(
         const FVector EdgeA = Triangle.B - Triangle.A;
         const FVector EdgeB = Triangle.C - Triangle.A;
         const double LocalDoubleArea = FVector::CrossProduct(EdgeA, EdgeB).Size();
+        // Rotation preserves area. Use the canonical scale metric so identical scales
+        // share bit-identical weights independently of wall orientation and position.
         const double WorldDoubleArea = FVector::CrossProduct(
-            SurfaceTransform.TransformVector(EdgeA), SurfaceTransform.TransformVector(EdgeB)).Size();
+            EdgeA * Scale, EdgeB * Scale).Size();
         if (FMath::IsFinite(LocalDoubleArea) && LocalDoubleArea > 0.0
             && FMath::IsFinite(WorldDoubleArea) && WorldDoubleArea > 0.0)
         { TriangleAreaScales[Index] = WorldDoubleArea / LocalDoubleArea; }
@@ -50,7 +52,7 @@ bool FMD_ScrapeFaceProgress::BuildMeshUVCellCarrierWeights(
 }
 
 bool FMD_ScrapeFaceProgress::CalculateWeightedCarrierAmounts(
-    const TConstArrayView<FMD_ScrapeSurfaceCell> Cells, const TConstArrayView<double> Weights,
+    const FMD_ScrapeConstCellView Cells, const FMD_ScrapeCarrierWeightView Weights,
     double& OutInitial, double& OutBase, double& OutTransferred)
 {
     OutInitial = OutBase = OutTransferred = 0.0;
@@ -69,13 +71,12 @@ bool FMD_ScrapeFaceProgress::CalculateWeightedCarrierAmounts(
 }
 
 float FMD_ScrapeFaceProgress::CalculateAreaWeightedCleanRatio(
-    const TConstArrayView<FMD_ScrapeSurfaceCell> SurfaceCells,
+    const FMD_ScrapeConstCellView SurfaceCells,
     const UMD_ScrapeMeshUVData& SurfaceData, const FTransform& SurfaceTransform)
 {
-    TArray<double> Weights;
+    const TSharedPtr<const FMD_ScrapeCarrierWeights> Weights = SurfaceData.GetSharedCellCarrierWeights(SurfaceTransform);
     double Initial = 0.0, Base = 0.0, Transferred = 0.0;
-    return BuildMeshUVCellCarrierWeights(SurfaceData, SurfaceTransform, Weights)
-        && CalculateWeightedCarrierAmounts(SurfaceCells, Weights, Initial, Base, Transferred)
+    return Weights && CalculateWeightedCarrierAmounts(SurfaceCells, Weights->GetView(), Initial, Base, Transferred)
         ? FMD_ScrapeEvaluator::CalculateCurrentCleanRatio(Initial, Base + Transferred) : 0.0f;
 }
 

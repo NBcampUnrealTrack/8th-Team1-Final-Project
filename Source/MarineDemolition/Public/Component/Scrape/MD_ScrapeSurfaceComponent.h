@@ -1,7 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Gameplay/Scrape/MD_ScrapeCarrierWeights.h"
+#include "Gameplay/Scrape/MD_ScrapeMaskPixels.h"
+#include "Gameplay/Scrape/MD_ScrapeCellView.h"
+#include "Gameplay/Scrape/MD_ScrapePagedState.h"
 #include "Components/ActorComponent.h"
+#include "Component/Scrape/MD_ContaminationSolidVisualComponent.h"
 #include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
 #include "Gameplay/Scrape/MD_ScrapeReplicationCodec.h"
 #include "Net/Serialization/FastArraySerializer.h"
@@ -264,6 +269,22 @@ public:
 		return bContaminationSurfaceInitialized;
 	}
 
+    /** Rebuilds only the derived solid display; gameplay state is preserved. */
+    UFUNCTION(BlueprintCallable, Category="MD|Scrape Surface|Solid")
+    void RefreshSolidContaminationVisual();
+    /** Explicit preview avoids rebuilding large meshes on selection or every construction run. */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="MD|Scrape Surface|Solid")
+    void PreviewSolidContamination();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="MD|Scrape Surface|Solid")
+    void ClearSolidContaminationPreview();
+    UFUNCTION(BlueprintPure, Category="MD|Scrape Surface|Solid")
+    FString GetSolidContaminationStats() const;
+    /** GT-only candidate query before Actor BeginPlay; late changes retain the synchronous fallback. */
+    bool TryGetSolidPrewarmInputs(const UMD_ScrapeMeshUVData*& OutData,
+        FVector& OutWallScale, FMD_ContaminationSolidSettings& OutSettings);
+    bool TryGetSolidVisualWorldContact(const FVector2D& SurfacePositionCm,
+        const FVector& BaseWorldPosition, const FVector& WorldNormal, FVector& OutPosition) const;
+
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
 	UStaticMeshComponent* GetSurfaceMesh() const
 	{
@@ -395,6 +416,8 @@ public:
 	bool TryBuildMeshUVStroke(const FMD_ScrapeStroke& Stroke, FMD_ScrapeMeshUVStroke& OutStroke) const;
 	bool TryGetScrapeSurfaceWorldNormalAtPosition(const FVector2D& Position, EMD_ScrapeSurfaceFace Face, FVector& OutNormal) const;
 	bool IsContaminationCellActive(int32 CellIndex) const;
+    UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
+    bool GetContaminationCellState(int32 AtlasCellIndex, FMD_ScrapeSurfaceCell& OutCell) const;
 	double GetContaminationCellCarrierWeight(int32 CellIndex) const;
 	bool AreContaminationCarrierWeightsCurrent() const;
 	FVector GetContaminationCarrierWeightScale() const;
@@ -456,6 +479,7 @@ public:
 	FMD_OnScrapeSurfaceFullyRemoved OnContaminationFullyRemoved;
 
 protected:
+    virtual void BeginDestroy() override;
 	virtual void OnRegister() override;
 	virtual void OnUnregister() override;
 	virtual void BeginPlay() override;
@@ -607,6 +631,24 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape Surface|MeshUV")
 	TObjectPtr<UMD_ScrapeMeshUVData> ContaminationMeshUVData;
 
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MD|Scrape Surface|Solid")
+    bool bSolidContaminationEnabled = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MD|Scrape Surface|Solid")
+    FMD_ContaminationSolidSettings SolidContaminationSettings;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Scrape Surface|Solid")
+    TObjectPtr<UMaterialInterface> ContaminationSolidMaterial;
+
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Contamination|Solid")
+    TSoftObjectPtr<UMaterialInterface> DefaultContaminationSolidMaterial;
+    bool bLoadedDefaultSolidMaterial = false;
+    void ResolveDefaultSolidMaterial();
+    UPROPERTY(Transient)
+    TObjectPtr<UMD_ContaminationSolidVisualComponent> ContaminationSolidVisual;
+    bool bEditorSolidPreview = false;
+    bool ConfigureSolidContaminationVisual();
+    void ReleaseSolidContaminationVisual();
+    void UpdateSolidContaminationVisual(const TArray<FMD_ScrapeCellChange>& CellChanges);
+
 	/**
 	 * Optional artist override for the tiled grime color. Null keeps the
 	 * ContamBaseColor texture inherited from the assigned material or MI.
@@ -738,11 +780,25 @@ private:
 	UFUNCTION()
 	void OnRep_ContaminationEnabled();
 
-	// Runtime atlases can contain over a million cells. Keep Blueprint access, but never
-	// generate per-cell Details rows when a PIE/SIE wall instance is selected.
+	// Dense planar state only; MeshUV reads shared initial state plus changed pages.
+    // Use GetContaminationCellState for logical atlas access, including unmodified cells.
+	// Never generate per-cell Details rows when a PIE/SIE wall instance is selected.
 	UPROPERTY(BlueprintReadOnly, Transient,
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
 	TArray<FMD_ScrapeSurfaceCell> ContaminationCells;
+    FMD_ScrapePagedState ContaminationPagedCells;
+    TSharedPtr<const FMD_ScrapeCellLayout> ContaminationCellLayout;
+    int32 GetContaminationStorageCellCount() const;
+    FMD_ScrapeSurfaceCell ReadContaminationStorageCell(int32 StorageIndex) const;
+    FMD_ScrapeSurfaceCell& EditContaminationStorageCell(int32 StorageIndex);
+    void SetContaminationStorageCell(int32 StorageIndex, const FMD_ScrapeSurfaceCell& Cell);
+    bool HasGeneratedInitialContamination(int32 StorageIndex) const;
+    float GetGeneratedInitialContamination(int32 StorageIndex) const;
+    bool HasLocalPredictedContaminationState() const;
+    int32 GetContaminationAtlasCellCount() const;
+    int32 GetContaminationStorageIndex(int32 AtlasCellIndex) const;
+    FMD_ScrapeCellView GetContaminationCellView();
+    FMD_ScrapeConstCellView GetContaminationCellView() const;
 
 	struct FLocalScrapePredictionStroke
 	{
@@ -762,6 +818,7 @@ private:
 
 	TArray<FLocalScrapePrediction> LocalScrapePredictions;
 	TArray<FMD_ScrapeSurfaceCell> LocalPredictedContaminationCells;
+    FMD_ScrapePagedState LocalPredictedPagedCells;
 	TArray<FMD_ScrapeSurfaceCell> LocalScrapePredictionFaceScratch;
 	FMD_ScrapeEvaluationScratch ScrapeEvaluationScratch;
 	TArray<int32> PendingLocalScrapePredictionVisualCellIndices;
@@ -770,6 +827,9 @@ private:
 	int32 ContaminationVisualUpdateBatchDepth = 0;
 
 	double PendingContaminationItemAmounts[2] = { 0.0, 0.0 };
+    FVector2D PendingContaminationDropPositions[2] = { FVector2D::ZeroVector, FVector2D::ZeroVector };
+    int32 TransferPendingContaminationDrop(int32 FaceSlot, const FVector2D& SurfacePositionCm);
+    void PreservePendingContaminationDrops();
 	/**
 	 * 한 face의 base/transferred layer는 내부에서 완전히 섞인 것으로 보고
 	 * 모든 source lot을 제거 질량 비율대로 함께 소비한다.
@@ -814,16 +874,18 @@ private:
 	TObjectPtr<UTexture2D> ContaminationMaskTexture;
 
 	bool InitializeContaminationCellCarrierWeights();
-	TArray<double> ContaminationCellCarrierWeights;
+	// One immutable triangle-scale metric per baked profile and exact scale, shared across live walls.
+	TSharedPtr<const FMD_ScrapeCarrierWeights> SharedContaminationCellCarrierWeights;
+	FMD_ScrapeCarrierWeightView GetContaminationCellCarrierWeights() const;
 	FVector ContaminationCarrierWeightScale = FVector::OneVector;
-	TArray<uint8> ContaminationMaskAtlasPixels;
+	FMD_ScrapeMaskPixels ContaminationMaskAtlasPixels;
 	FIntPoint ContaminationMaskAtlasDimensions;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UTexture2D> TransferredPaintMaskTexture;
 
-	TArray<uint8> TransferredPaintMaskAtlasPixels;
+	FMD_ScrapeMaskPixels TransferredPaintMaskAtlasPixels;
 	FIntPoint TransferredPaintMaskAtlasDimensions;
 
 	UPROPERTY(Transient)
@@ -911,9 +973,9 @@ private:
 	/** MeshUV owns one CPU atlas; analytic surfaces retain their two face slots. */
 	bool TryCalculateContaminationCellCounts(
 		int32& OutCellsPerFace, int32& OutStateCellCount) const;
-	TArrayView<FMD_ScrapeSurfaceCell> GetContaminationCellsForFace(
+	FMD_ScrapeCellView GetContaminationCellsForFace(
 		EMD_ScrapeSurfaceFace Face);
-	TConstArrayView<FMD_ScrapeSurfaceCell> GetContaminationCellsForFace(
+	FMD_ScrapeConstCellView GetContaminationCellsForFace(
 		EMD_ScrapeSurfaceFace Face) const;
 	bool ApplyLocalScrapePrediction(
 		UMD_ScrapeToolComponent* PredictionOwner,
@@ -942,6 +1004,11 @@ private:
 	void MarkLocalScrapePredictionReconcileCell(int32 CellIndex);
 	void FlushLocalScrapePredictionVisualUpdates();
 	void RebuildLocalScrapePredictionShadow();
+	SIZE_T GetLocalScrapePredictionAllocatedBytes() const;
+	bool UpdateLocalScrapePredictionMemoryBudget();
+	void ReleaseLocalScrapePredictionMemoryBudget();
+	static constexpr uint64 MaximumLocalScrapePredictionBytes = 8 * 1024 * 1024;
+	static constexpr uint64 MaximumWorldScrapePredictionBytes = 32 * 1024 * 1024;
 	bool DoesLocalScrapePredictionMatchResolution(
 		const FLocalScrapePrediction& Prediction,
 		const FMD_ScrapeAuthoritativeVisualDelta& Resolution) const;
@@ -965,7 +1032,7 @@ private:
 		FIntPoint& OutAtlasDimensions, TArray<uint8>& OutPixels) const;
 	bool InitializeContaminationMask();
 	void ReleaseContaminationMask();
-	TConstArrayView<FMD_ScrapeSurfaceCell> GetVisualContaminationCells() const;
+	FMD_ScrapeConstCellView GetVisualContaminationCells() const;
 	FMD_ScrapeSurfaceCell MakeContaminationMaskCell(int32 CellIndex) const;
 	void UpdateContaminationMask(
 		const TArray<FMD_ScrapeCellChange>& CellChanges);

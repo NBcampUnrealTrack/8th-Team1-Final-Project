@@ -23,8 +23,16 @@ public:
     UMD_ScrapeMeshUVSyncComponent();
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+    uint64 GetAllocatedTransferBytes() const
+    {
+        return ServerBytes.GetAllocatedSize() + ClientAssembler.Bytes.GetAllocatedSize()
+            + ServerCheckpoints.GetAllocatedSize() + ClientCheckpoints.GetAllocatedSize();
+    }
 private:
     void Pump();
+    void PruneCheckpoints();
+    double LastCheckpointPrune = -100.0;
+    static constexpr uint64 MaximumCheckpointBytes = 256 * 1024;
     void PollClientSurfaces();
     bool IsSurfaceAllowed(const UMD_ScrapeSurfaceComponent* Surface) const;
     void SendPages();

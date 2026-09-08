@@ -1,0 +1,12 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "MD Solid Rendering",
+  "Description": "Shared solid templates with GPU displacement and sparse state uploads.",
+  "Category": "Rendering",
+  "CanContainContent": false,
+  "Modules": [
+    { "Name": "MDSolidRendering", "Type": "Runtime", "LoadingPhase": "PostConfigInit" }
+  ]
+}

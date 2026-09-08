@@ -591,6 +591,17 @@ void UMD_ScrapeToolComponent::UpdateLocalScrapeVisualContactPose(
 			ContactNormal = CanonicalSurfaceNormal;
 		}
 	}
+    // Only this local rendering copy is raised to the solid crust. Authority ray,
+    // cell ownership, brush work and barnacle priority continue to use the original wall.
+    if (VisualAim.Surface && !VisualAim.Barnacle)
+    {
+        FVector SolidContact;
+        if (VisualAim.Surface->TryGetSolidVisualWorldContact(VisualAim.SurfacePositionCm,
+            VisualAim.WorldContactLocation, ContactNormal, SolidContact))
+        {
+            VisualAim.WorldContactLocation = SolidContact;
+        }
+    }
 	const bool bHasValidContact = VisualAim.IsActionable()
 		&& IsFiniteScrapeVisualVector(VisualAim.WorldContactLocation)
 		&& IsFiniteScrapeVisualVector(ContactNormal)

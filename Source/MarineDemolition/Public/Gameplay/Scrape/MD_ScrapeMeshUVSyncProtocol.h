@@ -37,6 +37,9 @@ struct MARINEDEMOLITION_API FMD_ScrapeMeshUVSyncProtocol
     // Budget for descriptor, RPC/bunch and packet headers in addition to each page's payload.
     static constexpr int32 PageOverheadBudgetBytes = 512;
     static constexpr double MaximumConnectionBudgetFraction = 0.25;
+    // State structs include FastArray bookkeeping. Covers two wire buffers plus the
+    // active-cell revision table and allocator/compression headroom.
+    static uint64 GetSnapshotMemoryReservation(int32 ActiveCells);
     static bool IsDescriptorValid(const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor);
     static int32 GetPageCount(int32 TotalStates);
     static int32 GetPageCount(const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor);
