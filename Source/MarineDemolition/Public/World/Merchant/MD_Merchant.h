@@ -112,15 +112,6 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	FText InvalidPurchaseDialogue = FText::FromString(TEXT("그 거래는 처리할 수 없어."));
 
-	/**
-	 * 아직 화면이 연결되지 않은 추가 메뉴를 눌렀을 때의 대사.
-	 *
-	 * 기획서에 이 상황 대사가 없어 `06` §4 톤에 맞춰 임시로 적었다.
-	 * 추가 화면이 생기면 이 대사 대신 화면을 띄우도록 바꾸기 위한 예비 문구.
-	 */
-	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
-	FText NotReadyDialogue = FText::FromString(TEXT("그건 아직 안 열었어. 목록이나 봐."));
-
 	/** 열려 있는 위젯 (중복 생성 방지용) */
 	TWeakObjectPtr<UMD_MerchantMenuWidget> ActiveMenuWidget;
 
@@ -212,9 +203,5 @@ private:
 	/** 현재 상점 화면을 소유한 플레이어의 개별 구매 원장을 제공하는 함수 */
 	AMD_PlayerState* GetInteractingPlayerState() const;
 
-	/**
-	 * 아직 화면이 없는 추가 메뉴를 버튼 상태 변경 없이 대사로 안내하는 예비 처리 함수
-	 */
-	UFUNCTION()
-	void HandleNotReadyRequested();
+
 };

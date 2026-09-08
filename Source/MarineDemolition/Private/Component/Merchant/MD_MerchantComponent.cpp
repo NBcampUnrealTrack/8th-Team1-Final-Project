@@ -1,10 +1,11 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Engine/GameInstance.h"
 #include "Net/UnrealNetwork.h"
+#include "Game/MD_GameStateBase.h"
 
 UMD_MerchantComponent::UMD_MerchantComponent()
 {
@@ -90,6 +91,14 @@ void UMD_MerchantComponent::RefreshFromSubsystem()
 	MainQuests = Merchant->GetMainQuests();
 	RepeatQuests = Merchant->GetRepeatQuests();
 	OwnedItemIds = Merchant->GetOwnedItemIds();
+    // 팀 원장을 소유한 GameState 확인
+    AMD_GameStateBase* GameState = Cast<AMD_GameStateBase>(GetOwner());
+    if (IsValid(GameState) == true)
+    {
+        // 착수금과 보상 및 지출의 최신 합계 반영
+        GameState->RefreshDailyLedger();
+    }
+
 
 	// 저장 복원 직후 접속 클라이언트가 다음 일반 갱신 주기를 기다리지 않도록 하는 즉시 복제 요청
 	GetOwner()->ForceNetUpdate();
