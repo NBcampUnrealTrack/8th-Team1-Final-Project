@@ -178,9 +178,44 @@ void AMD_TrashDispenser::Interact_Implementation(AActor* Interactor)
 		return;
 	}
 
-	LiveDispensedBins.Add(SpawnedTrashBin);
-	SpawnedTrashBin->OnDestroyed.AddDynamic(this, &AMD_TrashDispenser::HandleDispensedBinDestroyed);
+	if (!RegisterDispensedBin(SpawnedTrashBin))
+	{
+		SpawnedTrashBin->Destroy();
+		MulticastDispenseResult(EMD_TrashDispenseResult::SpawnFailed, RequestingPawn);
+		return;
+	}
 	MulticastDispenseResult(EMD_TrashDispenseResult::Success, RequestingPawn);
+}
+
+bool AMD_TrashDispenser::RegisterDispensedBin(AMD_TrashBin* const Bin)
+{
+	if (!HasAuthority()
+		|| !IsValid(Bin)
+		|| Bin->GetWorld() != GetWorld()
+		|| Bin->IsActorBeingDestroyed())
+	{
+		return false;
+	}
+
+	const FName ExistingSourceName = Bin->GetSourceTrashDispenserName();
+	if (!ExistingSourceName.IsNone() && ExistingSourceName != GetFName())
+	{
+		return false;
+	}
+
+	Bin->SetSourceTrashDispenser(this);
+	if (Bin->GetSourceTrashDispenserName() != GetFName())
+	{
+		return false;
+	}
+
+	Bin->SetOwner(this);
+	CompactLiveDispensedBins();
+	LiveDispensedBins.AddUnique(Bin);
+	Bin->OnDestroyed.AddUniqueDynamic(
+		this,
+		&AMD_TrashDispenser::HandleDispensedBinDestroyed);
+	return true;
 }
 
 void AMD_TrashDispenser::HandleDispensedBinDestroyed(AActor* DestroyedActor)

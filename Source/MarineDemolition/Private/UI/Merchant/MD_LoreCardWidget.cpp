@@ -1,69 +1,40 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "UI/Merchant/MD_LoreCardWidget.h"
-
-#include "Components/Button.h"
 #include "Components/TextBlock.h"
-#include "Data/Lore/MD_LoreCatalog.h"
 
-void UMD_LoreCardWidget::NativeConstruct()
+void UMD_LoreCardWidget::SetLoreEntry(int32 InLoreIndex, FText EntryName, bool bIsAcquired)
 {
-	Super::NativeConstruct();
-
-	// 내부 버튼 클릭 연결
-	if (IsValid(Btn_Select) == true)
-	{
-		Btn_Select->OnClicked.AddUniqueDynamic(this, &UMD_LoreCardWidget::HandleCardClicked);
-	}
-}
-
-void UMD_LoreCardWidget::SetLoreEntry(int32 InLoreIndex, const FText& EntryName, EMD_LoreEntryState EntryState)
-{
-	// 카드 선택 결과와 카탈로그 항목을 일치시키기 위한 인덱스 저장
-	LoreIndex = InLoreIndex;
-
-	// 한 자리 순서도 동일한 너비로 정렬하기 위한 두 자리 번호 표시
+	// 번호 표시 대상의 유효성 확인
 	if (IsValid(TXT_LoreNumber) == true)
 	{
-		TXT_LoreNumber->SetText(FText::FromString(FString::Printf(TEXT("%02d"), LoreIndex + 1)));
+		// 카드 번호 갱신
+		TXT_LoreNumber->SetText(FText::FromString(FString::Printf(TEXT("%02d"), InLoreIndex + 1)));
 	}
 
-	// 미발견 항목의 실제 이름 노출을 방지하기 위한 제목 표시
+	// 제목 표시 대상의 유효성 확인
 	if (IsValid(TXT_LoreTitle) == true)
 	{
-		FText DisplayName = EntryState == EMD_LoreEntryState::Undiscovered ? FText::FromString(TEXT("???")) : EntryName;
+		// 획득한 기록물의 제목을 기본 표시값으로 사용
+		FText DisplayName = EntryName;
+		// 미획득 기록물의 실제 제목 노출 방지
+		if (bIsAcquired == false)
+		{
+			// 미획득 제목 대체 문구 적용
+			DisplayName = FText::FromString(TEXT("???"));
+		}
+		// 획득 여부에 따른 제목 갱신
 		TXT_LoreTitle->SetText(DisplayName);
 	}
 
-	// 발견과 해독 단계를 목록에서 구분하기 위한 상태 문구 결정
+	// 상태 표시 대상의 유효성 확인
 	if (IsValid(TXT_LoreState) == true)
 	{
-		FText StateText;
-		switch (EntryState)
-		{
-		case EMD_LoreEntryState::Undiscovered:
-			StateText = FText::FromString(TEXT("미발견"));
-			break;
-		case EMD_LoreEntryState::Encrypted:
-			StateText = FText::FromString(TEXT("암호화됨"));
-			break;
-		case EMD_LoreEntryState::Decrypted:
-			StateText = FText::FromString(TEXT("해독됨"));
-			break;
-		default:
-			StateText = FText::GetEmpty();
-			break;
-		}
-
-		TXT_LoreState->SetText(StateText);
-	}
-}
-
-void UMD_LoreCardWidget::HandleCardClicked()
-{
-	// 데이터가 배정된 카드만 상세 선택 대상으로 전달하는 처리
-	if (LoreIndex != INDEX_NONE)
-	{
-		OnLoreCardSelected.Broadcast(LoreIndex);
+		// 카드 획득 상태 갱신
+		TXT_LoreState->SetText((bIsAcquired == true ? FText::FromString(TEXT("획득")) : FText::FromString(TEXT("미획득"))));
+		// 현재 획득 여부에 대응하는 에디터 지정 색상 선택
+		FLinearColor StateTextColor = bIsAcquired == true ? AcquiredStateTextColor : UnacquiredStateTextColor;
+		// 상태 문구와 동일한 획득 기준으로 색상 갱신
+		TXT_LoreState->SetColorAndOpacity(FSlateColor(StateTextColor));
 	}
 }

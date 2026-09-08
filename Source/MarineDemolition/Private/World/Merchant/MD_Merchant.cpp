@@ -447,15 +447,6 @@ void AMD_Merchant::HandleShopDeactivated()
 	ActiveShopWidget.Reset();
 }
 
-void AMD_Merchant::HandleNotReadyRequested()
-{
-	// 버튼을 숨기지 않는다 — 화면이 없으니 되돌아올 수단도 없다.
-	if (ActiveMenuWidget.IsValid())
-	{
-		ActiveMenuWidget->ShowDialogueLine(NotReadyDialogue);
-	}
-}
-
 void AMD_Merchant::HandleLoanDeactivated()
 {
 	// 비활성화된 대출 화면에 남아 있는 상인 연결 제거
@@ -748,12 +739,8 @@ void AMD_Merchant::RefreshQuestWidgetFromComponent()
 	// 잠긴 미래 퀘스트와 이전 일차 퀘스트를 제외하고 당일 메인 퀘스트 한 건만 전달
 	for (FMD_MainQuestState& MainQuest : MainQuests)
 	{
-		if (MainQuest.UnlockDay != CurrentDay)
-		{
-			continue;
-		}
-
-		if (MainQuest.Status == EMD_MainQuestStatus::Locked)
+		// 현재 일차가 아니거나 잠긴 퀘스트를 함께 제외
+		if (MainQuest.UnlockDay != CurrentDay || MainQuest.Status == EMD_MainQuestStatus::Locked)
 		{
 			continue;
 		}
@@ -780,16 +767,24 @@ void AMD_Merchant::RefreshLoreWidgetFromComponent()
 		return;
 	}
 
-	// 상인과 상호작용 중인 플레이어가 선택한 탐사 현장을 찾기 위한 컨트롤러
-	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
 
 	// 퀘스트 데이터와 분리된 현장별 로어 카탈로그 접근을 위한 탐사 현장 정의
+	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+	// 유효성 검사와 현장 조회에 동일 컨트롤러 재사용
 	UMD_SiteDefinition* ExpeditionSite = IsValid(InteractingPlayerController) == true ? InteractingPlayerController->GetExpeditionSite() : nullptr;
 
-	// 수집 원장의 식별자와 화면 표시 정의를 연결하기 위한 로어 카탈로그
-	UMD_LoreCatalog* LoreCatalog = IsValid(ExpeditionSite) == true ? ExpeditionSite->LoreCatalog : nullptr;
 
-	ActiveQuestWidget->SetLoreData(LoreCatalog, LoreComponent->GetDiscoveredLoreAssetIds());
+	// 탐사 현장이 없는 경우 사용할 빈 이름 준비
+	FText SiteName = FText::GetEmpty();
+	// 선택한 사이트 정의의 유효성 확인
+	if (IsValid(ExpeditionSite) == true)
+	{
+		// 카탈로그와 별도로 관리되는 실제 사이트 이름 조회
+		SiteName = ExpeditionSite->SiteName;
+	}
+	// 선택 사이트 이름과 로어 데이터를 함께 전달
+	ActiveQuestWidget->SetLoreData(
+		IsValid(ExpeditionSite) == true ? ExpeditionSite->LoreCatalog : nullptr, LoreComponent->GetDiscoveredLoreAssetIds(), SiteName);
 }
 
 void AMD_Merchant::RefreshShopWidgetFromComponent()

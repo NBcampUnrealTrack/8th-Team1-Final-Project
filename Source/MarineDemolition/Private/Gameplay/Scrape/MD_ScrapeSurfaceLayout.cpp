@@ -1,5 +1,38 @@
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 
+bool FMD_ScrapeSurfaceLayout::IsLayoutMetadataValid(
+	const int32 LayoutVersion, const FGuid& LayoutId, const FIntPoint& GridDimensions)
+{
+	if (LayoutVersion < 0 || LayoutVersion > 1
+		|| (LayoutVersion == 0 && LayoutId.IsValid())
+		|| (LayoutVersion == 1 && !LayoutId.IsValid()))
+	{
+		return false;
+	}
+	if (LayoutVersion == 0 && GridDimensions == FIntPoint::ZeroValue)
+	{
+		return true;
+	}
+	int32 CellsPerFace = 0;
+	int32 TotalCellCount = 0;
+	return TryCalculateCellCounts(GridDimensions, CellsPerFace, TotalCellCount);
+}
+
+bool FMD_ScrapeSurfaceLayout::IsSavedLayoutCompatible(
+	const int32 SavedVersion, const FGuid& SavedId, const FIntPoint& SavedGrid,
+	const int32 CurrentVersion, const FGuid& CurrentId, const FIntPoint& CurrentGrid)
+{
+	int32 CellsPerFace = 0;
+	int32 TotalCellCount = 0;
+	return IsLayoutMetadataValid(SavedVersion, SavedId, SavedGrid)
+		&& IsLayoutMetadataValid(CurrentVersion, CurrentId, CurrentGrid)
+		&& TryCalculateCellCounts(CurrentGrid, CellsPerFace, TotalCellCount)
+		&& SavedVersion == CurrentVersion
+		&& SavedId == CurrentId
+		&& (SavedGrid == CurrentGrid
+			|| (SavedVersion == 0 && SavedGrid == FIntPoint::ZeroValue));
+}
+
 bool FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
 	const FIntPoint& GridDimensions,
 	int32& OutCellsPerFace,
@@ -103,4 +136,17 @@ bool FMD_ScrapeSurfaceLayout::IsValidCellsPerFace(
 	return CellsPerFace > 0
 		&& static_cast<int64>(CellsPerFace) * FaceCount
 			<= MaximumCombinedCellCount;
+}
+
+
+bool FMD_ScrapeSurfaceLayout::IsCarrierScaleValid(const FVector& Scale)
+{
+    return !Scale.ContainsNaN() && FMath::Abs(Scale.X) > UE_SMALL_NUMBER
+        && FMath::Abs(Scale.Y) > UE_SMALL_NUMBER && FMath::Abs(Scale.Z) > UE_SMALL_NUMBER;
+}
+
+bool FMD_ScrapeSurfaceLayout::AreCarrierScalesCompatible(const FVector& SavedScale, const FVector& CurrentScale)
+{
+    return IsCarrierScaleValid(SavedScale) && IsCarrierScaleValid(CurrentScale)
+        && SavedScale.Equals(CurrentScale, 1.0e-4);
 }

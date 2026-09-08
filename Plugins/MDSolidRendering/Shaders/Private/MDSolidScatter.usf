@@ -1,0 +1,14 @@
+#include "/Engine/Public/Platform.ush"
+
+Buffer<uint2> Updates;
+RWBuffer<float> OutputState;
+uint UpdateCount;
+
+[numthreads(64, 1, 1)]
+void MainCS(uint3 DispatchThreadId : SV_DispatchThreadID)
+{
+    uint Index = DispatchThreadId.x;
+    if (Index >= UpdateCount) return;
+    uint2 Update = Updates[Index];
+    OutputState[Update.x] = asfloat(Update.y);
+}

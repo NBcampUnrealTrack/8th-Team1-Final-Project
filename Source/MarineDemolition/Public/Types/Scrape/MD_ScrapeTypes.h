@@ -110,13 +110,16 @@ enum class EMD_ScrapeAimQueryType : uint8
 	SurfaceHit UMETA(DisplayName = "작업면"),
 
 	/** 따개비를 맞혔지만 그 뒤에 오염 작업면은 없는 독립 접촉 상태. */
-	DirectBarnacleOnly UMETA(DisplayName = "직접 따개비")
+	DirectBarnacleOnly UMETA(DisplayName = "직접 따개비"),
+
+	/** 따개비 배치 영역의 허용 표면. 포커스만 허용하며 클릭 피해/벽 청소는 없다. */
+	BarnacleSpawnerSurface UMETA(DisplayName = "따개비 배치 표면")
 };
 
 /**
  * 진입 검증, 로컬 조준과 이후 서버 재검증이 공유하는 헤라 ray 조회 결과.
  *
- * Type은 기존 표면/직접 따개비/무접촉 세 갈래를 보존한다. NoTarget일 때
+ * Type은 작업면/직접 따개비/포커스 전용 배치 표면/무접촉을 구분한다. NoTarget일 때
  * bWasBlocked가 true면 ray가 빗나간 것이 아니라 일반 물체에 가로막힌 것이다.
  */
 USTRUCT(BlueprintType)
@@ -138,7 +141,7 @@ public:
 		Category = "MD|Scrape|Aim")
 	TObjectPtr<AMD_Barnacle> Barnacle = nullptr;
 
-	/** SurfaceHit의 표면 충돌 또는 DirectBarnacleOnly의 따개비 충돌. */
+	/** 작업면·배치 표면의 충돌 또는 직접 따개비 충돌. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Aim")
 	FHitResult Hit;
 
@@ -166,6 +169,12 @@ public:
 	/** NoTarget이 일반 충돌물 또는 투영 불가능한 표면 때문에 발생했는지 여부. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Aim")
 	bool bWasBlocked = false;
+
+	/** Focus is allowed on a spawner surface before aiming at an individual barnacle. */
+	bool CanEnterFocus() const
+	{
+		return IsActionable() || Type == EMD_ScrapeAimQueryType::BarnacleSpawnerSurface;
+	}
 
 	bool IsActionable() const
 	{
@@ -205,6 +214,101 @@ enum class EMD_ScrapeSurfaceNormalAxis : uint8
 	X UMETA(DisplayName = "로컬 X"),
 	Y UMETA(DisplayName = "로컬 Y"),
 	Z UMETA(DisplayName = "로컬 Z")
+};
+
+/** 셀 주소와 렌더링 마스크가 공유할 표면 좌표계. */
+UENUM(BlueprintType)
+enum class EMD_ScrapeSurfaceMappingMode : uint8
+{
+	Planar UMETA(DisplayName = "평면"),
+	CylindricalArc UMETA(DisplayName = "원통 곡면"),
+	CurvedFrontPlanarBack UMETA(DisplayName = "곡면 앞 / 평면 뒤"),
+
+	/**
+	 * 메시가 가진 unwrap UV를 그대로 canonical 주소로 사용한다.
+	 *
+	 * 앞의 세 모드는 월드 위치에서 UV를 되돌리는 해석적 역함수를 CPU와
+	 * 머티리얼이 각각 재현해야 한다. 그래서 메시가 그 해석적 원형과 정확히
+	 * 같아야 하고, 기둥·몰딩처럼 원형을 벗어난 부분은 게이트로 잘라내야 한다.
+	 * 손으로 모델링한 벽에는 성립하지 않는 전제다.
+	 *
+	 * 이 모드는 역함수를 계산하지 않는다. 머티리얼은 TexCoord[0]을, CPU는
+	 * 같은 삼각형의 FindCollisionUV를 읽으므로 두 주소가 같은 정점 속성에서
+	 * 나온다. 주소 일치가 두 공식의 우연이 아니라 정의가 된다.
+	 */
+	MeshUV UMETA(DisplayName = "메시 UV(unwrap)")
+};
+
+/**
+ * 원통 곡면용 canonical UV 설정.
+ *
+ * CurveStartDirectionLocal은 U=0인 곡면 가장자리를 가리키며,
+ * CurveSweepDegrees 방향으로 회전한 가장자리가 U=1이다. Radius와 Thickness는
+ * 메시 로컬 cm 기준이고, 셀과 머티리얼 모두 같은 설정을 사용한다.
+ */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_ScrapeSurfaceMapping
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "MD|Scrape Surface|Geometry")
+	EMD_ScrapeSurfaceMappingMode Mode = EMD_ScrapeSurfaceMappingMode::Planar;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "MD|Scrape Surface|Geometry|Curve",
+		meta = (EditCondition = "Mode == EMD_ScrapeSurfaceMappingMode::CylindricalArc || Mode == EMD_ScrapeSurfaceMappingMode::CurvedFrontPlanarBack",
+			EditConditionHides))
+	FVector CurveCenterLocal = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "MD|Scrape Surface|Geometry|Curve",
+		meta = (EditCondition = "Mode == EMD_ScrapeSurfaceMappingMode::CylindricalArc || Mode == EMD_ScrapeSurfaceMappingMode::CurvedFrontPlanarBack",
+			EditConditionHides))
+	FVector CurveAxisLocal = FVector::ZAxisVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "MD|Scrape Surface|Geometry|Curve",
+		meta = (EditCondition = "Mode == EMD_ScrapeSurfaceMappingMode::CylindricalArc || Mode == EMD_ScrapeSurfaceMappingMode::CurvedFrontPlanarBack",
+			EditConditionHides))
+	FVector CurveStartDirectionLocal = FVector::XAxisVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "MD|Scrape Surface|Geometry|Curve",
+		meta = (EditCondition = "Mode == EMD_ScrapeSurfaceMappingMode::CylindricalArc || Mode == EMD_ScrapeSurfaceMappingMode::CurvedFrontPlanarBack",
+			EditConditionHides, ClampMin = "-180.0", ClampMax = "180.0",
+			UIMin = "-180.0", UIMax = "180.0", Units = "deg"))
+	float CurveSweepDegrees = 90.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "MD|Scrape Surface|Geometry|Curve",
+		meta = (EditCondition = "Mode == EMD_ScrapeSurfaceMappingMode::CylindricalArc || Mode == EMD_ScrapeSurfaceMappingMode::CurvedFrontPlanarBack",
+			EditConditionHides, ClampMin = "0.01", UIMin = "1.0", Units = "cm"))
+	float CurveRadiusCm = 100.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "MD|Scrape Surface|Geometry|Curve",
+		meta = (EditCondition = "Mode == EMD_ScrapeSurfaceMappingMode::CylindricalArc || Mode == EMD_ScrapeSurfaceMappingMode::CurvedFrontPlanarBack",
+			EditConditionHides, ClampMin = "0.0", UIMin = "0.0", Units = "cm"))
+	float CurveThicknessCm = 10.0f;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "MD|Scrape Surface|Geometry|Curve",
+		meta = (EditCondition = "Mode == EMD_ScrapeSurfaceMappingMode::CylindricalArc || Mode == EMD_ScrapeSurfaceMappingMode::CurvedFrontPlanarBack",
+			EditConditionHides))
+	bool bCurveFrontIsOuter = true;
+
+	/**
+	 * MeshUV 모드에서 canonical 주소로 읽을 메시 UV 채널.
+	 *
+	 * 머티리얼의 TexCoord 인덱스와 반드시 같아야 한다. 다르면 CPU와 렌더링이
+	 * 서로 다른 주소를 읽으므로, 이 값은 사실상 두 계층의 계약이다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite,
+		Category = "MD|Scrape Surface|Geometry|Mesh UV",
+		meta = (EditCondition = "Mode == EMD_ScrapeSurfaceMappingMode::MeshUV",
+			EditConditionHides, ClampMin = "0", ClampMax = "7"))
+	int32 MeshUVChannel = 0;
 };
 
 /**
@@ -247,98 +351,6 @@ public:
 	{
 		return DepthAxis.IsNearlyZero() && WidthAxis.IsNearlyZero();
 	}
-};
-
-/**
- * Stage3 역오염 dab의 논리적 식별자.
- *
- * DistanceBin은 월드 좌표나 진행축 투영값이 아니라, 해당
- * sub-stroke의 서버 승인 누적 arc length에서 계산한 고정 간격 bin이다.
- * 네트워크 batch를 재전송해도 이 네 값이 같으면 같은 dab이다.
- */
-USTRUCT()
-struct MARINEDEMOLITION_API FMD_ScrapeContaminationStampIdentity
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY()
-	uint64 FocusSessionGeneration = 0;
-
-	UPROPERTY()
-	uint32 LmbStrokeGeneration = 0;
-
-	UPROPERTY()
-	uint32 SubStrokeGeneration = 0;
-
-	UPROPERTY()
-	int32 DistanceBin = INDEX_NONE;
-
-	bool IsValid() const
-	{
-		return FocusSessionGeneration != 0
-			&& LmbStrokeGeneration != 0
-			&& SubStrokeGeneration != 0
-			&& DistanceBin >= 0;
-	}
-
-	bool operator==(const FMD_ScrapeContaminationStampIdentity& Other) const
-	{
-		return FocusSessionGeneration == Other.FocusSessionGeneration
-			&& LmbStrokeGeneration == Other.LmbStrokeGeneration
-			&& SubStrokeGeneration == Other.SubStrokeGeneration
-			&& DistanceBin == Other.DistanceBin;
-	}
-
-	bool operator!=(const FMD_ScrapeContaminationStampIdentity& Other) const
-	{
-		return !(*this == Other);
-	}
-
-	friend uint32 GetTypeHash(
-		const FMD_ScrapeContaminationStampIdentity& Identity)
-	{
-		uint32 Hash = HashCombineFast(
-			GetTypeHash(Identity.FocusSessionGeneration),
-			GetTypeHash(Identity.LmbStrokeGeneration));
-		Hash = HashCombineFast(Hash, GetTypeHash(Identity.SubStrokeGeneration));
-		return HashCombineFast(Hash, GetTypeHash(Identity.DistanceBin));
-	}
-};
-
-/**
- * ordered Stage3 path에서 확정된 exact-position dab.
- *
- * 위치와 blade basis는 candidate 생성 시점의 값을 저장한다. tail flush나
- * 재전송 시점의 현재 tangent로 다시 계산하지 않는다.
- */
-USTRUCT()
-struct MARINEDEMOLITION_API FMD_ScrapeContaminationDab
-{
-	GENERATED_BODY()
-
-public:
-	UPROPERTY()
-	FMD_ScrapeContaminationStampIdentity Identity;
-
-	UPROPERTY()
-	FVector2D PositionCm = FVector2D::ZeroVector;
-
-	UPROPERTY()
-	FMD_ScrapeBladeBasis BladeBasis;
-
-	UPROPERTY()
-	EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
-
-	UPROPERTY()
-	double ArcLengthCm = 0.0;
-
-	/** TASK 7 RPC sequence가 붙기 전에는 서버 로컬 승인 순번을 사용한다. */
-	UPROPERTY()
-	uint64 SampleSequence = 0;
-
-	UPROPERTY()
-	uint32 ToolSpecGeneration = 0;
 };
 
 /**
@@ -397,6 +409,13 @@ public:
 	/** 구간 끝점의 날 방향. 한쪽 끝만 지정하면 그 basis를 구간 전체에서 고정 사용한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Blade")
 	FMD_ScrapeBladeBasis EndBladeBasis;
+
+	/** MeshUV uses physical tangents, never a direction in the packed atlas. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Blade")
+	FVector StartWorldBladeDepthAxis = FVector::ZeroVector;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Scrape|Blade")
+	FVector EndWorldBladeDepthAxis = FVector::ZeroVector;
 };
 
 /** 헤라가 표면과 접촉하는 브러시 형태 */
@@ -739,6 +758,101 @@ public:
 };
 
 /**
+ * 오염 가치가 현재 운반체에서 차지하는 양과 최종 보상 단위를 함께 보존하는 lot.
+ *
+ * CarrierAmount의 단위는 운반체마다 다르다. Surface에서는 raw cell 질량,
+ * Tool에서는 Load point다. RewardUnits만 경제 가치이며 항상 double로 계산한다.
+ * RewardUnits가 0인 lot은 따개비 연질 잔사처럼 관리량만 차지할 수 있다.
+ */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_ScrapeRecoveryLot
+{
+	GENERATED_BODY()
+
+public:
+	FMD_ScrapeRecoveryLot()
+		: SourceId()
+		, RewardClass(NAME_None)
+		, CarrierAmount(0.0)
+		, RewardUnits(0.0)
+	{
+	}
+
+	/** 최초 발행원을 식별한다. 보상 가치가 0인 관리용 lot은 invalid Guid를 허용한다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	FGuid SourceId;
+
+	/** 서로 합산 가능한 보상 종류. 현재 표면 오염은 Contamination을 사용한다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	FName RewardClass;
+
+	/** 현재 운반체에서 이 lot이 차지하는 양. 유한한 0 이상 값만 허용한다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	double CarrierAmount;
+
+	/** 최종 정분류로 회수 가능한 보상 단위. 유한한 0 이상 값만 허용한다. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	double RewardUnits;
+};
+
+/**
+ * 헤라 Load를 비울 때 실제로 빠진 관리량과 함께 이동한 가치 lot.
+ * LIQ 구현 전에도 단일 원자 API의 출력 계약을 고정한다.
+ */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_ScrapeLoadTransferResult
+{
+	GENERATED_BODY()
+
+public:
+	FMD_ScrapeLoadTransferResult()
+		: bSucceeded(false)
+		, RemovedLoadAmount(0.0f)
+		, RemovedRewardUnits(0.0)
+	{
+	}
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	bool bSucceeded;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	float RemovedLoadAmount;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	double RemovedRewardUnits;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Recovery")
+	TArray<FMD_ScrapeRecoveryLot> RemovedLots;
+};
+
+/** 서버 권위 recovery lot 배열에 공통으로 쓰는 결정적·무손실 산술. */
+struct MARINEDEMOLITION_API FMD_ScrapeRecoveryLedger
+{
+	static bool IsLotValid(const FMD_ScrapeRecoveryLot& Lot);
+	static double GetTotalCarrierAmount(
+		TConstArrayView<FMD_ScrapeRecoveryLot> Lots);
+	static double GetTotalRewardUnits(
+		TConstArrayView<FMD_ScrapeRecoveryLot> Lots);
+	static bool AppendLot(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		const FMD_ScrapeRecoveryLot& Lot);
+	static bool AppendScaledLots(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		TConstArrayView<FMD_ScrapeRecoveryLot> SourceLots,
+		double Scale);
+	static bool RebaseCarrierAmount(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		double NewTotalCarrierAmount);
+	static double ExtractProportional(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		double RequestedCarrierAmount,
+		TArray<FMD_ScrapeRecoveryLot>& OutExtractedLots);
+	static bool AppendZeroRewardCarrier(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		double CarrierAmount);
+};
+
+/**
  * 한 번의 긁기로 실제 값이 변한 셀 하나의 변경 내역
  *
  * 표면 Actor는 이 배열만 순회해 머티리얼 마스크를 갱신 가능.
@@ -784,6 +898,48 @@ public:
 };
 
 /**
+ * 한 번의 표면 순제거 질량을 헤라 적재와 물리 드롭 사이에 나눈 결과.
+ *
+ * RequestedLoadAmount가 유효한 양수일 때만 성공한다. 성공 결과의 두 비율은
+ * 항상 유한한 0~1이며 LoadOwnedRatio + PhysicalDropRatio == 1이다.
+ */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_ScrapeMassAllocationResult
+{
+	GENERATED_BODY()
+
+public:
+	FMD_ScrapeMassAllocationResult()
+		: bIsValid(false)
+		, RequestedLoadAmount(0.0f)
+		, ActualLoadAmount(0.0f)
+		, LoadOwnedRatio(0.0f)
+		, PhysicalDropRatio(0.0f)
+	{
+	}
+
+	/** 요청량과 실제 수용량으로 안전한 배분을 계산했는지 여부. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	bool bIsValid;
+
+	/** 이번 순제거량에서 헤라 적재로 바꾸려고 요청한 양. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float RequestedLoadAmount;
+
+	/** 0~100 상한을 적용한 뒤 헤라가 실제로 받아들인 양. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float ActualLoadAmount;
+
+	/** 순제거 질량 중 헤라 Load가 한 번 소유하는 몫. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float LoadOwnedRatio;
+
+	/** Load가 받지 못해 기존 물리 드롭 누적기로 보내는 나머지 몫. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float PhysicalDropRatio;
+};
+
+/**
  * 한 번의 긁기 입력을 격자에 적용한 최종 결과
  *
  * 이 구조체에는 판정 결과만 담고 사운드 재생, 이펙트 생성, 점수 변경은 미수행.
@@ -805,13 +961,21 @@ public:
 		, ModifiedCellCount(0)
 		, NewlyCleanedCellCount(0)
 		, RemovedContaminationAmount(0.0f)
+		, NetRemovedContaminationAmount(0.0f)
+		, RemovedBaseContaminationAmount(0.0f)
+		, RemovedTransferredContaminationAmount(0.0f)
+		, NetRemovedRewardUnits(0.0)
 		, CleanRatioBefore(0.0f)
 		, CleanRatioAfter(0.0f)
 		, CleanRatioDelta(0.0f)
+		, NetRemovedCleanRatioDelta(0.0f)
 		, bIsSurfaceFullyClean(false)
 		, bTouchedBareSurface(false)
 	{
 	}
+
+	/** Native path feedback only: distance actually sampled along the source surface. */
+	double EvaluatedTravelDistanceCm = 0.0;
 
 	/** 이번 결과가 평가한 앞면 또는 뒷면. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
@@ -860,6 +1024,25 @@ public:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	float RemovedContaminationAmount;
 
+	/**
+	 * 같은 트랜잭션의 역오염 도포까지 뺀 실제 순제거 질량.
+	 * 헤라 Load와 물리 드롭은 이 값 하나를 배분하며 gross 제거량을 다시 쓰지 않는다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float NetRemovedContaminationAmount;
+
+	/** 서버 회계 전용 gross 기본층 제거량. RPC 피드백에는 직렬화하지 않는다. */
+	float RemovedBaseContaminationAmount;
+
+	/** 서버 회계 전용 gross 재부착층 제거량. RPC 피드백에는 직렬화하지 않는다. */
+	float RemovedTransferredContaminationAmount;
+
+	/** 역오염 재부착 뒤 현재 운반체 밖으로 실제 이동한 보상 단위. */
+	double NetRemovedRewardUnits;
+
+	/** 서버 회계 전용 provenance lot. 클라이언트 피드백 RPC에는 직렬화하지 않는다. */
+	TArray<FMD_ScrapeRecoveryLot> NetRemovedRecoveryLots;
+
 	/** 스트로크 적용 전 표면 전체의 제거 비율. 0은 미제거, 1은 완전 제거를 의미 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	float CleanRatioBefore;
@@ -871,6 +1054,13 @@ public:
 	/** 이번 스트로크가 증가시킨 표면 전체 제거 비율이며 CleanRatioAfter - CleanRatioBefore 값 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape")
 	float CleanRatioDelta;
+
+	/**
+	 * CleanRatioDelta에서 같은 트랜잭션의 역오염 몫을 뺀 순제거율.
+	 * 헤라가 요청할 Load 양은 이 값으로만 계산한다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Scrape|Mass")
+	float NetRemovedCleanRatioDelta;
 
 	/**
 	 * 초기 오염이 존재했던 모든 셀의 잔여량이 CleanTolerance 이하인지 여부

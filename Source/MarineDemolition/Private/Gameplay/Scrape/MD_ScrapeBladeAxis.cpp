@@ -67,11 +67,6 @@ bool FMD_ScrapeBladeAxisWindow::TryCalculateWindowedAxis(
 	return true;
 }
 
-int32 FMD_ScrapeBladeAxisWindow::GetSampleCount() const
-{
-	return Samples.Num();
-}
-
 FMD_ScrapeBladeBasis FMD_ScrapeBladeAxis::MakeBasis(
 	const FVector2D& BladeDepthAxis)
 {

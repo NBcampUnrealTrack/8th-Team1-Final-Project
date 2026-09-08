@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameStateBase.h"
@@ -26,6 +26,8 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnDayChanged, int32, NewDay);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnInspectionReport, const FMD_InspectionReport&, Report);
 // 접속 플레이어 구성 또는 표시 이름 변경을 활성 UI에 전달하는 네이티브 이벤트 선언
 DECLARE_MULTICAST_DELEGATE(FMD_OnPlayerListChanged);
+// 서버 원장 변경을 구독 컨트롤러에 전달하는 이벤트
+DECLARE_MULTICAST_DELEGATE(FMD_OnDailyLedgerChanged);
 
 UCLASS()
 class MARINEDEMOLITION_API AMD_GameStateBase : public AGameStateBase
@@ -44,6 +46,9 @@ public:
 
     //Timer
     void StartGameTime();
+
+    // 현재 일자의 인게임 시각을 지정한 시의 정각으로 설정
+    bool SetGameTimeHour(int32 Hour);
 
     UFUNCTION(BlueprintPure, Category = "Game Time")
     double GetElapsedRealSeconds() const;
@@ -93,10 +98,6 @@ public:
     // 점수 이벤트 발생. 기본값은 ScoreTable 단가×Count이며, 계산 완료된 점수는 Count를 최종 증감값으로 사용
     UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score", meta = (AdvancedDisplay = "bUseCountAsDelta"))
     void AddScoreEvent(FGameplayTag EventTag, int32 Count = 1, bool bUseCountAsDelta = false);
-
-    // 샘플 점수 이벤트 발생 (등급×상태 단가)
-    UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Score")
-    void AddSampleScoreEvent(EMD_SampleGrade Grade, EMD_SampleScoreType Type);
 
     // 해당 Day 점검 기준. 경고 상태면 배율 반영 (HUD 표시 공용)
     UFUNCTION(BlueprintPure, Category = "Score")
@@ -261,4 +262,17 @@ public:
 
     // 검증된 저장 필드를 복제 GameState와 리슨 서버 알림에 적용하는 함수
     bool ApplyGameStateSaveData(const FMD_GameStateData& SaveData);
+public:
+    // PlayerController 응답 RPC가 조회하는 서버 당일 원장 합계
+    UPROPERTY(Transient)
+    FMD_InspectionReport DailyLedger;
+
+    // 활성 보고서가 구독할 원장 갱신 이벤트
+    FMD_OnDailyLedgerChanged OnDailyLedgerChanged;
+
+    // 서버 점수와 크레딧 원장을 응답용 보고서에 반영
+    void RefreshDailyLedger();
+
+    // 응답 RPC 구성에 사용할 서버 당일 보고서 조회
+    FORCEINLINE FMD_InspectionReport& GetDailyLedger() { return DailyLedger; }
 };

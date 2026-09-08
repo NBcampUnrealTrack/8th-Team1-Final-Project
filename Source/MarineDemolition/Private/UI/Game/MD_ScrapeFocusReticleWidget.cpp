@@ -73,7 +73,7 @@ int32 UMD_ScrapeFocusReticleWidget::NativePaint(
 	const UMD_ScrapeToolComponent* const ScrapeTool = IsValid(Character)
 		? Character->GetScrapeToolComponent()
 		: nullptr;
-	if (!IsValid(ScrapeTool) || !ScrapeTool->IsScrapeFocusActive())
+	if (!IsValid(ScrapeTool) || !ScrapeTool->IsScrapeFocusViewActive())
 	{
 		return BaseLayer;
 	}
@@ -92,7 +92,10 @@ int32 UMD_ScrapeFocusReticleWidget::NativePaint(
 	const FLinearColor ReticleColor =
 		ScrapeTool->GetScrapeFocusState() == EMD_ScrapeFocusState::FocusPending
 			? PendingColor
-			: (ScrapeTool->IsScrapeFocusAimValid() ? ActionableColor : InvalidColor);
+			: (ScrapeTool->IsScrapeFocusReady()
+				&& ScrapeTool->IsScrapeFocusAimValid()
+					? ActionableColor
+					: InvalidColor);
 	const int32 ReticleLayer = BaseLayer + 1;
 
 	TArray<FVector2f> CirclePoints;

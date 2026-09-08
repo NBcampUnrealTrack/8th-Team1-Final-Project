@@ -1,15 +1,39 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/Engine.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "Audio/MD_AudioSubsystem.h"
 #include "Net/UnrealNetwork.h"
+#include "World/Contamination/MD_Barnacle.h"
+
+namespace
+{
+	FIntVector QuantizeScrapeContactForReplication(const FVector& Value)
+	{
+		return FIntVector(
+			FMath::RoundToInt(Value.X * 10.0),
+			FMath::RoundToInt(Value.Y * 10.0),
+			FMath::RoundToInt(Value.Z * 10.0));
+	}
+
+	FIntVector QuantizeScrapeNormalForReplication(const FVector& Value)
+	{
+		constexpr double NormalScale = 32767.0;
+		return FIntVector(
+			FMath::RoundToInt(FMath::Clamp(Value.X, -1.0, 1.0) * NormalScale),
+			FMath::RoundToInt(FMath::Clamp(Value.Y, -1.0, 1.0) * NormalScale),
+			FMath::RoundToInt(FMath::Clamp(Value.Z, -1.0, 1.0) * NormalScale));
+	}
+}
 
 UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 {
@@ -60,7 +84,6 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	ScrapeLoadPerRemovedPercent = 0.6f;
 	ScrapeLoadPerRemovedBarnacle = 8.0f;
 	SaturatedContaminationStampRatio = 0.4f;
-	SaturatedRemovalMultiplier = 0.05f;
 	SaturatedContaminationStampCoverage = 0.5f;
 	SaturatedContaminationStampDepthCm = 4.0f;
 	SaturatedContaminationStampSpacingCm = 6.0f;
@@ -70,13 +93,8 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 	ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
 	bHasScrapeFocusView = false;
 	StrokePath.bHasPreviousSurfacePosition = false;
-	StrokePath.bHasLockedStrokeAxis = false;
-	ContaminationPaint.SaturatedContaminationStampPatternSeed = 7319;
 	StrokePath.PreviousSurfacePositionCm = FVector2D::ZeroVector;
 	StrokePath.PreviousSurfaceFace = EMD_ScrapeSurfaceFace::Front;
-	StrokePath.StrokeAnchorPositionCm = FVector2D::ZeroVector;
-	StrokePath.FurthestSurfacePositionCm = FVector2D::ZeroVector;
-	StrokePath.LockedStrokeAxis = FVector2D::ZeroVector;
 	StrokePath.PendingScrapePathArcLengthCm = 0.0;
 	StrokePath.ScrapePathArcLengthCm = 0.0;
 	StrokePath.LastEmittedScrapePathArcLengthCm = 0.0;
@@ -93,6 +111,8 @@ UMD_ScrapeToolComponent::UMD_ScrapeToolComponent()
 
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
+	// AnimBP가 이 컴포넌트의 로컬 visual pose를 같은 프레임에 소비한다.
+	PrimaryComponentTick.TickGroup = TG_PrePhysics;
 }
 
 void UMD_ScrapeToolComponent::GetLifetimeReplicatedProps(
@@ -111,22 +131,19 @@ void UMD_ScrapeToolComponent::GetLifetimeReplicatedProps(
 		UMD_ScrapeToolComponent,
 		bIsScraping,
 		COND_SkipOwner);
-	DOREPLIFETIME_CONDITION(
+	// 최종 접촉 pose는 소유자에게도 서버 승인값을 복제한다.
+	DOREPLIFETIME(
 		UMD_ScrapeToolComponent,
-		LastContactWorldLocation,
-		COND_SkipOwner);
-	DOREPLIFETIME_CONDITION(
+		LastContactWorldLocation);
+	DOREPLIFETIME(
 		UMD_ScrapeToolComponent,
-		bHasLastContact,
-		COND_SkipOwner);
-	DOREPLIFETIME_CONDITION(
+		bHasLastContact);
+	DOREPLIFETIME(
 		UMD_ScrapeToolComponent,
-		LastContactBladeWorldDirection,
-		COND_SkipOwner);
-	DOREPLIFETIME_CONDITION(
+		LastContactBladeWorldDirection);
+	DOREPLIFETIME(
 		UMD_ScrapeToolComponent,
-		bHasLastContactBladeDirection,
-		COND_SkipOwner);
+		bHasLastContactBladeDirection);
 }
 
 const TCHAR* UMD_ScrapeToolComponent::GetContactTypeLabel(
@@ -152,8 +169,45 @@ const TCHAR* UMD_ScrapeToolComponent::GetContactTypeLabel(
 void UMD_ScrapeToolComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	if (ACharacter* const OwnerCharacter = Cast<ACharacter>(GetOwner()))
+	{
+		if (UCharacterMovementComponent* const CharacterMovement =
+			OwnerCharacter->GetCharacterMovement())
+		{
+			// 이동 완료 후 visual pose와 판정 Tick을 함께 갱신한다.
+			AddTickPrerequisiteComponent(CharacterMovement);
+		}
+
+		if (USkeletalMeshComponent* const BodyMesh = OwnerCharacter->GetMesh())
+		{
+			// CharacterMovement → ScrapeTool → AnimBP 순서를 명시한다.
+			BodyMesh->AddTickPrerequisiteComponent(this);
+		}
+	}
 
 	SetComponentTickEnabled(false);
+}
+
+void UMD_ScrapeToolComponent::EndPlay(
+	const EEndPlayReason::Type EndPlayReason)
+{
+	// teardown 중에는 RPC를 만들지 않고 local latch와 auth state를 함께 폐기한다.
+	EndScrapeFocusInternal(false);
+	if (ACharacter* const OwnerCharacter = Cast<ACharacter>(GetOwner()))
+	{
+		if (USkeletalMeshComponent* const BodyMesh = OwnerCharacter->GetMesh())
+		{
+			BodyMesh->RemoveTickPrerequisiteComponent(this);
+		}
+
+		if (UCharacterMovementComponent* const CharacterMovement =
+			OwnerCharacter->GetCharacterMovement())
+		{
+			RemoveTickPrerequisiteComponent(CharacterMovement);
+		}
+	}
+	ClearLocalScrapePredictions();
+	Super::EndPlay(EndPlayReason);
 }
 
 float UMD_ScrapeToolComponent::GetEffectiveScrapeReachCm() const
@@ -176,11 +230,6 @@ bool UMD_ScrapeToolComponent::SetScrapeToolSpec(
 	// 성능이 바뀐 프레임에 이전 위치부터 새 범위를 소급 적용하지 않도록 경로를 끊는다.
 	ResetStrokeTracking();
 	ScrapeToolSpec = NewToolSpec;
-	++ScrapeToolSpecGeneration;
-	if (ScrapeToolSpecGeneration == 0)
-	{
-		++ScrapeToolSpecGeneration;
-	}
 	GetOwner()->ForceNetUpdate();
 	return true;
 }
@@ -189,11 +238,6 @@ void UMD_ScrapeToolComponent::OnRep_ScrapeToolSpec()
 {
 	// 서버에서 새 스펙을 받은 프레임에 이전 로컬 위치부터 새 범위를 잇지 않는다.
 	ResetStrokeTracking();
-	++ScrapeToolSpecGeneration;
-	if (ScrapeToolSpecGeneration == 0)
-	{
-		++ScrapeToolSpecGeneration;
-	}
 }
 
 bool UMD_ScrapeToolComponent::SetScrapeBladeWidthCm(
@@ -242,65 +286,442 @@ float UMD_ScrapeToolComponent::CalculateScrapeLoadGainFromCleanRatioDelta(
 		* LoadPerRemovedPercent;
 }
 
-bool UMD_ScrapeToolComponent::SetScrapeLoad(const float NewLoad)
+FMD_ScrapeMassAllocationResult
+UMD_ScrapeToolComponent::CalculateScrapeMassAllocation(
+	const float RequestedLoadAmount,
+	const float ActualLoadAmount)
 {
-	if (!GetOwner() || !GetOwner()->HasAuthority() || !FMath::IsFinite(NewLoad))
+	FMD_ScrapeMassAllocationResult Result;
+	if (!FMath::IsFinite(RequestedLoadAmount)
+		|| RequestedLoadAmount <= 0.0f
+		|| !FMath::IsFinite(ActualLoadAmount)
+		|| ActualLoadAmount < 0.0f
+		|| ActualLoadAmount > RequestedLoadAmount)
 	{
-		return false;
+		return Result;
 	}
 
-	const float PreviousLoad = GetScrapeLoad();
-	const float ClampedNewLoad = FMath::Clamp(
-		NewLoad,
-		0.0f,
-		MaximumScrapeLoad);
-	if (CalculateScrapeLoadStage(PreviousLoad) == EMD_ScrapeLoadStage::Stage3
-		&& CalculateScrapeLoadStage(ClampedNewLoad)
-			!= EMD_ScrapeLoadStage::Stage3)
+	const float LoadOwnedRatio = ActualLoadAmount / RequestedLoadAmount;
+	if (!FMath::IsFinite(LoadOwnedRatio)
+		|| LoadOwnedRatio < 0.0f
+		|| LoadOwnedRatio > 1.0f)
 	{
-		// 이전 spec/generation으로 생성한 tail을 먼저 확정한다.
-		FlushStage3PathTail();
-		AdvanceStage3SubStrokeGeneration();
+		return Result;
 	}
-	ScrapeLoad = ClampedNewLoad;
-	if (!FMath::IsNearlyEqual(PreviousLoad, ScrapeLoad))
-	{
-		NotifyScrapeLoadChanged();
-		GetOwner()->ForceNetUpdate();
-	}
-	return true;
+
+	Result.bIsValid = true;
+	Result.RequestedLoadAmount = RequestedLoadAmount;
+	Result.ActualLoadAmount = ActualLoadAmount;
+	Result.LoadOwnedRatio = LoadOwnedRatio;
+	Result.PhysicalDropRatio = 1.0f - LoadOwnedRatio;
+	return Result;
 }
 
-float UMD_ScrapeToolComponent::AddScrapeLoad(
+float UMD_ScrapeToolComponent::CalculateActualScrapeLoadRemoval(
+	const float CurrentLoad,
 	const float RequestedAmount)
 {
-	if (!GetOwner()
-		|| !GetOwner()->HasAuthority()
+	if (!FMath::IsFinite(CurrentLoad)
 		|| !FMath::IsFinite(RequestedAmount)
+		|| CurrentLoad <= 0.0f
 		|| RequestedAmount <= 0.0f)
 	{
 		return 0.0f;
 	}
 
+	const float ClampedCurrentLoad = FMath::Clamp(
+		CurrentLoad,
+		0.0f,
+		MaximumScrapeLoad);
+	if (RequestedAmount >= ClampedCurrentLoad)
+	{
+		// 전량 요청은 일반 알림 허용오차보다 작은 tail도 정확히 0까지 비운다.
+		return ClampedCurrentLoad;
+	}
+	const float RemainingLoad = FMath::Max(
+		0.0f,
+		ClampedCurrentLoad - RequestedAmount);
+	return FMath::IsNearlyEqual(ClampedCurrentLoad, RemainingLoad)
+		? 0.0f
+		: ClampedCurrentLoad - RemainingLoad;
+}
+
+bool UMD_ScrapeToolComponent::SetScrapeLoad(const float NewLoad)
+{
+	if (bScrapeLoadTransactionInProgress
+		|| !GetOwner()
+		|| !GetOwner()->HasAuthority()
+		|| !FMath::IsFinite(NewLoad))
+	{
+		return false;
+	}
+
+	const float ClampedNewLoad = FMath::Clamp(
+		NewLoad,
+		0.0f,
+		MaximumScrapeLoad);
+	TArray<FMD_ScrapeRecoveryLot> ZeroRewardRecoveryLots;
+	if (ClampedNewLoad > 0.0f
+		&& !FMD_ScrapeRecoveryLedger::AppendZeroRewardCarrier(
+			ZeroRewardRecoveryLots,
+			static_cast<double>(ClampedNewLoad)))
+	{
+		return false;
+	}
+
+	// Public Set은 저장 복원이 아닌 테스트/관리용 fixture다. 같은 숫자를 다시
+	// 설정하더라도 이전 provenance를 남기지 않고 보상 0 상태로 재정의한다.
+	return CommitScrapeLoadStateInternal(
+		ClampedNewLoad,
+		MoveTemp(ZeroRewardRecoveryLots),
+		true);
+}
+
+float UMD_ScrapeToolComponent::AddScrapeLoad(
+	const float RequestedAmount)
+{
+	return AddScrapeLoadInternal(RequestedAmount, true);
+}
+
+float UMD_ScrapeToolComponent::AddScrapeLoadInternal(
+	const float RequestedAmount,
+	const bool bNotifyChange)
+{
+	float ActualLoadAmount = 0.0f;
+	TryAddScrapeLoadWithRecoveryInternal(
+		RequestedAmount,
+		TConstArrayView<FMD_ScrapeRecoveryLot>(),
+		bNotifyChange,
+		ActualLoadAmount);
+	return ActualLoadAmount;
+}
+
+bool UMD_ScrapeToolComponent::TryAddScrapeLoadWithRecoveryInternal(
+	const float RequestedAmount,
+	const TConstArrayView<FMD_ScrapeRecoveryLot> RequestedRecoveryLots,
+	const bool bNotifyChange,
+	float& OutActualLoadAmount)
+{
+	OutActualLoadAmount = 0.0f;
+	if (bScrapeLoadTransactionInProgress
+		|| !GetOwner()
+		|| !GetOwner()->HasAuthority()
+		|| !FMath::IsFinite(RequestedAmount)
+		|| RequestedAmount <= 0.0f)
+	{
+		return false;
+	}
+
 	const float PreviousLoad = GetScrapeLoad();
-	ScrapeLoad = FMath::Clamp(
+	TArray<FMD_ScrapeRecoveryLot> CandidateRecoveryLots =
+		ScrapeLoadRecoveryLots;
+	if (!FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+			CandidateRecoveryLots,
+			static_cast<double>(PreviousLoad)))
+	{
+		return false;
+	}
+
+	TArray<FMD_ScrapeRecoveryLot> IncomingRecoveryLots;
+	if (RequestedRecoveryLots.Num() == 0)
+	{
+		if (!FMD_ScrapeRecoveryLedger::AppendZeroRewardCarrier(
+				IncomingRecoveryLots,
+				static_cast<double>(RequestedAmount)))
+		{
+			return false;
+		}
+	}
+	else
+	{
+		IncomingRecoveryLots.Append(
+			RequestedRecoveryLots.GetData(),
+			RequestedRecoveryLots.Num());
+		if (!FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+				IncomingRecoveryLots,
+				static_cast<double>(RequestedAmount)))
+		{
+			return false;
+		}
+	}
+
+	float CandidateLoad = FMath::Clamp(
 		PreviousLoad + RequestedAmount,
 		0.0f,
 		MaximumScrapeLoad);
-	const float AddedAmount = ScrapeLoad - PreviousLoad;
-	if (AddedAmount > 0.0f)
+	float StoredLoadDelta = CandidateLoad - PreviousLoad;
+	if (StoredLoadDelta > RequestedAmount && CandidateLoad > PreviousLoad)
 	{
-		NotifyScrapeLoadChanged();
-		GetOwner()->ForceNetUpdate();
+		// 양수 float의 bit 표현은 값 순서와 같다. 최근접 반올림이 요청량을
+		// 넘겼다면 바로 아래 표현값으로 내려 실제 저장 증가도 요청 이하로 만든다.
+		const uint32 CandidateBits = FMath::AsUInt(CandidateLoad);
+		CandidateLoad = CandidateBits > 0
+			? FMath::AsFloat(CandidateBits - 1)
+			: PreviousLoad;
+		if (!FMath::IsFinite(CandidateLoad) || CandidateLoad < PreviousLoad)
+		{
+			CandidateLoad = PreviousLoad;
+		}
+		StoredLoadDelta = CandidateLoad - PreviousLoad;
+	}
+	if (StoredLoadDelta <= 0.0f)
+	{
+		// 가득 찬 헤라는 정상적인 0 수용이다. Surface가 같은 비율을 물리
+		// 경로에 전부 넘길 수 있도록 validation 성공과 구분한다.
+		return true;
 	}
 
-	return AddedAmount;
+	TArray<FMD_ScrapeRecoveryLot> AcceptedRecoveryLots;
+	const double AcceptedCarrierAmount =
+		FMD_ScrapeRecoveryLedger::ExtractProportional(
+			IncomingRecoveryLots,
+			static_cast<double>(StoredLoadDelta),
+			AcceptedRecoveryLots);
+	if (!FMath::IsNearlyEqual(
+			AcceptedCarrierAmount,
+			static_cast<double>(StoredLoadDelta),
+			1.0e-9)
+		|| !FMD_ScrapeRecoveryLedger::AppendScaledLots(
+			CandidateRecoveryLots,
+			AcceptedRecoveryLots,
+			1.0)
+		|| !FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+			CandidateRecoveryLots,
+			static_cast<double>(CandidateLoad)))
+	{
+		return false;
+	}
+
+	if (!CommitScrapeLoadStateInternal(
+			CandidateLoad,
+			MoveTemp(CandidateRecoveryLots),
+			bNotifyChange))
+	{
+		return false;
+	}
+
+	OutActualLoadAmount = StoredLoadDelta;
+	return true;
 }
 
-void UMD_ScrapeToolComponent::OnRep_ScrapeLoad()
+float UMD_ScrapeToolComponent::RemoveScrapeLoad(
+	const float RequestedAmount)
+{
+	return RemoveScrapeLoadWithRecovery(RequestedAmount).RemovedLoadAmount;
+}
+
+FMD_ScrapeLoadTransferResult
+UMD_ScrapeToolComponent::RemoveScrapeLoadWithRecovery(
+	const float RequestedAmount)
+{
+	FPreparedScrapeLoadRemoval PreparedRemoval;
+	if (!TryPrepareScrapeLoadRemoval(RequestedAmount, PreparedRemoval))
+	{
+		return FMD_ScrapeLoadTransferResult();
+	}
+
+	if (!CommitPreparedScrapeLoadRemoval(
+			MoveTemp(PreparedRemoval),
+			/*bNotifyChange=*/true))
+	{
+		return FMD_ScrapeLoadTransferResult();
+	}
+	return MoveTemp(PreparedRemoval.TransferResult);
+}
+
+bool UMD_ScrapeToolComponent::TryPrepareScrapeLoadRemoval(
+	const float RequestedAmount,
+	FPreparedScrapeLoadRemoval& OutPreparedRemoval) const
+{
+	OutPreparedRemoval = FPreparedScrapeLoadRemoval();
+	const AActor* OwnerActor = GetOwner();
+	if (bScrapeLoadTransactionInProgress
+		|| !IsValid(OwnerActor)
+		|| !OwnerActor->HasAuthority()
+		|| !FMath::IsFinite(RequestedAmount)
+		|| RequestedAmount <= 0.0f)
+	{
+		return false;
+	}
+
+	const float PreviousLoad = GetScrapeLoad();
+	const float CalculatedRemoval = CalculateActualScrapeLoadRemoval(
+		PreviousLoad,
+		RequestedAmount);
+	if (CalculatedRemoval <= 0.0f)
+	{
+		return false;
+	}
+
+	const float TargetLoad = FMath::Max(
+		0.0f,
+		PreviousLoad - CalculatedRemoval);
+	if (PreviousLoad == TargetLoad)
+	{
+		return false;
+	}
+
+	TArray<FMD_ScrapeRecoveryLot> RemainingRecoveryLots =
+		ScrapeLoadRecoveryLots;
+	if (!FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+			RemainingRecoveryLots,
+			static_cast<double>(PreviousLoad)))
+	{
+		return false;
+	}
+
+	TArray<FMD_ScrapeRecoveryLot> RemovedRecoveryLots;
+	const double RemovedCarrierAmount =
+		FMD_ScrapeRecoveryLedger::ExtractProportional(
+			RemainingRecoveryLots,
+			static_cast<double>(CalculatedRemoval),
+			RemovedRecoveryLots);
+	const double RemovedRewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(RemovedRecoveryLots);
+	if (!FMath::IsNearlyEqual(
+			RemovedCarrierAmount,
+			static_cast<double>(CalculatedRemoval),
+			1.0e-9)
+		|| RemovedRewardUnits < 0.0)
+	{
+		return false;
+	}
+
+	if (TargetLoad == 0.0f)
+	{
+		// 완전 비움은 double tail을 남기지 않고 원장의 마지막 unit까지 이동한다.
+		RemainingRecoveryLots.Reset();
+	}
+	else if (!FMD_ScrapeRecoveryLedger::RebaseCarrierAmount(
+		RemainingRecoveryLots,
+		static_cast<double>(TargetLoad)))
+	{
+		return false;
+	}
+
+	OutPreparedRemoval.ExpectedRevision = ScrapeLoadStateRevision;
+	OutPreparedRemoval.PreviousLoad = PreviousLoad;
+	OutPreparedRemoval.NewLoad = TargetLoad;
+	OutPreparedRemoval.RemainingRecoveryLots = MoveTemp(RemainingRecoveryLots);
+	OutPreparedRemoval.TransferResult.bSucceeded = true;
+	OutPreparedRemoval.TransferResult.RemovedLoadAmount =
+		PreviousLoad - TargetLoad;
+	OutPreparedRemoval.TransferResult.RemovedRewardUnits = RemovedRewardUnits;
+	OutPreparedRemoval.TransferResult.RemovedLots = MoveTemp(RemovedRecoveryLots);
+	return true;
+}
+
+bool UMD_ScrapeToolComponent::CommitPreparedScrapeLoadRemoval(
+	FPreparedScrapeLoadRemoval&& PreparedRemoval,
+	const bool bNotifyChange)
+{
+	if (!PreparedRemoval.TransferResult.bSucceeded
+		|| PreparedRemoval.ExpectedRevision != ScrapeLoadStateRevision
+		|| GetScrapeLoad() != PreparedRemoval.PreviousLoad)
+	{
+		return false;
+	}
+
+	return CommitScrapeLoadStateInternal(
+		PreparedRemoval.NewLoad,
+		MoveTemp(PreparedRemoval.RemainingRecoveryLots),
+		bNotifyChange);
+}
+
+double UMD_ScrapeToolComponent::GetScrapeLoadRewardUnits() const
+{
+	const double RewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(
+			ScrapeLoadRecoveryLots);
+	return RewardUnits >= 0.0 ? RewardUnits : 0.0;
+}
+
+bool UMD_ScrapeToolComponent::CommitScrapeLoadStateInternal(
+	const float NewLoad,
+	TArray<FMD_ScrapeRecoveryLot>&& NewRecoveryLots,
+	const bool bNotifyChange)
+{
+	AActor* const OwnerActor = GetOwner();
+	if (!IsValid(OwnerActor)
+		|| !OwnerActor->HasAuthority()
+		|| !FMath::IsFinite(NewLoad)
+		|| NewLoad < 0.0f
+		|| NewLoad > MaximumScrapeLoad)
+	{
+		return false;
+	}
+
+	const double CarrierAmount =
+		FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(NewRecoveryLots);
+	const double RewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(NewRecoveryLots);
+	if (CarrierAmount < 0.0
+		|| RewardUnits < 0.0
+		|| !FMath::IsNearlyEqual(
+			CarrierAmount,
+			static_cast<double>(NewLoad),
+			1.0e-9))
+	{
+		return false;
+	}
+
+	const float PreviousLoad = GetScrapeLoad();
+	ScrapeLoad = NewLoad;
+	ScrapeLoadRecoveryLots = MoveTemp(NewRecoveryLots);
+	++ScrapeLoadStateRevision;
+	if (ScrapeLoad == 0.0f)
+	{
+		ScrapeLoadRecoveryLots.Reset();
+	}
+	if (PreviousLoad != ScrapeLoad && bNotifyChange)
+	{
+		NotifyScrapeLoadChangedAndForceNetUpdate();
+	}
+	return true;
+}
+
+void UMD_ScrapeToolComponent::NotifyScrapeLoadChangedAndForceNetUpdate()
+{
+	NotifyScrapeLoadChanged();
+	if (AActor* const OwnerActor = GetOwner())
+	{
+		OwnerActor->ForceNetUpdate();
+	}
+}
+
+void UMD_ScrapeToolComponent::OnRep_ScrapeLoad(
+	const float PreviousScrapeLoad)
 {
 	ScrapeLoad = GetScrapeLoad();
-	NotifyScrapeLoadChanged();
+	if (PreviousScrapeLoad != ScrapeLoad)
+	{
+		NotifyScrapeLoadChanged();
+	}
+}
+
+bool UMD_ScrapeToolComponent::ApplyAuthoritativeScrapeVisualDelta(
+	const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta)
+{
+	if (GetOwner() && GetOwner()->HasAuthority())
+	{
+		return false;
+	}
+	if (!IsValid(VisualDelta.Surface)
+		|| !FMath::IsFinite(VisualDelta.ScrapeLoadAfter)
+		|| VisualDelta.ScrapeLoadAfter < 0.0f
+		|| VisualDelta.ScrapeLoadAfter > MaximumScrapeLoad
+		|| !VisualDelta.Surface->ApplyAuthoritativeVisualDelta(VisualDelta))
+	{
+		return false;
+	}
+
+	const float PreviousScrapeLoad = ScrapeLoad;
+	ScrapeLoad = VisualDelta.ScrapeLoadAfter;
+	if (PreviousScrapeLoad != ScrapeLoad)
+	{
+		NotifyScrapeLoadChanged();
+	}
+	return true;
 }
 
 void UMD_ScrapeToolComponent::NotifyScrapeLoadChanged()
@@ -336,14 +757,16 @@ bool UMD_ScrapeToolComponent::GetCurrentScrapeContactPose(
 void UMD_ScrapeToolComponent::SetCurrentScrapeContact(
 	const FVector& WorldLocation)
 {
-	const bool bHadContact = bHasLastContact;
+	const bool bPoseChanged = !bHasLastContact
+		|| QuantizeScrapeContactForReplication(LastContactWorldLocation)
+			!= QuantizeScrapeContactForReplication(WorldLocation);
 	LastContactWorldLocation = WorldLocation;
 	// 위치를 먼저 기록해야 같은 복제 묶음에서 유효 플래그가 켜질 때 완성된 값을 읽는다.
 	bHasLastContact = true;
 
-	if (!bHadContact && GetOwner() && GetOwner()->HasAuthority())
+	if (bPoseChanged)
 	{
-		GetOwner()->ForceNetUpdate();
+		RequestScrapePoseNetUpdate();
 	}
 }
 
@@ -355,7 +778,7 @@ void UMD_ScrapeToolComponent::SetCurrentScrapeBladeDirection(
 	const FVector& ReferenceWorldPosition)
 {
 	const FVector2D SafeAxis = BladeDepthAxis.GetSafeNormal();
-	if (!IsValid(Surface) || SafeAxis.IsNearlyZero())
+	if (!IsValid(Surface) || Surface->UsesMeshUVSurface() || SafeAxis.IsNearlyZero())
 	{
 		return;
 	}
@@ -379,24 +802,42 @@ void UMD_ScrapeToolComponent::SetCurrentScrapeBladeDirection(
 	{
 		return;
 	}
+	const bool bPoseChanged = !bHasLastContactBladeDirection
+		|| QuantizeScrapeNormalForReplication(LastContactBladeWorldDirection)
+			!= QuantizeScrapeNormalForReplication(WorldDirection);
 	LastContactBladeWorldDirection = WorldDirection;
 	bHasLastContactBladeDirection = true;
+	if (bPoseChanged)
+	{
+		RequestScrapePoseNetUpdate();
+	}
 }
 
 void UMD_ScrapeToolComponent::ClearCurrentScrapeContact()
 {
-	if (!bHasLastContact)
+	if (!bHasLastContact && !bHasLastContactBladeDirection)
 	{
 		return;
 	}
 
 	bHasLastContact = false;
 	bHasLastContactBladeDirection = false;
-	if (GetOwner() && GetOwner()->HasAuthority())
+	RequestScrapePoseNetUpdate();
+}
+
+void UMD_ScrapeToolComponent::RequestScrapePoseNetUpdate()
+{
+	AActor* const OwnerActor = GetOwner();
+	if (!OwnerActor
+		|| !OwnerActor->HasAuthority()
+		|| LastScrapePoseNetUpdateFrame == GFrameCounter)
 	{
-		// Tick이 멈춘 뒤에도 시뮬레이티드 프록시에 해제 상태가 바로 전달되어야 한다.
-		GetOwner()->ForceNetUpdate();
+		return;
 	}
+
+	// 같은 서버 프레임의 contact와 blade 변경은 한 번만 갱신한다.
+	LastScrapePoseNetUpdateFrame = GFrameCounter;
+	OwnerActor->ForceNetUpdate();
 }
 
 void UMD_ScrapeToolComponent::StartScrapeLoopAudio()
@@ -589,6 +1030,9 @@ void UMD_ScrapeToolComponent::StartScraping()
 		return;
 	}
 
+	bBarnacleClickStroke = IsValid(CurrentScrapeAim.Barnacle)
+		&& CurrentScrapeAim.BarnacleHit.bBlockingHit
+		&& CurrentScrapeAim.BarnacleHit.GetActor() == CurrentScrapeAim.Barnacle.Get();
 	bIsScraping = true;
 	LastObservedScrapePathArcLengthCm =
 		StrokePath.ScrapePathArcLengthCm + StrokePath.PendingScrapePathArcLengthCm;
@@ -605,10 +1049,8 @@ void UMD_ScrapeToolComponent::StartScraping()
 	{
 		++LmbStrokeGeneration;
 	}
-	ContaminationPaint.Stage3SubStrokeGeneration = 0;
-	AdvanceStage3SubStrokeGeneration();
-	ContaminationPaint.Stage3SampleSequence = 0;
-	ContaminationPaint.CommittedStage3Dabs.Reset();
+	UpdateLocalScrapeVisualContactPose(0.0f);
+	BeginScrapeVisualStroke();
 	if (ScrapeFocusState == EMD_ScrapeFocusState::FocusedReady)
 	{
 		SetScrapeFocusState(EMD_ScrapeFocusState::FocusedScraping);
@@ -637,6 +1079,8 @@ void UMD_ScrapeToolComponent::StopScraping()
 {
 	const bool bWasScraping = bIsScraping;
 	bIsScraping = false;
+	bBarnacleClickStroke = false;
+	EndScrapeVisualStroke();
 	StopScrapeLoopAudio();
 	ResetScrapeFocusPointerStrokeConstraint();
 	ResetStrokeTracking();
@@ -650,7 +1094,7 @@ void UMD_ScrapeToolComponent::StopScraping()
 		// Replicate the authoritative pose-off edge together with cleared contact.
 		GetOwner()->ForceNetUpdate();
 	}
-	SetComponentTickEnabled(IsScrapeFocusActive());
+	SetComponentTickEnabled(IsScrapeFocusActive() || IsScrapeFocusViewActive());
 }
 
 void UMD_ScrapeToolComponent::TickComponent(
@@ -661,8 +1105,9 @@ void UMD_ScrapeToolComponent::TickComponent(
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
 	UpdateScrapeLoopAudio();
+	UpdateLocalScrapePredictionResolution(GetScrapeMonotonicSeconds());
 
-	if (!IsScrapeFocusActive() && !bIsScraping)
+	if (!IsScrapeFocusActive() && !IsScrapeFocusViewActive() && !bIsScraping)
 	{
 		return;
 	}
@@ -670,7 +1115,7 @@ void UMD_ScrapeToolComponent::TickComponent(
 	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
 	const bool bLocallyControlled = OwnerPawn && OwnerPawn->IsLocallyControlled();
 	if (bLocallyControlled
-		&& IsScrapeFocusActive()
+		&& IsScrapeFocusViewActive()
 		&& !IsCurrentScrapeFocusViewportAspectCompatible())
 	{
 		// 비율이 달라진 첫 Tick에서 aim heartbeat/판정을 만들기 전에 정리한다.
@@ -686,7 +1131,7 @@ void UMD_ScrapeToolComponent::TickComponent(
 		if (ScrapeFocusSession.FocusPendingElapsedSeconds
 			>= static_cast<double>(FMath::Max(BeginAckTimeoutSeconds, 0.01f)))
 		{
-			EndScrapeFocusInternal(true);
+			EndScrapeFocusInternal(true, true);
 			return;
 		}
 	}
@@ -697,7 +1142,7 @@ void UMD_ScrapeToolComponent::TickComponent(
 	{
 		const double SilenceSeconds = GetScrapeMonotonicSeconds()
 			- AuthoritativeAim.LastAuthoritativeAimReceiveSeconds;
-		if (!IsScrapeToolCurrentlyEligible())
+		if (!IsAuthoritativeScrapeFocusToolCurrent())
 		{
 			TerminateAuthoritativeScrapeFocus(
 				EMD_ScrapeFocusTerminationReason::EligibilityLost);
@@ -712,7 +1157,8 @@ void UMD_ScrapeToolComponent::TickComponent(
 		}
 	}
 
-	if (IsScrapeFocusActive() && bHasScrapeFocusView)
+	if ((IsScrapeFocusActive() || IsScrapeFocusViewActive())
+		&& (bHasScrapeFocusView || bHasAuthoritativeScrapeFocusView))
 	{
 		if (!IsScrapeFocusViewOriginValid())
 		{
@@ -720,6 +1166,23 @@ void UMD_ScrapeToolComponent::TickComponent(
 			TerminateScrapeFocusFromComponent();
 			return;
 		}
+	}
+	if (bLocallyControlled && IsScrapeFocusViewActive())
+	{
+		if (!IsScrapeFocusViewToolCurrent())
+		{
+			TerminateScrapeFocusFromComponent();
+			return;
+		}
+		if (!IsScrapeFocusActive())
+		{
+			// Free latch도 실제 pointer ray를 관찰한다. begin-attempt guard가 RPC 중복을 막는다.
+			RefreshScrapeFocusAim();
+		}
+	}
+	if (bLocallyControlled)
+	{
+		UpdateLocalScrapeVisualContactPose(DeltaTime);
 	}
 
 	if (bLocallyControlled && IsScrapeFocusReady())
@@ -731,6 +1194,14 @@ void UMD_ScrapeToolComponent::TickComponent(
 	// 한 번 처리한다. 중앙/local query로 같은 이동을 Tick에서 다시 적용하지 않는다.
 	if (GetOwner() && GetOwner()->HasAuthority()
 		&& ScrapeFocusSession.bAuthoritativeScrapeFocusAccepted)
+	{
+		return;
+	}
+	if (bLocallyControlled
+		&& bIsScraping
+		&& GetOwner()
+		&& !GetOwner()->HasAuthority()
+		&& IsScrapeFocusReady())
 	{
 		return;
 	}
@@ -747,25 +1218,11 @@ void UMD_ScrapeToolComponent::TickComponent(
 
 void UMD_ScrapeToolComponent::ResetStrokeTracking()
 {
-	const bool bHadTrackedSubStroke =
-		StrokePath.bHasPreviousSurfacePosition || ContaminationPaint.bStage3PathActive;
-	const uint32 GenerationBeforeFlush = ContaminationPaint.Stage3SubStrokeGeneration;
 	FlushPendingScrapePathApplication();
-	const bool bHadOrBuiltStage3Path = ContaminationPaint.bStage3PathActive;
-	FlushPendingContaminationPaintTail();
-	if ((bHadTrackedSubStroke || bHadOrBuiltStage3Path)
-		&& ContaminationPaint.Stage3SubStrokeGeneration == GenerationBeforeFlush)
-	{
-		AdvanceStage3SubStrokeGeneration();
-	}
 	ClearCurrentScrapeContact();
 	StrokePath.bHasPreviousSurfacePosition = false;
-	StrokePath.bHasLockedStrokeAxis = false;
 	StrokePath.PreviousSurfacePositionCm = FVector2D::ZeroVector;
 	StrokePath.PreviousSurfaceFace = EMD_ScrapeSurfaceFace::Front;
-	StrokePath.StrokeAnchorPositionCm = FVector2D::ZeroVector;
-	StrokePath.FurthestSurfacePositionCm = FVector2D::ZeroVector;
-	StrokePath.LockedStrokeAxis = FVector2D::ZeroVector;
 	StrokePath.PreviousSurface.Reset();
 	StrokePath.bHasLastScrapeSurfaceHit = false;
 	ResetScrapePathAccumulator(FVector2D::ZeroVector);
@@ -818,7 +1275,9 @@ void UMD_ScrapeToolComponent::EmitFeedback(
 		// 이펙트 로컬 +X가 벽 법선을 향하도록 정렬한다. 법선을 못 구하면 기존처럼 무회전.
 		FVector ContactNormal = FVector::ZeroVector;
 		const FRotator EffectRotation =
-			Surface->TryGetScrapeSurfaceWorldNormal(Result.SurfaceFace, ContactNormal)
+			Surface->TryGetScrapeSurfaceWorldNormalAtPosition(
+				CurrentScrapeAim.Surface == Surface ? CurrentScrapeAim.SurfacePositionCm : StrokePath.PreviousSurfacePositionCm,
+				Result.SurfaceFace, ContactNormal)
 				? ContactNormal.Rotation()
 				: FRotator::ZeroRotator;
 		UNiagaraFunctionLibrary::SpawnSystemAtLocation(

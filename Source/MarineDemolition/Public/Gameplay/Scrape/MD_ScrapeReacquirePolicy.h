@@ -14,7 +14,7 @@ enum class EMD_ScrapeReacquireDecision : uint8
 	/** 이어 붙이기 조건을 못 채웠다. 새 stroke로 시작한다. */
 	StartNewStroke,
 
-	/** 너무 오래 놓쳤다. 집중 세션 자체를 끝낸다. */
+	/** 너무 오래 놓쳤다. 호출자는 현재 stroke/GA만 끝내고 FocusedReady를 유지한다. */
 	TerminateFocus
 };
 

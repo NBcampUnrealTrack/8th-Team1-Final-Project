@@ -22,6 +22,8 @@ public class MarineDemolition : ModuleRules
 			// Landscape (editor import helper uses ALandscape::Import)
 			"Landscape",
 			"GeometryCollectionEngine",
+			// Solid geometry bounds are exposed by the runtime visual component header.
+			"GeometryCore",
 			// FInstancedStruct
 			"StructUtils"
         });
@@ -35,7 +37,11 @@ public class MarineDemolition : ModuleRules
 			// 기존 온라인 음성 캡처와 입출력 장치 런타임 제어
 			"Voice", "AudioCaptureCore", "AudioMixerCore", "SignalProcessing",
 			// 오염 마스크 런타임 텍스처 업로드
-			"RHI",
+			"RHI", "RenderCore",
+            // Bounded runtime solid-contamination geometry (no editor dependency).
+            "GeometryFramework",
+            // Shared solid templates, GPU displacement and sparse GPU updates.
+            "MDSolidRendering",
 			// 절단·헤라 VFX
 			"Niagara",
 			// 수중 서브믹스 LPF (SubmixEffectFilterPreset)
@@ -44,7 +50,7 @@ public class MarineDemolition : ModuleRules
 
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.Add("UnrealEd");
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "MeshDescription", "StaticMeshDescription", "MeshConversion" });
 			// 캐러셀의 Enum 전용 디테일 선택기 지원
 			PrivateDependencyModuleNames.AddRange(new string[] { "PropertyEditor", "KismetWidgets", "BlueprintGraph" });
 		}
