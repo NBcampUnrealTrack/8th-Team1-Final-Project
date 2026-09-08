@@ -5,10 +5,51 @@
 #include "Gameplay/Scrape/MD_ScrapeFocusProjection.h"
 #include "Camera/CameraTypes.h"
 #include "Camera/PlayerCameraManager.h"
+#include "Components/PrimitiveComponent.h"
+#include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerController.h"
 #include "HAL/IConsoleManager.h"
+
+namespace
+{
+	bool IsFiniteScrapeVisualVector(const FVector& Value)
+	{
+		return FMath::IsFinite(Value.X)
+			&& FMath::IsFinite(Value.Y)
+			&& FMath::IsFinite(Value.Z);
+	}
+
+	bool TryProjectScrapeVisualTangent(
+		const FVector& Candidate,
+		const FVector& SurfaceNormal,
+		FVector& OutTangent)
+	{
+		if (!IsFiniteScrapeVisualVector(Candidate)
+			|| !IsFiniteScrapeVisualVector(SurfaceNormal))
+		{
+			return false;
+		}
+
+		OutTangent = FVector::VectorPlaneProject(Candidate, SurfaceNormal);
+		return IsFiniteScrapeVisualVector(OutTangent)
+			&& OutTangent.Normalize();
+	}
+
+	void StabilizeScrapeVisualTangentSign(
+		const FMD_ScrapeVisualContactPose& PreviousPose,
+		FVector& InOutTangent)
+	{
+		if (PreviousPose.bTangentValid
+			&& FVector::DotProduct(
+				PreviousPose.StrokeWorldTangent,
+				InOutTangent) < 0.0f)
+		{
+			InOutTangent *= -1.0f;
+		}
+	}
+}
 
 bool UMD_ScrapeToolComponent::CaptureScrapeFocusView()
 {
@@ -73,16 +114,18 @@ bool UMD_ScrapeToolComponent::CaptureScrapeFocusView()
 	ScrapeFocusSession.ScrapeFocusAuthorityHorizontalHalfTangent = HorizontalHalfTangent;
 	ScrapeFocusSession.ScrapeFocusAuthorityVerticalHalfTangent = VerticalHalfTangent;
 	ScrapeFocusViewportSize = FIntPoint(ViewportWidth, ViewportHeight);
+	PlayerController->SetMouseLocation(ViewportWidth / 2, ViewportHeight / 2);
 	ScrapeFocusPointerNormalized = FVector2D(0.5, 0.5);
-	ResetScrapeFocusPointerStrokeConstraint();
 	bHasScrapeFocusView = true;
+	ClampScrapeFocusPointerToAuthorityCone();
+	ResetScrapeFocusPointerStrokeConstraint();
 	return true;
 }
 
 bool UMD_ScrapeToolComponent::ConsumeScrapeFocusLookInput(
 	const FVector2D& LookInput)
 {
-	if (!IsScrapeFocusActive())
+	if (!IsScrapeFocusViewActive())
 	{
 		return false;
 	}
@@ -330,7 +373,7 @@ float UMD_ScrapeToolComponent::GetScrapeFocusPointerAspectRatio() const
 bool UMD_ScrapeToolComponent::ApplyScrapeFocusCameraView(
 	FMinimalViewInfo& InOutViewInfo) const
 {
-	if (!IsScrapeFocusActive() || !bHasScrapeFocusView)
+	if (!IsScrapeFocusViewActive() || !bHasScrapeFocusView)
 	{
 		return false;
 	}
@@ -341,11 +384,13 @@ bool UMD_ScrapeToolComponent::ApplyScrapeFocusCameraView(
 	return true;
 }
 
-FVector UMD_ScrapeToolComponent::GetScrapeFocusAimDirection() const
+FVector UMD_ScrapeToolComponent::GetScrapeFocusAimDirectionForPointer(
+	const FVector2D& PointerNormalized) const
 {
 	if (!bHasScrapeFocusView
 		|| ScrapeFocusViewportSize.X <= 0
 		|| ScrapeFocusViewportSize.Y <= 0
+		|| PointerNormalized.ContainsNaN()
 		|| !FMath::IsFinite(ScrapeFocusSession.ScrapeFocusHorizontalHalfTangent)
 		|| !FMath::IsFinite(ScrapeFocusSession.ScrapeFocusVerticalHalfTangent)
 		|| ScrapeFocusSession.ScrapeFocusHorizontalHalfTangent <= UE_SMALL_NUMBER
@@ -354,19 +399,402 @@ FVector UMD_ScrapeToolComponent::GetScrapeFocusAimDirection() const
 		return FVector::ZeroVector;
 	}
 
-	// 방향 판정 구간에는 reticle만 움직이고 실제 판정 ray는 LMB 시작점에 둔다.
-	const FVector2D AimPointerNormalized =
-		bIsScraping && !ScrapeFocusSession.bHasScrapeFocusPointerStrokeAxis
-		? ScrapeFocusSession.ScrapeFocusPointerStrokeAnchorNormalized
-		: ScrapeFocusPointerNormalized;
-	const double ScreenX = (AimPointerNormalized.X - 0.5) * 2.0;
-	const double ScreenY = (0.5 - AimPointerNormalized.Y) * 2.0;
+	const double ScreenX = (PointerNormalized.X - 0.5) * 2.0;
+	const double ScreenY = (0.5 - PointerNormalized.Y) * 2.0;
 	const FRotationMatrix ViewAxes(ScrapeFocusViewRotation);
 	return (ViewAxes.GetScaledAxis(EAxis::X)
 		+ ViewAxes.GetScaledAxis(EAxis::Y) * ScreenX
 			* static_cast<double>(ScrapeFocusSession.ScrapeFocusHorizontalHalfTangent)
 		+ ViewAxes.GetScaledAxis(EAxis::Z) * ScreenY
 			* static_cast<double>(ScrapeFocusSession.ScrapeFocusVerticalHalfTangent)).GetSafeNormal();
+}
+
+FVector UMD_ScrapeToolComponent::GetScrapeFocusAimDirection() const
+{
+	// 방향 판정 구간에는 reticle만 움직이고 실제 판정 ray는 LMB 시작점에 둔다.
+	const FVector2D AimPointerNormalized =
+		bIsScraping && !ScrapeFocusSession.bHasScrapeFocusPointerStrokeAxis
+		? ScrapeFocusSession.ScrapeFocusPointerStrokeAnchorNormalized
+		: ScrapeFocusPointerNormalized;
+	return GetScrapeFocusAimDirectionForPointer(AimPointerNormalized);
+}
+
+FVector UMD_ScrapeToolComponent::GetScrapeFocusVisualAimDirection() const
+{
+	// Animation pose는 lock 판정 중에도 화면에 표시된 포인터를 그대로 따른다.
+	return GetScrapeFocusAimDirectionForPointer(ScrapeFocusPointerNormalized);
+}
+
+void UMD_ScrapeToolComponent::ForceRefreshLocalScrapeVisualContactPose(
+	const bool bTeleportOrSnap)
+{
+	// 승인 clamp처럼 같은 frame의 앞선 visual trace를 의도적으로 폐기하는 경계다.
+	LastScrapeVisualContactTraceFrame = MAX_uint64;
+	bForceNextScrapeVisualContactSnap |= bTeleportOrSnap;
+	UpdateLocalScrapeVisualContactPose(0.0f);
+}
+
+void UMD_ScrapeToolComponent::MarkScrapeVisualContactPoseUpdated()
+{
+	++ScrapeVisualContactPose.UpdateGeneration;
+	if (ScrapeVisualContactPose.UpdateGeneration == 0)
+	{
+		++ScrapeVisualContactPose.UpdateGeneration;
+	}
+	ScrapeVisualContactPose.LastUpdatedFrame = GFrameCounter;
+}
+
+void UMD_ScrapeToolComponent::PublishInvalidScrapeVisualContactPose(
+	const bool bTeleportOrSnap)
+{
+	const uint32 PreviousUpdateGeneration =
+		ScrapeVisualContactPose.UpdateGeneration;
+	ScrapeVisualContactPose = FMD_ScrapeVisualContactPose();
+	ScrapeVisualContactPose.FocusSessionId = IsScrapeFocusActive()
+		? ScrapeFocusSession.ActiveScrapeFocusSessionId
+		: 0;
+	ScrapeVisualContactPose.LmbStrokeGeneration = LmbStrokeGeneration;
+	ScrapeVisualContactPose.UpdateGeneration = PreviousUpdateGeneration;
+	ScrapeVisualContactPose.bTeleportOrSnap = bTeleportOrSnap;
+	MarkScrapeVisualContactPoseUpdated();
+}
+
+void UMD_ScrapeToolComponent::ResetScrapeVisualContactTracking(
+	const bool bPublishInvalidPose)
+{
+	ScrapeVisualContactSurface.Reset();
+	ScrapeVisualContactPrimitive.Reset();
+	ScrapeVisualContactSurfaceFace = EMD_ScrapeSurfaceFace::Front;
+	ScrapeVisualStrokeAnchorWorldLocation = FVector::ZeroVector;
+	ScrapeVisualStrokeAnchorSurface.Reset();
+	ScrapeVisualStrokeAnchorPrimitive.Reset();
+	ScrapeVisualStrokeAnchorFocusSessionId = 0;
+	ScrapeVisualStrokeAnchorLmbGeneration = 0;
+	bHasScrapeVisualStrokeAnchor = false;
+	ScrapeVisualLockedWorldTangent = FVector::ZeroVector;
+	ScrapeVisualLockedFocusSessionId = 0;
+	ScrapeVisualLockedLmbGeneration = 0;
+	ScrapeVisualInvalidElapsedSeconds = 0.0;
+	LastScrapeVisualContactTraceFrame = MAX_uint64;
+	bForceNextScrapeVisualContactSnap = false;
+	if (bPublishInvalidPose)
+	{
+		PublishInvalidScrapeVisualContactPose(true);
+	}
+}
+
+void UMD_ScrapeToolComponent::BeginScrapeVisualStroke()
+{
+	ScrapeVisualLockedWorldTangent = FVector::ZeroVector;
+	ScrapeVisualLockedFocusSessionId = 0;
+	ScrapeVisualLockedLmbGeneration = 0;
+	ScrapeVisualInvalidElapsedSeconds = 0.0;
+	ScrapeVisualStrokeAnchorFocusSessionId =
+		ScrapeFocusSession.ActiveScrapeFocusSessionId;
+	ScrapeVisualStrokeAnchorLmbGeneration = LmbStrokeGeneration;
+	bHasScrapeVisualStrokeAnchor = ScrapeVisualContactPose.bValid
+		&& ScrapeVisualContactPose.FocusSessionId
+			== ScrapeFocusSession.ActiveScrapeFocusSessionId;
+	if (bHasScrapeVisualStrokeAnchor)
+	{
+		ScrapeVisualStrokeAnchorWorldLocation =
+			ScrapeVisualContactPose.ContactWorldLocation;
+		ScrapeVisualStrokeAnchorSurface = ScrapeVisualContactSurface;
+		ScrapeVisualStrokeAnchorPrimitive = ScrapeVisualContactPrimitive;
+		ScrapeVisualContactPose.LmbStrokeGeneration = LmbStrokeGeneration;
+		ScrapeVisualContactPose.bDirectionLocked = false;
+		ScrapeVisualContactPose.bTeleportOrSnap = false;
+		MarkScrapeVisualContactPoseUpdated();
+	}
+}
+
+void UMD_ScrapeToolComponent::EndScrapeVisualStroke()
+{
+	ScrapeVisualLockedWorldTangent = FVector::ZeroVector;
+	ScrapeVisualLockedFocusSessionId = 0;
+	ScrapeVisualLockedLmbGeneration = 0;
+	ScrapeVisualStrokeAnchorFocusSessionId = 0;
+	ScrapeVisualStrokeAnchorLmbGeneration = 0;
+	bHasScrapeVisualStrokeAnchor = false;
+	if (ScrapeVisualContactPose.bValid)
+	{
+		// Ready pose는 마지막 유효 180도 동치 축을 유지하되 lock만 해제한다.
+		ScrapeVisualContactPose.bDirectionLocked = false;
+		ScrapeVisualContactPose.bTeleportOrSnap = false;
+		MarkScrapeVisualContactPoseUpdated();
+	}
+}
+
+void UMD_ScrapeToolComponent::UpdateLocalScrapeVisualContactPose(
+	const float DeltaTime)
+{
+	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+	if (!OwnerPawn || !OwnerPawn->IsLocallyControlled())
+	{
+		return;
+	}
+
+	const uint64 FocusSessionId =
+		ScrapeFocusSession.ActiveScrapeFocusSessionId;
+	if (!IsScrapeFocusActive()
+		|| !bHasScrapeFocusView
+		|| FocusSessionId == 0
+		|| !IsScrapeToolCurrentlyEligible())
+	{
+		if (ScrapeVisualContactPose.bValid
+			|| ScrapeVisualContactPose.FocusSessionId != FocusSessionId
+			|| ScrapeVisualContactSurface.IsValid()
+			|| ScrapeVisualContactPrimitive.IsValid()
+			|| bHasScrapeVisualStrokeAnchor
+			|| !ScrapeVisualLockedWorldTangent.IsNearlyZero())
+		{
+			ResetScrapeVisualContactTracking(true);
+			// eligibility/reset 뒤 같은 render frame에 새 visual trace를 열지 않는다.
+			LastScrapeVisualContactTraceFrame = GFrameCounter;
+		}
+		return;
+	}
+
+	if (LastScrapeVisualContactTraceFrame == GFrameCounter)
+	{
+		return;
+	}
+	LastScrapeVisualContactTraceFrame = GFrameCounter;
+
+	const FVector VisualAimDirection = GetScrapeFocusVisualAimDirection();
+	const AController* const OwnerController = OwnerPawn->GetController();
+	FVector VisualTraceOrigin = FVector::ZeroVector;
+	FRotator IgnoredCurrentViewRotation = FRotator::ZeroRotator;
+	if (OwnerController)
+	{
+		OwnerController->GetPlayerViewPoint(
+			VisualTraceOrigin,
+			IgnoredCurrentViewRotation);
+	}
+	const bool bHasCurrentViewOrigin = OwnerController
+		&& IsFiniteScrapeVisualVector(VisualTraceOrigin);
+	FMD_ScrapeAimQueryResult VisualAim;
+	if (bHasCurrentViewOrigin && !VisualAimDirection.IsNearlyZero())
+	{
+		// 회전/FOV는 캡처 basis를 유지하고 원점만 판정 경로와 같은 live view다.
+		VisualAim = QueryScrapeAim(VisualTraceOrigin, VisualAimDirection);
+	}
+
+	FVector ContactNormal = VisualAim.WorldContactNormal;
+	if (VisualAim.Surface)
+	{
+		FVector CanonicalSurfaceNormal = FVector::ZeroVector;
+		if (VisualAim.Surface->TryGetScrapeSurfaceWorldNormalAtPosition(
+			VisualAim.SurfacePositionCm, VisualAim.SurfaceFace,
+			CanonicalSurfaceNormal))
+		{
+			ContactNormal = CanonicalSurfaceNormal;
+		}
+	}
+    // Only this local rendering copy is raised to the solid crust. Authority ray,
+    // cell ownership, brush work and barnacle priority continue to use the original wall.
+    if (VisualAim.Surface && !VisualAim.Barnacle)
+    {
+        FVector SolidContact;
+        if (VisualAim.Surface->TryGetSolidVisualWorldContact(VisualAim.SurfacePositionCm,
+            VisualAim.WorldContactLocation, ContactNormal, SolidContact))
+        {
+            VisualAim.WorldContactLocation = SolidContact;
+        }
+    }
+	const bool bHasValidContact = VisualAim.IsActionable()
+		&& IsFiniteScrapeVisualVector(VisualAim.WorldContactLocation)
+		&& IsFiniteScrapeVisualVector(ContactNormal)
+		&& ContactNormal.Normalize();
+	if (!bHasValidContact)
+	{
+		const double SafeDeltaTime = FMath::IsFinite(DeltaTime)
+			? FMath::Max(static_cast<double>(DeltaTime), 0.0)
+			: 0.0;
+		ScrapeVisualInvalidElapsedSeconds += SafeDeltaTime;
+		const double GraceSeconds = static_cast<double>(
+			FMath::Max(TransientMissGraceSeconds, 0.0f));
+		if (!bForceNextScrapeVisualContactSnap
+			&& ScrapeVisualContactPose.bValid
+			&& ScrapeVisualContactPose.FocusSessionId == FocusSessionId
+			&& ScrapeVisualInvalidElapsedSeconds <= GraceSeconds)
+		{
+			// 짧은 trace 유실은 마지막 pose를 그대로 lease한다.
+			return;
+		}
+
+		if (ScrapeVisualContactPose.bValid
+			|| ScrapeVisualContactPose.FocusSessionId != FocusSessionId
+			|| ScrapeVisualContactSurface.IsValid()
+			|| ScrapeVisualContactPrimitive.IsValid()
+			|| bHasScrapeVisualStrokeAnchor
+			|| !ScrapeVisualLockedWorldTangent.IsNearlyZero())
+		{
+			ResetScrapeVisualContactTracking(true);
+			// persistent miss를 같은 render frame에 다시 조회하지 않는다.
+			LastScrapeVisualContactTraceFrame = GFrameCounter;
+		}
+		return;
+	}
+
+	ScrapeVisualInvalidElapsedSeconds = 0.0;
+	UPrimitiveComponent* const ContactPrimitive = VisualAim.Hit.GetComponent();
+	const bool bHadValidPose = ScrapeVisualContactPose.bValid;
+	const bool bNewFocus = !bHadValidPose
+		|| ScrapeVisualContactPose.FocusSessionId != FocusSessionId;
+	const bool bSurfaceChanged = bHadValidPose
+		&& (ScrapeVisualContactSurface.Get() != VisualAim.Surface.Get()
+			|| (VisualAim.Surface
+				&& ScrapeVisualContactSurfaceFace != VisualAim.SurfaceFace)
+			|| (!VisualAim.Surface
+				&& ScrapeVisualContactPrimitive.Get() != ContactPrimitive));
+	const double PositionSnapDistanceCm = static_cast<double>(
+		FMath::Max(ReconnectCandidateMaxCm, 0.0f));
+	const bool bLargePositionJump = bHadValidPose
+		&& FVector::DistSquared(
+			ScrapeVisualContactPose.ContactWorldLocation,
+			VisualAim.WorldContactLocation)
+			> PositionSnapDistanceCm * PositionSnapDistanceCm;
+	const float NormalSnapCosine = FMath::Cos(FMath::DegreesToRadians(
+		FMath::Clamp(LargeCornerSplitDegrees, 0.0f, 180.0f)));
+	const bool bLargeNormalJump = bHadValidPose
+		&& FVector::DotProduct(
+			ScrapeVisualContactPose.ContactWorldNormal,
+			ContactNormal) < NormalSnapCosine;
+	const bool bTeleportOrSnap = bNewFocus
+		|| bForceNextScrapeVisualContactSnap
+		|| bSurfaceChanged
+		|| bLargePositionJump
+		|| bLargeNormalJump;
+
+	const bool bStrokeIdentityMatches = bHasScrapeVisualStrokeAnchor
+		&& ScrapeVisualStrokeAnchorFocusSessionId == FocusSessionId
+		&& ScrapeVisualStrokeAnchorLmbGeneration == LmbStrokeGeneration;
+	if (bIsScraping && !bStrokeIdentityMatches)
+	{
+		ScrapeVisualStrokeAnchorWorldLocation = VisualAim.WorldContactLocation;
+		ScrapeVisualStrokeAnchorSurface = VisualAim.Surface.Get();
+		ScrapeVisualStrokeAnchorPrimitive = ContactPrimitive;
+		ScrapeVisualStrokeAnchorFocusSessionId = FocusSessionId;
+		ScrapeVisualStrokeAnchorLmbGeneration = LmbStrokeGeneration;
+		bHasScrapeVisualStrokeAnchor = true;
+	}
+
+	FVector StrokeTangent = FVector::ZeroVector;
+	bool bTangentValid = false;
+	bool bDirectionLocked = false;
+	bool bReusedLockedTangent = false;
+	const bool bShouldLockDirection = bIsScraping
+		&& ScrapeFocusSession.bHasScrapeFocusPointerStrokeAxis;
+	if (bShouldLockDirection)
+	{
+		const bool bLockedIdentityMatches =
+			ScrapeVisualLockedFocusSessionId == FocusSessionId
+			&& ScrapeVisualLockedLmbGeneration == LmbStrokeGeneration
+			&& !ScrapeVisualLockedWorldTangent.IsNearlyZero();
+		if (bLockedIdentityMatches)
+		{
+			bTangentValid = TryProjectScrapeVisualTangent(
+				ScrapeVisualLockedWorldTangent,
+				ContactNormal,
+				StrokeTangent);
+			bReusedLockedTangent = bTangentValid;
+		}
+		else
+		{
+			const bool bAnchorTargetMatches = bHasScrapeVisualStrokeAnchor
+				&& ScrapeVisualStrokeAnchorSurface.Get() == VisualAim.Surface.Get()
+				&& (VisualAim.Surface
+					|| ScrapeVisualStrokeAnchorPrimitive.Get() == ContactPrimitive);
+			if (bAnchorTargetMatches)
+			{
+				bTangentValid = TryProjectScrapeVisualTangent(
+					VisualAim.WorldContactLocation
+						- ScrapeVisualStrokeAnchorWorldLocation,
+					ContactNormal,
+					StrokeTangent);
+			}
+			if (!bTangentValid)
+			{
+				const FVector2D ScreenAxis =
+					ScrapeFocusSession.ScrapeFocusPointerStrokeAxis;
+				const FRotationMatrix ViewAxes(ScrapeFocusViewRotation);
+				const FVector ScreenAxisWorld =
+					ViewAxes.GetScaledAxis(EAxis::Y)
+						* ScreenAxis.X
+						* static_cast<double>(ScrapeFocusSession.ScrapeFocusHorizontalHalfTangent)
+					- ViewAxes.GetScaledAxis(EAxis::Z)
+						* ScreenAxis.Y
+						* static_cast<double>(ScrapeFocusSession.ScrapeFocusVerticalHalfTangent);
+				bTangentValid = TryProjectScrapeVisualTangent(
+					ScreenAxisWorld,
+					ContactNormal,
+					StrokeTangent);
+			}
+		}
+	}
+
+	const FRotationMatrix ViewAxes(ScrapeFocusViewRotation);
+	if (!bTangentValid && ScrapeVisualContactPose.bTangentValid)
+	{
+		bTangentValid = TryProjectScrapeVisualTangent(
+			ScrapeVisualContactPose.StrokeWorldTangent,
+			ContactNormal,
+			StrokeTangent);
+	}
+	if (!bTangentValid)
+	{
+		bTangentValid = TryProjectScrapeVisualTangent(
+			ViewAxes.GetScaledAxis(EAxis::Z),
+			ContactNormal,
+			StrokeTangent);
+	}
+	if (!bTangentValid)
+	{
+		bTangentValid = TryProjectScrapeVisualTangent(
+			ViewAxes.GetScaledAxis(EAxis::Y),
+			ContactNormal,
+			StrokeTangent);
+	}
+	if (!bTangentValid)
+	{
+		bTangentValid = TryProjectScrapeVisualTangent(
+			ViewAxes.GetScaledAxis(EAxis::X),
+			ContactNormal,
+			StrokeTangent);
+	}
+	if (bTangentValid)
+	{
+		StabilizeScrapeVisualTangentSign(
+			ScrapeVisualContactPose,
+			StrokeTangent);
+		bDirectionLocked = bShouldLockDirection;
+		if (bDirectionLocked && !bReusedLockedTangent)
+		{
+			ScrapeVisualLockedWorldTangent = StrokeTangent;
+			ScrapeVisualLockedFocusSessionId = FocusSessionId;
+			ScrapeVisualLockedLmbGeneration = LmbStrokeGeneration;
+		}
+	}
+
+	ScrapeVisualContactPose.ContactWorldLocation =
+		VisualAim.WorldContactLocation;
+	ScrapeVisualContactPose.ContactWorldNormal = ContactNormal;
+	ScrapeVisualContactPose.StrokeWorldTangent = bTangentValid
+		? StrokeTangent
+		: FVector::ZeroVector;
+	ScrapeVisualContactPose.FocusSessionId = FocusSessionId;
+	ScrapeVisualContactPose.LmbStrokeGeneration = LmbStrokeGeneration;
+	ScrapeVisualContactPose.bValid = true;
+	ScrapeVisualContactPose.bTangentValid = bTangentValid;
+	ScrapeVisualContactPose.bDirectionLocked = bDirectionLocked;
+	ScrapeVisualContactPose.bTeleportOrSnap = bTeleportOrSnap;
+	MarkScrapeVisualContactPoseUpdated();
+	bForceNextScrapeVisualContactSnap = false;
+
+	ScrapeVisualContactSurface = VisualAim.Surface.Get();
+	ScrapeVisualContactPrimitive = ContactPrimitive;
+	ScrapeVisualContactSurfaceFace = VisualAim.SurfaceFace;
 }
 
 bool UMD_ScrapeToolComponent::IsCurrentScrapeFocusViewportAspectCompatible() const

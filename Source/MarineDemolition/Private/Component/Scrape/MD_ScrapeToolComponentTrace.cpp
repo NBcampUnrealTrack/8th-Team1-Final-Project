@@ -2,12 +2,50 @@
 
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 
+#include "Character/MD_Character.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+#include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
+#include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
+#include "Components/StaticMeshComponent.h"
 #include "Camera/CameraTypes.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
+#include "Misc/ScopeExit.h"
 #include "World/Contamination/MD_Barnacle.h"
+#include "World/Contamination/MD_BarnacleSpawner.h"
 #include "World/Wall/MD_CuttableWall.h"
+
+namespace
+{
+double ScrapeContactDistanceCm(const UMD_ScrapeSurfaceComponent* Surface,
+	const FVector2D& Start, const FVector2D& End, EMD_ScrapeSurfaceFace Face)
+{
+	if (!Surface || !Surface->UsesMeshUVSurface())
+	{
+		return FVector2D::Distance(Start, End);
+	}
+	FVector StartWorld, EndWorld;
+	return Surface->TryGetScrapeSurfaceWorldPosition(Start, Face, StartWorld)
+		&& Surface->TryGetScrapeSurfaceWorldPosition(End, Face, EndWorld)
+		? FVector::Distance(StartWorld, EndWorld) : TNumericLimits<double>::Max();
+}
+void StopCurrentScrapeForPersistentInvalidAim(
+	UMD_ScrapeToolComponent& ScrapeTool)
+{
+	const uint64 FocusSessionId =
+		ScrapeTool.GetActiveScrapeFocusSessionId();
+	if (AMD_Character* const Character =
+		Cast<AMD_Character>(ScrapeTool.GetOwner()))
+	{
+		Character->CancelScrapeAbilityForSession(FocusSessionId);
+	}
+
+	// Ability cancellation normally reaches StopScraping through EndAbility.
+	// Keep this fallback so missing/stale GA registration cannot leave a stroke
+	// active across the invalid interval.
+	ScrapeTool.StopScraping();
+}
+}
 
 void UMD_ScrapeToolComponent::ProcessReadyScrapeAim(const float DeltaTime)
 {
@@ -18,7 +56,14 @@ void UMD_ScrapeToolComponent::ProcessReadyScrapeAimResult(
 	const FMD_ScrapeAimQueryResult& AimResult,
 	const float SampleDeltaTime)
 {
+	(void)SampleDeltaTime;
 	CurrentScrapeAim = AimResult;
+	if (AimResult.Type == EMD_ScrapeAimQueryType::BarnacleSpawnerSurface)
+	{
+		ClearCurrentScrapeContact();
+		ResetInvalidScrapeAim();
+		return;
+	}
 	if (AimResult.IsActionable())
 	{
 		SetCurrentScrapeContact(AimResult.WorldContactLocation);
@@ -98,7 +143,7 @@ bool UMD_ScrapeToolComponent::HandleInvalidScrapeAim(
 			PersistentInvalidExitSeconds);
 	if (Evaluation.Decision == EMD_ScrapeReacquireDecision::TerminateFocus)
 	{
-		TerminateScrapeFocusFromComponent();
+		StopCurrentScrapeForPersistentInvalidAim(*this);
 		return true;
 	}
 
@@ -120,11 +165,32 @@ bool UMD_ScrapeToolComponent::ValidateReconnectBridge(
 		return false;
 	}
 
-	const FVector2D MidpointCm =
+	FVector2D MidpointCm = FVector2D::ZeroVector;
+	FVector MidpointWorldPosition = FVector::ZeroVector;
+	if (Surface->UsesMeshUVSurface())
+	{
+		FMD_ScrapeStroke AddressStroke;
+		AddressStroke.SurfaceFace = AimResult.SurfaceFace;
+		AddressStroke.StartPositionCm = AimRecovery.ScrapeReconnectPositionCm;
+		AddressStroke.EndPositionCm = AimResult.SurfacePositionCm;
+		FMD_ScrapeMeshUVStroke WorldStroke;
+		FMD_ScrapeMeshUVSample Sample;
+		FVector Axis;
+		const UMD_ScrapeMeshUVData* Data = Surface->GetContaminationMeshUVData();
+		if (!Data || !Surface->GetSurfaceMesh() || !Surface->TryBuildMeshUVStroke(AddressStroke, WorldStroke)
+			|| !FMD_ScrapeEvaluator::TryInterpolateMeshUVStroke(*Data,
+				Surface->GetSurfaceMesh()->GetComponentTransform(), WorldStroke, 0.5, Sample, Axis))
+		{
+			return false;
+		}
+		MidpointWorldPosition = Surface->GetSurfaceMesh()->GetComponentTransform().TransformPosition(Sample.PositionLocal);
+	}
+	else
+	{
+		MidpointCm =
 		(AimRecovery.ScrapeReconnectPositionCm + AimResult.SurfacePositionCm) * 0.5;
 	const FVector ReferenceWorldPosition =
 		(AimRecovery.ScrapeReconnectSurfaceHit.ImpactPoint + AimResult.Hit.ImpactPoint) * 0.5;
-	FVector MidpointWorldPosition = FVector::ZeroVector;
 	if (!Surface->TryGetScrapeSurfaceWorldPositionAtDepth(
 			MidpointCm,
 			AimResult.SurfaceFace,
@@ -132,6 +198,8 @@ bool UMD_ScrapeToolComponent::ValidateReconnectBridge(
 			MidpointWorldPosition))
 	{
 		return false;
+	}
+
 	}
 
 	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
@@ -174,9 +242,9 @@ bool UMD_ScrapeToolComponent::ValidateReconnectBridge(
 	return MidpointAim.Type == EMD_ScrapeAimQueryType::SurfaceHit
 		&& MidpointAim.Surface == Surface
 		&& MidpointAim.SurfaceFace == AimResult.SurfaceFace
-		&& FVector2D::Distance(
-			MidpointAim.SurfacePositionCm,
-			MidpointCm) <= PositionToleranceCm;
+		&& (Surface->UsesMeshUVSurface()
+			? FVector::Distance(MidpointAim.WorldContactLocation, MidpointWorldPosition)
+			: FVector2D::Distance(MidpointAim.SurfacePositionCm, MidpointCm)) <= PositionToleranceCm;
 }
 
 bool UMD_ScrapeToolComponent::PrepareReacquiredSurface(
@@ -194,9 +262,8 @@ bool UMD_ScrapeToolComponent::PrepareReacquiredSurface(
 		&& AimRecovery.ScrapeReconnectSurface.Get() == Surface
 		&& AimRecovery.ScrapeReconnectSurfaceFace == AimResult.SurfaceFace;
 	const double ReconnectDistanceCm = AimRecovery.bHasScrapeReconnectAnchor
-		? FVector2D::Distance(
-			AimRecovery.ScrapeReconnectPositionCm,
-			AimResult.SurfacePositionCm)
+		? ScrapeContactDistanceCm(Surface, AimRecovery.ScrapeReconnectPositionCm,
+			AimResult.SurfacePositionCm, AimResult.SurfaceFace)
 		: TNumericLimits<double>::Max();
 	const double EvaluatorSpacingCm = IsValid(Surface)
 		? Surface->GetScrapeSampleSpacingCm(ScrapeToolSpec)
@@ -240,7 +307,7 @@ bool UMD_ScrapeToolComponent::PrepareReacquiredSurface(
 	}
 	if (Evaluation.Decision == EMD_ScrapeReacquireDecision::TerminateFocus)
 	{
-		TerminateScrapeFocusFromComponent();
+		StopCurrentScrapeForPersistentInvalidAim(*this);
 		return false;
 	}
 
@@ -293,9 +360,8 @@ void UMD_ScrapeToolComponent::ResetStrokeOnDiscontinuousSurfaceJump(
 		&& StrokePath.PreviousSurface.Get() == AimResult.Surface
 		&& StrokePath.PreviousSurfaceFace == AimResult.SurfaceFace;
 	const double ValidSampleJumpCm = bHasContinuousSurfaceTarget
-		? FVector2D::Distance(
-			StrokePath.PreviousSurfacePositionCm,
-			AimResult.SurfacePositionCm)
+		? ScrapeContactDistanceCm(AimResult.Surface, StrokePath.PreviousSurfacePositionCm,
+			AimResult.SurfacePositionCm, AimResult.SurfaceFace)
 		: 0.0;
 	const double MaximumContinuousJumpCm =
 		FMath::IsFinite(ReconnectCandidateMaxCm)
@@ -344,20 +410,49 @@ void UMD_ScrapeToolComponent::ApplyResolvedScrapePath(
 	const FHitResult& CurrentHit,
 	const TArray<FMD_ScrapeToolPathSegment>& PathSegments)
 {
+	const bool bBatchAuthoritativeVisualUpdates =
+		IsValid(CurrentSurface)
+		&& IsValid(CurrentSurface->GetOwner())
+		&& CurrentSurface->GetOwner()->HasAuthority()
+		&& PathSegments.Num() > 1;
+	if (bBatchAuthoritativeVisualUpdates)
+	{
+		CurrentSurface->BeginContaminationVisualUpdateBatch();
+	}
+	ON_SCOPE_EXIT
+	{
+		if (bBatchAuthoritativeVisualUpdates && IsValid(CurrentSurface))
+		{
+			CurrentSurface->EndContaminationVisualUpdateBatch();
+		}
+	};
 	for (const FMD_ScrapeToolPathSegment& PathSegment : PathSegments)
 	{
 		if (PathSegment.bStartsNewSubStroke)
 		{
-			SplitScrapeSubStrokeAtCorner(PathSegment.StartPositionCm);
 			continue;
 		}
 
+		if (CurrentSurface->UsesMeshUVSurface())
+		{
+			const FVector Axis = PathSegment.EndWorldBladeDepthAxis.GetSafeNormal();
+			if (!Axis.IsNearlyZero())
+			{
+				const bool bChanged = !bHasLastContactBladeDirection || !LastContactBladeWorldDirection.Equals(Axis, 0.001);
+				LastContactBladeWorldDirection = Axis;
+				bHasLastContactBladeDirection = true;
+				if (bChanged) { RequestScrapePoseNetUpdate(); }
+			}
+		}
+		else
+		{
 		SetCurrentScrapeBladeDirection(
 			CurrentSurface,
 			CurrentSurfaceFace,
 			PathSegment.EndPositionCm,
 			PathSegment.EndBladeDepthAxis,
 			CurrentHit.ImpactPoint);
+		}
 		ApplyScrapePathSegment(
 			CurrentSurface,
 			CurrentSurfaceFace,
@@ -381,6 +476,15 @@ void UMD_ScrapeToolComponent::ProcessScrapeAimResult(
 		CurrentScrapeAim = AimResult;
 	}
 
+	if (AimResult.Type == EMD_ScrapeAimQueryType::BarnacleSpawnerSurface)
+	{
+		// A focus-only target never bridges two wall strokes or produces wall feedback.
+		ClearCurrentScrapeContact();
+		ResetStrokeTracking();
+		ResetInvalidScrapeAim();
+		return;
+	}
+
 	if (AimResult.Type == EMD_ScrapeAimQueryType::DirectBarnacleOnly
 		&& IsValid(AimResult.Barnacle))
 	{
@@ -391,8 +495,9 @@ void UMD_ScrapeToolComponent::ProcessScrapeAimResult(
 		return;
 	}
 
-	// 오염 표면이 아니어도 따개비일 수 있다. 둘은 성격이 달라 경로를 갈라 둔다.
-	if (AimResult.Type != EMD_ScrapeAimQueryType::SurfaceHit)
+	// 직접 따개비가 아닌 잘못된 조준은 한 경로로 정리한다.
+	if (AimResult.Type != EMD_ScrapeAimQueryType::SurfaceHit
+		|| !IsValid(AimResult.Surface))
 	{
 		ClearCurrentScrapeContact();
 		HandleInvalidScrapeAim(SampleDeltaTime, true);
@@ -451,6 +556,20 @@ void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
 	const FMD_ScrapeResult& Result,
 	const FVector& ContactLocation)
 {
+	FMD_ScrapeAuthoritativeVisualDelta VisualDelta;
+	const bool bBuiltVisualDelta = IsValid(Surface)
+		&& Surface->BuildAuthoritativeVisualDelta(
+			Result.CellChanges,
+			ScrapeLoad,
+			VisualDelta);
+	ensureMsgf(
+		bBuiltVisualDelta,
+		TEXT("A successful scrape transaction could not build its visual delta."));
+	if (bBuiltVisualDelta)
+	{
+		AccumulateAuthoritativeScrapePredictionResolution(VisualDelta);
+	}
+
 	// 서버 게임 로직은 권한 인스턴스의 공통 표면 이벤트를 구독할 수 있다.
 	OnScrapeSurfaceApplied.Broadcast(Surface, Result);
 	if (AMD_CuttableWall* const Wall = Surface
@@ -460,8 +579,37 @@ void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
 		OnScrapeApplied.Broadcast(Wall, Result);
 	}
 
-	// 다른 플레이어 화면에도 접촉 이펙트·사운드를 재생한다. 소유자는 아래 전용 경로가 담당한다
-	MulticastReceiveScrapeFeedback(Surface, Result, ContactLocation);
+	FMD_ScrapeResult CompactNetworkResult;
+	const FMD_ScrapeResult* NetworkResult = &Result;
+	if (Surface && Surface->UsesMeshUVSurface()
+		&& (VisualDelta.CellStates.Num() > MaximumImmediateMeshUVCellStates
+			|| Result.CellChanges.Num() > MaximumImmediateMeshUVCellStates))
+	{
+		// Large edits converge through the acknowledged MeshUV journal transport.
+		// Keep feedback totals, but never serialize a whole wall in one result RPC.
+		CompactNetworkResult = Result;
+		CompactNetworkResult.CellChanges.Reset();
+		CompactNetworkResult.NetRemovedRecoveryLots.Reset();
+		VisualDelta.CellStates.Reset();
+		NetworkResult = &CompactNetworkResult;
+	}
+	if (bBuiltVisualDelta)
+	{
+		const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+		if (OwnerPawn
+			&& OwnerPawn->IsPlayerControlled()
+			&& !OwnerPawn->IsLocallyControlled())
+		{
+			ClientReceiveScrapeResult(
+				VisualDelta,
+				*NetworkResult,
+				ContactLocation);
+		}
+		MulticastReceiveScrapeFeedback(
+			VisualDelta,
+			*NetworkResult,
+			ContactLocation);
+	}
 
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
 	if (OwnerPawn
@@ -469,46 +617,67 @@ void UMD_ScrapeToolComponent::DispatchAuthoritativeScrapeResult(
 		&& GetNetMode() != NM_DedicatedServer)
 	{
 		EmitFeedback(Surface, Result, ContactLocation);
-		return;
 	}
-
-	// 원격 소유자의 사운드/이펙트와 Blueprint 피드백은 해당 클라이언트에서 실행한다.
-	ClientReceiveScrapeResult(Surface, Result, ContactLocation);
 }
 
-void UMD_ScrapeToolComponent::MulticastReceiveScrapeFeedback_Implementation(
-	UMD_ScrapeSurfaceComponent* Surface,
+void UMD_ScrapeToolComponent::ClientReceiveScrapeResult_Implementation(
+	const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
 	const FMD_ScrapeResult& Result,
 	const FVector_NetQuantize10 ContactLocation)
 {
-	// 소유 클라이언트는 로컬 즉시 재생 또는 Client RPC로 이미 받으므로 중복을 막는다
+	ReceiveAuthoritativeScrapeResult(VisualDelta, Result, ContactLocation);
+}
+
+void UMD_ScrapeToolComponent::ReceiveAuthoritativeScrapeResult(
+	const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
+	const FMD_ScrapeResult& Result,
+	const FVector& ContactLocation)
+{
+	if (!ApplyAuthoritativeScrapeVisualDelta(VisualDelta))
+	{
+		return;
+	}
+
+	const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+	if (OwnerPawn && OwnerPawn->IsLocallyControlled())
+	{
+		OnScrapeSurfaceApplied.Broadcast(VisualDelta.Surface, Result);
+		if (AMD_CuttableWall* const Wall = VisualDelta.Surface
+			? Cast<AMD_CuttableWall>(VisualDelta.Surface->GetOwner())
+			: nullptr)
+		{
+			OnScrapeApplied.Broadcast(Wall, Result);
+		}
+	}
+	EmitFeedback(VisualDelta.Surface, Result, ContactLocation);
+}
+
+void UMD_ScrapeToolComponent::MulticastReceiveScrapeFeedback_Implementation(
+	const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
+	const FMD_ScrapeResult& Result,
+	const FVector_NetQuantize10 ContactLocation)
+{
 	if (GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
 
 	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
-	if (OwnerPawn && OwnerPawn->IsLocallyControlled())
+	const bool bIsLocallyControlledOwner =
+		OwnerPawn && OwnerPawn->IsLocallyControlled();
+	if (GetOwner() && GetOwner()->HasAuthority())
 	{
+		// 서버에는 상태가 이미 적용되어 원격 Pawn의 피드백만 재생한다.
+		if (!bIsLocallyControlledOwner)
+		{
+			EmitFeedback(
+				VisualDelta.Surface,
+				Result,
+				ContactLocation);
+		}
 		return;
 	}
-
-	EmitFeedback(Surface, Result, ContactLocation);
-}
-
-void UMD_ScrapeToolComponent::ClientReceiveScrapeResult_Implementation(
-	UMD_ScrapeSurfaceComponent* Surface,
-	const FMD_ScrapeResult& Result,
-	const FVector_NetQuantize10 ContactLocation)
-{
-	OnScrapeSurfaceApplied.Broadcast(Surface, Result);
-	if (AMD_CuttableWall* const Wall = Surface
-		? Cast<AMD_CuttableWall>(Surface->GetOwner())
-		: nullptr)
-	{
-		OnScrapeApplied.Broadcast(Wall, Result);
-	}
-	EmitFeedback(Surface, Result, ContactLocation);
+	ReceiveAuthoritativeScrapeResult(VisualDelta, Result, ContactLocation);
 }
 
 FMD_ScrapeAimQueryResult UMD_ScrapeToolComponent::QueryCurrentScrapeAim() const
@@ -602,6 +771,16 @@ FMD_ScrapeAimQueryResult UMD_ScrapeToolComponent::QueryScrapeAim(
 		return Result;
 	}
 
+	if (AMD_BarnacleSpawner::IsSpawnerSurfaceHit(SurfaceHit))
+	{
+		Result.Type = EMD_ScrapeAimQueryType::BarnacleSpawnerSurface;
+		Result.Hit = SurfaceHit;
+		Result.WorldContactLocation = SurfaceHit.ImpactPoint;
+		Result.WorldContactNormal = SurfaceHit.ImpactNormal;
+		Result.TraceDistanceCm = static_cast<float>(FVector::Distance(TraceStart, SurfaceHit.ImpactPoint));
+		return Result;
+	}
+
 	// TryTraceScrapeTarget는 일반 물체를 첫 충돌로 보존해 NoTarget과 가림을 구분한다.
 	Result.Hit = SurfaceHit;
 	Result.bWasBlocked = SurfaceHit.bBlockingHit;
@@ -636,6 +815,9 @@ bool UMD_ScrapeToolComponent::TryTraceScrapeTarget(
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MD_ScrapeTrace), true);
 	QueryParams.AddIgnoredActor(IgnoredActor);
+	// MeshUV 모드의 셀 주소는 히트한 삼각형의 UV에서 나온다. FaceIndex 없이는
+	// FindCollisionUV가 어느 삼각형을 보간할지 알 수 없다.
+	QueryParams.bReturnFaceIndex = true;
 
 	FHitResult FirstHit;
 	if (!GetWorld()->LineTraceSingleByChannel(
