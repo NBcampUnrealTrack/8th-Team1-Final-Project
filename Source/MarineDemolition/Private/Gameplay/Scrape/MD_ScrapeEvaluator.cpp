@@ -562,9 +562,10 @@ namespace
                 OutCrossing = Crossing; OutStartDistance = StartDistance; OutEndDistance = EndDistance;
             }
         };
-        if (!Triangle.Neighbors.IsEmpty())
+        const TConstArrayView<FMD_ScrapeMeshUVNeighbor> Neighbors = Data.GetTriangleNeighbors(Stroke.StartTriangleIndex);
+        if (!Neighbors.IsEmpty())
         {
-            for (const FMD_ScrapeMeshUVNeighbor& Neighbor : Triangle.Neighbors)
+            for (const FMD_ScrapeMeshUVNeighbor& Neighbor : Neighbors)
             {
                 if (Neighbor.TriangleIndex == Stroke.EndTriangleIndex)
                 { ConsiderPortal(Neighbor.SharedEdgeA, Neighbor.SharedEdgeB); }
@@ -612,9 +613,10 @@ namespace
 				continue;
 			}
 			OutTriangles.Add(Index);
-            if (!Triangle.Neighbors.IsEmpty())
+            const TConstArrayView<FMD_ScrapeMeshUVNeighbor> Neighbors = Data.GetTriangleNeighbors(Index);
+            if (!Neighbors.IsEmpty())
             {
-                for (const FMD_ScrapeMeshUVNeighbor& Neighbor : Triangle.Neighbors)
+                for (const FMD_ScrapeMeshUVNeighbor& Neighbor : Neighbors)
                 {
                     if (!Data.Triangles.IsValidIndex(Neighbor.TriangleIndex) || Visited[Neighbor.TriangleIndex]) { continue; }
                     const FVector A = Transform.TransformPosition(Neighbor.SharedEdgeA);

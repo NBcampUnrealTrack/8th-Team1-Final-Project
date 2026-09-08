@@ -178,6 +178,8 @@ public:
 #endif
 	bool IsValidForMesh(const UStaticMesh* Mesh) const;
 	bool IsActiveCell(int32 CellIndex) const;
+    /** Baked portals plus unambiguous exact edges and shared-source fragment portals. Never serialized. */
+    TConstArrayView<FMD_ScrapeMeshUVNeighbor> GetTriangleNeighbors(int32 TriangleIndex) const;
 	/** Game-thread-only lookup shared by every wall using this immutable baked profile. */
 	const TMultiMap<int32, int32>& GetVisualDependents() const;
     /** Empty means the original single-source texel. Never serialized. */
@@ -191,6 +193,11 @@ public:
 
 private:
     mutable uint64 RuntimeCacheRevision = 0;
+    void BuildExactAdjacencyCache() const;
+    mutable TMap<int32, TArray<FMD_ScrapeMeshUVNeighbor>> ExactAdjacencyOverrides;
+    mutable const FMD_ScrapeMeshUVTriangle* ExactAdjacencyTriangleData = nullptr;
+    mutable int32 ExactAdjacencyTriangleCount = INDEX_NONE;
+    mutable FGuid ExactAdjacencyLayoutId;
     struct FRuntimeValidationKey
     {
         const UStaticMesh* Source = nullptr;

@@ -200,6 +200,10 @@ TConstArrayView<int32> UMD_ScrapeMeshUVData::GetVisualSeamDependents(int32 Sourc
 
 void UMD_ScrapeMeshUVData::InvalidateVisualDependentsCache() const
 {
+    ExactAdjacencyOverrides.Empty();
+    ExactAdjacencyTriangleData = nullptr;
+    ExactAdjacencyTriangleCount = INDEX_NONE;
+    ExactAdjacencyLayoutId.Invalidate();
     CarrierWeightCache.Empty();
     CarrierWeightsCellCount = INDEX_NONE;
     CachedCellLayout.Reset();
