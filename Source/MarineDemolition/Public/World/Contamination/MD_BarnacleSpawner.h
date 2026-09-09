@@ -43,6 +43,13 @@ public:
 	AMD_BarnacleSpawner();
 
 	/**
+	 * Does a live spawner in the hit's world permit barnacles at this visible surface?
+	 * Uses the placement volume, trace response and face rules without spawning or damage.
+	 * Call on the game thread with the first blocking hit from the player's reach trace.
+	 */
+	static bool IsSpawnerSurfaceHit(const FHitResult& Hit);
+
+	/**
 	 * 볼륨 안 표면에 따개비를 붙인다. 서버 전용.
 	 * @return 실제로 붙인 개수. 요청 개수보다 적으면 자리를 못 찾은 것이다.
 	 */
@@ -87,6 +94,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** 따개비를 찾을 범위. 섹터 하나를 덮게 잡는다 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner")

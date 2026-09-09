@@ -49,6 +49,8 @@ namespace MD_ScrapeSurfaceComponentInternal
 	extern const FName ContaminationPatchUVScaleVParameterName;
 	extern const FName ContaminationPatchUVOffsetVParameterName;
 	extern const FName ContaminationSurfaceWidthParameterName;
+	extern const FName ContaminationPlanarSurfaceWidthParameterName;
+	extern const FName ContaminationUseCylindricalCanonicalUParameterName;
 	extern const FName ContaminationSurfaceHeightParameterName;
 	extern const FName ContaminationSurfaceThicknessParameterName;
 	extern const FName ContaminationDetailTileWorldSizeParameterName;
@@ -70,4 +72,10 @@ namespace MD_ScrapeSurfaceComponentInternal
 	extern const FName ContaminationSurfaceOriginParameterName;
 	extern const FName ContaminationSurfaceTangentUParameterName;
 	extern const FName ContaminationSurfaceTangentVParameterName;
+	extern const FName ContaminationCurveCenterParameterName;
+	extern const FName ContaminationCurveAxisParameterName;
+	extern const FName ContaminationCurveStartDirectionParameterName;
+	extern const FName ContaminationCurveSweepRadiansParameterName;
+	extern const FName ContaminationCurveRadiusParameterName;
+	extern const FName ContaminationCurveFrontIsOuterParameterName;
 }

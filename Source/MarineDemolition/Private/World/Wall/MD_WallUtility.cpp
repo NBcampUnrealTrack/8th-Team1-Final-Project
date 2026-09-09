@@ -227,6 +227,23 @@ void AMD_WallUtility::DebugForceRepair(AActor* Repairer)
 	SetRepaired(Repairer);
 }
 
+bool AMD_WallUtility::TryExternalRepair(AActor* Repairer, FGameplayTag RepairToolTag)
+{
+	if (!HasAuthority() || UtilityState != EMD_UtilityState::Broken)
+	{
+		return false;
+	}
+
+	// Interact 경로의 CanRepairWith와 같은 기준 — 정확 일치만 인정
+	if (!RepairToolTag.MatchesTagExact(RequiredRepairToolTag))
+	{
+		return false;
+	}
+
+	SetRepaired(Repairer);
+	return true;
+}
+
 void AMD_WallUtility::SetRepaired(AActor* Repairer)
 {
 	if (!HasAuthority() || UtilityState != EMD_UtilityState::Broken)

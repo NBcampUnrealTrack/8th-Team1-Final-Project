@@ -4,11 +4,22 @@
 #include "GameFramework/Actor.h"
 #include "Gameplay/Scrape/MD_ScrapeReplicationCodec.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
+#include "Gameplay/Scrape/MD_ScrapeMeshUVSyncSubsystem.h"
+#include "Engine/World.h"
 
 // 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 책임: Fast Array 셀 복제 · 수신 상태 반영
 
 using namespace MD_ScrapeSurfaceComponentInternal;
+
+
+bool FMD_ReplicatedScrapeCellStateArray::NetDeltaSerialize(FNetDeltaSerializeInfo& DeltaParameters)
+{
+	// MeshUV uses the bounded connection transport, including initial relevance/JIP.
+	if (DeltaParameters.Writer && Owner && Owner->UsesMeshUVSurface()) { return false; }
+	return FastArrayDeltaSerialize<FMD_ReplicatedScrapeCellState,
+		FMD_ReplicatedScrapeCellStateArray>(Items, DeltaParameters, *this);
+}
 
 void FMD_ReplicatedScrapeCellStateArray::SetOwner(
 	UMD_ScrapeSurfaceComponent* InOwner)
@@ -29,85 +40,20 @@ void FMD_ReplicatedScrapeCellStateArray::SetOwner(
 void FMD_ReplicatedScrapeCellStateArray::SetCellState(
 	const int32 CellIndex)
 {
-	if (!Owner
-		|| !Owner->HasAuthority()
-		|| !Owner->ContaminationCells.IsValidIndex(CellIndex))
+	if (!Owner || !Owner->HasAuthority() || Owner->UsesMeshUVSurface())
 	{
 		return;
 	}
 
-	uint16 EncodedCellIndex = FMD_ScrapeReplicationCodec::InvalidCellIndex;
-	if (!FMD_ScrapeReplicationCodec::TryEncodeCellIndex(
+	FMD_ReplicatedScrapeCellState NewState;
+	bool bMatchesGeneratedState = false;
+	if (!Owner->TryBuildReplicatedCellState(
 			CellIndex,
-			EncodedCellIndex))
+			NewState,
+			bMatchesGeneratedState))
 	{
 		return;
 	}
-
-	const FMD_ScrapeSurfaceCell& Cell = Owner->ContaminationCells[CellIndex];
-	const float InitialContamination = FMath::Clamp(
-		Cell.InitialContamination,
-		0.0f,
-		1.0f);
-	const float SafeRemaining = FMath::Clamp(
-		Cell.RemainingContamination,
-		0.0f,
-		InitialContamination);
-	const float SafeTransferred = FMath::Clamp(
-		Cell.TransferredContamination,
-		0.0f,
-		1.0f);
-	const float SafeTransferredPatternDensity =
-		SafeTransferred > Owner->ScrapeSettings.CleanTolerance
-		? FMath::Clamp(
-			Cell.TransferredPaintPatternDensity,
-			0.0f,
-			1.0f)
-		: 0.0f;
-	const float GeneratedInitial =
-		Owner->ContaminationGeneratedInitialAmounts.IsValidIndex(CellIndex)
-		? FMath::Clamp(
-			Owner->ContaminationGeneratedInitialAmounts[CellIndex],
-			0.0f,
-			1.0f)
-		: InitialContamination;
-	const float SafeCoveredFraction = FMath::Clamp(
-		Cell.CoveredFraction,
-		0.0f,
-		1.0f);
-	const bool bMatchesGeneratedState = FMath::IsNearlyEqual(
-		InitialContamination,
-		GeneratedInitial,
-		UE_SMALL_NUMBER)
-		&& FMath::IsNearlyEqual(
-		SafeRemaining,
-		GeneratedInitial,
-		UE_SMALL_NUMBER)
-		&& SafeTransferred <= UE_SMALL_NUMBER
-		&& SafeTransferredPatternDensity <= UE_SMALL_NUMBER
-		&& SafeCoveredFraction <= UE_SMALL_NUMBER;
-	// 실제로 보내는 값은 양자화 결과다. 같은 바이트로 떨어지는 갱신은
-	// 네트워크로 내보내지 않는다.
-	const uint8 QuantizedInitial =
-		FMD_ScrapeReplicationCodec::QuantizeRemaining(
-			InitialContamination,
-			0.0f);
-	const uint8 QuantizedRemaining =
-		FMD_ScrapeReplicationCodec::QuantizeRemaining(
-			SafeRemaining,
-			Owner->ScrapeSettings.CleanTolerance);
-	const uint8 QuantizedTransferred =
-		FMD_ScrapeReplicationCodec::QuantizeRemaining(
-			SafeTransferred,
-			Owner->ScrapeSettings.CleanTolerance);
-	const uint8 QuantizedTransferredPatternDensity =
-		FMD_ScrapeReplicationCodec::QuantizeRemaining(
-			SafeTransferredPatternDensity,
-			0.0f);
-	const uint8 QuantizedCoveredFraction =
-		FMD_ScrapeReplicationCodec::QuantizeRemaining(
-			SafeCoveredFraction,
-			0.0f);
 
 	if (const int32* ExistingItemIndex = CellToItemIndex.Find(CellIndex))
 	{
@@ -129,20 +75,27 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellState(
 			}
 
 			FMD_ReplicatedScrapeCellState& Item = Items[*ExistingItemIndex];
-			if (Item.QuantizedInitialContamination != QuantizedInitial
-				|| Item.QuantizedRemainingContamination != QuantizedRemaining
+			if (Item.QuantizedInitialContamination
+					!= NewState.QuantizedInitialContamination
+				|| Item.QuantizedRemainingContamination
+					!= NewState.QuantizedRemainingContamination
 				|| Item.QuantizedTransferredContamination
-					!= QuantizedTransferred
+					!= NewState.QuantizedTransferredContamination
 				|| Item.QuantizedTransferredPatternDensity
-					!= QuantizedTransferredPatternDensity
-				|| Item.QuantizedCoveredFraction != QuantizedCoveredFraction)
+					!= NewState.QuantizedTransferredPatternDensity
+				|| Item.QuantizedCoveredFraction
+					!= NewState.QuantizedCoveredFraction)
 			{
-				Item.QuantizedInitialContamination = QuantizedInitial;
-				Item.QuantizedRemainingContamination = QuantizedRemaining;
-				Item.QuantizedTransferredContamination = QuantizedTransferred;
+				Item.QuantizedInitialContamination =
+					NewState.QuantizedInitialContamination;
+				Item.QuantizedRemainingContamination =
+					NewState.QuantizedRemainingContamination;
+				Item.QuantizedTransferredContamination =
+					NewState.QuantizedTransferredContamination;
 				Item.QuantizedTransferredPatternDensity =
-					QuantizedTransferredPatternDensity;
-				Item.QuantizedCoveredFraction = QuantizedCoveredFraction;
+					NewState.QuantizedTransferredPatternDensity;
+				Item.QuantizedCoveredFraction =
+					NewState.QuantizedCoveredFraction;
 				MarkItemDirty(Item);
 			}
 			return;
@@ -156,15 +109,95 @@ void FMD_ReplicatedScrapeCellStateArray::SetCellState(
 		return;
 	}
 
-	const int32 NewItemIndex = Items.Emplace(
-		EncodedCellIndex,
-		QuantizedInitial,
-		QuantizedRemaining,
-		QuantizedTransferred,
-		QuantizedTransferredPatternDensity,
-		QuantizedCoveredFraction);
+	const int32 NewItemIndex = Items.Add(MoveTemp(NewState));
 	CellToItemIndex.Add(CellIndex, NewItemIndex);
 	MarkItemDirty(Items[NewItemIndex]);
+}
+
+bool UMD_ScrapeSurfaceComponent::TryBuildReplicatedCellState(
+	const int32 CellIndex,
+	FMD_ReplicatedScrapeCellState& OutState,
+	bool& bOutMatchesGeneratedState) const
+{
+	OutState = FMD_ReplicatedScrapeCellState();
+	bOutMatchesGeneratedState = false;
+	if (!IsContaminationCellActive(CellIndex))
+	{
+		return false;
+	}
+
+	uint32 EncodedCellIndex = FMD_ScrapeReplicationCodec::InvalidCellIndex;
+	if (!FMD_ScrapeReplicationCodec::TryEncodeCellIndex(
+			CellIndex,
+			EncodedCellIndex))
+	{
+		return false;
+	}
+
+	const int32 StorageIndex = GetContaminationStorageIndex(CellIndex);
+	const FMD_ScrapeSurfaceCell Cell = ReadContaminationStorageCell(StorageIndex);
+	const float InitialContamination = FMath::Clamp(
+		Cell.InitialContamination,
+		0.0f,
+		1.0f);
+	const float SafeRemaining = FMath::Clamp(
+		Cell.RemainingContamination,
+		0.0f,
+		InitialContamination);
+	const float SafeTransferred = FMath::Clamp(
+		Cell.TransferredContamination,
+		0.0f,
+		1.0f);
+	const float SafeTransferredPatternDensity =
+		SafeTransferred > ScrapeSettings.CleanTolerance
+		? FMath::Clamp(
+			Cell.TransferredPaintPatternDensity,
+			0.0f,
+			1.0f)
+		: 0.0f;
+	const float GeneratedInitial =
+		HasGeneratedInitialContamination(StorageIndex)
+		? FMath::Clamp(
+			GetGeneratedInitialContamination(StorageIndex),
+			0.0f,
+			1.0f)
+		: InitialContamination;
+	const float SafeCoveredFraction = FMath::Clamp(
+		Cell.CoveredFraction,
+		0.0f,
+		1.0f);
+	bOutMatchesGeneratedState = FMath::IsNearlyEqual(
+		InitialContamination,
+		GeneratedInitial,
+		UE_SMALL_NUMBER)
+		&& FMath::IsNearlyEqual(
+			SafeRemaining,
+			GeneratedInitial,
+			UE_SMALL_NUMBER)
+		&& SafeTransferred <= UE_SMALL_NUMBER
+		&& SafeTransferredPatternDensity <= UE_SMALL_NUMBER
+		&& SafeCoveredFraction <= UE_SMALL_NUMBER;
+
+	// FastArray와 빠른 visual delta가 같은 1/255 표현을 사용해야 나중의
+	// 정본 복제가 도착해도 화면이 미세하게 되돌아가지 않는다.
+	OutState = FMD_ReplicatedScrapeCellState(
+		EncodedCellIndex,
+		FMD_ScrapeReplicationCodec::QuantizeRemaining(
+			InitialContamination,
+			0.0f),
+		FMD_ScrapeReplicationCodec::QuantizeRemaining(
+			SafeRemaining,
+			ScrapeSettings.CleanTolerance),
+		FMD_ScrapeReplicationCodec::QuantizeRemaining(
+			SafeTransferred,
+			ScrapeSettings.CleanTolerance),
+		FMD_ScrapeReplicationCodec::QuantizeRemaining(
+			SafeTransferredPatternDensity,
+			0.0f),
+		FMD_ScrapeReplicationCodec::QuantizeRemaining(
+			SafeCoveredFraction,
+			0.0f));
+	return true;
 }
 
 void FMD_ReplicatedScrapeCellStateArray::ResetState()
@@ -224,6 +257,46 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 	const TConstArrayView<int32> StateItemIndices,
 	const bool bResetToInitial)
 {
+	if (UsesMeshUVSurface()) { return; }
+	if (ReplicatedContaminationVisualRevision != 0
+		&& LastAppliedContaminationVisualRevision != 0
+		&& IsVisualRevisionNewer(
+			LastAppliedContaminationVisualRevision,
+			ReplicatedContaminationVisualRevision))
+	{
+		// revision property는 FastArray보다 먼저 직렬화한다. 이미 더 새
+		// transient/canonical 상태를 본 client는 뒤늦은 셀 bunch를 통째로 버린다.
+		return;
+	}
+
+	const TArray<FMD_ReplicatedScrapeCellState>& AllStateItems =
+		ReplicatedContaminationState.GetItems();
+	TArray<FMD_ReplicatedScrapeCellState, TInlineAllocator<16>> StateItems;
+	StateItems.Reserve(StateItemIndices.Num());
+	for (const int32 StateItemIndex : StateItemIndices)
+	{
+		if (AllStateItems.IsValidIndex(StateItemIndex))
+		{
+			StateItems.Add(AllStateItems[StateItemIndex]);
+		}
+	}
+
+	ApplyReplicatedContaminationStates(StateItems, bResetToInitial);
+	if (ReplicatedContaminationVisualRevision != 0
+		&& (LastAppliedContaminationVisualRevision == 0
+			|| IsVisualRevisionNewer(
+				ReplicatedContaminationVisualRevision,
+				LastAppliedContaminationVisualRevision)))
+	{
+		LastAppliedContaminationVisualRevision =
+			ReplicatedContaminationVisualRevision;
+	}
+}
+
+void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
+	const TConstArrayView<FMD_ReplicatedScrapeCellState> StateItems,
+	const bool bResetToInitial)
+{
 	if (!bContaminationEnabled
 		|| HasAuthority()
 		|| !bContaminationSurfaceInitialized)
@@ -231,28 +304,22 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 		return;
 	}
 
-	const bool bWasFullyRemoved = IsContaminationFullyRemoved();
-	const TArray<FMD_ReplicatedScrapeCellState>& StateItems =
-		ReplicatedContaminationState.GetItems();
+	bool bWasFullyRemoved = false;
+	bool bCapturedPreviousCompletion = false;
 	TArray<FMD_ScrapeCellChange> CellChanges;
-	CellChanges.Reserve(StateItemIndices.Num());
+	CellChanges.Reserve(StateItems.Num());
+	TSet<int32> ResetPages;
 
-	for (const int32 StateItemIndex : StateItemIndices)
+	for (const FMD_ReplicatedScrapeCellState& StateItem : StateItems)
 	{
-		if (!StateItems.IsValidIndex(StateItemIndex))
-		{
-			continue;
-		}
-
-		const FMD_ReplicatedScrapeCellState& StateItem =
-			StateItems[StateItemIndex];
 		const int32 StateCellIndex = StateItem.GetCellIndex();
-		if (!ContaminationCells.IsValidIndex(StateCellIndex))
+		if (!IsContaminationCellActive(StateCellIndex))
 		{
 			continue;
 		}
 
-		FMD_ScrapeSurfaceCell& Cell = ContaminationCells[StateCellIndex];
+		const int32 StorageIndex = GetContaminationStorageIndex(StateCellIndex);
+		FMD_ScrapeSurfaceCell Cell = ReadContaminationStorageCell(StorageIndex);
 		const float PreviousInitial = Cell.InitialContamination;
 		const float PreviousRemaining = Cell.RemainingContamination;
 		const float PreviousTransferred = Cell.TransferredContamination;
@@ -260,9 +327,9 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 			Cell.TransferredPaintPatternDensity;
 		const float PreviousCoveredFraction = Cell.CoveredFraction;
 		const float GeneratedInitial =
-			ContaminationGeneratedInitialAmounts.IsValidIndex(StateCellIndex)
+			HasGeneratedInitialContamination(StorageIndex)
 			? FMath::Clamp(
-				ContaminationGeneratedInitialAmounts[StateCellIndex],
+				GetGeneratedInitialContamination(StorageIndex),
 				0.0f,
 				1.0f)
 			: PreviousInitial;
@@ -333,17 +400,28 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 			continue;
 		}
 
+		if (!bCapturedPreviousCompletion)
+		{
+			bWasFullyRemoved = IsContaminationFullyRemoved();
+			bCapturedPreviousCompletion = true;
+		}
+
 		Cell.InitialContamination = TargetInitial;
 		Cell.RemainingContamination = TargetRemaining;
 		Cell.TransferredContamination = TargetTransferred;
 		Cell.TransferredPaintPatternDensity =
 			TargetTransferredPatternDensity;
 		Cell.CoveredFraction = TargetCoveredFraction;
+		SetContaminationStorageCell(StorageIndex, Cell);
+		if (bResetToInitial && !ContaminationPagedCells.IsEmpty())
+		{
+			ResetPages.Add(StorageIndex / FMD_ScrapePagedState::PageSize);
+		}
 
 		EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
 		int32 LocalCellIndex = INDEX_NONE;
-		const int32 CellsPerFace = ContaminationCells.Num()
-			/ FMD_ScrapeSurfaceLayout::FaceCount;
+		const int32 CellsPerFace = ContaminationGridDimensions.X
+			* ContaminationGridDimensions.Y;
 		if (!FMD_ScrapeSurfaceLayout::TryDecodeCombinedCellIndex(
 				StateCellIndex,
 				CellsPerFace,
@@ -364,6 +442,7 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 			+ FMath::Max(
 				0.0f,
 				PreviousTransferred - TargetTransferred);
+		CellChange.RemovedAmount *= static_cast<float>(GetContaminationCellCarrierWeight(StateCellIndex));
 		CellChange.RemainingAmountAfter = TargetRemaining;
 		CellChange.bBecameClean =
 			(PreviousRemaining > ScrapeSettings.CleanTolerance
@@ -372,8 +451,27 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 			&& TargetTransferred <= ScrapeSettings.CleanTolerance;
 	}
 
+	for (const int32 PageIndex : ResetPages)
+	{
+		ContaminationPagedCells.CompactUnchangedPageForIndex(PageIndex * FMD_ScrapePagedState::PageSize);
+	}
+	if (CellChanges.IsEmpty())
+	{
+		return;
+	}
+
 	RefreshContaminationCleanRatioCache();
-	UpdateContaminationMask(CellChanges);
+	if (!HasLocalPredictedContaminationState())
+	{
+		UpdateContaminationMask(CellChanges);
+	}
+	else
+	{
+		for (const FMD_ScrapeCellChange& CellChange : CellChanges)
+		{
+			MarkLocalScrapePredictionReconcileCell(CellChange.CellIndex);
+		}
+	}
 
 	const bool bIsFullyRemoved = IsContaminationFullyRemoved();
 	if (!bWasFullyRemoved
@@ -389,10 +487,181 @@ void UMD_ScrapeSurfaceComponent::HandleReplicatedContaminationState(
 	}
 }
 
+bool UMD_ScrapeSurfaceComponent::IsVisualRevisionNewer(
+	const uint32 Candidate,
+	const uint32 Baseline)
+{
+	return Candidate != Baseline
+		&& static_cast<int32>(Candidate - Baseline) > 0;
+}
+
+void UMD_ScrapeSurfaceComponent::AdvanceContaminationVisualRevision()
+{
+	check(HasAuthority());
+	++ReplicatedContaminationVisualRevision;
+	if (ReplicatedContaminationVisualRevision == 0)
+	{
+		// 0은 아직 visual transaction을 받지 않은 client/JIP 표식으로 남긴다.
+		++ReplicatedContaminationVisualRevision;
+	}
+}
+
+void UMD_ScrapeSurfaceComponent::OnRep_ContaminationVisualRevision()
+{
+	// MeshUV revision is only an advertisement; bounded snapshots own canonical state.
+	if (UsesMeshUVSurface()) { return; }
+	if (ReplicatedContaminationVisualRevision != 0
+		&& (LastAppliedContaminationVisualRevision == 0
+			|| IsVisualRevisionNewer(
+				ReplicatedContaminationVisualRevision,
+				LastAppliedContaminationVisualRevision)))
+	{
+		// 실제 셀 데이터는 FastArray callback이 적용한다. 여기서는 더 늦게 온
+		// unreliable delta가 이전 화면으로 되감지 못하도록 순서 바닥만 올린다.
+		LastAppliedContaminationVisualRevision =
+			ReplicatedContaminationVisualRevision;
+	}
+}
+
+bool UMD_ScrapeSurfaceComponent::BuildAuthoritativeVisualDelta(
+	const TArray<FMD_ScrapeCellChange>& CellChanges,
+	const float ScrapeLoadAfter,
+	FMD_ScrapeAuthoritativeVisualDelta& OutDelta)
+{
+	OutDelta = FMD_ScrapeAuthoritativeVisualDelta();
+	if (!HasAuthority()
+		|| !bContaminationEnabled
+		|| !bContaminationSurfaceInitialized
+		|| !FMath::IsFinite(ScrapeLoadAfter)
+		|| ScrapeLoadAfter < 0.0f)
+	{
+		return false;
+	}
+
+	TSet<int32> UniqueCellIndices;
+	UniqueCellIndices.Reserve(CellChanges.Num());
+	OutDelta.CellStates.Reserve(CellChanges.Num());
+	for (const FMD_ScrapeCellChange& CellChange : CellChanges)
+	{
+		if (UniqueCellIndices.Contains(CellChange.CellIndex))
+		{
+			continue;
+		}
+		UniqueCellIndices.Add(CellChange.CellIndex);
+
+		FMD_ReplicatedScrapeCellState State;
+		bool bMatchesGeneratedState = false;
+		if (!TryBuildReplicatedCellState(
+				CellChange.CellIndex,
+				State,
+				bMatchesGeneratedState))
+		{
+			OutDelta = FMD_ScrapeAuthoritativeVisualDelta();
+			return false;
+		}
+		OutDelta.CellStates.Add(MoveTemp(State));
+	}
+
+	// Bare-surface feedback can be a valid transaction without a cell delta.
+	// It still needs a unique sequence number so duplicate RPC feedback is rejected.
+	if (CellChanges.IsEmpty()
+		|| ReplicatedContaminationVisualRevision == 0)
+	{
+		AdvanceContaminationVisualRevision();
+		if (AActor* const OwnerActor = GetOwner())
+		{
+			OwnerActor->ForceNetUpdate();
+		}
+	}
+
+	OutDelta.Surface = this;
+	OutDelta.SurfaceVisualRevision =
+		ReplicatedContaminationVisualRevision;
+	OutDelta.ScrapeLoadAfter = ScrapeLoadAfter;
+	return OutDelta.SurfaceVisualRevision != 0;
+}
+
+bool UMD_ScrapeSurfaceComponent::ValidateAuthoritativeVisualDeltaCells(
+	const FMD_ScrapeAuthoritativeVisualDelta& Delta) const
+{
+	TSet<int32> UniqueCellIndices;
+	UniqueCellIndices.Reserve(Delta.CellStates.Num());
+	for (const FMD_ReplicatedScrapeCellState& State : Delta.CellStates)
+	{
+		const int32 CellIndex = State.GetCellIndex();
+		if (!IsContaminationCellActive(CellIndex)
+			|| UniqueCellIndices.Contains(CellIndex))
+		{
+			return false;
+		}
+		UniqueCellIndices.Add(CellIndex);
+	}
+	return true;
+}
+
+bool UMD_ScrapeSurfaceComponent::ApplyAuthoritativeVisualDelta(
+	const FMD_ScrapeAuthoritativeVisualDelta& Delta)
+{
+	if (!bContaminationEnabled
+		|| !bContaminationSurfaceInitialized
+		|| HasAuthority()
+		|| Delta.Surface != this
+		|| Delta.SurfaceVisualRevision == 0
+		|| (LastConsumedContaminationVisualRevision != 0
+			&& !IsVisualRevisionNewer(
+				Delta.SurfaceVisualRevision,
+				LastConsumedContaminationVisualRevision))
+		|| (LastAppliedContaminationVisualRevision != 0
+			&& IsVisualRevisionNewer(
+				LastAppliedContaminationVisualRevision,
+				Delta.SurfaceVisualRevision))
+		|| !ValidateAuthoritativeVisualDeltaCells(Delta))
+	{
+		return false;
+	}
+
+	if (UsesMeshUVSurface())
+	{
+		if (UMD_ScrapeMeshUVSyncSubsystem* Sync = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>())
+		{ Sync->RecordClientVisualDelta(Delta); }
+	}
+	ApplyReplicatedContaminationStates(Delta.CellStates, false);
+	LastAppliedContaminationVisualRevision = Delta.SurfaceVisualRevision;
+	LastConsumedContaminationVisualRevision = Delta.SurfaceVisualRevision;
+	return true;
+}
+
+bool UMD_ScrapeSurfaceComponent::ApplyAuthoritativePredictionResolution(
+	const FMD_ScrapeAuthoritativeVisualDelta& Delta)
+{
+	if (!bContaminationEnabled
+		|| !bContaminationSurfaceInitialized
+		|| HasAuthority()
+		|| Delta.Surface != this
+		|| Delta.SurfaceVisualRevision == 0
+		|| (LastAppliedContaminationVisualRevision != 0
+			&& IsVisualRevisionNewer(
+				LastAppliedContaminationVisualRevision,
+				Delta.SurfaceVisualRevision))
+		|| !ValidateAuthoritativeVisualDeltaCells(Delta))
+	{
+		return false;
+	}
+
+	if (UsesMeshUVSurface())
+	{
+		if (UMD_ScrapeMeshUVSyncSubsystem* Sync = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>())
+		{ Sync->RecordClientVisualDelta(Delta); }
+	}
+	ApplyReplicatedContaminationStates(Delta.CellStates, false);
+	LastAppliedContaminationVisualRevision = Delta.SurfaceVisualRevision;
+	return true;
+}
+
 
 void UMD_ScrapeSurfaceComponent::ApplyAllReplicatedContaminationState()
 {
-	if (!bContaminationEnabled)
+	if (!bContaminationEnabled || UsesMeshUVSurface())
 	{
 		return;
 	}
@@ -410,6 +679,7 @@ void UMD_ScrapeSurfaceComponent::ApplyAllReplicatedContaminationState()
 	}
 
 	HandleReplicatedContaminationState(StateItemIndices, false);
+	OnRep_ContaminationVisualRevision();
 }
 
 
@@ -425,12 +695,25 @@ void UMD_ScrapeSurfaceComponent::PublishContaminationChanges(
 		return;
 	}
 
+	bool bPublishedAnyCell = false;
 	for (const FMD_ScrapeCellChange& CellChange : CellChanges)
 	{
-		if (ContaminationCells.IsValidIndex(CellChange.CellIndex))
+		if (IsContaminationCellActive(CellChange.CellIndex))
 		{
-			ReplicatedContaminationState.SetCellState(CellChange.CellIndex);
+			if (!UsesMeshUVSurface())
+			{ ReplicatedContaminationState.SetCellState(CellChange.CellIndex); }
+			bPublishedAnyCell = true;
 		}
+	}
+	if (!bPublishedAnyCell)
+	{
+		return;
+	}
+	AdvanceContaminationVisualRevision();
+	if (UsesMeshUVSurface())
+	{
+		if (UMD_ScrapeMeshUVSyncSubsystem* Sync = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>())
+		{ Sync->RecordSurfaceChanges(*this, CellChanges); }
 	}
 
 	if (AActor* const OwnerActor = GetOwner())

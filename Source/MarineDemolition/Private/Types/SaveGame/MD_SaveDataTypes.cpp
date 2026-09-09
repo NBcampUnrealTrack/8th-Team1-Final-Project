@@ -1,14 +1,60 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Types/Lore/MD_LoreTypes.h"
+#include "World/Trash/MD_TrashBin.h"
 
 const FGameplayTag FMD_GameStateData::DataFieldKey = MDGameplayTags::Save_Data_GameState;
 const FGameplayTag FMD_MerchantData::DataFieldKey = MDGameplayTags::Save_Data_Merchant;
 const FGameplayTag FMD_WorldData::DataFieldKey = MDGameplayTags::Save_Data_World;
+
+bool FMD_TrashBinRecord::IsStructurallyValid() const
+{
+	const UClass* const SavedBinClass = TrashBinClass.Get();
+	const FVector SavedLocation = Transform.GetLocation();
+	const FVector SavedScale = Transform.GetScale3D();
+	const FQuat SavedRotation = Transform.GetRotation();
+	if (!StableBinId.IsValid()
+		|| SourceDispenserName.IsNone()
+		|| !IsValid(SavedBinClass)
+		|| !SavedBinClass->IsChildOf(AMD_TrashBin::StaticClass())
+		|| SavedLocation.ContainsNaN()
+		|| SavedScale.ContainsNaN()
+		|| SavedRotation.ContainsNaN()
+		|| !SavedRotation.IsNormalized()
+		|| LiquidRevision < 0)
+	{
+		return false;
+	}
+
+	FMD_TrashBinLiquidState SavedLiquidState;
+	SavedLiquidState.LiquidUnits = LiquidUnits;
+	SavedLiquidState.RewardUnits = RewardUnits;
+	SavedLiquidState.Revision = LiquidRevision;
+	if (!SavedLiquidState.IsValid(5.0))
+	{
+		return false;
+	}
+
+	const double SavedCarrierAmount =
+		FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(LiquidRecoveryLots);
+	const double SavedRewardUnits =
+		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(LiquidRecoveryLots);
+	return SavedCarrierAmount >= 0.0
+		&& SavedRewardUnits >= 0.0
+		&& FMath::IsNearlyEqual(
+			SavedCarrierAmount,
+			LiquidUnits,
+			1.0e-9)
+		&& FMath::IsNearlyEqual(
+			SavedRewardUnits,
+			RewardUnits,
+			1.0e-12);
+}
 
 bool FMD_GameStateData::IsStructurallyValid() const
 {
@@ -69,24 +115,46 @@ bool FMD_MerchantData::IsStructurallyValid() const
 
 bool FMD_WorldData::IsStructurallyValid() const
 {
-	// 오염 셀의 병렬 배열 길이가 다르면 잘못된 인덱스 복원을 수행하지 않기 위한 검사
-	for (const FMD_WallContaminationRecord& ContaminationRecord : WallContaminations)
+    TSet<FGuid> PendingBatchIds;
+    for (const FMD_ContaminationPendingDrop& Drop : PendingContaminationDrops)
+    {
+        if (!Drop.IsStructurallyValid() || PendingBatchIds.Contains(Drop.BatchId)) return false;
+        PendingBatchIds.Add(Drop.BatchId);
+    }
+
+	// 같은 stable ID가 두 record를 가리키거나 lot 합이 요약과 다르면 일부만 복원하지 않는다.
+	TSet<FGuid> SavedTrashBinIds;
+	for (const FMD_TrashBinRecord& TrashBinRecord : TrashBins)
 	{
-		const int32 CellCount = ContaminationRecord.CellIndices.Num();
-		const bool bTransferredAmountsValid =
-			ContaminationRecord.TransferredAmounts.IsEmpty()
-			|| ContaminationRecord.TransferredAmounts.Num() == CellCount;
-		const bool bTransferredPatternDensitiesValid =
-			ContaminationRecord.TransferredPatternDensities.IsEmpty()
-			|| ContaminationRecord.TransferredPatternDensities.Num() == CellCount;
-		if (ContaminationRecord.WallName.IsNone() == true
-			|| CellCount != ContaminationRecord.InitialAmounts.Num()
-			|| CellCount != ContaminationRecord.RemainingAmounts.Num()
-			|| bTransferredAmountsValid == false
-			|| bTransferredPatternDensitiesValid == false)
+		if (!TrashBinRecord.IsStructurallyValid()
+			|| SavedTrashBinIds.Contains(TrashBinRecord.StableBinId))
 		{
 			return false;
 		}
+		SavedTrashBinIds.Add(TrashBinRecord.StableBinId);
+	}
+
+	// 오염 셀의 병렬 배열 길이가 다르면 잘못된 인덱스 복원을 수행하지 않기 위한 검사
+	for (const FMD_WallContaminationRecord& ContaminationRecord : WallContaminations)
+	{
+        int32 MaximumCellCount = FMD_ScrapeSurfaceLayout::LegacyMaximumCombinedCellCount;
+        if (ContaminationRecord.WallName.IsNone()
+            || !FMD_ScrapeSurfaceLayout::IsLayoutMetadataValid(
+                ContaminationRecord.LayoutVersion, ContaminationRecord.LayoutId,
+                ContaminationRecord.GridDimensions)
+            || (ContaminationRecord.LayoutVersion == 1
+                && !FMD_ScrapeSurfaceLayout::IsCarrierScaleValid(ContaminationRecord.CarrierScale)))
+        {
+            return false;
+        }
+        if (ContaminationRecord.GridDimensions != FIntPoint::ZeroValue)
+        {
+            int32 CellsPerFace = 0;
+            if (!FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
+                ContaminationRecord.GridDimensions, CellsPerFace, MaximumCellCount)) return false;
+            if (ContaminationRecord.LayoutVersion == 1) MaximumCellCount = CellsPerFace;
+        }
+        if (!ContaminationRecord.ValidateCellIndices(MaximumCellCount)) return false;
 	}
 
 	// 배치기 식별자가 없는 따개비 기록을 다른 액터에 적용하지 않기 위한 검사
@@ -99,6 +167,23 @@ bool FMD_WorldData::IsStructurallyValid() const
 	}
 
 	return true;
+}
+
+bool FMD_GameData::Serialize(FArchive& Ar)
+{
+    if ((!Ar.IsLoading() && !Ar.IsSaving()) || Ar.WantBinaryPropertySerialization())
+    {
+        StaticStruct()->SerializeBin(Ar, reinterpret_cast<uint8*>(this));
+        return true;
+    }
+    const int64 Start = Ar.Tell();
+    StaticStruct()->SerializeTaggedProperties(Ar, reinterpret_cast<uint8*>(this), StaticStruct(), nullptr);
+    if (Ar.IsLoading() && !Ar.IsError() && Ar.GetArchiveName() == TEXT("MDLegacySlotIndex"))
+    {
+        LegacyDataOffset = Start;
+        LegacyDataBytes = Ar.Tell() - Start;
+    }
+    return true;
 }
 
 bool FMD_GameData::IsEmpty() const
@@ -180,6 +265,9 @@ bool FMD_GameData::MigrateToCurrentVersion()
 	// 구형 레코드는 새 유효성 플래그가 false로 역직렬화되며, 복원 시 기존
 	// PlacementSeed를 사용하므로 별도의 배열 변환이 필요 없다.
 
+	// 버전 8은 오염 주소의 bake ID와 격자 크기를 추가한다. 이전 기록은
+	// LayoutVersion=0 / invalid ID / zero grid를 유지하여 MeshUV에 적용하지 않는다.
+	// CellIndices는 이전부터 int32 UPROPERTY이므로 배열 원소 폭은 바뀌지 않는다.
 	SchemaVersion = CurrentSchemaVersion;
 	return true;
 }
@@ -187,7 +275,7 @@ bool FMD_GameData::MigrateToCurrentVersion()
 bool FMD_GameData::IsValidForLoad() const
 {
 	// 슬롯 식별자와 프로젝트 맵 경로가 없으면 안전한 적용 대상을 결정할 수 없으므로 거부하는 검사
-	if (SchemaVersion != CurrentSchemaVersion || IsEmpty() == true || MapPackagePath.StartsWith(TEXT("/Game/")) == false)
+	if (bIsSlotSummary || SchemaVersion != CurrentSchemaVersion || IsEmpty() == true || MapPackagePath.StartsWith(TEXT("/Game/")) == false)
 	{
 		return false;
 	}
@@ -209,8 +297,9 @@ bool FMD_GameData::IsValidForLoad() const
 	// 월드 필드는 초기 슬롯 호환을 위해 선택 사항이지만 존재하면 정확한 타입과 구조를 요구하는 검사
 	if (DataFields.Contains(FMD_WorldData::DataFieldKey) == true)
 	{
-		FMD_WorldData WorldData;
-		if (GetDataField(FMD_WorldData::DataFieldKey, WorldData) == false || WorldData.IsStructurallyValid() == false)
+        const FInstancedStruct& WorldField = DataFields.FindChecked(FMD_WorldData::DataFieldKey);
+        const FMD_WorldData* WorldData = WorldField.GetPtr<FMD_WorldData>();
+        if (!WorldData || !WorldData->IsStructurallyValid())
 		{
 			return false;
 		}

@@ -16,16 +16,9 @@ namespace
 		return Value;
 	}
 
-	float HashLatticePoint(
-		const int32 X,
-		const int32 Y,
-		const int32 Z,
-		const int32 Seed)
-	{
-		uint32 Hash = MixHash(static_cast<uint32>(Seed));
-		Hash = MixHash(Hash ^ static_cast<uint32>(X));
-		Hash = MixHash(Hash ^ static_cast<uint32>(Y));
-		Hash = MixHash(Hash ^ static_cast<uint32>(Z));
+    float HashLatticeZ(const uint32 XYPrefix, const int32 Z)
+    {
+        const uint32 Hash = MixHash(XYPrefix ^ static_cast<uint32>(Z));
 		return static_cast<float>(Hash & 0x00FFFFFFu)
 			/ static_cast<float>(0x00FFFFFFu);
 	}
@@ -59,21 +52,31 @@ float FMD_ContaminationNoise::ValueNoise3D(
 	const float ZAlpha = SmoothInterpolationAlpha(
 		static_cast<float>(Position.Z - static_cast<double>(Z0)));
 
+    // Reuse identical integer prefixes of the eight corners. Preserve the exact original
+    // hash, float conversion and interpolation order: 1 seed + 2 X + 4 XY + 8 XYZ mixes.
+    const uint32 SeedPrefix = MixHash(static_cast<uint32>(Seed));
+    const uint32 X0Prefix = MixHash(SeedPrefix ^ static_cast<uint32>(X0));
+    const uint32 X1Prefix = MixHash(SeedPrefix ^ static_cast<uint32>(X1));
+    const uint32 XY00 = MixHash(X0Prefix ^ static_cast<uint32>(Y0));
+    const uint32 XY10 = MixHash(X1Prefix ^ static_cast<uint32>(Y0));
+    const uint32 XY01 = MixHash(X0Prefix ^ static_cast<uint32>(Y1));
+    const uint32 XY11 = MixHash(X1Prefix ^ static_cast<uint32>(Y1));
+
 	const float X00 = FMath::Lerp(
-		HashLatticePoint(X0, Y0, Z0, Seed),
-		HashLatticePoint(X1, Y0, Z0, Seed),
+		HashLatticeZ(XY00, Z0),
+		HashLatticeZ(XY10, Z0),
 		XAlpha);
 	const float X10 = FMath::Lerp(
-		HashLatticePoint(X0, Y1, Z0, Seed),
-		HashLatticePoint(X1, Y1, Z0, Seed),
+		HashLatticeZ(XY01, Z0),
+		HashLatticeZ(XY11, Z0),
 		XAlpha);
 	const float X01 = FMath::Lerp(
-		HashLatticePoint(X0, Y0, Z1, Seed),
-		HashLatticePoint(X1, Y0, Z1, Seed),
+		HashLatticeZ(XY00, Z1),
+		HashLatticeZ(XY10, Z1),
 		XAlpha);
 	const float X11 = FMath::Lerp(
-		HashLatticePoint(X0, Y1, Z1, Seed),
-		HashLatticePoint(X1, Y1, Z1, Seed),
+		HashLatticeZ(XY01, Z1),
+		HashLatticeZ(XY11, Z1),
 		XAlpha);
 	const float Y0Value = FMath::Lerp(X00, X10, YAlpha);
 	const float Y1Value = FMath::Lerp(X01, X11, YAlpha);

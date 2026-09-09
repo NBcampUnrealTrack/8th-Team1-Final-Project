@@ -10,6 +10,7 @@
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
+#include "Component/Equipment/MD_FoamGunComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Comfort/MD_ComfortComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
@@ -47,11 +48,6 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "UI/Customization/MD_NameTagWidget.h"
-
-namespace
-{
-	constexpr int32 ScrapeFocusInputPriority = 100;
-}
 
 // Sets default values
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
@@ -131,6 +127,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 
 	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
 
+	FoamGunComponent = CreateDefaultSubobject<UMD_FoamGunComponent>(TEXT("FoamGunComponent"));
+
 	OxygenComponent = CreateDefaultSubobject<UMD_OxygenComponent>(TEXT("OxygenComponent"));
 
 	// 캐릭터 머리 위에 원격 플레이어의 이름표를 배치한다.
@@ -165,39 +163,9 @@ void AMD_Character::GetScrapeAnimationAim(
 	FRotator& AimDelta,
 	bool& Active)
 {
+	// 3인칭은 포인터 접점을 향해 본을 꺾지 않고 장착 애니메이션만 재생한다.
 	AimDelta = FRotator::ZeroRotator;
 	Active = false;
-	if (!IsValid(ScrapeToolComponent))
-	{
-		return;
-	}
-
-	FVector ContactWorldLocation = FVector::ZeroVector;
-	if (!ScrapeToolComponent->GetCurrentScrapeContact(ContactWorldLocation))
-	{
-		return;
-	}
-
-	const FVector HandWorldLocation = IsValid(GetMesh())
-		? GetMesh()->GetSocketLocation(TEXT("hand_r"))
-		: GetActorLocation();
-	const FVector AimWorldDirection =
-		(ContactWorldLocation - HandWorldLocation).GetSafeNormal();
-	if (AimWorldDirection.IsNearlyZero())
-	{
-		return;
-	}
-
-	const FQuat CurrentHandAim = IsValid(ThirdPersonToolMesh)
-		? (ThirdPersonToolMesh->GetSocketLocation(TEXT("Blade_Tip"))
-			- HandWorldLocation).GetSafeNormal().ToOrientationQuat()
-		: GetActorForwardVector().ToOrientationQuat();
-	AimDelta = (AimWorldDirection.ToOrientationQuat()
-		* CurrentHandAim.Inverse()).Rotator();
-	// 소유 클라이언트는 예측 상태를, 서버와 simulated proxy는 서버 확정 상태를 쓴다.
-	// bIsScraping은 non-owner에게만 복제되므로 FocusReady 접촉만으로 원격 긁기
-	// 포즈가 켜지지 않는다.
-	Active = ScrapeToolComponent->IsScraping();
 }
 
 void AMD_Character::UpdateScrapeAnimationBlade(
@@ -205,188 +173,46 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 	const double DeltaTime,
 	FRotator& Swing)
 {
+	// 3인칭 도구는 손 소켓의 기본 부착 자세만 사용한다. 긁는 방향은 몽타주가 표현한다.
+	(void)Active;
+	(void)DeltaTime;
 	Swing = FRotator::ZeroRotator;
-	FVector ContactWorldLocation = FVector::ZeroVector;
-	FVector BladeWorldDirection = FVector::ZeroVector;
-	const bool bHasContactPose = IsValid(ScrapeToolComponent)
-		&& ScrapeToolComponent->GetCurrentScrapeContactPose(
-			ContactWorldLocation,
-			BladeWorldDirection);
-
-	if (bHasContactPose)
-	{
-		BladeWorldDirection = BladeWorldDirection.GetSafeNormal();
-		if (bHasScrapeAnimationBladeDirection
-			&& FVector::DotProduct(
-				BladeWorldDirection,
-				LastScrapeAnimationBladeWorldDirection) < 0.0f)
-		{
-			BladeWorldDirection *= -1.0f;
-		}
-		LastScrapeAnimationBladeWorldDirection = BladeWorldDirection;
-		bHasScrapeAnimationBladeDirection = !BladeWorldDirection.IsNearlyZero();
-	}
-	else if (!Active)
-	{
-		LastScrapeAnimationBladeWorldDirection = FVector::ZeroVector;
-		bHasScrapeAnimationBladeDirection = false;
-	}
-
-	if (!Active)
-	{
-		// 긁기가 끝나면 유지 중이던 twist 를 버린다. 다음 스트로크가 다른 면에서
-		// 시작될 수 있으므로 이전 각을 물려받으면 안 된다.
-		LastScrapeAnimationTwistDegrees = 0.0f;
-		bHasScrapeAnimationTwist = false;
-	}
-
 	const UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
 		? EquipHotbarComponent->GetCurrentTool()
 		: nullptr;
-	const FRotator BaseToolRotation = IsValid(CurrentTool)
-		? CurrentTool->AttachOffset.Rotator()
-		: FRotator::ZeroRotator;
-	FRotator TargetToolRotation = BaseToolRotation;
-	if (Active
-		&& bHasScrapeAnimationBladeDirection
-		&& IsValid(GetMesh())
-		&& IsValid(ThirdPersonToolMesh))
-	{
-		UStaticMesh* const ToolMesh = ThirdPersonToolMesh->GetStaticMesh();
-		if (ScrapeAnimationBladeReferenceMesh.Get() != ToolMesh)
-		{
-			ScrapeAnimationBladeReferenceMesh = ToolMesh;
-			ScrapeAnimationBladeReferenceDirection = FVector::ZeroVector;
-			ScrapeAnimationToolTwistAxis = FVector::ZeroVector;
-			if (IsValid(ToolMesh))
-			{
-				const FBoxSphereBounds MeshBounds = ToolMesh->GetBounds();
-				if (const UStaticMeshSocket* BladeTipSocket =
-					ToolMesh->FindSocket(TEXT("Blade_Tip")))
-				{
-					ScrapeAnimationToolTwistAxis =
-						(BladeTipSocket->RelativeLocation - MeshBounds.Origin)
-						.GetSafeNormal();
-				}
-				if (ScrapeAnimationToolTwistAxis.IsNearlyZero())
-				{
-					const FVector Extent = MeshBounds.BoxExtent;
-					ScrapeAnimationToolTwistAxis = Extent.X >= Extent.Y
-						&& Extent.X >= Extent.Z ? FVector::ForwardVector
-						: (Extent.Y >= Extent.Z
-							? FVector::RightVector
-							: FVector::UpVector);
-				}
-
-				// 헤라 메시의 가장 얇은 축은 blade depth(진행축)다. 손잡이
-				// 축과 평행한 후보는 제외해 그 축 주위의 twist만 계산한다.
-				const FVector Extent = MeshBounds.BoxExtent;
-				const FVector CandidateAxes[] = {
-					FVector::ForwardVector,
-					FVector::RightVector,
-					FVector::UpVector};
-				const float CandidateExtents[] = {Extent.X, Extent.Y, Extent.Z};
-				float BestExtent = TNumericLimits<float>::Max();
-				for (int32 AxisIndex = 0; AxisIndex < 3; ++AxisIndex)
-				{
-					if (FMath::Abs(FVector::DotProduct(
-							CandidateAxes[AxisIndex],
-							ScrapeAnimationToolTwistAxis)) > 0.8f)
-					{
-						continue;
-					}
-					if (CandidateExtents[AxisIndex] < BestExtent)
-					{
-						BestExtent = CandidateExtents[AxisIndex];
-						ScrapeAnimationBladeReferenceDirection =
-							CandidateAxes[AxisIndex];
-					}
-				}
-			}
-		}
-
-		// AttachOffset과 메시 기준축은 실제 도구 부착 소켓-local이다.
-		// 복제된 world blade 축도 같은 공간으로 옮긴 뒤에만 twist를 계산한다.
-		const FName ToolSocketName = ThirdPersonToolMesh->GetAttachSocketName()
-			.IsNone()
-			? ToolAttachSocketName
-			: ThirdPersonToolMesh->GetAttachSocketName();
-		const USceneComponent* const ToolAttachParent =
-			ThirdPersonToolMesh->GetAttachParent();
-		const FTransform ToolSocketWorldTransform = IsValid(ToolAttachParent)
-			? ToolAttachParent->GetSocketTransform(ToolSocketName, RTS_World)
-			: GetMesh()->GetSocketTransform(ToolSocketName, RTS_World);
-		const FVector SocketSpaceBladeDirection = ToolSocketWorldTransform
-			.InverseTransformVectorNoScale(
-				LastScrapeAnimationBladeWorldDirection)
-			.GetSafeNormal();
-		const FVector ToolForwardAxis = BaseToolRotation.RotateVector(
-			ScrapeAnimationToolTwistAxis).GetSafeNormal();
-		const FVector ReferenceBladeDirection = BaseToolRotation.RotateVector(
-			ScrapeAnimationBladeReferenceDirection).GetSafeNormal();
-		// 투영 전 길이를 남겨 둔다. 그 길이가 스트로크 방향과 날 긴 축이 이루는
-		// 각의 sin 이고, 특이점에 얼마나 가까운지를 재는 유일한 척도다.
-		const FVector ReferenceProjected = FVector::VectorPlaneProject(
-			ReferenceBladeDirection,
-			ToolForwardAxis);
-		const FVector TargetProjected = FVector::VectorPlaneProject(
-			SocketSpaceBladeDirection,
-			ToolForwardAxis);
-		// 스트로크가 날 축과 거의 평행하면 축 주위 twist 자체가 정의되지 않는다.
-		// 이 구간에서 계산을 시도하면 각이 요동치고, IsNearlyZero(1e-4)로만 걸러
-		// 내면 그 임계값에 닿기 훨씬 전부터 값이 흔들린 뒤 AttachOffset 으로
-		// 스냅한다. 예방용 가드다 — 실측(투영 0.95~0.98)에서는 이 구간에
-		// 들어가지 않았고, 확인된 떨림 원인은 GetToolAttachTransform 쪽이었다.
-		if (!ToolForwardAxis.IsNearlyZero()
-			&& ReferenceProjected.Size() > ScrapeBladeTwistMinProjection
-			&& TargetProjected.Size() > ScrapeBladeTwistMinProjection)
-		{
-			const FVector ReferenceOnBladePlane =
-				ReferenceProjected.GetSafeNormal();
-			const FVector TargetOnBladePlane = TargetProjected.GetSafeNormal();
-			const float CosAngle = FMath::Clamp(FVector::DotProduct(
-				ReferenceOnBladePlane,
-				TargetOnBladePlane), -1.0f, 1.0f);
-			const float SinAngle = FVector::DotProduct(
-				ToolForwardAxis,
-				FVector::CrossProduct(
-					ReferenceOnBladePlane,
-					TargetOnBladePlane));
-			LastScrapeAnimationTwistDegrees = FMath::RadiansToDegrees(
-				FMath::Atan2(SinAngle, CosAngle));
-			bHasScrapeAnimationTwist = true;
-		}
-
-		// 특이점 구간에서는 직전에 정의된 twist 를 그대로 유지한다. 되돌리지
-		// 않는 것이 요점이다 — 정의되지 않는 동안은 마지막 각이 가장 옳다.
-		if (bHasScrapeAnimationTwist && !ToolForwardAxis.IsNearlyZero())
-		{
-			const FQuat TwistRotation(ToolForwardAxis, FMath::DegreesToRadians(
-				LastScrapeAnimationTwistDegrees));
-			TargetToolRotation = (TwistRotation
-				* BaseToolRotation.Quaternion()).Rotator();
-			// ABP의 upperarm_r 입력은 기존에도 Pitch/Yaw swing이었다. 날 축의
-			// roll은 도구 메시가 맡고 팔에는 과도한 회전을 전달하지 않는다.
-			Swing = FRotator::ZeroRotator;
-		}
-	}
-
-	const float SafeDeltaTime = FMath::IsFinite(DeltaTime)
-		? static_cast<float>(FMath::Max(DeltaTime, 0.0))
-		: 0.0f;
-	ScrapeAnimationToolRelativeRotation = FMath::RInterpTo(
-		ScrapeAnimationToolRelativeRotation,
-		TargetToolRotation,
-		SafeDeltaTime,
-		10.0f);
+	const FTransform BaseAttachOffset = IsValid(CurrentTool)
+		? CurrentTool->AttachOffset
+		: FTransform::Identity;
+	ScrapeAnimationToolRelativeRotation = BaseAttachOffset.Rotator();
 	if (IsValid(ThirdPersonToolMesh))
 	{
-		// 회전만 쓰면 그립 소켓 보정이 빠진 값이 남는다. RefreshScrapeLoadVisual
-		// 과 같은 합성 결과를 써서 두 경로가 같은 값을 쓰게 한다.
-		ThirdPersonToolMesh->SetRelativeTransform(GetToolAttachTransform(
+		ThirdPersonToolMesh->SetRelativeTransform(GetToolAttachTransformFromOffset(
 			ThirdPersonToolMesh->GetStaticMesh(),
-			CurrentTool));
+			BaseAttachOffset));
 	}
+}
+
+void AMD_Character::GetScrapeAnimationHandIK(
+	const double DeltaTime,
+	FTransform& EffectorTransformComponentSpace,
+	FVector& JointTargetLocationComponentSpace,
+	float& Alpha,
+	bool& Active,
+	bool& Reachable,
+	bool& TeleportOrSnap,
+	int64& PoseGeneration)
+{
+	// 1인칭 헤라는 별도의 viewmodel transform이 직접 소유한다. 기존 ABP가
+	// 함수를 계속 호출해도 3인칭 팔에 접촉 IK가 중복 적용되지 않도록 항상
+	// 명시적인 비활성 값만 돌려준다.
+	(void)DeltaTime;
+	EffectorTransformComponentSpace = FTransform::Identity;
+	JointTargetLocationComponentSpace = FVector::ZeroVector;
+	Alpha = 0.0f;
+	Active = false;
+	Reachable = false;
+	TeleportOrSnap = false;
+	PoseGeneration = 0;
 }
 
 void AMD_Character::CancelScrapeInteraction()
@@ -535,7 +361,7 @@ void AMD_Character::ConfigureFirstPersonRendering()
 
 void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	RemoveScrapeFocusInputContext();
+	ResetScrapeFocusInputState();
 
 	if (IsValid(InteractionComponent))
 	{
@@ -556,7 +382,7 @@ void AMD_Character::Tick(float DeltaSeconds)
 	if (IsLocallyControlled() == true)
 	{
 		UpdateFirstPersonArms(DeltaSeconds);
-		UpdateFirstPersonToolTransform();
+		UpdateFirstPersonToolTransform(DeltaSeconds);
 	}
 }
 
@@ -645,13 +471,388 @@ void AMD_Character::BindFirstPersonArmsToBodyPose()
 	}
 }
 
-void AMD_Character::UpdateFirstPersonToolTransform()
+void AMD_Character::SetFirstPersonScrapeViewModelActive(const bool bActive)
+{
+	if (bFirstPersonScrapeViewModelActive == bActive)
+	{
+		return;
+	}
+
+	bFirstPersonScrapeViewModelActive = bActive;
+	if (bActive)
+	{
+		bFirstPersonArmsWereVisible = IsValid(FirstPersonMesh)
+			&& FirstPersonMesh->IsVisible();
+		if (IsValid(FirstPersonMesh))
+		{
+			// 독립 viewmodel 도구와 기존 팔/손 소켓이 서로 다른 위치에 보이지 않게
+			// Focus 동안 1인칭 팔만 감춘다. 3인칭 본체/도구에는 영향이 없다.
+			FirstPersonMesh->SetVisibility(false, true);
+		}
+		if (IsValid(FirstPersonToolMesh))
+		{
+			ScrapeViewModelWorldScale =
+				FirstPersonToolMesh->GetComponentTransform().GetScale3D();
+			if (ScrapeViewModelWorldScale.ContainsNaN()
+				|| ScrapeViewModelWorldScale.IsNearlyZero())
+			{
+				ScrapeViewModelWorldScale = FVector::OneVector;
+			}
+		}
+		LastScrapeViewModelPointerNormalized = IsValid(ScrapeToolComponent)
+			? ScrapeToolComponent->GetScrapeFocusPointerNormalized()
+			: FVector2D(0.5, 0.5);
+		ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+		LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+		ScrapePointerViewModelWorldRotation = FQuat::Identity;
+		ScrapeStrokeViewModelWorldRotation = FQuat::Identity;
+		bScrapeStrokeViewModelDirectionLocked = false;
+		bWasScrapingForViewModel = false;
+		bHasScrapePointerViewModelRotation = false;
+		bHasScrapeStrokeViewModelRotation = false;
+		return;
+	}
+
+	if (IsValid(FirstPersonMesh))
+	{
+		FirstPersonMesh->SetVisibility(bFirstPersonArmsWereVisible, true);
+	}
+	LastScrapeViewModelPointerNormalized = FVector2D(0.5, 0.5);
+	ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+	LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+	ScrapePointerViewModelWorldRotation = FQuat::Identity;
+	ScrapeStrokeViewModelWorldRotation = FQuat::Identity;
+	ScrapeViewModelWorldScale = FVector::OneVector;
+	bScrapeStrokeViewModelDirectionLocked = false;
+	bWasScrapingForViewModel = false;
+	bHasScrapePointerViewModelRotation = false;
+	bHasScrapeStrokeViewModelRotation = false;
+}
+
+bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
+{
+	if (!bFirstPersonScrapeViewModelActive
+		|| !IsValid(FirstPersonToolMesh)
+		|| !IsValid(ScrapeToolComponent))
+	{
+		return false;
+	}
+
+	UStaticMesh* const ToolMesh = FirstPersonToolMesh->GetStaticMesh();
+	if (!IsValid(ToolMesh))
+	{
+		return false;
+	}
+	const UStaticMeshSocket* BladeContactSocket =
+		ToolMesh->FindSocket(ScrapeBladeTipSocketName);
+	if (BladeContactSocket == nullptr
+		&& !ScrapeBladeContactFallbackSocketName.IsNone())
+	{
+		BladeContactSocket = ToolMesh->FindSocket(
+			ScrapeBladeContactFallbackSocketName);
+	}
+	if (BladeContactSocket == nullptr)
+	{
+		return false;
+	}
+
+	APlayerController* const PlayerController = Cast<APlayerController>(Controller);
+	if (!IsValid(PlayerController) || !PlayerController->IsLocalController())
+	{
+		return false;
+	}
+	int32 ViewportWidth = 0;
+	int32 ViewportHeight = 0;
+	PlayerController->GetViewportSize(ViewportWidth, ViewportHeight);
+	const FVector2D PointerNormalized =
+		ScrapeToolComponent->GetScrapeFocusPointerNormalized();
+	if (ViewportWidth <= 0
+		|| ViewportHeight <= 0
+		|| PointerNormalized.ContainsNaN())
+	{
+		return false;
+	}
+
+	const bool bScraping = ScrapeToolComponent->IsSurfaceScrapeVisualStrokeActive();
+	const bool bScrapeModeChanged = bScraping != bWasScrapingForViewModel;
+	const FVector2D PointerDeltaPixels = bScrapeModeChanged
+		? FVector2D(0.0, 0.0)
+		: FVector2D(
+			(PointerNormalized.X - LastScrapeViewModelPointerNormalized.X)
+				* static_cast<double>(ViewportWidth),
+			(PointerNormalized.Y - LastScrapeViewModelPointerNormalized.Y)
+				* static_cast<double>(ViewportHeight));
+	if (!bScraping)
+	{
+		if (bWasScrapingForViewModel)
+		{
+			// 포인터 추적 모드로 돌아갈 때 직전 stroke의 방향 상태를 버린다.
+			ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+			LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+			bScrapeStrokeViewModelDirectionLocked = false;
+		}
+	}
+	else
+	{
+		if (!bWasScrapingForViewModel)
+		{
+			// 새 stroke는 포인터 추적 중의 이동량이나 접선 상태를 상속하지 않는다.
+			ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+			LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+			bScrapeStrokeViewModelDirectionLocked = false;
+		}
+		if (!bScrapeStrokeViewModelDirectionLocked
+			&& PointerDeltaPixels.SizeSquared() >= 0.25)
+		{
+			ScrapeStrokeViewModelScreenDirection = PointerDeltaPixels.GetSafeNormal();
+		}
+	}
+	bWasScrapingForViewModel = bScraping;
+	LastScrapeViewModelPointerNormalized = PointerNormalized;
+
+	const float ScreenX = static_cast<float>(
+		PointerNormalized.X * static_cast<double>(ViewportWidth));
+	const float ScreenY = static_cast<float>(
+		PointerNormalized.Y * static_cast<double>(ViewportHeight));
+	FVector RayOrigin = FVector::ZeroVector;
+	FVector RayDirection = FVector::ZeroVector;
+	if (!PlayerController->DeprojectScreenPositionToWorld(
+			ScreenX,
+			ScreenY,
+			RayOrigin,
+			RayDirection)
+		|| RayOrigin.ContainsNaN()
+		|| RayDirection.ContainsNaN()
+		|| !RayDirection.Normalize())
+	{
+		return false;
+	}
+
+	FVector ViewLocation = FVector::ZeroVector;
+	FRotator ViewRotation = FRotator::ZeroRotator;
+	PlayerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	if (ViewLocation.ContainsNaN() || ViewRotation.ContainsNaN())
+	{
+		return false;
+	}
+	const FRotationMatrix ViewAxes(ViewRotation);
+	const FVector ViewForward = ViewAxes.GetScaledAxis(EAxis::X).GetSafeNormal();
+	const FVector ViewRight = ViewAxes.GetScaledAxis(EAxis::Y).GetSafeNormal();
+	const FVector ViewUp = ViewAxes.GetScaledAxis(EAxis::Z).GetSafeNormal();
+	const double RayPlaneDenominator = FVector::DotProduct(
+		RayDirection,
+		ViewForward);
+	if (ViewForward.IsNearlyZero()
+		|| ViewRight.IsNearlyZero()
+		|| ViewUp.IsNearlyZero()
+		|| RayPlaneDenominator <= UE_DOUBLE_SMALL_NUMBER)
+	{
+		return false;
+	}
+
+	const float ConfiguredDistanceCm = bScraping
+		? ScrapeStrokeViewModelDistanceCm
+		: ScrapeViewModelDistanceCm;
+	const FVector ViewPlanePoint = ViewLocation
+		+ ViewForward * static_cast<double>(
+			FMath::Max(ConfiguredDistanceCm, 10.0f));
+	const double RayDistance = FVector::DotProduct(
+		ViewPlanePoint - RayOrigin,
+		ViewForward) / RayPlaneDenominator;
+	if (!FMath::IsFinite(RayDistance) || RayDistance <= 0.0)
+	{
+		return false;
+	}
+	const FVector ContactWorldLocation = RayOrigin + RayDirection * RayDistance;
+
+	FVector ContactWorldTangent = bScraping
+		? FVector::ZeroVector
+		: ViewUp;
+	FMD_ScrapeVisualContactPose VisualContactPose;
+	if (bScraping
+		&& ScrapeToolComponent->GetScrapeVisualContactPose(VisualContactPose)
+		&& VisualContactPose.bDirectionLocked
+		&& VisualContactPose.bTangentValid)
+	{
+		// Component가 고정한 단일 gesture 축을 소비한다. 해당 pose 경로가
+		// 이미 0.01 normalized threshold와 180도 부호 안정화를 담당한다.
+		ContactWorldTangent = FVector::VectorPlaneProject(
+			VisualContactPose.StrokeWorldTangent,
+			-ViewForward).GetSafeNormal();
+		bScrapeStrokeViewModelDirectionLocked = !ContactWorldTangent.IsNearlyZero();
+	}
+	if (bScraping
+		&& ContactWorldTangent.IsNearlyZero()
+		&& bScrapeStrokeViewModelDirectionLocked)
+	{
+		// 잠깐 visual trace가 비어도 현재 stroke에서 이미 고정한 축은 유지한다.
+		ContactWorldTangent = LastScrapeStrokeViewModelStableWorldTangent;
+	}
+	if (bScraping && ContactWorldTangent.IsNearlyZero())
+	{
+		ContactWorldTangent = ViewRight * ScrapeStrokeViewModelScreenDirection.X
+			- ViewUp * ScrapeStrokeViewModelScreenDirection.Y;
+		ContactWorldTangent = FVector::VectorPlaneProject(
+			ContactWorldTangent,
+			-ViewForward).GetSafeNormal();
+	}
+	if (bScraping && ContactWorldTangent.IsNearlyZero())
+	{
+		ContactWorldTangent = LastScrapeStrokeViewModelStableWorldTangent;
+	}
+	if (ContactWorldTangent.IsNearlyZero())
+	{
+		ContactWorldTangent = ViewUp;
+	}
+	if (bScraping
+		&& !LastScrapeStrokeViewModelStableWorldTangent.IsNearlyZero()
+		&& !LastScrapeStrokeViewModelStableWorldTangent.ContainsNaN()
+		&& !ContactWorldTangent.ContainsNaN()
+		&& FVector::DotProduct(
+			LastScrapeStrokeViewModelStableWorldTangent,
+			ContactWorldTangent) < 0.0)
+	{
+		// 헤라 날의 진행 축은 180도 동치이므로, locked pose를 포함한
+		// 새 tangent를 직전 안정 축과 같은 부호로 맞춰 한 프레임 flip을 막는다.
+		ContactWorldTangent *= -1.0;
+	}
+	if (bScraping)
+	{
+		LastScrapeStrokeViewModelStableWorldTangent = ContactWorldTangent;
+	}
+
+	const FQuat TargetContactRotation = FRotationMatrix::MakeFromXZ(
+		-ViewForward,
+		ContactWorldTangent).ToQuat();
+	FQuat& CachedWorldRotation = bScraping
+		? ScrapeStrokeViewModelWorldRotation
+		: ScrapePointerViewModelWorldRotation;
+	bool& bHasCachedWorldRotation = bScraping
+		? bHasScrapeStrokeViewModelRotation
+		: bHasScrapePointerViewModelRotation;
+	FQuat ContactRotation = TargetContactRotation;
+	const double SafeDeltaSeconds = FMath::IsFinite(DeltaSeconds)
+		? FMath::Max(static_cast<double>(DeltaSeconds), 0.0)
+		: 0.0;
+	const double SmoothingSeconds = FMath::Max(
+		static_cast<double>(ScrapeViewModelRotationSmoothingSeconds),
+		0.0);
+	if (bHasCachedWorldRotation
+		&& SmoothingSeconds > UE_DOUBLE_SMALL_NUMBER)
+	{
+		const double RotationBlend = 1.0 - FMath::Exp(
+			-SafeDeltaSeconds / SmoothingSeconds);
+		ContactRotation = FQuat::Slerp(
+			CachedWorldRotation,
+			TargetContactRotation,
+			FMath::Clamp(RotationBlend, 0.0, 1.0)).GetNormalized();
+	}
+	CachedWorldRotation = ContactRotation;
+	bHasCachedWorldRotation = true;
+
+	// StaticMesh socket scale은 배치 계약에 쓰지 않는다. 현재 viewmodel world scale을
+	// 보존하면서 Blade_Tip/Blade_Contact의 역변환으로 접점을 정확히 맞춘다.
+	const FTransform BladeContactMeshLocal(
+		BladeContactSocket->RelativeRotation,
+		BladeContactSocket->RelativeLocation);
+	const FTransform DesiredContactWorld(
+		ContactRotation,
+		ContactWorldLocation,
+		ScrapeViewModelWorldScale);
+	const FRotator ConfiguredRotationOffset = bScraping
+		? ScrapeStrokeViewModelRotationOffset
+		: ScrapeViewModelRotationOffset;
+	const FRotator SafeRotationOffset = ConfiguredRotationOffset.ContainsNaN()
+		? FRotator::ZeroRotator
+		: ConfiguredRotationOffset;
+	const float ConfiguredScaleMultiplier = bScraping
+		? ScrapeStrokeViewModelScaleMultiplier
+		: ScrapeViewModelScaleMultiplier;
+	const bool bScaleMultiplierUsable =
+		FMath::IsFinite(ConfiguredScaleMultiplier)
+		&& ConfiguredScaleMultiplier > UE_KINDA_SMALL_NUMBER;
+	const float SafeScaleMultiplier = bScaleMultiplierUsable
+		? ConfiguredScaleMultiplier
+		: 1.0f;
+	const FTransform LocalVisualOffset(
+		SafeRotationOffset.Quaternion(),
+		FVector::ZeroVector,
+		FVector(SafeScaleMultiplier));
+	// VisualOffset은 contact frame 원점에서 적용되므로 회전·스케일을
+	// 바꿔도 Blade_Tip/Blade_Contact의 world location은 포인터 접점에 남는다.
+	FirstPersonToolMesh->SetWorldTransform(
+		BladeContactMeshLocal.Inverse()
+			* LocalVisualOffset
+			* DesiredContactWorld);
+	return true;
+}
+
+void AMD_Character::UpdateFirstPersonToolTransform(const float DeltaSeconds)
 {
 	const USkeletalMeshComponent* BodyMesh = GetMesh();
 	if (!IsValid(FirstPersonToolMesh) || !IsValid(FirstPersonMesh) || !IsValid(BodyMesh)
 		|| !IsLocallyControlled())
 	{
 		return;
+	}
+
+	const bool bWantsScrapeViewModel = IsScrapeToolEquipped()
+		&& IsValid(ScrapeToolComponent)
+		&& ScrapeToolComponent->IsScrapeFocusViewActive();
+	bool bScrapeViewModelStructurallyReady = false;
+	if (bWantsScrapeViewModel)
+	{
+		const UStaticMesh* const ToolMesh = FirstPersonToolMesh->GetStaticMesh();
+		const UStaticMeshSocket* BladeContactSocket = IsValid(ToolMesh)
+			? ToolMesh->FindSocket(ScrapeBladeTipSocketName)
+			: nullptr;
+		if (BladeContactSocket == nullptr
+			&& IsValid(ToolMesh)
+			&& !ScrapeBladeContactFallbackSocketName.IsNone())
+		{
+			BladeContactSocket = ToolMesh->FindSocket(
+				ScrapeBladeContactFallbackSocketName);
+		}
+
+		const FVector CurrentWorldScale =
+			FirstPersonToolMesh->GetComponentTransform().GetScale3D();
+		const bool bWorldScaleUsable = !CurrentWorldScale.ContainsNaN()
+			&& FMath::Abs(CurrentWorldScale.X) > UE_KINDA_SMALL_NUMBER
+			&& FMath::Abs(CurrentWorldScale.Y) > UE_KINDA_SMALL_NUMBER
+			&& FMath::Abs(CurrentWorldScale.Z) > UE_KINDA_SMALL_NUMBER;
+		const APlayerController* const PlayerController =
+			Cast<APlayerController>(Controller);
+		const FVector2D PointerNormalized =
+			ScrapeToolComponent->GetScrapeFocusPointerNormalized();
+		bScrapeViewModelStructurallyReady = BladeContactSocket != nullptr
+			&& bWorldScaleUsable
+			&& FirstPersonToolMesh->IsVisible()
+			&& IsValid(PlayerController)
+			&& PlayerController->IsLocalController()
+			&& !PointerNormalized.ContainsNaN();
+	}
+
+	SetFirstPersonScrapeViewModelActive(
+		bWantsScrapeViewModel && bScrapeViewModelStructurallyReady);
+	if (bWantsScrapeViewModel && bScrapeViewModelStructurallyReady)
+	{
+		if (UpdateFirstPersonScrapeViewModel(DeltaSeconds))
+		{
+			return;
+		}
+		const bool bHasCurrentModeRotation = ScrapeToolComponent->IsSurfaceScrapeVisualStrokeActive()
+			? bHasScrapeStrokeViewModelRotation
+			: bHasScrapePointerViewModelRotation;
+		if (bHasCurrentModeRotation)
+		{
+			// Viewport/deproject가 일시적으로 안 나오면 현재 모드에서 성공한
+			// viewmodel pose만 유지하고 다른 모드나 기본 소켓으로 튀지 않는다.
+			return;
+		}
+
+		// 첫 pose를 한 번도 만들지 못했으면 팔을 감춘 채 손 위치의
+		// 도구만 남기지 않고 즉시 기본 부착으로 fail-closed 한다.
+		SetFirstPersonScrapeViewModelActive(false);
 	}
 
 	if (!BodyMesh->DoesSocketExist(ToolAttachSocketName))
@@ -782,7 +983,7 @@ void AMD_Character::PossessedBy(AController* NewController)
 
 void AMD_Character::UnPossessed()
 {
-	RemoveScrapeFocusInputContext();
+	ResetScrapeFocusInputState();
 
 	if (IsValid(InteractionComponent))
 	{
@@ -796,8 +997,8 @@ void AMD_Character::UnPossessed()
 
 void AMD_Character::PawnClientRestart()
 {
-	// 입력 컴포넌트가 재생성되기 전에 기존 포커스와 오버레이를 정리한다.
-	RemoveScrapeFocusInputContext();
+	// 입력 컴포넌트가 재생성되기 전에 기존 포커스와 입력 소유권을 정리한다.
+	ResetScrapeFocusInputState();
 
 	Super::PawnClientRestart();
 
@@ -813,7 +1014,7 @@ void AMD_Character::PawnClientRestart()
 		}
 	}
 
-	RefreshScrapeFocusInputContext();
+	RefreshScrapeFocusInputState();
 }
 
 void AMD_Character::OnRep_PlayerState()
@@ -882,29 +1083,28 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		return;
 	}
 
-	EnsureScrapeFocusInputObjects();
-	if (IsValid(ScrapeFocusInputAction))
-	{
-		EIC->BindAction(
-			ScrapeFocusInputAction,
-			ETriggerEvent::Started,
-			this,
-			&AMD_Character::HandleScrapeFocusInputStarted);
-		EIC->BindAction(
-			ScrapeFocusInputAction,
-			ETriggerEvent::Completed,
-			this,
-			&AMD_Character::HandleScrapeFocusInputEnded);
-		EIC->BindAction(
-			ScrapeFocusInputAction,
-			ETriggerEvent::Canceled,
-			this,
-			&AMD_Character::HandleScrapeFocusInputEnded);
-	}
-
 	if (!IsValid(InputConfig))
 	{
 		return;
+	}
+
+	if (IsValid(InputConfig->ScrapeFocusAction))
+	{
+		EIC->BindAction(
+			InputConfig->ScrapeFocusAction,
+			ETriggerEvent::Started,
+			this,
+			&AMD_Character::HandleScrapeFocusToggleInput);
+		EIC->BindAction(
+			InputConfig->ScrapeFocusAction,
+			ETriggerEvent::Completed,
+			this,
+			&AMD_Character::HandleScrapeFocusReleasedInput);
+		EIC->BindAction(
+			InputConfig->ScrapeFocusAction,
+			ETriggerEvent::Canceled,
+			this,
+			&AMD_Character::HandleScrapeFocusReleasedInput);
 	}
 
 	EIC->BindAction(InputConfig->MoveAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleMoveInput);
@@ -973,11 +1173,12 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 		return;
 	}
 
-	const FVector2D MoveInput = Value.Get<FVector2D>();
-	if (MoveInput.SizeSquared() > FMath::Square(ScrapeFocusMoveInputDeadzone))
+	if (IsValid(ScrapeToolComponent) && ScrapeToolComponent->IsScrapeFocusViewActive())
 	{
-		HandleScrapeFocusInputEnded();
+		return;
 	}
+
+	const FVector2D MoveInput = Value.Get<FVector2D>();
 
 	// 사다리 타기 상태 확인
 	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
@@ -1051,7 +1252,8 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 {
-	HandleScrapeFocusInputEnded();
+	// 상호작용 시 해제도 헤라 포커스만. 폼건 조준은 RMB 릴리즈로만 풀린다
+	CancelActiveScrapeAbilityAndEndFocus();
 
 	if (IsValid(InteractionComponent))
 	{
@@ -1133,9 +1335,30 @@ void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 	ASC->CancelAbilities(&AbilityTags);
 }
 
-void AMD_Character::HandleScrapeFocusInputStarted()
+void AMD_Character::HandleScrapeFocusToggleInput()
 {
-	if (!IsScrapeToolEquipped() || !IsValid(ScrapeToolComponent))
+	// 폼건: RMB를 누르는 동안 조준 궤적 표시
+	if (IsFoamGunEquipped())
+	{
+		if (IsValid(FoamGunComponent))
+		{
+			FoamGunComponent->SetAimHeld(true);
+		}
+		return;
+	}
+
+	if (!IsValid(ScrapeToolComponent))
+	{
+		return;
+	}
+
+	if (ScrapeToolComponent->IsScrapeFocusViewActive())
+	{
+		CancelActiveScrapeAbilityAndEndFocus();
+		return;
+	}
+
+	if (!IsScrapeToolEquipped())
 	{
 		return;
 	}
@@ -1143,8 +1366,23 @@ void AMD_Character::HandleScrapeFocusInputStarted()
 	ScrapeToolComponent->TryBeginScrapeFocus();
 }
 
+void AMD_Character::HandleScrapeFocusReleasedInput()
+{
+	// 폼건 조준만 홀드 방식이라 release에서 정리한다. 헤라 포커스는 토글이므로 여기서 건드리지 않는다
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(false);
+	}
+}
+
 void AMD_Character::HandleScrapeFocusInputEnded()
 {
+	// 도구 전환·컨텍스트 제거 경로에서도 호출되므로 조준 상태를 항상 정리한다
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(false);
+	}
+
 	CancelActiveScrapeAbilityAndEndFocus();
 }
 
@@ -1424,25 +1662,8 @@ void AMD_Character::CancelActiveScrapeAbilityAndEndFocus()
 	{
 		ScrapeToolComponent->EndScrapeFocus();
 	}
-}
-
-void AMD_Character::EnsureScrapeFocusInputObjects()
-{
-	if (IsValid(ScrapeFocusInputAction) && IsValid(ScrapeFocusInputMappingContext))
-	{
-		return;
-	}
-
-	ScrapeFocusInputAction = NewObject<UInputAction>(this, NAME_None, RF_Transient);
-	ScrapeFocusInputMappingContext = NewObject<UInputMappingContext>(this, NAME_None, RF_Transient);
-	if (!IsValid(ScrapeFocusInputAction) || !IsValid(ScrapeFocusInputMappingContext))
-	{
-		return;
-	}
-
-	ScrapeFocusInputAction->ValueType = EInputActionValueType::Boolean;
-	ScrapeFocusInputAction->bConsumeInput = true;
-	ScrapeFocusInputMappingContext->MapKey(ScrapeFocusInputAction, EKeys::RightMouseButton);
+	SetFirstPersonScrapeViewModelActive(false);
+	UpdateFirstPersonToolTransform(0.0f);
 }
 
 bool AMD_Character::IsScrapeToolEquipped() const
@@ -1455,6 +1676,47 @@ bool AMD_Character::IsScrapeToolEquipped() const
 	const UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
 	return IsValid(CurrentTool)
 		&& CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_Scrape);
+}
+
+bool AMD_Character::IsFoamGunEquipped() const
+{
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return false;
+	}
+
+	const UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+	return IsValid(CurrentTool)
+		&& CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Foam);
+}
+
+bool AMD_Character::CanUnloadScrapeLoad() const
+{
+	return IsValid(ScrapeToolComponent)
+		&& IsScrapeToolEquipped()
+		&& !FMath::IsNearlyZero(ScrapeToolComponent->GetScrapeLoad());
+}
+
+bool AMD_Character::CanUnloadScrapeLoadForRequest(const float RequestedAmount) const
+{
+	if (!CanUnloadScrapeLoad())
+	{
+		return false;
+	}
+
+	return UMD_ScrapeToolComponent::CalculateActualScrapeLoadRemoval(
+		ScrapeToolComponent->GetScrapeLoad(),
+		RequestedAmount) > 0.0f;
+}
+
+float AMD_Character::TryUnloadScrapeLoad(const float RequestedAmount)
+{
+	if (!HasAuthority() || !CanUnloadScrapeLoadForRequest(RequestedAmount))
+	{
+		return 0.0f;
+	}
+
+	return ScrapeToolComponent->RemoveScrapeLoad(RequestedAmount);
 }
 
 UEnhancedInputLocalPlayerSubsystem* AMD_Character::GetEnhancedInputSubsystem() const
@@ -1471,64 +1733,23 @@ UEnhancedInputLocalPlayerSubsystem* AMD_Character::GetEnhancedInputSubsystem() c
 		: nullptr;
 }
 
-void AMD_Character::RefreshScrapeFocusInputContext()
+void AMD_Character::RefreshScrapeFocusInputState()
 {
-	UEnhancedInputLocalPlayerSubsystem* Subsystem = GetEnhancedInputSubsystem();
-	if (!IsValid(Subsystem))
+	UMD_ToolDefinition* const CurrentTool = IsValid(EquipHotbarComponent)
+		? EquipHotbarComponent->GetCurrentTool()
+		: nullptr;
+	if (ScrapeFocusInputTool.Get() != CurrentTool)
 	{
-		// 원격 Pawn/전용 서버에는 로컬 mapping context가 없다. gameplay Focus 정리는
-		// 장비 identity가 실제로 바뀐 HandleHotbarChanged 또는 명시적 종료 사건이 맡는다.
-		return;
+		// 같은 도구의 수량 변경은 유지하고, 실제 장비 identity 변경만 정리한다.
+		CancelActiveScrapeAbilityAndEndFocus();
 	}
-	if (!IsScrapeToolEquipped())
-	{
-		RemoveScrapeFocusInputContext();
-		return;
-	}
-
-	EnsureScrapeFocusInputObjects();
-	if (!IsValid(ScrapeFocusInputAction) || !IsValid(ScrapeFocusInputMappingContext))
-	{
-		RemoveScrapeFocusInputContext();
-		return;
-	}
-
-	if (bScrapeFocusInputContextAdded && ScrapeFocusInputSubsystem.Get() != Subsystem)
-	{
-		RemoveScrapeFocusInputContext();
-	}
-
-	if (bScrapeFocusInputContextAdded)
-	{
-		return;
-	}
-
-	// 기본 옵션은 이미 눌린 키를 놓을 때까지 무시한다. 장착 순간 RMB 홀드로 자동 진입하지 않는다.
-	const FModifyContextOptions Options;
-	Subsystem->AddMappingContext(ScrapeFocusInputMappingContext, ScrapeFocusInputPriority, Options);
-	ScrapeFocusInputSubsystem = Subsystem;
-	ScrapeFocusContextTool = EquipHotbarComponent->GetCurrentTool();
-	bScrapeFocusInputContextAdded = true;
+	ScrapeFocusInputTool = CurrentTool;
 }
 
-void AMD_Character::RemoveScrapeFocusInputContext()
+void AMD_Character::ResetScrapeFocusInputState()
 {
 	CancelActiveScrapeAbilityAndEndFocus();
-
-	if (bScrapeFocusInputContextAdded)
-	{
-		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ScrapeFocusInputSubsystem.Get())
-		{
-			if (IsValid(ScrapeFocusInputMappingContext))
-			{
-				Subsystem->RemoveMappingContext(ScrapeFocusInputMappingContext);
-			}
-		}
-	}
-
-	ScrapeFocusInputSubsystem.Reset();
-	ScrapeFocusContextTool.Reset();
-	bScrapeFocusInputContextAdded = false;
+	ScrapeFocusInputTool.Reset();
 }
 
 void AMD_Character::HandleHotbarChanged()
@@ -1536,15 +1757,7 @@ void AMD_Character::HandleHotbarChanged()
 	UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
 		? EquipHotbarComponent->GetCurrentTool()
 		: nullptr;
-	const bool bFocusToolChanged = bScrapeFocusInputContextAdded
-		&& ScrapeFocusContextTool.Get() != CurrentTool;
-	const bool bActiveScrapeToolChanged = ActiveScrapeAbilityHandle.IsValid()
-		&& ActiveScrapeAbilityTool.Get() != CurrentTool;
-	if (bFocusToolChanged || bActiveScrapeToolChanged)
-	{
-		// 컨텍스트 제거만으로는 입력 해제가 보장되지 않으므로 Ability와 Focus를 함께 정리한다.
-		RemoveScrapeFocusInputContext();
-	}
+	RefreshScrapeFocusInputState();
 	if (HasAuthority()
 		&& IsValid(CurrentTool)
 		&& CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_Scrape)
@@ -1563,7 +1776,6 @@ void AMD_Character::HandleHotbarChanged()
 	}
 
 	RefreshToolMesh();
-	RefreshScrapeFocusInputContext();
 
 	if (IsValid(EquipHotbarComponent))
 	{
@@ -1586,6 +1798,8 @@ void AMD_Character::RefreshToolMesh()
 		return;
 	}
 
+	// 메시 교체 전에 이전 헤라 소켓/scale을 잡고 있던 독립 viewmodel 상태를 버린다.
+	SetFirstPersonScrapeViewModelActive(false);
 	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
 
 	// 도구별 소켓이 지정돼 있으면 그 소켓, 없으면 기본 소켓
@@ -1626,11 +1840,6 @@ void AMD_Character::RefreshToolMesh()
 		? CurrentTool->AttachOffset
 		: FTransform::Identity;
 	ScrapeAnimationToolRelativeRotation = AttachOffset.Rotator();
-	ScrapeAnimationBladeReferenceDirection = FVector::ZeroVector;
-	ScrapeAnimationToolTwistAxis = FVector::ZeroVector;
-	ScrapeAnimationBladeReferenceMesh.Reset();
-	LastScrapeAnimationBladeWorldDirection = FVector::ZeroVector;
-	bHasScrapeAnimationBladeDirection = false;
 
 	// 상대 트랜스폼 자체는 RefreshScrapeLoadVisual 에서 준다. 오염 적재 단계에 따라
 	// 메시가 바뀌는데, 그립 소켓은 메시마다 다를 수 있어 최종 메시가 정해진 뒤에
@@ -1688,8 +1897,17 @@ void AMD_Character::RefreshScrapeLoadVisual()
 	ThirdPersonToolMesh->SetVisibility(bShowTool && bHasThirdPersonSocket, true);
 
 	const FTransform ToolTransform = GetToolAttachTransform(NewToolMesh, CurrentTool);
-	FirstPersonToolMesh->SetRelativeTransform(ToolTransform);
 	ThirdPersonToolMesh->SetRelativeTransform(ToolTransform);
+	if (bFirstPersonScrapeViewModelActive)
+	{
+		// 오염 적재 메시가 바뀌어도 같은 프레임에 새 소켓을
+		// 포인터에 다시 맞춘다. 구조적 요건이 깨지면 기본 부착으로 복귀한다.
+		UpdateFirstPersonToolTransform(0.0f);
+	}
+	else
+	{
+		FirstPersonToolMesh->SetRelativeTransform(ToolTransform);
+	}
 }
 
 FTransform AMD_Character::GetToolAttachTransform(
@@ -1702,6 +1920,14 @@ FTransform AMD_Character::GetToolAttachTransform(
 	// 재사용하면 RefreshScrapeLoadVisual 이 같은 값을 되돌리는 것과 경쟁해
 	// 프레임마다 AttachOffset 으로 튄다.
 	Offset.SetRotation(ScrapeAnimationToolRelativeRotation.Quaternion());
+	return GetToolAttachTransformFromOffset(ToolMesh, Offset);
+}
+
+FTransform AMD_Character::GetToolAttachTransformFromOffset(
+	const UStaticMesh* ToolMesh,
+	const FTransform& AttachOffset) const
+{
+	const FTransform Offset = AttachOffset;
 
 	if (!IsValid(ToolMesh) || ToolGripSocketName.IsNone())
 	{

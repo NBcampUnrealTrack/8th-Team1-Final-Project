@@ -278,7 +278,9 @@ UTexture2D* UMD_CharacterCustomizationSubsystem::CreateFaceTextureFromPNG(
 	Texture->Rename(nullptr, this);
 	Texture->NeverStream = true;
 	Texture->SRGB = true;
+#if WITH_EDITORONLY_DATA
 	Texture->MipGenSettings = TMGS_NoMipmaps;
+#endif
 	Texture->CompressionSettings = TC_EditorIcon;
 	Texture->Filter = TF_Bilinear;
 	Texture->AddressX = TA_Clamp;

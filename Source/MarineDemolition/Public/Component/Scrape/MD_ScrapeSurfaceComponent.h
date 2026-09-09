@@ -1,7 +1,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Gameplay/Scrape/MD_ScrapeCarrierWeights.h"
+#include "Gameplay/Scrape/MD_ScrapeMaskPixels.h"
+#include "Gameplay/Scrape/MD_ScrapeCellView.h"
+#include "Gameplay/Scrape/MD_ScrapePagedState.h"
 #include "Components/ActorComponent.h"
+#include "Component/Scrape/MD_ContaminationSolidVisualComponent.h"
+#include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
 #include "Gameplay/Scrape/MD_ScrapeReplicationCodec.h"
 #include "Net/Serialization/FastArraySerializer.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
@@ -13,6 +19,9 @@ class UMaterialInterface;
 class UPrimitiveComponent;
 class UStaticMeshComponent;
 class UTexture2D;
+class UMD_ScrapeToolComponent;
+class UMD_ScrapeMeshUVData;
+struct FMD_ScrapeMeshUVStroke;
 struct FMD_ScrapeDecalFaceLayout;
 class AMD_ContaminationItem;
 class UMD_ScrapeSurfaceComponent;
@@ -35,7 +44,7 @@ struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 	}
 
 	FMD_ReplicatedScrapeCellState(
-		const uint16 InEncodedCellIndex,
+		const uint32 InEncodedCellIndex,
 		const uint8 InQuantizedInitialContamination,
 		const uint8 InQuantizedRemainingContamination,
 		const uint8 InQuantizedTransferredContamination = 0,
@@ -88,7 +97,7 @@ struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellState
 	}
 
 	UPROPERTY()
-	uint16 EncodedCellIndex;
+	uint32 EncodedCellIndex;
 
 	UPROPERTY()
 	uint8 QuantizedInitialContamination;
@@ -121,15 +130,7 @@ struct MARINEDEMOLITION_API FMD_ReplicatedScrapeCellStateArray
 	GENERATED_BODY()
 
 public:
-	bool NetDeltaSerialize(FNetDeltaSerializeInfo& DeltaParameters)
-	{
-		return FastArrayDeltaSerialize<
-			FMD_ReplicatedScrapeCellState,
-			FMD_ReplicatedScrapeCellStateArray>(
-				Items,
-				DeltaParameters,
-				*this);
-	}
+	bool NetDeltaSerialize(FNetDeltaSerializeInfo& DeltaParameters);
 
 	void SetOwner(UMD_ScrapeSurfaceComponent* InOwner);
 	void SetCellState(int32 CellIndex);
@@ -168,6 +169,34 @@ struct TStructOpsTypeTraits<FMD_ReplicatedScrapeCellStateArray>
 	{
 		WithNetDeltaSerializer = true
 	};
+};
+
+/**
+ * 서버가 성공한 한 번의 긁기 뒤 현재 렌더 peer에만 보내는 작은 절대 상태 묶음.
+ *
+ * FastArray와 ScrapeLoad property가 저장/JIP/손실 복구의 정본이다. 이 값은
+ * 같은 서버 확정 상태를 그 복제보다 먼저 화면에 반영할 뿐 gameplay 권위를
+ * 가지지 않는다.
+ */
+USTRUCT()
+struct MARINEDEMOLITION_API FMD_ScrapeAuthoritativeVisualDelta
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	TObjectPtr<UMD_ScrapeSurfaceComponent> Surface = nullptr;
+
+	/** Surface 전체에서 증가하는 서버 확정 시각 revision. 0은 무효다. */
+	UPROPERTY()
+	uint32 SurfaceVisualRevision = 0;
+
+	/** 바뀐 셀의 최종 1/255 상태. 상대 제거량이 아니라 절대값이다. */
+	UPROPERTY()
+	TArray<FMD_ReplicatedScrapeCellState> CellStates;
+
+	/** 같은 transaction이 끝난 뒤 서버의 절대 Tool Load. */
+	UPROPERTY()
+	float ScrapeLoadAfter = 0.0f;
 };
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
@@ -240,6 +269,22 @@ public:
 		return bContaminationSurfaceInitialized;
 	}
 
+    /** Rebuilds only the derived solid display; gameplay state is preserved. */
+    UFUNCTION(BlueprintCallable, Category="MD|Scrape Surface|Solid")
+    void RefreshSolidContaminationVisual();
+    /** Explicit preview avoids rebuilding large meshes on selection or every construction run. */
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="MD|Scrape Surface|Solid")
+    void PreviewSolidContamination();
+    UFUNCTION(BlueprintCallable, CallInEditor, Category="MD|Scrape Surface|Solid")
+    void ClearSolidContaminationPreview();
+    UFUNCTION(BlueprintPure, Category="MD|Scrape Surface|Solid")
+    FString GetSolidContaminationStats() const;
+    /** GT-only candidate query before Actor BeginPlay; late changes retain the synchronous fallback. */
+    bool TryGetSolidPrewarmInputs(const UMD_ScrapeMeshUVData*& OutData,
+        FVector& OutWallScale, FMD_ContaminationSolidSettings& OutSettings);
+    bool TryGetSolidVisualWorldContact(const FVector2D& SurfacePositionCm,
+        const FVector& BaseWorldPosition, const FVector& WorldNormal, FVector& OutPosition) const;
+
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
 	UStaticMeshComponent* GetSurfaceMesh() const
 	{
@@ -302,75 +347,30 @@ public:
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec);
 
-	/** Stage3 ordered path가 tail을 확정할 때까지 완전 제거 이벤트만 유예한다. */
+	/** Tool이 제거 질량을 Load와 물리 원장에 커밋할 때까지 완료 이벤트를 유예한다. */
 	FMD_ScrapeResult ApplyLocalScrapeStrokeWithDeferredCompletion(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec);
 
-	/** 유예한 Stage3 제거와 pending dab이 모두 끝난 후 완료 전환을 확정한다. */
+	/** Tool의 질량 커밋이 끝난 후 유예한 완료 전환을 확정한다. */
 	void FinalizeLocalContaminationPath();
 
-	/** 서버에서 일반 제거 후 경로의 무작위 지점에 헤라 접촉면 모양으로 새 오염을 덧칠한다. */
+	/** Uniform residue over every actual blade contact. A positive ratio deposits without removing existing contamination. */
 	FMD_ScrapeResult ApplyLocalScrapeStrokeWithContaminationStamp(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec,
 		float StampRatio,
-		float& OutRemovedCleanRatioDelta);
-
-	FMD_ScrapeResult ApplyLocalScrapeStrokeWithContaminationStamp(
-		const FMD_ScrapeStroke& Stroke,
-		const FMD_ScrapeToolSpec& ToolSpec,
-		const FVector2D& StampPathStartPositionCm,
-		const FVector2D& StampPathAxis,
-		float StampRatio,
-		float StampCoverage,
-		float StampDepthCm,
-		float StampSpacingCm,
-		int32 StampPatternSeed,
 		float& OutRemovedCleanRatioDelta,
 		bool bDeferCompletionBroadcast = false);
-
-	/** 입력 종료 시 보호 거리 뒤에 남겨 둔 마지막 오염 도장 구간을 적용한다. */
-	void FlushLocalContaminationPaintTail(
-		const FMD_ScrapeStroke& FullPathStroke,
-		const FVector2D& StampPathAxis,
-		const FMD_ScrapeToolSpec& ToolSpec,
-		float StampRatio,
-		float StampCoverage,
-		float StampDepthCm,
-		float StampSpacingCm,
-		int32 StampPatternSeed);
-
-	/** ordered Stage3 path의 exact-position dab을 identity dedupe 후 적용한다. */
-	float ApplyLocalContaminationDab(
-		const FMD_ScrapeContaminationDab& Dab,
-		const FMD_ScrapeToolSpec& ToolSpec,
-		float StampAmount,
-		float StampDepthCm);
-
-	/** 현재 격자와 도구 footprint에 맞는 Stage3 causal delay 거리. */
-	double GetContaminationPaintProtectionDistanceCm(
-		const FMD_ScrapeToolSpec& ToolSpec,
-		float StampDepthCm) const;
 
 	/** Exact movement spacing used by the evaluator for this surface and tool. */
 	double GetScrapeSampleSpacingCm(
 		const FMD_ScrapeToolSpec& ToolSpec) const;
 
-	/** 표면·면 salt를 기존 Stage3 pattern seed에 결합한다. */
-	int32 ResolveContaminationPaintPatternSeed(
-		EMD_ScrapeSurfaceFace SurfaceFace,
-		int32 PatternSeed) const;
-
 	/** 스크래핑과 동일한 충돌 기준으로 앞면/뒷면만 판정한다. */
 	bool TryGetScrapeSurfaceFaceFromHit(
 		const FHitResult& Hit,
 		EMD_ScrapeSurfaceFace& OutSurfaceFace);
-
-	/** 지정한 앞/뒤 면의 월드 법선을 반환한다. 접촉 이펙트 방향 정렬용. */
-	bool TryGetScrapeSurfaceWorldNormal(
-		EMD_ScrapeSurfaceFace SurfaceFace,
-		FVector& OutWorldNormal);
 
 	bool TryGetScrapeSurfacePositionFromHit(
 		const FHitResult& Hit,
@@ -409,6 +409,23 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
 	float GetContaminationCleanRatio() const;
+
+	/** MeshUV addresses are atlas coordinates; physical work always resolves the baked surface. */
+	bool UsesMeshUVSurface() const;
+	const UMD_ScrapeMeshUVData* GetContaminationMeshUVData() const;
+	bool TryBuildMeshUVStroke(const FMD_ScrapeStroke& Stroke, FMD_ScrapeMeshUVStroke& OutStroke) const;
+	bool TryGetScrapeSurfaceWorldNormalAtPosition(const FVector2D& Position, EMD_ScrapeSurfaceFace Face, FVector& OutNormal) const;
+	bool IsContaminationCellActive(int32 CellIndex) const;
+    UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
+    bool GetContaminationCellState(int32 AtlasCellIndex, FMD_ScrapeSurfaceCell& OutCell) const;
+	double GetContaminationCellCarrierWeight(int32 CellIndex) const;
+	bool AreContaminationCarrierWeightsCurrent() const;
+	FVector GetContaminationCarrierWeightScale() const;
+	int32 GetContaminationActiveCellCount() const;
+	int32 GetContaminationLayoutVersion() const;
+	FGuid GetContaminationLayoutId() const;
+	FIntPoint GetContaminationGridDimensions() const;
+	bool CanRestoreContaminationLayout(int32 Version, const FGuid& LayoutId, const FIntPoint& Grid) const;
 	float GetContaminationCleanRatio(EMD_ScrapeSurfaceFace Face) const;
 
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
@@ -462,6 +479,7 @@ public:
 	FMD_OnScrapeSurfaceFullyRemoved OnContaminationFullyRemoved;
 
 protected:
+    virtual void BeginDestroy() override;
 	virtual void OnRegister() override;
 	virtual void OnUnregister() override;
 	virtual void BeginPlay() override;
@@ -582,12 +600,54 @@ protected:
 		Category = "MD|Scrape Surface|Geometry")
 	EMD_ScrapeSurfaceNormalAxis ContaminationSurfaceNormalAxis;
 
+	/**
+	 * 셀 좌표와 데칼 canonical UV가 함께 사용하는 표면 주소체계.
+	 * 기존 벽은 Planar를 유지한다. 양쪽이 원호이면 CylindricalArc, D자형처럼
+	 * 앞은 곡면이고 뒤는 평면이면 CurvedFrontPlanarBack을 사용한다.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly,
+		Category = "MD|Scrape Surface|Geometry")
+	FMD_ScrapeSurfaceMapping ContaminationSurfaceMapping;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape Surface")
 	FMD_ScrapeSettings ScrapeSettings;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "MD|Scrape Surface|Decal")
 	TObjectPtr<UMaterialInterface> ContaminationDecalMaterial;
+
+	/**
+	 * MeshUV 모드에서 메시 위에 직접 얹는 오염 머티리얼.
+	 *
+	 * 프로젝터가 없으므로 Deferred Decal Domain이 아니라 Surface Domain이며,
+	 * 마스크 주소는 TexCoord[MeshUVChannel]에서 나온다. 투영 상자, 각도 페이드,
+	 * 두께 게이트, 면 소유권 게이트를 모두 쓰지 않는다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
+		Category = "MD|Scrape Surface|Mesh UV")
+	TObjectPtr<UMaterialInterface> ContaminationMeshUVMaterial;
+
+	/** Bake in the data asset, then use its generated mesh on this component. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape Surface|MeshUV")
+	TObjectPtr<UMD_ScrapeMeshUVData> ContaminationMeshUVData;
+
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MD|Scrape Surface|Solid")
+    bool bSolidContaminationEnabled = true;
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MD|Scrape Surface|Solid")
+    FMD_ContaminationSolidSettings SolidContaminationSettings;
+    UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Scrape Surface|Solid")
+    TObjectPtr<UMaterialInterface> ContaminationSolidMaterial;
+
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Contamination|Solid")
+    TSoftObjectPtr<UMaterialInterface> DefaultContaminationSolidMaterial;
+    bool bLoadedDefaultSolidMaterial = false;
+    void ResolveDefaultSolidMaterial();
+    UPROPERTY(Transient)
+    TObjectPtr<UMD_ContaminationSolidVisualComponent> ContaminationSolidVisual;
+    bool bEditorSolidPreview = false;
+    bool ConfigureSolidContaminationVisual();
+    void ReleaseSolidContaminationVisual();
+    void UpdateSolidContaminationVisual(const TArray<FMD_ScrapeCellChange>& CellChanges);
 
 	/**
 	 * Optional artist override for the tiled grime color. Null keeps the
@@ -695,7 +755,10 @@ protected:
 
 private:
 	friend struct FMD_ReplicatedScrapeCellStateArray;
+	friend class UMD_ScrapeMeshUVSyncComponent;
+	friend class UMD_ScrapeMeshUVSyncSubsystem;
 	friend class AMD_CuttableWall;
+	friend class UMD_ScrapeToolComponent;
 
 	static constexpr int32 MaximumContaminationGridAxis = 256;
 	static constexpr float MaximumContaminationCellSizeForPaintCm = 2.5f;
@@ -703,8 +766,8 @@ private:
 	static constexpr float MinimumContaminationFaceNormalDot = 0.5f;
 	static constexpr float MinimumFullCoverageFaceNormalDot = 0.05f;
 	static constexpr int32 MaximumContaminationDecalPatchesPerFace = 32;
-	/** TASK 7의 최대 재전송 window보다 넓게 유지하는 bounded dedupe history. */
-	static constexpr int32 MaximumRecentContaminationStampIdentities = 4096;
+	static constexpr int32 MaximumLocalScrapePredictionBatches = 24;
+	static constexpr int32 MaximumLocalScrapePredictionStrokesPerBatch = 128;
 
 	bool HasAuthority() const;
 	void ResolveSurfaceMeshFromOwner();
@@ -717,16 +780,75 @@ private:
 	UFUNCTION()
 	void OnRep_ContaminationEnabled();
 
-	TSet<FMD_ScrapeContaminationStampIdentity>
-		AppliedContaminationStampIdentities;
-	TArray<FMD_ScrapeContaminationStampIdentity>
-		AppliedContaminationStampIdentityOrder;
-
-	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
+	// Dense planar state only; MeshUV reads shared initial state plus changed pages.
+    // Use GetContaminationCellState for logical atlas access, including unmodified cells.
+	// Never generate per-cell Details rows when a PIE/SIE wall instance is selected.
+	UPROPERTY(BlueprintReadOnly, Transient,
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
 	TArray<FMD_ScrapeSurfaceCell> ContaminationCells;
+    FMD_ScrapePagedState ContaminationPagedCells;
+    TSharedPtr<const FMD_ScrapeCellLayout> ContaminationCellLayout;
+    int32 GetContaminationStorageCellCount() const;
+    FMD_ScrapeSurfaceCell ReadContaminationStorageCell(int32 StorageIndex) const;
+    FMD_ScrapeSurfaceCell& EditContaminationStorageCell(int32 StorageIndex);
+    void SetContaminationStorageCell(int32 StorageIndex, const FMD_ScrapeSurfaceCell& Cell);
+    bool HasGeneratedInitialContamination(int32 StorageIndex) const;
+    float GetGeneratedInitialContamination(int32 StorageIndex) const;
+    bool HasLocalPredictedContaminationState() const;
+    int32 GetContaminationAtlasCellCount() const;
+    int32 GetContaminationStorageIndex(int32 AtlasCellIndex) const;
+    FMD_ScrapeCellView GetContaminationCellView();
+    FMD_ScrapeConstCellView GetContaminationCellView() const;
 
-	float PendingContaminationItemAmounts[2] = { 0.0f, 0.0f };
+	struct FLocalScrapePredictionStroke
+	{
+		FMD_ScrapeStroke Stroke;
+		FMD_ScrapeToolSpec ToolSpec;
+	};
+
+	struct FLocalScrapePrediction
+	{
+		TWeakObjectPtr<UMD_ScrapeToolComponent> Owner;
+		uint64 FocusSessionId = 0;
+		uint32 AimSequence = 0;
+		double CreatedSeconds = 0.0;
+		TArray<FLocalScrapePredictionStroke> Strokes;
+		TMap<int32, FMD_ScrapeSurfaceCell> PredictedFinalCellStates;
+	};
+
+	TArray<FLocalScrapePrediction> LocalScrapePredictions;
+	TArray<FMD_ScrapeSurfaceCell> LocalPredictedContaminationCells;
+    FMD_ScrapePagedState LocalPredictedPagedCells;
+	TArray<FMD_ScrapeSurfaceCell> LocalScrapePredictionFaceScratch;
+	FMD_ScrapeEvaluationScratch ScrapeEvaluationScratch;
+	TArray<int32> PendingLocalScrapePredictionVisualCellIndices;
+	TBitArray<> PendingLocalScrapePredictionReconcileCells;
+	TArray<int32> PendingBatchedContaminationVisualCellIndices;
+	int32 ContaminationVisualUpdateBatchDepth = 0;
+
+	double PendingContaminationItemAmounts[2] = { 0.0, 0.0 };
+    FVector2D PendingContaminationDropPositions[2] = { FVector2D::ZeroVector, FVector2D::ZeroVector };
+    int32 TransferPendingContaminationDrop(int32 FaceSlot, const FVector2D& SurfacePositionCm);
+    void PreservePendingContaminationDrops();
+	/**
+	 * 한 face의 base/transferred layer는 내부에서 완전히 섞인 것으로 보고
+	 * 모든 source lot을 제거 질량 비율대로 함께 소비한다.
+	 */
+	TArray<FMD_ScrapeRecoveryLot> BaseContaminationRecoveryLots[2];
+	TArray<FMD_ScrapeRecoveryLot> TransferredContaminationRecoveryLots[2];
+	/** 아직 물리 아이템 한 개의 임계량에 못 미친 raw와 정확히 대응하는 lot. */
+	TArray<FMD_ScrapeRecoveryLot> PendingPhysicalRecoveryLots[2];
+	/**
+	 * legacy 물리 Actor에는 lot 필드가 아직 없으므로, 이미 스폰된 몫을
+	 * MASS-013 carrier 연결 전까지 Surface가 잃지 않고 보관한다.
+	 */
+	TArray<FMD_ScrapeRecoveryLot> SpawnedPhysicalRecoveryLotsAwaitingCarrier[2];
+	/**
+	 * authoring/procedural 생성 직후 실제로 제거 가능한 base carrier 합계.
+	 * 화면용 cache와 달리 밤샘 악화·legacy 복원·Refresh가 바꾸지 않으며,
+	 * 제품 net 제거율과 face당 canonical Reward1.0의 공통 분모다.
+	 */
+	double CanonicalInitialContaminationCarrierAmounts[2] = { 0.0, 0.0 };
 	TArray<float> ContaminationGeneratedInitialAmounts;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Transient,
@@ -751,14 +873,19 @@ private:
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UTexture2D> ContaminationMaskTexture;
 
-	TArray<uint8> ContaminationMaskAtlasPixels;
+	bool InitializeContaminationCellCarrierWeights();
+	// One immutable triangle-scale metric per baked profile and exact scale, shared across live walls.
+	TSharedPtr<const FMD_ScrapeCarrierWeights> SharedContaminationCellCarrierWeights;
+	FMD_ScrapeCarrierWeightView GetContaminationCellCarrierWeights() const;
+	FVector ContaminationCarrierWeightScale = FVector::OneVector;
+	FMD_ScrapeMaskPixels ContaminationMaskAtlasPixels;
 	FIntPoint ContaminationMaskAtlasDimensions;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UTexture2D> TransferredPaintMaskTexture;
 
-	TArray<uint8> TransferredPaintMaskAtlasPixels;
+	FMD_ScrapeMaskPixels TransferredPaintMaskAtlasPixels;
 	FIntPoint TransferredPaintMaskAtlasDimensions;
 
 	UPROPERTY(Transient)
@@ -773,10 +900,23 @@ private:
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMaterialInstanceDynamic>> BackContaminationDecalPatchMIDs;
 
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInstanceDynamic> ContaminationMeshUVOverlayMID;
+
 	bool bContaminationDecalsConfigured;
+
+	/** FastArray보다 먼저 수신해 오래된 canonical cell bunch도 되감지 못하게 한다. */
+	UPROPERTY(ReplicatedUsing = OnRep_ContaminationVisualRevision, Transient)
+	uint32 ReplicatedContaminationVisualRevision = 0;
 
 	UPROPERTY(Replicated, Transient)
 	FMD_ReplicatedScrapeCellStateArray ReplicatedContaminationState;
+
+	/** client mirror에 이미 반영된 FastArray 또는 visual delta revision. */
+	uint32 LastAppliedContaminationVisualRevision = 0;
+
+	/** one-shot delegate/feedback까지 소비한 visual delta revision. JIP에는 복제하지 않는다. */
+	uint32 LastConsumedContaminationVisualRevision = 0;
 
 	UPROPERTY(VisibleInstanceOnly, BlueprintReadOnly, Transient,
 		Category = "MD|Scrape Surface|Runtime", meta = (AllowPrivateAccess = "true"))
@@ -822,28 +962,65 @@ private:
 	double CachedBackInitialContaminationAmount;
 	double CachedFrontCurrentContaminationAmount;
 	double CachedBackCurrentContaminationAmount;
+	/** Canonical MeshUV totals and completion counts; refreshed by every bulk state replacement. */
+	FMD_ScrapeMeshUVProgress CachedMeshUVProgress;
 
 	bool bContaminationSurfaceInitialized;
 	bool bContaminationCompletionBroadcast;
+	bool bDeferredContaminationCompletionTransition = false;
 	bool bOwnsFrontContaminationDecal = false;
 	bool bOwnsBackContaminationDecal = false;
-	TArrayView<FMD_ScrapeSurfaceCell> GetContaminationCellsForFace(
+	/** MeshUV owns one CPU atlas; analytic surfaces retain their two face slots. */
+	bool TryCalculateContaminationCellCounts(
+		int32& OutCellsPerFace, int32& OutStateCellCount) const;
+	FMD_ScrapeCellView GetContaminationCellsForFace(
 		EMD_ScrapeSurfaceFace Face);
-	TConstArrayView<FMD_ScrapeSurfaceCell> GetContaminationCellsForFace(
+	FMD_ScrapeConstCellView GetContaminationCellsForFace(
 		EMD_ScrapeSurfaceFace Face) const;
+	bool ApplyLocalScrapePrediction(
+		UMD_ScrapeToolComponent* PredictionOwner,
+		uint64 FocusSessionId,
+		uint32 AimSequence,
+		double CreatedSeconds,
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		bool bDeferVisualUpdate = false);
+	void ResolveLocalScrapePredictions(
+		UMD_ScrapeToolComponent* PredictionOwner,
+		uint64 FocusSessionId,
+		uint32 AimSequence,
+		const FMD_ScrapeAuthoritativeVisualDelta* Resolution = nullptr,
+		bool bRebuildIfPredictionMissing = false);
+	void ExpireLocalScrapePredictions(
+		UMD_ScrapeToolComponent* PredictionOwner,
+		double ExpireBeforeSeconds);
+	void ClearLocalScrapePredictions(UMD_ScrapeToolComponent* PredictionOwner);
+	bool HasLocalScrapePredictions(
+		const UMD_ScrapeToolComponent* PredictionOwner) const;
+	bool ApplyLocalScrapePredictionToShadow(
+		const FMD_ScrapeStroke& Stroke,
+		const FMD_ScrapeToolSpec& ToolSpec,
+		TArray<int32>& OutChangedCellIndices);
+	void MarkLocalScrapePredictionReconcileCell(int32 CellIndex);
+	void FlushLocalScrapePredictionVisualUpdates();
+	void RebuildLocalScrapePredictionShadow();
+	SIZE_T GetLocalScrapePredictionAllocatedBytes() const;
+	bool UpdateLocalScrapePredictionMemoryBudget();
+	void ReleaseLocalScrapePredictionMemoryBudget();
+	static constexpr uint64 MaximumLocalScrapePredictionBytes = 8 * 1024 * 1024;
+	static constexpr uint64 MaximumWorldScrapePredictionBytes = 32 * 1024 * 1024;
+	bool DoesLocalScrapePredictionMatchResolution(
+		const FLocalScrapePrediction& Prediction,
+		const FMD_ScrapeAuthoritativeVisualDelta& Resolution) const;
+	static bool IsAimSequenceAtOrBefore(uint32 Candidate, uint32 Baseline);
 	FMD_ScrapeResult ApplyLocalScrapeStrokeInternal(
 		const FMD_ScrapeStroke& Stroke,
 		const FMD_ScrapeToolSpec& ToolSpec,
-		const FVector2D& StampPathStartPositionCm,
-		const FVector2D& StampPathAxis,
 		float StampRatio,
-		float StampCoverage,
-		float StampDepthCm,
-		float StampSpacingCm,
-		int32 StampPatternSeed,
 		float& OutRemovedCleanRatioDelta,
 		bool bDeferCompletionBroadcast = false);
 
+	void CommitContaminationMeshUVProgressCache(const FMD_ScrapeMeshUVProgress& Progress);
 	void RefreshContaminationCleanRatioCache();
 	void RefreshContaminationCleanRatioCache(EMD_ScrapeSurfaceFace Face);
 	bool ResolveContaminationSurfaceGeometry();
@@ -851,11 +1028,16 @@ private:
 	bool TryApplyProceduralInitialContamination(
 		int32 CellsPerFace,
 		float BaseInitialContamination);
+	bool TryBuildContaminationMaskPixels(
+		FIntPoint& OutAtlasDimensions, TArray<uint8>& OutPixels) const;
 	bool InitializeContaminationMask();
 	void ReleaseContaminationMask();
+	FMD_ScrapeConstCellView GetVisualContaminationCells() const;
 	FMD_ScrapeSurfaceCell MakeContaminationMaskCell(int32 CellIndex) const;
 	void UpdateContaminationMask(
 		const TArray<FMD_ScrapeCellChange>& CellChanges);
+	void BeginContaminationVisualUpdateBatch();
+	void EndContaminationVisualUpdateBatch();
 	bool UploadContaminationMaskRegion(const FIntRect& AtlasRegion);
 	bool InitializeTransferredPaintMask();
 	void ReleaseTransferredPaintMask();
@@ -885,7 +1067,8 @@ private:
 		UMaterialInstanceDynamic& DecalMID,
 		EMD_ScrapeSurfaceFace Face) const;
 	void ApplyContaminationDetailWorldFrame(
-		UMaterialInstanceDynamic& DecalMID) const;
+		UMaterialInstanceDynamic& DecalMID,
+		EMD_ScrapeSurfaceFace Face) const;
 	void ApplyContaminationAppearanceParameters(
 		UMaterialInstanceDynamic& DecalMID,
 		UMaterialInterface* ParentMaterial) const;
@@ -907,15 +1090,79 @@ private:
 		FMD_ScrapeDecalFaceLayout& InOutLayout) const;
 	void SetContaminationDecalsVisible(bool bVisible);
 	void RefreshContaminationDecalMaterialParameters();
+
+	/** MeshUV 모드에서 메시 자체에 오염 오버레이 머티리얼을 부착한다. */
+	bool ConfigureContaminationMeshUVOverlay();
+
+	/** 오버레이를 떼고 MID를 버린다. 모드 전환과 마스크 재생성에서 쓴다. */
+	void ReleaseContaminationMeshUVOverlay();
+
+	/** 오버레이 MID에 마스크 텍스처와 아틀라스 주소 규약을 넣는다. */
+	void ApplyContaminationMeshUVOverlayParameters(
+		UMaterialInstanceDynamic& OverlayMID) const;
 	void HandleReplicatedContaminationState(
 		TConstArrayView<int32> StateItemIndices,
+		bool bResetToInitial);
+	void ApplyReplicatedContaminationStates(
+		TConstArrayView<FMD_ReplicatedScrapeCellState> StateItems,
 		bool bResetToInitial);
 	void ApplyAllReplicatedContaminationState();
 	void PublishContaminationChanges(
 		const TArray<FMD_ScrapeCellChange>& CellChanges);
+	bool TryBuildReplicatedCellState(
+		int32 CellIndex,
+		FMD_ReplicatedScrapeCellState& OutState,
+		bool& bOutMatchesGeneratedState) const;
+	bool BuildAuthoritativeVisualDelta(
+		const TArray<FMD_ScrapeCellChange>& CellChanges,
+		float ScrapeLoadAfter,
+		FMD_ScrapeAuthoritativeVisualDelta& OutDelta);
+	bool ApplyAuthoritativeVisualDelta(
+		const FMD_ScrapeAuthoritativeVisualDelta& Delta);
+	bool ApplyAuthoritativePredictionResolution(
+		const FMD_ScrapeAuthoritativeVisualDelta& Delta);
+	bool ValidateAuthoritativeVisualDeltaCells(
+		const FMD_ScrapeAuthoritativeVisualDelta& Delta) const;
+	void AdvanceContaminationVisualRevision();
+	static bool IsVisualRevisionNewer(uint32 Candidate, uint32 Baseline);
+
+	UFUNCTION()
+	void OnRep_ContaminationVisualRevision();
+	/**
+	 * Tool이 셀을 바꾸기 전에 후속 recovery commit이 실패할 수 없는지 검사한다.
+	 * legacy pending raw의 missing lot은 Commit에서 reward 0으로 보충 가능하다.
+	 */
+	bool CanAcceptRecoveryTransaction(
+		EMD_ScrapeSurfaceFace SurfaceFace) const;
 	int32 DropContaminationItems(
 		EMD_ScrapeSurfaceFace SurfaceFace,
-		float RemovedAmount,
+		double RemovedAmount,
+		const FVector2D& SurfacePositionCm,
+		TConstArrayView<FMD_ScrapeRecoveryLot> RecoveryLots,
+		bool* bOutAcceptedToLedger = nullptr);
+	enum class EPhysicalCommitStatus : uint8
+	{
+		Rejected,
+		AcceptedNoPhysicalShare,
+		AcceptedPending
+	};
+	struct FPhysicalCommitResult
+	{
+		EPhysicalCommitStatus Status = EPhysicalCommitStatus::Rejected;
+		int32 SpawnedCount = 0;
+
+		bool IsAccepted() const
+		{
+			return Status != EPhysicalCommitStatus::Rejected;
+		}
+	};
+	/**
+	 * Tool이 Load 수용량을 확정한 뒤 받지 못한 순제거 질량만 한 번 커밋한다.
+	 * 제품 호출자는 UMD_ScrapeToolComponent 하나로 제한해 같은 결과의 중복 커밋을 막는다.
+	 */
+	FPhysicalCommitResult CommitContaminationPhysicalDrop(
+		const FMD_ScrapeResult& ScrapeResult,
+		const FMD_ScrapeMassAllocationResult& Allocation,
 		const FVector2D& SurfacePositionCm);
 	bool TryCalculateContaminationItemSpawnTransform(
 		EMD_ScrapeSurfaceFace SurfaceFace,
@@ -923,6 +1170,17 @@ private:
 		FTransform& OutSpawnTransform) const;
 	bool TryProjectWorldPointToContaminationSurface(
 		const FVector& WorldPoint,
+		EMD_ScrapeSurfaceFace SurfaceFace,
+		FVector2D& OutSurfacePositionCm) const;
+
+	/**
+	 * MeshUV 모드에서 히트 삼각형의 UV를 셀 주소로 해석한다.
+	 *
+	 * 월드 위치를 받는 형태가 아니라 FHitResult를 받는 이유는, 이 모드의 주소가
+	 * 위치가 아니라 맞힌 삼각형의 정점 속성에 들어 있기 때문이다.
+	 */
+	bool TryProjectHitToContaminationMeshUVSurface(
+		const FHitResult& Hit,
 		FVector2D& OutSurfacePositionCm) const;
 	bool TryGetContaminationFaceFromHit(
 		const FHitResult& Hit,

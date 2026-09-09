@@ -36,6 +36,16 @@ enum class EMD_InspectionResult : uint8
 	GameOver           UMETA(DisplayName = "게임오버"),
 };
 
+// 일일 보고서에서 수동 퇴근과 작업 시간 종료를 구분하는 원인
+UENUM(BlueprintType)
+enum class EMD_DayEndReason : uint8
+{
+    // 콘솔을 통한 퇴근 확인 및 수동 마감
+    Console UMETA(DisplayName = "퇴근 확인"),
+    // 작업 제한 시간 도달로 인한 자동 마감
+    TimeExpired UMETA(DisplayName = "작업 시간 종료"),
+};
+
 // 점수와 크레딧 일일 원장이 공통으로 사용하는 정산 분류
 UENUM(BlueprintType)
 enum class EMD_DailyReportCategory : uint8
@@ -97,6 +107,10 @@ struct FMD_InspectionReport
 
 	UPROPERTY(BlueprintReadOnly, Category = "Score")
 	EMD_InspectionResult Result = EMD_InspectionResult::NotApplicable;
+
+    // 서버 마감 원인을 원장 응답 RPC로 전달하는 구분값
+    UPROPERTY(BlueprintReadOnly, Category = "Daily Report")
+    EMD_DayEndReason EndReason = EMD_DayEndReason::Console;
 
 	// 판정에 사용된 점수 (경고 감점 적용 전)
 	UPROPERTY(BlueprintReadOnly, Category = "Score")
