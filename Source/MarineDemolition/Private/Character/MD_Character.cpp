@@ -9,6 +9,7 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
+#include "World/Wall/MD_WallUtility.h"
 #include "Component/Support/MD_SupplyComponent.h"
 #include "Component/Equipment/MD_FoamGunComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
@@ -1274,6 +1275,14 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("No tool equipped"));
 		return;
 	}
+
+	// 절연테이프는 GA가 없는 도구 입력 전용 수리. 상호작용 키(F)가 아니라 LMB로만 쓴다
+	if (CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Insulation))
+	{
+		TryToolInputUtilityRepair();
+		return;
+	}
+
 	const bool bIsScrapeAbility = CurrentTool->ToolAbilityTag.MatchesTagExact(
 		MDGameplayTags::Ability_Scrape);
 	bScrapeAbilityInputCaptured = bIsScrapeAbility;
@@ -1301,6 +1310,72 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 	// 비헤라 도구는 기존 tag 기반 활성화 흐름을 유지한다.
 	FGameplayTagContainer AbilityTags(CurrentTool->ToolAbilityTag);
 	ASC->TryActivateAbilitiesByTag(AbilityTags);
+}
+
+void AMD_Character::TryToolInputUtilityRepair()
+{
+	const AController* OwnController = GetController();
+	UWorld* World = GetWorld();
+	if (!IsValid(OwnController) || !World)
+	{
+		return;
+	}
+
+	// 상호작용 트레이스와 같은 거리로 조준선 위 인프라를 찾는다 (와이어 메시는 Visibility Block)
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	OwnController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(MDToolInputRepair), false, this);
+	if (!World->LineTraceSingleByChannel(
+			Hit,
+			ViewLocation,
+			ViewLocation + ViewRotation.Vector() * ToolInputRepairTraceDistance,
+			ECC_Visibility,
+			Params))
+	{
+		return;
+	}
+
+	AMD_WallUtility* Utility = Cast<AMD_WallUtility>(Hit.GetActor());
+	if (!IsValid(Utility) && IsValid(Hit.GetComponent()))
+	{
+		Utility = Cast<AMD_WallUtility>(Hit.GetComponent()->GetOwner());
+	}
+	if (!IsValid(Utility) || !Utility->RepairRequiresToolInput())
+	{
+		return;
+	}
+
+	ServerRepairUtilityWithTool(Utility);
+}
+
+void AMD_Character::ServerRepairUtilityWithTool_Implementation(AMD_WallUtility* Utility)
+{
+	if (!HasAuthority() || !IsValid(Utility) || !Utility->RepairRequiresToolInput())
+	{
+		return;
+	}
+
+	// 클라 조준을 그대로 믿지 않는다. 바운드 최근접점 거리로 재검증 (지연 허용 50cm)
+	const AController* OwnController = GetController();
+	if (!IsValid(OwnController))
+	{
+		return;
+	}
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	OwnController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	const FBox Bounds = Utility->GetComponentsBoundingBox(true);
+	const float Distance = FVector::Dist(Bounds.GetClosestPointTo(ViewLocation), ViewLocation);
+	if (Distance > ToolInputRepairTraceDistance + 50.f)
+	{
+		return;
+	}
+
+	// 도구 태그 검사·핫바 차감·상태 전이는 인프라 쪽 공통 진입점이 처리
+	Utility->TryRepairWithEquippedTool(this);
 }
 
 void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)

@@ -320,8 +320,32 @@ bool AMD_WallUtility::CanRepairWith(AActor* Interactor) const
 
 bool AMD_WallUtility::CanInteract_Implementation(AActor* Interactor) const
 {
-	return UtilityState == EMD_UtilityState::Broken
+	// 도구 입력 전용 인프라(절연테이프)는 상호작용 대상이 아니다 — 프롬프트도 뜨지 않는다
+	return !bRepairRequiresToolInput
+		&& UtilityState == EMD_UtilityState::Broken
 		&& CanRepairWith(Interactor);
+}
+
+bool AMD_WallUtility::TryRepairWithEquippedTool(AActor* Repairer)
+{
+	if (!HasAuthority() || UtilityState != EMD_UtilityState::Broken || !CanRepairWith(Repairer))
+	{
+		return false;
+	}
+
+	// 소모형 수리 도구는 차감이 먼저다. 차감 실패(수량 0)면 수리도 하지 않는다
+	if (bConsumesRepairTool)
+	{
+		const AMD_Character* Character = Cast<AMD_Character>(Repairer);
+		UMD_EquipHotbarComponent* Hotbar = IsValid(Character) ? Character->GetHotbarComponent() : nullptr;
+		if (!IsValid(Hotbar) || !Hotbar->TryConsumeTool(Hotbar->GetCurrentTool(), 1))
+		{
+			return false;
+		}
+	}
+
+	SetRepaired(Repairer);
+	return true;
 }
 
 void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
@@ -332,10 +356,12 @@ void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
 	}
 
 	// 조준 이후 상태·장비가 바뀔 수 있으므로 실제 실행 직전에도 같은 규칙을 다시 확인한다.
-	if (CanInteract_Implementation(Interactor))
+	if (!CanInteract_Implementation(Interactor))
 	{
-		SetRepaired(Interactor);
+		return;
 	}
+
+	TryRepairWithEquippedTool(Interactor);
 }
 
 void AMD_WallUtility::SetInteractionHighlighted_Implementation(bool bHighlighted)

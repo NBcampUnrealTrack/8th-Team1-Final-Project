@@ -55,6 +55,15 @@ public:
 	FVector GetBreakLocation() const { return BreakLocation; }
 	FVector GetBreakNormal() const { return BreakNormal; }
 
+	/**
+	 * 장착 도구로 수리한다. 상호작용(F)과 도구 입력(LMB) 양쪽이 공유하는 서버 진입점.
+	 * 파손 상태 + 장착 도구 태그 일치 + (소모형이면) 핫바 차감 성공일 때만 수리하고 true. 서버 전용
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Utility")
+	bool TryRepairWithEquippedTool(AActor* Repairer);
+
+	bool RepairRequiresToolInput() const { return bRepairRequiresToolInput; }
+
 	// IMD_Interactable — 수리는 서버에서 검증
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
@@ -123,6 +132,14 @@ protected:
 	// 이 인프라 수리에 필요한 도구 태그 (파생 클래스에서 지정)
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility")
 	FGameplayTag RequiredRepairToolTag;
+
+	// 상호작용 수리 성공 시 장착 도구 1개를 소모할지 (절연테이프 = 1회용, 기획 08 §4.1)
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility")
+	bool bConsumesRepairTool = false;
+
+	// true면 상호작용 키(F)로는 수리하지 않고 도구 입력(LMB)으로만 수리한다 (절연테이프)
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility")
+	bool bRepairRequiresToolInput = false;
 
 	// 컷 조준 레이가 이 인프라 메시를 관통했는지 검사할 최대 거리
 	// (절단자 시점에서 재구성. 벽 두께만큼 여유를 둔다)

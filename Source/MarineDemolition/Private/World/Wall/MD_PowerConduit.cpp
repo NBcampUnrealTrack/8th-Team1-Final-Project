@@ -6,6 +6,9 @@
 AMD_PowerConduit::AMD_PowerConduit()
 {
 	RequiredRepairToolTag = MDGameplayTags::Ability_UtilityRepair_Insulation;
+	// 절연테이프는 1회용: 수리 성공 시 핫바에서 1개 차감. 상호작용 키가 아니라 도구 입력(LMB)으로만 사용
+	bConsumesRepairTool = true;
+	bRepairRequiresToolInput = true;
 
 	CutSoundTag = FGameplayTag::RequestGameplayTag(
 		TEXT("SFX.Hazard.Cable.Cut"), /*ErrorIfNotFound*/ false);
