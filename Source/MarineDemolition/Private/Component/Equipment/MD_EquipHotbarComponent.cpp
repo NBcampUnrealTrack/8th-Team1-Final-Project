@@ -216,6 +216,11 @@ bool UMD_EquipHotbarComponent::TryConsumeTool(UMD_ToolDefinition* ToolDefinition
 	// 차감할 ToolDefinition의 고정 항목 위치 조회
 	int32 ToolEntryIndex = ToolEntries.IndexOfByPredicate([ToolDefinition](const FMD_HotbarToolEntry& Entry)
 		{
+			// 소진돼 비워진 슬롯(ToolDefinition == nullptr)은 건너뛴다
+			if (IsValid(Entry.ToolDefinition) == false)
+			{
+				return false;
+			}
 			bool bIsMatch = Entry.ToolDefinition->ToolAbilityTag.MatchesTagExact(ToolDefinition->ToolAbilityTag);
 			bIsMatch = bIsMatch && Entry.ToolDefinition == ToolDefinition;
 			return bIsMatch;

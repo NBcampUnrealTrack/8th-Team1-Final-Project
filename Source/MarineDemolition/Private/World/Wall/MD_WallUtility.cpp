@@ -57,6 +57,27 @@ void AMD_WallUtility::BeginPlay()
 	// 모든 머신에서 링크한다. 컷 델리게이트는 서버에서만 방송되어 클라 구독은 무해하고,
 	// 스캔 실루엣은 스캔한 클라 로컬에서 떠야 하므로 클라 파이프도 구독해야 한다.
 	LinkOverlappingWalls();
+
+	// 처음부터 고장 상태로 시작 (서버에서만 상태 전이, 클라는 복제로 따라온다)
+	if (bStartBroken && HasAuthority())
+	{
+		// 파손 지점은 레벨 배치 시 지정. 미지정이면 메시 중심 (바운드 랜덤은 ㄴ·ㄱ 파이프 허공에 뜸)
+		const FTransform ActorTM = GetActorTransform();
+		if (StartBreakLocalOffset.IsNearlyZero())
+		{
+			BreakLocation = IsValid(Mesh) ? Mesh->Bounds.Origin : GetActorLocation();
+		}
+		else
+		{
+			BreakLocation = ActorTM.TransformPosition(StartBreakLocalOffset);
+		}
+
+		const FVector WorldNormal = ActorTM.TransformVectorNoScale(StartBreakLocalNormal).GetSafeNormal();
+		BreakNormal = WorldNormal.IsNearlyZero() ? GetActorForwardVector() : WorldNormal;
+
+		// Cutter 없음 = 시작 파손. 파생 클래스는 이 값으로 감점을 건너뛴다
+		SetBroken(nullptr);
+	}
 }
 
 void AMD_WallUtility::LinkOverlappingWalls()
@@ -100,6 +121,13 @@ void AMD_WallUtility::LinkOverlappingWalls()
 
 void AMD_WallUtility::HandleHostWallCut(AMD_CuttableWall* Wall, AActor* Cutter)
 {
+	// 이미 파손된 인프라는 건드리지 않는다.
+	// (SetBroken이 걸러주지만, 그 전에 BreakLocation/Normal을 덮어써 VFX 기준점만 바뀌는 것을 막는다)
+	if (UtilityState == EMD_UtilityState::Broken)
+	{
+		return;
+	}
+
 	// 조준선이 이 인프라 메시를 실제로 관통했을 때만 파손한다.
 	// 파이프를 피해서 자르면 벽만 사라지고 인프라는 살아남는다.
 	FHitResult CutHit;
@@ -292,8 +320,32 @@ bool AMD_WallUtility::CanRepairWith(AActor* Interactor) const
 
 bool AMD_WallUtility::CanInteract_Implementation(AActor* Interactor) const
 {
-	return UtilityState == EMD_UtilityState::Broken
+	// 도구 입력 전용 인프라(절연테이프)는 상호작용 대상이 아니다 — 프롬프트도 뜨지 않는다
+	return !bRepairRequiresToolInput
+		&& UtilityState == EMD_UtilityState::Broken
 		&& CanRepairWith(Interactor);
+}
+
+bool AMD_WallUtility::TryRepairWithEquippedTool(AActor* Repairer)
+{
+	if (!HasAuthority() || UtilityState != EMD_UtilityState::Broken || !CanRepairWith(Repairer))
+	{
+		return false;
+	}
+
+	// 소모형 수리 도구는 차감이 먼저다. 차감 실패(수량 0)면 수리도 하지 않는다
+	if (bConsumesRepairTool)
+	{
+		const AMD_Character* Character = Cast<AMD_Character>(Repairer);
+		UMD_EquipHotbarComponent* Hotbar = IsValid(Character) ? Character->GetHotbarComponent() : nullptr;
+		if (!IsValid(Hotbar) || !Hotbar->TryConsumeTool(Hotbar->GetCurrentTool(), 1))
+		{
+			return false;
+		}
+	}
+
+	SetRepaired(Repairer);
+	return true;
 }
 
 void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
@@ -304,10 +356,12 @@ void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
 	}
 
 	// 조준 이후 상태·장비가 바뀔 수 있으므로 실제 실행 직전에도 같은 규칙을 다시 확인한다.
-	if (CanInteract_Implementation(Interactor))
+	if (!CanInteract_Implementation(Interactor))
 	{
-		SetRepaired(Interactor);
+		return;
 	}
+
+	TryRepairWithEquippedTool(Interactor);
 }
 
 void AMD_WallUtility::SetInteractionHighlighted_Implementation(bool bHighlighted)
