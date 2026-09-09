@@ -57,6 +57,27 @@ void AMD_WallUtility::BeginPlay()
 	// 모든 머신에서 링크한다. 컷 델리게이트는 서버에서만 방송되어 클라 구독은 무해하고,
 	// 스캔 실루엣은 스캔한 클라 로컬에서 떠야 하므로 클라 파이프도 구독해야 한다.
 	LinkOverlappingWalls();
+
+	// 처음부터 고장 상태로 시작 (서버에서만 상태 전이, 클라는 복제로 따라온다)
+	if (bStartBroken && HasAuthority())
+	{
+		// 파손 지점은 레벨 배치 시 지정. 미지정이면 메시 중심 (바운드 랜덤은 ㄴ·ㄱ 파이프 허공에 뜸)
+		const FTransform ActorTM = GetActorTransform();
+		if (StartBreakLocalOffset.IsNearlyZero())
+		{
+			BreakLocation = IsValid(Mesh) ? Mesh->Bounds.Origin : GetActorLocation();
+		}
+		else
+		{
+			BreakLocation = ActorTM.TransformPosition(StartBreakLocalOffset);
+		}
+
+		const FVector WorldNormal = ActorTM.TransformVectorNoScale(StartBreakLocalNormal).GetSafeNormal();
+		BreakNormal = WorldNormal.IsNearlyZero() ? GetActorForwardVector() : WorldNormal;
+
+		// Cutter 없음 = 시작 파손. 파생 클래스는 이 값으로 감점을 건너뛴다
+		SetBroken(nullptr);
+	}
 }
 
 void AMD_WallUtility::LinkOverlappingWalls()
@@ -100,6 +121,13 @@ void AMD_WallUtility::LinkOverlappingWalls()
 
 void AMD_WallUtility::HandleHostWallCut(AMD_CuttableWall* Wall, AActor* Cutter)
 {
+	// 이미 파손된 인프라는 건드리지 않는다.
+	// (SetBroken이 걸러주지만, 그 전에 BreakLocation/Normal을 덮어써 VFX 기준점만 바뀌는 것을 막는다)
+	if (UtilityState == EMD_UtilityState::Broken)
+	{
+		return;
+	}
+
 	// 조준선이 이 인프라 메시를 실제로 관통했을 때만 파손한다.
 	// 파이프를 피해서 자르면 벽만 사라지고 인프라는 살아남는다.
 	FHitResult CutHit;

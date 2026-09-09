@@ -134,6 +134,19 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility", meta = (ClampMin = "0", ClampMax = "255"))
 	int32 ScanSilhouetteStencil = 251;
 
+	// 레벨 시작 시 이미 파손된 상태로 시작할지. 벽 없이 인프라만 고장난 상태를 표현한다
+	// (감점 없음, 절단 원샷 연출 없음 — BP 연출도 이 값으로 분기)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Utility")
+	bool bStartBroken = false;
+
+	// 시작 파손 지점 (액터 로컬). 미지정(0)이면 메시 중심
+	UPROPERTY(EditAnywhere, Category = "MD|Utility", meta = (EditCondition = "bStartBroken"))
+	FVector StartBreakLocalOffset = FVector::ZeroVector;
+
+	// 시작 분출 방향 (액터 로컬, VFX +X=분출 규약). 미지정(0)이면 액터 전방
+	UPROPERTY(EditAnywhere, Category = "MD|Utility", meta = (EditCondition = "bStartBroken"))
+	FVector StartBreakLocalNormal = FVector::ForwardVector;
+
 	UPROPERTY(ReplicatedUsing = OnRep_UtilityState)
 	EMD_UtilityState UtilityState = EMD_UtilityState::Intact;
 
