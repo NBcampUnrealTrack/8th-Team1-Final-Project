@@ -302,12 +302,13 @@ void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole*
 	}
 }
 
-void AMD_PlayerController::ServerRequestShopPurchase_Implementation(AMD_Merchant* Merchant, FName ItemId)
+void AMD_PlayerController::ServerRequestShopPurchase_Implementation(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId)
 {
 	// 유효하지 않은 액터 참조로 서버 원장에 접근하지 못하도록 하는 요청 검사
-	if (IsValid(Merchant) == false || ItemId.IsNone() == true)
+	if (IsValid(Merchant) == false || ItemAssetId.IsValid() == false)
 	{
-		ClientReceiveShopPurchaseResult(Merchant, ItemId, EMD_ShopPurchaseResult::InvalidRequest);
+		// 거부된 요청의 전체 식별자와 실패 결과를 소유 클라이언트에 전달
+		ClientReceiveShopPurchaseResult(Merchant, ItemAssetId, EMD_ShopPurchaseResult::InvalidRequest);
 		return;
 	}
 
@@ -316,21 +317,24 @@ void AMD_PlayerController::ServerRequestShopPurchase_Implementation(AMD_Merchant
 	// 상점에서 멀어진 플레이어가 보관한 UI나 임의 RPC로 결제하지 못하도록 하는 거리 검사
 	if (IsValid(RequestingCharacter) == false || FVector::Dist(RequestingCharacter->GetActorLocation(), Merchant->GetActorLocation()) > 500.0f)
 	{
-		ClientReceiveShopPurchaseResult(Merchant, ItemId, EMD_ShopPurchaseResult::InvalidRequest);
+		// 거부된 요청의 전체 식별자와 실패 결과를 소유 클라이언트에 전달
+		ClientReceiveShopPurchaseResult(Merchant, ItemAssetId, EMD_ShopPurchaseResult::InvalidRequest);
 		return;
 	}
 
 	// 카탈로그와 서버 경제 원장을 소유한 상인 액터에 최종 구매 판정을 위임하는 처리
-	const EMD_ShopPurchaseResult PurchaseResult = Merchant->TryPurchaseItem(RequestingCharacter, ItemId);
-	ClientReceiveShopPurchaseResult(Merchant, ItemId, PurchaseResult);
+	const EMD_ShopPurchaseResult PurchaseResult = Merchant->TryPurchaseItem(RequestingCharacter, ItemAssetId);
+	// 구매한 전체 식별자를 유지한 서버 결과 응답
+	ClientReceiveShopPurchaseResult(Merchant, ItemAssetId, PurchaseResult);
 }
 
-void AMD_PlayerController::ClientReceiveShopPurchaseResult_Implementation(AMD_Merchant* Merchant, FName ItemId, EMD_ShopPurchaseResult Result)
+void AMD_PlayerController::ClientReceiveShopPurchaseResult_Implementation(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result)
 {
 	// 다른 상인의 로컬 위젯에 결과가 섞이지 않도록 요청 대상 액터에 직접 전달하는 처리
 	if (IsValid(Merchant) == true)
 	{
-		Merchant->ReceiveShopPurchaseResult(ItemId, Result);
+		// 정확한 품목의 표시 이름을 조회할 전체 식별자 전달
+		Merchant->ReceiveShopPurchaseResult(ItemAssetId, Result);
 	}
 }
 

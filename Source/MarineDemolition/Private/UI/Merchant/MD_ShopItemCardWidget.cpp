@@ -4,7 +4,7 @@
 #include "UI/Merchant/MD_ShopItemCardWidget.h"
 
 #include "Components/TextBlock.h"
-#include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Equipment/MD_ItemDefinition.h"
 #include "Engine/Texture2D.h"
 
 void UMD_ShopItemCardWidget::SetItem(const FMD_ShopItem& InItem, bool bInOwned)
@@ -21,8 +21,10 @@ void UMD_ShopItemCardWidget::SetItem(const FMD_ShopItem& InItem, bool bInOwned)
 
 void UMD_ShopItemCardWidget::RefreshDisplay()
 {
-	// 공통 버튼의 기본 텍스트에 품목 이름 적용
-	SetContentText(Item.DisplayName);
+	// 이름과 아이콘을 같은 공통 정의에서 조회
+	UMD_ItemDefinition* Definition = Item.GetDefinition();
+	// 로드되지 않은 품목은 이전 카드 이름을 비운 상태로 표시
+	SetContentText(IsValid(Definition) == true ? Definition->ItemName : FText::GetEmpty());
 
 	// 카드 하단에 품목 가격 적용
 	if (IsValid(Txt_CostCredit) == true)
@@ -31,24 +33,12 @@ void UMD_ShopItemCardWidget::RefreshDisplay()
 		Txt_CostCredit->SetText(priceText);
 	}
 
-	// 장비 정의에 저장된 아이콘을 상점 카드의 단일 이미지 원본으로 조회
-	UTexture2D* iconTexture = nullptr;
-	if (IsValid(Item.EquipmentDefinition) == true)
-	{
-		iconTexture = Item.EquipmentDefinition->ToolIcon;
-	}
-
-	// 유효한 장비 아이콘을 공통 버튼 이미지에 적용
-	if (IsValid(iconTexture) == true)
-	{
-		// 카드에 설정된 크기와 색상을 유지할 아이콘 Brush 복사
-		FSlateBrush itemIconBrush = GetContentImage();
-
-		// 아이템 아이콘을 카드 Brush의 이미지 리소스로 지정
-		itemIconBrush.SetResourceObject(iconTexture);
-		itemIconBrush.DrawAs = ESlateBrushDrawType::Image;
-
-		// 갱신한 Brush를 Brush_ButtonImage와 바인딩된 Image에 함께 적용
-		SetContentImage(itemIconBrush);
-	}
+	// 재사용된 카드에 이전 품목의 아이콘이 남지 않도록 기본 Brush 보관
+	FSlateBrush ItemIconBrush = GetContentImage();
+	// 로드된 정의의 아이콘 또는 빈 이미지 적용
+	ItemIconBrush.SetResourceObject(IsValid(Definition) == true ? Definition->ItemIcon.Get() : nullptr);
+	// 지정된 아이콘 유무에 따른 이미지 표시 여부 결정
+	ItemIconBrush.DrawAs = IsValid(Definition) == true && IsValid(Definition->ItemIcon) == true ? ESlateBrushDrawType::Image : ESlateBrushDrawType::NoDrawType;
+	// 카드의 기존 크기와 색상을 유지하면서 공통 아이콘 갱신
+	SetContentImage(ItemIconBrush);
 }

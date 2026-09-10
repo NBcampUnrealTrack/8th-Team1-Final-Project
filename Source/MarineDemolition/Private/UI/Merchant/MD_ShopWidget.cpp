@@ -6,7 +6,7 @@
 #include "Components/Image.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
-#include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Equipment/MD_ItemDefinition.h"
 #include "Engine/Texture2D.h"
 #include "Groups/CommonButtonGroupBase.h"
 #include "UI/MD_CommonButtonBase.h"
@@ -34,8 +34,8 @@ void UMD_ShopWidget::NativeOnActivated()
 		OwningMerchantMenu->SetMenuPanelVisible(false);
 	}
 
-	// 현재 상점 데이터를 화면에 반영
-	RefreshDisplay();
+	// BP 기본 카탈로그도 활성화 시 비동기 로드를 시작하여 화면에 반영
+	SetCatalog(Catalog);
 }
 
 void UMD_ShopWidget::NativeOnDeactivated()
@@ -55,6 +55,20 @@ void UMD_ShopWidget::NativeOnDeactivated()
 	Super::NativeOnDeactivated();
 }
 
+void UMD_ShopWidget::NativeDestruct()
+{
+	// 닫힌 화면으로 지연된 완료 콜백이 전달되지 않도록 요청 취소
+	if (DefinitionLoadHandle.IsValid() == true)
+	{
+		// 이 화면의 요청과 에셋 보관만 해제
+		DefinitionLoadHandle->CancelHandle();
+	}
+	// 위젯 수명이 끝난 뒤 핸들 참조 정리
+	DefinitionLoadHandle.Reset();
+	// 부모 위젯의 해제 절차 수행
+	Super::NativeDestruct();
+}
+
 void UMD_ShopWidget::SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget)
 {
 	// 화면을 연 상인 메뉴 저장
@@ -63,10 +77,33 @@ void UMD_ShopWidget::SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget)
 
 void UMD_ShopWidget::SetCatalog(UMD_ShopCatalog* InCatalog)
 {
+	// 같은 카탈로그를 갱신할 때 진행 중 로드와 보관 핸들 재사용
+	if (Catalog == InCatalog && DefinitionLoadHandle.IsValid() == true)
+	{
+		// 현재 로드 상태에 맞게 표시 내용 갱신
+		RefreshDisplay();
+		// 중복 요청 생성 방지
+		return;
+	}
+	// 이전 카탈로그의 지연 콜백과 에셋 보관 해제
+	if (DefinitionLoadHandle.IsValid() == true)
+	{
+		// 이전 화면 데이터에 해당하는 요청만 취소
+		DefinitionLoadHandle->CancelHandle();
+	}
+	// 새 카탈로그 요청 전 핸들 초기화
+	DefinitionLoadHandle.Reset();
 	// 표시할 카탈로그 저장
 	Catalog = InCatalog;
-
-	// 카탈로그 변경 사항 반영
+	// 새 목록에서 이전 품목이 선택된 상태 방지
+	SelectedItemAssetId = FPrimaryAssetId();
+	// 유효한 카탈로그에 한해 정의를 비동기로 요청
+	if (IsValid(Catalog) == true)
+	{
+		// 로드된 정의는 핸들로 유지하고 완료 후 전체 UI 갱신
+		DefinitionLoadHandle = Catalog->LoadItemDefinitions(FStreamableDelegate::CreateUObject(this, &UMD_ShopWidget::RefreshDisplay));
+	}
+	// 로드 중에는 기존 목록과 구매 버튼 초기화
 	RefreshDisplay();
 }
 
@@ -79,7 +116,7 @@ void UMD_ShopWidget::SetShopInfo(const FMD_MerchantMenuInfo& InInfo)
 	RefreshDisplay();
 }
 
-void UMD_ShopWidget::SetProgress(int32 InQuestCompletions, const TArray<FName>& InOwnedItemIds)
+void UMD_ShopWidget::SetProgress(int32 InQuestCompletions, const TArray<FPrimaryAssetId>& InOwnedItemIds)
 {
 	// 해금 판정용 진행 상태 저장
 	QuestCompletions = InQuestCompletions;
@@ -89,7 +126,7 @@ void UMD_ShopWidget::SetProgress(int32 InQuestCompletions, const TArray<FName>& 
 	RefreshDisplay();
 }
 
-void UMD_ShopWidget::SetFullyStockedItems(const TArray<FName>& InItemIds)
+void UMD_ShopWidget::SetFullyStockedItems(const TArray<FPrimaryAssetId>& InItemIds)
 {
 	// 구매 제한 품목 목록 저장
 	FullyStockedItemIds = InItemIds;
@@ -105,7 +142,7 @@ void UMD_ShopWidget::SelectCategory(EMD_ShopCategory InCategory)
 	bShowAllCategories = false;
 
 	// 새 분류의 첫 품목이 선택되도록 기존 선택 초기화
-	SelectedItemId = NAME_None;
+	SelectedItemAssetId = FPrimaryAssetId();
 
 	// 선택 분류에 맞는 목록 재구성
 	RebuildItemList();
@@ -146,8 +183,8 @@ void UMD_ShopWidget::RebuildItemList()
 	// 기존 동적 카드 제거
 	WB_ItemEntries->ClearChildren();
 
-	// 카탈로그 또는 카드 클래스가 없으면 상세 패널만 초기화
-	if (IsValid(Catalog) == false)
+	// 카탈로그가 없거나 정의가 준비되지 않으면 목록 표시 보류
+	if (IsValid(Catalog) == false || Catalog->IsItemDefinitionsLoaded() == false)
 	{
 		RefreshSelectedItem();
 		return;
@@ -180,7 +217,8 @@ void UMD_ShopWidget::RebuildItemList()
 		}
 
 		// 카드에 전달할 지급 완료 상태 확인
-		bool ownedItem = OwnedItemIds.Contains(item.ItemId);
+		// 정의의 전체 AssetId로 현재 플레이어의 구매 이력 확인
+		bool ownedItem = OwnedItemIds.Contains(item.GetItemAssetId());
 		if (item.Price <= 0)
 		{
 			ownedItem = true;
@@ -193,22 +231,22 @@ void UMD_ShopWidget::RebuildItemList()
 		{
 			ItemCardButtonGroup->AddWidget(itemCard);
 		}
-		itemCard->OnClicked().AddUObject(this, &UMD_ShopWidget::HandleItemSelected, item.ItemId);
+		// 카드 클릭 시 타입과 이름을 보존한 선택 이벤트 연결
+		itemCard->OnClicked().AddUObject(this, &UMD_ShopWidget::HandleItemSelected, item.GetItemAssetId());
 		WB_ItemEntries->AddChild(itemCard);
 
 		// 분류 진입 시 첫 품목을 기본 선택
-		if (SelectedItemId.IsNone() == true)
+		if (SelectedItemAssetId.IsValid() == false)
 		{
-			SelectedItemId = item.ItemId;
+			// 첫 판매 품목의 전체 식별자로 기본 선택 설정
+			SelectedItemAssetId = item.GetItemAssetId();
 		}
 
-		// 상세 패널의 현재 품목과 같은 카드의 선택 인덱스 저장
-		if (item.ItemId == SelectedItemId)
+		// 전체 식별자가 일치하는 카드의 선택 인덱스 복원
+		if (item.GetItemAssetId() == SelectedItemAssetId && IsValid(ItemCardButtonGroup) == true)
 		{
-			if (IsValid(ItemCardButtonGroup) == true)
-			{
-				selectedItemCardIndex = ItemCardButtonGroup->FindButtonIndex(itemCard);
-			}
+			// 전체 식별자가 일치하는 카드의 그룹 선택 위치 저장
+			selectedItemCardIndex = ItemCardButtonGroup->FindButtonIndex(itemCard);
 		}
 	}
 
@@ -230,13 +268,17 @@ void UMD_ShopWidget::RefreshSelectedItem()
 	// 선택 품목을 카탈로그에서 조회
 	FMD_ShopItem selectedItem;
 	bool foundItem = false;
-	if (IsValid(Catalog) == true)
+	// 로딩 전 또는 선택 전에는 미등록 품목 조회 생략
+	if (IsValid(Catalog) == true && Catalog->IsItemDefinitionsLoaded() == true && SelectedItemAssetId.IsValid() == true)
 	{
-		foundItem = Catalog->FindItem(SelectedItemId, selectedItem);
+		// 이름만 같은 다른 타입을 제외한 정확한 판매 항목 조회
+		foundItem = Catalog->FindItemByAssetId(SelectedItemAssetId, selectedItem);
 	}
 
-	// 선택 품목이 없으면 상세 패널 내용 초기화
-	if (foundItem == false)
+	// 여러 표시 요소가 함께 사용할 공통 정의 조회
+	UMD_ItemDefinition* Definition = foundItem == true ? selectedItem.GetDefinition() : nullptr;
+	// 선택 품목 또는 정의가 없으면 상세 패널 내용 초기화
+	if (foundItem == false || IsValid(Definition) == false)
 	{
 		if (IsValid(Txt_DetailName) == true)
 		{
@@ -272,7 +314,8 @@ void UMD_ShopWidget::RefreshSelectedItem()
 	}
 
 	// 이미 지급된 일회성 품목 여부 확인
-	bool ownedItem = OwnedItemIds.Contains(selectedItem.ItemId);
+	// 정의의 전체 AssetId로 현재 플레이어의 구매 이력 확인
+	bool ownedItem = OwnedItemIds.Contains(selectedItem.GetItemAssetId());
 	if (selectedItem.Price <= 0)
 	{
 		ownedItem = true;
@@ -281,12 +324,14 @@ void UMD_ShopWidget::RefreshSelectedItem()
 	// 선택 품목의 텍스트와 아이콘 표시
 	if (IsValid(Txt_DetailName) == true)
 	{
-		Txt_DetailName->SetText(selectedItem.DisplayName);
+		// 정의에서 관리하는 공통 이름 표시
+		Txt_DetailName->SetText(Definition->ItemName);
 	}
 
 	if (IsValid(Txt_DetailDescription) == true)
 	{
-		Txt_DetailDescription->SetText(selectedItem.Description);
+		// 정의에서 관리하는 공통 설명 표시
+		Txt_DetailDescription->SetText(Definition->Description);
 	}
 
 	if (IsValid(Txt_DetailPrice) == true)
@@ -302,20 +347,14 @@ void UMD_ShopWidget::RefreshSelectedItem()
 
 	if (IsValid(Img_DetailIcon) == true)
 	{
-		// 선택 품목의 장비 정의에서 상세 패널 아이콘 조회
-		UTexture2D* iconTexture = nullptr;
-		if (IsValid(selectedItem.EquipmentDefinition) == true)
-		{
-			iconTexture = selectedItem.EquipmentDefinition->ToolIcon;
-		}
-
-		// 장비 정의에 아이콘이 없으면 기존 상세 아이콘 제거
-		Img_DetailIcon->SetBrushFromTexture(iconTexture);
+		// 공통 정의의 아이콘을 표시하며 미지정 상태에서는 이전 이미지 제거
+		Img_DetailIcon->SetBrushFromTexture(Definition->ItemIcon);
 	}
 
 	// 해금, 크레딧과 가격을 기준으로 구매 버튼 상태 결정
 	if (IsValid(Btn_Buy) == true)
 	{
+		// 서버와 같은 전체 AssetId 보유 이력으로 선행 조건 판정
 		bool unlockedItem = selectedItem.IsUnlocked(ShopInfo.Affinity, QuestCompletions, OwnedItemIds);
 		bool affordableItem = ShopInfo.Credits >= selectedItem.Price;
 		bool paidItem = selectedItem.Price > 0;
@@ -408,7 +447,7 @@ void UMD_ShopWidget::HandleCategoryAllClicked()
 {
 	// 모든 아이템 카테고리를 함께 표시하도록 상태 변경
 	bShowAllCategories = true;
-	SelectedItemId = NAME_None;
+	SelectedItemAssetId = FPrimaryAssetId();
 	RebuildItemList();
 }
 
@@ -418,10 +457,10 @@ void UMD_ShopWidget::HandleCategoryClicked(EMD_ShopCategory Category)
 	SelectCategory(Category);
 }
 
-void UMD_ShopWidget::HandleItemSelected(FName ItemId)
+void UMD_ShopWidget::HandleItemSelected(FPrimaryAssetId ItemAssetId)
 {
 	// 선택한 카드의 품목을 상세 패널 대상으로 저장
-	SelectedItemId = ItemId;
+	SelectedItemAssetId = ItemAssetId;
 
 	// 선택 품목 상세 정보 갱신
 	RefreshSelectedItem();
@@ -429,19 +468,29 @@ void UMD_ShopWidget::HandleItemSelected(FName ItemId)
 
 void UMD_ShopWidget::HandleBuyClicked()
 {
-	// 선택 품목이 없으면 구매 요청 중단
-	if (SelectedItemId.IsNone() == true)
+	// 선택 또는 판매 정의의 준비가 끝나지 않은 구매 요청 차단
+	if (SelectedItemAssetId.IsValid() == false || IsValid(Catalog) == false || Catalog->IsItemDefinitionsLoaded() == false)
 	{
 		return;
 	}
 
-	// 가득 찬 품목은 별도 거부 이벤트로 전달
-	if (FullyStockedItemIds.Contains(SelectedItemId) == true)
+	// 선택된 판매 항목에서 구매 상태 비교용 전체 식별자 조회
+	FMD_ShopItem SelectedItem;
+	// 카탈로그에 없는 선택값의 구매 요청 차단
+	if (Catalog->FindItemByAssetId(SelectedItemAssetId, SelectedItem) == false)
 	{
-		OnPurchaseRejected.Broadcast(SelectedItemId);
+		// 유효한 판매 항목이 없는 요청 종료
+		return;
+	}
+
+	// 전체 식별자가 일치하는 구매 제한 품목의 별도 거부 이벤트 전달
+	if (FullyStockedItemIds.Contains(SelectedItem.GetItemAssetId()) == true)
+	{
+		// 사용하지 않는 품목 식별자 없이 구매 제한 알림
+		OnPurchaseRejected.Broadcast();
 		return;
 	}
 
 	// 실제 구매 시스템으로 선택 품목 요청 전달
-	OnItemPurchaseRequested.Broadcast(SelectedItemId);
+	OnItemPurchaseRequested.Broadcast(SelectedItemAssetId);
 }

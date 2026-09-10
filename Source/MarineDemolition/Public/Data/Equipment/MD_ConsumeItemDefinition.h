@@ -16,6 +16,7 @@ class MARINEDEMOLITION_API UMD_ConsumeItemDefinition : public UMD_ItemDefinition
 
 public:
 	virtual bool CanGrant_Implementation(FMD_ItemGrantContext Context) override;
+	virtual bool Grant_Implementation(FMD_ItemGrantContext Context) override;
 
 public:
 	// GAS 기반 소모 효과에 사용할 선택적 효과 설정

@@ -19,8 +19,10 @@ class UMD_CommonButtonBase;
 class UMD_MerchantMenuWidget;
 class UMD_ShopItemCardWidget;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopPurchaseRequest, FName, ItemId);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopPurchaseRejected, FName, ItemId);
+// 선택한 전체 AssetId를 구매 요청 수신자에 전달
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopPurchaseRequest, FPrimaryAssetId, ItemAssetId);
+// 품목 식별자를 사용하지 않는 구매 제한 알림
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_ShopPurchaseRejected);
 
 /**
  * 상점 UI. 5탭(`04` §3 = `08` §1) + 아이템 카드 목록.
@@ -47,9 +49,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void SetShopInfo(const FMD_MerchantMenuInfo& InInfo);
 
-	/** 해금 판정에 필요한 진행 상태. 아직 저장 시스템이 없어 외부에서 밀어 넣는다. */
+	// 진행 조건과 전체 AssetId 구매 이력을 상점 해금 판정에 전달
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
-	void SetProgress(int32 InQuestCompletions, const TArray<FName>& InOwnedItemIds);
+	void SetProgress(int32 InQuestCompletions, const TArray<FPrimaryAssetId>& InOwnedItemIds);
 
 	/**
 	 * 더 살 필요가 없는 품목(호환 장비가 이미 가득 찬 소모품 등)을 지정한다.
@@ -59,7 +61,7 @@ public:
 	 * 이 위젯은 그대로 쓸 수 있다.
 	 */
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
-	void SetFullyStockedItems(const TArray<FName>& InItemIds);
+	void SetFullyStockedItems(const TArray<FPrimaryAssetId>& InItemIds);
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void SelectCategory(EMD_ShopCategory InCategory);
@@ -78,6 +80,8 @@ protected:
 
 	virtual void NativeOnDeactivated() override;
 
+	virtual void NativeDestruct() override;
+
 	void RebuildItemList();
 
 	void BuildCategoryButtons();
@@ -88,7 +92,8 @@ protected:
 
 	void HandleCategoryClicked(EMD_ShopCategory Category);
 
-	void HandleItemSelected(FName ItemId);
+	// 선택된 카드의 전체 식별자로 상세 품목 갱신
+	void HandleItemSelected(FPrimaryAssetId ItemAssetId);
 
 	void HandleBuyClicked();
 
@@ -99,6 +104,9 @@ protected:
 	/** 카탈로그 에셋. WBP 기본값으로 지정해도 되고 런타임에 SetCatalog로 넣어도 된다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Shop")
 	TObjectPtr<UMD_ShopCatalog> Catalog;
+
+	// 이 화면이 사용하는 판매 정의의 비동기 로드 및 보관 핸들
+	TSharedPtr<FStreamableHandle> DefinitionLoadHandle;
 
 	/** 아이템 카드로 쓸 WBP */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Shop")
@@ -114,12 +122,13 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop", meta = (ClampMin = "0"))
 	int32 QuestCompletions = 0;
 
+	// 현재 플레이어의 전체 AssetId 구매 이력
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
-	TArray<FName> OwnedItemIds;
+	TArray<FPrimaryAssetId> OwnedItemIds;
 
 	/** 이미 가득 차서 구매를 막을 품목. SetFullyStockedItems()로 채운다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
-	TArray<FName> FullyStockedItemIds;
+	TArray<FPrimaryAssetId> FullyStockedItemIds;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
 	EMD_ShopCategory SelectedCategory = EMD_ShopCategory::Tool;
@@ -128,9 +137,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
 	bool bShowAllCategories = true;
 
-	// 현재 상세 패널에 표시 중인 품목 식별자
+	// 현재 상세 패널에 표시 중인 품목의 전체 AssetId
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop")
-	FName SelectedItemId;
+	FPrimaryAssetId SelectedItemAssetId;
 
 	// 동적으로 생성한 상점 카드 중 항상 하나만 선택되도록 관리하는 그룹
 	UPROPERTY(Transient)

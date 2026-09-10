@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerState.h"
 #include "AbilitySystemInterface.h"
+#include "UObject/PrimaryAssetId.h"
 #include "GameplayEffectTypes.h"
 #include "Types/State/MD_HealthTypes.h"
 #include "MD_PlayerState.generated.h"
@@ -96,14 +97,14 @@ public:
 
 	/** 현재 플레이어가 이미 구매한 비소모 품목인지 확인하는 함수 */
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")
-	bool HasPurchasedShopItem(FName ItemId) const;
+	bool HasPurchasedShopItem(FPrimaryAssetId ItemAssetId) const;
 
 	/** 현재 플레이어의 비소모 품목 구매 이력을 상점 해금 판정에 제공하는 함수 */
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")
-	TArray<FName> GetPurchasedShopItemIds() const { return PurchasedShopItemIds; }
+	FORCEINLINE TArray<FPrimaryAssetId> GetPurchasedShopItemIds() const { return PurchasedShopItemIds; }
 
 	/** 서버에서 구매가 완료된 비소모 품목을 현재 플레이어의 소유권에 기록하는 함수 */
-	bool RecordPurchasedShopItem(FName ItemId);
+	bool RecordPurchasedShopItem(FPrimaryAssetId ItemAssetId);
 
 protected:
 
@@ -121,7 +122,7 @@ protected:
 private:
 	/** 현재 플레이어만 확인하는 비소모 품목 구매 이력 */
 	UPROPERTY(ReplicatedUsing = OnRep_PurchasedShopItemIds)
-	TArray<FName> PurchasedShopItemIds;
+	TArray<FPrimaryAssetId> PurchasedShopItemIds;
 
 	/** 플레이어별 소유권 복제 후 열려 있는 상점 화면을 갱신하는 함수 */
 	UFUNCTION()
