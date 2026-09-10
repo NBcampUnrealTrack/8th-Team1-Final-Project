@@ -3,7 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/DataAsset.h"
+#include "Data/Equipment/MD_ItemDefinition.h"
 #include "GameplayTagContainer.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
 #include "MD_ToolDefinition.generated.h"
@@ -12,11 +12,14 @@ class UGameplayAbility;
 class UStaticMesh;
 class UTexture2D;
 
-UCLASS(BlueprintType)
-class MARINEDEMOLITION_API UMD_ToolDefinition : public UDataAsset
+// 메시와 GA 태그 및 도구별 성능을 제공하는 공통 아이템 파생 정의
+UCLASS(BlueprintType, Blueprintable)
+class MARINEDEMOLITION_API UMD_ToolDefinition : public UMD_ItemDefinition
 {
 	GENERATED_BODY()
-	
+
+public:
+	virtual bool CanGrant_Implementation(FMD_ItemGrantContext Context) override;
 
 public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
@@ -67,4 +70,12 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool",
 		meta = (ClampMin = "0.1"))
 	float CutSpeedMultiplier = 1.0f;
+
+	// 충전 도구의 최대 충전량이며 충전 기능이 없는 도구는 영
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Charge", meta = (ClampMin = "0.0"))
+	float MaxCharge = 0.0f;
+
+	// 실제 도구 지급 시 설정할 초기 충전량
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Charge", meta = (ClampMin = "0.0"))
+	float InitialCharge = 0.0f;
 };
