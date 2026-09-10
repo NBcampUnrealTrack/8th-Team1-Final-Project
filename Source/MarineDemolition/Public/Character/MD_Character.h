@@ -259,6 +259,20 @@ protected:
 	TObjectPtr<UAnimMontage> BarnacleScrapeMontage;
 
 	/**
+	 * 폼건 RMB 조준 자세(AS_FoamGun_Pose_Montage). DefaultSlot 에 재생하며
+	 * 조준을 놓을 때까지 유지한다. 한 프레임짜리 포즈 몽타주라 재생 직후
+	 * 섹션이 자기 자신을 다음으로 가리키게 만들어 루프시킨다.
+	 * 비어 있으면 조준해도 자세가 바뀌지 않는다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|Animation")
+	TObjectPtr<UAnimMontage> FoamAimMontage;
+
+	/** 조준 자세를 걷어낼 때의 블렌드 아웃 시간 */
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Animation",
+		meta = (ClampMin = "0.0", Units = "s"))
+	float FoamAimMontageBlendOutSeconds = 0.15f;
+
+	/**
 	 * 도구 스태틱 메시에서 손에 닿을 지점을 표시하는 소켓 이름.
 	 * 이 소켓이 있으면 그 지점이 캐릭터 손 소켓에 오도록 도구를 배치하므로,
 	 * 메시 에디터에서 소켓을 옮기는 것만으로 잡는 위치가 바뀐다.
@@ -366,6 +380,26 @@ private:
 	/** 절단 어빌리티가 활성인지. 서버가 굳히고 사본 프록시가 복제로 받는다 */
 	UPROPERTY(ReplicatedUsing = OnRep_CutterVFXActive)
 	bool bCutterVFXActive = false;
+
+	/**
+	 * 폼건 RMB 조준 자세를 켜고 끈다. 소유 클라가 즉시 반영하고 서버에 올리며,
+	 * 사본 프록시는 복제로 따라온다 — 그래야 남들 화면에도 조준 자세가 보인다.
+	 * FoamGunComponent 의 bAimHeld 는 궤적 프리뷰용 로컬 상태라 복제되지 않는다.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerSetFoamAiming(bool bAiming);
+
+	UFUNCTION()
+	void OnRep_FoamAiming();
+
+	/** 소유 클라·서버·사본 프록시가 모두 거치는 단일 적용 지점 */
+	void RefreshFoamAimMontage();
+
+	/** 조준 상태를 굳히고 로컬에 즉시 반영한 뒤 서버로 올린다 */
+	void SetFoamAiming(bool bAiming);
+
+	UPROPERTY(ReplicatedUsing = OnRep_FoamAiming)
+	bool bFoamAiming = false;
 
 	/** 현재 도구 메시에 붙어 있는 절단 루프 이펙트 인스턴스 */
 	UPROPERTY(Transient)

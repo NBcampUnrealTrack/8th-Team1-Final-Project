@@ -1412,13 +1412,14 @@ void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleScrapeFocusToggleInput()
 {
-	// 폼건: RMB를 누르는 동안 조준 궤적 표시
+	// 폼건: RMB를 누르는 동안 조준 궤적 표시 + 조준 자세
 	if (IsFoamGunEquipped())
 	{
 		if (IsValid(FoamGunComponent))
 		{
 			FoamGunComponent->SetAimHeld(true);
 		}
+		SetFoamAiming(true);
 		return;
 	}
 
@@ -1448,6 +1449,7 @@ void AMD_Character::HandleScrapeFocusReleasedInput()
 	{
 		FoamGunComponent->SetAimHeld(false);
 	}
+	SetFoamAiming(false);
 }
 
 void AMD_Character::HandleScrapeFocusInputEnded()
@@ -1457,6 +1459,7 @@ void AMD_Character::HandleScrapeFocusInputEnded()
 	{
 		FoamGunComponent->SetAimHeld(false);
 	}
+	SetFoamAiming(false);
 
 	CancelActiveScrapeAbilityAndEndFocus();
 }
@@ -2031,6 +2034,7 @@ void AMD_Character::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_Character, bCutterVFXActive);
+	DOREPLIFETIME(AMD_Character, bFoamAiming);
 }
 
 void AMD_Character::SetCutterVFXActive(bool bActive)
@@ -2064,6 +2068,83 @@ float AMD_Character::PlayBarnacleScrapeMontage()
 void AMD_Character::OnRep_CutterVFXActive()
 {
 	RefreshCutterVFX();
+}
+
+void AMD_Character::SetFoamAiming(const bool bAiming)
+{
+	if (bFoamAiming == bAiming)
+	{
+		return;
+	}
+
+	// 소유 클라는 서버 왕복을 기다리지 않고 즉시 자세를 바꾼다.
+	// 서버가 같은 값을 굳히면 사본 프록시가 OnRep 으로 따라온다.
+	bFoamAiming = bAiming;
+	RefreshFoamAimMontage();
+
+	if (!HasAuthority())
+	{
+		ServerSetFoamAiming(bAiming);
+	}
+}
+
+void AMD_Character::ServerSetFoamAiming_Implementation(const bool bAiming)
+{
+	if (bFoamAiming == bAiming)
+	{
+		return;
+	}
+
+	bFoamAiming = bAiming;
+	// 리슨 서버 호스트 화면에도 반영한다. OnRep 은 서버에서 불리지 않는다.
+	RefreshFoamAimMontage();
+}
+
+void AMD_Character::OnRep_FoamAiming()
+{
+	RefreshFoamAimMontage();
+}
+
+void AMD_Character::RefreshFoamAimMontage()
+{
+	if (GetNetMode() == NM_DedicatedServer || !IsValid(FoamAimMontage))
+	{
+		return;
+	}
+
+	USkeletalMeshComponent* const BodyMesh = GetMesh();
+	UAnimInstance* const AnimInstance = IsValid(BodyMesh) ? BodyMesh->GetAnimInstance() : nullptr;
+	if (!IsValid(AnimInstance))
+	{
+		return;
+	}
+
+	if (!bFoamAiming)
+	{
+		if (AnimInstance->Montage_IsPlaying(FoamAimMontage))
+		{
+			AnimInstance->Montage_Stop(FoamAimMontageBlendOutSeconds, FoamAimMontage);
+		}
+		return;
+	}
+
+	if (AnimInstance->Montage_IsPlaying(FoamAimMontage))
+	{
+		return;
+	}
+
+	if (AnimInstance->Montage_Play(FoamAimMontage) <= 0.0f)
+	{
+		return;
+	}
+
+	// 한 프레임짜리 포즈 몽타주라 그냥 두면 곧바로 끝난다. 섹션이 자기 자신을
+	// 다음으로 가리키게 해 조준을 놓을 때까지 자세를 유지시킨다.
+	const FName SectionName = FoamAimMontage->GetSectionName(0);
+	if (!SectionName.IsNone())
+	{
+		AnimInstance->Montage_SetNextSection(SectionName, SectionName, FoamAimMontage);
+	}
 }
 
 void AMD_Character::RefreshCutterVFX()
