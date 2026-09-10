@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Game/MD_GameModeBase.h"
@@ -288,7 +288,7 @@ void AMD_GameModeBase::RequestEndDay(EMD_DayEndReason EndReason, FGameplayTag Re
 
 void AMD_GameModeBase::TravelToNextDay()
 {
-    PreparePlayersForTravel(NSLOCTEXT("MDLoadingScreen", "StartingNextDay", "NEXT SHIFT PREPARING • 다음 작업일 준비 중"));
+    PreparePlayersForTravel(EMD_LoadingContext::NextShift);
 
     // 같은 레벨을 다시 로드 → BeginPlay에서 복원 경로 진입
     RestartLevelAfterLoadingIntro();
@@ -297,7 +297,7 @@ void AMD_GameModeBase::TravelToNextDay()
 // 세션 절차를 거치지 않는 직접 ServerTravel 앞에서 모든 소유 클라이언트의 로딩을 켠다.
 // 클라이언트가 서버와 같은 시점에 인트로를 시작해야 하므로
 // RestartLevelAfterLoadingIntro의 콜백 안이 아니라 그 전에 호출해야 한다.
-void AMD_GameModeBase::PreparePlayersForTravel(const FText& Subtitle)
+void AMD_GameModeBase::PreparePlayersForTravel(EMD_LoadingContext Context)
 {
     UWorld* World = GetWorld();
     if (!IsValid(World))
@@ -309,7 +309,7 @@ void AMD_GameModeBase::PreparePlayersForTravel(const FText& Subtitle)
     {
         if (AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(Iterator->Get()))
         {
-            PlayerController->ClientPrepareLoadingTransition(Subtitle);
+            PlayerController->ClientPrepareLoadingTransition(Context);
         }
     }
 }
@@ -628,7 +628,7 @@ void AMD_GameModeBase::TravelToLevel(const TSoftObjectPtr<UWorld>& Level)
         // 대상 미지정 → 안전하게 현재 레벨 리스타트 (BP에서 레벨 지정 필요)
         UE_LOG(LogTemp, Warning,
             TEXT("[Day] 전환 대상 레벨 미지정. BP GameMode에서 지정 필요"));
-        PreparePlayersForTravel(NSLOCTEXT("MDLoadingScreen", "RestartingCurrentLevel", "Reloading area..."));
+        PreparePlayersForTravel(EMD_LoadingContext::Default);
         RestartLevelAfterLoadingIntro();
         return;
     }

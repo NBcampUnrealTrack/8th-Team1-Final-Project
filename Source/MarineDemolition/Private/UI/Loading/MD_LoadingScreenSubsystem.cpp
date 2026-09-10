@@ -25,32 +25,46 @@
 
 namespace
 {
-	/**
-	 * 진행 문구를 같은 상황의 완료 문구로 바꾼다.
-	 * 호출부(MD_MultiplayManager / MD_GameModeBase)에서 진행 문구를 바꾸면 여기 접두사도
-	 * 함께 고쳐야 한다. 안 고치면 조용히 기본 문구로 떨어진다.
-	 */
-	FText MakeCompletionSubtitle(const FText& Subtitle)
+	/** 한 상황의 진행 문구와 완료 문구. 두 문구가 나란히 있어 한쪽만 바뀌는 일이 없다. */
+	struct FLoadingSubtitles
 	{
-		// static으로 두면 첫 호출 시점의 언어로 굳는다. 진행 문구는 호출부에서 매번 새로
-		// 만들어지므로, 여기만 굳으면 언어 변경 후 완료 문구만 옛 언어로 남는다.
-		struct FMapping { const TCHAR* Prefix; FText Completion; };
-		const FMapping Mappings[] =
-		{
-			{TEXT("CREW ASSEMBLING"),      LOCTEXT("CrewAssembled",  "CREW ASSEMBLED • 잠수팀 준비 완료")},
-			{TEXT("DIVE IN PROGRESS"),     LOCTEXT("DiveReady",      "DIVE READY • 잠수 준비 완료")},
-			{TEXT("RETURNING TO SURFACE"), LOCTEXT("SurfaceReady",   "SURFACE ROUTE READY • 수면 복귀 준비 완료")},
-			{TEXT("MISSION INCOMPLETE"),   LOCTEXT("ReturnReady",    "RETURN ROUTE READY • 복귀 준비 완료")},
-			{TEXT("LEAVING THE CREW"),     LOCTEXT("DepartureReady", "DEPARTURE READY • 팀 이탈 준비 완료")},
-			{TEXT("NEXT SHIFT PREPARING"), LOCTEXT("NextShiftReady", "NEXT SHIFT READY • 다음 작업일 준비 완료")},
-		};
+		FText Progress;
+		FText Completion;
+	};
 
-		const FString Source = Subtitle.ToString();
-		for (const FMapping& Mapping : Mappings)
+	/**
+	 * 로딩 화면에 표시할 문구를 상황에서 만든다. 문구가 여기 한 곳에만 있으므로
+	 * 호출부는 상황만 넘기면 되고, 진행/완료 문구가 서로 어긋날 수 없다.
+	 *
+	 * 표를 static으로 캐시하지 않는 이유: FText가 첫 호출 시점의 언어로 굳어
+	 * 언어를 바꿔도 옛 언어의 문구가 남는다. 호출은 로딩 1회당 1번이라 비용은 무시할 만하다.
+	 */
+	FLoadingSubtitles GetLoadingSubtitles(EMD_LoadingContext Context)
+	{
+		switch (Context)
 		{
-			if (Source.StartsWith(Mapping.Prefix)) { return Mapping.Completion; }
+		case EMD_LoadingContext::CrewAssembling:
+			return {LOCTEXT("CreatingSession",    "CREW ASSEMBLING • 잠수팀 준비 중"),
+			        LOCTEXT("CrewAssembled",      "CREW ASSEMBLED • 잠수팀 준비 완료")};
+		case EMD_LoadingContext::DiveStarting:
+			return {LOCTEXT("StartingExpedition", "DIVE IN PROGRESS • 잠수 준비 중"),
+			        LOCTEXT("DiveReady",          "DIVE READY • 잠수 준비 완료")};
+		case EMD_LoadingContext::ReturningToSurface:
+			return {LOCTEXT("ReturningToTitle",   "RETURNING TO SURFACE • 수면으로 복귀 중"),
+			        LOCTEXT("SurfaceReady",       "SURFACE ROUTE READY • 수면 복귀 준비 완료")};
+		case EMD_LoadingContext::MissionIncomplete:
+			return {LOCTEXT("ReturningToLobby",   "MISSION INCOMPLETE • 작업 중단 후 복귀 중"),
+			        LOCTEXT("ReturnReady",        "RETURN ROUTE READY • 복귀 준비 완료")};
+		case EMD_LoadingContext::LeavingCrew:
+			return {LOCTEXT("LeavingLobby",       "LEAVING THE CREW • 팀에서 나가는 중"),
+			        LOCTEXT("DepartureReady",     "DEPARTURE READY • 팀 이탈 준비 완료")};
+		case EMD_LoadingContext::NextShift:
+			return {LOCTEXT("StartingNextDay",    "NEXT SHIFT PREPARING • 다음 작업일 준비 중"),
+			        LOCTEXT("NextShiftReady",     "NEXT SHIFT READY • 다음 작업일 준비 완료")};
+		default:
+			return {LOCTEXT("DefaultSubtitle",    "PREPARING EXPEDITION • 원정 준비 중"),
+			        LOCTEXT("LoadingComplete",    "LOADING COMPLETE • 로딩 완료")};
 		}
-		return LOCTEXT("LoadingComplete", "LOADING COMPLETE • 로딩 완료");
 	}
 }
 
@@ -95,7 +109,7 @@ void UMD_LoadingScreenSubsystem::Deinitialize()
 	Super::Deinitialize();
 }
 
-void UMD_LoadingScreenSubsystem::BeginLoadingScreen(const FText& Subtitle)
+void UMD_LoadingScreenSubsystem::BeginLoadingScreen(EMD_LoadingContext Context)
 {
 	// 데디케이티드 서버에는 그릴 화면이 없다. 각 클라이언트는 ClientPrepareLoadingTransition
 	// RPC를 받아 자기 쪽에서 로딩을 시작한다.
@@ -109,7 +123,7 @@ void UMD_LoadingScreenSubsystem::BeginLoadingScreen(const FText& Subtitle)
 	// Common UI Transition이 이미 인트로를 재생 중이면 같은 연출을 Slate에서 다시 시작하지 않는다.
 	if (IsCommonTransitionScreenActive()) { return; }
 
-	StartLoadingVisuals(Subtitle, /*bSkipIntro=*/false);
+	StartLoadingVisuals(Context, /*bSkipIntro=*/false);
 	SetLoadingTimer(IntroTimerHandle, &ThisClass::HandleIntroAnimationFinished, MD_LoadingScreen::IntroDurationSeconds);
 }
 
@@ -154,7 +168,7 @@ void UMD_LoadingScreenSubsystem::HandlePreLoadMap(const FWorldContext& WorldCont
 	// 이미 맵 로딩이 시작돼 인트로를 재생할 시간이 없으므로 인트로를 건너뛰고 화면만 덮는다.
 	if (!IsLoadingScreenActive())
 	{
-		StartLoadingVisuals(FText::GetEmpty(), /*bSkipIntro=*/true);
+		StartLoadingVisuals(EMD_LoadingContext::Default, /*bSkipIntro=*/true);
 	}
 	if (VisualState.IsValid()) { VisualState->SetProgressFloor(MD_LoadingScreen::MapLoadStartProgress); }
 
@@ -350,33 +364,39 @@ void UMD_LoadingScreenSubsystem::BeginOutro()
 }
 
 // 연출 상태를 만들고 화면을 덮는다. bSkipIntro는 인트로를 기다릴 수 없는 fallback 경로용이다.
-void UMD_LoadingScreenSubsystem::StartLoadingVisuals(const FText& Subtitle, bool bSkipIntro)
+void UMD_LoadingScreenSubsystem::StartLoadingVisuals(EMD_LoadingContext Context, bool bSkipIntro)
 {
 	// 남아 있는 위젯은 이전 VisualState를 붙든 채 재사용되므로 새 연출이 보이지 않는다.
 	// outro 도중 다음 로딩이 시작되는 경우가 있어 여기서 먼저 걷어낸다.
 	RemoveLoadingWidgets();
 
-	const FText Resolved = Subtitle.IsEmpty()
-		? LOCTEXT("DefaultSubtitle", "PREPARING EXPEDITION • 원정 준비 중")
-		: Subtitle;
+	const FLoadingSubtitles Subtitles = GetLoadingSubtitles(Context);
 
 	Phase = bSkipIntro ? EMD_LoadingPhase::Loading : EMD_LoadingPhase::Intro;
 	PendingFinish = EMD_LoadingFinishRequest::None;
 	ReadyStablePollCount = 0;
 	ReadinessWaitStartSeconds = 0.0;
-	VisualState = MakeShared<FMD_LoadingVisualState>(Resolved, MakeCompletionSubtitle(Resolved));
+	VisualState = MakeShared<FMD_LoadingVisualState>(Subtitles.Progress, Subtitles.Completion);
 	EnsureViewportLoadingWidget();
 }
 
-// 로딩 타이머는 모두 월드에 종속된다. 월드가 없거나 남은 시간이 없으면 대기 없이
-// 콜백을 즉시 실행해 연출이 그 자리에서 멈추지 않게 한다.
+// 로딩 타이머는 모두 월드에 종속된다. 월드가 없으면 콜백을 즉시 실행한다.
+// 월드가 있지만 남은 시간이 없을 때는 다음 틱으로 넘긴다. PostLoadMap 델리게이트 안에서
+// 인트로 완료 콜백을 동기 실행하면 콜백이 즉시 ServerTravel을 재호출할 수 있어 재진입한다.
 void UMD_LoadingScreenSubsystem::SetLoadingTimer(FTimerHandle& Handle, FTimerCallback Callback, double Seconds,
 	UWorld* InWorld)
 {
 	UWorld* World = InWorld ? InWorld : GetWorld();
-	if (World && Seconds > KINDA_SMALL_NUMBER)
+	if (World)
 	{
-		World->GetTimerManager().SetTimer(Handle, this, Callback, static_cast<float>(Seconds), false);
+		if (Seconds > KINDA_SMALL_NUMBER)
+		{
+			World->GetTimerManager().SetTimer(Handle, this, Callback, static_cast<float>(Seconds), false);
+		}
+		else
+		{
+			Handle = World->GetTimerManager().SetTimerForNextTick(this, Callback);
+		}
 		return;
 	}
 	(this->*Callback)();
@@ -398,19 +418,18 @@ void UMD_LoadingScreenSubsystem::ClearLoadingTimers()
 // 한 번 로드하면 UPROPERTY가 붙들고 있으므로 다음 로딩에서는 다시 읽지 않는다.
 TSharedRef<SWidget> UMD_LoadingScreenSubsystem::CreateLoadingWidget()
 {
-	if (!ShipTexture || !BeaconTexture || !LoadingFont)
+	if (const UMD_LoadingScreenSettings* Settings = UMD_LoadingScreenSettings::Get())
 	{
-		if (const UMD_LoadingScreenSettings* Settings = UMD_LoadingScreenSettings::Get())
-		{
-			if (!ShipTexture) { ShipTexture = Settings->GetShipTexture(); }
-			if (!BeaconTexture) { BeaconTexture = Settings->GetBeaconTexture(); }
-			if (!LoadingFont) { LoadingFont = Settings->GetFont(); }
-		}
+		if (!ShipTexture) { ShipTexture = Settings->GetShipTexture(); }
+		if (!BeaconTexture) { BeaconTexture = Settings->GetBeaconTexture(); }
+		if (!LoadingFont) { LoadingFont = Settings->GetFont(); }
+		if (!BackgroundTexture) { BackgroundTexture = Settings->GetBackgroundTexture(); }
 	}
 	return SNew(SMD_LoadingScreenWidget)
 		.VisualState(VisualState)
 		.ShipTexture(ShipTexture)
 		.BeaconTexture(BeaconTexture)
+		.BackgroundTexture(BackgroundTexture)
 		.Font(LoadingFont);
 }
 
@@ -507,15 +526,15 @@ void UMD_LoadingScreenSubsystem::HandleIntroAnimationFinished()
 
 bool UMD_LoadingScreenSubsystem::IsCommonTransitionScreenActive() const
 {
+	const UMD_LoadingScreenSettings* Settings = UMD_LoadingScreenSettings::Get();
 	ULocalPlayer* LocalPlayer = GetGameInstance()->GetFirstGamePlayer();
 	UMD_LocalUIManager* LocalUIManager = IsValid(LocalPlayer)
 		? LocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
 	const UMD_UISettings* UISettings = UMD_UISettings::Get();
-	if (!IsValid(LocalUIManager) || !IsValid(UISettings)) { return false; }
+	if (!IsValid(LocalUIManager) || !IsValid(UISettings) || !IsValid(Settings)) { return false; }
 
 	UCommonActivatableWidget* ActiveModalScreen = LocalUIManager->GetActiveScreen(MDGameplayTags::UI_Layer_Modal);
-	const FGameplayTag TransitionTag =
-		FGameplayTag::RequestGameplayTag(FName(TEXT("UI.Layer.Modal.Transition")), /*ErrorIfNotFound=*/false);
+	const FGameplayTag TransitionTag = Settings->TransitionScreenTag;
 	if (!IsValid(ActiveModalScreen) || !TransitionTag.IsValid()) { return false; }
 
 	// 활성 화면이 이미 클래스를 로드했으므로 Soft Class를 강제로 다시 로드하지 않는다.

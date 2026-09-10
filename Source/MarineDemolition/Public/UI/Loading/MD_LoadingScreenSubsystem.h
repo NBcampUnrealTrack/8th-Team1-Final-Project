@@ -35,8 +35,9 @@ public:
 	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual void Deinitialize() override;
 
+	/** 표시할 문구는 상황에서 정해진다. 문구 자체는 서브시스템 안에 한 벌만 있다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|UI|Loading")
-	void BeginLoadingScreen(const FText& Subtitle);
+	void BeginLoadingScreen(EMD_LoadingContext Context);
 
 	/** 트래블이 일어나지 않게 된 경우(세션 실패 등) COMPLETE 없이 즉시 걷어낸다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|UI|Loading")
@@ -72,7 +73,7 @@ private:
 	void TryFinishAfterWorldLoad();
 	void FinishLoadingScreen(bool bShowCompletion = true);
 	void BeginOutro();
-	void StartLoadingVisuals(const FText& Subtitle, bool bSkipIntro);
+	void StartLoadingVisuals(EMD_LoadingContext Context, bool bSkipIntro);
 	void SetLoadingTimer(FTimerHandle& Handle, FTimerCallback Callback, double Seconds, UWorld* InWorld = nullptr);
 	void ClearLoadingTimers();
 	TSharedRef<SWidget> CreateLoadingWidget();
@@ -94,6 +95,8 @@ private:
 	TObjectPtr<UTexture2D> BeaconTexture;
 	UPROPERTY(Transient)
 	TObjectPtr<UFont> LoadingFont;
+	UPROPERTY(Transient)
+	TObjectPtr<UTexture2D> BackgroundTexture;
 
 	FTimerHandle IntroTimerHandle;
 	FTimerHandle WorldReadyTimerHandle;

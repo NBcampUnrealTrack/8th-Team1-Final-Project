@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "GameplayTagContainer.h"
 #include "MD_LoadingScreenSettings.generated.h"
 
 class UTexture2D;
@@ -36,12 +37,25 @@ public:
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading Screen")
 	TSoftObjectPtr<UTexture2D> BeaconTexture;
 
+	/** 항로 뒤에 깔리는 고정 바다 일러스트. MoviePlayer가 시작되기 전에 로드한다. */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading Screen")
+	TSoftObjectPtr<UTexture2D> BackgroundTexture;
+
 	/** 로딩 화면 제목과 부제에 사용할 폰트. */
 	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading Screen")
 	TSoftObjectPtr<UFont> Font;
 
+	/**
+	 * 같은 인트로를 이미 재생 중인 Common UI Transition 화면의 레이어 태그.
+	 * 그 화면이 떠 있으면 Slate 로딩 연출을 중복으로 시작하지 않는다.
+	 * 미지정이면 중복 검사를 하지 않는다.
+	 */
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Loading Screen")
+	FGameplayTag TransitionScreenTag;
+
 	// 미지정이면 nullptr. 로딩 시작 직전에 한 번만 동기 로드하고 서브시스템이 붙들고 있는다.
 	UTexture2D* GetShipTexture() const;
 	UTexture2D* GetBeaconTexture() const;
+	UTexture2D* GetBackgroundTexture() const;
 	UFont* GetFont() const;
 };
