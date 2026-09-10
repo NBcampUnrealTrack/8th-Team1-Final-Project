@@ -6,6 +6,7 @@
 #include "Data/Input/MD_InputConfig.h"
 #include "Component/Character/MD_CharacterMovementComponent.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
+#include "Component/Scanning/MD_ScannerComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
@@ -91,6 +92,7 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	FirstPersonMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	ScrapeToolComponent = CreateDefaultSubobject<UMD_ScrapeToolComponent>(TEXT("ScrapeToolComponent"));
+	ScannerComponent = CreateDefaultSubobject<UMD_ScannerComponent>(TEXT("ScannerComponent"));
 
 	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
 
@@ -1078,6 +1080,12 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		return;
 	}
 
+	if (IsValid(InputConfig->ScannerModeSwitchAction))
+	{
+		EIC->BindAction(InputConfig->ScannerModeSwitchAction, ETriggerEvent::Started,
+			this, &AMD_Character::HandleScannerModeSwitchInput);
+	}
+
 	if (IsValid(InputConfig->ScrapeFocusAction))
 	{
 		EIC->BindAction(
@@ -1172,6 +1180,11 @@ void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 	{
 		InteractionComponent->Interact();
 	}
+}
+
+void AMD_Character::HandleScannerModeSwitchInput(const FInputActionValue& Value)
+{
+	if (IsValid(ScannerComponent)) ScannerComponent->ToggleScanMode();
 }
 
 void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
@@ -1932,6 +1945,7 @@ void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
 	if (bIsDead)
 	{
 		CancelActiveScrapeAbilityAndEndFocus();
+		if (ScannerComponent) ScannerComponent->ClearScan();
 	}
 
 	if (IsValid(InteractionComponent))

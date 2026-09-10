@@ -1,205 +1,227 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+﻿#include "Ability/Wall/MD_GA_WallScan.h"
 
-
-#include "Ability/Wall/MD_GA_WallScan.h"
-
-#include "Engine/EngineTypes.h"
-#include "Engine/World.h"
-#include "GameFramework/Controller.h"
-#include "GameFramework/Pawn.h"
-#include "Kismet/KismetSystemLibrary.h"
-#include "Materials/MaterialParameterCollection.h"
-#include "Materials/MaterialParameterCollectionInstance.h"
-#include "Audio/MD_AudioRelayComponent.h"
+#include "AbilitySystemComponent.h"
 #include "Character/MD_Character.h"
+#include "Component/Scanning/MD_ScannerComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
+#include "EngineUtils.h"
+#include "GameFramework/Controller.h"
 #include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "GameplayPrediction.h"
+#include "Kismet/KismetSystemLibrary.h"
+#include "TimerManager.h"
+#include "World/Wall/MD_CuttableWall.h"
+#include "World/Wall/MD_WallUtility.h"
 
 UMD_GA_WallScan::UMD_GA_WallScan()
 {
-	ScanPulseSoundTag = FGameplayTag::RequestGameplayTag(TEXT("SFX.Tool.Scanner.PulseLoop"), /*ErrorIfNotFound*/ false);
+	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
+	NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
+	ActivationBlockedTags.AddTag(MDGameplayTags::State_Dead);
+	ScanPulseSoundTag = FGameplayTag::RequestGameplayTag(TEXT("SFX.Tool.Scanner.PulseLoop"), false);
 	RequiredTargetTags.AddTag(MDGameplayTags::Interaction_Scannable);
-
-	ScanObjectTypes = {
-		UEngineTypes::ConvertToObjectType(ECC_WorldStatic),
-		UEngineTypes::ConvertToObjectType(ECC_WorldDynamic),
-		UEngineTypes::ConvertToObjectType(ECC_PhysicsBody)
-	};
+	ScanObjectTypes = { UEngineTypes::ConvertToObjectType(ECC_WorldStatic),
+		UEngineTypes::ConvertToObjectType(ECC_WorldDynamic), UEngineTypes::ConvertToObjectType(ECC_PhysicsBody) };
 }
 
-bool UMD_GA_WallScan::IsLocationInsideScanCone(
-	const FVector& ViewLocation,
-	const FVector& ViewForward,
-	const FVector& TargetLocation,
-	const float Radius,
-	const float ConeHalfAngleDegrees)
-{
-	if (Radius <= 0.0f || ViewForward.IsNearlyZero())
-	{
-		return false;
-	}
-
-	const FVector ToTarget = TargetLocation - ViewLocation;
-	const double DistanceSquared = ToTarget.SizeSquared();
-	if (DistanceSquared > FMath::Square(static_cast<double>(Radius)))
-	{
-		return false;
-	}
-
-	// 카메라 위치와 같은 지점은 방향을 정의할 수 없지만 원뿔 꼭짓점 안으로 본다.
-	if (DistanceSquared <= UE_DOUBLE_SMALL_NUMBER)
-	{
-		return true;
-	}
-
-	const double ClampedHalfAngle = FMath::Clamp(static_cast<double>(ConeHalfAngleDegrees), 0.0, 180.0);
-	const double MinimumAlignment = FMath::Cos(FMath::DegreesToRadians(ClampedHalfAngle));
-	const double Alignment = FVector::DotProduct(ViewForward.GetSafeNormal(), ToTarget.GetSafeNormal());
-	return Alignment + UE_DOUBLE_KINDA_SMALL_NUMBER >= MinimumAlignment;
-}
-
-bool UMD_GA_WallScan::FindScanTargets(
-	const FGameplayAbilityActorInfo* ActorInfo,
-	TArray<AActor*>& OutTargets,
-	FVector& OutScanOrigin,
-	FVector& OutScanForward) const
+bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo, EMD_ScanMode Mode,
+	TArray<AActor*>& OutTargets, FVector& OutOrigin, FVector& OutForward) const
 {
 	OutTargets.Reset();
-	OutScanOrigin = FVector::ZeroVector;
-	OutScanForward = FVector::ZeroVector;
-
-	const APawn* Avatar = ActorInfo ? Cast<APawn>(ActorInfo->AvatarActor.Get()) : nullptr;
-	const AController* Controller = Avatar ? Avatar->GetController() : nullptr;
-	UWorld* World = Avatar ? Avatar->GetWorld() : nullptr;
-	if (!Avatar || !Controller || !World || ScanRadius <= 0.0f || ScanObjectTypes.IsEmpty())
-	{
-		return false;
-	}
-
-	FRotator ViewRotation;
-	Controller->GetPlayerViewPoint(OutScanOrigin, ViewRotation);
-	OutScanForward = ViewRotation.Vector().GetSafeNormal();
-
+	OutOrigin = FVector::ZeroVector;
+	OutForward = FVector::ForwardVector;
+	const APawn* Pawn = ActorInfo ? Cast<APawn>(ActorInfo->AvatarActor.Get()) : nullptr;
+	const AController* Controller = Pawn ? Pawn->GetController() : nullptr;
+	if (!Controller || !Pawn->GetWorld() || !FMath::IsFinite(ScanRadius) || ScanRadius <= 0
+		|| !FMath::IsFinite(ScanConeHalfAngleDegrees)
+		|| (Mode == EMD_ScanMode::InternalStructure && ScanObjectTypes.IsEmpty())) return false;
+	FRotator Rotation;
+	Controller->GetPlayerViewPoint(OutOrigin, Rotation);
+	OutForward = Rotation.Vector().GetSafeNormal();
 	TArray<AActor*> Candidates;
-	TArray<AActor*> ActorsToIgnore;
-	ActorsToIgnore.Add(const_cast<APawn*>(Avatar));
-	UKismetSystemLibrary::SphereOverlapActors(
-		World,
-		OutScanOrigin,
-		ScanRadius,
-		ScanObjectTypes,
-		AActor::StaticClass(),
-		ActorsToIgnore,
-		Candidates);
-
+	if (Mode == EMD_ScanMode::WallType)
+	{
+		// Some authored walls have complex collision only and are absent from simple
+		// overlap results. Classify their rendered bounds once per scan, without Tick.
+		for (TActorIterator<AMD_CuttableWall> It(Pawn->GetWorld()); It; ++It) Candidates.Add(*It);
+	}
+	else
+	{
+		const TArray<AActor*> Ignore { const_cast<APawn*>(Pawn) };
+		UKismetSystemLibrary::SphereOverlapActors(Pawn->GetWorld(), OutOrigin, ScanRadius,
+			ScanObjectTypes, AActor::StaticClass(), Ignore, Candidates);
+		// Pipes/conduits can have no simple collision or no host-wall link.
+		// Enumerate only this infrastructure class, once per activation.
+		for (TActorIterator<AMD_WallUtility> It(Pawn->GetWorld()); It; ++It)
+			Candidates.AddUnique(*It);
+	}
 	for (AActor* Candidate : Candidates)
 	{
-		if (!IsValid(Candidate)
-			|| !IsLocationInsideScanCone(
-				OutScanOrigin,
-				OutScanForward,
-				Candidate->GetActorLocation(),
-				ScanRadius,
-				ScanConeHalfAngleDegrees)
-			|| !ActorHasAnyTargetTag(Candidate, RequiredTargetTags)
-			|| !Candidate->GetClass()->ImplementsInterface(UMD_Scannable::StaticClass()))
-		{
+		if (!IsValid(Candidate) || Candidate->IsHidden() || !ActorHasAnyTargetTag(Candidate, RequiredTargetTags))
 			continue;
+		FVector Center = Candidate->GetActorLocation();
+		double BoundRadius = 0;
+		if (Mode == EMD_ScanMode::WallType)
+		{
+			const AMD_CuttableWall* Wall = Cast<AMD_CuttableWall>(Candidate);
+			if (!Wall || !Wall->CanCut() || !IsValid(Wall->GetScanMesh())) continue;
+			if (Wall->GetWallType() != EMD_WallType::Partition && Wall->GetWallType() != EMD_WallType::Strut) continue;
+			const UStaticMeshComponent* Mesh = Wall->GetScanMesh();
+			if (!Mesh->IsVisible() || !Mesh->bRenderInMainPass) continue;
+			Center = Mesh->Bounds.Origin;
+			BoundRadius = Mesh->Bounds.SphereRadius;
 		}
-
-		OutTargets.AddUnique(Candidate);
+		else if (const AMD_WallUtility* Utility = Cast<AMD_WallUtility>(Candidate))
+		{
+			const UStaticMeshComponent* Mesh = Utility->GetScanMesh();
+			if (!IsValid(Mesh) || !Mesh->GetStaticMesh() || !Mesh->IsVisible() || !Mesh->bRenderInMainPass)
+				continue;
+			Center = Mesh->Bounds.Origin;
+			BoundRadius = Mesh->Bounds.SphereRadius;
+		}
+		else if (!Candidate->GetClass()->ImplementsInterface(UMD_Scannable::StaticClass()))
+			continue;
+		if (MDScanning::SphereIntersectsScanCone(OutOrigin, OutForward, Center, BoundRadius,
+			ScanRadius, ScanConeHalfAngleDegrees)) OutTargets.AddUnique(Candidate);
 	}
-
+	UE_LOG(LogTemp, VeryVerbose, TEXT("[Scanner] Find %s mode=%d candidates=%d targets=%d"), *GetNameSafe(Pawn), int32(Mode), Candidates.Num(), OutTargets.Num());
 	return true;
 }
 
-void UMD_GA_WallScan::PlayScanPulse()
-{
-	// DA_MD_Audio_Tool 의 펄스 항목은 루프다. 끊을 시점이 없으면 영원히 남으므로
-	// ScanDuration 이 0 이하면 아예 재생하지 않는다.
-	if (!ScanPulseSoundTag.IsValid() || ScanDuration <= 0.f)
-	{
-		return;
-	}
-
-	// 재생과 정지를 모두 중계 컴포넌트에 맡긴다.
-	//
-	// 예전에는 이 어빌리티가 직접 재생하고 자기 인스턴스에 3초 타이머를 걸었는데,
-	// 즉발 어빌리티라 EndAbility 직후 인스턴스가 회수되면 타이머만 조용히 죽어
-	// 펄스가 영원히 울렸다. 컴포넌트는 아바타와 수명을 같이하므로 안전하다.
-	if (UMD_AudioRelayComponent* const Relay = GetAudioRelay())
-	{
-		Relay->PlayAttachedForDuration(ScanPulseSoundTag, ScanDuration, ScanPulseFadeOutSeconds);
-	}
-}
-
-void UMD_GA_WallScan::StopScanPulse()
-{
-	if (UMD_AudioRelayComponent* const Relay = GetAudioRelay())
-	{
-		Relay->StopEverywhere(ScanPulseSoundTag, ScanPulseFadeOutSeconds);
-	}
-}
-
 void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
-                                      const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo,
-                                      const FGameplayEventData* TriggerEventData)
+	const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo,
+	const FGameplayEventData*)
 {
-	if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
+	ClearModeWait();
+	LocalRequestId = 0;
+	AMD_Character* Character = ActorInfo ? Cast<AMD_Character>(ActorInfo->AvatarActor.Get()) : nullptr;
+	UMD_ScannerComponent* Scanner = Character ? Character->GetScannerComponent() : nullptr;
+	UAbilitySystemComponent* ASC = ActorInfo ? ActorInfo->AbilitySystemComponent.Get() : nullptr;
+	UE_LOG(LogTemp, VeryVerbose, TEXT("[Scanner] Activate %s authority=%d local=%d key=%d"), *GetNameSafe(Character), ActorInfo && ActorInfo->IsNetAuthority(), ActorInfo && ActorInfo->IsLocallyControlled(), ActivationInfo.GetActivationPredictionKey().Current);
+	if (!Scanner || !ASC || !Scanner->IsScannerEquipped())
 	{
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 		return;
 	}
-
-	APawn* Avatar = ActorInfo ? Cast<APawn>(ActorInfo->AvatarActor.Get()) : nullptr;
-	if (!Avatar)
+	PendingHandle = Handle;
+	PendingKey = ActivationInfo.GetActivationPredictionKey();
+	if (ActorInfo->IsNetAuthority() && !ActorInfo->IsLocallyControlled())
 	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+		if (!PendingKey.IsValidKey())
+		{
+			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+			return;
+		}
+		bWaitingForMode = true;
+		ModeDelegate = ASC->AbilityTargetDataSetDelegate(Handle, PendingKey).AddUObject(this, &ThisClass::ReceiveMode);
+		CancelDelegate = ASC->AbilityTargetDataCancelledDelegate(Handle, PendingKey).AddUObject(this, &ThisClass::CancelPendingMode);
+		GetWorld()->GetTimerManager().SetTimer(ModeTimeout, this, &ThisClass::CancelPendingMode,
+			FMath::IsFinite(ModeRequestTimeoutSeconds) ? FMath::Max(ModeRequestTimeoutSeconds, 0.1f) : 2.f, false);
+		ASC->CallReplicatedTargetDataDelegatesIfSet(Handle, PendingKey);
 		return;
 	}
-
-	TArray<AActor*> ScanTargets;
-	FVector ScanOrigin;
-	FVector ScanForward;
-	FindScanTargets(ActorInfo, ScanTargets, ScanOrigin, ScanForward);
-	if (!ScanTargets.IsEmpty())
+	LocalRequestId = Scanner->BeginLocalRequest();
+	const EMD_ScanMode Mode = Scanner->GetScanMode();
+	if (!PerformScan(Mode, LocalRequestId))
 	{
-		if (Avatar->IsLocallyControlled())
-		{
-			for (AActor* Target : ScanTargets)
-			{
-				// Execute 경로를 사용해야 Blueprint 전용 인터페이스 구현도 호출된다.
-				IMD_Scannable::Execute_OnScanned(Target, ScanDuration, Avatar);
-			}
-
-			// 스윕 연출 시작 — MPC는 월드 전역이라 스캔한 플레이어 로컬 머신에서만 세팅
-			if (ScanMPC)
-			{
-				if (UMaterialParameterCollectionInstance* MPCInst = GetWorld()->GetParameterCollectionInstance(ScanMPC))
-				{
-					MPCInst->SetVectorParameterValue(TEXT("ScanCenter"), FLinearColor(ScanOrigin));
-					MPCInst->SetVectorParameterValue(TEXT("ScanForward"), FLinearColor(ScanForward));
-					MPCInst->SetScalarParameterValue(TEXT("ScanRadius"), ScanRadius);
-					const float ClampedHalfAngle = FMath::Clamp(ScanConeHalfAngleDegrees, 0.0f, 180.0f);
-					MPCInst->SetScalarParameterValue(
-						TEXT("ScanConeCosine"),
-						FMath::Cos(FMath::DegreesToRadians(ClampedHalfAngle)));
-					// 다른 파라미터를 모두 갱신한 뒤 머티리얼 Time 기준 시작 트리거를 마지막에 쓴다.
-					MPCInst->SetScalarParameterValue(TEXT("ScanStartTime"), GetWorld()->GetTimeSeconds());
-				}
-			}
-		}
-
-		// 로컬에서는 즉시 재생하고, 서버 실행에서는 다른 클라이언트에 중계한다.
-		// 어느 쪽도 실제 스캔 대상이 있을 때만 시작한다.
-		PlayScanPulse();
+		Scanner->ClearScan();
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
 	}
-
-	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
+	if (!ActorInfo->IsNetAuthority())
+	{
+		if (!PendingKey.IsValidKey())
+		{
+			Scanner->ClearScan();
+			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+			return;
+		}
+		PendingKey.NewRejectedDelegate().BindWeakLambda(Scanner, [Scanner, RequestId = LocalRequestId]
+		{
+			Scanner->FinishLocalRequest(RequestId);
+		});
+		auto* Request = new FGameplayAbilityTargetData_ScanMode();
+		Request->Mode = Mode;
+		Request->RequestId = LocalRequestId;
+		FGameplayAbilityTargetDataHandle Data(Request);
+		FScopedPredictionWindow Prediction(ASC, true);
+		ASC->CallServerSetReplicatedTargetData(Handle, PendingKey, Data, FGameplayTag(), ASC->ScopedPredictionKey);
+	}
+	// The server ends its own request after consuming mode data. Do not race that wait
+	// with an instant client EndAbility RPC; the display belongs to ScannerComponent.
+	EndAbility(Handle, ActorInfo, ActivationInfo, ActorInfo->IsNetAuthority(), false);
 }
 
-UMD_AudioRelayComponent* UMD_GA_WallScan::GetAudioRelay() const
+bool UMD_GA_WallScan::PerformScan(EMD_ScanMode Mode, uint32 RequestId)
 {
-	const AMD_Character* const Avatar = Cast<AMD_Character>(GetAvatarActorFromActorInfo());
-	return Avatar ? Avatar->GetAudioRelayComponent() : nullptr;
+	const FGameplayAbilityActorInfo* Info = GetCurrentActorInfo();
+	const AMD_Character* Character = Info ? Cast<AMD_Character>(Info->AvatarActor.Get()) : nullptr;
+	UMD_ScannerComponent* Scanner = Character ? Character->GetScannerComponent() : nullptr;
+	if (!Scanner || !MDScanning::IsValidMode(Mode) || !Scanner->IsScannerEquipped()
+		|| !FMath::IsFinite(ScanDuration) || ScanDuration <= 0) return false;
+	if (Info->IsNetAuthority() && !Scanner->AcceptAuthoritativeRequest(RequestId)) return false;
+	if (!CommitAbility(GetCurrentAbilitySpecHandle(), Info, GetCurrentActivationInfo())) return false;
+	TArray<AActor*> Targets;
+	FVector Origin, Forward;
+	FindScanTargets(Info, Mode, Targets, Origin, Forward);
+	if (!Targets.IsEmpty())
+	{
+		if (Info->IsLocallyControlled())
+			Scanner->PresentLocalScan(RequestId, Mode, Targets, ScanDuration, ScanMPC, Origin,
+				Forward, ScanRadius, ScanConeHalfAngleDegrees);
+		Scanner->PlayScanPulse(RequestId, ScanPulseSoundTag, ScanDuration, ScanPulseFadeOutSeconds);
+	}
+	return true;
+}
+
+void UMD_GA_WallScan::ReceiveMode(const FGameplayAbilityTargetDataHandle& Data, FGameplayTag)
+{
+	if (!bWaitingForMode || !IsActive()) return;
+	const FGameplayAbilityTargetData* Raw = Data.Num() == 1 ? Data.Get(0) : nullptr;
+	const auto* Request = Raw && Raw->GetScriptStruct() == FGameplayAbilityTargetData_ScanMode::StaticStruct()
+		? static_cast<const FGameplayAbilityTargetData_ScanMode*>(Raw) : nullptr;
+	const EMD_ScanMode Mode = Request ? Request->Mode : static_cast<EMD_ScanMode>(255);
+	const uint32 RequestId = Request ? Request->RequestId : 0;
+	ClearModeWait(); // Copy before consuming GAS's owning handle.
+	const bool bSuccess = RequestId != 0 && PerformScan(Mode, RequestId);
+	UE_LOG(LogTemp, VeryVerbose, TEXT("[Scanner] Receive mode=%d request=%u accepted=%d"), int32(Mode), RequestId, bSuccess);
+	if (!bSuccess)
+	{
+		const AMD_Character* Character = Cast<AMD_Character>(GetAvatarActorFromActorInfo());
+		if (Character && Character->GetScannerComponent())
+			Character->GetScannerComponent()->RejectAuthoritativeRequest(RequestId);
+	}
+	EndAbility(GetCurrentAbilitySpecHandle(), GetCurrentActorInfo(), GetCurrentActivationInfo(), true, !bSuccess);
+}
+
+void UMD_GA_WallScan::CancelPendingMode()
+{
+	if (!bWaitingForMode || !IsActive()) return;
+	EndAbility(GetCurrentAbilitySpecHandle(), GetCurrentActorInfo(), GetCurrentActivationInfo(), true, true);
+}
+
+void UMD_GA_WallScan::ClearModeWait()
+{
+	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(ModeTimeout);
+	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponentFromActorInfo(); ASC && PendingHandle.IsValid() && PendingKey.IsValidKey())
+	{
+		if (ModeDelegate.IsValid()) ASC->AbilityTargetDataSetDelegate(PendingHandle, PendingKey).Remove(ModeDelegate);
+		if (CancelDelegate.IsValid()) ASC->AbilityTargetDataCancelledDelegate(PendingHandle, PendingKey).Remove(CancelDelegate);
+		if (bWaitingForMode) ASC->ConsumeClientReplicatedTargetData(PendingHandle, PendingKey);
+	}
+	ModeDelegate.Reset();
+	CancelDelegate.Reset();
+	bWaitingForMode = false;
+	PendingHandle = FGameplayAbilitySpecHandle();
+	PendingKey = FPredictionKey();
+}
+
+void UMD_GA_WallScan::EndAbility(const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo,
+	bool bReplicateEndAbility, bool bWasCancelled)
+{
+	ClearModeWait();
+	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }

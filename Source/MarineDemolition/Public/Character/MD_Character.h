@@ -22,6 +22,7 @@ class UPhysicsHandleComponent;
 class UMD_CharacterMovementComponent;
 class UMD_InteractionComponent;
 class UMD_ScrapeToolComponent;
+class UMD_ScannerComponent;
 class UGameplayAbility;
 class UMD_EquipHotbarComponent;
 class UMD_AudioRelayComponent;
@@ -69,6 +70,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
 	UMD_ScrapeToolComponent* GetScrapeToolComponent() const	{ return ScrapeToolComponent; }
+
+	UFUNCTION(BlueprintPure, Category="MD|Scanner")
+	UMD_ScannerComponent* GetScannerComponent() const { return ScannerComponent; }
 
 	/** 현재 장착한 헤라에 털어낼 적재량이 있는지 외부 상호작용 대상에 알려준다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Unload")
@@ -209,6 +213,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_ScrapeToolComponent> ScrapeToolComponent;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Scanner")
+	TObjectPtr<UMD_ScannerComponent> ScannerComponent;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_EquipHotbarComponent> EquipHotbarComponent;
 
@@ -311,6 +318,7 @@ private:
 	void HandleLookInput(const FInputActionValue& Value);
 	void HandleInteractInput(const FInputActionValue& Value);
 	void HandleAbilityInput(const FInputActionValue& Value);
+	void HandleScannerModeSwitchInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
 	void HandleScrapeFocusToggleInput();
 	void HandleScrapeFocusInputEnded();
