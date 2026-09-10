@@ -32,6 +32,13 @@ AMD_GameModeBase::AMD_GameModeBase()
 void AMD_GameModeBase::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
     Super::InitGame(MapName, Options, ErrorMessage);
+    if (auto* GI=GetGameInstance())
+    {
+        if (auto* Saves=GI->GetSubsystem<UMD_SaveSlotManager>())
+            Saves->PrepareContaminationForWorld(GetWorld());
+        else if (auto* Persistence=GI->GetSubsystem<UMD_DayPersistenceSubsystem>())
+            Persistence->PrepareContaminationContext(GetWorld());
+    }
 
     // 출발 콘솔이 전달한 난이도 옵션만 계약 난이도로 인정하기 위한 원문 검사
     FString DifficultyOption = UGameplayStatics::ParseOption(Options, TEXT("Difficulty"));
@@ -584,6 +591,7 @@ void AMD_GameModeBase::HandleContractCleared()
         GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
     {
         Persistence->ClearSnapshot();
+        Persistence->ResetContaminationContext();
     }
 
     TravelToLevel(ClearedLevel);
@@ -596,6 +604,7 @@ void AMD_GameModeBase::HandleGameOver()
         GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
     {
         Persistence->ClearSnapshot();
+        Persistence->ResetContaminationContext();
     }
 
     // 게임오버 시에만 전체 리셋 (크레딧·계약)

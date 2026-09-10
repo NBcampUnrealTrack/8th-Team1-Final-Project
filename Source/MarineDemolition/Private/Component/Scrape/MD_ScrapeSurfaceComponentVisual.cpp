@@ -12,6 +12,7 @@
 #include "Engine/StaticMesh.h"
 #include "Engine/Texture2D.h"
 #include "Gameplay/Scrape/MD_ScrapeRuntimeMaskTexture.h"
+#include "MDScrapeInitialMaskRenderer.h"
 #include "Engine/World.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialInstanceDynamic.h"
@@ -75,9 +76,7 @@ UMD_ScrapeSurfaceComponent::MakeContaminationMaskCell(
             {
                 if (!VisualCells.IsValidIndex(Sample.CellIndex)) continue;
                 const FMD_ScrapeSurfaceCell& Cell = VisualCells[Sample.CellIndex];
-                Signal += Sample.Weight * FMD_ScrapeMaskAtlas::CalculateVisualMaskValue(
-                    Cell.RemainingContamination, Cell.InitialContamination,
-                    Cell.CoveredFraction, ContaminationVisualFilmOpacityGamma);
+                Signal += Sample.Weight * CalculateContaminationVisualSignal(Cell);
             }
             MaskCell.RemainingContamination = static_cast<float>(FMath::Clamp(Signal, 0.0, 1.0));
             return MaskCell;
@@ -91,11 +90,7 @@ UMD_ScrapeSurfaceComponent::MakeContaminationMaskCell(
 
 	const FMD_ScrapeSurfaceCell& SourceCell = VisualCells[CellIndex];
 	MaskCell.RemainingContamination =
-		FMD_ScrapeMaskAtlas::CalculateVisualMaskValue(
-			SourceCell.RemainingContamination,
-			SourceCell.InitialContamination,
-			SourceCell.CoveredFraction,
-			ContaminationVisualFilmOpacityGamma);
+		CalculateContaminationVisualSignal(SourceCell);
 	return MaskCell;
 }
 
@@ -144,9 +139,7 @@ bool UMD_ScrapeSurfaceComponent::TryBuildContaminationMaskPixels(
                 if (!bHasPreviousSignal || InputBits[0] != PreviousInputBits[0]
                     || InputBits[1] != PreviousInputBits[1] || InputBits[2] != PreviousInputBits[2])
                 {
-                    PreviousSignal = FMD_ScrapeMaskAtlas::CalculateVisualMaskValue(
-                        Cell.RemainingContamination, Cell.InitialContamination,
-                        Cell.CoveredFraction, ContaminationVisualFilmOpacityGamma);
+                    PreviousSignal = CalculateContaminationVisualSignal(Cell);
                     FMemory::Memcpy(PreviousInputBits, InputBits, sizeof(InputBits));
                     bHasPreviousSignal = true;
                 }
@@ -205,6 +198,90 @@ bool UMD_ScrapeSurfaceComponent::TryBuildContaminationMaskPixels(
 	return true;
 }
 
+bool UMD_ScrapeSurfaceComponent::TryBuildInitialContaminationMaskRecipe()
+{
+    if (!UsesMeshUVSurface() || !ContaminationMeshUVData || !ContaminationCellLayout
+        || ContaminationGeneration.Version < 2 || !ContaminationGeneration.bProcedural
+        || !ContaminationPagedCells.IsPristineCanonicalInitial()
+        || HasLocalPredictedContaminationState() || !FMDScrapeInitialMaskRenderer::IsSupported()) return false;
+    FMD_ScrapeSurfaceCell Full;
+    Full.InitialContamination = Full.RemainingContamination = 1.f;
+    // The pristine progress alphabet must be exact 0/1 before the seam sum.
+    // Keep the generic path if the signal contract ever changes.
+    const float FullSignal = CalculateContaminationVisualSignal(Full);
+    uint8 FullByte = 0;
+    if (!FMD_ScrapeMaskAtlas::TryQuantizeRemainingContamination(FullSignal, 1.f, FullByte) || FullByte != 255) return false;
+    const auto* Data = ContaminationMeshUVData.Get();
+    const auto* CellLayout = ContaminationCellLayout.Get();
+    if (Data->Cells.Num() != ContaminationGridDimensions.X * ContaminationGridDimensions.Y
+        || CellLayout->AtlasToActive.Num() != Data->Cells.Num()
+        || ContaminationPagedCells.Num() != CellLayout->ActiveToAtlas.Num()) return false;
+    struct FLayoutEntry
+    {
+        TWeakObjectPtr<const UMD_ScrapeMeshUVData> Data;
+        uint64 Revision;
+        FGuid Id;
+        TWeakPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe> Layout;
+    };
+    static TArray<FLayoutEntry> Cache;
+    Cache.RemoveAllSwap([](const auto& Entry) { return !Entry.Data.IsValid() || !Entry.Layout.IsValid(); }, EAllowShrinking::No);
+    TSharedPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe> Layout;
+    for (const auto& Entry : Cache)
+        if (Entry.Data == Data && Entry.Revision == Data->GetRuntimeCacheRevision() && Entry.Id == Data->LayoutId)
+        { Layout = Entry.Layout.Pin(); break; }
+    const auto SeamView = Data->GetVisualSeamView();
+    if (!Layout)
+    {
+        TArray<uint32> Sources;
+        TArray<int32> SeamPixels;
+        Sources.SetNumUninitialized(Data->Cells.Num());
+        for (int32 Pixel = 0; Pixel < Sources.Num(); ++Pixel)
+        {
+            if (!SeamView.GetSamples(Pixel).IsEmpty())
+            {
+                Sources[Pixel] = 0x80000000u | uint32(SeamPixels.Num());
+                SeamPixels.Add(Pixel);
+            }
+            else
+            {
+                const int32 Source = Data->Cells[Pixel].VisualSourceCellIndex;
+                const int32 Active = CellLayout->AtlasToActive.IsValidIndex(Source) ? CellLayout->AtlasToActive[Source] : INDEX_NONE;
+                Sources[Pixel] = Active == INDEX_NONE ? MAX_uint32 : uint32(Active);
+            }
+        }
+        Layout = MakeShared<FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe>(MoveTemp(Sources), MoveTemp(SeamPixels));
+        Cache.Add({Data, Data->GetRuntimeCacheRevision(), Data->LayoutId, Layout});
+    }
+    TArray<uint32> Bits;
+    Bits.SetNumZeroed(FMath::DivideAndRoundUp(ContaminationPagedCells.Num(), 32));
+    for (int32 Active = 0; Active < ContaminationPagedCells.Num(); ++Active)
+    {
+        const float Amount = ContaminationPagedCells.GetInitialCell(Active).InitialContamination;
+        if (!FMath::IsFinite(Amount) || Amount < 0.f || Amount > 1.f) return false;
+        if (Amount > UE_SMALL_NUMBER) Bits[Active >> 5] |= 1u << (Active & 31);
+    }
+    TArray<uint8> SeamBytes;
+    SeamBytes.SetNumUninitialized(Layout->SeamPixels.Num());
+    for (int32 Seam = 0; Seam < SeamBytes.Num(); ++Seam)
+    {
+        // Preserve float products, double summation, sample order and G8 rounding.
+        // Only seam pixels need this reduction; full atlas expansion runs on GPU.
+        double Sum = 0.0;
+        for (const auto& Sample : SeamView.GetSamples(Layout->SeamPixels[Seam]))
+        {
+            if (!CellLayout->AtlasToActive.IsValidIndex(Sample.CellIndex)) continue;
+            const int32 Active = CellLayout->AtlasToActive[Sample.CellIndex];
+            const float Signal = Active != INDEX_NONE && ((Bits[Active >> 5] >> (Active & 31)) & 1u) ? FullSignal : 0.f;
+            Sum += Sample.Weight * Signal;
+        }
+        const float Signal = static_cast<float>(FMath::Clamp(Sum, 0.0, 1.0));
+        if (!FMD_ScrapeMaskAtlas::TryQuantizeRemainingContamination(Signal, 1.f, SeamBytes[Seam])) return false;
+    }
+    ContaminationMaskAtlasPixels.InitializeBinary(MoveTemp(Layout), MoveTemp(Bits), MoveTemp(SeamBytes));
+    ContaminationMaskAtlasDimensions = ContaminationGridDimensions;
+    return true;
+}
+
 bool UMD_ScrapeSurfaceComponent::InitializeContaminationMask()
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_InitializeMask);
@@ -229,6 +306,7 @@ bool UMD_ScrapeSurfaceComponent::InitializeContaminationMask()
     uint32 GammaBits = 0;
     static_assert(sizeof(GammaBits) == sizeof(ContaminationVisualFilmOpacityGamma));
     FMemory::Memcpy(&GammaBits, &ContaminationVisualFilmOpacityGamma, sizeof(GammaBits));
+    if (ContaminationGeneration.Version>=2 && ContaminationGeneration.bProcedural) GammaBits ^= 0x80000000u;
     const bool bCanShareBuild = UsesMeshUVSurface() && ContaminationPagedCells.Num() > 0
         && ContaminationPagedCells.GetOwnedPageCount() == 0 && LocalPredictedPagedCells.IsEmpty();
     UTexture2D* Cached = nullptr;
@@ -253,13 +331,16 @@ bool UMD_ScrapeSurfaceComponent::InitializeContaminationMask()
     }
     else
     {
-        FIntPoint AtlasDimensions = FIntPoint::ZeroValue;
-        TArray<uint8> AtlasPixels;
-        if (!TryBuildContaminationMaskPixels(AtlasDimensions, AtlasPixels)) return false;
-        ContaminationMaskAtlasDimensions = AtlasDimensions;
-        ContaminationMaskAtlasPixels = MoveTemp(AtlasPixels);
+        if (!TryBuildInitialContaminationMaskRecipe())
+        {
+            FIntPoint AtlasDimensions = FIntPoint::ZeroValue;
+            TArray<uint8> AtlasPixels;
+            if (!TryBuildContaminationMaskPixels(AtlasDimensions, AtlasPixels)) return false;
+            ContaminationMaskAtlasDimensions = AtlasDimensions;
+            ContaminationMaskAtlasPixels = MoveTemp(AtlasPixels);
+        }
         auto* Texture = FMD_ScrapeRuntimeMaskTexture::AcquireInitial(
-            AtlasDimensions, ContaminationMaskAtlasPixels, UsesMeshUVSurface() ? TF_Nearest : TF_Bilinear);
+            ContaminationMaskAtlasDimensions, ContaminationMaskAtlasPixels, TF_Bilinear);
         if (!Texture) { ContaminationMaskAtlasPixels.Empty(); return false; }
         ContaminationMaskTexture = Texture;
         if (bCanShareBuild)
@@ -274,6 +355,7 @@ bool UMD_ScrapeSurfaceComponent::InitializeContaminationMask()
 		ContaminationMaskAtlasDimensions = FIntPoint::ZeroValue;
 		return false;
 	}
+    UpdateContaminationGenerationOverride({});
 	RefreshContaminationDecalMaterialParameters();
 	return true;
 }
@@ -281,6 +363,8 @@ bool UMD_ScrapeSurfaceComponent::InitializeContaminationMask()
 
 void UMD_ScrapeSurfaceComponent::ReleaseContaminationMask()
 {
+    ReleaseContaminationBoundaryVisual();
+    ReleaseContaminationGenerationVisual();
 	ReleaseTransferredPaintMask();
 	if (ContaminationMaskTexture)
 	{
@@ -292,6 +376,7 @@ void UMD_ScrapeSurfaceComponent::ReleaseContaminationMask()
         if (!MID) return;
         MID->SetTextureParameterValue(ContaminationMaskTextureParameterName, nullptr);
         MID->SetTextureParameterValue(TransferredPaintMaskTextureParameterName, nullptr);
+        MID->SetTextureParameterValue(TEXT("ProceduralOverrideMask"),nullptr);
     };
     ClearMaskBindings(FrontContaminationDecalMID);
     ClearMaskBindings(BackContaminationDecalMID);
@@ -381,10 +466,26 @@ uint8 UMD_ScrapeSurfaceComponent::CalculateTransferredPaintMaskPixel(
         if (Face != EMD_ScrapeSurfaceFace::Front || !ContaminationMeshUVData) { return 0; }
         const int32 Pixel = FacePixelCoordinate.X + FacePixelCoordinate.Y * ContaminationGridDimensions.X;
         if (!ContaminationMeshUVData->Cells.IsValidIndex(Pixel)) { return 0; }
-        const int32 Source = ContaminationMeshUVData->Cells[Pixel].VisualSourceCellIndex;
-        if (!VisualCells.IsValidIndex(Source)) { return 0; }
-        return static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(
-            VisualCells[Source].TransferredContamination, 0.0f, 1.0f) * 255.0f));
+        // Reuse dirt's physical seam footprint, including private chart gutters.
+        // Blend the existing paint signal, never a binary occupied/empty classification.
+        const auto Samples = ContaminationMeshUVData->GetVisualSeamSamples(Pixel);
+        double Signal = 0.0;
+        if (!Samples.IsEmpty())
+        {
+            for (const FMD_ScrapeMeshUVVisualSample& Sample : Samples)
+            {
+                if (!VisualCells.IsValidIndex(Sample.CellIndex)) continue;
+                Signal += Sample.Weight * FMath::Clamp(
+                    VisualCells[Sample.CellIndex].TransferredContamination, 0.0f, 1.0f);
+            }
+        }
+        else
+        {
+            const int32 Source = ContaminationMeshUVData->Cells[Pixel].VisualSourceCellIndex;
+            if (!VisualCells.IsValidIndex(Source)) return 0;
+            Signal = FMath::Clamp(VisualCells[Source].TransferredContamination, 0.0f, 1.0f);
+        }
+        return static_cast<uint8>(FMath::RoundToInt(FMath::Clamp(Signal, 0.0, 1.0) * 255.0));
     }
 	const double U = (static_cast<double>(FacePixelCoordinate.X) + 0.5)
 		/ static_cast<double>(FaceMaskDimensions.X);
@@ -494,6 +595,18 @@ bool UMD_ScrapeSurfaceComponent::InitializeTransferredPaintMask()
 		return false;
 	}
 
+    const bool bPristineEmptyPaint = UsesMeshUVSurface()
+        && ContaminationPagedCells.IsPristineCanonicalInitial()
+        && !HasLocalPredictedContaminationState();
+    if (bPristineEmptyPaint)
+    {
+        TransferredPaintMaskAtlasDimensions = AtlasDimensions;
+        TransferredPaintMaskAtlasPixels.InitializeUniform(static_cast<int32>(PixelCount64), 0);
+        TransferredPaintMaskTexture = FMD_ScrapeRuntimeMaskTexture::AcquireInitial(
+            AtlasDimensions, TransferredPaintMaskAtlasPixels, TF_Bilinear);
+        if (!TransferredPaintMaskTexture) { TransferredPaintMaskAtlasPixels.Empty(); return false; }
+        return true;
+    }
 	TArray<uint8> AtlasPixels;
 	AtlasPixels.SetNumZeroed(static_cast<int32>(PixelCount64));
 	bool bHasTransferredPaint = false;
@@ -527,7 +640,7 @@ bool UMD_ScrapeSurfaceComponent::InitializeTransferredPaintMask()
     TransferredPaintMaskAtlasDimensions = AtlasDimensions;
     TransferredPaintMaskAtlasPixels = MoveTemp(AtlasPixels);
     TransferredPaintMaskTexture = FMD_ScrapeRuntimeMaskTexture::AcquireInitial(
-        AtlasDimensions, TransferredPaintMaskAtlasPixels, TF_Nearest);
+        AtlasDimensions, TransferredPaintMaskAtlasPixels, UsesMeshUVSurface() ? TF_Bilinear : TF_Nearest);
     if (!TransferredPaintMaskTexture) { TransferredPaintMaskAtlasPixels.Empty(); return false; }
 	return true;
 }
@@ -572,8 +685,8 @@ void UMD_ScrapeSurfaceComponent::UpdateTransferredPaintMask(
 		* ContaminationGridDimensions.Y;
 	if (UsesMeshUVSurface())
 	{
-		// MeshUV pixels read one canonical source without neighbour interpolation.
-		// The caller already includes gutter dependents, so sparse changes do not
+		// The caller includes both physical seam and private gutter dependents.
+		// Recompute only these paint texels, so sparse changes do not
 		// require scanning the large atlas rectangle between unrelated UV islands.
 		FIntRect ChangedRegion = FMD_ScrapeMaskAtlas::MakeEmptyAtlasRegion();
 		for (const FMD_ScrapeCellChange& CellChange : CellChanges)
@@ -739,6 +852,7 @@ void UMD_ScrapeSurfaceComponent::UpdateContaminationMask(
     // Geometry uses full precision state, including paint-only changes and prediction rollback.
     // Do this before the G8 dirty-region early-outs.
     UpdateSolidContaminationVisual(CellChanges);
+    UpdateContaminationBoundaryVisual(CellChanges);
 
     TArray<FMD_ScrapeCellChange> ExpandedChanges;
     const TArray<FMD_ScrapeCellChange>* VisualChanges = &CellChanges;
@@ -774,6 +888,7 @@ void UMD_ScrapeSurfaceComponent::UpdateContaminationMask(
         }
         VisualChanges = &ExpandedChanges;
     }
+    UpdateContaminationGenerationOverride(*VisualChanges);
     UpdateTransferredPaintMask(*VisualChanges);
 
 	FIntPoint ExpectedDimensions = FIntPoint::ZeroValue;
@@ -1068,6 +1183,7 @@ void UMD_ScrapeSurfaceComponent::ReleaseContaminationMeshUVOverlay()
 void UMD_ScrapeSurfaceComponent::ApplyContaminationMeshUVOverlayParameters(
 	UMaterialInstanceDynamic& OverlayMID) const
 {
+    ApplyContaminationBoundaryParameters(OverlayMID);
     OverlayMID.SetScalarParameterValue(TEXT("ContaminationGridWidth"), static_cast<float>(ContaminationGridDimensions.X));
     OverlayMID.SetScalarParameterValue(TEXT("ContaminationGridHeight"), static_cast<float>(ContaminationGridDimensions.Y));
 	OverlayMID.SetTextureParameterValue(
@@ -1730,6 +1846,7 @@ void UMD_ScrapeSurfaceComponent::ApplyContaminationAppearanceParameters(
 		ContaminationOpacityParameterName,
 		OverallOpacity);
 	ApplyContaminationVisualMaskCurveParameters(DecalMID);
+    ApplyContaminationGenerationParameters(DecalMID);
 }
 
 

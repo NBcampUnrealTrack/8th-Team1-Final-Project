@@ -1,0 +1,85 @@
+#include "/Engine/Public/Platform.ush"
+int2 LogicalOrigin;
+int2 PhysicalOrigin;
+StructuredBuffer<float4> Edges;
+StructuredBuffer<float4> Cells;
+StructuredBuffer<float4> Domains;
+RWTexture2D<float4> OutAtlas;
+groupshared uint CoveredSamples;
+groupshared uint DomainSamples;
+[numthreads(8,8,1)]
+void MainCS(uint3 GroupID:SV_GroupID,uint3 LocalID:SV_GroupThreadID,uint Lane:SV_GroupIndex)
+{
+    uint Cell=GroupID.x+GroupID.y*10;
+    float4 Meta=Cells[Cell];
+    float2 P=LogicalOrigin+float2(GroupID.xy)-1.0+(float2(LocalID.xy)+0.5)/8.0;
+    bool Inside=false;
+    float D2=64.0;
+    for (uint E=(uint)Meta.x;E<(uint)(Meta.x+Meta.y);++E)
+    {
+        float4 Edge=Edges[E];
+        float2 A=Edge.xy, B=Edge.zw;
+        float2 V=B-A;
+        float T=saturate(dot(P-A,V)/max(dot(V,V),1e-12));
+        D2=min(D2,dot(P-(A+T*V),P-(A+T*V)));
+        if ((A.y>P.y)!=(B.y>P.y))
+        {
+            float X=A.x+(P.y-A.y)*(B.x-A.x)/(B.y-A.y);
+            if (P.x<X) Inside=!Inside;
+        }
+    }
+    bool InDomain=true;
+    for (uint J=0;J<3;++J)
+    {
+        float4 H=Domains[Cell*3+J];
+        InDomain=InDomain && dot(H.xy,P)+H.z>=-1e-5;
+    }
+    if (Lane==0) { CoveredSamples=0; DomainSamples=0; }
+    GroupMemoryBarrierWithGroupSync();
+    if (InDomain)
+    {
+        InterlockedAdd(DomainSamples,1);
+        if (Inside) InterlockedAdd(CoveredSamples,1);
+    }
+    GroupMemoryBarrierWithGroupSync();
+    float G=DomainSamples>0 ? (float)CoveredSamples/(float)DomainSamples : 0.0;
+    float Target=saturate(Meta.z), Original=saturate(Meta.w);
+    // Retain the original integrated residual-film signal. Coverage moves that
+    // signal spatially; it cannot remove gameplay mass or erase a uniform film.
+    // The physical footprint alone defines the outer edge. Coarse-cell cleanup
+    // tolerance must not turn a small uncontacted triangle into an exterior notch.
+    float Outside=Original;
+    float Film=G>0 ? saturate((Target-Outside*(1.0-G))/G) : Target;
+    float Valid=(Meta.y>0 && DomainSamples>0) ? (G>0 ? 2.0 : 1.0) : 0.0;
+    OutAtlas[PhysicalOrigin+int2(GroupID.xy)*8+int2(LocalID.xy)]=
+        float4((Inside?-1.0:1.0)*sqrt(D2),Outside,Film,Valid);
+}
+
+
+// Separate, tiny-tile pass: interpolate film coefficients within the owning
+// chart. Distance is never blurred. Untouched cells cannot bleed opaque film
+// inward across the physical scrape edge.
+Texture2D<float4> RawTile;
+[numthreads(8,8,1)]
+void FilterFilmCS(uint3 GroupID:SV_GroupID,uint3 LocalID:SV_GroupThreadID)
+{
+    int2 Pixel=int2(GroupID.xy)*8+int2(LocalID.xy);
+    float4 Raw=RawTile.Load(int3(Pixel,0));
+    float2 Control=(float2(Pixel)+0.5)/8.0-0.5;
+    int2 Base=int2(floor(Control));
+    float2 F=frac(Control);
+    uint Cell=GroupID.x+GroupID.y*10;
+    float Owner=Domains[Cell*3].w;
+    float Sum=0,WeightSum=0;
+    for (int Y=0;Y<2;++Y) for (int X=0;X<2;++X)
+    {
+        int2 C=clamp(Base+int2(X,Y),int2(0,0),int2(9,9));
+        float4 Sample=RawTile.Load(int3(C*8+4,0));
+        float W=(X?F.x:1.0-F.x)*(Y?F.y:1.0-F.y);
+        if (Owner>0 && Domains[(C.x+C.y*10)*3].w==Owner && Sample.w>1.5)
+        { Sum+=W*Sample.z; WeightSum+=W; }
+    }
+    Raw.z=WeightSum>0.00001?Sum/WeightSum:Raw.z;
+    Raw.w=Raw.w>0?1.0:0.0;
+    OutAtlas[PhysicalOrigin+Pixel]=Raw;
+}

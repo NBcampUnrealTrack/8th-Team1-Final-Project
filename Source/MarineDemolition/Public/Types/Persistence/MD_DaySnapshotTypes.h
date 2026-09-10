@@ -1,6 +1,8 @@
 #pragma once
 
+#include "Gameplay/Scrape/MD_ScrapeBoundaryPayload.h"
 #include "CoreMinimal.h"
+#include "Gameplay/Scrape/MD_ContaminationGeneration.h"
 #include "Templates/SubclassOf.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
@@ -180,9 +182,17 @@ struct MARINEDEMOLITION_API FMD_WallContaminationRecord
       UPROPERTY()
       TArray<float> CoveredFractions;
 
+      /** Initial state for cells omitted from the sparse delta payload. */
+      UPROPERTY()
+      FMD_ContaminationGeneration Generation;
+
       /** New records share immutable compressed chunks; old array property names remain readable. */
       UPROPERTY()
       FMD_ContaminationSavePayload CellPayload;
+
+      /** Versioned current footprint contours; independent of gameplay cell encoding. */
+      UPROPERTY()
+      FMD_ScrapeBoundaryPayload BoundaryPayload;
 
       bool CompactCells();
       bool ExpandCells(FMD_WallContaminationRecord& Out) const;
@@ -230,6 +240,12 @@ USTRUCT()
 struct FMD_DaySnapshot
 {
       GENERATED_BODY()
+
+      UPROPERTY() bool bHasContaminationGenerationRecords = false;
+
+    /** Missing in older saves: preserve authored/per-surface seeds, including zero. */
+    UPROPERTY() bool bHasContaminationSessionSeed = false;
+    UPROPERTY() int32 ContaminationSessionSeed = 0;
 
       UPROPERTY()
       bool bValid = false;

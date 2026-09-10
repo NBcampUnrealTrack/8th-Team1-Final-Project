@@ -66,6 +66,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "GeometryProcessing",
+			"Enabled": true
+		},
+		{
 			"Name": "CommonUI",
 			"Enabled": true
 		},

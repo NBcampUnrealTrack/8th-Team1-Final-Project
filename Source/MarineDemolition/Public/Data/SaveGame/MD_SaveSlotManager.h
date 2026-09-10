@@ -130,6 +130,9 @@ public:
 	// 목적지 게임 맵의 액터 초기화 이후 임시 데이터 생성 또는 저장 데이터 적용을 완료하는 함수
 	bool ApplyPendingGameDataOperation();
 
+    /** Primes immutable generation inputs before the next-tick world restoration. */
+    void PrepareContaminationForWorld(UWorld* World);
+
 protected:
 	// 저장 슬롯 작업을 실행할 수 있는 Host 또는 서버 World인지 확인하는 함수
 	bool HasServerAuthority() const;

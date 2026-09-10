@@ -144,6 +144,12 @@ struct MARINEDEMOLITION_API FMD_WorldData
 {
 	GENERATED_BODY()
 
+    UPROPERTY() bool bHasContaminationGenerationRecords = false;
+
+    /** Missing in older saves: preserve authored/per-surface seeds, including zero. */
+    UPROPERTY() bool bHasContaminationSessionSeed = false;
+    UPROPERTY() int32 ContaminationSessionSeed = 0;
+
 public:
 	// 인스턴스 구조체 컨테이너에서 월드 필드를 식별하기 위한 키
 	static const FGameplayTag DataFieldKey;
@@ -202,7 +208,7 @@ struct MARINEDEMOLITION_API FMD_GameData
 
 public:
 	// 이후 필드 변경을 안전하게 마이그레이션하기 위한 현재 스키마 버전
-	static constexpr int32 CurrentSchemaVersion = 9;
+	static constexpr int32 CurrentSchemaVersion = 11;
 
 	// 저장된 필드 배치를 판별하기 위한 슬롯 데이터 버전
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")

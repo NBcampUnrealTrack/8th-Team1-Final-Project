@@ -416,7 +416,7 @@ void AMD_CuttableWall::SyncLegacySurfaceConfiguration()
 
 	ScrapeSurface->ContaminationItemClass = ContaminationItemClass;
 	ScrapeSurface->ContaminationItemsPerFace = ContaminationItemsPerFace;
-	ScrapeSurface->bUseProceduralContamination =
-		bUseProceduralContamination;
+	ScrapeSurface->bUseProceduralContamination = bUseProceduralContamination;
+    ScrapeSurface->bForceFullContamination = bForceFullContamination;
 	ScrapeSurface->ContaminationDecalMaterial = ContaminationDecalMaterial;
 }

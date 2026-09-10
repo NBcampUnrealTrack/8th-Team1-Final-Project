@@ -33,14 +33,16 @@ bool FMD_ScrapeMeshUVSnapshotDescriptor::operator==(const FMD_ScrapeMeshUVSnapsh
         && TransferId == Other.TransferId && TotalStates == Other.TotalStates
         && ContentHash == Other.ContentHash && PayloadBytes == Other.PayloadBytes
         && PayloadHash == Other.PayloadHash && bCompressed == Other.bCompressed
-        && bFullSnapshot == Other.bFullSnapshot;
+        && bFullSnapshot == Other.bFullSnapshot && BoundaryVersion == Other.BoundaryVersion
+        && BoundaryBytes == Other.BoundaryBytes && BoundaryDecodedBytes == Other.BoundaryDecodedBytes
+        && bBoundaryCompressed == Other.bBoundaryCompressed && Generation == Other.Generation;
 }
 
 uint64 FMD_ScrapeMeshUVSyncProtocol::GetSnapshotMemoryReservation(const int32 ActiveCells)
 {
     if (ActiveCells < 0 || ActiveCells > MaximumSnapshotStates) { return MAX_uint64; }
     return static_cast<uint64>(ActiveCells)
-        * (sizeof(FMD_ReplicatedScrapeCellState) + 2 * BytesPerCell + sizeof(uint32)) + 128 * 1024;
+        * (sizeof(FMD_ReplicatedScrapeCellState) + 2 * BytesPerCell + sizeof(uint32)) + 128 * 1024 + 4ull * MaximumBoundaryBytes;
 }
 
 bool FMD_ScrapeMeshUVSyncProtocol::IsDescriptorValid(const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor)
@@ -52,10 +54,22 @@ bool FMD_ScrapeMeshUVSyncProtocol::IsDescriptorValid(const FMD_ScrapeMeshUVSnaps
         || !FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(Descriptor.Grid, PerFace, Total)
         || Descriptor.TotalStates < 0 || Descriptor.TotalStates > PerFace
         || Descriptor.TotalStates > MaximumSnapshotStates) { return false; }
+    if (Descriptor.Generation.Version != 0 && !Descriptor.Generation.IsValid()) return false;
+    if (Descriptor.BoundaryVersion>1 || Descriptor.BoundaryBytes<0
+        || Descriptor.BoundaryBytes>MaximumBoundaryBytes || Descriptor.BoundaryDecodedBytes<0
+        || Descriptor.BoundaryDecodedBytes>MaximumBoundaryBytes
+        || Descriptor.PayloadBytes<Descriptor.BoundaryBytes
+        || Descriptor.PayloadBytes>MaximumDecodedBytes+MaximumBoundaryBytes) return false;
+    if (Descriptor.BoundaryVersion==0 && (Descriptor.BoundaryBytes!=0
+        || Descriptor.BoundaryDecodedBytes!=0 || Descriptor.bBoundaryCompressed)) return false;
+    if (Descriptor.bBoundaryCompressed
+        ? !(Descriptor.BoundaryBytes>0 && Descriptor.BoundaryBytes<Descriptor.BoundaryDecodedBytes)
+        : Descriptor.BoundaryBytes!=Descriptor.BoundaryDecodedBytes) return false;
     const int32 DecodedBytes = Descriptor.TotalStates * BytesPerCell;
+    const int32 CellPayloadBytes=Descriptor.PayloadBytes-Descriptor.BoundaryBytes;
     return Descriptor.bCompressed
-        ? Descriptor.PayloadBytes > 0 && Descriptor.PayloadBytes < DecodedBytes
-        : Descriptor.PayloadBytes == DecodedBytes;
+        ? CellPayloadBytes > 0 && CellPayloadBytes < DecodedBytes
+        : CellPayloadBytes == DecodedBytes;
 }
 
 int32 FMD_ScrapeMeshUVSyncProtocol::GetPageCount(const int32 TotalStates)
@@ -71,11 +85,13 @@ int32 FMD_ScrapeMeshUVSyncProtocol::GetPageCount(const FMD_ScrapeMeshUVSnapshotD
 
 bool FMD_ScrapeMeshUVSyncProtocol::EncodePayload(
     const TConstArrayView<FMD_ReplicatedScrapeCellState> States,
-    FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, TArray<uint8>& OutPayload)
+    FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, TArray<uint8>& OutPayload, const TConstArrayView<uint8> Boundary)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_EncodeSnapshot);
     OutPayload.Empty();
-    if (States.Num() > MaximumSnapshotStates) { return false; }
+    if (States.Num() > MaximumSnapshotStates || Boundary.Num()>MaximumBoundaryBytes
+        || Descriptor.BoundaryVersion>1 || (Descriptor.BoundaryVersion==0 && !Boundary.IsEmpty())) return false;
+    Descriptor.BoundaryBytes=0; Descriptor.BoundaryDecodedBytes=Boundary.Num(); Descriptor.bBoundaryCompressed=false;
     Descriptor.TotalStates = States.Num(); Descriptor.bCompressed = false;
     EncodeStates(States, OutPayload);
     Descriptor.ContentHash = HashBytes(OutPayload);
@@ -115,18 +131,63 @@ bool FMD_ScrapeMeshUVSyncProtocol::EncodePayload(
             }
         }
     }
+    TArray<uint8> BoundaryWire;
+    BoundaryWire.Append(Boundary.GetData(),Boundary.Num());
+    if (Boundary.Num()>=MaximumPayloadBytes)
+    {
+        int64 Bound=0;
+        if (FCompression::CompressMemoryBound(NAME_Zlib,Bound,Boundary.Num())
+            && Bound>0 && Bound<=int64(MaximumBoundaryBytes)+65536)
+        {
+            TArray<uint8> Compressed; Compressed.SetNumUninitialized(int32(Bound));
+            int64 Size=Bound;
+            if (FCompression::CompressMemory(NAME_Zlib,Compressed.GetData(),Size,Boundary.GetData(),int64(Boundary.Num()))
+                && Size>0 && Size<Boundary.Num())
+            {
+                BoundaryWire.Reset(); BoundaryWire.Append(Compressed.GetData(),int32(Size));
+                Descriptor.bBoundaryCompressed=true;
+            }
+        }
+    }
+    Descriptor.BoundaryBytes=BoundaryWire.Num();
+    OutPayload.Append(MoveTemp(BoundaryWire));
     Descriptor.PayloadBytes = OutPayload.Num(); Descriptor.PayloadHash = HashBytes(OutPayload);
     return IsDescriptorValid(Descriptor);
 }
 
 bool FMD_ScrapeMeshUVSyncProtocol::DecodePayload(
     const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, const TConstArrayView<uint8> Payload,
-    TArray<FMD_ReplicatedScrapeCellState>& OutStates)
+    TArray<FMD_ReplicatedScrapeCellState>& OutStates, TArray<uint8>* OutBoundary)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_DecodeSnapshot);
+    if (OutBoundary) OutBoundary->Reset();
     OutStates.Empty();
     if (!IsDescriptorValid(Descriptor) || Payload.Num() != Descriptor.PayloadBytes
         || HashBytes(Payload) != Descriptor.PayloadHash) { return false; }
+    if (Descriptor.BoundaryVersion==1)
+    {
+        // Require callers to consume the matching geometry; never silently drop it.
+        if (!OutBoundary) return false;
+        const int32 CellBytes=Payload.Num()-Descriptor.BoundaryBytes;
+        const auto BoundaryWire=Payload.Slice(CellBytes,Descriptor.BoundaryBytes);
+        TArray<uint8> Boundary;
+        Boundary.SetNumUninitialized(Descriptor.BoundaryDecodedBytes);
+        if (Descriptor.bBoundaryCompressed)
+        {
+            if (!FCompression::UncompressMemory(NAME_Zlib,Boundary.GetData(),int64(Boundary.Num()),
+                BoundaryWire.GetData(),int64(BoundaryWire.Num()))) return false;
+        }
+        else if (!Boundary.IsEmpty()) FMemory::Memcpy(Boundary.GetData(),BoundaryWire.GetData(),Boundary.Num());
+        FMD_ScrapeBoundaryState Check;
+        if (!Check.Deserialize(Boundary,Descriptor.LayoutId,Descriptor.Grid)) return false;
+        FMD_ScrapeMeshUVSnapshotDescriptor CellDescriptor=Descriptor;
+        CellDescriptor.BoundaryVersion=0; CellDescriptor.BoundaryBytes=0;
+        CellDescriptor.BoundaryDecodedBytes=0; CellDescriptor.bBoundaryCompressed=false;
+        CellDescriptor.PayloadBytes=CellBytes; CellDescriptor.PayloadHash=HashBytes(Payload.Left(CellBytes));
+        if (!DecodePayload(CellDescriptor,Payload.Left(CellBytes),OutStates)) return false;
+        *OutBoundary=MoveTemp(Boundary);
+        return true;
+    }
     if (!Descriptor.bCompressed)
     { return HashBytes(Payload) == Descriptor.ContentHash && DecodeStates(Payload, Descriptor.Grid, OutStates); }
     TArray<uint8> Planes;
@@ -281,9 +342,10 @@ bool FMD_ScrapeMeshUVSnapshotAssembler::Append(
     return true;
 }
 
-bool FMD_ScrapeMeshUVSnapshotAssembler::Finish(TArray<FMD_ReplicatedScrapeCellState>& OutStates) const
+bool FMD_ScrapeMeshUVSnapshotAssembler::Finish(TArray<FMD_ReplicatedScrapeCellState>& OutStates, TArray<uint8>* OutBoundary) const
 {
     OutStates.Reset();
+    if (OutBoundary) OutBoundary->Reset();
     return bStarted && NextPage == FMD_ScrapeMeshUVSyncProtocol::GetPageCount(Descriptor)
-        && FMD_ScrapeMeshUVSyncProtocol::DecodePayload(Descriptor, Bytes, OutStates);
+        && FMD_ScrapeMeshUVSyncProtocol::DecodePayload(Descriptor, Bytes, OutStates, OutBoundary);
 }

@@ -36,7 +36,7 @@ public:
     virtual void Tick(float DeltaTime) override;
     virtual TStatId GetStatId() const override;
     void InvalidateSurface(UMD_ScrapeSurfaceComponent& Surface);
-    void RecordSurfaceChanges(UMD_ScrapeSurfaceComponent& Surface, TConstArrayView<FMD_ScrapeCellChange> Changes);
+    void RecordSurfaceChanges(UMD_ScrapeSurfaceComponent& Surface, TConstArrayView<FMD_ScrapeCellChange> Changes, bool bBoundaryChanged=false);
     bool CaptureSnapshot(UMD_ScrapeSurfaceComponent& Surface, const FGuid& KnownEpoch,
         uint64 KnownSerial, FMD_ScrapeMeshUVSnapshotDescriptor& OutDescriptor,
         TArray<FMD_ReplicatedScrapeCellState>& OutStates);
@@ -54,7 +54,9 @@ public:
     static constexpr uint64 MaximumWorldJournalBytes = 4 * 1024 * 1024;
     static constexpr uint64 MaximumSurfaceLiveHistoryBytes = 4 * 1024 * 1024;
     static constexpr uint64 MaximumWorldLiveHistoryBytes = 8 * 1024 * 1024;
-    static constexpr uint64 MaximumConnectionTransferBytes = 48 * 1024 * 1024;
+    // A maximum wall now reserves 54.125 MiB including bounded SDF codec scratch.
+    // The shared 64 MiB gate still permits only one such capture at a time.
+    static constexpr uint64 MaximumConnectionTransferBytes = 56 * 1024 * 1024;
     static constexpr uint64 MaximumWorldTransferBytes = 64 * 1024 * 1024;
 private:
     void PruneExpiredOwners();

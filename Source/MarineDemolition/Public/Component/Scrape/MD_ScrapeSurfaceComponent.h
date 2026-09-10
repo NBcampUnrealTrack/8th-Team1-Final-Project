@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Gameplay/Scrape/MD_ContaminationGeneration.h"
 #include "Gameplay/Scrape/MD_ScrapeCarrierWeights.h"
 #include "Gameplay/Scrape/MD_ScrapeMaskPixels.h"
 #include "Gameplay/Scrape/MD_ScrapeCellView.h"
@@ -13,6 +14,7 @@
 #include "Types/Scrape/MD_ScrapeTypes.h"
 #include "MD_ScrapeSurfaceComponent.generated.h"
 
+struct FMD_ScrapeBoundaryVisual;
 class UDecalComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
@@ -220,6 +222,9 @@ class MARINEDEMOLITION_API UMD_ScrapeSurfaceComponent : public UActorComponent
 
 public:
 	UMD_ScrapeSurfaceComponent();
+    bool ExportContaminationBoundary(TArray<uint8>& Out) const;
+    bool ValidateContaminationBoundary(TConstArrayView<uint8> Bytes) const;
+    bool RestoreContaminationBoundary(TConstArrayView<uint8> Bytes, uint32 VisualRevision=0, FGuid Epoch=FGuid());
 
 	/** 피격/부착된 Primitive을 실제 작업면으로 쓰는 표면 컴포넌트를 찾는다. */
 	static UMD_ScrapeSurfaceComponent* FindForPrimitiveComponent(
@@ -258,6 +263,15 @@ public:
 	/** Rebuilds geometry and all runtime contamination state. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape Surface")
 	void InitializeSurface();
+
+    virtual void Serialize(FArchive& Ar) override;
+
+    UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface|Procedural")
+    int32 GetResolvedContaminationSeed() const { return ContaminationGeneration.Seed; }
+
+    const FMD_ContaminationGeneration& GetContaminationGeneration() const { return ContaminationGeneration; }
+    FMD_ContaminationGeneration MakeContaminationGeneration(bool bLegacy = false) const;
+    bool RestoreContaminationGeneration(const FMD_ContaminationGeneration& Generation, bool bResetState = false);
 
 	/** Refreshes editor/runtime geometry without resetting scrape progress. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape Surface")
@@ -568,29 +582,51 @@ protected:
 		meta = (ClampMin = "0.0", ClampMax = "1.0"))
 	float InitialContaminationPerCell;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly,
-		Category = "MD|Scrape Surface|Procedural")
-	bool bUseProceduralContamination;
+	/** Legacy serialized generation mode, retained only to restore saves made before procedural became the default. */
+    UPROPERTY()
+    bool bUseProceduralContamination;
+
+    /** Fill the entire surface; unchecked uses procedural contamination. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape Surface|Procedural",
+        meta = (DisplayName = "Full Contamination"))
+    bool bForceFullContamination = false;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly,
 		Category = "MD|Scrape Surface|Procedural",
-		meta = (EditCondition = "bUseProceduralContamination", ClampMin = "1.0", Units = "cm"))
+		meta = (EditCondition = "!bForceFullContamination", ClampMin = "1.0", Units = "cm"))
 	float ContaminationNoiseScaleCm;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly,
-		Category = "MD|Scrape Surface|Procedural",
-		meta = (EditCondition = "bUseProceduralContamination"))
-	int32 ContaminationNoiseSeed;
+    /** Automatic uses the server's common seed for this contract. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, AdvancedDisplay, Category = "MD|Scrape Surface|Procedural",
+        meta = (DisplayName = "Use Fixed Seed", EditCondition = "!bForceFullContamination"))
+    bool bUseFixedContaminationSeed = false;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly,
-		Category = "MD|Scrape Surface|Procedural",
-		meta = (EditCondition = "bUseProceduralContamination", ClampMin = "0.0", ClampMax = "1.0"))
-	float ContaminationCoverage;
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, AdvancedDisplay, Category = "MD|Scrape Surface|Procedural",
+        meta = (DisplayName = "Fixed Seed", EditCondition = "!bForceFullContamination && bUseFixedContaminationSeed"))
+    int32 ContaminationNoiseSeed;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly,
-		Category = "MD|Scrape Surface|Procedural",
-		meta = (EditCondition = "bUseProceduralContamination", ClampMin = "0.0", ClampMax = "1.0"))
-	float ContaminationMinimumAmount;
+    /** Serialized fixed coverage retained for saves without generation records. */
+    UPROPERTY()
+    float ContaminationCoverage;
+
+    /** Coverage is sampled once per wall and noise seed; saved games retain the selected value. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape Surface|Procedural",
+        meta = (DisplayName = "Coverage Min", EditCondition = "!bForceFullContamination", ClampMin = "0.0", ClampMax = "1.0"))
+    float ContaminationCoverageMin = 0.55f;
+
+    /** Equal endpoints give fixed coverage. Reversed endpoints are sorted when generating. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape Surface|Procedural",
+        meta = (DisplayName = "Coverage Max", EditCondition = "!bForceFullContamination", ClampMin = "0.0", ClampMax = "1.0"))
+    float ContaminationCoverageMax = 1.0f;
+
+    /** Retain the exact serialized lower bound for old saves without generation records. */
+    UPROPERTY()
+    float ContaminationMinimumAmount;
+
+    /** Lower bound inside new procedural patches; zero gives a continuous fade from clean. */
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape Surface|Procedural",
+        meta = (DisplayName = "Minimum Contamination Amount", EditCondition = "!bForceFullContamination", ClampMin = "0.0", ClampMax = "1.0"))
+    float ContaminationDensityMinimumAmount = 0.0f;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Scrape Surface",
 		meta = (ClampMin = "0.0", Units = "cm"))
@@ -755,6 +791,19 @@ protected:
 
 private:
 	friend struct FMD_ReplicatedScrapeCellStateArray;
+    FMD_ScrapeBoundaryState ContaminationBoundary;
+    FMD_ScrapeBoundaryState PredictedContaminationBoundary;
+    bool bHasPredictedContaminationBoundary = false;
+    uint32 LastBoundaryVisualRevision=0;
+    FGuid LastBoundaryEpoch;
+    TSharedPtr<FMD_ScrapeBoundaryVisual> ContaminationBoundaryVisual;
+    bool CommitContaminationBoundary(const FMD_ScrapeEvaluationScratch& Scratch, bool bPrediction);
+    void UpdateContaminationBoundaryVisual(const TArray<FMD_ScrapeCellChange>& Changes);
+    void ApplyContaminationBoundaryParameters(UMaterialInstanceDynamic& MID) const;
+    void ReleaseContaminationBoundaryVisual();
+    void ResetContaminationBoundary();
+    void ResetPredictedContaminationBoundary();
+    bool CheckContaminationBoundaryBudget();
 	friend class UMD_ScrapeMeshUVSyncComponent;
 	friend class UMD_ScrapeMeshUVSyncSubsystem;
 	friend class AMD_CuttableWall;
@@ -1025,6 +1074,24 @@ private:
 	void RefreshContaminationCleanRatioCache(EMD_ScrapeSurfaceFace Face);
 	bool ResolveContaminationSurfaceGeometry();
 	void InitializeContaminationSurface();
+    UPROPERTY(Transient, DuplicateTransient, ReplicatedUsing = OnRep_ContaminationGeneration)
+    FMD_ContaminationGeneration ContaminationGeneration;
+    FMD_ContaminationGeneration AppliedContaminationGeneration;
+    UFUNCTION() void OnRep_ContaminationGeneration();
+    bool bRestoringContaminationGeneration = false;
+    void PrepareContaminationGeneration();
+    float ResolveContaminationCoverage(int32 ResolvedSeed) const;
+    bool TryApplyContinuousInitialContamination();
+    float CalculateContaminationVisualSignal(const FMD_ScrapeSurfaceCell& Cell) const;
+    void ApplyContaminationGenerationParameters(UMaterialInstanceDynamic& MID) const;
+    void UpdateContaminationGenerationOverride(const TArray<FMD_ScrapeCellChange>& Changes);
+    bool TryBuildInitialContaminationMaskRecipe();
+    void ReleaseContaminationGenerationVisual();
+    UPROPERTY(Transient) TObjectPtr<UTexture2D> ProceduralOverrideTexture;
+    FMD_ScrapeMaskPixels ProceduralOverridePixels;
+    TWeakObjectPtr<UStaticMeshComponent> GenerationTransformSource;
+    FDelegateHandle GenerationTransformHandle;
+
 	bool TryApplyProceduralInitialContamination(
 		int32 CellsPerFace,
 		float BaseInitialContamination);
@@ -1107,8 +1174,7 @@ private:
 		TConstArrayView<FMD_ReplicatedScrapeCellState> StateItems,
 		bool bResetToInitial);
 	void ApplyAllReplicatedContaminationState();
-	void PublishContaminationChanges(
-		const TArray<FMD_ScrapeCellChange>& CellChanges);
+	void PublishContaminationChanges(const TArray<FMD_ScrapeCellChange>& CellChanges, bool bBoundaryChanged=false);
 	bool TryBuildReplicatedCellState(
 		int32 CellIndex,
 		FMD_ReplicatedScrapeCellState& OutState,

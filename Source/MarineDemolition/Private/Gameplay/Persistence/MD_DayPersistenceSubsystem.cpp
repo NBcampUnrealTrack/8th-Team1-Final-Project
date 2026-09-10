@@ -313,6 +313,87 @@ namespace
     }
 }
 
+
+void UMD_DayPersistenceSubsystem::ResetContaminationContext()
+{
+    ContaminationContextWorld.Reset();
+    bHasContaminationSessionSeed=false;
+    ContaminationSessionSeed=0;
+    bLegacyContaminationGeneration=false;
+    bDeferSavedContaminationGeneration=false;
+    SavedContaminationGenerations.Empty();
+}
+
+bool UMD_DayPersistenceSubsystem::IsContaminationContextReady(const UWorld* World) const
+{
+    return World && ContaminationContextWorld.Get()==World;
+}
+
+bool UMD_DayPersistenceSubsystem::TryGetContaminationSessionSeed(const UWorld* World, int32& OutSeed) const
+{
+    if (!IsContaminationContextReady(World) || !bHasContaminationSessionSeed) return false;
+    OutSeed=ContaminationSessionSeed;
+    return true;
+}
+
+void UMD_DayPersistenceSubsystem::PrepareContaminationContext(
+    UWorld* World, const FMD_WorldData* SavedWorld, const bool bNewContract, const bool bDeferSavedGeneration)
+{
+    if (!World || World->GetNetMode()==NM_Client) return;
+    if (!SavedWorld && !bNewContract && IsContaminationContextReady(World)) return;
+    ResetContaminationContext();
+    ContaminationContextWorld=World;
+    const TArray<FMD_WallContaminationRecord>* Records=nullptr;
+    if (SavedWorld)
+    {
+        bHasContaminationSessionSeed=SavedWorld->bHasContaminationSessionSeed;
+        ContaminationSessionSeed=SavedWorld->ContaminationSessionSeed;
+        bLegacyContaminationGeneration=!SavedWorld->bHasContaminationGenerationRecords;
+        Records=&SavedWorld->WallContaminations;
+    }
+    else if (!bNewContract && Snapshot.bValid && Snapshot.WorldName==World->GetFName())
+    {
+        bHasContaminationSessionSeed=Snapshot.bHasContaminationSessionSeed;
+        ContaminationSessionSeed=Snapshot.ContaminationSessionSeed;
+        bLegacyContaminationGeneration=!Snapshot.bHasContaminationGenerationRecords;
+        Records=&Snapshot.WallContaminations;
+    }
+    else
+    {
+        bHasContaminationSessionSeed=true;
+        ContaminationSessionSeed=static_cast<int32>(GetTypeHash(FGuid::NewGuid()));
+    }
+    bDeferSavedContaminationGeneration=bDeferSavedGeneration && Records;
+    if (Records)
+        for (const auto& Record:*Records)
+            if (Record.Generation.IsValid())
+                SavedContaminationGenerations.FindOrAdd(Record.WallName)
+                    .Add(Record.SurfaceComponentName,Record.Generation);
+}
+
+bool UMD_DayPersistenceSubsystem::TryGetSavedContaminationGeneration(
+    const UMD_ScrapeSurfaceComponent* Surface, FMD_ContaminationGeneration& OutGeneration,
+    bool& bOutLegacy) const
+{
+    bOutLegacy=false;
+    if (!Surface || !Surface->GetOwner() || !IsContaminationContextReady(Surface->GetWorld())) return false;
+    bOutLegacy=bLegacyContaminationGeneration;
+    const auto* Components=SavedContaminationGenerations.Find(Surface->GetOwner()->GetFName());
+    const auto* Generation=Components?Components->Find(GetPersistentSurfaceComponentName(Surface)):nullptr;
+    if (!Generation) return false;
+    OutGeneration=*Generation;
+    return true;
+}
+
+bool UMD_DayPersistenceSubsystem::ShouldDeferContaminationGeneration(
+    const UMD_ScrapeSurfaceComponent* Surface) const
+{
+    if (!bDeferSavedContaminationGeneration) return false;
+    FMD_ContaminationGeneration Saved;
+    bool bLegacy=false;
+    return TryGetSavedContaminationGeneration(Surface,Saved,bLegacy) || bLegacy;
+}
+
 void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
 {
     if (!World || World->GetNetMode() == NM_Client)
@@ -328,6 +409,7 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
 
     Snapshot = FMD_DaySnapshot();
     Snapshot.WorldName = World->GetFName();
+    Snapshot.bHasContaminationSessionSeed=TryGetContaminationSessionSeed(World,Snapshot.ContaminationSessionSeed);
     Snapshot.CompletedDay = GameState->GetCurrentDay();
     Snapshot.Score = GameState->GetScore();
     Snapshot.bWarningIssued = GameState->IsInspectionWarned();
@@ -354,6 +436,7 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
             continue;
         }
 
+        Snapshot.bHasContaminationGenerationRecords = true;
         // 생성 기준값과 달라진 오염 셀만 기록. 밤샘 분출로 총량이 오른 셀도 포함된다
         FMD_WallContaminationRecord ContaminationRecord;
         ContaminationRecord.WallName = SurfaceOwner->GetFName();
@@ -363,6 +446,7 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         ContaminationRecord.LayoutId = Surface->GetContaminationLayoutId();
         ContaminationRecord.CarrierScale = Surface->GetContaminationCarrierWeightScale();
         ContaminationRecord.GridDimensions = Surface->GetContaminationGridDimensions();
+        ContaminationRecord.Generation = Surface->GetContaminationGeneration();
         Surface->ExportContaminationDeltas(
             ContaminationRecord.CellIndices,
             ContaminationRecord.InitialAmounts,
@@ -370,7 +454,11 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
             ContaminationRecord.TransferredAmounts,
             ContaminationRecord.TransferredPatternDensities,
             ContaminationRecord.CoveredFractions);
-        if (ContaminationRecord.CellIndices.Num() > 0)
+        TArray<uint8> BoundaryBytes;
+        if (!Surface->ExportContaminationBoundary(BoundaryBytes)
+            || !ContaminationRecord.BoundaryPayload.Set(MoveTemp(BoundaryBytes)))
+        { Snapshot=FMD_DaySnapshot(); return; }
+        if (ContaminationRecord.Generation.IsValid() || ContaminationRecord.CellIndices.Num() > 0 || ContaminationRecord.BoundaryPayload.Num()>0)
         {
             if (!ContaminationRecord.CompactCells())
             {
@@ -477,12 +565,15 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
 
     // 파일 직렬화 구조에 현재 월드 변경 상태를 복사하는 처리
     OutWorldData = FMD_WorldData();
+    OutWorldData.bHasContaminationSessionSeed=Snapshot.bHasContaminationSessionSeed;
+    OutWorldData.ContaminationSessionSeed=Snapshot.ContaminationSessionSeed;
     OutWorldData.SurvivingWallNames = MoveTemp(Snapshot.SurvivingWallNames);
     OutWorldData.SupportedWallNames = MoveTemp(Snapshot.SupportedWallNames);
     OutWorldData.Braces = MoveTemp(Snapshot.Braces);
     OutWorldData.Samples = MoveTemp(Snapshot.Samples);
     OutWorldData.Pieces = MoveTemp(Snapshot.Pieces);
 	OutWorldData.TrashBins = MoveTemp(Snapshot.TrashBins);
+    OutWorldData.bHasContaminationGenerationRecords = true;
     OutWorldData.WallContaminations = MoveTemp(Snapshot.WallContaminations);
     OutWorldData.PendingContaminationDrops = MoveTemp(Snapshot.PendingContaminationDrops);
     OutWorldData.BarnacleRemovals = MoveTemp(Snapshot.BarnacleRemovals);
@@ -494,7 +585,7 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
     return true;
 }
 
-bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_WorldData& WorldData) const
+bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_WorldData& WorldData)
 {
 	// 파일 데이터 적용을 서버 권위 월드로 제한하고 손상 배열의 부분 적용을 막기 위한 검사
 	if (IsValid(World) == false || World->GetNetMode() == NM_Client || WorldData.IsStructurallyValid() == false)
@@ -512,6 +603,7 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
 		return false;
 	}
 
+    PrepareContaminationContext(World,&WorldData);
 	// 저장 시드는 초기 레벨 지오메트리가 그대로 있을 때 먼저 적용한다. 철거된 벽이나
 	// 동적 액터를 복원한 뒤 재배치하면 같은 시드라도 Trace 후보가 달라질 수 있다.
 	TMap<FName, const FMD_BarnacleRemovalRecord*> BarnacleStatesBySpawnerName;
@@ -578,6 +670,12 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
         }
     }
 
+    // Legacy saves omit untouched walls entirely. Reconstruct all of them using their
+    // retained authored legacy mode before applying any old deltas.
+    if (!WorldData.bHasContaminationGenerationRecords)
+        for (UMD_ScrapeSurfaceComponent* Surface : ScrapeSurfaces)
+            if (!Surface->RestoreContaminationGeneration(Surface->MakeContaminationGeneration(true), true)) return false;
+
     // 어제 긁은 오염 셀 상태 복원. 이후 ApplyOvernightWorsening이 이 위에 소량 재부착
     for (const FMD_WallContaminationRecord& Record : WorldData.WallContaminations)
     {
@@ -593,6 +691,8 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
                     *Record.WallName.ToString(), *Record.SurfaceComponentName.ToString());
                 continue;
             }
+            if (WorldData.bHasContaminationGenerationRecords
+                && !Surface->RestoreContaminationGeneration(Record.Generation, true)) return false;
             // Restore scratch belongs to this wall only, never all walls or all save slots.
             FMD_WallContaminationRecord Expanded;
             if (!Record.ExpandCells(Expanded)) return false;
@@ -603,6 +703,7 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
                 Expanded.TransferredAmounts,
                 Expanded.TransferredPatternDensities,
                 Expanded.CoveredFractions);
+            if (!Surface->RestoreContaminationBoundary(Record.BoundaryPayload.Get())) return false;
         }
     }
 
@@ -715,12 +816,15 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
 
     // 파일 저장과 일차 경계 복원이 같은 월드 상태 적용 경로를 사용하기 위한 데이터 변환
     FMD_WorldData WorldData;
+    WorldData.bHasContaminationSessionSeed=Snapshot.bHasContaminationSessionSeed;
+    WorldData.ContaminationSessionSeed=Snapshot.ContaminationSessionSeed;
     WorldData.SurvivingWallNames = Snapshot.SurvivingWallNames;
     WorldData.SupportedWallNames = Snapshot.SupportedWallNames;
     WorldData.Braces = Snapshot.Braces;
     WorldData.Samples = Snapshot.Samples;
     WorldData.Pieces = Snapshot.Pieces;
 	WorldData.TrashBins = Snapshot.TrashBins;
+    WorldData.bHasContaminationGenerationRecords = Snapshot.bHasContaminationGenerationRecords;
     WorldData.WallContaminations = Snapshot.WallContaminations;
     WorldData.PendingContaminationDrops = Snapshot.PendingContaminationDrops;
     WorldData.BarnacleRemovals = Snapshot.BarnacleRemovals;

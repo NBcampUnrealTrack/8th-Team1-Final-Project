@@ -1,5 +1,6 @@
 #include "Types/Persistence/MD_DaySnapshotTypes.h"
 #include "Containers/BitArray.h"
+#include "Gameplay/Scrape/MD_ScrapeBoundaryState.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 
 bool FMD_WallContaminationRecord::CompactCells()
@@ -28,6 +29,12 @@ bool FMD_WallContaminationRecord::ExpandCells(FMD_WallContaminationRecord& Out) 
 }
 bool FMD_WallContaminationRecord::ValidateCellIndices(const int32 MaximumCellCount) const
 {
+    if (Generation.Version != 0 && !Generation.IsValid()) return false;
+    if (BoundaryPayload.Num())
+    {
+        FMD_ScrapeBoundaryState Boundary;
+        if (LayoutVersion!=1 || !Boundary.Deserialize(BoundaryPayload.Get(),LayoutId,GridDimensions)) return false;
+    }
     if (MaximumCellCount <= 0 || MaximumCellCount > FMD_ScrapeSurfaceLayout::MaximumCombinedCellCount)
         return false;
     if (CellPayload.Num())

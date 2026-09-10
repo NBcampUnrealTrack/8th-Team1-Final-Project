@@ -1,4 +1,6 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+#include "Engine/GameInstance.h"
+#include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Gameplay/Scrape/MD_ContaminationNoise.h"
@@ -583,6 +585,15 @@ UMD_ScrapeSurfaceComponent::GetContaminationCellsForFace(
 
 void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 {
+    if (GetWorld() && GetWorld()->IsGameWorld())
+    {
+        if (!HasAuthority() && !ContaminationGeneration.IsValid()) return;
+        if (HasAuthority())
+            if (auto* GI=GetWorld()->GetGameInstance())
+                if (auto* Persistence=GI->GetSubsystem<UMD_DayPersistenceSubsystem>())
+                    if (!Persistence->IsContaminationContextReady(GetWorld())) return;
+    }
+    ResetContaminationBoundary();
     PreservePendingContaminationDrops();
     LocalScrapePredictions.Empty();
     LocalPredictedContaminationCells.Empty();
@@ -731,10 +742,18 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 		return;
 	}
 
+    // Saved surfaces need their layout for validation, but build dirt only once,
+    // when the next-tick restore applies the saved baseline and deltas.
+    if (!bRestoringContaminationGeneration && GetWorld() && HasAuthority())
+        if (auto* GI=GetWorld()->GetGameInstance())
+            if (auto* Persistence=GI->GetSubsystem<UMD_DayPersistenceSubsystem>())
+                if (Persistence->ShouldDeferContaminationGeneration(this)) return;
+    PrepareContaminationGeneration();
+
 	// 잘못된 초기값은 완전 오염으로 처리
 	const float SafeInitialContamination =
-		FMath::IsFinite(InitialContaminationPerCell)
-		? FMath::Clamp(InitialContaminationPerCell, 0.0f, 1.0f)
+		FMath::IsFinite(ContaminationGeneration.BaseAmount)
+		? FMath::Clamp(ContaminationGeneration.BaseAmount, 0.0f, 1.0f)
 		: 1.0f;
 
     FMD_ScrapeSurfaceCell InitialCell;
@@ -743,17 +762,28 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
     InitialCell.TransferredContamination = 0.0f;
     InitialCell.TransferredPaintPatternDensity = 0.0f;
     InitialCell.CoveredFraction = 0.0f;
-    if (ContaminationCellLayout && !bUseProceduralContamination)
+    if (ContaminationCellLayout && !ContaminationGeneration.bProcedural)
     {
         // Untouched MeshUV walls share one immutable value without materializing active cells.
         ContaminationPagedCells.InitializeUniform(StorageCellCount, InitialCell);
+    }
+    else if (ContaminationCellLayout && ContaminationGeneration.bProcedural
+        && ContaminationGeneration.Version >= 2)
+    {
+        // Move the completed float amounts into their immutable template directly.
+        // No temporary five-channel cell array, reconstruction or second dense copy.
+        if (!TryApplyContinuousInitialContamination())
+        {
+            ContaminationPagedCells.InitializeUniform(StorageCellCount, InitialCell);
+            UE_LOG(LogTemp, Warning, TEXT("%s: procedural initialization failed; retaining uniform initial state."), *GetName());
+        }
     }
     else
     {
         // Procedural generation remains atomic and uses the original world-space inputs.
         // Only the exact completed content is interned; nearby transforms are never conflated.
         ContaminationCells.Init(InitialCell, StorageCellCount);
-        if (bUseProceduralContamination && !TryApplyProceduralInitialContamination(
+        if (ContaminationGeneration.bProcedural && !TryApplyProceduralInitialContamination(
                 CellsPerFace, SafeInitialContamination))
         {
             UE_LOG(LogTemp, Warning, TEXT("%s: procedural initial contamination failed; retaining the uniform initial state."), *GetName());
@@ -789,9 +819,16 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 			: EMD_ScrapeSurfaceFace::Back;
 		double CanonicalCarrierAmount = 0.0;
 		const FMD_ScrapeConstCellView FaceCells = GetContaminationCellsForFace(Face);
-		for (int32 LocalIndex = 0; LocalIndex < FaceCells.Num(); ++LocalIndex)
-		{
-			const FMD_ScrapeSurfaceCell& Cell = FaceCells[LocalIndex];
+        // ActiveToAtlas is built in ascending atlas order. Skipping inactive zero
+        // cells preserves the original double accumulation order and exact result.
+        const int32 VisitCount = ContaminationCellLayout
+            ? (FaceSlot == 0 ? StorageCellCount : 0) : FaceCells.Num();
+        for (int32 VisitIndex = 0; VisitIndex < VisitCount; ++VisitIndex)
+        {
+            const int32 LocalIndex = ContaminationCellLayout
+                ? ContaminationCellLayout->ActiveToAtlas[VisitIndex] : VisitIndex;
+            const FMD_ScrapeSurfaceCell Cell = ContaminationCellLayout
+                ? ContaminationPagedCells.Read(VisitIndex) : FaceCells[LocalIndex];
 			const double SafeRemainingContamination =
 				FMath::IsFinite(Cell.RemainingContamination)
 				? FMath::Clamp(
@@ -873,6 +910,14 @@ bool UMD_ScrapeSurfaceComponent::TryApplyProceduralInitialContamination(
 	const float BaseInitialContamination)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_InitialNoise);
+    if (ContaminationGeneration.Version >= 2) return TryApplyContinuousInitialContamination();
+    const bool Frozen = ContaminationGeneration.IsValid();
+    const float NoiseScale = Frozen ? ContaminationGeneration.NoiseScaleCm : ContaminationNoiseScaleCm;
+    const int32 NoiseSeed = Frozen ? ContaminationGeneration.Seed : ContaminationNoiseSeed;
+    const float Coverage = Frozen ? ContaminationGeneration.Coverage : ContaminationCoverage;
+    const float Minimum = Frozen ? ContaminationGeneration.MinimumAmount : ContaminationMinimumAmount;
+    const FTransform GenerationTransform = Frozen ? ContaminationGeneration.SampleTransform
+        : (SurfaceMesh ? SurfaceMesh->GetComponentTransform() : FTransform::Identity);
     if (UsesMeshUVSurface())
     {
         if (!ContaminationMeshUVData || !SurfaceMesh) { return false; }
@@ -883,9 +928,9 @@ bool UMD_ScrapeSurfaceComponent::TryApplyProceduralInitialContamination(
             const int32 AtlasId = ContaminationCellLayout ? ContaminationCellLayout->ActiveToAtlas[Index] : Index;
             const auto& Cell = ContaminationMeshUVData->Cells[AtlasId];
             if (Cell.IsActive() && !FMD_ContaminationNoise::TryCalculateInitialContamination(
-                    SurfaceMesh->GetComponentTransform().TransformPosition(Cell.PositionLocal),
-                    BaseInitialContamination, ContaminationNoiseScaleCm, ContaminationNoiseSeed,
-                    ContaminationCoverage, ContaminationMinimumAmount, Amounts[Index]))
+                    GenerationTransform.TransformPosition(Cell.PositionLocal),
+                    BaseInitialContamination, NoiseScale, NoiseSeed,
+                    Coverage, Minimum, Amounts[Index]))
             { return false; }
         }
         for (int32 Index = 0; Index < Amounts.Num(); ++Index)
@@ -953,7 +998,7 @@ bool UMD_ScrapeSurfaceComponent::TryApplyProceduralInitialContamination(
 			continue;
 		}
 
-		const int32 FaceSeed = ContaminationNoiseSeed
+		const int32 FaceSeed = NoiseSeed
 			+ FaceIndex * 1013;
 		for (int32 LocalCellIndex = 0;
 			LocalCellIndex < CellsPerFace;
@@ -972,7 +1017,7 @@ bool UMD_ScrapeSurfaceComponent::TryApplyProceduralInitialContamination(
 			if (!FMD_ScrapeSurfaceGeometry::TryCalculateSurfaceWorldPosition(
 					SurfacePositionCm,
 					Face,
-					SurfaceMesh->GetComponentTransform(),
+					GenerationTransform,
 					ResolvedContaminationSurfaceNormalAxis,
 					ContaminationSurfaceCenterLocal,
 					ContaminationMeshLocalBoundsMinimum,
@@ -983,10 +1028,10 @@ bool UMD_ScrapeSurfaceComponent::TryApplyProceduralInitialContamination(
 				|| !FMD_ContaminationNoise::TryCalculateInitialContamination(
 					WorldPosition,
 					BaseInitialContamination,
-					ContaminationNoiseScaleCm,
+					NoiseScale,
 					FaceSeed,
-					ContaminationCoverage,
-					ContaminationMinimumAmount,
+					Coverage,
+					Minimum,
 					InitialAmount))
 			{
 				return false;
