@@ -23,6 +23,28 @@ UMD_ItemDefinition* FMD_ShopItem::GetDefinition() const
 	return IsValid(Definition) == true && Definition->GetPrimaryAssetId() == ItemAssetId ? Definition : nullptr;
 }
 
+bool FMD_ShopItem::IsDefinitionLoaded()
+{
+	// 판매 정의 자체를 사용할 수 없는 품목만 차단
+	if (IsValid(GetDefinition()) == false)
+	{
+		// 해당 품목에 한정한 표시 및 구매 보류
+		return false;
+	}
+	// 선행 조건이 있는 품목에 한해 선행 정의의 준비 여부 확인
+	if (PrerequisiteItemAssetId.IsValid() == true)
+	{
+		// 공통 정의 조회를 재사용할 선행 품목 구성
+		FMD_ShopItem PrerequisiteItem;
+		// 판매 품목과 독립적인 선행 정의의 식별자 지정
+		PrerequisiteItem.ItemAssetId = PrerequisiteItemAssetId;
+		// 선행 정의를 읽을 수 없는 해당 품목만 차단
+		return IsValid(PrerequisiteItem.GetDefinition());
+	}
+	// 별도 선행 정의가 없는 정상 품목의 사용 허용
+	return true;
+}
+
 bool FMD_ShopItem::IsUnlocked(float Affinity, int32 QuestCompletions, const TArray<FPrimaryAssetId>& OwnedItemAssetIds) const
 {
 	// 미충족 진행 조건의 해금 차단
@@ -87,7 +109,7 @@ FText FMD_ShopItem::GetUnlockConditionText() const
 	return FText::FromString(FString::Join(Parts, TEXT(" · ")));
 }
 
-int32 FMD_ShopItem::GetPurchasePrice(TArray<FPrimaryAssetId> PurchasedItemIds) const
+int32 FMD_ShopItem::GetPurchasePrice(TArray<FPrimaryAssetId>& PurchasedItemIds) const
 {
 	// 음수 가격 설정 오류와 구매 이력이 없는 품목의 원래 가격 유지
 	if (Price < 0 || PurchasedItemIds.Contains(ItemAssetId) == false)
@@ -144,26 +166,40 @@ UMD_ItemDefinition* UMD_ShopCatalog::GetItemDefinition(FMD_ShopItem Item)
 
 bool UMD_ShopCatalog::IsItemDefinitionLoaded(FPrimaryAssetId ItemAssetId)
 {
-	// 중복 또는 미등록 품목을 배제한 판매 정보 조회
+	// 유일한 판매 항목의 조회 결과를 정의 준비 검사에 재사용
 	FMD_ShopItem Item;
-	// 다른 품목의 상태와 독립적으로 해당 판매 정의의 준비 여부 확인
-	if (FindItemByAssetId(ItemAssetId, Item) == false || IsValid(Item.GetDefinition()) == false)
+	// 다른 품목의 로드 실패와 독립적인 판매 가능 상태 반환
+	return FindItemByAssetId(ItemAssetId, Item) == true && Item.IsDefinitionLoaded() == true;
+}
+
+TArray<FMD_ShopItem> UMD_ShopCatalog::GetAvailableItems()
+{
+	// 카탈로그 전체를 품목마다 재검색하지 않도록 중복 횟수 집계
+	TMap<FPrimaryAssetId, int32> ItemCounts;
+	// 판매 목록 크기에 맞춰 해시 저장 공간 확보
+	ItemCounts.Reserve(Items.Num());
+	// 카테고리가 다른 중복 행도 함께 집계
+	for (FMD_ShopItem& Item : Items)
 	{
-		// 해당 품목에 한정한 표시 및 구매 보류
-		return false;
+		// 전체 AssetId가 일치하는 판매 행의 횟수 증가
+		++ItemCounts.FindOrAdd(Item.ItemAssetId);
 	}
-	// 선행 조건이 있는 품목에 한해 선행 정의의 준비 여부 확인
-	if (Item.PrerequisiteItemAssetId.IsValid() == true)
+	// 원본 가격과 순서를 유지할 표시용 품목 목록
+	TArray<FMD_ShopItem> Result;
+	// 수집 중 배열의 반복 재할당 방지
+	Result.Reserve(Items.Num());
+	// 중복 집계 결과와 현재 정의 상태를 함께 확인
+	for (FMD_ShopItem& Item : Items)
 	{
-		// 선행 아이템의 표시 정보와 조건을 확인할 조회 항목 구성
-		FMD_ShopItem PrerequisiteItem;
-		// 판매 품목과 독립적인 선행 정의의 식별자 지정
-		PrerequisiteItem.ItemAssetId = Item.PrerequisiteItemAssetId;
-		// 해당 품목의 선행 정의를 읽을 수 없는 경우만 차단
-		return IsValid(PrerequisiteItem.GetDefinition());
+		// 중복이나 로드 실패가 없는 개별 품목만 표시 허용
+		if (ItemCounts.FindChecked(Item.ItemAssetId) == 1 && Item.IsDefinitionLoaded() == true)
+		{
+			// 정상 품목의 원본 판매 정보를 표시용 목록에 복사
+			Result.Add(Item);
+		}
 	}
-	// 판매 정의가 준비되고 별도 선행 정의가 없는 품목의 사용 허용
-	return true;
+	// 일부 실패와 독립적인 정상 품목 목록 전달
+	return Result;
 }
 
 TSharedPtr<FStreamableHandle> UMD_ShopCatalog::LoadItemDefinitions(FStreamableDelegate OnLoaded)

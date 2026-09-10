@@ -475,8 +475,8 @@ EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCh
 
 	// 서버가 보유한 카탈로그에 없는 식별자를 이용한 가격 조작을 막는 품목 조회
 	FMD_ShopItem ShopItem;
-	// 표시에서 제외된 품목의 결제를 막기 위한 판매 및 선행 정의의 개별 재검증
-	if (IsValid(ShopCatalog) == false || ShopCatalog->IsItemDefinitionLoaded(ItemAssetId) == false || ShopCatalog->FindItemByAssetId(ItemAssetId, ShopItem) == false)
+	// 한 번 조회한 판매 정보로 판매 및 선행 정의의 준비 상태 재검증
+	if (IsValid(ShopCatalog) == false || ShopCatalog->FindItemByAssetId(ItemAssetId, ShopItem) == false || ShopItem.IsDefinitionLoaded() == false)
 	{
 		return EMD_ShopPurchaseResult::InvalidItem;
 	}

@@ -158,8 +158,8 @@ void UMD_ShopWidget::RefreshDisplay()
 	// 보유 크레딧을 헤더에 표시
 	if (IsValid(Txt_Credits) == true)
 	{
-		FText creditsText = FText::AsNumber(ShopInfo.Credits);
-		Txt_Credits->SetText(creditsText);
+		// 숫자 형식의 현재 크레딧 직접 반영
+		Txt_Credits->SetText(FText::AsNumber(ShopInfo.Credits));
 	}
 
 	// 품목 목록과 상세 패널 갱신
@@ -171,99 +171,112 @@ void UMD_ShopWidget::RebuildItemList()
 	// 카드 컨테이너가 없으면 목록 생성 중단
 	if (IsValid(WB_ItemEntries) == false)
 	{
+		// 표시할 컨테이너가 없는 갱신 종료
 		return;
 	}
-
-	// 모든 상점 카드를 동일한 선택 필수 그룹에 등록하기 위한 그룹 준비
-	if (IsValid(ItemCardButtonGroup) == false)
+	// 현재 로드 상태와 카테고리를 반영할 표시용 품목 목록
+	TArray<FMD_ShopItem> DisplayItems;
+	// 카탈로그와 카드 클래스가 준비된 경우에만 정상 품목 수집
+	if (IsValid(Catalog) == true && ItemCardClass != nullptr)
 	{
-		ItemCardButtonGroup = NewObject<UCommonButtonGroupBase>(this);
+		// 품목마다 전체 카탈로그를 재검색하지 않는 일괄 준비 검사
+		DisplayItems = Catalog->GetAvailableItems();
+		// 정상 품목 중 현재 분류 밖의 항목만 제외
+		DisplayItems.RemoveAll([this](FMD_ShopItem& Item)
+		{
+			// 전체 탭의 카탈로그 순서를 유지하는 분류 필터
+			return bShowAllCategories == false && Item.Category != SelectedCategory;
+		});
 	}
-	if (IsValid(ItemCardButtonGroup) == true)
+	// 그룹 또는 표시 개수가 달라진 경우에만 카드 재구성 필요
+	bool bRebuildCards = IsValid(ItemCardButtonGroup) == false || WB_ItemEntries->GetChildrenCount() != DisplayItems.Num();
+	// 같은 개수에서도 순서나 카드 종류가 달라진 경우 감지
+	for (int32 Index = 0; bRebuildCards == false && Index < DisplayItems.Num(); ++Index)
 	{
+		// 기존 위치의 실제 표시 카드 조회
+		UMD_ShopItemCardWidget* ItemCard = Cast<UMD_ShopItemCardWidget>(WB_ItemEntries->GetChildAt(Index));
+		// 같은 전체 AssetId와 클래스의 카드만 재사용 허용
+		bRebuildCards = IsValid(ItemCard) == false || ItemCard->GetClass() != ItemCardClass.Get()
+			|| ItemCard->GetItem().GetItemAssetId() != DisplayItems[Index].GetItemAssetId();
+	}
+	// 표시 구성이 바뀐 경우에만 기존 카드와 선택 연결 재구성
+	if (bRebuildCards == true)
+	{
+		// 새 화면에서 사용할 선택 필수 그룹 준비
+		if (IsValid(ItemCardButtonGroup) == false)
+		{
+			// 카드 간 단일 선택을 관리할 그룹 생성
+			ItemCardButtonGroup = NewObject<UCommonButtonGroupBase>(this);
+		}
+		// 제거할 카드의 선택 이벤트와 필수 선택 상태 정리
 		ItemCardButtonGroup->RemoveAll();
+		// 표시 품목이 있으면 한 카드의 선택 유지
 		ItemCardButtonGroup->SetSelectionRequired(true);
+		// 변경된 목록에 속하지 않는 이전 카드 제거
+		WB_ItemEntries->ClearChildren();
 	}
-
-	// 기존 동적 카드 제거
-	WB_ItemEntries->ClearChildren();
-
-	// 목록을 구성할 카탈로그 또는 카드 클래스가 없는 경우만 전체 표시 중단
-	if (IsValid(Catalog) == false || ItemCardClass == nullptr)
-	{
-		// 표시할 목록이 없는 상태에서 이전 품목의 선택 제거
-		SelectedItemAssetId = FPrimaryAssetId();
-		// 이전 상세 정보와 구매 가능 상태 초기화
-		RefreshSelectedItem();
-		// 품목별 카드 생성 종료
-		return;
-	}
-
-	// 기존 상세 품목과 일치하는 카드의 선택 그룹 인덱스 저장
-	int32 selectedItemCardIndex = INDEX_NONE;
-	// 이전 선택 품목이 제외되었을 때 선택할 첫 번째 표시 품목 보관
+	// 이전 상세 품목의 카드 선택 위치
+	int32 SelectedItemCardIndex = INDEX_NONE;
+	// 기존 선택이 사라진 경우의 첫 정상 품목
 	FPrimaryAssetId FirstDisplayedItemAssetId;
-
-	// 카탈로그 순서대로 현재 분류 품목 카드 생성
-	for (FMD_ShopItem item : Catalog->Items)
+	// 표시 순서에 따라 새 카드 생성 또는 기존 카드 갱신
+	for (int32 Index = 0; Index < DisplayItems.Num(); ++Index)
 	{
-		// 다른 분류 또는 해당 정의가 준비되지 않은 품목만 표시에서 제외
-		if ((bShowAllCategories == false && item.Category != SelectedCategory) || Catalog->IsItemDefinitionLoaded(item.GetItemAssetId()) == false)
+		// 재사용할 카드는 앞선 구성 검사에서 유효성 확인 완료
+		UMD_ShopItemCardWidget* ItemCard = bRebuildCards == true
+			? CreateWidget<UMD_ShopItemCardWidget>(this, ItemCardClass) : Cast<UMD_ShopItemCardWidget>(WB_ItemEntries->GetChildAt(Index));
+		// 생성에 실패한 개별 카드만 건너뛰기
+		if (IsValid(ItemCard) == false)
 		{
-			// 정상 품목의 카드 생성 계속 진행
+			// 나머지 정상 품목의 표시 계속 진행
 			continue;
 		}
-
-		UMD_ShopItemCardWidget* itemCard = CreateWidget<UMD_ShopItemCardWidget>(this, ItemCardClass);
-		if (IsValid(itemCard) == false)
+		// 카탈로그 원본 대신 표시용 복사본의 가격 변경
+		FMD_ShopItem& Item = DisplayItems[Index];
+		// 기존 카드를 재사용해도 최신 무료 재구매 가격 반영
+		Item.Price = Item.GetPurchasePrice(OwnedItemIds);
+		// 같은 식별자의 이름과 아이콘 변경도 현재 정의에서 갱신
+		ItemCard->SetItem(Item);
+		// 신규 카드에만 선택 그룹과 클릭 이벤트 연결
+		if (bRebuildCards == true)
 		{
-			continue;
+			// 카드의 선택 상태 사용 허용
+			ItemCard->SetIsSelectable(true);
+			// 새 카드의 단일 선택 그룹 등록
+			ItemCardButtonGroup->AddWidget(ItemCard);
+			// 카드의 실제 품목을 사용하는 클릭 이벤트 연결
+			ItemCard->OnClicked().AddUObject(this, &UMD_ShopWidget::HandleItemSelected, Item.GetItemAssetId());
+			// 카탈로그 순서대로 카드 컨테이너에 배치
+			WB_ItemEntries->AddChild(ItemCard);
 		}
-
-		// 카탈로그 원본을 유지하고 카드용 복사본에 이번 구매 가격 반영
-		item.Price = item.GetPurchasePrice(OwnedItemIds);
-		// 무료 도구 재구매도 숫자 영으로 표시할 품목 전달
-		itemCard->SetItem(item);
-		itemCard->SetIsSelectable(true);
-		if (IsValid(ItemCardButtonGroup) == true)
-		{
-			ItemCardButtonGroup->AddWidget(itemCard);
-		}
-		// 카드 클릭 시 타입과 이름을 보존한 선택 이벤트 연결
-		itemCard->OnClicked().AddUObject(this, &UMD_ShopWidget::HandleItemSelected, item.GetItemAssetId());
-		WB_ItemEntries->AddChild(itemCard);
-
-		// 실제로 카드가 생성된 첫 품목을 대체 선택 대상으로 기록
+		// 실제 생성된 첫 카드만 대체 선택 후보로 보관
 		if (FirstDisplayedItemAssetId.IsValid() == false)
 		{
-			// 로드 실패로 제외된 품목이 기본 선택에 남는 상황 방지
-			FirstDisplayedItemAssetId = item.GetItemAssetId();
+			// 로드 또는 카드 생성 실패 품목의 기본 선택 방지
+			FirstDisplayedItemAssetId = Item.GetItemAssetId();
 		}
-
-		// 전체 식별자가 일치하는 카드의 선택 인덱스 복원
-		if (item.GetItemAssetId() == SelectedItemAssetId && IsValid(ItemCardButtonGroup) == true)
+		// 이전에 선택한 품목이 계속 표시되는 경우 선택 위치 복원
+		if (Item.GetItemAssetId() == SelectedItemAssetId)
 		{
-			// 전체 식별자가 일치하는 카드의 그룹 선택 위치 저장
-			selectedItemCardIndex = ItemCardButtonGroup->FindButtonIndex(itemCard);
+			// 카드 생성 실패를 고려한 실제 그룹 위치 조회
+			SelectedItemCardIndex = ItemCardButtonGroup->FindButtonIndex(ItemCard);
 		}
 	}
-
-	// 이전 선택이 표시 목록에서 제외되면 첫 정상 품목으로 선택 이동
-	if (selectedItemCardIndex == INDEX_NONE)
+	// 선택했던 품목이 사라진 경우 첫 정상 품목으로 이동
+	if (SelectedItemCardIndex == INDEX_NONE)
 	{
-		// 표시 품목이 전혀 없으면 빈 식별자로 선택 해제
+		// 빈 목록에서는 이전 상세 품목의 식별자 제거
 		SelectedItemAssetId = FirstDisplayedItemAssetId;
-		// 표시 품목이 있는 경우에만 첫 카드의 선택 위치 지정
-		selectedItemCardIndex = FirstDisplayedItemAssetId.IsValid() == true ? 0 : INDEX_NONE;
+		// 품목이 있는 경우에만 첫 카드 선택
+		SelectedItemCardIndex = FirstDisplayedItemAssetId.IsValid() == true ? 0 : INDEX_NONE;
 	}
-	// 유지되거나 대체된 정상 품목의 카드 선택 복원
-	if (IsValid(ItemCardButtonGroup) == true && selectedItemCardIndex != INDEX_NONE)
+	// 유지되거나 대체된 정상 품목의 선택 표시 적용
+	if (SelectedItemCardIndex != INDEX_NONE)
 	{
-		// 품목 클릭 이벤트를 재발생시키지 않고 선택 상태 갱신
-		ItemCardButtonGroup->SelectButtonAtIndex(selectedItemCardIndex, false);
+		// 클릭 이벤트를 재발생시키지 않고 단일 선택 복원
+		ItemCardButtonGroup->SelectButtonAtIndex(SelectedItemCardIndex, false);
 	}
-
-	// 선택된 품목 상세 정보 갱신
+	// 최신 가격과 소지 상태 및 구매 제한을 상세 패널에 반영
 	RefreshSelectedItem();
 }
 
@@ -271,13 +284,9 @@ void UMD_ShopWidget::RefreshSelectedItem()
 {
 	// 선택 품목을 카탈로그에서 조회
 	FMD_ShopItem selectedItem;
-	bool foundItem = false;
-	// 다른 품목의 로드 실패와 독립적으로 선택 품목의 준비 여부 확인
-	if (IsValid(Catalog) == true && SelectedItemAssetId.IsValid() == true && Catalog->IsItemDefinitionLoaded(SelectedItemAssetId) == true)
-	{
-		// 이름만 같은 다른 타입을 제외한 정확한 판매 항목 조회
-		foundItem = Catalog->FindItemByAssetId(SelectedItemAssetId, selectedItem);
-	}
+	// 한 번 조회한 판매 항목으로 정의 준비 상태까지 확인
+	bool foundItem = IsValid(Catalog) == true && SelectedItemAssetId.IsValid() == true
+		&& Catalog->FindItemByAssetId(SelectedItemAssetId, selectedItem) == true && selectedItem.IsDefinitionLoaded() == true;
 
 	// 여러 표시 요소가 함께 사용할 공통 정의 조회
 	UMD_ItemDefinition* Definition = foundItem == true ? selectedItem.GetDefinition() : nullptr;
@@ -370,7 +379,7 @@ void UMD_ShopWidget::RefreshSelectedItem()
 	}
 }
 
-bool UMD_ShopWidget::IsItemGrantable(FMD_ShopItem Item)
+bool UMD_ShopWidget::IsItemGrantable(FMD_ShopItem& Item)
 {
 	// 보유 업그레이드를 탐색하지 않고 등록된 구매 금지 식별자 검사
 	if (BlockedItemIds.Contains(Item.GetItemAssetId()) == true)
@@ -503,18 +512,13 @@ void UMD_ShopWidget::HandleItemSelected(FPrimaryAssetId ItemAssetId)
 
 void UMD_ShopWidget::HandleBuyClicked()
 {
-	// 선택한 품목이 표시 및 구매 가능한 상태인지 개별 재검증
-	if (SelectedItemAssetId.IsValid() == false || IsValid(Catalog) == false || Catalog->IsItemDefinitionLoaded(SelectedItemAssetId) == false)
-	{
-		return;
-	}
-
-	// 선택된 판매 항목에서 구매 상태 비교용 전체 식별자 조회
+	// 한 번 조회한 판매 정보를 클릭 직전 검증에도 재사용
 	FMD_ShopItem SelectedItem;
-	// 카탈로그에 없는 선택값의 구매 요청 차단
-	if (Catalog->FindItemByAssetId(SelectedItemAssetId, SelectedItem) == false)
+	// 유효한 선택과 유일한 판매 항목 및 준비된 정의를 함께 검사
+	if (SelectedItemAssetId.IsValid() == false || IsValid(Catalog) == false
+		|| Catalog->FindItemByAssetId(SelectedItemAssetId, SelectedItem) == false || SelectedItem.IsDefinitionLoaded() == false)
 	{
-		// 유효한 판매 항목이 없는 요청 종료
+		// 구매할 수 없는 개별 품목의 요청 종료
 		return;
 	}
 

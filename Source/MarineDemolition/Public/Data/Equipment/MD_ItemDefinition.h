@@ -4,11 +4,12 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
-#include "Engine/HitResult.h"
+#include "GameplayTagContainer.h"
 #include "MD_ItemDefinition.generated.h"
 
 class AActor;
 class UTexture2D;
+class UGameplayEffect;
 
 // 정의에 저장하지 않고 지급 요청마다 전달할 대상 및 수량
 USTRUCT(BlueprintType)
@@ -27,25 +28,6 @@ struct MARINEDEMOLITION_API FMD_ItemGrantContext
 	// 서버 지급 호출부가 제공할 지속 업그레이드 및 구매 이력
 	UPROPERTY(BlueprintReadWrite, Category = "Grant")
 	TArray<FPrimaryAssetId> PurchasedItemIds;
-};
-
-// 보관형 소모품의 사용 입력과 효과 대상을 전달할 자료형
-USTRUCT(BlueprintType)
-struct MARINEDEMOLITION_API FMD_ItemUseContext
-{
-	GENERATED_BODY()
-
-	// 소모품을 사용하는 액터
-	UPROPERTY(BlueprintReadWrite, Category = "Use")
-	TObjectPtr<AActor> User;
-
-	// 수리 등 대상 지정 효과를 받을 액터
-	UPROPERTY(BlueprintReadWrite, Category = "Use")
-	TObjectPtr<AActor> TargetActor;
-
-	// 표면 위치 또는 부위 지정에 사용할 명중 정보
-	UPROPERTY(BlueprintReadWrite, Category = "Use")
-	FHitResult HitResult;
 };
 
 // 모든 아이템의 식별 및 표시 정보와 지급 계약을 제공하는 공통 부모
@@ -90,4 +72,11 @@ public:
 	bool Grant(FMD_ItemGrantContext Context);
 	// 후속 지급 시스템이 연결되기 전 성공을 반환하지 않는 기본 처리
 	virtual bool Grant_Implementation(FMD_ItemGrantContext Context);
+	// 도구와 소모품 정의가 제공하는 구매 시 능력 부여 GE 조회
+	virtual TSubclassOf<UGameplayEffect> GetAbilityGrantEffect() { return nullptr; }
+
+	// 구매 GE가 부여한 능력 중 사용 입력에 연결할 태그 조회
+	UFUNCTION(BlueprintPure, Category = "Item|Ability")
+	virtual FGameplayTag GetUseAbilityTag() { return FGameplayTag(); }
+
 };

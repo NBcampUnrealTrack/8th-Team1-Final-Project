@@ -16,7 +16,7 @@ bool UMD_ConsumeItemDefinition::CanGrant_Implementation(FMD_ItemGrantContext Con
 	// 지급 대상의 공통 보관 컴포넌트 조회
 	UMD_EquipHotbarComponent* Hotbar = Context.Recipient->FindComponentByClass<UMD_EquipHotbarComponent>();
 	// 보관 컴포넌트 부재 또는 슬롯 및 수량 조건 미충족 차단
-	if (IsValid(Hotbar) == false || Hotbar->CanAddItem(this, Context.Quantity) == false)
+	if (IsValid(Hotbar) == false || Hotbar->IsItemAbilityGrantValid(this) == false || Hotbar->CanAddItem(this, Context.Quantity) == false)
 	{
 		// 실제 보관 조건 실패의 프로젝트 로그 기록
 		UE_LOG(MarineDemolition, Warning, TEXT("%s Hotbar에 아이템을 지급할 수 없음 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());
@@ -54,43 +54,5 @@ bool UMD_ConsumeItemDefinition::Grant_Implementation(FMD_ItemGrantContext Contex
 	// BP 조건 검사 이후 보관 대상이 사라진 원인 기록
 	UE_LOG(MarineDemolition, Warning, TEXT("%s 지급 직전 Hotbar가 유효하지 않음 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());
 	// 실제 지급이 없는 실패 결과 전달
-	return false;
-}
-
-bool UMD_ConsumeItemDefinition::CanUse_Implementation(FMD_ItemUseContext Context)
-{
-	// 사용 주체 또는 식별자가 유효하지 않은 소모품 사용의 차단
-	if (IsValid(Context.User) == false || GetPrimaryAssetId().IsValid() == false)
-	{
-		// 사용 주체 또는 식별자 확인 실패의 프로젝트 로그 기록
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 소모품 사용 주체 또는 AssetType/ItemId가 유효하지 않음 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());
-		// 소모품 사용 요청의 검증 실패 전달
-		return false;
-	}
-	// 실패 원인의 프로젝트 로그 기록
-	UE_LOG(MarineDemolition, Warning, TEXT("%s 소모품의 개별 사용 조건이 구현되지 않음 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());
-	// 개별 수리 및 소비 효과의 조건이 연결되기 전 승인 차단
-	return false;
-}
-
-bool UMD_ConsumeItemDefinition::ApplyItemEffect_Implementation(FMD_ItemUseContext Context)
-{
-	// 유효한 사용 주체에 한해서 효과 적용 권한 확인
-	if (IsValid(Context.User) == false || Context.User->HasAuthority() == false)
-	{
-		// 사용 주체 또는 서버 권한 확인 실패의 프로젝트 로그 기록
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 소모품 사용 주체가 유효하지 않거나 효과 적용의 서버 권한이 없음 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());
-		// 소모품 효과 실행 조건 실패 전달
-		return false;
-	}
-	// BP 재정의를 포함한 사용 조건 확인
-	if (CanUse(Context) == false)
-	{
-		// 선행 검사에서 기록한 실패 결과의 전달
-		return false;
-	}
-	// 실패 원인의 프로젝트 로그 기록
-	UE_LOG(MarineDemolition, Warning, TEXT("%s 소모품의 실제 사용 효과가 구현되지 않음 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());
-	// 실제 효과와 Hotbar 소비가 연결되기 전 성공 차단
 	return false;
 }

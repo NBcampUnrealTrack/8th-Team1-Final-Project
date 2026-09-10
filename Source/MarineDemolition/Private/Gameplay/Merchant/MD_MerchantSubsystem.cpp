@@ -81,23 +81,27 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerStat
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
 
-	// 카탈로그 식별자와 구매 가격이 없는 항목의 직접 구매를 막는 데이터 검사
-	// 정의의 전체 AssetId를 사용하여 타입이 다른 구매 이력 구분
-	// AssetId만 전달된 상태에서 미등록 또는 미로드 정의의 직접 결제 차단
-	if (ShopItem.GetItemAssetId().IsValid() == false || IsValid(ShopItem.GetDefinition()) == false || ShopItem.Price < 0)
+	// 검증과 구매 기록에서 함께 사용할 전체 식별자 조회
+	FPrimaryAssetId ItemAssetId = ShopItem.GetItemAssetId();
+	// 검증한 정의를 지급 성공 이후의 소스 조회에도 재사용
+	UMD_ItemDefinition* Definition = ShopItem.GetDefinition();
+	// 미등록 또는 미로드 정의와 잘못된 가격의 직접 결제 차단
+	if (ItemAssetId.IsValid() == false || IsValid(Definition) == false || ShopItem.Price < 0)
 	{
 		return EMD_ShopPurchaseResult::InvalidItem;
 	}
 
+	// 해금과 가격 계산에 사용할 구매 이력을 한 번만 복사
+	TArray<FPrimaryAssetId> PurchasedItemIds = PurchasingPlayerState->GetPurchasedShopItemIds();
 	// 등록된 구매 금지를 먼저 적용하고 나머지 상점 진행 조건 검사
-	if (PurchasingPlayerState->IsShopItemPurchaseBlocked(ShopItem.GetItemAssetId()) == true
-		|| ShopItem.IsUnlocked(Affinity, QuestCompletions, PurchasingPlayerState->GetPurchasedShopItemIds()) == false)
+	if (PurchasingPlayerState->IsShopItemPurchaseBlocked(ItemAssetId) == true
+		|| ShopItem.IsUnlocked(Affinity, QuestCompletions, PurchasedItemIds) == false)
 	{
 		return EMD_ShopPurchaseResult::Locked;
 	}
 
 	// 이번 성공으로 이력이 바뀌기 전에 서버 구매 이력으로 결제 금액 확정
-	int32 PurchasePrice = ShopItem.GetPurchasePrice(PurchasingPlayerState->GetPurchasedShopItemIds());
+	int32 PurchasePrice = ShopItem.GetPurchasePrice(PurchasedItemIds);
 	// 무료 재구매를 포함한 실제 금액으로 결제 가능 여부 검사
 	if (Credits < PurchasePrice)
 	{
@@ -111,9 +115,9 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerStat
 	}
 
 	// 실제 지급에 성공한 도구의 업그레이드 소스 설정 조회
-	UMD_ToolDefinition* PurchasedTool = Cast<UMD_ToolDefinition>(ShopItem.GetDefinition());
+	UMD_ToolDefinition* PurchasedTool = Cast<UMD_ToolDefinition>(Definition);
 	// 성공한 모든 구매의 이력과 유효한 소스 구매 금지를 함께 등록
-	if (PurchasingPlayerState->RecordPurchasedShopItem(ShopItem.GetItemAssetId(),
+	if (PurchasingPlayerState->RecordPurchasedShopItem(ItemAssetId,
 		IsValid(PurchasedTool) == true ? PurchasedTool->UpgradeSourceAssetId : FPrimaryAssetId()) == false)
 	{
 		return EMD_ShopPurchaseResult::InvalidRequest;
@@ -123,11 +127,11 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerStat
 	// 상점 구매 비용을 기타 정산 분류로 기록
 	AddCreditsInternal(EMD_DailyReportCategory::Other, -PurchasePrice);
 	// 정의의 전체 AssetId를 사용하여 타입이 다른 구매 이력 구분
-	int32& PurchasedCount = PurchasedItemAssetCounts.FindOrAdd(ShopItem.GetItemAssetId());
+	int32& PurchasedCount = PurchasedItemAssetCounts.FindOrAdd(ItemAssetId);
 	PurchasedCount += 1;
 
 	// 정의의 전체 AssetId를 사용하여 타입이 다른 구매 이력 구분
-	UE_LOG(MarineDemolition, Log, TEXT("[Merchant] 상점 구매 완료: %s (-%d, 잔액 %d, 누적 %d개)"), *ShopItem.GetItemAssetId().ToString(), PurchasePrice, Credits, PurchasedCount);
+	UE_LOG(MarineDemolition, Log, TEXT("[Merchant] 상점 구매 완료: %s (-%d, 잔액 %d, 누적 %d개)"), *ItemAssetId.ToString(), PurchasePrice, Credits, PurchasedCount);
 
 	// GameState 복제 미러와 열려 있는 상점 UI를 함께 갱신하기 위한 변경 알림
 	OnMerchantStateChanged.Broadcast();

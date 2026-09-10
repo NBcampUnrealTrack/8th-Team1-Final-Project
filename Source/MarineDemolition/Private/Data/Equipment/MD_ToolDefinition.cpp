@@ -43,7 +43,7 @@ bool UMD_ToolDefinition::CanGrant_Implementation(FMD_ItemGrantContext Context)
 	// 지급 대상의 공통 보관 컴포넌트 조회
 	UMD_EquipHotbarComponent* Hotbar = Context.Recipient->FindComponentByClass<UMD_EquipHotbarComponent>();
 	// 이미 보유한 도구의 재지급 및 유효하지 않은 보관 구조 차단
-	if (IsValid(Hotbar) == false || Hotbar->GetSlotCount() != 4 || Hotbar->GetItemCount(this) > 0)
+	if (IsValid(Hotbar) == false || Hotbar->IsItemAbilityGrantValid(this) == false || Hotbar->GetSlotCount() != 4 || Hotbar->GetItemCount(this) > 0)
 	{
 		// 소지 중인 도구는 구매 이력과 무관하게 중복 구매 거부
 		UE_LOG(MarineDemolition, Warning, TEXT("%s 이미 보유한 도구이거나 Hotbar가 유효하지 않음 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());
