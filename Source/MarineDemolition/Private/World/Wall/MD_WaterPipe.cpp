@@ -15,16 +15,22 @@ AMD_WaterPipe::AMD_WaterPipe()
 
 void AMD_WaterPipe::OnBroken(AActor* Cutter)
 {
-	// 파열 즉시 감점
-	if (AMD_GameStateBase* GS = GetWorld()->GetGameState<AMD_GameStateBase>())
-	{
-		GS->AddScoreEvent(MDGameplayTags::Score_Penalty_PipeBurst);
-	}
-
 	// 근접 위험 볼륨 가동 (-8/s)
 	if (IsValid(HazardVolume))
 	{
 		HazardVolume->SetHazardActive(true);
+	}
+
+	// 처음부터 고장(Cutter == nullptr)이면 사고만 발생하고 감점은 즉시·지속 모두 없음
+	if (Cutter == nullptr)
+	{
+		return;
+	}
+
+	// 파열 즉시 감점
+	if (AMD_GameStateBase* GS = GetWorld()->GetGameState<AMD_GameStateBase>())
+	{
+		GS->AddScoreEvent(MDGameplayTags::Score_Penalty_PipeBurst);
 	}
 
 	// 미밀봉 지속 감점 시작

@@ -1,15 +1,17 @@
 # 스캐너 시스템 개편 기획서 (Scanner System Redesign)
 
-## 1. 개요 (Overview)
-기존 스캐너 시스템은 플레이어 시선(Line Trace)을 기준으로 좁은 범위(2미터) 내의 단일 격벽(`AMD_CuttableWall`)만을 식별하여 하이라이트했습니다. 
-본 개편안은 스캐너의 범위를 **전방 원뿔(Cone) 형태, 10미터(1000 UU)** 로 확장하고, 해당 범위 내에 있는 **모든 스캔 가능한 오브젝트**를 동시에 다중 스캔할 수 있도록 개선합니다.
+스캐너를 켰을 때 전방 10 m 안의 여러 대상을 한꺼번에 표시하는 개편안이다. 먼저 탐지 거리와 방향으로 대상을 추린 뒤 스캔 태그가 있는 물건만 표시한다. 뒤쪽 절에는 개발자가 사용할 함수명과 렌더링 수정 방법을 적었다.
 
-## 2. 주요 변경 사항 (Key Changes)
+## 1. 무엇이 바뀌는가
+기존 스캐너는 시선 방향으로 선을 쏘는 `Line Trace` 방식이다. 2미터 안에서 격벽(`AMD_CuttableWall`) 하나만 찾아 강조 표시한다. 
+개편안에서는 **전방 10미터(1000 UU)의 원뿔 범위**를 검사한다. 그 안에 있는 **스캔 가능한 물건을 한 번에 모두 표시한다.**
+
+## 2. 변경 사항
 * **스캔 범위 확장**: 단일 Line Trace 탐지 방식에서 반경 10m 구역 내 전방 각도 판정(Cone Shape)으로 변경.
 * **스캔 대상 확대**: 단일 `CuttableWall` 타겟팅에서 범위 내 다중 액터 처리로 변경. 격벽 외의 상호작용 가능한 아이템 등(Scannable Objects)도 스캔 태그를 가지면 탐지 대상에 포함.
 * **VFX 변경 (MPC)**: 단일 오브젝트 기준 좌표계를 사용하던 `MPC_Scan`의 `ScanBoxCenter`를 **플레이어 스캐너 발동 위치**로 변경하고 범위를 10m에 맞게 확장.
 
-## 3. 세부 구현 로직 (Implementation Details)
+## 3. 구현 방법
 
 ### 3.1. 전방 원뿔 형태 다중 탐지 (Cone Overlap)
 `MD_GA_WallScan` 내부의 `ActivateAbility` 로직을 다음과 같이 수정합니다.
@@ -50,7 +52,7 @@
 > `PlayScanPulse()` 를 부르면 탐지 개수만큼 겹친다. 루프 **밖**에서 1회만 부르고,
 > 대상 수가 0이면 부르지 않는다.
 
-## 4. 변경 대상 파일 (Affected Files)
+## 4. 수정할 파일
 1. `Source/MarineDemolition/Private/Ability/Wall/MD_GA_WallScan.cpp`
    - 탐지 로직 (LineTrace -> SphereOverlap + DotProduct 필터링) 교체.
    - 다중 타겟 대상 `ScanHighlight` 루프 처리.
@@ -60,7 +62,7 @@
    - 사운드 프로퍼티(`ScanPulseSoundTag`, `ScanPulseFadeOutSeconds`)는 **그대로 둔다**.
 3. 머티리얼 관련: `Content/VFX/03_Scanner/MPC_Scan` 파라미터 구조 변경 반영.
 
-## 5. 알려진 이슈 및 렌더링 개선 (Rendering Fixes)
+## 5. 표시 오류와 수정 방법
 
 ### 5.1. 스캔 머티리얼 심도(Depth) 우선순위 문제
 - **이슈 설명**: 스캔된 오브젝트가 캐릭터 뒤에 있더라도 스캔 머티리얼 효과(포스트 프로세스 엑스레이 등)가 캐릭터(또는 카메라 앞의 다른 오브젝트)를 뚫고 렌더링되어 공간감을 해치고 캐릭터보다 앞에 있는 것처럼 보이는 현상.
