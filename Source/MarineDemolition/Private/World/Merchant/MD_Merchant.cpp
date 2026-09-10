@@ -475,8 +475,8 @@ EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCh
 
 	// 서버가 보유한 카탈로그에 없는 식별자를 이용한 가격 조작을 막는 품목 조회
 	FMD_ShopItem ShopItem;
-	// 공통 정의가 준비되기 전에는 모든 품목의 결제 진입 차단
-	if (IsValid(ShopCatalog) == false || ShopCatalog->FindItemByAssetId(ItemAssetId, ShopItem) == false || IsValid(ShopItem.GetDefinition()) == false)
+	// 표시에서 제외된 품목의 결제를 막기 위한 판매 및 선행 정의의 개별 재검증
+	if (IsValid(ShopCatalog) == false || ShopCatalog->IsItemDefinitionLoaded(ItemAssetId) == false || ShopCatalog->FindItemByAssetId(ItemAssetId, ShopItem) == false)
 	{
 		return EMD_ShopPurchaseResult::InvalidItem;
 	}
@@ -722,27 +722,11 @@ void AMD_Merchant::RefreshShopWidgetFromComponent()
 
 	// 소유권과 선행 품목 해금을 동일한 복제 스냅샷으로 계산하기 위한 목록 복사
 	AMD_PlayerState* InteractingPlayerState = GetInteractingPlayerState();
-	// 현재 플레이어의 전체 AssetId 구매 스냅샷 구성
-	TArray<FPrimaryAssetId> OwnedItemIds = IsValid(InteractingPlayerState) == true ? InteractingPlayerState->GetPurchasedShopItemIds() : TArray<FPrimaryAssetId>();
-	// 중복 구매를 막을 품목의 전체 식별자 목록
-	TArray<FPrimaryAssetId> FullyStockedItemIds;
-
-	if (IsValid(ShopCatalog) == true)
-	{
-		for (const FMD_ShopItem& ShopItem : ShopCatalog->Items)
-		{
-			// 전체 AssetId가 일치하는 구매 완료 품목의 중복 구매 제한
-			if (ShopItem.bPricePerUnit == false && OwnedItemIds.Contains(ShopItem.GetItemAssetId()) == true)
-			{
-				// 전체 AssetId가 일치하는 구매 완료 품목의 중복 구매 제한
-				FullyStockedItemIds.Add(ShopItem.GetItemAssetId());
-			}
-		}
-	}
-
 	ActiveShopWidget->SetShopInfo(MerchantComponent->BuildMenuInfo());
-	ActiveShopWidget->SetProgress(MerchantComponent->GetQuestCompletions(), OwnedItemIds);
-	ActiveShopWidget->SetFullyStockedItems(FullyStockedItemIds);
+	// 구매 이력과 성공한 업그레이드의 소스 구매 금지를 같은 화면에 전달
+	ActiveShopWidget->SetProgress(MerchantComponent->GetQuestCompletions(),
+		IsValid(InteractingPlayerState) == true ? InteractingPlayerState->GetPurchasedShopItemIds() : TArray<FPrimaryAssetId>(),
+		IsValid(InteractingPlayerState) == true ? InteractingPlayerState->GetBlockedShopItemIds() : TArray<FPrimaryAssetId>());
 }
 
 void AMD_Merchant::RefreshLoanWidgetFromComponent()

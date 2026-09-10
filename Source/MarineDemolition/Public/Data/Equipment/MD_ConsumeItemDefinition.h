@@ -7,6 +7,7 @@
 #include "MD_ConsumeItemDefinition.generated.h"
 
 class UGameplayEffect;
+class UStaticMesh;
 
 // 지급 시 보관하고 별도의 사용 요청에서 효과를 실행할 소모품 정의
 UCLASS(BlueprintType, Blueprintable)
@@ -19,6 +20,10 @@ public:
 	virtual bool Grant_Implementation(FMD_ItemGrantContext Context) override;
 
 public:
+	// Hotbar에서 선택한 소모품을 캐릭터 손에 표시할 메시
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Visual")
+	TObjectPtr<UStaticMesh> ConsumeMesh;
+
 	// GAS 기반 소모 효과에 사용할 선택적 효과 설정
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Use")
 	TSubclassOf<UGameplayEffect> EffectClass;

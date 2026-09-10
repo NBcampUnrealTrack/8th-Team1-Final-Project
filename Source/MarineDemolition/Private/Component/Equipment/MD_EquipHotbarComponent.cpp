@@ -116,20 +116,18 @@ bool UMD_EquipHotbarComponent::FindAvailableItemEntry(UMD_ItemDefinition* ItemDe
 		// 지급 요청 검증 실패 전달
 		return false;
 	}
-	// 도구의 단일 소지 규칙을 적용할 종류 확인
+	// 동일 도구의 중복 보관과 수량 합산을 제한할 종류 확인
 	bool bIsTool = ItemDefinition->IsA<UMD_ToolDefinition>();
 	// 도구의 일괄 지급 및 비정상 슬롯 배열 차단
 	if ((bIsTool == true && Amount != 1) || ToolEntries.Num() != 4)
 	{
 		// 슬롯 또는 도구 수량 제약 실패 기록
-		UE_LOG(MarineDemolition, Warning, TEXT("%s Hotbar는 네 슬롯이며 도구는 한 개만 지급 가능"), *UE_CALL_LOCATIONINFO);
+		UE_LOG(MarineDemolition, Warning, TEXT("%s Hotbar는 네 슬롯이며 같은 도구는 한 번에 한 개만 지급 가능"), *UE_CALL_LOCATIONINFO);
 		// 지급 수량 및 보관 구조 검증 실패 전달
 		return false;
 	}
 	// 동일 아이템의 합산 대상 위치
 	int32 SameEntryIndex = INDEX_NONE;
-	// 새 도구가 교체할 기존 도구 위치
-	int32 ToolEntryIndex = INDEX_NONE;
 	// 새로운 아이템을 넣을 최초 빈 위치
 	int32 EmptyEntryIndex = INDEX_NONE;
 	// 모든 슬롯의 상태를 변경 없이 확인
@@ -148,20 +146,6 @@ bool UMD_EquipHotbarComponent::FindAvailableItemEntry(UMD_ItemDefinition* ItemDe
 			}
 			// 빈 슬롯의 종류 및 AssetId 비교 생략
 			continue;
-		}
-		// 기존 도구 슬롯은 새 도구의 GA 태그와 무관하게 교체 후보
-		if (EntryDefinition->IsA<UMD_ToolDefinition>() == true)
-		{
-			// 여러 도구가 보관된 비정상 상태의 추가 변이 차단
-			if (ToolEntryIndex != INDEX_NONE)
-			{
-				// 단일 도구 제약 위반 기록
-				UE_LOG(MarineDemolition, Warning, TEXT("%s Hotbar에 도구가 두 개 이상 존재함"), *UE_CALL_LOCATIONINFO);
-				// 비정상 보관 상태의 지급 실패 전달
-				return false;
-			}
-			// 도구 교체 위치 저장
-			ToolEntryIndex = Index;
 		}
 		// 동일한 전체 AssetId의 합산 후보 확인
 		if (EntryDefinition->GetPrimaryAssetId() == ItemDefinition->GetPrimaryAssetId())
@@ -186,9 +170,9 @@ bool UMD_EquipHotbarComponent::FindAvailableItemEntry(UMD_ItemDefinition* ItemDe
 		// 추가 지급 실패 전달
 		return false;
 	}
-	// 도구는 기존 도구 위치에 교체하고 나머지는 동일 아이템 합산 우선
-	OutEntryIndex = bIsTool == true ? ToolEntryIndex : SameEntryIndex;
-	// 교체 또는 합산 대상이 없을 때만 빈 슬롯 사용
+	// 동일 일반 아이템의 수량 합산 위치를 우선 사용
+	OutEntryIndex = SameEntryIndex;
+	// 합산 대상이 없는 새로운 도구와 일반 아이템은 빈 슬롯 사용
 	if (OutEntryIndex == INDEX_NONE)
 	{
 		// 최초 빈 슬롯을 지급 위치로 선택
@@ -228,7 +212,7 @@ bool UMD_EquipHotbarComponent::AddItem(UMD_ItemDefinition* ItemDefinition, int32
 	}
 	// 실제 지급할 위치의 공통 검증 결과
 	int32 EntryIndex = INDEX_NONE;
-	// 직전 상태로 교체 및 합산 가능 여부 확인
+	// 직전 상태로 빈 슬롯 추가 및 수량 합산 가능 여부 확인
 	if (FindAvailableItemEntry(ItemDefinition, Amount, EntryIndex) == false)
 	{
 		// 선행 검사에서 기록한 지급 실패 전달
@@ -236,14 +220,12 @@ bool UMD_EquipHotbarComponent::AddItem(UMD_ItemDefinition* ItemDefinition, int32
 	}
 	// 실제 수량과 정의를 함께 갱신할 슬롯 참조
 	FMD_HotbarToolEntry& Entry = ToolEntries[EntryIndex];
-	// 일반 아이템만 같은 AssetId 수량을 합산하고 도구는 한 개로 교체
+	// 일반 아이템만 같은 AssetId 수량을 합산하고 새 도구는 한 개로 추가
 	int32 NewCount = ItemDefinition->IsA<UMD_ToolDefinition>() == false && IsValid(GetItemAtSlot(EntryIndex)) == true ? Entry.Count + Amount : Amount;
 	// 새로 지급할 도구의 초기 충전 설정 조회
 	UMD_ToolDefinition* NewTool = Cast<UMD_ToolDefinition>(ItemDefinition);
-	// 기존과 같은 도구는 잔량을 유지하고 다른 아이템 교체 시 충전 초기화
-	Entry.Charge = IsValid(NewTool) == true
-		? (IsValid(Entry.ToolDefinition) == true && Entry.ToolDefinition->GetPrimaryAssetId() == NewTool->GetPrimaryAssetId() ? Entry.Charge : NewTool->InitialCharge)
-		: 0.0f;
+	// 새 도구의 초기 충전량을 해당 빈 슬롯에만 반영
+	Entry.Charge = IsValid(NewTool) == true ? NewTool->InitialCharge : 0.0f;
 	// 새 정의 또는 합산 대상 정의를 슬롯에 반영
 	Entry.ToolDefinition = ItemDefinition;
 	// 검증을 통과한 보유 수량 반영
@@ -310,7 +292,7 @@ bool UMD_EquipHotbarComponent::SetItemAtSlot(int32 SlotIndex, UMD_ItemDefinition
 			// 슬롯 내용 검증 실패 전달
 			return false;
 		}
-		// 다른 슬롯과의 아이템 중복 및 다중 도구 소지 확인
+		// 서로 다른 도구는 허용하고 같은 아이템의 중복 슬롯만 검사
 		for (int32 Index = 0; Index < ToolEntries.Num(); ++Index)
 		{
 			// 현재 변경할 슬롯은 기존 내용과 무관하게 교체 가능
@@ -321,12 +303,11 @@ bool UMD_EquipHotbarComponent::SetItemAtSlot(int32 SlotIndex, UMD_ItemDefinition
 			}
 			// 다른 위치의 실제 아이템 조회
 			UMD_ItemDefinition* OtherItem = GetItemAtSlot(Index);
-			// 동일 AssetId 또는 두 번째 도구의 다른 슬롯 등록 차단
-			if (IsValid(OtherItem) == true && (OtherItem->GetPrimaryAssetId() == ItemDefinition->GetPrimaryAssetId()
-				|| (OtherItem->IsA<UMD_ToolDefinition>() == true && ItemDefinition->IsA<UMD_ToolDefinition>() == true)))
+			// 같은 전체 AssetId가 여러 슬롯에 보관되는 상태 차단
+			if (IsValid(OtherItem) == true && OtherItem->GetPrimaryAssetId() == ItemDefinition->GetPrimaryAssetId())
 			{
-				// 직접 슬롯 설정을 통한 단일 보관 규칙 위반 기록
-				UE_LOG(MarineDemolition, Warning, TEXT("%s 다른 슬롯에 동일 아이템 또는 도구가 이미 존재함"), *UE_CALL_LOCATIONINFO);
+				// 직접 슬롯 설정을 통한 동일 아이템 중복 보관 기록
+				UE_LOG(MarineDemolition, Warning, TEXT("%s 다른 슬롯에 동일 AssetId의 아이템이 이미 존재함"), *UE_CALL_LOCATIONINFO);
 				// 기존 슬롯들을 유지한 배치 실패 전달
 				return false;
 			}
@@ -448,7 +429,7 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 		// 로드 가능한 공통 정의만 현재 슬롯 제약에 따라 복구
 		if (IsValid(Item) == true)
 		{
-			// 구형 저장의 여러 도구는 앞의 한 개만 유지하는 검증 복구
+			// 저장된 슬롯 순서대로 서로 다른 도구와 일반 아이템 복구
 			SetItemAtSlot(Index, Item, 1);
 		}
 	}

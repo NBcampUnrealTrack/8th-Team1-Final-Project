@@ -15,6 +15,7 @@
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Comfort/MD_ComfortComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Equipment/MD_ConsumeItemDefinition.h"
 #include "Data/Equipment/MD_RepairItemDefinition.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
@@ -2033,10 +2034,20 @@ void AMD_Character::RefreshToolMesh()
 
 void AMD_Character::RefreshScrapeLoadVisual()
 {
-	const UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
-		? EquipHotbarComponent->GetCurrentTool()
-		: nullptr;
-	UStaticMesh* NewToolMesh = IsValid(CurrentTool) ? CurrentTool->ToolMesh : nullptr;
+	// 도구와 소모품을 포함한 선택 슬롯의 공통 정의 조회
+	UMD_ItemDefinition* CurrentItem = IsValid(EquipHotbarComponent) == true ? EquipHotbarComponent->GetCurrentItem() : nullptr;
+	// 기존 도구 메시와 오염 적재 표현에 사용할 도구 정의 조회
+	UMD_ToolDefinition* CurrentTool = Cast<UMD_ToolDefinition>(CurrentItem);
+	// 손에 표시할 소모품 메시를 제공하는 정의 조회
+	UMD_ConsumeItemDefinition* CurrentConsumeItem = Cast<UMD_ConsumeItemDefinition>(CurrentItem);
+	// 소모품 선택 시 지정 메시를 사용하고 빈 슬롯은 표시 해제
+	UStaticMesh* NewToolMesh = IsValid(CurrentConsumeItem) == true ? CurrentConsumeItem->ConsumeMesh : nullptr;
+	// 도구 선택 시 기존 도구 메시 표시 유지
+	if (IsValid(CurrentTool) == true)
+	{
+		// 도구별 기본 메시를 오염 적재 단계 판정의 기준으로 적용
+		NewToolMesh = CurrentTool->ToolMesh;
+	}
 	if (IsValid(CurrentTool) && IsValid(ScrapeToolComponent))
 	{
 		switch (ScrapeToolComponent->GetScrapeLoadStage())

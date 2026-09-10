@@ -85,11 +85,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
 	int32 GetItemCount(UMD_ItemDefinition* ItemDefinition) const;
 
-	// 도구 교체 또는 동일 아이템 합산 및 빈 슬롯 지급 가능 여부 확인
+	// 같은 도구의 중복 보관을 제외한 일반 아이템 합산 및 빈 슬롯 지급 검사
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
 	bool CanAddItem(UMD_ItemDefinition* ItemDefinition, int32 Amount = 1) const;
 
-	// 도구 한 개 제한과 일반 아이템 수량 합산을 반영하는 서버 지급
+	// 서로 다른 도구는 빈 슬롯에 추가하고 같은 일반 아이템은 수량 합산
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
 	bool AddItem(UMD_ItemDefinition* ItemDefinition, int32 Amount = 1);
 
@@ -109,7 +109,7 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
 	bool TryConsumeItem(UMD_ItemDefinition* ItemDefinition, int32 Amount = 1);
 
-	// 중복 아이템과 두 번째 도구를 허용하지 않는 지정 슬롯 설정이며 수량 영은 비우기
+	// 같은 AssetId의 중복 슬롯을 막는 지정 슬롯 설정이며 수량 영은 비우기
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
 	bool SetItemAtSlot(int32 SlotIndex, UMD_ItemDefinition* ItemDefinition, int32 Amount = 1);
 
