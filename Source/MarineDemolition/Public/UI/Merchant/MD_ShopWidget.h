@@ -18,6 +18,7 @@ class UTextBlock;
 class UMD_CommonButtonBase;
 class UMD_MerchantMenuWidget;
 class UMD_ShopItemCardWidget;
+class UMD_EquipHotbarComponent;
 
 // 선택한 전체 AssetId를 구매 요청 수신자에 전달
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopPurchaseRequest, FPrimaryAssetId, ItemAssetId);
@@ -49,19 +50,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void SetShopInfo(const FMD_MerchantMenuInfo& InInfo);
 
-	// 진행 조건과 전체 AssetId 구매 이력을 상점 해금 판정에 전달
+	// 진행 조건과 구매 이력 및 등록된 구매 금지를 상점 화면에 전달
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
-	void SetProgress(int32 InQuestCompletions, const TArray<FPrimaryAssetId>& InOwnedItemIds);
-
-	/**
-	 * 더 살 필요가 없는 품목(호환 장비가 이미 가득 찬 소모품 등)을 지정한다.
-	 *
-	 * "가득 찼는지"를 판단하는 규칙은 UI가 알 바가 아니다 — 장비·인벤 시스템이
-	 * 계산해서 결과만 넘긴다. 그래야 폼건 카트리지든 열선 배터리든 규칙이 바뀌어도
-	 * 이 위젯은 그대로 쓸 수 있다.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
-	void SetFullyStockedItems(const TArray<FPrimaryAssetId>& InItemIds);
+	void SetProgress(int32 InQuestCompletions, const TArray<FPrimaryAssetId>& InOwnedItemIds, TArray<FPrimaryAssetId> InBlockedItemIds);
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void SelectCategory(EMD_ShopCategory InCategory);
@@ -87,6 +78,12 @@ protected:
 	void BuildCategoryButtons();
 
 	void RefreshSelectedItem();
+
+	// 상점 품목의 지급 조건을 실제 소유 Pawn과 구매 이력으로 검사
+	bool IsItemGrantable(FMD_ShopItem Item);
+
+	// 선행 도구와 잔여 수량 변경을 화면에 반영할 Hotbar 구독 관리
+	void ObserveHotbar(UMD_EquipHotbarComponent* InHotbar);
 
 	void HandleCategoryAllClicked();
 
@@ -126,9 +123,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
 	TArray<FPrimaryAssetId> OwnedItemIds;
 
-	/** 이미 가득 차서 구매를 막을 품목. SetFullyStockedItems()로 채운다. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
-	TArray<FPrimaryAssetId> FullyStockedItemIds;
+	// 소유 플레이어에게 복제된 업그레이드 소스 구매 금지 목록
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop")
+	TArray<FPrimaryAssetId> BlockedItemIds;
+
+	// 화면에 연결된 보관 상태의 변경 알림 해제에 사용할 약한 참조
+	TWeakObjectPtr<UMD_EquipHotbarComponent> ObservedHotbar;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
 	EMD_ShopCategory SelectedCategory = EMD_ShopCategory::Tool;

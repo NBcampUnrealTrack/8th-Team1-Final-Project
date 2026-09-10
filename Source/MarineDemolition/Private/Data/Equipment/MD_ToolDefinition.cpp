@@ -7,7 +7,7 @@
 
 bool UMD_ToolDefinition::CanGrant_Implementation(FMD_ItemGrantContext Context)
 {
-	// 도구 교체 조건에 앞서 공통 지급 데이터 검사
+	// 도구 추가 및 업그레이드 조건에 앞서 공통 지급 데이터 검사
 	if (Super::CanGrant_Implementation(Context) == false)
 	{
 		// 선행 검사에서 기록한 실패 결과의 전달
@@ -42,16 +42,31 @@ bool UMD_ToolDefinition::CanGrant_Implementation(FMD_ItemGrantContext Context)
 	}
 	// 지급 대상의 공통 보관 컴포넌트 조회
 	UMD_EquipHotbarComponent* Hotbar = Context.Recipient->FindComponentByClass<UMD_EquipHotbarComponent>();
-	// 보관 컴포넌트 부재 또는 슬롯 및 수량 조건 미충족 차단
-	if (IsValid(Hotbar) == false || Hotbar->CanAddItem(this, Context.Quantity) == false)
+	// 이미 보유한 도구의 재지급 및 유효하지 않은 보관 구조 차단
+	if (IsValid(Hotbar) == false || Hotbar->GetSlotCount() != 4 || Hotbar->GetItemCount(this) > 0)
 	{
-		// 실제 보관 조건 실패의 프로젝트 로그 기록
-		UE_LOG(MarineDemolition, Warning, TEXT("%s Hotbar에 아이템을 지급할 수 없음 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());
-		// 상태 변경 없는 지급 불가 결과 전달
+		// 소지 중인 도구는 구매 이력과 무관하게 중복 구매 거부
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 이미 보유한 도구이거나 Hotbar가 유효하지 않음 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());
+		// 실제 보관 상태에 따른 지급 실패 전달
 		return false;
 	}
-	// 공통 슬롯의 보관 조건 통과 결과 전달
-	return true;
+	// 현재 선행 도구가 있으면 빈 슬롯 없이 해당 위치를 업그레이드 가능
+	if (FindUpgradeSourceSlot(Hotbar) != INDEX_NONE)
+	{
+		// 보유 선행 도구를 교체할 수 있는 지급 조건 전달
+		return true;
+	}
+	// 처음 구매하는 업그레이드만 현재 선행 도구 필요
+	if (UpgradeSourceAssetId.IsValid() == true && Context.PurchasedItemIds.Contains(GetPrimaryAssetId()) == false)
+	{
+		// 최초 업그레이드 구매의 선행 도구 미보유 원인 기록
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 최초 업그레이드에 필요한 선행 도구가 없음 (Item=%s, Source=%s)"),
+			*UE_CALL_LOCATIONINFO, *GetPrimaryAssetId().ToString(), *UpgradeSourceAssetId.ToString());
+		// 구매 이력이 없는 업그레이드의 직접 지급 차단
+		return false;
+	}
+	// 일반 도구와 선행 도구 없는 재구매는 남은 공통 슬롯에 추가
+	return Hotbar->CanAddItem(this, Context.Quantity);
 }
 
 bool UMD_ToolDefinition::Grant_Implementation(FMD_ItemGrantContext Context)
@@ -75,7 +90,15 @@ bool UMD_ToolDefinition::Grant_Implementation(FMD_ItemGrantContext Context)
 	// 재조회한 컴포넌트가 유효한 경우에만 실제 지급 요청
 	if (IsValid(Hotbar) == true)
 	{
-		// 단일 도구 교체 또는 일반 아이템 수량 합산 결과 전달
+		// 지급 직전 현재 보유한 선행 도구 위치 재조회
+		int32 SourceSlotIndex = FindUpgradeSourceSlot(Hotbar);
+		// 실제 선행 도구가 있을 때만 해당 슬롯을 업그레이드로 교체
+		if (SourceSlotIndex != INDEX_NONE)
+		{
+			// 다른 도구와 소모품을 보존하는 선행 도구 슬롯 갱신
+			return Hotbar->SetItemAtSlot(SourceSlotIndex, this, Context.Quantity);
+		}
+		// 일반 구매 또는 선행 도구 없는 재구매는 빈 슬롯에 추가
 		return Hotbar->AddItem(this, Context.Quantity);
 	}
 	// BP 조건 검사 이후 보관 대상이 사라진 원인 기록
@@ -120,4 +143,28 @@ bool UMD_ToolDefinition::ReceiveCharge_Implementation(AActor* Recipient, float A
 	UMD_EquipHotbarComponent* Hotbar = Recipient->FindComponentByClass<UMD_EquipHotbarComponent>();
 	// 조건 검사 이후에도 유효한 저장소로 충전 요청 전달
 	return IsValid(Hotbar) == true && Hotbar->AddToolCharge(this, Amount) == true;
+}
+
+int32 UMD_ToolDefinition::FindUpgradeSourceSlot(UMD_EquipHotbarComponent* Hotbar)
+{
+	// 보관 대상 또는 선행 식별자가 없는 상태의 슬롯 접근 차단
+	if (IsValid(Hotbar) == false || UpgradeSourceAssetId.IsValid() == false)
+	{
+		// 교체할 선행 도구 위치 부재 전달
+		return INDEX_NONE;
+	}
+	// 선택된 슬롯에 한정하지 않고 전체 보관 위치의 선행 도구 탐색
+	for (int32 SlotIndex = 0; SlotIndex < Hotbar->GetSlotCount(); ++SlotIndex)
+	{
+		// 같은 식별자의 일반 아이템을 선행 도구로 인정하지 않는 타입 확인
+		UMD_ToolDefinition* SourceTool = Cast<UMD_ToolDefinition>(Hotbar->GetItemAtSlot(SlotIndex));
+		// 현재 보유한 도구의 전체 식별자로 업그레이드 대상 확인
+		if (IsValid(SourceTool) == true && SourceTool->GetPrimaryAssetId() == UpgradeSourceAssetId)
+		{
+			// 실제 업그레이드가 교체해야 할 슬롯 위치 전달
+			return SlotIndex;
+		}
+	}
+	// 일치하는 선행 도구가 없는 결과 전달
+	return INDEX_NONE;
 }

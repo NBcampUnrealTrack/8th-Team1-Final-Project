@@ -7,13 +7,10 @@
 #include "Data/Equipment/MD_ItemDefinition.h"
 #include "Engine/Texture2D.h"
 
-void UMD_ShopItemCardWidget::SetItem(const FMD_ShopItem& InItem, bool bInOwned)
+void UMD_ShopItemCardWidget::SetItem(const FMD_ShopItem& InItem)
 {
 	// 전달받은 품목을 카드 데이터로 저장
 	Item = InItem;
-
-	// 품목의 지급 완료 상태 저장
-	bOwned = bInOwned;
 
 	// 변경된 품목을 카드 UI에 반영
 	RefreshDisplay();
@@ -29,8 +26,8 @@ void UMD_ShopItemCardWidget::RefreshDisplay()
 	// 카드 하단에 품목 가격 적용
 	if (IsValid(Txt_CostCredit) == true)
 	{
-		FText priceText = bOwned == true ? FText::FromString(TEXT("-")) : Item.GetPriceText();
-		Txt_CostCredit->SetText(priceText);
+		// 구매 이력과 무관하게 이번 구매에 적용되는 판매 가격 표시
+		Txt_CostCredit->SetText(Item.GetPriceText());
 	}
 
 	// 재사용된 카드에 이전 품목의 아이콘이 남지 않도록 기본 Brush 보관

@@ -93,7 +93,10 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 	// 공통 정의의 표시 이름을 사용한 해금 문구 생성 (예: 열선 헤라 보유)
 	FText GetUnlockConditionText() const;
 
-	/** `450₡` 또는 `35₡/개`, 0이면 `지급` */
+	// 구매 이력이 있는 도구만 무료로 계산하는 UI 및 서버 공통 가격
+	int32 GetPurchasePrice(TArray<FPrimaryAssetId> PurchasedItemIds) const;
+
+	// 일반 가격 450₡ 또는 개당 가격 35₡/개 표기이며 무료 가격은 0
 	FText GetPriceText() const;
 };
 
@@ -124,9 +127,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Shop")
 	static UMD_ItemDefinition* GetItemDefinition(FMD_ShopItem Item);
 
-	// 현재 판매 정의가 모두 준비되었는지 확인
+	// 지정 품목이 유일하게 등록되고 판매 및 선행 정의가 준비되었는지 확인
 	UFUNCTION(BlueprintPure, Category = "Shop")
-	bool IsItemDefinitionsLoaded();
+	bool IsItemDefinitionLoaded(FPrimaryAssetId ItemAssetId);
 
 	// 호출자가 반환 핸들을 유지하는 동안 판매 정의를 비동기로 로드 및 보관
 	TSharedPtr<FStreamableHandle> LoadItemDefinitions(FStreamableDelegate OnLoaded = FStreamableDelegate());

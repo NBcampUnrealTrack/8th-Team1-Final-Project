@@ -3,6 +3,7 @@
 
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
+#include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/AssetManager.h"
 #include "Util/MD_LogUtility.h"
 
@@ -86,12 +87,27 @@ FText FMD_ShopItem::GetUnlockConditionText() const
 	return FText::FromString(FString::Join(Parts, TEXT(" · ")));
 }
 
+int32 FMD_ShopItem::GetPurchasePrice(TArray<FPrimaryAssetId> PurchasedItemIds) const
+{
+	// 음수 가격 설정 오류와 구매 이력이 없는 품목의 원래 가격 유지
+	if (Price < 0 || PurchasedItemIds.Contains(ItemAssetId) == false)
+	{
+		// 무료 재구매 대상이 아닌 품목의 카탈로그 가격 전달
+		return Price;
+	}
+	// 카테고리 대신 실제 정의 유형으로 도구 재구매 여부 구분
+	UMD_ItemDefinition* Definition = GetDefinition();
+	// 이미 구매한 도구만 무료이며 소모품과 즉시 효과 품목은 정상 가격 유지
+	return IsValid(Definition) == true && Definition->IsA<UMD_ToolDefinition>() == true ? 0 : Price;
+}
+
 FText FMD_ShopItem::GetPriceText() const
 {
-	if (Price <= 0)
+	// 무료 품목은 구매 방식과 무관하게 숫자 가격으로 표시
+	if (Price == 0)
 	{
-		// `07` §4에서 기본 장비는 "0 (지급)"으로 표기한다.
-		return FText::FromString(TEXT("지급"));
+		// 카드와 상세 화면에서 공통으로 사용할 무료 가격 표기
+		return FText::FromString(TEXT("0"));
 	}
 
 	return FText::FromString(bPricePerUnit
@@ -126,37 +142,27 @@ UMD_ItemDefinition* UMD_ShopCatalog::GetItemDefinition(FMD_ShopItem Item)
 	return Item.GetDefinition();
 }
 
-bool UMD_ShopCatalog::IsItemDefinitionsLoaded()
+bool UMD_ShopCatalog::IsItemDefinitionLoaded(FPrimaryAssetId ItemAssetId)
 {
-	// 로드된 객체가 있어도 모호한 판매 목록은 준비 완료에서 제외
-	TSet<FPrimaryAssetId> AssetIds;
-	// 전체 목록을 표시하기 전에 각 정의의 로드 완료 여부 확인
-	for (FMD_ShopItem& Item : Items)
+	// 중복 또는 미등록 품목을 배제한 판매 정보 조회
+	FMD_ShopItem Item;
+	// 다른 품목의 상태와 독립적으로 해당 판매 정의의 준비 여부 확인
+	if (FindItemByAssetId(ItemAssetId, Item) == false || IsValid(Item.GetDefinition()) == false)
 	{
-		// 등록 누락 또는 로드되지 않은 품목이 있는 목록 차단
-		if (IsValid(Item.GetDefinition()) == false || AssetIds.Contains(Item.ItemAssetId) == true)
-		{
-			// 아직 준비되지 않은 상점 상태 전달
-			return false;
-		}
-		// 확인한 정의의 ID를 보관하여 중복 검사에 사용
-		AssetIds.Add(Item.ItemAssetId);
-		// 지정된 선행 아이템도 표시 이름을 조회할 수 있도록 준비 여부 확인
-		if (Item.PrerequisiteItemAssetId.IsValid() == true)
-		{
-			// 선행 아이템의 정확한 전체 식별자로 공통 정의 조회 구성
-			FMD_ShopItem PrerequisiteItem;
-			// 판매 항목의 타입과 독립적인 선행 식별자 전달
-			PrerequisiteItem.ItemAssetId = Item.PrerequisiteItemAssetId;
-			// 선행 정의가 없거나 준비되지 않은 목록 차단
-			if (IsValid(PrerequisiteItem.GetDefinition()) == false)
-			{
-				// 선행 정보의 로드 대기 상태 전달
-				return false;
-			}
-		}
+		// 해당 품목에 한정한 표시 및 구매 보류
+		return false;
 	}
-	// 모든 판매 정의가 준비된 상태 전달
+	// 선행 조건이 있는 품목에 한해 선행 정의의 준비 여부 확인
+	if (Item.PrerequisiteItemAssetId.IsValid() == true)
+	{
+		// 선행 아이템의 표시 정보와 조건을 확인할 조회 항목 구성
+		FMD_ShopItem PrerequisiteItem;
+		// 판매 품목과 독립적인 선행 정의의 식별자 지정
+		PrerequisiteItem.ItemAssetId = Item.PrerequisiteItemAssetId;
+		// 해당 품목의 선행 정의를 읽을 수 없는 경우만 차단
+		return IsValid(PrerequisiteItem.GetDefinition());
+	}
+	// 판매 정의가 준비되고 별도 선행 정의가 없는 품목의 사용 허용
 	return true;
 }
 
@@ -174,57 +180,67 @@ TSharedPtr<FStreamableHandle> UMD_ShopCatalog::LoadItemDefinitions(FStreamableDe
 		// 소유할 로드 요청 부재 전달
 		return nullptr;
 	}
-	// 현재 카탈로그의 일괄 비동기 로드 대상 구성
+	// 읽을 수 있는 품목만 포함할 비동기 로드 대상 구성
 	TArray<FPrimaryAssetId> AssetIds;
-	// 판매 순서를 유지하면서 잘못된 등록과 중복 검사
+	// 중복 판매 행의 첫 항목까지 함께 제외할 식별자 보관
+	TSet<FPrimaryAssetId> DuplicateAssetIds;
+	// 잘못된 품목을 건너뛰면서 나머지 판매 정의 수집
 	for (FMD_ShopItem& Item : Items)
 	{
-		// 반복 사용할 판매 정의의 전체 식별자 조회
+		// 반복 검사할 판매 정의의 전체 식별자 조회
 		FPrimaryAssetId AssetId = Item.GetItemAssetId();
-		// 잘못된 ID 또는 미등록 정의와 중복 판매 행의 로드 차단
-		if (AssetId.IsValid() == false || AssetIds.Contains(AssetId) == true || AssetManager->GetPrimaryAssetPath(AssetId).IsValid() == false)
+		// 식별자 또는 등록 경로가 없는 품목만 로드 대상에서 제외
+		if (AssetId.IsValid() == false || AssetManager->GetPrimaryAssetPath(AssetId).IsValid() == false)
 		{
-			// 조회할 수 없는 판매 정의의 실패 사유 기록
-			UE_LOG(MarineDemolition, Warning, TEXT("%s 상점 AssetId가 유효하지 않거나 미등록 또는 중복됨 (Item=%s)"), *UE_CALL_LOCATIONINFO, *AssetId.ToString());
-			// 실패한 목록을 호출부에서 비울 수 있도록 완료 통지
-			OnLoaded.ExecuteIfBound();
-			// 불완전한 목록의 로드 요청 차단
-			return nullptr;
+			// 제외한 품목의 원인을 프로젝트 로그에 기록
+			UE_LOG(MarineDemolition, Warning, TEXT("%s 상점 품목의 AssetId가 유효하지 않거나 미등록되어 제외됨 (Item=%s)"), *UE_CALL_LOCATIONINFO, *AssetId.ToString());
+			// 다른 판매 품목의 로드 검사 계속 진행
+			continue;
 		}
-		// 검증된 정의만 요청 목록에 포함
+		// 가격과 지급 조건을 확정할 수 없는 중복 품목만 제외
+		if (AssetIds.Contains(AssetId) == true || DuplicateAssetIds.Contains(AssetId) == true)
+		{
+			// 이미 수집한 첫 번째 중복 행도 판매 로드 대상에서 제거
+			AssetIds.Remove(AssetId);
+			// 세 번째 이후의 중복 행이 다시 추가되는 상황 방지
+			DuplicateAssetIds.Add(AssetId);
+			// 중복 품목의 제외 사유 기록
+			UE_LOG(MarineDemolition, Warning, TEXT("%s 상점에 동일 AssetId가 중복되어 해당 품목이 제외됨 (Item=%s)"), *UE_CALL_LOCATIONINFO, *AssetId.ToString());
+			// 다른 판매 품목의 수집 계속 진행
+			continue;
+		}
+		// 등록 경로가 유효한 판매 정의의 로드 요청 수집
 		AssetIds.Add(AssetId);
 	}
-	// 판매 행의 중복 검사와 분리하여 선행 정의의 로드 대상 구성
+	// 정상 판매 품목에 필요한 선행 정의의 추가 로드 대상 수집
 	for (FMD_ShopItem& Item : Items)
 	{
-		// 선행 조건을 지정하지 않은 품목의 추가 조회 생략
-		if (Item.PrerequisiteItemAssetId.IsValid() == false)
+		// 제외한 판매 품목 또는 선행 조건이 없는 품목의 추가 조회 생략
+		if (AssetIds.Contains(Item.ItemAssetId) == false || DuplicateAssetIds.Contains(Item.ItemAssetId) == true || Item.PrerequisiteItemAssetId.IsValid() == false)
 		{
 			// 다음 품목의 선행 정의 확인
 			continue;
 		}
-		// 미등록 선행 에셋의 로드 차단
+		// 미등록 선행 정의만 건너뛰고 다른 품목의 로드 유지
 		if (AssetManager->GetPrimaryAssetPath(Item.PrerequisiteItemAssetId).IsValid() == false)
 		{
-			// 선행 정의 설정 오류의 프로젝트 로그 기록
-			UE_LOG(MarineDemolition, Warning, TEXT("%s 선행 아이템 AssetId가 미등록됨 (Item=%s)"), *UE_CALL_LOCATIONINFO, *Item.PrerequisiteItemAssetId.ToString());
-			// 잘못된 선행 조건을 호출부에서도 확인할 수 있도록 완료 통지
-			OnLoaded.ExecuteIfBound();
-			// 불완전한 선행 정보의 로드 요청 차단
-			return nullptr;
+			// 해당 판매 품목의 준비 검사에서 차단할 선행 정보 오류 기록
+			UE_LOG(MarineDemolition, Warning, TEXT("%s 상점 품목의 선행 아이템 AssetId가 미등록됨 (Item=%s, Prerequisite=%s)"), *UE_CALL_LOCATIONINFO, *Item.ItemAssetId.ToString(), *Item.PrerequisiteItemAssetId.ToString());
+			// 다른 품목에 필요한 선행 정의의 수집 계속 진행
+			continue;
 		}
-		// 여러 판매 행이 같은 선행 품목을 요구해도 한 번만 로드
+		// 여러 품목이 같은 선행 정의를 요구해도 한 번만 로드
 		AssetIds.AddUnique(Item.PrerequisiteItemAssetId);
 	}
-	// 판매 항목이 없는 카탈로그의 불필요한 로드 생략
+	// 로드 가능한 정의가 없는 경우에도 호출자의 화면 갱신 허용
 	if (AssetIds.IsEmpty() == true)
 	{
-		// 빈 상점의 화면 갱신 통지
+		// 빈 목록 또는 전부 제외된 목록의 로드 완료 통지
 		OnLoaded.ExecuteIfBound();
 		// 유지할 에셋이 없는 요청 종료
 		return nullptr;
 	}
-	// 호출자별 핸들로 수명을 관리하여 다른 상점의 로드 상태 보존
+	// 호출자별 핸들로 정상 정의의 비동기 로드 및 보관 유지
 	return AssetManager->PreloadPrimaryAssets(AssetIds, TArray<FName>(), false, MoveTemp(OnLoaded));
 }
 
