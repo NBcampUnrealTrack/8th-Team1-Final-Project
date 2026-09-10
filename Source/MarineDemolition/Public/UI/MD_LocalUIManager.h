@@ -53,6 +53,9 @@ protected:
 	FDelegateHandle WorldBeginTearDownHandle;
 
 public:
+    // 등록된 모든 레이어의 활성 화면 목록 조회
+    TArray<UCommonActivatableWidget*> GetActiveScreens();
+
 	// 지정한 클래스로 LocalPlayer 전용 PrimaryLayout을 한 번만 생성한다.
 	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|UI")
 	bool InitializePrimaryLayout(TSubclassOf<UUserWidget> InPrimaryLayoutClass);

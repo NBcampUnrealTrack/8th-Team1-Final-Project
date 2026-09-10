@@ -10,7 +10,9 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
+#include "World/Wall/MD_WallUtility.h"
 #include "Component/Support/MD_SupplyComponent.h"
+#include "Component/Equipment/MD_FoamGunComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Comfort/MD_ComfortComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
@@ -18,7 +20,6 @@
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
 #include "InputMappingContext.h"
-#include "InputCoreTypes.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -27,9 +28,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Camera/CameraComponent.h"
-#include "Engine/Engine.h"
 #include "Engine/LocalPlayer.h"
-#include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshSocket.h"
 #include "Animation/AnimInstance.h"
 #include "Animation/AnimMontage.h"
@@ -38,6 +37,8 @@
 #include "GameFramework/PlayerStart.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
+#include "Gameplay/Settings/MD_ControlSettingCategory.h"
+#include "Gameplay/Settings/MD_SettingsManager.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "AbilitySystemComponent.h"
 #include "Abilities/GameplayAbility.h"
@@ -128,6 +129,8 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	ComfortComponent = CreateDefaultSubobject<UMD_ComfortComponent>(TEXT("ComfortComponent"));
 
 	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
+
+	FoamGunComponent = CreateDefaultSubobject<UMD_FoamGunComponent>(TEXT("FoamGunComponent"));
 
 	OxygenComponent = CreateDefaultSubobject<UMD_OxygenComponent>(TEXT("OxygenComponent"));
 
@@ -316,9 +319,13 @@ void AMD_Character::BeginPlay()
 	{
 		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = GetEnhancedInputSubsystem())
 		{
-			if (IsValid(PlayerMappingContext))
+			// 조작 설정 키가 반영된 런타임 입력 컨텍스트 조회
+			UInputMappingContext* MappingContext = ResolvePlayerMappingContext();
+			// 준비된 입력 컨텍스트에 한정한 로컬 플레이어 등록
+			if (IsValid(MappingContext) == true)
 			{
-				Subsystem->AddMappingContext(PlayerMappingContext, 0);
+				// 이동 키와 설정된 비이동 액션 키를 포함한 입력 컨텍스트 활성화
+				Subsystem->AddMappingContext(MappingContext, 0);
 			}
 		}
 
@@ -1000,9 +1007,13 @@ void AMD_Character::PawnClientRestart()
 
 	if (UEnhancedInputLocalPlayerSubsystem* Subsystem = GetEnhancedInputSubsystem())
 	{
-		if (IsValid(PlayerMappingContext))
+		// 재시작 이후 다시 사용할 런타임 입력 컨텍스트 조회
+		UInputMappingContext* MappingContext = ResolvePlayerMappingContext();
+		// 준비된 입력 컨텍스트에 한정한 로컬 플레이어 재등록
+		if (IsValid(MappingContext) == true)
 		{
-			Subsystem->AddMappingContext(PlayerMappingContext, 0);
+			// 현재 조작 설정 키가 반영된 입력 컨텍스트 활성화
+			Subsystem->AddMappingContext(MappingContext, 0);
 		}
 	}
 
@@ -1093,6 +1104,16 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 			ETriggerEvent::Started,
 			this,
 			&AMD_Character::HandleScrapeFocusToggleInput);
+		EIC->BindAction(
+			InputConfig->ScrapeFocusAction,
+			ETriggerEvent::Completed,
+			this,
+			&AMD_Character::HandleScrapeFocusReleasedInput);
+		EIC->BindAction(
+			InputConfig->ScrapeFocusAction,
+			ETriggerEvent::Canceled,
+			this,
+			&AMD_Character::HandleScrapeFocusReleasedInput);
 	}
 
 	EIC->BindAction(InputConfig->MoveAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleMoveInput);
@@ -1117,6 +1138,41 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		}
 		EIC->BindAction(SlotAction,ETriggerEvent::Started,this,&AMD_Character::HandleSelectHotbarSlotInput,SlotIndex);
 	}
+}
+
+UInputMappingContext* AMD_Character::ResolvePlayerMappingContext()
+{
+	// 설정 매니저나 카테고리를 찾지 못할 때 사용할 원본 입력 컨텍스트
+	UInputMappingContext* ResolvedMappingContext = PlayerMappingContext;
+	// 캐릭터에 원본 입력 컨텍스트가 없는 경우의 빈 결과 반환
+	if (IsValid(ResolvedMappingContext) == false)
+	{
+		return ResolvedMappingContext;
+	}
+	// 현재 게임 인스턴스의 설정 매니저 조회
+	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	// 설정 시스템이 없는 환경의 원본 입력 컨텍스트 유지
+	if (IsValid(SettingsManager) == false)
+	{
+		return ResolvedMappingContext;
+	}
+	// 현재 적용된 조작 설정과 런타임 매핑을 소유한 카테고리 조회
+	UMD_ControlSettingCategory* ControlCategory = SettingsManager->GetControlSettings();
+	// 조작 카테고리가 없는 환경의 원본 입력 컨텍스트 유지
+	if (IsValid(ControlCategory) == false)
+	{
+		return ResolvedMappingContext;
+	}
+	// 원본의 트리거와 모디파이어를 보존한 설정 전용 복제본 준비
+	UInputMappingContext* ConfiguredMappingContext = ControlCategory->PrepareInputMappingContext(PlayerMappingContext);
+	// 복제본 생성 성공에 한정한 반환 컨텍스트 교체
+	if (IsValid(ConfiguredMappingContext) == true)
+	{
+		// 사용자 선택 키가 반영된 런타임 입력 컨텍스트 보관
+		ResolvedMappingContext = ConfiguredMappingContext;
+	}
+	// 로컬 플레이어 서브시스템에 등록할 입력 컨텍스트 반환
+	return ResolvedMappingContext;
 }
 
 void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
@@ -1154,12 +1210,43 @@ void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 {
-	const FVector2D LookInput = Value.Get<FVector2D>();
-	if (IsValid(ScrapeToolComponent)
-		&& ScrapeToolComponent->ConsumeScrapeFocusLookInput(LookInput))
+	// 카메라 감도와 축 반전 적용 전의 원본 시점 입력 보관
+	FVector2D RawLookInput = Value.Get<FVector2D>();
+	// 헤라 포커스의 원본 입력 우선 처리
+	if (IsValid(ScrapeToolComponent) == true)
 	{
-		// Focus 중에는 같은 입력을 가상 포인터에만 사용하고 카메라에는 전달하지 않는다.
-		return;
+		// 헤라 전용 감도와 제스처 방향을 유지한 입력 전달
+		bool bConsumed = ScrapeToolComponent->ConsumeScrapeFocusLookInput(RawLookInput);
+		// 포커스에서 소비한 입력의 카메라 중복 처리 차단
+		if (bConsumed == true)
+		{
+			return;
+		}
+	}
+
+	// 설정 매니저를 찾지 못한 경우 사용할 기본 조작 설정을 준비한다.
+	FMD_ControlSettings AppliedControlSettings;
+	// 현재 게임 인스턴스가 관리하는 설정 매니저를 찾는다.
+	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	// 유효한 설정 매니저가 있으면 조작 카테고리 인스턴스를 조회한다.
+	if (IsValid(SettingsManager) == true)
+	{
+		// 실제 입력에 반영된 조작 설정을 가진 카테고리를 찾는다.
+		UMD_ControlSettingCategory* ControlSettings = SettingsManager->GetControlSettings();
+		// 유효한 조작 설정 인스턴스가 있으면 적용된 값을 사용한다.
+		if (IsValid(ControlSettings) == true)
+		{
+			// UI에서 편집 중인 값이 아닌 마지막으로 적용된 설정을 가져온다.
+			AppliedControlSettings = ControlSettings->GetAppliedSettings();
+		}
+	}
+	// 헤라에서 소비되지 않은 카메라 입력에 사용자 감도 적용
+	FVector2D LookInput = RawLookInput * AppliedControlSettings.MouseSensitivity;
+	// 카메라 상하 반전 설정의 적용 여부 확인
+	if (AppliedControlSettings.bInvertVerticalLook == true)
+	{
+		// 카메라 세로 입력에 한정한 방향 반전
+		LookInput.Y *= -1.0f;
 	}
 
 	// 멀미 완화 응답 커브를 먹인다. 스무딩이 켜져 있으면 컴포넌트가 누적분을 직접 흘려보내므로
@@ -1174,7 +1261,8 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 {
-	HandleScrapeFocusInputEnded();
+	// 상호작용 시 해제도 헤라 포커스만. 폼건 조준은 RMB 릴리즈로만 풀린다
+	CancelActiveScrapeAbilityAndEndFocus();
 
 	if (IsValid(InteractionComponent))
 	{
@@ -1200,6 +1288,14 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("No tool equipped"));
 		return;
 	}
+
+	// 절연테이프는 GA가 없는 도구 입력 전용 수리. 상호작용 키(F)가 아니라 LMB로만 쓴다
+	if (CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Insulation))
+	{
+		TryToolInputUtilityRepair();
+		return;
+	}
+
 	const bool bIsScrapeAbility = CurrentTool->ToolAbilityTag.MatchesTagExact(
 		MDGameplayTags::Ability_Scrape);
 	bScrapeAbilityInputCaptured = bIsScrapeAbility;
@@ -1227,6 +1323,72 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 	// 비헤라 도구는 기존 tag 기반 활성화 흐름을 유지한다.
 	FGameplayTagContainer AbilityTags(CurrentTool->ToolAbilityTag);
 	ASC->TryActivateAbilitiesByTag(AbilityTags);
+}
+
+void AMD_Character::TryToolInputUtilityRepair()
+{
+	const AController* OwnController = GetController();
+	UWorld* World = GetWorld();
+	if (!IsValid(OwnController) || !World)
+	{
+		return;
+	}
+
+	// 상호작용 트레이스와 같은 거리로 조준선 위 인프라를 찾는다 (와이어 메시는 Visibility Block)
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	OwnController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(MDToolInputRepair), false, this);
+	if (!World->LineTraceSingleByChannel(
+			Hit,
+			ViewLocation,
+			ViewLocation + ViewRotation.Vector() * ToolInputRepairTraceDistance,
+			ECC_Visibility,
+			Params))
+	{
+		return;
+	}
+
+	AMD_WallUtility* Utility = Cast<AMD_WallUtility>(Hit.GetActor());
+	if (!IsValid(Utility) && IsValid(Hit.GetComponent()))
+	{
+		Utility = Cast<AMD_WallUtility>(Hit.GetComponent()->GetOwner());
+	}
+	if (!IsValid(Utility) || !Utility->RepairRequiresToolInput())
+	{
+		return;
+	}
+
+	ServerRepairUtilityWithTool(Utility);
+}
+
+void AMD_Character::ServerRepairUtilityWithTool_Implementation(AMD_WallUtility* Utility)
+{
+	if (!HasAuthority() || !IsValid(Utility) || !Utility->RepairRequiresToolInput())
+	{
+		return;
+	}
+
+	// 클라 조준을 그대로 믿지 않는다. 바운드 최근접점 거리로 재검증 (지연 허용 50cm)
+	const AController* OwnController = GetController();
+	if (!IsValid(OwnController))
+	{
+		return;
+	}
+	FVector ViewLocation;
+	FRotator ViewRotation;
+	OwnController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	const FBox Bounds = Utility->GetComponentsBoundingBox(true);
+	const float Distance = FVector::Dist(Bounds.GetClosestPointTo(ViewLocation), ViewLocation);
+	if (Distance > ToolInputRepairTraceDistance + 50.f)
+	{
+		return;
+	}
+
+	// 도구 태그 검사·핫바 차감·상태 전이는 인프라 쪽 공통 진입점이 처리
+	Utility->TryRepairWithEquippedTool(this);
 }
 
 void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
@@ -1263,6 +1425,16 @@ void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleScrapeFocusToggleInput()
 {
+	// 폼건: RMB를 누르는 동안 조준 궤적 표시
+	if (IsFoamGunEquipped())
+	{
+		if (IsValid(FoamGunComponent))
+		{
+			FoamGunComponent->SetAimHeld(true);
+		}
+		return;
+	}
+
 	if (!IsValid(ScrapeToolComponent))
 	{
 		return;
@@ -1282,8 +1454,23 @@ void AMD_Character::HandleScrapeFocusToggleInput()
 	ScrapeToolComponent->TryBeginScrapeFocus();
 }
 
+void AMD_Character::HandleScrapeFocusReleasedInput()
+{
+	// 폼건 조준만 홀드 방식이라 release에서 정리한다. 헤라 포커스는 토글이므로 여기서 건드리지 않는다
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(false);
+	}
+}
+
 void AMD_Character::HandleScrapeFocusInputEnded()
 {
+	// 도구 전환·컨텍스트 제거 경로에서도 호출되므로 조준 상태를 항상 정리한다
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(false);
+	}
+
 	CancelActiveScrapeAbilityAndEndFocus();
 }
 
@@ -1577,6 +1764,18 @@ bool AMD_Character::IsScrapeToolEquipped() const
 	const UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
 	return IsValid(CurrentTool)
 		&& CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_Scrape);
+}
+
+bool AMD_Character::IsFoamGunEquipped() const
+{
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return false;
+	}
+
+	const UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+	return IsValid(CurrentTool)
+		&& CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Foam);
 }
 
 bool AMD_Character::CanUnloadScrapeLoad() const

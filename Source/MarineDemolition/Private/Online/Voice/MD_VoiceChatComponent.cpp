@@ -1,6 +1,8 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Online/Voice/MD_VoiceChatComponent.h"
+#include "Gameplay/Settings/MD_AudioSettingCategory.h"
+#include "Gameplay/Settings/MD_SettingsManager.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "Util/MD_LogUtility.h"
@@ -17,6 +19,8 @@ void UMD_VoiceChatComponent::BeginPlay()
 	Super::BeginPlay();
 
 	OwnerPlayerController = Cast<APlayerController>(GetOwner());
+	// 게임 인스턴스에 복원된 송신 모드 적용
+	ApplySavedPushToTalkSetting();
 
 	// Push To Talk 가 비활성화 되어있는 경우 컴포넌트가 활성화 되어있으면 마이크 활성화
 	if (IsActive() && bUsePushToTalk == false)
@@ -39,14 +43,14 @@ void UMD_VoiceChatComponent::Activate(bool bReset)
 void UMD_VoiceChatComponent::Deactivate()
 {
 	// 컴포넌트 비활성화 시 마이크 비활성화
-	StopTalking();
+	StopTalkingInternal();
 
 	Super::Deactivate();
 }
 
 void UMD_VoiceChatComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	StopTalking();
+	StopTalkingInternal();
 
 	Super::EndPlay(EndPlayReason);
 }
@@ -65,7 +69,7 @@ void UMD_VoiceChatComponent::SetPushToTalk(const bool bNewUsePushToTalk)
 	// 컴포넌트가 비활성화 되어있거나 또는 Push To Talk 설정을 켜는 경우 마이크 비활성화
 	if (IsActive() == false || bUsePushToTalk == true)
 	{
-		StopTalking();
+		StopTalkingInternal();
 	}
 	else
 	{
@@ -93,6 +97,21 @@ void UMD_VoiceChatComponent::StartTalking()
 
 	UE_LOG(MarineDemolition, Log, TEXT("%s 마이크 활성화"), *UE_CALL_LOCATIONINFO);
 
+	// 지연 생성된 온라인 음성 엔진에 확정된 입력 장치 적용
+	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	// 설정 매니저가 존재하는 로컬 플레이어 처리
+	if (IsValid(SettingsManager) == true)
+	{
+		// 실제 적용된 입력 선택을 소유한 카테고리 조회
+		UMD_AudioSettingCategory* AudioCategory = SettingsManager->GetAudioSettings();
+		// 송신 시작 전 선택 장치의 캡처 준비
+		if (IsValid(AudioCategory) == true)
+		{
+			// UI의 미적용 편집값과 분리된 입력 선택 반영
+			AudioCategory->ApplyInputDeviceSettings();
+		}
+	}
+
 	// 마이크 활성화
 	PlayerController->StartTalking();
 
@@ -101,6 +120,50 @@ void UMD_VoiceChatComponent::StartTalking()
 }
 
 void UMD_VoiceChatComponent::StopTalking()
+{
+	// 항상 켜기 모드에서 입력 키 해제가 송신을 끄는 동작 차단
+	if (bUsePushToTalk == false)
+	{
+		return;
+	}
+
+	StopTalkingInternal();
+}
+
+void UMD_VoiceChatComponent::ApplySavedPushToTalkSetting()
+{
+	// 로컬 플레이어의 마이크 설정에만 적용되는 소유자 확인
+	APlayerController* PlayerController = OwnerPlayerController.Get();
+	if (IsValid(PlayerController) == false)
+	{
+		return;
+	}
+	// 원격 컨트롤러에 로컬 송신 모드를 복원하는 동작 방지
+	bool bIsLocalController = PlayerController->IsLocalController();
+	if (bIsLocalController == false)
+	{
+		return;
+	}
+
+	// 현재 게임 인스턴스의 설정 매니저 조회
+	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	if (IsValid(SettingsManager) == false)
+	{
+		return;
+	}
+
+	// 복원 완료된 오디오 설정 인스턴스 조회
+	UMD_AudioSettingCategory* AudioCategory = SettingsManager->GetAudioSettings();
+	if (IsValid(AudioCategory) == false)
+	{
+		return;
+	}
+
+	// 로컬 음성 컴포넌트의 저장된 송신 모드 복원
+	SetPushToTalk(AudioCategory->Settings.bUsePushToTalk);
+}
+
+void UMD_VoiceChatComponent::StopTalkingInternal()
 {
 	if (bIsMicrophonActive == false)
 	{

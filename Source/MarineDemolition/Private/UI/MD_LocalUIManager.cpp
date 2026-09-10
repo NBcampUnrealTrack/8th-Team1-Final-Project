@@ -509,3 +509,27 @@ UMD_WidgetStack* UMD_LocalUIManager::FindLayerStack(FGameplayTag LayerTag) const
 	// Common UI Stack을 호출자에게 반환한다.
 	return FoundStack;
 }
+
+TArray<UCommonActivatableWidget*> UMD_LocalUIManager::GetActiveScreens()
+{
+    // 특정 화면 클래스와 무관한 현재 활성 화면 목록 구성
+    TArray<UCommonActivatableWidget*> Screens;
+    // 등록된 각 레이어의 활성 화면 수집
+    for (TPair<FGameplayTag, TObjectPtr<UMD_WidgetStack>>& Pair : LayerStacks)
+    {
+        // 해제된 레이어의 화면 조회 제외
+        if (IsValid(Pair.Value) == false)
+        {
+            continue;
+        }
+        // 유효성 검사 후 목록에 전달할 활성 화면 조회
+        UCommonActivatableWidget* Screen = Pair.Value->GetActiveWidget();
+        if (IsValid(Screen) == true)
+        {
+            // 동일 화면의 중복 전달 방지
+            Screens.AddUnique(Screen);
+        }
+    }
+    // 호출자가 필요한 화면을 선택할 수 있는 목록 반환
+    return Screens;
+}

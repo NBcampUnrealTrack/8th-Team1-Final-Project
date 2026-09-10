@@ -11,6 +11,7 @@
 
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Equipment/MD_FoamGunComponent.h"
 #include "Component/Lore/MD_LoreComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
@@ -36,6 +37,9 @@ namespace
 
 	/** 산소 확장 탱크 구매 직후 패시브 효과를 장착하기 위한 품목 식별자 */
 	const FName OxygenTankItemId(TEXT("IT-O2"));
+
+	/** 폼 카트리지 구매를 폼건 충전 게이지로 전달하기 위한 품목 식별자 */
+	const FName FoamCartridgeItemId(TEXT("IT-FG1"));
 
 	/**
 	 * 캐릭터 에셋 대체용 큐브를 사람 크기(60×60×180cm)로 맞추는 값.
@@ -71,6 +75,20 @@ namespace
 			}
 
 			SupplyComponent->AddSupport(1);
+			PurchasingCharacter->ForceNetUpdate();
+			return true;
+		}
+
+		// 폼 카트리지는 핫바 품목이 아니라 폼건 충전 게이지에 직접 지급하는 처리 (기획 08 §4.3)
+		if (ShopItem.ItemId == FoamCartridgeItemId)
+		{
+			UMD_FoamGunComponent* FoamGunComponent = PurchasingCharacter->FindComponentByClass<UMD_FoamGunComponent>();
+			if (IsValid(FoamGunComponent) == false || FoamGunComponent->IsChargeFull() == true)
+			{
+				return false;
+			}
+
+			FoamGunComponent->AddCharge(FoamGunComponent->GetShotCost());
 			PurchasingCharacter->ForceNetUpdate();
 			return true;
 		}
@@ -429,15 +447,6 @@ void AMD_Merchant::HandleShopDeactivated()
 	ActiveShopWidget.Reset();
 }
 
-void AMD_Merchant::HandleNotReadyRequested()
-{
-	// 버튼을 숨기지 않는다 — 화면이 없으니 되돌아올 수단도 없다.
-	if (ActiveMenuWidget.IsValid())
-	{
-		ActiveMenuWidget->ShowDialogueLine(NotReadyDialogue);
-	}
-}
-
 void AMD_Merchant::HandleLoanDeactivated()
 {
 	// 비활성화된 대출 화면에 남아 있는 상인 연결 제거
@@ -540,23 +549,41 @@ EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCh
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
 
+	// 지지대·폼 카트리지는 핫바를 거치지 않고 전용 컴포넌트로 직접 지급되는 품목
+	const bool bHotbarItem = ShopItem.ItemId != SupportItemId && ShopItem.ItemId != FoamCartridgeItemId;
+
 	// 상점 거래 식별자를 Hotbar 품목 데이터인 ToolDefinition으로 변환하는 처리
 	UMD_ToolDefinition* PurchasedToolDefinition = ShopItem.EquipmentDefinition.Get();
-	if (ShopItem.ItemId != SupportItemId && IsValid(PurchasedToolDefinition) == false)
+	if (bHotbarItem == true && IsValid(PurchasedToolDefinition) == false)
 	{
 		return EMD_ShopPurchaseResult::InvalidItem;
 	}
 
 	// 일회성 품목의 동일 계열 교체에 필요한 GameplayTag 유효성 검사
-	if (ShopItem.ItemId != SupportItemId && ShopItem.bPricePerUnit == false && PurchasedToolDefinition->ToolAbilityTag.IsValid() == false)
+	if (bHotbarItem == true && ShopItem.bPricePerUnit == false && PurchasedToolDefinition->ToolAbilityTag.IsValid() == false)
 	{
 		return EMD_ShopPurchaseResult::InvalidItem;
 	}
 
 	// ToolDefinition 하나로 수량 증가, 동일 태그 교체, 빈 항목 추가 가능성을 결제 전에 확인하는 검사
-	if (ShopItem.ItemId != SupportItemId && (HotbarComponent->CanAddTool(PurchasedToolDefinition) == false || (ShopItem.bPricePerUnit == true && HotbarComponent->GetToolCount(PurchasedToolDefinition) >= MAX_int32)))
+	if (bHotbarItem == true && (HotbarComponent->CanAddTool(PurchasedToolDefinition) == false || (ShopItem.bPricePerUnit == true && HotbarComponent->GetToolCount(PurchasedToolDefinition) >= MAX_int32)))
 	{
 		return EMD_ShopPurchaseResult::FullyStocked;
+	}
+
+	// 만충이면 상인이 카트리지 판매를 거절한다 — 결제 전에 걸러 크레딧이 빠지지 않게 한다 (기획 08 §4.3)
+	if (ShopItem.ItemId == FoamCartridgeItemId)
+	{
+		UMD_FoamGunComponent* FoamGunComponent = PurchasingCharacter->FindComponentByClass<UMD_FoamGunComponent>();
+		if (IsValid(FoamGunComponent) == false)
+		{
+			return EMD_ShopPurchaseResult::InvalidRequest;
+		}
+
+		if (FoamGunComponent->IsChargeFull() == true)
+		{
+			return EMD_ShopPurchaseResult::FullyStocked;
+		}
 	}
 
 	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
@@ -712,12 +739,8 @@ void AMD_Merchant::RefreshQuestWidgetFromComponent()
 	// 잠긴 미래 퀘스트와 이전 일차 퀘스트를 제외하고 당일 메인 퀘스트 한 건만 전달
 	for (FMD_MainQuestState& MainQuest : MainQuests)
 	{
-		if (MainQuest.UnlockDay != CurrentDay)
-		{
-			continue;
-		}
-
-		if (MainQuest.Status == EMD_MainQuestStatus::Locked)
+		// 현재 일차가 아니거나 잠긴 퀘스트를 함께 제외
+		if (MainQuest.UnlockDay != CurrentDay || MainQuest.Status == EMD_MainQuestStatus::Locked)
 		{
 			continue;
 		}
@@ -744,16 +767,24 @@ void AMD_Merchant::RefreshLoreWidgetFromComponent()
 		return;
 	}
 
-	// 상인과 상호작용 중인 플레이어가 선택한 탐사 현장을 찾기 위한 컨트롤러
-	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
 
 	// 퀘스트 데이터와 분리된 현장별 로어 카탈로그 접근을 위한 탐사 현장 정의
+	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
+	// 유효성 검사와 현장 조회에 동일 컨트롤러 재사용
 	UMD_SiteDefinition* ExpeditionSite = IsValid(InteractingPlayerController) == true ? InteractingPlayerController->GetExpeditionSite() : nullptr;
 
-	// 수집 원장의 식별자와 화면 표시 정의를 연결하기 위한 로어 카탈로그
-	UMD_LoreCatalog* LoreCatalog = IsValid(ExpeditionSite) == true ? ExpeditionSite->LoreCatalog : nullptr;
 
-	ActiveQuestWidget->SetLoreData(LoreCatalog, LoreComponent->GetDiscoveredLoreAssetIds());
+	// 탐사 현장이 없는 경우 사용할 빈 이름 준비
+	FText SiteName = FText::GetEmpty();
+	// 선택한 사이트 정의의 유효성 확인
+	if (IsValid(ExpeditionSite) == true)
+	{
+		// 카탈로그와 별도로 관리되는 실제 사이트 이름 조회
+		SiteName = ExpeditionSite->SiteName;
+	}
+	// 선택 사이트 이름과 로어 데이터를 함께 전달
+	ActiveQuestWidget->SetLoreData(
+		IsValid(ExpeditionSite) == true ? ExpeditionSite->LoreCatalog : nullptr, LoreComponent->GetDiscoveredLoreAssetIds(), SiteName);
 }
 
 void AMD_Merchant::RefreshShopWidgetFromComponent()

@@ -30,7 +30,7 @@ namespace
 {
     constexpr uint32 FileMagic = 0x3253444d;
     constexpr int32 DigestBytes = 20;
-    constexpr int32 MaxSlots = 1024;
+    constexpr int32 MaxStoredSaveSlots = 1024;
     constexpr int64 MaxMetadataBytes = 16 * 1024 * 1024;
     bool EngineHeader(FArchive& Ar, const uint32 ExpectedKind)
     {
@@ -116,7 +116,7 @@ namespace
             const FArrayProperty* Array = CastField<FArrayProperty>(Property);
             if (!Array) return;
             int32 Limit = (64 * 1024 * 1024) / FMath::Max(1, Array->Inner->GetElementSize());
-            if (Property->GetOwnerStruct() == UMD_SaveGame::StaticClass()) Limit = MaxSlots;
+            if (Property->GetOwnerStruct() == UMD_SaveGame::StaticClass()) Limit = MaxStoredSaveSlots;
             if (Property->GetOwnerStruct() == FMD_WallContaminationRecord::StaticStruct())
                 Limit = 2 * 1024 * 1024;
             int32& Count = *static_cast<int32*>(Data);
@@ -271,7 +271,7 @@ bool FMD_SaveSlotStore::ReadManifest(const FString& Path, FMD_SaveSlotIndex& Out
     {
         int32 Count = 0;
         Ar << Count;
-        if (Ar.IsError() || Count < 0 || Count > MaxSlots) return false;
+        if (Ar.IsError() || Count < 0 || Count > MaxStoredSaveSlots) return false;
         Rows->SetNum(Count);
         TSet<FString> Names;
         for (FMD_GameData& Row : *Rows)
@@ -317,7 +317,7 @@ bool FMD_SaveSlotStore::ReadLegacyIndex(FMD_SaveSlotIndex& Out) const
     Legacy->Serialize(Ar);
     if (Ar.IsError() || Ar.Tell() != Ar.TotalSize()
         || Legacy->SchemaVersion > FMD_GameData::CurrentSchemaVersion
-        || Legacy->AutoSaveList.Num() > MaxSlots || Legacy->UserSaveList.Num() > MaxSlots) return false;
+        || Legacy->AutoSaveList.Num() > MaxStoredSaveSlots || Legacy->UserSaveList.Num() > MaxStoredSaveSlots) return false;
     FMD_SaveSlotIndex Loaded;
     for (const bool bAuto : { true, false })
     {
@@ -424,7 +424,7 @@ bool FMD_SaveSlotStore::PrepareSave(const FMD_GameData& Data, bool bAuto, int32 
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_SaveSlots_PrepareMetadata);
     if (!Data.IsValidForLoad() || MaxAuto < 0 || MaxUser < 0
-        || MaxAuto > MaxSlots || MaxUser > MaxSlots || (bAuto ? MaxAuto : MaxUser) == 0) return false;
+        || MaxAuto > MaxStoredSaveSlots || MaxUser > MaxStoredSaveSlots || (bAuto ? MaxAuto : MaxUser) == 0) return false;
     FMD_SaveSlotIndex Index;
     if (!ReadIndex(Index) || Index.Generation == MAX_uint64) return false;
     const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);

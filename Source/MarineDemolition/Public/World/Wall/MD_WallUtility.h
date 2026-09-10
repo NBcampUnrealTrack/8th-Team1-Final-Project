@@ -54,6 +54,27 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Utility|Debug")
 	void DebugForceRepair(AActor* Repairer);
 
+	/**
+	 * 발사체 등 외부 시스템의 원격 수리 진입점 (폼건 착탄 밀봉).
+	 * Interact 경로는 "현재 장착 도구"를 검사하지만, 발사체는 착탄 시점에 장착
+	 * 상태를 보장할 수 없으므로 호출측이 도구 태그를 직접 증명한다.
+	 * 파손 상태 + 태그 일치일 때만 수리하고 성공 시 true. 서버 전용
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Utility")
+	bool TryExternalRepair(AActor* Repairer, FGameplayTag RepairToolTag);
+
+	FVector GetBreakLocation() const { return BreakLocation; }
+	FVector GetBreakNormal() const { return BreakNormal; }
+
+	/**
+	 * 장착 도구로 수리한다. 상호작용(F)과 도구 입력(LMB) 양쪽이 공유하는 서버 진입점.
+	 * 파손 상태 + 장착 도구 태그 일치 + (소모형이면) 핫바 차감 성공일 때만 수리하고 true. 서버 전용
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Utility")
+	bool TryRepairWithEquippedTool(AActor* Repairer);
+
+	bool RepairRequiresToolInput() const { return bRepairRequiresToolInput; }
+
 	// IMD_Interactable — 수리는 서버에서 검증
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
@@ -124,6 +145,14 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility")
 	FGameplayTag RequiredRepairToolTag;
 
+	// 상호작용 수리 성공 시 장착 도구 1개를 소모할지 (절연테이프 = 1회용, 기획 08 §4.1)
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility")
+	bool bConsumesRepairTool = false;
+
+	// true면 상호작용 키(F)로는 수리하지 않고 도구 입력(LMB)으로만 수리한다 (절연테이프)
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility")
+	bool bRepairRequiresToolInput = false;
+
 	// 컷 조준 레이가 이 인프라 메시를 관통했는지 검사할 최대 거리
 	// (절단자 시점에서 재구성. 벽 두께만큼 여유를 둔다)
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility")
@@ -133,6 +162,19 @@ protected:
 	// (상호작용 하이라이트 250과 구분되는 별도 값)
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility", meta = (ClampMin = "0", ClampMax = "255"))
 	int32 ScanSilhouetteStencil = 251;
+
+	// 레벨 시작 시 이미 파손된 상태로 시작할지. 벽 없이 인프라만 고장난 상태를 표현한다
+	// (감점 없음, 절단 원샷 연출 없음 — BP 연출도 이 값으로 분기)
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Utility")
+	bool bStartBroken = false;
+
+	// 시작 파손 지점 (액터 로컬). 미지정(0)이면 메시 중심
+	UPROPERTY(EditAnywhere, Category = "MD|Utility", meta = (EditCondition = "bStartBroken"))
+	FVector StartBreakLocalOffset = FVector::ZeroVector;
+
+	// 시작 분출 방향 (액터 로컬, VFX +X=분출 규약). 미지정(0)이면 액터 전방
+	UPROPERTY(EditAnywhere, Category = "MD|Utility", meta = (EditCondition = "bStartBroken"))
+	FVector StartBreakLocalNormal = FVector::ForwardVector;
 
 	UPROPERTY(ReplicatedUsing = OnRep_UtilityState)
 	EMD_UtilityState UtilityState = EMD_UtilityState::Intact;

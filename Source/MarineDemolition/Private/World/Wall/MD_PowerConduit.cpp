@@ -6,6 +6,9 @@
 AMD_PowerConduit::AMD_PowerConduit()
 {
 	RequiredRepairToolTag = MDGameplayTags::Ability_UtilityRepair_Insulation;
+	// 절연테이프는 1회용: 수리 성공 시 핫바에서 1개 차감. 상호작용 키가 아니라 도구 입력(LMB)으로만 사용
+	bConsumesRepairTool = true;
+	bRepairRequiresToolInput = true;
 
 	CutSoundTag = FGameplayTag::RequestGameplayTag(
 		TEXT("SFX.Hazard.Cable.Cut"), /*ErrorIfNotFound*/ false);
@@ -33,7 +36,8 @@ void AMD_PowerConduit::OnUtilityStateChangedLocal(const EMD_UtilityState NewStat
 	// 파열 지점에서 재생한다. BreakLocation 은 복제 속성이고 RepNotify 보다 먼저 적용된다.
 	const FVector BreakWorldLocation = BreakLocation;
 
-	if (CutSoundTag.IsValid())
+	// 처음부터 고장인 전선은 "끊기는 순간" 원샷이 없다. 스파크 루프만 켠다
+	if (!bStartBroken && CutSoundTag.IsValid())
 	{
 		Audio->PlayEventAtLocation(CutSoundTag, BreakWorldLocation);
 	}
@@ -48,10 +52,13 @@ void AMD_PowerConduit::OnUtilityStateChangedLocal(const EMD_UtilityState NewStat
 
 void AMD_PowerConduit::OnBroken(AActor* Cutter)
 {
-	// 절단 즉시 감점
-	if (AMD_GameStateBase* GS = GetWorld()->GetGameState<AMD_GameStateBase>())
+	// 절단 즉시 감점. 처음부터 고장(Cutter == nullptr)이면 감점 없음
+	if (Cutter != nullptr)
 	{
-		GS->AddScoreEvent(MDGameplayTags::Score_Penalty_CableCut);
+		if (AMD_GameStateBase* GS = GetWorld()->GetGameState<AMD_GameStateBase>())
+		{
+			GS->AddScoreEvent(MDGameplayTags::Score_Penalty_CableCut);
+		}
 	}
 
 	// 담당 조명 그룹 소등 (연출은 BP)

@@ -28,8 +28,10 @@ class UMD_EquipHotbarComponent;
 class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
 class UMD_SupplyComponent;
+class UMD_FoamGunComponent;
 class UMD_OxygenComponent;
 class UMD_ComfortComponent;
+class AMD_WallUtility;
 class UWidgetComponent;
 class UNiagaraSystem;
 class UNiagaraComponent;
@@ -122,6 +124,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Oxygen")
 	UMD_OxygenComponent* GetOxygenComponent() const { return OxygenComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
+	UMD_FoamGunComponent* GetFoamGunComponent() const { return FoamGunComponent; }
 
 	// 절단 루프 VFX 토글. 어빌리티가 서버·소유 클라 양쪽에서 부르고, 사본 프록시는 복제로 따라온다
 	void SetCutterVFXActive(bool bActive);
@@ -279,6 +284,10 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_SupplyComponent> SupplyComponent;
 
+	/** 폼건 충전·탄도 정본·조준 궤적 프리뷰 (기획 08 §4.2) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_FoamGunComponent> FoamGunComponent;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_OxygenComponent> OxygenComponent;
 
@@ -321,15 +330,25 @@ private:
 	void HandleScannerModeSwitchInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
 	void HandleScrapeFocusToggleInput();
+	void HandleScrapeFocusReleasedInput();
 	void HandleScrapeFocusInputEnded();
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
 	void HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
+	// 조작 설정 키가 반영된 런타임 플레이어 입력 컨텍스트 조회
+	UInputMappingContext* ResolvePlayerMappingContext();
 
 	// 클라이언트의 사다리 점프 이탈을 서버에 반영하는 요청
 	UFUNCTION(Server, Reliable)
 	void ServerJumpOffLadder();
+
+	// 도구 입력(LMB) 전용 인프라 수리(절연테이프). 클라가 조준한 대상을 서버가 거리 재검증 후 수리한다
+	void TryToolInputUtilityRepair();
+	UFUNCTION(Server, Reliable)
+	void ServerRepairUtilityWithTool(AMD_WallUtility* Utility);
+	// 도구 입력 수리의 조준 트레이스 거리 (상호작용 트레이스와 동일)
+	static constexpr float ToolInputRepairTraceDistance = 200.f;
 	//void HandleWallCutInput(const FInputActionValue& Value);
 	//void HandleWallScanInput(const FInputActionValue& Value);
 
@@ -378,6 +397,9 @@ private:
 		UMD_ToolDefinition* SourceTool);
 
 	bool IsScrapeToolEquipped() const;
+
+	/** 현재 슬롯이 폼건인지. RMB 조준 컨텍스트 유지 판정에 쓴다 */
+	bool IsFoamGunEquipped() const;
 	UEnhancedInputLocalPlayerSubsystem* GetEnhancedInputSubsystem() const;
 
 	/**
