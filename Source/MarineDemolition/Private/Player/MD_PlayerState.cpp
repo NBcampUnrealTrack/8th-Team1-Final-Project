@@ -203,29 +203,43 @@ bool AMD_PlayerState::RecordPurchasedShopItem(FPrimaryAssetId ItemAssetId, FPrim
 		// 구매 상태를 변경하지 않은 기록 실패 전달
 		return false;
 	}
-	// 도구 재구매도 중복 없이 성공으로 처리하는 전체 식별자 기록
-	PurchasedShopItemIds.AddUnique(ItemAssetId);
-	// 명시된 업그레이드 소스만 이후 구매 금지 목록에 등록
-	if (SourceAssetId.IsValid() == true)
+	// 실제로 추가할 구매 이력만 정렬과 통지 대상으로 구분
+	bool bPurchaseAdded = PurchasedShopItemIds.Contains(ItemAssetId) == false;
+	// 유효하고 아직 등록되지 않은 소스만 변경 대상으로 구분
+	bool bSourceAdded = SourceAssetId.IsValid() == true && BlockedShopItemIds.Contains(SourceAssetId) == false;
+	// 두 목록이 같은 재구매에서는 정렬과 복제 통지 생략
+	if (bPurchaseAdded == false && bSourceAdded == false)
 	{
-		// 같은 소스를 사용하는 업그레이드의 중복 등록 방지
-		BlockedShopItemIds.AddUnique(SourceAssetId);
+		// 기존 기록을 유지한 재구매 성공 전달
+		return true;
 	}
-	// 구매 이력을 복제에 안정적인 전체 식별자 순서로 유지
-	PurchasedShopItemIds.Sort([](FPrimaryAssetId Left, FPrimaryAssetId Right)
+	// 새 구매 이력이 생긴 경우에만 구매 목록 변경
+	if (bPurchaseAdded == true)
 	{
-		// 타입과 이름을 함께 고려한 고정 정렬 순서
-		return Left.LexicalLess(Right);
-	});
-	// 구매 금지 목록도 프로세스와 등록 순서에 독립적으로 정렬
-	BlockedShopItemIds.Sort([](FPrimaryAssetId Left, FPrimaryAssetId Right)
+		// 중복 여부 검사를 통과한 전체 식별자 추가
+		PurchasedShopItemIds.Add(ItemAssetId);
+		// 실제 변경된 구매 목록만 고정 순서로 정렬
+		PurchasedShopItemIds.Sort([](FPrimaryAssetId Left, FPrimaryAssetId Right)
+		{
+			// 타입과 이름을 함께 고려한 고정 정렬 순서
+			return Left.LexicalLess(Right);
+		});
+	}
+	// 새 업그레이드 소스가 있는 경우에만 구매 금지 목록 변경
+	if (bSourceAdded == true)
 	{
-		// 전체 식별자에 따른 구매 금지 목록 정렬
-		return Left.LexicalLess(Right);
-	});
-	// 두 목록의 기록이 모두 끝난 상태를 리슨 서버 UI에 전달
+		// 중복 여부 검사를 통과한 소스 식별자 추가
+		BlockedShopItemIds.Add(SourceAssetId);
+		// 실제 변경된 구매 금지 목록만 고정 순서로 정렬
+		BlockedShopItemIds.Sort([](FPrimaryAssetId Left, FPrimaryAssetId Right)
+		{
+			// 전체 식별자에 따른 구매 금지 목록 정렬
+			return Left.LexicalLess(Right);
+		});
+	}
+	// 두 목록의 변경을 마친 상태를 리슨 서버 UI에 한 번 전달
 	OnRep_ShopPurchaseState();
-	// 소유 클라이언트에 구매 이력과 금지 목록 복제 요청
+	// 변경된 구매 상태의 소유 클라이언트 복제 요청
 	ForceNetUpdate();
 	// 첫 구매와 재구매의 상태 기록 성공 전달
 	return true;

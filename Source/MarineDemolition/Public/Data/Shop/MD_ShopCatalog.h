@@ -87,14 +87,17 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 
 	// 에셋 로드 없이 이미 준비된 공통 정의만 조회
 	UMD_ItemDefinition* GetDefinition() const;
+	// 카탈로그 재검색 없이 판매 및 선행 정의의 로드 상태 확인
+	bool IsDefinitionLoaded();
+
 	// 호감 및 퀘스트 조건과 전체 AssetId가 일치하는 보유 이력으로 해금 판정
 	bool IsUnlocked(float Affinity, int32 QuestCompletions, const TArray<FPrimaryAssetId>& OwnedItemAssetIds) const;
 
 	// 공통 정의의 표시 이름을 사용한 해금 문구 생성 (예: 열선 헤라 보유)
 	FText GetUnlockConditionText() const;
 
-	// 구매 이력이 있는 도구만 무료로 계산하는 UI 및 서버 공통 가격
-	int32 GetPurchasePrice(TArray<FPrimaryAssetId> PurchasedItemIds) const;
+	// 구매 이력 복사 없이 도구의 무료 재구매 가격 계산
+	int32 GetPurchasePrice(TArray<FPrimaryAssetId>& PurchasedItemIds) const;
 
 	// 일반 가격 450₡ 또는 개당 가격 35₡/개 표기이며 무료 가격은 0
 	FText GetPriceText() const;
@@ -130,6 +133,9 @@ public:
 	// 지정 품목이 유일하게 등록되고 판매 및 선행 정의가 준비되었는지 확인
 	UFUNCTION(BlueprintPure, Category = "Shop")
 	bool IsItemDefinitionLoaded(FPrimaryAssetId ItemAssetId);
+
+	// 중복 집계 후 준비된 품목만 카탈로그 순서대로 수집
+	TArray<FMD_ShopItem> GetAvailableItems();
 
 	// 호출자가 반환 핸들을 유지하는 동안 판매 정의를 비동기로 로드 및 보관
 	TSharedPtr<FStreamableHandle> LoadItemDefinitions(FStreamableDelegate OnLoaded = FStreamableDelegate());

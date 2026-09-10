@@ -9,14 +9,12 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
-#include "World/Wall/MD_WallUtility.h"
 #include "Component/Support/MD_SupplyComponent.h"
 #include "Component/Equipment/MD_FoamGunComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Comfort/MD_ComfortComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Data/Equipment/MD_ConsumeItemDefinition.h"
-#include "Data/Equipment/MD_RepairItemDefinition.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
@@ -51,6 +49,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "UI/Customization/MD_NameTagWidget.h"
+#include "Util/MD_LogUtility.h"
 
 // Sets default values
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
@@ -1271,12 +1270,12 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 		return;
 	}
 
-	// 보관형 수리 소모품은 기존 인프라 수리 입력 경로로 전달
-	if (IsValid(Cast<UMD_RepairItemDefinition>(EquipHotbarComponent->GetCurrentItem())) == true)
+	// 모든 보관형 소모품의 사용 입력을 구매 GE가 부여한 GA에 전달
+	if (IsValid(Cast<UMD_ConsumeItemDefinition>(EquipHotbarComponent->GetCurrentItem())) == true)
 	{
-		// 서버가 소지 품목과 수리 대상을 검증하는 기존 요청 실행
-		TryToolInputUtilityRepair();
-		// 도구 GA 활성화와 소모품 수리 입력의 중복 실행 차단
+		// 선택한 아이템의 전체 AssetId에 귀속된 능력 한 개 활성화
+		EquipHotbarComponent->TryActivateCurrentItemAbility();
+		// 동일 입력의 일반 도구 처리 중복 방지
 		return;
 	}
 
@@ -1311,75 +1310,8 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 		return;
 	}
 
-	// 비헤라 도구는 기존 tag 기반 활성화 흐름을 유지한다.
-	FGameplayTagContainer AbilityTags(CurrentTool->ToolAbilityTag);
-	ASC->TryActivateAbilitiesByTag(AbilityTags);
-}
-
-void AMD_Character::TryToolInputUtilityRepair()
-{
-	const AController* OwnController = GetController();
-	UWorld* World = GetWorld();
-	if (!IsValid(OwnController) || !World)
-	{
-		return;
-	}
-
-	// 상호작용 트레이스와 같은 거리로 조준선 위 인프라를 찾는다 (와이어 메시는 Visibility Block)
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	OwnController->GetPlayerViewPoint(ViewLocation, ViewRotation);
-
-	FHitResult Hit;
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(MDToolInputRepair), false, this);
-	if (!World->LineTraceSingleByChannel(
-			Hit,
-			ViewLocation,
-			ViewLocation + ViewRotation.Vector() * ToolInputRepairTraceDistance,
-			ECC_Visibility,
-			Params))
-	{
-		return;
-	}
-
-	AMD_WallUtility* Utility = Cast<AMD_WallUtility>(Hit.GetActor());
-	if (!IsValid(Utility) && IsValid(Hit.GetComponent()))
-	{
-		Utility = Cast<AMD_WallUtility>(Hit.GetComponent()->GetOwner());
-	}
-	if (!IsValid(Utility) || !Utility->RepairRequiresToolInput())
-	{
-		return;
-	}
-
-	ServerRepairUtilityWithTool(Utility);
-}
-
-void AMD_Character::ServerRepairUtilityWithTool_Implementation(AMD_WallUtility* Utility)
-{
-	if (!HasAuthority() || !IsValid(Utility) || !Utility->RepairRequiresToolInput())
-	{
-		return;
-	}
-
-	// 클라 조준을 그대로 믿지 않는다. 바운드 최근접점 거리로 재검증 (지연 허용 50cm)
-	const AController* OwnController = GetController();
-	if (!IsValid(OwnController))
-	{
-		return;
-	}
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	OwnController->GetPlayerViewPoint(ViewLocation, ViewRotation);
-	const FBox Bounds = Utility->GetComponentsBoundingBox(true);
-	const float Distance = FVector::Dist(Bounds.GetClosestPointTo(ViewLocation), ViewLocation);
-	if (Distance > ToolInputRepairTraceDistance + 50.f)
-	{
-		return;
-	}
-
-	// 도구 태그 검사·핫바 차감·상태 전이는 인프라 쪽 공통 진입점이 처리
-	Utility->TryRepairWithEquippedTool(this);
+	// 같은 GA 태그를 공유하는 도구 사이에서도 선택 아이템의 부여 능력만 실행
+	EquipHotbarComponent->TryActivateCurrentItemAbility();
 }
 
 void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
@@ -1587,6 +1519,12 @@ void AMD_Character::InitializeAbilitySystem()
 	if (UAbilitySystemComponent* ASC = GetAbilitySystemComponent())
 	{
 		ASC->InitAbilityActorInfo(GetPlayerState(), this);
+		// 기본 슬롯 구성 이후 구매자 ASC에 아이템 GE 연결
+		if (IsValid(EquipHotbarComponent) == true)
+		{
+			// 기본 및 저장 장비에도 구매와 동일한 능력 부여 적용
+			EquipHotbarComponent->InitializeItemAbilities();
+		}
 	}
 	
 	//PlayerState가 호출되는 시점에 체력변화 델리게이트를 구독.
@@ -1663,38 +1601,15 @@ bool AMD_Character::TryActivateScrapeAbility(
 		ActiveScrapeAbilityTool.Reset();
 	}
 
-	const FGameplayTagContainer AbilityTags(AbilityTag);
-	TArray<FGameplayAbilitySpec*> MatchingSpecs;
-	AbilitySystem->GetActivatableGameplayAbilitySpecsByAllMatchingTags(
-		AbilityTags,
-		MatchingSpecs,
-		/*bOnlyAbilitiesThatSatisfyTagRequirements=*/true);
-
-	MatchingSpecs.RemoveAll(
-		[AbilityTag](const FGameplayAbilitySpec* Spec)
-		{
-			return !Spec
-				|| !IsValid(Spec->Ability)
-				|| !Spec->Ability->GetAssetTags().HasTagExact(AbilityTag);
-		});
-	if (MatchingSpecs.Num() != 1)
+	// 구매 GE의 SourceObject와 전체 AssetId로 현재 헤라의 능력 식별
+	FGameplayAbilitySpecHandle CandidateHandle = EquipHotbarComponent->FindItemAbility(SourceTool);
+	// 선택 헤라에 부여된 능력이 없는 실행 요청 차단
+	if (CandidateHandle.IsValid() == false)
 	{
-		UE_LOG(
-			LogTemp,
-			Warning,
-			TEXT("[Scrape] Expected exactly one activatable Ability spec with exact tag %s, found %d"),
-			*AbilityTag.ToString(),
-			MatchingSpecs.Num());
+		// 실제 실행할 헤라 능력 부재 전달
 		return false;
 	}
 
-	FGameplayAbilitySpec* Spec = MatchingSpecs[0];
-	if (!Spec || !Spec->Handle.IsValid())
-	{
-		return false;
-	}
-
-	const FGameplayAbilitySpecHandle CandidateHandle = Spec->Handle;
 	if (!AbilitySystem->TryActivateAbility(CandidateHandle))
 	{
 		return false;
@@ -1856,13 +1771,16 @@ void AMD_Character::HandleHotbarChanged()
 
 	RefreshToolMesh();
 
-	if (IsValid(EquipHotbarComponent))
+	// 공통 아이템 상태를 조회할 Hotbar 유효성 검사
+	if (IsValid(EquipHotbarComponent) == true)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[Hotbar] Slot %d/%d, Tool: %s"),
-			EquipHotbarComponent->GetCurrentSlotIndex(),
-			EquipHotbarComponent->GetSlotCount(),
-			// 장착 도구의 공통 아이템 이름을 로그에 표시
-			IsValid(CurrentTool) == true ? *CurrentTool->ItemName.ToString() : TEXT("Empty"));
+		// 도구와 소비 아이템을 함께 표시할 현재 보관 정의 조회
+		UMD_ItemDefinition* CurrentItem = EquipHotbarComponent->GetCurrentItem();
+		// 위치 표시와 보유 수량 조회에 사용할 선택 슬롯 확인
+		int32 SlotIndex = EquipHotbarComponent->GetCurrentSlotIndex();
+		// 실제 아이템 이름과 잔여 수량을 프로젝트 로그에 기록
+		UE_LOG(MarineDemolition, Log, TEXT("[Hotbar] Slot %d/%d, Item: %s, Count: %d"), SlotIndex, EquipHotbarComponent->GetSlotCount(),
+			IsValid(CurrentItem) == true ? *CurrentItem->ItemName.ToString() : TEXT("Empty"), EquipHotbarComponent->GetItemCountAtSlot(SlotIndex));
 	}
 }
 

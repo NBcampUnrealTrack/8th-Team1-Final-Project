@@ -30,7 +30,6 @@ class UMD_SupplyComponent;
 class UMD_FoamGunComponent;
 class UMD_OxygenComponent;
 class UMD_ComfortComponent;
-class AMD_WallUtility;
 class UWidgetComponent;
 class UNiagaraSystem;
 class UNiagaraComponent;
@@ -335,12 +334,6 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerJumpOffLadder();
 
-	// 도구 입력(LMB) 전용 인프라 수리(절연테이프). 클라가 조준한 대상을 서버가 거리 재검증 후 수리한다
-	void TryToolInputUtilityRepair();
-	UFUNCTION(Server, Reliable)
-	void ServerRepairUtilityWithTool(AMD_WallUtility* Utility);
-	// 도구 입력 수리의 조준 트레이스 거리 (상호작용 트레이스와 동일)
-	static constexpr float ToolInputRepairTraceDistance = 200.f;
 	//void HandleWallCutInput(const FInputActionValue& Value);
 	//void HandleWallScanInput(const FInputActionValue& Value);
 

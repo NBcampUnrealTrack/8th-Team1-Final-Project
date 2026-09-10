@@ -9,6 +9,7 @@
 #include "MD_ToolDefinition.generated.h"
 
 class UStaticMesh;
+class UGameplayEffect;
 class UMD_EquipHotbarComponent;
 
 // 메시와 GA 태그 및 도구별 성능을 제공하는 공통 아이템 파생 정의
@@ -20,8 +21,14 @@ class MARINEDEMOLITION_API UMD_ToolDefinition : public UMD_ItemDefinition
 public:
 	virtual bool CanGrant_Implementation(FMD_ItemGrantContext Context) override;
 	virtual bool Grant_Implementation(FMD_ItemGrantContext Context) override;
+	virtual FORCEINLINE TSubclassOf<UGameplayEffect> GetAbilityGrantEffect() override { return AbilityGrantEffect; }
+	virtual FORCEINLINE FGameplayTag GetUseAbilityTag() override { return ToolAbilityTag; }
 
 public:
+	// 구매 또는 장비 복구 시 소유자의 ASC에 적용하여 GA를 부여할 GE
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Ability")
+	TSubclassOf<UGameplayEffect> AbilityGrantEffect;
+
 	// 현재 Hotbar에 보유해야 할 업그레이드 선행 도구이며 미지정 시 종류 제한 없음
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Upgrade", meta = (AllowedTypes = "Item"))
 	FPrimaryAssetId UpgradeSourceAssetId;

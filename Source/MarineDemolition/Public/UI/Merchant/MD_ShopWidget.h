@@ -79,8 +79,8 @@ protected:
 
 	void RefreshSelectedItem();
 
-	// 상점 품목의 지급 조건을 실제 소유 Pawn과 구매 이력으로 검사
-	bool IsItemGrantable(FMD_ShopItem Item);
+	// 판매 정보 복사 없이 실제 소유 Pawn과 구매 이력으로 지급 조건 검사
+	bool IsItemGrantable(FMD_ShopItem& Item);
 
 	// 선행 도구와 잔여 수량 변경을 화면에 반영할 Hotbar 구독 관리
 	void ObserveHotbar(UMD_EquipHotbarComponent* InHotbar);

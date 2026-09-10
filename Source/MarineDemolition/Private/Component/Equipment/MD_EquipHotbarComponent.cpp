@@ -4,6 +4,12 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Equipment/MD_ConsumeItemDefinition.h"
+#include "AbilitySystemGlobals.h"
+#include "AbilitySystemComponent.h"
+#include "Abilities/GameplayAbility.h"
+#include "GameplayEffect.h"
+#include "GameplayEffectComponents/AbilitiesGameplayEffectComponent.h"
 #include "GameFramework/Actor.h"
 #include "Net/UnrealNetwork.h"
 #include "Util/MD_LogUtility.h"
@@ -48,6 +54,14 @@ void UMD_EquipHotbarComponent::BeginPlay()
 		// 빈 기본 설정도 UI에 초기 상태 전달
 		OnHotbarChanged.Broadcast();
 	}
+}
+
+void UMD_EquipHotbarComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// PlayerState에 남는 이전 캐릭터의 장비 GE 정리
+	RemoveAllItemAbilities();
+	// 상위 컴포넌트의 종료 처리
+	Super::EndPlay(EndPlayReason);
 }
 
 UMD_ItemDefinition* UMD_EquipHotbarComponent::GetCurrentItem() const
@@ -212,10 +226,10 @@ bool UMD_EquipHotbarComponent::AddItem(UMD_ItemDefinition* ItemDefinition, int32
 	}
 	// 실제 지급할 위치의 공통 검증 결과
 	int32 EntryIndex = INDEX_NONE;
-	// 직전 상태로 빈 슬롯 추가 및 수량 합산 가능 여부 확인
-	if (FindAvailableItemEntry(ItemDefinition, Amount, EntryIndex) == false)
+	// 보관 가능 검사와 능력 부여를 순서대로 완료한 경우에만 아이템 변경
+	if (FindAvailableItemEntry(ItemDefinition, Amount, EntryIndex) == false || GrantItemAbility(ItemDefinition) == false)
 	{
-		// 선행 검사에서 기록한 지급 실패 전달
+		// 보관 또는 GE 부여 실패에 따른 서버 구매 실패 전달
 		return false;
 	}
 	// 실제 수량과 정의를 함께 갱신할 슬롯 참조
@@ -261,6 +275,8 @@ bool UMD_EquipHotbarComponent::TryConsumeItem(UMD_ItemDefinition* ItemDefinition
 	// 소진 시 배열 위치를 유지하면서 정의 참조 제거
 	if (ToolEntries[EntryIndex].Count == 0)
 	{
+		// 실행 중인 소비 GA는 GE의 종료 후 제거 정책으로 마무리까지 유지
+		RemoveItemAbility(ItemDefinition);
 		// 다음 아이템이 사용할 수 있도록 슬롯 비우기
 		ToolEntries[EntryIndex].ToolDefinition = nullptr;
 	}
@@ -312,6 +328,20 @@ bool UMD_EquipHotbarComponent::SetItemAtSlot(int32 SlotIndex, UMD_ItemDefinition
 				return false;
 			}
 		}
+	}
+	// 교체할 아이템의 능력 부여를 완료한 경우에만 기존 슬롯 변경
+	if (Amount > 0 && GrantItemAbility(ItemDefinition) == false)
+	{
+		// 기존 도구와 GE를 보존한 교체 실패 전달
+		return false;
+	}
+	// 수량만 바뀐 같은 품목의 GE는 유지하고 교체되는 품목만 회수
+	UMD_ItemDefinition* PreviousItem = GetItemAtSlot(SlotIndex);
+	// 비우기 요청 또는 서로 다른 전체 AssetId의 교체 검사
+	if (IsValid(PreviousItem) == true && (Amount == 0 || PreviousItem->GetPrimaryAssetId() != ItemDefinition->GetPrimaryAssetId()))
+	{
+		// 교체 전 품목의 잔존 능력 정리
+		RemoveItemAbility(PreviousItem);
 	}
 	// 빈 슬롯 요청에서는 정의도 함께 제거
 	ToolEntries[SlotIndex].ToolDefinition = Amount > 0 ? ItemDefinition : nullptr;
@@ -409,6 +439,8 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 		// 복구할 정보가 없는 기존 저장 형식의 성공 전달
 		return true;
 	}
+	// 저장 복구로 사라질 기존 품목의 GE와 GA 정리
+	RemoveAllItemAbilities();
 	// 기존 보관 상태를 제거한 고정 네 슬롯 생성
 	ToolEntries.Empty(4);
 	// 저장 데이터 길이와 무관하게 슬롯 개수 고정
@@ -531,4 +563,251 @@ bool UMD_EquipHotbarComponent::AddToolCharge(UMD_ToolDefinition* ToolDefinition,
 	NotifyEntriesChanged();
 	// 실제 충전 완료 결과 전달
 	return true;
+}
+
+bool UMD_EquipHotbarComponent::IsItemAbilityGrantValid(UMD_ItemDefinition* ItemDefinition)
+{
+	// 도구 또는 소모품 정의의 기능 설정 접근 전 유효성 검사
+	if (IsValid(ItemDefinition) == false)
+	{
+		// 정의 부재의 프로젝트 로그 기록
+		UE_LOG(MarineDemolition, Warning, TEXT("Item ability definition is invalid."));
+		// 구매 설정 검증 실패 전달
+		return false;
+	}
+	// 아이템 유형이 제공한 구매 GE 클래스 조회
+	TSubclassOf<UGameplayEffect> EffectClass = ItemDefinition->GetAbilityGrantEffect();
+	// 사용 효과를 아직 지정하지 않은 소모품의 기존 보관 및 별도 사용 경로 유지
+	if (IsValid(EffectClass) == false && ItemDefinition->GetUseAbilityTag().IsValid() == false && ItemDefinition->IsA<UMD_ConsumeItemDefinition>() == true)
+	{
+		// 등록된 구매 GE가 없는 소모품의 보관 허용
+		return true;
+	}
+	// 부여 GE와 사용 태그가 없는 장비의 구매 차단
+	if (IsValid(EffectClass) == false || ItemDefinition->GetUseAbilityTag().IsValid() == false)
+	{
+		// 아이템의 누락된 구매 GE 또는 실행 태그 기록
+		UE_LOG(MarineDemolition, Warning, TEXT("Item requires AbilityGrantEffect and use ability tag: %s"), *ItemDefinition->GetPathName());
+		// 잘못된 지급 설정 결과 전달
+		return false;
+	}
+	// 보관 기간에 한정해 독립적으로 GA를 부여할 GE 기본값 조회
+	UGameplayEffect* Effect = EffectClass.GetDefaultObject();
+	// Instant 부여와 아이템 간 GE 스택 합산으로 발생할 수명 및 SourceObject 충돌 차단
+	if (Effect->DurationPolicy != EGameplayEffectDurationType::Infinite || Effect->GetStackingType() != EGameplayEffectStackingType::None
+		|| IsValid(Effect->FindComponent<UAbilitiesGameplayEffectComponent>()) == false)
+	{
+		// 지원하지 않는 구매 GE 구성의 프로젝트 로그 기록
+		UE_LOG(MarineDemolition, Warning, TEXT("Item GE requires Infinite, no stacking and Grant Gameplay Abilities: %s"), *ItemDefinition->GetPathName());
+		// 부여 계약을 충족하지 못한 설정 거부
+		return false;
+	}
+	// 구매자 인터페이스를 통해 PlayerState의 ASC 조회
+	UAbilitySystemComponent* AbilitySystem = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(GetOwner());
+	// 준비된 구매자에게만 실제 구매 허용
+	if (IsValid(AbilitySystem) == false || AbilitySystem->GetAvatarActor() != GetOwner())
+	{
+		// 아직 연결되지 않은 구매자 ASC 기록
+		UE_LOG(MarineDemolition, Warning, TEXT("Item buyer AbilitySystem is not initialized."));
+		// ASC 연결 전 구매 차단
+		return false;
+	}
+	// 아이템 구매 GE 설정과 수신자 준비 완료 전달
+	return true;
+}
+
+FGameplayAbilitySpecHandle UMD_EquipHotbarComponent::FindItemAbility(UMD_ItemDefinition* ItemDefinition)
+{
+	// 입력 소유자의 능력 시스템 조회
+	UAbilitySystemComponent* AbilitySystem = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(GetOwner());
+	// 미연결 시스템 또는 아이템 없는 입력 차단
+	if (IsValid(AbilitySystem) == false || IsValid(ItemDefinition) == false || ItemDefinition->GetPrimaryAssetId().IsValid() == false)
+	{
+		// 실행할 능력 부재 전달
+		return FGameplayAbilitySpecHandle();
+	}
+	// 동일 태그를 공유하더라도 선택한 아이템에 부여된 한 개의 GA만 탐색
+	FGameplayAbilitySpecHandle FoundHandle;
+	// ASC에 실제 부여된 능력 목록 순회
+	for (FGameplayAbilitySpec& Spec : AbilitySystem->GetActivatableAbilities())
+	{
+		// 구매 GE의 문맥에서 전달된 공통 아이템 정의 조회
+		UMD_ItemDefinition* SourceItem = Cast<UMD_ItemDefinition>(Spec.SourceObject.Get());
+		// 전체 AssetId와 정확한 사용 태그로 선택 품목의 능력 식별
+		if (IsValid(SourceItem) == true && SourceItem->GetPrimaryAssetId() == ItemDefinition->GetPrimaryAssetId()
+			&& Spec.PendingRemove == false && Spec.RemoveAfterActivation == false
+			&& IsValid(Spec.Ability) == true && Spec.Ability->GetAssetTags().HasTagExact(ItemDefinition->GetUseAbilityTag()) == true)
+		{
+			// 같은 아이템에 중복 등록된 입력 능력의 임의 실행 차단
+			if (FoundHandle.IsValid() == true)
+			{
+				// 중복된 능력 설정의 프로젝트 로그 기록
+				UE_LOG(MarineDemolition, Warning, TEXT("Multiple use abilities granted for item: %s"), *ItemDefinition->GetPrimaryAssetId().ToString());
+				// 모호한 실행 대상 거부
+				return FGameplayAbilitySpecHandle();
+			}
+			// 현재 품목에만 귀속된 실행 핸들 저장
+			FoundHandle = Spec.Handle;
+		}
+	}
+	// 실제 부여된 능력의 식별 결과 전달
+	return FoundHandle;
+}
+
+bool UMD_EquipHotbarComponent::GrantItemAbility(UMD_ItemDefinition* ItemDefinition)
+{
+	// GA를 사용하지 않는 공통 보관 아이템은 기존 지급만 수행
+	if (IsValid(ItemDefinition) == true && ItemDefinition->IsA<UMD_ToolDefinition>() == false && ItemDefinition->IsA<UMD_ConsumeItemDefinition>() == false)
+	{
+		// 비장비 품목의 능력 부여 생략 성공 전달
+		return true;
+	}
+	// 선택적 GE가 미지정된 소모품은 이전과 같이 보관만 수행
+	if (IsValid(ItemDefinition) == true && ItemDefinition->IsA<UMD_ConsumeItemDefinition>() == true
+		&& IsValid(ItemDefinition->GetAbilityGrantEffect()) == false && ItemDefinition->GetUseAbilityTag().IsValid() == false)
+	{
+		// 소비 기능을 지정하기 전 수량 보관의 성공 전달
+		return true;
+	}
+	// 기본 장비가 먼저 생성되는 초기화 시점의 ASC 조회
+	UAbilitySystemComponent* AbilitySystem = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(GetOwner());
+	// BeginPlay의 기본 슬롯은 보존하고 PossessedBy의 ASC 연결 시 능력 부여
+	if (IsValid(GetOwner()) == true && GetOwner()->HasActorBegunPlay() == false
+		&& (IsValid(AbilitySystem) == false || AbilitySystem->GetAvatarActor() != GetOwner()))
+	{
+		// 초기 보관만 완료하고 능력 연결은 초기화 진입점으로 연기
+		return true;
+	}
+	// 구매 GE의 형식과 구매자 ASC 검증
+	if (IsItemAbilityGrantValid(ItemDefinition) == false)
+	{
+		// 잘못된 구매 효과의 지급 차단
+		return false;
+	}
+	// 재구매에 의한 같은 품목의 GE 중복 생성 차단
+	FActiveGameplayEffectHandle* ExistingHandle = ItemAbilityEffects.Find(ItemDefinition->GetPrimaryAssetId());
+	// 기존 능력 부여가 유지되는 수량 증가 요청 확인
+	if (ExistingHandle != nullptr && AbilitySystem->GetActiveGameplayEffect(*ExistingHandle) != nullptr)
+	{
+		// 기존 품목의 유효한 능력 등록 상태 전달
+		return FindItemAbility(ItemDefinition).IsValid();
+	}
+	// GA의 SourceObject로 구매한 아이템을 전달할 GE 문맥 생성
+	FGameplayEffectContextHandle Context = AbilitySystem->MakeEffectContext();
+	// 같은 태그를 공유하는 도구 사이에서 아이템 귀속 구분
+	Context.AddSourceObject(ItemDefinition);
+	// BP GE에 지정된 GA 구성으로 실제 적용 사양 생성
+	FGameplayEffectSpecHandle Spec = AbilitySystem->MakeOutgoingSpec(ItemDefinition->GetAbilityGrantEffect(), 1.0f, Context);
+	// 유효한 사양에서만 부여 효과 적용
+	if (Spec.IsValid() == false)
+	{
+		// GE 사양 생성 실패의 프로젝트 로그 기록
+		UE_LOG(MarineDemolition, Warning, TEXT("Failed to create item grant GE spec."));
+		// 실제 지급 없는 실패 전달
+		return false;
+	}
+	// 서버 구매자에게 GE를 적용하여 엔진의 Grant Gameplay Abilities 실행
+	FActiveGameplayEffectHandle AppliedHandle = AbilitySystem->ApplyGameplayEffectSpecToSelf(*Spec.Data.Get());
+	// 요구된 사용 GA가 실제로 부여된 경우에만 지급 성공 허용
+	if (AppliedHandle.IsValid() == true && FindItemAbility(ItemDefinition).IsValid() == true)
+	{
+		// 마지막 소비나 업그레이드에서 회수할 GE 핸들 등록
+		ItemAbilityEffects.Add(ItemDefinition->GetPrimaryAssetId(), AppliedHandle);
+		// 구매 GE의 실제 능력 부여 성공 전달
+		return true;
+	}
+	// 적용은 되었으나 필요한 GA가 없는 잘못된 GE의 회수
+	if (AppliedHandle.IsValid() == true)
+	{
+		// 실패한 지급으로 남는 능력 및 효과 제거
+		AbilitySystem->RemoveActiveGameplayEffect(AppliedHandle);
+	}
+	// 적용 거부 또는 사용 태그에 해당하는 GA 부재 기록
+	UE_LOG(MarineDemolition, Warning, TEXT("Item GE failed to grant its use ability: %s"), *ItemDefinition->GetPathName());
+	// 아이템과 결제를 변경하지 않는 구매 실패 전달
+	return false;
+}
+
+void UMD_EquipHotbarComponent::RemoveItemAbility(UMD_ItemDefinition* ItemDefinition)
+{
+	// 빈 슬롯이나 초기화 전 아이템의 제거 생략
+	if (IsValid(ItemDefinition) == false)
+	{
+		// 제거할 아이템 부재 시 처리 종료
+		return;
+	}
+	// 아이템과 함께 회수할 구매 GE 핸들 수신
+	FActiveGameplayEffectHandle Handle;
+	// 동일 아이템의 정리 요청 중복 처리 방지
+	if (ItemAbilityEffects.RemoveAndCopyValue(ItemDefinition->GetPrimaryAssetId(), Handle) == true)
+	{
+		// 소유 캐릭터가 종료되어도 GE가 남은 실제 ASC 조회
+		UAbilitySystemComponent* AbilitySystem = Handle.GetOwningAbilitySystemComponent();
+		// 유효한 시스템에서 GE의 능력 회수 정책 실행
+		if (IsValid(AbilitySystem) == true)
+		{
+			// RemoveAbilityOnEnd로 마지막 소모품 GA의 정상 종료 보장
+			AbilitySystem->RemoveActiveGameplayEffect(Handle);
+		}
+	}
+}
+
+void UMD_EquipHotbarComponent::RemoveAllItemAbilities()
+{
+	// GE 제거 콜백의 재진입에도 순회가 유지되도록 핸들 목록 분리
+	TArray<FActiveGameplayEffectHandle> Handles;
+	// 현재 캐릭터가 부여한 아이템 GE만 회수 대상으로 수집
+	ItemAbilityEffects.GenerateValueArray(Handles);
+	// 능력 종료 콜백에서 동일 핸들을 다시 제거하지 않도록 먼저 등록 해제
+	ItemAbilityEffects.Reset();
+	// 저장 복구 또는 캐릭터 종료 이전에 적용된 효과 순회
+	for (FActiveGameplayEffectHandle Handle : Handles)
+	{
+		// GE가 적용된 PlayerState ASC 조회
+		UAbilitySystemComponent* AbilitySystem = Handle.GetOwningAbilitySystemComponent();
+		// 수명이 끝난 능력 시스템의 접근 차단
+		if (IsValid(AbilitySystem) == true)
+		{
+			// 보관 품목에 부여된 효과와 GA의 수명 종료
+			AbilitySystem->RemoveActiveGameplayEffect(Handle);
+		}
+	}
+}
+
+void UMD_EquipHotbarComponent::InitializeItemAbilities()
+{
+	// 서버의 ASC 연결 이후에만 기본 아이템 능력 초기화
+	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false)
+	{
+		// 클라이언트의 직접 GE 부여 차단
+		return;
+	}
+	// 네 공통 슬롯의 보관 아이템만 초기화 대상으로 순회
+	for (int32 Index = 0; Index < ToolEntries.Num(); ++Index)
+	{
+		// 소진된 아이템을 제외한 현재 보관 정의 조회
+		UMD_ItemDefinition* Item = GetItemAtSlot(Index);
+		// 유효한 보관 품목의 GE 연결 실패 검사
+		if (IsValid(Item) == true && GrantItemAbility(Item) == false)
+		{
+			// 기본 또는 저장 복구 장비의 설정 실패 기록
+			UE_LOG(MarineDemolition, Warning, TEXT("Failed to initialize stored item ability: %s"), *Item->GetPathName());
+		}
+	}
+}
+
+bool UMD_EquipHotbarComponent::TryActivateCurrentItemAbility()
+{
+	// 실제 선택 품목의 SourceObject와 태그에 해당하는 부여 GA 조회
+	FGameplayAbilitySpecHandle Handle = FindItemAbility(GetCurrentItem());
+	// 클라이언트 입력의 서버 활성화 요청을 지원하는 ASC 조회
+	UAbilitySystemComponent* AbilitySystem = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(GetOwner());
+	// 구매로 부여받은 능력이 있는 경우에만 실행 요청
+	if (IsValid(AbilitySystem) == true && Handle.IsValid() == true)
+	{
+		// GA에 설정된 실행 정책으로 클라이언트 또는 서버 실행 전달
+		return AbilitySystem->TryActivateAbility(Handle);
+	}
+	// 미보유 또는 아직 부여되지 않은 능력의 입력 결과 전달
+	return false;
 }

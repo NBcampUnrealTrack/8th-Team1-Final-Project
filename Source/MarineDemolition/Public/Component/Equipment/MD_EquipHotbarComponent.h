@@ -4,10 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "GameplayEffectTypes.h"
+#include "GameplayAbilitySpecHandle.h"
 #include "MD_EquipHotbarComponent.generated.h"
 
 class UMD_ItemDefinition;
 class UMD_ToolDefinition;
+class UAbilitySystemComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMDOnEquipHotbarChanged);
 
@@ -41,6 +44,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
 	// 슬롯 내용 또는 선택 변경을 캐릭터와 UI에 전달하는 알림
@@ -59,6 +63,10 @@ protected:
 	// 현재 사용 입력과 장착 표시가 참조할 슬롯 위치
 	UPROPERTY(ReplicatedUsing = OnRep_CurrentSlotIndex)
 	int32 CurrentSlotIndex = 0;
+
+	// 수량 증가 시 중복 부여를 방지하고 소진 시 제거할 아이템별 활성 GE
+	UPROPERTY(Transient)
+	TMap<FPrimaryAssetId, FActiveGameplayEffectHandle> ItemAbilityEffects;
 
 public:
 	// 선택한 슬롯의 공통 아이템 조회
@@ -131,7 +139,29 @@ public:
 	// 기존 경로 저장 데이터에서 공통 아이템을 슬롯당 한 개씩 복구
 	bool RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UDataAsset>>& SaveData);
 
+	// 구매 전에 무효 GE와 GA 태그 및 ASC 준비 상태 검사
+	bool IsItemAbilityGrantValid(UMD_ItemDefinition* ItemDefinition);
+
+	// PlayerState ASC 연결 이후 기본 또는 복구된 아이템의 구매 GE 부여
+	void InitializeItemAbilities();
+
+	// 아이템의 전체 AssetId와 사용 태그에 해당하는 부여 GA 조회
+	FGameplayAbilitySpecHandle FindItemAbility(UMD_ItemDefinition* ItemDefinition);
+
+	// 선택한 아이템에 부여된 GA 한 개에 사용 입력 전달
+	UFUNCTION(BlueprintCallable, Category = "Hotbar|Ability")
+	bool TryActivateCurrentItemAbility();
+
 protected:
+	// 새 품목의 GE를 먼저 적용하여 능력 부여 실패 시 보관과 결제 차단
+	bool GrantItemAbility(UMD_ItemDefinition* ItemDefinition);
+
+	// 마지막 수량 소진 또는 교체된 품목의 GE와 부여 능력 회수
+	void RemoveItemAbility(UMD_ItemDefinition* ItemDefinition);
+
+	// 캐릭터 종료 또는 전체 장비 복구 이전의 아이템 GE 정리
+	void RemoveAllItemAbilities();
+
 	// 공통 AssetId와 도구 소지 상태 및 수량 범위로 지급 위치 결정
 	bool FindAvailableItemEntry(UMD_ItemDefinition* ItemDefinition, int32 Amount, int32& OutEntryIndex) const;
 
