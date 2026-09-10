@@ -149,6 +149,14 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
 	void ServerAbandonRepeatQuest(int32 Index);
 
+	/** NPC 상호작용으로 메인 퀘스트 페이즈를 서버에서 전환하도록 요청하는 함수 */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerAdvanceMainQuestPhase(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex);
+
+	/** 레벨 내 퀘스트 상호작용 오브젝트(카드 등)를 획득했을 때 서버에서 진행도를 올리는 함수 */
+	UFUNCTION(Server, Reliable)
+	void ServerNotifyQuestInteraction(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex);
+
 	// 모선 상인과의 거리 및 대출 한도를 서버에서 검증한 뒤 대출을 실행하는 함수
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
 	void ServerBorrowCredits(AMD_Merchant* MerchantActor, int32 Amount);
