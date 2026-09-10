@@ -16,6 +16,7 @@ void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_PlayerState, ReturnStatus);
+	DOREPLIFETIME(AMD_PlayerState, ReplicatedAppearance);
 	DOREPLIFETIME_CONDITION(AMD_PlayerState, PurchasedShopItemIds, COND_OwnerOnly);
 }
 
@@ -29,6 +30,9 @@ void AMD_PlayerState::CopyProperties(APlayerState* PlayerState)
 	{
 		// 장비 해금 조건을 유지하기 위하여 플레이어가 구매한 장비 목록 복사
 		TargetPlayerState->PurchasedShopItemIds = PurchasedShopItemIds;
+
+		// 캐릭터 외형을 Seamless Travel 이후에도 유지하기 위한 복사
+		TargetPlayerState->ReplicatedAppearance = ReplicatedAppearance;
 	}
 }
 
@@ -293,4 +297,23 @@ void AMD_PlayerState::Revive()
 	CharacterAttributeSet->SetHealth(ReviveAmount);
 
 	UE_LOG(LogTemp, Log, TEXT("[Health][Server] 부활 (HP %.1f)"), ReviveAmount);
+}
+
+void AMD_PlayerState::SetAppearance(const FMDCharacterCustomizationAppearance& NewAppearance)
+{
+	if (HasAuthority() == false)
+	{
+		return;
+	}
+
+	ReplicatedAppearance = NewAppearance;
+
+	// Listen Server 호스트에서도 즉시 캐릭터에 반영
+	OnRep_ReplicatedAppearance();
+	ForceNetUpdate();
+}
+
+void AMD_PlayerState::OnRep_ReplicatedAppearance()
+{
+	OnAppearanceChanged.Broadcast();
 }

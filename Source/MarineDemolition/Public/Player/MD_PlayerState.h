@@ -7,10 +7,12 @@
 #include "AbilitySystemInterface.h"
 #include "GameplayEffectTypes.h"
 #include "Types/State/MD_HealthTypes.h"
+#include "Types/Customization/MD_CharacterCustomizationTypes.h"
 #include "MD_PlayerState.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnHealthStateChanged, EMD_HealthState, NewState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_OnShopOwnershipChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_OnAppearanceChanged);
 
 class UMD_CharacterAttributeSet;
 
@@ -94,6 +96,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Health")
 	EMD_HealthState GetHealthState() const;
 
+	/** 다른 플레이어에게 보이는 외형이 변경될 때 방송한다. 캐릭터가 DMI를 갱신하는 데 사용한다. */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Customization")
+	FMD_OnAppearanceChanged OnAppearanceChanged;
+
+	/** 복제된 외형 데이터를 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Customization")
+	const FMDCharacterCustomizationAppearance& GetAppearance() const { return ReplicatedAppearance; }
+
+	/** 서버에서 외형을 설정하고 모든 클라이언트에 복제한다. */
+	void SetAppearance(const FMDCharacterCustomizationAppearance& NewAppearance);
+
 	/** 현재 플레이어가 이미 구매한 비소모 품목인지 확인하는 함수 */
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")
 	bool HasPurchasedShopItem(FName ItemId) const;
@@ -119,6 +132,13 @@ protected:
 	float ReviveHealthRatio = 1.0f;
 
 private:
+	// 모든 클라이언트가 같은 캐릭터 외형을 표시하기 위한 복제 외형 데이터
+	UPROPERTY(ReplicatedUsing = OnRep_ReplicatedAppearance)
+	FMDCharacterCustomizationAppearance ReplicatedAppearance;
+
+	UFUNCTION()
+	void OnRep_ReplicatedAppearance();
+
 	/** 현재 플레이어만 확인하는 비소모 품목 구매 이력 */
 	UPROPERTY(ReplicatedUsing = OnRep_PurchasedShopItemIds)
 	TArray<FName> PurchasedShopItemIds;

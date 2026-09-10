@@ -4,6 +4,7 @@
 #include "Gameplay/Customization/MD_CharacterCustomizationPreviewActor.h"
 #include "Gameplay/Customization/MD_CharacterCustomizationSettings.h"
 #include "Gameplay/Customization/MD_CharacterCustomizationSubsystem.h"
+#include "Player/MD_PlayerController.h"
 #include "Components/Border.h"
 #include "Components/Button.h"
 #include "Components/EditableTextBox.h"
@@ -599,6 +600,14 @@ bool UMD_CharacterCustomizationWidget::SaveToSlot(int32 SlotIndex, const FString
 		SelectedSlotIndex = SlotIndex;
 		RefreshSlotStatus();
 		OnSlotSaved(SlotIndex);
+
+		// 서버에 외형을 전달하여 다른 플레이어에게도 보이게 한다.
+		APlayerController* PC = GetOwningPlayer();
+		AMD_PlayerController* MDPC = Cast<AMD_PlayerController>(PC);
+		if (IsValid(MDPC) == true)
+		{
+			MDPC->ServerApplyAppearance(Appearance);
+		}
 	}
 	return bSaved;
 }

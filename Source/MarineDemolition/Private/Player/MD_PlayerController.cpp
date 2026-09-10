@@ -30,6 +30,7 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "GameFramework/GameSession.h"
+#include "Gameplay/Customization/MD_CharacterCustomizationSubsystem.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
@@ -646,6 +647,7 @@ void AMD_PlayerController::BeginPlayingState()
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
 	SubmitPlatformNickname();
+	RestoreAppearanceFromLocalSave();
 
 	NotifyLoadingScreenPlayerReady();
 }
@@ -657,6 +659,7 @@ void AMD_PlayerController::PostSeamlessTravel()
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
 	SubmitPlatformNickname();
+	RestoreAppearanceFromLocalSave();
 
 	// Seamless travel은 BeginPlayingState를 거치지 않으므로 같은 알림을 여기서도 보낸다.
 	NotifyLoadingScreenPlayerReady();
@@ -773,6 +776,57 @@ void AMD_PlayerController::ServerRepayLoan_Implementation(AMD_Merchant* Merchant
 	}
 }
 
+
+void AMD_PlayerController::ServerApplyAppearance_Implementation(FMDCharacterCustomizationAppearance NewAppearance)
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (IsValid(MDPlayerState) == true)
+	{
+		MDPlayerState->SetAppearance(NewAppearance);
+	}
+}
+
+void AMD_PlayerController::RestoreAppearanceFromLocalSave()
+{
+	if (IsLocalController() == false)
+	{
+		return;
+	}
+
+	UMD_CharacterCustomizationSubsystem* Subsystem =
+		UMD_CharacterCustomizationSubsystem::Get(this);
+	if (IsValid(Subsystem) == false)
+	{
+		return;
+	}
+
+	// 가장 최근 수정된 슬롯의 외형을 찾아 서버에 전달한다.
+	TArray<FMDCharacterCustomizationSlotSummary> Summaries = Subsystem->GetCustomizationSlotSummaries();
+
+	int32 BestSlotIndex = INDEX_NONE;
+	FDateTime BestTime = FDateTime::MinValue();
+
+	for (const FMDCharacterCustomizationSlotSummary& Summary : Summaries)
+	{
+		if (Summary.bOccupied == true && Summary.LastModified > BestTime)
+		{
+			BestTime = Summary.LastModified;
+			BestSlotIndex = Summary.SlotIndex;
+		}
+	}
+
+	if (BestSlotIndex == INDEX_NONE)
+	{
+		return;
+	}
+
+	FMDCharacterCustomizationAppearance Appearance;
+	FString SlotLabel;
+	if (Subsystem->LoadCustomizationSlot(BestSlotIndex, Appearance, SlotLabel) == true)
+	{
+		ServerApplyAppearance(Appearance);
+	}
+}
 
 /* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 

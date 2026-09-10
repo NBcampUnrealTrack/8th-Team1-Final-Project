@@ -49,6 +49,7 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "UI/Customization/MD_NameTagWidget.h"
+#include "Component/Customization/MD_CharacterCustomizationComponent.h"
 
 // Sets default values
 AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
@@ -362,6 +363,7 @@ void AMD_Character::ConfigureFirstPersonRendering()
 
 void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	UnbindAppearanceDelegate();
 	ResetScrapeFocusInputState();
 
 	if (IsValid(InteractionComponent))
@@ -980,6 +982,9 @@ void AMD_Character::PossessedBy(AController* NewController)
 	RefreshFirstPersonArmsTick();
 	// 서버에서 빙의가 완료된 PlayerState의 이름을 이름표에 반영한다.
 	RefreshNameTag();
+	// 서버에서 빙의 시 PlayerState 외형을 캐릭터 메시에 적용한다.
+	BindAppearanceDelegate();
+	ApplyCustomizationFromPlayerState();
 }
 
 void AMD_Character::UnPossessed()
@@ -1025,6 +1030,9 @@ void AMD_Character::OnRep_PlayerState()
 	InitializeAbilitySystem();
 	// 클라이언트에 PlayerState가 복제된 뒤 플랫폼 닉네임을 이름표에 반영한다.
 	RefreshNameTag();
+	// 클라이언트에서 PlayerState 복제 후 외형을 캐릭터 메시에 적용한다.
+	BindAppearanceDelegate();
+	ApplyCustomizationFromPlayerState();
 }
 
 void AMD_Character::RefreshNameTag()
@@ -2215,4 +2223,56 @@ void AMD_Character::TeleportToMothership()
 		/*bSweep=*/false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
+}
+
+void AMD_Character::ApplyCustomizationFromPlayerState()
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (IsValid(MDPlayerState) == false)
+	{
+		return;
+	}
+
+	// BP에서 추가한 CustomizationComponent를 찾아 외형을 적용한다.
+	UMD_CharacterCustomizationComponent* CustomizationComp =
+		FindComponentByClass<UMD_CharacterCustomizationComponent>();
+	if (IsValid(CustomizationComp) == false)
+	{
+		return;
+	}
+
+	CustomizationComp->ApplyAppearance(MDPlayerState->GetAppearance());
+}
+
+void AMD_Character::BindAppearanceDelegate()
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (IsValid(MDPlayerState) == false)
+	{
+		return;
+	}
+
+	// 중복 등록 방지
+	if (MDPlayerState->OnAppearanceChanged.IsAlreadyBound(this, &AMD_Character::HandleAppearanceChanged) == true)
+	{
+		return;
+	}
+
+	MDPlayerState->OnAppearanceChanged.AddDynamic(this, &AMD_Character::HandleAppearanceChanged);
+}
+
+void AMD_Character::UnbindAppearanceDelegate()
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (IsValid(MDPlayerState) == false)
+	{
+		return;
+	}
+
+	MDPlayerState->OnAppearanceChanged.RemoveDynamic(this, &AMD_Character::HandleAppearanceChanged);
+}
+
+void AMD_Character::HandleAppearanceChanged()
+{
+	ApplyCustomizationFromPlayerState();
 }

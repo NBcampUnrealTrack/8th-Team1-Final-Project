@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Blueprint/UserWidget.h"
+#include "CommonActivatableWidget.h"
 #include "Types/Customization/MD_CharacterCustomizationTypes.h"
 #include "MD_CharacterCustomizationWidget.generated.h"
 
@@ -22,7 +22,7 @@ class UMaterialInterface;
 class UMDCharacterCustomizationSwatchHandler;
 
 UCLASS(Abstract, Blueprintable)
-class MARINEDEMOLITION_API UMD_CharacterCustomizationWidget : public UUserWidget
+class MARINEDEMOLITION_API UMD_CharacterCustomizationWidget : public UCommonActivatableWidget
 {
 	GENERATED_BODY()
 

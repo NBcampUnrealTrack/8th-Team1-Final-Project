@@ -34,6 +34,7 @@ class AMD_WallUtility;
 class UWidgetComponent;
 class UNiagaraSystem;
 class UNiagaraComponent;
+class UMD_CharacterCustomizationComponent;
 class UAnimMontage;
 struct FMinimalViewInfo;
 struct FGameplayTag;
@@ -447,6 +448,16 @@ private:
 
 	/** 모선 리스폰 지점으로 옮긴다. 서버에서만 호출한다. */
 	void TeleportToMothership();
+
+	/** PlayerState의 복제 외형을 캐릭터 메시에 적용한다. */
+	void ApplyCustomizationFromPlayerState();
+
+	/** PlayerState의 외형 변경 콜백 등록을 관리한다. */
+	void BindAppearanceDelegate();
+	void UnbindAppearanceDelegate();
+
+	UFUNCTION()
+	void HandleAppearanceChanged();
 
 	/** 직전에 사망 상태였는지. 부활 전이 판별용 */
 	bool bWasDeadState = false;
