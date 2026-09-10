@@ -10,13 +10,9 @@
 #include "UObject/ConstructorHelpers.h"
 
 #include "Character/MD_Character.h"
-#include "Component/Equipment/MD_EquipHotbarComponent.h"
-#include "Component/Equipment/MD_FoamGunComponent.h"
 #include "Component/Lore/MD_LoreComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
-#include "Component/Oxygen/MD_OxygenComponent.h"
-#include "Component/Support/MD_SupplyComponent.h"
-#include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Equipment/MD_ItemDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Game/MD_GameStateBase.h"
@@ -32,15 +28,6 @@
 
 namespace
 {
-	/** 임시 지지대 구매를 기존 설치 수량 컴포넌트로 전달하기 위한 품목 식별자 */
-	const FName SupportItemId(TEXT("IT-P1"));
-
-	/** 산소 확장 탱크 구매 직후 패시브 효과를 장착하기 위한 품목 식별자 */
-	const FName OxygenTankItemId(TEXT("IT-O2"));
-
-	/** 폼 카트리지 구매를 폼건 충전 게이지로 전달하기 위한 품목 식별자 */
-	const FName FoamCartridgeItemId(TEXT("IT-FG1"));
-
 	/**
 	 * 캐릭터 에셋 대체용 큐브를 사람 크기(60×60×180cm)로 맞추는 값.
 	 * 엔진 기본 큐브가 100cm 정육면체라 스케일로 눌러 세운다.
@@ -50,83 +37,6 @@ namespace
 
 	/** 큐브 피벗이 가운데라 절반 높이만큼 올려야 액터 원점이 발밑에 온다. */
 	constexpr float PlaceholderHalfHeight = 90.f;
-
-	/** bPricePerUnit 값에 따라 ToolDefinition 수량 증가 또는 동일 GameplayTag 항목 교체를 수행하는 처리 */
-	bool FulfillPurchasedItem(AMD_Character* PurchasingCharacter, const FMD_ShopItem& ShopItem)
-	{
-		if (IsValid(PurchasingCharacter) == false || PurchasingCharacter->HasAuthority() == false || ShopItem.ItemId.IsNone() == true)
-		{
-			return false;
-		}
-
-		UMD_EquipHotbarComponent* HotbarComponent = PurchasingCharacter->GetHotbarComponent();
-		if (IsValid(HotbarComponent) == false)
-		{
-			return false;
-		}
-
-		// 지지대 설치 어빌리티가 기존 수량 컴포넌트를 원본으로 사용하기 위한 직접 지급 처리
-		if (ShopItem.ItemId == SupportItemId)
-		{
-			UMD_SupplyComponent* SupplyComponent = PurchasingCharacter->FindComponentByClass<UMD_SupplyComponent>();
-			if (IsValid(SupplyComponent) == false || SupplyComponent->GetSupportCount() >= MAX_int32)
-			{
-				return false;
-			}
-
-			SupplyComponent->AddSupport(1);
-			PurchasingCharacter->ForceNetUpdate();
-			return true;
-		}
-
-		// 폼 카트리지는 핫바 품목이 아니라 폼건 충전 게이지에 직접 지급하는 처리 (기획 08 §4.3)
-		if (ShopItem.ItemId == FoamCartridgeItemId)
-		{
-			UMD_FoamGunComponent* FoamGunComponent = PurchasingCharacter->FindComponentByClass<UMD_FoamGunComponent>();
-			if (IsValid(FoamGunComponent) == false || FoamGunComponent->IsChargeFull() == true)
-			{
-				return false;
-			}
-
-			FoamGunComponent->AddCharge(FoamGunComponent->GetShotCost());
-			PurchasingCharacter->ForceNetUpdate();
-			return true;
-		}
-
-		// Hotbar 품목 데이터로 사용할 카탈로그 ToolDefinition 참조
-		UMD_ToolDefinition* PurchasedToolDefinition = ShopItem.EquipmentDefinition.Get();
-		if (IsValid(PurchasedToolDefinition) == false)
-		{
-			return false;
-		}
-
-		// 개당 판매 품목은 동일 ToolDefinition 항목의 수량을 증가시키는 처리
-		if (ShopItem.bPricePerUnit == true)
-		{
-			return HotbarComponent->AddTool(PurchasedToolDefinition, 1);
-		}
-
-		// 탱크 패시브 적용 실패 전에 소유 원장이 변경되지 않도록 하는 필수 컴포넌트 검사
-		UMD_OxygenComponent* OxygenComponent = ShopItem.ItemId == OxygenTankItemId ? PurchasingCharacter->GetOxygenComponent() : nullptr;
-		if (ShopItem.ItemId == OxygenTankItemId && IsValid(OxygenComponent) == false)
-		{
-			return false;
-		}
-
-		// 일회성 판매 품목은 동일 GameplayTag 항목을 교체하거나 빈 항목에 추가하는 처리
-		if (HotbarComponent->ReplaceTool(PurchasedToolDefinition) == false)
-		{
-			return false;
-		}
-
-		// 산소 탱크 아이템 효과 적용
-		if (ShopItem.ItemId == OxygenTankItemId)
-		{
-			OxygenComponent->SetOxygenTankEquipped(true);
-		}
-
-		return true;
-	}
 }
 
 AMD_Merchant::AMD_Merchant()
@@ -148,6 +58,32 @@ AMD_Merchant::AMD_Merchant()
 	}
 	Mesh->SetRelativeScale3D(FVector(PlaceholderWidthScale, PlaceholderWidthScale, PlaceholderHeightScale));
 	Mesh->SetRelativeLocation(FVector(0.f, 0.f, PlaceholderHalfHeight));
+}
+
+void AMD_Merchant::BeginPlay()
+{
+	// 부모 액터의 시작 처리 수행
+	Super::BeginPlay();
+	// 서버와 클라이언트에서 해당 상인의 판매 정의 준비
+	if (IsValid(ShopCatalog) == true)
+	{
+		// 카탈로그 에셋 자체와 분리하여 정의를 비동기로 로드 및 보관
+		DefinitionLoadHandle = ShopCatalog->LoadItemDefinitions();
+	}
+}
+
+void AMD_Merchant::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	// 상인이 사라지면 이 액터의 에셋 로드 요청 정리
+	if (DefinitionLoadHandle.IsValid() == true)
+	{
+		// 다른 상점의 핸들을 유지한 채 이 요청만 해제
+		DefinitionLoadHandle->CancelHandle();
+	}
+	// 종료된 상인이 정의를 계속 보관하지 않도록 참조 정리
+	DefinitionLoadHandle.Reset();
+	// 부모 액터의 종료 처리 수행
+	Super::EndPlay(EndPlayReason);
 }
 
 void AMD_Merchant::SetInteractionHighlighted_Implementation(bool bHighlighted)
@@ -499,22 +435,23 @@ void AMD_Merchant::HandleRepayRequested(int32 Amount)
 	}
 }
 
-void AMD_Merchant::HandleShopPurchaseRejected(FName ItemId)
+void AMD_Merchant::HandleShopPurchaseRejected()
 {
 	// 대사창은 메뉴 위젯에 있다. 상점은 그 위에 겹쳐 뜨지만 하단을 비워두므로 가려지지 않는다.
-	if (ActiveMenuWidget.IsValid())
+	if (ActiveMenuWidget.IsValid() == true)
 	{
 		ActiveMenuWidget->ShowDialogueLine(FullStockDialogue);
 	}
 }
 
-void AMD_Merchant::HandleShopItemPurchaseRequested(FName ItemId)
+void AMD_Merchant::HandleShopItemPurchaseRequested(FPrimaryAssetId ItemAssetId)
 {
 	// 소유 컨트롤러를 통해서만 서버 RPC를 보낼 수 있도록 하는 구매 요청 전달
 	AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
-	if (InteractingPlayerController != nullptr)
+	if (IsValid(InteractingPlayerController) == true)
 	{
-		InteractingPlayerController->ServerRequestShopPurchase(this, ItemId);
+		// 선택한 전체 식별자를 소유 플레이어의 서버 구매 요청에 전달
+		InteractingPlayerController->ServerRequestShopPurchase(this, ItemAssetId);
 	}
 }
 
@@ -528,7 +465,7 @@ void AMD_Merchant::HandlePlayerShopOwnershipChanged()
 	RefreshShopWidgetFromComponent();
 }
 
-EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCharacter, FName ItemId)
+EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCharacter, FPrimaryAssetId ItemAssetId)
 {
 	// 클라이언트 액터에서 경제 원장을 변경하지 못하도록 하는 서버 권한 검사
 	if (HasAuthority() == false || IsValid(PurchasingCharacter) == false || PurchasingCharacter->HasAuthority() == false)
@@ -538,52 +475,10 @@ EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCh
 
 	// 서버가 보유한 카탈로그에 없는 식별자를 이용한 가격 조작을 막는 품목 조회
 	FMD_ShopItem ShopItem;
-	if (IsValid(ShopCatalog) == false || ShopCatalog->FindItem(ItemId, ShopItem) == false)
+	// 공통 정의가 준비되기 전에는 모든 품목의 결제 진입 차단
+	if (IsValid(ShopCatalog) == false || ShopCatalog->FindItemByAssetId(ItemAssetId, ShopItem) == false || IsValid(ShopItem.GetDefinition()) == false)
 	{
 		return EMD_ShopPurchaseResult::InvalidItem;
-	}
-
-	UMD_EquipHotbarComponent* HotbarComponent = PurchasingCharacter->GetHotbarComponent();
-	if (IsValid(HotbarComponent) == false)
-	{
-		return EMD_ShopPurchaseResult::InvalidRequest;
-	}
-
-	// 지지대·폼 카트리지는 핫바를 거치지 않고 전용 컴포넌트로 직접 지급되는 품목
-	const bool bHotbarItem = ShopItem.ItemId != SupportItemId && ShopItem.ItemId != FoamCartridgeItemId;
-
-	// 상점 거래 식별자를 Hotbar 품목 데이터인 ToolDefinition으로 변환하는 처리
-	UMD_ToolDefinition* PurchasedToolDefinition = ShopItem.EquipmentDefinition.Get();
-	if (bHotbarItem == true && IsValid(PurchasedToolDefinition) == false)
-	{
-		return EMD_ShopPurchaseResult::InvalidItem;
-	}
-
-	// 일회성 품목의 동일 계열 교체에 필요한 GameplayTag 유효성 검사
-	if (bHotbarItem == true && ShopItem.bPricePerUnit == false && PurchasedToolDefinition->ToolAbilityTag.IsValid() == false)
-	{
-		return EMD_ShopPurchaseResult::InvalidItem;
-	}
-
-	// ToolDefinition 하나로 수량 증가, 동일 태그 교체, 빈 항목 추가 가능성을 결제 전에 확인하는 검사
-	if (bHotbarItem == true && (HotbarComponent->CanAddTool(PurchasedToolDefinition) == false || (ShopItem.bPricePerUnit == true && HotbarComponent->GetToolCount(PurchasedToolDefinition) >= MAX_int32)))
-	{
-		return EMD_ShopPurchaseResult::FullyStocked;
-	}
-
-	// 만충이면 상인이 카트리지 판매를 거절한다 — 결제 전에 걸러 크레딧이 빠지지 않게 한다 (기획 08 §4.3)
-	if (ShopItem.ItemId == FoamCartridgeItemId)
-	{
-		UMD_FoamGunComponent* FoamGunComponent = PurchasingCharacter->FindComponentByClass<UMD_FoamGunComponent>();
-		if (IsValid(FoamGunComponent) == false)
-		{
-			return EMD_ShopPurchaseResult::InvalidRequest;
-		}
-
-		if (FoamGunComponent->IsChargeFull() == true)
-		{
-			return EMD_ShopPurchaseResult::FullyStocked;
-		}
 	}
 
 	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
@@ -599,16 +494,29 @@ EMD_ShopPurchaseResult AMD_Merchant::TryPurchaseItem(AMD_Character* PurchasingCh
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
 
-	// 실제 플레이어 지급이 성공한 경우에만 팀 경제 원장의 결제를 확정하기 위한 콜백 전달
-	EMD_ShopPurchaseResult PurchaseResult = MerchantSubsystem->TryPurchaseShopItem(PurchasingPlayerState, ShopItem, [PurchasingCharacter, ShopItem]()
-		{
-			const bool bWasSuccessful = FulfillPurchasedItem(PurchasingCharacter, ShopItem);
-			return bWasSuccessful;
-		});
-	return PurchaseResult;
+	// 지급 대상과 수량 및 기존 업그레이드 이력을 정의에 전달할 문맥 구성
+	FMD_ItemGrantContext GrantContext;
+	// 서버가 검증한 실제 구매 캐릭터 지정
+	GrantContext.Recipient = PurchasingCharacter;
+	// 기록된 전체 구매 식별자를 타입 추정 없이 정의의 지급 문맥에 전달
+	GrantContext.PurchasedItemIds = PurchasingPlayerState->GetPurchasedShopItemIds();
+	// 지급 가능 검사와 실제 실행을 담당할 공통 정의 조회
+	UMD_ItemDefinition* Definition = ShopItem.GetDefinition();
+	// 유형별 정의가 현재 상태에서 지급을 거절하면 결제 차단
+	if (IsValid(Definition) == false || Definition->CanGrant(GrantContext) == false)
+	{
+		// 슬롯 부족 또는 충전 완료 등 정의의 지급 불가 결과 전달
+		return EMD_ShopPurchaseResult::FullyStocked;
+	}
+	// 유형별 지급이 성공한 경우에만 경제 시스템에서 결제 확정
+	return MerchantSubsystem->TryPurchaseShopItem(PurchasingPlayerState, ShopItem, [Definition, GrantContext]()
+	{
+		// 품목 ID 분기 없이 정의의 실제 지급 결과 전달
+		return Definition->Grant(GrantContext);
+	});
 }
 
-void AMD_Merchant::ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResult Result)
+void AMD_Merchant::ReceiveShopPurchaseResult(FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result)
 {
 	// 닫힌 메뉴에 피드백을 남기지 않도록 하는 로컬 위젯 수명 검사
 	if (ActiveMenuWidget.IsValid() == false)
@@ -619,9 +527,21 @@ void AMD_Merchant::ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResul
 	if (Result == EMD_ShopPurchaseResult::Success)
 	{
 		FMD_ShopItem PurchasedItem;
-		const bool bHasPurchasedItem = IsValid(ShopCatalog) == true && ShopCatalog->FindItem(ItemId, PurchasedItem) == true;
-		const FText ItemName = bHasPurchasedItem == true ? PurchasedItem.DisplayName : FText::FromName(ItemId);
-		ActiveMenuWidget->ShowDialogueLine(FText::Format(NSLOCTEXT("MDMerchant", "ShopPurchaseSuccess", "{0}, 챙겨 둬."), ItemName));
+		// 서버 응답의 전체 식별자에 해당하는 판매 정의 조회
+		const bool bHasPurchasedItem = IsValid(ShopCatalog) == true && ShopCatalog->FindItemByAssetId(ItemAssetId, PurchasedItem) == true;
+		// 구매한 아이템의 로드된 공통 정의 조회
+		UMD_ItemDefinition* Definition = bHasPurchasedItem == true ? PurchasedItem.GetDefinition() : nullptr;
+		// 공통 정의에 표시 이름이 준비된 경우 품목명을 포함한 구매 피드백 제공
+		if (IsValid(Definition) == true && Definition->ItemName.IsEmpty() == false)
+		{
+			// 구매한 아이템의 공통 표시 이름을 대사에 반영
+			ActiveMenuWidget->ShowDialogueLine(FText::Format(NSLOCTEXT("MDMerchant", "ShopPurchaseSuccess", "{0}, 챙겨 둬."), Definition->ItemName));
+		}
+		else
+		{
+			// 표시 이름 조회 실패 시 기본 구매 완료 대사 제공
+			ActiveMenuWidget->ShowDialogueLine(NSLOCTEXT("MDMerchant", "ShopPurchaseSuccessWithoutName", "구매한 아이템, 챙겨 둬."));
+		}
 		return;
 	}
 
@@ -802,16 +722,20 @@ void AMD_Merchant::RefreshShopWidgetFromComponent()
 
 	// 소유권과 선행 품목 해금을 동일한 복제 스냅샷으로 계산하기 위한 목록 복사
 	AMD_PlayerState* InteractingPlayerState = GetInteractingPlayerState();
-	TArray<FName> OwnedItemIds = IsValid(InteractingPlayerState) == true ? InteractingPlayerState->GetPurchasedShopItemIds() : TArray<FName>();
-	TArray<FName> FullyStockedItemIds;
+	// 현재 플레이어의 전체 AssetId 구매 스냅샷 구성
+	TArray<FPrimaryAssetId> OwnedItemIds = IsValid(InteractingPlayerState) == true ? InteractingPlayerState->GetPurchasedShopItemIds() : TArray<FPrimaryAssetId>();
+	// 중복 구매를 막을 품목의 전체 식별자 목록
+	TArray<FPrimaryAssetId> FullyStockedItemIds;
 
 	if (IsValid(ShopCatalog) == true)
 	{
 		for (const FMD_ShopItem& ShopItem : ShopCatalog->Items)
 		{
-			if (ShopItem.bPricePerUnit == false && OwnedItemIds.Contains(ShopItem.ItemId) == true)
+			// 전체 AssetId가 일치하는 구매 완료 품목의 중복 구매 제한
+			if (ShopItem.bPricePerUnit == false && OwnedItemIds.Contains(ShopItem.GetItemAssetId()) == true)
 			{
-				FullyStockedItemIds.Add(ShopItem.ItemId);
+				// 전체 AssetId가 일치하는 구매 완료 품목의 중복 구매 제한
+				FullyStockedItemIds.Add(ShopItem.GetItemAssetId());
 			}
 		}
 	}

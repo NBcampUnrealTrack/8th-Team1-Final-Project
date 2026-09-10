@@ -19,7 +19,7 @@ enum class EMD_BreathState : uint8
 class UAbilitySystemComponent;
 class UGameplayEffect;
 class UMD_CharacterAttributeSet;
-class UMD_ToolDefinition;
+class UMD_ItemDefinition;
 struct FOnAttributeChangeData;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnBreathStateChanged, EMD_BreathState, NewState);
@@ -82,17 +82,17 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen")
 	TSubclassOf<UGameplayEffect> OxygenCanEffectClass;
 
-	/** Hotbar 수량 조회와 소비에 사용할 산소 캔 ToolDefinition */
+	// 공통 Hotbar 수량 조회와 소비에 사용할 산소 캔 정의
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen")
-	TObjectPtr<UMD_ToolDefinition> OxygenCanToolDefinition;
+	TObjectPtr<UMD_ItemDefinition> OxygenCanToolDefinition;
 
 	// 산소 확장 탱크. Infinite, MaxOxygen ×1.4
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen")
 	TSubclassOf<UGameplayEffect> OxygenTankEffectClass;
 
-	/** Hotbar 고정 항목에서 장착 상태를 확인할 산소 확장 탱크 ToolDefinition */
+	// 기존 저장 데이터의 Hotbar 탱크 효과 복구에 사용할 공통 정의
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen")
-	TObjectPtr<UMD_ToolDefinition> OxygenTankToolDefinition;
+	TObjectPtr<UMD_ItemDefinition> OxygenTankToolDefinition;
 
 	/** 이 비율 이상 잠기면 머리까지 잠긴 것으로 본다. 1.0이면 수면 경계에서 판정이 떨린다 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen")

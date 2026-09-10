@@ -4,9 +4,10 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DataAsset.h"
+#include "Engine/StreamableManager.h"
 #include "MD_ShopCatalog.generated.h"
 
-class UMD_ToolDefinition;
+class UMD_ItemDefinition;
 
 /** 서버 구매 검증 결과를 클라이언트 UI에 전달하기 위한 상태 */
 UENUM(BlueprintType)
@@ -48,12 +49,6 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 {
 	GENERATED_BODY()
 
-	/** `07` §4의 ID를 그대로 쓴다 (IT-H1, IT-S1, IT-FG0 ...) */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop")
-	FName ItemId;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop")
-	FText DisplayName;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop")
 	EMD_ShopCategory Category = EMD_ShopCategory::Tool;
@@ -66,13 +61,9 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop")
 	bool bPricePerUnit = false;
 
-	/** `04` §3: 아이템 카드에 "한 줄 기능 설명"이 필수다. 상세는 `08`. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop", meta = (MultiLine = "false"))
-	FText Description;
-
-	/** 구매 시 기존 핫바 슬롯의 장비를 교체하기 위한 장비 정의 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Equipment")
-	TObjectPtr<UMD_ToolDefinition> EquipmentDefinition;
+	// 판매할 공통 정의의 PrimaryAssetId이며 별도 판매 식별자 없이 사용
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Item", meta = (AllowedTypes = "Item"))
+	FPrimaryAssetId ItemAssetId;
 
 	// ───── 해금 조건 (`07` §4). 아무것도 설정하지 않으면 "상점 상시". ─────
 
@@ -87,14 +78,19 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Unlock", meta = (ClampMin = "0"))
 	int32 QuestCompletionsRequired = 0;
 
-	/** 예: 열선 배터리는 IT-H2 보유, 폼 카트리지는 IT-FG0 보유 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Unlock")
-	FName PrerequisiteItemId;
+	/** 예: 열선 배터리는 IT-H2(열선 헤라) 보유, 폼 카트리지는 IT-FG0(폼건) 보유 */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Unlock", meta = (AllowedTypes = "Item"))
+	FPrimaryAssetId PrerequisiteItemAssetId;
 
-	/** 해금 조건을 실제로 판정한다. 런타임 시스템 없이도 호출 가능한 순수 함수다. */
-	bool IsUnlocked(float Affinity, int32 QuestCompletions, const TArray<FName>& OwnedItemIds) const;
+	// 카탈로그에 지정한 정의의 전체 식별자 제공
+	FORCEINLINE FPrimaryAssetId GetItemAssetId() const { return ItemAssetId; }
 
-	/** `호감 ≥0 · 퀘스트 1회` / `IT-H2 보유` / `상점 상시` 형태로 문구를 만든다. */
+	// 에셋 로드 없이 이미 준비된 공통 정의만 조회
+	UMD_ItemDefinition* GetDefinition() const;
+	// 호감 및 퀘스트 조건과 전체 AssetId가 일치하는 보유 이력으로 해금 판정
+	bool IsUnlocked(float Affinity, int32 QuestCompletions, const TArray<FPrimaryAssetId>& OwnedItemAssetIds) const;
+
+	// 공통 정의의 표시 이름을 사용한 해금 문구 생성 (예: 열선 헤라 보유)
 	FText GetUnlockConditionText() const;
 
 	/** `450₡` 또는 `35₡/개`, 0이면 `지급` */
@@ -120,6 +116,23 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Shop")
 	TArray<FMD_ShopItem> GetItemsInCategory(EMD_ShopCategory InCategory) const;
 
+	// BP 구조체 사용처에 판매 정의의 전체 식별자 제공
+	UFUNCTION(BlueprintPure, Category = "Shop")
+	static FPrimaryAssetId GetItemAssetId(FMD_ShopItem Item);
+
+	// BP UI가 공통 이름과 설명 및 아이콘을 조회할 로드된 정의 제공
+	UFUNCTION(BlueprintPure, Category = "Shop")
+	static UMD_ItemDefinition* GetItemDefinition(FMD_ShopItem Item);
+
+	// 현재 판매 정의가 모두 준비되었는지 확인
+	UFUNCTION(BlueprintPure, Category = "Shop")
+	bool IsItemDefinitionsLoaded();
+
+	// 호출자가 반환 핸들을 유지하는 동안 판매 정의를 비동기로 로드 및 보관
+	TSharedPtr<FStreamableHandle> LoadItemDefinitions(FStreamableDelegate OnLoaded = FStreamableDelegate());
+
+	// AssetType과 품목명 전체가 일치하는 판매 항목 조회
 	UFUNCTION(BlueprintCallable, Category = "Shop")
-	bool FindItem(FName ItemId, FMD_ShopItem& OutItem) const;
+	bool FindItemByAssetId(FPrimaryAssetId ItemAssetId, FMD_ShopItem& OutItem);
+
 };

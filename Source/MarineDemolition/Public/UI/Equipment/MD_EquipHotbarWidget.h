@@ -7,7 +7,7 @@
 #include "MD_EquipHotbarWidget.generated.h"
 
 class UMD_EquipHotbarComponent;
-class UMD_ToolDefinition;
+class UMD_ItemDefinition;
 
 UCLASS(BlueprintType)
 class MARINEDEMOLITION_API UMD_EquipHotbarWidget : public UUserWidget
@@ -28,9 +28,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
 	int32 GetCurrentSlotIndex() const;
 
+	// 도구와 소모품 등 모든 슬롯 아이템을 BP UI에 제공
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
-	UMD_ToolDefinition* GetToolAtSlot(int32 SlotIndex) const;
+	UMD_ItemDefinition* GetItemAtSlot(int32 SlotIndex);
 
+	// BP 슬롯 UI에 현재 보관 수량 제공
+	UFUNCTION(BlueprintPure, Category = "Hotbar")
+	int32 GetItemCountAtSlot(int32 SlotIndex);
 private:
 
 	UFUNCTION()

@@ -69,10 +69,10 @@ public:
 	EMD_ShopPurchaseResult TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase);
 
 	/** 상점 해금과 UI 갱신에 사용할 구매 완료 품목 식별자 목록 */
-	TArray<FName> GetOwnedItemIds() const;
+	TArray<FPrimaryAssetId> GetOwnedItemIds() const;
 
 	/** 소모품을 포함한 품목별 누적 구매 횟수 */
-	int32 GetPurchasedItemCount(FName ItemId) const;
+	int32 GetPurchasedItemCount(FPrimaryAssetId ItemAssetId) const;
 
 	// 호감도를 기획 범위 안에서 증감하고 복제 미러 갱신을 요청하는 함수
 	void AddAffinity(float Amount);
@@ -228,7 +228,7 @@ private:
 
 	/** 계약 중 구매 결과와 선행 품목 해금을 유지하기 위한 서버 권위 구매 원장 */
 	UPROPERTY()
-	TMap<FName, int32> PurchasedItemCounts;
+	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
 
 	// 기획상 모든 호감도 구간에 공통으로 적용되는 일일 대출 이자율
 	static constexpr float DailyInterestRate = 0.05f;

@@ -15,6 +15,7 @@
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Comfort/MD_ComfortComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Equipment/MD_RepairItemDefinition.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "InputAction.h"
@@ -1297,17 +1298,19 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 		return;
 	}
 
+	// 보관형 수리 소모품은 기존 인프라 수리 입력 경로로 전달
+	if (IsValid(Cast<UMD_RepairItemDefinition>(EquipHotbarComponent->GetCurrentItem())) == true)
+	{
+		// 서버가 소지 품목과 수리 대상을 검증하는 기존 요청 실행
+		TryToolInputUtilityRepair();
+		// 도구 GA 활성화와 소모품 수리 입력의 중복 실행 차단
+		return;
+	}
+
 	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
 	if (!IsValid(CurrentTool) || !CurrentTool->ToolAbilityTag.IsValid())
 	{
 		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, TEXT("No tool equipped"));
-		return;
-	}
-
-	// 절연테이프는 GA가 없는 도구 입력 전용 수리. 상호작용 키(F)가 아니라 LMB로만 쓴다
-	if (CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Insulation))
-	{
-		TryToolInputUtilityRepair();
 		return;
 	}
 
@@ -1962,7 +1965,8 @@ void AMD_Character::HandleHotbarChanged()
 		UE_LOG(LogTemp, Log, TEXT("[Hotbar] Slot %d/%d, Tool: %s"),
 			EquipHotbarComponent->GetCurrentSlotIndex(),
 			EquipHotbarComponent->GetSlotCount(),
-			IsValid(CurrentTool) ? *CurrentTool->ToolName.ToString() : TEXT("Empty"));
+			// 장착 도구의 공통 아이템 이름을 로그에 표시
+			IsValid(CurrentTool) == true ? *CurrentTool->ItemName.ToString() : TEXT("Empty"));
 	}
 }
 

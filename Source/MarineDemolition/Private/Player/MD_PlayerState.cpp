@@ -183,26 +183,35 @@ EMD_HealthState AMD_PlayerState::GetHealthState() const
 	return EMD_HealthState::Healthy;
 }
 
-bool AMD_PlayerState::HasPurchasedShopItem(FName ItemId) const
+bool AMD_PlayerState::HasPurchasedShopItem(FPrimaryAssetId ItemAssetId) const
 {
-	return ItemId.IsNone() == false && PurchasedShopItemIds.Contains(ItemId) == true;
+	// 타입과 이름이 모두 일치하는 유효한 구매 이력 확인
+	return ItemAssetId.IsValid() == true && PurchasedShopItemIds.Contains(ItemAssetId) == true;
 }
 
-bool AMD_PlayerState::RecordPurchasedShopItem(FName ItemId)
+bool AMD_PlayerState::RecordPurchasedShopItem(FPrimaryAssetId ItemAssetId)
 {
-	// 클라이언트가 로컬 소유권을 조작하거나 잘못된 식별자가 기록되는 상황을 막기 위한 검사
-	if (HasAuthority() == false || ItemId.IsNone() == true || PurchasedShopItemIds.Contains(ItemId) == true)
+	// 서버 권한과 전체 식별자 및 중복 여부를 확인하여 잘못된 소유권 기록 차단
+	if (HasAuthority() == false || ItemAssetId.IsValid() == false || PurchasedShopItemIds.Contains(ItemAssetId) == true)
 	{
+		// 유효하지 않거나 이미 기록된 구매 요청의 실패 전달
 		return false;
 	}
 
-	// 복제 배열 순서를 일정하게 유지하여 불필요한 네트워크 변경을 줄이기 위한 정렬
-	PurchasedShopItemIds.Add(ItemId);
-	PurchasedShopItemIds.Sort(FNameLexicalLess());
+	// 구매가 완료된 품목의 전체 식별자 기록
+	PurchasedShopItemIds.Add(ItemAssetId);
+	// 복제 배열을 에셋 타입과 이름 순서로 유지하여 불필요한 변경 방지
+	PurchasedShopItemIds.Sort([](FPrimaryAssetId Left, FPrimaryAssetId Right)
+	{
+		// 프로세스가 달라도 동일한 순서를 유지하는 타입 및 이름 비교
+		return Left.LexicalLess(Right);
+	});
 
-	// Listen Server환경 고려 상점 UI 갱신을 위한 UI 소유권 변화 이벤트 호출
+	// 리슨 서버 화면과 소유 클라이언트의 구매 상태 갱신
 	OnRep_PurchasedShopItemIds();
+	// 새 구매 이력의 복제 갱신 요청
 	ForceNetUpdate();
+	// 구매 이력 기록 성공 전달
 	return true;
 }
 
