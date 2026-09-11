@@ -19,6 +19,10 @@
 	],
 	"Plugins": [
 		{
+			"Name": "MDSolidRendering",
+			"Enabled": true
+		},
+		{
 			"Name": "ModelingToolsEditorMode",
 			"Enabled": true,
 			"TargetAllowList": [
@@ -62,6 +66,10 @@
 			"Enabled": true
 		},
 		{
+			"Name": "GeometryProcessing",
+			"Enabled": true
+		},
+		{
 			"Name": "CommonUI",
 			"Enabled": true
 		},
@@ -75,6 +83,14 @@
 			"TargetAllowList": [
 				"Editor"
 			]
+		},
+		{
+			"Name": "AudioCapture",
+			"Enabled": true
+		},
+		{
+			"Name": "VoiceChat",
+			"Enabled": true
 		}
 	]
 }

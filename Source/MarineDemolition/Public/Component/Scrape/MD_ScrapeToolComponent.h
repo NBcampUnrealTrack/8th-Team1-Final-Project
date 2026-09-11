@@ -1,9 +1,10 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
 #include "Types/Scrape/MD_ScrapeToolState.h"
 #include "Gameplay/Scrape/MD_ScrapeAimValidation.h"
@@ -13,9 +14,13 @@
 #include "Audio/MD_AudioSubsystem.h"
 #include "MD_ScrapeToolComponent.generated.h"
 
+class AController;
 class AMD_Barnacle;
 class AMD_CuttableWall;
+class UPrimitiveComponent;
 class UMD_ScrapeSurfaceComponent;
+class UMD_ToolDefinition;
+class AMD_TrashBin;
 class UNiagaraSystem;
 class UParticleSystem;
 struct FMinimalViewInfo;
@@ -28,6 +33,8 @@ struct FMD_ScrapeToolPathSegment
 	FVector2D EndPositionCm = FVector2D::ZeroVector;
 	FVector2D StartBladeDepthAxis = FVector2D::ZeroVector;
 	FVector2D EndBladeDepthAxis = FVector2D::ZeroVector;
+	FVector StartWorldBladeDepthAxis = FVector::ZeroVector;
+	FVector EndWorldBladeDepthAxis = FVector::ZeroVector;
 	float TravelDistanceCm = 0.0f;
 	/** 이 segment를 적용하기 직전, 이전 generation tail을 flush할 경계. */
 	bool bStartsNewSubStroke = false;
@@ -87,7 +94,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
 	bool IsScraping() const { return bIsScraping; }
 
-	/** 중앙 ray가 유효할 때만 우클릭 Focus 진입을 시작한다. */
+	/** Barnacle-first clicks retain the pointer pose until release, even after removal. */
+	bool IsSurfaceScrapeVisualStrokeActive() const
+	{
+		return bIsScraping && !bBarnacleClickStroke;
+	}
+
+	/** 현재 화면 중앙 ray가 작업면·따개비·허용 배치 표면일 때 로컬 latch와 권위 세션을 시작한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape|Focus")
 	bool TryBeginScrapeFocus();
 
@@ -99,6 +112,13 @@ public:
 	bool IsScrapeFocusActive() const
 	{
 		return ScrapeFocusState != EMD_ScrapeFocusState::Free;
+	}
+
+	/** 로컬 RMB가 고정한 표시 View. 권위 Focus state나 복제 상태를 뜻하지 않는다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Focus")
+	bool IsScrapeFocusViewActive() const
+	{
+		return bScrapeFocusViewActive;
 	}
 
 	/** 진입 승인이 끝난 Ready/Scraping 상태를 반환한다. */
@@ -170,6 +190,18 @@ public:
 		return ScrapeFocusPointerNormalized;
 	}
 
+	/**
+	 * 로컬 animation-only 접촉 자세를 복사해 반환한다.
+	 *
+	 * false여도 OutPose에는 현재 invalid 스냅샷을 대입하므로 호출자가 이전
+	 * 프레임 값을 실수로 재사용하지 않는다. 반환값과 OutPose.bValid은 같다.
+	 */
+	bool GetScrapeVisualContactPose(FMD_ScrapeVisualContactPose& OutPose) const
+	{
+		OutPose = ScrapeVisualContactPose;
+		return OutPose.bValid;
+	}
+
 	/** Mouse2D 한 단위를 화면 폭 기준 이동량으로 바꾸는 Focus 감도. */
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Focus")
 	float GetScrapeFocusPointerSensitivity() const
@@ -211,12 +243,6 @@ public:
 		FVector& OutWorldLocation,
 		FVector& OutBladeWorldDirection) const;
 
-	/**
-	 * legacy non-Focus 호출에서 잠긴 임의 축과 다른 방향의 시선 입력을 제거한다.
-	 * Focus 중 입력은 ConsumeScrapeFocusLookInput이 포인터 공간에서 직접 처리한다.
-	 */
-	FVector2D ConstrainLookInput(const FVector2D& LookInput) const;
-
 	/** 현재 장착한 헤라의 판정 성능을 반환한다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool")
 	FMD_ScrapeToolSpec GetScrapeToolSpec() const { return ScrapeToolSpec; }
@@ -224,6 +250,8 @@ public:
 	static constexpr float MaximumScrapeLoad = 100.0f;
 	static constexpr float ScrapeLoadStage2Threshold = 34.0f;
 	static constexpr float ScrapeLoadStage3Threshold = 67.0f;
+	/** 제품 긁기 환산 정본. 오염 면의 순제거율 1%는 모든 헤라에서 Load 1이다. */
+	static constexpr float CanonicalScrapeLoadPerRemovedPercent = 1.0f;
 
 	/** 적재량을 0/1/2/3단계 중 하나로 즉시 분류한다. */
 	static EMD_ScrapeLoadStage CalculateScrapeLoadStage(float Load);
@@ -232,6 +260,16 @@ public:
 	static float CalculateScrapeLoadGainFromCleanRatioDelta(
 		float CleanRatioDelta,
 		float LoadPerRemovedPercent);
+
+	/** 요청 Load와 실제 수용 Load를 합이 1인 단일 질량 귀속 비율로 바꾼다. */
+	static FMD_ScrapeMassAllocationResult CalculateScrapeMassAllocation(
+		float RequestedLoadAmount,
+		float ActualLoadAmount);
+
+	/** 현재 적재량과 요청량만으로 실제 제거 가능한 양을 계산하며 상태는 변경하지 않는다. */
+	static float CalculateActualScrapeLoadRemoval(
+		float CurrentLoad,
+		float RequestedAmount);
 
 	/** 현재 헤라 인스턴스의 적재량을 0~100으로 반환한다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
@@ -249,8 +287,9 @@ public:
 		return CalculateScrapeLoadStage(GetScrapeLoad());
 	}
 
-	/** 3단계 헤라의 직사각형 도장 한 번이 더하는 최대 오염량을 0~1로 반환한다. */
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	/** Legacy asset compatibility only; unused by path deposition. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Legacy",
+		meta = (DeprecatedFunction, DeprecationMessage = "Legacy random dabs are retired; Stage3 uses blade-contact path deposition."))
 	float GetSaturatedContaminationStampRatio() const
 	{
 		return FMath::IsFinite(SaturatedContaminationStampRatio)
@@ -258,17 +297,9 @@ public:
 			: 0.0f;
 	}
 
-	/** 3단계 포화 헤라의 제거력을 일반 헤라 대비 배율로 반환한다. */
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
-	float GetSaturatedRemovalMultiplier() const
-	{
-		return FMath::IsFinite(SaturatedRemovalMultiplier)
-			? FMath::Clamp(SaturatedRemovalMultiplier, 0.01f, 1.0f)
-			: 0.05f;
-	}
-
-	/** 3단계 헤라의 무작위 도장 후보 간격을 cm로 반환한다. */
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	/** Legacy asset compatibility only; unused by path deposition. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Legacy",
+		meta = (DeprecatedFunction, DeprecationMessage = "Legacy random dabs are retired; Stage3 uses blade-contact path deposition."))
 	float GetSaturatedContaminationStampSpacingCm() const
 	{
 		return FMath::IsFinite(SaturatedContaminationStampSpacingCm)
@@ -276,8 +307,9 @@ public:
 			: 0.1f;
 	}
 
-	/** 3단계 헤라가 남기는 직사각형 오염 도장의 진행 방향 깊이를 cm로 반환한다. */
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	/** Legacy asset compatibility only; unused by path deposition. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Legacy",
+		meta = (DeprecatedFunction, DeprecationMessage = "Legacy random dabs are retired; Stage3 uses blade-contact path deposition."))
 	float GetSaturatedContaminationStampDepthCm() const
 	{
 		return FMath::IsFinite(SaturatedContaminationStampDepthCm)
@@ -285,34 +317,15 @@ public:
 			: 0.1f;
 	}
 
-	/** 3단계 헤라의 각 도장 후보가 실제 자국이 될 확률을 0~1로 반환한다. */
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Tool|Load")
+	/** Legacy asset compatibility only; unused by path deposition. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Legacy",
+		meta = (DeprecatedFunction, DeprecationMessage = "Legacy random dabs are retired; Stage3 uses blade-contact path deposition."))
 	float GetSaturatedContaminationStampCoverage() const
 	{
 		return FMath::IsFinite(SaturatedContaminationStampCoverage)
 			? FMath::Clamp(SaturatedContaminationStampCoverage, 0.0f, 1.0f)
 			: 0.0f;
 	}
-
-	/**
-	 * 조준 보정으로 이번 프레임에 적용할 컨트롤 회전을 계산한다.
-	 *
-	 * 지금 조준하고 있는 방향과 목표 방향 사이의 각도 오차에서, 매 프레임
-	 * 일정 비율만 없앤다. 오차를 한 번에 전부 없애거나 임계값 미만에서 아예
-	 * 보정을 멈추면, 프레임마다 "보정함 / 안 함"이 번갈아 나타나면서 시선이
-	 * 빨라졌다 느려졌다 하는 떨림이 생긴다. 비율 보정은 그 경계가 없다.
-	 *
-	 * 보정량은 항상 오차보다 작으므로 목표를 지나치지 않는다.
-	 * 오차가 MaximumErrorDegrees보다 크면 시선이 표면을 너무 스치는 각도라
-	 * 조금만 돌려도 조준점이 크게 튀므로 그 프레임은 보정하지 않는다.
-	 */
-	static FRotator CalculateAimCorrectionRotation(
-		const FRotator& CurrentControlRotation,
-		const FVector& ViewToCurrentAim,
-		const FVector& ViewToTarget,
-		float CorrectionRatio,
-		float MaximumStepDegrees,
-		float MaximumErrorDegrees);
 
 	/**
 	 * 업그레이드 시스템이 새 헤라 성능을 적용한다.
@@ -325,7 +338,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Scrape|Tool")
 	bool SetScrapeBladeWidthCm(float NewBladeWidthCm);
 
-	/** 서버에서 ScrapeLoad를 직접 설정하고 0~100으로 보정한다. */
+	/**
+	 * 서버에서 ScrapeLoad를 직접 설정하고 0~100으로 보정한다.
+	 * 테스트/관리용 재정의 API이므로 기존 보상 원장은 버리고 전체 Load를 보상 0으로 만든다.
+	 */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
 		Category = "MD|Scrape|Tool|Load")
 	bool SetScrapeLoad(float NewLoad);
@@ -334,6 +350,20 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
 		Category = "MD|Scrape|Tool|Load")
 	float AddScrapeLoad(float RequestedAmount);
+
+	/** 서버에서 양수 적재량을 제거하고, 0 하한까지 실제로 제거된 양을 반환한다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+		Category = "MD|Scrape|Tool|Load")
+	float RemoveScrapeLoad(float RequestedAmount);
+
+	/** 서버에서 Load와 그 안의 보상 원장을 같은 비율로 원자 이동한다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly,
+		Category = "MD|Scrape|Tool|Load")
+	FMD_ScrapeLoadTransferResult RemoveScrapeLoadWithRecovery(
+		float RequestedAmount);
+
+	/** 서버 전용 원장에 현재 남은 회수 가능 보상 단위. 클라이언트에는 복제하지 않는다. */
+	double GetScrapeLoadRewardUnits() const;
 
 	/** 서버 변경 또는 복제 수신으로 ScrapeLoad가 실제로 바뀔 때 발생한다. */
 	UPROPERTY(BlueprintAssignable, Category = "MD|Scrape|Tool|Load")
@@ -352,6 +382,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	virtual void TickComponent(
 		float DeltaTime,
@@ -378,7 +409,10 @@ protected:
 		meta = (ClampMin = "0.0", ClampMax = "100.0"))
 	float ScrapeLoad;
 
-	/** 오염 마스크 실제 제거율 1%당 적재량. 정본 기본값은 +0.6이다. */
+	/**
+	 * 이전 Blueprint 직렬화 호환용 값. 제품 긁기는 이 override를 읽지 않고
+	 * CanonicalScrapeLoadPerRemovedPercent를 사용한다.
+	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "MD|Scrape|Tool|Load",
 		meta = (ClampMin = "0.0", UIMin = "0.0"))
@@ -390,36 +424,29 @@ protected:
 		meta = (ClampMin = "0.0", UIMin = "0.0"))
 	float ScrapeLoadPerRemovedBarnacle;
 
-	/** 선택된 직사각형 도장 한 번이 셀에 더하는 최대 오염량. 덧칠하면 1까지 누적된다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Scrape|Tool|Load",
+	/** Serialized legacy dab setting; no effect on current path deposition. */
+	UPROPERTY(BlueprintReadOnly,
+		Category = "MD|Scrape|Legacy",
 		meta = (ClampMin = "0.0", ClampMax = "1.0",
 			UIMin = "0.0", UIMax = "1.0"))
 	float SaturatedContaminationStampRatio;
 
-	/** 3단계 포화 헤라의 제거력 배율. 낮을수록 기존 오염과 전이 페인트를 덜 긁어낸다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Scrape|Tool|Load",
-		meta = (ClampMin = "0.01", ClampMax = "1.0",
-			UIMin = "0.01", UIMax = "1.0"))
-	float SaturatedRemovalMultiplier;
-
-	/** 경로의 각 무작위 도장 후보가 실제 오염 자국이 될 확률. 나머지는 빈 간격으로 남긴다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Scrape|Tool|Load",
+	/** Serialized legacy dab setting; no effect on current path deposition. */
+	UPROPERTY(BlueprintReadOnly,
+		Category = "MD|Scrape|Legacy",
 		meta = (ClampMin = "0.0", ClampMax = "1.0",
 			UIMin = "0.0", UIMax = "1.0"))
 	float SaturatedContaminationStampCoverage;
 
-	/** 오염 도장의 진행 방향 깊이. 폭은 장착한 헤라 폭을 그대로 사용한다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Scrape|Tool|Load",
+	/** Serialized legacy dab setting; no effect on current path deposition. */
+	UPROPERTY(BlueprintReadOnly,
+		Category = "MD|Scrape|Legacy",
 		meta = (ClampMin = "0.1", UIMin = "1.0", Units = "cm"))
 	float SaturatedContaminationStampDepthCm;
 
-	/** 경로를 따라 무작위 도장 후보를 배치하는 기준 간격. 각 후보는 약간 위치가 흔들린다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Scrape|Tool|Load",
+	/** Serialized legacy dab setting; no effect on current path deposition. */
+	UPROPERTY(BlueprintReadOnly,
+		Category = "MD|Scrape|Legacy",
 		meta = (ClampMin = "0.1", UIMin = "1.0", Units = "cm"))
 	float SaturatedContaminationStampSpacingCm;
 
@@ -611,7 +638,7 @@ protected:
 		meta = (ClampMin = "0", ClampMax = "8"))
 	int32 MaxMissingAimSequences;
 
-	/** A continuously invalid Focus exits after this timeout. */
+	/** A continuously invalid aim ends only the current stroke/GA after this timeout; Focus remains FocusedReady until RMB toggles it off. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly,
 		Category = "MD|Scrape|Motion|Reacquisition",
 		meta = (ClampMin = "0.01", Units = "s"))
@@ -652,6 +679,33 @@ protected:
 	float ReadyAimHeartbeatRateHz;
 
 private:
+	friend class AMD_TrashBin;
+	friend class FMD_ScrapeFocusCameraLockTest;
+	friend class FMD_ScrapeNetworkSessionTest;
+	/** Stage3 권위 규칙. Blueprint에서 바꿀 수 없는 정확한 역오염 비율이다. */
+	static constexpr float SaturatedReverseContaminationRatio = 0.1f;
+
+	/** Load와 함께 이동하지만 저장·복제하지 않는 서버 권위 보상 provenance 원장. */
+	TArray<FMD_ScrapeRecoveryLot> ScrapeLoadRecoveryLots;
+
+	/**
+	 * 통 같은 서버 운반체가 외부 알림 없이 두 원장을 먼저 검증한 뒤 한 번에
+	 * 확정할 수 있도록 준비한 제거 후보. public Blueprint API로 노출하지 않는다.
+	 */
+	struct FPreparedScrapeLoadRemoval
+	{
+		uint32 ExpectedRevision = 0;
+		float PreviousLoad = 0.0f;
+		float NewLoad = 0.0f;
+		FMD_ScrapeLoadTransferResult TransferResult;
+		TArray<FMD_ScrapeRecoveryLot> RemainingRecoveryLots;
+	};
+
+	/** Load나 provenance가 바뀔 때마다 증가해 오래된 준비 결과의 commit을 막는다. */
+	uint32 ScrapeLoadStateRevision = 0;
+
+	/** Bin과 Tool 두 원장이 함께 확정되는 동안 delegate 재진입 변경을 거부한다. */
+	bool bScrapeLoadTransactionInProgress = false;
 
 	/** 디버그 표시용 접촉 종류 문자열. 이 컴포넌트에서만 사용한다. */
 	static const TCHAR* GetContactTypeLabel(EMD_ScrapeContactType ContactType);
@@ -664,12 +718,24 @@ private:
 		const FVector2D& BladeDepthAxis,
 		const FVector& ReferenceWorldPosition);
 	void ClearCurrentScrapeContact();
+	void RequestScrapePoseNetUpdate();
 	void ProcessScrapeTrace(float DeltaTime);
 	void ProcessScrapeAimResult(
 		const FMD_ScrapeAimQueryResult& AimResult,
 		float SampleDeltaTime,
 		bool bSequenceGapKnown,
 		int32 MissingAimSequences);
+	void ProcessLocalPredictedScrapeAim(
+		const FMD_ScrapeAimNetSample& Sample,
+		const FMD_ScrapeAimQueryResult& AimResult,
+		float SampleDeltaTime);
+	void ProcessAuthoritativeScrapeAimResult(
+		const FMD_ScrapeAimQueryResult& AimResult,
+		float SampleDeltaTime,
+		bool bSequenceGapKnown,
+		int32 MissingAimSequences,
+		uint64 FocusSessionId,
+		uint32 AimSequence);
 	void ApplyAimSequenceGapPolicy(
 		bool bSequenceGapKnown,
 		int32 MissingAimSequences,
@@ -704,31 +770,87 @@ private:
 		UMD_ScrapeSurfaceComponent* Surface,
 		const FMD_ScrapeResult& Result,
 		const FVector& ContactLocation);
+	void AccumulateAuthoritativeScrapePredictionResolution(
+		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta);
+	void SendScrapePredictionResolution(uint64 FocusSessionId, uint32 AimSequence);
+	void ResolveLocalScrapePredictions(
+		uint64 FocusSessionId,
+		uint32 AimSequence,
+		const TArray<FMD_ScrapeAuthoritativeVisualDelta>& Resolutions,
+		bool bRebuildIfPredictionMissing = false);
+	void UpdateLocalScrapePredictionResolution(double NowSeconds);
+	void ClearLocalScrapePredictions();
 
 	UFUNCTION(Client, Unreliable)
 	void ClientReceiveScrapeResult(
-		UMD_ScrapeSurfaceComponent* Surface,
+		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
 		const FMD_ScrapeResult& Result,
 		FVector_NetQuantize10 ContactLocation);
 
-	// 다른 플레이어 화면·스피커용 코스메틱 피드백. 소유 클라이언트는 전용 경로가 있어 건너뛴다
+	UFUNCTION(Client, Reliable)
+	void ClientResolveScrapePrediction(
+		uint64 FocusSessionId,
+		uint32 AimSequence,
+		bool bFinalChunk,
+		const TArray<FMD_ScrapeAuthoritativeVisualDelta>& Resolutions);
+
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastReceiveScrapeFeedback(
-		UMD_ScrapeSurfaceComponent* Surface,
+		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
 		const FMD_ScrapeResult& Result,
 		FVector_NetQuantize10 ContactLocation);
+	void ReceiveAuthoritativeScrapeResult(
+		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta,
+		const FMD_ScrapeResult& Result,
+		const FVector& ContactLocation);
+	bool ApplyAuthoritativeScrapeVisualDelta(
+		const FMD_ScrapeAuthoritativeVisualDelta& VisualDelta);
 
 	UFUNCTION()
 	void OnRep_ScrapeToolSpec();
 
 	UFUNCTION()
-	void OnRep_ScrapeLoad();
+	void OnRep_ScrapeLoad(float PreviousScrapeLoad);
+
+	/** 보상 없는 직접 증가(따개비/관리 호출)를 위한 하위 호환 경로. */
+	float AddScrapeLoadInternal(float RequestedAmount, bool bNotifyChange);
+
+	/** Surface provenance를 실제 Load 수용량만큼만 원자 편입한다. */
+	bool TryAddScrapeLoadWithRecoveryInternal(
+		float RequestedAmount,
+		TConstArrayView<FMD_ScrapeRecoveryLot> RequestedRecoveryLots,
+		bool bNotifyChange,
+		float& OutActualLoadAmount);
+
+	/** 검증된 Load와 원장을 함께 확정한다. 공개 Set의 보상 0 재정의와 분리한다. */
+	bool CommitScrapeLoadStateInternal(
+		float NewLoad,
+		TArray<FMD_ScrapeRecoveryLot>&& NewRecoveryLots,
+		bool bNotifyChange);
+
+	/** 현재 상태를 바꾸지 않고 제거 결과와 남은 원장을 계산한다. */
+	bool TryPrepareScrapeLoadRemoval(
+		float RequestedAmount,
+		FPreparedScrapeLoadRemoval& OutPreparedRemoval) const;
+
+	/** 같은 revision에서 준비한 제거만 실제 Tool 상태에 반영한다. */
+	bool CommitPreparedScrapeLoadRemoval(
+		FPreparedScrapeLoadRemoval&& PreparedRemoval,
+		bool bNotifyChange);
+
+	void NotifyScrapeLoadChangedAndForceNetUpdate();
 
 	void NotifyScrapeLoadChanged();
 	void SetScrapeFocusState(EMD_ScrapeFocusState NewState);
 	void ResetScrapeFocusSessionState();
-	void EndScrapeFocusInternal(bool bSendServerEnd);
+	void ResetAuthoritativeScrapeFocusViewState();
+	void EndScrapeFocusInternal(
+		bool bSendServerEnd,
+		bool bPreserveLocalViewLatch = false);
 	bool CaptureScrapeFocusView();
+	bool TryBeginAuthoritativeScrapeFocusFromCurrentAim();
+	bool IsScrapeFocusViewToolCurrent() const;
+	bool IsAuthoritativeScrapeFocusToolCurrent() const;
 	bool TryGetAuthoritativeScrapeView(FMinimalViewInfo& OutViewInfo) const;
 	void RejectScrapeFocusBegin(
 		uint64 FocusSessionId,
@@ -742,7 +864,8 @@ private:
 		float RequestedFOV,
 		float RequestedAspectRatio,
 		float RequestedHorizontalHalfTangent,
-		float RequestedVerticalHalfTangent) const;
+		float RequestedVerticalHalfTangent,
+		const FVector& InitialCameraRelativeAimDirection) const;
 	FMD_ScrapeFocusBeginApproval EvaluateScrapeFocusBeginRequest(
 		const FMinimalViewInfo& ServerViewInfo,
 		const FRotator& RequestedViewRotation,
@@ -763,7 +886,17 @@ private:
 	void TerminateScrapeFocusFromComponent();
 	void TerminateAuthoritativeScrapeFocus(
 		EMD_ScrapeFocusTerminationReason Reason);
+	FVector GetScrapeFocusAimDirectionForPointer(
+		const FVector2D& PointerNormalized) const;
 	FVector GetScrapeFocusAimDirection() const;
+	FVector GetScrapeFocusVisualAimDirection() const;
+	void UpdateLocalScrapeVisualContactPose(float DeltaTime);
+	void ForceRefreshLocalScrapeVisualContactPose(bool bTeleportOrSnap);
+	void ResetScrapeVisualContactTracking(bool bPublishInvalidPose);
+	void BeginScrapeVisualStroke();
+	void EndScrapeVisualStroke();
+	void PublishInvalidScrapeVisualContactPose(bool bTeleportOrSnap);
+	void MarkScrapeVisualContactPoseUpdated();
 	bool IsCurrentScrapeFocusViewportAspectCompatible() const;
 	bool IsScrapeToolCurrentlyEligible() const;
 	bool BuildLocalAimSample(FMD_ScrapeAimNetSample& OutSample);
@@ -821,7 +954,8 @@ private:
 		float RequestedFOV,
 		float RequestedAspectRatio,
 		float RequestedHorizontalHalfTangent,
-		float RequestedVerticalHalfTangent);
+		float RequestedVerticalHalfTangent,
+		FVector_NetQuantizeNormal InitialCameraRelativeAimDirection);
 
 	UFUNCTION(Client, Reliable)
 	void ClientScrapeFocusBeginResult(
@@ -877,7 +1011,6 @@ private:
 		const FVector2D& EndPositionCm,
 		TArray<FMD_ScrapeToolPathSegment>& OutSegments);
 	void FlushPendingScrapePathApplication();
-	void SplitScrapeSubStrokeAtCorner(const FVector2D& CornerPositionCm);
 	void ResetScrapePathAccumulator(const FVector2D& StartPositionCm);
 	void UpdateStableBladeAxis(double ArcStepCm);
 	void ApplyScrapePathSegment(
@@ -891,40 +1024,9 @@ private:
 		const FMD_ScrapeToolPathSegment& PathSegment,
 		const FMD_ScrapeStroke& Stroke,
 		const FVector& FeedbackLocation);
-	void KeepAimOnScrapePosition(
-		const FVector& ViewLocation,
-		const FVector& CurrentAimWorldPosition,
-		const FVector& TargetWorldPosition,
-		float DeltaTime) const;
-
-	/** 보정 목표가 다른 표면에 가려지지 않고 시점에서 바로 보이는지 확인한다. */
-	bool IsAimCorrectionTargetVisible(
-		const FVector& ViewLocation,
-		const FVector& WorldPosition,
-		const AActor* IgnoredActor = nullptr) const;
-	void FlushPendingContaminationPaintTail();
-	void StartStage3PathAccumulator(
+	FMD_ScrapeResult ApplyScrapeStrokeForCurrentLoad(
 		UMD_ScrapeSurfaceComponent* Surface,
-		EMD_ScrapeSurfaceFace SurfaceFace,
-		const FVector2D& StartPositionCm,
-		const FVector2D& StartBladeDepthAxis);
-	void AccumulateStage3PathSegment(
-		UMD_ScrapeSurfaceComponent* Surface,
-		EMD_ScrapeSurfaceFace SurfaceFace,
-		const FMD_ScrapeToolPathSegment& PathSegment);
-	void CommitProtectedStage3Dabs();
-	void FlushStage3PathTail();
-	void ResetStage3PathAccumulator();
-	void AdvanceStage3SubStrokeGeneration();
-	void BreakStage3SubStroke();
-	uint64 GetStage3FocusSessionIdentity() const;
-	FMD_ScrapeContaminationDab BuildStage3DabAtArcLength(
-		const FMD_ScrapeToolPathSegment& PathSegment,
-		double SegmentStartArcCm,
-		double SegmentTravelCm,
-		double CandidateArcCm,
-		int32 DistanceBin,
-		EMD_ScrapeSurfaceFace SurfaceFace);
+		const FMD_ScrapeStroke& Stroke) const;
 	void ResetStrokeTracking();
 	void EmitFeedback(
 		UMD_ScrapeSurfaceComponent* Surface,
@@ -946,6 +1048,9 @@ private:
 	 */
 	UPROPERTY(Replicated)
 	bool bIsScraping;
+
+	/** First-click visual intent is retained after the target is removed. */
+	bool bBarnacleClickStroke = false;
 
 	/** 긁는 동안 살아 있는 지속음 핸들 */
 	FMD_AudioHandle ScrapeLoopHandle;
@@ -988,7 +1093,50 @@ private:
 	FMD_ScrapeAuthoritativeAimState AuthoritativeAim;
 	FMD_ScrapeStrokePathState StrokePath;
 	FMD_ScrapeAimRecoveryState AimRecovery;
-	FMD_ScrapeContaminationPaintState ContaminationPaint;
+	/**
+	 * 직렬화·복제하지 않는 로컬 animation snapshot. 이후 시각 갱신 경로만
+	 * 이 값을 쓰며 판정·예측 코드는 읽지 않는다.
+	 */
+	FMD_ScrapeVisualContactPose ScrapeVisualContactPose;
+	/** 로컬 시각 trace의 마지막 대상. pose snap 판정 외에는 소비하지 않는다. */
+	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> ScrapeVisualContactSurface;
+	TWeakObjectPtr<UPrimitiveComponent> ScrapeVisualContactPrimitive;
+	EMD_ScrapeSurfaceFace ScrapeVisualContactSurfaceFace =
+		EMD_ScrapeSurfaceFace::Front;
+	/** 현재 LMB stroke가 시작된 접점. 화면축 lock 전 이동 방향을 보강한다. */
+	FVector ScrapeVisualStrokeAnchorWorldLocation = FVector::ZeroVector;
+	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> ScrapeVisualStrokeAnchorSurface;
+	TWeakObjectPtr<UPrimitiveComponent> ScrapeVisualStrokeAnchorPrimitive;
+	uint64 ScrapeVisualStrokeAnchorFocusSessionId = 0;
+	uint32 ScrapeVisualStrokeAnchorLmbGeneration = 0;
+	bool bHasScrapeVisualStrokeAnchor = false;
+	/** (FocusSessionId, LmbStrokeGeneration) 동안 유지하는 180도 동치 월드 축. */
+	FVector ScrapeVisualLockedWorldTangent = FVector::ZeroVector;
+	uint64 ScrapeVisualLockedFocusSessionId = 0;
+	uint32 ScrapeVisualLockedLmbGeneration = 0;
+	double ScrapeVisualInvalidElapsedSeconds = 0.0;
+	uint64 LastScrapeVisualContactTraceFrame = MAX_uint64;
+	bool bForceNextScrapeVisualContactSnap = false;
+	struct FActiveAuthoritativeScrapePredictionResolution
+	{
+		FMD_ScrapeAuthoritativeVisualDelta VisualDelta;
+		TMap<int32, int32> CellStateIndices;
+	};
+	TArray<FActiveAuthoritativeScrapePredictionResolution>
+		ActiveAuthoritativeScrapePredictionResolutions;
+	uint64 ActiveAuthoritativeScrapePredictionSessionId = 0;
+	uint32 ActiveAuthoritativeScrapePredictionAimSequence = 0;
+	TArray<TWeakObjectPtr<UMD_ScrapeSurfaceComponent>> LocalPredictedScrapeSurfaces;
+	uint64 ActiveLocalScrapePredictionSessionId = 0;
+	uint32 ActiveLocalScrapePredictionAimSequence = 0;
+	TArray<FMD_ScrapeAuthoritativeVisualDelta>
+		PendingLocalScrapePredictionResolutionChunks;
+	uint64 PendingLocalScrapePredictionResolutionSessionId = 0;
+	uint32 PendingLocalScrapePredictionResolutionAimSequence = 0;
+	static constexpr int32
+		MaximumAuthoritativePredictionResolutionCellStates = 512;
+	static constexpr int32 MaximumImmediateMeshUVCellStates = 256;
+	static constexpr double LocalScrapePredictionTimeoutSeconds = 0.75;
 
 	UPROPERTY(Transient)
 	FVector ScrapeFocusViewOrigin = FVector::ZeroVector;
@@ -1008,8 +1156,31 @@ private:
 	UPROPERTY(Transient)
 	bool bHasScrapeFocusView = false;
 
+	/** RMB가 소유하는 비복제 로컬 표시 상태. auth Focus와 독립적으로 유지된다. */
+	UPROPERTY(Transient)
+	bool bScrapeFocusViewActive = false;
+
+	/** 한 RMB latch에서 Reliable Begin을 정확히 한 번만 보낸다. */
+	bool bScrapeFocusViewBeginAttemptConsumed = false;
+	bool bLastScrapeFocusViewAimActionable = false;
+	uint32 ScrapeFocusViewGeneration = 0;
+	uint32 PendingScrapeFocusViewGeneration = 0;
+	TWeakObjectPtr<UMD_ToolDefinition> ScrapeFocusViewTool;
+
+	/** listen host에서도 로컬 표시 basis를 덮지 않는 서버 전용 승인 view/cone. */
+	bool bHasAuthoritativeScrapeFocusView = false;
+	FVector AuthoritativeScrapeFocusViewOrigin = FVector::ZeroVector;
+	FRotator AuthoritativeScrapeFocusViewRotation = FRotator::ZeroRotator;
+	float AuthoritativeScrapeFocusViewFOV = 90.0f;
+	float AuthoritativeScrapeFocusAspectRatio = 16.0f / 9.0f;
+	float AuthoritativeScrapeFocusHorizontalHalfTangent = 1.0f;
+	float AuthoritativeScrapeFocusVerticalHalfTangent = 9.0f / 16.0f;
+	float AuthoritativeScrapeFocusConeHorizontalHalfTangent = 1.0f;
+	float AuthoritativeScrapeFocusConeVerticalHalfTangent = 9.0f / 16.0f;
+	TWeakObjectPtr<UMD_ToolDefinition> AuthoritativeScrapeFocusTool;
+
 	uint32 LmbStrokeGeneration = 0;
-	uint32 ScrapeToolSpecGeneration = 1;
+	uint64 LastScrapePoseNetUpdateFrame = MAX_uint64;
 
 	/** 마지막으로 표면에 닿은 월드 위치. 접촉이 끊기면 무효로 표시한다. */
 	UPROPERTY(Replicated)

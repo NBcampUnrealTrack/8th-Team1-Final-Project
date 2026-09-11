@@ -15,7 +15,7 @@
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
 #include "Util/MD_LogUtility.h"
-#include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Equipment/MD_ItemDefinition.h"
 
 UMD_OxygenComponent::UMD_OxygenComponent()
 {
@@ -101,7 +101,7 @@ void UMD_OxygenComponent::UseOxygenCan()
 	}
 
 	// 산소 캔 소비 처리
-	bool bConsumeSuccess = HotbarComponent->TryConsumeTool(OxygenCanToolDefinition, 1);
+	bool bConsumeSuccess = HotbarComponent->TryConsumeItem(OxygenCanToolDefinition, 1);
 	if (bConsumeSuccess == false)
 	{
 		return;
@@ -222,7 +222,8 @@ void UMD_OxygenComponent::EnsureInitialized(UAbilitySystemComponent* ASC)
 	// ASC 준비 전에 구매한 확장 탱크 아이템이 존재하면 해당 효과를 적용
 	const AMD_Character* OwnerCharacter = Cast<AMD_Character>(GetOwner());
 	const UMD_EquipHotbarComponent* HotbarComponent = IsValid(OwnerCharacter) == true ? OwnerCharacter->GetHotbarComponent() : nullptr;
-	if (IsValid(HotbarComponent) == true && IsValid(OxygenTankToolDefinition) == true && HotbarComponent->GetToolCount(OxygenTankToolDefinition) > 0)
+	// 공통 보유 수량을 기준으로 탱크 장착 효과 복구 여부 확인
+	if (IsValid(HotbarComponent) == true && IsValid(OxygenTankToolDefinition) == true && HotbarComponent->GetItemCount(OxygenTankToolDefinition) > 0)
 	{
 		SetOxygenTankEquipped(true);
 	}

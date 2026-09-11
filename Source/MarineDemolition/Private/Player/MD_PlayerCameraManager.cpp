@@ -17,7 +17,7 @@ void AMD_PlayerCameraManager::ApplyCameraModifiers(
 	UMD_ScrapeToolComponent* const ScrapeTool = Character
 		? Character->GetScrapeToolComponent()
 		: nullptr;
-	if (!ScrapeTool || !ScrapeTool->IsScrapeFocusActive())
+	if (!ScrapeTool || !ScrapeTool->IsScrapeFocusViewActive())
 	{
 		Super::ApplyCameraModifiers(DeltaTime, InOutPOV);
 		return;

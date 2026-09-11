@@ -1,5 +1,13 @@
 #include "World/Sample/MD_SampleItem.h"
 
+#include "AbilitySystemBlueprintLibrary.h"
+#include "AbilitySystemComponent.h"
+#include "Component/Interaction/MD_InteractionComponent.h"
+#include "GameFramework/GameStateBase.h"
+#include "GameFramework/PlayerState.h"
+#include "GameFramework/Pawn.h"
+#include "GameplayTags/MD_GameplayTags.h"
+#include "Util/MD_LogUtility.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/Engine.h"
@@ -219,6 +227,57 @@ void AMD_SampleItem::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* Ot
 	if (!FMath::IsFinite(ImpactSpeed))
 	{
 		return;
+	}
+
+	// 실제 손상 또는 파괴를 일으키는 충격에만 완충 보호 소비
+	if (ImpactSpeed >= BreakImpactSpeed || (bDamaged == false && ImpactSpeed >= DamageImpactSpeed))
+	{
+		// 서버의 실제 운반 상태를 가진 플레이어 목록 조회
+		AGameStateBase* GameState = GetWorld()->GetGameState();
+		// 월드 초기화나 종료 중 운반자 조회 생략
+		if (IsValid(GameState) == true)
+		{
+			// 다른 플레이어의 보호 효과를 소비하지 않도록 운반자 확인
+			for (APlayerState* PlayerState : GameState->PlayerArray)
+			{
+				// 연결이 종료된 플레이어의 접근 차단
+				APawn* Carrier = IsValid(PlayerState) == true ? PlayerState->GetPawn() : nullptr;
+				// 물리 운반을 담당하는 실제 컴포넌트 조회
+				UMD_InteractionComponent* Interaction = IsValid(Carrier) == true ? Carrier->FindComponentByClass<UMD_InteractionComponent>() : nullptr;
+				// 손에 들고 있는 이 샘플에만 보호 허용
+				if (IsValid(Interaction) == false || Interaction->GetHeldActor() != this)
+				{
+					// 놓여 있거나 다른 플레이어가 운반 중인 샘플 제외
+					continue;
+				}
+				// GA가 운반자에게 부여한 효과의 실제 저장소 조회
+				UAbilitySystemComponent* ASC = UAbilitySystemBlueprintLibrary::GetAbilitySystemComponent(Carrier);
+				// 활성 완충 보호가 있는 운반자에 한정한 효과 조회
+				if (IsValid(ASC) == true && ASC->HasMatchingGameplayTag(MDGameplayTags::State_SampleProtection) == true)
+				{
+					// 보호 상태를 부여한 GE만 선택하는 태그 필터
+					FGameplayTagContainer ProtectionTags(MDGameplayTags::State_SampleProtection);
+					// 기본 도구 GA와 다른 효과를 보존할 활성 효과 목록
+					TArray<FActiveGameplayEffectHandle> Effects = ASC->GetActiveEffects(FGameplayEffectQuery::MakeQuery_MatchAllOwningTags(ProtectionTags));
+					// 한 충돌에 보호 효과 한 개만 회수
+					for (FActiveGameplayEffectHandle Effect : Effects)
+					{
+						// 실제 회수에 성공한 경우에만 손상 무효 처리
+						if (ASC->RemoveActiveGameplayEffect(Effect) == true)
+						{
+							// 동일 충돌의 연속 물리 알림으로 즉시 재손상되는 현상 방지
+							BeginImpactProtection(GrabProtectionDuration);
+							// 소비한 보호와 대상의 프로젝트 로그 기록
+							UE_LOG(MarineDemolition, Log, TEXT("[SampleProtection] 충돌 흡수: Sample=%s, Carrier=%s"), *GetName(), *Carrier->GetName());
+							// 손상과 파괴 판정 없이 충돌 처리 종료
+							return;
+						}
+					}
+				}
+				// 실제 운반자 외 다른 플레이어의 검사 종료
+				break;
+			}
+		}
 	}
 
 	// 파괴 임계 이상이면 즉시 파괴, 손상 임계 이상이면 손상만 (기획 02 §4 손 운반 리스크)

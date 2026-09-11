@@ -73,7 +73,7 @@ int32 UMD_ScrapeFocusReticleWidget::NativePaint(
 	const UMD_ScrapeToolComponent* const ScrapeTool = IsValid(Character)
 		? Character->GetScrapeToolComponent()
 		: nullptr;
-	if (!IsValid(ScrapeTool) || !ScrapeTool->IsScrapeFocusActive())
+	if (!IsValid(Character))
 	{
 		return BaseLayer;
 	}
@@ -84,6 +84,21 @@ int32 UMD_ScrapeFocusReticleWidget::NativePaint(
 		return BaseLayer;
 	}
 
+	// Keep the center marker independent of equipped tools and the movable focus pointer.
+	const FVector2D ScreenCenter = LocalSize * 0.5;
+	TArray<FVector2f> CenterCircle;
+	CenterCircle.Reserve(ReticleCircleSegments + 1);
+	for (int32 Index = 0; Index <= ReticleCircleSegments; ++Index)
+	{
+		const float Angle = UE_TWO_PI * Index / ReticleCircleSegments;
+		CenterCircle.Add(UE::Slate::CastToVector2f(ScreenCenter + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * 3.0));
+	}
+	FSlateDrawElement::MakeLines(OutDrawElements, BaseLayer + 1, AllottedGeometry.ToPaintGeometry(),
+		CenterCircle, ESlateDrawEffect::None, FLinearColor(0, 0, 0, 0.8f), true, 3.0f);
+	FSlateDrawElement::MakeLines(OutDrawElements, BaseLayer + 2, AllottedGeometry.ToPaintGeometry(),
+		CenterCircle, ESlateDrawEffect::None, FLinearColor::White, true, 1.25f);
+	if (!IsValid(ScrapeTool) || !ScrapeTool->IsScrapeFocusViewActive()) return BaseLayer + 2;
+
 	const FVector2D Pointer = ScrapeTool->GetScrapeFocusPointerNormalized();
 	const FVector2D Center(
 		FMath::Clamp(Pointer.X, 0.0, 1.0) * LocalSize.X,
@@ -92,8 +107,11 @@ int32 UMD_ScrapeFocusReticleWidget::NativePaint(
 	const FLinearColor ReticleColor =
 		ScrapeTool->GetScrapeFocusState() == EMD_ScrapeFocusState::FocusPending
 			? PendingColor
-			: (ScrapeTool->IsScrapeFocusAimValid() ? ActionableColor : InvalidColor);
-	const int32 ReticleLayer = BaseLayer + 1;
+			: (ScrapeTool->IsScrapeFocusReady()
+				&& ScrapeTool->IsScrapeFocusAimValid()
+					? ActionableColor
+					: InvalidColor);
+	const int32 ReticleLayer = BaseLayer + 3;
 
 	TArray<FVector2f> CirclePoints;
 	CirclePoints.Reserve(ReticleCircleSegments + 1);

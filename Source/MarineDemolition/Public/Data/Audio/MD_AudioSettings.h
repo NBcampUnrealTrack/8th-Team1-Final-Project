@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Engine/DeveloperSettings.h"
+#include "Data/Audio/MD_AudioTypes.h"
 #include "MD_AudioSettings.generated.h"
 
 class UMD_AudioLibrary;
@@ -27,11 +28,24 @@ public:
 	UPROPERTY(EditAnywhere, Config, Category = "카탈로그", meta = (AllowedClasses = "/Script/MarineDemolition.MD_AudioLibrary"))
 	TSoftObjectPtr<UMD_AudioLibrary> AudioLibrary;
 
+	/**
+	 * 월드가 준비되면 스스로 시작할 항목들. 타이틀 BGM 등.
+	 *
+	 * 레벨이나 플레이어 컨트롤러를 고치지 않고 여기에만 등록하면 되므로,
+	 * 다른 작업자의 맵·블루프린트와 충돌하지 않는다.
+	 */
+	UPROPERTY(EditAnywhere, Config, Category = "자동 재생", meta = (TitleProperty = "EventTag"))
+	TArray<FMD_AudioAutoPlayEntry> AutoPlayOnWorldReady;
+
 	UPROPERTY(EditAnywhere, Config, Category = "서브믹스")
 	TSoftObjectPtr<USoundSubmix> UnderwaterSubmix;
 
 	UPROPERTY(EditAnywhere, Config, Category = "서브믹스")
 	TSoftObjectPtr<USoundSubmix> DrySubmix;
+
+	/** 사용자 음량 적용 뒤의 프로젝트 전체 출력 보정값 */
+	UPROPERTY(EditAnywhere, Config, Category = "사용자 음량", meta = (ClampMin = "0.0", ClampMax = "12.0", UIMin = "0.0", UIMax = "12.0", Units = "dB"))
+	float OutputGainDecibels = 6.0f;
 
 	/** 수심에 따라 컷오프를 움직일 필터 프리셋 */
 	UPROPERTY(EditAnywhere, Config, Category = "수중 필터")

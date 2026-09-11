@@ -87,7 +87,7 @@ void FAssetNamingToolModule::RegisterStyle()
 
 
     const FString ResourcesPath =
-        Plugin->GetBaseDir()
+        Plugin->GetBaseDir() 
         / TEXT("Resources");
 
 

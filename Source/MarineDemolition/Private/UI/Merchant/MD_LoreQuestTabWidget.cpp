@@ -1,7 +1,6 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "UI/Merchant/MD_LoreQuestTabWidget.h"
-
 #include "Components/ProgressBar.h"
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
@@ -12,214 +11,148 @@
 void UMD_LoreQuestTabWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
-
-	// 카탈로그 유무와 관계없이 일관된 초기 화면을 보장하기 위한 표시 구성
+	// 현재 획득 원장으로 카드 구성
 	RebuildLoreList();
+	// 현장 이름과 수집 진행률 갱신
 	RefreshLoreHeader();
-	RefreshLoreDetails();
 }
 
-void UMD_LoreQuestTabWidget::SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds)
+void UMD_LoreQuestTabWidget::SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds, FText InSiteName)
 {
-	// 동일 시점의 정적 정의와 복제 발견 원장을 사용하기 위한 데이터 저장
-	LoreCatalog = InLoreCatalog;
-	DiscoveredLoreAssetIds = InDiscoveredLoreAssetIds;
-
-	// 수집 상태 변경을 카드와 상세 정보에 동시에 반영하기 위한 전체 표시 갱신
-	RebuildLoreList();
+	// 동일한 원장 갱신에서 카드 전체 재생성을 피하기 위한 변경 확인
+	bool bListChanged = LoreCatalog != InLoreCatalog || DiscoveredLoreAssetIds != InDiscoveredLoreAssetIds;
+	// 현장명까지 동일하면 하위 텍스트 및 진행률 갱신 생략
+	if (bListChanged == false && LoreSiteName.EqualTo(InSiteName) == true)
+	{
+		return;
+	}
+	// 현재 현장명 보관
+	LoreSiteName = InSiteName;
+	// 카탈로그 또는 획득 원장이 바뀐 경우에만 카드 구성
+	if (bListChanged == true)
+	{
+		// 변경된 카탈로그 적용
+		LoreCatalog = InLoreCatalog;
+		// 복제된 획득 원장 갱신
+		DiscoveredLoreAssetIds = InDiscoveredLoreAssetIds;
+		// 변경된 데이터에 대한 카드 재구성
+		RebuildLoreList();
+	}
+	// 변경된 현장명과 수집 진행률 반영
 	RefreshLoreHeader();
-	RefreshLoreDetails();
 }
 
 void UMD_LoreQuestTabWidget::RebuildLoreList()
 {
-	// 블루프린트 목록 컨테이너 누락 시 안전한 갱신 중단
+	// 목록 컨테이너 누락 여부 확인
 	if (IsValid(SL_LoreList) == false)
 	{
+		// 표시 대상 부재로 갱신 중단
 		return;
 	}
 
-	// 디자인 목업 카드를 실제 카탈로그 카드로 교체하기 위한 목록 초기화
+	// 목업 또는 이전 카탈로그 카드 제거
 	SL_LoreList->ClearChildren();
-	SelectedLoreIndex = INDEX_NONE;
-	// 정적 정의 또는 생성 클래스 누락 시 빈 목록 유지
-	if (IsValid(LoreCatalog) == false || LoreCardClass == nullptr)
+	// 목록 생성에 필요한 카탈로그와 카드 클래스 확인
+	if (IsValid(LoreCatalog) == false || IsValid(LoreCardClass.Get()) == false)
 	{
+		// 생성 데이터 부재로 빈 목록 유지
 		return;
 	}
 
-	// 처음 열 때 읽을 수 있는 기록을 우선 표시하기 위한 후보 인덱스
-	int32 FirstReadableLoreIndex = INDEX_NONE;
-	// 카탈로그 배열 순서와 화면 번호를 동일하게 유지하기 위한 카드 생성 반복
-	for (int32 LoreIndex = 0; LoreIndex < LoreCatalog->LoreEntries.Num(); ++LoreIndex)
+	// 카탈로그에 등록된 전체 항목 수 조회
+	int32 LoreCount = LoreCatalog->LoreEntries.Num();
+	// 정의 에셋 로드 여부와 무관하게 모든 등록 항목의 획득 상태 표시
+	for (int32 LoreIndex = 0; LoreIndex < LoreCount; ++LoreIndex)
 	{
-		// 현재 항목의 정적 정의와 수집 원장으로 계산한 공개 상태
-		UMD_LoreDefinition* LoreDefinition = LoreCatalog->GetLoreDefinition(LoreIndex);
-		if (IsValid(LoreDefinition) == false)
+		// 현재 카드의 로어 식별자 조회
+		FPrimaryAssetId LoreAssetId = LoreCatalog->LoreEntries[LoreIndex];
+		// 해독 선행 조건과 무관한 획득 여부 확인
+		bool bIsAcquired = DiscoveredLoreAssetIds.Contains(LoreAssetId);
+		// 정의가 없는 항목에 사용할 제목 준비
+		FText EntryName = FText::FromString(TEXT("???"));
+		// 미획득 항목의 이름 조회 생략
+		if (bIsAcquired == true)
 		{
-			continue;
+			// 획득한 기록물의 제목 조회
+			UMD_LoreDefinition* LoreDefinition = LoreCatalog->GetLoreDefinition(LoreIndex);
+			// 제목 조회에 사용할 정의 유효성 확인
+			if (IsValid(LoreDefinition) == true)
+			{
+				// 획득한 기록물의 이름 적용
+				EntryName = LoreDefinition->EntryName;
+			}
 		}
 
-		FPrimaryAssetId LoreAssetId = LoreCatalog->LoreEntries[LoreIndex];
-		EMD_LoreEntryState LoreState = LoreCatalog->ResolveLoreState(LoreAssetId, DiscoveredLoreAssetIds);
-		// 항목별 선택 이벤트를 독립적으로 전달하기 위한 카드 인스턴스
+		// 항목별 공통 버튼 카드 생성
 		UMD_LoreCardWidget* LoreCard = CreateWidget<UMD_LoreCardWidget>(this, LoreCardClass);
+		// 카드 생성 성공 여부 확인
 		if (IsValid(LoreCard) == false)
 		{
+			// 생성 실패 항목 생략
 			continue;
 		}
-
-		// 데이터 표시와 상세 선택 및 스크롤 목록 소유 관계의 구성
-		LoreCard->SetLoreEntry(LoreIndex, LoreDefinition->EntryName, LoreState);
-		LoreCard->OnLoreCardSelected.AddUniqueDynamic(this, &UMD_LoreQuestTabWidget::HandleLoreCardSelected);
+		// 카드 번호와 제목 및 획득 여부 적용
+		LoreCard->SetLoreEntry(LoreIndex, EntryName, bIsAcquired);
+		// 카탈로그 순서대로 카드 배치
 		SL_LoreList->AddChild(LoreCard);
-
-		// 실제 내용을 열람할 수 있는 첫 번째 항목의 우선 선택
-		if (FirstReadableLoreIndex == INDEX_NONE && LoreState != EMD_LoreEntryState::Undiscovered)
-		{
-			FirstReadableLoreIndex = LoreIndex;
-		}
-	}
-
-	// 읽을 수 있는 기록 우선 정책과 빈 수집 상태의 첫 카드 대체 정책
-	if (FirstReadableLoreIndex != INDEX_NONE)
-	{
-		SelectedLoreIndex = FirstReadableLoreIndex;
-	}
-	else if (LoreCatalog->LoreEntries.Num() > 0)
-	{
-		SelectedLoreIndex = 0;
 	}
 }
 
 void UMD_LoreQuestTabWidget::RefreshLoreHeader()
 {
-	// 현장 정의가 없는 메뉴 진입에서도 유효한 빈 진행 화면을 위한 처리
-	if (IsValid(LoreCatalog) == false)
+	// 선택한 사이트 정의에서 전달받은 현장 이름 준비
+	FText SiteName = LoreSiteName;
+	// 현재 카탈로그의 획득 수량 초기화
+	int32 AcquiredLoreCount = 0;
+	// 현재 카탈로그의 전체 수량 초기화
+	int32 TotalLoreCount = 0;
+	// 집계할 카탈로그 유효성 확인
+	if (IsValid(LoreCatalog) == true)
 	{
-		if (IsValid(TXT_SiteName) == true)
+		// 사이트 표시명 누락 여부 확인
+		if (SiteName.IsEmpty() == true)
 		{
-			TXT_SiteName->SetText(FText::FromString(TEXT("로어 기록 보관함")));
+			// 카탈로그 표시명으로 보완
+			SiteName = LoreCatalog->SiteDisplayName;
 		}
-		if (IsValid(TXT_LoreProgress) == true)
+		// 카드 목록과 동일한 전체 항목 수 적용
+		TotalLoreCount = LoreCatalog->LoreEntries.Num();
+		// 현재 현장에 등록된 식별자만 획득 수량에 반영
+		for (FPrimaryAssetId LoreAssetId : LoreCatalog->LoreEntries)
 		{
-			TXT_LoreProgress->SetText(FText::FromString(TEXT("수집 진행  0 / 0")));
-		}
-		if (IsValid(PB_LoreProgress) == true)
-		{
-			PB_LoreProgress->SetPercent(0.0f);
-		}
-		return;
-	}
-
-	// 유효한 카탈로그 항목만 집계하여 오래된 원장 식별자를 제외하기 위한 수집 수량
-	int32 DiscoveredLoreCount = 0;
-	for (int32 LoreIndex = 0; LoreIndex < LoreCatalog->GetLoreCount(); ++LoreIndex)
-	{
-		// 카탈로그 Asset ID를 진행률 집계에 사용할 정의 에셋으로 해석한다.
-		UMD_LoreDefinition* LoreDefinition = LoreCatalog->GetLoreDefinition(LoreIndex);
-		if (IsValid(LoreDefinition) == false)
-		{
-			continue;
-		}
-
-		FPrimaryAssetId LoreAssetId = LoreCatalog->LoreEntries[LoreIndex];
-		if (DiscoveredLoreAssetIds.Contains(LoreAssetId) == true)
-		{
-			++DiscoveredLoreCount;
+			// 획득한 항목만 집계
+			if (DiscoveredLoreAssetIds.Contains(LoreAssetId) == true)
+			{
+				// 현장 내 획득 수량 증가
+				++AcquiredLoreCount;
+			}
 		}
 	}
 
-	// 진행 문구와 진행 막대가 공유하는 카탈로그 전체 수량
-	int32 TotalLoreCount = LoreCatalog->LoreEntries.Num();
+	// 빈 제목 표시 방지
+	if (SiteName.IsEmpty() == true)
+	{
+		// 표시할 사이트 이름이 없는 경우 기본 제목 사용
+		SiteName = FText::FromString(TEXT("로어 기록 보관함"));
+	}
+
+	// 현장 이름 표시 대상 확인
 	if (IsValid(TXT_SiteName) == true)
 	{
-		TXT_SiteName->SetText(LoreCatalog->SiteDisplayName);
+		// 현재 현장 이름 갱신
+		TXT_SiteName->SetText(SiteName);
 	}
+	// 진행 수량 표시 대상 확인
 	if (IsValid(TXT_LoreProgress) == true)
 	{
-		TXT_LoreProgress->SetText(FText::FromString(FString::Printf(TEXT("수집 진행  %d / %d"), DiscoveredLoreCount, TotalLoreCount)));
+		// 수집 진행 수량 갱신
+		TXT_LoreProgress->SetText(FText::FromString(FString::Printf(TEXT("수집 진행  %d / %d"), AcquiredLoreCount, TotalLoreCount)));
 	}
+	// 진행 막대 표시 대상 확인
 	if (IsValid(PB_LoreProgress) == true)
 	{
-		// 기록물이 없는 카탈로그에서 0 나누기를 방지하는 진행 비율
-		float ProgressRatio = TotalLoreCount > 0 ? static_cast<float>(DiscoveredLoreCount) / static_cast<float>(TotalLoreCount) : 0.0f;
-		PB_LoreProgress->SetPercent(ProgressRatio);
+		// 수집 진행률 갱신
+		PB_LoreProgress->SetPercent((TotalLoreCount > 0 ? static_cast<float>(AcquiredLoreCount) / static_cast<float>(TotalLoreCount) : 0.0f));
 	}
-}
-
-void UMD_LoreQuestTabWidget::RefreshLoreDetails()
-{
-	// 유효한 선택이 없는 상태를 명확히 안내하기 위한 빈 상세 정보
-	if (IsValid(LoreCatalog) == false || LoreCatalog->LoreEntries.IsValidIndex(SelectedLoreIndex) == false)
-	{
-		if (IsValid(TXT_DetailTitle) == true)
-		{
-			TXT_DetailTitle->SetText(FText::FromString(TEXT("선택된 기록물 없음")));
-		}
-		if (IsValid(TXT_DetailMeta) == true)
-		{
-			TXT_DetailMeta->SetText(FText::GetEmpty());
-		}
-		if (IsValid(TXT_DetailBody) == true)
-		{
-			TXT_DetailBody->SetText(FText::FromString(TEXT("수집한 기록물을 선택하면 상세 정보가 표시된다.")));
-		}
-		return;
-	}
-
-	// 선택 인덱스에 대응하는 정적 정의와 현재 공개 상태
-	UMD_LoreDefinition* LoreDefinition = LoreCatalog->GetLoreDefinition(SelectedLoreIndex);
-	if (IsValid(LoreDefinition) == false)
-	{
-		return;
-	}
-
-	FPrimaryAssetId LoreAssetId = LoreCatalog->LoreEntries[SelectedLoreIndex];
-	EMD_LoreEntryState LoreState = LoreCatalog->ResolveLoreState(LoreAssetId, DiscoveredLoreAssetIds);
-	// 완전 해독 상태를 기준으로 구성한 상세 표시 기본값
-	FText DetailTitle = LoreDefinition->EntryName;
-	FText DetailMeta = FText::FromString(FString::Printf(TEXT("기록물 %02d"), SelectedLoreIndex + 1));
-	FText DetailBody = LoreDefinition->EntryContent;
-
-	// 미발견 정보의 원문을 숨기기 위한 대체 표시
-	if (LoreState == EMD_LoreEntryState::Undiscovered)
-	{
-		DetailTitle = FText::FromString(TEXT("미발견 기록물"));
-		DetailMeta = FText::FromString(FString::Printf(TEXT("기록물 %02d · 미발견"), SelectedLoreIndex + 1));
-		DetailBody = FText::FromString(TEXT("아직 발견하지 못한 기록물이다."));
-	}
-	// 선행 기록 미충족 상태에서 원문만 제한하기 위한 암호화 표시
-	else if (LoreState == EMD_LoreEntryState::Encrypted)
-	{
-		DetailMeta = FText::FromString(FString::Printf(TEXT("기록물 %02d · 암호화됨"), SelectedLoreIndex + 1));
-		DetailBody = FText::FromString(TEXT("선행 기록을 수집하면 내용을 해독할 수 있다."));
-	}
-
-	// 계산된 공개 단계별 정보를 블루프린트 상세 영역에 반영하는 처리
-	if (IsValid(TXT_DetailTitle) == true)
-	{
-		TXT_DetailTitle->SetText(DetailTitle);
-	}
-	if (IsValid(TXT_DetailMeta) == true)
-	{
-		TXT_DetailMeta->SetText(DetailMeta);
-	}
-	if (IsValid(TXT_DetailBody) == true)
-	{
-		TXT_DetailBody->SetText(DetailBody);
-	}
-}
-
-void UMD_LoreQuestTabWidget::HandleLoreCardSelected(int32 LoreIndex)
-{
-	// 제거되었거나 잘못된 카드 인덱스의 상세 접근을 차단하는 검증
-	if (IsValid(LoreCatalog) == false || LoreCatalog->LoreEntries.IsValidIndex(LoreIndex) == false)
-	{
-		return;
-	}
-
-	// 선택된 카드와 우측 상세 영역을 연결하기 위한 인덱스 적용
-	SelectedLoreIndex = LoreIndex;
-	RefreshLoreDetails();
 }

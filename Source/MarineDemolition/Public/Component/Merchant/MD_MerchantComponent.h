@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "UObject/PrimaryAssetId.h"
 #include "Types/Merchant/MD_MerchantTypes.h"
 #include "UI/Merchant/MD_MerchantUITypes.h"
 #include "MD_MerchantComponent.generated.h"
@@ -65,8 +66,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	TArray<FMD_RepeatQuestState> GetRepeatQuests() const { return RepeatQuests; }
 
+	// 클라이언트에 복제된 전체 구매 식별자 목록 제공
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
-	TArray<FName> GetOwnedItemIds() const { return OwnedItemIds; }
+	FORCEINLINE TArray<FPrimaryAssetId> GetOwnedItemIds() const { return OwnedItemIds; }
 
 private:
 	/** Subsystem 값을 복제 변수로 복사한다. 서버에서만 호출된다. */
@@ -103,8 +105,9 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
 	TArray<FMD_RepeatQuestState> RepeatQuests;
 
+	// 팀 구매 이력을 타입과 이름을 포함하여 클라이언트에 복제
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
-	TArray<FName> OwnedItemIds;
+	TArray<FPrimaryAssetId> OwnedItemIds;
 
 	FDelegateHandle SubsystemChangedHandle;
 		

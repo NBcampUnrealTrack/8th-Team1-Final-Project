@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -6,6 +6,7 @@
 #include "GameFramework/GameModeBase.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
+#include "Types/UI/MD_LoadingScreenTypes.h"
 #include "MD_GameModeBase.generated.h"
 
 class AMD_CuttableWall;
@@ -25,20 +26,25 @@ class MARINEDEMOLITION_API AMD_GameModeBase : public AGameModeBase
 public:
     AMD_GameModeBase();
 
-    // 정식 하루 마감 진입점. 18:00 자동·모선 인터랙트·MD_EndDay 공용, 하루 1회만 동작
-    void RequestEndDay();
+    // 전체 플레이어의 정산 화면을 닫고 기존 판정에 따른 이동 실행
+    void FinishDayEndReport();
 
-    // 일일 보고서 확인 버튼을 누른 플레이어의 서버 요청으로 보류 중인 Day 전환을 확정하는 진입점
-    void ConfirmDayTransition(AMD_PlayerController* RequestingController);
+    // 수동 퇴근과 시간 종료 원인을 구분하는 하루 마감 진입점
+    void RequestEndDay(EMD_DayEndReason EndReason = EMD_DayEndReason::Console, FGameplayTag ReportWidgetTag = FGameplayTag());
 
     virtual void RestartPlayer(AController* NewPlayer) override;
 
     virtual void Logout(AController* Exiting) override;
 
+    virtual void PostLogin(APlayerController* NewPlayer) override;
+
 protected:
     virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+    // 참여 또는 퇴장한 플레이어의 이름을 각 소유 클라이언트에 전달
+    void NotifyPlayerJoinAndExit(AController* ChangedPlayer, bool bIsJoin);
 
  //TimeAlarm
 private:
@@ -82,8 +88,8 @@ private:
     // 18:00 자동 마감과 MD_EndDay 공용 하루 마감 시퀀스. 하루 1회만 실행. 판정 결과 반환
     EMD_InspectionResult FinalizeDay();
 
-    // 판정 결과에 따라 다음 날 진입·클리어·게임오버로 분기
-    void RouteAfterDay(EMD_InspectionResult Result);
+    // 마감 원인을 보존하고 판정에 따른 다음 날 및 최종 결과 전환
+    void RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReason EndReason, FGameplayTag ReportWidgetTag);
 
     // 지연 타이머가 호출. PendingResult에 따라 실제 전환 실행
     void ExecuteDayTransition();
@@ -105,13 +111,6 @@ private:
     // ExecuteDayTransition이 참조할 직전 판정 결과
     EMD_InspectionResult PendingResult = EMD_InspectionResult::NotApplicable;
 
-    // 여러 플레이어의 보고서 버튼 요청이 같은 Day 전환을 중복 실행하지 않도록 하는 서버 상태
-    bool bDayTransitionConfirmed = false;
-
-    // 클리어/게임오버 결과 화면을 보여줄 시간
-    UPROPERTY(EditDefaultsOnly, Category = "Day")
-    float ResultTravelDelay = 8.f;
-
     // 클리어 시 이동할 레벨(모선/다음 현장 대기). BP GameMode에서 지정
     UPROPERTY(EditDefaultsOnly, Category = "Day")
     TSoftObjectPtr<UWorld> ClearedLevel;
@@ -126,7 +125,7 @@ private:
     void TravelToNextDay();
 
     // 세션 절차를 거치지 않는 직접 ServerTravel 전에 모든 소유 클라이언트에 로딩 화면을 요청한다.
-    void PreparePlayersForTravel(const FText& Subtitle);
+    void PreparePlayersForTravel(EMD_LoadingContext Context);
 
     // 로딩 인트로가 화면을 완전히 덮은 뒤에 같은 레벨 재시작 트래블을 실행한다.
     void RestartLevelAfterLoadingIntro();
@@ -177,6 +176,10 @@ private:
 
     UFUNCTION(Exec)
     void MD_SetDay(int32 Day);
+
+    // 현재 일자의 시간을 H시 00분으로 설정하는 호스트 콘솔 명령
+    UFUNCTION(Exec)
+    void MD_SetTime(int32 Hour);
 
     UFUNCTION(Exec)
     void MD_SetCrew(int32 Crew);

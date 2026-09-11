@@ -14,8 +14,13 @@
 FMD_ScrapeAimAuthorityCone UMD_ScrapeToolComponent::MakeAimAuthorityCone() const
 {
 	FMD_ScrapeAimAuthorityCone Cone;
-	Cone.HorizontalHalfTangent = ScrapeFocusSession.ScrapeFocusAuthorityHorizontalHalfTangent;
-	Cone.VerticalHalfTangent = ScrapeFocusSession.ScrapeFocusAuthorityVerticalHalfTangent;
+	// Continuous samples are validated against the server-owned cone frozen at
+	// Begin. On a listen host the local display latch owns the similarly named
+	// session fields and must never widen or otherwise overwrite authority.
+	Cone.HorizontalHalfTangent =
+		AuthoritativeScrapeFocusConeHorizontalHalfTangent;
+	Cone.VerticalHalfTangent =
+		AuthoritativeScrapeFocusConeVerticalHalfTangent;
 	Cone.PointerSafeMargin = ScrapeFocusPointerSafeMargin;
 	Cone.MarginDegrees = AimViewConeMarginDegrees;
 	return Cone;
@@ -227,6 +232,17 @@ void UMD_ScrapeToolComponent::SendLocalAimIfDue(const float DeltaTime)
 	FMD_ScrapeAimNetSample Sample;
 	if (BuildLocalAimSample(Sample))
 	{
+		const APawn* const OwnerPawn = Cast<APawn>(GetOwner());
+		if (bIsScraping
+			&& OwnerPawn
+			&& OwnerPawn->IsLocallyControlled()
+			&& !OwnerPawn->HasAuthority())
+		{
+			ProcessLocalPredictedScrapeAim(
+				Sample,
+				QueryCurrentScrapeAim(),
+				static_cast<float>(IntervalSeconds));
+		}
 		ServerUpdateScrapeAim(Sample);
 	}
 }
@@ -324,20 +340,30 @@ void UMD_ScrapeToolComponent::PrepareBufferedAuthoritativeAimReplay(
 
 void UMD_ScrapeToolComponent::ReplayBufferedAuthoritativeAims()
 {
+	const uint64 ReplayFocusSessionId =
+		ScrapeFocusSession.ActiveScrapeFocusSessionId;
 	if (!bIsScraping
-		|| !AuthoritativeAim.bAuthoritativeFirstScrapeAimApproved
+		|| ReplayFocusSessionId == 0
+		|| !IsAuthoritativeFirstScrapeAimApproved(ReplayFocusSessionId)
 		|| AuthoritativeAim.AuthoritativeFirstAimSequence == 0)
 	{
 		return;
 	}
 
+	TArray<FMD_BufferedAuthoritativeScrapeAim> BufferedReplay =
+		MoveTemp(AuthoritativeAim.BufferedPreFirstAuthoritativeAims);
+	AuthoritativeAim.BufferedPreFirstAuthoritativeAims.Reset();
+	AuthoritativeAim.HighestDroppedPreFirstAimSequence = 0;
+	bool bForceNewAnchor =
+		AuthoritativeAim.bBufferedPreFirstAimReplayDiscontinuous;
+	AuthoritativeAim.bBufferedPreFirstAimReplayDiscontinuous = false;
+
 	uint32 PreviousSequence = AuthoritativeAim.AuthoritativeFirstAimSequence;
 	double PreviousClientSeconds =
 		AuthoritativeAim.AuthoritativeFirstAimClientSampleSeconds;
 	FMD_ScrapeAimQueryResult PreviousAim = CurrentScrapeAim;
-	bool bForceNewAnchor = AuthoritativeAim.bBufferedPreFirstAimReplayDiscontinuous;
 	for (const FMD_BufferedAuthoritativeScrapeAim& Buffered
-		: AuthoritativeAim.BufferedPreFirstAuthoritativeAims)
+		: BufferedReplay)
 	{
 		if (Buffered.Sample.Sequence <= PreviousSequence)
 		{
@@ -368,21 +394,29 @@ void UMD_ScrapeToolComponent::ReplayBufferedAuthoritativeAims()
 			ResetInvalidScrapeAim();
 		}
 		CurrentScrapeAim = Buffered.ValidatedAim;
-		ProcessScrapeAimResult(
+		ProcessAuthoritativeScrapeAimResult(
 			Buffered.ValidatedAim,
 			bStartsNewAnchor ? 0.0f : SampleDeltaTime,
 			true,
 			bStartsNewAnchor
 				? FMath::Max(MaxMissingAimSequences, 0) + 1
-				: 0);
+				: 0,
+			Buffered.Sample.FocusSessionId,
+			Buffered.Sample.Sequence);
+		if (!bIsScraping
+			|| !IsAuthoritativeFirstScrapeAimApproved(ReplayFocusSessionId)
+			|| ScrapeFocusSession.ActiveScrapeFocusSessionId
+				!= ReplayFocusSessionId)
+		{
+			break;
+		}
+
 		PreviousSequence = Buffered.Sample.Sequence;
 		PreviousClientSeconds = static_cast<double>(
 			Buffered.Sample.ClientMonotonicSeconds);
 		PreviousAim = Buffered.ValidatedAim;
 		bForceNewAnchor = false;
 	}
-	AuthoritativeAim.BufferedPreFirstAuthoritativeAims.Reset();
-	AuthoritativeAim.bBufferedPreFirstAimReplayDiscontinuous = false;
 }
 
 bool UMD_ScrapeToolComponent::TryAcceptAuthoritativeAimTiming(
@@ -424,7 +458,7 @@ bool UMD_ScrapeToolComponent::TryResolveAuthoritativeAimDirection(
 {
 	OutServerEyeLocation = FVector::ZeroVector;
 	OutWorldDirection = FVector::ZeroVector;
-	if (!IsScrapeToolCurrentlyEligible())
+	if (!IsAuthoritativeScrapeFocusToolCurrent())
 	{
 		TerminateAuthoritativeScrapeFocus(
 			EMD_ScrapeFocusTerminationReason::EligibilityLost);
@@ -442,8 +476,11 @@ bool UMD_ScrapeToolComponent::TryResolveAuthoritativeAimDirection(
 	// packet may temporarily restore the pre-Begin ControlRotation, so continuous
 	// samples validate their server-owned origin and session-relative direction
 	// without comparing against that independently ordered live rotation.
-	if (OutServerEyeLocation.ContainsNaN()
-		|| FVector::Distance(OutServerEyeLocation, ScrapeFocusViewOrigin)
+	if (!bHasAuthoritativeScrapeFocusView
+		|| OutServerEyeLocation.ContainsNaN()
+		|| FVector::Distance(
+			OutServerEyeLocation,
+			AuthoritativeScrapeFocusViewOrigin)
 			> FMath::Max(ScrapeFocusViewOriginDriftToleranceCm, 0.0f))
 	{
 		TerminateAuthoritativeScrapeFocus(
@@ -451,7 +488,7 @@ bool UMD_ScrapeToolComponent::TryResolveAuthoritativeAimDirection(
 		return false;
 	}
 
-	const FRotationMatrix Basis(ScrapeFocusViewRotation);
+	const FRotationMatrix Basis(AuthoritativeScrapeFocusViewRotation);
 	OutWorldDirection =
 		(Basis.GetScaledAxis(EAxis::X) * CameraRelativeDirection.X
 			+ Basis.GetScaledAxis(EAxis::Y) * CameraRelativeDirection.Y
@@ -597,197 +634,4 @@ bool UMD_ScrapeToolComponent::ValidateAndCacheAuthoritativeAim(
 		OutAim,
 		OutSampleDeltaTime,
 		OutMissingSequences);
-}
-
-FVector2D UMD_ScrapeToolComponent::ConstrainLookInput(
-	const FVector2D& LookInput) const
-{
-	if (IsScrapeFocusActive())
-	{
-		return FVector2D::ZeroVector;
-	}
-	if (!bIsScraping || !StrokePath.bHasLockedStrokeAxis)
-	{
-		return LookInput;
-	}
-
-	const FVector2D SafeAxis = StrokePath.LockedStrokeAxis.GetSafeNormal();
-	return SafeAxis.IsNearlyZero()
-		? LookInput
-		: SafeAxis * FVector2D::DotProduct(LookInput, SafeAxis);
-}
-
-FRotator UMD_ScrapeToolComponent::CalculateAimCorrectionRotation(
-	const FRotator& CurrentControlRotation,
-	const FVector& ViewToCurrentAim,
-	const FVector& ViewToTarget,
-	const float CorrectionRatio,
-	const float MaximumStepDegrees,
-	const float MaximumErrorDegrees)
-{
-	if (CurrentControlRotation.ContainsNaN()
-		|| ViewToCurrentAim.ContainsNaN()
-		|| ViewToTarget.ContainsNaN())
-	{
-		return CurrentControlRotation;
-	}
-
-	const FVector CurrentDirection = ViewToCurrentAim.GetSafeNormal();
-	const FVector TargetDirection = ViewToTarget.GetSafeNormal();
-	if (CurrentDirection.IsNearlyZero() || TargetDirection.IsNearlyZero())
-	{
-		return CurrentControlRotation;
-	}
-
-	const double DirectionDot = FMath::Clamp(
-		FVector::DotProduct(CurrentDirection, TargetDirection),
-		-1.0,
-		1.0);
-	const float ErrorDegrees = FMath::RadiansToDegrees(
-		static_cast<float>(FMath::Acos(DirectionDot)));
-	if (!FMath::IsFinite(ErrorDegrees)
-		|| ErrorDegrees <= UE_KINDA_SMALL_NUMBER)
-	{
-		return CurrentControlRotation;
-	}
-
-	// 시선이 벽을 너무 스치는 각도면 이 프레임은 건너뛴다.
-	if (FMath::IsFinite(MaximumErrorDegrees)
-		&& MaximumErrorDegrees > 0.0f
-		&& ErrorDegrees > MaximumErrorDegrees)
-	{
-		return CurrentControlRotation;
-	}
-
-	// 오차의 일정 비율만 없앤다. 항상 오차보다 작으므로 목표를 지나치지 않는다.
-	const float SafeCorrectionRatio = FMath::IsFinite(CorrectionRatio)
-		? FMath::Clamp(CorrectionRatio, 0.0f, 1.0f)
-		: 0.0f;
-	float AppliedDegrees = ErrorDegrees * SafeCorrectionRatio;
-	if (FMath::IsFinite(MaximumStepDegrees) && MaximumStepDegrees > 0.0f)
-	{
-		AppliedDegrees = FMath::Min(AppliedDegrees, MaximumStepDegrees);
-	}
-	if (AppliedDegrees <= UE_KINDA_SMALL_NUMBER)
-	{
-		return CurrentControlRotation;
-	}
-
-	const FVector RotationAxis = FVector::CrossProduct(
-		CurrentDirection,
-		TargetDirection).GetSafeNormal();
-	if (RotationAxis.IsNearlyZero())
-	{
-		return CurrentControlRotation;
-	}
-
-	// 두 시선 방향의 각도 차이를 그대로 현재 회전에 더한다.
-	const FQuat DeltaQuat(
-		RotationAxis,
-		FMath::DegreesToRadians(AppliedDegrees));
-	FRotator CorrectedRotation =
-		(DeltaQuat * CurrentControlRotation.Quaternion()).Rotator();
-	if (CorrectedRotation.ContainsNaN())
-	{
-		return CurrentControlRotation;
-	}
-
-	// Roll은 보정 대상이 아니므로 현재 값을 유지한다.
-	CorrectedRotation.Roll = CurrentControlRotation.Roll;
-	return CorrectedRotation;
-}
-
-bool UMD_ScrapeToolComponent::IsAimCorrectionTargetVisible(
-	const FVector& ViewLocation,
-	const FVector& WorldPosition,
-	const AActor* IgnoredActor) const
-{
-	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
-	const UWorld* World = GetWorld();
-	if (!OwnerPawn
-		|| !World
-		|| ViewLocation.ContainsNaN()
-		|| WorldPosition.ContainsNaN())
-	{
-		return false;
-	}
-
-	const FVector ViewToTarget = WorldPosition - ViewLocation;
-	const double DistanceCm = ViewToTarget.Size();
-	const double SafeToleranceCm = FMath::Max(
-		static_cast<double>(AimCorrectionVisibilityToleranceCm),
-		static_cast<double>(UE_KINDA_SMALL_NUMBER));
-	if (DistanceCm <= SafeToleranceCm)
-	{
-		return true;
-	}
-
-	// 목표 표면 자신에 맞는 것은 가림이 아니므로 조금 앞까지만 검사한다.
-	FCollisionQueryParams QueryParams(
-		SCENE_QUERY_STAT(MD_ScrapeAimVisibility),
-		true);
-	QueryParams.AddIgnoredActor(OwnerPawn);
-	if (IsValid(IgnoredActor))
-	{
-		QueryParams.AddIgnoredActor(IgnoredActor);
-	}
-
-	FHitResult BlockingHit;
-	return !World->LineTraceSingleByChannel(
-		BlockingHit,
-		ViewLocation,
-		ViewLocation
-			+ ViewToTarget.GetSafeNormal()
-				* (DistanceCm - SafeToleranceCm),
-		TraceChannel,
-		QueryParams);
-}
-
-void UMD_ScrapeToolComponent::KeepAimOnScrapePosition(
-	const FVector& ViewLocation,
-	const FVector& CurrentAimWorldPosition,
-	const FVector& TargetWorldPosition,
-	const float DeltaTime) const
-{
-	const APawn* OwnerPawn = Cast<APawn>(GetOwner());
-	if (IsScrapeFocusActive()
-		|| !bUseAimCorrection
-		|| !OwnerPawn
-		|| !OwnerPawn->IsLocallyControlled()
-		|| ViewLocation.ContainsNaN()
-		|| CurrentAimWorldPosition.ContainsNaN()
-		|| TargetWorldPosition.ContainsNaN())
-	{
-		return;
-	}
-
-	AController* Controller = OwnerPawn->GetController();
-	if (!Controller)
-	{
-		return;
-	}
-
-	const float SafeDeltaTime = FMath::IsFinite(DeltaTime)
-		? FMath::Max(DeltaTime, 0.0f)
-		: 0.0f;
-
-	// 프레임률이 달라도 같은 속도로 수렴하도록 지수 비율을 쓴다.
-	const float CorrectionRatio = 1.0f - FMath::Exp(
-		-FMath::Max(AimCorrectionInterpolationSpeed, 0.0f) * SafeDeltaTime);
-	const FRotator CurrentControlRotation = Controller->GetControlRotation();
-	const FRotator CorrectedControlRotation = CalculateAimCorrectionRotation(
-		CurrentControlRotation,
-		CurrentAimWorldPosition - ViewLocation,
-		TargetWorldPosition - ViewLocation,
-		CorrectionRatio,
-		AimCorrectionSpeedDegreesPerSecond * SafeDeltaTime,
-		AimCorrectionMaximumErrorDegrees);
-	if (CorrectedControlRotation.Equals(
-			CurrentControlRotation,
-			UE_KINDA_SMALL_NUMBER))
-	{
-		return;
-	}
-
-	Controller->SetControlRotation(CorrectedControlRotation);
 }

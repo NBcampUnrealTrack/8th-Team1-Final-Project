@@ -1,9 +1,11 @@
 #include "MDTrashPlacementEditorMode.h"
 
 #include "InteractiveToolManager.h"
+#include "Tools/EdModeInteractiveToolsContext.h"
 #include "MDTrashPlacementEditorModeCommands.h"
 #include "MDTrashPlacementEditorModeToolkit.h"
 #include "Tools/MDTrashPlacementTool.h"
+#include "Tools/MD_StainPlacementTool.h"
 
 #define LOCTEXT_NAMESPACE "MDTrashPlacementEditorMode"
 
@@ -15,7 +17,7 @@ UMDTrashPlacementEditorMode::UMDTrashPlacementEditorMode()
 {
 	Info = FEditorModeInfo(
 		EM_MDTrashPlacementEditorModeId,
-		LOCTEXT("ModeName", "MD Trash Placement"),
+		LOCTEXT("ModeName", "Placement"),
 		FSlateIcon(),
 		true);
 }
@@ -30,7 +32,8 @@ void UMDTrashPlacementEditorMode::Enter()
 		PlacementToolName,
 		NewObject<UMDTrashPlacementToolBuilder>(this));
 
-	GetToolManager()->SelectActiveToolType(EToolSide::Left, PlacementToolName);
+	RegisterTool(ToolCommands.StainPlacementTool, TEXT("MDStainPlacementTool"), NewObject<UMD_StainPlacementToolBuilder>(this));
+	GetInteractiveToolsContext()->StartTool(PlacementToolName);
 }
 
 void UMDTrashPlacementEditorMode::ActorSelectionChangeNotify()

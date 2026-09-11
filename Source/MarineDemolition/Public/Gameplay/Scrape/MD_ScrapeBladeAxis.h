@@ -43,8 +43,6 @@ struct MARINEDEMOLITION_API FMD_ScrapeBladeAxisWindow
 		double WindowCm,
 		FVector2D& OutAxis) const;
 
-	int32 GetSampleCount() const;
-
 private:
 	TArray<FMD_ScrapeBladeAxisSample> Samples;
 };

@@ -12,7 +12,6 @@
 
 class UMD_InputConfig;
 class UInputMappingContext;
-class UInputAction;
 class UEnhancedInputLocalPlayerSubsystem;
 class UCameraComponent;
 class UStaticMesh;
@@ -23,11 +22,15 @@ class UPhysicsHandleComponent;
 class UMD_CharacterMovementComponent;
 class UMD_InteractionComponent;
 class UMD_ScrapeToolComponent;
+class UMD_StainScraperComponent;
+class UMD_ScannerComponent;
 class UGameplayAbility;
 class UMD_EquipHotbarComponent;
 class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
+class UMD_ItemDefinition;
 class UMD_SupplyComponent;
+class UMD_FoamGunComponent;
 class UMD_OxygenComponent;
 class UMD_ComfortComponent;
 class UWidgetComponent;
@@ -71,22 +74,48 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
 	UMD_ScrapeToolComponent* GetScrapeToolComponent() const	{ return ScrapeToolComponent; }
 
-	/**
-	 * 서버/로컬이 확정한 접촉 자세를 기존 ABP 입력 형식으로 변환한다.
-	 * 카메라 중앙을 다시 Trace하지 않으며 원격 Pawn도 복제 pose만 소비한다.
-	 */
+	UFUNCTION(BlueprintPure, Category = "MD|Stain")
+	UMD_StainScraperComponent* GetStainScraperComponent() const { return StainScraperComponent; }
+
+	UFUNCTION(BlueprintPure, Category="MD|Scanner")
+	UMD_ScannerComponent* GetScannerComponent() const { return ScannerComponent; }
+
+	/** 현재 장착한 헤라에 털어낼 적재량이 있는지 외부 상호작용 대상에 알려준다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Unload")
+	bool CanUnloadScrapeLoad() const;
+
+	/** 현재 장착한 헤라에서 요청량만큼 실제 표현 가능한 감소가 생기는지 반환한다. */
+	bool CanUnloadScrapeLoadForRequest(float RequestedAmount) const;
+
+	/** 서버에서 장착 상태를 재검증하고 요청량만큼 헤라 적재량 제거를 시도한다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Scrape|Unload")
+	float TryUnloadScrapeLoad(float RequestedAmount);
+
+	/** 기존 AnimBP 호환용 출력. 3인칭 포인터 조준은 사용하지 않으므로 항상 비활성이다. */
 	UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "MD|Scrape|Animation")
 	void GetScrapeAnimationAim(FRotator& AimDelta, bool& Active);
 
-	/**
-	 * 명시적 blade 진행축을 도구의 소켓 기준 twist로 적용한다.
-	 * ControlRotation 변화량으로 가로/세로를 재추정하지 않는다.
-	 */
+	/** 기존 AnimBP 호환용 갱신. 3인칭 도구를 기본 손 소켓 자세로 유지한다. */
 	UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "MD|Scrape|Animation")
 	void UpdateScrapeAnimationBlade(
 		bool Active,
 		double DeltaTime,
 		FRotator& Swing);
+
+	/**
+	 * 기존 AnimBP 호환용 출력. 3인칭은 접촉 IK를 사용하지 않으므로 항상 비활성이다.
+	 * AnimBP에서 오른팔 IK 노드를 제거한 뒤 후속 정리에서 함께 삭제할 수 있다.
+	 */
+	UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "MD|Scrape|Animation")
+	void GetScrapeAnimationHandIK(
+		double DeltaTime,
+		FTransform& EffectorTransformComponentSpace,
+		FVector& JointTargetLocationComponentSpace,
+		float& Alpha,
+		bool& Active,
+		bool& Reachable,
+		bool& TeleportOrSnap,
+		int64& PoseGeneration);
 
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	UMD_EquipHotbarComponent* GetHotbarComponent() const { return EquipHotbarComponent; }
@@ -99,6 +128,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Oxygen")
 	UMD_OxygenComponent* GetOxygenComponent() const { return OxygenComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
+	UMD_FoamGunComponent* GetFoamGunComponent() const { return FoamGunComponent; }
 
 	// 절단 루프 VFX 토글. 어빌리티가 서버·소유 클라 양쪽에서 부르고, 사본 프록시는 복제로 따라온다
 	void SetCutterVFXActive(bool bActive);
@@ -190,6 +222,12 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_ScrapeToolComponent> ScrapeToolComponent;
 
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Stain", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMD_StainScraperComponent> StainScraperComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Scanner")
+	TObjectPtr<UMD_ScannerComponent> ScannerComponent;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_EquipHotbarComponent> EquipHotbarComponent;
 
@@ -215,6 +253,16 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> FirstPersonToolMesh;
 
+	/**
+	 * 절단기 톱날. 도구 메시와 같은 시점 분리(OwnerNoSee / OnlyOwnerSee)를 쓰고,
+	 * 각각 대응하는 도구 메시의 톱날 소켓에 붙는다. 절단 중 로컬 Y 를 축으로 돈다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UStaticMeshComponent> ThirdPersonCutterBlade;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UStaticMeshComponent> FirstPersonCutterBlade;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
 	FName ToolAttachSocketName = TEXT("ToolSocket");
 
@@ -235,6 +283,40 @@ protected:
 	TObjectPtr<UAnimMontage> BarnacleScrapeMontage;
 
 	/**
+	 * 절단기 톱날. 본체(ToolMesh)와 분리된 메시라 절단 중에 혼자 회전할 수 있다.
+	 * 본체 메시의 CutterBladePivotSocketName 소켓에 붙는다. 소켓이 없거나 이
+	 * 메시가 비어 있으면 톱날을 표시하지 않는다 — 다른 도구도 같은 경로를 탄다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|Cutter")
+	TObjectPtr<UStaticMesh> CutterBladeMesh;
+
+	/** 본체 메시에서 톱날 회전 중심을 표시하는 소켓. 원판 중심에 있어야 한다 */
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Cutter")
+	FName CutterBladePivotSocketName = TEXT("Blade_Pivot");
+
+	/**
+	 * 절단 중 톱날 회전 속도. 톱날 메시는 두께축이 Y 라 로컬 Y 를 축으로 돈다.
+	 * 회전은 bCutterVFXActive 를 그대로 따르므로 사본 프록시에서도 돌아간다.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Cutter",
+		meta = (ClampMin = "0.0", Units = "deg/s"))
+	float CutterBladeSpinDegreesPerSecond = 1440.0f;
+
+	/**
+	 * 폼건 RMB 조준 자세(AS_FoamGun_Pose_Montage). DefaultSlot 에 재생하며
+	 * 조준을 놓을 때까지 유지한다. 한 프레임짜리 포즈 몽타주라 재생 직후
+	 * 섹션이 자기 자신을 다음으로 가리키게 만들어 루프시킨다.
+	 * 비어 있으면 조준해도 자세가 바뀌지 않는다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|Animation")
+	TObjectPtr<UAnimMontage> FoamAimMontage;
+
+	/** 조준 자세를 걷어낼 때의 블렌드 아웃 시간 */
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Animation",
+		meta = (ClampMin = "0.0", Units = "s"))
+	float FoamAimMontageBlendOutSeconds = 0.15f;
+
+	/**
 	 * 도구 스태틱 메시에서 손에 닿을 지점을 표시하는 소켓 이름.
 	 * 이 소켓이 있으면 그 지점이 캐릭터 손 소켓에 오도록 도구를 배치하므로,
 	 * 메시 에디터에서 소켓을 옮기는 것만으로 잡는 위치가 바뀐다.
@@ -252,6 +334,10 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_SupplyComponent> SupplyComponent;
+
+	/** 폼건 충전·탄도 정본·조준 궤적 프리뷰 (기획 08 §4.2) */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_FoamGunComponent> FoamGunComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_OxygenComponent> OxygenComponent;
@@ -292,17 +378,22 @@ private:
 	void HandleLookInput(const FInputActionValue& Value);
 	void HandleInteractInput(const FInputActionValue& Value);
 	void HandleAbilityInput(const FInputActionValue& Value);
+	void HandleScannerModeSwitchInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
-	void HandleScrapeFocusInputStarted();
+	void HandleScrapeFocusToggleInput();
+	void HandleScrapeFocusReleasedInput();
 	void HandleScrapeFocusInputEnded();
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
 	void HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
+	// 조작 설정 키가 반영된 런타임 플레이어 입력 컨텍스트 조회
+	UInputMappingContext* ResolvePlayerMappingContext();
 
 	// 클라이언트의 사다리 점프 이탈을 서버에 반영하는 요청
 	UFUNCTION(Server, Reliable)
 	void ServerJumpOffLadder();
+
 	//void HandleWallCutInput(const FInputActionValue& Value);
 	//void HandleWallScanInput(const FInputActionValue& Value);
 
@@ -317,6 +408,15 @@ private:
 	void HandleScrapeLoadChanged(float NewScrapeLoad);
 
 	void RefreshToolMesh();
+
+	/**
+	 * 절단기 톱날 메시와 표시 여부를 확정한다. 도구 메시가 바뀔 때마다 불러야
+	 * 하며, 본체에 톱날 소켓이 없으면 톱날을 숨긴다.
+	 */
+	void RefreshCutterBladeMesh();
+
+	/** 절단 중일 때만 톱날을 돌린다. Tick 에서 부른다 */
+	void UpdateCutterBladeSpin(float DeltaSeconds);
 	void RefreshScrapeLoadVisual();
 
 	UFUNCTION()
@@ -329,18 +429,35 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_CutterVFXActive)
 	bool bCutterVFXActive = false;
 
+	/**
+	 * 폼건 RMB 조준 자세를 켜고 끈다. 소유 클라가 즉시 반영하고 서버에 올리며,
+	 * 사본 프록시는 복제로 따라온다 — 그래야 남들 화면에도 조준 자세가 보인다.
+	 * FoamGunComponent 의 bAimHeld 는 궤적 프리뷰용 로컬 상태라 복제되지 않는다.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerSetFoamAiming(bool bAiming);
+
+	UFUNCTION()
+	void OnRep_FoamAiming();
+
+	/** 소유 클라·서버·사본 프록시가 모두 거치는 단일 적용 지점 */
+	void RefreshFoamAimMontage();
+
+	/** 조준 상태를 굳히고 로컬에 즉시 반영한 뒤 서버로 올린다 */
+	void SetFoamAiming(bool bAiming);
+
+	UPROPERTY(ReplicatedUsing = OnRep_FoamAiming)
+	bool bFoamAiming = false;
+
 	/** 현재 도구 메시에 붙어 있는 절단 루프 이펙트 인스턴스 */
 	UPROPERTY(Transient)
 	TObjectPtr<UNiagaraComponent> CutterVFXComponent;
 
-	/** 우클릭 헤라 포커스 입력용 런타임 액션/컨텍스트를 필요할 때 생성한다. */
-	void EnsureScrapeFocusInputObjects();
+	/** 장비 identity 변경 시 이전 헤라 입력 소유권과 Focus를 정리한다. */
+	void RefreshScrapeFocusInputState();
 
-	/** 현재 장착 도구에 맞춰 로컬 플레이어의 헤라 포커스 입력 컨텍스트를 갱신한다. */
-	void RefreshScrapeFocusInputContext();
-
-	/** 컨텍스트 제거 전에 진행 중인 헤라 포커스를 항상 종료한다. */
-	void RemoveScrapeFocusInputContext();
+	/** 빙의/종료 경계에서 진행 중인 헤라 입력과 장비 identity를 초기화한다. */
+	void ResetScrapeFocusInputState();
 
 	/** 이번 LMB 입력으로 정확히 활성화한 헤라 Ability만 취소한다. */
 	void CancelActiveScrapeAbility();
@@ -354,15 +471,20 @@ private:
 		UMD_ToolDefinition* SourceTool);
 
 	bool IsScrapeToolEquipped() const;
+
+	/** 현재 슬롯이 폼건인지. RMB 조준 컨텍스트 유지 판정에 쓴다 */
+	bool IsFoamGunEquipped() const;
+
+	/** 절단 어빌리티 태그로 판정한다. 톱날 표시 여부에 쓴다 */
+	UFUNCTION(BlueprintPure, Category = "MD|Equipment")
+	bool IsCutterEquipped() const;
 	UEnhancedInputLocalPlayerSubsystem* GetEnhancedInputSubsystem() const;
 
-	/**
-	 * 도구 메시의 그립 소켓이 손 소켓 원점에 오도록 하는 상대 트랜스폼.
-	 * 그립 소켓이 없으면 Tool의 AttachOffset을 그대로 돌려준다.
-	 */
-	FTransform GetToolAttachTransform(
+	// 공통 아이템의 부착 오프셋과 메시 그립 소켓을 반영한 상대 트랜스폼 조회
+	FTransform GetToolAttachTransform(const UStaticMesh* ToolMesh, UMD_ItemDefinition* Item) const;
+	FTransform GetToolAttachTransformFromOffset(
 		const UStaticMesh* ToolMesh,
-		const UMD_ToolDefinition* Tool) const;
+		const FTransform& AttachOffset) const;
 
 	/** 로컬 1인칭 팔 또는 클라이언트 이름표 갱신이 필요한 경우 캐릭터 틱을 활성화한다. */
 	void RefreshFirstPersonArmsTick();
@@ -379,16 +501,18 @@ private:
 	void UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget = false);
 
 	/**
-	 * 1인칭 도구 메시를 본체 포즈에서 직접 배치한다.
+	 * 1인칭 도구를 Focus viewmodel 또는 기본 팔 소켓 경로로 배치한다.
 	 *
-	 * FirstPersonMesh 는 SetLeaderPoseComponent 팔로워라 자기 본 갱신 경로를
-	 * 건너뛴다. 그래서 그 본 소켓에 붙은 자식 컴포넌트는 본 단위 회전(날 비틀기)을
-	 * 받지 못하고, 1인칭에서만 도구가 안 도는 현상이 생긴다.
-	 * 본체의 컴포넌트 공간 소켓 트랜스폼을 1인칭 팔의 컴포넌트 트랜스폼에 얹는다.
+	 * Focus 중에는 Blade_Tip을 가상 포인터에 맞추고, Focus 해제 후에는
+	 * 본체의 컴포넌트 공간 ToolSocket을 1인칭 팔 월드 변환에 합성한다.
 	 */
-	void UpdateFirstPersonToolTransform();
+	void UpdateFirstPersonToolTransform(float DeltaSeconds);
 
+	/** Focus 진입/해제 경계에서 1인칭 헤라를 팔 부착과 독립 뷰모델 사이로 전환한다. */
+	void SetFirstPersonScrapeViewModelActive(bool bActive);
 
+	/** 가상 포인터를 카메라 앞 평면으로 투영해 Blade_Tip을 그 위치에 배치한다. */
+	bool UpdateFirstPersonScrapeViewModel(float DeltaSeconds);
 private:
 	UFUNCTION()
 	void HandleHealthStateChanged(EMD_HealthState NewState);
@@ -408,19 +532,8 @@ private:
 	/** 직전에 사망 상태였는지. 부활 전이 판별용 */
 	bool bWasDeadState = false;
 
-	/** 에셋 의존 없이 우클릭 포커스를 바인딩하는 런타임 전용 입력 액션. */
-	UPROPERTY(Transient)
-	TObjectPtr<UInputAction> ScrapeFocusInputAction;
-
-	/** 헤라를 장착한 동안에만 로컬 플레이어에게 추가하는 입력 오버레이. */
-	UPROPERTY(Transient)
-	TObjectPtr<UInputMappingContext> ScrapeFocusInputMappingContext;
-
-	/** 컨트롤러 교체 뒤에도 이전 로컬 플레이어에서 컨텍스트를 제거하기 위한 약한 참조. */
-	TWeakObjectPtr<UEnhancedInputLocalPlayerSubsystem> ScrapeFocusInputSubsystem;
-
-	/** 수량 변경과 실제 장비 교체를 구분하기 위해 컨텍스트 적용 당시의 도구를 기억한다. */
-	TWeakObjectPtr<UMD_ToolDefinition> ScrapeFocusContextTool;
+	/** 수량 변경과 실제 장비 교체를 구분하기 위해 마지막 장착 도구를 기억한다. */
+	TWeakObjectPtr<UMD_ToolDefinition> ScrapeFocusInputTool;
 
 	/** 서버가 현재 ScrapeTool runtime snapshot에 적용한 기본 Profile의 도구 identity. */
 	TWeakObjectPtr<UMD_ToolDefinition> AppliedScrapeProfileTool;
@@ -437,41 +550,65 @@ private:
 	/** 장비 변경이 LMB release보다 빨라도 release가 새 도구를 취소하지 않도록 입력 소유권을 유지한다. */
 	bool bScrapeAbilityInputCaptured = false;
 
-	bool bScrapeFocusInputContextAdded = false;
+	/** StaticMesh contact frame. X=화면을 향한 normal, Z=포인터 진행 방향 계약이다. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel")
+	FName ScrapeBladeTipSocketName = TEXT("Blade_Tip");
 
-	/** 0값 Triggered가 Focus를 해제하지 않도록 하는 이동 입력 deadzone. */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Focus",
-		meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float ScrapeFocusMoveInputDeadzone = 0.1f;
+	/** 새 메시가 Blade_Tip 대신 명시적 접촉 이름을 쓸 때의 fallback. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel")
+	FName ScrapeBladeContactFallbackSocketName = TEXT("Blade_Contact");
 
-	/** 180도 동치 blade 축이 프레임마다 뒤집히지 않도록 마지막 부호를 보존한다. */
-	FVector LastScrapeAnimationBladeWorldDirection = FVector::ZeroVector;
+	/** Focus Ready에서 포인터를 따라가는 헤라의 카메라 전방 거리. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Pointer",
+		meta = (ClampMin = "10.0", ClampMax = "200.0", Units = "cm"))
+	float ScrapeViewModelDistanceCm = 75.0f;
 
-	/** 현재 메시에서 날 축에 대응하는 component-space 기준 방향. */
-	FVector ScrapeAnimationBladeReferenceDirection = FVector::ZeroVector;
-	FVector ScrapeAnimationToolTwistAxis = FVector::ZeroVector;
+	/** Focus Ready에서 접촉 소켓을 pivot으로 적용하는 시각 회전 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Pointer",
+		meta = (UIMin = "-180.0", UIMax = "180.0",
+			ToolTip = "Pointer-follow rotation in the Blade_Tip/Blade_Contact local contact frame."))
+	FRotator ScrapeViewModelRotationOffset = FRotator::ZeroRotator;
 
-	TWeakObjectPtr<UStaticMesh> ScrapeAnimationBladeReferenceMesh;
+	/** Focus Ready에서 접촉 소켓을 pivot으로 적용하는 uniform 크기 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Pointer",
+		meta = (ClampMin = "0.01", UIMin = "0.25", UIMax = "2.0"))
+	float ScrapeViewModelScaleMultiplier = 1.0f;
+
+	/** 실제 LMB 긁기 중에만 쓰는 독립 카메라 전방 거리. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Stroke",
+		meta = (ClampMin = "10.0", ClampMax = "200.0", Units = "cm"))
+	float ScrapeStrokeViewModelDistanceCm = 75.0f;
+
+	/** 실제 LMB 긁기 중에만 쓰는 독립 시각 회전 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Stroke",
+		meta = (UIMin = "-180.0", UIMax = "180.0",
+			ToolTip = "Active-stroke rotation in the Blade_Tip/Blade_Contact local contact frame."))
+	FRotator ScrapeStrokeViewModelRotationOffset = FRotator::ZeroRotator;
+
+	/** 실제 LMB 긁기 중에만 쓰는 독립 uniform 크기 보정. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel|Stroke",
+		meta = (ClampMin = "0.01", UIMin = "0.25", UIMax = "2.0"))
+	float ScrapeStrokeViewModelScaleMultiplier = 0.25f;
+
+	/** 위치는 즉시 따라가고 헤라 회전만 이 시간 동안 완화한다. */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel",
+		meta = (ClampMin = "0.0", ClampMax = "0.2", Units = "s"))
+	float ScrapeViewModelRotationSmoothingSeconds = 0.04f;
+
+	FVector2D LastScrapeViewModelPointerNormalized = FVector2D(0.5, 0.5);
+	FVector2D ScrapeStrokeViewModelScreenDirection = FVector2D(0.0, -1.0);
+	FVector LastScrapeStrokeViewModelStableWorldTangent = FVector::ZeroVector;
+	FQuat ScrapePointerViewModelWorldRotation = FQuat::Identity;
+	FQuat ScrapeStrokeViewModelWorldRotation = FQuat::Identity;
+	FVector ScrapeViewModelWorldScale = FVector::OneVector;
+	bool bFirstPersonScrapeViewModelActive = false;
+	bool bFirstPersonArmsWereVisible = true;
+	bool bScrapeStrokeViewModelDirectionLocked = false;
+	bool bWasScrapingForViewModel = false;
+	bool bHasScrapePointerViewModelRotation = false;
+	bool bHasScrapeStrokeViewModelRotation = false;
 
 	/** 접촉이 끊길 때 도구 회전을 AttachOffset으로 부드럽게 복귀시키는 현재 값. */
 	FRotator ScrapeAnimationToolRelativeRotation = FRotator::ZeroRotator;
 
-	/**
-	 * 날 축 twist 를 정의된 값으로 인정하는 최소 투영 길이. 투영 길이는 스트로크
-	 * 방향과 날 긴 축이 이루는 각의 sin 이므로, 이 값은 "축에서 몇 도 이상
-	 * 떨어져야 회전을 신뢰하는가"를 뜻한다. 0.25 ≈ 14.5도.
-	 */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Animation",
-		meta = (ClampMin = "0.0", ClampMax = "1.0"))
-	float ScrapeBladeTwistMinProjection = 0.25f;
-
-	/**
-	 * 마지막으로 정의된 날 축 twist(도). 스트로크 방향이 날 축과 평행해지는
-	 * 특이점 구간에서는 새로 계산하지 않고 이 값을 유지한다 — AttachOffset 으로
-	 * 되돌리면 프레임마다 70~80도를 왕복한다.
-	 */
-	float LastScrapeAnimationTwistDegrees = 0.0f;
-
-	bool bHasScrapeAnimationBladeDirection = false;
-	bool bHasScrapeAnimationTwist = false;
 };

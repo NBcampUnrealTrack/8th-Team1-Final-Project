@@ -16,14 +16,32 @@ class UMD_ScrapeSurfaceComponent;
  * 멤버를 하나씩 대입하는 대신 구조체 하나를 새로 대입하면 된다.
  */
 
-/** pending candidate가 다른 표면·spec으로 바뀌 후에도 생성 시점 정보를 보존한다. */
-struct FMD_PendingScrapeContaminationDab
+/**
+ * 로컬 헤라 애니메이션만 소비하는 한 프레임의 접촉 자세.
+ *
+ * 판정·예측·오염 변경의 입력으로 사용하지 않으며 네트워크로 복제하지 않는다.
+ * bValid가 false면 접촉 위치와 노멀은 소비하지 않는다. 진행 방향은 180도
+ * 동치인 단위 축이며 bTangentValid가 true일 때만 소비한다. Ready 또는 방향
+ * lock 전에는 게시자가 기본/직전 유효 축을 제공할 수 있고, 축을 만들 수 없으면
+ * 영벡터와 bTangentValid=false를 게시해 소비자가 도구 기본 회전을 쓰게 한다.
+ */
+struct FMD_ScrapeVisualContactPose
 {
-	FMD_ScrapeContaminationDab Dab;
-	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> Surface;
-	FMD_ScrapeToolSpec ToolSpec;
-	float StampAmount = 0.0f;
-	float StampDepthCm = 0.0f;
+	FVector ContactWorldLocation = FVector::ZeroVector;
+	FVector ContactWorldNormal = FVector::ZeroVector;
+	FVector StrokeWorldTangent = FVector::ZeroVector;
+	uint64 FocusSessionId = 0;
+	uint32 LmbStrokeGeneration = 0;
+	/** 마지막 갱신의 GFrameCounter. MAX_uint64는 아직 갱신되지 않았음을 뜻한다. */
+	uint64 LastUpdatedFrame = MAX_uint64;
+	/** 시각 pose를 새로 게시할 때 증가하는 세대. 0은 게시 전 상태로 예약한다. */
+	uint32 UpdateGeneration = 0;
+	bool bValid = false;
+	bool bTangentValid = false;
+	/** true면 유효 tangent가 현재 LMB stroke의 고정 방향축이며 bTangentValid도 true다. */
+	bool bDirectionLocked = false;
+	/** 소비자가 이전 pose와 보간하지 않고 즉시 새 기준점을 써야 한다. */
+	bool bTeleportOrSnap = false;
 };
 
 /** 첫 Reliable aim보다 먼저 검증된 continuous 표본의 bounded replay 항목. */
@@ -95,12 +113,8 @@ struct FMD_ScrapeAuthoritativeAimState
 struct FMD_ScrapeStrokePathState
 {
 	bool bHasPreviousSurfacePosition;
-	bool bHasLockedStrokeAxis;
 	FVector2D PreviousSurfacePositionCm;
 	EMD_ScrapeSurfaceFace PreviousSurfaceFace;
-	FVector2D StrokeAnchorPositionCm;
-	FVector2D FurthestSurfacePositionCm;
-	FVector2D LockedStrokeAxis;
 	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> PreviousSurface;
 	/** 초기 basis가 확정될 때까지 원래 raw 점 순서를 그대로 보관한다. */
 	TArray<FVector2D> PendingScrapePolylineCm;
@@ -136,28 +150,4 @@ struct FMD_ScrapeAimRecoveryState
 		EMD_ScrapeSurfaceFace::Front;
 	FVector2D ScrapeReconnectPositionCm = FVector2D::ZeroVector;
 	FHitResult ScrapeReconnectSurfaceHit;
-};
-
-/** 포화된 헤라가 다시 묻히는 오염 도장의 누적 상태. */
-struct FMD_ScrapeContaminationPaintState
-{
-	/** Stage3에 진입한 지점부터만 누적하는 ordered path state. */
-	bool bStage3PathActive = false;
-	double Stage3PathArcLengthCm = 0.0;
-	int32 Stage3NextDistanceBin = 0;
-	double Stage3ProtectionDistanceCm = 0.0;
-	TWeakObjectPtr<UMD_ScrapeSurfaceComponent> Stage3PathSurface;
-	EMD_ScrapeSurfaceFace Stage3PathSurfaceFace =
-		EMD_ScrapeSurfaceFace::Front;
-	FMD_ScrapeToolSpec Stage3PathToolSpec;
-	FVector2D Stage3PathStartPositionCm = FVector2D::ZeroVector;
-	FMD_ScrapeBladeBasis Stage3PathStartBladeBasis;
-	TArray<FMD_PendingScrapeContaminationDab> PendingStage3Dabs;
-	/** 자동화 스냅샷과 재전송 안전성 확인용. */
-	TArray<FMD_ScrapeContaminationDab> CommittedStage3Dabs;
-	uint32 Stage3SubStrokeGeneration = 0;
-	uint64 Stage3SampleSequence = 0;
-	/** TASK 7 권위 session id가 배정되면 owner placeholder 대신 사용한다. */
-	uint64 Stage3FocusSessionIdentityOverride = 0;
-	int32 SaturatedContaminationStampPatternSeed;
 };

@@ -1,15 +1,17 @@
 #include "World/Wall/MD_WallUtility.h"
 
 #include "Character/MD_Character.h"
+#include "Component/Scanning/MD_ScannerComponent.h"
 #include "CollisionQueryParams.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Equipment/MD_ItemDefinition.h"
 #include "Engine/OverlapResult.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "World/Wall/MD_CuttableWall.h"
@@ -41,6 +43,19 @@ AMD_WallUtility::AMD_WallUtility()
 	LinkTrigger->SetCanEverAffectNavigation(false);
 }
 
+void AMD_WallUtility::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
+{
+	TagContainer.AddTag(MDGameplayTags::Interaction_Scannable);
+}
+
+void AMD_WallUtility::OnScanned_Implementation(float Duration, AActor* Scanner)
+{
+	if (!FMath::IsFinite(Duration) || Duration <= 0.f || IsHidden()
+		|| !IsValid(Mesh) || !Mesh->IsVisible() || !Mesh->bRenderInMainPass) return;
+	// Preserve local ownership, interaction priority and the existing cleanup timer.
+	HandleHostWallScanned(nullptr, Duration, Scanner);
+}
+
 void AMD_WallUtility::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -57,6 +72,27 @@ void AMD_WallUtility::BeginPlay()
 	// 모든 머신에서 링크한다. 컷 델리게이트는 서버에서만 방송되어 클라 구독은 무해하고,
 	// 스캔 실루엣은 스캔한 클라 로컬에서 떠야 하므로 클라 파이프도 구독해야 한다.
 	LinkOverlappingWalls();
+
+	// 처음부터 고장 상태로 시작 (서버에서만 상태 전이, 클라는 복제로 따라온다)
+	if (bStartBroken && HasAuthority())
+	{
+		// 파손 지점은 레벨 배치 시 지정. 미지정이면 메시 중심 (바운드 랜덤은 ㄴ·ㄱ 파이프 허공에 뜸)
+		const FTransform ActorTM = GetActorTransform();
+		if (StartBreakLocalOffset.IsNearlyZero())
+		{
+			BreakLocation = IsValid(Mesh) ? Mesh->Bounds.Origin : GetActorLocation();
+		}
+		else
+		{
+			BreakLocation = ActorTM.TransformPosition(StartBreakLocalOffset);
+		}
+
+		const FVector WorldNormal = ActorTM.TransformVectorNoScale(StartBreakLocalNormal).GetSafeNormal();
+		BreakNormal = WorldNormal.IsNearlyZero() ? GetActorForwardVector() : WorldNormal;
+
+		// Cutter 없음 = 시작 파손. 파생 클래스는 이 값으로 감점을 건너뛴다
+		SetBroken(nullptr);
+	}
 }
 
 void AMD_WallUtility::LinkOverlappingWalls()
@@ -100,6 +136,13 @@ void AMD_WallUtility::LinkOverlappingWalls()
 
 void AMD_WallUtility::HandleHostWallCut(AMD_CuttableWall* Wall, AActor* Cutter)
 {
+	// 이미 파손된 인프라는 건드리지 않는다.
+	// (SetBroken이 걸러주지만, 그 전에 BreakLocation/Normal을 덮어써 VFX 기준점만 바뀌는 것을 막는다)
+	if (UtilityState == EMD_UtilityState::Broken)
+	{
+		return;
+	}
+
 	// 조준선이 이 인프라 메시를 실제로 관통했을 때만 파손한다.
 	// 파이프를 피해서 자르면 벽만 사라지고 인프라는 살아남는다.
 	FHitResult CutHit;
@@ -175,6 +218,10 @@ void AMD_WallUtility::HandleHostWallScanned(AMD_CuttableWall* Wall, float Durati
 		return;
 	}
 
+	ActiveScanner = Scanner;
+	if (const AMD_Character* Character = Cast<AMD_Character>(Scanner))
+		if (UMD_ScannerComponent* Component = Character->GetScannerComponent())
+			Component->TrackScannedUtility(this);
 	SetScanSilhouette(true);
 
 	// 지속시간 후 자동 해제 (재스캔 시 타이머 갱신 = 연장)
@@ -187,22 +234,35 @@ void AMD_WallUtility::HandleHostWallScanned(AMD_CuttableWall* Wall, float Durati
 
 void AMD_WallUtility::SetScanSilhouette(bool bVisible)
 {
-	if (!IsValid(Mesh))
-	{
-		return;
-	}
+	bScanHighlighted = bVisible;
+	RefreshHighlight();
+}
 
-	if (bVisible)
-	{
-		// 상호작용 하이라이트(250)와 구분되는 스캔 전용 스텐실 → PP가 엑스레이로 렌더
-		Mesh->SetCustomDepthStencilValue(ScanSilhouetteStencil);
-	}
-	Mesh->SetRenderCustomDepth(bVisible);
+void AMD_WallUtility::RefreshHighlight()
+{
+	if (bScanHighlighted || bInteractionHighlighted)
+		HighlightState.Apply(Mesh, bScanHighlighted ? ScanSilhouetteStencil : IMD_Interactable::HighlightStencilValue);
+	else
+		HighlightState.Restore();
 }
 
 void AMD_WallUtility::EndScanSilhouette()
 {
+	GetWorldTimerManager().ClearTimer(ScanSilhouetteTimer);
+	ActiveScanner.Reset();
 	SetScanSilhouette(false);
+}
+
+void AMD_WallUtility::StopScanFor(AActor* Scanner)
+{
+	if (ActiveScanner.Get() == Scanner) EndScanSilhouette();
+}
+
+void AMD_WallUtility::EndPlay(const EEndPlayReason::Type Reason)
+{
+	GetWorldTimerManager().ClearTimer(ScanSilhouetteTimer);
+	HighlightState.Restore();
+	Super::EndPlay(Reason);
 }
 
 void AMD_WallUtility::SetBroken(AActor* Cutter)
@@ -227,6 +287,23 @@ void AMD_WallUtility::DebugForceRepair(AActor* Repairer)
 	SetRepaired(Repairer);
 }
 
+bool AMD_WallUtility::TryExternalRepair(AActor* Repairer, FGameplayTag RepairToolTag)
+{
+	if (!HasAuthority() || UtilityState != EMD_UtilityState::Broken)
+	{
+		return false;
+	}
+
+	// Interact 경로의 CanRepairWith와 같은 기준 — 정확 일치만 인정
+	if (!RepairToolTag.MatchesTagExact(RequiredRepairToolTag))
+	{
+		return false;
+	}
+
+	SetRepaired(Repairer);
+	return true;
+}
+
 void AMD_WallUtility::SetRepaired(AActor* Repairer)
 {
 	if (!HasAuthority() || UtilityState != EMD_UtilityState::Broken)
@@ -240,7 +317,37 @@ void AMD_WallUtility::SetRepaired(AActor* Repairer)
 
 	OnRepaired(Repairer);
 
+	// 수리 완료 시 연결된 문의 잠금 해제
+	UnlockLinkedGate();
+
 	OnRep_UtilityState();
+}
+
+void AMD_WallUtility::UnlockLinkedGate()
+{
+	AActor* GateActor = LinkedGateActor.Get();
+	if (!IsValid(GateActor))
+	{
+		return;
+	}
+
+	// BP_Door의 bLocked 변수를 FBoolProperty로 직접 접근해 false 세팅
+	FBoolProperty* LockedProp = CastField<FBoolProperty>(
+		GateActor->GetClass()->FindPropertyByName(TEXT("bLocked")));
+
+	if (LockedProp != nullptr)
+	{
+		LockedProp->SetPropertyValue_InContainer(GateActor, false);
+		GateActor->ForceNetUpdate();
+
+		UE_LOG(LogTemp, Display, TEXT("[MD_Utility] %s UnlockLinkedGate: %s.bLocked = false"),
+			*GetName(), *GateActor->GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s UnlockLinkedGate: %s has no bLocked property"),
+			*GetName(), *GateActor->GetName());
+	}
 }
 
 void AMD_WallUtility::OnRep_UtilityState()
@@ -268,15 +375,41 @@ bool AMD_WallUtility::CanRepairWith(AActor* Interactor) const
 		return false;
 	}
 
-	const UMD_ToolDefinition* CurrentTool = Hotbar->GetCurrentTool();
-	return IsValid(CurrentTool)
-		&& CurrentTool->ToolAbilityTag.MatchesTagExact(RequiredRepairToolTag);
+	// 도구와 소모품에 공통인 사용 능력으로 수리 대상 호환성 판정
+	UMD_ItemDefinition* CurrentItem = Hotbar->GetCurrentItem();
+	// 요구된 수리 능력 태그와 정확히 일치하는 아이템만 허용
+	return IsValid(CurrentItem) == true && CurrentItem->GetUseAbilityTag().MatchesTagExact(RequiredRepairToolTag) == true;
 }
 
 bool AMD_WallUtility::CanInteract_Implementation(AActor* Interactor) const
 {
-	return UtilityState == EMD_UtilityState::Broken
+	// 도구 입력 전용 인프라(절연테이프)는 상호작용 대상이 아니다 — 프롬프트도 뜨지 않는다
+	return !bRepairRequiresToolInput
+		&& UtilityState == EMD_UtilityState::Broken
 		&& CanRepairWith(Interactor);
+}
+
+bool AMD_WallUtility::TryRepairWithEquippedTool(AActor* Repairer)
+{
+	if (!HasAuthority() || UtilityState != EMD_UtilityState::Broken || !CanRepairWith(Repairer))
+	{
+		return false;
+	}
+
+	// 소모형 수리 도구는 차감이 먼저다. 차감 실패(수량 0)면 수리도 하지 않는다
+	if (bConsumesRepairTool)
+	{
+		const AMD_Character* Character = Cast<AMD_Character>(Repairer);
+		UMD_EquipHotbarComponent* Hotbar = IsValid(Character) ? Character->GetHotbarComponent() : nullptr;
+		// 수리 도구의 공통 수량 차감 실패 시 수리 진행 차단
+		if (IsValid(Hotbar) == false || Hotbar->TryConsumeItem(Hotbar->GetCurrentItem(), 1) == false)
+		{
+			return false;
+		}
+	}
+
+	SetRepaired(Repairer);
+	return true;
 }
 
 void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
@@ -287,19 +420,16 @@ void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
 	}
 
 	// 조준 이후 상태·장비가 바뀔 수 있으므로 실제 실행 직전에도 같은 규칙을 다시 확인한다.
-	if (CanInteract_Implementation(Interactor))
-	{
-		SetRepaired(Interactor);
-	}
-}
-
-void AMD_WallUtility::SetInteractionHighlighted_Implementation(bool bHighlighted)
-{
-	if (!IsValid(Mesh))
+	if (!CanInteract_Implementation(Interactor))
 	{
 		return;
 	}
 
-	Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
-	Mesh->SetRenderCustomDepth(bHighlighted);
+	TryRepairWithEquippedTool(Interactor);
+}
+
+void AMD_WallUtility::SetInteractionHighlighted_Implementation(bool bHighlighted)
+{
+	bInteractionHighlighted = bHighlighted;
+	RefreshHighlight();
 }

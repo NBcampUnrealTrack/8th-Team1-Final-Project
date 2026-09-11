@@ -65,6 +65,18 @@ public:
 	virtual bool RequiresServerInteraction_Implementation() const { return true; }
 
 	/**
+	 * 물리 픽업 태그가 있는 대상이 이번 입력에서 일반 Interact를 먼저 처리할지 조회한다.
+	 * 기존 픽업 대상의 동작을 보존하기 위해 기본값은 false다.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
+	bool ShouldPrioritizeInteractionOverPhysicsPickup(AActor* Interactor) const;
+	virtual bool ShouldPrioritizeInteractionOverPhysicsPickup_Implementation(
+		AActor* Interactor) const
+	{
+		return false;
+	}
+
+	/**
 	 * 물리 오브젝트를 든 상태에서도 이 대상을 조준하고 Interact를 전달할지 여부.
 	 * 기본값 false는 기존의 E 놓기 동작을 보존한다.
 	 */

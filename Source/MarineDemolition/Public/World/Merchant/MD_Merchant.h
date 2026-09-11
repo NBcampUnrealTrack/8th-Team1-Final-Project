@@ -5,8 +5,11 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
+#include "UObject/PrimaryAssetId.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_Merchant.generated.h"
+
+struct FStreamableHandle;
 
 class UMD_MerchantMenuWidget;
 class UMD_ShopCatalog;
@@ -50,10 +53,10 @@ public:
 	FText GetMerchantDisplayName() const { return MerchantDisplayName; }
 
 	/** 서버 카탈로그와 경제 원장을 사용해 구매자에게 품목을 지급하고 결제를 확정하는 함수 */
-	EMD_ShopPurchaseResult TryPurchaseItem(AMD_Character* PurchasingCharacter, FName ItemId);
+	EMD_ShopPurchaseResult TryPurchaseItem(AMD_Character* PurchasingCharacter, FPrimaryAssetId ItemAssetId);
 
 	/** 서버 구매 결과를 현재 로컬 상점과 대사창에 반영하는 함수 */
-	void ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResult Result);
+	void ReceiveShopPurchaseResult(FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result);
 
 	/** Blueprint가 Push하기 전에 전달한 상점 화면에 상인 데이터와 도메인 이벤트를 연결한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
@@ -66,6 +69,10 @@ public:
 	/** Blueprint가 Push한 대출 화면에 상인 데이터와 도메인 이벤트를 연결하는 함수 */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	void InitializePushedLoan(UMD_LoanWidget* LoanWidget, UMD_MerchantMenuWidget* MenuWidget);
+
+protected:
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 protected:
 	/**
@@ -91,6 +98,9 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	TObjectPtr<UMD_ShopCatalog> ShopCatalog;
 
+	// 서버 검증 및 로컬 상점에서 사용할 정의의 로드 수명 유지
+	TSharedPtr<FStreamableHandle> DefinitionLoadHandle;
+
 	/**
 	 * 이미 가득 찬 품목을 사려 할 때 브릭스가 하는 말.
 	 *
@@ -112,15 +122,6 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	FText InvalidPurchaseDialogue = FText::FromString(TEXT("그 거래는 처리할 수 없어."));
 
-	/**
-	 * 아직 화면이 연결되지 않은 추가 메뉴를 눌렀을 때의 대사.
-	 *
-	 * 기획서에 이 상황 대사가 없어 `06` §4 톤에 맞춰 임시로 적었다.
-	 * 추가 화면이 생기면 이 대사 대신 화면을 띄우도록 바꾸기 위한 예비 문구.
-	 */
-	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
-	FText NotReadyDialogue = FText::FromString(TEXT("그건 아직 안 열었어. 목록이나 봐."));
-
 	/** 열려 있는 위젯 (중복 생성 방지용) */
 	TWeakObjectPtr<UMD_MerchantMenuWidget> ActiveMenuWidget;
 
@@ -141,11 +142,11 @@ private:
 
 	/** 가득 찬 품목 구매를 막았을 때 — 메뉴의 대사창으로 이유를 알린다. */
 	UFUNCTION()
-	void HandleShopPurchaseRejected(FName ItemId);
+	void HandleShopPurchaseRejected();
 
 	/** 로컬 상점 구매 요청을 소유 PlayerController의 서버 RPC로 전달하는 처리 */
 	UFUNCTION()
-	void HandleShopItemPurchaseRequested(FName ItemId);
+	void HandleShopItemPurchaseRequested(FPrimaryAssetId ItemAssetId);
 
 	/** 상인 복제 미러가 바뀔 때 열려 있는 상점 정보와 구매 가능 상태를 갱신하는 처리 */
 	UFUNCTION()
@@ -199,6 +200,9 @@ private:
 	// 복제된 크레딧과 부채를 현재 대출 화면에 다시 적용하는 함수
 	void RefreshLoanWidgetFromComponent();
 
+	/** 활성 메인 퀘스트 중 Interaction 목표를 찾아 서버 페이즈 전환을 요청하는 함수 */
+	void TryAdvanceInteractionQuests(APlayerController* PC);
+
 	UMD_MerchantComponent* GetMerchantComponent() const;
 
 	/** 메인·반복 퀘스트와 독립된 로어 수집 복제 컴포넌트 조회 함수 */
@@ -212,9 +216,5 @@ private:
 	/** 현재 상점 화면을 소유한 플레이어의 개별 구매 원장을 제공하는 함수 */
 	AMD_PlayerState* GetInteractingPlayerState() const;
 
-	/**
-	 * 아직 화면이 없는 추가 메뉴를 버튼 상태 변경 없이 대사로 안내하는 예비 처리 함수
-	 */
-	UFUNCTION()
-	void HandleNotReadyRequested();
+
 };

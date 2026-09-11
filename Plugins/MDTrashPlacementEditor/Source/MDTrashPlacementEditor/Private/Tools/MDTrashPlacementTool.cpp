@@ -18,6 +18,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "PrimitiveDrawingUtils.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Templates/TypeHash.h"
 #include "ToolContextInterfaces.h"
 #include "UObject/ConstructorHelpers.h"
@@ -574,6 +575,7 @@ bool UMDTrashPlacementTool::EraseTrashItem(AMD_TrashItem* TrashItem)
 	}
 
 	TrashItem->Modify();
+	if (GEditor && TrashItem->IsSelected()) GEditor->SelectActor(TrashItem, false, true);
 	if (!TrashWorld->EditorDestroyActor(TrashItem, true))
 	{
 		DisplayWarning(LOCTEXT("EraseFailed", "Failed to erase the targeted trash actor."));
@@ -607,6 +609,8 @@ void UMDTrashPlacementTool::OnBeginHover(const FInputDeviceRay& DevicePos)
 
 bool UMDTrashPlacementTool::OnUpdateHover(const FInputDeviceRay& DevicePos)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Placement_TrashHover);
+	LastHoverRay = DevicePos;
 	FHitResult HitResult;
 	if (IsEraseMode())
 	{
@@ -630,6 +634,12 @@ bool UMDTrashPlacementTool::OnUpdateHover(const FInputDeviceRay& DevicePos)
 	return bHasHoverHit;
 }
 
+void UMDTrashPlacementTool::OnPropertyModified(UObject* PropertySet, FProperty* Property)
+{
+	Super::OnPropertyModified(PropertySet, Property);
+	if (bHasHoverHit) OnUpdateHover(LastHoverRay);
+}
+
 void UMDTrashPlacementTool::OnEndHover()
 {
 	bHasHoverHit = false;
@@ -645,7 +655,6 @@ bool UMDTrashPlacementTool::TraceWorld(const FInputDeviceRay& DevicePos, FHitRes
 
 	const FVector RayStart = DevicePos.WorldRay.Origin;
 	const FVector RayEnd = DevicePos.WorldRay.PointAt(PlacementTraceDistance);
-	const FCollisionObjectQueryParams ObjectQueryParams(FCollisionObjectQueryParams::AllObjects);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDTrashPlacement), true);
 	for (const TWeakObjectPtr<AMD_TrashItem>& PlacedTrashItem : StrokePlacedTrashItems)
 	{
@@ -655,11 +664,11 @@ bool UMDTrashPlacementTool::TraceWorld(const FInputDeviceRay& DevicePos, FHitRes
 		}
 	}
 
-	return TargetWorld->LineTraceSingleByObjectType(
+	return TargetWorld->LineTraceSingleByChannel(
 		OutHit,
 		RayStart,
 		RayEnd,
-		ObjectQueryParams,
+		ECC_Visibility,
 		QueryParams);
 }
 
@@ -676,13 +685,12 @@ bool UMDTrashPlacementTool::TraceTrash(
 
 	const FVector RayStart = DevicePos.WorldRay.Origin;
 	const FVector RayEnd = DevicePos.WorldRay.PointAt(PlacementTraceDistance);
-	const FCollisionObjectQueryParams ObjectQueryParams(FCollisionObjectQueryParams::AllObjects);
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDTrashErase), true);
-	if (!TargetWorld->LineTraceSingleByObjectType(
+	if (!TargetWorld->LineTraceSingleByChannel(
 		OutHit,
 		RayStart,
 		RayEnd,
-		ObjectQueryParams,
+		ECC_Visibility,
 		QueryParams))
 	{
 		return false;
@@ -927,14 +935,15 @@ bool UMDTrashPlacementTool::IsPlacementSafe(
 	BoxExtent.Z = FMath::Max(BoxExtent.Z - Tolerance, 0.1);
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDTrashPlacementOverlap), false);
+	// Trigger/sensor overlaps are not physical obstructions. Keep blocking walls and trash.
+	QueryParams.bIgnoreTouches = true;
 	TArray<FOverlapResult> Overlaps;
 	const FVector BoxCenter = Transform.TransformPosition(LocalBounds.GetCenter());
-	const FCollisionObjectQueryParams ObjectQueryParams(FCollisionObjectQueryParams::AllObjects);
-	return !TargetWorld->OverlapMultiByObjectType(
+	return !TargetWorld->OverlapMultiByChannel(
 		Overlaps,
 		BoxCenter,
 		Transform.GetRotation(),
-		ObjectQueryParams,
+		ECC_Pawn,
 		FCollisionShape::MakeBox(BoxExtent),
 		QueryParams);
 }
@@ -1015,7 +1024,6 @@ void UMDTrashPlacementTool::UpdateGhostPreview(const FHitResult& HitResult)
 		bIsHoverPlacementValid ? ValidGhostColor : InvalidGhostColor);
 	GhostPreviewComponent->SetWorldTransform(PreviewTransform);
 	GhostPreviewComponent->SetVisibility(true);
-	GhostPreviewComponent->MarkRenderStateDirty();
 }
 
 void UMDTrashPlacementTool::HideGhostPreview()
