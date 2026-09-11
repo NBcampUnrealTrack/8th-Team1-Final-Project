@@ -27,6 +27,7 @@ public:
 		SLATE_ARGUMENT(UTexture2D*, ShipTexture)
 		/** 미지정이면 목적지 아이콘을 생략한다. */
 		SLATE_ARGUMENT(UTexture2D*, BeaconTexture)
+		SLATE_ARGUMENT(UTexture2D*, BackgroundTexture)
 		/** 지정되면 제목/부제 모두 이 폰트로 그린다. */
 		SLATE_ARGUMENT(UFont*, Font)
 	SLATE_END_ARGS()
@@ -58,13 +59,13 @@ private:
 	void DrawCompletionCheck(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
 		float Progress, float Opacity) const;
 	void DrawVoyageProgress(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
-		float Time, float Progress, float Opacity) const;
+		float Time, float Progress, float OffsetY, float Opacity) const;
 	void DrawSkyAndSea(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
-		float Opacity) const;
+		float GlobeOffsetY, float Opacity) const;
 	void DrawCloudBands(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
-		float Drift, float Opacity) const;
+		float OffsetY, float Opacity) const;
 	void DrawSeaSwell(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
-		float Drift, float Opacity) const;
+		float Drift, float GlobeOffsetY, float Opacity) const;
 	void DrawCenteredText(const FMD_LoadingDesignSpace& Space, FSlateWindowElementList& DrawElements, int32 LayerId,
 		const FTextLayer& Layer) const;
 
@@ -73,6 +74,7 @@ private:
 	TSharedPtr<FMD_LoadingVisualState> VisualState;
 	FSlateBrush ShipBrush;
 	FSlateBrush BeaconBrush;
+	FSlateBrush BackgroundBrush;
 	FSlateFontInfo TitleFont;
 	FSlateFontInfo SubtitleFont;
 };

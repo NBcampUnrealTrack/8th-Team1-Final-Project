@@ -89,7 +89,14 @@ int32 UMD_EquipHotbarWidget::GetCurrentSlotIndex() const
 	return IsValid(BoundHotbar) ? BoundHotbar->GetCurrentSlotIndex() : INDEX_NONE;
 }
 
-UMD_ToolDefinition* UMD_EquipHotbarWidget::GetToolAtSlot(int32 SlotIndex) const
+UMD_ItemDefinition* UMD_EquipHotbarWidget::GetItemAtSlot(int32 SlotIndex)
 {
-	return IsValid(BoundHotbar) ? BoundHotbar->GetToolAtSlot(SlotIndex) : nullptr;
+	// 바인딩된 공통 Hotbar에서 해당 위치의 아이템 조회
+	return IsValid(BoundHotbar) == true ? BoundHotbar->GetItemAtSlot(SlotIndex) : nullptr;
+}
+
+int32 UMD_EquipHotbarWidget::GetItemCountAtSlot(int32 SlotIndex)
+{
+	// 바인딩된 공통 Hotbar에서 해당 위치의 보유 수량 조회
+	return IsValid(BoundHotbar) == true ? BoundHotbar->GetItemCountAtSlot(SlotIndex) : 0;
 }

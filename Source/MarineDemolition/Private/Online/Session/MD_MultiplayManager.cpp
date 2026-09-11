@@ -118,7 +118,7 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
         return;
     }
 
-    BeginLoadingScreenForTravel(NSLOCTEXT("MDLoadingScreen", "CreatingSession", "CREW ASSEMBLING • 잠수팀 준비 중"));
+    BeginLoadingScreenForTravel(EMD_LoadingContext::CrewAssembling);
 
     // Online Session 비동기 생성 절차 실행
     CreateSessionInternal(ServerName, MaxPlayerCount, SessionCreateParams);
@@ -167,7 +167,7 @@ void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData, bool bLoad
         return;
     }
 
-    BeginLoadingScreenForTravel(NSLOCTEXT("MDLoadingScreen", "StartingExpedition", "DIVE IN PROGRESS • 잠수 준비 중"));
+    BeginLoadingScreenForTravel(EMD_LoadingContext::DiveStarting);
     StartSessionInternal(GameMapPackagePath, GameMapPackagePath);
 }
 
@@ -203,7 +203,7 @@ void UMD_MultiplayManager::StartSessionByMap(const FString& MapPackagePath, cons
 
     // 검증된 목적지 패키지 뒤에 게임 규칙 전달용 URL 옵션만 결합하는 처리
     FString TravelURL = FString::Printf(TEXT("%s%s"), *MapPackagePath, *TravelOptions);
-    BeginLoadingScreenForTravel(NSLOCTEXT("MDLoadingScreen", "StartingExpedition", "DIVE IN PROGRESS • 잠수 준비 중"));
+    BeginLoadingScreenForTravel(EMD_LoadingContext::DiveStarting);
     StartSessionInternal(MapPackagePath, TravelURL);
 }
 
@@ -256,7 +256,7 @@ void UMD_MultiplayManager::EndSession(const FString& MapPackagePath)
         return;
     }
 
-    BeginLoadingScreenForTravel(NSLOCTEXT("MDLoadingScreen", "ReturningToLobby", "MISSION INCOMPLETE • 작업 중단 후 복귀 중"));
+    BeginLoadingScreenForTravel(EMD_LoadingContext::MissionIncomplete);
 
     // End Session 비동기 요청의 최종 결과 수신을 위한 완료 이벤트 등록
     const FOnEndSessionCompleteDelegate OnEndSessionCompleteDelegate = FOnEndSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleEndSessionComplete, MapPackagePath);
@@ -449,7 +449,7 @@ void UMD_MultiplayManager::JoinSession(const FBlueprintSessionResult& BlueprintS
         return;
     }
 
-    BeginLoadingScreenForTravel(NSLOCTEXT("MDLoadingScreen", "JoiningSession", "CREW ASSEMBLING • 잠수팀 준비 중"));
+    BeginLoadingScreenForTravel(EMD_LoadingContext::CrewAssembling);
 
     // Session 참여 함수 호출
     JoinSessionInternal(BlueprintSessionResult.OnlineResult);
@@ -484,8 +484,8 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
         : FString();
     const bool bLeavingLobby = CurrentMapPackage.Contains(TEXT("Lobby"), ESearchCase::IgnoreCase);
     BeginLoadingScreenForTravel(bLeavingLobby
-        ? NSLOCTEXT("MDLoadingScreen", "LeavingLobby", "LEAVING THE CREW • 팀에서 나가는 중")
-        : NSLOCTEXT("MDLoadingScreen", "ReturningToTitle", "RETURNING TO SURFACE • 수면으로 복귀 중"));
+        ? EMD_LoadingContext::LeavingCrew
+        : EMD_LoadingContext::ReturningToSurface);
 
     // SessionName의 기본값 설정(UFUNCTION 측에서 NAME_GameSession을 인식하지 못하여 .cpp 측에서 설정)
     SessionName = SessionName == NAME_None ? NAME_GameSession : SessionName;
@@ -524,11 +524,11 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
 
 // 로컬 화면과 서버가 소유한 모든 클라이언트 화면에서 동시에 로딩을 시작한다.
 // 서버만 켜면 원격 클라이언트는 트래블 순간 예고 없이 얼어붙는다.
-void UMD_MultiplayManager::BeginLoadingScreenForTravel(const FText& Subtitle)
+void UMD_MultiplayManager::BeginLoadingScreenForTravel(EMD_LoadingContext Context)
 {
 	if (UMD_LoadingScreenSubsystem* LoadingScreen = GetLoadingScreen())
 	{
-		LoadingScreen->BeginLoadingScreen(Subtitle);
+		LoadingScreen->BeginLoadingScreen(Context);
 	}
 
 	UWorld* World = GetWorld();
@@ -542,7 +542,7 @@ void UMD_MultiplayManager::BeginLoadingScreenForTravel(const FText& Subtitle)
 	{
 		if (AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(Iterator->Get()))
 		{
-			PlayerController->ClientPrepareLoadingTransition(Subtitle);
+			PlayerController->ClientPrepareLoadingTransition(Context);
 		}
 	}
 }

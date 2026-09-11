@@ -18,7 +18,7 @@ class MARINEDEMOLITION_API UMD_ShopItemCardWidget : public UMD_CommonButtonBase
 public:
 	// 카드에 표시할 품목을 설정
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
-	void SetItem(const FMD_ShopItem& InItem, bool bInOwned);
+	void SetItem(const FMD_ShopItem& InItem);
 
 	// 카드에 저장된 품목을 반환
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")
@@ -32,10 +32,6 @@ protected:
 	/** 디자이너가 에디터 미리보기에서 값을 넣어볼 수 있도록 노출한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
 	FMD_ShopItem Item;
-
-	// 이미 지급되어 추가 구매할 수 없는 상태
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop")
-	bool bOwned = false;
 
 	// 카드 하단의 크레딧 가격 표시
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))

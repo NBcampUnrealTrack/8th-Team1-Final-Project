@@ -15,6 +15,13 @@ struct MARINEDEMOLITION_API FMD_QuestPhaseData
 {
 	GENERATED_BODY()
 
+	FMD_QuestPhaseData()
+	{
+		// FMD_QuestRewardData의 기본 Affinity가 0.1f라서 중간 보상이 없는 페이즈에서도
+		// 호감도가 지급되는 것을 방지하기 위해 0으로 초기화한다.
+		PhaseCompletionReward.Affinity = 0.0f;
+	}
+
 	/** 납품·청소·마감 등 현재 페이즈의 목표 분류 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
 	EMD_QuestObjectiveType ObjectiveType = EMD_QuestObjectiveType::RecoverIntact;
@@ -42,6 +49,11 @@ struct MARINEDEMOLITION_API FMD_QuestPhaseData
 	/** 현재 페이즈 목표를 완료했을 때 표시할 대사 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
 	FText CompletionDialogue;
+
+	/** 이 페이즈가 완료될 때 지급할 중간 보상. 최종 완료 보상(SuccessReward)과 별도다.
+	 *  대부분 페이즈에서는 비어 있고, M03a처럼 호감도만 주는 중간 단계에서 사용한다. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
+	FMD_QuestRewardData PhaseCompletionReward;
 
 public:
 	/** 제출된 퀘스트 아이템 액터가 현재 페이즈의 샘플 등급·손상 조건을 충족하는지 판정하는 함수 */
@@ -120,6 +132,9 @@ public:
 
 	/** 현재 목표 완료 후 표시할 대사 반환 */
 	FText GetCompletionDialogue(int32 PhaseIndex) const;
+
+	/** 현재 페이즈 완료 시 지급할 중간 보상 반환. 없으면 모두 0 */
+	const FMD_QuestRewardData& GetPhaseCompletionReward(int32 PhaseIndex) const;
 
 	/** 현재 목표가 인정하는 등급 목록 반환 */
 	FGameplayTagContainer GetAcceptedGradeTags(int32 PhaseIndex) const;
