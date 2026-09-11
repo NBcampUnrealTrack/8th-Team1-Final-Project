@@ -9,6 +9,7 @@
 
 class AActor;
 class UTexture2D;
+class UStaticMesh;
 class UGameplayEffect;
 
 // 정의에 저장하지 않고 지급 요청마다 전달할 대상 및 수량
@@ -60,6 +61,22 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item")
 	TObjectPtr<UTexture2D> ItemIcon;
 
+	// Hotbar에서 선택한 아이템을 캐릭터 손에 표시할 기본 메시
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Visual")
+	TObjectPtr<UStaticMesh> ToolMesh;
+
+	// 아이템 메시를 부착할 소켓이며 미지정 시 캐릭터 기본 소켓 사용
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Visual")
+	FName AttachSocketName;
+
+	// 소켓 부착 후 메시별 손잡이 위치와 회전 및 크기를 보정할 트랜스폼
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Visual")
+	FTransform AttachOffset = FTransform::Identity;
+
+	// 구매 또는 장비 복구 시 소유자의 ASC에 적용하여 GA를 부여할 GE
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Ability")
+	TSubclassOf<UGameplayEffect> AbilityGrantEffect;
+
 public:
 	// 상태 변경 없이 지급 가능 여부를 확인할 확장 지점
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Grant")
@@ -72,8 +89,8 @@ public:
 	bool Grant(FMD_ItemGrantContext Context);
 	// 후속 지급 시스템이 연결되기 전 성공을 반환하지 않는 기본 처리
 	virtual bool Grant_Implementation(FMD_ItemGrantContext Context);
-	// 도구와 소모품 정의가 제공하는 구매 시 능력 부여 GE 조회
-	virtual TSubclassOf<UGameplayEffect> GetAbilityGrantEffect() { return nullptr; }
+	// 아이템 정의에 지정된 구매 시 능력 부여 GE 조회
+	FORCEINLINE TSubclassOf<UGameplayEffect> GetAbilityGrantEffect() { return AbilityGrantEffect; }
 
 	// 구매 GE가 부여한 능력 중 사용 입력에 연결할 태그 조회
 	UFUNCTION(BlueprintPure, Category = "Item|Ability")

@@ -262,24 +262,30 @@ bool UMD_EquipHotbarComponent::TryConsumeItem(UMD_ItemDefinition* ItemDefinition
 	}
 	// 실제 정의 AssetId에 해당하는 차감 위치 조회
 	int32 EntryIndex = FindItemEntry(ItemDefinition);
-	// 미보유 품목 및 보유 수량보다 큰 차감 요청 차단
-	if (ToolEntries.IsValidIndex(EntryIndex) == false || ToolEntries[EntryIndex].Count < Amount)
+	// 전달된 정의와 별도로 실제 보관 중인 아이템 유형과 표시 정보 조회
+	UMD_ItemDefinition* StoredItem = GetItemAtSlot(EntryIndex);
+	// 미보유 품목과 도구 및 보유 수량보다 큰 차감 요청 차단
+	if (IsValid(StoredItem) == false || StoredItem->IsA<UMD_ToolDefinition>() == true || ToolEntries[EntryIndex].Count < Amount)
 	{
-		// 차감 대상 또는 잔여 수량 부족 기록
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 차감할 아이템이 없거나 보유 수량이 부족함"), *UE_CALL_LOCATIONINFO);
+		// 도구 제외 조건과 잔여 수량 검증 실패 기록
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 차감할 아이템이 없거나 도구이거나 보유 수량이 부족함"), *UE_CALL_LOCATIONINFO);
 		// 수량을 변경하지 않은 차감 실패 전달
 		return false;
 	}
 	// 해당 슬롯의 보유 수량만 차감
 	ToolEntries[EntryIndex].Count -= Amount;
+	// 소진 처리와 사용 결과 로그에 사용할 차감 직후 수량 보존
+	int32 RemainingCount = ToolEntries[EntryIndex].Count;
 	// 소진 시 배열 위치를 유지하면서 정의 참조 제거
-	if (ToolEntries[EntryIndex].Count == 0)
+	if (RemainingCount == 0)
 	{
 		// 실행 중인 소비 GA는 GE의 종료 후 제거 정책으로 마무리까지 유지
 		RemoveItemAbility(ItemDefinition);
 		// 다음 아이템이 사용할 수 있도록 슬롯 비우기
 		ToolEntries[EntryIndex].ToolDefinition = nullptr;
 	}
+	// 선택 슬롯과 무관하게 실제 소비한 품목과 차감량 및 잔여 수량 기록
+	UE_LOG(MarineDemolition, Log, TEXT("[ItemUse] Item: %s, Consumed: %d, Remaining: %d"), *StoredItem->ItemName.ToString(), Amount, RemainingCount);
 	// 수량과 정의 변경을 함께 전달
 	NotifyEntriesChanged();
 	// 실제 수량 차감 성공 전달
