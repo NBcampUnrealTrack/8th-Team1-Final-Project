@@ -99,6 +99,18 @@ bool AMD_SurfaceStain::RebuildSticker()
 	if (!FMD_StainStickerBaker::Build(*this, Definition->GetHalfSize(GetInitialSize()), GetInitialSize(),
 		Definition->StickerMaterial, Patch, Mesh, Error))
 	{ StickerStatus = Error; return false; }
+	return ApplyPreparedSticker(MoveTemp(Patch), Mesh);
+#else
+	return false;
+#endif
+}
+
+#if WITH_EDITOR
+bool AMD_SurfaceStain::ApplyPreparedSticker(FMD_StainStickerPatch Patch, UStaticMesh* Mesh)
+{
+	if (!GetWorld() || GetWorld()->IsGameWorld() || !Mesh || !Patch.IsValid() || Patch.InitialSize != GetInitialSize()) return false;
+	// A successful preview becomes the placed actor's serialized mesh, without rebaking it.
+	if (Mesh->GetOuter() != this && !Mesh->Rename(nullptr, this, REN_DontCreateRedirectors | REN_NonTransactional)) return false;
 	Modify(); StickerMesh->Modify();
 	StickerPatch = MoveTemp(Patch);
 	StickerMesh->SetStaticMesh(Mesh);
@@ -107,12 +119,8 @@ bool AMD_SurfaceStain::RebuildSticker()
 	RefreshSize();
 	MarkPackageDirty();
 	return true;
-#else
-	return false;
-#endif
 }
 
-#if WITH_EDITOR
 void AMD_SurfaceStain::PostEditMove(bool bFinished)
 {
 	Super::PostEditMove(bFinished);

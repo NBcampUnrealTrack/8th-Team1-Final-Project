@@ -5,6 +5,7 @@
 #include "Gameplay/Contamination/MD_StainStickerPatch.h"
 #include "MD_SurfaceStain.generated.h"
 
+class UStaticMesh;
 class UStaticMeshComponent;
 class UBoxComponent;
 class UDecalComponent;
@@ -25,6 +26,7 @@ public:
 	virtual void PostEditMove(bool bFinished) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
 	virtual void PostEditUndo() override;
+	bool ApplyPreparedSticker(FMD_StainStickerPatch Patch, UStaticMesh* Mesh);
 #endif
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 

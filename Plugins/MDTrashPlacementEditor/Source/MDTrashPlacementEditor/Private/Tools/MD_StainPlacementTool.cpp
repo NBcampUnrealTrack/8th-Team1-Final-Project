@@ -4,6 +4,8 @@
 #include "BaseBehaviors/MouseHoverBehavior.h"
 #include "BaseBehaviors/MouseWheelBehavior.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
+#include "LevelUtils.h"
 #include "Components/SceneComponent.h"
 #include "Engine/StaticMesh.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
@@ -37,6 +39,7 @@ UInteractiveTool* UMD_StainPlacementToolBuilder::BuildTool(const FToolBuilderSta
 void UMD_StainPlacementTool::Setup()
 {
 	Super::Setup();
+	SourceCache = FMD_StainStickerBaker::CreateSourceCache();
 	Properties = NewObject<UMD_StainPlacementProperties>(this);
 	Properties->RestoreProperties(this);
 	if (Properties->Palette.IsEmpty())
@@ -89,6 +92,8 @@ void UMD_StainPlacementTool::Setup()
 
 void UMD_StainPlacementTool::Shutdown(EToolShutdownType Type)
 {
+	if (ActiveBake) ActiveBake->Cancel();
+	ActiveBake.Reset(); PendingPlacements.Reset(); SourceCache.Reset();
 	FinishStroke();
 	Properties->SaveProperties(this);
 	if (PreviewOwner) TargetWorld->DestroyActor(PreviewOwner);
@@ -121,7 +126,7 @@ bool UMD_StainPlacementTool::Trace(const FInputDeviceRay& Ray, FHitResult& Hit, 
 	if (!bErase)
 	{
 		return TargetWorld->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params)
-			&& Hit.GetComponent() && Hit.GetComponent()->bReceivesDecals;
+			&& Hit.GetComponent();
 	}
 	TArray<FHitResult> Hits;
 	TargetWorld->LineTraceMultiByChannel(Hits, Start, End, ECC_Visibility, Params);
@@ -166,11 +171,18 @@ FTransform UMD_StainPlacementTool::MakeTransform(const FHitResult& Hit) const
 FInputRayHit UMD_StainPlacementTool::CanBeginClickDragSequence(const FInputDeviceRay& Ray)
 {
 	FHitResult Hit;
-	return Trace(Ray, Hit, WantsErase()) ? FInputRayHit(Hit.Distance) : FInputRayHit();
+	if (Trace(Ray, Hit, WantsErase())) return FInputRayHit(Hit.Distance);
+	// A paint stroke may start over empty space and subsequently enter a surface.
+	return !WantsErase() && ResolveDefinition() ? FInputRayHit(0.0) : FInputRayHit();
 }
 
 void UMD_StainPlacementTool::OnClickPress(const FInputDeviceRay& Ray)
 {
+	if (IsPlacementPending())
+	{
+		GetToolManager()->DisplayMessage(LOCTEXT("StillPlacing", "Finishing the previous stroke. Wait for placement to complete, or switch tools to cancel the remaining stamps."), EToolMessageLevel::UserNotification);
+		return;
+	}
 	FinishStroke();
 	bStrokeErase = WantsErase();
 	if (!bStrokeErase && !ResolveDefinition())
@@ -179,18 +191,30 @@ void UMD_StainPlacementTool::OnClickPress(const FInputDeviceRay& Ray)
 		return;
 	}
 	bStroke = true;
-	bPlaced = false;
-	GetToolManager()->BeginUndoTransaction(bStrokeErase ? LOCTEXT("Erase", "Erase Surface Stains") : LOCTEXT("Place", "Place Surface Stains"));
+	bAttempted = false;
+	StrokePlaced = 0; StrokeFailed = 0;
+	// A new click can retry a repaired collision/material/surface at the same point.
+	if (bPreviewRejected) PreviewSize = 0;
 	ApplyAt(Ray);
+}
+
+void UMD_StainPlacementTool::BeginStrokeTransaction()
+{
+	if (bTransaction) return;
+	GetToolManager()->BeginUndoTransaction(bStrokeErase ? LOCTEXT("Erase", "Erase Surface Stains") : LOCTEXT("Place", "Place Surface Stains"));
+	bTransaction = true;
 }
 
 void UMD_StainPlacementTool::ApplyAt(const FInputDeviceRay& Ray)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Placement_StainApply);
 	FHitResult Hit;
 	if (!Trace(Ray, Hit, bStrokeErase)) return;
 	if (bStrokeErase)
 	{
 		AMD_SurfaceStain* Stain = CastChecked<AMD_SurfaceStain>(Hit.GetActor());
+		if (FLevelUtils::IsLevelLocked(Stain->GetLevel())) return;
+		BeginStrokeTransaction();
 		Stain->Modify();
 		if (GEditor && Stain->IsSelected()) GEditor->SelectActor(Stain, false, true);
 		TargetWorld->EditorDestroyActor(Stain, true);
@@ -199,30 +223,94 @@ void UMD_StainPlacementTool::ApplyAt(const FInputDeviceRay& Ray)
 	UMD_SurfaceStainDefinition* Definition = ResolveDefinition();
 	if (!Definition || !GEditor || !TargetWorld->GetCurrentLevel()) return;
 	const float Spacing = FMath::Max(Properties->SpacingCm, 1.0f);
-	if (bPlaced && FVector::DistSquared(LastPlacedLocation, Hit.ImpactPoint) < FMath::Square(Spacing)) return;
-	AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(GEditor->AddActor(TargetWorld->GetCurrentLevel(),
-		AMD_SurfaceStain::StaticClass(), MakeTransform(Hit), false, RF_Transactional, true));
-	if (!Stain) return;
-	Stain->Modify();
-	Stain->ConfigurePlacement(Definition, ResolveSize());
-	Hit.GetComponent()->Modify();
-	Stain->AttachToComponent(Hit.GetComponent(), FAttachmentTransformRules::KeepWorldTransform);
-	if (!Stain->RebuildSticker())
+	// Failed attempts consume spacing too; a stationary failed hit must not rebake every mouse event.
+	if (bAttempted && FVector::DistSquared(LastAttemptLocation, Hit.ImpactPoint) < FMath::Square(Spacing)) return;
+	LastAttemptLocation = Hit.ImpactPoint;
+	bAttempted = true;
+	OnUpdateHover(Ray);
+	const FMD_StainPlacementRequest Request = PreviewRequest();
+	FString Error;
+	if (!ValidateRequest(Request, Error)) { ++StrokeFailed; bPreviewPending = false; SetPreviewError(Error); return; }
+	if (bPreviewRejected) { ++StrokeFailed; return; }
+	if (bPreviewValid)
 	{
-		GetToolManager()->DisplayMessage(FText::FromString(Stain->GetStickerStatus()), EToolMessageLevel::UserWarning);
-		TargetWorld->EditorDestroyActor(Stain, true);
-		return;
+		UStaticMesh* Mesh = Preview->GetStaticMesh();
+		if (Mesh && Mesh->GetOuter() != PreviewOwner)
+			Mesh = FMD_StainStickerBaker::CreateMesh(*PreviewOwner, PreviewPatch, Request.Definition->StickerMaterial);
+		Preview->SetStaticMesh(nullptr);
+		CommitPrepared(Request, MoveTemp(PreviewPatch), Mesh);
 	}
-	Stain->MarkPackageDirty();
-	LastPlacedLocation = Hit.ImpactPoint;
-	bPlaced = true;
+	else if (ActiveBake && !ActiveBake->IsCancelled() && !bBakeForPlacement && MatchesPreview(ActiveRequest))
+	{
+		bBakeForPlacement = true;
+	}
+	else
+	{
+		constexpr int32 MaximumQueuedPlacements = 256;
+		if (PendingPlacements.Num() >= MaximumQueuedPlacements)
+		{
+			GetToolManager()->DisplayMessage(LOCTEXT("QueueFull", "Placement queue is full. Release the mouse and let the current stroke finish."), EToolMessageLevel::UserWarning);
+			return;
+		}
+		PendingPlacements.Add(Request);
+		if (ActiveBake && !bBakeForPlacement) ActiveBake->Cancel();
+	}
+	PreviewSize = 0; bPreviewValid = false;
 	++PlacementIndex;
 }
 
-void UMD_StainPlacementTool::OnClickDrag(const FInputDeviceRay& Ray) { if (bStroke) ApplyAt(Ray); OnUpdateHover(Ray); }
-void UMD_StainPlacementTool::OnClickRelease(const FInputDeviceRay& Ray) { FinishStroke(); OnUpdateHover(Ray); }
+void UMD_StainPlacementTool::CommitPrepared(const FMD_StainPlacementRequest& Request, FMD_StainStickerPatch Patch, UStaticMesh* Mesh)
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Placement_StainCommit);
+	FString Error;
+	if (!ValidateRequest(Request, Error)) { SetPreviewError(Error); return; }
+	BeginStrokeTransaction();
+	AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(GEditor->AddActor(Request.Level.Get(),
+		AMD_SurfaceStain::StaticClass(), Request.Transform, true, RF_Transactional, false));
+	if (!Stain) return;
+	Stain->Modify();
+	Stain->ConfigurePlacement(Request.Definition.Get(), Request.Size);
+	Request.Surface->Modify();
+	Stain->AttachToComponent(Request.Surface.Get(), FAttachmentTransformRules::KeepWorldTransform);
+	if (MatchesPreview(Request)) PreviewPatch = Patch;
+	if (!Stain->ApplyPreparedSticker(MoveTemp(Patch), Mesh))
+	{
+		SetPreviewError(TEXT("Could not transfer the prepared sticker to the level."));
+		TargetWorld->EditorDestroyActor(Stain, true);
+		++StrokeFailed;
+	}
+	else
+	{
+		++StrokePlaced;
+		if (MatchesPreview(Request))
+		{
+			Preview->SetRelativeTransform(FTransform::Identity);
+			Preview->SetStaticMesh(Mesh); Preview->SetVisibility(true);
+			bPreviewPending = false; bPreviewValid = true; bPreviewRejected = false;
+		}
+	}
+}
+
+void UMD_StainPlacementTool::OnClickDrag(const FInputDeviceRay& Ray)
+{
+	// Coalesce high-frequency pointer events; author at most one position per editor frame.
+	if (bStroke) { PendingDragRay = Ray; bDragPending = true; }
+	OnUpdateHover(Ray);
+}
+void UMD_StainPlacementTool::OnClickRelease(const FInputDeviceRay& Ray)
+{
+	if (bStroke && bDragPending) { bDragPending = false; ApplyAt(Ray); }
+	FinishStroke(); OnUpdateHover(Ray);
+}
 void UMD_StainPlacementTool::OnTerminateDragSequence() { FinishStroke(); }
-void UMD_StainPlacementTool::FinishStroke() { if (bStroke) GetToolManager()->EndUndoTransaction(); bStroke = false; }
+void UMD_StainPlacementTool::FinishStroke()
+{
+	if (bTransaction && !IsPlacementPending())
+	{
+		GetToolManager()->EndUndoTransaction(); bTransaction = false;
+	}
+	bStroke = false; bDragPending = false;
+}
 
 FInputRayHit UMD_StainPlacementTool::BeginHoverSequenceHitTest(const FInputDeviceRay& Ray) { return CanBeginClickDragSequence(Ray); }
 void UMD_StainPlacementTool::OnBeginHover(const FInputDeviceRay& Ray) { OnUpdateHover(Ray); }
@@ -238,19 +326,31 @@ bool UMD_StainPlacementTool::OnUpdateHover(const FInputDeviceRay& Ray)
 	{
 		Preview->SetVisibility(false);
 		bPreviewPending = false;
+		bPreviewValid = false;
 		PreviewSize = 0;
 	}
 	else
 	{
 		const FTransform Transform = MakeTransform(HoverHit);
 		const int32 Size = ResolveSize();
-		if (Definition != PreviewDefinition || Size != PreviewSize || !Transform.Equals(PreviewTransform, 0.01))
+		const auto* Surface = Cast<UStaticMeshComponent>(HoverHit.GetComponent());
+		UStaticMesh* SourceMesh = Surface ? Surface->GetStaticMesh() : nullptr;
+		const FGuid SourceGuid = SourceMesh ? SourceMesh->GetLightingGuid() : FGuid();
+		if (Definition != PreviewDefinition || Size != PreviewSize || SourceMesh != PreviewSourceMesh || SourceGuid != PreviewSourceGuid || !Transform.Equals(PreviewTransform, 0.01)
+			|| PreviewTarget != HoverHit.GetComponent() || !PreviewTargetTransform.Equals(HoverHit.GetComponent()->GetComponentTransform(), 0.01))
 		{
+			PreviewSourceMesh = SourceMesh; PreviewSourceGuid = SourceGuid;
+			PreviewTarget = HoverHit.GetComponent();
+			PreviewTargetTransform = HoverHit.GetComponent()->GetComponentTransform();
 			PreviewTransform = Transform;
 			PreviewDefinition = Definition;
 			PreviewSize = Size;
 			PreviewChangedAt = FPlatformTime::Seconds();
 			bPreviewPending = true;
+			bPreviewValid = false;
+			bPreviewRejected = false;
+			if (ActiveBake && !bBakeForPlacement) ActiveBake->Cancel();
+			PreviewPatch = FMD_StainStickerPatch();
 			ShowMovingPreview();
 		}
 	}
@@ -279,45 +379,142 @@ void UMD_StainPlacementTool::OnPropertyModified(UObject* PropertySet, FProperty*
 	}
 }
 
+void UMD_StainPlacementTool::SetPreviewError(const FString& Error)
+{
+	bPreviewValid = false;
+	bPreviewRejected = true;
+	Preview->SetVisibility(false);
+	if (Error == PreviewError) return;
+	PreviewError = Error;
+	GetToolManager()->DisplayMessage(FText::FromString(Error), EToolMessageLevel::UserWarning);
+}
+
+FMD_StainPlacementRequest UMD_StainPlacementTool::PreviewRequest() const
+{
+	return {PreviewTransform, PreviewTargetTransform, PreviewTarget, PreviewSourceMesh, PreviewSourceGuid, TargetWorld->GetCurrentLevel(), PreviewDefinition, PreviewSize};
+}
+
+bool UMD_StainPlacementTool::MatchesPreview(const FMD_StainPlacementRequest& Request) const
+{
+	return Request.Definition == PreviewDefinition && Request.Size == PreviewSize && Request.Surface == PreviewTarget && Request.SourceMesh == PreviewSourceMesh && Request.SourceGuid == PreviewSourceGuid
+		&& Request.Transform.Equals(PreviewTransform, 0.01) && Request.SurfaceTransform.Equals(PreviewTargetTransform, 0.01);
+}
+
+bool UMD_StainPlacementTool::ValidateRequest(const FMD_StainPlacementRequest& Request, FString& Error) const
+{
+	UStaticMeshComponent* Surface = Cast<UStaticMeshComponent>(Request.Surface.Get());
+	if (!Request.Definition.IsValid() || !Request.Definition->StickerMaterial)
+	{ Error = TEXT("Select a valid stain definition and sticker material."); return false; }
+	if (!Surface || !Surface->IsRegistered() || !Surface->GetStaticMesh() || !Surface->bReceivesDecals
+		|| Surface->GetCollisionResponseToChannel(ECC_Visibility) != ECR_Block)
+	{ Error = TEXT("Place stains on a static mesh with Visibility collision and Receives Decals enabled."); return false; }
+	if (Cast<UInstancedStaticMeshComponent>(Surface))
+	{ Error = TEXT("Instanced surfaces are not supported yet. Use an individual static mesh for this sticker."); return false; }
+	if (!Request.Level.IsValid() || !TargetWorld->GetLevels().Contains(Request.Level.Get()) || FLevelUtils::IsLevelLocked(Request.Level.Get()))
+	{ Error = TEXT("The destination level is locked or unloaded."); return false; }
+	if (Request.SourceMesh.Get() != Surface->GetStaticMesh() || Request.SourceGuid != Surface->GetStaticMesh()->GetLightingGuid()
+		|| !Request.SurfaceTransform.Equals(Surface->GetComponentTransform(), 0.01))
+	{ Error = TEXT("The receiving surface moved before placement completed. Place this stamp again."); return false; }
+	return true;
+}
+
+void UMD_StainPlacementTool::StartBake(const FMD_StainPlacementRequest& Request, bool bForPlacement)
+{
+	FString Error;
+	if (!ValidateRequest(Request, Error))
+	{
+		if (bForPlacement) ++StrokeFailed;
+		if (MatchesPreview(Request)) SetPreviewError(Error);
+		else GetToolManager()->DisplayMessage(FText::FromString(Error), EToolMessageLevel::UserWarning);
+		return;
+	}
+	ActiveRequest = Request; bBakeForPlacement = bForPlacement;
+	PreviewOwner->SetActorTransform(Request.Transform);
+	ActiveBake = FMD_StainStickerBaker::StartAsync(*PreviewOwner, Request.Definition->GetHalfSize(Request.Size), Request.Size, SourceCache);
+	PreviewOwner->SetActorTransform(PreviewTransform);
+}
+
+bool UMD_StainPlacementTool::PreparePreview()
+{
+	if (!bHover || WantsErase()) return false;
+	if (bPreviewValid) return true;
+	if (!bPreviewPending || ActiveBake || IsPlacementPending()) return false;
+	bPreviewPending = false;
+	StartBake(PreviewRequest(), false);
+	return false;
+}
+
+void UMD_StainPlacementTool::TickBake()
+{
+	if (ActiveBake && ActiveBake->IsReady())
+	{
+		const bool bRelevant = bBakeForPlacement || (bHover && !WantsErase() && MatchesPreview(ActiveRequest));
+		if (bRelevant)
+		{
+			FMD_StainStickerPatch Patch; UStaticMesh* Mesh = nullptr; FString Error;
+			if (ValidateRequest(ActiveRequest, Error) && ActiveBake->Finish(*PreviewOwner,
+				ActiveRequest.Definition->StickerMaterial, Patch, Mesh, Error))
+			{
+				if (bBakeForPlacement) CommitPrepared(ActiveRequest, MoveTemp(Patch), Mesh);
+				else
+				{
+					PreviewPatch = MoveTemp(Patch);
+					PreviewOwner->SetActorTransform(PreviewTransform);
+					Preview->SetRelativeTransform(FTransform::Identity);
+					Preview->SetStaticMesh(Mesh); Preview->SetVisibility(true);
+					bPreviewValid = true; bPreviewRejected = false;
+					PreviewError.Reset();
+					GetToolManager()->DisplayMessage(FText::GetEmpty(), EToolMessageLevel::UserWarning);
+				}
+			}
+			else if (!Error.IsEmpty())
+			{
+				if (bBakeForPlacement) ++StrokeFailed;
+				if (MatchesPreview(ActiveRequest)) SetPreviewError(Error);
+				else GetToolManager()->DisplayMessage(FText::FromString(Error), EToolMessageLevel::UserWarning);
+			}
+		}
+		ActiveBake.Reset();
+	}
+	if (!ActiveBake && !PendingPlacements.IsEmpty())
+	{
+		const FMD_StainPlacementRequest Request = PendingPlacements[0];
+		PendingPlacements.RemoveAt(0, 1, EAllowShrinking::No);
+		StartBake(Request, true);
+	}
+	const int32 Pending = PendingPlacements.Num() + (ActiveBake && bBakeForPlacement ? 1 : 0);
+	if (Pending != LastPendingCount)
+	{
+		LastPendingCount = Pending;
+		GetToolManager()->DisplayMessage(Pending > 0
+			? FText::Format(LOCTEXT("PlacingProgress", "Placing stains: {0} remaining. Switch tools to cancel the remaining stamps."), FText::AsNumber(Pending))
+			: FText::Format(LOCTEXT("PlacementDone", "Placed {0} stains; {1} positions could not be placed. Yellow checks the surface; green is ready; red is unavailable."), FText::AsNumber(StrokePlaced), FText::AsNumber(StrokeFailed)), EToolMessageLevel::UserNotification);
+	}
+	if (!bStroke && !IsPlacementPending() && bTransaction) FinishStroke();
+}
+
 void UMD_StainPlacementTool::OnTick(float DeltaTime)
 {
 	Super::OnTick(DeltaTime);
-	// Bake once after the cursor settles, never during every mouse-move or gameplay frame.
-	if (!bPreviewPending || !bHover || WantsErase() || FPlatformTime::Seconds() - PreviewChangedAt < 0.15) return;
-	bPreviewPending = false;
-	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Placement_StainPreviewBake);
-	UMD_SurfaceStainDefinition* Definition = PreviewDefinition.Get();
-	if (!Definition || !PreviewOwner) return;
-	PreviewOwner->SetActorTransform(PreviewTransform);
-	FMD_StainStickerPatch Patch;
-	UStaticMesh* Mesh = nullptr;
-	FString Error;
-	if (FMD_StainStickerBaker::Build(*PreviewOwner, Definition->GetHalfSize(PreviewSize), PreviewSize,
-		Definition->StickerMaterial, Patch, Mesh, Error))
-	{
-		Preview->SetRelativeTransform(FTransform::Identity);
-		Preview->SetStaticMesh(Mesh);
-		Preview->SetVisibility(true);
-		PreviewError.Reset();
-	}
-	else if (Error != PreviewError)
-	{
-		PreviewError = Error;
-		GetToolManager()->DisplayMessage(FText::FromString(Error), EToolMessageLevel::UserWarning);
-	}
+	if (bStroke && bDragPending) { bDragPending = false; ApplyAt(PendingDragRay); }
+	TickBake();
+	if (!bStroke && !ActiveBake && bPreviewPending && bHover && !WantsErase() && FPlatformTime::Seconds() - PreviewChangedAt >= 0.15)
+		PreparePreview();
 }
 
 void UMD_StainPlacementTool::OnEndHover()
 {
-	bHover = false; bPreviewPending = false; PreviewSize = 0;
+	bHover = false; bPreviewPending = false; bPreviewValid = false; PreviewSize = 0;
 	if (Preview) Preview->SetVisibility(false);
+	if (ActiveBake && !bBakeForPlacement) ActiveBake->Cancel();
 }
 
 void UMD_StainPlacementTool::Render(IToolsContextRenderAPI* RenderAPI)
 {
 	Super::Render(RenderAPI);
 	if (!bHover) return;
-	const FLinearColor Color = WantsErase() || !ResolveDefinition() ? FLinearColor::Red : FLinearColor::Green;
+	const FLinearColor Color = WantsErase() || !ResolveDefinition() || bPreviewRejected ? FLinearColor::Red
+		: bPreviewValid ? FLinearColor::Green : FLinearColor::Yellow;
 	RenderAPI->GetPrimitiveDrawInterface()->DrawPoint(HoverHit.ImpactPoint + HoverHit.ImpactNormal, Color, 10.0f, SDPG_Foreground);
 }
 

@@ -3,13 +3,29 @@
 #include "BaseBehaviors/BehaviorTargetInterfaces.h"
 #include "InteractiveTool.h"
 #include "Engine/HitResult.h"
+#include "Gameplay/Contamination/MD_StainStickerPatch.h"
 #include "InteractiveToolBuilder.h"
 #include "MD_StainPlacementTool.generated.h"
 
 class UStaticMeshComponent;
+class UPrimitiveComponent;
+class ULevel;
 class AActor;
 class UStaticMesh;
 class UMD_SurfaceStainDefinition;
+class FMD_StainStickerAsyncBake;
+struct FMD_StainStickerSourceCache;
+
+struct FMD_StainPlacementRequest
+{
+	FTransform Transform, SurfaceTransform;
+	TWeakObjectPtr<UPrimitiveComponent> Surface;
+	TWeakObjectPtr<UStaticMesh> SourceMesh;
+	FGuid SourceGuid;
+	TWeakObjectPtr<ULevel> Level;
+	TWeakObjectPtr<UMD_SurfaceStainDefinition> Definition;
+	int32 Size = 0;
+};
 
 UCLASS()
 class UMD_StainPlacementToolBuilder : public UInteractiveToolBuilder
@@ -70,6 +86,7 @@ class UMD_StainPlacementTool : public UInteractiveTool, public IClickDragBehavio
 	GENERATED_BODY()
 public:
 	void SetWorld(UWorld* World) { TargetWorld = World; }
+	bool IsPlacementPending() const { return !PendingPlacements.IsEmpty() || (ActiveBake.IsValid() && bBakeForPlacement); }
 	virtual void Setup() override;
 	virtual void Shutdown(EToolShutdownType Type) override;
 	virtual void Render(IToolsContextRenderAPI* RenderAPI) override;
@@ -99,6 +116,15 @@ private:
 	bool WantsErase() const;
 	void ChangeSpacing(float Delta);
 	void ShowMovingPreview();
+	bool PreparePreview();
+	FMD_StainPlacementRequest PreviewRequest() const;
+	bool ValidateRequest(const FMD_StainPlacementRequest& Request, FString& Error) const;
+	bool MatchesPreview(const FMD_StainPlacementRequest& Request) const;
+	void TickBake();
+	void StartBake(const FMD_StainPlacementRequest& Request, bool bForPlacement);
+	void CommitPrepared(const FMD_StainPlacementRequest& Request, FMD_StainStickerPatch Patch, UStaticMesh* Mesh);
+	void BeginStrokeTransaction();
+	void SetPreviewError(const FString& Error);
 
 	UPROPERTY() TObjectPtr<UWorld> TargetWorld;
 	UPROPERTY() TObjectPtr<UMD_StainPlacementProperties> Properties;
@@ -106,18 +132,35 @@ private:
 	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Preview;
 	UPROPERTY(Transient) TObjectPtr<UStaticMesh> PreviewPlane;
 	FInputDeviceRay LastHoverRay;
+	FInputDeviceRay PendingDragRay;
+	TSharedPtr<FMD_StainStickerAsyncBake> ActiveBake;
+	TSharedPtr<FMD_StainStickerSourceCache> SourceCache;
+	FMD_StainPlacementRequest ActiveRequest;
+	TArray<FMD_StainPlacementRequest> PendingPlacements;
+	bool bBakeForPlacement = false;
+	bool bPreviewRejected = false;
+	int32 LastPendingCount = 0;
+	int32 StrokePlaced = 0, StrokeFailed = 0;
+	FMD_StainStickerPatch PreviewPatch;
+	TWeakObjectPtr<UPrimitiveComponent> PreviewTarget;
+	FTransform PreviewTargetTransform;
+	TWeakObjectPtr<UStaticMesh> PreviewSourceMesh;
+	FGuid PreviewSourceGuid;
 	FString PreviewError;
 	TWeakObjectPtr<UMD_SurfaceStainDefinition> PreviewDefinition;
 	FTransform PreviewTransform;
 	int32 PreviewSize = 0;
 	double PreviewChangedAt = 0;
 	bool bPreviewPending = false;
+	bool bPreviewValid = false;
+	bool bDragPending = false;
+	bool bTransaction = false;
 	FHitResult HoverHit;
-	FVector LastPlacedLocation = FVector::ZeroVector;
+	FVector LastAttemptLocation = FVector::ZeroVector;
 	int32 PlacementIndex = 0;
 	bool bHover = false;
 	bool bShift = false;
 	bool bStroke = false;
 	bool bStrokeErase = false;
-	bool bPlaced = false;
+	bool bAttempted = false;
 };
