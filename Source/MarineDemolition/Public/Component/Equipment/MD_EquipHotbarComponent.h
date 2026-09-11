@@ -149,6 +149,14 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|HotBar")
 	void CycleSlot(int32 Direction);
 
+	// 이동 원본의 아이템과 두 슬롯 범위 및 서로 다른 위치 여부 검사
+	UFUNCTION(BlueprintPure, Category = "MD|Hotbar")
+	bool CanSwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex);
+
+	// 빈 슬롯 이동을 포함한 두 슬롯 교환, 서버에서는 적용 결과이며 클라이언트에서는 요청 전송 결과
+	UFUNCTION(BlueprintCallable, Category = "MD|Hotbar")
+	bool SwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex);
+
 	// 기존 저장 형식에 슬롯 순서를 보존한 공통 정의 경로 제공
 	TArray<TSoftObjectPtr<UDataAsset>> BuildEquipmentSaveData() const;
 
@@ -183,6 +191,9 @@ protected:
 
 	// 정의의 전체 AssetId에 일치하는 보관 위치 조회
 	int32 FindItemEntry(UMD_ItemDefinition* ItemDefinition) const;
+	// 요청 당시 두 아이템이 유지된 경우에만 서버에서 슬롯 교환을 확정하는 요청
+	UFUNCTION(Server, Reliable)
+	void ServerSwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex, UMD_ItemDefinition* ExpectedSourceItem, UMD_ItemDefinition* ExpectedTargetItem);
 
 	// 서버 슬롯 변경을 캐릭터와 UI 및 복제 대상에 전달
 	void NotifyEntriesChanged();

@@ -13,6 +13,7 @@
 #include "GameFramework/Actor.h"
 #include "Net/UnrealNetwork.h"
 #include "Util/MD_LogUtility.h"
+#include "GameFramework/Pawn.h"
 
 UMD_EquipHotbarComponent::UMD_EquipHotbarComponent()
 {
@@ -500,6 +501,96 @@ void UMD_EquipHotbarComponent::NotifyEntriesChanged()
 	}
 	// 리슨 서버에도 동일한 상태 변경 알림 적용
 	OnRep_ToolEntries();
+}
+
+bool UMD_EquipHotbarComponent::CanSwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex)
+{
+	// 범위 밖 접근과 같은 슬롯을 대상으로 하는 불필요한 요청 차단
+	if (ToolEntries.IsValidIndex(FromSlotIndex) == false || ToolEntries.IsValidIndex(ToSlotIndex) == false || FromSlotIndex == ToSlotIndex)
+	{
+		// 변경할 수 없는 슬롯 조합 거절
+		return false;
+	}
+
+	// 비어 있거나 소진된 슬롯을 이동 원본으로 사용하는 요청 차단
+	if (IsValid(ToolEntries[FromSlotIndex].ToolDefinition) == false || ToolEntries[FromSlotIndex].Count <= 0)
+	{
+		// 이동할 아이템이 없는 요청 거절
+		return false;
+	}
+
+	// 빈 목적지를 포함한 유효한 슬롯 조합 허용
+	return true;
+}
+
+bool UMD_EquipHotbarComponent::SwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex)
+{
+	// 요청 권한과 복제 갱신에 사용할 소유 액터 조회
+	AActor* OwnerActor = GetOwner();
+	// 소유 액터가 없거나 현재 배열에서 처리할 수 없는 교환 차단
+	if (IsValid(OwnerActor) == false || CanSwapItemSlots(FromSlotIndex, ToSlotIndex) == false)
+	{
+		// 검증 실패 시 원본 보관 상태 유지
+		return false;
+	}
+
+	// 클라이언트에서는 소유 Pawn의 서버 요청만 허용
+	if (OwnerActor->HasAuthority() == false)
+	{
+		// 다른 플레이어의 복제 컴포넌트에 대한 요청 차단용 소유 Pawn 조회
+		APawn* OwningPawn = Cast<APawn>(OwnerActor);
+		// 실제 소유 클라이언트에서만 서버 RPC 전송 허용
+		if (IsValid(OwningPawn) == false || OwningPawn->IsLocallyControlled() == false || OwningPawn->GetLocalRole() != ROLE_AutonomousProxy)
+		{
+			// 서버로 전달할 수 없는 요청 거절
+			return false;
+		}
+
+		// 지연된 요청이 다른 아이템을 교환하지 않도록 현재 두 아이템과 함께 서버 요청 전송
+		ServerSwapItemSlots(FromSlotIndex, ToSlotIndex, ToolEntries[FromSlotIndex].ToolDefinition, ToolEntries[ToSlotIndex].ToolDefinition);
+		// 서버 적용 확정이 아닌 요청 전송 성공 반환
+		return true;
+	}
+
+	// 아이템 정의와 수량을 하나의 항목으로 교환하며 빈 목적지는 단순 이동으로 처리
+	ToolEntries.Swap(FromSlotIndex, ToSlotIndex);
+	// 이동 원본을 장착 중이면 교환된 목적지 추적
+	if (CurrentSlotIndex == FromSlotIndex)
+	{
+		// 동일 아이템을 계속 장착하도록 선택 위치 이동
+		CurrentSlotIndex = ToSlotIndex;
+	}
+	// 교환 목적지를 장착 중이면 원래 아이템의 새 위치 추적
+	else if (CurrentSlotIndex == ToSlotIndex)
+	{
+		// 반대편으로 옮겨진 장착 항목의 선택 위치 반영
+		CurrentSlotIndex = FromSlotIndex;
+	}
+
+	// 아이템과 수량 및 충전량의 교환과 선택 변경을 공통 알림 경로로 전달
+	NotifyEntriesChanged();
+	// 서버 교환 적용 성공 반환
+	return true;
+}
+
+void UMD_EquipHotbarComponent::ServerSwapItemSlots_Implementation(int32 FromSlotIndex, int32 ToSlotIndex, UMD_ItemDefinition* ExpectedSourceItem, UMD_ItemDefinition* ExpectedTargetItem)
+{
+	// 서버 최신 상태에서 범위와 원본 아이템의 유효성 재검사
+	if (CanSwapItemSlots(FromSlotIndex, ToSlotIndex) == false)
+	{
+		// 이미 소진되거나 유효하지 않은 슬롯의 요청 차단
+		return;
+	}
+
+	// 요청 이후 구매나 다른 교환으로 두 슬롯의 아이템이 바뀐 경우 지연된 입력 차단
+	if (ToolEntries[FromSlotIndex].ToolDefinition != ExpectedSourceItem || ToolEntries[ToSlotIndex].ToolDefinition != ExpectedTargetItem)
+	{
+		// 사용자가 드롭 대상으로 확인하지 않은 아이템의 교환 방지
+		return;
+	}
+
+	// 서버 권한과 전체 항목 및 장착 유지를 공유하는 교환 처리
+	SwapItemSlots(FromSlotIndex, ToSlotIndex);
 }
 
 void UMD_EquipHotbarComponent::OnRep_ToolEntries()
