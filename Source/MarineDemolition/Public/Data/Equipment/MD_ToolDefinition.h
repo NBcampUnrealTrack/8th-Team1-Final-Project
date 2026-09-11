@@ -9,7 +9,6 @@
 #include "MD_ToolDefinition.generated.h"
 
 class UStaticMesh;
-class UGameplayEffect;
 class UMD_EquipHotbarComponent;
 
 // 메시와 GA 태그 및 도구별 성능을 제공하는 공통 아이템 파생 정의
@@ -21,21 +20,12 @@ class MARINEDEMOLITION_API UMD_ToolDefinition : public UMD_ItemDefinition
 public:
 	virtual bool CanGrant_Implementation(FMD_ItemGrantContext Context) override;
 	virtual bool Grant_Implementation(FMD_ItemGrantContext Context) override;
-	virtual FORCEINLINE TSubclassOf<UGameplayEffect> GetAbilityGrantEffect() override { return AbilityGrantEffect; }
 	virtual FORCEINLINE FGameplayTag GetUseAbilityTag() override { return ToolAbilityTag; }
 
 public:
-	// 구매 또는 장비 복구 시 소유자의 ASC에 적용하여 GA를 부여할 GE
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Ability")
-	TSubclassOf<UGameplayEffect> AbilityGrantEffect;
-
 	// 현재 Hotbar에 보유해야 할 업그레이드 선행 도구이며 미지정 시 종류 제한 없음
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Upgrade", meta = (AllowedTypes = "Item"))
 	FPrimaryAssetId UpgradeSourceAssetId;
-
-	/** 기본 전체 도구 메시. ScrapeLoad가 0이거나 단계 메시가 비어 있으면 사용한다. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
-	TObjectPtr<UStaticMesh> ToolMesh;
 
 	/** ScrapeLoad 1단계에서 ToolMesh를 대체할 오염 포함 전체 도구 메시 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape Load")
@@ -48,16 +38,6 @@ public:
 	/** ScrapeLoad 3단계에서 ToolMesh를 대체할 오염 포함 전체 도구 메시 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape Load")
 	TObjectPtr<UStaticMesh> ScrapeLoadStage3Mesh;
-
-	// 이 도구가 부착될 소켓 이름. 비우면 캐릭터 기본 소켓(ToolSocket) 사용
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
-	FName AttachSocketName;
-
-	//소켓 오프셋 미세 조정
-	//도구 매쉬 마다 손잡이 위치가 달라 미세 조정 필요.
-	//소켓에 스냅한 뒤 이 값을 트랜스폼으로 얹는다.
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
-	FTransform AttachOffset;
 
 	// 이 도구를 든 상태에서 좌클릭 시 발동될 어빌리티
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool", meta = (Categories = "Ability"))

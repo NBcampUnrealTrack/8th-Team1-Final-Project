@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/MD_Character.h"
@@ -196,12 +196,10 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 	(void)Active;
 	(void)DeltaTime;
 	Swing = FRotator::ZeroRotator;
-	const UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
-		? EquipHotbarComponent->GetCurrentTool()
-		: nullptr;
-	const FTransform BaseAttachOffset = IsValid(CurrentTool)
-		? CurrentTool->AttachOffset
-		: FTransform::Identity;
+	// 애니메이션 갱신 시에도 선택한 공통 아이템의 부착 설정 유지
+	UMD_ItemDefinition* CurrentItem = IsValid(EquipHotbarComponent) == true ? EquipHotbarComponent->GetCurrentItem() : nullptr;
+	// 소모품을 포함한 아이템별 오프셋의 삼인칭 메시 반영
+	FTransform BaseAttachOffset = IsValid(CurrentItem) == true ? CurrentItem->AttachOffset : FTransform::Identity;
 	ScrapeAnimationToolRelativeRotation = BaseAttachOffset.Rotator();
 	if (IsValid(ThirdPersonToolMesh))
 	{
@@ -820,8 +818,9 @@ bool AMD_Character::UpdateFirstPersonScrapeViewModel(const float DeltaSeconds)
 void AMD_Character::UpdateFirstPersonToolTransform(const float DeltaSeconds)
 {
 	const USkeletalMeshComponent* BodyMesh = GetMesh();
-	if (!IsValid(FirstPersonToolMesh) || !IsValid(FirstPersonMesh) || !IsValid(BodyMesh)
-		|| !IsLocallyControlled())
+	// 실제 부착 소켓과 일인칭 자세를 조회할 메시 및 로컬 소유자 검사
+	if (IsValid(FirstPersonToolMesh) == false || IsValid(ThirdPersonToolMesh) == false || IsValid(FirstPersonMesh) == false
+		|| IsValid(BodyMesh) == false || IsLocallyControlled() == false)
 	{
 		return;
 	}
@@ -885,25 +884,26 @@ void AMD_Character::UpdateFirstPersonToolTransform(const float DeltaSeconds)
 		SetFirstPersonScrapeViewModelActive(false);
 	}
 
-	if (!BodyMesh->DoesSocketExist(ToolAttachSocketName))
+	// 삼인칭 부착에서 확정한 아이템별 소켓을 일인칭 배치에도 공유
+	FName AttachSocketName = ThirdPersonToolMesh->GetAttachSocketName();
+	// 지정 소켓과 기본 소켓이 모두 없는 상태의 위치 계산 차단
+	if (AttachSocketName.IsNone() == true || BodyMesh->DoesSocketExist(AttachSocketName) == false)
 	{
 		return;
 	}
 
-	const UMD_ToolDefinition* CurrentTool = IsValid(EquipHotbarComponent)
-		? EquipHotbarComponent->GetCurrentTool()
-		: nullptr;
+	// 일인칭 배치에 사용할 선택 아이템의 공통 부착 설정 조회
+	UMD_ItemDefinition* CurrentItem = IsValid(EquipHotbarComponent) == true ? EquipHotbarComponent->GetCurrentItem() : nullptr;
 
-	// 본체가 확정한 소켓 자세를 컴포넌트 공간으로 받아, 1인칭 팔이 놓인 자리에
-	// 그대로 얹는다. 팔로워가 자식 트랜스폼을 갱신하지 않는 문제를 우회한다.
+	// 본체의 실제 부착 소켓 자세를 일인칭 팔 공간에 합성하기 위한 조회
 	const FTransform SocketLocal =
-		BodyMesh->GetSocketTransform(ToolAttachSocketName, RTS_Component);
+		BodyMesh->GetSocketTransform(AttachSocketName, RTS_Component);
 	// 날 축 roll 은 GetToolAttachTransform 안에 이미 들어 있다. 3인칭 메시의
 	// 상대 회전을 읽어 오면 안 된다 — 그 컴포넌트는 블레이드 갱신과
 	// RefreshScrapeLoadVisual 두 곳이 쓰는 경쟁 상태이고, 되돌려진 프레임을
 	// 집으면 AttachOffset 으로 튀어 1인칭에서만 떨림으로 보인다.
 	const FTransform Offset =
-		GetToolAttachTransform(FirstPersonToolMesh->GetStaticMesh(), CurrentTool);
+		GetToolAttachTransform(FirstPersonToolMesh->GetStaticMesh(), CurrentItem);
 
 	// 부모가 피벗(값이 확정적인 SceneComponent)이므로 월드로 지정해도 역산 기준이
 	// 흔들리지 않는다. 컴포넌트 계층이 어떻게 구성돼 있든 결과가 같도록
@@ -1903,13 +1903,11 @@ void AMD_Character::RefreshToolMesh()
 
 	// 메시 교체 전에 이전 헤라 소켓/scale을 잡고 있던 독립 viewmodel 상태를 버린다.
 	SetFirstPersonScrapeViewModelActive(false);
-	UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
-
-	// 도구별 소켓이 지정돼 있으면 그 소켓, 없으면 기본 소켓
-	const FName SocketName =
-		(IsValid(CurrentTool) && !CurrentTool->AttachSocketName.IsNone())
-			? CurrentTool->AttachSocketName
-			: ToolAttachSocketName;
+	// 선택한 공통 아이템에서 메시 부착 설정 조회
+	UMD_ItemDefinition* CurrentItem = EquipHotbarComponent->GetCurrentItem();
+	// 아이템별 지정 소켓을 우선하고 미지정 시 캐릭터 기본 소켓 선택
+	FName SocketName = IsValid(CurrentItem) == true && CurrentItem->AttachSocketName.IsNone() == false
+		? CurrentItem->AttachSocketName : ToolAttachSocketName;
 	const auto ResolveAttachSocket = [this, SocketName](
 		const USkeletalMeshComponent* SkeletalMesh) -> FName
 	{
@@ -1939,9 +1937,8 @@ void AMD_Character::RefreshToolMesh()
 		FirstPersonArmsPivot,
 		FAttachmentTransformRules::KeepRelativeTransform);
 
-	const FTransform AttachOffset = IsValid(CurrentTool)
-		? CurrentTool->AttachOffset
-		: FTransform::Identity;
+	// 도구와 소모품의 공통 오프셋으로 초기 부착 회전 설정
+	FTransform AttachOffset = IsValid(CurrentItem) == true ? CurrentItem->AttachOffset : FTransform::Identity;
 	ScrapeAnimationToolRelativeRotation = AttachOffset.Rotator();
 
 	// 상대 트랜스폼 자체는 RefreshScrapeLoadVisual 에서 준다. 오염 적재 단계에 따라
@@ -1956,16 +1953,8 @@ void AMD_Character::RefreshScrapeLoadVisual()
 	UMD_ItemDefinition* CurrentItem = IsValid(EquipHotbarComponent) == true ? EquipHotbarComponent->GetCurrentItem() : nullptr;
 	// 기존 도구 메시와 오염 적재 표현에 사용할 도구 정의 조회
 	UMD_ToolDefinition* CurrentTool = Cast<UMD_ToolDefinition>(CurrentItem);
-	// 손에 표시할 소모품 메시를 제공하는 정의 조회
-	UMD_ConsumeItemDefinition* CurrentConsumeItem = Cast<UMD_ConsumeItemDefinition>(CurrentItem);
-	// 소모품 선택 시 지정 메시를 사용하고 빈 슬롯은 표시 해제
-	UStaticMesh* NewToolMesh = IsValid(CurrentConsumeItem) == true ? CurrentConsumeItem->ConsumeMesh : nullptr;
-	// 도구 선택 시 기존 도구 메시 표시 유지
-	if (IsValid(CurrentTool) == true)
-	{
-		// 도구별 기본 메시를 오염 적재 단계 판정의 기준으로 적용
-		NewToolMesh = CurrentTool->ToolMesh;
-	}
+	// 아이템 유형에 관계없이 공통 기본 메시를 사용하고 빈 슬롯은 표시 해제
+	UStaticMesh* NewToolMesh = IsValid(CurrentItem) == true ? CurrentItem->ToolMesh : nullptr;
 	if (IsValid(CurrentTool) && IsValid(ScrapeToolComponent))
 	{
 		switch (ScrapeToolComponent->GetScrapeLoadStage())
@@ -1998,21 +1987,20 @@ void AMD_Character::RefreshScrapeLoadVisual()
 	}
 
 	const bool bShowTool = IsValid(NewToolMesh);
-	// 1인칭 도구도 본체 소켓에서 배치를 유도하므로 그쪽 유무로 판정한다.
-	const bool bHasFirstPersonSocket = IsValid(FirstPersonMesh)
-		&& IsValid(GetMesh())
-		&& GetMesh()->DoesSocketExist(ToolAttachSocketName);
 	const bool bHasThirdPersonSocket = IsValid(GetMesh())
 		&& GetMesh()->DoesSocketExist(ThirdPersonToolMesh->GetAttachSocketName());
+	// 일인칭도 기본 소켓 대신 실제 부착 소켓의 유효성으로 표시 여부 결정
+	bool bHasFirstPersonSocket = IsValid(FirstPersonMesh) == true && bHasThirdPersonSocket == true;
 	FirstPersonToolMesh->SetStaticMesh(NewToolMesh);
 	FirstPersonToolMesh->SetVisibility(bShowTool && bHasFirstPersonSocket, true);
 	ThirdPersonToolMesh->SetStaticMesh(NewToolMesh);
 	ThirdPersonToolMesh->SetVisibility(bShowTool && bHasThirdPersonSocket, true);
 
-	// 톱날은 본체 소켓 기준이라 본체 메시가 확정된 뒤에 갱신해야 한다
+	// 도구 본체 변경에 따른 절단기 톱날 메시 갱신
 	RefreshCutterBladeMesh();
 
-	const FTransform ToolTransform = GetToolAttachTransform(NewToolMesh, CurrentTool);
+	// 공통 부착 오프셋과 최종 메시의 그립 소켓을 함께 반영
+	FTransform ToolTransform = GetToolAttachTransform(NewToolMesh, CurrentItem);
 	ThirdPersonToolMesh->SetRelativeTransform(ToolTransform);
 	if (bFirstPersonScrapeViewModelActive)
 	{
@@ -2026,11 +2014,10 @@ void AMD_Character::RefreshScrapeLoadVisual()
 	}
 }
 
-FTransform AMD_Character::GetToolAttachTransform(
-	const UStaticMesh* ToolMesh,
-	const UMD_ToolDefinition* Tool) const
+FTransform AMD_Character::GetToolAttachTransform(const UStaticMesh* ToolMesh, UMD_ItemDefinition* Item) const
 {
-	FTransform Offset = IsValid(Tool) ? Tool->AttachOffset : FTransform::Identity;
+	// 선택 아이템의 공통 오프셋을 메시 그립 보정의 기준으로 사용
+	FTransform Offset = IsValid(Item) == true ? Item->AttachOffset : FTransform::Identity;
 	// 긁기 중 날 축 twist 는 AttachOffset 의 회전을 대체한다. 이 함수가 도구
 	// 부착 자세의 유일한 출처여야 한다 — 3인칭 메시의 상대 트랜스폼을 읽어
 	// 재사용하면 RefreshScrapeLoadVisual 이 같은 값을 되돌리는 것과 경쟁해

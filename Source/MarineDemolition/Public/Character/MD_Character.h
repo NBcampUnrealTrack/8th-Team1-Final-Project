@@ -26,6 +26,7 @@ class UGameplayAbility;
 class UMD_EquipHotbarComponent;
 class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
+class UMD_ItemDefinition;
 class UMD_SupplyComponent;
 class UMD_FoamGunComponent;
 class UMD_OxygenComponent;
@@ -464,13 +465,8 @@ private:
 	bool IsCutterEquipped() const;
 	UEnhancedInputLocalPlayerSubsystem* GetEnhancedInputSubsystem() const;
 
-	/**
-	 * 도구 메시의 그립 소켓이 손 소켓 원점에 오도록 하는 상대 트랜스폼.
-	 * 그립 소켓이 없으면 Tool의 AttachOffset을 그대로 돌려준다.
-	 */
-	FTransform GetToolAttachTransform(
-		const UStaticMesh* ToolMesh,
-		const UMD_ToolDefinition* Tool) const;
+	// 공통 아이템의 부착 오프셋과 메시 그립 소켓을 반영한 상대 트랜스폼 조회
+	FTransform GetToolAttachTransform(const UStaticMesh* ToolMesh, UMD_ItemDefinition* Item) const;
 	FTransform GetToolAttachTransformFromOffset(
 		const UStaticMesh* ToolMesh,
 		const FTransform& AttachOffset) const;
