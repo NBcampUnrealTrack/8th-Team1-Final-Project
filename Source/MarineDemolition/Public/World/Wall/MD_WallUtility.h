@@ -156,6 +156,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Utility")
 	bool bStartBroken = false;
 
+	// 수리 완료 시 잠금을 해제할 문 액터. BP_Door의 bLocked를 false로 세팅한다.
+	// 레벨에서 WaterPipe/PowerConduit ↔ BP_Door를 연결하는 게이트 메커니즘
+	UPROPERTY(EditAnywhere, Category = "MD|Utility|Gate")
+	TSoftObjectPtr<AActor> LinkedGateActor;
+
 	// 시작 파손 지점 (액터 로컬). 미지정(0)이면 메시 중심
 	UPROPERTY(EditAnywhere, Category = "MD|Utility", meta = (EditCondition = "bStartBroken"))
 	FVector StartBreakLocalOffset = FVector::ZeroVector;
@@ -174,6 +179,9 @@ protected:
 	// 관통 지점의 표면 법선 (VFX +X=분출 규약에 맞춰 MakeRotFromX으로 회전 구성)
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "MD|Utility")
 	FVector_NetQuantizeNormal BreakNormal = FVector_NetQuantizeNormal(0.f, 0.f, 1.f);
+
+	// 수리 완료 시 LinkedGateActor의 bLocked를 false로 해제 (서버)
+	void UnlockLinkedGate();
 
 private:
 	// LinkTrigger와 겹치는 CuttableWall을 찾아 철거 델리게이트 구독 (서버)

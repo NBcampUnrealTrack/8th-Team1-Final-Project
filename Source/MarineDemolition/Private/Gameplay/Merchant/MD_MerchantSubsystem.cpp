@@ -2,6 +2,7 @@
 
 
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+#include "EngineUtils.h"
 #include "GameplayTagContainer.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
@@ -13,6 +14,7 @@
 #include "Player/MD_PlayerState.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
+#include "World/Sample/MD_QuestInteractionPickup.h"
 #include "World/Sample/MD_QuestItem.h"
 #include "Util/MD_LogUtility.h"
 
@@ -452,6 +454,123 @@ bool UMD_MerchantSubsystem::TryAbandonRepeatQuest(int32 QuestIndex)
 	return true;
 }
 
+bool UMD_MerchantSubsystem::NotifyInteractionProgress(const FPrimaryAssetId& QuestDefinitionId, int32 ExpectedPhaseIndex)
+{
+	if (QuestDefinitionId.IsValid() == false)
+	{
+		return false;
+	}
+
+	for (FMD_MainQuestState& QuestState : MainQuests)
+	{
+		if (QuestState.IsActive() == false || QuestState.DefinitionId != QuestDefinitionId)
+		{
+			continue;
+		}
+
+		if (QuestState.CurrentPhaseIndex != ExpectedPhaseIndex)
+		{
+			return false;
+		}
+
+		UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		if (IsValid(Definition) == false)
+		{
+			return false;
+		}
+
+		// Interaction 페이즈에서만 진행도를 올릴 수 있다
+		EMD_QuestObjectiveType ObjectiveType = Definition->GetObjectiveType(QuestState.CurrentPhaseIndex);
+		if (ObjectiveType != EMD_QuestObjectiveType::Interaction)
+		{
+			return false;
+		}
+
+		int32 RequiredCount = Definition->GetRequiredCount(QuestState.CurrentPhaseIndex);
+		if (QuestState.CurrentProgress >= RequiredCount)
+		{
+			// 이미 충족됨
+			return false;
+		}
+
+		++QuestState.CurrentProgress;
+
+		UE_LOG(LogTemp, Log, TEXT("[Merchant] Interaction 진행도: %s Phase %d — %d/%d"),
+			*Definition->QuestName.ToString(), QuestState.CurrentPhaseIndex,
+			QuestState.CurrentProgress, RequiredCount);
+
+		OnMerchantStateChanged.Broadcast();
+		return true;
+	}
+
+	return false;
+}
+
+bool UMD_MerchantSubsystem::TryAdvanceMainQuestPhase(const FPrimaryAssetId& QuestDefinitionId, int32 ExpectedPhaseIndex)
+{
+	if (QuestDefinitionId.IsValid() == false)
+	{
+		return false;
+	}
+
+	for (FMD_MainQuestState& QuestState : MainQuests)
+	{
+		if (QuestState.IsActive() == false || QuestState.DefinitionId != QuestDefinitionId)
+		{
+			continue;
+		}
+
+		// 클라이언트가 보고 있는 페이즈와 서버 페이즈가 일치해야 진행한다
+		if (QuestState.CurrentPhaseIndex != ExpectedPhaseIndex)
+		{
+			return false;
+		}
+
+		UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		if (IsValid(Definition) == false)
+		{
+			return false;
+		}
+
+		// 다음 페이즈가 있어야 전환할 수 있다
+		if (Definition->HasPhase(QuestState.CurrentPhaseIndex + 1) == false)
+		{
+			return false;
+		}
+
+		// Interaction 페이즈에서는 선행 조건(카드 확보 등)이 충족되어야 전환할 수 있다
+		EMD_QuestObjectiveType ObjectiveType = Definition->GetObjectiveType(QuestState.CurrentPhaseIndex);
+		if (ObjectiveType == EMD_QuestObjectiveType::Interaction)
+		{
+			int32 RequiredCount = Definition->GetRequiredCount(QuestState.CurrentPhaseIndex);
+			if (QuestState.CurrentProgress < RequiredCount)
+			{
+				return false;
+			}
+		}
+
+		// 현재 페이즈의 중간 보상(호감도 등)을 적용한다
+		const FMD_QuestRewardData& PhaseReward = Definition->GetPhaseCompletionReward(QuestState.CurrentPhaseIndex);
+		bool bHasPhaseReward = PhaseReward.Credits > 0 || PhaseReward.Score > 0 || PhaseReward.Affinity > 0.0f;
+		if (bHasPhaseReward == true)
+		{
+			ApplyQuestRewardData(PhaseReward, false);
+		}
+
+		// 다음 페이즈로 전환한다
+		++QuestState.CurrentPhaseIndex;
+		QuestState.CurrentProgress = 0;
+
+		UE_LOG(LogTemp, Log, TEXT("[Merchant] 메인 퀘스트 페이즈 전환: %s → Phase %d (호감도 +%.1f)"),
+			*Definition->QuestName.ToString(), QuestState.CurrentPhaseIndex, PhaseReward.Affinity);
+
+		OnMerchantStateChanged.Broadcast();
+		return true;
+	}
+
+	return false;
+}
+
 bool UMD_MerchantSubsystem::TryDeliverQuestItem(AMD_QuestItem* SubmittedItem)
 {
 	bool bOutDelivered = false;
@@ -704,6 +823,9 @@ void UMD_MerchantSubsystem::ResolveActiveQuestsAtDayEnd(int32 CompletedDay)
 
 	bool bChanged = false;
 
+	// 실패 처리된 메인 퀘스트의 스폰물을 디스폰하기 위해 ID를 수집한다
+	TArray<FPrimaryAssetId> FailedQuestIds;
+
 	for (FMD_MainQuestState& QuestState : MainQuests)
 	{
 		if (QuestState.Status != EMD_MainQuestStatus::Active)
@@ -720,14 +842,69 @@ void UMD_MerchantSubsystem::ResolveActiveQuestsAtDayEnd(int32 CompletedDay)
 		bool bQuestFailed = FailMainQuest(QuestState, EMD_QuestFailureReason::NotDelivered);
 		if (bQuestFailed == true)
 		{
+			FailedQuestIds.Add(QuestState.DefinitionId);
 			bChanged = true;
 		}
 	}
 
+	// 기획 03 §6.1: 미회수 카트리지·퀘스트 샘플은 18:00에 디스폰한다
+	if (FailedQuestIds.Num() > 0)
+	{
+		DespawnMainQuestItems(FailedQuestIds);
+	}
+
 	if (bChanged == true)
 	{
-		UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 마감 — 미완료 메인 퀘스트 실패 처리"), CompletedDay);
+		UE_LOG(LogTemp, Log, TEXT("[Merchant] Day %d 마감 — 미완료 메인 퀘스트 %d건 실패·디스폰"), CompletedDay, FailedQuestIds.Num());
 		OnMerchantStateChanged.Broadcast();
+	}
+}
+
+void UMD_MerchantSubsystem::DespawnMainQuestItems(const TArray<FPrimaryAssetId>& FailedQuestIds)
+{
+	UWorld* World = GetWorld();
+	if (IsValid(World) == false || FailedQuestIds.Num() == 0)
+	{
+		return;
+	}
+
+	int32 DespawnedCount = 0;
+
+	// 월드 내 모든 퀘스트 아이템을 순회하여 실패 퀘스트에 귀속된 것만 제거한다
+	for (TActorIterator<AMD_QuestItem> It(World); It; ++It)
+	{
+		AMD_QuestItem* QuestItem = *It;
+		if (IsValid(QuestItem) == false || QuestItem->IsActorBeingDestroyed() == true)
+		{
+			continue;
+		}
+
+		if (FailedQuestIds.Contains(QuestItem->QuestDefinitionId) == true)
+		{
+			QuestItem->Destroy();
+			++DespawnedCount;
+		}
+	}
+
+	// 미획득 상호작용 오브젝트(카드 등)도 실패 퀘스트에 귀속되었으면 디스폰한다
+	for (TActorIterator<AMD_QuestInteractionPickup> It(World); It; ++It)
+	{
+		AMD_QuestInteractionPickup* Pickup = *It;
+		if (IsValid(Pickup) == false || Pickup->IsActorBeingDestroyed() == true)
+		{
+			continue;
+		}
+
+		if (FailedQuestIds.Contains(Pickup->QuestDefinitionId) == true)
+		{
+			Pickup->Destroy();
+			++DespawnedCount;
+		}
+	}
+
+	if (DespawnedCount > 0)
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Merchant] 실패 메인 퀘스트 아이템 %d개 디스폰"), DespawnedCount);
 	}
 }
 

@@ -616,7 +616,12 @@ void AMD_PlayerController::MD_DumpQuests()
 		return;
 	}
 
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] Credits=%d Day=%d"),Merchant->GetCredits(), Merchant->GetCurrentDay());
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] Credits=%d Day=%d"), Merchant->GetCredits(), Merchant->GetCurrentDay());
+	for (const FMD_MainQuestState& Q : Merchant->GetMainQuests())
+	{
+		UE_LOG(LogTemp, Log, TEXT("[Merchant]   Main: %s Status=%d Phase=%d Progress=%d UnlockDay=%d"),
+			*Q.DefinitionId.ToString(), (int32)Q.Status, Q.CurrentPhaseIndex, Q.CurrentProgress, Q.UnlockDay);
+	}
 }
 
 void AMD_PlayerController::BeginPlay()
@@ -731,6 +736,24 @@ void AMD_PlayerController::ServerAbandonRepeatQuest_Implementation(int32 Index)
 
 	// 고정 점수 차감 없이 퀘스트 에셋의 미회수 패널티만 적용하는 포기 처리
 	Merchant->TryAbandonRepeatQuest(Index);
+}
+
+void AMD_PlayerController::ServerAdvanceMainQuestPhase_Implementation(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex)
+{
+	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
+	if (IsValid(Merchant) == true)
+	{
+		Merchant->TryAdvanceMainQuestPhase(QuestDefinitionId, ExpectedPhaseIndex);
+	}
+}
+
+void AMD_PlayerController::ServerNotifyQuestInteraction_Implementation(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex)
+{
+	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
+	if (IsValid(Merchant) == true)
+	{
+		Merchant->NotifyInteractionProgress(QuestDefinitionId, ExpectedPhaseIndex);
+	}
 }
 
 void AMD_PlayerController::ServerBorrowCredits_Implementation(AMD_Merchant* MerchantActor, int32 Amount)

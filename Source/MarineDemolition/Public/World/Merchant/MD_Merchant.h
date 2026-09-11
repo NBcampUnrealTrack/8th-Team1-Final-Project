@@ -200,6 +200,9 @@ private:
 	// 복제된 크레딧과 부채를 현재 대출 화면에 다시 적용하는 함수
 	void RefreshLoanWidgetFromComponent();
 
+	/** 활성 메인 퀘스트 중 Interaction 목표를 찾아 서버 페이즈 전환을 요청하는 함수 */
+	void TryAdvanceInteractionQuests(APlayerController* PC);
+
 	UMD_MerchantComponent* GetMerchantComponent() const;
 
 	/** 메인·반복 퀘스트와 독립된 로어 수집 복제 컴포넌트 조회 함수 */

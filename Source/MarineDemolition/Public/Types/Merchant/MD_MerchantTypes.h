@@ -12,7 +12,8 @@ enum class EMD_QuestObjectiveType : uint8
 	RecoverDamaged UMETA(DisplayName = "손상 허용 회수"),
 	Cleanup        UMETA(DisplayName = "청소 계약"),
 	Sealing        UMETA(DisplayName = "마감 계약"),
-	Composite      UMETA(DisplayName = "복합")
+	Composite      UMETA(DisplayName = "복합"),
+	Interaction    UMETA(DisplayName = "NPC 상호작용")
 };
 
 UENUM(BlueprintType)
