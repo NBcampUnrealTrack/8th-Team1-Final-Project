@@ -36,6 +36,8 @@ public:
 
     void InitializeUniform(int32 Count, const FMD_ScrapeSurfaceCell& Cell);
     void InitializeFromCells(TArray<FMD_ScrapeSurfaceCell>&& Cells);
+    /** Consume authoritative initial amounts directly; other channels start at exact +0. */
+    void InitializeFromAmounts(TArray<float>&& Amounts);
     void Reset();
     int32 Num() const { return CellCount; }
     bool IsEmpty() const { return CellCount == 0; }
@@ -89,6 +91,8 @@ public:
     const void* GetSharedInitialIdentity() const { return Initial.Get(); }
     /** Number of modified page slots, including pages shared with another snapshot. */
     int32 GetOwnedPageCount() const { return NonNullPageCount; }
+    /** Initial equals remaining, with exact +0 paint/coverage and no modified pages. */
+    bool IsPristineCanonicalInitial() const;
     static FMD_ScrapePagedStateMemoryStats GetGlobalMemoryStats();
     static bool AreCellsBitIdentical(const FMD_ScrapeSurfaceCell& A, const FMD_ScrapeSurfaceCell& B);
 
@@ -127,6 +131,7 @@ private:
     static TSharedPtr<const FInitial, ESPMode::NotThreadSafe> FindOrAddInitial(
         TArray<FMD_ScrapeSurfaceCell>&& Cells, const FMD_ScrapeSurfaceCell& UniformCell,
         int32 Count, bool bUniform, bool bCanonicalAmounts);
+    static TSharedPtr<const FInitial, ESPMode::NotThreadSafe> FindOrAddInitialAmounts(TArray<float>&& Amounts);
     void BindInitial(TSharedPtr<const FInitial, ESPMode::NotThreadSafe> InInitial);
     FPage& EditPage(int32 PageIndex);
     void CompactExplicitPage(int32 PageIndex);

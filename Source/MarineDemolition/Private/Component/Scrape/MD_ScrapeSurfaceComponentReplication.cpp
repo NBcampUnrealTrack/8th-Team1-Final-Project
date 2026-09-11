@@ -684,18 +684,18 @@ void UMD_ScrapeSurfaceComponent::ApplyAllReplicatedContaminationState()
 
 
 void UMD_ScrapeSurfaceComponent::PublishContaminationChanges(
-	const TArray<FMD_ScrapeCellChange>& CellChanges)
+	const TArray<FMD_ScrapeCellChange>& CellChanges, bool bBoundaryChanged)
 {
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapePublish);
 
 	if (!bContaminationEnabled
 		|| !HasAuthority()
-		|| CellChanges.IsEmpty())
+		|| (CellChanges.IsEmpty() && !bBoundaryChanged))
 	{
 		return;
 	}
 
-	bool bPublishedAnyCell = false;
+	bool bPublishedAnyCell = bBoundaryChanged;
 	for (const FMD_ScrapeCellChange& CellChange : CellChanges)
 	{
 		if (IsContaminationCellActive(CellChange.CellIndex))
@@ -713,7 +713,7 @@ void UMD_ScrapeSurfaceComponent::PublishContaminationChanges(
 	if (UsesMeshUVSurface())
 	{
 		if (UMD_ScrapeMeshUVSyncSubsystem* Sync = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>())
-		{ Sync->RecordSurfaceChanges(*this, CellChanges); }
+		{ Sync->RecordSurfaceChanges(*this, CellChanges,bBoundaryChanged); }
 	}
 
 	if (AActor* const OwnerActor = GetOwner())

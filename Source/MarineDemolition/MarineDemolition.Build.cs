@@ -39,7 +39,7 @@ public class MarineDemolition : ModuleRules
 			// 오염 마스크 런타임 텍스처 업로드
 			"RHI", "RenderCore",
             // Bounded runtime solid-contamination geometry (no editor dependency).
-            "GeometryFramework",
+            "GeometryFramework", "GeometryAlgorithms",
             // Shared solid templates, GPU displacement and sparse GPU updates.
             "MDSolidRendering",
 			// 절단·헤라 VFX

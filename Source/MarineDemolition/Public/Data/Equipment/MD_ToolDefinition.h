@@ -50,6 +50,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape")
 	FMD_ScrapeToolSpec ScrapeProfile;
 
+	/** Authoritative amount removed from a surface stain by one completed swing. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape", meta = (ClampMin = "1", ClampMax = "10000"))
+	int32 StainRemovalAmount = 100;
+
 	// 절단 진행 속도 배율. 기획 08 §3의 "절단 시간 −35%"(IT-C1)는 속도 배율 약 1.54에 해당한다 (1 / 0.65)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool",
 		meta = (ClampMin = "0.1"))

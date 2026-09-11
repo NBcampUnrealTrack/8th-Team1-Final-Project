@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Types/SaveGame/MD_SaveDataTypes.h"
+#include "Gameplay/Contamination/MD_SurfaceStainPersistence.h"
 
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "GameplayTags/MD_GameplayTags.h"
@@ -117,6 +118,7 @@ bool FMD_MerchantData::IsStructurallyValid() const
 
 bool FMD_WorldData::IsStructurallyValid() const
 {
+    if (!FMD_SurfaceStainPersistence::Validate(SurfaceStains)) return false;
     TSet<FGuid> PendingBatchIds;
     for (const FMD_ContaminationPendingDrop& Drop : PendingContaminationDrops)
     {
@@ -140,7 +142,8 @@ bool FMD_WorldData::IsStructurallyValid() const
 	for (const FMD_WallContaminationRecord& ContaminationRecord : WallContaminations)
 	{
         int32 MaximumCellCount = FMD_ScrapeSurfaceLayout::LegacyMaximumCombinedCellCount;
-        if (ContaminationRecord.WallName.IsNone()
+        if ((bHasContaminationGenerationRecords && !ContaminationRecord.Generation.IsValid())
+            || ContaminationRecord.WallName.IsNone()
             || !FMD_ScrapeSurfaceLayout::IsLayoutMetadataValid(
                 ContaminationRecord.LayoutVersion, ContaminationRecord.LayoutId,
                 ContaminationRecord.GridDimensions)
@@ -263,8 +266,9 @@ bool FMD_GameData::MigrateToCurrentVersion()
 		}
 	}
 
-	// 이름 기반 구형 구매 원장을 전체 AssetId로 한 번 이전
-	if (SchemaVersion < 10)
+	// scrape의 버전 10~13도 이름 기반 원장을 사용했으므로 통합 버전 14 이전 모두 검사한다.
+	// dev 버전 10에서 이미 이전한 원장은 구형 필드가 비어 있어 그대로 보존된다.
+	if (SchemaVersion < 14)
 	{
 		// 기존 저장 슬롯에 포함된 상인 데이터 복사
 		FMD_MerchantData MerchantData;
@@ -303,6 +307,24 @@ bool FMD_GameData::MigrateToCurrentVersion()
 	// 버전 8은 오염 주소의 bake ID와 격자 크기를 추가한다. 이전 기록은
 	// LayoutVersion=0 / invalid ID / zero grid를 유지하여 MeshUV에 적용하지 않는다.
 	// CellIndices는 이전부터 int32 UPROPERTY이므로 배열 원소 폭은 바뀌지 않는다.
+    // Version 11 adds the common contamination session seed. Absence remains false
+    // for old saves; never infer a common seed from independently authored walls.
+    // Version 12 adds placed surface-stain stages. Older saves use authored initial stages.
+	if (SchemaVersion < 13)
+	{
+		FMD_WorldData WorldData;
+		if (GetDataField(FMD_WorldData::DataFieldKey, WorldData))
+		{
+			for (FMD_SurfaceStainRecord& Stain : WorldData.SurfaceStains)
+			{
+				const int32 Size = Stain.ResolveSize();
+				if (!FMD_SurfaceStainSize::IsValidRemaining(Size)) return false;
+				Stain.RemainingSize = Size;
+			}
+			AddDataField(FMD_WorldData::DataFieldKey, WorldData);
+		}
+	}
+
 	SchemaVersion = CurrentSchemaVersion;
 	return true;
 }

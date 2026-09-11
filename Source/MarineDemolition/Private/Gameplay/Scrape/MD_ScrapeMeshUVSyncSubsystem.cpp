@@ -144,10 +144,10 @@ void UMD_ScrapeMeshUVSyncSubsystem::InvalidateSurface(UMD_ScrapeSurfaceComponent
 }
 
 void UMD_ScrapeMeshUVSyncSubsystem::RecordSurfaceChanges(
-    UMD_ScrapeSurfaceComponent& Surface, const TConstArrayView<FMD_ScrapeCellChange> Changes)
+    UMD_ScrapeSurfaceComponent& Surface, const TConstArrayView<FMD_ScrapeCellChange> Changes, bool bBoundaryChanged)
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_RecordBoundedJournal);
-    if (!Surface.HasAuthority() || !Surface.UsesMeshUVSurface() || Changes.IsEmpty()
+    if (!Surface.HasAuthority() || !Surface.UsesMeshUVSurface() || (Changes.IsEmpty() && !bBoundaryChanged)
         || (GetWorld()->GetNetMode() == NM_Standalone && !Journals.Contains(&Surface))) { return; }
     FMD_ScrapeMeshUVJournal& Journal = FindJournal(Surface);
     if (Journal.Serial == MAX_uint64)
@@ -186,6 +186,7 @@ bool UMD_ScrapeMeshUVSyncSubsystem::CaptureSnapshot(
     FMD_ScrapeMeshUVJournal& Journal = FindJournal(Surface);
     OutDescriptor.LayoutId = Journal.LayoutId; OutDescriptor.Grid = Journal.Grid;
     OutDescriptor.CarrierScale = Surface.GetContaminationCarrierWeightScale();
+    OutDescriptor.Generation = Surface.GetContaminationGeneration();
     OutDescriptor.Epoch = Journal.Epoch; OutDescriptor.Serial = Journal.Serial;
     OutDescriptor.VisualRevision = Surface.ReplicatedContaminationVisualRevision;
     OutDescriptor.bFullSnapshot = Journal.NeedsFullSnapshot(KnownEpoch, KnownSerial);

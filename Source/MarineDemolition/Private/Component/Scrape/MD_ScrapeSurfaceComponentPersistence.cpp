@@ -286,7 +286,10 @@ void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
 
 		const bool bHasTransferredPaint =
 			Cell.TransferredContamination > UE_SMALL_NUMBER;
-		if (bScraped || bBurstSinceGeneration || bHasTransferredPaint)
+		// A stroke can cross a procedural hole without changing its zero mass.
+		// Its footprint still belongs to the saved surface state.
+		const bool bHasScrapedCoverage = Cell.CoveredFraction != 0.0f;
+		if (bScraped || bBurstSinceGeneration || bHasTransferredPaint || bHasScrapedCoverage)
 		{
 			OutCellIndices.Add(Index);
 			OutInitialAmounts.Add(Cell.InitialContamination);

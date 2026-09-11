@@ -1,6 +1,7 @@
 #include "World/Wall/MD_WallUtility.h"
 
 #include "Character/MD_Character.h"
+#include "Component/Scanning/MD_ScannerComponent.h"
 #include "CollisionQueryParams.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Components/BoxComponent.h"
@@ -11,6 +12,7 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "World/Wall/MD_CuttableWall.h"
@@ -40,6 +42,19 @@ AMD_WallUtility::AMD_WallUtility()
 	LinkTrigger->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
 	LinkTrigger->SetGenerateOverlapEvents(true);
 	LinkTrigger->SetCanEverAffectNavigation(false);
+}
+
+void AMD_WallUtility::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
+{
+	TagContainer.AddTag(MDGameplayTags::Interaction_Scannable);
+}
+
+void AMD_WallUtility::OnScanned_Implementation(float Duration, AActor* Scanner)
+{
+	if (!FMath::IsFinite(Duration) || Duration <= 0.f || IsHidden()
+		|| !IsValid(Mesh) || !Mesh->IsVisible() || !Mesh->bRenderInMainPass) return;
+	// Preserve local ownership, interaction priority and the existing cleanup timer.
+	HandleHostWallScanned(nullptr, Duration, Scanner);
 }
 
 void AMD_WallUtility::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -204,6 +219,10 @@ void AMD_WallUtility::HandleHostWallScanned(AMD_CuttableWall* Wall, float Durati
 		return;
 	}
 
+	ActiveScanner = Scanner;
+	if (const AMD_Character* Character = Cast<AMD_Character>(Scanner))
+		if (UMD_ScannerComponent* Component = Character->GetScannerComponent())
+			Component->TrackScannedUtility(this);
 	SetScanSilhouette(true);
 
 	// 지속시간 후 자동 해제 (재스캔 시 타이머 갱신 = 연장)
@@ -216,22 +235,35 @@ void AMD_WallUtility::HandleHostWallScanned(AMD_CuttableWall* Wall, float Durati
 
 void AMD_WallUtility::SetScanSilhouette(bool bVisible)
 {
-	if (!IsValid(Mesh))
-	{
-		return;
-	}
+	bScanHighlighted = bVisible;
+	RefreshHighlight();
+}
 
-	if (bVisible)
-	{
-		// 상호작용 하이라이트(250)와 구분되는 스캔 전용 스텐실 → PP가 엑스레이로 렌더
-		Mesh->SetCustomDepthStencilValue(ScanSilhouetteStencil);
-	}
-	Mesh->SetRenderCustomDepth(bVisible);
+void AMD_WallUtility::RefreshHighlight()
+{
+	if (bScanHighlighted || bInteractionHighlighted)
+		HighlightState.Apply(Mesh, bScanHighlighted ? ScanSilhouetteStencil : IMD_Interactable::HighlightStencilValue);
+	else
+		HighlightState.Restore();
 }
 
 void AMD_WallUtility::EndScanSilhouette()
 {
+	GetWorldTimerManager().ClearTimer(ScanSilhouetteTimer);
+	ActiveScanner.Reset();
 	SetScanSilhouette(false);
+}
+
+void AMD_WallUtility::StopScanFor(AActor* Scanner)
+{
+	if (ActiveScanner.Get() == Scanner) EndScanSilhouette();
+}
+
+void AMD_WallUtility::EndPlay(const EEndPlayReason::Type Reason)
+{
+	GetWorldTimerManager().ClearTimer(ScanSilhouetteTimer);
+	HighlightState.Restore();
+	Super::EndPlay(Reason);
 }
 
 void AMD_WallUtility::SetBroken(AActor* Cutter)
@@ -407,11 +439,6 @@ void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
 
 void AMD_WallUtility::SetInteractionHighlighted_Implementation(bool bHighlighted)
 {
-	if (!IsValid(Mesh))
-	{
-		return;
-	}
-
-	Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
-	Mesh->SetRenderCustomDepth(bHighlighted);
+	bInteractionHighlighted = bHighlighted;
+	RefreshHighlight();
 }

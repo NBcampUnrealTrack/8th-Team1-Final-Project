@@ -67,6 +67,15 @@ struct FMD_ScrapePagedState::FInitial
         ++Stats.LiveInitialTemplates;
         MD_ScrapePagedStatePrivate::TraceInitialStats();
     }
+    explicit FInitial(TArray<float>&& InAmounts)
+        : InitialAmounts(MoveTemp(InAmounts)), Count(InitialAmounts.Num()), bUniform(false), bCanonicalAmounts(true)
+    {
+        check(IsInGameThread());
+        auto& Stats = MD_ScrapePagedStatePrivate::LiveStats;
+        Stats.LiveInitialBytes += GetAllocatedSize();
+        ++Stats.LiveInitialTemplates;
+        MD_ScrapePagedStatePrivate::TraceInitialStats();
+    }
     ~FInitial()
     {
         auto& Stats = MD_ScrapePagedStatePrivate::LiveStats;
@@ -322,6 +331,15 @@ TSharedPtr<const FMD_ScrapePagedState::FInitial, ESPMode::NotThreadSafe> FMD_Scr
 {
     check(IsInGameThread());
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_ScrapeState_InternInitial);
+    if (bCanonicalAmounts)
+    {
+        TArray<float> Amounts;
+        Amounts.SetNumUninitialized(Count);
+        for (int32 Index = 0; Index < Count; ++Index)
+            FMemory::Memcpy(&Amounts[Index], &Cells[Index].InitialContamination, sizeof(float));
+        Cells.Empty();
+        return FindOrAddInitialAmounts(MoveTemp(Amounts));
+    }
     struct FCacheEntry
     {
         uint64 Hash;
@@ -383,6 +401,54 @@ TSharedPtr<const FMD_ScrapePagedState::FInitial, ESPMode::NotThreadSafe> FMD_Scr
     return Result;
 }
 
+TSharedPtr<const FMD_ScrapePagedState::FInitial, ESPMode::NotThreadSafe>
+FMD_ScrapePagedState::FindOrAddInitialAmounts(TArray<float>&& Amounts)
+{
+    check(IsInGameThread());
+    struct FEntry { uint64 Hash; TWeakPtr<const FInitial, ESPMode::NotThreadSafe> Initial; };
+    static TArray<FEntry> Cache;
+    const SIZE_T Bytes = Amounts.Num() * sizeof(float);
+    const uint64 Hash = FXxHash64::HashBuffer(Amounts.GetData(), Bytes).Hash;
+    Cache.RemoveAllSwap([](const FEntry& Entry) { return !Entry.Initial.IsValid(); }, EAllowShrinking::No);
+    for (const auto& Entry : Cache)
+    {
+        const auto Existing = Entry.Initial.Pin();
+        if (Entry.Hash == Hash && Existing && Existing->Count == Amounts.Num()
+            && FMemory::Memcmp(Existing->InitialAmounts.GetData(), Amounts.GetData(), Bytes) == 0)
+        {
+            Amounts.Empty();
+            return Existing;
+        }
+    }
+    auto Result = MakeShared<FInitial, ESPMode::NotThreadSafe>(MoveTemp(Amounts));
+    Cache.Add({Hash, Result});
+    return Result;
+}
+
+void FMD_ScrapePagedState::InitializeFromAmounts(TArray<float>&& Amounts)
+{
+    check(IsInGameThread());
+    if (Amounts.IsEmpty()) { Reset(); return; }
+    uint32 FirstBits;
+    FMemory::Memcpy(&FirstBits, Amounts.GetData(), sizeof(float));
+    bool bUniform = true;
+    for (const float& Amount : Amounts)
+    {
+        uint32 Bits;
+        FMemory::Memcpy(&Bits, &Amount, sizeof(float));
+        if (Bits != FirstBits) { bUniform = false; break; }
+    }
+    if (bUniform)
+    {
+        FMD_ScrapeSurfaceCell Cell;
+        FMemory::Memcpy(&Cell.InitialContamination, &FirstBits, sizeof(float));
+        FMemory::Memcpy(&Cell.RemainingContamination, &FirstBits, sizeof(float));
+        InitializeUniform(Amounts.Num(), Cell);
+        Amounts.Empty();
+    }
+    else BindInitial(FindOrAddInitialAmounts(MoveTemp(Amounts)));
+}
+
 void FMD_ScrapePagedState::BindInitial(TSharedPtr<const FInitial, ESPMode::NotThreadSafe> InInitial)
 {
     Pages.Empty();
@@ -436,6 +502,13 @@ void FMD_ScrapePagedState::InitializeFromCells(TArray<FMD_ScrapeSurfaceCell>&& C
         // A cache hit did not move the supplied array; consume it in both cases.
         Cells.Empty();
     }
+}
+
+bool FMD_ScrapePagedState::IsPristineCanonicalInitial() const
+{
+    return Initial && NonNullPageCount == 0
+        && (Initial->bCanonicalAmounts || (Initial->bUniform
+            && MD_ScrapePagedStatePrivate::IsCanonicalInitial(Initial->UniformCell)));
 }
 
 FMD_ScrapePagedState& FMD_ScrapePagedState::operator=(const FMD_ScrapePagedState& Other)

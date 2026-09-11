@@ -86,6 +86,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	EMD_WallType GetWallType() const { return WallType; }
 
+	/** Original wall geometry, excluding contamination and shadow-only proxies. */
+	UStaticMeshComponent* GetScanMesh() const { return Mesh.Get(); }
+
 	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination")
 	UMD_ScrapeSurfaceComponent* GetScrapeSurfaceComponent() const
 	{
@@ -196,9 +199,13 @@ protected:
 		meta = (ClampMin = "0", UIMax = "10"))
 	int32 ContaminationItemsPerFace = 3;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Procedural")
-	bool bUseProceduralContamination = false;
+	/** Legacy authored mode is retained for pre-default-change saves only. */
+    UPROPERTY()
+    bool bUseProceduralContamination = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Procedural",
+        meta = (DisplayName = "Full Contamination"))
+    bool bForceFullContamination = false;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "MD|Wall|Contamination|Decal")

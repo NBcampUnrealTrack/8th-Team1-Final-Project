@@ -182,8 +182,13 @@ void UMD_ScrapeMeshUVSyncComponent::ServerRequestSurface_Implementation(
     ++NextTransferId;
     if (NextTransferId == 0) { ++NextTransferId; }
     ServerDescriptor.TransferId = NextTransferId;
-    const bool bEncoded = FMD_ScrapeMeshUVSyncProtocol::EncodePayload(States, ServerDescriptor, ServerBytes);
-    States.Empty();
+    TArray<uint8> Boundary;
+    const bool bIncludeBoundary=ServerDescriptor.bFullSnapshot || ServerDescriptor.Serial!=KnownSerial;
+    ServerDescriptor.BoundaryVersion=bIncludeBoundary?1:0;
+    const bool bBoundaryReady=!bIncludeBoundary || Surface->ExportContaminationBoundary(Boundary);
+    const bool bEncoded = bBoundaryReady
+        && FMD_ScrapeMeshUVSyncProtocol::EncodePayload(States, ServerDescriptor, ServerBytes, Boundary);
+    States.Empty(); Boundary.Empty();
     if (!bEncoded || !Subsystem->TryReserveTransfer(this, ServerBytes.GetAllocatedSize()))
     { ClearServerTransfer(); ClientAbortTransfer(Surface, 0); return; }
     ServerSurface = Surface; ServerWindow = FMD_ScrapeMeshUVSendWindow(); LastServerActivity = Now;
@@ -254,10 +259,13 @@ void UMD_ScrapeMeshUVSyncComponent::ClientReceivePage_Implementation(
     if (bLast)
     {
         TArray<FMD_ReplicatedScrapeCellState> States;
-        bool bComplete = ClientAssembler.Finish(States)
+        TArray<uint8> Boundary;
+        bool bComplete = ClientAssembler.Finish(States,&Boundary)
             && (!Descriptor.bFullSnapshot || States.Num() == Surface->GetContaminationActiveCellCount());
         for (const FMD_ReplicatedScrapeCellState& State : States)
         { if (!Surface->IsContaminationCellActive(State.GetCellIndex())) { bComplete = false; break; } }
+        if (bComplete && Descriptor.BoundaryVersion==1)
+            bComplete=Surface->ValidateContaminationBoundary(Boundary);
         if (!bComplete)
         { ServerAcknowledgePage(Descriptor.TransferId, PageIndex, false); ClearClientTransfer(); return; }
         if (UMD_ScrapeMeshUVSyncSubsystem* Subsystem = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>())
@@ -268,7 +276,13 @@ void UMD_ScrapeMeshUVSyncComponent::ClientReceivePage_Implementation(
         if (!bComplete)
         { ServerAcknowledgePage(Descriptor.TransferId, PageIndex, false); ClearClientTransfer(); return; }
         // One commit after complete validation; prediction reconciliation remains on the existing path.
+        if (!Descriptor.Generation.IsValid()
+            || (Descriptor.Generation != Surface->GetContaminationGeneration() && !Descriptor.bFullSnapshot)
+            || !Surface->RestoreContaminationGeneration(Descriptor.Generation))
+        { ServerAcknowledgePage(Descriptor.TransferId, PageIndex, false); ClearClientTransfer(); return; }
         Surface->ApplyReplicatedContaminationStates(States, false);
+        if (Descriptor.BoundaryVersion==1)
+            Surface->RestoreContaminationBoundary(Boundary,Descriptor.VisualRevision,Descriptor.Epoch);
         if (Surface->LastAppliedContaminationVisualRevision == 0
             || Surface->IsVisualRevisionNewer(Descriptor.VisualRevision, Surface->LastAppliedContaminationVisualRevision))
         { Surface->LastAppliedContaminationVisualRevision = Descriptor.VisualRevision; }
