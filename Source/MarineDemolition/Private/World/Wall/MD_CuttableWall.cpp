@@ -2,6 +2,7 @@
 #include "GameplayTags/MD_GameplayTags.h"
 
 #include "TimerManager.h"
+#include "Audio/MD_AudioSubsystem.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Components/DecalComponent.h"
 #include "Components/InstancedStaticMeshComponent.h"
@@ -28,6 +29,10 @@ AMD_CuttableWall::AMD_CuttableWall()
 
 	// 배치된 격벽은 별도 설정 없이 절단 대상이 된다
 	OwnedGameplayTags.AddTag(MDGameplayTags::Interaction_Cuttable);
+
+	// 기본 태그. 대응 정의는 DA_MD_Audio_Cut 에 있고, 없으면 조용히 넘어간다
+	DemolishSoundTag = FGameplayTag::RequestGameplayTag(
+		TEXT("SFX.Cut.Wall.Break"), /*ErrorIfNotFound*/ false);
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
@@ -261,14 +266,30 @@ void AMD_CuttableWall::CompleteCutWithCleanRatio(
 
 void AMD_CuttableWall::MulticastPlayDemolishEffect_Implementation()
 {
-	if (GetNetMode() == NM_DedicatedServer || !DemolishEffect)
+	if (GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
 
 	// 액터 원점이 아니라 메시 바운드 중심에서 터뜨린다
-	UNiagaraFunctionLibrary::SpawnSystemAtLocation(
-		this, DemolishEffect, Mesh->Bounds.Origin, GetActorRotation());
+	const FVector BurstLocation = Mesh->Bounds.Origin;
+
+	if (DemolishEffect)
+	{
+		UNiagaraFunctionLibrary::SpawnSystemAtLocation(
+			this, DemolishEffect, BurstLocation, GetActorRotation());
+	}
+
+	// 멀티캐스트라 모든 머신에서 한 번씩 울린다. 중계 컴포넌트를 거치지 않아
+	// 절단한 본인도 그대로 듣는다
+	if (DemolishSoundTag.IsValid())
+	{
+		const UWorld* const World = GetWorld();
+		if (UMD_AudioSubsystem* Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr)
+		{
+			Audio->PlayEventAtLocation(DemolishSoundTag, BurstLocation);
+		}
+	}
 }
 
 
