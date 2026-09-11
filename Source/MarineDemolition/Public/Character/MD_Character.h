@@ -239,6 +239,16 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> FirstPersonToolMesh;
 
+	/**
+	 * 절단기 톱날. 도구 메시와 같은 시점 분리(OwnerNoSee / OnlyOwnerSee)를 쓰고,
+	 * 각각 대응하는 도구 메시의 톱날 소켓에 붙는다. 절단 중 로컬 Y 를 축으로 돈다.
+	 */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UStaticMeshComponent> ThirdPersonCutterBlade;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UStaticMeshComponent> FirstPersonCutterBlade;
+
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment")
 	FName ToolAttachSocketName = TEXT("ToolSocket");
 
@@ -257,6 +267,40 @@ protected:
 	 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|Animation")
 	TObjectPtr<UAnimMontage> BarnacleScrapeMontage;
+
+	/**
+	 * 절단기 톱날. 본체(ToolMesh)와 분리된 메시라 절단 중에 혼자 회전할 수 있다.
+	 * 본체 메시의 CutterBladePivotSocketName 소켓에 붙는다. 소켓이 없거나 이
+	 * 메시가 비어 있으면 톱날을 표시하지 않는다 — 다른 도구도 같은 경로를 탄다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|Cutter")
+	TObjectPtr<UStaticMesh> CutterBladeMesh;
+
+	/** 본체 메시에서 톱날 회전 중심을 표시하는 소켓. 원판 중심에 있어야 한다 */
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Cutter")
+	FName CutterBladePivotSocketName = TEXT("Blade_Pivot");
+
+	/**
+	 * 절단 중 톱날 회전 속도. 톱날 메시는 두께축이 Y 라 로컬 Y 를 축으로 돈다.
+	 * 회전은 bCutterVFXActive 를 그대로 따르므로 사본 프록시에서도 돌아간다.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Cutter",
+		meta = (ClampMin = "0.0", Units = "deg/s"))
+	float CutterBladeSpinDegreesPerSecond = 1440.0f;
+
+	/**
+	 * 폼건 RMB 조준 자세(AS_FoamGun_Pose_Montage). DefaultSlot 에 재생하며
+	 * 조준을 놓을 때까지 유지한다. 한 프레임짜리 포즈 몽타주라 재생 직후
+	 * 섹션이 자기 자신을 다음으로 가리키게 만들어 루프시킨다.
+	 * 비어 있으면 조준해도 자세가 바뀌지 않는다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|Animation")
+	TObjectPtr<UAnimMontage> FoamAimMontage;
+
+	/** 조준 자세를 걷어낼 때의 블렌드 아웃 시간 */
+	UPROPERTY(EditDefaultsOnly, Category = "Equipment|Animation",
+		meta = (ClampMin = "0.0", Units = "s"))
+	float FoamAimMontageBlendOutSeconds = 0.15f;
 
 	/**
 	 * 도구 스태틱 메시에서 손에 닿을 지점을 표시하는 소켓 이름.
@@ -355,6 +399,15 @@ private:
 	void HandleScrapeLoadChanged(float NewScrapeLoad);
 
 	void RefreshToolMesh();
+
+	/**
+	 * 절단기 톱날 메시와 표시 여부를 확정한다. 도구 메시가 바뀔 때마다 불러야
+	 * 하며, 본체에 톱날 소켓이 없으면 톱날을 숨긴다.
+	 */
+	void RefreshCutterBladeMesh();
+
+	/** 절단 중일 때만 톱날을 돌린다. Tick 에서 부른다 */
+	void UpdateCutterBladeSpin(float DeltaSeconds);
 	void RefreshScrapeLoadVisual();
 
 	UFUNCTION()
@@ -366,6 +419,26 @@ private:
 	/** 절단 어빌리티가 활성인지. 서버가 굳히고 사본 프록시가 복제로 받는다 */
 	UPROPERTY(ReplicatedUsing = OnRep_CutterVFXActive)
 	bool bCutterVFXActive = false;
+
+	/**
+	 * 폼건 RMB 조준 자세를 켜고 끈다. 소유 클라가 즉시 반영하고 서버에 올리며,
+	 * 사본 프록시는 복제로 따라온다 — 그래야 남들 화면에도 조준 자세가 보인다.
+	 * FoamGunComponent 의 bAimHeld 는 궤적 프리뷰용 로컬 상태라 복제되지 않는다.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerSetFoamAiming(bool bAiming);
+
+	UFUNCTION()
+	void OnRep_FoamAiming();
+
+	/** 소유 클라·서버·사본 프록시가 모두 거치는 단일 적용 지점 */
+	void RefreshFoamAimMontage();
+
+	/** 조준 상태를 굳히고 로컬에 즉시 반영한 뒤 서버로 올린다 */
+	void SetFoamAiming(bool bAiming);
+
+	UPROPERTY(ReplicatedUsing = OnRep_FoamAiming)
+	bool bFoamAiming = false;
 
 	/** 현재 도구 메시에 붙어 있는 절단 루프 이펙트 인스턴스 */
 	UPROPERTY(Transient)
@@ -392,6 +465,10 @@ private:
 
 	/** 현재 슬롯이 폼건인지. RMB 조준 컨텍스트 유지 판정에 쓴다 */
 	bool IsFoamGunEquipped() const;
+
+	/** 절단 어빌리티 태그로 판정한다. 톱날 표시 여부에 쓴다 */
+	UFUNCTION(BlueprintPure, Category = "MD|Equipment")
+	bool IsCutterEquipped() const;
 	UEnhancedInputLocalPlayerSubsystem* GetEnhancedInputSubsystem() const;
 
 	/**
