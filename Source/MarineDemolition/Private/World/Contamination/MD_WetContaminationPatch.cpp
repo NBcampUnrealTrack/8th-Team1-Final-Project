@@ -156,6 +156,7 @@ UMD_WetScrapeSurfaceComponent::UMD_WetScrapeSurfaceComponent()
 	bContaminationEnabled = false;
 	InitialContaminationPerCell = 0.0f;
 	bUseProceduralContamination = false;
+    bForceFullContamination = true;
 	ContaminationItemsPerFace = 0;
 	bShowContaminationDecals = false;
 }

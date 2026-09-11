@@ -5,6 +5,7 @@
 #include "AbilitySystemComponent.h"
 #include "Character/MD_Character.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
+#include "Component/Scrape/MD_StainScraperComponent.h"
 #include "Engine/World.h"
 #include "GameplayPrediction.h"
 #include "TimerManager.h"
@@ -56,6 +57,19 @@ void UMD_GA_Scrape::ActivateAbility(
 		Character ? Character->GetScrapeToolComponent() : nullptr;
 	UAbilitySystemComponent* const AbilitySystem =
 		ActorInfo ? ActorInfo->AbilitySystemComponent.Get() : nullptr;
+	if (Character && ScrapeTool && AbilitySystem && !ScrapeTool->IsScrapeFocusActive())
+	{
+		UMD_StainScraperComponent* StainScraper = Character->GetStainScraperComponent();
+		bStainStroke = true;
+		if (!StainScraper || !CommitAbility(Handle, ActorInfo, ActivationInfo) || !StainScraper->StartStroke())
+		{
+			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+			return;
+		}
+		GetWorld()->GetTimerManager().SetTimer(StainStrokeTimer, this,
+			&UMD_GA_Scrape::FinishStainStroke, StainScraper->GetStrokeDuration(), false);
+		return;
+	}
 	if (!Character
 		|| !ScrapeTool
 		|| !AbilitySystem
@@ -413,6 +427,11 @@ void UMD_GA_Scrape::EndCurrentAbilityAsCancelled()
 	}
 }
 
+void UMD_GA_Scrape::FinishStainStroke()
+{
+	if (IsActive()) EndAbility(GetCurrentAbilitySpecHandle(), GetCurrentActorInfo(), GetCurrentActivationInfo(), true, false);
+}
+
 void UMD_GA_Scrape::EndAbility(
 	const FGameplayAbilitySpecHandle Handle,
 	const FGameplayAbilityActorInfo* ActorInfo,
@@ -420,6 +439,15 @@ void UMD_GA_Scrape::EndAbility(
 	const bool bReplicateEndAbility,
 	const bool bWasCancelled)
 {
+	if (bStainStroke)
+	{
+		if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(StainStrokeTimer);
+		AMD_Character* Character = Cast<AMD_Character>(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr);
+		if (Character && Character->GetStainScraperComponent()) Character->GetStainScraperComponent()->CancelStroke();
+		bStainStroke = false;
+		Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
+		return;
+	}
 	UAbilitySystemComponent* const AbilitySystem =
 		ActorInfo ? ActorInfo->AbilitySystemComponent.Get() : nullptr;
 	RemoveFirstAimDelegates(AbilitySystem);

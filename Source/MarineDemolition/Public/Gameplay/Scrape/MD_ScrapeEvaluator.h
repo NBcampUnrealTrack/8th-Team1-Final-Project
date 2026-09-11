@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Gameplay/Scrape/MD_ScrapeCellView.h"
+#include "Gameplay/Scrape/MD_ScrapeBoundaryState.h"
 #include "Gameplay/Scrape/MD_ScrapeCarrierWeights.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
 
@@ -51,6 +52,9 @@ struct MARINEDEMOLITION_API FMD_ScrapeEvaluationScratch
 {
 	/** Per-evaluation diagnostic: atlas candidates tested by the physical MeshUV footprint. */
 	int64 MeshUVVisitedCellCount = 0;
+    bool bCaptureBoundary = false;
+    bool bBoundaryOverflow = false;
+    TArray<FMD_ScrapeBoundaryFootprint> BoundaryFootprints;
 	/** MeshUV only: ascending unique contact snapshots after evaluation. */
 	TArray<FMD_ScrapeTouchedCell> MeshUVTouchedCells;
 	TArray<int32> MeshUVTouchedCellSlots;

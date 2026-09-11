@@ -1,0 +1,57 @@
+#ifndef MD_PROCEDURAL_CONTAMINATION_USH
+#define MD_PROCEDURAL_CONTAMINATION_USH
+uint MDInitialHash(uint V)
+{
+    V^=V>>16; V*=0x7FEB352Du; V^=V>>15; V*=0x846CA68Bu; V^=V>>16; return V;
+}
+float MDInitialLattice(uint XY,int Z) { return float(MDInitialHash(XY^uint(Z))&0x00FFFFFFu)/16777215.0; }
+float MDInitialNoise(float3 P,uint Seed)
+{
+    int3 B=int3(floor(P)); float3 A=saturate(P-float3(B)); A=A*A*(3.0-2.0*A);
+    uint S=MDInitialHash(Seed), X0=MDInitialHash(S^uint(B.x)),X1=MDInitialHash(S^uint(B.x+1));
+    uint Q0=MDInitialHash(X0^uint(B.y)),Q1=MDInitialHash(X1^uint(B.y));
+    uint Q2=MDInitialHash(X0^uint(B.y+1)),Q3=MDInitialHash(X1^uint(B.y+1));
+    float Z0=lerp(lerp(MDInitialLattice(Q0,B.z),MDInitialLattice(Q1,B.z),A.x),
+        lerp(MDInitialLattice(Q2,B.z),MDInitialLattice(Q3,B.z),A.x),A.y);
+    float Z1=lerp(lerp(MDInitialLattice(Q0,B.z+1),MDInitialLattice(Q1,B.z+1),A.x),
+        lerp(MDInitialLattice(Q2,B.z+1),MDInitialLattice(Q3,B.z+1),A.x),A.y);
+    return saturate(lerp(Z0,Z1,A.z));
+}
+float MDInitialFractal(float3 WorldPosition,float Scale,uint Seed)
+{
+    float3 P=WorldPosition/max(Scale,1.0);
+    return saturate((MDInitialNoise(P,Seed)+0.5*MDInitialNoise(P*2.0,Seed+0x9E3779B9u)
+        +0.25*MDInitialNoise(P*4.0,Seed+2u*0x9E3779B9u))/1.75);
+}
+float MDInitialContour(float3 CurrentWorldPosition,float Existing,float Enabled,float4 Settings,
+    float2 SeedParts,float4 Row0,float4 Row1,float4 Row2,float Override)
+{
+    if (Enabled<0.5) return Existing;
+    float4 P=float4(CurrentWorldPosition,1);
+    float3 WorldPosition=float3(dot(P,Row0),dot(P,Row1),dot(P,Row2));
+    uint Seed=uint(round(SeedParts.x))|(uint(round(SeedParts.y))<<16);
+    float N=MDInitialFractal(WorldPosition,Settings.x,Seed);
+    float D=N-(1.0-Settings.y);
+    float Width=max(fwidth(D),1e-6);
+    float Alpha=Settings.y<=0?0:(Settings.y>=1?1:saturate(0.5+D/Width));
+    // Work in the existing inverse-smoothstep signal space. min preserves residual-film response.
+    float AmountAlpha=saturate(D/max(Settings.y,1e-6));
+    float Amount=Settings.w*lerp(Settings.z,1.0,AmountAlpha*AmountAlpha*(3.0-2.0*AmountAlpha));
+    if (Enabled>=1.5)
+    {
+        // Existing is encoded with inverse smoothstep by the cell/SDF path.
+        // Decode before multiplying so every scrape reduces even faint initial dirt.
+        float Progress=saturate(Existing);
+        Progress=Progress*Progress*(3.0-2.0*Progress);
+        float Density=max(Alpha*saturate(Amount),saturate(Override));
+        float Opacity=saturate(Density*Progress);
+        // Both current MeshUV and CanonicalUV parents consume the output directly.
+        return Opacity;
+    }
+    // Version 2 saves keep the original visual response and scrape composition.
+    // Match FMD_ScrapeMaskAtlas::PatternSolidFraction; preserve thin authored dirt.
+    Alpha=max(min(Alpha,smoothstep(0.0,0.12,Amount)),saturate(Override));
+    float Signal=0.5-sin(asin(clamp(1.0-2.0*Alpha,-1.0,1.0))/3.0);
+    return min(Existing,Signal);
+}
+#endif

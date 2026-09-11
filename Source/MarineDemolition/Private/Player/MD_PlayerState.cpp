@@ -10,6 +10,7 @@
 #include "AbilitySystemComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
+#include "Util/MD_LogUtility.h"
 
 void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
@@ -17,6 +18,7 @@ void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 
 	DOREPLIFETIME(AMD_PlayerState, ReturnStatus);
 	DOREPLIFETIME_CONDITION(AMD_PlayerState, PurchasedShopItemIds, COND_OwnerOnly);
+	DOREPLIFETIME_CONDITION(AMD_PlayerState, BlockedShopItemIds, COND_OwnerOnly);
 }
 
 void AMD_PlayerState::CopyProperties(APlayerState* PlayerState)
@@ -29,6 +31,8 @@ void AMD_PlayerState::CopyProperties(APlayerState* PlayerState)
 	{
 		// 장비 해금 조건을 유지하기 위하여 플레이어가 구매한 장비 목록 복사
 		TargetPlayerState->PurchasedShopItemIds = PurchasedShopItemIds;
+		// 구매 이력과 같은 수명으로 업그레이드 소스 구매 금지 유지
+		TargetPlayerState->BlockedShopItemIds = BlockedShopItemIds;
 	}
 }
 
@@ -183,30 +187,71 @@ EMD_HealthState AMD_PlayerState::GetHealthState() const
 	return EMD_HealthState::Healthy;
 }
 
-bool AMD_PlayerState::HasPurchasedShopItem(FName ItemId) const
+bool AMD_PlayerState::HasPurchasedShopItem(FPrimaryAssetId ItemAssetId) const
 {
-	return ItemId.IsNone() == false && PurchasedShopItemIds.Contains(ItemId) == true;
+	// 타입과 이름이 모두 일치하는 유효한 구매 이력 확인
+	return ItemAssetId.IsValid() == true && PurchasedShopItemIds.Contains(ItemAssetId) == true;
 }
 
-bool AMD_PlayerState::RecordPurchasedShopItem(FName ItemId)
+bool AMD_PlayerState::RecordPurchasedShopItem(FPrimaryAssetId ItemAssetId, FPrimaryAssetId SourceAssetId)
 {
-	// 클라이언트가 로컬 소유권을 조작하거나 잘못된 식별자가 기록되는 상황을 막기 위한 검사
-	if (HasAuthority() == false || ItemId.IsNone() == true || PurchasedShopItemIds.Contains(ItemId) == true)
+	// 성공한 서버 구매의 유효한 식별자만 이력에 반영
+	if (HasAuthority() == false || ItemAssetId.IsValid() == false)
 	{
+		// 구매 상태를 기록할 수 없는 원인의 프로젝트 로그 기록
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 구매 기록의 서버 권한 또는 AssetId가 유효하지 않음"), *UE_CALL_LOCATIONINFO);
+		// 구매 상태를 변경하지 않은 기록 실패 전달
 		return false;
 	}
-
-	// 복제 배열 순서를 일정하게 유지하여 불필요한 네트워크 변경을 줄이기 위한 정렬
-	PurchasedShopItemIds.Add(ItemId);
-	PurchasedShopItemIds.Sort(FNameLexicalLess());
-
-	// Listen Server환경 고려 상점 UI 갱신을 위한 UI 소유권 변화 이벤트 호출
-	OnRep_PurchasedShopItemIds();
+	// 실제로 추가할 구매 이력만 정렬과 통지 대상으로 구분
+	bool bPurchaseAdded = PurchasedShopItemIds.Contains(ItemAssetId) == false;
+	// 유효하고 아직 등록되지 않은 소스만 변경 대상으로 구분
+	bool bSourceAdded = SourceAssetId.IsValid() == true && BlockedShopItemIds.Contains(SourceAssetId) == false;
+	// 두 목록이 같은 재구매에서는 정렬과 복제 통지 생략
+	if (bPurchaseAdded == false && bSourceAdded == false)
+	{
+		// 기존 기록을 유지한 재구매 성공 전달
+		return true;
+	}
+	// 새 구매 이력이 생긴 경우에만 구매 목록 변경
+	if (bPurchaseAdded == true)
+	{
+		// 중복 여부 검사를 통과한 전체 식별자 추가
+		PurchasedShopItemIds.Add(ItemAssetId);
+		// 실제 변경된 구매 목록만 고정 순서로 정렬
+		PurchasedShopItemIds.Sort([](FPrimaryAssetId Left, FPrimaryAssetId Right)
+		{
+			// 타입과 이름을 함께 고려한 고정 정렬 순서
+			return Left.LexicalLess(Right);
+		});
+	}
+	// 새 업그레이드 소스가 있는 경우에만 구매 금지 목록 변경
+	if (bSourceAdded == true)
+	{
+		// 중복 여부 검사를 통과한 소스 식별자 추가
+		BlockedShopItemIds.Add(SourceAssetId);
+		// 실제 변경된 구매 금지 목록만 고정 순서로 정렬
+		BlockedShopItemIds.Sort([](FPrimaryAssetId Left, FPrimaryAssetId Right)
+		{
+			// 전체 식별자에 따른 구매 금지 목록 정렬
+			return Left.LexicalLess(Right);
+		});
+	}
+	// 두 목록의 변경을 마친 상태를 리슨 서버 UI에 한 번 전달
+	OnRep_ShopPurchaseState();
+	// 변경된 구매 상태의 소유 클라이언트 복제 요청
 	ForceNetUpdate();
+	// 첫 구매와 재구매의 상태 기록 성공 전달
 	return true;
 }
 
-void AMD_PlayerState::OnRep_PurchasedShopItemIds()
+bool AMD_PlayerState::IsShopItemPurchaseBlocked(FPrimaryAssetId ItemAssetId)
+{
+	// 무효 식별자를 제외하고 등록된 구매 금지 목록만 확인
+	return ItemAssetId.IsValid() == true && BlockedShopItemIds.Contains(ItemAssetId) == true;
+}
+
+void AMD_PlayerState::OnRep_ShopPurchaseState()
 {
 	// 플레이어의 화면에 보여지는 상점 UI를 갱신하도록 UI 소유 플레이어 변경 이벤트 호출
 	OnShopOwnershipChanged.Broadcast();

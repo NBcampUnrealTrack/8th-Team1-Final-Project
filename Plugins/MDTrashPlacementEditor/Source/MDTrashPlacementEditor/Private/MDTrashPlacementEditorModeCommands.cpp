@@ -7,7 +7,7 @@
 FMDTrashPlacementEditorModeCommands::FMDTrashPlacementEditorModeCommands()
 	: TCommands<FMDTrashPlacementEditorModeCommands>(
 		TEXT("MDTrashPlacementEditorMode"),
-		LOCTEXT("ContextName", "MD Trash Placement Editor Mode"),
+		LOCTEXT("ContextName", "Placement"),
 		NAME_None,
 		FAppStyle::GetAppStyleSetName())
 {
@@ -25,6 +25,8 @@ void FMDTrashPlacementEditorModeCommands::RegisterCommands()
 		FInputChord());
 
 	ToolCommands.Add(PlacementTool);
+	UI_COMMAND(StainPlacementTool, "Stain Placement", "Place purple surface stickers with size-based cleaning.", EUserInterfaceActionType::ToggleButton, FInputChord());
+	ToolCommands.Add(StainPlacementTool);
 }
 
 TMap<FName, TArray<TSharedPtr<FUICommandInfo>>> FMDTrashPlacementEditorModeCommands::GetCommands()

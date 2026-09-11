@@ -141,6 +141,17 @@ FText UMD_QuestDefinition::GetCompletionDialogue(int32 PhaseIndex) const
 	return OutDialogue;
 }
 
+const FMD_QuestRewardData& UMD_QuestDefinition::GetPhaseCompletionReward(int32 PhaseIndex) const
+{
+	const FMD_QuestPhaseData* Phase = GetPhase(PhaseIndex);
+	if (Phase != nullptr)
+	{
+		return Phase->PhaseCompletionReward;
+	}
+	static const FMD_QuestRewardData EmptyReward{};
+	return EmptyReward;
+}
+
 FGameplayTagContainer UMD_QuestDefinition::GetAcceptedGradeTags(int32 PhaseIndex) const
 {
 	const FMD_QuestPhaseData* Phase = GetPhase(PhaseIndex);

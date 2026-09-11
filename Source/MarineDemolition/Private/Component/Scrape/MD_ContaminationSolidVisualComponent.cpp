@@ -392,6 +392,11 @@ float UMD_ContaminationSolidVisualComponent::SampleVisualOffset(const FVector& L
     return 0.0f;
 }
 
+UPrimitiveComponent* UMD_ContaminationSolidVisualComponent::GetScanMesh() const
+{
+    return SolidMesh.Get();
+}
+
 void UMD_ContaminationSolidVisualComponent::SetVisualsVisible(const bool bVisible)
 {
     if (IsValid(SolidMesh)) SolidMesh->SetVisibility(bVisible);

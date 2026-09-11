@@ -1,10 +1,12 @@
 #include "Ability/Foam/MD_GA_FoamShot.h"
 
 #include "Audio/MD_AudioRelayComponent.h"
+#include "Audio/MD_AudioSubsystem.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_FoamGunComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
 #include "World/Foam/MD_FoamProjectile.h"
 
 namespace
@@ -22,6 +24,25 @@ namespace
 UMD_GA_FoamShot::UMD_GA_FoamShot()
 {
 	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
+
+	// 기본 태그. 대응 정의는 DA_MD_Audio_Hazard 에 있고, 없으면 조용히 넘어간다
+	EmptySoundTag = FGameplayTag::RequestGameplayTag(
+		TEXT("SFX.Hazard.FoamGun.Empty"), /*ErrorIfNotFound*/ false);
+}
+
+void UMD_GA_FoamShot::PlayLocalSound(const FGameplayTag& EventTag, const AActor* Avatar) const
+{
+	const APawn* const AvatarPawn = Cast<APawn>(Avatar);
+	if (!EventTag.IsValid() || !IsValid(AvatarPawn) || !AvatarPawn->IsLocallyControlled())
+	{
+		return;
+	}
+
+	const UWorld* const World = GetWorld();
+	if (UMD_AudioSubsystem* Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr)
+	{
+		Audio->PlayEventAtLocation(EventTag, AvatarPawn->GetActorLocation());
+	}
 }
 
 UMD_FoamGunComponent* UMD_GA_FoamShot::GetFoamGun(const FGameplayAbilityActorInfo* ActorInfo)
@@ -68,9 +89,17 @@ void UMD_GA_FoamShot::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 	if (!FoamGun->HasChargeForShot())
 	{
 		ShowFoamFailMessage(TEXT("폼 충전이 부족합니다 (카트리지 필요)"));
+
+		// 헛방 찰칵. 충전이 없다는 것을 화면 글자 말고 소리로도 알려 준다
+		PlayLocalSound(EmptySoundTag, Character);
+
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
 		return;
 	}
+
+	// 쏜 본인은 여기서 바로 듣는다. 중계만 믿으면 왕복 지연이 붙는 정도가 아니라
+	// 로컬 조작 폰은 멀티캐스트에서 걸러져 아예 소리가 나지 않는다
+	PlayLocalSound(FireSoundTag, Character);
 
 	// 상태 변경·스폰은 서버 권위. 클라이언트는 복제로 결과를 받는다
 	if (Character->HasAuthority())

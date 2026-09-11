@@ -18,6 +18,7 @@ class MARINEDEMOLITION_API AMD_Barnacle : public AActor
 
 public:
 	AMD_Barnacle();
+	UStaticMeshComponent* GetScanMesh() const { return Mesh.Get(); }
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void Tick(float DeltaSeconds) override;

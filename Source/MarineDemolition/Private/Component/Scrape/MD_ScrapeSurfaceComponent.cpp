@@ -1,8 +1,31 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+#include "World/Wall/MD_WallShadowBatchSubsystem.h"
 
 #include "Components/DecalComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Net/UnrealNetwork.h"
+#include "Serialization/CustomVersion.h"
+
+namespace
+{
+    const FGuid ContaminationSeedPolicyVersion(0xBC8E4F67, 0x6833487B, 0x9B6BA230, 0x9B7511AE);
+    FCustomVersionRegistration RegisterContaminationSeedPolicyVersion(
+        ContaminationSeedPolicyVersion, 1, TEXT("MDContaminationSeedPolicy"));
+}
+
+void UMD_ScrapeSurfaceComponent::Serialize(FArchive& Ar)
+{
+    Ar.UsingCustomVersion(ContaminationSeedPolicyVersion);
+    Super::Serialize(Ar);
+    // Preserve non-default seeds authored before automatic mode existed.
+    // Old 1337 defaults intentionally adopt automatic mode on a new contract.
+    if (Ar.IsLoading() && Ar.IsPersistent()
+        && Ar.CustomVer(ContaminationSeedPolicyVersion) < 1 && ContaminationNoiseSeed != 1337)
+    {
+        bUseFixedContaminationSeed = true;
+    }
+}
+
 #include "Materials/MaterialInterface.h"
 #include "UObject/ConstructorHelpers.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponentInternal.h"
@@ -183,6 +206,7 @@ void UMD_ScrapeSurfaceComponent::GetLifetimeReplicatedProps(
 	TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+    DOREPLIFETIME(UMD_ScrapeSurfaceComponent, ContaminationGeneration);
 	DOREPLIFETIME(
 		UMD_ScrapeSurfaceComponent,
 		bContaminationEnabled);
@@ -435,10 +459,17 @@ void UMD_ScrapeSurfaceComponent::InitializeRuntimeState()
 	{
 		ApplyAllReplicatedContaminationState();
 	}
+    if (SurfaceMesh && GetWorld() && GetWorld()->IsGameWorld())
+        if (auto* Shadows = GetWorld()->GetSubsystem<UMD_WallShadowBatchSubsystem>()) Shadows->RegisterWall(*SurfaceMesh);
 }
 
 void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 {
+    if (SurfaceMesh && GetWorld())
+        if (auto* Shadows = GetWorld()->GetSubsystem<UMD_WallShadowBatchSubsystem>()) Shadows->UnregisterWall(*SurfaceMesh);
+    if (auto* Previous=GenerationTransformSource.Get()) Previous->TransformUpdated.Remove(GenerationTransformHandle);
+    GenerationTransformSource.Reset();GenerationTransformHandle.Reset();
+    ResetContaminationBoundary();
     PreservePendingContaminationDrops();
 	ReleaseSolidContaminationVisual();
 	SetContaminationDecalsVisible(false);

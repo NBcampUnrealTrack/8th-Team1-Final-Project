@@ -10,6 +10,7 @@ struct MARINEDEMOLITION_API FMD_ScrapeMeshUVSnapshotDescriptor
 {
     GENERATED_BODY()
     UPROPERTY() FGuid LayoutId;
+    UPROPERTY() FMD_ContaminationGeneration Generation;
     UPROPERTY() FIntPoint Grid = FIntPoint::ZeroValue;
     UPROPERTY() FVector CarrierScale = FVector::OneVector;
     UPROPERTY() FGuid Epoch;
@@ -23,6 +24,11 @@ struct MARINEDEMOLITION_API FMD_ScrapeMeshUVSnapshotDescriptor
     // Compressed payload is zlib over nine byte planes; raw cell encoding remains unchanged.
     UPROPERTY() bool bCompressed = false;
     UPROPERTY() bool bFullSnapshot = false;
+    // 0: no boundary update; 1: complete current boundary replacement, including empty.
+    UPROPERTY() uint8 BoundaryVersion = 0;
+    UPROPERTY() int32 BoundaryBytes = 0;
+    UPROPERTY() int32 BoundaryDecodedBytes = 0;
+    UPROPERTY() bool bBoundaryCompressed = false;
     bool operator==(const FMD_ScrapeMeshUVSnapshotDescriptor& Other) const;
 };
 
@@ -34,6 +40,7 @@ struct MARINEDEMOLITION_API FMD_ScrapeMeshUVSyncProtocol
     static constexpr int32 MaximumPagesInFlight = 4;
     static constexpr int32 MaximumSnapshotStates = 1024 * 1024;
     static constexpr int32 MaximumDecodedBytes = MaximumSnapshotStates * BytesPerCell;
+    static constexpr int32 MaximumBoundaryBytes = FMD_ScrapeBoundaryState::MaximumPayloadBytes;
     // Budget for descriptor, RPC/bunch and packet headers in addition to each page's payload.
     static constexpr int32 PageOverheadBudgetBytes = 512;
     static constexpr double MaximumConnectionBudgetFraction = 0.25;
@@ -44,9 +51,9 @@ struct MARINEDEMOLITION_API FMD_ScrapeMeshUVSyncProtocol
     static int32 GetPageCount(int32 TotalStates);
     static int32 GetPageCount(const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor);
     static bool EncodePayload(TConstArrayView<FMD_ReplicatedScrapeCellState> States,
-        FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, TArray<uint8>& OutPayload);
+        FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, TArray<uint8>& OutPayload, TConstArrayView<uint8> Boundary = {});
     static bool DecodePayload(const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor,
-        TConstArrayView<uint8> Payload, TArray<FMD_ReplicatedScrapeCellState>& OutStates);
+        TConstArrayView<uint8> Payload, TArray<FMD_ReplicatedScrapeCellState>& OutStates, TArray<uint8>* OutBoundary = nullptr);
     static uint32 HashBytes(TConstArrayView<uint8> Bytes);
     static void EncodeStates(TConstArrayView<FMD_ReplicatedScrapeCellState> States, TArray<uint8>& OutBytes);
     static bool DecodeStates(TConstArrayView<uint8> Bytes, const FIntPoint& Grid, TArray<FMD_ReplicatedScrapeCellState>& OutStates);
@@ -82,5 +89,5 @@ struct MARINEDEMOLITION_API FMD_ScrapeMeshUVSnapshotAssembler
     bool bStarted = false;
     void Reset();
     bool Append(const FMD_ScrapeMeshUVSnapshotDescriptor& InDescriptor, int32 PageIndex, TConstArrayView<uint8> Payload);
-    bool Finish(TArray<FMD_ReplicatedScrapeCellState>& OutStates) const;
+    bool Finish(TArray<FMD_ReplicatedScrapeCellState>& OutStates, TArray<uint8>* OutBoundary = nullptr) const;
 };
