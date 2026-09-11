@@ -2,7 +2,14 @@
 
 
 #include "Online/Session/MD_MultiplayManager.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Engine/World.h"
+#include "Misc/PackageName.h"
+#include "Modules/ModuleManager.h"
 #include "OnlineSubsystem.h"            // IOnlineSubsystem
+#include "OnlineSubsystemImpl.h"
+#include "HAL/PlatformProcess.h"
+#include "HAL/PlatformTime.h"
 #include "OnlineSessionSettings.h"      // FOnlineSessionSettings
 #include "Online/OnlineSessionNames.h"  // NAME_GameSession
 #include "FindSessionsCallbackProxy.h"  // FBlueprintSessionResult
@@ -41,26 +48,6 @@ void UMD_MultiplayManager::Deinitialize()
     // Online Session의 유효성 검사
     if (SessionInterface.IsValid() == true)
     {
-        // PIE 종료 후 에디터 Online Subsystem에 세션이 남지 않도록 현재 월드 유형 확인
-        UWorld* World = GetWorld();
-        bool bIsPIEWorld = false;
-        bool bWorldValid = IsValid(World);
-        if (bWorldValid == true)
-        {
-            bIsPIEWorld = World->WorldType == EWorldType::PIE;
-        }
-
-        // 다음 PIE의 호스트 요청을 막는 기존 GameSession을 로컬 Named Session 원장에서 제거
-        if (bIsPIEWorld == true)
-        {
-            FNamedOnlineSession* ExistingSession = SessionInterface->GetNamedSession(NAME_GameSession);
-            if (ExistingSession != nullptr)
-            {
-                SessionInterface->RemoveNamedSession(NAME_GameSession);
-                UE_LOG(MarineDemolition, Log, TEXT("%s PIE 종료 시 남은 GameSession을 정리했습니다."), *UE_CALL_LOCATIONINFO);
-            }
-        }
-
         // Session 생성 완료에 대한 이벤트 연결 해제
         SessionInterface->OnCreateSessionCompleteDelegates.RemoveAll(this);
 
@@ -85,6 +72,9 @@ void UMD_MultiplayManager::Deinitialize()
         // Session 초대 수락 처리 완료에 대한 이벤트 연결 해제
         SessionInterface->OnSessionUserInviteAcceptedDelegates.RemoveAll(this);
 
+        // 종료된 화면의 콜백을 차단한 뒤 실제 온라인 로비 탈퇴 및 완료 대기
+        CleanupSessionOnShutdown();
+
     }
 
     SessionDelegateHandle.Reset();
@@ -93,6 +83,97 @@ void UMD_MultiplayManager::Deinitialize()
     ExternalUIInterface.Reset();
 
 	Super::Deinitialize();
+}
+
+void UMD_MultiplayManager::CleanupSessionOnShutdown()
+{
+    // 이미 제거된 세션이나 초기화 실패 시 종료 지연 생략
+    if (SessionInterface.IsValid() == false || SessionInterface->GetNamedSession(NAME_GameSession) == nullptr)
+    {
+        return; // 정리할 세션이 없는 종료 경로
+    }
+
+    // 세션을 소유한 기본 서비스와 엔진 구현의 호환 여부 확인
+    IOnlineSubsystem* OnlineSubsystem = IOnlineSubsystem::Get();
+    FOnlineSubsystemImpl* ShutdownSubsystem = nullptr; // 종료 중 온라인 작업만 진행할 서비스
+    if (OnlineSubsystem != nullptr && OnlineSubsystem->GetSessionInterface() == SessionInterface)
+    {
+        // 프로젝트의 Steam 및 에디터 NULL 서비스에서 제공하는 공통 구현 확인
+        FName SubsystemName = OnlineSubsystem->GetSubsystemName();
+        if (SubsystemName == FName(TEXT("STEAM")) || SubsystemName == FName(TEXT("NULL")))
+        {
+            // 두 엔진 서비스의 공통 기반 클래스를 통한 비동기 완료 처리
+            ShutdownSubsystem = static_cast<FOnlineSubsystemImpl*>(OnlineSubsystem);
+        }
+    }
+
+    // 네트워크 응답이 없는 환경에서도 프로그램 종료를 보장하는 대기 상한
+    double ShutdownDeadline = FPlatformTime::Seconds() + 3.0;
+    bool bDestroyRequested = false; // 동일 세션 제거 요청의 중복 방지
+    // 기존 비동기 작업 완료와 실제 로비 탈퇴의 순차 처리
+    while (SessionInterface->GetNamedSession(NAME_GameSession) != nullptr)
+    {
+        // 생성이나 시작 작업 중에는 완료 후 확정된 로비를 제거하기 위한 상태 확인
+        EOnlineSessionState::Type SessionState = SessionInterface->GetSessionState(NAME_GameSession);
+        if (bDestroyRequested == false && SessionState != EOnlineSessionState::Creating &&
+            SessionState != EOnlineSessionState::Starting && SessionState != EOnlineSessionState::Ending &&
+            SessionState != EOnlineSessionState::Destroying)
+        {
+            // 호스트 탈퇴 뒤 다른 참가자에게 남는 로비의 검색 및 재참가 차단
+            FNamedOnlineSession* ClosingSession = SessionInterface->GetNamedSession(NAME_GameSession);
+            if (ClosingSession != nullptr && ClosingSession->bHosting == true)
+            {
+                // 기존 방 식별 정보와 인원 설정을 유지한 종료 설정 구성
+                FOnlineSessionSettings ClosingSettings = ClosingSession->SessionSettings;
+                ClosingSettings.bShouldAdvertise = false; // 종료된 방의 검색 결과 노출 차단
+                ClosingSettings.bAllowJoinInProgress = false; // 종료 중인 방의 신규 접속 차단
+                ClosingSettings.bAllowInvites = false; // 종료된 호스트 방의 초대 차단
+                ClosingSettings.bAllowJoinViaPresence = false; // 친구 따라오기를 통한 재접속 차단
+                ClosingSettings.bAllowJoinViaPresenceFriendsOnly = false; // 친구 전용 참가 경로 해제
+                // Steam 작업 큐에서 실제 탈퇴보다 먼저 로비 비공개 전환 요청
+                if (SessionInterface->UpdateSession(NAME_GameSession, ClosingSettings, true) == false)
+                {
+                    // 공개 차단 실패에도 실제 탈퇴를 계속하기 위한 진단 기록
+                    UE_LOG(MarineDemolition, Warning, TEXT("%s 종료 중 GameSession 참가 차단 요청에 실패했습니다."), *UE_CALL_LOCATIONINFO);
+                }
+            }
+
+            bDestroyRequested = true; // 동기 완료 서비스에서도 제거 요청 1회 보장
+            // 로컬 원장 삭제 대신 서비스의 실제 로비 탈퇴 요청
+            if (SessionInterface->DestroySession(NAME_GameSession) == false)
+            {
+                // 실제 서비스의 탈퇴 실패를 숨기지 않기 위한 진단 기록
+                UE_LOG(MarineDemolition, Warning, TEXT("%s 종료 중 GameSession 제거 요청에 실패했습니다."), *UE_CALL_LOCATIONINFO);
+                return; // 실패한 요청의 반복 실행 방지
+            }
+        }
+
+        // 동기 제거 또는 생성 실패로 세션이 사라진 경우 대기 종료
+        if (SessionInterface->GetNamedSession(NAME_GameSession) == nullptr)
+        {
+            break; // 온라인 세션 정리 완료
+        }
+
+        // 지원하지 않는 서비스 또는 제한 시간 초과 시 종료 계속 진행
+        if (ShutdownSubsystem == nullptr || FPlatformTime::Seconds() >= ShutdownDeadline)
+        {
+            // 로컬 원장만 제거하여 미완료 Steam 로비를 숨기는 처리 방지
+            UE_LOG(MarineDemolition, Warning, TEXT("%s 종료 중 GameSession 정리가 완료되지 않았습니다. 상태: %d"),
+                *UE_CALL_LOCATIONINFO, static_cast<int32>(SessionInterface->GetSessionState(NAME_GameSession)));
+            return; // 종료 무한 대기 방지
+        }
+
+        // 엔진 메인 루프 종료 후에도 Steam 탈퇴 작업과 완료 콜백의 순차 실행
+        ShutdownSubsystem->Tick(0.01f);
+        // 제거 완료 시 추가 대기를 생략하기 위한 상태 확인
+        if (SessionInterface->GetNamedSession(NAME_GameSession) != nullptr)
+        {
+            FPlatformProcess::Sleep(0.01f); // 온라인 작업 스레드의 실행 시간 확보
+        }
+    }
+
+    // 다음 실행에서 방을 다시 생성하기 위한 온라인 세션 제거 완료 기록
+    UE_LOG(MarineDemolition, Log, TEXT("%s 프로그램 종료 시 GameSession 정리를 완료했습니다."), *UE_CALL_LOCATIONINFO);
 }
 
 void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPlayerCount, const FMD_SessionCreateParams& SessionCreateParams)
@@ -1802,27 +1883,49 @@ void UMD_MultiplayManager::HandleSessionUserInviteAccepted(const bool bWasSucces
 
 const bool UMD_MultiplayManager::IsValidMapPackagePath(const FString& MapPackagePath) const
 {
-    // ServerTravel 가능한 Map 패키지 경로 확인
+    // 이동 URL이나 오브젝트 경로 대신 정규 맵 패키지 이름만 허용
     if (FPackageName::IsValidLongPackageName(MapPackagePath) == false)
     {
-        return false;
+        return false; // 잘못된 패키지 경로 거부
     }
 
-    // 패키지의 실제 파일 경로 확인
-    // 오타 또는 패키지에 포함되지 않은 맵을 사용한 Session 생성 방지
-    FString SessionMapFilename;
-    if (FPackageName::DoesPackageExist(MapPackagePath, &SessionMapFilename) == false)
+    // 디스크와 IoStore에서 실제 존재하는 패키지만 허용
+    if (FPackageName::DoesPackageExist(MapPackagePath) == false)
     {
-        return false;
+        return false; // 누락되거나 패키징되지 않은 맵 거부
     }
 
-    // 맵 패키지 확장자를 명시적으로 확인(.umap)
-    // 일반 에셋 패키지를 통한 ServerTravel 사용 방지
-    const FString PackageExtension = FString::Printf(TEXT(".%s"), *FPaths::GetExtension(SessionMapFilename));
-    if (PackageExtension.Equals(FPackageName::GetMapPackageExtension(), ESearchCase::IgnoreCase) == false)
+    // 에디터와 패키지 실행에서 공통으로 사용하는 에셋 레지스트리 확보
+    FAssetRegistryModule* AssetRegistryModule = FModuleManager::LoadModulePtr<FAssetRegistryModule>(TEXT("AssetRegistry"));
+    if (AssetRegistryModule == nullptr || AssetRegistryModule->IsValid() == false)
     {
-        return false;
+        return false; // 조회 서비스를 사용할 수 없는 상태의 이동 거부
     }
 
-    return true;
+    // 초기 로드 중인 AssetRegistry.bin과 에디터 검색 결과의 조회 준비
+    IAssetRegistry& AssetRegistry = AssetRegistryModule->Get();
+    AssetRegistry.WaitForPremadeAssetRegistry(); // 패키지 빌드에 포함된 레지스트리 로드 완료 대기
+    if (AssetRegistry.IsLoadingAssets() == true)
+    {
+        AssetRegistry.WaitForCompletion(); // 에디터 초기 검색 중 미등록으로 오판하는 상황 방지
+    }
+
+    // 메모리의 임시 월드 대신 저장된 패키지의 에셋 메타데이터 조회
+    TArray<FAssetData> PackageAssets;
+    if (AssetRegistry.GetAssetsByPackageName(FName(*MapPackagePath), PackageAssets, true) == false)
+    {
+        return false; // 레지스트리에서 확인할 수 없는 패키지 거부
+    }
+
+    // 파일 확장자 없이 에셋의 실제 클래스로 맵 여부 판정
+    for (FAssetData& PackageAsset : PackageAssets)
+    {
+        // 일반 데이터 에셋이나 머티리얼을 맵으로 사용하는 이동 차단
+        if (PackageAsset.AssetClassPath == UWorld::StaticClass()->GetClassPathName())
+        {
+            return true; // 저장된 UWorld 에셋이 포함된 맵 패키지 허용
+        }
+    }
+
+    return false; // UWorld 에셋이 없는 일반 패키지 거부
 }

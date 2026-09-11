@@ -31,6 +31,8 @@ public class MarineDemolition : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"ImageWrapper", "Slate", "SlateCore", "MoviePlayer",
+			// 패키지 빌드의 맵 에셋 클래스 조회
+			"AssetRegistry",
 			"DeveloperSettings",
 			"ApplicationCore",
 			"CoreOnline",

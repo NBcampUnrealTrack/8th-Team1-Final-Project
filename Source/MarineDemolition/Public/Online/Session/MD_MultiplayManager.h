@@ -178,6 +178,9 @@ protected:
 
 	UMD_LoadingScreenSubsystem* GetLoadingScreen() const;
 
+    // 프로그램 종료 시 진행 중인 작업을 마무리하고 실제 온라인 세션을 제거하는 함수
+    void CleanupSessionOnShutdown();
+
     // Online Session Interface 객체를 초기화하는 함수
     void InitOnlineSessionInterface();
 
