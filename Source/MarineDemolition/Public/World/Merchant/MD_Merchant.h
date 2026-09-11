@@ -5,8 +5,11 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
+#include "UObject/PrimaryAssetId.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_Merchant.generated.h"
+
+struct FStreamableHandle;
 
 class UMD_MerchantMenuWidget;
 class UMD_ShopCatalog;
@@ -50,10 +53,10 @@ public:
 	FText GetMerchantDisplayName() const { return MerchantDisplayName; }
 
 	/** 서버 카탈로그와 경제 원장을 사용해 구매자에게 품목을 지급하고 결제를 확정하는 함수 */
-	EMD_ShopPurchaseResult TryPurchaseItem(AMD_Character* PurchasingCharacter, FName ItemId);
+	EMD_ShopPurchaseResult TryPurchaseItem(AMD_Character* PurchasingCharacter, FPrimaryAssetId ItemAssetId);
 
 	/** 서버 구매 결과를 현재 로컬 상점과 대사창에 반영하는 함수 */
-	void ReceiveShopPurchaseResult(FName ItemId, EMD_ShopPurchaseResult Result);
+	void ReceiveShopPurchaseResult(FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result);
 
 	/** Blueprint가 Push하기 전에 전달한 상점 화면에 상인 데이터와 도메인 이벤트를 연결한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
@@ -66,6 +69,10 @@ public:
 	/** Blueprint가 Push한 대출 화면에 상인 데이터와 도메인 이벤트를 연결하는 함수 */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	void InitializePushedLoan(UMD_LoanWidget* LoanWidget, UMD_MerchantMenuWidget* MenuWidget);
+
+protected:
+	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 protected:
 	/**
@@ -90,6 +97,9 @@ protected:
 	/** 가격·해금 데이터 (`07` §4). 없으면 상점이 빈 목록으로 열린다. */
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	TObjectPtr<UMD_ShopCatalog> ShopCatalog;
+
+	// 서버 검증 및 로컬 상점에서 사용할 정의의 로드 수명 유지
+	TSharedPtr<FStreamableHandle> DefinitionLoadHandle;
 
 	/**
 	 * 이미 가득 찬 품목을 사려 할 때 브릭스가 하는 말.
@@ -132,11 +142,11 @@ private:
 
 	/** 가득 찬 품목 구매를 막았을 때 — 메뉴의 대사창으로 이유를 알린다. */
 	UFUNCTION()
-	void HandleShopPurchaseRejected(FName ItemId);
+	void HandleShopPurchaseRejected();
 
 	/** 로컬 상점 구매 요청을 소유 PlayerController의 서버 RPC로 전달하는 처리 */
 	UFUNCTION()
-	void HandleShopItemPurchaseRequested(FName ItemId);
+	void HandleShopItemPurchaseRequested(FPrimaryAssetId ItemAssetId);
 
 	/** 상인 복제 미러가 바뀔 때 열려 있는 상점 정보와 구매 가능 상태를 갱신하는 처리 */
 	UFUNCTION()

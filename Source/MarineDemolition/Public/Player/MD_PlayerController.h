@@ -129,11 +129,11 @@ public:
 
 	/** 상점 액터와 품목을 서버에서 다시 검증하도록 요청하는 함수 */
 	UFUNCTION(Server, Reliable)
-	void ServerRequestShopPurchase(AMD_Merchant* Merchant, FName ItemId);
+	void ServerRequestShopPurchase(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId);
 
 	/** 서버 구매 결과를 요청한 로컬 상점 화면에 전달하는 응답 진입점 */
 	UFUNCTION(Client, Reliable)
-	void ClientReceiveShopPurchaseResult(AMD_Merchant* Merchant, FName ItemId, EMD_ShopPurchaseResult Result);
+	void ClientReceiveShopPurchaseResult(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result);
 
 	/** 서버 이동 전에 각 소유 클라이언트에서 실제 로딩 화면을 시작한다. */
 	UFUNCTION(Client, Reliable)

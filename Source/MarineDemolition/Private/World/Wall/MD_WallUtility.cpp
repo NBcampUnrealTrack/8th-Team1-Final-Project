@@ -6,6 +6,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Equipment/MD_RepairItemDefinition.h"
 #include "Engine/OverlapResult.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
@@ -343,6 +344,15 @@ bool AMD_WallUtility::CanRepairWith(AActor* Interactor) const
 		return false;
 	}
 
+	// 소모형 수리 아이템은 정의의 기능 태그로 수리 대상 판정
+	UMD_RepairItemDefinition* RepairItem = Cast<UMD_RepairItemDefinition>(Hotbar->GetCurrentItem());
+	// 일반 도구와 독립적으로 보관된 수리 소모품의 호환성 검사
+	if (IsValid(RepairItem) == true)
+	{
+		// 전선 등 요구된 수리 기능과 정확히 일치하는 경우만 허용
+		return RepairItem->RepairToolTag.MatchesTagExact(RequiredRepairToolTag);
+	}
+	// 비소모형 장비의 기존 도구 태그 검사 유지
 	const UMD_ToolDefinition* CurrentTool = Hotbar->GetCurrentTool();
 	return IsValid(CurrentTool)
 		&& CurrentTool->ToolAbilityTag.MatchesTagExact(RequiredRepairToolTag);
@@ -368,7 +378,8 @@ bool AMD_WallUtility::TryRepairWithEquippedTool(AActor* Repairer)
 	{
 		const AMD_Character* Character = Cast<AMD_Character>(Repairer);
 		UMD_EquipHotbarComponent* Hotbar = IsValid(Character) ? Character->GetHotbarComponent() : nullptr;
-		if (!IsValid(Hotbar) || !Hotbar->TryConsumeTool(Hotbar->GetCurrentTool(), 1))
+		// 수리 도구의 공통 수량 차감 실패 시 수리 진행 차단
+		if (IsValid(Hotbar) == false || Hotbar->TryConsumeItem(Hotbar->GetCurrentItem(), 1) == false)
 		{
 			return false;
 		}

@@ -26,11 +26,11 @@ class UGameplayAbility;
 class UMD_EquipHotbarComponent;
 class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
+class UMD_ItemDefinition;
 class UMD_SupplyComponent;
 class UMD_FoamGunComponent;
 class UMD_OxygenComponent;
 class UMD_ComfortComponent;
-class AMD_WallUtility;
 class UWidgetComponent;
 class UNiagaraSystem;
 class UNiagaraComponent;
@@ -379,12 +379,6 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerJumpOffLadder();
 
-	// 도구 입력(LMB) 전용 인프라 수리(절연테이프). 클라가 조준한 대상을 서버가 거리 재검증 후 수리한다
-	void TryToolInputUtilityRepair();
-	UFUNCTION(Server, Reliable)
-	void ServerRepairUtilityWithTool(AMD_WallUtility* Utility);
-	// 도구 입력 수리의 조준 트레이스 거리 (상호작용 트레이스와 동일)
-	static constexpr float ToolInputRepairTraceDistance = 200.f;
 	//void HandleWallCutInput(const FInputActionValue& Value);
 	//void HandleWallScanInput(const FInputActionValue& Value);
 
@@ -471,13 +465,8 @@ private:
 	bool IsCutterEquipped() const;
 	UEnhancedInputLocalPlayerSubsystem* GetEnhancedInputSubsystem() const;
 
-	/**
-	 * 도구 메시의 그립 소켓이 손 소켓 원점에 오도록 하는 상대 트랜스폼.
-	 * 그립 소켓이 없으면 Tool의 AttachOffset을 그대로 돌려준다.
-	 */
-	FTransform GetToolAttachTransform(
-		const UStaticMesh* ToolMesh,
-		const UMD_ToolDefinition* Tool) const;
+	// 공통 아이템의 부착 오프셋과 메시 그립 소켓을 반영한 상대 트랜스폼 조회
+	FTransform GetToolAttachTransform(const UStaticMesh* ToolMesh, UMD_ItemDefinition* Item) const;
 	FTransform GetToolAttachTransformFromOffset(
 		const UStaticMesh* ToolMesh,
 		const FTransform& AttachOffset) const;
