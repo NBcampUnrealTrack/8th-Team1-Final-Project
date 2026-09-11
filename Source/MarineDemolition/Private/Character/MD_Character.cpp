@@ -113,6 +113,23 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	FirstPersonToolMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FirstPersonToolMesh->SetCanEverAffectNavigation(false);
 
+	// 톱날은 도구 메시의 소켓에 붙는다. 생성자 시점에는 도구 메시가 비어 있어
+	// 소켓이 아직 없지만, 부착은 소켓 이름으로 남아 있다가 메시가 정해지면 풀린다.
+	ThirdPersonCutterBlade = CreateDefaultSubobject<UStaticMeshComponent>(
+		TEXT("ThirdPersonCutterBlade"));
+	ThirdPersonCutterBlade->SetupAttachment(ThirdPersonToolMesh, CutterBladePivotSocketName);
+	ThirdPersonCutterBlade->SetOwnerNoSee(true);
+	ThirdPersonCutterBlade->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	ThirdPersonCutterBlade->SetCanEverAffectNavigation(false);
+
+	FirstPersonCutterBlade = CreateDefaultSubobject<UStaticMeshComponent>(
+		TEXT("FirstPersonCutterBlade"));
+	FirstPersonCutterBlade->SetupAttachment(FirstPersonToolMesh, CutterBladePivotSocketName);
+	FirstPersonCutterBlade->SetOnlyOwnerSee(true);
+	FirstPersonCutterBlade->SetOwnerNoSee(false);
+	FirstPersonCutterBlade->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	FirstPersonCutterBlade->SetCanEverAffectNavigation(false);
+
 	ConfigureFirstPersonRendering();
 
 	HoldPoint = CreateDefaultSubobject<USceneComponent>(TEXT("HoldPoint"));
@@ -352,6 +369,13 @@ void AMD_Character::ConfigureFirstPersonRendering()
 			EFirstPersonPrimitiveType::FirstPerson);
 	}
 
+	if (IsValid(FirstPersonCutterBlade))
+	{
+		FirstPersonCutterBlade->SetReceivesDecals(false);
+		FirstPersonCutterBlade->SetFirstPersonPrimitiveType(
+			EFirstPersonPrimitiveType::FirstPerson);
+	}
+
 	if (IsValid(Camera))
 	{
 		Camera->SetEnableFirstPersonScale(true);
@@ -378,6 +402,10 @@ void AMD_Character::Tick(float DeltaSeconds)
 
 	// 월드 공간 이름표가 각 클라이언트의 현재 카메라를 계속 향하게 한다.
 	UpdateNameTagRotation();
+
+	// 톱날은 사본 프록시에서도 돌아야 한다. bCutterVFXActive 가 복제되므로
+	// 로컬 여부를 가리지 않고 모든 클라이언트에서 갱신한다.
+	UpdateCutterBladeSpin(DeltaSeconds);
 
 	// 1인칭 팔과 도구는 해당 캐릭터를 직접 조작하는 로컬 플레이어만 갱신한다.
 	if (IsLocallyControlled() == true)
@@ -1412,13 +1440,14 @@ void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleScrapeFocusToggleInput()
 {
-	// 폼건: RMB를 누르는 동안 조준 궤적 표시
+	// 폼건: RMB를 누르는 동안 조준 궤적 표시 + 조준 자세
 	if (IsFoamGunEquipped())
 	{
 		if (IsValid(FoamGunComponent))
 		{
 			FoamGunComponent->SetAimHeld(true);
 		}
+		SetFoamAiming(true);
 		return;
 	}
 
@@ -1448,6 +1477,7 @@ void AMD_Character::HandleScrapeFocusReleasedInput()
 	{
 		FoamGunComponent->SetAimHeld(false);
 	}
+	SetFoamAiming(false);
 }
 
 void AMD_Character::HandleScrapeFocusInputEnded()
@@ -1457,6 +1487,7 @@ void AMD_Character::HandleScrapeFocusInputEnded()
 	{
 		FoamGunComponent->SetAimHeld(false);
 	}
+	SetFoamAiming(false);
 
 	CancelActiveScrapeAbilityAndEndFocus();
 }
@@ -1765,6 +1796,80 @@ bool AMD_Character::IsFoamGunEquipped() const
 		&& CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Foam);
 }
 
+bool AMD_Character::IsCutterEquipped() const
+{
+	if (!IsValid(EquipHotbarComponent))
+	{
+		return false;
+	}
+
+	const UMD_ToolDefinition* CurrentTool = EquipHotbarComponent->GetCurrentTool();
+	return IsValid(CurrentTool)
+		&& CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_WallCut);
+}
+
+void AMD_Character::RefreshCutterBladeMesh()
+{
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		return;
+	}
+
+	// 절단기를 들고, 톱날 메시가 있고, 본체에 회전 중심 소켓이 있어야 표시한다.
+	// 소켓이 없으면 톱날이 도구 원점에 겹쳐 박히므로 숨기는 편이 낫다.
+	const bool bWantsBlade = IsCutterEquipped() && IsValid(CutterBladeMesh);
+
+	const auto Apply = [this, bWantsBlade](UStaticMeshComponent* const Blade,
+		const UStaticMeshComponent* const ToolMesh)
+	{
+		if (!IsValid(Blade))
+		{
+			return;
+		}
+
+		const UStaticMesh* const ParentMesh = IsValid(ToolMesh) ? ToolMesh->GetStaticMesh() : nullptr;
+		const bool bHasPivot = ParentMesh != nullptr
+			&& !CutterBladePivotSocketName.IsNone()
+			&& ParentMesh->FindSocket(CutterBladePivotSocketName) != nullptr;
+		const bool bShow = bWantsBlade && bHasPivot;
+
+		Blade->SetStaticMesh(bShow ? CutterBladeMesh : nullptr);
+		Blade->SetVisibility(bShow, true);
+
+		if (!bShow)
+		{
+			// 다시 켤 때 이전 각도에서 이어지지 않도록 회전을 초기화한다
+			Blade->SetRelativeRotation(FRotator::ZeroRotator);
+		}
+	};
+
+	Apply(ThirdPersonCutterBlade, ThirdPersonToolMesh);
+	Apply(FirstPersonCutterBlade, FirstPersonToolMesh);
+}
+
+void AMD_Character::UpdateCutterBladeSpin(const float DeltaSeconds)
+{
+	if (GetNetMode() == NM_DedicatedServer || !bCutterVFXActive)
+	{
+		return;
+	}
+
+	if (FMath::IsNearlyZero(CutterBladeSpinDegreesPerSecond))
+	{
+		return;
+	}
+
+	// 톱날 메시는 두께축이 Y 라 로컬 Y 를 축으로 돈다.
+	const FRotator Step(CutterBladeSpinDegreesPerSecond * DeltaSeconds, 0.0f, 0.0f);
+	for (UStaticMeshComponent* const Blade : { ThirdPersonCutterBlade.Get(), FirstPersonCutterBlade.Get() })
+	{
+		if (IsValid(Blade) && Blade->GetStaticMesh() != nullptr)
+		{
+			Blade->AddLocalRotation(Step);
+		}
+	}
+}
+
 bool AMD_Character::CanUnloadScrapeLoad() const
 {
 	return IsValid(ScrapeToolComponent)
@@ -1971,6 +2076,9 @@ void AMD_Character::RefreshScrapeLoadVisual()
 	ThirdPersonToolMesh->SetStaticMesh(NewToolMesh);
 	ThirdPersonToolMesh->SetVisibility(bShowTool && bHasThirdPersonSocket, true);
 
+	// 톱날은 본체 소켓 기준이라 본체 메시가 확정된 뒤에 갱신해야 한다
+	RefreshCutterBladeMesh();
+
 	const FTransform ToolTransform = GetToolAttachTransform(NewToolMesh, CurrentTool);
 	ThirdPersonToolMesh->SetRelativeTransform(ToolTransform);
 	if (bFirstPersonScrapeViewModelActive)
@@ -2031,6 +2139,7 @@ void AMD_Character::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_Character, bCutterVFXActive);
+	DOREPLIFETIME(AMD_Character, bFoamAiming);
 }
 
 void AMD_Character::SetCutterVFXActive(bool bActive)
@@ -2064,6 +2173,83 @@ float AMD_Character::PlayBarnacleScrapeMontage()
 void AMD_Character::OnRep_CutterVFXActive()
 {
 	RefreshCutterVFX();
+}
+
+void AMD_Character::SetFoamAiming(const bool bAiming)
+{
+	if (bFoamAiming == bAiming)
+	{
+		return;
+	}
+
+	// 소유 클라는 서버 왕복을 기다리지 않고 즉시 자세를 바꾼다.
+	// 서버가 같은 값을 굳히면 사본 프록시가 OnRep 으로 따라온다.
+	bFoamAiming = bAiming;
+	RefreshFoamAimMontage();
+
+	if (!HasAuthority())
+	{
+		ServerSetFoamAiming(bAiming);
+	}
+}
+
+void AMD_Character::ServerSetFoamAiming_Implementation(const bool bAiming)
+{
+	if (bFoamAiming == bAiming)
+	{
+		return;
+	}
+
+	bFoamAiming = bAiming;
+	// 리슨 서버 호스트 화면에도 반영한다. OnRep 은 서버에서 불리지 않는다.
+	RefreshFoamAimMontage();
+}
+
+void AMD_Character::OnRep_FoamAiming()
+{
+	RefreshFoamAimMontage();
+}
+
+void AMD_Character::RefreshFoamAimMontage()
+{
+	if (GetNetMode() == NM_DedicatedServer || !IsValid(FoamAimMontage))
+	{
+		return;
+	}
+
+	USkeletalMeshComponent* const BodyMesh = GetMesh();
+	UAnimInstance* const AnimInstance = IsValid(BodyMesh) ? BodyMesh->GetAnimInstance() : nullptr;
+	if (!IsValid(AnimInstance))
+	{
+		return;
+	}
+
+	if (!bFoamAiming)
+	{
+		if (AnimInstance->Montage_IsPlaying(FoamAimMontage))
+		{
+			AnimInstance->Montage_Stop(FoamAimMontageBlendOutSeconds, FoamAimMontage);
+		}
+		return;
+	}
+
+	if (AnimInstance->Montage_IsPlaying(FoamAimMontage))
+	{
+		return;
+	}
+
+	if (AnimInstance->Montage_Play(FoamAimMontage) <= 0.0f)
+	{
+		return;
+	}
+
+	// 한 프레임짜리 포즈 몽타주라 그냥 두면 곧바로 끝난다. 섹션이 자기 자신을
+	// 다음으로 가리키게 해 조준을 놓을 때까지 자세를 유지시킨다.
+	const FName SectionName = FoamAimMontage->GetSectionName(0);
+	if (!SectionName.IsNone())
+	{
+		AnimInstance->Montage_SetNextSection(SectionName, SectionName, FoamAimMontage);
+	}
 }
 
 void AMD_Character::RefreshCutterVFX()

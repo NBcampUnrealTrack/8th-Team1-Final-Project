@@ -32,6 +32,11 @@ UTexture2D* UMD_LoadingScreenSettings::GetBeaconTexture() const
 	return BeaconTexture.LoadSynchronous();
 }
 
+UTexture2D* UMD_LoadingScreenSettings::GetBackgroundTexture() const
+{
+	return BackgroundTexture.LoadSynchronous();
+}
+
 UFont* UMD_LoadingScreenSettings::GetFont() const
 {
 	return Font.LoadSynchronous();

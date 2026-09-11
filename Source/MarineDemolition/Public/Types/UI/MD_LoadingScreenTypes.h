@@ -7,6 +7,34 @@
 #include "Templates/Atomic.h"
 #include "MD_LoadingScreenTypes.generated.h"
 
+/**
+ * 로딩을 시작한 상황. 화면에 띄울 진행 문구와 완료 문구가 이 값 하나로 정해진다.
+ *
+ * 호출부가 문구를 직접 넘기지 않는 이유는 두 가지다.
+ *   1) 예전에는 진행 FText를 받아 영문 접두사로 짝이 되는 완료 문구를 되찾았다.
+ *      호출부의 문구를 한 글자만 고쳐도 완료 문구가 조용히 기본값으로 떨어졌다.
+ *   2) 이 값은 ClientPrepareLoadingTransition RPC로 전송된다. 지역화된 문자열 대신
+ *      1바이트 열거값을 보내야 서버와 클라이언트의 언어 설정이 달라도 각자 자기 언어로 표시된다.
+ */
+UENUM(BlueprintType)
+enum class EMD_LoadingContext : uint8
+{
+	/** 상황이 지정되지 않은 일반 로딩. 직접 OpenLevel 같은 fallback 경로가 쓴다. */
+	Default,
+	/** 세션 생성 / 참가. */
+	CrewAssembling,
+	/** 세션 시작 - 원정 출발. */
+	DiveStarting,
+	/** 타이틀로 복귀. */
+	ReturningToSurface,
+	/** 작업을 중단하고 로비로 복귀. */
+	MissionIncomplete,
+	/** 로비에서 팀 이탈. */
+	LeavingCrew,
+	/** 다음 작업일로 전환. */
+	NextShift
+};
+
 /** 로딩 연출의 진행 단계. 서브시스템은 개별 플래그 대신 이 하나로 상태를 관리한다. */
 UENUM()
 enum class EMD_LoadingPhase : uint8
@@ -252,7 +280,9 @@ private:
 };
 
 /**
- * 디자인 해상도(MD_LoadingScreen::DesignSize) 좌표를 실제 위젯 좌표로 옮기는 균일 스케일 변환.
+ * 디자인 해상도(MD_LoadingScreen::DesignSize) 좌표를 실제 위젯 좌표로 옮기는 반응형 변환.
+ * 위치는 각 축의 화면 비율을 따르고, 글자·아이콘·선 굵기는 작은 축의 균일 Scale을 쓴다.
+ * 따라서 16:9가 아닌 화면에서도 전체 구도는 화면을 채우되 개별 에셋은 찌그러지지 않는다.
  * viewport와 MoviePlayer가 같은 계산을 쓰기 때문에 트래블 순간 위치가 튀지 않는다.
  */
 struct FMD_LoadingDesignSpace
@@ -261,16 +291,15 @@ struct FMD_LoadingDesignSpace
 		: Geometry(InGeometry)
 	{
 		const FVector2D LocalSize = Geometry.GetLocalSize();
-		Scale = FMath::Max(0.01f, FMath::Min(
-			LocalSize.X / MD_LoadingScreen::DesignSize.X,
-			LocalSize.Y / MD_LoadingScreen::DesignSize.Y));
-		// 종횡비가 달라도 디자인 좌표가 같은 위치를 가리키게 남는 여백만큼 중앙으로 민다.
-		Origin = (LocalSize - MD_LoadingScreen::DesignSize * Scale) * 0.5f;
+		AxisScale = FVector2D(
+			FMath::Max(0.01f, LocalSize.X / MD_LoadingScreen::DesignSize.X),
+			FMath::Max(0.01f, LocalSize.Y / MD_LoadingScreen::DesignSize.Y));
+		Scale = FMath::Min(AxisScale.X, AxisScale.Y);
 	}
 
-	FVector2D Point(const FVector2D& DesignPoint) const { return Origin + DesignPoint * Scale; }
+	FVector2D Point(const FVector2D& DesignPoint) const { return DesignPoint * AxisScale; }
 
 	const FGeometry& Geometry;
-	FVector2D Origin = FVector2D::ZeroVector;
+	FVector2D AxisScale = FVector2D(1.0f, 1.0f);
 	float Scale = 1.0f;
 };

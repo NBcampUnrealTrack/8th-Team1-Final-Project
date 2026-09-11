@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Player/MD_PlayerController.h"
@@ -336,11 +336,11 @@ void AMD_PlayerController::ClientReceiveShopPurchaseResult_Implementation(AMD_Me
 
 // 서버가 트래블하기 직전에 각 소유 클라이언트에서 로딩 화면을 시작시킨다.
 // 서버 화면만 덮으면 원격 클라이언트는 아무 예고 없이 멈춘 것처럼 보인다.
-void AMD_PlayerController::ClientPrepareLoadingTransition_Implementation(const FText& Subtitle)
+void AMD_PlayerController::ClientPrepareLoadingTransition_Implementation(EMD_LoadingContext Context)
 {
 	if (UMD_LoadingScreenSubsystem* LoadingScreen = GetGameInstance()->GetSubsystem<UMD_LoadingScreenSubsystem>())
 	{
-		LoadingScreen->BeginLoadingScreen(Subtitle);
+		LoadingScreen->BeginLoadingScreen(Context);
 	}
 }
 
