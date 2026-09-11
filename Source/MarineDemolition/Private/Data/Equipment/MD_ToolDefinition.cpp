@@ -5,6 +5,13 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "GameFramework/Actor.h"
 
+bool UMD_ToolDefinition::IsChargeSettingsValid()
+{
+	// 비충전 아이템의 미사용 비용을 제외한 유한 값 및 사용 가능한 범위 검사
+	return FMath::IsFinite(MaxCharge) == true && MaxCharge >= 0.0f
+		&& (MaxCharge == 0.0f || (FMath::IsFinite(CostPerOnce) == true && CostPerOnce > 0.0f && CostPerOnce <= MaxCharge));
+}
+
 bool UMD_ToolDefinition::CanGrant_Implementation(FMD_ItemGrantContext Context)
 {
 	// 도구 추가 및 업그레이드 조건에 앞서 공통 지급 데이터 검사
@@ -29,15 +36,12 @@ bool UMD_ToolDefinition::CanGrant_Implementation(FMD_ItemGrantContext Context)
 		// 장착 및 실행 설정 오류 전달
 		return false;
 	}
-	// 최대 충전량과 초기 충전량의 유한 값 및 허용 범위 검사
-	if (FMath::IsFinite(MaxCharge) == false || MaxCharge < 0.0f
-		// 최대 충전량이 유효한 경우에만 초기 충전량 범위 확인
-		|| FMath::IsFinite(InitialCharge) == false || InitialCharge < 0.0f || InitialCharge > MaxCharge)
+	// 충전형 도구를 만충 상태에서 한 번 이상 사용할 수 있는 설정 검사
+	if (IsChargeSettingsValid() == false)
 	{
-		// 충전량 설정 실패 원인의 프로젝트 로그 기록
-		UE_LOG(MarineDemolition, Warning, TEXT("%s MaxCharge 또는 InitialCharge가 유한 값이 아니거나 0 <= InitialCharge <= MaxCharge 범위를 벗어남 (Item=%s)"),
-			*UE_CALL_LOCATIONINFO, *GetPathName());
-		// 최대 충전량 또는 초기 충전량 설정 오류 전달
+		// 최대 충전량 및 사용 비용의 설정 오류 기록
+		UE_LOG(MarineDemolition, Warning, TEXT("Invalid item charge settings: Item=%s Max=%g CostPerOnce=%g"), *GetPathName(), MaxCharge, CostPerOnce);
+		// 잘못된 충전 설정의 지급 거부
 		return false;
 	}
 	// 지급 대상의 공통 보관 컴포넌트 조회
@@ -92,14 +96,8 @@ bool UMD_ToolDefinition::Grant_Implementation(FMD_ItemGrantContext Context)
 	{
 		// 지급 직전 현재 보유한 선행 도구 위치 재조회
 		int32 SourceSlotIndex = FindUpgradeSourceSlot(Hotbar);
-		// 실제 선행 도구가 있을 때만 해당 슬롯을 업그레이드로 교체
-		if (SourceSlotIndex != INDEX_NONE)
-		{
-			// 다른 도구와 소모품을 보존하는 선행 도구 슬롯 갱신
-			return Hotbar->SetItemAtSlot(SourceSlotIndex, this, Context.Quantity);
-		}
-		// 일반 구매 또는 선행 도구 없는 재구매는 빈 슬롯에 추가
-		return Hotbar->AddItem(this, Context.Quantity);
+		// 공통 슬롯 지급에서 최대 충전량과 한 번의 사용 비용을 함께 초기화
+		return SourceSlotIndex != INDEX_NONE ? Hotbar->SetItemAtSlot(SourceSlotIndex, this, Context.Quantity) : Hotbar->AddItem(this, Context.Quantity);
 	}
 	// BP 조건 검사 이후 보관 대상이 사라진 원인 기록
 	UE_LOG(MarineDemolition, Warning, TEXT("%s 지급 직전 Hotbar가 유효하지 않음 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());

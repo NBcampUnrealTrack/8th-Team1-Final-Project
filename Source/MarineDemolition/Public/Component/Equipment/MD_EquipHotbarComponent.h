@@ -31,6 +31,10 @@ struct MARINEDEMOLITION_API FMD_HotbarToolEntry
 	// 보관 중인 일반 충전 도구의 현재 잔량
 	UPROPERTY(BlueprintReadOnly, Category = "Hotbar")
 	float Charge = 0.0f;
+
+	// 구매 또는 기본 지급 시 도구 정의에서 복사한 한 번의 사용 비용
+	UPROPERTY(BlueprintReadOnly, Category = "Hotbar")
+	float CostPerOnce = 0.0f;
 };
 
 UCLASS(ClassGroup=(MarineDemolition), meta=(BlueprintSpawnableComponent))
@@ -104,6 +108,18 @@ public:
 	// 보관 중인 도구의 현재 충전 잔량 조회
 	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")
 	float GetToolCharge(UMD_ToolDefinition* ToolDefinition);
+
+	// 지급 시 슬롯에 적용한 도구의 한 번 사용 비용 조회
+	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")
+	float GetToolCostPerOnce(UMD_ToolDefinition* ToolDefinition);
+
+	// 보유 도구의 한 번 사용 가능 여부이며 최대 충전량 영은 무제한 사용
+	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")
+	bool IsToolChargeAvailable(UMD_ToolDefinition* ToolDefinition);
+
+	// 서버에서 지급 시 설정한 비용만 차감하고 슬롯 복제와 UI 갱신 전달
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar|Charge")
+	bool ConsumeToolCharge(UMD_ToolDefinition* ToolDefinition);
 
 	// 도구 보유 상태와 충전 상한을 기준으로 보충 가능 여부 확인
 	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")

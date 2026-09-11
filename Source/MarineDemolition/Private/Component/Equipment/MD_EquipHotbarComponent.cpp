@@ -226,8 +226,11 @@ bool UMD_EquipHotbarComponent::AddItem(UMD_ItemDefinition* ItemDefinition, int32
 	}
 	// 실제 지급할 위치의 공통 검증 결과
 	int32 EntryIndex = INDEX_NONE;
-	// 보관 가능 검사와 능력 부여를 순서대로 완료한 경우에만 아이템 변경
-	if (FindAvailableItemEntry(ItemDefinition, Amount, EntryIndex) == false || GrantItemAbility(ItemDefinition) == false)
+	// 도구에만 존재하는 충전 설정을 검사할 파생 정의 조회
+	UMD_ToolDefinition* ToolDefinition = Cast<UMD_ToolDefinition>(ItemDefinition);
+	// 보관 조건과 도구 충전 설정 및 능력 부여를 완료한 경우에만 상태 변경
+	if (FindAvailableItemEntry(ItemDefinition, Amount, EntryIndex) == false
+		|| (IsValid(ToolDefinition) == true && ToolDefinition->IsChargeSettingsValid() == false) || GrantItemAbility(ItemDefinition) == false)
 	{
 		// 보관 또는 GE 부여 실패에 따른 서버 구매 실패 전달
 		return false;
@@ -236,10 +239,14 @@ bool UMD_EquipHotbarComponent::AddItem(UMD_ItemDefinition* ItemDefinition, int32
 	FMD_HotbarToolEntry& Entry = ToolEntries[EntryIndex];
 	// 일반 아이템만 같은 AssetId 수량을 합산하고 새 도구는 한 개로 추가
 	int32 NewCount = ItemDefinition->IsA<UMD_ToolDefinition>() == false && IsValid(GetItemAtSlot(EntryIndex)) == true ? Entry.Count + Amount : Amount;
-	// 새로 지급할 도구의 초기 충전 설정 조회
-	UMD_ToolDefinition* NewTool = Cast<UMD_ToolDefinition>(ItemDefinition);
-	// 새 도구의 초기 충전량을 해당 빈 슬롯에만 반영
-	Entry.Charge = IsValid(NewTool) == true ? NewTool->InitialCharge : 0.0f;
+	// 기존 수량 합산은 사용 중인 충전 상태를 보존하고 새 품목만 초기화
+	if (IsValid(GetItemAtSlot(EntryIndex)) == false)
+	{
+		// 도구만 최대 충전량 적용 및 일반 아이템의 미사용 잔량 초기화
+		Entry.Charge = IsValid(ToolDefinition) == true ? ToolDefinition->MaxCharge : 0.0f;
+		// 충전형 도구에만 이번 지급의 한 번 사용 비용 적용
+		Entry.CostPerOnce = IsValid(ToolDefinition) == true && ToolDefinition->MaxCharge > 0.0f ? ToolDefinition->CostPerOnce : 0.0f;
+	}
 	// 새 정의 또는 합산 대상 정의를 슬롯에 반영
 	Entry.ToolDefinition = ItemDefinition;
 	// 검증을 통과한 보유 수량 반영
@@ -302,12 +309,14 @@ bool UMD_EquipHotbarComponent::SetItemAtSlot(int32 SlotIndex, UMD_ItemDefinition
 		// 슬롯 설정 실패 전달
 		return false;
 	}
+	// 직접 지급과 업그레이드의 도구 전용 충전 설정 조회
+	UMD_ToolDefinition* ToolDefinition = Amount > 0 ? Cast<UMD_ToolDefinition>(ItemDefinition) : nullptr;
 	// 양의 수량을 배치할 때만 정의와 단일 소지 조건 확인
 	if (Amount > 0)
 	{
 		// 미지정 정의 및 무효 ID와 도구 다중 수량 차단
 		if (IsValid(ItemDefinition) == false || ItemDefinition->GetPrimaryAssetId().IsValid() == false
-			|| (ItemDefinition->IsA<UMD_ToolDefinition>() == true && Amount != 1))
+			|| (IsValid(ToolDefinition) == true && (ToolDefinition->IsChargeSettingsValid() == false || Amount != 1)))
 		{
 			// 배치할 아이템 설정 오류 기록
 			UE_LOG(MarineDemolition, Warning, TEXT("%s 슬롯의 아이템 정의, AssetId 또는 도구 수량이 유효하지 않음"), *UE_CALL_LOCATIONINFO);
@@ -351,10 +360,10 @@ bool UMD_EquipHotbarComponent::SetItemAtSlot(int32 SlotIndex, UMD_ItemDefinition
 	}
 	// 빈 슬롯 요청에서는 정의도 함께 제거
 	ToolEntries[SlotIndex].ToolDefinition = Amount > 0 ? ItemDefinition : nullptr;
-	// 직접 설정 또는 저장 복구한 도구의 초기 충전량 조회
-	UMD_ToolDefinition* SlotTool = Amount > 0 ? Cast<UMD_ToolDefinition>(ItemDefinition) : nullptr;
-	// 명시적 슬롯 재구성 시 정의의 초기 충전량 적용
-	ToolEntries[SlotIndex].Charge = IsValid(SlotTool) == true ? SlotTool->InitialCharge : 0.0f;
+	// 기본 지급과 업그레이드 시 도구만 최대 충전량으로 초기화
+	ToolEntries[SlotIndex].Charge = IsValid(ToolDefinition) == true ? ToolDefinition->MaxCharge : 0.0f;
+	// 일반 아이템과 빈 슬롯의 충전 비용 제거 및 충전 도구 비용 적용
+	ToolEntries[SlotIndex].CostPerOnce = IsValid(ToolDefinition) == true && ToolDefinition->MaxCharge > 0.0f ? ToolDefinition->CostPerOnce : 0.0f;
 	// 지정 슬롯의 수량 확정
 	ToolEntries[SlotIndex].Count = Amount;
 	// 완성된 슬롯 상태의 변경 알림
@@ -527,6 +536,63 @@ float UMD_EquipHotbarComponent::GetToolCharge(UMD_ToolDefinition* ToolDefinition
 	int32 Index = FindItemEntry(ToolDefinition);
 	// 미보유 도구는 사용 가능한 충전량이 없는 상태로 전달
 	return ToolEntries.IsValidIndex(Index) == true ? ToolEntries[Index].Charge : 0.0f;
+}
+
+float UMD_EquipHotbarComponent::GetToolCostPerOnce(UMD_ToolDefinition* ToolDefinition)
+{
+	// 실제 보유 슬롯에 적용된 비용 조회
+	int32 Index = FindItemEntry(ToolDefinition);
+	// 미보유 도구는 사용할 비용이 없는 상태로 전달
+	return ToolEntries.IsValidIndex(Index) == true ? ToolEntries[Index].CostPerOnce : 0.0f;
+}
+
+bool UMD_EquipHotbarComponent::IsToolChargeAvailable(UMD_ToolDefinition* ToolDefinition)
+{
+	// 사용 대상의 실제 보유 위치 조회
+	int32 Index = FindItemEntry(ToolDefinition);
+	// 무효 정의 및 미보유 도구와 잘못된 최대값 차단
+	if (IsValid(ToolDefinition) == false || ToolEntries.IsValidIndex(Index) == false || GetItemCount(ToolDefinition) <= 0
+		|| FMath::IsFinite(ToolDefinition->MaxCharge) == false || ToolDefinition->MaxCharge < 0.0f)
+	{
+		// 상태 변경 없는 사용 거절 전달
+		return false;
+	}
+	// 비용과 잔량을 한 슬롯에서 함께 확인
+	FMD_HotbarToolEntry& Entry = ToolEntries[Index];
+	// 비충전 도구 또는 지급 시 적용한 비용 이상의 잔량 허용
+	return ToolDefinition->MaxCharge == 0.0f || (FMath::IsFinite(Entry.CostPerOnce) == true && Entry.CostPerOnce > 0.0f
+		&& FMath::IsFinite(Entry.Charge) == true && Entry.Charge >= Entry.CostPerOnce);
+}
+
+bool UMD_EquipHotbarComponent::ConsumeToolCharge(UMD_ToolDefinition* ToolDefinition)
+{
+	// 서버 권한과 현재 보유 잔량을 함께 재검증
+	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false || IsToolChargeAvailable(ToolDefinition) == false)
+	{
+		// 실제 차감이 거부된 도구 기록
+		UE_LOG(MarineDemolition, Warning, TEXT("Tool charge consumption rejected: Item=%s"), *GetNameSafe(ToolDefinition));
+		// 충전 상태를 보존한 사용 실패 전달
+		return false;
+	}
+	// 최대 충전량이 영인 도구는 비용과 잔량 변경 없이 사용
+	if (ToolDefinition->MaxCharge == 0.0f)
+	{
+		// 무차감 사용 성공 전달
+		return true;
+	}
+	// 실제 사용 비용이 적용된 보유 슬롯 참조
+	FMD_HotbarToolEntry& Entry = ToolEntries[FindItemEntry(ToolDefinition)];
+	// 전후 잔량 로그에 사용할 기존 값 보관
+	float PreviousCharge = Entry.Charge;
+	// 지급된 한 번의 사용 비용만 잔량에서 차감
+	Entry.Charge -= Entry.CostPerOnce;
+	// 실제 차감 수치와 적용 비용을 프로젝트 로그로 기록
+	UE_LOG(MarineDemolition, Log, TEXT("[ToolCharge] Item=%s Before=%g CostPerOnce=%g After=%g Max=%g"),
+		*ToolDefinition->GetPrimaryAssetId().ToString(), PreviousCharge, Entry.CostPerOnce, Entry.Charge, ToolDefinition->MaxCharge);
+	// 서버 UI와 소유 클라이언트 슬롯 복제에 변경 전달
+	NotifyEntriesChanged();
+	// 실제 차감 성공 전달
+	return true;
 }
 
 bool UMD_EquipHotbarComponent::CanAddToolCharge(UMD_ToolDefinition* ToolDefinition, float Amount)
