@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -7,6 +7,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
+#include "Types/UI/MD_LoadingScreenTypes.h"
 #include "MD_PlayerController.generated.h"
 
 class AMD_GameStateBase;
@@ -136,7 +137,7 @@ public:
 
 	/** 서버 이동 전에 각 소유 클라이언트에서 실제 로딩 화면을 시작한다. */
 	UFUNCTION(Client, Reliable)
-	void ClientPrepareLoadingTransition(const FText& Subtitle);
+	void ClientPrepareLoadingTransition(EMD_LoadingContext Context);
 
 	// 서버의 참여 및 퇴장 알림을 소유 클라이언트 HUD에 전달
 	UFUNCTION(Client, Reliable)
