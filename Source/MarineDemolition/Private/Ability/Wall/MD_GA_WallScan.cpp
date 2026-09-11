@@ -3,6 +3,10 @@
 #include "AbilitySystemComponent.h"
 #include "Character/MD_Character.h"
 #include "Component/Scanning/MD_ScannerComponent.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+#include "World/Contamination/MD_Barnacle.h"
+#include "World/Contamination/MD_SurfaceStain.h"
+#include "UObject/UObjectIterator.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -11,6 +15,7 @@
 #include "GameplayTags/MD_GameplayTags.h"
 #include "GameplayPrediction.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "TimerManager.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallUtility.h"
@@ -29,12 +34,13 @@ UMD_GA_WallScan::UMD_GA_WallScan()
 bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo, EMD_ScanMode Mode,
 	TArray<AActor*>& OutTargets, FVector& OutOrigin, FVector& OutForward) const
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scanner_FindTargets);
 	OutTargets.Reset();
 	OutOrigin = FVector::ZeroVector;
 	OutForward = FVector::ForwardVector;
 	const APawn* Pawn = ActorInfo ? Cast<APawn>(ActorInfo->AvatarActor.Get()) : nullptr;
 	const AController* Controller = Pawn ? Pawn->GetController() : nullptr;
-	if (!Controller || !Pawn->GetWorld() || !FMath::IsFinite(ScanRadius) || ScanRadius <= 0
+	if (!MDScanning::IsValidMode(Mode) || !Controller || !Pawn->GetWorld() || !FMath::IsFinite(ScanRadius) || ScanRadius <= 0
 		|| !FMath::IsFinite(ScanConeHalfAngleDegrees)
 		|| (Mode == EMD_ScanMode::InternalStructure && ScanObjectTypes.IsEmpty())) return false;
 	FRotator Rotation;
@@ -46,6 +52,15 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 		// Some authored walls have complex collision only and are absent from simple
 		// overlap results. Classify their rendered bounds once per scan, without Tick.
 		for (TActorIterator<AMD_CuttableWall> It(Pawn->GetWorld()); It; ++It) Candidates.Add(*It);
+	}
+	else if (Mode == EMD_ScanMode::Cleanup)
+	{
+		// Surfaces also exist on floors/equipment; the collision query is not authoritative.
+		for (TObjectIterator<UMD_ScrapeSurfaceComponent> It; It; ++It)
+			if (It->GetWorld() == Pawn->GetWorld() && It->IsRegistered() && IsValid(It->GetOwner()))
+				Candidates.AddUnique(It->GetOwner());
+		for (TActorIterator<AMD_Barnacle> It(Pawn->GetWorld()); It; ++It) Candidates.AddUnique(*It);
+		for (TActorIterator<AMD_SurfaceStain> It(Pawn->GetWorld()); It; ++It) Candidates.Add(*It);
 	}
 	else
 	{
@@ -59,11 +74,38 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 	}
 	for (AActor* Candidate : Candidates)
 	{
-		if (!IsValid(Candidate) || Candidate->IsHidden() || !ActorHasAnyTargetTag(Candidate, RequiredTargetTags))
+		if (!IsValid(Candidate) || Candidate->IsHidden()
+			|| (Mode != EMD_ScanMode::Cleanup && !ActorHasAnyTargetTag(Candidate, RequiredTargetTags)))
 			continue;
 		FVector Center = Candidate->GetActorLocation();
 		double BoundRadius = 0;
-		if (Mode == EMD_ScanMode::WallType)
+		if (Mode == EMD_ScanMode::Cleanup)
+		{
+			const UStaticMeshComponent* Mesh = nullptr;
+			if (const AMD_Barnacle* Barnacle = Cast<AMD_Barnacle>(Candidate))
+			{
+				if (Barnacle->IsFullyRemoved()) continue;
+				Mesh = Barnacle->GetScanMesh();
+			}
+			else if (const auto* Surface = Candidate->FindComponentByClass<UMD_ScrapeSurfaceComponent>())
+			{
+				if (!Surface->IsContaminationEnabled() || !Surface->IsSurfaceInitialized()
+					|| !Surface->UsesMeshUVSurface() || Surface->IsContaminationFullyRemoved()) continue;
+				Mesh = Surface->GetSurfaceMesh();
+			}
+			if (const AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Candidate))
+			{
+				if (Stain->GetRemainingSize() <= 0) continue;
+				const FBoxSphereBounds Bounds = Stain->GetStainBounds();
+				Center = Bounds.Origin; BoundRadius = Bounds.SphereRadius;
+			}
+			else
+			{
+				if (!IsValid(Mesh) || !Mesh->GetStaticMesh() || !Mesh->IsVisible() || !Mesh->bRenderInMainPass) continue;
+				Center = Mesh->Bounds.Origin; BoundRadius = Mesh->Bounds.SphereRadius;
+			}
+		}
+		else if (Mode == EMD_ScanMode::WallType)
 		{
 			const AMD_CuttableWall* Wall = Cast<AMD_CuttableWall>(Candidate);
 			if (!Wall || !Wall->CanCut() || !IsValid(Wall->GetScanMesh())) continue;
@@ -156,6 +198,7 @@ void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 
 bool UMD_GA_WallScan::PerformScan(EMD_ScanMode Mode, uint32 RequestId)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scanner_Activate);
 	const FGameplayAbilityActorInfo* Info = GetCurrentActorInfo();
 	const AMD_Character* Character = Info ? Cast<AMD_Character>(Info->AvatarActor.Get()) : nullptr;
 	UMD_ScannerComponent* Scanner = Character ? Character->GetScannerComponent() : nullptr;

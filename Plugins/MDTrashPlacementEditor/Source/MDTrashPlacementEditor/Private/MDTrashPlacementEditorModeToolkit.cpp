@@ -21,7 +21,7 @@ FName FMDTrashPlacementEditorModeToolkit::GetToolkitFName() const
 
 FText FMDTrashPlacementEditorModeToolkit::GetBaseToolkitName() const
 {
-	return LOCTEXT("DisplayName", "MD Trash Placement Editor Mode");
+	return LOCTEXT("DisplayName", "Placement");
 }
 
 #undef LOCTEXT_NAMESPACE

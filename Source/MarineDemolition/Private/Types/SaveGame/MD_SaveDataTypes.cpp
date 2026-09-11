@@ -1,6 +1,7 @@
 // Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Types/SaveGame/MD_SaveDataTypes.h"
+#include "Gameplay/Contamination/MD_SurfaceStainPersistence.h"
 
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "GameplayTags/MD_GameplayTags.h"
@@ -115,6 +116,7 @@ bool FMD_MerchantData::IsStructurallyValid() const
 
 bool FMD_WorldData::IsStructurallyValid() const
 {
+    if (!FMD_SurfaceStainPersistence::Validate(SurfaceStains)) return false;
     TSet<FGuid> PendingBatchIds;
     for (const FMD_ContaminationPendingDrop& Drop : PendingContaminationDrops)
     {
@@ -271,6 +273,22 @@ bool FMD_GameData::MigrateToCurrentVersion()
 	// CellIndices는 이전부터 int32 UPROPERTY이므로 배열 원소 폭은 바뀌지 않는다.
     // Version 11 adds the common contamination session seed. Absence remains false
     // for old saves; never infer a common seed from independently authored walls.
+    // Version 12 adds placed surface-stain stages. Older saves use authored initial stages.
+	if (SchemaVersion < 13)
+	{
+		FMD_WorldData WorldData;
+		if (GetDataField(FMD_WorldData::DataFieldKey, WorldData))
+		{
+			for (FMD_SurfaceStainRecord& Stain : WorldData.SurfaceStains)
+			{
+				const int32 Size = Stain.ResolveSize();
+				if (!FMD_SurfaceStainSize::IsValidRemaining(Size)) return false;
+				Stain.RemainingSize = Size;
+			}
+			AddDataField(FMD_WorldData::DataFieldKey, WorldData);
+		}
+	}
+
 	SchemaVersion = CurrentSchemaVersion;
 	return true;
 }

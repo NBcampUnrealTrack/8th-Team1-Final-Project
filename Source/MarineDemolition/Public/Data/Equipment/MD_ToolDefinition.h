@@ -59,6 +59,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape")
 	FMD_ScrapeToolSpec ScrapeProfile;
 
+	/** Authoritative amount removed from a surface stain by one completed swing. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape", meta = (ClampMin = "1", ClampMax = "10000"))
+	int32 StainRemovalAmount = 100;
+
 	// 임시 UI용 아이콘 (없으면 이름만 표시)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool")
 	TObjectPtr<UTexture2D> ToolIcon;

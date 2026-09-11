@@ -7,6 +7,7 @@
 #include "Types/Scrape/MD_ScrapeTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
 #include "Types/Persistence/MD_ContaminationSavePayload.h"
+#include "Types/Persistence/MD_SurfaceStainRecord.h"
 #include "Types/Scrape/MD_ContaminationPendingDrop.h"
 #include "MD_DaySnapshotTypes.generated.h"
 
@@ -305,6 +306,9 @@ struct FMD_DaySnapshot
       /** Detached debris mass/recovery state survives source destruction and day travel. */
       UPROPERTY()
       TArray<FMD_ContaminationPendingDrop> PendingContaminationDrops;
+
+      UPROPERTY()
+      TArray<FMD_SurfaceStainRecord> SurfaceStains;
 
       // 마감 완료된 섹터 마감 마커 (레벨 배치 액터라 이름으로 식별)
       UPROPERTY()

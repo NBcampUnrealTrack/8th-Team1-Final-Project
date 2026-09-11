@@ -6,6 +6,7 @@
 #include "Data/Input/MD_InputConfig.h"
 #include "Component/Character/MD_CharacterMovementComponent.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
+#include "Component/Scrape/MD_StainScraperComponent.h"
 #include "Component/Scanning/MD_ScannerComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Audio/MD_AudioRelayComponent.h"
@@ -93,6 +94,7 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	FirstPersonMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	ScrapeToolComponent = CreateDefaultSubobject<UMD_ScrapeToolComponent>(TEXT("ScrapeToolComponent"));
+	StainScraperComponent = CreateDefaultSubobject<UMD_StainScraperComponent>(TEXT("StainScraperComponent"));
 	ScannerComponent = CreateDefaultSubobject<UMD_ScannerComponent>(TEXT("ScannerComponent"));
 
 	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
@@ -899,7 +901,8 @@ void AMD_Character::UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget
 	// 그래서 별도의 뷰 회전 조회 없이 컨트롤 회전만 따라가면 된다.
 	const FRotator TargetRotation = GetControlRotation() + FirstPersonArmsRotationOffset;
 	const FVector TargetLocation =
-		Camera->GetComponentLocation() + TargetRotation.RotateVector(FirstPersonArmsOffset);
+		Camera->GetComponentLocation() + TargetRotation.RotateVector(FirstPersonArmsOffset
+			+ (StainScraperComponent ? StainScraperComponent->GetHandSwingOffset() : FVector::ZeroVector));
 
 	// 리스폰·텔레포트로 멀리 튀었을 때 팔이 월드를 가로질러 날아오지 않게 끊어서 붙인다.
 	static constexpr float SnapDistanceSq = 200.f * 200.f;
@@ -1299,6 +1302,12 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 	const bool bIsScrapeAbility = CurrentTool->ToolAbilityTag.MatchesTagExact(
 		MDGameplayTags::Ability_Scrape);
 	bScrapeAbilityInputCaptured = bIsScrapeAbility;
+	if (bIsScrapeAbility && IsValid(ScrapeToolComponent) && !ScrapeToolComponent->IsScrapeFocusActive())
+	{
+		if (UAbilitySystemComponent* AbilitySystem = GetAbilitySystemComponent())
+			AbilitySystem->TryActivateAbilitiesByTag(FGameplayTagContainer(CurrentTool->ToolAbilityTag));
+		return;
+	}
 	if (bIsScrapeAbility
 		&& (!IsValid(ScrapeToolComponent)
 			|| !ScrapeToolComponent->IsScrapeFocusReady()
@@ -1744,6 +1753,7 @@ void AMD_Character::CancelActiveScrapeAbility()
 
 void AMD_Character::CancelActiveScrapeAbilityAndEndFocus()
 {
+	if (StainScraperComponent) StainScraperComponent->CancelStroke();
 	// CancelAbilityHandle은 GA EndAbility를 통해 scraping만 먼저 멈춘다.
 	CancelActiveScrapeAbility();
 	if (IsValid(ScrapeToolComponent))

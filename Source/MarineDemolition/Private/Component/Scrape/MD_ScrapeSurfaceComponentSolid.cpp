@@ -135,6 +135,11 @@ FString UMD_ScrapeSurfaceComponent::GetSolidContaminationStats() const
         : TEXT("Solid contamination inactive");
 }
 
+UPrimitiveComponent* UMD_ScrapeSurfaceComponent::GetSolidContaminationScanMesh() const
+{
+    return ContaminationSolidVisual ? ContaminationSolidVisual->GetScanMesh() : nullptr;
+}
+
 bool UMD_ScrapeSurfaceComponent::TryGetSolidVisualWorldContact(
     const FVector2D& SurfacePositionCm, const FVector& BaseWorldPosition,
     const FVector& WorldNormal, FVector& OutPosition) const

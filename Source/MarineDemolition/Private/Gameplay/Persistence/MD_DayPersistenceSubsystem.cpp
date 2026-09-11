@@ -1,6 +1,7 @@
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Gameplay/Scrape/MD_ContaminationDebrisSubsystem.h"
+#include "Gameplay/Contamination/MD_SurfaceStainPersistence.h"
 
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "EngineUtils.h"
@@ -541,6 +542,7 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
     {
         Debris->CapturePendingDrops(Snapshot.PendingContaminationDrops);
     }
+    FMD_SurfaceStainPersistence::Capture(World, Snapshot.SurfaceStains);
     Snapshot.bValid = true;
 }
 
@@ -576,6 +578,7 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
     OutWorldData.bHasContaminationGenerationRecords = true;
     OutWorldData.WallContaminations = MoveTemp(Snapshot.WallContaminations);
     OutWorldData.PendingContaminationDrops = MoveTemp(Snapshot.PendingContaminationDrops);
+    OutWorldData.SurfaceStains = MoveTemp(Snapshot.SurfaceStains);
     OutWorldData.BarnacleRemovals = MoveTemp(Snapshot.BarnacleRemovals);
     OutWorldData.ClosedMarkerNames = MoveTemp(Snapshot.ClosedMarkerNames);
 
@@ -795,6 +798,7 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
         if (!Debris->RestorePendingDrops(WorldData.PendingContaminationDrops)) return false;
     }
     else if (!WorldData.PendingContaminationDrops.IsEmpty()) return false;
+    if (!FMD_SurfaceStainPersistence::Restore(World, WorldData.SurfaceStains)) return false;
 
     // 점수 캐리오버 + Day 진행
     return true;
@@ -827,6 +831,7 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     WorldData.bHasContaminationGenerationRecords = Snapshot.bHasContaminationGenerationRecords;
     WorldData.WallContaminations = Snapshot.WallContaminations;
     WorldData.PendingContaminationDrops = Snapshot.PendingContaminationDrops;
+    WorldData.SurfaceStains = Snapshot.SurfaceStains;
     WorldData.BarnacleRemovals = Snapshot.BarnacleRemovals;
     WorldData.ClosedMarkerNames = Snapshot.ClosedMarkerNames;
 

@@ -11,7 +11,8 @@ UENUM(BlueprintType)
 enum class EMD_ScanMode : uint8
 {
 	InternalStructure UMETA(DisplayName = "내부 구조물"),
-	WallType UMETA(DisplayName = "벽 종류")
+	WallType UMETA(DisplayName = "벽 종류"),
+	Cleanup UMETA(DisplayName = "오염물·따개비")
 };
 
 namespace MDScanning
@@ -19,6 +20,8 @@ namespace MDScanning
 	constexpr int32 UtilityStencil = 251;
 	constexpr int32 PartitionStencil = 252;
 	constexpr int32 StrutStencil = 253;
+	constexpr int32 ContaminationStencil = StrutStencil;
+	constexpr int32 BarnacleStencil = PartitionStencil;
 	bool IsValidMode(EMD_ScanMode Mode);
 	bool IsNewerRequest(uint32 Request, uint32 Previous);
 	bool SphereIntersectsScanCone(const FVector& Origin, const FVector& Forward,

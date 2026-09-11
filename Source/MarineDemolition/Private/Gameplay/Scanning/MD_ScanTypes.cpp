@@ -3,7 +3,8 @@
 
 bool MDScanning::IsValidMode(EMD_ScanMode Mode)
 {
-	return Mode == EMD_ScanMode::InternalStructure || Mode == EMD_ScanMode::WallType;
+	return Mode == EMD_ScanMode::InternalStructure || Mode == EMD_ScanMode::WallType
+		|| Mode == EMD_ScanMode::Cleanup;
 }
 
 bool MDScanning::IsNewerRequest(uint32 Request, uint32 Previous)

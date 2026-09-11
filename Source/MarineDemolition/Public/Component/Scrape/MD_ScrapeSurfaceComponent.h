@@ -305,6 +305,10 @@ public:
 		return SurfaceMesh.Get();
 	}
 
+	/** Copies the existing live footprint/paint parameters; no scan-owned CPU mask generation. */
+	bool ConfigureContaminationScanMaterial(UMaterialInstanceDynamic* Material) const;
+	UPrimitiveComponent* GetSolidContaminationScanMesh() const;
+
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface|Mask")
 	UTexture2D* GetContaminationMaskTexture() const
 	{

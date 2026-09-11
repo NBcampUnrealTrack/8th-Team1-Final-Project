@@ -185,6 +185,9 @@ public:
     UPROPERTY()
     TArray<FMD_ContaminationPendingDrop> PendingContaminationDrops;
 
+    UPROPERTY()
+    TArray<FMD_SurfaceStainRecord> SurfaceStains;
+
 	// 새 게임별 배치 시드와 제거 순번을 함께 복원하기 위한 배치기 상태 목록
 	UPROPERTY()
 	TArray<FMD_BarnacleRemovalRecord> BarnacleRemovals;
@@ -208,7 +211,7 @@ struct MARINEDEMOLITION_API FMD_GameData
 
 public:
 	// 이후 필드 변경을 안전하게 마이그레이션하기 위한 현재 스키마 버전
-	static constexpr int32 CurrentSchemaVersion = 11;
+	static constexpr int32 CurrentSchemaVersion = 13;
 
 	// 저장된 필드 배치를 판별하기 위한 슬롯 데이터 버전
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")

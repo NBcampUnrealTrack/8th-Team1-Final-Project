@@ -22,6 +22,7 @@ class UPhysicsHandleComponent;
 class UMD_CharacterMovementComponent;
 class UMD_InteractionComponent;
 class UMD_ScrapeToolComponent;
+class UMD_StainScraperComponent;
 class UMD_ScannerComponent;
 class UGameplayAbility;
 class UMD_EquipHotbarComponent;
@@ -72,6 +73,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
 	UMD_ScrapeToolComponent* GetScrapeToolComponent() const	{ return ScrapeToolComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Stain")
+	UMD_StainScraperComponent* GetStainScraperComponent() const { return StainScraperComponent; }
 
 	UFUNCTION(BlueprintPure, Category="MD|Scanner")
 	UMD_ScannerComponent* GetScannerComponent() const { return ScannerComponent; }
@@ -217,6 +221,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_ScrapeToolComponent> ScrapeToolComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Stain", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UMD_StainScraperComponent> StainScraperComponent;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Scanner")
 	TObjectPtr<UMD_ScannerComponent> ScannerComponent;

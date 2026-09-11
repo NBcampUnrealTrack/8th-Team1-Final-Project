@@ -5,6 +5,10 @@
 #include "Camera/CameraComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "World/Contamination/MD_Barnacle.h"
+#include "World/Contamination/MD_SurfaceStain.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -14,6 +18,7 @@
 #include "Materials/MaterialInterface.h"
 #include "Materials/MaterialParameterCollection.h"
 #include "Materials/MaterialParameterCollectionInstance.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "TimerManager.h"
 #include "UI/Equipment/MD_ScannerModeWidget.h"
 #include "UObject/ConstructorHelpers.h"
@@ -27,6 +32,9 @@ UMD_ScannerComponent::UMD_ScannerComponent()
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WallStyle(
 		TEXT("/Game/VFX/03_Scanner/MI_ScanWallType.MI_ScanWallType"));
 	WallScanMaterial = WallStyle.Object;
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Mask(
+		TEXT("/Game/VFX/03_Scanner/M_ScanCleanupMask.M_ScanCleanupMask"));
+	ContaminationMaskMaterial = Mask.Object;
 }
 
 void UMD_ScannerComponent::BeginPlay()
@@ -56,6 +64,7 @@ bool UMD_ScannerComponent::IsScannerEquipped() const
 
 FText UMD_ScannerComponent::GetScanModeText() const
 {
+	if (ScanMode == EMD_ScanMode::Cleanup) return NSLOCTEXT("MDScanner", "CleanupMode", "오염물·따개비");
 	return ScanMode == EMD_ScanMode::WallType
 		? NSLOCTEXT("MDScanner", "WallTypeMode", "벽 종류")
 		: NSLOCTEXT("MDScanner", "InternalMode", "내부 구조물");
@@ -71,7 +80,12 @@ bool UMD_ScannerComponent::ToggleScanMode()
 		return false;
 	}
 	ClearScan();
-	ScanMode = ScanMode == EMD_ScanMode::InternalStructure ? EMD_ScanMode::WallType : EMD_ScanMode::InternalStructure;
+	switch (ScanMode)
+	{
+	case EMD_ScanMode::InternalStructure: ScanMode = EMD_ScanMode::WallType; break;
+	case EMD_ScanMode::WallType: ScanMode = EMD_ScanMode::Cleanup; break;
+	default: ScanMode = EMD_ScanMode::InternalStructure; break;
+	}
 	RefreshModeIndicator();
 	OnScanModeChanged.Broadcast(ScanMode);
 	return true;
@@ -90,6 +104,7 @@ void UMD_ScannerComponent::PresentLocalScan(uint32 RequestId, EMD_ScanMode Mode,
 	const TArray<AActor*>& Targets, float Duration, UMaterialParameterCollection* Collection,
 	const FVector& Origin, const FVector& Forward, float Radius, float HalfAngle)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scanner_Present);
 	const APawn* Pawn = Cast<APawn>(GetOwner());
 	if (!Pawn || !Pawn->IsLocallyControlled() || RequestId != ActiveRequestId
 		|| !MDScanning::IsValidMode(Mode) || Mode != ScanMode || !FMath::IsFinite(Duration) || Duration <= 0
@@ -100,7 +115,24 @@ void UMD_ScannerComponent::PresentLocalScan(uint32 RequestId, EMD_ScanMode Mode,
 	for (AActor* Target : Targets)
 	{
 		if (!IsValid(Target)) continue;
-		if (Mode == EMD_ScanMode::WallType)
+		if (Mode == EMD_ScanMode::Cleanup)
+		{
+			if (AMD_Barnacle* Barnacle = Cast<AMD_Barnacle>(Target))
+			{
+				if (!Barnacle->IsHidden() && !Barnacle->IsFullyRemoved())
+					WallHighlights.AddDefaulted_GetRef().Apply(Barnacle->GetScanMesh(), MDScanning::BarnacleStencil);
+			}
+			else if (AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Target))
+			{
+				if (Stain->GetRemainingSize() > 0)
+				{
+					Stain->SetScanHighlighted(this, true);
+					StainHighlights.AddUnique(Stain);
+				}
+			}
+			else AddContaminationHighlight(Target->FindComponentByClass<UMD_ScrapeSurfaceComponent>());
+		}
+		else if (Mode == EMD_ScanMode::WallType)
 		{
 			AMD_CuttableWall* Wall = Cast<AMD_CuttableWall>(Target);
 			if (!Wall || Wall->IsHidden() || !Wall->CanCut()) continue;
@@ -120,12 +152,15 @@ void UMD_ScannerComponent::PresentLocalScan(uint32 RequestId, EMD_ScanMode Mode,
 		MPC->SetVectorParameterValue(TEXT("ScanForward"), FLinearColor(Forward));
 		MPC->SetScalarParameterValue(TEXT("ScanRadius"), Radius);
 		MPC->SetScalarParameterValue(TEXT("ScanConeCosine"), FMath::Cos(FMath::DegreesToRadians(FMath::Clamp(HalfAngle, 0.f, 180.f))));
-		MPC->SetScalarParameterValue(TEXT("ScanMode"), Mode == EMD_ScanMode::WallType ? 1.f : 0.f);
+		MPC->SetScalarParameterValue(TEXT("ScanMode"), static_cast<float>(Mode));
 		MPC->SetScalarParameterValue(TEXT("ScanActive"), 1.f);
 		MPC->SetScalarParameterValue(TEXT("ScanDisplayDuration"), Duration);
 		MPC->SetScalarParameterValue(TEXT("ScanStartTime"), GetWorld()->GetTimeSeconds());
 	}
-	if (Mode == EMD_ScanMode::WallType && !WallHighlights.IsEmpty()) EnableWallPostProcess();
+	if (Mode != EMD_ScanMode::InternalStructure && (!WallHighlights.IsEmpty() || !ContaminationHighlights.IsEmpty() || !StainHighlights.IsEmpty())) EnableWallPostProcess();
+	if (!ContaminationHighlights.IsEmpty())
+		GetWorld()->GetTimerManager().SetTimer(ContaminationRefreshTimer, this,
+			&ThisClass::RefreshContaminationHighlights, 0.1f, true);
 	FTimerDelegate Expire;
 	Expire.BindWeakLambda(this, [this, RequestId] { FinishLocalRequest(RequestId); });
 	GetWorld()->GetTimerManager().SetTimer(ScanTimer, Expire, Duration, false);
@@ -194,9 +229,11 @@ void UMD_ScannerComponent::StopPulse()
 
 void UMD_ScannerComponent::ClearScan(bool bNotifyServer)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scanner_Clear);
 	const uint32 PreviousRequest = ActiveRequestId;
 	ActiveRequestId = 0;
 	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(ScanTimer);
+	ClearContaminationHighlights();
 	for (FMD_ScanMeshState& State : WallHighlights) State.Restore();
 	WallHighlights.Empty();
 	ClearWallPostProcess();

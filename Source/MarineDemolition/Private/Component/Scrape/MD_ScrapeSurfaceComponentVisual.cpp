@@ -1180,6 +1180,14 @@ void UMD_ScrapeSurfaceComponent::ReleaseContaminationMeshUVOverlay()
 }
 
 
+bool UMD_ScrapeSurfaceComponent::ConfigureContaminationScanMaterial(UMaterialInstanceDynamic* Material) const
+{
+    if (!Material || !bContaminationEnabled || !bContaminationSurfaceInitialized
+        || !UsesMeshUVSurface() || !SurfaceMesh || !ContaminationMaskTexture) return false;
+    ApplyContaminationMeshUVOverlayParameters(*Material);
+    return true;
+}
+
 void UMD_ScrapeSurfaceComponent::ApplyContaminationMeshUVOverlayParameters(
 	UMaterialInstanceDynamic& OverlayMID) const
 {
