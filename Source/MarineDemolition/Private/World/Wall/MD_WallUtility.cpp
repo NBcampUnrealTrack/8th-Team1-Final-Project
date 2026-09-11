@@ -285,7 +285,37 @@ void AMD_WallUtility::SetRepaired(AActor* Repairer)
 
 	OnRepaired(Repairer);
 
+	// 수리 완료 시 연결된 문의 잠금 해제
+	UnlockLinkedGate();
+
 	OnRep_UtilityState();
+}
+
+void AMD_WallUtility::UnlockLinkedGate()
+{
+	AActor* GateActor = LinkedGateActor.Get();
+	if (!IsValid(GateActor))
+	{
+		return;
+	}
+
+	// BP_Door의 bLocked 변수를 FBoolProperty로 직접 접근해 false 세팅
+	FBoolProperty* LockedProp = CastField<FBoolProperty>(
+		GateActor->GetClass()->FindPropertyByName(TEXT("bLocked")));
+
+	if (LockedProp != nullptr)
+	{
+		LockedProp->SetPropertyValue_InContainer(GateActor, false);
+		GateActor->ForceNetUpdate();
+
+		UE_LOG(LogTemp, Display, TEXT("[MD_Utility] %s UnlockLinkedGate: %s.bLocked = false"),
+			*GetName(), *GateActor->GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s UnlockLinkedGate: %s has no bLocked property"),
+			*GetName(), *GateActor->GetName());
+	}
 }
 
 void AMD_WallUtility::OnRep_UtilityState()

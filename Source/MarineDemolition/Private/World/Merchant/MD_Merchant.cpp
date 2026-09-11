@@ -17,6 +17,7 @@
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Merchant/MD_QuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Game/MD_GameStateBase.h"
@@ -180,6 +181,9 @@ void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 	{
 		return;
 	}
+
+	// 활성 메인 퀘스트 중 Interaction 목표가 있으면 상인 대화와 함께 페이즈를 전환한다
+	TryAdvanceInteractionQuests(PC);
 
 	// 에디터에서 지정한 상인 메뉴 화면 요청 태그를 검증한다.
 	bool bMenuWidgetTagValid = MenuWidgetTag.IsValid();
@@ -835,6 +839,46 @@ void AMD_Merchant::RefreshLoanWidgetFromComponent()
 	}
 
 	ActiveLoanWidget->SetLoanInfo(MerchantComponent->BuildMenuInfo());
+}
+
+void AMD_Merchant::TryAdvanceInteractionQuests(APlayerController* PC)
+{
+	const UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
+	if (IsValid(MerchantComponent) == false)
+	{
+		return;
+	}
+
+	AMD_PlayerController* MDPC = Cast<AMD_PlayerController>(PC);
+	if (IsValid(MDPC) == false)
+	{
+		return;
+	}
+
+	const TArray<FMD_MainQuestState> CurrentMainQuests = MerchantComponent->GetMainQuests();
+	for (const FMD_MainQuestState& QuestState : CurrentMainQuests)
+	{
+		if (QuestState.IsActive() == false)
+		{
+			continue;
+		}
+
+		// 현재 페이즈의 ObjectiveType이 Interaction인지 원본 에셋에서 확인한다
+		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		if (IsValid(Definition) == false)
+		{
+			continue;
+		}
+
+		EMD_QuestObjectiveType ObjectiveType = Definition->GetObjectiveType(QuestState.CurrentPhaseIndex);
+		if (ObjectiveType != EMD_QuestObjectiveType::Interaction)
+		{
+			continue;
+		}
+
+		// Interaction 목표를 발견하면 서버에 페이즈 전환을 요청한다
+		MDPC->ServerAdvanceMainQuestPhase(QuestState.DefinitionId, QuestState.CurrentPhaseIndex);
+	}
 }
 
 UMD_MerchantComponent* AMD_Merchant::GetMerchantComponent() const
