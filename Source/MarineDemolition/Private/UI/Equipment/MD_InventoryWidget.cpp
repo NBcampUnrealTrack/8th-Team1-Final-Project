@@ -113,8 +113,8 @@ bool UMD_InventoryWidget::CanSwapSlots(int32 FromSlotIndex, int32 ToSlotIndex)
 
 bool UMD_InventoryWidget::SwapSlots(int32 FromSlotIndex, int32 ToSlotIndex)
 {
-	// 드롭 또는 교환 버튼이 전달한 슬롯 조합 검사
-	if (CanSwapSlots(FromSlotIndex, ToSlotIndex) == false)
+	// 화면의 입력 가능 상태만 검사하고 슬롯 조합은 Hotbar에서 최종 검사
+	if (IsActivated() == false || IsValid(BoundHotbar) == false)
 	{
 		// 처리할 수 없는 위치 교환 거절
 		return false;
@@ -158,8 +158,8 @@ void UMD_InventoryWidget::RefreshSlots()
 	{
 		// 이전 Pawn 또는 다른 보관 공간의 슬롯 제거
 		HB_Slots->ClearChildren();
-		// 새 슬롯 인스턴스 구성을 위한 참조 초기화
-		SlotWidgets.Reset();
+		// 새 카드 수만큼 용량을 확보하고 기존 배열 저장 공간 재사용
+		SlotWidgets.Reset(SlotCount);
 		// Hotbar 인덱스와 동일한 순서로 가로 카드 생성
 		for (int32 SlotIndex = 0; SlotIndex < SlotCount; ++SlotIndex)
 		{
@@ -228,6 +228,16 @@ void UMD_InventoryWidget::BindToPawn(APawn* NewPawn)
 
 void UMD_InventoryWidget::UnbindHotbar()
 {
+	// 화면 종료와 Pawn 변경 시 남아 있는 카드 강조 정리
+	for (UMD_InventorySlotWidget* SlotWidget : SlotWidgets)
+	{
+		// 현재 남아 있는 카드에만 드래그 정리 요청
+		if (IsValid(SlotWidget) == true)
+		{
+			// 재활성화 후 이전 드롭 대상 표시가 남는 상태 방지
+			SlotWidget->ClearDropHighlight();
+		}
+	}
 	// 이전 연결이나 닫기 이전에 시작한 드래그의 재사용 차단
 	DragSessionId = FGuid::NewGuid();
 	// 기존 Pawn의 컴포넌트가 살아 있는 경우에만 연결 해제
