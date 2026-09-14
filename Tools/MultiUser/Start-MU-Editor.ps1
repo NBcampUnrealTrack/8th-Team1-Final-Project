@@ -24,14 +24,17 @@ Write-Host '사용 가능한 경로를 확인합니다...' -ForegroundColor Dark
 $transport = Select-Transport $cfg
 
 $displayName = $env:USERNAME
-$iniPath = Write-MultiUserConfig -Transport $transport -Config $cfg -DisplayName $displayName
+
+# StaticEndpoints 는 Config/DefaultEngine.ini 에 있다 (커밋됨).
+# Saved/Config/<플랫폼>Editor/Engine.ini 에 써도 에디터가 시작하면서 지워버린다 —
+# Write-MultiUserConfig 주석 참고.
 
 Write-Host ''
 Write-Host ("  경로       : {0}" -f $transport.Name) -ForegroundColor White
 Write-Host ("  내 주소    : {0}" -f $transport.LocalAddress) -ForegroundColor White
 Write-Host ("  호스트     : {0}:{1}" -f $transport.HostAddress, $cfg.serverPort) -ForegroundColor White
 Write-Host ("  표시 이름  : {0}" -f $displayName) -ForegroundColor White
-Write-Host ("  설정 기록  : {0}" -f $iniPath) -ForegroundColor DarkGray
+Write-Host ("  정적 엔드포인트: Config/DefaultEngine.ini") -ForegroundColor DarkGray
 Write-Host ''
 Write-Host '  에디터를 시작합니다. 툴바의 Multi-User 버튼으로 세션에 참가하세요.' -ForegroundColor Cyan
 Write-Host ''

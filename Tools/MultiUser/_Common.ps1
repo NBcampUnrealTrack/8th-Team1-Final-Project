@@ -174,11 +174,19 @@ function Select-Transport {
 
 function Write-MultiUserConfig {
     <#
-        선택된 경로를 머신별 설정에 기록한다.
-        Saved/ 는 .gitignore 라 팀 공유 파일을 건드리지 않는다.
+        [사용하지 않음 — 2026-09-15]
 
-        UdpMessaging 섹션 전체를 매번 다시 써서, 이전 실행이 남긴 반대편 경로의
-        StaticEndpoints 가 죽은 엔드포인트로 남지 않게 한다.
+        선택된 경로를 Saved/Config/<플랫폼>Editor/Engine.ini 에 기록하려던 함수.
+        **동작하지 않는다.** 에디터가 그 파일을 시작 시점에 통째로 덮어써서,
+        여기 써넣은 StaticEndpoints 가 읽히기 전에 사라진다.
+        (에디터 실행 중에 확인 — 블록이 이미 없었고 서버 탐색이 영영 실패했다)
+
+        StaticEndpoints 는 커맨드라인 옵션이 없으므로 대신 Config/DefaultEngine.ini
+        에 둔다. 호스트 주소는 머신마다 다르지 않아 공유 파일에 둬도 문제없다.
+        머신별로 다른 UnicastEndpoint 는 -UDPMESSAGING_TRANSPORT_UNICAST= 로 넘긴다.
+
+        남겨둔 이유: 나중에 쓸 수 있는 설정 주입 지점을 다시 찾을 때
+        "여기는 아니다"라는 기록이 필요하다.
     #>
     param($Transport, $Config, [string]$DisplayName)
 

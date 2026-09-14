@@ -165,8 +165,11 @@ select_transport() {
         "         3) 호스트 주소가 바뀌었다면 Tools/MultiUser/host.json 을 고쳐 커밋"
 }
 
-# 선택된 경로를 머신별 설정에 기록한다. Saved/ 는 .gitignore 대상이다.
-# 맥은 WindowsEditor 가 아니라 MacEditor 를 쓴다.
+# [사용하지 않음 - 2026-09-15]
+# Saved/Config/MacEditor/Engine.ini 에 기록하려던 함수. **동작하지 않는다.**
+# 에디터가 그 파일을 시작 시점에 통째로 덮어써서 StaticEndpoints 가 읽히기 전에
+# 사라진다. 대신 Config/DefaultEngine.ini 에 둔다 (호스트 주소는 머신마다 다르지
+# 않으므로 공유 파일에 둬도 된다). 머신별 UnicastEndpoint 는 커맨드라인으로 넘긴다.
 write_multiuser_config() {
     local display_name="$1"
     local port

@@ -30,14 +30,14 @@ if (-not $SessionName) {
 Write-Host '사용 가능한 경로를 확인합니다...' -ForegroundColor DarkGray
 $transport = Select-Transport $cfg
 
+# 주의: 표시 이름을 -Agent 로 바꾸려면 설정 주입이 필요한데, 그 경로가 막혀 있다
+# (Write-MultiUserConfig 주석 참고). 지금은 사람 세션과 같은 이름으로 들어간다.
 $displayName = "$($env:USERNAME)-Agent"
-$iniPath = Write-MultiUserConfig -Transport $transport -Config $cfg -DisplayName $displayName
 
 Write-Host ''
 Write-Host ("  경로       : {0}  ({1})" -f $transport.Name, $transport.LocalAddress) -ForegroundColor White
 Write-Host ("  세션       : {0} @ {1}" -f $SessionName, $cfg.serverName) -ForegroundColor White
 Write-Host ("  표시 이름  : {0}" -f $displayName) -ForegroundColor Yellow
-Write-Host ("  설정 기록  : {0}" -f $iniPath) -ForegroundColor DarkGray
 Write-Host ''
 Write-Host '  관찰자 인스턴스를 시작합니다. 이 인스턴스로는 에셋을 수정하지 마세요.' -ForegroundColor Cyan
 Write-Host ''

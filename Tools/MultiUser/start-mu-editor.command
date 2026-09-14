@@ -28,7 +28,9 @@ echo "사용 가능한 경로를 확인합니다..."
 select_transport
 
 DISPLAY_NAME="${USER}"
-INI_PATH="$(write_multiuser_config "$DISPLAY_NAME")"
+
+# StaticEndpoints 는 Config/DefaultEngine.ini 에 있다 (커밋됨).
+# Saved/Config/MacEditor/Engine.ini 에 써도 에디터가 시작하면서 지운다.
 
 cat <<EOF
 
@@ -37,7 +39,7 @@ cat <<EOF
   호스트     : $SELECTED_HOST:$SERVER_PORT
   표시 이름  : $DISPLAY_NAME
   엔진       : $ENGINE_DIR
-  설정 기록  : $INI_PATH
+  정적 엔드포인트: Config/DefaultEngine.ini
 
   에디터를 시작합니다. 툴바의 Multi-User 버튼으로 세션에 참가하세요.
 
