@@ -2,6 +2,8 @@
 
 
 #include "Player/MD_PlayerState.h"
+#include "Audio/MD_AudioSubsystem.h"
+#include "GameFramework/PlayerController.h"
 #include "Character/MD_Character.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
@@ -259,6 +261,18 @@ void AMD_PlayerState::OnRep_ShopPurchaseState()
 
 void AMD_PlayerState::HandleHealthChanged(const FOnAttributeChangeData& ChangeData)
 {
+	// 실제 HP 감소마다 소유 플레이어에게만 재생한다. 부상 상태 전이와는 별개다.
+	const APlayerController* PlayerController = GetPlayerController();
+	if (ChangeData.NewValue < ChangeData.OldValue && ChangeData.OldValue > 0.0f
+		&& PlayerController && PlayerController->IsLocalController()
+		&& GetNetMode() != NM_DedicatedServer)
+	{
+		if (UMD_AudioSubsystem* Audio = GetWorld()->GetSubsystem<UMD_AudioSubsystem>())
+		{
+			Audio->PlayEvent2D(FGameplayTag::RequestGameplayTag(TEXT("SFX.Character.Damage.Tick")));
+		}
+	}
+
 	RefreshHealthState();
 }
 
