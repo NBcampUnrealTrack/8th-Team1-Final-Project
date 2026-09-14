@@ -1289,3 +1289,29 @@ void AMD_PlayerController::ClientCloseDayEndReport_Implementation()
         }
     }
 }
+
+void AMD_PlayerController::ServerRequestShopSale_Implementation(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity)
+{
+	// 컨트롤러가 소유한 실제 캐릭터만 판매자로 사용
+	AMD_Character* SellingCharacter = Cast<AMD_Character>(GetPawn());
+	// 잘못된 참조와 식별자 및 수량을 거래 이전에 거부
+	if (IsValid(Merchant) == false || IsValid(SellingCharacter) == false || ItemAssetId.IsValid() == false || Quantity <= 0)
+	{
+		// 요청 거부를 소유 클라이언트에 전달
+		ClientReceiveShopSaleResult(Merchant, EMD_ShopSaleResult::InvalidRequest);
+		// 잘못된 요청의 서버 처리 종료
+		return;
+	}
+	// 상인에서 거리와 카탈로그 및 소지 상태를 다시 검증한 결과 전달
+	ClientReceiveShopSaleResult(Merchant, Merchant->TrySellItem(SellingCharacter, ItemAssetId, SlotIndex, Quantity));
+}
+
+void AMD_PlayerController::ClientReceiveShopSaleResult_Implementation(AMD_Merchant* Merchant, EMD_ShopSaleResult Result)
+{
+	// 판매를 요청한 상인이 살아 있는 경우에만 화면 갱신
+	if (IsValid(Merchant) == true)
+	{
+		// 상인별 활성 화면으로 서버 확정 결과 전달
+		Merchant->ReceiveShopSaleResult(Result);
+	}
+}

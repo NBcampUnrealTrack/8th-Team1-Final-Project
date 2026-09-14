@@ -21,6 +21,24 @@ enum class EMD_ShopPurchaseResult : uint8
 	FullyStocked        UMETA(DisplayName = "이미 보유한 품목")
 };
 
+// 서버가 확정한 판매 결과와 거부 원인
+UENUM(BlueprintType)
+enum class EMD_ShopSaleResult : uint8
+{
+	// 아이템 회수와 대금 적립 완료
+	Success UMETA(DisplayName = "판매 성공"),
+	// 권한 또는 거리 및 수량이 잘못된 요청
+	InvalidRequest UMETA(DisplayName = "잘못된 요청"),
+	// 서버 카탈로그에 없거나 로드되지 않은 품목
+	InvalidItem UMETA(DisplayName = "유효하지 않은 품목"),
+	// 판매 불가 유형 또는 잘못된 가격 설정
+	NotSellable UMETA(DisplayName = "판매 불가 품목"),
+	// 슬롯 변경 또는 판매 수량 부족
+	NotOwned UMETA(DisplayName = "보유 수량 부족"),
+	// 대금 적립으로 크레딧 정수 범위 초과
+	CreditLimit UMETA(DisplayName = "크레딧 한도 초과")
+};
+
 /**
  * 상점 카테고리 (`04` §3 = `08` §1, 5탭)
  *
@@ -98,6 +116,9 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 
 	// 구매 이력 복사 없이 도구의 무료 재구매 가격 계산
 	int32 GetPurchasePrice(TArray<FPrimaryAssetId>& PurchasedItemIds) const;
+
+	// 개당 소모품 반값과 무료 재지급 도구의 반환 가격 계산이며 판매 불가는 음수
+	int32 GetSalePrice();
 
 	// 일반 가격 450₡ 또는 개당 가격 35₡/개 표기이며 무료 가격은 0
 	FText GetPriceText() const;

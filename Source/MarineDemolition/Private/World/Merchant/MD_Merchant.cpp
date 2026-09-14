@@ -248,6 +248,8 @@ void AMD_Merchant::InitializePushedShop(UMD_ShopWidget* ShopWidget, UMD_Merchant
 	// 상점 화면의 구매 요청을 실제 상인 처리에 중복 없이 연결한다.
 	ShopWidget->OnPurchaseRejected.AddUniqueDynamic(this, &AMD_Merchant::HandleShopPurchaseRejected);
 	ShopWidget->OnItemPurchaseRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleShopItemPurchaseRequested);
+	// 현재 상점의 소지품 판매 요청 연결
+	ShopWidget->OnItemSaleRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleShopItemSaleRequested);
 
 	// 서버 원장의 복제 미러 변경을 현재 상점 화면에 반영한다.
 	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
@@ -365,6 +367,8 @@ void AMD_Merchant::HandleShopDeactivated()
 		ShopWidget->OnDeactivated().RemoveAll(this);
 		ShopWidget->OnPurchaseRejected.RemoveDynamic(this, &AMD_Merchant::HandleShopPurchaseRejected);
 		ShopWidget->OnItemPurchaseRequested.RemoveDynamic(this, &AMD_Merchant::HandleShopItemPurchaseRequested);
+		// 닫힌 상점의 판매 이벤트 연결 해제
+		ShopWidget->OnItemSaleRequested.RemoveDynamic(this, &AMD_Merchant::HandleShopItemSaleRequested);
 	}
 
 	// 더 이상 표시되지 않는 상점에 복제 상태를 전달하지 않도록 구독을 해제한다.
@@ -822,4 +826,65 @@ AMD_PlayerState* AMD_Merchant::GetInteractingPlayerState() const
 {
 	const AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
 	return IsValid(InteractingPlayerController) == true ? InteractingPlayerController->GetPlayerState<AMD_PlayerState>() : nullptr;
+}
+
+void AMD_Merchant::HandleShopItemSaleRequested(FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity)
+{
+	// 현재 상점 소유자의 요청 경로 조회
+	AMD_PlayerController* Controller = GetInteractingPlayerController();
+	// 유효한 로컬 소유자에게서만 판매 요청 전달
+	if (IsValid(Controller) == true)
+	{
+		// 가격을 전송하지 않고 품목과 위치 및 수량만 서버에 전달
+		Controller->ServerRequestShopSale(this, ItemAssetId, SlotIndex, Quantity);
+	}
+}
+
+EMD_ShopSaleResult AMD_Merchant::TrySellItem(AMD_Character* SellingCharacter, FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity)
+{
+	// RPC 외 호출에서도 서버 권한과 실제 상인 접근 거리 검사
+	if (HasAuthority() == false || IsValid(SellingCharacter) == false || SellingCharacter->HasAuthority() == false
+		|| SellingCharacter->GetWorld() != GetWorld() || FVector::DistSquared(SellingCharacter->GetActorLocation(), GetActorLocation()) > FMath::Square(500.0f))
+	{
+		// 원격 또는 잘못된 판매자 요청 거부
+		return EMD_ShopSaleResult::InvalidRequest;
+	}
+	// 판매 단가를 결정할 서버 원본 카탈로그 항목
+	FMD_ShopItem ShopItem;
+	// 중복 등록과 미등록 품목의 판매 차단
+	if (IsValid(ShopCatalog) == false || ShopCatalog->FindItemByAssetId(ItemAssetId, ShopItem) == false)
+	{
+		// 카탈로그에 없는 품목 결과 전달
+		return EMD_ShopSaleResult::InvalidItem;
+	}
+	// 공용 크레딧을 관리하는 서버 원장 조회
+	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
+	// 준비되지 않은 원장에서는 소지품 회수 차단
+	if (IsValid(MerchantSubsystem) == false)
+	{
+		// 경제 상태 부재 결과 반환
+		return EMD_ShopSaleResult::InvalidRequest;
+	}
+	// 판매에 해금 조건이나 구매 이력을 요구하지 않고 실제 소지품만 검증
+	return MerchantSubsystem->TrySellShopItem(SellingCharacter->GetPlayerState<AMD_PlayerState>(), ShopItem, SlotIndex, Quantity);
+}
+
+void AMD_Merchant::ReceiveShopSaleResult(EMD_ShopSaleResult Result)
+{
+	// 서버 결과 수신 후 현재 소지 수량과 크레딧 표시 갱신
+	RefreshShopWidgetFromComponent();
+	// 상점 화면에 결과를 전달하여 BP 피드백과 연속 요청 제어
+	if (ActiveShopWidget.IsValid() == true)
+	{
+		// 활성 상점이 처리할 판매 결과 전달
+		ActiveShopWidget->ReceiveSaleResult(Result);
+	}
+	// 기존 상인 대사 영역에 거래 결과 안내
+	if (ActiveMenuWidget.IsValid() == true)
+	{
+		// 판매 성공과 재시도가 필요한 실패를 구분하는 안내
+		ActiveMenuWidget->ShowDialogueLine(Result == EMD_ShopSaleResult::Success
+			? NSLOCTEXT("MDMerchant", "ShopSaleSuccess", "물건은 받았어. 정산도 끝났고.")
+			: NSLOCTEXT("MDMerchant", "ShopSaleFailed", "그 물건은 지금 받을 수 없어. 보유 수량을 확인해."));
+	}
 }

@@ -27,6 +27,7 @@ struct FMD_RepeatQuestPhaseData;
 struct FMD_ShopItem;
 
 enum class EMD_ShopPurchaseResult : uint8;
+enum class EMD_ShopSaleResult : uint8;
 
 UCLASS()
 class MARINEDEMOLITION_API UMD_MerchantSubsystem : public UGameInstanceSubsystem
@@ -36,6 +37,10 @@ class MARINEDEMOLITION_API UMD_MerchantSubsystem : public UGameInstanceSubsystem
 public:
 
 	FMD_OnMerchantStateChanged OnMerchantStateChanged;
+
+protected:
+	// 아이템 변경 알림에서 중첩 구매와 판매가 실행되는 상황 차단
+	bool bShopTransactionInProgress = false;
 
 public:
 
@@ -67,6 +72,9 @@ public:
 
 	/** 플레이어별 소유권을 검증하고 아이템 지급 성공 시에만 팀 재화 차감과 구매 원장을 확정하는 서버 구매 함수 */
 	EMD_ShopPurchaseResult TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase);
+
+	// 서버 소지 슬롯을 회수한 경우에만 팀 크레딧과 일일 원장에 판매 대금 적립
+	EMD_ShopSaleResult TrySellShopItem(AMD_PlayerState* SellingPlayerState, FMD_ShopItem ShopItem, int32 SlotIndex, int32 Quantity);
 
 	/** 상점 해금과 UI 갱신에 사용할 구매 완료 품목 식별자 목록 */
 	TArray<FPrimaryAssetId> GetOwnedItemIds() const;

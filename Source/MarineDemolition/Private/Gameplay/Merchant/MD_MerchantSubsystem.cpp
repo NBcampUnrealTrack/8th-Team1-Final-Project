@@ -3,6 +3,9 @@
 
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "EngineUtils.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "GameFramework/Pawn.h"
+#include "Templates/UnrealTemplate.h"
 #include "GameplayTagContainer.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
@@ -78,10 +81,13 @@ void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 A
 EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase)
 {
 	// 클라이언트가 로컬 원장을 변경하지 못하도록 막는 서버 권위 검사
-	if (IsValid(PurchasingPlayerState) == false || PurchasingPlayerState->HasAuthority() == false)
+	if (IsValid(PurchasingPlayerState) == false || PurchasingPlayerState->HasAuthority() == false || bShopTransactionInProgress == true)
 	{
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
+
+	// 지급과 경제 알림이 완료될 때까지 중첩 상점 거래 차단
+	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
 
 	// 검증과 구매 기록에서 함께 사용할 전체 식별자 조회
 	FPrimaryAssetId ItemAssetId = ShopItem.GetItemAssetId();
@@ -139,6 +145,65 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerStat
 	OnMerchantStateChanged.Broadcast();
 
 	return EMD_ShopPurchaseResult::Success;
+}
+
+EMD_ShopSaleResult UMD_MerchantSubsystem::TrySellShopItem(AMD_PlayerState* SellingPlayerState, FMD_ShopItem ShopItem, int32 SlotIndex, int32 Quantity)
+{
+	// 서버 소유권과 양수 수량 및 진행 중 거래 검사
+	if (IsValid(SellingPlayerState) == false || SellingPlayerState->HasAuthority() == false || Quantity <= 0 || bShopTransactionInProgress == true)
+	{
+		// 소지품과 원장을 변경하지 않은 요청 거부
+		return EMD_ShopSaleResult::InvalidRequest;
+	}
+	// 소지품 변경과 크레딧 알림의 재진입을 전체 거래 동안 차단
+	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
+	// 등록되지 않은 품목을 사용한 대금 요청 차단
+	if (IsValid(ShopItem.GetDefinition()) == false || ShopItem.GetItemAssetId().IsValid() == false)
+	{
+		// 유효하지 않은 품목 결과 반환
+		return EMD_ShopSaleResult::InvalidItem;
+	}
+	// 화면과 같은 단가를 서버 카탈로그 원본으로 계산
+	int32 UnitPrice = ShopItem.GetSalePrice();
+	// 인벤토리 외 즉시 효과 등 판매 불가 품목 차단
+	if (UnitPrice < 0)
+	{
+		// 회수할 수 없는 품목 결과 반환
+		return EMD_ShopSaleResult::NotSellable;
+	}
+	// 플레이어 상태가 실제 소유한 현재 Pawn에서만 소지품 조회
+	APawn* SellingPawn = SellingPlayerState->GetPawn();
+	// 현재 Pawn의 공통 슬롯 컴포넌트 조회
+	UMD_EquipHotbarComponent* Hotbar = IsValid(SellingPawn) == true ? SellingPawn->FindComponentByClass<UMD_EquipHotbarComponent>() : nullptr;
+	// 클라이언트가 선택했던 위치의 실제 서버 품목 조회
+	UMD_ItemDefinition* StoredItem = IsValid(Hotbar) == true ? Hotbar->GetItemAtSlot(SlotIndex) : nullptr;
+	// 슬롯 교환과 소진 및 다른 품목을 대상으로 한 오래된 요청 차단
+	if (IsValid(StoredItem) == false || StoredItem->GetPrimaryAssetId() != ShopItem.GetItemAssetId() || Hotbar->GetItemCountAtSlot(SlotIndex) < Quantity)
+	{
+		// 보유 수량을 보존한 판매 거부
+		return EMD_ShopSaleResult::NotOwned;
+	}
+	// 곱셈 오버플로 없이 판매 대금 계산
+	int64 TotalPrice = static_cast<int64>(UnitPrice) * Quantity;
+	// 대금 전액을 적립할 수 없는 거래는 회수 이전에 차단
+	if (TotalPrice > MAX_int32 || static_cast<int64>(Credits) + TotalPrice > MAX_int32)
+	{
+		// 상한 초과로 소지품을 잃지 않도록 실패 전달
+		return EMD_ShopSaleResult::CreditLimit;
+	}
+	// 도구는 슬롯 전체 반환이며 소모품은 지정 수량만 회수
+	if ((StoredItem->IsA<UMD_ToolDefinition>() == true
+		? Hotbar->SetItemAtSlot(SlotIndex, nullptr, 0) : Hotbar->TryConsumeItem(StoredItem, Quantity)) == false)
+	{
+		// 실제 회수 실패 시 대금 지급 차단
+		return EMD_ShopSaleResult::InvalidRequest;
+	}
+	// 회수 성공 이후 기존 정산 분류로 대금 적립
+	AddCreditsInternal(EMD_DailyReportCategory::Other, static_cast<int32>(TotalPrice));
+	// 공용 크레딧 복제와 현재 상점 화면 갱신
+	OnMerchantStateChanged.Broadcast();
+	// 회수 수량과 대금을 함께 확정한 판매 결과 전달
+	return EMD_ShopSaleResult::Success;
 }
 
 TArray<FPrimaryAssetId> UMD_MerchantSubsystem::GetOwnedItemIds() const
