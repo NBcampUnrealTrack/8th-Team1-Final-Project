@@ -19,6 +19,11 @@
 	],
 	"Plugins": [
 		{
+			"Name": "MDMultiUser",
+			"Enabled": true,
+			"TargetAllowList": ["Editor"]
+		},
+		{
 			"Name": "MDSolidRendering",
 			"Enabled": true
 		},
