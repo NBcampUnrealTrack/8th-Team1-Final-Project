@@ -46,6 +46,9 @@ public:
 
     //Timer
     void StartGameTime();
+    void FinishWorldInitialization();
+    UFUNCTION(BlueprintPure, Category = "Game Time")
+    bool IsWorldInitializationReady() const { return bWorldInitializationReady; }
 
     // 현재 일자의 인게임 시각을 지정한 시의 정각으로 설정
     bool SetGameTimeHour(int32 Hour);
@@ -163,6 +166,10 @@ protected:
     ) const override;
 
 private:
+    UPROPERTY(Replicated)
+    bool bWorldInitializationReady = false;
+    UPROPERTY(Replicated)
+    double PendingElapsedRealSeconds = 0.0;
     //Timer
     UPROPERTY(Replicated)
     double GameStartServerTime = 0.0;

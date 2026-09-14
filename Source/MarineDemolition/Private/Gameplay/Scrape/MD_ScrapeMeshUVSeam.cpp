@@ -1,5 +1,6 @@
 #include "Gameplay/Scrape/MD_ScrapeMeshUVSeam.h"
 #include "HAL/PlatformTime.h"
+#include "Async/ParallelFor.h"
 
 namespace
 {
@@ -13,6 +14,7 @@ namespace
     {
         FVector Origin, DualU, DualV;
         FVector2D UVOrigin;
+        TConstArrayView<FMD_ScrapeMeshUVNeighbor> Neighbors;
         bool bValid = false;
         FVector2D Project(const FVector& Point) const
         {
@@ -96,7 +98,7 @@ namespace
         return true;
     }
 
-    bool BuildPixel(const UMD_ScrapeMeshUVData& Data, const TArray<FSeamChartFrame>& Frames,
+    bool BuildPixel(const FMD_ScrapeVisualSourceView& Data, const TArray<FSeamChartFrame>& Frames,
         int32 Pixel, int32 Owner, TArray<FMD_ScrapeMeshUVVisualSample>& Samples)
     {
         Samples.Reset();
@@ -164,7 +166,7 @@ namespace
                     || !PortalTouchesPixel(Frame.Project(A) - Origin, Frame.Project(B) - Origin)) return;
                 Queue.Add(Neighbor);
             };
-            const TConstArrayView<FMD_ScrapeMeshUVNeighbor> Neighbors = Data.GetTriangleNeighbors(TriangleIndex);
+            const TConstArrayView<FMD_ScrapeMeshUVNeighbor> Neighbors = Frames[TriangleIndex].Neighbors;
             if (!Neighbors.IsEmpty())
                 for (const FMD_ScrapeMeshUVNeighbor& N : Neighbors) Visit(N.TriangleIndex, N.SharedEdgeA, N.SharedEdgeB);
             else
@@ -182,7 +184,7 @@ namespace
     }
 }
 
-void MD_ScrapeMeshUVSeam::Build(const UMD_ScrapeMeshUVData& Data,
+void MD_ScrapeMeshUVSeam::Build(const FMD_ScrapeVisualSourceView& Data,
     TArray<int32>& OutOffsets, TArray<FMD_ScrapeMeshUVVisualSample>& OutSamples,
     TArray<int32>& OutDependentOffsets, TArray<int32>& OutDependents)
 {
@@ -193,23 +195,60 @@ void MD_ScrapeMeshUVSeam::Build(const UMD_ScrapeMeshUVData& Data,
     TArray<FSeamChartFrame> Frames;
     Frames.Reserve(Data.Triangles.Num());
     for (const FMD_ScrapeMeshUVTriangle& T : Data.Triangles) Frames.Add(MakeFrame(T, FVector2D(Data.AtlasDimensions)));
-    TArray<FMD_ScrapeMeshUVVisualSample> Samples;
-    int32 BoundedFallbacks = 0, StencilCount = 0;
+    // Resolve the lazy adjacency cache on the game thread before workers borrow immutable views.
+    // ParallelFor joins before the caller can invalidate the profile or any neighbor storage.
+    for (int32 I = 0; I < Frames.Num(); ++I) Frames[I].Neighbors = Data.GetTriangleNeighbors(I);
+    constexpr int32 PixelsPerBatch = 2048;
+    struct FBatch
+    {
+        TArray<FMD_ScrapeMeshUVVisualSample> Samples;
+        int32 BoundedFallbacks = 0;
+        int32 StencilCount = 0;
+    };
+    TArray<FBatch> Batches;
+    Batches.SetNum(FMath::DivideAndRoundUp(Data.Cells.Num(), PixelsPerBatch));
     OutOffsets.SetNumZeroed(Data.Cells.Num() + 1);
     OutDependentOffsets.SetNumZeroed(Data.Cells.Num() + 1);
+    ParallelFor(Batches.Num(), [&](int32 BatchIndex)
+    {
+        FBatch& Batch = Batches[BatchIndex];
+        TArray<FMD_ScrapeMeshUVVisualSample> Samples;
+        const int32 End = FMath::Min((BatchIndex + 1) * PixelsPerBatch, Data.Cells.Num());
+        for (int32 Pixel = BatchIndex * PixelsPerBatch; Pixel < End; ++Pixel)
+        {
+            OutOffsets[Pixel] = Batch.Samples.Num();
+            const int32 Source = Data.Cells[Pixel].VisualSourceCellIndex;
+            if (!Data.IsActiveCell(Source)) continue;
+            const int32 Owner = Data.Cells[Source].TriangleIndex;
+            if (!Frames.IsValidIndex(Owner) || !Data.Triangles[Owner].bCleanable) continue;
+            if (!BuildPixel(Data, Frames, Pixel, Owner, Samples)) { ++Batch.BoundedFallbacks; continue; }
+            if (Samples.IsEmpty()) continue;
+            ++Batch.StencilCount;
+            Batch.Samples.Append(Samples);
+        }
+    });
+    int32 BoundedFallbacks = 0, StencilCount = 0, SampleCount = 0;
+    for (const FBatch& Batch : Batches) SampleCount += Batch.Samples.Num();
+    OutSamples.Reserve(SampleCount);
+    // Concatenate in atlas order: weights and reverse adjacency remain bit-identical regardless of scheduling.
+    for (int32 BatchIndex = 0; BatchIndex < Batches.Num(); ++BatchIndex)
+    {
+        FBatch& Batch = Batches[BatchIndex];
+        const int32 Base = OutSamples.Num();
+        const int32 End = FMath::Min((BatchIndex + 1) * PixelsPerBatch, Data.Cells.Num());
+        for (int32 Pixel = BatchIndex * PixelsPerBatch; Pixel < End; ++Pixel) OutOffsets[Pixel] += Base;
+        OutSamples.Append(Batch.Samples);
+        Batch.Samples.Empty();
+        BoundedFallbacks += Batch.BoundedFallbacks;
+        StencilCount += Batch.StencilCount;
+    }
     for (int32 Pixel = 0; Pixel < Data.Cells.Num(); ++Pixel)
     {
-        OutOffsets[Pixel] = OutSamples.Num();
+        const int32 End = Pixel + 1 < Data.Cells.Num() ? OutOffsets[Pixel + 1] : OutSamples.Num();
         const int32 Source = Data.Cells[Pixel].VisualSourceCellIndex;
-        if (!Data.IsActiveCell(Source)) continue;
-        const int32 Owner = Data.Cells[Source].TriangleIndex;
-        if (!Frames.IsValidIndex(Owner) || !Data.Triangles[Owner].bCleanable) continue;
-        if (!BuildPixel(Data, Frames, Pixel, Owner, Samples)) { ++BoundedFallbacks; continue; }
-        if (Samples.IsEmpty()) continue;
-        ++StencilCount;
-        OutSamples.Append(Samples);
-        for (const FMD_ScrapeMeshUVVisualSample& Sample : Samples)
-            if (Sample.CellIndex != Pixel && Sample.CellIndex != Source) ++OutDependentOffsets[Sample.CellIndex + 1];
+        for (int32 I = OutOffsets[Pixel]; I < End; ++I)
+            if (OutSamples[I].CellIndex != Pixel && OutSamples[I].CellIndex != Source)
+                ++OutDependentOffsets[OutSamples[I].CellIndex + 1];
     }
     OutOffsets.Last() = OutSamples.Num();
     for (int32 I = 1; I < OutDependentOffsets.Num(); ++I) OutDependentOffsets[I] += OutDependentOffsets[I - 1];
@@ -228,4 +267,14 @@ void MD_ScrapeMeshUVSeam::Build(const UMD_ScrapeMeshUVData& Data,
         *Data.GetName(), StencilCount, OutSamples.Num(), BoundedFallbacks, FPlatformTime::Seconds() - Started,
         (OutOffsets.GetAllocatedSize() + OutSamples.GetAllocatedSize() + OutDependentOffsets.GetAllocatedSize()
             + OutDependents.GetAllocatedSize()) / (1024.0 * 1024.0));
+}
+
+void MD_ScrapeMeshUVSeam::Build(const UMD_ScrapeMeshUVData& Data,
+    TArray<int32>& Offsets, TArray<FMD_ScrapeMeshUVVisualSample>& Samples,
+    TArray<int32>& DependentOffsets, TArray<int32>& Dependents)
+{
+    TArray<TConstArrayView<FMD_ScrapeMeshUVNeighbor>> Neighbors;
+    for (int32 I = 0; I < Data.Triangles.Num(); ++I) Neighbors.Add(Data.GetTriangleNeighbors(I));
+    Build(FMD_ScrapeVisualSourceView{Data.Cells, Data.Triangles, Data.AtlasDimensions, Neighbors, Data.GetName()},
+        Offsets, Samples, DependentOffsets, Dependents);
 }

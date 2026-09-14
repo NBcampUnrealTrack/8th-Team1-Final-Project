@@ -1,6 +1,9 @@
 ﻿#include "UI/Loading/MD_LoadingScreenSubsystem.h"
 
 #include "Engine/Engine.h"
+#include "Gameplay/Loading/MD_MapRegistrationSubsystem.h"
+#include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
+#include "Game/MD_GameStateBase.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
 #include "Engine/LevelStreaming.h"
@@ -13,6 +16,8 @@
 #include "GameFramework/PlayerController.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "MoviePlayer.h"
+#include "HAL/IConsoleManager.h"
+#include "ProfilingDebugging/MiscTrace.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "TimerManager.h"
 #include "UI/MD_LocalUIManager.h"
@@ -25,6 +30,8 @@
 
 namespace
 {
+    TAutoConsoleVariable<int32> PauseCoveredWorldRendering(TEXT("MD.Loading.PauseCoveredWorldRendering"), 1,
+        TEXT("Pause the covered main 3D view during surface initialization; resume before readiness warmup."));
 	/** 한 상황의 진행 문구와 완료 문구. 두 문구가 나란히 있어 한쪽만 바뀌는 일이 없다. */
 	struct FLoadingSubtitles
 	{
@@ -249,6 +256,10 @@ EMD_LoadingReadinessBlocker UMD_LoadingScreenSubsystem::CheckWorldReadiness() co
 	{
 		return EMD_LoadingReadinessBlocker::PlayerControllerMissing;
 	}
+	if (const auto* Initializer = World->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); Initializer && Initializer->IsPending())
+	{ return EMD_LoadingReadinessBlocker::SurfaceInitialization; }
+	if (const auto* GS = World->GetGameState<AMD_GameStateBase>(); GS && !GS->IsWorldInitializationReady())
+	{ return EMD_LoadingReadinessBlocker::SurfaceInitialization; }
 	if (IsAsyncLoading()) { return EMD_LoadingReadinessBlocker::AsyncLoading; }
 	if (World->IsVisibilityRequestPending()) { return EMD_LoadingReadinessBlocker::LevelVisibilityPending; }
 
@@ -272,14 +283,59 @@ EMD_LoadingReadinessBlocker UMD_LoadingScreenSubsystem::CheckWorldReadiness() co
 	return EMD_LoadingReadinessBlocker::None;
 }
 
+bool UMD_LoadingScreenSubsystem::UpdateCoveredWorldRendering()
+{
+    UWorld* World = GetWorld();
+    UGameViewportClient* Viewport = World ? World->GetGameViewport() : nullptr;
+    const auto* Initializer = World ? World->GetSubsystem<UMD_ScrapeInitializationSubsystem>() : nullptr;
+    const auto* Registration = World ? World->GetSubsystem<UMD_MapRegistrationSubsystem>() : nullptr;
+    const bool bCovered = Phase == EMD_LoadingPhase::Loading && bViewportWidgetAttached
+        && VisualState.IsValid() && VisualState->GetElapsedSeconds() >= MD_LoadingScreen::IntroDurationSeconds;
+    const bool bShouldPause = PauseCoveredWorldRendering.GetValueOnGameThread() != 0
+        && bCovered && ((Initializer && Initializer->IsPending())
+            || (Registration && Registration->IsAwaitingHandoffFrame()));
+    if (PausedWorldViewport.IsValid() && PausedWorldViewport.Get() != Viewport) RestoreWorldRendering();
+    if (bShouldPause && Viewport)
+    {
+        if (!PausedWorldViewport.IsValid() && !Viewport->bDisableWorldRendering)
+        {
+            PausedWorldViewport = Viewport;
+            Viewport->bDisableWorldRendering = true;
+            WorldRenderingResumedFrame = 0;
+            TRACE_BOOKMARK(TEXT("MD_Loading_WorldRenderingPaused"));
+        }
+    }
+    else
+    {
+        RestoreWorldRendering();
+    }
+    // Rebuild view-dependent render/streaming state before counting stable readiness polls.
+    return PausedWorldViewport.IsValid()
+        || (WorldRenderingResumedFrame != 0 && GFrameCounter - WorldRenderingResumedFrame < 3);
+}
+
+void UMD_LoadingScreenSubsystem::RestoreWorldRendering()
+{
+    if (UGameViewportClient* Viewport = PausedWorldViewport.Get())
+    {
+        Viewport->bDisableWorldRendering = false;
+        WorldRenderingResumedFrame = GFrameCounter;
+        TRACE_BOOKMARK(TEXT("MD_Loading_WorldRenderingResumed"));
+    }
+    PausedWorldViewport.Reset();
+}
+
 void UMD_LoadingScreenSubsystem::TryFinishAfterWorldLoad()
 {
-	if (!IsLoadingScreenActive()) { return; }
+	if (!IsLoadingScreenActive()) { RestoreWorldRendering(); return; }
+	if (UpdateCoveredWorldRendering()) { ReadyStablePollCount = 0; return; }
 
 	const EMD_LoadingReadinessBlocker Blocker = CheckWorldReadiness();
 	if (Blocker != EMD_LoadingReadinessBlocker::None)
 	{
 		ReadyStablePollCount = 0;
+        // Gameplay readiness is authoritative; a render-streaming timeout cannot bypass it.
+        if (Blocker == EMD_LoadingReadinessBlocker::SurfaceInitialization) return;
 
 		// 준비 조건이 영영 충족되지 않는 구성에서도 화면이 남지 않도록 상한을 넘기면 강제 종료한다.
 		const double ElapsedSeconds = ReadinessWaitStartSeconds > 0.0
@@ -312,6 +368,7 @@ void UMD_LoadingScreenSubsystem::TryFinishAfterWorldLoad()
 
 void UMD_LoadingScreenSubsystem::FinishLoadingScreen(bool bShowCompletion)
 {
+	RestoreWorldRendering();
 	// Completion/Outro는 이미 종료 절차에 들어간 상태이므로 다시 받지 않는다.
 	if (Phase != EMD_LoadingPhase::Intro && Phase != EMD_LoadingPhase::Loading) { return; }
 
@@ -345,6 +402,7 @@ void UMD_LoadingScreenSubsystem::FinishLoadingScreen(bool bShowCompletion)
 
 void UMD_LoadingScreenSubsystem::BeginOutro()
 {
+	RestoreWorldRendering();
 	if (Phase == EMD_LoadingPhase::Inactive || Phase == EMD_LoadingPhase::Outro) { return; }
 
 	Phase = EMD_LoadingPhase::Outro;
@@ -499,9 +557,11 @@ void UMD_LoadingScreenSubsystem::FlushPendingIntroCallbacks()
 // 연출이 완전히 끝난 뒤(또는 서브시스템 종료 시) 위젯과 상태를 모두 되돌린다.
 void UMD_LoadingScreenSubsystem::RemoveLoadingWidgets()
 {
+	RestoreWorldRendering();
 	ClearLoadingTimers();
 	DetachViewportLoadingWidget();
 
+	WorldRenderingResumedFrame = 0;
 	ViewportLoadingWidget.Reset();
 	MoviePlayerLoadingWidget.Reset();
 	VisualState.Reset();

@@ -10,6 +10,8 @@
 #include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
 #include "Engine/Engine.h"
 #include "Materials/MaterialInstanceDynamic.h"
+#include "Materials/Material.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
@@ -76,6 +78,21 @@ AMD_CuttableWall::AMD_CuttableWall()
 	SyncLegacySurfaceConfiguration();
 }
 
+
+void AMD_CuttableWall::PreRegisterAllComponents()
+{
+    // MeshUV uses its mesh overlay. Legacy hidden decals sometimes serialize
+    // that surface material, which cannot render as a decal and opens a blocking
+    // editor notification during PIE registration. Keep all valid decal bindings.
+    if (GetWorld() && GetWorld()->IsGameWorld() && ScrapeSurface && ScrapeSurface->UsesMeshUVSurface())
+    {
+        for (UDecalComponent* Decal : {FrontContaminationDecal.Get(), BackContaminationDecal.Get()})
+            if (Decal && (!Decal->IsVisible() || Decal->bHiddenInGame) && Decal->GetDecalMaterial()
+                && Decal->GetDecalMaterial()->GetMaterial()->MaterialDomain != MD_DeferredDecal)
+                Decal->SetDecalMaterial(nullptr);
+    }
+    Super::PreRegisterAllComponents();
+}
 
 void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 {

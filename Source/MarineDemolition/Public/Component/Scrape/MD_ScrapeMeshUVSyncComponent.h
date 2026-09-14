@@ -49,6 +49,8 @@ private:
     void ServerCancelTransfer(uint32 TransferId);
     UFUNCTION(Client, Reliable)
     void ClientAbortTransfer(UMD_ScrapeSurfaceComponent* Surface, uint32 TransferId);
+    UFUNCTION(Client, Reliable)
+    void ClientSelectSurfaceLayout(UMD_ScrapeSurfaceComponent* Surface, FGuid LayoutId);
 
     FTimerHandle PumpTimer;
     TWeakObjectPtr<UMD_ScrapeSurfaceComponent> ServerSurface;

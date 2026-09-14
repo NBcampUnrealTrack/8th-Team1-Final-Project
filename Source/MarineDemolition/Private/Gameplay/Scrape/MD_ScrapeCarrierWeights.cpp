@@ -8,9 +8,9 @@ bool FMD_ScrapeCarrierWeights::Initialize(const UMD_ScrapeMeshUVData& Data, cons
     CellData = nullptr;
     CellCount = 0;
     TotalWeight = 0.0;
-    ReferenceArea = FMath::Square(static_cast<double>(Data.TargetCellSizeCm));
+    ReferenceArea = FMath::Square(static_cast<double>(Data.GetCarrierReferenceCellSizeCm()));
     const FVector Scale = Transform.GetScale3D();
-    if (Transform.ContainsNaN() || !FMath::IsFinite(ReferenceArea) || ReferenceArea <= UE_SMALL_NUMBER
+    if (Data.GetCarrierReferenceCellSizeCm() <= 0.0 || Transform.ContainsNaN() || !FMath::IsFinite(ReferenceArea) || ReferenceArea <= UE_SMALL_NUMBER
         || FMath::Abs(Scale.X) <= UE_SMALL_NUMBER || FMath::Abs(Scale.Y) <= UE_SMALL_NUMBER
         || FMath::Abs(Scale.Z) <= UE_SMALL_NUMBER) return false;
     TriangleAreaScales.SetNumZeroed(Data.Triangles.Num());

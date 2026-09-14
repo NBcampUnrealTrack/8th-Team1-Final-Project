@@ -1,5 +1,6 @@
 #include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "Gameplay/Scrape/MD_ScrapeMeshUVSeam.h"
 
 namespace
 {
@@ -24,8 +25,25 @@ void UMD_ScrapeMeshUVData::BuildExactAdjacencyCache() const
     check(IsInGameThread());
     if (ExactAdjacencyTriangleData == Triangles.GetData() && ExactAdjacencyTriangleCount == Triangles.Num()
         && ExactAdjacencyLayoutId == LayoutId) return;
+    MD_ScrapeMeshUVSeam::BuildAdjacency(Triangles, AdjacencyWeldToleranceCm, ExactAdjacencyOverrides);
+    ExactAdjacencyTriangleData = Triangles.GetData();
+    ExactAdjacencyTriangleCount = Triangles.Num();
+    ExactAdjacencyLayoutId = LayoutId;
+}
+
+TConstArrayView<FMD_ScrapeMeshUVNeighbor> UMD_ScrapeMeshUVData::GetTriangleNeighbors(int32 TriangleIndex) const
+{
+    if (!Triangles.IsValidIndex(TriangleIndex)) return {};
+    BuildExactAdjacencyCache();
+    if (const auto* Override = ExactAdjacencyOverrides.Find(TriangleIndex)) return MakeArrayView(*Override);
+    return MakeArrayView(Triangles[TriangleIndex].Neighbors);
+}
+
+void MD_ScrapeMeshUVSeam::BuildAdjacency(TConstArrayView<FMD_ScrapeMeshUVTriangle> Triangles,
+    double AdjacencyWeldToleranceCm, TMap<int32, TArray<FMD_ScrapeMeshUVNeighbor>>& Out)
+{
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_ScrapeMeshUV_BuildExactAdjacency);
-    ExactAdjacencyOverrides.Empty();
+    Out.Empty();
     TArray<FExactEdge> Edges;
     Edges.Reserve(Triangles.Num() * 3);
     for (int32 Index = 0; Index < Triangles.Num(); ++Index)
@@ -53,13 +71,13 @@ void UMD_ScrapeMeshUVData::BuildExactAdjacencyCache() const
     const auto AddMissing = [&](int32 From, int32 To, const FVector& A, const FVector& B)
     {
         const FMD_ScrapeMeshUVTriangle& T = Triangles[From];
-        TArray<FMD_ScrapeMeshUVNeighbor>* Override = ExactAdjacencyOverrides.Find(From);
+        TArray<FMD_ScrapeMeshUVNeighbor>* Override = Out.Find(From);
         const auto& Existing = Override ? *Override : T.Neighbors;
         for (const FMD_ScrapeMeshUVNeighbor& N : Existing)
             if (N.TriangleIndex == To) return;
         if (!Override)
         {
-            Override = &ExactAdjacencyOverrides.Add(From, T.Neighbors);
+            Override = &Out.Add(From, T.Neighbors);
             // Adding one repaired edge must not hide a legacy profile's other full-edge links.
             if (T.Neighbors.IsEmpty())
             {
@@ -186,15 +204,4 @@ void UMD_ScrapeMeshUVData::BuildExactAdjacencyCache() const
             }
         Begin = End;
     }
-    ExactAdjacencyTriangleData = Triangles.GetData();
-    ExactAdjacencyTriangleCount = Triangles.Num();
-    ExactAdjacencyLayoutId = LayoutId;
-}
-
-TConstArrayView<FMD_ScrapeMeshUVNeighbor> UMD_ScrapeMeshUVData::GetTriangleNeighbors(int32 TriangleIndex) const
-{
-    if (!Triangles.IsValidIndex(TriangleIndex)) return {};
-    BuildExactAdjacencyCache();
-    if (const auto* Override = ExactAdjacencyOverrides.Find(TriangleIndex)) return MakeArrayView(*Override);
-    return MakeArrayView(Triangles[TriangleIndex].Neighbors);
 }

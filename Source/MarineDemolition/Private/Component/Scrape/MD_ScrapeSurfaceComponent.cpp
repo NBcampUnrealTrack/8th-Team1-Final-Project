@@ -1,5 +1,9 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "World/Wall/MD_WallShadowBatchSubsystem.h"
+#include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
+#include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
+#include "Engine/GameInstance.h"
+#include "Engine/World.h"
 
 #include "Components/DecalComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -444,6 +448,26 @@ void UMD_ScrapeSurfaceComponent::PostEditChangeProperty(
 }
 #endif
 
+bool UMD_ScrapeSurfaceComponent::TryDeferContaminationInitialization()
+{
+    if (bCompletingDeferredInitialization || bRestoringContaminationGeneration || bContaminationSurfaceInitialized
+        || !bContaminationEnabled || !UsesMeshUVSurface() || !ContaminationMeshUVData
+        || !GetWorld() || !GetWorld()->IsGameWorld() || !HasAuthority()) return false;
+    if (bDeferredInitializationPending) return true;
+    const auto* GI = GetWorld()->GetGameInstance();
+    const auto* Persistence = GI ? GI->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr;
+    if (!Persistence || !Persistence->IsContaminationContextReady(GetWorld())) return false;
+    FMD_ContaminationGeneration Saved;
+    bool Legacy = false;
+    if (Persistence->TryGetSavedContaminationGeneration(this, Saved, Legacy) || Legacy
+        || Persistence->ShouldDeferContaminationGeneration(this)) return false;
+    PrepareContaminationGeneration();
+    if (!ContaminationGeneration.bProcedural || ContaminationGeneration.Version < 2) return false;
+    auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>();
+    bDeferredInitializationPending = Initializer && Initializer->Enqueue(*this);
+    return bDeferredInitializationPending;
+}
+
 void UMD_ScrapeSurfaceComponent::InitializeRuntimeState()
 {
 	if (!bContaminationEnabled)
@@ -453,6 +477,7 @@ void UMD_ScrapeSurfaceComponent::InitializeRuntimeState()
 	}
 
 	ReplicatedContaminationState.SetOwner(this);
+	if (TryDeferContaminationInitialization()) return;
 	InitializeContaminationSurface();
 
 	if (!HasAuthority())
@@ -465,6 +490,9 @@ void UMD_ScrapeSurfaceComponent::InitializeRuntimeState()
 
 void UMD_ScrapeSurfaceComponent::ShutdownRuntimeState()
 {
+    ++DeferredInitializationEpoch;
+    bDeferredInitializationPending = false;
+    PreparedInitialState.Reset();
     if (SurfaceMesh && GetWorld())
         if (auto* Shadows = GetWorld()->GetSubsystem<UMD_WallShadowBatchSubsystem>()) Shadows->UnregisterWall(*SurfaceMesh);
     if (auto* Previous=GenerationTransformSource.Get()) Previous->TransformUpdated.Remove(GenerationTransformHandle);
