@@ -2,6 +2,8 @@
 
 
 #include "World/Sector/MD_PortalActor.h"
+#include "World/Sector/MD_PortalCaptureVisibility.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Components/BoxComponent.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Components/SceneCaptureComponent2D.h"
@@ -549,14 +551,6 @@ void AMD_PortalActor::UpdatePortalCaptureScene()
 	FRotator PlayerViewpointRotation;
 	LocalPlayer->PlayerController->GetPlayerViewPoint(PlayerViewpointLocation, PlayerViewpointRotation);
 
-	// SceneCapture Component의 위치 및 회전 값 계산
-	FVector CaptureLocation = TransformLocationToLinkedPortal(PlayerViewpointLocation);
-	FRotator CaptureRotation = TransformRotationToLinkedPortal(PlayerViewpointRotation);
-
-	// Portal의 SceneCaptureComponent 위치 및 회전값 변경
-	SceneCaptureComponent->SetWorldLocation(CaptureLocation);
-	SceneCaptureComponent->SetWorldRotation(CaptureRotation);
-
 	// Player의 Viewport를 관리하는 GameViewportClient Instance 얻기 및 유효성 검사
 	UGameViewportClient* ViewportClient = LocalPlayer->ViewportClient;
 	if (IsValid(ViewportClient) == false)
@@ -571,9 +565,6 @@ void AMD_PortalActor::UpdatePortalCaptureScene()
 		return;
 	}
 
-	// 필요한 경우 Texture Render Target의 크기 조정
-	UpdatePortalTextureRenderTargetSize();
-
 	// Viewport의 Projection 데이터 얻기
 	FSceneViewProjectionData ProjectionData;
 	if (LocalPlayer->GetProjectionData(Viewport, ProjectionData) == false)
@@ -581,8 +572,29 @@ void AMD_PortalActor::UpdatePortalCaptureScene()
 		return;
 	}
 
+	// Ray tracing and other scene captures also update WasRecentlyRendered.
+	// Require the portal surface to overlap the actual local player view before rendering it.
+	if (!IsValid(SurfaceMesh) || !MD_PortalCaptureVisibility::Intersects(
+		ProjectionData.ComputeViewProjectionMatrix(), SurfaceMesh->Bounds, ProjectionData.GetConstrainedViewRect().Size()))
+	{
+		return;
+	}
+
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Portal_CaptureVisibleScene);
+	// SceneCapture Component의 위치 및 회전 값 계산
+	FVector CaptureLocation = TransformLocationToLinkedPortal(PlayerViewpointLocation);
+	FRotator CaptureRotation = TransformRotationToLinkedPortal(PlayerViewpointRotation);
+
+	// Portal의 SceneCaptureComponent 위치 및 회전값 변경
+	SceneCaptureComponent->SetWorldLocation(CaptureLocation);
+	SceneCaptureComponent->SetWorldRotation(CaptureRotation);
+
+	// 필요한 경우 Texture Render Target의 크기 조정
+	UpdatePortalTextureRenderTargetSize();
+
 	// Portal의 SceneCapture Component가 Viewport의 Projection Matrix를 사용하도록 설정
 	SceneCaptureComponent->CustomProjectionMatrix = ProjectionData.ProjectionMatrix;
+
 
 	// SceneCapture 동작을 명시적으로 실행
 	SceneCaptureComponent->CaptureScene();

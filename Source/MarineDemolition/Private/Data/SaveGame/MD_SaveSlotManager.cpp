@@ -584,6 +584,12 @@ bool UMD_SaveSlotManager::CollectGameData()
 		return false;
 	}
 
+    if (!GameState->IsWorldInitializationReady())
+    {
+        UE_LOG(MarineDemolition, Warning, TEXT("Save deferred: world initialization has not completed."));
+        return false;
+    }
+
 	// 현재 맵의 패키지 경로 저장(PIE 환경 접두사 제거)
 	TemporaryGameData->MapPackagePath = UWorld::RemovePIEPrefix(WorldPackage->GetName());
 

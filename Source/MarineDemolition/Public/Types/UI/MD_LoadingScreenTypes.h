@@ -74,16 +74,17 @@ enum class EMD_LoadingReadinessBlocker : uint8
 	AsyncLoading,
 	LevelVisibilityPending,
 	StreamingLevelPending,
-	RenderAssetStreaming
+	RenderAssetStreaming,
+	SurfaceInitialization
 };
 
 namespace MD_LoadingScreen
 {
 	// 연출 순서: Intro 0.90초(화면을 완전히 덮음) → 준비될 때까지 항해 루프
-	// → 준비 완료 시 Completion 0.85초 → Outro 1.10초 fade-out.
+	// → 준비 완료 시 Completion 0.35초 → Outro 0.45초 fade-out.
 	constexpr double IntroDurationSeconds = 0.90;
-	constexpr double CompletionDisplaySeconds = 0.85;
-	constexpr double OutroDurationSeconds = 1.10;
+	constexpr double CompletionDisplaySeconds = 0.35;
+	constexpr double OutroDurationSeconds = 0.45;
 	// 시각 진행률 단계. 실제 바이트 퍼센트는 하드 트래블 중 안전하게 조회할 수 없으므로,
 	// 확실히 지나간 단계마다 하한을 올리고 그 사이는 경과 시간으로 메운다.
 	/** 인트로가 끝나는 시점의 진행률. 시간 기반 추정이 여기서부터 이어진다. */
@@ -99,7 +100,7 @@ namespace MD_LoadingScreen
 	/** 상한에 접근하는 속도의 시간 상수(초). 클수록 천천히 찬다. */
 	constexpr float BlockingLoadProgressTimeConstant = 6.0f;
 	/** COMPLETE와 함께 남은 구간을 100%까지 채우는 시간. */
-	constexpr double CompletionProgressBlendSeconds = 0.38;
+	constexpr double CompletionProgressBlendSeconds = 0.25;
 
 	// 단계 하한은 0.12 → 0.90처럼 크게 뛴다. 그대로 반영하면 배가 트랙의 절반을 한 프레임에
 	// 건너뛰므로, 표시값이 목표까지 일정 속도로 따라붙게 한다. 지속 시간이 아니라 속도인 이유:
@@ -118,10 +119,10 @@ namespace MD_LoadingScreen
 	static_assert(MapLoadStartProgress <= MapLoadedProgress && MapLoadedProgress <= ReadyStableProgress,
 		"단계 하한은 진행 순서대로 커져야 한다");
 
-	// 0.05초 x 10회 = 약 0.5초간 조건이 유지돼야 닫는다.
+	// 0.05초 x 3회 = 약 0.15초간 조건이 유지돼야 닫는다.
 	// 한 프레임만 만족했다가 곧바로 다시 로딩이 시작되는 경우를 거르기 위한 장치다.
 	constexpr float ReadinessPollSeconds = 0.05f;
-	constexpr int32 RequiredReadyStablePolls = 10;
+	constexpr int32 RequiredReadyStablePolls = 3;
 	// 스트리밍이 영영 해소되지 않을 때 로딩 화면이 무한히 남는 것을 막는 상한.
 	constexpr double ReadinessTimeoutSeconds = 45.0;
 
@@ -144,6 +145,7 @@ namespace MD_LoadingScreen
 		case EMD_LoadingReadinessBlocker::LevelVisibilityPending:  return TEXT("레벨 visibility 요청이 처리 대기 중");
 		case EMD_LoadingReadinessBlocker::StreamingLevelPending:   return TEXT("streaming level 로드/표시 대기");
 		case EMD_LoadingReadinessBlocker::RenderAssetStreaming:    return TEXT("render asset streaming 대기");
+		case EMD_LoadingReadinessBlocker::SurfaceInitialization:   return TEXT("Surface initialization pending");
 		default:                                                   return TEXT("없음");
 		}
 	}

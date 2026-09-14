@@ -1,5 +1,6 @@
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceGeometry.h"
@@ -263,8 +264,12 @@ void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
 	OutRemainingAmounts.Reset();
 	OutTransferredAmounts.Reset();
 	OutTransferredPatternDensities.Reset();
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_ExportSaveDeltas);
 	OutCoveredFractions.Reset();
-	if (!bContaminationEnabled)
+	// The immutable paged template is also GetGeneratedInitialContamination().
+	// Canonical pristine state has no scrape, added mass, paint or coverage to save.
+	// Boundary footprints are exported independently by the caller.
+	if (!bContaminationEnabled || ContaminationPagedCells.IsPristineCanonicalInitial())
 	{
 		return;
 	}

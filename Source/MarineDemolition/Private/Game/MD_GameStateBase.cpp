@@ -1,4 +1,5 @@
 #include "Game/MD_GameStateBase.h"
+#include "Game/MD_GameModeBase.h"
 #include "Component/Lore/MD_LoreComponent.h"
 #include "Data/Score/MD_ScoreTableData.h"
 #include "GameFramework/PlayerState.h"
@@ -57,7 +58,7 @@ void AMD_GameStateBase::BeginPlay()
 
     if (HasAuthority())
     {
-        StartGameTime();
+        if (!GetWorld()->GetAuthGameMode<AMD_GameModeBase>()) FinishWorldInitialization();
         // 초기 착수금과 현재 일차의 보고서 구성
         RefreshDailyLedger();
     }
@@ -69,6 +70,8 @@ void AMD_GameStateBase::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
+    DOREPLIFETIME(AMD_GameStateBase, bWorldInitializationReady);
+    DOREPLIFETIME(AMD_GameStateBase, PendingElapsedRealSeconds);
     DOREPLIFETIME(AMD_GameStateBase, GameStartServerTime);
     DOREPLIFETIME(AMD_GameStateBase, bGameTimeStarted);
     DOREPLIFETIME(AMD_GameStateBase, WithdrawalPhase);
@@ -96,14 +99,26 @@ void AMD_GameStateBase::StartGameTime()
         return;
     }
 
+    PendingElapsedRealSeconds = 0.0;
+    if (!bWorldInitializationReady) return;
     GameStartServerTime = GetServerWorldTimeSeconds();
     bGameTimeStarted = true;
 
     ForceNetUpdate();
 }
 
+void AMD_GameStateBase::FinishWorldInitialization()
+{
+    if (!HasAuthority() || bWorldInitializationReady) return;
+    GameStartServerTime = GetServerWorldTimeSeconds() - PendingElapsedRealSeconds;
+    bGameTimeStarted = true;
+    bWorldInitializationReady = true;
+    ForceNetUpdate();
+}
+
 double AMD_GameStateBase::GetElapsedRealSeconds() const
 {
+    if (!bWorldInitializationReady) return PendingElapsedRealSeconds;
     if (!bGameTimeStarted)
     {
         return 0.0;
@@ -490,8 +505,9 @@ bool AMD_GameStateBase::ApplyGameStateSaveData(const FMD_GameStateData& SaveData
 	const double TotalGameSeconds = static_cast<double>(EndHour - StartHour) * 60.0 * 60.0;
     const double TimeScale = TotalGameSeconds / RealDayDurationSeconds;
     const double ElapsedRealSeconds = SaveData.ElapsedSeconds / TimeScale;
+    PendingElapsedRealSeconds = ElapsedRealSeconds;
     GameStartServerTime = GetServerWorldTimeSeconds() - ElapsedRealSeconds;
-    bGameTimeStarted = true;
+    bGameTimeStarted = bWorldInitializationReady;
     bEmergencyDay = SaveData.bEmergencyDay;
     bInspectionWarned = SaveData.bInspectionWarned;
     ContractCrewCount = SaveData.ContractCrewCount;
@@ -645,7 +661,8 @@ bool AMD_GameStateBase::SetGameTimeHour(int32 Hour)
     // 지정한 시각을 작업 시작 이후의 인게임 경과 초로 환산
     double TargetGameSeconds = static_cast<double>(Hour - StartHour) * 3600.0;
     // 기존 시간 진행 속도에 맞춘 서버 시작 시각 역산
-    GameStartServerTime = GetServerWorldTimeSeconds() - TargetGameSeconds * RealDayDurationSeconds / TotalGameSeconds;
+    PendingElapsedRealSeconds = TargetGameSeconds * RealDayDurationSeconds / TotalGameSeconds;
+    GameStartServerTime = GetServerWorldTimeSeconds() - PendingElapsedRealSeconds;
     // 시작 전에도 지정한 시각부터 시간 진행 허용
     bGameTimeStarted = true;
     // 시간을 되돌린 경우에도 기존 알림과 자동 마감 순서 재평가

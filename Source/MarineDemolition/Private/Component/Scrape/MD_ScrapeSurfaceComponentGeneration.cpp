@@ -8,6 +8,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Gameplay/Scrape/MD_ScrapeRuntimeMaskTexture.h"
 #include "Async/ParallelFor.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "GameFramework/Actor.h"
 #include "Math/RandomStream.h"
 #include "Misc/Crc.h"
@@ -81,6 +82,8 @@ bool UMD_ScrapeSurfaceComponent::RestoreContaminationGeneration(const FMD_Contam
     if (!bResetState && G==AppliedContaminationGeneration && bContaminationSurfaceInitialized) return true;
     if (HasAuthority() && GetWorld())
         if (auto* Sync=GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>()) Sync->InvalidateSurface(*this);
+    ++DeferredInitializationEpoch;
+    bDeferredInitializationPending=false;PreparedInitialState.Reset();
     ContaminationGeneration=G;bRestoringContaminationGeneration=true;
     InitializeSurface();
     return !bContaminationEnabled || bContaminationSurfaceInitialized;
@@ -93,8 +96,16 @@ void UMD_ScrapeSurfaceComponent::OnRep_ContaminationGeneration()
 }
 bool UMD_ScrapeSurfaceComponent::TryApplyContinuousInitialContamination()
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_InitialAreaIntegration);
     const auto G=ContaminationGeneration;
     if (!G.IsValid() || !SurfaceMesh) return false;
+    if (PreparedInitialState.IsSet())
+    {
+        ContaminationPagedCells.InitializeFromAmounts(MoveTemp(PreparedInitialState->Amounts));
+        ContaminationCells.Empty();
+        ContaminationGeneratedInitialAmounts.Empty();
+        return true;
+    }
     const int32 Count = UsesMeshUVSurface() && ContaminationCellLayout
         ? ContaminationCellLayout->ActiveToAtlas.Num() : ContaminationCells.Num();
     TArray<float> Amounts;Amounts.SetNumZeroed(Count);
@@ -103,26 +114,7 @@ bool UMD_ScrapeSurfaceComponent::TryApplyContinuousInitialContamination()
         if (!ContaminationMeshUVData || !ContaminationCellLayout) return false;
         const auto* Data=ContaminationMeshUVData.Get();
         const auto* Layout=ContaminationCellLayout.Get();
-        const double MaximumAxisScale = G.SampleTransform.GetMaximumAxisScale();
-        // Immutable geometry and descriptor are read by workers. No UObject calls or GPU readback.
-        ParallelFor(Amounts.Num(),[&](int32 I)
-        {
-            const int32 Address=Layout->ActiveToAtlas[I];const auto& Cell=Data->Cells[Address];
-            const FVector WorldCenter=G.SampleTransform.TransformPosition(Cell.PositionLocal);
-            const float N=FMD_ContaminationNoise::FractalNoise3D(WorldCenter,G.NoiseScaleCm,G.Seed);
-            const double Bound=4.5*Cell.SupportRadiusCm*MaximumAxisScale/G.NoiseScaleCm;
-            if (G.Coverage<=UE_SMALL_NUMBER || N+Bound<=1.f-G.Coverage) return;
-            if (N-Bound>1.f-G.Coverage) { Amounts[I]=G.AmountFromNoise(N);return; }
-            TArray<FVector> Polygon;
-            if (!FMD_ScrapeMeshUVGeometry::GetCellPolygonLocal(*Data,Address,Polygon)) return;
-            double AreaSum=0,Sum=0;
-            for (int32 J=1;J+1<Polygon.Num();++J)
-            {
-                const double Area=FVector::CrossProduct(Polygon[J]-Polygon[0],Polygon[J+1]-Polygon[0]).Length();
-                AreaSum+=Area;Sum+=Area*G.IntegrateTriangle(Polygon[0],Polygon[J],Polygon[J+1]);
-            }
-            Amounts[I]=AreaSum>0?float(Sum/AreaSum):0;
-        });
+        Amounts = MD_ScrapeInitialState::Generate(*Data, *Layout, G);
     }
     else
     {

@@ -2,10 +2,12 @@
 
 
 #include "Game/MD_GameModeBase.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
+#include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
 #include "Game/MD_GameStateBase.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Player/MD_PlayerController.h"
@@ -19,6 +21,7 @@
 #include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "Gameplay/Loading/MD_MapRegistrationSubsystem.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
 
@@ -145,8 +148,35 @@ void AMD_GameModeBase::ApplyPendingGameDataOperation()
     }
 }
 
+void AMD_GameModeBase::StartPlay()
+{
+    if (const auto* Registration = GetWorld()->GetSubsystem<UMD_MapRegistrationSubsystem>(); Registration && Registration->IsPending())
+    {
+        bStartPlayWaitingForMapRegistration = true;
+        return;
+    }
+    bStartPlayWaitingForMapRegistration = false;
+    auto WaitingPlayers = MoveTemp(PendingMapRegistrationPlayers);
+    PendingMapRegistrationPlayers.Reset();
+    for (const auto& Weak : WaitingPlayers)
+        if (AController* Player = Weak.Get(); Player && !Player->IsActorBeingDestroyed() && Player->GetWorld() == GetWorld()) RestartPlayer(Player);
+    // Restore players before actor BeginPlay, matching the normal seamless-travel order.
+    Super::StartPlay();
+}
+
+void AMD_GameModeBase::FinishMapRegistration()
+{
+    if (bStartPlayWaitingForMapRegistration) StartPlay();
+}
+
 void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
 {
+    if (!IsValid(NewPlayer) || NewPlayer->IsActorBeingDestroyed()) return;
+    if (const auto* Registration = GetWorld()->GetSubsystem<UMD_MapRegistrationSubsystem>(); Registration && Registration->IsPending())
+    {
+        PendingMapRegistrationPlayers.AddUnique(NewPlayer);
+        return;
+    }
     Super::RestartPlayer(NewPlayer);
 
     UGameInstance* GameInstance = GetGameInstance();
@@ -159,6 +189,7 @@ void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
 
 void AMD_GameModeBase::Logout(AController* Exiting)
 {
+    PendingMapRegistrationPlayers.Remove(Exiting);
     // PlayerState 제거 전에 퇴장 이름을 남은 플레이어에게 전달
     NotifyPlayerJoinAndExit(Exiting, false);
 
@@ -887,6 +918,13 @@ void AMD_GameModeBase::CaptureDaySnapshot()
 
 void AMD_GameModeBase::InitializeExpeditionDay()
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_GameMode_InitializeExpeditionDay);
+    if (const auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); Initializer && Initializer->IsPending())
+    {
+        // Auto-save and contract setup must never capture a partially prepared world.
+        GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
+        return;
+    }
     RestoreDaySnapshot();
 
     if (const AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
@@ -894,12 +932,15 @@ void AMD_GameModeBase::InitializeExpeditionDay()
         SyncMerchantToGameDay(GS->GetCurrentDay());
     }
 
+    if (auto* GS = GetGameState<AMD_GameStateBase>()) GS->FinishWorldInitialization();
+
     // 월드 복원과 상인 퀘스트 일차 동기화가 끝난 경계 상태만 자동 저장하는 처리
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
     if (IsValid(SaveSlotManager) == true)
     {
-        SaveSlotManager->SaveGameData(TEXT("Auto"), true);
+        // Collection/serialization stays at this boundary; immutable file writes run off-thread.
+        SaveSlotManager->AsyncSaveGameData(TEXT("Auto"), true, FOnSaveMDGameDataComplete());
     }
 }
 

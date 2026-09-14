@@ -9,6 +9,7 @@
 #include "Components/ActorComponent.h"
 #include "Component/Scrape/MD_ContaminationSolidVisualComponent.h"
 #include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
+#include "Gameplay/Scrape/MD_ScrapeInitialState.h"
 #include "Gameplay/Scrape/MD_ScrapeReplicationCodec.h"
 #include "Net/Serialization/FastArraySerializer.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
@@ -444,6 +445,8 @@ public:
 	FGuid GetContaminationLayoutId() const;
 	FIntPoint GetContaminationGridDimensions() const;
 	bool CanRestoreContaminationLayout(int32 Version, const FGuid& LayoutId, const FIntPoint& Grid) const;
+    /** Selects only an explicitly registered historical layout; cell indices are never remapped. */
+    bool SelectCompatibleContaminationLayout(const FGuid& LayoutId, bool bInitialize = true);
 	float GetContaminationCleanRatio(EMD_ScrapeSurfaceFace Face) const;
 
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
@@ -826,6 +829,12 @@ private:
 	void ResolveSurfaceMeshFromOwner();
 	void EnsureVisualizationComponents();
 	void DestroyOwnedVisualizationComponents();
+	friend class UMD_ScrapeInitializationSubsystem;
+	bool bDeferredInitializationPending = false;
+    uint64 DeferredInitializationEpoch = 0;
+	bool bCompletingDeferredInitialization = false;
+	TOptional<FMD_ScrapeInitialState> PreparedInitialState;
+	bool TryDeferContaminationInitialization();
 	void InitializeRuntimeState();
 	void ShutdownRuntimeState();
 	void ApplyContaminationEnabledState();

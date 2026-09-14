@@ -1,4 +1,5 @@
 #include "World/Wall/MD_WallShadowBatchSubsystem.h"
+#include "Gameplay/Loading/MD_MapRegistrationSubsystem.h"
 #include "Engine/StaticMesh.h"
 #include "StaticMeshResources.h"
 #include "Engine/World.h"
@@ -9,6 +10,7 @@
 #include "Materials/MaterialInterface.h"
 #include "HAL/IConsoleManager.h"
 #include "RHI.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 namespace
 {
@@ -82,7 +84,18 @@ namespace
 void UMD_WallShadowBatchSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
     Super::OnWorldBeginPlay(InWorld);
-    if (InWorld.GetNetMode() == NM_DedicatedServer) return;
+    // The map's native meshes may still be registering behind the loading screen.
+    // Discover them together once registration finishes, just as ordinary startup does.
+    const auto* Registration = InWorld.GetSubsystem<UMD_MapRegistrationSubsystem>();
+    if (!Registration || !Registration->IsPending()) InitializeWorldBatches();
+}
+
+void UMD_WallShadowBatchSubsystem::InitializeWorldBatches()
+{
+    UWorld& InWorld = *GetWorld();
+    if (bInitialScanComplete || InWorld.GetNetMode() == NM_DedicatedServer) return;
+    bInitialScanComplete = true;
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Wall_InitializeShadowBatches);
     bRendererEligible = RendererEligible(&InWorld);
     // Discover only repeated, eligible ordinary meshes. Newly streamed/spawned
     // non-surface actors retain their original rendering; no hidden asset edits.
@@ -130,6 +143,7 @@ void UMD_WallShadowBatchSubsystem::RefreshEntry(UStaticMeshComponent& Source, FE
         Detach(&Source, Entry);
     }
     if (!bEnabled || !Entry.bMaterialsEligible || !CanBatch(Source)) return;
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Wall_RegisterShadowBatch);
     UInstancedStaticMeshComponent* Batch = nullptr;
     for (UInstancedStaticMeshComponent* Candidate : Batches) if (Matches(*Candidate, Source)) { Batch = Candidate; break; }
     if (!Batch)
@@ -212,6 +226,7 @@ void UMD_WallShadowBatchSubsystem::UnregisterWall(UStaticMeshComponent& Source)
 void UMD_WallShadowBatchSubsystem::PostActorTick(UWorld* World, ELevelTick, float)
 {
     if (World != GetWorld()) return;
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Wall_ShadowBatchVisibility);
     // Arbitrary attached surface meshes can change visibility without a delegate.
     // One compact pass after actor ticks updates membership before rendering, with
     // no geometry work and no per-wall actor/component tick.

@@ -32,7 +32,10 @@ public:
     // 수동 퇴근과 시간 종료 원인을 구분하는 하루 마감 진입점
     void RequestEndDay(EMD_DayEndReason EndReason = EMD_DayEndReason::Console, FGameplayTag ReportWidgetTag = FGameplayTag());
 
+    virtual void StartPlay() override;
     virtual void RestartPlayer(AController* NewPlayer) override;
+    bool IsStartPlayWaitingForMapRegistration() const { return bStartPlayWaitingForMapRegistration; }
+    void FinishMapRegistration();
 
     virtual void Logout(AController* Exiting) override;
 
@@ -62,6 +65,9 @@ private:
 
     // 서버 GameState에 검증된 출발 난이도와 인원수를 계약 상태로 반영하는 처리
     void ApplyRequestedContractSettings();
+
+    bool bStartPlayWaitingForMapRegistration = false;
+    TArray<TWeakObjectPtr<AController>> PendingMapRegistrationPlayers;
 
     FTimerHandle CheckGameTimeTimerHandle;
 
