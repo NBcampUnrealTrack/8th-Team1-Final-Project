@@ -117,7 +117,7 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 	// 구매 이력 복사 없이 도구의 무료 재구매 가격 계산
 	int32 GetPurchasePrice(TArray<FPrimaryAssetId>& PurchasedItemIds) const;
 
-	// 개당 소모품 반값과 무료 재지급 도구의 반환 가격 계산이며 판매 불가는 음수
+	// 도구와 개당 소모품 구매가의 절반 계산이며 판매 불가는 음수
 	int32 GetSalePrice();
 
 	// 일반 가격 450₡ 또는 개당 가격 35₡/개 표기이며 무료 가격은 0

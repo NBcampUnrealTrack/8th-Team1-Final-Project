@@ -3,6 +3,7 @@
 
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "EngineUtils.h"
+#include "Engine/AssetManager.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "GameFramework/Pawn.h"
 #include "Templates/UnrealTemplate.h"
@@ -191,8 +192,44 @@ EMD_ShopSaleResult UMD_MerchantSubsystem::TrySellShopItem(AMD_PlayerState* Selli
 		// 상한 초과로 소지품을 잃지 않도록 실패 전달
 		return EMD_ShopSaleResult::CreditLimit;
 	}
+	// 회수 방식과 판매 후 초기화 대상을 함께 결정할 실제 보유 도구 조회
+	UMD_ToolDefinition* SoldTool = Cast<UMD_ToolDefinition>(StoredItem);
+	// 판매 도구와 모든 선행 도구의 개인 이력 초기화 목록
+	TArray<FPrimaryAssetId> ToolAssetIds;
+	// 가장 높은 현재 단계에서 기본 도구 방향으로 검증 시작
+	UMD_ToolDefinition* UpgradeStep = SoldTool;
+	// 소모품은 제외하고 도구의 전체 업그레이드 경로 수집
+	while (IsValid(UpgradeStep) == true)
+	{
+		// 순환 검사와 초기화 목록에 사용할 현재 단계 식별자 조회
+		FPrimaryAssetId StepAssetId = UpgradeStep->GetPrimaryAssetId();
+		// 잘못된 식별자와 순환 업그레이드 설정의 부분 초기화 차단
+		if (StepAssetId.IsValid() == false || ToolAssetIds.Contains(StepAssetId) == true)
+		{
+			// 소지품 회수 이전에 잘못된 도구 경로의 판매 거부
+			return EMD_ShopSaleResult::InvalidItem;
+		}
+		// 현재 도구 단계의 구매 이력과 잠금을 초기화 대상으로 등록
+		ToolAssetIds.Add(StepAssetId);
+		// 선행 도구 로드와 식별자 일치 검사에 사용할 원본 설정 조회
+		FPrimaryAssetId SourceAssetId = UpgradeStep->UpgradeSourceAssetId;
+		// 기본 도구에 도달하면 전체 경로 수집 종료
+		if (SourceAssetId.IsValid() == false)
+		{
+			// 선행 단계가 없는 기본 도구까지 검증 완료
+			break;
+		}
+		// 현재 상점에 노출되지 않은 선행 도구도 등록된 원본 에셋으로 조회
+		UpgradeStep = Cast<UMD_ToolDefinition>(UAssetManager::Get().GetPrimaryAssetPath(SourceAssetId).TryLoad());
+		// 누락되거나 다른 유형의 선행 정의로 불완전한 초기화가 발생하는 상황 차단
+		if (IsValid(UpgradeStep) == false || UpgradeStep->GetPrimaryAssetId() != SourceAssetId)
+		{
+			// 도구와 이력을 보존한 잘못된 업그레이드 설정 결과 전달
+			return EMD_ShopSaleResult::InvalidItem;
+		}
+	}
 	// 도구는 슬롯 전체 반환이며 소모품은 지정 수량만 회수
-	if ((StoredItem->IsA<UMD_ToolDefinition>() == true
+	if ((IsValid(SoldTool) == true
 		? Hotbar->SetItemAtSlot(SlotIndex, nullptr, 0) : Hotbar->TryConsumeItem(StoredItem, Quantity)) == false)
 	{
 		// 실제 회수 실패 시 대금 지급 차단
@@ -200,6 +237,12 @@ EMD_ShopSaleResult UMD_MerchantSubsystem::TrySellShopItem(AMD_PlayerState* Selli
 	}
 	// 회수 성공 이후 기존 정산 분류로 대금 적립
 	AddCreditsInternal(EMD_DailyReportCategory::Other, static_cast<int32>(TotalPrice));
+	// 도구를 실제로 회수하고 대금을 확정한 뒤 업그레이드 이력 초기화
+	if (IsValid(SoldTool) == true)
+	{
+		// 판매한 단계의 무료 재구매를 해제하고 기본 도구부터 재구매 허용
+		SellingPlayerState->ResetShopToolProgress(ToolAssetIds);
+	}
 	// 공용 크레딧 복제와 현재 상점 화면 갱신
 	OnMerchantStateChanged.Broadcast();
 	// 회수 수량과 대금을 함께 확정한 판매 결과 전달

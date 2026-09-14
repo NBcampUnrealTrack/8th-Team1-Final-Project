@@ -245,6 +245,36 @@ bool AMD_PlayerState::RecordPurchasedShopItem(FPrimaryAssetId ItemAssetId, FPrim
 	return true;
 }
 
+void AMD_PlayerState::ResetShopToolProgress(TArray<FPrimaryAssetId>& ToolAssetIds)
+{
+	// 서버에서 확정한 도구 판매에만 개인 진행 상태 변경 허용
+	if (HasAuthority() == false)
+	{
+		// 클라이언트의 구매 이력 초기화 차단
+		return;
+	}
+	// 해당 도구 단계들의 무료 재구매 이력 제거
+	int32 RemovedCount = PurchasedShopItemIds.RemoveAll([&ToolAssetIds](FPrimaryAssetId ItemAssetId)
+	{
+		// 판매 도구의 업그레이드 경로에 포함된 이력만 선택
+		return ToolAssetIds.Contains(ItemAssetId);
+	});
+	// 기본 도구부터 다시 구매할 수 있도록 같은 경로의 구매 금지 제거
+	RemovedCount += BlockedShopItemIds.RemoveAll([&ToolAssetIds](FPrimaryAssetId ItemAssetId)
+	{
+		// 다른 도구 계열의 구매 금지를 보존할 초기화 대상 검사
+		return ToolAssetIds.Contains(ItemAssetId);
+	});
+	// 실제 이력 변경이 있을 때만 화면 갱신과 복제 요청
+	if (RemovedCount > 0)
+	{
+		// 두 목록을 함께 초기화한 상태를 서버 상점 화면에 전달
+		OnRep_ShopPurchaseState();
+		// 소유 클라이언트에 변경된 구매 및 잠금 이력 복제 요청
+		ForceNetUpdate();
+	}
+}
+
 bool AMD_PlayerState::IsShopItemPurchaseBlocked(FPrimaryAssetId ItemAssetId)
 {
 	// 무효 식별자를 제외하고 등록된 구매 금지 목록만 확인

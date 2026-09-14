@@ -134,11 +134,11 @@ int32 FMD_ShopItem::GetSalePrice()
 		// 유효하지 않은 판매 가격 전달
 		return INDEX_NONE;
 	}
-	// 무료 재지급 도구의 반복 판매를 통한 크레딧 생성 방지
+	// 도구 한 개의 카탈로그 구매가를 기준으로 판매 금액 계산
 	if (Definition->IsA<UMD_ToolDefinition>() == true)
 	{
-		// 구매 이력을 유지하는 무상 반환 금액
-		return 0;
+		// 구매가의 절반을 지급하며 소수점 이하 버림
+		return Price / 2;
 	}
 	// 묶음 구매 수량을 개별 판매 단가로 환산할 소모품 정의 조회
 	UMD_ConsumeItemDefinition* Consumable = Cast<UMD_ConsumeItemDefinition>(Definition);
