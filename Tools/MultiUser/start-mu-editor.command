@@ -22,7 +22,6 @@ ENGINE_DIR="$(find_engine)"
 EDITOR="$ENGINE_DIR/Engine/Binaries/Mac/UnrealEditor.app/Contents/MacOS/UnrealEditor"
 
 SERVER_NAME="$(json_get 'cfg["serverName"]')"
-SERVER_PORT="$(json_get 'cfg["serverPort"]')"
 
 echo "사용 가능한 경로를 확인합니다..."
 select_transport
@@ -36,7 +35,7 @@ cat <<EOF
 
   경로       : $SELECTED_NAME
   내 주소    : $SELECTED_LOCAL
-  호스트     : $SELECTED_HOST:$SERVER_PORT
+  호스트     : $SELECTED_HOST:$SELECTED_PORT
   표시 이름  : $DISPLAY_NAME
   엔진       : $ENGINE_DIR
   정적 엔드포인트: Config/DefaultEngine.ini

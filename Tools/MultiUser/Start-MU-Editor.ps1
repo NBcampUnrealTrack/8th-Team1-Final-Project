@@ -32,7 +32,7 @@ $displayName = $env:USERNAME
 Write-Host ''
 Write-Host ("  경로       : {0}" -f $transport.Name) -ForegroundColor White
 Write-Host ("  내 주소    : {0}" -f $transport.LocalAddress) -ForegroundColor White
-Write-Host ("  호스트     : {0}:{1}" -f $transport.HostAddress, $cfg.serverPort) -ForegroundColor White
+Write-Host ("  호스트     : {0}:{1}" -f $transport.HostAddress, $transport.HostPort) -ForegroundColor White
 Write-Host ("  표시 이름  : {0}" -f $displayName) -ForegroundColor White
 Write-Host ("  정적 엔드포인트: Config/DefaultEngine.ini") -ForegroundColor DarkGray
 Write-Host ''

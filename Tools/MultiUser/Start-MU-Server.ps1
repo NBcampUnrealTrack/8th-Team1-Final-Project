@@ -19,26 +19,26 @@ if ($env:COMPUTERNAME -ne $cfg.hostMachine) {
         "       지정 호스트 : $($cfg.hostMachine)",
         "       이 PC       : $($env:COMPUTERNAME)",
         '',
-        '       서버는 한 대에서만 띄웁니다. 호스트를 바꾸려면',
-        '       Tools\MultiUser\host.json 의 hostMachine 과 hostAddress 를 고치고 커밋하세요.'
+        '       서버는 한 대에서만 띄웁니다. 호스트를 바꾸려면 host.json 의 hostMachine 과',
+        '       Config/DefaultEngine.ini 의 +StaticEndpoints 를 고치고 커밋하세요.'
     )
 }
 
-Write-Host '사용 가능한 경로를 확인합니다...' -ForegroundColor DarkGray
-$null = Select-Transport $cfg   # 최소 한 경로는 살아있어야 의미가 있다
+$endpoints = Get-StaticEndpoints
+$port      = $endpoints[0].Port
 
 Write-Host ''
 Write-Host '============================================================' -ForegroundColor Cyan
 Write-Host ("  서버 이름 : {0}" -f $cfg.serverName) -ForegroundColor White
-Write-Host ("  포트      : {0}  (0.0.0.0 / 모든 경로에서 수신)" -f $cfg.serverPort) -ForegroundColor White
+Write-Host ("  포트      : {0}  (0.0.0.0 / 모든 경로에서 수신)" -f $port) -ForegroundColor White
 Write-Host '============================================================' -ForegroundColor Cyan
 Write-Host ''
-Write-Host '  이 PC의 실제 주소 (host.json 의 hostAddress 와 일치해야 합니다):' -ForegroundColor White
+Write-Host '  이 PC의 주소가 DefaultEngine.ini 의 +StaticEndpoints 와 맞는지 확인:' -ForegroundColor White
 Write-Host ''
 
 foreach ($t in $cfg.transports) {
     $mine     = Get-LocalAddressFor $t
-    $expected = $t.hostAddress
+    $expected = ($endpoints | Where-Object { $_.Address.StartsWith($t.subnetPrefix) } | Select-Object -First 1).Address
 
     if (-not $mine) {
         Write-Host ("    {0,-10} (어댑터 꺼짐)" -f $t.name) -ForegroundColor DarkGray
@@ -47,7 +47,8 @@ foreach ($t in $cfg.transports) {
         Write-Host ("    {0,-10} {1}" -f $t.name, $mine) -ForegroundColor Green
     }
     else {
-        Write-Host ("    {0,-10} {1}   <-- host.json 에는 {2} 로 적혀 있습니다. 고쳐서 커밋하세요." -f $t.name, $mine, $expected) -ForegroundColor Yellow
+        Write-Host ("    {0,-10} {1}" -f $t.name, $mine) -ForegroundColor Yellow
+        Write-Host ("               <-- DefaultEngine.ini 에는 {0} 로 적혀 있습니다. 고쳐서 커밋하세요." -f $expected) -ForegroundColor Yellow
     }
 }
 
@@ -55,4 +56,4 @@ Write-Host ''
 Write-Host '============================================================' -ForegroundColor Cyan
 Write-Host ''
 
-& $serverExe "-CONCERTSERVER=$($cfg.serverName)" "-UDPMESSAGING_TRANSPORT_UNICAST=0.0.0.0:$($cfg.serverPort)"
+& $serverExe "-CONCERTSERVER=$($cfg.serverName)" "-UDPMESSAGING_TRANSPORT_UNICAST=0.0.0.0:$port"

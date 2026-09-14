@@ -99,33 +99,67 @@ function Test-TailnetPeer {
 }
 
 
-function Select-Transport {
+function Get-StaticEndpoints {
     <#
-        host.json 의 transports 를 순서대로 시도해 쓸 수 있는 첫 경로를 고른다.
-        반환: @{ Name; LocalAddress; HostAddress; IsHost }
-        전부 실패하면 각 경로가 어디서 막혔는지 출력하고 종료한다.
-    #>
-    param($Config)
+        호스트 주소와 포트의 **유일한 출처**는 Config/DefaultEngine.ini 의
+        +StaticEndpoints 다. 에디터가 실제로 읽는 파일이 그것이기 때문에,
+        런처가 따로 값을 들고 있으면 둘이 어긋났을 때 런처는 통과하는데
+        에디터만 서버를 못 찾는 형태로 나타난다. 그래서 여기서 읽어 쓴다.
 
-    # host.json 을 아직 안 채웠으면 여기서 끊는다. 안 그러면 ping 타임아웃만 기다리다
-    # "호스트 응답 없음" 이라는 엉뚱한 원인을 보게 된다.
-    foreach ($t in $Config.transports) {
-        if ($t.hostAddress -like 'REPLACE-*') {
-            Stop-WithError @(
-                '[오류] host.json 의 호스트 주소가 아직 채워지지 않았습니다.',
-                '',
-                '       맥미니에서 Tools/MultiUser/start-mu-server.command 를 실행하면',
-                '       넣어야 할 hostMachine 과 hostAddress 가 출력됩니다.',
-                '       그 두 값을 Tools/MultiUser/host.json 에 넣고 커밋하세요.'
-            )
+        반환: @( @{ Address; Port } )
+    #>
+    $ini = Join-Path $ProjectDir 'Config\DefaultEngine.ini'
+    if (-not (Test-Path $ini)) {
+        Stop-WithError @('[오류] Config/DefaultEngine.ini 를 찾지 못했습니다.', "       $ini")
+    }
+
+    $found = @()
+    foreach ($line in (Get-Content $ini)) {
+        # 주석(;)으로 시작하는 줄은 정규식이 자연히 걸러낸다.
+        if ($line -match '^\s*\+StaticEndpoints\s*=\s*([0-9]{1,3}(?:\.[0-9]{1,3}){3})\s*:\s*([0-9]+)') {
+            $found += [pscustomobject]@{ Address = $Matches[1]; Port = [int]$Matches[2] }
         }
     }
 
-    $amHost = ($env:COMPUTERNAME -eq $Config.hostMachine)
-    $failures = @()
+    if ($found.Count -eq 0) {
+        Stop-WithError @(
+            '[오류] Config/DefaultEngine.ini 에 +StaticEndpoints 가 없습니다.',
+            '',
+            '       Tailscale 은 멀티캐스트를 나르지 않아 자동 탐색이 불가능합니다.',
+            '       호스트 주소를 직접 지정해야 붙습니다. 예:',
+            '         +StaticEndpoints=100.77.222.84:50002',
+            '',
+            '       호스트에서 서버 런처를 실행하면 넣을 값이 출력됩니다.'
+        )
+    }
+
+    return $found
+}
+
+
+function Select-Transport {
+    <#
+        host.json 의 transports 를 순서대로 시도해 쓸 수 있는 첫 경로를 고른다.
+        각 경로의 호스트 주소는 DefaultEngine.ini 의 +StaticEndpoints 중
+        subnetPrefix 가 맞는 것을 쓴다 (경로가 여러 개면 줄도 여러 개다).
+
+        반환: @{ Name; LocalAddress; HostAddress; HostPort; IsHost }
+    #>
+    param($Config)
+
+    $endpoints = Get-StaticEndpoints
+    $amHost    = ($env:COMPUTERNAME -eq $Config.hostMachine)
+    $failures  = @()
 
     foreach ($t in $Config.transports) {
         Write-Host ("  {0,-10} 확인 중..." -f $t.name) -NoNewline -ForegroundColor DarkGray
+
+        $ep = $endpoints | Where-Object { $_.Address.StartsWith($t.subnetPrefix) } | Select-Object -First 1
+        if (-not $ep) {
+            Write-Host ' 엔드포인트 없음' -ForegroundColor DarkYellow
+            $failures += "  - $($t.name): DefaultEngine.ini 에 $($t.subnetPrefix)* 로 시작하는 +StaticEndpoints 가 없음"
+            continue
+        }
 
         $localIP = Get-LocalAddressFor $t
         if (-not $localIP) {
@@ -136,18 +170,18 @@ function Select-Transport {
 
         # 내가 호스트면 자기 자신에게 ping 할 필요가 없다.
         if (-not $amHost) {
-            if (-not (Test-Connection -ComputerName $t.hostAddress -Count 1 -Quiet -ErrorAction SilentlyContinue)) {
-                Write-Host (' 호스트 {0} 응답 없음' -f $t.hostAddress) -ForegroundColor DarkYellow
+            if (-not (Test-Connection -ComputerName $ep.Address -Count 1 -Quiet -ErrorAction SilentlyContinue)) {
+                Write-Host (' 호스트 {0} 응답 없음' -f $ep.Address) -ForegroundColor DarkYellow
 
                 # 흔한 원인: 호스트가 아예 다른 tailnet(다른 계정)에 로그인되어 있다.
                 # 그러면 ping 이 물리 네트워크로 새어나가 TTL 만료로 죽는다.
-                if ((Test-TailnetPeer $t.hostAddress) -eq $false) {
-                    $failures += "  - $($t.name): 호스트 $($t.hostAddress) 가 이 tailnet 에 없습니다."
+                if ((Test-TailnetPeer $ep.Address) -eq $false) {
+                    $failures += "  - $($t.name): 호스트 $($ep.Address) 가 이 tailnet 에 없습니다."
                     $failures += "      tailscale status 목록에 안 보입니다. 호스트가 다른 계정/tailnet 에"
                     $failures += "      로그인되어 있을 수 있습니다. 같은 tailnet 으로 맞춰야 합니다."
                 }
                 else {
-                    $failures += "  - $($t.name): 내 주소는 $localIP 인데 호스트 $($t.hostAddress) 에 닿지 않음"
+                    $failures += "  - $($t.name): 내 주소는 $localIP 인데 호스트 $($ep.Address) 에 닿지 않음"
                 }
                 continue
             }
@@ -157,7 +191,8 @@ function Select-Transport {
         return @{
             Name         = $t.name
             LocalAddress = $localIP
-            HostAddress  = $t.hostAddress
+            HostAddress  = $ep.Address
+            HostPort     = $ep.Port
             IsHost       = $amHost
         }
     }
@@ -167,64 +202,24 @@ function Select-Transport {
         '       확인 순서:',
         '         1) tailscale status  - 호스트가 목록에 보이는가',
         '         2) 안 보이면 호스트와 내가 같은 tailnet(같은 계정)인지 확인',
-        '         3) 호스트 주소가 바뀌었다면 Tools\MultiUser\host.json 을 고쳐 커밋'
+        '         3) 호스트 주소가 바뀌었다면 Config/DefaultEngine.ini 의',
+        '            +StaticEndpoints 를 고쳐 커밋 (여기가 유일한 출처)'
     ))
 }
 
 
-function Write-MultiUserConfig {
-    <#
-        [사용하지 않음 — 2026-09-15]
-
-        선택된 경로를 Saved/Config/<플랫폼>Editor/Engine.ini 에 기록하려던 함수.
-        **동작하지 않는다.** 에디터가 그 파일을 시작 시점에 통째로 덮어써서,
-        여기 써넣은 StaticEndpoints 가 읽히기 전에 사라진다.
-        (에디터 실행 중에 확인 — 블록이 이미 없었고 서버 탐색이 영영 실패했다)
-
-        StaticEndpoints 는 커맨드라인 옵션이 없으므로 대신 Config/DefaultEngine.ini
-        에 둔다. 호스트 주소는 머신마다 다르지 않아 공유 파일에 둬도 문제없다.
-        머신별로 다른 UnicastEndpoint 는 -UDPMESSAGING_TRANSPORT_UNICAST= 로 넘긴다.
-
-        남겨둔 이유: 나중에 쓸 수 있는 설정 주입 지점을 다시 찾을 때
-        "여기는 아니다"라는 기록이 필요하다.
-    #>
-    param($Transport, $Config, [string]$DisplayName)
-
-    $dir = Join-Path $ProjectDir 'Saved\Config\WindowsEditor'
-    if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
-
-    $iniPath  = Join-Path $dir 'Engine.ini'
-    $endpoint = "$($Transport.HostAddress):$($Config.serverPort)"
-
-    $existing = if (Test-Path $iniPath) { Get-Content $iniPath -Encoding UTF8 } else { @() }
-
-    # 이 스크립트가 관리하는 블록만 걷어낸다.
-    $kept = @()
-    $inOurBlock = $false
-    foreach ($line in $existing) {
-        if ($line -match '^\s*;\s*<<< MultiUser launcher') { $inOurBlock = $true;  continue }
-        if ($line -match '^\s*;\s*>>> MultiUser launcher') { $inOurBlock = $false; continue }
-        if (-not $inOurBlock) { $kept += $line }
-    }
-
-    $block = @(
-        '; <<< MultiUser launcher — 이 블록은 Start-MU-*.ps1 이 매번 덮어쓴다. 직접 고치지 말 것.',
-        "; 선택된 경로: $($Transport.Name)  (내 주소 $($Transport.LocalAddress) → 호스트 $endpoint)",
-        '[/Script/UdpMessaging.UdpMessagingSettings]',
-        "UnicastEndpoint=$($Transport.LocalAddress):0",
-        "!StaticEndpoints=ClearArray",
-        "+StaticEndpoints=$endpoint",
-        '',
-        '[/Script/ConcertClient.ConcertClientConfig]',
-        "ClientSettings=(DisplayName=`"$DisplayName`",DiscoveryTimeoutSeconds=30)",
-        '; >>> MultiUser launcher'
-    )
-
-    # PowerShell 5.1 의 UTF8 은 BOM 을 붙이지만 UE ini 파서는 BOM 을 허용한다.
-    ($kept + $block) | Set-Content -Path $iniPath -Encoding UTF8
-
-    return $iniPath
-}
+# [제거됨 - 2026-09-15] Write-MultiUserConfig
+#
+# Saved/Config/<플랫폼>Editor/Engine.ini 에 StaticEndpoints 를 주입하려던 함수였다.
+# **동작하지 않는다.** 에디터가 그 파일을 시작 시점에 통째로 덮어써서, 써넣은 값이
+# 읽히기 전에 사라진다 (에디터 실행 중에 열어보면 블록이 이미 없고, 서버 탐색이
+# 영영 실패했다).
+#
+# StaticEndpoints 는 커맨드라인 옵션도 없으므로 Config/DefaultEngine.ini 가 유일한
+# 주입 경로다. 호스트 주소는 머신마다 다르지 않아 공유 파일에 둬도 문제없다.
+# 머신별로 다른 UnicastEndpoint 만 -UDPMESSAGING_TRANSPORT_UNICAST= 로 넘긴다.
+#
+# 설정 주입 지점을 다시 찾게 되면 "Saved/Config 는 아니다"를 기억할 것.
 
 
 function Assert-EngineFile {

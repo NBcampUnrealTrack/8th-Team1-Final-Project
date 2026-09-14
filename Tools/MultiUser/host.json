@@ -1,24 +1,26 @@
 {
   "_comment": [
-    "멀티유저 편집 호스트 주소록. 호스트나 주소가 바뀌면 여기만 고친다.",
+    "멀티유저 편집 런처 설정. 여기엔 '런처만 아는 것'만 둔다.",
     "",
-    "호스트는 맥미니(상시 가동)다. macOS 에는 Radmin VPN 이 없으므로(Windows 전용 제품)",
-    "모든 참가자가 Tailscale 로 붙는다. transports 에 radmin 을 되살리지 말 것 —",
-    "호스트에 Radmin 주소가 없어서 매 실행마다 ping 타임아웃만 발생한다.",
+    "호스트 주소와 포트는 여기 없다. Config/DefaultEngine.ini 의 +StaticEndpoints 가",
+    "유일한 출처다 — 에디터가 실제로 읽는 파일이 그것이라, 런처가 따로 값을 들고 있으면",
+    "둘이 어긋났을 때 런처는 통과하는데 에디터만 서버를 못 찾는다.",
+    "호스트가 바뀌면 DefaultEngine.ini 한 곳만 고치면 된다.",
     "",
-    "hostMachine  : 맥미니의 호스트명. `scutil --get LocalHostName` 또는 `hostname -s`",
-    "hostAddress  : 맥미니의 Tailscale IPv4. `tailscale ip -4`",
-    "두 값은 맥에서 start-mu-server.command 를 실행하면 그대로 출력된다."
+    "호스트는 맥미니(상시 가동)다. macOS 에는 Radmin VPN 이 없으므로(Windows 전용)",
+    "모든 참가자가 Tailscale 로 붙는다. transports 에 radmin 을 되살리지 말 것.",
+    "",
+    "hostMachine : 맥미니의 호스트명. `hostname -s` (서버 런처가 출력해 준다)",
+    "subnetPrefix: 이 경로의 주소 대역. DefaultEngine.ini 의 어느 +StaticEndpoints 를",
+    "              쓸지 고르는 기준이기도 하다."
   ],
 
   "serverName": "RevStudio",
-  "serverPort": 50002,
   "hostMachine": "bagjunmin-ui-Macmini",
 
   "transports": [
     {
       "name": "tailscale",
-      "hostAddress": "100.77.222.84",
       "adapterMatch": "*Tailscale*",
       "subnetPrefix": "100."
     }

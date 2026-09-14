@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # Multi-User Editing 스크립트 공용 함수 (macOS).
 # ifconfig 출력 형식과 ping 의 -t(타임아웃) 의미가 BSD 기준이라 리눅스에서는 안 맞는다.
-# Windows 쪽 _Common.ps1 과 같은 일을 한다. 두 파일은 같은 host.json 을 읽는다.
+# Windows 쪽 _Common.ps1 과 같은 일을 한다. 두 파일은 같은 host.json 과
+# 같은 Config/DefaultEngine.ini 를 읽는다.
 #
-# macOS 에는 Radmin VPN 이 없다(Windows 전용 제품). 따라서 맥은 항상 Tailscale 경로로
-# 떨어진다 — host.json 의 radmin 항목은 어댑터가 없어 자동으로 건너뛴다.
+# 호스트 주소·포트의 유일한 출처는 DefaultEngine.ini 의 +StaticEndpoints 다.
+# host.json 에는 런처만 아는 것(어댑터 매칭, 서브넷, 호스트명)만 둔다.
 
 set -uo pipefail
 
@@ -97,30 +98,61 @@ tailnet_has_peer() {
     echo "$out" | grep -qF "$addr"
 }
 
+# 호스트 주소와 포트의 **유일한 출처**는 Config/DefaultEngine.ini 의 +StaticEndpoints 다.
+# 에디터가 실제로 읽는 파일이 그것이라, 런처가 따로 값을 들고 있으면 둘이 어긋났을 때
+# 런처는 통과하는데 에디터만 서버를 못 찾는 형태로 나타난다.
+# 출력: "주소:포트" 한 줄씩
+static_endpoints() {
+    local ini="$PROJECT_DIR/Config/DefaultEngine.ini"
+    [ -f "$ini" ] || die "[오류] Config/DefaultEngine.ini 를 찾지 못했습니다." "       $ini"
+
+    # 주석(;)으로 시작하는 줄은 패턴이 자연히 걸러낸다.
+    grep -E '^[[:space:]]*\+StaticEndpoints[[:space:]]*=' "$ini" 2>/dev/null \
+        | sed -E 's/^[^=]*=[[:space:]]*//' \
+        | tr -d '\r' \
+        | grep -E '^[0-9.]+:[0-9]+$'
+}
+
 # host.json 의 transports 를 순서대로 시도해 쓸 수 있는 첫 경로를 고른다.
-# 성공하면 SELECTED_NAME / SELECTED_LOCAL / SELECTED_HOST 를 채운다.
+# 각 경로의 호스트 주소는 DefaultEngine.ini 의 +StaticEndpoints 중 subnetPrefix 가
+# 맞는 것을 쓴다. 성공하면 SELECTED_NAME / SELECTED_LOCAL / SELECTED_HOST / SELECTED_PORT.
 select_transport() {
     local count
     count="$(json_get 'len(cfg["transports"])')"
 
-    # host.json 을 아직 안 채웠으면 여기서 끊는다.
-    if json_get 'cfg["transports"][0]["hostAddress"]' | grep -q '^REPLACE-'; then
-        die "[오류] host.json 의 호스트 주소가 아직 채워지지 않았습니다." \
+    local endpoints
+    endpoints="$(static_endpoints)"
+    if [ -z "$endpoints" ]; then
+        die "[오류] Config/DefaultEngine.ini 에 +StaticEndpoints 가 없습니다." \
             "" \
-            "       맥미니에서 Tools/MultiUser/start-mu-server.command 를 실행하면" \
-            "       넣어야 할 hostMachine 과 hostAddress 가 출력됩니다." \
-            "       그 두 값을 Tools/MultiUser/host.json 에 넣고 커밋하세요."
+            "       Tailscale 은 멀티캐스트를 나르지 않아 자동 탐색이 불가능합니다." \
+            "       호스트 주소를 직접 지정해야 붙습니다. 예:" \
+            "         +StaticEndpoints=100.77.222.84:50002"
     fi
 
     local failures=()
     local i
     for (( i=0; i<count; i++ )); do
-        local name prefix host_addr local_ip
+        local name prefix host_addr local_ip endpoint ep
         name="$(json_get "cfg['transports'][$i]['name']")"
         prefix="$(json_get "cfg['transports'][$i]['subnetPrefix']")"
-        host_addr="$(json_get "cfg['transports'][$i]['hostAddress']")"
 
         printf '  %-10s 확인 중...' "$name"
+
+        # 접두사는 줄 맨 앞에서만 맞아야 한다. grep -F 로는 10.0.100.5 같은 주소도
+        # "100." 에 걸리므로 셸 패턴으로 앞자리를 고정한다.
+        endpoint=""
+        while IFS= read -r ep; do
+            case "$ep" in "$prefix"*) endpoint="$ep"; break ;; esac
+        done <<< "$endpoints"
+
+        if [ -z "$endpoint" ]; then
+            echo " 엔드포인트 없음"
+            failures+=("  - $name: DefaultEngine.ini 에 ${prefix}* 로 시작하는 +StaticEndpoints 가 없음")
+            continue
+        fi
+        host_addr="${endpoint%%:*}"
+        SELECTED_PORT="${endpoint##*:}"
 
         local_ip="$(local_address_for "$prefix")"
         if [ -z "$local_ip" ]; then
@@ -162,46 +194,12 @@ select_transport() {
         "       확인 순서:" \
         "         1) tailscale status  - 호스트가 목록에 보이는가" \
         "         2) 안 보이면 호스트와 내가 같은 tailnet(같은 계정)인지 확인" \
-        "         3) 호스트 주소가 바뀌었다면 Tools/MultiUser/host.json 을 고쳐 커밋"
+        "         3) 호스트 주소가 바뀌었다면 Config/DefaultEngine.ini 의" \
+        "            +StaticEndpoints 를 고쳐 커밋 (여기가 유일한 출처)"
 }
 
-# [사용하지 않음 - 2026-09-15]
-# Saved/Config/MacEditor/Engine.ini 에 기록하려던 함수. **동작하지 않는다.**
-# 에디터가 그 파일을 시작 시점에 통째로 덮어써서 StaticEndpoints 가 읽히기 전에
-# 사라진다. 대신 Config/DefaultEngine.ini 에 둔다 (호스트 주소는 머신마다 다르지
-# 않으므로 공유 파일에 둬도 된다). 머신별 UnicastEndpoint 는 커맨드라인으로 넘긴다.
-write_multiuser_config() {
-    local display_name="$1"
-    local port
-    port="$(json_get 'cfg["serverPort"]')"
-
-    local dir="$PROJECT_DIR/Saved/Config/MacEditor"
-    mkdir -p "$dir"
-    local ini="$dir/Engine.ini"
-
-    # 이 스크립트가 관리하는 블록만 걷어낸다.
-    if [ -f "$ini" ]; then
-        awk '
-            /^[[:space:]]*;[[:space:]]*<<< MultiUser launcher/ { skip=1; next }
-            /^[[:space:]]*;[[:space:]]*>>> MultiUser launcher/ { skip=0; next }
-            !skip
-        ' "$ini" > "$ini.tmp" && mv "$ini.tmp" "$ini"
-    else
-        : > "$ini"
-    fi
-
-    cat >> "$ini" <<EOF
-; <<< MultiUser launcher — 이 블록은 start-mu-editor.command 가 매번 덮어쓴다. 직접 고치지 말 것.
-; 선택된 경로: $SELECTED_NAME  (내 주소 $SELECTED_LOCAL → 호스트 $SELECTED_HOST:$port)
-[/Script/UdpMessaging.UdpMessagingSettings]
-UnicastEndpoint=$SELECTED_LOCAL:0
-!StaticEndpoints=ClearArray
-+StaticEndpoints=$SELECTED_HOST:$port
-
-[/Script/ConcertClient.ConcertClientConfig]
-ClientSettings=(DisplayName="$display_name",DiscoveryTimeoutSeconds=30)
-; >>> MultiUser launcher
-EOF
-
-    echo "$ini"
-}
+# [제거됨 - 2026-09-15] write_multiuser_config
+#
+# Saved/Config/MacEditor/Engine.ini 에 StaticEndpoints 를 주입하려던 함수였다.
+# 동작하지 않는다 — 에디터가 시작하면서 그 파일을 통째로 덮어써서, 써넣은 값이
+# 읽히기 전에 사라진다. Config/DefaultEngine.ini 의 +StaticEndpoints 가 유일한 출처다.

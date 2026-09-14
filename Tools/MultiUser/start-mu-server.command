@@ -55,7 +55,7 @@ if [ -z "$SERVER" ]; then
 fi
 
 SERVER_NAME="$(json_get 'cfg["serverName"]')"
-SERVER_PORT="$(json_get 'cfg["serverPort"]')"
+SERVER_PORT="$(static_endpoints | head -n 1 | sed -E 's/.*://')"
 
 MY_HOSTNAME="$(hostname -s)"
 MY_TAILSCALE="$(ifconfig 2>/dev/null | awk '$1 == "inet" { print $2 }' | grep '^100\.' | head -n 1)"
@@ -73,12 +73,12 @@ cat <<EOF
   포트      : $SERVER_PORT  (0.0.0.0 / 모든 경로에서 수신)
 ============================================================
 
-  host.json 에 들어가야 할 값:
+  설정에 들어가야 할 값:
 
-      "hostMachine": "$MY_HOSTNAME",
-      "hostAddress": "$MY_TAILSCALE"
+      host.json     -> "hostMachine": "$MY_HOSTNAME"
+      DefaultEngine -> +StaticEndpoints=$MY_TAILSCALE:$SERVER_PORT
 
-  이 값이 host.json 과 다르면 팀원이 접속하지 못합니다.
+  이 값이 설정과 다르면 팀원이 접속하지 못합니다.
 ============================================================
 
 EOF
