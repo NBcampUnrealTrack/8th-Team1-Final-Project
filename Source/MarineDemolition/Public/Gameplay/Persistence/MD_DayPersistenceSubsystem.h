@@ -35,6 +35,7 @@ public:
     bool TryGetSavedContaminationGeneration(const UMD_ScrapeSurfaceComponent* Surface,
         FMD_ContaminationGeneration& OutGeneration, bool& bOutLegacy) const;
     void ResetContaminationContext();
+    bool TryGetSavedContaminationLayout(const UMD_ScrapeSurfaceComponent* Surface, FGuid& OutLayout) const;
     bool ShouldDeferContaminationGeneration(const UMD_ScrapeSurfaceComponent* Surface) const;
 
     // 새 계약 시작 시 스냅샷 폐기
@@ -53,6 +54,7 @@ private:
     bool bDeferSavedContaminationGeneration = false;
     // Only immutable descriptors are cached, never cell arrays or UObject references.
     TMap<FName, TMap<FName, FMD_ContaminationGeneration>> SavedContaminationGenerations;
+    TMap<FName, TMap<FName, FGuid>> SavedContaminationLayouts;
 
     // 03 §3 허용 범위의 소량 악화: 지지대 1개 약화 + 오염 재부착 + 잔해 이동
     void ApplyOvernightWorsening(UWorld* World);

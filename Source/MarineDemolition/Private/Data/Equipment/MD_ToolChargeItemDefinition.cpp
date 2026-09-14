@@ -14,11 +14,11 @@ bool UMD_ToolChargeItemDefinition::CanGrant_Implementation(FMD_ItemGrantContext 
 		// 선행 검사에서 기록한 실패 결과의 전달
 		return false;
 	}
-	// 대상 식별자와 양의 유한 충전량 설정 확인
-	if (TargetItemAssetId.IsValid() == false || FMath::IsFinite(ChargeAmount) == false || ChargeAmount <= 0.0f)
+	// 만충으로 보충할 대상 도구의 식별자 확인
+	if (TargetItemAssetId.IsValid() == false)
 	{
 		// 실패 원인의 프로젝트 로그 기록
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 충전 대상 Asset ID가 유효하지 않거나 ChargeAmount가 양의 유한 값이 아님 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());
+		UE_LOG(MarineDemolition, Warning, TEXT("%s 충전 대상 Asset ID가 유효하지 않음 (Item=%s)"), *UE_CALL_LOCATIONINFO, *GetPathName());
 		// 충전물 설정 오류 전달
 		return false;
 	}
@@ -32,8 +32,8 @@ bool UMD_ToolChargeItemDefinition::CanGrant_Implementation(FMD_ItemGrantContext 
 		// 대상 도구가 없는 지급 요청 실패 전달
 		return false;
 	}
-	// 실제 잔량 저장소에 대한 검사를 도구 정의에 위임
-	return TargetTool->CanReceiveCharge(Context.Recipient, ChargeAmount);
+	// 대상 정의의 최대값만큼 보충 가능한지 검사하고 실제 보충은 상한으로 제한
+	return TargetTool->CanReceiveCharge(Context.Recipient, TargetTool->MaxCharge);
 }
 
 UMD_ToolDefinition* UMD_ToolChargeItemDefinition::FindTargetTool(AActor* Recipient)
@@ -80,6 +80,6 @@ bool UMD_ToolChargeItemDefinition::Grant_Implementation(FMD_ItemGrantContext Con
 	}
 	// BP 조건 검사 이후 현재 도구 재조회
 	UMD_ToolDefinition* TargetTool = FindTargetTool(Context.Recipient);
-	// 실제 도구 충전 결과를 결제 호출부에 전달
-	return IsValid(TargetTool) == true && TargetTool->ReceiveCharge(Context.Recipient, ChargeAmount) == true;
+	// 현재 잔량과 무관하게 대상 정의의 최대 충전량까지 보충한 결과 전달
+	return IsValid(TargetTool) == true && TargetTool->ReceiveCharge(Context.Recipient, TargetTool->MaxCharge) == true;
 }

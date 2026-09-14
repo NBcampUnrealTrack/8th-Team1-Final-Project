@@ -4,6 +4,8 @@
 #include "World/Interaction/MD_TravelConsole.h"
 
 #include "Character/MD_Character.h"
+#include "Online/Session/MD_TravelPreloadSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameplayTags/MD_GameplayTags.h"
@@ -32,6 +34,20 @@ AMD_TravelConsole::AMD_TravelConsole()
 	FMD_TravelSiteEntry& SiteBelmont = Sites.AddDefaulted_GetRef();
 	SiteBelmont.DisplayName = NSLOCTEXT("MDTravel", "Site_Belmont", "SS 벨몬트");
 	SiteBelmont.bAvailable = false;
+}
+
+void AMD_TravelConsole::BeginPlay()
+{
+    Super::BeginPlay();
+    if (auto* GI = GetGameInstance())
+        if (auto* Preload = GI->GetSubsystem<UMD_TravelPreloadSubsystem>())
+        {
+            // Only one configured available destination, never every entry in the roster.
+            if (Sites.IsEmpty()) Preload->QueueDestination(TargetLevel);
+            else for (int32 I = 0; I < Sites.Num(); ++I)
+                if (auto Level = ResolveSiteLevel(I); !Level.IsNull())
+                { Preload->QueueDestination(Level); break; }
+        }
 }
 
 TSoftObjectPtr<UWorld> AMD_TravelConsole::ResolveSiteLevel(int32 SiteIndex) const

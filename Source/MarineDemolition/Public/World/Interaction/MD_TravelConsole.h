@@ -34,6 +34,7 @@ public:
 	TSoftObjectPtr<UWorld> ResolveSiteLevel(int32 SiteIndex) const;
 
 protected:
+	virtual void BeginPlay() override;
 	UPROPERTY(VisibleAnywhere, Category="Console")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 	

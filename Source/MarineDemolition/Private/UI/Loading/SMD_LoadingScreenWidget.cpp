@@ -127,14 +127,16 @@ namespace
 	constexpr float VoyageRiseStartSeconds = 0.14f;
 	constexpr float VoyageRiseEndSeconds = 0.88f;
 	// 완료 교차 전환. 진행 문구가 빠지는 사이 완료 문구가 겹쳐 올라오고 안착하며 한 번 부푼다.
-	constexpr float CompletionExitEndSeconds = 0.18f;
-	constexpr float CompletionEnterStartSeconds = 0.12f;
-	constexpr float CompletionEnterEndSeconds = 0.38f;
-	constexpr float CompletionPulseSeconds = 0.48f;
+	constexpr float CompletionExitEndSeconds = 0.10f;
+	constexpr float CompletionEnterStartSeconds = 0.06f;
+	constexpr float CompletionEnterEndSeconds = 0.24f;
+	constexpr float CompletionPulseSeconds = 0.30f;
 	constexpr float CompletionPulseScale = 0.10f;
 	// 도착 순간 등대에서 한 번 번쩍이는 빛. 끝나는 시각은 시작+길이로 계산해 둘이 어긋나지 않게 한다.
-	constexpr float BeaconFlashStartSeconds = 0.38f;
-	constexpr float BeaconFlashDurationSeconds = 0.40f;
+    // Keep the upstream flash proportions within the project's shortened completion phase.
+    constexpr float CompletionTimeScale = static_cast<float>(MD_LoadingScreen::CompletionDisplaySeconds / 0.85);
+    constexpr float BeaconFlashStartSeconds = 0.38f * CompletionTimeScale;
+    constexpr float BeaconFlashDurationSeconds = 0.40f * CompletionTimeScale;
 
 	static_assert(BeaconFlashStartSeconds + BeaconFlashDurationSeconds
 		<= MD_LoadingScreen::CompletionDisplaySeconds,

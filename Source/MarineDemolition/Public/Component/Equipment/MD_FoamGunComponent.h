@@ -5,16 +5,19 @@
 #include "MD_FoamGunComponent.generated.h"
 
 class AMD_FoamProjectile;
+class UMD_EquipHotbarComponent;
+class UMD_ToolDefinition;
 class UNiagaraComponent;
 class UNiagaraSystem;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnFoamChargeChanged, int32, NewCharge);
+// 소수 충전량을 포함한 Hotbar 잔량 변경 전달
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnFoamChargeChanged, float, NewCharge);
 
 /**
  * 폼건 상태·탄도 정본 (기획 08 §4.2).
  *
  * 세 가지를 한곳에서 관리한다:
- *  1) 충전 게이지 — 만충 100, 사격 1회 −25, 카트리지 +25. 서버가 바꾸고 복제로 퍼진다.
+ *  1) 충전 게이지 — ToolDefinition 최대값 및 Hotbar에 적용된 사용 비용과 잔량 공유.
  *  2) 탄도 수치 정본 — 발사속도·중력 배율을 궤적 예측과 실발사체가 공유해야
  *     예측선과 실제 탄도가 일치한다 (기획 §4.2의 변수 공유 요구).
  *  3) 조준 궤적 프리뷰 — 폼건을 든 동안 소유 클라이언트에서만 NS_Foam_Trajectory를
@@ -28,32 +31,42 @@ class MARINEDEMOLITION_API UMD_FoamGunComponent : public UActorComponent
 public:
 	UMD_FoamGunComponent();
 
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
+	virtual void BeginPlay() override;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType,
 	                           FActorComponentTickFunction* ThisTickFunction) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+	// 실제 사격과 충전물이 공유하는 Hotbar 잔량 조회
 	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
-	int32 GetFoamCharge() const { return FoamCharge; }
+	float GetFoamCharge() const;
 
+	// 장착한 도구 정의의 최대 충전량 조회
 	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
-	bool HasChargeForShot() const { return FoamCharge >= ShotCost; }
+	float GetMaxCharge();
 
-	// 만충이면 상인이 카트리지 판매를 거절한다 (기획 §4.3)
+	// 장착한 폼건 정의의 최대 충전량을 기준으로 충전 사용 여부 확인
 	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
-	bool IsChargeFull() const { return FoamCharge >= MaxCharge; }
+	bool IsChargeRequired() const;
 
-	// 사격 1회분 차감. 성공 시 true. 서버에서만 호출
+	// 충전을 사용하지 않는 폼건의 잔량 제한 없는 사격 허용
+	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
+	bool HasChargeForShot() const;
+
+	// 충전 불필요 또는 만충 상태에서 카트리지 추가 보충 차단
+	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
+	bool IsChargeFull() const;
+
+	// 사격 한 번의 사용 비용을 서버에서 차감한 결과 전달
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|FoamGun")
 	bool TryConsumeShotCharge();
 
-	// 카트리지 충전(+25)용. 상점/보관함이 호출한다. 서버 전용
+	// BP의 보충 요청을 공통 Hotbar의 충전 상한과 서버 처리에 위임
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|FoamGun")
-	void AddCharge(int32 Amount);
+	void AddCharge(float Amount);
 
-	// 카트리지 1개 = 사격 1회분(기획 08 §4.3). 상점 충전량 산정에 쓴다
+	// 아이템 지급 시 Hotbar 슬롯에 설정된 한 번의 사용 비용 조회
 	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
-	int32 GetShotCost() const { return ShotCost; }
+	float GetShotCost() const;
 
 	// 발사 원점. 조준선과 탄도가 어긋나지 않도록 카메라 시점 기준으로 계산한다 (서버·클라 동일 산식)
 	FVector GetLaunchOrigin() const;
@@ -106,29 +119,21 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|FoamGun|Ballistics", meta = (ClampMin = "0.0"))
 	float MuzzleForwardOffset = 40.f;
 
-	// 만충 게이지. 기획 정본 100
-	UPROPERTY(EditDefaultsOnly, Category = "MD|FoamGun", meta = (ClampMin = "1"))
-	int32 MaxCharge = 100;
+	// 공통 충전 잔량 및 비용을 보관하는 소유자 Hotbar 조회
+	UMD_EquipHotbarComponent* GetHotbar() const;
 
-	// 사격 1회 소모량. 기획 정본 25 (4회분)
-	UPROPERTY(EditDefaultsOnly, Category = "MD|FoamGun", meta = (ClampMin = "1"))
-	int32 ShotCost = 25;
+	// 실제 사격 대상인 현재 장착 폼건의 정의 조회
+	UMD_ToolDefinition* GetEquippedFoamTool() const;
 
 private:
+	// Hotbar 복제 및 서버 변경 알림을 기존 폼건 UI 이벤트로 전달
 	UFUNCTION()
-	void OnRep_FoamCharge();
+	void HandleHotbarChanged();
 
 	// 폼건을 들고 있는 동안만 프리뷰를 유지한다
 	bool ShouldShowTrajectory() const;
 	void UpdateTrajectoryPreview();
 	void DestroyTrajectoryPreview();
-
-	// 현재 충전량. 서버가 바꾸고 복제로 퍼진다.
-	// 신품은 충전 0 — 만충 비용 = 카트리지 4개 220₡가 기획 전제 (08 §4.3).
-	// 테스트·스타트킷 지급분은 에디터에서 초기값을 올려 쓴다
-	UPROPERTY(EditAnywhere, ReplicatedUsing = OnRep_FoamCharge, Category = "MD|FoamGun",
-		meta = (ClampMin = "0", AllowPrivateAccess = "true"))
-	int32 FoamCharge = 0;
 
 	// 소유 클라이언트 전용 궤적 프리뷰 컴포넌트
 	UPROPERTY(Transient)

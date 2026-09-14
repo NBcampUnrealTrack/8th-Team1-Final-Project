@@ -163,8 +163,10 @@ void UMD_ScrapeMeshUVSyncComponent::ServerRequestSurface_Implementation(
     if (ServerDescriptor.TransferId != 0 || Now - LastServerRequest < 0.2) { return; }
     LastServerRequest = Now;
     if (Now - LastFullSnapshotCapture < 1.0) { ClientAbortTransfer(Surface, 0); return; }
-    if (!IsSurfaceAllowed(Surface) || LayoutId != Surface->GetContaminationLayoutId()
-        || Grid != Surface->GetContaminationGridDimensions()
+    if (!IsSurfaceAllowed(Surface)) { ClientAbortTransfer(Surface, 0); return; }
+    if (LayoutId != Surface->GetContaminationLayoutId())
+    { ClientSelectSurfaceLayout(Surface, Surface->GetContaminationLayoutId()); return; }
+    if (Grid != Surface->GetContaminationGridDimensions()
         || !FMD_ScrapeSurfaceLayout::AreCarrierScalesCompatible(CarrierScale, Surface->GetContaminationCarrierWeightScale()))
     { ClientAbortTransfer(Surface, 0); return; }
     UMD_ScrapeMeshUVSyncSubsystem* Subsystem = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>();
@@ -201,6 +203,17 @@ void UMD_ScrapeMeshUVSyncComponent::ServerRequestSurface_Implementation(
         ServerDescriptor.bCompressed, FMD_ScrapeMeshUVSyncProtocol::MaximumPagesInFlight, MaximumPagesPerPump,
         FPlatformTime::Seconds() - RequestStartedSeconds);
     SendPages();
+}
+
+void UMD_ScrapeMeshUVSyncComponent::ClientSelectSurfaceLayout_Implementation(
+    UMD_ScrapeSurfaceComponent* Surface, const FGuid LayoutId)
+{
+    if (ClientSurface.Get() != Surface || !IsSurfaceAllowed(Surface)) return;
+    ClearClientTransfer();
+    ClientCheckpoints.Remove(Surface);
+    // The server supplies only a GUID. Resolution accepts this asset's registered predecessor.
+    if (!Surface->SelectCompatibleContaminationLayout(LayoutId))
+        ClientCheckpoints.FindOrAdd(Surface).LastChecked = GetWorld()->GetTimeSeconds();
 }
 
 void UMD_ScrapeMeshUVSyncComponent::SendPages()

@@ -96,6 +96,13 @@ protected:
 		meta = (EditCondition = "bTintPlaceholderMeshByCategory"))
 	FName TintParameterName = TEXT("Tint");
 
+	/**
+	 * 품목이 삼켜질 때 그 자리에서 한 번 재생하는 투입음 event tag.
+	 * 사운드 에셋이 아니라 태그다 — 어떤 소재가 나갈지는 DA_MD_Audio_Carry 가 정한다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash|사운드")
+	FGameplayTag InsertSoundTag;
+
 	/** 지금까지 삼킨 물건 수. UI 표시용이라 복제한다 */
 	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "MD|Trash")
 	int32 SortedCount = 0;
@@ -115,6 +122,9 @@ private:
 		int32 DiscardedCount,
 		int32 RefundCredits,
 		FVector Location);
+
+	/** 투입음을 이 머신에서 재생한다. 위 멀티캐스트가 모든 머신에서 부른다 */
+	void PlayInsertSound(const FVector& Location) const;
 
 	/** 판정 → 점수 → 삼킴. 서버 전용 */
 	void JudgeAndSwallow(AActor* Item);

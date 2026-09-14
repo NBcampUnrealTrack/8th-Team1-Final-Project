@@ -25,6 +25,7 @@ class AMD_Character;
 class UStaticMeshComponent;
 
 enum class EMD_ShopPurchaseResult : uint8;
+enum class EMD_ShopSaleResult : uint8;
 
 /**
  * 모선 상인 노라 브릭스 (팀 호칭 "브릭스").
@@ -54,6 +55,12 @@ public:
 
 	/** 서버 카탈로그와 경제 원장을 사용해 구매자에게 품목을 지급하고 결제를 확정하는 함수 */
 	EMD_ShopPurchaseResult TryPurchaseItem(AMD_Character* PurchasingCharacter, FPrimaryAssetId ItemAssetId);
+
+	// 서버 카탈로그와 현재 소지 슬롯을 검증하여 판매 처리
+	EMD_ShopSaleResult TrySellItem(AMD_Character* SellingCharacter, FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity);
+
+	// 서버 판매 결과를 현재 상점과 상인 대사에 반영
+	void ReceiveShopSaleResult(EMD_ShopSaleResult Result);
 
 	/** 서버 구매 결과를 현재 로컬 상점과 대사창에 반영하는 함수 */
 	void ReceiveShopPurchaseResult(FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result);
@@ -148,6 +155,12 @@ private:
 	UFUNCTION()
 	void HandleShopItemPurchaseRequested(FPrimaryAssetId ItemAssetId);
 
+protected:
+	// BP 화면의 판매 요청을 소유 플레이어 서버 RPC에 연결
+	UFUNCTION()
+	void HandleShopItemSaleRequested(FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity);
+
+private:
 	/** 상인 복제 미러가 바뀔 때 열려 있는 상점 정보와 구매 가능 상태를 갱신하는 처리 */
 	UFUNCTION()
 	void HandleMerchantStateChangedForShop();

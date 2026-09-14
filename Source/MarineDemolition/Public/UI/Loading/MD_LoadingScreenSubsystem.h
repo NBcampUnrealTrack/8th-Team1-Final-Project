@@ -7,6 +7,7 @@
 #include "MD_LoadingScreenSubsystem.generated.h"
 
 class APlayerController;
+class UGameViewportClient;
 class SWidget;
 class UFont;
 class UTexture2D;
@@ -22,7 +23,7 @@ struct FWorldContext;
  *   RunAfterIntro       → 덮인 뒤에야 실제 트래블 실행
  *   PreLoadMap          → MoviePlayer가 전용 스레드로 블로킹 구간을 그림
  *   PostLoadMap         → viewport 오버레이가 다시 이어받고 준비 판정 시작
- *   준비 완료/타임아웃  → COMPLETE 0.85초 → outro 1.10초 fade-out
+ *   준비 완료/타임아웃  → COMPLETE 0.35초 → outro 0.45초 fade-out
  *
  * GameInstance 스코프인 이유는 맵이 바뀌어도 살아 있어야 하기 때문이다.
  */
@@ -48,6 +49,8 @@ public:
 	 * 종료를 확정하지는 않는다. 스트리밍까지 확인한 뒤 TryFinishAfterWorldLoad가 결정한다.
 	 */
 	void NotifyPlayerReady(APlayerController* PlayerController);
+	/** Refresh the fully covered view during the initial map handoff. */
+	bool UpdateCoveredWorldRendering();
 
 	/** outro는 이미 걷히는 중이므로 활성으로 보지 않는다. */
 	UFUNCTION(BlueprintPure, Category = "MD|UI|Loading")
@@ -71,6 +74,7 @@ private:
 	/** None이면 로딩을 닫아도 된다. 그 외 값은 아직 막고 있는 원인이며 타임아웃 로그에 쓴다. */
 	EMD_LoadingReadinessBlocker CheckWorldReadiness() const;
 	void TryFinishAfterWorldLoad();
+	void RestoreWorldRendering();
 	void FinishLoadingScreen(bool bShowCompletion = true);
 	void BeginOutro();
 	void StartLoadingVisuals(EMD_LoadingContext Context, bool bSkipIntro);
@@ -114,6 +118,9 @@ private:
 	/** 위젯은 재사용하되 부착 여부는 따로 본다(하드 트래블 후 overlay slot이 비워진다). */
 	bool bViewportWidgetAttached = false;
 	int32 ReadyStablePollCount = 0;
+	// Own only a viewport that this loading screen paused; preserve a pre-existing disabled state.
+	TWeakObjectPtr<UGameViewportClient> PausedWorldViewport;
+	uint64 WorldRenderingResumedFrame = 0;
 	/** 준비 판정 폴링을 시작한 시각. 0 이하이면 폴링 중이 아니다. */
 	double ReadinessWaitStartSeconds = 0.0;
 };

@@ -180,12 +180,27 @@ void UMD_ShopWidget::RebuildItemList()
 	if (IsValid(Catalog) == true && ItemCardClass != nullptr)
 	{
 		// 품목마다 전체 카탈로그를 재검색하지 않는 일괄 준비 검사
-		DisplayItems = Catalog->GetAvailableItems();
+		DisplayItems = bSellingMode == true ? Catalog->Items : Catalog->GetAvailableItems();
 		// 정상 품목 중 현재 분류 밖의 항목만 제외
 		DisplayItems.RemoveAll([this](FMD_ShopItem& Item)
 		{
-			// 전체 탭의 카탈로그 순서를 유지하는 분류 필터
-			return bShowAllCategories == false && Item.Category != SelectedCategory;
+			// 구매와 판매 목록에 동일한 선택 카테고리 적용
+			if (bShowAllCategories == false && Item.Category != SelectedCategory)
+			{
+				// 선택 분류에 속하지 않는 품목 제외
+				return true;
+			}
+			// 판매 목록에서는 구매 해금 대신 실제 소지 수량과 판매 단가 검사
+			if (bSellingMode == true)
+			{
+				// 중복 등록 품목의 거래를 서버와 동일하게 차단할 조회 항목
+				FMD_ShopItem UniqueItem;
+				// 소지한 판매 가능 품목만 카탈로그 순서로 표시
+				return Catalog->FindItemByAssetId(Item.GetItemAssetId(), UniqueItem) == false
+					|| Item.GetSalePrice() < 0 || FindSaleSlot(Item.GetItemAssetId()) == INDEX_NONE;
+			}
+			// 선택 분류와 표시 조건을 만족한 품목 유지
+			return false;
 		});
 	}
 	// 그룹 또는 표시 개수가 달라진 경우에만 카드 재구성 필요
@@ -233,8 +248,14 @@ void UMD_ShopWidget::RebuildItemList()
 		}
 		// 카탈로그 원본 대신 표시용 복사본의 가격 변경
 		FMD_ShopItem& Item = DisplayItems[Index];
-		// 기존 카드를 재사용해도 최신 무료 재구매 가격 반영
-		Item.Price = Item.GetPurchasePrice(OwnedItemIds);
+		// 현재 거래 방향에 따라 무료 재구매 가격 또는 개별 판매 단가 반영
+		Item.Price = bSellingMode == true ? Item.GetSalePrice() : Item.GetPurchasePrice(OwnedItemIds);
+		// 판매 단가는 묶음과 무관한 개당 금액으로 표시
+		if (bSellingMode == true)
+		{
+			// 카드의 가격 표시를 개별 수량 단위로 전환
+			Item.bPricePerUnit = true;
+		}
 		// 같은 식별자의 이름과 아이콘 변경도 현재 정의에서 갱신
 		ItemCard->SetItem(Item);
 		// 신규 카드에만 선택 그룹과 클릭 이벤트 연결
@@ -282,11 +303,18 @@ void UMD_ShopWidget::RebuildItemList()
 
 void UMD_ShopWidget::RefreshSelectedItem()
 {
+	// 현재 목록의 거래 방향을 실제 실행 버튼에 표시
+	if (IsValid(Btn_Buy) == true)
+	{
+		// 기존 버튼 스타일을 유지하며 구매와 판매 동작 구분
+		Btn_Buy->SetContentText(bSellingMode == true ? NSLOCTEXT("MDShop", "SellButton", "판매") : NSLOCTEXT("MDShop", "BuyButton", "구매"));
+	}
 	// 선택 품목을 카탈로그에서 조회
 	FMD_ShopItem selectedItem;
 	// 한 번 조회한 판매 항목으로 정의 준비 상태까지 확인
 	bool foundItem = IsValid(Catalog) == true && SelectedItemAssetId.IsValid() == true
-		&& Catalog->FindItemByAssetId(SelectedItemAssetId, selectedItem) == true && selectedItem.IsDefinitionLoaded() == true;
+		&& Catalog->FindItemByAssetId(SelectedItemAssetId, selectedItem) == true
+		&& (bSellingMode == true ? selectedItem.GetSalePrice() >= 0 : selectedItem.IsDefinitionLoaded() == true);
 
 	// 여러 표시 요소가 함께 사용할 공통 정의 조회
 	UMD_ItemDefinition* Definition = foundItem == true ? selectedItem.GetDefinition() : nullptr;
@@ -295,7 +323,8 @@ void UMD_ShopWidget::RefreshSelectedItem()
 	{
 		if (IsValid(Txt_DetailName) == true)
 		{
-			Txt_DetailName->SetText(FText::GetEmpty());
+			// 판매 목록 소진 시 다음 행동을 판단할 수 있는 빈 상태 안내
+			Txt_DetailName->SetText(bSellingMode == true ? NSLOCTEXT("MDShop", "NoItemsToSell", "판매할 아이템이 없습니다.") : FText::GetEmpty());
 		}
 
 		if (IsValid(Txt_DetailDescription) == true)
@@ -326,8 +355,14 @@ void UMD_ShopWidget::RefreshSelectedItem()
 		return;
 	}
 
-	// 카드 및 서버와 같은 규칙으로 상세 표시와 잔액 검사 금액 확정
-	selectedItem.Price = selectedItem.GetPurchasePrice(OwnedItemIds);
+	// 카드와 서버가 동일한 규칙을 사용하도록 현재 거래 단가 확정
+	selectedItem.Price = bSellingMode == true ? selectedItem.GetSalePrice() : selectedItem.GetPurchasePrice(OwnedItemIds);
+	// 판매 상세 가격을 개당 단위로 표시
+	if (bSellingMode == true)
+	{
+		// 묶음 구매가와 개별 판매가의 단위 혼동 방지
+		selectedItem.bPricePerUnit = true;
+	}
 
 	// 선택 품목의 텍스트와 아이콘 표시
 	if (IsValid(Txt_DetailName) == true)
@@ -350,8 +385,15 @@ void UMD_ShopWidget::RefreshSelectedItem()
 
 	if (IsValid(Txt_Owned) == true)
 	{
-		// 개당 판매 품목은 구매 이력과 무관하게 무제한 재고 표시
-		if (selectedItem.bPricePerUnit == true)
+		// 판매 화면에는 상점 재고 대신 현재 소유 수량 표시
+		if (bSellingMode == true)
+		{
+			// 판매 가능한 현재 수량을 상세 영역에 표시
+			Txt_Owned->SetText(FText::Format(NSLOCTEXT("MDShop", "SaleOwnedCount", "보유 수량: {0}개"),
+				FText::AsNumber(ObservedHotbar.IsValid() == true ? ObservedHotbar->GetItemCountAtSlot(FindSaleSlot(SelectedItemAssetId)) : 0)));
+		}
+		// 개당 구매 품목은 구매 이력과 무관하게 무제한 재고 표시
+		else if (selectedItem.bPricePerUnit == true)
 		{
 			// 반복 구매 가능한 품목의 상점 잔여 수량 표시
 			Txt_Owned->SetText(NSLOCTEXT("MDShop", "StockUnlimited", "잔여 수량: 무제한"));
@@ -373,9 +415,11 @@ void UMD_ShopWidget::RefreshSelectedItem()
 	// 상점 해금 및 결제 조건과 유형별 정의의 지급 조건을 함께 적용
 	if (IsValid(Btn_Buy) == true)
 	{
-		// 무료 재구매 가격과 등록된 금지 및 실제 지급 조건으로 구매 판정
-		Btn_Buy->SetIsEnabled(selectedItem.IsUnlocked(ShopInfo.Affinity, QuestCompletions, OwnedItemIds) == true
-			&& selectedItem.Price >= 0 && ShopInfo.Credits >= selectedItem.Price && IsItemGrantable(selectedItem) == true);
+		// 판매는 실제 소지 수량과 적립 한도이며 구매는 기존 해금 및 지급 조건 적용
+		Btn_Buy->SetIsEnabled(bSellingMode == true
+			? FindSaleSlot(SelectedItemAssetId) != INDEX_NONE && selectedItem.Price >= 0 && ShopInfo.Credits <= MAX_int32 - selectedItem.Price
+			: selectedItem.IsUnlocked(ShopInfo.Affinity, QuestCompletions, OwnedItemIds) == true
+				&& selectedItem.Price >= 0 && ShopInfo.Credits >= selectedItem.Price && IsItemGrantable(selectedItem) == true);
 	}
 }
 
@@ -512,6 +556,14 @@ void UMD_ShopWidget::HandleItemSelected(FPrimaryAssetId ItemAssetId)
 
 void UMD_ShopWidget::HandleBuyClicked()
 {
+	// 판매 목록의 실행 버튼은 현재 보유 품목 한 개 회수 요청
+	if (bSellingMode == true)
+	{
+		// 실제 소지 상태를 재검사하는 공통 BP 판매 진입점 호출
+		RequestSelectedItemSale();
+		// 같은 클릭으로 구매까지 진행되는 상황 방지
+		return;
+	}
 	// 한 번 조회한 판매 정보를 클릭 직전 검증에도 재사용
 	FMD_ShopItem SelectedItem;
 	// 유효한 선택과 유일한 판매 항목 및 준비된 정의를 함께 검사
@@ -532,4 +584,80 @@ void UMD_ShopWidget::HandleBuyClicked()
 
 	// 실제 구매 시스템으로 선택 품목 요청 전달
 	OnItemPurchaseRequested.Broadcast(SelectedItemAssetId);
+}
+
+void UMD_ShopWidget::SetSellingMode(bool bInSellingMode)
+{
+	// 현재 목록의 거래 방향 저장
+	bSellingMode = bInSellingMode;
+	// 새 목록에서 첫 보유 품목을 선택하도록 이전 선택 해제
+	SelectedItemAssetId = FPrimaryAssetId();
+	// 소지 상태와 카드 및 상세 화면을 함께 갱신
+	RefreshDisplay();
+}
+
+int32 UMD_ShopWidget::FindSaleSlot(FPrimaryAssetId ItemAssetId)
+{
+	// 소유 Pawn의 보관 상태를 구독하는 활성 화면만 판매 허용
+	if (ObservedHotbar.IsValid() == false || ItemAssetId.IsValid() == false)
+	{
+		// 유효한 판매 위치 부재 전달
+		return INDEX_NONE;
+	}
+	// 동일 AssetId가 하나의 슬롯에만 존재하는 공통 인벤토리 탐색
+	for (int32 SlotIndex = 0; SlotIndex < ObservedHotbar->GetSlotCount(); ++SlotIndex)
+	{
+		// 현재 위치의 실제 아이템 조회
+		UMD_ItemDefinition* Item = ObservedHotbar->GetItemAtSlot(SlotIndex);
+		// 남은 수량과 전체 식별자가 일치하는 소지 슬롯 선택
+		if (IsValid(Item) == true && Item->GetPrimaryAssetId() == ItemAssetId && ObservedHotbar->GetItemCountAtSlot(SlotIndex) > 0)
+		{
+			// 서버에서 다시 검증할 예상 위치 전달
+			return SlotIndex;
+		}
+	}
+	// 판매 가능한 소지품 부재 전달
+	return INDEX_NONE;
+}
+
+void UMD_ShopWidget::RequestSelectedItemSale(int32 Quantity)
+{
+	// 숨겨진 화면과 잘못된 수량 요청 차단
+	if (IsActivated() == false || bSellingMode == false || Quantity <= 0)
+	{
+		// BP 알림을 포함한 잘못된 요청 결과 전달
+		ReceiveSaleResult(EMD_ShopSaleResult::InvalidRequest);
+		// 판매 요청 진행 종료
+		return;
+	}
+	// 클릭 직전의 단가를 검증할 원본 카탈로그 항목
+	FMD_ShopItem Item;
+	// 무효 품목과 판매 불가 유형 검사
+	if (IsValid(Catalog) == false || Catalog->FindItemByAssetId(SelectedItemAssetId, Item) == false || Item.GetSalePrice() < 0)
+	{
+		// 현재 품목의 거래 불가 알림
+		ReceiveSaleResult(EMD_ShopSaleResult::NotSellable);
+		// 소지 수량을 변경하지 않은 요청 종료
+		return;
+	}
+	// 드래그 교환이나 소비 이후의 최신 보관 위치 조회
+	int32 SlotIndex = FindSaleSlot(SelectedItemAssetId);
+	// 예상 수량보다 적은 소지품의 요청 차단
+	if (SlotIndex == INDEX_NONE || ObservedHotbar->GetItemCountAtSlot(SlotIndex) < Quantity)
+	{
+		// 복제된 실제 수량 기준 판매 불가 알림
+		ReceiveSaleResult(EMD_ShopSaleResult::NotOwned);
+		// 잘못된 판매 요청 종료
+		return;
+	}
+	// 상인에게 단가 없이 전체 식별자와 위치 및 수량만 전달
+	OnItemSaleRequested.Broadcast(SelectedItemAssetId, SlotIndex, Quantity);
+}
+
+void UMD_ShopWidget::ReceiveSaleResult(EMD_ShopSaleResult Result)
+{
+	// 최신 복제 상태로 소진된 품목과 남은 수량 반영
+	RefreshDisplay();
+	// 판매 성공 및 실패 이유를 BP 사운드와 알림에 전달
+	OnSaleCompleted.Broadcast(Result);
 }

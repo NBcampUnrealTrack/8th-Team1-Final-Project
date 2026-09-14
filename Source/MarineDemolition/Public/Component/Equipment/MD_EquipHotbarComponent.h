@@ -31,6 +31,10 @@ struct MARINEDEMOLITION_API FMD_HotbarToolEntry
 	// 보관 중인 일반 충전 도구의 현재 잔량
 	UPROPERTY(BlueprintReadOnly, Category = "Hotbar")
 	float Charge = 0.0f;
+
+	// 구매 또는 기본 지급 시 도구 정의에서 복사한 한 번의 사용 비용
+	UPROPERTY(BlueprintReadOnly, Category = "Hotbar")
+	float CostPerOnce = 0.0f;
 };
 
 UCLASS(ClassGroup=(MarineDemolition), meta=(BlueprintSpawnableComponent))
@@ -105,6 +109,18 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")
 	float GetToolCharge(UMD_ToolDefinition* ToolDefinition);
 
+	// 지급 시 슬롯에 적용한 도구의 한 번 사용 비용 조회
+	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")
+	float GetToolCostPerOnce(UMD_ToolDefinition* ToolDefinition);
+
+	// 보유 도구의 한 번 사용 가능 여부이며 최대 충전량 영은 무제한 사용
+	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")
+	bool IsToolChargeAvailable(UMD_ToolDefinition* ToolDefinition);
+
+	// 서버에서 지급 시 설정한 비용만 차감하고 슬롯 복제와 UI 갱신 전달
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar|Charge")
+	bool ConsumeToolCharge(UMD_ToolDefinition* ToolDefinition);
+
 	// 도구 보유 상태와 충전 상한을 기준으로 보충 가능 여부 확인
 	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")
 	bool CanAddToolCharge(UMD_ToolDefinition* ToolDefinition, float Amount);
@@ -132,6 +148,14 @@ public:
 	// 휠 등 BP 입력에 따른 슬롯 순환
 	UFUNCTION(BlueprintCallable, Category = "MD|HotBar")
 	void CycleSlot(int32 Direction);
+
+	// 이동 원본의 아이템과 두 슬롯 범위 및 서로 다른 위치 여부 검사
+	UFUNCTION(BlueprintPure, Category = "MD|Hotbar")
+	bool CanSwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex);
+
+	// 빈 슬롯 이동을 포함한 두 슬롯 교환, 서버에서는 적용 결과이며 클라이언트에서는 요청 전송 결과
+	UFUNCTION(BlueprintCallable, Category = "MD|Hotbar")
+	bool SwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex);
 
 	// 기존 저장 형식에 슬롯 순서를 보존한 공통 정의 경로 제공
 	TArray<TSoftObjectPtr<UDataAsset>> BuildEquipmentSaveData() const;
@@ -167,6 +191,9 @@ protected:
 
 	// 정의의 전체 AssetId에 일치하는 보관 위치 조회
 	int32 FindItemEntry(UMD_ItemDefinition* ItemDefinition) const;
+	// 요청 당시 두 아이템이 유지된 경우에만 서버에서 슬롯 교환을 확정하는 요청
+	UFUNCTION(Server, Reliable)
+	void ServerSwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex, UMD_ItemDefinition* ExpectedSourceItem, UMD_ItemDefinition* ExpectedTargetItem);
 
 	// 서버 슬롯 변경을 캐릭터와 UI 및 복제 대상에 전달
 	void NotifyEntriesChanged();

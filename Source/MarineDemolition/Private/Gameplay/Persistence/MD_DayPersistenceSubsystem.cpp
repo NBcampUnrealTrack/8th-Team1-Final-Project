@@ -15,6 +15,7 @@
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 namespace
 {
@@ -323,6 +324,7 @@ void UMD_DayPersistenceSubsystem::ResetContaminationContext()
     bLegacyContaminationGeneration=false;
     bDeferSavedContaminationGeneration=false;
     SavedContaminationGenerations.Empty();
+    SavedContaminationLayouts.Empty();
 }
 
 bool UMD_DayPersistenceSubsystem::IsContaminationContextReady(const UWorld* World) const
@@ -342,6 +344,7 @@ void UMD_DayPersistenceSubsystem::PrepareContaminationContext(
 {
     if (!World || World->GetNetMode()==NM_Client) return;
     if (!SavedWorld && !bNewContract && IsContaminationContextReady(World)) return;
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Contamination_PrepareSession);
     ResetContaminationContext();
     ContaminationContextWorld=World;
     const TArray<FMD_WallContaminationRecord>* Records=nullptr;
@@ -367,9 +370,25 @@ void UMD_DayPersistenceSubsystem::PrepareContaminationContext(
     bDeferSavedContaminationGeneration=bDeferSavedGeneration && Records;
     if (Records)
         for (const auto& Record:*Records)
+        {
+            if (Record.LayoutVersion == 1 && Record.LayoutId.IsValid())
+                SavedContaminationLayouts.FindOrAdd(Record.WallName)
+                    .Add(Record.SurfaceComponentName, Record.LayoutId);
             if (Record.Generation.IsValid())
                 SavedContaminationGenerations.FindOrAdd(Record.WallName)
                     .Add(Record.SurfaceComponentName,Record.Generation);
+        }
+}
+
+bool UMD_DayPersistenceSubsystem::TryGetSavedContaminationLayout(
+    const UMD_ScrapeSurfaceComponent* Surface, FGuid& OutLayout) const
+{
+    if (!Surface || !Surface->GetOwner() || !IsContaminationContextReady(Surface->GetWorld())) return false;
+    const auto* Components = SavedContaminationLayouts.Find(Surface->GetOwner()->GetFName());
+    const FGuid* Layout = Components ? Components->Find(GetPersistentSurfaceComponentName(Surface)) : nullptr;
+    if (!Layout) return false;
+    OutLayout = *Layout;
+    return true;
 }
 
 bool UMD_DayPersistenceSubsystem::TryGetSavedContaminationGeneration(
@@ -397,6 +416,7 @@ bool UMD_DayPersistenceSubsystem::ShouldDeferContaminationGeneration(
 
 void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_DayPersistence_CaptureSnapshot);
     if (!World || World->GetNetMode() == NM_Client)
     {
         return;
@@ -684,6 +704,12 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
     {
         if (UMD_ScrapeSurfaceComponent* const Surface = FindSavedScrapeSurface(Record, WallsByName, SurfacesByOwnerName); Surface != nullptr)
         {
+            if (Record.LayoutVersion == 1 && !Surface->SelectCompatibleContaminationLayout(Record.LayoutId))
+            {
+                UE_LOG(LogTemp, Error, TEXT("Cannot restore exact saved contamination layout for %s/%s."),
+                    *Record.WallName.ToString(), *Record.SurfaceComponentName.ToString());
+                return false;
+            }
             if (!Surface->CanRestoreContaminationLayout(
                     Record.LayoutVersion, Record.LayoutId, Record.GridDimensions)
                 || (Record.LayoutVersion == 1 && !FMD_ScrapeSurfaceLayout::AreCarrierScalesCompatible(

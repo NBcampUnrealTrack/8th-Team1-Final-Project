@@ -31,7 +31,11 @@ public class MarineDemolition : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"ImageWrapper", "Slate", "SlateCore", "MoviePlayer",
+			// 패키지 빌드의 맵 에셋 클래스 조회
+			"AssetRegistry",
 			"DeveloperSettings",
+            // Process newly registered collision bodies without advancing simulation during map loading.
+            "Chaos", "PhysicsCore",
 			"ApplicationCore",
 			"CoreOnline",
 			// 기존 온라인 음성 캡처와 입출력 장치 런타임 제어

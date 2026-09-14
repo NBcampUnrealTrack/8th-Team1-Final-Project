@@ -59,15 +59,19 @@ public:
 		meta = (ClampMin = "0.1"))
 	float CutSpeedMultiplier = 1.0f;
 
-	// 충전 도구의 최대 충전량이며 충전 기능이 없는 도구는 영
+	// 구매 시 채울 최대 충전량이며 영이면 충전 조건 없이 사용
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Charge", meta = (ClampMin = "0.0"))
 	float MaxCharge = 0.0f;
 
-	// 실제 도구 지급 시 설정할 초기 충전량
+	// 한 번 사용에 차감할 충전량이며 구매 시 보관 슬롯에 적용
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Charge", meta = (ClampMin = "0.0"))
-	float InitialCharge = 0.0f;
+	float CostPerOnce = 1.0f;
 
 public:
+	// 구매와 기본 지급에서 공통으로 사용할 최대 충전량 및 사용 비용 검사
+	UFUNCTION(BlueprintPure, Category = "Tool|Charge")
+	bool IsChargeSettingsValid();
+
 	// 이 도구의 실제 잔량 저장소에 대한 충전 가능 검사
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "Tool|Charge")
 	bool CanReceiveCharge(AActor* Recipient, float Amount);
