@@ -13,12 +13,12 @@
 
   "serverName": "RevStudio",
   "serverPort": 50002,
-  "hostMachine": "REPLACE-WITH-MAC-HOSTNAME",
+  "hostMachine": "bagjunmin-ui-Macmini",
 
   "transports": [
     {
       "name": "tailscale",
-      "hostAddress": "REPLACE-WITH-MAC-TAILSCALE-IP",
+      "hostAddress": "100.77.222.84",
       "adapterMatch": "*Tailscale*",
       "subnetPrefix": "100."
     }
