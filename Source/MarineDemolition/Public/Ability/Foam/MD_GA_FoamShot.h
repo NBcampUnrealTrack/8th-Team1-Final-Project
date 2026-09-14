@@ -38,5 +38,18 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Foam|Audio", meta = (Categories = "SFX"))
 	FGameplayTag FireSoundTag;
 
+	// 충전 부족 사격의 헛방 소리 (SFX.Hazard.FoamGun.Empty). 대응 정의는 DA_MD_Audio_Hazard
+	UPROPERTY(EditDefaultsOnly, Category = "Foam|Audio", meta = (Categories = "SFX"))
+	FGameplayTag EmptySoundTag;
+
 	static UMD_FoamGunComponent* GetFoamGun(const FGameplayAbilityActorInfo* ActorInfo);
+
+private:
+	/**
+	 * 조작 중인 본인 머신에서 바로 재생한다.
+	 *
+	 * 중계(UMD_AudioRelayComponent)는 로컬 조작 폰의 멀티캐스트를 스스로 걸러내므로,
+	 * 여기서 직접 내주지 않으면 정작 쏜 사람만 소리를 못 듣는다.
+	 */
+	void PlayLocalSound(const FGameplayTag& EventTag, const AActor* Avatar) const;
 };

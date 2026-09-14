@@ -20,7 +20,5 @@ private:
 
     void OpenAssetNamingTool();
 
-private:
-
     TSharedPtr<FSlateStyleSet> StyleSet;
 };

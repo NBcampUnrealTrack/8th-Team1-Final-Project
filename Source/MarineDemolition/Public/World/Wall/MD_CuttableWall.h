@@ -86,6 +86,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	EMD_WallType GetWallType() const { return WallType; }
 
+	/** Original wall geometry, excluding contamination and shadow-only proxies. */
+	UStaticMeshComponent* GetScanMesh() const { return Mesh.Get(); }
+
 	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination")
 	UMD_ScrapeSurfaceComponent* GetScrapeSurfaceComponent() const
 	{
@@ -196,9 +199,13 @@ protected:
 		meta = (ClampMin = "0", UIMax = "10"))
 	int32 ContaminationItemsPerFace = 3;
 
-	UPROPERTY(EditAnywhere, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Procedural")
-	bool bUseProceduralContamination = false;
+	/** Legacy authored mode is retained for pre-default-change saves only. */
+    UPROPERTY()
+    bool bUseProceduralContamination = false;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Procedural",
+        meta = (DisplayName = "Full Contamination"))
+    bool bForceFullContamination = false;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
 		Category = "MD|Wall|Contamination|Decal")
@@ -207,6 +214,13 @@ protected:
 	/** 철거 완료 순간 벽 중심에 재생할 원샷 버스트 (NS_Cutter_Finish) */
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|VFX")
 	TObjectPtr<UNiagaraSystem> DemolishEffect;
+
+	/**
+	 * 철거 완료음 (SFX.Cut.Wall.Break). 소재는 오디오 카탈로그(DA_MD_Audio_Cut)가 정한다.
+	 * 비워 두면 무음.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Audio", meta = (Categories = "SFX"))
+	FGameplayTag DemolishSoundTag;
 
 	// 기획 §2 — 애니메이션 1사이클(3.567초)의 정수배로 잡는다
 	UPROPERTY(EditAnywhere, Category = "MD|Wall|Cut",

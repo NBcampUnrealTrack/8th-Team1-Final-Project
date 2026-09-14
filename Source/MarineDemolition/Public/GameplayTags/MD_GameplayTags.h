@@ -10,6 +10,13 @@ namespace MDGameplayTags
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_WallCut);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_WallScan);
 
+	// 구매한 산소 캔의 사용 능력 식별
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Consume_OxygenCan);
+	// 구매한 완충 패드의 사용 능력 식별
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_Consume_SampleProtection);
+	// 다음 손 운반 충돌 한 회를 흡수할 활성 효과 식별
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_SampleProtection);
+
 	/** 폼건으로 수도관을 수리할 수 있음을 식별하는 태그 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_UtilityRepair_Foam);
 

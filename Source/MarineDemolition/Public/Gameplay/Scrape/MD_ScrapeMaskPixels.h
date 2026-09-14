@@ -1,5 +1,8 @@
 #pragma once
 #include "CoreMinimal.h"
+class FMDScrapeInitialMaskLayout;
+class FRHICommandListImmediate;
+class FRHITexture;
 
 struct FMD_ScrapeMaskPixelMemoryStats
 {
@@ -20,6 +23,15 @@ public:
     FMD_ScrapeMaskPixels(FMD_ScrapeMaskPixels&& Other) noexcept;
     FMD_ScrapeMaskPixels& operator=(FMD_ScrapeMaskPixels&& Other) noexcept;
     FMD_ScrapeMaskPixels& operator=(TArray<uint8>&& Values);
+    /** Intern a constant baseline without rebuilding a dense array on cache hits. */
+    void InitializeUniform(int32 InCount, uint8 Value);
+    void InitializeBinary(TSharedPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe> Layout,
+        TArray<uint32>&& ActiveBits, TArray<uint8>&& SeamBytes);
+    bool HasBinaryInitial() const;
+    TSharedPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe> GetBinaryInitialLayout() const;
+    /** Per-mask GPU input plus resident changed-page staging; shared layout is reserved separately. */
+    uint64 GetBinaryUploadBound(int32 Width) const;
+    bool TryInitializeGPU(FRHICommandListImmediate& Cmd, FRHITexture* Texture, FIntPoint Size) const;
     int32 Num() const { return Count; }
     bool IsEmpty() const { return Count == 0; }
     bool IsValidIndex(int32 Index) const { return Index >= 0 && Index < Count; }
@@ -39,7 +51,20 @@ public:
     const TBitArray<FDefaultAllocator>& GetDirtyPages() const { return DirtyPages; }
     void ClearDirty() { DirtyPages.Empty(); }
 private:
-    struct FInitial { uint32 Hash = 0; int32 Count = 0; uint8 Uniform = 0; TArray<uint8> Values; };
+    struct FInitial
+    {
+        uint32 Hash = 0;
+        int32 Count = 0;
+        uint8 Uniform = 0;
+        TArray<uint8> Values;
+        TSharedPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe> Layout;
+        TArray<uint32> ActiveBits;
+        TArray<uint8> SeamBytes;
+        bool IsUniform() const { return !Layout && Values.IsEmpty(); }
+        uint8 Read(int32 Index) const;
+        SIZE_T GetPayloadBytes() const
+        { return sizeof(*this) + Values.GetAllocatedSize() + ActiveBits.GetAllocatedSize() + SeamBytes.GetAllocatedSize(); }
+    };
     struct FPage
     {
         uint8 Uniform = 0;

@@ -150,6 +150,7 @@ public:
 	virtual void Setup() override;
 	virtual void Shutdown(EToolShutdownType ShutdownType) override;
 	virtual void Render(IToolsContextRenderAPI* RenderAPI) override;
+	virtual void OnPropertyModified(UObject* PropertySet, FProperty* Property) override;
 	virtual void OnUpdateModifierState(int ModifierID, bool bIsOn) override;
 	virtual FInputRayHit ShouldRespondToMouseWheel(const FInputDeviceRay& CurrentPos) override;
 	virtual void OnMouseWheelScrollUp(const FInputDeviceRay& CurrentPos) override;
@@ -168,6 +169,7 @@ public:
 
 private:
 	static constexpr int32 ShiftEraseModifierId = 1;
+	FInputDeviceRay LastHoverRay;
 
 	bool ValidatePlacementSettings() const;
 	bool PlaceTrashAtHit(const FHitResult& HitResult, FName TrashKindId);

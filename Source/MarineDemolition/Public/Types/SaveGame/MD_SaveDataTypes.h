@@ -113,7 +113,11 @@ public:
 
 	// 구매 소유권과 소모품 누적 수량을 재개 세션에 복원하기 위한 품목별 구매 원장
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
-	TMap<FName, int32> PurchasedItemCounts;
+	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
+
+	// 통합 전 세이브(dev 9 이하, scrape 13 이하)의 이름 기반 구매 원장 이전 전용 필드
+	UPROPERTY()
+	TMap<FName, int32> PurchasedItemCounts_DEPRECATED;
 
 	// 재개 시 같은 퀘스트 정의를 연결하기 위한 현재 현장 애셋
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
@@ -143,6 +147,12 @@ USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_WorldData
 {
 	GENERATED_BODY()
+
+    UPROPERTY() bool bHasContaminationGenerationRecords = false;
+
+    /** Missing in older saves: preserve authored/per-surface seeds, including zero. */
+    UPROPERTY() bool bHasContaminationSessionSeed = false;
+    UPROPERTY() int32 ContaminationSessionSeed = 0;
 
 public:
 	// 인스턴스 구조체 컨테이너에서 월드 필드를 식별하기 위한 키
@@ -179,6 +189,9 @@ public:
     UPROPERTY()
     TArray<FMD_ContaminationPendingDrop> PendingContaminationDrops;
 
+    UPROPERTY()
+    TArray<FMD_SurfaceStainRecord> SurfaceStains;
+
 	// 새 게임별 배치 시드와 제거 순번을 함께 복원하기 위한 배치기 상태 목록
 	UPROPERTY()
 	TArray<FMD_BarnacleRemovalRecord> BarnacleRemovals;
@@ -202,7 +215,7 @@ struct MARINEDEMOLITION_API FMD_GameData
 
 public:
 	// 이후 필드 변경을 안전하게 마이그레이션하기 위한 현재 스키마 버전
-	static constexpr int32 CurrentSchemaVersion = 9;
+	static constexpr int32 CurrentSchemaVersion = 14;
 
 	// 저장된 필드 배치를 판별하기 위한 슬롯 데이터 버전
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")

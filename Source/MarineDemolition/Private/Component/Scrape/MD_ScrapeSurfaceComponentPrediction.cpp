@@ -46,7 +46,8 @@ SIZE_T UMD_ScrapeSurfaceComponent::GetLocalScrapePredictionAllocatedBytes() cons
         + LocalPredictedContaminationCells.GetAllocatedSize()
         + LocalScrapePredictionFaceScratch.GetAllocatedSize()
         + PendingLocalScrapePredictionVisualCellIndices.GetAllocatedSize()
-        + PendingLocalScrapePredictionReconcileCells.GetAllocatedSize();
+        + PendingLocalScrapePredictionReconcileCells.GetAllocatedSize()
+        + (bHasPredictedContaminationBoundary ? PredictedContaminationBoundary.GetAllocatedBytes() : 0);
     for (const FLocalScrapePrediction& Prediction : LocalScrapePredictions)
     {
         Bytes += Prediction.Strokes.GetAllocatedSize() + Prediction.PredictedFinalCellStates.GetAllocatedSize();
@@ -221,6 +222,7 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePredictionToShadow(
 	TArray<int32>& OutChangedCellIndices)
 {
 	FMD_ScrapeEvaluationScratch LocalEvaluationScratch;
+    LocalEvaluationScratch.bCaptureBoundary = UsesMeshUVSurface();
 	TArray<FMD_ScrapeSurfaceCell> PredictionFaceScratch;
 	OutChangedCellIndices.Reset();
 	int32 CellsPerFace = 0;
@@ -317,6 +319,7 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePredictionToShadow(
                 LocalPredictedPagedCells.CompactUnchangedPageForIndex(StorageIndex);
             }
         }
+        if (!OutChangedCellIndices.IsEmpty()) CommitContaminationBoundary(LocalEvaluationScratch, true);
         return !OutChangedCellIndices.IsEmpty();
     }
 	if (!Result.bIsInputValid || !Result.bWasStrokeLongEnough)
@@ -551,6 +554,7 @@ bool UMD_ScrapeSurfaceComponent::DoesLocalScrapePredictionMatchResolution(
 
 void UMD_ScrapeSurfaceComponent::RebuildLocalScrapePredictionShadow()
 {
+    ResetPredictedContaminationBoundary();
 	const int32 PreviousVisualCellCount = GetVisualContaminationCells().Num();
 	// Only these addresses can differ from the authoritative state. Include old
 	// predictions before removing expired owners, and new addresses during replay.

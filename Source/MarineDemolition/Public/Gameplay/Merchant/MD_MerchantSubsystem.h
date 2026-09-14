@@ -69,10 +69,10 @@ public:
 	EMD_ShopPurchaseResult TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase);
 
 	/** 상점 해금과 UI 갱신에 사용할 구매 완료 품목 식별자 목록 */
-	TArray<FName> GetOwnedItemIds() const;
+	TArray<FPrimaryAssetId> GetOwnedItemIds() const;
 
 	/** 소모품을 포함한 품목별 누적 구매 횟수 */
-	int32 GetPurchasedItemCount(FName ItemId) const;
+	int32 GetPurchasedItemCount(FPrimaryAssetId ItemAssetId) const;
 
 	// 호감도를 기획 범위 안에서 증감하고 복제 미러 갱신을 요청하는 함수
 	void AddAffinity(float Amount);
@@ -136,13 +136,36 @@ public:
 	/** 포기하는 반복 퀘스트를 실패 처리 및 패널티(호감도 감소) 처리하는 함수 */
 	bool TryAbandonRepeatQuest(int32 QuestIndex);
 
+	/**
+	 * Interaction 페이즈의 선행 조건(카드 확보 등)을 충족시키기 위해 진행도를 올린다.
+	 * 레벨 내 카드 액터 상호작용 시 서버에서 호출한다.
+	 * 페이즈 전환은 하지 않으며, 브릭스 대화(TryAdvanceMainQuestPhase)에서 처리한다.
+	 *
+	 * @param QuestDefinitionId  대상 퀘스트 DA 식별자
+	 * @param ExpectedPhaseIndex 현재 클라이언트가 보고 있는 페이즈. 서버 값과 불일치하면 거부
+	 * @return Progress 증가 성공 여부
+	 */
+	bool NotifyInteractionProgress(const FPrimaryAssetId& QuestDefinitionId, int32 ExpectedPhaseIndex);
+
+	/**
+	 * NPC 상호작용(카드 제시 등)으로 메인 퀘스트의 현재 페이즈를 다음으로 넘긴다.
+	 * 납품 경로(TryDeliverQuestItem)가 아닌 비회수 목표(Interaction)의 서버 진입점이다.
+	 * Interaction 페이즈에서는 CurrentProgress >= RequiredCount를 만족해야 전환한다.
+	 *
+	 * @param QuestDefinitionId  대상 퀘스트 DA 식별자
+	 * @param ExpectedPhaseIndex 현재 클라이언트가 보고 있는 페이즈. 서버 값과 불일치하면 거부
+	 * @return 페이즈 전환 성공 여부. 성공 시 중간 보상(PhaseCompletionReward)을 적용하고
+	 *         OnMerchantStateChanged를 브로드캐스트한다.
+	 */
+	bool TryAdvanceMainQuestPhase(const FPrimaryAssetId& QuestDefinitionId, int32 ExpectedPhaseIndex);
+
 	/** 제출 아이템 액터를 검사하고 제거 성공 이후 활성 퀘스트 진행도를 반영하는 함수 */
 	bool TryDeliverQuestItem(AMD_QuestItem* SubmittedItem);
 
 	/** 회수 대상 샘플이 파괴될 때 퀘스트 Asset ID·등급이 일치하는 활성 퀘스트를 실패 처리하는 함수 */
 	void NotifySampleDestroyed(const FPrimaryAssetId& QuestDefinitionId, EMD_SampleGrade Grade);
 
-	/** Day 마감 시 해당 Day의 미완료 메인 퀘스트만 실패로 정리하는 함수 */
+	/** Day 마감 시 해당 Day의 미완료 메인 퀘스트만 실패로 정리하고 미회수 스폰물을 디스폰하는 함수 */
 	void ResolveActiveQuestsAtDayEnd(int32 CompletedDay);
 
 	/** 계약 종료 시 남은 반복 퀘스트를 정산하고 활성 현장을 해제하는 함수 */
@@ -179,6 +202,9 @@ private:
 
 	/** 활성 반복 퀘스트를 실패로 전환하고 원본 에셋의 패널티를 한 번 적용하는 함수 */
 	void FailRepeatQuest(FMD_RepeatQuestState& QuestState, bool bDestroyed);
+
+	/** 실패 확정된 메인 퀘스트에 귀속된 월드 내 퀘스트 아이템을 제거하는 함수 */
+	void DespawnMainQuestItems(const TArray<FPrimaryAssetId>& FailedQuestIds);
 
 	/** 현재 진행 중인 현장으로 메인·반복 퀘스트 구성과 완료 이력 기록에 사용하는 참조 */
 	UPROPERTY()
@@ -228,7 +254,7 @@ private:
 
 	/** 계약 중 구매 결과와 선행 품목 해금을 유지하기 위한 서버 권위 구매 원장 */
 	UPROPERTY()
-	TMap<FName, int32> PurchasedItemCounts;
+	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
 
 	// 기획상 모든 호감도 구간에 공통으로 적용되는 일일 대출 이자율
 	static constexpr float DailyInterestRate = 0.05f;

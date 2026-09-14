@@ -5,6 +5,9 @@
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
+#include "Gameplay/Scanning/MD_Scannable.h"
+#include "GameplayTagAssetInterface.h"
+#include "Gameplay/Scanning/MD_ScanTypes.h"
 #include "MD_WallUtility.generated.h"
 
 class UBoxComponent;
@@ -23,12 +26,20 @@ enum class EMD_UtilityState : uint8
 // 절단이 벽 액터 통째라, LinkTrigger로 겹치는 CuttableWall을 찾아 철거 델리게이트를 구독한다.
 // 인프라 메시는 벽이 사라져도 남아 수리 대상이 된다.
 UCLASS(Abstract)
-class MARINEDEMOLITION_API AMD_WallUtility : public AActor, public IMD_Interactable
+class MARINEDEMOLITION_API AMD_WallUtility : public AActor, public IMD_Interactable,
+	public IGameplayTagAssetInterface, public IMD_Scannable
 {
 	GENERATED_BODY()
 
 public:
 	AMD_WallUtility();
+
+	void StopScanFor(AActor* Scanner);
+
+	// Scan actual infrastructure independently of physics-based host-wall links.
+	UStaticMeshComponent* GetScanMesh() const { return Mesh.Get(); }
+	virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override;
+	virtual void OnScanned_Implementation(float Duration, AActor* Scanner) override;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -72,6 +83,7 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
 	// 겹친 벽의 철거 델리게이트가 호출 (서버). 조준선이 메시를 관통했을 때만 파손
 	UFUNCTION()
@@ -156,6 +168,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Utility")
 	bool bStartBroken = false;
 
+	// 수리 완료 시 잠금을 해제할 문 액터. BP_Door의 bLocked를 false로 세팅한다.
+	// 레벨에서 WaterPipe/PowerConduit ↔ BP_Door를 연결하는 게이트 메커니즘
+	UPROPERTY(EditAnywhere, Category = "MD|Utility|Gate")
+	TSoftObjectPtr<AActor> LinkedGateActor;
+
 	// 시작 파손 지점 (액터 로컬). 미지정(0)이면 메시 중심
 	UPROPERTY(EditAnywhere, Category = "MD|Utility", meta = (EditCondition = "bStartBroken"))
 	FVector StartBreakLocalOffset = FVector::ZeroVector;
@@ -175,6 +192,9 @@ protected:
 	UPROPERTY(Replicated, BlueprintReadOnly, Category = "MD|Utility")
 	FVector_NetQuantizeNormal BreakNormal = FVector_NetQuantizeNormal(0.f, 0.f, 1.f);
 
+	// 수리 완료 시 LinkedGateActor의 bLocked를 false로 해제 (서버)
+	void UnlockLinkedGate();
+
 private:
 	// LinkTrigger와 겹치는 CuttableWall을 찾아 철거 델리게이트 구독 (서버)
 	void LinkOverlappingWalls();
@@ -185,4 +205,9 @@ private:
 
 	// 스캔 실루엣 지속시간 타이머
 	FTimerHandle ScanSilhouetteTimer;
+	TWeakObjectPtr<AActor> ActiveScanner;
+	FMD_ScanMeshState HighlightState;
+	bool bScanHighlighted = false;
+	bool bInteractionHighlighted = false;
+	void RefreshHighlight();
 };

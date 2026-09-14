@@ -5,7 +5,6 @@
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Kismet/GameplayStatics.h"
-#include "Net/UnrealNetwork.h"
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
@@ -17,39 +16,108 @@ UMD_FoamGunComponent::UMD_FoamGunComponent()
 	SetIsReplicatedByDefault(true);
 }
 
-void UMD_FoamGunComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+void UMD_FoamGunComponent::BeginPlay()
 {
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME(UMD_FoamGunComponent, FoamCharge);
+	// 상위 컴포넌트 시작 처리
+	Super::BeginPlay();
+	// 서버 변경과 클라이언트 복제를 함께 수신할 Hotbar 조회
+	UMD_EquipHotbarComponent* Hotbar = GetHotbar();
+	// 유효한 보관 컴포넌트의 공통 변경 알림에 연결
+	if (IsValid(Hotbar) == true)
+	{
+		// 기존 폼건 UI에 동일한 충전 상태 변경 전달
+		Hotbar->OnHotbarChanged.AddUniqueDynamic(this, &UMD_FoamGunComponent::HandleHotbarChanged);
+	}
+}
+
+UMD_EquipHotbarComponent* UMD_FoamGunComponent::GetHotbar() const
+{
+	// 유효한 소유자의 공통 충전 저장소 조회
+	return IsValid(GetOwner()) == true ? GetOwner()->FindComponentByClass<UMD_EquipHotbarComponent>() : nullptr;
+}
+
+UMD_ToolDefinition* UMD_FoamGunComponent::GetEquippedFoamTool() const
+{
+	// 현재 장착한 도구를 조회할 Hotbar 확인
+	UMD_EquipHotbarComponent* Hotbar = GetHotbar();
+	// 선택 슬롯의 도구 정의 조회
+	UMD_ToolDefinition* Tool = IsValid(Hotbar) == true ? Hotbar->GetCurrentTool() : nullptr;
+	// 폼건 사용 능력과 정확히 일치하는 도구만 허용
+	return IsValid(Tool) == true && Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Foam) == true ? Tool : nullptr;
+}
+
+float UMD_FoamGunComponent::GetFoamCharge() const
+{
+	// 복제되는 실제 보관 잔량의 저장소 조회
+	UMD_EquipHotbarComponent* Hotbar = GetHotbar();
+	// 장착 폼건의 공통 잔량 또는 미보유 상태의 영 반환
+	return IsValid(Hotbar) == true ? Hotbar->GetToolCharge(GetEquippedFoamTool()) : 0.0f;
+}
+
+float UMD_FoamGunComponent::GetMaxCharge()
+{
+	// 폼건 정의에 지정된 최대 충전량 조회
+	UMD_ToolDefinition* Tool = GetEquippedFoamTool();
+	// 장착 폼건이 없으면 충전 기능 미사용 처리
+	return IsValid(Tool) == true ? Tool->MaxCharge : 0.0f;
+}
+
+float UMD_FoamGunComponent::GetShotCost() const
+{
+	// 구매 시 확정한 비용을 보관하는 Hotbar 조회
+	UMD_EquipHotbarComponent* Hotbar = GetHotbar();
+	// 현재 정의의 변경과 무관하게 지급된 사용 비용 반환
+	return IsValid(Hotbar) == true ? Hotbar->GetToolCostPerOnce(GetEquippedFoamTool()) : 0.0f;
+}
+
+bool UMD_FoamGunComponent::IsChargeRequired() const
+{
+	// 충전 사용 여부를 결정하는 장착 폼건 정의 조회
+	UMD_ToolDefinition* Tool = GetEquippedFoamTool();
+	// 양의 최대 충전량이 설정된 폼건만 충전 요구
+	return IsValid(Tool) == true && Tool->MaxCharge > 0.0f;
+}
+
+bool UMD_FoamGunComponent::HasChargeForShot() const
+{
+	// 실제 보유 도구와 구매 비용을 함께 검사할 Hotbar 조회
+	UMD_EquipHotbarComponent* Hotbar = GetHotbar();
+	// 최대값 영의 무차감 사용을 포함한 공통 조건 검사
+	return IsValid(Hotbar) == true && Hotbar->IsToolChargeAvailable(GetEquippedFoamTool()) == true;
+}
+
+bool UMD_FoamGunComponent::IsChargeFull() const
+{
+	// 최대 충전량이 정의된 장착 폼건 조회
+	UMD_ToolDefinition* Tool = GetEquippedFoamTool();
+	// 미장착 또는 비충전 도구와 만충 상태의 추가 보충 차단
+	return IsValid(Tool) == false || Tool->MaxCharge <= 0.0f || GetFoamCharge() >= Tool->MaxCharge;
 }
 
 bool UMD_FoamGunComponent::TryConsumeShotCharge()
 {
-	if (!HasChargeForShot())
-	{
-		return false;
-	}
-
-	FoamCharge -= ShotCost;
-	// 리슨 서버는 OnRep이 안 오므로 직접 방송
-	OnRep_FoamCharge();
-	return true;
+	// 서버 차감 및 UI 변경 알림을 처리할 공통 Hotbar 조회
+	UMD_EquipHotbarComponent* Hotbar = GetHotbar();
+	// 장착 폼건의 구매 비용을 공통 잔량에서 차감
+	return IsValid(Hotbar) == true && Hotbar->ConsumeToolCharge(GetEquippedFoamTool()) == true;
 }
 
-void UMD_FoamGunComponent::AddCharge(int32 Amount)
+void UMD_FoamGunComponent::AddCharge(float Amount)
 {
-	if (Amount <= 0)
+	// BP의 보충 요청을 전달할 보유 슬롯 저장소 조회
+	UMD_EquipHotbarComponent* Hotbar = GetHotbar();
+	// Hotbar가 있는 대상만 서버 충전 경로로 전달
+	if (IsValid(Hotbar) == true)
 	{
-		return;
+		// 최대 충전량 상한 및 보유 여부와 권한을 공통 API에서 검사
+		Hotbar->AddToolCharge(GetEquippedFoamTool(), Amount);
 	}
-
-	FoamCharge = FMath::Min(FoamCharge + Amount, MaxCharge);
-	OnRep_FoamCharge();
 }
 
-void UMD_FoamGunComponent::OnRep_FoamCharge()
+void UMD_FoamGunComponent::HandleHotbarChanged()
 {
-	OnFoamChargeChanged.Broadcast(FoamCharge);
+	// 선택 및 잔량 변경을 기존 폼건 UI 이벤트에 전달
+	OnFoamChargeChanged.Broadcast(GetFoamCharge());
 }
 
 FVector UMD_FoamGunComponent::GetLaunchOrigin() const
@@ -163,6 +231,15 @@ void UMD_FoamGunComponent::DestroyTrajectoryPreview()
 
 void UMD_FoamGunComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// 종료 중인 컴포넌트의 공통 Hotbar 구독 정리
+	UMD_EquipHotbarComponent* Hotbar = GetHotbar();
+	// 유효한 저장소에 등록된 변경 콜백 해제
+	if (IsValid(Hotbar) == true)
+	{
+		// 컴포넌트 종료 이후 충전 UI 콜백 호출 방지
+		Hotbar->OnHotbarChanged.RemoveDynamic(this, &UMD_FoamGunComponent::HandleHotbarChanged);
+	}
+	// 기존 조준 궤적 정리
 	DestroyTrajectoryPreview();
 	Super::EndPlay(EndPlayReason);
 }

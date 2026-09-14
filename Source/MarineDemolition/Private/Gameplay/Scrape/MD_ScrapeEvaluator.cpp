@@ -1,6 +1,8 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
+#include "CompGeom/ConvexHull2.h"
+#include "HAL/IConsoleManager.h"
 
 #include "Containers/BitArray.h"
 #include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
@@ -10,6 +12,8 @@
 
 namespace
 {
+    TAutoConsoleVariable<int32> CVarCaptureBoundary(TEXT("md.Scrape.BoundaryCapture"),1,
+        TEXT("Diagnostic baseline: 0 disables new footprint capture; restart the test world for paired comparisons."));
 	// 부분 접촉으로 남기는 잔여 오염이 기준량의 이 비율보다 작으면
 	// 화면에서 사실상 보이지 않아 플레이어가 남은 자리를 찾을 수 없다.
 	// 그런 잔여는 아예 남기지 않아 완료 판정이 막히지 않게 한다.
@@ -759,7 +763,10 @@ namespace
 	void CollectMeshUVFootprint(const UMD_ScrapeMeshUVData& Data,
 		const FTransform& Transform, const FMD_ScrapeMeshUVSample& Sample,
 		const FVector& WorldDepthAxis, const FMD_ScrapeToolSpec& Tool,
-		TArray<FMeshUVCellCoverage>& OutCoverage, int64* OutVisitedCellCount = nullptr)
+		TArray<FMeshUVCellCoverage>& OutCoverage, int64* OutVisitedCellCount = nullptr,
+        FMD_ScrapeEvaluationScratch* BoundaryScratch = nullptr,
+        const FMD_ScrapeMeshUVSample* SweepStart = nullptr, const FVector* SweepStartAxis = nullptr,
+        const FMD_ScrapeMeshUVSample* SweepEnd = nullptr, const FVector* SweepEndAxis = nullptr)
 	{
 		OutCoverage.Reset();
 		const FVector Center = Transform.TransformPosition(Sample.PositionLocal);
@@ -798,6 +805,7 @@ namespace
 			{
 				continue;
 			}
+			const int32 ContactsBefore = OutCoverage.Num();
 			for (int32 Y = Minimum.Y; Y <= Maximum.Y; ++Y)
 			{
 				for (int32 X = Minimum.X; X <= Maximum.X; ++X)
@@ -849,6 +857,67 @@ namespace
 					}
 				}
 			}
+
+            if (BoundaryScratch && BoundaryScratch->bCaptureBoundary && CVarCaptureBoundary.GetValueOnGameThread()!=0 && OutCoverage.Num()>ContactsBefore)
+            {
+                // The exact affine blade half-planes used above, inverted into the
+                // owning private chart. Continuous polygons, never cell thresholds.
+                if (BoundaryScratch->BoundaryFootprints.Num()>=512)
+                { BoundaryScratch->bBoundaryOverflow=true; continue; }
+                const auto& T=Data.Triangles[TriangleIndex];
+                auto& Footprint=BoundaryScratch->BoundaryFootprints.AddDefaulted_GetRef();
+                Footprint.TriangleIndex=TriangleIndex;
+                const FVector B=Transform.TransformVector(T.B-T.A);
+                const FVector C=Transform.TransformVector(T.C-T.A);
+                const auto AddBlade=[&](const FMD_ScrapeMeshUVSample& At,const FVector& Axis)
+                {
+                    const FVector N=MeshUVWorldNormal(Transform,At.NormalLocal);
+                    const FVector D=FVector::VectorPlaneProject(Axis,N).GetSafeNormal();
+                    const FVector W=FVector::CrossProduct(N,D).GetSafeNormal();
+                    const FVector A=Transform.TransformVector(T.A-At.PositionLocal);
+                    const FVector2D PA(FVector::DotProduct(A,W),FVector::DotProduct(A,D));
+                    const FVector2D PB(FVector::DotProduct(B,W),FVector::DotProduct(B,D));
+                    const FVector2D PC(FVector::DotProduct(C,W),FVector::DotProduct(C,D));
+                    const double Det=PB.X*PC.Y-PB.Y*PC.X;
+                    if (FMath::Abs(Det)<=UE_SMALL_NUMBER) return;
+                    for (const FVector2D& Point : Blade)
+                    {
+                        const FVector2D Q=Point-PA;
+                        const double Beta=(Q.X*PC.Y-Q.Y*PC.X)/Det;
+                        const double Gamma=(PB.X*Q.Y-PB.Y*Q.X)/Det;
+                        const FVector2D UV=T.UVA+Beta*(T.UVB-T.UVA)+Gamma*(T.UVC-T.UVA);
+                        Footprint.Points.Add(UV*FVector2D(Data.AtlasDimensions));
+                    }
+                };
+                AddBlade(Sample,WorldDepthAxis);
+                // Connect the validated endpoints on a common physical plane.
+                // Translation is exact; bounded angular subdivision limits the
+                // convex sweep's rotation error to bladeRadius*(1-cos(theta/2)).
+                // At a fold keep the physical midpoint footprint of each face.
+                if (SweepStart && SweepEnd && SweepStartAxis && SweepEndAxis
+                    && FVector::DotProduct(MeshUVWorldNormal(Transform,SweepStart->NormalLocal),Normal)>0.999999
+                    && FVector::DotProduct(MeshUVWorldNormal(Transform,SweepEnd->NormalLocal),Normal)>0.999999)
+                { AddBlade(*SweepStart,*SweepStartAxis); AddBlade(*SweepEnd,*SweepEndAxis); }
+                UE::Geometry::FConvexHull2d Hull;
+                if (Hull.Solve(MakeArrayView(Footprint.Points)))
+                {
+                    TArray<FVector2D> Points;
+                    for (int32 Index : Hull.GetPolygonIndices()) Points.Add(Footprint.Points[Index]);
+                    Footprint.Points=MoveTemp(Points);
+                }
+                const int32 Columns=FMath::DivideAndRoundUp(Data.AtlasDimensions.X,8);
+                const int32 Rows=FMath::DivideAndRoundUp(Data.AtlasDimensions.Y,8);
+                TSet<int32> Tiles;
+                for (int32 Contact=ContactsBefore;Contact<OutCoverage.Num();++Contact)
+                {
+                    const int32 Address=OutCoverage[Contact].CellIndex;
+                    const int32 X=Address%Data.AtlasDimensions.X,Y=Address/Data.AtlasDimensions.X;
+                    for (int32 TY=FMath::Max(0,(Y-1)/8);TY<=FMath::Min(Rows-1,(Y+1)/8);++TY)
+                        for (int32 TX=FMath::Max(0,(X-1)/8);TX<=FMath::Min(Columns-1,(X+1)/8);++TX)
+                            Tiles.Add(TX+TY*Columns);
+                }
+                Footprint.Tiles=Tiles.Array(); Footprint.Tiles.Sort();
+            }
 		}
 	}
 
@@ -1456,6 +1525,7 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToMeshUVGrid(
 	State.MeshUVTouchedCellSlots.Empty();
 	TMap<int32, int32> TouchedSlots;
 	State.MeshUVTouchedCells.Reset();
+    State.BoundaryFootprints.Reset(); State.bBoundaryOverflow=false;
 	State.MeshUVVisitedCellCount = 0;
 	State.TouchedCells.Empty();
 	State.RemainingBeforeStroke.Empty();
@@ -1566,7 +1636,8 @@ FMD_ScrapeResult FMD_ScrapeEvaluator::ApplyStrokeToMeshUVGrid(
 			MeshToWorld.TransformPosition(Samples[I * 2 + 1].PositionLocal))
 			+ FVector::Distance(MeshToWorld.TransformPosition(Samples[I * 2 + 1].PositionLocal),
 				MeshToWorld.TransformPosition(Samples[I * 2 + 2].PositionLocal));
-		CollectMeshUVFootprint(Data, MeshToWorld, Samples[I * 2 + 1], DepthAxes[I * 2 + 1], ToolSpec, Coverage, &State.MeshUVVisitedCellCount);
+		CollectMeshUVFootprint(Data, MeshToWorld, Samples[I * 2 + 1], DepthAxes[I * 2 + 1], ToolSpec, Coverage, &State.MeshUVVisitedCellCount, &State,
+            &Samples[I*2], &DepthAxes[I*2], &Samples[I*2+2], &DepthAxes[I*2+2]);
 		Result.EvaluatedTravelDistanceCm += Travel;
 		for (const FMeshUVCellCoverage& Hit : Coverage)
 		{
@@ -1623,10 +1694,10 @@ bool FMD_ScrapeEvaluator::CalculateMeshUVProgress(
 	{
 		const double Weight = CellCarrierWeights[Index];
 		if (!FMath::IsFinite(Weight) || Weight < 0.0) { return false; }
-		Progress.UncleanCellCount += IsCellUnclean(Cells[Index], CleanTolerance) ? 1 : 0;
-		Progress.UncleanCellCountAtZero += IsCellUnclean(Cells[Index], 0.0f) ? 1 : 0;
-		if (Weight == 0.0) { continue; }
-		FMD_ScrapeSurfaceCell Cell = Cells[Index];
+        FMD_ScrapeSurfaceCell Cell = Cells[Index];
+        Progress.UncleanCellCount += IsCellUnclean(Cell, CleanTolerance) ? 1 : 0;
+        Progress.UncleanCellCountAtZero += IsCellUnclean(Cell, 0.0f) ? 1 : 0;
+        if (Weight == 0.0) { continue; }
 		Cell.Normalize();
 		Progress.InitialCarrierAmount += Weight * static_cast<double>(Cell.InitialContamination);
 		Progress.BaseCarrierAmount += Weight * static_cast<double>(Cell.RemainingContamination);

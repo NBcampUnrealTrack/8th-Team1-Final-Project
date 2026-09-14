@@ -31,6 +31,8 @@ public class MarineDemolition : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"ImageWrapper", "Slate", "SlateCore", "MoviePlayer",
+			// 패키지 빌드의 맵 에셋 클래스 조회
+			"AssetRegistry",
 			"DeveloperSettings",
 			"ApplicationCore",
 			"CoreOnline",
@@ -39,7 +41,7 @@ public class MarineDemolition : ModuleRules
 			// 오염 마스크 런타임 텍스처 업로드
 			"RHI", "RenderCore",
             // Bounded runtime solid-contamination geometry (no editor dependency).
-            "GeometryFramework",
+            "GeometryFramework", "GeometryAlgorithms",
             // Shared solid templates, GPU displacement and sparse GPU updates.
             "MDSolidRendering",
 			// 절단·헤라 VFX

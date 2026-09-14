@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/PlayerState.h"
 #include "AbilitySystemInterface.h"
+#include "UObject/PrimaryAssetId.h"
 #include "GameplayEffectTypes.h"
 #include "Types/State/MD_HealthTypes.h"
 #include "Types/Customization/MD_CharacterCustomizationTypes.h"
@@ -107,16 +108,24 @@ public:
 	/** 서버에서 외형을 설정하고 모든 클라이언트에 복제한다. */
 	void SetAppearance(const FMDCharacterCustomizationAppearance& NewAppearance);
 
-	/** 현재 플레이어가 이미 구매한 비소모 품목인지 확인하는 함수 */
+	// 현재 플레이어의 전체 AssetId 구매 이력 확인
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")
-	bool HasPurchasedShopItem(FName ItemId) const;
+	bool HasPurchasedShopItem(FPrimaryAssetId ItemAssetId) const;
 
-	/** 현재 플레이어의 비소모 품목 구매 이력을 상점 해금 판정에 제공하는 함수 */
+	// 무료 도구 재구매와 상점 해금 판정에 사용할 구매 이력 제공
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")
-	TArray<FName> GetPurchasedShopItemIds() const { return PurchasedShopItemIds; }
+	FORCEINLINE TArray<FPrimaryAssetId> GetPurchasedShopItemIds() const { return PurchasedShopItemIds; }
 
-	/** 서버에서 구매가 완료된 비소모 품목을 현재 플레이어의 소유권에 기록하는 함수 */
-	bool RecordPurchasedShopItem(FName ItemId);
+	// 구매 완료 이력과 업그레이드 소스의 구매 금지를 함께 기록
+	bool RecordPurchasedShopItem(FPrimaryAssetId ItemAssetId, FPrimaryAssetId SourceAssetId = FPrimaryAssetId());
+
+	// 업그레이드 구매로 금지된 전체 식별자 여부 검사
+	UFUNCTION(BlueprintPure, Category = "MD|Shop")
+	bool IsShopItemPurchaseBlocked(FPrimaryAssetId ItemAssetId);
+
+	// 소유 플레이어의 상점 구매 금지 목록 제공
+	UFUNCTION(BlueprintPure, Category = "MD|Shop")
+	FORCEINLINE TArray<FPrimaryAssetId> GetBlockedShopItemIds() { return BlockedShopItemIds; }
 
 protected:
 
@@ -131,6 +140,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Health")
 	float ReviveHealthRatio = 1.0f;
 
+	// 업그레이드 소지 여부와 무관하게 유지할 플레이어별 구매 금지 목록
+	UPROPERTY(ReplicatedUsing = OnRep_ShopPurchaseState)
+	TArray<FPrimaryAssetId> BlockedShopItemIds;
+
 private:
 	// 모든 클라이언트가 같은 캐릭터 외형을 표시하기 위한 복제 외형 데이터
 	UPROPERTY(ReplicatedUsing = OnRep_ReplicatedAppearance)
@@ -139,13 +152,13 @@ private:
 	UFUNCTION()
 	void OnRep_ReplicatedAppearance();
 
-	/** 현재 플레이어만 확인하는 비소모 품목 구매 이력 */
-	UPROPERTY(ReplicatedUsing = OnRep_PurchasedShopItemIds)
-	TArray<FName> PurchasedShopItemIds;
+	// 현재 플레이어만 확인하는 전체 품목 구매 이력
+	UPROPERTY(ReplicatedUsing = OnRep_ShopPurchaseState)
+	TArray<FPrimaryAssetId> PurchasedShopItemIds;
 
-	/** 플레이어별 소유권 복제 후 열려 있는 상점 화면을 갱신하는 함수 */
+	// 구매 이력 또는 금지 목록 복제 후 상점 화면 갱신
 	UFUNCTION()
-	void OnRep_PurchasedShopItemIds();
+	void OnRep_ShopPurchaseState();
 
 	/** HP가 바뀔 때마다 호출된다. SetHealth·GE·리플리케이션 어느 경로든 여기로 들어온다. */
 	void HandleHealthChanged(const FOnAttributeChangeData& ChangeData);

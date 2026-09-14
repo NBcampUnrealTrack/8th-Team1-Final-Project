@@ -6,6 +6,7 @@
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"      // Online Subsystem의 Session 관련 모듈 참조
 #include "Interfaces/OnlineExternalUIInterface.h"   // Online SubSystem의 플랫폼 제공 UI 관련 모듈 참조
+#include "Types/UI/MD_LoadingScreenTypes.h"
 #include "MD_MultiplayManager.generated.h"
 
 class UMD_LoadingScreenSubsystem;
@@ -163,7 +164,7 @@ public:
     
 protected:
 	// 로컬 화면과 서버가 소유한 각 클라이언트 화면에 실제 로딩 시작을 전달하는 공통 처리
-	void BeginLoadingScreenForTravel(const FText& Subtitle);
+	void BeginLoadingScreenForTravel(EMD_LoadingContext Context);
 
 	// 로컬 인트로가 화면을 덮은 뒤에 블로킹 트래블/연결 종료를 실행한다.
 	void RunAfterLoadingIntro(TFunction<void()>&& Callback);
@@ -176,6 +177,9 @@ protected:
 	void DisconnectAfterLoadingIntro();
 
 	UMD_LoadingScreenSubsystem* GetLoadingScreen() const;
+
+    // 프로그램 종료 시 진행 중인 작업을 마무리하고 실제 온라인 세션을 제거하는 함수
+    void CleanupSessionOnShutdown();
 
     // Online Session Interface 객체를 초기화하는 함수
     void InitOnlineSessionInterface();

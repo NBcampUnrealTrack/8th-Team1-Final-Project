@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -8,6 +8,7 @@
 #include "Types/Customization/MD_CharacterCustomizationTypes.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
+#include "Types/UI/MD_LoadingScreenTypes.h"
 #include "MD_PlayerController.generated.h"
 
 class AMD_GameStateBase;
@@ -129,15 +130,15 @@ public:
 
 	/** 상점 액터와 품목을 서버에서 다시 검증하도록 요청하는 함수 */
 	UFUNCTION(Server, Reliable)
-	void ServerRequestShopPurchase(AMD_Merchant* Merchant, FName ItemId);
+	void ServerRequestShopPurchase(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId);
 
 	/** 서버 구매 결과를 요청한 로컬 상점 화면에 전달하는 응답 진입점 */
 	UFUNCTION(Client, Reliable)
-	void ClientReceiveShopPurchaseResult(AMD_Merchant* Merchant, FName ItemId, EMD_ShopPurchaseResult Result);
+	void ClientReceiveShopPurchaseResult(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result);
 
 	/** 서버 이동 전에 각 소유 클라이언트에서 실제 로딩 화면을 시작한다. */
 	UFUNCTION(Client, Reliable)
-	void ClientPrepareLoadingTransition(const FText& Subtitle);
+	void ClientPrepareLoadingTransition(EMD_LoadingContext Context);
 
 	// 서버의 참여 및 퇴장 알림을 소유 클라이언트 HUD에 전달
 	UFUNCTION(Client, Reliable)
@@ -149,6 +150,14 @@ public:
 	// 서버에서 반복 퀘스트 포기와 관련 페널티를 처리하도록 요청하는 함수
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
 	void ServerAbandonRepeatQuest(int32 Index);
+
+	/** NPC 상호작용으로 메인 퀘스트 페이즈를 서버에서 전환하도록 요청하는 함수 */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerAdvanceMainQuestPhase(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex);
+
+	/** 레벨 내 퀘스트 상호작용 오브젝트(카드 등)를 획득했을 때 서버에서 진행도를 올리는 함수 */
+	UFUNCTION(Server, Reliable)
+	void ServerNotifyQuestInteraction(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex);
 
 	// 모선 상인과의 거리 및 대출 한도를 서버에서 검증한 뒤 대출을 실행하는 함수
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")

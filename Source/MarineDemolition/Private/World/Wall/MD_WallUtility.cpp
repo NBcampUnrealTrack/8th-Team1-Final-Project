@@ -1,15 +1,17 @@
 #include "World/Wall/MD_WallUtility.h"
 
 #include "Character/MD_Character.h"
+#include "Component/Scanning/MD_ScannerComponent.h"
 #include "CollisionQueryParams.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Data/Equipment/MD_ToolDefinition.h"
+#include "Data/Equipment/MD_ItemDefinition.h"
 #include "Engine/OverlapResult.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/Pawn.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "World/Wall/MD_CuttableWall.h"
@@ -39,6 +41,19 @@ AMD_WallUtility::AMD_WallUtility()
 	LinkTrigger->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
 	LinkTrigger->SetGenerateOverlapEvents(true);
 	LinkTrigger->SetCanEverAffectNavigation(false);
+}
+
+void AMD_WallUtility::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
+{
+	TagContainer.AddTag(MDGameplayTags::Interaction_Scannable);
+}
+
+void AMD_WallUtility::OnScanned_Implementation(float Duration, AActor* Scanner)
+{
+	if (!FMath::IsFinite(Duration) || Duration <= 0.f || IsHidden()
+		|| !IsValid(Mesh) || !Mesh->IsVisible() || !Mesh->bRenderInMainPass) return;
+	// Preserve local ownership, interaction priority and the existing cleanup timer.
+	HandleHostWallScanned(nullptr, Duration, Scanner);
 }
 
 void AMD_WallUtility::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -203,6 +218,10 @@ void AMD_WallUtility::HandleHostWallScanned(AMD_CuttableWall* Wall, float Durati
 		return;
 	}
 
+	ActiveScanner = Scanner;
+	if (const AMD_Character* Character = Cast<AMD_Character>(Scanner))
+		if (UMD_ScannerComponent* Component = Character->GetScannerComponent())
+			Component->TrackScannedUtility(this);
 	SetScanSilhouette(true);
 
 	// 지속시간 후 자동 해제 (재스캔 시 타이머 갱신 = 연장)
@@ -215,22 +234,35 @@ void AMD_WallUtility::HandleHostWallScanned(AMD_CuttableWall* Wall, float Durati
 
 void AMD_WallUtility::SetScanSilhouette(bool bVisible)
 {
-	if (!IsValid(Mesh))
-	{
-		return;
-	}
+	bScanHighlighted = bVisible;
+	RefreshHighlight();
+}
 
-	if (bVisible)
-	{
-		// 상호작용 하이라이트(250)와 구분되는 스캔 전용 스텐실 → PP가 엑스레이로 렌더
-		Mesh->SetCustomDepthStencilValue(ScanSilhouetteStencil);
-	}
-	Mesh->SetRenderCustomDepth(bVisible);
+void AMD_WallUtility::RefreshHighlight()
+{
+	if (bScanHighlighted || bInteractionHighlighted)
+		HighlightState.Apply(Mesh, bScanHighlighted ? ScanSilhouetteStencil : IMD_Interactable::HighlightStencilValue);
+	else
+		HighlightState.Restore();
 }
 
 void AMD_WallUtility::EndScanSilhouette()
 {
+	GetWorldTimerManager().ClearTimer(ScanSilhouetteTimer);
+	ActiveScanner.Reset();
 	SetScanSilhouette(false);
+}
+
+void AMD_WallUtility::StopScanFor(AActor* Scanner)
+{
+	if (ActiveScanner.Get() == Scanner) EndScanSilhouette();
+}
+
+void AMD_WallUtility::EndPlay(const EEndPlayReason::Type Reason)
+{
+	GetWorldTimerManager().ClearTimer(ScanSilhouetteTimer);
+	HighlightState.Restore();
+	Super::EndPlay(Reason);
 }
 
 void AMD_WallUtility::SetBroken(AActor* Cutter)
@@ -285,7 +317,37 @@ void AMD_WallUtility::SetRepaired(AActor* Repairer)
 
 	OnRepaired(Repairer);
 
+	// 수리 완료 시 연결된 문의 잠금 해제
+	UnlockLinkedGate();
+
 	OnRep_UtilityState();
+}
+
+void AMD_WallUtility::UnlockLinkedGate()
+{
+	AActor* GateActor = LinkedGateActor.Get();
+	if (!IsValid(GateActor))
+	{
+		return;
+	}
+
+	// BP_Door의 bLocked 변수를 FBoolProperty로 직접 접근해 false 세팅
+	FBoolProperty* LockedProp = CastField<FBoolProperty>(
+		GateActor->GetClass()->FindPropertyByName(TEXT("bLocked")));
+
+	if (LockedProp != nullptr)
+	{
+		LockedProp->SetPropertyValue_InContainer(GateActor, false);
+		GateActor->ForceNetUpdate();
+
+		UE_LOG(LogTemp, Display, TEXT("[MD_Utility] %s UnlockLinkedGate: %s.bLocked = false"),
+			*GetName(), *GateActor->GetName());
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s UnlockLinkedGate: %s has no bLocked property"),
+			*GetName(), *GateActor->GetName());
+	}
 }
 
 void AMD_WallUtility::OnRep_UtilityState()
@@ -313,9 +375,10 @@ bool AMD_WallUtility::CanRepairWith(AActor* Interactor) const
 		return false;
 	}
 
-	const UMD_ToolDefinition* CurrentTool = Hotbar->GetCurrentTool();
-	return IsValid(CurrentTool)
-		&& CurrentTool->ToolAbilityTag.MatchesTagExact(RequiredRepairToolTag);
+	// 도구와 소모품에 공통인 사용 능력으로 수리 대상 호환성 판정
+	UMD_ItemDefinition* CurrentItem = Hotbar->GetCurrentItem();
+	// 요구된 수리 능력 태그와 정확히 일치하는 아이템만 허용
+	return IsValid(CurrentItem) == true && CurrentItem->GetUseAbilityTag().MatchesTagExact(RequiredRepairToolTag) == true;
 }
 
 bool AMD_WallUtility::CanInteract_Implementation(AActor* Interactor) const
@@ -338,7 +401,8 @@ bool AMD_WallUtility::TryRepairWithEquippedTool(AActor* Repairer)
 	{
 		const AMD_Character* Character = Cast<AMD_Character>(Repairer);
 		UMD_EquipHotbarComponent* Hotbar = IsValid(Character) ? Character->GetHotbarComponent() : nullptr;
-		if (!IsValid(Hotbar) || !Hotbar->TryConsumeTool(Hotbar->GetCurrentTool(), 1))
+		// 수리 도구의 공통 수량 차감 실패 시 수리 진행 차단
+		if (IsValid(Hotbar) == false || Hotbar->TryConsumeItem(Hotbar->GetCurrentItem(), 1) == false)
 		{
 			return false;
 		}
@@ -366,11 +430,6 @@ void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
 
 void AMD_WallUtility::SetInteractionHighlighted_Implementation(bool bHighlighted)
 {
-	if (!IsValid(Mesh))
-	{
-		return;
-	}
-
-	Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
-	Mesh->SetRenderCustomDepth(bHighlighted);
+	bInteractionHighlighted = bHighlighted;
+	RefreshHighlight();
 }

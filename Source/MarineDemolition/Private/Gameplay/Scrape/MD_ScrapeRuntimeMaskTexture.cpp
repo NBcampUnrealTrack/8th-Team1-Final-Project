@@ -1,4 +1,5 @@
 #include "Gameplay/Scrape/MD_ScrapeRuntimeMaskTexture.h"
+#include "MDScrapeInitialMaskRenderer.h"
 #include "TextureResource.h"
 #include "RHICommandList.h"
 #include "RenderingThread.h"
@@ -42,11 +43,21 @@ using FUploadStatePtr = FStatePtr;
 std::atomic<uint64> InitialPending{0}, DirtyPending{0}, InitialPeak{0}, DirtyPeak{0}, FenceCount{0}, AdmissionFailures{0};
 std::atomic<bool> PumpQueued{false};
 FTSTicker::FDelegateHandle UploadTicker;
+struct FLayoutUploadReservation
+{
+    TSharedPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe> Layout;
+    uint64 Bytes = 0;
+    ~FLayoutUploadReservation() { InitialPending.fetch_sub(Bytes); }
+};
+using FLayoutReservationPtr = TSharedPtr<FLayoutUploadReservation, ESPMode::ThreadSafe>;
+FCriticalSection LayoutReservationsMutex;
+TMap<const FMDScrapeInitialMaskLayout*, TWeakPtr<FLayoutUploadReservation, ESPMode::ThreadSafe>> LayoutReservations;
 struct FPendingFence
 {
     FGPUFenceRHIRef Fence;
     uint64 Bytes = 0;
     bool bInitial = false;
+    FLayoutReservationPtr LayoutReservation;
 };
 TArray<FPendingFence> PendingFences; // RT only; survives texture destruction.
 int32 NextUploadIndex = 0; // RT round-robin admission avoids starving older walls.
@@ -99,6 +110,22 @@ bool ReserveInitial(uint64 Bytes)
     RecordPeak(InitialPeak, Before + Bytes);
     return true;
 }
+bool AcquireLayoutReservation(const FMD_ScrapeMaskPixels& Pixels, FLayoutReservationPtr& Out)
+{
+    const auto Layout = Pixels.GetBinaryInitialLayout();
+    if (!Layout) return true;
+    FScopeLock Lock(&LayoutReservationsMutex);
+    for (auto It = LayoutReservations.CreateIterator(); It; ++It)
+        if (!It.Value().IsValid()) It.RemoveCurrent();
+    if (auto* Existing = LayoutReservations.Find(Layout.Get()))
+        if (auto Shared = Existing->Pin()) { Out = MoveTemp(Shared); return true; }
+    const uint64 Bytes = Align(uint64(Layout->Sources.Num()) * sizeof(uint32), uint64(512));
+    if (!ReserveInitial(Bytes)) return false;
+    Out = MakeShared<FLayoutUploadReservation, ESPMode::ThreadSafe>();
+    Out->Layout = Layout; Out->Bytes = Bytes;
+    LayoutReservations.Add(Layout.Get(), Out);
+    return true;
+}
 void ReapFences()
 {
     check(IsInRenderingThread());
@@ -110,13 +137,21 @@ void ReapFences()
         FenceCount.fetch_sub(1);
         PendingFences.RemoveAtSwap(I);
     }
-    if (PendingFences.IsEmpty()) PendingFences.Empty();
+    if (PendingFences.IsEmpty())
+    {
+        PendingFences.Empty();
+        FScopeLock Lock(&LayoutReservationsMutex);
+        for (auto It = LayoutReservations.CreateIterator(); It; ++It)
+            if (!It.Value().IsValid()) It.RemoveCurrent();
+        if (LayoutReservations.IsEmpty()) LayoutReservations.Empty();
+    }
 }
-void TrackFence(FRHICommandListImmediate& Cmd, const FUploadStatePtr& State, uint64 Bytes, bool bInitial)
+void TrackFence(FRHICommandListImmediate& Cmd, const FUploadStatePtr& State, uint64 Bytes, bool bInitial,
+    FLayoutReservationPtr LayoutReservation = nullptr)
 {
     State->Fence = RHICreateGPUFence(TEXT("MD_ScrapeMaskUpload"));
     Cmd.WriteGPUFence(State->Fence);
-    PendingFences.Add({State->Fence, Bytes, bInitial});
+    PendingFences.Add({State->Fence, Bytes, bInitial, MoveTemp(LayoutReservation)});
     FenceCount.fetch_add(1);
 }
 uint64 PageUploadBytes(int32 Page, int32 PixelCount, int32 Width)
@@ -225,8 +260,10 @@ void EnsureUploadTicker()
 class FRuntimeMaskResource final : public FTextureResource
 {
 public:
-    FRuntimeMaskResource(FIntPoint InSize, TextureFilter InFilter, FStatePtr InState, FStatePtr InSource, uint64 InReservation)
-        : Size(InSize), Filter(InFilter), State(MoveTemp(InState)), Source(MoveTemp(InSource)), Reservation(InReservation) {}
+    FRuntimeMaskResource(FIntPoint InSize, TextureFilter InFilter, FStatePtr InState, FStatePtr InSource,
+        uint64 InReservation, FLayoutReservationPtr InLayoutReservation)
+        : Size(InSize), Filter(InFilter), State(MoveTemp(InState)), Source(MoveTemp(InSource)),
+          Reservation(InReservation), LayoutReservation(MoveTemp(InLayoutReservation)) {}
     virtual ~FRuntimeMaskResource() override
     { if (Reservation) InitialPending.fetch_sub(Reservation); }
     virtual uint32 GetSizeX() const override { return Size.X; }
@@ -234,10 +271,15 @@ public:
     virtual void InitRHI(FRHICommandListBase& RHICmdList) override
     {
         TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_MaskResourceInit);
+        FMD_ScrapeMaskPixels Latest;
+        {
+            FScopeLock Lock(&State->Mutex);
+            Latest = State->CurrentPixels;
+        }
         // RHI recreation also reconstructs exact latest bytes and requires staging admission.
         if (!Reservation)
         {
-            const uint64 Bytes = AlignedUploadBytes(Size.X, Size.Y);
+            const uint64 Bytes = AlignedUploadBytes(Size.X, Size.Y) + Latest.GetBinaryUploadBound(Size.X);
             if (!ReserveInitial(Bytes))
             {
                 AdmissionFailures.fetch_add(1);
@@ -245,10 +287,19 @@ public:
                 return;
             }
             Reservation = Bytes;
+            if (!AcquireLayoutReservation(Latest, LayoutReservation))
+            {
+                InitialPending.fetch_sub(Reservation); Reservation = 0;
+                AdmissionFailures.fetch_add(1);
+                UE_LOG(LogMDScrapeMaskUpload, Error, TEXT("Mask layout recreation exceeded the fixed startup staging budget."));
+                return;
+            }
         }
         TextureRHI = RHICmdList.CreateTexture(FRHITextureCreateDesc::Create2D(
             TEXT("MD_ScrapeRuntimeMask"), Size.X, Size.Y, PF_G8)
-            .SetFlags(ETextureCreateFlags::ShaderResource).SetInitialState(ERHIAccess::SRVMask));
+            .SetFlags(ETextureCreateFlags::ShaderResource
+                | (Latest.HasBinaryInitial() ? ETextureCreateFlags::UAV : ETextureCreateFlags::None))
+            .SetInitialState(ERHIAccess::SRVMask));
         SamplerStateRHI = GetOrCreateSamplerState(FSamplerStateInitializerRHI(
             Filter == TF_Nearest ? SF_Point : SF_Bilinear, AM_Clamp, AM_Clamp, AM_Clamp));
         const bool bCopyFromSource = Source && Source->Texture;
@@ -263,21 +314,17 @@ public:
         }
         else
         {
-            FMD_ScrapeMaskPixels Latest;
+            if (!Latest.TryInitializeGPU(FRHICommandListImmediate::Get(), TextureRHI, Size))
             {
-                FScopeLock Lock(&State->Mutex);
-                Latest = State->CurrentPixels;
+                TArray<uint8> InitialBytes;
+                InitialBytes.SetNumUninitialized(Size.X * Size.Y);
+                Latest.CopyRange(0, InitialBytes.Num(), InitialBytes.GetData());
+                RHICmdList.UpdateTexture2D(TextureRHI, 0,
+                    FUpdateTextureRegion2D(0, 0, 0, 0, Size.X, Size.Y), Size.X, InitialBytes.GetData());
             }
-            // One full temporary and one RHI upload avoid per-row aligned allocations.
-            // Driver staging outlives this caller buffer and still needs GPU profiling.
-            TArray<uint8> InitialBytes;
-            InitialBytes.SetNumUninitialized(Size.X * Size.Y);
-            Latest.CopyRange(0, InitialBytes.Num(), InitialBytes.GetData());
-            RHICmdList.UpdateTexture2D(TextureRHI, 0,
-                FUpdateTextureRegion2D(0, 0, 0, 0, Size.X, Size.Y), Size.X, InitialBytes.GetData());
         }
         State->Texture = TextureRHI;
-        TrackFence(FRHICommandListImmediate::Get(), State, bCopyFromSource ? 0 : Reservation, true);
+        TrackFence(FRHICommandListImmediate::Get(), State, bCopyFromSource ? 0 : Reservation, true, MoveTemp(LayoutReservation));
         // A source copy consumes no upload staging, but keep its initialization
         // reservation visible until the completion fence is tracked.
         if (bCopyFromSource) InitialPending.fetch_sub(Reservation);
@@ -296,6 +343,7 @@ private:
     TextureFilter Filter;
     FStatePtr State, Source;
     uint64 Reservation = 0;
+    FLayoutReservationPtr LayoutReservation;
 };
 
 UTexture2D* CreateMask(FIntPoint Dimensions, const FMD_ScrapeMaskPixels& Pixels,
@@ -305,13 +353,24 @@ UTexture2D* CreateMask(FIntPoint Dimensions, const FMD_ScrapeMaskPixels& Pixels,
     if (!FApp::CanEverRender() || Dimensions.X <= 0 || Dimensions.Y <= 0
         || Dimensions.X > MAX_uint16 || Dimensions.Y > MAX_uint16
         || static_cast<int64>(Dimensions.X) * Dimensions.Y != Pixels.Num()) return nullptr;
-    const uint64 Reservation = AlignedUploadBytes(Dimensions.X, Dimensions.Y);
+    const uint64 Reservation = AlignedUploadBytes(Dimensions.X, Dimensions.Y) + Pixels.GetBinaryUploadBound(Dimensions.X);
     if (!ReserveInitial(Reservation))
     {
         AdmissionFailures.fetch_add(1);
         UE_LOG(LogMDScrapeMaskUpload, Error,
             TEXT("Mask initialization exceeded the fixed %llu-byte startup staging budget; no uninitialized texture was published."),
             FMD_ScrapeRuntimeMaskTexture::MaximumInitialUploadBytes);
+        TraceUploadStats();
+        return nullptr;
+    }
+    // Every wall keeps its own completion fence, while immutable layout input is
+    // charged once until all associated uploads finish. The 256 MiB limit is unchanged.
+    FLayoutReservationPtr LayoutReservation;
+    if (!AcquireLayoutReservation(Pixels, LayoutReservation))
+    {
+        InitialPending.fetch_sub(Reservation);
+        AdmissionFailures.fetch_add(1);
+        UE_LOG(LogMDScrapeMaskUpload, Error, TEXT("Shared mask layout exceeded the fixed startup staging budget."));
         TraceUploadStats();
         return nullptr;
     }
@@ -327,7 +386,7 @@ UTexture2D* CreateMask(FIntPoint Dimensions, const FMD_ScrapeMaskPixels& Pixels,
     State->CurrentPixels = Pixels; State->CurrentPixels.ClearDirty();
     State->bSharedInitial = bSharedInitial;
     State->Size = Dimensions;
-    auto* Resource = new FRuntimeMaskResource(Dimensions, Filter, State, MoveTemp(Source), Reservation);
+    auto* Resource = new FRuntimeMaskResource(Dimensions, Filter, State, MoveTemp(Source), Reservation, MoveTemp(LayoutReservation));
     State->ResourceIdentity = Resource;
     // SetResource publishes the matching RT pointer first. Initialization mirrors the
     // exported UTexture::UpdateResourceWithParams lifecycle without invoking UTexture2D's

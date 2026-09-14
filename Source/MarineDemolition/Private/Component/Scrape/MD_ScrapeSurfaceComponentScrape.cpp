@@ -239,6 +239,7 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	SCOPE_CYCLE_COUNTER(STAT_MD_ScrapeStrokeTotal);
 	// Contact snapshots are released on every transaction exit.
 	FMD_ScrapeEvaluationScratch LocalEvaluationScratch;
+    LocalEvaluationScratch.bCaptureBoundary = UsesMeshUVSurface();
 	OutRemovedCleanRatioDelta = 0.0f;
 
 	if (!bContaminationEnabled || !HasAuthority())
@@ -731,6 +732,7 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	}
 	Result.CellChanges = MoveTemp(MergedChanges);
 	const TArray<FMD_ScrapeCellChange>& SurfaceChanges = Result.CellChanges;
+    const bool bBoundaryChanged=bMeshUVSurface && CommitContaminationBoundary(LocalEvaluationScratch, false);
 	Result.ModifiedCellCount = SurfaceChanges.Num();
 
 	if (bMeshUVSurface)
@@ -753,7 +755,8 @@ FMD_ScrapeResult UMD_ScrapeSurfaceComponent::ApplyLocalScrapeStrokeInternal(
 	{
 		UpdateContaminationMask(SurfaceChanges);
 	}
-	PublishContaminationChanges(SurfaceChanges);
+    if (bBoundaryChanged && SurfaceChanges.IsEmpty()) UpdateContaminationBoundaryVisual({});
+	PublishContaminationChanges(SurfaceChanges,bBoundaryChanged);
 
 	// MASS-004: 여기서는 표면 상태만 확정한다. Tool이 실제 Load 수용량을
 	// 확인한 뒤 받지 못한 순제거 몫만 CommitContaminationPhysicalDrop으로

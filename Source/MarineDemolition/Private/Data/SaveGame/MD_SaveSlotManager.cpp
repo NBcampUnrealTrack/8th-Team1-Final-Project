@@ -433,6 +433,27 @@ void UMD_SaveSlotManager::ResetTemporaryGameData()
 	return;
 }
 
+
+void UMD_SaveSlotManager::PrepareContaminationForWorld(UWorld* World)
+{
+    if (!World || World->GetNetMode()==NM_Client) return;
+    auto* GI=World->GetGameInstance();
+    auto* Persistence=GI?GI->GetSubsystem<UMD_DayPersistenceSubsystem>():nullptr;
+    if (!Persistence) return;
+    if (PendingGameDataOperation==EMD_PendingGameDataOperation::LoadGame
+        && SelectedLoadGameData.IsValid()
+        && UWorld::RemovePIEPrefix(World->GetPackage()->GetName())==SelectedLoadGameData->MapPackagePath)
+    {
+        FMD_WorldData WorldData;
+        const bool bHasWorldData=SelectedLoadGameData->GetDataField(FMD_WorldData::DataFieldKey,WorldData);
+        Persistence->PrepareContaminationContext(World,&WorldData,false,bHasWorldData);
+        return;
+    }
+    const bool bNewContract=PendingGameDataOperation==EMD_PendingGameDataOperation::NewGame
+        || PendingGameDataOperation==EMD_PendingGameDataOperation::ContinueGame;
+    Persistence->PrepareContaminationContext(World,nullptr,bNewContract,true);
+}
+
 bool UMD_SaveSlotManager::ApplyPendingGameDataOperation()
 {
 	// 클라이언트가 보류된 새 게임 또는 불러오기 데이터를 자신의 World에 적용하지 못하도록 하는 권한 제한

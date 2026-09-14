@@ -7,6 +7,7 @@
 #include "MD_ContaminationSolidVisualComponent.generated.h"
 
 class UMDSolidMeshComponent;
+class UPrimitiveComponent;
 struct FMDSolidRenderTemplate;
 struct FMDSolidDynamicData;
 class UMaterialInterface;
@@ -66,6 +67,7 @@ public:
     /** Current shell height in world cm; atlas/source-triangle lookup avoids full-mesh scans. */
     float SampleVisualOffset(const FVector& LocalPosition, const FVector2D& CanonicalUV,
         const FVector& NormalLocal) const;
+    UPrimitiveComponent* GetScanMesh() const;
     int32 GetSurfaceTriangleCount() const;
     int32 GetChunkCount() const { return SolidMesh ? 1 : 0; }
     int64 GetAllocatedBytes() const;
