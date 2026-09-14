@@ -30,7 +30,7 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "GameFramework/GameSession.h"
-#include "Gameplay/Customization/MD_CharacterCustomizationSubsystem.h"
+#include "Gameplay/Customization/MD_CharacterAppearanceLibrary.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
@@ -804,7 +804,7 @@ void AMD_PlayerController::ServerRepayLoan_Implementation(AMD_Merchant* Merchant
 }
 
 
-void AMD_PlayerController::ServerApplyAppearance_Implementation(FMDCharacterCustomizationAppearance NewAppearance)
+void AMD_PlayerController::ServerApplyAppearance_Implementation(FMD_CharacterAppearance NewAppearance)
 {
 	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
 	if (IsValid(MDPlayerState) == true)
@@ -820,38 +820,11 @@ void AMD_PlayerController::RestoreAppearanceFromLocalSave()
 		return;
 	}
 
-	UMD_CharacterCustomizationSubsystem* Subsystem =
-		UMD_CharacterCustomizationSubsystem::Get(this);
-	if (IsValid(Subsystem) == false)
+	// 마지막으로 확정한 선택을 서버에 다시 실어 재접속·트래블 후에도 유지한다
+	FMD_CharacterAppearance SavedAppearance;
+	if (UMD_CharacterAppearanceLibrary::LoadLocalAppearance(SavedAppearance) == true)
 	{
-		return;
-	}
-
-	// 가장 최근 수정된 슬롯의 외형을 찾아 서버에 전달한다.
-	TArray<FMDCharacterCustomizationSlotSummary> Summaries = Subsystem->GetCustomizationSlotSummaries();
-
-	int32 BestSlotIndex = INDEX_NONE;
-	FDateTime BestTime = FDateTime::MinValue();
-
-	for (const FMDCharacterCustomizationSlotSummary& Summary : Summaries)
-	{
-		if (Summary.bOccupied == true && Summary.LastModified > BestTime)
-		{
-			BestTime = Summary.LastModified;
-			BestSlotIndex = Summary.SlotIndex;
-		}
-	}
-
-	if (BestSlotIndex == INDEX_NONE)
-	{
-		return;
-	}
-
-	FMDCharacterCustomizationAppearance Appearance;
-	FString SlotLabel;
-	if (Subsystem->LoadCustomizationSlot(BestSlotIndex, Appearance, SlotLabel) == true)
-	{
-		ServerApplyAppearance(Appearance);
+		ServerApplyAppearance(SavedAppearance);
 	}
 }
 

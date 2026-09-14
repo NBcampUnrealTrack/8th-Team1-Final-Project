@@ -5,7 +5,7 @@
 #include "CoreMinimal.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "GameFramework/PlayerController.h"
-#include "Types/Customization/MD_CharacterCustomizationTypes.h"
+#include "Types/Customization/MD_CharacterAppearanceTypes.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
 #include "Types/UI/MD_LoadingScreenTypes.h"
@@ -169,7 +169,7 @@ public:
 
 	/** 클라이언트가 확정한 캐릭터 외형을 서버 PlayerState에 적용한다. */
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Customization")
-	void ServerApplyAppearance(FMDCharacterCustomizationAppearance NewAppearance);
+	void ServerApplyAppearance(FMD_CharacterAppearance NewAppearance);
 
 private:
 

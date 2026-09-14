@@ -8,7 +8,7 @@
 #include "UObject/PrimaryAssetId.h"
 #include "GameplayEffectTypes.h"
 #include "Types/State/MD_HealthTypes.h"
-#include "Types/Customization/MD_CharacterCustomizationTypes.h"
+#include "Types/Customization/MD_CharacterAppearanceTypes.h"
 #include "MD_PlayerState.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnHealthStateChanged, EMD_HealthState, NewState);
@@ -103,10 +103,10 @@ public:
 
 	/** 복제된 외형 데이터를 반환한다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Customization")
-	const FMDCharacterCustomizationAppearance& GetAppearance() const { return ReplicatedAppearance; }
+	const FMD_CharacterAppearance& GetAppearance() const { return ReplicatedAppearance; }
 
 	/** 서버에서 외형을 설정하고 모든 클라이언트에 복제한다. */
-	void SetAppearance(const FMDCharacterCustomizationAppearance& NewAppearance);
+	void SetAppearance(const FMD_CharacterAppearance& NewAppearance);
 
 	// 현재 플레이어의 전체 AssetId 구매 이력 확인
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")
@@ -147,7 +147,7 @@ protected:
 private:
 	// 모든 클라이언트가 같은 캐릭터 외형을 표시하기 위한 복제 외형 데이터
 	UPROPERTY(ReplicatedUsing = OnRep_ReplicatedAppearance)
-	FMDCharacterCustomizationAppearance ReplicatedAppearance;
+	FMD_CharacterAppearance ReplicatedAppearance;
 
 	UFUNCTION()
 	void OnRep_ReplicatedAppearance();
