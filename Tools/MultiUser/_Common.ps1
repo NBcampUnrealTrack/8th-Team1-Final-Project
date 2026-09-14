@@ -72,6 +72,33 @@ function Get-LocalAddressFor {
 }
 
 
+function Test-TailnetPeer {
+    <#
+        주어진 주소가 이 tailnet 의 피어 목록에 있는지 본다.
+        $true  = 목록에 있음
+        $false = 목록에 없음 (다른 tailnet 일 가능성)
+        $null  = tailscale CLI 를 못 찾아 판단 불가
+    #>
+    param([string]$Address)
+
+    $ErrorActionPreference = 'SilentlyContinue'
+
+    $cli = (Get-Command tailscale -ErrorAction SilentlyContinue).Source
+    if (-not $cli) {
+        foreach ($c in @("$env:ProgramFiles\Tailscale\tailscale.exe",
+                         "${env:ProgramFiles(x86)}\Tailscale\tailscale.exe")) {
+            if (Test-Path $c) { $cli = $c; break }
+        }
+    }
+    if (-not $cli) { return $null }
+
+    $out = & $cli status 2>$null
+    if (-not $out) { return $null }
+
+    return [bool](($out -join "`n") -match [regex]::Escape($Address))
+}
+
+
 function Select-Transport {
     <#
         host.json 의 transports 를 순서대로 시도해 쓸 수 있는 첫 경로를 고른다.
@@ -111,7 +138,17 @@ function Select-Transport {
         if (-not $amHost) {
             if (-not (Test-Connection -ComputerName $t.hostAddress -Count 1 -Quiet -ErrorAction SilentlyContinue)) {
                 Write-Host (' 호스트 {0} 응답 없음' -f $t.hostAddress) -ForegroundColor DarkYellow
-                $failures += "  - $($t.name): 내 주소는 $localIP 인데 호스트 $($t.hostAddress) 에 닿지 않음"
+
+                # 흔한 원인: 호스트가 아예 다른 tailnet(다른 계정)에 로그인되어 있다.
+                # 그러면 ping 이 물리 네트워크로 새어나가 TTL 만료로 죽는다.
+                if ((Test-TailnetPeer $t.hostAddress) -eq $false) {
+                    $failures += "  - $($t.name): 호스트 $($t.hostAddress) 가 이 tailnet 에 없습니다."
+                    $failures += "      tailscale status 목록에 안 보입니다. 호스트가 다른 계정/tailnet 에"
+                    $failures += "      로그인되어 있을 수 있습니다. 같은 tailnet 으로 맞춰야 합니다."
+                }
+                else {
+                    $failures += "  - $($t.name): 내 주소는 $localIP 인데 호스트 $($t.hostAddress) 에 닿지 않음"
+                }
                 continue
             }
         }
@@ -127,8 +164,10 @@ function Select-Transport {
 
     Stop-WithError (@('[오류] 사용할 수 있는 VPN 경로가 없습니다.', '') + $failures + @(
         '',
-        '       Radmin VPN 또는 Tailscale 을 실행하고 팀 네트워크에 접속한 뒤 다시 시도하세요.',
-        '       호스트 주소가 바뀌었다면 Tools\MultiUser\host.json 을 고쳐야 합니다.'
+        '       확인 순서:',
+        '         1) tailscale status  - 호스트가 목록에 보이는가',
+        '         2) 안 보이면 호스트와 내가 같은 tailnet(같은 계정)인지 확인',
+        '         3) 호스트 주소가 바뀌었다면 Tools\MultiUser\host.json 을 고쳐 커밋'
     ))
 }
 

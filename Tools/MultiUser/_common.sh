@@ -76,6 +76,27 @@ local_address_for() {
         | head -n 1
 }
 
+# 주어진 주소가 이 tailnet 의 피어 목록에 있는지 본다.
+# 있으면 0, 없거나 판단 불가면 1. (판단 불가일 때 "있다"로 취급해 오진을 피한다)
+tailnet_has_peer() {
+    local addr="$1"
+    local cli=""
+
+    if command -v tailscale >/dev/null 2>&1; then
+        cli=tailscale
+    elif [ -x /Applications/Tailscale.app/Contents/MacOS/Tailscale ]; then
+        cli=/Applications/Tailscale.app/Contents/MacOS/Tailscale
+    else
+        return 0   # CLI 없음 -> 판단 불가
+    fi
+
+    local out
+    out="$("$cli" status 2>/dev/null)" || return 0
+    [ -z "$out" ] && return 0
+
+    echo "$out" | grep -qF "$addr"
+}
+
 # host.json 의 transports 를 순서대로 시도해 쓸 수 있는 첫 경로를 고른다.
 # 성공하면 SELECTED_NAME / SELECTED_LOCAL / SELECTED_HOST 를 채운다.
 select_transport() {
@@ -114,7 +135,16 @@ select_transport() {
 
         if ! ping -c 1 -t 2 "$host_addr" >/dev/null 2>&1; then
             echo " 호스트 $host_addr 응답 없음"
-            failures+=("  - $name: 내 주소는 $local_ip 인데 호스트 $host_addr 에 닿지 않음")
+
+            # 흔한 원인: 호스트가 아예 다른 tailnet(다른 계정)에 로그인되어 있다.
+            # 그러면 ping 이 물리 네트워크로 새어나가 TTL 만료로 죽는다.
+            if tailnet_has_peer "$host_addr"; then
+                failures+=("  - $name: 내 주소는 $local_ip 인데 호스트 $host_addr 에 닿지 않음")
+            else
+                failures+=("  - $name: 호스트 $host_addr 가 이 tailnet 에 없습니다.")
+                failures+=("      tailscale status 목록에 안 보입니다 — 호스트가 다른 계정/tailnet 에")
+                failures+=("      로그인되어 있을 수 있습니다. 같은 tailnet 으로 맞춰야 합니다.")
+            fi
             continue
         fi
 
@@ -129,9 +159,10 @@ select_transport() {
         "" \
         "${failures[@]}" \
         "" \
-        "       Tailscale 을 실행하고 팀 tailnet 에 로그인한 뒤 다시 시도하세요:" \
-        "         tailscale status" \
-        "       호스트 주소가 바뀌었다면 Tools/MultiUser/host.json 을 고쳐야 합니다."
+        "       확인 순서:" \
+        "         1) tailscale status  - 호스트가 목록에 보이는가" \
+        "         2) 안 보이면 호스트와 내가 같은 tailnet(같은 계정)인지 확인" \
+        "         3) 호스트 주소가 바뀌었다면 Tools/MultiUser/host.json 을 고쳐 커밋"
 }
 
 # 선택된 경로를 머신별 설정에 기록한다. Saved/ 는 .gitignore 대상이다.
