@@ -1,26 +1,24 @@
 {
   "_comment": [
-    "멀티유저 편집 호스트 주소록. 호스트 PC나 VPN 주소가 바뀌면 여기만 고친다.",
-    "transports 배열의 순서가 곧 우선순위다 — 런처가 위에서부터 시도해",
-    "어댑터가 살아있고 호스트에 ping이 닿는 첫 번째 경로를 쓴다.",
-    "hostAddress 는 '호스트 PC'의 해당 VPN 주소다 (내 주소가 아니다).",
-    "Start-MU-Server.ps1 을 호스트에서 실행하면 넣을 값이 출력된다."
+    "멀티유저 편집 호스트 주소록. 호스트나 주소가 바뀌면 여기만 고친다.",
+    "",
+    "호스트는 맥미니(상시 가동)다. macOS 에는 Radmin VPN 이 없으므로(Windows 전용 제품)",
+    "모든 참가자가 Tailscale 로 붙는다. transports 에 radmin 을 되살리지 말 것 —",
+    "호스트에 Radmin 주소가 없어서 매 실행마다 ping 타임아웃만 발생한다.",
+    "",
+    "hostMachine  : 맥미니의 호스트명. `scutil --get LocalHostName` 또는 `hostname -s`",
+    "hostAddress  : 맥미니의 Tailscale IPv4. `tailscale ip -4`",
+    "두 값은 맥에서 start-mu-server.command 를 실행하면 그대로 출력된다."
   ],
 
   "serverName": "RevStudio",
   "serverPort": 50002,
-  "hostMachine": "DESKTOP-F6FGIDC",
+  "hostMachine": "REPLACE-WITH-MAC-HOSTNAME",
 
   "transports": [
     {
-      "name": "radmin",
-      "hostAddress": "26.111.195.212",
-      "adapterMatch": "*Radmin*",
-      "subnetPrefix": "26."
-    },
-    {
       "name": "tailscale",
-      "hostAddress": "100.74.171.37",
+      "hostAddress": "REPLACE-WITH-MAC-TAILSCALE-IP",
       "adapterMatch": "*Tailscale*",
       "subnetPrefix": "100."
     }

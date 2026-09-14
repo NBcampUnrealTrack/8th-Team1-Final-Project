@@ -80,6 +80,20 @@ function Select-Transport {
     #>
     param($Config)
 
+    # host.json 을 아직 안 채웠으면 여기서 끊는다. 안 그러면 ping 타임아웃만 기다리다
+    # "호스트 응답 없음" 이라는 엉뚱한 원인을 보게 된다.
+    foreach ($t in $Config.transports) {
+        if ($t.hostAddress -like 'REPLACE-*') {
+            Stop-WithError @(
+                '[오류] host.json 의 호스트 주소가 아직 채워지지 않았습니다.',
+                '',
+                '       맥미니에서 Tools/MultiUser/start-mu-server.command 를 실행하면',
+                '       넣어야 할 hostMachine 과 hostAddress 가 출력됩니다.',
+                '       그 두 값을 Tools/MultiUser/host.json 에 넣고 커밋하세요.'
+            )
+        }
+    }
+
     $amHost = ($env:COMPUTERNAME -eq $Config.hostMachine)
     $failures = @()
 
