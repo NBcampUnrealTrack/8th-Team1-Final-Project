@@ -237,6 +237,16 @@ bool AMD_SurfaceStain::ContainsSurfacePoint(const FVector& Point, const FVector&
 	return Definition->ContainsUV(FVector2D(Local.X / (2 * HalfSize.X) + 0.5, Local.Y / (2 * HalfSize.Y) + 0.5));
 }
 
+bool AMD_SurfaceStain::TraceSticker(const FVector& Origin, const FVector& Direction, double MaxDistance, double& OutDistance) const
+{
+	if (RemainingSize <= 0 || !Definition || !Definition->IsUsable() || !HasSticker()) return false;
+	const FTransform Frame = GetActorTransform();
+	const float Scale = FMD_StainStickerPatch::UVScale(RemainingSize, StickerPatch.InitialSize);
+	return StickerPatch.Raycast(Frame.InverseTransformPositionNoScale(Origin), Frame.InverseTransformVectorNoScale(Direction),
+		MaxDistance, [this, Scale](const FVector2D& UV)
+		{ return Definition->ContainsUV((UV - FVector2D(0.5)) * Scale + FVector2D(0.5)); }, OutDistance);
+}
+
 bool AMD_SurfaceStain::ApplyScrapeStroke(int32 RemovalAmount)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceStain_ApplyStroke);

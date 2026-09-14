@@ -16,5 +16,8 @@ struct MARINEDEMOLITION_API FMD_StainStickerPatch
 
 	bool IsValid() const;
 	bool FindUV(const FVector& LocalPoint, const FVector& LocalNormal, FVector2D& OutUV) const;
+	/** Closest front-facing opaque triangle along a normalized local ray. No collision cooking. */
+	bool Raycast(const FVector& Origin, const FVector& Direction, double MaxDistance,
+		TFunctionRef<bool(const FVector2D&)> AcceptUV, double& OutDistance) const;
 	static float UVScale(int32 RemainingSize, int32 BakedSize);
 };

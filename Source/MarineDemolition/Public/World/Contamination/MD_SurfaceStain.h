@@ -52,6 +52,7 @@ public:
 	bool ApplyScrapeStroke(int32 RemovalAmount = 100);
 	bool RestoreSize(int32 Size);
 	bool ContainsSurfacePoint(const FVector& Point, const FVector& Normal) const;
+	bool TraceSticker(const FVector& Origin, const FVector& Direction, double MaxDistance, double& OutDistance) const;
 	void SetScanHighlighted(UObject* Source, bool bHighlighted);
 	UDecalComponent* GetDecal() const { return Decal; }
 	FBoxSphereBounds GetStainBounds() const;
