@@ -132,6 +132,14 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestShopPurchase(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId);
 
+	// 소유 클라이언트의 판매 품목과 예상 슬롯 및 수량을 서버에서 검증
+	UFUNCTION(Server, Reliable)
+	void ServerRequestShopSale(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity);
+
+	// 해당 상인의 현재 화면에 판매 결과 전달
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveShopSaleResult(AMD_Merchant* Merchant, EMD_ShopSaleResult Result);
+
 	/** 서버 구매 결과를 요청한 로컬 상점 화면에 전달하는 응답 진입점 */
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveShopPurchaseResult(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result);

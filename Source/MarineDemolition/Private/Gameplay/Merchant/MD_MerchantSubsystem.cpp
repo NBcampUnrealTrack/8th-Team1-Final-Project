@@ -3,6 +3,10 @@
 
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "EngineUtils.h"
+#include "Engine/AssetManager.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "GameFramework/Pawn.h"
+#include "Templates/UnrealTemplate.h"
 #include "GameplayTagContainer.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
@@ -78,10 +82,13 @@ void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 A
 EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase)
 {
 	// 클라이언트가 로컬 원장을 변경하지 못하도록 막는 서버 권위 검사
-	if (IsValid(PurchasingPlayerState) == false || PurchasingPlayerState->HasAuthority() == false)
+	if (IsValid(PurchasingPlayerState) == false || PurchasingPlayerState->HasAuthority() == false || bShopTransactionInProgress == true)
 	{
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
+
+	// 지급과 경제 알림이 완료될 때까지 중첩 상점 거래 차단
+	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
 
 	// 검증과 구매 기록에서 함께 사용할 전체 식별자 조회
 	FPrimaryAssetId ItemAssetId = ShopItem.GetItemAssetId();
@@ -139,6 +146,107 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerStat
 	OnMerchantStateChanged.Broadcast();
 
 	return EMD_ShopPurchaseResult::Success;
+}
+
+EMD_ShopSaleResult UMD_MerchantSubsystem::TrySellShopItem(AMD_PlayerState* SellingPlayerState, FMD_ShopItem ShopItem, int32 SlotIndex, int32 Quantity)
+{
+	// 서버 소유권과 양수 수량 및 진행 중 거래 검사
+	if (IsValid(SellingPlayerState) == false || SellingPlayerState->HasAuthority() == false || Quantity <= 0 || bShopTransactionInProgress == true)
+	{
+		// 소지품과 원장을 변경하지 않은 요청 거부
+		return EMD_ShopSaleResult::InvalidRequest;
+	}
+	// 소지품 변경과 크레딧 알림의 재진입을 전체 거래 동안 차단
+	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
+	// 등록되지 않은 품목을 사용한 대금 요청 차단
+	if (IsValid(ShopItem.GetDefinition()) == false || ShopItem.GetItemAssetId().IsValid() == false)
+	{
+		// 유효하지 않은 품목 결과 반환
+		return EMD_ShopSaleResult::InvalidItem;
+	}
+	// 화면과 같은 단가를 서버 카탈로그 원본으로 계산
+	int32 UnitPrice = ShopItem.GetSalePrice();
+	// 인벤토리 외 즉시 효과 등 판매 불가 품목 차단
+	if (UnitPrice < 0)
+	{
+		// 회수할 수 없는 품목 결과 반환
+		return EMD_ShopSaleResult::NotSellable;
+	}
+	// 플레이어 상태가 실제 소유한 현재 Pawn에서만 소지품 조회
+	APawn* SellingPawn = SellingPlayerState->GetPawn();
+	// 현재 Pawn의 공통 슬롯 컴포넌트 조회
+	UMD_EquipHotbarComponent* Hotbar = IsValid(SellingPawn) == true ? SellingPawn->FindComponentByClass<UMD_EquipHotbarComponent>() : nullptr;
+	// 클라이언트가 선택했던 위치의 실제 서버 품목 조회
+	UMD_ItemDefinition* StoredItem = IsValid(Hotbar) == true ? Hotbar->GetItemAtSlot(SlotIndex) : nullptr;
+	// 슬롯 교환과 소진 및 다른 품목을 대상으로 한 오래된 요청 차단
+	if (IsValid(StoredItem) == false || StoredItem->GetPrimaryAssetId() != ShopItem.GetItemAssetId() || Hotbar->GetItemCountAtSlot(SlotIndex) < Quantity)
+	{
+		// 보유 수량을 보존한 판매 거부
+		return EMD_ShopSaleResult::NotOwned;
+	}
+	// 곱셈 오버플로 없이 판매 대금 계산
+	int64 TotalPrice = static_cast<int64>(UnitPrice) * Quantity;
+	// 대금 전액을 적립할 수 없는 거래는 회수 이전에 차단
+	if (TotalPrice > MAX_int32 || static_cast<int64>(Credits) + TotalPrice > MAX_int32)
+	{
+		// 상한 초과로 소지품을 잃지 않도록 실패 전달
+		return EMD_ShopSaleResult::CreditLimit;
+	}
+	// 회수 방식과 판매 후 초기화 대상을 함께 결정할 실제 보유 도구 조회
+	UMD_ToolDefinition* SoldTool = Cast<UMD_ToolDefinition>(StoredItem);
+	// 판매 도구와 모든 선행 도구의 개인 이력 초기화 목록
+	TArray<FPrimaryAssetId> ToolAssetIds;
+	// 가장 높은 현재 단계에서 기본 도구 방향으로 검증 시작
+	UMD_ToolDefinition* UpgradeStep = SoldTool;
+	// 소모품은 제외하고 도구의 전체 업그레이드 경로 수집
+	while (IsValid(UpgradeStep) == true)
+	{
+		// 순환 검사와 초기화 목록에 사용할 현재 단계 식별자 조회
+		FPrimaryAssetId StepAssetId = UpgradeStep->GetPrimaryAssetId();
+		// 잘못된 식별자와 순환 업그레이드 설정의 부분 초기화 차단
+		if (StepAssetId.IsValid() == false || ToolAssetIds.Contains(StepAssetId) == true)
+		{
+			// 소지품 회수 이전에 잘못된 도구 경로의 판매 거부
+			return EMD_ShopSaleResult::InvalidItem;
+		}
+		// 현재 도구 단계의 구매 이력과 잠금을 초기화 대상으로 등록
+		ToolAssetIds.Add(StepAssetId);
+		// 선행 도구 로드와 식별자 일치 검사에 사용할 원본 설정 조회
+		FPrimaryAssetId SourceAssetId = UpgradeStep->UpgradeSourceAssetId;
+		// 기본 도구에 도달하면 전체 경로 수집 종료
+		if (SourceAssetId.IsValid() == false)
+		{
+			// 선행 단계가 없는 기본 도구까지 검증 완료
+			break;
+		}
+		// 현재 상점에 노출되지 않은 선행 도구도 등록된 원본 에셋으로 조회
+		UpgradeStep = Cast<UMD_ToolDefinition>(UAssetManager::Get().GetPrimaryAssetPath(SourceAssetId).TryLoad());
+		// 누락되거나 다른 유형의 선행 정의로 불완전한 초기화가 발생하는 상황 차단
+		if (IsValid(UpgradeStep) == false || UpgradeStep->GetPrimaryAssetId() != SourceAssetId)
+		{
+			// 도구와 이력을 보존한 잘못된 업그레이드 설정 결과 전달
+			return EMD_ShopSaleResult::InvalidItem;
+		}
+	}
+	// 도구는 슬롯 전체 반환이며 소모품은 지정 수량만 회수
+	if ((IsValid(SoldTool) == true
+		? Hotbar->SetItemAtSlot(SlotIndex, nullptr, 0) : Hotbar->TryConsumeItem(StoredItem, Quantity)) == false)
+	{
+		// 실제 회수 실패 시 대금 지급 차단
+		return EMD_ShopSaleResult::InvalidRequest;
+	}
+	// 회수 성공 이후 기존 정산 분류로 대금 적립
+	AddCreditsInternal(EMD_DailyReportCategory::Other, static_cast<int32>(TotalPrice));
+	// 도구를 실제로 회수하고 대금을 확정한 뒤 업그레이드 이력 초기화
+	if (IsValid(SoldTool) == true)
+	{
+		// 판매한 단계의 무료 재구매를 해제하고 기본 도구부터 재구매 허용
+		SellingPlayerState->ResetShopToolProgress(ToolAssetIds);
+	}
+	// 공용 크레딧 복제와 현재 상점 화면 갱신
+	OnMerchantStateChanged.Broadcast();
+	// 회수 수량과 대금을 함께 확정한 판매 결과 전달
+	return EMD_ShopSaleResult::Success;
 }
 
 TArray<FPrimaryAssetId> UMD_MerchantSubsystem::GetOwnedItemIds() const

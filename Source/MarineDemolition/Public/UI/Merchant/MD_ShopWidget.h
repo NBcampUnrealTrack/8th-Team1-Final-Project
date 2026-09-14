@@ -25,6 +25,11 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopPurchaseRequest, FPrimaryAss
 // 품목 식별자를 사용하지 않는 구매 제한 알림
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_ShopPurchaseRejected);
 
+// 선택한 소지품의 식별자와 예상 슬롯 및 판매 수량 전달
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FMD_ShopSaleRequest, FPrimaryAssetId, ItemAssetId, int32, SlotIndex, int32, Quantity);
+// 서버가 확정한 판매 결과를 BP 피드백에 전달
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopSaleCompleted, EMD_ShopSaleResult, Result);
+
 /**
  * 상점 UI. 5탭(`04` §3 = `08` §1) + 아이템 카드 목록.
  *
@@ -60,6 +65,25 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void RefreshDisplay();
 
+	// BP 버튼에서 구매 목록과 보유 품목 판매 목록 전환
+	UFUNCTION(BlueprintCallable, Category = "MD|Shop|Sale")
+	void SetSellingMode(bool bInSellingMode);
+
+	// BP 수량 선택 UI에서 현재 품목의 지정 수량 판매 요청
+	UFUNCTION(BlueprintCallable, Category = "MD|Shop|Sale")
+	void RequestSelectedItemSale(int32 Quantity = 1);
+
+	// 서버 결과를 현재 화면과 BP 이벤트에 반영
+	void ReceiveSaleResult(EMD_ShopSaleResult Result);
+
+	// 실제 소지품을 서버에 회수 요청하는 화면 이벤트
+	UPROPERTY(BlueprintAssignable, Category = "MD|Shop|Sale")
+	FMD_ShopSaleRequest OnItemSaleRequested;
+
+	// 판매 성공 또는 실패 이유를 BP 알림에 연결하는 이벤트
+	UPROPERTY(BlueprintAssignable, Category = "MD|Shop|Sale")
+	FMD_ShopSaleCompleted OnSaleCompleted;
+
 	UPROPERTY(BlueprintAssignable, Category = "MD|Shop")
 	FMD_ShopPurchaseRequest OnItemPurchaseRequested;
 
@@ -93,6 +117,13 @@ protected:
 	void HandleItemSelected(FPrimaryAssetId ItemAssetId);
 
 	void HandleBuyClicked();
+
+	// 현재 소유 Pawn의 실제 슬롯에서 같은 전체 식별자의 위치 조회
+	int32 FindSaleSlot(FPrimaryAssetId ItemAssetId);
+
+	// 활성 목록이 상점 구매인지 소지품 판매인지 구분하는 상태
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop|Sale")
+	bool bSellingMode = false;
 
 	// 상점 화면을 연 상인 메뉴
 	UPROPERTY()

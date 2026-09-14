@@ -73,6 +73,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|태그")
 	FGameplayTagContainer OwnedGameplayTags;
 
+	virtual void PreRegisterAllComponents() override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;

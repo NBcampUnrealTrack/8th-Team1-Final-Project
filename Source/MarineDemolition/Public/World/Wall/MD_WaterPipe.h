@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Audio/MD_AudioSubsystem.h"
+#include "GameplayTagContainer.h"
 #include "World/Wall/MD_WallUtility.h"
 #include "MD_WaterPipe.generated.h"
 
@@ -18,6 +20,21 @@ public:
 protected:
 	virtual void OnBroken(AActor* Cutter) override;
 	virtual void OnRepaired(AActor* Repairer) override;
+
+	/** 상태 변화를 모든 머신에서 받는다. 분출음은 여기서 켜고 끈다 */
+	virtual void OnUtilityStateChangedLocal(EMD_UtilityState NewState) override;
+
+	/**
+	 * 파열 지속 분출음. 사운드 에셋이 아니라 태그다 —
+	 * 어떤 소재가 나갈지는 DA_MD_Audio_Hazard 가 정한다.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility|사운드")
+	FGameplayTag GushLoopSoundTag;
+
+	/** 봉합 시 분출음을 끊는 데 쓰는 페이드 길이 */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility|사운드",
+		meta = (ClampMin = "0.0", Units = "s"))
+	float GushStopFadeSeconds = 0.25f;
 
 	// 파열 지점 근접 피해 볼륨 (-8/s)
 	UPROPERTY(VisibleAnywhere, Category = "MD|Utility")
@@ -38,4 +55,7 @@ private:
 	FTimerHandle LeakTimerHandle;
 
 	int32 LeakTicksApplied = 0;
+
+	/** 재생 중인 분출 루프. 각 머신이 자기 것을 들고 있다 (복제하지 않는다) */
+	FMD_AudioHandle GushLoopHandle;
 };

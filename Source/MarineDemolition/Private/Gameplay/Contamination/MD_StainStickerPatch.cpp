@@ -39,3 +39,31 @@ bool FMD_StainStickerPatch::FindUV(const FVector& Point, const FVector& SurfaceN
 	}
 	return bFound;
 }
+
+
+bool FMD_StainStickerPatch::Raycast(const FVector& Origin, const FVector& Direction, double MaxDistance,
+	TFunctionRef<bool(const FVector2D&)> AcceptUV, double& OutDistance) const
+{
+	if (!IsValid() || Origin.ContainsNaN() || Direction.ContainsNaN() || !Direction.IsNormalized()
+		|| !FMath::IsFinite(MaxDistance) || MaxDistance <= 0) return false;
+	double Nearest = MaxDistance;
+	bool bFound = false;
+	for (int32 Index = 0; Index < Positions.Num(); Index += 3)
+	{
+		const FVector A(Positions[Index]), E0 = FVector(Positions[Index + 1]) - A, E1 = FVector(Positions[Index + 2]) - A;
+		const FVector Cross = FVector::CrossProduct(E0, E1);
+		const double AreaSquared = Cross.SquaredLength(), Denominator = FVector::DotProduct(Direction, Cross);
+		if (AreaSquared <= 1.e-16 || Denominator <= 1.e-8) continue;
+		const double Distance = FVector::DotProduct(A - Origin, Cross) / Denominator;
+		if (Distance < 0 || Distance > Nearest) continue;
+		const FVector Delta = Origin + Direction * Distance - A;
+		const double B = FVector::DotProduct(FVector::CrossProduct(Delta, E1), Cross) / AreaSquared;
+		const double C = FVector::DotProduct(FVector::CrossProduct(E0, Delta), Cross) / AreaSquared;
+		if (B < -1.e-5 || C < -1.e-5 || B + C > 1.00001) continue;
+		const FVector2D UV = FVector2D(UVs[Index]) * (1 - B - C) + FVector2D(UVs[Index + 1]) * B + FVector2D(UVs[Index + 2]) * C;
+		if (!AcceptUV(UV)) continue;
+		Nearest = Distance; bFound = true;
+	}
+	if (bFound) OutDistance = Nearest;
+	return bFound;
+}

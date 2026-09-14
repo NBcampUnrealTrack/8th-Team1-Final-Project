@@ -8,6 +8,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Gameplay/Contamination/MD_StainTargeting.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "TimerManager.h"
 #include "World/Contamination/MD_SurfaceStain.h"
@@ -59,23 +60,9 @@ AMD_SurfaceStain* UMD_StainScraperComponent::TraceTarget() const
 	Pawn->GetController()->GetPlayerViewPoint(Origin, Rotation);
 	const FVector Direction = Rotation.Vector();
 	if (Origin.ContainsNaN() || Direction.ContainsNaN()) return nullptr;
-	TArray<FHitResult> Hits;
-	FCollisionQueryParams Params(SCENE_QUERY_STAT(MDStainStroke), true, Pawn);
-	// Query volumes nominate candidates; only the actual visible surface point can receive a hit.
-	GetWorld()->LineTraceMultiByChannel(Hits, Origin, Origin + Direction * FMath::Min(ReachCm, 250.0f), ECC_Visibility, Params);
-	const FHitResult* Surface = Hits.FindByPredicate([](const FHitResult& Hit) { return Hit.bBlockingHit; });
-	if (!Surface) return nullptr;
-	AMD_SurfaceStain* Best = nullptr;
-	double BestDistance = TNumericLimits<double>::Max();
-	for (const FHitResult& Hit : Hits)
-	{
-		if (Hit.bBlockingHit) break;
-		AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Hit.GetActor());
-		if (!Stain || !Stain->ContainsSurfacePoint(Surface->ImpactPoint, Surface->ImpactNormal)) continue;
-		const double Distance = FVector::DistSquared(Stain->GetActorLocation(), Surface->ImpactPoint);
-		if (Distance < BestDistance) { Best = Stain; BestDistance = Distance; }
-	}
-	return Best;
+	FHitResult Hit;
+	return FMD_StainTargeting::Trace(*GetWorld(), Origin, Direction, FMath::Min(ReachCm, 250.0f), Hit, Pawn)
+		? Cast<AMD_SurfaceStain>(Hit.GetActor()) : nullptr;
 }
 
 void UMD_StainScraperComponent::ApplyImpact()

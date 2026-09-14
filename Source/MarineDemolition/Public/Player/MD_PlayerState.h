@@ -119,6 +119,9 @@ public:
 	// 구매 완료 이력과 업그레이드 소스의 구매 금지를 함께 기록
 	bool RecordPurchasedShopItem(FPrimaryAssetId ItemAssetId, FPrimaryAssetId SourceAssetId = FPrimaryAssetId());
 
+	// 판매한 도구부터 기본 도구까지 검증된 단계들의 구매 이력과 구매 금지 해제
+	void ResetShopToolProgress(TArray<FPrimaryAssetId>& ToolAssetIds);
+
 	// 업그레이드 구매로 금지된 전체 식별자 여부 검사
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")
 	bool IsShopItemPurchaseBlocked(FPrimaryAssetId ItemAssetId);
