@@ -719,6 +719,13 @@ void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
 	{
 		HUDWidgetInstance->SetVisibility(Target);
 	}
+
+	// 중앙 조준점은 GameHUD 레이어 밖의 별도 오버레이이므로 함께 숨긴다.
+	if (IsValid(ScrapeFocusReticleWidgetInstance))
+	{
+		ScrapeFocusReticleWidgetInstance->SetVisibility(
+			bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
 }
 
 void AMD_PlayerController::ServerAbandonRepeatQuest_Implementation(int32 Index)

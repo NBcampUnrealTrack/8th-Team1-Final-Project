@@ -1,8 +1,11 @@
 #include "UI/Customization/MD_CharacterSelectWidget.h"
 
 #include "Character/MD_Character.h"
+#include "Components/CanvasPanelSlot.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
+#include "Components/HorizontalBoxSlot.h"
+#include "Components/UniformGridPanel.h"
 #include "Data/Customization/MD_CharacterRosterData.h"
 #include "Engine/Texture2D.h"
 #include "Gameplay/Customization/MD_CharacterAppearanceLibrary.h"
@@ -22,7 +25,6 @@ void UMD_CharacterSelectWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
 
-	bConfirmed = false;
 	Roster = UMD_CharacterAppearanceLibrary::GetCharacterRoster();
 
 	// 현재 확정된 외형에서 시작한다. PlayerState가 아직 없으면 캐릭터에 적용된 값을 쓴다
@@ -41,9 +43,10 @@ void UMD_CharacterSelectWidget::NativeOnActivated()
 		Pending = Roster->Sanitize(Pending);
 	}
 
-	if (IsValid(Btn_Confirm) == true && ConfirmClickedHandle.IsValid() == false)
+	if (AMD_PlayerController* MDPC = Cast<AMD_PlayerController>(PC))
 	{
-		ConfirmClickedHandle = Btn_Confirm->OnClicked().AddWeakLambda(this, [this]() { Confirm(); });
+		MDPC->SetGameplayHUDVisible(false);
+		bGameplayHUDHidden = true;
 	}
 	if (IsValid(Btn_Close) == true && CloseClickedHandle.IsValid() == false)
 	{
@@ -58,22 +61,11 @@ void UMD_CharacterSelectWidget::NativeOnDeactivated()
 {
 	AMD_Character* Character = GetOwningCharacter();
 
-	// 확정 없이 닫히면 미리보기를 복제된 외형으로 되돌린다
-	if (bConfirmed == false && IsValid(Character) == true)
-	{
-		Character->ApplyAppearanceFromPlayerState();
-	}
-
 	if (IsValid(OwningConsole) == true)
 	{
 		OwningConsole->EndCustomization(Character);
 	}
 
-	if (IsValid(Btn_Confirm) == true && ConfirmClickedHandle.IsValid() == true)
-	{
-		Btn_Confirm->OnClicked().Remove(ConfirmClickedHandle);
-		ConfirmClickedHandle.Reset();
-	}
 	if (IsValid(Btn_Close) == true && CloseClickedHandle.IsValid() == true)
 	{
 		Btn_Close->OnClicked().Remove(CloseClickedHandle);
@@ -81,8 +73,28 @@ void UMD_CharacterSelectWidget::NativeOnDeactivated()
 	}
 
 	ClearButtons();
+	RestoreGameplayHUD();
 
 	Super::NativeOnDeactivated();
+}
+
+void UMD_CharacterSelectWidget::NativeDestruct()
+{
+	// 레이어 제거/레벨 이동으로 비활성화 경로를 건너뛰어도 HUD를 복구한다.
+	RestoreGameplayHUD();
+	Super::NativeDestruct();
+}
+
+void UMD_CharacterSelectWidget::RestoreGameplayHUD()
+{
+	if (bGameplayHUDHidden)
+	{
+		if (AMD_PlayerController* MDPC = Cast<AMD_PlayerController>(GetOwningPlayer()))
+		{
+			MDPC->SetGameplayHUDVisible(true);
+		}
+		bGameplayHUDHidden = false;
+	}
 }
 
 void UMD_CharacterSelectWidget::SelectCharacter(int32 CharacterIndex)
@@ -94,6 +106,7 @@ void UMD_CharacterSelectWidget::SelectCharacter(int32 CharacterIndex)
 
 	Pending.CharacterIndex = CharacterIndex;
 	ApplyPreview();
+	CommitSelection();
 	RefreshSelection();
 	OnSelectionChanged(Pending);
 }
@@ -107,11 +120,18 @@ void UMD_CharacterSelectWidget::SelectColor(int32 ColorIndex)
 
 	Pending.ColorIndex = ColorIndex;
 	ApplyPreview();
+	CommitSelection();
 	RefreshSelection();
 	OnSelectionChanged(Pending);
 }
 
 void UMD_CharacterSelectWidget::Confirm()
+{
+	CommitSelection();
+	DeactivateWidget();
+}
+
+void UMD_CharacterSelectWidget::CommitSelection()
 {
 	UMD_CharacterAppearanceLibrary::SaveLocalAppearance(Pending);
 
@@ -121,9 +141,6 @@ void UMD_CharacterSelectWidget::Confirm()
 	{
 		MDPC->ServerApplyAppearance(Pending);
 	}
-
-	bConfirmed = true;
-	DeactivateWidget();
 }
 
 void UMD_CharacterSelectWidget::Cancel()
@@ -145,6 +162,15 @@ void UMD_CharacterSelectWidget::BuildButtons()
 		return;
 	}
 
+	// 캐릭터 수가 적을 때는 선택 줄 자체를 중앙에 맞추고, 길면 스크롤한다.
+	if (UWidget* CharacterScroll = GetWidgetFromName(TEXT("SC_Characters")))
+	{
+		if (UCanvasPanelSlot* CharacterScrollSlot = Cast<UCanvasPanelSlot>(CharacterScroll->Slot))
+		{
+			CharacterScrollSlot->SetSize(FVector2D(FMath::Min(640.f, Roster->Characters.Num() * 116.f), 116.f));
+		}
+	}
+
 	if (IsValid(Panel_Characters) == true && IsValid(CharacterButtonClass) == true)
 	{
 		for (int32 Index = 0; Index < Roster->Characters.Num(); ++Index)
@@ -158,15 +184,32 @@ void UMD_CharacterSelectWidget::BuildButtons()
 
 			// 초상화가 있으면 이미지, 없으면 이름으로 구분한다
 			UTexture2D* Portrait = Entry.Portrait.LoadSynchronous();
+			if (UWidget* PortraitImage = Button->GetWidgetFromName(TEXT("Img_ButtonImage")))
+			{
+				PortraitImage->SetVisibility(IsValid(Portrait)
+					? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+			}
+			if (UWidget* CharacterLabel = Button->GetWidgetFromName(TEXT("Txt_ButtonText")))
+			{
+				CharacterLabel->SetVisibility(IsValid(Portrait)
+					? ESlateVisibility::Collapsed : ESlateVisibility::HitTestInvisible);
+			}
 			if (IsValid(Portrait) == true)
 			{
+				FSlateBrush PortraitBrush = Button->GetContentImage();
+				PortraitBrush.DrawAs = ESlateBrushDrawType::Image;
+				Button->SetContentImage(PortraitBrush);
 				Button->SetContentImageResourceObject(Portrait);
 			}
 			Button->SetContentText(Entry.DisplayName);
+			Button->SetToolTipText(Entry.DisplayName);
 			Button->SetIsSelectable(true);
 			Button->OnClicked().AddWeakLambda(this, [this, Index]() { SelectCharacter(Index); });
 
-			Panel_Characters->AddChild(Button);
+			if (UHorizontalBoxSlot* CharacterSlot = Cast<UHorizontalBoxSlot>(Panel_Characters->AddChild(Button)))
+			{
+				CharacterSlot->SetPadding(FMargin(6.f, 0.f));
+			}
 			CharacterButtons.Add(Button);
 		}
 	}
@@ -184,10 +227,19 @@ void UMD_CharacterSelectWidget::BuildButtons()
 
 			Button->SetContentImageColor(Entry.Color);
 			Button->SetContentText(Entry.DisplayName);
+			Button->SetToolTipText(Entry.DisplayName);
 			Button->SetIsSelectable(true);
 			Button->OnClicked().AddWeakLambda(this, [this, Index]() { SelectColor(Index); });
 
-			Panel_Colors->AddChild(Button);
+			// 우측 팔레트는 2열로 제한한다. 색이 늘어나면 세로 스크롤로 수용한다.
+			if (UUniformGridPanel* Grid = Cast<UUniformGridPanel>(Panel_Colors))
+			{
+				Grid->AddChildToUniformGrid(Button, Index / 2, Index % 2);
+			}
+			else
+			{
+				Panel_Colors->AddChild(Button);
+			}
 			ColorButtons.Add(Button);
 		}
 	}
@@ -239,7 +291,7 @@ void UMD_CharacterSelectWidget::RefreshSelection()
 
 void UMD_CharacterSelectWidget::ApplyPreview()
 {
-	// 로컬 캐릭터에만 적용한다. 복제는 Confirm에서만 일어난다
+	// 서버 왕복을 기다리지 않고 로컬 외형을 먼저 반영한다.
 	AMD_Character* Character = GetOwningCharacter();
 	if (IsValid(Character) == true)
 	{
