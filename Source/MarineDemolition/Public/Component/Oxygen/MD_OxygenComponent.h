@@ -20,7 +20,10 @@ class UAbilitySystemComponent;
 class UGameplayEffect;
 class UMD_CharacterAttributeSet;
 class UMD_ItemDefinition;
+class UMaterialInterface;
+class UPostProcessComponent;
 struct FOnAttributeChangeData;
+struct FPostProcessSettings;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnBreathStateChanged, EMD_BreathState, NewState);
 
@@ -105,6 +108,37 @@ protected:
 	/** 켜면 상태 전이와 잠긴 비율을 로그로 찍는다. 물 볼륨 설정 검증용 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen")
 	bool bLogBreathState = true;
+
+	// 현재 월드의 PostProcess에서 찾아 제어할 산소 효과 머티리얼
+	// Blueprint 기본값에서 지정할 산소 효과 머티리얼
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen|PostProcess")
+	TSoftObjectPtr<UMaterialInterface> OxygenPostProcessMaterial;
+
+	// Blueprint 기본값에서 지정할 효과 강도 Scalar 파라미터 이름
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen|PostProcess")
+	FName OxygenOpacityParameterName = NAME_None;
+
+	// 산소 효과가 시작되는 최대 산소량 대비 잔량 비율
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Oxygen|PostProcess", meta = (ClampMin = "0.01", ClampMax = "1.0"))
+	float OxygenEffectStartRatio = 0.3f;
+
+	// 로컬 제어 종료 시 원본 머티리얼 복원이 필요한 상태
+	bool bOxygenPostProcessApplied = false;
+
+	// 맵의 참조 여부와 관계없이 로컬 플레이어가 로드한 효과 머티리얼
+	UPROPERTY(Transient)
+	TObjectPtr<UMaterialInterface> LoadedOxygenPostProcessMaterial;
+
+	// 등록된 산소 효과가 없는 월드에서 사용할 로컬 전용 PostProcess
+	UPROPERTY(Transient)
+	TObjectPtr<UPostProcessComponent> LocalOxygenPostProcess;
+
+protected:
+	// 현재 월드의 모든 등록된 PostProcess에 산소 효과 반영 또는 복원
+	void UpdateOxygenPostProcess(bool bRestore = false);
+
+	// 등록 항목별 갱신 후 산소 효과 적용 여부 반환
+	bool UpdateOxygenPostProcessSettings(FPostProcessSettings& Settings, float Opacity, bool bRestore);
 		
 	private:
 	/** 타이머가 부르는 본체. 서버에서만 돈다 */
