@@ -30,6 +30,14 @@ struct FMD_ScrapeMeshUVVisualSeamView
     }
 };
 
+/** Immutable shared arrays can outlive profile invalidation while a worker reads them. */
+struct FMD_ScrapeMeshUVVisualSeams
+{
+    TArray<int32> Offsets;
+    TArray<FMD_ScrapeMeshUVVisualSample> Samples;
+    FMD_ScrapeMeshUVVisualSeamView GetView() const { return {Offsets, Samples}; }
+};
+
 /** A real shared subsegment; a T-junction can have several neighbors along one triangle edge. */
 USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_ScrapeMeshUVNeighbor
@@ -208,8 +216,9 @@ public:
     TConstArrayView<FMD_ScrapeMeshUVVisualSample> GetVisualSeamSamples(int32 PixelIndex) const;
     /** Validate/build shared caches once, then borrow their arrays for this call only. */
     FMD_ScrapeMeshUVVisualSeamView GetVisualSeamView() const;
+    TSharedPtr<const FMD_ScrapeMeshUVVisualSeams, ESPMode::ThreadSafe> GetSharedVisualSeams() const;
     TConstArrayView<int32> GetVisualSeamDependents(int32 SourceCellIndex) const;
-    TSharedPtr<const FMD_ScrapeCellLayout> GetSharedCellLayout() const;
+    TSharedPtr<const FMD_ScrapeCellLayout> GetSharedCellLayout(float BudgetMs = 0.f, bool* OutPending = nullptr) const;
     /** Positive budget advances an owned input snapshot; zero finishes it synchronously. */
     void BeginVisualPreparation(float SnapshotBudgetMs = 0.f) const;
     /** Release abandoned partial inputs; an already-dispatched worker keeps owning its snapshot. */
@@ -217,7 +226,10 @@ public:
     bool IsVisualPreparationReady() const;
     TSharedPtr<const class FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe> GetSharedInitialMaskLayout() const;
     /** Game thread only. Exact scale determines area; rotation/translation do not. */
-    TSharedPtr<const FMD_ScrapeCarrierWeights> GetSharedCellCarrierWeights(const FTransform& Transform) const;
+    TSharedPtr<const FMD_ScrapeCarrierWeights> GetSharedCellCarrierWeights(
+        const FTransform& Transform, float BudgetMs = 0.f, bool* OutPending = nullptr) const;
+    /** Drop unpublished metrics after cancellation; published shared results remain valid. */
+    void CancelInitializationPreparation() const;
 
 private:
     mutable uint64 RuntimeCacheRevision = 0;
@@ -245,12 +257,15 @@ private:
     mutable FRuntimeValidationKey RuntimeValidationKey;
     mutable bool bRuntimeValidationCached = false;
     mutable TSharedPtr<const FMD_ScrapeCellLayout> CachedCellLayout;
+    mutable TSharedPtr<FMD_ScrapeCellLayout> PreparingCellLayout;
+    mutable int32 PreparingLayoutCellCount = INDEX_NONE;
     mutable FGuid CellLayoutId;
     mutable FIntPoint CellLayoutAtlasDimensions = FIntPoint::ZeroValue;
     struct FCarrierWeightCacheEntry
     {
         FVector Scale = FVector::ZeroVector;
         TWeakPtr<const FMD_ScrapeCarrierWeights> Weights;
+        TSharedPtr<FMD_ScrapeCarrierWeights> Preparing;
     };
     mutable TArray<FCarrierWeightCacheEntry> CarrierWeightCache;
     mutable FGuid CarrierWeightsLayoutId;
@@ -261,10 +276,9 @@ private:
 	void InvalidateVisualDependentsCache() const;
 	// Derived runtime data: never serialized, cooked, or expanded by the Details panel.
 	mutable TMultiMap<int32, int32> CachedVisualDependents;
-    mutable TArray<int32> CachedVisualSeamOffsets;
+    mutable TSharedPtr<const FMD_ScrapeMeshUVVisualSeams, ESPMode::ThreadSafe> CachedVisualSeams;
     mutable TArray<int32> CachedVisualSeamDependentOffsets;
     mutable TArray<int32> CachedVisualSeamDependents;
-    mutable TArray<FMD_ScrapeMeshUVVisualSample> CachedVisualSeamSamples;
 	mutable FGuid VisualDependentsLayoutId;
 	mutable FIntPoint VisualDependentsAtlasDimensions = FIntPoint::ZeroValue;
 	mutable int32 VisualDependentsCellCount = INDEX_NONE;
