@@ -40,7 +40,7 @@ namespace
     const TMap<FString, FString>& English()
     {
         static const TMap<FString, FString> Values = {
-            {TEXT("Eyebrow"), TEXT("REVSTUDIO  /  MULTI-USER")},
+            {TEXT("Eyebrow"), TEXT("MULTI-USER")},
             {TEXT("Title"), TEXT("Team workspace")}, {TEXT("Tab"), TEXT("Team workspace")},
             {TEXT("TabTip"), TEXT("Multi-User sessions and teammates")},
             {TEXT("Open"), TEXT("Team workspace")}, {TEXT("OpenTip"), TEXT("Open the Multi-User workspace")},
@@ -68,7 +68,6 @@ namespace
             {TEXT("UnavailableHelp"), TEXT("You can choose a session when the Multi-User client is ready.")},
             {TEXT("BusyHelp"), TEXT("View progress and errors in the Multi-User browser.")},
             {TEXT("LiveHelp"), TEXT("You're in a team session. Open session details to view activity.")},
-            {TEXT("ServerLive"), TEXT("{0} server · You're in a team session.")},
             {TEXT("OfflineHelp"), TEXT("Choose a session to see the teammates working with you.")},
             {TEXT("SettingsTitle"), TEXT("Workspace settings")},
             {TEXT("SettingsIntro"), TEXT("Make this workspace yours.")},

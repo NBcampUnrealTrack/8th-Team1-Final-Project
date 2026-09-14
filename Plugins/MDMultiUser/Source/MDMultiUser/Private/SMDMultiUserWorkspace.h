@@ -35,7 +35,6 @@ private:
     EConcertConnectionStatus Status = EConcertConnectionStatus::Disconnected;
     bool bClientAvailable = false;
     FString SessionName;
-    FString ServerName;
     FString MapName;
     FString MapPath;
     FString Search;

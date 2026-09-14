@@ -3,7 +3,6 @@
 #include "Widgets/Images/SImage.h"
 
 #include "Brushes/SlateRoundedBoxBrush.h"
-#include "ConcertClientSettings.h"
 #include "Editor.h"
 #include "Engine/World.h"
 #include "HAL/PlatformApplicationMisc.h"
@@ -75,7 +74,7 @@ void SMDMultiUserWorkspace::BuildContent()
                 + SHorizontalBox::Slot().FillWidth(1).VAlign(VAlign_Center)
                 [
                     SNew(SVerticalBox)
-                    + SVerticalBox::Slot().AutoHeight()[Label(MDLOC("Eyebrow", "REVSTUDIO  /  MULTI-USER"), 9, true, Accent)]
+                    + SVerticalBox::Slot().AutoHeight()[Label(MDLOC("Eyebrow", "MULTI-USER"), 9, true, Accent)]
                     + SVerticalBox::Slot().AutoHeight().Padding(0, 6, 0, 0)[Label(MDLOC("Title", "함께 편집"), 22, true)]
                 ]
                 + SHorizontalBox::Slot().AutoWidth().VAlign(VAlign_Center)
@@ -216,7 +215,6 @@ EActiveTimerReturnType SMDMultiUserWorkspace::Refresh(double CurrentTime, float 
     Status = EConcertConnectionStatus::Disconnected;
     bClientAvailable = false;
     SessionName.Reset();
-    ServerName.Reset();
     TArray<TSharedPtr<FMDParticipant>> Updated;
     if (IMultiUserClientModule::IsAvailable())
     {
@@ -227,23 +225,9 @@ EActiveTimerReturnType SMDMultiUserWorkspace::Refresh(double CurrentTime, float 
             const auto& LocalInfo = Client->GetClientInfo();
             LocalDisplayName = LocalInfo.DisplayName.IsEmpty() ? LocalInfo.UserName : LocalInfo.DisplayName;
             Status = Client->GetSessionConnectionStatus();
-            if (const UConcertClientConfig* Config = Client->GetConfiguration())
-            {
-                ServerName = Config->DefaultServerURL;
-            }
             if (const auto Session = Client->GetCurrentSession(); Session && IsConnected())
             {
                 SessionName = Session->GetSessionInfo().SessionName;
-                // Resolve the actual session server; the configured default may be a different host.
-                ServerName.Reset();
-                for (const auto& Server : Client->GetKnownServers())
-                {
-                    if (Server.InstanceInfo.InstanceId == Session->GetSessionInfo().ServerInstanceId)
-                    {
-                        ServerName = Server.ServerName;
-                        break;
-                    }
-                }
                 auto Local = MakeShared<FMDParticipant>();
                 Local->Id = Session->GetSessionClientEndpointId();
                 Local->Info = Session->GetLocalClientInfo();
@@ -349,8 +333,7 @@ FText SMDMultiUserWorkspace::StatusDescription() const
     if (IsBusy()) { return MDLOC("BusyHelp", "진행 상황과 오류는 Multi-User 브라우저에서 확인할 수 있습니다."); }
     if (IsConnected())
     {
-        return ServerName.IsEmpty() ? MDLOC("LiveHelp", "팀 세션에 참여 중입니다. 활동 내역은 세션 상세에서 확인하세요.")
-            : FText::Format(MDLOC("ServerLive", "{0} 서버 · 팀 세션에 참여 중입니다."), FText::FromString(ServerName));
+        return MDLOC("LiveHelp", "팀 세션에 참여 중입니다. 활동 내역은 세션 상세에서 확인하세요.");
     }
     return MDLOC("OfflineHelp", "세션을 선택하면 함께 작업하는 팀원이 여기에 표시됩니다.");
 }
