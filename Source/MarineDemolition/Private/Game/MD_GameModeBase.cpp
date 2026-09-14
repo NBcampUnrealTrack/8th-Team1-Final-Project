@@ -4,6 +4,8 @@
 #include "Game/MD_GameModeBase.h"
 #include "World/Wall/MD_WallShadowBatchSubsystem.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "Character/MD_Character.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
@@ -75,6 +77,19 @@ void AMD_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();
 
+    // 서버 월드 수명에 맞추어 저장 이벤트에 게임 진행과 플레이어 소유자 등록
+    UGameInstance* SaveGameInstance = GetGameInstance();
+    // 유효한 게임 인스턴스의 저장 관리자 조회
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(SaveGameInstance) == true ? SaveGameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    // 저장 관리자 생성 여부를 확인한 뒤 현재 게임 모드 연결
+    if (IsValid(SaveSlotManager) == true)
+    {
+        // 전체 저장 시 서버 상태 수집 연결
+        SaveSlotManager->OnCollectGameData.AddUniqueDynamic(this, &ThisClass::CollectGameData);
+        // 전체 복원 시 서버 상태 적용 연결
+        SaveSlotManager->OnOverwriteGameData.AddUniqueDynamic(this, &ThisClass::OverwriteGameData);
+    }
+
     // GameState 생성이 끝난 시점에 출발 서버가 확정한 계약 설정을 서버 원장에 반영
     ApplyRequestedContractSettings();
 
@@ -127,6 +142,19 @@ void AMD_GameModeBase::ApplyRequestedContractSettings()
 
 void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    // 트래블로 제거되는 이전 게임 모드의 구독을 해제하기 위한 관리자 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    // 종료 시 게임 인스턴스가 유효한 경우에만 저장 관리자 조회
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    // 다음 월드에 이전 서버 수집기가 참여하지 않도록 구독 해제
+    if (IsValid(SaveSlotManager) == true)
+    {
+        // 이전 월드 수집 연결 해제
+        SaveSlotManager->OnCollectGameData.RemoveDynamic(this, &ThisClass::CollectGameData);
+        // 이전 월드 적용 연결 해제
+        SaveSlotManager->OnOverwriteGameData.RemoveDynamic(this, &ThisClass::OverwriteGameData);
+    }
+
     if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
     {
         GS->OnDayChanged.RemoveDynamic(this, &AMD_GameModeBase::HandleGameDayChanged);
@@ -955,6 +983,17 @@ void AMD_GameModeBase::InitializeExpeditionDay()
 
 void AMD_GameModeBase::HandleGameDayChanged(int32 NewDay)
 {
+    // 저장 데이터 복원으로 발생한 일차 알림인지 확인할 게임 인스턴스 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    // 현재 데이터 이벤트 처리 상태를 제공하는 저장 관리자 조회
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    // 복원 중인 상인 원장을 새로운 일차 시작으로 다시 초기화하는 상황 방지
+    if (IsValid(SaveSlotManager) == true && SaveSlotManager->IsGameDataOperationInProgress() == true)
+    {
+        // 각 구독자가 자신의 저장 필드를 복원하도록 일차 동기화 생략
+        return;
+    }
+    // 일반 게임 진행에서 발생한 일차 변경을 상인 상태에 반영
     SyncMerchantToGameDay(NewDay);
 }
 
@@ -1135,4 +1174,168 @@ void AMD_GameModeBase::MD_SetTime(int32 Hour)
     UE_LOG(LogTemp, Display, TEXT("[Time] 현재 일자 시각 변경 %02d:00"), Hour);
     // 기존 알림 및 시간 종료 처리 경로로 진입
     CheckGameTimeEvents();
+}
+
+void AMD_GameModeBase::CollectGameData(FMD_GameData& GameData, bool& bWasSuccessful)
+{
+    // 현재 게임 모드가 소유한 서버 진행 상태 조회
+    AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
+    // 서버 진행 상태의 존재와 권한 확인
+    if (IsValid(MDGameState) == false || MDGameState->HasAuthority() == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_GameStateData::DataFieldKey.ToString());
+        // 진행 상태가 없는 수집 종료
+        return;
+    }
+    // 점수와 일차 정보를 현재 저장 필드에 기록
+    if (GameData.AddDataField(FMD_GameStateData::DataFieldKey, MDGameState->GetGameStateSaveData()) == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_GameStateData::DataFieldKey.ToString());
+        // 실패한 진행 상태 수집 종료
+        return;
+    }
+    // 로그아웃 기록을 유지하면서 현재 접속자의 장비 기록 갱신
+    for (APlayerState* PlayerState : MDGameState->PlayerArray)
+    {
+        // 기존 정책에 따라 Pawn이 준비되지 않은 플레이어 건너뛰기
+        CollectPlayerGameData(PlayerState, GameData);
+    }
+}
+
+void AMD_GameModeBase::OverwriteGameData(const FMD_GameData& GameData, bool& bWasSuccessful)
+{
+    // 저장된 점수와 일차를 적용할 현재 서버 진행 상태 조회
+    AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
+    // 전달된 데이터에서 조회할 게임 진행 필드
+    FMD_GameStateData GameStateData;
+    // 게임 진행을 복원할 현재 상태 객체의 유효성 확인
+    if (IsValid(MDGameState) == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_GameStateData::DataFieldKey.ToString());
+        // 게임 진행 대상 부재 시 개인 장비 적용 종료
+        return;
+    }
+    // 전달된 데이터에서 게임 진행 태그의 필드 조회
+    if (GameData.GetDataField(FMD_GameStateData::DataFieldKey, GameStateData) == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_GameStateData::DataFieldKey.ToString());
+        // 게임 진행 필드 조회 실패 시 적용 종료
+        return;
+    }
+    // 조회를 마친 필드를 현재 게임 상태에 적용
+    if (MDGameState->ApplyGameStateSaveData(GameStateData) == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_GameStateData::DataFieldKey.ToString());
+        // 진행 상태를 복원하지 못한 경우 개인 장비 적용 종료
+        return;
+    }
+    // 같은 데이터 참조에서 현재 접속자의 개인 기록을 찾아 직접 적용
+    for (APlayerState* PlayerState : MDGameState->PlayerArray)
+    {
+        // 신규 접속자와 미생성 Pawn을 건너뛰는 기존 정책 유지
+        OverwritePlayerGameData(PlayerState, GameData);
+    }
+}
+
+FString AMD_GameModeBase::BuildPlayerPersistenceKey(const APlayerState* PlayerState)
+{
+    // 제거된 플레이어에 대한 저장 키 생성 차단
+    if (IsValid(PlayerState) == false)
+    {
+        // 유효하지 않은 개인 식별자 반환
+        return FString();
+    }
+    // 온라인 계정 식별자를 여러 번 참조하기 위한 조회 결과 보관
+    FUniqueNetIdRepl UniqueNetID = PlayerState->GetUniqueId();
+    // 온라인 식별자가 없는 환경의 이름 키 대체 준비
+    FString NetworkKey = UniqueNetID.IsValid() == true ? UniqueNetID.ToString() : FString();
+    // 기존 온라인 우선 및 오프라인 이름 정책에 따른 개인 식별자 반환
+    return NetworkKey.IsEmpty() == false ? NetworkKey : PlayerState->GetPlayerName();
+}
+
+bool AMD_GameModeBase::CollectPlayerGameData(const APlayerState* PlayerState, FMD_GameData& GameData)
+{
+    // 다른 월드의 플레이어와 클라이언트 개인 기록 수집 차단
+    if (IsValid(PlayerState) == false || PlayerState->HasAuthority() == false || PlayerState->GetWorld() != GetWorld())
+    {
+        // 현재 서버 소유가 아닌 플레이어의 수집 실패 반환
+        return false;
+    }
+    // 재접속 복원에 재사용할 온라인 또는 오프라인 개인 식별자 생성
+    FString PlayerKey = BuildPlayerPersistenceKey(PlayerState);
+    // 빈 키로 다른 플레이어의 기록을 덮어쓰는 상황 차단
+    if (PlayerKey.IsEmpty() == true)
+    {
+        // 개인 식별자 부재의 실패 반환
+        return false;
+    }
+    // 장비 데이터 소유자인 플레이어 캐릭터 조회
+    AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerState->GetPawn());
+    // 장비 저장 기능을 제공하는 핫바 컴포넌트 조회
+    UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
+    // Pawn 미생성 시 기존 개인 기록을 빈 데이터로 교체하는 상황 차단
+    if (IsValid(EquipmentComponent) == false)
+    {
+        // 준비되지 않은 개인 장비의 수집 실패 반환
+        return false;
+    }
+    // 이번 요청에서 갱신할 플레이어별 장비 필드 조회
+    FMD_PlayerData& PlayerData = GameData.PlayerFields.FindOrAdd(PlayerKey);
+    // 현재 장비의 수량과 충전 상태를 포함한 기존 저장 스냅샷 기록
+    PlayerData.HotbarToolList = EquipmentComponent->BuildEquipmentSaveData();
+    // 플레이어 장비 수집 성공 반환
+    return true;
+}
+
+bool AMD_GameModeBase::OverwritePlayerGameData(const APlayerState* PlayerState, const FMD_GameData& GameData)
+{
+    // 다른 월드의 플레이어와 클라이언트 장비 변경 차단
+    if (IsValid(PlayerState) == false || PlayerState->HasAuthority() == false || PlayerState->GetWorld() != GetWorld())
+    {
+        // 현재 서버 소유가 아닌 플레이어의 적용 실패 반환
+        return false;
+    }
+    // 로그아웃 수집과 동일한 개인 식별자로 저장 기록 조회 준비
+    FString PlayerKey = BuildPlayerPersistenceKey(PlayerState);
+    // 식별자 없는 개인 기록의 잘못된 적용 차단
+    if (PlayerKey.IsEmpty() == true)
+    {
+        // 개인 식별자 부재의 적용 실패 반환
+        return false;
+    }
+    // 읽기 전용 저장 구조체에서 해당 플레이어의 기록 조회
+    const FMD_PlayerData* PlayerData = GameData.PlayerFields.Find(PlayerKey);
+    // 저장에 참여하지 않은 신규 플레이어의 기본 장비 유지
+    if (PlayerData == nullptr)
+    {
+        // 복원할 개인 기록 부재 반환
+        return false;
+    }
+    // 실제 장비 복원을 담당할 현재 플레이어 캐릭터 조회
+    AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerState->GetPawn());
+    // 기존 장비 복원 API를 제공하는 핫바 컴포넌트 조회
+    UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
+    // Pawn이 아직 준비되지 않은 플레이어의 적용 연기
+    if (IsValid(EquipmentComponent) == false)
+    {
+        // 장비 복원 대상 부재의 실패 반환
+        return false;
+    }
+    // 서버 권위 장비 복원 API의 실제 성공 여부 반환
+    return EquipmentComponent->RestoreEquipmentSaveData(PlayerData->HotbarToolList);
 }

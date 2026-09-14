@@ -28,8 +28,9 @@ bool FMD_SurfaceStainPersistence::Validate(TConstArrayView<FMD_SurfaceStainRecor
 	TSet<FSoftObjectPath> Paths;
 	for (const FMD_SurfaceStainRecord& Record : Records)
 	{
-		if (!Record.ActorPath.IsValid() || !FMD_SurfaceStainSize::IsValidRemaining(Record.ResolveSize())
-			|| Paths.Contains(Record.ActorPath)) return false;
+        // 현재 저장 형식의 실제 잔여 크기와 고유 액터 경로 검증
+        if (Record.ActorPath.IsValid() == false || FMD_SurfaceStainSize::IsValidRemaining(Record.RemainingSize) == false
+            || Paths.Contains(Record.ActorPath) == true) return false;
 		Paths.Add(Record.ActorPath);
 	}
 	return true;
@@ -40,7 +41,8 @@ bool FMD_SurfaceStainPersistence::Restore(UWorld* World, TConstArrayView<FMD_Sur
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceStain_Restore);
 	if (!World || World->GetNetMode() == NM_Client || !Validate(Records)) return false;
 	TMap<FSoftObjectPath, int32> Sizes;
-	for (const FMD_SurfaceStainRecord& Record : Records) Sizes.Add(Record.ActorPath, Record.ResolveSize());
+    // 저장된 잔여 크기를 액터별로 직접 연결
+    for (const FMD_SurfaceStainRecord& Record : Records) Sizes.Add(Record.ActorPath, Record.RemainingSize);
 	for (TActorIterator<AMD_SurfaceStain> It(World); It; ++It)
 	{
 		const FSoftObjectPath Path(UWorld::RemovePIEPrefix(FSoftObjectPath(*It).ToString()));
