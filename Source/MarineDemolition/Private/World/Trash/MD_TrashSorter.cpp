@@ -1,5 +1,6 @@
 #include "World/Trash/MD_TrashSorter.h"
 
+#include "Audio/MD_AudioSubsystem.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
@@ -29,6 +30,9 @@ AMD_TrashSorter::AMD_TrashSorter()
 	SetRootComponent(Mesh);
 	Mesh->SetCollisionProfileName(TEXT("BlockAll"));
 	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
+
+	InsertSoundTag = FGameplayTag::RequestGameplayTag(
+		TEXT("SFX.Carry.Bin.Insert"), /*ErrorIfNotFound*/ false);
 
 	// 고정 설치물. 밀려나면 안 된다
 	Mesh->SetSimulatePhysics(false);
@@ -383,11 +387,34 @@ void AMD_TrashSorter::MulticastContainerSwallowed_Implementation(
 		DiscardedCount,
 		RefundCredits,
 		Location);
+
+	// 통째 투입은 품목 수와 무관하게 한 번만 낸다. 품목마다 내면 겹쳐서 뭉갠다.
+	PlayInsertSound(Location);
 }
 
 void AMD_TrashSorter::MulticastItemSwallowed_Implementation(const bool bCorrectSort, const FVector Location)
 {
 	OnItemSwallowed(bCorrectSort, Location);
+	PlayInsertSound(Location);
+}
+
+void AMD_TrashSorter::PlayInsertSound(const FVector& Location) const
+{
+	if (!InsertSoundTag.IsValid())
+	{
+		return;
+	}
+
+	const UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	if (UMD_AudioSubsystem* const Audio = World->GetSubsystem<UMD_AudioSubsystem>())
+	{
+		Audio->PlayEventAtLocation(InsertSoundTag, Location);
+	}
 }
 
 void AMD_TrashSorter::ApplyCategoryTint()

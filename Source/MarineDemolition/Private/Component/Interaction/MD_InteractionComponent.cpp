@@ -2,6 +2,7 @@
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
+#include "Audio/MD_AudioSubsystem.h"
 #include "Camera/CameraComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
@@ -46,6 +47,9 @@ UMD_InteractionComponent::UMD_InteractionComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
 	SetIsReplicatedByDefault(true);
+
+	PickupSoundTag = FGameplayTag::RequestGameplayTag(
+		TEXT("SFX.Carry.Hand.Pickup"), /*ErrorIfNotFound*/ false);
 }
 
 void UMD_InteractionComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -673,6 +677,11 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 	}
 
 	UpdateHeldTarget();
+
+	// 권한 머신은 OnRep 이 오지 않는다. 리슨 서버 호스트가 자기 픽업음을 들으려면
+	// 여기서 직접 내야 한다. 데디케이티드 서버에서는 오디오가 알아서 빠진다.
+	PlayPickupSound();
+
 	Target->ForceNetUpdate();
 	OwnerPawn->ForceNetUpdate();
 	RefreshTickEnabled();
@@ -923,9 +932,31 @@ void UMD_InteractionComponent::OnRep_HeldActor()
 	if (IsHolding())
 	{
 		SetCurrentTarget(nullptr);
+
+		// 놓을 때는 null 로 바뀌므로 여기 오지 않는다. 잡는 순간에만 난다.
+		PlayPickupSound();
 	}
 
 	RefreshTickEnabled();
+}
+
+void UMD_InteractionComponent::PlayPickupSound() const
+{
+	if (!PickupSoundTag.IsValid() || !IsValid(HeldActor))
+	{
+		return;
+	}
+
+	const UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	if (UMD_AudioSubsystem* const Audio = World->GetSubsystem<UMD_AudioSubsystem>())
+	{
+		Audio->PlayEventAtLocation(PickupSoundTag, HeldActor->GetActorLocation());
+	}
 }
 
 void UMD_InteractionComponent::CaptureDefaultHoldProfile()
