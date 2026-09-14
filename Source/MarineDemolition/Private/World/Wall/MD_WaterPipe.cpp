@@ -11,6 +11,35 @@ AMD_WaterPipe::AMD_WaterPipe()
 	HazardVolume->SetupAttachment(Root);
 
 	RequiredRepairToolTag = MDGameplayTags::Ability_UtilityRepair_Foam;
+
+	GushLoopSoundTag = FGameplayTag::RequestGameplayTag(
+		TEXT("SFX.Hazard.Pipe.GushLoop"), /*ErrorIfNotFound*/ false);
+}
+
+void AMD_WaterPipe::OnUtilityStateChangedLocal(const EMD_UtilityState NewState)
+{
+	UWorld* const World = GetWorld();
+	UMD_AudioSubsystem* const Audio = World ? World->GetSubsystem<UMD_AudioSubsystem>() : nullptr;
+	if (!Audio)
+	{
+		return;
+	}
+
+	if (NewState != EMD_UtilityState::Broken)
+	{
+		// 봉합·초기 상태. 분출이 돌고 있으면 끊는다. 무효 핸들이면 StopHandle 이 무시한다.
+		Audio->StopHandle(GushLoopHandle, GushStopFadeSeconds);
+		GushLoopHandle = FMD_AudioHandle();
+		return;
+	}
+
+	if (GushLoopSoundTag.IsValid())
+	{
+		// 파열 지점에서 재생한다. BreakLocation 은 복제 속성이고 RepNotify 보다 먼저 적용된다.
+		// 이미 돌고 있으면 겹치지 않게 먼저 끊는다.
+		Audio->StopHandle(GushLoopHandle, 0.0f);
+		GushLoopHandle = Audio->PlayEventAtLocation(GushLoopSoundTag, GetBreakLocation());
+	}
 }
 
 void AMD_WaterPipe::OnBroken(AActor* Cutter)

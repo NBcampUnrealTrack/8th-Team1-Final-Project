@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/EngineTypes.h"
+#include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Grabbable.h"
 #include "MD_InteractionComponent.generated.h"
 
@@ -85,6 +86,13 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "MD|Interaction", meta = (ClampMin = "0.0", Units = "cm"))
 	float InteractTraceDistance = 200.f;
+
+	/**
+	 * 물건을 손에 쥔 순간 그 자리에서 한 번 재생하는 픽업음 event tag.
+	 * 사운드 에셋이 아니라 태그다 — 어떤 소재가 나갈지는 DA_MD_Audio_Carry 가 정한다.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Interaction|사운드")
+	FGameplayTag PickupSoundTag;
 
 	/** 커팅·스캔 도구의 중앙 조준 프롬프트가 확인할 거리. GA 기본 TraceDistance와 같다. */
 	UPROPERTY(EditAnywhere, Category = "MD|Interaction", meta = (ClampMin = "0.0", Units = "cm"))
@@ -194,6 +202,14 @@ private:
 
 	UFUNCTION()
 	void OnRep_HeldActor();
+
+	/**
+	 * 픽업음을 이 머신에서 재생한다.
+	 *
+	 * 권한 쪽은 TryHoldTarget 이, 나머지 머신은 OnRep_HeldActor 가 부른다.
+	 * HeldActor 는 이미 무조건 복제되므로 이 소리를 위한 RPC 는 따로 쓰지 않는다.
+	 */
+	void PlayPickupSound() const;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UCameraComponent> Camera;
