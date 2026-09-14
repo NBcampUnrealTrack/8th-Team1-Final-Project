@@ -348,6 +348,9 @@ void AMD_PlayerState::Revive()
 		return;
 	}
 
+	// 부활 상태 전이 전에 확장 탱크가 반영된 현재 최대 산소량으로 완충
+	CharacterAttributeSet->SetOxygen(CharacterAttributeSet->GetMaxOxygen());
+
 	const float ReviveAmount = CharacterAttributeSet->GetMaxHealth() * ReviveHealthRatio;
 	CharacterAttributeSet->SetHealth(ReviveAmount);
 
