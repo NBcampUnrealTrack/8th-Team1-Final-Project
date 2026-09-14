@@ -30,6 +30,13 @@
 			]
 		},
 		{
+			"Name": "MultiUserClient",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
 			"Name": "GameplayAbilities",
 			"Enabled": true
 		},
