@@ -7,7 +7,8 @@
 # 처음 한 번:
 #   chmod +x Tools/MultiUser/start-mu-server.command
 #
-# 서버 실행 파일이 없다면 엔진에서 먼저 빌드해야 한다 (Program 타깃이라 기본 빌드에 없다):
+# Epic 런처 설치본에는 서버 실행 파일이 이미 들어 있다. 빌드할 필요 없다.
+# 소스 빌드에서 없다면 Program 타깃이라 기본 빌드에 빠진 것이니 먼저 빌드한다:
 #   cd "$UE_ENGINE_DIR"
 #   ./Engine/Build/BatchFiles/Mac/Build.sh UnrealMultiUserSlateServer Mac Development
 #
@@ -19,20 +20,38 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/_common.sh"
 require_python
 
 ENGINE_DIR="$(find_engine)"
-SERVER="$ENGINE_DIR/Engine/Binaries/Mac/UnrealMultiUserSlateServer"
+BIN_DIR="$ENGINE_DIR/Engine/Binaries/Mac"
 
+# .app 번들 안의 실행 파일을 먼저 쓴다.
+#
+# Binaries/Mac 에는 같은 서버가 번들 밖에도 하나 놓여 있는데, 그걸 직접 부르면
+# dyld 가 libUnrealMultiUserSlateServer-Concert.dylib 을 못 찾고 죽는다.
+# 두 실행 파일의 LC_RPATH 목록은 같지만 기준점(@loader_path)이 다르기 때문이다.
+#
+#   번들 안 : .../Mac/<이름>.app/Contents/MacOS  + ../../../../../Plugins/...
+#             -> Engine/Plugins/Developer/Concert/ConcertMain/Binaries/Mac   (있음)
+#   번들 밖 : .../Engine/Binaries/Mac            + ../../../../../Plugins/...
+#             -> /Users/Shared/Plugins/...                                   (없음)
+#
 # Slate 서버가 없으면 콘솔 서버로 대체한다. 둘 다 없으면 빌드 안내.
-if [ ! -x "$SERVER" ]; then
-    if [ -x "$ENGINE_DIR/Engine/Binaries/Mac/UnrealMultiUserServer" ]; then
-        SERVER="$ENGINE_DIR/Engine/Binaries/Mac/UnrealMultiUserServer"
-    else
-        die "[오류] 멀티유저 서버 실행 파일이 없습니다." \
-            "       $ENGINE_DIR/Engine/Binaries/Mac/UnrealMultiUserSlateServer" \
-            "" \
-            "       Program 타깃이라 엔진 기본 빌드에 포함되지 않습니다. 먼저 빌드하세요:" \
-            "         cd \"$ENGINE_DIR\"" \
-            "         ./Engine/Build/BatchFiles/Mac/Build.sh UnrealMultiUserSlateServer Mac Development"
-    fi
+SERVER=""
+for name in UnrealMultiUserSlateServer UnrealMultiUserServer; do
+    for candidate in "$BIN_DIR/$name.app/Contents/MacOS/$name" "$BIN_DIR/$name"; do
+        if [ -x "$candidate" ]; then
+            SERVER="$candidate"
+            break 2
+        fi
+    done
+done
+
+if [ -z "$SERVER" ]; then
+    die "[오류] 멀티유저 서버 실행 파일이 없습니다." \
+        "       $BIN_DIR/UnrealMultiUserSlateServer.app/Contents/MacOS/UnrealMultiUserSlateServer" \
+        "" \
+        "       Epic 런처 설치본에는 이미 들어 있습니다. 소스 빌드라면 Program 타깃이라" \
+        "       엔진 기본 빌드에 포함되지 않으므로 먼저 빌드하세요:" \
+        "         cd \"$ENGINE_DIR\"" \
+        "         ./Engine/Build/BatchFiles/Mac/Build.sh UnrealMultiUserSlateServer Mac Development"
 fi
 
 SERVER_NAME="$(json_get 'cfg["serverName"]')"
