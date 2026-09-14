@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "멀티유저 편집 호스트 주소록. 호스트 PC나 VPN 주소가 바뀌면 여기만 고친다.",
+    "transports 배열의 순서가 곧 우선순위다 — 런처가 위에서부터 시도해",
+    "어댑터가 살아있고 호스트에 ping이 닿는 첫 번째 경로를 쓴다.",
+    "hostAddress 는 '호스트 PC'의 해당 VPN 주소다 (내 주소가 아니다).",
+    "Start-MU-Server.ps1 을 호스트에서 실행하면 넣을 값이 출력된다."
+  ],
+
+  "serverName": "RevStudio",
+  "serverPort": 50002,
+  "hostMachine": "DESKTOP-F6FGIDC",
+
+  "transports": [
+    {
+      "name": "radmin",
+      "hostAddress": "26.111.195.212",
+      "adapterMatch": "*Radmin*",
+      "subnetPrefix": "26."
+    },
+    {
+      "name": "tailscale",
+      "hostAddress": "100.74.171.37",
+      "adapterMatch": "*Tailscale*",
+      "subnetPrefix": "100."
+    }
+  ]
+}
