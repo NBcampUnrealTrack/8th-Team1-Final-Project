@@ -85,8 +85,8 @@ namespace
         return Values;
     }
 
-    const FSlateRoundedBoxBrush Background(FLinearColor::FromSRGBColor(FColor(24, 27, 33)), 0.0f);
-    const FSlateRoundedBoxBrush Card(FLinearColor::FromSRGBColor(FColor(34, 39, 47)), 8.0f);
+    const FSlateRoundedBoxBrush PrefsBackground(FLinearColor::FromSRGBColor(FColor(24, 27, 33)), 0.0f);
+    const FSlateRoundedBoxBrush PrefsCard(FLinearColor::FromSRGBColor(FColor(34, 39, 47)), 8.0f);
 
     class SMDWorkspaceSettings : public SCompoundWidget
     {
@@ -113,7 +113,7 @@ namespace
         {
             ChildSlot
             [
-                SNew(SBorder).BorderImage(&Background).Padding(24)
+                SNew(SBorder).BorderImage(&PrefsBackground).Padding(24)
                 [
                     SNew(SVerticalBox)
                     + SVerticalBox::Slot().AutoHeight()[Label(MDLOC("SettingsTitle", "작업 공간 설정"), 20, true)]
@@ -123,7 +123,7 @@ namespace
                         SNew(SScrollBox)
                         + SScrollBox::Slot()
                         [
-                            SNew(SBorder).BorderImage(&Card).Padding(16)
+                            SNew(SBorder).BorderImage(&PrefsCard).Padding(16)
                             [
                                 SNew(SVerticalBox)
                                 + SVerticalBox::Slot().AutoHeight()[Label(MDLOC("Language", "표시 언어"), 11, true)]
