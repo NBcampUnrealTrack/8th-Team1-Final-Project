@@ -8,6 +8,7 @@
 class UCheckBox;
 class UInputKeySelector;
 class USlider;
+class UTextBlock;
 
 // 조작 설정의 미적용 편집값과 카테고리별 저장을 관리하는 화면
 UCLASS(Blueprintable)
@@ -29,7 +30,7 @@ protected:
 
 	// WBP 세로 시점 반전 선택 바인딩
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Controls", meta = (BindWidgetOptional))
-	TObjectPtr<UCheckBox> CheckBox_AxisNegate;
+	TObjectPtr<UCheckBox> TB_Reversal;
 
 	// 상호작용 키를 표시하거나 BP에서 변경할 선택기
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Controls", meta = (BindWidgetOptional))
@@ -45,7 +46,11 @@ protected:
 
 	// 음성 채팅 키의 선택적 바인딩
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Controls", meta = (BindWidgetOptional))
-	TObjectPtr<UInputKeySelector> KeySelector_VoiceChat;
+	TObjectPtr<UInputKeySelector> KeySelector_PushToTalk;
+
+	// 현재 마우스 감도 배율의 숫자 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Controls", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Value_MouseSensitivity;
 
 	// 적용 전까지 실제 카테고리와 분리된 화면 기준값
 	UPROPERTY(Transient)
