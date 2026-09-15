@@ -1,4 +1,5 @@
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
+#include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Gameplay/Scrape/MD_ContaminationDebrisSubsystem.h"
 #include "Gameplay/Contamination/MD_SurfaceStainPersistence.h"
@@ -325,6 +326,7 @@ void UMD_DayPersistenceSubsystem::ResetContaminationContext()
     bDeferSavedContaminationGeneration=false;
     SavedContaminationGenerations.Empty();
     SavedContaminationLayouts.Empty();
+    DeferredContaminationRecords.Empty();
 }
 
 bool UMD_DayPersistenceSubsystem::IsContaminationContextReady(const UWorld* World) const
@@ -371,6 +373,8 @@ void UMD_DayPersistenceSubsystem::PrepareContaminationContext(
     if (Records)
         for (const auto& Record:*Records)
         {
+            if (bDeferSavedContaminationGeneration && Record.CellIndices.IsEmpty())
+                DeferredContaminationRecords.FindOrAdd(Record.WallName).Add(Record.SurfaceComponentName, Record);
             if (Record.LayoutVersion == 1 && Record.LayoutId.IsValid())
                 SavedContaminationLayouts.FindOrAdd(Record.WallName)
                     .Add(Record.SurfaceComponentName, Record.LayoutId);
@@ -403,6 +407,14 @@ bool UMD_DayPersistenceSubsystem::TryGetSavedContaminationGeneration(
     if (!Generation) return false;
     OutGeneration=*Generation;
     return true;
+}
+
+const FMD_WallContaminationRecord* UMD_DayPersistenceSubsystem::FindDeferredContaminationRecord(
+    const UMD_ScrapeSurfaceComponent* Surface) const
+{
+    if (!Surface || !Surface->GetOwner() || !IsContaminationContextReady(Surface->GetWorld())) return nullptr;
+    const auto* Components = DeferredContaminationRecords.Find(Surface->GetOwner()->GetFName());
+    return Components ? Components->Find(GetPersistentSurfaceComponentName(Surface)) : nullptr;
 }
 
 bool UMD_DayPersistenceSubsystem::ShouldDeferContaminationGeneration(
@@ -720,6 +732,8 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
                     *Record.WallName.ToString(), *Record.SurfaceComponentName.ToString());
                 continue;
             }
+            if (auto* Initializer = World->GetSubsystem<UMD_ScrapeInitializationSubsystem>();
+                Initializer && Initializer->ConsumePreparedSavedState(*Surface, Record)) continue;
             if (WorldData.bHasContaminationGenerationRecords
                 && !Surface->RestoreContaminationGeneration(Record.Generation, true)) return false;
             // Restore scratch belongs to this wall only, never all walls or all save slots.

@@ -33,6 +33,16 @@ namespace
 
 }
 
+void UMD_SaveSlotManager::AddReferencedObjects(UObject* Object, FReferenceCollector& Collector)
+{
+    auto* Self = CastChecked<UMD_SaveSlotManager>(Object);
+    // Shared C++ storage survives travel, but does not expose its UObject fields to GC.
+    for (const auto& Data : {Self->SelectedLoadGameData, Self->TemporaryGameData})
+        if (Data.IsValid())
+            Collector.AddPropertyReferencesWithStructARO(FMD_GameData::StaticStruct(), Data.Get(), Self);
+    Super::AddReferencedObjects(Object, Collector);
+}
+
 void UMD_SaveSlotManager::Initialize(FSubsystemCollectionBase& Collection)
 {
 	Super::Initialize(Collection);

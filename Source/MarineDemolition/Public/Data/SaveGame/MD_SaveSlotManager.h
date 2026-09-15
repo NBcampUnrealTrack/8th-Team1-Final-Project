@@ -44,6 +44,8 @@ public:
 
 	virtual void Deinitialize() override;
 
+	static void AddReferencedObjects(UObject* Object, FReferenceCollector& Collector);
+
 public:
 	// 자동 저장 목록에 할당할 수 있는 최대 슬롯 개수이며 0이면 자동 저장 목록을 사용하지 않는다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession", meta = (ClampMin = "1", ClampMax = "9"))
