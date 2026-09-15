@@ -193,6 +193,10 @@ void AMD_TrashItem::ApplyTrashKindRow()
 		return;
 	}
 
+	// BP/이전 인스턴스의 단색 override가 Variant 메시의 원래 머티리얼을 가리지 않게 한다.
+	// 같은 메시를 다시 적용하는 경우에도 슬롯을 비워 메시 에셋의 머티리얼을 사용한다.
+	Mesh->EmptyOverrideMaterials();
+
 	if (!bHasAppliedTrashKind || AppliedTrashKindId != TrashKindId || AppliedTrashVariantId != TrashVariantId)
 	{
 		// 행이 없으면 기본값 행이 그대로 적용된다. 무효 카테고리는 아래에서 누락 신호 색이 된다
