@@ -19,11 +19,23 @@
 	],
 	"Plugins": [
 		{
+			"Name": "MDMultiUser",
+			"Enabled": true,
+			"TargetAllowList": ["Editor"]
+		},
+		{
 			"Name": "MDSolidRendering",
 			"Enabled": true
 		},
 		{
 			"Name": "ModelingToolsEditorMode",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "MultiUserClient",
 			"Enabled": true,
 			"TargetAllowList": [
 				"Editor"
