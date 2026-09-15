@@ -38,6 +38,8 @@ namespace
 	const FLinearColor ValidGhostColor(0.05f, 1.0f, 0.1f, 1.0f);
 	const FLinearColor InvalidGhostColor(1.0f, 0.05f, 0.05f, 1.0f);
 	constexpr uint32 TrashKindSeedSalt = 0x6D445450u;
+	constexpr uint32 TrashVariantSeedSalt = 0x56415249u;
+	constexpr uint32 TransformSeedSalt = 0x54524E53u;
 	constexpr int32 PlacementSpacingSolveIterations = 8;
 	constexpr double PlacementSpacingSolveTolerance = 0.1;
 
@@ -72,6 +74,12 @@ TArray<FName> UMDTrashPlacementToolProperties::GetTrashKindIdOptions() const
 	return UMD_TrashLibrary::GetTrashKindIds();
 }
 
+TArray<FName> UMDTrashPlacementToolProperties::GetTrashVariantIdOptions() const
+{
+	TArray<FName> Ids = UMD_TrashLibrary::GetTrashVariantIds(TrashKindId);
+	return Ids;
+}
+
 void UMDTrashPlacementTool::SetTargetWorld(UWorld* InTargetWorld)
 {
 	TargetWorld = InTargetWorld;
@@ -83,6 +91,10 @@ void UMDTrashPlacementTool::Setup()
 
 	Properties = NewObject<UMDTrashPlacementToolProperties>(this);
 	Properties->RestoreProperties(this);
+	if (Properties->TrashVariantId.IsNone())
+	{
+		Properties->TrashVariantId = UMD_TrashLibrary::GetDefaultTrashVariantId(Properties->TrashKindId);
+	}
 	AddToolPropertySource(Properties);
 	SetupGhostPreview();
 
@@ -149,6 +161,7 @@ void UMDTrashPlacementTool::Shutdown(EToolShutdownType ShutdownType)
 		FinishStroke();
 	}
 	DestroyGhostPreview();
+	ResolvedMeshes.Reset();
 
 	UInteractiveTool::Shutdown(ShutdownType);
 }
@@ -250,9 +263,12 @@ void UMDTrashPlacementTool::OnClickPress(const FInputDeviceRay& PressPos)
 		return;
 	}
 
-	const FName PlacementTrashKindId = ResolveTrashKindId(HitResult);
+	const FName PlacementTrashKindId = ResolveTrashKindId();
+	FName PlacementVariantId;
+	UStaticMesh* PlacementMesh = nullptr;
+	const bool bResolvedAppearance = ResolveTrashAppearance(PlacementTrashKindId, PlacementVariantId, PlacementMesh);
 	UpdateHoverFromHit(HitResult);
-	if (!IsPlacementAllowedAtHit(HitResult, PlacementTrashKindId))
+	if (!bResolvedAppearance || !IsPlacementAllowedAtHit(HitResult, PlacementMesh))
 	{
 		DisplayWarning(
 			LOCTEXT(
@@ -263,7 +279,7 @@ void UMDTrashPlacementTool::OnClickPress(const FInputDeviceRay& PressPos)
 
 	BeginStrokeTransaction();
 	bIsStrokeActive = true;
-	if (!PlaceTrashAtHit(HitResult, PlacementTrashKindId))
+	if (!PlaceTrashAtHit(HitResult, PlacementTrashKindId, PlacementVariantId, PlacementMesh))
 	{
 		CancelStroke();
 		return;
@@ -273,6 +289,7 @@ void UMDTrashPlacementTool::OnClickPress(const FInputDeviceRay& PressPos)
 	PreviousSurfaceNormal = GetSafeSurfaceNormal(HitResult);
 	DistanceSinceLastPlacement = 0.0;
 	bHasPreviousSurfaceHit = true;
+	UpdateGhostPreview(HitResult);
 }
 
 void UMDTrashPlacementTool::OnClickDrag(const FInputDeviceRay& DragPos)
@@ -360,11 +377,13 @@ void UMDTrashPlacementTool::OnClickDrag(const FInputDeviceRay& DragPos)
 			}
 
 			FHitResult PlacementHit = BuildSurfaceHit(CursorDistance + CandidateOffset);
-			const FName PlacementTrashKindId = ResolveTrashKindId(PlacementHit);
-			UStaticMesh* PlacementMesh = ResolveTrashMesh(PlacementTrashKindId);
-			if (!IsValid(PlacementMesh))
+			const FName PlacementTrashKindId = ResolveTrashKindId();
+			FName PlacementVariantId;
+			UStaticMesh* PlacementMesh = nullptr;
+			// 간격 계산으로 위치가 바뀌어도 이 후보의 품목/Variant는 다시 뽑지 않는다.
+			if (!ResolveTrashAppearance(PlacementTrashKindId, PlacementVariantId, PlacementMesh))
 			{
-				DisplayWarning(LOCTEXT("MissingPreviewMesh", "The selected Trash Kind has no mesh for placement."));
+				DisplayWarning(LOCTEXT("MissingPreviewMesh", "The selected kind or Variant has no loadable mesh for placement."));
 				bIsStrokeActive = false;
 				break;
 			}
@@ -406,9 +425,9 @@ void UMDTrashPlacementTool::OnClickDrag(const FInputDeviceRay& DragPos)
 			}
 
 			PlacementHit = BuildSurfaceHit(CursorDistance + CandidateOffset);
-			if (IsPlacementAllowedAtHit(PlacementHit, PlacementTrashKindId))
+			if (IsPlacementAllowedAtHit(PlacementHit, PlacementMesh))
 			{
-				if (!PlaceTrashAtHit(PlacementHit, PlacementTrashKindId))
+				if (!PlaceTrashAtHit(PlacementHit, PlacementTrashKindId, PlacementVariantId, PlacementMesh))
 				{
 					bIsStrokeActive = false;
 					break;
@@ -442,6 +461,7 @@ void UMDTrashPlacementTool::OnClickDrag(const FInputDeviceRay& DragPos)
 
 	PreviousSurfaceLocation = CurrentSurfaceLocation;
 	PreviousSurfaceNormal = CurrentSurfaceNormal;
+	UpdateGhostPreview(CurrentHit);
 }
 
 void UMDTrashPlacementTool::OnClickRelease(const FInputDeviceRay& ReleasePos)
@@ -490,6 +510,13 @@ bool UMDTrashPlacementTool::ValidatePlacementSettings() const
 		}
 	}
 
+	if (!IsRandomSelectionMode() && !Properties->bRandomVariant
+		&& !UMD_TrashLibrary::GetTrashVariantIds(Properties->TrashKindId).Contains(Properties->TrashVariantId))
+	{
+		DisplayWarning(LOCTEXT("InvalidTrashVariant", "Select a valid Variant with a mesh."));
+		return false;
+	}
+
 	if (!TargetWorld->GetCurrentLevel())
 	{
 		DisplayWarning(LOCTEXT("MissingTargetLevel", "The editor world has no current level for trash placement."));
@@ -501,7 +528,9 @@ bool UMDTrashPlacementTool::ValidatePlacementSettings() const
 
 bool UMDTrashPlacementTool::PlaceTrashAtHit(
 	const FHitResult& HitResult,
-	const FName TrashKindId)
+	const FName TrashKindId,
+	const FName VariantId,
+	UStaticMesh* PreviewMesh)
 {
 	ULevel* TargetLevel = TargetWorld->GetCurrentLevel();
 	if (!TargetLevel)
@@ -510,10 +539,9 @@ bool UMDTrashPlacementTool::PlaceTrashAtHit(
 		return false;
 	}
 
-	UStaticMesh* PreviewMesh = ResolveTrashMesh(TrashKindId);
 	if (!IsValid(PreviewMesh))
 	{
-		DisplayWarning(LOCTEXT("MissingPreviewMesh", "The selected Trash Kind has no mesh for placement."));
+		DisplayWarning(LOCTEXT("MissingPreviewMesh", "The selected kind or Variant has no loadable mesh for placement."));
 		return false;
 	}
 
@@ -533,7 +561,12 @@ bool UMDTrashPlacementTool::PlaceTrashAtHit(
 	}
 
 	TrashItem->Modify();
-	TrashItem->SetTrashKindId(TrashKindId);
+	if (!TrashItem->SetTrashAppearance(TrashKindId, VariantId))
+	{
+		TargetWorld->EditorDestroyActor(TrashItem, true);
+		DisplayWarning(LOCTEXT("VariantChangedBeforeSpawn", "The selected kind or Variant is no longer available."));
+		return false;
+	}
 
 	UStaticMesh* PlacedMesh = PreviewMesh;
 	if (UStaticMeshComponent* MeshComponent = TrashItem->FindComponentByClass<UStaticMeshComponent>())
@@ -558,6 +591,7 @@ bool UMDTrashPlacementTool::PlaceTrashAtHit(
 	DistanceSinceLastPlacement = 0.0;
 	StrokePlacedTrashItems.Add(TrashItem);
 	++StrokePlacementCount;
+	++NextPlacementIndex;
 	return true;
 }
 
@@ -637,6 +671,19 @@ bool UMDTrashPlacementTool::OnUpdateHover(const FInputDeviceRay& DevicePos)
 void UMDTrashPlacementTool::OnPropertyModified(UObject* PropertySet, FProperty* Property)
 {
 	Super::OnPropertyModified(PropertySet, Property);
+	if (PropertySet == Properties && Property
+		&& Property->GetFName() == GET_MEMBER_NAME_CHECKED(UMDTrashPlacementToolProperties, TrashKindId))
+	{
+		Properties->TrashVariantId = UMD_TrashLibrary::GetDefaultTrashVariantId(Properties->TrashKindId);
+		NotifyOfPropertyChangeByTool(Properties);
+	}
+	if (PropertySet == Properties && Property
+		&& Property->GetFName() == GET_MEMBER_NAME_CHECKED(UMDTrashPlacementToolProperties, RandomSeed))
+	{
+		NextPlacementIndex = 0;
+	}
+	// 설정 변경은 실패한 경로를 다시 시도할 기회이기도 하다.
+	ResolvedMeshes.Reset();
 	if (bHasHoverHit) OnUpdateHover(LastHoverRay);
 }
 
@@ -789,7 +836,12 @@ TArray<FName> UMDTrashPlacementTool::BuildEligibleTrashKindIds() const
 	return EligibleTrashKindIds;
 }
 
-FName UMDTrashPlacementTool::ResolveTrashKindId(const FHitResult& HitResult) const
+uint32 UMDTrashPlacementTool::GetPlacementRandomSeed(const uint32 Salt) const
+{
+	return HashCombine(HashCombine(GetTypeHash(Properties->RandomSeed), NextPlacementIndex), Salt);
+}
+
+FName UMDTrashPlacementTool::ResolveTrashKindId() const
 {
 	if (!IsRandomSelectionMode())
 	{
@@ -802,35 +854,45 @@ FName UMDTrashPlacementTool::ResolveTrashKindId(const FHitResult& HitResult) con
 		return NAME_None;
 	}
 
-	const uint32 SelectionSeed = HashCombine(
-		HashCombine(GetTypeHash(Properties->RandomSeed), GetTypeHash(HitResult.ImpactPoint)),
-		TrashKindSeedSalt);
+	const uint32 SelectionSeed = GetPlacementRandomSeed(TrashKindSeedSalt);
 	FRandomStream SelectionRandomStream(static_cast<int32>(SelectionSeed));
 	return EligibleTrashKindIds[SelectionRandomStream.RandRange(0, EligibleTrashKindIds.Num() - 1)];
 }
 
-UStaticMesh* UMDTrashPlacementTool::ResolveTrashMesh(const FName TrashKindId) const
+bool UMDTrashPlacementTool::ResolveTrashAppearance(
+	const FName TrashKindId, FName& OutVariantId, UStaticMesh*& OutMesh)
 {
-	if (!IsValid(Properties))
+	OutVariantId = NAME_None;
+	OutMesh = nullptr;
+	if (!IsValid(Properties)) return false;
+	if (Properties->bRandomVariant)
 	{
-		return nullptr;
+		const uint32 Seed = GetPlacementRandomSeed(HashCombine(GetTypeHash(TrashKindId.ToString()), TrashVariantSeedSalt));
+		if (!UMD_TrashLibrary::SelectRandomTrashVariant(TrashKindId, static_cast<int32>(Seed), OutVariantId)) return false;
 	}
-
-	FMD_TrashKindRow TrashKindRow;
-	if (UMD_TrashLibrary::FindTrashKindRow(TrashKindId, TrashKindRow))
+	else
 	{
-		if (UStaticMesh* TrashKindMesh = TrashKindRow.Mesh.LoadSynchronous())
-		{
-			return TrashKindMesh;
-		}
+		OutVariantId = IsRandomSelectionMode()
+			? UMD_TrashLibrary::GetDefaultTrashVariantId(TrashKindId) : Properties->TrashVariantId;
 	}
+	if (OutVariantId.IsNone()) return false;
+	OutMesh = ResolveTrashMesh(TrashKindId, OutVariantId);
+	return IsValid(OutMesh);
+}
 
-	const AMD_TrashItem* DefaultTrashItem = Properties->TrashItemClass.GetDefaultObject();
-	if (const UStaticMeshComponent* MeshComponent = DefaultTrashItem
-		? DefaultTrashItem->FindComponentByClass<UStaticMeshComponent>()
-		: nullptr)
+UStaticMesh* UMDTrashPlacementTool::ResolveTrashMesh(const FName TrashKindId, const FName VariantId)
+{
+	if (!IsValid(Properties)) return nullptr;
+	TSoftObjectPtr<UStaticMesh> MeshReference;
+	if (!UMD_TrashLibrary::ResolveTrashKindMesh(TrashKindId, VariantId, MeshReference)) return nullptr;
+	if (!MeshReference.IsNull())
 	{
-		return MeshComponent->GetStaticMesh();
+		const FSoftObjectPath Path = MeshReference.ToSoftObjectPath();
+		if (const TObjectPtr<UStaticMesh>* Cached = ResolvedMeshes.Find(Path)) return Cached->Get();
+		UStaticMesh* SelectedMesh = MeshReference.Get();
+		if (!SelectedMesh) SelectedMesh = MeshReference.LoadSynchronous();
+		ResolvedMeshes.Add(Path, SelectedMesh); // 실패도 캐시하여 Hover마다 재시도하지 않는다.
+		return SelectedMesh;
 	}
 
 	return nullptr;
@@ -842,9 +904,7 @@ FTransform UMDTrashPlacementTool::BuildPlacementTransform(
 {
 	const FVector SurfaceNormal = GetSafeSurfaceNormal(HitResult);
 	const FVector PlacementUp = Properties->bAlignToSurface ? SurfaceNormal : FVector::UpVector;
-	const uint32 PlacementSeed = HashCombine(
-		GetTypeHash(Properties->RandomSeed),
-		GetTypeHash(HitResult.ImpactPoint));
+	const uint32 PlacementSeed = GetPlacementRandomSeed(TransformSeedSalt);
 	FRandomStream PlacementRandomStream(static_cast<int32>(PlacementSeed));
 	const float RotationRandomFraction = PlacementRandomStream.FRand();
 	const float ScaleRandomFraction = PlacementRandomStream.FRand();
@@ -950,9 +1010,8 @@ bool UMDTrashPlacementTool::IsPlacementSafe(
 
 bool UMDTrashPlacementTool::IsPlacementAllowedAtHit(
 	const FHitResult& HitResult,
-	const FName TrashKindId) const
+	const UStaticMesh* StaticMesh) const
 {
-	UStaticMesh* StaticMesh = ResolveTrashMesh(TrashKindId);
 	return IsValid(StaticMesh)
 		&& IsPlacementSafe(StaticMesh, BuildPlacementTransform(HitResult, StaticMesh));
 }
@@ -1004,24 +1063,33 @@ void UMDTrashPlacementTool::UpdateGhostPreview(const FHitResult& HitResult)
 		return;
 	}
 
-	const FName TrashKindId = ResolveTrashKindId(HitResult);
-	UStaticMesh* StaticMesh = ResolveTrashMesh(TrashKindId);
-	if (!IsValid(StaticMesh))
+	const FName TrashKindId = ResolveTrashKindId();
+	FName VariantId;
+	UStaticMesh* StaticMesh = nullptr;
+	if (!ResolveTrashAppearance(TrashKindId, VariantId, StaticMesh))
 	{
 		HideGhostPreview();
 		return;
 	}
 
 	const FTransform PreviewTransform = BuildPlacementTransform(HitResult, StaticMesh);
+	const bool bWasPlacementValid = bIsHoverPlacementValid;
 	bIsHoverPlacementValid = IsPlacementSafe(StaticMesh, PreviewTransform);
-	GhostPreviewComponent->SetStaticMesh(StaticMesh);
-	for (int32 MaterialIndex = 0; MaterialIndex < GhostPreviewComponent->GetNumMaterials(); ++MaterialIndex)
+	const bool bMeshChanged = GhostPreviewComponent->GetStaticMesh() != StaticMesh;
+	if (bMeshChanged)
 	{
-		GhostPreviewComponent->SetMaterial(MaterialIndex, GhostMaterial);
+		GhostPreviewComponent->SetStaticMesh(StaticMesh);
+		for (int32 MaterialIndex = 0; MaterialIndex < GhostPreviewComponent->GetNumMaterials(); ++MaterialIndex)
+		{
+			GhostPreviewComponent->SetMaterial(MaterialIndex, GhostMaterial);
+		}
 	}
-	GhostMaterial->SetVectorParameterValue(
-		GhostColorParameterName,
-		bIsHoverPlacementValid ? ValidGhostColor : InvalidGhostColor);
+	if (bMeshChanged || bWasPlacementValid != bIsHoverPlacementValid || !GhostPreviewComponent->IsVisible())
+	{
+		GhostMaterial->SetVectorParameterValue(
+			GhostColorParameterName,
+			bIsHoverPlacementValid ? ValidGhostColor : InvalidGhostColor);
+	}
 	GhostPreviewComponent->SetWorldTransform(PreviewTransform);
 	GhostPreviewComponent->SetVisibility(true);
 }
