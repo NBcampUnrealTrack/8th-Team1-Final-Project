@@ -31,7 +31,9 @@ AMD_CustomizationConsole::AMD_CustomizationConsole()
 	// 기본 위치는 거울 앞 2m 뒤편 상단. 실제 값은 레벨 액터에서 잡는다
 	ViewCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("ViewCamera"));
 	ViewCamera->SetupAttachment(Mesh);
-	ViewCamera->SetRelativeLocation(FVector(-350.f, 0.f, 120.f));
+	// 기본 구도: 캐릭터 오른쪽 뒤·가슴 높이에서 몸과 거울을 함께 잡는다. 사용자가 PIE 유령 시점으로 확정한 값
+	ViewCamera->SetRelativeLocation(FVector(490.f, -108.f, 134.f));
+	ViewCamera->SetRelativeRotation(FRotator(-7.1f, 162.4f, 0.f));
 	ViewCamera->bUsePawnControlRotation = false;
 	ViewCamera->FieldOfView = 75.f;
 
@@ -45,12 +47,11 @@ AMD_CustomizationConsole::AMD_CustomizationConsole()
 	// 세로로 긴 렌더타깃이라 가로 FOV를 좁혀야 거울 속 캐릭터가 작아지지 않는다
 	MirrorCapture->FOVAngle = 45.f;
 
-	// 거울 앞 1.2m, 거울 축에서 왼쪽(+Y)으로 1.4m 비켜 서서 거울 중심을 바라본다.
-	// 카메라가 거울 축 위에 오므로 화면에서 몸(왼쪽)과 거울(오른쪽)이 겹치지 않는다
+	// 거울 앞 1.8m, 거울 축에서 왼쪽(+Y)으로 0.7m 비켜 서서 거울(-X)을 바라본다. 사용자 PIE 확정값
 	StandPoint = CreateDefaultSubobject<USceneComponent>(TEXT("StandPoint"));
 	StandPoint->SetupAttachment(Mesh);
-	StandPoint->SetRelativeLocation(FVector(120.f, 140.f, 0.f));
-	StandPoint->SetRelativeRotation(FRotator(0.f, -130.f, 0.f));
+	StandPoint->SetRelativeLocation(FVector(178.f, 71.f, 0.f));
+	StandPoint->SetRelativeRotation(FRotator(0.f, 180.f, 0.f));
 }
 
 void AMD_CustomizationConsole::Tick(float DeltaSeconds)
@@ -281,7 +282,10 @@ void AMD_CustomizationConsole::BeginCustomization(AMD_Character* Character)
 	}
 
 	ActiveCharacter = Character;
-	PlaceCameraBehind(Character);
+	if (bPlaceCameraBehindPlayer == true)
+	{
+		PlaceCameraBehind(Character);
+	}
 	AimMirrorCaptureAtStandPoint();
 	PC->SetViewTargetWithBlend(this, CameraBlendTime);
 	Character->SetLocalThirdPersonViewEnabled(true);

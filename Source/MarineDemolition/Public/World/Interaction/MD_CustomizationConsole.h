@@ -71,24 +71,28 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console")
 	float CameraBlendTime = 0.5f;
 
-	// 열 때 카메라를 플레이어 뒤로 옮긴다. 플레이어에서 거울 반대쪽으로 이만큼 떨어진다
+	// true면 열 때 StandPoint 기준으로 카메라를 계산해 놓고, false면 ViewCamera 컴포넌트에 잡아 둔 트랜스폼을 그대로 쓴다
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Camera")
+	bool bPlaceCameraBehindPlayer = false;
+
+	// 열 때 카메라를 플레이어 뒤로 옮긴다. 플레이어에서 거울 반대쪽으로 이만큼 떨어진다
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Camera", meta = (EditCondition = "bPlaceCameraBehindPlayer"))
 	float CameraDistanceBehindPlayer = 300.f;
 
 	// 플레이어 발 기준 카메라 높이
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Camera")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Camera", meta = (EditCondition = "bPlaceCameraBehindPlayer"))
 	float CameraHeight = 190.f;
 
 	// 카메라 주시점 높이. 콘솔 원점(바닥) 기준이라 거울 중심·캐릭터 머리 높이 근처로 맞춘다
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Camera")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Camera", meta = (EditCondition = "bPlaceCameraBehindPlayer"))
 	float CameraLookAtHeightOffset = 120.f;
 
 	// 주시점을 거울 중심(0)과 StandPoint(1) 사이 어디에 둘지. 0.5면 캐릭터와 거울이 화면 좌우로 나뉜다
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Camera", meta = (ClampMin = "0.0", ClampMax = "1.0"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Camera", meta = (ClampMin = "0.0", ClampMax = "1.0", EditCondition = "bPlaceCameraBehindPlayer"))
 	float CameraLookAtBlend = 0.5f;
 
 	// 카메라를 플레이어 기준 오른쪽으로 비껴 놓는 거리. 정면 뒤에서 보면 거울 속 앞모습이 몸에 가린다
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Camera")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Camera", meta = (EditCondition = "bPlaceCameraBehindPlayer"))
 	float CameraSideOffset = 400.f;
 
 	// StandPoint 도착 판정 반경(cm)
