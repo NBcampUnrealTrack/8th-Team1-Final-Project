@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "GameFramework/PlayerController.h"
+#include "Types/Customization/MD_CharacterAppearanceTypes.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
 #include "Types/UI/MD_LoadingScreenTypes.h"
@@ -174,6 +175,10 @@ public:
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
 	void ServerRepayLoan(AMD_Merchant* MerchantActor, int32 Amount);
 
+	/** 클라이언트가 확정한 캐릭터 외형을 서버 PlayerState에 적용한다. */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Customization")
+	void ServerApplyAppearance(FMD_CharacterAppearance NewAppearance);
+
 private:
 
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Debug")
@@ -244,6 +249,9 @@ protected:
 	virtual void SetPawn(APawn* InPawn) override;
 
 private:
+	/** 로컬 커스터마이징 세이브에서 가장 최근 외형을 읽어 서버에 전달한다. */
+	void RestoreAppearanceFromLocalSave();
+
 	/** Alt-Tab/창 비활성화로 입력 release를 잃기 전에 헤라 상호작용을 정리한다. */
 	void HandleApplicationWillDeactivate();
 

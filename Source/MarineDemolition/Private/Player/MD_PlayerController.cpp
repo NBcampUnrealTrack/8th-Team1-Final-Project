@@ -30,6 +30,7 @@
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "GameFramework/GameSession.h"
+#include "Gameplay/Customization/MD_CharacterAppearanceLibrary.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
@@ -655,6 +656,7 @@ void AMD_PlayerController::BeginPlayingState()
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
 	SubmitPlatformNickname();
+	RestoreAppearanceFromLocalSave();
 
 	NotifyLoadingScreenPlayerReady();
 }
@@ -666,6 +668,7 @@ void AMD_PlayerController::PostSeamlessTravel()
 	InitializeGameplayHUD();
 	InitializeScrapeFocusReticle();
 	SubmitPlatformNickname();
+	RestoreAppearanceFromLocalSave();
 
 	// Seamless travel은 BeginPlayingState를 거치지 않으므로 같은 알림을 여기서도 보낸다.
 	NotifyLoadingScreenPlayerReady();
@@ -715,6 +718,13 @@ void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
 	if (IsValid(HUDWidgetInstance))
 	{
 		HUDWidgetInstance->SetVisibility(Target);
+	}
+
+	// 중앙 조준점은 GameHUD 레이어 밖의 별도 오버레이이므로 함께 숨긴다.
+	if (IsValid(ScrapeFocusReticleWidgetInstance))
+	{
+		ScrapeFocusReticleWidgetInstance->SetVisibility(
+			bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
 }
 
@@ -800,6 +810,30 @@ void AMD_PlayerController::ServerRepayLoan_Implementation(AMD_Merchant* Merchant
 	}
 }
 
+
+void AMD_PlayerController::ServerApplyAppearance_Implementation(FMD_CharacterAppearance NewAppearance)
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (IsValid(MDPlayerState) == true)
+	{
+		MDPlayerState->SetAppearance(NewAppearance);
+	}
+}
+
+void AMD_PlayerController::RestoreAppearanceFromLocalSave()
+{
+	if (IsLocalController() == false)
+	{
+		return;
+	}
+
+	// 마지막으로 확정한 선택을 서버에 다시 실어 재접속·트래블 후에도 유지한다
+	FMD_CharacterAppearance SavedAppearance;
+	if (UMD_CharacterAppearanceLibrary::LoadLocalAppearance(SavedAppearance) == true)
+	{
+		ServerApplyAppearance(SavedAppearance);
+	}
+}
 
 /* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 

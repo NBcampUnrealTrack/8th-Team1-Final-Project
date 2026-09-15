@@ -8,6 +8,7 @@
 #include "InputActionValue.h"
 #include "AbilitySystemInterface.h"
 #include "Types/State/MD_HealthTypes.h"
+#include "Types/Customization/MD_CharacterAppearanceTypes.h"
 #include "MD_Character.generated.h"
 
 class UMD_InputConfig;
@@ -186,6 +187,20 @@ public:
 	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 	virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override;
+
+	/** 로스터·팔레트 인덱스로 메시·애님·메인 색을 적용한다. 로컬 미리보기에도 쓴다. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Customization")
+	void ApplyAppearance(const FMD_CharacterAppearance& Appearance);
+
+	/** PlayerState에 복제된 외형을 다시 적용한다. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Customization")
+	void ApplyAppearanceFromPlayerState();
+
+	UFUNCTION(BlueprintPure, Category = "MD|Customization")
+	const FMD_CharacterAppearance& GetAppliedAppearance() const { return AppliedAppearance; }
+
+	/** 거울 앞에서 로컬 플레이어가 자기 3인칭 몸을 보고 1인칭 팔은 숨기도록 전환한다. */
+	void SetLocalThirdPersonViewEnabled(bool bEnabled);
 protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
@@ -528,6 +543,21 @@ private:
 
 	/** 모선 리스폰 지점으로 옮긴다. 서버에서만 호출한다. */
 	void TeleportToMothership();
+
+	/** PlayerState의 외형 변경 콜백 등록을 관리한다. */
+	void BindAppearanceDelegate();
+	void UnbindAppearanceDelegate();
+
+	UFUNCTION()
+	void HandleAppearanceChanged();
+
+	/** 메시 컴포넌트의 모든 슬롯을 MID로 바꿔 메인 색을 넣는다. */
+	void ApplyAppearanceColor(USkeletalMeshComponent* MeshComponent, FName ParameterName, const FLinearColor& Color);
+
+	/** 마지막으로 적용한 외형. 선택 화면의 시작값으로 쓴다. */
+	FMD_CharacterAppearance AppliedAppearance;
+
+	bool bLocalThirdPersonViewEnabled = false;
 
 	/** 직전에 사망 상태였는지. 부활 전이 판별용 */
 	bool bWasDeadState = false;
