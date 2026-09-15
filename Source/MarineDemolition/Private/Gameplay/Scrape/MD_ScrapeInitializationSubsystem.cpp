@@ -1,11 +1,13 @@
 #include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
+#include "Engine/GameInstance.h"
+#include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
+#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Components/StaticMeshComponent.h"
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/Pawn.h"
 #include "Engine/World.h"
-#include "Engine/GameInstance.h"
 #include "Game/MD_GameStateBase.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
 #include "Async/Async.h"
@@ -36,6 +38,21 @@ bool UMD_ScrapeInitializationSubsystem::Enqueue(UMD_ScrapeSurfaceComponent& Surf
     ++Surface.DeferredInitializationEpoch;
     Queue.AddUnique(&Surface);
     return true;
+}
+
+bool UMD_ScrapeInitializationSubsystem::ConsumePreparedSavedState(
+    UMD_ScrapeSurfaceComponent& Surface, const FMD_WallContaminationRecord& Record)
+{
+    FMD_WallContaminationRecord Prepared;
+    if (!PreparedSavedStates.RemoveAndCopyValue(&Surface, Prepared)) return false;
+    const bool bSameCells = (Prepared.GetCellCount() == 0 && Record.GetCellCount() == 0)
+        || Prepared.CellPayload.IsSharedWith(Record.CellPayload);
+    return Surface.IsSurfaceInitialized() && Surface.GetContaminationGeneration() == Record.Generation
+        && Prepared.Generation == Record.Generation && Prepared.LayoutVersion == Record.LayoutVersion
+        && Prepared.LayoutId == Record.LayoutId
+        && Prepared.GridDimensions == Record.GridDimensions && Prepared.CarrierScale == Record.CarrierScale
+        && bSameCells && Prepared.BoundaryPayload.Num() == Record.BoundaryPayload.Num()
+        && Prepared.BoundaryPayload.Get().GetData() == Record.BoundaryPayload.Get().GetData();
 }
 
 TStatId UMD_ScrapeInitializationSubsystem::GetStatId() const
@@ -89,6 +106,8 @@ void UMD_ScrapeInitializationSubsystem::Tick(float DeltaTime)
             Job->Tolerance = Surface->ScrapeSettings.CleanTolerance;
             Job->Revision = Job->Data->GetRuntimeCacheRevision();
             Job->Generation = Surface->ContaminationGeneration;
+            if (auto* Persistence = GI ? GI->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr)
+                if (const auto* Record = Persistence->FindDeferredContaminationRecord(Surface)) Job->SavedRecord = *Record;
             Jobs.Add(MoveTemp(Job));
         }
         for (int32 I = Jobs.Num() - 1; I >= 0 && FPlatformTime::Seconds() < Deadline; --I)
@@ -126,6 +145,48 @@ void UMD_ScrapeInitializationSubsystem::Tick(float DeltaTime)
                     Job.Data->CancelInitializationPreparation();
                 }
                 Jobs.RemoveAtSwap(I);
+                continue;
+            }
+            if (Job.bCommitted)
+            {
+                if (!Job.ExpandedRecord.IsSet())
+                {
+                    Job.ExpandedRecord.Emplace();
+                    if (!Surface->CanRestoreContaminationLayout(Job.SavedRecord->LayoutVersion,
+                            Job.SavedRecord->LayoutId, Job.SavedRecord->GridDimensions)
+                        || !FMD_ScrapeSurfaceLayout::AreCarrierScalesCompatible(Job.SavedRecord->CarrierScale, Job.Scale)
+                        || !Job.SavedRecord->ValidateCellIndices(Surface->GetContaminationAtlasCellCount())
+                        || !Job.SavedRecord->ExpandCells(*Job.ExpandedRecord)
+                        || Job.ExpandedRecord->CellIndices.ContainsByPredicate([Surface](int32 Index)
+                            { return !Surface->IsContaminationCellActive(Index); }))
+                    {
+                        Surface->bDeferredInitializationPending = false;
+                        Jobs.RemoveAtSwap(I); // The normal validated restore reports this failure.
+                        continue;
+                    }
+                }
+                const auto& Full = *Job.ExpandedRecord;
+                const int32 Count = FMath::Min(1024, Full.CellIndices.Num() - Job.RestoredCells);
+                if (Count > 0)
+                {
+                    FMD_WallContaminationRecord Slice;
+                    Slice.CellIndices.Append(Full.CellIndices.GetData() + Job.RestoredCells, Count);
+                    const auto CopyChannel = [&](const TArray<float>& In, TArray<float>& Out)
+                    { if (!In.IsEmpty()) Out.Append(In.GetData() + Job.RestoredCells, Count); };
+                    CopyChannel(Full.InitialAmounts, Slice.InitialAmounts);CopyChannel(Full.RemainingAmounts, Slice.RemainingAmounts);
+                    CopyChannel(Full.TransferredAmounts, Slice.TransferredAmounts);CopyChannel(Full.TransferredPatternDensities, Slice.TransferredPatternDensities);
+                    CopyChannel(Full.CoveredFractions, Slice.CoveredFractions);
+                    Surface->RestoreContaminationCells(Slice.CellIndices, Slice.InitialAmounts, Slice.RemainingAmounts,
+                        Slice.TransferredAmounts, Slice.TransferredPatternDensities, Slice.CoveredFractions);
+                    Job.RestoredCells += Count;
+                }
+                if (Job.RestoredCells == Full.CellIndices.Num())
+                {
+                    if (Surface->RestoreContaminationBoundary(Job.SavedRecord->BoundaryPayload.Get()))
+                        PreparedSavedStates.Add(Surface, MoveTemp(*Job.SavedRecord));
+                    Surface->bDeferredInitializationPending = false;
+                    Jobs.RemoveAtSwap(I);
+                }
                 continue;
             }
             if (!Job.Layout)
@@ -194,7 +255,13 @@ void UMD_ScrapeInitializationSubsystem::Tick(float DeltaTime)
             TGuardValue<bool> Completing(Surface->bCompletingDeferredInitialization, true);
             Surface->InitializeRuntimeState();
             Surface->PreparedInitialState.Reset();
-            Jobs.RemoveAtSwap(I);
+            if (Surface->bContaminationSurfaceInitialized && Job.SavedRecord.IsSet())
+            {
+                Job.bCommitted = true;
+                Job.Prepared.Reset();
+                Surface->bDeferredInitializationPending = true;
+            }
+            else Jobs.RemoveAtSwap(I);
         }
     }
     if (!IsPending()) { Queue.Empty(); Jobs.Empty(); }
@@ -205,6 +272,7 @@ void UMD_ScrapeInitializationSubsystem::Deinitialize()
 {
     bStopping = true;
     Queue.Empty();
+    PreparedSavedStates.Empty();
     // Keep pinned immutable profiles alive until readers have left; never touch a destroyed component.
     for (const auto& Job : Jobs)
     {

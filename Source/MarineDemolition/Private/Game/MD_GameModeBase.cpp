@@ -96,10 +96,7 @@ void AMD_GameModeBase::BeginPlay()
         It->OnWallDemolished.AddDynamic(this, &AMD_GameModeBase::HandleWallDemolished);
     }
 
-    // 이전 Day 스냅샷 복원은 전 액터 BeginPlay 이후로 미룸 (벽 오염 초기화보다 늦게).
-    // 복원 직후 Merchant Day·퀘스트를 GameState와 맞춘다.
-    GetWorldTimerManager().SetTimerForNextTick(
-        this, &AMD_GameModeBase::InitializeExpeditionDay);
+    // Expedition readiness is scheduled after the pending save operation below.
 
     if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
     {
@@ -140,6 +137,11 @@ void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AMD_GameModeBase::ApplyPendingGameDataOperation()
 {
+    if (const auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); Initializer && Initializer->IsPending())
+    {
+        GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
+        return;
+    }
     // GameInstance 수명으로 트래블을 통과한 데이터 초기화 작업을 실행할 저장 관리자 참조
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
@@ -147,6 +149,7 @@ void AMD_GameModeBase::ApplyPendingGameDataOperation()
     {
         SaveSlotManager->ApplyPendingGameDataOperation();
     }
+    GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
 }
 
 void AMD_GameModeBase::StartPlay()

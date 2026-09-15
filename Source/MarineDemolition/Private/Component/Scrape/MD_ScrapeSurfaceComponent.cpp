@@ -459,8 +459,15 @@ bool UMD_ScrapeSurfaceComponent::TryDeferContaminationInitialization()
     if (!Persistence || !Persistence->IsContaminationContextReady(GetWorld())) return false;
     FMD_ContaminationGeneration Saved;
     bool Legacy = false;
-    if (Persistence->TryGetSavedContaminationGeneration(this, Saved, Legacy) || Legacy
-        || Persistence->ShouldDeferContaminationGeneration(this)) return false;
+    const bool bHasSavedGeneration = Persistence->TryGetSavedContaminationGeneration(this, Saved, Legacy);
+    if (Legacy || (!bHasSavedGeneration && Persistence->ShouldDeferContaminationGeneration(this))) return false;
+    if (bHasSavedGeneration)
+    {
+        FGuid Layout;
+        if (Persistence->TryGetSavedContaminationLayout(this, Layout)
+            && !SelectCompatibleContaminationLayout(Layout, false)) return false;
+        ContaminationGeneration = Saved;
+    }
     PrepareContaminationGeneration();
     if (!ContaminationGeneration.bProcedural || ContaminationGeneration.Version < 2) return false;
     auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>();

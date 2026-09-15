@@ -93,6 +93,8 @@ public:
     int32 GetOwnedPageCount() const { return NonNullPageCount; }
     /** Initial equals remaining, with exact +0 paint/coverage and no modified pages. */
     bool IsPristineCanonicalInitial() const;
+    /** Ascending storage indices that can differ from the canonical save baseline. */
+    void ForEachSaveCandidate(TFunctionRef<void(int32)> Visit) const;
     static FMD_ScrapePagedStateMemoryStats GetGlobalMemoryStats();
     static bool AreCellsBitIdentical(const FMD_ScrapeSurfaceCell& A, const FMD_ScrapeSurfaceCell& B);
 

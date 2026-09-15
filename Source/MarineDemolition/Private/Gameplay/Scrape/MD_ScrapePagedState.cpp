@@ -504,6 +504,22 @@ void FMD_ScrapePagedState::InitializeFromCells(TArray<FMD_ScrapeSurfaceCell>&& C
     }
 }
 
+void FMD_ScrapePagedState::ForEachSaveCandidate(TFunctionRef<void(int32)> Visit) const
+{
+    if (!Initial) return;
+    const bool bCanonical = Initial->bCanonicalAmounts || (Initial->bUniform
+        && MD_ScrapePagedStatePrivate::IsCanonicalInitial(Initial->UniformCell));
+    if (!bCanonical)
+    {
+        for (int32 I = 0; I < CellCount; ++I) Visit(I);
+        return;
+    }
+    for (int32 PageIndex = 0; PageIndex < Pages.Num(); ++PageIndex)
+        if (Pages[PageIndex])
+            for (int32 I = PageIndex * PageSize; I < FMath::Min((PageIndex + 1) * PageSize, CellCount); ++I)
+                Visit(I);
+}
+
 bool FMD_ScrapePagedState::IsPristineCanonicalInitial() const
 {
     return Initial && NonNullPageCount == 0
