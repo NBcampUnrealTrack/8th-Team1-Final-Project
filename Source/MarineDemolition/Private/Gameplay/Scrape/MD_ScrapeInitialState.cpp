@@ -4,6 +4,8 @@
 #include "Gameplay/Scrape/MD_ContaminationNoise.h"
 #include "Async/ParallelFor.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "Gameplay/Scrape/MD_ScrapeMaskAtlas.h"
+#include "MDScrapeInitialMaskRenderer.h"
 
 TArray<float> MD_ScrapeInitialState::Generate(const UMD_ScrapeMeshUVData& Data,
     const FMD_ScrapeCellLayout& Layout, const FMD_ContaminationGeneration& G)
@@ -71,4 +73,58 @@ bool MD_ScrapeInitialState::CalculateTotals(FMD_ScrapeInitialState& State,
     P.bIsValid = FMath::IsFinite(P.InitialCarrierAmount) && FMath::IsFinite(P.CurrentCarrierAmount)
         && FMath::IsFinite(State.CanonicalCarrier);
     return P.bIsValid;
+}
+
+bool MD_ScrapeInitialState::PrepareMaskRecipe(FMD_ScrapeInitialState& State,
+    const FMD_ScrapeCellLayout& Cells, FMD_ScrapeMeshUVVisualSeamView Seams,
+    float FullSignal, bool bParallel, double Deadline)
+{
+    if (State.bMaskRecipeComplete) return true;
+    if (!State.MaskLayout || State.Amounts.Num() != Cells.ActiveToAtlas.Num())
+    { State.MaskLayout.Reset(); State.bMaskRecipeComplete = true; return true; }
+    if (State.MaskBits.IsEmpty() && State.NextMaskCell == 0)
+    {
+        State.MaskBits.SetNumZeroed(FMath::DivideAndRoundUp(State.Amounts.Num(), 32));
+        State.MaskSeams.SetNumUninitialized(State.MaskLayout->SeamPixels.Num());
+    }
+    while (State.NextMaskCell < State.Amounts.Num())
+    {
+        const int32 End = FMath::Min(State.NextMaskCell + 4096, State.Amounts.Num());
+        for (; State.NextMaskCell < End; ++State.NextMaskCell)
+            if (State.Amounts[State.NextMaskCell] > UE_SMALL_NUMBER)
+                State.MaskBits[State.NextMaskCell >> 5] |= 1u << (State.NextMaskCell & 31);
+        if (FPlatformTime::Seconds() >= Deadline) return false;
+    }
+    while (State.NextMaskSeam < State.MaskSeams.Num())
+    {
+        const int32 Begin = State.NextMaskSeam;
+        constexpr int32 SeamsPerJob = 2048;
+        const int32 End = FMath::Min(Begin + 16 * SeamsPerJob, State.MaskSeams.Num());
+        TAtomic<bool> Valid(true);
+        // Join only a bounded group; retain parallel seam evaluation instead of
+        // serializing the full recipe or waiting on one job for the whole atlas.
+        ParallelFor(FMath::DivideAndRoundUp(End - Begin, SeamsPerJob), [&](int32 Job)
+        {
+            const int32 JobEnd = FMath::Min(Begin + (Job + 1) * SeamsPerJob, End);
+            for (int32 Seam = Begin + Job * SeamsPerJob; Seam < JobEnd; ++Seam)
+            {
+                double Sum = 0.0;
+                for (const auto& Sample : Seams.GetSamples(State.MaskLayout->SeamPixels[Seam]))
+                {
+                    if (!Cells.AtlasToActive.IsValidIndex(Sample.CellIndex)) continue;
+                    const int32 Active = Cells.AtlasToActive[Sample.CellIndex];
+                    const float Signal = Active != INDEX_NONE && ((State.MaskBits[Active >> 5] >> (Active & 31)) & 1u) ? FullSignal : 0.f;
+                    Sum += Sample.Weight * Signal;
+                }
+                const float Signal = static_cast<float>(FMath::Clamp(Sum, 0.0, 1.0));
+                if (!FMD_ScrapeMaskAtlas::TryQuantizeRemainingContamination(Signal, 1.f, State.MaskSeams[Seam])) Valid.Store(false);
+            }
+        }, bParallel ? EParallelForFlags::None : EParallelForFlags::ForceSingleThread);
+        if (!Valid.Load())
+        { State.MaskLayout.Reset(); State.MaskBits.Empty(); State.MaskSeams.Empty(); State.bMaskRecipeComplete = true; return true; }
+        State.NextMaskSeam = End;
+        if (FPlatformTime::Seconds() >= Deadline) return false;
+    }
+    State.bMaskRecipeComplete = true;
+    return true;
 }

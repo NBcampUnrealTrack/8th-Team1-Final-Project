@@ -35,6 +35,7 @@ private:
         FVector Scale;
         float Tolerance = 0.f;
         TFuture<FMD_ScrapeInitialState> Result;
+        TOptional<FMD_ScrapeInitialState> Prepared;
     };
     TArray<TWeakObjectPtr<UMD_ScrapeSurfaceComponent>> Queue;
     TArray<TUniquePtr<FJob>> Jobs;

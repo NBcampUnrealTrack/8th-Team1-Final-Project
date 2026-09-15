@@ -203,6 +203,21 @@ bool UMD_ScrapeSurfaceComponent::TryBuildContaminationMaskPixels(
 	return true;
 }
 
+bool UMD_ScrapeSurfaceComponent::GetDeferredInitialMaskInputs(
+    TSharedPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe>& OutLayout, float& OutFullSignal) const
+{
+    if (!FMDScrapeInitialMaskRenderer::IsSupported() || !ContaminationMeshUVData
+        || (GetWorld() && GetWorld()->GetNetMode() == NM_DedicatedServer)) return false;
+    FMD_ScrapeSurfaceCell Full;
+    Full.InitialContamination = Full.RemainingContamination = 1.f;
+    OutFullSignal = CalculateContaminationVisualSignal(Full);
+    uint8 FullByte = 0;
+    if (!FMD_ScrapeMaskAtlas::TryQuantizeRemainingContamination(OutFullSignal, 1.f, FullByte) || FullByte != 255)
+        return false;
+    OutLayout = ContaminationMeshUVData->GetSharedInitialMaskLayout();
+    return OutLayout.IsValid();
+}
+
 bool UMD_ScrapeSurfaceComponent::TryBuildInitialContaminationMaskRecipe()
 {
     if (!UsesMeshUVSurface() || !ContaminationMeshUVData || !ContaminationCellLayout
@@ -210,6 +225,13 @@ bool UMD_ScrapeSurfaceComponent::TryBuildInitialContaminationMaskRecipe()
         || !ContaminationPagedCells.IsPristineCanonicalInitial()
         || HasLocalPredictedContaminationState() || !FMDScrapeInitialMaskRenderer::IsSupported()) return false;
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_BuildInitialMaskRecipe);
+    if (PreparedInitialState.IsSet() && PreparedInitialState->bMaskRecipeComplete && PreparedInitialState->MaskLayout)
+    {
+        ContaminationMaskAtlasPixels.InitializeBinary(MoveTemp(PreparedInitialState->MaskLayout),
+            MoveTemp(PreparedInitialState->MaskBits), MoveTemp(PreparedInitialState->MaskSeams));
+        ContaminationMaskAtlasDimensions = ContaminationGridDimensions;
+        return true;
+    }
     FMD_ScrapeSurfaceCell Full;
     Full.InitialContamination = Full.RemainingContamination = 1.f;
     // The pristine progress alphabet must be exact 0/1 before the seam sum.

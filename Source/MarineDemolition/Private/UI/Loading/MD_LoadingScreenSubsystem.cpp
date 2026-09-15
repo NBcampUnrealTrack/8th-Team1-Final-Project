@@ -1,4 +1,5 @@
 ﻿#include "UI/Loading/MD_LoadingScreenSubsystem.h"
+#include "World/Wall/MD_WallShadowBatchSubsystem.h"
 
 #include "Engine/Engine.h"
 #include "Gameplay/Loading/MD_MapRegistrationSubsystem.h"
@@ -256,6 +257,8 @@ EMD_LoadingReadinessBlocker UMD_LoadingScreenSubsystem::CheckWorldReadiness() co
 	{
 		return EMD_LoadingReadinessBlocker::PlayerControllerMissing;
 	}
+    if (const auto* Shadows = World->GetSubsystem<UMD_WallShadowBatchSubsystem>(); Shadows && Shadows->IsInitializationPending())
+    { return EMD_LoadingReadinessBlocker::SurfaceInitialization; }
 	if (const auto* Initializer = World->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); Initializer && Initializer->IsPending())
 	{ return EMD_LoadingReadinessBlocker::SurfaceInitialization; }
 	if (const auto* GS = World->GetGameState<AMD_GameStateBase>(); GS && !GS->IsWorldInitializationReady())

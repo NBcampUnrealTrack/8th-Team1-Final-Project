@@ -105,7 +105,25 @@ void UMD_WallShadowBatchSubsystem::InitializeWorldBatches()
             Repeated.FindOrAdd(It->GetStaticMesh()).Add(*It);
     for (auto& Pair : Repeated)
         if (Pair.Value.Num() >= 4)
-            for (auto* Source : Pair.Value) RegisterWall(*Source);
+            for (auto* Source : Pair.Value) PendingInitialSources.Add(Source);
+    if (IsInitializationPending() && !TickHandle.IsValid())
+        TickHandle = FWorldDelegates::OnWorldPostActorTick.AddUObject(this, &ThisClass::PostActorTick);
+}
+
+void UMD_WallShadowBatchSubsystem::TickInitialization()
+{
+    if (!IsInitializationPending()) return;
+    const double Deadline = FPlatformTime::Seconds() + .002;
+    while (NextInitialSource < PendingInitialSources.Num() && FPlatformTime::Seconds() < Deadline)
+        if (auto* Source = PendingInitialSources[NextInitialSource++].Get())
+            RegisterWall(*Source);
+    if (NextInitialSource == PendingInitialSources.Num())
+    {
+        PendingInitialSources.Empty();
+        NextInitialSource = 0;
+        if (Entries.IsEmpty())
+        { FWorldDelegates::OnWorldPostActorTick.Remove(TickHandle); TickHandle.Reset(); }
+    }
 }
 
 bool UMD_WallShadowBatchSubsystem::RegisterWall(UStaticMeshComponent& Source)
@@ -220,12 +238,13 @@ void UMD_WallShadowBatchSubsystem::UnregisterWall(UStaticMeshComponent& Source)
     if (!Entries.RemoveAndCopyValue(&Source, Entry)) return;
     Source.TransformUpdated.Remove(Entry.TransformHandle);
     Detach(&Source, Entry);
-    if (Entries.IsEmpty()) { FWorldDelegates::OnWorldPostActorTick.Remove(TickHandle); TickHandle.Reset(); }
+    if (Entries.IsEmpty() && !IsInitializationPending()) { FWorldDelegates::OnWorldPostActorTick.Remove(TickHandle); TickHandle.Reset(); }
 }
 
 void UMD_WallShadowBatchSubsystem::PostActorTick(UWorld* World, ELevelTick, float)
 {
     if (World != GetWorld()) return;
+    TickInitialization();
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_Wall_ShadowBatchVisibility);
     // Arbitrary attached surface meshes can change visibility without a delegate.
     // One compact pass after actor ticks updates membership before rendering, with
@@ -256,6 +275,7 @@ void UMD_WallShadowBatchSubsystem::PostActorTick(UWorld* World, ELevelTick, floa
 
 void UMD_WallShadowBatchSubsystem::Deinitialize()
 {
+    PendingInitialSources.Empty(); NextInitialSource = 0;
     TArray<TWeakObjectPtr<UStaticMeshComponent>> Sources;
     Entries.GetKeys(Sources);
     for (const auto& Source : Sources) if (auto* Component = Source.Get()) UnregisterWall(*Component);

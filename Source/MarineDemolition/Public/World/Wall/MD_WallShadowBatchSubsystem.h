@@ -13,6 +13,7 @@ public:
     virtual void OnWorldBeginPlay(UWorld& InWorld) override;
     virtual void Deinitialize() override;
     void InitializeWorldBatches();
+    bool IsInitializationPending() const { return !PendingInitialSources.IsEmpty(); }
     bool RegisterWall(UStaticMeshComponent& Source);
     void UnregisterWall(UStaticMeshComponent& Source);
     void UpdateWallTransform(UStaticMeshComponent& Source);
@@ -26,6 +27,9 @@ private:
         bool bMaterialsEligible = false;
         bool bOwnsDynamicShadowFlag = false;
     };
+    TArray<TWeakObjectPtr<UStaticMeshComponent>> PendingInitialSources;
+    int32 NextInitialSource = 0;
+    void TickInitialization();
     void RefreshEntry(UStaticMeshComponent& Source, FEntry& Entry);
     void Detach(UStaticMeshComponent* Source, FEntry& Entry);
     void PostActorTick(UWorld* World, ELevelTick TickType, float DeltaSeconds);

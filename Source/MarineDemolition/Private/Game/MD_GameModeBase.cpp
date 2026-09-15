@@ -2,6 +2,7 @@
 
 
 #include "Game/MD_GameModeBase.h"
+#include "World/Wall/MD_WallShadowBatchSubsystem.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
@@ -918,6 +919,11 @@ void AMD_GameModeBase::CaptureDaySnapshot()
 
 void AMD_GameModeBase::InitializeExpeditionDay()
 {
+    if (const auto* Shadows = GetWorld()->GetSubsystem<UMD_WallShadowBatchSubsystem>(); Shadows && Shadows->IsInitializationPending())
+    {
+        GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
+        return;
+    }
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_GameMode_InitializeExpeditionDay);
     if (const auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); Initializer && Initializer->IsPending())
     {
