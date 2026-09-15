@@ -59,7 +59,8 @@ public:
     {
         for (const double Weight : Dense) TotalWeight += Weight;
     }
-    bool Initialize(const UMD_ScrapeMeshUVData& Data, const FTransform& Transform);
+    bool Initialize(const UMD_ScrapeMeshUVData& Data, const FTransform& Transform,
+        double Deadline = TNumericLimits<double>::Max(), bool* OutPending = nullptr);
     FMD_ScrapeCarrierWeightView GetView() const;
     int32 Num() const { return GetView().Num(); }
     bool IsEmpty() const { return Num() == 0; }
@@ -69,6 +70,13 @@ public:
     SIZE_T GetAllocatedSize() const { return sizeof(*this) + Dense.GetAllocatedSize() + TriangleAreaScales.GetAllocatedSize(); }
 
 private:
+    // An unpublished partial instance is owned only by the profile's preparation cache.
+    const UMD_ScrapeMeshUVData* PreparingData = nullptr;
+    FVector PreparingScale = FVector::ZeroVector;
+    uint64 PreparingRevision = 0;
+    int32 PreparingCellCount = 0, PreparingTriangleCount = 0;
+    int32 NextTriangle = 0, NextCell = 0;
+    bool bInitializing = false, bHasActiveArea = false;
     TStrongObjectPtr<UMD_ScrapeMeshUVData> SurfaceData;
     TArray<double> Dense;
     TArray<double> TriangleAreaScales;

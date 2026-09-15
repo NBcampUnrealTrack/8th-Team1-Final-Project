@@ -25,6 +25,7 @@ AMD_TrashSorter::AMD_TrashSorter()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
+	SortActionText = NSLOCTEXT("MDInteraction", "TrashSorterSortAction", "분류");
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
@@ -39,10 +40,9 @@ AMD_TrashSorter::AMD_TrashSorter()
 
 	IntakeVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("IntakeVolume"));
 	IntakeVolume->SetupAttachment(Mesh);
-	IntakeVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	IntakeVolume->SetCollisionObjectType(ECC_WorldDynamic);
+	// 기존 BP의 컴포넌트 참조만 보존한다. 분류는 InteractTrace로만 선택한다.
+	IntakeVolume->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	IntakeVolume->SetCollisionResponseToAllChannels(ECR_Ignore);
-	IntakeVolume->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Overlap);
 	IntakeVolume->SetGenerateOverlapEvents(false);
 	IntakeVolume->SetCanEverAffectNavigation(false);
 }
@@ -64,6 +64,13 @@ void AMD_TrashSorter::OnConstruction(const FTransform& Transform)
 void AMD_TrashSorter::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// 기존 BP의 충돌 프로파일이 프로젝트 InteractTrace 기본 Ignore를 상속해도 조준된다.
+	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
+
+	// 기존 BP에 저장된 충돌/Overlap 설정도 끈다. 영역 크기와 위치는 분류에 영향이 없다.
+	IntakeVolume->SetGenerateOverlapEvents(false);
+	IntakeVolume->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 
 	// 드롭다운에 Bonus.* 도 뜨므로 칸이 아닌 값을 걸러낸다
 	if (!UMD_TrashLibrary::IsTrashCategory(AcceptedCategory))
@@ -88,14 +95,21 @@ void AMD_TrashSorter::SetInteractionHighlighted_Implementation(bool bHighlighted
 
 FText AMD_TrashSorter::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
-	return IsValid(GetHeldSortableForInteractor(Interactor))
-		? NSLOCTEXT("MDInteraction", "TrashSorterInsertPrompt", "[E] 넣기")
-		: FText::GetEmpty();
+	if (!CanInteract_Implementation(Interactor) || SortActionText.IsEmpty())
+	{
+		return FText::GetEmpty();
+	}
+
+	return FText::Format(
+		NSLOCTEXT("MDInteraction", "TrashSorterPromptFormat", "[E] {0}"),
+		SortActionText);
 }
 
 bool AMD_TrashSorter::CanInteract_Implementation(AActor* Interactor) const
 {
-	return IsValid(GetHeldSortableForInteractor(Interactor));
+	// 거리와 조준은 InteractionComponent의 공통 Trace 및 서버 재검증이 담당한다.
+	return UMD_TrashLibrary::IsTrashCategory(AcceptedCategory)
+		&& IsValid(GetHeldSortableForInteractor(Interactor));
 }
 
 AActor* AMD_TrashSorter::GetHeldSortableForInteractor(AActor* Interactor) const
@@ -120,7 +134,8 @@ AActor* AMD_TrashSorter::GetHeldSortableForInteractor(AActor* Interactor) const
 
 void AMD_TrashSorter::Interact_Implementation(AActor* Interactor)
 {
-	if (!HasAuthority())
+	// BP에서 직접 호출하더라도 서버 권한·분류 카테고리·현재 운반 상태를 다시 검증한다.
+	if (!HasAuthority() || !CanInteract_Implementation(Interactor))
 	{
 		return;
 	}

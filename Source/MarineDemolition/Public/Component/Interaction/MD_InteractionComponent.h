@@ -13,6 +13,7 @@ class UCameraComponent;
 class UPhysicsHandleComponent;
 class UPrimitiveComponent;
 class USceneComponent;
+struct FCollisionQueryParams;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnInteractionTargetChanged, AActor*, NewTarget);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnInteractionPromptChanged, FText, PromptText);
@@ -191,6 +192,7 @@ private:
 	void UpdateInteractionFocus();
 	void UpdateInteractionPrompt();
 	AActor* TraceInteractionTarget() const;
+	void AddInteractionTraceIgnoredActors(FCollisionQueryParams& QueryParams) const;
 	FText ResolveCurrentInteractionPrompt() const;
 	FText ResolveAbilityInteractionPrompt() const;
 	bool TryTraceAimedWall(class AMD_CuttableWall*& OutWall, FHitResult& OutHit) const;

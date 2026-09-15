@@ -834,6 +834,8 @@ private:
     uint64 DeferredInitializationEpoch = 0;
 	bool bCompletingDeferredInitialization = false;
 	TOptional<FMD_ScrapeInitialState> PreparedInitialState;
+    bool GetDeferredInitialMaskInputs(
+        TSharedPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe>& OutLayout, float& OutFullSignal) const;
 	bool TryDeferContaminationInitialization();
 	void InitializeRuntimeState();
 	void ShutdownRuntimeState();
