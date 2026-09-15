@@ -37,6 +37,7 @@ public:
     void ResetContaminationContext();
     bool TryGetSavedContaminationLayout(const UMD_ScrapeSurfaceComponent* Surface, FGuid& OutLayout) const;
     bool ShouldDeferContaminationGeneration(const UMD_ScrapeSurfaceComponent* Surface) const;
+    const FMD_WallContaminationRecord* FindDeferredContaminationRecord(const UMD_ScrapeSurfaceComponent* Surface) const;
 
     // 새 계약 시작 시 스냅샷 폐기
     void ClearSnapshot() { Snapshot = FMD_DaySnapshot(); }
@@ -52,7 +53,9 @@ private:
     int32 ContaminationSessionSeed = 0;
     bool bLegacyContaminationGeneration = false;
     bool bDeferSavedContaminationGeneration = false;
-    // Only immutable descriptors are cached, never cell arrays or UObject references.
+    // Compact records share immutable payload bytes only during covered saved-world startup.
+    TMap<FName, TMap<FName, FMD_WallContaminationRecord>> DeferredContaminationRecords;
+    // Generation/layout descriptors contain no UObject references.
     TMap<FName, TMap<FName, FMD_ContaminationGeneration>> SavedContaminationGenerations;
     TMap<FName, TMap<FName, FGuid>> SavedContaminationLayouts;
 

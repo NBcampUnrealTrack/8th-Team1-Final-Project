@@ -4,6 +4,7 @@
 #include "Async/Future.h"
 #include "UObject/StrongObjectPtr.h"
 #include "Gameplay/Scrape/MD_ScrapeInitialState.h"
+#include "Types/Persistence/MD_DaySnapshotTypes.h"
 #include "MD_ScrapeInitializationSubsystem.generated.h"
 
 class UMD_ScrapeSurfaceComponent;
@@ -20,6 +21,7 @@ public:
     virtual TStatId GetStatId() const override;
     virtual void Deinitialize() override;
     bool Enqueue(UMD_ScrapeSurfaceComponent& Surface);
+    bool ConsumePreparedSavedState(UMD_ScrapeSurfaceComponent& Surface, const FMD_WallContaminationRecord& Record);
     bool IsPending() const { return !Queue.IsEmpty() || !Jobs.IsEmpty(); }
 private:
     struct FJob
@@ -36,8 +38,13 @@ private:
         float Tolerance = 0.f;
         TFuture<FMD_ScrapeInitialState> Result;
         TOptional<FMD_ScrapeInitialState> Prepared;
+        TOptional<FMD_WallContaminationRecord> SavedRecord;
+        TOptional<FMD_WallContaminationRecord> ExpandedRecord;
+        int32 RestoredCells = 0;
+        bool bCommitted = false;
     };
     TArray<TWeakObjectPtr<UMD_ScrapeSurfaceComponent>> Queue;
     TArray<TUniquePtr<FJob>> Jobs;
+    TMap<TWeakObjectPtr<UMD_ScrapeSurfaceComponent>, FMD_WallContaminationRecord> PreparedSavedStates;
     bool bStopping = false;
 };
