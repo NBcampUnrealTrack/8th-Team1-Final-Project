@@ -52,8 +52,8 @@ void UMD_EquipHotbarComponent::BeginPlay()
 				SetItemAtSlot(Index, DefaultTools[Index], 1);
 			}
 		}
-		// 빈 기본 설정도 UI에 초기 상태 전달
-		OnHotbarChanged.Broadcast();
+		// 빈 기본 설정도 내용 갱신 경로에 초기 상태 전달
+		OnRep_ToolEntries();
 	}
 }
 
@@ -399,8 +399,8 @@ void UMD_EquipHotbarComponent::SelectSlot(int32 SlotIndex)
 	}
 	// 로컬 입력 지연을 줄이기 위한 예측 선택 반영
 	CurrentSlotIndex = SlotIndex;
-	// 로컬 장착 표시와 UI에 예측 상태 전달
-	OnHotbarChanged.Broadcast();
+	// 예측 선택에도 서버와 동일한 선택 변경 알림 경로 적용
+	OnRep_CurrentSlotIndex();
 	// 서버에 실제 선택 위치 확정 요청
 	ServerSelectSlot(SlotIndex);
 }
@@ -481,10 +481,18 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 			SetItemAtSlot(Index, Item, 1);
 		}
 	}
+	// 저장 복구의 선택 위치 보정 여부를 판별할 기존 값 보관
+	int32 PreviousSlotIndex = CurrentSlotIndex;
 	// 복구 후 선택 위치가 유효한 네 슬롯 범위에 있도록 보정
 	CurrentSlotIndex = FMath::Clamp(CurrentSlotIndex, 0, ToolEntries.Num() - 1);
 	// 복구된 최종 보관 상태 전달
 	NotifyEntriesChanged();
+	// 저장 복구에서 실제로 보정된 선택 위치만 별도 통지
+	if (PreviousSlotIndex != CurrentSlotIndex)
+	{
+		// 내용 갱신과 구분한 최종 선택 표시 동기화
+		OnHotbarSelectionChanged.Broadcast();
+	}
 	// 기존 저장 데이터의 적용 완료 전달
 	return true;
 }
@@ -567,8 +575,14 @@ bool UMD_EquipHotbarComponent::SwapItemSlots(int32 FromSlotIndex, int32 ToSlotIn
 		CurrentSlotIndex = FromSlotIndex;
 	}
 
-	// 아이템과 수량 및 충전량의 교환과 선택 변경을 공통 알림 경로로 전달
+	// 아이템과 수량 및 충전량의 교환 결과를 내용 갱신 경로로 전달
 	NotifyEntriesChanged();
+	// 교환된 두 위치에 포함된 선택만 별도 변경 알림 전달
+	if (CurrentSlotIndex == FromSlotIndex || CurrentSlotIndex == ToSlotIndex)
+	{
+		// 동일 아이템을 따라 이동한 선택 표시 동기화
+		OnHotbarSelectionChanged.Broadcast();
+	}
 	// 서버 교환 적용 성공 반환
 	return true;
 }
@@ -597,12 +611,16 @@ void UMD_EquipHotbarComponent::OnRep_ToolEntries()
 {
 	// 복제된 아이템과 수량으로 장착 표시 및 UI 갱신
 	OnHotbarChanged.Broadcast();
+	// 선택 표시를 건드리지 않는 슬롯 내용 변경 알림
+	OnHotbarContentsChanged.Broadcast();
 }
 
 void UMD_EquipHotbarComponent::OnRep_CurrentSlotIndex()
 {
 	// 복제된 선택 상태로 장착 표시 및 UI 갱신
 	OnHotbarChanged.Broadcast();
+	// 아이템 내용을 다시 그리지 않는 선택 변경 알림
+	OnHotbarSelectionChanged.Broadcast();
 }
 
 void UMD_EquipHotbarComponent::ServerSelectSlot_Implementation(int32 SlotIndex)
