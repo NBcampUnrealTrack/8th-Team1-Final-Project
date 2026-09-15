@@ -8,6 +8,7 @@
 #include "Engine/TextureRenderTarget2D.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UI/Customization/MD_CharacterSelectWidget.h"
 #include "UI/MD_LocalUIManager.h"
@@ -84,6 +85,11 @@ void AMD_CustomizationConsole::SetMirrorActive(bool bActive)
 	if (bActive == true)
 	{
 		MirrorCapture->CaptureScene();
+	}
+	else if (IsValid(MirrorRenderTarget) == true)
+	{
+		// 닫으면 마지막 캡처가 남지 않도록 거울을 검게 되돌린다
+		UKismetRenderingLibrary::ClearRenderTarget2D(this, MirrorRenderTarget, MirrorRenderTarget->ClearColor);
 	}
 }
 
