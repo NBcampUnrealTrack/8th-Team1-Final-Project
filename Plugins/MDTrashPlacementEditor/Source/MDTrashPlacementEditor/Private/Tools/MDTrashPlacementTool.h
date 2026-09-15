@@ -64,6 +64,16 @@ public:
 			GetOptions = "GetTrashKindIdOptions"))
 	FName TrashKindId = TEXT("DrinkCan");
 
+	/** 선택한 품목의 이름별 메시 중에서 선택한다. 배치 성공 후에만 다음 변형을 선택한다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Selection", meta = (DisplayName = "Random Variant"))
+	bool bRandomVariant = false;
+
+	/** Random By Category에서는 품목의 첫 Variant 또는 Random Variant를 쓴다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Selection",
+		meta = (EditCondition = "!bRandomVariant && SelectionMode == EMDTrashPlacementSelectionMode::SingleKind",
+			GetOptions = "GetTrashVariantIdOptions", DisplayName = "Variant"))
+	FName TrashVariantId;
+
 	/**
 	 * Random By Category에서 허용할 Category 태그의 합집합.
 	 * Score.Sorting은 전체 종류, Score.Sorting.Metal은 금속 종류만 허용한다.
@@ -133,6 +143,9 @@ public:
 private:
 	UFUNCTION()
 	TArray<FName> GetTrashKindIdOptions() const;
+
+	UFUNCTION()
+	TArray<FName> GetTrashVariantIdOptions() const;
 };
 
 UCLASS()
@@ -172,7 +185,7 @@ private:
 	FInputDeviceRay LastHoverRay;
 
 	bool ValidatePlacementSettings() const;
-	bool PlaceTrashAtHit(const FHitResult& HitResult, FName TrashKindId);
+	bool PlaceTrashAtHit(const FHitResult& HitResult, FName TrashKindId, FName VariantId, UStaticMesh* PreviewMesh);
 	bool EraseTrashItem(AMD_TrashItem* TrashItem);
 	bool TraceWorld(const FInputDeviceRay& DevicePos, FHitResult& OutHit) const;
 	bool TraceTrash(const FInputDeviceRay& DevicePos, AMD_TrashItem*& OutTrashItem, FHitResult& OutHit) const;
@@ -182,8 +195,10 @@ private:
 	bool IsEraseMode() const;
 	bool IsRandomSelectionMode() const;
 	TArray<FName> BuildEligibleTrashKindIds() const;
-	FName ResolveTrashKindId(const FHitResult& HitResult) const;
-	UStaticMesh* ResolveTrashMesh(FName TrashKindId) const;
+	FName ResolveTrashKindId() const;
+	uint32 GetPlacementRandomSeed(uint32 Salt) const;
+	bool ResolveTrashAppearance(FName TrashKindId, FName& OutVariantId, UStaticMesh*& OutMesh);
+	UStaticMesh* ResolveTrashMesh(FName TrashKindId, FName VariantId);
 	FTransform BuildPlacementTransform(const FHitResult& HitResult, const UStaticMesh* StaticMesh) const;
 	double CalculatePlacementExtent(
 		const UStaticMesh* StaticMesh,
@@ -191,7 +206,7 @@ private:
 		const FVector& SurfaceLocation,
 		const FVector& Direction) const;
 	bool IsPlacementSafe(const UStaticMesh* StaticMesh, const FTransform& Transform) const;
-	bool IsPlacementAllowedAtHit(const FHitResult& HitResult, FName TrashKindId) const;
+	bool IsPlacementAllowedAtHit(const FHitResult& HitResult, const UStaticMesh* StaticMesh) const;
 	void UpdateHoverFromHit(const FHitResult& HitResult);
 	void SetupGhostPreview();
 	void UpdateGhostPreview(const FHitResult& HitResult);
@@ -217,6 +232,10 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> LastPlacementMesh;
 
+	/** 이 도구에서 실제 선택한 메시만 유지한다. 매 Hover에서 동기 로드를 반복하지 않는다. */
+	UPROPERTY(Transient)
+	TMap<FSoftObjectPath, TObjectPtr<UStaticMesh>> ResolvedMeshes;
+
 	TArray<TWeakObjectPtr<AMD_TrashItem>> StrokePlacedTrashItems;
 	FTransform LastPlacementTransform = FTransform::Identity;
 	FVector HoverLocation = FVector::ZeroVector;
@@ -226,6 +245,8 @@ private:
 	FVector LastPlacementSurfaceLocation = FVector::ZeroVector;
 	double DistanceSinceLastPlacement = 0.0;
 	EMDTrashPlacementToolMode ActiveStrokeMode = EMDTrashPlacementToolMode::Place;
+	/** 마우스 이동/거절/스트로크 시작에서는 바꾸지 않는다. 성공한 배치만 진행한다. */
+	uint32 NextPlacementIndex = 0;
 	int32 StrokePlacementCount = 0;
 	int32 StrokeEraseCount = 0;
 	bool bHasHoverHit = false;
