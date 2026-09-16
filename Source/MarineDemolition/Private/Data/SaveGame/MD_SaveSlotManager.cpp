@@ -61,8 +61,18 @@ bool UMD_SaveSlotManager::SaveGameData(const FString& DataName, bool bIsAuto)
         // 허용 슬롯이 없는 저장 요청 종료
         return false;
     }
-    // 사용자 저장에만 이름 검증 적용
-    if (bIsAuto == false)
+    // 자동 저장은 현재 게임 모드의 맵 제외 정책을 수집 전에 확인
+    if (bIsAuto == true)
+    {
+        // 서버 권한 검사로 확인한 월드의 게임 모드 조회
+        AMD_GameModeBase* GameMode = GetWorld()->GetAuthGameMode<AMD_GameModeBase>();
+        if (IsValid(GameMode) == true && GameMode->IsAutoSaveAllowed() == false)
+        {
+            // 제외 맵의 회차 데이터와 자동 저장 슬롯 보존
+            return false;
+        }
+    }
+    else
     {
         // 같은 이름 값의 누락과 예약 이름 사용을 함께 확인
         if (DataName.IsEmpty() == true || DataName.Contains(TEXT("AutoSave")) == true)
@@ -139,8 +149,20 @@ void UMD_SaveSlotManager::AsyncSaveGameData(const FString& DataName, bool bIsAut
         // 허용 슬롯이 없는 저장 요청 종료
         return;
     }
-    // 사용자 저장에만 이름 검증 적용
-    if (bIsAuto == false)
+    // 비동기 자동 저장도 동일한 맵 제외 정책을 수집 전에 확인
+    if (bIsAuto == true)
+    {
+        // 서버 권한 검사로 확인한 월드의 게임 모드 조회
+        AMD_GameModeBase* GameMode = GetWorld()->GetAuthGameMode<AMD_GameModeBase>();
+        if (IsValid(GameMode) == true && GameMode->IsAutoSaveAllowed() == false)
+        {
+            // 저장을 실행하지 않은 결과를 호출자에게 전달
+            Completion.ExecuteIfBound(false);
+            // 데이터 수집과 파일 작업 및 슬롯 순환 생략
+            return;
+        }
+    }
+    else
     {
         // 같은 이름 값의 누락과 예약 이름 사용을 함께 확인
         if (DataName.IsEmpty() == true || DataName.Contains(TEXT("AutoSave")) == true)

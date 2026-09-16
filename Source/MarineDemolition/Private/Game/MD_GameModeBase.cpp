@@ -219,6 +219,37 @@ void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
     }
 }
 
+void AMD_GameModeBase::GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList)
+{
+    Super::GetSeamlessTravelActorList(bToTransition, ActorList);
+
+    // 출발 맵에서만 수집하여 전환 맵의 임시 장비로 기존 기록을 덮어쓰는 상황 방지
+    if (bToTransition == false)
+    {
+        return;
+    }
+    // 기존 캐릭터가 제거되기 전에 개인 기록을 보관할 게임 인스턴스 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    // 맵 이동 중에도 유지되는 저장 관리자 조회
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    // 저장 관리자가 없는 이동의 개인 수집 생략
+    if (IsValid(SaveSlotManager) == false)
+    {
+        return;
+    }
+    // 현재 접속 플레이어 목록이 준비된 경우에만 장비 수집
+    if (IsValid(GameState) == false)
+    {
+        return;
+    }
+    // 호스트와 접속 클라이언트의 최신 장비를 각 개인 기록에 반영
+    for (APlayerState* PlayerState : GameState->PlayerArray)
+    {
+        // 파일 자동 저장 없이 메모리에 보관하여 목적지의 캐릭터 재생성에 대비
+        SaveSlotManager->ParseDataFromPlayer(PlayerState);
+    }
+}
+
 void AMD_GameModeBase::Logout(AController* Exiting)
 {
     PendingMapRegistrationPlayers.Remove(Exiting);
@@ -946,6 +977,19 @@ void AMD_GameModeBase::CaptureDaySnapshot()
     {
         Persistence->CaptureSnapshot(GetWorld());
     }
+}
+
+bool AMD_GameModeBase::IsAutoSaveAllowed()
+{
+    // 자동 저장 정책을 적용할 현재 서버 월드 조회
+    UWorld* World = GetWorld();
+    if (IsValid(World) == false)
+    {
+        // 실행 중인 맵이 없는 상태의 자동 저장 차단
+        return false;
+    }
+    // 에디터 실행 접두사를 제거한 맵 참조로 제외 목록 확인
+    return AutoSaveExcludedMaps.Contains(MakeWorldAssetReference(World)) == false;
 }
 
 void AMD_GameModeBase::InitializeExpeditionDay()

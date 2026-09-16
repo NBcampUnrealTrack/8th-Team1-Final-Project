@@ -95,6 +95,10 @@ void UMD_NewGameTabWidget::RefreshSites()
                 Card->SetContentText(Sites[Index].DisplayName);
                 // 선택된 현장 표시 허용
                 Card->SetIsSelectable(true);
+                // 선택한 현장의 재클릭 해제 방지
+                Card->SetIsToggleable(false);
+                // 포커스 이동에 의한 현장 선택 불일치 방지
+                Card->SetShouldSelectUponReceivingFocus(false);
                 // 준비된 호스트 현장만 선택 허용
                 Card->SetIsEnabled(bCanSelect && Sites[Index].bAvailable);
                 // 원본 인덱스 전달
@@ -170,7 +174,7 @@ bool UMD_NewGameTabWidget::SelectDifficulty(EMD_Difficulty Difficulty)
     // 출항 옵션으로 사용할 난이도 보관
     SelectedDifficulty = Difficulty;
     // 난이도 선택 이벤트 전달
-    RefreshSelection();
+    OnSelectionChanged();
     // 선택 적용 완료
     return true;
 }
@@ -255,8 +259,22 @@ void UMD_NewGameTabWidget::RefreshSelection()
         // 생성에 성공한 카드만 갱신
         if (IsValid(MapCards[Index]) == true)
         {
-            // 추가 클릭 이벤트 없이 선택 스타일 적용
-            MapCards[Index]->SetIsSelected(Index == SelectedSiteIndex, false);
+            // 비토글 카드도 다른 현장을 선택하면 이전 선택 표시 해제
+            if (Index != SelectedSiteIndex && MapCards[Index]->GetSelected() == true)
+            {
+                // 새 현장의 선택 표시보다 이전 현장의 해제를 우선 처리
+                MapCards[Index]->ClearSelection();
+            }
+        }
+    }
+    // 이전 선택 해제 후 현재 현장 하나만 선택 표시
+    if (MapCards.IsValidIndex(SelectedSiteIndex) == true)
+    {
+        // 생성에 성공한 선택 카드에만 표시 적용
+        if (IsValid(MapCards[SelectedSiteIndex]) == true)
+        {
+            // 추가 클릭 이벤트 없이 현재 현장 선택 표시
+            MapCards[SelectedSiteIndex]->SetIsSelected(true, false);
         }
     }
     // 상세 설명과 고정 버튼의 표현을 화면 이벤트에 전달

@@ -112,10 +112,12 @@ void UMD_LoadGameTabWidget::HandleSaveSlotsLoaded(const TArray<FMD_GameData>& Ga
         // 최초 진입 또는 삭제된 선택은 최근 저장으로 대체
         SelectedSlotIndex = 0;
     }
-    // 완료 이벤트 재진입 전에 조회 상태 해제
-    bIsRefreshing = false;
+    // 카드 생성 이벤트에서 목록을 다시 조회하여 현재 배열을 교체하는 재진입 차단
+    bIsRefreshing = true;
     // 실제 저장 개수로 목록 갱신
     RebuildSaveCards();
+    // 카드 생성 완료 후 선택과 완료 이벤트의 후속 요청 허용
+    bIsRefreshing = false;
     // 상세 정보와 불러오기 활성 상태 동기화
     RefreshSelection();
     // 성공한 빈 목록과 조회 실패 구분
@@ -149,6 +151,8 @@ void UMD_LoadGameTabWidget::RebuildSaveCards()
     }
     // 생성 실패에도 원본 인덱스 유지
     SaveCards.SetNum(SaveSlots.Num());
+    // 같은 목록의 카드에 적용할 호스트 권한을 한 번만 확인
+    bool bCanSelect = IsLocalHost();
     for (int32 Index = 0; Index < SaveSlots.Num(); ++Index)
     {
         // 저장 항목의 공통 카드 생성
@@ -161,8 +165,12 @@ void UMD_LoadGameTabWidget::RebuildSaveCards()
         Card->SetContentText(FText::FromString(SaveSlots[Index].UniqueName));
         // 단일 선택 표시 허용
         Card->SetIsSelectable(true);
+        // 선택한 저장의 재클릭 해제 방지
+        Card->SetIsToggleable(false);
+        // 포커스 이동에 의한 저장 선택 불일치 방지
+        Card->SetShouldSelectUponReceivingFocus(false);
         // 호스트만 저장 선택 허용
-        Card->SetIsEnabled(IsLocalHost());
+        Card->SetIsEnabled(bCanSelect);
         // 원본 저장 인덱스 전달
         Card->OnClicked().AddUObject(this, &ThisClass::HandleSaveCardClicked, Index);
         // 원본 저장과 카드 연결
@@ -298,15 +306,31 @@ void UMD_LoadGameTabWidget::HandleSaveCardClicked(int32 SlotIndex)
 
 void UMD_LoadGameTabWidget::RefreshSelection()
 {
+    // 카드마다 반복하던 동일한 입력 권한 검사를 목록 단위로 수행
+    bool bCanSelect = bIsRefreshing == false && IsLocalHost();
     // 선택한 저장 하나만 카드에 표시
     for (int32 Index = 0; Index < SaveCards.Num(); ++Index)
     {
         if (IsValid(SaveCards[Index]) == true)
         {
-            // 추가 클릭 없이 선택 스타일 적용
-            SaveCards[Index]->SetIsSelected(Index == SelectedSlotIndex, false);
+            // 비토글 카드의 이전 선택 표시를 명시적으로 해제
+            if (Index != SelectedSlotIndex && SaveCards[Index]->GetSelected() == true)
+            {
+                // 새 저장의 선택 표시보다 이전 저장의 해제를 우선 처리
+                SaveCards[Index]->ClearSelection();
+            }
             // 조회 중 이전 목록 입력 차단
-            SaveCards[Index]->SetIsEnabled(bIsRefreshing == false && IsLocalHost());
+            SaveCards[Index]->SetIsEnabled(bCanSelect);
+        }
+    }
+    // 이전 선택 해제 후 현재 저장 하나만 선택 표시
+    if (SaveCards.IsValidIndex(SelectedSlotIndex) == true)
+    {
+        // 생성에 성공한 선택 카드에만 표시 적용
+        if (IsValid(SaveCards[SelectedSlotIndex]) == true)
+        {
+            // 추가 클릭 이벤트 없이 현재 저장 선택 표시
+            SaveCards[SelectedSlotIndex]->SetIsSelected(true, false);
         }
     }
     // 상세 화면과 불러오기 버튼 갱신 이벤트
@@ -315,18 +339,35 @@ void UMD_LoadGameTabWidget::RefreshSelection()
 
 void UMD_LoadGameTabWidget::RefreshSelectionDisplay()
 {
-    // 선택 요약에서 상세 패널에 필요한 필드만 조회
-    FMD_GameData GameData;
     // 빈 목록과 선택 항목 구분
-    bool bHasSelection = GetSelectedGameData(GameData);
+    bool bHasSelection = SaveSlots.IsValidIndex(SelectedSlotIndex);
+    // 저장 필드 전체를 복사하지 않고 표시할 이름만 보관
+    FText SaveName;
+    // 경제 필드가 없을 때 표시할 문구로 초기화
+    FText CreditText = MissingFieldText;
+    if (bHasSelection == true)
+    {
+        // 저장 목록의 원본 요약을 직접 참조
+        FMD_GameData& GameData = SaveSlots[SelectedSlotIndex];
+        // 표시 갱신 전 저장 이름만 텍스트로 변환
+        SaveName = FText::FromString(GameData.UniqueName);
+        // 퀘스트와 구매 원장 복사 없이 크레딧 필드 조회
+        FInstancedStruct* MerchantField = GameData.DataFields.Find(FMD_MerchantData::DataFieldKey);
+        if (MerchantField != nullptr && MerchantField->IsValid() == true && MerchantField->GetScriptStruct() == FMD_MerchantData::StaticStruct())
+        {
+            // 구조체 조회 API의 읽기 전용 반환형으로 원본 경제 데이터 참조
+            const FMD_MerchantData* MerchantData = MerchantField->GetPtr<FMD_MerchantData>();
+            if (MerchantData != nullptr)
+            {
+                // 원본 데이터 참조를 화면 이벤트에 유지하지 않도록 표시 값만 보관
+                CreditText = FText::AsNumber(MerchantData->Credits);
+            }
+        }
+    }
     // 저장된 계약 진행 정보
     FMD_GameStateData GameStateData;
     // 누락된 진행 정보 구분
     bool bHasGameState = GetSelectedGameStateData(GameStateData);
-    // 저장된 경제 정보
-    FMD_MerchantData MerchantData;
-    // 누락된 경제 정보 구분
-    bool bHasMerchant = GetSelectedMerchantData(MerchantData);
     // 존재하지 않는 필드의 표시
     FText MissingText = MissingFieldText;
     // 빈 목록 안내
@@ -344,7 +385,7 @@ void UMD_LoadGameTabWidget::RefreshSelectionDisplay()
     if (IsValid(Txt_DetailName) == true)
     {
         // 선택한 저장의 고유 이름 표시
-        Txt_DetailName->SetText(FText::FromString(GameData.UniqueName));
+        Txt_DetailName->SetText(SaveName);
     }
     if (IsValid(Txt_DetailDescription) == true)
     {
@@ -354,7 +395,7 @@ void UMD_LoadGameTabWidget::RefreshSelectionDisplay()
     if (IsValid(Txt_Value_Credit) == true)
     {
         // 저장된 보유 크레딧 표시
-        Txt_Value_Credit->SetText(bHasMerchant ? FText::AsNumber(MerchantData.Credits) : MissingText);
+        Txt_Value_Credit->SetText(CreditText);
     }
     if (IsValid(Txt_Value_Score) == true)
     {

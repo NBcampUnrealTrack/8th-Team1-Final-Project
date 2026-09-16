@@ -60,6 +60,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hotbar", meta = (DisplayName = "Default Items"))
 	TArray<TObjectPtr<UMD_ItemDefinition>> DefaultTools;
 
+	// 시작 전에 복원된 빈 슬롯까지 기본 아이템 지급에서 보호하는 상태
+	bool bHasRestoredEquipmentData = false;
+
 	// 종류별 전용 슬롯 없이 네 위치에 아이템과 수량을 함께 복제하는 상태
 	UPROPERTY(ReplicatedUsing = OnRep_ToolEntries)
 	TArray<FMD_HotbarToolEntry> ToolEntries;
