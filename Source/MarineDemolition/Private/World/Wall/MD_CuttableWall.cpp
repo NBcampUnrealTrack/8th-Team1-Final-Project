@@ -1,14 +1,11 @@
 ﻿#include "World/Wall/MD_CuttableWall.h"
 #include "GameplayTags/MD_GameplayTags.h"
 
-#include "TimerManager.h"
 #include "Audio/MD_AudioSubsystem.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Components/DecalComponent.h"
-#include "Components/InstancedStaticMeshComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
-#include "Engine/Engine.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/Material.h"
 #include "Engine/World.h"
@@ -17,11 +14,6 @@
 #include "NiagaraSystem.h"
 #include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
-
-namespace
-{
-	const FLinearColor NeutralWallColor(0.4f, 0.4f, 0.45f);
-}
 
 AMD_CuttableWall::AMD_CuttableWall()
 {
@@ -40,16 +32,6 @@ AMD_CuttableWall::AMD_CuttableWall()
 	SetRootComponent(Mesh);
 	// 특정 Cube를 벽 크기로 찌그러뜨리지 않는다. 실제 메시 또는 Blueprint가 크기를 결정한다.
 	Mesh->SetRelativeScale3D(FVector::OneVector);
-
-	ContaminationOverlay = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("ContaminationOverlay"));
-	ContaminationOverlay->SetupAttachment(Mesh);
-	ContaminationOverlay->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	ContaminationOverlay->SetGenerateOverlapEvents(false);
-	ContaminationOverlay->SetCanEverAffectNavigation(false);
-	ContaminationOverlay->SetReceivesDecals(false);
-	ContaminationOverlay->CastShadow = false;
-	ContaminationOverlay->SetVisibility(false);
-	ContaminationOverlay->SetHiddenInGame(true);
 
 	FrontContaminationDecal = CreateDefaultSubobject<UDecalComponent>(
 		TEXT("FrontContaminationDecal"));
@@ -99,12 +81,6 @@ void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 	Super::OnConstruction(Transform);
 
 	SyncLegacySurfaceConfiguration();
-	if (ContaminationOverlay)
-	{
-		ContaminationOverlay->ClearInstances();
-		ContaminationOverlay->SetVisibility(false);
-		ContaminationOverlay->SetHiddenInGame(true);
-	}
 	if (ScrapeSurface)
 	{
 		ScrapeSurface->ConfigureExternalComponents(
@@ -115,11 +91,7 @@ void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 	}
 
 	// 스캔 전에는 타입 구분 없이 중립 회색
-	MID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
-	if (MID)
-	{
-		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
-	}
+	ApplyNeutralWallColor();
 
 }
 
@@ -135,12 +107,6 @@ void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 void AMD_CuttableWall::BeginPlay()
 {
 	Super::BeginPlay();
-	if (ContaminationOverlay)
-	{
-		ContaminationOverlay->ClearInstances();
-		ContaminationOverlay->SetVisibility(false);
-		ContaminationOverlay->SetHiddenInGame(true);
-	}
 	SyncLegacySurfaceConfiguration();
 	if (ScrapeSurface)
 	{
@@ -151,12 +117,8 @@ void AMD_CuttableWall::BeginPlay()
 		}
 	}
 
-	// Transient인 MID는 레벨 로드/PIE 복제 시 유실되므로 런타임에서 재생성
-	MID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
-	if (MID)
-	{
-		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
-	}
+	// 레벨 로드/PIE에서도 기존 벽 색상 설정을 적용한다.
+	ApplyNeutralWallColor();
 
 }
 
@@ -324,12 +286,6 @@ void AMD_CuttableWall::ScanHighlight(float Duration, AActor* Scanner)
 		Duration = 3.f;
 	}
 
-	// 벽 타입 확인용 디버그 로그 (화면 표시는 UI 담당)
-	UE_LOG(LogTemp, Log, TEXT("MD_CuttableWall::ScanHighlight - %s 스캔: %s, 지속 %.1fs"),
-			*GetName(),
-			WallType == EMD_WallType::Strut ? TEXT("지주격벽 (위험)") : TEXT("칸막이격벽 (자유 철거)"),
-			Duration);
-
 	// 겹친 인프라(배관·배선)에 실루엣 노출 알림. 벽 타입 표시는 UI 담당
 	OnWallScanned.Broadcast(this, Duration, Scanner);
 }
@@ -361,12 +317,7 @@ void AMD_CuttableWall::AddCutProgressInternal(
 {
 	// 협동 합산(기획 §4) 때문에 진행도는 벽이 소유하고 서버만 갱신한다.
 	// 여러 명이 같은 벽을 자르면 각자 이 함수를 불러 자연히 합산된다.
-	if (!HasAuthority() || bCut || DeltaSeconds <= 0.0f)
-	{
-		return;
-	}
-
-	if (!CanCut())
+	if (!HasAuthority() || !CanCut() || DeltaSeconds <= 0.0f)
 	{
 		return;
 	}
@@ -418,30 +369,14 @@ void AMD_CuttableWall::OnRep_CutProgress()
 	const float ProgressRatio = GetCutProgressRatio();
 	OnCutProgressChanged.Broadcast(this, ProgressRatio);
 
-	if (GEngine && GetNetMode() != NM_DedicatedServer)
-	{
-		const TCHAR* WallTypeLabel = WallType == EMD_WallType::Strut
-			? TEXT("Strut")
-			: TEXT("Partition");
-		const TCHAR* NetRoleLabel = HasAuthority()
-			? TEXT("Server")
-			: TEXT("Client");
-		const FColor ProgressColor = ProgressRatio >= 1.0f
-			? FColor::Green
-			: FColor::Cyan;
+}
 
-		GEngine->AddOnScreenDebugMessage(
-			reinterpret_cast<uint64>(this),
-			0.35f,
-			ProgressColor,
-			FString::Printf(
-				TEXT("[Wall Cutting][%s] %s (%s) | %.1f%% | %.2f / %.2fs"),
-				NetRoleLabel,
-				*GetName(),
-				WallTypeLabel,
-				ProgressRatio * 100.0f,
-				CutProgressSeconds,
-				GetRequiredCutSeconds()));
+void AMD_CuttableWall::ApplyNeutralWallColor()
+{
+	// The mesh owns the material instance; the actor does not need a second reference.
+	if (UMaterialInstanceDynamic* WallMaterial = Mesh->CreateAndSetMaterialInstanceDynamic(0))
+	{
+		WallMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.4f, 0.4f, 0.45f));
 	}
 }
 
