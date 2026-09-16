@@ -3,12 +3,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "GameFramework/Actor.h"
 #include "Types/Travel/MD_TravelTypes.h"
 #include "MD_TravelConsole.generated.h"
-
-class UMD_CommonTravelWidget;
 
 UCLASS()
 class MARINEDEMOLITION_API AMD_TravelConsole : public AActor, public IMD_Interactable
@@ -46,6 +45,7 @@ protected:
 	UPROPERTY(EditAnywhere, Category="Console")
 	TArray<FMD_TravelSiteEntry> Sites;
 
-	UPROPERTY(EditDefaultsOnly, Category="Console")
-	TSubclassOf<UMD_CommonTravelWidget> ConsoleWidgetClass;
+	// UI 관리자에 등록된 항해 화면과 레이어를 선택하는 태그
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Console", meta = (Categories="UI.Layer"))
+	FGameplayTag ConsoleWidgetTag;
 };
