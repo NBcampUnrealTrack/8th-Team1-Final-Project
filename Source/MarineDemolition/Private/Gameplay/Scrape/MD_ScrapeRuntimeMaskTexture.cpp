@@ -26,7 +26,12 @@ struct FMaskUploadState
 {
     FCriticalSection Mutex;
     bool bHasDirtyWork = false; // Protected by Mutex; also read after final owner release.
-    ~FMaskUploadState() { if (bHasDirtyWork) QueuedDirtyStates.fetch_sub(1); }
+    ~FMaskUploadState()
+    {
+        if (bHasDirtyWork) QueuedDirtyStates.fetch_sub(1);
+        CurrentPixels.EmptyWithDeferredPageRelease();
+        PendingPixels.EmptyWithDeferredPageRelease();
+    }
     FMD_ScrapeMaskPixels CurrentPixels; // Exact latest data, including resource recreation.
     FMD_ScrapeMaskPixels PendingPixels;
     TBitArray<> Dirty;

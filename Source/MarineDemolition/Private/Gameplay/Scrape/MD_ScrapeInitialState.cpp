@@ -7,6 +7,13 @@
 #include "Gameplay/Scrape/MD_ScrapeMaskAtlas.h"
 #include "MDScrapeInitialMaskRenderer.h"
 
+// Generated network baselines must use the same arithmetic in Game and Editor.
+// UE 5.8 defaults to fast math for Game and precise math for Editor on MSVC.
+#if defined(_MSC_VER)
+#pragma float_control(precise, on, push)
+#pragma fp_contract(off)
+#endif
+
 TArray<float> MD_ScrapeInitialState::Generate(const UMD_ScrapeMeshUVData& Data,
     const FMD_ScrapeCellLayout& Layout, const FMD_ContaminationGeneration& G)
 {
@@ -41,6 +48,10 @@ TArray<float> MD_ScrapeInitialState::Generate(const UMD_ScrapeMeshUVData& Data,
     });
     return Amounts;
 }
+
+#if defined(_MSC_VER)
+#pragma float_control(pop)
+#endif
 
 bool MD_ScrapeInitialState::CalculateTotals(FMD_ScrapeInitialState& State,
     const FMD_ScrapeCellLayout& Layout, FMD_ScrapeCarrierWeightView Weights, float Tolerance)

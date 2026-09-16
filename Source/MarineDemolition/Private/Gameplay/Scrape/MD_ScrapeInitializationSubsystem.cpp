@@ -106,8 +106,9 @@ void UMD_ScrapeInitializationSubsystem::Tick(float DeltaTime)
             Job->Tolerance = Surface->ScrapeSettings.CleanTolerance;
             Job->Revision = Job->Data->GetRuntimeCacheRevision();
             Job->Generation = Surface->ContaminationGeneration;
-            if (auto* Persistence = GI ? GI->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr)
-                if (const auto* Record = Persistence->FindDeferredContaminationRecord(Surface)) Job->SavedRecord = *Record;
+            if (Surface->HasAuthority())
+                if (auto* Persistence = GI ? GI->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr)
+                    if (const auto* Record = Persistence->FindDeferredContaminationRecord(Surface)) Job->SavedRecord = *Record;
             Jobs.Add(MoveTemp(Job));
         }
         for (int32 I = Jobs.Num() - 1; I >= 0 && FPlatformTime::Seconds() < Deadline; --I)

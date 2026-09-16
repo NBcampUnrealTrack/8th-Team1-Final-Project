@@ -24,6 +24,10 @@ struct MARINEDEMOLITION_API FMD_ScrapeMeshUVSnapshotDescriptor
     // Compressed payload is zlib over nine byte planes; raw cell encoding remains unchanged.
     UPROPERTY() bool bCompressed = false;
     UPROPERTY() bool bFullSnapshot = false;
+    // Exceptions to a verified generated baseline; expanded before live revision merging.
+    UPROPERTY() bool bGeneratedBase = false;
+    UPROPERTY() uint32 GeneratedBaseHash = 0;
+    UPROPERTY() uint32 FullStateHash = 0;
     // 0: no boundary update; 1: complete current boundary replacement, including empty.
     UPROPERTY() uint8 BoundaryVersion = 0;
     UPROPERTY() int32 BoundaryBytes = 0;
@@ -55,6 +59,7 @@ struct MARINEDEMOLITION_API FMD_ScrapeMeshUVSyncProtocol
     static bool DecodePayload(const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor,
         TConstArrayView<uint8> Payload, TArray<FMD_ReplicatedScrapeCellState>& OutStates, TArray<uint8>* OutBoundary = nullptr);
     static uint32 HashBytes(TConstArrayView<uint8> Bytes);
+    static uint32 AccumulateStateHash(uint32 Hash, const FMD_ReplicatedScrapeCellState& State);
     static void EncodeStates(TConstArrayView<FMD_ReplicatedScrapeCellState> States, TArray<uint8>& OutBytes);
     static bool DecodeStates(TConstArrayView<uint8> Bytes, const FIntPoint& Grid, TArray<FMD_ReplicatedScrapeCellState>& OutStates);
 };

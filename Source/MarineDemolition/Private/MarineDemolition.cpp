@@ -1,6 +1,7 @@
 ﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MarineDemolition.h"
+#include "Gameplay/Scrape/MD_ScrapeMaskPixels.h"
 #include "Modules/ModuleManager.h"
 
 #if WITH_EDITOR
@@ -36,6 +37,7 @@ void FMarineDemolitionModule::StartupModule()
 
 void FMarineDemolitionModule::ShutdownModule()
 {
+    FMD_ScrapeMaskPixels::ShutdownDeferredPageReleases();
 // 모듈 종료 시 디테일 델리게이트 잔존 방지
 #if WITH_EDITOR
 	// 종료 중 모듈 재로드 방지

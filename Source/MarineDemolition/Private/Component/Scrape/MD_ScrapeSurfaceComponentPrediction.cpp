@@ -5,6 +5,8 @@
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
 #include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
+#include "Gameplay/Scrape/MD_ScrapeMeshUVSyncSubsystem.h"
+#include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 
@@ -74,6 +76,7 @@ bool UMD_ScrapeSurfaceComponent::UpdateLocalScrapePredictionMemoryBudget()
 
 void UMD_ScrapeSurfaceComponent::ReleaseLocalScrapePredictionMemoryBudget()
 {
+    bLocalScrapePredictionRebuildPending = false;
     PredictionAllocations.Remove(this);
 }
 
@@ -105,6 +108,7 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePrediction(
 	const FMD_ScrapeToolSpec& ToolSpec,
 	const bool bDeferVisualUpdate)
 {
+    FlushLocalScrapePredictionRebuild();
 	FLocalScrapePrediction* Prediction = LocalScrapePredictions.FindByPredicate(
 		[PredictionOwner, FocusSessionId, AimSequence](
 			FLocalScrapePrediction& Candidate)
@@ -143,6 +147,7 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePrediction(
 		{
 			// Fork the current pages; either writer separates only a changed page.
 			LocalPredictedPagedCells = ContaminationPagedCells;
+			LocalPredictedMeshUVProgress = CachedMeshUVProgress;
 		}
 	}
 	else if (LocalPredictedContaminationCells.Num() != GetContaminationStorageCellCount())
@@ -262,7 +267,7 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePredictionToShadow(
 		Result = FMD_ScrapeEvaluator::ApplyStrokeToMeshUVGrid(*Data,
 			SurfaceMesh->GetComponentTransform(), MeshStroke, ToolSpec, ScrapeSettings,
 			FaceCells, nullptr, &LocalEvaluationScratch,
-			GetContaminationCellCarrierWeights());
+			GetContaminationCellCarrierWeights(), &LocalPredictedMeshUVProgress);
 	}
 	else
 	{
@@ -319,6 +324,18 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePredictionToShadow(
                 LocalPredictedPagedCells.CompactUnchangedPageForIndex(StorageIndex);
             }
         }
+        // Update from the committed cells after tolerance/invalid-stroke rollback.
+        // The evaluator's uncommitted result may include changes restored above.
+        FMD_ScrapeMeshUVProgress ProgressAfter;
+        const auto Weights = GetContaminationCellCarrierWeights();
+        if (!FMD_ScrapeEvaluator::UpdateMeshUVProgressFromTouchedCells(
+            LocalPredictedMeshUVProgress, LocalEvaluationScratch.MeshUVTouchedCells,
+            FaceCells, Weights, ProgressAfter))
+        {
+            FMD_ScrapeEvaluator::CalculateMeshUVProgress(
+                FaceCells, Weights, ScrapeSettings.CleanTolerance, ProgressAfter);
+        }
+        LocalPredictedMeshUVProgress = ProgressAfter;
         if (!OutChangedCellIndices.IsEmpty()) CommitContaminationBoundary(LocalEvaluationScratch, true);
         return !OutChangedCellIndices.IsEmpty();
     }
@@ -367,6 +384,7 @@ void UMD_ScrapeSurfaceComponent::MarkLocalScrapePredictionReconcileCell(
 
 void UMD_ScrapeSurfaceComponent::FlushLocalScrapePredictionVisualUpdates()
 {
+    FlushLocalScrapePredictionRebuild();
 	if (PendingLocalScrapePredictionVisualCellIndices.IsEmpty())
 	{
 		return;
@@ -439,7 +457,7 @@ void UMD_ScrapeSurfaceComponent::ResolveLocalScrapePredictions(
 	if (RemovedCount > 0
 		&& (LocalScrapePredictions.IsEmpty() || !bCanKeepCurrentShadow))
 	{
-		RebuildLocalScrapePredictionShadow();
+		RequestLocalScrapePredictionRebuild();
 	}
 	else if (RemovedCount == 0
 		&& (Resolution || bRebuildIfPredictionMissing)
@@ -451,7 +469,7 @@ void UMD_ScrapeSurfaceComponent::ResolveLocalScrapePredictions(
 					&& Prediction.FocusSessionId == FocusSessionId;
 			}))
 	{
-		RebuildLocalScrapePredictionShadow();
+		RequestLocalScrapePredictionRebuild();
 	}
 }
 
@@ -552,8 +570,24 @@ bool UMD_ScrapeSurfaceComponent::DoesLocalScrapePredictionMatchResolution(
 	return true;
 }
 
+void UMD_ScrapeSurfaceComponent::RequestLocalScrapePredictionRebuild()
+{
+    if (UWorld* World = GetWorld(); World && World->GetNetMode() == NM_Client)
+        if (auto* Sync = World->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>())
+            if (Sync->QueuePredictionRebuild(*this)) return;
+    RebuildLocalScrapePredictionShadow();
+}
+
+void UMD_ScrapeSurfaceComponent::FlushLocalScrapePredictionRebuild()
+{
+    if (!bLocalScrapePredictionRebuildPending) return;
+    bLocalScrapePredictionRebuildPending = false;
+    if (bContaminationSurfaceInitialized) RebuildLocalScrapePredictionShadow();
+}
+
 void UMD_ScrapeSurfaceComponent::RebuildLocalScrapePredictionShadow()
 {
+    bLocalScrapePredictionRebuildPending = false;
     ResetPredictedContaminationBoundary();
 	const int32 PreviousVisualCellCount = GetVisualContaminationCells().Num();
 	// Only these addresses can differ from the authoritative state. Include old
@@ -605,6 +639,7 @@ void UMD_ScrapeSurfaceComponent::RebuildLocalScrapePredictionShadow()
 	if (UsesMeshUVSurface())
 	{
 		LocalPredictedPagedCells = ContaminationPagedCells;
+		LocalPredictedMeshUVProgress = CachedMeshUVProgress;
 	}
 	else
 	{

@@ -1,4 +1,8 @@
 #include "Gameplay/Scrape/MD_ScrapeMaskPixels.h"
+#include "Tasks/Task.h"
+#include "RenderingThread.h"
+#include "Misc/ScopeLock.h"
+#include <atomic>
 #include "Misc/Crc.h"
 #include "Algo/BinarySearch.h"
 #include "MDScrapeInitialMaskRenderer.h"
@@ -269,6 +273,55 @@ bool FMD_ScrapeMaskPixels::Set(int32 Index, uint8 Value)
         Page->Offsets = MoveTemp(Offsets); Page->Values = MoveTemp(Sparse); Page->bDense = false;
     }
     return true;
+}
+
+namespace
+{
+FCriticalSection PageReleaseMutex;
+UE::Tasks::FTask PageReleaseTasks[FMD_ScrapeMaskPixels::MaximumDeferredPageBatches];
+UE::Tasks::FTask LastPageReleaseTask;
+bool bPageReleasesEnabled = true; // PageReleaseMutex; disabled before module unload.
+std::atomic<uint64> RetiringSlots{0};
+}
+
+void FMD_ScrapeMaskPixels::FlushDeferredPageReleases()
+{
+    TArray<UE::Tasks::FTask, TInlineAllocator<MaximumDeferredPageBatches>> Tasks;
+    { FScopeLock Lock(&PageReleaseMutex); for (const auto& Task : PageReleaseTasks) Tasks.Add(Task); }
+    for (const auto& Task : Tasks) Task.Wait();
+}
+void FMD_ScrapeMaskPixels::ShutdownDeferredPageReleases()
+{
+    { FScopeLock Lock(&PageReleaseMutex); bPageReleasesEnabled = false; }
+    FlushDeferredPageReleases();
+}
+void FMD_ScrapeMaskPixels::EmptyWithDeferredPageRelease()
+{
+    // UTexture GC releases large arrays of shared page pointers on the render thread.
+    // Only CPU-only FPage data escapes; no UObject, RHI reference, or this pointer.
+    const uint64 Slots = Pages.Num();
+    if (IsInRenderingThread() && Slots > 0 && Slots <= MaximumDeferredPageSlots)
+    {
+        FScopeLock Lock(&PageReleaseMutex);
+        if (bPageReleasesEnabled && RetiringSlots.load() <= MaximumDeferredPageSlots - Slots)
+        {
+            for (auto& Task : PageReleaseTasks)
+            {
+                if (!Task.IsCompleted()) continue;
+                RetiringSlots.fetch_add(Slots);
+                Task = UE::Tasks::Launch(UE_SOURCE_LOCATION,
+                    [RetiredPages = MoveTemp(Pages), Slots]() mutable
+                    {
+                        RetiredPages.Empty();
+                        RetiringSlots.fetch_sub(Slots);
+                    }, UE::Tasks::Prerequisites(LastPageReleaseTask), UE::Tasks::ETaskPriority::BackgroundNormal);
+                LastPageReleaseTask = Task;
+                break;
+            }
+        }
+    }
+    // At capacity or during shutdown, synchronous ownership release bounds memory.
+    Empty();
 }
 
 void FMD_ScrapeMaskPixels::Empty()
