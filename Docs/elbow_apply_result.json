@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\r\n\t\"success\": true,\r\n\t\"output\": \"MapRangeClamped [('self', ''), ('Value', '0.0'), ('InRangeA', '0.0'), ('InRangeB', '0.0'), ('OutRangeA', '0.0'), ('OutRangeB', '0.0'), ('ReturnValue', '0.0')]\\nSelectFloat [('self', ''), ('A', '0.0'), ('B', '0.0'), ('bPickA', 'false'), ('ReturnValue', '0.0')]\\nMapRangeClamped [('self', ''), ('Value', '0.0'), ('InRangeA', '0.0'), ('InRangeB', '0.0'), ('OutRangeA', '0.0'), ('OutRangeB', '0.0'), ('ReturnValue', '0.0')]\\nMultiply_DoubleDouble [('self', ''), ('A', '0.0'), ('B', '0.0'), ('ReturnValue', '0.0')]\\nMultiply_DoubleDouble [('self', ''), ('A', '0.0'), ('B', '0.0'), ('ReturnValue', '0.0')]\\nCOMMENT C8EED91542A30227E4CCC6A26E3DB002\\nCOMPILE <Struct 'BlueprintCompileResult' (0x000002525E57A9E0) {success: True, num_errors: 0, num_warnings: 0, errors: , warnings: }>\\nVERIFIED 58 58 <Struct 'BlueprintGraphStatus' (0x000002522C694500) {compile_status: \\\"BS_UpToDate\\\", is_dirty: False, package_dirty: True, is_up_to_date: True, has_compile_errors: False, has_compile_warnings: False}>\\nSAVED /Game/Assets/Character/Shark_MK4/Anim/ABP/ABP_MD_Shark BACKUP /Game/Revvy/Validation/SharkArmClearance/ABP_MD_Shark_PreElbowReach REACH D502D4934180F3706B9EB9B6BE71A0CC\",\r\n\t\"result\": \"None\",\r\n\t\"warnings\": [],\r\n\t\"execution_time_ms\": 3599.91748046875\r\n}"
+    }
+  ],
+  "isError": false
+}

@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\r\n\t\"success\": true,\r\n\t\"output\": \"right_position_delta_cm 0.0\\nright_quat_max_delta 0.0\\nlook_up25 {\\\"alpha\\\": 1.0, \\\"arc\\\": 1.2246467991473532e-16, \\\"grip_error_world_cm\\\": 5.684341886080802e-14, \\\"right_cs\\\": \\\"<Struct 'Transform' (0x0000024F1BEE50B0) {rotation: {x: 0.420448, y: 0.135853, z: -0.785898, w: 0.432587}, translation: {x: -32.479809, y: -2.588897, z: 38.760883}, scale3d: {x: 1.000000, y: 1.000000, z: 1.000000}}>\\\", \\\"left_cs\\\": \\\"<Struct 'Transform' (0x0000024F1BEE50B0) {rotation: {x: 0.483944, y: 0.670192, z: 0.337490, w: -0.450268}, translation: {x: -25.495988, y: 16.569488, z: 65.352100}, scale3d: {x: 1.000000, y: 1.000000, z: 1.000000}}>\\\"}\",\r\n\t\"result\": \"None\",\r\n\t\"warnings\": [],\r\n\t\"execution_time_ms\": 29.39470100402832\r\n}"
+    }
+  ],
+  "isError": false
+}
