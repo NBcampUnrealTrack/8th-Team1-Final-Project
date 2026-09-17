@@ -774,7 +774,7 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 
     // Saved surfaces need their layout for validation, but build dirt only once,
     // when the next-tick restore applies the saved baseline and deltas.
-    if (!bRestoringContaminationGeneration && GetWorld() && HasAuthority())
+    if (!bRestoringContaminationGeneration && !bCompletingDeferredInitialization && GetWorld() && HasAuthority())
         if (auto* GI=GetWorld()->GetGameInstance())
             if (auto* Persistence=GI->GetSubsystem<UMD_DayPersistenceSubsystem>())
                 if (Persistence->ShouldDeferContaminationGeneration(this)) return;
