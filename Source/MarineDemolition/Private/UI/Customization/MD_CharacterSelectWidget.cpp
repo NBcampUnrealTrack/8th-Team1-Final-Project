@@ -7,11 +7,15 @@
 #include "Components/HorizontalBoxSlot.h"
 #include "Components/UniformGridPanel.h"
 #include "Data/Customization/MD_CharacterRosterData.h"
+#include "Engine/GameViewportClient.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/Texture2D.h"
+#include "Framework/Application/SlateUser.h"
 #include "Gameplay/Customization/MD_CharacterAppearanceLibrary.h"
 #include "Player/MD_PlayerController.h"
 #include "Player/MD_PlayerState.h"
 #include "UI/MD_CommonButtonBase.h"
+#include "Widgets/SViewport.h"
 #include "World/Interaction/MD_CustomizationConsole.h"
 
 UMD_CharacterSelectWidget::UMD_CharacterSelectWidget(const FObjectInitializer& ObjectInitializer)
@@ -19,6 +23,73 @@ UMD_CharacterSelectWidget::UMD_CharacterSelectWidget(const FObjectInitializer& O
 {
 	// ESC(Back 액션)로 닫히게 한다. 닫힘은 Cancel과 같은 경로다
 	bIsBackHandler = true;
+	// 위젯 자체도 포커스를 받을 수 있게 해 Q/E 키 이벤트가 이 위젯에서 끝나게 한다
+	SetIsFocusable(true);
+}
+
+UWidget* UMD_CharacterSelectWidget::NativeGetDesiredFocusTarget() const
+{
+	// 액션 라우터는 자기 자신을 포커스 대상으로 받지 않으므로 자식 버튼을 준다
+	if (CharacterButtons.IsValidIndex(Pending.CharacterIndex) == true && IsValid(CharacterButtons[Pending.CharacterIndex]) == true)
+	{
+		return CharacterButtons[Pending.CharacterIndex];
+	}
+	if (IsValid(Btn_Close) == true)
+	{
+		return Btn_Close;
+	}
+	return Super::NativeGetDesiredFocusTarget();
+}
+
+FReply UMD_CharacterSelectWidget::NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent)
+{
+	// 자식 버튼에 포커스가 있어도 키 이벤트는 여기까지 버블링된다. 반복 입력은 무시한다
+	const FKey Key = InKeyEvent.GetKey();
+	if (InKeyEvent.IsRepeat() == false && (Key == TurnLeftKey || Key == TurnRightKey))
+	{
+		if (IsValid(OwningConsole) == true)
+		{
+			OwningConsole->TurnFacing(Key == TurnRightKey);
+		}
+		return FReply::Handled();
+	}
+
+	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
+}
+
+void UMD_CharacterSelectWidget::NativeTick(const FGeometry& MyGeometry, float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	EnsureKeyboardFocus();
+}
+
+void UMD_CharacterSelectWidget::EnsureKeyboardFocus()
+{
+	if (IsActivated() == false || HasKeyboardFocus() == true || HasFocusedDescendants() == true)
+	{
+		return;
+	}
+
+	// 마우스가 창 밖으로 나갔다 오거나 빈 곳을 클릭하면 포커스가 게임 뷰포트로 넘어가고, UIOnly 모드의 뷰포트는 키를 버린다
+	ULocalPlayer* LocalPlayer = GetOwningLocalPlayer();
+	TSharedPtr<FSlateUser> SlateUser = IsValid(LocalPlayer) == true ? LocalPlayer->GetSlateUser() : nullptr;
+	if (SlateUser.IsValid() == false)
+	{
+		return;
+	}
+
+	const TSharedPtr<SWidget> FocusedWidget = SlateUser->GetFocusedWidget();
+	const TSharedPtr<SViewport> ViewportWidget =
+		IsValid(LocalPlayer->ViewportClient) == true ? LocalPlayer->ViewportClient->GetGameViewportWidget() : nullptr;
+	if (FocusedWidget.IsValid() == true && FocusedWidget != ViewportWidget)
+	{
+		return;
+	}
+
+	if (UWidget* FocusTarget = NativeGetDesiredFocusTarget())
+	{
+		FocusTarget->SetFocus();
+	}
 }
 
 void UMD_CharacterSelectWidget::NativeOnActivated()
