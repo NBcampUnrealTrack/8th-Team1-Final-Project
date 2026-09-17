@@ -35,21 +35,24 @@ void UMD_EquipHotbarComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 
 void UMD_EquipHotbarComponent::BeginPlay()
 {
-	// 상위 컴포넌트 시작 처리
 	Super::BeginPlay();
-	// 유효한 서버 소유자에 한해서 기본 아이템 구성
+	// 유효한 서버 소유자에 한해서 초기 아이템 상태 구성
 	if (IsValid(GetOwner()) == true && GetOwner()->HasAuthority() == true)
 	{
-		// 기본 설정이 슬롯 수를 늘리지 않도록 복사 범위 제한
-		int32 CopyCount = FMath::Min(DefaultTools.Num(), ToolEntries.Num());
-		// 기본 설정의 슬롯 순서를 유지하는 지급 순회
-		for (int32 Index = 0; Index < CopyCount; ++Index)
+		// 재생성 직후 복원된 장비와 빈 슬롯이 없는 신규 캐릭터에만 기본 지급
+		if (bHasRestoredEquipmentData == false)
 		{
-			// 비어 있지 않은 기본 아이템만 한 개씩 등록
-			if (IsValid(DefaultTools[Index]) == true)
+			// 기본 설정이 슬롯 수를 늘리지 않도록 복사 범위 제한
+			int32 CopyCount = FMath::Min(DefaultTools.Num(), ToolEntries.Num());
+			// 기본 설정의 슬롯 순서를 유지하는 지급 순회
+			for (int32 Index = 0; Index < CopyCount; ++Index)
 			{
-				// 잘못된 중복 도구 설정은 공통 슬롯 검증에서 거부
-				SetItemAtSlot(Index, DefaultTools[Index], 1);
+				// 비어 있지 않은 기본 아이템만 한 개씩 등록
+				if (IsValid(DefaultTools[Index]) == true)
+				{
+					// 잘못된 중복 도구 설정은 공통 슬롯 검증에서 거부
+					SetItemAtSlot(Index, DefaultTools[Index], 1);
+				}
 			}
 		}
 		// 빈 기본 설정도 내용 갱신 경로에 초기 상태 전달
@@ -455,6 +458,8 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 		// 복구할 정보가 없는 기존 저장 형식의 성공 전달
 		return true;
 	}
+	// 시작 전 복원된 슬롯을 기본 지급으로 다시 초기화하지 않도록 표시
+	bHasRestoredEquipmentData = true;
 	// 저장 복구로 사라질 기존 품목의 GE와 GA 정리
 	RemoveAllItemAbilities();
 	// 기존 보관 상태를 제거한 고정 네 슬롯 생성

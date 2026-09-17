@@ -10,13 +10,14 @@ struct FMD_SaveSlotIndex
     TArray<FMD_GameData> User;
 };
 
-/** Streaming local file store. Tests must supply an isolated Root and LegacyFile. */
 struct FMD_PreparedSlotWrite;
 
+/** Streaming local file store. Tests must supply an isolated Root and LegacyFile. */
 class MARINEDEMOLITION_API FMD_SaveSlotStore
 {
 public:
-    FMD_SaveSlotStore(FString InRoot, FString InLegacyFile);
+    // 저장 파일을 생성하고 조회할 루트 디렉터리 지정
+    FMD_SaveSlotStore(FString InRoot);
     static FMD_SaveSlotStore ForProject();
     bool ReadIndex(FMD_SaveSlotIndex& Out) const;
     bool ReadSlot(const FMD_GameData& Summary, FMD_GameData& Out) const;
@@ -29,9 +30,7 @@ private:
     bool PrepareSave(const FMD_GameData& Data, bool bAuto, int32 MaxAuto, int32 MaxUser,
         FMD_PreparedSlotWrite& Out) const;
     FString Root;
-    FString LegacyFile;
     bool ReadManifest(const FString& Path, FMD_SaveSlotIndex& Out) const;
     bool WriteManifest(FMD_SaveSlotIndex& Index) const;
-    bool ReadLegacyIndex(FMD_SaveSlotIndex& Out) const;
 
 };
