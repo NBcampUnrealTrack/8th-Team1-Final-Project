@@ -1,7 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Blueprint/UserWidget.h"
+#include "CommonActivatableWidget.h"
 #include "Gameplay/Settings/MD_SettingsTypes.h"
 #include "MD_SettingsCategoryWidgetBase.generated.h"
 
@@ -9,7 +9,7 @@ class UMD_SettingsManager;
 
 // 카테고리 화면의 미적용 편집값을 설정 매니저와 연결하는 공통 기반
 UCLASS(Abstract, Blueprintable)
-class MARINEDEMOLITION_API UMD_SettingsCategoryWidgetBase : public UUserWidget
+class MARINEDEMOLITION_API UMD_SettingsCategoryWidgetBase : public UCommonActivatableWidget
 {
 	GENERATED_BODY()
 

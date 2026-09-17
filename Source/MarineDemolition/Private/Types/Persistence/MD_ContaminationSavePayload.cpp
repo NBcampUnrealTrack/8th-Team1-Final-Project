@@ -10,7 +10,8 @@ namespace
     constexpr int32 CellsPerChunk = 4096;
     constexpr int32 BytesPerCell = 24;
     constexpr int32 MaximumChunkBytes = CellsPerChunk * BytesPerCell;
-    constexpr uint8 RequiredFields = 3;
+    // 현재 형식의 다섯 오염 열 전체 필수
+    constexpr uint8 RequiredFields = 31;
     struct FChunk
     {
         uint32 Crc = 0;
@@ -58,7 +59,8 @@ bool FMD_ContaminationSavePayload::Encode(const TArray<int32>& Indices,
         || Initial.Num() != Count || Remaining.Num() != Count) return false;
     for (const TArray<float>* Column : Columns)
     {
-        if (!Column->IsEmpty() && Column->Num() != Count) return false;
+        // 현재 저장에서는 모든 열의 셀 개수가 일치해야 인코딩 허용
+        if (Column->Num() != Count) return false;
     }
     if (Count == 0)
     {
@@ -86,11 +88,6 @@ bool FMD_ContaminationSavePayload::Encode(const TArray<int32>& Indices,
             Seen[Index] = true;
         }
     }
-    NewStorage->Fields = 0;
-    for (int32 Column = 0; Column < 5; ++Column)
-    {
-        if (!Columns[Column]->IsEmpty()) NewStorage->Fields |= 1 << Column;
-    }
     TArray<uint8> Raw;
     TArray<uint8> Compressed;
     for (int32 Start = 0; Start < Count; Start += CellsPerChunk)
@@ -98,15 +95,12 @@ bool FMD_ContaminationSavePayload::Encode(const TArray<int32>& Indices,
         const int32 Rows = FMath::Min(CellsPerChunk, Count - Start);
         Raw.SetNumUninitialized(Rows * BytesPerCell);
         FMemory::Memzero(Raw.GetData(), Raw.Num());
-        // Column-major bytes preserve every float bit; optional absent fields retain explicit flags.
+        // 현재 저장의 모든 열을 연속 배치해 실수 비트와 압축 효율 보존
         FMemory::Memcpy(Raw.GetData(), Indices.GetData() + Start, Rows * sizeof(int32));
         for (int32 Column = 0; Column < 5; ++Column)
         {
-            if (!Columns[Column]->IsEmpty())
-            {
-                FMemory::Memcpy(Raw.GetData() + (Column + 1) * Rows * sizeof(float),
-                    Columns[Column]->GetData() + Start, Rows * sizeof(float));
-            }
+            // 모든 셀 열의 원본 비트를 압축 전 버퍼에 복사
+            FMemory::Memcpy(Raw.GetData() + (Column + 1) * Rows * sizeof(float), Columns[Column]->GetData() + Start, Rows * sizeof(float));
         }
         FChunk& Chunk = NewStorage->Chunks.AddDefaulted_GetRef();
         Chunk.RawBytes = Raw.Num();
@@ -136,7 +130,8 @@ bool FMD_ContaminationSavePayload::Decode(TArray<int32>& Indices, TArray<float>&
     if (!Storage) return true;
     for (int32 Column = 0; Column < 5; ++Column)
     {
-        if (Storage->Fields & (1 << Column)) Columns[Column]->Reserve(Num());
+        // 현재 형식의 모든 열에 필요한 셀 공간 확보
+        Columns[Column]->Reserve(Num());
     }
     TArray<uint8> Raw;
     for (const FChunk& Chunk : Storage->Chunks)
@@ -152,12 +147,10 @@ bool FMD_ContaminationSavePayload::Decode(TArray<int32>& Indices, TArray<float>&
         FMemory::Memcpy(Indices.GetData() + Start, Raw.GetData(), Rows * sizeof(int32));
         for (int32 Column = 0; Column < 5; ++Column)
         {
-            if (Storage->Fields & (1 << Column))
-            {
-                Columns[Column]->AddUninitialized(Rows);
-                FMemory::Memcpy(Columns[Column]->GetData() + Start,
-                    Raw.GetData() + (Column + 1) * Rows * sizeof(float), Rows * sizeof(float));
-            }
+            // 현재 청크의 셀 개수만큼 열 확장
+            Columns[Column]->AddUninitialized(Rows);
+            // 필수 열의 저장 비트를 대응하는 셀 위치로 복원
+            FMemory::Memcpy(Columns[Column]->GetData() + Start, Raw.GetData() + (Column + 1) * Rows * sizeof(float), Rows * sizeof(float));
         }
     }
     return Indices.Num() == Num();
@@ -191,7 +184,8 @@ bool FMD_ContaminationSavePayload::Serialize(FArchive& Ar)
     Ar << Version << Count << Fields << ChunkCount;
     if (Ar.IsError() || Version != 1 || Count < 0
         || Count > FMD_ScrapeSurfaceLayout::MaximumCombinedCellCount
-        || (Fields & RequiredFields) != RequiredFields || (Fields & ~31) != 0
+        // 누락 열을 포함한 구형 압축 본문 거부
+        || Fields != RequiredFields
         || ChunkCount != FMath::DivideAndRoundUp(Count, CellsPerChunk))
     {
         Ar.SetError();

@@ -1,4 +1,4 @@
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+﻿#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "World/Wall/MD_WallShadowBatchSubsystem.h"
 #include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
@@ -458,14 +458,22 @@ bool UMD_ScrapeSurfaceComponent::TryDeferContaminationInitialization()
     const auto* Persistence = GI ? GI->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr;
     if (!Persistence || !Persistence->IsContaminationContextReady(GetWorld())) return false;
     FMD_ContaminationGeneration Saved;
-    bool Legacy = false;
-    const bool bHasSavedGeneration = Persistence->TryGetSavedContaminationGeneration(this, Saved, Legacy);
-    if (Legacy || (!bHasSavedGeneration && Persistence->ShouldDeferContaminationGeneration(this))) return false;
-    if (bHasSavedGeneration)
+    // 저장된 생성 기준을 사용하면서 분할 초기화 경로 유지
+    if (Persistence->TryGetSavedContaminationGeneration(this, Saved) == true)
     {
+        // 저장된 셀 배치와 현재 표면의 호환성 확인용 식별자
         FGuid Layout;
-        if (Persistence->TryGetSavedContaminationLayout(this, Layout)
-            && !SelectCompatibleContaminationLayout(Layout, false)) return false;
+        // 저장 기록에 셀 배치 식별자가 포함된 경우 호환 배치 선택
+        if (Persistence->TryGetSavedContaminationLayout(this, Layout) == true)
+        {
+            // 호환 배치를 선택할 수 없는 표면의 초기화 예약 중단
+            if (SelectCompatibleContaminationLayout(Layout, false) == false)
+            {
+                // 정규 복원 경로에서 배치 오류를 처리하도록 예약 실패 반환
+                return false;
+            }
+        }
+        // 비동기 초기화 작업에서 사용할 저장 생성 기준 적용
         ContaminationGeneration = Saved;
     }
     PrepareContaminationGeneration();

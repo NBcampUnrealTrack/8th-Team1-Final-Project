@@ -55,10 +55,21 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
 	FMDOnEquipHotbarChanged OnHotbarChanged;
 
+	// 슬롯 아이템과 수량 변경을 내용 표시 갱신에 전달하는 알림
+	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
+	FMDOnEquipHotbarChanged OnHotbarContentsChanged;
+
+	// 선택 위치 변경을 선택 표시에 전달하는 알림
+	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
+	FMDOnEquipHotbarChanged OnHotbarSelectionChanged;
+
 protected:
 	// 기존 BP 설정 이름을 유지하는 기본 아이템 목록이며 앞의 네 위치만 사용
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hotbar", meta = (DisplayName = "Default Items"))
 	TArray<TObjectPtr<UMD_ItemDefinition>> DefaultTools;
+
+	// 시작 전에 복원된 빈 슬롯까지 기본 아이템 지급에서 보호하는 상태
+	bool bHasRestoredEquipmentData = false;
 
 	// 종류별 전용 슬롯 없이 네 위치에 아이템과 수량을 함께 복제하는 상태
 	UPROPERTY(ReplicatedUsing = OnRep_ToolEntries)

@@ -23,15 +23,15 @@ struct FMD_TravelSiteEntry
 	GENERATED_BODY()
 
 	/** 현장 표시명. UI 버튼 라벨로 쓴다 */
-	UPROPERTY(EditAnywhere, Category = "Travel")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Travel")
 	FText DisplayName;
 
 	/** 출발 시 ServerTravel할 레벨 */
-	UPROPERTY(EditAnywhere, Category = "Travel")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Travel")
 	TSoftObjectPtr<UWorld> Level;
 
 	/** false면 준비 중 현장. 위젯에서 잠기고 서버도 요청을 거부한다 */
-	UPROPERTY(EditAnywhere, Category = "Travel")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Travel")
 	bool bAvailable = false;
 };
 

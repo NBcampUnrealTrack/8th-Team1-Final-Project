@@ -3,6 +3,7 @@
 #include "Components/CheckBox.h"
 #include "Components/InputKeySelector.h"
 #include "Components/Slider.h"
+#include "Components/TextBlock.h"
 #include "Gameplay/Settings/MD_ControlSettingCategory.h"
 #include "Gameplay/Settings/MD_SettingsManager.h"
 
@@ -108,10 +109,10 @@ FMD_ControlSettings UMD_SettingsControlWidget::GetPendingSettings()
 		SelectedSettings.MouseSensitivity = FMath::Clamp(Slider_MouseSensitivity->GetValue(), 0.1f, 10.0f);
 	}
 	// 세로 시점 반전 선택이 있는 레이아웃의 현재 상태 수집
-	if (IsValid(CheckBox_AxisNegate) == true)
+	if (IsValid(TB_Reversal) == true)
 	{
 		// 체크 상태와 세로 시점 반전 설정의 대응
-		SelectedSettings.bInvertVerticalLook = CheckBox_AxisNegate->IsChecked();
+		SelectedSettings.bInvertVerticalLook = TB_Reversal->IsChecked();
 	}
 	// 점프 키 선택기의 현재 단일 입력 키 수집
 	SelectedSettings.JumpKey = GetSelectedKey(KeySelector_Jump, SelectedSettings.JumpKey);
@@ -120,43 +121,49 @@ FMD_ControlSettings UMD_SettingsControlWidget::GetPendingSettings()
 	// 기존 UseItem 이름의 선택기를 능력 사용 입력에 대응
 	SelectedSettings.AbilityKey = GetSelectedKey(KeySelector_UseItem, SelectedSettings.AbilityKey);
 	// 음성 채팅 키 선택기의 현재 단일 입력 키 수집
-	SelectedSettings.VoiceChatKey = GetSelectedKey(KeySelector_VoiceChat, SelectedSettings.VoiceChatKey);
+	SelectedSettings.VoiceChatKey = GetSelectedKey(KeySelector_PushToTalk, SelectedSettings.VoiceChatKey);
 	// 카테고리에 적용하지 않은 현재 화면 값 반환
 	return SelectedSettings;
 }
 
 void UMD_SettingsControlWidget::RefreshDisplay()
 {
-	// 현재 WBP의 슬라이더 범위를 유지한 마우스 감도 표시
+	// 실제 배율과 동일한 범위의 감도 슬라이더 표시
 	if (IsValid(Slider_MouseSensitivity) == true)
 	{
-		// 디자이너 범위와 설정 범위를 모두 만족하는 표시값 계산
-		float MinimumValue = FMath::Max(Slider_MouseSensitivity->GetMinValue(), 0.1f);
-		float MaximumValue = FMath::Min(Slider_MouseSensitivity->GetMaxValue(), 10.0f);
-		// 잘못된 디자이너 범위의 안전한 최대값 보정
-		if (MaximumValue < MinimumValue)
-		{
-			MaximumValue = MinimumValue;
-		}
-		// 보정된 범위에 맞춘 현재 감도 표시
-		float DisplayValue = FMath::Clamp(PendingSettings.MouseSensitivity, MinimumValue, MaximumValue);
-		// 실제 카테고리 변경 없는 슬라이더 표시 갱신
-		Slider_MouseSensitivity->SetValue(DisplayValue);
+		// 조작 카테고리와 동일한 최소 배율 지정
+		Slider_MouseSensitivity->SetMinValue(0.1f);
+		// 조작 카테고리와 동일한 최대 배율 지정
+		Slider_MouseSensitivity->SetMaxValue(10.0f);
+		// 키보드 및 게임패드 이동의 배율 간격 지정
+		Slider_MouseSensitivity->SetStepSize(0.1f);
+		// 사용자 입력 이벤트 없는 현재 배율 선택
+		Slider_MouseSensitivity->SetValue(PendingSettings.MouseSensitivity);
 	}
-	// 세로 시점 반전 선택이 있는 레이아웃의 표시 갱신
-	if (IsValid(CheckBox_AxisNegate) == true)
+	// 프로그램에 의한 복원 시 Blueprint 입력 이벤트 없이 숫자 갱신
+	if (IsValid(Txt_Value_MouseSensitivity) == true)
 	{
-		// 실제 카테고리 변경 없는 체크 상태 반영
-		CheckBox_AxisNegate->SetIsChecked(PendingSettings.bInvertVerticalLook);
+		// Blueprint 입력 표시와 동일한 소수 자릿수 준비
+		FNumberFormattingOptions NumberFormat;
+		// 소수점 한 자리까지 표시할 감도 정밀도 지정
+		NumberFormat.MaximumFractionalDigits = 1;
+		// 저장된 감도 배율의 숫자 표시
+		Txt_Value_MouseSensitivity->SetText(FText::AsNumber(PendingSettings.MouseSensitivity, &NumberFormat));
 	}
-	// 점프 키의 현재 화면 표시
-	RefreshKeySelector(KeySelector_Jump, PendingSettings.JumpKey);
-	// 상호작용 키의 현재 화면 표시
+	// 현재 레이아웃의 시점 반전 컨트롤 표시
+	if (IsValid(TB_Reversal) == true)
+	{
+		// 미적용 기준값의 체크 상태 반영
+		TB_Reversal->SetIsChecked(PendingSettings.bInvertVerticalLook);
+	}
+	// 상호작용 키 표시 복원
 	RefreshKeySelector(KeySelector_Interact, PendingSettings.InteractKey);
-	// 능력 사용 키의 현재 화면 표시
+	// 점프 키 표시 복원
+	RefreshKeySelector(KeySelector_Jump, PendingSettings.JumpKey);
+	// 장비 사용 키 표시 복원
 	RefreshKeySelector(KeySelector_UseItem, PendingSettings.AbilityKey);
-	// 음성 채팅 키의 현재 화면 표시
-	RefreshKeySelector(KeySelector_VoiceChat, PendingSettings.VoiceChatKey);
+	// 누르고 말하기 키 표시 복원
+	RefreshKeySelector(KeySelector_PushToTalk, PendingSettings.VoiceChatKey);
 }
 
 FKey UMD_SettingsControlWidget::GetSelectedKey(UInputKeySelector* KeySelector, FKey PreviousKey)
