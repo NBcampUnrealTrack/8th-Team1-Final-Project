@@ -24,7 +24,21 @@
 #include "Net/UnrealNetwork.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "World/Sample/MD_QuestItem.h"
+#include "World/Trash/MD_TrashSorter.h"
 #include "World/Wall/MD_CuttableWall.h"
+
+static void AddActorAndAttachmentsToInteractionQuery(
+	const AActor* Actor, FCollisionQueryParams& QueryParams)
+{
+	if (!IsValid(Actor)) return;
+
+	QueryParams.AddIgnoredActor(Actor);
+	Actor->ForEachAttachedActors([&QueryParams](AActor* AttachedActor)
+	{
+		AddActorAndAttachmentsToInteractionQuery(AttachedActor, QueryParams);
+		return true;
+	});
+}
 
 namespace
 {
@@ -399,11 +413,14 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 	{
 		if (IsValid(RequestedActor)
 			&& RequestedActor->Implements<UMD_Interactable>()
-			&& IMD_Interactable::Execute_SupportsHeldActorInteraction(RequestedActor)
-			&& ValidateInteractionTarget(RequestedActor)
-			&& IMD_Interactable::CanInteractWith(RequestedActor, OwnerPawn))
+			&& IMD_Interactable::Execute_SupportsHeldActorInteraction(RequestedActor))
 		{
-			IMD_Interactable::Execute_Interact(RequestedActor, OwnerPawn);
+			if (ValidateInteractionTarget(RequestedActor)
+				&& IMD_Interactable::CanInteractWith(RequestedActor, OwnerPawn))
+			{
+				IMD_Interactable::Execute_Interact(RequestedActor, OwnerPawn);
+			}
+			// 조준/거리 이탈이나 복제 지연으로 거절된 분류 입력을 놓기로 바꾸지 않는다.
 			return;
 		}
 
@@ -1002,6 +1019,13 @@ void UMD_InteractionComponent::UpdateInteractionFocus()
 	SetCurrentTarget(TraceInteractionTarget());
 }
 
+void UMD_InteractionComponent::AddInteractionTraceIgnoredActors(FCollisionQueryParams& QueryParams) const
+{
+	QueryParams.AddIgnoredActor(GetOwnerPawn());
+	// 통 본체만 제외하면 별도 액터로 부착된 내용물이 시선을 막는다.
+	AddActorAndAttachmentsToInteractionQuery(HeldActor, QueryParams);
+}
+
 AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 {
 	APawn* OwnerPawn = GetOwnerPawn();
@@ -1017,11 +1041,7 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 	// GeometryCollection은 복합(complex) 콜리전이 없다. bTraceComplex를 켜면 GC를 통째로 놓친다.
 	FHitResult Hit;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(InteractTrace), /*bTraceComplex*/ false);
-	QueryParams.AddIgnoredActor(OwnerPawn);
-	if (IsValid(HeldActor))
-	{
-		QueryParams.AddIgnoredActor(HeldActor);
-	}
+	AddInteractionTraceIgnoredActors(QueryParams);
 
 	if (!GetWorld()->LineTraceSingleByChannel(
 		Hit,
@@ -1048,6 +1068,11 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 	{
 		return nullptr;
 	}
+	if (const AMD_TrashSorter* Sorter = Cast<AMD_TrashSorter>(HitActor))
+	{
+		// 조준 대상은 현재 운반 물건과 유효한 분류 카테고리를 요구한다.
+		if (Sorter->IsActorBeingDestroyed() || !Sorter->CanInteract_Implementation(OwnerPawn)) return nullptr;
+	}
 	if (IsHeldByOtherPawn(HitActor)) return nullptr;
 	if (!IMD_Interactable::CanInteractWith(HitActor, OwnerPawn)) return nullptr;
 
@@ -1059,6 +1084,12 @@ bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor)
 	if (!IsValid(RequestedActor))
 	{
 		return false;
+	}
+
+	if (RequestedActor->IsA<AMD_TrashSorter>())
+	{
+		// 클라이언트와 같은 거리/조준 Trace로 승인한다. 별도 영역 판정은 없다.
+		return TraceInteractionTarget() == RequestedActor;
 	}
 
 	if (TraceInteractionTarget() == RequestedActor)
@@ -1112,12 +1143,12 @@ bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor)
 	// The relaxed bounds/aim fallback must not authorize an actor hidden by world geometry
 	// or another interactable. A clear trace may either hit the requested actor itself or hit nothing
 	// (for example, a GeometryCollection without a matching simple collision representation).
-	const auto IsOccludedOnChannel = [this, OwnerPawn, RequestedActor, &ViewLocation, &ClosestPoint](
+	const auto IsOccludedOnChannel = [this, RequestedActor, &ViewLocation, &ClosestPoint](
 		ECollisionChannel Channel) -> bool
 	{
 		FHitResult OcclusionHit;
 		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(InteractFallbackOcclusion), /*bTraceComplex*/ false);
-		QueryParams.AddIgnoredActor(OwnerPawn);
+		AddInteractionTraceIgnoredActors(QueryParams);
 
 		if (!GetWorld()->LineTraceSingleByChannel(
 			OcclusionHit,

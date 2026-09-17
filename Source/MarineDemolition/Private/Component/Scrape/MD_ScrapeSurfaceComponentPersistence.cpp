@@ -1,4 +1,4 @@
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+﻿#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Components/StaticMeshComponent.h"
@@ -313,61 +313,20 @@ void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
 void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 	const TArray<int32>& CellIndices,
 	const TArray<float>& InitialAmounts,
-	const TArray<float>& RemainingAmounts)
-{
-	RestoreContaminationCells(
-		CellIndices,
-		InitialAmounts,
-		RemainingAmounts,
-		TArray<float>(),
-		TArray<float>());
-}
-
-
-void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
-	const TArray<int32>& CellIndices,
-	const TArray<float>& InitialAmounts,
-	const TArray<float>& RemainingAmounts,
-	const TArray<float>& TransferredAmounts,
-	const TArray<float>& TransferredPatternDensities)
-{
-	RestoreContaminationCells(
-		CellIndices,
-		InitialAmounts,
-		RemainingAmounts,
-		TransferredAmounts,
-		TransferredPatternDensities,
-		TArray<float>());
-}
-
-
-void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
-	const TArray<int32>& CellIndices,
-	const TArray<float>& InitialAmounts,
 	const TArray<float>& RemainingAmounts,
 	const TArray<float>& TransferredAmounts,
 	const TArray<float>& TransferredPatternDensities,
 	const TArray<float>& CoveredFractions)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_RestoreSavedCells);
-	const bool bHasInitialAmounts = !InitialAmounts.IsEmpty();
-	const bool bHasTransferredAmounts = !TransferredAmounts.IsEmpty();
-	const bool bHasTransferredPatternDensities =
-		!TransferredPatternDensities.IsEmpty();
-	const bool bHasCoveredFractions = !CoveredFractions.IsEmpty();
-	if (!bContaminationEnabled
-		|| !HasAuthority()
-		|| CellIndices.Num() != RemainingAmounts.Num()
-		|| (bHasInitialAmounts && CellIndices.Num() != InitialAmounts.Num())
-		|| (bHasTransferredAmounts
-			&& CellIndices.Num() != TransferredAmounts.Num())
-		|| (bHasTransferredPatternDensities
-			&& CellIndices.Num() != TransferredPatternDensities.Num())
-		|| (bHasCoveredFractions
-			&& CellIndices.Num() != CoveredFractions.Num()))
-	{
-		return;
-	}
+    // 현재 저장 형식의 모든 셀 열이 동일한 길이인 경우에만 복원 허용
+    if (bContaminationEnabled == false || HasAuthority() == false || CellIndices.Num() != RemainingAmounts.Num()
+        || CellIndices.Num() != InitialAmounts.Num() || CellIndices.Num() != TransferredAmounts.Num()
+        || CellIndices.Num() != TransferredPatternDensities.Num() || CellIndices.Num() != CoveredFractions.Num())
+    {
+        // 구형 누락 열을 대체하지 않고 복원 중단
+        return;
+    }
 
 	if (!bContaminationSurfaceInitialized)
 	{
@@ -405,7 +364,8 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 		FMD_ScrapeSurfaceCell Cell = ReadContaminationStorageCell(StorageIndex);
         if (bIncrementProgress) { auto& Before = Touched.AddDefaulted_GetRef();Before.CellIndex=Index;Before.Before=Cell; }
 
-		if (bHasInitialAmounts && FMath::IsFinite(InitialAmounts[i]))
+		// 저장된 초기 오염량의 유효한 숫자만 적용
+		if (FMath::IsFinite(InitialAmounts[i]) == true)
 		{
 			Cell.InitialContamination = FMath::Clamp(
 				InitialAmounts[i], 0.0f, 1.0f);
@@ -418,7 +378,8 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 				Cell.InitialContamination)
 			: 0.0f;
 		Cell.TransferredContamination =
-			bHasTransferredAmounts && FMath::IsFinite(TransferredAmounts[i])
+			// 현재 열에 기록된 전이 오염량의 유효성 확인
+			FMath::IsFinite(TransferredAmounts[i]) == true
 			? FMath::Clamp(
 				TransferredAmounts[i],
 				0.0f,
@@ -427,27 +388,15 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 		Cell.TransferredPaintPatternDensity =
 			Cell.TransferredContamination <= ScrapeSettings.CleanTolerance
 			? 0.0f
-			: (bHasTransferredPatternDensities
-				&& FMath::IsFinite(TransferredPatternDensities[i])
+			// 현재 열에 기록된 패턴 밀도의 유효성 확인
+			: (FMath::IsFinite(TransferredPatternDensities[i]) == true
 				? FMath::Clamp(
 					TransferredPatternDensities[i],
 					0.0f,
 					1.0f)
 				: 1.0f);
-		// 구버전 스냅샷에는 피복률이 없다. 잔여량에서 역산하면 얇은 막과 부분
-		// 피복이 다시 한 값으로 뭉개져 이 변경 전의 겉모습이 되는데, 어제 저장한
-		// 상태를 그때 보였던 모습대로 되살리는 것이므로 이 쪽이 맞다.
-		Cell.CoveredFraction =
-			bHasCoveredFractions && FMath::IsFinite(CoveredFractions[i])
-			? FMath::Clamp(CoveredFractions[i], 0.0f, 1.0f)
-			: (Cell.InitialContamination > UE_SMALL_NUMBER
-				? FMath::Clamp(
-					1.0f
-						- Cell.RemainingContamination
-							/ Cell.InitialContamination,
-					0.0f,
-					1.0f)
-				: 0.0f);
+        // 잔여량에서 역산하지 않고 저장된 피복률 직접 적용
+        Cell.CoveredFraction = FMath::IsFinite(CoveredFractions[i]) == true ? FMath::Clamp(CoveredFractions[i], 0.0f, 1.0f) : 0.0f;
 		Cell.Normalize();
 		SetContaminationStorageCell(StorageIndex, Cell);
 		if (!ContaminationPagedCells.IsEmpty())
@@ -471,18 +420,25 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 		return;
 	}
 
+    // 복원된 셀만 반영한 오염 진행률의 계산 결과
     FMD_ScrapeMeshUVProgress Progress;
+    // 증분 진행률 계산에 필요한 셀 인덱스 순서 정렬
     Touched.Sort([](const auto& A, const auto& B) { return A.CellIndex < B.CellIndex; });
-    if (bIncrementProgress && FMD_ScrapeEvaluator::UpdateMeshUVProgressFromTouchedCells(
+    // 유효한 기존 캐시에 복원된 셀의 변화량만 반영
+    if (bIncrementProgress == true && FMD_ScrapeEvaluator::UpdateMeshUVProgressFromTouchedCells(
         CachedMeshUVProgress, Touched, GetContaminationCellsForFace(EMD_ScrapeSurfaceFace::Front),
-        GetContaminationCellCarrierWeights(), Progress))
+        GetContaminationCellCarrierWeights(), Progress) == true)
+    {
+        // 전체 셀 재계산 없이 갱신된 진행률 캐시 확정
         CommitContaminationMeshUVProgressCache(Progress);
+    }
     else
+    {
+        // 증분 계산이 불가능한 경우 전체 진행률 캐시 복구
         RefreshContaminationCleanRatioCache();
+    }
 
-	// MASS-014 형식 전의 save에는 이미 회수된 canonical unit 이력이 없다.
-	// 남은 셀을 다시 canonical로 만들면 저장/로드만으로 보상을 재발행하므로,
-	// legacy restore가 만든 base/transferred raw는 모두 reward 0으로 보수 복원한다.
+	// 셀 상태 복원만으로 이미 지급된 보상을 재발행하지 않도록 무보상 회수 원장 재구성
 	for (int32 FaceSlot = 0; FaceSlot < 2; ++FaceSlot)
 	{
 		BaseContaminationRecoveryLots[FaceSlot].Reset();
@@ -516,7 +472,7 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 				TransferredCarrierAmount);
 		ensureMsgf(
 			bRecordedBase && bRecordedTransferred,
-			TEXT("Legacy contamination restore could not rebuild recovery ledger."));
+			TEXT("Contamination restore could not rebuild recovery ledger."));
 	}
 
 	// 어제 완전 제거된 벽이면 완료 이벤트가 재방송되지 않게 이미 방송된 것으로 마킹

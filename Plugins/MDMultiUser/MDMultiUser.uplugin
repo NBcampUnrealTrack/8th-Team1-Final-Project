@@ -1,0 +1,11 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "MD Multi-User Workspace",
+  "Description": "A focused collaboration workspace for Multi-User Editing.",
+  "Category": "Editor",
+  "CanContainContent": false,
+  "Modules": [{ "Name": "MDMultiUser", "Type": "Editor", "LoadingPhase": "PostEngineInit" }],
+  "Plugins": [{ "Name": "MultiUserClient", "Enabled": true }]
+}

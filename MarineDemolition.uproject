@@ -19,11 +19,23 @@
 	],
 	"Plugins": [
 		{
+			"Name": "MDMultiUser",
+			"Enabled": true,
+			"TargetAllowList": ["Editor"]
+		},
+		{
 			"Name": "MDSolidRendering",
 			"Enabled": true
 		},
 		{
 			"Name": "ModelingToolsEditorMode",
+			"Enabled": true,
+			"TargetAllowList": [
+				"Editor"
+			]
+		},
+		{
+			"Name": "MultiUserClient",
 			"Enabled": true,
 			"TargetAllowList": [
 				"Editor"
@@ -90,6 +102,14 @@
 		},
 		{
 			"Name": "VoiceChat",
+			"Enabled": true
+		},
+		{
+			"Name": "PoseSearch",
+			"Enabled": true
+		},
+		{
+			"Name": "MovieRenderPipeline",
 			"Enabled": true
 		}
 	]

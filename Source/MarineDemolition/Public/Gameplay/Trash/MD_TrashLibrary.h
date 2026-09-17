@@ -27,6 +27,21 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Trash")
 	static bool FindTrashKindRow(FName TrashKindId, FMD_TrashKindRow& OutRow);
 
+	/** 해당 품목의 유효한 Variant 이름. 메시를 로드하지 않는다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Trash")
+	static TArray<FName> GetTrashVariantIds(FName TrashKindId);
+
+	/** 첫 항목의 이름. 첫 항목이 잘못됐으면 None. */
+	UFUNCTION(BlueprintPure, Category = "MD|Trash")
+	static FName GetDefaultTrashVariantId(FName TrashKindId);
+
+	/** 이전 None 선택은 첫 Variant로 해석한다. 잘못된 명시적 Variant는 false. */
+	static bool ResolveTrashKindMesh(FName TrashKindId, FName VariantId, TSoftObjectPtr<UStaticMesh>& OutMesh);
+
+	/** Seed로 Variant 이름을 결정한다. 유효한 항목이 없으면 false를 반환한다. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Trash")
+	static bool SelectRandomTrashVariant(FName TrashKindId, int32 Seed, FName& OutVariantId);
+
 	/** 이 종류를 넣어야 하는 칸 */
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	static FGameplayTag GetTrashKindCategory(FName TrashKindId);

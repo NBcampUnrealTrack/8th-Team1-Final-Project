@@ -13,7 +13,7 @@ class UStaticMeshComponent;
 /**
  * 기지 바닥에 산재한 각종 쓰레기 (기획 02 §1)
  * 손으로 집어 임시 쓰레기통에 담는 물리 오브젝트.
- * 정답 칸·질량·메시는 종류 테이블에서 오고, 배치 시 지정하는 값은 종류 ID 하나뿐이다.
+ * 정답 칸·질량·메시는 종류 테이블에서 오고, 배치 시 종류와 Variant 이름을 지정한다.
  */
 UCLASS()
 class MARINEDEMOLITION_API AMD_TrashItem
@@ -47,9 +47,25 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Trash")
 	void SetTrashKindId(FName NewTrashKindId);
 
+	UFUNCTION(BlueprintPure, Category = "MD|Trash")
+	FName GetTrashVariantId() const { return TrashVariantId; }
+
+	/** 종류와 Variant를 함께 적용한다. 이전 None 입력은 첫 Variant. 잘못된 선택이면 변경하지 않는다. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Trash")
+	bool SetTrashAppearance(FName NewTrashKindId, FName NewVariantId);
+
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Trash")
+	bool SetTrashVariantId(FName NewVariantId);
+
+#if WITH_EDITOR
+	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
+	virtual void PostEditUndo() override;
+#endif
+
 protected:
 	/** 배치 인스턴스에서 종류를 바꿔도 에디터에 바로 반영되게 한다 */
 	virtual void OnConstruction(const FTransform& Transform) override;
+	virtual void BeginPlay() override;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash")
 	TObjectPtr<UStaticMeshComponent> Mesh;
@@ -61,6 +77,11 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_TrashKindId,
 		Category = "MD|Trash", meta = (GetOptions = "GetTrashKindIdOptions"))
 	FName TrashKindId = TEXT("DrinkCan");
+
+	/** 이름으로 저장되므로 배열 재정렬에 영향받지 않는다. 이전 None 값은 첫 Variant로 이전한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_TrashKindId,
+		Category = "MD|Trash", meta = (GetOptions = "GetTrashVariantIdOptions", DisplayName = "Variant"))
+	FName TrashVariantId;
 
 	/** 그레이박스에서 종류를 구분하기 위한 칸 색 적용. 최종 아트 메시로 교체하면 끈다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash")
@@ -93,11 +114,15 @@ private:
 	UFUNCTION()
 	TArray<FName> GetTrashKindIdOptions() const;
 
+	UFUNCTION()
+	TArray<FName> GetTrashVariantIdOptions() const;
+
 	/** 종류 행의 질량·메시·색을 메시 컴포넌트에 반영 */
 	void ApplyTrashKindRow();
 
 	/** OnConstruction 재실행이 같은 메시를 다시 동기 로드하지 않게 한다 */
 	FName AppliedTrashKindId = NAME_None;
+	FName AppliedTrashVariantId;
 	FGameplayTag AppliedCategory;
 	bool bHasAppliedTrashKind = false;
 };

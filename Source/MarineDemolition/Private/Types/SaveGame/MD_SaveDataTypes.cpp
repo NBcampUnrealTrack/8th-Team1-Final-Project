@@ -3,12 +3,10 @@
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 #include "Gameplay/Contamination/MD_SurfaceStainPersistence.h"
 
-#include "Data/Merchant/MD_SiteDefinition.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Types/Lore/MD_LoreTypes.h"
 #include "World/Trash/MD_TrashBin.h"
-#include "Util/MD_LogUtility.h"
 
 const FGameplayTag FMD_GameStateData::DataFieldKey = MDGameplayTags::Save_Data_GameState;
 const FGameplayTag FMD_MerchantData::DataFieldKey = MDGameplayTags::Save_Data_Merchant;
@@ -118,6 +116,13 @@ bool FMD_MerchantData::IsStructurallyValid() const
 
 bool FMD_WorldData::IsStructurallyValid() const
 {
+    const TSet<FName> Surviving(SurvivingWallNames);
+    TSet<FName> PendingLoads;
+    for (const FName WallName : PendingCollapseWallNames)
+    {
+        if (WallName.IsNone() || Surviving.Contains(WallName) || PendingLoads.Contains(WallName)) return false;
+        PendingLoads.Add(WallName);
+    }
     if (!FMD_SurfaceStainPersistence::Validate(SurfaceStains)) return false;
     TSet<FGuid> PendingBatchIds;
     for (const FMD_ContaminationPendingDrop& Drop : PendingContaminationDrops)
@@ -142,13 +147,14 @@ bool FMD_WorldData::IsStructurallyValid() const
 	for (const FMD_WallContaminationRecord& ContaminationRecord : WallContaminations)
 	{
         int32 MaximumCellCount = FMD_ScrapeSurfaceLayout::LegacyMaximumCombinedCellCount;
-        if ((bHasContaminationGenerationRecords && !ContaminationRecord.Generation.IsValid())
-            || ContaminationRecord.WallName.IsNone()
-            || !FMD_ScrapeSurfaceLayout::IsLayoutMetadataValid(
+        // 현재 월드 기록에는 유효한 생성 정보와 액터 및 컴포넌트 식별자 필수
+        if (ContaminationRecord.Generation.IsValid() == false || ContaminationRecord.SurfaceComponentName.IsNone() == true
+            || ContaminationRecord.WallName.IsNone() == true
+            || FMD_ScrapeSurfaceLayout::IsLayoutMetadataValid(
                 ContaminationRecord.LayoutVersion, ContaminationRecord.LayoutId,
-                ContaminationRecord.GridDimensions)
+                ContaminationRecord.GridDimensions) == false
             || (ContaminationRecord.LayoutVersion == 1
-                && !FMD_ScrapeSurfaceLayout::IsCarrierScaleValid(ContaminationRecord.CarrierScale)))
+                && FMD_ScrapeSurfaceLayout::IsCarrierScaleValid(ContaminationRecord.CarrierScale) == false))
         {
             return false;
         }
@@ -174,162 +180,12 @@ bool FMD_WorldData::IsStructurallyValid() const
 	return true;
 }
 
-bool FMD_GameData::Serialize(FArchive& Ar)
-{
-    if ((!Ar.IsLoading() && !Ar.IsSaving()) || Ar.WantBinaryPropertySerialization())
-    {
-        StaticStruct()->SerializeBin(Ar, reinterpret_cast<uint8*>(this));
-        return true;
-    }
-    const int64 Start = Ar.Tell();
-    StaticStruct()->SerializeTaggedProperties(Ar, reinterpret_cast<uint8*>(this), StaticStruct(), nullptr);
-    if (Ar.IsLoading() && !Ar.IsError() && Ar.GetArchiveName() == TEXT("MDLegacySlotIndex"))
-    {
-        LegacyDataOffset = Start;
-        LegacyDataBytes = Ar.Tell() - Start;
-    }
-    return true;
-}
-
 bool FMD_GameData::IsEmpty() const
 {
 	return UniqueName.IsEmpty() == true || MapPackagePath.IsEmpty() == true;
 }
 
-bool FMD_GameData::MigrateToCurrentVersion()
-{
-	// 현재 실행 파일이 이해하지 못하는 미래 슬롯을 부분 적용하거나 덮어쓰지 않기 위한 검사
-	if (SchemaVersion > CurrentSchemaVersion)
-	{
-		return false;
-	}
-
-	// 구형 반복 퀘스트 구조와 제거된 보상 수령 상태를 현재 의미로 오인하지 않고 안전하게 재선정하도록 비우는 마이그레이션
-	if (SchemaVersion < 4)
-	{
-		FMD_MerchantData MerchantData;
-		if (GetDataField(FMD_MerchantData::DataFieldKey, MerchantData) == true)
-		{
-			if (SchemaVersion <= 0)
-			{
-				MerchantData.Affinity = FMath::Clamp(MerchantData.Affinity, -4.0f, 5.0f);
-			}
-			MerchantData.RepeatQuests.Reset();
-			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
-		}
-	}
-
-	// 인라인 메인 퀘스트를 저장하던 슬롯은 현장 에셋의 일차별 PrimaryAssetId에 다시 연결한다.
-	if (SchemaVersion < 5)
-	{
-		FMD_MerchantData MerchantData;
-		if (GetDataField(FMD_MerchantData::DataFieldKey, MerchantData) == true && MerchantData.MainQuests.IsEmpty() == false)
-		{
-			const UMD_SiteDefinition* Site = MerchantData.CurrentSite.IsNull() == true ? nullptr : MerchantData.CurrentSite.LoadSynchronous();
-			bool bCanRelinkAllMainQuests = IsValid(Site) == true;
-			for (FMD_MainQuestState& MainQuest : MerchantData.MainQuests)
-			{
-				const int32 DefinitionIndex = MainQuest.UnlockDay - 1;
-				if (bCanRelinkAllMainQuests == false || Site->MainQuestLine.IsValidIndex(DefinitionIndex) == false
-					|| Site->MainQuestLine[DefinitionIndex].IsValid() == false)
-				{
-					bCanRelinkAllMainQuests = false;
-					break;
-				}
-
-				MainQuest.DefinitionId = Site->MainQuestLine[DefinitionIndex];
-			}
-
-			if (bCanRelinkAllMainQuests == false)
-			{
-				// 복원할 원본이 없으면 다음 월드 동기화에서 계약을 안전하게 재초기화하도록 비운다.
-				MerchantData.MainQuests.Reset();
-			}
-
-			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
-		}
-	}
-
-	// 통합 Definition에서 메인 역할도 다단계를 지원하므로 기존 슬롯을 첫 페이즈 상태로 명시하는 마이그레이션
-	if (SchemaVersion < 6)
-	{
-		FMD_MerchantData MerchantData;
-		// 기존 상인 데이터가 있을 때만 메인 퀘스트 단계 인덱스를 보정하기 위한 조회 결과
-		bool bHasMerchantData = GetDataField(FMD_MerchantData::DataFieldKey, MerchantData);
-		if (bHasMerchantData == true)
-		{
-			for (FMD_MainQuestState& MainQuest : MerchantData.MainQuests)
-			{
-				MainQuest.CurrentPhaseIndex = 0;
-			}
-			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
-		}
-	}
-
-	// scrape의 버전 10~13도 이름 기반 원장을 사용했으므로 통합 버전 14 이전 모두 검사한다.
-	// dev 버전 10에서 이미 이전한 원장은 구형 필드가 비어 있어 그대로 보존된다.
-	if (SchemaVersion < 14)
-	{
-		// 기존 저장 슬롯에 포함된 상인 데이터 복사
-		FMD_MerchantData MerchantData;
-		// 상인 원장이 있는 슬롯에만 구매 이력 이전 적용
-		if (GetDataField(FMD_MerchantData::DataFieldKey, MerchantData) == true)
-		{
-			// 구형 저장 전용 필드의 유효한 항목을 현재 원장에 통합
-			for (TPair<FName, int32>& LegacyPurchase : MerchantData.PurchasedItemCounts_DEPRECATED)
-			{
-				// 손상된 구형 이력을 유효한 구매로 변환하는 상황 차단
-				if (LegacyPurchase.Key.IsNone() == true || LegacyPurchase.Value <= 0)
-				{
-					// 이전 실패 사유의 프로젝트 로그 기록
-					UE_LOG(MarineDemolition, Warning, TEXT("%s 구형 구매 이력의 식별자 또는 수량이 유효하지 않음"), *UE_CALL_LOCATIONINFO);
-					// 손상된 구매 이력의 부분 적용 차단
-					return false;
-				}
-				// 구형 상점의 단일 Item 타입을 명시하여 전체 식별자 복원
-				FPrimaryAssetId ItemAssetId(FPrimaryAssetType(TEXT("Item")), LegacyPurchase.Key);
-				// 이미 이전된 수량을 중복 합산하지 않도록 현재 원장 항목 조회
-				int32& PurchasedCount = MerchantData.PurchasedItemAssetCounts.FindOrAdd(ItemAssetId);
-				// 두 형식이 함께 존재할 경우 더 큰 누적 구매 수량 보존
-				PurchasedCount = FMath::Max(PurchasedCount, LegacyPurchase.Value);
-			}
-			// 이후 저장과 런타임에서 구형 이력의 재사용 방지
-			MerchantData.PurchasedItemCounts_DEPRECATED.Reset();
-			// 전체 AssetId로 이전한 원장을 슬롯에 반영
-			AddDataField(FMD_MerchantData::DataFieldKey, MerchantData);
-		}
-	}
-
-	// 버전 7은 따개비 배치기 기록에 새 게임별 런타임 시드를 추가한다.
-	// 구형 레코드는 새 유효성 플래그가 false로 역직렬화되며, 복원 시 기존
-	// PlacementSeed를 사용하므로 별도의 배열 변환이 필요 없다.
-
-	// 버전 8은 오염 주소의 bake ID와 격자 크기를 추가한다. 이전 기록은
-	// LayoutVersion=0 / invalid ID / zero grid를 유지하여 MeshUV에 적용하지 않는다.
-	// CellIndices는 이전부터 int32 UPROPERTY이므로 배열 원소 폭은 바뀌지 않는다.
-    // Version 11 adds the common contamination session seed. Absence remains false
-    // for old saves; never infer a common seed from independently authored walls.
-    // Version 12 adds placed surface-stain stages. Older saves use authored initial stages.
-	if (SchemaVersion < 13)
-	{
-		FMD_WorldData WorldData;
-		if (GetDataField(FMD_WorldData::DataFieldKey, WorldData))
-		{
-			for (FMD_SurfaceStainRecord& Stain : WorldData.SurfaceStains)
-			{
-				const int32 Size = Stain.ResolveSize();
-				if (!FMD_SurfaceStainSize::IsValidRemaining(Size)) return false;
-				Stain.RemainingSize = Size;
-			}
-			AddDataField(FMD_WorldData::DataFieldKey, WorldData);
-		}
-	}
-
-	SchemaVersion = CurrentSchemaVersion;
-	return true;
-}
-
-bool FMD_GameData::IsValidForLoad() const
+bool FMD_GameData::IsValidForLoad(bool bRequireWorldData) const
 {
 	// 슬롯 식별자와 프로젝트 맵 경로가 없으면 안전한 적용 대상을 결정할 수 없으므로 거부하는 검사
 	if (bIsSlotSummary || SchemaVersion != CurrentSchemaVersion || IsEmpty() == true || MapPackagePath.StartsWith(TEXT("/Game/")) == false)
@@ -351,26 +207,30 @@ bool FMD_GameData::IsValidForLoad() const
 		return false;
 	}
 
-	// 월드 필드는 초기 슬롯 호환을 위해 선택 사항이지만 존재하면 정확한 타입과 구조를 요구하는 검사
-	if (DataFields.Contains(FMD_WorldData::DataFieldKey) == true)
-	{
-        const FInstancedStruct& WorldField = DataFields.FindChecked(FMD_WorldData::DataFieldKey);
-        const FMD_WorldData* WorldData = WorldField.GetPtr<FMD_WorldData>();
-        if (!WorldData || !WorldData->IsStructurallyValid())
-		{
-			return false;
-		}
-	}
+    // 대용량 월드 필드를 복사하지 않고 현재 형식의 타입과 구조 검사
+    const FInstancedStruct* WorldField = DataFields.Find(FMD_WorldData::DataFieldKey);
+    // 파일 저장 데이터에는 월드 필드를 필수로 요구
+    if (WorldField == nullptr && bRequireWorldData == true)
+    {
+        // 파일에서 월드 필드가 누락된 경우 거부
+        return false;
+    }
+    // 현재 회차 이동의 의도적인 생략을 제외한 월드 필드 전체 검증
+    if (WorldField != nullptr && (WorldField->IsValid() == false || WorldField->GetScriptStruct() != FMD_WorldData::StaticStruct()
+        || WorldField->GetPtr<FMD_WorldData>()->IsStructurallyValid() == false))
+    {
+        // 잘못된 월드 타입과 손상된 기록의 적용 거부
+        return false;
+    }
 
-	// 로어 필드는 초기 슬롯 호환을 위해 선택 사항이지만 존재하면 정확한 타입과 구조를 요구하는 검사
-	if (DataFields.Contains(FMD_LoreData::DataFieldKey) == true)
-	{
-		FMD_LoreData LoreData;
-		if (GetDataField(FMD_LoreData::DataFieldKey, LoreData) == false || LoreData.IsStructurallyValid() == false)
-		{
-			return false;
-		}
-	}
+    // 최초 저장 형식부터 포함되는 로어 발견 원장 조회
+    FMD_LoreData LoreData;
+    // 로어 필드 누락을 빈 진행으로 대체하지 않고 거부
+    if (GetDataField(FMD_LoreData::DataFieldKey, LoreData) == false || LoreData.IsStructurallyValid() == false)
+    {
+        // 누락되거나 손상된 로어 원장의 적용 거부
+        return false;
+    }
 
 	// 빈 플레이어 식별자가 다른 사용자의 개인 데이터를 가리키지 않도록 하는 검사
 	for (const TPair<FString, FMD_PlayerData>& PlayerField : PlayerFields)
@@ -380,49 +240,6 @@ bool FMD_GameData::IsValidForLoad() const
 			return false;
 		}
 	}
-
-	return true;
-}
-
-void UMD_SaveGame::ApplyMaxSaveCountLimit(const int32& MaxAutoSaveCount, const int32& MaxUserSaveCount)
-{
-	// 가장 최근 항목이 앞에 배치되므로 목록 끝의 오래된 자동 저장을 제거하는 처리
-	if (AutoSaveList.Num() > MaxAutoSaveCount)
-	{
-		AutoSaveList.SetNum(MaxAutoSaveCount);
-	}
-
-	// 가장 최근 항목이 앞에 배치되므로 목록 끝의 오래된 사용자 저장을 제거하는 처리
-	if (UserSaveList.Num() > MaxUserSaveCount)
-	{
-		UserSaveList.SetNum(MaxUserSaveCount);
-	}
-}
-
-bool UMD_SaveGame::MigrateAndValidate()
-{
-	// 현재 실행 파일보다 새로운 컨테이너를 실수로 현재 형식으로 덮어쓰지 않기 위한 검사
-	if (SchemaVersion > FMD_GameData::CurrentSchemaVersion)
-	{
-		return false;
-	}
-
-	// 개별 슬롯을 승격하고 손상된 항목만 제거하여 나머지 슬롯을 복구하기 위한 공통 처리
-	auto MigrateList = [](TArray<FMD_GameData>& DataList)
-	{
-		for (int32 DataIndex = DataList.Num() - 1; DataIndex >= 0; --DataIndex)
-		{
-			FMD_GameData& GameData = DataList[DataIndex];
-			if (GameData.MigrateToCurrentVersion() == false || GameData.IsValidForLoad() == false)
-			{
-				DataList.RemoveAt(DataIndex);
-			}
-		}
-	};
-
-	MigrateList(AutoSaveList);
-	MigrateList(UserSaveList);
-	SchemaVersion = FMD_GameData::CurrentSchemaVersion;
 
 	return true;
 }

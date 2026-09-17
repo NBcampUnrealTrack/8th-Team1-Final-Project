@@ -11,7 +11,6 @@
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
 #include "UObject/ObjectVersion.h"
 #include "UObject/UnrealType.h"
-#include "UObject/StrongObjectPtr.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 
 struct FMD_PreparedSlotWrite
@@ -101,8 +100,9 @@ namespace
     class FSlotArchive : public FObjectAndNameAsStringProxyArchive
     {
     public:
-        FSlotArchive(FArchive& Inner, bool bInSummary = false)
-            : FObjectAndNameAsStringProxyArchive(Inner, true), bSummary(bInSummary)
+        FSlotArchive(FArchive& Inner)
+            // 객체 이름과 경로의 엔진 표준 직렬화 사용
+            : FObjectAndNameAsStringProxyArchive(Inner, true)
         {
             ArMaxSerializeSize = 128 * 1024 * 1024;
         }
@@ -116,7 +116,6 @@ namespace
             const FArrayProperty* Array = CastField<FArrayProperty>(Property);
             if (!Array) return;
             int32 Limit = (64 * 1024 * 1024) / FMath::Max(1, Array->Inner->GetElementSize());
-            if (Property->GetOwnerStruct() == UMD_SaveGame::StaticClass()) Limit = MaxStoredSaveSlots;
             if (Property->GetOwnerStruct() == FMD_WallContaminationRecord::StaticStruct())
                 Limit = 2 * 1024 * 1024;
             int32& Count = *static_cast<int32*>(Data);
@@ -126,53 +125,11 @@ namespace
                 SetCriticalError();
             }
         }
-        virtual FString GetArchiveName() const override
-        {
-            return bSummary ? TEXT("MDLegacySlotIndex") : TEXT("MDSlotArchive");
-        }
-        virtual bool ShouldSkipProperty(const FProperty* Property) const override
-        {
-            return (bSummary && Property
-                && (Property->GetOwnerStruct() == FMD_WorldData::StaticStruct()
-                    || (Property->GetOwnerStruct() == FMD_GameData::StaticStruct()
-                        && Property->GetFName() == TEXT("PlayerFields"))))
-                || FObjectAndNameAsStringProxyArchive::ShouldSkipProperty(Property);
-        }
+
     private:
-        bool bSummary;
         const FProperty* LastSerializedProperty = nullptr;
     };
-    bool ReadLegacyHeader(FArchive& Ar)
-    {
-        int32 Magic = 0, Version = 0;
-        Ar << Magic << Version;
-        if (Magic != 0x53415647 || Version < 1 || Version > 3) return false;
-        FPackageFileVersion PackageVersion;
-        if (Version >= 3) Ar << PackageVersion;
-        else
-        {
-            int32 UE4 = 0;
-            Ar << UE4;
-            PackageVersion = FPackageFileVersion::CreateUE4Version(UE4);
-        }
-        FEngineVersion EngineVersion;
-        Ar << EngineVersion;
-        Ar.SetUEVer(PackageVersion);
-        Ar.SetEngineVer(EngineVersion);
-        if (Version >= 2)
-        {
-            int32 Format = 0;
-            Ar << Format;
-            if (Format <= static_cast<int32>(ECustomVersionSerializationFormat::Unknown)
-                || Format > static_cast<int32>(ECustomVersionSerializationFormat::Latest)) return false;
-            FCustomVersionContainer Versions;
-            Versions.Serialize(Ar, static_cast<ECustomVersionSerializationFormat>(Format));
-            Ar.SetCustomVersions(Versions);
-        }
-        FString ClassName;
-        Ar << ClassName;
-        return !Ar.IsError() && ClassName == UMD_SaveGame::StaticClass()->GetPathName();
-    }
+
     bool IsPayloadId(const FString& Id)
     {
         FGuid Guid;
@@ -180,10 +137,9 @@ namespace
     }
     bool IsSummaryValid(const FMD_GameData& Row)
     {
-        return Row.bIsSlotSummary && !Row.IsEmpty() && Row.SchemaVersion <= FMD_GameData::CurrentSchemaVersion
-            && (IsPayloadId(Row.SlotPayloadId) || (Row.SlotPayloadId.IsEmpty()
-                && Row.LegacyDataOffset > 0 && Row.LegacyDataBytes > 0
-                && Row.LegacyDataOffset <= Row.LegacyFileBytes - Row.LegacyDataBytes));
+        // 현재 스키마와 실제 개별 파일 식별자를 가진 요약만 허용
+        return Row.bIsSlotSummary == true && Row.IsEmpty() == false && Row.SchemaVersion == FMD_GameData::CurrentSchemaVersion
+            && IsPayloadId(Row.SlotPayloadId) == true;
     }
     bool WriteRawFile(const FString& Path, const TArray<uint8>& Bytes)
     {
@@ -236,13 +192,15 @@ namespace
         return !Ar.IsError() && Out.Num() <= MaxMetadataBytes - DigestBytes;
     }
 }
-FMD_SaveSlotStore::FMD_SaveSlotStore(FString InRoot, FString InLegacyFile)
-    : Root(FPaths::ConvertRelativePathToFull(InRoot)), LegacyFile(FPaths::ConvertRelativePathToFull(InLegacyFile)) {}
+FMD_SaveSlotStore::FMD_SaveSlotStore(FString InRoot)
+    // 상대 경로 영향을 받지 않는 저장 루트 보관
+    : Root(FPaths::ConvertRelativePathToFull(InRoot))
+{
+}
 FMD_SaveSlotStore FMD_SaveSlotStore::ForProject()
 {
-    const FString Saves = FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("SaveGames"));
-    return FMD_SaveSlotStore(FPaths::Combine(Saves, TEXT("MarineDemolitionSlotsV1")),
-        FPaths::Combine(Saves, TEXT("MarineDemolitionGame.sav")));
+    // 최초 배포 스키마의 독립 저장 경로로 개발용 인덱스와 충돌 방지
+    return FMD_SaveSlotStore(FPaths::Combine(FPaths::ProjectSavedDir(), TEXT("SaveGames/MarineDemolition/Schema1")));
 }
 FMD_GameData FMD_SaveSlotStore::MakeSummary(const FMD_GameData& Data)
 {
@@ -298,100 +256,110 @@ bool FMD_SaveSlotStore::ReadIndex(FMD_SaveSlotIndex& Out) const
         return true;
     }
     // A damaged new index must not resurrect deleted rows from the untouched old file.
-    if (IFileManager::Get().FileExists(*APath) || IFileManager::Get().FileExists(*BPath)) return false;
-    if (IFileManager::Get().FileExists(*LegacyFile)) return ReadLegacyIndex(Out);
+    if (IFileManager::Get().FileExists(*APath) == true || IFileManager::Get().FileExists(*BPath) == true) return false;
     Out = FMD_SaveSlotIndex();
     return true;
 }
-bool FMD_SaveSlotStore::ReadLegacyIndex(FMD_SaveSlotIndex& Out) const
-{
-    TRACE_CPUPROFILER_EVENT_SCOPE(MD_SaveSlots_ReadLegacyMetadata);
-    TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*LegacyFile, FILEREAD_Silent));
-    if (!Reader) return false;
-    Reader->ArMaxSerializeSize = 128 * 1024 * 1024;
-    if (!ReadLegacyHeader(*Reader)) return false;
-    FSlotArchive Ar(*Reader, true);
-    TStrongObjectPtr<UMD_SaveGame> Legacy(NewObject<UMD_SaveGame>());
-    // Engine owns all versioned class/array tags. The archive seeks over world properties;
-    // native game-data serialization only records each small row's original byte range.
-    Legacy->Serialize(Ar);
-    if (Ar.IsError() || Ar.Tell() != Ar.TotalSize()
-        || Legacy->SchemaVersion > FMD_GameData::CurrentSchemaVersion
-        || Legacy->AutoSaveList.Num() > MaxStoredSaveSlots || Legacy->UserSaveList.Num() > MaxStoredSaveSlots) return false;
-    FMD_SaveSlotIndex Loaded;
-    for (const bool bAuto : { true, false })
-    {
-        TArray<FMD_GameData>& Input = bAuto ? Legacy->AutoSaveList : Legacy->UserSaveList;
-        TArray<FMD_GameData>& Output = bAuto ? Loaded.Auto : Loaded.User;
-        for (FMD_GameData& Data : Input)
-        {
-            FMD_GameData Row = MakeSummary(Data);
-            Row.LegacyDataOffset = Data.LegacyDataOffset;
-            Row.LegacyDataBytes = Data.LegacyDataBytes;
-            Row.LegacyFileBytes = Reader->TotalSize();
-            Row.LegacyFileTime = IFileManager::Get().GetTimeStamp(*LegacyFile);
-            Data.DataFields.Remove(FMD_WorldData::DataFieldKey);
-            if (Data.MigrateToCurrentVersion() && Data.IsValidForLoad() && IsSummaryValid(Row))
-                Output.Add(MoveTemp(Row));
-        }
-    }
-    Out = MoveTemp(Loaded);
-    return true;
-}
+
 bool FMD_SaveSlotStore::ReadSlot(const FMD_GameData& Summary, FMD_GameData& Out) const
 {
-    TRACE_CPUPROFILER_EVENT_SCOPE(MD_SaveSlots_ReadOne);
-    if (!IsSummaryValid(Summary)) return false;
-    const bool bLegacy = Summary.SlotPayloadId.IsEmpty();
-    const FString Path = bLegacy ? LegacyFile : FPaths::Combine(Root, Summary.SlotPayloadId + TEXT(".mdslot"));
+    // 지원하는 스키마와 개별 파일 식별자를 확인한 뒤 슬롯 접근
+    if (IsSummaryValid(Summary) == false)
+    {
+        // 현재 형식이 아닌 슬롯 요약 거부
+        return false;
+    }
+    // 검증된 식별자로 읽을 개별 저장 파일 경로 구성
+    FString Path = FPaths::Combine(Root, Summary.SlotPayloadId + TEXT(".mdslot"));
+    // 파일 수명을 관리할 읽기 아카이브 생성
     TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*Path, FILEREAD_Silent));
-    if (!Reader) return false;
+    // 파일이 없거나 열리지 않은 경우 적용 데이터 생성 차단
+    if (Reader.Get() == nullptr)
+    {
+        // 개별 저장 파일 열기 실패 반환
+        return false;
+    }
+    // 손상된 메타데이터의 과도한 직렬화 메모리 사용 제한
     Reader->ArMaxSerializeSize = 128 * 1024 * 1024;
-    if (bLegacy)
+    // 파일 해시와 현재 파일 헤더 형식 확인
+    if (VerifyFile(*Reader) == false || EngineHeader(*Reader, 1) == false)
     {
-        if (Reader->TotalSize() != Summary.LegacyFileBytes
-            || IFileManager::Get().GetTimeStamp(*LegacyFile) != Summary.LegacyFileTime
-            || !ReadLegacyHeader(*Reader)) return false;
-        Reader->Seek(Summary.LegacyDataOffset);
+        // 손상되거나 다른 형식인 파일 거부
+        return false;
     }
-    else if (!VerifyFile(*Reader) || !EngineHeader(*Reader, 1)) return false;
+    // 제한된 크기로 읽을 메타데이터 영역 길이 준비
+    int32 Size = 0;
+    // 저장된 메타데이터 바이트 길이 조회
+    *Reader << Size;
+    // 파일 범위를 벗어나거나 상한을 초과한 메타데이터 길이 차단
+    if (Reader->IsError() == true || Size < 0 || Size > MaxMetadataBytes
+        || Size > Reader->TotalSize() - Reader->Tell() - DigestBytes)
+    {
+        // 메타데이터 영역 손상의 실패 반환
+        return false;
+    }
+    // 직렬화된 저장 구조체를 읽을 제한된 메모리 버퍼
+    TArray<uint8> Metadata;
+    // 검증한 바이트 수만큼 버퍼 할당
+    Metadata.SetNumUninitialized(Size);
+    // 파일의 메타데이터를 메모리로 읽기
+    Reader->Serialize(Metadata.GetData(), Size);
+    // 압축 셀 본문과 분리한 메타데이터 아카이브 구성
+    FMemoryReader MetadataReader(Metadata, true);
+    // 현재 파일 헤더에 기록된 엔진 직렬화 버전 적용
+    MetadataReader.SetUEVer(Reader->UEVer());
+    // 구조체 해석에 필요한 엔진 버전 전달
+    MetadataReader.SetEngineVer(Reader->EngineVer());
+    // 엔진 자료형의 사용자 정의 직렬화 버전 전달
+    MetadataReader.SetCustomVersions(Reader->GetCustomVersions());
+    // UObject 참조를 경로로 읽는 현재 슬롯 아카이브 구성
+    FSlotArchive Ar(MetadataReader);
+    // 검증 완료 전 호출자의 데이터를 변경하지 않는 임시 저장 구조체
     FMD_GameData Loaded;
-    if (bLegacy)
+    // 태그 기반 구조체 메타데이터 복원
+    FMD_GameData::StaticStruct()->SerializeItem(Ar, &Loaded, nullptr);
+    // 잘못된 메타데이터 영역과 지원하지 않는 스키마를 셀 본문 읽기 전에 차단
+    if (Ar.IsError() == true || Ar.Tell() != Size || Loaded.SchemaVersion != FMD_GameData::CurrentSchemaVersion)
     {
-        FSlotArchive Ar(*Reader);
-        FMD_GameData::StaticStruct()->SerializeItem(Ar, &Loaded, nullptr);
-        if (Ar.IsError()) return false;
+        // 메타데이터 형식 또는 버전 불일치 반환
+        return false;
     }
-    else
+    // 별도 저장된 압축 셀 본문을 연결할 월드 필드 조회
+    FInstancedStruct* Field = Loaded.DataFields.Find(FMD_WorldData::DataFieldKey);
+    // 현재 파일 형식에서 필수인 월드 필드 타입 확인
+    if (Field == nullptr || Field->IsValid() == false || Field->GetScriptStruct() != FMD_WorldData::StaticStruct())
     {
-        int32 Size = 0;
-        *Reader << Size;
-        if (Reader->IsError() || Size < 0 || Size > MaxMetadataBytes
-            || Size > Reader->TotalSize() - Reader->Tell() - DigestBytes) return false;
-        TArray<uint8> Metadata;
-        Metadata.SetNumUninitialized(Size);
-        Reader->Serialize(Metadata.GetData(), Size);
-        FMemoryReader MetadataReader(Metadata, true);
-        MetadataReader.SetUEVer(Reader->UEVer());
-        MetadataReader.SetEngineVer(Reader->EngineVer());
-        MetadataReader.SetCustomVersions(Reader->GetCustomVersions());
-        FSlotArchive Ar(MetadataReader);
-        FMD_GameData::StaticStruct()->SerializeItem(Ar, &Loaded, nullptr);
-        if (Ar.IsError() || Ar.Tell() != Size) return false;
-        FInstancedStruct* Field = Loaded.DataFields.Find(FMD_WorldData::DataFieldKey);
-        FMD_WorldData* World = Field ? Field->GetMutablePtr<FMD_WorldData>() : nullptr;
-        int32 Count = 0;
-        *Reader << Count;
-        if (Reader->IsError() || Count != (World ? World->WallContaminations.Num() : 0)) return false;
-        if (World)
-            for (FMD_WallContaminationRecord& Record : World->WallContaminations)
-                Record.CellPayload.Serialize(*Reader);
+        // 월드 필드가 없거나 다른 타입인 파일 거부
+        return false;
     }
-    const int64 ExpectedEnd = bLegacy ? Summary.LegacyDataOffset + Summary.LegacyDataBytes : Reader->TotalSize() - DigestBytes;
-    if (Reader->IsError() || Reader->Tell() != ExpectedEnd || Loaded.UniqueName != Summary.UniqueName
-        || Loaded.MapPackagePath != Summary.MapPackagePath || Loaded.SaveTime != Summary.SaveTime
-        || !Loaded.MigrateToCurrentVersion() || !Loaded.IsValidForLoad()) return false;
+    // 타입을 검증한 월드 필드의 본문 연결 대상 조회
+    FMD_WorldData* World = Field->GetMutablePtr<FMD_WorldData>();
+    // 월드의 표면 기록 수와 비교할 본문 개수 준비
+    int32 Count = 0;
+    // 저장된 압축 셀 본문 개수 조회
+    *Reader << Count;
+    // 표면 기록과 본문 개수가 다른 파일의 부분 복원 차단
+    if (Reader->IsError() == true || Count != World->WallContaminations.Num())
+    {
+        // 압축 본문 개수 불일치 반환
+        return false;
+    }
+    // 각 표면 기록에 해당하는 압축 셀 본문 복원
+    for (FMD_WallContaminationRecord& Record : World->WallContaminations)
+    {
+        // 표면별 압축 본문 읽기
+        Record.CellPayload.Serialize(*Reader);
+    }
+    // 파일 경계와 요약 식별 정보 및 전체 저장 구조 검증
+    if (Reader->IsError() == true || Reader->Tell() != Reader->TotalSize() - DigestBytes || Loaded.UniqueName != Summary.UniqueName
+        || Loaded.MapPackagePath != Summary.MapPackagePath || Loaded.SaveTime != Summary.SaveTime || Loaded.IsValidForLoad() == false)
+    {
+        // 손상 또는 다른 슬롯 본문의 적용 거부
+        return false;
+    }
+    // 모든 검사를 통과한 현재 형식의 데이터만 호출자에 전달
     Out = MoveTemp(Loaded);
+    // 개별 슬롯 읽기 성공 반환
     return true;
 }
 bool FMD_SaveSlotStore::WriteManifest(FMD_SaveSlotIndex& Index) const

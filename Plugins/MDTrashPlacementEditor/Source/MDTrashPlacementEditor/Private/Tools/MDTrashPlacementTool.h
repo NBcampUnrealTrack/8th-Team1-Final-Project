@@ -64,6 +64,16 @@ public:
 			GetOptions = "GetTrashKindIdOptions"))
 	FName TrashKindId = TEXT("DrinkCan");
 
+	/** 선택한 품목의 이름별 메시 중에서 선택한다. 배치 성공 후에만 다음 변형을 선택한다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Selection", meta = (DisplayName = "Random Variant"))
+	bool bRandomVariant = false;
+
+	/** Random By Category에서는 품목의 첫 Variant 또는 Random Variant를 쓴다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Selection",
+		meta = (EditCondition = "!bRandomVariant && SelectionMode == EMDTrashPlacementSelectionMode::SingleKind",
+			GetOptions = "GetTrashVariantIdOptions", DisplayName = "Variant"))
+	FName TrashVariantId;
+
 	/**
 	 * Random By Category에서 허용할 Category 태그의 합집합.
 	 * Score.Sorting은 전체 종류, Score.Sorting.Metal은 금속 종류만 허용한다.
@@ -87,17 +97,80 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Placement|Orientation")
 	bool bAlignToSurface = true;
 
-	UPROPERTY(EditAnywhere, Category = "Placement|Orientation", meta = (UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
-	float RotationOffsetDegrees = 0.0f;
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Pitch", meta = (DisplayName = "Random Pitch"))
+	bool bRandomizePitch = false;
 
-	UPROPERTY(EditAnywhere, Category = "Placement|Orientation")
+	/** Random이 꺼져 있을 때만 사용할 고정 각도. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Pitch",
+		meta = (DisplayName = "Pitch", EditCondition = "!bRandomizePitch", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float PitchOffsetDegrees = 0.0f;
+
+	/** 랜덤 회전 각도의 최솟값. Min/Max 입력 순서가 반대여도 내부에서 정렬한다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Pitch",
+		meta = (DisplayName = "Min Pitch", EditCondition = "bRandomizePitch", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MinimumPitchDegrees = -180.0f;
+
+	/** 랜덤 회전 각도의 최댓값. Min과 같으면 해당 값으로 고정된다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Pitch",
+		meta = (DisplayName = "Max Pitch", EditCondition = "bRandomizePitch", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MaximumPitchDegrees = 180.0f;
+
+	/** 선택된 각도(고정값 또는 랜덤값)의 부호를 반전한다. 새 난수는 생성하지 않는다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Pitch", meta = (DisplayName = "Invert Pitch"))
+	bool bInvertPitch = false;
+
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Roll", meta = (DisplayName = "Random Roll"))
+	bool bRandomizeRoll = false;
+
+	/** Random이 꺼져 있을 때만 사용할 고정 각도. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Roll",
+		meta = (DisplayName = "Roll", EditCondition = "!bRandomizeRoll", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float RollOffsetDegrees = 0.0f;
+
+	/** 랜덤 회전 각도의 최솟값. Min/Max 입력 순서가 반대여도 내부에서 정렬한다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Roll",
+		meta = (DisplayName = "Min Roll", EditCondition = "bRandomizeRoll", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MinimumRollDegrees = -180.0f;
+
+	/** 랜덤 회전 각도의 최댓값. Min과 같으면 해당 값으로 고정된다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Roll",
+		meta = (DisplayName = "Max Roll", EditCondition = "bRandomizeRoll", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MaximumRollDegrees = 180.0f;
+
+	/** 선택된 각도(고정값 또는 랜덤값)의 부호를 반전한다. 새 난수는 생성하지 않는다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Roll", meta = (DisplayName = "Invert Roll"))
+	bool bInvertRoll = false;
+
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Yaw", meta = (DisplayName = "Random Yaw"))
 	bool bRandomizeRotation = false;
 
-	UPROPERTY(
-		EditAnywhere,
-		Category = "Placement|Orientation",
-		meta = (EditCondition = "bRandomizeRotation", ClampMin = "0.0", UIMax = "180.0", ForceUnits = "deg"))
-	float RandomRotationRangeDegrees = 180.0f;
+	/** Random이 꺼져 있을 때만 사용할 고정 각도. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Yaw",
+		meta = (DisplayName = "Yaw", EditCondition = "!bRandomizeRotation", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float RotationOffsetDegrees = 0.0f;
+
+	/** 랜덤 회전 각도의 최솟값. Min/Max 입력 순서가 반대여도 내부에서 정렬한다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Yaw",
+		meta = (DisplayName = "Min Yaw", EditCondition = "bRandomizeRotation", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MinimumYawDegrees = -180.0f;
+
+	/** 랜덤 회전 각도의 최댓값. Min과 같으면 해당 값으로 고정된다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Yaw",
+		meta = (DisplayName = "Max Yaw", EditCondition = "bRandomizeRotation", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MaximumYawDegrees = 180.0f;
+
+	/** 선택된 각도(고정값 또는 랜덤값)의 부호를 반전한다. 새 난수는 생성하지 않는다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Yaw", meta = (DisplayName = "Invert Yaw"))
+	bool bInvertYaw = false;
 
 	UPROPERTY(EditAnywhere, Category = "Placement|Scale", meta = (ClampMin = "0.01", UIMin = "0.01"))
 	float UniformScale = 1.0f;
@@ -133,6 +206,9 @@ public:
 private:
 	UFUNCTION()
 	TArray<FName> GetTrashKindIdOptions() const;
+
+	UFUNCTION()
+	TArray<FName> GetTrashVariantIdOptions() const;
 };
 
 UCLASS()
@@ -172,7 +248,7 @@ private:
 	FInputDeviceRay LastHoverRay;
 
 	bool ValidatePlacementSettings() const;
-	bool PlaceTrashAtHit(const FHitResult& HitResult, FName TrashKindId);
+	bool PlaceTrashAtHit(const FHitResult& HitResult, FName TrashKindId, FName VariantId, UStaticMesh* PreviewMesh);
 	bool EraseTrashItem(AMD_TrashItem* TrashItem);
 	bool TraceWorld(const FInputDeviceRay& DevicePos, FHitResult& OutHit) const;
 	bool TraceTrash(const FInputDeviceRay& DevicePos, AMD_TrashItem*& OutTrashItem, FHitResult& OutHit) const;
@@ -182,8 +258,10 @@ private:
 	bool IsEraseMode() const;
 	bool IsRandomSelectionMode() const;
 	TArray<FName> BuildEligibleTrashKindIds() const;
-	FName ResolveTrashKindId(const FHitResult& HitResult) const;
-	UStaticMesh* ResolveTrashMesh(FName TrashKindId) const;
+	FName ResolveTrashKindId() const;
+	uint32 GetPlacementRandomSeed(uint32 Salt) const;
+	bool ResolveTrashAppearance(FName TrashKindId, FName& OutVariantId, UStaticMesh*& OutMesh);
+	UStaticMesh* ResolveTrashMesh(FName TrashKindId, FName VariantId);
 	FTransform BuildPlacementTransform(const FHitResult& HitResult, const UStaticMesh* StaticMesh) const;
 	double CalculatePlacementExtent(
 		const UStaticMesh* StaticMesh,
@@ -191,7 +269,7 @@ private:
 		const FVector& SurfaceLocation,
 		const FVector& Direction) const;
 	bool IsPlacementSafe(const UStaticMesh* StaticMesh, const FTransform& Transform) const;
-	bool IsPlacementAllowedAtHit(const FHitResult& HitResult, FName TrashKindId) const;
+	bool IsPlacementAllowedAtHit(const FHitResult& HitResult, const UStaticMesh* StaticMesh) const;
 	void UpdateHoverFromHit(const FHitResult& HitResult);
 	void SetupGhostPreview();
 	void UpdateGhostPreview(const FHitResult& HitResult);
@@ -217,6 +295,10 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UStaticMesh> LastPlacementMesh;
 
+	/** 이 도구에서 실제 선택한 메시만 유지한다. 매 Hover에서 동기 로드를 반복하지 않는다. */
+	UPROPERTY(Transient)
+	TMap<FSoftObjectPath, TObjectPtr<UStaticMesh>> ResolvedMeshes;
+
 	TArray<TWeakObjectPtr<AMD_TrashItem>> StrokePlacedTrashItems;
 	FTransform LastPlacementTransform = FTransform::Identity;
 	FVector HoverLocation = FVector::ZeroVector;
@@ -226,6 +308,8 @@ private:
 	FVector LastPlacementSurfaceLocation = FVector::ZeroVector;
 	double DistanceSinceLastPlacement = 0.0;
 	EMDTrashPlacementToolMode ActiveStrokeMode = EMDTrashPlacementToolMode::Place;
+	/** 마우스 이동/거절/스트로크 시작에서는 바꾸지 않는다. 성공한 배치만 진행한다. */
+	uint32 NextPlacementIndex = 0;
 	int32 StrokePlacementCount = 0;
 	int32 StrokeEraseCount = 0;
 	bool bHasHoverHit = false;

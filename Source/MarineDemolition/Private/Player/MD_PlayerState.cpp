@@ -5,6 +5,8 @@
 #include "Audio/MD_AudioSubsystem.h"
 #include "GameFramework/PlayerController.h"
 #include "Character/MD_Character.h"
+#include "Data/Customization/MD_CharacterRosterData.h"
+#include "Gameplay/Customization/MD_CharacterAppearanceSettings.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
@@ -19,6 +21,7 @@ void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_PlayerState, ReturnStatus);
+	DOREPLIFETIME(AMD_PlayerState, ReplicatedAppearance);
 	DOREPLIFETIME_CONDITION(AMD_PlayerState, PurchasedShopItemIds, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(AMD_PlayerState, BlockedShopItemIds, COND_OwnerOnly);
 }
@@ -35,6 +38,9 @@ void AMD_PlayerState::CopyProperties(APlayerState* PlayerState)
 		TargetPlayerState->PurchasedShopItemIds = PurchasedShopItemIds;
 		// 구매 이력과 같은 수명으로 업그레이드 소스 구매 금지 유지
 		TargetPlayerState->BlockedShopItemIds = BlockedShopItemIds;
+
+		// 캐릭터 외형을 Seamless Travel 이후에도 유지하기 위한 복사
+		TargetPlayerState->ReplicatedAppearance = ReplicatedAppearance;
 	}
 }
 
@@ -385,4 +391,26 @@ void AMD_PlayerState::Revive()
 	CharacterAttributeSet->SetHealth(ReviveAmount);
 
 	UE_LOG(LogTemp, Log, TEXT("[Health][Server] 부활 (HP %.1f)"), ReviveAmount);
+}
+
+void AMD_PlayerState::SetAppearance(const FMD_CharacterAppearance& NewAppearance)
+{
+	if (HasAuthority() == false)
+	{
+		return;
+	}
+
+	// 클라이언트가 보낸 인덱스는 로스터 범위로 정리한다
+	const UMD_CharacterAppearanceSettings* Settings = UMD_CharacterAppearanceSettings::Get();
+	const UMD_CharacterRosterData* Roster = IsValid(Settings) == true ? Settings->GetRoster() : nullptr;
+	ReplicatedAppearance = IsValid(Roster) == true ? Roster->Sanitize(NewAppearance) : NewAppearance;
+
+	// Listen Server 호스트에서도 즉시 캐릭터에 반영
+	OnRep_ReplicatedAppearance();
+	ForceNetUpdate();
+}
+
+void AMD_PlayerState::OnRep_ReplicatedAppearance()
+{
+	OnAppearanceChanged.Broadcast();
 }

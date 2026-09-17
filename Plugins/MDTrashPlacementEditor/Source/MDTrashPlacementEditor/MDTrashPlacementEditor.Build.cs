@@ -12,6 +12,7 @@ public class MDTrashPlacementEditor : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
+			"DeveloperSettings",
 			"GameplayTags",
 			"Slate",
 			"SlateCore",

@@ -8,6 +8,8 @@
 #include "Types/Score/MD_ScoreTypes.h"
 #include "MD_MerchantSubsystem.generated.h"
 
+struct FMD_GameData;
+
 /**
  * DayPersistenceSubsystem과 같은 패턴으로, Day전환해도 계약3일동안 크레딧과 퀘스트가 유지되어야하므로
  * Gameinstance에 수명을 둠. 값 변경 처리는 서버에서 하고 클라 복제는 GameState에서 담당
@@ -34,6 +36,11 @@ class MARINEDEMOLITION_API UMD_MerchantSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
 	
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+    virtual void Deinitialize() override;
+
 public:
 
 	FMD_OnMerchantStateChanged OnMerchantStateChanged;
@@ -266,4 +273,13 @@ private:
 
 	// 기획상 모든 호감도 구간에 공통으로 적용되는 일일 대출 이자율
 	static constexpr float DailyInterestRate = 0.05f;
+protected:
+    // 소유한 기능 상태를 저장 이벤트의 구조체에 기록하는 함수
+    UFUNCTION()
+    void CollectGameData(UPARAM(ref) FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
+
+    // 전달된 저장 데이터에서 담당 태그의 필드를 찾아 직접 적용하는 함수
+    UFUNCTION()
+    void OverwriteGameData(const FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
+
 };

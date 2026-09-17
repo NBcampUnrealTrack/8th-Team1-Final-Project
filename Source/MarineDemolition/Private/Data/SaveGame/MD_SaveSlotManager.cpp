@@ -1,45 +1,28 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "Data/SaveGame/MD_SaveSlotStore.h"
-#include "Async/Async.h"
 #include "GameFramework/PlayerState.h"
 
+#include "Game/MD_GameModeBase.h"
 #include "Game/MD_GameStateBase.h"
-#include "Character/MD_Character.h"
-#include "Component/Equipment/MD_EquipHotbarComponent.h"
-#include "Gameplay/Lore/MD_LoreSubsystem.h"
-#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Util/MD_LogUtility.h"
 
-const FString UMD_SaveSlotManager::GameSaveFileName = TEXT("MarineDemolitionGame");
-
-namespace
-{
-	// 온라인 계정 식별자를 우선 사용하고 오프라인 환경에서는 플레이어 이름으로 대체하는 키 생성 함수
-	FString BuildPlayerPersistenceKey(const APlayerState* PlayerState)
-	{
-		if (IsValid(PlayerState) == false)
-		{
-			return FString();
-		}
-
-		const FUniqueNetIdRepl UniqueNetID = PlayerState->GetUniqueId();
-		const FString NetworkKey = UniqueNetID.IsValid() == true ? UniqueNetID.ToString() : FString();
-		return NetworkKey.IsEmpty() == false ? NetworkKey : PlayerState->GetPlayerName();
-	}
-
-
-}
-
 void UMD_SaveSlotManager::AddReferencedObjects(UObject* Object, FReferenceCollector& Collector)
 {
+    // 맵 이동을 넘어 유지되는 저장 데이터를 보유한 관리자 조회
     auto* Self = CastChecked<UMD_SaveSlotManager>(Object);
-    // Shared C++ storage survives travel, but does not expose its UObject fields to GC.
-    for (const auto& Data : {Self->SelectedLoadGameData, Self->TemporaryGameData})
-        if (Data.IsValid())
+    // 공유 저장 구조체 내부의 UObject 참조를 GC 추적 대상으로 등록
+    for (auto& Data : {Self->SelectedLoadGameData, Self->TemporaryGameData})
+    {
+        // 실제 저장 데이터가 존재하는 경우에만 구조체 참조 수집
+        if (Data.IsValid() == true)
+        {
+            // 확장 저장 필드에 포함된 객체 참조의 조기 수거 방지
             Collector.AddPropertyReferencesWithStructARO(FMD_GameData::StaticStruct(), Data.Get(), Self);
+        }
+    }
     Super::AddReferencedObjects(Object, Collector);
 }
 
@@ -53,6 +36,10 @@ void UMD_SaveSlotManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UMD_SaveSlotManager::Deinitialize()
 {
+    // 종료된 데이터 소유자를 다음 이벤트에서 참조하지 않도록 구독 정리
+    OnCollectGameData.Clear();
+    // 종료된 복원 구독자의 참조 해제
+    OnOverwriteGameData.Clear();
 	// GameInstance 종료 이후 보류 데이터가 다음 World에 적용되지 않도록 전환 상태 초기화
 	ResetTemporaryGameData();
     SelectedLoadGameData.Reset();
@@ -62,10 +49,44 @@ void UMD_SaveSlotManager::Deinitialize()
 
 bool UMD_SaveSlotManager::SaveGameData(const FString& DataName, bool bIsAuto)
 {
-    if (!HasServerAuthority() || bAsyncOperationInProgress
-        || (bIsAuto ? MaxAutoSaveSlotCount : MaxUserSaveSlotCount) <= 0
-        || (!bIsAuto && (DataName.IsEmpty() || DataName.Contains(TEXT("AutoSave"))))
-        || !CollectGameData()) return false;
+    // 관리자의 권한과 진행 중인 작업을 함께 확인
+    if (HasServerAuthority() == false || bAsyncOperationInProgress == true || bGameDataOperationInProgress == true)
+    {
+        // 실행할 수 없는 저장 요청 종료
+        return false;
+    }
+    // 선택한 저장 종류의 슬롯 허용 개수 확인
+    if ((bIsAuto ? MaxAutoSaveSlotCount : MaxUserSaveSlotCount) <= 0)
+    {
+        // 허용 슬롯이 없는 저장 요청 종료
+        return false;
+    }
+    // 자동 저장은 현재 게임 모드의 맵 제외 정책을 수집 전에 확인
+    if (bIsAuto == true)
+    {
+        // 서버 권한 검사로 확인한 월드의 게임 모드 조회
+        AMD_GameModeBase* GameMode = GetWorld()->GetAuthGameMode<AMD_GameModeBase>();
+        if (IsValid(GameMode) == true && GameMode->IsAutoSaveAllowed() == false)
+        {
+            // 제외 맵의 회차 데이터와 자동 저장 슬롯 보존
+            return false;
+        }
+    }
+    else
+    {
+        // 같은 이름 값의 누락과 예약 이름 사용을 함께 확인
+        if (DataName.IsEmpty() == true || DataName.Contains(TEXT("AutoSave")) == true)
+        {
+            // 유효하지 않은 사용자 저장 이름 거부
+            return false;
+        }
+    }
+    // 입력 검증을 마친 요청의 실제 데이터 수집 결과 확인
+    if (CollectGameData() == false)
+    {
+        // 수집에 실패한 저장 요청 종료
+        return false;
+    }
     TemporaryGameData->UniqueName = bIsAuto
         ? FString::Printf(TEXT("AutoSave_%d"), AutoSaveIndex + 1) : DataName;
     const bool bSuccess = FMD_SaveSlotStore::ForProject().Save(
@@ -78,16 +99,32 @@ bool UMD_SaveSlotManager::SaveGameData(const FString& DataName, bool bIsAuto)
 
 bool UMD_SaveSlotManager::RemoveGameData(const FMD_GameData& GameData)
 {
-    return HasServerAuthority() && !bAsyncOperationInProgress
-        && FMD_SaveSlotStore::ForProject().Remove(GameData.UniqueName);
+    // 관리자의 권한과 진행 중인 작업을 함께 확인
+    if (HasServerAuthority() == false || bAsyncOperationInProgress == true || bGameDataOperationInProgress == true)
+    {
+        // 실행할 수 없는 삭제 요청 종료
+        return false;
+    }
+    // 실행 상태 검증 후 실제 슬롯 삭제 결과 반환
+    return FMD_SaveSlotStore::ForProject().Remove(GameData.UniqueName);
 }
 
 TArray<FMD_GameData> UMD_SaveSlotManager::LoadAllGameDataList()
 {
     FMD_SaveSlotIndex Index;
     TArray<FMD_GameData> Rows;
-    if (!HasServerAuthority() || bAsyncOperationInProgress
-        || !FMD_SaveSlotStore::ForProject().ReadIndex(Index)) return Rows;
+    // 관리자의 권한과 진행 중인 작업을 함께 확인
+    if (HasServerAuthority() == false || bAsyncOperationInProgress == true || bGameDataOperationInProgress == true)
+    {
+        // 조회를 실행할 수 없는 요청의 빈 목록 반환
+        return Rows;
+    }
+    // 실행 상태 검증 후 저장 목록 읽기 결과 확인
+    if (FMD_SaveSlotStore::ForProject().ReadIndex(Index) == false)
+    {
+        // 목록 읽기 실패 시 기존 빈 목록 반환
+        return Rows;
+    }
     Rows = MoveTemp(Index.Auto);
     Rows.Append(MoveTemp(Index.User));
     return Rows;
@@ -96,12 +133,52 @@ TArray<FMD_GameData> UMD_SaveSlotManager::LoadAllGameDataList()
 void UMD_SaveSlotManager::AsyncSaveGameData(const FString& DataName, bool bIsAuto,
     const FOnSaveMDGameDataComplete& Completion)
 {
-    if (!HasServerAuthority() || bAsyncOperationInProgress
-        || (bIsAuto ? MaxAutoSaveSlotCount : MaxUserSaveSlotCount) <= 0
-        || (!bIsAuto && (DataName.IsEmpty() || DataName.Contains(TEXT("AutoSave"))))
-        || !CollectGameData())
+    // 관리자의 권한과 진행 중인 작업을 함께 확인
+    if (HasServerAuthority() == false || bAsyncOperationInProgress == true || bGameDataOperationInProgress == true)
     {
+        // 현재 요청의 실패 결과 전달
         Completion.ExecuteIfBound(false);
+        // 실행할 수 없는 저장 요청 종료
+        return;
+    }
+    // 선택한 저장 종류의 슬롯 허용 개수 확인
+    if ((bIsAuto ? MaxAutoSaveSlotCount : MaxUserSaveSlotCount) <= 0)
+    {
+        // 현재 요청의 실패 결과 전달
+        Completion.ExecuteIfBound(false);
+        // 허용 슬롯이 없는 저장 요청 종료
+        return;
+    }
+    // 비동기 자동 저장도 동일한 맵 제외 정책을 수집 전에 확인
+    if (bIsAuto == true)
+    {
+        // 서버 권한 검사로 확인한 월드의 게임 모드 조회
+        AMD_GameModeBase* GameMode = GetWorld()->GetAuthGameMode<AMD_GameModeBase>();
+        if (IsValid(GameMode) == true && GameMode->IsAutoSaveAllowed() == false)
+        {
+            // 저장을 실행하지 않은 결과를 호출자에게 전달
+            Completion.ExecuteIfBound(false);
+            // 데이터 수집과 파일 작업 및 슬롯 순환 생략
+            return;
+        }
+    }
+    else
+    {
+        // 같은 이름 값의 누락과 예약 이름 사용을 함께 확인
+        if (DataName.IsEmpty() == true || DataName.Contains(TEXT("AutoSave")) == true)
+        {
+            // 현재 요청의 실패 결과 전달
+            Completion.ExecuteIfBound(false);
+            // 유효하지 않은 사용자 저장 이름 거부
+            return;
+        }
+    }
+    // 입력 검증을 마친 요청의 실제 데이터 수집 결과 확인
+    if (CollectGameData() == false)
+    {
+        // 현재 요청의 실패 결과 전달
+        Completion.ExecuteIfBound(false);
+        // 수집에 실패한 저장 요청 종료
         return;
     }
     TemporaryGameData->UniqueName = bIsAuto
@@ -127,7 +204,8 @@ void UMD_SaveSlotManager::AsyncSaveGameData(const FString& DataName, bool bIsAut
 void UMD_SaveSlotManager::AsyncRemoveGameData(const FMD_GameData& GameData,
     const FOnRemoveMDGameDataComplete& Completion)
 {
-    if (!HasServerAuthority() || bAsyncOperationInProgress)
+    // 서버 권한과 파일 작업 및 이벤트 재진입 상태 확인
+    if (HasServerAuthority() == false || bAsyncOperationInProgress == true || bGameDataOperationInProgress == true)
     {
         Completion.ExecuteIfBound(false);
         return;
@@ -147,7 +225,8 @@ void UMD_SaveSlotManager::AsyncRemoveGameData(const FMD_GameData& GameData,
 
 void UMD_SaveSlotManager::AsyncLoadAllGameDataList(const FOnLoadMDGameDataListComplete& Completion)
 {
-    if (!HasServerAuthority() || bAsyncOperationInProgress)
+    // 서버 권한과 파일 작업 및 이벤트 재진입 상태 확인
+    if (HasServerAuthority() == false || bAsyncOperationInProgress == true || bGameDataOperationInProgress == true)
     {
         Completion.ExecuteIfBound({}, false);
         return;
@@ -169,203 +248,159 @@ void UMD_SaveSlotManager::AsyncLoadAllGameDataList(const FOnLoadMDGameDataListCo
 
 bool UMD_SaveSlotManager::LoadGameDataToWorld(const FMD_GameData& GameData)
 {
-    if (!HasServerAuthority() || bAsyncOperationInProgress) return false;
+    // 서버 권한과 파일 작업 및 이벤트 재진입 상태 확인
+    if (HasServerAuthority() == false || bAsyncOperationInProgress == true || bGameDataOperationInProgress == true) return false;
     if (!GameData.bIsSlotSummary) return ApplyGameDataToWorldInternal(GameData, true);
     FMD_GameData Loaded;
-    return FMD_SaveSlotStore::ForProject().ReadSlot(GameData, Loaded)
-        && ApplyGameDataToWorldInternal(Loaded, true);
+    // 선택한 슬롯의 데이터 읽기 결과 확인
+    if (FMD_SaveSlotStore::ForProject().ReadSlot(GameData, Loaded) == false)
+    {
+        // 슬롯 읽기 실패 시 월드 적용 차단
+        return false;
+    }
+    // 읽기를 마친 데이터의 월드 적용 결과 반환
+    return ApplyGameDataToWorldInternal(Loaded, true);
 }
 
 bool UMD_SaveSlotManager::ApplyGameDataToWorldInternal(const FMD_GameData& GameData, bool bRequireSavedSlotIdentity)
 {
-	// 클라이언트가 저장 데이터를 자신의 World에 적용하지 못하도록 하는 권한 제한
-	if (HasServerAuthority() == false)
-	{
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 적용은 Host/Server에서만 실행할 수 있습니다."), *UE_CALL_LOCATIONINFO);
-		return false;
-	}
+    // 관리자의 서버 권한과 재진입 상태 확인
+    if (HasServerAuthority() == false || bGameDataOperationInProgress == true)
+    {
+        // 실행할 수 없는 적용 요청의 실패 반환
+        return false;
+    }
+    // 복원 이벤트를 처리할 구독자 존재 여부 확인
+    if (OnOverwriteGameData.IsBound() == false)
+    {
+        // 복원 구독자가 없는 요청 종료
+        return false;
+    }
 
-	// 구버전 슬롯을 현재 필드 스키마로 승격하고 모든 필수 데이터가 유효할 때만 적용하기 위한 복사
-	FMD_GameData MigratedGameData = GameData;
-	if (bRequireSavedSlotIdentity == false && MigratedGameData.UniqueName.IsEmpty() == true)
-	{
-		// 저장되지 않은 현재 회차도 저장 슬롯과 동일한 구조 검증을 재사용하기 위한 임시 식별자
-		MigratedGameData.UniqueName = TEXT("TemporaryGameData");
-	}
-	if (MigratedGameData.MigrateToCurrentVersion() == false || MigratedGameData.IsValidForLoad() == false)
-	{
-		UE_LOG(MarineDemolition, Error, TEXT("%s 손상되었거나 지원하지 않는 게임 데이터의 적용을 거부합니다."), *UE_CALL_LOCATIONINFO);
-		return false;
-	}
+    // 원본 슬롯을 변경하지 않고 현재 스키마를 검증할 작업 데이터 생성
+    FMD_GameData ValidatedGameData = GameData;
+    // 저장 전 회차의 임시 식별자 허용 여부 확인
+    if (bRequireSavedSlotIdentity == false)
+    {
+        // 검증 데이터의 식별자가 없는 경우에만 임시 이름 보완
+        if (ValidatedGameData.UniqueName.IsEmpty() == true)
+        {
+            // 저장 전 회차의 검증용 식별자 설정
+            ValidatedGameData.UniqueName = TEXT("TemporaryGameData");
+        }
+    }
+    // 지원하지 않는 버전과 손상 필드를 적용 이벤트 전에 차단
+    if (ValidatedGameData.IsValidForLoad(bRequireSavedSlotIdentity) == false)
+    {
+        // 적용 거부 원인 기록
+        UE_LOG(MarineDemolition, Error, TEXT("저장 데이터의 버전 또는 구조가 유효하지 않습니다."));
+        // 손상된 저장 데이터의 적용 실패 반환
+        return false;
+    }
 
-	// 현재 맵이 게임 데이터가 저장된 맵과 일치하는지 확인
-	UWorld* World = GetWorld();
-	UPackage* WorldPackage = IsValid(World) == true ? World->GetPackage() : nullptr;
-	FString WorldPackagePath = IsValid(WorldPackage) == true ? UWorld::RemovePIEPrefix(WorldPackage->GetName()) : TEXT("");
-	if (WorldPackagePath.IsEmpty() == true || WorldPackagePath != MigratedGameData.MapPackagePath)
-	{
-		return false;
-	}
+    // 저장 당시 맵과 적용 대상 맵을 비교하기 위한 서버 월드 조회
+    UWorld* World = GetWorld();
+    // PIE 접두사 제거에 사용할 현재 맵 패키지 조회
+    UPackage* WorldPackage = IsValid(World) == true ? World->GetPackage() : nullptr;
+    // 다른 맵의 액터 상태가 현재 맵에 적용되는 상황 차단
+    if (IsValid(WorldPackage) == false || UWorld::RemovePIEPrefix(WorldPackage->GetName()) != ValidatedGameData.MapPackagePath)
+    {
+        // 적용 대상 맵 불일치의 실패 반환
+        return false;
+    }
 
-	UGameInstance* GameInstance = GetGameInstance();
-	if (IsValid(GameInstance) == false)
-	{
-		return false;
-	}
+    // 적용과 수집의 중첩 요청을 전체 복원 완료 시점까지 차단
+    TGuardValue<bool> OperationGuard(bGameDataOperationInProgress, true);
+    // 이번 복원의 결과만 구독자와 공유하는 성공 상태 생성
+    bool bWasSuccessful = true;
+    // 모든 구독자에게 읽기 전용 데이터를 전달하여 각자의 필드를 직접 복원
+    OnOverwriteGameData.Broadcast(ValidatedGameData, bWasSuccessful);
+    // 구독자가 보고한 적용 실패를 현재 요청의 결과에 반영
+    if (bWasSuccessful == false)
+    {
+        // 실패한 복원 결과로 현재 회차를 교체하는 상황 방지
+        return false;
+    }
 
-	// 필수 서버 상태가 준비되지 않은 시점의 부분 적용을 방지하기 위한 객체 검사
-	AMD_GameStateBase* GameState = World->GetGameState<AMD_GameStateBase>();
-	UMD_LoreSubsystem* LoreManager = GameInstance->GetSubsystem<UMD_LoreSubsystem>();
-	UMD_MerchantSubsystem* MerchantManager = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
-	if (IsValid(GameState) == false || GameState->HasAuthority() == false || IsValid(LoreManager) == false || IsValid(MerchantManager) == false)
-	{
-		return false;
-	}
-
-	// 필수 데이터 필드의 누락이나 타입 불일치로 인한 불완전한 복원을 방지하기 위한 검사
-	FMD_GameStateData GameStateData;
-	if (MigratedGameData.GetDataField(FMD_GameStateData::DataFieldKey, GameStateData) == false)
-	{
-		return false;
-	}
-	FMD_MerchantData MerchantData;
-	if (MigratedGameData.GetDataField(FMD_MerchantData::DataFieldKey, MerchantData) == false)
-	{
-		return false;
-	}
-
-	// 로어 필드가 없는 초기 슬롯은 빈 진행으로 복원하고 타입이 손상된 최신 슬롯만 거부하는 조회
-	FMD_LoreData LoreData;
-	const bool bContainsLoreData = MigratedGameData.DataFields.Contains(FMD_LoreData::DataFieldKey);
-	const bool bHasLoreData = MigratedGameData.GetDataField(FMD_LoreData::DataFieldKey, LoreData);
-	if (bContainsLoreData == true && bHasLoreData == false)
-	{
-		return false;
-	}
-
-	// 월드 데이터가 존재하는 최신 세이브와 필드가 없는 이전 세이브를 구분하는 조회
-	UMD_DayPersistenceSubsystem* DayPersistenceManager = GameInstance->GetSubsystem<UMD_DayPersistenceSubsystem>();
-	FMD_WorldData WorldData;
-	bool bContainsWorldData = MigratedGameData.DataFields.Contains(FMD_WorldData::DataFieldKey);
-	bool bHasWorldData = MigratedGameData.GetDataField(FMD_WorldData::DataFieldKey, WorldData);
-	if (bContainsWorldData == true && bHasWorldData == false)
-	{
-		return false;
-	}
-	if (bHasWorldData == true && IsValid(DayPersistenceManager) == false)
-	{
-		return false;
-	}
-
-	// 상인 원장을 변경하기 전에 GameState 설정 범위까지 검증하여 부분 적용을 방지하는 처리
-	if (GameState->CanApplyGameStateSaveData(GameStateData) == false)
-	{
-		return false;
-	}
-	if (LoreManager->CanApplyLoreSaveData(LoreData) == false)
-	{
-		return false;
-	}
-
-	// 상인 상태를 먼저 복원하여 GameState 일차 알림이 퀘스트를 다시 초기화하지 않도록 하는 처리
-	if (MerchantManager->ApplyMerchantSaveData(MerchantData) == false)
-	{
-		return false;
-	}
-
-	// 기존 슬롯의 빈 상태를 포함한 로어 원장을 상인 상태와 같은 복원 시점에 적용하는 처리
-	if (LoreManager->ApplyLoreSaveData(LoreData) == false)
-	{
-		return false;
-	}
-
-	// GameState를 저장 스냅샷으로 교체하고 복제 알림을 발생시키는 처리
-	if (GameState->ApplyGameStateSaveData(GameStateData) == false)
-	{
-		return false;
-	}
-
-	// 저장 데이터에 월드 필드가 존재하는 경우 파괴와 오염 상태까지 복원하는 처리
-	if (bHasWorldData == true && DayPersistenceManager->ApplyWorldSaveData(World, WorldData) == false)
-	{
-		return false;
-	}
-
-	// 전체 플레이어 데이터 덮어씌우기
-	const TArray<APlayerState*> PlayerArray = GameState->PlayerArray;
-	for (const APlayerState* PlayerState : PlayerArray)
-	{
-		OverwriteDataToPlayerInternal(PlayerState, MigratedGameData);
-	}
-
-	// 이후 접속하거나 Pawn이 교체된 플레이어도 같은 개인 데이터를 사용하도록 현재 회차 데이터 유지
-	TemporaryGameData = MakeShared<FMD_GameData>(MoveTemp(MigratedGameData));
+    // 재접속 플레이어가 적용 완료된 동일한 개인 데이터를 사용하도록 회차 교체
+    TemporaryGameData = MakeShared<FMD_GameData>(MoveTemp(ValidatedGameData));
+    // 현재 회차가 이전 맵의 무거운 월드 스냅샷을 계속 보유하는 상황 방지
     TemporaryGameData->DataFields.Remove(FMD_WorldData::DataFieldKey);
-
-	return true;
+    // 모든 구독자의 복원 성공 반환
+    return true;
 }
 
 bool UMD_SaveSlotManager::ParseDataFromPlayer(const APlayerState* PlayerState)
 {
-	// 클라이언트 환경 실행 제한
-	if (IsValid(PlayerState) == false || PlayerState->HasAuthority() == false)
-	{
-		return false;
-	}
-
-	// 데이터를 기록할 객체가 존재하지 않는 경우 객체를 새로 생성
-	if (TemporaryGameData.IsValid() == false)
-	{
-		TemporaryGameData = MakeShared<FMD_GameData>();
-	}
-
-	// 로그아웃 수집과 재접속 복원이 같은 개인 데이터 항목을 사용하도록 공통 키를 생성하는 처리
-	const FString PlayerKey = BuildPlayerPersistenceKey(PlayerState);
-
-	// 플레이어 고유 식별자의 유효성 검사
-	if (PlayerKey.IsEmpty() == true)
-	{
-		return false;
-	}
-
-	// 플레이어가 조종하는 Pawn이 존재하지 않는 경우 함수 조기 종료
-	APawn* PlayerPawn = PlayerState->GetPawn();
-	if (IsValid(PlayerPawn) == false)
-	{
-		return false;
-	}
-
-	// 플레이어 캐릭터 참조
-	AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerPawn);
-
-	// 빈 플레이어 데이터가 기록되지 않도록 장비 컴포넌트 유효성 검사
-	UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
-	if (IsValid(EquipmentComponent) == false)
-	{
-		return false;
-	}
-
-	// 식별자에 대응하는 플레이어 장비 스냅샷 갱신
-	FMD_PlayerData& PlayerData = TemporaryGameData->PlayerFields.FindOrAdd(PlayerKey);
-	PlayerData.HotbarToolList = EquipmentComponent->BuildEquipmentSaveData();
-
-	return true;
+    // 진행 중인 데이터 처리와 개인 수집의 중첩 차단
+    if (bGameDataOperationInProgress == true)
+    {
+        // 재진입한 개인 수집 요청 종료
+        return false;
+    }
+    // 같은 플레이어 객체의 유효성과 서버 권한을 함께 확인
+    if (IsValid(PlayerState) == false || PlayerState->HasAuthority() == false)
+    {
+        // 잘못된 플레이어 수집 요청의 실패 반환
+        return false;
+    }
+    // 플레이어 저장 책임을 가진 현재 서버 게임 모드 조회
+    UWorld* World = GetWorld();
+    // 서버 월드의 게임 모드를 통한 기존 Blueprint API 연결
+    AMD_GameModeBase* GameMode = IsValid(World) == true ? World->GetAuthGameMode<AMD_GameModeBase>() : nullptr;
+    // 플레이어 데이터 소유자가 없는 경우 수집 차단
+    if (IsValid(GameMode) == false)
+    {
+        // 게임 모드 부재의 실패 반환
+        return false;
+    }
+    // 최초 로그아웃 전에 현재 회차 데이터가 생성되지 않은 경우 확인
+    if (TemporaryGameData.IsValid() == false)
+    {
+        // 개인 기록을 보관할 회차 데이터 생성
+        TemporaryGameData = MakeShared<FMD_GameData>();
+    }
+    // 단일 플레이어 수집도 전체 저장 이벤트와 동일한 구현으로 위임
+    return GameMode->CollectPlayerGameData(PlayerState, *TemporaryGameData);
 }
 
 bool UMD_SaveSlotManager::LoadPlayerData(const APlayerState* PlayerState) const
 {
-	// 데이터를 덮어씌워질 플레이어가 유효하지 않거나 덮어씌울 데이터가 존재하지 않는 경우 함수 조기 종료
-	if (IsValid(PlayerState) == false || TemporaryGameData.IsValid() == false)
-	{
-		return false;
-	}
-
-	bool bOverwriteSuccess = OverwriteDataToPlayerInternal(PlayerState, *TemporaryGameData);
-	return bOverwriteSuccess;
+    // 관리자의 새 게임 예약과 데이터 처리 상태를 함께 확인
+    if (bGameDataOperationInProgress == true || PendingGameDataOperation == EMD_PendingGameDataOperation::NewGame)
+    {
+        // 이전 개인 데이터를 적용할 수 없는 관리자 상태 거부
+        return false;
+    }
+    // 개인 기록을 적용할 플레이어의 유효성 확인
+    if (IsValid(PlayerState) == false)
+    {
+        // 적용 대상이 없는 개인 데이터 요청 종료
+        return false;
+    }
+    // 적용할 현재 회차 데이터의 존재 여부 확인
+    if (TemporaryGameData.IsValid() == false)
+    {
+        // 현재 회차가 없는 개인 데이터 요청 종료
+        return false;
+    }
+    // 재접속 플레이어의 실제 복원을 담당하는 서버 게임 모드 조회
+    UWorld* World = GetWorld();
+    // 기존 Blueprint 함수 시그니처를 유지하면서 데이터 소유자에 연결
+    AMD_GameModeBase* GameMode = IsValid(World) == true ? World->GetAuthGameMode<AMD_GameModeBase>() : nullptr;
+    // 개인 데이터 조회와 장비 적용을 게임 모드에 위임
+    return IsValid(GameMode) == true && GameMode->OverwritePlayerGameData(PlayerState, *TemporaryGameData);
 }
 
 bool UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameData, bool bLoadGame, FString& OutMapPackagePath)
 {
+    // 이벤트 도중 활성 회차와 보류 작업이 교체되는 상황 차단
+    if (bGameDataOperationInProgress == true)
+    {
+        // 진행 중인 요청을 유지한 채 재진입 종료
+        return false;
+    }
+
 	OutMapPackagePath.Reset();
 
 	// 클라이언트가 로드할 데이터를 독립적으로 예약하지 못하도록 하는 권한 제한
@@ -380,24 +415,24 @@ bool UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameDat
 	{
 		SelectedLoadGameData.Reset();
 
-        FMD_GameData MigratedGameData;
+        FMD_GameData ValidatedGameData;
         if (GameData.bIsSlotSummary)
         {
-            if (!FMD_SaveSlotStore::ForProject().ReadSlot(GameData, MigratedGameData))
+            if (!FMD_SaveSlotStore::ForProject().ReadSlot(GameData, ValidatedGameData))
             {
                 PendingGameDataOperation = EMD_PendingGameDataOperation::None;
                 return false;
             }
         }
-        else MigratedGameData = GameData;
-		if (MigratedGameData.MigrateToCurrentVersion() == false || MigratedGameData.IsValidForLoad() == false)
+        else ValidatedGameData = GameData;
+		if (ValidatedGameData.IsValidForLoad() == false)
 		{
 			UE_LOG(MarineDemolition, Error, TEXT("%s 시작할 저장 데이터가 손상되었거나 지원하지 않는 버전입니다."), *UE_CALL_LOCATIONINFO);
 			PendingGameDataOperation = EMD_PendingGameDataOperation::None;
 			return false;
 		}
 
-		SelectedLoadGameData = MakeShared<FMD_GameData>(MoveTemp(MigratedGameData));
+		SelectedLoadGameData = MakeShared<FMD_GameData>(MoveTemp(ValidatedGameData));
 		PendingGameDataOperation = EMD_PendingGameDataOperation::LoadGame;
 		OutMapPackagePath = SelectedLoadGameData->MapPackagePath;
 		return true;
@@ -426,6 +461,13 @@ bool UMD_SaveSlotManager::HasTemporaryGameData() const
 
 void UMD_SaveSlotManager::CancelPendingGameDataOperation()
 {
+    // 이벤트 도중 활성 회차와 보류 작업이 교체되는 상황 차단
+    if (bGameDataOperationInProgress == true)
+    {
+        // 진행 중인 요청을 유지한 채 재진입 종료
+        return;
+    }
+
 	// 실패한 불러오기 선택 데이터가 다음 시작 요청에 적용되지 않도록 하는 정리
 	if (PendingGameDataOperation == EMD_PendingGameDataOperation::LoadGame)
 	{
@@ -438,6 +480,13 @@ void UMD_SaveSlotManager::CancelPendingGameDataOperation()
 
 void UMD_SaveSlotManager::ResetTemporaryGameData()
 {
+    // 이벤트 도중 활성 회차와 보류 작업이 교체되는 상황 차단
+    if (bGameDataOperationInProgress == true)
+    {
+        // 진행 중인 요청을 유지한 채 재진입 종료
+        return;
+    }
+
 	PendingGameDataOperation = EMD_PendingGameDataOperation::None;
 	TemporaryGameData.Reset();
 	return;
@@ -466,6 +515,13 @@ void UMD_SaveSlotManager::PrepareContaminationForWorld(UWorld* World)
 
 bool UMD_SaveSlotManager::ApplyPendingGameDataOperation()
 {
+    // 이벤트 도중 활성 회차와 보류 작업이 교체되는 상황 차단
+    if (bGameDataOperationInProgress == true)
+    {
+        // 진행 중인 요청을 유지한 채 재진입 종료
+        return false;
+    }
+
 	// 클라이언트가 보류된 새 게임 또는 불러오기 데이터를 자신의 World에 적용하지 못하도록 하는 권한 제한
 	if (HasServerAuthority() == false)
 	{
@@ -566,134 +622,79 @@ bool UMD_SaveSlotManager::HasServerAuthority() const
 
 bool UMD_SaveSlotManager::CollectGameData()
 {
-	if (TemporaryGameData.IsValid() == false)
-	{
-		TemporaryGameData = MakeShared<FMD_GameData>();
-	}
-
-	// 수집 결과가 항상 현재 실행 파일의 필드 스키마로 기록되도록 하는 버전 확정
-	TemporaryGameData->SchemaVersion = FMD_GameData::CurrentSchemaVersion;
-
-	// 게임 데이터를 수집하기 위하여 필요한 객체들 참조
-	UGameInstance* GameInstance = GetGameInstance();
-	UMD_LoreSubsystem* LoreManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_LoreSubsystem>() : nullptr;
-	UMD_MerchantSubsystem* MerchantManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
-	UMD_DayPersistenceSubsystem* DayPersistenceManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr;
-	if (IsValid(LoreManager) == false || IsValid(MerchantManager) == false || IsValid(DayPersistenceManager) == false)
-	{
-		return false;
-	}
-
-	// GameState 참조 및 클라이언트 환경 실행 제한
-	UWorld* World = GetWorld();
-	UPackage* WorldPackage = IsValid(World) == true ? World->GetPackage() : nullptr;
-	AMD_GameStateBase* GameState = IsValid(World) == true ? World->GetGameState<AMD_GameStateBase>() : nullptr;
-	if (IsValid(WorldPackage) == false || IsValid(GameState) == false || GameState->HasAuthority() == false)
-	{
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 저장은 Host/Server에서만 실행할 수 있습니다."), *UE_CALL_LOCATIONINFO);
-		return false;
-	}
-
-    if (!GameState->IsWorldInitializationReady())
+    // 관리자의 재진입 상태와 서버 권한을 함께 확인
+    if (bGameDataOperationInProgress == true || HasServerAuthority() == false)
     {
-        UE_LOG(MarineDemolition, Warning, TEXT("Save deferred: world initialization has not completed."));
+        // 처리할 수 없는 수집 요청의 실패 반환
+        return false;
+    }
+    // 수집 이벤트를 처리할 구독자 존재 여부 확인
+    if (OnCollectGameData.IsBound() == false)
+    {
+        // 수집 구독자가 없는 요청 종료
         return false;
     }
 
-	// 현재 맵의 패키지 경로 저장(PIE 환경 접두사 제거)
-	TemporaryGameData->MapPackagePath = UWorld::RemovePIEPrefix(WorldPackage->GetName());
+    // 현재 맵의 저장 식별자를 안전하게 구성하기 위한 패키지 조회
+    UWorld* World = GetWorld();
+    // 유효한 서버 월드의 맵 패키지 조회
+    UPackage* WorldPackage = IsValid(World) == true ? World->GetPackage() : nullptr;
+    // 맵 패키지가 없는 상태에서 저장 데이터 생성 차단
+    if (IsValid(WorldPackage) == false)
+    {
+        // 맵 식별 정보 누락의 실패 반환
+        return false;
+    }
 
-	// 게임 데이터 수집 시각 저장
-	TemporaryGameData->SaveTime = FDateTime::Now();
+    // 초기화가 끝난 서버 월드에서만 저장 이벤트를 호출하기 위한 진행 상태 조회
+    AMD_GameStateBase* GameState = World->GetGameState<AMD_GameStateBase>();
+    // 같은 진행 상태 객체의 유효성 및 권한과 월드 초기화 완료 여부 확인
+    if (IsValid(GameState) == false || GameState->HasAuthority() == false || GameState->IsWorldInitializationReady() == false)
+    {
+        // 초기화 중인 월드를 저장하지 않은 원인 기록
+        UE_LOG(MarineDemolition, Warning, TEXT("Save deferred: world initialization has not completed."));
+        // 미완성 월드의 데이터 수집 이벤트 실행 차단
+        return false;
+    }
 
-	// 상인 관련 정보 저장
-	FMD_MerchantData MerchantData = MerchantManager->GetMerchantSaveData();
-	if (TemporaryGameData->AddDataField(FMD_MerchantData::DataFieldKey, MerchantData) == false)
-	{
-		return false;
-	}
+    // 모든 조기 반환 경로에서 재진입 제한을 해제하는 범위 보호
+    TGuardValue<bool> OperationGuard(bGameDataOperationInProgress, true);
+    // 이번 수집의 결과만 구독자와 공유하는 성공 상태 생성
+    bool bWasSuccessful = true;
+    // 이전 요청의 기능별 필드가 남지 않는 이번 저장용 데이터 생성
+    FMD_GameData CollectedGameData;
+    // 현재 실행 파일이 기록하는 스키마 버전 반영
+    CollectedGameData.SchemaVersion = FMD_GameData::CurrentSchemaVersion;
+    // 저장 전 구조 검증에 사용할 임시 슬롯 식별자 설정
+    CollectedGameData.UniqueName = TEXT("TemporaryGameData");
+    // PIE 접두사를 제외한 실제 맵 경로 기록
+    CollectedGameData.MapPackagePath = UWorld::RemovePIEPrefix(WorldPackage->GetName());
+    // 이번 수집 시점의 저장 시각 기록
+    CollectedGameData.SaveTime = FDateTime::Now();
+    // 로그아웃한 플레이어 기록을 새 수집에서도 유지하기 위한 기존 데이터 확인
+    if (TemporaryGameData.IsValid() == true)
+    {
+        // 현재 접속자의 갱신에 앞서 이전 개인 기록 승계
+        CollectedGameData.PlayerFields = TemporaryGameData->PlayerFields;
+    }
 
-	// 계약을 넘어 누적되는 현장별 발견 목록과 완료 보상 상태 저장
-	FMD_LoreData LoreData = LoreManager->GetLoreSaveData();
-	if (TemporaryGameData->AddDataField(FMD_LoreData::DataFieldKey, LoreData) == false)
-	{
-		return false;
-	}
+    // 구독 중인 데이터 소유자에게 수정 가능한 저장 구조체 전달
+    OnCollectGameData.Broadcast(CollectedGameData, bWasSuccessful);
+    // 구독자가 공유한 이번 수집의 성공 여부 확인
+    if (bWasSuccessful == false)
+    {
+        // 구독자 실패 시 수집 결과 반영 차단
+        return false;
+    }
+    // 수집을 마친 데이터의 저장 구조 유효성 확인
+    if (CollectedGameData.IsValidForLoad() == false)
+    {
+        // 미완성 수집 결과를 기존 회차에 반영하지 않고 실패 반환
+        return false;
+    }
 
-	// 파괴된 벽과 동적 액터를 포함한 현재 월드 상태 저장
-	FMD_WorldData WorldData;
-	if (DayPersistenceManager->BuildWorldSaveData(World, WorldData) == false || TemporaryGameData->AddDataField(FMD_WorldData::DataFieldKey, WorldData) == false)
-	{
-		return false;
-	}
-
-	// GameState관련 정보 저장
-	FMD_GameStateData GameStateData = GameState->GetGameStateSaveData();
-	if (TemporaryGameData->AddDataField(FMD_GameStateData::DataFieldKey, GameStateData) == false)
-	{
-		return false;
-	}
-
-	// 플레이어 관련 정보 저장
-	const TArray<APlayerState*> PlayerArray = GameState->PlayerArray;
-	for (const APlayerState* PlayerState : PlayerArray)
-	{
-		ParseDataFromPlayer(PlayerState);
-	}
-
-	return true;
-}
-
-bool UMD_SaveSlotManager::OverwriteDataToPlayerInternal(const APlayerState* PlayerState, const FMD_GameData& GameData) const
-{
-	// 클라이언트 환경 실행 제한
-	if (IsValid(PlayerState) == false || PlayerState->HasAuthority() == false)
-	{
-		return false;
-	}
-
-	// 새로하기 트래블 중 이전 세션의 플레이어 데이터가 새 Pawn에 적용되지 않도록 하는 복원 제한
-	if (PendingGameDataOperation == EMD_PendingGameDataOperation::NewGame)
-	{
-		return false;
-	}
-
-	// 로그아웃 수집과 재접속 복원이 같은 개인 데이터 항목을 사용하도록 공통 키를 생성하는 처리
-	const FString PlayerKey = BuildPlayerPersistenceKey(PlayerState);
-	if (PlayerKey.IsEmpty() == true)
-	{
-		return false;
-	}
-
-	// 플레이어 데이터의 존재 여부 검사
-	const FMD_PlayerData* PlayerData = GameData.PlayerFields.Find(PlayerKey);
-	if (PlayerData == nullptr && PlayerState->GetPlayerName() != PlayerKey)
-	{
-		// 오프라인 이름 키로 저장된 초기 슬롯을 온라인 계정 키 환경에서도 재바인딩하기 위한 호환 조회
-		PlayerData = GameData.PlayerFields.Find(PlayerState->GetPlayerName());
-	}
-
-	if (PlayerData == nullptr)
-	{
-		return false;
-	}
-
-	// 플레이어가 조종하는 캐릭터(폰)이 존재하지 않으면 함수 조기 종료
-	if (IsValid(PlayerState->GetPawn()) == false)
-	{
-		return false;
-	}
-
-	// 플레이어 캐릭터 참조
-	AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerState->GetPawn());
-
-	// 플레이어 복원 성공 여부를 정확히 전달하기 위한 장비 컴포넌트 검사
-	UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
-	if (IsValid(EquipmentComponent) == false)
-	{
-		return false;
-	}
-
-	// 저장된 장비 스냅샷을 서버 권위 플레이어에 적용하는 처리
-	return EquipmentComponent->RestoreEquipmentSaveData(PlayerData->HotbarToolList);
+    // 전체 수집이 성공한 경우에만 현재 회차 데이터 교체
+    TemporaryGameData = MakeShared<FMD_GameData>(MoveTemp(CollectedGameData));
+    // 검증된 저장 스냅샷 수집 성공 반환
+    return true;
 }

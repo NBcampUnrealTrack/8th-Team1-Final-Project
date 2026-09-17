@@ -41,6 +41,7 @@ void AMD_TrashItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_TrashItem, TrashKindId);
+	DOREPLIFETIME(AMD_TrashItem, TrashVariantId);
 }
 
 void AMD_TrashItem::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
@@ -102,26 +103,82 @@ FMD_TrashSortDescriptor AMD_TrashItem::GetTrashSortDescriptor_Implementation() c
 
 void AMD_TrashItem::SetTrashKindId(const FName NewTrashKindId)
 {
-	if (TrashKindId == NewTrashKindId)
+	if (TrashKindId != NewTrashKindId)
 	{
-		return;
+		SetTrashAppearance(NewTrashKindId, NAME_None);
 	}
+}
 
+bool AMD_TrashItem::SetTrashAppearance(const FName NewTrashKindId, const FName NewVariantId)
+{
+	const FName ResolvedVariantId = NewVariantId.IsNone()
+		? UMD_TrashLibrary::GetDefaultTrashVariantId(NewTrashKindId) : NewVariantId;
+	TSoftObjectPtr<UStaticMesh> SelectedMesh;
+	if (!HasAuthority() || ResolvedVariantId.IsNone()
+		|| !UMD_TrashLibrary::ResolveTrashKindMesh(NewTrashKindId, ResolvedVariantId, SelectedMesh))
+	{
+		return false;
+	}
+	// 잘못된 에셋 경로는 기존 선택을 바꾸기 전에 거절한다. 배치 도구가 로드한 메시는 재사용한다.
+	if (!SelectedMesh.IsNull() && !SelectedMesh.Get() && !SelectedMesh.LoadSynchronous())
+	{
+		return false;
+	}
 	TrashKindId = NewTrashKindId;
+	TrashVariantId = ResolvedVariantId;
 	ApplyTrashKindRow();
 	ForceNetUpdate();
+	return true;
+}
+
+bool AMD_TrashItem::SetTrashVariantId(const FName NewVariantId)
+{
+	return SetTrashAppearance(TrashKindId, NewVariantId);
+}
+
+#if WITH_EDITOR
+void AMD_TrashItem::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	if (PropertyChangedEvent.GetPropertyName() == GET_MEMBER_NAME_CHECKED(AMD_TrashItem, TrashKindId))
+	{
+		TrashVariantId = NAME_None;
+	}
+	bHasAppliedTrashKind = false;
+	Super::PostEditChangeProperty(PropertyChangedEvent);
+}
+
+void AMD_TrashItem::PostEditUndo()
+{
+	Super::PostEditUndo();
+	bHasAppliedTrashKind = false;
+	ApplyTrashKindRow();
+}
+#endif
+
+void AMD_TrashItem::BeginPlay()
+{
+	Super::BeginPlay();
+	ApplyTrashKindRow();
 }
 
 void AMD_TrashItem::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
+	// 테이블 편집 후 재구성에도 최신 메시/질량을 적용한다. 이미 로드된 메시는 재사용한다.
+	bHasAppliedTrashKind = false;
 	ApplyTrashKindRow();
 }
 
 TArray<FName> AMD_TrashItem::GetTrashKindIdOptions() const
 {
 	return UMD_TrashLibrary::GetTrashKindIds();
+}
+
+TArray<FName> AMD_TrashItem::GetTrashVariantIdOptions() const
+{
+	TArray<FName> Ids = UMD_TrashLibrary::GetTrashVariantIds(TrashKindId);
+	return Ids;
 }
 
 void AMD_TrashItem::OnRep_TrashKindId()
@@ -136,27 +193,32 @@ void AMD_TrashItem::ApplyTrashKindRow()
 		return;
 	}
 
-	if (!bHasAppliedTrashKind || AppliedTrashKindId != TrashKindId)
+	// BP/이전 인스턴스의 단색 override가 Variant 메시의 원래 머티리얼을 가리지 않게 한다.
+	// 같은 메시를 다시 적용하는 경우에도 슬롯을 비워 메시 에셋의 머티리얼을 사용한다.
+	Mesh->EmptyOverrideMaterials();
+
+	if (!bHasAppliedTrashKind || AppliedTrashKindId != TrashKindId || AppliedTrashVariantId != TrashVariantId)
 	{
 		// 행이 없으면 기본값 행이 그대로 적용된다. 무효 카테고리는 아래에서 누락 신호 색이 된다
 		FMD_TrashKindRow KindRow;
 		UMD_TrashLibrary::FindTrashKindRow(TrashKindId, KindRow);
+		// 이전 맵의 None 선택도 이름을 저장하도록 정규화한다. 클라이언트는 서버 값을 받는다.
+		if (HasAuthority() && TrashVariantId.IsNone()) TrashVariantId = KindRow.GetDefaultVariantId();
 
-		// 메시 볼륨 자동 계산에 맡기면 메시 교체만으로 무게감이 조용히 달라진다
+		TSoftObjectPtr<UStaticMesh> MeshReference;
+		const bool bValidVariant = KindRow.ResolveMesh(TrashVariantId, MeshReference);
+		UStaticMesh* KindMesh = nullptr;
+		if (bValidVariant && !MeshReference.IsNull())
+		{
+			KindMesh = MeshReference.Get();
+			if (!KindMesh) KindMesh = MeshReference.LoadSynchronous();
+		}
+		// 명시적 Variant가 삭제되거나 로드에 실패하면 다른 변형을 대신 표시하지 않는다.
+		if (Mesh->GetStaticMesh() != KindMesh) Mesh->SetStaticMesh(KindMesh);
 		Mesh->SetMassOverrideInKg(NAME_None, FMath::Max(KindRow.MassKg, 0.01f), true);
 
-		// 이미 메모리에 있으면 Get()으로 즉시 사용하고, 종류가 실제로 바뀐 경우에만 동기 로드한다.
-		UStaticMesh* KindMesh = KindRow.Mesh.Get();
-		if (!KindMesh && !KindRow.Mesh.IsNull())
-		{
-			KindMesh = KindRow.Mesh.LoadSynchronous();
-		}
-		if (KindMesh && Mesh->GetStaticMesh() != KindMesh)
-		{
-			Mesh->SetStaticMesh(KindMesh);
-		}
-
 		AppliedTrashKindId = TrashKindId;
+		AppliedTrashVariantId = TrashVariantId;
 		AppliedCategory = KindRow.Category;
 		bHasAppliedTrashKind = true;
 	}
