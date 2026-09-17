@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
@@ -843,7 +843,8 @@ FGameplayAbilitySpecHandle UMD_EquipHotbarComponent::FindItemAbility(UMD_ItemDef
 bool UMD_EquipHotbarComponent::GrantItemAbility(UMD_ItemDefinition* ItemDefinition)
 {
 	// GA를 사용하지 않는 공통 보관 아이템은 기존 지급만 수행
-	if (IsValid(ItemDefinition) == true && ItemDefinition->IsA<UMD_ToolDefinition>() == false && ItemDefinition->IsA<UMD_ConsumeItemDefinition>() == false)
+	if (IsValid(ItemDefinition) == true && ItemDefinition->IsA<UMD_ToolDefinition>() == false && ItemDefinition->IsA<UMD_ConsumeItemDefinition>() == false
+		&& !ItemDefinition->GetUseAbilityTag().IsValid())
 	{
 		// 비장비 품목의 능력 부여 생략 성공 전달
 		return true;

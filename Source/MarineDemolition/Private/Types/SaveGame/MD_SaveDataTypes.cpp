@@ -116,6 +116,13 @@ bool FMD_MerchantData::IsStructurallyValid() const
 
 bool FMD_WorldData::IsStructurallyValid() const
 {
+    const TSet<FName> Surviving(SurvivingWallNames);
+    TSet<FName> PendingLoads;
+    for (const FName WallName : PendingCollapseWallNames)
+    {
+        if (WallName.IsNone() || Surviving.Contains(WallName) || PendingLoads.Contains(WallName)) return false;
+        PendingLoads.Add(WallName);
+    }
     if (!FMD_SurfaceStainPersistence::Validate(SurfaceStains)) return false;
     TSet<FGuid> PendingBatchIds;
     for (const FMD_ContaminationPendingDrop& Drop : PendingContaminationDrops)

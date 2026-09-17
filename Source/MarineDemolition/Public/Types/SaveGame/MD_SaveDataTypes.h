@@ -155,9 +155,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FName> SurvivingWallNames;
 
-	// 생존 벽 중 지지대 연결 상태를 복원하기 위한 벽 이름
+	// 절단 전 벽과 절단 후 남은 하중의 지지 상태를 복원하기 위한 벽 이름
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FName> SupportedWallNames;
+
+	// Hidden cut struts still held by support braces, retained until their last support is lost.
+	UPROPERTY()
+	TArray<FName> PendingCollapseWallNames;
 
 	// 동적 지지대의 클래스·위치·연결 벽을 복원하기 위한 목록
 	UPROPERTY()
