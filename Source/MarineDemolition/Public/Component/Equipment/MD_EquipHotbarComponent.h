@@ -55,6 +55,14 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
 	FMDOnEquipHotbarChanged OnHotbarChanged;
 
+	// 슬롯 아이템과 수량 변경을 내용 표시 갱신에 전달하는 알림
+	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
+	FMDOnEquipHotbarChanged OnHotbarContentsChanged;
+
+	// 선택 위치 변경을 선택 표시에 전달하는 알림
+	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
+	FMDOnEquipHotbarChanged OnHotbarSelectionChanged;
+
 protected:
 	// 기존 BP 설정 이름을 유지하는 기본 아이템 목록이며 앞의 네 위치만 사용
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hotbar", meta = (DisplayName = "Default Items"))

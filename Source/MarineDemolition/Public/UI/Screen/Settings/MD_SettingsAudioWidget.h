@@ -10,6 +10,7 @@
 class UComboBoxString;
 class UMD_CarouselWidget;
 class USlider;
+class UTextBlock;
 
 // 음성 입력 모드 캐러셀의 BP 디테일 선택용 타입
 UENUM(BlueprintType, meta = (EnumDisplayNameFn = "UMD_SettingsAudioWidget::GetVoiceInputModeDisplayName"))
@@ -46,7 +47,7 @@ protected:
 
 	// 현재 WBP의 효과음 음량 바인딩
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Audio", meta = (BindWidgetOptional))
-	TObjectPtr<USlider> Slider_VFXVolume;
+	TObjectPtr<USlider> Slider_SFXVolume;
 
 	// 현재 WBP의 음성 입력 감도 바인딩
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Audio", meta = (BindWidgetOptional))
@@ -62,7 +63,23 @@ protected:
 
 	// BP에서 EMD_VoiceInputMode 타입을 지정할 캐러셀
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Audio", meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CarouselWidget> Carousel_VoiceInputMode;
+	TObjectPtr<UMD_CarouselWidget> Carousel_MicMode;
+
+	// 복원과 초기화 시 갱신할 슬라이더 숫자 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Audio", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Value_MasterVolume;
+
+	// 복원과 초기화 시 갱신할 슬라이더 숫자 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Audio", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Value_BGMVolume;
+
+	// 복원과 초기화 시 갱신할 슬라이더 숫자 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Audio", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Value_SFXVolume;
+
+	// 복원과 초기화 시 갱신할 슬라이더 숫자 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Audio", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Value_MicThreshold;
 
 	// 적용 전까지 실제 카테고리와 분리된 화면 기준값
 	UPROPERTY(Transient)
@@ -121,7 +138,7 @@ protected:
 	void RefreshDisplay();
 
 	// 슬라이더의 디자이너 범위를 유지한 정규화 값 표시
-	void RefreshSlider(USlider* Slider, float Value);
+	void RefreshSlider(USlider* Slider, UTextBlock* ValueText, float Value);
 
 	// 디자이너 슬라이더 범위에서 정규화 설정값 수집
 	float GetSliderValue(USlider* Slider, float PreviousValue);
