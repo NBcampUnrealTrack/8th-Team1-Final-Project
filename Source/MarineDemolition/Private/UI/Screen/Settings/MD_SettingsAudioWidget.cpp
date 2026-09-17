@@ -3,6 +3,7 @@
 #include "Async/Async.h"
 #include "Components/ComboBoxString.h"
 #include "Components/Slider.h"
+#include "Components/TextBlock.h"
 #include "Gameplay/Settings/MD_AudioSettingCategory.h"
 #include "Gameplay/Settings/MD_SettingsManager.h"
 #include "UI/Foundation/MD_CarouselWidget.h"
@@ -113,8 +114,8 @@ FMD_AudioUserSettings UMD_SettingsAudioWidget::GetPendingSettings()
 	SelectedSettings.MasterVolume = GetSliderValue(Slider_MasterVolume, SelectedSettings.MasterVolume);
 	// 현재 WBP의 BGM 이름과 음악 음량 필드 대응
 	SelectedSettings.MusicVolume = GetSliderValue(Slider_BGMVolume, SelectedSettings.MusicVolume);
-	// 현재 WBP의 VFX 이름과 효과음 필드 대응
-	SelectedSettings.EffectsVolume = GetSliderValue(Slider_VFXVolume, SelectedSettings.EffectsVolume);
+	// 현재 WBP의 SFX 이름과 효과음 필드 대응
+	SelectedSettings.EffectsVolume = GetSliderValue(Slider_SFXVolume, SelectedSettings.EffectsVolume);
 	// MicThreshold 이름의 컨트롤을 입력 감도 설정값으로 수집
 	SelectedSettings.VoiceInputSensitivity = GetSliderValue(Slider_MicThreshold, SelectedSettings.VoiceInputSensitivity);
 	// 출력 장치 표시 인덱스에 대응하는 실제 ID 수집
@@ -122,22 +123,22 @@ FMD_AudioUserSettings UMD_SettingsAudioWidget::GetPendingSettings()
 	// 입력 장치 표시 인덱스에 대응하는 실제 ID 수집
 	SelectedSettings.InputDeviceId = GetSelectedDeviceId(CB_VoiceInput, InputDeviceIds, SelectedSettings.InputDeviceId);
 	// 음성 모드 컨트롤이 있는 레이아웃의 선택 확인
-	if (IsValid(Carousel_VoiceInputMode) == true)
+	if (IsValid(Carousel_MicMode) == true)
 	{
 		// BP 디테일에서 지정한 Enum 타입 조회
-		UEnum* OptionsEnum = Carousel_VoiceInputMode->GetOptionsEnum();
+		UEnum* OptionsEnum = Carousel_MicMode->GetOptionsEnum();
 		// 그래픽 품질 등 다른 Enum의 음성 모드 오해석 방지
 		UEnum* VoiceModeEnum = StaticEnum<EMD_VoiceInputMode>();
 		// 음성 모드 전용 타입에 한정한 선택 해석
 		if (OptionsEnum == VoiceModeEnum)
 		{
 			// 빈 목록의 임의 모드 변경 방지용 선택 위치 조회
-			int32 SelectedIndex = Carousel_VoiceInputMode->GetSelectedIndex();
+			int32 SelectedIndex = Carousel_MicMode->GetSelectedIndex();
 			// 실제 항목이 선택된 경우의 값 해석
 			if (SelectedIndex != INDEX_NONE)
 			{
 				// 표시 순서와 분리된 실제 Enum 값 조회
-				int64 SelectedMode = Carousel_VoiceInputMode->GetSelectedEnumValue();
+				int64 SelectedMode = Carousel_MicMode->GetSelectedEnumValue();
 				// 키 입력 중 전송 모드의 설정값 반영
 				if (SelectedMode == static_cast<int64>(EMD_VoiceInputMode::PushToTalk))
 				{
@@ -296,22 +297,22 @@ void UMD_SettingsAudioWidget::ProcessInputDevicesObtained(TArray<FAudioInputDevi
 void UMD_SettingsAudioWidget::RefreshDisplay()
 {
 	// 디자이너 범위와 스타일을 유지한 전체 음량 표시
-	RefreshSlider(Slider_MasterVolume, PendingSettings.MasterVolume);
+	RefreshSlider(Slider_MasterVolume, Txt_Value_MasterVolume, PendingSettings.MasterVolume);
 	// 현재 음악 음량 표시
-	RefreshSlider(Slider_BGMVolume, PendingSettings.MusicVolume);
+	RefreshSlider(Slider_BGMVolume, Txt_Value_BGMVolume, PendingSettings.MusicVolume);
 	// 현재 효과음 음량 표시
-	RefreshSlider(Slider_VFXVolume, PendingSettings.EffectsVolume);
+	RefreshSlider(Slider_SFXVolume, Txt_Value_SFXVolume, PendingSettings.EffectsVolume);
 	// 현재 입력 감도 표시
-	RefreshSlider(Slider_MicThreshold, PendingSettings.VoiceInputSensitivity);
+	RefreshSlider(Slider_MicThreshold, Txt_Value_MicThreshold, PendingSettings.VoiceInputSensitivity);
 	// 기준 출력 장치 선택 표시
 	RefreshOutputDeviceOptions(PendingSettings.OutputDeviceId);
 	// 기준 입력 장치 선택 표시
 	RefreshInputDeviceOptions(PendingSettings.InputDeviceId);
 	// 음성 모드 컨트롤의 선택적 표시
-	if (IsValid(Carousel_VoiceInputMode) == true)
+	if (IsValid(Carousel_MicMode) == true)
 	{
 		// BP에서 지정한 타입 조회
-		UEnum* OptionsEnum = Carousel_VoiceInputMode->GetOptionsEnum();
+		UEnum* OptionsEnum = Carousel_MicMode->GetOptionsEnum();
 		// 음성 모드 표시 규약의 기준 타입 조회
 		UEnum* VoiceModeEnum = StaticEnum<EMD_VoiceInputMode>();
 		// BP의 타입을 교체하지 않는 음성 모드 선택 갱신
@@ -320,14 +321,14 @@ void UMD_SettingsAudioWidget::RefreshDisplay()
 			// 저장된 사용 여부에 대응하는 모드 결정
 			EMD_VoiceInputMode Mode = PendingSettings.bUsePushToTalk ? EMD_VoiceInputMode::PushToTalk : EMD_VoiceInputMode::OpenMicrophone;
 			// 선택 이벤트 없는 실제 Enum 값 동기화
-			bool bSelected = Carousel_VoiceInputMode->SetSelectedEnumValue(static_cast<int64>(Mode));
+			bool bSelected = Carousel_MicMode->SetSelectedEnumValue(static_cast<int64>(Mode));
 			// 선택 결과의 명시적 소비
 			(void)bSelected;
 		}
 	}
 }
 
-void UMD_SettingsAudioWidget::RefreshSlider(USlider* Slider, float Value)
+void UMD_SettingsAudioWidget::RefreshSlider(USlider* Slider, UTextBlock* ValueText, float Value)
 {
 	// 생략된 음량 컨트롤 허용
 	if (IsValid(Slider) == false)
@@ -349,6 +350,16 @@ void UMD_SettingsAudioWidget::RefreshSlider(USlider* Slider, float Value)
 	float DisplayValue = FMath::Lerp(MinValue, MaxValue, NormalizedValue);
 	// 사용자 변경 이벤트 없는 선택값 표시
 	Slider->SetValue(DisplayValue);
+	// 프로그램에 의한 복원 시 Blueprint 입력 이벤트 없이 숫자 갱신
+	if (IsValid(ValueText) == true)
+	{
+		// Blueprint 입력 표시와 동일한 숫자 형식 준비
+		FNumberFormattingOptions NumberFormat;
+		// 소수점 한 자리까지 표시할 음량 정밀도 지정
+		NumberFormat.MaximumFractionalDigits = 1;
+		// 현재 슬라이더 표시 범위의 숫자 반영
+		ValueText->SetText(FText::AsNumber(DisplayValue, &NumberFormat));
+	}
 }
 
 float UMD_SettingsAudioWidget::GetSliderValue(USlider* Slider, float PreviousValue)

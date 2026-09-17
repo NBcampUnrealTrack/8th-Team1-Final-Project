@@ -405,6 +405,7 @@ TSharedPtr<const FMD_ScrapePagedState::FInitial, ESPMode::NotThreadSafe>
 FMD_ScrapePagedState::FindOrAddInitialAmounts(TArray<float>&& Amounts)
 {
     check(IsInGameThread());
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_ScrapeState_InternAmounts);
     struct FEntry { uint64 Hash; TWeakPtr<const FInitial, ESPMode::NotThreadSafe> Initial; };
     static TArray<FEntry> Cache;
     const SIZE_T Bytes = Amounts.Num() * sizeof(float);

@@ -9,6 +9,7 @@
 #include "UObject/StrongObjectPtr.h"
 #include "HAL/IConsoleManager.h"
 #include "Containers/Ticker.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 namespace
 {
@@ -185,6 +186,7 @@ void UMD_ScrapeSurfaceComponent::ApplyContaminationBoundaryParameters(UMaterialI
 }
 void UMD_ScrapeSurfaceComponent::UpdateContaminationBoundaryVisual(const TArray<FMD_ScrapeCellChange>& Changes)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_BoundaryDirtyTiles);
     if (!UsesMeshUVSurface() || !ContaminationMeshUVData || !GetWorld()
         || GetWorld()->GetNetMode()==NM_DedicatedServer) return;
     auto& State=bHasPredictedContaminationBoundary?PredictedContaminationBoundary:ContaminationBoundary;

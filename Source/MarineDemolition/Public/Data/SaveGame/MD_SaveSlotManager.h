@@ -14,6 +14,14 @@ DECLARE_DYNAMIC_DELEGATE_OneParam(FOnRemoveMDGameDataComplete, bool, bWasSuccess
 // 게임 데이터 목록을 비동기 로드 완료 시 데이터 목록과 함께 성공 여부를 호출부에 전달한다.
 DECLARE_DYNAMIC_DELEGATE_TwoParams(FOnLoadMDGameDataListComplete, const TArray<FMD_GameData>&, GameDataList, bool, bWasSuccessful);
 
+// 저장에 참여하는 객체가 자신의 필드를 기록하는 수집 이벤트
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnCollectGameData, UPARAM(ref) FMD_GameData&, GameData,
+    UPARAM(ref) bool&, bWasSuccessful);
+
+// 저장에 참여하는 객체가 읽기 전용 데이터에서 자신의 필드를 찾아 적용하는 이벤트
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnOverwriteGameData, const FMD_GameData&, GameData,
+    UPARAM(ref) bool&, bWasSuccessful);
+
 // 맵 이동 이후 실행할 게임 데이터 초기화 방식을 구분하는 상태
 enum class EMD_PendingGameDataOperation : uint8
 {
@@ -47,6 +55,19 @@ public:
 	static void AddReferencedObjects(UObject* Object, FReferenceCollector& Collector);
 
 public:
+    // 기능별 데이터 소유자가 현재 상태를 저장 구조체에 추가하는 이벤트
+    // 구독자는 실패 시에만 bWasSuccessful을 false로 변경하여 앞선 실패 유지
+    // BP에서는 GameData와 bWasSuccessful의 참조 입력 함수를 Create Event로 연결 필요
+    UPROPERTY(BlueprintAssignable, Category = "Save Game")
+    FMD_OnCollectGameData OnCollectGameData;
+
+    // 기능별 데이터 소유자가 전달된 저장 필드를 찾아 직접 복원하는 이벤트
+    // 구독자는 실패 시에만 bWasSuccessful을 false로 변경하여 앞선 실패 유지
+    // BP에서는 bWasSuccessful의 참조 입력 함수를 Create Event로 연결 필요
+    UPROPERTY(BlueprintAssignable, Category = "Save Game")
+    FMD_OnOverwriteGameData OnOverwriteGameData;
+
+public:
 	// 자동 저장 목록에 할당할 수 있는 최대 슬롯 개수이며 0이면 자동 저장 목록을 사용하지 않는다.
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession", meta = (ClampMin = "1", ClampMax = "9"))
 	int32 MaxAutoSaveSlotCount = 3;
@@ -56,9 +77,10 @@ public:
 	int32 MaxUserSaveSlotCount = 5;
 
 protected:
-	// 세이브 파일 이름
-	static const FString GameSaveFileName;
+    // 이벤트 처리 도중 저장과 복원이 재진입하여 요청 데이터를 변경하는 상황 방지
+    bool bGameDataOperationInProgress = false;
 
+protected:
 	// 비동기 함수 실행 상태를 나타내는 플래그
 	bool bAsyncOperationInProgress = false;
 
@@ -74,6 +96,10 @@ protected:
 
 	// 목적지 맵에서 실행할 게임 데이터 초기화 작업
 	EMD_PendingGameDataOperation PendingGameDataOperation = EMD_PendingGameDataOperation::None;
+
+public:
+    // 이벤트 요청이 진행 중인지 확인하기 위한 상태 조회
+    FORCEINLINE bool IsGameDataOperationInProgress() { return bGameDataOperationInProgress; }
 
 public:
 	// 현재의 게임 데이터를 수집하고 세이브 파일에 저장하는 함수
@@ -141,9 +167,6 @@ protected:
 
 	// 저장해야 하는 GameSession 데이터를 수집하는 함수
 	bool CollectGameData();
-
-	// 게임 데이터에 존재하는 플레이어의 데이터를 현재 플레이어에게 덮어쓰는 함수
-	bool OverwriteDataToPlayerInternal(const APlayerState* PlayerState, const FMD_GameData& GameData) const;
 
 	// 저장 슬롯과 저장되지 않은 현재 회차에 필요한 검증 기준을 구분하여 World에 적용하는 함수
 	bool ApplyGameDataToWorldInternal(const FMD_GameData& GameData, bool bRequireSavedSlotIdentity);

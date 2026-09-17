@@ -12,11 +12,13 @@ public class MDTrashPlacementEditor : ModuleRules
 		{
 			"CoreUObject",
 			"Engine",
+			"DeveloperSettings",
 			"GameplayTags",
 			"Slate",
 			"SlateCore",
 			"InputCore",
 			"EditorFramework",
+			"TypedElementFramework",
 			"UnrealEd",
 			"LevelEditor",
 			"InteractiveToolsFramework",

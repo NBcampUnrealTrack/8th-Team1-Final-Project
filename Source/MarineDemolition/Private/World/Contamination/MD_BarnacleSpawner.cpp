@@ -331,23 +331,19 @@ bool AMD_BarnacleSpawner::TryGetRuntimePlacementSeed(
 	return true;
 }
 
-void AMD_BarnacleSpawner::RestorePersistentState(
-	const TArray<int32>& InRemovedSpawnIndices,
-	const bool bHasSavedRuntimePlacementSeed,
-	const int32 SavedRuntimePlacementSeed)
+bool AMD_BarnacleSpawner::RestorePersistentState(const TArray<int32>& InRemovedSpawnIndices, bool bHasSavedRuntimePlacementSeed, int32 SavedRuntimePlacementSeed)
 {
-	if (!HasAuthority())
-	{
-		return;
-	}
+	// 서버 권한과 랜덤 배치에 필수인 저장 시드 존재 여부 검사
+    if (HasAuthority() == false || (PlacementSeedMode == EMD_BarnaclePlacementSeedMode::RandomPerNewGame && bHasSavedRuntimePlacementSeed == false))
+    {
+        // 구형 시드 대체 없이 잘못된 복원 요청 거부
+        return false;
+    }
 
 	if (PlacementSeedMode == EMD_BarnaclePlacementSeedMode::RandomPerNewGame)
 	{
-		// 구버전 기록에는 런타임 시드가 없다. 당시 배치는 PlacementSeed 고정값을
-		// 사용했으므로 그 값을 최초 런타임 시드로 승격해야 제거 순번이 어긋나지 않는다.
-		RuntimePlacementSeed = bHasSavedRuntimePlacementSeed
-			? SavedRuntimePlacementSeed
-			: PlacementSeed;
+		// 현재 저장 형식에 기록된 런타임 배치 시드 직접 복원
+		RuntimePlacementSeed = SavedRuntimePlacementSeed;
 		bHasRuntimePlacementSeed = true;
 	}
 	else
@@ -370,12 +366,15 @@ void AMD_BarnacleSpawner::RestorePersistentState(
 	// 저장 상태만 주입하고, 나중의 첫 SpawnBarnacles 호출이 그 시드를 사용하게 한다.
 	if (!bHasSpawnedInitialPlacement)
 	{
-		return;
+		// 초기 배치 전 저장 상태 주입 성공 반환
+		return true;
 	}
 
 	DestroySpawnedBarnaclesForRebuild();
 	bHasSpawnedInitialPlacement = false;
 	SpawnBarnacles();
+    // 저장 시드와 제거 순번을 반영한 배치 복원 완료
+    return true;
 }
 
 void AMD_BarnacleSpawner::InitializeRuntimePlacementSeed()

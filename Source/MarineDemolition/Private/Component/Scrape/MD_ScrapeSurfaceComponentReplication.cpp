@@ -309,6 +309,10 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 	TArray<FMD_ScrapeCellChange> CellChanges;
 	CellChanges.Reserve(StateItems.Num());
 	TSet<int32> ResetPages;
+    FMD_ScrapeMeshUVProgress UpdatedProgress = CachedMeshUVProgress;
+    bool bIncrementalProgress = UsesMeshUVSurface() && UpdatedProgress.bIsValid
+        && UpdatedProgress.CleanTolerance == ScrapeSettings.CleanTolerance;
+    const auto CarrierWeights = GetContaminationCellCarrierWeights();
 
 	for (const FMD_ReplicatedScrapeCellState& StateItem : StateItems)
 	{
@@ -406,6 +410,9 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 			bCapturedPreviousCompletion = true;
 		}
 
+        FMD_ScrapeTouchedCell ProgressChange;
+        ProgressChange.CellIndex = StateCellIndex;
+        ProgressChange.Before = Cell;
 		Cell.InitialContamination = TargetInitial;
 		Cell.RemainingContamination = TargetRemaining;
 		Cell.TransferredContamination = TargetTransferred;
@@ -413,10 +420,34 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 			TargetTransferredPatternDensity;
 		Cell.CoveredFraction = TargetCoveredFraction;
 		SetContaminationStorageCell(StorageIndex, Cell);
+        if (bIncrementalProgress)
+        {
+            bIncrementalProgress = FMD_ScrapeEvaluator::UpdateMeshUVProgressFromTouchedCells(
+                UpdatedProgress, MakeArrayView(&ProgressChange, 1), GetContaminationCellView(),
+                CarrierWeights, UpdatedProgress);
+        }
 		if (bResetToInitial && !ContaminationPagedCells.IsEmpty())
 		{
 			ResetPages.Add(StorageIndex / FMD_ScrapePagedState::PageSize);
 		}
+
+        // Intact procedural dirt has the same progress signal before and after
+        // transport quantization (remaining / initial == 1). Paint and coverage
+        // must also be identical, and neither initial amount may create an override.
+        // Commit every received float and the gameplay totals above; only omit a
+        // provably unchanged visual update. Solid geometry and predictions retain
+        // the full-precision reconciliation path.
+        const bool bUnchangedGeneratedVisual = !bResetToInitial && UsesMeshUVSurface()
+            && !ContaminationSolidVisual && !HasLocalPredictedContaminationState()
+            && ContaminationGeneration.bProcedural && ContaminationGeneration.Version >= 2
+            && PreviousInitial > UE_SMALL_NUMBER && TargetInitial > UE_SMALL_NUMBER
+            && PreviousInitial == GeneratedInitial && PreviousRemaining == PreviousInitial
+            && TargetRemaining == TargetInitial
+            && TargetInitial <= GeneratedInitial + .5f / 255.f + 1.e-6f
+            && PreviousTransferred == TargetTransferred
+            && PreviousTransferredPatternDensity == TargetTransferredPatternDensity
+            && PreviousCoveredFraction == TargetCoveredFraction;
+        if (bUnchangedGeneratedVisual) { continue; }
 
 		EMD_ScrapeSurfaceFace SurfaceFace = EMD_ScrapeSurfaceFace::Front;
 		int32 LocalCellIndex = INDEX_NONE;
@@ -455,12 +486,13 @@ void UMD_ScrapeSurfaceComponent::ApplyReplicatedContaminationStates(
 	{
 		ContaminationPagedCells.CompactUnchangedPageForIndex(PageIndex * FMD_ScrapePagedState::PageSize);
 	}
-	if (CellChanges.IsEmpty())
+	if (!bCapturedPreviousCompletion)
 	{
 		return;
 	}
 
-	RefreshContaminationCleanRatioCache();
+    if (bIncrementalProgress) { CommitContaminationMeshUVProgressCache(UpdatedProgress); }
+    else { RefreshContaminationCleanRatioCache(); }
 	if (!HasLocalPredictedContaminationState())
 	{
 		UpdateContaminationMask(CellChanges);

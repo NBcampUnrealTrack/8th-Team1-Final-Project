@@ -38,6 +38,12 @@ public:
     uint8 operator[](int32 Index) const;
     bool Set(int32 Index, uint8 Value);
     void Empty();
+    // Retire only CPU page references; texture and layout RHI lifetimes stay on their owner thread.
+    void EmptyWithDeferredPageRelease();
+    static constexpr uint64 MaximumDeferredPageSlots = 65536;
+    static constexpr int32 MaximumDeferredPageBatches = 1024;
+    static void FlushDeferredPageReleases();
+    static void ShutdownDeferredPageReleases();
     void Reset() { Empty(); }
     SIZE_T GetAllocatedSize() const;
     SIZE_T GetSharedInitialAllocatedSize() const;

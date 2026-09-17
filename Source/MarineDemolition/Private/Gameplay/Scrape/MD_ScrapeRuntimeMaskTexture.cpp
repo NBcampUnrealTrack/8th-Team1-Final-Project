@@ -11,6 +11,7 @@
 #include <atomic>
 
 DEFINE_LOG_CATEGORY_STATIC(LogMDScrapeMaskUpload, Log, All);
+TRACE_DECLARE_INT_COUNTER(MD_ScrapeMask_LayoutGPUBytes, TEXT("MD/ScrapeMask/LayoutGPUBytes"));
 TRACE_DECLARE_INT_COUNTER(MD_ScrapeMask_InitialPendingBytes, TEXT("MD/ScrapeMask/InitialPendingBytes"));
 TRACE_DECLARE_INT_COUNTER(MD_ScrapeMask_DirtyPendingBytes, TEXT("MD/ScrapeMask/DirtyPendingBytes"));
 TRACE_DECLARE_INT_COUNTER(MD_ScrapeMask_InitialPeakBytes, TEXT("MD/ScrapeMask/InitialPeakBytes"));
@@ -26,7 +27,12 @@ struct FMaskUploadState
 {
     FCriticalSection Mutex;
     bool bHasDirtyWork = false; // Protected by Mutex; also read after final owner release.
-    ~FMaskUploadState() { if (bHasDirtyWork) QueuedDirtyStates.fetch_sub(1); }
+    ~FMaskUploadState()
+    {
+        if (bHasDirtyWork) QueuedDirtyStates.fetch_sub(1);
+        CurrentPixels.EmptyWithDeferredPageRelease();
+        PendingPixels.EmptyWithDeferredPageRelease();
+    }
     FMD_ScrapeMaskPixels CurrentPixels; // Exact latest data, including resource recreation.
     FMD_ScrapeMaskPixels PendingPixels;
     TBitArray<> Dirty;
@@ -67,6 +73,7 @@ void TraceUploadStats()
     // Trace-counter objects are written only on GT; render/RHI work updates atomics.
     // Always emit samples so a trace begun after startup still has explicit zeroes.
     check(IsInGameThread());
+    TRACE_COUNTER_SET_ALWAYS(MD_ScrapeMask_LayoutGPUBytes, FMDScrapeInitialMaskRenderer::GetLiveLayoutGPUBytes());
     TRACE_COUNTER_SET_ALWAYS(MD_ScrapeMask_InitialPendingBytes, InitialPending.load());
     TRACE_COUNTER_SET_ALWAYS(MD_ScrapeMask_DirtyPendingBytes, DirtyPending.load());
     TRACE_COUNTER_SET_ALWAYS(MD_ScrapeMask_InitialPeakBytes, InitialPeak.load());

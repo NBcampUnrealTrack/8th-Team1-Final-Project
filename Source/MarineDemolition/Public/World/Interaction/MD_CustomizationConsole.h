@@ -40,6 +40,9 @@ public:
 	// 카메라·메시 표시·입력을 되돌린다. 선택 화면이 닫힐 때(또는 접근 실패 시) 호출된다
 	void EndCustomization(AMD_Character* Character);
 
+	// 선택 화면이 열린 동안 캐릭터를 거울 방향과 카메라 방향 사이에서 돌린다. bTurnRight면 오른쪽(Yaw 증가)으로 돈다
+	void TurnFacing(bool bTurnRight);
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaSeconds) override;
@@ -111,6 +114,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Approach")
 	float ApproachTimeout = 4.f;
 
+	// 선택 화면에서 Q/E로 돌 때의 보간 속도
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Facing")
+	float FacingTurnInterpSpeed = 6.f;
+
+	// 카메라를 볼 때 카메라 정면에서 이만큼 Yaw를 더한다. 살짝 비스듬히 서게 할 때 쓴다
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Facing")
+	float FacingCameraYawOffset = 0.f;
+
 	// 거울 면 머티리얼. 비우면 MirrorSurface의 첫 머티리얼을 쓴다
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Mirror")
 	TObjectPtr<UMaterialInterface> MirrorMaterial;
@@ -140,9 +151,19 @@ private:
 	void FinishApproach();
 	bool PushSelectWidget(APlayerController* PC);
 
+	// Q/E 회전 보간. 목표 Yaw는 회전 방향을 지키기 위해 정규화하지 않은 누적값으로 둔다
+	void TickFacing(float DeltaSeconds);
+	float GetMirrorFacingYaw() const;
+	float GetCameraFacingYaw() const;
+
 	bool bApproaching = false;
 	bool bReachedStandPoint = false;
 	float ApproachElapsed = 0.f;
+
+	bool bTurningFacing = false;
+	bool bFacingMirror = true;
+	float FacingCurrentYaw = 0.f;
+	float FacingTargetYaw = 0.f;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextureRenderTarget2D> MirrorRenderTarget;

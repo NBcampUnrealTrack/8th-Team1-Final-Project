@@ -106,8 +106,9 @@ void UMD_ScrapeInitializationSubsystem::Tick(float DeltaTime)
             Job->Tolerance = Surface->ScrapeSettings.CleanTolerance;
             Job->Revision = Job->Data->GetRuntimeCacheRevision();
             Job->Generation = Surface->ContaminationGeneration;
-            if (auto* Persistence = GI ? GI->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr)
-                if (const auto* Record = Persistence->FindDeferredContaminationRecord(Surface)) Job->SavedRecord = *Record;
+            if (Surface->HasAuthority())
+                if (auto* Persistence = GI ? GI->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr)
+                    if (const auto* Record = Persistence->FindDeferredContaminationRecord(Surface)) Job->SavedRecord = *Record;
             Jobs.Add(MoveTemp(Job));
         }
         for (int32 I = Jobs.Num() - 1; I >= 0 && FPlatformTime::Seconds() < Deadline; --I)
@@ -149,6 +150,7 @@ void UMD_ScrapeInitializationSubsystem::Tick(float DeltaTime)
             }
             if (Job.bCommitted)
             {
+                TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_SavedRestoreSlice);
                 if (!Job.ExpandedRecord.IsSet())
                 {
                     Job.ExpandedRecord.Emplace();
@@ -250,6 +252,7 @@ void UMD_ScrapeInitializationSubsystem::Tick(float DeltaTime)
                 Job.Prepared = Job.Result.Consume();
             }
             if (FPlatformTime::Seconds() >= Deadline) continue;
+            TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_InitializationCommit);
             Surface->bDeferredInitializationPending = false;
             if (Job.Prepared->Progress.bIsValid) Surface->PreparedInitialState = MoveTemp(*Job.Prepared);
             TGuardValue<bool> Completing(Surface->bCompletingDeferredInitialization, true);

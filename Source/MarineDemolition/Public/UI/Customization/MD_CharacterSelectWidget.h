@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "InputCoreTypes.h"
 #include "UI/Foundation/MD_CommonGameMenuWidget.h"
 #include "Types/Customization/MD_CharacterAppearanceTypes.h"
 #include "MD_CharacterSelectWidget.generated.h"
@@ -49,6 +50,10 @@ protected:
 	virtual void NativeOnActivated() override;
 	virtual void NativeOnDeactivated() override;
 	virtual void NativeDestruct() override;
+	// 활성화 시 키보드 포커스가 이 위젯 안에 있어야 Q/E가 들어온다
+	virtual UWidget* NativeGetDesiredFocusTarget() const override;
+	virtual FReply NativeOnKeyDown(const FGeometry& InGeometry, const FKeyEvent& InKeyEvent) override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 	// 선택이 바뀔 때 BP 연출용
 	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Customization")
@@ -61,6 +66,13 @@ protected:
 	// 색 버튼 클래스. 이미지 틴트에 팔레트 색을 넣는다
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Customization")
 	TSubclassOf<UMD_CommonButtonBase> ColorButtonClass;
+
+	// 캐릭터를 왼쪽/오른쪽으로 돌려 거울 방향과 카메라 방향을 오가는 키
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Customization|Input")
+	FKey TurnLeftKey = EKeys::Q;
+
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Customization|Input")
+	FKey TurnRightKey = EKeys::E;
 
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UPanelWidget> Panel_Characters;
@@ -82,6 +94,8 @@ private:
 	void ApplyPreview();
 	void CommitSelection();
 	void RestoreGameplayHUD();
+	// 포커스가 게임 뷰포트로 빠지거나 비면 위젯 안으로 되찾는다. 다른 UI가 가진 포커스는 건드리지 않는다
+	void EnsureKeyboardFocus();
 
 	UPROPERTY(Transient)
 	TArray<TObjectPtr<UMD_CommonButtonBase>> CharacterButtons;

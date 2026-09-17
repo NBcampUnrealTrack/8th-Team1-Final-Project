@@ -62,6 +62,10 @@ void AMD_CustomizationConsole::Tick(float DeltaSeconds)
 	{
 		TickApproach(DeltaSeconds);
 	}
+	else if (bTurningFacing == true)
+	{
+		TickFacing(DeltaSeconds);
+	}
 }
 
 void AMD_CustomizationConsole::BeginPlay()
@@ -258,6 +262,8 @@ void AMD_CustomizationConsole::TickApproach(float DeltaSeconds)
 void AMD_CustomizationConsole::FinishApproach()
 {
 	bApproaching = false;
+	bTurningFacing = false;
+	bFacingMirror = true;
 	SetActorTickEnabled(false);
 
 	AMD_Character* Character = ActiveCharacter.Get();
@@ -266,6 +272,84 @@ void AMD_CustomizationConsole::FinishApproach()
 	{
 		EndCustomization(Character);
 	}
+}
+
+float AMD_CustomizationConsole::GetMirrorFacingYaw() const
+{
+	return IsValid(StandPoint) == true ? StandPoint->GetComponentRotation().Yaw : GetActorRotation().Yaw + 180.f;
+}
+
+float AMD_CustomizationConsole::GetCameraFacingYaw() const
+{
+	const AMD_Character* Character = ActiveCharacter.Get();
+	if (IsValid(Character) == false || IsValid(ViewCamera) == false)
+	{
+		return GetMirrorFacingYaw() + 180.f;
+	}
+
+	// 캐릭터 위치에서 카메라를 향한 수평 방향. 카메라가 바로 위에 있으면 거울 반대쪽으로 둔다
+	const FVector ToCamera = (ViewCamera->GetComponentLocation() - Character->GetActorLocation()).GetSafeNormal2D();
+	if (ToCamera.IsNearlyZero() == true)
+	{
+		return GetMirrorFacingYaw() + 180.f;
+	}
+	return ToCamera.Rotation().Yaw + FacingCameraYawOffset;
+}
+
+void AMD_CustomizationConsole::TurnFacing(bool bTurnRight)
+{
+	AMD_Character* Character = ActiveCharacter.Get();
+	APlayerController* PC = IsValid(Character) == true ? Cast<APlayerController>(Character->GetController()) : nullptr;
+	// 접근이 끝나고 선택 화면이 열린 동안만 돈다
+	if (IsValid(Character) == false || IsValid(PC) == false || bApproaching == true)
+	{
+		return;
+	}
+
+	bFacingMirror = !bFacingMirror;
+	const float DesiredYaw = bFacingMirror == true ? GetMirrorFacingYaw() : GetCameraFacingYaw();
+
+	// 회전 중 다시 누르면 지금 각도에서 이어서 돈다
+	if (bTurningFacing == false)
+	{
+		FacingCurrentYaw = PC->GetControlRotation().Yaw;
+	}
+
+	// 두 방향이 거의 정반대라 최단 경로로는 회전 방향이 정해지지 않는다. 요청한 쪽으로만 돌도록 목표를 누적값으로 잡는다
+	float Delta = FRotator::NormalizeAxis(DesiredYaw - FacingCurrentYaw);
+	if (bTurnRight == true && Delta < 0.f)
+	{
+		Delta += 360.f;
+	}
+	else if (bTurnRight == false && Delta > 0.f)
+	{
+		Delta -= 360.f;
+	}
+	FacingTargetYaw = FacingCurrentYaw + Delta;
+
+	bTurningFacing = true;
+	SetActorTickEnabled(true);
+}
+
+void AMD_CustomizationConsole::TickFacing(float DeltaSeconds)
+{
+	AMD_Character* Character = ActiveCharacter.Get();
+	APlayerController* PC = IsValid(Character) == true ? Cast<APlayerController>(Character->GetController()) : nullptr;
+	if (IsValid(Character) == false || IsValid(PC) == false)
+	{
+		bTurningFacing = false;
+		SetActorTickEnabled(false);
+		return;
+	}
+
+	FacingCurrentYaw = FMath::FInterpTo(FacingCurrentYaw, FacingTargetYaw, DeltaSeconds, FacingTurnInterpSpeed);
+	if (FMath::Abs(FacingTargetYaw - FacingCurrentYaw) <= 0.5f)
+	{
+		FacingCurrentYaw = FacingTargetYaw;
+		bTurningFacing = false;
+		SetActorTickEnabled(false);
+	}
+	PC->SetControlRotation(FRotator(0.f, FRotator::NormalizeAxis(FacingCurrentYaw), 0.f));
 }
 
 void AMD_CustomizationConsole::BeginCustomization(AMD_Character* Character)
@@ -342,6 +426,8 @@ void AMD_CustomizationConsole::EndCustomization(AMD_Character* Character)
 	ActiveCharacter.Reset();
 	bApproaching = false;
 	bReachedStandPoint = false;
+	bTurningFacing = false;
+	bFacingMirror = true;
 	SetActorTickEnabled(false);
 	SetMirrorActive(false);
 

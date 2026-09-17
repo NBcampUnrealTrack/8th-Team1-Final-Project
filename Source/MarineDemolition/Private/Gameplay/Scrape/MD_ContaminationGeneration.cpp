@@ -1,6 +1,13 @@
 #include "Gameplay/Scrape/MD_ContaminationGeneration.h"
 #include "Gameplay/Scrape/MD_ContaminationNoise.h"
 
+// Generated network baselines must use the same arithmetic in Game and Editor.
+// UE 5.8 defaults to fast math for Game and precise math for Editor on MSVC.
+#if defined(_MSC_VER)
+#pragma float_control(precise, on, push)
+#pragma fp_contract(off)
+#endif
+
 bool FMD_ContaminationGeneration::IsValid() const
 {
     const FVector Scale = SampleTransform.GetScale3D();
@@ -105,3 +112,7 @@ float FMD_ContaminationGeneration::IntegrateTriangle(const FVector& A, const FVe
     return Integrate(*this,SampleTransform.TransformPosition(A),SampleTransform.TransformPosition(B),
         SampleTransform.TransformPosition(C),0);
 }
+
+#if defined(_MSC_VER)
+#pragma float_control(pop)
+#endif
