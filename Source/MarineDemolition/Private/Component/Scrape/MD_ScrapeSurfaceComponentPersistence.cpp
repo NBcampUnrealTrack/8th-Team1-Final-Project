@@ -349,6 +349,7 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 	const TArray<float>& TransferredPatternDensities,
 	const TArray<float>& CoveredFractions)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_RestoreSavedCells);
 	const bool bHasInitialAmounts = !InitialAmounts.IsEmpty();
 	const bool bHasTransferredAmounts = !TransferredAmounts.IsEmpty();
 	const bool bHasTransferredPatternDensities =

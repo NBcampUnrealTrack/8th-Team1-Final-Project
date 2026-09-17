@@ -7,6 +7,7 @@
 #include "Algo/BinarySearch.h"
 #include "MDScrapeInitialMaskRenderer.h"
 #include "RHICommandList.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 FMD_ScrapeMaskPixels& FMD_ScrapeMaskPixels::operator=(const FMD_ScrapeMaskPixels& Other)
 {
@@ -130,6 +131,7 @@ bool FMD_ScrapeMaskPixels::TryInitializeGPU(FRHICommandListImmediate& Cmd, FRHIT
 {
     if (!HasBinaryInitial() || !FMDScrapeInitialMaskRenderer::Generate(Cmd, Texture, Size,
         *Initial->Layout, Initial->ActiveBits, Initial->SeamBytes)) return false;
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_InitialMaskRestorePages);
     // Resource recreation reuses the GPU baseline and uploads only actual modified
     // pages. No readback or whole-atlas CPU raster is deferred to the first scrape.
     uint8 Bytes[PageSize];
@@ -297,6 +299,7 @@ void FMD_ScrapeMaskPixels::ShutdownDeferredPageReleases()
 }
 void FMD_ScrapeMaskPixels::EmptyWithDeferredPageRelease()
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_QueueRetirePages);
     // UTexture GC releases large arrays of shared page pointers on the render thread.
     // Only CPU-only FPage data escapes; no UObject, RHI reference, or this pointer.
     const uint64 Slots = Pages.Num();
@@ -312,6 +315,7 @@ void FMD_ScrapeMaskPixels::EmptyWithDeferredPageRelease()
                 Task = UE::Tasks::Launch(UE_SOURCE_LOCATION,
                     [RetiredPages = MoveTemp(Pages), Slots]() mutable
                     {
+                        TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_RetireMaskPages);
                         RetiredPages.Empty();
                         RetiringSlots.fetch_sub(Slots);
                     }, UE::Tasks::Prerequisites(LastPageReleaseTask), UE::Tasks::ETaskPriority::BackgroundNormal);

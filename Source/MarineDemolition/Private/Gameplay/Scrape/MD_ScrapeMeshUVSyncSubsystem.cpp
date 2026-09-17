@@ -261,6 +261,7 @@ bool UMD_ScrapeMeshUVSyncSubsystem::BuildGeneratedCell(const UMD_ScrapeSurfaceCo
 bool UMD_ScrapeMeshUVSyncSubsystem::CompactGeneratedSnapshot(UMD_ScrapeSurfaceComponent& Surface,
     FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, TArray<FMD_ReplicatedScrapeCellState>& States)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_CompactGeneratedSnapshot);
     if (!Descriptor.bFullSnapshot || !Descriptor.Generation.IsValid()
         || Descriptor.Generation != Surface.GetContaminationGeneration()
         || States.Num() != Surface.GetContaminationActiveCellCount()) return false;
@@ -303,6 +304,7 @@ bool UMD_ScrapeMeshUVSyncSubsystem::CompactGeneratedSnapshot(UMD_ScrapeSurfaceCo
 bool UMD_ScrapeMeshUVSyncSubsystem::ExpandGeneratedSnapshot(UMD_ScrapeSurfaceComponent& Surface,
     const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, TArray<FMD_ReplicatedScrapeCellState>& States)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_ExpandGeneratedSnapshot);
     if (!Descriptor.bGeneratedBase) return true;
     if (!Descriptor.bFullSnapshot || Descriptor.Generation != Surface.GetContaminationGeneration()
         || Descriptor.LayoutId != Surface.GetContaminationLayoutId()

@@ -26,4 +26,5 @@ public:
     static bool Generate(FRHICommandListImmediate& Cmd, FRHITexture* Texture, FIntPoint Size,
         const FMDScrapeInitialMaskLayout& Layout, TConstArrayView<uint32> ActiveBits,
         TConstArrayView<uint8> SeamBytes);
+    static uint64 GetLiveLayoutGPUBytes();
 };

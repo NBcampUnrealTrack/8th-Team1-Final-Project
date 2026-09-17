@@ -5,9 +5,12 @@
 #include "RenderGraphUtils.h"
 #include "RenderTargetPool.h"
 #include "RHICommandList.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
+#include <atomic>
 
 namespace
 {
+    std::atomic<uint64> LiveLayoutGPUBytes{0};
     class FMDScrapeInitialMaskCS : public FGlobalShader
     {
         DECLARE_GLOBAL_SHADER(FMDScrapeInitialMaskCS);
@@ -28,12 +31,15 @@ namespace
 struct FMDScrapeInitialMaskLayout::FGPUData
 {
     TRefCountPtr<FRDGPooledBuffer> Sources;
+    uint64 Bytes = 0;
+    ~FGPUData() { LiveLayoutGPUBytes.fetch_sub(Bytes); }
 };
 FMDScrapeInitialMaskLayout::FMDScrapeInitialMaskLayout(TArray<uint32>&& InSources, TArray<int32>&& InSeamPixels)
     : Sources(MoveTemp(InSources)), SeamPixels(MoveTemp(InSeamPixels)), GPU(MakeUnique<FGPUData>()) {}
 FMDScrapeInitialMaskLayout::~FMDScrapeInitialMaskLayout() = default;
 uint64 FMDScrapeInitialMaskLayout::GetCPUBytes() const
 { return sizeof(*this) + Sources.GetAllocatedSize() + SeamPixels.GetAllocatedSize() + sizeof(FGPUData); }
+uint64 FMDScrapeInitialMaskRenderer::GetLiveLayoutGPUBytes() { return LiveLayoutGPUBytes.load(); }
 bool FMDScrapeInitialMaskRenderer::IsSupported()
 {
     return GMaxRHIFeatureLevel >= ERHIFeatureLevel::SM5
@@ -45,6 +51,7 @@ bool FMDScrapeInitialMaskRenderer::Generate(FRHICommandListImmediate& Cmd, FRHIT
 {
     check(IsInRenderingThread());
     if (!IsSupported() || !Texture || Layout.Sources.Num() != Size.X * Size.Y || Bits.IsEmpty()) return false;
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_InitialMaskGPUUpload);
     FRDGBuilder Graph(Cmd);
     FRDGBufferRef Sources;
     if (Layout.GPU->Sources) Sources = Graph.RegisterExternalBuffer(Layout.GPU->Sources);
@@ -52,6 +59,8 @@ bool FMDScrapeInitialMaskRenderer::Generate(FRHICommandListImmediate& Cmd, FRHIT
     {
         Sources = CreateStructuredBuffer(Graph, TEXT("MD_InitialMaskLayout"), Layout.Sources);
         Graph.QueueBufferExtraction(Sources, &Layout.GPU->Sources);
+        Layout.GPU->Bytes = uint64(Layout.Sources.Num()) * sizeof(uint32);
+        LiveLayoutGPUBytes.fetch_add(Layout.GPU->Bytes);
     }
     TArray<uint32> PackedSeam;
     PackedSeam.SetNumZeroed(FMath::Max(1, FMath::DivideAndRoundUp(Seam.Num(), 4)));

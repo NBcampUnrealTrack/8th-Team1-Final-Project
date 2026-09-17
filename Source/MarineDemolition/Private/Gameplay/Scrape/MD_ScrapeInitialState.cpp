@@ -91,6 +91,7 @@ bool MD_ScrapeInitialState::PrepareMaskRecipe(FMD_ScrapeInitialState& State,
     float FullSignal, bool bParallel, double Deadline)
 {
     if (State.bMaskRecipeComplete) return true;
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_InitialMaskRecipeSlice);
     if (!State.MaskLayout || State.Amounts.Num() != Cells.ActiveToAtlas.Num())
     { State.MaskLayout.Reset(); State.bMaskRecipeComplete = true; return true; }
     if (State.MaskBits.IsEmpty() && State.NextMaskCell == 0)

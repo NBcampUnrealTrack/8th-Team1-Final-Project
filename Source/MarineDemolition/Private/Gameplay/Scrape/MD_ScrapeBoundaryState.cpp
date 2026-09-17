@@ -2,6 +2,7 @@
 #include "Curve/PolygonIntersectionUtils.h"
 #include "Serialization/MemoryReader.h"
 #include "Serialization/MemoryWriter.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 using namespace UE::Geometry;
 namespace
@@ -117,6 +118,7 @@ uint64 FMD_ScrapeBoundaryState::GetAllocatedBytes() const
 }
 void FMD_ScrapeBoundaryState::Apply(TConstArrayView<FMD_ScrapeBoundaryFootprint> Footprints)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_BoundaryUnion);
     if (bDisabled || Dimensions.X <= 0 || Dimensions.Y <= 0) return;
     const int32 Columns = TileColumns();
     const int32 Rows = FMath::DivideAndRoundUp(Dimensions.Y, TileCells);

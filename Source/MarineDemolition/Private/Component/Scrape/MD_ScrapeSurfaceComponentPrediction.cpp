@@ -9,6 +9,7 @@
 #include "Engine/World.h"
 #include "Components/StaticMeshComponent.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
 namespace
 {
@@ -226,6 +227,7 @@ bool UMD_ScrapeSurfaceComponent::ApplyLocalScrapePredictionToShadow(
 	const FMD_ScrapeToolSpec& ToolSpec,
 	TArray<int32>& OutChangedCellIndices)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_PredictionStroke);
 	FMD_ScrapeEvaluationScratch LocalEvaluationScratch;
     LocalEvaluationScratch.bCaptureBoundary = UsesMeshUVSurface();
 	TArray<FMD_ScrapeSurfaceCell> PredictionFaceScratch;
@@ -588,6 +590,7 @@ void UMD_ScrapeSurfaceComponent::FlushLocalScrapePredictionRebuild()
 void UMD_ScrapeSurfaceComponent::RebuildLocalScrapePredictionShadow()
 {
     bLocalScrapePredictionRebuildPending = false;
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_PredictionRebuild);
     ResetPredictedContaminationBoundary();
 	const int32 PreviousVisualCellCount = GetVisualContaminationCells().Num();
 	// Only these addresses can differ from the authoritative state. Include old
