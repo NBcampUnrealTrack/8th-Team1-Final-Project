@@ -844,10 +844,6 @@ Content/Assets/Stylized_Cemetery/**
 !Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Dirt_Islands_Normal.uasset
 !Content/Assets/Stylized_Cemetery/Textures/Environment_Assets_Textures/T_Dirt_Islands_ORM.uasset
 
-# Codex safe-modify rollback snapshots.
-.ue-safe-modify-backup/
-
-# Local-only automation/test sources.
+# Local-only automation/test sources; retained for local validation.
 /Source/MarineDemolition/Private/Tests/
 /Source/MarineDemolition/Public/Tests/
-.claude/settings.local.json

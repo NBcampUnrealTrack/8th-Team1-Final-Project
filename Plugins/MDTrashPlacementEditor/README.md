@@ -16,8 +16,8 @@
 ## 빠른 시작
 
 1. C++ 변경 뒤에는 Unreal Editor를 다시 시작한다.
-2. 에디터의 모드 선택 메뉴에서 **Placement**를 선택한다.
-3. **Trash Placement**가 자동으로 시작된다. 오염물은 **Stains** 도구로 전환한다.
+2. 에디터의 모드 선택 메뉴에서 **MD Trash Placement**를 선택한다.
+3. 모드 패널에서 **Trash Placement** 도구를 선택한다.
 4. `Mode`를 `Place`로 설정한다.
 5. 한 종류만 배치하려면 `Selection Mode`를 `Single Kind`로 두고 `Trash Kind Id`를 선택한다.
 6. 뷰포트의 표면을 클릭하면 1개가 배치되고, 마우스 왼쪽 버튼을 누른 채 드래그하면 연속 배치된다.
@@ -29,7 +29,7 @@
 
 | 입력 | Place 모드 | Erase 모드 |
 |---|---|---|
-| 마우스 Hover | 클릭 전 실제 크기·방향의 Ghost 표시 | 삭제 대상 위치 표시 |
+| 마우스 Hover | 배치 위치와 유효성 Ghost 표시 | 삭제 대상 위치 표시 |
 | 왼쪽 클릭 | Trash 1개 배치 | 커서가 맞힌 Trash 1개 삭제 |
 | 왼쪽 드래그 | 표면을 따라 연속 배치 | 지나간 Trash 연속 삭제 |
 | 마우스 휠 위·아래 | `Placement Spacing` 증가·감소 | 동일 |
@@ -133,7 +133,7 @@ Ghost 컴포넌트는 임시 객체이며 레벨에 저장되지 않는다. 도�
 
 ## 설정 저장
 
-도구를 정상적으로 종료하면 현재 속성이 저장되고, Placement에 다시 들어왔을 때 복원된다.
+도구를 정상적으로 종료하면 현재 속성이 저장되고, MD Trash Placement 모드에 다시 들어왔을 때 복원된다.
 
 에디터 강제 종료나 크래시처럼 도구의 정상 종료 절차가 실행되지 않은 경우 마지막 변경값은 저장되지 않을 수 있다.
 
@@ -150,7 +150,7 @@ Ghost 컴포넌트는 임시 객체이며 레벨에 저장되지 않는다. 도�
 
 ## 문제 해결
 
-### Placement가 보이지 않음
+### MD Trash Placement 모드가 보이지 않음
 
 - `MarineDemolition.uproject`에서 `MDTrashPlacementEditor`가 활성화됐는지 확인한다.
 - Editor 타깃 빌드가 성공했는지 확인한다.
@@ -198,9 +198,3 @@ DebugGame Editor 빌드:
 ```powershell
 C:\UE_5.8\Engine\Build\BatchFiles\Build.bat MarineDemolitionEditor Win64 DebugGame -Project=C:\UE_Project\ProjectATM\MarineDemolition.uproject -WaitMutex -FromMsBuild
 ```
-
-## 배치 미리보기
-
-Trash는 Visibility를 막는 표면에 붙이고 Pawn을 막는 장애물과의 겹침을 검사한다. 오염물 감지 상자와 Overlap 전용 트리거는 배치나 삭제를 가로막지 않는다. 설정을 변경하면 커서를 다시 움직이지 않아도 미리보기가 갱신된다.
-
-Stains는 커서 이동 중 선택한 보라색 모양과 크기의 평면 미리보기를 즉시 표시한다. 커서를 0.15초 멈추면 실제 배치와 같은 표면 펼침 결과로 바뀐다. 굴곡·단차에서는 정지 후 모양으로 최종 부착 범위를 확인한다.
