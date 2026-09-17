@@ -14,6 +14,7 @@ class AMD_GameStateBase;
 class AMD_PlayerController;
 class UMD_SiteDefinition;
 class UWorld;
+struct FMD_GameData;
 
 /**
  *
@@ -34,12 +35,40 @@ public:
 
     virtual void StartPlay() override;
     virtual void RestartPlayer(AController* NewPlayer) override;
+    virtual void GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList) override;
     bool IsStartPlayWaitingForMapRegistration() const { return bStartPlayWaitingForMapRegistration; }
     void FinishMapRegistration();
 
     virtual void Logout(AController* Exiting) override;
 
     virtual void PostLogin(APlayerController* NewPlayer) override;
+
+protected:
+    // 로비처럼 자동 저장에서 제외할 맵 목록
+    UPROPERTY(EditDefaultsOnly, Category = "Save Game")
+    TSet<TSoftObjectPtr<UWorld>> AutoSaveExcludedMaps;
+
+public:
+    // 현재 맵의 자동 저장 허용 여부 확인
+    bool IsAutoSaveAllowed();
+
+    // 로그아웃과 저장 이벤트가 공유하는 단일 플레이어 장비 수집
+    bool CollectPlayerGameData(const APlayerState* PlayerState, FMD_GameData& GameData);
+
+    // 재접속과 적용 이벤트가 공유하는 단일 플레이어 장비 복원
+    bool OverwritePlayerGameData(const APlayerState* PlayerState, const FMD_GameData& GameData);
+
+protected:
+    // 저장 이벤트에 게임 진행과 접속 플레이어 기록을 추가하는 함수
+    UFUNCTION()
+    void CollectGameData(UPARAM(ref) FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
+
+    // 전달된 저장 데이터에서 게임 진행과 개인 기록을 찾아 직접 복원하는 함수
+    UFUNCTION()
+    void OverwriteGameData(const FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
+
+    // 온라인 식별자와 오프라인 이름의 기존 개인 저장 키 정책 유지
+    FString BuildPlayerPersistenceKey(const APlayerState* PlayerState);
 
 protected:
     virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;

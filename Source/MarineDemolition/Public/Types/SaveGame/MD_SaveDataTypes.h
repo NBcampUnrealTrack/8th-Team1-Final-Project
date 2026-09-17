@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/SaveGame.h"
 #include "GameplayTags.h"
 #include "StructUtils/InstancedStruct.h"
 #include "Types/Merchant/MD_MerchantTypes.h"
@@ -115,10 +114,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
 
-	// 통합 전 세이브(dev 9 이하, scrape 13 이하)의 이름 기반 구매 원장 이전 전용 필드
-	UPROPERTY()
-	TMap<FName, int32> PurchasedItemCounts_DEPRECATED;
-
 	// 재개 시 같은 퀘스트 정의를 연결하기 위한 현재 현장 애셋
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TSoftObjectPtr<UMD_SiteDefinition> CurrentSite;
@@ -147,8 +142,6 @@ USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_WorldData
 {
 	GENERATED_BODY()
-
-    UPROPERTY() bool bHasContaminationGenerationRecords = false;
 
     /** Missing in older saves: preserve authored/per-surface seeds, including zero. */
     UPROPERTY() bool bHasContaminationSessionSeed = false;
@@ -214,8 +207,8 @@ struct MARINEDEMOLITION_API FMD_GameData
 	GENERATED_BODY()
 
 public:
-	// 이후 필드 변경을 안전하게 마이그레이션하기 위한 현재 스키마 버전
-	static constexpr int32 CurrentSchemaVersion = 14;
+	// 현재 저장 형식을 최초 배포 형식으로 식별하는 스키마 버전
+	static constexpr int32 CurrentSchemaVersion = 1;
 
 	// 저장된 필드 배치를 판별하기 위한 슬롯 데이터 버전
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
@@ -233,25 +226,12 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	FDateTime SaveTime;
 
-    /** A list row is resolved from its immutable file/legacy range before any world application. */
+    // 슬롯 목록의 요약을 개별 저장 파일에서 읽은 전체 데이터와 구분하는 상태
     UPROPERTY()
     bool bIsSlotSummary = false;
 
     UPROPERTY()
     FString SlotPayloadId;
-
-    UPROPERTY()
-    int64 LegacyDataOffset = 0;
-
-    UPROPERTY()
-    int64 LegacyDataBytes = 0;
-
-    UPROPERTY()
-    int64 LegacyFileBytes = 0;
-
-    UPROPERTY()
-    FDateTime LegacyFileTime;
-
 
 	// 기능별 구조체를 태그로 식별하여 확장하기 위한 데이터 필드 컨테이너
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
@@ -262,17 +242,11 @@ public:
 	TMap<FString, FMD_PlayerData> PlayerFields;
 
 public:
-    /** Keep tagged properties while exposing bounded legacy record ranges to the summary reader. */
-    bool Serialize(FArchive& Ar);
-
 	// 새 게임 입력과 저장 슬롯을 구분하기 위한 최소 식별 정보 검사 함수
 	bool IsEmpty() const;
 
-	// 버전 필드가 없던 현재 브랜치의 초기 슬롯을 승격하고 미래 버전을 거부하는 함수
-	bool MigrateToCurrentVersion();
-
-	// 필수 필드·맵·데이터 범위를 검사하여 부분 복원을 방지하는 함수
-	bool IsValidForLoad() const;
+	// 현재 버전과 필수 필드를 검사하고 현재 회차 이동에서만 월드 필드 생략 허용
+	bool IsValidForLoad(bool bRequireWorldData = true) const;
 
 	// 기능별 구조체를 태그 키에 복사하여 저장하기 위한 함수
 	template<typename T>
@@ -312,38 +286,4 @@ public:
 
 		return true;
 	}
-};
-
-template<> struct TStructOpsTypeTraits<FMD_GameData> : TStructOpsTypeTraitsBase2<FMD_GameData>
-{
-    enum { WithSerializer = true, WithCopy = true };
-};
-
-/**
- * Host 로컬 SaveGames 디렉터리에 직렬화되는 자동·사용자 슬롯 컨테이너
- */
-UCLASS()
-class MARINEDEMOLITION_API UMD_SaveGame : public USaveGame
-{
-	GENERATED_BODY()
-
-public:
-	// 파일 단위 형식을 판별하고 미래 버전 덮어쓰기를 막기 위한 컨테이너 버전
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	int32 SchemaVersion = 0;
-
-	// 순환 방식으로 덮어쓰는 자동 저장 데이터 목록
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	TArray<FMD_GameData> AutoSaveList;
-
-	// 사용자가 명시적으로 생성하고 제거하는 저장 데이터 목록
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	TArray<FMD_GameData> UserSaveList;
-
-public:
-	// 설정된 슬롯 수를 초과한 오래된 항목을 목록 끝에서 제거하는 함수
-	void ApplyMaxSaveCountLimit(const int32& MaxAutoSaveCount, const int32& MaxUserSaveCount);
-
-	// 모든 슬롯을 현재 버전으로 승격하고 손상 항목만 격리하는 함수
-	bool MigrateAndValidate();
 };

@@ -6,6 +6,8 @@
 #include "Types/Lore/MD_LoreTypes.h"
 #include "MD_LoreSubsystem.generated.h"
 
+struct FMD_GameData;
+
 class UMD_LoreDefinition;
 
 /** 서버 로어 원장 변경을 복제 미러와 저장 시스템에 알리는 이벤트 */
@@ -16,6 +18,11 @@ UCLASS()
 class MARINEDEMOLITION_API UMD_LoreSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
+
+public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+    virtual void Deinitialize() override;
 
 public:
 	/** 로어 발견 또는 저장 복원 이후 복제 미러 갱신을 요청하는 이벤트 */
@@ -66,5 +73,14 @@ public:
 protected:
 	/** 클라이언트가 로컬 원장을 변경하지 못하도록 현재 실행 권한을 확인하는 함수 */
 	bool HasServerAuthority() const;
+
+protected:
+    // 소유한 기능 상태를 저장 이벤트의 구조체에 기록하는 함수
+    UFUNCTION()
+    void CollectGameData(UPARAM(ref) FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
+
+    // 전달된 저장 데이터에서 담당 태그의 필드를 찾아 직접 적용하는 함수
+    UFUNCTION()
+    void OverwriteGameData(const FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
 
 };
