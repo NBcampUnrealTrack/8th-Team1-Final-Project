@@ -15,7 +15,6 @@
 #include "Net/UnrealNetwork.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
-#include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
 
 namespace
@@ -28,6 +27,7 @@ AMD_CuttableWall::AMD_CuttableWall()
 	PrimaryActorTick.bCanEverTick = false;
 	// bHasSupport 복제용 (원격 클라이언트의 절단 판정 일치)
 	bReplicates = true;
+
 
 	// 배치된 격벽은 별도 설정 없이 절단 대상이 된다
 	OwnedGameplayTags.AddTag(MDGameplayTags::Interaction_Cuttable);
@@ -128,6 +128,7 @@ void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AMD_CuttableWall, bHasSupport);
+	DOREPLIFETIME(AMD_CuttableWall, bCut);
 	DOREPLIFETIME(AMD_CuttableWall, CutProgressSeconds);
 }
 
@@ -224,18 +225,12 @@ void AMD_CuttableWall::CompleteCutWithCleanRatio(
 	AActor* Cutter,
 	const float CutSurfaceCleanRatio)
 {
+	// Keep the support links and authored collapse settings after the wall disappears.
+	bAwaitingSupportCollapse = WallType == EMD_WallType::Strut && bHasSupport;
+	if (bAwaitingSupportCollapse) bAlwaysRelevant = true;
 	if (WallType == EMD_WallType::Strut && !bHasSupport)
 	{
-		// 벽이 아니라 "절단자가 서 있는 섹터"가 무너진다
-		if (AMD_Sector* Sector = AMD_Sector::FindSectorContaining(Cutter))
-		{
-			Sector->CollapseCeiling();
-			OnStrutCollapsed.Broadcast(this, Cutter);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("MD_CuttableWall::Cut - 절단자가 속한 섹터를 찾지 못함"));
-		}
+		CollapseIfUnsupported(Cutter);
 	}
 	else
 	{
@@ -276,9 +271,18 @@ void AMD_CuttableWall::CompleteCutWithCleanRatio(
 
 	// 경로 개방 (조각이 벽 자리를 대체).
 	// 즉시 Destroy하면 방금 보낸 멀티캐스트가 채널과 함께 유실될 수 있어 잠깐 미룬다
+	OnRep_Cut();
+	SetLifeSpan(bAwaitingSupportCollapse ? 0.f : 0.2f);
+	ForceNetUpdate();
+}
+
+void AMD_CuttableWall::OnRep_Cut()
+{
+	if (!bCut) return;
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
-	SetLifeSpan(0.2f);
+	// The retained wall only tracks support. Release its contamination cells and GPU visuals.
+	if (ScrapeSurface && HasAuthority()) ScrapeSurface->SetContaminationEnabled(false);
 }
 
 void AMD_CuttableWall::MulticastPlayDemolishEffect_Implementation()

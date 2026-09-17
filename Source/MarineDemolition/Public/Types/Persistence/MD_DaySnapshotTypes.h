@@ -45,6 +45,13 @@ struct FMD_BraceRecord
 
       UPROPERTY()
       FName SupportedWallName = NAME_None;
+
+      // Version 15: all walls connected at installation; old records retain the single name above.
+      UPROPERTY()
+      TArray<FName> SupportedWallNames;
+
+      UPROPERTY()
+      bool bWeakened = false;
 };
 
 // 미수거 잔해(격벽 조각) 기록
@@ -236,7 +243,7 @@ struct FMD_BarnacleRemovalRecord
       TArray<int32> RemovedSpawnIndices;
 };
 
-// Day 종료 시점의 현장 상태. Cut()이 벽을 Destroy하므로 "살아남은 벽"을 기록한다
+// Day 종료 시점의 현장 상태. 남은 벽과 절단 후 지지 중인 하중을 따로 기록한다
 USTRUCT()
 struct FMD_DaySnapshot
 {
@@ -282,9 +289,13 @@ struct FMD_DaySnapshot
       UPROPERTY()
       TArray<FName> SurvivingWallNames;
 
-      // 살아남은 벽 중 지지대가 설치된 벽
+      // 지지 중인 벽(아직 절단되지 않은 벽과 절단 후 남은 하중)
       UPROPERTY()
       TArray<FName> SupportedWallNames;
+
+      // Version 16: cut struts held by braces, awaiting loss of their last support.
+      UPROPERTY()
+      TArray<FName> PendingCollapseWallNames;
 
       UPROPERTY()
       TArray<FMD_BraceRecord> Braces;

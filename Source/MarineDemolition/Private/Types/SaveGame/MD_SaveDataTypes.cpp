@@ -118,6 +118,13 @@ bool FMD_MerchantData::IsStructurallyValid() const
 
 bool FMD_WorldData::IsStructurallyValid() const
 {
+    const TSet<FName> Surviving(SurvivingWallNames);
+    TSet<FName> PendingLoads;
+    for (const FName WallName : PendingCollapseWallNames)
+    {
+        if (WallName.IsNone() || Surviving.Contains(WallName) || PendingLoads.Contains(WallName)) return false;
+        PendingLoads.Add(WallName);
+    }
     if (!FMD_SurfaceStainPersistence::Validate(SurfaceStains)) return false;
     TSet<FGuid> PendingBatchIds;
     for (const FMD_ContaminationPendingDrop& Drop : PendingContaminationDrops)
@@ -325,6 +332,10 @@ bool FMD_GameData::MigrateToCurrentVersion()
 		}
 	}
 
+	// Version 15 adds multi-wall brace links and weakened state. Empty arrays fall back
+	// to SupportedWallName at restore, and old active braces default to not weakened.
+	// Version 16 adds PendingCollapseWallNames. Old saves have no retained cut loads;
+	// leave the new array empty instead of reconstructing already-destroyed walls.
 	SchemaVersion = CurrentSchemaVersion;
 	return true;
 }

@@ -452,7 +452,12 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
 
     for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
     {
-        Snapshot.SurvivingWallNames.Add(It->GetFName());
+        if (It->IsAwaitingSupportCollapse())
+            Snapshot.PendingCollapseWallNames.Add(It->GetFName());
+        else if (It->CanCut())
+            Snapshot.SurvivingWallNames.Add(It->GetFName());
+        else
+            continue; // Already collapsed/cut; waiting only for the short multicast grace period.
         if (It->IsSupported())
         {
             Snapshot.SupportedWallNames.Add(It->GetFName());
@@ -511,6 +516,11 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
         {
             Record.SupportedWallName = Wall->GetFName();
         }
+        for (const TWeakObjectPtr<AMD_CuttableWall>& Wall : It->GetSupportedWalls())
+        {
+            if (Wall.IsValid()) Record.SupportedWallNames.AddUnique(Wall->GetFName());
+        }
+        Record.bWeakened = It->IsWeakened();
         Snapshot.Braces.Add(Record);
     }
 
@@ -603,6 +613,7 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
     OutWorldData.ContaminationSessionSeed=Snapshot.ContaminationSessionSeed;
     OutWorldData.SurvivingWallNames = MoveTemp(Snapshot.SurvivingWallNames);
     OutWorldData.SupportedWallNames = MoveTemp(Snapshot.SupportedWallNames);
+    OutWorldData.PendingCollapseWallNames = MoveTemp(Snapshot.PendingCollapseWallNames);
     OutWorldData.Braces = MoveTemp(Snapshot.Braces);
     OutWorldData.Samples = MoveTemp(Snapshot.Samples);
     OutWorldData.Pieces = MoveTemp(Snapshot.Pieces);
@@ -638,6 +649,20 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
 		return false;
 	}
 
+    TMap<FName, AMD_CuttableWall*> WallsByName;
+    for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
+        WallsByName.Add(It->GetFName(), *It);
+    const TSet<FName> PendingLoads(WorldData.PendingCollapseWallNames);
+    for (const FName WallName : PendingLoads)
+    {
+        AMD_CuttableWall* const* Wall = WallsByName.Find(WallName);
+        if (!Wall || !IsValid(*Wall) || (*Wall)->GetWallType() != EMD_WallType::Strut)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Cannot restore pending strut load: %s"), *WallName.ToString());
+            return false;
+        }
+    }
+
     PrepareContaminationContext(World,&WorldData);
 	// 저장 시드는 초기 레벨 지오메트리가 그대로 있을 때 먼저 적용한다. 철거된 벽이나
 	// 동적 액터를 복원한 뒤 재배치하면 같은 시드라도 Trace 후보가 달라질 수 있다.
@@ -666,22 +691,14 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
 			It->RestorePersistentState({}, false, 0);
 		}
 	}
-    // 다른 레벨(모선 등)에서는 적용하지 않음
-    // 이름 → 벽 조회용 맵
-    TMap<FName, AMD_CuttableWall*> WallsByName;
-    for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
-    {
-        WallsByName.Add(It->GetFName(), *It);
-    }
-
     // 어제 철거된 벽 제거 (조각 스폰·점수 없이 통로만 유지)
     const TSet<FName> Surviving(WorldData.SurvivingWallNames);
     for (const TPair<FName, AMD_CuttableWall*>& Pair : WallsByName)
     {
-        if (!Surviving.Contains(Pair.Key))
-        {
+        if (PendingLoads.Contains(Pair.Key))
+            Pair.Value->RestorePendingSupportCollapse();
+        else if (!Surviving.Contains(Pair.Key))
             Pair.Value->Destroy();
-        }
     }
 
     // 철거된 벽을 제거한 뒤 살아 있는 모든 표면을 복원용 키로 묶는다.
@@ -699,7 +716,7 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
     // 지지대 설치 상태 복원
     for (const FName& WallName : WorldData.SupportedWallNames)
     {
-        if (AMD_CuttableWall* const* Wall = WallsByName.Find(WallName); Wall != nullptr)
+        if (AMD_CuttableWall* const* Wall = WallsByName.Find(WallName); Wall && IsValid(*Wall))
         {
             (*Wall)->SetSupported(true);
         }
@@ -768,10 +785,17 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
         {
             Brace->SetActorScale3D(Record.Transform.GetScale3D());
 
-            if (AMD_CuttableWall* const* Wall = WallsByName.Find(Record.SupportedWallName); Wall != nullptr)
+            Brace->RestoreWeakenedState(Record.bWeakened);
+            TArray<TWeakObjectPtr<AMD_CuttableWall>> LinkedWalls;
+            TArray<FName> WallNames = Record.SupportedWallNames;
+            if (WallNames.IsEmpty() && !Record.SupportedWallName.IsNone())
+                WallNames.Add(Record.SupportedWallName);
+            for (const FName WallName : WallNames)
             {
-                Brace->SetSupportedWall(*Wall);
+                AMD_CuttableWall* const* Wall = WallsByName.Find(WallName);
+                if (Wall && IsValid(*Wall)) LinkedWalls.Add(*Wall);
             }
+            Brace->SetSupportedWalls(LinkedWalls);
         }
     }
 
@@ -864,6 +888,7 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     WorldData.ContaminationSessionSeed=Snapshot.ContaminationSessionSeed;
     WorldData.SurvivingWallNames = Snapshot.SurvivingWallNames;
     WorldData.SupportedWallNames = Snapshot.SupportedWallNames;
+    WorldData.PendingCollapseWallNames = Snapshot.PendingCollapseWallNames;
     WorldData.Braces = Snapshot.Braces;
     WorldData.Samples = Snapshot.Samples;
     WorldData.Pieces = Snapshot.Pieces;
@@ -908,7 +933,7 @@ void UMD_DayPersistenceSubsystem::ApplyOvernightWorsening(UWorld* World)
     TArray<AMD_SupportBrace*> Braces;
     for (TActorIterator<AMD_SupportBrace> It(World); It; ++It)
     {
-        Braces.Add(*It);
+        if (!It->IsWeakened()) Braces.Add(*It);
     }
     if (Braces.Num() > 0)
     {

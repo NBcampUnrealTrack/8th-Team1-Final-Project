@@ -162,9 +162,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FName> SurvivingWallNames;
 
-	// 생존 벽 중 지지대 연결 상태를 복원하기 위한 벽 이름
+	// 절단 전 벽과 절단 후 남은 하중의 지지 상태를 복원하기 위한 벽 이름
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FName> SupportedWallNames;
+
+	// Version 16: hidden cut struts still held by support braces. Empty in older saves.
+	UPROPERTY()
+	TArray<FName> PendingCollapseWallNames;
 
 	// 동적 지지대의 클래스·위치·연결 벽을 복원하기 위한 목록
 	UPROPERTY()
@@ -215,7 +219,7 @@ struct MARINEDEMOLITION_API FMD_GameData
 
 public:
 	// 이후 필드 변경을 안전하게 마이그레이션하기 위한 현재 스키마 버전
-	static constexpr int32 CurrentSchemaVersion = 14;
+	static constexpr int32 CurrentSchemaVersion = 16;
 
 	// 저장된 필드 배치를 판별하기 위한 슬롯 데이터 버전
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")

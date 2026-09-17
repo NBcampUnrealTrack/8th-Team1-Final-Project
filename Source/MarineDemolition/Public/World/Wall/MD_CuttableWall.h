@@ -8,6 +8,7 @@
 #include "GameplayTagContainer.h"
 #include "MD_CuttableWall.generated.h"
 
+class UCameraShakeBase;
 class UDecalComponent;
 class UInstancedStaticMeshComponent;
 class UMaterialInstanceDynamic;
@@ -79,7 +80,13 @@ public:
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
-	void SetSupported(bool bSupported) { bHasSupport = bSupported; }
+	void SetSupported(bool bSupported) { UpdateSupportState(bSupported, nullptr); }
+
+	/** Native brace changes also identify the player responsible for losing support. */
+	void UpdateSupportState(bool bSupported, AActor* ResponsibleActor);
+	bool IsAwaitingSupportCollapse() const { return bAwaitingSupportCollapse; }
+	/** Restore the hidden load-bearing state without replaying cutting, rewards or collapse. */
+	void RestorePendingSupportCollapse();
 
 	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	bool IsSupported() const { return bHasSupport; }
@@ -187,6 +194,26 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall")
 	TSubclassOf<AMD_WallPiece> PieceClass;
 
+	/** Local collapse footprint around the cut wall. */
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "50", ClampMax = "1000", Units = "cm"))
+	float CollapseRadiusCm = 250.f;
+
+	/** Search above wall mid-height for the actual underside of the ceiling. */
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "50", ClampMax = "1000", Units = "cm"))
+	float CollapseCeilingSearchHeightCm = 400.f;
+
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "0", ClampMax = "24"))
+	int32 CollapseDebrisCount = 12;
+
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "0"))
+	float CollapseDamage = 40.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Collapse")
+	TObjectPtr<UNiagaraSystem> CollapseEffect;
+
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Collapse")
+	TSubclassOf<UCameraShakeBase> CollapseShakeClass;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> MID;
 
@@ -238,6 +265,12 @@ private:
 	void CutFromHit(AActor* Cutter, const FHitResult* WallHit);
 	float ResolveCutSurfaceCleanRatio(const FHitResult* WallHit);
 	void CompleteCutWithCleanRatio(AActor* Cutter, float CutSurfaceCleanRatio);
+	void CollapseIfUnsupported(AActor* ResponsibleActor);
+	void TriggerUnsupportedCollapse(AActor* Cutter);
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlayCollapseEffect(FVector EffectLocation, FVector EffectScale);
+
 	void AddCutProgressInternal(
 		float DeltaSeconds,
 		AActor* Cutter,
@@ -250,7 +283,14 @@ private:
 	UFUNCTION()
 	void OnRep_CutProgress();
 
+	UFUNCTION()
+	void OnRep_Cut();
+
+	UPROPERTY(ReplicatedUsing = OnRep_Cut)
 	bool bCut = false;
+
+	bool bAwaitingSupportCollapse = false;
+	bool bCollapseTriggered = false;
 
 	//  누적 절단 시간. 감소하지 않으며 Day 간에도 유지된다 (기획 §3)
 	UPROPERTY(ReplicatedUsing = OnRep_CutProgress)
