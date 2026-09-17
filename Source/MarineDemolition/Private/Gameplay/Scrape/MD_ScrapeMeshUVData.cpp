@@ -57,6 +57,11 @@ namespace
 		return FMath::IsFinite(UV.X) && FMath::IsFinite(UV.Y);
 	}
 
+// Cell integration must round identically in Game and Editor generated baselines.
+#if defined(_MSC_VER)
+#pragma float_control(precise, on, push)
+#pragma fp_contract(off)
+#endif
 	bool UVBarycentric(const FMD_ScrapeMeshUVTriangle& T, const FVector2D& P, FVector& Out)
 	{
 		const FVector2D E0 = T.UVB - T.UVA;
@@ -72,6 +77,10 @@ namespace
 		Out = FVector(1.0 - B - C, B, C);
 		return !Out.ContainsNaN();
 	}
+#if defined(_MSC_VER)
+#pragma float_control(pop)
+#endif
+
 
     double PortalEdgeDistanceSquared(const FMD_ScrapeMeshUVTriangle& Triangle,
         const FVector& A, const FVector& B, int32& OutEdge)
@@ -113,6 +122,11 @@ namespace
 	// A triangle clipped by a rectangle has at most seven vertices.
 	using FCellUVPolygon = TArray<FVector2D, TInlineAllocator<8>>;
 
+// Cell integration must round identically in Game and Editor generated baselines.
+#if defined(_MSC_VER)
+#pragma float_control(precise, on, push)
+#pragma fp_contract(off)
+#endif
 	void ClipHalfPlane(FCellUVPolygon& Polygon, int32 Axis, double Limit, bool bKeepGreater)
 	{
 		if (Polygon.IsEmpty()) return;
@@ -144,6 +158,10 @@ namespace
 		}
 		Polygon = MoveTemp(Output);
 	}
+#if defined(_MSC_VER)
+#pragma float_control(pop)
+#endif
+
 }
 
 bool UMD_ScrapeMeshUVData::IsActiveCell(const int32 CellIndex) const
@@ -635,6 +653,11 @@ bool FMD_ScrapeMeshUVGeometry::SampleCanonicalUV(const UMD_ScrapeMeshUVData& Dat
 	return false;
 }
 
+// Cell integration must round identically in Game and Editor generated baselines.
+#if defined(_MSC_VER)
+#pragma float_control(precise, on, push)
+#pragma fp_contract(off)
+#endif
 bool FMD_ScrapeMeshUVGeometry::GetCellPolygonBarycentric(const UMD_ScrapeMeshUVData& Data,
 	int32 CellIndex, TArray<FVector>& OutPolygon)
 {
@@ -658,8 +681,17 @@ bool FMD_ScrapeMeshUVGeometry::GetCellPolygonBarycentric(const UMD_ScrapeMeshUVD
 	}
 	return true;
 }
+#if defined(_MSC_VER)
+#pragma float_control(pop)
+#endif
 
 
+
+// Cell integration must round identically in Game and Editor generated baselines.
+#if defined(_MSC_VER)
+#pragma float_control(precise, on, push)
+#pragma fp_contract(off)
+#endif
 bool FMD_ScrapeMeshUVGeometry::GetCellPolygonLocal(const UMD_ScrapeMeshUVData& Data,
     int32 CellIndex, TArray<FVector>& OutPolygon)
 {
@@ -670,6 +702,10 @@ bool FMD_ScrapeMeshUVGeometry::GetCellPolygonLocal(const UMD_ScrapeMeshUVData& D
     { Barycentric = Triangle.A + (Triangle.B - Triangle.A) * Barycentric.Y + (Triangle.C - Triangle.A) * Barycentric.Z; }
     return true;
 }
+#if defined(_MSC_VER)
+#pragma float_control(pop)
+#endif
+
 
 TSharedPtr<const FMD_ScrapeCarrierWeights> UMD_ScrapeMeshUVData::GetSharedCellCarrierWeights(
     const FTransform& Transform, float BudgetMs, bool* OutPending) const

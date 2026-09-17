@@ -450,9 +450,22 @@ void UMD_ScrapeSurfaceComponent::PostEditChangeProperty(
 
 bool UMD_ScrapeSurfaceComponent::TryDeferContaminationInitialization()
 {
-    if (bCompletingDeferredInitialization || bRestoringContaminationGeneration || bContaminationSurfaceInitialized
+    if (bCompletingDeferredInitialization || bContaminationSurfaceInitialized
         || !bContaminationEnabled || !UsesMeshUVSurface() || !ContaminationMeshUVData
-        || !GetWorld() || !GetWorld()->IsGameWorld() || !HasAuthority()) return false;
+        || !GetWorld() || !GetWorld()->IsGameWorld()) return false;
+    if (!HasAuthority())
+    {
+        // A replicated generation supplies the client baseline. Use the same bounded
+        // preparation queue without consulting this machine's local saved world.
+        if (!ContaminationGeneration.IsValid() || !ContaminationGeneration.bProcedural
+            || ContaminationGeneration.Version < 2) return false;
+        if (bDeferredInitializationPending) return true;
+        PrepareContaminationGeneration();
+        auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>();
+        bDeferredInitializationPending = Initializer && Initializer->Enqueue(*this);
+        return bDeferredInitializationPending;
+    }
+    if (bRestoringContaminationGeneration) return false;
     if (bDeferredInitializationPending) return true;
     const auto* GI = GetWorld()->GetGameInstance();
     const auto* Persistence = GI ? GI->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr;

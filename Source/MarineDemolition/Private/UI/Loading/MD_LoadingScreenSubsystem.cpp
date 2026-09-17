@@ -10,6 +10,7 @@
 #include "Engine/LevelStreaming.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/Texture2D.h"
+#include "Engine/StreamableRenderAsset.h"
 #include "Engine/World.h"
 #include "Blueprint/WidgetLayoutLibrary.h"
 #include "CommonActivatableWidget.h"
@@ -277,8 +278,10 @@ EMD_LoadingReadinessBlocker UMD_LoadingScreenSubsystem::CheckWorldReadiness() co
 
 	// Audio streaming cache에는 절대 간섭하지 않는다. IStreamingManager::BlockTillAllRequestsFinished를
 	// 부르면 AudioStreamingCache의 종료 Assert(NumberOfLoadsInFlight)가 터진다.
-	const IRenderAssetStreamingManager& RenderAssetStreaming = IStreamingManager::Get().GetRenderAssetStreamingManager();
-	if (RenderAssetStreaming.GetNumWantingResources() > 0)
+	// Headless peers have no render-asset streaming manager.
+	const FStreamingManagerCollection& StreamingManagers = IStreamingManager::Get();
+	if (StreamingManagers.IsRenderAssetStreamingEnabled(EStreamableRenderAssetType::None)
+		&& StreamingManagers.GetRenderAssetStreamingManager().GetNumWantingResources() > 0)
 	{
 		return EMD_LoadingReadinessBlocker::RenderAssetStreaming;
 	}

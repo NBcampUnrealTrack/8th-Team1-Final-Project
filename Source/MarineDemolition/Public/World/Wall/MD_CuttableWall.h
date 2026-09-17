@@ -1,7 +1,6 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/TimerHandle.h"
 #include "GameFramework/Actor.h"
 #include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTagAssetInterface.h"
@@ -10,8 +9,6 @@
 
 class UCameraShakeBase;
 class UDecalComponent;
-class UInstancedStaticMeshComponent;
-class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UStaticMeshComponent;
 class UMD_ScrapeSurfaceComponent;
@@ -159,16 +156,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "MD|Wall")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
-	/**
-	 * Deprecated inert compatibility shell. It is retained temporarily so old
-	 * Blueprint component overrides do not become orphaned.
-	 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-		AdvancedDisplay, Category = "MD|Wall|Contamination|Deprecated",
-		meta = (DeprecatedProperty,
-			DeprecationMessage = "Cell ISM contamination overlays are no longer used."))
-	TObjectPtr<UInstancedStaticMeshComponent> ContaminationOverlay;
-
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
 		Category = "MD|Wall|Contamination|Decal")
 	TObjectPtr<UDecalComponent> FrontContaminationDecal;
@@ -213,9 +200,6 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Collapse")
 	TSubclassOf<UCameraShakeBase> CollapseShakeClass;
-
-	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInstanceDynamic> MID;
 
 	/** Serialized BP values retained until BP_MD_CuttableWall is migrated. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
@@ -262,6 +246,7 @@ protected:
 private:
 
 	void SyncLegacySurfaceConfiguration();
+	void ApplyNeutralWallColor();
 	void CutFromHit(AActor* Cutter, const FHitResult* WallHit);
 	float ResolveCutSurfaceCleanRatio(const FHitResult* WallHit);
 	void CompleteCutWithCleanRatio(AActor* Cutter, float CutSurfaceCleanRatio);

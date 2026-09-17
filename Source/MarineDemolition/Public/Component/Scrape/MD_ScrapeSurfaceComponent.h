@@ -874,6 +874,8 @@ private:
 	TArray<FLocalScrapePrediction> LocalScrapePredictions;
 	TArray<FMD_ScrapeSurfaceCell> LocalPredictedContaminationCells;
     FMD_ScrapePagedState LocalPredictedPagedCells;
+    FMD_ScrapeMeshUVProgress LocalPredictedMeshUVProgress;
+    bool bLocalScrapePredictionRebuildPending = false;
 	TArray<FMD_ScrapeSurfaceCell> LocalScrapePredictionFaceScratch;
 	FMD_ScrapeEvaluationScratch ScrapeEvaluationScratch;
 	TArray<int32> PendingLocalScrapePredictionVisualCellIndices;
@@ -1059,6 +1061,8 @@ private:
 	void MarkLocalScrapePredictionReconcileCell(int32 CellIndex);
 	void FlushLocalScrapePredictionVisualUpdates();
 	void RebuildLocalScrapePredictionShadow();
+    void RequestLocalScrapePredictionRebuild();
+    void FlushLocalScrapePredictionRebuild();
 	SIZE_T GetLocalScrapePredictionAllocatedBytes() const;
 	bool UpdateLocalScrapePredictionMemoryBudget();
 	void ReleaseLocalScrapePredictionMemoryBudget();

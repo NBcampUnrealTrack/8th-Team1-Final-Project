@@ -1,4 +1,5 @@
 #include "Gameplay/Scrape/MD_ScrapeMeshUVSyncSubsystem.h"
+#include "Gameplay/Scrape/MD_ScrapeReplicationCodec.h"
 #include "Component/Scrape/MD_ScrapeMeshUVSyncComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/PlayerController.h"
@@ -47,10 +48,36 @@ void UMD_ScrapeMeshUVSyncSubsystem::PruneExpiredOwners()
     if (TransferReservations.IsEmpty()) { TransferReservations.Empty(); }
 }
 
+bool UMD_ScrapeMeshUVSyncSubsystem::QueuePredictionRebuild(UMD_ScrapeSurfaceComponent& Surface)
+{
+    if (Surface.GetWorld() != GetWorld() || !Surface.IsSurfaceInitialized() || !Surface.UsesMeshUVSurface()) return false;
+    if (!PendingPredictionRebuilds.Contains(&Surface))
+    {
+        if (PendingPredictionRebuilds.Num() == 32) return false;
+        PendingPredictionRebuilds.Add(&Surface);
+    }
+    Surface.bLocalScrapePredictionRebuildPending = true;
+    return true;
+}
+
+void UMD_ScrapeMeshUVSyncSubsystem::Deinitialize()
+{
+    for (auto WeakSurface : PendingPredictionRebuilds)
+        if (auto* Surface = WeakSurface.Get()) Surface->bLocalScrapePredictionRebuildPending = false;
+    PendingPredictionRebuilds.Reset();
+    Super::Deinitialize();
+}
+
 void UMD_ScrapeMeshUVSyncSubsystem::Tick(const float DeltaTime)
 {
     UWorld* World = GetWorld();
     if (!World) { return; }
+    // UWorld ticks world subsystems after actor/network work, before viewport drawing.
+    // New local input can flush its own surface earlier; the queued entry then does no work.
+    auto Pending = MoveTemp(PendingPredictionRebuilds);
+    PendingPredictionRebuilds.Reset();
+    for (auto WeakSurface : Pending)
+        if (auto* Surface = WeakSurface.Get()) Surface->FlushLocalScrapePredictionRebuild();
     ScanAccumulator += DeltaTime;
     if (ScanAccumulator < 1.0f) { return; }
     ScanAccumulator = 0.0f;
@@ -180,6 +207,7 @@ bool UMD_ScrapeMeshUVSyncSubsystem::CaptureSnapshot(
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_CaptureBoundedSnapshot);
     OutStates.Reset();
+    OutDescriptor = FMD_ScrapeMeshUVSnapshotDescriptor();
     if (!Surface.HasAuthority() || !Surface.UsesMeshUVSurface() || !Surface.IsSurfaceInitialized()
         || !Surface.AreContaminationCarrierWeightsCurrent()
         || Surface.GetContaminationActiveCellCount() > FMD_ScrapeMeshUVSyncProtocol::MaximumSnapshotStates) { return false; }
@@ -216,6 +244,100 @@ bool UMD_ScrapeMeshUVSyncSubsystem::CaptureSnapshot(
     }
     OutDescriptor.TotalStates = OutStates.Num();
     return true;
+}
+
+bool UMD_ScrapeMeshUVSyncSubsystem::BuildGeneratedCell(const UMD_ScrapeSurfaceComponent& Surface,
+    const int32 Index, FMD_ReplicatedScrapeCellState& State) const
+{
+    const int32 Storage = Surface.GetContaminationStorageIndex(Index);
+    if (!Surface.IsContaminationCellActive(Index) || !Surface.HasGeneratedInitialContamination(Storage)) return false;
+    const float Initial = FMath::Clamp(Surface.GetGeneratedInitialContamination(Storage), 0.0f, 1.0f);
+    State = FMD_ReplicatedScrapeCellState(Index,
+        FMD_ScrapeReplicationCodec::QuantizeRemaining(Initial, 0.0f),
+        FMD_ScrapeReplicationCodec::QuantizeRemaining(Initial, Surface.ScrapeSettings.CleanTolerance));
+    return true;
+}
+
+bool UMD_ScrapeMeshUVSyncSubsystem::CompactGeneratedSnapshot(UMD_ScrapeSurfaceComponent& Surface,
+    FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, TArray<FMD_ReplicatedScrapeCellState>& States)
+{
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_CompactGeneratedSnapshot);
+    if (!Descriptor.bFullSnapshot || !Descriptor.Generation.IsValid()
+        || Descriptor.Generation != Surface.GetContaminationGeneration()
+        || States.Num() != Surface.GetContaminationActiveCellCount()) return false;
+    uint32 BaseHash = 2166136261u, FullHash = 2166136261u;
+    const auto IsException = [](const FMD_ReplicatedScrapeCellState& State, const FMD_ReplicatedScrapeCellState& Base)
+    {
+        return State.QuantizedInitialContamination != Base.QuantizedInitialContamination
+            || State.QuantizedRemainingContamination != Base.QuantizedRemainingContamination
+            || State.QuantizedTransferredContamination != 0 || State.QuantizedTransferredPatternDensity != 0
+            || State.QuantizedCoveredFraction != 0;
+    };
+    int32 Exceptions = 0;
+    // Validate before compacting, so failure leaves the original dense snapshot usable.
+    int32 Read = 0;
+    for (int32 Index = 0; Index < Surface.GetContaminationAtlasCellCount(); ++Index)
+    {
+        if (!Surface.IsContaminationCellActive(Index)) continue;
+        FMD_ReplicatedScrapeCellState Base;
+        if (!States.IsValidIndex(Read) || States[Read].GetCellIndex() != Index || !BuildGeneratedCell(Surface, Index, Base)) return false;
+        BaseHash = FMD_ScrapeMeshUVSyncProtocol::AccumulateStateHash(BaseHash, Base);
+        Exceptions += IsException(States[Read], Base) ? 1 : 0;
+        FullHash = FMD_ScrapeMeshUVSyncProtocol::AccumulateStateHash(FullHash, States[Read++]);
+    }
+    // Keep expansion/reallocation inside the existing full-snapshot memory reservation.
+    // Dense changes already compress efficiently with the original byte-plane codec.
+    if (Exceptions > States.Num() / 2) return false;
+    int32 Write = 0;
+    for (const FMD_ReplicatedScrapeCellState& State : States)
+    {
+        FMD_ReplicatedScrapeCellState Base;
+        BuildGeneratedCell(Surface, State.GetCellIndex(), Base);
+        if (IsException(State, Base)) States[Write++] = State;
+    }
+    States.SetNum(Write, EAllowShrinking::No);
+    Descriptor.TotalStates = Write; Descriptor.bGeneratedBase = true;
+    Descriptor.GeneratedBaseHash = BaseHash; Descriptor.FullStateHash = FullHash;
+    return true;
+}
+
+bool UMD_ScrapeMeshUVSyncSubsystem::ExpandGeneratedSnapshot(UMD_ScrapeSurfaceComponent& Surface,
+    const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, TArray<FMD_ReplicatedScrapeCellState>& States)
+{
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_ExpandGeneratedSnapshot);
+    if (!Descriptor.bGeneratedBase) return true;
+    if (!Descriptor.bFullSnapshot || Descriptor.Generation != Surface.GetContaminationGeneration()
+        || Descriptor.LayoutId != Surface.GetContaminationLayoutId()
+        || States.Num() > Surface.GetContaminationActiveCellCount() / 2) return false;
+    int32 Previous = INDEX_NONE;
+    for (const auto& State : States)
+    {
+        if (State.GetCellIndex() <= Previous || !Surface.IsContaminationCellActive(State.GetCellIndex())) return false;
+        Previous = State.GetCellIndex();
+    }
+    uint32 BaseHash = 2166136261u;
+    for (int32 Index = 0; Index < Surface.GetContaminationAtlasCellCount(); ++Index)
+    {
+        if (!Surface.IsContaminationCellActive(Index)) continue;
+        FMD_ReplicatedScrapeCellState Base;
+        if (!BuildGeneratedCell(Surface, Index, Base)) return false;
+        BaseHash = FMD_ScrapeMeshUVSyncProtocol::AccumulateStateHash(BaseHash, Base);
+    }
+    if (BaseHash != Descriptor.GeneratedBaseHash) return false;
+    // Grow the reserved staging array backwards; no second full cell array overlaps it.
+    int32 Exception = States.Num() - 1;
+    States.Reserve(Surface.GetContaminationActiveCellCount());
+    States.SetNum(Surface.GetContaminationActiveCellCount(), EAllowShrinking::No);
+    int32 Write = States.Num() - 1;
+    for (int32 Index = Surface.GetContaminationAtlasCellCount() - 1; Index >= 0; --Index)
+    {
+        if (!Surface.IsContaminationCellActive(Index)) continue;
+        if (Exception >= 0 && States[Exception].GetCellIndex() == Index) States[Write--] = States[Exception--];
+        else BuildGeneratedCell(Surface, Index, States[Write--]);
+    }
+    uint32 FullHash = 2166136261u;
+    for (const auto& State : States) FullHash = FMD_ScrapeMeshUVSyncProtocol::AccumulateStateHash(FullHash, State);
+    return FullHash == Descriptor.FullStateHash;
 }
 
 bool UMD_ScrapeMeshUVSyncSubsystem::BeginClientSnapshot(UMD_ScrapeSurfaceComponent& Surface, const UObject* Owner)

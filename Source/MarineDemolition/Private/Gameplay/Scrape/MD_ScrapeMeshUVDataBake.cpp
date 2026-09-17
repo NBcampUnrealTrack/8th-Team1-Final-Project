@@ -130,6 +130,12 @@ namespace
 				Writer << TriangleIndex << EdgeA << EdgeB;
 			}
 		}
+        // Explicit carrier units are part of the save/network contract. Legacy hashes stay stable.
+        if (Data.CarrierReferenceCellSizeCm != 0.0)
+        {
+            double ReferenceSize = Data.CarrierReferenceCellSizeCm;
+            Writer << ReferenceSize;
+        }
 		FMD5 MD5;
 		MD5.Update(Bytes.GetData(), Bytes.Num());
 		uint8 Digest[16];
@@ -157,6 +163,7 @@ void UMD_ScrapeMeshUVData::BakeSourceMesh()
 		UE_LOG(LogTemp, Error, TEXT("%s: %s"), *GetPathName(), *LastBakeReport);
 	};
 	if (!SourceMesh || !FMath::IsFinite(TargetCellSizeCm) || TargetCellSizeCm < 0.1
+        || !FMath::IsFinite(CarrierReferenceCellSizeCm) || CarrierReferenceCellSizeCm < 0.0
 		|| MaximumAtlasAxis < 32 || MaximumAtlasAxis > 1024
 		|| !FMath::IsPowerOfTwo(MaximumAtlasAxis) || GutterCells < 1 || GutterCells > 4
 		|| !FMath::IsFinite(CapNormalThreshold) || CapNormalThreshold < 0.99 || CapNormalThreshold > 1.0
@@ -221,6 +228,8 @@ void UMD_ScrapeMeshUVData::BakeSourceMesh()
 	TStrongObjectPtr<UMD_ScrapeMeshUVData> WorkingGuard(NewObject<UMD_ScrapeMeshUVData>(GetTransientPackage()));
 	UMD_ScrapeMeshUVData* Working = WorkingGuard.Get();
 	Working->SourceMesh = SourceMesh;
+    Working->TargetCellSizeCm = TargetCellSizeCm;
+    Working->CarrierReferenceCellSizeCm = CarrierReferenceCellSizeCm;
 	Working->SourceMeshLightingGuid = SourceMesh->GetLightingGuid();
 	Working->CanonicalUVChannel = NewUVChannel;
 	Working->OriginalTriangleCount = SourceDescription->Triangles().Num();

@@ -318,6 +318,7 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 	const TArray<float>& TransferredPatternDensities,
 	const TArray<float>& CoveredFractions)
 {
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_RestoreSavedCells);
     // 현재 저장 형식의 모든 셀 열이 동일한 길이인 경우에만 복원 허용
     if (bContaminationEnabled == false || HasAuthority() == false || CellIndices.Num() != RemainingAmounts.Num()
         || CellIndices.Num() != InitialAmounts.Num() || CellIndices.Num() != TransferredAmounts.Num()

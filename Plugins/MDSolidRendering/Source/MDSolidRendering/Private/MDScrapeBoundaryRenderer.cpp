@@ -8,6 +8,7 @@
 #include "RenderingThread.h"
 #include "RHICommandList.h"
 #include "Containers/Ticker.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include <atomic>
 
 namespace
@@ -93,6 +94,7 @@ bool FMDScrapeBoundaryRenderer::Submit(UTextureRenderTarget2D* Atlas,TArray<FMDS
     ENQUEUE_RENDER_COMMAND(MDScrapeBoundaryDirtyTiles)(
         [Resource,Tiles=MoveTemp(Tiles),Bytes](FRHICommandListImmediate& Cmd)
     {
+        TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_BoundaryGPUUpload);
         Reap(Cmd);
         FRDGBuilder Graph(Cmd);
         auto Texture=Graph.RegisterExternalTexture(CreateRenderTarget(Resource->GetRenderTargetTexture(),TEXT("MD_ScrapeBoundaryAtlas")));

@@ -18,6 +18,7 @@ public class MDTrashPlacementEditor : ModuleRules
 			"SlateCore",
 			"InputCore",
 			"EditorFramework",
+			"TypedElementFramework",
 			"UnrealEd",
 			"LevelEditor",
 			"InteractiveToolsFramework",

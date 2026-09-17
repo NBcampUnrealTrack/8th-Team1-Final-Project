@@ -1,6 +1,7 @@
 #include "Gameplay/Contamination/MD_StainStickerBaker.h"
 
 #if WITH_EDITOR
+#include "MD_StainDownhillBridge.h"
 #include "Gameplay/Contamination/MD_StainStickerPatch.h"
 #include "Components/StaticMeshComponent.h"
 #include "DynamicMesh/DynamicMesh3.h"
@@ -322,7 +323,7 @@ namespace MD_StainStickerBake
 				Weld.OnlyUniquePairs = true;
 				Weld.Apply();
 				bJoined = true;
-				for (const int32 Edge : Union.CreatedBoundaryEdges)
+				for (const int32 Edge : CutEdges)
 				{
 					if (!Joined.IsEdge(Edge) || !Joined.IsBoundaryEdge(Edge)) continue;
 					FVector A, B; Joined.GetEdgeV(Edge, A, B);
@@ -352,7 +353,7 @@ namespace MD_StainStickerBake
 	}
 
 	bool MakeSurface(TArray<FSourceMesh>& Sources, const FVector2D& HalfSize, FDynamicMesh3& Combined,
-		FString& Error, FProgressCancel* Progress = nullptr)
+		TArray<int32>& Disconnected, FString& Error, FProgressCancel* Progress = nullptr)
 	{
 		const double Radius = HalfSize.Length() + 1;
 		TArray<int32> Connected;
@@ -378,6 +379,8 @@ namespace MD_StainStickerBake
 		}
 		if (Progress && Progress->Cancelled()) return false;
 		if (!ConnectSources(Sources, Radius, Connected, Error)) return false;
+		for (int32 Index = 0; Index < Sources.Num(); ++Index)
+			if (!Connected.Contains(Index)) Disconnected.Add(Index);
 		Combined = *Sources[Connected[0]].Mesh;
 		TArray<int32> Deferred;
 		// A failed seam can become unambiguous after adjoining tiles have been joined.
@@ -508,6 +511,91 @@ namespace MD_StainStickerBake
 		return Patch.IsValid();
 	}
 
+	bool TryAddDownhillBridges(FDynamicMesh3& Surface, const TArray<FSourceMesh>& Sources, const TArray<int32>& Disconnected, const FVector2D& HalfSize, FString& Error, FProgressCancel* Progress, bool bOverlapLandings, int32& UnjoinedCount)
+	{
+		UnjoinedCount = INDEX_NONE;
+		TArray<FDynamicMesh3> Wedges;
+		const double Radius = HalfSize.Length() + 1;
+		// Search lower receivers across air gaps without making unrelated surfaces reachable by unfolding.
+		FDynamicMesh3 LandingSurface;
+		const FDynamicMesh3* Search = &Surface;
+		if (!Disconnected.IsEmpty())
+		{
+			LandingSurface = Surface;
+			FDynamicMeshEditor Editor(&LandingSurface);
+			for (int32 Index : Disconnected)
+			{
+				if (Progress && Progress->Cancelled()) return false;
+				if (LandingSurface.TriangleCount() + Sources[Index].Mesh->TriangleCount() > MaximumSourceTriangles)
+				{ Error = TEXT("Descending landing search exceeds 50,000 triangles. Reduce the sticker size."); return false; }
+				FMeshIndexMappings Mappings; Editor.AppendMesh(Sources[Index].Mesh.Get(), Mappings);
+			}
+			Search = &LandingSurface;
+		}
+		if (!FMD_StainDownhillBridge::Gather(Surface, *Search, HalfSize, Wedges, Error, Progress, bOverlapLandings)) return false;
+		TSet<int32> JoinedLandings;
+		// Broad connections resolve intersecting tile corners before their short seam fragments.
+		Wedges.Sort([](const FDynamicMesh3& A, const FDynamicMesh3& B)
+		{ return A.GetBounds().DiagonalLength() > B.GetBounds().DiagonalLength(); });
+		TArray<int32> Pending;
+		for (int32 Index = 0; Index < Wedges.Num(); ++Index) Pending.Add(Index);
+		for (int32 Cursor = 0; Cursor < Pending.Num();)
+		{
+			if (Progress && Progress->Cancelled()) return false;
+			const FDynamicMesh3& Wedge = Wedges[Pending[Cursor]];
+			if (!TryJoin(Surface, Wedge, Radius, Progress)) { ++Cursor; continue; }
+
+			// Only a receiver touched by an accepted bridge becomes part of the sticker surface.
+			FDynamicMeshAABBTree3 WedgeTree(&Wedge);
+			for (int32 Index : Disconnected)
+			{
+				if (Progress && Progress->Cancelled()) return false;
+				if (JoinedLandings.Contains(Index)) continue;
+				FDynamicMeshAABBTree3 ReceiverTree(Sources[Index].Mesh.Get());
+				double Distance;
+				const FIndex2i Contact = WedgeTree.FindNearestTriangles(ReceiverTree, nullptr, Distance, IMeshSpatial::FQueryOptions(0.01));
+				if (Contact.A < 0 || Distance > 0.01) continue;
+				if (!TryJoin(Surface, *Sources[Index].Mesh, Radius, Progress))
+				{ Error = TEXT("The descending sticker could not connect to its lower receiver."); return false; }
+				JoinedLandings.Add(Index);
+			}
+			if (Surface.TriangleCount() > MaximumSourceTriangles)
+			{ Error = TEXT("Descending sticker surface exceeds 50,000 triangles. Reduce the sticker size."); return false; }
+			Pending.RemoveAt(Cursor);
+			Cursor = 0;
+		}
+		if (!Pending.IsEmpty())
+		{
+			// A short, ambiguous corner must not discard the independent descents already joined.
+			if (Pending.Num() < Wedges.Num()) UnjoinedCount = Pending.Num();
+			Error = TEXT("The descending sticker bridge could not be joined to its landing."); return false;
+		}
+		return true;
+	}
+
+	bool AddDownhillBridges(FDynamicMesh3& Surface, const TArray<FSourceMesh>& Sources, const TArray<int32>& Disconnected,
+		const FVector2D& HalfSize, FString& Error, FProgressCancel* Progress = nullptr)
+	{
+		TUniquePtr<FDynamicMesh3> Partial;
+		int32 FewestUnjoined = TNumericLimits<int32>::Max();
+		// Retry ambiguous contacts from the original surface, without mixing incompatible operands.
+		for (bool bOverlapLandings : {false,true})
+		{
+			if (Progress && Progress->Cancelled()) return false;
+			FDynamicMesh3 Candidate = Surface;
+			int32 Unjoined = INDEX_NONE;
+			Error.Reset();
+			if (TryAddDownhillBridges(Candidate,Sources,Disconnected,HalfSize,Error,Progress,bOverlapLandings,Unjoined))
+			{ Surface = MoveTemp(Candidate); return true; }
+			if (Unjoined >= 0 && Unjoined < FewestUnjoined)
+			{ FewestUnjoined = Unjoined; Partial = MakeUnique<FDynamicMesh3>(MoveTemp(Candidate)); }
+		}
+		if (Progress && Progress->Cancelled()) return false;
+		// Preserve original wrapping only at unresolved corners; valid bridges and receiving faces remain usable.
+		if (Partial) { Surface = MoveTemp(*Partial); Error.Reset(); return true; }
+		return false;
+	}
+
 	UStaticMesh* MakeMesh(AActor& Owner, const FMD_StainStickerPatch& Patch, UMaterialInterface* Material)
 	{
 		FMeshDescription Description;
@@ -566,7 +654,9 @@ bool FMD_StainStickerBaker::Build(AActor& Owner, const FVector2D& HalfSize, int3
 	TArray<MD_StainStickerBake::FSourceMesh> Sources;
 	if (!MD_StainStickerBake::BuildSources(Instances, HalfSize.Length() + 1, Sources, Error)) return false;
 	FDynamicMesh3 Surface;
-	if (!MD_StainStickerBake::MakeSurface(Sources, HalfSize, Surface, Error)) return false;
+	TArray<int32> Disconnected;
+	if (!MD_StainStickerBake::MakeSurface(Sources, HalfSize, Surface, Disconnected, Error)
+		|| !MD_StainStickerBake::AddDownhillBridges(Surface, Sources, Disconnected, HalfSize, Error)) return false;
 	FMD_StainStickerPatch Patch; Patch.InitialSize = InitialSize;
 	if (!MD_StainStickerBake::Unfold(Surface, HalfSize, Patch, Error)) return false;
 	UStaticMesh* Mesh = MD_StainStickerBake::MakeMesh(Owner, Patch, Material);
@@ -635,11 +725,13 @@ TSharedPtr<FMD_StainStickerAsyncBake> FMD_StainStickerBaker::StartAsync(AActor& 
 		FProgressCancel Progress;
 		Progress.CancelF = [Result]() { return Result->bCancelled.load(); };
 		FDynamicMesh3 Surface;
+		TArray<int32> Disconnected;
 		TArray<MD_StainStickerBake::FSourceMesh> Sources;
 		Result->Patch.InitialSize = InitialSize;
 		Result->bSuccess = !Progress.Cancelled()
 			&& MD_StainStickerBake::BuildSources(Instances, HalfSize.Length() + 1, Sources, Result->Error, &Progress)
-			&& MD_StainStickerBake::MakeSurface(Sources, HalfSize, Surface, Result->Error, &Progress)
+			&& MD_StainStickerBake::MakeSurface(Sources, HalfSize, Surface, Disconnected, Result->Error, &Progress)
+			&& MD_StainStickerBake::AddDownhillBridges(Surface, Sources, Disconnected, HalfSize, Result->Error, &Progress)
 			&& !Progress.Cancelled()
 			&& MD_StainStickerBake::Unfold(Surface, HalfSize, Result->Patch, Result->Error);
 		if (!Result->bSuccess && Result->Error.IsEmpty()) Result->Error = TEXT("Could not unfold this connected surface.");
