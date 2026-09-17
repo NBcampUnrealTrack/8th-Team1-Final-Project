@@ -46,7 +46,7 @@ struct FMD_BraceRecord
       UPROPERTY()
       FName SupportedWallName = NAME_None;
 
-      // Version 15: all walls connected at installation; old records retain the single name above.
+      // All walls connected at installation; the single name above remains for existing callers.
       UPROPERTY()
       TArray<FName> SupportedWallNames;
 
@@ -114,10 +114,6 @@ struct MARINEDEMOLITION_API FMD_TrashBinRecord
       UPROPERTY()
       uint64 NextSpillSequence = 0;
 
-      /** 구버전 저장 호환용 폐기 필드. 현재 판정은 읽지 않고 새 저장은 false다. */
-      UPROPERTY()
-      bool bSpillTiltAttemptConsumedUntilRearm = false;
-
       /** 손상 record를 월드에 일부 적용하기 전에 거르는 공통 검사. */
       bool IsStructurallyValid() const;
 };
@@ -135,10 +131,7 @@ struct MARINEDEMOLITION_API FMD_WallContaminationRecord
       UPROPERTY()
       FName WallName = NAME_None;
 
-      /**
-       * 일반 벽·바닥·설비의 표면 컴포넌트 이름.
-       * NAME_None은 기존 AMD_CuttableWall의 기본 표면을 뜻한다.
-       */
+      // 저장 대상인 벽·바닥·설비 표면의 실제 컴포넌트 이름
       UPROPERTY()
       FName SurfaceComponentName = NAME_None;
 
@@ -206,13 +199,13 @@ struct MARINEDEMOLITION_API FMD_WallContaminationRecord
       bool ExpandCells(FMD_WallContaminationRecord& Out) const;
       bool ValidateCellIndices(int32 MaximumCellCount) const;
       int32 GetCellCount() const { return CellPayload.Num() ? CellPayload.Num() : CellIndices.Num(); }
-      void PostSerialize(const FArchive& Ar);
 };
 
 template<> struct TStructOpsTypeTraits<FMD_WallContaminationRecord>
     : TStructOpsTypeTraitsBase2<FMD_WallContaminationRecord>
 {
-      enum { WithPostSerialize = true, WithCopy = true };
+      // 압축 본문 공유 참조를 보존하는 구조체 복사 지원
+      enum { WithCopy = true };
 };
 
 /**
@@ -248,8 +241,6 @@ USTRUCT()
 struct FMD_DaySnapshot
 {
       GENERATED_BODY()
-
-      UPROPERTY() bool bHasContaminationGenerationRecords = false;
 
     /** Missing in older saves: preserve authored/per-surface seeds, including zero. */
     UPROPERTY() bool bHasContaminationSessionSeed = false;
@@ -293,7 +284,7 @@ struct FMD_DaySnapshot
       UPROPERTY()
       TArray<FName> SupportedWallNames;
 
-      // Version 16: cut struts held by braces, awaiting loss of their last support.
+      // Cut struts held by braces, awaiting loss of their last support.
       UPROPERTY()
       TArray<FName> PendingCollapseWallNames;
 

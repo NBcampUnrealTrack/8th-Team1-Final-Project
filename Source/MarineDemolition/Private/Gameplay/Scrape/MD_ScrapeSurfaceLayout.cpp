@@ -9,10 +9,6 @@ bool FMD_ScrapeSurfaceLayout::IsLayoutMetadataValid(
 	{
 		return false;
 	}
-	if (LayoutVersion == 0 && GridDimensions == FIntPoint::ZeroValue)
-	{
-		return true;
-	}
 	int32 CellsPerFace = 0;
 	int32 TotalCellCount = 0;
 	return TryCalculateCellCounts(GridDimensions, CellsPerFace, TotalCellCount);
@@ -29,8 +25,8 @@ bool FMD_ScrapeSurfaceLayout::IsSavedLayoutCompatible(
 		&& TryCalculateCellCounts(CurrentGrid, CellsPerFace, TotalCellCount)
 		&& SavedVersion == CurrentVersion
 		&& SavedId == CurrentId
-		&& (SavedGrid == CurrentGrid
-			|| (SavedVersion == 0 && SavedGrid == FIntPoint::ZeroValue));
+		// 저장 당시 격자 크기와 현재 크기가 일치하는 경우만 허용
+		&& SavedGrid == CurrentGrid;
 }
 
 bool FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(

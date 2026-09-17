@@ -29,7 +29,8 @@ bool FMD_WallContaminationRecord::ExpandCells(FMD_WallContaminationRecord& Out) 
 }
 bool FMD_WallContaminationRecord::ValidateCellIndices(const int32 MaximumCellCount) const
 {
-    if (Generation.Version != 0 && !Generation.IsValid()) return false;
+    // 생성 정보가 없는 이전 기록을 현재 표면에 적용하는 상황 차단
+    if (Generation.IsValid() == false) return false;
     if (BoundaryPayload.Num())
     {
         FMD_ScrapeBoundaryState Boundary;
@@ -45,9 +46,11 @@ bool FMD_WallContaminationRecord::ValidateCellIndices(const int32 MaximumCellCou
     }
     const int32 Count = CellIndices.Num();
     if (Count > MaximumCellCount || InitialAmounts.Num() != Count || RemainingAmounts.Num() != Count
-        || (!TransferredAmounts.IsEmpty() && TransferredAmounts.Num() != Count)
-        || (!TransferredPatternDensities.IsEmpty() && TransferredPatternDensities.Num() != Count)
-        || (!CoveredFractions.IsEmpty() && CoveredFractions.Num() != Count)) return false;
+        // 현재 전이 오염량 열 누락 차단
+        || TransferredAmounts.Num() != Count
+        // 현재 패턴 밀도 열 누락 차단
+        || TransferredPatternDensities.Num() != Count
+        || CoveredFractions.Num() != Count) return false;
     TBitArray<> Seen(false, MaximumCellCount);
     for (const int32 Index : CellIndices)
     {
@@ -55,10 +58,4 @@ bool FMD_WallContaminationRecord::ValidateCellIndices(const int32 MaximumCellCou
         Seen[Index] = true;
     }
     return true;
-}
-void FMD_WallContaminationRecord::PostSerialize(const FArchive& Ar)
-{
-    // Old tagged-property records are converted before the next wall is deserialized.
-    // A malformed legacy record remains intact for validation to reject; it is never silently dropped.
-    if (Ar.IsLoading() && !Ar.IsError() && !CellPayload.Num()) CompactCells();
 }
