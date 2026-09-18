@@ -33,7 +33,9 @@ bool FMD_ScrapeMeshUVSnapshotDescriptor::operator==(const FMD_ScrapeMeshUVSnapsh
         && TransferId == Other.TransferId && TotalStates == Other.TotalStates
         && ContentHash == Other.ContentHash && PayloadBytes == Other.PayloadBytes
         && PayloadHash == Other.PayloadHash && bCompressed == Other.bCompressed
-        && bFullSnapshot == Other.bFullSnapshot && BoundaryVersion == Other.BoundaryVersion
+        && bFullSnapshot == Other.bFullSnapshot && bGeneratedBase == Other.bGeneratedBase
+        && GeneratedBaseHash == Other.GeneratedBaseHash && FullStateHash == Other.FullStateHash
+        && BoundaryVersion == Other.BoundaryVersion
         && BoundaryBytes == Other.BoundaryBytes && BoundaryDecodedBytes == Other.BoundaryDecodedBytes
         && bBoundaryCompressed == Other.bBoundaryCompressed && Generation == Other.Generation;
 }
@@ -55,6 +57,8 @@ bool FMD_ScrapeMeshUVSyncProtocol::IsDescriptorValid(const FMD_ScrapeMeshUVSnaps
         || Descriptor.TotalStates < 0 || Descriptor.TotalStates > PerFace
         || Descriptor.TotalStates > MaximumSnapshotStates) { return false; }
     if (Descriptor.Generation.Version != 0 && !Descriptor.Generation.IsValid()) return false;
+    if (Descriptor.bGeneratedBase && (!Descriptor.bFullSnapshot || !Descriptor.Generation.IsValid())) return false;
+    if (!Descriptor.bGeneratedBase && (Descriptor.GeneratedBaseHash != 0 || Descriptor.FullStateHash != 0)) return false;
     if (Descriptor.BoundaryVersion>1 || Descriptor.BoundaryBytes<0
         || Descriptor.BoundaryBytes>MaximumBoundaryBytes || Descriptor.BoundaryDecodedBytes<0
         || Descriptor.BoundaryDecodedBytes>MaximumBoundaryBytes
@@ -245,6 +249,16 @@ uint32 FMD_ScrapeMeshUVSyncProtocol::HashBytes(const TConstArrayView<uint8> Byte
 {
     uint32 Hash = 2166136261u;
     for (const uint8 Byte : Bytes) { Hash = (Hash ^ Byte) * 16777619u; }
+    return Hash;
+}
+
+uint32 FMD_ScrapeMeshUVSyncProtocol::AccumulateStateHash(uint32 Hash, const FMD_ReplicatedScrapeCellState& State)
+{
+    for (int32 Shift = 0; Shift < 32; Shift += 8)
+        Hash = (Hash ^ static_cast<uint8>(State.EncodedCellIndex >> Shift)) * 16777619u;
+    const uint8 Channels[] = {State.QuantizedInitialContamination, State.QuantizedRemainingContamination,
+        State.QuantizedTransferredContamination, State.QuantizedTransferredPatternDensity, State.QuantizedCoveredFraction};
+    for (uint8 Byte : Channels) Hash = (Hash ^ Byte) * 16777619u;
     return Hash;
 }
 

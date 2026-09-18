@@ -113,6 +113,7 @@ void UMD_WallShadowBatchSubsystem::InitializeWorldBatches()
 void UMD_WallShadowBatchSubsystem::TickInitialization()
 {
     if (!IsInitializationPending()) return;
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Wall_InitializeShadowBatchSlice);
     const double Deadline = FPlatformTime::Seconds() + .002;
     while (NextInitialSource < PendingInitialSources.Num() && FPlatformTime::Seconds() < Deadline)
         if (auto* Source = PendingInitialSources[NextInitialSource++].Get())

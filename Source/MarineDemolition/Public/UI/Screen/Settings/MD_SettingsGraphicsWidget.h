@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Components/ComboBoxString.h"
 #include "Gameplay/Settings/MD_SettingsTypes.h"
 #include "UI/Screen/Settings/MD_SettingsCategoryWidgetBase.h"
 #include "MD_SettingsGraphicsWidget.generated.h"
@@ -25,7 +26,7 @@ enum class EMD_GraphicsQuality : uint8
 	Cinematic = 4 UMETA(DisplayName = "시네마틱")
 };
 
-// 그래픽 설정 표시와 현재 화면 선택값의 카테고리별 저장 지원
+// 현재 그래픽 화면의 선택값과 적용 전 편집 상태를 연결하는 위젯
 UCLASS(Blueprintable)
 class MARINEDEMOLITION_API UMD_SettingsGraphicsWidget : public UMD_SettingsCategoryWidgetBase
 {
@@ -40,75 +41,82 @@ protected:
 	virtual void ResetPendingSettings() override;
 
 protected:
-	// 전체 화면과 창 모드 선택
+	// 실제 엔진 창 모드 Enum을 선택하는 캐러셀
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
-	TObjectPtr<UComboBoxString> CB_WindowMode;
+	TObjectPtr<UMD_CarouselWidget> Carousel_WindowMode;
 
-	// 출력 해상도 선택
+	// 지원 해상도와 저장된 창 크기 선택
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
 	TObjectPtr<UComboBoxString> CB_Resolution;
 
-	// 수직 동기화 사용 여부 선택
+	// 수직 동기화 선택 토글
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
-	TObjectPtr<UCheckBox> CheckBox_VSync;
+	TObjectPtr<UCheckBox> TB_VSync;
 
-	// 프레임 제한 선택
+	// 실제 FPS와 표시 순서를 분리하는 프레임 제한 선택
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CarouselWidget> Carousel_FrameRate;
+	TObjectPtr<UComboBoxString> CB_FPSLimit;
 
-	// 전체 확장성 품질 선택
+	// 개별 품질 변경 시 사용자 지정 상태를 표시하는 전체 품질 선택
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CarouselWidget> Carousel_OverallQuality;
+	TObjectPtr<UComboBoxString> CB_TotalQuality;
 
 	// 그림자 품질 선택
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CarouselWidget> Carousel_ShadowQuality;
+	TObjectPtr<UComboBoxString> CB_ShadowQuality;
 
-	// 실제 WBP의 단수형 Effect 이름에 대응하는 효과 품질 선택
+	// 시각 효과 품질 선택
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CarouselWidget> Carousel_EffectQuality;
+	TObjectPtr<UComboBoxString> CB_VFXQuality;
 
 	// 후처리 품질 선택
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CarouselWidget> Carousel_PPQuality;
+	TObjectPtr<UComboBoxString> CB_PPQuality;
 
-	// 저장 전까지 카테고리 원본과 분리할 화면 기준값
+	// 적용된 카테고리 원본과 분리할 편집 기준값
 	UPROPERTY(Transient)
 	FMD_GraphicsSettings PendingSettings;
 
-	// 해상도 표시 순서에 대응하는 실제 가로와 세로 값
+	// 해상도 표시 위치에 대응하는 실제 가로와 세로 값
 	UPROPERTY(Transient)
 	TArray<FIntPoint> ResolutionOptions;
 
-	// Enum 미지정 프레임 캐러셀의 표시 순서에 대응하는 실제 FPS 값
+	// 프레임 제한 표시 위치에 대응하는 실제 FPS 값
 	UPROPERTY(Transient)
 	TArray<float> FrameRateOptions;
 
 public:
-	// 바인딩된 컨트롤의 현재 선택값과 생략한 컨트롤의 기존 값 반환
+	// 현재 컨트롤 선택과 생략된 컨트롤의 기준값 수집
 	UFUNCTION(BlueprintPure, Category = "MD|Settings|Graphics")
 	FMD_GraphicsSettings GetPendingSettings();
 
-	// 메타데이터가 제거된 패키징 환경의 품질 Enum 현지화 문구 제공
+	// 패키징 환경에서도 유지되는 품질 Enum 표시 문구 제공
 	static FText GetQualityDisplayName(int32 NameIndex);
 
 protected:
-	// 전체 품질 선택에 맞춘 개별 품질의 미적용 편집값 동기화
+	// 전체 품질의 사용자 선택에 따른 개별 품질 동기화
 	UFUNCTION()
-	void HandleOverallQualityChanged(UEnum* EnumType, int64 EnumValue, FText SelectedOption);
+	void HandleOverallQualityChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
 
-	// 화면 기준값에 맞춘 목록과 선택 표시의 무저장 갱신
+	// 개별 품질의 사용자 선택에 따른 전체 품질 표시 갱신
+	UFUNCTION()
+	void HandleIndividualQualityChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
+	// 실제 적용 없이 기준값을 모든 컨트롤에 표시
 	void RefreshDisplay();
 
-	// 장치가 지원하는 해상도와 현재 저장된 해상도의 선택 목록 구성
+	// 지원 해상도와 현재 저장 해상도의 목록 구성
 	void RefreshResolutionOptions();
 
-	// BP 지정 Enum의 선택 동기화 또는 Enum 미지정 시 FPS 목록 구성
+	// 무제한과 사용자 지정 FPS를 포함한 목록 구성
 	void RefreshFrameRateOptions();
 
-	// BP에서 지정한 품질 Enum 타입을 유지한 현재 값 선택 표시
-	void RefreshQualityCarousel(UMD_CarouselWidget* Carousel, int32 Quality);
+	// 엔진 품질 단계 순서의 콤보박스 목록과 선택 구성
+	void RefreshQualityOptions(UComboBoxString* ComboBox, int32 Quality, bool bIncludeCustom = false);
 
-	// 품질 캐러셀의 실제 Enum 값 조회 및 유효하지 않은 선택의 기존 값 유지
-	int32 GetQualityFromCarousel(UMD_CarouselWidget* Carousel, int32 PreviousQuality);
+	// 유효한 품질 선택 또는 이전 기준값 반환
+	int32 GetQualityFromComboBox(UComboBoxString* ComboBox, int32 PreviousQuality);
+
+	// 개별 품질과 전체 기준값의 불일치에 따른 사용자 지정 표시
+	void RefreshOverallQualitySelection();
 };

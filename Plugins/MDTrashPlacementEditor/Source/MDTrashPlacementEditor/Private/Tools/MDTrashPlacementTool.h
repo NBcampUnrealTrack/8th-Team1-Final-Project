@@ -97,17 +97,80 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Placement|Orientation")
 	bool bAlignToSurface = true;
 
-	UPROPERTY(EditAnywhere, Category = "Placement|Orientation", meta = (UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
-	float RotationOffsetDegrees = 0.0f;
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Pitch", meta = (DisplayName = "Random Pitch"))
+	bool bRandomizePitch = false;
 
-	UPROPERTY(EditAnywhere, Category = "Placement|Orientation")
+	/** Random이 꺼져 있을 때만 사용할 고정 각도. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Pitch",
+		meta = (DisplayName = "Pitch", EditCondition = "!bRandomizePitch", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float PitchOffsetDegrees = 0.0f;
+
+	/** 랜덤 회전 각도의 최솟값. Min/Max 입력 순서가 반대여도 내부에서 정렬한다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Pitch",
+		meta = (DisplayName = "Min Pitch", EditCondition = "bRandomizePitch", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MinimumPitchDegrees = -180.0f;
+
+	/** 랜덤 회전 각도의 최댓값. Min과 같으면 해당 값으로 고정된다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Pitch",
+		meta = (DisplayName = "Max Pitch", EditCondition = "bRandomizePitch", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MaximumPitchDegrees = 180.0f;
+
+	/** 선택된 각도(고정값 또는 랜덤값)의 부호를 반전한다. 새 난수는 생성하지 않는다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Pitch", meta = (DisplayName = "Invert Pitch"))
+	bool bInvertPitch = false;
+
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Roll", meta = (DisplayName = "Random Roll"))
+	bool bRandomizeRoll = false;
+
+	/** Random이 꺼져 있을 때만 사용할 고정 각도. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Roll",
+		meta = (DisplayName = "Roll", EditCondition = "!bRandomizeRoll", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float RollOffsetDegrees = 0.0f;
+
+	/** 랜덤 회전 각도의 최솟값. Min/Max 입력 순서가 반대여도 내부에서 정렬한다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Roll",
+		meta = (DisplayName = "Min Roll", EditCondition = "bRandomizeRoll", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MinimumRollDegrees = -180.0f;
+
+	/** 랜덤 회전 각도의 최댓값. Min과 같으면 해당 값으로 고정된다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Roll",
+		meta = (DisplayName = "Max Roll", EditCondition = "bRandomizeRoll", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MaximumRollDegrees = 180.0f;
+
+	/** 선택된 각도(고정값 또는 랜덤값)의 부호를 반전한다. 새 난수는 생성하지 않는다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Roll", meta = (DisplayName = "Invert Roll"))
+	bool bInvertRoll = false;
+
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Yaw", meta = (DisplayName = "Random Yaw"))
 	bool bRandomizeRotation = false;
 
-	UPROPERTY(
-		EditAnywhere,
-		Category = "Placement|Orientation",
-		meta = (EditCondition = "bRandomizeRotation", ClampMin = "0.0", UIMax = "180.0", ForceUnits = "deg"))
-	float RandomRotationRangeDegrees = 180.0f;
+	/** Random이 꺼져 있을 때만 사용할 고정 각도. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Yaw",
+		meta = (DisplayName = "Yaw", EditCondition = "!bRandomizeRotation", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float RotationOffsetDegrees = 0.0f;
+
+	/** 랜덤 회전 각도의 최솟값. Min/Max 입력 순서가 반대여도 내부에서 정렬한다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Yaw",
+		meta = (DisplayName = "Min Yaw", EditCondition = "bRandomizeRotation", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MinimumYawDegrees = -180.0f;
+
+	/** 랜덤 회전 각도의 최댓값. Min과 같으면 해당 값으로 고정된다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Yaw",
+		meta = (DisplayName = "Max Yaw", EditCondition = "bRandomizeRotation", EditConditionHides,
+			UIMin = "-180.0", UIMax = "180.0", ForceUnits = "deg"))
+	float MaximumYawDegrees = 180.0f;
+
+	/** 선택된 각도(고정값 또는 랜덤값)의 부호를 반전한다. 새 난수는 생성하지 않는다. */
+	UPROPERTY(EditAnywhere, Category = "Placement|Orientation|Yaw", meta = (DisplayName = "Invert Yaw"))
+	bool bInvertYaw = false;
 
 	UPROPERTY(EditAnywhere, Category = "Placement|Scale", meta = (ClampMin = "0.01", UIMin = "0.01"))
 	float UniformScale = 1.0f;

@@ -1,5 +1,12 @@
 #include "Gameplay/Scrape/MD_ContaminationNoise.h"
 
+// Generated network baselines must use the same arithmetic in Game and Editor.
+// UE 5.8 defaults to fast math for Game and precise math for Editor on MSVC.
+#if defined(_MSC_VER)
+#pragma float_control(precise, on, push)
+#pragma fp_contract(off)
+#endif
+
 namespace
 {
 	constexpr int32 FractalOctaveCount = 3;
@@ -182,3 +189,7 @@ bool FMD_ContaminationNoise::TryCalculateInitialContamination(
 		ShapedAlpha);
 	return true;
 }
+
+#if defined(_MSC_VER)
+#pragma float_control(pop)
+#endif

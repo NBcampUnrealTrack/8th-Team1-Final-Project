@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
@@ -35,25 +35,28 @@ void UMD_EquipHotbarComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 
 void UMD_EquipHotbarComponent::BeginPlay()
 {
-	// 상위 컴포넌트 시작 처리
 	Super::BeginPlay();
-	// 유효한 서버 소유자에 한해서 기본 아이템 구성
+	// 유효한 서버 소유자에 한해서 초기 아이템 상태 구성
 	if (IsValid(GetOwner()) == true && GetOwner()->HasAuthority() == true)
 	{
-		// 기본 설정이 슬롯 수를 늘리지 않도록 복사 범위 제한
-		int32 CopyCount = FMath::Min(DefaultTools.Num(), ToolEntries.Num());
-		// 기본 설정의 슬롯 순서를 유지하는 지급 순회
-		for (int32 Index = 0; Index < CopyCount; ++Index)
+		// 재생성 직후 복원된 장비와 빈 슬롯이 없는 신규 캐릭터에만 기본 지급
+		if (bHasRestoredEquipmentData == false)
 		{
-			// 비어 있지 않은 기본 아이템만 한 개씩 등록
-			if (IsValid(DefaultTools[Index]) == true)
+			// 기본 설정이 슬롯 수를 늘리지 않도록 복사 범위 제한
+			int32 CopyCount = FMath::Min(DefaultTools.Num(), ToolEntries.Num());
+			// 기본 설정의 슬롯 순서를 유지하는 지급 순회
+			for (int32 Index = 0; Index < CopyCount; ++Index)
 			{
-				// 잘못된 중복 도구 설정은 공통 슬롯 검증에서 거부
-				SetItemAtSlot(Index, DefaultTools[Index], 1);
+				// 비어 있지 않은 기본 아이템만 한 개씩 등록
+				if (IsValid(DefaultTools[Index]) == true)
+				{
+					// 잘못된 중복 도구 설정은 공통 슬롯 검증에서 거부
+					SetItemAtSlot(Index, DefaultTools[Index], 1);
+				}
 			}
 		}
-		// 빈 기본 설정도 UI에 초기 상태 전달
-		OnHotbarChanged.Broadcast();
+		// 빈 기본 설정도 내용 갱신 경로에 초기 상태 전달
+		OnRep_ToolEntries();
 	}
 }
 
@@ -399,8 +402,8 @@ void UMD_EquipHotbarComponent::SelectSlot(int32 SlotIndex)
 	}
 	// 로컬 입력 지연을 줄이기 위한 예측 선택 반영
 	CurrentSlotIndex = SlotIndex;
-	// 로컬 장착 표시와 UI에 예측 상태 전달
-	OnHotbarChanged.Broadcast();
+	// 예측 선택에도 서버와 동일한 선택 변경 알림 경로 적용
+	OnRep_CurrentSlotIndex();
 	// 서버에 실제 선택 위치 확정 요청
 	ServerSelectSlot(SlotIndex);
 }
@@ -455,6 +458,8 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 		// 복구할 정보가 없는 기존 저장 형식의 성공 전달
 		return true;
 	}
+	// 시작 전 복원된 슬롯을 기본 지급으로 다시 초기화하지 않도록 표시
+	bHasRestoredEquipmentData = true;
 	// 저장 복구로 사라질 기존 품목의 GE와 GA 정리
 	RemoveAllItemAbilities();
 	// 기존 보관 상태를 제거한 고정 네 슬롯 생성
@@ -481,10 +486,18 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObject
 			SetItemAtSlot(Index, Item, 1);
 		}
 	}
+	// 저장 복구의 선택 위치 보정 여부를 판별할 기존 값 보관
+	int32 PreviousSlotIndex = CurrentSlotIndex;
 	// 복구 후 선택 위치가 유효한 네 슬롯 범위에 있도록 보정
 	CurrentSlotIndex = FMath::Clamp(CurrentSlotIndex, 0, ToolEntries.Num() - 1);
 	// 복구된 최종 보관 상태 전달
 	NotifyEntriesChanged();
+	// 저장 복구에서 실제로 보정된 선택 위치만 별도 통지
+	if (PreviousSlotIndex != CurrentSlotIndex)
+	{
+		// 내용 갱신과 구분한 최종 선택 표시 동기화
+		OnHotbarSelectionChanged.Broadcast();
+	}
 	// 기존 저장 데이터의 적용 완료 전달
 	return true;
 }
@@ -567,8 +580,14 @@ bool UMD_EquipHotbarComponent::SwapItemSlots(int32 FromSlotIndex, int32 ToSlotIn
 		CurrentSlotIndex = FromSlotIndex;
 	}
 
-	// 아이템과 수량 및 충전량의 교환과 선택 변경을 공통 알림 경로로 전달
+	// 아이템과 수량 및 충전량의 교환 결과를 내용 갱신 경로로 전달
 	NotifyEntriesChanged();
+	// 교환된 두 위치에 포함된 선택만 별도 변경 알림 전달
+	if (CurrentSlotIndex == FromSlotIndex || CurrentSlotIndex == ToSlotIndex)
+	{
+		// 동일 아이템을 따라 이동한 선택 표시 동기화
+		OnHotbarSelectionChanged.Broadcast();
+	}
 	// 서버 교환 적용 성공 반환
 	return true;
 }
@@ -597,12 +616,16 @@ void UMD_EquipHotbarComponent::OnRep_ToolEntries()
 {
 	// 복제된 아이템과 수량으로 장착 표시 및 UI 갱신
 	OnHotbarChanged.Broadcast();
+	// 선택 표시를 건드리지 않는 슬롯 내용 변경 알림
+	OnHotbarContentsChanged.Broadcast();
 }
 
 void UMD_EquipHotbarComponent::OnRep_CurrentSlotIndex()
 {
 	// 복제된 선택 상태로 장착 표시 및 UI 갱신
 	OnHotbarChanged.Broadcast();
+	// 아이템 내용을 다시 그리지 않는 선택 변경 알림
+	OnHotbarSelectionChanged.Broadcast();
 }
 
 void UMD_EquipHotbarComponent::ServerSelectSlot_Implementation(int32 SlotIndex)
@@ -820,7 +843,8 @@ FGameplayAbilitySpecHandle UMD_EquipHotbarComponent::FindItemAbility(UMD_ItemDef
 bool UMD_EquipHotbarComponent::GrantItemAbility(UMD_ItemDefinition* ItemDefinition)
 {
 	// GA를 사용하지 않는 공통 보관 아이템은 기존 지급만 수행
-	if (IsValid(ItemDefinition) == true && ItemDefinition->IsA<UMD_ToolDefinition>() == false && ItemDefinition->IsA<UMD_ConsumeItemDefinition>() == false)
+	if (IsValid(ItemDefinition) == true && ItemDefinition->IsA<UMD_ToolDefinition>() == false && ItemDefinition->IsA<UMD_ConsumeItemDefinition>() == false
+		&& !ItemDefinition->GetUseAbilityTag().IsValid())
 	{
 		// 비장비 품목의 능력 부여 생략 성공 전달
 		return true;

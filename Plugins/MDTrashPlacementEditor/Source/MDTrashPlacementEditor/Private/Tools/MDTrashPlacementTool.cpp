@@ -1,5 +1,7 @@
 #include "Tools/MDTrashPlacementTool.h"
 
+#include "MD_TrashPlacementSettings.h"
+
 #include "BaseBehaviors/ClickDragBehavior.h"
 #include "BaseBehaviors/MouseHoverBehavior.h"
 #include "BaseBehaviors/MouseWheelBehavior.h"
@@ -21,7 +23,6 @@
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Templates/TypeHash.h"
 #include "ToolContextInterfaces.h"
-#include "UObject/ConstructorHelpers.h"
 #include "World/Trash/MD_TrashItem.h"
 
 #define LOCTEXT_NAMESPACE "MDTrashPlacementTool"
@@ -31,8 +32,6 @@ namespace
 	constexpr double PlacementTraceDistance = 10000000.0;
 	constexpr float HoverNormalLength = 25.0f;
 	constexpr float HoverPointSize = 12.0f;
-	constexpr TCHAR DefaultTrashItemClassPath[] = TEXT("/Game/Blueprint/Resource/Trash/TrashItem/BP_TrashItemBase");
-	constexpr TCHAR GhostMaterialPath[] = TEXT("/Engine/EditorLandscapeResources/FoliageBrushSphereMaterial.FoliageBrushSphereMaterial");
 	const FName GhostColorParameterName(TEXT("HighlightColor"));
 	const FName GhostOpacityParameterName(TEXT("OpacityAmount"));
 	const FLinearColor ValidGhostColor(0.05f, 1.0f, 0.1f, 1.0f);
@@ -64,8 +63,6 @@ UInteractiveTool* UMDTrashPlacementToolBuilder::BuildTool(const FToolBuilderStat
 
 UMDTrashPlacementToolProperties::UMDTrashPlacementToolProperties()
 {
-	static ConstructorHelpers::FClassFinder<AMD_TrashItem> TrashItemClassFinder(DefaultTrashItemClassPath);
-	TrashItemClass = TrashItemClassFinder.Class;
 	RandomCategoryTags.Add(MDGameplayTags::Score_Sorting);
 }
 
@@ -91,6 +88,8 @@ void UMDTrashPlacementTool::Setup()
 
 	Properties = NewObject<UMDTrashPlacementToolProperties>(this);
 	Properties->RestoreProperties(this);
+	// 에디터에서 지정한 참조만 사용한다. 이전 도구 캐시의 클래스도 설정값으로 덮어쓴다.
+	Properties->TrashItemClass = GetDefault<UMD_TrashPlacementSettings>()->TrashItemClass.LoadSynchronous();
 	if (Properties->TrashVariantId.IsNone())
 	{
 		Properties->TrashVariantId = UMD_TrashLibrary::GetDefaultTrashVariantId(Properties->TrashKindId);
@@ -485,7 +484,13 @@ bool UMDTrashPlacementTool::ValidatePlacementSettings() const
 
 	if (!Properties->TrashItemClass)
 	{
-		DisplayWarning(LOCTEXT("MissingTrashClass", "Trash Item Class is not configured."));
+		DisplayWarning(LOCTEXT("MissingTrashClass", "Assign Trash Item Class in Project Settings > Plugins > MD Trash Placement, then reopen the tool."));
+		return false;
+	}
+
+	if (!IsValid(GhostMaterial))
+	{
+		DisplayWarning(LOCTEXT("MissingGhostMaterial", "Assign Ghost Preview Material in Project Settings > Plugins > MD Trash Placement, then reopen the tool."));
 		return false;
 	}
 
@@ -906,14 +911,46 @@ FTransform UMDTrashPlacementTool::BuildPlacementTransform(
 	const FVector PlacementUp = Properties->bAlignToSurface ? SurfaceNormal : FVector::UpVector;
 	const uint32 PlacementSeed = GetPlacementRandomSeed(TransformSeedSalt);
 	FRandomStream PlacementRandomStream(static_cast<int32>(PlacementSeed));
-	const float RotationRandomFraction = PlacementRandomStream.FRand();
+	// 기존 Yaw/Scale 난수 순서를 보존하고, 축 체크 여부와 무관하게 각 난수를 고정한다.
+	const float YawRandomFraction = PlacementRandomStream.FRand();
 	const float ScaleRandomFraction = PlacementRandomStream.FRand();
+	const float PitchRandomFraction = PlacementRandomStream.FRand();
+	const float RollRandomFraction = PlacementRandomStream.FRand();
 
-	float RotationDegrees = Properties->RotationOffsetDegrees;
+	// Random 축은 고정 각도를 더하지 않고, 해당 Min/Max에서 선택한 값으로 대체한다.
+	FRotator RotationOffset(Properties->PitchOffsetDegrees, Properties->RotationOffsetDegrees, Properties->RollOffsetDegrees);
 	if (Properties->bRandomizeRotation)
 	{
-		const float RandomRotationRange = FMath::Abs(Properties->RandomRotationRangeDegrees);
-		RotationDegrees += FMath::Lerp(-RandomRotationRange, RandomRotationRange, RotationRandomFraction);
+		RotationOffset.Yaw = FMath::Lerp(
+			FMath::Min(Properties->MinimumYawDegrees, Properties->MaximumYawDegrees),
+			FMath::Max(Properties->MinimumYawDegrees, Properties->MaximumYawDegrees),
+			YawRandomFraction);
+	}
+	if (Properties->bRandomizePitch)
+	{
+		RotationOffset.Pitch = FMath::Lerp(
+			FMath::Min(Properties->MinimumPitchDegrees, Properties->MaximumPitchDegrees),
+			FMath::Max(Properties->MinimumPitchDegrees, Properties->MaximumPitchDegrees),
+			PitchRandomFraction);
+	}
+	if (Properties->bRandomizeRoll)
+	{
+		RotationOffset.Roll = FMath::Lerp(
+			FMath::Min(Properties->MinimumRollDegrees, Properties->MaximumRollDegrees),
+			FMath::Max(Properties->MinimumRollDegrees, Properties->MaximumRollDegrees),
+			RollRandomFraction);
+	}
+	if (Properties->bInvertPitch)
+	{
+		RotationOffset.Pitch = -RotationOffset.Pitch;
+	}
+	if (Properties->bInvertRoll)
+	{
+		RotationOffset.Roll = -RotationOffset.Roll;
+	}
+	if (Properties->bInvertYaw)
+	{
+		RotationOffset.Yaw = -RotationOffset.Yaw;
 	}
 
 	float UniformScale = FMath::Max(Properties->UniformScale, 0.01f);
@@ -929,10 +966,17 @@ FTransform UMDTrashPlacementTool::BuildPlacementTransform(
 	}
 
 	const FQuat AlignmentRotation = FQuat::FindBetweenNormals(FVector::UpVector, PlacementUp);
-	const FQuat OffsetRotation(PlacementUp, FMath::DegreesToRadians(RotationDegrees));
-	const FQuat PlacementRotation = OffsetRotation * AlignmentRotation;
-	const float LocalBottom = IsValid(StaticMesh) ? StaticMesh->GetBoundingBox().Min.Z : 0.0f;
-	const FVector FinalLocation = HitResult.ImpactPoint - PlacementUp * LocalBottom * UniformScale;
+	const FQuat PlacementRotation = AlignmentRotation * RotationOffset.Quaternion();
+	FVector FinalLocation = HitResult.ImpactPoint;
+	if (IsValid(StaticMesh))
+	{
+		// 회전된 Bounds의 가장 낮은 점을 실제 표면에 맞춰 Pitch/Roll 관통을 방지한다.
+		const FBox LocalBounds = StaticMesh->GetBoundingBox();
+		const FVector LocalSurfaceNormal = PlacementRotation.UnrotateVector(SurfaceNormal);
+		const double LowestProjection = FVector::DotProduct(LocalSurfaceNormal, LocalBounds.GetCenter())
+			- FVector::DotProduct(LocalSurfaceNormal.GetAbs(), LocalBounds.GetExtent());
+		FinalLocation -= SurfaceNormal * LowestProjection * UniformScale;
+	}
 	return FTransform(PlacementRotation, FinalLocation, FVector(UniformScale));
 }
 
@@ -1031,7 +1075,7 @@ void UMDTrashPlacementTool::SetupGhostPreview()
 		return;
 	}
 
-	UMaterialInterface* BaseMaterial = LoadObject<UMaterialInterface>(nullptr, GhostMaterialPath);
+	UMaterialInterface* BaseMaterial = GetDefault<UMD_TrashPlacementSettings>()->GhostPreviewMaterial.LoadSynchronous();
 	if (!IsValid(BaseMaterial))
 	{
 		return;

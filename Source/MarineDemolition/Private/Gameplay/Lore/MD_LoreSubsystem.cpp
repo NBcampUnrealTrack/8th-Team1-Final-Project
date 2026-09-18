@@ -1,4 +1,6 @@
 ﻿#include "Gameplay/Lore/MD_LoreSubsystem.h"
+#include "Data/SaveGame/MD_SaveSlotManager.h"
+#include "Engine/GameInstance.h"
 
 #include "Data/Lore/MD_LoreDefinition.h"
 #include "Util/MD_LogUtility.h"
@@ -127,4 +129,76 @@ bool UMD_LoreSubsystem::HasServerAuthority() const
 {
 	const UWorld* World = GetWorld();
 	return IsValid(World) == true && World->GetNetMode() != ENetMode::NM_Client;
+}
+
+void UMD_LoreSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+{
+    // 엔진 서브시스템 초기화 수행
+    Super::Initialize(Collection);
+    // 저장 관리자보다 먼저 구독을 시도하지 않도록 초기화 의존성 지정
+    Collection.InitializeDependency<UMD_SaveSlotManager>();
+    // 기능별 데이터 소유자를 등록할 저장 관리자 조회
+    UMD_SaveSlotManager* SaveSlotManager = GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>();
+    // 저장 관리자가 유효한 경우에만 현재 서브시스템 연결
+    if (IsValid(SaveSlotManager) == true)
+    {
+        // 소유 데이터 수집 이벤트 구독
+        SaveSlotManager->OnCollectGameData.AddUniqueDynamic(this, &ThisClass::CollectGameData);
+        // 소유 데이터 적용 이벤트 구독
+        SaveSlotManager->OnOverwriteGameData.AddUniqueDynamic(this, &ThisClass::OverwriteGameData);
+    }
+}
+
+void UMD_LoreSubsystem::Deinitialize()
+{
+    // 종료 중인 게임 인스턴스의 저장 관리자 조회 준비
+    UGameInstance* GameInstance = GetGameInstance();
+    // 게임 인스턴스가 남아 있는 경우에만 관리자 조회
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    // 종료한 서브시스템이 다음 저장 요청에 참여하지 않도록 구독 해제
+    if (IsValid(SaveSlotManager) == true)
+    {
+        // 소유 데이터 수집 연결 해제
+        SaveSlotManager->OnCollectGameData.RemoveDynamic(this, &ThisClass::CollectGameData);
+        // 소유 데이터 적용 연결 해제
+        SaveSlotManager->OnOverwriteGameData.RemoveDynamic(this, &ThisClass::OverwriteGameData);
+    }
+    // 엔진 서브시스템 종료 수행
+    Super::Deinitialize();
+}
+
+void UMD_LoreSubsystem::CollectGameData(FMD_GameData& GameData, bool& bWasSuccessful)
+{
+    // 현재 기능 원장을 자신의 저장 태그 필드에 기록
+    if (GameData.AddDataField(FMD_LoreData::DataFieldKey, GetLoreSaveData()) == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_LoreData::DataFieldKey.ToString());
+    }
+}
+
+void UMD_LoreSubsystem::OverwriteGameData(const FMD_GameData& GameData, bool& bWasSuccessful)
+{
+    // 전달된 읽기 전용 데이터에서 조회할 담당 필드
+    FMD_LoreData SaveData;
+    // 전달된 데이터에서 자신의 태그에 해당하는 필드 조회
+    if (GameData.GetDataField(FMD_LoreData::DataFieldKey, SaveData) == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_LoreData::DataFieldKey.ToString());
+        // 필드 조회 실패 시 복원 API 호출 차단
+        return;
+    }
+    // 조회를 마친 필드를 기존 복원 API에 적용
+    if (ApplyLoreSaveData(SaveData) == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_LoreData::DataFieldKey.ToString());
+    }
 }

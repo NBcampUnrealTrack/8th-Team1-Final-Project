@@ -680,8 +680,6 @@ protected:
 
 private:
 	friend class AMD_TrashBin;
-	friend class FMD_ScrapeFocusCameraLockTest;
-	friend class FMD_ScrapeNetworkSessionTest;
 	/** Stage3 권위 규칙. Blueprint에서 바꿀 수 없는 정확한 역오염 비율이다. */
 	static constexpr float SaturatedReverseContaminationRatio = 0.1f;
 

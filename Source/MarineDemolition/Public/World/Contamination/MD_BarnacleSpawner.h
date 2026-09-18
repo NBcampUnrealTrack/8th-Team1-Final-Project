@@ -78,13 +78,10 @@ public:
 	bool TryGetRuntimePlacementSeed(int32& OutRuntimePlacementSeed) const;
 
 	/**
-	 * 세이브 또는 Day 스냅샷의 시드와 제거 순번을 함께 복원한다. 서버 전용.
+	 * 현재 세이브 또는 Day 스냅샷의 시드와 제거 순번 복원 및 필수 시드 누락 시 실패 반환
 	 * BeginPlay에서 임시 배치가 끝난 뒤 호출돼도 저장 시드로 전체 배치를 다시 구성한다.
 	 */
-	void RestorePersistentState(
-		const TArray<int32>& InRemovedSpawnIndices,
-		bool bHasSavedRuntimePlacementSeed,
-		int32 SavedRuntimePlacementSeed);
+	bool RestorePersistentState(const TArray<int32>& InRemovedSpawnIndices, bool bHasSavedRuntimePlacementSeed, int32 SavedRuntimePlacementSeed);
 
 	/**
 	 * Day 스냅샷에서 복원한다. 서버 전용.
@@ -118,7 +115,7 @@ protected:
 	EMD_BarnaclePlacementSeedMode PlacementSeedMode =
 		EMD_BarnaclePlacementSeedMode::Fixed;
 
-	/** Fixed 모드의 배치 시드. 구버전 세이브의 배치를 복원할 때도 대체값으로 사용한다. */
+	/** Fixed 모드의 배치 시드 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Barnacle|Spawner|Seed",
 		meta = (EditCondition = "PlacementSeedMode == EMD_BarnaclePlacementSeedMode::Fixed",
 			EditConditionHides))

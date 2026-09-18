@@ -1,9 +1,16 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Data/Equipment/MD_SupplyItemDefinition.h"
 #include "Component/Support/MD_SupplyComponent.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "GameFramework/Actor.h"
 #include "Util/MD_LogUtility.h"
+
+FGameplayTag UMD_SupplyItemDefinition::GetUseAbilityTag()
+{
+	return MDGameplayTags::Ability_PlaceSupport;
+}
 
 bool UMD_SupplyItemDefinition::CanGrant_Implementation(FMD_ItemGrantContext Context)
 {
@@ -23,8 +30,10 @@ bool UMD_SupplyItemDefinition::CanGrant_Implementation(FMD_ItemGrantContext Cont
 		// 보급 수량을 변경하지 않은 실패 결과 전달
 		return false;
 	}
-	// 지지대 적립 가능 결과 전달
-	return true;
+	// A supply purchase also needs one selectable installation slot, only on first purchase.
+	UMD_EquipHotbarComponent* Hotbar = Context.Recipient->FindComponentByClass<UMD_EquipHotbarComponent>();
+	return IsValid(Hotbar) && Hotbar->IsItemAbilityGrantValid(this)
+		&& (Hotbar->GetItemCount(this) > 0 || Hotbar->CanAddItem(this, 1));
 }
 
 bool UMD_SupplyItemDefinition::Grant_Implementation(FMD_ItemGrantContext Context)
@@ -53,6 +62,8 @@ bool UMD_SupplyItemDefinition::Grant_Implementation(FMD_ItemGrantContext Context
 		// 실제 적립 없는 실패 전달
 		return false;
 	}
+	UMD_EquipHotbarComponent* Hotbar = Context.Recipient->FindComponentByClass<UMD_EquipHotbarComponent>();
+	if (!Hotbar || (Hotbar->GetItemCount(this) <= 0 && !Hotbar->AddItem(this, 1))) return false;
 	// 기존 설치 GA가 소비할 수량으로 적립
 	Supply->AddSupport(Context.Quantity);
 	// 변경된 보급 수량의 빠른 복제 요청

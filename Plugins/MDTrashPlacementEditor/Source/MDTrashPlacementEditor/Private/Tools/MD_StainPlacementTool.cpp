@@ -1,4 +1,5 @@
 #include "Tools/MD_StainPlacementTool.h"
+#include "Gameplay/Contamination/MD_StainTargeting.h"
 
 #include "BaseBehaviors/ClickDragBehavior.h"
 #include "BaseBehaviors/MouseHoverBehavior.h"
@@ -128,18 +129,7 @@ bool UMD_StainPlacementTool::Trace(const FInputDeviceRay& Ray, FHitResult& Hit, 
 		return TargetWorld->LineTraceSingleByChannel(Hit, Start, End, ECC_Visibility, Params)
 			&& Hit.GetComponent();
 	}
-	TArray<FHitResult> Hits;
-	TargetWorld->LineTraceMultiByChannel(Hits, Start, End, ECC_Visibility, Params);
-	const FHitResult* Surface = Hits.FindByPredicate([](const FHitResult& Result) { return Result.bBlockingHit; });
-	if (!Surface) return false;
-	for (const FHitResult& Candidate : Hits)
-	{
-		if (Candidate.bBlockingHit) break;
-		const AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Candidate.GetActor());
-		if (Stain && Stain->ContainsSurfacePoint(Surface->ImpactPoint, Surface->ImpactNormal))
-		{ Hit = Candidate; return true; }
-	}
-	return false;
+	return FMD_StainTargeting::Trace(*TargetWorld, Start, Ray.WorldRay.Direction, TraceDistanceCm, Hit);
 }
 
 UMD_SurfaceStainDefinition* UMD_StainPlacementTool::ResolveDefinition() const

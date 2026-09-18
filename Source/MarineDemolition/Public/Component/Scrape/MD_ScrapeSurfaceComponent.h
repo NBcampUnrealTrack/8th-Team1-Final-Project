@@ -271,7 +271,8 @@ public:
     int32 GetResolvedContaminationSeed() const { return ContaminationGeneration.Seed; }
 
     const FMD_ContaminationGeneration& GetContaminationGeneration() const { return ContaminationGeneration; }
-    FMD_ContaminationGeneration MakeContaminationGeneration(bool bLegacy = false) const;
+    // 현재 생성 설정과 세션 시드를 사용하는 표면 생성 정보 구성
+    FMD_ContaminationGeneration MakeContaminationGeneration() const;
     bool RestoreContaminationGeneration(const FMD_ContaminationGeneration& Generation, bool bResetState = false);
 
 	/** Refreshes editor/runtime geometry without resetting scrape progress. */
@@ -477,17 +478,7 @@ public:
 		TArray<float>& OutTransferredAmounts,
 		TArray<float>& OutTransferredPatternDensities,
 		TArray<float>& OutCoveredFractions) const;
-	void RestoreContaminationCells(
-		const TArray<int32>& CellIndices,
-		const TArray<float>& InitialAmounts,
-		const TArray<float>& RemainingAmounts);
-	void RestoreContaminationCells(
-		const TArray<int32>& CellIndices,
-		const TArray<float>& InitialAmounts,
-		const TArray<float>& RemainingAmounts,
-		const TArray<float>& TransferredAmounts,
-		const TArray<float>& TransferredPatternDensities);
-	/** CoveredFractions가 비어 있으면 잔여량에서 역산해 구버전 겉모습을 쓴다. */
+	// 현재 저장 형식의 모든 오염 열과 피복률을 함께 복원
 	void RestoreContaminationCells(
 		const TArray<int32>& CellIndices,
 		const TArray<float>& InitialAmounts,
@@ -883,6 +874,8 @@ private:
 	TArray<FLocalScrapePrediction> LocalScrapePredictions;
 	TArray<FMD_ScrapeSurfaceCell> LocalPredictedContaminationCells;
     FMD_ScrapePagedState LocalPredictedPagedCells;
+    FMD_ScrapeMeshUVProgress LocalPredictedMeshUVProgress;
+    bool bLocalScrapePredictionRebuildPending = false;
 	TArray<FMD_ScrapeSurfaceCell> LocalScrapePredictionFaceScratch;
 	FMD_ScrapeEvaluationScratch ScrapeEvaluationScratch;
 	TArray<int32> PendingLocalScrapePredictionVisualCellIndices;
@@ -1068,6 +1061,8 @@ private:
 	void MarkLocalScrapePredictionReconcileCell(int32 CellIndex);
 	void FlushLocalScrapePredictionVisualUpdates();
 	void RebuildLocalScrapePredictionShadow();
+    void RequestLocalScrapePredictionRebuild();
+    void FlushLocalScrapePredictionRebuild();
 	SIZE_T GetLocalScrapePredictionAllocatedBytes() const;
 	bool UpdateLocalScrapePredictionMemoryBudget();
 	void ReleaseLocalScrapePredictionMemoryBudget();
