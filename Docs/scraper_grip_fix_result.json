@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\r\n\t\"success\": true,\r\n\t\"output\": \"COMPILE <Struct 'BlueprintCompileResult' (0x0000024FD17E77A0) {success: True, num_errors: 0, num_warnings: 0, errors: , warnings: }>\\nNEW_EDGE ['<Struct \\\\'BlueprintConnectionInfo\\\\' (0x000002521550B520) {source_node_id: \\\"8BE53C904C91CC6488C9B897161056D9\\\", source_node_title: \\\"AND Boolean\\\", source_pin_name: \\\"ReturnValue\\\", target_node_id: \\\"74E205DA459451E725321A8C6F526BDA\\\", target_node_title: \\\"OR Boolean\\\", target_pin_name: \\\"A\\\"}>', '<Struct \\\\'BlueprintConnectionInfo\\\\' (0x0000025215508640) {source_node_id: \\\"6BABEC024032BDF691C440A148741488\\\", source_node_title: \\\"Get bScraperEquipped\\\", source_pin_name: \\\"bScraperEquipped\\\", target_node_id: \\\"74E205DA459451E725321A8C6F526BDA\\\", target_node_title: \\\"OR Boolean\\\", target_pin_name: \\\"B\\\"}>']\\nANIM_GRAPH_UNCHANGED 47 48\\nSAVED <Struct 'BlueprintGraphStatus' (0x00000252974D6350) {compile_status: \\\"BS_UpToDate\\\", is_dirty: False, package_dirty: False, is_up_to_date: True, has_compile_errors: False, has_compile_warnings: False}>\",\r\n\t\"result\": \"None\",\r\n\t\"warnings\": [],\r\n\t\"execution_time_ms\": 1055.1502685546875\r\n}"
+    }
+  ],
+  "isError": false
+}

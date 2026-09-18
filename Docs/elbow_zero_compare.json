@@ -1,0 +1,9 @@
+{
+  "content": [
+    {
+      "type": "text",
+      "text": "{\r\n\t\"success\": true,\r\n\t\"output\": \"ZERO_MAX_POS_DELTA 0.0\\nZERO_MAX_QUAT_DELTA 0.0\\nTrue\",\r\n\t\"result\": \"None\",\r\n\t\"warnings\": [],\r\n\t\"execution_time_ms\": 24.073600769042969\r\n}"
+    }
+  ],
+  "isError": false
+}
