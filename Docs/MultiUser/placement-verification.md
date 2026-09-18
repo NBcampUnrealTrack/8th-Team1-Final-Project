@@ -1,0 +1,96 @@
+# 배치 도구 검증 — 2026-09-18
+
+브랜치: `codex/multi-user-snap-tools` (시작점 `dev`, `8f579de5`). 플러그인: `Plugins/MDMultiUser`.
+
+## 자동 검증
+
+UE 5.8 Win64 Development 전체 에디터 빌드 성공. 별도 NullRHI 에디터의 `/Engine/Maps/Entry`에서 실행한 최종 보고서는 `Saved/MDMultiUserReview/PlacementTests/index.json`에 있습니다.
+
+| 테스트 | 결과 | 확인 내용 |
+|---|---|---|
+| EdgeMath | 성공 | 끝점/중앙, 회전, 거리/각도 제한, 반대 방향, 음수·비균일 스케일, 무효 모서리, 불필요한 이동 제외 |
+| MeshFeatures | 성공 | 분할된 큐브 모서리를 12개로 통합, UV 이음새·평면 대각선 제외, 변환 후 추출, 오래된 위치 정보 거부 |
+| ApplyUndo | 성공 | 기준 액터 탐색, 미리보기 무변경, 실제 적용, 한 번의 Undo, 기준 위치가 바뀐 후보 적용 거부 |
+
+최종 합계: 성공 3, 경고 0, 실패 0. 에디터 시작 로그에는 프로젝트의 기존 GameFeatureData Asset Manager 설정 오류가 있으며 이 변경에서 수정하지 않았습니다.
+
+## 실제 패널 검증
+
+저장하지 않는 Entry 맵에 100cm 큐브 2개와 바닥을 생성해 확인했습니다. 결과는 UI 표시와 별도로 액터 위치를 다시 조회했습니다.
+
+- 모서리 미리보기: 이동 큐브 `(0, 0, 250)` 유지.
+- 모서리 적용: 기준 큐브 `(120, 0, 250)`에 맞춰 이동 큐브 X가 `0 → 20cm`로 변경.
+- End 바닥 스냅: Z가 `250 → 50.0001cm`로 변경. Ctrl+Z로 `250cm` 복구.
+- 경사면 정렬: 10도 기울인 바닥에 위치와 방향이 정렬됨.
+- 한국어/영어 전환: 패널 문구 및 탭 표시 갱신, 기존 후보 취소. 최종 언어 한국어.
+- 테스트 액터 제거 후 기존 PlayerStart만 존재, dirty map/content 모두 0, Concert 연결 없음. 테스트용 에디터 종료.
+
+초기 임시(transient) 액터는 엔진 기본 바닥 스냅 대상에서 제외되어, 기본 스냅 검증은 일반 레벨 액터로 수행했습니다.
+
+## 화면
+
+![한국어 배치 도구](UI/placement-ko.png)
+
+![English placement tools](UI/placement-en.png)
+
+## 남은 범위
+
+모서리 스냅은 메시가 루트인 일반 StaticMeshActor 한 개만 지원합니다. 물체 충돌이나 면 전체 겹침을 자동 해결하지 않으며 미리보기 선으로 확인해야 합니다. Blueprint 내부 메시, ISM/HISM, 스켈레탈 메시 및 부착 관계는 지원하지 않습니다. macOS 빌드와 실제 다중 클라이언트 동시 편집/잠금 경합은 검증하지 않았습니다. 그리드·카메라 이동 버튼은 컴파일과 명령 연결만 확인했습니다.
+
+## 누르고 드래그 단축키 추가 검증
+
+2026-09-18 후속 구현. `B` 끝점, `N` 중앙, `J` 모서리 회전, `U` 바닥, `I` 경사면, `Y` 그리드. 일반 선택 모드의 이동 기즈모에서 사용하며 키를 놓으면 같은 드래그에서 일반 이동을 계속합니다. 단축키는 에디터 개인설정의 Multi-User Placement 항목에서 변경합니다.
+
+최종 UE 5.8 Win64 Development 빌드 성공. 화면 렌더링이 켜진 별도 D3D12 에디터에서 `MDMultiUser.Placement` 4개 테스트 모두 성공, 경고/실패 0입니다. 최종 보고서: `Saved/MDMultiUserReview/HoldSnapTests/index.json`, 실행 로그: `Saved/MDMultiUserReview/HoldSnapUI.log`.
+
+추가 `HoldDrag` 테스트가 확인한 내용:
+
+- 키 누름 → 기본 레벨 뷰포트의 실제 기즈모 입력 처리 → X=20cm 모서리 스냅.
+- 키 해제 → 같은 드래그에서 X=25cm 일반 이동 → 한 번의 Undo로 시작 위치 복구.
+- 드래그 이동량 누적으로 스냅 위치에서 이탈 가능, Esc로 시작 위치 복구.
+- 아래 충돌 표면을 찾는 바닥 맞춤, 거리 제한, 10도 경사면의 법선 방향 정렬.
+- 현재 그리드 간격 적용, 캐시된 모서리의 이동/회전 후 위치 일치.
+- 회전 도구에서는 스냅 키를 소비하지 않음, 뷰포트 포커스 상실 시 눌림 상태 해제.
+- LevelEditor/EditorViewport/GenericCommands의 현재 단축키와 기본 6개 키 충돌 없음.
+
+물리 키보드와 마우스를 동시에 길게 누르는 조작은 OS 자동 입력으로 재현하지 않았습니다. 키 누름/해제 및 기즈모 이동은 에디터 입력 경로를 통해 검증했습니다. 패널 단축키 안내는 실제 창을 열어 별도로 확인했습니다. 테스트 후 dirty map/content 0, 팀 세션 연결 없음.
+
+![누르고 드래그 단축키 안내](UI/placement-hold-keys.png)
+
+## PR 전 최종 재점검
+
+2026-09-18, 최신 `dev` 기준점 `c0e4df1a`에서 재검증했습니다.
+
+- 이미 정확히 맞은 모서리도 드래그 후보에 유지해, 넓은 탐색 범위에서 다른 모서리로 튀지 않도록 보완했습니다. 버튼 미리보기의 불필요한 이동 제외는 유지합니다.
+- 스냅 키를 놓은 뒤 일반 이동을 이어간 경우에도 Esc가 드래그 시작 위치를 복구하도록 보완했습니다. 취소 시 선택과 편집 잠금을 다시 검사합니다.
+- 두 상황을 `HoldDrag` 회귀 검증에 추가했습니다. 끝점/중앙의 정확한 일치, 키 해제 후 일반 이동과 Esc 복구를 포함합니다.
+- 수정 후 UE 5.8 Win64 Development 빌드 성공. D3D12 에디터에서 자동 검증 4개 모두 성공, 테스트 경고/실패 0, 프로세스 종료 코드 0.
+- 공유 가능한 최종 결과: [placement-test-results.json](placement-test-results.json). 원본 보고서와 로그는 `Saved/MDMultiUserReview/PRFinalTests` 및 `PRFinalTests.log`에 있습니다.
+- macOS 빌드, 실제 다중 클라이언트 경합, 물리 키보드·마우스 동시 입력 검증은 기존과 같이 미실시입니다.
+
+시작 로그도 별도 확인했습니다. 플러그인이 레벨 에디터 준비 전에 전역 모드 관리자에 접근하던 ensure를 레벨 에디터 생성 이벤트 이후 등록하도록 수정했습니다. 현재 드래그 방식은 기본 선택 모드에서 기존 기즈모를 요구하므로 `ITF Gizmos and Controls have been disabled` 안내 경고는 남습니다. 이는 테스트 실패가 아닌 현재 구현의 호환성 제약이며, ITF 기즈모를 유지한 드래그 스냅은 지원하지 않습니다. 기존 프로젝트의 GameFeatureData 설정 오류와 StructUtils 사용 경고는 별개입니다.
+## U 입력 누락 수정 — 2026-09-18
+
+- 사용자 환경은 스냅 기능이 아직 포함되지 않은 dev DLL을 실행 중이었습니다. 실제 선택한 BP_MD_CuttableWall_Inter_B도 일반 StaticMeshActor가 아니어서 기존 입력 조건에서 제외됐습니다.
+- U/I는 StaticMeshComponent 루트를 가진 Actor/Blueprint에도 허용합니다. 부착 관계와 편집 잠금 검사는 그대로 적용하고, 모서리/그리드 단축키의 지원 범위는 유지합니다.
+- 독립 BuildPlugin Win64 Development 빌드 성공. D3D12 HostProject에서 자동 검증 4개 성공, 테스트 경고/실패 0, 종료 코드 0.
+- HoldDrag에 같은 루트 구조의 비-StaticMeshActor 검증 추가: U 준비, 키만 누르면 무변경, 실제 레벨 뷰포트 입력 경로의 드래그 바닥 스냅, 한 번의 Undo 복구, I 경사 법선 정렬.
+- 이 회귀 검증은 프로젝트 Blueprint 자체를 로드하지 않는 Actor fixture입니다. 물리 키보드/마우스 동시 입력과 팀원 동시 편집은 검증하지 않았습니다.
+- 원본 결과는 로컬 `.revvy/worktree-backups/snap-blueprint-qa-20260918/TestResults`에 보관합니다.
+## 대상 클릭 UX 전환 — 2026-09-18
+
+사용자 요청으로 기즈모 드래그 스냅을 키+대상 클릭으로 교체했습니다. B/N/J/I를 누른 채 다른 액터를 클릭하면 원래 선택한 액터만 한 번 이동하며 Ctrl+Z 한 번으로 복구됩니다. U는 XY·회전·크기를 유지하고 월드 -Z 바닥에 즉시 붙입니다. Y도 키 한 번으로 그리드에 맞춥니다. 키 해제/Esc/포커스 상실은 대상 지정 대기를 취소합니다.
+
+원본과 대상 모두 StaticMeshComponent 루트 Blueprint 구조를 지원합니다. I는 클릭한 대상 컴포넌트의 충돌 표면만 사용하며, 반복 클릭 위치가 안정적으로 유지됩니다. B/N/J는 명시적으로 클릭한 대상으로만 계산하고 클릭 지점 가까운 모서리를 우선합니다. 대상 클릭에는 주변 자동 탐색의 거리 제한을 적용하지 않습니다. 메시 복잡도 제한·편집 잠금·부착 관계 보호는 유지합니다.
+
+독립 HostProject Win64 Development 빌드 성공. D3D12 렌더링 에디터에서 EdgeMath/MeshFeatures/ApplyUndo/ClickSnap 4개 성공, 테스트 경고/실패 0. U 단독 키 입력 및 XY·회전·크기 보존, Y 입력, Blueprint 구조의 B/N/J/I 실제 에디터 키/클릭 경로, 원본 선택 유지, 반복 I 클릭 안정성, Undo, Esc/포커스 상실, 부적절한 대상 거부를 확인했습니다. 최초 I 테스트 실패는 비표시 직교 뷰 선택으로 발생한 테스트 카메라 문제였으며 표시된 원근 뷰로 교정했습니다.
+
+원본 보고서/로그: 로컬 `.revvy/worktree-backups/snap-blueprint-qa-20260918/ClickTests3`. 공유 요약은 placement-test-results.json. 테스트는 Blueprint와 같은 루트 구조의 Actor fixture이며 프로젝트 Blueprint 자체나 물리 키보드/마우스 동시 조작, 다중 사용자 경합, macOS는 검증하지 않았습니다. 이전 HoldDrag 절과 이미지는 과거 구현 기록입니다.
+
+사용자가 에디터를 종료한 뒤 실제 MarineDemolitionEditor Win64 Development 빌드도 성공했습니다. 테스트 세션 종료와 맵 재로드가 로그에서 확인됐으며 에디터 프로세스가 없는 상태에서 DLL을 갱신했습니다.
+
+## U/B/Y만 활성화 — 2026-09-18
+
+사용자 요청으로 N/J/I 단축키 등록과 대상 클릭 실행 경로를 차단했습니다. 패널의 중앙·회전 설정 및 선택 보기 버튼도 제거했으며 후보 미리보기는 회전 없는 끝점 맞춤으로 고정했습니다. U/B/Y의 키 변경 지원은 유지합니다. 엔진 자체 End/F는 변경하지 않았습니다.
+
+실제 MarineDemolitionEditor 및 독립 HostProject Win64 Development 빌드 성공. UBYTests D3D12 자동 검증 4개 성공, 경고/실패 0. 기존 U/B/Y 실행·선택 유지·Undo에 더해 N/J/I 미등록, 키 입력 및 대상 클릭 대기 비활성, 직접 실행 우회 차단, 경사면/선택 보기 빠른 실행 차단을 검증했습니다. 원본은 로컬 .revvy/worktree-backups/snap-blueprint-qa-20260918/UBYTests에 있습니다.
