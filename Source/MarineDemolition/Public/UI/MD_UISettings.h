@@ -33,7 +33,7 @@ public:
 	TSoftClassPtr<UUserWidget> InitialPrimaryLayoutClass;
 
 	// 화면 요청 태그별로 생성할 ActivatableWidget 소프트 클래스를 지정한다.
-	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Widget Map", meta = (Categories = "UI"))
+	UPROPERTY(config, EditAnywhere, BlueprintReadOnly, Category = "Widget Map", meta = (Categories = "UI.Layer"))
 	TMap<FGameplayTag, TSoftClassPtr<UCommonActivatableWidget>> WidgetClassMap;
 
 public:

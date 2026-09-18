@@ -46,6 +46,6 @@ protected:
 	TArray<FMD_TravelSiteEntry> Sites;
 
 	// UI 관리자에 등록된 항해 화면과 레이어를 선택하는 태그
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Console", meta = (Categories="UI"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Console", meta = (Categories="UI.Layer"))
 	FGameplayTag ConsoleWidgetTag;
 };
