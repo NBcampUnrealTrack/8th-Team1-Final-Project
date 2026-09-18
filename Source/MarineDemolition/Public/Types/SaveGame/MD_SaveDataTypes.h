@@ -230,6 +230,10 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	FDateTime SaveTime;
 
+    // 저장 시점의 카메라 장면을 슬롯과 함께 보관하는 압축 이미지
+    UPROPERTY(BlueprintReadOnly, Category = "Save Data")
+    TArray<uint8> ThumbnailImage;
+
     // 슬롯 목록의 요약을 개별 저장 파일에서 읽은 전체 데이터와 구분하는 상태
     UPROPERTY()
     bool bIsSlotSummary = false;

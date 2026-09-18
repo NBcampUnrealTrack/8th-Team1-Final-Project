@@ -209,6 +209,8 @@ FMD_GameData FMD_SaveSlotStore::MakeSummary(const FMD_GameData& Data)
     Row.UniqueName = Data.UniqueName;
     Row.MapPackagePath = Data.MapPackagePath;
     Row.SaveTime = Data.SaveTime;
+    // 전체 월드 데이터를 읽지 않고 목록에서 저장 장면 표시
+    Row.ThumbnailImage = Data.ThumbnailImage;
     Row.bIsSlotSummary = true;
     for (const auto& Field : Data.DataFields)
     {

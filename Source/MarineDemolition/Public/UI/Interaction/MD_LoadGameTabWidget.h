@@ -1,4 +1,4 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -8,6 +8,7 @@
 #include "MD_LoadGameTabWidget.generated.h"
 
 class UMD_CommonButtonBase;
+class UImage;
 class UScrollBox;
 class UTextBlock;
 
@@ -74,6 +75,10 @@ protected:
     UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MD|LoadGame")
     TObjectPtr<UScrollBox> SB_DataList;
 
+    // 선택 슬롯의 저장 시점 장면을 표시하는 미리보기
+    UPROPERTY(BlueprintReadOnly, meta = (BindWidgetOptional), Category = "MD|LoadGame")
+    TObjectPtr<UImage> Img_DetailPreview;
+
     // 디자이너에서 지정하는 저장 카드 클래스
     UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|LoadGame")
     TSubclassOf<UMD_CommonButtonBase> SaveCardWidgetClass;
@@ -93,6 +98,10 @@ protected:
     // 저장 요약과 같은 순서의 런타임 카드
     UPROPERTY(Transient)
     TArray<TObjectPtr<UMD_CommonButtonBase>> SaveCards;
+
+    // 정렬된 저장 목록과 같은 순서로 재사용하는 장면 텍스처
+    UPROPERTY(Transient)
+    TArray<TObjectPtr<UTexture2D>> SaveThumbnails;
 
 public:
     // 선택 변경 이벤트에서 호출하는 기본 레이아웃 표시 갱신
