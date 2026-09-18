@@ -1,41 +1,33 @@
 {
+  "date": "2026-09-18",
   "engine": "Unreal Engine 5.8",
-  "target": "MarineDemolitionEditor Win64 Development",
-  "reportCreatedOn": "2026.09.18-04.53.54",
-  "renderMode": "D3D12_SM6",
+  "platform": "Win64 Development / D3D12",
+  "workflow": "Select source, hold B/N/J/I, click target; press U/Y once",
   "succeeded": 4,
   "succeededWithWarnings": 0,
   "failed": 0,
   "notRun": 0,
-  "totalDuration": 0.22558929026126862,
   "tests": [
     {
       "fullTestPath": "MDMultiUser.Placement.ApplyUndo",
-      "state": "Success",
-      "duration": 0.10101909935474396,
-      "warnings": 0,
-      "errors": 0
+      "state": "Success"
+    },
+    {
+      "fullTestPath": "MDMultiUser.Placement.ClickSnap",
+      "state": "Success"
     },
     {
       "fullTestPath": "MDMultiUser.Placement.EdgeMath",
-      "state": "Success",
-      "duration": 0.029263898730278015,
-      "warnings": 0,
-      "errors": 0
-    },
-    {
-      "fullTestPath": "MDMultiUser.Placement.HoldDrag",
-      "state": "Success",
-      "duration": 0.07011959701776505,
-      "warnings": 0,
-      "errors": 0
+      "state": "Success"
     },
     {
       "fullTestPath": "MDMultiUser.Placement.MeshFeatures",
-      "state": "Success",
-      "duration": 0.025186702609062195,
-      "warnings": 0,
-      "errors": 0
+      "state": "Success"
     }
+  ],
+  "limitations": [
+    "Native viewport routing tested; physical simultaneous keyboard and mouse input not automated",
+    "Blueprint layout represented by Actor with StaticMeshComponent root",
+    "macOS and multi-client contention not tested"
   ]
 }

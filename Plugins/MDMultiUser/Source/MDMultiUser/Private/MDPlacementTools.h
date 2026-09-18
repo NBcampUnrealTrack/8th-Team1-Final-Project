@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 
 class UStaticMesh;
+class UStaticMeshComponent;
 struct FPropertyChangedEvent;
 
 namespace MDPlacement
@@ -28,6 +29,7 @@ namespace MDPlacement
     enum class EAnchor : uint8 { Endpoint, Midpoint };
     struct FOptions
     {
+        TOptional<FVector> TargetPoint;
         double Distance = 100.0;
         double AngleDegrees = 15.0;
         bool bRotate = false;
@@ -56,6 +58,7 @@ namespace MDPlacement
 
     FText Text(const TCHAR* Ko, const TCHAR* En);
     AActor* SelectedActor();
+    UStaticMeshComponent* RootMesh(AActor* Actor);
     bool CanMove(AActor* Actor, FText& Reason);
     bool ExtractEdges(AActor* Actor, TArray<FEdge>& Out, FText& Reason);
     bool MatchEdges(const FEdge& Source, const FEdge& Target, const FTransform& ActorTransform,

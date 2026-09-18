@@ -54,12 +54,11 @@ void SMDPlacementTools::Build()
                 [SNew(SVerticalBox)
                     + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,14)
                     [SNew(STextBlock).AutoWrapText(true).Text_Lambda([] { return MDHoldSnap::Shortcuts(); })
-                        .ToolTipText(Text(TEXT("에디터 개인설정 → 키보드 단축키 → Multi-User Placement에서 변경할 수 있습니다. 이동 모드(W)에서 사용하세요."),TEXT("Change keys in Editor Preferences > Keyboard Shortcuts > Multi-User Placement. Use Move mode (W).")))]
+                        .ToolTipText(Text(TEXT("에디터 개인설정 → 키보드 단축키 → Multi-User Placement에서 변경할 수 있습니다. 액터 선택 후 키를 누른 채 대상을 클릭하세요. U/Y는 한 번 누릅니다."),TEXT("Change keys in Editor Preferences > Keyboard Shortcuts > Multi-User Placement. Hold a key and click a target. Press U/Y once.")))]
                     + SVerticalBox::Slot().AutoHeight()[Label(Text(TEXT("빠른 배치"),TEXT("Quick placement")),true)]
                     + SVerticalBox::Slot().AutoHeight().Padding(0,10,0,18)
                     [SNew(SWrapBox).UseAllottedSize(true).InnerSlotPadding(FVector2D(6,6))
-                        + SWrapBox::Slot()[Quick(EQuickAction::Floor,Text(TEXT("바닥 스냅 · End"),TEXT("Drop to floor · End")))]
-                        + SWrapBox::Slot()[Quick(EQuickAction::Slope,Text(TEXT("경사면 정렬"),TEXT("Align to slope")))]
+                        + SWrapBox::Slot()[Quick(EQuickAction::Floor,Text(TEXT("수직 바닥 스냅 · U"),TEXT("Vertical drop · U")))]
                         + SWrapBox::Slot()[Quick(EQuickAction::Grid,Text(TEXT("그리드 맞춤"),TEXT("Snap to grid")))]
                         + SWrapBox::Slot()[Quick(EQuickAction::Focus,Text(TEXT("선택 대상으로 이동"),TEXT("Frame selection")))]]
                     + SVerticalBox::Slot().AutoHeight()
@@ -67,7 +66,7 @@ void SMDPlacementTools::Build()
                         [SNew(SVerticalBox)
                             + SVerticalBox::Slot().AutoHeight()[Label(Text(TEXT("모서리 스냅"),TEXT("Edge snap")),true)]
                             + SVerticalBox::Slot().AutoHeight().Padding(0,6,0,12)
-                            [Label(Text(TEXT("StaticMeshActor 1개 · 실제 메시 경계와 꺾이는 모서리에 맞춥니다."),TEXT("One StaticMeshActor · Align real mesh boundaries and sharp edges.")))]
+                            [Label(Text(TEXT("메시 루트 액터 1개 · Blueprint 지원 · 실제 메시 모서리에 맞춥니다."),TEXT("One actor with a static mesh root, including Blueprints. Align real mesh edges.")))]
                             + SVerticalBox::Slot().AutoHeight()
                             [SNew(SWrapBox).UseAllottedSize(true).InnerSlotPadding(FVector2D(6,6))
                                 + SWrapBox::Slot()

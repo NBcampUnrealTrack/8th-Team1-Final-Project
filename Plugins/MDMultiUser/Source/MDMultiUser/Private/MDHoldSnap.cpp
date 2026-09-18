@@ -9,8 +9,8 @@
 #include "EditorViewportClient.h"
 #include "Engine/Engine.h"
 #include "Engine/StaticMesh.h"
-#include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "LevelEditor.h"
 #include "Framework/Application/SlateApplication.h"
 #include "Framework/Commands/Commands.h"
@@ -19,7 +19,6 @@
 #include "ScopedTransaction.h"
 #include "Styling/AppStyle.h"
 #include "UnrealEdGlobals.h"
-#include "UnrealWidget.h"
 
 #define LOCTEXT_NAMESPACE "MDHoldSnap"
 namespace
@@ -29,21 +28,36 @@ namespace
     class FHoldCommands : public TCommands<FHoldCommands>
     {
     public:
-        FHoldCommands() : TCommands("MDHoldSnap", LOCTEXT("Context", "Multi-User Placement (hold while dragging)"), NAME_None, FAppStyle::GetAppStyleSetName()) {}
+        FHoldCommands() : TCommands("MDHoldSnap", LOCTEXT("ClickContext", "Multi-User Placement"), NAME_None, FAppStyle::GetAppStyleSetName()) {}
         TSharedPtr<FUICommandInfo> Endpoint, Midpoint, Rotate, Floor, Slope, Grid;
         virtual void RegisterCommands() override
         {
-            UI_COMMAND(Endpoint, "Hold: edge endpoint", "Hold while dragging the move gizmo to snap edge endpoints.", EUserInterfaceActionType::Button, FInputChord(EKeys::B));
-            UI_COMMAND(Midpoint, "Hold: edge midpoint", "Hold while dragging to match edge midpoints.", EUserInterfaceActionType::Button, FInputChord(EKeys::N));
-            UI_COMMAND(Rotate, "Hold: edge rotation", "Hold while dragging to align edge direction and anchor.", EUserInterfaceActionType::Button, FInputChord(EKeys::J));
-            UI_COMMAND(Floor, "Hold: floor", "Hold while dragging to place the actor on the surface below.", EUserInterfaceActionType::Button, FInputChord(EKeys::U));
-            UI_COMMAND(Slope, "Hold: slope", "Hold while dragging to align the actor up axis with the surface below.", EUserInterfaceActionType::Button, FInputChord(EKeys::I));
-            UI_COMMAND(Grid, "Hold: grid", "Hold while dragging to snap the actor pivot to the editor grid.", EUserInterfaceActionType::Button, FInputChord(EKeys::Y));
+            UI_COMMAND(Endpoint, "Click: edge endpoint", "Hold the key and click a target actor to match edge endpoints.", EUserInterfaceActionType::Button, FInputChord(EKeys::B));
+            UI_COMMAND(Midpoint, "Click: edge midpoint", "Hold the key and click a target actor to match edge midpoints.", EUserInterfaceActionType::Button, FInputChord(EKeys::N));
+            UI_COMMAND(Rotate, "Click: edge rotation", "Hold the key and click a target actor to align edge direction and anchor.", EUserInterfaceActionType::Button, FInputChord(EKeys::J));
+            UI_COMMAND(Floor, "Drop vertically", "Press once to drop straight down. XY, rotation and scale are unchanged.", EUserInterfaceActionType::Button, FInputChord(EKeys::U));
+            UI_COMMAND(Slope, "Click: slope", "Hold the key and click the target surface to place and align the actor.", EUserInterfaceActionType::Button, FInputChord(EKeys::I));
+            UI_COMMAND(Grid, "Snap to grid", "Press once to snap the selected actor pivot to the editor grid.", EUserInterfaceActionType::Button, FInputChord(EKeys::Y));
         }
         TArray<TSharedPtr<FUICommandInfo>> All() const { return {Endpoint,Midpoint,Rotate,Floor,Slope,Grid}; }
     };
+    bool CommitPlacement(AActor* Source, const FTransform& Transform, FText& Result)
+    {
+        if (!MDPlacement::CanMove(Source,Result) || Source!=MDPlacement::SelectedActor()) { return false; }
+        if (Transform.ContainsNaN()) { return false; }
+        if (Source->GetActorTransform().Equals(Transform,.001))
+        { Result=MDPlacement::Text(TEXT("이미 정렬되어 있습니다."),TEXT("Already aligned.")); return true; }
+        const FScopedTransaction Transaction(MDPlacement::Text(TEXT("클릭 스냅"),TEXT("Click snap")));
+        Source->Modify(); Source->GetRootComponent()->Modify();
+        Source->SetActorTransform(Transform,false,nullptr,ETeleportType::TeleportPhysics);
+        Source->PostEditMove(true);
+        Source->MarkPackageDirty();
+        GLevelEditorModeTools().SetPivotLocation(Source->GetActorLocation(),false);
+        GEditor->RedrawLevelEditingViewports();
+        Result=MDPlacement::Text(TEXT("스냅 완료 · Ctrl+Z로 되돌리기"),TEXT("Snapped. Ctrl+Z to undo."));
+        return true;
+    }
 }
-
 const FEditorModeID FMDHoldSnapMode::ID = TEXT("EM_MDHoldSnap");
 namespace MDHoldSnap
 {
@@ -85,181 +99,126 @@ namespace MDHoldSnap
     FText Shortcuts()
     {
         if (!FHoldCommands::IsRegistered()) { return FText::GetEmpty(); }
-        const auto Commands = FHoldCommands::Get().All();
         TArray<FText> Keys;
-        for (const auto& Command : Commands) { Keys.Add(Command->GetActiveChord(EMultipleKeyBindingIndex::Primary)->GetInputText()); }
+        for (const auto& Command:FHoldCommands::Get().All()) { Keys.Add(Command->GetActiveChord(EMultipleKeyBindingIndex::Primary)->GetInputText()); }
         return FText::Format(MDPlacement::Text(
-            TEXT("키를 누른 채 이동 기즈모 드래그\n{0} 끝점 · {1} 중앙 · {2} 모서리 회전\n{3} 바닥 · {4} 경사면 · {5} 그리드\n키 놓기: 일반 이동 · Esc: 드래그 취소\nF: 선택 보기 · End: 바닥 스냅"),
-            TEXT("Hold a key and drag the move gizmo\n{0} Endpoint · {1} Midpoint · {2} Edge rotation\n{3} Floor · {4} Slope · {5} Grid\nRelease key: free move · Esc: cancel drag\nF: Frame selection · End: Drop to floor")), Keys[0],Keys[1],Keys[2],Keys[3],Keys[4],Keys[5]);
+            TEXT("액터 선택 → 키를 누른 채 대상 클릭\n{0} 끝점 · {1} 중앙 · {2} 모서리 회전 · {4} 경사면\n한 번 누르기: {3} 수직 바닥 스냅 · {5} 그리드\n키 놓기 / Esc: 대기 취소 · Ctrl+Z: 실행 취소\nF: 선택 보기 · End: 기본 바닥 스냅"),
+            TEXT("Select actor > hold key > click target\n{0} Endpoint · {1} Midpoint · {2} Edge rotation · {4} Slope\nPress once: {3} Vertical drop · {5} Grid\nRelease / Esc: cancel targeting · Ctrl+Z: undo\nF: Frame selection · End: native floor snap")),Keys[0],Keys[1],Keys[2],Keys[3],Keys[4],Keys[5]);
     }
-
-    bool Solve(AActor* Source, const FTransform& Desired, EMode Mode, const MDPlacement::FOptions& Options, FTransform& Out, FText& Result, MDPlacement::FGeometryCache* Cache)
+    bool ApplyImmediate(AActor* Source, EMode Mode, FText& Result)
     {
-        Out = Desired;
-        if (Mode == EMode::None) { return false; }
-        if (Mode == EMode::Grid)
+        if (!MDPlacement::CanMove(Source,Result)) { return false; }
+        FTransform Transform=Source->GetActorTransform();
+        if (Mode==EMode::Grid)
+        { Transform.SetLocation(Transform.GetLocation().GridSnap(FMath::Max(KINDA_SMALL_NUMBER,GEditor->GetGridSize()))); }
+        else if (Mode==EMode::Floor)
         {
-            Out.SetLocation(Desired.GetLocation().GridSnap(FMath::Max(KINDA_SMALL_NUMBER, GEditor->GetGridSize())));
-            Result = MDPlacement::Text(TEXT("그리드 맞춤"),TEXT("Grid snap")); return true;
+            auto* Mesh=MDPlacement::RootMesh(Source);
+            if (!Mesh || !Mesh->GetStaticMesh())
+            { Result=MDPlacement::Text(TEXT("메시가 루트인 액터를 선택하세요."),TEXT("Select an actor with a static mesh root.")); return false; }
+            const FBox Bounds=Mesh->GetStaticMesh()->GetBoundingBox().TransformBy(Transform);
+            const FVector Start(Bounds.GetCenter().X,Bounds.GetCenter().Y,Bounds.Min.Z+.1);
+            FCollisionQueryParams Params(SCENE_QUERY_STAT(MDClickFloor),true,Source);
+            FHitResult Hit;
+            if (!Source->GetWorld()->LineTraceSingleByChannel(Hit,Start,Start-FVector(0,0,100000),ECC_Visibility,Params)
+                || Hit.bStartPenetrating || !Hit.GetActor() || Hit.GetActor()->IsHiddenEd() || Hit.ImpactNormal.Z<.1)
+            { Result=MDPlacement::Text(TEXT("액터 바로 아래에 충돌 바닥이 없습니다."),TEXT("No collision floor directly below the actor.")); return false; }
+            Transform.AddToTranslation(FVector(0,0,FMath::Min(0.,Hit.ImpactPoint.Z-Bounds.Min.Z)));
         }
-        if (Mode == EMode::Endpoint || Mode == EMode::Midpoint || Mode == EMode::Rotate)
-        {
-            MDPlacement::FOptions MatchOptions = Options;
-            MatchOptions.bRotate = Mode == EMode::Rotate;
-            if (Mode != EMode::Rotate) { MatchOptions.Anchor = Mode == EMode::Endpoint ? MDPlacement::EAnchor::Endpoint : MDPlacement::EAnchor::Midpoint; }
-            TArray<MDPlacement::FCandidate> Matches;
-            MDPlacement::FindCandidates(Source, nullptr, MatchOptions, Matches, Result, &Desired, Cache);
-            if (Matches.IsEmpty()) { Result=MDPlacement::Text(TEXT("대상 모서리에 가까이 이동하세요."),TEXT("Move closer to a target edge.")); return false; }
-            Out = Matches[0].Transform;
-            Result = FText::Format(MDPlacement::Text(TEXT("스냅: {0}"),TEXT("Snap: {0}")),FText::FromString(Matches[0].Target->GetActorLabel()));
-            return true;
-        }
-        // Blueprint walls can own a static mesh root without deriving from StaticMeshActor.
-        const auto* Component = Source ? Cast<UStaticMeshComponent>(Source->GetRootComponent()) : nullptr;
-        const UStaticMesh* Mesh = Component ? Component->GetStaticMesh() : nullptr;
-        if (!Mesh || Component != Source->GetRootComponent()) { return false; }
-        const FBox LocalBounds = Mesh->GetBoundingBox();
-        const FBox WorldBounds = LocalBounds.TransformBy(Desired);
-        const double Radius = Options.Distance;
-        // Trace from the mesh's bottom rather than through its top; ignore the moving actor.
-        const FVector Start(Desired.GetLocation().X,Desired.GetLocation().Y,WorldBounds.Min.Z+Radius);
-        const FVector End(Start.X,Start.Y,WorldBounds.Min.Z-Radius);
-        FCollisionQueryParams Params(SCENE_QUERY_STAT(MDHoldFloor),true,Source);
+        else { return false; }
+        return CommitPlacement(Source,Transform,Result);
+    }
+    bool ApplyTarget(AActor* Source,AActor* Target,EMode Mode,const FVector& RayOrigin,const FVector& RayDirection,FText& Result)
+    {
+        if (!MDPlacement::CanMove(Source,Result)) { return false; }
+        if (!IsValid(Target) || Target==Source || Target->GetWorld()!=Source->GetWorld() || Target->IsHiddenEd())
+        { Result=MDPlacement::Text(TEXT("다른 대상 액터를 클릭하세요."),TEXT("Click a different target actor.")); return false; }
+        auto* SourceMesh=MDPlacement::RootMesh(Source);
+        auto* TargetMesh=MDPlacement::RootMesh(Target);
+        if (!SourceMesh || !SourceMesh->GetStaticMesh() || !TargetMesh || !TargetMesh->GetStaticMesh())
+        { Result=MDPlacement::Text(TEXT("두 액터 모두 메시가 루트여야 합니다."),TEXT("Both actors need a static mesh root.")); return false; }
+        const FTransform Before=Source->GetActorTransform();
         FHitResult Hit;
-        if (!Source->GetWorld()->LineTraceSingleByChannel(Hit,Start,End,ECC_Visibility,Params)
-            || !Hit.GetActor() || Hit.GetActor()->IsHiddenEd() || Hit.ImpactNormal.Z < .1)
-        { Result = MDPlacement::Text(TEXT("아래 표면에 가까이 이동하세요."),TEXT("Move closer to a surface below.")); return false; }
-        const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
-        if (Mode == EMode::Slope)
+        const bool bHit=TargetMesh->LineTraceComponent(Hit,RayOrigin,RayOrigin+RayDirection.GetSafeNormal()*1000000,
+            FCollisionQueryParams(SCENE_QUERY_STAT(MDClickSurface),true,Source));
+        if (Mode==EMode::Slope)
         {
-            const FQuat Delta = FQuat::FindBetweenNormals(Desired.GetRotation().GetUpVector(),Normal);
-            Out.SetRotation((Delta*Desired.GetRotation()).GetNormalized());
+            if (!bHit || Hit.bStartPenetrating || Hit.ImpactNormal.Z<.1)
+            { Result=MDPlacement::Text(TEXT("충돌이 있는 경사면의 윗면을 클릭하세요."),TEXT("Click an upward-facing collision surface.")); return false; }
+            const FVector Normal=Hit.ImpactNormal.GetSafeNormal();
+            FTransform Transform=Before;
+            Transform.SetRotation((FQuat::FindBetweenNormals(Before.GetRotation().GetUpVector(),Normal)*Before.GetRotation()).GetNormalized());
+            const FBox Bounds=SourceMesh->GetStaticMesh()->GetBoundingBox();
+            double Support=TNumericLimits<double>::Max();
+            for (int32 I=0;I<8;++I)
+            {
+                const FVector Corner((I&1)?Bounds.Max.X:Bounds.Min.X,(I&2)?Bounds.Max.Y:Bounds.Min.Y,(I&4)?Bounds.Max.Z:Bounds.Min.Z);
+                Support=FMath::Min(Support,FVector::DotProduct(Transform.TransformVector(Corner),Normal));
+            }
+            const FVector Center=Transform.TransformVector(Bounds.GetCenter());
+            Transform.SetLocation(Hit.ImpactPoint-Center+Normal*(FVector::DotProduct(Center,Normal)-Support));
+            return CommitPlacement(Source,Transform,Result);
         }
-        double Support = TNumericLimits<double>::Max();
-        for (int32 I=0; I<8; ++I)
-        {
-            const FVector Corner((I&1)?LocalBounds.Max.X:LocalBounds.Min.X,(I&2)?LocalBounds.Max.Y:LocalBounds.Min.Y,(I&4)?LocalBounds.Max.Z:LocalBounds.Min.Z);
-            Support = FMath::Min(Support,FVector::DotProduct(Out.TransformVector(Corner),Normal));
-        }
-        const double Drop = (FVector::DotProduct(Hit.ImpactPoint-Desired.GetLocation(),Normal)-Support)/Normal.Z;
-        if (FMath::Abs(Drop) > Radius) { Result=MDPlacement::Text(TEXT("표면이 이동 범위 밖에 있습니다."),TEXT("Surface is beyond snap distance.")); return false; }
-        Out.AddToTranslation(FVector(0,0,Drop));
-        Result = FText::Format(MDPlacement::Text(TEXT("표면: {0}"),TEXT("Surface: {0}")),FText::FromString(Hit.GetActor()->GetActorLabel()));
-        return true;
-    }
-
-    FDrag::FDrag() = default;
-    FDrag::~FDrag() = default;
-    void FDrag::Finish()
-    {
-        if (bMoved && Source.IsValid()) { Source->PostEditMove(true); Source->MarkPackageDirty(); }
-        Reset();
-    }
-    void FDrag::Begin(AActor* Actor)
-    {
-        Source=Actor;
-        if (Actor) { Start=Desired=Last=Actor->GetActorTransform(); }
-    }
-    void FDrag::Rebase() { if (Source.IsValid()) { Desired=Last=Source->GetActorTransform(); } }
-    void FDrag::Reset() { OwnedTransaction.Reset(); Source.Reset(); bMoved=false; Cache.Reset(); }
-    void FDrag::Cancel(bool bIncludeNativeMovement)
-    {
-        FText Reason;
-        // Key-up returns movement to the native gizmo, which can advance beyond Last.
-        if (Source.IsValid() && Source.Get()==MDPlacement::SelectedActor() && MDPlacement::CanMove(Source.Get(),Reason)
-            && (bIncludeNativeMovement || Source->GetActorTransform().Equals(Last,.001)))
-        {
-            Source->SetActorTransform(Start,false,nullptr,ETeleportType::TeleportPhysics);
-            Source->PostEditMove(false);
-            GLevelEditorModeTools().SetPivotLocation(Start.GetLocation(),false);
-        }
-        if (OwnedTransaction) { OwnedTransaction->Cancel(); }
-        Reset();
-    }
-    bool FDrag::Move(EMode Mode,const FVector& Delta,const MDPlacement::FOptions& Options,FText& Result)
-    {
-        if (!Source.IsValid() || Source.Get()!=MDPlacement::SelectedActor() || !MDPlacement::CanMove(Source.Get(),Result)) { Reset(); return false; }
-        if (!Source->GetActorTransform().Equals(Last,.001))
-        { Result=MDPlacement::Text(TEXT("외부 위치 변경으로 스냅을 중지했습니다."),TEXT("Snap stopped: actor transform changed externally.")); Reset(); return false; }
-        Desired.AddToTranslation(Delta);
-        FTransform Applied;
-        Solve(Source.Get(),Desired,Mode,Options,Applied,Result,&Cache);
-        if (!GEditor->IsTransactionActive() && !OwnedTransaction)
-        { OwnedTransaction = MakeUnique<FScopedTransaction>(MDPlacement::Text(TEXT("드래그 스냅"),TEXT("Drag snap"))); }
-        Source->Modify(); Source->GetRootComponent()->Modify();
-        if (!Source->SetActorTransform(Applied,false,nullptr,ETeleportType::TeleportPhysics)) { Reset(); return false; }
-        Source->PostEditMove(false);
-        bMoved=true;
-        Last=Source->GetActorTransform();
-        GLevelEditorModeTools().SetPivotLocation(Last.GetLocation(),false);
-        GEditor->RedrawLevelEditingViewports();
-        return true;
+        if (Mode!=EMode::Endpoint && Mode!=EMode::Midpoint && Mode!=EMode::Rotate) { return false; }
+        MDPlacement::FOptions Options=MDPlacement::SessionOptions();
+        // Explicitly clicking a target authorizes the distance to that target, not a nearby search radius.
+        Options.Distance=FVector::Distance(Source->GetActorLocation(),Target->GetActorLocation())
+            +Source->GetComponentsBoundingBox(true).GetSize().Length()+Target->GetComponentsBoundingBox(true).GetSize().Length()+1;
+        Options.bRotate=Mode==EMode::Rotate;
+        if (Options.bRotate) { Options.AngleDegrees=90; }
+        else { Options.Anchor=Mode==EMode::Endpoint ? MDPlacement::EAnchor::Endpoint : MDPlacement::EAnchor::Midpoint; }
+        if (bHit) { Options.TargetPoint=Hit.ImpactPoint; }
+        TArray<MDPlacement::FCandidate> Matches;
+        MDPlacement::FindCandidates(Source,Target,Options,Matches,Result,&Before);
+        if (Matches.IsEmpty()) { return false; }
+        return CommitPlacement(Source,Matches[0].Transform,Result);
     }
 }
 
 bool FMDHoldSnapMode::IsCompatibleWith(FEditorModeID Other) const { return Other==FBuiltinEditorModes::EM_Default; }
-void FMDHoldSnapMode::Release() { Held=MDHoldSnap::EMode::None; HeldKey=FKey(); Session.Rebase(); LiveStatus=FText::GetEmpty(); }
+void FMDHoldSnapMode::Release() { Held=MDHoldSnap::EMode::None; HeldKey=FKey(); Source.Reset(); LiveStatus=FText::GetEmpty(); }
 bool FMDHoldSnapMode::InputKey(FEditorViewportClient* Client,FViewport* Viewport,FKey Key,EInputEvent Event)
 {
     if (Event==IE_Released && Key==HeldKey) { Release(); return true; }
-    if (Key==EKeys::Escape && Event==IE_Pressed && DragClient && Session.HasSource() && Session.WasUsed())
-    { Session.Cancel(Held==MDHoldSnap::EMode::None); Release(); bCanceled=true; return true; }
+    if (Key==EKeys::Escape && Event==IE_Pressed && HeldKey.IsValid()) { Release(); return true; }
     if (Event==IE_Repeat) { return Key==HeldKey; }
-    if (Event!=IE_Pressed) { return false; }
-    if (!GEditor || !Client || Client->GetWorld()!=GEditor->GetEditorWorldContext().World()
-        || Client->GetWidgetMode()!=UE::Widget::WM_Translate || !MDPlacement::SelectedActor()) { return false; }
-    if (Viewport && (Viewport->KeyState(EKeys::RightMouseButton) || Viewport->KeyState(EKeys::MiddleMouseButton))) { return false; }
+    if (Event!=IE_Pressed || !GEditor || !Client || Client->GetWorld()!=GEditor->GetEditorWorldContext().World()) { return false; }
+    if (Viewport && (Viewport->KeyState(EKeys::RightMouseButton) || Viewport->KeyState(EKeys::MiddleMouseButton) || Viewport->KeyState(EKeys::LeftMouseButton))) { return false; }
     const FInputChord Chord(Key,Client->IsShiftPressed(),Client->IsCtrlPressed(),Client->IsAltPressed(),Client->IsCmdPressed());
     const auto Commands=FHoldCommands::Get().All();
-    for (int32 I=0; I<Commands.Num(); ++I)
+    for (int32 I=0;I<Commands.Num();++I)
     {
-        if (Commands[I]->HasActiveChord(Chord))
-        {
-            FText Reason;
-            if (!MDPlacement::CanMove(MDPlacement::SelectedActor(),Reason)) { LiveStatus=Reason; return true; }
-            const auto Mode=static_cast<MDHoldSnap::EMode>(I+1);
-            const AActor* Source=MDPlacement::SelectedActor();
-            const bool bRootMeshSurface=(Mode==MDHoldSnap::EMode::Floor || Mode==MDHoldSnap::EMode::Slope)
-                && Cast<UStaticMeshComponent>(Source->GetRootComponent());
-            if (!Source->IsA<AStaticMeshActor>() && !bRootMeshSurface)
-            {
-                LiveStatus=MDPlacement::Text(TEXT("U/I는 메시가 루트인 액터, 모서리/그리드는 StaticMeshActor를 선택하세요."),
-                    TEXT("U/I require a static mesh root; edge/grid snap requires a StaticMeshActor."));
-                return true;
-            }
-            if (Held!=Mode) { Session.Rebase(); }
-            Held=Mode; HeldKey=Key;
-            LiveStatus=MDPlacement::Text(TEXT("스냅 준비 · 이동 기즈모를 드래그하세요."),TEXT("Snap ready. Drag the move gizmo."));
-            return true;
-        }
+        if (!Commands[I]->HasActiveChord(Chord)) { continue; }
+        Release();
+        AActor* Actor=MDPlacement::SelectedActor();
+        if (!MDPlacement::CanMove(Actor,LiveStatus)) { return true; }
+        HeldKey=Key;
+        const auto Mode=static_cast<MDHoldSnap::EMode>(I+1);
+        if (Mode==MDHoldSnap::EMode::Floor || Mode==MDHoldSnap::EMode::Grid)
+        { MDHoldSnap::ApplyImmediate(Actor,Mode,LiveStatus); return true; }
+        if (!MDPlacement::RootMesh(Actor))
+        { LiveStatus=MDPlacement::Text(TEXT("메시가 루트인 액터를 선택하세요."),TEXT("Select an actor with a static mesh root.")); return true; }
+        Source=Actor; Held=Mode;
+        LiveStatus=MDPlacement::Text(TEXT("키를 누른 채 다른 대상 액터를 클릭하세요. Esc: 취소"),TEXT("Keep the key held and click another actor. Esc: cancel."));
+        return true;
     }
     return false;
 }
-bool FMDHoldSnapMode::StartTracking(FEditorViewportClient* Client,FViewport*)
+bool FMDHoldSnapMode::HandleClick(FEditorViewportClient* Client,HHitProxy* HitProxy,const FViewportClick& Click)
 {
-    if (Client && Client->GetWidgetMode()==UE::Widget::WM_Translate && Client->GetCurrentWidgetAxis()!=EAxisList::None)
-    { DragClient=Client; bCanceled=false; Session.Begin(MDPlacement::SelectedActor()); }
-    return false;
-}
-bool FMDHoldSnapMode::EndTracking(FEditorViewportClient*,FViewport*)
-{ Session.Finish(); DragClient=nullptr; bCanceled=false; LiveStatus=FText::GetEmpty(); return false; }
-bool FMDHoldSnapMode::InputDelta(FEditorViewportClient* Client,FViewport*,FVector& Drag,FRotator& Rot,FVector& Scale)
-{
-    if (Client!=DragClient) { return false; }
-    if (bCanceled) { return true; }
-    if (Held==MDHoldSnap::EMode::None || !Rot.IsNearlyZero() || !Scale.IsNearlyZero()) { return false; }
-    const FInputChord CurrentChord(HeldKey,Client->IsShiftPressed(),Client->IsCtrlPressed(),Client->IsAltPressed(),Client->IsCmdPressed());
-    if (!FHoldCommands::Get().All()[static_cast<int32>(Held)-1]->HasActiveChord(CurrentChord)) { Release(); return false; }
-    if (Client->IsAltPressed()) { Release(); return false; } // Never interfere with Alt-duplicate.
-    if (Drag.IsNearlyZero()) { return true; }
-    if (!Session.Move(Held,Drag,MDPlacement::SessionOptions(),LiveStatus)) { const FText Reason=LiveStatus; Release(); LiveStatus=Reason; bCanceled=true; }
-    return true;
+    if (Held==MDHoldSnap::EMode::None || Click.GetKey()!=EKeys::LeftMouseButton) { return false; }
+    if (!Source.IsValid() || Source.Get()!=MDPlacement::SelectedActor()) { Release(); return false; }
+    const FInputChord Chord(HeldKey,Client->IsShiftPressed(),Client->IsCtrlPressed(),Client->IsAltPressed(),Client->IsCmdPressed());
+    if (!FHoldCommands::Get().All()[static_cast<int32>(Held)-1]->HasActiveChord(Chord)) { Release(); return false; }
+    AActor* Target=HitProxy && HitProxy->IsA(HActor::StaticGetType()) ? static_cast<HActor*>(HitProxy)->Actor.Get() : nullptr;
+    MDHoldSnap::ApplyTarget(Source.Get(),Target,Held,Click.GetOrigin(),Click.GetDirection(),LiveStatus);
+    return true; // Consume target selection; keep the original moving actor selected.
 }
 bool FMDHoldSnapMode::LostFocus(FEditorViewportClient*,FViewport*) { Release(); return false; }
 void FMDHoldSnapMode::Tick(FEditorViewportClient* Client,float DeltaTime)
 {
     FEdMode::Tick(Client,DeltaTime);
-    if (Held!=MDHoldSnap::EMode::None && (!FSlateApplication::Get().IsActive() || GEditor->PlayWorld)) { Release(); }
+    if (HeldKey.IsValid() && (!FSlateApplication::Get().IsActive() || GEditor->PlayWorld || (Source.IsValid() && Source.Get()!=MDPlacement::SelectedActor()))) { Release(); }
 }
 void FMDHoldSnapMode::DrawHUD(FEditorViewportClient*,FViewport*,const FSceneView*,FCanvas* Canvas)
 {
@@ -269,5 +228,5 @@ void FMDHoldSnapMode::DrawHUD(FEditorViewportClient*,FViewport*,const FSceneView
         Item.EnableShadow(FLinearColor::Black); Canvas->DrawItem(Item);
     }
 }
-void FMDHoldSnapMode::Exit() { Release(); Session.Finish(); DragClient=nullptr; FEdMode::Exit(); }
+void FMDHoldSnapMode::Exit() { Release(); FEdMode::Exit(); }
 #undef LOCTEXT_NAMESPACE

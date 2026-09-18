@@ -1,7 +1,9 @@
 #include "MDPlacementTools.h"
+#include "MDHoldSnap.h"
 
 #include "MDWorkspacePreferences.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/InstancedStaticMeshComponent.h"
 #include "DrawDebugHelpers.h"
 #include "Editor.h"
 #include "Engine/Selection.h"
@@ -64,14 +66,20 @@ namespace MDPlacement
         return true;
     }
 
+    UStaticMeshComponent* RootMesh(AActor* Actor)
+    {
+        auto* Mesh=Actor ? Cast<UStaticMeshComponent>(Actor->GetRootComponent()) : nullptr;
+        return Mesh && !Mesh->IsA<UInstancedStaticMeshComponent>() ? Mesh : nullptr;
+    }
+
     bool ExtractEdges(AActor* Actor, TArray<FEdge>& Out, FText& Reason)
     {
         Out.Reset();
-        const AStaticMeshActor* MeshActor = Cast<AStaticMeshActor>(Actor);
-        const UStaticMeshComponent* Component = MeshActor ? MeshActor->GetStaticMeshComponent() : nullptr;
+        AActor* MeshActor = Actor;
+        const UStaticMeshComponent* Component = RootMesh(MeshActor);
         const UStaticMesh* Mesh = Component ? Component->GetStaticMesh() : nullptr;
         if (!Mesh || MeshActor->GetRootComponent() != Component)
-        { Reason = Text(TEXT("모서리 스냅은 StaticMeshActor를 지원합니다."), TEXT("Edge snap requires a StaticMeshActor with its mesh as root.")); return false; }
+        { Reason = Text(TEXT("모서리 스냅은 StaticMeshComponent가 루트인 액터를 지원합니다."), TEXT("Edge snap requires an actor with a static mesh root.")); return false; }
         const FMeshDescription* Description = Mesh->GetMeshDescription(0);
         if (!Description || Description->Triangles().Num() > 50000)
         { Reason = Text(TEXT("원본 LOD0가 없거나 50,000개 삼각형 제한을 초과했습니다."), TEXT("Missing source LOD0, or more than 50,000 triangles.")); return false; }
@@ -173,8 +181,8 @@ namespace MDPlacement
     { if (Object && Object->IsA<UStaticMesh>()) { Reset(); } }
     bool FGeometryCache::Read(AActor* Actor,TArray<FEdge>& Out,FText& Reason)
     {
-        auto* MeshActor=Cast<AStaticMeshActor>(Actor);
-        auto* Component=MeshActor ? MeshActor->GetStaticMeshComponent() : nullptr;
+        auto* MeshActor=Actor;
+        auto* Component=RootMesh(MeshActor);
         UStaticMesh* Mesh=Component ? Component->GetStaticMesh() : nullptr;
         if (!Mesh || Component!=Actor->GetRootComponent()) { return ExtractEdges(Actor,Out,Reason); }
         const FTransform Transform=Actor->GetActorTransform();
@@ -257,9 +265,9 @@ namespace MDPlacement
         else
         {
             const FBox Bounds = SearchBounds.ExpandBy(Options.Distance);
-            for (TActorIterator<AStaticMeshActor> It(Source->GetWorld()); It; ++It)
+            for (TActorIterator<AActor> It(Source->GetWorld()); It; ++It)
             {
-                if (*It != Source && !It->IsHiddenEd() && Bounds.Intersect(It->GetComponentsBoundingBox(true))) { Targets.Add(*It); }
+                if (*It != Source && Cast<UStaticMeshComponent>(It->GetRootComponent()) && !It->IsHiddenEd() && Bounds.Intersect(It->GetComponentsBoundingBox(true))) { Targets.Add(*It); }
             }
             Targets.Sort([SourceTransform](const AActor& A, const AActor& B) {
                 const double DA = FVector::DistSquared(A.GetActorLocation(), SourceTransform.GetLocation());
@@ -283,6 +291,7 @@ namespace MDPlacement
                     if (++Comparisons > 2000000) { bLimited = true; break; }
                     FMatch Match;
                     if (!MatchEdges(S, T, SourceTransform, Options, Match, SourceOverride != nullptr)) { continue; }
+                    if (Options.TargetPoint.IsSet()) { Match.Score=FVector::Distance(Match.TargetAnchor,Options.TargetPoint.GetValue())*1000+Match.Distance; }
                     FCandidate Candidate;
                     static_cast<FMatch&>(Candidate) = Match;
                     Candidate.Source = Source; Candidate.Target = Target;
@@ -353,6 +362,8 @@ namespace MDPlacement
         if (!CanMove(Actor, Result)) { return false; }
         if (Action == EQuickAction::Focus)
         { GEditor->MoveViewportCamerasToActor(*Actor, false); return true; }
+        if (Action==EQuickAction::Floor || Action==EQuickAction::Grid)
+        { return MDHoldSnap::ApplyImmediate(Actor,Action==EQuickAction::Floor ? MDHoldSnap::EMode::Floor : MDHoldSnap::EMode::Grid,Result); }
         const auto Commands = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor")).GetGlobalLevelEditorActions();
         const FLevelEditorCommands& BuiltIn = FLevelEditorCommands::Get();
         const TSharedPtr<FUICommandInfo> Command = Action == EQuickAction::Floor ? BuiltIn.SnapToFloor :

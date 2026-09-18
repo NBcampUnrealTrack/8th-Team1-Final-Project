@@ -3,6 +3,8 @@
 #include "EditorModeManager.h"
 #include "EditorModes.h"
 #include "LevelEditorViewport.h"
+#include "EngineUtils.h"
+#include "SceneView.h"
 #include "Framework/Commands/InputBindingManager.h"
 #include "Framework/Commands/UICommandInfo.h"
 #include "UnrealEdGlobals.h"
@@ -125,176 +127,103 @@ bool FMDEdgeApplyTest::RunTest(const FString& Parameters)
     World->GetOutermost()->SetDirtyFlag(bWasDirty);
     return true;
 }
-IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMDHoldSnapTest, "MDMultiUser.Placement.HoldDrag", EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
-bool FMDHoldSnapTest::RunTest(const FString& Parameters)
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMDClickSnapTest,"MDMultiUser.Placement.ClickSnap",EAutomationTestFlags::EditorContext|EAutomationTestFlags::EngineFilter)
+bool FMDClickSnapTest::RunTest(const FString& Parameters)
 {
     using namespace MDHoldSnap;
     if (!FParse::Param(FCommandLine::Get(),TEXT("MDPlacementTest")))
-    { AddWarning(TEXT("HoldDrag requires isolated editor with -MDPlacementTest.")); return true; }
+    { AddWarning(TEXT("ClickSnap requires isolated editor with -MDPlacementTest.")); return true; }
     UWorld* World=GEditor->GetEditorWorldContext().World();
     const bool bWasDirty=World->GetOutermost()->IsDirty();
-    FActorSpawnParameters Params; Params.ObjectFlags=RF_Transactional;
-    AStaticMeshActor* Source=World->SpawnActor<AStaticMeshActor>(Params);
-    AStaticMeshActor* Target=World->SpawnActor<AStaticMeshActor>(Params);
     UStaticMesh* Cube=LoadObject<UStaticMesh>(nullptr,TEXT("/Engine/BasicShapes/Cube.Cube"));
-    Source->GetStaticMeshComponent()->SetStaticMesh(Cube); Target->GetStaticMeshComponent()->SetStaticMesh(Cube);
-    Source->SetActorLocation(FVector(0,0,10000)); Target->SetActorLocation(FVector(120,0,10000));
+    FActorSpawnParameters Params; Params.ObjectFlags=RF_Transactional;
+    auto MakeActor=[&]() {
+        AActor* Actor=World->SpawnActor<AActor>(Params);
+        auto* Mesh=NewObject<UStaticMeshComponent>(Actor,NAME_None,RF_Transactional);
+        Actor->AddInstanceComponent(Mesh); Actor->SetRootComponent(Mesh);
+        Mesh->SetStaticMesh(Cube); Mesh->RegisterComponent(); return Actor;
+    };
+    AActor* Source=MakeActor(); AActor* Target=MakeActor(); AActor* Ceiling=MakeActor();
+    Source->SetActorLocation(FVector(20000,0,10250));
+    Target->SetActorLocation(FVector(20000,0,9950)); Target->SetActorScale3D(FVector(10,10,1));
+    Ceiling->SetActorLocation(FVector(20000,0,10400)); Ceiling->SetActorScale3D(FVector(10,10,1));
     GEditor->SelectNone(false,true); GEditor->SelectActor(Source,true,true);
     const FTransform Before=Source->GetActorTransform();
-    MDPlacement::FOptions Options; Options.Distance=15;
     FText Result;
-    {
-        FDrag Drag; Drag.Begin(Source);
-        TestTrue(TEXT("Hold moves to nearby edge"),Drag.Move(EMode::Endpoint,FVector(10,0,0),Options,Result));
-        TestTrue(TEXT("Snap at 20 cm"),FMath::IsNearlyEqual(Source->GetActorLocation().X,20.));
-        Drag.Move(EMode::Endpoint,FVector(1,0,0),Options,Result);
-        TestTrue(TEXT("Subthreshold movement stays snapped"),FMath::IsNearlyEqual(Source->GetActorLocation().X,20.));
-        Drag.Move(EMode::Endpoint,FVector(-30,0,0),Options,Result);
-        TestTrue(TEXT("Raw drag accumulator can pull free without sticking"),FMath::IsNearlyEqual(Source->GetActorLocation().X,-19.));
-        Drag.Finish();
-        GEditor->UndoTransaction();
-        TestTrue(TEXT("Whole held drag has one undo"),Source->GetActorTransform().Equals(Before,.001));
-    }
-    {
-        FDrag Drag; Drag.Begin(Source); Drag.Move(EMode::Endpoint,FVector(10,0,0),Options,Result);
-        Drag.Cancel();
-        TestTrue(TEXT("Escape restores drag beginning"),Source->GetActorTransform().Equals(Before,.001));
-    }
-    // Exactly aligned anchors must stay eligible during a held drag, even with a wide radius.
-    {
-        MDPlacement::FOptions WideOptions; WideOptions.Distance=100;
-        FTransform Aligned=Before; Aligned.SetLocation(FVector(20,0,10000));
-        FTransform Stable;
-        TestTrue(TEXT("Already aligned endpoint remains a snap candidate"),Solve(Source,Aligned,EMode::Endpoint,WideOptions,Stable,Result));
-        TestTrue(TEXT("Exact endpoint does not jump to another edge"),Stable.Equals(Aligned,.001));
-        TestTrue(TEXT("Already aligned midpoint remains a snap candidate"),Solve(Source,Aligned,EMode::Midpoint,WideOptions,Stable,Result));
-        TestTrue(TEXT("Exact midpoint does not jump to another edge"),Stable.Equals(Aligned,.001));
-    }
-    FTransform Desired=Before; Desired.SetLocation(FVector(3,7,10000)); FTransform Solved;
-    Solve(Source,Desired,EMode::Grid,Options,Solved,Result);
-    TestTrue(TEXT("Grid uses current editor interval"),Solved.GetLocation().Equals(Desired.GetLocation().GridSnap(GEditor->GetGridSize())));
-    {
-        AStaticMeshActor* Floor=World->SpawnActor<AStaticMeshActor>(Params);
-        Floor->GetStaticMeshComponent()->SetStaticMesh(Cube);
-        Floor->SetActorLocation(FVector(0,0,9950)); Floor->SetActorScale3D(FVector(10,10,1));
-        MDPlacement::FOptions SurfaceOptions; SurfaceOptions.Distance=300;
-        FTransform Above=Before; Above.SetLocation(FVector(0,0,10250));
-        TestTrue(TEXT("Held floor finds collision surface"),Solve(Source,Above,EMode::Floor,SurfaceOptions,Solved,Result));
-        TestTrue(TEXT("Held floor places bottom exactly on surface"),FMath::IsNearlyEqual(Solved.GetLocation().Z,10050.,.01));
-        SurfaceOptions.Distance=20;
-        TestFalse(TEXT("Held floor respects distance"),Solve(Source,Above,EMode::Floor,SurfaceOptions,Solved,Result));
-        SurfaceOptions.Distance=300;
-        Floor->SetActorRotation(FRotator(0,0,10));
-        TestTrue(TEXT("Held slope finds angled surface"),Solve(Source,Above,EMode::Slope,SurfaceOptions,Solved,Result));
-        TestTrue(TEXT("Held slope up matches normal"),Solved.GetRotation().GetUpVector().Equals(Floor->GetActorQuat().GetUpVector(),1.e-4));
-        World->DestroyActor(Floor);
-    }
-    {
-        MDPlacement::FGeometryCache Cache;
-        TArray<MDPlacement::FEdge> Cached,Fresh;
-        Cache.Read(Source,Cached,Result);
-        Source->SetActorTransform(FTransform(FRotator(10,25,0),FVector(20,30,10000),FVector(1)));
-        Cache.Read(Source,Cached,Result); MDPlacement::ExtractEdges(Source,Fresh,Result);
-        TestEqual(TEXT("Cached topology count matches fresh extraction"),Cached.Num(),Fresh.Num());
-        for (const auto& E:Fresh)
-        { TestTrue(TEXT("Cached edges rebase after actor motion"),Cached.ContainsByPredicate([&](const auto& C){return (C.A.Equals(E.A,.001)&&C.B.Equals(E.B,.001))||(C.B.Equals(E.A,.001)&&C.A.Equals(E.B,.001));})); }
-        Source->SetActorTransform(Before);
-    }
-    // Native editor routing, including key-up during the same drag and its transaction.
+    TestFalse(TEXT("Blueprint-layout source is not StaticMeshActor"),Source->IsA<AStaticMeshActor>());
+    TArray<MDPlacement::FEdge> Edges;
+    TestTrue(TEXT("Blueprint root mesh exposes edges"),MDPlacement::ExtractEdges(Source,Edges,Result));
+    TestEqual(TEXT("Blueprint cube has twelve edges"),Edges.Num(),12);
     auto& Modes=GLevelEditorModeTools();
-    TestTrue(TEXT("Hold mode active alongside selection mode"),Modes.IsModeActive(FMDHoldSnapMode::ID));
+    TestTrue(TEXT("Click mode active"),Modes.IsModeActive(FMDHoldSnapMode::ID));
     FLevelEditorViewportClient* Client=nullptr;
-    for (auto* C:GEditor->GetLevelViewportClients()) { if (C && C->Viewport && C->GetWorld()==World) { Client=C; break; } }
-    if (TestNotNull(TEXT("Native level viewport available"),Client))
+    for (auto* C:GEditor->GetLevelViewportClients()) { if (C && C->Viewport && C->GetWorld()==World && C->IsPerspective() && C->Viewport->GetSizeXY().X>0 && C->Viewport->GetSizeXY().Y>0) { Client=C; break; } }
+    if (TestNotNull(TEXT("Native viewport"),Client))
     {
         const auto OldWidget=Client->GetWidgetMode();
-        const auto OldAxis=Client->GetCurrentWidgetAxis();
-        const auto OldOptions=MDPlacement::SessionOptions(); MDPlacement::SessionOptions()=Options;
-        Client->SetWidgetMode(UE::Widget::WM_Translate); Client->SetCurrentWidgetAxis(EAxisList::X);
-        TestTrue(TEXT("Key down enters hold mode"),Modes.InputKey(Client,Client->Viewport,EKeys::B,IE_Pressed,false));
-        Client->TrackingStarted(FInputEventState(Client->Viewport,EKeys::LeftMouseButton,IE_Pressed),true,false);
-        FVector Delta(10,0,0), Scale=FVector::ZeroVector; FRotator Rot=FRotator::ZeroRotator;
-        Client->InputWidgetDelta(Client->Viewport,EAxisList::X,Delta,Rot,Scale);
-        TestTrue(TEXT("Native gizmo path snaps"),FMath::IsNearlyEqual(Source->GetActorLocation().X,20.));
-        TestTrue(TEXT("Key up exits hold mode"),Modes.InputKey(Client,Client->Viewport,EKeys::B,IE_Released,false));
-        Delta=FVector(5,0,0); Client->InputWidgetDelta(Client->Viewport,EAxisList::X,Delta,Rot,Scale);
-        TestTrue(TEXT("Same drag resumes ordinary movement on key release"),FMath::IsNearlyEqual(Source->GetActorLocation().X,25.));
-        Client->TrackingStopped();
-        GEditor->UndoTransaction();
-        TestTrue(TEXT("Native mixed drag has one undo"),Source->GetActorTransform().Equals(Before,.001));
-        Modes.InputKey(Client,Client->Viewport,EKeys::B,IE_Pressed,false);
-        Client->TrackingStarted(FInputEventState(Client->Viewport,EKeys::LeftMouseButton,IE_Pressed),true,false);
-        Delta=FVector(10,0,0); Client->InputWidgetDelta(Client->Viewport,EAxisList::X,Delta,Rot,Scale);
-        TestTrue(TEXT("Esc consumed only for snap drag"),Modes.InputKey(Client,Client->Viewport,EKeys::Escape,IE_Pressed,false));
-        TestTrue(TEXT("Native Esc restores drag start"),Source->GetActorTransform().Equals(Before,.001));
-        Client->TrackingStopped();
-        Modes.InputKey(Client,Client->Viewport,EKeys::B,IE_Released,false);
-        // Escape must also undo the native portion after releasing the snap key.
-        Modes.InputKey(Client,Client->Viewport,EKeys::B,IE_Pressed,false);
-        Client->TrackingStarted(FInputEventState(Client->Viewport,EKeys::LeftMouseButton,IE_Pressed),true,false);
-        Delta=FVector(10,0,0); Client->InputWidgetDelta(Client->Viewport,EAxisList::X,Delta,Rot,Scale);
-        Modes.InputKey(Client,Client->Viewport,EKeys::B,IE_Released,false);
-        Delta=FVector(5,0,0); Client->InputWidgetDelta(Client->Viewport,EAxisList::X,Delta,Rot,Scale);
-        TestTrue(TEXT("Mixed cancellation fixture has native movement"),FMath::IsNearlyEqual(Source->GetActorLocation().X,25.));
-        TestTrue(TEXT("Escape handles released-key mixed drag"),Modes.InputKey(Client,Client->Viewport,EKeys::Escape,IE_Pressed,false));
-        TestTrue(TEXT("Mixed Escape restores original drag start"),Source->GetActorTransform().Equals(Before,.001));
-        Client->TrackingStopped();
-        // Blueprint walls typically derive from Actor and own a StaticMeshComponent root.
-        // Exercise that layout through the actual U-key/native gizmo path.
+        const FVector OldLocation=Client->GetViewLocation(); const FRotator OldRotation=Client->GetViewRotation();
+        Client->SetWidgetMode(UE::Widget::WM_Rotate);
+        TestTrue(TEXT("U press works without move gizmo"),Modes.InputKey(Client,Client->Viewport,EKeys::U,IE_Pressed,false));
+        TestTrue(TEXT("U press alone drops to floor, ignores ceiling"),FMath::IsNearlyEqual(Source->GetActorLocation().Z,10050.,.01));
+        TestTrue(TEXT("U preserves XY"),FVector2D(Source->GetActorLocation()).Equals(FVector2D(Before.GetLocation()),.001));
+        TestTrue(TEXT("U preserves rotation and scale"),Source->GetActorQuat().Equals(Before.GetRotation()) && Source->GetActorScale3D().Equals(Before.GetScale3D()));
+        TestTrue(TEXT("U autorepeat consumed"),Modes.InputKey(Client,Client->Viewport,EKeys::U,IE_Repeat,false));
+        Modes.InputKey(Client,Client->Viewport,EKeys::U,IE_Released,false);
+        GEditor->UndoTransaction(); TestTrue(TEXT("One Undo restores U"),Source->GetActorTransform().Equals(Before,.001));
+        Source->SetActorLocation(FVector(20003,7,10253));
+        const FTransform GridBefore=Source->GetActorTransform();
+        Modes.InputKey(Client,Client->Viewport,EKeys::Y,IE_Pressed,false);
+        TestTrue(TEXT("Y press snaps grid"),Source->GetActorLocation().Equals(GridBefore.GetLocation().GridSnap(GEditor->GetGridSize()),.001));
+        Modes.InputKey(Client,Client->Viewport,EKeys::Y,IE_Released,false);
+        if (!Source->GetActorTransform().Equals(GridBefore,.001)) { GEditor->UndoTransaction(); }
+        Source->SetActorTransform(Before);
+        World->DestroyActor(Ceiling); Ceiling=nullptr;
+        Target->SetActorRotation(FRotator(0,0,15));
+        Client->SetViewLocation(FVector(20000,0,12000)); Client->SetViewRotation(FRotator(-90,0,0));
+        FSceneViewFamilyContext Family(FSceneViewFamily::ConstructionValues(Client->Viewport,World->Scene,Client->EngineShowFlags).SetRealtimeUpdate(true));
+        FSceneView* View=Client->CalcSceneView(&Family);
+        const FIntPoint Size=Client->Viewport->GetSizeXY();
+        const FViewportClick Click(View,Client,EKeys::LeftMouseButton,IE_Pressed,Size.X/2,Size.Y/2);
+        HActor Proxy(Target,Target->GetRootComponent() ? Cast<UPrimitiveComponent>(Target->GetRootComponent()) : nullptr);
+        Modes.InputKey(Client,Client->Viewport,EKeys::I,IE_Pressed,false);
+        TestTrue(TEXT("I waits for click without moving"),Source->GetActorTransform().Equals(Before,.001));
+        TestTrue(TEXT("Native I click consumed"),Modes.HandleClick(Client,&Proxy,Click));
+        AddInfo(FString::Printf(TEXT("I click: %s; origin=%s direction=%s source=%s"),*Status().ToString(),*Click.GetOrigin().ToString(),*Click.GetDirection().ToString(),*Source->GetActorLocation().ToString()));
+        TestTrue(TEXT("I keeps source selected"),MDPlacement::SelectedActor()==Source);
+        TestTrue(TEXT("I aligns up with clicked slope"),Source->GetActorQuat().GetUpVector().Equals(Target->GetActorQuat().GetUpVector(),.001));
+        TestTrue(TEXT("I lands near clicked point, not another actor"),FVector::Distance(Source->GetActorLocation(),Target->GetActorLocation())<150);
+        const FTransform Sloped=Source->GetActorTransform();
+        Modes.HandleClick(Client,&Proxy,Click);
+        TestTrue(TEXT("Repeated I click stable"),Source->GetActorTransform().Equals(Sloped,.001));
+        Modes.InputKey(Client,Client->Viewport,EKeys::I,IE_Released,false);
+        GEditor->UndoTransaction(); TestTrue(TEXT("One Undo restores I"),Source->GetActorTransform().Equals(Before,.001));
+        Target->SetActorTransform(FTransform(FQuat::Identity,FVector(20000,0,10000),FVector(1)));
+        for (FKey Key:{EKeys::B,EKeys::N,EKeys::J})
         {
-            AActor* RootMeshActor=World->SpawnActor<AActor>(Params);
-            UStaticMeshComponent* RootMesh=NewObject<UStaticMeshComponent>(RootMeshActor,NAME_None,RF_Transactional);
-            RootMeshActor->AddInstanceComponent(RootMesh);
-            RootMeshActor->SetRootComponent(RootMesh);
-            RootMesh->SetStaticMesh(Cube); RootMesh->RegisterComponent();
-            RootMeshActor->SetActorLocation(FVector(20000,0,10250));
-            AStaticMeshActor* Support=World->SpawnActor<AStaticMeshActor>(Params);
-            Support->GetStaticMeshComponent()->SetStaticMesh(Cube);
-            Support->SetActorLocation(FVector(20000,0,9950)); Support->SetActorScale3D(FVector(10,10,1));
-            GEditor->SelectNone(false,true); GEditor->SelectActor(RootMeshActor,true,true);
-            const FTransform RootBefore=RootMeshActor->GetActorTransform();
-            TestFalse(TEXT("Blueprint-layout fixture is not a StaticMeshActor"),RootMeshActor->IsA<AStaticMeshActor>());
-            MDPlacement::SessionOptions().Distance=300;
-            TestTrue(TEXT("U arms for an Actor with static mesh root"),Modes.InputKey(Client,Client->Viewport,EKeys::U,IE_Pressed,false));
-            TestTrue(TEXT("U alone leaves actor unchanged"),RootMeshActor->GetActorTransform().Equals(RootBefore));
-            Client->TrackingStarted(FInputEventState(Client->Viewport,EKeys::LeftMouseButton,IE_Pressed),true,false);
-            Delta=FVector(5,0,0); Client->InputWidgetDelta(Client->Viewport,EAxisList::X,Delta,Rot,Scale);
-            TestTrue(TEXT("U native drag drops root-mesh actor to floor"),FMath::IsNearlyEqual(RootMeshActor->GetActorLocation().Z,10050.,.01));
-            Modes.InputKey(Client,Client->Viewport,EKeys::U,IE_Released,false);
-            Client->TrackingStopped();
-            GEditor->UndoTransaction();
-            TestTrue(TEXT("One undo restores root-mesh actor"),RootMeshActor->GetActorTransform().Equals(RootBefore,.001));
-            Support->SetActorRotation(FRotator(0,0,10));
-            TestTrue(TEXT("I supports root-mesh actor slope solve"),Solve(RootMeshActor,RootBefore,EMode::Slope,MDPlacement::SessionOptions(),Solved,Result));
-            TestTrue(TEXT("Root-mesh actor slope aligns up"),Solved.GetRotation().GetUpVector().Equals(Support->GetActorQuat().GetUpVector(),1.e-4));
-            GEditor->SelectNone(false,true);
-            World->DestroyActor(RootMeshActor); World->DestroyActor(Support);
-            GEditor->SelectActor(Source,true,true);
-            MDPlacement::SessionOptions()=Options;
+            Source->SetActorTransform(FTransform(Key==EKeys::J ? FRotator(0,30,0) : FRotator::ZeroRotator,FVector(21200,0,10000),FVector(1)));
+            const FTransform EdgeBefore=Source->GetActorTransform();
+            Modes.InputKey(Client,Client->Viewport,Key,IE_Pressed,false);
+            TestTrue(TEXT("Edge key alone does not move"),Source->GetActorTransform().Equals(EdgeBefore,.001));
+            TestTrue(TEXT("Native edge target click consumed"),Modes.HandleClick(Client,&Proxy,Click));
+            TestFalse(*FString::Printf(TEXT("%s click moves distant Blueprint source"),*Key.ToString()),Source->GetActorTransform().Equals(EdgeBefore,.001));
+            TestTrue(TEXT("Edge target unchanged"),Target->GetActorLocation().Equals(FVector(20000,0,10000)));
+            TestTrue(TEXT("Edge click preserves selection"),MDPlacement::SelectedActor()==Source);
+            Modes.InputKey(Client,Client->Viewport,Key,IE_Released,false);
+            GEditor->UndoTransaction(); TestTrue(TEXT("One Undo restores edge click"),Source->GetActorTransform().Equals(EdgeBefore,.001));
         }
-        Client->SetCurrentWidgetAxis(EAxisList::None);
-        Client->SetWidgetModeOverride(UE::Widget::WM_Rotate);
-        TestEqual(TEXT("Rotation widget override selected"),Client->GetWidgetMode(),UE::Widget::WM_Rotate);
-        auto* HoldMode=Modes.GetActiveMode(FMDHoldSnapMode::ID);
-        if (HoldMode) { TestFalse(TEXT("Rotation gizmo does not arm hold snap"),HoldMode->InputKey(Client,Client->Viewport,EKeys::B,IE_Pressed)); }
-        Client->SetWidgetModeOverride(UE::Widget::WM_None);
-        Client->SetWidgetMode(UE::Widget::WM_Translate);
-        Modes.InputKey(Client,Client->Viewport,EKeys::B,IE_Pressed,false);
+        Source->SetActorTransform(Before);
+        Modes.InputKey(Client,Client->Viewport,EKeys::I,IE_Pressed,false);
+        Modes.InputKey(Client,Client->Viewport,EKeys::Escape,IE_Pressed,false);
         auto* Mode=Modes.GetActiveMode(FMDHoldSnapMode::ID);
-        if (Mode) { Mode->LostFocus(Client,Client->Viewport); }
-        TestTrue(TEXT("Focus loss clears held mode"),MDHoldSnap::Status().IsEmpty());
-        Client->SetCurrentWidgetAxis(OldAxis); Client->SetWidgetMode(OldWidget); MDPlacement::SessionOptions()=OldOptions;
+        TestFalse(TEXT("Esc cancels target interception"),Mode->HandleClick(Client,&Proxy,Click));
+        TestTrue(TEXT("Canceled action unchanged"),Source->GetActorTransform().Equals(Before,.001));
+        Modes.InputKey(Client,Client->Viewport,EKeys::I,IE_Pressed,false); Mode->LostFocus(Client,Client->Viewport);
+        TestTrue(TEXT("Focus loss clears pending click"),Status().IsEmpty());
+        TestFalse(TEXT("No floor leaves actor unchanged"),ApplyImmediate(Target,EMode::Floor,Result));
+        TestTrue(TEXT("Invalid target refuses action"),!ApplyTarget(Source,Source,EMode::Slope,FVector::ZeroVector,FVector::DownVector,Result));
+        Client->SetWidgetMode(OldWidget); Client->SetViewLocation(OldLocation); Client->SetViewRotation(OldRotation);
     }
-    // Audit only contexts used by the ordinary level viewport, rather than unrelated asset editors.
-    for (const FName Context : {FName("LevelEditor"),FName("EditorViewport"),FName("GenericCommands")})
-    {
-        for (const FKey Key : {EKeys::B,EKeys::N,EKeys::J,EKeys::U,EKeys::I,EKeys::Y})
-        {
-            const auto Conflict=FInputBindingManager::Get().GetCommandInfoFromInputChord(Context,FInputChord(Key),false);
-            if (Conflict) { AddWarning(FString::Printf(TEXT("Shortcut conflict: %s %s"),*Key.ToString(),*Conflict->GetCommandName().ToString())); }
-        }
-    }
-    GEditor->SelectNone(false,true); World->DestroyActor(Source); World->DestroyActor(Target);
+    GEditor->SelectNone(false,true); World->DestroyActor(Source); World->DestroyActor(Target); if (Ceiling) { World->DestroyActor(Ceiling); }
     World->GetOutermost()->SetDirtyFlag(bWasDirty);
     return true;
 }

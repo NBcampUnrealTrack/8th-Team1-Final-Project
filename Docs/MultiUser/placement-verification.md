@@ -77,3 +77,14 @@ UE 5.8 Win64 Development 전체 에디터 빌드 성공. 별도 NullRHI 에디�
 - HoldDrag에 같은 루트 구조의 비-StaticMeshActor 검증 추가: U 준비, 키만 누르면 무변경, 실제 레벨 뷰포트 입력 경로의 드래그 바닥 스냅, 한 번의 Undo 복구, I 경사 법선 정렬.
 - 이 회귀 검증은 프로젝트 Blueprint 자체를 로드하지 않는 Actor fixture입니다. 물리 키보드/마우스 동시 입력과 팀원 동시 편집은 검증하지 않았습니다.
 - 원본 결과는 로컬 `.revvy/worktree-backups/snap-blueprint-qa-20260918/TestResults`에 보관합니다.
+## 대상 클릭 UX 전환 — 2026-09-18
+
+사용자 요청으로 기즈모 드래그 스냅을 키+대상 클릭으로 교체했습니다. B/N/J/I를 누른 채 다른 액터를 클릭하면 원래 선택한 액터만 한 번 이동하며 Ctrl+Z 한 번으로 복구됩니다. U는 XY·회전·크기를 유지하고 월드 -Z 바닥에 즉시 붙입니다. Y도 키 한 번으로 그리드에 맞춥니다. 키 해제/Esc/포커스 상실은 대상 지정 대기를 취소합니다.
+
+원본과 대상 모두 StaticMeshComponent 루트 Blueprint 구조를 지원합니다. I는 클릭한 대상 컴포넌트의 충돌 표면만 사용하며, 반복 클릭 위치가 안정적으로 유지됩니다. B/N/J는 명시적으로 클릭한 대상으로만 계산하고 클릭 지점 가까운 모서리를 우선합니다. 대상 클릭에는 주변 자동 탐색의 거리 제한을 적용하지 않습니다. 메시 복잡도 제한·편집 잠금·부착 관계 보호는 유지합니다.
+
+독립 HostProject Win64 Development 빌드 성공. D3D12 렌더링 에디터에서 EdgeMath/MeshFeatures/ApplyUndo/ClickSnap 4개 성공, 테스트 경고/실패 0. U 단독 키 입력 및 XY·회전·크기 보존, Y 입력, Blueprint 구조의 B/N/J/I 실제 에디터 키/클릭 경로, 원본 선택 유지, 반복 I 클릭 안정성, Undo, Esc/포커스 상실, 부적절한 대상 거부를 확인했습니다. 최초 I 테스트 실패는 비표시 직교 뷰 선택으로 발생한 테스트 카메라 문제였으며 표시된 원근 뷰로 교정했습니다.
+
+원본 보고서/로그: 로컬 `.revvy/worktree-backups/snap-blueprint-qa-20260918/ClickTests3`. 공유 요약은 placement-test-results.json. 테스트는 Blueprint와 같은 루트 구조의 Actor fixture이며 프로젝트 Blueprint 자체나 물리 키보드/마우스 동시 조작, 다중 사용자 경합, macOS는 검증하지 않았습니다. 이전 HoldDrag 절과 이미지는 과거 구현 기록입니다.
+
+사용자가 에디터를 종료한 뒤 실제 MarineDemolitionEditor Win64 Development 빌드도 성공했습니다. 테스트 세션 종료와 맵 재로드가 로그에서 확인됐으며 에디터 프로세스가 없는 상태에서 DLL을 갱신했습니다.
