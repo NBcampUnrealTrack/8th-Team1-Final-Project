@@ -2,7 +2,13 @@
   "date": "2026-09-18",
   "engine": "Unreal Engine 5.8",
   "platform": "Win64 Development / D3D12",
-  "workflow": "Select source, hold B/N/J/I, click target; press U/Y once",
+  "workflow": "U vertical drop; B held target click; Y grid only",
+  "disabled": [
+    "Midpoint (N)",
+    "Edge rotation (J)",
+    "Slope (I)",
+    "Extra focus button"
+  ],
   "succeeded": 4,
   "succeededWithWarnings": 0,
   "failed": 0,

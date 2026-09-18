@@ -29,17 +29,15 @@ namespace
     {
     public:
         FHoldCommands() : TCommands("MDHoldSnap", LOCTEXT("ClickContext", "Multi-User Placement"), NAME_None, FAppStyle::GetAppStyleSetName()) {}
-        TSharedPtr<FUICommandInfo> Endpoint, Midpoint, Rotate, Floor, Slope, Grid;
+        TSharedPtr<FUICommandInfo> Endpoint, Floor, Grid;
         virtual void RegisterCommands() override
         {
             UI_COMMAND(Endpoint, "Click: edge endpoint", "Hold the key and click a target actor to match edge endpoints.", EUserInterfaceActionType::Button, FInputChord(EKeys::B));
-            UI_COMMAND(Midpoint, "Click: edge midpoint", "Hold the key and click a target actor to match edge midpoints.", EUserInterfaceActionType::Button, FInputChord(EKeys::N));
-            UI_COMMAND(Rotate, "Click: edge rotation", "Hold the key and click a target actor to align edge direction and anchor.", EUserInterfaceActionType::Button, FInputChord(EKeys::J));
             UI_COMMAND(Floor, "Drop vertically", "Press once to drop straight down. XY, rotation and scale are unchanged.", EUserInterfaceActionType::Button, FInputChord(EKeys::U));
-            UI_COMMAND(Slope, "Click: slope", "Hold the key and click the target surface to place and align the actor.", EUserInterfaceActionType::Button, FInputChord(EKeys::I));
             UI_COMMAND(Grid, "Snap to grid", "Press once to snap the selected actor pivot to the editor grid.", EUserInterfaceActionType::Button, FInputChord(EKeys::Y));
         }
-        TArray<TSharedPtr<FUICommandInfo>> All() const { return {Endpoint,Midpoint,Rotate,Floor,Slope,Grid}; }
+        TArray<TPair<MDHoldSnap::EMode,TSharedPtr<FUICommandInfo>>> All() const
+        { return {{MDHoldSnap::EMode::Endpoint,Endpoint},{MDHoldSnap::EMode::Floor,Floor},{MDHoldSnap::EMode::Grid,Grid}}; }
     };
     bool CommitPlacement(AActor* Source, const FTransform& Transform, FText& Result)
     {
@@ -100,10 +98,10 @@ namespace MDHoldSnap
     {
         if (!FHoldCommands::IsRegistered()) { return FText::GetEmpty(); }
         TArray<FText> Keys;
-        for (const auto& Command:FHoldCommands::Get().All()) { Keys.Add(Command->GetActiveChord(EMultipleKeyBindingIndex::Primary)->GetInputText()); }
+        for (const auto& Command:FHoldCommands::Get().All()) { Keys.Add(Command.Value->GetActiveChord(EMultipleKeyBindingIndex::Primary)->GetInputText()); }
         return FText::Format(MDPlacement::Text(
-            TEXT("액터 선택 → 키를 누른 채 대상 클릭\n{0} 끝점 · {1} 중앙 · {2} 모서리 회전 · {4} 경사면\n한 번 누르기: {3} 수직 바닥 스냅 · {5} 그리드\n키 놓기 / Esc: 대기 취소 · Ctrl+Z: 실행 취소\nF: 선택 보기 · End: 기본 바닥 스냅"),
-            TEXT("Select actor > hold key > click target\n{0} Endpoint · {1} Midpoint · {2} Edge rotation · {4} Slope\nPress once: {3} Vertical drop · {5} Grid\nRelease / Esc: cancel targeting · Ctrl+Z: undo\nF: Frame selection · End: native floor snap")),Keys[0],Keys[1],Keys[2],Keys[3],Keys[4],Keys[5]);
+            TEXT("액터 선택 후\n{1} 한 번: 수직 바닥 스냅\n{0} 누른 채 대상 클릭: 모서리 끝점 맞춤\n{2} 한 번: 그리드 맞춤\n키 놓기 / Esc: 대기 취소 · Ctrl+Z: 실행 취소"),
+            TEXT("Select an actor\nPress {1}: vertical drop\nHold {0} + click target: edge endpoint\nPress {2}: grid snap\nRelease / Esc: cancel targeting · Ctrl+Z: undo")),Keys[0],Keys[1],Keys[2]);
     }
     bool ApplyImmediate(AActor* Source, EMode Mode, FText& Result)
     {
@@ -130,6 +128,7 @@ namespace MDHoldSnap
     }
     bool ApplyTarget(AActor* Source,AActor* Target,EMode Mode,const FVector& RayOrigin,const FVector& RayDirection,FText& Result)
     {
+        if (Mode!=EMode::Endpoint) { Result=MDPlacement::Text(TEXT("비활성화된 배치 기능입니다."),TEXT("This placement feature is disabled.")); return false; }
         if (!MDPlacement::CanMove(Source,Result)) { return false; }
         if (!IsValid(Target) || Target==Source || Target->GetWorld()!=Source->GetWorld() || Target->IsHiddenEd())
         { Result=MDPlacement::Text(TEXT("다른 대상 액터를 클릭하세요."),TEXT("Click a different target actor.")); return false; }
@@ -141,32 +140,11 @@ namespace MDHoldSnap
         FHitResult Hit;
         const bool bHit=TargetMesh->LineTraceComponent(Hit,RayOrigin,RayOrigin+RayDirection.GetSafeNormal()*1000000,
             FCollisionQueryParams(SCENE_QUERY_STAT(MDClickSurface),true,Source));
-        if (Mode==EMode::Slope)
-        {
-            if (!bHit || Hit.bStartPenetrating || Hit.ImpactNormal.Z<.1)
-            { Result=MDPlacement::Text(TEXT("충돌이 있는 경사면의 윗면을 클릭하세요."),TEXT("Click an upward-facing collision surface.")); return false; }
-            const FVector Normal=Hit.ImpactNormal.GetSafeNormal();
-            FTransform Transform=Before;
-            Transform.SetRotation((FQuat::FindBetweenNormals(Before.GetRotation().GetUpVector(),Normal)*Before.GetRotation()).GetNormalized());
-            const FBox Bounds=SourceMesh->GetStaticMesh()->GetBoundingBox();
-            double Support=TNumericLimits<double>::Max();
-            for (int32 I=0;I<8;++I)
-            {
-                const FVector Corner((I&1)?Bounds.Max.X:Bounds.Min.X,(I&2)?Bounds.Max.Y:Bounds.Min.Y,(I&4)?Bounds.Max.Z:Bounds.Min.Z);
-                Support=FMath::Min(Support,FVector::DotProduct(Transform.TransformVector(Corner),Normal));
-            }
-            const FVector Center=Transform.TransformVector(Bounds.GetCenter());
-            Transform.SetLocation(Hit.ImpactPoint-Center+Normal*(FVector::DotProduct(Center,Normal)-Support));
-            return CommitPlacement(Source,Transform,Result);
-        }
-        if (Mode!=EMode::Endpoint && Mode!=EMode::Midpoint && Mode!=EMode::Rotate) { return false; }
         MDPlacement::FOptions Options=MDPlacement::SessionOptions();
         // Explicitly clicking a target authorizes the distance to that target, not a nearby search radius.
         Options.Distance=FVector::Distance(Source->GetActorLocation(),Target->GetActorLocation())
             +Source->GetComponentsBoundingBox(true).GetSize().Length()+Target->GetComponentsBoundingBox(true).GetSize().Length()+1;
-        Options.bRotate=Mode==EMode::Rotate;
-        if (Options.bRotate) { Options.AngleDegrees=90; }
-        else { Options.Anchor=Mode==EMode::Endpoint ? MDPlacement::EAnchor::Endpoint : MDPlacement::EAnchor::Midpoint; }
+        Options.bRotate=false; Options.Anchor=MDPlacement::EAnchor::Endpoint;
         if (bHit) { Options.TargetPoint=Hit.ImpactPoint; }
         TArray<MDPlacement::FCandidate> Matches;
         MDPlacement::FindCandidates(Source,Target,Options,Matches,Result,&Before);
@@ -188,12 +166,12 @@ bool FMDHoldSnapMode::InputKey(FEditorViewportClient* Client,FViewport* Viewport
     const auto Commands=FHoldCommands::Get().All();
     for (int32 I=0;I<Commands.Num();++I)
     {
-        if (!Commands[I]->HasActiveChord(Chord)) { continue; }
+        if (!Commands[I].Value->HasActiveChord(Chord)) { continue; }
         Release();
         AActor* Actor=MDPlacement::SelectedActor();
         if (!MDPlacement::CanMove(Actor,LiveStatus)) { return true; }
         HeldKey=Key;
-        const auto Mode=static_cast<MDHoldSnap::EMode>(I+1);
+        const auto Mode=Commands[I].Key;
         if (Mode==MDHoldSnap::EMode::Floor || Mode==MDHoldSnap::EMode::Grid)
         { MDHoldSnap::ApplyImmediate(Actor,Mode,LiveStatus); return true; }
         if (!MDPlacement::RootMesh(Actor))
@@ -209,7 +187,7 @@ bool FMDHoldSnapMode::HandleClick(FEditorViewportClient* Client,HHitProxy* HitPr
     if (Held==MDHoldSnap::EMode::None || Click.GetKey()!=EKeys::LeftMouseButton) { return false; }
     if (!Source.IsValid() || Source.Get()!=MDPlacement::SelectedActor()) { Release(); return false; }
     const FInputChord Chord(HeldKey,Client->IsShiftPressed(),Client->IsCtrlPressed(),Client->IsAltPressed(),Client->IsCmdPressed());
-    if (!FHoldCommands::Get().All()[static_cast<int32>(Held)-1]->HasActiveChord(Chord)) { Release(); return false; }
+    if (!FHoldCommands::Get().Endpoint->HasActiveChord(Chord)) { Release(); return false; }
     AActor* Target=HitProxy && HitProxy->IsA(HActor::StaticGetType()) ? static_cast<HActor*>(HitProxy)->Actor.Get() : nullptr;
     MDHoldSnap::ApplyTarget(Source.Get(),Target,Held,Click.GetOrigin(),Click.GetDirection(),LiveStatus);
     return true; // Consume target selection; keep the original moving actor selected.

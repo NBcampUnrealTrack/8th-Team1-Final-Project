@@ -185,22 +185,25 @@ bool FMDClickSnapTest::RunTest(const FString& Parameters)
         const FIntPoint Size=Client->Viewport->GetSizeXY();
         const FViewportClick Click(View,Client,EKeys::LeftMouseButton,IE_Pressed,Size.X/2,Size.Y/2);
         HActor Proxy(Target,Target->GetRootComponent() ? Cast<UPrimitiveComponent>(Target->GetRootComponent()) : nullptr);
-        Modes.InputKey(Client,Client->Viewport,EKeys::I,IE_Pressed,false);
-        TestTrue(TEXT("I waits for click without moving"),Source->GetActorTransform().Equals(Before,.001));
-        TestTrue(TEXT("Native I click consumed"),Modes.HandleClick(Client,&Proxy,Click));
-        AddInfo(FString::Printf(TEXT("I click: %s; origin=%s direction=%s source=%s"),*Status().ToString(),*Click.GetOrigin().ToString(),*Click.GetDirection().ToString(),*Source->GetActorLocation().ToString()));
-        TestTrue(TEXT("I keeps source selected"),MDPlacement::SelectedActor()==Source);
-        TestTrue(TEXT("I aligns up with clicked slope"),Source->GetActorQuat().GetUpVector().Equals(Target->GetActorQuat().GetUpVector(),.001));
-        TestTrue(TEXT("I lands near clicked point, not another actor"),FVector::Distance(Source->GetActorLocation(),Target->GetActorLocation())<150);
-        const FTransform Sloped=Source->GetActorTransform();
-        Modes.HandleClick(Client,&Proxy,Click);
-        TestTrue(TEXT("Repeated I click stable"),Source->GetActorTransform().Equals(Sloped,.001));
-        Modes.InputKey(Client,Client->Viewport,EKeys::I,IE_Released,false);
-        GEditor->UndoTransaction(); TestTrue(TEXT("One Undo restores I"),Source->GetActorTransform().Equals(Before,.001));
-        Target->SetActorTransform(FTransform(FQuat::Identity,FVector(20000,0,10000),FVector(1)));
-        for (FKey Key:{EKeys::B,EKeys::N,EKeys::J})
+        auto* ClickMode=Modes.GetActiveMode(FMDHoldSnapMode::ID);
+        for (FKey Key:{EKeys::N,EKeys::J,EKeys::I})
         {
-            Source->SetActorTransform(FTransform(Key==EKeys::J ? FRotator(0,30,0) : FRotator::ZeroRotator,FVector(21200,0,10000),FVector(1)));
+            TestFalse(TEXT("Disabled key is not registered"),FInputBindingManager::Get().GetCommandInfoFromInputChord(FName("MDHoldSnap"),FInputChord(Key),false).IsValid());
+            TestFalse(TEXT("Disabled key is not consumed"),ClickMode->InputKey(Client,Client->Viewport,Key,IE_Pressed));
+            TestFalse(TEXT("Disabled key cannot arm target click"),ClickMode->HandleClick(Client,&Proxy,Click));
+            TestTrue(TEXT("Disabled key leaves source unchanged"),Source->GetActorTransform().Equals(Before,.001));
+        }
+        for (EMode Disabled:{EMode::Midpoint,EMode::Rotate,EMode::Slope})
+        {
+            TestFalse(TEXT("Disabled action cannot bypass input guard"),ApplyTarget(Source,Target,Disabled,Click.GetOrigin(),Click.GetDirection(),Result));
+            TestTrue(TEXT("Disabled action preserves transform"),Source->GetActorTransform().Equals(Before,.001));
+        }
+        TestFalse(TEXT("Slope quick action disabled"),MDPlacement::QuickAction(MDPlacement::EQuickAction::Slope,Result));
+        TestFalse(TEXT("Extra focus quick action disabled"),MDPlacement::QuickAction(MDPlacement::EQuickAction::Focus,Result));
+        Target->SetActorTransform(FTransform(FQuat::Identity,FVector(20000,0,10000),FVector(1)));
+        for (FKey Key:{EKeys::B})
+        {
+            Source->SetActorTransform(FTransform(FRotator::ZeroRotator,FVector(21200,0,10000),FVector(1)));
             const FTransform EdgeBefore=Source->GetActorTransform();
             Modes.InputKey(Client,Client->Viewport,Key,IE_Pressed,false);
             TestTrue(TEXT("Edge key alone does not move"),Source->GetActorTransform().Equals(EdgeBefore,.001));
@@ -212,15 +215,15 @@ bool FMDClickSnapTest::RunTest(const FString& Parameters)
             GEditor->UndoTransaction(); TestTrue(TEXT("One Undo restores edge click"),Source->GetActorTransform().Equals(EdgeBefore,.001));
         }
         Source->SetActorTransform(Before);
-        Modes.InputKey(Client,Client->Viewport,EKeys::I,IE_Pressed,false);
+        Modes.InputKey(Client,Client->Viewport,EKeys::B,IE_Pressed,false);
         Modes.InputKey(Client,Client->Viewport,EKeys::Escape,IE_Pressed,false);
         auto* Mode=Modes.GetActiveMode(FMDHoldSnapMode::ID);
         TestFalse(TEXT("Esc cancels target interception"),Mode->HandleClick(Client,&Proxy,Click));
         TestTrue(TEXT("Canceled action unchanged"),Source->GetActorTransform().Equals(Before,.001));
-        Modes.InputKey(Client,Client->Viewport,EKeys::I,IE_Pressed,false); Mode->LostFocus(Client,Client->Viewport);
+        Modes.InputKey(Client,Client->Viewport,EKeys::B,IE_Pressed,false); Mode->LostFocus(Client,Client->Viewport);
         TestTrue(TEXT("Focus loss clears pending click"),Status().IsEmpty());
         TestFalse(TEXT("No floor leaves actor unchanged"),ApplyImmediate(Target,EMode::Floor,Result));
-        TestTrue(TEXT("Invalid target refuses action"),!ApplyTarget(Source,Source,EMode::Slope,FVector::ZeroVector,FVector::DownVector,Result));
+        TestTrue(TEXT("Invalid target refuses action"),!ApplyTarget(Source,Source,EMode::Endpoint,FVector::ZeroVector,FVector::DownVector,Result));
         Client->SetWidgetMode(OldWidget); Client->SetViewLocation(OldLocation); Client->SetViewRotation(OldRotation);
     }
     GEditor->SelectNone(false,true); World->DestroyActor(Source); World->DestroyActor(Target); if (Ceiling) { World->DestroyActor(Ceiling); }

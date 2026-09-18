@@ -5,7 +5,6 @@
 #include "Editor.h"
 #include "Styling/AppStyle.h"
 #include "Widgets/Input/SButton.h"
-#include "Widgets/Input/SCheckBox.h"
 #include "Widgets/Input/SNumericEntryBox.h"
 #include "Widgets/Layout/SBorder.h"
 #include "Widgets/Layout/SScrollBox.h"
@@ -59,8 +58,7 @@ void SMDPlacementTools::Build()
                     + SVerticalBox::Slot().AutoHeight().Padding(0,10,0,18)
                     [SNew(SWrapBox).UseAllottedSize(true).InnerSlotPadding(FVector2D(6,6))
                         + SWrapBox::Slot()[Quick(EQuickAction::Floor,Text(TEXT("수직 바닥 스냅 · U"),TEXT("Vertical drop · U")))]
-                        + SWrapBox::Slot()[Quick(EQuickAction::Grid,Text(TEXT("그리드 맞춤"),TEXT("Snap to grid")))]
-                        + SWrapBox::Slot()[Quick(EQuickAction::Focus,Text(TEXT("선택 대상으로 이동"),TEXT("Frame selection")))]]
+                        + SWrapBox::Slot()[Quick(EQuickAction::Grid,Text(TEXT("그리드 맞춤 · Y"),TEXT("Snap to grid · Y")))]]
                     + SVerticalBox::Slot().AutoHeight()
                     [SNew(SBorder).BorderImage(&Card).Padding(16)
                         [SNew(SVerticalBox)
@@ -90,28 +88,7 @@ void SMDPlacementTools::Build()
                             [SNew(SNumericEntryBox<double>).MinValue(1).MaxValue(1000).MinSliderValue(1).MaxSliderValue(500)
                                 .Value_Lambda([this] { return TOptional<double>(Options.Distance); })
                                 .OnValueChanged_Lambda([this](double Value) { Options.Distance=FMath::Clamp(Value,1.,1000.); ClearPreview(); })]
-                            + SVerticalBox::Slot().AutoHeight()[Label(Text(TEXT("맞춤 기준"),TEXT("Anchor")))]
-                            + SVerticalBox::Slot().AutoHeight().Padding(0,6,0,12)
-                            [SNew(SHorizontalBox)
-                                + SHorizontalBox::Slot().FillWidth(1)
-                                [SNew(SCheckBox).Style(FAppStyle::Get(),"ToggleButtonCheckbox")
-                                    .IsChecked_Lambda([this] { return Options.Anchor==EAnchor::Endpoint ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-                                    .OnCheckStateChanged_Lambda([this](ECheckBoxState) { Options.Anchor=EAnchor::Endpoint; ClearPreview(); })[Label(Text(TEXT("가까운 끝점"),TEXT("Nearest endpoint")))]]
-                                + SHorizontalBox::Slot().FillWidth(1)
-                                [SNew(SCheckBox).Style(FAppStyle::Get(),"ToggleButtonCheckbox")
-                                    .IsChecked_Lambda([this] { return Options.Anchor==EAnchor::Midpoint ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-                                    .OnCheckStateChanged_Lambda([this](ECheckBoxState) { Options.Anchor=EAnchor::Midpoint; ClearPreview(); })[Label(Text(TEXT("모서리 중앙"),TEXT("Edge midpoint")))]]]
-                            + SVerticalBox::Slot().AutoHeight()
-                            [SNew(SCheckBox).IsChecked_Lambda([this] { return Options.bRotate ? ECheckBoxState::Checked : ECheckBoxState::Unchecked; })
-                                .OnCheckStateChanged_Lambda([this](ECheckBoxState Value) { Options.bRotate=Value==ECheckBoxState::Checked; ClearPreview(); })
-                                [Label(Text(TEXT("모서리 방향으로 회전 허용"),TEXT("Allow rotation to align edge directions")))]]
-                            + SVerticalBox::Slot().AutoHeight().Padding(0,8,0,4)
-                            [Label(Text(TEXT("회전 허용 각도 (°) · 회전 OFF는 평행 모서리만"),TEXT("Maximum rotation (°) · OFF matches parallel edges only")))]
-                            + SVerticalBox::Slot().AutoHeight()
-                            [SNew(SNumericEntryBox<double>).MinValue(1).MaxValue(90).MinSliderValue(1).MaxSliderValue(45)
-                                .IsEnabled_Lambda([this] { return Options.bRotate; })
-                                .Value_Lambda([this] { return TOptional<double>(Options.AngleDegrees); })
-                                .OnValueChanged_Lambda([this](double Value) { Options.AngleDegrees=FMath::Clamp(Value,1.,90.); ClearPreview(); })]
+                            + SVerticalBox::Slot().AutoHeight()[Label(Text(TEXT("끝점 맞춤 · 액터 회전 유지"),TEXT("Endpoint matching · Keep actor rotation")))]
                             + SVerticalBox::Slot().AutoHeight().Padding(0,16,0,0)
                             [SNew(SButton).ButtonStyle(FAppStyle::Get(),"PrimaryButton").ContentPadding(FMargin(14,9))
                                 .IsEnabled_Lambda([] { FText Reason; return CanMove(SelectedActor(),Reason); })
@@ -119,7 +96,7 @@ void SMDPlacementTools::Build()
                         ]
                     ]
                     + SVerticalBox::Slot().AutoHeight().Padding(0,14,0,0)
-                    [Label(Text(TEXT("주황: 원래 모서리 · 청록: 기준 · 초록: 적용 위치\n끝점/중앙을 일치시킵니다. 면 겹침·충돌은 미리보기에서 확인하세요."),TEXT("Orange: source · Cyan: target · Green: result\nMatches the selected anchor. Check preview for face overlap / collisions.")))]
+                    [Label(Text(TEXT("주황: 원래 모서리 · 청록: 기준 · 초록: 적용 위치\n끝점을 일치시킵니다. 면 겹침·충돌은 미리보기에서 확인하세요."),TEXT("Orange: source · Cyan: target · Green: result\nMatches edge endpoints. Check preview for face overlap / collisions.")))]
                 ]
             ]
             + SVerticalBox::Slot().AutoHeight().Padding(0,12,0,8)
@@ -151,6 +128,7 @@ void SMDPlacementTools::ClearPreview() { Candidates.Reset(); CandidateIndex=0; F
 FReply SMDPlacementTools::Preview()
 {
     ClearPreview();
+    Options.Anchor=MDPlacement::EAnchor::Endpoint; Options.bRotate=false;
     if (bPinned && (!Target.IsValid() || Target.Get()==MDPlacement::SelectedActor()))
     { Feedback=MDPlacement::Text(TEXT("기준과 다른 이동 액터를 선택하세요. 기준이 없어졌다면 다시 지정하세요."),TEXT("Select a different source actor, or re-pin the missing target.")); return FReply::Handled(); }
     MDPlacement::FindCandidates(MDPlacement::SelectedActor(),bPinned ? Target.Get() : nullptr,Options,Candidates,Feedback);

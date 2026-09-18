@@ -88,3 +88,9 @@ UE 5.8 Win64 Development 전체 에디터 빌드 성공. 별도 NullRHI 에디�
 원본 보고서/로그: 로컬 `.revvy/worktree-backups/snap-blueprint-qa-20260918/ClickTests3`. 공유 요약은 placement-test-results.json. 테스트는 Blueprint와 같은 루트 구조의 Actor fixture이며 프로젝트 Blueprint 자체나 물리 키보드/마우스 동시 조작, 다중 사용자 경합, macOS는 검증하지 않았습니다. 이전 HoldDrag 절과 이미지는 과거 구현 기록입니다.
 
 사용자가 에디터를 종료한 뒤 실제 MarineDemolitionEditor Win64 Development 빌드도 성공했습니다. 테스트 세션 종료와 맵 재로드가 로그에서 확인됐으며 에디터 프로세스가 없는 상태에서 DLL을 갱신했습니다.
+
+## U/B/Y만 활성화 — 2026-09-18
+
+사용자 요청으로 N/J/I 단축키 등록과 대상 클릭 실행 경로를 차단했습니다. 패널의 중앙·회전 설정 및 선택 보기 버튼도 제거했으며 후보 미리보기는 회전 없는 끝점 맞춤으로 고정했습니다. U/B/Y의 키 변경 지원은 유지합니다. 엔진 자체 End/F는 변경하지 않았습니다.
+
+실제 MarineDemolitionEditor 및 독립 HostProject Win64 Development 빌드 성공. UBYTests D3D12 자동 검증 4개 성공, 경고/실패 0. 기존 U/B/Y 실행·선택 유지·Undo에 더해 N/J/I 미등록, 키 입력 및 대상 클릭 대기 비활성, 직접 실행 우회 차단, 경사면/선택 보기 빠른 실행 차단을 검증했습니다. 원본은 로컬 .revvy/worktree-backups/snap-blueprint-qa-20260918/UBYTests에 있습니다.

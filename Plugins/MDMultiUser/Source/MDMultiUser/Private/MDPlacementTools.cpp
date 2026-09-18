@@ -360,18 +360,9 @@ namespace MDPlacement
     {
         AActor* Actor = SelectedActor();
         if (!CanMove(Actor, Result)) { return false; }
-        if (Action == EQuickAction::Focus)
-        { GEditor->MoveViewportCamerasToActor(*Actor, false); return true; }
         if (Action==EQuickAction::Floor || Action==EQuickAction::Grid)
         { return MDHoldSnap::ApplyImmediate(Actor,Action==EQuickAction::Floor ? MDHoldSnap::EMode::Floor : MDHoldSnap::EMode::Grid,Result); }
-        const auto Commands = FModuleManager::LoadModuleChecked<FLevelEditorModule>(TEXT("LevelEditor")).GetGlobalLevelEditorActions();
-        const FLevelEditorCommands& BuiltIn = FLevelEditorCommands::Get();
-        const TSharedPtr<FUICommandInfo> Command = Action == EQuickAction::Floor ? BuiltIn.SnapToFloor :
-            Action == EQuickAction::Slope ? BuiltIn.AlignToFloor : BuiltIn.SnapOriginToGridPerActor;
-        if (!Commands->CanExecuteAction(Command.ToSharedRef()))
-        { Result = Text(TEXT("현재 선택에서는 이 동작을 실행할 수 없습니다."), TEXT("This action is unavailable for the current selection.")); return false; }
-        Commands->ExecuteAction(Command.ToSharedRef());
-        Result = Text(TEXT("실행 완료 · 이동이 있었다면 Ctrl+Z로 되돌릴 수 있습니다."), TEXT("Executed. Any movement can be undone with Ctrl+Z."));
-        return true;
+        Result=Text(TEXT("비활성화된 배치 기능입니다."),TEXT("This placement feature is disabled."));
+        return false;
     }
 }
