@@ -17,6 +17,8 @@ struct FCollisionQueryParams;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnInteractionTargetChanged, AActor*, NewTarget);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnInteractionPromptChanged, FText, PromptText);
+/** 운반 대상이 바뀔 때(잡음·놓음). 권한·비권한 머신 모두에서 난다. 놓으면 nullptr */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnHeldActorChanged, AActor*, HeldActor);
 
 /**
  * 플레이어의 조준 상호작용과 물리 오브젝트 운반을 담당
@@ -57,6 +59,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	AActor* GetHeldActor() const { return HeldActor; }
+
+	/** 운반 시작·종료 알림. 캐릭터가 도구 메시를 내리고 올리는 연출에 쓴다 */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Interaction")
+	FMDOnHeldActorChanged OnHeldActorChanged;
 
 	/** 로컬 플레이어가 현재 조준 중인 상호작용 가능 대상. */
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")

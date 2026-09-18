@@ -436,6 +436,10 @@ private:
 	UFUNCTION()
 	void HandleScrapeLoadChanged(float NewScrapeLoad);
 
+	/** 운반 시작·종료에 맞춰 도구 메시를 내리고 다시 든다 */
+	UFUNCTION()
+	void HandleHeldActorChanged(AActor* HeldActor);
+
 	void RefreshToolMesh();
 
 	/**
@@ -507,6 +511,13 @@ private:
 	/** 절단 어빌리티 태그로 판정한다. 톱날 표시 여부에 쓴다 */
 	UFUNCTION(BlueprintPure, Category = "MD|Equipment")
 	bool IsCutterEquipped() const;
+
+	/**
+	 * 인터랙트로 물건을 들고 있는지. 들고 있는 동안은 핫바 슬롯은 그대로 두고
+	 * 도구 메시만 내려 맨손 연출을 한다. ABP에서 맨손 포즈 분기에도 쓴다
+	 */
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
+	bool IsCarryingItem() const;
 	UEnhancedInputLocalPlayerSubsystem* GetEnhancedInputSubsystem() const;
 
 	// 공통 아이템의 부착 오프셋과 메시 그립 소켓을 반영한 상대 트랜스폼 조회

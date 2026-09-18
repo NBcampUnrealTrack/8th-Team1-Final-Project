@@ -702,6 +702,7 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 	Target->ForceNetUpdate();
 	OwnerPawn->ForceNetUpdate();
 	RefreshTickEnabled();
+	OnHeldActorChanged.Broadcast(HeldActor);
 	return true;
 }
 
@@ -789,6 +790,8 @@ void UMD_InteractionComponent::ReleaseHeldActor()
 	if (!HeldActor && !HasAuthorityPhysicsGrip())
 	{
 		RefreshTickEnabled();
+		// 운반 중 대상이 파괴돼 포인터가 먼저 비워진 경우에도 도구를 다시 들게 한다
+		OnHeldActorChanged.Broadcast(nullptr);
 		return;
 	}
 
@@ -820,6 +823,7 @@ void UMD_InteractionComponent::ReleaseHeldActor()
 
 	OwnerPawn->ForceNetUpdate();
 	RefreshTickEnabled();
+	OnHeldActorChanged.Broadcast(nullptr);
 }
 
 FTransform UMD_InteractionComponent::GetHoldPointTransform() const
@@ -955,6 +959,7 @@ void UMD_InteractionComponent::OnRep_HeldActor()
 	}
 
 	RefreshTickEnabled();
+	OnHeldActorChanged.Broadcast(HeldActor);
 }
 
 void UMD_InteractionComponent::PlayPickupSound() const
