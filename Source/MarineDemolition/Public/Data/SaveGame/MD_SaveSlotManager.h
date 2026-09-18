@@ -168,6 +168,9 @@ protected:
 	// 저장해야 하는 GameSession 데이터를 수집하는 함수
 	bool CollectGameData();
 
+    // 현재 호스트 카메라의 UI 없는 장면을 이번 저장 데이터에 기록
+    void CaptureSaveThumbnail(FMD_GameData& GameData);
+
 	// 저장 슬롯과 저장되지 않은 현재 회차에 필요한 검증 기준을 구분하여 World에 적용하는 함수
 	bool ApplyGameDataToWorldInternal(const FMD_GameData& GameData, bool bRequireSavedSlotIdentity);
 
