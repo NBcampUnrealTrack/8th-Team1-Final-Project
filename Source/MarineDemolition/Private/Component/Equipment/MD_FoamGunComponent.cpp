@@ -1,13 +1,16 @@
 #include "Component/Equipment/MD_FoamGunComponent.h"
 
+#include "Audio/MD_AudioRelayComponent.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "GameFramework/PlayerController.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Kismet/GameplayStatics.h"
 #include "NiagaraComponent.h"
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
+#include "World/Foam/MD_FoamProjectile.h"
 
 UMD_FoamGunComponent::UMD_FoamGunComponent()
 {
@@ -20,6 +23,8 @@ void UMD_FoamGunComponent::BeginPlay()
 {
 	// 상위 컴포넌트 시작 처리
 	Super::BeginPlay();
+	// 1인칭 도구 메시 배치는 캐릭터 Tick에서 갱신되므로, 총구 소켓을 읽는 프리뷰 틱은 그 뒤에 돈다
+	AddTickPrerequisiteActor(GetOwner());
 	// 서버 변경과 클라이언트 복제를 함께 수신할 Hotbar 조회
 	UMD_EquipHotbarComponent* Hotbar = GetHotbar();
 	// 유효한 보관 컴포넌트의 공통 변경 알림에 연결
@@ -120,20 +125,126 @@ void UMD_FoamGunComponent::HandleHotbarChanged()
 	OnFoamChargeChanged.Broadcast(GetFoamCharge());
 }
 
-FVector UMD_FoamGunComponent::GetLaunchOrigin() const
+void UMD_FoamGunComponent::GetViewPoint(FVector& OutLocation, FVector& OutDirection) const
 {
 	const APawn* Pawn = Cast<APawn>(GetOwner());
 	if (!Pawn)
 	{
-		return GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+		OutLocation = GetOwner() ? GetOwner()->GetActorLocation() : FVector::ZeroVector;
+		OutDirection = FVector::ForwardVector;
+		return;
 	}
-	return Pawn->GetPawnViewLocation() + GetAimDirection() * MuzzleForwardOffset;
+
+	// 로컬 플레이어는 실제 카메라 시점을 써야 화면 중앙 조준선과 정확히 맞는다
+	if (const APlayerController* PlayerController = Cast<APlayerController>(Pawn->GetController());
+		PlayerController && PlayerController->IsLocalController())
+	{
+		FRotator ViewRotation;
+		PlayerController->GetPlayerViewPoint(OutLocation, ViewRotation);
+		OutDirection = ViewRotation.Vector();
+		return;
+	}
+
+	// 서버·타인: BaseAimRotation은 복제되므로 같은 조준 방향이 나온다
+	OutLocation = Pawn->GetPawnViewLocation();
+	OutDirection = Pawn->GetBaseAimRotation().Vector();
 }
 
-FVector UMD_FoamGunComponent::GetAimDirection() const
+FVector UMD_FoamGunComponent::ComputeAimTarget(const FVector& ViewLocation, const FVector& ViewDirection) const
 {
-	const APawn* Pawn = Cast<APawn>(GetOwner());
-	return Pawn ? Pawn->GetBaseAimRotation().Vector() : FVector::ForwardVector;
+	const FVector TraceEnd = ViewLocation + ViewDirection * AimTraceRange;
+	const UWorld* World = GetWorld();
+	if (!World)
+	{
+		return TraceEnd;
+	}
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(MD_FoamGunAim), /*bTraceComplex=*/false, GetOwner());
+	FHitResult Hit;
+	if (World->LineTraceSingleByChannel(Hit, ViewLocation, TraceEnd, ECC_Visibility, Params))
+	{
+		return Hit.ImpactPoint;
+	}
+	return TraceEnd;
+}
+
+void UMD_FoamGunComponent::ComputeLaunch(FVector& OutOrigin, FVector& OutDirection) const
+{
+	FVector ViewLocation;
+	FVector ViewDirection;
+	GetViewPoint(ViewLocation, ViewDirection);
+
+	// 원점 = 보이는 도구 메시의 총구 소켓. 소켓이 없으면 옛 시점 기준으로 폴백
+	const AMD_Character* Character = Cast<AMD_Character>(GetOwner());
+	if (!Character || !Character->TryGetVisibleToolSocketLocation(MuzzleSocketName, OutOrigin))
+	{
+		OutOrigin = ViewLocation + ViewDirection * MuzzleForwardOffset;
+		OutDirection = ViewDirection;
+		return;
+	}
+
+	// 방향 = 총구 → 카메라 조준점. 조준점이 총구 뒤(벽에 바짝 붙은 경우)면 시점 방향 그대로
+	const FVector AimTarget = ComputeAimTarget(ViewLocation, ViewDirection);
+	const FVector ToTarget = AimTarget - OutOrigin;
+	if (FVector::DotProduct(ToTarget, ViewDirection) <= UE_KINDA_SMALL_NUMBER)
+	{
+		OutDirection = ViewDirection;
+		return;
+	}
+	OutDirection = ToTarget.GetSafeNormal(UE_KINDA_SMALL_NUMBER, ViewDirection);
+}
+
+void UMD_FoamGunComponent::ServerFire_Implementation(FVector_NetQuantize Origin, FVector_NetQuantizeNormal Direction,
+                                                     FGameplayTag FireSoundTag)
+{
+	AMD_Character* Character = Cast<AMD_Character>(GetOwner());
+	UWorld* World = GetWorld();
+	if (!Character || !World || !ProjectileClass)
+	{
+		return;
+	}
+
+	// 클라이언트 값은 서버 시점 기준 허용 범위 안일 때만 신뢰. 벗어나면 서버 계산값(3인칭 소켓)으로 대체
+	FVector ViewLocation;
+	FVector ViewDirection;
+	GetViewPoint(ViewLocation, ViewDirection);
+	const FVector ClientDirection = FVector(Direction).GetSafeNormal(UE_KINDA_SMALL_NUMBER, ViewDirection);
+	const bool bOriginTrusted = FVector::DistSquared(Origin, ViewLocation) <= FMath::Square(MaxClientOriginDistance);
+	const bool bDirectionTrusted = FVector::DotProduct(ClientDirection, ViewDirection)
+		>= FMath::Cos(FMath::DegreesToRadians(MaxClientAimAngle));
+
+	FVector LaunchOrigin = Origin;
+	FVector LaunchDirection = ClientDirection;
+	if (!bOriginTrusted || !bDirectionTrusted)
+	{
+		ComputeLaunch(LaunchOrigin, LaunchDirection);
+	}
+
+	// 충전 소모는 서버 권위. 부족하면 스폰·발사음 없음 (클라이언트는 이미 헛방 피드백을 냈다)
+	if (!TryConsumeShotCharge())
+	{
+		return;
+	}
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = Character;
+	SpawnParams.Instigator = Character;
+	SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+
+	if (AMD_FoamProjectile* Projectile = World->SpawnActor<AMD_FoamProjectile>(
+		ProjectileClass, LaunchOrigin, LaunchDirection.Rotation(), SpawnParams))
+	{
+		// 탄도 정본 주입 — 궤적 프리뷰와 같은 수치라 예측선대로 날아간다
+		Projectile->InitLaunch(LaunchDirection * LaunchSpeed, ProjectileGravityScale);
+	}
+
+	if (FireSoundTag.IsValid())
+	{
+		if (UMD_AudioRelayComponent* Relay = Character->GetAudioRelayComponent())
+		{
+			Relay->PlayAtOwnerLocationForAll(FireSoundTag);
+		}
+	}
 }
 
 bool UMD_FoamGunComponent::ShouldShowTrajectory() const
@@ -191,8 +302,10 @@ void UMD_FoamGunComponent::UpdateTrajectoryPreview()
 		TrajectoryPreview->SetOnlyOwnerSee(true);
 	}
 
-	const FVector Origin = GetLaunchOrigin();
-	const FVector LaunchVelocity = GetAimDirection() * LaunchSpeed;
+	FVector Origin;
+	FVector AimDirection;
+	ComputeLaunch(Origin, AimDirection);
+	const FVector LaunchVelocity = AimDirection * LaunchSpeed;
 	const float GravityZ = GetWorld()->GetGravityZ() * ProjectileGravityScale;
 
 	// 실발사체와 같은 수치로 예측해야 예측선 = 실제 탄도가 성립한다

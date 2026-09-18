@@ -31,6 +31,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/StaticMeshSocket.h"
 #include "Animation/AnimInstance.h"
@@ -2501,6 +2502,65 @@ void AMD_Character::ApplyAppearanceColor(USkeletalMeshComponent* MeshComponent, 
 			MID->SetVectorParameterValue(ParameterName, Color);
 		}
 	}
+}
+
+bool AMD_Character::TryGetVisibleToolSocketLocation(FName SocketName, FVector& OutLocation) const
+{
+	if (SocketName.IsNone())
+	{
+		return false;
+	}
+
+	// 로컬 1인칭 화면이면 1인칭 도구, 거울(3인칭 전환)·타 클라이언트·서버는 3인칭 도구
+	const bool bUseFirstPerson = IsLocallyControlled()
+		&& !bLocalThirdPersonViewEnabled
+		&& IsValid(FirstPersonToolMesh)
+		&& FirstPersonToolMesh->IsVisible();
+	const UStaticMeshComponent* ToolMesh = bUseFirstPerson ? FirstPersonToolMesh : ThirdPersonToolMesh;
+	if (!IsValid(ToolMesh) || !ToolMesh->DoesSocketExist(SocketName))
+	{
+		return false;
+	}
+
+	const FVector SocketLocation = ToolMesh->GetSocketLocation(SocketName);
+	OutLocation = bUseFirstPerson ? ToFirstPersonApparentWorldLocation(SocketLocation) : SocketLocation;
+	return true;
+}
+
+FVector AMD_Character::ToFirstPersonApparentWorldLocation(const FVector& WorldLocation) const
+{
+	if (!IsValid(Camera) || !Camera->bEnableFirstPersonScale)
+	{
+		return WorldLocation;
+	}
+
+	// 1인칭 프리미티브는 뷰 원점을 기준으로 FirstPersonScale만큼 당겨 그려진다
+	const APlayerController* PlayerController = Cast<APlayerController>(Controller);
+	FVector ViewLocation = Camera->GetComponentLocation();
+	FRotator ViewRotation = Camera->GetComponentRotation();
+	if (IsValid(PlayerController))
+	{
+		PlayerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	}
+
+	const FTransform ViewTransform(ViewRotation, ViewLocation);
+	FVector ViewSpace = ViewTransform.InverseTransformPositionNoScale(WorldLocation) * Camera->FirstPersonScale;
+
+	// 1인칭 전용 FOV를 쓰면 화면 투영도 달라지므로 시야각 비율만큼 가로·세로를 보정한다
+	if (Camera->bEnableFirstPersonFieldOfView && IsValid(PlayerController) && IsValid(PlayerController->PlayerCameraManager))
+	{
+		const float WorldFOV = PlayerController->PlayerCameraManager->GetFOVAngle();
+		const float FirstPersonFOV = Camera->FirstPersonFieldOfView;
+		if (WorldFOV > UE_KINDA_SMALL_NUMBER && FirstPersonFOV > UE_KINDA_SMALL_NUMBER)
+		{
+			const float Ratio = FMath::Tan(FMath::DegreesToRadians(WorldFOV * 0.5f))
+				/ FMath::Tan(FMath::DegreesToRadians(FirstPersonFOV * 0.5f));
+			ViewSpace.Y *= Ratio;
+			ViewSpace.Z *= Ratio;
+		}
+	}
+
+	return ViewTransform.TransformPositionNoScale(ViewSpace);
 }
 
 void AMD_Character::SetLocalThirdPersonViewEnabled(bool bEnabled)
