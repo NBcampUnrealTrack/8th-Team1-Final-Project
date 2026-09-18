@@ -134,6 +134,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
 	UMD_FoamGunComponent* GetFoamGunComponent() const { return FoamGunComponent; }
 
+	/**
+	 * 지금 이 화면에 보이는 도구 메시(로컬 1인칭 / 거울·타인·서버는 3인칭)의 소켓 월드 위치.
+	 * 1인칭 메시는 FirstPersonScale로 카메라 쪽에 당겨 그려지므로 화면상 보이는 자리로 보정해 돌려준다.
+	 * 도구 메시에 해당 소켓이 없으면 false.
+	 */
+	bool TryGetVisibleToolSocketLocation(FName SocketName, FVector& OutLocation) const;
+
 	// 절단 루프 VFX 토글. 어빌리티가 서버·소유 클라 양쪽에서 부르고, 사본 프록시는 복제로 따라온다
 	void SetCutterVFXActive(bool bActive);
 
@@ -203,6 +210,9 @@ public:
 	/** 거울 앞에서 로컬 플레이어가 자기 3인칭 몸을 보고 1인칭 팔은 숨기도록 전환한다. */
 	void SetLocalThirdPersonViewEnabled(bool bEnabled);
 protected:
+	/** 1인칭 프리미티브의 실제 월드 위치를 렌더에 보이는 위치(카메라 기준 FirstPersonScale·FOV 보정)로 변환한다. */
+	FVector ToFirstPersonApparentWorldLocation(const FVector& WorldLocation) const;
+
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UCameraComponent> Camera;

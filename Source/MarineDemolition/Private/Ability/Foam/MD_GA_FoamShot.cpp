@@ -1,6 +1,5 @@
 #include "Ability/Foam/MD_GA_FoamShot.h"
 
-#include "Audio/MD_AudioRelayComponent.h"
 #include "Audio/MD_AudioSubsystem.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_FoamGunComponent.h"
@@ -101,34 +100,15 @@ void UMD_GA_FoamShot::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 	// 로컬 조작 폰은 멀티캐스트에서 걸러져 아예 소리가 나지 않는다
 	PlayLocalSound(FireSoundTag, Character);
 
-	// 상태 변경·스폰은 서버 권위. 클라이언트는 복제로 결과를 받는다
-	if (Character->HasAuthority())
+	// 발사체는 로컬 플레이어가 보는 총구(1인칭 도구 소켓)에서 시작해야 하므로 로컬 측이 원점·방향을
+	// 계산해 서버에 요청한다. 충전 소모·스폰·발사음 중계는 서버 RPC 안에서 처리하고, 호스트는 즉시 실행된다.
+	// 원격 폰의 서버 측 활성화는 여기서 아무것도 스폰하지 않는다 (이중 발사 방지)
+	if (Character->IsLocallyControlled())
 	{
-		if (FoamGun->TryConsumeShotCharge())
-		{
-			FActorSpawnParameters SpawnParams;
-			SpawnParams.Owner = Character;
-			SpawnParams.Instigator = Character;
-			SpawnParams.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-			const FVector Origin = FoamGun->GetLaunchOrigin();
-			const FVector AimDir = FoamGun->GetAimDirection();
-
-			if (AMD_FoamProjectile* Projectile = Character->GetWorld()->SpawnActor<AMD_FoamProjectile>(
-				FoamGun->GetProjectileClass(), Origin, AimDir.Rotation(), SpawnParams))
-			{
-				// 탄도 정본 주입 — 궤적 프리뷰와 같은 수치라 예측선대로 날아간다
-				Projectile->InitLaunch(AimDir * FoamGun->GetLaunchSpeed(), FoamGun->GetProjectileGravityScale());
-			}
-
-			if (FireSoundTag.IsValid())
-			{
-				if (UMD_AudioRelayComponent* Relay = Character->GetAudioRelayComponent())
-				{
-					Relay->PlayAtOwnerLocationForAll(FireSoundTag);
-				}
-			}
-		}
+		FVector Origin;
+		FVector AimDir;
+		FoamGun->ComputeLaunch(Origin, AimDir);
+		FoamGun->ServerFire(Origin, AimDir, FireSoundTag);
 	}
 
 	EndAbility(Handle, ActorInfo, ActivationInfo, true, false);
