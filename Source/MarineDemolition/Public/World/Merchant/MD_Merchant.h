@@ -98,7 +98,7 @@ protected:
 	FText MerchantDisplayName = FText::FromString(TEXT("노라 브릭스"));
 
 	/** UIManager가 인터랙트 시 Push할 상인 메뉴 화면 요청 태그 */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant", meta = (Categories = "UI.Layer.GameMenu"))
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant", meta = (Categories = "UI"))
 	FGameplayTag MenuWidgetTag;
 
 	/** 가격·해금 데이터 (`07` §4). 없으면 상점이 빈 목록으로 열린다. */
