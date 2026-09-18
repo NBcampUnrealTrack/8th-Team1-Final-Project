@@ -356,6 +356,12 @@ void AMD_Character::BeginPlay()
 
 	}
 
+	if (IsValid(InteractionComponent))
+	{
+		// 핫바보다 먼저 묶어 두면 아래 HandleHotbarChanged 가 운반 상태를 반영한 첫 도구 표시를 만든다
+		InteractionComponent->OnHeldActorChanged.AddDynamic(this, &AMD_Character::HandleHeldActorChanged);
+	}
+
 	if (IsValid(EquipHotbarComponent))
 	{
 		EquipHotbarComponent->OnHotbarChanged.AddDynamic(this, &AMD_Character::HandleHotbarChanged);
@@ -1774,7 +1780,7 @@ void AMD_Character::RefreshCutterBladeMesh()
 
 	// 절단기를 들고, 톱날 메시가 있고, 본체에 회전 중심 소켓이 있어야 표시한다.
 	// 소켓이 없으면 톱날이 도구 원점에 겹쳐 박히므로 숨기는 편이 낫다.
-	const bool bWantsBlade = IsCutterEquipped() && IsValid(CutterBladeMesh);
+	const bool bWantsBlade = IsCutterEquipped() && IsValid(CutterBladeMesh) && !IsCarryingItem();
 
 	const auto Apply = [this, bWantsBlade](UStaticMeshComponent* const Blade,
 		const UStaticMeshComponent* const ToolMesh)
@@ -1932,6 +1938,22 @@ void AMD_Character::HandleScrapeLoadChanged(const float NewScrapeLoad)
 	RefreshScrapeLoadVisual();
 }
 
+void AMD_Character::HandleHeldActorChanged(AActor* HeldActor)
+{
+	// EndPlay 의 CancelInteraction 으로도 오므로 파괴 중엔 메시를 건드리지 않는다
+	if (IsActorBeingDestroyed())
+	{
+		return;
+	}
+	// 슬롯은 그대로, 표시만 바꾼다. 도구 메시·톱날·헤라 적재 메시가 한 경로에서 갱신된다
+	RefreshToolMesh();
+}
+
+bool AMD_Character::IsCarryingItem() const
+{
+	return IsValid(InteractionComponent) && InteractionComponent->IsHolding();
+}
+
 void AMD_Character::RefreshToolMesh()
 {
 	if (!IsValid(EquipHotbarComponent))
@@ -2024,7 +2046,8 @@ void AMD_Character::RefreshScrapeLoadVisual()
 		}
 	}
 
-	const bool bShowTool = IsValid(NewToolMesh);
+	// 물건을 들고 있는 동안은 도구를 내린다 (슬롯 유지, 연출만)
+	const bool bShowTool = IsValid(NewToolMesh) && !IsCarryingItem();
 	const bool bHasThirdPersonSocket = IsValid(GetMesh())
 		&& GetMesh()->DoesSocketExist(ThirdPersonToolMesh->GetAttachSocketName());
 	// 일인칭도 기본 소켓 대신 실제 부착 소켓의 유효성으로 표시 여부 결정
