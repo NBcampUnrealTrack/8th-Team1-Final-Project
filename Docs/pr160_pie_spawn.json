@@ -1,9 +1,0 @@
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{\r\n\t\"success\": true,\r\n\t\"output\": \"WORLD L_MerchantTest PAWN <Object '/Game/Developers/JunminPark/Maps/UEDPIE_0_L_MerchantTest.L_MerchantTest:PersistentLevel.BP_MDPlayerCharacter_C_0' (0x0000026EF576F000) Class 'BP_MDPlayerCharacter_C'>\\nCLASS /Game/Blueprint/Character/BP_MDPlayerCharacter.BP_MDPlayerCharacter_C\\nCOMPONENTS [('CharacterMesh0', \\\"<Object '/Game/Assets/Character/Shark/SKM_Shark.SKM_Shark' (0x0000026F4DB06400) Class 'SkeletalMesh'>\\\", \\\"<Object '/Game/Assets/Character/Shark/Anim/ABP/ABP_MD_Shark.ABP_MD_Shark_C' (0x0000026F664CD200) Class 'AnimBlueprintGeneratedClass'>\\\"), ('FirstPersonMesh', \\\"<Object '/Game/Assets/Character/Shark/Arms/SKM_Shark_Arms_UE5.SKM_Shark_Arms_UE5' (0x0000026F4DB04600) Class 'SkeletalMesh'>\\\", 'None')]\\nSUPPORT <Object '/Game/Developers/JunminPark/Maps/UEDPIE_0_L_MerchantTest.L_MerchantTest:PersistentLevel.BP_MDPlayerCharacter_C_0.SupportPlacementComponent' (0x000002700C81F500) Class 'MD_SupportPlacementComponent'>\",\r\n\t\"result\": \"None\",\r\n\t\"warnings\": [],\r\n\t\"execution_time_ms\": 39.505096435546875\r\n}"
-    }
-  ],
-  "isError": false
-}
