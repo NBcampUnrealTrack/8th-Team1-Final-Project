@@ -69,3 +69,11 @@ UE 5.8 Win64 Development 전체 에디터 빌드 성공. 별도 NullRHI 에디�
 - macOS 빌드, 실제 다중 클라이언트 경합, 물리 키보드·마우스 동시 입력 검증은 기존과 같이 미실시입니다.
 
 시작 로그도 별도 확인했습니다. 플러그인이 레벨 에디터 준비 전에 전역 모드 관리자에 접근하던 ensure를 레벨 에디터 생성 이벤트 이후 등록하도록 수정했습니다. 현재 드래그 방식은 기본 선택 모드에서 기존 기즈모를 요구하므로 `ITF Gizmos and Controls have been disabled` 안내 경고는 남습니다. 이는 테스트 실패가 아닌 현재 구현의 호환성 제약이며, ITF 기즈모를 유지한 드래그 스냅은 지원하지 않습니다. 기존 프로젝트의 GameFeatureData 설정 오류와 StructUtils 사용 경고는 별개입니다.
+## U 입력 누락 수정 — 2026-09-18
+
+- 사용자 환경은 스냅 기능이 아직 포함되지 않은 dev DLL을 실행 중이었습니다. 실제 선택한 BP_MD_CuttableWall_Inter_B도 일반 StaticMeshActor가 아니어서 기존 입력 조건에서 제외됐습니다.
+- U/I는 StaticMeshComponent 루트를 가진 Actor/Blueprint에도 허용합니다. 부착 관계와 편집 잠금 검사는 그대로 적용하고, 모서리/그리드 단축키의 지원 범위는 유지합니다.
+- 독립 BuildPlugin Win64 Development 빌드 성공. D3D12 HostProject에서 자동 검증 4개 성공, 테스트 경고/실패 0, 종료 코드 0.
+- HoldDrag에 같은 루트 구조의 비-StaticMeshActor 검증 추가: U 준비, 키만 누르면 무변경, 실제 레벨 뷰포트 입력 경로의 드래그 바닥 스냅, 한 번의 Undo 복구, I 경사 법선 정렬.
+- 이 회귀 검증은 프로젝트 Blueprint 자체를 로드하지 않는 Actor fixture입니다. 물리 키보드/마우스 동시 입력과 팀원 동시 편집은 검증하지 않았습니다.
+- 원본 결과는 로컬 `.revvy/worktree-backups/snap-blueprint-qa-20260918/TestResults`에 보관합니다.

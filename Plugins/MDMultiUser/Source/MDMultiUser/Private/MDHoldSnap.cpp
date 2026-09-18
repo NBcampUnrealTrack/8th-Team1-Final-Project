@@ -114,8 +114,8 @@ namespace MDHoldSnap
             Result = FText::Format(MDPlacement::Text(TEXT("스냅: {0}"),TEXT("Snap: {0}")),FText::FromString(Matches[0].Target->GetActorLabel()));
             return true;
         }
-        const auto* Actor = Cast<AStaticMeshActor>(Source);
-        const auto* Component = Actor ? Actor->GetStaticMeshComponent() : nullptr;
+        // Blueprint walls can own a static mesh root without deriving from StaticMeshActor.
+        const auto* Component = Source ? Cast<UStaticMeshComponent>(Source->GetRootComponent()) : nullptr;
         const UStaticMesh* Mesh = Component ? Component->GetStaticMesh() : nullptr;
         if (!Mesh || Component != Source->GetRootComponent()) { return false; }
         const FBox LocalBounds = Mesh->GetBoundingBox();
@@ -207,7 +207,7 @@ bool FMDHoldSnapMode::InputKey(FEditorViewportClient* Client,FViewport* Viewport
     if (Event==IE_Repeat) { return Key==HeldKey; }
     if (Event!=IE_Pressed) { return false; }
     if (!GEditor || !Client || Client->GetWorld()!=GEditor->GetEditorWorldContext().World()
-        || Client->GetWidgetMode()!=UE::Widget::WM_Translate || !Cast<AStaticMeshActor>(MDPlacement::SelectedActor())) { return false; }
+        || Client->GetWidgetMode()!=UE::Widget::WM_Translate || !MDPlacement::SelectedActor()) { return false; }
     if (Viewport && (Viewport->KeyState(EKeys::RightMouseButton) || Viewport->KeyState(EKeys::MiddleMouseButton))) { return false; }
     const FInputChord Chord(Key,Client->IsShiftPressed(),Client->IsCtrlPressed(),Client->IsAltPressed(),Client->IsCmdPressed());
     const auto Commands=FHoldCommands::Get().All();
@@ -218,6 +218,15 @@ bool FMDHoldSnapMode::InputKey(FEditorViewportClient* Client,FViewport* Viewport
             FText Reason;
             if (!MDPlacement::CanMove(MDPlacement::SelectedActor(),Reason)) { LiveStatus=Reason; return true; }
             const auto Mode=static_cast<MDHoldSnap::EMode>(I+1);
+            const AActor* Source=MDPlacement::SelectedActor();
+            const bool bRootMeshSurface=(Mode==MDHoldSnap::EMode::Floor || Mode==MDHoldSnap::EMode::Slope)
+                && Cast<UStaticMeshComponent>(Source->GetRootComponent());
+            if (!Source->IsA<AStaticMeshActor>() && !bRootMeshSurface)
+            {
+                LiveStatus=MDPlacement::Text(TEXT("U/I는 메시가 루트인 액터, 모서리/그리드는 StaticMeshActor를 선택하세요."),
+                    TEXT("U/I require a static mesh root; edge/grid snap requires a StaticMeshActor."));
+                return true;
+            }
             if (Held!=Mode) { Session.Rebase(); }
             Held=Mode; HeldKey=Key;
             LiveStatus=MDPlacement::Text(TEXT("스냅 준비 · 이동 기즈모를 드래그하세요."),TEXT("Snap ready. Drag the move gizmo."));

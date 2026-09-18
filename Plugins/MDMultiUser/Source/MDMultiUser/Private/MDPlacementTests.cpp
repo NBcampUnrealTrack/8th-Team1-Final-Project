@@ -239,6 +239,39 @@ bool FMDHoldSnapTest::RunTest(const FString& Parameters)
         TestTrue(TEXT("Escape handles released-key mixed drag"),Modes.InputKey(Client,Client->Viewport,EKeys::Escape,IE_Pressed,false));
         TestTrue(TEXT("Mixed Escape restores original drag start"),Source->GetActorTransform().Equals(Before,.001));
         Client->TrackingStopped();
+        // Blueprint walls typically derive from Actor and own a StaticMeshComponent root.
+        // Exercise that layout through the actual U-key/native gizmo path.
+        {
+            AActor* RootMeshActor=World->SpawnActor<AActor>(Params);
+            UStaticMeshComponent* RootMesh=NewObject<UStaticMeshComponent>(RootMeshActor,NAME_None,RF_Transactional);
+            RootMeshActor->AddInstanceComponent(RootMesh);
+            RootMeshActor->SetRootComponent(RootMesh);
+            RootMesh->SetStaticMesh(Cube); RootMesh->RegisterComponent();
+            RootMeshActor->SetActorLocation(FVector(20000,0,10250));
+            AStaticMeshActor* Support=World->SpawnActor<AStaticMeshActor>(Params);
+            Support->GetStaticMeshComponent()->SetStaticMesh(Cube);
+            Support->SetActorLocation(FVector(20000,0,9950)); Support->SetActorScale3D(FVector(10,10,1));
+            GEditor->SelectNone(false,true); GEditor->SelectActor(RootMeshActor,true,true);
+            const FTransform RootBefore=RootMeshActor->GetActorTransform();
+            TestFalse(TEXT("Blueprint-layout fixture is not a StaticMeshActor"),RootMeshActor->IsA<AStaticMeshActor>());
+            MDPlacement::SessionOptions().Distance=300;
+            TestTrue(TEXT("U arms for an Actor with static mesh root"),Modes.InputKey(Client,Client->Viewport,EKeys::U,IE_Pressed,false));
+            TestTrue(TEXT("U alone leaves actor unchanged"),RootMeshActor->GetActorTransform().Equals(RootBefore));
+            Client->TrackingStarted(FInputEventState(Client->Viewport,EKeys::LeftMouseButton,IE_Pressed),true,false);
+            Delta=FVector(5,0,0); Client->InputWidgetDelta(Client->Viewport,EAxisList::X,Delta,Rot,Scale);
+            TestTrue(TEXT("U native drag drops root-mesh actor to floor"),FMath::IsNearlyEqual(RootMeshActor->GetActorLocation().Z,10050.,.01));
+            Modes.InputKey(Client,Client->Viewport,EKeys::U,IE_Released,false);
+            Client->TrackingStopped();
+            GEditor->UndoTransaction();
+            TestTrue(TEXT("One undo restores root-mesh actor"),RootMeshActor->GetActorTransform().Equals(RootBefore,.001));
+            Support->SetActorRotation(FRotator(0,0,10));
+            TestTrue(TEXT("I supports root-mesh actor slope solve"),Solve(RootMeshActor,RootBefore,EMode::Slope,MDPlacement::SessionOptions(),Solved,Result));
+            TestTrue(TEXT("Root-mesh actor slope aligns up"),Solved.GetRotation().GetUpVector().Equals(Support->GetActorQuat().GetUpVector(),1.e-4));
+            GEditor->SelectNone(false,true);
+            World->DestroyActor(RootMeshActor); World->DestroyActor(Support);
+            GEditor->SelectActor(Source,true,true);
+            MDPlacement::SessionOptions()=Options;
+        }
         Client->SetCurrentWidgetAxis(EAxisList::None);
         Client->SetWidgetModeOverride(UE::Widget::WM_Rotate);
         TestEqual(TEXT("Rotation widget override selected"),Client->GetWidgetMode(),UE::Widget::WM_Rotate);
