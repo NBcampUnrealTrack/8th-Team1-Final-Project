@@ -1,5 +1,7 @@
 #include "SMDMultiUserWorkspace.h"
 #include "MDWorkspacePreferences.h"
+#include "MDPlacementTools.h"
+#include "Framework/Docking/TabManager.h"
 #include "Widgets/Images/SImage.h"
 
 #include "Brushes/SlateRoundedBoxBrush.h"
@@ -138,6 +140,10 @@ void SMDMultiUserWorkspace::BuildContent()
                         .ToolTipText_Lambda([this] { return FText::FromString(MapPath); }).ColorAndOpacity(Ink).AutoWrapText(true)]
                 ]
             ]
+            + SVerticalBox::Slot().AutoHeight().Padding(0,0,0,12)
+            [SNew(SButton).ContentPadding(FMargin(12,8))
+                .OnClicked_Lambda([] { FGlobalTabmanager::Get()->TryInvokeTab(FName(TEXT("MDPlacementTools"))); return FReply::Handled(); })
+                [Label(MDPlacement::Text(TEXT("배치 도구 열기 · End / 모서리 스냅"), TEXT("Placement tools · End / Edge snap")))]]
             + SVerticalBox::Slot().FillHeight(1)
             [
                 SNew(SOverlay)

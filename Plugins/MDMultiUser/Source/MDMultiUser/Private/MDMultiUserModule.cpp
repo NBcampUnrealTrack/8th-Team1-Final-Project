@@ -3,6 +3,8 @@
 #include "Framework/Docking/TabManager.h"
 #include "HAL/IConsoleManager.h"
 #include "SMDMultiUserWorkspace.h"
+#include "SMDPlacementTools.h"
+#include "MDHoldSnap.h"
 #include "MDWorkspacePreferences.h"
 #include "Styling/AppStyle.h"
 #include "ToolMenus.h"
@@ -15,7 +17,17 @@ class FMDMultiUserModule : public IModuleInterface
 public:
     virtual void StartupModule() override
     {
+        MDHoldSnap::Register();
         FGlobalTabmanager::RegisterDefaultTabWindowSize(TabName, FVector2D(460, 720));
+        FGlobalTabmanager::RegisterDefaultTabWindowSize(FName(TEXT("MDPlacementTools")), FVector2D(480, 850));
+        FGlobalTabmanager::Get()->RegisterNomadTabSpawner("MDPlacementTools", FOnSpawnTab::CreateLambda([this](const FSpawnTabArgs&) {
+            const auto Tab = SNew(SDockTab).TabRole(ETabRole::NomadTab)
+                .Label_Lambda([] { return MDPlacement::Text(TEXT("배치 도구"), TEXT("Placement tools")); })[SNew(SMDPlacementTools)];
+            PlacementTab = Tab;
+            return Tab;
+        })).SetDisplayName(MDPlacement::Text(TEXT("배치 도구"), TEXT("Placement tools"))).SetMenuType(ETabSpawnerMenuType::Hidden);
+        PlacementCommand = IConsoleManager::Get().RegisterConsoleCommand(TEXT("MD.MultiUser.Placement"), TEXT("Open placement tools."),
+            FConsoleCommandDelegate::CreateLambda([] { FGlobalTabmanager::Get()->TryInvokeTab(FName(TEXT("MDPlacementTools"))); }), ECVF_Default);
         FGlobalTabmanager::Get()->RegisterNomadTabSpawner(TabName,
             FOnSpawnTab::CreateRaw(this, &FMDMultiUserModule::SpawnTab))
             .SetDisplayName(MDLOC("Tab", "함께 편집"))
@@ -41,6 +53,10 @@ public:
 
     virtual void ShutdownModule() override
     {
+        MDHoldSnap::Unregister();
+        if (PlacementCommand) { IConsoleManager::Get().UnregisterConsoleObject(PlacementCommand); }
+        if (const auto Tab = PlacementTab.Pin()) { Tab->RequestCloseTab(); }
+        FGlobalTabmanager::Get()->UnregisterNomadTabSpawner("MDPlacementTools");
         FMDWorkspacePreferences::CloseWindow();
         if (LanguageCommand) { IConsoleManager::Get().UnregisterConsoleObject(LanguageCommand); }
         if (SettingsCommand) { IConsoleManager::Get().UnregisterConsoleObject(SettingsCommand); }
@@ -74,6 +90,8 @@ private:
     }
 
     inline static const FName TabName = TEXT("MDMultiUserWorkspace");
+    TWeakPtr<SDockTab> PlacementTab;
+    IConsoleObject* PlacementCommand = nullptr;
     IConsoleObject* SettingsCommand = nullptr;
     IConsoleObject* LanguageCommand = nullptr;
     IConsoleObject* OpenCommand = nullptr;
