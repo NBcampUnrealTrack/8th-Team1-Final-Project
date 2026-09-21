@@ -22,7 +22,7 @@ class UMD_MerchantSubsystem;
 class AMD_PlayerController;
 class AMD_PlayerState;
 class AMD_Character;
-class UStaticMeshComponent;
+class USkeletalMeshComponent;
 
 enum class EMD_ShopPurchaseResult : uint8;
 enum class EMD_ShopSaleResult : uint8;
@@ -32,9 +32,8 @@ enum class EMD_ShopSaleResult : uint8;
  *
  * 역할 (`02` §7): 장비 판매 · 착수금 지급 · 상급 샘플 퀘스트 부여 · 대출 · 부상 치료
  *
- * 캐릭터 에셋이 아직 없어 큐브 스태틱 메시로 대체한다. 실제 캐릭터가 나오면
- * MeshAsset만 바꾸거나 스켈레탈 메시 컴포넌트로 교체하면 되고,
- * IMD_Interactable 계약과 위젯 흐름은 그대로 유지된다.
+ * Blueprint에서 스켈레탈 캐릭터 메시를 지정한다.
+ * IMD_Interactable 계약과 위젯 흐름은 외형과 독립적으로 유지된다.
  */
 UCLASS()
 class MARINEDEMOLITION_API AMD_Merchant : public AActor, public IMD_Interactable
@@ -90,9 +89,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
 	TObjectPtr<USceneComponent> Root;
 
-	/** 큐브 플레이스홀더. 캐릭터 에셋 확정 시 교체 대상. */
+	/** 상인 캐릭터. PhysicsAsset으로 상호작용 트레이스를 받고 외곽선을 표시한다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
-	TObjectPtr<UStaticMeshComponent> Mesh;
+	TObjectPtr<USkeletalMeshComponent> CharacterMesh;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
 	FText MerchantDisplayName = FText::FromString(TEXT("노라 브릭스"));
