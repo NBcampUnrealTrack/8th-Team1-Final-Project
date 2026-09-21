@@ -43,7 +43,7 @@ struct FMD_PropPaletteEntry
 	bool operator==(const FMD_PropPaletteEntry& Other) const;
 };
 
-/** Project palette collection. Edits stay in memory until Save Palette writes this config section. */
+/** Working collection. Legacy config entries remain readable; named collections are saved by the palette library. */
 UCLASS(config = Editor, defaultconfig)
 class UMD_PropPaletteSettings : public UObject
 {
@@ -59,8 +59,11 @@ public:
 	void SetUseInMix(const FGuid& Id, bool bEnabled);
 	void SetCategory(const FGuid& Id, const FString& Category);
 	void SetPlacementSettings(const FGuid& Id, const FMD_PropPlacementSettings& Placement, TSoftObjectPtr<UStaticMesh> PreviewMesh);
-	bool SavePalette(FText& OutError);
 	void ReplaceEntries(const TArray<FMD_PropPaletteEntry>& NewEntries);
+	// Identity of the working collection; retained across tool reopen within this editor session.
+	FGuid WorkingPaletteId;
+	bool bWorkingPaletteInitialized = false;
+	void MarkEntriesSaved() { bUnsavedChanges = false; }
 	bool HasUnsavedChanges() const { return bUnsavedChanges; }
 	void HandleAssetRenamed(const FAssetData& Asset, const FString& OldObjectPath);
 

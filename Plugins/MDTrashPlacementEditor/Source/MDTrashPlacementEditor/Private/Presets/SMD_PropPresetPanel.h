@@ -35,6 +35,9 @@ private:
 	void BeginRename();
 	void CommitName(const FText& Text, ETextCommit::Type Reason);
 	bool VerifyName(const FText& Text, FText& OutError) const;
+	bool ConfirmSwitch();
+	void SelectPalette(const FGuid& Id);
+	FReply NewPalette();
 	FReply Load();
 	FReply Save();
 	FReply SaveAs();

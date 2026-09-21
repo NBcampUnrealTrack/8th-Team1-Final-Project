@@ -14,6 +14,8 @@ class UMD_PropPresetSettings : public UObject
 	GENERATED_BODY()
 
 public:
+	FGuid GetActivePresetId() const;
+	bool SetActivePreset(const FGuid& Id, FText& OutError);
 	const TArray<FMD_PropPlacementPreset>& GetPresets() const { return Presets; }
 	const FMD_PropPlacementPreset* FindPreset(const FGuid& Id) const;
 	FString MakeUniqueName(const FString& BaseName) const;
@@ -35,6 +37,9 @@ private:
 
 	UPROPERTY(config)
 	TArray<FMD_PropPlacementPreset> Presets;
+
+	UPROPERTY(config)
+	FString ActivePaletteId;
 
 	bool bUnsavedChanges = false;
 };

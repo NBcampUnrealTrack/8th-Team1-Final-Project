@@ -77,6 +77,8 @@ bool FMD_PropRotationSettings::operator==(const FMD_PropRotationSettings& Other)
 
 void FMD_PropPlacementSettings::Sanitize()
 {
+	LeanAngle = FMath::Clamp(FiniteOr(LeanAngle, 75.0), 15.0, 85.0);
+	EdgeSearchDistance = FMath::Clamp(FiniteOr(EdgeSearchDistance, 5.0), 0.5, 25.0);
 	Pitch.Sanitize();
 	Roll.Sanitize();
 	Yaw.Sanitize();
@@ -137,7 +139,8 @@ double FMD_PropPlacementSettings::EvaluateScale(uint32 CandidateIndex) const
 
 bool FMD_PropPlacementSettings::operator==(const FMD_PropPlacementSettings& Other) const
 {
-	return bAlignToSurface == Other.bAlignToSurface && Pitch == Other.Pitch && Roll == Other.Roll && Yaw == Other.Yaw
+	return bAlignToSurface == Other.bAlignToSurface && bSmartEdge == Other.bSmartEdge
+		&& LeanAngle == Other.LeanAngle && EdgeSearchDistance == Other.EdgeSearchDistance && Pitch == Other.Pitch && Roll == Other.Roll && Yaw == Other.Yaw
 		&& bRandomizeScale == Other.bRandomizeScale && UniformScale == Other.UniformScale
 		&& MinimumScale == Other.MinimumScale && MaximumScale == Other.MaximumScale
 		&& SurfaceOffset == Other.SurfaceOffset && RandomSeed == Other.RandomSeed

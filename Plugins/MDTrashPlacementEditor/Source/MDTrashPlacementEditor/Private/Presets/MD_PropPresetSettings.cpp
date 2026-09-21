@@ -9,6 +9,35 @@
 
 #define LOCTEXT_NAMESPACE "MDPropPresetSettings"
 
+FGuid UMD_PropPresetSettings::GetActivePresetId() const
+{
+	FGuid Id;
+	FGuid::Parse(ActivePaletteId, Id);
+	return Id;
+}
+
+bool UMD_PropPresetSettings::SetActivePreset(const FGuid& Id, FText& OutError)
+{
+	if (!FindPreset(Id))
+	{
+		OutError = LOCTEXT("Missing", "팔레트를 먼저 선택하세요.");
+		return false;
+	}
+	const FString Updated = Id.ToString();
+	if (ActivePaletteId == Updated)
+	{
+		return true;
+	}
+	const FString Previous = ActivePaletteId;
+	ActivePaletteId = Updated;
+	if (!SaveLibrary(OutError))
+	{
+		ActivePaletteId = Previous;
+		return false;
+	}
+	return true;
+}
+
 const FMD_PropPlacementPreset* UMD_PropPresetSettings::FindPreset(const FGuid& Id) const
 {
 	return Presets.FindByPredicate([&Id](const FMD_PropPlacementPreset& Preset) { return Preset.Id == Id; });
@@ -32,21 +61,21 @@ bool UMD_PropPresetSettings::ValidateName(const FString& Name, const FGuid& Exce
 	const FString Trimmed = Name.TrimStartAndEnd();
 	if (Trimmed.IsEmpty() || Trimmed.Len() > 64)
 	{
-		OutError = LOCTEXT("NameLength", "프리셋 이름은 1~64자로 입력하세요.");
+		OutError = LOCTEXT("NameLength", "팔레트 이름은 1~64자로 입력하세요.");
 		return false;
 	}
 	for (const TCHAR Character : Trimmed)
 	{
 		if (Character < 32 || Character == 127)
 		{
-			OutError = LOCTEXT("NameControl", "프리셋 이름은 줄바꿈과 탭 없이 한 줄로 입력하세요.");
+			OutError = LOCTEXT("NameControl", "팔레트 이름은 줄바꿈과 탭 없이 한 줄로 입력하세요.");
 			return false;
 		}
 	}
 	if (Presets.ContainsByPredicate([&Trimmed, &ExceptId](const FMD_PropPlacementPreset& Preset)
 		{ return Preset.Id != ExceptId && Preset.Name.Equals(Trimmed, ESearchCase::IgnoreCase); }))
 	{
-		OutError = LOCTEXT("NameExists", "같은 이름의 프리셋이 있습니다. 다른 이름을 입력하세요.");
+		OutError = LOCTEXT("NameExists", "같은 이름의 팔레트가 있습니다. 다른 이름을 입력하세요.");
 		return false;
 	}
 	return true;
@@ -74,7 +103,7 @@ bool UMD_PropPresetSettings::UpdatePreset(const FGuid& Id, const FMD_PropPlaceme
 	FMD_PropPlacementPreset* Preset = Updated.FindByPredicate([&Id](const FMD_PropPlacementPreset& Item) { return Item.Id == Id; });
 	if (!Preset)
 	{
-		OutError = LOCTEXT("Missing", "프리셋을 먼저 선택하세요.");
+		OutError = LOCTEXT("Missing", "팔레트를 먼저 선택하세요.");
 		return false;
 	}
 	Preset->Data = Data;
@@ -87,7 +116,7 @@ FGuid UMD_PropPresetSettings::DuplicatePreset(const FGuid& Id, FText& OutError)
 	const FMD_PropPlacementPreset* Preset = FindPreset(Id);
 	if (!Preset)
 	{
-		OutError = LOCTEXT("Missing", "프리셋을 먼저 선택하세요.");
+		OutError = LOCTEXT("Missing", "팔레트를 먼저 선택하세요.");
 		return FGuid();
 	}
 	// Duplicate the saved snapshot, not the potentially edited working palette.
@@ -105,7 +134,7 @@ bool UMD_PropPresetSettings::RenamePreset(const FGuid& Id, const FString& Name, 
 	FMD_PropPlacementPreset* Preset = Updated.FindByPredicate([&Id](const FMD_PropPlacementPreset& Item) { return Item.Id == Id; });
 	if (!Preset)
 	{
-		OutError = LOCTEXT("Missing", "프리셋을 먼저 선택하세요.");
+		OutError = LOCTEXT("Missing", "팔레트를 먼저 선택하세요.");
 		return false;
 	}
 	Preset->Name = Name.TrimStartAndEnd();
@@ -117,7 +146,7 @@ bool UMD_PropPresetSettings::DeletePreset(const FGuid& Id, FText& OutError)
 	TArray<FMD_PropPlacementPreset> Updated = Presets;
 	if (Updated.RemoveAll([&Id](const FMD_PropPlacementPreset& Item) { return Item.Id == Id; }) == 0)
 	{
-		OutError = LOCTEXT("Missing", "프리셋을 먼저 선택하세요.");
+		OutError = LOCTEXT("Missing", "팔레트를 먼저 선택하세요.");
 		return false;
 	}
 	return Commit(MoveTemp(Updated), OutError);
@@ -127,9 +156,15 @@ bool UMD_PropPresetSettings::Commit(TArray<FMD_PropPlacementPreset>&& Updated, F
 {
 	TArray<FMD_PropPlacementPreset> Previous = MoveTemp(Presets);
 	Presets = MoveTemp(Updated);
+	const FString PreviousActive = ActivePaletteId;
+	if (!FindPreset(GetActivePresetId()))
+	{
+		ActivePaletteId.Reset();
+	}
 	if (!SaveLibrary(OutError))
 	{
 		Presets = MoveTemp(Previous);
+		ActivePaletteId = PreviousActive;
 		return false;
 	}
 	return true;
@@ -140,7 +175,7 @@ bool UMD_PropPresetSettings::SaveLibrary(FText& OutError)
 	OutError = FText::GetEmpty();
 	if (!TryUpdateDefaultConfigFile() || !MatchesSavedLibrary())
 	{
-		OutError = FText::Format(LOCTEXT("SaveFailed", "프리셋을 저장하지 못했습니다.\n\n설정 파일의 쓰기 권한을 확인하고 다시 시도하세요.\n{0}"), FText::FromString(GetDefaultConfigFilename()));
+		OutError = FText::Format(LOCTEXT("SaveFailed", "팔레트를 저장하지 못했습니다.\n\n설정 파일의 쓰기 권한을 확인하고 다시 시도하세요.\n{0}"), FText::FromString(GetDefaultConfigFilename()));
 		return false;
 	}
 	bUnsavedChanges = false;
@@ -153,6 +188,12 @@ bool UMD_PropPresetSettings::MatchesSavedLibrary() const
 	// TryUpdateDefaultConfigFile only reports read-only rejection in this engine version.
 	FConfigFile SavedFile;
 	if (!SavedFile.Combine(GetDefaultConfigFilename()))
+	{
+		return false;
+	}
+	FString SavedActive;
+	SavedFile.GetString(*GetClass()->GetPathName(), TEXT("ActivePaletteId"), SavedActive);
+	if (SavedActive != ActivePaletteId)
 	{
 		return false;
 	}

@@ -1012,38 +1012,15 @@ double UMDTrashPlacementTool::CalculatePlacementExtent(
 
 bool UMDTrashPlacementTool::IsPlacementSafe(
 	const UStaticMesh* StaticMesh,
-	const FTransform& Transform) const
+	const FTransform& Transform,
+	const FHitResult& SurfaceHit) const
 {
-	if (!Properties->bPreventOverlaps)
-	{
-		return true;
-	}
-
-	if (!IsValid(TargetWorld) || !IsValid(StaticMesh))
+	if (!IsValid(TargetWorld) || !IsValid(StaticMesh) || !Transform.IsValid())
 	{
 		return false;
 	}
-
-	const FBox LocalBounds = StaticMesh->GetBoundingBox();
-	const FVector AbsoluteScale = Transform.GetScale3D().GetAbs();
-	FVector BoxExtent = LocalBounds.GetExtent() * AbsoluteScale;
-	const double Tolerance = FMath::Max(static_cast<double>(Properties->OverlapTolerance), 0.0);
-	BoxExtent.X = FMath::Max(BoxExtent.X - Tolerance, 0.1);
-	BoxExtent.Y = FMath::Max(BoxExtent.Y - Tolerance, 0.1);
-	BoxExtent.Z = FMath::Max(BoxExtent.Z - Tolerance, 0.1);
-
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDTrashPlacementOverlap), false);
-	// Trigger/sensor overlaps are not physical obstructions. Keep blocking walls and trash.
-	QueryParams.bIgnoreTouches = true;
-	TArray<FOverlapResult> Overlaps;
-	const FVector BoxCenter = Transform.TransformPosition(LocalBounds.GetCenter());
-	return !TargetWorld->OverlapMultiByChannel(
-		Overlaps,
-		BoxCenter,
-		Transform.GetRotation(),
-		ECC_Pawn,
-		FCollisionShape::MakeBox(BoxExtent),
-		QueryParams);
+	return !Properties->bPreventOverlaps || !MDPlacementGeometry::HasBlockingOverlap(
+		TargetWorld, StaticMesh->GetBoundingBox(), Transform, Properties->OverlapTolerance, SurfaceHit.GetComponent());
 }
 
 bool UMDTrashPlacementTool::IsPlacementAllowedAtHit(
@@ -1051,7 +1028,7 @@ bool UMDTrashPlacementTool::IsPlacementAllowedAtHit(
 	const UStaticMesh* StaticMesh) const
 {
 	return IsValid(StaticMesh)
-		&& IsPlacementSafe(StaticMesh, BuildPlacementTransform(HitResult, StaticMesh));
+		&& IsPlacementSafe(StaticMesh, BuildPlacementTransform(HitResult, StaticMesh), HitResult);
 }
 
 void UMDTrashPlacementTool::UpdateHoverFromHit(const FHitResult& HitResult)
@@ -1112,7 +1089,7 @@ void UMDTrashPlacementTool::UpdateGhostPreview(const FHitResult& HitResult)
 
 	const FTransform PreviewTransform = BuildPlacementTransform(HitResult, StaticMesh);
 	const bool bWasPlacementValid = bIsHoverPlacementValid;
-	bIsHoverPlacementValid = IsPlacementSafe(StaticMesh, PreviewTransform);
+	bIsHoverPlacementValid = IsPlacementSafe(StaticMesh, PreviewTransform, HitResult);
 	const bool bMeshChanged = GhostPreviewComponent->GetStaticMesh() != StaticMesh;
 	if (bMeshChanged)
 	{

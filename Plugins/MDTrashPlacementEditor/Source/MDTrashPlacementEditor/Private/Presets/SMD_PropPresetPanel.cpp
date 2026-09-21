@@ -1,6 +1,7 @@
 #include "Presets/SMD_PropPresetPanel.h"
 
 #include "Presets/MD_PropPresetSettings.h"
+#include "Palette/MD_PropPaletteSettings.h"
 #include "Tools/MD_PropPlacementTool.h"
 #include "InputCoreTypes.h"
 #include "Misc/MessageDialog.h"
@@ -24,7 +25,7 @@ void SMD_PropPresetPanel::Construct(const FArguments& Args)
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
 		[
 			SNew(STextBlock).AutoWrapText(true)
-			.Text(LOCTEXT("Help", "저장과 불러오기\nSave As로 현재 구성을 새로 저장하고 F2로 이름을 바꾸세요. Save는 선택한 프리셋을 현재 구성으로 덮어씁니다.\n\n목록 선택 후 Load를 누르면 팔레트와 배치 설정을 불러옵니다. 레벨의 소품은 그대로 유지됩니다."))
+			.Text(LOCTEXT("Help", "팔레트 나누기\nNew로 빈 팔레트를 만든 뒤 Book, Shelf처럼 F2로 이름을 붙이세요. 목록에서 이름을 선택하면 해당 팔레트로 바로 전환합니다.\n\n저장\nSave와 Save Palette는 현재 팔레트를 저장합니다. Save As는 현재 내용을 별도 팔레트로 복사합니다. 팔레트 전환은 레벨의 소품에 영향을 주지 않습니다."))
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 4)
 		[
@@ -38,8 +39,7 @@ void SMD_PropPresetPanel::Construct(const FArguments& Args)
 			{
 				if (Properties.IsValid() && Option.IsValid() && Reason != ESelectInfo::Direct)
 				{
-					Properties->SelectedPresetId = Option->Id;
-					StatusMessage = LOCTEXT("SelectionHelp", "Load로 불러오거나 Save로 현재 구성을 덮어쓸 수 있습니다.");
+					SelectPalette(Option->Id);
 				}
 			})
 			[
@@ -47,13 +47,13 @@ void SMD_PropPresetPanel::Construct(const FArguments& Args)
 				.Text_Lambda([this]
 				{
 					const FMD_PropPlacementPreset* Preset = HasSelection() ? Library->FindPreset(Properties->SelectedPresetId) : nullptr;
-					return Preset ? FText::FromString(Preset->Name) : LOCTEXT("Empty", "No Presets");
+					return Preset ? FText::FromString(Preset->Name) : LOCTEXT("Empty", "Unsaved Palette");
 				})
 				.IsReadOnly_Lambda([this] { return !HasSelection(); })
 				.IsSelected_Lambda([this] { return HasSelection(); })
 				.DelayedLeftClickEntersEditMode(false)
 				.OverflowPolicy(ETextOverflowPolicy::Ellipsis)
-				.ToolTipText(LOCTEXT("NameHelp", "프리셋 선택기에 포커스를 두고 F2로 이름을 바꾸세요.\n\nEnter 또는 포커스 이동으로 저장하고 Esc로 취소합니다. 이름은 1~64자이며 중복 이름은 사용할 수 없습니다."))
+				.ToolTipText(LOCTEXT("NameHelp", "팔레트 선택기에 포커스를 두고 F2로 이름을 바꾸세요.\n\nEnter 또는 포커스 이동으로 저장하고 Esc로 취소합니다. 이름은 1~64자이며 중복 이름은 사용할 수 없습니다."))
 				.OnEnterEditingMode_Lambda([this] { RenameId = Properties.IsValid() ? Properties->SelectedPresetId : FGuid(); })
 				.OnVerifyTextChanged(this, &SMD_PropPresetPanel::VerifyName)
 				.OnTextCommitted(this, &SMD_PropPresetPanel::CommitName)
@@ -63,29 +63,33 @@ void SMD_PropPresetPanel::Construct(const FArguments& Args)
 		[
 			SNew(SWrapBox).UseAllottedSize(true).InnerSlotPadding(FVector2D(4, 4))
 			+ SWrapBox::Slot()
-			[SNew(SButton).Text(LOCTEXT("Load", "Load")).IsEnabled(this, &SMD_PropPresetPanel::HasSelection)
-				.ToolTipText(LOCTEXT("LoadHelp", "선택한 프리셋의 팔레트·Mix 체크·배치 설정을 불러옵니다. 현재 팔레트를 교체하며 미저장 변경이 있으면 먼저 확인합니다."))
+			[SNew(SButton).Text(LOCTEXT("New", "New"))
+				.ToolTipText(LOCTEXT("NewHelp", "빈 팔레트를 만듭니다. Book이나 Shelf처럼 용도별로 이름을 붙이고 소품을 등록하세요."))
+				.OnClicked(this, &SMD_PropPresetPanel::NewPalette)]
+			+ SWrapBox::Slot()
+			[SNew(SButton).Text(LOCTEXT("Load", "Reload")).IsEnabled(this, &SMD_PropPresetPanel::HasSelection)
+				.ToolTipText(LOCTEXT("LoadHelp", "현재 팔레트의 마지막 저장 내용을 다시 불러옵니다. 미저장 변경이 있으면 먼저 확인합니다."))
 				.OnClicked(this, &SMD_PropPresetPanel::Load)]
 			+ SWrapBox::Slot()
-			[SNew(SButton).Text(LOCTEXT("Save", "Save")).IsEnabled(this, &SMD_PropPresetPanel::HasSelection)
-				.ToolTipText(LOCTEXT("SaveHelp", "선택한 프리셋을 현재 팔레트와 배치 설정으로 덮어써 저장합니다. 기존 내용도 남기려면 Save As를 사용하세요."))
+			[SNew(SButton).Text(LOCTEXT("Save", "Save"))
+				.ToolTipText(LOCTEXT("SaveHelp", "현재 팔레트의 목록과 소품별 설정을 저장합니다. 기존 내용도 남기려면 Save As를 사용하세요."))
 				.OnClicked(this, &SMD_PropPresetPanel::Save)]
 			+ SWrapBox::Slot()
 			[SNew(SButton).Text(LOCTEXT("SaveAs", "Save As"))
-				.ToolTipText(LOCTEXT("SaveAsHelp", "현재 구성을 새 프리셋으로 저장합니다. 자동 이름으로 먼저 저장하고 바로 이름을 편집합니다. Esc를 누르면 자동 이름이 유지됩니다."))
+				.ToolTipText(LOCTEXT("SaveAsHelp", "현재 목록과 소품별 설정을 새 팔레트로 저장합니다. 자동 이름으로 먼저 저장하고 바로 이름을 편집합니다. Esc를 누르면 자동 이름이 유지됩니다."))
 				.OnClicked(this, &SMD_PropPresetPanel::SaveAs)]
 			+ SWrapBox::Slot()
 			[SNew(SButton).Text(LOCTEXT("Duplicate", "Duplicate")).IsEnabled(this, &SMD_PropPresetPanel::HasSelection)
-				.ToolTipText(LOCTEXT("DuplicateHelp", "선택한 프리셋에 저장된 내용을 독립 복사합니다. 현재 편집 내용으로 별도 저장하려면 Save As를 사용하세요."))
+				.ToolTipText(LOCTEXT("DuplicateHelp", "현재 팔레트의 편집 내용을 포함해 독립 복사하고 새 팔레트로 전환합니다."))
 				.OnClicked(this, &SMD_PropPresetPanel::Duplicate)]
 			+ SWrapBox::Slot()
 			[SNew(SButton).Text(LOCTEXT("Delete", "Delete")).IsEnabled(this, &SMD_PropPresetPanel::HasSelection)
-				.ToolTipText(LOCTEXT("DeleteHelp", "선택한 프리셋의 저장 기록을 삭제합니다. 현재 팔레트·레벨 소품·원본 에셋은 유지됩니다."))
+				.ToolTipText(LOCTEXT("DeleteHelp", "선택한 팔레트의 저장 기록을 삭제합니다. 현재 팔레트·레벨 소품·원본 에셋은 유지됩니다."))
 				.OnClicked(this, &SMD_PropPresetPanel::Delete)]
 			+ SWrapBox::Slot()
 			[SNew(SButton).Text(LOCTEXT("SaveLibrary", "Save Library"))
 				.Visibility_Lambda([this] { return Library.IsValid() && Library->HasUnsavedChanges() ? EVisibility::Visible : EVisibility::Collapsed; })
-				.ToolTipText(LOCTEXT("SaveLibraryHelp", "에셋 이름 변경으로 갱신된 프리셋 참조를 저장합니다. 프리셋을 현재 작업 구성으로 덮어쓰지 않습니다."))
+				.ToolTipText(LOCTEXT("SaveLibraryHelp", "에셋 이름 변경으로 갱신된 팔레트 참조를 저장합니다. 팔레트를 현재 작업 구성으로 덮어쓰지 않습니다."))
 				.OnClicked(this, &SMD_PropPresetPanel::SaveLibrary)]
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
@@ -141,7 +145,7 @@ void SMD_PropPresetPanel::RefreshOptions()
 	}
 	if (!Library->FindPreset(Properties->SelectedPresetId))
 	{
-		Properties->SelectedPresetId = Options.IsEmpty() ? FGuid() : Options[0]->Id;
+		Properties->SetActivePaletteId(FGuid());
 	}
 	Combo->RefreshOptions();
 	Combo->ClearSelection();
@@ -197,9 +201,66 @@ void SMD_PropPresetPanel::CommitName(const FText& Text, ETextCommit::Type Reason
 	{
 		if (Library->RenamePreset(Id, Text.ToString(), StatusMessage))
 		{
-			StatusMessage = LOCTEXT("Renamed", "프리셋 이름을 저장했습니다.");
+			StatusMessage = LOCTEXT("Renamed", "팔레트 이름을 저장했습니다.");
 		}
 	}
+}
+
+bool SMD_PropPresetPanel::ConfirmSwitch()
+{
+	if (!Properties.IsValid() || !Library.IsValid())
+	{
+		return false;
+	}
+	Properties->StoreActivePaletteSettings();
+	if (!Properties->HasUnsavedPresetChanges())
+	{
+		return true;
+	}
+	const EAppReturnType::Type Answer = FMessageDialog::Open(EAppMsgType::YesNoCancel,
+		EAppReturnType::Cancel,
+		LOCTEXT("SwitchQuestion", "현재 팔레트의 변경을 저장하고 전환할까요?\n\nYes: 현재 팔레트를 저장한 뒤 전환\nNo: 변경을 버리고 전환\nCancel: 현재 팔레트에서 계속 작업"),
+		LOCTEXT("SwitchTitle", "Switch Palette"));
+	return Answer == EAppReturnType::No
+		|| (Answer == EAppReturnType::Yes && Properties.IsValid() && Properties->SaveActivePalette(StatusMessage));
+}
+
+void SMD_PropPresetPanel::SelectPalette(const FGuid& Id)
+{
+	if (!Properties.IsValid() || !Library.IsValid() || Id == Properties->SelectedPresetId)
+	{
+		return;
+	}
+	const FMD_PropPlacementPreset* Found = Library->FindPreset(Id);
+	if (!Found)
+	{
+		return;
+	}
+	// Saving in the dialog may reallocate the library; retain a value snapshot.
+	const FMD_PropPlacementPreset Palette = *Found;
+	if (ConfirmSwitch() && Properties.IsValid() && Library.IsValid() && Library->SetActivePreset(Palette.Id, StatusMessage))
+	{
+		Properties->SetActivePaletteId(Palette.Id);
+		Properties->ApplyPreset(Palette.Data, StatusMessage);
+	}
+	RequestRefresh();
+}
+
+FReply SMD_PropPresetPanel::NewPalette()
+{
+	if (ConfirmSwitch() && Properties.IsValid() && Library.IsValid())
+	{
+		const FMD_PropPlacementPresetData Empty;
+		const FGuid Id = Library->AddPreset(Library->MakeUniqueName(TEXT("Palette")), Empty, StatusMessage);
+		if (Id.IsValid() && Library->SetActivePreset(Id, StatusMessage))
+		{
+			Properties->SetActivePaletteId(Id);
+			Properties->ApplyPreset(Empty, StatusMessage);
+			RequestRefresh();
+			bRenamePending = true;
+		}
+	}
+	return FReply::Handled();
 }
 
 FReply SMD_PropPresetPanel::Load()
@@ -208,37 +269,24 @@ FReply SMD_PropPresetPanel::Load()
 	{
 		return FReply::Handled();
 	}
-	// A dialog or asset load may invalidate the library array; work with a value snapshot.
-	const FMD_PropPlacementPreset Preset = *Library->FindPreset(Properties->SelectedPresetId);
-	if (Properties->HasUnsavedPresetChanges() && !(Properties->CapturePreset() == Preset.Data))
+	const FMD_PropPlacementPreset Palette = *Library->FindPreset(Properties->SelectedPresetId);
+	if (Properties->HasUnsavedPresetChanges()
+		&& FMessageDialog::Open(EAppMsgType::YesNo, EAppReturnType::No,
+			LOCTEXT("ReloadQuestion", "현재 변경을 버리고 이 팔레트의 마지막 저장 내용을 다시 불러올까요?"),
+			LOCTEXT("ReloadTitle", "Reload Palette")) != EAppReturnType::Yes)
 	{
-		const FText Question = FText::Format(LOCTEXT("DiscardQuestion", "현재 작업 구성이 변경되었습니다. {0} 프리셋으로 교체할까요?\n\n변경을 프리셋으로 남기려면 No를 누른 뒤 Save 또는 Save As를 사용하세요."), FText::FromString(Preset.Name));
-		if (FMessageDialog::Open(EAppMsgType::YesNo, EAppReturnType::No, Question, LOCTEXT("LoadTitle", "Load Preset")) != EAppReturnType::Yes)
-		{
-			return FReply::Handled();
-		}
+		return FReply::Handled();
 	}
-	if (Properties.IsValid())
-	{
-		Properties->ApplyPreset(Preset.Data, StatusMessage);
-		if (StatusMessage.IsEmpty())
-		{
-			StatusMessage = FText::Format(LOCTEXT("Loaded", "{0} 프리셋을 불러왔습니다."), FText::FromString(Preset.Name));
-		}
-	}
+	Properties->ApplyPreset(Palette.Data, StatusMessage);
 	return FReply::Handled();
 }
 
 FReply SMD_PropPresetPanel::Save()
 {
-	if (HasSelection())
+	if (Properties.IsValid() && Properties->SaveActivePalette(StatusMessage))
 	{
-		Properties->StoreActivePaletteSettings();
-		if (Library->UpdatePreset(Properties->SelectedPresetId, Properties->CapturePreset(), StatusMessage))
-		{
-			Properties->RememberPresetBaseline(true);
-			StatusMessage = LOCTEXT("Saved", "현재 구성을 선택한 프리셋에 저장했습니다.");
-		}
+		StatusMessage = LOCTEXT("Saved", "현재 팔레트를 저장했습니다.");
+		RequestRefresh();
 	}
 	return FReply::Handled();
 }
@@ -248,13 +296,14 @@ FReply SMD_PropPresetPanel::SaveAs()
 	if (Properties.IsValid() && Library.IsValid())
 	{
 		Properties->StoreActivePaletteSettings();
-		const FGuid NewId = Library->AddPreset(Library->MakeUniqueName(TEXT("Preset")), Properties->CapturePreset(), StatusMessage);
-		if (NewId.IsValid())
+		const FGuid Id = Library->AddPreset(Library->MakeUniqueName(TEXT("Palette")), Properties->CapturePreset(), StatusMessage);
+		if (Id.IsValid() && Library->SetActivePreset(Id, StatusMessage))
 		{
-			Properties->SelectedPresetId = NewId;
-			Properties->RememberPresetBaseline(true);
+			Properties->SetActivePaletteId(Id);
+			GetMutableDefault<UMD_PropPaletteSettings>()->MarkEntriesSaved();
+			RequestRefresh();
 			bRenamePending = true;
-			StatusMessage = LOCTEXT("Created", "새 프리셋을 저장했습니다. 이름을 입력하고 Enter를 누르세요.");
+			StatusMessage = LOCTEXT("Created", "별도 팔레트로 저장했습니다. 이름을 입력하고 Enter를 누르세요.");
 		}
 	}
 	return FReply::Handled();
@@ -262,17 +311,8 @@ FReply SMD_PropPresetPanel::SaveAs()
 
 FReply SMD_PropPresetPanel::Duplicate()
 {
-	if (HasSelection())
-	{
-		const FGuid NewId = Library->DuplicatePreset(Properties->SelectedPresetId, StatusMessage);
-		if (NewId.IsValid())
-		{
-			Properties->SelectedPresetId = NewId;
-			bRenamePending = true;
-			StatusMessage = LOCTEXT("Duplicated", "저장된 프리셋을 복제했습니다. 이름을 바꾸고 Load로 불러올 수 있습니다.");
-		}
-	}
-	return FReply::Handled();
+	// Duplicate the working collection, including edits, so the displayed name always matches its contents.
+	return SaveAs();
 }
 
 FReply SMD_PropPresetPanel::Delete()
@@ -281,21 +321,14 @@ FReply SMD_PropPresetPanel::Delete()
 	{
 		return FReply::Handled();
 	}
-	const FMD_PropPlacementPreset Preset = *Library->FindPreset(Properties->SelectedPresetId);
-	const FText Question = FText::Format(LOCTEXT("DeleteQuestion", "{0} 프리셋의 저장 기록을 삭제할까요?\n\n프리셋 삭제는 레벨 Undo로 복원되지 않습니다. 현재 팔레트와 레벨에 배치한 소품은 유지됩니다."), FText::FromString(Preset.Name));
-	if (FMessageDialog::Open(EAppMsgType::YesNo, EAppReturnType::No, Question, LOCTEXT("DeleteTitle", "Delete Preset")) == EAppReturnType::Yes
-		&& Library.IsValid() && Library->DeletePreset(Preset.Id, StatusMessage))
+	const FMD_PropPlacementPreset Palette = *Library->FindPreset(Properties->SelectedPresetId);
+	const FText Question = FText::Format(LOCTEXT("DeleteQuestion", "{0} 팔레트의 저장 기록을 삭제할까요?\n\n현재 목록은 이름 없는 팔레트로 유지됩니다. 레벨의 소품과 원본 에셋은 유지됩니다. 저장 기록 삭제는 레벨 Undo로 복원되지 않습니다."), FText::FromString(Palette.Name));
+	if (FMessageDialog::Open(EAppMsgType::YesNo, EAppReturnType::No, Question, LOCTEXT("DeleteTitle", "Delete Palette")) == EAppReturnType::Yes
+		&& Library.IsValid() && Library->DeletePreset(Palette.Id, StatusMessage))
 	{
-		if (Properties.IsValid() && Properties->CapturePreset() == Preset.Data)
-		{
-			const bool bAnotherCopy = Library->GetPresets().ContainsByPredicate([&Preset](const FMD_PropPlacementPreset& Item)
-				{ return Item.Data == Preset.Data; });
-			if (!bAnotherCopy)
-			{
-				Properties->RememberPresetBaseline(false);
-			}
-		}
-		StatusMessage = LOCTEXT("Deleted", "프리셋을 삭제했습니다. 현재 팔레트와 배치 결과는 유지됩니다.");
+		Properties->SetActivePaletteId(FGuid());
+		RequestRefresh();
+		StatusMessage = LOCTEXT("Deleted", "팔레트 저장 기록을 삭제했습니다. 현재 목록은 Save As로 다시 저장할 수 있습니다.");
 	}
 	return FReply::Handled();
 }
@@ -304,7 +337,7 @@ FReply SMD_PropPresetPanel::SaveLibrary()
 {
 	if (Library.IsValid() && Library->SaveLibrary(StatusMessage))
 	{
-		StatusMessage = LOCTEXT("LibrarySaved", "변경된 프리셋 에셋 참조를 저장했습니다.");
+		StatusMessage = LOCTEXT("LibrarySaved", "변경된 팔레트 에셋 참조를 저장했습니다.");
 	}
 	return FReply::Handled();
 }

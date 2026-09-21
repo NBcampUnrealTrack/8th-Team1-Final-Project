@@ -171,19 +171,6 @@ void UMD_PropPaletteSettings::SetPlacementSettings(
 	}
 }
 
-bool UMD_PropPaletteSettings::SavePalette(FText& OutError)
-{
-	OutError = FText::GetEmpty();
-	if (!TryUpdateDefaultConfigFile())
-	{
-		OutError = FText::Format(LOCTEXT("SaveFailed", "팔레트를 저장하지 못했습니다.\n\n아래 설정 파일에 쓸 수 있는지 확인한 뒤 다시 저장하세요.\n{0}"), FText::FromString(GetDefaultConfigFilename()));
-		return false;
-	}
-	bUnsavedChanges = false;
-	OnChanged.Broadcast();
-	return true;
-}
-
 void UMD_PropPaletteSettings::HandleAssetRenamed(const FAssetData& Asset, const FString& OldObjectPath)
 {
 	const FSoftObjectPath OldPath(OldObjectPath);
