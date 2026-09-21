@@ -3,7 +3,6 @@
 
 #include "Player/MD_PlayerController.h"
 #include "UI/Game/MD_HUDWidget.h"
-#include "UI/Game/MD_ScrapeFocusReticleWidget.h"
 #include "UI/MD_LocalUIManager.h"
 #include "UI/Game/MD_DailyReportWidget.h"
 
@@ -46,7 +45,6 @@
 AMD_PlayerController::AMD_PlayerController()
 {
 	PlayerCameraManagerClass = AMD_PlayerCameraManager::StaticClass();
-	ScrapeFocusReticleWidgetClass = UMD_ScrapeFocusReticleWidget::StaticClass();
 }
 
 void AMD_PlayerController::CancelScrapeInteraction()
@@ -451,40 +449,6 @@ void AMD_PlayerController::ClientNotifyPlayerJoinAndExit_Implementation(const FT
 	HUD->HandlePlayerJoinAndExit(PlayerName, bIsJoin);
 }
 
-void AMD_PlayerController::InitializeScrapeFocusReticle()
-{
-	if (IsLocalController() == false || ScrapeFocusReticleWidgetClass == nullptr)
-	{
-		return;
-	}
-
-	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
-	{
-		ScrapeFocusReticleWidgetInstance =
-			CreateWidget<UMD_ScrapeFocusReticleWidget>(
-				this,
-				ScrapeFocusReticleWidgetClass);
-	}
-
-	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
-	{
-		return;
-	}
-
-	// 파생 Blueprint defaults와 무관하게 이 overlay 전체를 비입력형으로 고정한다.
-	ScrapeFocusReticleWidgetInstance->SetVisibility(ESlateVisibility::HitTestInvisible);
-	ScrapeFocusReticleWidgetInstance->SetIsFocusable(false);
-	ScrapeFocusReticleWidgetInstance->ForceVolatile(true);
-
-	// Seamless Travel에서 유효한 위젯이 기존 viewport에서 제거된 경우에도 복구한다.
-	if (ScrapeFocusReticleWidgetInstance->IsInViewport() == false)
-	{
-		// Owning local player 영역에만 붙여 split-screen이나 다중 local player에서도
-		// 다른 플레이어의 normalized 좌표/입력을 시각화하지 않는다.
-		ScrapeFocusReticleWidgetInstance->AddToPlayerScreen(1000);
-	}
-}
-
 void AMD_PlayerController::MD_ApplyTestDamage()
 {
 	ServerApplyTestDamage();
@@ -646,7 +610,6 @@ void AMD_PlayerController::BeginPlay()
 				&AMD_PlayerController::HandleApplicationWillDeactivate);
 	}
 
-	InitializeScrapeFocusReticle();
 }
 
 void AMD_PlayerController::BeginPlayingState()
@@ -654,7 +617,6 @@ void AMD_PlayerController::BeginPlayingState()
 	Super::BeginPlayingState();
 
 	InitializeGameplayHUD();
-	InitializeScrapeFocusReticle();
 	SubmitPlatformNickname();
 	RestoreAppearanceFromLocalSave();
 
@@ -666,7 +628,6 @@ void AMD_PlayerController::PostSeamlessTravel()
 	Super::PostSeamlessTravel();
 
 	InitializeGameplayHUD();
-	InitializeScrapeFocusReticle();
 	SubmitPlatformNickname();
 	RestoreAppearanceFromLocalSave();
 
@@ -682,7 +643,6 @@ void AMD_PlayerController::SetPawn(APawn* InPawn)
 	{
 		// 최초 스폰과 재스폰 모두 Pawn 지정이 끝난 뒤 HUD를 보장하는 처리
 		InitializeGameplayHUD();
-		InitializeScrapeFocusReticle();
 	}
 }
 
@@ -696,13 +656,6 @@ void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			ApplicationWillDeactivateHandle);
 		ApplicationWillDeactivateHandle.Reset();
 	}
-
-	if (IsValid(ScrapeFocusReticleWidgetInstance))
-	{
-		ScrapeFocusReticleWidgetInstance->RemoveFromParent();
-		ScrapeFocusReticleWidgetInstance = nullptr;
-	}
-
 
 	CancelScrapeInteraction();
 	Super::EndPlay(EndPlayReason);
@@ -718,13 +671,6 @@ void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
 	if (IsValid(HUDWidgetInstance))
 	{
 		HUDWidgetInstance->SetVisibility(Target);
-	}
-
-	// 중앙 조준점은 GameHUD 레이어 밖의 별도 오버레이이므로 함께 숨긴다.
-	if (IsValid(ScrapeFocusReticleWidgetInstance))
-	{
-		ScrapeFocusReticleWidgetInstance->SetVisibility(
-			bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
 }
 

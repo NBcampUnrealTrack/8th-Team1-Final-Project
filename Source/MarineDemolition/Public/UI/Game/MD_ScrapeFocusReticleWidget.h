@@ -7,10 +7,10 @@
 #include "MD_ScrapeFocusReticleWidget.generated.h"
 
 /**
- * 화면 고정 헤라 Focus의 가상 포인터를 그리는 입력 비소비형 위젯이다.
+ * GameHUD의 자식으로 중앙 조준점과 헤라 Focus 포인터를 그리는 입력 비소비형 위젯이다.
  *
- * 별도 Blueprint 자산이 없어도 동작하며, normalized 포인터를 현재 위젯 크기에
- * 매 프레임 투영하므로 해상도와 DPI가 바뀌어도 Trace ray와 같은 화면 좌표를 쓴다.
+ * HUD의 전체 영역에 배치하고 생성과 표시 여부는 부모 HUD에 맡긴다.
+ * 플레이어 화면의 normalized 좌표를 위젯 로컬 좌표로 변환하여 SafeZone과 DPI를 반영한다.
  */
 UCLASS()
 class MARINEDEMOLITION_API UMD_ScrapeFocusReticleWidget : public UUserWidget
@@ -21,6 +21,8 @@ public:
 	UMD_ScrapeFocusReticleWidget(const FObjectInitializer& ObjectInitializer);
 
 protected:
+	virtual void NativeConstruct() override;
+
 	virtual int32 NativePaint(
 		const FPaintArgs& Args,
 		const FGeometry& AllottedGeometry,

@@ -17,7 +17,6 @@ class AMD_DayEndConsole;
 class AMD_SectorCloseoutMarker;
 class AMD_Merchant;
 class UMD_HUDWidget;
-class UMD_ScrapeFocusReticleWidget;
 class UMD_SiteDefinition;
 class UMD_MerchantSubsystem;
 class UGameplayEffect;
@@ -270,18 +269,8 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMD_HUDWidget> HUDWidgetInstance;
 
-	/** Blueprint 자산이 없어도 동작하는 Focus 가상 포인터. */
-	UPROPERTY(EditDefaultsOnly, Category = "HUD|Scrape")
-	TSubclassOf<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetClass;
-
-	UPROPERTY()
-	TObjectPtr<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetInstance;
-
 	// 로컬 플레이어의 메인 HUD를 생성하거나 화면에 복구하는 처리
 	void InitializeGameplayHUD();
-
-	// 로컬 플레이어의 헤라 Focus 포인터를 생성하거나 화면에 복구하는 처리
-	void InitializeScrapeFocusReticle();
 
 	/* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 private:
