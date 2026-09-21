@@ -11,6 +11,7 @@ public:
 	static TMap<FName, TArray<TSharedPtr<FUICommandInfo>>> GetCommands();
 
 	TSharedPtr<FUICommandInfo> PlacementTool;
+	TSharedPtr<FUICommandInfo> PropPlacementTool;
 	TSharedPtr<FUICommandInfo> StainPlacementTool;
 
 private:
