@@ -280,7 +280,9 @@ void AMD_QuestSampleSpawner::TrySpawnForMainQuestState(const UMD_MerchantSubsyst
 	// 공통 Definition의 청소·마감 페이즈는 각 전용 진행 시스템이 처리하므로 샘플을 만들지 않는 분기
 	EMD_QuestObjectiveType ObjectiveType = Definition->GetObjectiveType(QuestState.CurrentPhaseIndex);
 	bool bIsRecoveryObjective = ObjectiveType == EMD_QuestObjectiveType::RecoverIntact || ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
-	if (bIsRecoveryObjective == false)
+	// 핫바 회수물(RequiredItemDefinition) 페이즈는 단말 등 레벨 기믹이 지급하므로 샘플을 만들지 않는다
+	bool bUsesHotbarDelivery = Definition->UsesHotbarDelivery(QuestState.CurrentPhaseIndex);
+	if (bIsRecoveryObjective == false || bUsesHotbarDelivery == true)
 	{
 		// 생성 대상이 아닌 Phase도 같은 상태 알림에서 반복 검사하지 않도록 Definition을 기록한다.
 		LastSpawnedMainQuestDefinitionId = QuestState.DefinitionId;

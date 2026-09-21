@@ -8,6 +8,7 @@
 #include "MD_QuestDefinition.generated.h"
 
 class AMD_QuestItem;
+class UMD_QuestItemDefinition;
 
 /** 메인·반복 배치와 무관하게 순차 목표 하나를 정의하는 공통 페이즈 데이터 */
 USTRUCT(BlueprintType)
@@ -29,6 +30,14 @@ struct MARINEDEMOLITION_API FMD_QuestPhaseData
 	/** 이 페이즈에 스폰하거나 귀속할 퀘스트 아이템 클래스이며 비어 있으면 클래스를 제한하지 않는 설정 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
 	TSubclassOf<AMD_QuestItem> RequiredItemClass;
+
+	/**
+	 * 핫바에 보관하는 회수물 정의(연구 데이터 카트리지 등). 지정하면 이 페이즈는 손 운반 대신
+	 * 브릭스 대화 시 핫바에서 자동 납품되고, 스포너는 이 페이즈의 샘플을 만들지 않는다.
+	 * 회수물은 단말 등 레벨 기믹이 지급한다.
+	 */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
+	TObjectPtr<UMD_QuestItemDefinition> RequiredItemDefinition;
 
 	/** 비어 있으면 등급을 제한하지 않고 값이 있으면 하나와 일치해야 하는 허용 등급 목록 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
@@ -61,6 +70,15 @@ public:
 
 	/** 퀘스트에 귀속된 아이템의 등급이 현재 회수 목표에 포함되는지 판정하는 함수 */
 	bool TargetsQuestItem(const FGameplayTag& GradeTag) const;
+
+	/**
+	 * 핫바 회수물 정의가 현재 페이즈의 납품 대상인지 판정하는 함수.
+	 * RequiredItemDefinition이 지정되면 같은 정의만, 비어 있으면 정의의 QuestDefinitionId가 이 퀘스트와 같을 때 받는다.
+	 */
+	bool AcceptsQuestItemDefinition(const UMD_QuestItemDefinition* SubmittedItem, const FPrimaryAssetId& OwningQuestId) const;
+
+	/** 이 페이즈가 핫바 회수물로 진행되는지 (스포너가 샘플을 만들지 않아야 하는지) */
+	bool UsesHotbarDelivery() const { return RequiredItemDefinition != nullptr; }
 
 };
 
@@ -147,6 +165,12 @@ public:
 
 	/** 제출된 퀘스트 아이템 액터가 현재 목표의 샘플 등급·손상 조건을 충족하는지 판정하는 함수 */
 	bool AcceptsQuestItem(int32 PhaseIndex, AMD_QuestItem* SubmittedItem) const;
+
+	/** 핫바 회수물 정의가 지정 페이즈의 납품 조건을 충족하는지 판정하는 함수 */
+	bool AcceptsQuestItemDefinition(int32 PhaseIndex, const UMD_QuestItemDefinition* SubmittedItem) const;
+
+	/** 지정 페이즈가 핫바 회수물(RequiredItemDefinition)로 진행되는지 판정하는 함수 */
+	bool UsesHotbarDelivery(int32 PhaseIndex) const;
 
 	/** 퀘스트에 귀속된 파괴 아이템의 등급이 현재 회수 목표와 일치하는지 판정하는 함수 */
 	bool TargetsQuestItem(int32 PhaseIndex, const FGameplayTag& GradeTag) const;

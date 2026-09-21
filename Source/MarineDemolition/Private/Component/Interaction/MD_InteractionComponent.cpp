@@ -353,6 +353,9 @@ void UMD_InteractionComponent::Interact()
 
 	AActor* Target = CurrentTarget.Get();
 
+	// 이전 홀드가 해제 없이 남아 있으면 새 입력 전에 정리한다.
+	HoldInteractionTarget.Reset();
+
 	// New interactables are server-authoritative by default. UI-only targets must explicitly opt out.
 	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
 	{
@@ -360,6 +363,12 @@ void UMD_InteractionComponent::Interact()
 		{
 			SetCurrentTarget(nullptr);
 			return;
+		}
+
+		// 홀드 대상은 키를 뗄 때 같은 경로로 InteractReleased를 보내야 하므로 기억해 둔다.
+		if (IMD_Interactable::Execute_IsHoldInteraction(Target))
+		{
+			HoldInteractionTarget = Target;
 		}
 
 		const bool bRequiresServerInteraction =
@@ -375,8 +384,46 @@ void UMD_InteractionComponent::Interact()
 	ServerInteract(Target);
 }
 
+void UMD_InteractionComponent::InteractReleased()
+{
+	AActor* Target = HoldInteractionTarget.Get();
+	HoldInteractionTarget.Reset();
+
+	APawn* OwnerPawn = GetOwnerPawn();
+	if (!IsValid(OwnerPawn) || !IsValid(Target) || !Target->Implements<UMD_Interactable>())
+	{
+		return;
+	}
+
+	// Interact와 같은 경로로 보낸다. 로컬 전용 대상은 서버를 거치지 않는다.
+	if (!IMD_Interactable::Execute_RequiresServerInteraction(Target))
+	{
+		IMD_Interactable::Execute_InteractReleased(Target, OwnerPawn);
+		return;
+	}
+
+	ServerInteractReleased(Target);
+}
+
+void UMD_InteractionComponent::ServerInteractReleased_Implementation(AActor* RequestedActor)
+{
+	APawn* OwnerPawn = GetOwnerPawn();
+	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()) return;
+
+	// 해제는 진행 중인 홀드를 멈출 뿐이라 조준·거리·간격 검증 없이 대상에 넘긴다. 대상이 자기 홀더인지 확인한다.
+	if (!IsValid(RequestedActor) || !RequestedActor->Implements<UMD_Interactable>()
+		|| !IMD_Interactable::Execute_IsHoldInteraction(RequestedActor))
+	{
+		return;
+	}
+
+	IMD_Interactable::Execute_InteractReleased(RequestedActor, OwnerPawn);
+}
+
 void UMD_InteractionComponent::CancelInteraction()
 {
+	// 키 해제를 못 받는 상황(사망·이동)에서도 홀드 대상은 서버 틱의 CanOwnerInteract 검사로 스스로 멈춘다.
+	HoldInteractionTarget.Reset();
 	SetCurrentTarget(nullptr);
 	SetCurrentInteractionPrompt(FText::GetEmpty());
 

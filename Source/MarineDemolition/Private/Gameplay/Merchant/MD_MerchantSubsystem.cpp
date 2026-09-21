@@ -14,6 +14,7 @@
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
+#include "Data/Equipment/MD_QuestItemDefinition.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Game/MD_GameStateBase.h"
 #include "GameplayTags/MD_GameplayTags.h"
@@ -782,26 +783,8 @@ bool UMD_MerchantSubsystem::TryDeliverQuestItem(AMD_QuestItem* SubmittedItem)
 		}
 
 		FMD_MainQuestState& QuestState = MainQuests[Delivery.QuestIndex];
-		UMD_QuestDefinition* Definition = Delivery.Definition;
-		++QuestState.CurrentProgress;
+		ApplyMainQuestDeliveryProgress(QuestState, *Delivery.Definition);
 		bChanged = true;
-
-		int32 RequiredCount = Definition->GetRequiredCount(QuestState.CurrentPhaseIndex);
-		if (QuestState.CurrentProgress >= RequiredCount)
-		{
-			// 다단계 퀘스트의 경우 순서대로 진행하기 위한 전환
-			bool bHasNextPhase = Definition->HasPhase(QuestState.CurrentPhaseIndex + 1);
-			if (bHasNextPhase == true)
-			{
-				++QuestState.CurrentPhaseIndex;
-				QuestState.CurrentProgress = 0;
-			}
-			else
-			{
-				QuestState.Status = EMD_MainQuestStatus::Completed;
-				ApplyMainQuestReward(*Definition);
-			}
-		}
 	}
 
 	for (FAcceptedQuestDelivery& Delivery : AcceptedRepeatDeliveries)
@@ -1381,6 +1364,88 @@ FGameplayTag UMD_MerchantSubsystem::GradeTagFromSampleGrade(EMD_SampleGrade Grad
 	return FGameplayTag::RequestGameplayTag(
 		FName(*FString::Printf(TEXT("Resource.Sample.Grade.%s"), *ShortName)),
 		/*ErrorIfNotFound=*/false);
+}
+
+void UMD_MerchantSubsystem::ApplyMainQuestDeliveryProgress(FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition)
+{
+	++QuestState.CurrentProgress;
+
+	int32 RequiredCount = Definition.GetRequiredCount(QuestState.CurrentPhaseIndex);
+	if (QuestState.CurrentProgress < RequiredCount)
+	{
+		return;
+	}
+
+	// 다단계 퀘스트의 경우 순서대로 진행하기 위한 전환
+	bool bHasNextPhase = Definition.HasPhase(QuestState.CurrentPhaseIndex + 1);
+	if (bHasNextPhase == true)
+	{
+		++QuestState.CurrentPhaseIndex;
+		QuestState.CurrentProgress = 0;
+	}
+	else
+	{
+		QuestState.Status = EMD_MainQuestStatus::Completed;
+		ApplyMainQuestReward(Definition);
+	}
+}
+
+int32 UMD_MerchantSubsystem::TryDeliverQuestItemDefinition(const UMD_QuestItemDefinition* SubmittedItem, int32 AvailableCount)
+{
+	if (IsValid(SubmittedItem) == false || AvailableCount <= 0)
+	{
+		return 0;
+	}
+
+	int32 DeliveredCount = 0;
+	int32 RemainingCount = AvailableCount;
+
+	for (FMD_MainQuestState& QuestState : MainQuests)
+	{
+		if (RemainingCount <= 0)
+		{
+			break;
+		}
+
+		if (QuestState.IsActive() == false)
+		{
+			continue;
+		}
+
+		UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+		if (IsValid(Definition) == false || Definition->HasPhase(QuestState.CurrentPhaseIndex) == false)
+		{
+			continue;
+		}
+
+		if (Definition->AcceptsQuestItemDefinition(QuestState.CurrentPhaseIndex, SubmittedItem) == false)
+		{
+			continue;
+		}
+
+		// 현재 페이즈가 더 필요로 하는 개수만 받는다. 페이즈가 넘어가도 남은 개수는 다음 페이즈가 다시 판정한다
+		int32 RequiredCount = FMath::Max(Definition->GetRequiredCount(QuestState.CurrentPhaseIndex), 1);
+		int32 NeededCount = FMath::Max(RequiredCount - QuestState.CurrentProgress, 0);
+		int32 AcceptCount = FMath::Min(NeededCount, RemainingCount);
+		for (int32 Index = 0; Index < AcceptCount; ++Index)
+		{
+			ApplyMainQuestDeliveryProgress(QuestState, *Definition);
+		}
+
+		DeliveredCount += AcceptCount;
+		RemainingCount -= AcceptCount;
+
+		UE_LOG(LogTemp, Log, TEXT("[Merchant] 핫바 회수물 납품: %s x%d → %s Phase %d (%d/%d, 상태 %d)"),
+			*SubmittedItem->ItemName.ToString(), AcceptCount, *Definition->QuestName.ToString(), QuestState.CurrentPhaseIndex,
+			QuestState.CurrentProgress, RequiredCount, static_cast<int32>(QuestState.Status));
+	}
+
+	if (DeliveredCount > 0)
+	{
+		OnMerchantStateChanged.Broadcast();
+	}
+
+	return DeliveredCount;
 }
 
 void UMD_MerchantSubsystem::ApplyMainQuestReward(const UMD_QuestDefinition& Definition)

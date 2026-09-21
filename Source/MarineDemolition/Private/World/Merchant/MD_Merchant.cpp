@@ -167,6 +167,36 @@ void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 
 	// 상태 갱신과 하위 화면 연결에 사용할 활성 메뉴를 저장한다.
 	ActiveMenuWidget = Widget;
+
+	// 핫바에 든 회수물(카트리지)은 대화를 열면 자동 납품된다. 리슨 서버 호스트는 응답이 즉시 오므로 메뉴 저장 뒤에 요청한다
+	RequestHotbarQuestDelivery(PC);
+}
+
+void AMD_Merchant::RequestHotbarQuestDelivery(APlayerController* PC)
+{
+	AMD_PlayerController* MDPC = Cast<AMD_PlayerController>(PC);
+	if (IsValid(MDPC) == true)
+	{
+		MDPC->ServerDeliverHotbarQuestItems(this);
+	}
+}
+
+void AMD_Merchant::ReceiveQuestItemDelivery(AMD_PlayerController* Requester, const FText& ItemName, int32 Count)
+{
+	const FText Line = FText::Format(QuestDeliveryDialogue, ItemName, FText::AsNumber(Count));
+
+	// 요청자가 연 대화창이 아직 열려 있으면 그곳에, 아니면 HUD 알림으로 전달한다
+	if (ActiveMenuWidget.IsValid() == true && ActiveMenuWidget->GetOwningPlayer() == Requester)
+	{
+		ActiveMenuWidget->ShowDialogueLine(Line);
+		return;
+	}
+
+	// 로컬 컨트롤러에서 부르는 Client RPC는 그 자리에서 실행된다
+	if (IsValid(Requester) == true)
+	{
+		Requester->ClientShowHUDMessage(Line);
+	}
 }
 
 void AMD_Merchant::HandleMenuExitRequested()
