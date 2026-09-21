@@ -137,7 +137,7 @@ void SMD_PropPalette::Construct(const FArguments& Args)
 			+ SWrapBox::Slot()
 			[
 				SNew(SButton).Text(LOCTEXT("Save", "Save Palette"))
-				.IsEnabled_Lambda([this] { return Palette.IsValid() && Palette->HasUnsavedChanges(); })
+				.IsEnabled_Lambda([this] { return Properties.IsValid() && Properties->HasUnsavedPresetChanges(); })
 				.OnClicked(this, &SMD_PropPalette::SavePalette)
 			]
 		]
@@ -221,7 +221,7 @@ void SMD_PropPalette::Construct(const FArguments& Args)
 			{
 				return FText::Format(LOCTEXT("Count", "{0} shown / {1} total | Mix: {2}\n{3}"), FText::AsNumber(Items.Num()),
 					FText::AsNumber(Palette.IsValid() ? Palette->GetEntries().Num() : 0), FText::AsNumber(MixEntryCount),
-					Palette.IsValid() && Palette->HasUnsavedChanges() ? LOCTEXT("Unsaved", "Unsaved changes") : LOCTEXT("Saved", "Saved"));
+					Properties.IsValid() && Properties->HasUnsavedPresetChanges() ? LOCTEXT("Unsaved", "Unsaved changes") : LOCTEXT("Saved", "Saved"));
 			})
 		]
 		+ SVerticalBox::Slot().AutoHeight().Padding(0, 2)
@@ -622,7 +622,7 @@ FReply SMD_PropPalette::SavePalette()
 	if (Palette.IsValid())
 	{
 		FText Error;
-		StatusMessage = Palette->SavePalette(Error) ? LOCTEXT("SaveSucceeded", "팔레트와 소품별 배치 설정을 저장했습니다.\n\n다음 실행에서도 같은 항목과 설정을 사용할 수 있습니다.") : Error;
+		StatusMessage = Properties.IsValid() && Properties->SaveActivePalette(Error) ? LOCTEXT("SaveSucceeded", "팔레트와 소품별 배치 설정을 저장했습니다.\n\n다음 실행에서도 같은 항목과 설정을 사용할 수 있습니다.") : Error;
 	}
 	return FReply::Handled();
 }
@@ -645,8 +645,8 @@ void FMD_PropPaletteCustomization::CustomizeDetails(IDetailLayoutBuilder& Detail
 	{
 		return;
 	}
-	DetailBuilder.EditCategory(TEXT("Presets"), LOCTEXT("PresetsCategory", "Presets"), ECategoryPriority::Important)
-		.AddCustomRow(LOCTEXT("PresetsSearch", "Presets Save Load Duplicate F2"))
+	DetailBuilder.EditCategory(TEXT("Presets"), LOCTEXT("PresetsCategory", "Palettes"), ECategoryPriority::Important)
+		.AddCustomRow(LOCTEXT("PresetsSearch", "Palettes New Save Reload Duplicate F2"))
 		.WholeRowContent().MinDesiredWidth(260)
 		[SNew(SMD_PropPresetPanel).Properties(TWeakObjectPtr<UMD_PropPlacementProperties>(Properties))];
 	DetailBuilder.EditCategory(TEXT("Brush"), LOCTEXT("BrushCategory", "Brush"), ECategoryPriority::Important)

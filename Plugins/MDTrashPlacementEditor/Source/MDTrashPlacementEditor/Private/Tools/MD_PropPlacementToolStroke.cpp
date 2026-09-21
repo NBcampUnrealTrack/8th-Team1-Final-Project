@@ -63,6 +63,7 @@ void UMD_PropPlacementTool::OnClickPress(const FInputDeviceRay& PressPos)
 		}
 	}
 	HasReachedStrokeLimit();
+	OnUpdateHover(PressPos);
 }
 
 void UMD_PropPlacementTool::OnClickDrag(const FInputDeviceRay& DragPos)
@@ -223,8 +224,9 @@ bool UMD_PropPlacementTool::TryPlaceAtHit(const FHitResult& Hit)
 	{
 		return false;
 	}
-	const FTransform Transform = BuildPlacementTransform(Hit);
-	if (!IsPlacementSafe(Transform))
+	const FMD_PropSurfacePlacement Placement = BuildPlacement(Hit);
+	const FTransform& Transform = Placement.Transform;
+	if (!IsPlacementSafe(Placement))
 	{
 		return false;
 	}
@@ -258,6 +260,7 @@ bool UMD_PropPlacementTool::TryPlaceAtHit(const FHitResult& Hit)
 	Actor->MarkPackageDirty();
 	StrokePlacedActors.Add(Actor);
 	++StrokeChangeCount;
+	ConsumeMixCandidate();
 	++PreviewCandidateIndex;
 	RefreshCandidatePreview();
 	return true;

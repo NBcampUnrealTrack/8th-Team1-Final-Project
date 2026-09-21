@@ -8,6 +8,8 @@
 #include "Tools/MD_PropPlacementCandidate.h"
 #include "Presets/MD_PropPlacementPreset.h"
 #include "Tools/MD_PropPlacementStroke.h"
+#include "Tools/MD_PropMixSelection.h"
+#include "Tools/MD_PropPlacementSurface.h"
 #include "Tools/MD_PropPlacementSettings.h"
 #include "UObject/SoftObjectPtr.h"
 #include "MD_PropPlacementTool.generated.h"
@@ -53,7 +55,7 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Brush", meta = (DisplayName = "Action", ToolTip = "Place는 소품을 배치하고 Erase는 직접 가리킨 소품을 삭제합니다. Place에서도 Shift를 먼저 누르고 클릭·드래그하면 그 드래그만 Erase로 처리합니다.\n\nErase는 이 도구로 배치 표시를 남긴 현재 레벨의 소품만 삭제합니다. 기존 수동 배치와 이전 버전에서 만든 소품은 제외합니다."))
 	EMD_PropBrushAction Action = EMD_PropBrushAction::Place;
 
-	UPROPERTY(EditAnywhere, Category = "Brush", meta = (DisplayName = "Selection Mode", EditCondition = "Action == EMD_PropBrushAction::Place", ToolTip = "Selected Item은 선택한 소품을 사용합니다. Palette Mix는 팔레트에서 Mix를 체크한 항목들을 같은 확률로 고릅니다.\n\n검색·분류 필터는 혼합 대상에 영향을 주지 않습니다. 항목 이름을 클릭하면 Selected Item으로 돌아갑니다."))
+	UPROPERTY(EditAnywhere, Category = "Brush", meta = (DisplayName = "Selection Mode", EditCondition = "Action == EMD_PropBrushAction::Place", ToolTip = "Selected Item은 선택한 소품을 사용합니다. Palette Mix는 팔레트에서 Mix를 체크한 항목들을 동일한 기본 확률로 무작위 선택하며, 오래 선택되지 않은 항목의 확률을 조금 높입니다. 반복 선택도 가능합니다.\n\n검색·분류 필터는 혼합 대상에 영향을 주지 않습니다. 항목 이름을 클릭하면 Selected Item으로 돌아갑니다."))
 	EMD_PropBrushSelection SelectionMode = EMD_PropBrushSelection::SelectedItem;
 
 	UPROPERTY(EditAnywhere, Category = "Brush", meta = (DisplayName = "Continuous", ToolTip = "켜면 왼쪽 드래그로 연속 배치·삭제합니다. 끄면 클릭할 때 한 개만 처리합니다.\n\n버튼을 누른 순간부터 놓을 때까지 한 번의 Undo로 묶습니다."))
@@ -131,8 +133,9 @@ public:
 	void ClearUnavailablePresetSource() { UnavailablePresetSource.Reset(); }
 	FMD_PropPlacementPresetData CapturePreset() const;
 	void ApplyPreset(const FMD_PropPlacementPresetData& Data, FText& OutWarning);
-	void RememberPresetBaseline(bool bSaved);
 	bool HasUnsavedPresetChanges() const;
+	bool SaveActivePalette(FText& OutError);
+	void SetActivePaletteId(const FGuid& Id);
 
 	UPROPERTY(Transient, meta = (TransientToolProperty))
 	FGuid SelectedPresetId;
@@ -161,9 +164,7 @@ public:
 
 private:
 	void RotateSelectedAxis(double DeltaDegrees);
-	FMD_PropPlacementPresetData PresetBaseline;
 	FSoftObjectPath UnavailablePresetSource;
-	bool bPresetBaselineSaved = false;
 };
 
 UCLASS()
@@ -209,6 +210,7 @@ private:
 	void HandlePaletteAssetSelected(bool bPreservePreviewPose);
 	void HandlePlacementSettingsChanged();
 	void AdvancePreviewCandidate();
+	void ConsumeMixCandidate();
 	void FreezePreviewPose();
 	void InvalidatePreview();
 	void HandlePaletteChanged();
@@ -228,8 +230,8 @@ private:
 	void HidePreview();
 	bool CanEditLevel() const;
 	bool TraceSurface(const FInputDeviceRay& DevicePos, FHitResult& Hit) const;
-	FTransform BuildPlacementTransform(const FHitResult& Hit) const;
-	bool IsPlacementSafe(const FTransform& Transform) const;
+	FMD_PropSurfacePlacement BuildPlacement(const FHitResult& Hit) const;
+	bool IsPlacementSafe(const FMD_PropSurfacePlacement& Placement) const;
 	void UpdatePreview(const FHitResult& Hit);
 	void ShowWheelPreview();
 
@@ -256,6 +258,7 @@ private:
 	TWeakObjectPtr<AActor> EraseHoverActor;
 	TArray<TWeakObjectPtr<AActor>> StrokePlacedActors;
 	FMD_PropPlacementStrokePath StrokePath;
+	FMD_PropMixSelection MixSelection;
 	FInputDeviceRay LastStrokeRay;
 	EMD_PropBrushAction StrokeAction = EMD_PropBrushAction::Place;
 	int32 StrokeChangeCount = 0;

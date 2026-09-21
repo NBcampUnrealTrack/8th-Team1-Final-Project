@@ -2,18 +2,15 @@
 
 #include "MD_TrashPlacementSettings.h"
 #include "Palette/MD_PropPaletteSettings.h"
+#include "Presets/MD_PropPresetSettings.h"
 #include "BaseBehaviors/MouseHoverBehavior.h"
 #include "BaseBehaviors/MouseWheelBehavior.h"
 #include "BaseBehaviors/ClickDragBehavior.h"
-#include "Math/RandomStream.h"
-#include "Templates/TypeHash.h"
 #include "CollisionQueryParams.h"
-#include "CollisionShape.h"
 #include "Components/StaticMeshComponent.h"
 #include "Editor.h"
 #include "Engine/HitResult.h"
 #include "Engine/Level.h"
-#include "Engine/OverlapResult.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
@@ -169,6 +166,23 @@ void UMD_PropPlacementTool::Setup()
 	Properties->RestoreProperties(this);
 	Properties->SanitizeBrushSettings();
 	Properties->Placement.Sanitize();
+	UMD_PropPaletteSettings* Palette = GetMutableDefault<UMD_PropPaletteSettings>();
+	if (!Palette->bWorkingPaletteInitialized)
+	{
+		Palette->bWorkingPaletteInitialized = true;
+		const UMD_PropPresetSettings* Library = GetDefault<UMD_PropPresetSettings>();
+		if (const FMD_PropPlacementPreset* Saved = Library->FindPreset(Library->GetActivePresetId()))
+		{
+			const FMD_PropPlacementPreset Snapshot = *Saved;
+			FText Warning;
+			Properties->SetActivePaletteId(Snapshot.Id);
+			Properties->ApplyPreset(Snapshot.Data, Warning);
+			if (!Warning.IsEmpty())
+			{
+				GetToolManager()->DisplayMessage(Warning, EToolMessageLevel::UserWarning);
+			}
+		}
+	}
 	Properties->OnPaletteAssetSelected.BindUObject(this, &UMD_PropPlacementTool::HandlePaletteAssetSelected);
 	Properties->OnRefreshPreview.BindUObject(this, &UMD_PropPlacementTool::InvalidatePreview);
 	Properties->OnPlacementSettingsChanged.BindUObject(this, &UMD_PropPlacementTool::HandlePlacementSettingsChanged);
@@ -176,10 +190,9 @@ void UMD_PropPlacementTool::Setup()
 	Properties->OnFreezePreview.BindUObject(this, &UMD_PropPlacementTool::FreezePreviewPose);
 	Properties->OnPoseEditUnavailable.BindUObject(this, &UMD_PropPlacementTool::ShowPoseEditUnavailable);
 	Properties->OnPresetApplied.BindUObject(this, &UMD_PropPlacementTool::HandlePresetApplied);
-	UMD_PropPaletteSettings* Palette = GetMutableDefault<UMD_PropPaletteSettings>();
 	PaletteChangedHandle = Palette->OnChanged.AddUObject(this, &UMD_PropPlacementTool::HandlePaletteChanged);
 	PalettePlacementChangedHandle = Palette->OnPlacementChanged.AddUObject(this, &UMD_PropPlacementTool::HandlePaletteChanged);
-	Properties->RememberPresetBaseline(!Palette->HasUnsavedChanges());
+	Properties->SelectedPresetId = Palette->WorkingPaletteId;
 	AddToolPropertySource(Properties);
 
 	UClickDragInputBehavior* Click = NewObject<UClickDragInputBehavior>(this);
@@ -287,6 +300,7 @@ void UMD_PropPlacementTool::OnPropertyModified(UObject* PropertySet, FProperty* 
 			|| Name == GET_MEMBER_NAME_CHECKED(UMD_PropPlacementProperties, MixSeed))
 		{
 			PreviewCandidateIndex = 0;
+			MixSelection.Reset();
 		}
 		InvalidatePreview();
 		return;
@@ -422,7 +436,8 @@ void UMD_PropPlacementTool::RefreshCandidatePreview()
 		bPreviewDirty = true;
 		RebuildPreview();
 	}
-	if (bHasHoverRay)
+	// The stroke updates hover once per input, after all distance samples are processed.
+	if (bHasHoverRay && !bStrokeActive)
 	{
 		OnUpdateHover(LastHoverRay);
 	}
@@ -434,8 +449,21 @@ void UMD_PropPlacementTool::AdvancePreviewCandidate()
 	{
 		return;
 	}
+	if (bPreviewDirty)
+	{
+		RebuildPreview();
+	}
+	ConsumeMixCandidate();
 	++PreviewCandidateIndex;
 	RefreshCandidatePreview();
+}
+
+void UMD_PropPlacementTool::ConsumeMixCandidate()
+{
+	if (Properties->SelectionMode == EMD_PropBrushSelection::PaletteMix)
+	{
+		MixSelection.Consume(PreviewCandidate.EntryId);
+	}
 }
 
 void UMD_PropPlacementTool::FreezePreviewPose()
@@ -552,6 +580,13 @@ void UMD_PropPlacementTool::RebuildMixCandidates()
 			++Rejected;
 		}
 	}
+	TArray<FGuid> CandidateIds;
+	CandidateIds.Reserve(MixCandidates.Num());
+	for (const FMD_PropPlacementCandidate& Candidate : MixCandidates)
+	{
+		CandidateIds.Add(Candidate.EntryId);
+	}
+	MixSelection.SetCandidates(MoveTemp(CandidateIds));
 	if (Rejected > 0)
 	{
 		MixWarning = FText::Format(LOCTEXT("InvalidMixItems", "혼합 대상 중 {0}개는 에셋 또는 미리보기가 유효하지 않아 제외했습니다.\n\n해당 항목을 선택해 참조를 수정한 뒤 Refresh Preview를 누르세요."), FText::AsNumber(Rejected));
@@ -587,8 +622,7 @@ void UMD_PropPlacementTool::RebuildPreview()
 		}
 		else
 		{
-			const FRandomStream Random(static_cast<int32>(HashCombineFast(GetTypeHash(Properties->MixSeed), PreviewCandidateIndex)));
-			PreviewCandidate = MixCandidates[Random.RandHelper(MixCandidates.Num())];
+			PreviewCandidate = MixCandidates[MixSelection.PickIndex(Properties->MixSeed, PreviewCandidateIndex)];
 		}
 	}
 	else
@@ -710,38 +744,23 @@ bool UMD_PropPlacementTool::TraceSurface(const FInputDeviceRay& DevicePos, FHitR
 		DevicePos.WorldRay.PointAt(10000000.0), ECC_Visibility, Query);
 }
 
-FTransform UMD_PropPlacementTool::BuildPlacementTransform(const FHitResult& Hit) const
+FMD_PropSurfacePlacement UMD_PropPlacementTool::BuildPlacement(const FHitResult& Hit) const
 {
-	return PreviewCandidate.BuildTransform(Hit, PreviewCandidateIndex);
-}
-
-bool UMD_PropPlacementTool::IsPlacementSafe(const FTransform& Transform) const
-{
-	if (!CanEditLevel() || !Transform.IsValid() || PreviewCandidate.Parts.IsEmpty() || !PreviewError.IsEmpty())
+	FCollisionQueryParams Query(SCENE_QUERY_STAT(MDPropEdgeSupport), true);
+	for (const TWeakObjectPtr<AActor>& Actor : StrokePlacedActors)
 	{
-		return false;
-	}
-	if (!PreviewCandidate.Settings.bPreventOverlaps)
-	{
-		return true;
-	}
-	FCollisionQueryParams Query(SCENE_QUERY_STAT(MDPropPlacementOverlap), false);
-	Query.bIgnoreTouches = true;
-	const double Tolerance = FMath::Max(PreviewCandidate.Settings.OverlapTolerance, 0.0);
-	for (const FMD_PropPlacementPreviewPart& Part : PreviewCandidate.Parts)
-	{
-		const FTransform PartTransform = Part.LocalTransform * Transform;
-		const FBox Bounds = Part.Mesh->GetBoundingBox();
-		const FVector Extent = (Bounds.GetExtent() * PartTransform.GetScale3D().GetAbs()
-			- FVector(Tolerance)).ComponentMax(FVector(0.1));
-		TArray<FOverlapResult> Overlaps;
-		if (TargetWorld->OverlapMultiByChannel(Overlaps, PartTransform.TransformPosition(Bounds.GetCenter()),
-			PartTransform.GetRotation(), ECC_Pawn, FCollisionShape::MakeBox(Extent), Query))
+		if (Actor.IsValid())
 		{
-			return false;
+			Query.AddIgnoredActor(Actor.Get());
 		}
 	}
-	return true;
+	return MDPropPlacementSurface::Solve(TargetWorld.Get(), PreviewCandidate, Hit, PreviewCandidateIndex, Query);
+}
+
+bool UMD_PropPlacementTool::IsPlacementSafe(const FMD_PropSurfacePlacement& Placement) const
+{
+	return CanEditLevel() && PreviewError.IsEmpty()
+		&& MDPropPlacementSurface::IsSafe(TargetWorld.Get(), PreviewCandidate, Placement);
 }
 
 void UMD_PropPlacementTool::UpdatePreview(const FHitResult& Hit)
@@ -751,13 +770,14 @@ void UMD_PropPlacementTool::UpdatePreview(const FHitResult& Hit)
 		HidePreview();
 		return;
 	}
-	const FTransform Transform = BuildPlacementTransform(Hit);
+	const FMD_PropSurfacePlacement Placement = BuildPlacement(Hit);
+	const FTransform& Transform = Placement.Transform;
 	if (!Transform.IsValid())
 	{
 		HidePreview();
 		return;
 	}
-	GhostMaterial->SetVectorParameterValue(TEXT("HighlightColor"), IsPlacementSafe(Transform)
+	GhostMaterial->SetVectorParameterValue(TEXT("HighlightColor"), IsPlacementSafe(Placement)
 		? FLinearColor(0.05f, 1.0f, 0.1f) : FLinearColor(1.0f, 0.05f, 0.05f));
 	for (int32 Index = 0; Index < GhostComponents.Num(); ++Index)
 	{
