@@ -1,9 +1,0 @@
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{\r\n\t\"success\": true,\r\n\t\"output\": \"{\\\"mesh\\\": \\\"/Game/Assets/Character/Shark_MK4/Normalized/SKM_Shark_CM.SKM_Shark_CM\\\", \\\"anim\\\": \\\"/Game/Assets/Character/Shark_MK4/Anim/ABP/ABP_MD_Shark.ABP_MD_Shark_C\\\", \\\"left_ik_alpha\\\": 1.0, \\\"aim_pitch\\\": 42.0, \\\"upper_length\\\": 14.222517225442166, \\\"lower_length\\\": 11.679468669954316, \\\"elbow_angle\\\": 153.0595229337225, \\\"grip_error\\\": 2.2469334198890888e-14}\\nTrue\",\r\n\t\"result\": \"None\",\r\n\t\"warnings\": [],\r\n\t\"execution_time_ms\": 28.234001159667969\r\n}"
-    }
-  ],
-  "isError": false
-}
