@@ -1174,6 +1174,8 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Started, this, &AMD_Character::HandleJumpOrSwimInput);
 	EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Completed, this, &AMD_Character::HandleJumpOrSwimReleasedInput);
 	EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Started, this, &AMD_Character::HandleInteractInput);
+	EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Completed, this, &AMD_Character::HandleInteractReleasedInput);
+	EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleInteractReleasedInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Started, this, &AMD_Character::HandleAbilityInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAbilityReleasedInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAbilityReleasedInput);
@@ -1320,6 +1322,14 @@ void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 	if (IsValid(InteractionComponent))
 	{
 		InteractionComponent->Interact();
+	}
+}
+
+void AMD_Character::HandleInteractReleasedInput(const FInputActionValue& Value)
+{
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->InteractReleased();
 	}
 }
 

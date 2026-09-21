@@ -22,6 +22,7 @@ class UMD_SiteDefinition;
 class UMD_QuestDefinition;
 class AMD_PlayerState;
 class AMD_QuestItem;
+class UMD_QuestItemDefinition;
 struct FGameplayTag;
 struct FMD_MerchantData;
 struct FMD_QuestRewardData;
@@ -177,6 +178,13 @@ public:
 	/** 제출 아이템 액터를 검사하고 제거 성공 이후 활성 퀘스트 진행도를 반영하는 함수 */
 	bool TryDeliverQuestItem(AMD_QuestItem* SubmittedItem);
 
+	/**
+	 * 핫바에 보관한 회수물 정의(카트리지 등)를 활성 메인 퀘스트에 납품한다.
+	 * 현재 페이즈가 받는 정의면 남은 필요 수량만큼 진행도를 올리고, 실제 반영한 개수를 돌려준다.
+	 * 호출자는 반환 개수만큼 핫바에서 차감한다. 반복 퀘스트는 대상이 아니다.
+	 */
+	int32 TryDeliverQuestItemDefinition(const UMD_QuestItemDefinition* SubmittedItem, int32 AvailableCount);
+
 	/** 회수 대상 샘플이 파괴될 때 퀘스트 Asset ID·등급이 일치하는 활성 퀘스트를 실패 처리하는 함수 */
 	void NotifySampleDestroyed(const FPrimaryAssetId& QuestDefinitionId, EMD_SampleGrade Grade);
 
@@ -220,6 +228,9 @@ private:
 
 	/** 실패 확정된 메인 퀘스트에 귀속된 월드 내 퀘스트 아이템을 제거하는 함수 */
 	void DespawnMainQuestItems(const TArray<FPrimaryAssetId>& FailedQuestIds);
+
+	/** 납품 1건을 메인 퀘스트 진행도에 반영하고 필요 수량 충족 시 다음 페이즈 전환 또는 완료 보상을 적용하는 함수 */
+	void ApplyMainQuestDeliveryProgress(FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition);
 
 	/** 현재 진행 중인 현장으로 메인·반복 퀘스트 구성과 완료 이력 기록에 사용하는 참조 */
 	UPROPERTY()

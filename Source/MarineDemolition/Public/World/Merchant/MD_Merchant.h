@@ -65,6 +65,9 @@ public:
 	/** 서버 구매 결과를 현재 로컬 상점과 대사창에 반영하는 함수 */
 	void ReceiveShopPurchaseResult(FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result);
 
+	/** 서버가 핫바 회수물(카트리지 등)을 납품 처리한 결과를 대사창 또는 HUD 알림에 반영하는 함수 */
+	void ReceiveQuestItemDelivery(AMD_PlayerController* Requester, const FText& ItemName, int32 Count);
+
 	/** Blueprint가 Push하기 전에 전달한 상점 화면에 상인 데이터와 도메인 이벤트를 연결한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	void InitializePushedShop(UMD_ShopWidget* ShopWidget, UMD_MerchantMenuWidget* MenuWidget);
@@ -128,6 +131,10 @@ protected:
 	/** 잘못된 품목이나 만료된 요청에 표시할 상인 대사 */
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	FText InvalidPurchaseDialogue = FText::FromString(TEXT("그 거래는 처리할 수 없어."));
+
+	/** 핫바 회수물 납품 성공 대사. {0} = 품목명, {1} = 개수 (`03` §3 카트리지 납품) */
+	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
+	FText QuestDeliveryDialogue = FText::FromString(TEXT("{0} {1}개, 확실히 받았어. 본사엔 내가 넘길게."));
 
 	/** 열려 있는 위젯 (중복 생성 방지용) */
 	TWeakObjectPtr<UMD_MerchantMenuWidget> ActiveMenuWidget;
@@ -215,6 +222,9 @@ private:
 
 	/** 활성 메인 퀘스트 중 Interaction 목표를 찾아 서버 페이즈 전환을 요청하는 함수 */
 	void TryAdvanceInteractionQuests(APlayerController* PC);
+
+	/** 대화를 연 플레이어의 핫바 회수물을 서버에서 납품하도록 요청하는 함수. 메뉴가 열린 뒤 호출해야 응답 대사가 표시된다 */
+	void RequestHotbarQuestDelivery(APlayerController* PC);
 
 	UMD_MerchantComponent* GetMerchantComponent() const;
 

@@ -152,6 +152,10 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientNotifyPlayerJoinAndExit(const FText& PlayerName, bool bIsJoin);
 
+	// 서버 판정 결과(슬롯 가득 참·전원 없음 등) 한 줄을 소유 클라이언트 HUD 알림에 전달
+	UFUNCTION(Client, Reliable)
+	void ClientShowHUDMessage(const FText& Message);
+
 	/** 로딩 화면에 조작 주체 준비 완료를 알린다(하드 트래블/seamless travel 공용). */
 	void NotifyLoadingScreenPlayerReady();
 
@@ -166,6 +170,14 @@ public:
 	/** 레벨 내 퀘스트 상호작용 오브젝트(카드 등)를 획득했을 때 서버에서 진행도를 올리는 함수 */
 	UFUNCTION(Server, Reliable)
 	void ServerNotifyQuestInteraction(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex);
+
+	/** 모선 상인 대화 시 핫바의 퀘스트 회수물(카트리지 등)을 서버에서 거리 검증 후 활성 메인 퀘스트에 납품하고 핫바에서 차감하는 함수 */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerDeliverHotbarQuestItems(AMD_Merchant* MerchantActor);
+
+	/** 핫바 회수물 납품 결과(품목명·개수)를 요청한 상인의 대사창에 전달하는 응답 진입점 */
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveQuestItemDelivery(AMD_Merchant* MerchantActor, const FText& ItemName, int32 Count);
 
 	// 모선 상인과의 거리 및 대출 한도를 서버에서 검증한 뒤 대출을 실행하는 함수
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")

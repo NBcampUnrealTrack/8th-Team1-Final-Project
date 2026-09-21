@@ -87,4 +87,18 @@ public:
 	/** 플레이어의 상호작용 입력을 액터에 전달한다. */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
 	void Interact(AActor* Interactor);
+
+	/**
+	 * 상호작용 키를 누르고 있는 동안 진행되는 대상인지 여부.
+	 * true면 Interact 뒤 키를 뗄 때 InteractReleased가 같은 경로(서버/로컬)로 전달된다.
+	 * 기본값 false는 기존 단발 상호작용 동작을 보존한다.
+	 */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
+	bool IsHoldInteraction() const;
+	virtual bool IsHoldInteraction_Implementation() const { return false; }
+
+	/** 홀드 대상에서 상호작용 키를 뗐을 때 전달된다. IsHoldInteraction이 true인 대상에만 온다. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
+	void InteractReleased(AActor* Interactor);
+	virtual void InteractReleased_Implementation(AActor* Interactor) {}
 };

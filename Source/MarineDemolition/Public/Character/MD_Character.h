@@ -406,6 +406,8 @@ private:
 	void HandleMoveInput(const FInputActionValue& Value);
 	void HandleLookInput(const FInputActionValue& Value);
 	void HandleInteractInput(const FInputActionValue& Value);
+	// 상호작용 키 해제. 홀드형 대상(데이터 덤프 단말 등)의 진행 취소에만 쓰인다
+	void HandleInteractReleasedInput(const FInputActionValue& Value);
 	void HandleAbilityInput(const FInputActionValue& Value);
 	void HandleScannerModeSwitchInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
