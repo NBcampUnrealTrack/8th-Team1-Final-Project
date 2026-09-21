@@ -4,10 +4,9 @@
 #include "World/Merchant/MD_Merchant.h"
 
 #include "CommonActivatableWidget.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
-#include "UObject/ConstructorHelpers.h"
 
 #include "Character/MD_Character.h"
 #include "Component/Lore/MD_LoreComponent.h"
@@ -30,19 +29,6 @@
 #include "UI/Merchant/MD_QuestScreenWidget.h"
 #include "UI/Merchant/MD_ShopWidget.h"
 
-namespace
-{
-	/**
-	 * 캐릭터 에셋 대체용 큐브를 사람 크기(60×60×180cm)로 맞추는 값.
-	 * 엔진 기본 큐브가 100cm 정육면체라 스케일로 눌러 세운다.
-	 */
-	constexpr float PlaceholderWidthScale = 0.6f;
-	constexpr float PlaceholderHeightScale = 1.8f;
-
-	/** 큐브 피벗이 가운데라 절반 높이만큼 올려야 액터 원점이 발밑에 온다. */
-	constexpr float PlaceholderHalfHeight = 90.f;
-}
-
 AMD_Merchant::AMD_Merchant()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -50,18 +36,14 @@ AMD_Merchant::AMD_Merchant()
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
 
-	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
-	Mesh->SetupAttachment(Root);
-	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
-
-	// Mesh가 루트가 아니어야 이 값들이 배치 트랜스폼에 덮이지 않는다.
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMesh.Succeeded())
-	{
-		Mesh->SetStaticMesh(CubeMesh.Object);
-	}
-	Mesh->SetRelativeScale3D(FVector(PlaceholderWidthScale, PlaceholderWidthScale, PlaceholderHeightScale));
-	Mesh->SetRelativeLocation(FVector(0.f, 0.f, PlaceholderHalfHeight));
+	// 새 subobject 이름으로 기존 BP의 스태틱 메시 템플릿과 타입 충돌을 피한다.
+	CharacterMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("CharacterMesh"));
+	CharacterMesh->SetupAttachment(Root);
+	CharacterMesh->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+	CharacterMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	CharacterMesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
+	CharacterMesh->SetGenerateOverlapEvents(false);
+	CharacterMesh->SetSimulatePhysics(false);
 }
 
 void AMD_Merchant::BeginPlay()
@@ -92,10 +74,10 @@ void AMD_Merchant::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AMD_Merchant::SetInteractionHighlighted_Implementation(bool bHighlighted)
 {
-	if (IsValid(Mesh))
+	if (IsValid(CharacterMesh))
 	{
-		Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
-		Mesh->SetRenderCustomDepth(bHighlighted);
+		CharacterMesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
+		CharacterMesh->SetRenderCustomDepth(bHighlighted);
 	}
 }
 

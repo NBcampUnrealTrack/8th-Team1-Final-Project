@@ -1,9 +1,0 @@
-{
-  "content": [
-    {
-      "type": "text",
-      "text": "{\r\n\t\"success\": true,\r\n\t\"output\": \"CUTTER_REACH_ALPHA 0.000000\",\r\n\t\"result\": \"None\",\r\n\t\"warnings\": [],\r\n\t\"execution_time_ms\": 5.2899012565612793\r\n}"
-    }
-  ],
-  "isError": false
-}
