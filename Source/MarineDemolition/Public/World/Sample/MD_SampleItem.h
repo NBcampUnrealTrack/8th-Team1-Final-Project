@@ -44,7 +44,10 @@ public:
 	void SetDamaged();
 
 	// 이미 손상된 샘플도 저장 당시 등급과 외형으로 정확히 복구
-	void RestorePersistentSampleState(EMD_SampleGrade SavedGrade, bool bSavedDamaged);
+	void RestorePersistentSampleState(EMD_SampleGrade SavedGrade, bool bSavedDamaged, bool bSavedHasBeenCarried = false);
+
+	// 복귀 구역 자동 제출에서 실제 운반 이력 확인
+	FORCEINLINE bool HasBeenCarried() { return bHasBeenCarried; }
 
 	/** 모든 머신에서 로컬로 파편 연출을 스폰. Destroy 직전에 서버가 호출 */
 	UFUNCTION(NetMulticast, Reliable)
@@ -93,6 +96,10 @@ protected:
 	void BeginSpawnProtection();
 	void BeginImpactProtection(float Duration);
 	void EndImpactProtection();
+
+	// 생성 위치에 남은 샘플과 플레이어가 집어 든 샘플 구분
+	UPROPERTY()
+	bool bHasBeenCarried = false;
 
 	bool bImpactProtected = false;
 	FTimerHandle ImpactProtectionTimerHandle;

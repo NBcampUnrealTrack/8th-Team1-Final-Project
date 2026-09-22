@@ -45,6 +45,10 @@ struct MARINEDEMOLITION_API FMD_QuestItemRecord : public FMD_WorldActorRecord
     // 이미 손상된 샘플을 온전한 물품으로 되돌리는 상황 방지
     UPROPERTY()
     bool bDamaged = false;
+
+    // 복원된 샘플의 복귀 구역 자동 제출 자격 보존
+    UPROPERTY()
+    bool bHasBeenCarried = false;
 };
 
 // 수거되지 않은 일반 쓰레기의 종류와 외형 기록

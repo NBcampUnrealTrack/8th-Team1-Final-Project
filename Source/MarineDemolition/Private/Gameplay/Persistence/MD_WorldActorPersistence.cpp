@@ -162,6 +162,8 @@ bool FMD_WorldActorPersistence::Capture(UWorld* World, FMD_WorldActorSnapshot& O
                 Record.Grade = Sample->Grade;
                 // 손상 조건 보존
                 Record.bDamaged = Sample->bDamaged;
+                // 미운반 샘플의 오납품과 운반한 샘플의 자격 유실 방지
+                Record.bHasBeenCarried = Sample->HasBeenCarried();
             }
             // 같은 물품의 다른 분류 중복 기록 방지
             continue;
@@ -593,8 +595,8 @@ bool FMD_WorldActorPersistence::Restore(UWorld* World, const FMD_WorldActorSnaps
         // 손상 효과 없이 샘플 저장 상태 복원
         if (IsValid(Sample) == true)
         {
-            // 납품 등급과 손상 외형 동기화
-            Sample->RestorePersistentSampleState(Record.Grade, Record.bDamaged);
+            // 납품 등급과 손상 외형 및 자동 제출 자격 동기화
+            Sample->RestorePersistentSampleState(Record.Grade, Record.bDamaged, Record.bHasBeenCarried);
         }
         // 퀘스트 물품 복원 성공 반환
         return true;

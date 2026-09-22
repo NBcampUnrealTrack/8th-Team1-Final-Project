@@ -113,6 +113,30 @@ UMD_ItemDefinition* FMD_HotbarItemData::ResolveItemDefinition() const
 
 bool FMD_PlayerData::IsStructurallyValid() const
 {
+	// 이력 형식 표시와 실제 기록이 어긋난 저장 거부
+	if (bHasShopPurchaseState == false && (PurchasedShopItemIds.IsEmpty() == false || BlockedShopItemIds.IsEmpty() == false))
+	{
+		// 구형 데이터의 불완전한 이력 차단
+		return false;
+	}
+	// 두 개인 이력에서 잘못된 식별자와 중복 기록 검사
+	for (const TArray<FPrimaryAssetId>* ItemIds : { &PurchasedShopItemIds, &BlockedShopItemIds })
+	{
+		// 현재 목록에서 이미 검증한 식별자 집합
+		TSet<FPrimaryAssetId> SeenIds;
+		// 구매 및 금지 목록을 각각 독립적으로 검증
+		for (FPrimaryAssetId ItemId : *ItemIds)
+		{
+			// 손상된 해금 조건과 중복 이력의 부분 적용 차단
+			if (ItemId.IsValid() == false || SeenIds.Contains(ItemId) == true)
+			{
+				// 현재 개인 기록의 구조 오류 반환
+				return false;
+			}
+			// 다음 식별자의 중복 검사 기준 보관
+			SeenIds.Add(ItemId);
+		}
+	}
 	// 상세 정보가 없는 기존 저장은 경로 슬롯 범위만 확인
 	if (bHasHotbarState == false)
 	{
@@ -161,13 +185,13 @@ bool FMD_PlayerData::AreAssetsValid() const
 		// 복원할 수 없는 개인 기록의 실패 반환
 		return false;
 	}
-	// 수량과 충전량이 없던 구형 기록의 기본값 검증 정책 재사용
-	if (bHasHotbarState == false)
+	// 기존 파일의 장비와 업그레이드 선행 정의를 실제 적용 전에 함께 검증
+	if (bHasHotbarState == false || bHasShopPurchaseState == false)
 	{
 		// 구형 기록만 변환용 복사본을 사용하여 원본 보호
 		FMD_PlayerData Legacy = *this;
 		// 이전 도구 기본값을 포함한 호환 변환 결과 반환
-		return Legacy.MigrateHotbarItemIds();
+		return Legacy.MigrateHotbarItemIds() == true && Legacy.MigrateShopPurchaseState() == true;
 	}
 	// 최대 네 슬롯의 중복 검사를 추가 힙 할당 없이 처리
 	TArray<FPrimaryAssetId, TInlineAllocator<4>> ItemIds;
@@ -327,6 +351,86 @@ bool FMD_TrashBinRecord::IsStructurallyValid() const
 			SavedRewardUnits,
 			RewardUnits,
 			1.0e-12);
+}
+
+bool FMD_PlayerData::MigrateShopPurchaseState()
+{
+	// 이미 기록된 이력과 현재 장비를 임의로 합치지 않기 위한 선행 검사
+	if (IsStructurallyValid() == false)
+	{
+		// 손상된 개인 기록을 보존한 실패 반환
+		return false;
+	}
+	// 명시적으로 저장된 빈 이력도 그대로 유지
+	if (bHasShopPurchaseState == true)
+	{
+		// 현재 형식의 이력 재구성 생략
+		return true;
+	}
+	// 선행 도구 검증을 모두 마칠 때까지 원본 저장 보호
+	FMD_PlayerData Converted = *this;
+	// 구형 경로 목록과 상세 슬롯의 품목 해석 통일
+	if (Converted.MigrateHotbarItemIds() == false)
+	{
+		// 해석 불가능한 장비의 부분 이력 복구 차단
+		return false;
+	}
+	// 플레이어가 실제 보유한 도구에서만 과거 업그레이드 단계 복구
+	for (FMD_HotbarItemData& Saved : Converted.HotbarItems)
+	{
+		// 빈 슬롯은 이력 복구 대상에서 제외
+		if (Saved.Count == 0)
+		{
+			// 다음 보유 슬롯 검사
+			continue;
+		}
+		// 소모품의 구매 여부를 보유 수량으로 추정하지 않기 위한 도구 분류
+		UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(Saved.ResolveItemDefinition());
+		// 각 도구 계열의 순환 참조 검사 집합
+		TSet<FPrimaryAssetId> VisitedIds;
+		// 보유 단계부터 기본 도구까지 실제 업그레이드 경로 확인
+		while (IsValid(Tool) == true)
+		{
+			// 현재 단계의 전체 품목 식별자 조회
+			FPrimaryAssetId ToolId = Tool->GetPrimaryAssetId();
+			// 잘못된 식별자 또는 순환 경로의 무한 탐색 차단
+			if (ToolId.IsValid() == false || VisitedIds.Contains(ToolId) == true)
+			{
+				// 원본 개인 기록을 유지한 호환 복구 실패 반환
+				return false;
+			}
+			// 다음 선행 단계와의 순환 검사 기준 보관
+			VisitedIds.Add(ToolId);
+			// 보유 단계와 선행 단계의 해금 및 재구매 이력 복구
+			Converted.PurchasedShopItemIds.AddUnique(ToolId);
+			// 기본 도구에 도달한 경로의 탐색 종료
+			if (Tool->UpgradeSourceAssetId == FPrimaryAssetId())
+			{
+				// 선행 단계가 없는 도구의 경로 수집 완료
+				break;
+			}
+			// 기존 Hotbar와 같은 Asset Manager 식별자 해석 정책 적용
+			FMD_HotbarItemData SourceItem;
+			// 현재 단계가 소비한 선행 도구 지정
+			SourceItem.ItemId = Tool->UpgradeSourceAssetId;
+			// 등록된 정의에서 실제 선행 도구 조회
+			Tool = Cast<UMD_ToolDefinition>(SourceItem.ResolveItemDefinition());
+			// 누락되거나 잘못된 종류의 선행 정의를 부분 이력으로 확정하는 상황 차단
+			if (IsValid(Tool) == false)
+			{
+				// 원본 저장을 유지한 복구 실패 반환
+				return false;
+			}
+			// 상위 도구로 대체된 선행 단계의 재구매 금지 복구
+			Converted.BlockedShopItemIds.AddUnique(Tool->GetPrimaryAssetId());
+		}
+	}
+	// 이후 저장과 복원에서는 명시적인 개인 이력으로 처리
+	Converted.bHasShopPurchaseState = true;
+	// 모든 경로 검증이 성공한 개인 기록만 한 번에 교체
+	*this = MoveTemp(Converted);
+	// 기존 저장의 상점 진행 복구 성공 반환
+	return true;
 }
 
 bool FMD_GameStateData::IsStructurallyValid() const

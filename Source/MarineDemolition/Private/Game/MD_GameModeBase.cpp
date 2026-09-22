@@ -867,7 +867,8 @@ void AMD_GameModeBase::FinalizeDeliveredSamples()
     for (TActorIterator<AMD_SampleItem> It(GetWorld()); It; ++It)
     {
         AMD_SampleItem* Sample = *It;
-        if (IsValid(Sample) == false)
+        // 생성 위치가 복귀 구역과 겹치는 미운반 샘플의 자동 납품 방지
+        if (IsValid(Sample) == false || Sample->HasBeenCarried() == false)
         {
             continue;
         }
@@ -1418,10 +1419,20 @@ bool AMD_GameModeBase::CollectPlayerGameData(const APlayerState* PlayerState, FM
         // 준비되지 않은 개인 장비의 수집 실패 반환
         return false;
     }
+    // 읽기 전용 수집 대상의 개인 상점 이력 조회
+    const AMD_PlayerState* MDPlayerState = Cast<AMD_PlayerState>(PlayerState);
+    // 개인 이력 없이 장비만 저장되는 불완전한 수집 차단
+    if (IsValid(MDPlayerState) == false)
+    {
+        // 프로젝트 플레이어 상태가 없는 수집 실패 반환
+        return false;
+    }
     // 이번 요청에서 갱신할 플레이어별 장비 필드 조회
     FMD_PlayerData& PlayerData = GameData.PlayerFields.FindOrAdd(PlayerKey);
     // 현재 장비의 수량과 충전 상태를 포함한 기존 저장 스냅샷 기록
     PlayerData = EquipmentComponent->BuildEquipmentSaveData();
+    // 보유 도구와 동일한 시점의 구매 이력 및 선행 도구 구매 금지 기록
+    MDPlayerState->CollectShopPurchaseState(PlayerData);
     // 불완전한 슬롯 상태가 파일에 기록되는 상황 차단
     return PlayerData.IsStructurallyValid();
 }
@@ -1460,6 +1471,22 @@ bool AMD_GameModeBase::OverwritePlayerGameData(const APlayerState* PlayerState, 
         // 장비 복원 대상 부재의 실패 반환
         return false;
     }
-    // 서버 권위 장비 복원 API의 실제 성공 여부 반환
-    return EquipmentComponent->RestoreEquipmentSaveData(*PlayerData);
+    // 실제 장비 소유 Pawn에 연결된 변경 가능한 개인 이력 대상 조회
+    AMD_PlayerState* MDPlayerState = PlayerCharacter->GetPlayerState<AMD_PlayerState>();
+    // 다른 플레이어 이력의 적용과 연결 전 복원 차단
+    if (IsValid(MDPlayerState) == false || MDPlayerState != PlayerState)
+    {
+        // 장비와 개인 이력을 모두 유지한 실패 반환
+        return false;
+    }
+    // 장비 교체 전에 기존 파일의 업그레이드 이력까지 검증할 임시 기록
+    FMD_PlayerData RestoredPlayerData = *PlayerData;
+    // 개인 구매 이력과 선행 정의를 검증한 뒤 실제 장비 복원
+    if (RestoredPlayerData.MigrateShopPurchaseState() == false || EquipmentComponent->RestoreEquipmentSaveData(RestoredPlayerData) == false)
+    {
+        // 장비 복원이 실패한 요청의 구매 이력 변경 차단
+        return false;
+    }
+    // 장비 복원 완료 후 개인 이력 교체와 상점 화면 동기화
+    return MDPlayerState->RestoreShopPurchaseState(RestoredPlayerData);
 }

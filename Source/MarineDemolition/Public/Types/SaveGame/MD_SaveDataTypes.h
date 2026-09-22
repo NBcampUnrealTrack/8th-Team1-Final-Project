@@ -71,6 +71,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
 	int32 SelectedHotbarSlot = 0;
 
+	// 구매 이력이 없던 기존 파일과 명시적으로 비어 있는 새 이력 구분
+	UPROPERTY()
+	bool bHasShopPurchaseState = false;
+
+	// 선행 장비 해금과 무료 재구매에 사용할 플레이어별 구매 이력
+	UPROPERTY()
+	TArray<FPrimaryAssetId> PurchasedShopItemIds;
+
+	// 업그레이드로 대체된 기본 및 중간 도구의 구매 금지 기록
+	UPROPERTY()
+	TArray<FPrimaryAssetId> BlockedShopItemIds;
+
 public:
 	// 읽기 전용 저장 데이터의 슬롯 범위와 수량 및 충전 값 검사
 	bool IsStructurallyValid() const;
@@ -80,6 +92,9 @@ public:
 
 	// 접속 여부와 무관하게 과거 슬롯 기록을 경로 없는 아이템 식별자로 변환
 	bool MigrateHotbarItemIds();
+
+	// 구매 이력 없는 기존 파일의 보유 도구와 선행 단계에서 개인 진행 복구
+	bool MigrateShopPurchaseState();
 };
 
 /**

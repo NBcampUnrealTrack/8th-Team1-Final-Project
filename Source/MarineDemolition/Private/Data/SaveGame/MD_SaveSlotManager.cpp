@@ -1039,7 +1039,7 @@ bool UMD_SaveSlotManager::CollectGameData()
     for (TPair<FString, FMD_PlayerData>& PlayerEntry : CollectedGameData.PlayerFields)
     {
         // 일부 기록의 변환 실패로 경로 기반 데이터가 다시 저장되는 상황 차단
-        if (PlayerEntry.Value.MigrateHotbarItemIds() == false)
+        if (PlayerEntry.Value.MigrateHotbarItemIds() == false || PlayerEntry.Value.MigrateShopPurchaseState() == false)
         {
             // 이전 회차 데이터를 유지한 채 이번 저장 수집 실패 반환
             return false;
