@@ -16,6 +16,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_OnShopOwnershipChanged);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_OnAppearanceChanged);
 
 class UMD_CharacterAttributeSet;
+struct FMD_PlayerData;
 
 UENUM(BlueprintType)
 enum class EMD_ReturnStatus : uint8
@@ -121,6 +122,12 @@ public:
 
 	// 판매한 도구부터 기본 도구까지 검증된 단계들의 구매 이력과 구매 금지 해제
 	void ResetShopToolProgress(TArray<FPrimaryAssetId>& ToolAssetIds);
+
+	// 읽기 전용 PlayerState 저장 요청에 구매 이력과 구매 금지를 함께 기록
+	void CollectShopPurchaseState(FMD_PlayerData& SaveData) const;
+
+	// 검증된 개인 이력을 교체한 뒤 상점 화면 갱신과 소유 클라이언트 복제
+	bool RestoreShopPurchaseState(FMD_PlayerData& SaveData);
 
 	// 업그레이드 구매로 금지된 전체 식별자 여부 검사
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")

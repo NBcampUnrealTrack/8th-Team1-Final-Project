@@ -2,6 +2,7 @@
 
 
 #include "Player/MD_PlayerState.h"
+#include "Types/SaveGame/MD_SaveDataTypes.h"
 #include "Audio/MD_AudioSubsystem.h"
 #include "GameFramework/PlayerController.h"
 #include "Character/MD_Character.h"
@@ -281,6 +282,42 @@ void AMD_PlayerState::ResetShopToolProgress(TArray<FPrimaryAssetId>& ToolAssetId
 		// 소유 클라이언트에 변경된 구매 및 잠금 이력 복제 요청
 		ForceNetUpdate();
 	}
+}
+
+void AMD_PlayerState::CollectShopPurchaseState(FMD_PlayerData& SaveData) const
+{
+	// 구매하지 않았거나 판매로 초기화된 빈 이력까지 명시적으로 저장
+	SaveData.bHasShopPurchaseState = true;
+	// 상위 도구 해금과 무료 재구매 기준 보존
+	SaveData.PurchasedShopItemIds = PurchasedShopItemIds;
+	// 업그레이드로 대체된 선행 도구 구매 금지 보존
+	SaveData.BlockedShopItemIds = BlockedShopItemIds;
+}
+
+bool AMD_PlayerState::RestoreShopPurchaseState(FMD_PlayerData& SaveData)
+{
+	// 준비되지 않은 호환 기록이나 손상된 이력의 서버 상태 변경 차단
+	if (HasAuthority() == false || SaveData.bHasShopPurchaseState == false || SaveData.IsStructurallyValid() == false)
+	{
+		// 기존 개인 이력을 유지한 실패 반환
+		return false;
+	}
+	// 같은 파일 재적용의 불필요한 화면 갱신과 복제 생략
+	if (PurchasedShopItemIds == SaveData.PurchasedShopItemIds && BlockedShopItemIds == SaveData.BlockedShopItemIds)
+	{
+		// 동일한 이력 복원 성공 반환
+		return true;
+	}
+	// 다른 슬롯이나 이전 세션의 구매 이력을 저장된 값으로 교체
+	PurchasedShopItemIds = SaveData.PurchasedShopItemIds;
+	// 구매 이력과 같은 시점의 재구매 제한 교체
+	BlockedShopItemIds = SaveData.BlockedShopItemIds;
+	// 두 목록을 함께 반영한 서버 상점 화면 갱신
+	OnRep_ShopPurchaseState();
+	// 기존 소유자 전용 복제를 통한 클라이언트 상점 상태 동기화
+	ForceNetUpdate();
+	// 구매 효과나 결제 없이 개인 진행 복원 완료
+	return true;
 }
 
 bool AMD_PlayerState::IsShopItemPurchaseBlocked(FPrimaryAssetId ItemAssetId)

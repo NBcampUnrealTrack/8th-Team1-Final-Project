@@ -3,6 +3,7 @@
 
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+#include "Data/Merchant/MD_SiteDefinition.h"
 #include "Engine/GameInstance.h"
 #include "Net/UnrealNetwork.h"
 #include "Game/MD_GameStateBase.h"
@@ -87,9 +88,30 @@ void UMD_MerchantComponent::RefreshFromSubsystem()
 	CurrentDay = Merchant->GetCurrentDay();
 	Affinity = Merchant->GetAffinity();
 	QuestCompletions = Merchant->GetQuestCompletions();
-	ActiveQuestReward = Merchant->GetActiveQuestReward();
-	MainQuests = Merchant->GetMainQuests();
-	RepeatQuests = Merchant->GetRepeatQuests();
+	// 저장된 계약의 현장과 실제 표시 대상 월드 조회
+	UMD_SiteDefinition* CurrentSite = Merchant->GetCurrentSite();
+	// 서버에서 판정한 동일 목록을 호스트와 모든 클라이언트에 제공
+	UWorld* World = GetWorld();
+	// PIE 접두사를 제외한 전체 패키지 경로로 해당 현장의 맵만 허용
+	if (IsValid(CurrentSite) == true && IsValid(World) == true && CurrentSite->QuestMap.IsNull() == false
+		&& CurrentSite->QuestMap.ToSoftObjectPath().GetLongPackageFName() == FName(UWorld::RemovePIEPrefix(World->GetPackage()->GetName())))
+	{
+		// 현재 맵에서 표시할 진행 중인 퀘스트 보상 반영
+		ActiveQuestReward = Merchant->GetActiveQuestReward();
+		// 원본 순서를 유지하여 화면의 퀘스트 선택 인덱스 보존
+		MainQuests = Merchant->GetMainQuests();
+		// 현재 현장의 반복 퀘스트 목록을 클라이언트에도 동일하게 전달
+		RepeatQuests = Merchant->GetRepeatQuests();
+	}
+	else
+	{
+		// 다른 맵에서 이전 현장의 보상 표시 제거
+		ActiveQuestReward = 0;
+		// 서버 원장의 진행도는 유지하고 표시용 메인 목록만 비우기
+		MainQuests.Reset();
+		// 서버 원장의 수락 상태는 유지하고 표시용 반복 목록만 비우기
+		RepeatQuests.Reset();
+	}
 	OwnedItemIds = Merchant->GetOwnedItemIds();
     // 팀 원장을 소유한 GameState 확인
     AMD_GameStateBase* GameState = Cast<AMD_GameStateBase>(GetOwner());

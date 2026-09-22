@@ -1,9 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/NetSerialization.h"
-#include "GameFramework/Actor.h"
-#include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTagAssetInterface.h"
@@ -13,6 +10,7 @@
 class UBoxComponent;
 class UStaticMeshComponent;
 class AMD_CuttableWall;
+struct FMD_UtilityRecord;
 
 UENUM(BlueprintType)
 enum class EMD_UtilityState : uint8
@@ -33,6 +31,12 @@ class MARINEDEMOLITION_API AMD_WallUtility : public AActor, public IMD_Interacta
 
 public:
 	AMD_WallUtility();
+
+	// 파손과 수리 상태를 점수 처리 없이 보관하는 기록 생성
+	virtual FMD_UtilityRecord BuildPersistenceRecord();
+
+	// 저장된 상태로 설비와 연결된 연출 및 게이트 복원
+	virtual bool RestorePersistenceRecord(FMD_UtilityRecord Record);
 
 	void StopScanFor(AActor* Scanner);
 

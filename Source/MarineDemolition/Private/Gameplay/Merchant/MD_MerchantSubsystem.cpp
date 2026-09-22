@@ -3,24 +3,17 @@
 
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Data/SaveGame/MD_SaveSlotManager.h"
-#include "Engine/GameInstance.h"
 #include "EngineUtils.h"
 #include "Engine/AssetManager.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
-#include "GameFramework/Pawn.h"
-#include "Templates/UnrealTemplate.h"
-#include "GameplayTagContainer.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
-#include "Data/Equipment/MD_ItemDefinition.h"
 #include "Data/Equipment/MD_QuestItemDefinition.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Game/MD_GameStateBase.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
-#include "Types/Score/MD_ScoreTypes.h"
-#include "Types/SaveGame/MD_SaveDataTypes.h"
 #include "World/Sample/MD_QuestInteractionPickup.h"
 #include "World/Sample/MD_QuestItem.h"
 #include "Util/MD_LogUtility.h"
@@ -1028,6 +1021,8 @@ FMD_MerchantData UMD_MerchantSubsystem::GetMerchantSaveData() const
 	FMD_MerchantData SaveData;
 	SaveData.bConsumableDiscountActive = bConsumableDiscountActive;
 	SaveData.Credits = Credits;
+	// 보유액과 별개로 당일 정산 분류별 증감 내역 보존
+	SaveData.DailyCreditTotals = DailyCreditTotals;
 	SaveData.DebtBalance = DebtBalance;
 	SaveData.Affinity = Affinity;
 	SaveData.CurrentDay = CurrentDay;
@@ -1054,13 +1049,13 @@ FMD_MerchantData UMD_MerchantSubsystem::GetMerchantSaveData() const
 bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveData)
 {
 	// 클라이언트 적용과 손상된 경제·퀘스트 상태의 부분 적용을 막기 위한 검사
-	if (IsValid(GetWorld()) == false || GetWorld()->GetNetMode() == ENetMode::NM_Client || SaveData.IsStructurallyValid() == false)
+	if (IsValid(GetWorld()) == false || GetWorld()->GetNetMode() == ENetMode::NM_Client || SaveData.IsStructurallyValid() == false || SaveData.AreAssetsValid() == false)
 	{
 		return false;
 	}
 
 	// 현재 현장 애셋을 먼저 검증하여 실패 시 기존 서버 원장을 유지하기 위한 선행 로드
-	UMD_SiteDefinition* LoadedCurrentSite = SaveData.CurrentSite.IsNull() == true ? nullptr : SaveData.CurrentSite.LoadSynchronous();
+	UMD_SiteDefinition* LoadedCurrentSite = SaveData.CurrentSite.IsNull() == true ? nullptr : FMD_MerchantData::ResolveSite(SaveData.CurrentSite);
 	if (SaveData.CurrentSite.IsNull() == false && IsValid(LoadedCurrentSite) == false)
 	{
 		return false;
@@ -1070,7 +1065,7 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 	TSet<TObjectPtr<UMD_SiteDefinition>> LoadedClearedSites;
 	for (const TSoftObjectPtr<UMD_SiteDefinition>& ClearedSitePath : SaveData.ClearedSites)
 	{
-		UMD_SiteDefinition* ClearedSite = ClearedSitePath.IsNull() == true ? nullptr : ClearedSitePath.LoadSynchronous();
+		UMD_SiteDefinition* ClearedSite = ClearedSitePath.IsNull() == true ? nullptr : FMD_MerchantData::ResolveSite(ClearedSitePath);
 		if (IsValid(ClearedSite) == false)
 		{
 			return false;
@@ -1079,51 +1074,11 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 		LoadedClearedSites.Add(ClearedSite);
 	}
 
-	// 저장된 PrimaryAssetId가 실제 메인 퀘스트 에셋에서 복원 가능한지 확인하는 검사
-	for (const FMD_MainQuestState& MainQuest : SaveData.MainQuests)
-	{
-		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(MainQuest.DefinitionId);
-		// 원본 포인터부터 단계까지 기존 단락 평가 순서로 검증하기 위한 결과
-		bool bIsDefinitionValid = IsValid(Definition);
-		if (bIsDefinitionValid == false)
-		{
-			return false;
-		}
-
-		bool bIsDefinitionDataValid = Definition->IsValidDefinition();
-		if (bIsDefinitionDataValid == false)
-		{
-			return false;
-		}
-
-		bool bHasCurrentPhase = Definition->HasPhase(MainQuest.CurrentPhaseIndex);
-		if (bHasCurrentPhase == false)
-		{
-			return false;
-		}
-	}
-
-	// 저장된 PrimaryAssetId와 페이즈 인덱스가 실제 반복 퀘스트 에셋에서 복원 가능한지 확인하는 검사
-	for (const FMD_RepeatQuestState& RepeatQuest : SaveData.RepeatQuests)
-	{
-		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(RepeatQuest.DefinitionId);
-		bool bIsDefinitionValid = IsValid(Definition);
-		if (bIsDefinitionValid == false)
-		{
-			return false;
-		}
-
-		bool bHasCurrentPhase = Definition->HasPhase(RepeatQuest.CurrentPhaseIndex);
-		if (bHasCurrentPhase == false)
-		{
-			return false;
-		}
-	}
-
 	// 모든 참조 검증 이후 경제·호감도·퀘스트 원장을 한 번에 교체하는 처리
 	bConsumableDiscountActive = SaveData.bConsumableDiscountActive;
 	Credits = SaveData.Credits;
-	DailyCreditTotals.Reset();
+	// 보상이나 소비 이벤트 없이 당일 수입과 지출 원장 복원
+	DailyCreditTotals = SaveData.DailyCreditTotals;
 	DebtBalance = SaveData.DebtBalance;
 	Affinity = SaveData.Affinity;
 	CurrentDay = SaveData.CurrentDay;
@@ -1135,16 +1090,6 @@ bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveDa
 	MainQuests = SaveData.MainQuests;
 	RepeatQuests = SaveData.RepeatQuests;
 
-	// 실패 처리된 반복 퀘스트를 다시 수락할 수 있는 상태로 복구
-	for (FMD_RepeatQuestState& RepeatQuest : RepeatQuests)
-	{
-		if (RepeatQuest.Status == EMD_RepeatQuestStatus::Failed)
-		{
-			RepeatQuest.Status = EMD_RepeatQuestStatus::Offered;
-			RepeatQuest.CurrentPhaseIndex = 0;
-			RepeatQuest.CurrentProgress = 0;
-		}
-	}
 
 	ClearedSites = MoveTemp(LoadedClearedSites);
 	OnMerchantStateChanged.Broadcast();
@@ -1532,9 +1477,9 @@ void UMD_MerchantSubsystem::CollectGameData(FMD_GameData& GameData, bool& bWasSu
 void UMD_MerchantSubsystem::OverwriteGameData(const FMD_GameData& GameData, bool& bWasSuccessful)
 {
     // 전달된 읽기 전용 데이터에서 조회할 담당 필드
-    FMD_MerchantData SaveData;
+    const FMD_MerchantData* SaveData = GameData.FindDataField<FMD_MerchantData>(FMD_MerchantData::DataFieldKey);
     // 전달된 데이터에서 자신의 태그에 해당하는 필드 조회
-    if (GameData.GetDataField(FMD_MerchantData::DataFieldKey, SaveData) == false)
+    if (SaveData == nullptr)
     {
         // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
         bWasSuccessful = false;
@@ -1544,7 +1489,7 @@ void UMD_MerchantSubsystem::OverwriteGameData(const FMD_GameData& GameData, bool
         return;
     }
     // 조회를 마친 필드를 기존 복원 API에 적용
-    if (ApplyMerchantSaveData(SaveData) == false)
+    if (ApplyMerchantSaveData(*SaveData) == false)
     {
         // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
         bWasSuccessful = false;

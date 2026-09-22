@@ -182,9 +182,9 @@ void UMD_LoreSubsystem::CollectGameData(FMD_GameData& GameData, bool& bWasSucces
 void UMD_LoreSubsystem::OverwriteGameData(const FMD_GameData& GameData, bool& bWasSuccessful)
 {
     // 전달된 읽기 전용 데이터에서 조회할 담당 필드
-    FMD_LoreData SaveData;
+    const FMD_LoreData* SaveData = GameData.FindDataField<FMD_LoreData>(FMD_LoreData::DataFieldKey);
     // 전달된 데이터에서 자신의 태그에 해당하는 필드 조회
-    if (GameData.GetDataField(FMD_LoreData::DataFieldKey, SaveData) == false)
+    if (SaveData == nullptr)
     {
         // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
         bWasSuccessful = false;
@@ -194,7 +194,7 @@ void UMD_LoreSubsystem::OverwriteGameData(const FMD_GameData& GameData, bool& bW
         return;
     }
     // 조회를 마친 필드를 기존 복원 API에 적용
-    if (ApplyLoreSaveData(SaveData) == false)
+    if (ApplyLoreSaveData(*SaveData) == false)
     {
         // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
         bWasSuccessful = false;

@@ -166,3 +166,17 @@ void AMD_SupportBrace::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	if (EndPlayReason == EEndPlayReason::Destroyed) ReleaseSupport(Dismantler.Get());
 	Super::EndPlay(EndPlayReason);
 }
+
+void AMD_SupportBrace::DetachForSaveRestore()
+{
+    // 서버의 저장 복원에서만 물리적 지지 연결의 직접 초기화 허용
+    if (HasAuthority() == false)
+    {
+        // 클라이언트의 권위 상태 변경 차단
+        return;
+    }
+    // EndPlay에서 복원 대상 벽에 지지 상실 이벤트를 전달하지 않도록 참조 해제
+    SupportedWalls.Reset();
+    // 구형 단일 벽 연결도 함께 제거
+    SupportedWall = nullptr;
+}

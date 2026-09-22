@@ -1,11 +1,7 @@
 #include "World/Interaction/MD_DataDumpTerminal.h"
 
 #include "Component/Interaction/MD_InteractionComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "Data/Equipment/MD_QuestItemDefinition.h"
-#include "Engine/GameInstance.h"
-#include "Engine/World.h"
-#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
@@ -395,6 +391,28 @@ void AMD_DataDumpTerminal::OnRep_HoldingPawn()
 void AMD_DataDumpTerminal::OnRep_HoldProgress()
 {
 	OnDumpProgressChanged.Broadcast(HoldProgress);
+}
+
+void AMD_DataDumpTerminal::RestorePersistentState(bool bSavedDumped, bool bSavedLocked)
+{
+    // 서버만 영속 상태를 적용하도록 권위 검사
+    if (HasAuthority() == false)
+    {
+        // 클라이언트의 사용 완료 변경 차단
+        return;
+    }
+    // 재로드 전 플레이어의 일시적인 키 누름 상태 해제
+    CancelHold();
+    // 한 번 지급된 카트리지의 재발급 방지
+    bDumped = bSavedDumped;
+    // 수리로 변경된 전원 게이트 복원
+    bLocked = bSavedLocked;
+    // 호스트의 완료 표시 갱신
+    OnRep_Dumped();
+    // 호스트의 전원 표시 갱신
+    OnRep_Locked();
+    // 접속 클라이언트의 상태 동기화 예약
+    ForceNetUpdate();
 }
 
 #undef LOCTEXT_NAMESPACE
