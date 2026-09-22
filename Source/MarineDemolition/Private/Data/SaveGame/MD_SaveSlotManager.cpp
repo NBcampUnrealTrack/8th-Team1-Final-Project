@@ -527,6 +527,22 @@ bool UMD_SaveSlotManager::OnTryStartGameWithGameData(const FMD_GameData& GameDat
 	return true;
 }
 
+bool UMD_SaveSlotManager::PrepareNewContract()
+{
+    // 저장 적용 중이거나 클라이언트인 경우 새 출항 예약 차단
+    if (bGameDataOperationInProgress == true || HasServerAuthority() == false)
+    {
+        // 기존 데이터 작업과 서버 상태 유지
+        return false;
+    }
+    // 이전 불러오기 선택과 로드 핸들만 정리하여 현재 회차 기록 보존
+    CancelPendingGameDataOperation();
+    // 다음 게임 맵에서 한 번만 소비할 새 계약 예약
+    PendingGameDataOperation = EMD_PendingGameDataOperation::NewContract;
+    // 새 출항 준비 성공 반환
+    return true;
+}
+
 bool UMD_SaveSlotManager::HasTemporaryGameData() const
 {
 	bool bHasTemporaryGameData = TemporaryGameData.IsValid() == true;
@@ -587,8 +603,10 @@ void UMD_SaveSlotManager::PrepareContaminationForWorld(UWorld* World)
         Persistence->PrepareContaminationContext(World,&WorldData,false,bHasWorldData);
         return;
     }
-    const bool bNewContract=PendingGameDataOperation==EMD_PendingGameDataOperation::NewGame
-        || PendingGameDataOperation==EMD_PendingGameDataOperation::ContinueGame;
+    // 새 출항에서 이전 현장의 오염 생성 상태를 재사용하지 않도록 구분
+    bool bNewContract = PendingGameDataOperation == EMD_PendingGameDataOperation::NewGame
+        || PendingGameDataOperation == EMD_PendingGameDataOperation::ContinueGame
+        || PendingGameDataOperation == EMD_PendingGameDataOperation::NewContract;
     Persistence->PrepareContaminationContext(World,nullptr,bNewContract,true);
 }
 
@@ -908,6 +926,15 @@ bool UMD_SaveSlotManager::ApplyPendingGameDataOperation()
 	{
 		DayPersistence->ClearSnapshot();
 	}
+
+    // 출발 콘솔 경로에서는 현재 장비와 경제 상태를 유지하고 이전 현장 복원만 종료
+    if (PendingGameDataOperation == EMD_PendingGameDataOperation::NewContract)
+    {
+        // 목적지 게임 모드가 예약된 새 계약을 초기화하도록 작업 소비
+        PendingGameDataOperation = EMD_PendingGameDataOperation::None;
+        // 이전 저장 데이터를 새 현장에 덮어쓰지 않는 출항 완료
+        return true;
+    }
 
 	if (PendingGameDataOperation == EMD_PendingGameDataOperation::NewGame)
 	{

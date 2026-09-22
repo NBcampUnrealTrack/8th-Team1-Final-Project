@@ -177,14 +177,14 @@ void AMD_QuestSampleSpawner::TrySpawnForQuestState()
 	}
 
 	UWorld* World = GetWorld();
-	// 선택한 파일의 물품 상태가 적용되기 전 임의 재생성 차단
+	// 저장 복원 또는 새 계약 적용 전에 이전 퀘스트로 물품이 생성되는 상황 차단
 	UMD_SaveSlotManager* SaveManager = IsValid(World) == true && IsValid(World->GetGameInstance()) == true
 		? World->GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-	// 복원 이벤트 중 변경 알림으로 퀘스트 물품이 중복 생성되는 상황 방지
-	if (IsValid(SaveManager) == true && (SaveManager->GetPendingGameDataOperation() == EMD_PendingGameDataOperation::LoadGame
+	// 예약된 맵 초기화와 복원 이벤트가 완료될 때까지 퀘스트 물품 생성 보류
+	if (IsValid(SaveManager) == true && (SaveManager->GetPendingGameDataOperation() != EMD_PendingGameDataOperation::None
 		|| SaveManager->IsGameDataOperationInProgress() == true))
 	{
-		// 저장된 생존 목록의 복원을 먼저 완료하도록 생성 연기
+		// 저장된 생존 목록 또는 새 계약의 퀘스트를 먼저 확정하도록 생성 연기
 		return;
 	}
 

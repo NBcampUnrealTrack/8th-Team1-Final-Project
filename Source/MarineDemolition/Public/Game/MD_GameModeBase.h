@@ -187,8 +187,8 @@ private:
 
     void RestoreDaySnapshot();
 
-    /** GameState CurrentDay와 MerchantSubsystem BeginDay를 맞춘다. 서버 전용. */
-    void SyncMerchantToGameDay(int32 Day);
+    // 서버 일차와 퀘스트를 동기화하고 명시적인 새 출항만 같은 현장의 계약 재구성
+    void SyncMerchantToGameDay(int32 Day, bool bStartNewContract = false);
 
     UMD_SiteDefinition* ResolveExpeditionSite() const;
 

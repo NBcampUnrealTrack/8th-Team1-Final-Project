@@ -36,7 +36,10 @@ enum class EMD_PendingGameDataOperation : uint8
 	ContinueGame,
 
 	// 목적지 맵에 선택한 저장 데이터를 적용하는 작업
-	LoadGame
+	LoadGame,
+
+	// 현재 장비와 경제 상태를 유지하면서 새 현장 계약을 시작하는 작업
+	NewContract
 };
 
 /**
@@ -154,6 +157,9 @@ public:
 	// 불러오기 여부와 현재 진행 데이터 존재 여부에 따라 맵 적용 작업을 예약하고 목적지 맵을 반환하는 함수
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool OnTryStartGameWithGameData(const FMD_GameData& GameData, bool bLoadGame, FString& OutMapPackagePath);
+
+	// 출발 콘솔의 새 계약을 기존 진행 상태 변경 없이 예약하는 함수
+	bool PrepareNewContract();
 
 	// 현재 진행중인 게임 데이터의 존재 여부를 반환하는 함수
 	UFUNCTION(BlueprintPure, Category = "Save Game")

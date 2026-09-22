@@ -217,16 +217,31 @@ void AMD_GameModeBase::ApplyPendingGameDataOperation()
             // 오염 초기화 중 월드 복원 중단
             return;
         }
-        // 실제 파일 복원과 일차 경계 초기화를 구분할 요청 상태 보관
-        bRestoredSavedWorld = SaveSlotManager->GetPendingGameDataOperation() == EMD_PendingGameDataOperation::LoadGame;
+        // 작업 소비 전에 파일 복원과 새 출항 및 다음 일차 전환을 구분할 요청 보관
+        EMD_PendingGameDataOperation PendingOperation = SaveSlotManager->GetPendingGameDataOperation();
+        // 파일 불러오기에서 저장된 퀘스트와 시각 유지
+        bRestoredSavedWorld = PendingOperation == EMD_PendingGameDataOperation::LoadGame;
         // 작업 없음은 정상 진입으로 유지하고 실제 복원 실패만 중단
-        if (SaveSlotManager->GetPendingGameDataOperation() != EMD_PendingGameDataOperation::None
-            && SaveSlotManager->ApplyPendingGameDataOperation() == false)
+        if (PendingOperation != EMD_PendingGameDataOperation::None && SaveSlotManager->ApplyPendingGameDataOperation() == false)
         {
             // 부분 복원 월드의 시간 재개와 자동 저장 차단 원인 기록
             UE_LOG(LogTemp, Error, TEXT("Saved game restoration failed; world initialization and auto-save stopped."));
             // 준비 완료를 게시하지 않고 복원 실패 상태 유지
             return;
+        }
+        // 새 출항은 작업 소비 직후 계약을 갱신하여 이전 수락 상태로 물품이 생성되는 상황 방지
+        if (PendingOperation == EMD_PendingGameDataOperation::NewGame
+            || PendingOperation == EMD_PendingGameDataOperation::ContinueGame
+            || PendingOperation == EMD_PendingGameDataOperation::NewContract)
+        {
+            // 목적지 맵의 일차를 새 계약에 적용할 서버 상태 조회
+            AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
+            // 게임 상태가 준비된 출항에서만 새 퀘스트 구성
+            if (IsValid(MDGameState) == true)
+            {
+                // 다음 틱의 스포너 평가보다 먼저 새 계약 확정
+                SyncMerchantToGameDay(MDGameState->GetCurrentDay(), true);
+            }
         }
     }
     GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
@@ -1159,7 +1174,7 @@ UMD_SiteDefinition* AMD_GameModeBase::ResolveExpeditionSite() const
     return OutSite;
 }
 
-void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
+void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day, bool bStartNewContract)
 {
     if (Day <= 0)
     {
@@ -1187,10 +1202,12 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
         return;
     }
 
-    // 같은 현장의 Day 전환은 유지하고 다른 현장 진입만 새 계약으로 교체하기 위한 현재 데이터
+    // 같은 현장의 다음 일차는 유지하되 로비에서 새로 출항한 계약은 재구성
     UMD_SiteDefinition* CurrentSite = Merchant->GetCurrentSite();
-    if (CurrentSite != ResolvedSite || Merchant->GetMainQuests().IsEmpty() == true)
+    // 기존 현장과 일치하더라도 명시적인 새 출항에서는 퀘스트 재추첨
+    if (bStartNewContract == true || CurrentSite != ResolvedSite || Merchant->GetMainQuests().IsEmpty() == true)
     {
+        // 이전 수락 및 실패와 진행도를 새 현장의 초기 퀘스트 목록으로 교체
         Merchant->BeginContract(ResolvedSite);
     }
 
