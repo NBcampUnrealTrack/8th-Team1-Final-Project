@@ -95,6 +95,12 @@ private:
     // 서버 GameState에 검증된 출발 난이도와 인원수를 계약 상태로 반영하는 처리
     void ApplyRequestedContractSettings();
 
+    // 파일 복원 직후 저장된 퀘스트와 시간을 일차 초기화에서 보호하는 상태
+    bool bRestoredSavedWorld = false;
+
+    // 비동기 구역 복원의 무한 대기를 막는 실시간 기준
+    double SavedStreamingStartSeconds = 0.0;
+
     bool bStartPlayWaitingForMapRegistration = false;
     TArray<TWeakObjectPtr<AController>> PendingMapRegistrationPlayers;
 

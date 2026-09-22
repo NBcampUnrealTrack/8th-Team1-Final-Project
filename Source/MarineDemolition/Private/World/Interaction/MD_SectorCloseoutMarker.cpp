@@ -77,11 +77,20 @@ void AMD_SectorCloseoutMarker::TryCloseout()
 	}
 }
 
-void AMD_SectorCloseoutMarker::RestoreClosed()
+void AMD_SectorCloseoutMarker::RestoreClosed(bool bWasClosed)
 {
-	// 어제 마감분 복원. 점수는 스냅샷 캐리오버에 이미 포함돼 있어 재지급하지 않는다
-	bClosed = true;
-	OnRep_Closed();
+    // 서버의 복원에서만 마감 여부 변경 허용
+    if (HasAuthority() == false)
+    {
+        // 클라이언트의 권위 상태 변경 차단
+        return;
+    }
+    // 저장 당시의 미마감 상태도 이전 플레이 상태 위에 정확히 적용
+    bClosed = bWasClosed;
+    // 리슨 서버와 BP 외형에 변경된 상태 통지
+    OnRep_Closed();
+    // 이미 접속한 클라이언트에도 복원된 마감 여부 전송
+    ForceNetUpdate();
 }
 
 void AMD_SectorCloseoutMarker::OnRep_Closed()

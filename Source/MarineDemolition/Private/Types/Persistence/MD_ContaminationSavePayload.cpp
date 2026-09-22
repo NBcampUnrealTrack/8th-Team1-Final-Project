@@ -61,6 +61,16 @@ bool FMD_ContaminationSavePayload::Encode(const TArray<int32>& Indices,
     {
         // 현재 저장에서는 모든 열의 셀 개수가 일치해야 인코딩 허용
         if (Column->Num() != Count) return false;
+        // 비정상 실수가 압축된 정상 파일로 고정되는 상황 차단
+        for (float Value : *Column)
+        {
+            // 기존 값의 정밀도와 범위를 유지하면서 NaN과 무한대만 거부
+            if (FMath::IsFinite(Value) == false)
+            {
+                // 원본 압축 저장을 교체하기 전 실패 반환
+                return false;
+            }
+        }
     }
     if (Count == 0)
     {
@@ -242,6 +252,22 @@ bool FMD_ContaminationSavePayload::Serialize(FArchive& Ar)
             {
                 int32 CellIndex;
                 FMemory::Memcpy(&CellIndex, Raw.GetData() + Row * sizeof(int32), sizeof(int32));
+                // CRC가 일치하더라도 의미 없는 오염 수치의 월드 유입 차단
+                for (int32 Column = 0; Column < 5; ++Column)
+                {
+                    // 비정렬 압축 해제 버퍼의 실수를 안전하게 복사
+                    float Value;
+                    // 직렬화된 열 배치에 맞춰 셀 값 추출
+                    FMemory::Memcpy(&Value, Raw.GetData() + ((Column + 1) * ExpectedRows + Row) * sizeof(float), sizeof(float));
+                    // 한 번의 파일 읽기에서 모든 수치의 유한성 검증
+                    if (FMath::IsFinite(Value) == false)
+                    {
+                        // 손상된 본문의 이후 적용 차단
+                        Ar.SetError();
+                        // 아카이브 오류를 유지한 채 직렬화 종료
+                        return true;
+                    }
+                }
                 Loaded->MinimumIndex = FMath::Min(Loaded->MinimumIndex, CellIndex);
                 Loaded->MaximumIndex = FMath::Max(Loaded->MaximumIndex, CellIndex);
                 if (CellIndex < 0 || CellIndex >= Seen.Num())

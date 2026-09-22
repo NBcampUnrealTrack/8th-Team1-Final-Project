@@ -2,8 +2,8 @@
 
 
 #include "Game/MD_GameModeBase.h"
+#include "World/Sample/MD_QuestSampleSpawnerManager.h"
 #include "World/Wall/MD_WallShadowBatchSubsystem.h"
-#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "EngineUtils.h"
@@ -14,7 +14,6 @@
 #include "Game/MD_GameStateBase.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Player/MD_PlayerController.h"
-#include "TimerManager.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
 #include "World/Return/MD_ReturnZone.h"
@@ -22,8 +21,6 @@
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
 #include "Data/SaveGame/MD_SaveSlotManager.h"
-#include "Engine/GameInstance.h"
-#include "Engine/World.h"
 #include "Gameplay/Loading/MD_MapRegistrationSubsystem.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
@@ -165,17 +162,72 @@ void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AMD_GameModeBase::ApplyPendingGameDataOperation()
 {
-    if (const auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); Initializer && Initializer->IsPending())
-    {
-        GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
-        return;
-    }
     // GameInstance 수명으로 트래블을 통과한 데이터 초기화 작업을 실행할 저장 관리자 참조
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
     if (IsValid(SaveSlotManager) == true)
     {
-        SaveSlotManager->ApplyPendingGameDataOperation();
+        // 월드 복원 전에 모든 개인 기록의 아이템 자산 준비
+        bool bAssetsReady = false;
+        // 손상된 품목과 로드 실패가 부분 복원으로 이어지는 상황 차단
+        if (SaveSlotManager->PrepareSavedAssets(bAssetsReady) == false)
+        {
+            // 초기화와 자동 저장을 막는 자산 준비 실패 기록
+            UE_LOG(LogTemp, Error, TEXT("Saved assets could not be prepared; initialization stopped."));
+            // 준비되지 않은 장비로 월드 진입 차단
+            return;
+        }
+        // 방문 구역의 내부 액터가 준비되기 전 저장 데이터 적용 연기
+        bool bStreamingReady = false;
+        // 사라진 구역과 로더 설정 변경의 실패 검사
+        if (SaveSlotManager->PrepareSavedWorldStreaming(bStreamingReady) == false)
+        {
+            // 초기화와 자동 저장을 막는 구역 복원 실패 기록
+            UE_LOG(LogTemp, Error, TEXT("Saved streaming levels could not be restored; initialization stopped."));
+            // 불완전한 월드의 정상 진입 차단
+            return;
+        }
+        // 구역과 아이템 로딩을 같은 프레임에 진행하고 둘 다 준비될 때까지 대기
+        if (bStreamingReady == false || bAssetsReady == false)
+        {
+            // 첫 구역 및 아이템 준비 요청의 실시간 기준 보관
+            if (SavedStreamingStartSeconds == 0.0)
+            {
+                // 게임 시간 정지와 무관한 로딩 제한 기준
+                SavedStreamingStartSeconds = FPlatformTime::Seconds();
+            }
+            // 엔진 로드 실패가 무한 대기로 이어지는 상황 차단
+            if (FPlatformTime::Seconds() - SavedStreamingStartSeconds > 120.0)
+            {
+                // 구역 복원 시간 초과 원인 기록
+                UE_LOG(LogTemp, Error, TEXT("Saved level or save asset loading timed out; initialization stopped."));
+                // 정상 완료와 자동 저장 차단
+                return;
+            }
+            // 구역 로딩을 막지 않는 다음 프레임 재시도
+            GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
+            // 현재 프레임의 데이터 적용 연기
+            return;
+        }
+        // 추가 구역을 포함한 모든 오염 표면의 초기화 완료 대기
+        if (auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); IsValid(Initializer) == true && Initializer->IsPending() == true)
+        {
+            // 신규 구역 표면의 준비를 다음 프레임에서 재확인
+            GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
+            // 오염 초기화 중 월드 복원 중단
+            return;
+        }
+        // 실제 파일 복원과 일차 경계 초기화를 구분할 요청 상태 보관
+        bRestoredSavedWorld = SaveSlotManager->GetPendingGameDataOperation() == EMD_PendingGameDataOperation::LoadGame;
+        // 작업 없음은 정상 진입으로 유지하고 실제 복원 실패만 중단
+        if (SaveSlotManager->GetPendingGameDataOperation() != EMD_PendingGameDataOperation::None
+            && SaveSlotManager->ApplyPendingGameDataOperation() == false)
+        {
+            // 부분 복원 월드의 시간 재개와 자동 저장 차단 원인 기록
+            UE_LOG(LogTemp, Error, TEXT("Saved game restoration failed; world initialization and auto-save stopped."));
+            // 준비 완료를 게시하지 않고 복원 실패 상태 유지
+            return;
+        }
     }
     GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
 }
@@ -994,6 +1046,16 @@ bool AMD_GameModeBase::IsAutoSaveAllowed()
 
 void AMD_GameModeBase::InitializeExpeditionDay()
 {
+    // 구버전 퀘스트 물품을 새 빈 생존 목록으로 자동 저장하는 상황 방지
+    UMD_QuestSampleSpawnerManager* Spawners = GetWorld()->GetSubsystem<UMD_QuestSampleSpawnerManager>();
+    // 같은 프레임의 타이머 실행 순서와 무관하게 물품 복구 완료 대기
+    if (IsValid(Spawners) == true && Spawners->IsLegacyQuestRecoveryPending() == true)
+    {
+        // 구버전 복구 후 월드 완료와 자동 저장 재개
+        GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
+        // 불완전한 생존 목록의 저장 차단
+        return;
+    }
     if (const auto* Shadows = GetWorld()->GetSubsystem<UMD_WallShadowBatchSubsystem>(); Shadows && Shadows->IsInitializationPending())
     {
         GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
@@ -1006,11 +1068,19 @@ void AMD_GameModeBase::InitializeExpeditionDay()
         GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
         return;
     }
-    RestoreDaySnapshot();
-
-    if (const AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    // 파일에서 복원한 퀘스트와 시각을 신규 일차 설정으로 덮는 상황 방지
+    if (bRestoredSavedWorld == false)
     {
-        SyncMerchantToGameDay(GS->GetCurrentDay());
+        // 정상적인 다음 일차 전환에만 경계 스냅샷과 악화 적용
+        RestoreDaySnapshot();
+        // 새 일차의 계약 설정에 사용할 서버 진행 상태 조회
+        AMD_GameStateBase* RestoredGameState = GetGameState<AMD_GameStateBase>();
+        // 파일 복원이 아닌 새 출항 및 일차 전환의 계약 동기화
+        if (IsValid(RestoredGameState) == true)
+        {
+            // 실제 일차가 바뀐 경로의 착수금과 퀘스트 해금 처리
+            SyncMerchantToGameDay(RestoredGameState->GetCurrentDay());
+        }
     }
 
     if (auto* GS = GetGameState<AMD_GameStateBase>()) GS->FinishWorldInitialization();
@@ -1247,8 +1317,12 @@ void AMD_GameModeBase::CollectGameData(FMD_GameData& GameData, bool& bWasSuccess
     // 로그아웃 기록을 유지하면서 현재 접속자의 장비 기록 갱신
     for (APlayerState* PlayerState : MDGameState->PlayerArray)
     {
-        // 기존 정책에 따라 Pawn이 준비되지 않은 플레이어 건너뛰기
-        CollectPlayerGameData(PlayerState, GameData);
+        // 아직 생성되지 않은 Pawn은 재접속 기록을 유지하여 이후 복원
+        if (IsValid(PlayerState) == true && IsValid(PlayerState->GetPawn()) == true && CollectPlayerGameData(PlayerState, GameData) == false)
+        {
+            // 실제 접속자의 장비 수집 실패를 전체 저장에 반영
+            bWasSuccessful = false;
+        }
     }
 }
 
@@ -1257,7 +1331,7 @@ void AMD_GameModeBase::OverwriteGameData(const FMD_GameData& GameData, bool& bWa
     // 저장된 점수와 일차를 적용할 현재 서버 진행 상태 조회
     AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
     // 전달된 데이터에서 조회할 게임 진행 필드
-    FMD_GameStateData GameStateData;
+    const FMD_GameStateData* GameStateData = GameData.FindDataField<FMD_GameStateData>(FMD_GameStateData::DataFieldKey);
     // 게임 진행을 복원할 현재 상태 객체의 유효성 확인
     if (IsValid(MDGameState) == false)
     {
@@ -1269,7 +1343,7 @@ void AMD_GameModeBase::OverwriteGameData(const FMD_GameData& GameData, bool& bWa
         return;
     }
     // 전달된 데이터에서 게임 진행 태그의 필드 조회
-    if (GameData.GetDataField(FMD_GameStateData::DataFieldKey, GameStateData) == false)
+    if (GameStateData == nullptr)
     {
         // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
         bWasSuccessful = false;
@@ -1279,7 +1353,7 @@ void AMD_GameModeBase::OverwriteGameData(const FMD_GameData& GameData, bool& bWa
         return;
     }
     // 조회를 마친 필드를 현재 게임 상태에 적용
-    if (MDGameState->ApplyGameStateSaveData(GameStateData) == false)
+    if (MDGameState->ApplyGameStateSaveData(*GameStateData) == false)
     {
         // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
         bWasSuccessful = false;
@@ -1291,8 +1365,14 @@ void AMD_GameModeBase::OverwriteGameData(const FMD_GameData& GameData, bool& bWa
     // 같은 데이터 참조에서 현재 접속자의 개인 기록을 찾아 직접 적용
     for (APlayerState* PlayerState : MDGameState->PlayerArray)
     {
-        // 신규 접속자와 미생성 Pawn을 건너뛰는 기존 정책 유지
-        OverwritePlayerGameData(PlayerState, GameData);
+        // 신규 접속자와 미생성 Pawn은 개인 기록을 적용할 다음 시점까지 대기
+        if (IsValid(PlayerState) == true && IsValid(PlayerState->GetPawn()) == true
+            && GameData.PlayerFields.Contains(BuildPlayerPersistenceKey(PlayerState)) == true
+            && OverwritePlayerGameData(PlayerState, GameData) == false)
+        {
+            // 존재하는 장비 기록을 복원하지 못한 결과 전파
+            bWasSuccessful = false;
+        }
     }
 }
 
@@ -1341,9 +1421,9 @@ bool AMD_GameModeBase::CollectPlayerGameData(const APlayerState* PlayerState, FM
     // 이번 요청에서 갱신할 플레이어별 장비 필드 조회
     FMD_PlayerData& PlayerData = GameData.PlayerFields.FindOrAdd(PlayerKey);
     // 현재 장비의 수량과 충전 상태를 포함한 기존 저장 스냅샷 기록
-    PlayerData.HotbarToolList = EquipmentComponent->BuildEquipmentSaveData();
-    // 플레이어 장비 수집 성공 반환
-    return true;
+    PlayerData = EquipmentComponent->BuildEquipmentSaveData();
+    // 불완전한 슬롯 상태가 파일에 기록되는 상황 차단
+    return PlayerData.IsStructurallyValid();
 }
 
 bool AMD_GameModeBase::OverwritePlayerGameData(const APlayerState* PlayerState, const FMD_GameData& GameData)
@@ -1381,5 +1461,5 @@ bool AMD_GameModeBase::OverwritePlayerGameData(const APlayerState* PlayerState, 
         return false;
     }
     // 서버 권위 장비 복원 API의 실제 성공 여부 반환
-    return EquipmentComponent->RestoreEquipmentSaveData(PlayerData->HotbarToolList);
+    return EquipmentComponent->RestoreEquipmentSaveData(*PlayerData);
 }

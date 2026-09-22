@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "GameplayEffectTypes.h"
 #include "GameplayAbilitySpecHandle.h"
 #include "MD_EquipHotbarComponent.generated.h"
@@ -11,6 +10,7 @@
 class UMD_ItemDefinition;
 class UMD_ToolDefinition;
 class UAbilitySystemComponent;
+struct FMD_PlayerData;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMDOnEquipHotbarChanged);
 
@@ -168,11 +168,11 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Hotbar")
 	bool SwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex);
 
-	// 기존 저장 형식에 슬롯 순서를 보존한 공통 정의 경로 제공
-	TArray<TSoftObjectPtr<UDataAsset>> BuildEquipmentSaveData() const;
+	// 슬롯 순서와 수량 및 충전 상태를 포함한 개인 저장 데이터 수집
+	FMD_PlayerData BuildEquipmentSaveData();
 
-	// 기존 경로 저장 데이터에서 공통 아이템을 슬롯당 한 개씩 복구
-	bool RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UDataAsset>>& SaveData);
+	// 모든 아이템 검증 후 빈 칸과 선택 슬롯까지 함께 복원
+	bool RestoreEquipmentSaveData(FMD_PlayerData SaveData);
 
 	// 구매 전에 무효 GE와 GA 태그 및 ASC 준비 상태 검사
 	bool IsItemAbilityGrantValid(UMD_ItemDefinition* ItemDefinition);

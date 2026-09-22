@@ -43,6 +43,9 @@ public:
 	/** 붕괴 피해와 Day 복원에서 공용으로 사용하는 손상 상태 적용 함수 */
 	void SetDamaged();
 
+	// 이미 손상된 샘플도 저장 당시 등급과 외형으로 정확히 복구
+	void RestorePersistentSampleState(EMD_SampleGrade SavedGrade, bool bSavedDamaged);
+
 	/** 모든 머신에서 로컬로 파편 연출을 스폰. Destroy 직전에 서버가 호출 */
 	UFUNCTION(NetMulticast, Reliable)
 	void MulticastSpawnBreakDebris();

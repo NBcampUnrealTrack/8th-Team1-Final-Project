@@ -1,8 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/AssetManagerTypes.h"
-#include "GameFramework/Actor.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_DataDumpTerminal.generated.h"
 
@@ -42,6 +40,12 @@ public:
 	virtual bool IsHoldInteraction_Implementation() const override { return true; }
 	virtual void Interact_Implementation(AActor* Interactor) override;
 	virtual void InteractReleased_Implementation(AActor* Interactor) override;
+
+    // 저장 시점의 전원 잠금 조회
+    FORCEINLINE bool GetPersistentLocked() { return bLocked; }
+
+    // 카트리지 재지급 없이 사용 완료와 전원 상태 복원
+    void RestorePersistentState(bool bSavedDumped, bool bSavedLocked);
 
 	/** 덤프가 끝났는지 (단말당 1회) */
 	UFUNCTION(BlueprintPure, Category = "MD|DataDump")

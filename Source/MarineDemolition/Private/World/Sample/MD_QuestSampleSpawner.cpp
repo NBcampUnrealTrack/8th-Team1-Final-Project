@@ -1,11 +1,9 @@
 #include "World/Sample/MD_QuestSampleSpawner.h"
+#include "Data/SaveGame/MD_SaveSlotManager.h"
 
 #include "Components/ArrowComponent.h"
-#include "Components/SceneComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
-#include "Engine/GameInstance.h"
-#include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
@@ -179,6 +177,17 @@ void AMD_QuestSampleSpawner::TrySpawnForQuestState()
 	}
 
 	UWorld* World = GetWorld();
+	// 선택한 파일의 물품 상태가 적용되기 전 임의 재생성 차단
+	UMD_SaveSlotManager* SaveManager = IsValid(World) == true && IsValid(World->GetGameInstance()) == true
+		? World->GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+	// 복원 이벤트 중 변경 알림으로 퀘스트 물품이 중복 생성되는 상황 방지
+	if (IsValid(SaveManager) == true && (SaveManager->GetPendingGameDataOperation() == EMD_PendingGameDataOperation::LoadGame
+		|| SaveManager->IsGameDataOperationInProgress() == true))
+	{
+		// 저장된 생존 목록의 복원을 먼저 완료하도록 생성 연기
+		return;
+	}
+
 	// 등록 완료 전 생성 요청은 매니저의 비동기 대기열에서 처리하도록 전달한다.
 	UMD_QuestSampleSpawnerManager* SpawnerManager = IsValid(World) == true ? World->GetSubsystem<UMD_QuestSampleSpawnerManager>() : nullptr;
 	bool bIsSpawnerManagerValid = IsValid(SpawnerManager);

@@ -2,7 +2,6 @@
 
 #include "CoreMinimal.h"
 #include "Audio/MD_AudioSubsystem.h"
-#include "GameplayTagContainer.h"
 #include "World/Wall/MD_WallUtility.h"
 #include "MD_WaterPipe.generated.h"
 
@@ -16,6 +15,9 @@ class MARINEDEMOLITION_API AMD_WaterPipe : public AMD_WallUtility
 
 public:
 	AMD_WaterPipe();
+
+	virtual FMD_UtilityRecord BuildPersistenceRecord() override;
+	virtual bool RestorePersistenceRecord(FMD_UtilityRecord Record) override;
 
 protected:
 	virtual void OnBroken(AActor* Cutter) override;

@@ -51,6 +51,20 @@ bool FMD_WallContaminationRecord::ValidateCellIndices(const int32 MaximumCellCou
         // 현재 패턴 밀도 열 누락 차단
         || TransferredPatternDensities.Num() != Count
         || CoveredFractions.Num() != Count) return false;
+    // 비압축 호환 배열에도 압축 본문과 동일한 수치 검증 적용
+    for (const TArray<float>* Column : {&InitialAmounts, &RemainingAmounts, &TransferredAmounts, &TransferredPatternDensities, &CoveredFractions})
+    {
+        // 모든 오염 열에서 NaN과 무한대 확인
+        for (float Value : *Column)
+        {
+            // 잘못된 실수가 오염 계산에 전달되는 상황 차단
+            if (FMath::IsFinite(Value) == false)
+            {
+                // 손상된 비압축 셀 기록 거부
+                return false;
+            }
+        }
+    }
     TBitArray<> Seen(false, MaximumCellCount);
     for (const int32 Index : CellIndices)
     {

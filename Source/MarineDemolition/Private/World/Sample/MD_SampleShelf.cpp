@@ -3,22 +3,12 @@
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Components/ArrowComponent.h"
 #include "Components/BoxComponent.h"
-#include "Components/SceneComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/GameInstance.h"
-#include "Engine/StaticMesh.h"
-#include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
-#include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 // MD_MerchantSubsystem.h는 FGameplayTag를 전방 선언만 한다. 값으로 받으므로 전체 정의가 필요하다.
-#include "GameplayTagContainer.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
-#include "TimerManager.h"
 #include "Util/MD_MaterialTintUtility.h"
-#include "World/Sample/MD_QuestItem.h"
 #include "World/Sample/MD_SampleItem.h"
 
 AMD_SampleShelf::AMD_SampleShelf()
@@ -395,4 +385,20 @@ FTransform AMD_SampleShelf::GetSlotTransform(int32 Index) const
 	Result.AddToTranslation(Result.GetRotation().RotateVector(LocalOffset));
 
 	return Result;
+}
+
+void AMD_SampleShelf::RestorePersistentDisplayEntries(TArray<FMD_ShelfDisplayEntry> Entries)
+{
+	// 클라이언트의 독립적인 납품 외형 변경 차단
+	if (HasAuthority() == false)
+	{
+		// 서버가 아닌 요청 종료
+		return;
+	}
+	// 납품된 물품을 다시 제출하지 않고 전시 기록만 교체
+	DisplayEntries = MoveTemp(Entries);
+	// 호스트 전시 컴포넌트 재구성
+	OnRep_DisplayEntries();
+	// 저장된 전시 목록의 클라이언트 복제 요청
+	ForceNetUpdate();
 }

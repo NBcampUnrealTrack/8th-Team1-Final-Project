@@ -1,23 +1,14 @@
 #include "World/Sample/MD_SampleItem.h"
 
-#include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
-#include "GameFramework/Pawn.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Util/MD_LogUtility.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/Engine.h"
-#include "Engine/EngineTypes.h"
-#include "Engine/GameInstance.h"
-#include "Engine/World.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
-#include "TimerManager.h"
 #include "Util/MD_MaterialTintUtility.h"
 
 AMD_SampleItem::AMD_SampleItem()
@@ -300,4 +291,24 @@ void AMD_SampleItem::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* Ot
 	{
 		SetDamaged();
 	}
+}
+
+void AMD_SampleItem::RestorePersistentSampleState(EMD_SampleGrade SavedGrade, bool bSavedDamaged)
+{
+	// 물품 상태 복원은 서버에서만 적용
+	if (HasAuthority() == false)
+	{
+		// 비권위 요청 종료
+		return;
+	}
+	// 저장 시점의 납품 등급 적용
+	Grade = SavedGrade;
+	// 손상 효과와 퀘스트 실패를 재발행하지 않고 상태만 복구
+	bDamaged = bSavedDamaged;
+	// 호스트 손상 외형 갱신
+	OnRep_Damaged();
+	// 로드 직후 물리 안정화 중 발생하는 충격 보호
+	SuppressImpactDamage(SpawnProtectionDuration);
+	// 클라이언트 손상 상태 동기화
+	ForceNetUpdate();
 }
