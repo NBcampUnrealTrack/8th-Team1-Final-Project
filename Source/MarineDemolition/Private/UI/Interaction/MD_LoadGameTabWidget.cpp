@@ -1,12 +1,14 @@
-// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "UI/Interaction/MD_LoadGameTabWidget.h"
 
+#include "Components/Image.h"
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
 #include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "Engine/GameInstance.h"
 #include "GameFramework/PlayerController.h"
+#include "ImageUtils.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/MD_CommonButtonBase.h"
 
@@ -112,6 +114,15 @@ void UMD_LoadGameTabWidget::HandleSaveSlotsLoaded(const TArray<FMD_GameData>& Ga
         // 최초 진입 또는 삭제된 선택은 최근 저장으로 대체
         SelectedSlotIndex = 0;
     }
+    // 이전 목록 이미지의 참조를 해제하고 새 정렬 순서와 대응
+    SaveThumbnails.Reset(SaveSlots.Num());
+    // 선택을 바꿀 때마다 압축 이미지를 다시 해제하는 비용 방지
+    for (FMD_GameData& GameData : SaveSlots)
+    {
+        // 캡처가 없거나 해제에 실패한 슬롯은 디자이너 기본 이미지 사용
+        SaveThumbnails.Add(GameData.ThumbnailImage.IsEmpty() == false
+            ? FImageUtils::ImportBufferAsTexture2D(GameData.ThumbnailImage) : nullptr);
+    }
     // 카드 생성 이벤트에서 목록을 다시 조회하여 현재 배열을 교체하는 재진입 차단
     bIsRefreshing = true;
     // 실제 저장 개수로 목록 갱신
@@ -163,6 +174,18 @@ void UMD_LoadGameTabWidget::RebuildSaveCards()
         }
         // 실제 저장 이름 표시
         Card->SetContentText(FText::FromString(SaveSlots[Index].UniqueName));
+        // 유효한 캡처가 있는 카드만 디자이너 기본 이미지 교체
+        if (IsValid(SaveThumbnails[Index]) == true)
+        {
+            // 디자이너의 카드 크기와 모서리를 유지할 브러시 복사
+            FSlateBrush ThumbnailBrush = Card->GetContentImage();
+            // 슬롯과 같은 정렬 순서의 장면 텍스처 연결
+            ThumbnailBrush.SetResourceObject(SaveThumbnails[Index]);
+            // 별도 잘라내기 없이 캡처 텍스처 전체 사용
+            ThumbnailBrush.SetUVRegion(FBox2f());
+            // 재구성 이후에도 유지되는 카드 이미지 속성 갱신
+            Card->SetContentImage(ThumbnailBrush);
+        }
         // 단일 선택 표시 허용
         Card->SetIsSelectable(true);
         // 선택한 저장의 재클릭 해제 방지
@@ -341,6 +364,33 @@ void UMD_LoadGameTabWidget::RefreshSelectionDisplay()
 {
     // 빈 목록과 선택 항목 구분
     bool bHasSelection = SaveSlots.IsValidIndex(SelectedSlotIndex);
+    // 선택 변경과 빈 목록에서 이전 슬롯 장면 잔류 방지
+    if (IsValid(Img_DetailPreview) == true)
+    {
+        // 현재 선택에 대응하는 캐시 텍스처 조회
+        UTexture2D* Thumbnail = SaveThumbnails.IsValidIndex(SelectedSlotIndex) == true ? SaveThumbnails[SelectedSlotIndex].Get() : nullptr;
+        // 현재 미리보기의 크기와 색상을 유지할 브러시 복사
+        FSlateBrush ThumbnailBrush = Img_DetailPreview->GetBrush();
+        // 읽기에 성공한 캡처만 상세 미리보기에 표시
+        if (IsValid(Thumbnail) == true)
+        {
+            // 선택한 슬롯의 저장 장면 적용
+            ThumbnailBrush.SetResourceObject(Thumbnail);
+            // 별도 잘라내기 없이 캡처 텍스처 전체 사용
+            ThumbnailBrush.SetUVRegion(FBox2f());
+            // 빈 미리보기에서 유효한 슬롯 선택 시 이미지 그리기 복원
+            ThumbnailBrush.DrawAs = ESlateBrushDrawType::Image;
+        }
+        else
+        {
+            // 이전 캡처와 디자이너 기본 이미지의 참조 제거
+            ThumbnailBrush.SetResourceObject(nullptr);
+            // 텍스처 없는 흰 사각형도 그리지 않고 미리보기 비우기
+            ThumbnailBrush.DrawAs = ESlateBrushDrawType::NoDrawType;
+        }
+        // 캡처 여부에 따라 선택한 브러시 표시
+        Img_DetailPreview->SetBrush(ThumbnailBrush);
+    }
     // 저장 필드 전체를 복사하지 않고 표시할 이름만 보관
     FText SaveName;
     // 경제 필드가 없을 때 표시할 문구로 초기화

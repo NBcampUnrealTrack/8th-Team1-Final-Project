@@ -1,5 +1,6 @@
 #include "Data/Merchant/MD_QuestDefinition.h"
 
+#include "Data/Equipment/MD_QuestItemDefinition.h"
 #include "Engine/AssetManager.h"
 #include "World/Sample/MD_QuestItem.h"
 #include "World/Sample/MD_SampleItem.h"
@@ -38,6 +39,29 @@ bool FMD_QuestPhaseData::TargetsQuestItem(const FGameplayTag& GradeTag) const
 	bool bGradeMatches = bHasGradeRequirement == false || (GradeTag.IsValid() == true && AcceptedGradeTags.HasTagExact(GradeTag) == true);
 	bool bOutTargetsQuestItem = bIsRecovery == true && bGradeMatches == true;
 	return bOutTargetsQuestItem;
+}
+
+bool FMD_QuestPhaseData::AcceptsQuestItemDefinition(const UMD_QuestItemDefinition* SubmittedItem, const FPrimaryAssetId& OwningQuestId) const
+{
+	if (IsValid(SubmittedItem) == false)
+	{
+		return false;
+	}
+
+	// 핫바 회수물은 파괴 상태가 없으므로 회수 계열 페이즈면 온전 조건은 항상 충족한다
+	bool bIsRecovery = ObjectiveType == EMD_QuestObjectiveType::RecoverIntact || ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
+	if (bIsRecovery == false)
+	{
+		return false;
+	}
+
+	if (RequiredItemDefinition != nullptr)
+	{
+		return RequiredItemDefinition == SubmittedItem;
+	}
+
+	// 페이즈에 정의가 없으면 회수물이 스스로 밝힌 귀속 퀘스트로 대조한다
+	return SubmittedItem->QuestDefinitionId.IsValid() == true && SubmittedItem->QuestDefinitionId == OwningQuestId;
 }
 
 const FPrimaryAssetType UMD_QuestDefinition::QuestPrimaryAssetType(TEXT("Quest"));
@@ -184,6 +208,20 @@ bool UMD_QuestDefinition::AcceptsQuestItem(int32 PhaseIndex, AMD_QuestItem* Subm
 	const FMD_QuestPhaseData* Phase = GetPhase(PhaseIndex);
 	bool bOutAcceptsQuestItem = Phase != nullptr && Phase->AcceptsQuestItem(SubmittedItem) == true;
 	return bOutAcceptsQuestItem;
+}
+
+bool UMD_QuestDefinition::AcceptsQuestItemDefinition(int32 PhaseIndex, const UMD_QuestItemDefinition* SubmittedItem) const
+{
+	const FMD_QuestPhaseData* Phase = GetPhase(PhaseIndex);
+	bool bOutAccepts = Phase != nullptr && Phase->AcceptsQuestItemDefinition(SubmittedItem, GetPrimaryAssetId()) == true;
+	return bOutAccepts;
+}
+
+bool UMD_QuestDefinition::UsesHotbarDelivery(int32 PhaseIndex) const
+{
+	const FMD_QuestPhaseData* Phase = GetPhase(PhaseIndex);
+	bool bOutUsesHotbar = Phase != nullptr && Phase->UsesHotbarDelivery() == true;
+	return bOutUsesHotbar;
 }
 
 bool UMD_QuestDefinition::TargetsQuestItem(int32 PhaseIndex, const FGameplayTag& GradeTag) const

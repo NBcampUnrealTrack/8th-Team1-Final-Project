@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "GameplayTagContainer.h"
 #include "MD_FoamGunComponent.generated.h"
 
 class AMD_FoamProjectile;
@@ -68,11 +69,20 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
 	float GetShotCost() const;
 
-	// 발사 원점. 조준선과 탄도가 어긋나지 않도록 카메라 시점 기준으로 계산한다 (서버·클라 동일 산식)
-	FVector GetLaunchOrigin() const;
+	/**
+	 * 발사 원점과 방향. 원점은 도구 메시의 총구 소켓(MuzzleSocketName), 방향은 총구에서
+	 * 카메라 조준점(시점 트레이스 착점)을 향한다 — 궤적 프리뷰와 서버 스폰이 같은 산식을 쓴다.
+	 * 소켓이 없으면 옛 방식(시점 + MuzzleForwardOffset)으로 폴백한다.
+	 */
+	void ComputeLaunch(FVector& OutOrigin, FVector& OutDirection) const;
 
-	// 조준 방향. BaseAimRotation은 복제되므로 서버에서도 같은 값이 나온다
-	FVector GetAimDirection() const;
+	/**
+	 * 발사 요청. 로컬 플레이어가 보는 총구 원점·방향을 서버로 보내고, 서버가 충전 소모·스폰·발사음 중계를 한다.
+	 * 서버는 1인칭 도구 메시를 모르므로 클라이언트 값이 필요하다 — 호스트는 즉시 로컬 실행.
+	 * 값이 서버 시점 기준 허용 범위를 벗어나면 서버 계산값으로 대체한다.
+	 */
+	UFUNCTION(Server, Reliable)
+	void ServerFire(FVector_NetQuantize Origin, FVector_NetQuantizeNormal Direction, FGameplayTag FireSoundTag);
 
 	float GetLaunchSpeed() const { return LaunchSpeed; }
 	float GetProjectileGravityScale() const { return ProjectileGravityScale; }
@@ -115,7 +125,23 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|FoamGun|Trajectory", meta = (ClampMin = "0.0"))
 	float ImpactMarkerOffset = 8.f;
 
-	// 시점에서 발사 원점까지 전방 오프셋(cm). 1인칭 화면에서 궤적 시작부가 얼굴을 가리지 않게 띄운다
+	// 폼건 스태틱 메시의 총구 소켓. 궤적 프리뷰·발사체가 여기서 시작한다
+	UPROPERTY(EditDefaultsOnly, Category = "MD|FoamGun|Ballistics")
+	FName MuzzleSocketName = TEXT("VFX_Muzzle");
+
+	// 카메라 조준점 트레이스 거리(cm). 아무것도 안 맞으면 이 거리의 점을 조준점으로 쓴다
+	UPROPERTY(EditDefaultsOnly, Category = "MD|FoamGun|Ballistics", meta = (ClampMin = "100.0"))
+	float AimTraceRange = 10000.f;
+
+	// 클라이언트가 보낸 발사 원점이 서버 시점에서 이 거리(cm) 안이어야 신뢰한다
+	UPROPERTY(EditDefaultsOnly, Category = "MD|FoamGun|Ballistics", meta = (ClampMin = "0.0"))
+	float MaxClientOriginDistance = 250.f;
+
+	// 클라이언트가 보낸 발사 방향이 서버 조준 방향과 이 각도(도) 안이어야 신뢰한다
+	UPROPERTY(EditDefaultsOnly, Category = "MD|FoamGun|Ballistics", meta = (ClampMin = "0.0", ClampMax = "90.0"))
+	float MaxClientAimAngle = 30.f;
+
+	// 총구 소켓이 없을 때의 폴백: 시점에서 발사 원점까지 전방 오프셋(cm)
 	UPROPERTY(EditDefaultsOnly, Category = "MD|FoamGun|Ballistics", meta = (ClampMin = "0.0"))
 	float MuzzleForwardOffset = 40.f;
 
@@ -129,6 +155,12 @@ private:
 	// Hotbar 복제 및 서버 변경 알림을 기존 폼건 UI 이벤트로 전달
 	UFUNCTION()
 	void HandleHotbarChanged();
+
+	// 시점 위치·방향. 로컬 플레이어는 실제 카메라, 서버·타인은 복제된 BaseAimRotation 기준
+	void GetViewPoint(FVector& OutLocation, FVector& OutDirection) const;
+
+	// 시점 트레이스 착점. 총구에서 이 점을 향해 쏘면 조준선(화면 중앙)과 탄도가 맞는다
+	FVector ComputeAimTarget(const FVector& ViewLocation, const FVector& ViewDirection) const;
 
 	// 폼건을 들고 있는 동안만 프리뷰를 유지한다
 	bool ShouldShowTrajectory() const;

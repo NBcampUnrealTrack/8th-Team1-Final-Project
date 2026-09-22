@@ -17,6 +17,8 @@ struct FCollisionQueryParams;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnInteractionTargetChanged, AActor*, NewTarget);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnInteractionPromptChanged, FText, PromptText);
+/** 운반 대상이 바뀔 때(잡음·놓음). 권한·비권한 머신 모두에서 난다. 놓으면 nullptr */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnHeldActorChanged, AActor*, HeldActor);
 
 /**
  * 플레이어의 조준 상호작용과 물리 오브젝트 운반을 담당
@@ -43,9 +45,20 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
 	void Interact();
 
+	/**
+	 * 상호작용 키를 뗐을 때 호출한다. 직전 Interact가 홀드 대상(IsHoldInteraction)에 갔다면
+	 * 같은 경로(서버/로컬)로 InteractReleased를 전달하고, 아니면 아무것도 하지 않는다.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
+	void InteractReleased();
+
 	/** Clears local focus and releases any authoritative carry state. Safe to call during death/teleport/teardown. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
 	void CancelInteraction();
+
+	/** 소유 폰이 지금 상호작용할 수 있는 상태인지 (차단·사망·빙의 해제 검사). 홀드 대상이 서버 틱에서 유지 조건으로 쓴다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
+	bool CanOwnerInteract() const;
 
 	/** Releases the held actor on the server. Client calls are intentionally ignored. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
@@ -57,6 +70,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	AActor* GetHeldActor() const { return HeldActor; }
+
+	/** 운반 시작·종료 알림. 캐릭터가 도구 메시를 내리고 올리는 연출에 쓴다 */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Interaction")
+	FMDOnHeldActorChanged OnHeldActorChanged;
 
 	/** 로컬 플레이어가 현재 조준 중인 상호작용 가능 대상. */
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
@@ -154,6 +171,10 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerInteract(AActor* RequestedActor);
 
+	/** 홀드 대상의 키 해제를 서버에 전달한다. 해제는 항상 안전하므로 조준·간격 검증 없이 대상에 그대로 넘긴다. */
+	UFUNCTION(Server, Reliable)
+	void ServerInteractReleased(AActor* RequestedActor);
+
 	bool TryHoldTarget(AActor* Target);
 	bool TryGrabPhysicsComponent(UPrimitiveComponent* Component, const FVector& PreferredGrabLocation,
 		const FMD_HoldProfile& HoldProfile);
@@ -183,7 +204,6 @@ private:
 	FVector ResolveHoldTargetLocation(const FTransform& HoldTransform) const;
 	bool ValidateInteractionTarget(AActor* RequestedActor) const;
 	bool IsHeldByOtherPawn(const AActor* Target) const;
-	bool CanOwnerInteract() const;
 	bool HasAuthorityPhysicsGrip() const;
 	void RefreshTickEnabled();
 	void UpdateHeldTarget();
@@ -223,6 +243,9 @@ private:
 	TObjectPtr<UPhysicsHandleComponent> PhysicsHandle;
 
 	TWeakObjectPtr<AActor> CurrentTarget;
+
+	/** 직전 Interact가 향한 홀드 대상. 키를 뗄 때 InteractReleased를 보낸 뒤 비운다 (로컬 전용). */
+	TWeakObjectPtr<AActor> HoldInteractionTarget;
 
 	UPROPERTY(Transient)
 	FText CurrentInteractionPrompt;

@@ -39,6 +39,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent)
 	void HandlePlayerJoinAndExit(const FText& PlayerName, bool bIsJoin);
 
+	// 서버 판정 한 줄 알림(슬롯 가득 참·전원 없음 등). WBP_PlayerNotification 계열에 표시하도록 BP에서 구현한다
+	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent)
+	void HandleHUDMessage(const FText& Message);
+
 	// 알림 위젯을 생성하여 HUD 목록에 추가한 후 반환
 	UMD_TalkNotificationWidget* CreateTalkNotification();
 };

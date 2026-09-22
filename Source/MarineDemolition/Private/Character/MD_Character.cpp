@@ -31,6 +31,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/StaticMeshSocket.h"
 #include "Animation/AnimInstance.h"
@@ -354,6 +355,12 @@ void AMD_Character::BeginPlay()
 			}
 		}
 
+	}
+
+	if (IsValid(InteractionComponent))
+	{
+		// 핫바보다 먼저 묶어 두면 아래 HandleHotbarChanged 가 운반 상태를 반영한 첫 도구 표시를 만든다
+		InteractionComponent->OnHeldActorChanged.AddDynamic(this, &AMD_Character::HandleHeldActorChanged);
 	}
 
 	if (IsValid(EquipHotbarComponent))
@@ -1167,6 +1174,8 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Started, this, &AMD_Character::HandleJumpOrSwimInput);
 	EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Completed, this, &AMD_Character::HandleJumpOrSwimReleasedInput);
 	EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Started, this, &AMD_Character::HandleInteractInput);
+	EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Completed, this, &AMD_Character::HandleInteractReleasedInput);
+	EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleInteractReleasedInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Started, this, &AMD_Character::HandleAbilityInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAbilityReleasedInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAbilityReleasedInput);
@@ -1313,6 +1322,14 @@ void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 	if (IsValid(InteractionComponent))
 	{
 		InteractionComponent->Interact();
+	}
+}
+
+void AMD_Character::HandleInteractReleasedInput(const FInputActionValue& Value)
+{
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->InteractReleased();
 	}
 }
 
@@ -1774,7 +1791,7 @@ void AMD_Character::RefreshCutterBladeMesh()
 
 	// 절단기를 들고, 톱날 메시가 있고, 본체에 회전 중심 소켓이 있어야 표시한다.
 	// 소켓이 없으면 톱날이 도구 원점에 겹쳐 박히므로 숨기는 편이 낫다.
-	const bool bWantsBlade = IsCutterEquipped() && IsValid(CutterBladeMesh);
+	const bool bWantsBlade = IsCutterEquipped() && IsValid(CutterBladeMesh) && !IsCarryingItem();
 
 	const auto Apply = [this, bWantsBlade](UStaticMeshComponent* const Blade,
 		const UStaticMeshComponent* const ToolMesh)
@@ -1932,6 +1949,22 @@ void AMD_Character::HandleScrapeLoadChanged(const float NewScrapeLoad)
 	RefreshScrapeLoadVisual();
 }
 
+void AMD_Character::HandleHeldActorChanged(AActor* HeldActor)
+{
+	// EndPlay 의 CancelInteraction 으로도 오므로 파괴 중엔 메시를 건드리지 않는다
+	if (IsActorBeingDestroyed())
+	{
+		return;
+	}
+	// 슬롯은 그대로, 표시만 바꾼다. 도구 메시·톱날·헤라 적재 메시가 한 경로에서 갱신된다
+	RefreshToolMesh();
+}
+
+bool AMD_Character::IsCarryingItem() const
+{
+	return IsValid(InteractionComponent) && InteractionComponent->IsHolding();
+}
+
 void AMD_Character::RefreshToolMesh()
 {
 	if (!IsValid(EquipHotbarComponent))
@@ -2024,7 +2057,8 @@ void AMD_Character::RefreshScrapeLoadVisual()
 		}
 	}
 
-	const bool bShowTool = IsValid(NewToolMesh);
+	// 물건을 들고 있는 동안은 도구를 내린다 (슬롯 유지, 연출만)
+	const bool bShowTool = IsValid(NewToolMesh) && !IsCarryingItem();
 	const bool bHasThirdPersonSocket = IsValid(GetMesh())
 		&& GetMesh()->DoesSocketExist(ThirdPersonToolMesh->GetAttachSocketName());
 	// 일인칭도 기본 소켓 대신 실제 부착 소켓의 유효성으로 표시 여부 결정
@@ -2501,6 +2535,65 @@ void AMD_Character::ApplyAppearanceColor(USkeletalMeshComponent* MeshComponent, 
 			MID->SetVectorParameterValue(ParameterName, Color);
 		}
 	}
+}
+
+bool AMD_Character::TryGetVisibleToolSocketLocation(FName SocketName, FVector& OutLocation) const
+{
+	if (SocketName.IsNone())
+	{
+		return false;
+	}
+
+	// 로컬 1인칭 화면이면 1인칭 도구, 거울(3인칭 전환)·타 클라이언트·서버는 3인칭 도구
+	const bool bUseFirstPerson = IsLocallyControlled()
+		&& !bLocalThirdPersonViewEnabled
+		&& IsValid(FirstPersonToolMesh)
+		&& FirstPersonToolMesh->IsVisible();
+	const UStaticMeshComponent* ToolMesh = bUseFirstPerson ? FirstPersonToolMesh : ThirdPersonToolMesh;
+	if (!IsValid(ToolMesh) || !ToolMesh->DoesSocketExist(SocketName))
+	{
+		return false;
+	}
+
+	const FVector SocketLocation = ToolMesh->GetSocketLocation(SocketName);
+	OutLocation = bUseFirstPerson ? ToFirstPersonApparentWorldLocation(SocketLocation) : SocketLocation;
+	return true;
+}
+
+FVector AMD_Character::ToFirstPersonApparentWorldLocation(const FVector& WorldLocation) const
+{
+	if (!IsValid(Camera) || !Camera->bEnableFirstPersonScale)
+	{
+		return WorldLocation;
+	}
+
+	// 1인칭 프리미티브는 뷰 원점을 기준으로 FirstPersonScale만큼 당겨 그려진다
+	const APlayerController* PlayerController = Cast<APlayerController>(Controller);
+	FVector ViewLocation = Camera->GetComponentLocation();
+	FRotator ViewRotation = Camera->GetComponentRotation();
+	if (IsValid(PlayerController))
+	{
+		PlayerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	}
+
+	const FTransform ViewTransform(ViewRotation, ViewLocation);
+	FVector ViewSpace = ViewTransform.InverseTransformPositionNoScale(WorldLocation) * Camera->FirstPersonScale;
+
+	// 1인칭 전용 FOV를 쓰면 화면 투영도 달라지므로 시야각 비율만큼 가로·세로를 보정한다
+	if (Camera->bEnableFirstPersonFieldOfView && IsValid(PlayerController) && IsValid(PlayerController->PlayerCameraManager))
+	{
+		const float WorldFOV = PlayerController->PlayerCameraManager->GetFOVAngle();
+		const float FirstPersonFOV = Camera->FirstPersonFieldOfView;
+		if (WorldFOV > UE_KINDA_SMALL_NUMBER && FirstPersonFOV > UE_KINDA_SMALL_NUMBER)
+		{
+			const float Ratio = FMath::Tan(FMath::DegreesToRadians(WorldFOV * 0.5f))
+				/ FMath::Tan(FMath::DegreesToRadians(FirstPersonFOV * 0.5f));
+			ViewSpace.Y *= Ratio;
+			ViewSpace.Z *= Ratio;
+		}
+	}
+
+	return ViewTransform.TransformPositionNoScale(ViewSpace);
 }
 
 void AMD_Character::SetLocalThirdPersonViewEnabled(bool bEnabled)

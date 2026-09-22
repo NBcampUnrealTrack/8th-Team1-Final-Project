@@ -282,6 +282,19 @@ void UMD_MultiplayManager::StartSessionByMap(const FString& MapPackagePath, cons
         return;
     }
 
+    // 로비에서 같은 맵으로 출항해도 이전 계약이 이어지지 않도록 저장 관리자 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    // 맵 이동 성공 이후 새 계약을 적용할 예약 소유자 확인
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    // 기존 경제 및 장비를 보존한 새 계약 예약에 실패하면 출항 중단
+    if (IsValid(SaveSlotManager) == false || SaveSlotManager->PrepareNewContract() == false)
+    {
+        // 호출 화면에 새 출항 준비 실패 전달
+        OnStartGameComplete.Broadcast(false);
+        // 준비되지 않은 계약의 맵 이동 방지
+        return;
+    }
+
     // 검증된 목적지 패키지 뒤에 게임 규칙 전달용 URL 옵션만 결합하는 처리
     FString TravelURL = FString::Printf(TEXT("%s%s"), *MapPackagePath, *TravelOptions);
     BeginLoadingScreenForTravel(EMD_LoadingContext::DiveStarting);

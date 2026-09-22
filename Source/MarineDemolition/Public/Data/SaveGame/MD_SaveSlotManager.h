@@ -3,9 +3,10 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 #include "MD_SaveSlotManager.generated.h"
+
+struct FStreamableHandle;
 
 // 게임 데이터 비동기 저장 완료 시 성공 여부를 호출부에 전달한다.
 DECLARE_DYNAMIC_DELEGATE_OneParam(FOnSaveMDGameDataComplete, bool, bWasSuccessful);
@@ -35,7 +36,10 @@ enum class EMD_PendingGameDataOperation : uint8
 	ContinueGame,
 
 	// 목적지 맵에 선택한 저장 데이터를 적용하는 작업
-	LoadGame
+	LoadGame,
+
+	// 현재 장비와 경제 상태를 유지하면서 새 현장 계약을 시작하는 작업
+	NewContract
 };
 
 /**
@@ -77,6 +81,15 @@ public:
 	int32 MaxUserSaveSlotCount = 5;
 
 protected:
+    // 복원할 현장과 퀘스트 및 아이템을 적용까지 GC로부터 보호하는 로드 핸들
+    TSharedPtr<FStreamableHandle> SavedAssetLoadHandle;
+
+    // 매 프레임 같은 저장의 자산 목록을 다시 만드는 상황 방지
+    bool bSavedAssetLoadRequested = false;
+
+    // 엔진 로드 완료 이후 필수 자산 검증까지 마친 상태
+    bool bSavedAssetsReady = false;
+
     // 이벤트 처리 도중 저장과 복원이 재진입하여 요청 데이터를 변경하는 상황 방지
     bool bGameDataOperationInProgress = false;
 
@@ -100,6 +113,9 @@ protected:
 public:
     // 이벤트 요청이 진행 중인지 확인하기 위한 상태 조회
     FORCEINLINE bool IsGameDataOperationInProgress() { return bGameDataOperationInProgress; }
+
+    // 파일 복원과 새 게임 및 작업 없는 진입을 구분하는 상태 조회
+    FORCEINLINE EMD_PendingGameDataOperation GetPendingGameDataOperation() { return PendingGameDataOperation; }
 
 public:
 	// 현재의 게임 데이터를 수집하고 세이브 파일에 저장하는 함수
@@ -142,6 +158,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Save Game")
 	bool OnTryStartGameWithGameData(const FMD_GameData& GameData, bool bLoadGame, FString& OutMapPackagePath);
 
+	// 출발 콘솔의 새 계약을 기존 진행 상태 변경 없이 예약하는 함수
+	bool PrepareNewContract();
+
 	// 현재 진행중인 게임 데이터의 존재 여부를 반환하는 함수
 	UFUNCTION(BlueprintPure, Category = "Save Game")
 	bool HasTemporaryGameData() const;
@@ -161,12 +180,24 @@ public:
     /** Primes immutable generation inputs before the next-tick world restoration. */
     void PrepareContaminationForWorld(UWorld* World);
 
+    // 복원할 현장과 퀘스트 및 모든 플레이어의 아이템을 엔진 로더로 일괄 준비
+    bool PrepareSavedAssets(bool& bReady);
+
+    // 저장 파일 또는 다음 일차의 방문 구역을 적용 전에 준비
+    bool PrepareSavedWorldStreaming(bool& bReady);
+
 protected:
+    // 새 요청과 취소 및 완료 시 해당 복원만 소유한 로딩 핸들 해제
+    void ResetSavedAssetPreload();
+
 	// 저장 슬롯 작업을 실행할 수 있는 Host 또는 서버 World인지 확인하는 함수
 	bool HasServerAuthority() const;
 
 	// 저장해야 하는 GameSession 데이터를 수집하는 함수
 	bool CollectGameData();
+
+    // 현재 호스트 카메라의 UI 없는 장면을 이번 저장 데이터에 기록
+    void CaptureSaveThumbnail(FMD_GameData& GameData);
 
 	// 저장 슬롯과 저장되지 않은 현재 회차에 필요한 검증 기준을 구분하여 World에 적용하는 함수
 	bool ApplyGameDataToWorldInternal(const FMD_GameData& GameData, bool bRequireSavedSlotIdentity);

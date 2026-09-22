@@ -1,10 +1,8 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTagAssetInterface.h"
-#include "GameplayTagContainer.h"
 #include "MD_CuttableWall.generated.h"
 
 class UCameraShakeBase;
@@ -85,6 +83,9 @@ public:
 	/** Restore the hidden load-bearing state without replaying cutting, rewards or collapse. */
 	void RestorePendingSupportCollapse();
 
+	// 저장 복원 시 붕괴나 감점 이벤트 없이 지지 유무만 교체
+	void RestoreSupportState(bool bSupported);
+
 	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	bool IsSupported() const { return bHasSupport; }
 
@@ -126,6 +127,12 @@ public:
 	// 절단 진행도 누적. 서버 전용. 100% 도달 시 Cut()을 호출한다
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Cut")
 	void AddCutProgress(float DeltaSeconds, AActor* Cutter);
+
+	// 절단 완료 효과 없이 누적량만 파일에 보관하기 위한 조회
+	FORCEINLINE float GetPersistentCutSeconds() { return CutProgressSeconds; }
+
+	// 점수와 파괴 이벤트를 발생시키지 않는 절단 진행 복원
+	bool RestorePersistentCutSeconds(float Seconds);
 
 	/** 서버 GA의 마지막 벽 충돌면을 조각 배분까지 동기 전달한다. */
 	void AddCutProgressFromHit(

@@ -209,6 +209,8 @@ FMD_GameData FMD_SaveSlotStore::MakeSummary(const FMD_GameData& Data)
     Row.UniqueName = Data.UniqueName;
     Row.MapPackagePath = Data.MapPackagePath;
     Row.SaveTime = Data.SaveTime;
+    // 전체 월드 데이터를 읽지 않고 목록에서 저장 장면 표시
+    Row.ThumbnailImage = Data.ThumbnailImage;
     Row.bIsSlotSummary = true;
     for (const auto& Field : Data.DataFields)
     {
@@ -218,31 +220,241 @@ FMD_GameData FMD_SaveSlotStore::MakeSummary(const FMD_GameData& Data)
 }
 bool FMD_SaveSlotStore::ReadManifest(const FString& Path, FMD_SaveSlotIndex& Out) const
 {
+    // 기존 동기 API의 파일 수명과 해시 검사 유지
     TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*Path, FILEREAD_Silent));
-    if (!Reader || Reader->TotalSize() > MaxMetadataBytes || !VerifyFile(*Reader)
-        || !EngineHeader(*Reader, 2)) return false;
+    // 크기 초과와 손상된 파일의 엔진 객체 해석 차단
+    if (Reader.IsValid() == false || Reader->TotalSize() > MaxMetadataBytes || VerifyFile(*Reader) == false)
+    {
+        // 읽을 수 없는 인덱스 세대 반환
+        return false;
+    }
+    // 동기 및 비동기 경로의 동일한 구조체 검증 사용
+    return DecodeManifest(*Reader, Out);
+}
+
+bool FMD_SaveSlotStore::DecodeManifest(FArchive& Reader, FMD_SaveSlotIndex& Out)
+{
+    // 저장 시 사용한 엔진 및 사용자 정의 버전 복원
+    if (EngineHeader(Reader, 2) == false)
+    {
+        // 지원하지 않거나 손상된 인덱스 헤더 거부
+        return false;
+    }
+    // 전체 검증 이전에 호출자의 기존 목록을 유지할 임시 결과
     FMD_SaveSlotIndex Loaded;
-    *Reader << Loaded.Generation;
-    if (!Loaded.Generation) return false;
-    FSlotArchive Ar(*Reader);
+    // 교대 인덱스의 최신 세대 선택에 필요한 번호 조회
+    Reader << Loaded.Generation;
+    // 기록된 적 없는 세대의 정상 파일 위장 차단
+    if (Loaded.Generation == 0)
+    {
+        // 유효한 세대 번호 부재 반환
+        return false;
+    }
+    // 게임 스레드에서만 UObject와 구조체 참조 해석
+    FSlotArchive Ar(Reader);
+    // 자동 및 사용자 목록에 동일한 상한과 정합성 검사 적용
     for (TArray<FMD_GameData>* Rows : { &Loaded.Auto, &Loaded.User })
     {
+        // 저장된 목록 크기를 읽을 임시 값
         int32 Count = 0;
+        // 파일에 기록된 슬롯 수 조회
         Ar << Count;
-        if (Ar.IsError() || Count < 0 || Count > MaxStoredSaveSlots) return false;
+        // 손상된 개수로 과도한 배열 할당이 발생하는 상황 차단
+        if (Ar.IsError() == true || Count < 0 || Count > MaxStoredSaveSlots)
+        {
+            // 목록 길이 손상 반환
+            return false;
+        }
+        // 검증한 개수만큼 요약 구조체 확보
         Rows->SetNum(Count);
+        // 동일 목록의 중복 슬롯 이름 검사 준비
         TSet<FString> Names;
+        // 각 요약을 엔진의 태그 기반 구조체로 해석
         for (FMD_GameData& Row : *Rows)
         {
+            // 엔진 메타데이터 버전을 적용한 요약 복원
             FMD_GameData::StaticStruct()->SerializeItem(Ar, &Row, nullptr);
-            if (Ar.IsError() || !IsSummaryValid(Row) || Names.Contains(Row.UniqueName)) return false;
+            // 파일 식별자와 요약 여부 및 이름 중복 검사
+            if (Ar.IsError() == true || IsSummaryValid(Row) == false || Names.Contains(Row.UniqueName) == true)
+            {
+                // 불완전한 목록의 부분 반환 차단
+                return false;
+            }
+            // 후속 슬롯의 중복 검사에 이름 등록
             Names.Add(Row.UniqueName);
         }
     }
-    if (Ar.IsError() || Ar.Tell() != Reader->TotalSize() - DigestBytes) return false;
+    // 해시 영역 직전에서 구조체 해석이 끝났는지 확인
+    if (Ar.IsError() == true || Ar.Tell() != Reader.TotalSize() - DigestBytes)
+    {
+        // 잘리거나 다른 본문이 덧붙은 인덱스 거부
+        return false;
+    }
+    // 검증을 마친 목록의 소유권 이전
     Out = MoveTemp(Loaded);
+    // 현재 세대의 해석 성공 반환
     return true;
 }
+
+bool FMD_SaveSlotStore::ReadManifestBytes(FString Path, TArray<uint8>& Out, bool& bExists)
+{
+    // 미생성 저장소와 손상된 인덱스를 구분할 존재 여부 조회
+    bExists = IFileManager::Get().FileExists(*Path);
+    // 작업 스레드에서 파일 읽기 수명 관리
+    TUniquePtr<FArchive> Reader(IFileManager::Get().CreateFileReader(*Path, FILEREAD_Silent));
+    // 파일 부재 또는 접근 실패 검사
+    if (Reader.IsValid() == false)
+    {
+        // 읽을 수 없는 세대의 실패 반환
+        return false;
+    }
+    // 존재 검사 이후 생성된 파일도 손상 여부 판정에 포함
+    bExists = true;
+    // 메모리 버퍼 크기의 파일 상한 적용
+    if (Reader->TotalSize() <= DigestBytes || Reader->TotalSize() > MaxMetadataBytes)
+    {
+        // 과도한 파일 버퍼 할당 차단
+        return false;
+    }
+    // 최대 16 MiB로 제한된 인덱스 버퍼 확보
+    Out.SetNumUninitialized(static_cast<int32>(Reader->TotalSize()));
+    // 중복 디스크 순회 없이 인덱스 전체를 한 번 읽기
+    Reader->Serialize(Out.GetData(), Out.Num());
+    // 완료되지 않은 읽기와 닫기 오류 확인
+    if (Reader->IsError() == true || Reader->Close() == false)
+    {
+        // 불완전한 버퍼의 게임 스레드 전달 차단
+        return false;
+    }
+    // UObject 해석 없이 원시 바이트의 SHA 검사를 수행할 아카이브
+    FMemoryReader BytesReader(Out, true);
+    // 작업 스레드에서 끝낸 해시 검사 결과 반환
+    return VerifyFile(BytesReader);
+}
+
+void FMD_SaveSlotStore::ReadIndexAsync(TFunction<void(FMD_SaveSlotIndex, bool)> Completion)
+{
+    // 임시 저장소 객체의 수명과 독립적인 경로만 작업 스레드에 전달
+    Async(EAsyncExecution::ThreadPool, [StoreRoot = Root, Completion = MoveTemp(Completion)]() mutable
+    {
+        // 디스크 읽기와 해시 계산 구간의 엔진 프로파일 표식
+        TRACE_CPUPROFILER_EVENT_SCOPE(MD_SaveSlots_AsyncReadIndex);
+        // 교대 인덱스의 최대 두 세대 바이트 보관
+        TArray<uint8> ABytes, BBytes;
+        // 양쪽 파일 부재와 손상 상태를 구분할 결과 준비
+        bool bAExists = false, bBExists = false;
+        // 첫 번째 세대의 파일 읽기와 해시 검사
+        bool bARead = ReadManifestBytes(FPaths::Combine(StoreRoot, TEXT("index-a.mdindex")), ABytes, bAExists);
+        // 두 번째 세대의 파일 읽기와 해시 검사
+        bool bBRead = ReadManifestBytes(FPaths::Combine(StoreRoot, TEXT("index-b.mdindex")), BBytes, bBExists);
+        // 엔진 구조체 해석과 완료 이벤트를 게임 스레드로 전달
+        AsyncTask(ENamedThreads::GameThread,
+            [ABytes = MoveTemp(ABytes), BBytes = MoveTemp(BBytes), bARead, bBRead, bAExists, bBExists,
+                Completion = MoveTemp(Completion)]() mutable
+        {
+            // 결과 반환 이전까지 세대별 검증 결과를 분리
+            FMD_SaveSlotIndex A, B;
+            // 메모리에 읽은 첫 번째 세대의 구조체 해석 준비
+            FMemoryReader AReader(ABytes, true);
+            // 메모리에 읽은 두 번째 세대의 구조체 해석 준비
+            FMemoryReader BReader(BBytes, true);
+            // 손상되지 않은 파일만 게임 스레드에서 역직렬화
+            bool bA = bARead == true && DecodeManifest(AReader, A) == true;
+            // 이전 세대의 복구 가능성도 동일하게 검사
+            bool bB = bBRead == true && DecodeManifest(BReader, B) == true;
+            // 적어도 하나의 정상 세대가 있으면 최신 결과 선택
+            if (bA == true || bB == true)
+            {
+                // 동기 API와 같은 세대 우선순위로 결과의 소유권 전달
+                Completion(bA == true && (bB == false || A.Generation >= B.Generation) ? MoveTemp(A) : MoveTemp(B), true);
+                // 완료 콜백의 중복 호출 차단
+                return;
+            }
+            // 새 저장소만 빈 목록으로 성공하고 기존 파일 손상은 실패 처리
+            Completion(FMD_SaveSlotIndex(), bAExists == false && bBExists == false);
+        });
+    });
+}
+
+bool FMD_SaveSlotStore::WriteManifestBytes(FString StoreRoot, uint64 Generation, TArray<uint8>& Bytes)
+{
+    // 내구성 쓰기와 교체 구간의 엔진 프로파일 표식
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_SaveSlots_AsyncRemoveIndex);
+    // 최초 저장소의 인덱스 쓰기 디렉터리 확보
+    if (IFileManager::Get().MakeDirectory(*StoreRoot, true) == false)
+    {
+        // 저장 경로 생성 실패 반환
+        return false;
+    }
+    // 다른 정상 세대를 보존하는 교대 쓰기 대상 선택
+    FString Destination = FPaths::Combine(StoreRoot, Generation % 2 == 1 ? TEXT("index-a.mdindex") : TEXT("index-b.mdindex"));
+    // 다른 요청의 임시 파일을 덮어쓰지 않는 고유 경로 생성
+    FString Temporary = Destination + TEXT(".") + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".tmp");
+    // 직렬화된 바이트를 기록하고 SHA 추가 및 내구성 플러시 수행
+    if (WriteRawFile(Temporary, Bytes) == false || SealFile(Temporary) == false)
+    {
+        // 기존 인덱스를 유지한 채 쓰기 실패 반환
+        return false;
+    }
+    {
+        // 교체 전에 실제 파일을 다시 열어 기록 결과 확인
+        TUniquePtr<FArchive> Check(IFileManager::Get().CreateFileReader(*Temporary));
+        // 파일 손상이나 쓰기 불완전 상태의 게시 차단
+        if (Check.IsValid() == false || VerifyFile(*Check) == false)
+        {
+            // 정상 세대를 유지한 채 검증 실패 반환
+            return false;
+        }
+    }
+    // 검증이 끝난 인덱스만 원자적으로 교체
+    return IFileManager::Get().Move(*Destination, *Temporary, true, false, false, true);
+}
+
+void FMD_SaveSlotStore::RemoveAsync(FString Name, TFunction<void(bool)> Completion)
+{
+    // 기존 인덱스 읽기와 해시 검사도 게임 스레드 밖에서 처리
+    ReadIndexAsync([StoreRoot = Root, Name = MoveTemp(Name), Completion = MoveTemp(Completion)](FMD_SaveSlotIndex Index, bool bSuccess) mutable
+    {
+        // 잘못된 요청과 손상 및 세대 번호 오버플로 차단
+        if (Name.IsEmpty() == true || bSuccess == false || Index.Generation == MAX_uint64)
+        {
+            // 파일 변경 이전의 실패를 게임 스레드에서 전달
+            Completion(false);
+            // 실패한 요청의 쓰기 작업 생성 방지
+            return;
+        }
+        // 자동 슬롯의 해당 이름을 목록에서 제거
+        Index.Auto.RemoveAll([&Name](const FMD_GameData& Row) { return Row.UniqueName == Name; });
+        // 사용자 슬롯의 해당 이름을 목록에서 제거
+        Index.User.RemoveAll([&Name](const FMD_GameData& Row) { return Row.UniqueName == Name; });
+        // 이전 정상 세대보다 새로운 삭제 결과의 순서 기록
+        ++Index.Generation;
+        // 게임 스레드에서 완성할 엔진 직렬화 버퍼
+        TArray<uint8> Bytes;
+        // UObject와 FInstancedStruct 해석을 작업 스레드로 넘기지 않는 직렬화
+        if (BuildManifestBytes(Index, Bytes) == false)
+        {
+            // 기존 파일을 유지한 채 직렬화 실패 전달
+            Completion(false);
+            // 불완전한 바이트의 디스크 쓰기 차단
+            return;
+        }
+        // 경로와 원시 바이트 및 세대 번호만 작업 스레드로 이동
+        Async(EAsyncExecution::ThreadPool,
+            [StoreRoot = MoveTemp(StoreRoot), Generation = Index.Generation, Bytes = MoveTemp(Bytes), Completion = MoveTemp(Completion)]() mutable
+        {
+            // 해시와 내구성 플러시 및 원자적 인덱스 교체 수행
+            bool bWritten = WriteManifestBytes(MoveTemp(StoreRoot), Generation, Bytes);
+            // 디스크 작업 결과를 게임 스레드에서 한 번만 전달
+            AsyncTask(ENamedThreads::GameThread, [bWritten, Completion = MoveTemp(Completion)]() mutable
+            {
+                // 관리자의 파일 작업 가드를 해제할 완료 콜백 호출
+                Completion(bWritten);
+            });
+        });
+    });
+}
+
 bool FMD_SaveSlotStore::ReadIndex(FMD_SaveSlotIndex& Out) const
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_SaveSlots_ReadMetadata);

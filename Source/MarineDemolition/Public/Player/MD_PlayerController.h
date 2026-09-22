@@ -17,7 +17,6 @@ class AMD_DayEndConsole;
 class AMD_SectorCloseoutMarker;
 class AMD_Merchant;
 class UMD_HUDWidget;
-class UMD_ScrapeFocusReticleWidget;
 class UMD_SiteDefinition;
 class UMD_MerchantSubsystem;
 class UGameplayEffect;
@@ -152,6 +151,10 @@ public:
 	UFUNCTION(Client, Reliable)
 	void ClientNotifyPlayerJoinAndExit(const FText& PlayerName, bool bIsJoin);
 
+	// 서버 판정 결과(슬롯 가득 참·전원 없음 등) 한 줄을 소유 클라이언트 HUD 알림에 전달
+	UFUNCTION(Client, Reliable)
+	void ClientShowHUDMessage(const FText& Message);
+
 	/** 로딩 화면에 조작 주체 준비 완료를 알린다(하드 트래블/seamless travel 공용). */
 	void NotifyLoadingScreenPlayerReady();
 
@@ -166,6 +169,14 @@ public:
 	/** 레벨 내 퀘스트 상호작용 오브젝트(카드 등)를 획득했을 때 서버에서 진행도를 올리는 함수 */
 	UFUNCTION(Server, Reliable)
 	void ServerNotifyQuestInteraction(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex);
+
+	/** 모선 상인 대화 시 핫바의 퀘스트 회수물(카트리지 등)을 서버에서 거리 검증 후 활성 메인 퀘스트에 납품하고 핫바에서 차감하는 함수 */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerDeliverHotbarQuestItems(AMD_Merchant* MerchantActor);
+
+	/** 핫바 회수물 납품 결과(품목명·개수)를 요청한 상인의 대사창에 전달하는 응답 진입점 */
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveQuestItemDelivery(AMD_Merchant* MerchantActor, const FText& ItemName, int32 Count);
 
 	// 모선 상인과의 거리 및 대출 한도를 서버에서 검증한 뒤 대출을 실행하는 함수
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
@@ -270,18 +281,8 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMD_HUDWidget> HUDWidgetInstance;
 
-	/** Blueprint 자산이 없어도 동작하는 Focus 가상 포인터. */
-	UPROPERTY(EditDefaultsOnly, Category = "HUD|Scrape")
-	TSubclassOf<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetClass;
-
-	UPROPERTY()
-	TObjectPtr<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetInstance;
-
 	// 로컬 플레이어의 메인 HUD를 생성하거나 화면에 복구하는 처리
 	void InitializeGameplayHUD();
-
-	// 로컬 플레이어의 헤라 Focus 포인터를 생성하거나 화면에 복구하는 처리
-	void InitializeScrapeFocusReticle();
 
 	/* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 private:

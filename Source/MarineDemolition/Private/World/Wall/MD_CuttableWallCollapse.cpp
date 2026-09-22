@@ -172,3 +172,17 @@ void AMD_CuttableWall::MulticastPlayCollapseEffect_Implementation(FVector Effect
 		UGameplayStatics::PlayWorldCameraShake(this, CollapseShakeClass,
 			EffectLocation, 0.f, FMath::Clamp(CollapseRadiusCm, 50.f, 1000.f) * 2.f);
 }
+
+void AMD_CuttableWall::RestoreSupportState(bool bSupported)
+{
+    // 파일 복원의 직접 상태 교체를 서버로 제한
+    if (HasAuthority() == false)
+    {
+        // 클라이언트의 권위 상태 변경 차단
+        return;
+    }
+    // 이전 월드의 지지 유무를 저장값으로 교체
+    bHasSupport = bSupported;
+    // 붕괴 이벤트 없이 복원된 값을 클라이언트에 전송
+    ForceNetUpdate();
+}

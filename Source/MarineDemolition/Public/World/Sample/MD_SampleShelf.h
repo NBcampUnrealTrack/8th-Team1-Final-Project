@@ -1,7 +1,6 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "MD_SampleShelf.generated.h"
 
@@ -52,6 +51,12 @@ class MARINEDEMOLITION_API AMD_SampleShelf : public AActor
 
 public:
 	AMD_SampleShelf();
+
+	// 실제 전시 목록을 저장 상태에 복사하기 위한 조회
+	FORCEINLINE TArray<FMD_ShelfDisplayEntry> GetPersistentDisplayEntries() { return DisplayEntries; }
+
+	// 보상과 납품 이벤트 없이 저장된 선반 외형 복원
+	void RestorePersistentDisplayEntries(TArray<FMD_ShelfDisplayEntry> Entries);
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 

@@ -2,6 +2,7 @@
 
 #include "UI/Game/MD_ScrapeFocusReticleWidget.h"
 
+#include "Blueprint/WidgetLayoutLibrary.h"
 #include "Character/MD_Character.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "GameFramework/PlayerController.h"
@@ -48,6 +49,16 @@ UMD_ScrapeFocusReticleWidget::UMD_ScrapeFocusReticleWidget(
 	ForceVolatile(true);
 }
 
+void UMD_ScrapeFocusReticleWidget::NativeConstruct()
+{
+	Super::NativeConstruct();
+
+	// HUD에서 생성한 파생 Blueprint에도 비입력형 표시와 매 프레임 갱신을 보장한다.
+	SetVisibility(ESlateVisibility::HitTestInvisible);
+	SetIsFocusable(false);
+	ForceVolatile(true);
+}
+
 int32 UMD_ScrapeFocusReticleWidget::NativePaint(
 	const FPaintArgs& Args,
 	const FGeometry& AllottedGeometry,
@@ -66,7 +77,7 @@ int32 UMD_ScrapeFocusReticleWidget::NativePaint(
 		InWidgetStyle,
 		bParentEnabled);
 
-	const APlayerController* const PlayerController = GetOwningPlayer();
+	APlayerController* const PlayerController = GetOwningPlayer();
 	const AMD_Character* const Character = IsValid(PlayerController)
 		? Cast<AMD_Character>(PlayerController->GetPawn())
 		: nullptr;
@@ -84,8 +95,22 @@ int32 UMD_ScrapeFocusReticleWidget::NativePaint(
 		return BaseLayer;
 	}
 
-	// Keep the center marker independent of equipped tools and the movable focus pointer.
-	const FVector2D ScreenCenter = LocalSize * 0.5;
+	const FGeometry PlayerScreenGeometry = UWidgetLayoutLibrary::GetPlayerScreenWidgetGeometry(PlayerController);
+	const FVector2D PlayerScreenSize = PlayerScreenGeometry.GetLocalSize();
+	if (PlayerScreenSize.X <= UE_SMALL_NUMBER || PlayerScreenSize.Y <= UE_SMALL_NUMBER)
+	{
+		return BaseLayer;
+	}
+
+	// SafeZone 등 부모 레이아웃의 여백과 무관하게 소유 플레이어의 화면 좌표를 사용한다.
+	const auto PlayerScreenToLocal = [&PlayerScreenGeometry, &AllottedGeometry, &PlayerScreenSize](const FVector2D& NormalizedPosition)
+	{
+		return AllottedGeometry.AbsoluteToLocal(
+			PlayerScreenGeometry.LocalToAbsolute(NormalizedPosition * PlayerScreenSize));
+	};
+
+	// 중앙 조준점은 장착 도구와 움직이는 Focus 포인터에 관계없이 표시한다.
+	const FVector2D ScreenCenter = PlayerScreenToLocal(FVector2D(0.5, 0.5));
 	TArray<FVector2f> CenterCircle;
 	CenterCircle.Reserve(ReticleCircleSegments + 1);
 	for (int32 Index = 0; Index <= ReticleCircleSegments; ++Index)
@@ -100,9 +125,9 @@ int32 UMD_ScrapeFocusReticleWidget::NativePaint(
 	if (!IsValid(ScrapeTool) || !ScrapeTool->IsScrapeFocusViewActive()) return BaseLayer + 2;
 
 	const FVector2D Pointer = ScrapeTool->GetScrapeFocusPointerNormalized();
-	const FVector2D Center(
-		FMath::Clamp(Pointer.X, 0.0, 1.0) * LocalSize.X,
-		FMath::Clamp(Pointer.Y, 0.0, 1.0) * LocalSize.Y);
+	const FVector2D Center = PlayerScreenToLocal(FVector2D(
+		FMath::Clamp(Pointer.X, 0.0, 1.0),
+		FMath::Clamp(Pointer.Y, 0.0, 1.0)));
 
 	const FLinearColor ReticleColor =
 		ScrapeTool->GetScrapeFocusState() == EMD_ScrapeFocusState::FocusPending

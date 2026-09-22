@@ -239,8 +239,8 @@ void AMD_GameStateBase::AddScoreDelta(int32 Delta)
 
 int32 AMD_GameStateBase::GetScoreForDay(int32 Day) const
 {
-    // 계약 누적 점수와 분리된 일일 정산값을 구성하기 위한 해당 Day 원장 합계
-    int32 OutScore = 0;
+    // 저장된 점수 이벤트 합계가 표시 정수 범위를 넘어도 오버플로하지 않는 누적값
+    int64 OutScore = 0;
     for (const FMD_ScoreEntry& ScoreEntry : ScoreLog)
     {
         if (ScoreEntry.Day == Day)
@@ -249,7 +249,8 @@ int32 AMD_GameStateBase::GetScoreForDay(int32 Day) const
         }
     }
 
-    return OutScore;
+    // 원본 로그를 유지하면서 UI 반환형 범위에서만 합계 제한
+    return static_cast<int32>(FMath::Clamp<int64>(OutScore, MIN_int32, MAX_int32));
 }
 
 TArray<FMD_DailyReportValue> AMD_GameStateBase::GetDailyScoreTotals() const
@@ -490,6 +491,12 @@ FMD_GameStateData AMD_GameStateBase::GetGameStateSaveData() const
     SaveData.ElapsedDay = CurrentDay;
     SaveData.ElapsedSeconds = GetElapsedGameSeconds();
     SaveData.Score = Score;
+    // 당일 증감 조회에 필요한 이벤트 기록 보존
+    SaveData.ScoreLog = ScoreLog;
+    // 분류별 정산 값을 원래 정밀도로 보존
+    SaveData.DailyScoreTotals = DailyScoreTotals;
+    // 마지막 점검의 판정과 정산 내역 보존
+    SaveData.LastInspectionReport = LastInspectionReport;
     return SaveData;
 }
 
@@ -514,6 +521,12 @@ bool AMD_GameStateBase::ApplyGameStateSaveData(const FMD_GameStateData& SaveData
     ContractDifficulty = SaveData.ContractDifficulty;
     CurrentDay = SaveData.ElapsedDay;
     Score = SaveData.Score;
+    // 보상 함수를 재실행하지 않고 저장된 점수 로그 복원
+    ScoreLog = SaveData.ScoreLog;
+    // 이전 세션의 원장이 섞이지 않도록 당일 합계 교체
+    DailyScoreTotals = SaveData.DailyScoreTotals;
+    // 구형 저장의 기본값도 이전 세션의 점검 결과를 제거하도록 적용
+    LastInspectionReport = SaveData.LastInspectionReport;
     // 저장 복원 후 현재 일자 기준 보고서 재구성
     RefreshDailyLedger();
 

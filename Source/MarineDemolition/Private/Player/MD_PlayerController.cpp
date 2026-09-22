@@ -3,7 +3,6 @@
 
 #include "Player/MD_PlayerController.h"
 #include "UI/Game/MD_HUDWidget.h"
-#include "UI/Game/MD_ScrapeFocusReticleWidget.h"
 #include "UI/MD_LocalUIManager.h"
 #include "UI/Game/MD_DailyReportWidget.h"
 
@@ -26,6 +25,7 @@
 #include "Player/MD_PlayerState.h"
 #include "Player/MD_PlayerCameraManager.h"
 
+#include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
@@ -38,6 +38,8 @@
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Character/MD_Character.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Data/Equipment/MD_QuestItemDefinition.h"
 #include "World/Merchant/MD_Merchant.h"
 #include "Interfaces/OnlineIdentityInterface.h"
 #include "OnlineSubsystem.h"
@@ -46,7 +48,6 @@
 AMD_PlayerController::AMD_PlayerController()
 {
 	PlayerCameraManagerClass = AMD_PlayerCameraManager::StaticClass();
-	ScrapeFocusReticleWidgetClass = UMD_ScrapeFocusReticleWidget::StaticClass();
 }
 
 void AMD_PlayerController::CancelScrapeInteraction()
@@ -451,37 +452,25 @@ void AMD_PlayerController::ClientNotifyPlayerJoinAndExit_Implementation(const FT
 	HUD->HandlePlayerJoinAndExit(PlayerName, bIsJoin);
 }
 
-void AMD_PlayerController::InitializeScrapeFocusReticle()
+void AMD_PlayerController::ClientShowHUDMessage_Implementation(const FText& Message)
 {
-	if (IsLocalController() == false || ScrapeFocusReticleWidgetClass == nullptr)
+	// HUD 위젯이 알림 이벤트를 구현하기 전까지 화면에서 확인할 임시 표시 — 폼건·지지대 실패 메시지와 같은 방식
+	if (GEngine != nullptr)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, Message.ToString());
+	}
+
+	ULocalPlayer* LocalPlayer = GetLocalPlayer();
+	UMD_LocalUIManager* UIManager = IsValid(LocalPlayer) ? LocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
+	if (IsValid(UIManager) == false)
 	{
 		return;
 	}
 
-	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
+	UMD_HUDWidget* HUD = Cast<UMD_HUDWidget>(UIManager->GetActiveScreen(MDGameplayTags::UI_Layer_GameHUD));
+	if (IsValid(HUD) == true)
 	{
-		ScrapeFocusReticleWidgetInstance =
-			CreateWidget<UMD_ScrapeFocusReticleWidget>(
-				this,
-				ScrapeFocusReticleWidgetClass);
-	}
-
-	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
-	{
-		return;
-	}
-
-	// 파생 Blueprint defaults와 무관하게 이 overlay 전체를 비입력형으로 고정한다.
-	ScrapeFocusReticleWidgetInstance->SetVisibility(ESlateVisibility::HitTestInvisible);
-	ScrapeFocusReticleWidgetInstance->SetIsFocusable(false);
-	ScrapeFocusReticleWidgetInstance->ForceVolatile(true);
-
-	// Seamless Travel에서 유효한 위젯이 기존 viewport에서 제거된 경우에도 복구한다.
-	if (ScrapeFocusReticleWidgetInstance->IsInViewport() == false)
-	{
-		// Owning local player 영역에만 붙여 split-screen이나 다중 local player에서도
-		// 다른 플레이어의 normalized 좌표/입력을 시각화하지 않는다.
-		ScrapeFocusReticleWidgetInstance->AddToPlayerScreen(1000);
+		HUD->HandleHUDMessage(Message);
 	}
 }
 
@@ -646,7 +635,6 @@ void AMD_PlayerController::BeginPlay()
 				&AMD_PlayerController::HandleApplicationWillDeactivate);
 	}
 
-	InitializeScrapeFocusReticle();
 }
 
 void AMD_PlayerController::BeginPlayingState()
@@ -654,7 +642,6 @@ void AMD_PlayerController::BeginPlayingState()
 	Super::BeginPlayingState();
 
 	InitializeGameplayHUD();
-	InitializeScrapeFocusReticle();
 	SubmitPlatformNickname();
 	RestoreAppearanceFromLocalSave();
 
@@ -666,7 +653,6 @@ void AMD_PlayerController::PostSeamlessTravel()
 	Super::PostSeamlessTravel();
 
 	InitializeGameplayHUD();
-	InitializeScrapeFocusReticle();
 	SubmitPlatformNickname();
 	RestoreAppearanceFromLocalSave();
 
@@ -682,7 +668,6 @@ void AMD_PlayerController::SetPawn(APawn* InPawn)
 	{
 		// 최초 스폰과 재스폰 모두 Pawn 지정이 끝난 뒤 HUD를 보장하는 처리
 		InitializeGameplayHUD();
-		InitializeScrapeFocusReticle();
 	}
 }
 
@@ -696,13 +681,6 @@ void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			ApplicationWillDeactivateHandle);
 		ApplicationWillDeactivateHandle.Reset();
 	}
-
-	if (IsValid(ScrapeFocusReticleWidgetInstance))
-	{
-		ScrapeFocusReticleWidgetInstance->RemoveFromParent();
-		ScrapeFocusReticleWidgetInstance = nullptr;
-	}
-
 
 	CancelScrapeInteraction();
 	Super::EndPlay(EndPlayReason);
@@ -718,13 +696,6 @@ void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
 	if (IsValid(HUDWidgetInstance))
 	{
 		HUDWidgetInstance->SetVisibility(Target);
-	}
-
-	// 중앙 조준점은 GameHUD 레이어 밖의 별도 오버레이이므로 함께 숨긴다.
-	if (IsValid(ScrapeFocusReticleWidgetInstance))
-	{
-		ScrapeFocusReticleWidgetInstance->SetVisibility(
-			bVisible ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
 	}
 }
 
@@ -763,6 +734,61 @@ void AMD_PlayerController::ServerNotifyQuestInteraction_Implementation(FPrimaryA
 	if (IsValid(Merchant) == true)
 	{
 		Merchant->NotifyInteractionProgress(QuestDefinitionId, ExpectedPhaseIndex);
+	}
+}
+
+void AMD_PlayerController::ServerDeliverHotbarQuestItems_Implementation(AMD_Merchant* MerchantActor)
+{
+	APawn* PlayerPawn = GetPawn();
+	if (IsValid(MerchantActor) == false || IsValid(PlayerPawn) == false)
+	{
+		return;
+	}
+
+	// 대출·상환과 같은 상인 접근 거리 검증
+	if (FVector::DistSquared(PlayerPawn->GetActorLocation(), MerchantActor->GetActorLocation()) > FMath::Square(500.0f))
+	{
+		return;
+	}
+
+	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
+	UMD_EquipHotbarComponent* Hotbar = PlayerPawn->FindComponentByClass<UMD_EquipHotbarComponent>();
+	if (IsValid(MerchantSubsystem) == false || IsValid(Hotbar) == false)
+	{
+		return;
+	}
+
+	// 슬롯을 앞에서부터 훑어 퀘스트 회수물만 납품한다. 차감으로 슬롯이 비어도 인덱스는 유지된다
+	for (int32 SlotIndex = 0; SlotIndex < Hotbar->GetSlotCount(); ++SlotIndex)
+	{
+		UMD_QuestItemDefinition* QuestItem = Cast<UMD_QuestItemDefinition>(Hotbar->GetItemAtSlot(SlotIndex));
+		int32 HeldCount = Hotbar->GetItemCountAtSlot(SlotIndex);
+		if (IsValid(QuestItem) == false || HeldCount <= 0)
+		{
+			continue;
+		}
+
+		int32 DeliveredCount = MerchantSubsystem->TryDeliverQuestItemDefinition(QuestItem, HeldCount);
+		if (DeliveredCount <= 0)
+		{
+			continue;
+		}
+
+		// 진행도는 이미 반영됐으므로 차감 실패는 로그만 남긴다 (도구가 아닌 보관 품목이라 실패 경로는 사실상 없다)
+		if (Hotbar->TryConsumeItem(QuestItem, DeliveredCount) == false)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Merchant] 핫바 회수물 차감 실패: %s x%d"), *QuestItem->ItemName.ToString(), DeliveredCount);
+		}
+
+		ClientReceiveQuestItemDelivery(MerchantActor, QuestItem->ItemName, DeliveredCount);
+	}
+}
+
+void AMD_PlayerController::ClientReceiveQuestItemDelivery_Implementation(AMD_Merchant* MerchantActor, const FText& ItemName, int32 Count)
+{
+	if (IsValid(MerchantActor) == true)
+	{
+		MerchantActor->ReceiveQuestItemDelivery(this, ItemName, Count);
 	}
 }
 

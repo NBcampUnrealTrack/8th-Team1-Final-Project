@@ -1,6 +1,7 @@
 #include "Tools/MDTrashPlacementTool.h"
 
 #include "MD_TrashPlacementSettings.h"
+#include "Tools/MD_PlacementGeometry.h"
 
 #include "BaseBehaviors/ClickDragBehavior.h"
 #include "BaseBehaviors/MouseHoverBehavior.h"
@@ -41,12 +42,6 @@ namespace
 	constexpr uint32 TransformSeedSalt = 0x54524E53u;
 	constexpr int32 PlacementSpacingSolveIterations = 8;
 	constexpr double PlacementSpacingSolveTolerance = 0.1;
-
-	FVector GetSafeSurfaceNormal(const FHitResult& HitResult)
-	{
-		const FVector SurfaceNormal = HitResult.ImpactNormal.GetSafeNormal();
-		return SurfaceNormal.IsNearlyZero() ? FVector::UpVector : SurfaceNormal;
-	}
 }
 
 bool UMDTrashPlacementToolBuilder::CanBuildTool(const FToolBuilderState& SceneState) const
@@ -285,7 +280,7 @@ void UMDTrashPlacementTool::OnClickPress(const FInputDeviceRay& PressPos)
 	}
 
 	PreviousSurfaceLocation = HitResult.ImpactPoint;
-	PreviousSurfaceNormal = GetSafeSurfaceNormal(HitResult);
+	PreviousSurfaceNormal = MDPlacementGeometry::GetSurfaceNormal(HitResult);
 	DistanceSinceLastPlacement = 0.0;
 	bHasPreviousSurfaceHit = true;
 	UpdateGhostPreview(HitResult);
@@ -327,7 +322,7 @@ void UMDTrashPlacementTool::OnClickDrag(const FInputDeviceRay& DragPos)
 
 	UpdateHoverFromHit(CurrentHit);
 	const FVector CurrentSurfaceLocation = CurrentHit.ImpactPoint;
-	const FVector CurrentSurfaceNormal = GetSafeSurfaceNormal(CurrentHit);
+	const FVector CurrentSurfaceNormal = MDPlacementGeometry::GetSurfaceNormal(CurrentHit);
 
 	if (!bHasPreviousSurfaceHit)
 	{
@@ -907,7 +902,7 @@ FTransform UMDTrashPlacementTool::BuildPlacementTransform(
 	const FHitResult& HitResult,
 	const UStaticMesh* StaticMesh) const
 {
-	const FVector SurfaceNormal = GetSafeSurfaceNormal(HitResult);
+	const FVector SurfaceNormal = MDPlacementGeometry::GetSurfaceNormal(HitResult);
 	const FVector PlacementUp = Properties->bAlignToSurface ? SurfaceNormal : FVector::UpVector;
 	const uint32 PlacementSeed = GetPlacementRandomSeed(TransformSeedSalt);
 	FRandomStream PlacementRandomStream(static_cast<int32>(PlacementSeed));
@@ -972,9 +967,8 @@ FTransform UMDTrashPlacementTool::BuildPlacementTransform(
 	{
 		// 회전된 Bounds의 가장 낮은 점을 실제 표면에 맞춰 Pitch/Roll 관통을 방지한다.
 		const FBox LocalBounds = StaticMesh->GetBoundingBox();
-		const FVector LocalSurfaceNormal = PlacementRotation.UnrotateVector(SurfaceNormal);
-		const double LowestProjection = FVector::DotProduct(LocalSurfaceNormal, LocalBounds.GetCenter())
-			- FVector::DotProduct(LocalSurfaceNormal.GetAbs(), LocalBounds.GetExtent());
+		const double LowestProjection = MDPlacementGeometry::GetLowestProjection(
+			LocalBounds, FTransform(PlacementRotation, FVector::ZeroVector, FVector::OneVector), SurfaceNormal);
 		FinalLocation -= SurfaceNormal * LowestProjection * UniformScale;
 	}
 	return FTransform(PlacementRotation, FinalLocation, FVector(UniformScale));
@@ -1018,38 +1012,15 @@ double UMDTrashPlacementTool::CalculatePlacementExtent(
 
 bool UMDTrashPlacementTool::IsPlacementSafe(
 	const UStaticMesh* StaticMesh,
-	const FTransform& Transform) const
+	const FTransform& Transform,
+	const FHitResult& SurfaceHit) const
 {
-	if (!Properties->bPreventOverlaps)
-	{
-		return true;
-	}
-
-	if (!IsValid(TargetWorld) || !IsValid(StaticMesh))
+	if (!IsValid(TargetWorld) || !IsValid(StaticMesh) || !Transform.IsValid())
 	{
 		return false;
 	}
-
-	const FBox LocalBounds = StaticMesh->GetBoundingBox();
-	const FVector AbsoluteScale = Transform.GetScale3D().GetAbs();
-	FVector BoxExtent = LocalBounds.GetExtent() * AbsoluteScale;
-	const double Tolerance = FMath::Max(static_cast<double>(Properties->OverlapTolerance), 0.0);
-	BoxExtent.X = FMath::Max(BoxExtent.X - Tolerance, 0.1);
-	BoxExtent.Y = FMath::Max(BoxExtent.Y - Tolerance, 0.1);
-	BoxExtent.Z = FMath::Max(BoxExtent.Z - Tolerance, 0.1);
-
-	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDTrashPlacementOverlap), false);
-	// Trigger/sensor overlaps are not physical obstructions. Keep blocking walls and trash.
-	QueryParams.bIgnoreTouches = true;
-	TArray<FOverlapResult> Overlaps;
-	const FVector BoxCenter = Transform.TransformPosition(LocalBounds.GetCenter());
-	return !TargetWorld->OverlapMultiByChannel(
-		Overlaps,
-		BoxCenter,
-		Transform.GetRotation(),
-		ECC_Pawn,
-		FCollisionShape::MakeBox(BoxExtent),
-		QueryParams);
+	return !Properties->bPreventOverlaps || !MDPlacementGeometry::HasBlockingOverlap(
+		TargetWorld, StaticMesh->GetBoundingBox(), Transform, Properties->OverlapTolerance, SurfaceHit.GetComponent());
 }
 
 bool UMDTrashPlacementTool::IsPlacementAllowedAtHit(
@@ -1057,13 +1028,13 @@ bool UMDTrashPlacementTool::IsPlacementAllowedAtHit(
 	const UStaticMesh* StaticMesh) const
 {
 	return IsValid(StaticMesh)
-		&& IsPlacementSafe(StaticMesh, BuildPlacementTransform(HitResult, StaticMesh));
+		&& IsPlacementSafe(StaticMesh, BuildPlacementTransform(HitResult, StaticMesh), HitResult);
 }
 
 void UMDTrashPlacementTool::UpdateHoverFromHit(const FHitResult& HitResult)
 {
 	HoverLocation = HitResult.ImpactPoint;
-	HoverNormal = GetSafeSurfaceNormal(HitResult);
+	HoverNormal = MDPlacementGeometry::GetSurfaceNormal(HitResult);
 	bHasHoverHit = true;
 	UpdateGhostPreview(HitResult);
 }
@@ -1118,7 +1089,7 @@ void UMDTrashPlacementTool::UpdateGhostPreview(const FHitResult& HitResult)
 
 	const FTransform PreviewTransform = BuildPlacementTransform(HitResult, StaticMesh);
 	const bool bWasPlacementValid = bIsHoverPlacementValid;
-	bIsHoverPlacementValid = IsPlacementSafe(StaticMesh, PreviewTransform);
+	bIsHoverPlacementValid = IsPlacementSafe(StaticMesh, PreviewTransform, HitResult);
 	const bool bMeshChanged = GhostPreviewComponent->GetStaticMesh() != StaticMesh;
 	if (bMeshChanged)
 	{

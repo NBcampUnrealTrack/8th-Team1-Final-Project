@@ -268,7 +268,7 @@ private:
 		const FTransform& Transform,
 		const FVector& SurfaceLocation,
 		const FVector& Direction) const;
-	bool IsPlacementSafe(const UStaticMesh* StaticMesh, const FTransform& Transform) const;
+	bool IsPlacementSafe(const UStaticMesh* StaticMesh, const FTransform& Transform, const FHitResult& SurfaceHit) const;
 	bool IsPlacementAllowedAtHit(const FHitResult& HitResult, const UStaticMesh* StaticMesh) const;
 	void UpdateHoverFromHit(const FHitResult& HitResult);
 	void SetupGhostPreview();

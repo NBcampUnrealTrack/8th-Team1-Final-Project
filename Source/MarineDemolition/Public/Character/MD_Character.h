@@ -134,6 +134,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
 	UMD_FoamGunComponent* GetFoamGunComponent() const { return FoamGunComponent; }
 
+	/**
+	 * 지금 이 화면에 보이는 도구 메시(로컬 1인칭 / 거울·타인·서버는 3인칭)의 소켓 월드 위치.
+	 * 1인칭 메시는 FirstPersonScale로 카메라 쪽에 당겨 그려지므로 화면상 보이는 자리로 보정해 돌려준다.
+	 * 도구 메시에 해당 소켓이 없으면 false.
+	 */
+	bool TryGetVisibleToolSocketLocation(FName SocketName, FVector& OutLocation) const;
+
 	// 절단 루프 VFX 토글. 어빌리티가 서버·소유 클라 양쪽에서 부르고, 사본 프록시는 복제로 따라온다
 	void SetCutterVFXActive(bool bActive);
 
@@ -203,6 +210,9 @@ public:
 	/** 거울 앞에서 로컬 플레이어가 자기 3인칭 몸을 보고 1인칭 팔은 숨기도록 전환한다. */
 	void SetLocalThirdPersonViewEnabled(bool bEnabled);
 protected:
+	/** 1인칭 프리미티브의 실제 월드 위치를 렌더에 보이는 위치(카메라 기준 FirstPersonScale·FOV 보정)로 변환한다. */
+	FVector ToFirstPersonApparentWorldLocation(const FVector& WorldLocation) const;
+
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UCameraComponent> Camera;
@@ -396,6 +406,8 @@ private:
 	void HandleMoveInput(const FInputActionValue& Value);
 	void HandleLookInput(const FInputActionValue& Value);
 	void HandleInteractInput(const FInputActionValue& Value);
+	// 상호작용 키 해제. 홀드형 대상(데이터 덤프 단말 등)의 진행 취소에만 쓰인다
+	void HandleInteractReleasedInput(const FInputActionValue& Value);
 	void HandleAbilityInput(const FInputActionValue& Value);
 	void HandleScannerModeSwitchInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
@@ -425,6 +437,10 @@ private:
 
 	UFUNCTION()
 	void HandleScrapeLoadChanged(float NewScrapeLoad);
+
+	/** 운반 시작·종료에 맞춰 도구 메시를 내리고 다시 든다 */
+	UFUNCTION()
+	void HandleHeldActorChanged(AActor* HeldActor);
 
 	void RefreshToolMesh();
 
@@ -497,6 +513,13 @@ private:
 	/** 절단 어빌리티 태그로 판정한다. 톱날 표시 여부에 쓴다 */
 	UFUNCTION(BlueprintPure, Category = "MD|Equipment")
 	bool IsCutterEquipped() const;
+
+	/**
+	 * 인터랙트로 물건을 들고 있는지. 들고 있는 동안은 핫바 슬롯은 그대로 두고
+	 * 도구 메시만 내려 맨손 연출을 한다. ABP에서 맨손 포즈 분기에도 쓴다
+	 */
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
+	bool IsCarryingItem() const;
 	UEnhancedInputLocalPlayerSubsystem* GetEnhancedInputSubsystem() const;
 
 	// 공통 아이템의 부착 오프셋과 메시 그립 소켓을 반영한 상대 트랜스폼 조회

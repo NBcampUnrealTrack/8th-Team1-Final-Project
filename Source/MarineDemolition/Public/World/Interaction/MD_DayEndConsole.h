@@ -28,7 +28,7 @@ protected:
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
 	// UI Manager에 등록된 화면 클래스와 부모 레이어를 선택할 BP 설정 태그
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Console", meta=(Categories="UI.Layer"))
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="Console", meta=(Categories="UI"))
 	FGameplayTag ConsoleWidgetTag;
 
 	// 열려 있는 위젯 (중복 생성 방지용)
