@@ -50,6 +50,7 @@ Config/DefaultEditorPerProjectUserSettings.ini
 # AI coding agents (local state)
 .codex/
 .claude/
+.agents/
 .revvy/
 /AGENT.md
 /CLAUDE.md
@@ -64,6 +65,7 @@ Docs/**/_audit*
 
 # Editor automation scripts (machine-local / WIP)
 Content/Python/
+Tools/Diagnostics/
 
 # Local Unreal MCP / AI client configs (machine-local only)
 .cursor/
