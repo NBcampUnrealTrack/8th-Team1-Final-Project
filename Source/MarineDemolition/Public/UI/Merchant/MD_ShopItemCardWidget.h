@@ -36,4 +36,8 @@ protected:
 	// 카드 하단의 크레딧 가격 표시
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_CostCredit;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
+	// 가격 숫자와 분리된 크레딧 기호 및 개당 단위 표시
+	TObjectPtr<UTextBlock> Txt_Credit_Suffix;
 };

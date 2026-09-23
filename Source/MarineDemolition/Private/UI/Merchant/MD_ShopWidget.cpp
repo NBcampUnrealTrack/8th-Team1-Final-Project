@@ -5,8 +5,10 @@
 
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "GameFramework/Pawn.h"
+#include "Components/Button.h"
 #include "Components/Image.h"
-#include "Components/PanelWidget.h"
+#include "Components/UniformGridPanel.h"
+#include "Components/UniformGridSlot.h"
 #include "Components/TextBlock.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
 #include "Engine/Texture2D.h"
@@ -18,16 +20,15 @@ void UMD_ShopWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
 
-	// 구매 버튼의 현재 활성화 주기 클릭 처리를 등록한다.
-	if (IsValid(Btn_Buy) == true)
+	// 하단 실행 버튼의 현재 활성화 주기 클릭 처리 연결
+	if (IsValid(Btn_BuyItem) == true)
 	{
-		auto& clickedEvent = Btn_Buy->OnClicked();
-		clickedEvent.RemoveAll(this);
-		clickedEvent.AddUObject(this, &UMD_ShopWidget::HandleBuyClicked);
+		// 구매와 판매 탭 이벤트와 분리된 거래 요청 연결
+		Btn_BuyItem->OnClicked.AddUniqueDynamic(this, &UMD_ShopWidget::HandleBuyClicked);
 	}
 
-	// 아이템 카테고리 열거형을 기준으로 카테고리 버튼 자동 생성
-	BuildCategoryButtons();
+	// 디자이너가 배치한 카테고리 버튼의 선택 그룹 준비
+	InitializeCategoryButtons();
 
 	// BP 기본 카탈로그도 활성화 시 비동기 로드를 시작하여 화면에 반영
 	SetCatalog(Catalog);
@@ -37,10 +38,11 @@ void UMD_ShopWidget::NativeOnDeactivated()
 {
 	// 닫힌 화면의 불필요한 인벤토리 갱신 중단
 	ObserveHotbar(nullptr);
-	// 현재 상점 인스턴스가 등록한 구매 버튼 연결을 제거한다.
-	if (IsValid(Btn_Buy) == true)
+	// 닫힌 화면의 하단 실행 버튼에서 거래 요청 연결 해제
+	if (IsValid(Btn_BuyItem) == true)
 	{
-		Btn_Buy->OnClicked().RemoveAll(this);
+		// 현재 인스턴스가 등록한 실행 이벤트만 제거
+		Btn_BuyItem->OnClicked.RemoveDynamic(this, &UMD_ShopWidget::HandleBuyClicked);
 	}
 
 	Super::NativeOnDeactivated();
@@ -122,6 +124,9 @@ void UMD_ShopWidget::SelectCategory(EMD_ShopCategory InCategory)
 	SelectedCategory = InCategory;
 	bShowAllCategories = false;
 
+	// 프로그램에서 분류를 변경한 경우에도 선택 스타일 동기화
+	RefreshCategorySelection();
+
 	// 새 분류의 첫 품목이 선택되도록 기존 선택 초기화
 	SelectedItemAssetId = FPrimaryAssetId();
 
@@ -142,6 +147,9 @@ void UMD_ShopWidget::RefreshDisplay()
 		// 숫자 형식의 현재 크레딧 직접 반영
 		Txt_Credits->SetText(FText::AsNumber(ShopInfo.Credits));
 	}
+
+	// 구매 및 판매 목록을 가리키는 상단 탭 선택 동기화
+	RefreshModeButtons();
 
 	// 품목 목록과 상세 패널 갱신
 	RebuildItemList();
@@ -248,8 +256,18 @@ void UMD_ShopWidget::RebuildItemList()
 			ItemCardButtonGroup->AddWidget(ItemCard);
 			// 카드의 실제 품목을 사용하는 클릭 이벤트 연결
 			ItemCard->OnClicked().AddUObject(this, &UMD_ShopWidget::HandleItemSelected, Item.GetItemAssetId());
-			// 카탈로그 순서대로 카드 컨테이너에 배치
-			WB_ItemEntries->AddChild(ItemCard);
+			// 생성 실패로 인한 빈 칸을 방지할 실제 카드 순번
+			int32 CardIndex = WB_ItemEntries->GetChildrenCount();
+			// 네 카드마다 다음 행으로 이동하는 격자 슬롯 생성
+			UUniformGridSlot* ItemSlot = WB_ItemEntries->AddChildToUniformGrid(ItemCard, CardIndex / 4, CardIndex % 4);
+			// 생성된 슬롯에 동일한 열 너비 적용
+			if (IsValid(ItemSlot) == true)
+			{
+				// 품목 이름 길이와 무관한 카드 가로 영역 확보
+				ItemSlot->SetHorizontalAlignment(HAlign_Fill);
+				// 같은 행의 카드 높이를 맞추는 세로 영역 확보
+				ItemSlot->SetVerticalAlignment(VAlign_Fill);
+			}
 		}
 		// 실제 생성된 첫 카드만 대체 선택 후보로 보관
 		if (FirstDisplayedItemAssetId.IsValid() == false)
@@ -285,10 +303,10 @@ void UMD_ShopWidget::RebuildItemList()
 void UMD_ShopWidget::RefreshSelectedItem()
 {
 	// 현재 목록의 거래 방향을 실제 실행 버튼에 표시
-	if (IsValid(Btn_Buy) == true)
+	if (IsValid(Txt_Buy) == true)
 	{
-		// 기존 버튼 스타일을 유지하며 구매와 판매 동작 구분
-		Btn_Buy->SetContentText(bSellingMode == true ? NSLOCTEXT("MDShop", "SellButton", "판매") : NSLOCTEXT("MDShop", "BuyButton", "구매"));
+		// 하단 실행 버튼에 구매와 판매 동작 표시
+		Txt_Buy->SetText(bSellingMode == true ? NSLOCTEXT("MDShop", "SellButton", "판매") : NSLOCTEXT("MDShop", "BuyButton", "구매"));
 	}
 	// 선택 품목을 카탈로그에서 조회
 	FMD_ShopItem selectedItem;
@@ -313,9 +331,11 @@ void UMD_ShopWidget::RefreshSelectedItem()
 			Txt_DetailDescription->SetText(FText::GetEmpty());
 		}
 
-		if (IsValid(Txt_DetailPrice) == true)
+		// 빈 상세 화면에 남은 카테고리 표시 영역 확인
+		if (IsValid(Txt_DetailCategory) == true)
 		{
-			Txt_DetailPrice->SetText(FText::GetEmpty());
+			// 선택 품목이 없는 상태의 카테고리 배지 초기화
+			Txt_DetailCategory->SetText(FText::GetEmpty());
 		}
 
 		if (IsValid(Txt_Owned) == true)
@@ -328,9 +348,11 @@ void UMD_ShopWidget::RefreshSelectedItem()
 			Img_DetailIcon->SetBrushFromTexture(nullptr);
 		}
 
-		if (IsValid(Btn_Buy) == true)
+		// 선택 품목이 없는 상태에서 거래 실행 버튼 확인
+		if (IsValid(Btn_BuyItem) == true)
 		{
-			Btn_Buy->SetIsEnabled(false);
+			// 목록 전환 탭은 유지하면서 거래 실행만 차단
+			Btn_BuyItem->SetIsEnabled(false);
 		}
 
 		return;
@@ -358,10 +380,11 @@ void UMD_ShopWidget::RefreshSelectedItem()
 		Txt_DetailDescription->SetText(Definition->Description);
 	}
 
-	if (IsValid(Txt_DetailPrice) == true)
+	// 선택 품목의 카테고리를 표시할 배지 유효성 확인
+	if (IsValid(Txt_DetailCategory) == true)
 	{
-		// 도구 재구매의 무료 가격을 포함한 실제 결제 금액 표시
-		Txt_DetailPrice->SetText(selectedItem.GetPriceText());
+		// 전체 보기에서도 선택 품목의 실제 카테고리 이름 표시
+		Txt_DetailCategory->SetText(StaticEnum<EMD_ShopCategory>()->GetDisplayNameTextByValue(static_cast<int64>(selectedItem.Category)));
 	}
 
 	if (IsValid(Txt_Owned) == true)
@@ -394,10 +417,10 @@ void UMD_ShopWidget::RefreshSelectedItem()
 	}
 
 	// 상점 해금 및 결제 조건과 유형별 정의의 지급 조건을 함께 적용
-	if (IsValid(Btn_Buy) == true)
+	if (IsValid(Btn_BuyItem) == true)
 	{
 		// 판매는 실제 소지 수량과 적립 한도이며 구매는 기존 해금 및 지급 조건 적용
-		Btn_Buy->SetIsEnabled(bSellingMode == true
+		Btn_BuyItem->SetIsEnabled(bSellingMode == true
 			? FindSaleSlot(SelectedItemAssetId) != INDEX_NONE && selectedItem.Price >= 0 && ShopInfo.Credits <= MAX_int32 - selectedItem.Price
 			: selectedItem.IsUnlocked(ShopInfo.Affinity, QuestCompletions, OwnedItemIds) == true
 				&& selectedItem.Price >= 0 && ShopInfo.Credits >= selectedItem.Price && IsItemGrantable(selectedItem) == true);
@@ -448,82 +471,90 @@ void UMD_ShopWidget::ObserveHotbar(UMD_EquipHotbarComponent* InHotbar)
 	}
 }
 
-void UMD_ShopWidget::BuildCategoryButtons()
+void UMD_ShopWidget::InitializeCategoryButtons()
 {
-	// 카테고리 컨테이너가 없으면 자동 생성 중단
-	if (IsValid(SB_Categories) == false)
+	// 배치된 버튼의 단일 선택을 관리할 그룹 준비
+	if (IsValid(CategoryButtonGroup) == false)
 	{
-		return;
+		// 화면 수명 동안 사용할 선택 그룹 생성
+		CategoryButtonGroup = NewObject<UCommonButtonGroupBase>(this);
 	}
-
-	// 에셋에 배치된 첫 버튼의 클래스를 동적 버튼 템플릿으로 재사용
-	if (CategoryButtonClass == nullptr)
+	// 재활성화 시 같은 버튼의 그룹 이벤트 중복 등록 방지
+	CategoryButtonGroup->RemoveAll();
+	// 현재 필터를 표시할 카테고리 하나의 선택 유지
+	CategoryButtonGroup->SetSelectionRequired(true);
+	// 이벤트 그래프의 클릭 연결을 유지할 디자이너 버튼 목록
+	TArray<UMD_CommonButtonBase*> CategoryButtons = {
+		Btn_Category_All, Btn_Category_Tool, Btn_Category_Safety, Btn_Category_Repair, Btn_Category_Survive, Btn_Category_Recovery
+	};
+	// 새 버튼 생성 없이 기존 버튼의 선택 정책만 적용
+	for (UMD_CommonButtonBase* CategoryButton : CategoryButtons)
 	{
-		if (SB_Categories->GetChildrenCount() > 0)
+		// 현재 레이아웃에 배치된 유효한 버튼만 등록
+		if (IsValid(CategoryButton) == true)
 		{
-			UWidget* firstCategoryWidget = SB_Categories->GetChildAt(0);
-			UMD_CommonButtonBase* firstCategoryButton = Cast<UMD_CommonButtonBase>(firstCategoryWidget);
-			if (IsValid(firstCategoryButton) == true)
-			{
-				CategoryButtonClass = firstCategoryButton->GetClass();
-			}
+			// 분류 선택에 대응하는 버튼 스타일 사용 허용
+			CategoryButton->SetIsSelectable(true);
+			// 현재 분류 재클릭에 따른 선택 해제 방지
+			CategoryButton->SetIsToggleable(false);
+			// 포커스 이동과 실제 분류 선택의 표시 구분 유지
+			CategoryButton->SetShouldSelectUponReceivingFocus(false);
+			// 클릭의 필터 처리는 Blueprint에 두고 단일 선택 그룹만 연결
+			CategoryButtonGroup->AddWidget(CategoryButton);
 		}
 	}
+	// 이전 활성화에서 선택한 필터의 표시 복원
+	RefreshCategorySelection();
+}
 
-	// 사용할 버튼 클래스가 없으면 기존 디자이너 구성을 유지
-	if (CategoryButtonClass == nullptr)
+void UMD_ShopWidget::RefreshModeButtons()
+{
+	// 구매와 판매 탭을 같은 순서로 갱신할 표시 목록
+	TArray<UMD_CommonButtonBase*> ModeButtons = { Btn_Buy, Btn_Sell };
+	// 현재 모드에 해당하는 탭 하나에만 선택 스타일 적용
+	for (int32 Index = 0; Index < ModeButtons.Num(); ++Index)
 	{
-		return;
-	}
-
-	// 기존 디자이너 배치 버튼을 제거하고 자동 생성 목록 준비
-	SB_Categories->ClearChildren();
-
-	// 전체 품목을 표시하는 선두 버튼 생성
-	UMD_CommonButtonBase* allButton = CreateWidget<UMD_CommonButtonBase>(this, CategoryButtonClass);
-	if (IsValid(allButton) == true)
-	{
-		allButton->SetContentText(FText::FromString(TEXT("전체")));
-		allButton->OnClicked().AddUObject(this, &UMD_ShopWidget::HandleCategoryAllClicked);
-		SB_Categories->AddChild(allButton);
-	}
-
-	// 아이템 카테고리 열거형의 유효 항목마다 버튼 생성
-	UEnum* categoryEnum = StaticEnum<EMD_ShopCategory>();
-	if (IsValid(categoryEnum) == false)
-	{
-		return;
-	}
-
-	int32 categoryCount = categoryEnum->NumEnums() - 1;
-	for (int32 categoryIndex = 0; categoryIndex < categoryCount; ++categoryIndex)
-	{
-		EMD_ShopCategory category = static_cast<EMD_ShopCategory>(categoryEnum->GetValueByIndex(categoryIndex));
-		UMD_CommonButtonBase* categoryButton = CreateWidget<UMD_CommonButtonBase>(this, CategoryButtonClass);
-		if (IsValid(categoryButton) == false)
+		// 선택 표시를 갱신할 탭 유효성 확인
+		if (IsValid(ModeButtons[Index]) == true)
 		{
-			continue;
+			// 구매와 판매 탭의 선택 스타일 사용 허용
+			ModeButtons[Index]->SetIsSelectable(true);
+			// 선택 중인 탭을 다시 눌러도 선택 해제 방지
+			ModeButtons[Index]->SetIsToggleable(false);
+			// 포커스 이동만으로 거래 방향의 선택 표시 변경 방지
+			ModeButtons[Index]->SetShouldSelectUponReceivingFocus(false);
+			// 비토글 버튼의 이전 선택 상태를 명시적으로 정리
+			ModeButtons[Index]->ClearSelection();
+			// 거래 방향과 일치하는 탭만 클릭 이벤트 없이 선택
+			ModeButtons[Index]->SetIsSelected(Index == (bSellingMode == true ? 1 : 0), false);
 		}
-
-		FText categoryName = categoryEnum->GetDisplayNameTextByIndex(categoryIndex);
-		categoryButton->SetContentText(categoryName);
-		categoryButton->OnClicked().AddUObject(this, &UMD_ShopWidget::HandleCategoryClicked, category);
-		SB_Categories->AddChild(categoryButton);
 	}
 }
 
-void UMD_ShopWidget::HandleCategoryAllClicked()
+void UMD_ShopWidget::RefreshCategorySelection()
+{
+	// 화면 배치 순서와 독립적으로 Enum에 대응할 버튼 목록
+	TArray<UMD_CommonButtonBase*> CategoryButtons = {
+		Btn_Category_All, Btn_Category_Tool, Btn_Category_Safety, Btn_Category_Repair, Btn_Category_Survive, Btn_Category_Recovery
+	};
+	// 전체 보기 또는 지정한 Enum 값에 대응하는 버튼 위치 산출
+	int32 CategoryIndex = bShowAllCategories == true ? 0 : StaticEnum<EMD_ShopCategory>()->GetIndexByValue(static_cast<int64>(SelectedCategory)) + 1;
+	// 일부 버튼이 없는 레이아웃에서도 현재 버튼의 실제 그룹 위치 확인
+	if (IsValid(CategoryButtonGroup) == true && CategoryButtons.IsValidIndex(CategoryIndex) == true && IsValid(CategoryButtons[CategoryIndex]) == true)
+	{
+		// 버튼 배치 순서 대신 실제 버튼 참조를 기준으로 현재 필터 선택
+		CategoryButtonGroup->SelectButtonAtIndex(CategoryButtonGroup->FindButtonIndex(CategoryButtons[CategoryIndex]), false);
+	}
+}
+
+void UMD_ShopWidget::SelectAllCategories()
 {
 	// 모든 아이템 카테고리를 함께 표시하도록 상태 변경
 	bShowAllCategories = true;
+	// 전체 보기로 전환된 분류 선택 표시 반영
+	RefreshCategorySelection();
 	SelectedItemAssetId = FPrimaryAssetId();
 	RebuildItemList();
-}
-
-void UMD_ShopWidget::HandleCategoryClicked(EMD_ShopCategory Category)
-{
-	// 생성한 버튼에 연결된 아이템 카테고리 선택
-	SelectCategory(Category);
 }
 
 void UMD_ShopWidget::HandleItemSelected(FPrimaryAssetId ItemAssetId)
