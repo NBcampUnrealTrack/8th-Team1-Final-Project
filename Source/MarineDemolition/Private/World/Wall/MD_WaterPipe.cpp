@@ -3,7 +3,7 @@
 #include "Component/Hazard/MD_HazardVolumeComponent.h"
 #include "Game/MD_GameStateBase.h"
 #include "GameplayTags/MD_GameplayTags.h"
-#include "TimerManager.h"
+#include "Types/Persistence/MD_WorldActorSnapshotTypes.h"
 
 AMD_WaterPipe::AMD_WaterPipe()
 {
@@ -94,4 +94,46 @@ void AMD_WaterPipe::OnRepaired(AActor* Repairer)
 	}
 
 	GetWorld()->GetTimerManager().ClearTimer(LeakTimerHandle);
+}
+
+FMD_UtilityRecord AMD_WaterPipe::BuildPersistenceRecord()
+{
+	FMD_UtilityRecord Record = Super::BuildPersistenceRecord();
+	// 이미 감점한 횟수를 다시 적용하지 않도록 보관
+	Record.LeakTicksApplied = LeakTicksApplied;
+	// 배치 파손과 활성 누수 타이머 구분
+	Record.bLeakTimerActive = GetWorldTimerManager().IsTimerActive(LeakTimerHandle);
+	// 다음 감점까지 남은 시간 보존
+	Record.LeakTimeRemaining = FMath::Max(0.0f, GetWorldTimerManager().GetTimerRemaining(LeakTimerHandle));
+	// 누수 진행을 포함한 기록 반환
+	return Record;
+}
+
+bool AMD_WaterPipe::RestorePersistenceRecord(FMD_UtilityRecord Record)
+{
+	// 잘못된 누수 진행이 무한 감점이나 잘못된 타이머를 만드는 상황 차단
+	if (Record.LeakTicksApplied < 0 || Record.LeakTicksApplied > MaxLeakTicks
+		|| FMath::IsFinite(Record.LeakTimeRemaining) == false || Record.LeakTimeRemaining < 0.0f)
+	{
+		// 파손 상태 변경 전 실패 반환
+		return false;
+	}
+	if (Super::RestorePersistenceRecord(Record) == false)
+	{
+		// 공통 상태를 복원하지 못한 요청 종료
+		return false;
+	}
+	// 이전 월드 상태의 감점 타이머 제거
+	GetWorldTimerManager().ClearTimer(LeakTimerHandle);
+	// 이미 소모한 감점 횟수 복원
+	LeakTicksApplied = Record.LeakTicksApplied;
+	// 저장 당시 진행 중이던 누수만 재개
+	if (Record.State == EMD_UtilityState::Broken && Record.bLeakTimerActive == true && LeakTicksApplied < MaxLeakTicks)
+	{
+		// 다음 감점 시각을 저장된 잔여 시간부터 재개
+		GetWorldTimerManager().SetTimer(LeakTimerHandle, this, &ThisClass::ApplyLeakTick, LeakTickInterval, true,
+			FMath::Max(Record.LeakTimeRemaining, UE_KINDA_SMALL_NUMBER));
+	}
+	// 누수 진행 복원 성공 반환
+	return true;
 }

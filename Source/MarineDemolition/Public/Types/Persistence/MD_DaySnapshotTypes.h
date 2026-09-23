@@ -3,12 +3,11 @@
 #include "Gameplay/Scrape/MD_ScrapeBoundaryPayload.h"
 #include "CoreMinimal.h"
 #include "Gameplay/Scrape/MD_ContaminationGeneration.h"
-#include "Templates/SubclassOf.h"
-#include "Types/Scrape/MD_ScrapeTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
 #include "Types/Persistence/MD_ContaminationSavePayload.h"
 #include "Types/Persistence/MD_SurfaceStainRecord.h"
 #include "Types/Scrape/MD_ContaminationPendingDrop.h"
+#include "Types/Persistence/MD_WorldActorSnapshotTypes.h"
 #include "MD_DaySnapshotTypes.generated.h"
 
 class AMD_SupportBrace;
@@ -89,6 +88,10 @@ struct MARINEDEMOLITION_API FMD_TrashBinRecord
       /** 원래 보급 제한과 파괴 추적 원장에 다시 연결할 레벨 배치 보급기 이름. */
       UPROPERTY()
       FName SourceDispenserName = NAME_None;
+
+      // 다른 구역의 동일 이름 보급기를 구분하며 기존 파일은 미지정으로 해석
+      UPROPERTY()
+      FName SourceDispenserLevelPackage = NAME_None;
 
       UPROPERTY()
       TSubclassOf<AMD_TrashBin> TrashBinClass;
@@ -241,6 +244,10 @@ USTRUCT()
 struct FMD_DaySnapshot
 {
       GENERATED_BODY()
+
+      // 물품과 설비 및 절단 진행을 다음 일차까지 보존하는 추가 기록
+      UPROPERTY()
+      FMD_WorldActorSnapshot ActorSnapshot;
 
     /** Missing in older saves: preserve authored/per-surface seeds, including zero. */
     UPROPERTY() bool bHasContaminationSessionSeed = false;

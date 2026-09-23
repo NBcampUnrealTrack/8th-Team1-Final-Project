@@ -1,7 +1,6 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/GameInstanceSubsystem.h"
 #include "Types/Persistence/MD_DaySnapshotTypes.h"
 #include "MD_DayPersistenceSubsystem.generated.h"
 
@@ -27,6 +26,9 @@ public:
 
     // Day 시작 시 서버에서 호출. 스냅샷 적용 + 소량 악화. 적용했으면 true
     bool RestoreSnapshot(UWorld* World);
+
+    // 일차 스냅샷에 포함된 방문 구역의 선행 복원
+    bool PrepareSnapshotStreaming(UWorld* World, bool& bReady);
 
     // 파일 저장에 사용할 현재 서버 월드 상태를 수집하는 함수
     bool BuildWorldSaveData(UWorld* World, FMD_WorldData& OutWorldData);
@@ -57,6 +59,8 @@ private:
 
     TWeakObjectPtr<UWorld> ContaminationContextWorld;
     bool bHasContaminationSessionSeed = false;
+    // 기존 파일의 단순 이름과 새 파일의 구역 포함 식별자 구분
+    bool bUseQualifiedActorNames = false;
     int32 ContaminationSessionSeed = 0;
     bool bDeferSavedContaminationGeneration = false;
     // Compact records share immutable payload bytes only during covered saved-world startup.

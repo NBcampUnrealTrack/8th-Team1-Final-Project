@@ -2,11 +2,7 @@
 
 #include "Components/ArrowComponent.h"
 #include "Components/BoxComponent.h"
-#include "Components/SceneComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "Engine/OverlapResult.h"
-#include "Engine/World.h"
-#include "GameFramework/Pawn.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Util/MD_LogUtility.h"
 #include "World/Trash/MD_TrashBin.h"
@@ -204,8 +200,11 @@ bool AMD_TrashDispenser::RegisterDispensedBin(AMD_TrashBin* const Bin)
 	}
 
 	Bin->SetSourceTrashDispenser(this);
-	if (Bin->GetSourceTrashDispenserName() != GetFName())
+	// 같은 이름이어도 다른 구역에서 지급한 통의 원장 혼합 차단
+	if (Bin->GetSourceTrashDispenserName() != GetFName()
+		|| Bin->GetSourceTrashDispenserLevelPackage() != FName(UWorld::RemovePIEPrefix(GetLevel()->GetOutermost()->GetName())))
 	{
+		// 원래 보급기와 일치하지 않는 등록 실패 반환
 		return false;
 	}
 

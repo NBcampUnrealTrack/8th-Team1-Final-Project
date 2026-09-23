@@ -173,7 +173,10 @@ void UMD_HUDQuestWidget::RefreshQuestDisplay()
 	TArray<FMD_MainQuestState> MainQuests = MerchantComponent->GetMainQuests();
 	for (FMD_MainQuestState& MainQuest : MainQuests)
 	{
-		if (MainQuest.UnlockDay != MerchantComponent->GetCurrentDay() || MainQuest.Status == EMD_MainQuestStatus::Locked)
+		// 완료 보상은 서버에서 이미 지급됐다. 완료 상태는 원장에 보존하되 HUD에서는 제거한다.
+		if (MainQuest.UnlockDay != MerchantComponent->GetCurrentDay()
+			|| MainQuest.Status == EMD_MainQuestStatus::Locked
+			|| MainQuest.Status == EMD_MainQuestStatus::Completed)
 		{
 			continue;
 		}

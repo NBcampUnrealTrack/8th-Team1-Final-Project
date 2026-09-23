@@ -25,6 +25,8 @@ public:
 	const UStaticMeshComponent* GetBraceMesh() const { return Mesh; }
 	bool IsWeakened() const { return bWeakened; }
 	void RestoreWeakenedState(bool bWasWeakened);
+	// 파일 복원의 교체 삭제가 철거와 점수 이벤트를 일으키지 않도록 연결만 해제
+	void DetachForSaveRestore();
 	void Weaken();
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 

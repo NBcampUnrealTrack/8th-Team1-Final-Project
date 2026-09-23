@@ -1,8 +1,9 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/StaticArray.h"
 #include "UI/Foundation/MD_CommonGameMenuWidget.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "MD_DailyReportWidget.generated.h"
@@ -13,7 +14,7 @@ class AMD_DayEndConsole;
 /**
  * GameMenu 레이어에서 정산 데이터와 확인 입력을 처리하는 위젯 클래스
  */
-UCLASS()
+UCLASS(meta = (DisableNativeTick))
 class MARINEDEMOLITION_API UMD_DailyReportWidget : public UMD_CommonGameMenuWidget
 {
 	GENERATED_BODY()
@@ -23,7 +24,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Daily Report")
 	void SetReport(const FMD_InspectionReport& Report);
 
-	// Blueprint 그래프에서 전환 버튼의 입력 상태 제어
+	// Blueprint에서 정산 화면의 퇴근 및 잔업 버튼 입력 상태 제어
 	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category = "MD|Daily Report")
 	void SetContinueEnabled(bool bEnabled);
 
@@ -42,7 +43,9 @@ public:
     void CloseFinalReport();
 
 protected:
-    virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
+    virtual void NativeConstruct() override;
+
+    virtual void NativeDestruct() override;
 
     virtual bool NativeOnHandleBackAction() override;
 
@@ -60,10 +63,25 @@ protected:
     // 같은 초의 남은 시간 문구를 반복 적용하지 않기 위한 캐시
     int32 DisplayedRemainingSeconds = INDEX_NONE;
 
+    // 남은 시간이 다음 정수 초로 바뀔 때 실행할 단발 타이머
+    FTimerHandle RemainingTimeTimer;
+
+    // 숫자 영역별 마지막 값과 지역화된 표시 문자열 재사용
+    TMap<TWeakObjectPtr<UTextBlock>, TPair<int32, FText>> AmountTextCache;
+
+    // 동일 날짜의 부제목 재생성 방지를 위한 날짜 캐시
+    TOptional<int32> CachedReportDay;
+
+    // 날짜가 유지되는 동안 재사용할 지역화된 부제목
+    FText CachedReportHeader;
+
     // 서버 기준 남은 시간을 전용 텍스트에 표시
     void UpdateRemainingTime();
 
-    // Blueprint가 소유한 잔업 버튼의 표시 상태 제어
+    // 비활성화 및 Slate 해제 시 예약된 카운트다운 정리
+    void StopRemainingTimeUpdates();
+
+    // Blueprint에서 잔업 버튼의 표시 상태 제어
     UFUNCTION(BlueprintImplementableEvent, Category = "MD|Daily Report")
     void SetResumeVisibility(ESlateVisibility ResumeVisibility);
 
@@ -151,17 +169,16 @@ protected:
 	// 크레딧 영역의 분류별 값과 전체 변동 합계 및 부호 색상 적용
 	void SetCreditValues(const FMD_InspectionReport& Report);
 
-	// 원장 배열에서 요청한 분류의 정산 값 조회
-	static int32 FindDailyReportValue(const TArray<FMD_DailyReportValue>& Values, EMD_DailyReportCategory Category);
+	// 누락 분류의 영점과 최초 분류 값을 보관하는 고정 크기 조회표
+	using FDailyReportValues = TStaticArray<int32, static_cast<uint8>(EMD_DailyReportCategory::Other) + 1>;
+
+	// 한 번의 원장 순회로 새 조회표 구성 및 표시 외 항목을 포함한 총합 반환
+	static int32 CollectDailyReportValues(const TArray<FMD_DailyReportValue>& Values, FDailyReportValues& Amounts);
 
 	// 점수와 크레딧에 부호 및 천 단위 구분 적용
 	static FText FormatDailyReportAmount(int32 Amount);
 
 	// 정산 숫자의 서식과 부호 색상을 공통 경로로 적용
 	void SetAmountText(UTextBlock* AmountTextBlock, int32 Amount);
-
-	// Blueprint 그래프에서 정산 결과에 맞는 전환 문구 표시
-	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Daily Report")
-	void SetContinueText(const FText& ButtonText);
 
 };

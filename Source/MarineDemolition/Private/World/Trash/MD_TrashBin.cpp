@@ -3,18 +3,13 @@
 #include "Character/MD_Character.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Components/BoxComponent.h"
-#include "Components/SceneComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "EngineUtils.h"
-#include "Engine/StaticMesh.h"
-#include "Engine/World.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Trash/MD_TrashContentClaimSubsystem.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Net/UnrealNetwork.h"
 #include "Types/Persistence/MD_DaySnapshotTypes.h"
-#include "TimerManager.h"
 #include "World/Trash/MD_TrashDispenser.h"
 #include "World/Trash/MD_TrashBinLiquidSloshVisualComponent.h"
 
@@ -307,20 +302,29 @@ bool AMD_TrashBin::CommitNextSpillSequence(
 	return true;
 }
 
-void AMD_TrashBin::SetSourceTrashDispenser(
-	AMD_TrashDispenser* const SourceDispenser)
+void AMD_TrashBin::SetSourceTrashDispenser(AMD_TrashDispenser* SourceDispenser)
 {
-	if (!HasAuthority() || !IsValid(SourceDispenser))
+	// 서버의 유효한 보급기에 한정한 귀속 기록
+	if (HasAuthority() == false || IsValid(SourceDispenser) == false)
 	{
+		// 해제되거나 비권위인 보급기 연결 차단
 		return;
 	}
-
-	const FName NewSourceName = SourceDispenser->GetFName();
-	if (SourceTrashDispenserName.IsNone()
-		|| SourceTrashDispenserName == NewSourceName)
+	// 기존 귀속과 비교할 보급기 실제 이름
+	FName NewSourceName = SourceDispenser->GetFName();
+	// 재실행에서도 동일한 구역을 연결할 PIE 접두사 제거
+	FName NewSourceLevel(UWorld::RemovePIEPrefix(SourceDispenser->GetLevel()->GetOutermost()->GetName()));
+	// 다른 이름이나 다른 구역 보급기로의 임의 재귀속 방지
+	if ((SourceTrashDispenserName.IsNone() == false && SourceTrashDispenserName != NewSourceName)
+		|| (SourceTrashDispenserLevelPackage.IsNone() == false && SourceTrashDispenserLevelPackage != NewSourceLevel))
 	{
-		SourceTrashDispenserName = NewSourceName;
+		// 원래 소유권 보존
+		return;
 	}
+	// 기존 이름 형식과 신규 기록의 공통 귀속 정보 설정
+	SourceTrashDispenserName = NewSourceName;
+	// 기존 파일의 미지정 구역도 확인된 보급기로 보완
+	SourceTrashDispenserLevelPackage = NewSourceLevel;
 }
 
 bool AMD_TrashBin::BuildPersistenceRecord(FMD_TrashBinRecord& OutRecord)
@@ -335,8 +339,10 @@ bool AMD_TrashBin::BuildPersistenceRecord(FMD_TrashBinRecord& OutRecord)
 	}
 
 	// Live Coding 이전에 생성된 보급 통도 Owner가 남아 있으면 새 필드를 안전하게 보완한다.
-	if (SourceTrashDispenserName.IsNone())
+	// 이전 실행 객체와 기존 저장에서 빠진 구역까지 원래 소유자로 보완
+	if (SourceTrashDispenserName.IsNone() == true || SourceTrashDispenserLevelPackage.IsNone() == true)
 	{
+		// 기존 소유 보급기의 이름과 구역 조회
 		SetSourceTrashDispenser(Cast<AMD_TrashDispenser>(GetOwner()));
 	}
 	if (SourceTrashDispenserName.IsNone())
@@ -348,6 +354,8 @@ bool AMD_TrashBin::BuildPersistenceRecord(FMD_TrashBinRecord& OutRecord)
 	EnsureStableBinId();
 	OutRecord.StableBinId = StableBinId;
 	OutRecord.SourceDispenserName = SourceTrashDispenserName;
+	// 동일 이름의 다른 구역 보급기를 구분할 배치 정보 저장
+	OutRecord.SourceDispenserLevelPackage = SourceTrashDispenserLevelPackage;
 	OutRecord.TrashBinClass = GetClass();
 	OutRecord.Transform = GetActorTransform();
 	OutRecord.LiquidUnits = LiquidState.LiquidUnits;
@@ -382,6 +390,8 @@ bool AMD_TrashBin::RestorePersistenceRecord(
 
 	StableBinId = Record.StableBinId;
 	SourceTrashDispenserName = Record.SourceDispenserName;
+	// 기존 파일의 미지정 구역은 보급기 재등록 단계에서 보완
+	SourceTrashDispenserLevelPackage = Record.SourceDispenserLevelPackage;
 	LiquidState.LiquidUnits = Record.LiquidUnits;
 	LiquidState.RewardUnits = Record.RewardUnits;
 	// Revision은 복원 자체를 새 gameplay mutation으로 세지 않고 저장값을 exact 유지한다.

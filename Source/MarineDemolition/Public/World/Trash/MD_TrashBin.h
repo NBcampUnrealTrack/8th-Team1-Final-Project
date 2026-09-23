@@ -1,14 +1,11 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/Actor.h"
 #include "GameplayTagAssetInterface.h"
 #include "Gameplay/Interaction/MD_Grabbable.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "Gameplay/Trash/MD_TrashContainer.h"
-#include "Types/Scrape/MD_ScrapeTypes.h"
 #include "Types/Trash/MD_TrashBinSpillTypes.h"
-#include "TimerManager.h"
 #include "MD_TrashBin.generated.h"
 
 class UBoxComponent;
@@ -185,6 +182,9 @@ public:
 
 	/** 이 동적 통을 만든 레벨 배치 보급기의 안정적인 이름. NAME_None이면 비보급 통이다. */
 	FName GetSourceTrashDispenserName() const { return SourceTrashDispenserName; }
+
+	// 재등록할 보급기의 원래 배치 구역 조회
+	FORCEINLINE FName GetSourceTrashDispenserLevelPackage() { return SourceTrashDispenserLevelPackage; }
 
 	/** 마지막으로 성공 commit한 쏟김 sequence. 신규/구버전은 0이다. */
 	uint64 GetNextSpillSequence() const { return NextSpillSequence; }
@@ -449,6 +449,10 @@ private:
 	/** 원래 TrashDispenser 추적 원장에 복원 후 재등록하기 위한 레벨 배치 이름. */
 	UPROPERTY()
 	FName SourceTrashDispenserName = NAME_None;
+
+	// 운반으로 통의 위치가 바뀌어도 유지할 원래 보급기 구역
+	UPROPERTY()
+	FName SourceTrashDispenserLevelPackage = NAME_None;
 
 	/** 마지막으로 성공한 쏟김 sequence high-water. 신규·필드 없는 구버전은 0이다. */
 	UPROPERTY()
