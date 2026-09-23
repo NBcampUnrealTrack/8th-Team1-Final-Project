@@ -12,7 +12,6 @@
 #include "Engine/Texture2D.h"
 #include "Groups/CommonButtonGroupBase.h"
 #include "UI/MD_CommonButtonBase.h"
-#include "UI/Merchant/MD_MerchantMenuWidget.h"
 #include "UI/Merchant/MD_ShopItemCardWidget.h"
 
 void UMD_ShopWidget::NativeOnActivated()
@@ -30,12 +29,6 @@ void UMD_ShopWidget::NativeOnActivated()
 	// 아이템 카테고리 열거형을 기준으로 카테고리 버튼 자동 생성
 	BuildCategoryButtons();
 
-	// 상점 활성화 중 기존 상인 메뉴 패널 숨김
-	if (IsValid(OwningMerchantMenu) == true)
-	{
-		OwningMerchantMenu->SetMenuPanelVisible(false);
-	}
-
 	// BP 기본 카탈로그도 활성화 시 비동기 로드를 시작하여 화면에 반영
 	SetCatalog(Catalog);
 }
@@ -48,12 +41,6 @@ void UMD_ShopWidget::NativeOnDeactivated()
 	if (IsValid(Btn_Buy) == true)
 	{
 		Btn_Buy->OnClicked().RemoveAll(this);
-	}
-
-	// 상점 종료 후 기존 상인 메뉴 패널 복원
-	if (IsValid(OwningMerchantMenu) == true)
-	{
-		OwningMerchantMenu->SetMenuPanelVisible(true);
 	}
 
 	Super::NativeOnDeactivated();
@@ -73,12 +60,6 @@ void UMD_ShopWidget::NativeDestruct()
 	DefinitionLoadHandle.Reset();
 	// 부모 위젯의 해제 절차 수행
 	Super::NativeDestruct();
-}
-
-void UMD_ShopWidget::SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget)
-{
-	// 화면을 연 상인 메뉴 저장
-	OwningMerchantMenu = InMenuWidget;
 }
 
 void UMD_ShopWidget::SetCatalog(UMD_ShopCatalog* InCatalog)

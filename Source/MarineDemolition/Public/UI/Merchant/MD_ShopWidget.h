@@ -16,7 +16,6 @@ class UCommonButtonGroupBase;
 class UPanelWidget;
 class UTextBlock;
 class UMD_CommonButtonBase;
-class UMD_MerchantMenuWidget;
 class UMD_ShopItemCardWidget;
 class UMD_EquipHotbarComponent;
 
@@ -45,9 +44,6 @@ class MARINEDEMOLITION_API UMD_ShopWidget : public UMD_CommonGameMenuWidget
 	GENERATED_BODY()
 
 public:
-	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
-	void SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget);
-
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void SetCatalog(UMD_ShopCatalog* InCatalog);
 
@@ -124,10 +120,6 @@ protected:
 	// 활성 목록이 상점 구매인지 소지품 판매인지 구분하는 상태
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop|Sale")
 	bool bSellingMode = false;
-
-	// 상점 화면을 연 상인 메뉴
-	UPROPERTY()
-	TObjectPtr<UMD_MerchantMenuWidget> OwningMerchantMenu;
 
 	/** 카탈로그 에셋. WBP 기본값으로 지정해도 되고 런타임에 SetCatalog로 넣어도 된다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Shop")

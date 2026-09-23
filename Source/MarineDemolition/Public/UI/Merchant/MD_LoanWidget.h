@@ -10,7 +10,6 @@
 class UEditableText;
 class UTextBlock;
 class UMD_CommonButtonBase;
-class UMD_MerchantMenuWidget;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_LoanAmountRequest, int32, Amount);
 
@@ -25,8 +24,6 @@ class MARINEDEMOLITION_API UMD_LoanWidget : public UMD_CommonGameMenuWidget
 protected:
 	virtual void NativeOnActivated() override;
 
-	virtual void NativeOnDeactivated() override;
-
 public:
 	// 서버 대출 요청을 상인 액터로 전달하기 위한 금액 이벤트
 	UPROPERTY(BlueprintAssignable, Category = "MD|Loan")
@@ -37,10 +34,6 @@ public:
 	FMD_LoanAmountRequest OnRepayRequested;
 
 private:
-	// 화면 전환 중 입력 모드를 유지할 배경 상인 메뉴 참조
-	UPROPERTY()
-	TObjectPtr<UMD_MerchantMenuWidget> OwningMerchantMenu;
-
 	// WBP_Loan에서 대출 신청을 실행하는 공통 버튼
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Loan", meta = (BindWidgetOptional, AllowPrivateAccess = "true"))
 	TObjectPtr<UMD_CommonButtonBase> Btn_Loan;
@@ -74,9 +67,6 @@ private:
 	FMD_MerchantMenuInfo LoanInfo;
 
 public:
-	// 배경 메뉴를 숨긴 상태로 유지하고 뒤로가기에서 다시 표시하기 위한 설정 함수
-	void SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget);
-
 	// 복제된 최신 대출 원장을 저장하고 화면을 즉시 갱신하는 함수
 	UFUNCTION(BlueprintCallable, Category = "MD|Loan")
 	void SetLoanInfo(const FMD_MerchantMenuInfo& InLoanInfo);

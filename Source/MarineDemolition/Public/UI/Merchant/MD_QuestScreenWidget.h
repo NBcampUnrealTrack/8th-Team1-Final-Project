@@ -12,7 +12,6 @@
 class UMD_CommonButtonBase;
 class UMD_LoreCatalog;
 class UMD_LoreQuestTabWidget;
-class UMD_MerchantMenuWidget;
 
 /** 퀘스트와 로어 탭 전환 및 화면 수명을 관리하는 상인 퀘스트 화면 */
 UCLASS()
@@ -24,7 +23,6 @@ protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 	virtual void NativeOnActivated() override;
-	virtual void NativeOnDeactivated() override;
 
 public:
 	// 퀘스트 탭의 반복 퀘스트 수락 또는 보상 요청 전달 이벤트
@@ -40,10 +38,6 @@ public:
 	FMD_QuestRepeatActionRequest OnRepeatAbandonRequested;
 
 protected:
-	// 퀘스트 화면 뒤에 남아 있는 상인 메뉴 표시 상태를 관리하기 위한 참조
-	UPROPERTY()
-	TObjectPtr<UMD_MerchantMenuWidget> OwningMerchantMenu;
-
 	// 화면 생성 전후에 동일한 메인 퀘스트 데이터를 유지하기 위한 캐시
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	TArray<FMD_MainQuestState> MainQuests;
@@ -85,10 +79,6 @@ protected:
 	TObjectPtr<UMD_LoreQuestTabWidget> WBP_MD_LoreTab;
 
 public:
-	// 화면 뒤에 표시할 상인 메뉴 참조를 적용하는 함수
-	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
-	void SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget);
-
 	// 퀘스트 탭에 메인 퀘스트 상태를 전달하는 함수
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
 	void SetMainQuests(const TArray<FMD_MainQuestState>& InMainQuests);

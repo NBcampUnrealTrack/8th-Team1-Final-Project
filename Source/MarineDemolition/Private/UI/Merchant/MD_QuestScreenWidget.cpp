@@ -3,7 +3,6 @@
 #include "Data/Lore/MD_LoreCatalog.h"
 #include "UI/MD_CommonButtonBase.h"
 #include "UI/Merchant/MD_LoreQuestTabWidget.h"
-#include "UI/Merchant/MD_MerchantMenuWidget.h"
 
 void UMD_QuestScreenWidget::NativeConstruct()
 {
@@ -58,30 +57,8 @@ void UMD_QuestScreenWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
 
-	// 퀘스트 화면이 상인 메뉴 위에 표시되는 동안 기존 메뉴 패널 숨김
-	if (IsValid(OwningMerchantMenu) == true)
-	{
-		OwningMerchantMenu->SetMenuPanelVisible(false);
-	}
 	RefreshDisplay();
 	ApplySelectedTab();
-}
-
-void UMD_QuestScreenWidget::NativeOnDeactivated()
-{
-	// 퀘스트 화면 종료 시 뒤에 남은 상인 메뉴 패널 복구
-	if (IsValid(OwningMerchantMenu) == true)
-	{
-		OwningMerchantMenu->SetMenuPanelVisible(true);
-	}
-
-	Super::NativeOnDeactivated();
-}
-
-void UMD_QuestScreenWidget::SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget)
-{
-	// 화면 활성화와 비활성화에서 동일 메뉴 패널을 제어하기 위한 참조 저장
-	OwningMerchantMenu = InMenuWidget;
 }
 
 void UMD_QuestScreenWidget::SetMainQuests(const TArray<FMD_MainQuestState>& InMainQuests)

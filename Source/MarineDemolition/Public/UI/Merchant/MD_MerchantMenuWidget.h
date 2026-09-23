@@ -9,6 +9,7 @@
 
 #include "MD_MerchantMenuWidget.generated.h"
 
+class UScrollBox;
 class UTextBlock;
 class AMD_Merchant;
 
@@ -49,13 +50,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	void ShowDialogueLine(const FText& Line);
 
-	/**
-	 * 상점·퀘스트·대출 화면이 열릴 때 메뉴 패널을 숨긴다.
-	 * 메뉴 패널 전체(카테고리 탭들)가 상점과 겹치므로 숨긴다.
-	 */
-	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
-	void SetMenuPanelVisible(bool bVisible);
-
 	/** 각 메뉴 진입 요청. 실제 화면은 소유 액터나 BP가 붙인다. */
 	UPROPERTY(BlueprintAssignable, Category = "MD|Merchant")
 	FMD_MerchantMenuRequest OnTalkRequested;
@@ -79,34 +73,23 @@ protected:
 	UPROPERTY()
 	TObjectPtr<AMD_Merchant> OwningMerchant;
 
-	// ───────────────────────── 메뉴 패널 ─────────────────────────
-
-	/**
-	 * 메뉴 패널 전체(상인 정보 + 대사창 + 버튼들). 상점 화면 열릴 때 숨긴다.
-	 * 컨테이너 종류를 묶지 않아 디자이너가 바꿔도 바인딩이 유지된다.
-	 */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Merchant", meta = (BindWidgetOptional))
-	TObjectPtr<UWidget> BDR_BodyPanel;
-
 	// ───────────────────────── 상인 신원 ─────────────────────────
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Merchant", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_Name;
+	// 초상화 아래에 표시할 현재 상인 이름
+	TObjectPtr<UTextBlock> Txt_NpcName;
 
-	/** 현재 상인 호감도를 부호가 포함된 소수점 한 자리 값으로 표시한다. */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Merchant", meta = (BindWidgetOptional))
+	// 별도 호감도 라벨 옆에 표시할 부호와 소수점 한 자리 수치
 	TObjectPtr<UTextBlock> Txt_Affinity;
 
 	/** 화면 중앙 대사창의 본문 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Merchant", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_Dialogue;
 
-	/**
-	 * 대사창 컨테이너. 보이기/숨기기 대상이라 구체 타입을 묶지 않는다 —
-	 * 디자이너가 Border를 SizeBox나 Overlay로 바꿔도 그대로 바인딩된다.
-	 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Merchant", meta = (BindWidgetOptional))
-	TObjectPtr<UWidget> BDR_Dialogue;
+	// 대사 교체 시 읽기 위치를 처음으로 되돌릴 스크롤 영역
+	TObjectPtr<UScrollBox> SB_Dialogue;
 
 private:
 	/** TalkLines에서 마지막으로 보여준 줄. -1이면 아직 Greeting만 띄운 상태다. */

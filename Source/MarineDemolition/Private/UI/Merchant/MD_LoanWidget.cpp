@@ -5,37 +5,13 @@
 #include "Components/EditableText.h"
 #include "Components/TextBlock.h"
 #include "UI/MD_CommonButtonBase.h"
-#include "UI/Merchant/MD_MerchantMenuWidget.h"
 
 void UMD_LoanWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
 
-	// 대출 화면이 활성화된 동안 배경 상인 메뉴 패널 숨김
-	if (IsValid(OwningMerchantMenu) == true)
-	{
-		OwningMerchantMenu->SetMenuPanelVisible(false);
-	}
-
 	// 현재 대출 원장을 활성화된 화면에 반영
 	RefreshDisplay();
-}
-
-void UMD_LoanWidget::NativeOnDeactivated()
-{
-	// 대출 화면 비활성화 후 배경 상인 메뉴 패널 복원
-	if (IsValid(OwningMerchantMenu) == true)
-	{
-		OwningMerchantMenu->SetMenuPanelVisible(true);
-	}
-
-	Super::NativeOnDeactivated();
-}
-
-void UMD_LoanWidget::SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget)
-{
-	// 활성화와 비활성화에서 제어할 배경 상인 메뉴 저장
-	OwningMerchantMenu = InMenuWidget;
 }
 
 void UMD_LoanWidget::SetLoanInfo(const FMD_MerchantMenuInfo& InLoanInfo)

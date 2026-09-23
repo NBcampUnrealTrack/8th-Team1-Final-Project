@@ -3,6 +3,7 @@
 
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
 
+#include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
 
 void UMD_MerchantMenuWidget::NativeOnActivated()
@@ -24,18 +25,18 @@ void UMD_MerchantMenuWidget::SetMenuInfo(const FMD_MerchantMenuInfo& InInfo)
 
 void UMD_MerchantMenuWidget::RefreshDisplay()
 {
-	// 상인 신원
-	if (IsValid(Txt_Name) == true)
+	// 새 레이아웃의 상인 이름 영역 유효성 확인
+	if (IsValid(Txt_NpcName) == true)
 	{
-		Txt_Name->SetText(MenuInfo.DisplayName);
+		// 초상화 아래 이름에 현재 상인 정보 반영
+		Txt_NpcName->SetText(MenuInfo.DisplayName);
 	}
 
-	// 현재 호감도를 양수와 음수가 구분되도록 부호와 소수점 한 자리로 표시한다.
+	// 별도 라벨 옆 호감도 수치 영역 유효성 확인
 	if (IsValid(Txt_Affinity) == true)
 	{
-		FString AffinitySign = MenuInfo.Affinity >= 0.f ? TEXT("+") : TEXT("-");
-		FString AffinityValue = FString::Printf(TEXT("호감도 %s%.1f"), *AffinitySign, FMath::Abs(MenuInfo.Affinity));
-		Txt_Affinity->SetText(FText::FromString(AffinityValue));
+		// 호감도 라벨을 중복하지 않고 부호와 소수점 한 자리 수치 표시
+		Txt_Affinity->SetText(FText::FromString(FString::Printf(TEXT("%+.1f"), MenuInfo.Affinity)));
 	}
 
 	// 대사창은 인사말로 시작한다. '대화'를 누르면 TalkLines로 넘어간다.
@@ -50,26 +51,18 @@ void UMD_MerchantMenuWidget::CloseMenu()
 
 void UMD_MerchantMenuWidget::ShowDialogueLine(const FText& Line)
 {
+	// 현재 대사를 표시할 본문 영역 유효성 확인
 	if (IsValid(Txt_Dialogue) == true)
 	{
-		// `노라 브릭스: 목록이나 봐.` 형식. 이름이 비어 있으면 대사만 띄운다 —
-		// 화자 표기가 있어야 대사창이 UI 안내문이 아니라 대화로 읽힌다.
-		Txt_Dialogue->SetText(MenuInfo.DisplayName.IsEmpty()
-			? Line
-			: FText::Format(FText::FromString(TEXT("{0}: {1}")), MenuInfo.DisplayName, Line));
+		// 별도 상인 이름 영역과 중복되지 않도록 대사 본문만 표시
+		Txt_Dialogue->SetText(Line);
 	}
 
-	if (IsValid(BDR_Dialogue))
+	// 새 레이아웃의 대사 스크롤 영역 유효성 확인
+	if (IsValid(SB_Dialogue) == true)
 	{
-		BDR_Dialogue->SetVisibility(ESlateVisibility::HitTestInvisible);
-	}
-}
-
-void UMD_MerchantMenuWidget::SetMenuPanelVisible(bool bVisible)
-{
-	if (IsValid(BDR_BodyPanel) == true)
-	{
-		BDR_BodyPanel->SetVisibility(bVisible ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		// 이전 대사의 스크롤 위치가 다음 대사의 시작을 가리지 않도록 초기화
+		SB_Dialogue->SetScrollOffset(0.f);
 	}
 }
 
