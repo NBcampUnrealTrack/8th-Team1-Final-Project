@@ -672,6 +672,29 @@ void UMD_InteractionComponent::EndCarryCollisionIsolation()
 	Component->SetCollisionResponseToChannel(ECC_Pawn, CarryIsolatedPawnResponse);
 }
 
+bool UMD_InteractionComponent::TryReceiveQuestItem(AMD_QuestItem* Item, AActor* Source)
+{
+	const APawn* Pawn = GetOwnerPawn();
+	if (!IsValid(Pawn) || !Pawn->HasAuthority() || !CanOwnerInteract()
+		|| IsHolding() || HasAuthorityPhysicsGrip() || !IsValid(HoldPoint)
+		|| !IsValid(Item) || !IsValid(Source) || Item->GetOwner() != Source
+		|| !ValidateInteractionTarget(Source)
+		|| !IMD_Interactable::CanInteractWith(Item, GetOwnerPawn())) return false;
+
+	// Put the item at the carry point before enabling the grip: no floor drop or
+	// spring acceleration from inside the rack on the initial pickup frame.
+	const FTransform Original = Item->GetActorTransform();
+	const FTransform HoldTransform = GetHoldPointTransform();
+	const UPrimitiveComponent* ItemBody = Cast<UPrimitiveComponent>(Item->GetRootComponent());
+	Item->SetActorLocationAndRotation(ResolveHoldTargetLocation(HoldTransform, ItemBody),
+		HoldTransform.GetRotation(), false, nullptr, ETeleportType::TeleportPhysics);
+	Item->SetActorHiddenInGame(false);
+	Item->SetActorEnableCollision(true);
+	if (TryHoldTarget(Item)) return true;
+	Item->SetActorTransform(Original, false, nullptr, ETeleportType::TeleportPhysics);
+	return false;
+}
+
 bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 {
 	APawn* OwnerPawn = GetOwnerPawn();
@@ -885,11 +908,13 @@ FTransform UMD_InteractionComponent::GetHoldPointTransform() const
 	return HoldPoint->GetRelativeTransform() * ViewTransform;
 }
 
-FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& HoldTransform) const
+FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& HoldTransform,
+	const UPrimitiveComponent* PendingItem) const
 {
 	const FVector Desired = HoldTransform.TransformPositionNoScale(HeldTargetOffset);
 
-	const UPrimitiveComponent* Held = IsValid(PhysicsHandle) ? PhysicsHandle->GetGrabbedComponent() : nullptr;
+	const UPrimitiveComponent* Held = IsValid(PendingItem) ? PendingItem
+		: (IsValid(PhysicsHandle) ? PhysicsHandle->GetGrabbedComponent() : nullptr);
 	const UWorld* World = GetWorld();
 	if (!IsValid(Held) || !IsValid(Camera) || !World)
 	{

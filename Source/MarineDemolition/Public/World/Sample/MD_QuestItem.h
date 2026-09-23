@@ -40,6 +40,7 @@ public:
 
 	/** 파생 클래스가 그랩 직후 동작을 추가하기 위한 확장 함수 */
 	virtual void NotifyGrabbed();
+	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
 
 	/** 파생 클래스가 지정 시간 동안 충격 보호를 추가하기 위한 확장 함수 */
 	virtual void SuppressImpactDamage(float Duration);

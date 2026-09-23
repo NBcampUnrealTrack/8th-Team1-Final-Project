@@ -57,6 +57,9 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Barnacle")
 	bool IsFullyRemoved() const;
 
+	/** Persistence only: restores work without spawning drops or emitting scrape rewards. */
+	bool RestoreRemovalProgress(float RemovalRatio);
+
 protected:
 	virtual void BeginPlay() override;
 

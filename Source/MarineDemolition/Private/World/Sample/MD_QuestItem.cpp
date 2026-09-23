@@ -4,6 +4,7 @@
 #include "Data/Merchant/MD_QuestDefinition.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "World/Sample/MD_QuestRackSpawner.h"
 
 AMD_QuestItem::AMD_QuestItem()
 {
@@ -81,6 +82,16 @@ bool AMD_QuestItem::CanBeDestroyedByGameplay() const
 
 void AMD_QuestItem::NotifyGrabbed()
 {
+	if (AMD_QuestRackSpawner* Rack = Cast<AMD_QuestRackSpawner>(GetOwner()))
+	{
+		Rack->NotifyCartridgeGrabbed(this);
+	}
+}
+
+bool AMD_QuestItem::CanInteract_Implementation(AActor* Interactor) const
+{
+	const AMD_QuestRackSpawner* Rack = Cast<AMD_QuestRackSpawner>(GetOwner());
+	return !Rack || Rack->CanCollectCartridge(this);
 }
 
 void AMD_QuestItem::SuppressImpactDamage(float Duration)

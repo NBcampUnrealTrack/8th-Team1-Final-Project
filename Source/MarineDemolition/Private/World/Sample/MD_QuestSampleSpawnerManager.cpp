@@ -217,6 +217,15 @@ bool UMD_QuestSampleSpawnerManager::IsSelectedSpawner(AMD_QuestSampleSpawner* Re
 		return false;
 	}
 
+	// A dedicated rack set owns this phase; never also spawn legacy random copies.
+	for (const TWeakObjectPtr<AMD_QuestSampleSpawner>& Spawner : RegisteredSpawners)
+	{
+		if (Spawner.IsValid() && Spawner->ClaimsQuestPhase(Definition.GetPrimaryAssetId(), PhaseIndex))
+		{
+			return false;
+		}
+	}
+
 	// 퀘스트와 현재 Phase를 식별하는 캐시 키를 생성한다.
 	FString SelectionKey = BuildSelectionKey(Definition, PhaseIndex);
 	// 앞서 선택한 스포너가 아직 유효하면 같은 결과를 재사용한다.
@@ -276,6 +285,10 @@ AMD_QuestSampleSpawner* UMD_QuestSampleSpawnerManager::SelectRandomSpawner(UMD_Q
 
 		// 유효한 약한 포인터에서 Zone 판정에 사용할 스포너를 가져온다.
 		AMD_QuestSampleSpawner* CandidateSpawner = RegisteredSpawners[Index].Get();
+		if (!CandidateSpawner->IsRandomSpawnCandidate())
+		{
+			continue;
+		}
 		// 현재 퀘스트 Phase의 Zone을 담당하지 않는 스포너를 제외한다.
 		bool bMatchesSpawnZone = CandidateSpawner->MatchesSpawnZone(Definition, PhaseIndex);
 		if (bMatchesSpawnZone == false)

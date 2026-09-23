@@ -64,6 +64,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
 	void ReleaseHeldActor();
 
+	/** Server-only handoff from a currently aimed, validated interaction source. */
+	bool TryReceiveQuestItem(class AMD_QuestItem* Item, AActor* Source);
+
 	/** Blocks new interactions and immediately cancels the current interaction when blocked. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
 	void SetInteractionBlocked(bool bBlocked);
@@ -201,7 +204,8 @@ private:
 	 * 도달 불가능한 목표를 스프링이 계속 당기고 바닥이 계속 밀어내면 평형점이 없어 떨린다.
 	 * 목표를 항상 빈 공간에 두면 그 싸움 자체가 없어진다.
 	 */
-	FVector ResolveHoldTargetLocation(const FTransform& HoldTransform) const;
+	FVector ResolveHoldTargetLocation(const FTransform& HoldTransform,
+		const UPrimitiveComponent* PendingItem = nullptr) const;
 	bool ValidateInteractionTarget(AActor* RequestedActor) const;
 	bool IsHeldByOtherPawn(const AActor* Target) const;
 	bool HasAuthorityPhysicsGrip() const;

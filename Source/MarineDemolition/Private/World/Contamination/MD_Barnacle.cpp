@@ -110,6 +110,15 @@ void AMD_Barnacle::OnRep_AccumulatedRemovalWork()
 	ApplyRemovalProgressVisual();
 }
 
+bool AMD_Barnacle::RestoreRemovalProgress(float RemovalRatio)
+{
+	if (!HasAuthority() || !FMath::IsFinite(RemovalRatio) || RemovalRatio < 0.f || RemovalRatio > 1.f) return false;
+	AccumulatedRemovalWork = RemovalRatio * GetMaximumDurability();
+	ApplyRemovalProgressVisual();
+	ForceNetUpdate();
+	return true;
+}
+
 void AMD_Barnacle::OnRep_RemovalWorkRequired()
 {
 	ApplyRemovalProgressVisual();

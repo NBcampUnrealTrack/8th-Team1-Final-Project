@@ -30,6 +30,10 @@ class MARINEDEMOLITION_API AMD_QuestSampleSpawner : public AActor
 public:
 	AMD_QuestSampleSpawner();
 
+	/** Authored rack sets handle their quest explicitly instead of random selection. */
+	virtual bool IsRandomSpawnCandidate() const { return true; }
+	virtual bool ClaimsQuestPhase(const FPrimaryAssetId& DefinitionId, int32 PhaseIndex) const { return false; }
+
 protected:
 	virtual void PostInitializeComponents() override;
 	virtual void BeginPlay() override;
@@ -42,7 +46,7 @@ protected:
 
 	void HandleSubsystemStateChanged();
 
-	void TrySpawnForQuestState();
+	virtual void TrySpawnForQuestState();
 
 	/** 연결된 메인 퀘스트의 샘플 생성 처리. */
 	void TrySpawnForMainQuestState(const UMD_MerchantSubsystem* MerchantSubsystem);

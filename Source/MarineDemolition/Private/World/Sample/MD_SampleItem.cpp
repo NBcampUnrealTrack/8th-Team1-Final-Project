@@ -133,6 +133,7 @@ void AMD_SampleItem::BeginSpawnProtection()
 
 void AMD_SampleItem::NotifyGrabbed()
 {
+	Super::NotifyGrabbed();
 	// 충격 보호 설정과 무관하게 서버의 실제 그랩 성공 이력 보존
 	if (HasAuthority() == true)
 	{
