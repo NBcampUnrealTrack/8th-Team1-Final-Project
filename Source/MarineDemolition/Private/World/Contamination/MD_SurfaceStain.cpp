@@ -5,6 +5,7 @@
 #include "Gameplay/Contamination/MD_StainStickerBaker.h"
 #include "Components/DecalComponent.h"
 #include "Engine/World.h"
+#include "Engine/StaticMesh.h"
 #include "Gameplay/Contamination/MD_SurfaceStainDefinition.h"
 #include "Gameplay/Contamination/MD_SurfaceStainSize.h"
 #include "Gameplay/Scrape/MD_ContaminationDebrisSubsystem.h"
@@ -23,7 +24,8 @@ AMD_SurfaceStain::AMD_SurfaceStain()
 	SetRootComponent(SurfaceQuery);
 	// Furniture may move/rotate, but its non-uniform scale must not stretch the decal.
 	SurfaceQuery->SetAbsolute(false, false, true);
-	SurfaceQuery->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	// A definition and its final extent must be ready before creating query physics.
+	SurfaceQuery->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	SurfaceQuery->SetCollisionObjectType(ECC_WorldDynamic);
 	SurfaceQuery->SetCollisionResponseToAllChannels(ECR_Ignore);
 	SurfaceQuery->SetCollisionResponseToChannel(ECC_Visibility, ECR_Overlap);
@@ -32,6 +34,8 @@ AMD_SurfaceStain::AMD_SurfaceStain()
 	SurfaceQuery->SetHiddenInGame(true);
 	Decal = CreateDefaultSubobject<UDecalComponent>(TEXT("StainDecal"));
 	Decal->SetupAttachment(SurfaceQuery);
+	// RefreshSize enables the legacy decal only when its definition is usable.
+	Decal->SetVisibility(false);
 	Decal->SetRelativeRotation(FRotator(-90.0, 0.0, 0.0));
 	Decal->SetFadeScreenSize(0.002f);
 	StickerMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StickerMesh"));
@@ -83,14 +87,32 @@ void AMD_SurfaceStain::OnConstruction(const FTransform& Transform)
 	RefreshSize();
 }
 
+bool AMD_SurfaceStain::UsesSharedVolume() const
+{
+	return IsValid(Definition) && Definition->UsesSharedVolume();
+}
+
+int32 AMD_SurfaceStain::GetVolumeStageIndex() const
+{
+	return IsValid(Definition) ? Definition->GetVolumeStageIndex(RemainingSize, GetInitialSize()) : INDEX_NONE;
+}
+
 bool AMD_SurfaceStain::HasSticker() const
 {
-	return StickerPatch.IsValid() && StickerMesh && StickerMesh->GetStaticMesh();
+	return !UsesSharedVolume() && StickerPatch.IsValid() && StickerMesh && StickerMesh->GetStaticMesh();
 }
 
 bool AMD_SurfaceStain::RebuildSticker()
 {
 #if WITH_EDITOR
+	if (UsesSharedVolume())
+	{
+		if (!GetWorld() || GetWorld()->IsGameWorld()) return false;
+		RemainingSize = GetInitialSize();
+		RefreshSize();
+		StickerStatus = Definition->VolumeValidationStatus;
+		return Definition->IsUsable();
+	}
 	if (!GetWorld() || GetWorld()->IsGameWorld() || !Definition || !Definition->StickerMaterial)
 	{ StickerStatus = TEXT("Assign a definition with a sticker material before baking."); return false; }
 	FMD_StainStickerPatch Patch;
@@ -108,11 +130,12 @@ bool AMD_SurfaceStain::RebuildSticker()
 #if WITH_EDITOR
 bool AMD_SurfaceStain::ApplyPreparedSticker(FMD_StainStickerPatch Patch, UStaticMesh* Mesh)
 {
-	if (!GetWorld() || GetWorld()->IsGameWorld() || !Mesh || !Patch.IsValid() || Patch.InitialSize != GetInitialSize()) return false;
+	if (!GetWorld() || GetWorld()->IsGameWorld() || UsesSharedVolume() || !Mesh || !Patch.IsValid() || Patch.InitialSize != GetInitialSize()) return false;
 	// A successful preview becomes the placed actor's serialized mesh, without rebaking it.
 	if (Mesh->GetOuter() != this && !Mesh->Rename(nullptr, this, REN_DontCreateRedirectors | REN_NonTransactional)) return false;
 	Modify(); StickerMesh->Modify();
 	StickerPatch = MoveTemp(Patch);
+	LegacyStickerMesh = Mesh;
 	StickerMesh->SetStaticMesh(Mesh);
 	StickerStatus = FString::Printf(TEXT("Surface sticker: %d triangles"), GetStickerTriangleCount());
 	RemainingSize = GetInitialSize();
@@ -138,6 +161,8 @@ void AMD_SurfaceStain::PostEditChangeProperty(FPropertyChangedEvent& Event)
 void AMD_SurfaceStain::PostEditUndo()
 {
 	Super::PostEditUndo();
+	// Undoing creation or redoing deletion can clear default subobjects before this callback.
+	if (!IsValid(this) || !IsValid(SurfaceQuery) || !IsValid(StickerMesh) || !IsValid(Decal)) return;
 	RemainingSize = GetInitialSize();
 	RefreshSize();
 }
@@ -154,6 +179,7 @@ void AMD_SurfaceStain::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AMD_SurfaceStain, Definition);
+	DOREPLIFETIME(AMD_SurfaceStain, InitialSize);
 	DOREPLIFETIME(AMD_SurfaceStain, RemainingSize);
 }
 
@@ -161,6 +187,14 @@ void AMD_SurfaceStain::RefreshMaterial()
 {
 	for (auto It = ScanSources.CreateIterator(); It; ++It)
 		if (!It->IsValid()) It.RemoveCurrent();
+	if (UsesSharedVolume())
+	{
+		StickerMesh->SetMaterial(0, Definition->VolumeMaterial);
+		StickerMesh->SetCustomPrimitiveDataFloat(0, 1.f);
+		StickerMesh->SetCustomPrimitiveDataFloat(1, ScanSources.IsEmpty() ? 0.f : 1.f);
+		ScanMaterial = nullptr;
+		return;
+	}
 	if (HasSticker() && IsValid(Definition))
 	{
 		StickerMesh->SetMaterial(0, Definition->StickerMaterial);
@@ -191,9 +225,42 @@ void AMD_SurfaceStain::SetScanHighlighted(UObject* Source, bool bHighlighted)
 void AMD_SurfaceStain::RefreshSize()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceStain_RefreshSize);
-	SurfaceQuery->SetAbsolute(false, false, true);
+	if (SurfaceQuery->IsUsingAbsoluteLocation() || SurfaceQuery->IsUsingAbsoluteRotation()
+		|| !SurfaceQuery->IsUsingAbsoluteScale())
+		SurfaceQuery->SetAbsolute(false, false, true);
 	SurfaceQuery->SetWorldScale3D(FVector::OneVector);
+	// The legacy bake belongs to this actor. Never rename, duplicate, or discard a shared volume asset.
+	if (!LegacyStickerMesh && StickerPatch.IsValid() && StickerMesh->GetStaticMesh()
+		&& StickerMesh->GetStaticMesh()->GetOuter() == this)
+		LegacyStickerMesh = StickerMesh->GetStaticMesh();
 	const bool bVisible = RemainingSize > 0 && IsValid(Definition) && Definition->IsUsable();
+	if (UsesSharedVolume())
+	{
+		const FMD_SurfaceStainVolumeStage* Stage = Definition->GetVolumeStage(RemainingSize, GetInitialSize());
+		Decal->SetVisibility(false);
+		StickerMesh->SetVisibility(bVisible && Stage);
+		if (!bVisible || !Stage)
+		{
+			SurfaceQuery->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+			return;
+		}
+		// The common contact anchor stays fixed. Scaling is for this controlled prototype, not arbitrary edge fitting.
+		const FVector MeshScale = Definition->GetVolumeScale(GetInitialSize());
+		StickerMesh->SetStaticMesh(Stage->Mesh);
+		StickerMesh->SetRelativeTransform(FTransform(FQuat::Identity, FVector::ZeroVector, MeshScale));
+		StickerMesh->SetCastShadow(true);
+		const FVector Extent = Stage->QueryBounds.Min.GetAbs().ComponentMax(Stage->QueryBounds.Max.GetAbs()) * MeshScale;
+		const FVector QueryExtent = Extent + FVector(0.5);
+		if (SurfaceQuery->GetUnscaledBoxExtent() != QueryExtent)
+			SurfaceQuery->SetBoxExtent(QueryExtent, false);
+		// Create query physics with the final size when restoring an empty stain.
+		SurfaceQuery->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		RefreshMaterial();
+		return;
+	}
+	StickerMesh->SetStaticMesh(LegacyStickerMesh);
+	StickerMesh->SetRelativeTransform(FTransform::Identity);
+	StickerMesh->SetCastShadow(false);
 	const bool bSticker = HasSticker();
 	Decal->SetVisibility(bVisible && !bSticker);
 	StickerMesh->SetVisibility(bVisible && bSticker);
@@ -214,12 +281,12 @@ void AMD_SurfaceStain::RefreshSize()
 
 FBoxSphereBounds AMD_SurfaceStain::GetStainBounds() const
 {
-	return HasSticker() ? StickerMesh->Bounds : SurfaceQuery->Bounds;
+	return UsesSharedVolume() || HasSticker() ? StickerMesh->Bounds : SurfaceQuery->Bounds;
 }
 
 bool AMD_SurfaceStain::ContainsSurfacePoint(const FVector& Point, const FVector& Normal) const
 {
-	if (RemainingSize <= 0 || !Definition || !Definition->IsUsable()
+	if (UsesSharedVolume() || RemainingSize <= 0 || !Definition || !Definition->IsUsable()
 		|| Point.ContainsNaN() || Normal.ContainsNaN()) return false;
 	if (HasSticker())
 	{
@@ -245,6 +312,48 @@ bool AMD_SurfaceStain::TraceSticker(const FVector& Origin, const FVector& Direct
 	return StickerPatch.Raycast(Frame.InverseTransformPositionNoScale(Origin), Frame.InverseTransformVectorNoScale(Direction),
 		MaxDistance, [this, Scale](const FVector2D& UV)
 		{ return Definition->ContainsUV((UV - FVector2D(0.5)) * Scale + FVector2D(0.5)); }, OutDistance);
+}
+
+bool AMD_SurfaceStain::TraceVolume(const FVector& Origin, const FVector& Direction, double MaxDistance, double& OutDistance) const
+{
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceStain_VolumePick);
+	if (!UsesSharedVolume() || Origin.ContainsNaN() || Direction.ContainsNaN() || !Direction.IsNormalized()
+		|| !FMath::IsFinite(MaxDistance) || MaxDistance <= 0) return false;
+	const FMD_SurfaceStainVolumeStage* Stage = Definition->GetVolumeStage(RemainingSize, GetInitialSize());
+	if (!Stage || !StickerMesh || StickerMesh->GetStaticMesh() != Stage->Mesh || !StickerMesh->IsVisible()) return false;
+	const FTransform Frame = StickerMesh->GetComponentTransform();
+	const FVector LocalOrigin = Frame.InverseTransformPosition(Origin);
+	const FVector LocalVector = Frame.InverseTransformVector(Direction);
+	const double LocalPerWorld = LocalVector.Length();
+	if (!FMath::IsFinite(LocalPerWorld) || LocalPerWorld <= UE_SMALL_NUMBER) return false;
+	const FVector LocalDirection = LocalVector / LocalPerWorld;
+	const double LocalReach = MaxDistance * LocalPerWorld;
+	if (!FMath::IsFinite(LocalReach) || !FMath::LineBoxIntersection(Stage->QueryBounds,
+		LocalOrigin, LocalOrigin + LocalDirection * LocalReach, LocalDirection * LocalReach)) return false;
+	double Nearest = LocalReach;
+	bool bFound = false;
+	// A bounded, shared closed query also runs on dedicated servers; no render-resource copies or per-hit allocation.
+	for (int32 Index = 0; Index < Stage->QueryTriangleIndices.Num(); Index += 3)
+	{
+		const FVector& A = Stage->QueryVerticesCm[Stage->QueryTriangleIndices[Index]];
+		const FVector E0 = Stage->QueryVerticesCm[Stage->QueryTriangleIndices[Index + 1]] - A;
+		const FVector E1 = Stage->QueryVerticesCm[Stage->QueryTriangleIndices[Index + 2]] - A;
+		const FVector P = FVector::CrossProduct(LocalDirection, E1);
+		const double Determinant = FVector::DotProduct(E0, P);
+		if (FMath::Abs(Determinant) <= 1.e-10) continue;
+		const FVector Delta = LocalOrigin - A;
+		const double B = FVector::DotProduct(Delta, P) / Determinant;
+		if (B < -1.e-7 || B > 1.0000001) continue;
+		const FVector Q = FVector::CrossProduct(Delta, E0);
+		const double C = FVector::DotProduct(LocalDirection, Q) / Determinant;
+		if (C < -1.e-7 || B + C > 1.0000001) continue;
+		const double Distance = FVector::DotProduct(E1, Q) / Determinant;
+		if (!FMath::IsFinite(Distance) || Distance < 0 || Distance > Nearest) continue;
+		Nearest = Distance;
+		bFound = true;
+	}
+	if (bFound) OutDistance = Nearest / LocalPerWorld;
+	return bFound;
 }
 
 bool AMD_SurfaceStain::ApplyScrapeStroke(int32 RemovalAmount)

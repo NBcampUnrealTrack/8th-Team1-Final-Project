@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "GameplayAbilitySpecHandle.h"
 #include "MD_StainScraperComponent.generated.h"
 
 class AMD_SurfaceStain;
@@ -15,8 +16,8 @@ class MARINEDEMOLITION_API UMD_StainScraperComponent : public UActorComponent
 
 public:
 	UMD_StainScraperComponent();
-	bool StartStroke();
-	void CancelStroke();
+	bool StartStroke(FGameplayAbilitySpecHandle AbilityHandle);
+	void CancelStroke(bool bCancelAbility = true);
 	float GetStrokeDuration() const { return StrokeDurationSeconds; }
 	FVector GetHandSwingOffset() const;
 
@@ -42,6 +43,7 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Stain|Scraper", meta = (ClampMin = "0", ClampMax = "20", Units = "cm"))
 	float SwingDistanceCm = 6.0f;
 
+	FGameplayAbilitySpecHandle StrokeAbility;
 	TWeakObjectPtr<AMD_SurfaceStain> StrokeTarget;
 	TWeakObjectPtr<UMD_ToolDefinition> StrokeTool;
 	FTimerHandle ImpactTimer;

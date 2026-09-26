@@ -12,7 +12,7 @@ class UDecalComponent;
 class UMaterialInstanceDynamic;
 class UMD_SurfaceStainDefinition;
 
-/** Surface-bound decal with an authoritative cleaning budget and one final sortable item. */
+/** Surface-bound contamination with an authoritative cleaning budget and one final sortable item. */
 UCLASS()
 class MARINEDEMOLITION_API AMD_SurfaceStain : public AActor
 {
@@ -43,6 +43,12 @@ public:
 	bool RebuildSticker();
 	UFUNCTION(BlueprintPure, Category = "MD|Stain")
 	bool HasSticker() const;
+	UFUNCTION(BlueprintPure, Category = "MD|Stain|Volume")
+	bool UsesSharedVolume() const;
+	UFUNCTION(BlueprintPure, Category = "MD|Stain|Volume")
+	int32 GetVolumeStageIndex() const;
+	UFUNCTION(BlueprintCallable, Category = "MD|Stain|Volume")
+	bool TraceVolume(const FVector& Origin, const FVector& Direction, double MaxDistance, double& OutDistance) const;
 	const FString& GetStickerStatus() const { return StickerStatus; }
 	UFUNCTION(BlueprintPure, Category = "MD|Stain")
 	int32 GetStickerTriangleCount() const { return StickerPatch.Positions.Num() / 3; }
@@ -69,7 +75,7 @@ private:
 	TObjectPtr<UMD_SurfaceStainDefinition> Definition;
 
 	/** Zero is a serialization sentinel for level assets authored before numeric sizes. */
-	UPROPERTY(EditAnywhere, Category = "MD|Stain", meta = (ClampMin = "100", ClampMax = "10000"))
+	UPROPERTY(EditAnywhere, ReplicatedUsing = RefreshSize, Category = "MD|Stain", meta = (ClampMin = "100", ClampMax = "10000"))
 	int32 InitialSize = 0;
 
 	/** Retained solely to migrate previously saved level actors. */
@@ -87,6 +93,9 @@ private:
 	TObjectPtr<UStaticMeshComponent> StickerMesh;
 	UPROPERTY()
 	FMD_StainStickerPatch StickerPatch;
+	/** Preserve the original baked mesh while the same actor previews an opt-in shared volume. */
+	UPROPERTY()
+	TObjectPtr<UStaticMesh> LegacyStickerMesh;
 	UPROPERTY(VisibleInstanceOnly, Category = "MD|Stain")
 	FString StickerStatus;
 	UPROPERTY(Transient)

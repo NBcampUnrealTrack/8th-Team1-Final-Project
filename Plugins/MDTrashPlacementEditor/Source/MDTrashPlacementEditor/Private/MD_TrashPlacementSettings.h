@@ -7,6 +7,8 @@
 
 class AMD_TrashItem;
 class UMaterialInterface;
+class UStaticMesh;
+class UMD_SurfaceStainDefinition;
 
 /** Project Settings > Plugins > MD Trash Placement에서 배치 도구의 에셋을 직접 지정한다. */
 UCLASS(config = Editor, defaultconfig, meta = (DisplayName = "MD Trash Placement"))
@@ -24,4 +26,11 @@ public:
 	/** 미리보기 재질. HighlightColor와 OpacityAmount 파라미터를 사용한다. 변경 후 도구를 다시 연다. */
 	UPROPERTY(config, EditAnywhere, Category = "Assets")
 	TSoftObjectPtr<UMaterialInterface> GhostPreviewMaterial;
+	/** Explicit project palette loaded when the stain tool starts. Entries may be edited for the current session. */
+	UPROPERTY(config, EditAnywhere, Category = "Stains")
+	TArray<TSoftObjectPtr<UMD_SurfaceStainDefinition>> StainPalette;
+
+	/** Optional 100 cm XY quad for the legacy sticker moving preview; the volume preview uses its own shared mesh. */
+	UPROPERTY(config, EditAnywhere, Category = "Stains")
+	TSoftObjectPtr<UStaticMesh> StickerPreviewMesh;
 };
