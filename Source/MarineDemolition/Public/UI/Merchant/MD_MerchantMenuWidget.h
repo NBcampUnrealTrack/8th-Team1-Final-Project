@@ -26,7 +26,8 @@ class MARINEDEMOLITION_API UMD_MerchantMenuWidget : public UMD_CommonGameMenuWid
 	GENERATED_BODY()
 
 public:
-	void SetOwningMerchant(AMD_Merchant* InMerchant) { OwningMerchant = InMerchant; }
+	// 재사용된 메뉴의 소유 상인 변경 시 대화 진행 상태 초기화
+	void SetOwningMerchant(AMD_Merchant* InMerchant);
 
 	/** Blueprint가 Push한 상점을 초기화할 소유 상인을 반환한다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
@@ -90,6 +91,13 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Merchant", meta = (BindWidgetOptional))
 	// 대사 교체 시 읽기 위치를 처음으로 되돌릴 스크롤 영역
 	TObjectPtr<UScrollBox> SB_Dialogue;
+
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "MD|Merchant")
+	// 하위 화면에서 복귀하거나 정보가 갱신되어도 유지할 현재 대사
+	FText CurrentDialogueLine;
+
+	// 빈 대사도 표시 완료 상태로 구분할 초기화 여부
+	bool bHasDialogueLine = false;
 
 private:
 	/** TalkLines에서 마지막으로 보여준 줄. -1이면 아직 Greeting만 띄운 상태다. */

@@ -14,7 +14,7 @@
 class UButton;
 class UImage;
 class UCommonButtonGroupBase;
-class UUniformGridPanel;
+class UWrapBox;
 class UTextBlock;
 class UMD_CommonButtonBase;
 class UMD_ShopItemCardWidget;
@@ -101,13 +101,21 @@ protected:
 
 	void RebuildItemList();
 
+	// 목록 재구성 없이 보유 크레딧 문구 갱신
+	void RefreshCredits();
+
+	UFUNCTION()
+	// 소지 상태 변경에 필요한 거래 화면 영역만 갱신
+	void HandleHotbarChanged();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Shop|Presentation")
+	// 거래 방향 변경에 맞춘 토글 애니메이션과 화면 연출
+	void BP_OnSellingModeChanged(bool bIsSelling);
+
 	// 배치된 카테고리 버튼의 선택 그룹만 초기화
 	void InitializeCategoryButtons();
 
 	void RefreshSelectedItem();
-
-	// 구매와 판매 탭의 선택 표시를 현재 거래 모드와 동기화
-	void RefreshModeButtons();
 
 	// 선택된 품목 분류를 카테고리 버튼 그룹에 반영
 	void RefreshCategorySelection();
@@ -121,8 +129,8 @@ protected:
 	// 선택된 카드의 전체 식별자로 상세 품목 갱신
 	void HandleItemSelected(FPrimaryAssetId ItemAssetId);
 
-	// 하단 실행 버튼의 클릭을 현재 거래 방향에 맞춰 처리
-	UFUNCTION()
+	// 이벤트 그래프에서 선택 품목의 구매 또는 판매 요청
+	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void HandleBuyClicked();
 
 	// 현재 소유 Pawn의 실제 슬롯에서 같은 전체 식별자의 위치 조회
@@ -176,16 +184,8 @@ protected:
 	TObjectPtr<UCommonButtonGroupBase> ItemCardButtonGroup;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	// 구매 목록으로 전환하는 상단 탭
-	TObjectPtr<UMD_CommonButtonBase> Btn_Buy;
-
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	// 판매 목록으로 전환하는 상단 탭
-	TObjectPtr<UMD_CommonButtonBase> Btn_Sell;
-
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
 	// 선택 품목의 실제 구매 또는 판매를 실행하는 하단 버튼
-	TObjectPtr<UButton> Btn_BuyItem;
+	TObjectPtr<UButton> Btn_Buy;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
 	// 현재 거래 방향을 표시하는 하단 실행 버튼 문구
@@ -220,8 +220,8 @@ protected:
 	TObjectPtr<UCommonButtonGroupBase> CategoryButtonGroup;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	// 한 행에 네 개의 카드를 배치하는 균등 격자 목록
-	TObjectPtr<UUniformGridPanel> WB_ItemEntries;
+	// 카드 크기를 유지하며 한 행에 최대 네 개씩 배치하는 줄바꿈 목록
+	TObjectPtr<UWrapBox> WB_ItemEntries;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_Credits;

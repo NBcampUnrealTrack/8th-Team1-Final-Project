@@ -13,13 +13,44 @@ void UMD_MerchantMenuWidget::NativeOnActivated()
 	RefreshDisplay();
 }
 
+void UMD_MerchantMenuWidget::SetOwningMerchant(AMD_Merchant* InMerchant)
+{
+	// 같은 소유 상인의 재설정에 따른 대화 초기화 방지
+	if (OwningMerchant == InMerchant)
+	{
+		// 현재 대화 진행 상태 유지
+		return;
+	}
+	// 현재 메뉴 요청을 처리할 소유 상인 저장
+	OwningMerchant = InMerchant;
+	// 다른 상인의 인사말부터 표시할 상태 초기화
+	bHasDialogueLine = false;
+	// 다른 상인의 대화 순서를 첫 줄로 초기화
+	TalkLineIndex = INDEX_NONE;
+}
+
 void UMD_MerchantMenuWidget::SetMenuInfo(const FMD_MerchantMenuInfo& InInfo)
 {
+	// 수치 갱신과 구분할 상인 및 대사 구성 변경 여부
+	bool bDialogueChanged = MenuInfo.DisplayName.EqualTo(InInfo.DisplayName) == false
+		|| MenuInfo.Greeting.EqualTo(InInfo.Greeting) == false || MenuInfo.TalkLines.Num() != InInfo.TalkLines.Num();
+	// 길이가 같은 대사 목록의 실제 내용 변경 검사
+	for (int32 Index = 0; bDialogueChanged == false && Index < MenuInfo.TalkLines.Num(); ++Index)
+	{
+		// 같은 순서의 대사 비교로 불필요한 대화 초기화 방지
+		bDialogueChanged = MenuInfo.TalkLines[Index].EqualTo(InInfo.TalkLines[Index]) == false;
+	}
+	// 최신 상인 이름과 호감도 및 대사 구성 저장
 	MenuInfo = InInfo;
-
-	// 대사 목록이 갈렸을 수 있으니 재생 위치를 처음으로 되돌린다.
-	TalkLineIndex = INDEX_NONE;
-
+	// 대사 구성이 바뀐 경우에만 인사말부터 다시 시작
+	if (bDialogueChanged == true)
+	{
+		// 새 목록의 첫 대화를 선택할 순번 초기화
+		TalkLineIndex = INDEX_NONE;
+		// 새 인사말 표시를 위한 초기화 상태 해제
+		bHasDialogueLine = false;
+	}
+	// 대화 진행 상태를 보존하면서 최신 상인 정보 반영
 	RefreshDisplay();
 }
 
@@ -39,8 +70,12 @@ void UMD_MerchantMenuWidget::RefreshDisplay()
 		Txt_Affinity->SetText(FText::FromString(FString::Printf(TEXT("%+.1f"), MenuInfo.Affinity)));
 	}
 
-	// 대사창은 인사말로 시작한다. '대화'를 누르면 TalkLines로 넘어간다.
-	ShowDialogueLine(MenuInfo.Greeting);
+	// 상인 또는 대사 구성이 바뀐 최초 표시에서만 인사말 적용
+	if (bHasDialogueLine == false)
+	{
+		// 정보 갱신과 하위 화면 복귀가 현재 대사를 덮어쓰는 상황 방지
+		ShowDialogueLine(MenuInfo.Greeting);
+	}
 }
 
 void UMD_MerchantMenuWidget::CloseMenu()
@@ -51,6 +86,16 @@ void UMD_MerchantMenuWidget::CloseMenu()
 
 void UMD_MerchantMenuWidget::ShowDialogueLine(const FText& Line)
 {
+	// 같은 대사 재표시로 텍스트와 스크롤 위치가 초기화되는 상황 방지
+	if (bHasDialogueLine == true && CurrentDialogueLine.EqualTo(Line) == true)
+	{
+		// 현재 읽기 위치 유지
+		return;
+	}
+	// 빈 문자열을 포함한 현재 표시 대사 보관
+	CurrentDialogueLine = Line;
+	// 다음 정보 갱신에서 인사말을 다시 표시하지 않는 초기화 상태
+	bHasDialogueLine = true;
 	// 현재 대사를 표시할 본문 영역 유효성 확인
 	if (IsValid(Txt_Dialogue) == true)
 	{

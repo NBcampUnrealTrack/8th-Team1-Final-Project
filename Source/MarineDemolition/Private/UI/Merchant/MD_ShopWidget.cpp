@@ -7,8 +7,8 @@
 #include "GameFramework/Pawn.h"
 #include "Components/Button.h"
 #include "Components/Image.h"
-#include "Components/UniformGridPanel.h"
-#include "Components/UniformGridSlot.h"
+#include "Components/WrapBox.h"
+#include "Components/WrapBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
 #include "Engine/Texture2D.h"
@@ -20,16 +20,17 @@ void UMD_ShopWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
 
-	// 하단 실행 버튼의 현재 활성화 주기 클릭 처리 연결
-	if (IsValid(Btn_BuyItem) == true)
+	// 같은 위젯 인스턴스의 카테고리 그룹을 최초 활성화에서만 구성
+	if (IsValid(CategoryButtonGroup) == false)
 	{
-		// 구매와 판매 탭 이벤트와 분리된 거래 요청 연결
-		Btn_BuyItem->OnClicked.AddUniqueDynamic(this, &UMD_ShopWidget::HandleBuyClicked);
+		// 실제 배치된 버튼의 단일 선택 정책 초기화
+		InitializeCategoryButtons();
 	}
-
-	// 디자이너가 배치한 카테고리 버튼의 선택 그룹 준비
-	InitializeCategoryButtons();
-
+	else
+	{
+		// 재활성화 시 기존 그룹 연결을 유지하며 분류 표시 복원
+		RefreshCategorySelection();
+	}
 	// BP 기본 카탈로그도 활성화 시 비동기 로드를 시작하여 화면에 반영
 	SetCatalog(Catalog);
 }
@@ -38,12 +39,6 @@ void UMD_ShopWidget::NativeOnDeactivated()
 {
 	// 닫힌 화면의 불필요한 인벤토리 갱신 중단
 	ObserveHotbar(nullptr);
-	// 닫힌 화면의 하단 실행 버튼에서 거래 요청 연결 해제
-	if (IsValid(Btn_BuyItem) == true)
-	{
-		// 현재 인스턴스가 등록한 실행 이벤트만 제거
-		Btn_BuyItem->OnClicked.RemoveDynamic(this, &UMD_ShopWidget::HandleBuyClicked);
-	}
 
 	Super::NativeOnDeactivated();
 }
@@ -60,7 +55,6 @@ void UMD_ShopWidget::NativeDestruct()
 	}
 	// 위젯 수명이 끝난 뒤 핸들 참조 정리
 	DefinitionLoadHandle.Reset();
-	// 부모 위젯의 해제 절차 수행
 	Super::NativeDestruct();
 }
 
@@ -101,27 +95,52 @@ void UMD_ShopWidget::SetShopInfo(const FMD_MerchantMenuInfo& InInfo)
 	// 전달받은 상점 정보 저장
 	ShopInfo = InInfo;
 
-	// 크레딧과 구매 상태 갱신
-	RefreshDisplay();
+	// 크레딧과 호감도 변경에 필요한 헤더 및 거래 조건만 갱신
+	RefreshCredits();
+	// 표시 품목과 카드 가격에 영향 없는 정보의 목록 재순회 방지
+	RefreshSelectedItem();
 }
 
 void UMD_ShopWidget::SetProgress(int32 InQuestCompletions, const TArray<FPrimaryAssetId>& InOwnedItemIds, TArray<FPrimaryAssetId> InBlockedItemIds)
 {
+	// 동일한 복제 스냅샷의 중복 표시 갱신 방지
+	if (QuestCompletions == InQuestCompletions && OwnedItemIds == InOwnedItemIds && BlockedItemIds == InBlockedItemIds)
+	{
+		// 현재 카드와 상세 패널 유지
+		return;
+	}
+	// 무료 재구매 가격을 바꾸는 구매 이력 변경 여부
+	bool bPricesChanged = OwnedItemIds != InOwnedItemIds;
 	// 해금 판정용 진행 상태 저장
 	QuestCompletions = InQuestCompletions;
 	// 도구의 무료 재구매와 정의 조건에 사용할 이력 저장
 	OwnedItemIds = InOwnedItemIds;
 	// 소스 도구를 다시 구매하지 못하도록 등록된 식별자 저장
 	BlockedItemIds = MoveTemp(InBlockedItemIds);
-
-	// 진행 상태에 맞게 화면 갱신
-	RefreshDisplay();
+	// 카드 가격이 바뀌는 경우에만 목록 갱신
+	if (bPricesChanged == true)
+	{
+		// 구매 이력이 반영된 카드 가격과 상세 상태 적용
+		RebuildItemList();
+	}
+	else
+	{
+		// 퀘스트와 구매 금지 변경은 선택 품목의 거래 조건에만 반영
+		RefreshSelectedItem();
+	}
 }
 
 void UMD_ShopWidget::SelectCategory(EMD_ShopCategory InCategory)
 {
+	// 같은 분류 재클릭 시 현재 카드 선택과 목록 유지
+	if (bShowAllCategories == false && SelectedCategory == InCategory)
+	{
+		// 변경 없는 필터의 재적용 생략
+		return;
+	}
 	// 선택한 아이템 카테고리 저장
 	SelectedCategory = InCategory;
+	// 특정 분류만 표시하는 목록으로 전환
 	bShowAllCategories = false;
 
 	// 프로그램에서 분류를 변경한 경우에도 선택 스타일 동기화
@@ -141,18 +160,41 @@ void UMD_ShopWidget::RefreshDisplay()
 	// 소유 Pawn 변경 시 이전 구독을 해제하고 새 Hotbar에 연결
 	ObserveHotbar(IsActivated() == true && IsValid(OwningPawn) == true ? OwningPawn->FindComponentByClass<UMD_EquipHotbarComponent>() : nullptr);
 
-	// 보유 크레딧을 헤더에 표시
-	if (IsValid(Txt_Credits) == true)
-	{
-		// 숫자 형식의 현재 크레딧 직접 반영
-		Txt_Credits->SetText(FText::AsNumber(ShopInfo.Credits));
-	}
-
-	// 구매 및 판매 목록을 가리키는 상단 탭 선택 동기화
-	RefreshModeButtons();
-
+	// 현재 크레딧 헤더 갱신
+	RefreshCredits();
 	// 품목 목록과 상세 패널 갱신
 	RebuildItemList();
+}
+
+void UMD_ShopWidget::RefreshCredits()
+{
+	// 현재 레이아웃에 배치된 크레딧 문구 확인
+	if (IsValid(Txt_Credits) == true)
+	{
+		// 숫자 형식의 현재 크레딧 반영
+		Txt_Credits->SetText(FText::AsNumber(ShopInfo.Credits));
+	}
+}
+
+void UMD_ShopWidget::HandleHotbarChanged()
+{
+	// 구독 해제 중 전달된 비활성 화면 갱신 방지
+	if (IsActivated() == false)
+	{
+		// 다음 활성화의 전체 갱신까지 처리 보류
+		return;
+	}
+	// 소지품 구성에 따라 판매 목록이 달라지는 경우 확인
+	if (bSellingMode == true)
+	{
+		// 소진되거나 새로 소지한 판매 품목 반영
+		RebuildItemList();
+	}
+	else
+	{
+		// 구매 목록을 유지하면서 지급 가능 상태만 갱신
+		RefreshSelectedItem();
+	}
 }
 
 void UMD_ShopWidget::RebuildItemList()
@@ -170,8 +212,22 @@ void UMD_ShopWidget::RebuildItemList()
 	{
 		// 품목마다 전체 카탈로그를 재검색하지 않는 일괄 준비 검사
 		DisplayItems = bSellingMode == true ? Catalog->Items : Catalog->GetAvailableItems();
+		// 판매 목록의 중복 품목을 반복 검색 없이 제외할 횟수 집계
+		TMap<FPrimaryAssetId, int32> SaleItemCounts;
+		// 구매 목록은 카탈로그의 일괄 검사 결과 재사용
+		if (bSellingMode == true)
+		{
+			// 전체 품목에 맞춰 중복 검사 저장 공간 확보
+			SaleItemCounts.Reserve(DisplayItems.Num());
+			// 필터 적용 전 다른 분류의 중복 행까지 포함한 집계
+			for (FMD_ShopItem& Item : DisplayItems)
+			{
+				// 같은 전체 식별자의 등록 횟수 누적
+				++SaleItemCounts.FindOrAdd(Item.GetItemAssetId());
+			}
+		}
 		// 정상 품목 중 현재 분류 밖의 항목만 제외
-		DisplayItems.RemoveAll([this](FMD_ShopItem& Item)
+		DisplayItems.RemoveAll([this, &SaleItemCounts](FMD_ShopItem& Item)
 		{
 			// 구매와 판매 목록에 동일한 선택 카테고리 적용
 			if (bShowAllCategories == false && Item.Category != SelectedCategory)
@@ -182,10 +238,8 @@ void UMD_ShopWidget::RebuildItemList()
 			// 판매 목록에서는 구매 해금 대신 실제 소지 수량과 판매 단가 검사
 			if (bSellingMode == true)
 			{
-				// 중복 등록 품목의 거래를 서버와 동일하게 차단할 조회 항목
-				FMD_ShopItem UniqueItem;
-				// 소지한 판매 가능 품목만 카탈로그 순서로 표시
-				return Catalog->FindItemByAssetId(Item.GetItemAssetId(), UniqueItem) == false
+				// 유일하게 등록되고 실제 소지한 판매 가능 품목만 표시
+				return Item.GetItemAssetId().IsValid() == false || SaleItemCounts.FindChecked(Item.GetItemAssetId()) != 1
 					|| Item.GetSalePrice() < 0 || FindSaleSlot(Item.GetItemAssetId()) == INDEX_NONE;
 			}
 			// 선택 분류와 표시 조건을 만족한 품목 유지
@@ -258,15 +312,17 @@ void UMD_ShopWidget::RebuildItemList()
 			ItemCard->OnClicked().AddUObject(this, &UMD_ShopWidget::HandleItemSelected, Item.GetItemAssetId());
 			// 생성 실패로 인한 빈 칸을 방지할 실제 카드 순번
 			int32 CardIndex = WB_ItemEntries->GetChildrenCount();
-			// 네 카드마다 다음 행으로 이동하는 격자 슬롯 생성
-			UUniformGridSlot* ItemSlot = WB_ItemEntries->AddChildToUniformGrid(ItemCard, CardIndex / 4, CardIndex % 4);
-			// 생성된 슬롯에 동일한 열 너비 적용
+			// 카드 자체의 크기로 가로 배치할 줄바꿈 슬롯 생성
+			UWrapBoxSlot* ItemSlot = WB_ItemEntries->AddChildToWrapBox(ItemCard);
+			// 생성된 슬롯에서 카드 자체의 크기 제한 존중
 			if (IsValid(ItemSlot) == true)
 			{
-				// 품목 이름 길이와 무관한 카드 가로 영역 확보
-				ItemSlot->SetHorizontalAlignment(HAlign_Fill);
-				// 같은 행의 카드 높이를 맞추는 세로 영역 확보
-				ItemSlot->SetVerticalAlignment(VAlign_Fill);
+				// 가로 공간이 넓어도 네 카드마다 다음 줄로 이동
+				ItemSlot->SetNewLine(CardIndex > 0 && CardIndex % 4 == 0);
+				// CommonButtonBase의 Min/Max 폭을 셀 너비로 늘리지 않는 좌측 정렬
+				ItemSlot->SetHorizontalAlignment(HAlign_Left);
+				// CommonButtonBase의 Min/Max 높이를 행 높이로 늘리지 않는 상단 정렬
+				ItemSlot->SetVerticalAlignment(VAlign_Top);
 			}
 		}
 		// 실제 생성된 첫 카드만 대체 선택 후보로 보관
@@ -349,10 +405,10 @@ void UMD_ShopWidget::RefreshSelectedItem()
 		}
 
 		// 선택 품목이 없는 상태에서 거래 실행 버튼 확인
-		if (IsValid(Btn_BuyItem) == true)
+		if (IsValid(Btn_Buy) == true)
 		{
 			// 목록 전환 탭은 유지하면서 거래 실행만 차단
-			Btn_BuyItem->SetIsEnabled(false);
+			Btn_Buy->SetIsEnabled(false);
 		}
 
 		return;
@@ -417,10 +473,10 @@ void UMD_ShopWidget::RefreshSelectedItem()
 	}
 
 	// 상점 해금 및 결제 조건과 유형별 정의의 지급 조건을 함께 적용
-	if (IsValid(Btn_BuyItem) == true)
+	if (IsValid(Btn_Buy) == true)
 	{
 		// 판매는 실제 소지 수량과 적립 한도이며 구매는 기존 해금 및 지급 조건 적용
-		Btn_BuyItem->SetIsEnabled(bSellingMode == true
+		Btn_Buy->SetIsEnabled(bSellingMode == true
 			? FindSaleSlot(SelectedItemAssetId) != INDEX_NONE && selectedItem.Price >= 0 && ShopInfo.Credits <= MAX_int32 - selectedItem.Price
 			: selectedItem.IsUnlocked(ShopInfo.Affinity, QuestCompletions, OwnedItemIds) == true
 				&& selectedItem.Price >= 0 && ShopInfo.Credits >= selectedItem.Price && IsItemGrantable(selectedItem) == true);
@@ -459,7 +515,7 @@ void UMD_ShopWidget::ObserveHotbar(UMD_EquipHotbarComponent* InHotbar)
 	if (ObservedHotbar.IsValid() == true)
 	{
 		// 이전 보관 변경으로 현재 화면이 갱신되는 상황 방지
-		ObservedHotbar->OnHotbarChanged.RemoveDynamic(this, &UMD_ShopWidget::RefreshDisplay);
+		ObservedHotbar->OnHotbarChanged.RemoveDynamic(this, &UMD_ShopWidget::HandleHotbarChanged);
 	}
 	// 화면과 수명을 공유하지 않는 약한 보관 참조 갱신
 	ObservedHotbar = InHotbar;
@@ -467,7 +523,7 @@ void UMD_ShopWidget::ObserveHotbar(UMD_EquipHotbarComponent* InHotbar)
 	if (IsValid(InHotbar) == true)
 	{
 		// 서버 지급과 클라이언트 복제로 선행 도구 조건이 바뀌면 즉시 재검사
-		InHotbar->OnHotbarChanged.AddUniqueDynamic(this, &UMD_ShopWidget::RefreshDisplay);
+		InHotbar->OnHotbarChanged.AddUniqueDynamic(this, &UMD_ShopWidget::HandleHotbarChanged);
 	}
 }
 
@@ -507,30 +563,6 @@ void UMD_ShopWidget::InitializeCategoryButtons()
 	RefreshCategorySelection();
 }
 
-void UMD_ShopWidget::RefreshModeButtons()
-{
-	// 구매와 판매 탭을 같은 순서로 갱신할 표시 목록
-	TArray<UMD_CommonButtonBase*> ModeButtons = { Btn_Buy, Btn_Sell };
-	// 현재 모드에 해당하는 탭 하나에만 선택 스타일 적용
-	for (int32 Index = 0; Index < ModeButtons.Num(); ++Index)
-	{
-		// 선택 표시를 갱신할 탭 유효성 확인
-		if (IsValid(ModeButtons[Index]) == true)
-		{
-			// 구매와 판매 탭의 선택 스타일 사용 허용
-			ModeButtons[Index]->SetIsSelectable(true);
-			// 선택 중인 탭을 다시 눌러도 선택 해제 방지
-			ModeButtons[Index]->SetIsToggleable(false);
-			// 포커스 이동만으로 거래 방향의 선택 표시 변경 방지
-			ModeButtons[Index]->SetShouldSelectUponReceivingFocus(false);
-			// 비토글 버튼의 이전 선택 상태를 명시적으로 정리
-			ModeButtons[Index]->ClearSelection();
-			// 거래 방향과 일치하는 탭만 클릭 이벤트 없이 선택
-			ModeButtons[Index]->SetIsSelected(Index == (bSellingMode == true ? 1 : 0), false);
-		}
-	}
-}
-
 void UMD_ShopWidget::RefreshCategorySelection()
 {
 	// 화면 배치 순서와 독립적으로 Enum에 대응할 버튼 목록
@@ -549,16 +581,30 @@ void UMD_ShopWidget::RefreshCategorySelection()
 
 void UMD_ShopWidget::SelectAllCategories()
 {
+	// 전체 보기 재클릭 시 현재 품목 선택 유지
+	if (bShowAllCategories == true)
+	{
+		// 변경 없는 목록 재구성 생략
+		return;
+	}
 	// 모든 아이템 카테고리를 함께 표시하도록 상태 변경
 	bShowAllCategories = true;
 	// 전체 보기로 전환된 분류 선택 표시 반영
 	RefreshCategorySelection();
+	// 전체 목록의 첫 품목으로 선택 초기화
 	SelectedItemAssetId = FPrimaryAssetId();
+	// 해제된 필터를 목록과 상세 패널에 반영
 	RebuildItemList();
 }
 
 void UMD_ShopWidget::HandleItemSelected(FPrimaryAssetId ItemAssetId)
 {
+	// 이미 선택한 품목의 반복 상세 조회 방지
+	if (SelectedItemAssetId == ItemAssetId)
+	{
+		// 현재 상세 표시 유지
+		return;
+	}
 	// 선택한 카드의 품목을 상세 패널 대상으로 저장
 	SelectedItemAssetId = ItemAssetId;
 
@@ -568,6 +614,12 @@ void UMD_ShopWidget::HandleItemSelected(FPrimaryAssetId ItemAssetId)
 
 void UMD_ShopWidget::HandleBuyClicked()
 {
+	// 이벤트 그래프의 직접 호출도 활성 화면에서만 허용
+	if (IsActivated() == false)
+	{
+		// 숨겨진 화면의 거래 요청 차단
+		return;
+	}
 	// 판매 목록의 실행 버튼은 현재 보유 품목 한 개 회수 요청
 	if (bSellingMode == true)
 	{
@@ -586,6 +638,15 @@ void UMD_ShopWidget::HandleBuyClicked()
 		return;
 	}
 
+	// 버튼을 거치지 않는 BP 호출에서도 현재 구매 단가 적용
+	SelectedItem.Price = SelectedItem.GetPurchasePrice(OwnedItemIds);
+	// 비활성 구매 버튼과 같은 가격 및 해금 조건 검사
+	if (SelectedItem.Price < 0 || ShopInfo.Credits < SelectedItem.Price
+		|| SelectedItem.IsUnlocked(ShopInfo.Affinity, QuestCompletions, OwnedItemIds) == false)
+	{
+		// 현재 결제 조건을 충족하지 않은 요청 차단
+		return;
+	}
 	// 클릭 직전의 선행 도구와 보관 및 효과 조건을 정의를 통해 재검증
 	if (IsItemGrantable(SelectedItem) == false)
 	{
@@ -600,12 +661,20 @@ void UMD_ShopWidget::HandleBuyClicked()
 
 void UMD_ShopWidget::SetSellingMode(bool bInSellingMode)
 {
+	// 같은 모드 재클릭과 BP 중복 호출의 목록 및 애니메이션 갱신 방지
+	if (bSellingMode == bInSellingMode)
+	{
+		// 현재 품목 선택 유지
+		return;
+	}
 	// 현재 목록의 거래 방향 저장
 	bSellingMode = bInSellingMode;
 	// 새 목록에서 첫 보유 품목을 선택하도록 이전 선택 해제
 	SelectedItemAssetId = FPrimaryAssetId();
 	// 소지 상태와 카드 및 상세 화면을 함께 갱신
 	RefreshDisplay();
+	// 입력 방식과 관계없이 실제 상태 변경에 맞춘 BP 연출 호출
+	BP_OnSellingModeChanged(bSellingMode);
 }
 
 int32 UMD_ShopWidget::FindSaleSlot(FPrimaryAssetId ItemAssetId)
