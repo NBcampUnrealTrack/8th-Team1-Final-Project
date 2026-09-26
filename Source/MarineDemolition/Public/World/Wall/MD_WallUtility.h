@@ -79,6 +79,14 @@ public:
 
 	bool RepairRequiresToolInput() const { return bRepairRequiresToolInput; }
 
+	// HUD 조회 전용. E 상호작용을 허용하거나 수리/수량 차감을 실행하지 않는다.
+	bool CanRepairWithToolInput(AActor* Repairer) const
+	{
+		return bRepairRequiresToolInput
+			&& UtilityState == EMD_UtilityState::Broken
+			&& CanRepairWith(Repairer);
+	}
+
 	// IMD_Interactable — 수리는 서버에서 검증
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
