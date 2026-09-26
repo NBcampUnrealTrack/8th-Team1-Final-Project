@@ -167,6 +167,11 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility", meta = (ClampMin = "0", ClampMax = "255"))
 	int32 ScanSilhouetteStencil = 251;
 
+	// 이 설비가 겹친 파괴 가능 벽을 찾아 철거/스캔 델리게이트를 구독할지.
+	// 독립 설비(예: Day3 냉각 펌프)는 false로 두어 벽 철거 시스템과 완전히 분리한다.
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility")
+	bool bLinkHostWalls = true;
+
 	// 레벨 시작 시 이미 파손된 상태로 시작할지. 벽 없이 인프라만 고장난 상태를 표현한다
 	// (감점 없음, 절단 원샷 연출 없음 — BP 연출도 이 값으로 분기)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Utility")
