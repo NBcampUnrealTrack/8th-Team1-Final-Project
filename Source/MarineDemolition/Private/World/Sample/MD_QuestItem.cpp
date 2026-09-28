@@ -5,6 +5,13 @@
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "World/Sample/MD_QuestRackSpawner.h"
+#include "Net/UnrealNetwork.h"
+
+void AMD_QuestItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AMD_QuestItem, QuestDefinitionId);
+}
 
 AMD_QuestItem::AMD_QuestItem()
 {
