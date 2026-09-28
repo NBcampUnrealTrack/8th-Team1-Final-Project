@@ -1,4 +1,5 @@
 #include "World/Sample/MD_SampleItem.h"
+#include "World/Sample/MD_SampleProtectionZone.h"
 
 #include "AbilitySystemComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -206,7 +207,8 @@ void AMD_SampleItem::OnAnyDamage(AActor* DamagedActor, float Damage, const UDama
 {
 	// 파괴 불가 하위 클래스가 일반 피해로 손상되는 경로를 차단하기 위한 결과
 	bool bCanBeDestroyed = CanBeDestroyedByGameplay();
-	if (bCanBeDestroyed == false || bImpactProtected == true || bDamaged == true)
+	if (bCanBeDestroyed == false || bImpactProtected == true || bDamaged == true
+		|| AMD_SampleProtectionZone::ProtectsActor(this))
 	{
 		return;
 	}
@@ -228,7 +230,7 @@ void AMD_SampleItem::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* Ot
 		return;
 	}
 
-	if (bImpactProtected)
+	if (bImpactProtected || AMD_SampleProtectionZone::ProtectsActor(this))
 	{
 		return;
 	}
