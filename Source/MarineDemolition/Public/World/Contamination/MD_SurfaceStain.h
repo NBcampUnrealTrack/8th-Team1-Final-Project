@@ -26,7 +26,10 @@ public:
 	virtual void PostEditMove(bool bFinished) override;
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& Event) override;
 	virtual void PostEditUndo() override;
+	virtual void PostEditImport() override;
 	bool ApplyPreparedSticker(FMD_StainStickerPatch Patch, UStaticMesh* Mesh);
+	TSoftObjectPtr<UMD_SurfaceStainDefinition> GetRefitSource() const;
+	float GetRefitSearchDistance() const { return RefitSearchDistance; }
 #endif
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -37,7 +40,7 @@ public:
 	int32 GetInitialSize() const;
 
 	UFUNCTION(BlueprintPure, Category = "MD|Stain")
-	UMD_SurfaceStainDefinition* GetDefinition() const { return Definition; }
+	UMD_SurfaceStainDefinition* GetDefinition() const { return FittedDefinition ? FittedDefinition : Definition; }
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "MD|Stain")
 	bool RebuildSticker();
@@ -54,7 +57,8 @@ public:
 	int32 GetStickerTriangleCount() const { return StickerPatch.Positions.Num() / 3; }
 
 	/** Authoring only. Runtime budget changes require an authoritative hit or save restore. */
-	void ConfigurePlacement(UMD_SurfaceStainDefinition* InDefinition, int32 InSize);
+	void ConfigurePlacement(UMD_SurfaceStainDefinition* InDefinition, int32 InSize,
+		UMD_SurfaceStainDefinition* InSourceDefinition = nullptr);
 	/** RemovalAmount is actual stored size, after tool-strength conversion; 1000 is one basic stroke. */
 	bool ApplyScrapeStroke(int32 RemovalAmount = 1000);
 	bool RestoreSize(int32 Size);
@@ -74,6 +78,20 @@ private:
 
 	UPROPERTY(EditAnywhere, ReplicatedUsing = RefreshSize, Category = "MD|Stain")
 	TObjectPtr<UMD_SurfaceStainDefinition> Definition;
+
+	/** Immutable level-authored geometry. Clients load it with the actor; only cleaning state is replicated. */
+	UPROPERTY(Instanced)
+	TObjectPtr<UMD_SurfaceStainDefinition> FittedDefinition;
+
+#if WITH_EDITORONLY_DATA
+	/** Original unfitted shape. A soft editor-only reference adds no runtime mesh dependency. */
+	UPROPERTY(EditInstanceOnly, Category = "MD|Stain|Surface Fit", meta = (DisplayName = "Refit Source"))
+	TSoftObjectPtr<UMD_SurfaceStainDefinition> RefitSource;
+
+	/** Search along the stain's local Z axis; size is controlled by Initial Size. */
+	UPROPERTY(EditInstanceOnly, Category = "MD|Stain|Surface Fit", meta = (ClampMin = "1", ClampMax = "1500", Units = "cm"))
+	float RefitSearchDistance = 100.0f;
+#endif
 
 	/** Zero is a serialization sentinel for level assets authored before numeric sizes. */
 	UPROPERTY(EditAnywhere, ReplicatedUsing = RefreshSize, Category = "MD|Stain", meta = (ClampMin = "100", ClampMax = "5000"))

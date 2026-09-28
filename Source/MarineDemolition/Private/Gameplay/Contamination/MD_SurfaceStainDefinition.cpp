@@ -33,6 +33,11 @@ void UMD_SurfaceStainDefinition::PostEditUndo()
 
 bool UMD_SurfaceStainDefinition::RebuildVolumeValidation()
 {
+	return ValidateVolumeGeometry(true);
+}
+
+bool UMD_SurfaceStainDefinition::ValidateVolumeGeometry(bool bRequireMeshes)
+{
 	bVolumeGeometryValid = false;
 #if WITH_EDITOR
 	++AuthoringRevision;
@@ -55,7 +60,7 @@ bool UMD_SurfaceStainDefinition::RebuildVolumeValidation()
 			VolumeValidationStatus = FString::Printf(TEXT("Stage %d: %s"), StageIndex, Reason);
 			return false;
 		};
-		if (!IsValid(Stage.Mesh)) return Reject(TEXT("assign a shared mesh."));
+		if (bRequireMeshes && !IsValid(Stage.Mesh)) return Reject(TEXT("assign a shared mesh."));
 		if (Stage.QueryVerticesCm.Num() < 4 || Stage.QueryVerticesCm.Num() > MaximumVolumeQueryVertices
 			|| Stage.QueryTriangleIndices.Num() < 12 || Stage.QueryTriangleIndices.Num() > MaximumVolumeQueryTriangles * 3
 			|| Stage.QueryTriangleIndices.Num() % 3 != 0)
@@ -102,9 +107,9 @@ bool UMD_SurfaceStainDefinition::RebuildVolumeValidation()
 			|| !Stage.QueryBounds.IsValid)
 			return Reject(TEXT("query must enclose nonzero volume."));
 	}
-	bVolumeGeometryValid = true;
+	bVolumeGeometryValid = bRequireMeshes;
 #if WITH_EDITOR
-	RebuildPlanarPlacementCache();
+	if (bRequireMeshes) RebuildPlanarPlacementCache();
 #endif
 	VolumeValidationStatus = FString::Printf(TEXT("Validated %d closed query stages%s. Mesh/query alignment and contact require visual verification."),
 		VolumeStages.Num(), VolumeStages.Num() == LegacyVolumeStageCount ? TEXT(" (legacy)") : TEXT(""));

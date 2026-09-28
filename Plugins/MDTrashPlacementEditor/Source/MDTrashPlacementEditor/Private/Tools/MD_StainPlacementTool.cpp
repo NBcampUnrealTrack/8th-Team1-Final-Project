@@ -216,13 +216,20 @@ AMD_SurfaceStain* UMD_StainPlacementTool::PlaceFittedVolume(UWorld* World, UMD_S
 	if (FMD_StainStickerBaker::Build(*Helper, FMD_StainSurfaceFit::HalfSize(*Definition, InitialSize), InitialSize,
 		Definition->VolumeMaterial, Patch, Unused, Error, true))
 		Fit = FMD_StainSurfaceFit::Build(*Helper, *Definition, Patch, InitialSize, Error);
-	UMD_SurfaceStainDefinition* Saved = Fit ? FMD_StainSurfaceFit::Save(*Fit, Error) : nullptr;
-	World->DestroyActor(Helper);
-	if (!Saved) return nullptr;
+	if (!Fit) { World->DestroyActor(Helper); return nullptr; }
 	FScopedTransaction Transaction(LOCTEXT("PlaceFittedVolume", "Place Surface-Fitted Slime"));
 	AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(GEditor->AddActor(World->GetCurrentLevel(), AMD_SurfaceStain::StaticClass(), ContactTransform, true, RF_Transactional, false));
-	if (!Stain) return nullptr;
-	Stain->Modify(); Stain->ConfigurePlacement(Saved,InitialSize); Receiver->Modify();
+	if (!Stain) { World->DestroyActor(Helper); return nullptr; }
+	UMD_SurfaceStainDefinition* Final = FMD_StainSurfaceFit::BuildFinal(*Stain, *Fit, Error);
+	World->DestroyActor(Helper);
+	if (!Final)
+	{
+		World->EditorDestroyActor(Stain, true);
+		Transaction.Cancel();
+		return nullptr;
+	}
+	Stain->Modify(); Stain->GetRootComponent()->Modify();
+	Stain->ConfigurePlacement(Final,InitialSize,Definition); Receiver->Modify();
 	Stain->AttachToComponent(Receiver,FAttachmentTransformRules::KeepWorldTransform); Stain->MarkPackageDirty(); return Stain;
 }
 
@@ -381,13 +388,18 @@ void UMD_StainPlacementTool::CommitFit(const FMD_StainPlacementRequest& Request,
 {
 	FString Error;
 	if (!Fit || !ValidateRequest(Request, Error)) { ++StrokeFailed; SetPreviewError(Error); return; }
-	UMD_SurfaceStainDefinition* Saved = FMD_StainSurfaceFit::Save(*Fit, Error);
-	if (!Saved) { ++StrokeFailed; SetPreviewError(Error); return; }
 	BeginStrokeTransaction();
 	AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(GEditor->AddActor(Request.Level.Get(),
 		AMD_SurfaceStain::StaticClass(), Request.Transform, true, RF_Transactional, false));
 	if (!Stain) { ++StrokeFailed; return; }
-	Stain->Modify(); Stain->ConfigurePlacement(Saved, Request.Size);
+	UMD_SurfaceStainDefinition* Final = FMD_StainSurfaceFit::BuildFinal(*Stain, *Fit, Error);
+	if (!Final)
+	{
+		TargetWorld->EditorDestroyActor(Stain, true);
+		++StrokeFailed; SetPreviewError(Error); return;
+	}
+	Stain->Modify(); Stain->GetRootComponent()->Modify();
+	Stain->ConfigurePlacement(Final, Request.Size, Request.Definition.Get());
 	Request.Surface->Modify(); Stain->AttachToComponent(Request.Surface.Get(), FAttachmentTransformRules::KeepWorldTransform);
 	Stain->MarkPackageDirty(); ++StrokePlaced; bPreviewRejected = false;
 }

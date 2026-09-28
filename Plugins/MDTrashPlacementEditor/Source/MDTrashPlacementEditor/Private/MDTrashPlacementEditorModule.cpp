@@ -1,6 +1,9 @@
 #include "MDTrashPlacementEditorModule.h"
 
 #include "MDTrashPlacementEditorModeCommands.h"
+#include "Details/MD_StainCustomization.h"
+#include "Tools/MD_StainRefit.h"
+#include "World/Contamination/MD_SurfaceStain.h"
 #include "Palette/MD_PropPaletteCustomization.h"
 #include "Palette/MD_PropPaletteSettings.h"
 #include "Presets/MD_PropPresetSettings.h"
@@ -19,6 +22,8 @@ void FMDTrashPlacementEditorModule::StartupModule()
 	FPropertyEditorModule& PropertyEditor = FModuleManager::LoadModuleChecked<FPropertyEditorModule>(TEXT("PropertyEditor"));
 	PropertyEditor.RegisterCustomClassLayout(UMD_PropPlacementProperties::StaticClass()->GetFName(),
 		FOnGetDetailCustomizationInstance::CreateStatic(&FMD_PropPaletteCustomization::MakeInstance));
+	PropertyEditor.RegisterCustomClassLayout(AMD_SurfaceStain::StaticClass()->GetFName(),
+		FOnGetDetailCustomizationInstance::CreateStatic(&FMD_StainCustomization::MakeInstance));
 	PropertyEditor.NotifyCustomizationModuleChanged();
 	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 	PropAssetRenamedHandle = Registry.OnAssetRenamed().AddUObject(
@@ -29,6 +34,7 @@ void FMDTrashPlacementEditorModule::StartupModule()
 
 void FMDTrashPlacementEditorModule::ShutdownModule()
 {
+	FMD_StainRefit::Shutdown();
 	if (FAssetRegistryModule* Registry = FModuleManager::GetModulePtr<FAssetRegistryModule>(TEXT("AssetRegistry")))
 	{
 		if (IAssetRegistry* ActiveRegistry = Registry->TryGet())
@@ -40,6 +46,7 @@ void FMDTrashPlacementEditorModule::ShutdownModule()
 	if (FPropertyEditorModule* PropertyEditor = FModuleManager::GetModulePtr<FPropertyEditorModule>(TEXT("PropertyEditor")))
 	{
 		PropertyEditor->UnregisterCustomClassLayout(UMD_PropPlacementProperties::StaticClass()->GetFName());
+		PropertyEditor->UnregisterCustomClassLayout(AMD_SurfaceStain::StaticClass()->GetFName());
 		PropertyEditor->NotifyCustomizationModuleChanged();
 	}
 	FMDTrashPlacementEditorModeCommands::Unregister();

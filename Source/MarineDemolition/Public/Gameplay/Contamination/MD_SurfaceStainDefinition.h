@@ -167,6 +167,12 @@ public:
 	bool ContainsUV(const FVector2D& UV) const;
 
 private:
+	friend class FMD_StainSurfaceFit;
+	/** Binary duplication preserves meshes. Text paste rebuilds them from the exported query geometry. */
+	UPROPERTY(Instanced, TextExportTransient)
+	TArray<TObjectPtr<UStaticMesh>> FittedMeshes;
+	bool ValidateVolumeGeometry(bool bRequireMeshes);
+
 	bool bVolumeGeometryValid = false;
 #if WITH_EDITOR
 	void RebuildPlanarPlacementCache();

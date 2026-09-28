@@ -7,7 +7,6 @@
 #include "Engine/StaticMesh.h"
 #include "StaticMeshCompiler.h"
 #include "StaticMeshResources.h"
-#include "Misc/ScopeExit.h"
 #include "HAL/IConsoleManager.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "DynamicMesh/DynamicMeshAABBTree3.h"
@@ -21,12 +20,9 @@
 #include "MeshDescription.h"
 #include "StaticMeshAttributes.h"
 #include "PhysicsEngine/BodySetup.h"
-#include "AssetRegistry/AssetRegistryModule.h"
-#include "Misc/PackageName.h"
-#include "Misc/SecureHash.h"
-#include "UObject/SavePackage.h"
 #include "Materials/MaterialInterface.h"
 #include "World/Contamination/MD_ContaminationItem.h"
+#include "World/Contamination/MD_SurfaceStain.h"
 
 struct FMD_StainSurfaceFitJob
 {
@@ -503,56 +499,33 @@ UMD_SurfaceStainDefinition* FMD_StainSurfaceFit::Build(UObject& Owner,const UMD_
 	return Job && Prepare(*Job,Surface,Size,Error) ? Create(Owner,Source,*Job,Error) : nullptr;
 }
 
-UMD_SurfaceStainDefinition* FMD_StainSurfaceFit::Save(const UMD_SurfaceStainDefinition& Prepared,FString& Error)
+UMD_SurfaceStainDefinition* FMD_StainSurfaceFit::BuildFinal(AMD_SurfaceStain& Owner,
+	const UMD_SurfaceStainDefinition& Prepared,FString& Error)
 {
 	check(IsInGameThread());
-	if (!Prepared.IsUsable()) { Error=TEXT("The prepared slime is not valid for saving."); return nullptr; }
-	FMD5 Hash;
-	// A new build identity must not load/reuse assets persisted with the preview-only fast build flag.
-	const FString Identity=TEXT("SurfaceFit_NormalBuild_v1|")+Prepared.VolumeMaterial->GetPathName()
-		+Prepared.RemovedItemClass->GetPathName()+FString::FromInt(int32(Prepared.Kind));
-	FTCHARToUTF8 UTF8(*Identity); Hash.Update(reinterpret_cast<const uint8*>(UTF8.Get()),UTF8.Length());
-	for (const auto& Stage : Prepared.VolumeStages)
-	{ Hash.Update(reinterpret_cast<const uint8*>(Stage.QueryVerticesCm.GetData()),Stage.QueryVerticesCm.Num()*sizeof(FVector)); Hash.Update(reinterpret_cast<const uint8*>(Stage.QueryTriangleIndices.GetData()),Stage.QueryTriangleIndices.Num()*sizeof(int32)); }
-	uint8 Digest[16]; Hash.Final(Digest);
-	const FString Name=TEXT("DA_SurfaceFit_")+BytesToHex(Digest,16);
-	const FString PackageName=TEXT("/Game/Contamination/GeneratedSurfaceFits/")+Name;
-	// An in-memory result from a failed SavePackage is not a saved cache entry.
-	if (FPackageName::DoesPackageExist(PackageName))
-	{
-		UMD_SurfaceStainDefinition* Existing=LoadObject<UMD_SurfaceStainDefinition>(nullptr,*(PackageName+TEXT(".")+Name));
-		if (Existing && MD_SurfaceFit::HasValidSavedMeshes(*Existing)) return Existing;
-		Error=TEXT("The saved slime asset has invalid mesh build data."); return nullptr;
-	}
-	UPackage* Package=CreatePackage(*PackageName);
-	UMD_SurfaceStainDefinition* Saved=NewObject<UMD_SurfaceStainDefinition>(Package,*Name,RF_Public|RF_Standalone);
-	bool bSavedToDisk=false;
-	ON_SCOPE_EXIT
-	{
-		if (!bSavedToDisk)
-		{
-			Saved->ClearFlags(RF_Public|RF_Standalone);
-			Saved->MarkAsGarbage();
-			Package->SetDirtyFlag(false);
-		}
-	};
+	if (!Prepared.UsesSharedVolume() || !IsValid(Prepared.VolumeMaterial) || !Prepared.RemovedItemClass)
+	{ Error=TEXT("The prepared slime is not valid for placement."); return nullptr; }
+	UMD_SurfaceStainDefinition* Saved=NewObject<UMD_SurfaceStainDefinition>(&Owner,NAME_None,RF_Transactional);
 	Saved->Kind=Prepared.Kind; Saved->Presentation=Prepared.Presentation;
 	Saved->VolumeMaterial=Prepared.VolumeMaterial; Saved->RemovedItemClass=Prepared.RemovedItemClass;
 	Saved->VolumePlacementPolicy=Prepared.VolumePlacementPolicy; Saved->SizeCm=Prepared.SizeCm;
 	Saved->VolumeStages=Prepared.VolumeStages;
+	// Clipboard imports carry coordinates, not static-mesh bulk data. Validate before indexing them.
+	if (!Saved->ValidateVolumeGeometry(false)) { Error=Saved->VolumeValidationStatus; return nullptr; }
 	for (int32 I=0; I<Saved->VolumeStages.Num(); ++I)
 	{
 		auto& Stage=Saved->VolumeStages[I];
 		// Never duplicate a preview mesh: its persisted bDoFastBuild flag bypasses normal bounds building on reload.
 		Stage.Mesh=MD_SurfaceFit::MakeMesh(*Saved,Saved->VolumeMaterial,Stage,I,false);
+		if (Stage.Mesh)
+		{
+			Stage.Mesh->ClearFlags(RF_Public);
+			Stage.Mesh->SetFlags(RF_TextExportTransient);
+		}
+		Saved->FittedMeshes.Add(Stage.Mesh);
 	}
 	if (!Saved->RebuildVolumeValidation() || !MD_SurfaceFit::HasValidSavedMeshes(*Saved))
 	{ Error=TEXT("Could not build valid render bounds for the fitted slime asset."); return nullptr; }
-	FSavePackageArgs Args; Args.TopLevelFlags=RF_Public|RF_Standalone; Args.SaveFlags=SAVE_NoError;
-	const FString Filename=FPackageName::LongPackageNameToFilename(PackageName,FPackageName::GetAssetPackageExtension());
-	if (!UPackage::SavePackage(Package,Saved,*Filename,Args)) { Error=TEXT("Could not save the fitted slime asset."); return nullptr; }
-	bSavedToDisk=true;
-	FAssetRegistryModule::AssetCreated(Saved);
 	return Saved;
 }
 #endif

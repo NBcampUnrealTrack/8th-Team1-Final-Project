@@ -4,6 +4,7 @@
 class UMD_SurfaceStainDefinition;
 class UStaticMesh;
 class UMaterialInterface;
+class AMD_SurfaceStain;
 struct FMD_StainStickerPatch;
 struct FMD_StainSurfaceFitJob;
 class FProgressCancel;
@@ -25,7 +26,8 @@ public:
 	static FVector2D HalfSize(const UMD_SurfaceStainDefinition& Source, int32 Size);
 	static UMD_SurfaceStainDefinition* Build(UObject& Owner, const UMD_SurfaceStainDefinition& Source,
 		const FMD_StainStickerPatch& Surface, int32 Size, FString& Error);
-	/** Normal-build meshes in a versioned content-addressed package. Preview geometry is reused without refitting. */
-	static UMD_SurfaceStainDefinition* Save(const UMD_SurfaceStainDefinition& Prepared, FString& Error);
+	/** Normal-build actor-owned meshes from prepared geometry, without refitting or saving a separate asset. */
+	static UMD_SurfaceStainDefinition* BuildFinal(AMD_SurfaceStain& Owner,
+		const UMD_SurfaceStainDefinition& Prepared, FString& Error);
 #endif
 };
