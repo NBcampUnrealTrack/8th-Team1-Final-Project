@@ -53,17 +53,17 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Stains", meta = (ClampMin = "0", EditCondition = "!bRandomVariant"))
 	int32 VariantIndex = 0;
 
-	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "10000", EditCondition = "!bRandomSize"))
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "5000", EditCondition = "!bRandomSize"))
 	int32 InitialSize = 300;
 
 	UPROPERTY(EditAnywhere, Category = "Size")
 	bool bRandomSize = false;
 
-	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "10000", EditCondition = "bRandomSize"))
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "5000", EditCondition = "bRandomSize"))
 	int32 MinSize = 100;
 
-	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "10000", EditCondition = "bRandomSize"))
-	int32 MaxSize = 10000;
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "5000", EditCondition = "bRandomSize"))
+	int32 MaxSize = 5000;
 
 	UPROPERTY(EditAnywhere, Category = "Placement", meta = (ClampMin = "1", Units = "cm"))
 	float SpacingCm = 60.0f;
@@ -193,6 +193,8 @@ private:
 	FVector LastAttemptLocation = FVector::ZeroVector;
 	int32 PlacementIndex = 0;
 	bool bHover = false;
+	bool bHoverEndPending = false;
+	bool bPreviewWasVisible = false;
 	bool bShift = false;
 	bool bStroke = false;
 	bool bStrokeErase = false;

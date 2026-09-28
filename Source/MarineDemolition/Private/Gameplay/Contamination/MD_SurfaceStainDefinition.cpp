@@ -41,9 +41,9 @@ bool UMD_SurfaceStainDefinition::RebuildVolumeValidation()
 	PlacementMeshGuids.Reset();
 	VolumePlacementValidationStatus = TEXT("Volume geometry must validate before automatic placement.");
 #endif
-	if (VolumeStages.Num() != VolumeStageCount)
+	if ((VolumeStages.Num() != VolumeStageCount && VolumeStages.Num() != LegacyVolumeStageCount))
 	{
-		VolumeValidationStatus = TEXT("Assign exactly three closed stages: full, two-thirds, one-third.");
+		VolumeValidationStatus = TEXT("Assign five closed stages: full, four-fifths, three-fifths, two-fifths, one-fifth. Existing three-stage profiles remain supported.");
 		return false;
 	}
 	for (int32 StageIndex = 0; StageIndex < VolumeStages.Num(); ++StageIndex)
@@ -106,7 +106,8 @@ bool UMD_SurfaceStainDefinition::RebuildVolumeValidation()
 #if WITH_EDITOR
 	RebuildPlanarPlacementCache();
 #endif
-	VolumeValidationStatus = TEXT("Validated three closed query stages. Mesh/query alignment and contact require visual verification.");
+	VolumeValidationStatus = FString::Printf(TEXT("Validated %d closed query stages%s. Mesh/query alignment and contact require visual verification."),
+		VolumeStages.Num(), VolumeStages.Num() == LegacyVolumeStageCount ? TEXT(" (legacy)") : TEXT(""));
 	return true;
 }
 
@@ -263,7 +264,8 @@ bool UMD_SurfaceStainDefinition::CanPlaceEdgeVolume(int32 InitialSize, FString& 
 	if (!UsesSharedVolume() || !IsUsable() || !bEdgePlacementValid
 		|| VolumePlacementPolicy != EMD_SurfaceStainVolumePlacement::ConvexRightAngleSupport)
 	{ Error = VolumePlacementValidationStatus; return false; }
-	if (InitialSize < FMD_SurfaceStainSize::Minimum || InitialSize > MaximumPlanarInitialSize)
+	if (InitialSize < FMD_SurfaceStainSize::Minimum
+		|| InitialSize > FMath::Min(MaximumPlanarInitialSize, FMD_SurfaceStainSize::MaximumPlacement))
 	{ Error = FString::Printf(TEXT("This edge profile supports initial sizes 100-%d."), MaximumPlanarInitialSize); return false; }
 	for (int32 I = 0; I < VolumeStages.Num(); ++I)
 		if (!PlacementMeshGuids.IsValidIndex(I) || PlacementMeshGuids[I] != VolumeStages[I].Mesh->GetLightingGuid())
@@ -285,10 +287,11 @@ bool UMD_SurfaceStainDefinition::CanPlacePlanarVolume(int32 InitialSize, FString
 			Error = TEXT("A shared mesh changed after contact validation. Refresh its query geometry and rebuild the definition.");
 			return false;
 		}
-	if (InitialSize < FMD_SurfaceStainSize::Minimum || InitialSize > MaximumPlanarInitialSize)
+	if (InitialSize < FMD_SurfaceStainSize::Minimum
+		|| InitialSize > FMath::Min(MaximumPlanarInitialSize, FMD_SurfaceStainSize::MaximumPlacement))
 	{
 		Error = FString::Printf(TEXT("This planar profile supports initial sizes %d-%d. Choose a supported size."),
-			FMD_SurfaceStainSize::Minimum, MaximumPlanarInitialSize);
+			FMD_SurfaceStainSize::Minimum, FMath::Min(MaximumPlanarInitialSize, FMD_SurfaceStainSize::MaximumPlacement));
 		return false;
 	}
 	return true;
@@ -307,10 +310,11 @@ int32 UMD_SurfaceStainDefinition::GetVolumeStageIndex(int32 RemainingSize, int32
 	if (!UsesSharedVolume() || !IsUsable() || !FMD_SurfaceStainSize::IsValidRemaining(RemainingSize)
 		|| RemainingSize == 0 || InitialSize < FMD_SurfaceStainSize::Minimum || InitialSize > FMD_SurfaceStainSize::Maximum)
 		return INDEX_NONE;
-	// Three discrete closed shapes deliberately trade continuous area matching for bounded shared resources.
+	// Shared meshes follow the remaining fraction; legacy fitted profiles keep their original thresholds.
 	// Existing saves may contain more than InitialSize; preserve that budget and display the full shape.
-	return int64(RemainingSize) * 3 > int64(InitialSize) * 2 ? 0
-		: int64(RemainingSize) * 3 > InitialSize ? 1 : 2;
+	const int32 Count = VolumeStages.Num();
+	const int64 VisibleStages = (int64(FMath::Min(RemainingSize, InitialSize)) * Count + InitialSize - 1) / InitialSize;
+	return Count - int32(VisibleStages);
 }
 
 const FMD_SurfaceStainVolumeStage* UMD_SurfaceStainDefinition::GetVolumeStage(int32 RemainingSize, int32 InitialSize) const
@@ -341,7 +345,7 @@ bool UMD_SurfaceStainDefinition::IsUsable() const
 		|| !RemovedItemClass || RemovedItemClass->HasAnyClassFlags(CLASS_Abstract)) return false;
 	if (UsesSharedVolume())
 	{
-		if (!bVolumeGeometryValid || VolumeStages.Num() != VolumeStageCount
+		if (!bVolumeGeometryValid || (VolumeStages.Num() != VolumeStageCount && VolumeStages.Num() != LegacyVolumeStageCount)
 			|| !IsValid(VolumeMaterial) || !VolumeMaterial->GetMaterial()
 			|| VolumeMaterial->GetMaterial()->MaterialDomain != MD_Surface
 			|| VolumeMaterial->GetBlendMode() != BLEND_Opaque) return false;

@@ -55,7 +55,8 @@ public:
 
 	/** Authoring only. Runtime budget changes require an authoritative hit or save restore. */
 	void ConfigurePlacement(UMD_SurfaceStainDefinition* InDefinition, int32 InSize);
-	bool ApplyScrapeStroke(int32 RemovalAmount = 100);
+	/** RemovalAmount is actual stored size, after tool-strength conversion; 1000 is one basic stroke. */
+	bool ApplyScrapeStroke(int32 RemovalAmount = 1000);
 	bool RestoreSize(int32 Size);
 	bool ContainsSurfacePoint(const FVector& Point, const FVector& Normal) const;
 	bool TraceSticker(const FVector& Origin, const FVector& Direction, double MaxDistance, double& OutDistance) const;
@@ -75,7 +76,7 @@ private:
 	TObjectPtr<UMD_SurfaceStainDefinition> Definition;
 
 	/** Zero is a serialization sentinel for level assets authored before numeric sizes. */
-	UPROPERTY(EditAnywhere, ReplicatedUsing = RefreshSize, Category = "MD|Stain", meta = (ClampMin = "100", ClampMax = "10000"))
+	UPROPERTY(EditAnywhere, ReplicatedUsing = RefreshSize, Category = "MD|Stain", meta = (ClampMin = "100", ClampMax = "5000"))
 	int32 InitialSize = 0;
 
 	/** Retained solely to migrate previously saved level actors. */

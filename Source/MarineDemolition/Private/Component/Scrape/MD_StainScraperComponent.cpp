@@ -9,6 +9,7 @@
 #include "GameFramework/Controller.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Gameplay/Contamination/MD_StainTargeting.h"
+#include "Gameplay/Contamination/MD_SurfaceStainSize.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "TimerManager.h"
 #include "World/Contamination/MD_SurfaceStain.h"
@@ -74,7 +75,7 @@ void UMD_StainScraperComponent::ApplyImpact()
 	StrokeTarget.Reset(); // Consume before any callback; one stroke cannot hit twice.
 	if (!Character || !Character->HasAuthority() || !CanUseEquippedScraper()
 		|| Character->GetHotbarComponent()->GetCurrentTool() != StrokeTool.Get()) return;
-	if (IsValid(Target) && TraceTarget() == Target) Target->ApplyScrapeStroke(StrokeTool->StainRemovalAmount);
+	if (IsValid(Target) && TraceTarget() == Target) Target->ApplyScrapeStroke(FMD_SurfaceStainSize::RemovalFromToolStrength(StrokeTool->StainRemovalAmount));
 }
 
 void UMD_StainScraperComponent::PlaySwing()

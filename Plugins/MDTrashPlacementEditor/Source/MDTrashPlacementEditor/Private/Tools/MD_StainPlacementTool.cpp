@@ -201,13 +201,13 @@ AMD_SurfaceStain* UMD_StainPlacementTool::PlaceFittedVolume(UWorld* World, UMD_S
 	UStaticMeshComponent* Receiver = Cast<UStaticMeshComponent>(Surface);
 	if (!World || World->IsGameWorld() || !GEditor || !World->GetCurrentLevel()
 		|| FLevelUtils::IsLevelLocked(World->GetCurrentLevel()) || !Definition || !Definition->UsesSharedVolume()
-		|| !Definition->IsUsable() || InitialSize < 100 || InitialSize > 10000 || !Receiver
+		|| !Definition->IsUsable() || InitialSize < FMD_SurfaceStainSize::Minimum || InitialSize > FMD_SurfaceStainSize::MaximumPlacement || !Receiver
 		|| Cast<UInstancedStaticMeshComponent>(Receiver) || !Receiver->GetStaticMesh() || !Receiver->IsRegistered()
 		|| Receiver->GetWorld() != World || !Receiver->IsQueryCollisionEnabled()
 		|| Receiver->GetCollisionResponseToChannel(ECC_Visibility) != ECR_Block || !Receiver->GetOwner()
 		|| FLevelUtils::IsLevelLocked(Receiver->GetOwner()->GetLevel()) || ContactTransform.ContainsNaN()
 		|| !ContactTransform.GetScale3D().Equals(FVector::OneVector,0.0001))
-	{ Error = TEXT("A valid editor surface, volume profile, and size 100-10000 are required."); return nullptr; }
+	{ Error = TEXT("A valid editor surface, volume profile, and size 100-5000 are required."); return nullptr; }
 	FActorSpawnParameters Params; Params.ObjectFlags = RF_Transient; Params.bHideFromSceneOutliner = true;
 	AActor* Helper = World->SpawnActor<AActor>(AActor::StaticClass(), ContactTransform, Params);
 	USceneComponent* Root = NewObject<USceneComponent>(Helper); Helper->SetRootComponent(Root); Root->RegisterComponent(); Helper->SetActorTransform(ContactTransform);
@@ -255,7 +255,7 @@ int32 UMD_StainPlacementTool::ResolveSize() const
 	const int32 Seed = HashCombine(GetTypeHash(Properties->RandomSeed), GetTypeHash(PlacementIndex) ^ 0x57A1u);
 	return Properties->bRandomSize
 		? FMD_SurfaceStainSize::RandomInitial(Properties->MinSize, Properties->MaxSize, Seed)
-		: FMD_SurfaceStainSize::ClampInitial(Properties->InitialSize);
+		: FMD_SurfaceStainSize::ClampPlacement(Properties->InitialSize);
 }
 
 FTransform UMD_StainPlacementTool::MakeTransform(const FHitResult& Hit) const
@@ -463,6 +463,8 @@ void UMD_StainPlacementTool::OnBeginHover(const FInputDeviceRay& Ray) { OnUpdate
 bool UMD_StainPlacementTool::OnUpdateHover(const FInputDeviceRay& Ray)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Placement_StainHover);
+	const bool bRestorePreview = bHoverEndPending && bPreviewWasVisible;
+	bHoverEndPending = false;
 	LastHoverRay = Ray;
 	bHover = Trace(Ray, HoverHit, WantsErase());
 	UMD_SurfaceStainDefinition* Definition = ResolveDefinition();
@@ -504,6 +506,11 @@ bool UMD_StainPlacementTool::OnUpdateHover(const FInputDeviceRay& Ray)
 			PreviewPatch = FMD_StainStickerPatch();
 			PreparedFit = nullptr; PreparedSurface.Reset(); DraftPreview = nullptr;
 			ShowMovingPreview();
+		}
+		else if (bRestorePreview)
+		{
+			// Resume the existing component, including a prepared legacy sticker mesh.
+			Preview->SetVisibility(true);
 		}
 	}
 	return true;
@@ -550,11 +557,8 @@ void UMD_StainPlacementTool::ShowMovingPreview()
 void UMD_StainPlacementTool::OnPropertyModified(UObject* PropertySet, FProperty* Property)
 {
 	Super::OnPropertyModified(PropertySet, Property);
-	if (bHover)
-	{
-		PreviewSize = 0;
-		OnUpdateHover(LastHoverRay);
-	}
+	if (bHover || bHoverEndPending) PreviewSize = 0;
+	if (bHover) OnUpdateHover(LastHoverRay);
 }
 
 void UMD_StainPlacementTool::SetPreviewError(const FString& Error)
@@ -727,6 +731,16 @@ void UMD_StainPlacementTool::OnTick(float DeltaTime)
 	Super::OnTick(DeltaTime);
 	if (bCompletingBake) return;
 	TGuardValue<bool> CompletionGuard(bCompletingBake, true);
+	if (bHoverEndPending)
+	{
+		// No same-event click/hover claimed the result: this was a genuine hover exit.
+		bHoverEndPending = false; bPreviewWasVisible = false;
+		bPreviewPending = false; bPreviewValid = false; PreviewSize = 0;
+		DraftPreview = nullptr; PreparedFit = nullptr; PreparedSurface.Reset();
+		PreviewPatch = FMD_StainStickerPatch();
+		if (Preview) Preview->SetStaticMesh(nullptr);
+		if (ActiveBake && !bBakeForPlacement) ActiveBake->Cancel();
+	}
 	// Definition edits/Undo and target movement invalidate settled previews without rebuilding geometry per frame.
 	if (bHover && !WantsErase())
 	{
@@ -752,9 +766,11 @@ void UMD_StainPlacementTool::OnTick(float DeltaTime)
 
 void UMD_StainPlacementTool::OnEndHover()
 {
-	bHover = false; bPreviewPending = false; bPreviewValid = false; PreviewSize = 0; DraftPreview = nullptr;
+	// InputRouter ends hover immediately before delivering a click. Keep the result
+	// until the next tick so that click can validate and consume it without rebaking.
+	if (!bHoverEndPending) bPreviewWasVisible = Preview && Preview->IsVisible();
+	bHover = false; bHoverEndPending = true;
 	if (Preview) Preview->SetVisibility(false);
-	if (ActiveBake && !bBakeForPlacement) ActiveBake->Cancel();
 }
 
 void UMD_StainPlacementTool::Render(IToolsContextRenderAPI* RenderAPI)

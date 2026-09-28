@@ -69,7 +69,9 @@ class MARINEDEMOLITION_API UMD_SurfaceStainDefinition : public UDataAsset
 {
 	GENERATED_BODY()
 public:
-	static constexpr int32 VolumeStageCount = 3;
+	static constexpr int32 VolumeStageCount = 5;
+	/** Previously fitted assets retain their original contact geometry until re-authored. */
+	static constexpr int32 LegacyVolumeStageCount = 3;
 	static constexpr int32 MaximumVolumeQueryTriangles = 4096;
 	static constexpr int32 MaximumVolumeQueryVertices = 4096;
 	static constexpr int32 MaximumPlacementSamples = 256;
@@ -92,7 +94,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Stain|Volume")
 	TObjectPtr<UMaterialInterface> VolumeMaterial;
 
-	/** Exactly three shapes, ordered full, two-thirds, one-third. Initial size scales XY independently of the stage. */
+	/** Five shapes, ordered full, four-fifths, three-fifths, two-fifths, one-fifth. Initial size scales XY independently of the stage. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Stain|Volume")
 	TArray<FMD_SurfaceStainVolumeStage> VolumeStages;
 
@@ -104,7 +106,7 @@ public:
 	EMD_SurfaceStainVolumePlacement VolumePlacementPolicy = EMD_SurfaceStainVolumePlacement::ManualOnly;
 
 	/** Limits automatic placement only; the existing runtime cleaning-size contract is unchanged. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Stain|Placement", meta = (ClampMin = "100", ClampMax = "10000"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Stain|Placement", meta = (ClampMin = "100", ClampMax = "5000"))
 	int32 MaximumPlanarInitialSize = 300;
 
 	UPROPERTY(VisibleAnywhere, Transient, Category = "MD|Stain|Placement")
@@ -115,7 +117,7 @@ public:
 	float EdgeStartCm = 13.5f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Stain|Placement", meta = (ClampMin = "0", ClampMax = "3", Units = "cm"))
 	float EdgeRadiusCm = 0.0f;
-	/** Covers the underside of all three stages. Produced alongside the mesh, never at runtime. */
+	/** Covers the underside of all authored stages. Produced alongside the mesh, never at runtime. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Stain|Placement")
 	TArray<FMD_SurfaceStainEdgeContact> EdgeContacts;
 

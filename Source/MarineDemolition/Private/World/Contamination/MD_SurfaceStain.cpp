@@ -71,7 +71,7 @@ void AMD_SurfaceStain::ConfigurePlacement(UMD_SurfaceStainDefinition* InDefiniti
 {
 	if (GetWorld() && GetWorld()->IsGameWorld()) return;
 	Definition = InDefinition;
-	InitialSize = FMD_SurfaceStainSize::ClampInitial(InSize);
+	InitialSize = FMD_SurfaceStainSize::ClampPlacement(InSize);
 	RemainingSize = InitialSize;
 	RefreshSize();
 }
@@ -154,6 +154,8 @@ void AMD_SurfaceStain::PostEditChangeProperty(FPropertyChangedEvent& Event)
 {
 	Super::PostEditChangeProperty(Event);
 	const FName Name = Event.GetMemberPropertyName();
+	if (Name == GET_MEMBER_NAME_CHECKED(AMD_SurfaceStain, InitialSize))
+		InitialSize = FMD_SurfaceStainSize::ClampPlacement(InitialSize);
 	if (Name == GET_MEMBER_NAME_CHECKED(AMD_SurfaceStain, InitialSize)
 		|| Name == GET_MEMBER_NAME_CHECKED(AMD_SurfaceStain, Definition)) RebuildSticker();
 }

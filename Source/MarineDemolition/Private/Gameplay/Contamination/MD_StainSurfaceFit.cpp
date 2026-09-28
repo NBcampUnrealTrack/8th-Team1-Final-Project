@@ -5,6 +5,9 @@
 #include "Gameplay/Contamination/MD_SurfaceStainSize.h"
 #include "Gameplay/Contamination/MD_StainStickerPatch.h"
 #include "Engine/StaticMesh.h"
+#include "StaticMeshCompiler.h"
+#include "StaticMeshResources.h"
+#include "Misc/ScopeExit.h"
 #include "HAL/IConsoleManager.h"
 #include "DynamicMesh/DynamicMesh3.h"
 #include "DynamicMesh/DynamicMeshAABBTree3.h"
@@ -305,7 +308,7 @@ namespace MD_SurfaceFit
 		return Coating.IsClosed() && Coating.TriangleCount()<=UMD_SurfaceStainDefinition::MaximumVolumeQueryTriangles;
 	}
 
-	UStaticMesh* MakeMesh(UObject& Owner, UMaterialInterface* Material, const FMD_SurfaceStainVolumeStage& Stage, int32 Index)
+	UStaticMesh* MakeMesh(UObject& Owner, UMaterialInterface* Material, const FMD_SurfaceStainVolumeStage& Stage, int32 Index, bool bFastBuild)
 	{
 		FMeshDescription Description;
 		FStaticMeshAttributes Attributes(Description); Attributes.Register();
@@ -343,9 +346,28 @@ namespace MD_SurfaceFit
 		Settings.bGenerateLightmapUVs=false; Settings.bRecomputeNormals=false; Settings.bRecomputeTangents=false;
 		Settings.bRemoveDegenerates=false; Settings.bUseFullPrecisionUVs=true;
 		Mesh->GetNaniteSettings().bEnabled=false; Mesh->GetStaticMaterials().Add(FStaticMaterial(Material));
-		UStaticMesh::FBuildMeshDescriptionsParams Params; Params.bFastBuild=true; Params.bBuildSimpleCollision=false;
+		UStaticMesh::FBuildMeshDescriptionsParams Params; Params.bFastBuild=bFastBuild; Params.bBuildSimpleCollision=false;
 		Params.bAllowCpuAccess=false; Params.bCommitMeshDescription=true; Params.bMarkPackageDirty=false;
-		return Mesh->BuildFromMeshDescriptions({&Description},Params) ? Mesh : nullptr;
+		if (!Mesh->BuildFromMeshDescriptions({&Description},Params)) return nullptr;
+		if (!bFastBuild) FStaticMeshCompilingManager::Get().FinishCompilation({Mesh});
+		return Mesh;
+	}
+
+	bool HasValidSavedMeshes(const UMD_SurfaceStainDefinition& Definition)
+	{
+		if (!Definition.IsUsable()) return false;
+		for (const auto& Stage : Definition.VolumeStages)
+		{
+			const UStaticMesh* Mesh=Stage.Mesh;
+			if (!Mesh || Mesh->bDoFastBuild) return false;
+			const FStaticMeshRenderData* Data=Mesh->GetRenderData();
+			if (!Data || Data->LODResources.IsEmpty() || Data->LODResources[0].GetNumVertices()==0
+				|| Data->LODResources[0].GetNumTriangles()==0) return false;
+			const FBoxSphereBounds& Bounds=Data->Bounds;
+			if (Bounds.Origin.ContainsNaN() || Bounds.BoxExtent.ContainsNaN() || !FMath::IsFinite(Bounds.SphereRadius)
+				|| Bounds.BoxExtent.GetMin()<=0 || Bounds.SphereRadius<=0) return false;
+		}
+		return true;
 	}
 }
 
@@ -378,7 +400,7 @@ bool FMD_StainSurfaceFit::Prepare(FMD_StainSurfaceFitJob& Source,const FMD_Stain
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceFit_Final);
 	TRACE_CPUPROFILER_EVENT_SCOPE_TEXT(Source.bParallelSamples ? TEXT("MD_SurfaceFit_Final_Optimized") : TEXT("MD_SurfaceFit_Final_Reference"));
-	if (!Surface.IsValid() || Size<FMD_SurfaceStainSize::Minimum || Size>FMD_SurfaceStainSize::Maximum)
+	if (!Surface.IsValid() || Size<FMD_SurfaceStainSize::Minimum || Size>FMD_SurfaceStainSize::MaximumPlacement)
 	{ Error=TEXT("Select a usable volume profile and receiving surface."); return false; }
 	FVector2D Extent(1,1);
 	for (const auto& Stage : Source.VolumeStages) for (FVector P : Stage.QueryVerticesCm)
@@ -428,7 +450,8 @@ bool FMD_StainSurfaceFit::PreparePreview(FMD_StainSurfaceFitJob& Job,const FMD_S
 	int32 Size,FProgressCancel* Progress)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceFit_Preview);
-	if (!Surface.IsValid() || Job.VolumeStages.IsEmpty()) return false;
+	if (!Surface.IsValid() || Job.VolumeStages.IsEmpty()
+		|| Size<FMD_SurfaceStainSize::Minimum || Size>FMD_SurfaceStainSize::MaximumPlacement) return false;
 	FVector2D Extent(1,1);
 	for (const auto& Stage : Job.VolumeStages) for (FVector P : Stage.QueryVerticesCm)
 	{ P=MD_SurfaceFit::Unbend(Job,P); Extent.X=FMath::Max(Extent.X,FMath::Abs(P.X)); Extent.Y=FMath::Max(Extent.Y,FMath::Abs(P.Y)); }
@@ -456,7 +479,7 @@ bool FMD_StainSurfaceFit::PreparePreview(FMD_StainSurfaceFitJob& Job,const FMD_S
 UStaticMesh* FMD_StainSurfaceFit::CreatePreview(UObject& Owner,UMaterialInterface* Material,const FMD_StainSurfaceFitJob& Job)
 {
 	check(IsInGameThread());
-	return Job.PreviewStage.QueryVerticesCm.IsEmpty() ? nullptr : MD_SurfaceFit::MakeMesh(Owner,Material,Job.PreviewStage,-1);
+	return Job.PreviewStage.QueryVerticesCm.IsEmpty() ? nullptr : MD_SurfaceFit::MakeMesh(Owner,Material,Job.PreviewStage,-1,true);
 }
 
 UMD_SurfaceStainDefinition* FMD_StainSurfaceFit::Create(UObject& Owner,const UMD_SurfaceStainDefinition& Source,
@@ -468,7 +491,7 @@ UMD_SurfaceStainDefinition* FMD_StainSurfaceFit::Create(UObject& Owner,const UMD
 	Result->VolumeMaterial=Source.VolumeMaterial; Result->RemovedItemClass=Source.RemovedItemClass;
 	Result->VolumePlacementPolicy=EMD_SurfaceStainVolumePlacement::ManualOnly; Result->SizeCm=Source.SizeCm;
 	Result->VolumeStages=Job.PreparedStages;
-	for (int32 I=0;I<Result->VolumeStages.Num();++I) Result->VolumeStages[I].Mesh=MD_SurfaceFit::MakeMesh(*Result,Result->VolumeMaterial,Result->VolumeStages[I],I);
+	for (int32 I=0;I<Result->VolumeStages.Num();++I) Result->VolumeStages[I].Mesh=MD_SurfaceFit::MakeMesh(*Result,Result->VolumeMaterial,Result->VolumeStages[I],I,true);
 	if (!Result->RebuildVolumeValidation() || !Result->IsUsable()) { Error=Result->VolumeValidationStatus; return nullptr; }
 	return Result;
 }
@@ -482,22 +505,53 @@ UMD_SurfaceStainDefinition* FMD_StainSurfaceFit::Build(UObject& Owner,const UMD_
 
 UMD_SurfaceStainDefinition* FMD_StainSurfaceFit::Save(const UMD_SurfaceStainDefinition& Prepared,FString& Error)
 {
+	check(IsInGameThread());
+	if (!Prepared.IsUsable()) { Error=TEXT("The prepared slime is not valid for saving."); return nullptr; }
 	FMD5 Hash;
-	const FString Identity=Prepared.VolumeMaterial->GetPathName()+Prepared.RemovedItemClass->GetPathName()+FString::FromInt(int32(Prepared.Kind));
+	// A new build identity must not load/reuse assets persisted with the preview-only fast build flag.
+	const FString Identity=TEXT("SurfaceFit_NormalBuild_v1|")+Prepared.VolumeMaterial->GetPathName()
+		+Prepared.RemovedItemClass->GetPathName()+FString::FromInt(int32(Prepared.Kind));
 	FTCHARToUTF8 UTF8(*Identity); Hash.Update(reinterpret_cast<const uint8*>(UTF8.Get()),UTF8.Length());
 	for (const auto& Stage : Prepared.VolumeStages)
 	{ Hash.Update(reinterpret_cast<const uint8*>(Stage.QueryVerticesCm.GetData()),Stage.QueryVerticesCm.Num()*sizeof(FVector)); Hash.Update(reinterpret_cast<const uint8*>(Stage.QueryTriangleIndices.GetData()),Stage.QueryTriangleIndices.Num()*sizeof(int32)); }
 	uint8 Digest[16]; Hash.Final(Digest);
 	const FString Name=TEXT("DA_SurfaceFit_")+BytesToHex(Digest,16);
 	const FString PackageName=TEXT("/Game/Contamination/GeneratedSurfaceFits/")+Name;
-	if (UMD_SurfaceStainDefinition* Existing=LoadObject<UMD_SurfaceStainDefinition>(nullptr,*(PackageName+TEXT(".")+Name))) return Existing;
+	// An in-memory result from a failed SavePackage is not a saved cache entry.
+	if (FPackageName::DoesPackageExist(PackageName))
+	{
+		UMD_SurfaceStainDefinition* Existing=LoadObject<UMD_SurfaceStainDefinition>(nullptr,*(PackageName+TEXT(".")+Name));
+		if (Existing && MD_SurfaceFit::HasValidSavedMeshes(*Existing)) return Existing;
+		Error=TEXT("The saved slime asset has invalid mesh build data."); return nullptr;
+	}
 	UPackage* Package=CreatePackage(*PackageName);
-	UMD_SurfaceStainDefinition* Saved=DuplicateObject<UMD_SurfaceStainDefinition>(&Prepared,Package,*Name);
-	Saved->SetFlags(RF_Public|RF_Standalone); Saved->ClearFlags(RF_Transient);
-	if (!Saved->RebuildVolumeValidation()) { Error=Saved->VolumeValidationStatus; return nullptr; }
+	UMD_SurfaceStainDefinition* Saved=NewObject<UMD_SurfaceStainDefinition>(Package,*Name,RF_Public|RF_Standalone);
+	bool bSavedToDisk=false;
+	ON_SCOPE_EXIT
+	{
+		if (!bSavedToDisk)
+		{
+			Saved->ClearFlags(RF_Public|RF_Standalone);
+			Saved->MarkAsGarbage();
+			Package->SetDirtyFlag(false);
+		}
+	};
+	Saved->Kind=Prepared.Kind; Saved->Presentation=Prepared.Presentation;
+	Saved->VolumeMaterial=Prepared.VolumeMaterial; Saved->RemovedItemClass=Prepared.RemovedItemClass;
+	Saved->VolumePlacementPolicy=Prepared.VolumePlacementPolicy; Saved->SizeCm=Prepared.SizeCm;
+	Saved->VolumeStages=Prepared.VolumeStages;
+	for (int32 I=0; I<Saved->VolumeStages.Num(); ++I)
+	{
+		auto& Stage=Saved->VolumeStages[I];
+		// Never duplicate a preview mesh: its persisted bDoFastBuild flag bypasses normal bounds building on reload.
+		Stage.Mesh=MD_SurfaceFit::MakeMesh(*Saved,Saved->VolumeMaterial,Stage,I,false);
+	}
+	if (!Saved->RebuildVolumeValidation() || !MD_SurfaceFit::HasValidSavedMeshes(*Saved))
+	{ Error=TEXT("Could not build valid render bounds for the fitted slime asset."); return nullptr; }
 	FSavePackageArgs Args; Args.TopLevelFlags=RF_Public|RF_Standalone; Args.SaveFlags=SAVE_NoError;
 	const FString Filename=FPackageName::LongPackageNameToFilename(PackageName,FPackageName::GetAssetPackageExtension());
 	if (!UPackage::SavePackage(Package,Saved,*Filename,Args)) { Error=TEXT("Could not save the fitted slime asset."); return nullptr; }
+	bSavedToDisk=true;
 	FAssetRegistryModule::AssetCreated(Saved);
 	return Saved;
 }

@@ -25,7 +25,7 @@ public:
 	static FVector2D HalfSize(const UMD_SurfaceStainDefinition& Source, int32 Size);
 	static UMD_SurfaceStainDefinition* Build(UObject& Owner, const UMD_SurfaceStainDefinition& Source,
 		const FMD_StainStickerPatch& Surface, int32 Size, FString& Error);
-	/** One content-addressed package, reused for identical fits. Only called when committing a placement. */
+	/** Normal-build meshes in a versioned content-addressed package. Preview geometry is reused without refitting. */
 	static UMD_SurfaceStainDefinition* Save(const UMD_SurfaceStainDefinition& Prepared, FString& Error);
 #endif
 };
