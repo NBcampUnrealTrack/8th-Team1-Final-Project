@@ -67,7 +67,11 @@ void AMD_WallUtility::BeginPlay()
 
 	// 모든 머신에서 링크한다. 컷 델리게이트는 서버에서만 방송되어 클라 구독은 무해하고,
 	// 스캔 실루엣은 스캔한 클라 로컬에서 떠야 하므로 클라 파이프도 구독해야 한다.
-	LinkOverlappingWalls();
+	// 독립 설비는 이 경로를 끄고 벽 철거 시스템과 분리한다.
+	if (bLinkHostWalls)
+	{
+		LinkOverlappingWalls();
+	}
 
 	// 처음부터 고장 상태로 시작 (서버에서만 상태 전이, 클라는 복제로 따라온다)
 	if (bStartBroken && HasAuthority())

@@ -300,8 +300,8 @@
     <div class="step">B 캐비닛 카드 획득 &rarr; 브릭스 제시</div>
     <div class="step phase-line"><b>3-2:</b> 페이즈 전환 (같은 날)</div>
     <div class="step">B1-04 진입면: 지지 + 절단 <span class="tt">지지대 + 절단기</span></div>
-    <div class="step gate">GATE &mdash; 고온 (HP&minus;8/s), 냉각 수리 필요</div>
-    <div class="step">B1-05 냉각 배관 밀봉 <span class="tt">폼건</span></div>
+    <div class="step gate">GATE &mdash; 냉각펌프 고장: 격리실 B 진입 시 HP&minus;8/s</div>
+    <div class="step">B1-05 냉각펌프 수리 <span class="tt">폼건</span> &rarr; 분출 VFX·격리실 B 데미지존 OFF</div>
     <div class="step">캐비닛 개방 &rarr; 블룸 샘플 회수 (Intact!)</div>
     <div class="step">브릭스 납품 &rarr; <b>Day 3 완료</b></div>
   </div>
@@ -316,8 +316,8 @@
 <h2>게이트 메커니즘 3종</h2>
 
 <div class="gate-card">
-  <h4><span class="tag tag-g">유형 1</span> HP 데미지 존 (배관 파손)</h4>
-  <div class="desc">파손된 배관이 오염수/고온 볼륨을 생성한다. 문 없이 HP 피해 자체가 진행을 막는다.</div>
+  <h4><span class="tag tag-g">유형 1</span> HP 데미지 존 (배관 파손 / 냉각펌프 고장)</h4>
+  <div class="desc">M03a는 배관 파손, M03b는 냉각펌프 고장이다. M03b 펌프는 고장/수리 상태와 오염수 분출 VFX를 제공하고, 격리실 B 데미지존이 그 상태를 읽어 진입·내부 피해를 적용한다. 펌프를 수리하면 피해가 해제된다.</div>
   <div class="chain">
     <span class="cn">배관 파손 (bStartBroken)</span>
     <span class="ca">&rarr;</span>
@@ -327,7 +327,7 @@
     <span class="ca">&rarr;</span>
     <span class="cn">존 해제 &rarr; 안전 접근</span>
   </div>
-  <div class="gate-note">사용처: Day1 (수도관), Day3 M03a (배관), Day3 M03b (냉각 배관)</div>
+  <div class="gate-note">사용처: Day1 (수도관), Day3 M03a (배관), Day3 M03b (냉각펌프 + 연결된 격리실 B 데미지존)</div>
 </div>
 
 <div class="gate-card">
@@ -572,8 +572,8 @@
   <table style="margin-top:0.5rem;">
     <tbody>
       <tr><td style="width:120px;color:var(--dim);">진입로</td><td>파손된 문 &rarr; 내력벽 <b>지지 후 절단</b>. 무지지 절단 = 붕괴(HP&minus;60, 과태료 250&#8353;, 샘플 파괴).</td></tr>
-      <tr><td style="color:var(--dim);">고온</td><td>내부 해수 70도+. HP&minus;8/s 볼륨. <b>진입 불가</b> &mdash; 냉각 먼저.</td></tr>
-      <tr><td style="color:var(--dim);">냉각 수리</td><td>B1-05 냉각 시스템실. 냉각 배관 1곳 폼건 밀봉 (&minus;25 차지). 수리 &rarr; 고온 볼륨 OFF.</td></tr>
+      <tr><td style="color:var(--dim);">진입 피해</td><td>냉각펌프 고장 상태에서 격리실 B 진입 즉시 피해 + HP&minus;8/s. 입구와 실내를 덮는 박스 트리거.</td></tr>
+      <tr><td style="color:var(--dim);">냉각펌프 수리</td><td>B1-05 고장난 펌프 1대에 폼건 착탄. 수리 &rarr; 펌프 오염수 분출 VFX·격리실 B 데미지존 OFF. 이후 안전 진입.</td></tr>
       <tr><td style="color:var(--dim);">캐비닛 조건</td><td><code>bHasCard && bCoolingRestored</code></td></tr>
       <tr><td style="color:var(--dim);">강행 개방</td><td>고온인 채 열면 샘플 파괴 (Intact 실패). 냉각 스킵 불가.</td></tr>
       <tr><td style="color:var(--dim);">회수물</td><td>변성 블룸 샘플 1개. 퀘스트 전용 스폰. 단가만 A Intact 차용.</td></tr>
@@ -649,9 +649,9 @@
       <td>bHasCard && bCoolingRestored 검사. 고온 강행 시 샘플 파괴.</td>
     </tr>
     <tr>
-      <td>M03b 고온 볼륨</td>
-      <td><span class="status-todo">미구현</span></td>
-      <td>오염수 DoT 재사용 (HP&minus;8/s). FX만 고온. 냉각 수리 시 OFF.</td>
+      <td>M03b 냉각펌프 / 격리실 B 데미지존</td>
+      <td><span class="status-done">코드·자동화 검증 완료</span></td>
+      <td>MD_CoolingPump + MD_CoolingHazardZone. 펌프는 상태/VFX를 제공하고 격리실 B 데미지존이 피해를 전담한다. 빌드·자동화 테스트 통과, PIE 시각/멀티 검증은 남아 있다. <a href="X-7%20기지%20기획서/07%20X-7%20Day3%20냉각펌프%20배치.md">배치 가이드</a>.</td>
     </tr>
     <tr>
       <td>Day1 전력 노드 / 전자문</td>
@@ -680,7 +680,7 @@
     <tr><td>2</td><td>DA Day/보상 필드 교체 + 목록 정렬 키를 Day로</td><td>&mdash;</td></tr>
     <tr><td>3</td><td>Day1 = 전력 노드 / 전자문 / 카트리지</td><td>1, 2</td></tr>
     <tr><td>4</td><td>M03 페이즈 + 브릭스 중간 상호작용 + 카드 플래그</td><td>1</td></tr>
-    <tr><td>5</td><td>M03 오염수 배관, 고온 볼륨, 냉각 배관 폼건 노드, 캐비닛 조건</td><td>4</td></tr>
+    <tr><td>5</td><td>M03a 오염수 배관, M03b 냉각펌프·분출 VFX·격리실 B 데미지존, 캐비닛 조건</td><td>4</td></tr>
     <tr><td>6</td><td>Day2 = 랙 3종 기믹</td><td>1, 2</td></tr>
     <tr><td>7</td><td>레벨 배치 반영 (02 X-7 레벨 배치 &sect;4.4)</td><td>3~6</td></tr>
     <tr><td>8</td><td>반복 풀 강등 3종 (기존 사양 재사용)</td><td>3~6</td></tr>

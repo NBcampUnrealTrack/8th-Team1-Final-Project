@@ -79,6 +79,14 @@ public:
 
 	bool RepairRequiresToolInput() const { return bRepairRequiresToolInput; }
 
+	// HUD 조회 전용. E 상호작용을 허용하거나 수리/수량 차감을 실행하지 않는다.
+	bool CanRepairWithToolInput(AActor* Repairer) const
+	{
+		return bRepairRequiresToolInput
+			&& UtilityState == EMD_UtilityState::Broken
+			&& CanRepairWith(Repairer);
+	}
+
 	// IMD_Interactable — 수리는 서버에서 검증
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
@@ -166,6 +174,11 @@ protected:
 	// (상호작용 하이라이트 250과 구분되는 별도 값)
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility", meta = (ClampMin = "0", ClampMax = "255"))
 	int32 ScanSilhouetteStencil = 251;
+
+	// 이 설비가 겹친 파괴 가능 벽을 찾아 철거/스캔 델리게이트를 구독할지.
+	// 독립 설비(예: Day3 냉각 펌프)는 false로 두어 벽 철거 시스템과 완전히 분리한다.
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility")
+	bool bLinkHostWalls = true;
 
 	// 레벨 시작 시 이미 파손된 상태로 시작할지. 벽 없이 인프라만 고장난 상태를 표현한다
 	// (감점 없음, 절단 원샷 연출 없음 — BP 연출도 이 값으로 분기)

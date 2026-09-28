@@ -9,7 +9,9 @@
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
+#include "Data/Equipment/MD_ConsumeItemDefinition.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "World/Wall/MD_PowerConduit.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameStateBase.h"
@@ -146,6 +148,40 @@ FText UMD_InteractionComponent::ResolveAbilityInteractionPrompt() const
 	const UMD_EquipHotbarComponent* Hotbar = IsValid(OwnerPawn)
 		? OwnerPawn->FindComponentByClass<UMD_EquipHotbarComponent>()
 		: nullptr;
+	// 절연테이프는 ToolDefinition이 아닌 소모품이다. 일반 E 대상 목록과 별도로
+	// GA_InsulationTape와 같은 200cm Visibility 조준 조건에서 LMB 안내를 만든다.
+	const UMD_ConsumeItemDefinition* Consumable = IsValid(Hotbar)
+		? Cast<UMD_ConsumeItemDefinition>(Hotbar->GetCurrentItem())
+		: nullptr;
+	if (IsValid(Consumable)
+		&& Consumable->UseAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Insulation))
+	{
+		const AController* Controller = IsValid(OwnerPawn) ? OwnerPawn->GetController() : nullptr;
+		const UWorld* World = GetWorld();
+		if (!IsValid(Controller) || !World
+			|| Hotbar->GetItemCountAtSlot(Hotbar->GetCurrentSlotIndex()) <= 0)
+		{
+			return FText::GetEmpty();
+		}
+
+		FVector ViewLocation;
+		FRotator ViewRotation;
+		Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+		FHitResult Hit;
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDInsulationRepairPrompt), false, OwnerPawn);
+		if (!World->LineTraceSingleByChannel(Hit, ViewLocation,
+				ViewLocation + ViewRotation.Vector() * AbilityPromptTraceDistance,
+				ECC_Visibility, QueryParams))
+		{
+			return FText::GetEmpty();
+		}
+
+		const AMD_PowerConduit* Conduit = Cast<AMD_PowerConduit>(Hit.GetActor());
+		return IsValid(Conduit) && Conduit->CanRepairWithToolInput(GetOwnerPawn())
+			? NSLOCTEXT("MDInteraction", "InsulationRepairAction", "고장난 전선\n[LMB] 수리 (절연테이프 1개)")
+			: FText::GetEmpty();
+	}
+
 	const UMD_ToolDefinition* Tool = IsValid(Hotbar)
 		? Hotbar->GetCurrentTool()
 		: nullptr;
