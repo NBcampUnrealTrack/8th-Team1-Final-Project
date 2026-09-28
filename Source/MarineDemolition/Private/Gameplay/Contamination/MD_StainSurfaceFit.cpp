@@ -41,6 +41,71 @@ namespace MD_SurfaceFit
 	TAutoConsoleVariable<int32> ParallelSamples(TEXT("MD.Slime.ParallelSurfaceSamples"), 1,
 		TEXT("Parallelize precise coating samples while preserving sequential mesh construction. 0 = reference."));
 
+	// A fit owns these immutable meshes and trees. Tree pointers must never outlive or move their meshes.
+	struct FSurfaceQueries
+	{
+		FDynamicMesh3 Receiver, Coverage;
+		FDynamicMeshAABBTree3 ReceiverTree, CoverageTree;
+		explicit FSurfaceQueries(const FMD_StainStickerPatch& Patch)
+			: ReceiverTree(&Receiver, false), CoverageTree(&Coverage, false)
+		{
+			for (const auto& P : Patch.FitReceiverVertices) Receiver.AppendVertex(P);
+			for (const auto& T : Patch.FitReceiverTriangles) Receiver.AppendTriangle(T.X,T.Y,T.Z);
+			for (const auto& P : Patch.Positions) Coverage.AppendVertex(FVector3d(P));
+			for (int32 I=0;I<Patch.Positions.Num();I+=3) Coverage.AppendTriangle(I,I+1,I+2);
+			ReceiverTree.Build(); CoverageTree.Build();
+		}
+		FSurfaceQueries(const FSurfaceQueries&) = delete;
+		FSurfaceQueries& operator=(const FSurfaceQueries&) = delete;
+	};
+
+	// Conservative broad phase only. Keep triangle order and all original narrow-phase arithmetic,
+	// including ties/early exit, so accepted points produce exactly the same geometry.
+	class FUVTriangleLookup
+	{
+		static constexpr int32 Resolution = 32;
+		static constexpr SIZE_T MaxBytes = 16 * 1024 * 1024;
+		TArray<TArray<int32>> Bins;
+		SIZE_T AllocatedBytes = 0;
+	public:
+		void Build(const FMD_StainStickerPatch& Patch, FProgressCancel* Progress)
+		{
+			Bins.SetNum(Resolution*Resolution); AllocatedBytes=Bins.GetAllocatedSize();
+			// Sample accepts distance squared < .0004. Expansion includes rounding at bin borders.
+			constexpr double Margin = .020000000001;
+			for (int32 I=0; I<Patch.UVs.Num(); I+=3)
+			{
+				if ((I%384==0 && Progress && Progress->Cancelled())
+					|| !FMath::IsFinite(Patch.UVs[I].X) || !FMath::IsFinite(Patch.UVs[I].Y)
+					|| !FMath::IsFinite(Patch.UVs[I+1].X) || !FMath::IsFinite(Patch.UVs[I+1].Y)
+					|| !FMath::IsFinite(Patch.UVs[I+2].X) || !FMath::IsFinite(Patch.UVs[I+2].Y))
+				{ Bins.Empty(); AllocatedBytes=0; return; }
+				const double MinX=FMath::Min3(double(Patch.UVs[I].X),double(Patch.UVs[I+1].X),double(Patch.UVs[I+2].X))-Margin;
+				const double MinY=FMath::Min3(double(Patch.UVs[I].Y),double(Patch.UVs[I+1].Y),double(Patch.UVs[I+2].Y))-Margin;
+				const double MaxX=FMath::Max3(double(Patch.UVs[I].X),double(Patch.UVs[I+1].X),double(Patch.UVs[I+2].X))+Margin;
+				const double MaxY=FMath::Max3(double(Patch.UVs[I].Y),double(Patch.UVs[I+1].Y),double(Patch.UVs[I+2].Y))+Margin;
+				if (MaxX<0 || MaxY<0 || MinX>1 || MinY>1) continue;
+				auto Cell=[](double V) { return FMath::Min(Resolution-1,FMath::FloorToInt(FMath::Clamp(V,0.,1.)*Resolution)); };
+				for (int32 Y=Cell(MinY); Y<=Cell(MaxY); ++Y)
+				for (int32 X=Cell(MinX); X<=Cell(MaxX); ++X)
+				{
+					auto& Bin=Bins[Y*Resolution+X];
+					AllocatedBytes-=Bin.GetAllocatedSize(); Bin.Add(I); AllocatedBytes+=Bin.GetAllocatedSize();
+					// Pathological UV overlap falls back to the original scan instead of growing a cache indefinitely.
+					if (AllocatedBytes>MaxBytes) { Bins.Empty(); AllocatedBytes=0; return; }
+				}
+			}
+		}
+		const TArray<int32>* Find(FVector2D UV) const
+		{
+			if (Bins.IsEmpty() || !FMath::IsFinite(UV.X) || !FMath::IsFinite(UV.Y)
+				|| UV.X<0 || UV.Y<0 || UV.X>1 || UV.Y>1) return nullptr;
+			const int32 X=FMath::Min(Resolution-1,FMath::FloorToInt(UV.X*Resolution));
+			const int32 Y=FMath::Min(Resolution-1,FMath::FloorToInt(UV.Y*Resolution));
+			return &Bins[Y*Resolution+X];
+		}
+	};
+
 	class FParallelSampleMarchingCubes final : public FMarchingCubes
 	{
 	public:
@@ -102,11 +167,15 @@ namespace MD_SurfaceFit
 		return FVector(P.X, Definition.EdgeStartCm + Span * FMath::Atan2(Y, Z), FMath::Sqrt(Y * Y + Z * Z) - R);
 	}
 
-	bool Sample(const FMD_StainStickerPatch& Patch, FVector2D UV, FVector& Position, FVector& Normal)
+	bool Sample(const FMD_StainStickerPatch& Patch, FVector2D UV, FVector& Position, FVector& Normal,
+		const FUVTriangleLookup* Lookup = nullptr)
 	{
 		double Best = TNumericLimits<double>::Max();
-		for (int32 I = 0; I < Patch.UVs.Num(); I += 3)
+		const TArray<int32>* Candidates=Lookup ? Lookup->Find(UV) : nullptr;
+		const int32 Count=Candidates ? Candidates->Num() : Patch.UVs.Num()/3;
+		for (int32 Candidate=0; Candidate<Count; ++Candidate)
 		{
+			const int32 I=Candidates ? (*Candidates)[Candidate] : Candidate*3;
 			const FVector A(Patch.UVs[I].X, Patch.UVs[I].Y, 0), B(Patch.UVs[I+1].X, Patch.UVs[I+1].Y, 0), C(Patch.UVs[I+2].X, Patch.UVs[I+2].Y, 0);
 			const FVector Point(UV.X, UV.Y, 0);
 			const FVector Closest = FMath::ClosestPointOnTriangleToPoint(Point, A, B, C);
@@ -131,15 +200,14 @@ namespace MD_SurfaceFit
 	// a folded parameter grid. The grid only controls coverage; receiver distance controls contact.
 	bool MakeCoating(const FMD_StainSurfaceFitJob& Source, int32 StageIndex,
 		const FMD_StainStickerPatch& Patch, FVector2D Extent, double Scale,
-		TArray<FVector>& Positions, TArray<int32>& Indices, FProgressCancel* Progress, bool bPreview = false)
+		TArray<FVector>& Positions, TArray<int32>& Indices, FProgressCancel* Progress, bool bPreview = false,
+		const FSurfaceQueries* SharedQueries = nullptr)
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceFit_Coating);
-		FDynamicMesh3 Receiver, Coverage;
-		for (const auto& P : Patch.FitReceiverVertices) Receiver.AppendVertex(P);
-		for (const auto& T : Patch.FitReceiverTriangles) Receiver.AppendTriangle(T.X,T.Y,T.Z);
-		for (const auto& P : Patch.Positions) Coverage.AppendVertex(FVector3d(P));
-		for (int32 I=0;I<Patch.Positions.Num();I+=3) Coverage.AppendTriangle(I,I+1,I+2);
-		FDynamicMeshAABBTree3 ReceiverTree(&Receiver), CoverageTree(&Coverage);
+		TUniquePtr<FSurfaceQueries> LocalQueries;
+		if (!SharedQueries) { LocalQueries=MakeUnique<FSurfaceQueries>(Patch); SharedQueries=LocalQueries.Get(); }
+		const auto& Receiver=SharedQueries->Receiver; const auto& Coverage=SharedQueries->Coverage;
+		const auto& ReceiverTree=SharedQueries->ReceiverTree; const auto& CoverageTree=SharedQueries->CoverageTree;
 		constexpr int32 Resolution=192;
 		TArray<double> Heights; Heights.Init(-1.0,Resolution*Resolution);
 		const auto& Input=Source.VolumeStages[StageIndex];
@@ -318,10 +386,19 @@ bool FMD_StainSurfaceFit::Prepare(FMD_StainSurfaceFitJob& Source,const FMD_Stain
 	const double Scale=FMD_SurfaceStainSize::LinearScale(Size);
 	Extent=Extent*Scale+FVector2D(1,1);
 	Source.PreparedStages.Reset();
+	bool bCurved=Surface.LocalBounds.GetSize().Z>.5;
+	for (const auto& N : Surface.FitNormals) bCurved|=!N.Equals(FVector3f(0,0,1),.01f);
+	bCurved&=!Surface.FitReceiverTriangles.IsEmpty();
+	MD_SurfaceFit::FUVTriangleLookup Lookup;
+	TUniquePtr<MD_SurfaceFit::FSurfaceQueries> SharedQueries;
+	Lookup.Build(Surface,Progress);
+	if (Progress && Progress->Cancelled()) return false;
+	if (bCurved) SharedQueries=MakeUnique<MD_SurfaceFit::FSurfaceQueries>(Surface);
 	auto FitPoint = [&](const FVector& P,FVector& Fitted)
 	{
 		FVector Contact,Normal;
-		if (!MD_SurfaceFit::Sample(Surface,FVector2D(P.X,P.Y)*Scale/(Extent*2)+FVector2D(.5,.5),Contact,Normal)) return false;
+		if (!MD_SurfaceFit::Sample(Surface,FVector2D(P.X,P.Y)*Scale/(Extent*2)+FVector2D(.5,.5),Contact,Normal,
+			&Lookup)) return false;
 		Fitted=Contact+Normal*(P.Z+0.03);
 		return true;
 	};
@@ -338,11 +415,8 @@ bool FMD_StainSurfaceFit::Prepare(FMD_StainSurfaceFitJob& Source,const FMD_Stain
 			{ Error=TEXT("The outline reaches beyond the nearby receiving surface. Move the cursor or reduce the size."); return false; }
 			Positions.Add(Fitted);
 		}
-		bool bCurved=false;
-		for (const auto& N : Surface.FitNormals) bCurved|=!N.Equals(FVector3f(0,0,1),.01f);
-		bCurved|=Surface.LocalBounds.GetSize().Z>.5;
-		if (bCurved && !Surface.FitReceiverTriangles.IsEmpty()
-			&& !MD_SurfaceFit::MakeCoating(Source,Index,Surface,Extent,Scale,Positions,Stage.QueryTriangleIndices,Progress))
+		if (bCurved
+			&& !MD_SurfaceFit::MakeCoating(Source,Index,Surface,Extent,Scale,Positions,Stage.QueryTriangleIndices,Progress,false,SharedQueries.Get()))
 		{ Error=TEXT("Could not make a continuous coating on this surface."); return false; }
 		// The runtime uses ordinary initial-size XY scaling. Store its inverse after fitting.
 		for (const FVector& P : Positions) Stage.QueryVerticesCm.Add(FVector(P.X/Scale,P.Y/Scale,P.Z));
