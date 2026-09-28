@@ -165,6 +165,7 @@ bool FMD_WorldActorPersistence::Capture(UWorld* World, FMD_WorldActorSnapshot& O
                 Record.bDamaged = Sample->bDamaged;
                 // 미운반 샘플의 오납품과 운반한 샘플의 자격 유실 방지
                 Record.bHasBeenCarried = Sample->HasBeenCarried();
+				Record.WaterFloat = Sample->WaterFloat;
             }
             // 같은 물품의 다른 분류 중복 기록 방지
             continue;
@@ -340,7 +341,8 @@ bool FMD_WorldActorPersistence::Validate(const FMD_WorldActorSnapshot& Snapshot)
     for (auto& Record : Snapshot.QuestItems)
     {
         // 잘못된 열거 값의 납품 판정 유입 차단
-        if (StaticEnum<EMD_SampleGrade>()->IsValidEnumValue(static_cast<int64>(Record.Grade)) == false)
+        if (StaticEnum<EMD_SampleGrade>()->IsValidEnumValue(static_cast<int64>(Record.Grade)) == false
+            || !Record.WaterFloat.IsValid())
         {
             // 손상된 등급 거부
             return false;
@@ -616,6 +618,7 @@ bool FMD_WorldActorPersistence::Restore(UWorld* World, const FMD_WorldActorSnaps
         {
             // 납품 등급과 손상 외형 및 자동 제출 자격 동기화
             Sample->RestorePersistentSampleState(Record.Grade, Record.bDamaged, Record.bHasBeenCarried);
+			Sample->WaterFloat = Record.WaterFloat;
         }
         // 퀘스트 물품 복원 성공 반환
         return true;

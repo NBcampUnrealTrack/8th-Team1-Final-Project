@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "World/Sample/MD_QuestItem.h"
+#include "Types/MD_SampleFloatSettings.h"
 #include "MD_SampleItem.generated.h"
 
 class UPrimitiveComponent;
@@ -17,6 +18,11 @@ class MARINEDEMOLITION_API AMD_SampleItem : public AMD_QuestItem
 public:
 	/** 샘플 전용 파괴 임계값과 피해 허용 정책을 구성하는 생성자 */
 	AMD_SampleItem();
+	virtual void Tick(float DeltaSeconds) override;
+
+	/** Enable on placed samples or in a sample Blueprint; spawners may opt in too. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sample|Water Float", meta = (ShowOnlyInnerProperties))
+	FMD_SampleFloatSettings WaterFloat;
 
 	/** 손상 상태를 네트워크로 복제하기 위한 등록 함수 */
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;

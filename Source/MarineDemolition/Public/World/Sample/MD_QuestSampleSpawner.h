@@ -5,6 +5,7 @@
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
 #include "Types/Score/MD_ScoreTypes.h"
+#include "Types/MD_SampleFloatSettings.h"
 #include "MD_QuestSampleSpawner.generated.h"
 
 class UArrowComponent;
@@ -117,6 +118,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest|Spawn",
 		meta = (ClampMin = "0.0", UIMin = "0.0", DisplayName = "Spawn Protection Duration"))
 	float SampleSpawnProtectionDuration = 3.f;
+
+	/** When enabled, apply this water plane and bobbing to spawned samples. Disabled preserves sample BP defaults. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest|Water Float", meta = (ShowOnlyInnerProperties))
+	FMD_SampleFloatSettings WaterFloat;
 
 	/** 메인 역할 퀘스트에서 마지막으로 스폰을 완료한 페이즈 인덱스 */
 	int32 LastSpawnedMainPhaseIndex = INDEX_NONE;

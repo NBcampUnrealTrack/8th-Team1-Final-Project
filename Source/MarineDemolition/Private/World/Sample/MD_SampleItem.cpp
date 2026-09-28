@@ -1,6 +1,9 @@
 #include "World/Sample/MD_SampleItem.h"
 
 #include "AbilitySystemComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "EngineUtils.h"
+#include "GameFramework/Pawn.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
@@ -13,6 +16,8 @@
 
 AMD_SampleItem::AMD_SampleItem()
 {
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickGroup = TG_PrePhysics;
 	// 공통 부모의 파괴 불가 기본값을 샘플 전용 피해 허용 정책으로 전환하는 설정
 	SetCanBeDamaged(true);
 
@@ -31,6 +36,24 @@ AMD_SampleItem::AMD_SampleItem()
 
 	// 샘플에서만 물리 충격 이벤트를 받아 파괴 기능을 추가하기 위한 설정
 	Mesh->SetNotifyRigidBodyCollision(true);
+}
+
+void AMD_SampleItem::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (!HasAuthority() || !WaterFloat.bEnabled || !IsValid(Mesh)
+		|| !Mesh->IsSimulatingPhysics() || !Mesh->IsGravityEnabled()
+		|| IsHidden() || GetAttachParentActor()) return;
+
+	// Check actual grips, not the historical bHasBeenCarried flag: dropping re-enables buoyancy.
+	for (TActorIterator<APawn> It(GetWorld()); It; ++It)
+	{
+		const UMD_InteractionComponent* Interaction = It->FindComponentByClass<UMD_InteractionComponent>();
+		if (Interaction && Interaction->GetHeldActor() == this) return;
+	}
+	const FVector Acceleration = WaterFloat.GetAcceleration(Mesh->GetCenterOfMass().Z,
+		Mesh->GetPhysicsLinearVelocity(), GetWorld()->GetTimeSeconds(), GetWorld()->GetGravityZ());
+	if (!Acceleration.IsNearlyZero()) Mesh->AddForce(Acceleration, NAME_None, true);
 }
 
 FText AMD_SampleItem::GetInteractionPrompt_Implementation(AActor* Interactor) const
