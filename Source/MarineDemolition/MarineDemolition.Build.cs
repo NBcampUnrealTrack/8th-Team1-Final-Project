@@ -15,6 +15,8 @@ public class MarineDemolition : ModuleRules
 			"GameplayAbilities", "GameplayTags", "GameplayTasks",
 			// AI
 			"AIModule",
+			// Native StateTree conditions/tasks are exposed by public headers.
+			"StateTreeModule",
 			// Online
 			"OnlineSubsystem", "OnlineSubsystemUtils",
 			//UI
@@ -34,6 +36,7 @@ public class MarineDemolition : ModuleRules
 			// 패키지 빌드의 맵 에셋 클래스 조회
 			"AssetRegistry",
 			"DeveloperSettings",
+			"GameplayStateTreeModule",
             // Process newly registered collision bodies without advancing simulation during map loading.
             "Chaos", "PhysicsCore",
 			"ApplicationCore",
