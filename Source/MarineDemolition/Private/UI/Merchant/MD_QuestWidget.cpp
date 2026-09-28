@@ -4,7 +4,8 @@
 #include "UI/Merchant/MD_QuestWidget.h"
 
 #include "Components/Image.h"
-#include "Components/ScrollBox.h"
+#include "Components/VerticalBox.h"
+#include "Components/VerticalBoxSlot.h"
 #include "Components/TextBlock.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
 #include "Groups/CommonButtonGroupBase.h"
@@ -139,12 +140,6 @@ void UMD_QuestWidget::SelectQuestCard(UMD_QuestCardWidget* QuestCard)
 
 void UMD_QuestWidget::RebuildQuestList()
 {
-	// 디자이너 필수 스크롤 목록이 유효하지 않으면 생성 작업 중단
-	if (IsValid(SB_QuestList) == false)
-	{
-		return;
-	}
-
 	// 데이터 갱신 후에도 같은 종류와 인덱스의 선택을 복원하기 위한 값 보관
 	bool bHadSelection = IsValid(SelectedQuestCard) == true;
 	bool bSelectedMainQuest = bHadSelection == true ? SelectedQuestCard->GetIsMainQuest() : true;
@@ -169,54 +164,79 @@ void UMD_QuestWidget::RebuildQuestList()
 			QuestCard->OnClicked().RemoveAll(this);
 		}
 	}
-	SB_QuestList->ClearChildren();
+	// 스크롤과 구분 제목을 유지하면서 메인 목록의 카드만 교체
+	if (IsValid(VB_MainQuest) == true)
+	{
+		// 메인 영역의 목업 또는 이전 카드 제거
+		VB_MainQuest->ClearChildren();
+	}
+	// 반복 목록의 카드만 교체
+	if (IsValid(VB_RepeatQuest) == true)
+	{
+		// 반복 영역의 목업 또는 이전 카드 제거
+		VB_RepeatQuest->ClearChildren();
+	}
 	QuestCards.Empty();
 	SelectedQuestCard = nullptr;
 
 	// 카드 클래스가 지정되지 않은 화면에서는 빈 목록과 상세 상태 유지
-	if (QuestCardClass == nullptr)
+	if (IsValid(QuestCardClass.Get()) == false)
 	{
 		RefreshQuestDetail();
 		return;
 	}
 
-	// 메인 퀘스트를 원본 배열 순서대로 목록 앞부분에 생성
-	for (int32 QuestIndex = 0; QuestIndex < MainQuests.Num(); ++QuestIndex)
+	// 메인과 반복을 기존 배열 순서대로 각 전용 영역에 생성
+	for (int32 CardIndex = 0; CardIndex < MainQuests.Num() + RepeatQuests.Num(); ++CardIndex)
 	{
-		UMD_QuestCardWidget* QuestCard = CreateWidget<UMD_QuestCardWidget>(this, QuestCardClass);
-		if (IsValid(QuestCard) == false)
+		// 공통 생성 경로에서 적용할 퀘스트 종류 구분
+		bool bMainQuest = CardIndex < MainQuests.Num();
+		// 현재 종류에 대응하는 디자이너 목록 영역 선택
+		UVerticalBox* QuestList = bMainQuest == true ? VB_MainQuest.Get() : VB_RepeatQuest.Get();
+		// 선택 바인딩이 없는 종류는 카드 생성 생략
+		if (IsValid(QuestList) == false)
 		{
+			// 다음 카드로 이동
 			continue;
 		}
-
-		QuestCard->SetMainQuest(QuestIndex, MainQuests[QuestIndex]);
-		// 메인 퀘스트 카드를 단일 선택 그룹에 등록
-		if (IsValid(QuestCardButtonGroup) == true)
-		{
-			QuestCardButtonGroup->AddWidget(QuestCard);
-		}
-		QuestCard->OnClicked().AddUObject(this, &UMD_QuestWidget::HandleQuestCardClicked, QuestCard);
-		SB_QuestList->AddChild(QuestCard);
-		QuestCards.Add(QuestCard);
-	}
-
-	// 반복 퀘스트를 원본 배열 순서대로 메인 퀘스트 뒤에 생성
-	for (int32 QuestIndex = 0; QuestIndex < RepeatQuests.Num(); ++QuestIndex)
-	{
+		// 서버 요청에 사용할 종류별 원본 배열 인덱스 계산
+		int32 QuestIndex = bMainQuest == true ? CardIndex : CardIndex - MainQuests.Num();
+		// 현재 구성에 사용할 카드 인스턴스 생성
 		UMD_QuestCardWidget* QuestCard = CreateWidget<UMD_QuestCardWidget>(this, QuestCardClass);
+		// 생성에 실패한 카드는 선택 그룹과 목록에서 제외
 		if (IsValid(QuestCard) == false)
 		{
+			// 다음 카드로 이동
 			continue;
 		}
-
-		QuestCard->SetRepeatQuest(QuestIndex, RepeatQuests[QuestIndex]);
-		// 반복 퀘스트 카드를 메인 퀘스트 카드와 같은 단일 선택 그룹에 등록
+		// 선택한 종류에 맞는 원본 상태 적용
+		if (bMainQuest == true)
+		{
+			// 메인 퀘스트 상태와 원본 인덱스 전달
+			QuestCard->SetMainQuest(QuestIndex, MainQuests[QuestIndex]);
+		}
+		else
+		{
+			// 반복 퀘스트 상태와 원본 인덱스 전달
+			QuestCard->SetRepeatQuest(QuestIndex, RepeatQuests[QuestIndex]);
+		}
+		// 두 영역의 카드를 하나의 선택 그룹으로 관리
 		if (IsValid(QuestCardButtonGroup) == true)
 		{
+			// 새 카드의 단일 선택 등록
 			QuestCardButtonGroup->AddWidget(QuestCard);
 		}
-		QuestCard->OnClicked().AddUObject(this, &UMD_QuestWidget::HandleQuestCardClicked, QuestCard);
-		SB_QuestList->AddChild(QuestCard);
+		// 중간 전달 함수 없이 카드 선택 처리에 클릭 연결
+		QuestCard->OnClicked().AddUObject(this, &UMD_QuestWidget::SelectQuestCard, QuestCard);
+		// 현재 종류의 목록에 카드를 배치하고 슬롯 확보
+		UVerticalBoxSlot* CardSlot = QuestList->AddChildToVerticalBox(QuestCard);
+		// 실제 에셋의 카드 간격을 동적 카드에도 적용
+		if (IsValid(CardSlot) == true)
+		{
+			// 목업과 동일한 위아래 여백 적용
+			CardSlot->SetPadding(FMargin(0.0f, 4.0f));
+		}
+		// 선택 복원과 구독 해제에 사용할 카드 보관
 		QuestCards.Add(QuestCard);
 	}
 
@@ -254,148 +274,206 @@ void UMD_QuestWidget::RebuildQuestList()
 
 void UMD_QuestWidget::RefreshQuestDetail()
 {
-	// 선택된 카드가 없을 때 사용할 빈 상세 표시 값
-	FText QuestTypeText = FText::GetEmpty();
-	FText QuestNameText = FText::FromString(TEXT("선택된 퀘스트 없음"));
-	FText QuestProgressText = FText::GetEmpty();
-	FText QuestDescriptionText = FText::FromString(TEXT("퀘스트를 선택하면 상세 정보가 표시됩니다."));
-	FText AffinityRewardText = FText::FromString(TEXT("-"));
-	FText ScoreRewardText = FText::FromString(TEXT("-"));
-	FText CreditRewardText = FText::FromString(TEXT("-"));
-	bool bShowAccept = false;
-	bool bShowReject = false;
+	// 선택 또는 원본이 없는 경우 사용할 상태 문구 준비
+	FText StateText = FText::GetEmpty();
+	// 빈 목록의 상세 이름 안내 준비
+	FText QuestNameText = NSLOCTEXT("MDQuestTab", "NoSelection", "선택된 퀘스트 없음");
+	// 현재 페이즈가 없는 경우 사용할 목표 분류 기본값 준비
+	FText ObjectiveText = FText::GetEmpty();
+	// 데이터가 없는 진행 수량과 보상에 공통으로 사용할 표시값 준비
+	FText EmptyValue = FText::FromString(TEXT("-"));
+	// 현재 진행 수량의 기본 표시 준비
+	FText CurrentProgressText = EmptyValue;
+	// 목표 수량의 기본 표시 준비
+	FText RequiredCountText = EmptyValue;
+	// 선택 전 상세 설명 안내 준비
+	FText DescriptionText = NSLOCTEXT("MDQuestTab", "SelectQuest", "퀘스트를 선택하면 상세 정보가 표시됩니다.");
+	// 빈 상세 호감도 보상 표시 준비
+	FText AffinityText = EmptyValue;
+	// 빈 상세 점수 보상 표시 준비
+	FText ScoreText = EmptyValue;
+	// 빈 상세 크레딧 보상 표시 준비
+	FText CreditText = EmptyValue;
+	// 제시 상태의 수락 및 거절 버튼 표시 여부 준비
+	bool bShowOfferActions = false;
+	// 마지막 목표 달성 후 보상 버튼 표시 여부 준비
 	bool bShowReward = false;
+	// 목표 달성 전 포기 버튼 표시 여부 준비
 	bool bShowGiveup = false;
+	// 현재 페이즈의 체크 표시 여부 준비
+	bool bPhaseComplete = false;
 
-	// 선택 카드의 종류에 맞는 상태와 원본 퀘스트 정의 조회
+	// 선택 카드의 원본을 조회하기 위한 준비
 	UMD_QuestDefinition* Definition = nullptr;
+	// 상세 목표에 사용할 페이즈 기본값 준비
 	int32 PhaseIndex = 0;
+	// 상세 수량에 사용할 진행도 기본값 준비
 	int32 CurrentProgress = 0;
-	bool bMainQuest = false;
+	// 반복 액션을 메인 퀘스트에 노출하지 않기 위한 기본 상태 준비
+	EMD_RepeatQuestStatus RepeatStatus = EMD_RepeatQuestStatus::Declined;
+	// 유효한 선택 카드에서만 원본과 진행 상태 조회
 	if (IsValid(SelectedQuestCard) == true)
 	{
-		bMainQuest = SelectedQuestCard->GetIsMainQuest();
-		if (bMainQuest == true)
+		// 카드 종류에 대응하는 원본 데이터 선택
+		if (SelectedQuestCard->GetIsMainQuest() == true)
 		{
+			// 원본과 현재 페이즈를 함께 조회할 메인 상태 복사
 			FMD_MainQuestState QuestState = SelectedQuestCard->GetMainQuestState();
+			// 메인 퀘스트 원본 로드
 			Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+			// 상세 페이즈 선택
 			PhaseIndex = QuestState.CurrentPhaseIndex;
+			// 상세 진행 수량 선택
 			CurrentProgress = QuestState.CurrentProgress;
-			QuestTypeText = FText::FromString(TEXT("메인 퀘스트"));
 		}
 		else
 		{
+			// 원본과 액션 상태를 함께 조회할 반복 상태 복사
 			FMD_RepeatQuestState QuestState = SelectedQuestCard->GetRepeatQuestState();
+			// 반복 퀘스트 원본 로드
 			Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
+			// 상세 페이즈 선택
 			PhaseIndex = QuestState.CurrentPhaseIndex;
+			// 상세 진행 수량 선택
 			CurrentProgress = QuestState.CurrentProgress;
-			QuestTypeText = FText::FromString(TEXT("반복 퀘스트"));
-
-			// 반복 퀘스트 상태와 목표 달성 여부에 맞는 액션 버튼 구성
-			bool bHasDefinition = IsValid(Definition);
-			if (bHasDefinition == true)
-			{
-				bHasDefinition = Definition->HasPhase(PhaseIndex);
-			}
-			bool bObjectiveComplete = false;
-			if (bHasDefinition == true)
-			{
-				bObjectiveComplete = Definition->IsObjectiveComplete(PhaseIndex, CurrentProgress);
-			}
-			bShowAccept = QuestState.Status == EMD_RepeatQuestStatus::Offered;
-			bShowReject = QuestState.Status == EMD_RepeatQuestStatus::Offered;
-			bool bAccepted = QuestState.Status == EMD_RepeatQuestStatus::Accepted;
-			if (bAccepted == true)
-			{
-				bShowReward = bObjectiveComplete;
-				bShowGiveup = bObjectiveComplete == false;
-			}
+			// 반복 액션 노출에 사용할 상태 보관
+			RepeatStatus = QuestState.Status;
 		}
 	}
 
-	// 유효한 현재 페이즈에서 상세 본문과 성공 보상 계산
-	bool bHasDefinition = IsValid(Definition);
-	if (bHasDefinition == true)
+	// 유효한 원본에서 이름과 상태 및 보상 표시 계산
+	if (IsValid(Definition) == true)
 	{
-		bHasDefinition = Definition->HasPhase(PhaseIndex);
-	}
-	if (bHasDefinition == true)
-	{
-		int32 RequiredCount = Definition->GetRequiredCount(PhaseIndex);
+		// 선택 카드와 동일한 상태 표시 규칙 적용
+		StateText = SelectedQuestCard->MakeQuestStateText(Definition);
+		// 현재 페이즈 유무와 관계없이 퀘스트 이름 표시
 		QuestNameText = Definition->QuestName;
-		QuestProgressText = FText::FromString(FString::Printf(TEXT("%d / %d"), CurrentProgress, RequiredCount));
-		QuestDescriptionText = Definition->GetHUDDescription(PhaseIndex);
-		AffinityRewardText = FText::FromString(FString::Printf(TEXT("%+.1f"), Definition->SuccessReward.Affinity));
-		ScoreRewardText = FText::AsNumber(Definition->SuccessReward.Score);
-		CreditRewardText = FText::AsNumber(Definition->SuccessReward.Credits);
-	}
-
-	// 계산된 상세 텍스트를 실제 디자이너 위젯에 반영
-	if (IsValid(Txt_DetailType) == true)
-	{
-		Txt_DetailType->SetText(QuestTypeText);
-	}
-	if (IsValid(Txt_DetailName) == true)
-	{
-		Txt_DetailName->SetText(QuestNameText);
-	}
-	if (IsValid(Txt_DetailProgress) == true)
-	{
-		Txt_DetailProgress->SetText(QuestProgressText);
-	}
-	if (IsValid(Txt_DetailDescription) == true)
-	{
-		Txt_DetailDescription->SetText(QuestDescriptionText);
-	}
-	if (IsValid(Txt_AffinityReward) == true)
-	{
-		Txt_AffinityReward->SetText(AffinityRewardText);
-	}
-	if (IsValid(Txt_ScoreReward) == true)
-	{
-		Txt_ScoreReward->SetText(ScoreRewardText);
-	}
-	if (IsValid(Txt_CreditReward) == true)
-	{
-		Txt_CreditReward->SetText(CreditRewardText);
-	}
-
-	// 디자이너가 종류별 아이콘을 지정한 경우에만 상세 아이콘 교체
-	if (IsValid(Img_DetailType) == true)
-	{
-		if (IsValid(SelectedQuestCard) == true)
+		// 없는 페이즈의 설명에 선택 안내가 남지 않도록 초기화
+		DescriptionText = FText::GetEmpty();
+		// 성공 보상 호감도 표시 계산
+		AffinityText = FText::FromString(FString::Printf(TEXT("%+.1f"), Definition->SuccessReward.Affinity));
+		// 성공 보상 점수 표시 계산
+		ScoreText = FText::AsNumber(Definition->SuccessReward.Score);
+		// 성공 보상 크레딧 표시 계산
+		CreditText = FText::AsNumber(Definition->SuccessReward.Credits);
+		// 현재 목표가 존재할 때만 진행도와 액션 노출 계산
+		if (Definition->HasPhase(PhaseIndex) == true)
 		{
-			FSlateBrush QuestIcon = bMainQuest == true ? MainQuestIcon : RepeatQuestIcon;
-			UObject* QuestIconResource = QuestIcon.GetResourceObject();
-			if (IsValid(QuestIconResource) == true)
+			// 목표 수량 표시와 체크 판정에서 공유할 요구 수량 조회
+			int32 RequiredCount = Definition->GetRequiredCount(PhaseIndex);
+			// 분리된 현재 수량 텍스트 구성
+			CurrentProgressText = FText::AsNumber(CurrentProgress);
+			// 분리된 목표 수량 텍스트 구성
+			RequiredCountText = FText::AsNumber(RequiredCount);
+			// 실제 현재 페이즈의 목표 설명 표시
+			DescriptionText = Definition->GetHUDDescription(PhaseIndex);
+			// 현재 페이즈를 달성한 경우 체크 표시 활성화
+			bPhaseComplete = CurrentProgress >= FMath::Max(RequiredCount, 1);
+			// 제시된 반복 퀘스트에서만 수락과 거절 노출
+			bShowOfferActions = RepeatStatus == EMD_RepeatQuestStatus::Offered;
+			// 수락한 반복 퀘스트에서 목표 달성에 따른 액션 구분
+			if (RepeatStatus == EMD_RepeatQuestStatus::Accepted)
 			{
-				Img_DetailType->SetBrush(QuestIcon);
+				// 마지막 목표 달성 시 보상 수령 노출
+				bShowReward = Definition->IsObjectiveComplete(PhaseIndex, CurrentProgress);
+				// 보상 대기 상태에서는 포기 액션 제외
+				bShowGiveup = bShowReward == false;
+			}
+			// 기존 수량 합성 텍스트 대신 실제 목표 종류에 맞는 제목 선택
+			switch (Definition->GetObjectiveType(PhaseIndex))
+			{
+			case EMD_QuestObjectiveType::RecoverIntact:
+				// 온전한 대상 회수 목표 표시
+				ObjectiveText = NSLOCTEXT("MDQuestTab", "RecoverIntact", "회수");
+				break;
+			case EMD_QuestObjectiveType::RecoverDamaged:
+				// 손상 여부를 허용하는 회수 목표 표시
+				ObjectiveText = NSLOCTEXT("MDQuestTab", "RecoverDamaged", "손상 허용 회수");
+				break;
+			case EMD_QuestObjectiveType::Cleanup:
+				// 청소 목표 표시
+				ObjectiveText = NSLOCTEXT("MDQuestTab", "Cleanup", "청소 계약");
+				break;
+			case EMD_QuestObjectiveType::Sealing:
+				// 마감 목표 표시
+				ObjectiveText = NSLOCTEXT("MDQuestTab", "Sealing", "마감 계약");
+				break;
+			case EMD_QuestObjectiveType::Composite:
+				// 복합 목표 표시
+				ObjectiveText = NSLOCTEXT("MDQuestTab", "Composite", "복합");
+				break;
+			case EMD_QuestObjectiveType::Interaction:
+				// 인물 상호작용 목표 표시
+				ObjectiveText = NSLOCTEXT("MDQuestTab", "Interaction", "NPC 상호작용");
+				break;
 			}
 		}
 	}
 
-	// 선택된 반복 퀘스트 상태에 맞는 액션만 노출
+	// 선택 바인딩이 존재하고 표시값이 달라진 텍스트만 갱신
+	auto ApplyText = [](UTextBlock* TextBlock, FText Text)
+	{
+		// 없는 위젯이나 동일 문구의 반복 갱신 생략
+		if (IsValid(TextBlock) == true && TextBlock->GetText().EqualTo(Text) == false)
+		{
+			// 새 상세 표시값 적용
+			TextBlock->SetText(Text);
+		}
+	};
+	// 선택 카드의 상태 문구 적용
+	ApplyText(Txt_Detail_State, StateText);
+	// 선택 퀘스트 이름 적용
+	ApplyText(Txt_Detail_Name, QuestNameText);
+	// 목표 종류 제목 적용
+	ApplyText(Txt_DetailProgress, ObjectiveText);
+	// 분리된 현재 진행 수량 적용
+	ApplyText(Txt_DetailProgress_Current, CurrentProgressText);
+	// 분리된 목표 수량 적용
+	ApplyText(Txt_DetailProgress_Total, RequiredCountText);
+	// 현재 목표 설명 적용
+	ApplyText(Txt_Detail_Description, DescriptionText);
+	// 호감도 보상 적용
+	ApplyText(Txt_Reward_Affinity, AffinityText);
+	// 점수 보상 적용
+	ApplyText(Txt_Reward_Score, ScoreText);
+	// 크레딧 보상 적용
+	ApplyText(Txt_Reward_Credit, CreditText);
+	// 선택 바인딩이 존재하는 체크 이미지 갱신
+	if (IsValid(Img_DetailProgress) == true)
+	{
+		// 미달성 시 슬롯 크기를 유지하면서 체크 이미지만 숨김
+		Img_DetailProgress->SetVisibility(bPhaseComplete == true ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Hidden);
+	}
+	// 실제로 보상을 받을 수 있을 때만 완료 안내 노출
+	if (IsValid(Txt_CompletionMessage) == true)
+	{
+		// 기존 디자이너 안내 문구를 보상 버튼 상태와 동기화
+		Txt_CompletionMessage->SetVisibility(bShowReward == true ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+	}
+	// 제시된 반복 퀘스트의 수락 액션 노출
 	if (IsValid(Btn_Accept) == true)
 	{
-		Btn_Accept->SetVisibility(bShowAccept == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		// 수락 가능 상태에서만 버튼 표시
+		Btn_Accept->SetVisibility(bShowOfferActions == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
+	// 제시된 반복 퀘스트의 거절 액션 노출
 	if (IsValid(Btn_Reject) == true)
 	{
-		Btn_Reject->SetVisibility(bShowReject == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
+		// 제시 상태에서만 버튼 표시
+		Btn_Reject->SetVisibility(bShowOfferActions == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
+	// 마지막 목표를 달성한 반복 퀘스트의 보상 액션 노출
 	if (IsValid(Btn_Reward) == true)
 	{
+		// 보상 대기 상태에서만 버튼 표시
 		Btn_Reward->SetVisibility(bShowReward == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
+	// 진행 중인 반복 퀘스트의 포기 액션 노출
 	if (IsValid(Btn_Giveup) == true)
 	{
+		// 보상 대기 전 수행 상태에서만 버튼 표시
 		Btn_Giveup->SetVisibility(bShowGiveup == true ? ESlateVisibility::Visible : ESlateVisibility::Collapsed);
 	}
-}
-
-void UMD_QuestWidget::HandleQuestCardClicked(UMD_QuestCardWidget* QuestCard)
-{
-	SelectQuestCard(QuestCard);
 }
 
 void UMD_QuestWidget::HandleAcceptClicked()

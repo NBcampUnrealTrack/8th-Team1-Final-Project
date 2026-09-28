@@ -10,6 +10,7 @@
 #include "MD_QuestScreenWidget.generated.h"
 
 class UMD_CommonButtonBase;
+class UWidgetSwitcher;
 class UMD_LoreCatalog;
 class UMD_LoreQuestTabWidget;
 
@@ -22,7 +23,6 @@ class MARINEDEMOLITION_API UMD_QuestScreenWidget : public UMD_CommonGameMenuWidg
 protected:
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
-	virtual void NativeOnActivated() override;
 
 public:
 	// 퀘스트 탭의 반복 퀘스트 수락 또는 보상 요청 전달 이벤트
@@ -38,45 +38,29 @@ public:
 	FMD_QuestRepeatActionRequest OnRepeatAbandonRequested;
 
 protected:
-	// 화면 생성 전후에 동일한 메인 퀘스트 데이터를 유지하기 위한 캐시
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
-	TArray<FMD_MainQuestState> MainQuests;
-
-	// 화면 생성 전후에 동일한 반복 퀘스트 데이터를 유지하기 위한 캐시
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
-	TArray<FMD_RepeatQuestState> RepeatQuests;
-
-	// 로어 탭에 전달할 현재 현장의 정적 카탈로그
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
-	TObjectPtr<UMD_LoreCatalog> LoreCatalog;
-
-	// 선택한 사이트의 이름을 위젯 재구성 이후에도 유지하기 위한 보관
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
-	FText LoreSiteName;
-
-	// 로어 탭에 전달할 플레이어의 전역 수집 원장
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
-	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds;
-
 	// 현재 로어 탭을 표시 중인지 저장하는 선택 상태
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	bool bShowingLoreTab = false;
 
-	// 퀘스트 탭 선택과 화면 전환에 사용하는 공통 버튼
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
-	TObjectPtr<UMD_CommonButtonBase> Btn_QuestTab;
-
-	// 로어 탭 선택과 화면 전환에 사용하는 공통 버튼
+	// 현재 디자이너의 퀘스트 선택 버튼
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CommonButtonBase> Btn_LoreTab;
+	TObjectPtr<UMD_CommonButtonBase> Btn_QuestTab_1;
+
+	// 현재 디자이너의 기록 선택 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UMD_CommonButtonBase> Btn_QuestTab_2;
 
 	// 퀘스트 목록과 상세 정보를 표시하는 디자이너 하위 위젯
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_QuestWidget> WBP_MD_QuestTab;
 
 	// 수집한 로어 목록과 상세 정보를 표시하는 디자이너 하위 위젯
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_LoreQuestTabWidget> WBP_MD_LoreTab;
+
+	// 선택 탭에 맞는 하위 화면을 표시하는 디자이너 전환 영역
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UWidgetSwitcher> WS_Contents;
 
 public:
 	// 퀘스트 탭에 메인 퀘스트 상태를 전달하는 함수
@@ -91,10 +75,6 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
 	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds, FText InSiteName);
 
-	// 퀘스트 하위 위젯과 로어 하위 위젯을 현재 캐시로 갱신하는 함수
-	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
-	void RefreshDisplay();
-
 	// 퀘스트 목록 및 상세 탭을 표시하는 함수
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
 	void ShowQuestTab();
@@ -104,7 +84,7 @@ public:
 	void ShowLoreTab();
 
 protected:
-	// 현재 탭 선택 상태를 두 하위 위젯과 상단 버튼에 적용하는 함수
+	// 현재 탭의 표시 페이지와 버튼 선택 상태를 동기화하는 함수
 	void ApplySelectedTab();
 
 	// 퀘스트 탭의 수락 또는 보상 요청을 화면 외부로 전달하는 함수

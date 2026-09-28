@@ -378,8 +378,8 @@ void UMD_ShopWidget::RefreshSelectedItem()
 	{
 		if (IsValid(Txt_DetailName) == true)
 		{
-			// 판매 목록 소진 시 다음 행동을 판단할 수 있는 빈 상태 안내
-			Txt_DetailName->SetText(bSellingMode == true ? NSLOCTEXT("MDShop", "NoItemsToSell", "판매할 아이템이 없습니다.") : FText::GetEmpty());
+			// 선택 품목이 없는 상태의 상세 이름을 대시로 표시
+			Txt_DetailName->SetText(FText::FromString(TEXT("-")));
 		}
 
 		if (IsValid(Txt_DetailDescription) == true)
@@ -390,8 +390,8 @@ void UMD_ShopWidget::RefreshSelectedItem()
 		// 빈 상세 화면에 남은 카테고리 표시 영역 확인
 		if (IsValid(Txt_DetailCategory) == true)
 		{
-			// 선택 품목이 없는 상태의 카테고리 배지 초기화
-			Txt_DetailCategory->SetText(FText::GetEmpty());
+			// 선택 품목이 없는 상태의 카테고리를 대시로 표시
+			Txt_DetailCategory->SetText(FText::FromString(TEXT("-")));
 		}
 
 		if (IsValid(Txt_Owned) == true)
@@ -402,6 +402,8 @@ void UMD_ShopWidget::RefreshSelectedItem()
 		if (IsValid(Img_DetailIcon) == true)
 		{
 			Img_DetailIcon->SetBrushFromTexture(nullptr);
+			// 선택 품목이 없는 상세 이미지를 완전히 투명하게 표시
+			Img_DetailIcon->SetRenderOpacity(0.0f);
 		}
 
 		// 선택 품목이 없는 상태에서 거래 실행 버튼 확인
@@ -470,6 +472,8 @@ void UMD_ShopWidget::RefreshSelectedItem()
 	{
 		// 공통 정의의 아이콘을 표시하며 미지정 상태에서는 이전 이미지 제거
 		Img_DetailIcon->SetBrushFromTexture(Definition->ItemIcon);
+		// 품목 선택 시 투명 상태를 해제하여 상세 아이콘 표시 복원
+		Img_DetailIcon->SetRenderOpacity(1.0f);
 	}
 
 	// 상점 해금 및 결제 조건과 유형별 정의의 지급 조건을 함께 적용
