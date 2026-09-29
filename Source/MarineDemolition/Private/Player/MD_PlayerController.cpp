@@ -22,6 +22,8 @@
 #include "EngineUtils.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallUtility.h"
+#include "World/Sample/MD_QuestSampleSpawner.h"
+#include "Data/Merchant/MD_QuestDefinition.h"
 #include "Player/MD_PlayerState.h"
 #include "Player/MD_PlayerCameraManager.h"
 
@@ -1045,6 +1047,33 @@ void AMD_PlayerController::MD_RepairUtility()
 
 	UE_LOG(LogTemp, Log, TEXT("MD_RepairUtility: %s 수리 요청"), *Utility->GetName());
 	ServerRepairUtility(Utility);
+}
+
+void AMD_PlayerController::MD_SpawnDay3Sample()
+{
+#if !UE_BUILD_SHIPPING
+	ServerSpawnDay3Sample();
+#endif
+}
+
+void AMD_PlayerController::ServerSpawnDay3Sample_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(
+		FPrimaryAssetId(TEXT("Quest"), TEXT("X7-M03")));
+	if (IsValid(Definition))
+	{
+		for (TActorIterator<AMD_QuestSampleSpawner> It(GetWorld()); It; ++It)
+		{
+			if (It->DebugSpawnQuestSample(*Definition, 1))
+			{
+				ClientMessage(TEXT("MD_SpawnDay3Sample: Day3 sample is ready at the Isolation B spawner (existing samples are reused)."));
+				return;
+			}
+		}
+	}
+	ClientMessage(TEXT("MD_SpawnDay3Sample: no matching Day3 spawner or valid quest sample class in this map."));
+#endif
 }
 
 void AMD_PlayerController::ServerRepairUtility_Implementation(AMD_WallUtility* Utility)

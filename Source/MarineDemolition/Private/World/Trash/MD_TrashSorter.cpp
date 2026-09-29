@@ -1,8 +1,8 @@
 #include "World/Trash/MD_TrashSorter.h"
 
-#include "Audio/MD_AudioSubsystem.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/StateTreeComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
@@ -13,27 +13,33 @@
 #include "Gameplay/Trash/MD_TrashContainer.h"
 #include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "Gameplay/Trash/MD_TrashSortable.h"
-#include "GameplayTags/MD_GameplayTags.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
+#include "NativeGameplayTags.h"
 #include "Util/MD_LogUtility.h"
 #include "Util/MD_MaterialTintUtility.h"
 #include "World/Sample/MD_QuestItem.h"
-#include "World/Sample/MD_SampleItem.h"
+
+UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_TrashSorter_Request, "Event.TrashSorter.Request");
+UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_TrashSorter_Rejected, "Event.TrashSorter.Rejected");
+// Legacy tag registration only, so existing assets can be opened during migration.
+// These events are no longer sent. Delay Task completion now drives the return to Ready.
+UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_TrashSorter_Finished, "Event.TrashSorter.Finished");
+UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_TrashSorter_ErrorFinished, "Event.TrashSorter.ErrorFinished");
 
 AMD_TrashSorter::AMD_TrashSorter()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
+	SorterStateTree = CreateDefaultSubobject<UStateTreeComponent>(TEXT("SorterStateTree"));
+	SorterStateTree->SetStartLogicAutomatically(false);
+	SortingAnimation = CreateDefaultSubobject<UMD_TrashSorterAnimationComponent>(TEXT("SortingAnimation"));
 	SortActionText = NSLOCTEXT("MDInteraction", "TrashSorterSortAction", "분류");
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
 	Mesh->SetCollisionProfileName(TEXT("BlockAll"));
 	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
-
-	InsertSoundTag = FGameplayTag::RequestGameplayTag(
-		TEXT("SFX.Carry.Bin.Insert"), /*ErrorIfNotFound*/ false);
 
 	// 고정 설치물. 밀려나면 안 된다
 	Mesh->SetSimulatePhysics(false);
@@ -52,6 +58,7 @@ void AMD_TrashSorter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_TrashSorter, SortedCount);
+	DOREPLIFETIME(AMD_TrashSorter, RuntimeState);
 }
 
 void AMD_TrashSorter::OnConstruction(const FTransform& Transform)
@@ -59,6 +66,21 @@ void AMD_TrashSorter::OnConstruction(const FTransform& Transform)
 	Super::OnConstruction(Transform);
 
 	ApplyCategoryTint();
+}
+
+void AMD_TrashSorter::PostInitializeComponents()
+{
+	Super::PostInitializeComponents();
+	// Enforce server-only startup even when an existing BP overrides the component default.
+	SorterStateTree->SetStartLogicAutomatically(false);
+}
+
+void AMD_TrashSorter::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+	SorterStateTree->StopLogic(TEXT("TrashSorter EndPlay"));
+	EndSortingState();
+	SortingAnimation->StopSorting();
+	Super::EndPlay(EndPlayReason);
 }
 
 void AMD_TrashSorter::BeginPlay()
@@ -79,6 +101,11 @@ void AMD_TrashSorter::BeginPlay()
 			TEXT("'%s'의 Accepted Category '%s'는 분류 칸이 아니다. 이 분류기는 아무것도 삼키지 않는다."),
 			*GetName(), *AcceptedCategory.ToString());
 		return;
+	}
+
+	if (HasAuthority())
+	{
+		SorterStateTree->StartLogic();
 	}
 }
 
@@ -108,8 +135,18 @@ FText AMD_TrashSorter::GetInteractionPrompt_Implementation(AActor* Interactor) c
 bool AMD_TrashSorter::CanInteract_Implementation(AActor* Interactor) const
 {
 	// 거리와 조준은 InteractionComponent의 공통 Trace 및 서버 재검증이 담당한다.
-	return UMD_TrashLibrary::IsTrashCategory(AcceptedCategory)
-		&& IsValid(GetHeldSortableForInteractor(Interactor));
+	return RuntimeState.bReady && !RuntimeState.bSorting && !bHasPendingSortRequest
+		&& (!HasAuthority() || (SorterStateTree->IsRunning() && !SorterStateTree->IsPaused()))
+		&& IsValid(Interactor) && Interactor->IsA<APawn>();
+}
+
+bool AMD_TrashSorter::CanAcceptHeldItem(AActor* Interactor) const
+{
+	if (!UMD_TrashLibrary::IsTrashCategory(AcceptedCategory)) return false;
+	AActor* Item = GetHeldSortableForInteractor(Interactor);
+	if (!IsValid(Item)) return false;
+	const AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Item);
+	return !IsValid(QuestItem) || QuestItem->CanBeDestroyedByGameplay();
 }
 
 AActor* AMD_TrashSorter::GetHeldSortableForInteractor(AActor* Interactor) const
@@ -126,54 +163,63 @@ AActor* AMD_TrashSorter::GetHeldSortableForInteractor(AActor* Interactor) const
 		return nullptr;
 	}
 
-	return HeldActor->Implements<UMD_TrashContainer>()
-		|| HeldActor->Implements<UMD_TrashSortable>()
+	return !HeldActor->Implements<UMD_TrashContainer>()
+		&& HeldActor->Implements<UMD_TrashSortable>()
 		? HeldActor
 		: nullptr;
 }
 
 void AMD_TrashSorter::Interact_Implementation(AActor* Interactor)
 {
-	// BP에서 직접 호출하더라도 서버 권한·분류 카테고리·현재 운반 상태를 다시 검증한다.
-	if (!HasAuthority() || !CanInteract_Implementation(Interactor))
-	{
-		return;
-	}
+	if (!HasAuthority() || !CanInteract_Implementation(Interactor)) return;
 
-	APawn* Pawn = Cast<APawn>(Interactor);
-	UMD_InteractionComponent* Interaction = IsValid(Pawn)
-		? Pawn->FindComponentByClass<UMD_InteractionComponent>()
-		: nullptr;
-	AActor* HeldActor = GetHeldSortableForInteractor(Interactor);
-	if (!IsValid(Interaction) || !IsValid(HeldActor))
-	{
-		return;
-	}
-
-	// 물리 핸들이 파괴될 액터를 계속 붙잡지 않도록 먼저 정상 해제한다.
-	Interaction->ReleaseHeldActor();
-
-	if (HeldActor->Implements<UMD_TrashContainer>())
-	{
-		JudgeAndSwallowContainer(HeldActor);
-		return;
-	}
-
-	JudgeAndSwallow(HeldActor);
+	// Invalid held items still reach Interact so the tree can play its Error feedback.
+	const bool bCanAcceptItem = CanAcceptHeldItem(Interactor);
+	PendingInteractor = Interactor;
+	PendingItem = bCanAcceptItem ? GetHeldSortableForInteractor(Interactor) : nullptr;
+	bHasPendingSortRequest = true;
+	// Reserve both accepted and rejected requests until their event has been processed.
+	RuntimeState.bReady = false;
+	RuntimeState.bHasResult = false;
+	ForceNetUpdate();
+	SorterStateTree->SendStateTreeEvent(bCanAcceptItem ? TAG_TrashSorter_Request : TAG_TrashSorter_Rejected);
 }
 
-void AMD_TrashSorter::JudgeAndSwallow(AActor* Item)
+bool AMD_TrashSorter::EnterReadyState()
 {
-	if (!IsValid(Item) || ActorsBeingProcessed.Contains(TWeakObjectPtr<AActor>(Item)))
-	{
-		return;
-	}
+	if (!HasAuthority() || RuntimeState.bSorting) return false;
+	ClearPendingSortRequest();
+	RuntimeState.bReady = true;
+	ForceNetUpdate();
+	return true;
+}
 
-	AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Item);
-	if (IsValid(QuestItem) == true && QuestItem->CanBeDestroyedByGameplay() == false)
+void AMD_TrashSorter::ExitReadyState()
+{
+	if (!HasAuthority()) return;
+	RuntimeState.bReady = false;
+	ForceNetUpdate();
+}
+
+void AMD_TrashSorter::ClearPendingSortRequest()
+{
+	PendingInteractor.Reset();
+	PendingItem.Reset();
+	bHasPendingSortRequest = false;
+}
+
+bool AMD_TrashSorter::BeginPendingSort()
+{
+	if (!HasAuthority() || RuntimeState.bSorting || !bHasPendingSortRequest) return false;
+
+	AActor* Interactor = PendingInteractor.Get();
+	AActor* Item = PendingItem.Get();
+	// Consume the request once, including failures. Never substitute a newly held item.
+	ClearPendingSortRequest();
+	if (!IsValid(Item) || !CanAcceptHeldItem(Interactor)
+		|| GetHeldSortableForInteractor(Interactor) != Item)
 	{
-		// 파괴 불가 퀘스트 아이템을 단일 투입 경로에서도 소비하지 않는 보호 처리
-		return;
+		return false;
 	}
 
 	AMD_GameStateBase* MDGameState = nullptr;
@@ -181,145 +227,98 @@ void AMD_TrashSorter::JudgeAndSwallow(AActor* Item)
 	FMD_TrashSortResult Result;
 	if (!GetServerLedgers(MDGameState, Merchant) || !ResolveSortResult(Item, Result))
 	{
-		// 데이터 누락 시 원인 액터를 없애지 않는다.
-		return;
+		// Reject before releasing the item when data or accounting services are unavailable.
+		return false;
 	}
 
-	FVector SwallowLocation = Item->GetActorLocation();
-	TWeakObjectPtr<AActor> ItemPtr(Item);
-	ActorsBeingProcessed.Add(ItemPtr);
+	UMD_InteractionComponent* Interaction = Interactor->FindComponentByClass<UMD_InteractionComponent>();
+	if (!IsValid(Interaction)) return false;
+
+	const FVector SwallowLocation = Item->GetActorLocation();
+	const FMD_SorterItemVisual ItemVisual = UMD_TrashSorterAnimationComponent::CaptureItem(Item);
+	RuntimeState.bReady = false;
+	RuntimeState.bSorting = true;
+	Interaction->ReleaseHeldActor();
 
 	int32 RefundCredits = 0;
-	bool bConsumed = ConsumeSortable(Item, MDGameState, Result, RefundCredits);
-	ActorsBeingProcessed.Remove(ItemPtr);
-	if (!bConsumed)
+	if (!ConsumeSortable(Item, MDGameState, Result, RefundCredits))
 	{
-		return;
+		RuntimeState.bSorting = false;
+		ForceNetUpdate();
+		return false;
 	}
 
+	RuntimeState.bHasResult = true;
+	RuntimeState.bCorrectSort = Result.bCorrectSort;
+	RuntimeState.StartServerTime = MDGameState->GetServerWorldTimeSeconds();
+	RuntimeState.Duration = FMath::IsFinite(SortingDuration) ? FMath::Max(0.0f, SortingDuration) : 0.0f;
+	RuntimeState.ItemVisual = ItemVisual;
 	if (RefundCredits > 0)
 	{
-		// 정분류 환급을 일일 보고서의 분류 금액 행에 기록
 		Merchant->AddCredits(EMD_DailyReportCategory::Categorizing, RefundCredits);
 	}
 
 	ForceNetUpdate();
 	MulticastItemSwallowed(Result.bCorrectSort, SwallowLocation);
+	RefreshSortingPresentation();
+	return true;
 }
 
-void AMD_TrashSorter::JudgeAndSwallowContainer(AActor* ContainerActor)
+float AMD_TrashSorter::GetSortingRemainingTime() const
 {
-	if (!IsValid(ContainerActor)
-		|| ActorsBeingProcessed.Contains(TWeakObjectPtr<AActor>(ContainerActor)))
+	if (!RuntimeState.bSorting || !GetWorld()) return 0.0f;
+	const AGameStateBase* GameState = GetWorld()->GetGameState();
+	if (!GameState) return RuntimeState.Duration;
+	return static_cast<float>(FMath::Clamp(
+		RuntimeState.StartServerTime + RuntimeState.Duration - GameState->GetServerWorldTimeSeconds(),
+		0.0, static_cast<double>(RuntimeState.Duration)));
+}
+
+void AMD_TrashSorter::EndSortingState()
+{
+	if (!HasAuthority()) return;
+	ClearPendingSortRequest();
+	RuntimeState.bReady = false;
+	if (RuntimeState.bSorting)
 	{
-		return;
+		RuntimeState.bSorting = false;
+		RuntimeState.ItemVisual = FMD_SorterItemVisual();
+		RefreshSortingPresentation();
 	}
-
-	AMD_GameStateBase* MDGameState = nullptr;
-	UMD_MerchantSubsystem* Merchant = nullptr;
-	if (!GetServerLedgers(MDGameState, Merchant))
-	{
-		return;
-	}
-
-	// Drain이 최신 overlap을 반영한 최종 소비 목록을 반환한다.
-	FVector SwallowLocation = ContainerActor->GetActorLocation();
-	TWeakObjectPtr<AActor> ContainerPtr(ContainerActor);
-	ActorsBeingProcessed.Add(ContainerPtr);
-
-	TArray<AActor*> DrainedContents;
-	if (!IMD_TrashContainer::Execute_TryDrainContentsForSorting(
-		ContainerActor, DrainedContents))
-	{
-		ActorsBeingProcessed.Remove(ContainerPtr);
-		return;
-	}
-
-	// 정상적인 서버 TrashBin은 반드시 파괴된다. 실패는 복구 분기 대신 개발 중 invariant 위반으로 알린다.
-	bool bContainerDestroyed = ContainerActor->Destroy();
-	ensureMsgf(bContainerDestroyed,
-		TEXT("분류기에 들어온 컨테이너 '%s' 파괴에 실패했습니다."),
-		*GetNameSafe(ContainerActor));
-	ActorsBeingProcessed.Remove(ContainerPtr);
-
-	int32 CorrectCount = 0;
-	int32 MisSortCount = 0;
-	int32 DiscardedCount = 0;
-	int32 TotalRefundCredits = 0;
-
-	for (AActor* Content : DrainedContents)
-	{
-		if (!IsValid(Content)) continue;
-
-		TWeakObjectPtr<AActor> ContentPtr(Content);
-		if (ActorsBeingProcessed.Contains(ContentPtr)) continue;
-		ActorsBeingProcessed.Add(ContentPtr);
-
-		AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Content);
-		if (IsValid(QuestItem) == true && QuestItem->CanBeDestroyedByGameplay() == false)
-		{
-			// 컨테이너에서 배출된 파괴 불가 퀘스트 아이템을 월드에 남기는 보호 처리
-			ActorsBeingProcessed.Remove(ContentPtr);
-			continue;
-		}
-
-		if (!Content->Implements<UMD_TrashSortable>())
-		{
-			// 샘플처럼 분류 계약이 없는 내용물은 점수/환급 없이 소비한다.
-			AMD_SampleItem* Sample = Cast<AMD_SampleItem>(Content);
-			TOptional<EMD_SampleGrade> DestroyedSampleGrade = Sample
-				? TOptional<EMD_SampleGrade>(Sample->Grade)
-				: TOptional<EMD_SampleGrade>();
-			FPrimaryAssetId DestroyedSampleQuestDefinitionId = Sample != nullptr ? Sample->QuestDefinitionId : FPrimaryAssetId();
-			if (Content->Destroy())
-			{
-				if (DestroyedSampleGrade.IsSet())
-				{
-					Merchant->NotifySampleDestroyed(DestroyedSampleQuestDefinitionId, DestroyedSampleGrade.GetValue());
-				}
-				++DiscardedCount;
-			}
-			ActorsBeingProcessed.Remove(ContentPtr);
-			continue;
-		}
-
-		FMD_TrashSortResult Result;
-		if (!ResolveSortResult(Content, Result))
-		{
-			UE_LOG(MarineDemolition, Error,
-				TEXT("'%s'의 분류 정책이 유효하지 않아 점수 없이 폐기합니다."),
-				*GetNameSafe(Content));
-			if (Content->Destroy())
-			{
-				++DiscardedCount;
-			}
-			ActorsBeingProcessed.Remove(ContentPtr);
-			continue;
-		}
-
-		int32 ItemRefundCredits = 0;
-		if (ConsumeSortable(Content, MDGameState, Result, ItemRefundCredits))
-		{
-			Result.bCorrectSort ? ++CorrectCount : ++MisSortCount;
-			TotalRefundCredits += ItemRefundCredits;
-		}
-		ActorsBeingProcessed.Remove(ContentPtr);
-	}
-
-	// 내용물 수와 무관하게 Merchant delegate/복제 갱신은 한 번만 일으킨다.
-	if (TotalRefundCredits > 0)
-	{
-		// 일괄 정분류 환급을 일일 보고서의 분류 금액 행에 기록
-		Merchant->AddCredits(EMD_DailyReportCategory::Categorizing, TotalRefundCredits);
-	}
-
 	ForceNetUpdate();
-	MulticastContainerSwallowed(
-		CorrectCount,
-		MisSortCount,
-		DiscardedCount,
-		TotalRefundCredits,
-		SwallowLocation);
+}
+
+void AMD_TrashSorter::OnRep_RuntimeState(const FMD_TrashSorterRuntimeState& PreviousState)
+{
+	if (PreviousState.bSorting != RuntimeState.bSorting
+		|| (RuntimeState.bSorting && (PreviousState.StartServerTime != RuntimeState.StartServerTime
+			|| PreviousState.ItemVisual.Mesh != RuntimeState.ItemVisual.Mesh)))
+	{
+		RefreshSortingPresentation();
+	}
+}
+
+void AMD_TrashSorter::RefreshSortingPresentation()
+{
+	const float Remaining = GetSortingRemainingTime();
+	if (RuntimeState.bSorting)
+		SortingAnimation->StartSorting(RuntimeState.ItemVisual, RuntimeState.Duration, RuntimeState.Duration - Remaining);
+	else
+		SortingAnimation->StopSorting();
+	OnSortingStateChanged(RuntimeState.bSorting, RuntimeState.bCorrectSort, Remaining);
+}
+
+bool AMD_TrashSorter::BeginErrorState()
+{
+	if (!HasAuthority()) return false;
+	ClearPendingSortRequest();
+	MulticastErrorFeedback();
+	return true;
+}
+
+void AMD_TrashSorter::MulticastErrorFeedback_Implementation()
+{
+	OnSortErrorFeedback();
 }
 
 bool AMD_TrashSorter::ResolveSortResult(
@@ -389,47 +388,9 @@ bool AMD_TrashSorter::GetServerLedgers(
 	return IsValid(OutGameState) && IsValid(OutMerchant);
 }
 
-void AMD_TrashSorter::MulticastContainerSwallowed_Implementation(
-	const int32 CorrectCount,
-	const int32 MisSortCount,
-	const int32 DiscardedCount,
-	const int32 RefundCredits,
-	const FVector Location)
-{
-	OnContainerSwallowed(
-		CorrectCount,
-		MisSortCount,
-		DiscardedCount,
-		RefundCredits,
-		Location);
-
-	// 통째 투입은 품목 수와 무관하게 한 번만 낸다. 품목마다 내면 겹쳐서 뭉갠다.
-	PlayInsertSound(Location);
-}
-
 void AMD_TrashSorter::MulticastItemSwallowed_Implementation(const bool bCorrectSort, const FVector Location)
 {
 	OnItemSwallowed(bCorrectSort, Location);
-	PlayInsertSound(Location);
-}
-
-void AMD_TrashSorter::PlayInsertSound(const FVector& Location) const
-{
-	if (!InsertSoundTag.IsValid())
-	{
-		return;
-	}
-
-	const UWorld* const World = GetWorld();
-	if (World == nullptr)
-	{
-		return;
-	}
-
-	if (UMD_AudioSubsystem* const Audio = World->GetSubsystem<UMD_AudioSubsystem>())
-	{
-		Audio->PlayEventAtLocation(InsertSoundTag, Location);
-	}
 }
 
 void AMD_TrashSorter::ApplyCategoryTint()

@@ -54,6 +54,13 @@ FReply UMD_CharacterSelectWidget::NativeOnKeyDown(const FGeometry& InGeometry, c
 		return FReply::Handled();
 	}
 
+	// 프로젝트 CommonUI 입력 데이터에 Back 액션이 지정돼 있지 않아 bIsBackHandler만으로는 ESC가 오지 않는다
+	if (InKeyEvent.IsRepeat() == false && Key == CloseKey)
+	{
+		Cancel();
+		return FReply::Handled();
+	}
+
 	return Super::NativeOnKeyDown(InGeometry, InKeyEvent);
 }
 

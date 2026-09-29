@@ -85,4 +85,5 @@ private:
 	FMD_AudioHandle CutLoopHandle;
 
 	FTimerHandle ProgressTimerHandle;
+	TWeakObjectPtr<class AMD_QuestRackSpawner> ActiveRackTarget;
 };

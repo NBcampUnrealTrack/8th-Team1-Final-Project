@@ -4,14 +4,13 @@
 
 #include "CoreMinimal.h"
 #include "Blueprint/UserWidget.h"
-#include "Styling/SlateBrush.h"
 #include "Types/Merchant/MD_MerchantTypes.h"
 
 #include "MD_QuestWidget.generated.h"
 
 class UImage;
 class UCommonButtonGroupBase;
-class UScrollBox;
+class UVerticalBox;
 class UTextBlock;
 class UMD_CommonButtonBase;
 class UMD_QuestCardWidget;
@@ -67,64 +66,72 @@ protected:
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "MD|Quest")
 	TObjectPtr<UMD_QuestCardWidget> SelectedQuestCard;
 
-	// 디자이너가 지정한 메인 퀘스트 상세 아이콘 Brush
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Appearance")
-	FSlateBrush MainQuestIcon;
-
-	// 디자이너가 지정한 반복 퀘스트 상세 아이콘 Brush
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Appearance")
-	FSlateBrush RepeatQuestIcon;
-
-	// 동적으로 생성한 메인 및 반복 퀘스트 카드를 담는 스크롤 목록
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
-	TObjectPtr<UScrollBox> SB_QuestList;
-
-	// 선택된 퀘스트 종류에 맞는 아이콘을 표시하는 이미지
+	// 메인 퀘스트 카드를 배치하는 목록 영역
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UImage> Img_DetailType;
+	TObjectPtr<UVerticalBox> VB_MainQuest;
 
-	// 선택된 퀘스트의 메인 또는 반복 종류를 표시하는 텍스트
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
-	TObjectPtr<UTextBlock> Txt_DetailType;
+	// 반복 퀘스트 카드를 배치하는 목록 영역
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UVerticalBox> VB_RepeatQuest;
 
-	// 선택된 퀘스트 이름을 표시하는 텍스트
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
-	TObjectPtr<UTextBlock> Txt_DetailName;
+	// 선택된 퀘스트의 카드와 동일한 상태 문구 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Detail_State;
 
-	// 선택된 퀘스트의 현재 진행 수량을 표시하는 텍스트
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	// 선택된 퀘스트 이름 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Detail_Name;
+
+	// 현재 페이즈의 목표 종류 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_DetailProgress;
 
-	// 선택된 퀘스트의 현재 목표 내용을 표시하는 텍스트
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
-	TObjectPtr<UTextBlock> Txt_DetailDescription;
+	// 현재 페이즈의 누적 진행 수량 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_DetailProgress_Current;
 
-	// 성공 보상 호감도 값을 표시하는 텍스트
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
-	TObjectPtr<UTextBlock> Txt_AffinityReward;
+	// 현재 페이즈의 요구 수량 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_DetailProgress_Total;
 
-	// 성공 보상 점수 값을 표시하는 텍스트
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
-	TObjectPtr<UTextBlock> Txt_ScoreReward;
+	// 현재 페이즈 목표 달성 시 체크 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UImage> Img_DetailProgress;
 
-	// 성공 보상 크레딧 값을 표시하는 텍스트
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
-	TObjectPtr<UTextBlock> Txt_CreditReward;
+	// 현재 페이즈의 목표 설명 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Detail_Description;
 
-	// 제시된 반복 퀘스트를 수락하는 공통 버튼
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	// 보상 수령 가능 상태에서만 표시할 안내 문구
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_CompletionMessage;
+
+	// 성공 보상 호감도 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Reward_Affinity;
+
+	// 성공 보상 점수 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Reward_Score;
+
+	// 성공 보상 크레딧 표시
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Reward_Credit;
+
+	// 제시된 반복 퀘스트 수락 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_CommonButtonBase> Btn_Accept;
 
-	// 제시된 반복 퀘스트를 거절하는 공통 버튼
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	// 제시된 반복 퀘스트 거절 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_CommonButtonBase> Btn_Reject;
 
-	// 목표를 달성한 반복 퀘스트의 보상을 수령하는 공통 버튼
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	// 목표를 달성한 반복 퀘스트 보상 수령 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_CommonButtonBase> Btn_Reward;
 
-	// 진행 중인 반복 퀘스트를 포기하는 공통 버튼
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidget))
+	// 진행 중인 반복 퀘스트 포기 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
 	TObjectPtr<UMD_CommonButtonBase> Btn_Giveup;
 
 public:
@@ -150,9 +157,6 @@ protected:
 
 	// 현재 선택 카드의 데이터로 우측 상세 및 액션 버튼을 갱신하는 함수
 	void RefreshQuestDetail();
-
-	// 공통 버튼 카드의 기본 클릭 이벤트를 선택 처리로 연결하는 함수
-	void HandleQuestCardClicked(UMD_QuestCardWidget* QuestCard);
 
 	// 선택된 반복 퀘스트의 수락 요청을 전달하는 함수
 	void HandleAcceptClicked();

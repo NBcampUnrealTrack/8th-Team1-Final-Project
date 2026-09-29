@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "World/Sample/MD_SampleShelf.h"
 #include "World/Wall/MD_WallUtility.h"
+#include "Types/MD_SampleFloatSettings.h"
 #include "MD_WorldActorSnapshotTypes.generated.h"
 
 // 재생성 가능한 맵 액터의 배치 레벨과 클래스 및 위치 기록
@@ -49,6 +50,9 @@ struct MARINEDEMOLITION_API FMD_QuestItemRecord : public FMD_WorldActorRecord
     // 복원된 샘플의 복귀 구역 자동 제출 자격 보존
     UPROPERTY()
     bool bHasBeenCarried = false;
+
+    UPROPERTY()
+    FMD_SampleFloatSettings WaterFloat;
 };
 
 // 수거되지 않은 일반 쓰레기의 종류와 외형 기록
@@ -172,6 +176,22 @@ struct MARINEDEMOLITION_API FMD_StreamingRecord : public FMD_WorldActorRecord
     FString InstanceName;
 };
 
+// Rack-local progress; contamination itself uses the shared surface snapshot.
+USTRUCT()
+struct MARINEDEMOLITION_API FMD_QuestRackRecord : public FMD_WorldActorRecord
+{
+    GENERATED_BODY()
+    UPROPERTY() uint8 Mode = 2;
+    UPROPERTY() bool bCartridgeReleased = false;
+    UPROPERTY() bool bCartridgeCollected = false;
+    UPROPERTY() bool bRackDisabled = false;
+    UPROPERTY() FName CartridgeActorName;
+    UPROPERTY() FName CartridgeLevelPackage;
+    UPROPERTY() bool bPadlockCut = false;
+    UPROPERTY() float CutSeconds = 0.f;
+    UPROPERTY() TArray<float> BarnacleRemovalRatios;
+};
+
 // 동일한 수집 시점의 월드 액터 변경 기록
 USTRUCT()
 struct MARINEDEMOLITION_API FMD_WorldActorSnapshot
@@ -209,6 +229,9 @@ struct MARINEDEMOLITION_API FMD_WorldActorSnapshot
     // 퀘스트 카트리지 단말의 재사용 방지 기록
     UPROPERTY()
     TArray<FMD_TerminalRecord> Terminals;
+
+    UPROPERTY()
+    TArray<FMD_QuestRackRecord> QuestRacks;
 
     // 방문한 동적 스트리밍 구역의 복원 순서 결정 기록
     UPROPERTY()

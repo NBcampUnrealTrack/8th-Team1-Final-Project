@@ -1367,8 +1367,7 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 	bScrapeAbilityInputCaptured = bIsScrapeAbility;
 	if (bIsScrapeAbility && IsValid(ScrapeToolComponent) && !ScrapeToolComponent->IsScrapeFocusActive())
 	{
-		if (UAbilitySystemComponent* AbilitySystem = GetAbilitySystemComponent())
-			AbilitySystem->TryActivateAbilitiesByTag(FGameplayTagContainer(CurrentTool->ToolAbilityTag));
+		EquipHotbarComponent->TryActivateCurrentItemAbility();
 		return;
 	}
 	if (bIsScrapeAbility

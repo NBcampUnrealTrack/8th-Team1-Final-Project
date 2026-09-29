@@ -19,6 +19,9 @@ class UMD_ToolDefinition;
 class UMD_ScannerModeWidget;
 class APawn;
 class AController;
+class UAudioComponent;
+class USoundBase;
+class AMD_QuestItem;
 
 /** Local, temporary depth mask. It shares live contamination textures with the surface. */
 USTRUCT()
@@ -74,6 +77,19 @@ public:
 	void ClearScan(bool bNotifyServer = true);
 
 protected:
+	/** Passive locator: audible only to the player holding this scanner. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Scanner|Quest Locator")
+	bool bEnableQuestLocator = true;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Scanner|Quest Locator", meta=(ClampMin="100", Units="cm"))
+	float QuestLocatorRadius = 3000.f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Scanner|Quest Locator", meta=(ClampMin="0.6", Units="s"))
+	float QuestLocatorInterval = 1.5f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Scanner|Quest Locator")
+	TObjectPtr<USoundBase> QuestLocatorSound;
+
 	/** Dedicated wall-style pass, installed on the local camera only during a wall scan. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Scanner|Visual")
 	TObjectPtr<UMaterialInterface> WallScanMaterial;
@@ -85,6 +101,16 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
 private:
+	friend class FMDQuestLocatorTest;
+	UPROPERTY(Transient)
+	TObjectPtr<UAudioComponent> QuestLocatorAudio;
+	TWeakObjectPtr<AMD_QuestItem> QuestLocatorTarget;
+	FTimerHandle QuestLocatorTimer;
+	double NextQuestLocatorTime = 0;
+	int32 QuestLocatorIndex = 0;
+	void UpdateQuestLocator();
+	void StopQuestLocator();
+
 	UPROPERTY(Transient, BlueprintReadOnly, Category="MD|Scanner", meta=(AllowPrivateAccess="true"))
 	EMD_ScanMode ScanMode = EMD_ScanMode::InternalStructure;
 

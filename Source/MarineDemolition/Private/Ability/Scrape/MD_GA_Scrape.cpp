@@ -6,6 +6,8 @@
 #include "Character/MD_Character.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Component/Scrape/MD_StainScraperComponent.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/World.h"
 #include "GameplayPrediction.h"
 #include "TimerManager.h"
@@ -38,6 +40,7 @@ UMD_GA_Scrape::UMD_GA_Scrape()
 	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
 	NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
 	ReplicationPolicy = EGameplayAbilityReplicationPolicy::ReplicateNo;
+	bServerRespectsRemoteAbilityCancellation = true;
 }
 
 void UMD_GA_Scrape::ActivateAbility(
@@ -61,7 +64,11 @@ void UMD_GA_Scrape::ActivateAbility(
 	{
 		UMD_StainScraperComponent* StainScraper = Character->GetStainScraperComponent();
 		bStainStroke = true;
-		if (!StainScraper || !CommitAbility(Handle, ActorInfo, ActivationInfo) || !StainScraper->StartStroke())
+		// A predicted activation must still belong to the currently equipped tool on the server.
+		const UMD_ToolDefinition* SourceTool = Cast<UMD_ToolDefinition>(GetSourceObject(Handle, ActorInfo));
+		if (!StainScraper || !SourceTool || !Character->GetHotbarComponent()
+			|| Character->GetHotbarComponent()->GetCurrentTool() != SourceTool
+			|| !CommitAbility(Handle, ActorInfo, ActivationInfo) || !StainScraper->StartStroke(Handle))
 		{
 			EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 			return;
@@ -443,7 +450,7 @@ void UMD_GA_Scrape::EndAbility(
 	{
 		if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(StainStrokeTimer);
 		AMD_Character* Character = Cast<AMD_Character>(ActorInfo ? ActorInfo->AvatarActor.Get() : nullptr);
-		if (Character && Character->GetStainScraperComponent()) Character->GetStainScraperComponent()->CancelStroke();
+		if (Character && Character->GetStainScraperComponent()) Character->GetStainScraperComponent()->CancelStroke(false);
 		bStainStroke = false;
 		Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 		return;

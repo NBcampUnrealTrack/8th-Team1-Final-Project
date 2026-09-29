@@ -6,6 +6,7 @@
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Trash/MD_TrashItem.h"
 #include "World/Wall/MD_CuttableWall.h"
+#include "World/Sample/MD_QuestRackSpawner.h"
 
 void FMD_WorldActorPersistence::CaptureActor(AActor* Actor, FMD_WorldActorRecord& Out)
 {
@@ -164,6 +165,7 @@ bool FMD_WorldActorPersistence::Capture(UWorld* World, FMD_WorldActorSnapshot& O
                 Record.bDamaged = Sample->bDamaged;
                 // 미운반 샘플의 오납품과 운반한 샘플의 자격 유실 방지
                 Record.bHasBeenCarried = Sample->HasBeenCarried();
+				Record.WaterFloat = Sample->WaterFloat;
             }
             // 같은 물품의 다른 분류 중복 기록 방지
             continue;
@@ -226,6 +228,13 @@ bool FMD_WorldActorPersistence::Capture(UWorld* World, FMD_WorldActorSnapshot& O
             // 다른 분류 검사 생략
             continue;
         }
+        if (AMD_QuestRackSpawner* Rack = Cast<AMD_QuestRackSpawner>(Actor))
+        {
+            FMD_QuestRackRecord& Record = Out.QuestRacks.AddDefaulted_GetRef();
+            CaptureActor(Actor, Record);
+            Rack->CaptureRackState(Record);
+            continue;
+        }
         // 완료된 카트리지 단말의 재사용 방지 상태 조회
         AMD_DataDumpTerminal* Terminal = Cast<AMD_DataDumpTerminal>(Actor);
         // 단말 사용 완료와 전원 잠금을 함께 기록
@@ -285,7 +294,7 @@ bool FMD_WorldActorPersistence::Validate(const FMD_WorldActorSnapshot& Snapshot)
         // 기록된 형식 표시 없이 본문만 섞인 데이터 거부
         return Snapshot.QuestItems.IsEmpty() == true && Snapshot.TrashItems.IsEmpty() == true && Snapshot.Pickups.IsEmpty() == true
             && Snapshot.WallProgress.IsEmpty() == true && Snapshot.Utilities.IsEmpty() == true && Snapshot.Shelves.IsEmpty() == true
-            && Snapshot.Terminals.IsEmpty() == true && Snapshot.Streaming.IsEmpty() == true;
+            && Snapshot.Terminals.IsEmpty() == true && Snapshot.Streaming.IsEmpty() == true && Snapshot.QuestRacks.IsEmpty();
     }
     // 여러 분류가 동일 액터를 중복 적용하는 상황 방지
     TSet<FName> Keys;
@@ -312,7 +321,8 @@ bool FMD_WorldActorPersistence::Validate(const FMD_WorldActorSnapshot& Snapshot)
         || ValidateRecords(Snapshot.WallProgress, AMD_CuttableWall::StaticClass()) == false
         || ValidateRecords(Snapshot.Utilities, AMD_WallUtility::StaticClass()) == false
         || ValidateRecords(Snapshot.Shelves, AMD_SampleShelf::StaticClass()) == false
-        || ValidateRecords(Snapshot.Terminals, AMD_DataDumpTerminal::StaticClass()) == false)
+        || ValidateRecords(Snapshot.Terminals, AMD_DataDumpTerminal::StaticClass()) == false
+        || ValidateRecords(Snapshot.QuestRacks, AMD_QuestRackSpawner::StaticClass()) == false)
     {
         // 잘못된 종류의 액터 생성을 차단하는 실패 반환
         return false;
@@ -331,7 +341,8 @@ bool FMD_WorldActorPersistence::Validate(const FMD_WorldActorSnapshot& Snapshot)
     for (auto& Record : Snapshot.QuestItems)
     {
         // 잘못된 열거 값의 납품 판정 유입 차단
-        if (StaticEnum<EMD_SampleGrade>()->IsValidEnumValue(static_cast<int64>(Record.Grade)) == false)
+        if (StaticEnum<EMD_SampleGrade>()->IsValidEnumValue(static_cast<int64>(Record.Grade)) == false
+            || !Record.WaterFloat.IsValid())
         {
             // 손상된 등급 거부
             return false;
@@ -356,6 +367,10 @@ bool FMD_WorldActorPersistence::Validate(const FMD_WorldActorSnapshot& Snapshot)
             // 잘못된 단계 거부
             return false;
         }
+    }
+    for (const FMD_QuestRackRecord& Record : Snapshot.QuestRacks)
+    {
+        if (!AMD_QuestRackSpawner::ValidateRackState(Record)) return false;
     }
     // 누적 절단량의 숫자 손상 검사
     for (auto& Record : Snapshot.WallProgress)
@@ -500,7 +515,8 @@ bool FMD_WorldActorPersistence::CanRestore(UWorld* World, const FMD_WorldActorSn
     if (CheckTargets(Snapshot.QuestItems, false) == false || CheckTargets(Snapshot.TrashItems, false) == false
         || CheckTargets(Snapshot.Pickups, false) == false || CheckTargets(Snapshot.WallProgress, true) == false
         || CheckTargets(Snapshot.Utilities, true) == false || CheckTargets(Snapshot.Shelves, true) == false
-        || CheckTargets(Snapshot.Terminals, true) == false || CheckTargets(Snapshot.Streaming, true) == false)
+        || CheckTargets(Snapshot.Terminals, true) == false || CheckTargets(Snapshot.Streaming, true) == false
+        || CheckTargets(Snapshot.QuestRacks, true) == false)
     {
         // 필수 대상을 찾지 못한 복원 거부
         return false;
@@ -528,6 +544,11 @@ bool FMD_WorldActorPersistence::CanRestore(UWorld* World, const FMD_WorldActorSn
             // 월드를 변경하기 전 호환 실패 반환
             return false;
         }
+    }
+    for (const FMD_QuestRackRecord& Record : Snapshot.QuestRacks)
+    {
+        const AMD_QuestRackSpawner* Rack = Cast<AMD_QuestRackSpawner>(FindActor(World, Record));
+        if (!Rack || !Rack->CanRestoreRackState(Record)) return false;
     }
     // 모든 현재 대상의 복원 가능성 검사 완료
     return true;
@@ -597,6 +618,7 @@ bool FMD_WorldActorPersistence::Restore(UWorld* World, const FMD_WorldActorSnaps
         {
             // 납품 등급과 손상 외형 및 자동 제출 자격 동기화
             Sample->RestorePersistentSampleState(Record.Grade, Record.bDamaged, Record.bHasBeenCarried);
+			Sample->WaterFloat = Record.WaterFloat;
         }
         // 퀘스트 물품 복원 성공 반환
         return true;
@@ -684,6 +706,11 @@ bool FMD_WorldActorPersistence::Restore(UWorld* World, const FMD_WorldActorSnaps
         }
         // 전원과 완료 표시의 최종 상태 적용
         Terminal->RestorePersistentState(Record.bDumped, Record.bLocked);
+    }
+    for (const FMD_QuestRackRecord& Record : Snapshot.QuestRacks)
+    {
+        AMD_QuestRackSpawner* Rack = Cast<AMD_QuestRackSpawner>(FindActor(World, Record));
+        if (!Rack || !Rack->RestoreRackState(Record)) return false;
     }
     // 모든 맵 상호작용 상태 복원 완료
     return true;

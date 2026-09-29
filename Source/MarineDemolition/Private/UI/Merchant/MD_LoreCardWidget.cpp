@@ -5,36 +5,29 @@
 
 void UMD_LoreCardWidget::SetLoreEntry(int32 InLoreIndex, FText EntryName, bool bIsAcquired)
 {
-	// 번호 표시 대상의 유효성 확인
-	if (IsValid(TXT_LoreNumber) == true)
+	// 번호 위젯이 있는 구성에서만 표시 문자열 계산
+	if (IsValid(Txt_Index) == true)
 	{
-		// 카드 번호 갱신
-		TXT_LoreNumber->SetText(FText::FromString(FString::Printf(TEXT("%02d"), InLoreIndex + 1)));
-	}
-
-	// 제목 표시 대상의 유효성 확인
-	if (IsValid(TXT_LoreTitle) == true)
-	{
-		// 획득한 기록물의 제목을 기본 표시값으로 사용
-		FText DisplayName = EntryName;
-		// 미획득 기록물의 실제 제목 노출 방지
-		if (bIsAcquired == false)
+		// 카탈로그 순서를 최소 두 자리 번호로 표시
+		FString IndexString = FString::Printf(TEXT("%02d"), InLoreIndex + 1);
+		// 동일 번호의 FText 생성과 표시 갱신 생략
+		if (Txt_Index->GetText().ToString() != IndexString)
 		{
-			// 미획득 제목 대체 문구 적용
-			DisplayName = FText::FromString(TEXT("???"));
+			// 변경된 번호만 현재 위젯에 반영
+			Txt_Index->SetText(FText::FromString(IndexString));
 		}
-		// 획득 여부에 따른 제목 갱신
-		TXT_LoreTitle->SetText(DisplayName);
 	}
 
-	// 상태 표시 대상의 유효성 확인
-	if (IsValid(TXT_LoreState) == true)
+	// 미획득 기록물의 제목을 숨기면서 획득한 제목의 지역화 정보 유지
+	FText DisplayName = bIsAcquired == true ? EntryName : NSLOCTEXT("MDLoreCard", "UnknownTitle", "미발견 기록");
+	// 저장된 제목이나 실제 표시가 달라진 경우만 공통 버튼 갱신
+	if (GetContentText().IdenticalTo(DisplayName) == false
+		|| (IsValid(Txt_ButtonText) == true && Txt_ButtonText->GetText().IdenticalTo(DisplayName) == false))
 	{
-		// 카드 획득 상태 갱신
-		TXT_LoreState->SetText((bIsAcquired == true ? FText::FromString(TEXT("획득")) : FText::FromString(TEXT("미획득"))));
-		// 현재 획득 여부에 대응하는 에디터 지정 색상 선택
-		FLinearColor StateTextColor = bIsAcquired == true ? AcquiredStateTextColor : UnacquiredStateTextColor;
-		// 상태 문구와 동일한 획득 기준으로 색상 갱신
-		TXT_LoreState->SetColorAndOpacity(FSlateColor(StateTextColor));
+		// 재구성에 사용할 제목과 현재 표시를 함께 동기화
+		SetContentText(DisplayName);
 	}
+
+	// 상태 문구와 완료 표시 및 잠금 이미지에 현재 획득 여부 전달
+	SetLoreIsFound(bIsAcquired);
 }
