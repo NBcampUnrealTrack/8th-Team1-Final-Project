@@ -19,6 +19,7 @@ class MARINEDEMOLITION_API AMD_QuestItem : public AActor, public IGameplayTagAss
 public:
 	/** 물리 운반과 파괴 불가 정책을 구성하는 생성자 */
 	AMD_QuestItem();
+	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** 상호작용 시스템에 물리 운반·보관 분류 태그를 제공하는 함수 */
 	virtual void GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const override;
@@ -46,7 +47,7 @@ public:
 	virtual void SuppressImpactDamage(float Duration);
 
 	/** 아이템을 생성하거나 할당한 메인·반복 퀘스트와 납품 이벤트를 연결하는 식별자 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Quest")
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Replicated, Category = "MD|Quest")
 	FPrimaryAssetId QuestDefinitionId;
 
 protected:

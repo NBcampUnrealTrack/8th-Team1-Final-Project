@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "World/Sample/MD_SampleShelf.h"
 #include "World/Wall/MD_WallUtility.h"
+#include "Types/MD_SampleFloatSettings.h"
 #include "MD_WorldActorSnapshotTypes.generated.h"
 
 // 재생성 가능한 맵 액터의 배치 레벨과 클래스 및 위치 기록
@@ -49,6 +50,9 @@ struct MARINEDEMOLITION_API FMD_QuestItemRecord : public FMD_WorldActorRecord
     // 복원된 샘플의 복귀 구역 자동 제출 자격 보존
     UPROPERTY()
     bool bHasBeenCarried = false;
+
+    UPROPERTY()
+    FMD_SampleFloatSettings WaterFloat;
 };
 
 // 수거되지 않은 일반 쓰레기의 종류와 외형 기록

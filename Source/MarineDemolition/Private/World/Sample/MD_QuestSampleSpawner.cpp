@@ -715,6 +715,7 @@ void AMD_QuestSampleSpawner::SpawnMainQuestItems(const FMD_MainQuestState& Quest
 		{
 			// 파괴 가능한 샘플에 생성 직후 충격 보호를 추가하는 설정
 			Sample->SpawnProtectionDuration = SampleSpawnProtectionDuration;
+			if (WaterFloat.bEnabled) Sample->WaterFloat = WaterFloat;
 			Sample->SuppressImpactDamage(2.0f);
 			if (bRequiresSampleGrade == true)
 			{
@@ -783,6 +784,7 @@ void AMD_QuestSampleSpawner::SpawnRepeatQuestItems(const FMD_RepeatQuestState& Q
 		{
 			// 파괴 가능한 샘플에 생성 직후 충격 보호를 추가하는 설정
 			Sample->SpawnProtectionDuration = SampleSpawnProtectionDuration;
+			if (WaterFloat.bEnabled) Sample->WaterFloat = WaterFloat;
 			Sample->SuppressImpactDamage(2.0f);
 			if (bRequiresSampleGrade == true)
 			{

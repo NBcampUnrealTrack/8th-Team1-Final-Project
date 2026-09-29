@@ -74,6 +74,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Customization|Input")
 	FKey TurnRightKey = EKeys::E;
 
+	// 선택을 유지한 채 화면을 닫는 키. CommonUI 기본 Back 액션이 비어 있어도 ESC로 나갈 수 있게 직접 처리한다
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Customization|Input")
+	FKey CloseKey = EKeys::Escape;
+
 	UPROPERTY(meta = (BindWidgetOptional))
 	TObjectPtr<UPanelWidget> Panel_Characters;
 
