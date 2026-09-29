@@ -9,6 +9,12 @@ struct MARINEDEMOLITION_API FMD_StainStickerPatch
 {
 	GENERATED_BODY()
 	static constexpr int32 MaximumTriangles = 4096;
+#if WITH_EDITOR
+	/** Temporary thickness directions for surface fitting; never serialized into legacy stickers. */
+	TArray<FVector3f> FitNormals;
+	TArray<FVector3d> FitReceiverVertices;
+	TArray<FIntVector> FitReceiverTriangles;
+#endif
 	UPROPERTY() TArray<FVector3f> Positions;
 	UPROPERTY() TArray<FVector2f> UVs;
 	UPROPERTY() int32 InitialSize = 0;

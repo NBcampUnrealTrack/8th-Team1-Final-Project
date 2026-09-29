@@ -21,7 +21,8 @@ bool FMD_StainTargeting::Trace(UWorld& World, const FVector& Origin, const FVect
 		AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Candidate.GetActor());
 		if (!Stain) continue;
 		double Distance = Nearest;
-		const bool bHit = Stain->HasSticker() ? Stain->TraceSticker(Origin, Direction, Nearest, Distance)
+		const bool bHit = Stain->UsesSharedVolume() ? Stain->TraceVolume(Origin, Direction, Nearest, Distance)
+			: Stain->HasSticker() ? Stain->TraceSticker(Origin, Direction, Nearest, Distance)
 			: Surface && Stain->ContainsSurfacePoint(Surface->ImpactPoint, Surface->ImpactNormal);
 		if (!bHit) continue;
 		Nearest = Distance; bFound = true;

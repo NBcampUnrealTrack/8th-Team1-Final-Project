@@ -50,7 +50,7 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape")
 	FMD_ScrapeToolSpec ScrapeProfile;
 
-	/** Authoritative amount removed from a surface stain by one completed swing. */
+	/** Cleaning strength per completed swing: 100 removes 1000 stain-size units (one basic step); 200/300 remove two/three steps. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Scrape", meta = (ClampMin = "1", ClampMax = "10000"))
 	int32 StainRemovalAmount = 100;
 

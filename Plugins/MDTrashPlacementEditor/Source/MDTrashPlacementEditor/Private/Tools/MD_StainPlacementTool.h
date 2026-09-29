@@ -7,6 +7,7 @@
 #include "InteractiveToolBuilder.h"
 #include "MD_StainPlacementTool.generated.h"
 
+class AMD_SurfaceStain;
 class UStaticMeshComponent;
 class UPrimitiveComponent;
 class ULevel;
@@ -25,6 +26,8 @@ struct FMD_StainPlacementRequest
 	TWeakObjectPtr<ULevel> Level;
 	TWeakObjectPtr<UMD_SurfaceStainDefinition> Definition;
 	int32 Size = 0;
+	uint32 DefinitionRevision = 0;
+	bool bFitSurface = false;
 };
 
 UCLASS()
@@ -50,17 +53,17 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Stains", meta = (ClampMin = "0", EditCondition = "!bRandomVariant"))
 	int32 VariantIndex = 0;
 
-	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "10000", EditCondition = "!bRandomSize"))
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "5000", EditCondition = "!bRandomSize"))
 	int32 InitialSize = 300;
 
 	UPROPERTY(EditAnywhere, Category = "Size")
 	bool bRandomSize = false;
 
-	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "10000", EditCondition = "bRandomSize"))
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "5000", EditCondition = "bRandomSize"))
 	int32 MinSize = 100;
 
-	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "10000", EditCondition = "bRandomSize"))
-	int32 MaxSize = 10000;
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "5000", EditCondition = "bRandomSize"))
+	int32 MaxSize = 5000;
 
 	UPROPERTY(EditAnywhere, Category = "Placement", meta = (ClampMin = "1", Units = "cm"))
 	float SpacingCm = 60.0f;
@@ -74,17 +77,40 @@ public:
 	UPROPERTY(EditAnywhere, Category = "Placement")
 	int32 RandomSeed = 1337;
 
+	/** Bake the selected volume around connected receiving faces at authoring time. */
+	UPROPERTY(EditAnywhere, Category = "Placement", meta = (DisplayName = "Follow Surface"))
+	bool bFollowSurface = true;
+
 	UPROPERTY(EditAnywhere, Category = "Placement")
 	bool bErase = false;
 };
 
-/** Decal-specific placement, isolated from the mesh overlap/stacking policy of Trash. */
+/** Surface stain placement, isolated from the mesh overlap/stacking policy of Trash. */
 UCLASS()
 class UMD_StainPlacementTool : public UInteractiveTool, public IClickDragBehaviorTarget,
 	public IHoverBehaviorTarget, public IMouseWheelBehaviorTarget
 {
 	GENERATED_BODY()
 public:
+	/** Shared editor validation used by the live preview, committing, and authoring automation. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Stain|Placement")
+	static bool ValidateVolumePlacement(UWorld* World, UMD_SurfaceStainDefinition* Definition,
+		UPrimitiveComponent* Surface, const FTransform& ContactTransform, int32 InitialSize, FString& Error);
+
+	/** Resolve a nearby supported edge from a main-face hit; planar profiles retain their input frame. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Stain|Placement")
+	static bool ResolveVolumePlacement(UWorld* World, UMD_SurfaceStainDefinition* Definition,
+		UPrimitiveComponent* Surface, const FTransform& Hint, int32 InitialSize, FTransform& Contact, FString& Error);
+
+	/** Places an already-authored shared shape with the same contact checks and undo contract as this tool. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Stain|Placement")
+	static AMD_SurfaceStain* PlaceVolume(UWorld* World, UMD_SurfaceStainDefinition* Definition,
+		UPrimitiveComponent* Surface, const FTransform& ContactTransform, int32 InitialSize, FString& Error);
+
+	UFUNCTION(BlueprintCallable, Category = "MD|Stain|Placement")
+	static AMD_SurfaceStain* PlaceFittedVolume(UWorld* World, UMD_SurfaceStainDefinition* Definition,
+		UPrimitiveComponent* Surface, const FTransform& ContactTransform, int32 InitialSize, FString& Error);
+
 	void SetWorld(UWorld* World) { TargetWorld = World; }
 	bool IsPlacementPending() const { return !PendingPlacements.IsEmpty() || (ActiveBake.IsValid() && bBakeForPlacement); }
 	virtual void Setup() override;
@@ -122,6 +148,7 @@ private:
 	bool MatchesPreview(const FMD_StainPlacementRequest& Request) const;
 	void TickBake();
 	void StartBake(const FMD_StainPlacementRequest& Request, bool bForPlacement);
+	void CommitFit(const FMD_StainPlacementRequest& Request, UMD_SurfaceStainDefinition* Fit);
 	void CommitPrepared(const FMD_StainPlacementRequest& Request, FMD_StainStickerPatch Patch, UStaticMesh* Mesh);
 	void BeginStrokeTransaction();
 	void SetPreviewError(const FString& Error);
@@ -130,7 +157,12 @@ private:
 	UPROPERTY() TObjectPtr<UMD_StainPlacementProperties> Properties;
 	UPROPERTY(Transient) TObjectPtr<AActor> PreviewOwner;
 	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Preview;
-	UPROPERTY(Transient) TObjectPtr<UStaticMesh> PreviewPlane;
+	UPROPERTY(Transient) TObjectPtr<UStaticMesh> StickerPreviewMesh;
+	UPROPERTY(Transient) TObjectPtr<UMD_SurfaceStainDefinition> PreparedFit;
+	UPROPERTY(Transient) TObjectPtr<UStaticMesh> DraftPreview;
+	bool bDraftAttempted = false;
+	TSharedPtr<FMD_StainStickerAsyncBake> PreparedSurface;
+	bool bCompletingBake = false;
 	FInputDeviceRay LastHoverRay;
 	FInputDeviceRay PendingDragRay;
 	TSharedPtr<FMD_StainStickerAsyncBake> ActiveBake;
@@ -149,7 +181,9 @@ private:
 	FString PreviewError;
 	TWeakObjectPtr<UMD_SurfaceStainDefinition> PreviewDefinition;
 	FTransform PreviewTransform;
+	FTransform PreviewInputTransform;
 	int32 PreviewSize = 0;
+	uint32 PreviewDefinitionRevision = 0;
 	double PreviewChangedAt = 0;
 	bool bPreviewPending = false;
 	bool bPreviewValid = false;
@@ -159,6 +193,8 @@ private:
 	FVector LastAttemptLocation = FVector::ZeroVector;
 	int32 PlacementIndex = 0;
 	bool bHover = false;
+	bool bHoverEndPending = false;
+	bool bPreviewWasVisible = false;
 	bool bShift = false;
 	bool bStroke = false;
 	bool bStrokeErase = false;
