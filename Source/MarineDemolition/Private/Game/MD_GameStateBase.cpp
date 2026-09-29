@@ -1,5 +1,6 @@
 #include "Game/MD_GameStateBase.h"
 #include "Game/MD_GameModeBase.h"
+#include "Data/Merchant/MD_SiteDefinition.h"
 #include "Component/Lore/MD_LoreComponent.h"
 #include "Data/Score/MD_ScoreTableData.h"
 #include "GameFramework/PlayerState.h"
@@ -607,6 +608,26 @@ void AMD_GameStateBase::RefreshDailyLedger()
     Report.bValid = true;
     // 계약 누적 점수와 당일 점수 분리
     Report.Score = Score;
+    // 판정 당시 점수와 구분할 실제 누적 점수 기록
+    Report.CumulativeScore = Score;
+    // 이전 정산에서 전달된 다음 점검 기준 초기화
+    Report.NextThreshold = 0;
+    // 퇴근 전에는 현재 일자부터 가장 가까운 유효 점검 탐색
+    for (int32 InspectionDay = CurrentDay; InspectionDay <= 4; ++InspectionDay)
+    {
+        // 난이도와 인원 및 경고 배율이 반영된 기준 조회
+        Report.NextThreshold = GetInspectionThreshold(InspectionDay);
+        // 실제 점검이 있는 첫 일자의 기준 사용
+        if (Report.NextThreshold > 0)
+        {
+            // 다음 점검 탐색 종료
+            break;
+        }
+    }
+    // 이전 확정 보고서의 보유 크레딧 초기화
+    Report.Credits = 0;
+    // 이전 현장의 이름이 남지 않도록 표시 초기화
+    Report.SiteName = FText::GetEmpty();
     // 당일 점수 로그 합계 조회
     Report.DailyScore = GetScoreForDay(CurrentDay);
     // 분류별 점수 원장 조회
@@ -624,6 +645,16 @@ void AMD_GameStateBase::RefreshDailyLedger()
         {
             // 실제 잔액 변동을 반영한 분류별 크레딧 기록 조회
             Report.DailyCreditTotals = Merchant->GetDailyCreditTotals();
+            // 일일 변동 합계와 같은 시점의 보유 잔액 기록
+            Report.Credits = Merchant->GetCredits();
+            // 경로 하드코딩 없이 현재 계약의 현장 에셋 조회
+            UMD_SiteDefinition* Site = Merchant->GetCurrentSite();
+            // 유효한 현장의 표시 이름만 보고서에 전달
+            if (IsValid(Site) == true)
+            {
+                // 모든 클라이언트에서 사용할 동일한 현장 이름 기록
+                Report.SiteName = Site->SiteName;
+            }
         }
     }
     // 값이 같으면 구독 중인 모든 클라이언트의 중복 응답 전송 생략

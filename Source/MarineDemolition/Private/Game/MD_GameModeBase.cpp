@@ -671,6 +671,20 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReas
         DailyReport.Result = Result;
         // 콘솔 확인과 시간 종료를 구분할 서버 마감 원인 보존
         DailyReport.EndReason = EndReason;
+        // 점검 판정 점수와 별도로 경고 감점까지 반영한 누적 점수 기록
+        DailyReport.CumulativeScore = GS->GetScore();
+        // 계약 종료 시 다음 점검이 없는 상태 표시
+        DailyReport.NextThreshold = 0;
+        // 진행 중인 계약에만 다음 일자의 점검 목표 제공
+        if (Result != EMD_InspectionResult::ContractCleared && Result != EMD_InspectionResult::GameOver)
+        {
+            // 난이도와 인원 및 경고 배율을 반영한 다음 점검 기준 기록
+            DailyReport.NextThreshold = GS->GetInspectionThreshold(Day + 1);
+        }
+        // 이전 보고서의 보유 잔액 초기화
+        DailyReport.Credits = 0;
+        // 이전 현장 표시 초기화
+        DailyReport.SiteName = FText::GetEmpty();
         DailyReport.DailyScore = GS->GetScoreForDay(Day);
         // 일일 보고서가 서버 점수 Map을 그대로 전달받도록 구성
         DailyReport.DailyScoreTotals = GS->GetDailyScoreTotals();
@@ -678,6 +692,16 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReas
         if (IsValid(Merchant) == true)
         {
             DailyReport.DailyCreditTotals = Merchant->GetDailyCreditTotals();
+            // 최종 일일 정산과 같은 시점의 보유 크레딧 기록
+            DailyReport.Credits = Merchant->GetCredits();
+            // 현재 계약의 현장 데이터 조회
+            UMD_SiteDefinition* Site = Merchant->GetCurrentSite();
+            // 유효한 현장 이름만 확정 보고서에 전달
+            if (IsValid(Site) == true)
+            {
+                // 클라이언트 복제 순서와 무관한 현장 표시값 확정
+                DailyReport.SiteName = Site->SiteName;
+            }
         }
         GS->SetInspectionReport(DailyReport);
     }
