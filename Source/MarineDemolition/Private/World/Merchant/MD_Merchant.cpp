@@ -249,9 +249,8 @@ void AMD_Merchant::InitializePushedShop(UMD_ShopWidget* ShopWidget, UMD_Merchant
 	ActiveMenuWidget = MenuWidget;
 	ActiveShopWidget = ShopWidget;
 
-	// 상점 활성화 전에 카탈로그와 루트 메뉴를 전달한다.
+	// 상점 활성화 전에 판매 카탈로그 전달
 	ShopWidget->SetCatalog(ShopCatalog);
-	ShopWidget->SetOwningMerchantMenu(MenuWidget);
 
 	// Common UI Stack의 모든 상점 종료 경로에서 상태를 정리하도록 비활성화 이벤트를 연결한다.
 	ShopWidget->OnDeactivated().RemoveAll(this);
@@ -299,9 +298,6 @@ void AMD_Merchant::InitializePushedQuest(UMD_QuestScreenWidget* QuestWidget, UMD
 	ActiveMenuWidget = MenuWidget;
 	ActiveQuestWidget = QuestWidget;
 
-	// 퀘스트 화면 활성화 전에 루트 메뉴를 전달한다.
-	QuestWidget->SetOwningMerchantMenu(MenuWidget);
-
 	// Common UI Stack의 모든 퀘스트 화면 종료 경로에서 상태를 정리하도록 비활성화 이벤트를 연결한다.
 	QuestWidget->OnDeactivated().RemoveAll(this);
 	QuestWidget->OnDeactivated().AddUObject(this, &AMD_Merchant::HandleQuestBackRequested);
@@ -347,9 +343,6 @@ void AMD_Merchant::InitializePushedLoan(UMD_LoanWidget* LoanWidget, UMD_Merchant
 	// 이후 상태 조회가 Blueprint에서 전달한 메뉴와 대출 화면을 사용하도록 저장
 	ActiveMenuWidget = MenuWidget;
 	ActiveLoanWidget = LoanWidget;
-
-	// 대출 화면 활성화 전에 루트 메뉴를 전달하여 배경 메뉴 패널 숨김
-	LoanWidget->SetOwningMerchantMenu(MenuWidget);
 
 	// Common UI Stack의 모든 대출 화면 종료 경로에서 상태를 정리하도록 비활성화 이벤트 연결
 	LoanWidget->OnDeactivated().RemoveAll(this);
@@ -428,12 +421,6 @@ void AMD_Merchant::HandleLoanDeactivated()
 		{
 			ActiveMenuWidget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
 		}
-	}
-
-	// 다시 표시되는 상인 메뉴의 본문 패널 복구
-	if (ActiveMenuWidget.IsValid() == true)
-	{
-		ActiveMenuWidget->SetMenuPanelVisible(true);
 	}
 
 	// 비활성화된 Stack 화면을 더 이상 활성 대출 화면으로 취급하지 않음
