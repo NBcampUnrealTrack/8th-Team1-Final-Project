@@ -32,6 +32,8 @@ class MARINEDEMOLITION_API AMD_WallUtility : public AActor, public IMD_Interacta
 public:
 	AMD_WallUtility();
 
+	void SetQuestHighlighted(AActor* Source, bool bHighlighted);
+
 	// 파손과 수리 상태를 점수 처리 없이 보관하는 기록 생성
 	virtual FMD_UtilityRecord BuildPersistenceRecord();
 
@@ -226,5 +228,7 @@ private:
 	FMD_ScanMeshState HighlightState;
 	bool bScanHighlighted = false;
 	bool bInteractionHighlighted = false;
+	bool bQuestHighlighted = false;
+	TSet<TWeakObjectPtr<AActor>> QuestHighlightSources;
 	void RefreshHighlight();
 };
