@@ -31,6 +31,9 @@ class MARINEDEMOLITION_API AMD_QuestSampleSpawner : public AActor
 public:
 	AMD_QuestSampleSpawner();
 
+	/** 테스트 전용: 퀘스트 진행 상태 변경 없이 일치하는 Phase의 부족한 샘플만 생성한다. */
+	bool DebugSpawnQuestSample(const UMD_QuestDefinition& Definition, int32 PhaseIndex);
+
 	/** Authored rack sets handle their quest explicitly instead of random selection. */
 	virtual bool IsRandomSpawnCandidate() const { return true; }
 	virtual bool ClaimsQuestPhase(const FPrimaryAssetId& DefinitionId, int32 PhaseIndex) const { return false; }

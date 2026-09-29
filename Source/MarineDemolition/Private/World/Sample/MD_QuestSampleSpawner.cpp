@@ -649,6 +649,33 @@ int32 AMD_QuestSampleSpawner::BindOccupyingQuestItemsToMainQuest(const FPrimaryA
 	return AssignedQuestItemCount;
 }
 
+bool AMD_QuestSampleSpawner::DebugSpawnQuestSample(const UMD_QuestDefinition& Definition, int32 PhaseIndex)
+{
+#if !UE_BUILD_SHIPPING
+	if (!HasAuthority() || !Definition.HasPhase(PhaseIndex) || !MatchesSpawnZone(Definition, PhaseIndex)) return false;
+	const TSubclassOf<AMD_QuestItem> ItemClass = ResolveSpawnItemClass(Definition, PhaseIndex);
+	if (!ItemClass || CollectSpawnTransforms().IsEmpty()) return false;
+	const bool bRequiresGrade = ItemClass->IsChildOf(AMD_SampleItem::StaticClass())
+		&& Definition.GetAcceptedGradeTags(PhaseIndex).Num() > 0;
+	EMD_SampleGrade Grade = EMD_SampleGrade::C;
+	if (bRequiresGrade && !ResolveSpawnGrade(Definition, PhaseIndex, Grade)) return false;
+	const int32 RequiredCount = FMath::Max(1, Definition.GetRequiredCount(PhaseIndex));
+	BindOccupyingQuestItemsToMainQuest(Definition.GetPrimaryAssetId(), ItemClass.Get(), bRequiresGrade, Grade, RequiredCount);
+	const int32 MissingCount = RequiredCount - CountAvailableQuestItems(Definition.GetPrimaryAssetId(), ItemClass.Get(), bRequiresGrade, Grade);
+	if (MissingCount > 0)
+	{
+		FMD_MainQuestState State;
+		State.DefinitionId = Definition.GetPrimaryAssetId();
+		State.CurrentPhaseIndex = PhaseIndex;
+		State.UnlockDay = 3;
+		SpawnMainQuestItems(State, Definition, ItemClass, bRequiresGrade, Grade, MissingCount);
+	}
+	return CountAvailableQuestItems(Definition.GetPrimaryAssetId(), ItemClass.Get(), bRequiresGrade, Grade) >= RequiredCount;
+#else
+	return false;
+#endif
+}
+
 void AMD_QuestSampleSpawner::SpawnMainQuestItems(const FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition, TSubclassOf<AMD_QuestItem> SpawnItemClass, bool bRequiresSampleGrade, EMD_SampleGrade SpawnGrade, int32 SpawnCount)
 {
 	UWorld* World = GetWorld();
