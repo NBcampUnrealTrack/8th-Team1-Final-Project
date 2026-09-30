@@ -321,6 +321,13 @@ private:
 	UFUNCTION(Exec)
 	void MD_RepairUtility();
 
+	/** Day3 회수 샘플을 배치된 스포너에 생성한다. 기존 샘플이 있으면 중복 생성하지 않는다. */
+	UFUNCTION(Exec)
+	void MD_SpawnDay3Sample();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSpawnDay3Sample();
+
 	UFUNCTION(Server, Reliable)
 	void ServerRepairUtility(AMD_WallUtility* Utility);
 

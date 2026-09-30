@@ -26,8 +26,16 @@ void UMD_ShopItemCardWidget::RefreshDisplay()
 	// 카드 하단에 품목 가격 적용
 	if (IsValid(Txt_CostCredit) == true)
 	{
-		// 구매 이력과 무관하게 이번 구매에 적용되는 판매 가격 표시
-		Txt_CostCredit->SetText(Item.GetPriceText());
+		// 별도 크레딧 기호와 중복되지 않도록 가격 숫자만 표시
+		Txt_CostCredit->SetText(FText::AsNumber(Item.Price));
+	}
+
+	// 가격 숫자 옆 크레딧 단위 영역 유효성 확인
+	if (IsValid(Txt_Credit_Suffix) == true)
+	{
+		// 일반 품목과 개당 품목의 거래 단위를 분리해서 표시
+		Txt_Credit_Suffix->SetText(Item.bPricePerUnit == true
+			? NSLOCTEXT("MDShop", "CreditPerUnit", "₡/개") : NSLOCTEXT("MDShop", "CreditSuffix", "₡"));
 	}
 
 	// 재사용된 카드에 이전 품목의 아이콘이 남지 않도록 기본 Brush 보관

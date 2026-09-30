@@ -28,6 +28,8 @@ class MARINEDEMOLITION_API AMD_DataDumpTerminal : public AActor, public IMD_Inte
 public:
 	AMD_DataDumpTerminal();
 
+	void SetQuestHighlighted(AActor* Source, bool bHighlighted);
+
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -163,6 +165,10 @@ protected:
 	void OnRep_HoldProgress();
 
 private:
+	bool bQuestHighlighted = false;
+	TSet<TWeakObjectPtr<AActor>> QuestHighlightSources;
+	bool bInteractionHighlighted = false;
+	void RefreshHighlight();
 	void BeginHold(APawn* Pawn);
 	void CancelHold();
 	void CompleteDump();

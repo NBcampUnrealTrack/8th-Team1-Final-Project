@@ -240,10 +240,22 @@ void AMD_WallUtility::SetScanSilhouette(bool bVisible)
 
 void AMD_WallUtility::RefreshHighlight()
 {
-	if (bScanHighlighted || bInteractionHighlighted)
+	if (bScanHighlighted || bInteractionHighlighted || bQuestHighlighted)
 		HighlightState.Apply(Mesh, bScanHighlighted ? ScanSilhouetteStencil : IMD_Interactable::HighlightStencilValue);
 	else
 		HighlightState.Restore();
+}
+
+void AMD_WallUtility::SetQuestHighlighted(AActor* Source, bool bHighlighted)
+{
+	if (bHighlighted) QuestHighlightSources.Add(Source);
+	else QuestHighlightSources.Remove(Source);
+	for (auto It = QuestHighlightSources.CreateIterator(); It; ++It)
+		if (!It->IsValid()) It.RemoveCurrent();
+	const bool bRequested = !QuestHighlightSources.IsEmpty();
+	if (bQuestHighlighted == bRequested) return;
+	bQuestHighlighted = bRequested;
+	RefreshHighlight();
 }
 
 void AMD_WallUtility::EndScanSilhouette()

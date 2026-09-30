@@ -58,10 +58,28 @@ void AMD_DataDumpTerminal::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AMD_DataDumpTerminal::SetInteractionHighlighted_Implementation(bool bHighlighted)
 {
+	bInteractionHighlighted = bHighlighted;
+	RefreshHighlight();
+}
+
+void AMD_DataDumpTerminal::SetQuestHighlighted(AActor* Source, bool bHighlighted)
+{
+	if (bHighlighted) QuestHighlightSources.Add(Source);
+	else QuestHighlightSources.Remove(Source);
+	for (auto It = QuestHighlightSources.CreateIterator(); It; ++It)
+		if (!It->IsValid()) It.RemoveCurrent();
+	const bool bRequested = !QuestHighlightSources.IsEmpty();
+	if (bQuestHighlighted == bRequested) return;
+	bQuestHighlighted = bRequested;
+	RefreshHighlight();
+}
+
+void AMD_DataDumpTerminal::RefreshHighlight()
+{
 	if (IsValid(Mesh) == true)
 	{
 		Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
-		Mesh->SetRenderCustomDepth(bHighlighted);
+		Mesh->SetRenderCustomDepth(bInteractionHighlighted || bQuestHighlighted);
 	}
 }
 

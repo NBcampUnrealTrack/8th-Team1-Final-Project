@@ -3,14 +3,13 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Styling/SlateBrush.h"
 #include "Types/Merchant/MD_MerchantTypes.h"
 #include "UI/MD_CommonButtonBase.h"
 
 #include "MD_QuestCardWidget.generated.h"
 
-class UImage;
 class UTextBlock;
+class UMD_QuestDefinition;
 
 /** 메인 또는 반복 퀘스트 하나를 선택하는 공통 버튼 카드 */
 UCLASS()
@@ -38,33 +37,13 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest")
 	FMD_RepeatQuestState RepeatQuestState;
 
-	// 디자이너가 지정한 메인 퀘스트 아이콘 Brush
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Appearance")
-	FSlateBrush MainQuestIcon;
-
-	// 디자이너가 지정한 반복 퀘스트 아이콘 Brush
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Appearance")
-	FSlateBrush RepeatQuestIcon;
-
-	// 퀘스트 종류에 맞는 아이콘을 표시하기 위한 이미지
+	// 현재 페이즈의 제출 수량과 요구 수량 표시
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UImage> Img_QuestType;
+	TObjectPtr<UTextBlock> Txt_Progress;
 
-	// 메인 또는 반복 퀘스트 종류를 표시하기 위한 텍스트
+	// 수락 가능 여부와 진행 또는 완료 상태 표시
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_QuestType;
-
-	// 퀘스트 원본의 표시 이름을 출력하기 위한 텍스트
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_QuestName;
-
-	// 현재 페이즈 진행도를 수량 형식으로 출력하기 위한 텍스트
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_QuestProgress;
-
-	// 현재 페이즈의 목표 내용을 출력하기 위한 텍스트
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Quest", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_QuestDescription;
+	TObjectPtr<UTextBlock> Txt_State;
 
 public:
 	// 메인 퀘스트 배열 인덱스와 상태를 카드에 적용하는 함수
@@ -98,4 +77,7 @@ public:
 	// 현재 종류와 상태를 카드 위젯에 다시 반영하는 함수
 	UFUNCTION(BlueprintCallable, Category = "MD|Quest")
 	void RefreshDisplay();
+
+	// 카드와 선택 상세에서 동일한 상태 문구를 계산하는 공통 처리
+	FText MakeQuestStateText(UMD_QuestDefinition* Definition);
 };
