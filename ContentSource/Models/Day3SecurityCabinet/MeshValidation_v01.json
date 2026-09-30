@@ -1,0 +1,6452 @@
+[
+  {
+    "object": {
+      "name": "D3_Base",
+      "type": "MESH",
+      "data_name": "D3_Base_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        1.100000023841858,
+        0.75,
+        0.14000000059604645
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "ce07b9faa798869c06944b07b7e27d75d90fe3749827a95a8fa572f46efe6c9e",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.550000011920929,
+        -0.375,
+        0.0
+      ],
+      "local_max": [
+        0.550000011920929,
+        0.375,
+        0.14000000059604645
+      ],
+      "world_min": [
+        3.450000047683716,
+        -0.375,
+        0.0
+      ],
+      "world_max": [
+        4.550000190734863,
+        0.375,
+        0.14000000059604645
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003376985900104046,
+          0.003376961452886462
+        ],
+        "bounds_max": [
+          0.9651427865028381,
+          0.9966229796409607
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_LeftShell",
+      "type": "MESH",
+      "data_name": "D3_LeftShell_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.10500001907348633,
+        0.7300000190734863,
+        1.5299999713897705
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "c10792a74a434271c2558b35298cce62fbb69abc222fd5581de4958f7236385e",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.550000011920929,
+        -0.36500000953674316,
+        0.12999999523162842
+      ],
+      "local_max": [
+        -0.4449999928474426,
+        0.36500000953674316,
+        1.659999966621399
+      ],
+      "world_min": [
+        3.450000047683716,
+        -0.36500000953674316,
+        0.12999999523162842
+      ],
+      "world_max": [
+        3.555000066757202,
+        0.36500000953674316,
+        1.659999966621399
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Teal"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003767331363633275,
+          0.0037673143669962883
+        ],
+        "bounds_max": [
+          0.9962326288223267,
+          0.8723117113113403
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_RightShell",
+      "type": "MESH",
+      "data_name": "D3_RightShell_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.10500001907348633,
+        0.7300000190734863,
+        1.5299999713897705
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "228cc2f7256d76a7a762582723aecc24ed9e2ca6a56ec0e6989dc5362f040bea",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.4449999928474426,
+        -0.36500000953674316,
+        0.12999999523162842
+      ],
+      "local_max": [
+        0.550000011920929,
+        0.36500000953674316,
+        1.659999966621399
+      ],
+      "world_min": [
+        4.445000171661377,
+        -0.36500000953674316,
+        0.12999999523162842
+      ],
+      "world_max": [
+        4.550000190734863,
+        0.36500000953674316,
+        1.659999966621399
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Teal"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003767331363633275,
+          0.0037673143669962883
+        ],
+        "bounds_max": [
+          0.9962326288223267,
+          0.8723117113113403
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_TopShell",
+      "type": "MESH",
+      "data_name": "D3_TopShell_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        1.100000023841858,
+        0.75,
+        0.1400001049041748
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "861f15e2ff043952629fb7b6d547c3277e076a156d6c4a1236c3afb59c538110",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.550000011920929,
+        -0.375,
+        1.6099998950958252
+      ],
+      "local_max": [
+        0.550000011920929,
+        0.375,
+        1.75
+      ],
+      "world_min": [
+        3.450000047683716,
+        -0.375,
+        1.6099998950958252
+      ],
+      "world_max": [
+        4.550000190734863,
+        0.375,
+        1.75
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Teal"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0033493940718472004,
+          0.003349385457113385
+        ],
+        "bounds_max": [
+          0.9486080408096313,
+          0.9966505765914917
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_BackShell",
+      "type": "MESH",
+      "data_name": "D3_BackShell_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.9100000262260437,
+        0.05500000715255737,
+        1.4900000095367432
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "24c3d07909da8c356005af811f1459629f57bcb4b50729de13bb9d9bfb029927",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.45500001311302185,
+        0.3199999928474426,
+        0.1499999761581421
+      ],
+      "local_max": [
+        0.45500001311302185,
+        0.375,
+        1.6399999856948853
+      ],
+      "world_min": [
+        3.5450000762939453,
+        0.3199999928474426,
+        0.1499999761581421
+      ],
+      "world_max": [
+        4.454999923706055,
+        0.375,
+        1.6399999856948853
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Teal"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0032202480360865593,
+          0.0032202473375946283
+        ],
+        "bounds_max": [
+          0.99677973985672,
+          0.9122225642204285
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_InnerFloor",
+      "type": "MESH",
+      "data_name": "D3_InnerFloor_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.9100000262260437,
+        0.6600000262260437,
+        0.06999999284744263
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "292559926aeeb9a0962832061ea7d21e5324da83a04ab54e1ff47ef35e181b28",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.45500001311302185,
+        -0.33000001311302185,
+        0.14000000059604645
+      ],
+      "local_max": [
+        0.45500001311302185,
+        0.33000001311302185,
+        0.20999999344348907
+      ],
+      "world_min": [
+        3.5450000762939453,
+        -0.33000001311302185,
+        0.14000000059604645
+      ],
+      "world_max": [
+        4.454999923706055,
+        0.33000001311302185,
+        0.20999999344348907
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Teal"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0031140760984271765,
+          0.0031140681821852922
+        ],
+        "bounds_max": [
+          0.9968860745429993,
+          0.8677557110786438
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_InnerRoof",
+      "type": "MESH",
+      "data_name": "D3_InnerRoof_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.9100000262260437,
+        0.6600000262260437,
+        0.059999942779541016
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "cf4ede135336f8e0cd22a6b5950cc3465a4c51bf334ae7278ba929f463f10c5c",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.45500001311302185,
+        -0.33000001311302185,
+        1.5500000715255737
+      ],
+      "local_max": [
+        0.45500001311302185,
+        0.33000001311302185,
+        1.6100000143051147
+      ],
+      "world_min": [
+        3.5450000762939453,
+        -0.33000001311302185,
+        1.5500000715255737
+      ],
+      "world_max": [
+        4.454999923706055,
+        0.33000001311302185,
+        1.6100000143051147
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Teal"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003121238434687257,
+          0.0031212184112519026
+        ],
+        "bounds_max": [
+          0.9968787431716919,
+          0.9122154116630554
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_BackInset",
+      "type": "MESH",
+      "data_name": "D3_BackInset_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.7599999904632568,
+        0.015999972820281982,
+        1.1699998378753662
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "7b657964d1ddf7f20c5332dd3eb380e0ea7d4190dd13e64e8d2c70f5f856dd64",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.42500001192092896,
+        0.3020000159740448,
+        0.29500001668930054
+      ],
+      "local_max": [
+        0.3349999785423279,
+        0.3179999887943268,
+        1.4649999141693115
+      ],
+      "world_min": [
+        3.575000047683716,
+        0.3020000159740448,
+        0.29500001668930054
+      ],
+      "world_max": [
+        4.335000038146973,
+        0.3179999887943268,
+        1.4649999141693115
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Inner"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.002918297192081809,
+          0.0029182785656303167
+        ],
+        "bounds_max": [
+          0.9970816373825073,
+          0.9484463334083557
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_LeftSeal",
+      "type": "MESH",
+      "data_name": "D3_LeftSeal_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.029999971389770508,
+        0.0350000262260437,
+        1.2899999618530273
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "17df1e96ea590a435ee3568a04c85f87df5868c5760da3430ad8719dbb286f88",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.4439999759197235,
+        -0.38450002670288086,
+        0.21500003337860107
+      ],
+      "local_max": [
+        -0.414000004529953,
+        -0.34950000047683716,
+        1.5049999952316284
+      ],
+      "world_min": [
+        3.555999994277954,
+        -0.38450002670288086,
+        0.21500003337860107
+      ],
+      "world_max": [
+        3.5859999656677246,
+        -0.34950000047683716,
+        1.5049999952316284
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0012762241531163454,
+          0.0012762009864673018
+        ],
+        "bounds_max": [
+          0.12058040499687195,
+          0.9987238049507141
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_RightSeal",
+      "type": "MESH",
+      "data_name": "D3_RightSeal_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.029999971389770508,
+        0.0350000262260437,
+        1.2899999618530273
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "f21a9db7b283dda054fc158f0a1feaa30c1e0f4afe34cd6efd09e4839d650896",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.3060000240802765,
+        -0.38450002670288086,
+        0.21500003337860107
+      ],
+      "local_max": [
+        0.335999995470047,
+        -0.34950000047683716,
+        1.5049999952316284
+      ],
+      "world_min": [
+        4.306000232696533,
+        -0.38450002670288086,
+        0.21500003337860107
+      ],
+      "world_max": [
+        4.335999965667725,
+        -0.34950000047683716,
+        1.5049999952316284
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0012762241531163454,
+          0.0012762009864673018
+        ],
+        "bounds_max": [
+          0.12058024853467941,
+          0.9987238049507141
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_TopSeal",
+      "type": "MESH",
+      "data_name": "D3_TopSeal_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.7799999713897705,
+        0.0350000262260437,
+        0.03500008583068848
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "1db7d43e1a156d98d222c33a98535bd5c50c3a5382f0c5080766b39ad2b0a155",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.4439999759197235,
+        -0.38450002670288086,
+        1.4804999828338623
+      ],
+      "local_max": [
+        0.335999995470047,
+        -0.34950000047683716,
+        1.5155000686645508
+      ],
+      "world_min": [
+        3.555999994277954,
+        -0.38450002670288086,
+        1.4804999828338623
+      ],
+      "world_max": [
+        4.335999965667725,
+        -0.34950000047683716,
+        1.5155000686645508
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0017349320696666837,
+          0.0017348537221550941
+        ],
+        "bounds_max": [
+          0.21151486039161682,
+          0.9982650279998779
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_BottomSeal",
+      "type": "MESH",
+      "data_name": "D3_BottomSeal_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.7799999713897705,
+        0.0350000262260437,
+        0.034999996423721313
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "de104534bd2d3fdf841c6b973bd102f7619051c7335d664f7a971fe26edfe5a1",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.4439999759197235,
+        -0.38450002670288086,
+        0.2004999965429306
+      ],
+      "local_max": [
+        0.335999995470047,
+        -0.34950000047683716,
+        0.23549999296665192
+      ],
+      "world_min": [
+        3.555999994277954,
+        -0.38450002670288086,
+        0.2004999965429306
+      ],
+      "world_max": [
+        4.335999965667725,
+        -0.34950000047683716,
+        0.23549999296665192
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0017374891322106123,
+          0.0017374880844727159
+        ],
+        "bounds_max": [
+          0.21153664588928223,
+          0.9982625246047974
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_LeftJamb",
+      "type": "MESH",
+      "data_name": "D3_LeftJamb_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.05500000715255737,
+        0.06999999284744263,
+        1.3199999332427979
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "3cf426fd4bec3a621da51171913e1d01518af081adcf7a18b2dd89fd805f1b20",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.5015000104904175,
+        -0.40700000524520874,
+        0.19999998807907104
+      ],
+      "local_max": [
+        -0.4465000033378601,
+        -0.3370000123977661,
+        1.5199999809265137
+      ],
+      "world_min": [
+        3.498499870300293,
+        -0.40700000524520874,
+        0.19999998807907104
+      ],
+      "world_max": [
+        3.553499937057495,
+        -0.3370000123977661,
+        1.5199999809265137
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0017646037740632892,
+          0.001764596556313336
+        ],
+        "bounds_max": [
+          0.18231156468391418,
+          0.9982354044914246
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_RightJamb",
+      "type": "MESH",
+      "data_name": "D3_RightJamb_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.15500003099441528,
+        0.07499998807907104,
+        1.3799998760223389
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "fc7e373e589069ccac40d3d759524a25c37e1df3594d5ad469f1ba67c4708223",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.3374999761581421,
+        -0.40950000286102295,
+        0.1899999976158142
+      ],
+      "local_max": [
+        0.4925000071525574,
+        -0.3345000147819519,
+        1.5699999332427979
+      ],
+      "world_min": [
+        4.337500095367432,
+        -0.40950000286102295,
+        0.1899999976158142
+      ],
+      "world_max": [
+        4.492499828338623,
+        -0.3345000147819519,
+        1.5699999332427979
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0024453983642160892,
+          0.0024453550577163696
+        ],
+        "bounds_max": [
+          0.3754201829433441,
+          0.9975546002388
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_Header",
+      "type": "MESH",
+      "data_name": "D3_Header_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.9649999737739563,
+        0.07199996709823608,
+        0.18499994277954102
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "fb33d334c7e7eafd5ffd5d0710be39b0ec7b9ea38d54d2a21aae327b339ba303",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.48249998688697815,
+        -0.40799999237060547,
+        1.4925000667572021
+      ],
+      "local_max": [
+        0.48249998688697815,
+        -0.3360000252723694,
+        1.6775000095367432
+      ],
+      "world_min": [
+        3.5174999237060547,
+        -0.40799999237060547,
+        1.4925000667572021
+      ],
+      "world_max": [
+        4.482500076293945,
+        -0.3360000252723694,
+        1.6775000095367432
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0030359472148120403,
+          0.003035975154489279
+        ],
+        "bounds_max": [
+          0.5885019898414612,
+          0.9969640374183655
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_Footer",
+      "type": "MESH",
+      "data_name": "D3_Footer_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.9649999737739563,
+        0.07199996709823608,
+        0.11500000953674316
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "c3d23698f3865e1bb6c117fdca8f81dfded6cda7a6e8aff9d2526a20a7599c79",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.48249998688697815,
+        -0.40799999237060547,
+        0.13749998807907104
+      ],
+      "local_max": [
+        0.48249998688697815,
+        -0.3360000252723694,
+        0.2524999976158142
+      ],
+      "world_min": [
+        3.5174999237060547,
+        -0.40799999237060547,
+        0.13749998807907104
+      ],
+      "world_max": [
+        4.482500076293945,
+        -0.3360000252723694,
+        0.2524999976158142
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.002617117017507553,
+          0.0026170576456934214
+        ],
+        "bounds_max": [
+          0.43863123655319214,
+          0.9973829388618469
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_Shelf",
+      "type": "MESH",
+      "data_name": "D3_Shelf_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.6899999976158142,
+        0.47999998927116394,
+        0.04499995708465576
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "f7e0c80cbfc54c3ab77485d0a78d7ec3e246110453c36c9e965c24957caa054d",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.3970000147819519,
+        -0.2800000011920929,
+        0.7825000286102295
+      ],
+      "local_max": [
+        0.2929999828338623,
+        0.19999998807907104,
+        0.8274999856948853
+      ],
+      "world_min": [
+        3.6029999256134033,
+        -0.2800000011920929,
+        0.7825000286102295
+      ],
+      "world_max": [
+        4.293000221252441,
+        0.19999998807907104,
+        0.8274999856948853
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003160354681313038,
+          0.003160320920869708
+        ],
+        "bounds_max": [
+          0.996839702129364,
+          0.8710438013076782
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_ShelfPad",
+      "type": "MESH",
+      "data_name": "D3_ShelfPad_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.574999988079071,
+        0.3700000047683716,
+        0.016000032424926758
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "e32da6e27052d3bfa3d102a6070ec974472551b643bf8c547de45c5c6524e433",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.3395000100135803,
+        -0.22499999403953552,
+        0.8269999623298645
+      ],
+      "local_max": [
+        0.23549999296665192,
+        0.14500001072883606,
+        0.8429999947547913
+      ],
+      "world_min": [
+        3.6605000495910645,
+        -0.22499999403953552,
+        0.8269999623298645
+      ],
+      "world_max": [
+        4.235499858856201,
+        0.14500001072883606,
+        0.8429999947547913
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0030909401830285788,
+          0.0030908994376659393
+        ],
+        "bounds_max": [
+          0.9969092011451721,
+          0.9262581467628479
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_ShelfRailL",
+      "type": "MESH",
+      "data_name": "D3_ShelfRailL_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.04799997806549072,
+        0.46000000834465027,
+        0.06700003147125244
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "1f127f2086ff5dd539aed2c0062be942715039bb2035c73e18b68f495e439237",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.3959999978542328,
+        -0.27000001072883606,
+        0.8215000033378601
+      ],
+      "local_max": [
+        -0.34800001978874207,
+        0.1899999976158142,
+        0.8885000348091125
+      ],
+      "world_min": [
+        3.6040000915527344,
+        -0.27000001072883606,
+        0.8215000033378601
+      ],
+      "world_max": [
+        3.6519999504089355,
+        0.1899999976158142,
+        0.8885000348091125
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003100206609815359,
+          0.003100280649960041
+        ],
+        "bounds_max": [
+          0.5689587593078613,
+          0.9968996644020081
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_ShelfRailR",
+      "type": "MESH",
+      "data_name": "D3_ShelfRailR_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.047999992966651917,
+        0.46000000834465027,
+        0.06700003147125244
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "3aae0eea2d2fabea273c51679973a719c4cd310f02ca457bcaf80775896fff0a",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.24400000274181366,
+        -0.27000001072883606,
+        0.8215000033378601
+      ],
+      "local_max": [
+        0.2919999957084656,
+        0.1899999976158142,
+        0.8885000348091125
+      ],
+      "world_min": [
+        4.24399995803833,
+        -0.27000001072883606,
+        0.8215000033378601
+      ],
+      "world_max": [
+        4.291999816894531,
+        0.1899999976158142,
+        0.8885000348091125
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.00310344947502017,
+          0.003103523515164852
+        ],
+        "bounds_max": [
+          0.5689836740493774,
+          0.9968964457511902
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_ShelfBack",
+      "type": "MESH",
+      "data_name": "D3_ShelfBack_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.6399999856948853,
+        0.03999999165534973,
+        0.059999942779541016
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "73e4b6c71bd6b18e57b211f35847d1d38cada98f7bc79d56c1e4d43d8cbd0aa2",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.37199997901916504,
+        0.1550000011920929,
+        0.8250000476837158
+      ],
+      "local_max": [
+        0.2680000066757202,
+        0.19499999284744263,
+        0.8849999904632568
+      ],
+      "world_min": [
+        3.628000020980835,
+        0.1550000011920929,
+        0.8250000476837158
+      ],
+      "world_max": [
+        4.26800012588501,
+        0.19499999284744263,
+        0.8849999904632568
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.002376813907176256,
+          0.0023768427781760693
+        ],
+        "bounds_max": [
+          0.35723307728767395,
+          0.9976232051849365
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_ShelfFront",
+      "type": "MESH",
+      "data_name": "D3_ShelfFront_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.5699999928474426,
+        0.040000006556510925,
+        0.04999995231628418
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "e316d58b4be4f52056388a1e5dd3ac5031c7add8d7ab37ee96599fc875ee561f",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.3370000123977661,
+        -0.289000004529953,
+        0.7880000472068787
+      ],
+      "local_max": [
+        0.2329999953508377,
+        -0.24899999797344208,
+        0.8379999995231628
+      ],
+      "world_min": [
+        3.6630001068115234,
+        -0.289000004529953,
+        0.7880000472068787
+      ],
+      "world_max": [
+        4.232999801635742,
+        -0.24899999797344208,
+        0.8379999995231628
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.002385568805038929,
+          0.002385604428127408
+        ],
+        "bounds_max": [
+          0.3636869192123413,
+          0.9976144433021545
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_ReaderHousing",
+      "type": "MESH",
+      "data_name": "D3_ReaderHousing_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.09500002861022949,
+        0.041999995708465576,
+        0.2200000286102295
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "6a4173e91612a8f70560cc7834bdc56f29879e4adc9014e01aad3dcd401e756e",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.36949998140335083,
+        -0.453000009059906,
+        0.9299999475479126
+      ],
+      "local_max": [
+        0.4645000100135803,
+        -0.41100001335144043,
+        1.149999976158142
+      ],
+      "world_min": [
+        4.369500160217285,
+        -0.453000009059906,
+        0.9299999475479126
+      ],
+      "world_max": [
+        4.4644999504089355,
+        -0.41100001335144043,
+        1.149999976158142
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0037894314154982567,
+          0.0037892330437898636
+        ],
+        "bounds_max": [
+          0.9962106347084045,
+          0.7183251976966858
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_ReaderFace",
+      "type": "MESH",
+      "data_name": "D3_ReaderFace_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.07200002670288086,
+        0.009000003337860107,
+        0.16599994897842407
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "8458919a44359bc42da7bf7b94e3dcdd9bdc6ec10eb0a454bb09ee1b43b2c794",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.38099998235702515,
+        -0.46149998903274536,
+        0.9599999785423279
+      ],
+      "local_max": [
+        0.453000009059906,
+        -0.45249998569488525,
+        1.125999927520752
+      ],
+      "world_min": [
+        4.38100004196167,
+        -0.46149998903274536,
+        0.9599999785423279
+      ],
+      "world_max": [
+        4.453000068664551,
+        -0.45249998569488525,
+        1.125999927520752
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Inner"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003760857041925192,
+          0.0037608318962156773
+        ],
+        "bounds_max": [
+          0.9962390065193176,
+          0.9686785340309143
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_ReaderLED",
+      "type": "MESH",
+      "data_name": "D3_ReaderLED_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.05199998617172241,
+        0.009000003337860107,
+        0.01399993896484375
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "a66c3245274988a567c44c33a2398970476ddaff10605e9cd659c9f2d1ab438f",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.39100000262260437,
+        -0.47049999237060547,
+        1.093000054359436
+      ],
+      "local_max": [
+        0.4429999887943268,
+        -0.46149998903274536,
+        1.1069999933242798
+      ],
+      "world_min": [
+        4.390999794006348,
+        -0.47049999237060547,
+        1.093000054359436
+      ],
+      "world_max": [
+        4.442999839782715,
+        -0.46149998903274536,
+        1.1069999933242798
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Amber"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.004398252349346876,
+          0.004397011362016201
+        ],
+        "bounds_max": [
+          0.9956027865409851,
+          0.9708013534545898
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_CardSlot",
+      "type": "MESH",
+      "data_name": "D3_CardSlot_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.05199998617172241,
+        0.010999977588653564,
+        0.012000083923339844
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "84575ca020951670dadc5eba2870829cf9aa7ccd0f19bd8661a41477aff80dcb",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.39100000262260437,
+        -0.4714999794960022,
+        1.0189999341964722
+      ],
+      "local_max": [
+        0.4429999887943268,
+        -0.46050000190734863,
+        1.031000018119812
+      ],
+      "world_min": [
+        4.390999794006348,
+        -0.4714999794960022,
+        1.0189999341964722
+      ],
+      "world_max": [
+        4.442999839782715,
+        -0.46050000190734863,
+        1.031000018119812
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.004238068126142025,
+          0.004238138906657696
+        ],
+        "bounds_max": [
+          0.9957619905471802,
+          0.9747239947319031
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_TopLED",
+      "type": "MESH",
+      "data_name": "D3_TopLED_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.14000000059604645,
+        0.018000006675720215,
+        0.017999887466430664
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "2e5fbbc4c6a03f5f4b0073eb409ad4a07c11c60e51ea1dd8412b2dc7012b1fad",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.07000000029802322,
+        -0.4000000059604645,
+        1.694000005722046
+      ],
+      "local_max": [
+        0.07000000029802322,
+        -0.38199999928474426,
+        1.7119998931884766
+      ],
+      "world_min": [
+        3.930000066757202,
+        -0.4000000059604645,
+        1.694000005722046
+      ],
+      "world_max": [
+        4.070000171661377,
+        -0.38199999928474426,
+        1.7119998931884766
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Cyan"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0031354809179902077,
+          0.0031353773083537817
+        ],
+        "bounds_max": [
+          0.5940874814987183,
+          0.9968644976615906
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_CeilingLED",
+      "type": "MESH",
+      "data_name": "D3_CeilingLED_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.4000000059604645,
+        0.1599999964237213,
+        0.015000104904174805
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "2a6df497ac11a1134e96c21605e272412ac7373991ef396257fd3b933fb13431",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.25,
+        -0.14000000059604645,
+        1.534500002861023
+      ],
+      "local_max": [
+        0.15000000596046448,
+        0.019999999552965164,
+        1.5495001077651978
+      ],
+      "world_min": [
+        3.75,
+        -0.14000000059604645,
+        1.534500002861023
+      ],
+      "world_max": [
+        4.150000095367432,
+        0.019999999552965164,
+        1.5495001077651978
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Cyan"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0037144566886126995,
+          0.003714444348588586
+        ],
+        "bounds_max": [
+          0.9640158414840698,
+          0.996285617351532
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_BaseVent-0.32",
+      "type": "MESH",
+      "data_name": "D3_BaseVent-0.32_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.24000000953674316,
+        0.012000024318695068,
+        0.02799999713897705
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "add27877fb3374f21d08c366ba53b18514a68dc00ce27645e00da7d8bfe8fcbb",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.4399999976158142,
+        -0.3850000202655792,
+        0.06100000441074371
+      ],
+      "local_max": [
+        -0.19999998807907104,
+        -0.37299999594688416,
+        0.08900000154972076
+      ],
+      "world_min": [
+        3.559999942779541,
+        -0.3850000202655792,
+        0.06100000441074371
+      ],
+      "world_max": [
+        3.799999952316284,
+        -0.37299999594688416,
+        0.08900000154972076
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Inner"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.002436819253489375,
+          0.0024368318263441324
+        ],
+        "bounds_max": [
+          0.3736022710800171,
+          0.9975632429122925
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_BaseVent0.32",
+      "type": "MESH",
+      "data_name": "D3_BaseVent0.32_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.24000000953674316,
+        0.012000024318695068,
+        0.02799999713897705
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "cce7cd8ecdbbbb48b58566791de33d77b9b39e59894d2bbfd4b6d9f2942e3d96",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.19999998807907104,
+        -0.3850000202655792,
+        0.06100000441074371
+      ],
+      "local_max": [
+        0.4399999976158142,
+        -0.37299999594688416,
+        0.08900000154972076
+      ],
+      "world_min": [
+        4.199999809265137,
+        -0.3850000202655792,
+        0.06100000441074371
+      ],
+      "world_max": [
+        4.440000057220459,
+        -0.37299999594688416,
+        0.08900000154972076
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Inner"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0022137665655463934,
+          0.0022137481719255447
+        ],
+        "bounds_max": [
+          0.32696354389190674,
+          0.9977863430976868
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_BackFastener0",
+      "type": "MESH",
+      "data_name": "D3_BackFastener0_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.018999993801116943,
+        0.012000024318695068,
+        0.018999993801116943
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "4f6276e872c3422c3e4794d401355e78fd3db2653dd57ca4f84cb38726effd2d",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.3894999921321869,
+        0.29099997878074646,
+        0.3804999887943268
+      ],
+      "local_max": [
+        -0.37049999833106995,
+        0.30300000309944153,
+        0.3994999825954437
+      ],
+      "world_min": [
+        3.6105000972747803,
+        0.29099997878074646,
+        0.3804999887943268
+      ],
+      "world_max": [
+        3.629499912261963,
+        0.30300000309944153,
+        0.3994999825954437
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.004504364915192127,
+          0.004504429176449776
+        ],
+        "bounds_max": [
+          0.9954962730407715,
+          0.8988872766494751
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_BackFastener1",
+      "type": "MESH",
+      "data_name": "D3_BackFastener1_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.018999993801116943,
+        0.012000024318695068,
+        0.018999993801116943
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "540adbccd3ccc68e0480bc09e42bdbaaf47c82b50749d3762dc6f3b7d2896f56",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.28049999475479126,
+        0.29099997878074646,
+        0.3804999887943268
+      ],
+      "local_max": [
+        0.2994999885559082,
+        0.30300000309944153,
+        0.3994999825954437
+      ],
+      "world_min": [
+        4.2804999351501465,
+        0.29099997878074646,
+        0.3804999887943268
+      ],
+      "world_max": [
+        4.299499988555908,
+        0.30300000309944153,
+        0.3994999825954437
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003825221210718155,
+          0.00382527569308877
+        ],
+        "bounds_max": [
+          0.996175229549408,
+          0.7633605003356934
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_BackFastener2",
+      "type": "MESH",
+      "data_name": "D3_BackFastener2_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.018999993801116943,
+        0.012000024318695068,
+        0.01900005340576172
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "e3527c7484870060e419f7aa94a45636e03284fcfd8250a580138df5cc49e97b",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.3894999921321869,
+        0.29099997878074646,
+        1.3604999780654907
+      ],
+      "local_max": [
+        -0.37049999833106995,
+        0.30300000309944153,
+        1.3795000314712524
+      ],
+      "world_min": [
+        3.6105000972747803,
+        0.29099997878074646,
+        1.3604999780654907
+      ],
+      "world_max": [
+        3.629499912261963,
+        0.30300000309944153,
+        1.3795000314712524
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0038309090305119753,
+          0.0038309090305119753
+        ],
+        "bounds_max": [
+          0.9961685538291931,
+          0.763357400894165
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_BackFastener3",
+      "type": "MESH",
+      "data_name": "D3_BackFastener3_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.018999993801116943,
+        0.012000024318695068,
+        0.01900005340576172
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "2245c0289becd39d3fd0dba57a4bf2f5338a2b7dc0abd8a259c30948f42e610c",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.28049999475479126,
+        0.29099997878074646,
+        1.3604999780654907
+      ],
+      "local_max": [
+        0.2994999885559082,
+        0.30300000309944153,
+        1.3795000314712524
+      ],
+      "world_min": [
+        4.2804999351501465,
+        0.29099997878074646,
+        1.3604999780654907
+      ],
+      "world_max": [
+        4.299499988555908,
+        0.30300000309944153,
+        1.3795000314712524
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003830899251624942,
+          0.003830899251624942
+        ],
+        "bounds_max": [
+          0.9961685538291931,
+          0.7633554339408875
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_Hinge0",
+      "type": "MESH",
+      "data_name": "D3_Hinge0_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.06300002336502075,
+        0.09499996900558472,
+        0.16999998688697815
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "3ba2cc5e768ca6307efdb425c8fc60284402dc3ecec838b331821eaa723c702d",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.4925000071525574,
+        -0.4674999713897705,
+        0.3449999988079071
+      ],
+      "local_max": [
+        -0.4294999837875366,
+        -0.3725000023841858,
+        0.5149999856948853
+      ],
+      "world_min": [
+        3.507499933242798,
+        -0.4674999713897705,
+        0.3449999988079071
+      ],
+      "world_max": [
+        3.570499897003174,
+        -0.3725000023841858,
+        0.5149999856948853
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003797660581767559,
+          0.0037975586019456387
+        ],
+        "bounds_max": [
+          0.9962023496627808,
+          0.8387700915336609
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_HingeBand0",
+      "type": "MESH",
+      "data_name": "D3_HingeBand0_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.06800001859664917,
+        0.10000002384185791,
+        0.018000006675720215
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "0742b06bfbe1c927ca7c60cd6c5330d4f5dc36eaa315eae8a9c4eaa16e95d724",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.4950000047683716,
+        -0.4699999988079071,
+        0.42100000381469727
+      ],
+      "local_max": [
+        -0.4269999861717224,
+        -0.3699999749660492,
+        0.4390000104904175
+      ],
+      "world_min": [
+        3.505000114440918,
+        -0.4699999988079071,
+        0.42100000381469727
+      ],
+      "world_max": [
+        3.572999954223633,
+        -0.3699999749660492,
+        0.4390000104904175
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Inner"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003519962076097727,
+          0.0035199166741222143
+        ],
+        "bounds_max": [
+          0.9964799284934998,
+          0.9203053116798401
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_Hinge1",
+      "type": "MESH",
+      "data_name": "D3_Hinge1_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.06300002336502075,
+        0.09499996900558472,
+        0.1700000762939453
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "8591fc9c5ab3040ae6604e1c68bdd2544293da894a38fee1e1661b36595a8f95",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.4925000071525574,
+        -0.4674999713897705,
+        1.2149999141693115
+      ],
+      "local_max": [
+        -0.4294999837875366,
+        -0.3725000023841858,
+        1.3849999904632568
+      ],
+      "world_min": [
+        3.507499933242798,
+        -0.4674999713897705,
+        1.2149999141693115
+      ],
+      "world_max": [
+        3.570499897003174,
+        -0.3725000023841858,
+        1.3849999904632568
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003848720109090209,
+          0.0038485280238091946
+        ],
+        "bounds_max": [
+          0.9961513876914978,
+          0.8619253039360046
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_HingeBand1",
+      "type": "MESH",
+      "data_name": "D3_HingeBand1_Mesh",
+      "location": [
+        4.0,
+        0.0,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        0.0
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.06800001859664917,
+        0.10000002384185791,
+        0.017999887466430664
+      ],
+      "matrix_world": [
+        [
+          1.0,
+          0.0,
+          0.0,
+          4.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "cd266a4f7a71014042ca58b6582eb76f5be91d43f8f8592a1941ba07d1fea81c",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.4950000047683716,
+        -0.4699999988079071,
+        1.2910000085830688
+      ],
+      "local_max": [
+        -0.4269999861717224,
+        -0.3699999749660492,
+        1.3089998960494995
+      ],
+      "world_min": [
+        3.505000114440918,
+        -0.4699999988079071,
+        1.2910000085830688
+      ],
+      "world_max": [
+        3.572999954223633,
+        -0.3699999749660492,
+        1.3089998960494995
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Inner"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0035197963006794453,
+          0.0035199271515011787
+        ],
+        "bounds_max": [
+          0.9964797496795654,
+          0.9203082919120789
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_DoorLeft",
+      "type": "MESH",
+      "data_name": "D3_DoorLeft_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.07499999552965164,
+        0.059999994933605194,
+        1.3599998950958252
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "2f412144bda11c02f2aba23fbdd84f3b2330755b1423d100260c5ad8663dd191",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.01250000111758709,
+        -0.029999999329447746,
+        0.1899999976158142
+      ],
+      "local_max": [
+        0.0625,
+        0.029999999329447746,
+        1.5499999523162842
+      ],
+      "world_min": [
+        3.4954330921173096,
+        -0.4839913845062256,
+        0.1899999976158142
+      ],
+      "world_max": [
+        3.5774660110473633,
+        -0.3929932415485382,
+        1.5499999523162842
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0018470858922228217,
+          0.0018470530631020665
+        ],
+        "bounds_max": [
+          0.23127198219299316,
+          0.9981529116630554
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_DoorRight",
+      "type": "MESH",
+      "data_name": "D3_DoorRight_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.07500004023313522,
+        0.059999994933605194,
+        1.3599998950958252
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "d3c5e403b0e5db754603c838778dc5fca9ee346e156000a385b6684351221515",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.7174999713897705,
+        -0.029999999329447746,
+        0.1899999976158142
+      ],
+      "local_max": [
+        0.7925000190734863,
+        0.029999999329447746,
+        1.5499999523162842
+      ],
+      "world_min": [
+        3.245758295059204,
+        -1.1699669361114502,
+        0.1899999976158142
+      ],
+      "world_max": [
+        3.327791452407837,
+        -1.07896888256073,
+        1.5499999523162842
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.001811058260500431,
+          0.0018110073870047927
+        ],
+        "bounds_max": [
+          0.19066397845745087,
+          0.9981890320777893
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_DoorTop",
+      "type": "MESH",
+      "data_name": "D3_DoorTop_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.7899999022483826,
+        0.059999994933605194,
+        0.12999987602233887
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "5da773805ff3db61c57f94facd1331280f074138d2482a4d9e49dd6c5d49466a",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.005000025033950806,
+        -0.029999999329447746,
+        1.4200000762939453
+      ],
+      "local_max": [
+        0.7849999666213989,
+        0.029999999329447746,
+        1.5499999523162842
+      ],
+      "world_min": [
+        3.248323440551758,
+        -1.162919282913208,
+        1.4200000762939453
+      ],
+      "world_max": [
+        3.5749008655548096,
+        -0.4000408947467804,
+        1.5499999523162842
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0030021483544260263,
+          0.0030020365957170725
+        ],
+        "bounds_max": [
+          0.5369828939437866,
+          0.9969978928565979
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_DoorBottom",
+      "type": "MESH",
+      "data_name": "D3_DoorBottom_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.7899999022483826,
+        0.059999994933605194,
+        0.11000001430511475
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "b2723269bdaa56b0bbf216782f4aa18401f885263745986cc4898873ce58522f",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        -0.005000025033950806,
+        -0.029999999329447746,
+        0.1899999976158142
+      ],
+      "local_max": [
+        0.7849999666213989,
+        0.029999999329447746,
+        0.30000001192092896
+      ],
+      "world_min": [
+        3.248323440551758,
+        -1.162919282913208,
+        0.1899999976158142
+      ],
+      "world_max": [
+        3.5749008655548096,
+        -0.4000408947467804,
+        0.30000001192092896
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Ivory"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0030362752731889486,
+          0.003036209847778082
+        ],
+        "bounds_max": [
+          0.4867555797100067,
+          0.9969637393951416
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_Glass",
+      "type": "MESH",
+      "data_name": "D3_Glass_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.6679999232292175,
+        0.014999999664723873,
+        1.1499998569488525
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "a2453b028be5b99a518385e7bd27ca6793231674b3033c4378ebf69a06bc8836",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.0559999942779541,
+        0.0014999997802078724,
+        0.29500001668930054
+      ],
+      "local_max": [
+        0.7239999771118164,
+        0.016499999910593033,
+        1.4449999332427979
+      ],
+      "world_min": [
+        3.2987871170043945,
+        -1.1009807586669922,
+        0.29500001668930054
+      ],
+      "world_max": [
+        3.541351795196533,
+        -0.468135803937912,
+        1.4449999332427979
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Glass"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0030804998241364956,
+          0.0030804798007011414
+        ],
+        "bounds_max": [
+          0.9969194531440735,
+          0.9456838369369507
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_GlassSealLeft",
+      "type": "MESH",
+      "data_name": "D3_GlassSealLeft_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.018999995663762093,
+        0.03699999675154686,
+        1.1600000858306885
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "0e18bd76440f33adb31f9269b27a5d2db2682705adebd40cc40ec0930a12dda0",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.05450000241398811,
+        -0.003500000573694706,
+        0.2900000214576721
+      ],
+      "local_max": [
+        0.07349999994039536,
+        0.03350000083446503,
+        1.4500000476837158
+      ],
+      "world_min": [
+        3.5165727138519287,
+        -0.495525062084198,
+        0.2900000214576721
+      ],
+      "world_max": [
+        3.5578396320343018,
+        -0.4650161564350128,
+        1.4500000476837158
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0012488879729062319,
+          0.0012488493230193853
+        ],
+        "bounds_max": [
+          0.11357700824737549,
+          0.998751163482666
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_GlassSealRight",
+      "type": "MESH",
+      "data_name": "D3_GlassSealRight_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.01900005154311657,
+        0.03699999675154686,
+        1.1600000858306885
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "e1c69209034ce47587502c77db4a9857ecad5561428e9babf8eccda34bbe454c",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.7064999938011169,
+        -0.003500000573694706,
+        0.2900000214576721
+      ],
+      "local_max": [
+        0.7255000472068787,
+        0.03350000083446503,
+        1.4500000476837158
+      ],
+      "world_min": [
+        3.2935755252838135,
+        -1.10820472240448,
+        0.2900000214576721
+      ],
+      "world_max": [
+        3.3348426818847656,
+        -1.0776957273483276,
+        1.4500000476837158
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0012476101983338594,
+          0.0012476096162572503
+        ],
+        "bounds_max": [
+          0.11356601864099503,
+          0.9987524151802063
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_GlassSealTop",
+      "type": "MESH",
+      "data_name": "D3_GlassSealTop_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.6700000166893005,
+        0.03699999675154686,
+        0.023999929428100586
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "11cac2d68ed27895e605e635895f845af74dfa352948f5c76bb8288bebb39434",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.054999977350234985,
+        -0.003500000573694706,
+        1.4259999990463257
+      ],
+      "local_max": [
+        0.7250000238418579,
+        0.03350000083446503,
+        1.4499999284744263
+      ],
+      "world_min": [
+        3.2937464714050293,
+        -1.1077347993850708,
+        1.4259999990463257
+      ],
+      "world_max": [
+        3.557668685913086,
+        -0.46548599004745483,
+        1.4499999284744263
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0017636122647672892,
+          0.0017635674448683858
+        ],
+        "bounds_max": [
+          0.21091514825820923,
+          0.9982364773750305
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_GlassSealBottom",
+      "type": "MESH",
+      "data_name": "D3_GlassSealBottom_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.6700000166893005,
+        0.03699999675154686,
+        0.02399998903274536
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "157e5d3d29f200a086ca388100ed4744262e7ce73a8ef525b60228fcfeba4b0f",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.054999977350234985,
+        -0.003500000573694706,
+        0.2880000174045563
+      ],
+      "local_max": [
+        0.7250000238418579,
+        0.03350000083446503,
+        0.31200000643730164
+      ],
+      "world_min": [
+        3.2937464714050293,
+        -1.1077347993850708,
+        0.2880000174045563
+      ],
+      "world_max": [
+        3.557668685913086,
+        -0.46548599004745483,
+        0.31200000643730164
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0017636122647672892,
+          0.0017634783871471882
+        ],
+        "bounds_max": [
+          0.21091468632221222,
+          0.9982364773750305
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_Handle",
+      "type": "MESH",
+      "data_name": "D3_Handle_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.03499996289610863,
+        0.047999992966651917,
+        0.21999996900558472
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "fb6c51b1deaf1b19ff9feaef1e90fc0002dac0974ed0de08fab707d830503031",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.737500011920929,
+        -0.085999995470047,
+        0.8199999928474426
+      ],
+      "local_max": [
+        0.7724999785423279,
+        -0.03799999877810478,
+        1.0399999618530273
+      ],
+      "world_min": [
+        3.1999759674072266,
+        -1.1279157400131226,
+        0.8199999928474426
+      ],
+      "world_max": [
+        3.257051944732666,
+        -1.078609585762024,
+        1.0399999618530273
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.003942118491977453,
+          0.003942034672945738
+        ],
+        "bounds_max": [
+          0.8570520877838135,
+          0.9960581064224243
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_HandleMount0",
+      "type": "MESH",
+      "data_name": "D3_HandleMount0_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.03600000962615013,
+        0.059999991208314896,
+        0.026999950408935547
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "f03f9dc5f7ba13979105bcce5b13f2b5fcbfb2ce015f4e0b5e4980abc3ef16d5",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.7369999885559082,
+        -0.060999996960163116,
+        0.8165000081062317
+      ],
+      "local_max": [
+        0.7730000019073486,
+        -0.0010000001639127731,
+        0.8434999585151672
+      ],
+      "world_min": [
+        3.223297357559204,
+        -1.141040325164795,
+        0.8165000081062317
+      ],
+      "world_max": [
+        3.2919914722442627,
+        -1.0866901874542236,
+        0.8434999585151672
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0037293508648872375,
+          0.003729423275217414
+        ],
+        "bounds_max": [
+          0.7904060482978821,
+          0.9962706565856934
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  },
+  {
+    "object": {
+      "name": "D3_HandleMount1",
+      "type": "MESH",
+      "data_name": "D3_HandleMount1_Mesh",
+      "location": [
+        3.5450000762939453,
+        -0.41499999165534973,
+        0.0
+      ],
+      "rotation_degrees": [
+        0.0,
+        0.0,
+        -109.99999850756943
+      ],
+      "scale": [
+        1.0,
+        1.0,
+        1.0
+      ],
+      "dimensions": [
+        0.03600000962615013,
+        0.059999991208314896,
+        0.026999950408935547
+      ],
+      "matrix_world": [
+        [
+          -0.3420201241970062,
+          0.9396926164627075,
+          0.0,
+          3.5450000762939453
+        ],
+        [
+          -0.9396926164627075,
+          -0.3420201241970062,
+          0.0,
+          -0.41499999165534973
+        ],
+        [
+          0.0,
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0,
+          1.0
+        ]
+      ],
+      "parent": null,
+      "collections": [
+        "Collection"
+      ]
+    },
+    "fingerprint": "468c8587f944fe47e3cb992da2810e8d009759ddeb5f1bc7cff7550b4b532b6e",
+    "geometry": {
+      "vertices": 152,
+      "edges": 300,
+      "polygons": 150,
+      "triangles": 300,
+      "ngons": 0,
+      "loose_vertices": 0,
+      "loose_edges": 0,
+      "zero_length_edges": 0,
+      "boundary_edges": 0,
+      "wire_edges": 0,
+      "non_manifold_edges": 0,
+      "degenerate_faces": 0,
+      "invalid_face_normals": 0,
+      "non_finite_vertices": 0
+    },
+    "bounds": {
+      "local_min": [
+        0.7369999885559082,
+        -0.060999996960163116,
+        1.0164999961853027
+      ],
+      "local_max": [
+        0.7730000019073486,
+        -0.0010000001639127731,
+        1.0434999465942383
+      ],
+      "world_min": [
+        3.223297357559204,
+        -1.141040325164795,
+        1.0164999961853027
+      ],
+      "world_max": [
+        3.2919914722442627,
+        -1.0866901874542236,
+        1.0434999465942383
+      ]
+    },
+    "materials": [
+      {
+        "slot": 0,
+        "name": "D3Cabinet_Dark"
+      }
+    ],
+    "uv_layers": [
+      {
+        "name": "UVMap",
+        "active": true,
+        "active_render": true,
+        "loop_count": 600,
+        "bounds_min": [
+          0.0037293508648872375,
+          0.003729423275217414
+        ],
+        "bounds_max": [
+          0.7904081344604492,
+          0.9962707161903381
+        ],
+        "out_of_zero_one_range": 0,
+        "non_finite": 0,
+        "degenerate_faces": 0
+      }
+    ],
+    "modifiers": [],
+    "quality": {
+      "passed": true,
+      "score": 100,
+      "blockers": [],
+      "warnings": [],
+      "requirements": {}
+    }
+  }
+]
