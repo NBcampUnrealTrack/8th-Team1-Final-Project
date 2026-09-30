@@ -381,6 +381,12 @@ void UMD_DailyReportWidget::AnimateSummaryValues(float Duration)
     {
         // 잘못된 시간이나 해제된 월드에서 중간 표시가 남지 않도록 정리
         StopSummaryAnimation();
+        // 유효한 화면에서 즉시 완료된 연출도 후속 효과에 통지
+        if (IsValid(World) == true)
+        {
+            // 실제 최종값 적용 이후 Blueprint 완료 이벤트 실행
+            BP_OnSummaryAnimationFinished();
+        }
         return;
     }
     // 함수가 호출된 순간의 실제 점수 표시를 보간 시작값으로 저장
@@ -392,6 +398,8 @@ void UMD_DailyReportWidget::AnimateSummaryValues(float Duration)
     {
         // 동일한 합계의 숫자 서식과 색상만 복원하고 반복 예약 생략
         StopSummaryAnimation();
+        // 이미 목표값인 경우에도 후속 강조 연출 연결
+        BP_OnSummaryAnimationFinished();
         return;
     }
     // 읽어 온 점수 시작값에 기존 숫자 서식과 부호 색상 적용
@@ -430,6 +438,8 @@ void UMD_DailyReportWidget::UpdateSummaryAnimation()
     {
         // 최종 합계의 정확한 표시 및 반복 예약 종료
         StopSummaryAnimation();
+        // 정상 완료 시에만 Blueprint의 후속 강조 연출 실행
+        BP_OnSummaryAnimationFinished();
         return;
     }
     // 정수끼리의 차감 넘침 없이 현재 표시와 목표값을 보간하는 처리

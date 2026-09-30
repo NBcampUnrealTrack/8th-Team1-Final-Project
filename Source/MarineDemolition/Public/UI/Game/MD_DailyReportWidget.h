@@ -123,6 +123,10 @@ protected:
     UFUNCTION(BlueprintImplementableEvent, Category = "MD|Daily Report", meta = (DisplayName = "On Report Updated"))
     void BP_OnReportUpdated(bool bFinalReport);
 
+    // 합계가 최종값에 도달한 뒤 강조 연출을 연결하는 완료 이벤트
+    UFUNCTION(BlueprintImplementableEvent, Category = "MD|Daily Report", meta = (DisplayName = "On Summary Animation Finished"))
+    void BP_OnSummaryAnimationFinished();
+
     // 서버 기준 남은 시간을 전용 텍스트에 표시
     void UpdateRemainingTime();
 
