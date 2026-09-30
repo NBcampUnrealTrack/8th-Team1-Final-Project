@@ -19,6 +19,8 @@
 #include "Util/MD_LogUtility.h"
 #include "Util/MD_MaterialTintUtility.h"
 #include "World/Sample/MD_QuestItem.h"
+#include "World/Trash/MD_TrashItem.h"
+#include "World/Trash/MD_TrashSpawnVolume.h"
 
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_TrashSorter_Request, "Event.TrashSorter.Request");
 UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_TrashSorter_Rejected, "Event.TrashSorter.Rejected");
@@ -348,13 +350,28 @@ bool AMD_TrashSorter::ConsumeSortable(
 		return false;
 	}
 
-	// Destroy 뒤에는 Item을 읽을 수 없으므로 방송에 실을 값을 미리 잡아 둔다.
+	// Destroy 뒤에는 Item을 읽을 수 없으므로 방송과 원본 생성기에 실을 값을 미리 잡아 둔다.
 	const TSubclassOf<AActor> ItemClass = Item->GetClass();
+	AMD_TrashItem* SpawnedTrash = Cast<AMD_TrashItem>(Item);
+	TWeakObjectPtr<AMD_TrashSpawnVolume> OriginGenerator(
+		SpawnedTrash ? SpawnedTrash->GetOriginGenerator() : nullptr);
+	const FName TrashKindId = SpawnedTrash ? SpawnedTrash->GetOriginKindId() : NAME_None;
+	FIntVector OriginCell;
+	const bool bHasOriginCell = SpawnedTrash && SpawnedTrash->GetOriginFloorCell(OriginCell);
+	const FIntVector* Cell = bHasOriginCell ? &OriginCell : nullptr;
+	if (AMD_TrashSpawnVolume* Generator = OriginGenerator.Get(); Generator && !Generator->CanConsumeTrash(TrashKindId, Cell))
+	{
+		return false;
+	}
 
 	// Actor 소비가 실패하면 점수와 환급을 주지 않아 같은 물건의 중복 지급을 막는다.
 	if (!Item->Destroy())
 	{
 		return false;
+	}
+	if (AMD_TrashSpawnVolume* Generator = OriginGenerator.Get())
+	{
+		Generator->NotifyTrashConsumed(TrashKindId, Cell);
 	}
 
 	MDGameState->AddScoreEvent(Result.PrimaryScoreTag);

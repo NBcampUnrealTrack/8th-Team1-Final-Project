@@ -20,6 +20,7 @@
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
+#include "World/Trash/MD_TrashSpawnManager.h"
 #include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "Gameplay/Loading/MD_MapRegistrationSubsystem.h"
 #include "Online/Session/MD_MultiplayManager.h"
@@ -218,6 +219,20 @@ void AMD_GameModeBase::ApplyPendingGameDataOperation()
             return;
         }
         // 작업 소비 전에 파일 복원과 새 출항 및 다음 일차 전환을 구분할 요청 보관
+        if (UMD_TrashSpawnManager* Trash = GetWorld()->GetSubsystem<UMD_TrashSpawnManager>())
+        {
+            bool bTrashReady = false;
+            if (!Trash->PrepareGenerators(bTrashReady))
+            {
+                UE_LOG(LogTemp, Error, TEXT("Trash floors could not be prepared; saved world restoration stopped."));
+                return;
+            }
+            if (!bTrashReady)
+            {
+                GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
+                return;
+            }
+        }
         EMD_PendingGameDataOperation PendingOperation = SaveSlotManager->GetPendingGameDataOperation();
         // 파일 불러오기에서 저장된 퀘스트와 시각 유지
         bRestoredSavedWorld = PendingOperation == EMD_PendingGameDataOperation::LoadGame;
@@ -243,6 +258,7 @@ void AMD_GameModeBase::ApplyPendingGameDataOperation()
                 SyncMerchantToGameDay(MDGameState->GetCurrentDay(), true);
             }
         }
+
     }
     GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
 }
@@ -456,6 +472,13 @@ void AMD_GameModeBase::RequestEndDay(EMD_DayEndReason EndReason, FGameplayTag Re
 
 void AMD_GameModeBase::TravelToNextDay()
 {
+    const UMD_DayPersistenceSubsystem* Persistence = GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>();
+    if (!IsValid(Persistence) || !Persistence->HasSnapshot())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Day snapshot is unavailable; next-day travel is stopped to preserve remaining trash."));
+        return;
+    }
+
     PreparePlayersForTravel(EMD_LoadingContext::NextShift);
 
     // 같은 레벨을 다시 로드 → BeginPlay에서 복원 경로 진입
@@ -1043,6 +1066,7 @@ void AMD_GameModeBase::CaptureDaySnapshot()
     if (UMD_DayPersistenceSubsystem* Persistence =
         GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
     {
+        Persistence->ClearSnapshot();
         Persistence->CaptureSnapshot(GetWorld());
     }
 }
@@ -1062,6 +1086,20 @@ bool AMD_GameModeBase::IsAutoSaveAllowed()
 
 void AMD_GameModeBase::InitializeExpeditionDay()
 {
+    if (UMD_TrashSpawnManager* Trash = GetWorld()->GetSubsystem<UMD_TrashSpawnManager>())
+    {
+        bool bTrashReady = false;
+        if (!Trash->PrepareGenerators(bTrashReady))
+        {
+            UE_LOG(LogTemp, Error, TEXT("Trash floors could not be prepared; day initialization and auto-save stopped."));
+            return;
+        }
+        if (!bTrashReady)
+        {
+            GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
+            return;
+        }
+    }
     // 구버전 퀘스트 물품을 새 빈 생존 목록으로 자동 저장하는 상황 방지
     UMD_QuestSampleSpawnerManager* Spawners = GetWorld()->GetSubsystem<UMD_QuestSampleSpawnerManager>();
     // 같은 프레임의 타이머 실행 순서와 무관하게 물품 복구 완료 대기
@@ -1084,11 +1122,15 @@ void AMD_GameModeBase::InitializeExpeditionDay()
         GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
         return;
     }
-    // 파일에서 복원한 퀘스트와 시각을 신규 일차 설정으로 덮는 상황 방지
+    // 파일 복원은 이미 적용됐으므로 다음 일차 경계에서만 스냅샷을 복원한다.
     if (bRestoredSavedWorld == false)
     {
-        // 정상적인 다음 일차 전환에만 경계 스냅샷과 악화 적용
-        RestoreDaySnapshot();
+        // 복원 실패 시 새 추첨과 자동 저장으로 기존 잔량을 덮지 않는다.
+        if (!RestoreDaySnapshot())
+        {
+            UE_LOG(LogTemp, Error, TEXT("Day snapshot could not be restored; trash initialization and auto-save are stopped."));
+            return;
+        }
         // 새 일차의 계약 설정에 사용할 서버 진행 상태 조회
         AMD_GameStateBase* RestoredGameState = GetGameState<AMD_GameStateBase>();
         // 파일 복원이 아닌 새 출항 및 일차 전환의 계약 동기화
@@ -1099,12 +1141,24 @@ void AMD_GameModeBase::InitializeExpeditionDay()
         }
     }
 
+    // BeginPlay registers generators; file/day state is restored before fresh draws.
+    bool bTrashReady = true;
+    if (UMD_TrashSpawnManager* TrashManager = GetWorld()->GetSubsystem<UMD_TrashSpawnManager>())
+    {
+        bTrashReady = TrashManager->InitializeUnrestoredGenerators();
+        if (!bTrashReady)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Procedural trash initialization failed; initial auto-save is skipped."));
+            return;
+        }
+    }
+
     if (auto* GS = GetGameState<AMD_GameStateBase>()) GS->FinishWorldInitialization();
 
     // 월드 복원과 상인 퀘스트 일차 동기화가 끝난 경계 상태만 자동 저장하는 처리
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-    if (IsValid(SaveSlotManager) == true)
+    if (bTrashReady && IsValid(SaveSlotManager) == true)
     {
         // Collection/serialization stays at this boundary; immutable file writes run off-thread.
         SaveSlotManager->AsyncSaveGameData(TEXT("Auto"), true, FOnSaveMDGameDataComplete());
@@ -1235,13 +1289,12 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day, bool bStartNewContract)
     }
 }
 
-void AMD_GameModeBase::RestoreDaySnapshot()
+bool AMD_GameModeBase::RestoreDaySnapshot()
 {
-    if (UMD_DayPersistenceSubsystem* Persistence =
-        GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
-    {
-        Persistence->RestoreSnapshot(GetWorld());
-    }
+    UMD_DayPersistenceSubsystem* Persistence =
+        GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>();
+    return !IsValid(Persistence) || !Persistence->HasSnapshot()
+        || Persistence->RestoreSnapshot(GetWorld());
 }
 
 void AMD_GameModeBase::MD_EndDay()

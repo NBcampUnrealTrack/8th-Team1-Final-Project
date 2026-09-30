@@ -8,6 +8,7 @@
 #include "Types/Persistence/MD_SurfaceStainRecord.h"
 #include "Types/Scrape/MD_ContaminationPendingDrop.h"
 #include "Types/Persistence/MD_WorldActorSnapshotTypes.h"
+#include "Types/Trash/MD_TrashSpawnState.h"
 #include "MD_DaySnapshotTypes.generated.h"
 
 class AMD_SupportBrace;
@@ -307,6 +308,18 @@ struct FMD_DaySnapshot
       /** 보급기에서 생성되어 다음 Day에도 같은 개체로 이어질 동적 쓰레기통. */
       UPROPERTY()
       TArray<FMD_TrashBinRecord> TrashBins;
+
+      /** Set for new snapshots even when every generator has no trash left. */
+      UPROPERTY()
+      bool bHasTrashGeneratorState = false;
+
+      UPROPERTY()
+      TArray<FMD_TrashGeneratorState> TrashGenerators;
+
+      // Day travel is a map reload, but must retain the previous day's exact placement.
+      // This field is deliberately absent from FMD_WorldData (ordinary file/session loads).
+      UPROPERTY()
+      TMap<FName, FMD_TrashGeneratorPlacement> TrashPlacements;
 
       // 이름은 하위 호환을 위해 유지하지만 일반 표면 컴포넌트도 포함한다
       UPROPERTY()
