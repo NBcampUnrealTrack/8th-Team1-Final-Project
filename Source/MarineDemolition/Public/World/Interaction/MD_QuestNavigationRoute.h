@@ -36,6 +36,10 @@ public:
     UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Route|Quest", meta=(ClampMin="0"))
     int32 RequiredDay = 1;
 
+    /** Guide to an authored quest location while the configured phase is active, without a Day1 terminal. */
+    UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="Route|Quest")
+    bool bGuideToQuestLocation = false;
+
     /** Route is available after all these utilities cease to be broken. */
     UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category="Route|Quest")
     TArray<TObjectPtr<AMD_WallUtility>> RequiredRepairs;

@@ -65,7 +65,7 @@ void AMD_QuestNavigationRoute::Tick(float DeltaSeconds)
 void AMD_QuestNavigationRoute::UpdateTargetHighlight(bool bActive)
 {
     TSet<TWeakObjectPtr<AActor>> Targets;
-    if (bActive)
+    if (bActive && !bGuideToQuestLocation)
     {
         // All outstanding repairs belong to the objective, regardless of the selected path.
         auto AddRepair = [&Targets](AMD_WallUtility* Utility)
@@ -96,7 +96,8 @@ void AMD_QuestNavigationRoute::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 bool AMD_QuestNavigationRoute::IsQuestActive() const
 {
-    if (!IsValid(Terminal) || Terminal->IsDumped() || !QuestDefinitionId.IsValid()) return false;
+    if (!QuestDefinitionId.IsValid()) return false;
+    if (!bGuideToQuestLocation && (!IsValid(Terminal) || Terminal->IsDumped())) return false;
     const AMD_GameStateBase* State = GetWorld() ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
     const UMD_MerchantComponent* Merchant = State ? State->GetMerchantComponent() : nullptr;
     if (!Merchant || (RequiredDay > 0 && Merchant->GetCurrentDay() != RequiredDay)) return false;
@@ -111,6 +112,7 @@ bool AMD_QuestNavigationRoute::IsQuestActive() const
 bool AMD_QuestNavigationRoute::ShouldDisplayRoute() const
 {
     if (!IsQuestActive()) return false;
+    if (bGuideToQuestLocation) return true;
     for (const AMD_WallUtility* Utility : RequiredRepairs)
     {
         // Missing references must not prematurely advance the guide.
