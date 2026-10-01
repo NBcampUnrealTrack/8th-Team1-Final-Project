@@ -1,6 +1,8 @@
 #include "Gameplay/Scrape/MD_ScrapeMeshUVAdjacency.h"
 
 #if WITH_EDITOR
+#include "Algo/Sort.h"
+
 namespace
 {
     constexpr double MinimumPortalLengthCm = 0.0;
@@ -22,6 +24,96 @@ namespace
         double StartA, EndA, StartB, EndB;
         FVector A, B;
         bool bAmbiguous = false;
+    };
+
+    // Only budget-risk bakes use this broad phase. Exact expanded boxes and original
+    // sweep ranks preserve every accepted pair, its orientation and its trim order.
+    class FMDAdjacencyBoundsTree
+    {
+        struct FNode
+        {
+            FBox Bounds = FBox(ForceInit);
+            int32 First = 0, Count = 0;
+            int32 Left = INDEX_NONE, Right = INDEX_NONE;
+        };
+
+        const TArray<FMDAdjacencyEdge>& Edges;
+        TArray<int32> EdgeRanks;
+        TArray<int32> Indices;
+        TArray<FNode> Nodes;
+
+        int32 BuildNode(const int32 First, const int32 Count)
+        {
+            FNode Node;
+            Node.First = First; Node.Count = Count;
+            FBox Centers(ForceInit);
+            for (int32 I = First; I < First + Count; ++I)
+            {
+                const FBox& Bounds = Edges[Indices[I]].Bounds;
+                Node.Bounds += Bounds;
+                Centers += Bounds.GetCenter();
+            }
+            const int32 NodeIndex = Nodes.Add(Node);
+            if (Count > 8)
+            {
+                const FVector Size = Centers.GetSize();
+                const int32 Axis = Size.X >= Size.Y && Size.X >= Size.Z ? 0 : (Size.Y >= Size.Z ? 1 : 2);
+                Algo::Sort(MakeArrayView(Indices.GetData() + First, Count), [&](const int32 A, const int32 B)
+                {
+                    const double CenterA = Edges[A].Bounds.GetCenter()[Axis];
+                    const double CenterB = Edges[B].Bounds.GetCenter()[Axis];
+                    return CenterA == CenterB ? EdgeRanks[A] < EdgeRanks[B] : CenterA < CenterB;
+                });
+                const int32 LeftCount = Count / 2;
+                const int32 Left = BuildNode(First, LeftCount);
+                const int32 Right = BuildNode(First + LeftCount, Count - LeftCount);
+                // Recursive Add can reallocate Nodes; reacquire by index.
+                Nodes[NodeIndex].Left = Left; Nodes[NodeIndex].Right = Right;
+            }
+            return NodeIndex;
+        }
+
+    public:
+        FMDAdjacencyBoundsTree(const TArray<FMDAdjacencyEdge>& InEdges, const TArray<int32>& Order)
+            : Edges(InEdges), Indices(Order)
+        {
+            EdgeRanks.SetNumUninitialized(Edges.Num());
+            for (int32 I = 0; I < Order.Num(); ++I) { EdgeRanks[Order[I]] = I; }
+            if (!Indices.IsEmpty()) { BuildNode(0, Indices.Num()); }
+        }
+
+        bool Collect(const FBox& Bounds, const int32 AfterRank, TArray<int32>& OutRanks,
+            int64& WorkChecks, FString& OutError) const
+        {
+            OutRanks.Reset();
+            TArray<int32, TInlineAllocator<64>> Stack;
+            if (!Nodes.IsEmpty()) { Stack.Add(0); }
+            while (!Stack.IsEmpty())
+            {
+                const FNode& Node = Nodes[Stack.Pop(EAllowShrinking::No)];
+                if (++WorkChecks > MaximumCandidateChecks)
+                { OutError = TEXT("Partial-edge adjacency exceeded its bounded candidate budget."); return false; }
+                if (!Bounds.Intersect(Node.Bounds)) { continue; }
+                if (Node.Left != INDEX_NONE)
+                {
+                    Stack.Add(Node.Right); Stack.Add(Node.Left);
+                    continue;
+                }
+                for (int32 I = Node.First; I < Node.First + Node.Count; ++I)
+                {
+                    const int32 EdgeIndex = Indices[I], Rank = EdgeRanks[EdgeIndex];
+                    if (Rank <= AfterRank) { continue; }
+                    if (++WorkChecks > MaximumCandidateChecks)
+                    { OutError = TEXT("Partial-edge adjacency exceeded its bounded candidate budget."); return false; }
+                    if (Bounds.Intersect(Edges[EdgeIndex].Bounds)) { OutRanks.Add(Rank); }
+                }
+            }
+            OutRanks.Sort();
+            return true;
+        }
+
+        SIZE_T GetAllocatedSize() const
+        { return EdgeRanks.GetAllocatedSize() + Indices.GetAllocatedSize() + Nodes.GetAllocatedSize(); }
     };
 
     void TrimPair(FPair& Pair, const int32 EdgeIndex, const double Low, const double High)
@@ -132,13 +224,24 @@ bool FMD_ScrapeMeshUVAdjacency::Build(TArray<FMD_ScrapeMeshUVTriangle>& Triangle
     }
     UE_LOG(LogTemp, Display, TEXT("MeshUV adjacency: %d edges; candidate overlaps X=%lld Y=%lld Z=%lld; sweep axis=%d."),
         Edges.Num(), AxisCandidateCounts[0], AxisCandidateCounts[1], AxisCandidateCounts[2], Axis);
+    TUniquePtr<FMDAdjacencyBoundsTree> BoundsTree;
+    if (BestCandidateCount > MaximumCandidateChecks)
+    {
+        BoundsTree = MakeUnique<FMDAdjacencyBoundsTree>(Edges, Order);
+    }
     TArray<FPair> Pairs;
+    TArray<int32> CandidateRanks;
     int64 CandidateChecks = 0;
+    int64 BroadPhaseChecks = 0;
     for (int32 I = 0; I < Order.Num(); ++I)
     {
         const int32 EdgeA = Order[I];
-        for (int32 J = I + 1; J < Order.Num(); ++J)
+        if (BoundsTree && !BoundsTree->Collect(Edges[EdgeA].Bounds, I, CandidateRanks, BroadPhaseChecks, OutError))
+        { return false; }
+        const int32 CandidateCount = BoundsTree ? CandidateRanks.Num() : Order.Num() - I - 1;
+        for (int32 CandidateIndex = 0; CandidateIndex < CandidateCount; ++CandidateIndex)
         {
+            const int32 J = BoundsTree ? CandidateRanks[CandidateIndex] : I + 1 + CandidateIndex;
             const int32 EdgeB = Order[J];
             const FMDAdjacencyEdge& A = Edges[EdgeA]; const FMDAdjacencyEdge& B = Edges[EdgeB];
             if (B.Bounds.Min[Axis] > A.Bounds.Max[Axis]) { break; }
@@ -154,6 +257,11 @@ bool FMD_ScrapeMeshUVAdjacency::Build(TArray<FMD_ScrapeMeshUVTriangle>& Triangle
             const int32 PairIndex = Pairs.Add(Pair);
             Edges[EdgeA].Pairs.Add(PairIndex); Edges[EdgeB].Pairs.Add(PairIndex);
         }
+    }
+    if (BoundsTree)
+    {
+        UE_LOG(LogTemp, Display, TEXT("MeshUV adjacency spatial broad phase: %lld box checks, %lld intersecting candidates, %.3f MiB search storage."),
+            BroadPhaseChecks, CandidateChecks, (BoundsTree->GetAllocatedSize() + CandidateRanks.GetAllocatedSize()) / (1024.0 * 1024.0));
     }
     // Two short edges may meet at a point on one long edge. Positive overlapping intervals,
     // however, indicate more than two incident faces and are not a safe bridge for a brush.
