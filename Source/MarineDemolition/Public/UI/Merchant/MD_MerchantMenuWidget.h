@@ -12,6 +12,7 @@
 class UScrollBox;
 class UTextBlock;
 class AMD_Merchant;
+class UMD_MerchantComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_MerchantMenuRequest);
 
@@ -60,6 +61,7 @@ public:
 
 protected:
 	virtual void NativeOnActivated() override;
+	virtual void NativeDestruct() override;
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	void HandleTalkClicked();
@@ -67,12 +69,19 @@ protected:
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	void HandleExitClicked();
 
+	// 복제된 상인 상태를 대화 진행 상태와 함께 화면에 반영
+	UFUNCTION()
+	void HandleMerchantStateChanged();
+
 	/** 디자이너가 에디터에서 미리보기할 수 있도록 기본값을 노출한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Merchant")
 	FMD_MerchantMenuInfo MenuInfo;
 
 	UPROPERTY()
 	TObjectPtr<AMD_Merchant> OwningMerchant;
+
+	// 하위 화면 전환 중에도 유지하고 메뉴 제거 시 해제할 상태 알림 연결
+	TWeakObjectPtr<UMD_MerchantComponent> BoundMerchantComponent;
 
 	// ───────────────────────── 상인 신원 ─────────────────────────
 
