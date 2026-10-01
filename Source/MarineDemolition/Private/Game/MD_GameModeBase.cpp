@@ -1315,10 +1315,24 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day, bool bStartNewContract)
 
 bool AMD_GameModeBase::RestoreDaySnapshot()
 {
-    UMD_DayPersistenceSubsystem* Persistence =
-        GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>();
-    return !IsValid(Persistence) || !Persistence->HasSnapshot()
-        || Persistence->RestoreSnapshot(GetWorld());
+    // 로비 복귀와 현장 일차 전환을 구분할 현재 월드 조회
+    UWorld* World = GetWorld();
+    // PIE 접두사를 제거한 로비 맵에서 이전 현장 스냅샷 복원 생략
+    if (MakeWorldAssetReference(World).ToSoftObjectPath().GetLongPackageName() == TEXT("/Game/Maps/L_Lobby"))
+    {
+        // 복원 대상이 없는 로비의 정상 초기화 진행
+        return true;
+    }
+    // 현장 월드에서만 일차 기록을 복원할 인스턴스 서브시스템 조회
+    UMD_DayPersistenceSubsystem* Persistence = GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>();
+    // 복원할 기록이 없는 신규 현장 진입 확인
+    if (IsValid(Persistence) == false || Persistence->HasSnapshot() == false)
+    {
+        // 일차 기록 없이 진행하는 정상 초기화 허용
+        return true;
+    }
+    // 실제 현장 복원 결과를 초기화 단계에 전달
+    return Persistence->RestoreSnapshot(World);
 }
 
 void AMD_GameModeBase::MD_EndDay()
