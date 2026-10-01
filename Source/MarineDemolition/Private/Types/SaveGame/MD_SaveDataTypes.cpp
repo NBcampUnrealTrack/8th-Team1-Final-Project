@@ -2,7 +2,6 @@
 
 #include "Types/SaveGame/MD_SaveDataTypes.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
-#include "Data/Merchant/MD_QuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "World/Support/MD_SupportBrace.h"
 #include "World/Wall/MD_WallPiece.h"
@@ -490,7 +489,7 @@ bool FMD_GameStateData::IsStructurallyValid() const
 bool FMD_MerchantData::IsStructurallyValid() const
 {
 	// 경제와 호감도 범위가 런타임 규칙에서 허용하는 범위인지 확인하는 검사
-	if (Credits < 0 || DebtBalance < 0 || Affinity < -4.0f || Affinity > 5.0f || FMath::IsFinite(Affinity) == false || CurrentDay < 0 || CurrentDay > 4 || NextDepositMultiplier < 0.0f || FMath::IsFinite(NextDepositMultiplier) == false || QuestCompletions < 0)
+	if (Credits < 0 || DebtBalance < 0 || Affinity < -4.0f || Affinity > 5.0f || FMath::IsFinite(Affinity) == false || CurrentDay < 0 || CurrentDay > 4 || NextDepositMultiplier < 0.0f || FMath::IsFinite(NextDepositMultiplier) == false)
 	{
 		return false;
 	}
@@ -506,8 +505,8 @@ bool FMD_MerchantData::IsStructurallyValid() const
         }
     }
 
-	// 활성 계약 없이 퀘스트 상태만 남은 손상 데이터의 부분 적용을 막기 위한 검사
-	if (CurrentSite.IsNull() == true && (CurrentDay > 0 || MainQuests.Num() > 0 || RepeatQuests.Num() > 0))
+	// 활성 계약 없이 일차만 남은 손상 데이터 검사
+	if (CurrentSite.IsNull() == true && CurrentDay > 0)
 	{
 		return false;
 	}
@@ -517,33 +516,6 @@ bool FMD_MerchantData::IsStructurallyValid() const
 	{
 		// 전체 AssetId와 양수 구매 수량을 갖춘 저장 항목만 허용
 		if (PurchasedItemEntry.Key.IsValid() == false || PurchasedItemEntry.Value <= 0)
-		{
-			return false;
-		}
-	}
-
-	// 메인 퀘스트 상태가 원본 Primary Data Asset을 다시 찾을 식별자와 유효한 진행도를 갖는지 확인하는 검사
-	for (const FMD_MainQuestState& MainQuest : MainQuests)
-	{
-		bool bHasValidDefinitionId = MainQuest.HasValidDefinitionId();
-		if (bHasValidDefinitionId == false || MainQuest.UnlockDay <= 0)
-		{
-			return false;
-		}
-
-		if (MainQuest.CurrentPhaseIndex < 0 || MainQuest.CurrentProgress < 0
-            || MainQuest.Status > EMD_MainQuestStatus::Failed || MainQuest.FailureReason > EMD_QuestFailureReason::Destroyed)
-		{
-			return false;
-		}
-	}
-
-	// 반복 퀘스트 상태가 Primary Data Asset과 페이즈 진행을 다시 찾을 최소 식별 정보를 갖는지 확인하는 검사
-	for (const FMD_RepeatQuestState& RepeatQuest : RepeatQuests)
-	{
-		bool bHasValidDefinitionId = RepeatQuest.HasValidDefinitionId();
-		if (bHasValidDefinitionId == false || RepeatQuest.CurrentPhaseIndex < 0 || RepeatQuest.CurrentProgress < 0
-            || RepeatQuest.Status > EMD_RepeatQuestStatus::Failed)
 		{
 			return false;
 		}
@@ -592,43 +564,6 @@ bool FMD_MerchantData::AreAssetsValid() const
             return false;
         }
     }
-    // 메인과 반복 퀘스트에 동일한 정의 및 페이즈 검증 적용
-    TMap<FPrimaryAssetId, TArray<int32>> QuestPhases;
-    // 메인 퀘스트의 현재 단계 수집
-    for (const FMD_MainQuestState& Quest : MainQuests)
-    {
-        // 같은 정의의 여러 사용 단계도 누락 없이 보존
-        QuestPhases.FindOrAdd(Quest.DefinitionId).AddUnique(Quest.CurrentPhaseIndex);
-    }
-    // 반복 퀘스트의 현재 단계 수집
-    for (const FMD_RepeatQuestState& Quest : RepeatQuests)
-    {
-        // 두 역할에서 사용하는 동일 정의의 중복 로드 방지
-        QuestPhases.FindOrAdd(Quest.DefinitionId).AddUnique(Quest.CurrentPhaseIndex);
-    }
-    // 실제 로드된 정의를 원장 변경 전에 검증
-    for (TPair<FPrimaryAssetId, TArray<int32>>& Entry : QuestPhases)
-    {
-        // 준비된 정의 재사용과 직접 복원 API의 동기 로드 호환
-        UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(Entry.Key);
-        // 목표가 사라진 반복 퀘스트도 메인 퀘스트와 동일하게 거부
-        if (IsValid(Definition) == false || Definition->IsValidDefinition() == false)
-        {
-            // 잘못된 퀘스트 정의의 부분 적용 차단
-            return false;
-        }
-        // 저장된 모든 역할의 페이즈 존재 여부 확인
-        for (int32 Phase : Entry.Value)
-        {
-            // 에셋 편집으로 제거된 단계의 진행 복원 차단
-            if (Definition->HasPhase(Phase) == false)
-            {
-                // 사라진 페이즈 거부
-                return false;
-            }
-        }
-    }
-    // 현장 및 퀘스트 복원 준비 완료
     return true;
 }
 

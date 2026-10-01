@@ -46,10 +46,10 @@ bool FMD_ShopItem::IsDefinitionLoaded()
 	return true;
 }
 
-bool FMD_ShopItem::IsUnlocked(float Affinity, int32 QuestCompletions, const TArray<FPrimaryAssetId>& OwnedItemAssetIds) const
+bool FMD_ShopItem::IsUnlocked(float Affinity, const TArray<FPrimaryAssetId>& OwnedItemAssetIds) const
 {
 	// 미충족 진행 조건의 해금 차단
-	if ((bRequiresAffinity == true && Affinity < AffinityRequired) || (QuestCompletionsRequired > 0 && QuestCompletions < QuestCompletionsRequired))
+	if (bRequiresAffinity == true && Affinity < AffinityRequired)
 	{
 		// 조건을 충족하지 않은 품목의 잠금 유지
 		return false;
@@ -73,11 +73,6 @@ FText FMD_ShopItem::GetUnlockConditionText() const
 		// 기획서 표기를 그대로 따른다: `호감 ≥0`, `호감 ≥+1`
 		const FString Sign = AffinityRequired > 0.f ? TEXT("+") : TEXT("");
 		Parts.Add(FString::Printf(TEXT("호감 ≥%s%g"), *Sign, AffinityRequired));
-	}
-
-	if (QuestCompletionsRequired > 0)
-	{
-		Parts.Add(FString::Printf(TEXT("퀘스트 %d회"), QuestCompletionsRequired));
 	}
 
 	// 선행 품목이 필요한 경우 공통 정의의 표시 이름으로 조건 구성

@@ -93,7 +93,4 @@ struct FMD_MerchantMenuInfo
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Contract")
 	int32 ContractTotalDays = 3;
 
-	/** 활성 퀘스트 보수 미리보기. 실패 시 크레딧 위약금은 없다 (`07` §3.2, §8) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest")
-	int32 ActiveQuestReward = 0;
 };

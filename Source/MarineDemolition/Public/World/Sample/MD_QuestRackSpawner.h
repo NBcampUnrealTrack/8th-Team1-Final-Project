@@ -115,10 +115,9 @@ protected:
 
 private:
 	void ConfigureRackComponents();
-	bool FindActiveRackQuest(FMD_MainQuestState& OutState) const;
 	bool IsAccessRequirementMet() const;
-	AMD_QuestItem* SpawnCartridge(const FMD_MainQuestState& QuestState);
-	void RefreshRackGroup();
+	// 랙에 저장된 물품 구성으로 회수용 카트리지 생성
+	AMD_QuestItem* SpawnCartridge();
 	UFUNCTION() void OnRep_RackState();
 
 	UPROPERTY(ReplicatedUsing=OnRep_RackState) bool bQuestActive = false;

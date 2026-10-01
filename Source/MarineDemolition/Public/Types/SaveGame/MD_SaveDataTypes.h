@@ -182,7 +182,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	float Affinity = 0.0f;
 
-	// 퀘스트 해금과 반복 카드 상태의 기준이 되는 상인 시스템 일차
+	// 현장 계약과 착수금 지급 기준이 되는 상인 시스템 일차
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	int32 CurrentDay = 0;
 
@@ -194,35 +194,25 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	bool bConsumableDiscountActive = true;
 
-	// 계약을 넘어 상점 해금 조건으로 사용하는 누적 퀘스트 성공 횟수
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
-	int32 QuestCompletions = 0;
 
 	// 구매 소유권과 소모품 누적 수량을 재개 세션에 복원하기 위한 품목별 구매 원장
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
 
-	// 재개 시 같은 퀘스트 정의를 연결하기 위한 현재 현장 애셋
+	// 재개 시 계약을 이어갈 현재 현장 애셋
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TSoftObjectPtr<UMD_SiteDefinition> CurrentSite;
 
-	// 잠김·진행·완료·실패와 목표 진행도를 그대로 유지하기 위한 메인 퀘스트 목록
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
-	TArray<FMD_MainQuestState> MainQuests;
-
-	// 퀘스트 진행도를 유지하기 위한 반복 퀘스트 목록
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
-	TArray<FMD_RepeatQuestState> RepeatQuests;
 
 	// 계약 사이에도 완료된 현장 기록을 유지하기 위한 클리어 현장 목록
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<TSoftObjectPtr<UMD_SiteDefinition>> ClearedSites;
 
 public:
-	// 손상된 경제 범위와 퀘스트 상태가 서버 원장에 적용되지 않도록 검사하는 함수
+	// 손상된 경제 범위와 계약 일차의 서버 원장 적용 차단
 	bool IsStructurallyValid() const;
 
-	// 원장 적용 전에 현장과 퀘스트 정의 및 저장 페이즈의 호환성 확인
+	// 원장 적용 전에 현재 현장과 완료 현장 자산의 유효성 확인
 	bool AreAssetsValid() const;
 
 	// 엔진 경로 변경 설정을 현장의 일괄 준비와 실제 복원에 동일하게 적용

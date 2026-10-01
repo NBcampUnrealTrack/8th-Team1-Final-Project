@@ -113,8 +113,6 @@ private:
 
     void FinalizeReturnStatuses();
 
-    // Day 마감 시 복귀 구역 내부 샘플을 퀘스트 제출로 확정하는 처리
-    void FinalizeDeliveredSamples();
 
  //Collapse Score
 private:
