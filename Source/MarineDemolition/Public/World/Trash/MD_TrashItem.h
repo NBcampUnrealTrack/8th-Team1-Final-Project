@@ -9,6 +9,7 @@
 #include "MD_TrashItem.generated.h"
 
 class UStaticMeshComponent;
+class AMD_TrashSpawnVolume;
 
 /**
  * 기지 바닥에 산재한 각종 쓰레기 (기획 02 §1)
@@ -46,6 +47,17 @@ public:
 	/** 동적 스폰 전에 종류를 지정한다. 서버에서 바꾼 값은 클라이언트에도 복제된다. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Trash")
 	void SetTrashKindId(FName NewTrashKindId);
+
+	/** Server-only source of this procedurally generated item. Carried items retain the source. */
+	AMD_TrashSpawnVolume* GetOriginGenerator() const;
+	void SetOriginGenerator(AMD_TrashSpawnVolume* NewOriginGenerator);
+	/** Server-only, immutable with respect to carrying and world movement. */
+	void SetOriginFloorCell(const FIntVector& Cell);
+	bool GetOriginFloorCell(FIntVector& OutCell) const;
+	FName GetOriginKindId() const { return OriginKindId; }
+
+	/** Generated items use the mesh asset's authored centimeter size, independent of Blueprint placement defaults. */
+	void UseAuthoredMeshScaleForProceduralSpawn();
 
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	FName GetTrashVariantId() const { return TrashVariantId; }
@@ -125,4 +137,10 @@ private:
 	FName AppliedTrashVariantId;
 	FGameplayTag AppliedCategory;
 	bool bHasAppliedTrashKind = false;
+
+	/** Runtime origin; the generator's named ledger is persisted instead of item transforms. */
+	TWeakObjectPtr<AMD_TrashSpawnVolume> OriginGenerator;
+	FIntVector OriginFloorCell = FIntVector::ZeroValue;
+	FName OriginKindId = NAME_None;
+	bool bHasOriginFloorCell = false;
 };

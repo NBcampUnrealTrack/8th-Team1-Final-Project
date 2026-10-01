@@ -12,6 +12,7 @@
 
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
+#include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "Types/Lore/MD_LoreTypes.h"
 #include "World/Trash/MD_TrashBin.h"
 
@@ -741,6 +742,45 @@ bool FMD_WorldData::IsStructurallyValid() const
 			return false;
 		}
 		SavedTrashBinIds.Add(TrashBinRecord.StableBinId);
+	}
+
+	// 구형 슬롯에는 생성기 원장이 없을 수 있다. 새 원장은 빈 영역도 명시적으로 기록한다.
+	if (!bHasTrashGeneratorState && !TrashGenerators.IsEmpty())
+	{
+		return false;
+	}
+	TSet<FName> GeneratorNames;
+	TSet<FName> ValidTrashKindIds;
+	if (!TrashGenerators.IsEmpty())
+	{
+		for (const FName TrashKindId : UMD_TrashLibrary::GetTrashKindIds())
+		{
+			ValidTrashKindIds.Add(TrashKindId);
+		}
+	}
+	for (const FMD_TrashGeneratorState& GeneratorState : TrashGenerators)
+	{
+		if (!GeneratorState.IsStructurallyValid()
+			|| GeneratorNames.Contains(GeneratorState.GeneratorName))
+		{
+			return false;
+		}
+		GeneratorNames.Add(GeneratorState.GeneratorName);
+
+		int64 TotalRemaining = 0;
+		for (const TPair<FName, int32>& KindCount : GeneratorState.RemainingKindCounts)
+		{
+			if (KindCount.Key.IsNone() || !ValidTrashKindIds.Contains(KindCount.Key)
+				|| KindCount.Value < 0)
+			{
+				return false;
+			}
+			TotalRemaining += KindCount.Value;
+			if (TotalRemaining > MAX_int32)
+			{
+				return false;
+			}
+		}
 	}
 
 	// 오염 셀의 병렬 배열 길이가 다르면 잘못된 인덱스 복원을 수행하지 않기 위한 검사

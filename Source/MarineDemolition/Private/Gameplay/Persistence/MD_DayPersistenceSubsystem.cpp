@@ -1,5 +1,6 @@
-﻿#include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
+#include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
 #include "Gameplay/Persistence/MD_WorldActorPersistence.h"
+#include "Misc/ScopeExit.h"
 #include "Gameplay/Persistence/MD_TrashBinPersistence.h"
 #include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
 #include "Data/SaveGame/MD_SaveSlotManager.h"
@@ -14,6 +15,8 @@
 #include "World/Interaction/MD_SectorCloseoutMarker.h"
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Support/MD_SupportBrace.h"
+#include "World/Trash/MD_TrashSpawnManager.h"
+#include "World/Trash/MD_TrashSpawnVolume.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
 
@@ -179,6 +182,11 @@ bool UMD_DayPersistenceSubsystem::ShouldDeferContaminationGeneration(const UMD_S
 
 void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
 {
+    CaptureSnapshotInternal(World, true);
+}
+
+void UMD_DayPersistenceSubsystem::CaptureSnapshotInternal(UWorld* World, bool bCaptureTrashPlacements)
+{
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_DayPersistence_CaptureSnapshot);
     if (!World || World->GetNetMode() == NM_Client)
     {
@@ -301,6 +309,17 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
 		return;
 	}
 
+	// 미분류 쓰레기는 위치 대신 생성기별 종류·잔량을 보관한다.
+	UMD_TrashSpawnManager* TrashSpawnManager = World->GetSubsystem<UMD_TrashSpawnManager>();
+	if (!IsValid(TrashSpawnManager)
+		|| !TrashSpawnManager->CaptureStates(Snapshot.TrashGenerators)
+        || (bCaptureTrashPlacements && !TrashSpawnManager->CapturePlacements(Snapshot.TrashPlacements)))
+	{
+		Snapshot = FMD_DaySnapshot();
+		return;
+	}
+	Snapshot.bHasTrashGeneratorState = true;
+
     for (TActorIterator<AMD_SectorCloseoutMarker> It(World); It; ++It)
     {
         if (It->IsClosed())
@@ -358,7 +377,7 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
     // 파일 저장 수집이 일차 경계용 메모리 스냅샷을 변경하지 않도록 하는 임시 보존
     FMD_DaySnapshot PreservedSnapshot = MoveTemp(Snapshot);
     Snapshot = FMD_DaySnapshot();
-    CaptureSnapshot(World);
+    CaptureSnapshotInternal(World, false);
 
     if (Snapshot.bValid == false)
     {
@@ -377,6 +396,8 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
     OutWorldData.Samples = MoveTemp(Snapshot.Samples);
     OutWorldData.Pieces = MoveTemp(Snapshot.Pieces);
 	OutWorldData.TrashBins = MoveTemp(Snapshot.TrashBins);
+	OutWorldData.bHasTrashGeneratorState = Snapshot.bHasTrashGeneratorState;
+	OutWorldData.TrashGenerators = MoveTemp(Snapshot.TrashGenerators);
     OutWorldData.WallContaminations = MoveTemp(Snapshot.WallContaminations);
     OutWorldData.PendingContaminationDrops = MoveTemp(Snapshot.PendingContaminationDrops);
     OutWorldData.SurfaceStains = MoveTemp(Snapshot.SurfaceStains);
@@ -393,6 +414,17 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
 
 bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_WorldData& WorldData)
 {
+    return ApplyWorldState(World, WorldData, nullptr);
+}
+
+bool UMD_DayPersistenceSubsystem::ApplyWorldState(UWorld* World, const FMD_WorldData& WorldData,
+    const TMap<FName, FMD_TrashGeneratorPlacement>* DayPlacements)
+{
+    ON_SCOPE_EXIT
+    {
+        if (IsValid(World))
+            if (auto* Manager = World->GetSubsystem<UMD_TrashSpawnManager>()) Manager->CancelPreparedRestore();
+    };
 	// 파일 데이터 적용을 서버 권위 월드로 제한하고 손상 배열의 부분 적용을 막기 위한 검사
 	if (IsValid(World) == false || World->GetNetMode() == NM_Client || WorldData.IsStructurallyValid() == false)
     {
@@ -400,6 +432,12 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
     }
 
     // 월드 변경 전에 저장된 클래스와 배치 레벨 및 필수 액터 검사
+    if (WorldData.bHasTrashGeneratorState)
+    {
+        UMD_TrashSpawnManager* Trash = World->GetSubsystem<UMD_TrashSpawnManager>();
+        if (!Trash || !Trash->PrepareRestoreStates(WorldData.TrashGenerators)
+            || (DayPlacements && !Trash->CanRestorePlacements(WorldData.TrashGenerators, *DayPlacements))) return false;
+    }
     if (FMD_WorldActorPersistence::CanRestore(World, WorldData.ActorSnapshot) == false)
     {
         // 복원 불가능한 저장의 부분 적용 차단
@@ -696,6 +734,7 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
 		return false;
 	}
 
+
     if (UMD_ContaminationDebrisSubsystem* Debris = World->GetSubsystem<UMD_ContaminationDebrisSubsystem>())
     {
         if (!Debris->RestorePendingDrops(WorldData.PendingContaminationDrops)) return false;
@@ -704,7 +743,37 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldSaveData(UWorld* World, const FMD_Wo
     if (!FMD_SurfaceStainPersistence::Restore(World, WorldData.SurfaceStains)) return false;
 
     // 생존 물품 재생성과 삭제 이력 및 작업 상태 복원의 실패 전파
-    return FMD_WorldActorPersistence::Restore(World, WorldData.ActorSnapshot);
+    // 저장된 개별 물품의 이름을 먼저 확보해 새 생성기 물품과 이름이 겹치지 않도록 한다.
+    if (!FMD_WorldActorPersistence::Restore(World, WorldData.ActorSnapshot)) return false;
+
+	// 생성기 원장이 없는 구형 액터 저장은 개별 쓰레기 기록을 그대로 복원한다.
+	// 출처를 복구할 수 없으므로 생성기의 신규 추첨을 막아 같은 쓰레기의 중복 생성을 방지한다.
+	// 두 저장 형식 모두 없는 더 오래된 슬롯은 GameMode의 최초 추첨을 유지한다.
+	if (WorldData.bHasTrashGeneratorState || WorldData.ActorSnapshot.bCaptured)
+	{
+		UMD_TrashSpawnManager* TrashSpawnManager = World->GetSubsystem<UMD_TrashSpawnManager>();
+		if (!IsValid(TrashSpawnManager))
+		{
+			return false;
+		}
+		TArray<FMD_TrashGeneratorState> LegacyEmptyGenerators;
+		if (!WorldData.bHasTrashGeneratorState)
+		{
+			for (const AMD_TrashSpawnVolume* Generator : TrashSpawnManager->GetGenerators())
+			{
+				if (TrashSpawnManager->IsTransitionGenerator(Generator)) continue;
+				FMD_TrashGeneratorState Empty;
+				if (!Generator->BuildEmptyState(Empty)) return false;
+				LegacyEmptyGenerators.Add(MoveTemp(Empty));
+			}
+		}
+		if (!TrashSpawnManager->RestoreStates(WorldData.bHasTrashGeneratorState
+			? WorldData.TrashGenerators : LegacyEmptyGenerators, DayPlacements))
+		{
+			return false;
+		}
+	}
+    return true;
 }
 
 bool UMD_DayPersistenceSubsystem::PrepareSnapshotStreaming(UWorld* World, bool& bReady)
@@ -746,6 +815,8 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     WorldData.Samples = Snapshot.Samples;
     WorldData.Pieces = Snapshot.Pieces;
 	WorldData.TrashBins = Snapshot.TrashBins;
+	WorldData.bHasTrashGeneratorState = Snapshot.bHasTrashGeneratorState;
+	WorldData.TrashGenerators = Snapshot.TrashGenerators;
     WorldData.WallContaminations = Snapshot.WallContaminations;
     WorldData.PendingContaminationDrops = Snapshot.PendingContaminationDrops;
     WorldData.SurfaceStains = Snapshot.SurfaceStains;
@@ -754,7 +825,7 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
     // 다음 일차에도 같은 물품 및 작업 상태를 유지할 추가 기록 복사
     WorldData.ActorSnapshot = Snapshot.ActorSnapshot;
 
-    if (ApplyWorldSaveData(World, WorldData) == false)
+    if (ApplyWorldState(World, WorldData, &Snapshot.TrashPlacements) == false)
     {
         return false;
     }

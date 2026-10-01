@@ -5,6 +5,7 @@
 #include "World/Interaction/MD_DataDumpTerminal.h"
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Trash/MD_TrashItem.h"
+#include "World/Trash/MD_TrashSpawnManager.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Sample/MD_QuestRackSpawner.h"
 
@@ -175,6 +176,11 @@ bool FMD_WorldActorPersistence::Capture(UWorld* World, FMD_WorldActorSnapshot& O
         // 수거되지 않은 쓰레기의 실제 종류와 위치 기록
         if (IsValid(Trash) == true)
         {
+            // 생성기 소속 물품은 별도 종류·잔량 원장만 저장하고 다음 로드에 다시 배치한다.
+            if (Trash->GetOriginGenerator() != nullptr)
+            {
+                continue;
+            }
             // 쓰레기 상태 기록 확보
             FMD_TrashItemRecord& Record = Out.TrashItems.AddDefaulted_GetRef();
             // 공통 액터 상태 수집
@@ -594,6 +600,16 @@ bool FMD_WorldActorPersistence::Restore(UWorld* World, const FMD_WorldActorSnaps
         // 새 맵이 초기 배치한 물품 중 이미 수거된 대상 제거
         for (TActorIterator<AActor> It(World, ItemClass); It; ++It)
         {
+            // 생성기 원장에서 이미 재배치한 쓰레기는 이 생존 목록의 관리 대상이 아니다.
+            AMD_TrashItem* Trash = Cast<AMD_TrashItem>(*It);
+            if (Trash != nullptr && Trash->GetOriginGenerator() != nullptr)
+            {
+                continue;
+            }
+            if (Trash && !Restored.Contains(*It))
+            {
+                if (auto* Manager = World->GetSubsystem<UMD_TrashSpawnManager>(); Manager && Manager->ReserveAuthoredTrashForRestore(Trash)) continue;
+            }
             // 저장 목록에 없는 해당 분류의 물품만 제거
             if (Restored.Contains(*It) == false && It->Destroy() == false)
             {
