@@ -431,7 +431,8 @@ void UMD_MerchantSubsystem::BeginDay(int32 NewDay, int32 BaseAdvancePayment, boo
 	// 높은 호감도는 착수금을 10% 늘리고 낮은 호감도는 10% 줄이는 배율 계산
 	float AffinityAdvanceMultiplier = FMath::GetRangePct(-2.0f, 2.0f, Affinity);
 	AffinityAdvanceMultiplier = 0.9f + 0.2f * FMath::Clamp(AffinityAdvanceMultiplier, 0, 1);
-	AffinityAdvanceMultiplier *= bEmergencyDay == true ? 0.7f : 1;
+	// 경고 이후 착수금 배율을 반영하고 비상 Day의 지급 배율을 0으로 고정
+	AffinityAdvanceMultiplier *= bEmergencyDay == true ? 0.f : NextDepositMultiplier;
 
 	// 비상 Day에는 호감도와 무관하게 착수금을 지급하지 않는 최종 금액 계산
 	int32 GrantedAdvancePayment = FMath::RoundToInt32(ValidBaseAdvancePayment * AffinityAdvanceMultiplier);
