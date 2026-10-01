@@ -8,6 +8,8 @@
 #include "Types/Score/MD_ScoreTypes.h"
 #include "MD_MerchantSubsystem.generated.h"
 
+struct FMD_GameData;
+
 /**
  * DayPersistenceSubsystem과 같은 패턴으로, Day전환해도 계약3일동안 크레딧과 퀘스트가 유지되어야하므로
  * Gameinstance에 수명을 둠. 값 변경 처리는 서버에서 하고 클라 복제는 GameState에서 담당
@@ -20,6 +22,7 @@ class UMD_SiteDefinition;
 class UMD_QuestDefinition;
 class AMD_PlayerState;
 class AMD_QuestItem;
+class UMD_QuestItemDefinition;
 struct FGameplayTag;
 struct FMD_MerchantData;
 struct FMD_QuestRewardData;
@@ -27,6 +30,7 @@ struct FMD_RepeatQuestPhaseData;
 struct FMD_ShopItem;
 
 enum class EMD_ShopPurchaseResult : uint8;
+enum class EMD_ShopSaleResult : uint8;
 
 UCLASS()
 class MARINEDEMOLITION_API UMD_MerchantSubsystem : public UGameInstanceSubsystem
@@ -34,8 +38,17 @@ class MARINEDEMOLITION_API UMD_MerchantSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 	
 public:
+    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
+
+    virtual void Deinitialize() override;
+
+public:
 
 	FMD_OnMerchantStateChanged OnMerchantStateChanged;
+
+protected:
+	// 아이템 변경 알림에서 중첩 구매와 판매가 실행되는 상황 차단
+	bool bShopTransactionInProgress = false;
 
 public:
 
@@ -67,6 +80,9 @@ public:
 
 	/** 플레이어별 소유권을 검증하고 아이템 지급 성공 시에만 팀 재화 차감과 구매 원장을 확정하는 서버 구매 함수 */
 	EMD_ShopPurchaseResult TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase);
+
+	// 서버 소지 슬롯을 회수한 경우에만 팀 크레딧과 일일 원장에 판매 대금 적립
+	EMD_ShopSaleResult TrySellShopItem(AMD_PlayerState* SellingPlayerState, FMD_ShopItem ShopItem, int32 SlotIndex, int32 Quantity);
 
 	/** 상점 해금과 UI 갱신에 사용할 구매 완료 품목 식별자 목록 */
 	TArray<FPrimaryAssetId> GetOwnedItemIds() const;
@@ -162,6 +178,13 @@ public:
 	/** 제출 아이템 액터를 검사하고 제거 성공 이후 활성 퀘스트 진행도를 반영하는 함수 */
 	bool TryDeliverQuestItem(AMD_QuestItem* SubmittedItem);
 
+	/**
+	 * 핫바에 보관한 회수물 정의(카트리지 등)를 활성 메인 퀘스트에 납품한다.
+	 * 현재 페이즈가 받는 정의면 남은 필요 수량만큼 진행도를 올리고, 실제 반영한 개수를 돌려준다.
+	 * 호출자는 반환 개수만큼 핫바에서 차감한다. 반복 퀘스트는 대상이 아니다.
+	 */
+	int32 TryDeliverQuestItemDefinition(const UMD_QuestItemDefinition* SubmittedItem, int32 AvailableCount);
+
 	/** 회수 대상 샘플이 파괴될 때 퀘스트 Asset ID·등급이 일치하는 활성 퀘스트를 실패 처리하는 함수 */
 	void NotifySampleDestroyed(const FPrimaryAssetId& QuestDefinitionId, EMD_SampleGrade Grade);
 
@@ -205,6 +228,9 @@ private:
 
 	/** 실패 확정된 메인 퀘스트에 귀속된 월드 내 퀘스트 아이템을 제거하는 함수 */
 	void DespawnMainQuestItems(const TArray<FPrimaryAssetId>& FailedQuestIds);
+
+	/** 납품 1건을 메인 퀘스트 진행도에 반영하고 필요 수량 충족 시 다음 페이즈 전환 또는 완료 보상을 적용하는 함수 */
+	void ApplyMainQuestDeliveryProgress(FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition);
 
 	/** 현재 진행 중인 현장으로 메인·반복 퀘스트 구성과 완료 이력 기록에 사용하는 참조 */
 	UPROPERTY()
@@ -258,4 +284,13 @@ private:
 
 	// 기획상 모든 호감도 구간에 공통으로 적용되는 일일 대출 이자율
 	static constexpr float DailyInterestRate = 0.05f;
+protected:
+    // 소유한 기능 상태를 저장 이벤트의 구조체에 기록하는 함수
+    UFUNCTION()
+    void CollectGameData(UPARAM(ref) FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
+
+    // 전달된 저장 데이터에서 담당 태그의 필드를 찾아 직접 적용하는 함수
+    UFUNCTION()
+    void OverwriteGameData(const FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
+
 };

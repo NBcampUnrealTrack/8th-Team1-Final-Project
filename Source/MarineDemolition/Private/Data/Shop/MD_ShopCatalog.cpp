@@ -3,6 +3,7 @@
 
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
+#include "Data/Equipment/MD_ConsumeItemDefinition.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/AssetManager.h"
 #include "Util/MD_LogUtility.h"
@@ -121,6 +122,34 @@ int32 FMD_ShopItem::GetPurchasePrice(TArray<FPrimaryAssetId>& PurchasedItemIds) 
 	UMD_ItemDefinition* Definition = GetDefinition();
 	// 이미 구매한 도구만 무료이며 소모품과 즉시 효과 품목은 정상 가격 유지
 	return IsValid(Definition) == true && Definition->IsA<UMD_ToolDefinition>() == true ? 0 : Price;
+}
+
+int32 FMD_ShopItem::GetSalePrice()
+{
+	// 실제 품목 유형과 가격 설정의 공통 검증
+	UMD_ItemDefinition* Definition = GetDefinition();
+	// 로드 실패와 음수 구매가를 판매 불가로 처리
+	if (IsValid(Definition) == false || Price < 0)
+	{
+		// 유효하지 않은 판매 가격 전달
+		return INDEX_NONE;
+	}
+	// 도구 한 개의 카탈로그 구매가를 기준으로 판매 금액 계산
+	if (Definition->IsA<UMD_ToolDefinition>() == true)
+	{
+		// 구매가의 절반을 지급하며 소수점 이하 버림
+		return Price / 2;
+	}
+	// 묶음 구매 수량을 개별 판매 단가로 환산할 소모품 정의 조회
+	UMD_ConsumeItemDefinition* Consumable = Cast<UMD_ConsumeItemDefinition>(Definition);
+	// 즉시 효과와 보급 저장소 등 인벤토리 외 품목의 판매 차단
+	if (IsValid(Consumable) == false || Consumable->QuantityPerPurchase <= 0)
+	{
+		// 개별 수량을 회수할 수 없는 품목 표시
+		return INDEX_NONE;
+	}
+	// 구매 묶음 가격의 절반을 개수로 나눈 정수 단가이며 소수점 버림
+	return static_cast<int32>(static_cast<int64>(Price) / (static_cast<int64>(Consumable->QuantityPerPurchase) * 2));
 }
 
 FText FMD_ShopItem::GetPriceText() const

@@ -4,17 +4,41 @@
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
+#include "World/Trash/MD_TrashSorterAnimationComponent.h"
 #include "MD_TrashSorter.generated.h"
 
 class UBoxComponent;
 class UMaterialInstanceDynamic;
 class UStaticMeshComponent;
+class UStateTreeComponent;
 class AMD_GameStateBase;
 class UMD_MerchantSubsystem;
 struct FMD_TrashSortResult;
 
+/** Keep the animation result and timing together when replicating to clients. */
+USTRUCT()
+struct FMD_TrashSorterRuntimeState
+{
+	GENERATED_BODY()
+
+	UPROPERTY()
+	bool bReady = false;
+	UPROPERTY()
+	bool bSorting = false;
+	UPROPERTY()
+	bool bHasResult = false;
+	UPROPERTY()
+	bool bCorrectSort = false;
+	UPROPERTY()
+	double StartServerTime = 0.0;
+	UPROPERTY()
+	float Duration = 0.0f;
+	UPROPERTY()
+	FMD_SorterItemVisual ItemVisual;
+};
+
 /**
- * 한 품목이 실제로 소비된 뒤 서버에서 한 번 방송한다. 통째 투입이면 품목 수만큼 나온다.
+ * 한 품목이 실제로 소비된 뒤 서버에서 한 번 방송한다.
  * 액터가 이미 파괴된 뒤라 포인터 대신 클래스를 넘긴다.
  * SorterCategory는 이 분류기가 담당하는 칸이다 — bCorrectSort가 true면 품목의 칸과 같다.
  */
@@ -56,18 +80,49 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MD|Trash")
 	FMD_OnTrashSorted OnTrashSorted;
 
+	/** Pure item eligibility query; independent of the machine's Ready state. */
+	UFUNCTION(BlueprintPure, Category = "MD|Trash|StateTree")
+	bool CanAcceptHeldItem(AActor* Interactor) const;
+
+	UFUNCTION(BlueprintPure, Category = "MD|Trash|StateTree")
+	bool HasPendingSortRequest() const { return bHasPendingSortRequest; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Trash|StateTree")
+	AActor* GetPendingInteractor() const { return PendingInteractor.Get(); }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Trash|StateTree")
+	bool IsSorting() const { return RuntimeState.bSorting; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Trash|StateTree")
+	bool HasSortResult() const { return RuntimeState.bHasResult; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Trash|StateTree")
+	bool WasCorrectSort() const { return RuntimeState.bHasResult && RuntimeState.bCorrectSort; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Trash|StateTree")
+	float GetSortingRemainingTime() const;
+
+	/** StateTree adapters call these. All gameplay work stays inside the sorter. */
+	bool EnterReadyState();
+	void ExitReadyState();
+	bool BeginPendingSort();
+	void EndSortingState();
+	bool BeginErrorState();
+
 protected:
 	/** 배치 인스턴스에서 칸을 바꿔도 에디터에 바로 색이 반영되게 한다 */
 	virtual void OnConstruction(const FTransform& Transform) override;
 
 	virtual void BeginPlay() override;
+	virtual void PostInitializeComponents() override;
+	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 	/** 삼킬 때 연출 훅. 소리 없이 사라지면 버그와 구분이 안 된다 */
 	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Trash")
 	void OnItemSwallowed(bool bCorrectSort, const FVector& Location);
 
-	/** 통째 투입은 품목별 로그 대신 합산 결과 하나만 연출한다. 통 자체는 점수에 포함하지 않는다 */
-	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Trash")
+	/** Legacy BP event signature only. Container intake is no longer supported or invoked. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Trash", meta = (DeprecatedFunction, DeprecationMessage = "Container intake is disabled. Use OnItemSwallowed."))
 	void OnContainerSwallowed(
 		int32 CorrectCount,
 		int32 MisSortCount,
@@ -75,12 +130,42 @@ protected:
 		int32 RefundCredits,
 		const FVector& Location);
 
+	/** Runs on server/listen host and on clients via replication, including late relevancy. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Trash|Animation")
+	void OnSortingStateChanged(bool bSorting, bool bCorrectSort, float RemainingSeconds);
+
+	/** Optional cosmetic hook. An empty implementation is valid. */
+	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Trash|StateTree")
+	void OnSortErrorFeedback();
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash|StateTree")
+	TObjectPtr<UStateTreeComponent> SorterStateTree;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash|Animation")
+	TObjectPtr<UMD_TrashSorterAnimationComponent> SortingAnimation;
+
+	/** Shared timing input: bind the Sorting state's Delay Duration to this value. Also drives replicated presentation. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash|Animation", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", Units = "s"))
+	float SortingDuration = 1.0f;
+
+	/** Bind the Error state's Delay Duration to this value. The actor does not run a timer. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash|StateTree", meta = (AllowPrivateAccess = "true", ClampMin = "0.0", Units = "s"))
+	float ErrorDuration = 0.5f;
+
+	/** Legacy data only; play sound from OnSortErrorFeedback in Blueprint. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use OnSortErrorFeedback."))
+	FGameplayTag ErrorSoundTag;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
-	/** 이 안에 들어오면 투입으로 본다 */
+	/** 기존 BP 참조 호환용 비활성 컴포넌트. 분류 판정에는 사용하지 않는다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash")
 	TObjectPtr<UBoxComponent> IntakeVolume;
+
+	/** 행동 문구만 지정한다. 기존 Interact 위젯에 필요한 [E] 접두사는 코드에서 붙인다. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash|Interaction")
+	FText SortActionText;
 
 	/** 담당 칸. 드롭다운에 Bonus.* 도 뜨지만 그건 칸이 아니다 — BeginPlay에서 걸러 경고한다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash",
@@ -96,6 +181,10 @@ protected:
 		meta = (EditCondition = "bTintPlaceholderMeshByCategory"))
 	FName TintParameterName = TEXT("Tint");
 
+	/** Legacy data only; play sound from OnItemSwallowed in Blueprint. */
+	UPROPERTY(meta = (DeprecatedProperty, DeprecationMessage = "Use OnItemSwallowed."))
+	FGameplayTag InsertSoundTag;
+
 	/** 지금까지 삼킨 물건 수. UI 표시용이라 복제한다 */
 	UPROPERTY(Replicated, VisibleInstanceOnly, BlueprintReadOnly, Category = "MD|Trash")
 	int32 SortedCount = 0;
@@ -109,16 +198,20 @@ private:
 	void MulticastItemSwallowed(bool bCorrectSort, FVector Location);
 
 	UFUNCTION(NetMulticast, Unreliable)
-	void MulticastContainerSwallowed(
-		int32 CorrectCount,
-		int32 MisSortCount,
-		int32 DiscardedCount,
-		int32 RefundCredits,
-		FVector Location);
+	void MulticastErrorFeedback();
 
-	/** 판정 → 점수 → 삼킴. 서버 전용 */
-	void JudgeAndSwallow(AActor* Item);
-	void JudgeAndSwallowContainer(AActor* ContainerActor);
+	UFUNCTION()
+	void OnRep_RuntimeState(const FMD_TrashSorterRuntimeState& PreviousState);
+
+	UPROPERTY(ReplicatedUsing = OnRep_RuntimeState)
+	FMD_TrashSorterRuntimeState RuntimeState;
+
+	TWeakObjectPtr<AActor> PendingInteractor;
+	TWeakObjectPtr<AActor> PendingItem;
+	bool bHasPendingSortRequest = false;
+
+	void ClearPendingSortRequest();
+	void RefreshSortingPresentation();
 
 	bool ResolveSortResult(AActor* Item, FMD_TrashSortResult& OutResult) const;
 	bool ConsumeSortable(
@@ -130,8 +223,6 @@ private:
 		AMD_GameStateBase*& OutGameState,
 		UMD_MerchantSubsystem*& OutMerchant) const;
 	AActor* GetHeldSortableForInteractor(AActor* Interactor) const;
-
-	TSet<TWeakObjectPtr<AActor>> ActorsBeingProcessed;
 
 	/** 담당 칸 색을 메시에 반영 */
 	void ApplyCategoryTint();

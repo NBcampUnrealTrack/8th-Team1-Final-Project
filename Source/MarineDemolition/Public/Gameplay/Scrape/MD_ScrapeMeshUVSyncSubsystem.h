@@ -34,12 +34,18 @@ class MARINEDEMOLITION_API UMD_ScrapeMeshUVSyncSubsystem : public UTickableWorld
 public:
     virtual bool ShouldCreateSubsystem(UObject* Outer) const override;
     virtual void Tick(float DeltaTime) override;
+    virtual void Deinitialize() override;
+    bool QueuePredictionRebuild(UMD_ScrapeSurfaceComponent& Surface);
     virtual TStatId GetStatId() const override;
     void InvalidateSurface(UMD_ScrapeSurfaceComponent& Surface);
     void RecordSurfaceChanges(UMD_ScrapeSurfaceComponent& Surface, TConstArrayView<FMD_ScrapeCellChange> Changes, bool bBoundaryChanged=false);
     bool CaptureSnapshot(UMD_ScrapeSurfaceComponent& Surface, const FGuid& KnownEpoch,
         uint64 KnownSerial, FMD_ScrapeMeshUVSnapshotDescriptor& OutDescriptor,
         TArray<FMD_ReplicatedScrapeCellState>& OutStates);
+    bool CompactGeneratedSnapshot(UMD_ScrapeSurfaceComponent& Surface,
+        FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, TArray<FMD_ReplicatedScrapeCellState>& States);
+    bool ExpandGeneratedSnapshot(UMD_ScrapeSurfaceComponent& Surface,
+        const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, TArray<FMD_ReplicatedScrapeCellState>& States);
     void RecordClientVisualDelta(const FMD_ScrapeAuthoritativeVisualDelta& Delta);
     bool BeginClientSnapshot(UMD_ScrapeSurfaceComponent& Surface, const UObject* Owner = nullptr);
     void EndClientSnapshot(UMD_ScrapeSurfaceComponent& Surface, const UObject* Owner = nullptr);
@@ -59,8 +65,12 @@ public:
     static constexpr uint64 MaximumConnectionTransferBytes = 56 * 1024 * 1024;
     static constexpr uint64 MaximumWorldTransferBytes = 64 * 1024 * 1024;
 private:
+    bool BuildGeneratedCell(const UMD_ScrapeSurfaceComponent& Surface, int32 Index,
+        FMD_ReplicatedScrapeCellState& State) const;
     void PruneExpiredOwners();
     FMD_ScrapeMeshUVJournal& FindJournal(UMD_ScrapeSurfaceComponent& Surface);
+    // Weak, fixed-capacity requests coalesce reliable responses within one world frame.
+    TArray<TWeakObjectPtr<UMD_ScrapeSurfaceComponent>, TInlineAllocator<32>> PendingPredictionRebuilds;
     float ScanAccumulator = 1.0f;
     TMap<TWeakObjectPtr<UMD_ScrapeSurfaceComponent>, FMD_ScrapeMeshUVJournal> Journals;
     TMap<TWeakObjectPtr<const UObject>, FMD_ScrapeMeshUVLiveHistory> ClientLiveStates;

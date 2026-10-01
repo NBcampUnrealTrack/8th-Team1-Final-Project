@@ -8,6 +8,7 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Gameplay/Scrape/MD_ScrapeRuntimeMaskTexture.h"
 #include "Async/ParallelFor.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "GameFramework/Actor.h"
 #include "Math/RandomStream.h"
 #include "Misc/Crc.h"
@@ -29,20 +30,48 @@ float UMD_ScrapeSurfaceComponent::ResolveContaminationCoverage(const int32 Resol
     return FMath::Lerp(Low, High, Random.GetFraction());
 }
 
-FMD_ContaminationGeneration UMD_ScrapeSurfaceComponent::MakeContaminationGeneration(const bool bLegacy) const
+FMD_ContaminationGeneration UMD_ScrapeSurfaceComponent::MakeContaminationGeneration() const
 {
-    FMD_ContaminationGeneration G;
-    G.Version=bLegacy?1:3; G.bProcedural=bLegacy?bUseProceduralContamination:!bForceFullContamination;
-    G.BaseAmount=FMath::IsFinite(InitialContaminationPerCell)?FMath::Clamp(InitialContaminationPerCell,0.f,1.f):1.f;
-    G.NoiseScaleCm=ContaminationNoiseScaleCm;G.Seed=ContaminationNoiseSeed;
-    if (!bLegacy && !bUseFixedContaminationSeed && GetWorld() && GetWorld()->IsGameWorld())
-        if (const auto* GI=GetWorld()->GetGameInstance())
-            if (const auto* Persistence=GI->GetSubsystem<UMD_DayPersistenceSubsystem>())
-                Persistence->TryGetContaminationSessionSeed(GetWorld(),G.Seed);
-    G.Coverage=bLegacy?ContaminationCoverage:(G.bProcedural?ResolveContaminationCoverage(G.Seed):1.f);
-    G.MinimumAmount=bLegacy?ContaminationMinimumAmount:ContaminationDensityMinimumAmount;
-    if (SurfaceMesh) G.SampleTransform=SurfaceMesh->GetComponentTransform();
-    return G;
+    // 현재 표면의 생성 설정을 보관할 기록 구성
+    FMD_ContaminationGeneration Generation;
+    // 현재 사용하는 연속 밀도 생성 알고리즘 식별자 설정
+    Generation.Version = 3;
+    // 전체 오염 강제 옵션을 반영한 절차적 생성 사용 여부 설정
+    Generation.bProcedural = bForceFullContamination == false;
+    // 유효한 범위의 셀 기준 오염량 반영
+    Generation.BaseAmount = FMath::IsFinite(InitialContaminationPerCell) == true ? FMath::Clamp(InitialContaminationPerCell, 0.f, 1.f) : 1.f;
+    // 현재 노이즈 크기 설정 반영
+    Generation.NoiseScaleCm = ContaminationNoiseScaleCm;
+    // 고정 시드 또는 세션 시드 조회 실패 시 사용할 작성 시드 반영
+    Generation.Seed = ContaminationNoiseSeed;
+    // 게임 실행 중 공통 세션 시드를 사용할 월드 조회
+    UWorld* World = GetWorld();
+    // 고정 시드가 아닌 실행 월드에서 공통 세션 시드 사용
+    if (bUseFixedContaminationSeed == false && IsValid(World) == true && World->IsGameWorld() == true)
+    {
+        // 공통 세션 시드를 보관하는 게임 인스턴스 조회
+        UGameInstance* GameInstance = World->GetGameInstance();
+        // 현재 월드의 영속 상태 관리자 조회
+        UMD_DayPersistenceSubsystem* Persistence = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr;
+        // 유효한 관리자에서 현재 세션의 오염 생성 시드 조회
+        if (IsValid(Persistence) == true)
+        {
+            // 고정 시드 설정을 제외한 공통 시드 반영
+            Persistence->TryGetContaminationSessionSeed(World, Generation.Seed);
+        }
+    }
+    // 현재 시드와 생성 설정에 따른 표면 오염 면적 설정
+    Generation.Coverage = Generation.bProcedural == true ? ResolveContaminationCoverage(Generation.Seed) : 1.f;
+    // 현재 연속 밀도 설정의 최소 오염량 사용
+    Generation.MinimumAmount = ContaminationDensityMinimumAmount;
+    // 샘플 좌표 기준이 될 유효한 표면 메시 확인
+    if (IsValid(SurfaceMesh) == true)
+    {
+        // 현재 표면 메시 좌표계 기록
+        Generation.SampleTransform = SurfaceMesh->GetComponentTransform();
+    }
+    // 현재 생성 형식의 완성된 기록 반환
+    return Generation;
 }
 void UMD_ScrapeSurfaceComponent::PrepareContaminationGeneration()
 {
@@ -61,11 +90,16 @@ void UMD_ScrapeSurfaceComponent::PrepareContaminationGeneration()
         return;
     }
     FMD_ContaminationGeneration G;
-    bool bLegacy=false;
-    const auto* GI=bRuntime?GetWorld()->GetGameInstance():nullptr;
-    const auto* Persistence=GI?GI->GetSubsystem<UMD_DayPersistenceSubsystem>():nullptr;
-    if (!Persistence || !Persistence->TryGetSavedContaminationGeneration(this,G,bLegacy))
-        G=MakeContaminationGeneration(bLegacy);
+    // 실행 월드에 대응하는 현재 저장 생성 정보 조회 준비
+    UGameInstance* GI = bRuntime == true ? GetWorld()->GetGameInstance() : nullptr;
+    // 저장된 생성 정보를 제공하는 영속 상태 관리자 조회
+    UMD_DayPersistenceSubsystem* Persistence = IsValid(GI) == true ? GI->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr;
+    // 현재 표면의 저장 기록이 없으면 현재 설정으로 새 생성 정보 구성
+    if (IsValid(Persistence) == false || Persistence->TryGetSavedContaminationGeneration(this, G) == false)
+    {
+        // 과거 생성 방식 대체 없이 현재 생성 정책 적용
+        G = MakeContaminationGeneration();
+    }
     if (!G.IsValid())
     {
         UE_LOG(LogTemp,Warning,TEXT("%s: invalid contamination generation settings; using full coverage."),*GetPathName());
@@ -81,6 +115,8 @@ bool UMD_ScrapeSurfaceComponent::RestoreContaminationGeneration(const FMD_Contam
     if (!bResetState && G==AppliedContaminationGeneration && bContaminationSurfaceInitialized) return true;
     if (HasAuthority() && GetWorld())
         if (auto* Sync=GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>()) Sync->InvalidateSurface(*this);
+    ++DeferredInitializationEpoch;
+    bDeferredInitializationPending=false;PreparedInitialState.Reset();
     ContaminationGeneration=G;bRestoringContaminationGeneration=true;
     InitializeSurface();
     return !bContaminationEnabled || bContaminationSurfaceInitialized;
@@ -93,8 +129,16 @@ void UMD_ScrapeSurfaceComponent::OnRep_ContaminationGeneration()
 }
 bool UMD_ScrapeSurfaceComponent::TryApplyContinuousInitialContamination()
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_InitialAreaIntegration);
     const auto G=ContaminationGeneration;
     if (!G.IsValid() || !SurfaceMesh) return false;
+    if (PreparedInitialState.IsSet())
+    {
+        ContaminationPagedCells.InitializeFromAmounts(MoveTemp(PreparedInitialState->Amounts));
+        ContaminationCells.Empty();
+        ContaminationGeneratedInitialAmounts.Empty();
+        return true;
+    }
     const int32 Count = UsesMeshUVSurface() && ContaminationCellLayout
         ? ContaminationCellLayout->ActiveToAtlas.Num() : ContaminationCells.Num();
     TArray<float> Amounts;Amounts.SetNumZeroed(Count);
@@ -103,26 +147,7 @@ bool UMD_ScrapeSurfaceComponent::TryApplyContinuousInitialContamination()
         if (!ContaminationMeshUVData || !ContaminationCellLayout) return false;
         const auto* Data=ContaminationMeshUVData.Get();
         const auto* Layout=ContaminationCellLayout.Get();
-        const double MaximumAxisScale = G.SampleTransform.GetMaximumAxisScale();
-        // Immutable geometry and descriptor are read by workers. No UObject calls or GPU readback.
-        ParallelFor(Amounts.Num(),[&](int32 I)
-        {
-            const int32 Address=Layout->ActiveToAtlas[I];const auto& Cell=Data->Cells[Address];
-            const FVector WorldCenter=G.SampleTransform.TransformPosition(Cell.PositionLocal);
-            const float N=FMD_ContaminationNoise::FractalNoise3D(WorldCenter,G.NoiseScaleCm,G.Seed);
-            const double Bound=4.5*Cell.SupportRadiusCm*MaximumAxisScale/G.NoiseScaleCm;
-            if (G.Coverage<=UE_SMALL_NUMBER || N+Bound<=1.f-G.Coverage) return;
-            if (N-Bound>1.f-G.Coverage) { Amounts[I]=G.AmountFromNoise(N);return; }
-            TArray<FVector> Polygon;
-            if (!FMD_ScrapeMeshUVGeometry::GetCellPolygonLocal(*Data,Address,Polygon)) return;
-            double AreaSum=0,Sum=0;
-            for (int32 J=1;J+1<Polygon.Num();++J)
-            {
-                const double Area=FVector::CrossProduct(Polygon[J]-Polygon[0],Polygon[J+1]-Polygon[0]).Length();
-                AreaSum+=Area;Sum+=Area*G.IntegrateTriangle(Polygon[0],Polygon[J],Polygon[J+1]);
-            }
-            Amounts[I]=AreaSum>0?float(Sum/AreaSum):0;
-        });
+        Amounts = MD_ScrapeInitialState::Generate(*Data, *Layout, G);
     }
     else
     {

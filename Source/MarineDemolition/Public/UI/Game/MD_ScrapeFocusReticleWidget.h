@@ -6,11 +6,13 @@
 #include "Blueprint/UserWidget.h"
 #include "MD_ScrapeFocusReticleWidget.generated.h"
 
+class UImage;
+
 /**
- * 화면 고정 헤라 Focus의 가상 포인터를 그리는 입력 비소비형 위젯이다.
+ * 디자이너에 배치한 중앙 조준점과 헤라 Focus Image를 갱신하는 입력 비소비형 위젯이다.
  *
- * 별도 Blueprint 자산이 없어도 동작하며, normalized 포인터를 현재 위젯 크기에
- * 매 프레임 투영하므로 해상도와 DPI가 바뀌어도 Trace ray와 같은 화면 좌표를 쓴다.
+ * 이름으로 연결된 Image의 역할만 약속하며 부모 패널·슬롯·중첩 배치는 디자이너가 정한다.
+ * 중앙 Image의 배치는 유지하고 Focus Image는 실제 Geometry 기준 Render Translation만 갱신한다.
  */
 UCLASS()
 class MARINEDEMOLITION_API UMD_ScrapeFocusReticleWidget : public UUserWidget
@@ -21,27 +23,18 @@ public:
 	UMD_ScrapeFocusReticleWidget(const FObjectInitializer& ObjectInitializer);
 
 protected:
-	virtual int32 NativePaint(
-		const FPaintArgs& Args,
-		const FGeometry& AllottedGeometry,
-		const FSlateRect& MyCullingRect,
-		FSlateWindowElementList& OutDrawElements,
-		int32 LayerId,
-		const FWidgetStyle& InWidgetStyle,
-		bool bParentEnabled) const override;
+	virtual void NativeConstruct() override;
+	virtual void NativeTick(const FGeometry& MyGeometry, float InDeltaTime) override;
 
 private:
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Reticle", meta = (ClampMin = "1.0"))
-	float ReticleRadius = 10.0f;
+	void UpdateReticles(const FGeometry& MyGeometry);
 
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Reticle", meta = (ClampMin = "0.0"))
-	float ReticleGap = 4.0f;
+	// 기존 BP를 단계적으로 배치할 수 있도록 optional로 두며, 누락 시 경고 후 숨긴다.
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UImage> Img_CenterReticle = nullptr;
 
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Reticle", meta = (ClampMin = "1.0"))
-	float ReticleArmLength = 8.0f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Reticle", meta = (ClampMin = "0.5"))
-	float ReticleThickness = 2.0f;
+	UPROPERTY(meta = (BindWidgetOptional))
+	TObjectPtr<UImage> Img_FocusReticle = nullptr;
 
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|Reticle")
 	FLinearColor ActionableColor = FLinearColor(0.16f, 1.0f, 0.32f, 0.95f);

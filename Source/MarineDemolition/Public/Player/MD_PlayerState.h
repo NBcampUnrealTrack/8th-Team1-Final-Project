@@ -8,12 +8,15 @@
 #include "UObject/PrimaryAssetId.h"
 #include "GameplayEffectTypes.h"
 #include "Types/State/MD_HealthTypes.h"
+#include "Types/Customization/MD_CharacterAppearanceTypes.h"
 #include "MD_PlayerState.generated.h"
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnHealthStateChanged, EMD_HealthState, NewState);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_OnShopOwnershipChanged);
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_OnAppearanceChanged);
 
 class UMD_CharacterAttributeSet;
+struct FMD_PlayerData;
 
 UENUM(BlueprintType)
 enum class EMD_ReturnStatus : uint8
@@ -95,6 +98,17 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Health")
 	EMD_HealthState GetHealthState() const;
 
+	/** 다른 플레이어에게 보이는 외형이 변경될 때 방송한다. 캐릭터가 DMI를 갱신하는 데 사용한다. */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Customization")
+	FMD_OnAppearanceChanged OnAppearanceChanged;
+
+	/** 복제된 외형 데이터를 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Customization")
+	const FMD_CharacterAppearance& GetAppearance() const { return ReplicatedAppearance; }
+
+	/** 서버에서 외형을 설정하고 모든 클라이언트에 복제한다. */
+	void SetAppearance(const FMD_CharacterAppearance& NewAppearance);
+
 	// 현재 플레이어의 전체 AssetId 구매 이력 확인
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")
 	bool HasPurchasedShopItem(FPrimaryAssetId ItemAssetId) const;
@@ -105,6 +119,15 @@ public:
 
 	// 구매 완료 이력과 업그레이드 소스의 구매 금지를 함께 기록
 	bool RecordPurchasedShopItem(FPrimaryAssetId ItemAssetId, FPrimaryAssetId SourceAssetId = FPrimaryAssetId());
+
+	// 판매한 도구부터 기본 도구까지 검증된 단계들의 구매 이력과 구매 금지 해제
+	void ResetShopToolProgress(TArray<FPrimaryAssetId>& ToolAssetIds);
+
+	// 읽기 전용 PlayerState 저장 요청에 구매 이력과 구매 금지를 함께 기록
+	void CollectShopPurchaseState(FMD_PlayerData& SaveData) const;
+
+	// 검증된 개인 이력을 교체한 뒤 상점 화면 갱신과 소유 클라이언트 복제
+	bool RestoreShopPurchaseState(FMD_PlayerData& SaveData);
 
 	// 업그레이드 구매로 금지된 전체 식별자 여부 검사
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")
@@ -132,6 +155,13 @@ protected:
 	TArray<FPrimaryAssetId> BlockedShopItemIds;
 
 private:
+	// 모든 클라이언트가 같은 캐릭터 외형을 표시하기 위한 복제 외형 데이터
+	UPROPERTY(ReplicatedUsing = OnRep_ReplicatedAppearance)
+	FMD_CharacterAppearance ReplicatedAppearance;
+
+	UFUNCTION()
+	void OnRep_ReplicatedAppearance();
+
 	// 현재 플레이어만 확인하는 전체 품목 구매 이력
 	UPROPERTY(ReplicatedUsing = OnRep_ShopPurchaseState)
 	TArray<FPrimaryAssetId> PurchasedShopItemIds;

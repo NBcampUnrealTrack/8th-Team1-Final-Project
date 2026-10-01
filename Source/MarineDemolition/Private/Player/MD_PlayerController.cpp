@@ -3,7 +3,6 @@
 
 #include "Player/MD_PlayerController.h"
 #include "UI/Game/MD_HUDWidget.h"
-#include "UI/Game/MD_ScrapeFocusReticleWidget.h"
 #include "UI/MD_LocalUIManager.h"
 #include "UI/Game/MD_DailyReportWidget.h"
 
@@ -23,13 +22,17 @@
 #include "EngineUtils.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallUtility.h"
+#include "World/Sample/MD_QuestSampleSpawner.h"
+#include "Data/Merchant/MD_QuestDefinition.h"
 #include "Player/MD_PlayerState.h"
 #include "Player/MD_PlayerCameraManager.h"
 
+#include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "GameFramework/GameSession.h"
+#include "Gameplay/Customization/MD_CharacterAppearanceLibrary.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
@@ -37,6 +40,8 @@
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Character/MD_Character.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Data/Equipment/MD_QuestItemDefinition.h"
 #include "World/Merchant/MD_Merchant.h"
 #include "Interfaces/OnlineIdentityInterface.h"
 #include "OnlineSubsystem.h"
@@ -45,7 +50,6 @@
 AMD_PlayerController::AMD_PlayerController()
 {
 	PlayerCameraManagerClass = AMD_PlayerCameraManager::StaticClass();
-	ScrapeFocusReticleWidgetClass = UMD_ScrapeFocusReticleWidget::StaticClass();
 }
 
 void AMD_PlayerController::CancelScrapeInteraction()
@@ -450,37 +454,25 @@ void AMD_PlayerController::ClientNotifyPlayerJoinAndExit_Implementation(const FT
 	HUD->HandlePlayerJoinAndExit(PlayerName, bIsJoin);
 }
 
-void AMD_PlayerController::InitializeScrapeFocusReticle()
+void AMD_PlayerController::ClientShowHUDMessage_Implementation(const FText& Message)
 {
-	if (IsLocalController() == false || ScrapeFocusReticleWidgetClass == nullptr)
+	// HUD 위젯이 알림 이벤트를 구현하기 전까지 화면에서 확인할 임시 표시 — 폼건·지지대 실패 메시지와 같은 방식
+	if (GEngine != nullptr)
+	{
+		GEngine->AddOnScreenDebugMessage(-1, 2.f, FColor::Yellow, Message.ToString());
+	}
+
+	ULocalPlayer* LocalPlayer = GetLocalPlayer();
+	UMD_LocalUIManager* UIManager = IsValid(LocalPlayer) ? LocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
+	if (IsValid(UIManager) == false)
 	{
 		return;
 	}
 
-	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
+	UMD_HUDWidget* HUD = Cast<UMD_HUDWidget>(UIManager->GetActiveScreen(MDGameplayTags::UI_Layer_GameHUD));
+	if (IsValid(HUD) == true)
 	{
-		ScrapeFocusReticleWidgetInstance =
-			CreateWidget<UMD_ScrapeFocusReticleWidget>(
-				this,
-				ScrapeFocusReticleWidgetClass);
-	}
-
-	if (IsValid(ScrapeFocusReticleWidgetInstance) == false)
-	{
-		return;
-	}
-
-	// 파생 Blueprint defaults와 무관하게 이 overlay 전체를 비입력형으로 고정한다.
-	ScrapeFocusReticleWidgetInstance->SetVisibility(ESlateVisibility::HitTestInvisible);
-	ScrapeFocusReticleWidgetInstance->SetIsFocusable(false);
-	ScrapeFocusReticleWidgetInstance->ForceVolatile(true);
-
-	// Seamless Travel에서 유효한 위젯이 기존 viewport에서 제거된 경우에도 복구한다.
-	if (ScrapeFocusReticleWidgetInstance->IsInViewport() == false)
-	{
-		// Owning local player 영역에만 붙여 split-screen이나 다중 local player에서도
-		// 다른 플레이어의 normalized 좌표/입력을 시각화하지 않는다.
-		ScrapeFocusReticleWidgetInstance->AddToPlayerScreen(1000);
+		HUD->HandleHUDMessage(Message);
 	}
 }
 
@@ -645,7 +637,6 @@ void AMD_PlayerController::BeginPlay()
 				&AMD_PlayerController::HandleApplicationWillDeactivate);
 	}
 
-	InitializeScrapeFocusReticle();
 }
 
 void AMD_PlayerController::BeginPlayingState()
@@ -653,8 +644,8 @@ void AMD_PlayerController::BeginPlayingState()
 	Super::BeginPlayingState();
 
 	InitializeGameplayHUD();
-	InitializeScrapeFocusReticle();
 	SubmitPlatformNickname();
+	RestoreAppearanceFromLocalSave();
 
 	NotifyLoadingScreenPlayerReady();
 }
@@ -664,8 +655,8 @@ void AMD_PlayerController::PostSeamlessTravel()
 	Super::PostSeamlessTravel();
 
 	InitializeGameplayHUD();
-	InitializeScrapeFocusReticle();
 	SubmitPlatformNickname();
+	RestoreAppearanceFromLocalSave();
 
 	// Seamless travel은 BeginPlayingState를 거치지 않으므로 같은 알림을 여기서도 보낸다.
 	NotifyLoadingScreenPlayerReady();
@@ -679,7 +670,6 @@ void AMD_PlayerController::SetPawn(APawn* InPawn)
 	{
 		// 최초 스폰과 재스폰 모두 Pawn 지정이 끝난 뒤 HUD를 보장하는 처리
 		InitializeGameplayHUD();
-		InitializeScrapeFocusReticle();
 	}
 }
 
@@ -693,13 +683,6 @@ void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 			ApplicationWillDeactivateHandle);
 		ApplicationWillDeactivateHandle.Reset();
 	}
-
-	if (IsValid(ScrapeFocusReticleWidgetInstance))
-	{
-		ScrapeFocusReticleWidgetInstance->RemoveFromParent();
-		ScrapeFocusReticleWidgetInstance = nullptr;
-	}
-
 
 	CancelScrapeInteraction();
 	Super::EndPlay(EndPlayReason);
@@ -756,6 +739,61 @@ void AMD_PlayerController::ServerNotifyQuestInteraction_Implementation(FPrimaryA
 	}
 }
 
+void AMD_PlayerController::ServerDeliverHotbarQuestItems_Implementation(AMD_Merchant* MerchantActor)
+{
+	APawn* PlayerPawn = GetPawn();
+	if (IsValid(MerchantActor) == false || IsValid(PlayerPawn) == false)
+	{
+		return;
+	}
+
+	// 대출·상환과 같은 상인 접근 거리 검증
+	if (FVector::DistSquared(PlayerPawn->GetActorLocation(), MerchantActor->GetActorLocation()) > FMath::Square(500.0f))
+	{
+		return;
+	}
+
+	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
+	UMD_EquipHotbarComponent* Hotbar = PlayerPawn->FindComponentByClass<UMD_EquipHotbarComponent>();
+	if (IsValid(MerchantSubsystem) == false || IsValid(Hotbar) == false)
+	{
+		return;
+	}
+
+	// 슬롯을 앞에서부터 훑어 퀘스트 회수물만 납품한다. 차감으로 슬롯이 비어도 인덱스는 유지된다
+	for (int32 SlotIndex = 0; SlotIndex < Hotbar->GetSlotCount(); ++SlotIndex)
+	{
+		UMD_QuestItemDefinition* QuestItem = Cast<UMD_QuestItemDefinition>(Hotbar->GetItemAtSlot(SlotIndex));
+		int32 HeldCount = Hotbar->GetItemCountAtSlot(SlotIndex);
+		if (IsValid(QuestItem) == false || HeldCount <= 0)
+		{
+			continue;
+		}
+
+		int32 DeliveredCount = MerchantSubsystem->TryDeliverQuestItemDefinition(QuestItem, HeldCount);
+		if (DeliveredCount <= 0)
+		{
+			continue;
+		}
+
+		// 진행도는 이미 반영됐으므로 차감 실패는 로그만 남긴다 (도구가 아닌 보관 품목이라 실패 경로는 사실상 없다)
+		if (Hotbar->TryConsumeItem(QuestItem, DeliveredCount) == false)
+		{
+			UE_LOG(LogTemp, Warning, TEXT("[Merchant] 핫바 회수물 차감 실패: %s x%d"), *QuestItem->ItemName.ToString(), DeliveredCount);
+		}
+
+		ClientReceiveQuestItemDelivery(MerchantActor, QuestItem->ItemName, DeliveredCount);
+	}
+}
+
+void AMD_PlayerController::ClientReceiveQuestItemDelivery_Implementation(AMD_Merchant* MerchantActor, const FText& ItemName, int32 Count)
+{
+	if (IsValid(MerchantActor) == true)
+	{
+		MerchantActor->ReceiveQuestItemDelivery(this, ItemName, Count);
+	}
+}
+
 void AMD_PlayerController::ServerBorrowCredits_Implementation(AMD_Merchant* MerchantActor, int32 Amount)
 {
 	APawn* PlayerPawn = GetPawn();
@@ -800,6 +838,30 @@ void AMD_PlayerController::ServerRepayLoan_Implementation(AMD_Merchant* Merchant
 	}
 }
 
+
+void AMD_PlayerController::ServerApplyAppearance_Implementation(FMD_CharacterAppearance NewAppearance)
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (IsValid(MDPlayerState) == true)
+	{
+		MDPlayerState->SetAppearance(NewAppearance);
+	}
+}
+
+void AMD_PlayerController::RestoreAppearanceFromLocalSave()
+{
+	if (IsLocalController() == false)
+	{
+		return;
+	}
+
+	// 마지막으로 확정한 선택을 서버에 다시 실어 재접속·트래블 후에도 유지한다
+	FMD_CharacterAppearance SavedAppearance;
+	if (UMD_CharacterAppearanceLibrary::LoadLocalAppearance(SavedAppearance) == true)
+	{
+		ServerApplyAppearance(SavedAppearance);
+	}
+}
 
 /* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 
@@ -985,6 +1047,33 @@ void AMD_PlayerController::MD_RepairUtility()
 
 	UE_LOG(LogTemp, Log, TEXT("MD_RepairUtility: %s 수리 요청"), *Utility->GetName());
 	ServerRepairUtility(Utility);
+}
+
+void AMD_PlayerController::MD_SpawnDay3Sample()
+{
+#if !UE_BUILD_SHIPPING
+	ServerSpawnDay3Sample();
+#endif
+}
+
+void AMD_PlayerController::ServerSpawnDay3Sample_Implementation()
+{
+#if !UE_BUILD_SHIPPING
+	const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(
+		FPrimaryAssetId(TEXT("Quest"), TEXT("X7-M03")));
+	if (IsValid(Definition))
+	{
+		for (TActorIterator<AMD_QuestSampleSpawner> It(GetWorld()); It; ++It)
+		{
+			if (It->DebugSpawnQuestSample(*Definition, 1))
+			{
+				ClientMessage(TEXT("MD_SpawnDay3Sample: Day3 sample is ready at the Isolation B spawner (existing samples are reused)."));
+				return;
+			}
+		}
+	}
+	ClientMessage(TEXT("MD_SpawnDay3Sample: no matching Day3 spawner or valid quest sample class in this map."));
+#endif
 }
 
 void AMD_PlayerController::ServerRepairUtility_Implementation(AMD_WallUtility* Utility)
@@ -1288,4 +1377,30 @@ void AMD_PlayerController::ClientCloseDayEndReport_Implementation()
             ReportWidget->CloseFinalReport();
         }
     }
+}
+
+void AMD_PlayerController::ServerRequestShopSale_Implementation(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity)
+{
+	// 컨트롤러가 소유한 실제 캐릭터만 판매자로 사용
+	AMD_Character* SellingCharacter = Cast<AMD_Character>(GetPawn());
+	// 잘못된 참조와 식별자 및 수량을 거래 이전에 거부
+	if (IsValid(Merchant) == false || IsValid(SellingCharacter) == false || ItemAssetId.IsValid() == false || Quantity <= 0)
+	{
+		// 요청 거부를 소유 클라이언트에 전달
+		ClientReceiveShopSaleResult(Merchant, EMD_ShopSaleResult::InvalidRequest);
+		// 잘못된 요청의 서버 처리 종료
+		return;
+	}
+	// 상인에서 거리와 카탈로그 및 소지 상태를 다시 검증한 결과 전달
+	ClientReceiveShopSaleResult(Merchant, Merchant->TrySellItem(SellingCharacter, ItemAssetId, SlotIndex, Quantity));
+}
+
+void AMD_PlayerController::ClientReceiveShopSaleResult_Implementation(AMD_Merchant* Merchant, EMD_ShopSaleResult Result)
+{
+	// 판매를 요청한 상인이 살아 있는 경우에만 화면 갱신
+	if (IsValid(Merchant) == true)
+	{
+		// 상인별 활성 화면으로 서버 확정 결과 전달
+		Merchant->ReceiveShopSaleResult(Result);
+	}
 }

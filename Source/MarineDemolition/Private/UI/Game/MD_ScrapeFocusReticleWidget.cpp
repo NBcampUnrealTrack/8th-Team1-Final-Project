@@ -2,173 +2,197 @@
 
 #include "UI/Game/MD_ScrapeFocusReticleWidget.h"
 
+#include "Blueprint/WidgetLayoutLibrary.h"
+#include "Components/Image.h"
+#include "GameFramework/PlayerController.h"
+#include "Layout/ArrangedChildren.h"
+#include "Widgets/SWidget.h"
+
 #include "Character/MD_Character.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
-#include "GameFramework/PlayerController.h"
-#include "Rendering/DrawElements.h"
+#include "Util/MD_LogUtility.h"
 
-namespace
+static void SetReticleVisibility(UImage* Image, const bool bVisible)
 {
-	constexpr int32 ReticleCircleSegments = 32;
-
-	void DrawReticleLine(
-		FSlateWindowElementList& OutDrawElements,
-		const FGeometry& Geometry,
-		const int32 LayerId,
-		const FVector2D& Start,
-		const FVector2D& End,
-		const FLinearColor& Color,
-		const float Thickness)
+	if (!IsValid(Image))
 	{
-		TArray<FVector2f> Points;
-		Points.Reserve(2);
-		Points.Add(UE::Slate::CastToVector2f(Start));
-		Points.Add(UE::Slate::CastToVector2f(End));
-		FSlateDrawElement::MakeLines(
-			OutDrawElements,
-			LayerId,
-			Geometry.ToPaintGeometry(),
-			Points,
-			ESlateDrawEffect::None,
-			Color,
-			true,
-			Thickness);
+		return;
 	}
+
+	// 숨겨도 디자이너의 레이아웃 공간을 유지한다. Collapsed는 주변 배치를 바꿀 수 있다.
+	const ESlateVisibility Visibility = bVisible
+		? ESlateVisibility::HitTestInvisible
+		: ESlateVisibility::Hidden;
+	if (Image->GetVisibility() != Visibility)
+	{
+		Image->SetVisibility(Visibility);
+	}
+}
+
+static bool FindReticleGeometry(
+	const TSharedPtr<SWidget>& Root,
+	const FGeometry& RootGeometry,
+	const TSharedPtr<SWidget>& Image,
+	FGeometry& OutGeometry)
+{
+	if (!Root.IsValid() || !Image.IsValid())
+	{
+		return false;
+	}
+
+	// 패널 타입 대신 실제 Slate 부모 경로를 사용한다. 보통 깊이에서는 힙 할당이 없다.
+	TArray<TSharedPtr<SWidget>, TInlineAllocator<16>> Path;
+	TSharedPtr<SWidget> Current = Image;
+	while (Current.IsValid() && Current != Root)
+	{
+		Path.Add(Current);
+		Current = Current->GetParentWidget();
+	}
+	if (Current != Root)
+	{
+		return false;
+	}
+
+	// 지난 프레임의 Image 캐시를 사용하면 이동량 피드백과 resize 시 오차가 생긴다.
+	// Tick으로 받은 현재 Geometry에서 해당 경로만 다시 배치해 실제 위치를 구한다.
+	OutGeometry = RootGeometry;
+	for (int32 Index = Path.Num() - 1; Index >= 0; --Index)
+	{
+		const TSharedPtr<SWidget>& Parent = Index == Path.Num() - 1 ? Root : Path[Index + 1];
+		FArrangedChildren Children(EVisibility::All);
+		Parent->ArrangeChildren(OutGeometry, Children);
+		const int32 ChildIndex = Children.IndexOfByPredicate(
+			[&Path, Index](const FArrangedWidget& Child) { return Child.Widget == Path[Index]; });
+		if (ChildIndex == INDEX_NONE)
+		{
+			return false;
+		}
+		OutGeometry = Children[ChildIndex].Geometry;
+	}
+	return true;
+}
+
+static bool MoveReticleImage(
+	UImage* Image,
+	const TSharedPtr<SWidget>& Root,
+	const FGeometry& RootGeometry,
+	const FVector2D& DesktopPosition)
+{
+	FGeometry ImageGeometry;
+	if (!FindReticleGeometry(Root, RootGeometry, Image->GetCachedWidget(), ImageGeometry))
+	{
+		return false;
+	}
+
+	const FVector2D ImageSize = ImageGeometry.GetLocalSize();
+	const float Determinant = ImageGeometry.GetAccumulatedRenderTransform().GetMatrix().Determinant();
+	if (ImageSize.X <= UE_SMALL_NUMBER || ImageSize.Y <= UE_SMALL_NUMBER
+		|| !FMath::IsFinite(Determinant) || FMath::IsNearlyZero(Determinant, UE_SMALL_NUMBER))
+	{
+		return false;
+	}
+
+	const FWidgetTransform CurrentTransform = Image->GetRenderTransform();
+	const FVector2D LocalDelta = ImageGeometry.AbsoluteToLocal(DesktopPosition) - ImageSize * 0.5;
+	// AbsoluteToLocal은 Image 자신의 회전/스케일까지 역변환한다.
+	// Translation에는 그 선형 변환을 다시 적용해야 부모 공간에서 정확한 이동량이 된다.
+	const FVector2D Translation = CurrentTransform.Translation
+		+ TransformVector(CurrentTransform.ToSlateRenderTransform(), LocalDelta);
+	if (!FMath::IsFinite(Translation.X) || !FMath::IsFinite(Translation.Y))
+	{
+		return false;
+	}
+	if (!CurrentTransform.Translation.Equals(Translation))
+	{
+		Image->SetRenderTranslation(Translation);
+	}
+	return true;
 }
 
 UMD_ScrapeFocusReticleWidget::UMD_ScrapeFocusReticleWidget(
 	const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
-	// 파생 Widget Blueprint가 장식용 child를 추가해도 포인터 입력을 가로채지 않는다.
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 	SetIsFocusable(false);
-	// 포인터 위치와 Focus/aim 상태는 별도 UMG 속성 변경 없이 Component에서 갱신된다.
-	// Invalidation cache 안에서도 NativePaint가 매 프레임 다시 실행되게 한다.
-	ForceVolatile(true);
 }
 
-int32 UMD_ScrapeFocusReticleWidget::NativePaint(
-	const FPaintArgs& Args,
-	const FGeometry& AllottedGeometry,
-	const FSlateRect& MyCullingRect,
-	FSlateWindowElementList& OutDrawElements,
-	const int32 LayerId,
-	const FWidgetStyle& InWidgetStyle,
-	const bool bParentEnabled) const
+void UMD_ScrapeFocusReticleWidget::NativeConstruct()
 {
-	const int32 BaseLayer = Super::NativePaint(
-		Args,
-		AllottedGeometry,
-		MyCullingRect,
-		OutDrawElements,
-		LayerId,
-		InWidgetStyle,
-		bParentEnabled);
+	Super::NativeConstruct();
 
-	const APlayerController* const PlayerController = GetOwningPlayer();
+	SetVisibility(ESlateVisibility::HitTestInvisible);
+	SetIsFocusable(false);
+	ForceVolatile(false);
+	SetReticleVisibility(Img_CenterReticle, false);
+	SetReticleVisibility(Img_FocusReticle, false);
+
+	if (!IsValid(Img_CenterReticle) || !IsValid(Img_CenterReticle->GetBrush().GetResourceObject()))
+	{
+		UE_LOG(MarineDemolition, Warning,
+			TEXT("%s: Place Img_CenterReticle in the Widget Blueprint and assign its Brush texture."), *GetName());
+	}
+	if (!IsValid(Img_FocusReticle) || !IsValid(Img_FocusReticle->GetBrush().GetResourceObject()))
+	{
+		UE_LOG(MarineDemolition, Warning,
+			TEXT("%s: Place Img_FocusReticle in the Widget Blueprint and assign its Brush texture."), *GetName());
+	}
+}
+
+void UMD_ScrapeFocusReticleWidget::NativeTick(const FGeometry& MyGeometry, const float InDeltaTime)
+{
+	Super::NativeTick(MyGeometry, InDeltaTime);
+	UpdateReticles(MyGeometry);
+}
+
+void UMD_ScrapeFocusReticleWidget::UpdateReticles(const FGeometry& MyGeometry)
+{
+	APlayerController* const PlayerController = GetOwningPlayer();
 	const AMD_Character* const Character = IsValid(PlayerController)
 		? Cast<AMD_Character>(PlayerController->GetPawn())
 		: nullptr;
+	SetReticleVisibility(Img_CenterReticle, IsValid(Character)
+		&& IsValid(Img_CenterReticle)
+		&& IsValid(Img_CenterReticle->GetBrush().GetResourceObject()));
+
 	const UMD_ScrapeToolComponent* const ScrapeTool = IsValid(Character)
 		? Character->GetScrapeToolComponent()
 		: nullptr;
-	if (!IsValid(Character))
+	if (!IsValid(ScrapeTool) || !ScrapeTool->IsScrapeFocusViewActive()
+		|| !IsValid(Img_FocusReticle) || !IsValid(Img_FocusReticle->GetBrush().GetResourceObject()))
 	{
-		return BaseLayer;
+		SetReticleVisibility(Img_FocusReticle, false);
+		return;
 	}
-
-	const FVector2D LocalSize = AllottedGeometry.GetLocalSize();
-	if (LocalSize.X <= UE_SMALL_NUMBER || LocalSize.Y <= UE_SMALL_NUMBER)
-	{
-		return BaseLayer;
-	}
-
-	// Keep the center marker independent of equipped tools and the movable focus pointer.
-	const FVector2D ScreenCenter = LocalSize * 0.5;
-	TArray<FVector2f> CenterCircle;
-	CenterCircle.Reserve(ReticleCircleSegments + 1);
-	for (int32 Index = 0; Index <= ReticleCircleSegments; ++Index)
-	{
-		const float Angle = UE_TWO_PI * Index / ReticleCircleSegments;
-		CenterCircle.Add(UE::Slate::CastToVector2f(ScreenCenter + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle)) * 3.0));
-	}
-	FSlateDrawElement::MakeLines(OutDrawElements, BaseLayer + 1, AllottedGeometry.ToPaintGeometry(),
-		CenterCircle, ESlateDrawEffect::None, FLinearColor(0, 0, 0, 0.8f), true, 3.0f);
-	FSlateDrawElement::MakeLines(OutDrawElements, BaseLayer + 2, AllottedGeometry.ToPaintGeometry(),
-		CenterCircle, ESlateDrawEffect::None, FLinearColor::White, true, 1.25f);
-	if (!IsValid(ScrapeTool) || !ScrapeTool->IsScrapeFocusViewActive()) return BaseLayer + 2;
 
 	const FVector2D Pointer = ScrapeTool->GetScrapeFocusPointerNormalized();
-	const FVector2D Center(
-		FMath::Clamp(Pointer.X, 0.0, 1.0) * LocalSize.X,
-		FMath::Clamp(Pointer.Y, 0.0, 1.0) * LocalSize.Y);
+	const FGeometry PlayerGeometry = UWidgetLayoutLibrary::GetPlayerScreenWidgetGeometry(PlayerController);
+	const FVector2D PlayerSize = PlayerGeometry.GetLocalSize();
+	if (!FMath::IsFinite(Pointer.X) || !FMath::IsFinite(Pointer.Y)
+		|| PlayerSize.X <= UE_SMALL_NUMBER || PlayerSize.Y <= UE_SMALL_NUMBER)
+	{
+		SetReticleVisibility(Img_FocusReticle, false);
+		return;
+	}
+
+	// 두 Geometry 모두 Tick의 desktop 좌표계다. 부모 패널의 종류·위치·여백에 의존하지 않는다.
+	const FVector2D DesktopPosition = PlayerGeometry.LocalToAbsolute(
+		FVector2D(FMath::Clamp(Pointer.X, 0.0, 1.0), FMath::Clamp(Pointer.Y, 0.0, 1.0)) * PlayerSize);
+	if (!MoveReticleImage(Img_FocusReticle, GetCachedWidget(), MyGeometry, DesktopPosition))
+	{
+		SetReticleVisibility(Img_FocusReticle, false);
+		return;
+	}
 
 	const FLinearColor ReticleColor =
 		ScrapeTool->GetScrapeFocusState() == EMD_ScrapeFocusState::FocusPending
 			? PendingColor
-			: (ScrapeTool->IsScrapeFocusReady()
-				&& ScrapeTool->IsScrapeFocusAimValid()
-					? ActionableColor
-					: InvalidColor);
-	const int32 ReticleLayer = BaseLayer + 3;
-
-	TArray<FVector2f> CirclePoints;
-	CirclePoints.Reserve(ReticleCircleSegments + 1);
-	for (int32 SegmentIndex = 0; SegmentIndex <= ReticleCircleSegments; ++SegmentIndex)
+			: (ScrapeTool->IsScrapeFocusReady() && ScrapeTool->IsScrapeFocusAimValid()
+				? ActionableColor
+				: InvalidColor);
+	if (Img_FocusReticle->GetColorAndOpacity() != ReticleColor)
 	{
-		const float Angle = UE_TWO_PI
-			* static_cast<float>(SegmentIndex)
-			/ static_cast<float>(ReticleCircleSegments);
-		const FVector2D Point = Center + FVector2D(FMath::Cos(Angle), FMath::Sin(Angle))
-			* ReticleRadius;
-		CirclePoints.Add(UE::Slate::CastToVector2f(Point));
+		Img_FocusReticle->SetColorAndOpacity(ReticleColor);
 	}
-
-	FSlateDrawElement::MakeLines(
-		OutDrawElements,
-		ReticleLayer,
-		AllottedGeometry.ToPaintGeometry(),
-		CirclePoints,
-		ESlateDrawEffect::None,
-		ReticleColor,
-		true,
-		ReticleThickness);
-
-	const float Inner = ReticleRadius + ReticleGap;
-	const float Outer = Inner + ReticleArmLength;
-	DrawReticleLine(
-		OutDrawElements,
-		AllottedGeometry,
-		ReticleLayer,
-		Center + FVector2D(-Outer, 0.0),
-		Center + FVector2D(-Inner, 0.0),
-		ReticleColor,
-		ReticleThickness);
-	DrawReticleLine(
-		OutDrawElements,
-		AllottedGeometry,
-		ReticleLayer,
-		Center + FVector2D(Inner, 0.0),
-		Center + FVector2D(Outer, 0.0),
-		ReticleColor,
-		ReticleThickness);
-	DrawReticleLine(
-		OutDrawElements,
-		AllottedGeometry,
-		ReticleLayer,
-		Center + FVector2D(0.0, -Outer),
-		Center + FVector2D(0.0, -Inner),
-		ReticleColor,
-		ReticleThickness);
-	DrawReticleLine(
-		OutDrawElements,
-		AllottedGeometry,
-		ReticleLayer,
-		Center + FVector2D(0.0, Inner),
-		Center + FVector2D(0.0, Outer),
-		ReticleColor,
-		ReticleThickness);
-
-	return ReticleLayer;
+	SetReticleVisibility(Img_FocusReticle, true);
 }

@@ -2,7 +2,12 @@
 
 
 #include "Player/MD_PlayerState.h"
+#include "Types/SaveGame/MD_SaveDataTypes.h"
+#include "Audio/MD_AudioSubsystem.h"
+#include "GameFramework/PlayerController.h"
 #include "Character/MD_Character.h"
+#include "Data/Customization/MD_CharacterRosterData.h"
+#include "Gameplay/Customization/MD_CharacterAppearanceSettings.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
@@ -17,6 +22,7 @@ void AMD_PlayerState::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
 	DOREPLIFETIME(AMD_PlayerState, ReturnStatus);
+	DOREPLIFETIME(AMD_PlayerState, ReplicatedAppearance);
 	DOREPLIFETIME_CONDITION(AMD_PlayerState, PurchasedShopItemIds, COND_OwnerOnly);
 	DOREPLIFETIME_CONDITION(AMD_PlayerState, BlockedShopItemIds, COND_OwnerOnly);
 }
@@ -33,6 +39,9 @@ void AMD_PlayerState::CopyProperties(APlayerState* PlayerState)
 		TargetPlayerState->PurchasedShopItemIds = PurchasedShopItemIds;
 		// 구매 이력과 같은 수명으로 업그레이드 소스 구매 금지 유지
 		TargetPlayerState->BlockedShopItemIds = BlockedShopItemIds;
+
+		// 캐릭터 외형을 Seamless Travel 이후에도 유지하기 위한 복사
+		TargetPlayerState->ReplicatedAppearance = ReplicatedAppearance;
 	}
 }
 
@@ -245,6 +254,72 @@ bool AMD_PlayerState::RecordPurchasedShopItem(FPrimaryAssetId ItemAssetId, FPrim
 	return true;
 }
 
+void AMD_PlayerState::ResetShopToolProgress(TArray<FPrimaryAssetId>& ToolAssetIds)
+{
+	// 서버에서 확정한 도구 판매에만 개인 진행 상태 변경 허용
+	if (HasAuthority() == false)
+	{
+		// 클라이언트의 구매 이력 초기화 차단
+		return;
+	}
+	// 해당 도구 단계들의 무료 재구매 이력 제거
+	int32 RemovedCount = PurchasedShopItemIds.RemoveAll([&ToolAssetIds](FPrimaryAssetId ItemAssetId)
+	{
+		// 판매 도구의 업그레이드 경로에 포함된 이력만 선택
+		return ToolAssetIds.Contains(ItemAssetId);
+	});
+	// 기본 도구부터 다시 구매할 수 있도록 같은 경로의 구매 금지 제거
+	RemovedCount += BlockedShopItemIds.RemoveAll([&ToolAssetIds](FPrimaryAssetId ItemAssetId)
+	{
+		// 다른 도구 계열의 구매 금지를 보존할 초기화 대상 검사
+		return ToolAssetIds.Contains(ItemAssetId);
+	});
+	// 실제 이력 변경이 있을 때만 화면 갱신과 복제 요청
+	if (RemovedCount > 0)
+	{
+		// 두 목록을 함께 초기화한 상태를 서버 상점 화면에 전달
+		OnRep_ShopPurchaseState();
+		// 소유 클라이언트에 변경된 구매 및 잠금 이력 복제 요청
+		ForceNetUpdate();
+	}
+}
+
+void AMD_PlayerState::CollectShopPurchaseState(FMD_PlayerData& SaveData) const
+{
+	// 구매하지 않았거나 판매로 초기화된 빈 이력까지 명시적으로 저장
+	SaveData.bHasShopPurchaseState = true;
+	// 상위 도구 해금과 무료 재구매 기준 보존
+	SaveData.PurchasedShopItemIds = PurchasedShopItemIds;
+	// 업그레이드로 대체된 선행 도구 구매 금지 보존
+	SaveData.BlockedShopItemIds = BlockedShopItemIds;
+}
+
+bool AMD_PlayerState::RestoreShopPurchaseState(FMD_PlayerData& SaveData)
+{
+	// 준비되지 않은 호환 기록이나 손상된 이력의 서버 상태 변경 차단
+	if (HasAuthority() == false || SaveData.bHasShopPurchaseState == false || SaveData.IsStructurallyValid() == false)
+	{
+		// 기존 개인 이력을 유지한 실패 반환
+		return false;
+	}
+	// 같은 파일 재적용의 불필요한 화면 갱신과 복제 생략
+	if (PurchasedShopItemIds == SaveData.PurchasedShopItemIds && BlockedShopItemIds == SaveData.BlockedShopItemIds)
+	{
+		// 동일한 이력 복원 성공 반환
+		return true;
+	}
+	// 다른 슬롯이나 이전 세션의 구매 이력을 저장된 값으로 교체
+	PurchasedShopItemIds = SaveData.PurchasedShopItemIds;
+	// 구매 이력과 같은 시점의 재구매 제한 교체
+	BlockedShopItemIds = SaveData.BlockedShopItemIds;
+	// 두 목록을 함께 반영한 서버 상점 화면 갱신
+	OnRep_ShopPurchaseState();
+	// 기존 소유자 전용 복제를 통한 클라이언트 상점 상태 동기화
+	ForceNetUpdate();
+	// 구매 효과나 결제 없이 개인 진행 복원 완료
+	return true;
+}
+
 bool AMD_PlayerState::IsShopItemPurchaseBlocked(FPrimaryAssetId ItemAssetId)
 {
 	// 무효 식별자를 제외하고 등록된 구매 금지 목록만 확인
@@ -259,6 +334,18 @@ void AMD_PlayerState::OnRep_ShopPurchaseState()
 
 void AMD_PlayerState::HandleHealthChanged(const FOnAttributeChangeData& ChangeData)
 {
+	// 실제 HP 감소마다 소유 플레이어에게만 재생한다. 부상 상태 전이와는 별개다.
+	const APlayerController* PlayerController = GetPlayerController();
+	if (ChangeData.NewValue < ChangeData.OldValue && ChangeData.OldValue > 0.0f
+		&& PlayerController && PlayerController->IsLocalController()
+		&& GetNetMode() != NM_DedicatedServer)
+	{
+		if (UMD_AudioSubsystem* Audio = GetWorld()->GetSubsystem<UMD_AudioSubsystem>())
+		{
+			Audio->PlayEvent2D(FGameplayTag::RequestGameplayTag(TEXT("SFX.Character.Damage.Tick")));
+		}
+	}
+
 	RefreshHealthState();
 }
 
@@ -334,8 +421,33 @@ void AMD_PlayerState::Revive()
 		return;
 	}
 
+	// 부활 상태 전이 전에 확장 탱크가 반영된 현재 최대 산소량으로 완충
+	CharacterAttributeSet->SetOxygen(CharacterAttributeSet->GetMaxOxygen());
+
 	const float ReviveAmount = CharacterAttributeSet->GetMaxHealth() * ReviveHealthRatio;
 	CharacterAttributeSet->SetHealth(ReviveAmount);
 
 	UE_LOG(LogTemp, Log, TEXT("[Health][Server] 부활 (HP %.1f)"), ReviveAmount);
+}
+
+void AMD_PlayerState::SetAppearance(const FMD_CharacterAppearance& NewAppearance)
+{
+	if (HasAuthority() == false)
+	{
+		return;
+	}
+
+	// 클라이언트가 보낸 인덱스는 로스터 범위로 정리한다
+	const UMD_CharacterAppearanceSettings* Settings = UMD_CharacterAppearanceSettings::Get();
+	const UMD_CharacterRosterData* Roster = IsValid(Settings) == true ? Settings->GetRoster() : nullptr;
+	ReplicatedAppearance = IsValid(Roster) == true ? Roster->Sanitize(NewAppearance) : NewAppearance;
+
+	// Listen Server 호스트에서도 즉시 캐릭터에 반영
+	OnRep_ReplicatedAppearance();
+	ForceNetUpdate();
+}
+
+void AMD_PlayerState::OnRep_ReplicatedAppearance()
+{
+	OnAppearanceChanged.Broadcast();
 }

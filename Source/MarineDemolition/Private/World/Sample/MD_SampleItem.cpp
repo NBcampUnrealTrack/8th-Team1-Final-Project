@@ -1,27 +1,24 @@
 #include "World/Sample/MD_SampleItem.h"
+#include "World/Sample/MD_SampleProtectionZone.h"
 
-#include "AbilitySystemBlueprintLibrary.h"
 #include "AbilitySystemComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "EngineUtils.h"
+#include "GameFramework/Pawn.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
-#include "GameFramework/Pawn.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Util/MD_LogUtility.h"
 #include "Components/HierarchicalInstancedStaticMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
-#include "Engine/Engine.h"
-#include "Engine/EngineTypes.h"
-#include "Engine/GameInstance.h"
-#include "Engine/World.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
-#include "TimerManager.h"
 #include "Util/MD_MaterialTintUtility.h"
 
 AMD_SampleItem::AMD_SampleItem()
 {
+	PrimaryActorTick.bCanEverTick = true;
+	PrimaryActorTick.TickGroup = TG_PrePhysics;
 	// 공통 부모의 파괴 불가 기본값을 샘플 전용 피해 허용 정책으로 전환하는 설정
 	SetCanBeDamaged(true);
 
@@ -40,6 +37,24 @@ AMD_SampleItem::AMD_SampleItem()
 
 	// 샘플에서만 물리 충격 이벤트를 받아 파괴 기능을 추가하기 위한 설정
 	Mesh->SetNotifyRigidBodyCollision(true);
+}
+
+void AMD_SampleItem::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (!HasAuthority() || !WaterFloat.bEnabled || !IsValid(Mesh)
+		|| !Mesh->IsSimulatingPhysics() || !Mesh->IsGravityEnabled()
+		|| IsHidden() || GetAttachParentActor()) return;
+
+	// Check actual grips, not the historical bHasBeenCarried flag: dropping re-enables buoyancy.
+	for (TActorIterator<APawn> It(GetWorld()); It; ++It)
+	{
+		const UMD_InteractionComponent* Interaction = It->FindComponentByClass<UMD_InteractionComponent>();
+		if (Interaction && Interaction->GetHeldActor() == this) return;
+	}
+	const FVector Acceleration = WaterFloat.GetAcceleration(Mesh->GetCenterOfMass().Z,
+		Mesh->GetPhysicsLinearVelocity(), GetWorld()->GetTimeSeconds(), GetWorld()->GetGravityZ());
+	if (!Acceleration.IsNearlyZero()) Mesh->AddForce(Acceleration, NAME_None, true);
 }
 
 FText AMD_SampleItem::GetInteractionPrompt_Implementation(AActor* Interactor) const
@@ -142,6 +157,14 @@ void AMD_SampleItem::BeginSpawnProtection()
 
 void AMD_SampleItem::NotifyGrabbed()
 {
+	Super::NotifyGrabbed();
+	// 충격 보호 설정과 무관하게 서버의 실제 그랩 성공 이력 보존
+	if (HasAuthority() == true)
+	{
+		// 퇴근 시 복귀 구역 안의 운반한 샘플만 자동 제출 허용
+		bHasBeenCarried = true;
+	}
+
 	if (GrabProtectionDuration <= 0.f)
 	{
 		return;
@@ -184,7 +207,8 @@ void AMD_SampleItem::OnAnyDamage(AActor* DamagedActor, float Damage, const UDama
 {
 	// 파괴 불가 하위 클래스가 일반 피해로 손상되는 경로를 차단하기 위한 결과
 	bool bCanBeDestroyed = CanBeDestroyedByGameplay();
-	if (bCanBeDestroyed == false || bImpactProtected == true || bDamaged == true)
+	if (bCanBeDestroyed == false || bImpactProtected == true || bDamaged == true
+		|| AMD_SampleProtectionZone::ProtectsActor(this))
 	{
 		return;
 	}
@@ -206,7 +230,7 @@ void AMD_SampleItem::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* Ot
 		return;
 	}
 
-	if (bImpactProtected)
+	if (bImpactProtected || AMD_SampleProtectionZone::ProtectsActor(this))
 	{
 		return;
 	}
@@ -300,4 +324,26 @@ void AMD_SampleItem::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* Ot
 	{
 		SetDamaged();
 	}
+}
+
+void AMD_SampleItem::RestorePersistentSampleState(EMD_SampleGrade SavedGrade, bool bSavedDamaged, bool bSavedHasBeenCarried)
+{
+	// 물품 상태 복원은 서버에서만 적용
+	if (HasAuthority() == false)
+	{
+		// 비권위 요청 종료
+		return;
+	}
+	// 파일 및 다음 일자 복원에서 자동 제출 자격 유지
+	bHasBeenCarried = bSavedHasBeenCarried;
+	// 저장 시점의 납품 등급 적용
+	Grade = SavedGrade;
+	// 손상 효과와 퀘스트 실패를 재발행하지 않고 상태만 복구
+	bDamaged = bSavedDamaged;
+	// 호스트 손상 외형 갱신
+	OnRep_Damaged();
+	// 로드 직후 물리 안정화 중 발생하는 충격 보호
+	SuppressImpactDamage(SpawnProtectionDuration);
+	// 클라이언트 손상 상태 동기화
+	ForceNetUpdate();
 }

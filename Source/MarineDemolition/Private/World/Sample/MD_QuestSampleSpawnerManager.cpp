@@ -1,7 +1,6 @@
 #include "World/Sample/MD_QuestSampleSpawnerManager.h"
 
 #include "Data/Merchant/MD_QuestDefinition.h"
-#include "TimerManager.h"
 #include "Util/MD_LogUtility.h"
 #include "World/Sample/MD_QuestSampleSpawner.h"
 
@@ -13,6 +12,10 @@ void UMD_QuestSampleSpawnerManager::Deinitialize()
 	if (bIsWorldValid == true)
 	{
 		World->GetTimerManager().ClearTimer(RegistrationCompletionTimerHandle);
+		// 이전 월드의 구버전 복원 예약 정리
+		World->GetTimerManager().ClearTimer(LegacyQuestRecoveryTimerHandle);
+		// 종료된 월드의 준비 대기 상태 해제
+		bLegacyQuestRecoveryPending = false;
 	}
 
 	// 다음 월드에서 이전 등록 객체가 재사용되지 않도록 목록을 비운다.
@@ -214,6 +217,15 @@ bool UMD_QuestSampleSpawnerManager::IsSelectedSpawner(AMD_QuestSampleSpawner* Re
 		return false;
 	}
 
+	// A dedicated rack set owns this phase; never also spawn legacy random copies.
+	for (const TWeakObjectPtr<AMD_QuestSampleSpawner>& Spawner : RegisteredSpawners)
+	{
+		if (Spawner.IsValid() && Spawner->ClaimsQuestPhase(Definition.GetPrimaryAssetId(), PhaseIndex))
+		{
+			return false;
+		}
+	}
+
 	// 퀘스트와 현재 Phase를 식별하는 캐시 키를 생성한다.
 	FString SelectionKey = BuildSelectionKey(Definition, PhaseIndex);
 	// 앞서 선택한 스포너가 아직 유효하면 같은 결과를 재사용한다.
@@ -273,6 +285,10 @@ AMD_QuestSampleSpawner* UMD_QuestSampleSpawnerManager::SelectRandomSpawner(UMD_Q
 
 		// 유효한 약한 포인터에서 Zone 판정에 사용할 스포너를 가져온다.
 		AMD_QuestSampleSpawner* CandidateSpawner = RegisteredSpawners[Index].Get();
+		if (!CandidateSpawner->IsRandomSpawnCandidate())
+		{
+			continue;
+		}
 		// 현재 퀘스트 Phase의 Zone을 담당하지 않는 스포너를 제외한다.
 		bool bMatchesSpawnZone = CandidateSpawner->MatchesSpawnZone(Definition, PhaseIndex);
 		if (bMatchesSpawnZone == false)
@@ -295,4 +311,52 @@ AMD_QuestSampleSpawner* UMD_QuestSampleSpawnerManager::SelectRandomSpawner(UMD_Q
 	// 선택한 스포너를 호출자에게 반환한다.
 	AMD_QuestSampleSpawner* SelectedSpawner = CandidateSpawners[SelectedIndex];
 	return SelectedSpawner;
+}
+
+void UMD_QuestSampleSpawnerManager::ScheduleLegacyQuestRecovery(bool bRecoverLegacyItems)
+{
+	// 동일 월드에서 여러 파일을 연속 적용할 때 이전 예약 교체
+	GetWorld()->GetTimerManager().ClearTimer(LegacyQuestRecoveryTimerHandle);
+	// 최신 생존 목록을 적용할 때 이전 준비 대기 상태도 해제
+	bLegacyQuestRecoveryPending = bRecoverLegacyItems;
+	// 생존 목록이 없는 기존 파일에서만 스포너 복구 허용
+	if (bRecoverLegacyItems == true)
+	{
+		// 파일 적용 중 생성 억제가 해제된 이후 한 번만 실행
+		LegacyQuestRecoveryTimerHandle = GetWorld()->GetTimerManager().SetTimerForNextTick(this, &ThisClass::RecoverLegacyQuestItems);
+	}
+}
+
+void UMD_QuestSampleSpawnerManager::RecoverLegacyQuestItems()
+{
+	// 스포너 등록이 끝나기 전 자동 저장으로 빈 생존 목록이 확정되는 상황 방지
+	if (bRegistrationComplete == false && RegisteredSpawners.IsEmpty() == false)
+	{
+		// 마지막 등록 완료 콜백 이후 복구를 한 번 더 예약
+		ScheduleLegacyQuestRecovery(true);
+		// 실제 복구 전 준비 상태 유지
+		return;
+	}
+	// 완료된 예약을 후속 로드에서 재사용하지 않도록 초기화
+	LegacyQuestRecoveryTimerHandle.Invalidate();
+	// 모든 스포너의 동기 평가가 끝나는 현재 틱의 대기 상태 해제
+	bLegacyQuestRecoveryPending = false;
+	// 생성 콜백 중 등록 목록이 변경되어도 순회를 유지할 후보 목록
+	TArray<TWeakObjectPtr<AMD_QuestSampleSpawner>> Spawners = RegisteredSpawners;
+	// 전역 액터 검색 없이 이미 등록된 스포너만 재평가
+	for (TWeakObjectPtr<AMD_QuestSampleSpawner>& Spawner : Spawners)
+	{
+		// 구역 해제 또는 월드 종료로 사라진 후보 제외
+		if (Spawner.IsValid() == false)
+		{
+			// 종료된 스포너 처리 생략
+			continue;
+		}
+		// 이전 플레이 시점의 메인 퀘스트 생성 캐시 제거
+		Spawner->LastSpawnedMainPhaseIndex = INDEX_NONE;
+		// 동일 단계 번호의 다른 퀘스트도 현재 저장 상태로 재평가
+		Spawner->LastSpawnedMainQuestDefinitionId = FPrimaryAssetId();
+		// 저장된 진행도와 현재 생존 수량을 제외한 부족 물품만 생성
+		Spawner->TrySpawnForQuestState();
+	}
 }

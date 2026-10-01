@@ -1,16 +1,12 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/TimerHandle.h"
-#include "GameFramework/Actor.h"
 #include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTagAssetInterface.h"
-#include "GameplayTagContainer.h"
 #include "MD_CuttableWall.generated.h"
 
+class UCameraShakeBase;
 class UDecalComponent;
-class UInstancedStaticMeshComponent;
-class UMaterialInstanceDynamic;
 class UMaterialInterface;
 class UStaticMeshComponent;
 class UMD_ScrapeSurfaceComponent;
@@ -73,12 +69,22 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|태그")
 	FGameplayTagContainer OwnedGameplayTags;
 
+	virtual void PreRegisterAllComponents() override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
-	void SetSupported(bool bSupported) { bHasSupport = bSupported; }
+	void SetSupported(bool bSupported) { UpdateSupportState(bSupported, nullptr); }
+
+	/** Native brace changes also identify the player responsible for losing support. */
+	void UpdateSupportState(bool bSupported, AActor* ResponsibleActor);
+	bool IsAwaitingSupportCollapse() const { return bAwaitingSupportCollapse; }
+	/** Restore the hidden load-bearing state without replaying cutting, rewards or collapse. */
+	void RestorePendingSupportCollapse();
+
+	// 저장 복원 시 붕괴나 감점 이벤트 없이 지지 유무만 교체
+	void RestoreSupportState(bool bSupported);
 
 	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	bool IsSupported() const { return bHasSupport; }
@@ -122,6 +128,12 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Cut")
 	void AddCutProgress(float DeltaSeconds, AActor* Cutter);
 
+	// 절단 완료 효과 없이 누적량만 파일에 보관하기 위한 조회
+	FORCEINLINE float GetPersistentCutSeconds() { return CutProgressSeconds; }
+
+	// 점수와 파괴 이벤트를 발생시키지 않는 절단 진행 복원
+	bool RestorePersistentCutSeconds(float Seconds);
+
 	/** 서버 GA의 마지막 벽 충돌면을 조각 배분까지 동기 전달한다. */
 	void AddCutProgressFromHit(
 		float DeltaSeconds,
@@ -151,16 +163,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, Category = "MD|Wall")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
-	/**
-	 * Deprecated inert compatibility shell. It is retained temporarily so old
-	 * Blueprint component overrides do not become orphaned.
-	 */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-		AdvancedDisplay, Category = "MD|Wall|Contamination|Deprecated",
-		meta = (DeprecatedProperty,
-			DeprecationMessage = "Cell ISM contamination overlays are no longer used."))
-	TObjectPtr<UInstancedStaticMeshComponent> ContaminationOverlay;
-
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
 		Category = "MD|Wall|Contamination|Decal")
 	TObjectPtr<UDecalComponent> FrontContaminationDecal;
@@ -186,8 +188,25 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall")
 	TSubclassOf<AMD_WallPiece> PieceClass;
 
-	UPROPERTY(Transient)
-	TObjectPtr<UMaterialInstanceDynamic> MID;
+	/** Local collapse footprint around the cut wall. */
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "50", ClampMax = "1000", Units = "cm"))
+	float CollapseRadiusCm = 250.f;
+
+	/** Search above wall mid-height for the actual underside of the ceiling. */
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "50", ClampMax = "1000", Units = "cm"))
+	float CollapseCeilingSearchHeightCm = 400.f;
+
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "0", ClampMax = "24"))
+	int32 CollapseDebrisCount = 12;
+
+	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "0"))
+	float CollapseDamage = 40.f;
+
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Collapse")
+	TObjectPtr<UNiagaraSystem> CollapseEffect;
+
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Collapse")
+	TSubclassOf<UCameraShakeBase> CollapseShakeClass;
 
 	/** Serialized BP values retained until BP_MD_CuttableWall is migrated. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
@@ -237,6 +256,12 @@ private:
 	void CutFromHit(AActor* Cutter, const FHitResult* WallHit);
 	float ResolveCutSurfaceCleanRatio(const FHitResult* WallHit);
 	void CompleteCutWithCleanRatio(AActor* Cutter, float CutSurfaceCleanRatio);
+	void CollapseIfUnsupported(AActor* ResponsibleActor);
+	void TriggerUnsupportedCollapse(AActor* Cutter);
+
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlayCollapseEffect(FVector EffectLocation, FVector EffectScale);
+
 	void AddCutProgressInternal(
 		float DeltaSeconds,
 		AActor* Cutter,
@@ -249,7 +274,14 @@ private:
 	UFUNCTION()
 	void OnRep_CutProgress();
 
+	UFUNCTION()
+	void OnRep_Cut();
+
+	UPROPERTY(ReplicatedUsing = OnRep_Cut)
 	bool bCut = false;
+
+	bool bAwaitingSupportCollapse = false;
+	bool bCollapseTriggered = false;
 
 	//  누적 절단 시간. 감소하지 않으며 Day 간에도 유지된다 (기획 §3)
 	UPROPERTY(ReplicatedUsing = OnRep_CutProgress)

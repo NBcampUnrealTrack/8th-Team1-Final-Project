@@ -391,6 +391,27 @@ bool UMD_ScrapeSurfaceComponent::TryGetScrapeSurfaceWorldPositionAtDepth(
 }
 
 
+bool UMD_ScrapeSurfaceComponent::SelectCompatibleContaminationLayout(const FGuid& LayoutId, const bool bInitialize)
+{
+    if (!UsesMeshUVSurface() || !ContaminationMeshUVData) return false;
+    if (ContaminationMeshUVData->LayoutId == LayoutId) return true;
+    UMD_ScrapeMeshUVData* Compatible = ContaminationMeshUVData->ResolveCompatibleLayout(LayoutId);
+    if (!Compatible || !SurfaceMesh) return false;
+    if (HasAuthority() && GetWorld())
+        if (auto* Sync = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>()) Sync->InvalidateSurface(*this);
+    ShutdownRuntimeState();
+    ContaminationMeshUVData = Compatible;
+    SurfaceMesh->SetStaticMesh(Compatible->SourceMesh);
+    ContaminationGridDimensions = Compatible->AtlasDimensions;
+    if (bInitialize)
+    {
+        TGuardValue<bool> Completing(bCompletingDeferredInitialization, true);
+        InitializeSurface();
+        return bContaminationSurfaceInitialized;
+    }
+    return true;
+}
+
 bool UMD_ScrapeSurfaceComponent::ResolveContaminationSurfaceGeometry()
 {
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_ResolveSurfaceGeometry);
@@ -405,6 +426,14 @@ bool UMD_ScrapeSurfaceComponent::ResolveContaminationSurfaceGeometry()
 
     if (UsesMeshUVSurface())
     {
+        if (HasAuthority() && GetWorld() && GetWorld()->IsGameWorld())
+            if (auto* GI = GetWorld()->GetGameInstance())
+                if (auto* Persistence = GI->GetSubsystem<UMD_DayPersistenceSubsystem>())
+                {
+                    FGuid SavedLayout;
+                    if (Persistence->TryGetSavedContaminationLayout(this, SavedLayout)
+                        && !SelectCompatibleContaminationLayout(SavedLayout, false)) return false;
+                }
         FString Error;
         if (!ContaminationMeshUVData || !ContaminationMeshUVData->ValidateForRuntime(&Error)
             || !ContaminationMeshUVData->IsValidForMesh(SurfaceMesh->GetStaticMesh())
@@ -585,6 +614,7 @@ UMD_ScrapeSurfaceComponent::GetContaminationCellsForFace(
 
 void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 {
+    if (bDeferredInitializationPending && !bRestoringContaminationGeneration) return;
     if (GetWorld() && GetWorld()->IsGameWorld())
     {
         if (!HasAuthority() && !ContaminationGeneration.IsValid()) return;
@@ -744,7 +774,7 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 
     // Saved surfaces need their layout for validation, but build dirt only once,
     // when the next-tick restore applies the saved baseline and deltas.
-    if (!bRestoringContaminationGeneration && GetWorld() && HasAuthority())
+    if (!bRestoringContaminationGeneration && !bCompletingDeferredInitialization && GetWorld() && HasAuthority())
         if (auto* GI=GetWorld()->GetGameInstance())
             if (auto* Persistence=GI->GetSubsystem<UMD_DayPersistenceSubsystem>())
                 if (Persistence->ShouldDeferContaminationGeneration(this)) return;
@@ -812,6 +842,13 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 		ScrapeSettings.CleanTolerance)
 		? FMath::Max(0.0f, ScrapeSettings.CleanTolerance)
 		: 0.0f;
+    if (PreparedInitialState.IsSet())
+    {
+        CanonicalInitialContaminationCarrierAmounts[0] = PreparedInitialState->CanonicalCarrier;
+        CanonicalInitialContaminationCarrierAmounts[1] = 0.0;
+    }
+    else
+    {
 	for (int32 FaceSlot = 0; FaceSlot < 2; ++FaceSlot)
 	{
 		const EMD_ScrapeSurfaceFace Face = FaceSlot == 0
@@ -847,6 +884,8 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 			CanonicalCarrierAmount;
 	}
 
+    }
+
 	if ((!GetWorld() || GetWorld()->GetNetMode() != NM_DedicatedServer) && !InitializeContaminationMask())
 	{
 		UE_LOG(
@@ -856,7 +895,13 @@ void UMD_ScrapeSurfaceComponent::InitializeContaminationSurface()
 			*GetName());
 	}
 
-	RefreshContaminationCleanRatioCache();
+    if (PreparedInitialState.IsSet())
+    {
+        CommitContaminationMeshUVProgressCache(PreparedInitialState->Progress);
+        CachedBackInitialContaminationAmount = CachedBackCurrentContaminationAmount = 0.0;
+        CachedBackContaminationCleanRatio = FMD_ScrapeEvaluator::CalculateCurrentCleanRatio(0.0, 0.0);
+    }
+    else RefreshContaminationCleanRatioCache();
 	if (HasAuthority())
 	{
 		// 저작된 초기 오염은 오염된 face 하나당 정확히 1.0 unit을 한 번

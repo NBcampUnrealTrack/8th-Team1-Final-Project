@@ -50,6 +50,7 @@ Config/DefaultEditorPerProjectUserSettings.ini
 # AI coding agents (local state)
 .codex/
 .claude/
+.agents/
 .revvy/
 /AGENT.md
 /CLAUDE.md
@@ -64,6 +65,7 @@ Docs/**/_audit*
 
 # Editor automation scripts (machine-local / WIP)
 Content/Python/
+Tools/Diagnostics/
 
 # Local Unreal MCP / AI client configs (machine-local only)
 .cursor/
@@ -847,3 +849,16 @@ Content/Assets/Stylized_Cemetery/**
 # Local-only automation/test sources; retained for local validation.
 /Source/MarineDemolition/Private/Tests/
 /Source/MarineDemolition/Public/Tests/
+Content/Assets/X7/Interior/Objects/CoolingMachin_Low.uasset
+Content/Assets/X7/Interior/Objects/CoolingMachin_Low_Mat.uasset
+Content/Assets/X7/Interior/Objects/CoolingMachine_LowEdit.uasset
+Content/Assets/X7/Interior/Objects/signature/M_GeneticChamber_MonitorScreen.uasset
+Content/Assets/X7/Interior/Objects/signature/SM_GeneticChamber_MonitorScreen.uasset
+Content/Assets/X7/Interior/Objects/signature/tripo_node_b5ae0d65.uasset
+Content/Assets/X7/Interior/Objects/signature/texture/ChatGPT_Image_2026년_9월_23일_오후_05_20_07.uasset
+Content/Assets/X7/Interior/Objects/signature/texture/ChatGPT_Image_2026년_9월_23일_오후_05_20_07_Mat.uasset
+Content/Assets/X7/Interior/Objects/signature/texture/ChatGPT_Image_2026년_9월_23일_오후_05_44_31.uasset
+Content/Assets/X7/Interior/Objects/signature/texture/ChatGPT_Image_2026년_9월_23일_오후_05_44_31_Mat.uasset
+Content/Assets/X7/Interior/Objects/signature/texture/GeneticChamber.uasset
+Content/Assets/X7/Interior/Objects/signature/texture/GeneticChamber_Mat.uasset
+frontend/src/components/editor/StudioVst3Editor.vue

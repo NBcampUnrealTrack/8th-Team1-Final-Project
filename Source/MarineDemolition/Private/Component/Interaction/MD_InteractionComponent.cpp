@@ -2,13 +2,16 @@
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
+#include "Audio/MD_AudioSubsystem.h"
 #include "Camera/CameraComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
+#include "Data/Equipment/MD_ConsumeItemDefinition.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "World/Wall/MD_PowerConduit.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameStateBase.h"
@@ -23,7 +26,21 @@
 #include "Net/UnrealNetwork.h"
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "World/Sample/MD_QuestItem.h"
+#include "World/Trash/MD_TrashSorter.h"
 #include "World/Wall/MD_CuttableWall.h"
+
+static void AddActorAndAttachmentsToInteractionQuery(
+	const AActor* Actor, FCollisionQueryParams& QueryParams)
+{
+	if (!IsValid(Actor)) return;
+
+	QueryParams.AddIgnoredActor(Actor);
+	Actor->ForEachAttachedActors([&QueryParams](AActor* AttachedActor)
+	{
+		AddActorAndAttachmentsToInteractionQuery(AttachedActor, QueryParams);
+		return true;
+	});
+}
 
 namespace
 {
@@ -46,6 +63,9 @@ UMD_InteractionComponent::UMD_InteractionComponent()
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
 	SetIsReplicatedByDefault(true);
+
+	PickupSoundTag = FGameplayTag::RequestGameplayTag(
+		TEXT("SFX.Carry.Hand.Pickup"), /*ErrorIfNotFound*/ false);
 }
 
 void UMD_InteractionComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -128,6 +148,40 @@ FText UMD_InteractionComponent::ResolveAbilityInteractionPrompt() const
 	const UMD_EquipHotbarComponent* Hotbar = IsValid(OwnerPawn)
 		? OwnerPawn->FindComponentByClass<UMD_EquipHotbarComponent>()
 		: nullptr;
+	// 절연테이프는 ToolDefinition이 아닌 소모품이다. 일반 E 대상 목록과 별도로
+	// GA_InsulationTape와 같은 200cm Visibility 조준 조건에서 LMB 안내를 만든다.
+	const UMD_ConsumeItemDefinition* Consumable = IsValid(Hotbar)
+		? Cast<UMD_ConsumeItemDefinition>(Hotbar->GetCurrentItem())
+		: nullptr;
+	if (IsValid(Consumable)
+		&& Consumable->UseAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Insulation))
+	{
+		const AController* Controller = IsValid(OwnerPawn) ? OwnerPawn->GetController() : nullptr;
+		const UWorld* World = GetWorld();
+		if (!IsValid(Controller) || !World
+			|| Hotbar->GetItemCountAtSlot(Hotbar->GetCurrentSlotIndex()) <= 0)
+		{
+			return FText::GetEmpty();
+		}
+
+		FVector ViewLocation;
+		FRotator ViewRotation;
+		Controller->GetPlayerViewPoint(ViewLocation, ViewRotation);
+		FHitResult Hit;
+		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDInsulationRepairPrompt), false, OwnerPawn);
+		if (!World->LineTraceSingleByChannel(Hit, ViewLocation,
+				ViewLocation + ViewRotation.Vector() * AbilityPromptTraceDistance,
+				ECC_Visibility, QueryParams))
+		{
+			return FText::GetEmpty();
+		}
+
+		const AMD_PowerConduit* Conduit = Cast<AMD_PowerConduit>(Hit.GetActor());
+		return IsValid(Conduit) && Conduit->CanRepairWithToolInput(GetOwnerPawn())
+			? NSLOCTEXT("MDInteraction", "InsulationRepairAction", "고장난 전선\n[LMB] 수리 (절연테이프 1개)")
+			: FText::GetEmpty();
+	}
+
 	const UMD_ToolDefinition* Tool = IsValid(Hotbar)
 		? Hotbar->GetCurrentTool()
 		: nullptr;
@@ -335,6 +389,9 @@ void UMD_InteractionComponent::Interact()
 
 	AActor* Target = CurrentTarget.Get();
 
+	// 이전 홀드가 해제 없이 남아 있으면 새 입력 전에 정리한다.
+	HoldInteractionTarget.Reset();
+
 	// New interactables are server-authoritative by default. UI-only targets must explicitly opt out.
 	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
 	{
@@ -342,6 +399,12 @@ void UMD_InteractionComponent::Interact()
 		{
 			SetCurrentTarget(nullptr);
 			return;
+		}
+
+		// 홀드 대상은 키를 뗄 때 같은 경로로 InteractReleased를 보내야 하므로 기억해 둔다.
+		if (IMD_Interactable::Execute_IsHoldInteraction(Target))
+		{
+			HoldInteractionTarget = Target;
 		}
 
 		const bool bRequiresServerInteraction =
@@ -357,8 +420,46 @@ void UMD_InteractionComponent::Interact()
 	ServerInteract(Target);
 }
 
+void UMD_InteractionComponent::InteractReleased()
+{
+	AActor* Target = HoldInteractionTarget.Get();
+	HoldInteractionTarget.Reset();
+
+	APawn* OwnerPawn = GetOwnerPawn();
+	if (!IsValid(OwnerPawn) || !IsValid(Target) || !Target->Implements<UMD_Interactable>())
+	{
+		return;
+	}
+
+	// Interact와 같은 경로로 보낸다. 로컬 전용 대상은 서버를 거치지 않는다.
+	if (!IMD_Interactable::Execute_RequiresServerInteraction(Target))
+	{
+		IMD_Interactable::Execute_InteractReleased(Target, OwnerPawn);
+		return;
+	}
+
+	ServerInteractReleased(Target);
+}
+
+void UMD_InteractionComponent::ServerInteractReleased_Implementation(AActor* RequestedActor)
+{
+	APawn* OwnerPawn = GetOwnerPawn();
+	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()) return;
+
+	// 해제는 진행 중인 홀드를 멈출 뿐이라 조준·거리·간격 검증 없이 대상에 넘긴다. 대상이 자기 홀더인지 확인한다.
+	if (!IsValid(RequestedActor) || !RequestedActor->Implements<UMD_Interactable>()
+		|| !IMD_Interactable::Execute_IsHoldInteraction(RequestedActor))
+	{
+		return;
+	}
+
+	IMD_Interactable::Execute_InteractReleased(RequestedActor, OwnerPawn);
+}
+
 void UMD_InteractionComponent::CancelInteraction()
 {
+	// 키 해제를 못 받는 상황(사망·이동)에서도 홀드 대상은 서버 틱의 CanOwnerInteract 검사로 스스로 멈춘다.
+	HoldInteractionTarget.Reset();
 	SetCurrentTarget(nullptr);
 	SetCurrentInteractionPrompt(FText::GetEmpty());
 
@@ -395,11 +496,14 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 	{
 		if (IsValid(RequestedActor)
 			&& RequestedActor->Implements<UMD_Interactable>()
-			&& IMD_Interactable::Execute_SupportsHeldActorInteraction(RequestedActor)
-			&& ValidateInteractionTarget(RequestedActor)
-			&& IMD_Interactable::CanInteractWith(RequestedActor, OwnerPawn))
+			&& IMD_Interactable::Execute_SupportsHeldActorInteraction(RequestedActor))
 		{
-			IMD_Interactable::Execute_Interact(RequestedActor, OwnerPawn);
+			if (ValidateInteractionTarget(RequestedActor)
+				&& IMD_Interactable::CanInteractWith(RequestedActor, OwnerPawn))
+			{
+				IMD_Interactable::Execute_Interact(RequestedActor, OwnerPawn);
+			}
+			// 조준/거리 이탈이나 복제 지연으로 거절된 분류 입력을 놓기로 바꾸지 않는다.
 			return;
 		}
 
@@ -604,6 +708,29 @@ void UMD_InteractionComponent::EndCarryCollisionIsolation()
 	Component->SetCollisionResponseToChannel(ECC_Pawn, CarryIsolatedPawnResponse);
 }
 
+bool UMD_InteractionComponent::TryReceiveQuestItem(AMD_QuestItem* Item, AActor* Source)
+{
+	const APawn* Pawn = GetOwnerPawn();
+	if (!IsValid(Pawn) || !Pawn->HasAuthority() || !CanOwnerInteract()
+		|| IsHolding() || HasAuthorityPhysicsGrip() || !IsValid(HoldPoint)
+		|| !IsValid(Item) || !IsValid(Source) || Item->GetOwner() != Source
+		|| !ValidateInteractionTarget(Source)
+		|| !IMD_Interactable::CanInteractWith(Item, GetOwnerPawn())) return false;
+
+	// Put the item at the carry point before enabling the grip: no floor drop or
+	// spring acceleration from inside the rack on the initial pickup frame.
+	const FTransform Original = Item->GetActorTransform();
+	const FTransform HoldTransform = GetHoldPointTransform();
+	const UPrimitiveComponent* ItemBody = Cast<UPrimitiveComponent>(Item->GetRootComponent());
+	Item->SetActorLocationAndRotation(ResolveHoldTargetLocation(HoldTransform, ItemBody),
+		HoldTransform.GetRotation(), false, nullptr, ETeleportType::TeleportPhysics);
+	Item->SetActorHiddenInGame(false);
+	Item->SetActorEnableCollision(true);
+	if (TryHoldTarget(Item)) return true;
+	Item->SetActorTransform(Original, false, nullptr, ETeleportType::TeleportPhysics);
+	return false;
+}
+
 bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 {
 	APawn* OwnerPawn = GetOwnerPawn();
@@ -673,9 +800,15 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 	}
 
 	UpdateHeldTarget();
+
+	// 권한 머신은 OnRep 이 오지 않는다. 리슨 서버 호스트가 자기 픽업음을 들으려면
+	// 여기서 직접 내야 한다. 데디케이티드 서버에서는 오디오가 알아서 빠진다.
+	PlayPickupSound();
+
 	Target->ForceNetUpdate();
 	OwnerPawn->ForceNetUpdate();
 	RefreshTickEnabled();
+	OnHeldActorChanged.Broadcast(HeldActor);
 	return true;
 }
 
@@ -763,6 +896,8 @@ void UMD_InteractionComponent::ReleaseHeldActor()
 	if (!HeldActor && !HasAuthorityPhysicsGrip())
 	{
 		RefreshTickEnabled();
+		// 운반 중 대상이 파괴돼 포인터가 먼저 비워진 경우에도 도구를 다시 들게 한다
+		OnHeldActorChanged.Broadcast(nullptr);
 		return;
 	}
 
@@ -794,6 +929,7 @@ void UMD_InteractionComponent::ReleaseHeldActor()
 
 	OwnerPawn->ForceNetUpdate();
 	RefreshTickEnabled();
+	OnHeldActorChanged.Broadcast(nullptr);
 }
 
 FTransform UMD_InteractionComponent::GetHoldPointTransform() const
@@ -808,11 +944,13 @@ FTransform UMD_InteractionComponent::GetHoldPointTransform() const
 	return HoldPoint->GetRelativeTransform() * ViewTransform;
 }
 
-FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& HoldTransform) const
+FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& HoldTransform,
+	const UPrimitiveComponent* PendingItem) const
 {
 	const FVector Desired = HoldTransform.TransformPositionNoScale(HeldTargetOffset);
 
-	const UPrimitiveComponent* Held = IsValid(PhysicsHandle) ? PhysicsHandle->GetGrabbedComponent() : nullptr;
+	const UPrimitiveComponent* Held = IsValid(PendingItem) ? PendingItem
+		: (IsValid(PhysicsHandle) ? PhysicsHandle->GetGrabbedComponent() : nullptr);
 	const UWorld* World = GetWorld();
 	if (!IsValid(Held) || !IsValid(Camera) || !World)
 	{
@@ -923,9 +1061,32 @@ void UMD_InteractionComponent::OnRep_HeldActor()
 	if (IsHolding())
 	{
 		SetCurrentTarget(nullptr);
+
+		// 놓을 때는 null 로 바뀌므로 여기 오지 않는다. 잡는 순간에만 난다.
+		PlayPickupSound();
 	}
 
 	RefreshTickEnabled();
+	OnHeldActorChanged.Broadcast(HeldActor);
+}
+
+void UMD_InteractionComponent::PlayPickupSound() const
+{
+	if (!PickupSoundTag.IsValid() || !IsValid(HeldActor))
+	{
+		return;
+	}
+
+	const UWorld* const World = GetWorld();
+	if (World == nullptr)
+	{
+		return;
+	}
+
+	if (UMD_AudioSubsystem* const Audio = World->GetSubsystem<UMD_AudioSubsystem>())
+	{
+		Audio->PlayEventAtLocation(PickupSoundTag, HeldActor->GetActorLocation());
+	}
 }
 
 void UMD_InteractionComponent::CaptureDefaultHoldProfile()
@@ -971,6 +1132,13 @@ void UMD_InteractionComponent::UpdateInteractionFocus()
 	SetCurrentTarget(TraceInteractionTarget());
 }
 
+void UMD_InteractionComponent::AddInteractionTraceIgnoredActors(FCollisionQueryParams& QueryParams) const
+{
+	QueryParams.AddIgnoredActor(GetOwnerPawn());
+	// 통 본체만 제외하면 별도 액터로 부착된 내용물이 시선을 막는다.
+	AddActorAndAttachmentsToInteractionQuery(HeldActor, QueryParams);
+}
+
 AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 {
 	APawn* OwnerPawn = GetOwnerPawn();
@@ -986,11 +1154,7 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 	// GeometryCollection은 복합(complex) 콜리전이 없다. bTraceComplex를 켜면 GC를 통째로 놓친다.
 	FHitResult Hit;
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(InteractTrace), /*bTraceComplex*/ false);
-	QueryParams.AddIgnoredActor(OwnerPawn);
-	if (IsValid(HeldActor))
-	{
-		QueryParams.AddIgnoredActor(HeldActor);
-	}
+	AddInteractionTraceIgnoredActors(QueryParams);
 
 	if (!GetWorld()->LineTraceSingleByChannel(
 		Hit,
@@ -1017,6 +1181,11 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 	{
 		return nullptr;
 	}
+	if (const AMD_TrashSorter* Sorter = Cast<AMD_TrashSorter>(HitActor))
+	{
+		// 조준 대상은 현재 운반 물건과 유효한 분류 카테고리를 요구한다.
+		if (Sorter->IsActorBeingDestroyed() || !Sorter->CanInteract_Implementation(OwnerPawn)) return nullptr;
+	}
 	if (IsHeldByOtherPawn(HitActor)) return nullptr;
 	if (!IMD_Interactable::CanInteractWith(HitActor, OwnerPawn)) return nullptr;
 
@@ -1028,6 +1197,12 @@ bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor)
 	if (!IsValid(RequestedActor))
 	{
 		return false;
+	}
+
+	if (RequestedActor->IsA<AMD_TrashSorter>())
+	{
+		// 클라이언트와 같은 거리/조준 Trace로 승인한다. 별도 영역 판정은 없다.
+		return TraceInteractionTarget() == RequestedActor;
 	}
 
 	if (TraceInteractionTarget() == RequestedActor)
@@ -1081,12 +1256,12 @@ bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor)
 	// The relaxed bounds/aim fallback must not authorize an actor hidden by world geometry
 	// or another interactable. A clear trace may either hit the requested actor itself or hit nothing
 	// (for example, a GeometryCollection without a matching simple collision representation).
-	const auto IsOccludedOnChannel = [this, OwnerPawn, RequestedActor, &ViewLocation, &ClosestPoint](
+	const auto IsOccludedOnChannel = [this, RequestedActor, &ViewLocation, &ClosestPoint](
 		ECollisionChannel Channel) -> bool
 	{
 		FHitResult OcclusionHit;
 		FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(InteractFallbackOcclusion), /*bTraceComplex*/ false);
-		QueryParams.AddIgnoredActor(OwnerPawn);
+		AddInteractionTraceIgnoredActors(QueryParams);
 
 		if (!GetWorld()->LineTraceSingleByChannel(
 			OcclusionHit,

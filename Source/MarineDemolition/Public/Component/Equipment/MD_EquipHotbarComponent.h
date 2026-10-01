@@ -3,7 +3,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Components/ActorComponent.h"
 #include "GameplayEffectTypes.h"
 #include "GameplayAbilitySpecHandle.h"
 #include "MD_EquipHotbarComponent.generated.h"
@@ -11,6 +10,7 @@
 class UMD_ItemDefinition;
 class UMD_ToolDefinition;
 class UAbilitySystemComponent;
+struct FMD_PlayerData;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMDOnEquipHotbarChanged);
 
@@ -55,10 +55,21 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
 	FMDOnEquipHotbarChanged OnHotbarChanged;
 
+	// 슬롯 아이템과 수량 변경을 내용 표시 갱신에 전달하는 알림
+	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
+	FMDOnEquipHotbarChanged OnHotbarContentsChanged;
+
+	// 선택 위치 변경을 선택 표시에 전달하는 알림
+	UPROPERTY(BlueprintAssignable, Category = "MD|HotBar")
+	FMDOnEquipHotbarChanged OnHotbarSelectionChanged;
+
 protected:
 	// 기존 BP 설정 이름을 유지하는 기본 아이템 목록이며 앞의 네 위치만 사용
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Hotbar", meta = (DisplayName = "Default Items"))
 	TArray<TObjectPtr<UMD_ItemDefinition>> DefaultTools;
+
+	// 시작 전에 복원된 빈 슬롯까지 기본 아이템 지급에서 보호하는 상태
+	bool bHasRestoredEquipmentData = false;
 
 	// 종류별 전용 슬롯 없이 네 위치에 아이템과 수량을 함께 복제하는 상태
 	UPROPERTY(ReplicatedUsing = OnRep_ToolEntries)
@@ -149,11 +160,19 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|HotBar")
 	void CycleSlot(int32 Direction);
 
-	// 기존 저장 형식에 슬롯 순서를 보존한 공통 정의 경로 제공
-	TArray<TSoftObjectPtr<UDataAsset>> BuildEquipmentSaveData() const;
+	// 이동 원본의 아이템과 두 슬롯 범위 및 서로 다른 위치 여부 검사
+	UFUNCTION(BlueprintPure, Category = "MD|Hotbar")
+	bool CanSwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex);
 
-	// 기존 경로 저장 데이터에서 공통 아이템을 슬롯당 한 개씩 복구
-	bool RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UDataAsset>>& SaveData);
+	// 빈 슬롯 이동을 포함한 두 슬롯 교환, 서버에서는 적용 결과이며 클라이언트에서는 요청 전송 결과
+	UFUNCTION(BlueprintCallable, Category = "MD|Hotbar")
+	bool SwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex);
+
+	// 슬롯 순서와 수량 및 충전 상태를 포함한 개인 저장 데이터 수집
+	FMD_PlayerData BuildEquipmentSaveData();
+
+	// 모든 아이템 검증 후 빈 칸과 선택 슬롯까지 함께 복원
+	bool RestoreEquipmentSaveData(FMD_PlayerData SaveData);
 
 	// 구매 전에 무효 GE와 GA 태그 및 ASC 준비 상태 검사
 	bool IsItemAbilityGrantValid(UMD_ItemDefinition* ItemDefinition);
@@ -183,6 +202,9 @@ protected:
 
 	// 정의의 전체 AssetId에 일치하는 보관 위치 조회
 	int32 FindItemEntry(UMD_ItemDefinition* ItemDefinition) const;
+	// 요청 당시 두 아이템이 유지된 경우에만 서버에서 슬롯 교환을 확정하는 요청
+	UFUNCTION(Server, Reliable)
+	void ServerSwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex, UMD_ItemDefinition* ExpectedSourceItem, UMD_ItemDefinition* ExpectedTargetItem);
 
 	// 서버 슬롯 변경을 캐릭터와 UI 및 복제 대상에 전달
 	void NotifyEntriesChanged();

@@ -12,6 +12,7 @@ struct FMD_ScrapeMeshUVSyncCheckpoint
     uint64 Serial = 0;
     uint32 VisualRevision = 0;
     double LastChecked = -100.0;
+    bool bUseGeneratedSnapshotBase = true;
 };
 
 /** Player-controller-owned transport: one immutable transfer with a bounded page window. */
@@ -44,11 +45,13 @@ private:
     void ClientReceivePage(UMD_ScrapeSurfaceComponent* Surface,
         const FMD_ScrapeMeshUVSnapshotDescriptor& Descriptor, int32 PageIndex, const TArray<uint8>& Payload);
     UFUNCTION(Server, Reliable)
-    void ServerAcknowledgePage(uint32 TransferId, int32 PageIndex, bool bAccepted);
+    void ServerAcknowledgePage(uint32 TransferId, int32 PageIndex, bool bAccepted, bool bRejectGeneratedBase = false);
     UFUNCTION(Server, Reliable)
     void ServerCancelTransfer(uint32 TransferId);
     UFUNCTION(Client, Reliable)
     void ClientAbortTransfer(UMD_ScrapeSurfaceComponent* Surface, uint32 TransferId);
+    UFUNCTION(Client, Reliable)
+    void ClientSelectSurfaceLayout(UMD_ScrapeSurfaceComponent* Surface, FGuid LayoutId);
 
     FTimerHandle PumpTimer;
     TWeakObjectPtr<UMD_ScrapeSurfaceComponent> ServerSurface;

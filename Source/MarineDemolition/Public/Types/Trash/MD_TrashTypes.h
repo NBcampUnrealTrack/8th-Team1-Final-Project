@@ -112,6 +112,20 @@ struct MARINEDEMOLITION_API FMD_TrashCategoryRow : public FTableRowBase
 	int32 RefundCredits = 0;
 };
 
+/** 품목 안에서 사용하는 이름과 메시. 이름은 배열 순서가 바뀌어도 유지한다. */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_TrashMeshVariant
+{
+	GENERATED_BODY()
+
+	/** ColaCan, BeerCan 등 품목 안에서 고유한 이름. None은 사용할 수 없다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash")
+	FName VariantId;
+
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash")
+	TSoftObjectPtr<UStaticMesh> Mesh;
+};
+
 /**
  * 산재 쓰레기 한 종류 (기획 02 §1)
  * 행 이름이 종류 ID다. 종류 추가·삭제는 이 테이블의 행만 고치면 된다.
@@ -120,6 +134,8 @@ USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_TrashKindRow : public FTableRowBase
 {
 	GENERATED_BODY()
+
+	FMD_TrashKindRow();
 
 	/** 모선에서 이 쓰레기를 넣어야 하는 칸 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash",
@@ -146,7 +162,33 @@ struct MARINEDEMOLITION_API FMD_TrashKindRow : public FTableRowBase
 		meta = (ClampMin = "0.01", UIMin = "0.05", Units = "kg"))
 	float MassKg = 1.0f;
 
-	/** 비워 두면 배치한 Blueprint의 메시를 그대로 쓴다 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash")
-	TSoftObjectPtr<UStaticMesh> Mesh;
+	/** 최소 한 개의 이름별 메시를 지정한다. 첫 항목이 기본 Variant다. 새 행은 Default 하나로 시작한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash", meta = (TitleProperty = "VariantId"))
+	TArray<FMD_TrashMeshVariant> MeshVariants;
+
+	/** 메시를 로드하지 않고 유효하고 고유한 Variant 이름만 반환한다. */
+	TArray<FName> GetVariantIds() const;
+	/** 첫 항목이 유효할 때 그 이름을 반환한다. */
+	FName GetDefaultVariantId() const;
+	/** 이전 액터의 None은 첫 Variant로 해석한다. 잘못된 명시적 이름은 대체하지 않는다. */
+	bool ResolveMesh(FName VariantId, TSoftObjectPtr<UStaticMesh>& OutMesh) const;
+	void PostSerialize(const FArchive& Ar);
+	virtual void OnPostDataImport(const UDataTable* InDataTable, FName InRowName,
+		TArray<FString>& OutCollectedImportProblems) override;
+
+#if WITH_EDITOR
+	virtual EDataValidationResult IsDataValid(FDataValidationContext& Context) const override;
+#endif
+
+private:
+	/** 이전 에셋의 Mesh 태그를 읽기 위한 필드. 편집/저장에는 사용하지 않는다. */
+	UPROPERTY()
+	TSoftObjectPtr<UStaticMesh> Mesh_DEPRECATED;
+
+	void MigrateLegacyMesh();
+};
+
+template<> struct TStructOpsTypeTraits<FMD_TrashKindRow> : TStructOpsTypeTraitsBase2<FMD_TrashKindRow>
+{
+	enum { WithPostSerialize = true };
 };

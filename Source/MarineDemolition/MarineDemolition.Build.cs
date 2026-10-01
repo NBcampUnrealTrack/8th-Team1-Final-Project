@@ -15,6 +15,8 @@ public class MarineDemolition : ModuleRules
 			"GameplayAbilities", "GameplayTags", "GameplayTasks",
 			// AI
 			"AIModule",
+			// Native StateTree conditions/tasks are exposed by public headers.
+			"StateTreeModule",
 			// Online
 			"OnlineSubsystem", "OnlineSubsystemUtils",
 			//UI
@@ -31,7 +33,12 @@ public class MarineDemolition : ModuleRules
 		PrivateDependencyModuleNames.AddRange(new string[]
 		{
 			"ImageWrapper", "Slate", "SlateCore", "MoviePlayer",
+			// 패키지 빌드의 맵 에셋 클래스 조회
+			"AssetRegistry",
 			"DeveloperSettings",
+			"GameplayStateTreeModule",
+            // Process newly registered collision bodies without advancing simulation during map loading.
+            "Chaos", "PhysicsCore",
 			"ApplicationCore",
 			"CoreOnline",
 			// 기존 온라인 음성 캡처와 입출력 장치 런타임 제어
@@ -50,7 +57,7 @@ public class MarineDemolition : ModuleRules
 
 		if (Target.bBuildEditor)
 		{
-			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "MeshDescription", "StaticMeshDescription", "MeshConversion" });
+			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "MeshDescription", "StaticMeshDescription", "MeshConversion", "DynamicMesh" });
 			// 캐러셀의 Enum 전용 디테일 선택기 지원
 			PrivateDependencyModuleNames.AddRange(new string[] { "PropertyEditor", "KismetWidgets", "BlueprintGraph" });
 		}

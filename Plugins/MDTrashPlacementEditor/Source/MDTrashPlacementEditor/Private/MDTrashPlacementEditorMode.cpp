@@ -5,6 +5,7 @@
 #include "MDTrashPlacementEditorModeCommands.h"
 #include "MDTrashPlacementEditorModeToolkit.h"
 #include "Tools/MDTrashPlacementTool.h"
+#include "Tools/MD_PropPlacementTool.h"
 #include "Tools/MD_StainPlacementTool.h"
 
 #define LOCTEXT_NAMESPACE "MDTrashPlacementEditorMode"
@@ -33,6 +34,7 @@ void UMDTrashPlacementEditorMode::Enter()
 		NewObject<UMDTrashPlacementToolBuilder>(this));
 
 	RegisterTool(ToolCommands.StainPlacementTool, TEXT("MDStainPlacementTool"), NewObject<UMD_StainPlacementToolBuilder>(this));
+	RegisterTool(ToolCommands.PropPlacementTool, TEXT("MDPropPlacementTool"), NewObject<UMD_PropPlacementToolBuilder>(this));
 	GetInteractiveToolsContext()->StartTool(PlacementToolName);
 }
 

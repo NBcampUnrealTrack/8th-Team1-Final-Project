@@ -2,23 +2,27 @@
 
 
 #include "Game/MD_GameModeBase.h"
+#include "World/Sample/MD_QuestSampleSpawnerManager.h"
+#include "World/Wall/MD_WallShadowBatchSubsystem.h"
+#include "Character/MD_Character.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
+#include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
 #include "Game/MD_GameStateBase.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Player/MD_PlayerController.h"
-#include "TimerManager.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Player/MD_PlayerState.h"
 #include "World/Return/MD_ReturnZone.h"
 #include "World/Sample/MD_SampleItem.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
+#include "World/Trash/MD_TrashSpawnManager.h"
 #include "Data/SaveGame/MD_SaveSlotManager.h"
-#include "Engine/GameInstance.h"
-#include "Engine/World.h"
+#include "Gameplay/Loading/MD_MapRegistrationSubsystem.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
 
@@ -71,6 +75,19 @@ void AMD_GameModeBase::BeginPlay()
 {
     Super::BeginPlay();
 
+    // 서버 월드 수명에 맞추어 저장 이벤트에 게임 진행과 플레이어 소유자 등록
+    UGameInstance* SaveGameInstance = GetGameInstance();
+    // 유효한 게임 인스턴스의 저장 관리자 조회
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(SaveGameInstance) == true ? SaveGameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    // 저장 관리자 생성 여부를 확인한 뒤 현재 게임 모드 연결
+    if (IsValid(SaveSlotManager) == true)
+    {
+        // 전체 저장 시 서버 상태 수집 연결
+        SaveSlotManager->OnCollectGameData.AddUniqueDynamic(this, &ThisClass::CollectGameData);
+        // 전체 복원 시 서버 상태 적용 연결
+        SaveSlotManager->OnOverwriteGameData.AddUniqueDynamic(this, &ThisClass::OverwriteGameData);
+    }
+
     // GameState 생성이 끝난 시점에 출발 서버가 확정한 계약 설정을 서버 원장에 반영
     ApplyRequestedContractSettings();
 
@@ -92,10 +109,7 @@ void AMD_GameModeBase::BeginPlay()
         It->OnWallDemolished.AddDynamic(this, &AMD_GameModeBase::HandleWallDemolished);
     }
 
-    // 이전 Day 스냅샷 복원은 전 액터 BeginPlay 이후로 미룸 (벽 오염 초기화보다 늦게).
-    // 복원 직후 Merchant Day·퀘스트를 GameState와 맞춘다.
-    GetWorldTimerManager().SetTimerForNextTick(
-        this, &AMD_GameModeBase::InitializeExpeditionDay);
+    // Expedition readiness is scheduled after the pending save operation below.
 
     if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
     {
@@ -126,6 +140,19 @@ void AMD_GameModeBase::ApplyRequestedContractSettings()
 
 void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    // 트래블로 제거되는 이전 게임 모드의 구독을 해제하기 위한 관리자 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    // 종료 시 게임 인스턴스가 유효한 경우에만 저장 관리자 조회
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    // 다음 월드에 이전 서버 수집기가 참여하지 않도록 구독 해제
+    if (IsValid(SaveSlotManager) == true)
+    {
+        // 이전 월드 수집 연결 해제
+        SaveSlotManager->OnCollectGameData.RemoveDynamic(this, &ThisClass::CollectGameData);
+        // 이전 월드 적용 연결 해제
+        SaveSlotManager->OnOverwriteGameData.RemoveDynamic(this, &ThisClass::OverwriteGameData);
+    }
+
     if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
     {
         GS->OnDayChanged.RemoveDynamic(this, &AMD_GameModeBase::HandleGameDayChanged);
@@ -141,12 +168,130 @@ void AMD_GameModeBase::ApplyPendingGameDataOperation()
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
     if (IsValid(SaveSlotManager) == true)
     {
-        SaveSlotManager->ApplyPendingGameDataOperation();
+        // 월드 복원 전에 모든 개인 기록의 아이템 자산 준비
+        bool bAssetsReady = false;
+        // 손상된 품목과 로드 실패가 부분 복원으로 이어지는 상황 차단
+        if (SaveSlotManager->PrepareSavedAssets(bAssetsReady) == false)
+        {
+            // 초기화와 자동 저장을 막는 자산 준비 실패 기록
+            UE_LOG(LogTemp, Error, TEXT("Saved assets could not be prepared; initialization stopped."));
+            // 준비되지 않은 장비로 월드 진입 차단
+            return;
+        }
+        // 방문 구역의 내부 액터가 준비되기 전 저장 데이터 적용 연기
+        bool bStreamingReady = false;
+        // 사라진 구역과 로더 설정 변경의 실패 검사
+        if (SaveSlotManager->PrepareSavedWorldStreaming(bStreamingReady) == false)
+        {
+            // 초기화와 자동 저장을 막는 구역 복원 실패 기록
+            UE_LOG(LogTemp, Error, TEXT("Saved streaming levels could not be restored; initialization stopped."));
+            // 불완전한 월드의 정상 진입 차단
+            return;
+        }
+        // 구역과 아이템 로딩을 같은 프레임에 진행하고 둘 다 준비될 때까지 대기
+        if (bStreamingReady == false || bAssetsReady == false)
+        {
+            // 첫 구역 및 아이템 준비 요청의 실시간 기준 보관
+            if (SavedStreamingStartSeconds == 0.0)
+            {
+                // 게임 시간 정지와 무관한 로딩 제한 기준
+                SavedStreamingStartSeconds = FPlatformTime::Seconds();
+            }
+            // 엔진 로드 실패가 무한 대기로 이어지는 상황 차단
+            if (FPlatformTime::Seconds() - SavedStreamingStartSeconds > 120.0)
+            {
+                // 구역 복원 시간 초과 원인 기록
+                UE_LOG(LogTemp, Error, TEXT("Saved level or save asset loading timed out; initialization stopped."));
+                // 정상 완료와 자동 저장 차단
+                return;
+            }
+            // 구역 로딩을 막지 않는 다음 프레임 재시도
+            GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
+            // 현재 프레임의 데이터 적용 연기
+            return;
+        }
+        // 추가 구역을 포함한 모든 오염 표면의 초기화 완료 대기
+        if (auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); IsValid(Initializer) == true && Initializer->IsPending() == true)
+        {
+            // 신규 구역 표면의 준비를 다음 프레임에서 재확인
+            GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
+            // 오염 초기화 중 월드 복원 중단
+            return;
+        }
+        // 작업 소비 전에 파일 복원과 새 출항 및 다음 일차 전환을 구분할 요청 보관
+        if (UMD_TrashSpawnManager* Trash = GetWorld()->GetSubsystem<UMD_TrashSpawnManager>())
+        {
+            bool bTrashReady = false;
+            if (!Trash->PrepareGenerators(bTrashReady))
+            {
+                UE_LOG(LogTemp, Error, TEXT("Trash floors could not be prepared; saved world restoration stopped."));
+                return;
+            }
+            if (!bTrashReady)
+            {
+                GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
+                return;
+            }
+        }
+        EMD_PendingGameDataOperation PendingOperation = SaveSlotManager->GetPendingGameDataOperation();
+        // 파일 불러오기에서 저장된 퀘스트와 시각 유지
+        bRestoredSavedWorld = PendingOperation == EMD_PendingGameDataOperation::LoadGame;
+        // 작업 없음은 정상 진입으로 유지하고 실제 복원 실패만 중단
+        if (PendingOperation != EMD_PendingGameDataOperation::None && SaveSlotManager->ApplyPendingGameDataOperation() == false)
+        {
+            // 부분 복원 월드의 시간 재개와 자동 저장 차단 원인 기록
+            UE_LOG(LogTemp, Error, TEXT("Saved game restoration failed; world initialization and auto-save stopped."));
+            // 준비 완료를 게시하지 않고 복원 실패 상태 유지
+            return;
+        }
+        // 새 출항은 작업 소비 직후 계약을 갱신하여 이전 수락 상태로 물품이 생성되는 상황 방지
+        if (PendingOperation == EMD_PendingGameDataOperation::NewGame
+            || PendingOperation == EMD_PendingGameDataOperation::ContinueGame
+            || PendingOperation == EMD_PendingGameDataOperation::NewContract)
+        {
+            // 목적지 맵의 일차를 새 계약에 적용할 서버 상태 조회
+            AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
+            // 게임 상태가 준비된 출항에서만 새 퀘스트 구성
+            if (IsValid(MDGameState) == true)
+            {
+                // 다음 틱의 스포너 평가보다 먼저 새 계약 확정
+                SyncMerchantToGameDay(MDGameState->GetCurrentDay(), true);
+            }
+        }
+
     }
+    GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
+}
+
+void AMD_GameModeBase::StartPlay()
+{
+    if (const auto* Registration = GetWorld()->GetSubsystem<UMD_MapRegistrationSubsystem>(); Registration && Registration->IsPending())
+    {
+        bStartPlayWaitingForMapRegistration = true;
+        return;
+    }
+    bStartPlayWaitingForMapRegistration = false;
+    auto WaitingPlayers = MoveTemp(PendingMapRegistrationPlayers);
+    PendingMapRegistrationPlayers.Reset();
+    for (const auto& Weak : WaitingPlayers)
+        if (AController* Player = Weak.Get(); Player && !Player->IsActorBeingDestroyed() && Player->GetWorld() == GetWorld()) RestartPlayer(Player);
+    // Restore players before actor BeginPlay, matching the normal seamless-travel order.
+    Super::StartPlay();
+}
+
+void AMD_GameModeBase::FinishMapRegistration()
+{
+    if (bStartPlayWaitingForMapRegistration) StartPlay();
 }
 
 void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
 {
+    if (!IsValid(NewPlayer) || NewPlayer->IsActorBeingDestroyed()) return;
+    if (const auto* Registration = GetWorld()->GetSubsystem<UMD_MapRegistrationSubsystem>(); Registration && Registration->IsPending())
+    {
+        PendingMapRegistrationPlayers.AddUnique(NewPlayer);
+        return;
+    }
     Super::RestartPlayer(NewPlayer);
 
     UGameInstance* GameInstance = GetGameInstance();
@@ -157,8 +302,40 @@ void AMD_GameModeBase::RestartPlayer(AController* NewPlayer)
     }
 }
 
+void AMD_GameModeBase::GetSeamlessTravelActorList(bool bToTransition, TArray<AActor*>& ActorList)
+{
+    Super::GetSeamlessTravelActorList(bToTransition, ActorList);
+
+    // 출발 맵에서만 수집하여 전환 맵의 임시 장비로 기존 기록을 덮어쓰는 상황 방지
+    if (bToTransition == false)
+    {
+        return;
+    }
+    // 기존 캐릭터가 제거되기 전에 개인 기록을 보관할 게임 인스턴스 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    // 맵 이동 중에도 유지되는 저장 관리자 조회
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    // 저장 관리자가 없는 이동의 개인 수집 생략
+    if (IsValid(SaveSlotManager) == false)
+    {
+        return;
+    }
+    // 현재 접속 플레이어 목록이 준비된 경우에만 장비 수집
+    if (IsValid(GameState) == false)
+    {
+        return;
+    }
+    // 호스트와 접속 클라이언트의 최신 장비를 각 개인 기록에 반영
+    for (APlayerState* PlayerState : GameState->PlayerArray)
+    {
+        // 파일 자동 저장 없이 메모리에 보관하여 목적지의 캐릭터 재생성에 대비
+        SaveSlotManager->ParseDataFromPlayer(PlayerState);
+    }
+}
+
 void AMD_GameModeBase::Logout(AController* Exiting)
 {
+    PendingMapRegistrationPlayers.Remove(Exiting);
     // PlayerState 제거 전에 퇴장 이름을 남은 플레이어에게 전달
     NotifyPlayerJoinAndExit(Exiting, false);
 
@@ -295,6 +472,13 @@ void AMD_GameModeBase::RequestEndDay(EMD_DayEndReason EndReason, FGameplayTag Re
 
 void AMD_GameModeBase::TravelToNextDay()
 {
+    const UMD_DayPersistenceSubsystem* Persistence = GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>();
+    if (!IsValid(Persistence) || !Persistence->HasSnapshot())
+    {
+        UE_LOG(LogTemp, Error, TEXT("Day snapshot is unavailable; next-day travel is stopped to preserve remaining trash."));
+        return;
+    }
+
     PreparePlayersForTravel(EMD_LoadingContext::NextShift);
 
     // 같은 레벨을 다시 로드 → BeginPlay에서 복원 경로 진입
@@ -510,6 +694,20 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReas
         DailyReport.Result = Result;
         // 콘솔 확인과 시간 종료를 구분할 서버 마감 원인 보존
         DailyReport.EndReason = EndReason;
+        // 점검 판정 점수와 별도로 경고 감점까지 반영한 누적 점수 기록
+        DailyReport.CumulativeScore = GS->GetScore();
+        // 계약 종료 시 다음 점검이 없는 상태 표시
+        DailyReport.NextThreshold = 0;
+        // 진행 중인 계약에만 다음 일자의 점검 목표 제공
+        if (Result != EMD_InspectionResult::ContractCleared && Result != EMD_InspectionResult::GameOver)
+        {
+            // 난이도와 인원 및 경고 배율을 반영한 다음 점검 기준 기록
+            DailyReport.NextThreshold = GS->GetInspectionThreshold(Day + 1);
+        }
+        // 이전 보고서의 보유 잔액 초기화
+        DailyReport.Credits = 0;
+        // 이전 현장 표시 초기화
+        DailyReport.SiteName = FText::GetEmpty();
         DailyReport.DailyScore = GS->GetScoreForDay(Day);
         // 일일 보고서가 서버 점수 Map을 그대로 전달받도록 구성
         DailyReport.DailyScoreTotals = GS->GetDailyScoreTotals();
@@ -517,6 +715,16 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReas
         if (IsValid(Merchant) == true)
         {
             DailyReport.DailyCreditTotals = Merchant->GetDailyCreditTotals();
+            // 최종 일일 정산과 같은 시점의 보유 크레딧 기록
+            DailyReport.Credits = Merchant->GetCredits();
+            // 현재 계약의 현장 데이터 조회
+            UMD_SiteDefinition* Site = Merchant->GetCurrentSite();
+            // 유효한 현장 이름만 확정 보고서에 전달
+            if (IsValid(Site) == true)
+            {
+                // 클라이언트 복제 순서와 무관한 현장 표시값 확정
+                DailyReport.SiteName = Site->SiteName;
+            }
         }
         GS->SetInspectionReport(DailyReport);
     }
@@ -531,7 +739,7 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReas
     if (ReportWidgetTag.IsValid() == false)
     {
         // UI Manager 설정에 등록된 보고서 조회 태그
-        ReportWidgetTag = FGameplayTag::RequestGameplayTag(TEXT("UI.Layer.GameMenu.Report"));
+        ReportWidgetTag = FGameplayTag::RequestGameplayTag(TEXT("UI.Layer.GameHUD.Report"));
     }
     // 클라이언트의 남은 시간 계산에 사용할 서버 종료 시각
     double EndServerTime = GetWorld()->GetTimeSeconds() + 5.0;
@@ -721,7 +929,8 @@ void AMD_GameModeBase::FinalizeDeliveredSamples()
     for (TActorIterator<AMD_SampleItem> It(GetWorld()); It; ++It)
     {
         AMD_SampleItem* Sample = *It;
-        if (IsValid(Sample) == false)
+        // 생성 위치가 복귀 구역과 겹치는 미운반 샘플의 자동 납품 방지
+        if (IsValid(Sample) == false || Sample->HasBeenCarried() == false)
         {
             continue;
         }
@@ -881,30 +1090,118 @@ void AMD_GameModeBase::CaptureDaySnapshot()
     if (UMD_DayPersistenceSubsystem* Persistence =
         GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
     {
+        Persistence->ClearSnapshot();
         Persistence->CaptureSnapshot(GetWorld());
     }
 }
 
+bool AMD_GameModeBase::IsAutoSaveAllowed()
+{
+    // 자동 저장 정책을 적용할 현재 서버 월드 조회
+    UWorld* World = GetWorld();
+    if (IsValid(World) == false)
+    {
+        // 실행 중인 맵이 없는 상태의 자동 저장 차단
+        return false;
+    }
+    // 에디터 실행 접두사를 제거한 맵 참조로 제외 목록 확인
+    return AutoSaveExcludedMaps.Contains(MakeWorldAssetReference(World)) == false;
+}
+
 void AMD_GameModeBase::InitializeExpeditionDay()
 {
-    RestoreDaySnapshot();
-
-    if (const AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
+    if (UMD_TrashSpawnManager* Trash = GetWorld()->GetSubsystem<UMD_TrashSpawnManager>())
     {
-        SyncMerchantToGameDay(GS->GetCurrentDay());
+        bool bTrashReady = false;
+        if (!Trash->PrepareGenerators(bTrashReady))
+        {
+            UE_LOG(LogTemp, Error, TEXT("Trash floors could not be prepared; day initialization and auto-save stopped."));
+            return;
+        }
+        if (!bTrashReady)
+        {
+            GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
+            return;
+        }
     }
+    // 구버전 퀘스트 물품을 새 빈 생존 목록으로 자동 저장하는 상황 방지
+    UMD_QuestSampleSpawnerManager* Spawners = GetWorld()->GetSubsystem<UMD_QuestSampleSpawnerManager>();
+    // 같은 프레임의 타이머 실행 순서와 무관하게 물품 복구 완료 대기
+    if (IsValid(Spawners) == true && Spawners->IsLegacyQuestRecoveryPending() == true)
+    {
+        // 구버전 복구 후 월드 완료와 자동 저장 재개
+        GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
+        // 불완전한 생존 목록의 저장 차단
+        return;
+    }
+    if (const auto* Shadows = GetWorld()->GetSubsystem<UMD_WallShadowBatchSubsystem>(); Shadows && Shadows->IsInitializationPending())
+    {
+        GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
+        return;
+    }
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_GameMode_InitializeExpeditionDay);
+    if (const auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); Initializer && Initializer->IsPending())
+    {
+        // Auto-save and contract setup must never capture a partially prepared world.
+        GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
+        return;
+    }
+    // 파일 복원은 이미 적용됐으므로 다음 일차 경계에서만 스냅샷을 복원한다.
+    if (bRestoredSavedWorld == false)
+    {
+        // 복원 실패 시 새 추첨과 자동 저장으로 기존 잔량을 덮지 않는다.
+        if (!RestoreDaySnapshot())
+        {
+            UE_LOG(LogTemp, Error, TEXT("Day snapshot could not be restored; trash initialization and auto-save are stopped."));
+            return;
+        }
+        // 새 일차의 계약 설정에 사용할 서버 진행 상태 조회
+        AMD_GameStateBase* RestoredGameState = GetGameState<AMD_GameStateBase>();
+        // 파일 복원이 아닌 새 출항 및 일차 전환의 계약 동기화
+        if (IsValid(RestoredGameState) == true)
+        {
+            // 실제 일차가 바뀐 경로의 착수금과 퀘스트 해금 처리
+            SyncMerchantToGameDay(RestoredGameState->GetCurrentDay());
+        }
+    }
+
+    // BeginPlay registers generators; file/day state is restored before fresh draws.
+    bool bTrashReady = true;
+    if (UMD_TrashSpawnManager* TrashManager = GetWorld()->GetSubsystem<UMD_TrashSpawnManager>())
+    {
+        bTrashReady = TrashManager->InitializeUnrestoredGenerators();
+        if (!bTrashReady)
+        {
+            UE_LOG(LogTemp, Error, TEXT("Procedural trash initialization failed; initial auto-save is skipped."));
+            return;
+        }
+    }
+
+    if (auto* GS = GetGameState<AMD_GameStateBase>()) GS->FinishWorldInitialization();
 
     // 월드 복원과 상인 퀘스트 일차 동기화가 끝난 경계 상태만 자동 저장하는 처리
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-    if (IsValid(SaveSlotManager) == true)
+    if (bTrashReady && IsValid(SaveSlotManager) == true)
     {
-        SaveSlotManager->SaveGameData(TEXT("Auto"), true);
+        // Collection/serialization stays at this boundary; immutable file writes run off-thread.
+        SaveSlotManager->AsyncSaveGameData(TEXT("Auto"), true, FOnSaveMDGameDataComplete());
     }
 }
 
 void AMD_GameModeBase::HandleGameDayChanged(int32 NewDay)
 {
+    // 저장 데이터 복원으로 발생한 일차 알림인지 확인할 게임 인스턴스 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    // 현재 데이터 이벤트 처리 상태를 제공하는 저장 관리자 조회
+    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+    // 복원 중인 상인 원장을 새로운 일차 시작으로 다시 초기화하는 상황 방지
+    if (IsValid(SaveSlotManager) == true && SaveSlotManager->IsGameDataOperationInProgress() == true)
+    {
+        // 각 구독자가 자신의 저장 필드를 복원하도록 일차 동기화 생략
+        return;
+    }
+    // 일반 게임 진행에서 발생한 일차 변경을 상인 상태에 반영
     SyncMerchantToGameDay(NewDay);
 }
 
@@ -955,7 +1252,7 @@ UMD_SiteDefinition* AMD_GameModeBase::ResolveExpeditionSite() const
     return OutSite;
 }
 
-void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
+void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day, bool bStartNewContract)
 {
     if (Day <= 0)
     {
@@ -983,10 +1280,12 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
         return;
     }
 
-    // 같은 현장의 Day 전환은 유지하고 다른 현장 진입만 새 계약으로 교체하기 위한 현재 데이터
+    // 같은 현장의 다음 일차는 유지하되 로비에서 새로 출항한 계약은 재구성
     UMD_SiteDefinition* CurrentSite = Merchant->GetCurrentSite();
-    if (CurrentSite != ResolvedSite || Merchant->GetMainQuests().IsEmpty() == true)
+    // 기존 현장과 일치하더라도 명시적인 새 출항에서는 퀘스트 재추첨
+    if (bStartNewContract == true || CurrentSite != ResolvedSite || Merchant->GetMainQuests().IsEmpty() == true)
     {
+        // 이전 수락 및 실패와 진행도를 새 현장의 초기 퀘스트 목록으로 교체
         Merchant->BeginContract(ResolvedSite);
     }
 
@@ -1014,13 +1313,26 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day)
     }
 }
 
-void AMD_GameModeBase::RestoreDaySnapshot()
+bool AMD_GameModeBase::RestoreDaySnapshot()
 {
-    if (UMD_DayPersistenceSubsystem* Persistence =
-        GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
+    // 로비 복귀와 현장 일차 전환을 구분할 현재 월드 조회
+    UWorld* World = GetWorld();
+    // PIE 접두사를 제거한 로비 맵에서 이전 현장 스냅샷 복원 생략
+    if (MakeWorldAssetReference(World).ToSoftObjectPath().GetLongPackageName() == TEXT("/Game/Maps/L_Lobby"))
     {
-        Persistence->RestoreSnapshot(GetWorld());
+        // 복원 대상이 없는 로비의 정상 초기화 진행
+        return true;
     }
+    // 현장 월드에서만 일차 기록을 복원할 인스턴스 서브시스템 조회
+    UMD_DayPersistenceSubsystem* Persistence = GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>();
+    // 복원할 기록이 없는 신규 현장 진입 확인
+    if (IsValid(Persistence) == false || Persistence->HasSnapshot() == false)
+    {
+        // 일차 기록 없이 진행하는 정상 초기화 허용
+        return true;
+    }
+    // 실제 현장 복원 결과를 초기화 단계에 전달
+    return Persistence->RestoreSnapshot(World);
 }
 
 void AMD_GameModeBase::MD_EndDay()
@@ -1085,4 +1397,204 @@ void AMD_GameModeBase::MD_SetTime(int32 Hour)
     UE_LOG(LogTemp, Display, TEXT("[Time] 현재 일자 시각 변경 %02d:00"), Hour);
     // 기존 알림 및 시간 종료 처리 경로로 진입
     CheckGameTimeEvents();
+}
+
+void AMD_GameModeBase::CollectGameData(FMD_GameData& GameData, bool& bWasSuccessful)
+{
+    // 현재 게임 모드가 소유한 서버 진행 상태 조회
+    AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
+    // 서버 진행 상태의 존재와 권한 확인
+    if (IsValid(MDGameState) == false || MDGameState->HasAuthority() == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_GameStateData::DataFieldKey.ToString());
+        // 진행 상태가 없는 수집 종료
+        return;
+    }
+    // 점수와 일차 정보를 현재 저장 필드에 기록
+    if (GameData.AddDataField(FMD_GameStateData::DataFieldKey, MDGameState->GetGameStateSaveData()) == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_GameStateData::DataFieldKey.ToString());
+        // 실패한 진행 상태 수집 종료
+        return;
+    }
+    // 로그아웃 기록을 유지하면서 현재 접속자의 장비 기록 갱신
+    for (APlayerState* PlayerState : MDGameState->PlayerArray)
+    {
+        // 아직 생성되지 않은 Pawn은 재접속 기록을 유지하여 이후 복원
+        if (IsValid(PlayerState) == true && IsValid(PlayerState->GetPawn()) == true && CollectPlayerGameData(PlayerState, GameData) == false)
+        {
+            // 실제 접속자의 장비 수집 실패를 전체 저장에 반영
+            bWasSuccessful = false;
+        }
+    }
+}
+
+void AMD_GameModeBase::OverwriteGameData(const FMD_GameData& GameData, bool& bWasSuccessful)
+{
+    // 저장된 점수와 일차를 적용할 현재 서버 진행 상태 조회
+    AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
+    // 전달된 데이터에서 조회할 게임 진행 필드
+    const FMD_GameStateData* GameStateData = GameData.FindDataField<FMD_GameStateData>(FMD_GameStateData::DataFieldKey);
+    // 게임 진행을 복원할 현재 상태 객체의 유효성 확인
+    if (IsValid(MDGameState) == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_GameStateData::DataFieldKey.ToString());
+        // 게임 진행 대상 부재 시 개인 장비 적용 종료
+        return;
+    }
+    // 전달된 데이터에서 게임 진행 태그의 필드 조회
+    if (GameStateData == nullptr)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_GameStateData::DataFieldKey.ToString());
+        // 게임 진행 필드 조회 실패 시 적용 종료
+        return;
+    }
+    // 조회를 마친 필드를 현재 게임 상태에 적용
+    if (MDGameState->ApplyGameStateSaveData(*GameStateData) == false)
+    {
+        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
+        bWasSuccessful = false;
+        // 실패한 기능의 필드 키 기록
+        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_GameStateData::DataFieldKey.ToString());
+        // 진행 상태를 복원하지 못한 경우 개인 장비 적용 종료
+        return;
+    }
+    // 같은 데이터 참조에서 현재 접속자의 개인 기록을 찾아 직접 적용
+    for (APlayerState* PlayerState : MDGameState->PlayerArray)
+    {
+        // 신규 접속자와 미생성 Pawn은 개인 기록을 적용할 다음 시점까지 대기
+        if (IsValid(PlayerState) == true && IsValid(PlayerState->GetPawn()) == true
+            && GameData.PlayerFields.Contains(BuildPlayerPersistenceKey(PlayerState)) == true
+            && OverwritePlayerGameData(PlayerState, GameData) == false)
+        {
+            // 존재하는 장비 기록을 복원하지 못한 결과 전파
+            bWasSuccessful = false;
+        }
+    }
+}
+
+FString AMD_GameModeBase::BuildPlayerPersistenceKey(const APlayerState* PlayerState)
+{
+    // 제거된 플레이어에 대한 저장 키 생성 차단
+    if (IsValid(PlayerState) == false)
+    {
+        // 유효하지 않은 개인 식별자 반환
+        return FString();
+    }
+    // 온라인 계정 식별자를 여러 번 참조하기 위한 조회 결과 보관
+    FUniqueNetIdRepl UniqueNetID = PlayerState->GetUniqueId();
+    // 온라인 식별자가 없는 환경의 이름 키 대체 준비
+    FString NetworkKey = UniqueNetID.IsValid() == true ? UniqueNetID.ToString() : FString();
+    // 기존 온라인 우선 및 오프라인 이름 정책에 따른 개인 식별자 반환
+    return NetworkKey.IsEmpty() == false ? NetworkKey : PlayerState->GetPlayerName();
+}
+
+bool AMD_GameModeBase::CollectPlayerGameData(const APlayerState* PlayerState, FMD_GameData& GameData)
+{
+    // 다른 월드의 플레이어와 클라이언트 개인 기록 수집 차단
+    if (IsValid(PlayerState) == false || PlayerState->HasAuthority() == false || PlayerState->GetWorld() != GetWorld())
+    {
+        // 현재 서버 소유가 아닌 플레이어의 수집 실패 반환
+        return false;
+    }
+    // 재접속 복원에 재사용할 온라인 또는 오프라인 개인 식별자 생성
+    FString PlayerKey = BuildPlayerPersistenceKey(PlayerState);
+    // 빈 키로 다른 플레이어의 기록을 덮어쓰는 상황 차단
+    if (PlayerKey.IsEmpty() == true)
+    {
+        // 개인 식별자 부재의 실패 반환
+        return false;
+    }
+    // 장비 데이터 소유자인 플레이어 캐릭터 조회
+    AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerState->GetPawn());
+    // 장비 저장 기능을 제공하는 핫바 컴포넌트 조회
+    UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
+    // Pawn 미생성 시 기존 개인 기록을 빈 데이터로 교체하는 상황 차단
+    if (IsValid(EquipmentComponent) == false)
+    {
+        // 준비되지 않은 개인 장비의 수집 실패 반환
+        return false;
+    }
+    // 읽기 전용 수집 대상의 개인 상점 이력 조회
+    const AMD_PlayerState* MDPlayerState = Cast<AMD_PlayerState>(PlayerState);
+    // 개인 이력 없이 장비만 저장되는 불완전한 수집 차단
+    if (IsValid(MDPlayerState) == false)
+    {
+        // 프로젝트 플레이어 상태가 없는 수집 실패 반환
+        return false;
+    }
+    // 이번 요청에서 갱신할 플레이어별 장비 필드 조회
+    FMD_PlayerData& PlayerData = GameData.PlayerFields.FindOrAdd(PlayerKey);
+    // 현재 장비의 수량과 충전 상태를 포함한 기존 저장 스냅샷 기록
+    PlayerData = EquipmentComponent->BuildEquipmentSaveData();
+    // 보유 도구와 동일한 시점의 구매 이력 및 선행 도구 구매 금지 기록
+    MDPlayerState->CollectShopPurchaseState(PlayerData);
+    // 불완전한 슬롯 상태가 파일에 기록되는 상황 차단
+    return PlayerData.IsStructurallyValid();
+}
+
+bool AMD_GameModeBase::OverwritePlayerGameData(const APlayerState* PlayerState, const FMD_GameData& GameData)
+{
+    // 다른 월드의 플레이어와 클라이언트 장비 변경 차단
+    if (IsValid(PlayerState) == false || PlayerState->HasAuthority() == false || PlayerState->GetWorld() != GetWorld())
+    {
+        // 현재 서버 소유가 아닌 플레이어의 적용 실패 반환
+        return false;
+    }
+    // 로그아웃 수집과 동일한 개인 식별자로 저장 기록 조회 준비
+    FString PlayerKey = BuildPlayerPersistenceKey(PlayerState);
+    // 식별자 없는 개인 기록의 잘못된 적용 차단
+    if (PlayerKey.IsEmpty() == true)
+    {
+        // 개인 식별자 부재의 적용 실패 반환
+        return false;
+    }
+    // 읽기 전용 저장 구조체에서 해당 플레이어의 기록 조회
+    const FMD_PlayerData* PlayerData = GameData.PlayerFields.Find(PlayerKey);
+    // 저장에 참여하지 않은 신규 플레이어의 기본 장비 유지
+    if (PlayerData == nullptr)
+    {
+        // 복원할 개인 기록 부재 반환
+        return false;
+    }
+    // 실제 장비 복원을 담당할 현재 플레이어 캐릭터 조회
+    AMD_Character* PlayerCharacter = Cast<AMD_Character>(PlayerState->GetPawn());
+    // 기존 장비 복원 API를 제공하는 핫바 컴포넌트 조회
+    UMD_EquipHotbarComponent* EquipmentComponent = IsValid(PlayerCharacter) == true ? PlayerCharacter->GetHotbarComponent() : nullptr;
+    // Pawn이 아직 준비되지 않은 플레이어의 적용 연기
+    if (IsValid(EquipmentComponent) == false)
+    {
+        // 장비 복원 대상 부재의 실패 반환
+        return false;
+    }
+    // 실제 장비 소유 Pawn에 연결된 변경 가능한 개인 이력 대상 조회
+    AMD_PlayerState* MDPlayerState = PlayerCharacter->GetPlayerState<AMD_PlayerState>();
+    // 다른 플레이어 이력의 적용과 연결 전 복원 차단
+    if (IsValid(MDPlayerState) == false || MDPlayerState != PlayerState)
+    {
+        // 장비와 개인 이력을 모두 유지한 실패 반환
+        return false;
+    }
+    // 장비 교체 전에 기존 파일의 업그레이드 이력까지 검증할 임시 기록
+    FMD_PlayerData RestoredPlayerData = *PlayerData;
+    // 개인 구매 이력과 선행 정의를 검증한 뒤 실제 장비 복원
+    if (RestoredPlayerData.MigrateShopPurchaseState() == false || EquipmentComponent->RestoreEquipmentSaveData(RestoredPlayerData) == false)
+    {
+        // 장비 복원이 실패한 요청의 구매 이력 변경 차단
+        return false;
+    }
+    // 장비 복원 완료 후 개인 이력 교체와 상점 화면 동기화
+    return MDPlayerState->RestoreShopPurchaseState(RestoredPlayerData);
 }

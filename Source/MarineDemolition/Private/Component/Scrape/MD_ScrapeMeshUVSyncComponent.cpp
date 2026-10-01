@@ -116,7 +116,7 @@ void UMD_ScrapeMeshUVSyncComponent::Pump()
         }
         return;
     }
-    if (Now - LastClientPoll >= 0.25)
+    if (Now - LastClientPoll >= 0.1)
     { LastClientPoll = Now; PollClientSurfaces(); }
 }
 
@@ -125,6 +125,7 @@ void UMD_ScrapeMeshUVSyncComponent::PollClientSurfaces()
     const double Now = GetWorld()->GetTimeSeconds();
     UMD_ScrapeSurfaceComponent* Candidate = nullptr;
     double OldestCheck = Now;
+    int32 BestPriority = MAX_int32;
     for (TObjectIterator<UMD_ScrapeSurfaceComponent> It; It; ++It)
     {
         UMD_ScrapeSurfaceComponent* Surface = *It;
@@ -134,8 +135,11 @@ void UMD_ScrapeMeshUVSyncComponent::PollClientSurfaces()
             || Checkpoint.VisualRevision != Surface->ReplicatedContaminationVisualRevision;
         // Periodic probes also detect resets that retain the same visual revision.
         if (Now - Checkpoint.LastChecked < (bChanged ? 0.5 : 5.0)) { continue; }
-        if (Checkpoint.LastChecked < OldestCheck)
-        { Candidate = Surface; OldestCheck = Checkpoint.LastChecked; }
+        // Unreceived state must not wait behind hundreds of unchanged periodic probes.
+        const bool bUnreceived = !Checkpoint.Epoch.IsValid() || Checkpoint.LayoutId != Surface->GetContaminationLayoutId();
+        const int32 Priority = bUnreceived ? 0 : (bChanged ? 1 : 2);
+        if (Priority < BestPriority || (Priority == BestPriority && Checkpoint.LastChecked < OldestCheck))
+        { Candidate = Surface; OldestCheck = Checkpoint.LastChecked; BestPriority = Priority; }
     }
     for (auto It = ClientCheckpoints.CreateIterator(); It; ++It)
     { if (!It.Key().IsValid()) { It.RemoveCurrent(); } }
@@ -160,11 +164,13 @@ void UMD_ScrapeMeshUVSyncComponent::ServerRequestSurface_Implementation(
     const double RequestStartedSeconds = FPlatformTime::Seconds();
     const double Now = GetWorld()->GetTimeSeconds();
     // Client parameters select read-only state; no authoritative gameplay mutation is accepted.
-    if (ServerDescriptor.TransferId != 0 || Now - LastServerRequest < 0.2) { return; }
+    if (ServerDescriptor.TransferId != 0 || Now - LastServerRequest < 0.1) { ClientAbortTransfer(Surface, 0); return; }
     LastServerRequest = Now;
-    if (Now - LastFullSnapshotCapture < 1.0) { ClientAbortTransfer(Surface, 0); return; }
-    if (!IsSurfaceAllowed(Surface) || LayoutId != Surface->GetContaminationLayoutId()
-        || Grid != Surface->GetContaminationGridDimensions()
+    if (Now - LastFullSnapshotCapture < 0.1) { ClientAbortTransfer(Surface, 0); return; }
+    if (!IsSurfaceAllowed(Surface)) { ClientAbortTransfer(Surface, 0); return; }
+    if (LayoutId != Surface->GetContaminationLayoutId())
+    { ClientSelectSurfaceLayout(Surface, Surface->GetContaminationLayoutId()); return; }
+    if (Grid != Surface->GetContaminationGridDimensions()
         || !FMD_ScrapeSurfaceLayout::AreCarrierScalesCompatible(CarrierScale, Surface->GetContaminationCarrierWeightScale()))
     { ClientAbortTransfer(Surface, 0); return; }
     UMD_ScrapeMeshUVSyncSubsystem* Subsystem = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>();
@@ -178,7 +184,11 @@ void UMD_ScrapeMeshUVSyncComponent::ServerRequestSurface_Implementation(
     TArray<FMD_ReplicatedScrapeCellState> States;
     if (!Subsystem->CaptureSnapshot(*Surface, KnownEpoch, KnownSerial, ServerDescriptor, States))
     { ClearServerTransfer(); ClientAbortTransfer(Surface, 0); return; }
-    if (ServerDescriptor.bFullSnapshot) { LastFullSnapshotCapture = Now; }
+    if (ServerDescriptor.bFullSnapshot)
+    {
+        LastFullSnapshotCapture = Now;
+        if (!Checkpoint || Checkpoint->bUseGeneratedSnapshotBase) Subsystem->CompactGeneratedSnapshot(*Surface, ServerDescriptor, States);
+    }
     ++NextTransferId;
     if (NextTransferId == 0) { ++NextTransferId; }
     ServerDescriptor.TransferId = NextTransferId;
@@ -201,6 +211,17 @@ void UMD_ScrapeMeshUVSyncComponent::ServerRequestSurface_Implementation(
         ServerDescriptor.bCompressed, FMD_ScrapeMeshUVSyncProtocol::MaximumPagesInFlight, MaximumPagesPerPump,
         FPlatformTime::Seconds() - RequestStartedSeconds);
     SendPages();
+}
+
+void UMD_ScrapeMeshUVSyncComponent::ClientSelectSurfaceLayout_Implementation(
+    UMD_ScrapeSurfaceComponent* Surface, const FGuid LayoutId)
+{
+    if (ClientSurface.Get() != Surface || !IsSurfaceAllowed(Surface)) return;
+    ClearClientTransfer();
+    ClientCheckpoints.Remove(Surface);
+    // The server supplies only a GUID. Resolution accepts this asset's registered predecessor.
+    if (!Surface->SelectCompatibleContaminationLayout(LayoutId))
+        ClientCheckpoints.FindOrAdd(Surface).LastChecked = GetWorld()->GetTimeSeconds();
 }
 
 void UMD_ScrapeMeshUVSyncComponent::SendPages()
@@ -260,14 +281,23 @@ void UMD_ScrapeMeshUVSyncComponent::ClientReceivePage_Implementation(
     {
         TArray<FMD_ReplicatedScrapeCellState> States;
         TArray<uint8> Boundary;
-        bool bComplete = ClientAssembler.Finish(States,&Boundary)
+        UMD_ScrapeMeshUVSyncSubsystem* SnapshotSubsystem = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>();
+        const bool bDecoded = ClientAssembler.Finish(States,&Boundary);
+        const bool bExpanded = bDecoded && SnapshotSubsystem
+            && SnapshotSubsystem->ExpandGeneratedSnapshot(*Surface, Descriptor, States);
+        const bool bRejectGeneratedBase = bDecoded && SnapshotSubsystem
+            && Descriptor.bGeneratedBase && !bExpanded;
+        bool bComplete = bExpanded
             && (!Descriptor.bFullSnapshot || States.Num() == Surface->GetContaminationActiveCellCount());
         for (const FMD_ReplicatedScrapeCellState& State : States)
         { if (!Surface->IsContaminationCellActive(State.GetCellIndex())) { bComplete = false; break; } }
         if (bComplete && Descriptor.BoundaryVersion==1)
             bComplete=Surface->ValidateContaminationBoundary(Boundary);
         if (!bComplete)
-        { ServerAcknowledgePage(Descriptor.TransferId, PageIndex, false); ClearClientTransfer(); return; }
+        {
+            ServerAcknowledgePage(Descriptor.TransferId, PageIndex, false, bRejectGeneratedBase);
+            ClearClientTransfer(); return;
+        }
         if (UMD_ScrapeMeshUVSyncSubsystem* Subsystem = GetWorld()->GetSubsystem<UMD_ScrapeMeshUVSyncSubsystem>())
         {
             bComplete = Subsystem->MergeClientVisualStates(*Surface, Descriptor.VisualRevision, States, this);
@@ -302,10 +332,23 @@ void UMD_ScrapeMeshUVSyncComponent::ClientReceivePage_Implementation(
 }
 
 void UMD_ScrapeMeshUVSyncComponent::ServerAcknowledgePage_Implementation(
-    const uint32 TransferId, const int32 PageIndex, const bool bAccepted)
+    const uint32 TransferId, const int32 PageIndex, const bool bAccepted, const bool bRejectGeneratedBase)
 {
     if (TransferId != ServerDescriptor.TransferId || !ServerWindow.Acknowledge(PageIndex)) { return; }
-    if (!bAccepted) { ClearServerTransfer(); return; }
+    if (!bAccepted)
+    {
+        // Eligibility/cancellation is transient. Only a verified payload whose
+        // generated baseline cannot be reconstructed needs the dense fallback.
+        // Compatibility of one surface must not penalize the entire connection.
+        if (bRejectGeneratedBase && ServerDescriptor.bGeneratedBase && ServerSurface.IsValid())
+        {
+            ServerCheckpoints.FindOrAdd(ServerSurface).bUseGeneratedSnapshotBase = false;
+            UE_LOG(LogMDScrapeMeshUVSync, Display,
+                TEXT("Generated baseline rejected; dense snapshot for owner=%s surface_owner=%s"),
+                *GetNameSafe(GetOwner()), *GetNameSafe(ServerSurface->GetOwner()));
+        }
+        ClearServerTransfer(); return;
+    }
     LastServerActivity = GetWorld()->GetTimeSeconds();
     if (ServerWindow.IsComplete(FMD_ScrapeMeshUVSyncProtocol::GetPageCount(ServerDescriptor)))
     {

@@ -4,6 +4,7 @@
 #include "Ability/Wall/MD_GA_WallCut.h"
 
 #include "World/Wall/MD_CuttableWall.h"
+#include "World/Sample/MD_QuestRackSpawner.h"
 
 #include "Engine/HitResult.h"
 #include "Engine/World.h"
@@ -142,6 +143,11 @@ bool UMD_GA_WallCut::CanActivateAbility(const FGameplayAbilitySpecHandle Handle,
 		return false;
 	}
 
+	if (const AMD_QuestRackSpawner* Rack = Cast<AMD_QuestRackSpawner>(Target))
+	{
+		return Rack->CanCutPadlockFromHit(Hit);
+	}
+
 	// 이미 잘린 격벽에는 다시 발동하지 않는다.
 	// 격벽이 아닌 대상(퀘스트 오브젝트)은 이 검사를 건너뛴다
 	if (const AMD_CuttableWall* Wall = Cast<AMD_CuttableWall>(Target))
@@ -159,6 +165,13 @@ void UMD_GA_WallCut::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 	AActor* Target = nullptr;
 	FHitResult TargetHit;
 	if (!TryGetAimedTargetHit(ActorInfo, Target, TargetHit))
+	{
+		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+		return;
+	}
+
+	ActiveRackTarget = Cast<AMD_QuestRackSpawner>(Target);
+	if (ActiveRackTarget.IsValid() && !ActiveRackTarget->CanCutPadlockFromHit(TargetHit))
 	{
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 		return;
@@ -200,6 +213,7 @@ void UMD_GA_WallCut::EndAbility(const FGameplayAbilitySpecHandle Handle, const F
 	}
 
 	StopCutAudio();
+	ActiveRackTarget.Reset();
 
 	OnCutStopped();
 
@@ -216,12 +230,27 @@ void UMD_GA_WallCut::TickCutProgress()
 		return;
 	}
 
-	AMD_CuttableWall* Wall = nullptr;
+	// The lock becomes hidden on completion; finish even when the next trace misses it.
+	if (ActiveRackTarget.IsValid() && ActiveRackTarget->IsPadlockCut())
+	{
+		EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+		return;
+	}
+	AActor* Target = nullptr;
 	FHitResult WallHit;
-	const bool bHasAimedWallHit = TryGetAimedWallHit(
-		ActorInfo,
-		Wall,
-		WallHit);
+	const bool bHasAimedWallHit = TryGetAimedTargetHit(ActorInfo, Target, WallHit);
+	if (AMD_QuestRackSpawner* Rack = Cast<AMD_QuestRackSpawner>(Target))
+	{
+		ActiveRackTarget = Rack;
+		if (Rack->CanCutPadlockFromHit(WallHit))
+		{
+			Rack->AddPadlockCutProgress(ProgressInterval * GetCutSpeedMultiplier(), ActorInfo->AvatarActor.Get(), WallHit);
+			if (Rack->IsPadlockCut())
+				EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, false);
+		}
+		return;
+	}
+	AMD_CuttableWall* Wall = Cast<AMD_CuttableWall>(Target);
 
 	// 조준이 벗어나면 진행만 멈추고 어빌리티는 유지한다.
 	// 전선·수도관을 확인하려고 잠깐 시선을 돌리는 정석 플레이를 처벌하지 않기 위해서다 (기획 §1)

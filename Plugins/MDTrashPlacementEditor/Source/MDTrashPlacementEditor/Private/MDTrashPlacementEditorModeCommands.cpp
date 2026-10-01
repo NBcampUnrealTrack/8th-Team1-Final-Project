@@ -25,6 +25,8 @@ void FMDTrashPlacementEditorModeCommands::RegisterCommands()
 		FInputChord());
 
 	ToolCommands.Add(PlacementTool);
+	UI_COMMAND(PropPlacementTool, "Prop Placement", "메시나 액터 블루프린트를 선택해 표면에 배치합니다.", EUserInterfaceActionType::ToggleButton, FInputChord());
+	ToolCommands.Add(PropPlacementTool);
 	UI_COMMAND(StainPlacementTool, "Stain Placement", "Place purple surface stickers with size-based cleaning.", EUserInterfaceActionType::ToggleButton, FInputChord());
 	ToolCommands.Add(StainPlacementTool);
 }

@@ -20,6 +20,8 @@
 #include "Math/RotationMatrix.h"
 #include "RHITypes.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "Async/ParallelFor.h"
+#include "HAL/IConsoleManager.h"
 
 // 파일 분할 기준은 MD_ScrapeSurfaceComponentInternal.h 표 참고.
 // 책임: G8 마스크 · 앞뒤 데칼 · 셀 오버레이
@@ -28,6 +30,9 @@ using namespace MD_ScrapeSurfaceComponentInternal;
 
 namespace
 {
+    TAutoConsoleVariable<int32> ParallelInitialMaskRecipe(TEXT("MD.Scrape.ParallelInitialMaskRecipe"), 1,
+        TEXT("Partition independent initial seam pixels; preserve each pixel's ordered reduction."));
+
 	uint32 MixTransferredPaintHash(uint32 Value)
 	{
 		Value ^= Value >> 16;
@@ -198,12 +203,35 @@ bool UMD_ScrapeSurfaceComponent::TryBuildContaminationMaskPixels(
 	return true;
 }
 
+bool UMD_ScrapeSurfaceComponent::GetDeferredInitialMaskInputs(
+    TSharedPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe>& OutLayout, float& OutFullSignal) const
+{
+    if (!FMDScrapeInitialMaskRenderer::IsSupported() || !ContaminationMeshUVData
+        || (GetWorld() && GetWorld()->GetNetMode() == NM_DedicatedServer)) return false;
+    FMD_ScrapeSurfaceCell Full;
+    Full.InitialContamination = Full.RemainingContamination = 1.f;
+    OutFullSignal = CalculateContaminationVisualSignal(Full);
+    uint8 FullByte = 0;
+    if (!FMD_ScrapeMaskAtlas::TryQuantizeRemainingContamination(OutFullSignal, 1.f, FullByte) || FullByte != 255)
+        return false;
+    OutLayout = ContaminationMeshUVData->GetSharedInitialMaskLayout();
+    return OutLayout.IsValid();
+}
+
 bool UMD_ScrapeSurfaceComponent::TryBuildInitialContaminationMaskRecipe()
 {
     if (!UsesMeshUVSurface() || !ContaminationMeshUVData || !ContaminationCellLayout
         || ContaminationGeneration.Version < 2 || !ContaminationGeneration.bProcedural
         || !ContaminationPagedCells.IsPristineCanonicalInitial()
         || HasLocalPredictedContaminationState() || !FMDScrapeInitialMaskRenderer::IsSupported()) return false;
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_BuildInitialMaskRecipe);
+    if (PreparedInitialState.IsSet() && PreparedInitialState->bMaskRecipeComplete && PreparedInitialState->MaskLayout)
+    {
+        ContaminationMaskAtlasPixels.InitializeBinary(MoveTemp(PreparedInitialState->MaskLayout),
+            MoveTemp(PreparedInitialState->MaskBits), MoveTemp(PreparedInitialState->MaskSeams));
+        ContaminationMaskAtlasDimensions = ContaminationGridDimensions;
+        return true;
+    }
     FMD_ScrapeSurfaceCell Full;
     Full.InitialContamination = Full.RemainingContamination = 1.f;
     // The pristine progress alphabet must be exact 0/1 before the seam sum.
@@ -216,42 +244,9 @@ bool UMD_ScrapeSurfaceComponent::TryBuildInitialContaminationMaskRecipe()
     if (Data->Cells.Num() != ContaminationGridDimensions.X * ContaminationGridDimensions.Y
         || CellLayout->AtlasToActive.Num() != Data->Cells.Num()
         || ContaminationPagedCells.Num() != CellLayout->ActiveToAtlas.Num()) return false;
-    struct FLayoutEntry
-    {
-        TWeakObjectPtr<const UMD_ScrapeMeshUVData> Data;
-        uint64 Revision;
-        FGuid Id;
-        TWeakPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe> Layout;
-    };
-    static TArray<FLayoutEntry> Cache;
-    Cache.RemoveAllSwap([](const auto& Entry) { return !Entry.Data.IsValid() || !Entry.Layout.IsValid(); }, EAllowShrinking::No);
-    TSharedPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe> Layout;
-    for (const auto& Entry : Cache)
-        if (Entry.Data == Data && Entry.Revision == Data->GetRuntimeCacheRevision() && Entry.Id == Data->LayoutId)
-        { Layout = Entry.Layout.Pin(); break; }
+    auto Layout = Data->GetSharedInitialMaskLayout();
     const auto SeamView = Data->GetVisualSeamView();
-    if (!Layout)
-    {
-        TArray<uint32> Sources;
-        TArray<int32> SeamPixels;
-        Sources.SetNumUninitialized(Data->Cells.Num());
-        for (int32 Pixel = 0; Pixel < Sources.Num(); ++Pixel)
-        {
-            if (!SeamView.GetSamples(Pixel).IsEmpty())
-            {
-                Sources[Pixel] = 0x80000000u | uint32(SeamPixels.Num());
-                SeamPixels.Add(Pixel);
-            }
-            else
-            {
-                const int32 Source = Data->Cells[Pixel].VisualSourceCellIndex;
-                const int32 Active = CellLayout->AtlasToActive.IsValidIndex(Source) ? CellLayout->AtlasToActive[Source] : INDEX_NONE;
-                Sources[Pixel] = Active == INDEX_NONE ? MAX_uint32 : uint32(Active);
-            }
-        }
-        Layout = MakeShared<FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe>(MoveTemp(Sources), MoveTemp(SeamPixels));
-        Cache.Add({Data, Data->GetRuntimeCacheRevision(), Data->LayoutId, Layout});
-    }
+    if (!Layout) return false;
     TArray<uint32> Bits;
     Bits.SetNumZeroed(FMath::DivideAndRoundUp(ContaminationPagedCells.Num(), 32));
     for (int32 Active = 0; Active < ContaminationPagedCells.Num(); ++Active)
@@ -262,21 +257,36 @@ bool UMD_ScrapeSurfaceComponent::TryBuildInitialContaminationMaskRecipe()
     }
     TArray<uint8> SeamBytes;
     SeamBytes.SetNumUninitialized(Layout->SeamPixels.Num());
-    for (int32 Seam = 0; Seam < SeamBytes.Num(); ++Seam)
+    constexpr int32 SeamsPerBatch = 2048;
+    const int32 BatchCount = FMath::DivideAndRoundUp(SeamBytes.Num(), SeamsPerBatch);
+    const bool bParallel = BatchCount > 1 && ParallelInitialMaskRecipe.GetValueOnGameThread() != 0;
+    TAtomic<bool> bValid(true);
+    // Join before returning: borrowed cache views never survive this game-thread call.
+    ParallelFor(BatchCount, [&](int32 Batch)
     {
-        // Preserve float products, double summation, sample order and G8 rounding.
-        // Only seam pixels need this reduction; full atlas expansion runs on GPU.
-        double Sum = 0.0;
-        for (const auto& Sample : SeamView.GetSamples(Layout->SeamPixels[Seam]))
+        TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_InitialSeamRecipeBatch);
+        const int32 End = FMath::Min((Batch + 1) * SeamsPerBatch, SeamBytes.Num());
+        for (int32 Seam = Batch * SeamsPerBatch; Seam < End; ++Seam)
         {
-            if (!CellLayout->AtlasToActive.IsValidIndex(Sample.CellIndex)) continue;
-            const int32 Active = CellLayout->AtlasToActive[Sample.CellIndex];
-            const float Signal = Active != INDEX_NONE && ((Bits[Active >> 5] >> (Active & 31)) & 1u) ? FullSignal : 0.f;
-            Sum += Sample.Weight * Signal;
+            // Preserve float products, double summation, sample order and G8 rounding.
+            // Pixels are independent; the full atlas expansion still runs on GPU.
+            double Sum = 0.0;
+            for (const auto& Sample : SeamView.GetSamples(Layout->SeamPixels[Seam]))
+            {
+                if (!CellLayout->AtlasToActive.IsValidIndex(Sample.CellIndex)) continue;
+                const int32 Active = CellLayout->AtlasToActive[Sample.CellIndex];
+                const float Signal = Active != INDEX_NONE && ((Bits[Active >> 5] >> (Active & 31)) & 1u) ? FullSignal : 0.f;
+                Sum += Sample.Weight * Signal;
+            }
+            const float Signal = static_cast<float>(FMath::Clamp(Sum, 0.0, 1.0));
+            if (!FMD_ScrapeMaskAtlas::TryQuantizeRemainingContamination(Signal, 1.f, SeamBytes[Seam]))
+            {
+                bValid.Store(false);
+                return;
+            }
         }
-        const float Signal = static_cast<float>(FMath::Clamp(Sum, 0.0, 1.0));
-        if (!FMD_ScrapeMaskAtlas::TryQuantizeRemainingContamination(Signal, 1.f, SeamBytes[Seam])) return false;
-    }
+    }, bParallel ? EParallelForFlags::None : EParallelForFlags::ForceSingleThread);
+    if (!bValid.Load()) return false;
     ContaminationMaskAtlasPixels.InitializeBinary(MoveTemp(Layout), MoveTemp(Bits), MoveTemp(SeamBytes));
     ContaminationMaskAtlasDimensions = ContaminationGridDimensions;
     return true;

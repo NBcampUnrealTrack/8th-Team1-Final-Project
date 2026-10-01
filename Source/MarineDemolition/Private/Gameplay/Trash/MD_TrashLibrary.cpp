@@ -3,6 +3,8 @@
 #include "Gameplay/Trash/MD_TrashLibrary.h"
 
 #include "Engine/DataTable.h"
+#include "Engine/StaticMesh.h"
+#include "Math/RandomStream.h"
 #include "Gameplay/Trash/MD_TrashSettings.h"
 #include "Gameplay/Trash/MD_TrashSortable.h"
 #include "GameplayTags/MD_GameplayTags.h"
@@ -210,6 +212,38 @@ bool UMD_TrashLibrary::FindTrashKindRow(const FName TrashKindId, FMD_TrashKindRo
 
 	OutRow = FMD_TrashKindRow();
 	return false;
+}
+
+TArray<FName> UMD_TrashLibrary::GetTrashVariantIds(const FName TrashKindId)
+{
+	const FMD_TrashKindRow* Row = FindTrashKindRowInternal(TrashKindId);
+	return Row ? Row->GetVariantIds() : TArray<FName>();
+}
+
+FName UMD_TrashLibrary::GetDefaultTrashVariantId(const FName TrashKindId)
+{
+	const FMD_TrashKindRow* Row = FindTrashKindRowInternal(TrashKindId);
+	return Row ? Row->GetDefaultVariantId() : NAME_None;
+}
+
+bool UMD_TrashLibrary::ResolveTrashKindMesh(
+	const FName TrashKindId, const FName VariantId, TSoftObjectPtr<UStaticMesh>& OutMesh)
+{
+	OutMesh.Reset();
+	const FMD_TrashKindRow* Row = FindTrashKindRowInternal(TrashKindId);
+	return Row && Row->ResolveMesh(VariantId, OutMesh);
+}
+
+bool UMD_TrashLibrary::SelectRandomTrashVariant(const FName TrashKindId, const int32 Seed, FName& OutVariantId)
+{
+	OutVariantId = NAME_None;
+	const FMD_TrashKindRow* Row = FindTrashKindRowInternal(TrashKindId);
+	if (!Row) return false;
+	const TArray<FName> Ids = Row->GetVariantIds();
+	if (Ids.IsEmpty()) return false;
+	FRandomStream RandomStream(Seed);
+	OutVariantId = Ids[RandomStream.RandRange(0, Ids.Num() - 1)];
+	return true;
 }
 
 FGameplayTag UMD_TrashLibrary::GetTrashKindCategory(const FName TrashKindId)

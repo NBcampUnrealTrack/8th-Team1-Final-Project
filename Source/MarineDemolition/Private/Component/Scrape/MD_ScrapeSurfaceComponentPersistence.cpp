@@ -1,5 +1,6 @@
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
+﻿#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "Gameplay/Scrape/MD_ScrapeSurfaceGeometry.h"
@@ -263,18 +264,19 @@ void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
 	OutRemainingAmounts.Reset();
 	OutTransferredAmounts.Reset();
 	OutTransferredPatternDensities.Reset();
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_ExportSaveDeltas);
 	OutCoveredFractions.Reset();
-	if (!bContaminationEnabled)
+	// The immutable paged template is also GetGeneratedInitialContamination().
+	// Canonical pristine state has no scrape, added mass, paint or coverage to save.
+	// Boundary footprints are exported independently by the caller.
+	if (!bContaminationEnabled || ContaminationPagedCells.IsPristineCanonicalInitial())
 	{
 		return;
 	}
 
-	for (int32 Index = 0; Index < GetContaminationAtlasCellCount(); ++Index)
-	{
-		if (!IsContaminationCellActive(Index))
-		{
-			continue;
-		}
+    const auto AppendCandidate = [&](int32 Index)
+    {
+        if (!IsContaminationCellActive(Index)) return;
 		const int32 StorageIndex = GetContaminationStorageIndex(Index);
 		const FMD_ScrapeSurfaceCell Cell = ReadContaminationStorageCell(StorageIndex);
 		const bool bScraped = Cell.RemainingContamination != Cell.InitialContamination;
@@ -299,38 +301,12 @@ void UMD_ScrapeSurfaceComponent::ExportContaminationDeltas(
 				Cell.TransferredPaintPatternDensity);
 			OutCoveredFractions.Add(Cell.CoveredFraction);
 		}
-	}
-}
-
-
-void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
-	const TArray<int32>& CellIndices,
-	const TArray<float>& InitialAmounts,
-	const TArray<float>& RemainingAmounts)
-{
-	RestoreContaminationCells(
-		CellIndices,
-		InitialAmounts,
-		RemainingAmounts,
-		TArray<float>(),
-		TArray<float>());
-}
-
-
-void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
-	const TArray<int32>& CellIndices,
-	const TArray<float>& InitialAmounts,
-	const TArray<float>& RemainingAmounts,
-	const TArray<float>& TransferredAmounts,
-	const TArray<float>& TransferredPatternDensities)
-{
-	RestoreContaminationCells(
-		CellIndices,
-		InitialAmounts,
-		RemainingAmounts,
-		TransferredAmounts,
-		TransferredPatternDensities,
-		TArray<float>());
+    };
+    if (ContaminationCellLayout && !ContaminationPagedCells.IsEmpty())
+        ContaminationPagedCells.ForEachSaveCandidate([&](int32 Storage)
+        { AppendCandidate(ContaminationCellLayout->ActiveToAtlas[Storage]); });
+    else
+        for (int32 Index = 0; Index < GetContaminationAtlasCellCount(); ++Index) AppendCandidate(Index);
 }
 
 
@@ -342,24 +318,15 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 	const TArray<float>& TransferredPatternDensities,
 	const TArray<float>& CoveredFractions)
 {
-	const bool bHasInitialAmounts = !InitialAmounts.IsEmpty();
-	const bool bHasTransferredAmounts = !TransferredAmounts.IsEmpty();
-	const bool bHasTransferredPatternDensities =
-		!TransferredPatternDensities.IsEmpty();
-	const bool bHasCoveredFractions = !CoveredFractions.IsEmpty();
-	if (!bContaminationEnabled
-		|| !HasAuthority()
-		|| CellIndices.Num() != RemainingAmounts.Num()
-		|| (bHasInitialAmounts && CellIndices.Num() != InitialAmounts.Num())
-		|| (bHasTransferredAmounts
-			&& CellIndices.Num() != TransferredAmounts.Num())
-		|| (bHasTransferredPatternDensities
-			&& CellIndices.Num() != TransferredPatternDensities.Num())
-		|| (bHasCoveredFractions
-			&& CellIndices.Num() != CoveredFractions.Num()))
-	{
-		return;
-	}
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Scrape_RestoreSavedCells);
+    // 현재 저장 형식의 모든 셀 열이 동일한 길이인 경우에만 복원 허용
+    if (bContaminationEnabled == false || HasAuthority() == false || CellIndices.Num() != RemainingAmounts.Num()
+        || CellIndices.Num() != InitialAmounts.Num() || CellIndices.Num() != TransferredAmounts.Num()
+        || CellIndices.Num() != TransferredPatternDensities.Num() || CellIndices.Num() != CoveredFractions.Num())
+    {
+        // 구형 누락 열을 대체하지 않고 복원 중단
+        return;
+    }
 
 	if (!bContaminationSurfaceInitialized)
 	{
@@ -384,6 +351,10 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 		}
 		UniqueCellIndices.Add(Index);
 	}
+    const bool bIncrementProgress = UsesMeshUVSurface() && CachedMeshUVProgress.bIsValid
+        && CachedMeshUVProgress.CleanTolerance == ScrapeSettings.CleanTolerance;
+    TArray<FMD_ScrapeTouchedCell> Touched;
+    if (bIncrementProgress) Touched.Reserve(CellIndices.Num());
 	TArray<FMD_ScrapeCellChange> Changes;
 	TSet<int32> RestoredPages;
 	for (int32 i = 0; i < CellIndices.Num(); ++i)
@@ -391,8 +362,10 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 		const int32 Index = CellIndices[i];
 		const int32 StorageIndex = GetContaminationStorageIndex(Index);
 		FMD_ScrapeSurfaceCell Cell = ReadContaminationStorageCell(StorageIndex);
+        if (bIncrementProgress) { auto& Before = Touched.AddDefaulted_GetRef();Before.CellIndex=Index;Before.Before=Cell; }
 
-		if (bHasInitialAmounts && FMath::IsFinite(InitialAmounts[i]))
+		// 저장된 초기 오염량의 유효한 숫자만 적용
+		if (FMath::IsFinite(InitialAmounts[i]) == true)
 		{
 			Cell.InitialContamination = FMath::Clamp(
 				InitialAmounts[i], 0.0f, 1.0f);
@@ -405,7 +378,8 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 				Cell.InitialContamination)
 			: 0.0f;
 		Cell.TransferredContamination =
-			bHasTransferredAmounts && FMath::IsFinite(TransferredAmounts[i])
+			// 현재 열에 기록된 전이 오염량의 유효성 확인
+			FMath::IsFinite(TransferredAmounts[i]) == true
 			? FMath::Clamp(
 				TransferredAmounts[i],
 				0.0f,
@@ -414,27 +388,15 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 		Cell.TransferredPaintPatternDensity =
 			Cell.TransferredContamination <= ScrapeSettings.CleanTolerance
 			? 0.0f
-			: (bHasTransferredPatternDensities
-				&& FMath::IsFinite(TransferredPatternDensities[i])
+			// 현재 열에 기록된 패턴 밀도의 유효성 확인
+			: (FMath::IsFinite(TransferredPatternDensities[i]) == true
 				? FMath::Clamp(
 					TransferredPatternDensities[i],
 					0.0f,
 					1.0f)
 				: 1.0f);
-		// 구버전 스냅샷에는 피복률이 없다. 잔여량에서 역산하면 얇은 막과 부분
-		// 피복이 다시 한 값으로 뭉개져 이 변경 전의 겉모습이 되는데, 어제 저장한
-		// 상태를 그때 보였던 모습대로 되살리는 것이므로 이 쪽이 맞다.
-		Cell.CoveredFraction =
-			bHasCoveredFractions && FMath::IsFinite(CoveredFractions[i])
-			? FMath::Clamp(CoveredFractions[i], 0.0f, 1.0f)
-			: (Cell.InitialContamination > UE_SMALL_NUMBER
-				? FMath::Clamp(
-					1.0f
-						- Cell.RemainingContamination
-							/ Cell.InitialContamination,
-					0.0f,
-					1.0f)
-				: 0.0f);
+        // 잔여량에서 역산하지 않고 저장된 피복률 직접 적용
+        Cell.CoveredFraction = FMath::IsFinite(CoveredFractions[i]) == true ? FMath::Clamp(CoveredFractions[i], 0.0f, 1.0f) : 0.0f;
 		Cell.Normalize();
 		SetContaminationStorageCell(StorageIndex, Cell);
 		if (!ContaminationPagedCells.IsEmpty())
@@ -458,9 +420,25 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 		return;
 	}
 
-	// MASS-014 형식 전의 save에는 이미 회수된 canonical unit 이력이 없다.
-	// 남은 셀을 다시 canonical로 만들면 저장/로드만으로 보상을 재발행하므로,
-	// legacy restore가 만든 base/transferred raw는 모두 reward 0으로 보수 복원한다.
+    // 복원된 셀만 반영한 오염 진행률의 계산 결과
+    FMD_ScrapeMeshUVProgress Progress;
+    // 증분 진행률 계산에 필요한 셀 인덱스 순서 정렬
+    Touched.Sort([](const auto& A, const auto& B) { return A.CellIndex < B.CellIndex; });
+    // 유효한 기존 캐시에 복원된 셀의 변화량만 반영
+    if (bIncrementProgress == true && FMD_ScrapeEvaluator::UpdateMeshUVProgressFromTouchedCells(
+        CachedMeshUVProgress, Touched, GetContaminationCellsForFace(EMD_ScrapeSurfaceFace::Front),
+        GetContaminationCellCarrierWeights(), Progress) == true)
+    {
+        // 전체 셀 재계산 없이 갱신된 진행률 캐시 확정
+        CommitContaminationMeshUVProgressCache(Progress);
+    }
+    else
+    {
+        // 증분 계산이 불가능한 경우 전체 진행률 캐시 복구
+        RefreshContaminationCleanRatioCache();
+    }
+
+	// 셀 상태 복원만으로 이미 지급된 보상을 재발행하지 않도록 무보상 회수 원장 재구성
 	for (int32 FaceSlot = 0; FaceSlot < 2; ++FaceSlot)
 	{
 		BaseContaminationRecoveryLots[FaceSlot].Reset();
@@ -472,12 +450,18 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 			GetContaminationCellsForFace(Face);
 		double BaseCarrierAmount = 0.0;
 		double TransferredCarrierAmount = 0.0;
-		for (int32 LocalIndex = 0; LocalIndex < FaceCells.Num(); ++LocalIndex)
-		{
-            const double Weight = GetContaminationCellCarrierWeight(FaceSlot * FaceCells.Num() + LocalIndex);
-			BaseCarrierAmount += static_cast<double>(FaceCells[LocalIndex].RemainingContamination) * Weight;
-			TransferredCarrierAmount += static_cast<double>(FaceCells[LocalIndex].TransferredContamination) * Weight;
-		}
+        if (UsesMeshUVSurface() && CachedMeshUVProgress.bIsValid)
+        {
+            BaseCarrierAmount = FaceSlot == 0 ? CachedMeshUVProgress.BaseCarrierAmount : 0.0;
+            TransferredCarrierAmount = FaceSlot == 0 ? CachedMeshUVProgress.TransferredCarrierAmount : 0.0;
+        }
+        else
+            for (int32 LocalIndex = 0; LocalIndex < FaceCells.Num(); ++LocalIndex)
+            {
+                const double Weight = GetContaminationCellCarrierWeight(FaceSlot * FaceCells.Num() + LocalIndex);
+                BaseCarrierAmount += static_cast<double>(FaceCells[LocalIndex].RemainingContamination) * Weight;
+                TransferredCarrierAmount += static_cast<double>(FaceCells[LocalIndex].TransferredContamination) * Weight;
+            }
 		const bool bRecordedBase = BaseCarrierAmount <= 0.0
 			|| FMD_ScrapeRecoveryLedger::AppendZeroRewardCarrier(
 				BaseContaminationRecoveryLots[FaceSlot],
@@ -488,11 +472,9 @@ void UMD_ScrapeSurfaceComponent::RestoreContaminationCells(
 				TransferredCarrierAmount);
 		ensureMsgf(
 			bRecordedBase && bRecordedTransferred,
-			TEXT("Legacy contamination restore could not rebuild recovery ledger."));
+			TEXT("Contamination restore could not rebuild recovery ledger."));
 	}
 
-	// 앞/뒤 제거 비율을 함께 갱신한다.
-	RefreshContaminationCleanRatioCache();
 	// 어제 완전 제거된 벽이면 완료 이벤트가 재방송되지 않게 이미 방송된 것으로 마킹
 	bContaminationCompletionBroadcast = IsContaminationFullyRemoved();
 	// 복원한 셀 상태가 화면에 보이도록 런타임 G8 마스크도 함께 갱신한다.

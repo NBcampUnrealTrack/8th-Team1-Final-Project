@@ -83,8 +83,8 @@ void AMD_PortalActor::Tick(float DeltaSeconds)
 		UpdateOverlappedActors();
 	}
 
-	// 로컬 플레이어의 카메라를 기준으로 Portal의 화면 캡처 갱신
-	UpdatePortalCaptureScene();
+	// 시간 배율과 무관한 실제 프레임 간격으로 로컬 Portal 화면 캡처 갱신
+	UpdatePortalCaptureScene(FApp::GetDeltaTime());
 }
 
 void AMD_PortalActor::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -347,6 +347,9 @@ void AMD_PortalActor::ConnectPortal(AMD_PortalActor* PortalA, AMD_PortalActor* P
 
 void AMD_PortalActor::OnRep_LinkedPortal()
 {
+	// 상태 변경 직후 오래된 화면을 교체하기 위한 즉시 캡처 예약
+	bForceNextPortalCapture = true;
+
 	// 캡처되는 Scene에서 제외되는 액터 목록 초기화
 	SceneCaptureComponent->HiddenActors.Reset();
 
@@ -366,6 +369,9 @@ void AMD_PortalActor::OnRep_LinkedPortal()
 
 void AMD_PortalActor::OnRep_PortalActive()
 {
+	// 상태 변경 직후 오래된 화면을 교체하기 위한 즉시 캡처 예약
+	bForceNextPortalCapture = true;
+
 	// Portal이 비활성화 된 경우 추적 중이던 액터 목록 초기화
 	if (bIsPortalActive == false)
 	{
@@ -500,122 +506,321 @@ FRotator AMD_PortalActor::TransformRotationToLinkedPortal(const FRotator& WorldR
 	return QuatTemp.Rotator();
 }
 
-void AMD_PortalActor::UpdatePortalCaptureScene()
+bool AMD_PortalActor::BuildPortalCaptureView(FTransform SourcePortal, FTransform DestinationPortal, FVector ViewOrigin, FMatrix ViewRotation, FMatrix Projection,
+	FVector& OutLocation, FQuat& OutRotation, FMatrix& OutProjection)
 {
-	// Dedicated Server 환경의 경우 함수 조기 종료
-	if (GetNetMode() == NM_DedicatedServer)
+	// 역변환할 수 없는 포털 크기 제외
+	if (SourcePortal.GetScale3D().GetAbsMin() <= UE_SMALL_NUMBER || DestinationPortal.GetScale3D().GetAbsMin() <= UE_SMALL_NUMBER)
 	{
-		return;
+		// 축이 소실된 포털의 잘못된 캡처 방지
+		return false;
 	}
-
-	// 최근 렌더링되지 않은 경우 함수 조기 종료
-	if (WasRecentlyRendered() == false)
+	// 양쪽 포털의 크기 차이와 반 바퀴 회전을 결합한 역방향 축 배율 계산
+	FVector InverseScale = SourcePortal.GetScale3D() / DestinationPortal.GetScale3D() * FVector(-1.0, -1.0, 1.0);
+	// 이동 성분을 제외한 목적지의 직교 회전 행렬 구성
+	FMatrix DestinationRotation = FQuatRotationMatrix(DestinationPortal.GetRotation());
+	// 범용 역행렬 없이 회전 전치와 축 배율로 목적지 광선의 역변환 구성
+	FMatrix DestinationToSource = DestinationRotation.GetTransposed() * FScaleMatrix(InverseScale) * FQuatRotationMatrix(SourcePortal.GetRotation());
+	// 직교 뷰 회전 행렬의 열에서 월드 시선 방향 직접 추출
+	FVector ViewForward = ViewRotation.GetColumn(2);
+	// 직교 뷰 회전 행렬의 열에서 월드 화면 위쪽 방향 직접 추출
+	FVector ViewUp = ViewRotation.GetColumn(1);
+	// 역전치 변환으로 비균일 스케일 이후에도 올바른 시선 평면 법선 계산
+	FVector CaptureForward = FVector(DestinationToSource.GetTransposed().TransformVector(ViewForward));
+	// 전체 위치 행렬을 만들지 않고 포털의 벡터 변환으로 화면 위쪽 방향 계산
+	FVector CaptureUp = DestinationPortal.TransformVector(SourcePortal.InverseTransformVector(ViewUp) * FVector(-1.0, -1.0, 1.0));
+	// 포털의 위치 변환을 직접 적용하여 캡처 카메라 위치 계산
+	OutLocation = DestinationPortal.TransformPosition(SourcePortal.InverseTransformPosition(ViewOrigin) * FVector(-1.0, -1.0, 1.0));
+	// 시선과 위쪽 방향을 한 번만 정규화하여 직교 카메라 축 구성
+	FMatrix CaptureBasis = FRotationMatrix::MakeFromXZ(CaptureForward, CaptureUp);
+	// 각도 변환 없이 SceneCapture에 전달할 회전 구성
+	OutRotation = CaptureBasis.ToQuat();
+	// 계산된 축을 오른쪽·위쪽·깊이 순서로 재배치하여 카메라 역변환 구성
+	FMatrix CaptureToWorld(CaptureBasis.GetScaledAxis(EAxis::Y), CaptureBasis.GetScaledAxis(EAxis::Z), CaptureBasis.GetScaledAxis(EAxis::X), FVector::ZeroVector);
+	// 이미 계산된 카메라 축을 재사용하여 포털 사이의 크기와 기울기 차이 반영
+	OutProjection = CaptureToWorld * DestinationToSource * ViewRotation * Projection;
+	// 엔진의 깊이 복원에 필요한 원근 나눗셈 계수 보관
+	double PerspectiveScale = OutProjection.M[2][3];
+	// 원근 투영이 성립하지 않는 입력 제외
+	if (FMath::IsNearlyZero(PerspectiveScale) == true)
 	{
-		return;
+		// 비정상 투영 행렬 적용 방지
+		return false;
 	}
-
-	// 참조하는 Local Player가 존재하지 않으면 함수 조기 종료
-	if (IsValid(LocalPlayer) == false)
-	{
-		if (IsValid(GEngine) == true)
-		{
-			// Local Player 참조 시도
-			APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
-			LocalPlayer = IsValid(LocalPlayerController) == true ? LocalPlayerController->GetLocalPlayer() : nullptr;
-		}
-		return;
-	}
-
-	// Portal이 비활성화 상태 또는 Surface에 화면 Rendering 비활성화 상태인 경우 함수 조기 종료
-	if (bIsPortalActive == false || bSurfaceRenderEnabled == false)
-	{
-		return;
-	}
-
-	// 연결된 다른 Portal이 존재하지않는 경우 함수 조기 종료
-	if (LinkedPortal.IsValid() == false)
-	{
-		return;
-	}
-
-	// 첫번째 Local Player의 Controller 얻기 및 유효성 검사
-	if (IsValid(LocalPlayer->PlayerController) == false)
-	{
-		return;
-	}
-
-	// Player 시점의 위치 및 회전 값 얻기
-	FVector PlayerViewpointLocation;
-	FRotator PlayerViewpointRotation;
-	LocalPlayer->PlayerController->GetPlayerViewPoint(PlayerViewpointLocation, PlayerViewpointRotation);
-
-	// SceneCapture Component의 위치 및 회전 값 계산
-	FVector CaptureLocation = TransformLocationToLinkedPortal(PlayerViewpointLocation);
-	FRotator CaptureRotation = TransformRotationToLinkedPortal(PlayerViewpointRotation);
-
-	// Portal의 SceneCaptureComponent 위치 및 회전값 변경
-	SceneCaptureComponent->SetWorldLocation(CaptureLocation);
-	SceneCaptureComponent->SetWorldRotation(CaptureRotation);
-
-	// Player의 Viewport를 관리하는 GameViewportClient Instance 얻기 및 유효성 검사
-	UGameViewportClient* ViewportClient = LocalPlayer->ViewportClient;
-	if (IsValid(ViewportClient) == false)
-	{
-		return;
-	}
-
-	// Player의 Viewport 얻기 및 유효성 검사
-	FSceneViewport* Viewport = ViewportClient->Viewport;
-	if (Viewport == nullptr)
-	{
-		return;
-	}
-
-	// 필요한 경우 Texture Render Target의 크기 조정
-	UpdatePortalTextureRenderTargetSize();
-
-	// Viewport의 Projection 데이터 얻기
-	FSceneViewProjectionData ProjectionData;
-	if (LocalPlayer->GetProjectionData(Viewport, ProjectionData) == false)
-	{
-		return;
-	}
-
-	// Portal의 SceneCapture Component가 Viewport의 Projection Matrix를 사용하도록 설정
-	SceneCaptureComponent->CustomProjectionMatrix = ProjectionData.ProjectionMatrix;
-
-	// SceneCapture 동작을 명시적으로 실행
-	SceneCaptureComponent->CaptureScene();
+	// 투영 결과를 유지하면서 깊이 계수를 표준 형태로 정규화
+	OutProjection *= 1.0 / PerspectiveScale;
+	// 유효한 캡처 설정 계산 완료 반환
+	return true;
 }
 
-void AMD_PortalActor::UpdatePortalTextureRenderTargetSize()
+bool AMD_PortalActor::GetPortalScreenRatio(FMatrix ViewProjection, FBoxSphereBounds SurfaceBounds, FIntPoint ViewSize, float& OutScreenRatio)
 {
-	// Dedicated Server 환경의 경우 함수 조기 종료
-	if (GetNetMode() == ENetMode::NM_DedicatedServer)
+	// 화면 밖인 경우에도 호출자가 사용할 수 있는 기본 비율 초기화
+	OutScreenRatio = 0.0f;
+	// 최소화되거나 크기가 없는 화면의 캡처 제외
+	if (ViewSize.X <= 0 || ViewSize.Y <= 0)
 	{
+		// 표시 영역이 없는 상태 반환
+		return false;
+	}
+	// 로컬 카메라의 가시 영역 저장 공간
+	FConvexVolume Frustum;
+	// 원근 투영 행렬에서 가시 영역 추출
+	GetViewFrustumBounds(Frustum, ViewProjection, true);
+	// Portal 경계와 로컬 가시 영역의 교차 여부 검사
+	if (Frustum.IntersectBox(SurfaceBounds.Origin, SurfaceBounds.BoxExtent) == false)
+	{
+		// 화면 밖 Portal 제외
+		return false;
+	}
+	// 투영된 경계의 최소 좌표 초기화
+	FVector2D Minimum(DBL_MAX, DBL_MAX);
+	// 투영된 경계의 최대 좌표 초기화
+	FVector2D Maximum(-DBL_MAX, -DBL_MAX);
+	// 모든 꼭짓점이 공유하는 중심의 동차 화면 좌표 계산
+	FVector4 CenterClip = ViewProjection.TransformFVector4(FVector4(SurfaceBounds.Origin, 1.0));
+	// 가로 경계 이동이 화면 좌표에 더하는 변화량 계산
+	FVector4 ExtentX = FVector4(ViewProjection.M[0][0], ViewProjection.M[0][1], ViewProjection.M[0][2], ViewProjection.M[0][3]) * SurfaceBounds.BoxExtent.X;
+	// 깊이 경계 이동이 화면 좌표에 더하는 변화량 계산
+	FVector4 ExtentY = FVector4(ViewProjection.M[1][0], ViewProjection.M[1][1], ViewProjection.M[1][2], ViewProjection.M[1][3]) * SurfaceBounds.BoxExtent.Y;
+	// 높이 경계 이동이 화면 좌표에 더하는 변화량 계산
+	FVector4 ExtentZ = FVector4(ViewProjection.M[2][0], ViewProjection.M[2][1], ViewProjection.M[2][2], ViewProjection.M[2][3]) * SurfaceBounds.BoxExtent.Z;
+	// 박스 경계의 여덟 꼭짓점 검토
+	for (int32 Corner = 0; Corner < 8; ++Corner)
+	{
+		// 중심과 축별 변화량을 조합하여 꼭짓점별 행렬 곱셈 생략
+		FVector4 Clip = CenterClip + (Corner & 1 ? ExtentX : -ExtentX) + (Corner & 2 ? ExtentY : -ExtentY) + (Corner & 4 ? ExtentZ : -ExtentZ);
+		// 카메라 평면을 가로지르는 경계의 축소 방지
+		if (Clip.W <= UE_SMALL_NUMBER)
+		{
+			// 접근 또는 통과 중인 Portal의 원본 품질 유지
+			OutScreenRatio = 1.0f;
+			// 보수적인 가시 상태 반환
+			return true;
+		}
+		// 원근 나눗셈을 적용한 화면 좌표 계산
+		FVector2D NDC(Clip.X / Clip.W, Clip.Y / Clip.W);
+		// 전체 꼭짓점의 최소 가로 좌표 누적
+		Minimum.X = FMath::Min(Minimum.X, NDC.X);
+		// 전체 꼭짓점의 최소 세로 좌표 누적
+		Minimum.Y = FMath::Min(Minimum.Y, NDC.Y);
+		// 전체 꼭짓점의 최대 가로 좌표 누적
+		Maximum.X = FMath::Max(Maximum.X, NDC.X);
+		// 전체 꼭짓점의 최대 세로 좌표 누적
+		Maximum.Y = FMath::Max(Maximum.Y, NDC.Y);
+	}
+	// 실제 화면과 겹치는 가로 비율 계산
+	double WidthRatio = FMath::Max(0.0, FMath::Min(1.0, Maximum.X) - FMath::Max(-1.0, Minimum.X)) * 0.5;
+	// 실제 화면과 겹치는 세로 비율 계산
+	double HeightRatio = FMath::Max(0.0, FMath::Min(1.0, Maximum.Y) - FMath::Max(-1.0, Minimum.Y)) * 0.5;
+	// 어느 방향으로도 한 픽셀을 차지하지 못하는 Portal 제외
+	if (WidthRatio * ViewSize.X < 1.0 && HeightRatio * ViewSize.Y < 1.0)
+	{
+		// 식별할 수 없는 표면의 캡처 생략
+		return false;
+	}
+	// 긴 방향의 화면 점유율을 품질 선택 기준으로 반환
+	OutScreenRatio = FMath::Max(WidthRatio, HeightRatio);
+	// 화면에 표시 가능한 상태 반환
+	return true;
+}
+
+bool AMD_PortalActor::ShouldUseFullQualityCapture(bool bWasFullQuality, float ScreenRatio, float SurfaceDistance, float ScreenThreshold, float NearDistance)
+{
+	// 화면 점유율 설정의 유효 범위 보정
+	ScreenThreshold = FMath::Clamp(ScreenThreshold, 0.05f, 1.0f);
+	// 접근 거리 설정의 음수 방지
+	NearDistance = FMath::Max(0.0f, NearDistance);
+	// 원본 품질 상태에서는 더 작고 멀어진 이후 축소 허용
+	if (bWasFullQuality == true)
+	{
+		// 화면 비율과 접근 거리의 여유 구간을 포함한 유지 여부 반환
+		return ScreenRatio >= ScreenThreshold * 0.8f || SurfaceDistance <= NearDistance * 1.2f;
+	}
+	// 작은 화면에서 확대 또는 접근 시 즉시 원본 품질로 전환
+	return ScreenRatio >= ScreenThreshold || SurfaceDistance <= NearDistance;
+}
+
+bool AMD_PortalActor::ShouldCapturePortal(float& SecondsUntilCapture, float DeltaSeconds, float CaptureRate, bool bForceCapture)
+{
+	// 무제한 캡처 또는 재진입에 필요한 즉시 갱신 처리
+	if (CaptureRate <= 0.0f || bForceCapture == true)
+	{
+		// 강제 캡처 시점을 기준으로 다음 주기 초기화
+		SecondsUntilCapture = CaptureRate > 0.0f ? 1.0f / CaptureRate : 0.0f;
+		// 현재 프레임 캡처 허용
+		return true;
+	}
+	// 역방향 시간 변화 없이 남은 대기 시간 감소
+	SecondsUntilCapture -= FMath::Max(0.0f, DeltaSeconds);
+	// 다음 캡처 주기 도달 여부 확인
+	if (SecondsUntilCapture > UE_SMALL_NUMBER)
+	{
+		// 대기 중인 프레임의 캡처 생략
+		return false;
+	}
+	// 목표 캡처 빈도의 실제 시간 간격 계산
+	float Interval = 1.0f / CaptureRate;
+	// 지연 이후 한 프레임에 캡처가 몰리지 않도록 지나간 주기 제거
+	SecondsUntilCapture = Interval - FMath::Fmod(FMath::Max(-SecondsUntilCapture, 0.0f), Interval);
+	// 이번 프레임의 단일 캡처 허용
+	return true;
+}
+
+void AMD_PortalActor::UpdatePortalCaptureScene(float DeltaSeconds)
+{
+	// 화면 재진입 시 대기 주기 없이 캡처하기 위한 직전 상태 보관
+	bool bWasVisible = bCaptureWasVisible;
+	// 조기 종료된 프레임을 캡처 불가능 상태로 기록
+	bCaptureWasVisible = false;
+
+	// 전용 서버와 비활성 Portal의 렌더링 작업 제외
+	if (GetNetMode() == NM_DedicatedServer || bIsPortalActive == false || bSurfaceRenderEnabled == false)
+	{
+		// 화면 갱신이 필요하지 않은 상태의 처리 종료
 		return;
 	}
 
-	// Viewport 크기를 얻어올 Local Player와 크기를 조정할 Texture의 유효성 검사
-	if (IsValid(LocalPlayer) == false || IsValid(TextureRenderTarget) == false)
+	// 연결과 렌더링 리소스가 준비된 Portal만 캡처 허용
+	if (LinkedPortal.IsValid() == false || IsValid(SurfaceMesh) == false || IsValid(SceneCaptureComponent) == false || IsValid(TextureRenderTarget) == false)
 	{
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 참조된 Local Player 객체 또는 생성된 Texture Render Target가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+		// 준비되지 않은 캡처 작업 제외
 		return;
 	}
 
-	// Viewport 크기를 얻어올 Local Player와 크기를 조정할 Texture의 유효성 검사
-	if (IsValid(LocalPlayer->ViewportClient) == false)
+	// 최근 렌더링되지 않은 Portal의 투영 계산 생략
+	if (WasRecentlyRendered() == false)
 	{
-		UE_LOG(MarineDemolition, Log, TEXT("%s 참조된 Local Player 객체 또는 생성된 Texture Render Target가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
+		// 화면에 표시되지 않은 Portal의 처리 종료
 		return;
 	}
 
-	// Viewport의 크기 얻기
-	FVector2D ViewportSize;
-	LocalPlayer->ViewportClient->GetViewportSize(ViewportSize);
+	// 아직 참조하지 않은 로컬 플레이어 검색
+	if (IsValid(LocalPlayer) == false)
+	{
+		// 로컬 컨트롤러 조회에 필요한 엔진 유효성 검사
+		if (IsValid(GEngine) == true)
+		{
+			// 현재 월드에서 사용하는 첫 번째 로컬 컨트롤러 조회
+			APlayerController* LocalPlayerController = GEngine->GetFirstLocalPlayerController(GetWorld());
+			// 유효한 컨트롤러에서 로컬 플레이어 참조 보관
+			LocalPlayer = IsValid(LocalPlayerController) == true ? LocalPlayerController->GetLocalPlayer() : nullptr;
+		}
+	}
 
-	// Texture Render Target 2D의 크기 조정
-	TextureRenderTarget->ResizeTarget(ViewportSize.X, ViewportSize.Y);
+	// 로컬 카메라를 조회할 수 없는 상태 제외
+	if (IsValid(LocalPlayer) == false || IsValid(LocalPlayer->PlayerController) == false)
+	{
+		// 로컬 플레이어 준비 전 처리 종료
+		return;
+	}
+
+	// 로컬 화면을 관리하는 클라이언트 조회
+	UGameViewportClient* ViewportClient = LocalPlayer->ViewportClient;
+	// 화면 클라이언트의 유효성 검사
+	if (IsValid(ViewportClient) == false)
+	{
+		// 화면이 준비되지 않은 상태의 처리 종료
+		return;
+	}
+
+	// 실제 화면 크기와 투영 정보를 제공하는 Viewport 조회
+	FSceneViewport* Viewport = ViewportClient->Viewport;
+	// Viewport 생성 전 또는 제거 이후 상태 제외
+	if (Viewport == nullptr)
+	{
+		// 화면 참조가 없는 상태의 처리 종료
+		return;
+	}
+
+	// 현재 로컬 카메라의 투영 정보 저장 공간
+	FSceneViewProjectionData ProjectionData;
+	// 유효한 투영 정보 확보 여부 검사
+	if (LocalPlayer->GetProjectionData(Viewport, ProjectionData) == false)
+	{
+		// 투영할 수 없는 화면의 처리 종료
+		return;
+	}
+
+	// 화면 비율 제한을 반영한 로컬 카메라 영역 크기
+	FIntPoint ViewSize = ProjectionData.GetConstrainedViewRect().Size();
+	// Portal 표면이 차지하는 최대 가로 또는 세로 비율 저장 공간
+	float ScreenRatio = 0.0f;
+	// 다른 Scene Capture의 렌더링 기록과 무관하게 실제 로컬 화면과의 교차 여부 검사
+	if (GetPortalScreenRatio(ProjectionData.ComputeViewProjectionMatrix(), SurfaceMesh->Bounds, ViewSize, ScreenRatio) == false)
+	{
+		// 화면 밖 또는 한 픽셀 미만인 Portal의 캡처 생략
+		return;
+	}
+
+	// 카메라에서 Portal 표면 경계까지의 거리 계산
+	float SurfaceDistance = FMath::Sqrt(SurfaceMesh->Bounds.GetBox().ComputeSquaredDistanceToPoint(ProjectionData.ViewOrigin));
+	// 화면 점유율과 접근 거리에 여유 구간을 적용한 품질 선택
+	bool bUseFullQuality = bAdaptiveCaptureEnabled == false || ShouldUseFullQualityCapture(bFullQualityCapture, ScreenRatio, SurfaceDistance, FullQualityScreenRatio, FullQualityDistance);
+	// 저해상도 설정의 런타임 범위 보정
+	float ResolutionScale = bUseFullQuality == true ? 1.0f : FMath::Clamp(DistantCaptureResolutionScale, 0.25f, 1.0f);
+	// 원본 화면 비율을 유지하는 캡처 대상 크기 계산
+	FIntPoint TargetSize(FMath::Max(1, FMath::RoundToInt(ViewSize.X * ResolutionScale)), FMath::Max(1, FMath::RoundToInt(ViewSize.Y * ResolutionScale)));
+	// 재진입과 품질 변경 및 창 크기 변경 시 즉시 캡처 조건 계산
+	bool bForceCapture = bWasVisible == false || bForceNextPortalCapture == true || bFullQualityCapture != bUseFullQuality || LastCaptureViewSize != ViewSize
+		|| TextureRenderTarget->SizeX != TargetSize.X || TextureRenderTarget->SizeY != TargetSize.Y;
+	// 이번 프레임의 캡처 가능 상태 기록
+	bCaptureWasVisible = true;
+	// 다음 품질 판정에 사용할 현재 품질 기록
+	bFullQualityCapture = bUseFullQuality;
+	// 근접 화면은 매 프레임, 작은 화면은 제한된 빈도로 캡처하도록 간격 선택
+	float CaptureRate = bUseFullQuality == true ? 0.0f : FMath::Clamp(DistantCaptureRate, 1.0f, 120.0f);
+	// 캡처 시점에 도달한 프레임만 렌더링 작업 진행
+	if (ShouldCapturePortal(SecondsUntilNextCapture, DeltaSeconds, CaptureRate, bForceCapture) == false)
+	{
+		// 다음 캡처까지 직전 화면 유지
+		return;
+	}
+
+	// 실제 장면 캡처 구간의 CPU 추적 범위
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Portal_CaptureVisibleScene);
+	// 비균일 포털 크기를 반영한 캡처 위치 저장 공간
+	FVector CaptureLocation;
+	// 각도 왕복 변환 없이 적용할 캡처 회전 저장 공간
+	FQuat CaptureRotation;
+	// 카메라 위치와 같은 좌표 변환을 사용하는 투영 행렬 저장 공간
+	FMatrix CaptureProjection;
+	// 화면 UV와 목적지의 광선이 일치하도록 카메라 및 투영 계산
+	if (BuildPortalCaptureView(GetActorTransform(), LinkedPortal->GetActorTransform(), ProjectionData.ViewOrigin, ProjectionData.ViewRotationMatrix,
+		ProjectionData.ProjectionMatrix, CaptureLocation, CaptureRotation, CaptureProjection) == false)
+	{
+		// 크기가 소실된 포털의 잘못된 행렬 적용 방지
+		return;
+	}
+	// 계산된 목적지 카메라 위치와 회전 적용
+	SceneCaptureComponent->SetWorldLocationAndRotation(CaptureLocation, CaptureRotation);
+	// 선택된 품질에 맞는 렌더 타깃 크기 적용
+	UpdatePortalTextureRenderTargetSize(TargetSize);
+	// 포털 크기와 시선 각도까지 반영한 투영 적용
+	SceneCaptureComponent->CustomProjectionMatrix = CaptureProjection;
+	// 목적지 이동과 실행 중 오프셋 변경을 반영한 최신 클립 평면 위치 적용
+	SceneCaptureComponent->ClipPlaneBase = LinkedPortal->GetActorLocation() - ClipPlaneOffset * LinkedPortal->GetActorForwardVector();
+	// 목적지 회전을 반영한 최신 클립 평면 방향 적용
+	SceneCaptureComponent->ClipPlaneNormal = LinkedPortal->GetActorForwardVector();
+	// 수동 장면 캡처 실행
+	SceneCaptureComponent->CaptureScene();
+	// 다음 창 크기 변경을 감지하기 위한 화면 크기 기록
+	LastCaptureViewSize = ViewSize;
+	// 이번 캡처에서 처리한 강제 갱신 예약 해제
+	bForceNextPortalCapture = false;
+}
+
+void AMD_PortalActor::UpdatePortalTextureRenderTargetSize(FIntPoint TargetSize)
+{
+	// 이미 일치하는 크기의 렌더 타깃 재설정 생략
+	if (TextureRenderTarget->SizeX == TargetSize.X && TextureRenderTarget->SizeY == TargetSize.Y)
+	{
+		// 기존 리소스 유지
+		return;
+	}
+
+	// 화면 크기 또는 품질 단계가 변경된 경우에만 렌더 타깃 크기 조정
+	TextureRenderTarget->ResizeTarget(TargetSize.X, TargetSize.Y);
 }
 
 void AMD_PortalActor::UpdateOverlappedActors()
@@ -636,8 +841,8 @@ void AMD_PortalActor::UpdateOverlappedActors()
 		}
 	}
 
-	// 이번 프레임에 Teleport된 Actor 목록
-	TArray<TWeakObjectPtr<AActor>> ActorsToBeTeleported;
+	// 최대 네 명의 동시 통과는 별도 힙 할당 없이 보관하고 초과 객체는 자동 확장
+	TArray<TWeakObjectPtr<AActor>, TInlineAllocator<4>> ActorsToBeTeleported;
 
 	// 현재 Portal 영역과 겹쳐있는 Actor 목록 검토
 	for (auto Iterator = MapDistanceWithOverlappedActor.CreateIterator(); Iterator.operator bool() == true; ++Iterator)
@@ -691,6 +896,13 @@ void AMD_PortalActor::UpdateOverlappedActors()
 
 void AMD_PortalActor::InitPortalTextureRenderTarget()
 {
+	// 전용 서버에서는 화면 출력용 리소스 생성 제외
+	if (GetNetMode() == NM_DedicatedServer)
+	{
+		// 렌더 타깃과 동적 머티리얼 생성 생략
+		return;
+	}
+
 	// TextureRenderTarget 객체 생성 및 유효성 검사
 	TextureRenderTarget = NewObject<UTextureRenderTarget2D>(this);
 	if (IsValid(TextureRenderTarget) == false)
@@ -702,13 +914,8 @@ void AMD_PortalActor::InitPortalTextureRenderTarget()
 	TextureRenderTarget->RenderTargetFormat = ETextureRenderTargetFormat::RTF_RGBA16f;
 	TextureRenderTarget->ClearColor = FLinearColor::Transparent;
 
-	FVector2D ViewportSize = FVector2D(128, 128);
-	if (IsValid(GEngine) == true && IsValid(GEngine->GameViewport) == true)
-	{
-		GEngine->GameViewport->GetViewportSize(ViewportSize);
-	}
-	ViewportSize = FVector2D::Max(ViewportSize, FVector2D::One());
-	TextureRenderTarget->InitAutoFormat(ViewportSize.X, ViewportSize.Y);
+	// 처음 화면에 나타날 때 필요한 크기로 확장하는 최소 렌더 타깃 생성
+	TextureRenderTarget->InitAutoFormat(1, 1);
 
 	SceneCaptureComponent->TextureTarget = TextureRenderTarget;
 

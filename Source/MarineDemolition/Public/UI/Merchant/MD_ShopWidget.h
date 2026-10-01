@@ -11,12 +11,12 @@
 #include "UI/Merchant/MD_MerchantUITypes.h"
 #include "MD_ShopWidget.generated.h"
 
+class UButton;
 class UImage;
 class UCommonButtonGroupBase;
-class UPanelWidget;
+class UWrapBox;
 class UTextBlock;
 class UMD_CommonButtonBase;
-class UMD_MerchantMenuWidget;
 class UMD_ShopItemCardWidget;
 class UMD_EquipHotbarComponent;
 
@@ -24,6 +24,11 @@ class UMD_EquipHotbarComponent;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopPurchaseRequest, FPrimaryAssetId, ItemAssetId);
 // 품목 식별자를 사용하지 않는 구매 제한 알림
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_ShopPurchaseRejected);
+
+// 선택한 소지품의 식별자와 예상 슬롯 및 판매 수량 전달
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FMD_ShopSaleRequest, FPrimaryAssetId, ItemAssetId, int32, SlotIndex, int32, Quantity);
+// 서버가 확정한 판매 결과를 BP 피드백에 전달
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_ShopSaleCompleted, EMD_ShopSaleResult, Result);
 
 /**
  * 상점 UI. 5탭(`04` §3 = `08` §1) + 아이템 카드 목록.
@@ -41,9 +46,6 @@ class MARINEDEMOLITION_API UMD_ShopWidget : public UMD_CommonGameMenuWidget
 
 public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
-	void SetOwningMerchantMenu(UMD_MerchantMenuWidget* InMenuWidget);
-
-	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void SetCatalog(UMD_ShopCatalog* InCatalog);
 
 	/** 크레딧·호감도 등 헤더 정보. 메뉴 위젯과 같은 구조체를 쓴다. */
@@ -55,10 +57,34 @@ public:
 	void SetProgress(int32 InQuestCompletions, const TArray<FPrimaryAssetId>& InOwnedItemIds, TArray<FPrimaryAssetId> InBlockedItemIds);
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
+	// 이벤트 그래프에서 선택한 카테고리 Enum 값으로 품목 필터 적용
 	void SelectCategory(EMD_ShopCategory InCategory);
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
+	// 전체 버튼의 이벤트 그래프에서 카테고리 필터 해제
+	void SelectAllCategories();
+
+	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void RefreshDisplay();
+
+	// BP 버튼에서 구매 목록과 보유 품목 판매 목록 전환
+	UFUNCTION(BlueprintCallable, Category = "MD|Shop|Sale")
+	void SetSellingMode(bool bInSellingMode);
+
+	// BP 수량 선택 UI에서 현재 품목의 지정 수량 판매 요청
+	UFUNCTION(BlueprintCallable, Category = "MD|Shop|Sale")
+	void RequestSelectedItemSale(int32 Quantity = 1);
+
+	// 서버 결과를 현재 화면과 BP 이벤트에 반영
+	void ReceiveSaleResult(EMD_ShopSaleResult Result);
+
+	// 실제 소지품을 서버에 회수 요청하는 화면 이벤트
+	UPROPERTY(BlueprintAssignable, Category = "MD|Shop|Sale")
+	FMD_ShopSaleRequest OnItemSaleRequested;
+
+	// 판매 성공 또는 실패 이유를 BP 알림에 연결하는 이벤트
+	UPROPERTY(BlueprintAssignable, Category = "MD|Shop|Sale")
+	FMD_ShopSaleCompleted OnSaleCompleted;
 
 	UPROPERTY(BlueprintAssignable, Category = "MD|Shop")
 	FMD_ShopPurchaseRequest OnItemPurchaseRequested;
@@ -75,9 +101,24 @@ protected:
 
 	void RebuildItemList();
 
-	void BuildCategoryButtons();
+	// 목록 재구성 없이 보유 크레딧 문구 갱신
+	void RefreshCredits();
+
+	UFUNCTION()
+	// 소지 상태 변경에 필요한 거래 화면 영역만 갱신
+	void HandleHotbarChanged();
+
+	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Shop|Presentation")
+	// 거래 방향 변경에 맞춘 토글 애니메이션과 화면 연출
+	void BP_OnSellingModeChanged(bool bIsSelling);
+
+	// 배치된 카테고리 버튼의 선택 그룹만 초기화
+	void InitializeCategoryButtons();
 
 	void RefreshSelectedItem();
+
+	// 선택된 품목 분류를 카테고리 버튼 그룹에 반영
+	void RefreshCategorySelection();
 
 	// 판매 정보 복사 없이 실제 소유 Pawn과 구매 이력으로 지급 조건 검사
 	bool IsItemGrantable(FMD_ShopItem& Item);
@@ -85,18 +126,19 @@ protected:
 	// 선행 도구와 잔여 수량 변경을 화면에 반영할 Hotbar 구독 관리
 	void ObserveHotbar(UMD_EquipHotbarComponent* InHotbar);
 
-	void HandleCategoryAllClicked();
-
-	void HandleCategoryClicked(EMD_ShopCategory Category);
-
 	// 선택된 카드의 전체 식별자로 상세 품목 갱신
 	void HandleItemSelected(FPrimaryAssetId ItemAssetId);
 
+	// 이벤트 그래프에서 선택 품목의 구매 또는 판매 요청
+	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	void HandleBuyClicked();
 
-	// 상점 화면을 연 상인 메뉴
-	UPROPERTY()
-	TObjectPtr<UMD_MerchantMenuWidget> OwningMerchantMenu;
+	// 현재 소유 Pawn의 실제 슬롯에서 같은 전체 식별자의 위치 조회
+	int32 FindSaleSlot(FPrimaryAssetId ItemAssetId);
+
+	// 활성 목록이 상점 구매인지 소지품 판매인지 구분하는 상태
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop|Sale")
+	bool bSellingMode = false;
 
 	/** 카탈로그 에셋. WBP 기본값으로 지정해도 되고 런타임에 SetCatalog로 넣어도 된다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Shop")
@@ -108,10 +150,6 @@ protected:
 	/** 아이템 카드로 쓸 WBP */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Shop")
 	TSubclassOf<UMD_ShopItemCardWidget> ItemCardClass;
-
-	// 동적으로 생성할 카테고리 버튼 클래스
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Shop")
-	TSubclassOf<UMD_CommonButtonBase> CategoryButtonClass;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
 	FMD_MerchantMenuInfo ShopInfo;
@@ -146,17 +184,44 @@ protected:
 	TObjectPtr<UCommonButtonGroupBase> ItemCardButtonGroup;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CommonButtonBase> Btn_Buy;
-
-	/*
-	 * 카드가 들어갈 컨테이너. ScrollBox·WrapBox·VerticalBox 아무거나 가능하도록
-	 * UPanelWidget으로 받는다 — 레이아웃 선택을 디자이너에게 남긴다.
-	 */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UPanelWidget> SB_Categories;
+	// 선택 품목의 실제 구매 또는 판매를 실행하는 하단 버튼
+	TObjectPtr<UButton> Btn_Buy;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UPanelWidget> WB_ItemEntries;
+	// 현재 거래 방향을 표시하는 하단 실행 버튼 문구
+	TObjectPtr<UTextBlock> Txt_Buy;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
+	// 모든 품목을 표시하는 전체 분류 버튼
+	TObjectPtr<UMD_CommonButtonBase> Btn_Category_All;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
+	// 도구 분류의 선택 표시를 담당하는 버튼
+	TObjectPtr<UMD_CommonButtonBase> Btn_Category_Tool;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
+	// 안전 분류의 선택 표시를 담당하는 버튼
+	TObjectPtr<UMD_CommonButtonBase> Btn_Category_Safety;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
+	// 유틸 수리 분류의 선택 표시를 담당하는 버튼
+	TObjectPtr<UMD_CommonButtonBase> Btn_Category_Repair;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
+	// 생존 분류의 선택 표시를 담당하는 버튼
+	TObjectPtr<UMD_CommonButtonBase> Btn_Category_Survive;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
+	// 회수 분류의 선택 표시를 담당하는 버튼
+	TObjectPtr<UMD_CommonButtonBase> Btn_Category_Recovery;
+
+	UPROPERTY(Transient)
+	// 카테고리 버튼 중 하나의 선택 상태를 유지하는 그룹
+	TObjectPtr<UCommonButtonGroupBase> CategoryButtonGroup;
+
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
+	// 카드 크기를 유지하며 한 행에 최대 네 개씩 배치하는 줄바꿈 목록
+	TObjectPtr<UWrapBox> WB_ItemEntries;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_Credits;
@@ -168,7 +233,8 @@ protected:
 	TObjectPtr<UTextBlock> Txt_DetailDescription;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_DetailPrice;
+	// 선택 품목의 실제 카테고리를 표시하는 상세 배지
+	TObjectPtr<UTextBlock> Txt_DetailCategory;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_Owned;

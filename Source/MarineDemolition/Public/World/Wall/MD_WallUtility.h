@@ -1,9 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Engine/NetSerialization.h"
-#include "GameFramework/Actor.h"
-#include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTagAssetInterface.h"
@@ -13,6 +10,7 @@
 class UBoxComponent;
 class UStaticMeshComponent;
 class AMD_CuttableWall;
+struct FMD_UtilityRecord;
 
 UENUM(BlueprintType)
 enum class EMD_UtilityState : uint8
@@ -33,6 +31,14 @@ class MARINEDEMOLITION_API AMD_WallUtility : public AActor, public IMD_Interacta
 
 public:
 	AMD_WallUtility();
+
+	void SetQuestHighlighted(AActor* Source, bool bHighlighted);
+
+	// 파손과 수리 상태를 점수 처리 없이 보관하는 기록 생성
+	virtual FMD_UtilityRecord BuildPersistenceRecord();
+
+	// 저장된 상태로 설비와 연결된 연출 및 게이트 복원
+	virtual bool RestorePersistenceRecord(FMD_UtilityRecord Record);
 
 	void StopScanFor(AActor* Scanner);
 
@@ -74,6 +80,14 @@ public:
 	bool TryRepairWithEquippedTool(AActor* Repairer);
 
 	bool RepairRequiresToolInput() const { return bRepairRequiresToolInput; }
+
+	// HUD 조회 전용. E 상호작용을 허용하거나 수리/수량 차감을 실행하지 않는다.
+	bool CanRepairWithToolInput(AActor* Repairer) const
+	{
+		return bRepairRequiresToolInput
+			&& UtilityState == EMD_UtilityState::Broken
+			&& CanRepairWith(Repairer);
+	}
 
 	// IMD_Interactable — 수리는 서버에서 검증
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
@@ -163,6 +177,11 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility", meta = (ClampMin = "0", ClampMax = "255"))
 	int32 ScanSilhouetteStencil = 251;
 
+	// 이 설비가 겹친 파괴 가능 벽을 찾아 철거/스캔 델리게이트를 구독할지.
+	// 독립 설비(예: Day3 냉각 펌프)는 false로 두어 벽 철거 시스템과 완전히 분리한다.
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Utility")
+	bool bLinkHostWalls = true;
+
 	// 레벨 시작 시 이미 파손된 상태로 시작할지. 벽 없이 인프라만 고장난 상태를 표현한다
 	// (감점 없음, 절단 원샷 연출 없음 — BP 연출도 이 값으로 분기)
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Utility")
@@ -209,5 +228,7 @@ private:
 	FMD_ScanMeshState HighlightState;
 	bool bScanHighlighted = false;
 	bool bInteractionHighlighted = false;
+	bool bQuestHighlighted = false;
+	TSet<TWeakObjectPtr<AActor>> QuestHighlightSources;
 	void RefreshHighlight();
 };

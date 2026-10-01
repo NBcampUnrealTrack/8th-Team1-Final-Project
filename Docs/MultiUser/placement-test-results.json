@@ -1,0 +1,39 @@
+{
+  "date": "2026-09-18",
+  "engine": "Unreal Engine 5.8",
+  "platform": "Win64 Development / D3D12",
+  "workflow": "U vertical drop; B held target click; Y grid only",
+  "disabled": [
+    "Midpoint (N)",
+    "Edge rotation (J)",
+    "Slope (I)",
+    "Extra focus button"
+  ],
+  "succeeded": 4,
+  "succeededWithWarnings": 0,
+  "failed": 0,
+  "notRun": 0,
+  "tests": [
+    {
+      "fullTestPath": "MDMultiUser.Placement.ApplyUndo",
+      "state": "Success"
+    },
+    {
+      "fullTestPath": "MDMultiUser.Placement.ClickSnap",
+      "state": "Success"
+    },
+    {
+      "fullTestPath": "MDMultiUser.Placement.EdgeMath",
+      "state": "Success"
+    },
+    {
+      "fullTestPath": "MDMultiUser.Placement.MeshFeatures",
+      "state": "Success"
+    }
+  ],
+  "limitations": [
+    "Native viewport routing tested; physical simultaneous keyboard and mouse input not automated",
+    "Blueprint layout represented by Actor with StaticMeshComponent root",
+    "macOS and multi-client contention not tested"
+  ]
+}

@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Character/MD_Character.h"
@@ -12,6 +12,8 @@
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
+#include "Component/Support/MD_SupportPlacementComponent.h"
+#include "Data/Equipment/MD_SupplyItemDefinition.h"
 #include "Component/Equipment/MD_FoamGunComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Comfort/MD_ComfortComponent.h"
@@ -29,6 +31,7 @@
 #include "Components/BoxComponent.h"
 #include "Components/WidgetComponent.h"
 #include "Camera/CameraComponent.h"
+#include "Camera/PlayerCameraManager.h"
 #include "Engine/LocalPlayer.h"
 #include "Engine/StaticMeshSocket.h"
 #include "Animation/AnimInstance.h"
@@ -51,6 +54,10 @@
 #include "NiagaraFunctionLibrary.h"
 #include "NiagaraSystem.h"
 #include "UI/Customization/MD_NameTagWidget.h"
+#include "Data/Customization/MD_CharacterRosterData.h"
+#include "Gameplay/Customization/MD_CharacterAppearanceSettings.h"
+#include "Materials/MaterialInstanceDynamic.h"
+#include "Engine/SkeletalMesh.h"
 #include "Util/MD_LogUtility.h"
 
 // Sets default values
@@ -149,6 +156,7 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	ComfortComponent = CreateDefaultSubobject<UMD_ComfortComponent>(TEXT("ComfortComponent"));
 
 	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
+	SupportPlacementComponent = CreateDefaultSubobject<UMD_SupportPlacementComponent>(TEXT("SupportPlacementComponent"));
 
 	FoamGunComponent = CreateDefaultSubobject<UMD_FoamGunComponent>(TEXT("FoamGunComponent"));
 
@@ -349,6 +357,12 @@ void AMD_Character::BeginPlay()
 
 	}
 
+	if (IsValid(InteractionComponent))
+	{
+		// 핫바보다 먼저 묶어 두면 아래 HandleHotbarChanged 가 운반 상태를 반영한 첫 도구 표시를 만든다
+		InteractionComponent->OnHeldActorChanged.AddDynamic(this, &AMD_Character::HandleHeldActorChanged);
+	}
+
 	if (IsValid(EquipHotbarComponent))
 	{
 		EquipHotbarComponent->OnHotbarChanged.AddDynamic(this, &AMD_Character::HandleHotbarChanged);
@@ -389,6 +403,7 @@ void AMD_Character::ConfigureFirstPersonRendering()
 
 void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	UnbindAppearanceDelegate();
 	ResetScrapeFocusInputState();
 
 	if (IsValid(InteractionComponent))
@@ -1014,6 +1029,9 @@ void AMD_Character::PossessedBy(AController* NewController)
 	RefreshFirstPersonArmsTick();
 	// 서버에서 빙의가 완료된 PlayerState의 이름을 이름표에 반영한다.
 	RefreshNameTag();
+	// 서버에서 빙의 시 PlayerState 외형을 캐릭터 메시에 적용한다.
+	BindAppearanceDelegate();
+	ApplyAppearanceFromPlayerState();
 }
 
 void AMD_Character::UnPossessed()
@@ -1059,6 +1077,9 @@ void AMD_Character::OnRep_PlayerState()
 	InitializeAbilitySystem();
 	// 클라이언트에 PlayerState가 복제된 뒤 플랫폼 닉네임을 이름표에 반영한다.
 	RefreshNameTag();
+	// 클라이언트에서 PlayerState 복제 후 외형을 캐릭터 메시에 적용한다.
+	BindAppearanceDelegate();
+	ApplyAppearanceFromPlayerState();
 }
 
 void AMD_Character::RefreshNameTag()
@@ -1153,6 +1174,8 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Started, this, &AMD_Character::HandleJumpOrSwimInput);
 	EIC->BindAction(InputConfig->JumpAction, ETriggerEvent::Completed, this, &AMD_Character::HandleJumpOrSwimReleasedInput);
 	EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Started, this, &AMD_Character::HandleInteractInput);
+	EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Completed, this, &AMD_Character::HandleInteractReleasedInput);
+	EIC->BindAction(InputConfig->InteractAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleInteractReleasedInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Started, this, &AMD_Character::HandleAbilityInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAbilityReleasedInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAbilityReleasedInput);
@@ -1302,6 +1325,14 @@ void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 	}
 }
 
+void AMD_Character::HandleInteractReleasedInput(const FInputActionValue& Value)
+{
+	if (IsValid(InteractionComponent))
+	{
+		InteractionComponent->InteractReleased();
+	}
+}
+
 void AMD_Character::HandleScannerModeSwitchInput(const FInputActionValue& Value)
 {
 	if (IsValid(ScannerComponent)) ScannerComponent->ToggleScanMode();
@@ -1315,7 +1346,8 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 	}
 
 	// 모든 보관형 소모품의 사용 입력을 구매 GE가 부여한 GA에 전달
-	if (IsValid(Cast<UMD_ConsumeItemDefinition>(EquipHotbarComponent->GetCurrentItem())) == true)
+	if (IsValid(Cast<UMD_ConsumeItemDefinition>(EquipHotbarComponent->GetCurrentItem()))
+		|| IsValid(Cast<UMD_SupplyItemDefinition>(EquipHotbarComponent->GetCurrentItem())))
 	{
 		// 선택한 아이템의 전체 AssetId에 귀속된 능력 한 개 활성화
 		EquipHotbarComponent->TryActivateCurrentItemAbility();
@@ -1335,8 +1367,7 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 	bScrapeAbilityInputCaptured = bIsScrapeAbility;
 	if (bIsScrapeAbility && IsValid(ScrapeToolComponent) && !ScrapeToolComponent->IsScrapeFocusActive())
 	{
-		if (UAbilitySystemComponent* AbilitySystem = GetAbilitySystemComponent())
-			AbilitySystem->TryActivateAbilitiesByTag(FGameplayTagContainer(CurrentTool->ToolAbilityTag));
+		EquipHotbarComponent->TryActivateCurrentItemAbility();
 		return;
 	}
 	if (bIsScrapeAbility
@@ -1759,7 +1790,7 @@ void AMD_Character::RefreshCutterBladeMesh()
 
 	// 절단기를 들고, 톱날 메시가 있고, 본체에 회전 중심 소켓이 있어야 표시한다.
 	// 소켓이 없으면 톱날이 도구 원점에 겹쳐 박히므로 숨기는 편이 낫다.
-	const bool bWantsBlade = IsCutterEquipped() && IsValid(CutterBladeMesh);
+	const bool bWantsBlade = IsCutterEquipped() && IsValid(CutterBladeMesh) && !IsCarryingItem();
 
 	const auto Apply = [this, bWantsBlade](UStaticMeshComponent* const Blade,
 		const UStaticMeshComponent* const ToolMesh)
@@ -1917,6 +1948,22 @@ void AMD_Character::HandleScrapeLoadChanged(const float NewScrapeLoad)
 	RefreshScrapeLoadVisual();
 }
 
+void AMD_Character::HandleHeldActorChanged(AActor* HeldActor)
+{
+	// EndPlay 의 CancelInteraction 으로도 오므로 파괴 중엔 메시를 건드리지 않는다
+	if (IsActorBeingDestroyed())
+	{
+		return;
+	}
+	// 슬롯은 그대로, 표시만 바꾼다. 도구 메시·톱날·헤라 적재 메시가 한 경로에서 갱신된다
+	RefreshToolMesh();
+}
+
+bool AMD_Character::IsCarryingItem() const
+{
+	return IsValid(InteractionComponent) && InteractionComponent->IsHolding();
+}
+
 void AMD_Character::RefreshToolMesh()
 {
 	if (!IsValid(EquipHotbarComponent))
@@ -2009,7 +2056,8 @@ void AMD_Character::RefreshScrapeLoadVisual()
 		}
 	}
 
-	const bool bShowTool = IsValid(NewToolMesh);
+	// 물건을 들고 있는 동안은 도구를 내린다 (슬롯 유지, 연출만)
+	const bool bShowTool = IsValid(NewToolMesh) && !IsCarryingItem();
 	const bool bHasThirdPersonSocket = IsValid(GetMesh())
 		&& GetMesh()->DoesSocketExist(ThirdPersonToolMesh->GetAttachSocketName());
 	// 일인칭도 기본 소켓 대신 실제 부착 소켓의 유효성으로 표시 여부 결정
@@ -2345,4 +2393,273 @@ void AMD_Character::TeleportToMothership()
 		/*bSweep=*/false,
 		nullptr,
 		ETeleportType::TeleportPhysics);
+}
+
+void AMD_Character::ApplyAppearanceFromPlayerState()
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (IsValid(MDPlayerState) == false)
+	{
+		return;
+	}
+
+	ApplyAppearance(MDPlayerState->GetAppearance());
+}
+
+void AMD_Character::ApplyAppearance(const FMD_CharacterAppearance& Appearance)
+{
+	const UMD_CharacterAppearanceSettings* Settings = UMD_CharacterAppearanceSettings::Get();
+	UMD_CharacterRosterData* Roster = IsValid(Settings) == true ? Settings->GetRoster() : nullptr;
+	if (IsValid(Roster) == false)
+	{
+		return;
+	}
+
+	const FMD_CharacterAppearance Sanitized = Roster->Sanitize(Appearance);
+	USkeletalMeshComponent* BodyMesh = GetMesh();
+	bool bUseMaterialVariants = false;
+
+	if (Roster->Characters.IsValidIndex(Sanitized.CharacterIndex) == true && IsValid(BodyMesh) == true)
+	{
+		const FMD_CharacterRosterEntry& Entry = Roster->Characters[Sanitized.CharacterIndex];
+		bUseMaterialVariants = Entry.MaterialVariants.Num() > 0;
+
+		// 몸 메시·애님은 바뀔 때만 교체한다. 같은 값 재적용은 포즈를 끊는다
+		USkeletalMesh* NewBodyMesh = Entry.BodyMesh.LoadSynchronous();
+		if (IsValid(NewBodyMesh) == true && BodyMesh->GetSkeletalMeshAsset() != NewBodyMesh)
+		{
+			BodyMesh->SetSkeletalMeshAsset(NewBodyMesh);
+			BodyMesh->EmptyOverrideMaterials();
+		}
+
+		UClass* NewAnimClass = Entry.BodyAnimClass.LoadSynchronous();
+		if (IsValid(NewAnimClass) == true && BodyMesh->GetAnimClass() != NewAnimClass)
+		{
+			BodyMesh->SetAnimInstanceClass(NewAnimClass);
+		}
+
+		// 1인칭 팔은 몸 포즈를 따라가므로 교체 후 LeaderPose를 다시 묶는다
+		USkeletalMesh* NewArmsMesh = Entry.ArmsMesh.LoadSynchronous();
+		if (IsValid(FirstPersonMesh) == true && IsValid(NewArmsMesh) == true
+			&& FirstPersonMesh->GetSkeletalMeshAsset() != NewArmsMesh)
+		{
+			FirstPersonMesh->SetSkeletalMeshAsset(NewArmsMesh);
+			FirstPersonMesh->EmptyOverrideMaterials();
+			BindFirstPersonArmsToBodyPose();
+		}
+
+		if (GetNetMode() != NM_DedicatedServer)
+		{
+			const FMD_CharacterMaterialVariant* Variant = nullptr;
+			if (bUseMaterialVariants)
+			{
+				const int32 VariantIndex = Entry.MaterialVariants.IsValidIndex(Sanitized.ColorIndex)
+					? Sanitized.ColorIndex : 0;
+				Variant = &Entry.MaterialVariants[VariantIndex];
+			}
+
+			// 이전 색의 슬롯이 남지 않도록 매번 원본을 기준으로 해석한다.
+			auto ApplyMaterials = [bUseMaterialVariants](USkeletalMeshComponent* Component,
+				const TArray<TSoftObjectPtr<UMaterialInterface>>* BaseOverrides,
+				const TArray<TSoftObjectPtr<UMaterialInterface>>* VariantOverrides)
+			{
+				if (!IsValid(Component) || !IsValid(Component->GetSkeletalMeshAsset()))
+				{
+					return;
+				}
+				const TArray<FSkeletalMaterial>& Defaults = Component->GetSkeletalMeshAsset()->GetMaterials();
+				for (int32 SlotIndex = 0; SlotIndex < Defaults.Num(); ++SlotIndex)
+				{
+					UMaterialInterface* Material = Defaults[SlotIndex].MaterialInterface;
+					if (BaseOverrides && BaseOverrides->IsValidIndex(SlotIndex))
+					{
+						if (UMaterialInterface* Override = (*BaseOverrides)[SlotIndex].LoadSynchronous())
+						{
+							Material = Override;
+						}
+					}
+					if (VariantOverrides && VariantOverrides->IsValidIndex(SlotIndex))
+					{
+						if (UMaterialInterface* Override = (*VariantOverrides)[SlotIndex].LoadSynchronous())
+						{
+							Material = Override;
+						}
+					}
+					UMaterialInterface* Current = Component->GetMaterial(SlotIndex);
+					UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(Current);
+					if (Current != Material && !(MID && !bUseMaterialVariants && MID->Parent == Material))
+					{
+						Component->SetMaterial(SlotIndex, Material);
+					}
+				}
+			};
+
+			if (bUseMaterialVariants || AppliedAppearance.CharacterIndex != Sanitized.CharacterIndex)
+			{
+				ApplyMaterials(BodyMesh, nullptr, Variant ? &Variant->BodyMaterials : nullptr);
+			}
+			ApplyMaterials(FirstPersonMesh, &Entry.ArmsMaterials, Variant ? &Variant->ArmsMaterials : nullptr);
+		}
+	}
+
+	// 색상별 머티리얼은 텍스처 자체에 색이 있어 추가 틴트를 곱하지 않는다.
+	if (GetNetMode() != NM_DedicatedServer && !bUseMaterialVariants)
+	{
+		const FLinearColor MainColor = Roster->GetPaletteColor(Sanitized.ColorIndex);
+		ApplyAppearanceColor(BodyMesh, Roster->ColorParameterName, MainColor);
+		ApplyAppearanceColor(FirstPersonMesh, Roster->ColorParameterName, MainColor);
+	}
+
+	AppliedAppearance = Sanitized;
+}
+
+void AMD_Character::ApplyAppearanceColor(USkeletalMeshComponent* MeshComponent, FName ParameterName, const FLinearColor& Color)
+{
+	if (IsValid(MeshComponent) == false || ParameterName.IsNone() == true)
+	{
+		return;
+	}
+
+	const int32 MaterialCount = MeshComponent->GetNumMaterials();
+	for (int32 SlotIndex = 0; SlotIndex < MaterialCount; ++SlotIndex)
+	{
+		// 이미 MID면 재사용하고, 아니면 슬롯 머티리얼을 부모로 MID를 만든다
+		UMaterialInstanceDynamic* MID = Cast<UMaterialInstanceDynamic>(MeshComponent->GetMaterial(SlotIndex));
+		if (IsValid(MID) == false)
+		{
+			MID = MeshComponent->CreateAndSetMaterialInstanceDynamic(SlotIndex);
+		}
+		if (IsValid(MID) == true)
+		{
+			MID->SetVectorParameterValue(ParameterName, Color);
+		}
+	}
+}
+
+bool AMD_Character::TryGetVisibleToolSocketLocation(FName SocketName, FVector& OutLocation) const
+{
+	if (SocketName.IsNone())
+	{
+		return false;
+	}
+
+	// 로컬 1인칭 화면이면 1인칭 도구, 거울(3인칭 전환)·타 클라이언트·서버는 3인칭 도구
+	const bool bUseFirstPerson = IsLocallyControlled()
+		&& !bLocalThirdPersonViewEnabled
+		&& IsValid(FirstPersonToolMesh)
+		&& FirstPersonToolMesh->IsVisible();
+	const UStaticMeshComponent* ToolMesh = bUseFirstPerson ? FirstPersonToolMesh : ThirdPersonToolMesh;
+	if (!IsValid(ToolMesh) || !ToolMesh->DoesSocketExist(SocketName))
+	{
+		return false;
+	}
+
+	const FVector SocketLocation = ToolMesh->GetSocketLocation(SocketName);
+	OutLocation = bUseFirstPerson ? ToFirstPersonApparentWorldLocation(SocketLocation) : SocketLocation;
+	return true;
+}
+
+FVector AMD_Character::ToFirstPersonApparentWorldLocation(const FVector& WorldLocation) const
+{
+	if (!IsValid(Camera) || !Camera->bEnableFirstPersonScale)
+	{
+		return WorldLocation;
+	}
+
+	// 1인칭 프리미티브는 뷰 원점을 기준으로 FirstPersonScale만큼 당겨 그려진다
+	const APlayerController* PlayerController = Cast<APlayerController>(Controller);
+	FVector ViewLocation = Camera->GetComponentLocation();
+	FRotator ViewRotation = Camera->GetComponentRotation();
+	if (IsValid(PlayerController))
+	{
+		PlayerController->GetPlayerViewPoint(ViewLocation, ViewRotation);
+	}
+
+	const FTransform ViewTransform(ViewRotation, ViewLocation);
+	FVector ViewSpace = ViewTransform.InverseTransformPositionNoScale(WorldLocation) * Camera->FirstPersonScale;
+
+	// 1인칭 전용 FOV를 쓰면 화면 투영도 달라지므로 시야각 비율만큼 가로·세로를 보정한다
+	if (Camera->bEnableFirstPersonFieldOfView && IsValid(PlayerController) && IsValid(PlayerController->PlayerCameraManager))
+	{
+		const float WorldFOV = PlayerController->PlayerCameraManager->GetFOVAngle();
+		const float FirstPersonFOV = Camera->FirstPersonFieldOfView;
+		if (WorldFOV > UE_KINDA_SMALL_NUMBER && FirstPersonFOV > UE_KINDA_SMALL_NUMBER)
+		{
+			const float Ratio = FMath::Tan(FMath::DegreesToRadians(WorldFOV * 0.5f))
+				/ FMath::Tan(FMath::DegreesToRadians(FirstPersonFOV * 0.5f));
+			ViewSpace.Y *= Ratio;
+			ViewSpace.Z *= Ratio;
+		}
+	}
+
+	return ViewTransform.TransformPositionNoScale(ViewSpace);
+}
+
+void AMD_Character::SetLocalThirdPersonViewEnabled(bool bEnabled)
+{
+	if (bLocalThirdPersonViewEnabled == bEnabled || IsLocallyControlled() == false)
+	{
+		return;
+	}
+	bLocalThirdPersonViewEnabled = bEnabled;
+
+	// 외부 카메라에서 자기 몸이 보이도록 OwnerNoSee를 풀고, 1인칭 팔·도구는 숨긴다
+	const bool bOwnerNoSee = !bEnabled;
+	if (IsValid(GetMesh()) == true)
+	{
+		GetMesh()->SetOwnerNoSee(bOwnerNoSee);
+	}
+	if (IsValid(ThirdPersonToolMesh) == true)
+	{
+		ThirdPersonToolMesh->SetOwnerNoSee(bOwnerNoSee);
+	}
+	if (IsValid(ThirdPersonCutterBlade) == true)
+	{
+		ThirdPersonCutterBlade->SetOwnerNoSee(bOwnerNoSee);
+	}
+	if (IsValid(FirstPersonMesh) == true)
+	{
+		FirstPersonMesh->SetHiddenInGame(bEnabled, false);
+	}
+	if (IsValid(FirstPersonToolMesh) == true)
+	{
+		FirstPersonToolMesh->SetHiddenInGame(bEnabled, false);
+	}
+	if (IsValid(FirstPersonCutterBlade) == true)
+	{
+		FirstPersonCutterBlade->SetHiddenInGame(bEnabled, false);
+	}
+}
+
+void AMD_Character::BindAppearanceDelegate()
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (IsValid(MDPlayerState) == false)
+	{
+		return;
+	}
+
+	// 중복 등록 방지
+	if (MDPlayerState->OnAppearanceChanged.IsAlreadyBound(this, &AMD_Character::HandleAppearanceChanged) == true)
+	{
+		return;
+	}
+
+	MDPlayerState->OnAppearanceChanged.AddDynamic(this, &AMD_Character::HandleAppearanceChanged);
+}
+
+void AMD_Character::UnbindAppearanceDelegate()
+{
+	AMD_PlayerState* MDPlayerState = GetPlayerState<AMD_PlayerState>();
+	if (IsValid(MDPlayerState) == false)
+	{
+		return;
+	}
+
+	MDPlayerState->OnAppearanceChanged.RemoveDynamic(this, &AMD_Character::HandleAppearanceChanged);
+}
+
+void AMD_Character::HandleAppearanceChanged()
+{
+	ApplyAppearanceFromPlayerState();
 }

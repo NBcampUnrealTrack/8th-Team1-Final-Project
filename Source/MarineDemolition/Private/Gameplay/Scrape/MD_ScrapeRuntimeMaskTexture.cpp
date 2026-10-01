@@ -1,4 +1,5 @@
 #include "Gameplay/Scrape/MD_ScrapeRuntimeMaskTexture.h"
+#include "MD_ScrapeMaskUploadRegions.h"
 #include "MDScrapeInitialMaskRenderer.h"
 #include "TextureResource.h"
 #include "RHICommandList.h"
@@ -11,6 +12,7 @@
 #include <atomic>
 
 DEFINE_LOG_CATEGORY_STATIC(LogMDScrapeMaskUpload, Log, All);
+TRACE_DECLARE_INT_COUNTER(MD_ScrapeMask_LayoutGPUBytes, TEXT("MD/ScrapeMask/LayoutGPUBytes"));
 TRACE_DECLARE_INT_COUNTER(MD_ScrapeMask_InitialPendingBytes, TEXT("MD/ScrapeMask/InitialPendingBytes"));
 TRACE_DECLARE_INT_COUNTER(MD_ScrapeMask_DirtyPendingBytes, TEXT("MD/ScrapeMask/DirtyPendingBytes"));
 TRACE_DECLARE_INT_COUNTER(MD_ScrapeMask_InitialPeakBytes, TEXT("MD/ScrapeMask/InitialPeakBytes"));
@@ -26,7 +28,12 @@ struct FMaskUploadState
 {
     FCriticalSection Mutex;
     bool bHasDirtyWork = false; // Protected by Mutex; also read after final owner release.
-    ~FMaskUploadState() { if (bHasDirtyWork) QueuedDirtyStates.fetch_sub(1); }
+    ~FMaskUploadState()
+    {
+        if (bHasDirtyWork) QueuedDirtyStates.fetch_sub(1);
+        CurrentPixels.EmptyWithDeferredPageRelease();
+        PendingPixels.EmptyWithDeferredPageRelease();
+    }
     FMD_ScrapeMaskPixels CurrentPixels; // Exact latest data, including resource recreation.
     FMD_ScrapeMaskPixels PendingPixels;
     TBitArray<> Dirty;
@@ -67,6 +74,7 @@ void TraceUploadStats()
     // Trace-counter objects are written only on GT; render/RHI work updates atomics.
     // Always emit samples so a trace begun after startup still has explicit zeroes.
     check(IsInGameThread());
+    TRACE_COUNTER_SET_ALWAYS(MD_ScrapeMask_LayoutGPUBytes, FMDScrapeInitialMaskRenderer::GetLiveLayoutGPUBytes());
     TRACE_COUNTER_SET_ALWAYS(MD_ScrapeMask_InitialPendingBytes, InitialPending.load());
     TRACE_COUNTER_SET_ALWAYS(MD_ScrapeMask_DirtyPendingBytes, DirtyPending.load());
     TRACE_COUNTER_SET_ALWAYS(MD_ScrapeMask_InitialPeakBytes, InitialPeak.load());
@@ -202,19 +210,20 @@ void PumpUploads(FRHICommandListImmediate& Cmd, const TArray<FUploadStatePtr>& S
         }
         const uint64 Before = DirtyPending.fetch_add(Bytes);
         RecordPeak(DirtyPeak, Before + Bytes);
-        uint8 Row[FMD_ScrapeMaskPixels::PageSize];
+        uint8 PagePixels[FMD_ScrapeMaskPixels::PageSize];
         for (int32 Page : Pages)
         {
-            int32 Start = Page * FMD_ScrapeMaskPixels::PageSize;
-            const int32 End = FMath::Min(Start + FMD_ScrapeMaskPixels::PageSize, Latest.Num());
-            while (Start < End)
+            const int32 Start = Page * FMD_ScrapeMaskPixels::PageSize;
+            const int32 Length = FMath::Min(FMD_ScrapeMaskPixels::PageSize, Latest.Num() - Start);
+            Latest.CopyRange(Start, Length, PagePixels);
+            // Preserve admitted pages and fences; merge only complete rows in this page.
+            MD_ScrapeMaskUploadPrivate::ForEachPageUploadRegion(Start, Length, State->Size.X,
+                [&](const MD_ScrapeMaskUploadPrivate::FPageUploadRegion& Region)
             {
-                const int32 X = Start % State->Size.X, Y = Start / State->Size.X;
-                const int32 Length = FMath::Min(End - Start, State->Size.X - X);
-                Latest.CopyRange(Start, Length, Row);
-                Cmd.UpdateTexture2D(State->Texture, 0, FUpdateTextureRegion2D(X, Y, 0, 0, Length, 1), Length, Row);
-                Start += Length;
-            }
+                Cmd.UpdateTexture2D(State->Texture, 0,
+                    FUpdateTextureRegion2D(Region.X, Region.Y, 0, 0, Region.Width, Region.Height),
+                    Region.Width, PagePixels + Region.SourceOffset);
+            });
         }
         TrackFence(Cmd, State, Bytes, false);
         NextUploadIndex = (StateIndex + 1) % Count;

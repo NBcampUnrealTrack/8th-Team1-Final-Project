@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Engine/EngineTypes.h"
+#include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Grabbable.h"
 #include "MD_InteractionComponent.generated.h"
 
@@ -12,9 +13,12 @@ class UCameraComponent;
 class UPhysicsHandleComponent;
 class UPrimitiveComponent;
 class USceneComponent;
+struct FCollisionQueryParams;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnInteractionTargetChanged, AActor*, NewTarget);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnInteractionPromptChanged, FText, PromptText);
+/** 운반 대상이 바뀔 때(잡음·놓음). 권한·비권한 머신 모두에서 난다. 놓으면 nullptr */
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMDOnHeldActorChanged, AActor*, HeldActor);
 
 /**
  * 플레이어의 조준 상호작용과 물리 오브젝트 운반을 담당
@@ -41,13 +45,27 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
 	void Interact();
 
+	/**
+	 * 상호작용 키를 뗐을 때 호출한다. 직전 Interact가 홀드 대상(IsHoldInteraction)에 갔다면
+	 * 같은 경로(서버/로컬)로 InteractReleased를 전달하고, 아니면 아무것도 하지 않는다.
+	 */
+	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
+	void InteractReleased();
+
 	/** Clears local focus and releases any authoritative carry state. Safe to call during death/teleport/teardown. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
 	void CancelInteraction();
 
+	/** 소유 폰이 지금 상호작용할 수 있는 상태인지 (차단·사망·빙의 해제 검사). 홀드 대상이 서버 틱에서 유지 조건으로 쓴다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
+	bool CanOwnerInteract() const;
+
 	/** Releases the held actor on the server. Client calls are intentionally ignored. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
 	void ReleaseHeldActor();
+
+	/** Server-only handoff from a currently aimed, validated interaction source. */
+	bool TryReceiveQuestItem(class AMD_QuestItem* Item, AActor* Source);
 
 	/** Blocks new interactions and immediately cancels the current interaction when blocked. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
@@ -55,6 +73,10 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	AActor* GetHeldActor() const { return HeldActor; }
+
+	/** 운반 시작·종료 알림. 캐릭터가 도구 메시를 내리고 올리는 연출에 쓴다 */
+	UPROPERTY(BlueprintAssignable, Category = "MD|Interaction")
+	FMDOnHeldActorChanged OnHeldActorChanged;
 
 	/** 로컬 플레이어가 현재 조준 중인 상호작용 가능 대상. */
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
@@ -85,6 +107,13 @@ protected:
 
 	UPROPERTY(EditAnywhere, Category = "MD|Interaction", meta = (ClampMin = "0.0", Units = "cm"))
 	float InteractTraceDistance = 200.f;
+
+	/**
+	 * 물건을 손에 쥔 순간 그 자리에서 한 번 재생하는 픽업음 event tag.
+	 * 사운드 에셋이 아니라 태그다 — 어떤 소재가 나갈지는 DA_MD_Audio_Carry 가 정한다.
+	 */
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Interaction|사운드")
+	FGameplayTag PickupSoundTag;
 
 	/** 커팅·스캔 도구의 중앙 조준 프롬프트가 확인할 거리. GA 기본 TraceDistance와 같다. */
 	UPROPERTY(EditAnywhere, Category = "MD|Interaction", meta = (ClampMin = "0.0", Units = "cm"))
@@ -145,6 +174,10 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerInteract(AActor* RequestedActor);
 
+	/** 홀드 대상의 키 해제를 서버에 전달한다. 해제는 항상 안전하므로 조준·간격 검증 없이 대상에 그대로 넘긴다. */
+	UFUNCTION(Server, Reliable)
+	void ServerInteractReleased(AActor* RequestedActor);
+
 	bool TryHoldTarget(AActor* Target);
 	bool TryGrabPhysicsComponent(UPrimitiveComponent* Component, const FVector& PreferredGrabLocation,
 		const FMD_HoldProfile& HoldProfile);
@@ -171,10 +204,10 @@ private:
 	 * 도달 불가능한 목표를 스프링이 계속 당기고 바닥이 계속 밀어내면 평형점이 없어 떨린다.
 	 * 목표를 항상 빈 공간에 두면 그 싸움 자체가 없어진다.
 	 */
-	FVector ResolveHoldTargetLocation(const FTransform& HoldTransform) const;
+	FVector ResolveHoldTargetLocation(const FTransform& HoldTransform,
+		const UPrimitiveComponent* PendingItem = nullptr) const;
 	bool ValidateInteractionTarget(AActor* RequestedActor) const;
 	bool IsHeldByOtherPawn(const AActor* Target) const;
-	bool CanOwnerInteract() const;
 	bool HasAuthorityPhysicsGrip() const;
 	void RefreshTickEnabled();
 	void UpdateHeldTarget();
@@ -183,6 +216,7 @@ private:
 	void UpdateInteractionFocus();
 	void UpdateInteractionPrompt();
 	AActor* TraceInteractionTarget() const;
+	void AddInteractionTraceIgnoredActors(FCollisionQueryParams& QueryParams) const;
 	FText ResolveCurrentInteractionPrompt() const;
 	FText ResolveAbilityInteractionPrompt() const;
 	bool TryTraceAimedWall(class AMD_CuttableWall*& OutWall, FHitResult& OutHit) const;
@@ -195,6 +229,14 @@ private:
 	UFUNCTION()
 	void OnRep_HeldActor();
 
+	/**
+	 * 픽업음을 이 머신에서 재생한다.
+	 *
+	 * 권한 쪽은 TryHoldTarget 이, 나머지 머신은 OnRep_HeldActor 가 부른다.
+	 * HeldActor 는 이미 무조건 복제되므로 이 소리를 위한 RPC 는 따로 쓰지 않는다.
+	 */
+	void PlayPickupSound() const;
+
 	UPROPERTY(Transient)
 	TObjectPtr<UCameraComponent> Camera;
 
@@ -205,6 +247,9 @@ private:
 	TObjectPtr<UPhysicsHandleComponent> PhysicsHandle;
 
 	TWeakObjectPtr<AActor> CurrentTarget;
+
+	/** 직전 Interact가 향한 홀드 대상. 키를 뗄 때 InteractReleased를 보낸 뒤 비운다 (로컬 전용). */
+	TWeakObjectPtr<AActor> HoldInteractionTarget;
 
 	UPROPERTY(Transient)
 	FText CurrentInteractionPrompt;

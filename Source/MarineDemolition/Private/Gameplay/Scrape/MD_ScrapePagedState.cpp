@@ -405,6 +405,7 @@ TSharedPtr<const FMD_ScrapePagedState::FInitial, ESPMode::NotThreadSafe>
 FMD_ScrapePagedState::FindOrAddInitialAmounts(TArray<float>&& Amounts)
 {
     check(IsInGameThread());
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_ScrapeState_InternAmounts);
     struct FEntry { uint64 Hash; TWeakPtr<const FInitial, ESPMode::NotThreadSafe> Initial; };
     static TArray<FEntry> Cache;
     const SIZE_T Bytes = Amounts.Num() * sizeof(float);
@@ -502,6 +503,22 @@ void FMD_ScrapePagedState::InitializeFromCells(TArray<FMD_ScrapeSurfaceCell>&& C
         // A cache hit did not move the supplied array; consume it in both cases.
         Cells.Empty();
     }
+}
+
+void FMD_ScrapePagedState::ForEachSaveCandidate(TFunctionRef<void(int32)> Visit) const
+{
+    if (!Initial) return;
+    const bool bCanonical = Initial->bCanonicalAmounts || (Initial->bUniform
+        && MD_ScrapePagedStatePrivate::IsCanonicalInitial(Initial->UniformCell));
+    if (!bCanonical)
+    {
+        for (int32 I = 0; I < CellCount; ++I) Visit(I);
+        return;
+    }
+    for (int32 PageIndex = 0; PageIndex < Pages.Num(); ++PageIndex)
+        if (Pages[PageIndex])
+            for (int32 I = PageIndex * PageSize; I < FMath::Min((PageIndex + 1) * PageSize, CellCount); ++I)
+                Visit(I);
 }
 
 bool FMD_ScrapePagedState::IsPristineCanonicalInitial() const

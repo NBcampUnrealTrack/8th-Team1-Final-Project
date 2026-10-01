@@ -1,18 +1,15 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
-#include "Data/Equipment/MD_ItemDefinition.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Data/Equipment/MD_ConsumeItemDefinition.h"
 #include "AbilitySystemGlobals.h"
 #include "AbilitySystemComponent.h"
-#include "Abilities/GameplayAbility.h"
-#include "GameplayEffect.h"
 #include "GameplayEffectComponents/AbilitiesGameplayEffectComponent.h"
-#include "GameFramework/Actor.h"
 #include "Net/UnrealNetwork.h"
 #include "Util/MD_LogUtility.h"
+#include "Types/SaveGame/MD_SaveDataTypes.h"
 
 UMD_EquipHotbarComponent::UMD_EquipHotbarComponent()
 {
@@ -34,25 +31,28 @@ void UMD_EquipHotbarComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProper
 
 void UMD_EquipHotbarComponent::BeginPlay()
 {
-	// 상위 컴포넌트 시작 처리
 	Super::BeginPlay();
-	// 유효한 서버 소유자에 한해서 기본 아이템 구성
+	// 유효한 서버 소유자에 한해서 초기 아이템 상태 구성
 	if (IsValid(GetOwner()) == true && GetOwner()->HasAuthority() == true)
 	{
-		// 기본 설정이 슬롯 수를 늘리지 않도록 복사 범위 제한
-		int32 CopyCount = FMath::Min(DefaultTools.Num(), ToolEntries.Num());
-		// 기본 설정의 슬롯 순서를 유지하는 지급 순회
-		for (int32 Index = 0; Index < CopyCount; ++Index)
+		// 재생성 직후 복원된 장비와 빈 슬롯이 없는 신규 캐릭터에만 기본 지급
+		if (bHasRestoredEquipmentData == false)
 		{
-			// 비어 있지 않은 기본 아이템만 한 개씩 등록
-			if (IsValid(DefaultTools[Index]) == true)
+			// 기본 설정이 슬롯 수를 늘리지 않도록 복사 범위 제한
+			int32 CopyCount = FMath::Min(DefaultTools.Num(), ToolEntries.Num());
+			// 기본 설정의 슬롯 순서를 유지하는 지급 순회
+			for (int32 Index = 0; Index < CopyCount; ++Index)
 			{
-				// 잘못된 중복 도구 설정은 공통 슬롯 검증에서 거부
-				SetItemAtSlot(Index, DefaultTools[Index], 1);
+				// 비어 있지 않은 기본 아이템만 한 개씩 등록
+				if (IsValid(DefaultTools[Index]) == true)
+				{
+					// 잘못된 중복 도구 설정은 공통 슬롯 검증에서 거부
+					SetItemAtSlot(Index, DefaultTools[Index], 1);
+				}
 			}
 		}
-		// 빈 기본 설정도 UI에 초기 상태 전달
-		OnHotbarChanged.Broadcast();
+		// 빈 기본 설정도 내용 갱신 경로에 초기 상태 전달
+		OnRep_ToolEntries();
 	}
 }
 
@@ -398,8 +398,8 @@ void UMD_EquipHotbarComponent::SelectSlot(int32 SlotIndex)
 	}
 	// 로컬 입력 지연을 줄이기 위한 예측 선택 반영
 	CurrentSlotIndex = SlotIndex;
-	// 로컬 장착 표시와 UI에 예측 상태 전달
-	OnHotbarChanged.Broadcast();
+	// 예측 선택에도 서버와 동일한 선택 변경 알림 경로 적용
+	OnRep_CurrentSlotIndex();
 	// 서버에 실제 선택 위치 확정 요청
 	ServerSelectSlot(SlotIndex);
 }
@@ -418,73 +418,189 @@ void UMD_EquipHotbarComponent::CycleSlot(int32 Direction)
 	SelectSlot((CurrentSlotIndex + Step + ToolEntries.Num()) % ToolEntries.Num());
 }
 
-TArray<TSoftObjectPtr<UDataAsset>> UMD_EquipHotbarComponent::BuildEquipmentSaveData() const
+FMD_PlayerData UMD_EquipHotbarComponent::BuildEquipmentSaveData()
 {
-	// 기존 저장 형식으로 반환할 공통 아이템 경로 목록
-	TArray<TSoftObjectPtr<UDataAsset>> Result;
-	// 서버 소유자만 저장용 보관 상태 조회 허용
+	// 현재 보관 상태를 원본 슬롯과 분리하여 기록할 결과
+	FMD_PlayerData Result;
+	// 파일에 기록할 수 있는 상세 상태로 표시
+	Result.bHasHotbarState = true;
+	// 클라이언트나 초기화되지 않은 보관함의 수집 차단
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false)
 	{
-		// 비권위 저장 요청에 빈 결과 전달
+		// 슬롯 수 검증에 실패하는 빈 상세 기록 반환
 		return Result;
 	}
-	// 빈 슬롯을 포함한 네 위치의 순서 유지
-	for (int32 Index = 0; Index < ToolEntries.Num(); ++Index)
+	// 저장 당시 장착 위치 보존
+	Result.SelectedHotbarSlot = CurrentSlotIndex;
+	// 빈 슬롯도 포함한 보관 순서 유지
+	for (FMD_HotbarToolEntry& Entry : ToolEntries)
 	{
-		// 도구와 일반 아이템을 같은 저장 형식에 기록
-		Result.Add(GetItemAtSlot(Index));
+		// 원본 실행 상태와 독립적인 슬롯 기록 생성
+		FMD_HotbarItemData& Saved = Result.HotbarItems.AddDefaulted_GetRef();
+		// 빈 슬롯을 제외한 품목의 경로 독립적인 식별자 보관
+		if (IsValid(Entry.ToolDefinition) == true)
+		{
+			// 아이템 정의의 공통 식별 체계를 저장에도 적용
+			Saved.ItemId = Entry.ToolDefinition->GetPrimaryAssetId();
+		}
+		// 소모 후 남은 수량 보관
+		Saved.Count = Entry.Count;
+		// 도구를 재충전하지 않고 이어 사용할 잔량 보관
+		Saved.Charge = Entry.Charge;
+		// 지급 당시 적용된 사용 비용 보관
+		Saved.CostPerOnce = Entry.CostPerOnce;
 	}
-	// 기존 저장 시스템에 경로 목록 반환
+	// 상세 보관 상태 반환
 	return Result;
 }
 
-bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(const TArray<TSoftObjectPtr<UDataAsset>>& SaveData)
+bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(FMD_PlayerData SaveData)
 {
-	// 서버 권한 없는 저장 상태 복구 차단
-	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false)
+	// 손상된 슬롯을 현재 보관함에 일부 적용하는 상황 차단
+	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false || SaveData.IsStructurallyValid() == false)
 	{
-		// 복구 권한 실패 기록
-		UE_LOG(MarineDemolition, Warning, TEXT("%s Hotbar 저장 복구의 서버 소유자가 유효하지 않음"), *UE_CALL_LOCATIONINFO);
-		// 보관 상태 복구 실패 전달
+		// 기존 보관 상태를 유지한 채 실패 반환
 		return false;
 	}
-	// 기존 저장 정보가 없으면 기본 장비 상태 유지
-	if (SaveData.Num() == 0)
+	// 상세 상태가 없는 기존 파일의 경로 목록을 네 슬롯으로 해석
+	if (SaveData.bHasHotbarState == false)
 	{
-		// 복구할 정보가 없는 기존 저장 형식의 성공 전달
-		return true;
-	}
-	// 저장 복구로 사라질 기존 품목의 GE와 GA 정리
-	RemoveAllItemAbilities();
-	// 기존 보관 상태를 제거한 고정 네 슬롯 생성
-	ToolEntries.Empty(4);
-	// 저장 데이터 길이와 무관하게 슬롯 개수 고정
-	ToolEntries.SetNum(4);
-	// 구형 저장의 긴 슬롯 목록을 현재 최대 범위로 제한
-	int32 CopyCount = FMath::Min(SaveData.Num(), ToolEntries.Num());
-	// 저장 위치를 유지하는 공통 아이템 복구 순회
-	for (int32 Index = 0; Index < CopyCount; ++Index)
-	{
-		// 빈 저장 위치의 불필요한 로드 생략
-		if (SaveData[Index].IsNull() == true)
+		// 기존 파일에 개인 보관 기록이 없는 경우 기본 지급 유지
+		if (SaveData.HotbarToolList.IsEmpty() == true)
 		{
-			// 다음 저장 위치 확인
+			// 실제 적용할 기록 부재의 정상 종료
+			return true;
+		}
+		// 기존 형식의 빈 칸을 포함한 네 위치 확보
+		SaveData.HotbarItems.SetNum(4);
+		// 기록되지 않았던 선택 위치는 현재 유효 위치 유지
+		SaveData.SelectedHotbarSlot = FMath::Clamp(CurrentSlotIndex, 0, 3);
+		// 실제로 저장되어 있던 아이템 경로만 변환
+		for (int32 Index = 0; Index < SaveData.HotbarToolList.Num(); ++Index)
+		{
+			// 동일 슬롯에 저장된 기존 애셋 연결
+			SaveData.HotbarItems[Index].Item = SaveData.HotbarToolList[Index];
+			// 과거 파일에 없던 수량은 기존 복원 정책으로 해석
+			SaveData.HotbarItems[Index].Count = SaveData.HotbarToolList[Index].IsNull() == true ? 0 : 1;
+		}
+	}
+	// 모든 애셋과 상태 검증을 마칠 때까지 원본 보관함 보호
+	TArray<FMD_HotbarToolEntry> RestoredEntries;
+	// 현재 보관함의 네 슬롯 형식 유지
+	RestoredEntries.SetNum(4);
+	// 동일 품목의 중복 슬롯과 능력 중복 부여 방지
+	TSet<FPrimaryAssetId> RestoredIds;
+	// 각 슬롯의 정의와 런타임 제약 사전 검사
+	for (int32 Index = 0; Index < SaveData.HotbarItems.Num(); ++Index)
+	{
+		// 반복 조회할 저장 슬롯 참조
+		FMD_HotbarItemData& Saved = SaveData.HotbarItems[Index];
+		// 명시적으로 비어 있던 칸 유지
+		if (Saved.Count == 0)
+		{
+			// 빈 칸의 애셋 로드 생략
 			continue;
 		}
-		// 소프트 경로에서 도구 또는 일반 아이템 정의 복구
-		UMD_ItemDefinition* Item = Cast<UMD_ItemDefinition>(SaveData[Index].LoadSynchronous());
-		// 로드 가능한 공통 정의만 현재 슬롯 제약에 따라 복구
-		if (IsValid(Item) == true)
+		// 저장 식별자와 기존 경로를 Asset Manager의 검증된 아이템 정의로 해석
+		UMD_ItemDefinition* Item = Saved.ResolveItemDefinition();
+		// 품목 식별자와 슬롯 중복 여부 검사
+		if (IsValid(Item) == false || Item->GetPrimaryAssetId().IsValid() == false || RestoredIds.Contains(Item->GetPrimaryAssetId()) == true)
 		{
-			// 저장된 슬롯 순서대로 서로 다른 도구와 일반 아이템 복구
-			SetItemAtSlot(Index, Item, 1);
+			// 보관함을 비우기 전에 실패 반환
+			return false;
+		}
+		// 도구 전용 충전 규칙 적용 대상 조회
+		UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(Item);
+		// 경로만 있는 기존 파일에는 원래 지급 기준 적용
+		if (SaveData.bHasHotbarState == false && IsValid(Tool) == true)
+		{
+			// 과거 기록에 없던 충전량의 기본값 구성
+			Saved.Charge = Tool->MaxCharge;
+			// 무제한 도구와 일반 충전 도구의 비용 구분
+			Saved.CostPerOnce = Tool->MaxCharge > 0.0f ? Tool->CostPerOnce : 0.0f;
+		}
+		// 도구 수량과 충전 범위 및 사용 비용의 의미 검증
+		if (IsValid(Tool) == true)
+		{
+			// 정의 변경 또는 손상으로 사용할 수 없는 도구의 적용 차단
+			if (Tool->IsChargeSettingsValid() == false || Saved.Count != 1 || Saved.Charge > Tool->MaxCharge
+				|| (Tool->MaxCharge > 0.0f && Saved.CostPerOnce <= 0.0f)
+				|| (Tool->MaxCharge == 0.0f && (Saved.Charge != 0.0f || Saved.CostPerOnce != 0.0f)))
+			{
+				// 유효하지 않은 도구 상태 반환
+				return false;
+			}
+		}
+		// 일반 아이템에 도구 충전 상태가 섞인 기록 차단
+		else if (Saved.Charge != 0.0f || Saved.CostPerOnce != 0.0f)
+		{
+			// 품목 종류와 맞지 않는 기록 거부
+			return false;
+		}
+		// 동일 품목의 후속 중복 검사에 사용할 식별자 등록
+		RestoredIds.Add(Item->GetPrimaryAssetId());
+		// 검증한 정의와 저장 당시 사용 상태를 원자적으로 교체할 배열에 보관
+		RestoredEntries[Index] = {Item, Saved.Count, Saved.Charge, Saved.CostPerOnce};
+	}
+	// 능력 부여 실패 시 이번 요청으로 추가한 효과만 정리할 목록
+	TArray<UMD_ItemDefinition*> AddedAbilities;
+	// 슬롯 변경에 앞서 필요한 아이템 능력 확보
+	for (FMD_HotbarToolEntry& Entry : RestoredEntries)
+	{
+		// 빈 칸은 능력을 부여하지 않는 대상
+		if (IsValid(Entry.ToolDefinition) == false)
+		{
+			// 빈 칸 처리 생략
+			continue;
+		}
+		// 기존 효과와 신규 효과를 구분할 상태 보관
+		bool bHadAbility = ItemAbilityEffects.Contains(Entry.ToolDefinition->GetPrimaryAssetId());
+		// 복원 도중 능력 설정 실패 전파
+		if (GrantItemAbility(Entry.ToolDefinition) == false)
+		{
+			// 앞서 이번 요청으로만 추가한 능력 회수
+			for (UMD_ItemDefinition* AddedItem : AddedAbilities)
+			{
+				// 기존 보관함과 관계없는 신규 효과 제거
+				RemoveItemAbility(AddedItem);
+			}
+			// 기존 슬롯을 유지한 채 실패 반환
+			return false;
+		}
+		// 기존 소유 효과를 실패 복구에서 제거하지 않도록 구분
+		if (bHadAbility == false)
+		{
+			// 이번 요청에서 확보한 품목 추적
+			AddedAbilities.Add(Entry.ToolDefinition);
 		}
 	}
-	// 복구 후 선택 위치가 유효한 네 슬롯 범위에 있도록 보정
-	CurrentSlotIndex = FMath::Clamp(CurrentSlotIndex, 0, ToolEntries.Num() - 1);
-	// 복구된 최종 보관 상태 전달
+	// 복원 결과에 없는 이전 보관 품목의 능력 회수
+	for (FMD_HotbarToolEntry& Entry : ToolEntries)
+	{
+		// 계속 보유하는 품목의 기존 능력은 유지
+		if (IsValid(Entry.ToolDefinition) == true && RestoredIds.Contains(Entry.ToolDefinition->GetPrimaryAssetId()) == false)
+		{
+			// 사라지는 품목만 능력 정리
+			RemoveItemAbility(Entry.ToolDefinition);
+		}
+	}
+	// 선택 변경 알림이 필요한 이전 위치 보관
+	int32 PreviousSlotIndex = CurrentSlotIndex;
+	// 검증을 마친 네 슬롯을 한 번에 적용
+	ToolEntries = MoveTemp(RestoredEntries);
+	// 저장 당시 장착 위치 복원
+	CurrentSlotIndex = SaveData.SelectedHotbarSlot;
+	// BeginPlay 기본 지급으로 빈 칸과 저장 상태가 덮이는 상황 방지
+	bHasRestoredEquipmentData = true;
+	// 서버 보관 상태와 클라이언트 및 UI 동기화
 	NotifyEntriesChanged();
-	// 기존 저장 데이터의 적용 완료 전달
+	// 저장 당시 선택이 달라진 경우에만 선택 전용 알림
+	if (PreviousSlotIndex != CurrentSlotIndex)
+	{
+		// 슬롯 내용 알림과 구분되는 선택 표시 갱신
+		OnHotbarSelectionChanged.Broadcast();
+	}
+	// 모든 슬롯 복원 성공 반환
 	return true;
 }
 
@@ -502,16 +618,116 @@ void UMD_EquipHotbarComponent::NotifyEntriesChanged()
 	OnRep_ToolEntries();
 }
 
+bool UMD_EquipHotbarComponent::CanSwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex)
+{
+	// 범위 밖 접근과 같은 슬롯을 대상으로 하는 불필요한 요청 차단
+	if (ToolEntries.IsValidIndex(FromSlotIndex) == false || ToolEntries.IsValidIndex(ToSlotIndex) == false || FromSlotIndex == ToSlotIndex)
+	{
+		// 변경할 수 없는 슬롯 조합 거절
+		return false;
+	}
+
+	// 비어 있거나 소진된 슬롯을 이동 원본으로 사용하는 요청 차단
+	if (IsValid(ToolEntries[FromSlotIndex].ToolDefinition) == false || ToolEntries[FromSlotIndex].Count <= 0)
+	{
+		// 이동할 아이템이 없는 요청 거절
+		return false;
+	}
+
+	// 빈 목적지를 포함한 유효한 슬롯 조합 허용
+	return true;
+}
+
+bool UMD_EquipHotbarComponent::SwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex)
+{
+	// 요청 권한과 복제 갱신에 사용할 소유 액터 조회
+	AActor* OwnerActor = GetOwner();
+	// 소유 액터가 없거나 현재 배열에서 처리할 수 없는 교환 차단
+	if (IsValid(OwnerActor) == false || CanSwapItemSlots(FromSlotIndex, ToSlotIndex) == false)
+	{
+		// 검증 실패 시 원본 보관 상태 유지
+		return false;
+	}
+
+	// 클라이언트에서는 소유 Pawn의 서버 요청만 허용
+	if (OwnerActor->HasAuthority() == false)
+	{
+		// 다른 플레이어의 복제 컴포넌트에 대한 요청 차단용 소유 Pawn 조회
+		APawn* OwningPawn = Cast<APawn>(OwnerActor);
+		// 실제 소유 클라이언트에서만 서버 RPC 전송 허용
+		if (IsValid(OwningPawn) == false || OwningPawn->IsLocallyControlled() == false || OwningPawn->GetLocalRole() != ROLE_AutonomousProxy)
+		{
+			// 서버로 전달할 수 없는 요청 거절
+			return false;
+		}
+
+		// 지연된 요청이 다른 아이템을 교환하지 않도록 현재 두 아이템과 함께 서버 요청 전송
+		ServerSwapItemSlots(FromSlotIndex, ToSlotIndex, ToolEntries[FromSlotIndex].ToolDefinition, ToolEntries[ToSlotIndex].ToolDefinition);
+		// 서버 적용 확정이 아닌 요청 전송 성공 반환
+		return true;
+	}
+
+	// 아이템 정의와 수량을 하나의 항목으로 교환하며 빈 목적지는 단순 이동으로 처리
+	ToolEntries.Swap(FromSlotIndex, ToSlotIndex);
+	// 이동 원본을 장착 중이면 교환된 목적지 추적
+	if (CurrentSlotIndex == FromSlotIndex)
+	{
+		// 동일 아이템을 계속 장착하도록 선택 위치 이동
+		CurrentSlotIndex = ToSlotIndex;
+	}
+	// 교환 목적지를 장착 중이면 원래 아이템의 새 위치 추적
+	else if (CurrentSlotIndex == ToSlotIndex)
+	{
+		// 반대편으로 옮겨진 장착 항목의 선택 위치 반영
+		CurrentSlotIndex = FromSlotIndex;
+	}
+
+	// 아이템과 수량 및 충전량의 교환 결과를 내용 갱신 경로로 전달
+	NotifyEntriesChanged();
+	// 교환된 두 위치에 포함된 선택만 별도 변경 알림 전달
+	if (CurrentSlotIndex == FromSlotIndex || CurrentSlotIndex == ToSlotIndex)
+	{
+		// 동일 아이템을 따라 이동한 선택 표시 동기화
+		OnHotbarSelectionChanged.Broadcast();
+	}
+	// 서버 교환 적용 성공 반환
+	return true;
+}
+
+void UMD_EquipHotbarComponent::ServerSwapItemSlots_Implementation(int32 FromSlotIndex, int32 ToSlotIndex, UMD_ItemDefinition* ExpectedSourceItem, UMD_ItemDefinition* ExpectedTargetItem)
+{
+	// 서버 최신 상태에서 범위와 원본 아이템의 유효성 재검사
+	if (CanSwapItemSlots(FromSlotIndex, ToSlotIndex) == false)
+	{
+		// 이미 소진되거나 유효하지 않은 슬롯의 요청 차단
+		return;
+	}
+
+	// 요청 이후 구매나 다른 교환으로 두 슬롯의 아이템이 바뀐 경우 지연된 입력 차단
+	if (ToolEntries[FromSlotIndex].ToolDefinition != ExpectedSourceItem || ToolEntries[ToSlotIndex].ToolDefinition != ExpectedTargetItem)
+	{
+		// 사용자가 드롭 대상으로 확인하지 않은 아이템의 교환 방지
+		return;
+	}
+
+	// 서버 권한과 전체 항목 및 장착 유지를 공유하는 교환 처리
+	SwapItemSlots(FromSlotIndex, ToSlotIndex);
+}
+
 void UMD_EquipHotbarComponent::OnRep_ToolEntries()
 {
 	// 복제된 아이템과 수량으로 장착 표시 및 UI 갱신
 	OnHotbarChanged.Broadcast();
+	// 선택 표시를 건드리지 않는 슬롯 내용 변경 알림
+	OnHotbarContentsChanged.Broadcast();
 }
 
 void UMD_EquipHotbarComponent::OnRep_CurrentSlotIndex()
 {
 	// 복제된 선택 상태로 장착 표시 및 UI 갱신
 	OnHotbarChanged.Broadcast();
+	// 아이템 내용을 다시 그리지 않는 선택 변경 알림
+	OnHotbarSelectionChanged.Broadcast();
 }
 
 void UMD_EquipHotbarComponent::ServerSelectSlot_Implementation(int32 SlotIndex)
@@ -729,7 +945,8 @@ FGameplayAbilitySpecHandle UMD_EquipHotbarComponent::FindItemAbility(UMD_ItemDef
 bool UMD_EquipHotbarComponent::GrantItemAbility(UMD_ItemDefinition* ItemDefinition)
 {
 	// GA를 사용하지 않는 공통 보관 아이템은 기존 지급만 수행
-	if (IsValid(ItemDefinition) == true && ItemDefinition->IsA<UMD_ToolDefinition>() == false && ItemDefinition->IsA<UMD_ConsumeItemDefinition>() == false)
+	if (IsValid(ItemDefinition) == true && ItemDefinition->IsA<UMD_ToolDefinition>() == false && ItemDefinition->IsA<UMD_ConsumeItemDefinition>() == false
+		&& !ItemDefinition->GetUseAbilityTag().IsValid())
 	{
 		// 비장비 품목의 능력 부여 생략 성공 전달
 		return true;

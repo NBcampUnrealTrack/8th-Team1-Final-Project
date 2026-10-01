@@ -1,7 +1,6 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
-#include "Subsystems/WorldSubsystem.h"
 #include "MD_QuestSampleSpawnerManager.generated.h"
 
 class AMD_QuestSampleSpawner;
@@ -37,7 +36,19 @@ protected:
 	// 마지막 스포너 등록 이후 다음 틱으로 완료 시점을 갱신하기 위한 타이머 핸들이다.
 	FTimerHandle RegistrationCompletionTimerHandle;
 
+	// 성공한 구버전 복원 이후 한 번만 실행할 물품 복구 예약
+	FTimerHandle LegacyQuestRecoveryTimerHandle;
+
+	// 구버전 물품 복원이 끝나기 전 자동 저장을 막는 준비 상태
+	bool bLegacyQuestRecoveryPending = false;
+
 public:
+	// 구버전 파일의 누락 물품 복구 예약 또는 최신 생존 목록 적용 시 예약 취소
+	void ScheduleLegacyQuestRecovery(bool bRecoverLegacyItems);
+
+	// 구버전 물품 복구를 기다리는 월드 초기화 상태 조회
+	FORCEINLINE bool IsLegacyQuestRecoveryPending() { return bLegacyQuestRecoveryPending; }
+
 	// 생성 또는 시작된 스포너를 무작위 선택 후보 목록에 등록한다.
 	void RegisterSpawner(AMD_QuestSampleSpawner* Spawner);
 
@@ -51,6 +62,9 @@ public:
 	bool IsSelectedSpawner(AMD_QuestSampleSpawner* RequestingSpawner, UMD_QuestDefinition& Definition, int32 PhaseIndex);
 
 protected:
+	// 저장된 진행도 기준으로 현재 등록 스포너의 부족 물품만 보완
+	void RecoverLegacyQuestItems();
+
 	// 마지막 등록 다음 틱에 스포너 등록을 완료하고 대기 중인 생성 요청을 실행한다.
 	void CompleteSpawnerRegistration();
 

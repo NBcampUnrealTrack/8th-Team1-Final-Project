@@ -2,6 +2,7 @@
 
 
 #include "World/Sector/MD_SubLevelLoadTrigger.h"
+#include "Gameplay/Persistence/MD_WorldActorPersistence.h"
 #include "Engine/LevelStreamingDynamic.h"
 #include "Components/BoxComponent.h"
 #include "Net/UnrealNetwork.h"
@@ -101,9 +102,11 @@ void AMD_SubLevelLoadTrigger::ApplyStreamingState()
 
 bool AMD_SubLevelLoadTrigger::LoadSubLevel()
 {
-	// 이미 설정된 Sub Level이 로드된 상태인 경우 함수 조기 종료
-	if (IsLevelLoaded() == true)
+	// 같은 로드와 표시 요청이 진행 중이면 중복 설정 및 로그 생략
+	if (IsValid(StreamedLevelInstance) == true && StreamedLevelInstance->ShouldBeLoaded() == true
+		&& StreamedLevelInstance->ShouldBeVisible() == true)
 	{
+		// 비동기 완료 여부는 호출부의 준비 검사에 위임
 		return true;
 	}
 
@@ -158,3 +161,67 @@ bool AMD_SubLevelLoadTrigger::UnloadSubLevel()
 	return true;
 }
 
+
+FMD_StreamingRecord AMD_SubLevelLoadTrigger::BuildPersistenceRecord()
+{
+    // 트리거 배치 레벨과 객체 식별자를 포함한 기록
+    FMD_StreamingRecord Record;
+    // 해당 구역의 로더 식별자 수집
+    FMD_WorldActorPersistence::CaptureActor(this, Record);
+    // 직접 LoadSubLevel을 호출한 경로까지 실제 로드 의도 수집
+    Record.bLoaded = IsValid(StreamedLevelInstance) == true ? StreamedLevelInstance->ShouldBeLoaded() : bShouldBeLoaded;
+    // 로드 대상 경로를 비교할 기준 보관
+    Record.LevelAsset = SubLevelAsset;
+    // 동적 레벨의 재실행 식별 이름 보관
+    Record.InstanceName = LevelInstanceName;
+    // 완성된 구역 상태 반환
+    return Record;
+}
+
+bool AMD_SubLevelLoadTrigger::IsPersistentStreamingReady(bool bExpectedLoaded)
+{
+    // 실제 구역의 액터 등록과 표시 완료 검사
+    if (bExpectedLoaded == true)
+    {
+        // 로드 중간의 일부 액터만 저장하거나 복원하는 상황 차단
+        return IsValid(StreamedLevelInstance) == true && StreamedLevelInstance->IsLevelLoaded() == true
+            && StreamedLevelInstance->IsLevelVisible() == true;
+    }
+    // 해제 요청 역시 실제 제거가 끝난 이후에만 완료 판정
+    return IsValid(StreamedLevelInstance) == false || StreamedLevelInstance->IsLevelLoaded() == false;
+}
+
+bool AMD_SubLevelLoadTrigger::RestorePersistenceRecord(const FMD_StreamingRecord& Record)
+{
+    // 저장 후 변경된 구역 설정과 비권위 실행의 복원 차단
+    if (HasAuthority() == false || Record.LevelAsset != SubLevelAsset || Record.InstanceName != LevelInstanceName
+        || (Record.bLoaded == true && (SubLevelAsset.IsNull() == true || LevelInstanceName.IsEmpty() == true)))
+    {
+        // 다른 구역에 저장 상태를 적용하지 않는 실패 반환
+        return false;
+    }
+    // 비동기 대기 중 동일한 복제 요청의 반복 발행 방지
+    if (bShouldBeLoaded != Record.bLoaded)
+    {
+        // 이후 진입 이벤트와 클라이언트의 구역 상태 동기화
+        bShouldBeLoaded = Record.bLoaded;
+        // 상태가 바뀐 구역만 즉시 복제 요청
+        ForceNetUpdate();
+    }
+    // 방문했던 구역만 다시 로드
+    if (bShouldBeLoaded == true)
+    {
+        // 기존 인스턴스를 재사용하는 원래 로드 경로 사용
+        return LoadSubLevel();
+    }
+    // 아직 로드 중인 인스턴스의 요청도 취소
+    if (IsValid(StreamedLevelInstance) == true)
+    {
+        // 구역 표시 해제 요청
+        StreamedLevelInstance->SetShouldBeVisible(false);
+        // 구역 메모리 해제 요청
+        StreamedLevelInstance->SetShouldBeLoaded(false);
+    }
+    // 구역 해제 요청 접수 완료
+    return true;
+}

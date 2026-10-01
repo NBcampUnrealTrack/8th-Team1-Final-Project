@@ -3,12 +3,12 @@
 #include "Gameplay/Scrape/MD_ScrapeBoundaryPayload.h"
 #include "CoreMinimal.h"
 #include "Gameplay/Scrape/MD_ContaminationGeneration.h"
-#include "Templates/SubclassOf.h"
-#include "Types/Scrape/MD_ScrapeTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
 #include "Types/Persistence/MD_ContaminationSavePayload.h"
 #include "Types/Persistence/MD_SurfaceStainRecord.h"
 #include "Types/Scrape/MD_ContaminationPendingDrop.h"
+#include "Types/Persistence/MD_WorldActorSnapshotTypes.h"
+#include "Types/Trash/MD_TrashSpawnState.h"
 #include "MD_DaySnapshotTypes.generated.h"
 
 class AMD_SupportBrace;
@@ -45,6 +45,13 @@ struct FMD_BraceRecord
 
       UPROPERTY()
       FName SupportedWallName = NAME_None;
+
+      // All walls connected at installation; the single name above remains for existing callers.
+      UPROPERTY()
+      TArray<FName> SupportedWallNames;
+
+      UPROPERTY()
+      bool bWeakened = false;
 };
 
 // 미수거 잔해(격벽 조각) 기록
@@ -83,6 +90,10 @@ struct MARINEDEMOLITION_API FMD_TrashBinRecord
       UPROPERTY()
       FName SourceDispenserName = NAME_None;
 
+      // 다른 구역의 동일 이름 보급기를 구분하며 기존 파일은 미지정으로 해석
+      UPROPERTY()
+      FName SourceDispenserLevelPackage = NAME_None;
+
       UPROPERTY()
       TSubclassOf<AMD_TrashBin> TrashBinClass;
 
@@ -107,10 +118,6 @@ struct MARINEDEMOLITION_API FMD_TrashBinRecord
       UPROPERTY()
       uint64 NextSpillSequence = 0;
 
-      /** 구버전 저장 호환용 폐기 필드. 현재 판정은 읽지 않고 새 저장은 false다. */
-      UPROPERTY()
-      bool bSpillTiltAttemptConsumedUntilRearm = false;
-
       /** 손상 record를 월드에 일부 적용하기 전에 거르는 공통 검사. */
       bool IsStructurallyValid() const;
 };
@@ -128,10 +135,7 @@ struct MARINEDEMOLITION_API FMD_WallContaminationRecord
       UPROPERTY()
       FName WallName = NAME_None;
 
-      /**
-       * 일반 벽·바닥·설비의 표면 컴포넌트 이름.
-       * NAME_None은 기존 AMD_CuttableWall의 기본 표면을 뜻한다.
-       */
+      // 저장 대상인 벽·바닥·설비 표면의 실제 컴포넌트 이름
       UPROPERTY()
       FName SurfaceComponentName = NAME_None;
 
@@ -199,13 +203,13 @@ struct MARINEDEMOLITION_API FMD_WallContaminationRecord
       bool ExpandCells(FMD_WallContaminationRecord& Out) const;
       bool ValidateCellIndices(int32 MaximumCellCount) const;
       int32 GetCellCount() const { return CellPayload.Num() ? CellPayload.Num() : CellIndices.Num(); }
-      void PostSerialize(const FArchive& Ar);
 };
 
 template<> struct TStructOpsTypeTraits<FMD_WallContaminationRecord>
     : TStructOpsTypeTraitsBase2<FMD_WallContaminationRecord>
 {
-      enum { WithPostSerialize = true, WithCopy = true };
+      // 압축 본문 공유 참조를 보존하는 구조체 복사 지원
+      enum { WithCopy = true };
 };
 
 /**
@@ -236,13 +240,15 @@ struct FMD_BarnacleRemovalRecord
       TArray<int32> RemovedSpawnIndices;
 };
 
-// Day 종료 시점의 현장 상태. Cut()이 벽을 Destroy하므로 "살아남은 벽"을 기록한다
+// Day 종료 시점의 현장 상태. 남은 벽과 절단 후 지지 중인 하중을 따로 기록한다
 USTRUCT()
 struct FMD_DaySnapshot
 {
       GENERATED_BODY()
 
-      UPROPERTY() bool bHasContaminationGenerationRecords = false;
+      // 물품과 설비 및 절단 진행을 다음 일차까지 보존하는 추가 기록
+      UPROPERTY()
+      FMD_WorldActorSnapshot ActorSnapshot;
 
     /** Missing in older saves: preserve authored/per-surface seeds, including zero. */
     UPROPERTY() bool bHasContaminationSessionSeed = false;
@@ -282,9 +288,13 @@ struct FMD_DaySnapshot
       UPROPERTY()
       TArray<FName> SurvivingWallNames;
 
-      // 살아남은 벽 중 지지대가 설치된 벽
+      // 지지 중인 벽(아직 절단되지 않은 벽과 절단 후 남은 하중)
       UPROPERTY()
       TArray<FName> SupportedWallNames;
+
+      // Cut struts held by braces, awaiting loss of their last support.
+      UPROPERTY()
+      TArray<FName> PendingCollapseWallNames;
 
       UPROPERTY()
       TArray<FMD_BraceRecord> Braces;
@@ -298,6 +308,18 @@ struct FMD_DaySnapshot
       /** 보급기에서 생성되어 다음 Day에도 같은 개체로 이어질 동적 쓰레기통. */
       UPROPERTY()
       TArray<FMD_TrashBinRecord> TrashBins;
+
+      /** Set for new snapshots even when every generator has no trash left. */
+      UPROPERTY()
+      bool bHasTrashGeneratorState = false;
+
+      UPROPERTY()
+      TArray<FMD_TrashGeneratorState> TrashGenerators;
+
+      // Day travel is a map reload, but must retain the previous day's exact placement.
+      // This field is deliberately absent from FMD_WorldData (ordinary file/session loads).
+      UPROPERTY()
+      TMap<FName, FMD_TrashGeneratorPlacement> TrashPlacements;
 
       // 이름은 하위 호환을 위해 유지하지만 일반 표면 컴포넌트도 포함한다
       UPROPERTY()

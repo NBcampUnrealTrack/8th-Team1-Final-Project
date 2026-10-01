@@ -25,8 +25,8 @@ public:
 	// 서버 전용 마감 제출. 이미 마감이면 무시
 	void TryCloseout();
 
-	// 스냅샷 복원용: 점수 없이 마감 상태만 되살림
-	void RestoreClosed();
+	// 점수 재지급 없이 마감 여부를 양방향으로 복원하며 기존 호출은 마감 상태 유지
+	void RestoreClosed(bool bWasClosed = true);
 
 	bool IsClosed() const { return bClosed; }
 

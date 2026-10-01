@@ -4,10 +4,9 @@
 #include "World/Merchant/MD_Merchant.h"
 
 #include "CommonActivatableWidget.h"
-#include "Components/StaticMeshComponent.h"
+#include "Components/SkeletalMeshComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
-#include "UObject/ConstructorHelpers.h"
 
 #include "Character/MD_Character.h"
 #include "Component/Lore/MD_LoreComponent.h"
@@ -30,19 +29,6 @@
 #include "UI/Merchant/MD_QuestScreenWidget.h"
 #include "UI/Merchant/MD_ShopWidget.h"
 
-namespace
-{
-	/**
-	 * 캐릭터 에셋 대체용 큐브를 사람 크기(60×60×180cm)로 맞추는 값.
-	 * 엔진 기본 큐브가 100cm 정육면체라 스케일로 눌러 세운다.
-	 */
-	constexpr float PlaceholderWidthScale = 0.6f;
-	constexpr float PlaceholderHeightScale = 1.8f;
-
-	/** 큐브 피벗이 가운데라 절반 높이만큼 올려야 액터 원점이 발밑에 온다. */
-	constexpr float PlaceholderHalfHeight = 90.f;
-}
-
 AMD_Merchant::AMD_Merchant()
 {
 	PrimaryActorTick.bCanEverTick = false;
@@ -50,18 +36,14 @@ AMD_Merchant::AMD_Merchant()
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
 
-	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
-	Mesh->SetupAttachment(Root);
-	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
-
-	// Mesh가 루트가 아니어야 이 값들이 배치 트랜스폼에 덮이지 않는다.
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> CubeMesh(TEXT("/Engine/BasicShapes/Cube.Cube"));
-	if (CubeMesh.Succeeded())
-	{
-		Mesh->SetStaticMesh(CubeMesh.Object);
-	}
-	Mesh->SetRelativeScale3D(FVector(PlaceholderWidthScale, PlaceholderWidthScale, PlaceholderHeightScale));
-	Mesh->SetRelativeLocation(FVector(0.f, 0.f, PlaceholderHalfHeight));
+	// 새 subobject 이름으로 기존 BP의 스태틱 메시 템플릿과 타입 충돌을 피한다.
+	CharacterMesh = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("CharacterMesh"));
+	CharacterMesh->SetupAttachment(Root);
+	CharacterMesh->SetCollisionProfileName(TEXT("BlockAllDynamic"));
+	CharacterMesh->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	CharacterMesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
+	CharacterMesh->SetGenerateOverlapEvents(false);
+	CharacterMesh->SetSimulatePhysics(false);
 }
 
 void AMD_Merchant::BeginPlay()
@@ -92,10 +74,10 @@ void AMD_Merchant::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AMD_Merchant::SetInteractionHighlighted_Implementation(bool bHighlighted)
 {
-	if (IsValid(Mesh))
+	if (IsValid(CharacterMesh))
 	{
-		Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
-		Mesh->SetRenderCustomDepth(bHighlighted);
+		CharacterMesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
+		CharacterMesh->SetRenderCustomDepth(bHighlighted);
 	}
 }
 
@@ -185,6 +167,36 @@ void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 
 	// 상태 갱신과 하위 화면 연결에 사용할 활성 메뉴를 저장한다.
 	ActiveMenuWidget = Widget;
+
+	// 핫바에 든 회수물(카트리지)은 대화를 열면 자동 납품된다. 리슨 서버 호스트는 응답이 즉시 오므로 메뉴 저장 뒤에 요청한다
+	RequestHotbarQuestDelivery(PC);
+}
+
+void AMD_Merchant::RequestHotbarQuestDelivery(APlayerController* PC)
+{
+	AMD_PlayerController* MDPC = Cast<AMD_PlayerController>(PC);
+	if (IsValid(MDPC) == true)
+	{
+		MDPC->ServerDeliverHotbarQuestItems(this);
+	}
+}
+
+void AMD_Merchant::ReceiveQuestItemDelivery(AMD_PlayerController* Requester, const FText& ItemName, int32 Count)
+{
+	const FText Line = FText::Format(QuestDeliveryDialogue, ItemName, FText::AsNumber(Count));
+
+	// 요청자가 연 대화창이 아직 열려 있으면 그곳에, 아니면 HUD 알림으로 전달한다
+	if (ActiveMenuWidget.IsValid() == true && ActiveMenuWidget->GetOwningPlayer() == Requester)
+	{
+		ActiveMenuWidget->ShowDialogueLine(Line);
+		return;
+	}
+
+	// 로컬 컨트롤러에서 부르는 Client RPC는 그 자리에서 실행된다
+	if (IsValid(Requester) == true)
+	{
+		Requester->ClientShowHUDMessage(Line);
+	}
 }
 
 void AMD_Merchant::HandleMenuExitRequested()
@@ -237,9 +249,8 @@ void AMD_Merchant::InitializePushedShop(UMD_ShopWidget* ShopWidget, UMD_Merchant
 	ActiveMenuWidget = MenuWidget;
 	ActiveShopWidget = ShopWidget;
 
-	// 상점 활성화 전에 카탈로그와 루트 메뉴를 전달한다.
+	// 상점 활성화 전에 판매 카탈로그 전달
 	ShopWidget->SetCatalog(ShopCatalog);
-	ShopWidget->SetOwningMerchantMenu(MenuWidget);
 
 	// Common UI Stack의 모든 상점 종료 경로에서 상태를 정리하도록 비활성화 이벤트를 연결한다.
 	ShopWidget->OnDeactivated().RemoveAll(this);
@@ -248,6 +259,8 @@ void AMD_Merchant::InitializePushedShop(UMD_ShopWidget* ShopWidget, UMD_Merchant
 	// 상점 화면의 구매 요청을 실제 상인 처리에 중복 없이 연결한다.
 	ShopWidget->OnPurchaseRejected.AddUniqueDynamic(this, &AMD_Merchant::HandleShopPurchaseRejected);
 	ShopWidget->OnItemPurchaseRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleShopItemPurchaseRequested);
+	// 현재 상점의 소지품 판매 요청 연결
+	ShopWidget->OnItemSaleRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleShopItemSaleRequested);
 
 	// 서버 원장의 복제 미러 변경을 현재 상점 화면에 반영한다.
 	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
@@ -284,9 +297,6 @@ void AMD_Merchant::InitializePushedQuest(UMD_QuestScreenWidget* QuestWidget, UMD
 	// 이후 상태 조회가 Blueprint에서 전달한 메뉴와 퀘스트 화면을 사용하도록 저장한다.
 	ActiveMenuWidget = MenuWidget;
 	ActiveQuestWidget = QuestWidget;
-
-	// 퀘스트 화면 활성화 전에 루트 메뉴를 전달한다.
-	QuestWidget->SetOwningMerchantMenu(MenuWidget);
 
 	// Common UI Stack의 모든 퀘스트 화면 종료 경로에서 상태를 정리하도록 비활성화 이벤트를 연결한다.
 	QuestWidget->OnDeactivated().RemoveAll(this);
@@ -334,9 +344,6 @@ void AMD_Merchant::InitializePushedLoan(UMD_LoanWidget* LoanWidget, UMD_Merchant
 	ActiveMenuWidget = MenuWidget;
 	ActiveLoanWidget = LoanWidget;
 
-	// 대출 화면 활성화 전에 루트 메뉴를 전달하여 배경 메뉴 패널 숨김
-	LoanWidget->SetOwningMerchantMenu(MenuWidget);
-
 	// Common UI Stack의 모든 대출 화면 종료 경로에서 상태를 정리하도록 비활성화 이벤트 연결
 	LoanWidget->OnDeactivated().RemoveAll(this);
 	LoanWidget->OnDeactivated().AddUObject(this, &AMD_Merchant::HandleLoanDeactivated);
@@ -365,6 +372,8 @@ void AMD_Merchant::HandleShopDeactivated()
 		ShopWidget->OnDeactivated().RemoveAll(this);
 		ShopWidget->OnPurchaseRejected.RemoveDynamic(this, &AMD_Merchant::HandleShopPurchaseRejected);
 		ShopWidget->OnItemPurchaseRequested.RemoveDynamic(this, &AMD_Merchant::HandleShopItemPurchaseRequested);
+		// 닫힌 상점의 판매 이벤트 연결 해제
+		ShopWidget->OnItemSaleRequested.RemoveDynamic(this, &AMD_Merchant::HandleShopItemSaleRequested);
 	}
 
 	// 더 이상 표시되지 않는 상점에 복제 상태를 전달하지 않도록 구독을 해제한다.
@@ -412,12 +421,6 @@ void AMD_Merchant::HandleLoanDeactivated()
 		{
 			ActiveMenuWidget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
 		}
-	}
-
-	// 다시 표시되는 상인 메뉴의 본문 패널 복구
-	if (ActiveMenuWidget.IsValid() == true)
-	{
-		ActiveMenuWidget->SetMenuPanelVisible(true);
 	}
 
 	// 비활성화된 Stack 화면을 더 이상 활성 대출 화면으로 취급하지 않음
@@ -822,4 +825,65 @@ AMD_PlayerState* AMD_Merchant::GetInteractingPlayerState() const
 {
 	const AMD_PlayerController* InteractingPlayerController = GetInteractingPlayerController();
 	return IsValid(InteractingPlayerController) == true ? InteractingPlayerController->GetPlayerState<AMD_PlayerState>() : nullptr;
+}
+
+void AMD_Merchant::HandleShopItemSaleRequested(FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity)
+{
+	// 현재 상점 소유자의 요청 경로 조회
+	AMD_PlayerController* Controller = GetInteractingPlayerController();
+	// 유효한 로컬 소유자에게서만 판매 요청 전달
+	if (IsValid(Controller) == true)
+	{
+		// 가격을 전송하지 않고 품목과 위치 및 수량만 서버에 전달
+		Controller->ServerRequestShopSale(this, ItemAssetId, SlotIndex, Quantity);
+	}
+}
+
+EMD_ShopSaleResult AMD_Merchant::TrySellItem(AMD_Character* SellingCharacter, FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity)
+{
+	// RPC 외 호출에서도 서버 권한과 실제 상인 접근 거리 검사
+	if (HasAuthority() == false || IsValid(SellingCharacter) == false || SellingCharacter->HasAuthority() == false
+		|| SellingCharacter->GetWorld() != GetWorld() || FVector::DistSquared(SellingCharacter->GetActorLocation(), GetActorLocation()) > FMath::Square(500.0f))
+	{
+		// 원격 또는 잘못된 판매자 요청 거부
+		return EMD_ShopSaleResult::InvalidRequest;
+	}
+	// 판매 단가를 결정할 서버 원본 카탈로그 항목
+	FMD_ShopItem ShopItem;
+	// 중복 등록과 미등록 품목의 판매 차단
+	if (IsValid(ShopCatalog) == false || ShopCatalog->FindItemByAssetId(ItemAssetId, ShopItem) == false)
+	{
+		// 카탈로그에 없는 품목 결과 전달
+		return EMD_ShopSaleResult::InvalidItem;
+	}
+	// 공용 크레딧을 관리하는 서버 원장 조회
+	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
+	// 준비되지 않은 원장에서는 소지품 회수 차단
+	if (IsValid(MerchantSubsystem) == false)
+	{
+		// 경제 상태 부재 결과 반환
+		return EMD_ShopSaleResult::InvalidRequest;
+	}
+	// 판매에 해금 조건이나 구매 이력을 요구하지 않고 실제 소지품만 검증
+	return MerchantSubsystem->TrySellShopItem(SellingCharacter->GetPlayerState<AMD_PlayerState>(), ShopItem, SlotIndex, Quantity);
+}
+
+void AMD_Merchant::ReceiveShopSaleResult(EMD_ShopSaleResult Result)
+{
+	// 서버 결과 수신 후 현재 소지 수량과 크레딧 표시 갱신
+	RefreshShopWidgetFromComponent();
+	// 상점 화면에 결과를 전달하여 BP 피드백과 연속 요청 제어
+	if (ActiveShopWidget.IsValid() == true)
+	{
+		// 활성 상점이 처리할 판매 결과 전달
+		ActiveShopWidget->ReceiveSaleResult(Result);
+	}
+	// 기존 상인 대사 영역에 거래 결과 안내
+	if (ActiveMenuWidget.IsValid() == true)
+	{
+		// 판매 성공과 재시도가 필요한 실패를 구분하는 안내
+		ActiveMenuWidget->ShowDialogueLine(Result == EMD_ShopSaleResult::Success
+			? NSLOCTEXT("MDMerchant", "ShopSaleSuccess", "물건은 받았어. 정산도 끝났고.")
+			: NSLOCTEXT("MDMerchant", "ShopSaleFailed", "그 물건은 지금 받을 수 없어. 보유 수량을 확인해."));
+	}
 }

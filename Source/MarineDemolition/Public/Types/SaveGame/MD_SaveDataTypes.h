@@ -3,14 +3,48 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameFramework/SaveGame.h"
-#include "GameplayTags.h"
 #include "StructUtils/InstancedStruct.h"
 #include "Types/Merchant/MD_MerchantTypes.h"
 #include "Types/Persistence/MD_DaySnapshotTypes.h"
 #include "MD_SaveDataTypes.generated.h"
 
 class UMD_SiteDefinition;
+class UMD_ItemDefinition;
+
+// 슬롯 위치별 아이템 소유권과 사용 후 남은 상태의 영속 기록
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_HotbarItemData
+{
+	GENERATED_BODY()
+
+public:
+	// 에셋 경로와 파일명 변경에도 유지할 아이템 식별자
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
+	FPrimaryAssetId ItemId;
+
+	// 기존 상세 슬롯 저장을 읽기 위한 호환 경로이며 새 저장에서는 미사용
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
+	TSoftObjectPtr<UDataAsset> Item;
+
+	// 빈 슬롯을 포함한 실제 보관 수량
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
+	int32 Count = 0;
+
+	// 저장 직전 도구의 남은 충전량
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
+	float Charge = 0.0f;
+
+	// 지급 당시 확정된 도구의 사용 비용
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
+	float CostPerOnce = 0.0f;
+
+public:
+	// 자산을 로드하지 않고 식별자와 이전 경로의 현재 로딩 위치 조회
+	FSoftObjectPath GetItemAssetPath() const;
+
+	// 저장 식별자 또는 기존 경로를 등록된 아이템 정의로 검증하여 해석
+	UMD_ItemDefinition* ResolveItemDefinition() const;
+};
 
 /**
  * 재접속과 Pawn 교체 이후에도 동일한 장비 구성을 적용하기 위한 플레이어 데이터
@@ -21,9 +55,46 @@ struct MARINEDEMOLITION_API FMD_PlayerData
 	GENERATED_BODY()
 
 public:
-	// 서버에서 소유권을 복원할 수 있도록 애셋 경로로 기록하는 핫바 슬롯 목록
+	// 상세 슬롯 도입 이전의 저장을 읽기 위한 호환 경로 목록
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
 	TArray<TSoftObjectPtr<UDataAsset>> HotbarToolList;
+
+	// 경로만 저장된 기존 파일과 전체 슬롯 상태를 구분하는 표시
+	UPROPERTY()
+	bool bHasHotbarState = false;
+
+	// 빈 칸과 순서를 보존하는 네 슬롯의 상세 기록
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
+	TArray<FMD_HotbarItemData> HotbarItems;
+
+	// 불러온 직후 장착과 입력 대상으로 사용할 슬롯
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save GameSession")
+	int32 SelectedHotbarSlot = 0;
+
+	// 구매 이력이 없던 기존 파일과 명시적으로 비어 있는 새 이력 구분
+	UPROPERTY()
+	bool bHasShopPurchaseState = false;
+
+	// 선행 장비 해금과 무료 재구매에 사용할 플레이어별 구매 이력
+	UPROPERTY()
+	TArray<FPrimaryAssetId> PurchasedShopItemIds;
+
+	// 업그레이드로 대체된 기본 및 중간 도구의 구매 금지 기록
+	UPROPERTY()
+	TArray<FPrimaryAssetId> BlockedShopItemIds;
+
+public:
+	// 읽기 전용 저장 데이터의 슬롯 범위와 수량 및 충전 값 검사
+	bool IsStructurallyValid() const;
+
+	// 읽기 전용 개인 기록의 품목 해석과 중복 슬롯 검사
+	bool AreAssetsValid() const;
+
+	// 접속 여부와 무관하게 과거 슬롯 기록을 경로 없는 아이템 식별자로 변환
+	bool MigrateHotbarItemIds();
+
+	// 구매 이력 없는 기존 파일의 보유 도구와 선행 단계에서 개인 진행 복구
+	bool MigrateShopPurchaseState();
 };
 
 /**
@@ -66,6 +137,18 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	EMD_Difficulty ContractDifficulty = EMD_Difficulty::Standard;
 
+	// 누계 점수와 별도로 당일 점수 증감을 재구성할 이벤트 기록
+	UPROPERTY()
+	TArray<FMD_ScoreEntry> ScoreLog;
+
+	// 표시용 정수로 잘라내지 않은 분류별 당일 점수 원장
+	UPROPERTY()
+	TMap<EMD_DailyReportCategory, int64> DailyScoreTotals;
+
+	// 로드 이후에도 유지할 마지막 확정 점검 결과
+	UPROPERTY()
+	FMD_InspectionReport LastInspectionReport;
+
 public:
 	// 손상된 숫자 범위가 서버 진행 상태에 적용되지 않도록 검사하는 함수
 	bool IsStructurallyValid() const;
@@ -86,6 +169,10 @@ public:
 	// 팀이 공유하는 현재 보유 크레딧
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	int32 Credits = 0;
+
+	// 저장 이전의 당일 수입과 지출을 함께 유지할 분류별 원장
+	UPROPERTY()
+	TMap<EMD_DailyReportCategory, int64> DailyCreditTotals;
 
 	// 계약과 게임 재시작을 넘어 유지되는 팀 공유 미상환 대출 잔액
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
@@ -115,10 +202,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
 
-	// 통합 전 세이브(dev 9 이하, scrape 13 이하)의 이름 기반 구매 원장 이전 전용 필드
-	UPROPERTY()
-	TMap<FName, int32> PurchasedItemCounts_DEPRECATED;
-
 	// 재개 시 같은 퀘스트 정의를 연결하기 위한 현재 현장 애셋
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TSoftObjectPtr<UMD_SiteDefinition> CurrentSite;
@@ -138,6 +221,12 @@ public:
 public:
 	// 손상된 경제 범위와 퀘스트 상태가 서버 원장에 적용되지 않도록 검사하는 함수
 	bool IsStructurallyValid() const;
+
+	// 원장 적용 전에 현장과 퀘스트 정의 및 저장 페이즈의 호환성 확인
+	bool AreAssetsValid() const;
+
+	// 엔진 경로 변경 설정을 현장의 일괄 준비와 실제 복원에 동일하게 적용
+	static UMD_SiteDefinition* ResolveSite(TSoftObjectPtr<UMD_SiteDefinition> Site);
 };
 
 /**
@@ -148,7 +237,9 @@ struct MARINEDEMOLITION_API FMD_WorldData
 {
 	GENERATED_BODY()
 
-    UPROPERTY() bool bHasContaminationGenerationRecords = false;
+    // 물품과 설비 및 절단 진행을 파일에 함께 보존하는 추가 기록
+    UPROPERTY()
+    FMD_WorldActorSnapshot ActorSnapshot;
 
     /** Missing in older saves: preserve authored/per-surface seeds, including zero. */
     UPROPERTY() bool bHasContaminationSessionSeed = false;
@@ -162,9 +253,13 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FName> SurvivingWallNames;
 
-	// 생존 벽 중 지지대 연결 상태를 복원하기 위한 벽 이름
+	// 절단 전 벽과 절단 후 남은 하중의 지지 상태를 복원하기 위한 벽 이름
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	TArray<FName> SupportedWallNames;
+
+	// Hidden cut struts still held by support braces, retained until their last support is lost.
+	UPROPERTY()
+	TArray<FName> PendingCollapseWallNames;
 
 	// 동적 지지대의 클래스·위치·연결 벽을 복원하기 위한 목록
 	UPROPERTY()
@@ -181,6 +276,13 @@ public:
 	// 보급기가 만든 동적 통의 class·transform·stable ID와 전체 액체 원장을 복원하기 위한 목록
 	UPROPERTY()
 	TArray<FMD_TrashBinRecord> TrashBins;
+
+	/** Distinguishes old saves from a fully cleared generated-trash layout. */
+	UPROPERTY()
+	bool bHasTrashGeneratorState = false;
+
+	UPROPERTY()
+	TArray<FMD_TrashGeneratorState> TrashGenerators;
 
 	// 생성 기준과 달라진 표면 오염 셀을 복원하기 위한 목록
 	UPROPERTY()
@@ -214,8 +316,8 @@ struct MARINEDEMOLITION_API FMD_GameData
 	GENERATED_BODY()
 
 public:
-	// 이후 필드 변경을 안전하게 마이그레이션하기 위한 현재 스키마 버전
-	static constexpr int32 CurrentSchemaVersion = 14;
+	// 현재 저장 형식을 최초 배포 형식으로 식별하는 스키마 버전
+	static constexpr int32 CurrentSchemaVersion = 1;
 
 	// 저장된 필드 배치를 판별하기 위한 슬롯 데이터 버전
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
@@ -233,25 +335,16 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
 	FDateTime SaveTime;
 
-    /** A list row is resolved from its immutable file/legacy range before any world application. */
+    // 저장 시점의 카메라 장면을 슬롯과 함께 보관하는 압축 이미지
+    UPROPERTY(BlueprintReadOnly, Category = "Save Data")
+    TArray<uint8> ThumbnailImage;
+
+    // 슬롯 목록의 요약을 개별 저장 파일에서 읽은 전체 데이터와 구분하는 상태
     UPROPERTY()
     bool bIsSlotSummary = false;
 
     UPROPERTY()
     FString SlotPayloadId;
-
-    UPROPERTY()
-    int64 LegacyDataOffset = 0;
-
-    UPROPERTY()
-    int64 LegacyDataBytes = 0;
-
-    UPROPERTY()
-    int64 LegacyFileBytes = 0;
-
-    UPROPERTY()
-    FDateTime LegacyFileTime;
-
 
 	// 기능별 구조체를 태그로 식별하여 확장하기 위한 데이터 필드 컨테이너
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Save Data")
@@ -262,17 +355,14 @@ public:
 	TMap<FString, FMD_PlayerData> PlayerFields;
 
 public:
-    /** Keep tagged properties while exposing bounded legacy record ranges to the summary reader. */
-    bool Serialize(FArchive& Ar);
-
 	// 새 게임 입력과 저장 슬롯을 구분하기 위한 최소 식별 정보 검사 함수
 	bool IsEmpty() const;
 
-	// 버전 필드가 없던 현재 브랜치의 초기 슬롯을 승격하고 미래 버전을 거부하는 함수
-	bool MigrateToCurrentVersion();
+	// 현재 버전과 필수 필드를 검사하고 현재 회차 이동에서만 월드 필드 생략 허용
+	bool IsValidForLoad(bool bRequireWorldData = true) const;
 
-	// 필수 필드·맵·데이터 범위를 검사하여 부분 복원을 방지하는 함수
-	bool IsValidForLoad() const;
+	// 원장과 플레이어를 변경하기 전에 필수 자산의 복원 가능성 검사
+	bool AreAssetsValid() const;
 
 	// 기능별 구조체를 태그 키에 복사하여 저장하기 위한 함수
 	template<typename T>
@@ -291,59 +381,45 @@ public:
 		return true;
 	}
 
-	// 태그 키와 실제 구조체 타입이 모두 일치할 때만 데이터를 반환하는 함수
+	// 소유 필드가 변경되기 전까지만 유효한 읽기 전용 참조를 복사 없이 조회
+	template<typename T>
+	const T* FindDataField(FGameplayTag KeyTag) const
+	{
+		// 엔진 구조체로 지원되는 요청 타입의 컴파일 시점 검사
+		UE::StructUtils::CheckStructType<T>();
+		// 유효하지 않은 태그로 저장 필드를 조회하는 요청 차단
+		if (KeyTag.IsValid() == false)
+		{
+			// 조회 가능한 키 부재 반환
+			return nullptr;
+		}
+		// 읽기 전용 컨테이너에서 원본 필드의 수명에 종속되는 참조 조회
+		const FInstancedStruct* DataField = DataFields.Find(KeyTag);
+		// 빈 필드와 다른 구조체 타입의 잘못된 메모리 해석 차단
+		if (DataField == nullptr || DataField->IsValid() == false || DataField->GetScriptStruct() != T::StaticStruct())
+		{
+			// 요청한 타입으로 해석할 수 없는 필드 반환
+			return nullptr;
+		}
+		// 배열과 원장의 추가 할당 없이 검증된 원본 데이터 참조 반환
+		return DataField->GetPtr<T>();
+	}
+
+	// 독립적인 소유권이 필요한 호출자에 검증된 필드의 복사본 전달
 	template<typename T>
 	bool GetDataField(FGameplayTag KeyTag, T& OutStructData) const
 	{
-		UE::StructUtils::CheckStructType<T>();
-
-		if (KeyTag.IsValid() == false)
+		// 읽기 전용 조회와 동일한 태그 및 타입 검사 재사용
+		const T* DataField = FindDataField<T>(KeyTag);
+		// 조회 실패 시 기존 출력 데이터 유지
+		if (DataField == nullptr)
 		{
+			// 복사할 필드 부재 반환
 			return false;
 		}
-
-		const FInstancedStruct* DataField = DataFields.Find(KeyTag);
-		if (DataField == nullptr || DataField->IsValid() == false || DataField->GetScriptStruct() != T::StaticStruct())
-		{
-			return false;
-		}
-
-		OutStructData = *DataField->GetPtr<T>();
-
+		// 명시적으로 소유권을 요청한 호출자에게만 전체 필드 복사
+		OutStructData = *DataField;
+		// 검증된 필드의 복사 완료 반환
 		return true;
 	}
-};
-
-template<> struct TStructOpsTypeTraits<FMD_GameData> : TStructOpsTypeTraitsBase2<FMD_GameData>
-{
-    enum { WithSerializer = true, WithCopy = true };
-};
-
-/**
- * Host 로컬 SaveGames 디렉터리에 직렬화되는 자동·사용자 슬롯 컨테이너
- */
-UCLASS()
-class MARINEDEMOLITION_API UMD_SaveGame : public USaveGame
-{
-	GENERATED_BODY()
-
-public:
-	// 파일 단위 형식을 판별하고 미래 버전 덮어쓰기를 막기 위한 컨테이너 버전
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	int32 SchemaVersion = 0;
-
-	// 순환 방식으로 덮어쓰는 자동 저장 데이터 목록
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	TArray<FMD_GameData> AutoSaveList;
-
-	// 사용자가 명시적으로 생성하고 제거하는 저장 데이터 목록
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Marine Demolition Game Data")
-	TArray<FMD_GameData> UserSaveList;
-
-public:
-	// 설정된 슬롯 수를 초과한 오래된 항목을 목록 끝에서 제거하는 함수
-	void ApplyMaxSaveCountLimit(const int32& MaxAutoSaveCount, const int32& MaxUserSaveCount);
-
-	// 모든 슬롯을 현재 버전으로 승격하고 손상 항목만 격리하는 함수
-	bool MigrateAndValidate();
 };

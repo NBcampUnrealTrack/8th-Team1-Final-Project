@@ -22,8 +22,6 @@ class MARINEDEMOLITION_API UMD_AudioSettingCategory : public UMD_SettingCategory
 {
 	GENERATED_BODY()
 
-	// 실제 장치 없는 비동기 출력 상태 회귀 검증 접근
-	friend class FMD_AudioOutputStateTest;
 
 public:
 	virtual void BeginDestroy() override;

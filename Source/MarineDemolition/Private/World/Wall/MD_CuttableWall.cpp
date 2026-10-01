@@ -1,31 +1,20 @@
 ﻿#include "World/Wall/MD_CuttableWall.h"
 #include "GameplayTags/MD_GameplayTags.h"
 
-#include "TimerManager.h"
 #include "Audio/MD_AudioSubsystem.h"
 #include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Components/DecalComponent.h"
-#include "Components/InstancedStaticMeshComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
-#include "Engine/Engine.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "NiagaraFunctionLibrary.h"
-#include "NiagaraSystem.h"
-#include "World/Sector/MD_Sector.h"
 #include "World/Wall/MD_WallPiece.h"
-
-namespace
-{
-	const FLinearColor NeutralWallColor(0.4f, 0.4f, 0.45f);
-}
 
 AMD_CuttableWall::AMD_CuttableWall()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	// bHasSupport 복제용 (원격 클라이언트의 절단 판정 일치)
 	bReplicates = true;
+
 
 	// 배치된 격벽은 별도 설정 없이 절단 대상이 된다
 	OwnedGameplayTags.AddTag(MDGameplayTags::Interaction_Cuttable);
@@ -38,16 +27,6 @@ AMD_CuttableWall::AMD_CuttableWall()
 	SetRootComponent(Mesh);
 	// 특정 Cube를 벽 크기로 찌그러뜨리지 않는다. 실제 메시 또는 Blueprint가 크기를 결정한다.
 	Mesh->SetRelativeScale3D(FVector::OneVector);
-
-	ContaminationOverlay = CreateDefaultSubobject<UInstancedStaticMeshComponent>(TEXT("ContaminationOverlay"));
-	ContaminationOverlay->SetupAttachment(Mesh);
-	ContaminationOverlay->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	ContaminationOverlay->SetGenerateOverlapEvents(false);
-	ContaminationOverlay->SetCanEverAffectNavigation(false);
-	ContaminationOverlay->SetReceivesDecals(false);
-	ContaminationOverlay->CastShadow = false;
-	ContaminationOverlay->SetVisibility(false);
-	ContaminationOverlay->SetHiddenInGame(true);
 
 	FrontContaminationDecal = CreateDefaultSubobject<UDecalComponent>(
 		TEXT("FrontContaminationDecal"));
@@ -77,17 +56,26 @@ AMD_CuttableWall::AMD_CuttableWall()
 }
 
 
+void AMD_CuttableWall::PreRegisterAllComponents()
+{
+    // MeshUV uses its mesh overlay. Legacy hidden decals sometimes serialize
+    // that surface material, which cannot render as a decal and opens a blocking
+    // editor notification during PIE registration. Keep all valid decal bindings.
+    if (GetWorld() && GetWorld()->IsGameWorld() && ScrapeSurface && ScrapeSurface->UsesMeshUVSurface())
+    {
+        for (UDecalComponent* Decal : {FrontContaminationDecal.Get(), BackContaminationDecal.Get()})
+            if (Decal && (!Decal->IsVisible() || Decal->bHiddenInGame) && Decal->GetDecalMaterial()
+                && Decal->GetDecalMaterial()->GetMaterial()->MaterialDomain != MD_DeferredDecal)
+                Decal->SetDecalMaterial(nullptr);
+    }
+    Super::PreRegisterAllComponents();
+}
+
 void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
 	SyncLegacySurfaceConfiguration();
-	if (ContaminationOverlay)
-	{
-		ContaminationOverlay->ClearInstances();
-		ContaminationOverlay->SetVisibility(false);
-		ContaminationOverlay->SetHiddenInGame(true);
-	}
 	if (ScrapeSurface)
 	{
 		ScrapeSurface->ConfigureExternalComponents(
@@ -96,14 +84,6 @@ void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 			BackContaminationDecal);
 		ScrapeSurface->RefreshSurfaceGeometry();
 	}
-
-	// 스캔 전에는 타입 구분 없이 중립 회색
-	MID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
-	if (MID)
-	{
-		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
-	}
-
 }
 
 
@@ -111,6 +91,7 @@ void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME(AMD_CuttableWall, bHasSupport);
+	DOREPLIFETIME(AMD_CuttableWall, bCut);
 	DOREPLIFETIME(AMD_CuttableWall, CutProgressSeconds);
 }
 
@@ -118,12 +99,6 @@ void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 void AMD_CuttableWall::BeginPlay()
 {
 	Super::BeginPlay();
-	if (ContaminationOverlay)
-	{
-		ContaminationOverlay->ClearInstances();
-		ContaminationOverlay->SetVisibility(false);
-		ContaminationOverlay->SetHiddenInGame(true);
-	}
 	SyncLegacySurfaceConfiguration();
 	if (ScrapeSurface)
 	{
@@ -133,14 +108,6 @@ void AMD_CuttableWall::BeginPlay()
 			ScrapeSurface->InitializeSurface();
 		}
 	}
-
-	// Transient인 MID는 레벨 로드/PIE 복제 시 유실되므로 런타임에서 재생성
-	MID = Mesh->CreateAndSetMaterialInstanceDynamic(0);
-	if (MID)
-	{
-		MID->SetVectorParameterValue(TEXT("Color"), NeutralWallColor);
-	}
-
 }
 
 
@@ -207,18 +174,12 @@ void AMD_CuttableWall::CompleteCutWithCleanRatio(
 	AActor* Cutter,
 	const float CutSurfaceCleanRatio)
 {
+	// Keep the support links and authored collapse settings after the wall disappears.
+	bAwaitingSupportCollapse = WallType == EMD_WallType::Strut && bHasSupport;
+	if (bAwaitingSupportCollapse) bAlwaysRelevant = true;
 	if (WallType == EMD_WallType::Strut && !bHasSupport)
 	{
-		// 벽이 아니라 "절단자가 서 있는 섹터"가 무너진다
-		if (AMD_Sector* Sector = AMD_Sector::FindSectorContaining(Cutter))
-		{
-			Sector->CollapseCeiling();
-			OnStrutCollapsed.Broadcast(this, Cutter);
-		}
-		else
-		{
-			UE_LOG(LogTemp, Warning, TEXT("MD_CuttableWall::Cut - 절단자가 속한 섹터를 찾지 못함"));
-		}
+		CollapseIfUnsupported(Cutter);
 	}
 	else
 	{
@@ -259,9 +220,18 @@ void AMD_CuttableWall::CompleteCutWithCleanRatio(
 
 	// 경로 개방 (조각이 벽 자리를 대체).
 	// 즉시 Destroy하면 방금 보낸 멀티캐스트가 채널과 함께 유실될 수 있어 잠깐 미룬다
+	OnRep_Cut();
+	SetLifeSpan(bAwaitingSupportCollapse ? 0.f : 0.2f);
+	ForceNetUpdate();
+}
+
+void AMD_CuttableWall::OnRep_Cut()
+{
+	if (!bCut) return;
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
-	SetLifeSpan(0.2f);
+	// The retained wall only tracks support. Release its contamination cells and GPU visuals.
+	if (ScrapeSurface && HasAuthority()) ScrapeSurface->SetContaminationEnabled(false);
 }
 
 void AMD_CuttableWall::MulticastPlayDemolishEffect_Implementation()
@@ -307,12 +277,6 @@ void AMD_CuttableWall::ScanHighlight(float Duration, AActor* Scanner)
 		Duration = 3.f;
 	}
 
-	// 벽 타입 확인용 디버그 로그 (화면 표시는 UI 담당)
-	UE_LOG(LogTemp, Log, TEXT("MD_CuttableWall::ScanHighlight - %s 스캔: %s, 지속 %.1fs"),
-			*GetName(),
-			WallType == EMD_WallType::Strut ? TEXT("지주격벽 (위험)") : TEXT("칸막이격벽 (자유 철거)"),
-			Duration);
-
 	// 겹친 인프라(배관·배선)에 실루엣 노출 알림. 벽 타입 표시는 UI 담당
 	OnWallScanned.Broadcast(this, Duration, Scanner);
 }
@@ -344,12 +308,7 @@ void AMD_CuttableWall::AddCutProgressInternal(
 {
 	// 협동 합산(기획 §4) 때문에 진행도는 벽이 소유하고 서버만 갱신한다.
 	// 여러 명이 같은 벽을 자르면 각자 이 함수를 불러 자연히 합산된다.
-	if (!HasAuthority() || bCut || DeltaSeconds <= 0.0f)
-	{
-		return;
-	}
-
-	if (!CanCut())
+	if (!HasAuthority() || !CanCut() || DeltaSeconds <= 0.0f)
 	{
 		return;
 	}
@@ -401,31 +360,6 @@ void AMD_CuttableWall::OnRep_CutProgress()
 	const float ProgressRatio = GetCutProgressRatio();
 	OnCutProgressChanged.Broadcast(this, ProgressRatio);
 
-	if (GEngine && GetNetMode() != NM_DedicatedServer)
-	{
-		const TCHAR* WallTypeLabel = WallType == EMD_WallType::Strut
-			? TEXT("Strut")
-			: TEXT("Partition");
-		const TCHAR* NetRoleLabel = HasAuthority()
-			? TEXT("Server")
-			: TEXT("Client");
-		const FColor ProgressColor = ProgressRatio >= 1.0f
-			? FColor::Green
-			: FColor::Cyan;
-
-		GEngine->AddOnScreenDebugMessage(
-			reinterpret_cast<uint64>(this),
-			0.35f,
-			ProgressColor,
-			FString::Printf(
-				TEXT("[Wall Cutting][%s] %s (%s) | %.1f%% | %.2f / %.2fs"),
-				NetRoleLabel,
-				*GetName(),
-				WallTypeLabel,
-				ProgressRatio * 100.0f,
-				CutProgressSeconds,
-				GetRequiredCutSeconds()));
-	}
 }
 
 void AMD_CuttableWall::SyncLegacySurfaceConfiguration()
@@ -440,4 +374,22 @@ void AMD_CuttableWall::SyncLegacySurfaceConfiguration()
 	ScrapeSurface->bUseProceduralContamination = bUseProceduralContamination;
     ScrapeSurface->bForceFullContamination = bForceFullContamination;
 	ScrapeSurface->ContaminationDecalMaterial = ContaminationDecalMaterial;
+}
+
+bool AMD_CuttableWall::RestorePersistentCutSeconds(float Seconds)
+{
+	// 저장 당시 진행량의 손상과 클라이언트 적용 차단
+	if (HasAuthority() == false || FMath::IsFinite(Seconds) == false || Seconds < 0.0f || Seconds > GetRequiredCutSeconds())
+	{
+		// 현재 벽의 절단 상태를 유지한 채 실패 반환
+		return false;
+	}
+	// 절단 완료를 다시 실행하지 않고 누적 진행만 복구
+	CutProgressSeconds = Seconds;
+	// 호스트 진행 표시 갱신
+	OnRep_CutProgress();
+	// 접속 클라이언트의 절단 표시 동기화
+	ForceNetUpdate();
+	// 절단 상태 복원 성공 반환
+	return true;
 }

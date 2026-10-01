@@ -5,6 +5,7 @@
 #include "GameFramework/Actor.h"
 #include "GameplayTagContainer.h"
 #include "Types/Score/MD_ScoreTypes.h"
+#include "Types/MD_SampleFloatSettings.h"
 #include "MD_QuestSampleSpawner.generated.h"
 
 class UArrowComponent;
@@ -30,6 +31,13 @@ class MARINEDEMOLITION_API AMD_QuestSampleSpawner : public AActor
 public:
 	AMD_QuestSampleSpawner();
 
+	/** 테스트 전용: 퀘스트 진행 상태 변경 없이 일치하는 Phase의 부족한 샘플만 생성한다. */
+	bool DebugSpawnQuestSample(const UMD_QuestDefinition& Definition, int32 PhaseIndex);
+
+	/** Authored rack sets handle their quest explicitly instead of random selection. */
+	virtual bool IsRandomSpawnCandidate() const { return true; }
+	virtual bool ClaimsQuestPhase(const FPrimaryAssetId& DefinitionId, int32 PhaseIndex) const { return false; }
+
 protected:
 	virtual void PostInitializeComponents() override;
 	virtual void BeginPlay() override;
@@ -42,7 +50,7 @@ protected:
 
 	void HandleSubsystemStateChanged();
 
-	void TrySpawnForQuestState();
+	virtual void TrySpawnForQuestState();
 
 	/** 연결된 메인 퀘스트의 샘플 생성 처리. */
 	void TrySpawnForMainQuestState(const UMD_MerchantSubsystem* MerchantSubsystem);
@@ -113,6 +121,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest|Spawn",
 		meta = (ClampMin = "0.0", UIMin = "0.0", DisplayName = "Spawn Protection Duration"))
 	float SampleSpawnProtectionDuration = 3.f;
+
+	/** When enabled, apply this water plane and bobbing to spawned samples. Disabled preserves sample BP defaults. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Quest|Water Float", meta = (ShowOnlyInnerProperties))
+	FMD_SampleFloatSettings WaterFloat;
 
 	/** 메인 역할 퀘스트에서 마지막으로 스폰을 완료한 페이즈 인덱스 */
 	int32 LastSpawnedMainPhaseIndex = INDEX_NONE;

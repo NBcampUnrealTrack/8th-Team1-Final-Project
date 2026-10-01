@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "GameFramework/PlayerController.h"
+#include "Types/Customization/MD_CharacterAppearanceTypes.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
 #include "Types/UI/MD_LoadingScreenTypes.h"
@@ -16,7 +17,6 @@ class AMD_DayEndConsole;
 class AMD_SectorCloseoutMarker;
 class AMD_Merchant;
 class UMD_HUDWidget;
-class UMD_ScrapeFocusReticleWidget;
 class UMD_SiteDefinition;
 class UMD_MerchantSubsystem;
 class UGameplayEffect;
@@ -131,6 +131,14 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerRequestShopPurchase(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId);
 
+	// 소유 클라이언트의 판매 품목과 예상 슬롯 및 수량을 서버에서 검증
+	UFUNCTION(Server, Reliable)
+	void ServerRequestShopSale(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity);
+
+	// 해당 상인의 현재 화면에 판매 결과 전달
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveShopSaleResult(AMD_Merchant* Merchant, EMD_ShopSaleResult Result);
+
 	/** 서버 구매 결과를 요청한 로컬 상점 화면에 전달하는 응답 진입점 */
 	UFUNCTION(Client, Reliable)
 	void ClientReceiveShopPurchaseResult(AMD_Merchant* Merchant, FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result);
@@ -142,6 +150,10 @@ public:
 	// 서버의 참여 및 퇴장 알림을 소유 클라이언트 HUD에 전달
 	UFUNCTION(Client, Reliable)
 	void ClientNotifyPlayerJoinAndExit(const FText& PlayerName, bool bIsJoin);
+
+	// 서버 판정 결과(슬롯 가득 참·전원 없음 등) 한 줄을 소유 클라이언트 HUD 알림에 전달
+	UFUNCTION(Client, Reliable)
+	void ClientShowHUDMessage(const FText& Message);
 
 	/** 로딩 화면에 조작 주체 준비 완료를 알린다(하드 트래블/seamless travel 공용). */
 	void NotifyLoadingScreenPlayerReady();
@@ -158,6 +170,14 @@ public:
 	UFUNCTION(Server, Reliable)
 	void ServerNotifyQuestInteraction(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex);
 
+	/** 모선 상인 대화 시 핫바의 퀘스트 회수물(카트리지 등)을 서버에서 거리 검증 후 활성 메인 퀘스트에 납품하고 핫바에서 차감하는 함수 */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
+	void ServerDeliverHotbarQuestItems(AMD_Merchant* MerchantActor);
+
+	/** 핫바 회수물 납품 결과(품목명·개수)를 요청한 상인의 대사창에 전달하는 응답 진입점 */
+	UFUNCTION(Client, Reliable)
+	void ClientReceiveQuestItemDelivery(AMD_Merchant* MerchantActor, const FText& ItemName, int32 Count);
+
 	// 모선 상인과의 거리 및 대출 한도를 서버에서 검증한 뒤 대출을 실행하는 함수
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
 	void ServerBorrowCredits(AMD_Merchant* MerchantActor, int32 Amount);
@@ -165,6 +185,10 @@ public:
 	// 모선 상인과의 거리 및 보유 크레딧을 서버에서 검증한 뒤 상환을 실행하는 함수
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
 	void ServerRepayLoan(AMD_Merchant* MerchantActor, int32 Amount);
+
+	/** 클라이언트가 확정한 캐릭터 외형을 서버 PlayerState에 적용한다. */
+	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Customization")
+	void ServerApplyAppearance(FMD_CharacterAppearance NewAppearance);
 
 private:
 
@@ -236,6 +260,9 @@ protected:
 	virtual void SetPawn(APawn* InPawn) override;
 
 private:
+	/** 로컬 커스터마이징 세이브에서 가장 최근 외형을 읽어 서버에 전달한다. */
+	void RestoreAppearanceFromLocalSave();
+
 	/** Alt-Tab/창 비활성화로 입력 release를 잃기 전에 헤라 상호작용을 정리한다. */
 	void HandleApplicationWillDeactivate();
 
@@ -254,18 +281,8 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMD_HUDWidget> HUDWidgetInstance;
 
-	/** Blueprint 자산이 없어도 동작하는 Focus 가상 포인터. */
-	UPROPERTY(EditDefaultsOnly, Category = "HUD|Scrape")
-	TSubclassOf<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetClass;
-
-	UPROPERTY()
-	TObjectPtr<UMD_ScrapeFocusReticleWidget> ScrapeFocusReticleWidgetInstance;
-
 	// 로컬 플레이어의 메인 HUD를 생성하거나 화면에 복구하는 처리
 	void InitializeGameplayHUD();
-
-	// 로컬 플레이어의 헤라 Focus 포인터를 생성하거나 화면에 복구하는 처리
-	void InitializeScrapeFocusReticle();
 
 	/* 아래부터는 콘솔 커맨드 입력으로 디버깅용 ServerRPC래핑입니다. 미션선택 UI연결되면 삭제 */
 private:
@@ -303,6 +320,13 @@ private:
 	 */
 	UFUNCTION(Exec)
 	void MD_RepairUtility();
+
+	/** Day3 회수 샘플을 배치된 스포너에 생성한다. 기존 샘플이 있으면 중복 생성하지 않는다. */
+	UFUNCTION(Exec)
+	void MD_SpawnDay3Sample();
+
+	UFUNCTION(Server, Reliable)
+	void ServerSpawnDay3Sample();
 
 	UFUNCTION(Server, Reliable)
 	void ServerRepairUtility(AMD_WallUtility* Utility);

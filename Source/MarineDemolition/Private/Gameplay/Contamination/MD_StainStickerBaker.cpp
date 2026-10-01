@@ -1,6 +1,8 @@
 #include "Gameplay/Contamination/MD_StainStickerBaker.h"
+#include "Gameplay/Contamination/MD_StainSurfaceFit.h"
 
 #if WITH_EDITOR
+#include "MD_StainDownhillBridge.h"
 #include "Gameplay/Contamination/MD_StainStickerPatch.h"
 #include "Components/StaticMeshComponent.h"
 #include "DynamicMesh/DynamicMesh3.h"
@@ -9,6 +11,7 @@
 #include "Components/InstancedStaticMeshComponent.h"
 #include "DynamicMeshEditor.h"
 #include "Engine/StaticMesh.h"
+#include "StaticMeshResources.h"
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
@@ -28,10 +31,11 @@ struct FMD_StainSourceSnapshot
 	TWeakObjectPtr<UStaticMesh> Mesh;
 	FTransform Transform;
 	FGuid GeometryGuid;
+	bool bRequireDecals = true;
 	bool IsCurrent() const
 	{
 		return Component.IsValid() && Component->IsRegistered() && Component->IsVisible()
-			&& Component->bReceivesDecals && Component->IsCollisionEnabled()
+			&& (!bRequireDecals || Component->bReceivesDecals) && Component->IsCollisionEnabled()
 			&& Component->GetCollisionResponseToChannel(ECC_Visibility) == ECR_Block
 			&& Component->GetStaticMesh() == Mesh.Get() && Mesh.IsValid() && Mesh->GetLightingGuid() == GeometryGuid
 			&& Component->GetComponentTransform().Equals(Transform, 0.01);
@@ -41,7 +45,7 @@ struct FMD_StainSourceSnapshot
 struct FMD_StainStickerSourceCache
 {
 	struct FTriangle { FVector3f Positions[3]; FVector3f Normal; };
-	struct FGeometry { TArray<FTriangle> Triangles; bool bClosedSource = false; };
+	struct FGeometry { TArray<FTriangle> Triangles; bool bClosedSource = false; bool bRendered = false; };
 	struct FEntry
 	{
 		FGuid Guid;
@@ -153,7 +157,7 @@ namespace MD_StainStickerBake
 		return true;
 	}
 
-	bool CaptureSources(AActor& Owner, double Radius, TArray<FGeometryInstance>& Instances, FString& Error, TArray<FMD_StainSourceSnapshot>* Snapshots = nullptr, FMD_StainStickerSourceCache* Cache = nullptr)
+	bool CaptureSources(AActor& Owner, double Radius, TArray<FGeometryInstance>& Instances, FString& Error, TArray<FMD_StainSourceSnapshot>* Snapshots = nullptr, FMD_StainStickerSourceCache* Cache = nullptr, bool bUseRenderMesh = false)
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(MD_StainSticker_GatherEditor);
 		const FTransform Frame = Owner.GetActorTransform();
@@ -167,7 +171,7 @@ namespace MD_StainStickerBake
 		for (const FOverlapResult& Overlap : Overlaps)
 		{
 			UStaticMeshComponent* Component = Cast<UStaticMeshComponent>(Overlap.GetComponent());
-			if (!Component || Cast<UInstancedStaticMeshComponent>(Component) || !Component->IsVisible() || !Component->bReceivesDecals || !Component->GetStaticMesh()
+			if (!Component || Cast<UInstancedStaticMeshComponent>(Component) || !Component->IsVisible() || (!bUseRenderMesh && !Component->bReceivesDecals) || !Component->GetStaticMesh()
 				|| Component->GetCollisionResponseToChannel(ECC_Visibility) != ECR_Block) continue;
 			Components.AddUnique(Component);
 		}
@@ -181,13 +185,30 @@ namespace MD_StainStickerBake
 		for (UStaticMeshComponent* Component : Components)
 		{
 			UStaticMesh* Source = Component->GetStaticMesh();
+			const bool bReadRender = bUseRenderMesh && !Source->GetNaniteSettings().bEnabled;
 			TSharedPtr<FSourceGeometry, ESPMode::ThreadSafe> Geometry = GeometryByMesh.FindRef(Source);
 			if (!Geometry)
 			{
 				const FGuid Guid = Source->GetLightingGuid();
 				if (Cache)
-					if (const auto* Entry = Cache->Entries.Find(Source); Entry && Entry->Guid == Guid)
+					if (const auto* Entry = Cache->Entries.Find(Source); Entry && Entry->Guid == Guid && Entry->Geometry->bRendered == bReadRender)
 						Geometry = Entry->Geometry;
+				if (!Geometry && bReadRender)
+				{
+					const FStaticMeshRenderData* Data=Source->GetRenderData();
+					if (!Data || Data->LODResources.IsEmpty()) continue;
+					const FStaticMeshLODResources& LOD=Data->LODResources[0];
+					const auto Indices=LOD.IndexBuffer.GetArrayView();
+					if (Indices.Num()/3 > MaximumSnapshotTriangles)
+					{ Error=TEXT("The receiving render mesh exceeds the authoring geometry budget."); return false; }
+					Geometry=MakeShared<FSourceGeometry, ESPMode::ThreadSafe>(); Geometry->bRendered=true;
+					for (int32 I=0;I<Indices.Num();I+=3)
+					{
+						FSourceTriangle& Triangle=Geometry->Triangles.AddDefaulted_GetRef();
+						for (int32 K=0;K<3;++K) Triangle.Positions[K]=LOD.VertexBuffers.PositionVertexBuffer.VertexPosition(Indices[I+K]);
+						Triangle.Normal=LOD.VertexBuffers.StaticMeshVertexBuffer.VertexTangentZ(Indices[I]);
+					}
+				}
 				if (!Geometry)
 				{
 					const FMeshDescription* Description = Source->GetMeshDescription(0);
@@ -212,15 +233,16 @@ namespace MD_StainStickerBake
 							Triangle.Positions[K] = Positions[Description->GetVertexInstanceVertex(Corners[K])];
 						Triangle.Normal = Normals[Corners[0]];
 					}
-					if (Cache)
-					{
-						// This tool owns a bounded cache of immutable coordinates, never source UObjects.
-						if (const auto* Previous = Cache->Entries.Find(Source)) Cache->TriangleCount -= Previous->Geometry->Triangles.Num();
-						if (Cache->TriangleCount + Geometry->Triangles.Num() > MaximumSnapshotTriangles)
-						{ Cache->Entries.Reset(); Cache->TriangleCount = 0; }
-						Cache->Entries.Add(Source, {Guid, Geometry});
-						Cache->TriangleCount += Geometry->Triangles.Num();
-					}
+
+				}
+				if (Cache)
+				{
+					// This tool owns a bounded cache of immutable coordinates, never source UObjects.
+					if (const auto* Previous = Cache->Entries.Find(Source)) Cache->TriangleCount -= Previous->Geometry->Triangles.Num();
+					if (Cache->TriangleCount + Geometry->Triangles.Num() > MaximumSnapshotTriangles)
+					{ Cache->Entries.Reset(); Cache->TriangleCount = 0; }
+					Cache->Entries.Add(Source, {Guid, Geometry});
+					Cache->TriangleCount += Geometry->Triangles.Num();
 				}
 				SnapshotTriangles += Geometry->Triangles.Num();
 				if (SnapshotTriangles > MaximumSnapshotTriangles)
@@ -228,8 +250,8 @@ namespace MD_StainStickerBake
 				GeometryByMesh.Add(Source, Geometry);
 			}
 			const FTransform Transform = Component->GetComponentTransform();
-			if (Snapshots) Snapshots->Add({Component, Source, Transform, Source->GetLightingGuid()});
-			const FVector BuildScale = Source->GetNumSourceModels() > 0 ? Source->GetSourceModel(0).BuildSettings.BuildScale3D : FVector::OneVector;
+			if (Snapshots) Snapshots->Add({Component, Source, Transform, Source->GetLightingGuid(), !bUseRenderMesh});
+			const FVector BuildScale = !Geometry->bRendered && Source->GetNumSourceModels() > 0 ? Source->GetSourceModel(0).BuildSettings.BuildScale3D : FVector::OneVector;
 			Instances.Add({Geometry, Frame, Transform, BuildScale});
 		}
 		if (Instances.IsEmpty()) { Error = TEXT("No readable source surface around this placement."); return false; }
@@ -322,7 +344,7 @@ namespace MD_StainStickerBake
 				Weld.OnlyUniquePairs = true;
 				Weld.Apply();
 				bJoined = true;
-				for (const int32 Edge : Union.CreatedBoundaryEdges)
+				for (const int32 Edge : CutEdges)
 				{
 					if (!Joined.IsEdge(Edge) || !Joined.IsBoundaryEdge(Edge)) continue;
 					FVector A, B; Joined.GetEdgeV(Edge, A, B);
@@ -352,7 +374,7 @@ namespace MD_StainStickerBake
 	}
 
 	bool MakeSurface(TArray<FSourceMesh>& Sources, const FVector2D& HalfSize, FDynamicMesh3& Combined,
-		FString& Error, FProgressCancel* Progress = nullptr)
+		TArray<int32>& Disconnected, FString& Error, FProgressCancel* Progress = nullptr)
 	{
 		const double Radius = HalfSize.Length() + 1;
 		TArray<int32> Connected;
@@ -378,6 +400,8 @@ namespace MD_StainStickerBake
 		}
 		if (Progress && Progress->Cancelled()) return false;
 		if (!ConnectSources(Sources, Radius, Connected, Error)) return false;
+		for (int32 Index = 0; Index < Sources.Num(); ++Index)
+			if (!Connected.Contains(Index)) Disconnected.Add(Index);
 		Combined = *Sources[Connected[0]].Mesh;
 		TArray<int32> Deferred;
 		// A failed seam can become unambiguous after adjoining tiles have been joined.
@@ -508,6 +532,279 @@ namespace MD_StainStickerBake
 		return Patch.IsValid();
 	}
 
+	bool TryAddDownhillBridges(FDynamicMesh3& Surface, const TArray<FSourceMesh>& Sources, const TArray<int32>& Disconnected, const FVector2D& HalfSize, FString& Error, FProgressCancel* Progress, bool bOverlapLandings, int32& UnjoinedCount)
+	{
+		UnjoinedCount = INDEX_NONE;
+		TArray<FDynamicMesh3> Wedges;
+		const double Radius = HalfSize.Length() + 1;
+		// Search lower receivers across air gaps without making unrelated surfaces reachable by unfolding.
+		FDynamicMesh3 LandingSurface;
+		const FDynamicMesh3* Search = &Surface;
+		if (!Disconnected.IsEmpty())
+		{
+			LandingSurface = Surface;
+			FDynamicMeshEditor Editor(&LandingSurface);
+			for (int32 Index : Disconnected)
+			{
+				if (Progress && Progress->Cancelled()) return false;
+				if (LandingSurface.TriangleCount() + Sources[Index].Mesh->TriangleCount() > MaximumSourceTriangles)
+				{ Error = TEXT("Descending landing search exceeds 50,000 triangles. Reduce the sticker size."); return false; }
+				FMeshIndexMappings Mappings; Editor.AppendMesh(Sources[Index].Mesh.Get(), Mappings);
+			}
+			Search = &LandingSurface;
+		}
+		if (!FMD_StainDownhillBridge::Gather(Surface, *Search, HalfSize, Wedges, Error, Progress, bOverlapLandings)) return false;
+		TSet<int32> JoinedLandings;
+		// Broad connections resolve intersecting tile corners before their short seam fragments.
+		Wedges.Sort([](const FDynamicMesh3& A, const FDynamicMesh3& B)
+		{ return A.GetBounds().DiagonalLength() > B.GetBounds().DiagonalLength(); });
+		TArray<int32> Pending;
+		for (int32 Index = 0; Index < Wedges.Num(); ++Index) Pending.Add(Index);
+		for (int32 Cursor = 0; Cursor < Pending.Num();)
+		{
+			if (Progress && Progress->Cancelled()) return false;
+			const FDynamicMesh3& Wedge = Wedges[Pending[Cursor]];
+			if (!TryJoin(Surface, Wedge, Radius, Progress)) { ++Cursor; continue; }
+
+			// Only a receiver touched by an accepted bridge becomes part of the sticker surface.
+			FDynamicMeshAABBTree3 WedgeTree(&Wedge);
+			for (int32 Index : Disconnected)
+			{
+				if (Progress && Progress->Cancelled()) return false;
+				if (JoinedLandings.Contains(Index)) continue;
+				FDynamicMeshAABBTree3 ReceiverTree(Sources[Index].Mesh.Get());
+				double Distance;
+				const FIndex2i Contact = WedgeTree.FindNearestTriangles(ReceiverTree, nullptr, Distance, IMeshSpatial::FQueryOptions(0.01));
+				if (Contact.A < 0 || Distance > 0.01) continue;
+				if (!TryJoin(Surface, *Sources[Index].Mesh, Radius, Progress))
+				{ Error = TEXT("The descending sticker could not connect to its lower receiver."); return false; }
+				JoinedLandings.Add(Index);
+			}
+			if (Surface.TriangleCount() > MaximumSourceTriangles)
+			{ Error = TEXT("Descending sticker surface exceeds 50,000 triangles. Reduce the sticker size."); return false; }
+			Pending.RemoveAt(Cursor);
+			Cursor = 0;
+		}
+		if (!Pending.IsEmpty())
+		{
+			// A short, ambiguous corner must not discard the independent descents already joined.
+			if (Pending.Num() < Wedges.Num()) UnjoinedCount = Pending.Num();
+			Error = TEXT("The descending sticker bridge could not be joined to its landing."); return false;
+		}
+		return true;
+	}
+
+	bool AddDownhillBridges(FDynamicMesh3& Surface, const TArray<FSourceMesh>& Sources, const TArray<int32>& Disconnected,
+		const FVector2D& HalfSize, FString& Error, FProgressCancel* Progress = nullptr)
+	{
+		TUniquePtr<FDynamicMesh3> Partial;
+		int32 FewestUnjoined = TNumericLimits<int32>::Max();
+		// Retry ambiguous contacts from the original surface, without mixing incompatible operands.
+		for (bool bOverlapLandings : {false,true})
+		{
+			if (Progress && Progress->Cancelled()) return false;
+			FDynamicMesh3 Candidate = Surface;
+			int32 Unjoined = INDEX_NONE;
+			Error.Reset();
+			if (TryAddDownhillBridges(Candidate,Sources,Disconnected,HalfSize,Error,Progress,bOverlapLandings,Unjoined))
+			{ Surface = MoveTemp(Candidate); return true; }
+			if (Unjoined >= 0 && Unjoined < FewestUnjoined)
+			{ FewestUnjoined = Unjoined; Partial = MakeUnique<FDynamicMesh3>(MoveTemp(Candidate)); }
+		}
+		if (Progress && Progress->Cancelled()) return false;
+		// Preserve original wrapping only at unresolved corners; valid bridges and receiving faces remain usable.
+		if (Partial) { Surface = MoveTemp(*Partial); Error.Reset(); return true; }
+		return false;
+	}
+
+	bool WalkSurface(const TArray<FSourceMesh>& Sources, const FVector2D& HalfSize,
+		FMD_StainStickerPatch& Patch, FString& Error, bool bLimitNeighborRise, FProgressCancel* Progress = nullptr)
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceFit_Walk);
+		FDynamicMesh3 Mesh;
+		FDynamicMeshEditor Editor(&Mesh);
+		const FSourceMesh* Primary=nullptr; double SeedDistance=6.0;
+		for (const auto& Source : Sources)
+		{
+			FDynamicMeshAABBTree3 SourceTree(Source.Mesh.Get());
+			double T; FVector3d Bary; int32 ID=INDEX_NONE;
+			if (SourceTree.FindNearestHitTriangle(FRay3d(FVector3d(0,0,6),FVector3d(0,0,-1)),T,ID,Bary)
+				&& T<=12 && FMath::Abs(T-6)<SeedDistance)
+			{ Primary=&Source; SeedDistance=FMath::Abs(T-6); }
+		}
+		for (const auto& Source : Sources)
+		{
+			if (!bLimitNeighborRise || &Source==Primary)
+			{ FMeshIndexMappings Mapping; Editor.AppendMesh(Source.Mesh.Get(),Mapping); continue; }
+			// A floor spill may cover adjacent low steps and chair feet, but must not climb
+			// an unrelated piece of furniture all the way to its seat. Direct furniture hits
+			// keep their full size-dependent wrapping; downward continuation is unchanged.
+			for (int32 Triangle : Source.Mesh->TriangleIndicesItr())
+			{
+				FVector A,B,C; Source.Mesh->GetTriVertices(Triangle,A,B,C);
+				const TArray<FVector> Input={A,B,C}; TArray<FVector> Clipped;
+				for (int32 I=0;I<3;++I)
+				{
+					const FVector P=Input[I],Q=Input[(I+1)%3];
+					const double DP=P.Z-6.0,DQ=Q.Z-6.0;
+					if (DP<=0) Clipped.Add(P);
+					if ((DP<=0)!=(DQ<=0)) Clipped.Add(FMath::Lerp(P,Q,DP/(DP-DQ)));
+				}
+				for (int32 I=1;I+1<Clipped.Num();++I)
+				{
+					if (FVector::CrossProduct(Clipped[I]-Clipped[0],Clipped[I+1]-Clipped[0]).SquaredLength()<1.e-12) continue;
+					Mesh.AppendTriangle(Mesh.AppendVertex(Clipped[0]),Mesh.AppendVertex(Clipped[I]),Mesh.AppendVertex(Clipped[I+1]));
+				}
+			}
+		}
+		FDynamicMeshAABBTree3 Tree(&Mesh);
+		auto Trace = [&](FVector A,FVector B,FVector& P,FVector& N)
+		{
+			const FVector D=B-A; const double Length=D.Length(); if (Length<1.e-6) return false;
+			const FRay3d Ray(A,D/Length);
+			double T; FVector3d Bary;
+			int32 ID=INDEX_NONE;
+			if (!Tree.FindNearestHitTriangle(Ray,T,ID,Bary,IMeshSpatial::FQueryOptions(Length,[&](int32 Triangle) { return FVector::DotProduct(Mesh.GetTriNormal(Triangle),D)<-1.e-6; })) || ID<0 || T>Length) return false;
+			P=Ray.PointAt(T); N=Mesh.GetTriNormal(ID);
+			return FVector::DotProduct(N,D)<-1.e-6;
+		};
+		FVector Seed,SeedNormal;
+		if (!Trace(FVector(0,0,6),FVector(0,0,-6),Seed,SeedNormal))
+		{ Error=TEXT("No readable surface at the cursor."); return false; }
+		auto Walk = [&](FVector2D Target,FVector& Result,FVector& ThicknessNormal,double StepLimit)
+		{
+			FVector P=Seed,N=SeedNormal;
+			const FVector PlanarDirection=FVector(Target.X,Target.Y,0).GetSafeNormal();
+			const double Radius=Target.Length();
+			const double Reach=FMath::Clamp(HalfSize.GetMax()*.5,6.0,40.0);
+			double Projected=0;
+			// Keep an inset screen and its raised front bezel in one height field. Unfold only
+			// beyond the outer lip; traversing every concave crease creates radial folds.
+			while (Projected<Radius-.001)
+			{
+				if (Progress && Progress->Cancelled()) return false;
+				const double NextDistance=FMath::Min(Radius,Projected+.75);
+				const FVector Center=PlanarDirection*NextDistance;
+				FVector Next,NextNormal;
+				if (!Trace(Center+FVector::UpVector*Reach,Center-FVector::UpVector*Reach,Next,NextNormal)
+					|| FVector::Distance(P,Next)>FMath::Clamp(HalfSize.GetMax()*.3,6.0,18.0)) break;
+				P=Next; N=NextNormal; Projected=NextDistance;
+			}
+			if (Projected>=Radius-.001) { Result=P; ThicknessNormal=FVector::UpVector; return true; }
+			FVector D=FQuat::FindBetweenNormals(FVector::UpVector,N).RotateVector(PlanarDirection);
+			double Remaining=Radius-Projected; const double WrappingDistance=Remaining; int32 Steps=0;
+			while (Remaining>0.01)
+			{
+				if (++Steps>8192 || (Progress && Progress->Cancelled())) return false;
+				const double Step=FMath::Min(Remaining,StepLimit);
+				const FVector Predicted=P+D*Step;
+				FVector Next,NextNormal;
+				// An inset screen meets the inner bezel before a normal projection can see its top.
+				bool Found=Trace(P+N*.03,Predicted+N*.03,Next,NextNormal)
+					&& FVector::Distance(P,Next)>.02 && FVector::DotProduct(N,NextNormal)>-.95;
+				if (!Found) Found=Trace(Predicted+N*2.0,Predicted-N*2.0,Next,NextNormal)
+					&& FVector::Distance(P,Next)<3.0 && FVector::DotProduct(N,NextNormal)>-.95;
+				if (!Found || FVector::DotProduct(Next-P,N)<-Step*.5)
+				{
+					// Cross a convex lip by looking back toward its side; no mesh-edge adjacency required.
+					FVector Side,SideNormal;
+					if (Trace(P+D*Step+N*.02,P-D*.15-N*Step,Side,SideNormal)
+						&& FVector::Distance(P,Side)<2.0 && FVector::DotProduct(N,SideNormal)>-.95)
+					{ Next=Side; NextNormal=SideNormal; Found=true; }
+				}
+				if (!Found) { Result=P; return false; }
+				const double Travel=FVector::Distance(P,Next);
+				if (Travel<0.0001) return false;
+				if (Travel>Remaining) { Next=FMath::Lerp(P,Next,Remaining/Travel); Remaining=0; }
+				else Remaining-=Travel;
+				D=FQuat::FindBetweenNormals(N,NextNormal).RotateVector(D).GetSafeNormal(); P=Next; N=NextNormal;
+			}
+			Result=P; ThicknessNormal=FMath::Lerp(FVector::UpVector,N,FMath::Clamp(WrappingDistance/3.0,0.0,1.0)).GetSafeNormal(); return true;
+		};
+		constexpr int32 Resolution=33;
+		TArray<FVector> Points,ThicknessNormals; Points.SetNum(Resolution*Resolution); ThicknessNormals.SetNum(Points.Num());
+		TArray<bool> Valid; Valid.SetNumZeroed(Points.Num());
+		for (int32 Y=0;Y<Resolution;++Y) for (int32 X=0;X<Resolution;++X)
+		{
+			if (Progress && Progress->Cancelled()) return false;
+			const int32 I=Y*Resolution+X;
+			const FVector2D Target=(FVector2D(X,Y)/(Resolution-1)-FVector2D(.5,.5))*(HalfSize*2);
+			Valid[I]=Walk(Target,Points[I],ThicknessNormals[I],0.25);
+			if (!Valid[I]) Valid[I]=Walk(Target,Points[I],ThicknessNormals[I],0.10);
+			if (!Valid[I]) Valid[I]=Walk(Target,Points[I],ThicknessNormals[I],0.05);
+		}
+		// A bounded fluid fillet rises before a sharp bezel instead of pinching into its crease.
+		// Only the front height field changes; the flat interior and side-wrapping coordinates stay fixed.
+		TArray<FVector> Rounded=Points;
+		for (int32 Y=0;Y<Resolution;++Y) for (int32 X=0;X<Resolution;++X)
+		{
+			const int32 I=Y*Resolution+X;
+			if (!Valid[I] || !ThicknessNormals[I].Equals(FVector::UpVector,.001)) continue;
+			for (int32 DY=-3;DY<=3;++DY) for (int32 DX=-3;DX<=3;++DX)
+			{
+				const int32 NX=X+DX,NY=Y+DY;
+				if (NX<0 || NX>=Resolution || NY<0 || NY>=Resolution) continue;
+				const int32 J=NY*Resolution+NX;
+				if (!Valid[J] || !ThicknessNormals[J].Equals(FVector::UpVector,.001)) continue;
+				const double Distance=FVector2D(Points[I].X-Points[J].X,Points[I].Y-Points[J].Y).Length();
+				if (Distance>3.0) continue;
+				Rounded[I].Z=FMath::Max(Rounded[I].Z,Points[J].Z-Distance);
+			}
+		}
+		Points=MoveTemp(Rounded);
+		TArray<bool> Front; Front.SetNum(Points.Num());
+		for (int32 I=0;I<Points.Num();++I) Front[I]=ThicknessNormals[I].Equals(FVector::UpVector,.001);
+		// Relax side paths across small vents and tessellation changes. A viscous coating bridges
+		// these recesses; transporting every authored face normal would create sharp spikes.
+		for (int32 Pass=0;Pass<10;++Pass)
+		{
+			TArray<FVector> NextPoints=Points,NextNormals=ThicknessNormals;
+			for (int32 Y=0;Y<Resolution;++Y) for (int32 X=0;X<Resolution;++X)
+			{
+				const int32 I=Y*Resolution+X; if (!Valid[I] || Front[I]) continue;
+				FVector Sum=FVector::ZeroVector,NormalSum=ThicknessNormals[I]*2; int32 Count=0;
+				const FIntPoint Deltas[]={FIntPoint(-1,0),FIntPoint(1,0),FIntPoint(0,-1),FIntPoint(0,1)};
+				for (FIntPoint Delta:Deltas)
+				{
+					const int32 NX=X+Delta.X,NY=Y+Delta.Y;
+					if (NX<0 || NX>=Resolution || NY<0 || NY>=Resolution) continue;
+					const int32 J=NY*Resolution+NX;
+					if (!Valid[J] || FVector::DistSquared(Points[I],Points[J])>64.0) continue;
+					Sum+=Points[J]; NormalSum+=ThicknessNormals[J]; ++Count;
+				}
+				if (Count<2) continue;
+				const FVector Normal=NormalSum.GetSafeNormal(); if (Normal.IsNearlyZero()) continue;
+				FVector Point=FMath::Lerp(Points[I],Sum/Count,.35),Contact,ContactNormal;
+				if (Trace(Point+Normal*3,Point-Normal*3,Contact,ContactNormal) && FVector::DotProduct(Contact-Point,Normal)>0)
+					Point=Contact+Normal*.03;
+				NextPoints[I]=Point; NextNormals[I]=Normal;
+			}
+			Points=MoveTemp(NextPoints); ThicknessNormals=MoveTemp(NextNormals);
+		}
+		for (int32 Y=0;Y<Resolution-1;++Y) for (int32 X=0;X<Resolution-1;++X)
+		{
+			const int32 A=Y*Resolution+X,B=A+1,C=A+Resolution,D=C+1;
+			const int32 Indices[]={A,D,B,A,C,D};
+			for (int32 I=0;I<6;I+=3)
+			{
+				if (!Valid[Indices[I]] || !Valid[Indices[I+1]] || !Valid[Indices[I+2]]) continue;
+				if (FVector::CrossProduct(Points[Indices[I+1]]-Points[Indices[I]],Points[Indices[I+2]]-Points[Indices[I]]).SquaredLength()<1.e-8) continue;
+				for (int32 K=0;K<3;++K)
+				{
+					const int32 ID=Indices[I+K]; Patch.Positions.Add(FVector3f(Points[ID])); Patch.FitNormals.Add(FVector3f(ThicknessNormals[ID]));
+					Patch.UVs.Add(FVector2f(float(ID%Resolution)/(Resolution-1),float(ID/Resolution)/(Resolution-1)));
+					Patch.LocalBounds+=Points[ID];
+				}
+			}
+		}
+		TMap<int32,int32> ReceiverIDs;
+		for (int32 V : Mesh.VertexIndicesItr()) { ReceiverIDs.Add(V,Patch.FitReceiverVertices.Num()); Patch.FitReceiverVertices.Add(Mesh.GetVertex(V)); }
+		for (int32 T : Mesh.TriangleIndicesItr())
+		{ const auto V=Mesh.GetTriangle(T); Patch.FitReceiverTriangles.Add(FIntVector(ReceiverIDs[V.A],ReceiverIDs[V.B],ReceiverIDs[V.C])); }
+		if (!Patch.IsValid()) { Error=TEXT("This surface could not support a connected slime patch."); return false; }
+		return true;
+	}
+
 	UStaticMesh* MakeMesh(AActor& Owner, const FMD_StainStickerPatch& Patch, UMaterialInterface* Material)
 	{
 		FMeshDescription Description;
@@ -556,19 +853,26 @@ namespace MD_StainStickerBake
 }
 
 bool FMD_StainStickerBaker::Build(AActor& Owner, const FVector2D& HalfSize, int32 InitialSize,
-	UMaterialInterface* Material, FMD_StainStickerPatch& OutPatch, UStaticMesh*& OutMesh, FString& Error)
+	UMaterialInterface* Material, FMD_StainStickerPatch& OutPatch, UStaticMesh*& OutMesh, FString& Error, bool bSurfaceWalk)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_StainSticker_BakeEditor);
 	if (!Owner.GetWorld() || Owner.GetWorld()->IsGameWorld() || !Material || HalfSize.ContainsNaN() || HalfSize.GetMin() <= 0)
 	{ Error = TEXT("A sticker material and an editor-world surface are required."); return false; }
 	TArray<MD_StainStickerBake::FGeometryInstance> Instances;
-	if (!MD_StainStickerBake::CaptureSources(Owner, HalfSize.Length() + 1, Instances, Error)) return false;
+	if (!MD_StainStickerBake::CaptureSources(Owner, HalfSize.Length() + 1, Instances, Error, nullptr, nullptr, bSurfaceWalk)) return false;
 	TArray<MD_StainStickerBake::FSourceMesh> Sources;
 	if (!MD_StainStickerBake::BuildSources(Instances, HalfSize.Length() + 1, Sources, Error)) return false;
 	FDynamicMesh3 Surface;
-	if (!MD_StainStickerBake::MakeSurface(Sources, HalfSize, Surface, Error)) return false;
+	TArray<int32> Disconnected;
 	FMD_StainStickerPatch Patch; Patch.InitialSize = InitialSize;
-	if (!MD_StainStickerBake::Unfold(Surface, HalfSize, Patch, Error)) return false;
+	if (bSurfaceWalk)
+	{
+		if (!MD_StainStickerBake::WalkSurface(Sources, HalfSize, Patch, Error, Owner.GetActorUpVector().Z>.75)) return false;
+		OutPatch=MoveTemp(Patch); OutMesh=nullptr; return true;
+	}
+	else if (!MD_StainStickerBake::MakeSurface(Sources, HalfSize, Surface, Disconnected, Error)
+		|| !MD_StainStickerBake::AddDownhillBridges(Surface, Sources, Disconnected, HalfSize, Error)
+		|| !MD_StainStickerBake::Unfold(Surface, HalfSize, Patch, Error)) return false;
 	UStaticMesh* Mesh = MD_StainStickerBake::MakeMesh(Owner, Patch, Material);
 	if (!Mesh) { Error = TEXT("Could not build the mesh decal."); return false; }
 	OutPatch = MoveTemp(Patch); OutMesh = Mesh;
@@ -577,17 +881,39 @@ bool FMD_StainStickerBaker::Build(AActor& Owner, const FVector2D& HalfSize, int3
 
 struct FMD_StainStickerAsyncResult
 {
-	std::atomic<bool> bReady {false}, bCancelled {false};
+	std::atomic<bool> bReady {false}, bCancelled {false}, bPreviewReady {false};
 	bool bSuccess = false;
 	FMD_StainStickerPatch Patch;
+	TSharedPtr<FMD_StainSurfaceFitJob,ESPMode::ThreadSafe> FitJob;
 	FString Error;
 	TArray<FMD_StainSourceSnapshot> Sources;
 };
 
 FMD_StainStickerAsyncBake::~FMD_StainStickerAsyncBake() { Cancel(); }
 bool FMD_StainStickerAsyncBake::IsReady() const { return Result->bReady.load(); }
+bool FMD_StainStickerAsyncBake::IsPreviewReady() const { return Result->bPreviewReady.load(); }
+UStaticMesh* FMD_StainStickerAsyncBake::FinishPreview(AActor& Owner,UMaterialInterface* Material)
+{
+	check(IsInGameThread());
+	if (!IsPreviewReady() || IsCancelled() || !SourcesAreCurrent()) return nullptr;
+	return FMD_StainSurfaceFit::CreatePreview(Owner,Material,*Result->FitJob);
+}
 bool FMD_StainStickerAsyncBake::IsCancelled() const { return Result->bCancelled.load(); }
 void FMD_StainStickerAsyncBake::Cancel() { if (Result) Result->bCancelled.store(true); }
+bool FMD_StainStickerAsyncBake::SourcesAreCurrent() const
+{
+	for (const auto& Source : Result->Sources) if (!Source.IsCurrent()) return false;
+	return true;
+}
+UMD_SurfaceStainDefinition* FMD_StainStickerAsyncBake::FinishVolume(AActor& Owner,const UMD_SurfaceStainDefinition& Definition,FString& Error)
+{
+	check(IsInGameThread());
+	if (!IsReady() || IsCancelled()) return nullptr;
+	if (!Result->bSuccess) { Error=Result->Error; return nullptr; }
+	if (!SourcesAreCurrent()) { Error=TEXT("A receiving surface changed. Place this stain again."); return nullptr; }
+	return Result->FitJob ? FMD_StainSurfaceFit::Create(Owner,Definition,*Result->FitJob,Error) : nullptr;
+}
+
 bool FMD_StainStickerAsyncBake::Finish(AActor& Owner, UMaterialInterface* Material,
 	FMD_StainStickerPatch& OutPatch, UStaticMesh*& OutMesh, FString& Error)
 {
@@ -614,34 +940,49 @@ TSharedPtr<FMD_StainStickerSourceCache> FMD_StainStickerBaker::CreateSourceCache
 }
 
 TSharedPtr<FMD_StainStickerAsyncBake> FMD_StainStickerBaker::StartAsync(AActor& Owner, const FVector2D& HalfSize, int32 InitialSize,
-	const TSharedPtr<FMD_StainStickerSourceCache>& Cache)
+	const TSharedPtr<FMD_StainStickerSourceCache>& Cache, const UMD_SurfaceStainDefinition* FitDefinition, bool bPreparePreview)
 {
 	check(IsInGameThread());
 	auto Task = MakeShared<FMD_StainStickerAsyncBake>();
 	Task->Result = MakeShared<FMD_StainStickerAsyncResult, ESPMode::ThreadSafe>();
 	const auto Result = Task->Result;
+	const bool bSurfaceWalk=FitDefinition!=nullptr;
+	const bool bLimitNeighborRise=Owner.GetActorUpVector().Z>.75;
+	if (FitDefinition) Result->FitJob=FMD_StainSurfaceFit::Capture(*FitDefinition);
 	TArray<MD_StainStickerBake::FGeometryInstance> Instances;
 	if (!Owner.GetWorld() || Owner.GetWorld()->IsGameWorld() || HalfSize.ContainsNaN() || HalfSize.GetMin() <= 0
-		|| !MD_StainStickerBake::CaptureSources(Owner, HalfSize.Length() + 1, Instances, Result->Error, &Result->Sources, Cache.Get()))
+		|| !MD_StainStickerBake::CaptureSources(Owner, HalfSize.Length() + 1, Instances, Result->Error, &Result->Sources, Cache.Get(), bSurfaceWalk))
 	{
 		if (Result->Error.IsEmpty()) Result->Error = TEXT("No readable source surface around this placement.");
 		Result->bReady.store(true);
 		return Task;
 	}
 	// Only private geometry copies cross threads. UObject, collision, mesh upload and transactions stay on the editor thread.
-	UE::Tasks::Launch(TEXT("MD Stain Sticker"), [Result, Instances = MoveTemp(Instances), HalfSize, InitialSize]() mutable
+	UE::Tasks::Launch(TEXT("MD Stain Sticker"), [Result, Instances = MoveTemp(Instances), HalfSize, InitialSize, bSurfaceWalk, bLimitNeighborRise, bPreparePreview]() mutable
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(MD_StainSticker_WorkerBake);
 		FProgressCancel Progress;
 		Progress.CancelF = [Result]() { return Result->bCancelled.load(); };
 		FDynamicMesh3 Surface;
+		TArray<int32> Disconnected;
 		TArray<MD_StainStickerBake::FSourceMesh> Sources;
 		Result->Patch.InitialSize = InitialSize;
 		Result->bSuccess = !Progress.Cancelled()
 			&& MD_StainStickerBake::BuildSources(Instances, HalfSize.Length() + 1, Sources, Result->Error, &Progress)
-			&& MD_StainStickerBake::MakeSurface(Sources, HalfSize, Surface, Result->Error, &Progress)
-			&& !Progress.Cancelled()
-			&& MD_StainStickerBake::Unfold(Surface, HalfSize, Result->Patch, Result->Error);
+			&& (bSurfaceWalk ? MD_StainStickerBake::WalkSurface(Sources, HalfSize, Result->Patch, Result->Error, bLimitNeighborRise, &Progress)
+				: (MD_StainStickerBake::MakeSurface(Sources, HalfSize, Surface, Disconnected, Result->Error, &Progress)
+				&& MD_StainStickerBake::AddDownhillBridges(Surface, Sources, Disconnected, HalfSize, Result->Error, &Progress)
+				&& !Progress.Cancelled()
+				&& MD_StainStickerBake::Unfold(Surface, HalfSize, Result->Patch, Result->Error)));
+		if (Result->bSuccess && Result->FitJob && bSurfaceWalk && bPreparePreview)
+		{
+			// Publish an immutable estimate before doing the expensive three final removal stages.
+			// Release/acquire through the atomic flag keeps UObject creation on the editor thread.
+			if (FMD_StainSurfaceFit::PreparePreview(*Result->FitJob,Result->Patch,InitialSize,&Progress))
+				Result->bPreviewReady.store(true);
+		}
+		if (Result->bSuccess && bSurfaceWalk)
+			Result->bSuccess=Result->FitJob.IsValid() && FMD_StainSurfaceFit::Prepare(*Result->FitJob,Result->Patch,InitialSize,Result->Error,&Progress);
 		if (!Result->bSuccess && Result->Error.IsEmpty()) Result->Error = TEXT("Could not unfold this connected surface.");
 		Instances.Reset(); Sources.Reset(); Surface = FDynamicMesh3();
 		Result->bReady.store(true);

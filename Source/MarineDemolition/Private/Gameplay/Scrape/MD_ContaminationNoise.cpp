@@ -1,5 +1,12 @@
 #include "Gameplay/Scrape/MD_ContaminationNoise.h"
 
+// Generated network baselines must use the same arithmetic in Game and Editor.
+// UE 5.8 defaults to fast math for Game and precise math for Editor on MSVC.
+#if defined(_MSC_VER)
+#pragma float_control(precise, on, push)
+#pragma fp_contract(off)
+#endif
+
 namespace
 {
 	constexpr int32 FractalOctaveCount = 3;
@@ -52,32 +59,41 @@ float FMD_ContaminationNoise::ValueNoise3D(
 	const float ZAlpha = SmoothInterpolationAlpha(
 		static_cast<float>(Position.Z - static_cast<double>(Z0)));
 
-    // Reuse identical integer prefixes of the eight corners. Preserve the exact original
-    // hash, float conversion and interpolation order: 1 seed + 2 X + 4 XY + 8 XYZ mixes.
-    const uint32 SeedPrefix = MixHash(static_cast<uint32>(Seed));
-    const uint32 X0Prefix = MixHash(SeedPrefix ^ static_cast<uint32>(X0));
-    const uint32 X1Prefix = MixHash(SeedPrefix ^ static_cast<uint32>(X1));
-    const uint32 XY00 = MixHash(X0Prefix ^ static_cast<uint32>(Y0));
-    const uint32 XY10 = MixHash(X1Prefix ^ static_cast<uint32>(Y0));
-    const uint32 XY01 = MixHash(X0Prefix ^ static_cast<uint32>(Y1));
-    const uint32 XY11 = MixHash(X1Prefix ^ static_cast<uint32>(Y1));
-
-	const float X00 = FMath::Lerp(
-		HashLatticeZ(XY00, Z0),
-		HashLatticeZ(XY10, Z0),
-		XAlpha);
-	const float X10 = FMath::Lerp(
-		HashLatticeZ(XY01, Z0),
-		HashLatticeZ(XY11, Z0),
-		XAlpha);
-	const float X01 = FMath::Lerp(
-		HashLatticeZ(XY00, Z1),
-		HashLatticeZ(XY10, Z1),
-		XAlpha);
-	const float X11 = FMath::Lerp(
-		HashLatticeZ(XY01, Z1),
-		HashLatticeZ(XY11, Z1),
-		XAlpha);
+    // Nearby samples reuse the same eight lattice corners. Each worker owns four
+    // fixed entries; full keys make seed-slot collisions harmless. Interpolation
+    // and float conversion are unchanged, including negative lattice coordinates.
+    struct FLatticeCorners
+    {
+        int32 X = 0, Y = 0, Z = 0, Seed = 0;
+        float Values[8] = {};
+        bool bValid = false;
+    };
+    static thread_local FLatticeCorners Cache[4];
+    auto& Entry = Cache[static_cast<uint32>(Seed) & 3u];
+    if (!Entry.bValid || Entry.X != X0 || Entry.Y != Y0 || Entry.Z != Z0 || Entry.Seed != Seed)
+    {
+        const uint32 SeedPrefix = MixHash(static_cast<uint32>(Seed));
+        const uint32 X0Prefix = MixHash(SeedPrefix ^ static_cast<uint32>(X0));
+        const uint32 X1Prefix = MixHash(SeedPrefix ^ static_cast<uint32>(X1));
+        const uint32 XY00 = MixHash(X0Prefix ^ static_cast<uint32>(Y0));
+        const uint32 XY10 = MixHash(X1Prefix ^ static_cast<uint32>(Y0));
+        const uint32 XY01 = MixHash(X0Prefix ^ static_cast<uint32>(Y1));
+        const uint32 XY11 = MixHash(X1Prefix ^ static_cast<uint32>(Y1));
+        Entry.Values[0] = HashLatticeZ(XY00, Z0);
+        Entry.Values[1] = HashLatticeZ(XY10, Z0);
+        Entry.Values[2] = HashLatticeZ(XY01, Z0);
+        Entry.Values[3] = HashLatticeZ(XY11, Z0);
+        Entry.Values[4] = HashLatticeZ(XY00, Z1);
+        Entry.Values[5] = HashLatticeZ(XY10, Z1);
+        Entry.Values[6] = HashLatticeZ(XY01, Z1);
+        Entry.Values[7] = HashLatticeZ(XY11, Z1);
+        Entry.X = X0; Entry.Y = Y0; Entry.Z = Z0; Entry.Seed = Seed;
+        Entry.bValid = true;
+    }
+    const float X00 = FMath::Lerp(Entry.Values[0], Entry.Values[1], XAlpha);
+    const float X10 = FMath::Lerp(Entry.Values[2], Entry.Values[3], XAlpha);
+    const float X01 = FMath::Lerp(Entry.Values[4], Entry.Values[5], XAlpha);
+    const float X11 = FMath::Lerp(Entry.Values[6], Entry.Values[7], XAlpha);
 	const float Y0Value = FMath::Lerp(X00, X10, YAlpha);
 	const float Y1Value = FMath::Lerp(X01, X11, YAlpha);
 	return FMath::Clamp(
@@ -173,3 +189,7 @@ bool FMD_ContaminationNoise::TryCalculateInitialContamination(
 		ShapedAlpha);
 	return true;
 }
+
+#if defined(_MSC_VER)
+#pragma float_control(pop)
+#endif

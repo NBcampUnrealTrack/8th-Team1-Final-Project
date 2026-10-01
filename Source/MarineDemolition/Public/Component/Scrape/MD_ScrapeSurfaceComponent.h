@@ -9,6 +9,7 @@
 #include "Components/ActorComponent.h"
 #include "Component/Scrape/MD_ContaminationSolidVisualComponent.h"
 #include "Gameplay/Scrape/MD_ScrapeEvaluator.h"
+#include "Gameplay/Scrape/MD_ScrapeInitialState.h"
 #include "Gameplay/Scrape/MD_ScrapeReplicationCodec.h"
 #include "Net/Serialization/FastArraySerializer.h"
 #include "Types/Scrape/MD_ScrapeTypes.h"
@@ -270,7 +271,8 @@ public:
     int32 GetResolvedContaminationSeed() const { return ContaminationGeneration.Seed; }
 
     const FMD_ContaminationGeneration& GetContaminationGeneration() const { return ContaminationGeneration; }
-    FMD_ContaminationGeneration MakeContaminationGeneration(bool bLegacy = false) const;
+    // 현재 생성 설정과 세션 시드를 사용하는 표면 생성 정보 구성
+    FMD_ContaminationGeneration MakeContaminationGeneration() const;
     bool RestoreContaminationGeneration(const FMD_ContaminationGeneration& Generation, bool bResetState = false);
 
 	/** Refreshes editor/runtime geometry without resetting scrape progress. */
@@ -444,6 +446,8 @@ public:
 	FGuid GetContaminationLayoutId() const;
 	FIntPoint GetContaminationGridDimensions() const;
 	bool CanRestoreContaminationLayout(int32 Version, const FGuid& LayoutId, const FIntPoint& Grid) const;
+    /** Selects only an explicitly registered historical layout; cell indices are never remapped. */
+    bool SelectCompatibleContaminationLayout(const FGuid& LayoutId, bool bInitialize = true);
 	float GetContaminationCleanRatio(EMD_ScrapeSurfaceFace Face) const;
 
 	UFUNCTION(BlueprintPure, Category = "MD|Scrape Surface")
@@ -474,17 +478,7 @@ public:
 		TArray<float>& OutTransferredAmounts,
 		TArray<float>& OutTransferredPatternDensities,
 		TArray<float>& OutCoveredFractions) const;
-	void RestoreContaminationCells(
-		const TArray<int32>& CellIndices,
-		const TArray<float>& InitialAmounts,
-		const TArray<float>& RemainingAmounts);
-	void RestoreContaminationCells(
-		const TArray<int32>& CellIndices,
-		const TArray<float>& InitialAmounts,
-		const TArray<float>& RemainingAmounts,
-		const TArray<float>& TransferredAmounts,
-		const TArray<float>& TransferredPatternDensities);
-	/** CoveredFractions가 비어 있으면 잔여량에서 역산해 구버전 겉모습을 쓴다. */
+	// 현재 저장 형식의 모든 오염 열과 피복률을 함께 복원
 	void RestoreContaminationCells(
 		const TArray<int32>& CellIndices,
 		const TArray<float>& InitialAmounts,
@@ -826,6 +820,14 @@ private:
 	void ResolveSurfaceMeshFromOwner();
 	void EnsureVisualizationComponents();
 	void DestroyOwnedVisualizationComponents();
+	friend class UMD_ScrapeInitializationSubsystem;
+	bool bDeferredInitializationPending = false;
+    uint64 DeferredInitializationEpoch = 0;
+	bool bCompletingDeferredInitialization = false;
+	TOptional<FMD_ScrapeInitialState> PreparedInitialState;
+    bool GetDeferredInitialMaskInputs(
+        TSharedPtr<const FMDScrapeInitialMaskLayout, ESPMode::ThreadSafe>& OutLayout, float& OutFullSignal) const;
+	bool TryDeferContaminationInitialization();
 	void InitializeRuntimeState();
 	void ShutdownRuntimeState();
 	void ApplyContaminationEnabledState();
@@ -872,6 +874,8 @@ private:
 	TArray<FLocalScrapePrediction> LocalScrapePredictions;
 	TArray<FMD_ScrapeSurfaceCell> LocalPredictedContaminationCells;
     FMD_ScrapePagedState LocalPredictedPagedCells;
+    FMD_ScrapeMeshUVProgress LocalPredictedMeshUVProgress;
+    bool bLocalScrapePredictionRebuildPending = false;
 	TArray<FMD_ScrapeSurfaceCell> LocalScrapePredictionFaceScratch;
 	FMD_ScrapeEvaluationScratch ScrapeEvaluationScratch;
 	TArray<int32> PendingLocalScrapePredictionVisualCellIndices;
@@ -1057,6 +1061,8 @@ private:
 	void MarkLocalScrapePredictionReconcileCell(int32 CellIndex);
 	void FlushLocalScrapePredictionVisualUpdates();
 	void RebuildLocalScrapePredictionShadow();
+    void RequestLocalScrapePredictionRebuild();
+    void FlushLocalScrapePredictionRebuild();
 	SIZE_T GetLocalScrapePredictionAllocatedBytes() const;
 	bool UpdateLocalScrapePredictionMemoryBudget();
 	void ReleaseLocalScrapePredictionMemoryBudget();

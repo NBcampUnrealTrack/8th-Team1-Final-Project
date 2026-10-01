@@ -7,8 +7,8 @@
 #include "Blueprint/UserWidget.h"
 #include "MD_LoreQuestTabWidget.generated.h"
 
-class UProgressBar;
-class UScrollBox;
+class UMD_FilledSlider;
+class UWrapBox;
 class UTextBlock;
 class UMD_LoreCardWidget;
 class UMD_LoreCatalog;
@@ -39,30 +39,28 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore")
 	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds;
 
-	// 현장 이름 표시용 텍스트 바인딩
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_SiteName;
+	// 현재 구성의 현장 이름 표시
+	TObjectPtr<UTextBlock> Txt_Location;
 
-	// 전체 기록물 대비 획득 수량 표시용 텍스트 바인딩
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> TXT_LoreProgress;
+	// 별도 수집 접두사 옆에 표시할 획득 수량과 전체 수량
+	TObjectPtr<UTextBlock> Txt_Progress;
 
-	// 로어 수집 비율 표시용 진행 막대 바인딩
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidgetOptional))
-	TObjectPtr<UProgressBar> PB_LoreProgress;
+	// 획득 수량과 전체 수량으로 채움 길이를 표시하는 슬라이더
+	TObjectPtr<UMD_FilledSlider> Slider_Progress;
 
-	// 로어 카드 목록 표시용 스크롤 영역 바인딩
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Lore", meta = (BindWidgetOptional))
-	TObjectPtr<UScrollBox> SL_LoreList;
+	// 기존 스크롤 구조 안에서 카드만 배치하는 WrapBox
+	TObjectPtr<UWrapBox> WB_LoreList;
 
 public:
-	// 카탈로그와 복제된 획득 원장을 목록과 진행률에 적용하는 함수
+	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
+	// 카탈로그와 복제된 획득 원장을 목록과 진행률에 적용
 	void SetLoreData(UMD_LoreCatalog* InLoreCatalog, const TArray<FPrimaryAssetId>& InDiscoveredLoreAssetIds, FText InSiteName);
 
 protected:
-	// 카탈로그 순서대로 획득 여부를 표시하는 카드 생성
-	void RebuildLoreList();
-
-	// 현장 이름과 획득 수량 및 진행 막대 갱신
-	void RefreshLoreHeader();
+	// 목록과 진행률을 한 번 집계하고 필요한 카드 및 헤더만 갱신
+	void RefreshDisplay(bool bUpdateCards);
 };

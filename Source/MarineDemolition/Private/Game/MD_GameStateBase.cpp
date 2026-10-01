@@ -1,4 +1,6 @@
 #include "Game/MD_GameStateBase.h"
+#include "Game/MD_GameModeBase.h"
+#include "Data/Merchant/MD_SiteDefinition.h"
 #include "Component/Lore/MD_LoreComponent.h"
 #include "Data/Score/MD_ScoreTableData.h"
 #include "GameFramework/PlayerState.h"
@@ -57,7 +59,7 @@ void AMD_GameStateBase::BeginPlay()
 
     if (HasAuthority())
     {
-        StartGameTime();
+        if (!GetWorld()->GetAuthGameMode<AMD_GameModeBase>()) FinishWorldInitialization();
         // 초기 착수금과 현재 일차의 보고서 구성
         RefreshDailyLedger();
     }
@@ -69,6 +71,8 @@ void AMD_GameStateBase::GetLifetimeReplicatedProps(
 {
     Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 
+    DOREPLIFETIME(AMD_GameStateBase, bWorldInitializationReady);
+    DOREPLIFETIME(AMD_GameStateBase, PendingElapsedRealSeconds);
     DOREPLIFETIME(AMD_GameStateBase, GameStartServerTime);
     DOREPLIFETIME(AMD_GameStateBase, bGameTimeStarted);
     DOREPLIFETIME(AMD_GameStateBase, WithdrawalPhase);
@@ -96,14 +100,26 @@ void AMD_GameStateBase::StartGameTime()
         return;
     }
 
+    PendingElapsedRealSeconds = 0.0;
+    if (!bWorldInitializationReady) return;
     GameStartServerTime = GetServerWorldTimeSeconds();
     bGameTimeStarted = true;
 
     ForceNetUpdate();
 }
 
+void AMD_GameStateBase::FinishWorldInitialization()
+{
+    if (!HasAuthority() || bWorldInitializationReady) return;
+    GameStartServerTime = GetServerWorldTimeSeconds() - PendingElapsedRealSeconds;
+    bGameTimeStarted = true;
+    bWorldInitializationReady = true;
+    ForceNetUpdate();
+}
+
 double AMD_GameStateBase::GetElapsedRealSeconds() const
 {
+    if (!bWorldInitializationReady) return PendingElapsedRealSeconds;
     if (!bGameTimeStarted)
     {
         return 0.0;
@@ -224,8 +240,8 @@ void AMD_GameStateBase::AddScoreDelta(int32 Delta)
 
 int32 AMD_GameStateBase::GetScoreForDay(int32 Day) const
 {
-    // 계약 누적 점수와 분리된 일일 정산값을 구성하기 위한 해당 Day 원장 합계
-    int32 OutScore = 0;
+    // 저장된 점수 이벤트 합계가 표시 정수 범위를 넘어도 오버플로하지 않는 누적값
+    int64 OutScore = 0;
     for (const FMD_ScoreEntry& ScoreEntry : ScoreLog)
     {
         if (ScoreEntry.Day == Day)
@@ -234,7 +250,8 @@ int32 AMD_GameStateBase::GetScoreForDay(int32 Day) const
         }
     }
 
-    return OutScore;
+    // 원본 로그를 유지하면서 UI 반환형 범위에서만 합계 제한
+    return static_cast<int32>(FMath::Clamp<int64>(OutScore, MIN_int32, MAX_int32));
 }
 
 TArray<FMD_DailyReportValue> AMD_GameStateBase::GetDailyScoreTotals() const
@@ -475,6 +492,12 @@ FMD_GameStateData AMD_GameStateBase::GetGameStateSaveData() const
     SaveData.ElapsedDay = CurrentDay;
     SaveData.ElapsedSeconds = GetElapsedGameSeconds();
     SaveData.Score = Score;
+    // 당일 증감 조회에 필요한 이벤트 기록 보존
+    SaveData.ScoreLog = ScoreLog;
+    // 분류별 정산 값을 원래 정밀도로 보존
+    SaveData.DailyScoreTotals = DailyScoreTotals;
+    // 마지막 점검의 판정과 정산 내역 보존
+    SaveData.LastInspectionReport = LastInspectionReport;
     return SaveData;
 }
 
@@ -490,14 +513,21 @@ bool AMD_GameStateBase::ApplyGameStateSaveData(const FMD_GameStateData& SaveData
 	const double TotalGameSeconds = static_cast<double>(EndHour - StartHour) * 60.0 * 60.0;
     const double TimeScale = TotalGameSeconds / RealDayDurationSeconds;
     const double ElapsedRealSeconds = SaveData.ElapsedSeconds / TimeScale;
+    PendingElapsedRealSeconds = ElapsedRealSeconds;
     GameStartServerTime = GetServerWorldTimeSeconds() - ElapsedRealSeconds;
-    bGameTimeStarted = true;
+    bGameTimeStarted = bWorldInitializationReady;
     bEmergencyDay = SaveData.bEmergencyDay;
     bInspectionWarned = SaveData.bInspectionWarned;
     ContractCrewCount = SaveData.ContractCrewCount;
     ContractDifficulty = SaveData.ContractDifficulty;
     CurrentDay = SaveData.ElapsedDay;
     Score = SaveData.Score;
+    // 보상 함수를 재실행하지 않고 저장된 점수 로그 복원
+    ScoreLog = SaveData.ScoreLog;
+    // 이전 세션의 원장이 섞이지 않도록 당일 합계 교체
+    DailyScoreTotals = SaveData.DailyScoreTotals;
+    // 구형 저장의 기본값도 이전 세션의 점검 결과를 제거하도록 적용
+    LastInspectionReport = SaveData.LastInspectionReport;
     // 저장 복원 후 현재 일자 기준 보고서 재구성
     RefreshDailyLedger();
 
@@ -578,6 +608,26 @@ void AMD_GameStateBase::RefreshDailyLedger()
     Report.bValid = true;
     // 계약 누적 점수와 당일 점수 분리
     Report.Score = Score;
+    // 판정 당시 점수와 구분할 실제 누적 점수 기록
+    Report.CumulativeScore = Score;
+    // 이전 정산에서 전달된 다음 점검 기준 초기화
+    Report.NextThreshold = 0;
+    // 퇴근 전에는 현재 일자부터 가장 가까운 유효 점검 탐색
+    for (int32 InspectionDay = CurrentDay; InspectionDay <= 4; ++InspectionDay)
+    {
+        // 난이도와 인원 및 경고 배율이 반영된 기준 조회
+        Report.NextThreshold = GetInspectionThreshold(InspectionDay);
+        // 실제 점검이 있는 첫 일자의 기준 사용
+        if (Report.NextThreshold > 0)
+        {
+            // 다음 점검 탐색 종료
+            break;
+        }
+    }
+    // 이전 확정 보고서의 보유 크레딧 초기화
+    Report.Credits = 0;
+    // 이전 현장의 이름이 남지 않도록 표시 초기화
+    Report.SiteName = FText::GetEmpty();
     // 당일 점수 로그 합계 조회
     Report.DailyScore = GetScoreForDay(CurrentDay);
     // 분류별 점수 원장 조회
@@ -595,6 +645,16 @@ void AMD_GameStateBase::RefreshDailyLedger()
         {
             // 실제 잔액 변동을 반영한 분류별 크레딧 기록 조회
             Report.DailyCreditTotals = Merchant->GetDailyCreditTotals();
+            // 일일 변동 합계와 같은 시점의 보유 잔액 기록
+            Report.Credits = Merchant->GetCredits();
+            // 경로 하드코딩 없이 현재 계약의 현장 에셋 조회
+            UMD_SiteDefinition* Site = Merchant->GetCurrentSite();
+            // 유효한 현장의 표시 이름만 보고서에 전달
+            if (IsValid(Site) == true)
+            {
+                // 모든 클라이언트에서 사용할 동일한 현장 이름 기록
+                Report.SiteName = Site->SiteName;
+            }
         }
     }
     // 값이 같으면 구독 중인 모든 클라이언트의 중복 응답 전송 생략
@@ -645,7 +705,8 @@ bool AMD_GameStateBase::SetGameTimeHour(int32 Hour)
     // 지정한 시각을 작업 시작 이후의 인게임 경과 초로 환산
     double TargetGameSeconds = static_cast<double>(Hour - StartHour) * 3600.0;
     // 기존 시간 진행 속도에 맞춘 서버 시작 시각 역산
-    GameStartServerTime = GetServerWorldTimeSeconds() - TargetGameSeconds * RealDayDurationSeconds / TotalGameSeconds;
+    PendingElapsedRealSeconds = TargetGameSeconds * RealDayDurationSeconds / TotalGameSeconds;
+    GameStartServerTime = GetServerWorldTimeSeconds() - PendingElapsedRealSeconds;
     // 시작 전에도 지정한 시각부터 시간 진행 허용
     bGameTimeStarted = true;
     // 시간을 되돌린 경우에도 기존 알림과 자동 마감 순서 재평가

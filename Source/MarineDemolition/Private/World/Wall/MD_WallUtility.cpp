@@ -2,19 +2,15 @@
 
 #include "Character/MD_Character.h"
 #include "Component/Scanning/MD_ScannerComponent.h"
-#include "CollisionQueryParams.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Components/BoxComponent.h"
-#include "Components/StaticMeshComponent.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
 #include "Engine/OverlapResult.h"
-#include "GameFramework/Controller.h"
-#include "GameFramework/Pawn.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Net/UnrealNetwork.h"
-#include "TimerManager.h"
 #include "World/Wall/MD_CuttableWall.h"
+#include "Gameplay/Persistence/MD_WorldActorPersistence.h"
 
 AMD_WallUtility::AMD_WallUtility()
 {
@@ -71,7 +67,11 @@ void AMD_WallUtility::BeginPlay()
 
 	// 모든 머신에서 링크한다. 컷 델리게이트는 서버에서만 방송되어 클라 구독은 무해하고,
 	// 스캔 실루엣은 스캔한 클라 로컬에서 떠야 하므로 클라 파이프도 구독해야 한다.
-	LinkOverlappingWalls();
+	// 독립 설비는 이 경로를 끄고 벽 철거 시스템과 분리한다.
+	if (bLinkHostWalls)
+	{
+		LinkOverlappingWalls();
+	}
 
 	// 처음부터 고장 상태로 시작 (서버에서만 상태 전이, 클라는 복제로 따라온다)
 	if (bStartBroken && HasAuthority())
@@ -240,10 +240,22 @@ void AMD_WallUtility::SetScanSilhouette(bool bVisible)
 
 void AMD_WallUtility::RefreshHighlight()
 {
-	if (bScanHighlighted || bInteractionHighlighted)
+	if (bScanHighlighted || bInteractionHighlighted || bQuestHighlighted)
 		HighlightState.Apply(Mesh, bScanHighlighted ? ScanSilhouetteStencil : IMD_Interactable::HighlightStencilValue);
 	else
 		HighlightState.Restore();
+}
+
+void AMD_WallUtility::SetQuestHighlighted(AActor* Source, bool bHighlighted)
+{
+	if (bHighlighted) QuestHighlightSources.Add(Source);
+	else QuestHighlightSources.Remove(Source);
+	for (auto It = QuestHighlightSources.CreateIterator(); It; ++It)
+		if (!It->IsValid()) It.RemoveCurrent();
+	const bool bRequested = !QuestHighlightSources.IsEmpty();
+	if (bQuestHighlighted == bRequested) return;
+	bQuestHighlighted = bRequested;
+	RefreshHighlight();
 }
 
 void AMD_WallUtility::EndScanSilhouette()
@@ -432,4 +444,60 @@ void AMD_WallUtility::SetInteractionHighlighted_Implementation(bool bHighlighted
 {
 	bInteractionHighlighted = bHighlighted;
 	RefreshHighlight();
+}
+
+FMD_UtilityRecord AMD_WallUtility::BuildPersistenceRecord()
+{
+	// 파생 설비의 추가 기록에도 사용할 공통 상태
+	FMD_UtilityRecord Record;
+	// 레벨 식별자와 배치 정보 보관
+	FMD_WorldActorPersistence::CaptureActor(this, Record);
+	// 저장 시점의 파손 또는 수리 상태 보관
+	Record.State = UtilityState;
+	// 파손 연출 위치 보관
+	Record.BreakLocation = BreakLocation;
+	// 파손 연출 방향 보관
+	Record.BreakNormal = BreakNormal;
+	// 완성한 설비 기록 반환
+	return Record;
+}
+
+bool AMD_WallUtility::RestorePersistenceRecord(FMD_UtilityRecord Record)
+{
+	// 잘못된 설비 상태와 클라이언트 변경 차단
+	if (HasAuthority() == false || Record.State > EMD_UtilityState::Repaired
+		|| Record.BreakLocation.ContainsNaN() == true || Record.BreakNormal.ContainsNaN() == true)
+	{
+		// 설비를 변경하기 전 실패 반환
+		return false;
+	}
+	// 현재 설비의 영속 상태 적용
+	UtilityState = Record.State;
+	// 저장된 사고 지점 복원
+	BreakLocation = Record.BreakLocation;
+	// 저장된 분출 방향 복원
+	BreakNormal = Record.BreakNormal;
+	// 사고 점수 없이 위험 볼륨과 조명 상태 재구성
+	if (UtilityState == EMD_UtilityState::Broken)
+	{
+		// 절단자를 전달하지 않아 사고 감점 재발행 방지
+		OnBroken(nullptr);
+	}
+	else
+	{
+		// 정상 및 수리 상태의 위험과 파손 효과 해제
+		OnRepaired(nullptr);
+	}
+	// 수리로 해제된 연결 게이트의 잠금 복구
+	if (UtilityState == EMD_UtilityState::Repaired)
+	{
+		// 게임플레이 수리 입력 없이 잠금 해제 반영
+		UnlockLinkedGate();
+	}
+	// 호스트의 파손 연출 복원
+	OnRep_UtilityState();
+	// 클라이언트에 최종 설비 상태 전송
+	ForceNetUpdate();
+	// 설비 복원 성공 반환
+	return true;
 }

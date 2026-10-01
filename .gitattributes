@@ -15,6 +15,7 @@
 *.fbx  filter=lfs diff=lfs merge=lfs -text
 *.obj  filter=lfs diff=lfs merge=lfs -text
 *.blend filter=lfs diff=lfs merge=lfs -text
+*.glb filter=lfs diff=lfs merge=lfs -text
 *.png  filter=lfs diff=lfs merge=lfs -text
 *.jpg  filter=lfs diff=lfs merge=lfs -text
 *.tga  filter=lfs diff=lfs merge=lfs -text
@@ -33,3 +34,14 @@
 *.ini text
 *.uproject text
 *.uplugin  text
+
+# ── 스크립트 (줄바꿈 고정) ────────────────────────────
+# 셸 스크립트가 CRLF 로 체크아웃되면 맥/리눅스에서
+# "bad interpreter: /usr/bin/env bash^M" 로 죽는다.
+*.sh      text eol=lf
+*.command text eol=lf
+*.py      text eol=lf
+
+# 배치 파일은 반대로 CRLF 여야 cmd.exe 가 안전하게 파싱한다.
+*.bat text eol=crlf
+*.ps1 text eol=crlf

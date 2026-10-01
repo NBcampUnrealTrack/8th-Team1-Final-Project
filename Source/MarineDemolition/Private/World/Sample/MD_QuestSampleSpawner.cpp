@@ -1,11 +1,9 @@
 #include "World/Sample/MD_QuestSampleSpawner.h"
+#include "Data/SaveGame/MD_SaveSlotManager.h"
 
 #include "Components/ArrowComponent.h"
-#include "Components/SceneComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
-#include "Engine/GameInstance.h"
-#include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
@@ -179,6 +177,17 @@ void AMD_QuestSampleSpawner::TrySpawnForQuestState()
 	}
 
 	UWorld* World = GetWorld();
+	// 저장 복원 또는 새 계약 적용 전에 이전 퀘스트로 물품이 생성되는 상황 차단
+	UMD_SaveSlotManager* SaveManager = IsValid(World) == true && IsValid(World->GetGameInstance()) == true
+		? World->GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
+	// 예약된 맵 초기화와 복원 이벤트가 완료될 때까지 퀘스트 물품 생성 보류
+	if (IsValid(SaveManager) == true && (SaveManager->GetPendingGameDataOperation() != EMD_PendingGameDataOperation::None
+		|| SaveManager->IsGameDataOperationInProgress() == true))
+	{
+		// 저장된 생존 목록 또는 새 계약의 퀘스트를 먼저 확정하도록 생성 연기
+		return;
+	}
+
 	// 등록 완료 전 생성 요청은 매니저의 비동기 대기열에서 처리하도록 전달한다.
 	UMD_QuestSampleSpawnerManager* SpawnerManager = IsValid(World) == true ? World->GetSubsystem<UMD_QuestSampleSpawnerManager>() : nullptr;
 	bool bIsSpawnerManagerValid = IsValid(SpawnerManager);
@@ -280,7 +289,9 @@ void AMD_QuestSampleSpawner::TrySpawnForMainQuestState(const UMD_MerchantSubsyst
 	// 공통 Definition의 청소·마감 페이즈는 각 전용 진행 시스템이 처리하므로 샘플을 만들지 않는 분기
 	EMD_QuestObjectiveType ObjectiveType = Definition->GetObjectiveType(QuestState.CurrentPhaseIndex);
 	bool bIsRecoveryObjective = ObjectiveType == EMD_QuestObjectiveType::RecoverIntact || ObjectiveType == EMD_QuestObjectiveType::RecoverDamaged;
-	if (bIsRecoveryObjective == false)
+	// 핫바 회수물(RequiredItemDefinition) 페이즈는 단말 등 레벨 기믹이 지급하므로 샘플을 만들지 않는다
+	bool bUsesHotbarDelivery = Definition->UsesHotbarDelivery(QuestState.CurrentPhaseIndex);
+	if (bIsRecoveryObjective == false || bUsesHotbarDelivery == true)
 	{
 		// 생성 대상이 아닌 Phase도 같은 상태 알림에서 반복 검사하지 않도록 Definition을 기록한다.
 		LastSpawnedMainQuestDefinitionId = QuestState.DefinitionId;
@@ -638,6 +649,33 @@ int32 AMD_QuestSampleSpawner::BindOccupyingQuestItemsToMainQuest(const FPrimaryA
 	return AssignedQuestItemCount;
 }
 
+bool AMD_QuestSampleSpawner::DebugSpawnQuestSample(const UMD_QuestDefinition& Definition, int32 PhaseIndex)
+{
+#if !UE_BUILD_SHIPPING
+	if (!HasAuthority() || !Definition.HasPhase(PhaseIndex) || !MatchesSpawnZone(Definition, PhaseIndex)) return false;
+	const TSubclassOf<AMD_QuestItem> ItemClass = ResolveSpawnItemClass(Definition, PhaseIndex);
+	if (!ItemClass || CollectSpawnTransforms().IsEmpty()) return false;
+	const bool bRequiresGrade = ItemClass->IsChildOf(AMD_SampleItem::StaticClass())
+		&& Definition.GetAcceptedGradeTags(PhaseIndex).Num() > 0;
+	EMD_SampleGrade Grade = EMD_SampleGrade::C;
+	if (bRequiresGrade && !ResolveSpawnGrade(Definition, PhaseIndex, Grade)) return false;
+	const int32 RequiredCount = FMath::Max(1, Definition.GetRequiredCount(PhaseIndex));
+	BindOccupyingQuestItemsToMainQuest(Definition.GetPrimaryAssetId(), ItemClass.Get(), bRequiresGrade, Grade, RequiredCount);
+	const int32 MissingCount = RequiredCount - CountAvailableQuestItems(Definition.GetPrimaryAssetId(), ItemClass.Get(), bRequiresGrade, Grade);
+	if (MissingCount > 0)
+	{
+		FMD_MainQuestState State;
+		State.DefinitionId = Definition.GetPrimaryAssetId();
+		State.CurrentPhaseIndex = PhaseIndex;
+		State.UnlockDay = 3;
+		SpawnMainQuestItems(State, Definition, ItemClass, bRequiresGrade, Grade, MissingCount);
+	}
+	return CountAvailableQuestItems(Definition.GetPrimaryAssetId(), ItemClass.Get(), bRequiresGrade, Grade) >= RequiredCount;
+#else
+	return false;
+#endif
+}
+
 void AMD_QuestSampleSpawner::SpawnMainQuestItems(const FMD_MainQuestState& QuestState, const UMD_QuestDefinition& Definition, TSubclassOf<AMD_QuestItem> SpawnItemClass, bool bRequiresSampleGrade, EMD_SampleGrade SpawnGrade, int32 SpawnCount)
 {
 	UWorld* World = GetWorld();
@@ -704,6 +742,7 @@ void AMD_QuestSampleSpawner::SpawnMainQuestItems(const FMD_MainQuestState& Quest
 		{
 			// 파괴 가능한 샘플에 생성 직후 충격 보호를 추가하는 설정
 			Sample->SpawnProtectionDuration = SampleSpawnProtectionDuration;
+			if (WaterFloat.bEnabled) Sample->WaterFloat = WaterFloat;
 			Sample->SuppressImpactDamage(2.0f);
 			if (bRequiresSampleGrade == true)
 			{
@@ -772,6 +811,7 @@ void AMD_QuestSampleSpawner::SpawnRepeatQuestItems(const FMD_RepeatQuestState& Q
 		{
 			// 파괴 가능한 샘플에 생성 직후 충격 보호를 추가하는 설정
 			Sample->SpawnProtectionDuration = SampleSpawnProtectionDuration;
+			if (WaterFloat.bEnabled) Sample->WaterFloat = WaterFloat;
 			Sample->SuppressImpactDamage(2.0f);
 			if (bRequiresSampleGrade == true)
 			{

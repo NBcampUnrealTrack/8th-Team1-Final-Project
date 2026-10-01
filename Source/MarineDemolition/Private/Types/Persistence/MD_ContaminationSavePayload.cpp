@@ -10,7 +10,8 @@ namespace
     constexpr int32 CellsPerChunk = 4096;
     constexpr int32 BytesPerCell = 24;
     constexpr int32 MaximumChunkBytes = CellsPerChunk * BytesPerCell;
-    constexpr uint8 RequiredFields = 3;
+    // 현재 형식의 다섯 오염 열 전체 필수
+    constexpr uint8 RequiredFields = 31;
     struct FChunk
     {
         uint32 Crc = 0;
@@ -58,7 +59,18 @@ bool FMD_ContaminationSavePayload::Encode(const TArray<int32>& Indices,
         || Initial.Num() != Count || Remaining.Num() != Count) return false;
     for (const TArray<float>* Column : Columns)
     {
-        if (!Column->IsEmpty() && Column->Num() != Count) return false;
+        // 현재 저장에서는 모든 열의 셀 개수가 일치해야 인코딩 허용
+        if (Column->Num() != Count) return false;
+        // 비정상 실수가 압축된 정상 파일로 고정되는 상황 차단
+        for (float Value : *Column)
+        {
+            // 기존 값의 정밀도와 범위를 유지하면서 NaN과 무한대만 거부
+            if (FMath::IsFinite(Value) == false)
+            {
+                // 원본 압축 저장을 교체하기 전 실패 반환
+                return false;
+            }
+        }
     }
     if (Count == 0)
     {
@@ -86,11 +98,6 @@ bool FMD_ContaminationSavePayload::Encode(const TArray<int32>& Indices,
             Seen[Index] = true;
         }
     }
-    NewStorage->Fields = 0;
-    for (int32 Column = 0; Column < 5; ++Column)
-    {
-        if (!Columns[Column]->IsEmpty()) NewStorage->Fields |= 1 << Column;
-    }
     TArray<uint8> Raw;
     TArray<uint8> Compressed;
     for (int32 Start = 0; Start < Count; Start += CellsPerChunk)
@@ -98,15 +105,12 @@ bool FMD_ContaminationSavePayload::Encode(const TArray<int32>& Indices,
         const int32 Rows = FMath::Min(CellsPerChunk, Count - Start);
         Raw.SetNumUninitialized(Rows * BytesPerCell);
         FMemory::Memzero(Raw.GetData(), Raw.Num());
-        // Column-major bytes preserve every float bit; optional absent fields retain explicit flags.
+        // 현재 저장의 모든 열을 연속 배치해 실수 비트와 압축 효율 보존
         FMemory::Memcpy(Raw.GetData(), Indices.GetData() + Start, Rows * sizeof(int32));
         for (int32 Column = 0; Column < 5; ++Column)
         {
-            if (!Columns[Column]->IsEmpty())
-            {
-                FMemory::Memcpy(Raw.GetData() + (Column + 1) * Rows * sizeof(float),
-                    Columns[Column]->GetData() + Start, Rows * sizeof(float));
-            }
+            // 모든 셀 열의 원본 비트를 압축 전 버퍼에 복사
+            FMemory::Memcpy(Raw.GetData() + (Column + 1) * Rows * sizeof(float), Columns[Column]->GetData() + Start, Rows * sizeof(float));
         }
         FChunk& Chunk = NewStorage->Chunks.AddDefaulted_GetRef();
         Chunk.RawBytes = Raw.Num();
@@ -136,7 +140,8 @@ bool FMD_ContaminationSavePayload::Decode(TArray<int32>& Indices, TArray<float>&
     if (!Storage) return true;
     for (int32 Column = 0; Column < 5; ++Column)
     {
-        if (Storage->Fields & (1 << Column)) Columns[Column]->Reserve(Num());
+        // 현재 형식의 모든 열에 필요한 셀 공간 확보
+        Columns[Column]->Reserve(Num());
     }
     TArray<uint8> Raw;
     for (const FChunk& Chunk : Storage->Chunks)
@@ -152,12 +157,10 @@ bool FMD_ContaminationSavePayload::Decode(TArray<int32>& Indices, TArray<float>&
         FMemory::Memcpy(Indices.GetData() + Start, Raw.GetData(), Rows * sizeof(int32));
         for (int32 Column = 0; Column < 5; ++Column)
         {
-            if (Storage->Fields & (1 << Column))
-            {
-                Columns[Column]->AddUninitialized(Rows);
-                FMemory::Memcpy(Columns[Column]->GetData() + Start,
-                    Raw.GetData() + (Column + 1) * Rows * sizeof(float), Rows * sizeof(float));
-            }
+            // 현재 청크의 셀 개수만큼 열 확장
+            Columns[Column]->AddUninitialized(Rows);
+            // 필수 열의 저장 비트를 대응하는 셀 위치로 복원
+            FMemory::Memcpy(Columns[Column]->GetData() + Start, Raw.GetData() + (Column + 1) * Rows * sizeof(float), Rows * sizeof(float));
         }
     }
     return Indices.Num() == Num();
@@ -191,7 +194,8 @@ bool FMD_ContaminationSavePayload::Serialize(FArchive& Ar)
     Ar << Version << Count << Fields << ChunkCount;
     if (Ar.IsError() || Version != 1 || Count < 0
         || Count > FMD_ScrapeSurfaceLayout::MaximumCombinedCellCount
-        || (Fields & RequiredFields) != RequiredFields || (Fields & ~31) != 0
+        // 누락 열을 포함한 구형 압축 본문 거부
+        || Fields != RequiredFields
         || ChunkCount != FMath::DivideAndRoundUp(Count, CellsPerChunk))
     {
         Ar.SetError();
@@ -248,6 +252,22 @@ bool FMD_ContaminationSavePayload::Serialize(FArchive& Ar)
             {
                 int32 CellIndex;
                 FMemory::Memcpy(&CellIndex, Raw.GetData() + Row * sizeof(int32), sizeof(int32));
+                // CRC가 일치하더라도 의미 없는 오염 수치의 월드 유입 차단
+                for (int32 Column = 0; Column < 5; ++Column)
+                {
+                    // 비정렬 압축 해제 버퍼의 실수를 안전하게 복사
+                    float Value;
+                    // 직렬화된 열 배치에 맞춰 셀 값 추출
+                    FMemory::Memcpy(&Value, Raw.GetData() + ((Column + 1) * ExpectedRows + Row) * sizeof(float), sizeof(float));
+                    // 한 번의 파일 읽기에서 모든 수치의 유한성 검증
+                    if (FMath::IsFinite(Value) == false)
+                    {
+                        // 손상된 본문의 이후 적용 차단
+                        Ar.SetError();
+                        // 아카이브 오류를 유지한 채 직렬화 종료
+                        return true;
+                    }
+                }
                 Loaded->MinimumIndex = FMath::Min(Loaded->MinimumIndex, CellIndex);
                 Loaded->MaximumIndex = FMath::Max(Loaded->MaximumIndex, CellIndex);
                 if (CellIndex < 0 || CellIndex >= Seen.Num())

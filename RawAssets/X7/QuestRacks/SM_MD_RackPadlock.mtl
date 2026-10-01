@@ -1,0 +1,27 @@
+newmtl Body
+Kd 0.52000 0.28000 0.07500
+Ks 0.25 0.25 0.25
+Ns 40
+d 1
+illum 2
+
+newmtl Shackle
+Kd 0.19000 0.23000 0.24000
+Ks 0.25 0.25 0.25
+Ns 40
+d 1
+illum 2
+
+newmtl Plate
+Kd 0.09000 0.13000 0.14000
+Ks 0.25 0.25 0.25
+Ns 40
+d 1
+illum 2
+
+newmtl Keyhole
+Kd 0.01200 0.01600 0.01800
+Ks 0.25 0.25 0.25
+Ns 40
+d 1
+illum 2

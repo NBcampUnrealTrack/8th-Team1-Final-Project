@@ -4,6 +4,14 @@
 #include "Data/Merchant/MD_QuestDefinition.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "World/Sample/MD_QuestRackSpawner.h"
+#include "Net/UnrealNetwork.h"
+
+void AMD_QuestItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
+{
+	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
+	DOREPLIFETIME(AMD_QuestItem, QuestDefinitionId);
+}
 
 AMD_QuestItem::AMD_QuestItem()
 {
@@ -81,6 +89,16 @@ bool AMD_QuestItem::CanBeDestroyedByGameplay() const
 
 void AMD_QuestItem::NotifyGrabbed()
 {
+	if (AMD_QuestRackSpawner* Rack = Cast<AMD_QuestRackSpawner>(GetOwner()))
+	{
+		Rack->NotifyCartridgeGrabbed(this);
+	}
+}
+
+bool AMD_QuestItem::CanInteract_Implementation(AActor* Interactor) const
+{
+	const AMD_QuestRackSpawner* Rack = Cast<AMD_QuestRackSpawner>(GetOwner());
+	return !Rack || Rack->CanCollectCartridge(this);
 }
 
 void AMD_QuestItem::SuppressImpactDamage(float Duration)

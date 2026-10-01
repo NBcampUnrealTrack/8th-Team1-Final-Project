@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "World/Sample/MD_QuestItem.h"
+#include "Types/MD_SampleFloatSettings.h"
 #include "MD_SampleItem.generated.h"
 
 class UPrimitiveComponent;
@@ -17,6 +18,11 @@ class MARINEDEMOLITION_API AMD_SampleItem : public AMD_QuestItem
 public:
 	/** 샘플 전용 파괴 임계값과 피해 허용 정책을 구성하는 생성자 */
 	AMD_SampleItem();
+	virtual void Tick(float DeltaSeconds) override;
+
+	/** Enable on placed samples or in a sample Blueprint; spawners may opt in too. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Sample|Water Float", meta = (ShowOnlyInnerProperties))
+	FMD_SampleFloatSettings WaterFloat;
 
 	/** 손상 상태를 네트워크로 복제하기 위한 등록 함수 */
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -42,6 +48,12 @@ public:
 
 	/** 붕괴 피해와 Day 복원에서 공용으로 사용하는 손상 상태 적용 함수 */
 	void SetDamaged();
+
+	// 이미 손상된 샘플도 저장 당시 등급과 외형으로 정확히 복구
+	void RestorePersistentSampleState(EMD_SampleGrade SavedGrade, bool bSavedDamaged, bool bSavedHasBeenCarried = false);
+
+	// 복귀 구역 자동 제출에서 실제 운반 이력 확인
+	FORCEINLINE bool HasBeenCarried() { return bHasBeenCarried; }
 
 	/** 모든 머신에서 로컬로 파편 연출을 스폰. Destroy 직전에 서버가 호출 */
 	UFUNCTION(NetMulticast, Reliable)
@@ -90,6 +102,10 @@ protected:
 	void BeginSpawnProtection();
 	void BeginImpactProtection(float Duration);
 	void EndImpactProtection();
+
+	// 생성 위치에 남은 샘플과 플레이어가 집어 든 샘플 구분
+	UPROPERTY()
+	bool bHasBeenCarried = false;
 
 	bool bImpactProtected = false;
 	FTimerHandle ImpactProtectionTimerHandle;

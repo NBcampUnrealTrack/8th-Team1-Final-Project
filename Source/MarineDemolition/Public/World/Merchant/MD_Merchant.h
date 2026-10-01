@@ -22,18 +22,18 @@ class UMD_MerchantSubsystem;
 class AMD_PlayerController;
 class AMD_PlayerState;
 class AMD_Character;
-class UStaticMeshComponent;
+class USkeletalMeshComponent;
 
 enum class EMD_ShopPurchaseResult : uint8;
+enum class EMD_ShopSaleResult : uint8;
 
 /**
  * 모선 상인 노라 브릭스 (팀 호칭 "브릭스").
  *
  * 역할 (`02` §7): 장비 판매 · 착수금 지급 · 상급 샘플 퀘스트 부여 · 대출 · 부상 치료
  *
- * 캐릭터 에셋이 아직 없어 큐브 스태틱 메시로 대체한다. 실제 캐릭터가 나오면
- * MeshAsset만 바꾸거나 스켈레탈 메시 컴포넌트로 교체하면 되고,
- * IMD_Interactable 계약과 위젯 흐름은 그대로 유지된다.
+ * Blueprint에서 스켈레탈 캐릭터 메시를 지정한다.
+ * IMD_Interactable 계약과 위젯 흐름은 외형과 독립적으로 유지된다.
  */
 UCLASS()
 class MARINEDEMOLITION_API AMD_Merchant : public AActor, public IMD_Interactable
@@ -55,8 +55,17 @@ public:
 	/** 서버 카탈로그와 경제 원장을 사용해 구매자에게 품목을 지급하고 결제를 확정하는 함수 */
 	EMD_ShopPurchaseResult TryPurchaseItem(AMD_Character* PurchasingCharacter, FPrimaryAssetId ItemAssetId);
 
+	// 서버 카탈로그와 현재 소지 슬롯을 검증하여 판매 처리
+	EMD_ShopSaleResult TrySellItem(AMD_Character* SellingCharacter, FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity);
+
+	// 서버 판매 결과를 현재 상점과 상인 대사에 반영
+	void ReceiveShopSaleResult(EMD_ShopSaleResult Result);
+
 	/** 서버 구매 결과를 현재 로컬 상점과 대사창에 반영하는 함수 */
 	void ReceiveShopPurchaseResult(FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result);
+
+	/** 서버가 핫바 회수물(카트리지 등)을 납품 처리한 결과를 대사창 또는 HUD 알림에 반영하는 함수 */
+	void ReceiveQuestItemDelivery(AMD_PlayerController* Requester, const FText& ItemName, int32 Count);
 
 	/** Blueprint가 Push하기 전에 전달한 상점 화면에 상인 데이터와 도메인 이벤트를 연결한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
@@ -83,15 +92,15 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
 	TObjectPtr<USceneComponent> Root;
 
-	/** 큐브 플레이스홀더. 캐릭터 에셋 확정 시 교체 대상. */
+	/** 상인 캐릭터. PhysicsAsset으로 상호작용 트레이스를 받고 외곽선을 표시한다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
-	TObjectPtr<UStaticMeshComponent> Mesh;
+	TObjectPtr<USkeletalMeshComponent> CharacterMesh;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
 	FText MerchantDisplayName = FText::FromString(TEXT("노라 브릭스"));
 
 	/** UIManager가 인터랙트 시 Push할 상인 메뉴 화면 요청 태그 */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant", meta = (Categories = "UI.Layer.GameMenu"))
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant", meta = (Categories = "UI"))
 	FGameplayTag MenuWidgetTag;
 
 	/** 가격·해금 데이터 (`07` §4). 없으면 상점이 빈 목록으로 열린다. */
@@ -122,6 +131,10 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	FText InvalidPurchaseDialogue = FText::FromString(TEXT("그 거래는 처리할 수 없어."));
 
+	/** 핫바 회수물 납품 성공 대사. {0} = 품목명, {1} = 개수 (`03` §3 카트리지 납품) */
+	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
+	FText QuestDeliveryDialogue = FText::FromString(TEXT("{0} {1}개, 확실히 받았어. 본사엔 내가 넘길게."));
+
 	/** 열려 있는 위젯 (중복 생성 방지용) */
 	TWeakObjectPtr<UMD_MerchantMenuWidget> ActiveMenuWidget;
 
@@ -148,6 +161,12 @@ private:
 	UFUNCTION()
 	void HandleShopItemPurchaseRequested(FPrimaryAssetId ItemAssetId);
 
+protected:
+	// BP 화면의 판매 요청을 소유 플레이어 서버 RPC에 연결
+	UFUNCTION()
+	void HandleShopItemSaleRequested(FPrimaryAssetId ItemAssetId, int32 SlotIndex, int32 Quantity);
+
+private:
 	/** 상인 복제 미러가 바뀔 때 열려 있는 상점 정보와 구매 가능 상태를 갱신하는 처리 */
 	UFUNCTION()
 	void HandleMerchantStateChangedForShop();
@@ -202,6 +221,9 @@ private:
 
 	/** 활성 메인 퀘스트 중 Interaction 목표를 찾아 서버 페이즈 전환을 요청하는 함수 */
 	void TryAdvanceInteractionQuests(APlayerController* PC);
+
+	/** 대화를 연 플레이어의 핫바 회수물을 서버에서 납품하도록 요청하는 함수. 메뉴가 열린 뒤 호출해야 응답 대사가 표시된다 */
+	void RequestHotbarQuestDelivery(APlayerController* PC);
 
 	UMD_MerchantComponent* GetMerchantComponent() const;
 
