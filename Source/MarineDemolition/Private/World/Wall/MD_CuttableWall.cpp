@@ -84,10 +84,6 @@ void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 			BackContaminationDecal);
 		ScrapeSurface->RefreshSurfaceGeometry();
 	}
-
-	// 스캔 전에는 타입 구분 없이 중립 회색
-	ApplyNeutralWallColor();
-
 }
 
 
@@ -112,10 +108,6 @@ void AMD_CuttableWall::BeginPlay()
 			ScrapeSurface->InitializeSurface();
 		}
 	}
-
-	// 레벨 로드/PIE에서도 기존 벽 색상 설정을 적용한다.
-	ApplyNeutralWallColor();
-
 }
 
 
@@ -368,15 +360,6 @@ void AMD_CuttableWall::OnRep_CutProgress()
 	const float ProgressRatio = GetCutProgressRatio();
 	OnCutProgressChanged.Broadcast(this, ProgressRatio);
 
-}
-
-void AMD_CuttableWall::ApplyNeutralWallColor()
-{
-	// The mesh owns the material instance; the actor does not need a second reference.
-	if (UMaterialInstanceDynamic* WallMaterial = Mesh->CreateAndSetMaterialInstanceDynamic(0))
-	{
-		WallMaterial->SetVectorParameterValue(TEXT("Color"), FLinearColor(0.4f, 0.4f, 0.45f));
-	}
 }
 
 void AMD_CuttableWall::SyncLegacySurfaceConfiguration()

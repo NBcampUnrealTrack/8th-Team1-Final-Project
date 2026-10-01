@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -185,7 +185,7 @@ private:
     // 다음 틱에 스냅샷 복원 후 Merchant Day 동기화 (전 액터 BeginPlay 완료 보장)
     void InitializeExpeditionDay();
 
-    void RestoreDaySnapshot();
+    bool RestoreDaySnapshot();
 
     // 서버 일차와 퀘스트를 동기화하고 명시적인 새 출항만 같은 현장의 계약 재구성
     void SyncMerchantToGameDay(int32 Day, bool bStartNewContract = false);

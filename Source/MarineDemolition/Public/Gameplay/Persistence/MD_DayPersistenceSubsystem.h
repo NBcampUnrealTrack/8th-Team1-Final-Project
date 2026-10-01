@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 
 #include "CoreMinimal.h"
 #include "Types/Persistence/MD_DaySnapshotTypes.h"
@@ -54,6 +54,10 @@ public:
     bool HasSnapshot() const { return Snapshot.bValid; }
 
 private:
+    void CaptureSnapshotInternal(UWorld* World, bool bCaptureTrashPlacements);
+    bool ApplyWorldState(UWorld* World, const FMD_WorldData& WorldData,
+        const TMap<FName, FMD_TrashGeneratorPlacement>* DayPlacements);
+
     UPROPERTY()
     FMD_DaySnapshot Snapshot;
 

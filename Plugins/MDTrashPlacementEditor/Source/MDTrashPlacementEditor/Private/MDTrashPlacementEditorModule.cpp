@@ -1,6 +1,7 @@
 #include "MDTrashPlacementEditorModule.h"
 
 #include "MDTrashPlacementEditorModeCommands.h"
+#include "Details/MD_TrashSpawnVariantChanceCustomization.h"
 #include "Details/MD_StainCustomization.h"
 #include "Tools/MD_StainRefit.h"
 #include "World/Contamination/MD_SurfaceStain.h"
@@ -8,6 +9,7 @@
 #include "Palette/MD_PropPaletteSettings.h"
 #include "Presets/MD_PropPresetSettings.h"
 #include "Tools/MD_PropPlacementTool.h"
+#include "World/Trash/MD_TrashSpawnVolume.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "CoreGlobals.h"
 #include "PropertyEditorModule.h"
@@ -24,6 +26,8 @@ void FMDTrashPlacementEditorModule::StartupModule()
 		FOnGetDetailCustomizationInstance::CreateStatic(&FMD_PropPaletteCustomization::MakeInstance));
 	PropertyEditor.RegisterCustomClassLayout(AMD_SurfaceStain::StaticClass()->GetFName(),
 		FOnGetDetailCustomizationInstance::CreateStatic(&FMD_StainCustomization::MakeInstance));
+	PropertyEditor.RegisterCustomPropertyTypeLayout(FMD_TrashSpawnVariantChance::StaticStruct()->GetFName(),
+		FOnGetPropertyTypeCustomizationInstance::CreateStatic(&FMD_TrashSpawnVariantChanceCustomization::MakeInstance));
 	PropertyEditor.NotifyCustomizationModuleChanged();
 	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
 	PropAssetRenamedHandle = Registry.OnAssetRenamed().AddUObject(
@@ -47,6 +51,7 @@ void FMDTrashPlacementEditorModule::ShutdownModule()
 	{
 		PropertyEditor->UnregisterCustomClassLayout(UMD_PropPlacementProperties::StaticClass()->GetFName());
 		PropertyEditor->UnregisterCustomClassLayout(AMD_SurfaceStain::StaticClass()->GetFName());
+		PropertyEditor->UnregisterCustomPropertyTypeLayout(FMD_TrashSpawnVariantChance::StaticStruct()->GetFName());
 		PropertyEditor->NotifyCustomizationModuleChanged();
 	}
 	FMDTrashPlacementEditorModeCommands::Unregister();

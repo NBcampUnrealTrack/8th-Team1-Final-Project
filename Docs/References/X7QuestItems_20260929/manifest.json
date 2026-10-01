@@ -1,0 +1,47 @@
+[
+  {
+    "File": "sample-a.png",
+    "Path": "E:\\Unreal\\ProjectATM\\Docs\\References\\X7QuestItems_20260929\\sample-a.png",
+    "Width": 1536,
+    "Height": 1024,
+    "Format": "PNG",
+    "SHA256": "A453EB668E07A3FCF9844C0F06F70FE3C19A19653CBE35D63DC21A8124023FE0",
+    "Source": "C:\\Users\\TaitoP\\.codex\\generated_images\\01a0cc81-06a8-7d62-97bc-a24ed07c1e9f\\exec-87eb0011-a06d-4020-bfaf-c275bf37fff9.png"
+  },
+  {
+    "File": "sample-b.png",
+    "Path": "E:\\Unreal\\ProjectATM\\Docs\\References\\X7QuestItems_20260929\\sample-b.png",
+    "Width": 1536,
+    "Height": 1024,
+    "Format": "PNG",
+    "SHA256": "24BDE9A5E18E6B1D5532ED230AB6E65FB2D4DBDF8CF68CF770DB1831C2E44558",
+    "Source": "C:\\Users\\TaitoP\\.codex\\generated_images\\01a0cc81-06a8-7d62-97bc-a24ed07c1e9f\\exec-4292433a-a6b8-4794-8437-f62e5a188860.png"
+  },
+  {
+    "File": "sample-c.png",
+    "Path": "E:\\Unreal\\ProjectATM\\Docs\\References\\X7QuestItems_20260929\\sample-c.png",
+    "Width": 1536,
+    "Height": 1024,
+    "Format": "PNG",
+    "SHA256": "A58774ADB916CE1F4A4804F4CE1B45C14E2A617CEF92DEFCED35316EAA0734FE",
+    "Source": "C:\\Users\\TaitoP\\.codex\\generated_images\\01a0cc81-06a8-7d62-97bc-a24ed07c1e9f\\exec-5947e78b-e9f9-4142-9ab8-e086393bc368.png"
+  },
+  {
+    "File": "mutated-bloom.png",
+    "Path": "E:\\Unreal\\ProjectATM\\Docs\\References\\X7QuestItems_20260929\\mutated-bloom.png",
+    "Width": 1536,
+    "Height": 1024,
+    "Format": "PNG",
+    "SHA256": "4DCF6628DE667444A89CDE6BFCAF7FC3F72CFE5718924B15A31512B8050C4DA0",
+    "Source": "C:\\Users\\TaitoP\\.codex\\generated_images\\01a0cc81-06a8-7d62-97bc-a24ed07c1e9f\\exec-7b406ca5-752b-4b73-997a-606617fa3327.png"
+  },
+  {
+    "File": "cabinet-card.png",
+    "Path": "E:\\Unreal\\ProjectATM\\Docs\\References\\X7QuestItems_20260929\\cabinet-card.png",
+    "Width": 1536,
+    "Height": 1024,
+    "Format": "PNG",
+    "SHA256": "1792698EBF178EDF6F05B70FF9D0D6DED8AF45200EC9AEF3334CB735C2A6C08A",
+    "Source": "C:\\Users\\TaitoP\\.codex\\generated_images\\01a0cc81-06a8-7d62-97bc-a24ed07c1e9f\\exec-3e662803-d565-45aa-b12b-2940ca555e8b.png"
+  }
+]

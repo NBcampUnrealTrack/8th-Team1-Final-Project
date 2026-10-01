@@ -620,12 +620,5 @@ void UMD_StylizedSkyControllerComponent::WriteMpc(
 		SetVector(MPCAsset, MpcMoonLightDirectionName, MoonLightDir);
 	}
 
-	if (Presentation.SkyDome)
-	{
-		Presentation.SkyDome->MarkRenderStateDirty();
-	}
-	if (Presentation.CloudDome)
-	{
-		Presentation.CloudDome->MarkRenderStateDirty();
-	}
+	// MPC updates propagate through their uniform buffer without recreating the dome scene proxies.
 }

@@ -253,7 +253,6 @@ protected:
 private:
 
 	void SyncLegacySurfaceConfiguration();
-	void ApplyNeutralWallColor();
 	void CutFromHit(AActor* Cutter, const FHitResult* WallHit);
 	float ResolveCutSurfaceCleanRatio(const FHitResult* WallHit);
 	void CompleteCutWithCleanRatio(AActor* Cutter, float CutSurfaceCleanRatio);

@@ -277,6 +277,13 @@ public:
 	UPROPERTY()
 	TArray<FMD_TrashBinRecord> TrashBins;
 
+	/** Distinguishes old saves from a fully cleared generated-trash layout. */
+	UPROPERTY()
+	bool bHasTrashGeneratorState = false;
+
+	UPROPERTY()
+	TArray<FMD_TrashGeneratorState> TrashGenerators;
+
 	// 생성 기준과 달라진 표면 오염 셀을 복원하기 위한 목록
 	UPROPERTY()
 	TArray<FMD_WallContaminationRecord> WallContaminations;
