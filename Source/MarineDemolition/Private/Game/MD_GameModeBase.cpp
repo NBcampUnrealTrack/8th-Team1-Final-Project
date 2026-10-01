@@ -739,7 +739,7 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReas
     if (ReportWidgetTag.IsValid() == false)
     {
         // UI Manager 설정에 등록된 보고서 조회 태그
-        ReportWidgetTag = FGameplayTag::RequestGameplayTag(TEXT("UI.Layer.GameMenu.Report"));
+        ReportWidgetTag = FGameplayTag::RequestGameplayTag(TEXT("UI.Layer.GameHUD.Report"));
     }
     // 클라이언트의 남은 시간 계산에 사용할 서버 종료 시각
     double EndServerTime = GetWorld()->GetTimeSeconds() + 5.0;
