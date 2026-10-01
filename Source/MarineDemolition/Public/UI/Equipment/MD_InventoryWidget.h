@@ -36,7 +36,7 @@ protected:
 
 	// 자동 생성 카드에 적용할 좌우 및 상하 여백
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Inventory")
-	FMargin SlotPadding = FMargin(64.0f, 8.0f);
+	FMargin SlotPadding = FMargin(8.0f, 2.0f);
 
 	// 동일 슬롯의 드래그 대상을 유지할 카드 인스턴스 목록
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "MD|Inventory")
@@ -66,10 +66,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Inventory")
 	int32 GetSlotCount();
 
-	// 현재 장착한 아이템의 Hotbar 위치 조회
-	UFUNCTION(BlueprintPure, Category = "MD|Inventory")
-	int32 GetCurrentSlotIndex();
-
 	// 슬롯의 이름과 아이콘을 제공하는 아이템 정의 조회
 	UFUNCTION(BlueprintPure, Category = "MD|Inventory")
 	UMD_ItemDefinition* GetItemAtSlot(int32 SlotIndex);
@@ -78,6 +74,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Inventory")
 	int32 GetItemCountAtSlot(int32 SlotIndex);
 
+	// 실제 목록의 카드 클릭을 캐릭터의 공통 장비 선택 경로로 전달
+	UFUNCTION(BlueprintCallable, Category = "MD|Inventory")
+	void SelectSlot(UMD_InventorySlotWidget* SlotWidget);
+
 	// 드롭 대상의 슬롯 조합 검사
 	UFUNCTION(BlueprintPure, Category = "MD|Inventory")
 	bool CanSwapSlots(int32 FromSlotIndex, int32 ToSlotIndex);
@@ -85,10 +85,6 @@ public:
 	// 0부터 시작하는 슬롯 인덱스로 빈칸 이동 또는 위치 교환, 클라이언트의 true는 서버 요청 전송 성공
 	UFUNCTION(BlueprintCallable, Category = "MD|Inventory")
 	bool SwapSlots(int32 FromSlotIndex, int32 ToSlotIndex);
-
-	// 화면 활성화와 Pawn 교체 및 Hotbar 변경 후 슬롯 표시 갱신 이벤트
-	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Inventory")
-	void OnInventoryRefreshed();
 
 protected:
 	// 고정 슬롯 카드를 가로 생성하고 기존 인스턴스의 표시 갱신
@@ -107,4 +103,8 @@ protected:
 	// 실제 보관 상태와 선택 위치의 변경을 화면에 전달
 	UFUNCTION()
 	void HandleHotbarChanged();
+
+	// 아이템 내용을 재조회하지 않고 실제 사용 슬롯의 선택 표시만 갱신
+	UFUNCTION()
+	void HandleHotbarSelectionChanged();
 };

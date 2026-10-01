@@ -2,25 +2,15 @@
 
 #include "UI/Equipment/MD_InventorySlotWidget.h"
 
-#include "Blueprint/WidgetBlueprintLibrary.h"
 #include "Components/Border.h"
-#include "Components/HorizontalBox.h"
-#include "Components/Image.h"
+#include "Blueprint/WidgetLayoutLibrary.h"
+#include "Components/SizeBox.h"
+#include "Components/ScaleBox.h"
 #include "Components/TextBlock.h"
-#include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
+#include "Engine/Texture2D.h"
 #include "UI/Equipment/MD_InventoryDragDropOperation.h"
 #include "UI/Equipment/MD_InventoryWidget.h"
-
-void UMD_InventorySlotWidget::NativeConstruct()
-{
-	// 카드의 기본 위젯 구성 처리
-	Super::NativeConstruct();
-	// 빈 카드도 드롭 영역으로 사용할 수 있도록 슬롯 자체의 입력 판정 활성화
-	SetVisibility(ESlateVisibility::Visible);
-	// 위젯 트리 생성 이후 실제 슬롯 데이터 표시
-	RefreshSlot();
-}
 
 void UMD_InventorySlotWidget::NativeDestruct()
 {
@@ -29,24 +19,14 @@ void UMD_InventorySlotWidget::NativeDestruct()
 	Super::NativeDestruct();
 }
 
-FReply UMD_InventorySlotWidget::NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
+FReply UMD_InventorySlotWidget::HandleButtonDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent)
 {
-	// 부모의 마우스 입력 처리 우선 적용
-	FReply Reply = Super::NativeOnMouseButtonDown(InGeometry, InMouseEvent);
-	// 이미 처리한 입력과 드래그할 아이템이 없는 경우 기본 응답 유지
-	if (Reply.IsEventHandled() == true || CanDragItem() == false)
-	{
-		// 부모 처리 결과 또는 빈 슬롯의 미처리 응답 반환
-		return Reply;
-	}
-
-	// 왼쪽 마우스를 누른 상태의 드래그 시작 감지
-	return UWidgetBlueprintLibrary::DetectDragIfPressed(InMouseEvent, this, EKeys::LeftMouseButton).NativeReply;
+	// 버튼 내부에서 감지한 드래그를 UMG 작업 생성과 수명 관리 경로로 전달
+	return TakeWidget()->OnDragDetected(InGeometry, InMouseEvent);
 }
 
 void UMD_InventorySlotWidget::NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation)
 {
-	// 부모의 드래그 생성 처리 우선 적용
 	Super::NativeOnDragDetected(InGeometry, InMouseEvent, OutOperation);
 	// 별도 작업이 없는 경우 공통 인벤토리 드래그 생성
 	if (IsValid(OutOperation) == false)
@@ -73,7 +53,7 @@ void UMD_InventorySlotWidget::NativeOnDragLeave(const FDragDropEvent& InDragDrop
 bool UMD_InventorySlotWidget::NativeOnDragOver(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation)
 {
 	// 현재 슬롯의 드롭 검사 결과를 강조 표시와 입력 처리에 함께 사용
-	if (UpdateDropHighlightState(Cast<UMD_InventoryDragDropOperation>(InOperation)) == true)
+	if (UpdateDropHighlight(Cast<UMD_InventoryDragDropOperation>(InOperation)) == true)
 	{
 		// 현재 카드가 유효한 드롭 대상임을 입력 경로에 전달
 		return true;
@@ -119,10 +99,10 @@ void UMD_InventorySlotWidget::RefreshSlot()
 	// 연결된 인벤토리의 실제 슬롯 상태 조회
 	if (IsValid(OwningInventory) == true)
 	{
-		// 이름과 아이콘을 공유할 현재 아이템 정의 보관
-		ItemDefinition = OwningInventory->GetItemAtSlot(SlotIndex);
-		// 이동된 아이템과 함께 보존된 현재 수량 조회
+		// 아이템 유효성까지 확인하는 실제 보유 수량 우선 조회
 		ItemCount = OwningInventory->GetItemCountAtSlot(SlotIndex);
+		// 빈 슬롯의 중복 조회를 생략하고 남아 있는 아이템 참조 해제
+		ItemDefinition = ItemCount > 0 ? OwningInventory->GetItemAtSlot(SlotIndex) : nullptr;
 	}
 	else
 	{
@@ -140,52 +120,50 @@ void UMD_InventorySlotWidget::RefreshSlot()
 
 	// 슬롯 연결 시 생성한 번호 텍스트 재사용
 	SetSlotText(Txt_SlotNumber, SlotNumberText);
-	// 실제 아이콘이 있는 경우에만 이미지 영역 표시
-	if (IsValid(Img_ToolIcon) == true)
-	{
-		// 빈 슬롯과 아이콘 미지정 항목의 단색 사각형 표시 방지
-		if (IsValid(ItemDefinition) == true && ItemCount > 0 && IsValid(ItemDefinition->ItemIcon) == true)
-		{
-			// 카드에 지정된 아이콘 크기를 유지한 아이템 이미지 교체
-			Img_ToolIcon->SetBrushFromTexture(ItemDefinition->ItemIcon);
-			// 아이콘이 다시 채워진 슬롯의 이미지 표시 복원
-			Img_ToolIcon->SetVisibility(ESlateVisibility::SelfHitTestInvisible);
-		}
-		else
-		{
-			// 이전 아이템의 텍스처 참조 제거
-			Img_ToolIcon->SetBrushFromTexture(nullptr);
-			// 카드 높이를 유지하면서 텍스처 없는 이미지의 그리기 차단
-			Img_ToolIcon->SetVisibility(ESlateVisibility::Hidden);
-		}
-	}
-	// 실제 아이템을 보유한 카드에만 품목 표시 적용
+	// 이름과 아이콘 및 본문 전환에 공통으로 사용할 실제 보유 상태
+	bool bHasItem = false;
+	// 유효한 아이템 정의와 양수 수량을 가진 슬롯만 채움 상태로 처리
 	if (IsValid(ItemDefinition) == true && ItemCount > 0)
 	{
-		// 중간 초기화 없이 실제 아이템 이름을 한 번만 반영
-		SetSlotText(Txt_ToolName, ItemDefinition->ItemName);
-		// 동일 수량의 숫자 서식과 텍스트 위젯 갱신 재사용
-		SetSlotText(Txt_ToolCount, ItemCountText);
+		// 공통 표시와 본문 선택에 사용할 보유 상태 기록
+		bHasItem = true;
 	}
-	else
+	// 부모 버튼에 실제 이름을 보관하고 동일 텍스트의 위젯 갱신 생략
+	Text_ButtonText = bHasItem == true ? ItemDefinition->ItemName : FText::GetEmpty();
+	// 부모 표시가 재구성된 경우에도 저장된 이름과 실제 위젯 동기화
+	SetSlotText(Txt_ButtonText, Text_ButtonText);
+	// 기존 숫자 서식을 재사용한 실제 보유 수량 표시
+	SetSlotText(Txt_ToolCount, bHasItem == true ? ItemCountText : FText::GetEmpty());
+	// 아이템이 없는 경우 이전 텍스처 참조를 해제할 이미지 리소스
+	UTexture2D* ItemIcon = nullptr;
+	// 비어 있는 이미지의 단색 사각형을 방지할 그리기 방식
+	ESlateBrushDrawType::Type DrawType = ESlateBrushDrawType::NoDrawType;
+	// 현재 사용할 수 있는 텍스처에만 이미지 그리기 허용
+	if (bHasItem == true && IsValid(ItemDefinition->ItemIcon) == true)
 	{
-		// 빈 슬롯에 남아 있는 이전 이름만 제거
-		SetSlotText(Txt_ToolName, FText::GetEmpty());
-		// 빈 슬롯에 남아 있는 이전 수량만 제거
-		SetSlotText(Txt_ToolCount, FText::GetEmpty());
+		// 유효한 텍스처만 부모 버튼 브러시에 연결
+		ItemIcon = ItemDefinition->ItemIcon;
+		// 유효한 아이템 아이콘의 기본 그리기 방식 선택
+		DrawType = ESlateBrushDrawType::Image;
 	}
-
-	// 실제 보유 수량에 맞춰 수량 영역의 표시를 한 번만 갱신
-	if (IsValid(HB_ToolCount) == true)
+	// 동일한 아이콘과 브러시를 반복 적용하는 비용 생략
+	if (Brush_ButtonImage.GetResourceObject() != ItemIcon || Brush_ButtonImage.DrawAs != DrawType)
 	{
-		// 빈 카드 높이를 유지하며 수량 문구와 숫자를 함께 숨기거나 복원
-		HB_ToolCount->SetVisibility(ItemCount > 0 ? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Hidden);
+		// 사용자 지정 이미지 크기와 색상을 유지한 리소스 교체
+		Brush_ButtonImage.SetResourceObject(ItemIcon);
+		// 아이콘 유무에 따라 실제 그리기만 전환
+		Brush_ButtonImage.DrawAs = DrawType;
+		// 부모 버튼의 공통 이미지 바인딩에 변경 브러시 반영
+		ApplyContentImageBrush();
 	}
-
-	// 아이템 상태에 따른 카드 디자인 갱신
-	OnSlotRefreshed();
-	// 드래그 중 아이템 소진과 교체로 달라진 드롭 가능 상태 반영
-	UpdateDropHighlight(HoveredDragOperation.Get());
+	// 아이템 유효성과 수량 판정 결과를 BP의 본문 및 디자인 갱신에 전달
+	OnSlotRefreshed(bHasItem);
+	// 드래그 또는 남아 있는 강조가 있을 때만 교환 가능 상태 재검사
+	if (HoveredDragOperation.IsValid() == true || bIsDropHighlighted == true)
+	{
+		// 아이템 소진과 교체 또는 종료된 작업에 맞춰 강조 갱신
+		UpdateDropHighlight(HoveredDragOperation.Get());
+	}
 }
 
 void UMD_InventorySlotWidget::SetSlotText(UTextBlock* TextBlock, FText NewText)
@@ -213,8 +191,9 @@ bool UMD_InventorySlotWidget::CanDragItem()
 
 bool UMD_InventorySlotWidget::CanAcceptDrop(UMD_InventoryDragDropOperation* Operation)
 {
-	// 다른 작업 유형과 해제된 화면의 드롭 차단
-	if (IsValid(Operation) == false || IsValid(OwningInventory) == false)
+	// 비활성 화면과 같은 위치의 드롭은 출처와 아이템 조회 전에 차단
+	if (IsValid(Operation) == false || IsValid(OwningInventory) == false || OwningInventory->IsActivated() == false
+		|| Operation->SourceSlotIndex == SlotIndex)
 	{
 		// 처리할 수 없는 드래그 작업 거절
 		return false;
@@ -227,9 +206,8 @@ bool UMD_InventorySlotWidget::CanAcceptDrop(UMD_InventoryDragDropOperation* Oper
 		return false;
 	}
 
-	// 다른 화면에서 시작했거나 드래그 중 Pawn이 교체된 작업 차단
-	if (Operation->SourceInventory.IsValid() == false || Operation->SourceInventory.Get() != OwningInventory
-		|| Operation->SourceHotbar.IsValid() == false || Operation->SourceHotbar.Get() != OwningInventory->GetHotbarComponent())
+	// 세션 식별자와 함께 원래 화면이 일치하는 작업만 허용
+	if (Operation->SourceInventory.IsValid() == false || Operation->SourceInventory.Get() != OwningInventory)
 	{
 		// 원래 인벤토리와 보관 공간이 일치하지 않는 드롭 거절
 		return false;
@@ -250,25 +228,20 @@ void UMD_InventorySlotWidget::SetDropHighlightColor(FLinearColor InColor)
 {
 	// 이후 드롭 대상 검사에서도 사용할 지정 색상 보관
 	DropHighlightColor = InColor;
-	// 강조 중인 테두리에만 즉시 색상 변경 적용
-	if (bIsDropHighlighted == true && IsValid(BDR_Background) == true)
+	// 강조 중인 실제 외곽선이 달라질 때만 브러시 복사와 Slate 갱신 수행
+	if (bIsDropHighlighted == true && IsValid(BDR_Root) == true
+		&& BDR_Root->Background.OutlineSettings.Color != FSlateColor(DropHighlightColor))
 	{
 		// 강조 종료 시 복원할 원래 색상과 현재 배경 디자인 유지
-		FSlateBrush Brush = BDR_Background->Background;
+		FSlateBrush Brush = BDR_Root->Background;
 		// 외곽선에 새로 지정한 강조 색상 적용
 		Brush.OutlineSettings.Color = FSlateColor(DropHighlightColor);
 		// 현재 드래그가 끝나기 전에도 변경 색상 표시
-		BDR_Background->SetBrush(Brush);
+		BDR_Root->SetBrush(Brush);
 	}
 }
 
-void UMD_InventorySlotWidget::UpdateDropHighlight(UMD_InventoryDragDropOperation* Operation)
-{
-	// 기존 호출 경로를 유지하며 강조 상태의 공통 갱신 실행
-	UpdateDropHighlightState(Operation);
-}
-
-bool UMD_InventorySlotWidget::UpdateDropHighlightState(UMD_InventoryDragDropOperation* Operation)
+bool UMD_InventorySlotWidget::UpdateDropHighlight(UMD_InventoryDragDropOperation* Operation)
 {
 	// 다른 드래그로 바뀐 경우에만 종료 알림 연결 교체
 	if (HoveredDragOperation.Get() != Operation)
@@ -300,10 +273,12 @@ void UMD_InventorySlotWidget::ClearDropHighlight()
 	// 드래그 작업이 남아 있는 경우 등록한 종료 알림 해제
 	if (HoveredDragOperation.IsValid() == true)
 	{
+		// 두 종료 알림에서 재사용할 작업을 약한 참조에서 한 번 조회
+		UMD_InventoryDragDropOperation* Operation = HoveredDragOperation.Get();
 		// 해당 카드가 등록한 드롭 완료 알림 제거
-		HoveredDragOperation->OnDrop.RemoveDynamic(this, &UMD_InventorySlotWidget::HandleDragEnded);
+		Operation->OnDrop.RemoveDynamic(this, &UMD_InventorySlotWidget::HandleDragEnded);
 		// 해당 카드가 등록한 취소 알림 제거
-		HoveredDragOperation->OnDragCancelled.RemoveDynamic(this, &UMD_InventorySlotWidget::HandleDragEnded);
+		Operation->OnDragCancelled.RemoveDynamic(this, &UMD_InventorySlotWidget::HandleDragEnded);
 	}
 
 	// 종료되거나 커서가 떠난 드래그 참조 정리
@@ -321,7 +296,7 @@ void UMD_InventorySlotWidget::SetDropHighlighted(bool bHighlight)
 		return;
 	}
 	// 선택 바인딩이 없는 슬롯의 배경 접근 차단
-	if (IsValid(BDR_Background) == false)
+	if (IsValid(BDR_Root) == false)
 	{
 		// 실제 적용할 테두리가 없는 상태 기록
 		bIsDropHighlighted = false;
@@ -330,7 +305,7 @@ void UMD_InventorySlotWidget::SetDropHighlighted(bool bHighlight)
 	}
 
 	// 배경색과 모서리 및 두께를 보존할 현재 브러시 복사
-	FSlateBrush Brush = BDR_Background->Background;
+	FSlateBrush Brush = BDR_Root->Background;
 	// 강조를 시작하는 순간의 실제 외곽선 색상 보관
 	if (bHighlight == true)
 	{
@@ -345,7 +320,7 @@ void UMD_InventorySlotWidget::SetDropHighlighted(bool bHighlight)
 		Brush.OutlineSettings.Color = DefaultOutlineColor;
 	}
 	// 외곽선만 변경한 브러시를 실제 테두리에 반영
-	BDR_Background->SetBrush(Brush);
+	BDR_Root->SetBrush(Brush);
 	// 다음 입력에서 중복 갱신을 피할 현재 강조 상태 기록
 	bIsDropHighlighted = bHighlight;
 }
@@ -375,35 +350,68 @@ UMD_InventoryDragDropOperation* UMD_InventorySlotWidget::CreateItemDragOperation
 	Operation->SourceDragSessionId = OwningInventory->GetDragSessionId();
 	// 드래그 출처 화면 보관
 	Operation->SourceInventory = OwningInventory;
-	// Pawn 교체 이후의 오래된 드래그를 차단할 보관 공간 보관
-	Operation->SourceHotbar = OwningInventory->GetHotbarComponent();
 	// 교환할 원본의 고정 Hotbar 위치 보관
 	Operation->SourceSlotIndex = SlotIndex;
 	// 드래그 시작 당시의 실제 아이템 정의 보관
 	Operation->SourceItem = OwningInventory->GetItemAtSlot(SlotIndex);
-	// 커서 중앙에 아이템 미리보기 배치
+	// 마우스 위치를 따라 이동할 카드 중심 기준 설정
 	Operation->Pivot = EDragPivot::CenterCenter;
-	// 사용자 지정 미리보기 위젯 조회
-	Operation->DefaultDragVisual = CreateItemDragVisual();
-	// 별도 미리보기가 없는 경우 기본 아이템 아이콘 구성
-	if (IsValid(Operation->DefaultDragVisual) == false)
+	// 원본 카드를 목록에서 떼어내지 않고 같은 BP의 독립 표시 인스턴스 생성
+	UMD_InventorySlotWidget* DragSlot = CreateWidget<UMD_InventorySlotWidget>(this, GetClass());
+	// 실제 슬롯 UI를 만들 수 없는 경우 불완전한 드래그 시작 차단
+	if (IsValid(DragSlot) == false)
 	{
-		// 실제 슬롯 위젯을 떼어내지 않는 독립 아이콘 생성
-		UImage* DragIcon = NewObject<UImage>(Operation);
-		// 원본 아이템과 동일한 아이콘을 미리보기에 표시
-		DragIcon->SetBrushFromTexture(Operation->SourceItem->ItemIcon);
-		// 화면 위젯 생성 이후에도 유지할 아이콘 브러시 설정 복사
-		FSlateBrush DragBrush = DragIcon->GetBrush();
-		// 보이지 않는 크기를 방지하며 지정한 가로 및 세로 크기 저장
-		DragBrush.SetImageSize(FVector2D(FMath::Max(1.0, DragIconSize.X), FMath::Max(1.0, DragIconSize.Y)));
-		// 초기 화면 위젯 생성 전에도 유효한 미리보기 크기 반영
-		DragIcon->SetBrush(DragBrush);
-		// 드래그 수명 동안 유지할 미리보기 참조 저장
-		Operation->DefaultDragVisual = DragIcon;
+		// 원본 슬롯을 그대로 유지한 생성 실패 반환
+		return nullptr;
 	}
-
-	// 커서 미리보기가 목적지 슬롯의 드롭 판정을 가리지 않도록 설정
-	Operation->DefaultDragVisual->SetVisibility(ESlateVisibility::HitTestInvisible);
+	// 원본과 동일한 번호 및 아이템과 수량 연결
+	DragSlot->InitializeSlot(OwningInventory, SlotIndex);
+	// 사용자 BP의 현재 선택 표시를 미리보기에도 동일하게 적용
+	DragSlot->SetIsSelected(GetSelected(), false);
+	// 원본 카드에 적용한 아이콘 크기와 색상 보존
+	DragSlot->SetContentImage(Brush_ButtonImage);
+	// 글꼴과 내부 간격을 동일하게 배치할 원본 카드의 로컬 크기
+	FVector2D SlotSize = GetCachedGeometry().GetLocalSize();
+	// 화면 배율을 포함한 실제 카드 크기를 드래그 장식의 UI 좌표로 환산
+	FVector2D DragSize = GetCachedGeometry().GetAbsoluteSize() / FMath::Max(UWidgetLayoutLibrary::GetViewportScale(this), UE_SMALL_NUMBER);
+	// 아직 배치되지 않은 슬롯은 레이아웃 계산 결과를 크기로 사용
+	if (SlotSize.X <= 0.0 || SlotSize.Y <= 0.0)
+	{
+		// 아이콘과 이름 및 배경의 실제 필요 크기 계산
+		ForceLayoutPrepass();
+		// 첫 프레임에도 크기가 있는 카드 미리보기 구성
+		SlotSize = GetDesiredSize();
+		// 배치 전에는 원래 필요한 크기를 기준으로 표시
+		DragSize = SlotSize;
+	}
+	// 원본 로컬 크기에 맞춰 글꼴과 내부 여백을 동일하게 배치
+	USizeBox* DragContent = NewObject<USizeBox>(Operation);
+	// 화면 배율 적용 전의 카드 가로 크기 보존
+	DragContent->SetWidthOverride(FMath::Max(1.0, SlotSize.X));
+	// 화면 배율 적용 전의 카드 세로 크기 보존
+	DragContent->SetHeightOverride(FMath::Max(1.0, SlotSize.Y));
+	// 원본과 동일한 슬롯 BP를 로컬 크기 영역에 연결
+	DragContent->AddChild(DragSlot);
+	// 인벤토리의 화면 배율을 전체 카드에 동일하게 적용할 스케일 영역
+	UScaleBox* DragScale = NewObject<UScaleBox>(Operation);
+	// 카드 내부 배치를 바꾸지 않고 전체 비율을 유지한 크기 조절
+	DragScale->SetStretch(EStretch::ScaleToFit);
+	// 원본 크기의 슬롯을 화면 크기에 맞추는 스케일 영역에 연결
+	DragScale->AddChild(DragContent);
+	// 가로 컨테이너를 벗어난 미리보기의 크기를 원본과 동일하게 고정
+	USizeBox* DragVisual = NewObject<USizeBox>(Operation);
+	// 원본 카드의 가로 크기를 유지하며 영 크기 방지
+	DragVisual->SetWidthOverride(FMath::Max(1.0, DragSize.X));
+	// 원본 카드의 세로 크기를 유지하며 영 크기 방지
+	DragVisual->SetHeightOverride(FMath::Max(1.0, DragSize.Y));
+	// 슬롯 전체의 글꼴과 내부 간격을 포함한 화면 배율 적용
+	DragVisual->AddChild(DragScale);
+	// 배경과 번호 및 아이콘과 수량 전체의 불투명도 적용
+	DragVisual->SetRenderOpacity(0.6f);
+	// 미리보기 자식까지 입력 판정을 차단하여 목적지 드롭 허용
+	DragVisual->SetVisibility(ESlateVisibility::HitTestInvisible);
+	// 드래그 작업이 끝날 때까지 카드 미리보기 수명 유지
+	Operation->DefaultDragVisual = DragVisual;
 	// 원본 보관 상태를 변경하지 않은 드래그 작업 반환
 	return Operation;
 }
