@@ -9,7 +9,6 @@
 #include "GameplayTags/MD_GameplayTags.h"
 #include "NiagaraFunctionLibrary.h"
 #include "Net/UnrealNetwork.h"
-#include "Types/Persistence/MD_DaySnapshotTypes.h"
 #include "World/Trash/MD_TrashDispenser.h"
 #include "World/Trash/MD_TrashBinLiquidSloshVisualComponent.h"
 
@@ -325,103 +324,6 @@ void AMD_TrashBin::SetSourceTrashDispenser(AMD_TrashDispenser* SourceDispenser)
 	SourceTrashDispenserName = NewSourceName;
 	// 기존 파일의 미지정 구역도 확인된 보급기로 보완
 	SourceTrashDispenserLevelPackage = NewSourceLevel;
-}
-
-bool AMD_TrashBin::BuildPersistenceRecord(FMD_TrashBinRecord& OutRecord)
-{
-	OutRecord = FMD_TrashBinRecord();
-	if (!HasAuthority()
-		|| bLiquidTransferInProgress
-		|| bSortingTransactionActive
-		|| IsActorBeingDestroyed())
-	{
-		return false;
-	}
-
-	// Live Coding 이전에 생성된 보급 통도 Owner가 남아 있으면 새 필드를 안전하게 보완한다.
-	// 이전 실행 객체와 기존 저장에서 빠진 구역까지 원래 소유자로 보완
-	if (SourceTrashDispenserName.IsNone() == true || SourceTrashDispenserLevelPackage.IsNone() == true)
-	{
-		// 기존 소유 보급기의 이름과 구역 조회
-		SetSourceTrashDispenser(Cast<AMD_TrashDispenser>(GetOwner()));
-	}
-	if (SourceTrashDispenserName.IsNone())
-	{
-		// 레벨 배치 등 비보급 통은 동적 재스폰 대상이 아니다.
-		return false;
-	}
-
-	EnsureStableBinId();
-	OutRecord.StableBinId = StableBinId;
-	OutRecord.SourceDispenserName = SourceTrashDispenserName;
-	// 동일 이름의 다른 구역 보급기를 구분할 배치 정보 저장
-	OutRecord.SourceDispenserLevelPackage = SourceTrashDispenserLevelPackage;
-	OutRecord.TrashBinClass = GetClass();
-	OutRecord.Transform = GetActorTransform();
-	OutRecord.LiquidUnits = LiquidState.LiquidUnits;
-	OutRecord.RewardUnits = LiquidState.RewardUnits;
-	OutRecord.LiquidRevision = LiquidState.Revision;
-	OutRecord.LiquidRecoveryLots = LiquidRecoveryLots;
-	OutRecord.NextSpillSequence = NextSpillSequence;
-	return OutRecord.IsStructurallyValid();
-}
-
-bool AMD_TrashBin::RestorePersistenceRecord(
-	const FMD_TrashBinRecord& Record)
-{
-	if (!HasAuthority()
-		|| bLiquidTransferInProgress
-		|| bSortingTransactionActive
-		|| IsActorBeingDestroyed()
-		|| !Record.IsStructurallyValid()
-		|| Record.TrashBinClass.Get() != GetClass())
-	{
-		return false;
-	}
-
-	const bool bLiquidStateChanged =
-		LiquidState.LiquidUnits != Record.LiquidUnits
-		|| LiquidState.RewardUnits != Record.RewardUnits
-		|| LiquidState.Revision != Record.LiquidRevision;
-
-	LastConsumedSpillCosmeticStableBinId.Invalidate();
-	LastConsumedSpillCosmeticSequence = 0;
-	LastRenderedLiquidRevision = INDEX_NONE;
-
-	StableBinId = Record.StableBinId;
-	SourceTrashDispenserName = Record.SourceDispenserName;
-	// 기존 파일의 미지정 구역은 보급기 재등록 단계에서 보완
-	SourceTrashDispenserLevelPackage = Record.SourceDispenserLevelPackage;
-	LiquidState.LiquidUnits = Record.LiquidUnits;
-	LiquidState.RewardUnits = Record.RewardUnits;
-	// Revision은 복원 자체를 새 gameplay mutation으로 세지 않고 저장값을 exact 유지한다.
-	LiquidState.Revision = Record.LiquidRevision;
-	LiquidRecoveryLots = Record.LiquidRecoveryLots;
-	NextSpillSequence = Record.NextSpillSequence;
-	++SpillCosmeticEpoch;
-	if (SpillCosmeticEpoch == 0)
-	{
-		++SpillCosmeticEpoch;
-	}
-
-	if (HasActorBegunPlay() && bLiquidStateChanged)
-	{
-		NotifyLiquidStateChanged();
-	}
-	else if (HasActorBegunPlay())
-	{
-		RefreshLiquidVisual();
-		ForceNetUpdate();
-	}
-	else
-	{
-		RefreshLiquidVisual();
-	}
-	if (HasActorBegunPlay())
-	{
-		RefreshSpillSamplingAfterLiquidMutation();
-	}
-	return true;
 }
 
 float AMD_TrashBin::GetAcceptableScrapeLoad(

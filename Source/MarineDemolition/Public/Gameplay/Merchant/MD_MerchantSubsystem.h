@@ -8,10 +8,8 @@
 #include "Types/Score/MD_ScoreTypes.h"
 #include "MD_MerchantSubsystem.generated.h"
 
-struct FMD_GameData;
-
 /**
- * DayPersistenceSubsystem과 같은 패턴으로, Day전환해도 계약3일동안 크레딧과 퀘스트가 유지되어야하므로
+ * 계약 동안 크레딧과 퀘스트가 맵 이동을 넘어 유지되어야 하므로
  * Gameinstance에 수명을 둠. 값 변경 처리는 서버에서 하고 클라 복제는 GameState에서 담당
  */
 
@@ -24,7 +22,6 @@ class AMD_PlayerState;
 class AMD_QuestItem;
 class UMD_QuestItemDefinition;
 struct FGameplayTag;
-struct FMD_MerchantData;
 struct FMD_QuestRewardData;
 struct FMD_RepeatQuestPhaseData;
 struct FMD_ShopItem;
@@ -194,12 +191,6 @@ public:
 	/** 계약 종료 시 남은 반복 퀘스트를 정산하고 활성 현장을 해제하는 함수 */
 	void FinalizeContract();
 
-	// 현재 경제·호감도·퀘스트 원장을 저장 필드로 복사하는 함수
-	FMD_MerchantData GetMerchantSaveData() const;
-
-	// 검증된 저장 필드를 서버 권위 상인 원장에 원자적으로 적용하는 함수
-	bool ApplyMerchantSaveData(const FMD_MerchantData& SaveData);
-
 	/** `Resource.Sample.Grade.X` 태그 변환. 등급 태그가 필요한 곳에서 공용으로 쓴다. */
 	static FGameplayTag GradeTagFromSampleGrade(EMD_SampleGrade Grade);
 
@@ -284,13 +275,4 @@ private:
 
 	// 기획상 모든 호감도 구간에 공통으로 적용되는 일일 대출 이자율
 	static constexpr float DailyInterestRate = 0.05f;
-protected:
-    // 소유한 기능 상태를 저장 이벤트의 구조체에 기록하는 함수
-    UFUNCTION()
-    void CollectGameData(UPARAM(ref) FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
-
-    // 전달된 저장 데이터에서 담당 태그의 필드를 찾아 직접 적용하는 함수
-    UFUNCTION()
-    void OverwriteGameData(const FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
-
 };

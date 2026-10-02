@@ -261,28 +261,6 @@ namespace MDGameplayTags
 		"State.Oxygen.Depleted",
 		"산소 0 상태. 잠수중이면 질식 피해 -15/s");
 
-	// For Save Data
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_GameState,
-		"Save.Data.GameState",
-		"저장된 게임 데이터로부터 점수, 인게임 시간 등의 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_Merchant,
-		"Save.Data.Merchant",
-		"저장된 게임 데이터로부터 상인 관련 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_Player,
-		"Save.Data.Player",
-		"저장된 게임 데이터로부터 플레이어 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_World,
-		"Save.Data.World",
-		"저장된 게임 데이터로부터 맵의 변경 사항에 대한 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_Lore,
-		"Save.Data.Lore",
-		"저장된 게임 데이터로부터 영구 누적 로어 진행 정보를 얻는 키");
-
 	// UI
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		UI_Layer,

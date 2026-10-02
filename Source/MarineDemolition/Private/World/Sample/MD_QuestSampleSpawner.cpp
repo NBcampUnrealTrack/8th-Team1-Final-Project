@@ -1,5 +1,4 @@
 #include "World/Sample/MD_QuestSampleSpawner.h"
-#include "Data/SaveGame/MD_SaveSlotManager.h"
 
 #include "Components/ArrowComponent.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
@@ -177,17 +176,6 @@ void AMD_QuestSampleSpawner::TrySpawnForQuestState()
 	}
 
 	UWorld* World = GetWorld();
-	// 저장 복원 또는 새 계약 적용 전에 이전 퀘스트로 물품이 생성되는 상황 차단
-	UMD_SaveSlotManager* SaveManager = IsValid(World) == true && IsValid(World->GetGameInstance()) == true
-		? World->GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-	// 예약된 맵 초기화와 복원 이벤트가 완료될 때까지 퀘스트 물품 생성 보류
-	if (IsValid(SaveManager) == true && (SaveManager->GetPendingGameDataOperation() != EMD_PendingGameDataOperation::None
-		|| SaveManager->IsGameDataOperationInProgress() == true))
-	{
-		// 저장된 생존 목록 또는 새 계약의 퀘스트를 먼저 확정하도록 생성 연기
-		return;
-	}
-
 	// 등록 완료 전 생성 요청은 매니저의 비동기 대기열에서 처리하도록 전달한다.
 	UMD_QuestSampleSpawnerManager* SpawnerManager = IsValid(World) == true ? World->GetSubsystem<UMD_QuestSampleSpawnerManager>() : nullptr;
 	bool bIsSpawnerManagerValid = IsValid(SpawnerManager);

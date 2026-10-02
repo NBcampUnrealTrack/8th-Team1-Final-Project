@@ -6,7 +6,6 @@
 #include "GameFramework/PlayerState.h"
 #include "Net/UnrealNetwork.h"
 #include "Component/Merchant/MD_MerchantComponent.h"
-#include "Types/SaveGame/MD_SaveDataTypes.h"
 #include "Types/Travel/MD_TravelTypes.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Engine/GameInstance.h"
@@ -479,71 +478,6 @@ void AMD_GameStateBase::OnRep_CurrentDay()
 void AMD_GameStateBase::OnRep_Score()
 {
     OnScoreChanged.Broadcast(Score);
-}
-
-FMD_GameStateData AMD_GameStateBase::GetGameStateSaveData() const
-{
-    // 하나의 수집 시점에 속한 복제 진행 상태만 슬롯에 기록하기 위한 값 복사
-    FMD_GameStateData SaveData;
-    SaveData.bEmergencyDay = bEmergencyDay;
-    SaveData.bInspectionWarned = bInspectionWarned;
-    SaveData.ContractCrewCount = ContractCrewCount;
-    SaveData.ContractDifficulty = ContractDifficulty;
-    SaveData.ElapsedDay = CurrentDay;
-    SaveData.ElapsedSeconds = GetElapsedGameSeconds();
-    SaveData.Score = Score;
-    // 당일 증감 조회에 필요한 이벤트 기록 보존
-    SaveData.ScoreLog = ScoreLog;
-    // 분류별 정산 값을 원래 정밀도로 보존
-    SaveData.DailyScoreTotals = DailyScoreTotals;
-    // 마지막 점검의 판정과 정산 내역 보존
-    SaveData.LastInspectionReport = LastInspectionReport;
-    return SaveData;
-}
-
-bool AMD_GameStateBase::ApplyGameStateSaveData(const FMD_GameStateData& SaveData)
-{
-	// 선행 검증을 통과한 데이터만 복제 상태에 적용하기 위한 검사
-	if (CanApplyGameStateSaveData(SaveData) == false)
-	{
-		return false;
-	}
-
-	// 저장 당시 인게임 경과 초를 현재 서버 시각 기준의 시작 시각으로 역산하는 처리
-	const double TotalGameSeconds = static_cast<double>(EndHour - StartHour) * 60.0 * 60.0;
-    const double TimeScale = TotalGameSeconds / RealDayDurationSeconds;
-    const double ElapsedRealSeconds = SaveData.ElapsedSeconds / TimeScale;
-    PendingElapsedRealSeconds = ElapsedRealSeconds;
-    GameStartServerTime = GetServerWorldTimeSeconds() - ElapsedRealSeconds;
-    bGameTimeStarted = bWorldInitializationReady;
-    bEmergencyDay = SaveData.bEmergencyDay;
-    bInspectionWarned = SaveData.bInspectionWarned;
-    ContractCrewCount = SaveData.ContractCrewCount;
-    ContractDifficulty = SaveData.ContractDifficulty;
-    CurrentDay = SaveData.ElapsedDay;
-    Score = SaveData.Score;
-    // 보상 함수를 재실행하지 않고 저장된 점수 로그 복원
-    ScoreLog = SaveData.ScoreLog;
-    // 이전 세션의 원장이 섞이지 않도록 당일 합계 교체
-    DailyScoreTotals = SaveData.DailyScoreTotals;
-    // 구형 저장의 기본값도 이전 세션의 점검 결과를 제거하도록 적용
-    LastInspectionReport = SaveData.LastInspectionReport;
-    // 저장 복원 후 현재 일자 기준 보고서 재구성
-    RefreshDailyLedger();
-
-    // 리슨 서버와 접속 클라이언트가 같은 복원 결과를 즉시 관찰하도록 하는 알림과 복제 요청
-    OnRep_Score();
-    OnRep_CurrentDay();
-    ForceNetUpdate();
-
-	return true;
-}
-
-bool AMD_GameStateBase::CanApplyGameStateSaveData(const FMD_GameStateData& SaveData) const
-{
-	// 클라이언트 적용과 설정된 하루 길이를 벗어난 진행 시간의 부분 적용을 방지하기 위한 검사
-	const double TotalGameSeconds = static_cast<double>(EndHour - StartHour) * 60.0 * 60.0;
-	return HasAuthority() == true && SaveData.IsStructurallyValid() == true && RealDayDurationSeconds > 0.0 && TotalGameSeconds > 0.0 && SaveData.ElapsedSeconds <= TotalGameSeconds;
 }
 
 void AMD_GameStateBase::OnRep_WithdrawalPhase()

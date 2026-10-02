@@ -14,7 +14,6 @@ class AMD_GameStateBase;
 class AMD_PlayerController;
 class UMD_SiteDefinition;
 class UWorld;
-struct FMD_GameData;
 
 /**
  *
@@ -44,33 +43,6 @@ public:
     virtual void PostLogin(APlayerController* NewPlayer) override;
 
 protected:
-    // 로비처럼 자동 저장에서 제외할 맵 목록
-    UPROPERTY(EditDefaultsOnly, Category = "Save Game")
-    TSet<TSoftObjectPtr<UWorld>> AutoSaveExcludedMaps;
-
-public:
-    // 현재 맵의 자동 저장 허용 여부 확인
-    bool IsAutoSaveAllowed();
-
-    // 로그아웃과 저장 이벤트가 공유하는 단일 플레이어 장비 수집
-    bool CollectPlayerGameData(const APlayerState* PlayerState, FMD_GameData& GameData);
-
-    // 재접속과 적용 이벤트가 공유하는 단일 플레이어 장비 복원
-    bool OverwritePlayerGameData(const APlayerState* PlayerState, const FMD_GameData& GameData);
-
-protected:
-    // 저장 이벤트에 게임 진행과 접속 플레이어 기록을 추가하는 함수
-    UFUNCTION()
-    void CollectGameData(UPARAM(ref) FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
-
-    // 전달된 저장 데이터에서 게임 진행과 개인 기록을 찾아 직접 복원하는 함수
-    UFUNCTION()
-    void OverwriteGameData(const FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
-
-    // 온라인 식별자와 오프라인 이름의 기존 개인 저장 키 정책 유지
-    FString BuildPlayerPersistenceKey(const APlayerState* PlayerState);
-
-protected:
     virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -95,19 +67,10 @@ private:
     // 서버 GameState에 검증된 출발 난이도와 인원수를 계약 상태로 반영하는 처리
     void ApplyRequestedContractSettings();
 
-    // 파일 복원 직후 저장된 퀘스트와 시간을 일차 초기화에서 보호하는 상태
-    bool bRestoredSavedWorld = false;
-
-    // 비동기 구역 복원의 무한 대기를 막는 실시간 기준
-    double SavedStreamingStartSeconds = 0.0;
-
     bool bStartPlayWaitingForMapRegistration = false;
     TArray<TWeakObjectPtr<AController>> PendingMapRegistrationPlayers;
 
     FTimerHandle CheckGameTimeTimerHandle;
-
-    // 새 게임 또는 불러오기 데이터를 World에 적용하는 함수
-    void ApplyPendingGameDataOperation();
 
     void CheckGameTimeEvents();
 
@@ -179,13 +142,8 @@ private:
 
  //Day Persistence
 private:
-    // 18:00 마감 또는 트래블 직전에 스냅샷 기록
-    void CaptureDaySnapshot();
-
-    // 다음 틱에 스냅샷 복원 후 Merchant Day 동기화 (전 액터 BeginPlay 완료 보장)
+    // 다음 틱에 월드 준비를 기다린 뒤 계약 동기화 (전 액터 BeginPlay 완료 보장)
     void InitializeExpeditionDay();
-
-    bool RestoreDaySnapshot();
 
     // 서버 일차와 퀘스트를 동기화하고 명시적인 새 출항만 같은 현장의 계약 재구성
     void SyncMerchantToGameDay(int32 Day, bool bStartNewContract = false);
