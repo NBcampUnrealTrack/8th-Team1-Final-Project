@@ -167,21 +167,6 @@ bool AMD_QuestRackSpawner::ClaimsQuestPhase(const FPrimaryAssetId& Id, int32 Pha
 	return RackQuestDefinitionId.IsValid() && Id == RackQuestDefinitionId && Phase == RackPhaseIndex;
 }
 
-bool AMD_QuestRackSpawner::FindActiveRackQuest(FMD_MainQuestState& OutState) const
-{
-	const UGameInstance* GI = GetGameInstance();
-	const UMD_MerchantSubsystem* Merchant = GI ? GI->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
-	if (!Merchant || !Merchant->HasActiveContract()) return false;
-	for (const FMD_MainQuestState& State : Merchant->GetMainQuests())
-	{
-		if (State.IsActive() && ClaimsQuestPhase(State.DefinitionId, State.CurrentPhaseIndex))
-		{
-			OutState = State;
-			return true;
-		}
-	}
-	return false;
-}
 
 float AMD_QuestRackSpawner::GetContaminationRemovedRatio() const
 {
@@ -219,16 +204,20 @@ void AMD_QuestRackSpawner::TrySpawnForQuestState()
 	if (!HasAuthority() || !HasActorBegunPlay() || bRackEndingPlay) return;
 	UMD_QuestSampleSpawnerManager* Manager = GetWorld()->GetSubsystem<UMD_QuestSampleSpawnerManager>();
 	if (!Manager || !Manager->RequestSpawnEvaluation(this)) return;
-	RefreshRackGroup();
-	FMD_MainQuestState State;
-	const bool bActive = FindActiveRackQuest(State);
-	if (bQuestActive != bActive)
+	// 퀘스트 진행과 무관하게 랙의 물리 접근 조건 활성화
+	if (bQuestActive == false || bRackDisabled == true)
 	{
-		bQuestActive = bActive;
+		// 모든 배치 랙의 청소 및 잠금 해제 허용
+		bQuestActive = true;
+		// 이전 퀘스트 수량 제한으로 잠긴 저장 상태 해제
+		bRackDisabled = false;
+		// 호스트의 물리 접근 상태 갱신
 		OnRep_RackState();
+		// 클라이언트에 복구된 랙 접근 상태 전달
 		ForceNetUpdate();
 	}
-	if (!bActive || bRackDisabled || bCartridgeReleased || !IsAccessRequirementMet()) return;
+	// 청소 및 잠금 해제 완료 후 한 번만 카트리지 준비
+	if (bCartridgeReleased == true || IsAccessRequirementMet() == false) return;
 	if (RackMode == EMD_QuestRackMode::Contamination)
 	{
 		if (!RackScrapeSurface->CompleteCleaningWithoutDrops()) return;
@@ -238,9 +227,10 @@ void AMD_QuestRackSpawner::TrySpawnForQuestState()
 	ForceNetUpdate();
 }
 
-AMD_QuestItem* AMD_QuestRackSpawner::SpawnCartridge(const FMD_MainQuestState& State)
+AMD_QuestItem* AMD_QuestRackSpawner::SpawnCartridge()
 {
-	UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(State.DefinitionId);
+	// 배치된 랙의 기존 카트리지 구성 조회
+	UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(RackQuestDefinitionId);
 	if (!Definition || !Definition->HasPhase(RackPhaseIndex) || Definition->UsesHotbarDelivery(RackPhaseIndex)) return nullptr;
 	const EMD_QuestObjectiveType Objective = Definition->GetObjectiveType(RackPhaseIndex);
 	if (Objective != EMD_QuestObjectiveType::RecoverIntact && Objective != EMD_QuestObjectiveType::RecoverDamaged) return nullptr;
@@ -256,7 +246,8 @@ AMD_QuestItem* AMD_QuestRackSpawner::SpawnCartridge(const FMD_MainQuestState& St
 		bSpawnFailureLogged = true;
 		return nullptr;
 	}
-	Item->QuestDefinitionId = State.DefinitionId;
+	// 저장 복원에서 같은 랙의 카트리지를 식별할 구성 키 유지
+	Item->QuestDefinitionId = RackQuestDefinitionId;
 	ReleasedCartridge = Item;
 	UGameplayStatics::FinishSpawningActor(Item, Placement);
 	Item->SuppressImpactDamage(SampleSpawnProtectionDuration);
@@ -280,30 +271,8 @@ void AMD_QuestRackSpawner::NotifyCartridgeGrabbed(AMD_QuestItem* Item)
 	bCartridgeCollected = true;
 	OnRep_RackState();
 	ForceNetUpdate();
-	// The successful second server grab disables the other rack in the same call.
-	RefreshRackGroup();
 }
 
-void AMD_QuestRackSpawner::RefreshRackGroup()
-{
-	if (!HasAuthority()) return;
-	TArray<AMD_QuestRackSpawner*> Group;
-	int32 Collected = 0;
-	for (TActorIterator<AMD_QuestRackSpawner> It(GetWorld()); It; ++It)
-	{
-		if (!It->ClaimsQuestPhase(RackQuestDefinitionId, RackPhaseIndex)) continue;
-		Group.Add(*It);
-		Collected += It->bCartridgeCollected ? 1 : 0;
-	}
-	if (Collected < 2) return;
-	for (AMD_QuestRackSpawner* Rack : Group)
-	{
-		if (Rack->bCartridgeCollected || Rack->bRackDisabled) continue;
-		Rack->bRackDisabled = true;
-		Rack->OnRep_RackState();
-		Rack->ForceNetUpdate();
-	}
-}
 
 void AMD_QuestRackSpawner::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
 {
@@ -320,8 +289,6 @@ bool AMD_QuestRackSpawner::CanCutPadlockFromHit(const FHitResult& Hit) const
 void AMD_QuestRackSpawner::AddPadlockCutProgress(float WorkSeconds, AActor* Cutter, const FHitResult& Hit)
 {
 	if (!HasAuthority() || !CanCutPadlockFromHit(Hit) || !FMath::IsFinite(WorkSeconds) || WorkSeconds <= 0.f || WorkSeconds > 1.f) return;
-	FMD_MainQuestState State;
-	if (!FindActiveRackQuest(State)) return;
 	const AMD_Character* Character = Cast<AMD_Character>(Cutter);
 	const UMD_EquipHotbarComponent* Hotbar = Character ? Character->GetHotbarComponent() : nullptr;
 	UMD_ItemDefinition* Tool = Hotbar ? Hotbar->GetCurrentItem() : nullptr;
@@ -405,12 +372,13 @@ void AMD_QuestRackSpawner::Interact_Implementation(AActor* Interactor)
 {
 	if (!HasAuthority() || !CanInteract_Implementation(Interactor) || bCollectionInProgress) return;
 	TrySpawnForQuestState();
-	FMD_MainQuestState State;
 	UMD_InteractionComponent* Interaction = Interactor->FindComponentByClass<UMD_InteractionComponent>();
-	if (!bCartridgeReleased || bRackDisabled || !FindActiveRackQuest(State)
-		|| !Interaction || !Interaction->CanOwnerInteract() || Interaction->IsHolding()) return;
+	// 랙 해제 상태와 실제 운반 가능 여부로 회수 요청 검증
+	if (bCartridgeReleased == false || bRackDisabled == true || IsValid(Interaction) == false
+		|| Interaction->CanOwnerInteract() == false || Interaction->IsHolding() == true) return;
 	TGuardValue<bool> CollectionGuard(bCollectionInProgress, true);
-	AMD_QuestItem* Item = IsValid(ReleasedCartridge) ? ReleasedCartridge.Get() : SpawnCartridge(State);
+	// 이미 생성한 카트리지를 재사용하고 미생성 시에만 배치 구성으로 생성
+	AMD_QuestItem* Item = IsValid(ReleasedCartridge) == true ? ReleasedCartridge.Get() : SpawnCartridge();
 	if (!Item) return;
 	if (!Interaction->TryReceiveQuestItem(Item, this))
 	{

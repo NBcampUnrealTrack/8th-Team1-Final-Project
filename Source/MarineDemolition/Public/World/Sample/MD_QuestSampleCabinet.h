@@ -26,8 +26,6 @@ public:
     virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 
     UFUNCTION(BlueprintPure, Category="Cabinet")
-    bool HasAccessCard() const;
-    UFUNCTION(BlueprintPure, Category="Cabinet")
     bool IsOpen() const { return bOpened; }
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="Cabinet|Quest")

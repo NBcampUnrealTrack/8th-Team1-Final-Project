@@ -2,10 +2,7 @@
 #include "Components/ArrowComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Component/Merchant/MD_MerchantComponent.h"
-#include "Game/MD_GameStateBase.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
-#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
 #include "World/Sample/MD_SampleItem.h"
 #include "Engine/GameInstance.h"
@@ -55,31 +52,6 @@ bool AMD_QuestSampleCabinet::ClaimsQuestPhase(const FPrimaryAssetId& Id, int32 P
     return Id == CabinetQuestId && Phase == SamplePhaseIndex;
 }
 
-bool AMD_QuestSampleCabinet::HasAccessCard() const
-{
-    // Server uses authoritative progress; clients use the replicated merchant mirror.
-    TArray<FMD_MainQuestState> Quests;
-    int32 Day = 0;
-    if (HasAuthority())
-    {
-        const UMD_MerchantSubsystem* M = GetGameInstance() ? GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
-        if (!M) return false;
-        Quests = M->GetMainQuests(); Day = M->GetCurrentDay();
-    }
-    else
-    {
-        const AMD_GameStateBase* GS = GetWorld() ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
-        const UMD_MerchantComponent* M = GS ? GS->GetMerchantComponent() : nullptr;
-        if (!M) return false;
-        Quests = M->GetMainQuests(); Day = M->GetCurrentDay();
-    }
-    if (RequiredDay > 0 && Day != RequiredDay) return false;
-    const UMD_QuestDefinition* D = UMD_QuestDefinition::LoadDefinition(CabinetQuestId);
-    for (const FMD_MainQuestState& Q : Quests)
-        if (Q.DefinitionId == CabinetQuestId && Q.IsActive() && Q.CurrentPhaseIndex == SamplePhaseIndex)
-            return D && !D->IsObjectiveComplete(SamplePhaseIndex, Q.CurrentProgress);
-    return false;
-}
 
 FText AMD_QuestSampleCabinet::GetInteractionDisplayName_Implementation() const
 {
@@ -89,12 +61,14 @@ FText AMD_QuestSampleCabinet::GetInteractionDisplayName_Implementation() const
 FText AMD_QuestSampleCabinet::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
     if (bOpened) return FText::FromString(TEXT("샘플을 조준해 회수"));
-    return FText::FromString(HasAccessCard() ? TEXT("E — 카드로 문 열기") : TEXT("B 캐비닛 카드 필요"));
+    // 퀘스트 카드 없이 사용할 수 있는 캐비닛 상호작용 안내
+    return FText::FromString(TEXT("E — 문 열기"));
 }
 
 bool AMD_QuestSampleCabinet::CanInteract_Implementation(AActor* Interactor) const
 {
-    return !bOpened && HasAccessCard();
+    // 열린 캐비닛의 중복 상호작용 차단
+    return bOpened == false;
 }
 
 void AMD_QuestSampleCabinet::Interact_Implementation(AActor* Interactor)
@@ -139,7 +113,6 @@ void AMD_QuestSampleCabinet::Tick(float DeltaSeconds)
 
 bool AMD_QuestSampleCabinet::ReleaseSample()
 {
-    if (!HasAccessCard()) return false;
     UMD_QuestDefinition* D = UMD_QuestDefinition::LoadDefinition(CabinetQuestId);
     if (!D) return false;
     const TSubclassOf<AMD_QuestItem> ItemClass = ResolveSpawnItemClass(*D, SamplePhaseIndex);

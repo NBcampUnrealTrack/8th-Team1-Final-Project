@@ -72,7 +72,8 @@ public:
 
 private:
     TSet<TWeakObjectPtr<AActor>> HighlightedTargets;
-    bool IsQuestActive() const;
+    // 회수 대상과 연결 단말기의 안내 사용 가능 여부 확인
+    bool IsDestinationAvailable() const;
     void UpdateTargetHighlight(bool bActive);
     UPROPERTY(VisibleAnywhere, Category="Route")
     TObjectPtr<UInstancedStaticMeshComponent> RouteGeometry;
