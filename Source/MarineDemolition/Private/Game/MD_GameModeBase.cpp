@@ -87,10 +87,9 @@ void AMD_GameModeBase::BeginPlay()
         true
     );
 
-    // 레벨의 모든 격벽에 붕괴·철거 점수 처리 바인딩 (GameMode는 서버 전용이라 중복 적용 없음)
+    // 레벨의 모든 격벽에 철거 점수 처리 바인딩 (GameMode는 서버 전용이라 중복 적용 없음)
     for (TActorIterator<AMD_CuttableWall> It(GetWorld()); It; ++It)
     {
-        It->OnStrutCollapsed.AddDynamic(this, &AMD_GameModeBase::HandleStrutCollapsed);
         It->OnWallDemolished.AddDynamic(this, &AMD_GameModeBase::HandleWallDemolished);
     }
 
@@ -263,22 +262,12 @@ void AMD_GameModeBase::NotifyPlayerJoinAndExit(AController* ChangedPlayer, bool 
     }
 }
 
-void AMD_GameModeBase::HandleStrutCollapsed(AMD_CuttableWall* Wall, AActor* Cutter)
-{
-    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
-    {
-        GS->AddScoreEvent(MDGameplayTags::Score_Penalty_Collapse_Unsupported);
-    }
-}
-
 void AMD_GameModeBase::HandleWallDemolished(AMD_CuttableWall* Wall, AActor* Cutter)
 {
     if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
     {
-        // 칸막이 +15 / 지지 상태 지주 +30
-        GS->AddScoreEvent(Wall->GetWallType() == EMD_WallType::Strut
-            ? MDGameplayTags::Score_Demolition_Strut
-            : MDGameplayTags::Score_Demolition_Partition);
+        // 벽 철거 +15 (벽 종류 구분 없음)
+        GS->AddScoreEvent(MDGameplayTags::Score_Demolition_Partition);
     }
 }
 

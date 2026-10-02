@@ -77,11 +77,8 @@ private:
     void FinalizeReturnStatuses();
 
 
- //Collapse Score
+ //Demolition Score
 private:
-    UFUNCTION()
-    void HandleStrutCollapsed(AMD_CuttableWall* Wall, AActor* Cutter);
-
     UFUNCTION()
     void HandleWallDemolished(AMD_CuttableWall* Wall, AActor* Cutter);
 

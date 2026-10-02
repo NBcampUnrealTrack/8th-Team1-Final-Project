@@ -18,7 +18,6 @@ UMD_ScoreTableData::UMD_ScoreTableData()
 	EventValues.Add(MDGameplayTags::Score_Sorting_Bonus_Glass, 4);
 	EventValues.Add(MDGameplayTags::Score_Sorting_Bonus_Battery, 8);
 	EventValues.Add(MDGameplayTags::Score_Demolition_Partition, 15);
-	EventValues.Add(MDGameplayTags::Score_Demolition_Strut, 30);
 	EventValues.Add(MDGameplayTags::Score_Daily_SectorClosed, 40);
 	EventValues.Add(MDGameplayTags::Score_Daily_Quest, 80);
 	EventValues.Add(MDGameplayTags::Score_Daily_QuestS, 160);
@@ -29,8 +28,6 @@ UMD_ScoreTableData::UMD_ScoreTableData()
 	EventValues.Add(MDGameplayTags::Score_Penalty_MissortContaminated, -24);
 	EventValues.Add(MDGameplayTags::Score_Penalty_UnsortedRemain, -6);
 	EventValues.Add(MDGameplayTags::Score_Penalty_UncollectedRemain, -6);
-	EventValues.Add(MDGameplayTags::Score_Penalty_Collapse_Unsupported, -200);
-	EventValues.Add(MDGameplayTags::Score_Penalty_Collapse_Supported, -120);
 	EventValues.Add(MDGameplayTags::Score_Penalty_NotReturned, -35);
 	EventValues.Add(MDGameplayTags::Score_Penalty_Death, -30);
 	EventValues.Add(MDGameplayTags::Score_Penalty_Warning, -40);

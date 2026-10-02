@@ -5,7 +5,6 @@
 #include "GameplayTagAssetInterface.h"
 #include "MD_CuttableWall.generated.h"
 
-class UCameraShakeBase;
 class UDecalComponent;
 class UMaterialInterface;
 class UStaticMeshComponent;
@@ -16,7 +15,6 @@ class AMD_ContaminationItem;
 class AMD_WallPiece;
 struct FHitResult;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnStrutCollapsed, AMD_CuttableWall*, Wall, AActor*, Cutter);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnWallDemolished, AMD_CuttableWall*, Wall,	AActor*, Cutter);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FMD_OnWallScanned, AMD_CuttableWall*, Wall, float, Duration, AActor*, Scanner);
 
@@ -32,13 +30,6 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
  * 튜토리얼이 "배관 자리만 자를 수 있다"를 구현하는 데 쓴다.
  */
 DECLARE_DELEGATE_RetVal_OneParam(bool, FMD_CutLocationFilter, const FHitResult*);
-
-UENUM(BlueprintType)
-enum class EMD_WallType : uint8
-{
-	Partition UMETA(DisplayName = "칸막이격벽"),
-	Strut UMETA(DisplayName = "지주격벽"),
-};
 
 /**
  * A demolishable wall.
@@ -74,24 +65,6 @@ public:
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
-	void SetSupported(bool bSupported) { UpdateSupportState(bSupported, nullptr); }
-
-	/** Native brace changes also identify the player responsible for losing support. */
-	void UpdateSupportState(bool bSupported, AActor* ResponsibleActor);
-	bool IsAwaitingSupportCollapse() const { return bAwaitingSupportCollapse; }
-	/** Restore the hidden load-bearing state without replaying cutting, rewards or collapse. */
-	void RestorePendingSupportCollapse();
-
-	// 저장 복원 시 붕괴나 감점 이벤트 없이 지지 유무만 교체
-	void RestoreSupportState(bool bSupported);
-
-	UFUNCTION(BlueprintPure, Category = "MD|Wall")
-	bool IsSupported() const { return bHasSupport; }
-
-	UFUNCTION(BlueprintPure, Category = "MD|Wall")
-	EMD_WallType GetWallType() const { return WallType; }
-
 	/** Original wall geometry, excluding contamination and shadow-only proxies. */
 	UStaticMeshComponent* GetScanMesh() const { return Mesh.Get(); }
 
@@ -100,9 +73,6 @@ public:
 	{
 		return ScrapeSurface.Get();
 	}
-
-	UPROPERTY(BlueprintAssignable, Category = "MD|Wall")
-	FMD_OnStrutCollapsed OnStrutCollapsed;
 
 	UPROPERTY(BlueprintAssignable, Category = "MD|Wall")
 	FMD_OnWallDemolished OnWallDemolished;
@@ -169,38 +139,12 @@ protected:
 		Category = "MD|Wall|Contamination")
 	TObjectPtr<UMD_ScrapeSurfaceComponent> ScrapeSurface;
 
-	UPROPERTY(EditAnywhere, Category = "MD|Wall")
-	EMD_WallType WallType = EMD_WallType::Partition;
-
-	UPROPERTY(EditAnywhere, Replicated, Category = "MD|Wall")
-	bool bHasSupport = false;
-
 	UPROPERTY(EditAnywhere, Category = "MD|Wall",
 		meta = (ClampMin = "0"))
 	int32 PieceCount = 10;
 
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall")
 	TSubclassOf<AMD_WallPiece> PieceClass;
-
-	/** Local collapse footprint around the cut wall. */
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "50", ClampMax = "1000", Units = "cm"))
-	float CollapseRadiusCm = 250.f;
-
-	/** Search above wall mid-height for the actual underside of the ceiling. */
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "50", ClampMax = "1000", Units = "cm"))
-	float CollapseCeilingSearchHeightCm = 400.f;
-
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "0", ClampMax = "24"))
-	int32 CollapseDebrisCount = 12;
-
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "0"))
-	float CollapseDamage = 40.f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Collapse")
-	TObjectPtr<UNiagaraSystem> CollapseEffect;
-
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Collapse")
-	TSubclassOf<UCameraShakeBase> CollapseShakeClass;
 
 	/** Serialized BP values retained until BP_MD_CuttableWall is migrated. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
@@ -235,14 +179,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Audio", meta = (Categories = "SFX"))
 	FGameplayTag DemolishSoundTag;
 
-	// 기획 §2 — 애니메이션 1사이클(3.567초)의 정수배로 잡는다
+	// 기획 §2 — 애니메이션 1사이클(3.567초)의 정수배로 잡는다. 모든 벽이 같은 값을 쓴다
 	UPROPERTY(EditAnywhere, Category = "MD|Wall|Cut",
 		meta = (ClampMin = "0.1", Units = "s"))
 	float PartitionCutSeconds = 10.8f;      // 3사이클
-
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Cut",
-		meta = (ClampMin = "0.1", Units = "s"))
-	float StrutCutSeconds = 14.4f;          // 4사이클
 
 private:
 
@@ -250,11 +190,6 @@ private:
 	void CutFromHit(AActor* Cutter, const FHitResult* WallHit);
 	float ResolveCutSurfaceCleanRatio(const FHitResult* WallHit);
 	void CompleteCutWithCleanRatio(AActor* Cutter, float CutSurfaceCleanRatio);
-	void CollapseIfUnsupported(AActor* ResponsibleActor);
-	void TriggerUnsupportedCollapse(AActor* Cutter);
-
-	UFUNCTION(NetMulticast, Reliable)
-	void MulticastPlayCollapseEffect(FVector EffectLocation, FVector EffectScale);
 
 	void AddCutProgressInternal(
 		float DeltaSeconds,
@@ -273,9 +208,6 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_Cut)
 	bool bCut = false;
-
-	bool bAwaitingSupportCollapse = false;
-	bool bCollapseTriggered = false;
 
 	//  누적 절단 시간. 감소하지 않으며 Day 간에도 유지된다 (기획 §3)
 	UPROPERTY(ReplicatedUsing = OnRep_CutProgress)

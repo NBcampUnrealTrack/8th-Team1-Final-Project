@@ -123,7 +123,6 @@ void AMD_WallUtility::LinkOverlappingWalls()
 		}
 
 		Wall->OnWallDemolished.AddDynamic(this, &AMD_WallUtility::HandleHostWallCut);
-		Wall->OnStrutCollapsed.AddDynamic(this, &AMD_WallUtility::HandleHostWallCut);
 		Wall->OnWallScanned.AddDynamic(this, &AMD_WallUtility::HandleHostWallScanned);
 		LinkedWalls.Add(Wall);
 	}
