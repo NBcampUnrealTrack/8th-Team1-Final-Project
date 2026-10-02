@@ -6,6 +6,7 @@
 #include "Serialization/MemoryWriter.h"
 #include "Misc/EngineVersion.h"
 #include "Misc/Paths.h"
+#include "Misc/ScopeExit.h"
 #include "Misc/SecureHash.h"
 #include "Serialization/CustomVersion.h"
 #include "Serialization/ObjectAndNameAsStringProxyArchive.h"
@@ -23,6 +24,12 @@ struct FMD_PreparedSlotWrite
     TArray<uint8> Metadata;
     TArray<uint8> Manifest;
     TArray<FMD_ContaminationSavePayload> Payloads;
+    // 게시 이후 현재 및 복구 세대에서 계속 사용하는 개별 파일 식별자
+    TSet<FString> RetainedPayloadIds;
+    // 이번 요청에서 생성한 본문만 실패 시 회수하기 위한 소유 상태
+    bool bPayloadCreated = false;
+    // 이번 요청에서 생성한 임시 인덱스만 회수하기 위한 소유 상태
+    bool bManifestTemporaryCreated = false;
 };
 
 namespace
@@ -141,10 +148,16 @@ namespace
         return Row.bIsSlotSummary == true && Row.IsEmpty() == false && Row.SchemaVersion == FMD_GameData::CurrentSchemaVersion
             && IsPayloadId(Row.SlotPayloadId) == true;
     }
-    bool WriteRawFile(const FString& Path, const TArray<uint8>& Bytes)
+    bool WriteRawFile(const FString& Path, const TArray<uint8>& Bytes, bool* bCreated = nullptr)
     {
         TUniquePtr<FArchive> Writer(IFileManager::Get().CreateFileWriter(*Path, FILEWRITE_NoReplaceExisting));
         if (!Writer) return false;
+        // 독점 생성에 성공한 파일만 호출자의 실패 정리 대상으로 표시
+        if (bCreated != nullptr)
+        {
+            // 기존 동명 파일과 이번 요청의 임시 파일을 구분하는 소유권 기록
+            *bCreated = true;
+        }
         Writer->Serialize(const_cast<uint8*>(Bytes.GetData()), Bytes.Num());
         return !Writer->IsError() && Writer->Close();
     }
@@ -157,6 +170,8 @@ namespace
             TUniquePtr<FArchive> Writer(IFileManager::Get().CreateFileWriter(
                 *Prepared.PayloadPath, FILEWRITE_NoReplaceExisting));
             if (!Writer) return false;
+            // 쓰기 도중 실패하더라도 이번 요청에서 생성한 본문만 제거하도록 표시
+            Prepared.bPayloadCreated = true;
             Writer->Serialize(Prepared.PayloadHeader.GetData(), Prepared.PayloadHeader.Num());
             int32 Size = Prepared.Metadata.Num();
             *Writer << Size;
@@ -166,9 +181,10 @@ namespace
             for (FMD_ContaminationSavePayload& Payload : Prepared.Payloads) Payload.Serialize(*Writer);
             if (Writer->IsError() || !Writer->Close()) return false;
         }
-        if (!SealFile(Prepared.PayloadPath)
-            || !WriteRawFile(Prepared.ManifestTemporary, Prepared.Manifest)
-            || !SealFile(Prepared.ManifestTemporary)) return false;
+        // 본문과 소유권이 기록된 임시 인덱스의 내구성 쓰기 실패 확인
+        if (SealFile(Prepared.PayloadPath) == false
+            || WriteRawFile(Prepared.ManifestTemporary, Prepared.Manifest, &Prepared.bManifestTemporaryCreated) == false
+            || SealFile(Prepared.ManifestTemporary) == false) return false;
         {
             TUniquePtr<FArchive> Check(IFileManager::Get().CreateFileReader(*Prepared.ManifestTemporary));
             if (!Check || !VerifyFile(*Check)) return false;
@@ -376,7 +392,97 @@ void FMD_SaveSlotStore::ReadIndexAsync(TFunction<void(FMD_SaveSlotIndex, bool)> 
     });
 }
 
-bool FMD_SaveSlotStore::WriteManifestBytes(FString StoreRoot, uint64 Generation, TArray<uint8>& Bytes)
+void FMD_SaveSlotStore::AddPayloadReferences(FMD_SaveSlotIndex& Index, TSet<FString>& Out)
+{
+    // 자동 및 사용자 슬롯을 같은 파일 보존 집합으로 처리
+    for (TArray<FMD_GameData>* Rows : { &Index.Auto, &Index.User })
+    {
+        // 검증된 목록의 모든 개별 저장 파일을 보존 대상으로 수집
+        for (FMD_GameData& Row : *Rows)
+        {
+            // 대소문자를 구분하지 않는 파일 시스템에서도 참조 파일을 보존
+            Out.Add(Row.SlotPayloadId.ToLower());
+        }
+    }
+}
+
+void FMD_SaveSlotStore::DeleteStoreFile(FString Path)
+{
+    // 삭제 실패가 이미 게시된 저장의 성공 여부를 바꾸지 않도록 분리
+    if (IFileManager::Get().Delete(*Path, false, false, true) == false)
+    {
+        // 다음 저장 및 삭제 때 재시도할 파일을 진단 로그에 기록
+        UE_LOG(LogTemp, Warning, TEXT("[SaveSlots] 사용하지 않는 저장 파일 정리 실패: %s"), *Path);
+    }
+}
+
+void FMD_SaveSlotStore::CleanupUnreferencedFiles(FString StoreRoot, TSet<FString>& RetainedPayloadIds)
+{
+    // 지정 저장 루트의 개별 파일만 검사할 목록
+    TArray<FString> Files;
+    // 하위 디렉터리와 다른 저장 형식을 제외한 본문 목록 조회
+    IFileManager::Get().FindFiles(Files, *FPaths::Combine(StoreRoot, TEXT("*.mdslot")), true, false);
+    // 현재 및 복구 세대에서 참조가 사라진 본문만 제거
+    for (FString& File : Files)
+    {
+        // 확장자를 제외한 저장소 고유 파일 식별자 조회
+        FString Id = FPaths::GetBaseFilename(File);
+        // 다른 용도의 파일과 정상 세대의 본문 보호
+        if (IsPayloadId(Id) == true && RetainedPayloadIds.Contains(Id.ToLower()) == false)
+        {
+            // 저장 루트 바로 아래의 사용하지 않는 본문 회수
+            DeleteStoreFile(FPaths::Combine(StoreRoot, File));
+        }
+    }
+    // 본문 목록을 재사용하여 중단된 요청의 임시 파일 조회 준비
+    Files.Reset();
+    // 저장소 내부의 임시 파일만 조회
+    IFileManager::Get().FindFiles(Files, *FPaths::Combine(StoreRoot, TEXT("*.tmp")), true, false);
+    // 호출자가 직렬화한 파일 작업 이후 남은 임시 인덱스 정리
+    for (FString& File : Files)
+    {
+        // 이 저장소가 생성한 교대 인덱스 이름만 허용
+        if (File.Len() == 52 && (File.StartsWith(TEXT("index-a.mdindex.")) == true || File.StartsWith(TEXT("index-b.mdindex.")) == true))
+        {
+            // 임시 인덱스의 고유 요청 식별자 추출
+            FString Id = File.Mid(16, 32);
+            // 정확한 GUID 파일명만 정리하여 다른 임시 파일 보존
+            if (IsPayloadId(Id) == true)
+            {
+                // 게시되지 않은 과거 임시 인덱스 회수
+                DeleteStoreFile(FPaths::Combine(StoreRoot, File));
+            }
+        }
+    }
+}
+
+bool FMD_SaveSlotStore::CommitPreparedWrite(FMD_PreparedSlotWrite& Prepared)
+{
+    // 새 본문 기록과 검증된 인덱스 게시 결과 보관
+    bool bSuccess = ExecutePreparedWrite(Prepared);
+    // 저장 성공 이후에만 이전 세대에서 해제된 파일 회수
+    if (bSuccess == true)
+    {
+        // 현재 및 직전 인덱스가 참조하는 본문은 복구를 위해 유지
+        CleanupUnreferencedFiles(Prepared.Root, Prepared.RetainedPayloadIds);
+    }
+    // 실패한 요청이 직접 생성한 본문만 회수
+    else if (Prepared.bPayloadCreated == true)
+    {
+        // 기존 정상 세대와 무관한 실패 본문 제거
+        DeleteStoreFile(Prepared.PayloadPath);
+    }
+    // 성공한 이동 이후에는 부재를 허용하고 실패한 임시 파일만 제거
+    if (Prepared.bManifestTemporaryCreated == true)
+    {
+        // 이번 요청 소유의 임시 인덱스 정리
+        DeleteStoreFile(Prepared.ManifestTemporary);
+    }
+    // 파일 정리 결과와 분리된 실제 저장 게시 결과 반환
+    return bSuccess;
+}
+
+bool FMD_SaveSlotStore::WriteManifestBytes(FString StoreRoot, uint64 Generation, TArray<uint8>& Bytes, TSet<FString>& RetainedPayloadIds)
 {
     // 내구성 쓰기와 교체 구간의 엔진 프로파일 표식
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_SaveSlots_AsyncRemoveIndex);
@@ -390,8 +496,20 @@ bool FMD_SaveSlotStore::WriteManifestBytes(FString StoreRoot, uint64 Generation,
     FString Destination = FPaths::Combine(StoreRoot, Generation % 2 == 1 ? TEXT("index-a.mdindex") : TEXT("index-b.mdindex"));
     // 다른 요청의 임시 파일을 덮어쓰지 않는 고유 경로 생성
     FString Temporary = Destination + TEXT(".") + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".tmp");
+    // 다른 요청의 기존 파일을 실패 정리에서 제외할 소유 상태
+    bool bTemporaryCreated = false;
+    // 모든 반환 경로에서 이번 요청의 임시 파일 정리
+    ON_SCOPE_EXIT
+    {
+        // 독점 생성에 성공한 임시 파일만 회수
+        if (bTemporaryCreated == true)
+        {
+            // 성공한 이동 이후의 파일 부재도 허용하는 정리
+            DeleteStoreFile(Temporary);
+        }
+    };
     // 직렬화된 바이트를 기록하고 SHA 추가 및 내구성 플러시 수행
-    if (WriteRawFile(Temporary, Bytes) == false || SealFile(Temporary) == false)
+    if (WriteRawFile(Temporary, Bytes, &bTemporaryCreated) == false || SealFile(Temporary) == false)
     {
         // 기존 인덱스를 유지한 채 쓰기 실패 반환
         return false;
@@ -407,7 +525,15 @@ bool FMD_SaveSlotStore::WriteManifestBytes(FString StoreRoot, uint64 Generation,
         }
     }
     // 검증이 끝난 인덱스만 원자적으로 교체
-    return IFileManager::Get().Move(*Destination, *Temporary, true, false, false, true);
+    if (IFileManager::Get().Move(*Destination, *Temporary, true, false, false, true) == false)
+    {
+        // 게시 실패 시 기존 세대의 모든 본문 유지
+        return false;
+    }
+    // 삭제 결과의 게시 이후에만 복구 세대에서 벗어난 본문 회수
+    CleanupUnreferencedFiles(StoreRoot, RetainedPayloadIds);
+    // 인덱스 게시 성공 반환
+    return true;
 }
 
 void FMD_SaveSlotStore::RemoveAsync(FString Name, TFunction<void(bool)> Completion)
@@ -423,6 +549,10 @@ void FMD_SaveSlotStore::RemoveAsync(FString Name, TFunction<void(bool)> Completi
             // 실패한 요청의 쓰기 작업 생성 방지
             return;
         }
+        // 새 삭제 결과의 복구 세대가 사용하는 본문 보존 집합
+        TSet<FString> RetainedPayloadIds;
+        // 삭제 전 정상 인덱스를 복구할 모든 파일 보존
+        AddPayloadReferences(Index, RetainedPayloadIds);
         // 자동 슬롯의 해당 이름을 목록에서 제거
         Index.Auto.RemoveAll([&Name](const FMD_GameData& Row) { return Row.UniqueName == Name; });
         // 사용자 슬롯의 해당 이름을 목록에서 제거
@@ -441,10 +571,11 @@ void FMD_SaveSlotStore::RemoveAsync(FString Name, TFunction<void(bool)> Completi
         }
         // 경로와 원시 바이트 및 세대 번호만 작업 스레드로 이동
         Async(EAsyncExecution::ThreadPool,
-            [StoreRoot = MoveTemp(StoreRoot), Generation = Index.Generation, Bytes = MoveTemp(Bytes), Completion = MoveTemp(Completion)]() mutable
+            [StoreRoot = MoveTemp(StoreRoot), Generation = Index.Generation, Bytes = MoveTemp(Bytes),
+                RetainedPayloadIds = MoveTemp(RetainedPayloadIds), Completion = MoveTemp(Completion)]() mutable
         {
             // 해시와 내구성 플러시 및 원자적 인덱스 교체 수행
-            bool bWritten = WriteManifestBytes(MoveTemp(StoreRoot), Generation, Bytes);
+            bool bWritten = WriteManifestBytes(MoveTemp(StoreRoot), Generation, Bytes, RetainedPayloadIds);
             // 디스크 작업 결과를 게임 스레드에서 한 번만 전달
             AsyncTask(ENamedThreads::GameThread, [bWritten, Completion = MoveTemp(Completion)]() mutable
             {
@@ -574,30 +705,20 @@ bool FMD_SaveSlotStore::ReadSlot(const FMD_GameData& Summary, FMD_GameData& Out)
     // 개별 슬롯 읽기 성공 반환
     return true;
 }
-bool FMD_SaveSlotStore::WriteManifest(FMD_SaveSlotIndex& Index) const
+bool FMD_SaveSlotStore::WriteManifest(FMD_SaveSlotIndex& Index, TSet<FString>& RetainedPayloadIds) const
 {
-    if (Index.Generation == MAX_uint64) return false;
-    ++Index.Generation;
-    const FString Name = Index.Generation % 2 ? TEXT("index-a.mdindex") : TEXT("index-b.mdindex");
-    const FString Destination = FPaths::Combine(Root, Name);
-    const FString Temporary = Destination + TEXT(".") + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".tmp");
+    // 교대 세대 번호의 오버플로로 이전 파일이 덮이는 상황 차단
+    if (Index.Generation == MAX_uint64)
     {
-        TUniquePtr<FArchive> Writer(IFileManager::Get().CreateFileWriter(*Temporary, FILEWRITE_NoReplaceExisting));
-        if (!Writer || !EngineHeader(*Writer, 2)) return false;
-        *Writer << Index.Generation;
-        FSlotArchive Ar(*Writer);
-        for (TArray<FMD_GameData>* Rows : { &Index.Auto, &Index.User })
-        {
-            int32 Count = Rows->Num();
-            Ar << Count;
-            for (FMD_GameData& Row : *Rows) FMD_GameData::StaticStruct()->SerializeItem(Ar, &Row, nullptr);
-        }
-        if (Ar.IsError() || Ar.Tell() > MaxMetadataBytes - DigestBytes || !Writer->Close()) return false;
+        // 새 세대 생성 불가 반환
+        return false;
     }
-    FMD_SaveSlotIndex Verified;
-    if (!SealFile(Temporary) || !ReadManifest(Temporary, Verified)) return false;
-    // The other complete generation survives any interruption or failed replacement.
-    return IFileManager::Get().Move(*Destination, *Temporary, true, false, false, true);
+    // 기존 복구 세대보다 새로운 삭제 결과의 순서 지정
+    ++Index.Generation;
+    // 비동기 경로와 동일한 검증 및 파일 정리를 사용할 직렬화 버퍼
+    TArray<uint8> Bytes;
+    // 새 인덱스의 직렬화와 내구성 게시를 모두 완료한 결과 반환
+    return BuildManifestBytes(Index, Bytes) == true && WriteManifestBytes(Root, Index.Generation, Bytes, RetainedPayloadIds) == true;
 }
 bool FMD_SaveSlotStore::PrepareSave(const FMD_GameData& Data, bool bAuto, int32 MaxAuto,
     int32 MaxUser, FMD_PreparedSlotWrite& Out) const
@@ -607,6 +728,8 @@ bool FMD_SaveSlotStore::PrepareSave(const FMD_GameData& Data, bool bAuto, int32 
         || MaxAuto > MaxStoredSaveSlots || MaxUser > MaxStoredSaveSlots || (bAuto ? MaxAuto : MaxUser) == 0) return false;
     FMD_SaveSlotIndex Index;
     if (!ReadIndex(Index) || Index.Generation == MAX_uint64) return false;
+    // 새 인덱스 게시 이후 복구용으로 남을 현재 세대의 본문 보존
+    AddPayloadReferences(Index, Out.RetainedPayloadIds);
     const FString Id = FGuid::NewGuid().ToString(EGuidFormats::Digits);
     Out.Root = Root;
     Out.PayloadPath = FPaths::Combine(Root, Id + TEXT(".mdslot"));
@@ -633,6 +756,8 @@ bool FMD_SaveSlotStore::PrepareSave(const FMD_GameData& Data, bool bAuto, int32 
     }
     FMD_GameData Summary = MakeSummary(Data);
     Summary.SlotPayloadId = Id;
+    // 이번에 게시할 새 슬롯의 본문을 정리 대상에서 제외
+    Out.RetainedPayloadIds.Add(Id.ToLower());
     TArray<FMD_GameData>& Rows = bAuto ? Index.Auto : Index.User;
     Rows.RemoveAll([&](const FMD_GameData& Row) { return Row.UniqueName == Data.UniqueName; });
     Rows.Insert(MoveTemp(Summary), 0);
@@ -646,7 +771,8 @@ bool FMD_SaveSlotStore::PrepareSave(const FMD_GameData& Data, bool bAuto, int32 
 bool FMD_SaveSlotStore::Save(const FMD_GameData& Data, bool bAuto, int32 MaxAuto, int32 MaxUser) const
 {
     FMD_PreparedSlotWrite Prepared;
-    return PrepareSave(Data, bAuto, MaxAuto, MaxUser, Prepared) && ExecutePreparedWrite(Prepared);
+    // 저장 성공 이후 미참조 파일과 실패한 요청의 임시 파일까지 정리
+    return PrepareSave(Data, bAuto, MaxAuto, MaxUser, Prepared) == true && CommitPreparedWrite(Prepared) == true;
 }
 void FMD_SaveSlotStore::SaveAsync(const FMD_GameData& Data, bool bAuto, int32 MaxAuto, int32 MaxUser,
     TFunction<void(bool)> Completion) const
@@ -662,7 +788,8 @@ void FMD_SaveSlotStore::SaveAsync(const FMD_GameData& Data, bool bAuto, int32 Ma
     }
     Async(EAsyncExecution::ThreadPool, [Prepared, Completion = MoveTemp(Completion)]() mutable
     {
-        const bool bSuccess = ExecutePreparedWrite(*Prepared);
+        // 완료 콜백 이전에 게시 및 미참조 파일 정리까지 마친 결과 보관
+        bool bSuccess = CommitPreparedWrite(*Prepared);
         AsyncTask(ENamedThreads::GameThread, [Completion = MoveTemp(Completion), bSuccess]() mutable
         {
             Completion(bSuccess);
@@ -673,8 +800,13 @@ bool FMD_SaveSlotStore::Remove(const FString& Name) const
 {
     FMD_SaveSlotIndex Index;
     if (Name.IsEmpty() || !ReadIndex(Index)) return false;
+    // 삭제 결과의 이전 세대에서 사용하는 본문 보존 집합
+    TSet<FString> RetainedPayloadIds;
+    // 성공한 삭제 이후에도 복구할 수 있도록 현재 참조 수집
+    AddPayloadReferences(Index, RetainedPayloadIds);
     Index.Auto.RemoveAll([&](const FMD_GameData& Row) { return Row.UniqueName == Name; });
     Index.User.RemoveAll([&](const FMD_GameData& Row) { return Row.UniqueName == Name; });
     if (!IFileManager::Get().MakeDirectory(*Root, true)) return false;
-    return WriteManifest(Index);
+    // 삭제 인덱스 게시와 더 이상 참조하지 않는 파일 정리 실행
+    return WriteManifest(Index, RetainedPayloadIds);
 }

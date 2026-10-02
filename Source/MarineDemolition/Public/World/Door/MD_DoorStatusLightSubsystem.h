@@ -18,6 +18,7 @@ private:
 	void AttachStatusLight(AActor* Door);
 	void HandleActorSpawned(AActor* Actor);
 
+	UPROPERTY(Transient)
 	TObjectPtr<UClass> DoorClass;
 	FDelegateHandle ActorSpawnedHandle;
 };

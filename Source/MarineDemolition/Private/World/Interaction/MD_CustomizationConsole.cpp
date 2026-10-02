@@ -166,9 +166,10 @@ void AMD_CustomizationConsole::Interact_Implementation(AActor* Interactor)
 	{
 		return;
 	}
-	UCommonActivatableWidget* ActiveGameMenuWidget =
-		LocalUIManager->GetActiveScreen(MDGameplayTags::UI_Layer_GameMenu);
-	if (IsValid(ActiveGameMenuWidget) == true && ActiveGameMenuWidget->IsA(SelectWidgetClass) == true)
+	// HUD 스택의 현재 선택 화면 조회
+	UCommonActivatableWidget* ActiveHUDLayerWidget = LocalUIManager->GetActiveScreen(MDGameplayTags::UI_Layer_GameHUD);
+	// 이미 열린 외형 선택 화면의 중복 진입 차단
+	if (IsValid(ActiveHUDLayerWidget) == true && ActiveHUDLayerWidget->IsA(SelectWidgetClass) == true)
 	{
 		return;
 	}
@@ -187,7 +188,8 @@ bool AMD_CustomizationConsole::PushSelectWidget(APlayerController* PC)
 	}
 
 	UCommonActivatableWidget* PushedScreen = LocalUIManager->PushScreenToLayerInitialized(
-		MDGameplayTags::UI_Layer_GameMenu,
+		// HUD 재활성화와 입력 복구를 공유하는 화면 레이어
+		MDGameplayTags::UI_Layer_GameHUD,
 		SelectWidgetClass,
 		[this](UCommonActivatableWidget& Screen)
 		{
