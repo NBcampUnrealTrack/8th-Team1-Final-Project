@@ -57,8 +57,6 @@ namespace MDGameplayTags
 	/** 상호작용한 대상을 월드의 물리 오브젝트로 운반하는 픽업 방식 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Pickup_Physics);
 
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_PlaceSupport);
-
 	/*샘플 등급 분류. 퀘스트 목표 달성 여부 확인*/
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Sample_Grade);
 

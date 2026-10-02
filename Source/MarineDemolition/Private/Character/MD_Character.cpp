@@ -11,9 +11,6 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
-#include "Component/Support/MD_SupplyComponent.h"
-#include "Component/Support/MD_SupportPlacementComponent.h"
-#include "Data/Equipment/MD_SupplyItemDefinition.h"
 #include "Component/Equipment/MD_FoamGunComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Comfort/MD_ComfortComponent.h"
@@ -154,9 +151,6 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	InteractionComponent->SetInteractionDependencies(Camera, HoldPoint, PhysicsHandle);
 
 	ComfortComponent = CreateDefaultSubobject<UMD_ComfortComponent>(TEXT("ComfortComponent"));
-
-	SupplyComponent = CreateDefaultSubobject<UMD_SupplyComponent>(TEXT("SupplyComponent"));
-	SupportPlacementComponent = CreateDefaultSubobject<UMD_SupportPlacementComponent>(TEXT("SupportPlacementComponent"));
 
 	FoamGunComponent = CreateDefaultSubobject<UMD_FoamGunComponent>(TEXT("FoamGunComponent"));
 
@@ -1346,8 +1340,7 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 	}
 
 	// 모든 보관형 소모품의 사용 입력을 구매 GE가 부여한 GA에 전달
-	if (IsValid(Cast<UMD_ConsumeItemDefinition>(EquipHotbarComponent->GetCurrentItem()))
-		|| IsValid(Cast<UMD_SupplyItemDefinition>(EquipHotbarComponent->GetCurrentItem())))
+	if (IsValid(Cast<UMD_ConsumeItemDefinition>(EquipHotbarComponent->GetCurrentItem())))
 	{
 		// 선택한 아이템의 전체 AssetId에 귀속된 능력 한 개 활성화
 		EquipHotbarComponent->TryActivateCurrentItemAbility();

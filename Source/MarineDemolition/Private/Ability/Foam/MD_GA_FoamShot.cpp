@@ -10,7 +10,7 @@
 
 namespace
 {
-	// 실패 사유 노출 — PlaceSupport와 같은 임시 방식
+	// 실패 사유 노출 — 임시 방식
 	void ShowFoamFailMessage(const FString& Reason)
 	{
 		if (GEngine)

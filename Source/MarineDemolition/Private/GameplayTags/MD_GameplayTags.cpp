@@ -70,11 +70,6 @@ namespace MDGameplayTags
 		"Carry the interacted actor as a world physics object");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-	  Ability_PlaceSupport,
-	  "Ability.PlaceSupport",
-	  "임시 지지대 설치 어빌리티");
-
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Sample_Grade,
 		"Resource.Sample.Grade",
 		"샘플 등급 분류의 공통 루트");
