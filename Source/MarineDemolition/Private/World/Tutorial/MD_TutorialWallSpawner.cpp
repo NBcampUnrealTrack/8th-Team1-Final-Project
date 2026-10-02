@@ -1,6 +1,5 @@
 #include "World/Tutorial/MD_TutorialWallSpawner.h"
 
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Components/ChildActorComponent.h"
 #include "Data/Tutorial/MD_TutorialScriptData.h"
 #include "Engine/Engine.h"
@@ -85,9 +84,6 @@ AMD_TutorialWallSpawner::AMD_TutorialWallSpawner()
 		Slot.SlotName = TEXT("1_정화 후 철거");
 		Slot.ExpectedSortCategory = MDGameplayTags::Score_Sorting_NonBurnable;
 		Slot.Steps = {
-			{ EMD_TutorialWallPhase::Scrape,
-				LOCTEXT("S1_Scrape_T", "격벽 정화"),
-				LOCTEXT("S1_Scrape_B", "오염물을 긁어내어 벽을 정화하세요.") },
 			{ EMD_TutorialWallPhase::Cut,
 				LOCTEXT("S1_Cut_T", "격벽 철거"),
 				LOCTEXT("S1_Cut_B", "절단기로 벽을 철거하세요.") },
@@ -99,20 +95,6 @@ AMD_TutorialWallSpawner::AMD_TutorialWallSpawner()
 				LOCTEXT("S1_Sort_B",
 					"깨끗한 조각벽은 안 타는 쓰레기입니다.\n"
 					"분리에 성공하면 점수가 오르고, 잘못 분리하면 점수와 돈이 차감됩니다.") },
-		};
-		Slots.Add(MoveTemp(Slot));
-	}
-	{
-		FMD_TutorialWallSlot Slot;
-		Slot.SlotName = TEXT("2_미정화 철거");
-		Slot.ExpectedSortCategory = MDGameplayTags::Score_Sorting_Contaminated;
-		Slot.Steps = {
-			{ EMD_TutorialWallPhase::Cut,
-				LOCTEXT("S2_Cut_T", "정화 없이 철거"),
-				LOCTEXT("S2_Cut_B", "헤라로 벽을 정화하지 않고 벽을 철거해보세요.") },
-			{ EMD_TutorialWallPhase::Sort,
-				LOCTEXT("S2_Sort_T", "오염된 쓰레기"),
-				LOCTEXT("S2_Sort_B", "오염된 조각벽은 오염된 쓰레기로 분류됩니다.") },
 		};
 		Slots.Add(MoveTemp(Slot));
 	}
@@ -168,6 +150,30 @@ AMD_TutorialWallSpawner::AMD_TutorialWallSpawner()
 	}
 }
 
+void AMD_TutorialWallSpawner::PostLoad()
+{
+	Super::PostLoad();
+	RemoveRetiredCleaningLessons();
+}
+
+void AMD_TutorialWallSpawner::RemoveRetiredCleaningLessons()
+{
+	for (FMD_TutorialWallSlot& Slot : Slots)
+	{
+		// Preserve the original slot key used by ScriptData for its cutting/sorting text.
+		Slot.Steps.RemoveAll([](const FMD_TutorialGuideStep& Step)
+		{
+			return Step.Phase == EMD_TutorialWallPhase::Scrape;
+		});
+		// Dirty-debris sorting was part of the removed wall cleaning lesson.
+		if (Slot.SlotName == FName(TEXT("2_미정화 철거"))
+			|| Slot.ExpectedSortCategory.MatchesTagExact(MDGameplayTags::Score_Sorting_Contaminated))
+		{
+			Slot.bEnabled = false;
+		}
+	}
+}
+
 void AMD_TutorialWallSpawner::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
@@ -181,6 +187,7 @@ void AMD_TutorialWallSpawner::GetLifetimeReplicatedProps(TArray<FLifetimePropert
 void AMD_TutorialWallSpawner::BeginPlay()
 {
 	Super::BeginPlay();
+	RemoveRetiredCleaningLessons();
 
 	if (!HasAuthority())
 	{
@@ -464,8 +471,7 @@ void AMD_TutorialWallSpawner::EnterStep(const int32 StepIndex)
 	const bool bNeedsPoll = Step
 		&& (Step->Phase == EMD_TutorialWallPhase::Collect
 			|| Step->Phase == EMD_TutorialWallPhase::Repair
-			|| Step->Phase == EMD_TutorialWallPhase::ReachZone
-			|| Step->Phase == EMD_TutorialWallPhase::Scrape);
+			|| Step->Phase == EMD_TutorialWallPhase::ReachZone);
 
 	// 존은 단계마다 한 번만 찾아 캐시한다.
 	ActiveZone.Reset();
@@ -532,7 +538,6 @@ bool AMD_TutorialWallSpawner::SlotRequiresWall(const FMD_TutorialWallSlot& Slot)
 	{
 		switch (Step.Phase)
 		{
-		case EMD_TutorialWallPhase::Scrape:
 		case EMD_TutorialWallPhase::Cut:
 		case EMD_TutorialWallPhase::Collect:
 		case EMD_TutorialWallPhase::Sort:
@@ -584,11 +589,6 @@ bool AMD_TutorialWallSpawner::SpawnSlotActors(const FMD_TutorialWallSlot& Slot)
 	ActiveWall = Wall;
 	Wall->OnWallDemolished.AddDynamic(this, &AMD_TutorialWallSpawner::HandleWallDemolished);
 	Wall->OnWallScanned.AddDynamic(this, &AMD_TutorialWallSpawner::HandleWallScanned);
-	if (UMD_ScrapeSurfaceComponent* Surface = Wall->GetScrapeSurfaceComponent())
-	{
-		Surface->OnContaminationFullyRemoved.AddDynamic(
-			this, &AMD_TutorialWallSpawner::HandleContaminationFullyRemoved);
-	}
 
 	// 벽 BP 가 배관·전선을 직접 품는 경우(BP_MD_CuttableWall_InPipe / _InWire)를 먼저 거둔다.
 	CollectUtilitiesFromWall(Wall);
@@ -694,11 +694,6 @@ void AMD_TutorialWallSpawner::ReleaseSlotActors()
 		Wall->CutLocationFilter.Unbind();
 		Wall->OnWallDemolished.RemoveDynamic(this, &AMD_TutorialWallSpawner::HandleWallDemolished);
 		Wall->OnWallScanned.RemoveDynamic(this, &AMD_TutorialWallSpawner::HandleWallScanned);
-		if (UMD_ScrapeSurfaceComponent* Surface = Wall->GetScrapeSurfaceComponent())
-		{
-			Surface->OnContaminationFullyRemoved.RemoveDynamic(
-				this, &AMD_TutorialWallSpawner::HandleContaminationFullyRemoved);
-		}
 	}
 
 	// 따로 스폰한 인프라는 벽이 사라져도 남는다. 슬롯마다 같은 자리에 벽이 다시 스폰되므로
@@ -790,20 +785,6 @@ void AMD_TutorialWallSpawner::PollActivePhase()
 		return;
 	}
 
-	if (IsActivePhase(EMD_TutorialWallPhase::Scrape))
-	{
-		// 정상 경로는 OnContaminationFullyRemoved 델리게이트다. 이 폴링은 그 방송을 타지 않는
-		// 완료 경로(MD_CleanWall 치트처럼 오염 자체를 끄는 방식)까지 받아내는 안전망이다.
-		const AMD_CuttableWall* const Wall = ActiveWall.Get();
-		const UMD_ScrapeSurfaceComponent* const Surface =
-			Wall ? Wall->GetScrapeSurfaceComponent() : nullptr;
-		if (Surface && Surface->IsContaminationFullyRemoved())
-		{
-			AdvanceStep();
-		}
-		return;
-	}
-
 	if (IsActivePhase(EMD_TutorialWallPhase::Collect))
 	{
 		// 튜토리얼 구간에는 조각벽 말고 담을 것이 없으므로 내용물 유무만 본다.
@@ -868,20 +849,6 @@ void AMD_TutorialWallSpawner::DestroyActiveUtilities()
 
 //~ 기존 시스템 신호 ------------------------------------------------------------
 
-void AMD_TutorialWallSpawner::HandleContaminationFullyRemoved(UMD_ScrapeSurfaceComponent* Surface)
-{
-	const AMD_CuttableWall* Wall = ActiveWall.Get();
-	if (!HasAuthority()
-		|| !Wall
-		|| Surface != Wall->GetScrapeSurfaceComponent()
-		|| !IsActivePhase(EMD_TutorialWallPhase::Scrape))
-	{
-		return;
-	}
-
-	AdvanceStep();
-}
-
 void AMD_TutorialWallSpawner::HandleWallDemolished(AMD_CuttableWall* Wall, AActor* Cutter)
 {
 	if (!HasAuthority() || Wall != ActiveWall.Get())
@@ -889,7 +856,7 @@ void AMD_TutorialWallSpawner::HandleWallDemolished(AMD_CuttableWall* Wall, AActo
 		return;
 	}
 
-	// 이 방송은 조각이 스폰되기 **전**이다 (CompleteCutWithCleanRatio).
+	// 이 방송은 조각이 스폰되기 **전**이다 (CompleteCut).
 	// 벽은 곧 숨겨지고 파괴되므로 위치를 지금 붙잡아 두고 다음 틱에 조각을 줍는다.
 	const FMD_TutorialWallSlot* Slot = GetActiveSlot();
 	if (Slot && Slot->bDestroyPiecesOnRepair)

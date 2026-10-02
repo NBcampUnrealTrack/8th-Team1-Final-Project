@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #pragma once
 
@@ -83,11 +83,11 @@ public:
 
 
 	/**
-	 * 입력 모드를 바꾸기 전에 진행 중인 헤라 Focus와 Ability를 함께 정리한다.
+	 * 입력 모드를 바꾸기 전에 진행 중인 오염물 타격을 취소한다.
 	 *
 	 * Blueprint UI도 같은 진입점을 사용할 수 있도록 공개한다. 호출은 중복되어도 안전하다.
 	 */
-	UFUNCTION(BlueprintCallable, Category = "MD|Scrape")
+	UFUNCTION(BlueprintCallable, Category = "MD|Stain")
 	void CancelScrapeInteraction();
 
 	/**
@@ -300,19 +300,6 @@ private:
 
 	UFUNCTION(Server, Reliable)
 	void ServerBeginDay(int32 Day);
-
-	/**
-	 * 조준한 격벽(없으면 가장 가까운 오염된 격벽) 하나의 오염을 100% 제거한다.
-	 * 명령 1회당 벽 1개. 헤라질을 건너뛰고 다음 단계를 확인할 때 쓴다.
-	 */
-	UFUNCTION(Exec)
-	void MD_CleanWall();
-
-	UFUNCTION(Server, Reliable)
-	void ServerCleanWall(AMD_CuttableWall* Wall);
-
-	/** 조준선 우선, 실패하면 반경 내 가장 가까운 오염된 격벽을 찾는다 */
-	AMD_CuttableWall* FindWallToClean(float SearchRadiusCm = DefaultCheatSearchRadiusCm) const;
 
 	/**
 	 * 조준한 인프라(없으면 가장 가까운 파손된 인프라) 하나를 수리 상태로 만든다.

@@ -5,7 +5,6 @@
 #include "GameplayAbilitySpecHandle.h"
 #include "MD_StainScraperComponent.generated.h"
 
-class AMD_SurfaceStain;
 class UMD_ToolDefinition;
 
 /** One GAS activation owns one finite swing and at most one server-authorized impact. */
@@ -18,6 +17,7 @@ public:
 	UMD_StainScraperComponent();
 	bool StartStroke(FGameplayAbilitySpecHandle AbilityHandle);
 	void CancelStroke(bool bCancelAbility = true);
+	void FinishStroke(FGameplayAbilitySpecHandle AbilityHandle);
 	float GetStrokeDuration() const { return StrokeDurationSeconds; }
 	FVector GetHandSwingOffset() const;
 
@@ -27,7 +27,7 @@ protected:
 private:
 
 	bool CanUseEquippedScraper() const;
-	AMD_SurfaceStain* TraceTarget() const;
+	AActor* TraceTarget() const;
 	void ApplyImpact();
 	void PlaySwing();
 
@@ -44,7 +44,7 @@ private:
 	float SwingDistanceCm = 6.0f;
 
 	FGameplayAbilitySpecHandle StrokeAbility;
-	TWeakObjectPtr<AMD_SurfaceStain> StrokeTarget;
+	TWeakObjectPtr<AActor> StrokeTarget;
 	TWeakObjectPtr<UMD_ToolDefinition> StrokeTool;
 	FTimerHandle ImpactTimer;
 	double StrokeStartedAt = -10.0;

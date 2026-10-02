@@ -1,4 +1,4 @@
-﻿{
+{
 	"FileVersion": 3,
 	"EngineAssociation": "5.8",
 	"Category": "",
@@ -22,10 +22,6 @@
 			"Name": "MDMultiUser",
 			"Enabled": true,
 			"TargetAllowList": ["Editor"]
-		},
-		{
-			"Name": "MDSolidRendering",
-			"Enabled": true
 		},
 		{
 			"Name": "ModelingToolsEditorMode",

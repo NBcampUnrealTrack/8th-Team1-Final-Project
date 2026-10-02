@@ -72,10 +72,6 @@ bool AMD_QuestRackSpawner::RestoreRackState(const FMD_QuestRackRecord& Record)
 	}
 	bPadlockCut = Record.bPadlockCut;
 	PadlockCutSeconds = Record.CutSeconds;
-	if (RackMode == EMD_QuestRackMode::Contamination && bCartridgeReleased)
-	{
-		if (!RackScrapeSurface->CompleteCleaningWithoutDrops()) return false;
-	}
 	OnRep_RackState();
 	ForceNetUpdate();
 	return true;

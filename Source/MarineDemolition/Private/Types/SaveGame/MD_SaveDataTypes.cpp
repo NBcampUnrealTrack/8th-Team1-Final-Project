@@ -11,7 +11,6 @@
 #include "Gameplay/Persistence/MD_WorldActorPersistence.h"
 
 #include "GameplayTags/MD_GameplayTags.h"
-#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "Types/Lore/MD_LoreTypes.h"
 #include "World/Trash/MD_TrashBin.h"
@@ -781,31 +780,6 @@ bool FMD_WorldData::IsStructurallyValid() const
 				return false;
 			}
 		}
-	}
-
-	// 오염 셀의 병렬 배열 길이가 다르면 잘못된 인덱스 복원을 수행하지 않기 위한 검사
-	for (const FMD_WallContaminationRecord& ContaminationRecord : WallContaminations)
-	{
-        int32 MaximumCellCount = FMD_ScrapeSurfaceLayout::LegacyMaximumCombinedCellCount;
-        // 현재 월드 기록에는 유효한 생성 정보와 액터 및 컴포넌트 식별자 필수
-        if (ContaminationRecord.Generation.IsValid() == false || ContaminationRecord.SurfaceComponentName.IsNone() == true
-            || ContaminationRecord.WallName.IsNone() == true
-            || FMD_ScrapeSurfaceLayout::IsLayoutMetadataValid(
-                ContaminationRecord.LayoutVersion, ContaminationRecord.LayoutId,
-                ContaminationRecord.GridDimensions) == false
-            || (ContaminationRecord.LayoutVersion == 1
-                && FMD_ScrapeSurfaceLayout::IsCarrierScaleValid(ContaminationRecord.CarrierScale) == false))
-        {
-            return false;
-        }
-        if (ContaminationRecord.GridDimensions != FIntPoint::ZeroValue)
-        {
-            int32 CellsPerFace = 0;
-            if (!FMD_ScrapeSurfaceLayout::TryCalculateCellCounts(
-                ContaminationRecord.GridDimensions, CellsPerFace, MaximumCellCount)) return false;
-            if (ContaminationRecord.LayoutVersion == 1) MaximumCellCount = CellsPerFace;
-        }
-        if (!ContaminationRecord.ValidateCellIndices(MaximumCellCount)) return false;
 	}
 
     // 배치기별 제거 이력의 중복 적용 검사

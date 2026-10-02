@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "Engine/AssetManager.h"
@@ -587,28 +587,6 @@ void UMD_SaveSlotManager::ResetTemporaryGameData()
 	return;
 }
 
-
-void UMD_SaveSlotManager::PrepareContaminationForWorld(UWorld* World)
-{
-    if (!World || World->GetNetMode()==NM_Client) return;
-    auto* GI=World->GetGameInstance();
-    auto* Persistence=GI?GI->GetSubsystem<UMD_DayPersistenceSubsystem>():nullptr;
-    if (!Persistence) return;
-    if (PendingGameDataOperation==EMD_PendingGameDataOperation::LoadGame
-        && SelectedLoadGameData.IsValid()
-        && UWorld::RemovePIEPrefix(World->GetPackage()->GetName())==SelectedLoadGameData->MapPackagePath)
-    {
-        FMD_WorldData WorldData;
-        const bool bHasWorldData=SelectedLoadGameData->GetDataField(FMD_WorldData::DataFieldKey,WorldData);
-        Persistence->PrepareContaminationContext(World,&WorldData,false,bHasWorldData);
-        return;
-    }
-    // 새 출항에서 이전 현장의 오염 생성 상태를 재사용하지 않도록 구분
-    bool bNewContract = PendingGameDataOperation == EMD_PendingGameDataOperation::NewGame
-        || PendingGameDataOperation == EMD_PendingGameDataOperation::ContinueGame
-        || PendingGameDataOperation == EMD_PendingGameDataOperation::NewContract;
-    Persistence->PrepareContaminationContext(World,nullptr,bNewContract,true);
-}
 
 void UMD_SaveSlotManager::ResetSavedAssetPreload()
 {

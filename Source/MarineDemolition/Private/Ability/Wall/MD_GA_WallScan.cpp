@@ -3,10 +3,8 @@
 #include "AbilitySystemComponent.h"
 #include "Character/MD_Character.h"
 #include "Component/Scanning/MD_ScannerComponent.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "World/Contamination/MD_Barnacle.h"
 #include "World/Contamination/MD_SurfaceStain.h"
-#include "UObject/UObjectIterator.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -55,10 +53,6 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 	}
 	else if (Mode == EMD_ScanMode::Cleanup)
 	{
-		// Surfaces also exist on floors/equipment; the collision query is not authoritative.
-		for (TObjectIterator<UMD_ScrapeSurfaceComponent> It; It; ++It)
-			if (It->GetWorld() == Pawn->GetWorld() && It->IsRegistered() && IsValid(It->GetOwner()))
-				Candidates.AddUnique(It->GetOwner());
 		for (TActorIterator<AMD_Barnacle> It(Pawn->GetWorld()); It; ++It) Candidates.AddUnique(*It);
 		for (TActorIterator<AMD_SurfaceStain> It(Pawn->GetWorld()); It; ++It) Candidates.Add(*It);
 	}
@@ -86,12 +80,6 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 			{
 				if (Barnacle->IsFullyRemoved()) continue;
 				Mesh = Barnacle->GetScanMesh();
-			}
-			else if (const auto* Surface = Candidate->FindComponentByClass<UMD_ScrapeSurfaceComponent>())
-			{
-				if (!Surface->IsContaminationEnabled() || !Surface->IsSurfaceInitialized()
-					|| !Surface->UsesMeshUVSurface() || Surface->IsContaminationFullyRemoved()) continue;
-				Mesh = Surface->GetSurfaceMesh();
 			}
 			if (const AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Candidate))
 			{

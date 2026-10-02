@@ -2,9 +2,10 @@
 #include "Engine/World.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "World/Contamination/MD_SurfaceStain.h"
+#include "World/Contamination/MD_Barnacle.h"
 
 bool FMD_StainTargeting::Trace(UWorld& World, const FVector& Origin, const FVector& Direction, double Reach,
-	FHitResult& OutHit, const AActor* IgnoredActor)
+	FHitResult& OutHit, const AActor* IgnoredActor, bool bIncludeBarnacles)
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceStain_Pick);
 	if (Origin.ContainsNaN() || Direction.ContainsNaN() || !Direction.IsNormalized() || !FMath::IsFinite(Reach) || Reach <= 0) return false;
@@ -15,6 +16,16 @@ bool FMD_StainTargeting::Trace(UWorld& World, const FVector& Origin, const FVect
 	// The world remains the occluder. A bridge may be hit before it, or without a backing hit.
 	double Nearest = Surface ? FMath::Min(Reach, double(Surface->Distance) + 0.02) : Reach;
 	bool bFound = false;
+	if (bIncludeBarnacles && Surface)
+	{
+		const AMD_Barnacle* Barnacle = Cast<AMD_Barnacle>(Surface->GetActor());
+		if (IsValid(Barnacle) && !Barnacle->IsFullyRemoved())
+		{
+			OutHit = *Surface;
+			Nearest = Surface->Distance;
+			bFound = true;
+		}
+	}
 	for (const FHitResult& Candidate : Hits)
 	{
 		if (Candidate.bBlockingHit) break;

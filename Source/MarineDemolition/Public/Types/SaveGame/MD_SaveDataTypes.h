@@ -241,10 +241,6 @@ struct MARINEDEMOLITION_API FMD_WorldData
     UPROPERTY()
     FMD_WorldActorSnapshot ActorSnapshot;
 
-    /** Missing in older saves: preserve authored/per-surface seeds, including zero. */
-    UPROPERTY() bool bHasContaminationSessionSeed = false;
-    UPROPERTY() int32 ContaminationSessionSeed = 0;
-
 public:
 	// 인스턴스 구조체 컨테이너에서 월드 필드를 식별하기 위한 키
 	static const FGameplayTag DataFieldKey;
@@ -269,7 +265,7 @@ public:
 	UPROPERTY()
 	TArray<FMD_SampleRecord> Samples;
 
-	// 미수거 격벽 조각의 클래스·위치·오염 상태를 복원하기 위한 목록
+	// 미수거 격벽 조각의 클래스와 위치를 복원하기 위한 목록
 	UPROPERTY()
 	TArray<FMD_PieceRecord> Pieces;
 
@@ -283,10 +279,6 @@ public:
 
 	UPROPERTY()
 	TArray<FMD_TrashGeneratorState> TrashGenerators;
-
-	// 생성 기준과 달라진 표면 오염 셀을 복원하기 위한 목록
-	UPROPERTY()
-	TArray<FMD_WallContaminationRecord> WallContaminations;
 
     UPROPERTY()
     TArray<FMD_ContaminationPendingDrop> PendingContaminationDrops;
@@ -303,7 +295,7 @@ public:
 	TArray<FName> ClosedMarkerNames;
 
 public:
-	// 병렬 오염 배열과 필수 이름의 정합성을 적용 전에 검사하는 함수
+	// 배치 오염물과 동적 액터 기록 및 필수 이름을 적용 전에 검사하는 함수
 	bool IsStructurallyValid() const;
 };
 

@@ -2,13 +2,11 @@
 #include "Gameplay/Persistence/MD_WorldActorPersistence.h"
 #include "Misc/ScopeExit.h"
 #include "Gameplay/Persistence/MD_TrashBinPersistence.h"
-#include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
 #include "Data/SaveGame/MD_SaveSlotManager.h"
-#include "Gameplay/Scrape/MD_ScrapeSurfaceLayout.h"
 #include "Gameplay/Scrape/MD_ContaminationDebrisSubsystem.h"
 #include "Gameplay/Contamination/MD_SurfaceStainPersistence.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "EngineUtils.h"
 #include "Game/MD_GameStateBase.h"
 #include "World/Contamination/MD_BarnacleSpawner.h"
@@ -19,166 +17,6 @@
 #include "World/Trash/MD_TrashSpawnVolume.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallPiece.h"
-
-namespace
-{
-    void GatherScrapeSurfaces(
-        UWorld* World,
-        TArray<UMD_ScrapeSurfaceComponent*>& OutSurfaces)
-    {
-        OutSurfaces.Reset();
-        if (!World)
-        {
-            return;
-        }
-
-        for (TActorIterator<AActor> It(World); It; ++It)
-        {
-            TInlineComponentArray<UMD_ScrapeSurfaceComponent*> ActorSurfaces(*It);
-            for (UMD_ScrapeSurfaceComponent* const Surface : ActorSurfaces)
-            {
-                if (IsValid(Surface) && Surface->IsContaminationEnabled())
-                {
-                    OutSurfaces.Add(Surface);
-                }
-            }
-        }
-    }
-
-}
-
-
-void UMD_DayPersistenceSubsystem::ResetContaminationContext()
-{
-    ContaminationContextWorld.Reset();
-    bHasContaminationSessionSeed=false;
-    // 이전 맵의 구역 식별 형식 초기화
-    bUseQualifiedActorNames = false;
-    ContaminationSessionSeed=0;
-    bDeferSavedContaminationGeneration=false;
-    SavedContaminationGenerations.Empty();
-    SavedContaminationLayouts.Empty();
-    DeferredContaminationRecords.Empty();
-}
-
-bool UMD_DayPersistenceSubsystem::IsContaminationContextReady(const UWorld* World) const
-{
-    return World && ContaminationContextWorld.Get()==World;
-}
-
-bool UMD_DayPersistenceSubsystem::TryGetContaminationSessionSeed(const UWorld* World, int32& OutSeed) const
-{
-    if (!IsContaminationContextReady(World) || !bHasContaminationSessionSeed) return false;
-    OutSeed=ContaminationSessionSeed;
-    return true;
-}
-
-void UMD_DayPersistenceSubsystem::PrepareContaminationContext(
-    UWorld* World, const FMD_WorldData* SavedWorld, const bool bNewContract, const bool bDeferSavedGeneration)
-{
-    if (!World || World->GetNetMode()==NM_Client) return;
-    if (!SavedWorld && !bNewContract && IsContaminationContextReady(World)) return;
-    TRACE_CPUPROFILER_EVENT_SCOPE(MD_Contamination_PrepareSession);
-    ResetContaminationContext();
-    ContaminationContextWorld=World;
-    const TArray<FMD_WallContaminationRecord>* Records=nullptr;
-    // 해당 기록을 작성한 형식에 따라 표면 식별 방법 결정
-    bUseQualifiedActorNames = SavedWorld != nullptr ? SavedWorld->ActorSnapshot.bCaptured : Snapshot.ActorSnapshot.bCaptured;
-    if (SavedWorld)
-    {
-        bHasContaminationSessionSeed=SavedWorld->bHasContaminationSessionSeed;
-        ContaminationSessionSeed=SavedWorld->ContaminationSessionSeed;
-        Records=&SavedWorld->WallContaminations;
-    }
-    else if (!bNewContract && Snapshot.bValid && Snapshot.WorldName==World->GetFName())
-    {
-        bHasContaminationSessionSeed=Snapshot.bHasContaminationSessionSeed;
-        ContaminationSessionSeed=Snapshot.ContaminationSessionSeed;
-        Records=&Snapshot.WallContaminations;
-    }
-    else
-    {
-        bHasContaminationSessionSeed=true;
-        ContaminationSessionSeed=static_cast<int32>(GetTypeHash(FGuid::NewGuid()));
-    }
-    bDeferSavedContaminationGeneration=bDeferSavedGeneration && Records;
-    if (Records)
-        for (const auto& Record:*Records)
-        {
-            if (bDeferSavedContaminationGeneration && Record.CellIndices.IsEmpty())
-                DeferredContaminationRecords.FindOrAdd(Record.WallName).Add(Record.SurfaceComponentName, Record);
-            if (Record.LayoutVersion == 1 && Record.LayoutId.IsValid())
-                SavedContaminationLayouts.FindOrAdd(Record.WallName)
-                    .Add(Record.SurfaceComponentName, Record.LayoutId);
-            if (Record.Generation.IsValid())
-                SavedContaminationGenerations.FindOrAdd(Record.WallName)
-                    .Add(Record.SurfaceComponentName,Record.Generation);
-        }
-}
-
-bool UMD_DayPersistenceSubsystem::TryGetSavedContaminationLayout(
-    const UMD_ScrapeSurfaceComponent* Surface, FGuid& OutLayout) const
-{
-    if (!Surface || !Surface->GetOwner() || !IsContaminationContextReady(Surface->GetWorld())) return false;
-    const auto* Components = SavedContaminationLayouts.Find(bUseQualifiedActorNames == true ? FMD_WorldActorPersistence::GetActorKey(Surface->GetOwner()) : Surface->GetOwner()->GetFName());
-    // 저장 기록과 동일한 실제 컴포넌트 이름으로 표면 배치 식별자 조회
-    const FGuid* Layout = Components != nullptr ? Components->Find(Surface->GetFName()) : nullptr;
-    if (!Layout) return false;
-    OutLayout = *Layout;
-    return true;
-}
-
-bool UMD_DayPersistenceSubsystem::TryGetSavedContaminationGeneration(const UMD_ScrapeSurfaceComponent* Surface, FMD_ContaminationGeneration& OutGeneration) const
-{
-    // 유효한 현재 월드의 표면과 소유 액터만 조회 허용
-    if (IsValid(Surface) == false || IsValid(Surface->GetOwner()) == false || IsContaminationContextReady(Surface->GetWorld()) == false)
-    {
-        // 저장된 생성 정보를 연결할 표면 부재 반환
-        return false;
-    }
-    // 소유 액터별로 보관한 컴포넌트 생성 기록 조회
-    const TMap<FName, FMD_ContaminationGeneration>* Components = SavedContaminationGenerations.Find(bUseQualifiedActorNames == true ? FMD_WorldActorPersistence::GetActorKey(Surface->GetOwner()) : Surface->GetOwner()->GetFName());
-    // 현재 컴포넌트의 실제 이름으로 생성 정보 조회
-    const FMD_ContaminationGeneration* Generation = Components != nullptr ? Components->Find(Surface->GetFName()) : nullptr;
-    // 기록이 없는 표면에는 현재 신규 생성 정책을 사용하도록 조회 실패 반환
-    if (Generation == nullptr)
-    {
-        // 대응하는 생성 정보 부재 반환
-        return false;
-    }
-    // 확인한 생성 정보를 호출자에게 전달
-    OutGeneration = *Generation;
-    // 현재 형식의 생성 정보 조회 성공 반환
-    return true;
-}
-
-const FMD_WallContaminationRecord* UMD_DayPersistenceSubsystem::FindDeferredContaminationRecord(const UMD_ScrapeSurfaceComponent* Surface) const
-{
-    // 현재 월드에 속한 유효한 표면과 소유 액터만 조회 허용
-    if (IsValid(Surface) == false || IsValid(Surface->GetOwner()) == false || IsContaminationContextReady(Surface->GetWorld()) == false)
-    {
-        // 분할 복원 기록을 연결할 표면 부재 반환
-        return nullptr;
-    }
-    // 소유 액터별 분할 복원 기록 조회
-    const auto* Components = DeferredContaminationRecords.Find(bUseQualifiedActorNames == true ? FMD_WorldActorPersistence::GetActorKey(Surface->GetOwner()) : Surface->GetOwner()->GetFName());
-    // 현재 저장 형식의 실제 컴포넌트 이름으로 분할 복원 기록 조회
-    return Components != nullptr ? Components->Find(Surface->GetFName()) : nullptr;
-}
-
-bool UMD_DayPersistenceSubsystem::ShouldDeferContaminationGeneration(const UMD_ScrapeSurfaceComponent* Surface) const
-{
-    // 저장 복원에 의한 생성 지연이 필요한 경우에만 기록 조회
-    if (bDeferSavedContaminationGeneration == false)
-    {
-        // 일반 월드 시작에서 표면 생성 허용
-        return false;
-    }
-    // 현재 표면에 대응하는 생성 기록 존재 여부 확인용 데이터
-    FMD_ContaminationGeneration Saved;
-    // 실제 저장 기록을 가진 표면만 생성 시점 지연
-    return TryGetSavedContaminationGeneration(Surface, Saved);
-}
 
 void UMD_DayPersistenceSubsystem::CaptureSnapshot(UWorld* World)
 {
@@ -201,7 +39,6 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshotInternal(UWorld* World, bool bC
 
     Snapshot = FMD_DaySnapshot();
     Snapshot.WorldName = World->GetFName();
-    Snapshot.bHasContaminationSessionSeed=TryGetContaminationSessionSeed(World,Snapshot.ContaminationSessionSeed);
     Snapshot.CompletedDay = GameState->GetCurrentDay();
     Snapshot.Score = GameState->GetScore();
     Snapshot.bWarningIssued = GameState->IsInspectionWarned();
@@ -223,49 +60,6 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshotInternal(UWorld* World, bool bC
         {
             // 실제로 지지된 벽의 배치 구역 보관
             Snapshot.SupportedWallNames.Add(FMD_WorldActorPersistence::GetActorKey(*It));
-        }
-    }
-
-    TArray<UMD_ScrapeSurfaceComponent*> ScrapeSurfaces;
-    GatherScrapeSurfaces(World, ScrapeSurfaces);
-    for (UMD_ScrapeSurfaceComponent* const Surface : ScrapeSurfaces)
-    {
-        AActor* const SurfaceOwner = Surface->GetOwner();
-        if (!IsValid(SurfaceOwner))
-        {
-            continue;
-        }
-
-        // 생성 기준값과 달라진 오염 셀만 기록. 밤샘 분출로 총량이 오른 셀도 포함된다
-        FMD_WallContaminationRecord ContaminationRecord;
-        // 다른 구역의 같은 이름 표면이 서로의 오염 상태를 덮지 않도록 식별
-        ContaminationRecord.WallName = FMD_WorldActorPersistence::GetActorKey(SurfaceOwner);
-        // 기본 철거벽을 포함한 실제 표면 컴포넌트 이름 기록
-        ContaminationRecord.SurfaceComponentName = Surface->GetFName();
-        ContaminationRecord.LayoutVersion = Surface->GetContaminationLayoutVersion();
-        ContaminationRecord.LayoutId = Surface->GetContaminationLayoutId();
-        ContaminationRecord.CarrierScale = Surface->GetContaminationCarrierWeightScale();
-        ContaminationRecord.GridDimensions = Surface->GetContaminationGridDimensions();
-        ContaminationRecord.Generation = Surface->GetContaminationGeneration();
-        Surface->ExportContaminationDeltas(
-            ContaminationRecord.CellIndices,
-            ContaminationRecord.InitialAmounts,
-            ContaminationRecord.RemainingAmounts,
-            ContaminationRecord.TransferredAmounts,
-            ContaminationRecord.TransferredPatternDensities,
-            ContaminationRecord.CoveredFractions);
-        TArray<uint8> BoundaryBytes;
-        if (!Surface->ExportContaminationBoundary(BoundaryBytes)
-            || !ContaminationRecord.BoundaryPayload.Set(MoveTemp(BoundaryBytes)))
-        { Snapshot=FMD_DaySnapshot(); return; }
-        if (ContaminationRecord.Generation.IsValid() || ContaminationRecord.CellIndices.Num() > 0 || ContaminationRecord.BoundaryPayload.Num()>0)
-        {
-            if (!ContaminationRecord.CompactCells())
-            {
-                Snapshot = FMD_DaySnapshot();
-                return;
-            }
-            Snapshot.WallContaminations.Add(MoveTemp(ContaminationRecord));
         }
     }
 
@@ -297,7 +91,7 @@ void UMD_DayPersistenceSubsystem::CaptureSnapshotInternal(UWorld* World, bool bC
         FMD_PieceRecord Record;
         Record.PieceClass = It->GetClass();
         Record.Transform = It->GetActorTransform();
-        Record.bContaminated = It->bContaminated;
+        Record.bContaminated = false;
         Snapshot.Pieces.Add(Record);
     }
 
@@ -387,8 +181,6 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
 
     // 파일 직렬화 구조에 현재 월드 변경 상태를 복사하는 처리
     OutWorldData = FMD_WorldData();
-    OutWorldData.bHasContaminationSessionSeed=Snapshot.bHasContaminationSessionSeed;
-    OutWorldData.ContaminationSessionSeed=Snapshot.ContaminationSessionSeed;
     OutWorldData.SurvivingWallNames = MoveTemp(Snapshot.SurvivingWallNames);
     OutWorldData.SupportedWallNames = MoveTemp(Snapshot.SupportedWallNames);
     OutWorldData.PendingCollapseWallNames = MoveTemp(Snapshot.PendingCollapseWallNames);
@@ -398,7 +190,6 @@ bool UMD_DayPersistenceSubsystem::BuildWorldSaveData(UWorld* World, FMD_WorldDat
 	OutWorldData.TrashBins = MoveTemp(Snapshot.TrashBins);
 	OutWorldData.bHasTrashGeneratorState = Snapshot.bHasTrashGeneratorState;
 	OutWorldData.TrashGenerators = MoveTemp(Snapshot.TrashGenerators);
-    OutWorldData.WallContaminations = MoveTemp(Snapshot.WallContaminations);
     OutWorldData.PendingContaminationDrops = MoveTemp(Snapshot.PendingContaminationDrops);
     OutWorldData.SurfaceStains = MoveTemp(Snapshot.SurfaceStains);
     OutWorldData.BarnacleRemovals = MoveTemp(Snapshot.BarnacleRemovals);
@@ -491,7 +282,6 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldState(UWorld* World, const FMD_World
             return false;
         }
     }
-    PrepareContaminationContext(World,&WorldData);
 	// 저장 시드는 초기 레벨 지오메트리가 그대로 있을 때 먼저 적용한다. 철거된 벽이나
 	// 동적 액터를 복원한 뒤 재배치하면 같은 시드라도 Trace 후보가 달라질 수 있다.
 	TMap<FName, const FMD_BarnacleRemovalRecord*> BarnacleStatesBySpawnerName;
@@ -524,19 +314,6 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldState(UWorld* World, const FMD_World
             Pair.Value->Destroy();
     }
 
-    // 철거된 벽을 제거한 뒤 살아 있는 모든 표면을 복원용 키로 묶는다.
-    TArray<UMD_ScrapeSurfaceComponent*> ScrapeSurfaces;
-    GatherScrapeSurfaces(World, ScrapeSurfaces);
-    TMap<FName, TArray<UMD_ScrapeSurfaceComponent*>> SurfacesByOwnerName;
-    for (UMD_ScrapeSurfaceComponent* const Surface : ScrapeSurfaces)
-    {
-        if (AActor* const Owner = Surface->GetOwner(); IsValid(Owner))
-        {
-            // 구역이 다른 표면의 오염 복원 기록 혼합 방지
-            SurfacesByOwnerName.FindOrAdd(WorldData.ActorSnapshot.bCaptured == true ? FMD_WorldActorPersistence::GetActorKey(Owner) : Owner->GetFName()).Add(Surface);
-        }
-    }
-
     // 지지된 벽과 지지되지 않은 벽을 모두 저장 상태로 교체
     TSet<FName> SupportedWalls(WorldData.SupportedWallNames);
     // 이전 플레이의 지지 플래그가 남지 않도록 전체 생존 벽 순회
@@ -547,53 +324,6 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldState(UWorld* World, const FMD_World
         {
             // 붕괴나 감점 없이 지지 여부의 양방향 복원
             Pair.Value->RestoreSupportState(SupportedWalls.Contains(Pair.Key));
-        }
-    }
-
-    // 어제 긁은 오염 셀 상태 복원. 이후 ApplyOvernightWorsening이 이 위에 소량 재부착
-    for (const FMD_WallContaminationRecord& Record : WorldData.WallContaminations)
-    {
-        if (UMD_ScrapeSurfaceComponent* const Surface = FindSavedScrapeSurface(Record, SurfacesByOwnerName); Surface != nullptr)
-        {
-            if (Record.LayoutVersion == 1 && !Surface->SelectCompatibleContaminationLayout(Record.LayoutId))
-            {
-                UE_LOG(LogTemp, Error, TEXT("Cannot restore exact saved contamination layout for %s/%s."),
-                    *Record.WallName.ToString(), *Record.SurfaceComponentName.ToString());
-                return false;
-            }
-            if (!Surface->CanRestoreContaminationLayout(
-                    Record.LayoutVersion, Record.LayoutId, Record.GridDimensions)
-                || (Record.LayoutVersion == 1 && !FMD_ScrapeSurfaceLayout::AreCarrierScalesCompatible(
-                    Record.CarrierScale, Surface->GetContaminationCarrierWeightScale())))
-            {
-                UE_LOG(LogTemp, Warning,
-                    TEXT("Skipped contamination restore for %s/%s: saved surface layout no longer matches."),
-                    *Record.WallName.ToString(), *Record.SurfaceComponentName.ToString());
-                continue;
-            }
-            // 로딩 중 분할 복원을 완료한 표면의 중복 복원 방지
-            if (auto* Initializer = World->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); IsValid(Initializer) == true)
-            {
-                // 현재 저장 기록과 일치하는 사전 복원 결과 소비
-                if (Initializer->ConsumePreparedSavedState(*Surface, Record) == true)
-                {
-                    // 이미 적용된 셀과 회수 원장을 유지하고 다음 표면 처리
-                    continue;
-                }
-            }
-            // 모든 현재 표면 기록에 포함된 생성 기준을 셀 복원 전에 적용
-            if (Surface->RestoreContaminationGeneration(Record.Generation, true) == false) return false;
-            // Restore scratch belongs to this wall only, never all walls or all save slots.
-            FMD_WallContaminationRecord Expanded;
-            if (!Record.ExpandCells(Expanded)) return false;
-            Surface->RestoreContaminationCells(
-                Expanded.CellIndices,
-                Expanded.InitialAmounts,
-                Expanded.RemainingAmounts,
-                Expanded.TransferredAmounts,
-                Expanded.TransferredPatternDensities,
-                Expanded.CoveredFractions);
-            if (!Surface->RestoreContaminationBoundary(Record.BoundaryPayload.Get())) return false;
         }
     }
 
@@ -688,7 +418,7 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldState(UWorld* World, const FMD_World
 
     }
 
-    // 미수거 잔해도 저장된 상태로 생명주기 시작
+    // 미수거 잔해는 저장된 위치와 깨끗한 상태로 생명주기 시작
     for (const FMD_PieceRecord& Record : WorldData.Pieces)
     {
         // 루트 기본 배율과 충돌 이동 없이 저장된 잔해 생성
@@ -699,8 +429,8 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldState(UWorld* World, const FMD_World
             // 잔해 복원 실패 전파
             return false;
         }
-        // BeginPlay가 조회할 오염 상태 선행 복원
-        Piece->SetContaminated(Record.bContaminated);
+        // 기존 저장의 오염 플래그를 폐기하고 깨끗한 잔해로 복원
+        Piece->SetContaminated(false);
         // 저장된 상태와 크기로 생성 과정 완료
         Piece->FinishSpawning(Record.Transform, false, nullptr, ESpawnActorScaleMethod::OverrideRootScale);
         // 생성 중 제거된 잔해를 정상 복원으로 인정하지 않도록 검사
@@ -710,7 +440,7 @@ bool UMD_DayPersistenceSubsystem::ApplyWorldState(UWorld* World, const FMD_World
             return false;
         }
         // 생성 스크립트 실행 후에도 최종 저장 상태 유지
-        Piece->SetContaminated(Record.bContaminated);
+        Piece->SetContaminated(false);
         // 생성 스크립트가 변경한 위치와 크기 재확정
         Piece->SetActorTransform(Record.Transform, false, nullptr, ETeleportType::TeleportPhysics);
         // 최종 복원 상태의 네트워크 전송 요청
@@ -806,8 +536,6 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
 
     // 파일 저장과 일차 경계 복원이 같은 월드 상태 적용 경로를 사용하기 위한 데이터 변환
     FMD_WorldData WorldData;
-    WorldData.bHasContaminationSessionSeed=Snapshot.bHasContaminationSessionSeed;
-    WorldData.ContaminationSessionSeed=Snapshot.ContaminationSessionSeed;
     WorldData.SurvivingWallNames = Snapshot.SurvivingWallNames;
     WorldData.SupportedWallNames = Snapshot.SupportedWallNames;
     WorldData.PendingCollapseWallNames = Snapshot.PendingCollapseWallNames;
@@ -817,7 +545,6 @@ bool UMD_DayPersistenceSubsystem::RestoreSnapshot(UWorld* World)
 	WorldData.TrashBins = Snapshot.TrashBins;
 	WorldData.bHasTrashGeneratorState = Snapshot.bHasTrashGeneratorState;
 	WorldData.TrashGenerators = Snapshot.TrashGenerators;
-    WorldData.WallContaminations = Snapshot.WallContaminations;
     WorldData.PendingContaminationDrops = Snapshot.PendingContaminationDrops;
     WorldData.SurfaceStains = Snapshot.SurfaceStains;
     WorldData.BarnacleRemovals = Snapshot.BarnacleRemovals;
@@ -863,17 +590,6 @@ void UMD_DayPersistenceSubsystem::ApplyOvernightWorsening(UWorld* World)
     if (Braces.Num() > 0)
     {
         Braces[FMath::RandRange(0, Braces.Num() - 1)]->Weaken();
-    }
-
-    // 살아남은 일반 표면과 철거벽 표면 일부에 소형 오염 재부착
-    TArray<UMD_ScrapeSurfaceComponent*> ScrapeSurfaces;
-    GatherScrapeSurfaces(World, ScrapeSurfaces);
-    for (UMD_ScrapeSurfaceComponent* const Surface : ScrapeSurfaces)
-    {
-        if (FMath::FRand() < 0.3f)
-        {
-            Surface->ReapplyContaminationPatch(0.6f, 3);
-        }
     }
 
     // 따개비 소량 재부착 (기획 03 §3).
@@ -988,28 +704,4 @@ void UMD_DayPersistenceSubsystem::OverwriteGameData(const FMD_GameData& GameData
         // 실패한 기능의 필드 키 기록
         UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_WorldData::DataFieldKey.ToString());
     }
-}
-
-UMD_ScrapeSurfaceComponent* UMD_DayPersistenceSubsystem::FindSavedScrapeSurface(const FMD_WallContaminationRecord& Record, TMap<FName, TArray<UMD_ScrapeSurfaceComponent*>>& SurfacesByOwnerName)
-{
-    // 저장된 액터 식별자에 속한 현재 표면 목록 조회
-    TArray<UMD_ScrapeSurfaceComponent*>* OwnerSurfaces = SurfacesByOwnerName.Find(Record.WallName);
-    // 제거되거나 저장 당시 존재하지 않은 소유 액터의 표면 조회 종료
-    if (OwnerSurfaces == nullptr || Record.SurfaceComponentName.IsNone() == true)
-    {
-        // 정확한 표면 식별자가 없는 기록 거부
-        return nullptr;
-    }
-    // 현재 형식에 기록된 컴포넌트 이름으로 복원 대상을 특정
-    for (UMD_ScrapeSurfaceComponent* Surface : *OwnerSurfaces)
-    {
-        // 유효하고 활성화된 동일 이름의 표면만 복원 대상으로 반환
-        if (IsValid(Surface) == true && Surface->IsContaminationEnabled() == true && Surface->GetFName() == Record.SurfaceComponentName)
-        {
-            // 현재 저장 키와 일치하는 복원 대상 반환
-            return Surface;
-        }
-    }
-    // 현재 월드에서 대응하는 표면을 찾지 못한 결과 반환
-    return nullptr;
 }

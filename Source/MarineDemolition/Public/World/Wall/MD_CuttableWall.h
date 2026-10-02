@@ -1,18 +1,15 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTagAssetInterface.h"
 #include "MD_CuttableWall.generated.h"
 
 class UCameraShakeBase;
-class UDecalComponent;
-class UMaterialInterface;
 class UStaticMeshComponent;
-class UMD_ScrapeSurfaceComponent;
 class UNiagaraSystem;
 class AMD_CuttableWall;
-class AMD_ContaminationItem;
 class AMD_WallPiece;
 struct FHitResult;
 
@@ -40,13 +37,7 @@ enum class EMD_WallType : uint8
 	Strut UMETA(DisplayName = "지주격벽"),
 };
 
-/**
- * A demolishable wall.
- *
- * Wall demolition remains here. Reusable contamination behavior lives in
- * UMD_ScrapeSurfaceComponent. This actor only keeps serialized Blueprint
- * settings that have not been migrated to the component yet.
- */
+/** A demolishable wall with cutting, support and scanning behavior. */
 UCLASS()
 class MARINEDEMOLITION_API AMD_CuttableWall : public AActor, public IGameplayTagAssetInterface, public IMD_Scannable
 {
@@ -69,8 +60,6 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|태그")
 	FGameplayTagContainer OwnedGameplayTags;
 
-	virtual void PreRegisterAllComponents() override;
-	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -92,14 +81,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	EMD_WallType GetWallType() const { return WallType; }
 
-	/** Original wall geometry, excluding contamination and shadow-only proxies. */
+	/** Original wall geometry, used for scanning. */
 	UStaticMeshComponent* GetScanMesh() const { return Mesh.Get(); }
-
-	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination")
-	UMD_ScrapeSurfaceComponent* GetScrapeSurfaceComponent() const
-	{
-		return ScrapeSurface.Get();
-	}
 
 	UPROPERTY(BlueprintAssignable, Category = "MD|Wall")
 	FMD_OnStrutCollapsed OnStrutCollapsed;
@@ -158,22 +141,8 @@ public:
 	FMD_CutLocationFilter CutLocationFilter;
 
 protected:
-	virtual void BeginPlay() override;
-
 	UPROPERTY(VisibleAnywhere, Category = "MD|Wall")
 	TObjectPtr<UStaticMeshComponent> Mesh;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Decal")
-	TObjectPtr<UDecalComponent> FrontContaminationDecal;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Decal")
-	TObjectPtr<UDecalComponent> BackContaminationDecal;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination")
-	TObjectPtr<UMD_ScrapeSurfaceComponent> ScrapeSurface;
 
 	UPROPERTY(EditAnywhere, Category = "MD|Wall")
 	EMD_WallType WallType = EMD_WallType::Partition;
@@ -208,28 +177,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Collapse")
 	TSubclassOf<UCameraShakeBase> CollapseShakeClass;
 
-	/** Serialized BP values retained until BP_MD_CuttableWall is migrated. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Debris")
-	TSubclassOf<AMD_ContaminationItem> ContaminationItemClass;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Debris",
-		meta = (ClampMin = "0", UIMax = "10"))
-	int32 ContaminationItemsPerFace = 3;
-
-	/** Legacy authored mode is retained for pre-default-change saves only. */
-    UPROPERTY()
-    bool bUseProceduralContamination = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Procedural",
-        meta = (DisplayName = "Full Contamination"))
-    bool bForceFullContamination = false;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Decal")
-	TObjectPtr<UMaterialInterface> ContaminationDecalMaterial;
-
 	/** 철거 완료 순간 벽 중심에 재생할 원샷 버스트 (NS_Cutter_Finish) */
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|VFX")
 	TObjectPtr<UNiagaraSystem> DemolishEffect;
@@ -252,10 +199,7 @@ protected:
 
 private:
 
-	void SyncLegacySurfaceConfiguration();
-	void CutFromHit(AActor* Cutter, const FHitResult* WallHit);
-	float ResolveCutSurfaceCleanRatio(const FHitResult* WallHit);
-	void CompleteCutWithCleanRatio(AActor* Cutter, float CutSurfaceCleanRatio);
+	void CompleteCut(AActor* Cutter);
 	void CollapseIfUnsupported(AActor* ResponsibleActor);
 	void TriggerUnsupportedCollapse(AActor* Cutter);
 

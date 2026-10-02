@@ -23,7 +23,6 @@ struct FMD_PreparedSlotWrite
     TArray<uint8> PayloadHeader;
     TArray<uint8> Metadata;
     TArray<uint8> Manifest;
-    TArray<FMD_ContaminationSavePayload> Payloads;
     // 게시 이후 현재 및 복구 세대에서 계속 사용하는 개별 파일 식별자
     TSet<FString> RetainedPayloadIds;
     // 이번 요청에서 생성한 본문만 실패 시 회수하기 위한 소유 상태
@@ -38,6 +37,39 @@ namespace
     constexpr int32 DigestBytes = 20;
     constexpr int32 MaxStoredSaveSlots = 1024;
     constexpr int64 MaxMetadataBytes = 16 * 1024 * 1024;
+    // Schema 1 files may end with retired wall-cell chunks. Consume their framing
+    // without allocating or decoding obsolete gameplay state.
+    bool SkipRetiredWallPayload(FArchive& Reader, const int64 PayloadEnd)
+    {
+        constexpr int32 CellsPerChunk = 4096;
+        constexpr int32 BytesPerCell = 24;
+        constexpr int32 MaximumLegacyCells = 2 * 1024 * 1024;
+        constexpr int64 PayloadHeaderBytes = 2 * sizeof(uint8) + 2 * sizeof(int32);
+        constexpr int64 ChunkHeaderBytes = 4 * sizeof(uint32);
+        if (Reader.Tell() < 0 || PayloadEnd - Reader.Tell() < PayloadHeaderBytes) return false;
+        uint8 Version = 0, Fields = 0;
+        int32 CellCount = 0, ChunkCount = 0;
+        Reader << Version << CellCount << Fields << ChunkCount;
+        if (Reader.IsError() || Version != 1 || Fields != 31 || CellCount < 0
+            || CellCount > MaximumLegacyCells
+            || ChunkCount != FMath::DivideAndRoundUp(CellCount, CellsPerChunk)) return false;
+        for (int32 Index = 0; Index < ChunkCount; ++Index)
+        {
+            if (PayloadEnd - Reader.Tell() < ChunkHeaderBytes) return false;
+            int32 RawBytes = 0, StoredBytes = 0;
+            uint32 Crc = 0;
+            bool bCompressed = false;
+            Reader << RawBytes << Crc << bCompressed << StoredBytes;
+            const int32 ExpectedRows = FMath::Min(CellsPerChunk, CellCount - Index * CellsPerChunk);
+            if (Reader.IsError() || RawBytes != ExpectedRows * BytesPerCell
+                || StoredBytes <= 0 || StoredBytes > RawBytes
+                || (!bCompressed && StoredBytes != RawBytes)
+                || StoredBytes > PayloadEnd - Reader.Tell()) return false;
+            Reader.Seek(Reader.Tell() + StoredBytes);
+            if (Reader.IsError()) return false;
+        }
+        return true;
+    }
     bool EngineHeader(FArchive& Ar, const uint32 ExpectedKind)
     {
         uint32 Magic = FileMagic, Kind = ExpectedKind;
@@ -123,8 +155,6 @@ namespace
             const FArrayProperty* Array = CastField<FArrayProperty>(Property);
             if (!Array) return;
             int32 Limit = (64 * 1024 * 1024) / FMath::Max(1, Array->Inner->GetElementSize());
-            if (Property->GetOwnerStruct() == FMD_WallContaminationRecord::StaticStruct())
-                Limit = 2 * 1024 * 1024;
             int32& Count = *static_cast<int32*>(Data);
             if (Count < 0 || Count > Limit)
             {
@@ -164,7 +194,7 @@ namespace
     bool ExecutePreparedWrite(FMD_PreparedSlotWrite& Prepared)
     {
         TRACE_CPUPROFILER_EVENT_SCOPE(MD_SaveSlots_AsyncDiskWrite);
-        // Only byte buffers, immutable chunk references and paths cross to this worker.
+        // Only serialized byte buffers and paths cross to this worker.
         if (!IFileManager::Get().MakeDirectory(*Prepared.Root, true)) return false;
         {
             TUniquePtr<FArchive> Writer(IFileManager::Get().CreateFileWriter(
@@ -176,9 +206,8 @@ namespace
             int32 Size = Prepared.Metadata.Num();
             *Writer << Size;
             Writer->Serialize(Prepared.Metadata.GetData(), Size);
-            int32 Count = Prepared.Payloads.Num();
+            int32 Count = 0; // retain the Schema 1 envelope; walls no longer have cell payloads
             *Writer << Count;
-            for (FMD_ContaminationSavePayload& Payload : Prepared.Payloads) Payload.Serialize(*Writer);
             if (Writer->IsError() || !Writer->Close()) return false;
         }
         // 본문과 소유권이 기록된 임시 인덱스의 내구성 쓰기 실패 확인
@@ -675,23 +704,21 @@ bool FMD_SaveSlotStore::ReadSlot(const FMD_GameData& Summary, FMD_GameData& Out)
         // 월드 필드가 없거나 다른 타입인 파일 거부
         return false;
     }
-    // 타입을 검증한 월드 필드의 본문 연결 대상 조회
-    FMD_WorldData* World = Field->GetMutablePtr<FMD_WorldData>();
-    // 월드의 표면 기록 수와 비교할 본문 개수 준비
+    // 기존 Schema 1 파일의 벽 오염 본문은 읽기 경계만 확인하고 폐기한다.
     int32 Count = 0;
-    // 저장된 압축 셀 본문 개수 조회
+    const int64 PayloadEnd = Reader->TotalSize() - DigestBytes;
+    constexpr int64 PayloadCountBytes = sizeof(int32);
+    if (PayloadEnd - Reader->Tell() < PayloadCountBytes) return false;
     *Reader << Count;
-    // 표면 기록과 본문 개수가 다른 파일의 부분 복원 차단
-    if (Reader->IsError() == true || Count != World->WallContaminations.Num())
+    constexpr int64 MinimumRetiredPayloadBytes = 2 * sizeof(uint8) + 2 * sizeof(int32);
+    if (Reader->IsError() == true || Count < 0
+        || Count > (PayloadEnd - Reader->Tell()) / MinimumRetiredPayloadBytes)
     {
-        // 압축 본문 개수 불일치 반환
         return false;
     }
-    // 각 표면 기록에 해당하는 압축 셀 본문 복원
-    for (FMD_WallContaminationRecord& Record : World->WallContaminations)
+    for (int32 Index = 0; Index < Count; ++Index)
     {
-        // 표면별 압축 본문 읽기
-        Record.CellPayload.Serialize(*Reader);
+        if (!SkipRetiredWallPayload(*Reader, PayloadEnd)) return false;
     }
     // 파일 경계와 요약 식별 정보 및 전체 저장 구조 검증
     if (Reader->IsError() == true || Reader->Tell() != Reader->TotalSize() - DigestBytes || Loaded.UniqueName != Summary.UniqueName
@@ -734,18 +761,6 @@ bool FMD_SaveSlotStore::PrepareSave(const FMD_GameData& Data, bool bAuto, int32 
     Out.Root = Root;
     Out.PayloadPath = FPaths::Combine(Root, Id + TEXT(".mdslot"));
     FMD_GameData Metadata = Data;
-    if (FInstancedStruct* Field = Metadata.DataFields.Find(FMD_WorldData::DataFieldKey))
-    {
-        FMD_WorldData* World = Field->GetMutablePtr<FMD_WorldData>();
-        if (!World) return false;
-        Out.Payloads.Reserve(World->WallContaminations.Num());
-        for (FMD_WallContaminationRecord& Record : World->WallContaminations)
-        {
-            if (!Record.CompactCells()) return false;
-            Out.Payloads.Add(Record.CellPayload);
-            Record.CellPayload = FMD_ContaminationSavePayload();
-        }
-    }
     {
         FMemoryWriter Header(Out.PayloadHeader, true);
         if (!EngineHeader(Header, 1)) return false;

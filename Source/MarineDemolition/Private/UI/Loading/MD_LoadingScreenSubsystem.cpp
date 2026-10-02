@@ -1,9 +1,8 @@
-﻿#include "UI/Loading/MD_LoadingScreenSubsystem.h"
+#include "UI/Loading/MD_LoadingScreenSubsystem.h"
 #include "World/Wall/MD_WallShadowBatchSubsystem.h"
 
 #include "Engine/Engine.h"
 #include "Gameplay/Loading/MD_MapRegistrationSubsystem.h"
-#include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
 #include "Game/MD_GameStateBase.h"
 #include "Engine/GameInstance.h"
 #include "Engine/GameViewportClient.h"
@@ -260,8 +259,6 @@ EMD_LoadingReadinessBlocker UMD_LoadingScreenSubsystem::CheckWorldReadiness() co
 	}
     if (const auto* Shadows = World->GetSubsystem<UMD_WallShadowBatchSubsystem>(); Shadows && Shadows->IsInitializationPending())
     { return EMD_LoadingReadinessBlocker::SurfaceInitialization; }
-	if (const auto* Initializer = World->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); Initializer && Initializer->IsPending())
-	{ return EMD_LoadingReadinessBlocker::SurfaceInitialization; }
 	if (const auto* GS = World->GetGameState<AMD_GameStateBase>(); GS && !GS->IsWorldInitializationReady())
 	{ return EMD_LoadingReadinessBlocker::SurfaceInitialization; }
 	if (IsAsyncLoading()) { return EMD_LoadingReadinessBlocker::AsyncLoading; }
@@ -293,13 +290,11 @@ bool UMD_LoadingScreenSubsystem::UpdateCoveredWorldRendering()
 {
     UWorld* World = GetWorld();
     UGameViewportClient* Viewport = World ? World->GetGameViewport() : nullptr;
-    const auto* Initializer = World ? World->GetSubsystem<UMD_ScrapeInitializationSubsystem>() : nullptr;
     const auto* Registration = World ? World->GetSubsystem<UMD_MapRegistrationSubsystem>() : nullptr;
     const bool bCovered = Phase == EMD_LoadingPhase::Loading && bViewportWidgetAttached
         && VisualState.IsValid() && VisualState->GetElapsedSeconds() >= MD_LoadingScreen::IntroDurationSeconds;
     const bool bShouldPause = PauseCoveredWorldRendering.GetValueOnGameThread() != 0
-        && bCovered && ((Initializer && Initializer->IsPending())
-            || (Registration && Registration->IsAwaitingHandoffFrame()));
+        && bCovered && Registration && Registration->IsAwaitingHandoffFrame();
     if (PausedWorldViewport.IsValid() && PausedWorldViewport.Get() != Viewport) RestoreWorldRendering();
     if (bShouldPause && Viewport)
     {

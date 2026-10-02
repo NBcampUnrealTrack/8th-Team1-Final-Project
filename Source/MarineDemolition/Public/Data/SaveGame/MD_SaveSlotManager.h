@@ -177,9 +177,6 @@ public:
 	// 목적지 게임 맵의 액터 초기화 이후 임시 데이터 생성 또는 저장 데이터 적용을 완료하는 함수
 	bool ApplyPendingGameDataOperation();
 
-    /** Primes immutable generation inputs before the next-tick world restoration. */
-    void PrepareContaminationForWorld(UWorld* World);
-
     // 복원할 현장과 퀘스트 및 모든 플레이어의 아이템을 엔진 로더로 일괄 준비
     bool PrepareSavedAssets(bool& bReady);
 

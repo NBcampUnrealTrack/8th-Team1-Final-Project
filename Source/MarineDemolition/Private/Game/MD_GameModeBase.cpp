@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Game/MD_GameModeBase.h"
@@ -10,7 +10,6 @@
 #include "Kismet/GameplayStatics.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
-#include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
 #include "Game/MD_GameStateBase.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Player/MD_PlayerController.h"
@@ -36,14 +35,6 @@ AMD_GameModeBase::AMD_GameModeBase()
 void AMD_GameModeBase::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
     Super::InitGame(MapName, Options, ErrorMessage);
-    if (auto* GI=GetGameInstance())
-    {
-        if (auto* Saves=GI->GetSubsystem<UMD_SaveSlotManager>())
-            Saves->PrepareContaminationForWorld(GetWorld());
-        else if (auto* Persistence=GI->GetSubsystem<UMD_DayPersistenceSubsystem>())
-            Persistence->PrepareContaminationContext(GetWorld());
-    }
-
     // 출발 콘솔이 전달한 난이도 옵션만 계약 난이도로 인정하기 위한 원문 검사
     FString DifficultyOption = UGameplayStatics::ParseOption(Options, TEXT("Difficulty"));
     if (DifficultyOption.IsEmpty() == false)
@@ -208,14 +199,6 @@ void AMD_GameModeBase::ApplyPendingGameDataOperation()
             // 구역 로딩을 막지 않는 다음 프레임 재시도
             GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
             // 현재 프레임의 데이터 적용 연기
-            return;
-        }
-        // 추가 구역을 포함한 모든 오염 표면의 초기화 완료 대기
-        if (auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); IsValid(Initializer) == true && Initializer->IsPending() == true)
-        {
-            // 신규 구역 표면의 준비를 다음 프레임에서 재확인
-            GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::ApplyPendingGameDataOperation);
-            // 오염 초기화 중 월드 복원 중단
             return;
         }
         // 작업 소비 전에 파일 복원과 새 출항 및 다음 일차 전환을 구분할 요청 보관
@@ -810,7 +793,6 @@ void AMD_GameModeBase::HandleContractCleared()
         GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
     {
         Persistence->ClearSnapshot();
-        Persistence->ResetContaminationContext();
     }
 
     TravelToLevel(ClearedLevel);
@@ -823,7 +805,6 @@ void AMD_GameModeBase::HandleGameOver()
         GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
     {
         Persistence->ClearSnapshot();
-        Persistence->ResetContaminationContext();
     }
 
     // 게임오버 시에만 전체 리셋 (크레딧·계약)
@@ -1140,12 +1121,6 @@ void AMD_GameModeBase::InitializeExpeditionDay()
         return;
     }
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_GameMode_InitializeExpeditionDay);
-    if (const auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); Initializer && Initializer->IsPending())
-    {
-        // Auto-save and contract setup must never capture a partially prepared world.
-        GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
-        return;
-    }
     // 파일 복원은 이미 적용됐으므로 다음 일차 경계에서만 스냅샷을 복원한다.
     if (bRestoredSavedWorld == false)
     {
