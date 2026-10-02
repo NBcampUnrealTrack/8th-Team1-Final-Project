@@ -307,14 +307,6 @@ void AMD_SampleItem::HandleMeshHit(UPrimitiveComponent* HitComponent, AActor* Ot
 	// 파괴 임계 이상이면 즉시 파괴, 손상 임계 이상이면 손상만 (기획 02 §4 손 운반 리스크)
 	if (ImpactSpeed >= BreakImpactSpeed)
 	{
-		if (UGameInstance* GameInstance = GetGameInstance())
-		{
-			if (UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>())
-			{
-				Merchant->NotifySampleDestroyed(QuestDefinitionId, Grade);
-			}
-		}
-
 		MulticastSpawnBreakDebris();
 		Destroy();
 		return;

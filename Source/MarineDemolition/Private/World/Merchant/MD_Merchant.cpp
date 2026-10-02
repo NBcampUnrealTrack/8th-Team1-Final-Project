@@ -15,7 +15,6 @@
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Support/MD_SupplyComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
-#include "Data/Merchant/MD_QuestDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Game/MD_GameStateBase.h"
@@ -26,7 +25,8 @@
 #include "Player/MD_PlayerState.h"
 #include "UI/MD_LocalUIManager.h"
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
-#include "UI/Merchant/MD_QuestScreenWidget.h"
+#include "CommonActivatableWidget.h"
+#include "UI/Merchant/MD_LoreQuestTabWidget.h"
 #include "UI/Merchant/MD_ShopWidget.h"
 
 AMD_Merchant::AMD_Merchant()
@@ -103,8 +103,6 @@ void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 		return;
 	}
 
-	// 활성 메인 퀘스트 중 Interaction 목표가 있으면 상인 대화와 함께 페이즈를 전환한다
-	TryAdvanceInteractionQuests(PC);
 
 	// 에디터에서 지정한 상인 메뉴 화면 요청 태그를 검증한다.
 	bool bMenuWidgetTagValid = MenuWidgetTag.IsValid();
@@ -168,36 +166,8 @@ void AMD_Merchant::Interact_Implementation(AActor* Interactor)
 	// 상태 갱신과 하위 화면 연결에 사용할 활성 메뉴를 저장한다.
 	ActiveMenuWidget = Widget;
 
-	// 핫바에 든 회수물(카트리지)은 대화를 열면 자동 납품된다. 리슨 서버 호스트는 응답이 즉시 오므로 메뉴 저장 뒤에 요청한다
-	RequestHotbarQuestDelivery(PC);
 }
 
-void AMD_Merchant::RequestHotbarQuestDelivery(APlayerController* PC)
-{
-	AMD_PlayerController* MDPC = Cast<AMD_PlayerController>(PC);
-	if (IsValid(MDPC) == true)
-	{
-		MDPC->ServerDeliverHotbarQuestItems(this);
-	}
-}
-
-void AMD_Merchant::ReceiveQuestItemDelivery(AMD_PlayerController* Requester, const FText& ItemName, int32 Count)
-{
-	const FText Line = FText::Format(QuestDeliveryDialogue, ItemName, FText::AsNumber(Count));
-
-	// 요청자가 연 대화창이 아직 열려 있으면 그곳에, 아니면 HUD 알림으로 전달한다
-	if (ActiveMenuWidget.IsValid() == true && ActiveMenuWidget->GetOwningPlayer() == Requester)
-	{
-		ActiveMenuWidget->ShowDialogueLine(Line);
-		return;
-	}
-
-	// 로컬 컨트롤러에서 부르는 Client RPC는 그 자리에서 실행된다
-	if (IsValid(Requester) == true)
-	{
-		Requester->ClientShowHUDMessage(Line);
-	}
-}
 
 void AMD_Merchant::HandleMenuExitRequested()
 {
@@ -216,10 +186,11 @@ void AMD_Merchant::HandleMenuExitRequested()
 		ActiveShopWidget->DeactivateWidget();
 	}
 
-	if (ActiveQuestWidget.IsValid() == true)
+	// 열려 있는 기록 화면의 종료 필요 여부 확인
+	if (ActiveLoreScreen.IsValid() == true)
 	{
-		// 실제 상태 정리는 퀘스트 화면의 공통 비활성화 이벤트에서 한 번만 처리한다.
-		ActiveQuestWidget->DeactivateWidget();
+		// 기록 화면의 공통 비활성화 이벤트를 통한 단일 종료 처리
+		ActiveLoreScreen->DeactivateWidget();
 	}
 
 	if (ActiveLoanWidget.IsValid() == true)
@@ -280,49 +251,45 @@ void AMD_Merchant::InitializePushedShop(UMD_ShopWidget* ShopWidget, UMD_Merchant
 	RefreshShopWidgetFromComponent();
 }
 
-void AMD_Merchant::InitializePushedQuest(UMD_QuestScreenWidget* QuestWidget, UMD_MerchantMenuWidget* MenuWidget)
+void AMD_Merchant::InitializePushedLore(UCommonActivatableWidget* LoreScreen, UMD_MerchantMenuWidget* MenuWidget)
 {
-	// Blueprint에서 전달한 퀘스트 화면의 유효성을 확인한다.
-	if (IsValid(QuestWidget) == false)
+	// Blueprint에서 전달한 기록 화면의 유효성을 확인
+	if (IsValid(LoreScreen) == false)
 	{
 		return;
 	}
 
-	// 퀘스트 화면을 연 메뉴의 유효성을 확인한다.
+	// 기록 화면을 연 메뉴의 유효성을 확인
 	if (IsValid(MenuWidget) == false)
 	{
 		return;
 	}
 
-	// 이후 상태 조회가 Blueprint에서 전달한 메뉴와 퀘스트 화면을 사용하도록 저장한다.
+	// 이후 상태 조회가 Blueprint에서 전달한 메뉴와 기록 화면을 사용하도록 저장
 	ActiveMenuWidget = MenuWidget;
-	ActiveQuestWidget = QuestWidget;
+	// 외부 클래스 의존 없이 활성 기록 화면 수명 추적
+	ActiveLoreScreen = LoreScreen;
 
-	// Common UI Stack의 모든 퀘스트 화면 종료 경로에서 상태를 정리하도록 비활성화 이벤트를 연결한다.
-	QuestWidget->OnDeactivated().RemoveAll(this);
-	QuestWidget->OnDeactivated().AddUObject(this, &AMD_Merchant::HandleQuestBackRequested);
+	// Common UI Stack의 모든 기록 화면 종료 경로에서 상태를 정리하도록 비활성화 이벤트를 연결
+	LoreScreen->OnDeactivated().RemoveAll(this);
+	// 비활성화 시 기록 화면의 원장 구독 해제 연결
+	LoreScreen->OnDeactivated().AddUObject(this, &AMD_Merchant::HandleLoreDeactivated);
 
-	// 반복 퀘스트 요청을 실제 상인 처리에 중복 없이 연결한다.
-	QuestWidget->OnRepeatAcceptRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleRepeatAcceptRequested);
-	QuestWidget->OnRepeatDeclineRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleRepeatDeclineRequested);
-	QuestWidget->OnRepeatAbandonRequested.AddUniqueDynamic(this, &AMD_Merchant::HandleRepeatAbandonRequested);
 
-	// 상인 퀘스트 상태가 바뀔 때 열린 화면을 갱신하도록 구독한다.
+	// 상인 상태가 바뀔 때 열린 화면을 갱신하도록 구독
 	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
-	if (MerchantComponent != nullptr)
+	if (IsValid(MerchantComponent) == true)
 	{
 		MerchantComponent->OnMerchantStateChanged.AddUniqueDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
 	}
 
-	// 로어 수집 원장이 바뀔 때 열린 로어 탭을 갱신하도록 구독한다.
+	// 로어 수집 원장이 바뀔 때 열린 로어 탭을 갱신하도록 구독
 	UMD_LoreComponent* LoreComponent = GetLoreComponent();
-	if (LoreComponent != nullptr)
+	if (IsValid(LoreComponent) == true)
 	{
 		LoreComponent->OnLoreProgressUpdated.AddUniqueDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
 	}
 
-	// 연결을 마친 퀘스트 화면에 현재 복제 상태를 즉시 적용한다.
-	RefreshQuestWidgetFromComponent();
 	RefreshLoreWidgetFromComponent();
 }
 
@@ -576,60 +543,34 @@ void AMD_Merchant::ReceiveShopPurchaseResult(FPrimaryAssetId ItemAssetId, EMD_Sh
 	ActiveMenuWidget->ShowDialogueLine(InvalidPurchaseDialogue);
 }
 
-void AMD_Merchant::HandleQuestBackRequested()
+void AMD_Merchant::HandleLoreDeactivated()
 {
-	// 비활성화된 퀘스트 화면에 남아 있는 상인 연결을 제거한다.
-	UMD_QuestScreenWidget* QuestWidget = ActiveQuestWidget.Get();
-	if (IsValid(QuestWidget) == true)
+	// 비활성화된 기록 화면에 남아 있는 상인 연결을 제거
+	UCommonActivatableWidget* LoreScreen = ActiveLoreScreen.Get();
+	// 살아 있는 기록 화면의 종료 알림 연결 해제
+	if (IsValid(LoreScreen) == true)
 	{
-		QuestWidget->OnDeactivated().RemoveAll(this);
-		QuestWidget->OnRepeatAcceptRequested.RemoveDynamic(this, &AMD_Merchant::HandleRepeatAcceptRequested);
-		QuestWidget->OnRepeatDeclineRequested.RemoveDynamic(this, &AMD_Merchant::HandleRepeatDeclineRequested);
-		QuestWidget->OnRepeatAbandonRequested.RemoveDynamic(this, &AMD_Merchant::HandleRepeatAbandonRequested);
+		// 닫힌 화면에서 이전 상인으로 전달되는 후속 알림 차단
+		LoreScreen->OnDeactivated().RemoveAll(this);
 	}
 
-	// 더 이상 표시되지 않는 퀘스트 화면에 상태를 전달하지 않도록 구독을 해제한다.
+	// 더 이상 표시되지 않는 기록 화면에 상태를 전달하지 않도록 구독을 해제
 	UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
-	if (MerchantComponent != nullptr)
+	if (IsValid(MerchantComponent) == true)
 	{
 		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &AMD_Merchant::HandleMerchantStateChanged);
 	}
 
 	UMD_LoreComponent* LoreComponent = GetLoreComponent();
-	if (LoreComponent != nullptr)
+	if (IsValid(LoreComponent) == true)
 	{
 		LoreComponent->OnLoreProgressUpdated.RemoveDynamic(this, &AMD_Merchant::HandleLoreProgressUpdated);
 	}
 
-	// 비활성화된 Stack 화면을 더 이상 활성 퀘스트 화면으로 취급하지 않는다.
-	ActiveQuestWidget.Reset();
+	// 비활성화된 Stack 화면을 더 이상 활성 기록 화면으로 취급 방지
+	ActiveLoreScreen.Reset();
 }
 
-void AMD_Merchant::HandleRepeatAcceptRequested(int32 QuestIndex)
-{
-	if (AMD_PlayerController* InteractingPC = GetInteractingPlayerController())
-	{
-		InteractingPC->ServerAcceptRepeat(QuestIndex);
-	}
-}
-
-void AMD_Merchant::HandleRepeatDeclineRequested(int32 QuestIndex)
-{
-	if (AMD_PlayerController* InteractingPC = GetInteractingPlayerController())
-	{
-		InteractingPC->ServerDeclineRepeat(QuestIndex);
-	}
-}
-
-void AMD_Merchant::HandleRepeatAbandonRequested(int32 QuestIndex)
-{
-	// PlayerController의 반복 퀘스트 포기 요청 Server RPC 함수 호출
-	AMD_PlayerController* InteractingPC = GetInteractingPlayerController();
-	if (IsValid(InteractingPC) == true)
-	{
-		InteractingPC->ServerAbandonRepeatQuest(QuestIndex);
-	}
-}
 
 void AMD_Merchant::HandleMerchantStateChanged()
 {
@@ -639,7 +580,6 @@ void AMD_Merchant::HandleMerchantStateChanged()
 		ActiveMenuWidget->SetMenuInfo(MerchantComponent->BuildMenuInfo());
 	}
 
-	RefreshQuestWidgetFromComponent();
 	RefreshLoanWidgetFromComponent();
 }
 
@@ -648,45 +588,11 @@ void AMD_Merchant::HandleLoreProgressUpdated()
 	RefreshLoreWidgetFromComponent();
 }
 
-void AMD_Merchant::RefreshQuestWidgetFromComponent()
-{
-	if (!ActiveQuestWidget.IsValid())
-	{
-		return;
-	}
-
-	const UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
-	if (!IsValid(MerchantComponent))
-	{
-		return;
-	}
-
-	// 현재 일차와 일치하는 메인 퀘스트를 찾기 위한 복제 상태 조회
-	int32 CurrentDay = MerchantComponent->GetCurrentDay();
-	TArray<FMD_MainQuestState> MainQuests = MerchantComponent->GetMainQuests();
-	TArray<FMD_MainQuestState> CurrentDayMainQuests;
-
-	// 잠긴 미래 퀘스트와 이전 일차 퀘스트를 제외하고 당일 메인 퀘스트 한 건만 전달
-	for (FMD_MainQuestState& MainQuest : MainQuests)
-	{
-		// 현재 일차가 아니거나 잠긴 퀘스트를 함께 제외
-		if (MainQuest.UnlockDay != CurrentDay || MainQuest.Status == EMD_MainQuestStatus::Locked)
-		{
-			continue;
-		}
-
-		CurrentDayMainQuests.Add(MainQuest);
-		break;
-	}
-
-	// 퀘스트 화면에는 당일 진행 대상 메인 퀘스트만 적용
-	ActiveQuestWidget->SetMainQuests(CurrentDayMainQuests);
-	ActiveQuestWidget->SetRepeatQuests(MerchantComponent->GetRepeatQuests());
-}
 
 void AMD_Merchant::RefreshLoreWidgetFromComponent()
 {
-	if (ActiveQuestWidget.IsValid() == false)
+	// 닫힌 기록 화면으로의 수집 정보 전달 차단
+	if (ActiveLoreScreen.IsValid() == false)
 	{
 		return;
 	}
@@ -713,8 +619,13 @@ void AMD_Merchant::RefreshLoreWidgetFromComponent()
 		SiteName = ExpeditionSite->SiteName;
 	}
 	// 선택 사이트 이름과 로어 데이터를 함께 전달
-	ActiveQuestWidget->SetLoreData(
-		IsValid(ExpeditionSite) == true ? ExpeditionSite->LoreCatalog : nullptr, LoreComponent->GetDiscoveredLoreAssetIds(), SiteName);
+	UMD_LoreQuestTabWidget* LoreTab = Cast<UMD_LoreQuestTabWidget>(ActiveLoreScreen->GetWidgetFromName(TEXT("WBP_MD_LoreTab")));
+	// 보존한 화면의 기록 탭에만 수집 원장 반영
+	if (IsValid(LoreTab) == true)
+	{
+		// 탐사 현장별 기록과 발견 목록 전달
+		LoreTab->SetLoreData(IsValid(ExpeditionSite) == true ? ExpeditionSite->LoreCatalog : nullptr, LoreComponent->GetDiscoveredLoreAssetIds(), SiteName);
+	}
 }
 
 void AMD_Merchant::RefreshShopWidgetFromComponent()
@@ -734,7 +645,7 @@ void AMD_Merchant::RefreshShopWidgetFromComponent()
 	AMD_PlayerState* InteractingPlayerState = GetInteractingPlayerState();
 	ActiveShopWidget->SetShopInfo(MerchantComponent->BuildMenuInfo());
 	// 구매 이력과 성공한 업그레이드의 소스 구매 금지를 같은 화면에 전달
-	ActiveShopWidget->SetProgress(MerchantComponent->GetQuestCompletions(),
+	ActiveShopWidget->SetProgress(
 		IsValid(InteractingPlayerState) == true ? InteractingPlayerState->GetPurchasedShopItemIds() : TArray<FPrimaryAssetId>(),
 		IsValid(InteractingPlayerState) == true ? InteractingPlayerState->GetBlockedShopItemIds() : TArray<FPrimaryAssetId>());
 }
@@ -755,45 +666,6 @@ void AMD_Merchant::RefreshLoanWidgetFromComponent()
 	ActiveLoanWidget->SetLoanInfo(MerchantComponent->BuildMenuInfo());
 }
 
-void AMD_Merchant::TryAdvanceInteractionQuests(APlayerController* PC)
-{
-	const UMD_MerchantComponent* MerchantComponent = GetMerchantComponent();
-	if (IsValid(MerchantComponent) == false)
-	{
-		return;
-	}
-
-	AMD_PlayerController* MDPC = Cast<AMD_PlayerController>(PC);
-	if (IsValid(MDPC) == false)
-	{
-		return;
-	}
-
-	const TArray<FMD_MainQuestState> CurrentMainQuests = MerchantComponent->GetMainQuests();
-	for (const FMD_MainQuestState& QuestState : CurrentMainQuests)
-	{
-		if (QuestState.IsActive() == false)
-		{
-			continue;
-		}
-
-		// 현재 페이즈의 ObjectiveType이 Interaction인지 원본 에셋에서 확인한다
-		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(QuestState.DefinitionId);
-		if (IsValid(Definition) == false)
-		{
-			continue;
-		}
-
-		EMD_QuestObjectiveType ObjectiveType = Definition->GetObjectiveType(QuestState.CurrentPhaseIndex);
-		if (ObjectiveType != EMD_QuestObjectiveType::Interaction)
-		{
-			continue;
-		}
-
-		// Interaction 목표를 발견하면 서버에 페이즈 전환을 요청한다
-		MDPC->ServerAdvanceMainQuestPhase(QuestState.DefinitionId, QuestState.CurrentPhaseIndex);
-	}
-}
 
 UMD_MerchantComponent* AMD_Merchant::GetMerchantComponent() const
 {

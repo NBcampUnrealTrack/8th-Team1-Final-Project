@@ -685,10 +685,6 @@ bool UMD_SaveSlotManager::PrepareSavedAssets(bool& bReady)
         TArray<FName> PropertiesToSkip = {
             // 소프트 참조가 없는 구매 수량 원장 제외
             GET_MEMBER_NAME_CHECKED(FMD_MerchantData, PurchasedItemAssetCounts),
-            // 별도 ID 조회 대상인 메인 퀘스트 배열 제외
-            GET_MEMBER_NAME_CHECKED(FMD_MerchantData, MainQuests),
-            // 별도 ID 조회 대상인 반복 퀘스트 배열 제외
-            GET_MEMBER_NAME_CHECKED(FMD_MerchantData, RepeatQuests),
             // 소프트 참조가 없는 당일 금액 원장 제외
             GET_MEMBER_NAME_CHECKED(FMD_MerchantData, DailyCreditTotals)
         };
@@ -701,34 +697,6 @@ bool UMD_SaveSlotManager::PrepareSavedAssets(bool& bReady)
             FSoftObjectPath Redirected = AssetManager->GetRedirectedAssetPath(Path);
             // 경로 리다이렉트가 없으면 패키지 로더가 원래 경로 해석
             UniquePaths.Add(Redirected.IsValid() == true ? Redirected : Path);
-        }
-        // 메인과 반복 역할이 공유하는 퀘스트 ID 중복 제거
-        TSet<FPrimaryAssetId> QuestIds;
-        // 메인 퀘스트 복원에 필요한 정의 수집
-        for (const FMD_MainQuestState& Quest : Merchant->MainQuests)
-        {
-            // 등록된 퀘스트 식별자 보관
-            QuestIds.Add(Quest.DefinitionId);
-        }
-        // 반복 퀘스트 복원에 필요한 정의 수집
-        for (const FMD_RepeatQuestState& Quest : Merchant->RepeatQuests)
-        {
-            // 동일 정의의 중복 요청 방지
-            QuestIds.Add(Quest.DefinitionId);
-        }
-        // 실제 등록 경로를 해석한 뒤 로딩 요청에 포함
-        for (FPrimaryAssetId QuestId : QuestIds)
-        {
-            // 객체 로드 없이 등록된 퀘스트 경로 조회
-            FSoftObjectPath Path = AssetManager->GetPrimaryAssetPath(QuestId);
-            // 사라진 필수 퀘스트를 월드 적용 전에 거부
-            if (Path.IsValid() == false)
-            {
-                // 불완전한 퀘스트 복원 차단
-                return false;
-            }
-            // 다른 저장 필드와 공유하는 경로의 중복 제거
-            UniquePaths.Add(Path);
         }
         // 연결되지 않은 플레이어까지 같은 저장의 자산 준비
         for (TPair<FString, FMD_PlayerData>& Entry : Data->PlayerFields)

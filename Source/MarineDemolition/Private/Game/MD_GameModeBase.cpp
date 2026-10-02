@@ -234,7 +234,7 @@ void AMD_GameModeBase::ApplyPendingGameDataOperation()
             }
         }
         EMD_PendingGameDataOperation PendingOperation = SaveSlotManager->GetPendingGameDataOperation();
-        // 파일 불러오기에서 저장된 퀘스트와 시각 유지
+        // 파일 불러오기에서 저장된 계약과 시각 유지
         bRestoredSavedWorld = PendingOperation == EMD_PendingGameDataOperation::LoadGame;
         // 작업 없음은 정상 진입으로 유지하고 실제 복원 실패만 중단
         if (PendingOperation != EMD_PendingGameDataOperation::None && SaveSlotManager->ApplyPendingGameDataOperation() == false)
@@ -251,7 +251,7 @@ void AMD_GameModeBase::ApplyPendingGameDataOperation()
         {
             // 목적지 맵의 일차를 새 계약에 적용할 서버 상태 조회
             AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
-            // 게임 상태가 준비된 출항에서만 새 퀘스트 구성
+            // 게임 상태가 준비된 출항에서만 새 계약 초기화
             if (IsValid(MDGameState) == true)
             {
                 // 다음 틱의 스포너 평가보다 먼저 새 계약 확정
@@ -551,16 +551,14 @@ EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
 
     bDayFinalized = true;
 
-    // 복귀 구역 샘플 제출을 퀘스트 실패 확정보다 먼저 반영하기 위한 마감 순서
+    // 일일 점수 정산에 반영할 플레이어 복귀 상태 확정
     FinalizeReturnStatuses();
-    FinalizeDeliveredSamples();
 
     if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
     {
         if (UMD_MerchantSubsystem* Merchant =
             GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
         {
-            Merchant->ResolveActiveQuestsAtDayEnd(GS->GetCurrentDay());
 
 			// 빚에 대한 이자 측정 및 증가
 			Merchant->ApplyDailyLoanInterest();
@@ -796,7 +794,7 @@ void AMD_GameModeBase::ExecuteDayTransition()
 
 void AMD_GameModeBase::HandleContractCleared()
 {
-    // 클리어 이력 등록 후 남은 반복 퀘스트의 미회수 정산과 같은 현장 재진입 판정을 위한 기존 계약 종료
+    // 클리어 이력 등록 후 같은 현장 재진입을 새 계약으로 판정하기 위한 기존 계약 종료
     UGameInstance* GameInstance = GetGameInstance();
     UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
     if (IsValid(Merchant) == true)
@@ -805,7 +803,7 @@ void AMD_GameModeBase::HandleContractCleared()
         Merchant->FinalizeContract();
     }
 
-    // 진행(크레딧·퀘스트·호감도)은 유지, 현장 3일 스냅샷만 폐기 → 다음 현장은 새로 시작
+    // 진행(크레딧·호감도)은 유지, 현장 3일 스냅샷만 폐기 → 다음 현장은 새로 시작
     if (UMD_DayPersistenceSubsystem* Persistence =
         GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
     {
@@ -910,52 +908,6 @@ void AMD_GameModeBase::FinalizeReturnStatuses()
     }
 }
 
-void AMD_GameModeBase::FinalizeDeliveredSamples()
-{
-    UGameInstance* GameInstance = GetGameInstance();
-    UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
-    if (IsValid(Merchant) == false)
-    {
-        return;
-    }
-
-    // 마감 순간 샘플의 제출 여부를 위치로 판정하기 위한 복귀 구역 목록
-    TArray<AMD_ReturnZone*> ReturnZones;
-    for (TActorIterator<AMD_ReturnZone> It(GetWorld()); It; ++It)
-    {
-        ReturnZones.Add(*It);
-    }
-
-    for (TActorIterator<AMD_SampleItem> It(GetWorld()); It; ++It)
-    {
-        AMD_SampleItem* Sample = *It;
-        // 생성 위치가 복귀 구역과 겹치는 미운반 샘플의 자동 납품 방지
-        if (IsValid(Sample) == false || Sample->HasBeenCarried() == false)
-        {
-            continue;
-        }
-
-        // 복귀 구역 경계 내부에 존재하는 샘플만 자동 제출 대상으로 인정하는 위치 판정
-        FVector SampleLocation = Sample->GetActorLocation();
-        bool bDelivered = ReturnZones.ContainsByPredicate(
-            [&SampleLocation](const AMD_ReturnZone* Zone)
-            {
-                bool bContainsSample = IsValid(Zone) == true && Zone->ContainsPoint(SampleLocation) == true;
-                return bContainsSample;
-            });
-        if (bDelivered == false)
-        {
-            continue;
-        }
-
-        // 통합된 제출 경로에서 액터 검증과 제거가 성공한 경우에만 퀘스트 진행도를 반영한다.
-        bool bSampleDelivered = Merchant->TryDeliverQuestItem(Sample);
-        if (bSampleDelivered == false)
-        {
-            continue;
-        }
-    }
-}
 
 void AMD_GameModeBase::FinalizeDailyScore()
 {
@@ -1160,7 +1112,7 @@ void AMD_GameModeBase::InitializeExpeditionDay()
         // 파일 복원이 아닌 새 출항 및 일차 전환의 계약 동기화
         if (IsValid(RestoredGameState) == true)
         {
-            // 실제 일차가 바뀐 경로의 착수금과 퀘스트 해금 처리
+            // 실제 일차가 바뀐 경로의 착수금 지급 처리
             SyncMerchantToGameDay(RestoredGameState->GetCurrentDay());
         }
     }
@@ -1179,7 +1131,7 @@ void AMD_GameModeBase::InitializeExpeditionDay()
 
     if (auto* GS = GetGameState<AMD_GameStateBase>()) GS->FinishWorldInitialization();
 
-    // 월드 복원과 상인 퀘스트 일차 동기화가 끝난 경계 상태만 자동 저장하는 처리
+    // 월드 복원과 상인 계약 일차 동기화가 끝난 경계 상태만 자동 저장하는 처리
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
     if (bTrashReady && IsValid(SaveSlotManager) == true)
@@ -1282,28 +1234,15 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day, bool bStartNewContract)
 
     // 같은 현장의 다음 일차는 유지하되 로비에서 새로 출항한 계약은 재구성
     UMD_SiteDefinition* CurrentSite = Merchant->GetCurrentSite();
-    // 기존 현장과 일치하더라도 명시적인 새 출항에서는 퀘스트 재추첨
-    if (bStartNewContract == true || CurrentSite != ResolvedSite || Merchant->GetMainQuests().IsEmpty() == true)
+    // 명시적인 새 출항 또는 현장 변경 시 계약 초기화
+    if (bStartNewContract == true || CurrentSite != ResolvedSite)
     {
-        // 이전 수락 및 실패와 진행도를 새 현장의 초기 퀘스트 목록으로 교체
+        // 새 계약의 일차와 착수금 배율 초기화
         Merchant->BeginContract(ResolvedSite);
     }
 
-    bool bShouldBeginDay = Merchant->GetCurrentDay() != Day;
-    if (!bShouldBeginDay)
-    {
-        for (const FMD_MainQuestState& QuestState : Merchant->GetMainQuests())
-        {
-            if (QuestState.UnlockDay <= Day
-                && QuestState.Status == EMD_MainQuestStatus::Locked)
-            {
-                bShouldBeginDay = true;
-                break;
-            }
-        }
-    }
-
-    if (bShouldBeginDay)
+    // 저장된 일차와 다를 때만 착수금을 지급하여 복원 시 중복 지급 방지
+    if (Merchant->GetCurrentDay() != Day)
     {
         // 복원된 GameState의 비상 Day 상태를 착수금 계산에 전달
         AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
