@@ -70,11 +70,6 @@ namespace MDGameplayTags
 		"Carry the interacted actor as a world physics object");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-	  Ability_PlaceSupport,
-	  "Ability.PlaceSupport",
-	  "임시 지지대 설치 어빌리티");
-
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Sample_Grade,
 		"Resource.Sample.Grade",
 		"샘플 등급 분류의 공통 루트");
@@ -260,28 +255,6 @@ namespace MDGameplayTags
 		State_Oxygen_Depleted,
 		"State.Oxygen.Depleted",
 		"산소 0 상태. 잠수중이면 질식 피해 -15/s");
-
-	// For Save Data
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_GameState,
-		"Save.Data.GameState",
-		"저장된 게임 데이터로부터 점수, 인게임 시간 등의 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_Merchant,
-		"Save.Data.Merchant",
-		"저장된 게임 데이터로부터 상인 관련 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_Player,
-		"Save.Data.Player",
-		"저장된 게임 데이터로부터 플레이어 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_World,
-		"Save.Data.World",
-		"저장된 게임 데이터로부터 맵의 변경 사항에 대한 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_Lore,
-		"Save.Data.Lore",
-		"저장된 게임 데이터로부터 영구 누적 로어 진행 정보를 얻는 키");
 
 	// UI
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(

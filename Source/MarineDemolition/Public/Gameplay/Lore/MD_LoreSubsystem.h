@@ -3,10 +3,8 @@
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Data/Lore/MD_LoreCatalog.h"
-#include "Types/Lore/MD_LoreTypes.h"
 #include "MD_LoreSubsystem.generated.h"
 
-struct FMD_GameData;
 
 class UMD_LoreDefinition;
 
@@ -58,29 +56,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	bool IsCatalogComplete(const UMD_LoreCatalog* LoreCatalog) const;
 
-	/** 현재 서버 로어 원장을 저장 필드로 복사하는 함수 */
-	FMD_LoreData GetLoreSaveData() const;
-
-	/** 저장 필드를 변경하지 않고 서버 권한과 구조를 확인하는 함수 */
-	bool CanApplyLoreSaveData(const FMD_LoreData& SaveData) const;
-
-	/** 검증된 저장 필드로 서버 로어 원장을 교체하는 함수 */
-	bool ApplyLoreSaveData(const FMD_LoreData& SaveData);
-
 	/** 복제 미러가 서버 원장 전체를 동일한 순서로 복사하기 위한 조회 함수 */
 	FORCEINLINE const TArray<FPrimaryAssetId>& GetDiscoveredLoreAssetIds() const { return DiscoveredLoreAssetIds; }
 
 protected:
 	/** 클라이언트가 로컬 원장을 변경하지 못하도록 현재 실행 권한을 확인하는 함수 */
 	bool HasServerAuthority() const;
-
-protected:
-    // 소유한 기능 상태를 저장 이벤트의 구조체에 기록하는 함수
-    UFUNCTION()
-    void CollectGameData(UPARAM(ref) FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
-
-    // 전달된 저장 데이터에서 담당 태그의 필드를 찾아 직접 적용하는 함수
-    UFUNCTION()
-    void OverwriteGameData(const FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
 
 };

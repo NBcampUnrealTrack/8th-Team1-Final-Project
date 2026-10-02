@@ -9,7 +9,7 @@
 #include "GameplayEffectComponents/AbilitiesGameplayEffectComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Util/MD_LogUtility.h"
-#include "Types/SaveGame/MD_SaveDataTypes.h"
+#include "Types/Session/MD_PlayerCarryTypes.h"
 
 UMD_EquipHotbarComponent::UMD_EquipHotbarComponent()
 {
@@ -422,8 +422,6 @@ FMD_PlayerData UMD_EquipHotbarComponent::BuildEquipmentSaveData()
 {
 	// 현재 보관 상태를 원본 슬롯과 분리하여 기록할 결과
 	FMD_PlayerData Result;
-	// 파일에 기록할 수 있는 상세 상태로 표시
-	Result.bHasHotbarState = true;
 	// 클라이언트나 초기화되지 않은 보관함의 수집 차단
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false)
 	{
@@ -462,28 +460,6 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(FMD_PlayerData SaveData)
 		// 기존 보관 상태를 유지한 채 실패 반환
 		return false;
 	}
-	// 상세 상태가 없는 기존 파일의 경로 목록을 네 슬롯으로 해석
-	if (SaveData.bHasHotbarState == false)
-	{
-		// 기존 파일에 개인 보관 기록이 없는 경우 기본 지급 유지
-		if (SaveData.HotbarToolList.IsEmpty() == true)
-		{
-			// 실제 적용할 기록 부재의 정상 종료
-			return true;
-		}
-		// 기존 형식의 빈 칸을 포함한 네 위치 확보
-		SaveData.HotbarItems.SetNum(4);
-		// 기록되지 않았던 선택 위치는 현재 유효 위치 유지
-		SaveData.SelectedHotbarSlot = FMath::Clamp(CurrentSlotIndex, 0, 3);
-		// 실제로 저장되어 있던 아이템 경로만 변환
-		for (int32 Index = 0; Index < SaveData.HotbarToolList.Num(); ++Index)
-		{
-			// 동일 슬롯에 저장된 기존 애셋 연결
-			SaveData.HotbarItems[Index].Item = SaveData.HotbarToolList[Index];
-			// 과거 파일에 없던 수량은 기존 복원 정책으로 해석
-			SaveData.HotbarItems[Index].Count = SaveData.HotbarToolList[Index].IsNull() == true ? 0 : 1;
-		}
-	}
 	// 모든 애셋과 상태 검증을 마칠 때까지 원본 보관함 보호
 	TArray<FMD_HotbarToolEntry> RestoredEntries;
 	// 현재 보관함의 네 슬롯 형식 유지
@@ -511,14 +487,6 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(FMD_PlayerData SaveData)
 		}
 		// 도구 전용 충전 규칙 적용 대상 조회
 		UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(Item);
-		// 경로만 있는 기존 파일에는 원래 지급 기준 적용
-		if (SaveData.bHasHotbarState == false && IsValid(Tool) == true)
-		{
-			// 과거 기록에 없던 충전량의 기본값 구성
-			Saved.Charge = Tool->MaxCharge;
-			// 무제한 도구와 일반 충전 도구의 비용 구분
-			Saved.CostPerOnce = Tool->MaxCharge > 0.0f ? Tool->CostPerOnce : 0.0f;
-		}
 		// 도구 수량과 충전 범위 및 사용 비용의 의미 검증
 		if (IsValid(Tool) == true)
 		{

@@ -120,12 +120,6 @@ public:
 	/** GameMode가 원정 계약을 시작할 때 쓴다. DebugSite와 동일 에셋을 넣으면 된다. */
 	UMD_SiteDefinition* GetExpeditionSite() const { return DebugSite; }
 
-	/** 상인 UI에서 반복 퀘스트를 수락할 때 호출한다. */
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
-	void ServerAcceptRepeat(int32 Index);
-
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
-	void ServerDeclineRepeat(int32 Index);
 
 	/** 상점 액터와 품목을 서버에서 다시 검증하도록 요청하는 함수 */
 	UFUNCTION(Server, Reliable)
@@ -158,25 +152,6 @@ public:
 	/** 로딩 화면에 조작 주체 준비 완료를 알린다(하드 트래블/seamless travel 공용). */
 	void NotifyLoadingScreenPlayerReady();
 
-	// 서버에서 반복 퀘스트 포기와 관련 페널티를 처리하도록 요청하는 함수
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
-	void ServerAbandonRepeatQuest(int32 Index);
-
-	/** NPC 상호작용으로 메인 퀘스트 페이즈를 서버에서 전환하도록 요청하는 함수 */
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
-	void ServerAdvanceMainQuestPhase(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex);
-
-	/** 레벨 내 퀘스트 상호작용 오브젝트(카드 등)를 획득했을 때 서버에서 진행도를 올리는 함수 */
-	UFUNCTION(Server, Reliable)
-	void ServerNotifyQuestInteraction(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex);
-
-	/** 모선 상인 대화 시 핫바의 퀘스트 회수물(카트리지 등)을 서버에서 거리 검증 후 활성 메인 퀘스트에 납품하고 핫바에서 차감하는 함수 */
-	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
-	void ServerDeliverHotbarQuestItems(AMD_Merchant* MerchantActor);
-
-	/** 핫바 회수물 납품 결과(품목명·개수)를 요청한 상인의 대사창에 전달하는 응답 진입점 */
-	UFUNCTION(Client, Reliable)
-	void ClientReceiveQuestItemDelivery(AMD_Merchant* MerchantActor, const FText& ItemName, int32 Count);
 
 	// 모선 상인과의 거리 및 대출 한도를 서버에서 검증한 뒤 대출을 실행하는 함수
 	UFUNCTION(Server, Reliable, BlueprintCallable, Category = "MD|Merchant")
@@ -236,8 +211,6 @@ private:
 	UFUNCTION(Exec)
 	void MD_BeginContract();
 
-	UFUNCTION(Exec)
-	void MD_DumpQuests();
 
 public:
 	/**
@@ -321,11 +294,6 @@ private:
 	/** 조준선 우선, 실패하면 반경 내 가장 가까운 파손된 인프라를 찾는다 */
 	AMD_WallUtility* FindUtilityToRepair(float SearchRadiusCm = DefaultCheatSearchRadiusCm) const;
 
-	UFUNCTION(Exec)
-	void MD_AcceptRepeat(int32 Index);
-
-	UFUNCTION(Exec)
-	void MD_DeclineRepeat(int32 Index);
 
 	UFUNCTION(Exec)
 	void MD_Deliver(const FString& GradeName, bool bIntact);

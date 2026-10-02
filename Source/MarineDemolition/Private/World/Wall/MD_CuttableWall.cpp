@@ -230,21 +230,3 @@ void AMD_CuttableWall::OnRep_CutProgress()
 	OnCutProgressChanged.Broadcast(this, ProgressRatio);
 
 }
-
-bool AMD_CuttableWall::RestorePersistentCutSeconds(float Seconds)
-{
-	// 저장 당시 진행량의 손상과 클라이언트 적용 차단
-	if (HasAuthority() == false || FMath::IsFinite(Seconds) == false || Seconds < 0.0f || Seconds > GetRequiredCutSeconds())
-	{
-		// 현재 벽의 절단 상태를 유지한 채 실패 반환
-		return false;
-	}
-	// 절단 완료를 다시 실행하지 않고 누적 진행만 복구
-	CutProgressSeconds = Seconds;
-	// 호스트 진행 표시 갱신
-	OnRep_CutProgress();
-	// 접속 클라이언트의 절단 표시 동기화
-	ForceNetUpdate();
-	// 절단 상태 복원 성공 반환
-	return true;
-}

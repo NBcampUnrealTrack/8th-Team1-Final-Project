@@ -5,8 +5,6 @@
 #include "CoreMinimal.h"
 #include "MD_SubLevelLoadTrigger.generated.h"
 
-struct FMD_StreamingRecord;
-
 UCLASS()
 class MARINEDEMOLITION_API AMD_SubLevelLoadTrigger : public AActor
 {
@@ -52,12 +50,6 @@ protected:
 	TObjectPtr<class ULevelStreamingDynamic> StreamedLevelInstance;
 
 public:
-    // 구역 요청과 실제 액터의 수집 시점을 함께 기록
-    FMD_StreamingRecord BuildPersistenceRecord();
-
-    // 원래 구역 경로와 이름을 검증하고 로드 또는 해제 요청
-    bool RestorePersistenceRecord(const FMD_StreamingRecord& Record);
-
     // 구역 내부 액터를 복원할 수 있는 로드 및 표시 완료 여부
     bool IsPersistentStreamingReady(bool bExpectedLoaded);
 

@@ -6,7 +6,6 @@
 #include "GameplayTagAssetInterface.h"
 #include "MD_QuestRackSpawner.generated.h"
 
-struct FMD_QuestRackRecord;
 class UStaticMesh;
 class UStaticMeshComponent;
 
@@ -58,10 +57,6 @@ public:
 	bool CanCutPadlockFromHit(const FHitResult& Hit) const;
 	/** Called only by the existing server cutter ability. Revalidates equipment and line of sight. */
 	void AddPadlockCutProgress(float WorkSeconds, AActor* Cutter, const FHitResult& Hit);
-	void CaptureRackState(FMD_QuestRackRecord& OutRecord) const;
-	static bool ValidateRackState(const FMD_QuestRackRecord& Record);
-	bool CanRestoreRackState(const FMD_QuestRackRecord& Record) const;
-	bool RestoreRackState(const FMD_QuestRackRecord& Record);
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
 	TObjectPtr<UStaticMeshComponent> RackMesh;
@@ -90,10 +85,9 @@ protected:
 
 private:
 	void ConfigureRackComponents();
-	bool FindActiveRackQuest(FMD_MainQuestState& OutState) const;
 	bool IsAccessRequirementMet() const;
-	AMD_QuestItem* SpawnCartridge(const FMD_MainQuestState& QuestState);
-	void RefreshRackGroup();
+	// 랙에 저장된 물품 구성으로 회수용 카트리지 생성
+	AMD_QuestItem* SpawnCartridge();
 	UFUNCTION() void OnRep_RackState();
 
 	UPROPERTY(ReplicatedUsing=OnRep_RackState) bool bQuestActive = false;

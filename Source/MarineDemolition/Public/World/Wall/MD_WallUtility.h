@@ -10,7 +10,6 @@
 class UBoxComponent;
 class UStaticMeshComponent;
 class AMD_CuttableWall;
-struct FMD_UtilityRecord;
 
 UENUM(BlueprintType)
 enum class EMD_UtilityState : uint8
@@ -33,12 +32,6 @@ public:
 	AMD_WallUtility();
 
 	void SetQuestHighlighted(AActor* Source, bool bHighlighted);
-
-	// 파손과 수리 상태를 점수 처리 없이 보관하는 기록 생성
-	virtual FMD_UtilityRecord BuildPersistenceRecord();
-
-	// 저장된 상태로 설비와 연결된 연출 및 게이트 복원
-	virtual bool RestorePersistenceRecord(FMD_UtilityRecord Record);
 
 	void StopScanFor(AActor* Scanner);
 

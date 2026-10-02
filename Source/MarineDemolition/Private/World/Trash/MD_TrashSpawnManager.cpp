@@ -10,7 +10,15 @@
 #include "World/Trash/MD_TrashFloorPlacementComponent.h"
 #include "World/Trash/MD_TrashItem.h"
 #include "EngineUtils.h"
-#include "Gameplay/Persistence/MD_WorldActorPersistence.h"
+
+namespace
+{
+	// 구역 인스턴스와 액터 이름을 하나의 키로 구성 (옛 월드 퍼시스턴스 키와 동일 형식)
+	FName MakeAuthoredTrashKey(AActor* Actor)
+	{
+		return FName(UWorld::RemovePIEPrefix(Actor->GetLevel()->GetOutermost()->GetName()) + TEXT(":") + Actor->GetName());
+	}
+}
 
 void UMD_TrashSpawnManager::AppendOccupiedTrash(const AMD_TrashSpawnVolume* Requester,
     TArray<FVector>& Positions, TArray<float>& Radii, float& MinimumSpacing) const
@@ -347,7 +355,7 @@ bool UMD_TrashSpawnManager::PrepareRestoreStates(const TArray<FMD_TrashGenerator
 bool UMD_TrashSpawnManager::ReserveAuthoredTrashForRestore(AMD_TrashItem* Item)
 {
 	if (!bReserveAuthoredTrash || !IsValid(Item) || !Item->HasAuthority() || Item->GetOriginGenerator()
-		|| !AuthoredPositions.Contains(FMD_WorldActorPersistence::GetActorKey(Item))) return false;
+		|| !AuthoredPositions.Contains(MakeAuthoredTrashKey(Item))) return false;
 	ReservedTrash.AddUnique(Item);
 	return true;
 }
@@ -392,7 +400,7 @@ bool UMD_TrashSpawnManager::EnableAuthoredFloorTransition()
 	for (TActorIterator<AMD_TrashItem> It(GetWorld()); It; ++It)
 	{
 		if (It->GetOriginGenerator() || !It->HasAuthority()) continue;
-		AuthoredPositions.Add(FMD_WorldActorPersistence::GetActorKey(*It), It->GetActorLocation());
+		AuthoredPositions.Add(MakeAuthoredTrashKey(*It), It->GetActorLocation());
 		Generator->TrashItemClass = It->GetClass();
 		auto& Profiles = Generator->FloorAppearances.FindOrAdd(It->GetTrashKindId());
 		const FName Variant = It->GetTrashVariantId();
@@ -413,7 +421,7 @@ bool UMD_TrashSpawnManager::ConvertAuthoredTrash(const bool bPreserveCells)
 	for (TActorIterator<AMD_TrashItem> It(GetWorld()); It; ++It)
 	{
 		if (It->GetOriginGenerator()) continue;
-		const FVector* Origin = AuthoredPositions.Find(FMD_WorldActorPersistence::GetActorKey(*It));
+		const FVector* Origin = AuthoredPositions.Find(MakeAuthoredTrashKey(*It));
 		// Unknown dynamic/legacy items retain their exact actor snapshot identity.
 		if (!Origin) continue;
 		Items.Add(*It);

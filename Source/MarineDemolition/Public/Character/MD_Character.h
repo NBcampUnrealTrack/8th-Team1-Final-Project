@@ -29,8 +29,6 @@ class UMD_EquipHotbarComponent;
 class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
 class UMD_ItemDefinition;
-class UMD_SupplyComponent;
-class UMD_SupportPlacementComponent;
 class UMD_FoamGunComponent;
 class UMD_OxygenComponent;
 class UMD_ComfortComponent;
@@ -313,12 +311,6 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UPhysicsHandleComponent> PhysicsHandle;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UMD_SupplyComponent> SupplyComponent;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UMD_SupportPlacementComponent> SupportPlacementComponent;
 
 	/** 폼건 충전·탄도 정본·조준 궤적 프리뷰 (기획 08 §4.2) */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")

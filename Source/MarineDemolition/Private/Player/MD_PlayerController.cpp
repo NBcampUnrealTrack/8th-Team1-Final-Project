@@ -593,27 +593,6 @@ void AMD_PlayerController::MD_BeginContract()
 	ServerBeginContract();
 }
 
-void AMD_PlayerController::MD_DumpQuests()
-{
-	UGameInstance* GameInstance = GetGameInstance();
-	if (!IsValid(GameInstance))
-	{
-		return;
-	}
-
-	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
-	if (!IsValid(Merchant))
-	{
-		return;
-	}
-
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] Credits=%d Day=%d"), Merchant->GetCredits(), Merchant->GetCurrentDay());
-	for (const FMD_MainQuestState& Q : Merchant->GetMainQuests())
-	{
-		UE_LOG(LogTemp, Log, TEXT("[Merchant]   Main: %s Status=%d Phase=%d Progress=%d UnlockDay=%d"),
-			*Q.DefinitionId.ToString(), (int32)Q.Status, Q.CurrentPhaseIndex, Q.CurrentProgress, Q.UnlockDay);
-	}
-}
 
 void AMD_PlayerController::BeginPlay()
 {
@@ -700,98 +679,6 @@ void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
 	}
 }
 
-void AMD_PlayerController::ServerAbandonRepeatQuest_Implementation(int32 Index)
-{
-	// 퀘스트 포기에 따른 패널티를 적용할 GameState 얻기
-	AMD_GameStateBase* MDGameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
-	if (IsValid(MDGameState) == false || MDGameState->HasAuthority() == false)
-	{
-		return;
-	}
-
-	// 퀘스트 상태와 경제·호감도 페널티를 관리하는 서버의 상인 매니저 얻기
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == false)
-	{
-		return;
-	}
-
-	// 고정 점수 차감 없이 퀘스트 에셋의 미회수 패널티만 적용하는 포기 처리
-	Merchant->TryAbandonRepeatQuest(Index);
-}
-
-void AMD_PlayerController::ServerAdvanceMainQuestPhase_Implementation(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex)
-{
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == true)
-	{
-		Merchant->TryAdvanceMainQuestPhase(QuestDefinitionId, ExpectedPhaseIndex);
-	}
-}
-
-void AMD_PlayerController::ServerNotifyQuestInteraction_Implementation(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex)
-{
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == true)
-	{
-		Merchant->NotifyInteractionProgress(QuestDefinitionId, ExpectedPhaseIndex);
-	}
-}
-
-void AMD_PlayerController::ServerDeliverHotbarQuestItems_Implementation(AMD_Merchant* MerchantActor)
-{
-	APawn* PlayerPawn = GetPawn();
-	if (IsValid(MerchantActor) == false || IsValid(PlayerPawn) == false)
-	{
-		return;
-	}
-
-	// 대출·상환과 같은 상인 접근 거리 검증
-	if (FVector::DistSquared(PlayerPawn->GetActorLocation(), MerchantActor->GetActorLocation()) > FMath::Square(500.0f))
-	{
-		return;
-	}
-
-	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
-	UMD_EquipHotbarComponent* Hotbar = PlayerPawn->FindComponentByClass<UMD_EquipHotbarComponent>();
-	if (IsValid(MerchantSubsystem) == false || IsValid(Hotbar) == false)
-	{
-		return;
-	}
-
-	// 슬롯을 앞에서부터 훑어 퀘스트 회수물만 납품한다. 차감으로 슬롯이 비어도 인덱스는 유지된다
-	for (int32 SlotIndex = 0; SlotIndex < Hotbar->GetSlotCount(); ++SlotIndex)
-	{
-		UMD_QuestItemDefinition* QuestItem = Cast<UMD_QuestItemDefinition>(Hotbar->GetItemAtSlot(SlotIndex));
-		int32 HeldCount = Hotbar->GetItemCountAtSlot(SlotIndex);
-		if (IsValid(QuestItem) == false || HeldCount <= 0)
-		{
-			continue;
-		}
-
-		int32 DeliveredCount = MerchantSubsystem->TryDeliverQuestItemDefinition(QuestItem, HeldCount);
-		if (DeliveredCount <= 0)
-		{
-			continue;
-		}
-
-		// 진행도는 이미 반영됐으므로 차감 실패는 로그만 남긴다 (도구가 아닌 보관 품목이라 실패 경로는 사실상 없다)
-		if (Hotbar->TryConsumeItem(QuestItem, DeliveredCount) == false)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("[Merchant] 핫바 회수물 차감 실패: %s x%d"), *QuestItem->ItemName.ToString(), DeliveredCount);
-		}
-
-		ClientReceiveQuestItemDelivery(MerchantActor, QuestItem->ItemName, DeliveredCount);
-	}
-}
-
-void AMD_PlayerController::ClientReceiveQuestItemDelivery_Implementation(AMD_Merchant* MerchantActor, const FText& ItemName, int32 Count)
-{
-	if (IsValid(MerchantActor) == true)
-	{
-		MerchantActor->ReceiveQuestItemDelivery(this, ItemName, Count);
-	}
-}
 
 void AMD_PlayerController::ServerBorrowCredits_Implementation(AMD_Merchant* MerchantActor, int32 Amount)
 {
@@ -1025,31 +912,6 @@ void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)
 	Merchant->BeginDay(Day, DebugAdvancePayment, bEmergencyDay);
 }
 
-void AMD_PlayerController::MD_AcceptRepeat(int32 Index)
-{
-	ServerAcceptRepeat(Index);
-}
-
-void AMD_PlayerController::ServerAcceptRepeat_Implementation(int32 Index)
-{
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
-	{
-		Merchant->TryAcceptRepeatQuest(Index);
-	}
-}
-
-void AMD_PlayerController::MD_DeclineRepeat(int32 Index)
-{
-	ServerDeclineRepeat(Index);
-}
-
-void AMD_PlayerController::ServerDeclineRepeat_Implementation(int32 Index)
-{
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
-	{
-		Merchant->TryDeclineRepeatQuest(Index);
-	}
-}
 
 void AMD_PlayerController::MD_Deliver(const FString& GradeName, bool bIntact)
 {

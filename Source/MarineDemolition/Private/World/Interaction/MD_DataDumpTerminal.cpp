@@ -4,7 +4,6 @@
 #include "Data/Equipment/MD_QuestItemDefinition.h"
 #include "GameFramework/PlayerState.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
-#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Net/UnrealNetwork.h"
 #include "Player/MD_PlayerController.h"
 #include "Util/MD_LogUtility.h"
@@ -29,7 +28,6 @@ AMD_DataDumpTerminal::AMD_DataDumpTerminal()
 	DisplayName = LOCTEXT("DefaultDisplayName", "단말");
 	LockedMessage = LOCTEXT("Locked", "전원이 끊겨 있습니다. 전력을 먼저 복구하세요.");
 	BusyMessage = LOCTEXT("Busy", "다른 대원이 덤프 중입니다.");
-	QuestInactiveMessage = LOCTEXT("QuestInactive", "지금은 회수 의뢰가 없습니다.");
 	InventoryFullMessage = LOCTEXT("InventoryFull", "장비 슬롯이 가득 찼습니다. 슬롯을 비운 뒤 다시 시도하세요.");
 	DumpCompletedMessage = LOCTEXT("DumpCompleted", "{0} 획득");
 }
@@ -154,13 +152,6 @@ void AMD_DataDumpTerminal::Interact_Implementation(AActor* Interactor)
 		return;
 	}
 
-	if (bRequireActiveQuest == true && IsQuestPhaseActive() == false)
-	{
-		SendHUDMessage(Pawn, QuestInactiveMessage);
-		return;
-	}
-
-	// 3초를 기다린 뒤에 "가득 참"을 듣지 않도록 시작 전에 미리 검사한다
 	FText FailMessage;
 	if (CanGrantCartridge(Pawn, FailMessage) == false)
 	{
@@ -302,19 +293,6 @@ void AMD_DataDumpTerminal::CompleteDump()
 	bDumped = true;
 	CancelHold();
 
-	// Interaction 페이즈면 진행도를 올린다. 회수(납품) 페이즈면 false가 돌아오고 납품 경로가 나머지를 맡는다
-	if (QuestDefinitionId.IsValid() == true)
-	{
-		UGameInstance* GameInstance = GetGameInstance();
-		UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
-		if (IsValid(Merchant) == true)
-		{
-			const bool bProgressed = Merchant->NotifyInteractionProgress(QuestDefinitionId, PhaseIndex);
-			UE_LOG(MarineDemolition, Log, TEXT("[DataDump] %s: 덤프 완료 — 퀘스트 %s Phase %d 진행도 반영 %s"),
-				*GetName(), *QuestDefinitionId.ToString(), PhaseIndex, bProgressed == true ? TEXT("O") : TEXT("X"));
-		}
-	}
-
 	SendHUDMessage(Pawn, FText::Format(DumpCompletedMessage, CartridgeItem->ItemName));
 	ForceNetUpdate();
 
@@ -322,30 +300,6 @@ void AMD_DataDumpTerminal::CompleteDump()
 	OnDumpStateChanged(true);
 }
 
-bool AMD_DataDumpTerminal::IsQuestPhaseActive() const
-{
-	if (QuestDefinitionId.IsValid() == false)
-	{
-		return true;
-	}
-
-	const UGameInstance* GameInstance = GetGameInstance();
-	const UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
-	if (IsValid(Merchant) == false)
-	{
-		return false;
-	}
-
-	for (const FMD_MainQuestState& QuestState : Merchant->GetMainQuests())
-	{
-		if (QuestState.DefinitionId == QuestDefinitionId)
-		{
-			return QuestState.IsActive() == true && QuestState.CurrentPhaseIndex == PhaseIndex;
-		}
-	}
-
-	return false;
-}
 
 bool AMD_DataDumpTerminal::CanGrantCartridge(APawn* Pawn, FText& OutFailMessage) const
 {

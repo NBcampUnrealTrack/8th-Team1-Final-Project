@@ -113,9 +113,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|DataDump|Quest")
 	int32 PhaseIndex = 0;
 
-	/** true면 해당 퀘스트가 PhaseIndex 페이즈로 활성일 때만 덤프할 수 있다 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|DataDump|Quest")
-	bool bRequireActiveQuest = true;
 
 	/**
 	 * 전원 잠금. true면 덤프 불가. 이름을 bLocked로 유지해야 AMD_WallUtility::LinkedGateActor의
@@ -130,8 +127,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|DataDump|Message")
 	FText BusyMessage;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|DataDump|Message")
-	FText QuestInactiveMessage;
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|DataDump|Message")
 	FText InventoryFullMessage;
@@ -176,8 +171,6 @@ private:
 	/** 홀더가 여전히 살아 있고 단말을 가까이서 보고 있는지 (서버) */
 	bool IsHoldStillValid() const;
 
-	/** QuestDefinitionId가 가리키는 메인 퀘스트가 PhaseIndex 페이즈로 활성인지 (서버) */
-	bool IsQuestPhaseActive() const;
 
 	/** 지급 조건 사전 검사. 실패 사유 메시지를 돌려준다 (서버) */
 	bool CanGrantCartridge(APawn* Pawn, FText& OutFailMessage) const;
