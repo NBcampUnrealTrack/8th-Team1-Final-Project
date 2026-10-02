@@ -7,7 +7,6 @@
 #include "GameplayTagAssetInterface.h"
 #include "MD_QuestRackSpawner.generated.h"
 
-struct FMD_QuestRackRecord;
 class UDecalComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
@@ -72,10 +71,6 @@ public:
 	bool CanCutPadlockFromHit(const FHitResult& Hit) const;
 	/** Called only by the existing server cutter ability. Revalidates equipment and line of sight. */
 	void AddPadlockCutProgress(float WorkSeconds, AActor* Cutter, const FHitResult& Hit);
-	void CaptureRackState(FMD_QuestRackRecord& OutRecord) const;
-	static bool ValidateRackState(const FMD_QuestRackRecord& Record);
-	bool CanRestoreRackState(const FMD_QuestRackRecord& Record) const;
-	bool RestoreRackState(const FMD_QuestRackRecord& Record);
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
 	TObjectPtr<UStaticMeshComponent> RackMesh;

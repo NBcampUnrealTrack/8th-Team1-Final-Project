@@ -13,7 +13,6 @@
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
-#include "Component/Support/MD_SupplyComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Data/Shop/MD_ShopCatalog.h"

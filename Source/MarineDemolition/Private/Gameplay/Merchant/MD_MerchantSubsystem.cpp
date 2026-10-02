@@ -2,7 +2,6 @@
 
 
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
-#include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "Engine/AssetManager.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
@@ -406,82 +405,6 @@ void UMD_MerchantSubsystem::FinalizeContract()
 	OnMerchantStateChanged.Broadcast();
 }
 
-FMD_MerchantData UMD_MerchantSubsystem::GetMerchantSaveData() const
-{
-	// 하나의 수집 시점에 속한 상인 원장만 슬롯에 기록하기 위한 값 복사
-	FMD_MerchantData SaveData;
-	SaveData.bConsumableDiscountActive = bConsumableDiscountActive;
-	SaveData.Credits = Credits;
-	// 보유액과 별개로 당일 정산 분류별 증감 내역 보존
-	SaveData.DailyCreditTotals = DailyCreditTotals;
-	SaveData.DebtBalance = DebtBalance;
-	SaveData.Affinity = Affinity;
-	SaveData.CurrentDay = CurrentDay;
-	SaveData.NextDepositMultiplier = NextDepositMultiplier;
-	// 전체 AssetId별 누적 구매 수량을 현재 세이브 형식으로 복사
-	SaveData.PurchasedItemAssetCounts = PurchasedItemAssetCounts;
-	SaveData.CurrentSite = TSoftObjectPtr<UMD_SiteDefinition>(CurrentSite.Get());
-
-	// UObject 강참조 집합을 파일에 안전한 소프트 경로 목록으로 변환하기 위한 처리
-	for (const TObjectPtr<UMD_SiteDefinition>& ClearedSite : ClearedSites)
-	{
-		if (IsValid(ClearedSite) == true)
-		{
-			SaveData.ClearedSites.Add(TSoftObjectPtr<UMD_SiteDefinition>(ClearedSite.Get()));
-		}
-	}
-
-	return SaveData;
-}
-
-bool UMD_MerchantSubsystem::ApplyMerchantSaveData(const FMD_MerchantData& SaveData)
-{
-	// 클라이언트 적용과 손상된 경제 상태의 부분 적용을 막기 위한 검사
-	if (IsValid(GetWorld()) == false || GetWorld()->GetNetMode() == ENetMode::NM_Client || SaveData.IsStructurallyValid() == false || SaveData.AreAssetsValid() == false)
-	{
-		return false;
-	}
-
-	// 현재 현장 애셋을 먼저 검증하여 실패 시 기존 서버 원장을 유지하기 위한 선행 로드
-	UMD_SiteDefinition* LoadedCurrentSite = SaveData.CurrentSite.IsNull() == true ? nullptr : FMD_MerchantData::ResolveSite(SaveData.CurrentSite);
-	if (SaveData.CurrentSite.IsNull() == false && IsValid(LoadedCurrentSite) == false)
-	{
-		return false;
-	}
-
-	// 클리어 현장 경로를 임시 집합에 모두 구성한 뒤 한 번에 교체하기 위한 처리
-	TSet<TObjectPtr<UMD_SiteDefinition>> LoadedClearedSites;
-	for (const TSoftObjectPtr<UMD_SiteDefinition>& ClearedSitePath : SaveData.ClearedSites)
-	{
-		UMD_SiteDefinition* ClearedSite = ClearedSitePath.IsNull() == true ? nullptr : FMD_MerchantData::ResolveSite(ClearedSitePath);
-		if (IsValid(ClearedSite) == false)
-		{
-			return false;
-		}
-
-		LoadedClearedSites.Add(ClearedSite);
-	}
-
-	// 모든 참조 검증 이후 경제·호감도 원장을 한 번에 교체하는 처리
-	bConsumableDiscountActive = SaveData.bConsumableDiscountActive;
-	Credits = SaveData.Credits;
-	// 보상이나 소비 이벤트 없이 당일 수입과 지출 원장 복원
-	DailyCreditTotals = SaveData.DailyCreditTotals;
-	DebtBalance = SaveData.DebtBalance;
-	Affinity = SaveData.Affinity;
-	CurrentDay = SaveData.CurrentDay;
-	NextDepositMultiplier = SaveData.NextDepositMultiplier;
-	// 검증된 저장 원장의 전체 AssetId별 구매 수량 복원
-	PurchasedItemAssetCounts = SaveData.PurchasedItemAssetCounts;
-	CurrentSite = LoadedCurrentSite;
-
-
-	ClearedSites = MoveTemp(LoadedClearedSites);
-	OnMerchantStateChanged.Broadcast();
-
-	return true;
-}
-
 
 void UMD_MerchantSubsystem::AddCreditsInternal(EMD_DailyReportCategory Category, int32 Amount)
 {
@@ -547,72 +470,10 @@ void UMD_MerchantSubsystem::ResetContract()
 
 void UMD_MerchantSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-    // 엔진 서브시스템 초기화 수행
     Super::Initialize(Collection);
-    // 저장 관리자보다 먼저 구독을 시도하지 않도록 초기화 의존성 지정
-    Collection.InitializeDependency<UMD_SaveSlotManager>();
-    // 기능별 데이터 소유자를 등록할 저장 관리자 조회
-    UMD_SaveSlotManager* SaveSlotManager = GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>();
-    // 저장 관리자가 유효한 경우에만 현재 서브시스템 연결
-    if (IsValid(SaveSlotManager) == true)
-    {
-        // 소유 데이터 수집 이벤트 구독
-        SaveSlotManager->OnCollectGameData.AddUniqueDynamic(this, &ThisClass::CollectGameData);
-        // 소유 데이터 적용 이벤트 구독
-        SaveSlotManager->OnOverwriteGameData.AddUniqueDynamic(this, &ThisClass::OverwriteGameData);
-    }
 }
 
 void UMD_MerchantSubsystem::Deinitialize()
 {
-    // 종료 중인 게임 인스턴스의 저장 관리자 조회 준비
-    UGameInstance* GameInstance = GetGameInstance();
-    // 게임 인스턴스가 남아 있는 경우에만 관리자 조회
-    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-    // 종료한 서브시스템이 다음 저장 요청에 참여하지 않도록 구독 해제
-    if (IsValid(SaveSlotManager) == true)
-    {
-        // 소유 데이터 수집 연결 해제
-        SaveSlotManager->OnCollectGameData.RemoveDynamic(this, &ThisClass::CollectGameData);
-        // 소유 데이터 적용 연결 해제
-        SaveSlotManager->OnOverwriteGameData.RemoveDynamic(this, &ThisClass::OverwriteGameData);
-    }
-    // 엔진 서브시스템 종료 수행
     Super::Deinitialize();
-}
-
-void UMD_MerchantSubsystem::CollectGameData(FMD_GameData& GameData, bool& bWasSuccessful)
-{
-    // 현재 기능 원장을 자신의 저장 태그 필드에 기록
-    if (GameData.AddDataField(FMD_MerchantData::DataFieldKey, GetMerchantSaveData()) == false)
-    {
-        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
-        bWasSuccessful = false;
-        // 실패한 기능의 필드 키 기록
-        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_MerchantData::DataFieldKey.ToString());
-    }
-}
-
-void UMD_MerchantSubsystem::OverwriteGameData(const FMD_GameData& GameData, bool& bWasSuccessful)
-{
-    // 전달된 읽기 전용 데이터에서 조회할 담당 필드
-    const FMD_MerchantData* SaveData = GameData.FindDataField<FMD_MerchantData>(FMD_MerchantData::DataFieldKey);
-    // 전달된 데이터에서 자신의 태그에 해당하는 필드 조회
-    if (SaveData == nullptr)
-    {
-        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
-        bWasSuccessful = false;
-        // 실패한 기능의 필드 키 기록
-        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_MerchantData::DataFieldKey.ToString());
-        // 필드 조회 실패 시 복원 API 호출 차단
-        return;
-    }
-    // 조회를 마친 필드를 기존 복원 API에 적용
-    if (ApplyMerchantSaveData(*SaveData) == false)
-    {
-        // 다른 구독자의 성공으로 덮어쓰지 않는 현재 요청의 실패 반영
-        bWasSuccessful = false;
-        // 실패한 기능의 필드 키 기록
-        UE_LOG(LogTemp, Warning, TEXT("저장 데이터 처리 실패: %s"), *FMD_MerchantData::DataFieldKey.ToString());
-    }
 }

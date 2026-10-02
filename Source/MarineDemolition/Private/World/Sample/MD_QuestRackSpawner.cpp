@@ -8,7 +8,6 @@
 #include "Components/StaticMeshComponent.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
-#include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -203,8 +202,6 @@ bool AMD_QuestRackSpawner::IsAccessRequirementMet() const
 void AMD_QuestRackSpawner::TrySpawnForQuestState()
 {
 	if (!HasAuthority() || !HasActorBegunPlay() || bRackEndingPlay) return;
-	UMD_SaveSlotManager* Save = GetGameInstance() ? GetGameInstance()->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-	if (Save && (Save->GetPendingGameDataOperation() != EMD_PendingGameDataOperation::None || Save->IsGameDataOperationInProgress())) return;
 	UMD_QuestSampleSpawnerManager* Manager = GetWorld()->GetSubsystem<UMD_QuestSampleSpawnerManager>();
 	if (!Manager || !Manager->RequestSpawnEvaluation(this)) return;
 	// 퀘스트 진행과 무관하게 랙의 물리 접근 조건 활성화

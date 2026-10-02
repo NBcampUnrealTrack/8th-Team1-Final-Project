@@ -3,7 +3,6 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Data/Lore/MD_LoreCatalog.h"
-#include "Types/Lore/MD_LoreTypes.h"
 #include "MD_LoreComponent.generated.h"
 
 class UMD_LoreSubsystem;

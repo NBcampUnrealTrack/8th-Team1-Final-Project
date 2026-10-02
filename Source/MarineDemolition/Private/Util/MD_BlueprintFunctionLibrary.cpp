@@ -4,7 +4,6 @@
 #include "Util/MD_BlueprintFunctionLibrary.h"
 #include "HAL/PlatformApplicationMisc.h"
 #include "Types/Online/MD_SessionTypes.h"
-#include "Types/SaveGame/MD_SaveDataTypes.h"
 
 void UMD_BlueprintFunctionLibrary::CopyTextToClipboard(const FString& CopyString)
 {
@@ -29,13 +28,6 @@ FMD_SessionCreateParams UMD_BlueprintFunctionLibrary::MakeMD_SessionCreateParams
 FMD_SessionFindParams UMD_BlueprintFunctionLibrary::MakeMD_SessionFindParams(FString ServerName, FString RoomCodeString)
 {
 	return FMD_SessionFindParams(ServerName, RoomCodeString);
-}
-
-FMD_GameData UMD_BlueprintFunctionLibrary::MakeMD_GameData(TSoftObjectPtr<UWorld> GameMap)
-{
-	FMD_GameData OutGameData = FMD_GameData();
-	OutGameData.MapPackagePath = GameMap.ToSoftObjectPath().GetLongPackageName();
-	return OutGameData;
 }
 
 FString UMD_BlueprintFunctionLibrary::GetMapPackagePath(TSoftObjectPtr<UWorld> InMap)

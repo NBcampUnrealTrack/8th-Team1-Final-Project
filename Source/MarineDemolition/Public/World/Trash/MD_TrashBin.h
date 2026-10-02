@@ -19,7 +19,6 @@ class APawn;
 class AMD_TrashDispenser;
 class AMD_WetContaminationPatch;
 
-struct FMD_TrashBinRecord;
 
 struct FMD_CarryFrozenContent
 {
@@ -194,12 +193,6 @@ public:
 
 	/** 성공한 spill transaction의 prepared sequence만 한 번 확정한다. */
 	bool CommitNextSpillSequence(uint64 PreparedSequence);
-
-	/** 서버 원장을 Day/파일 저장 공통 record로 값 변경 없이 내보낸다. */
-	bool BuildPersistenceRecord(FMD_TrashBinRecord& OutRecord);
-
-	/** 저장 record의 ID·액체 쌍·전체 lots·revision·sequence를 exact 복원한다. */
-	bool RestorePersistenceRecord(const FMD_TrashBinRecord& Record);
 
 	/** 현재 여유와 요청량을 함께 적용해 헤라에서 실제로 받을 수 있는 Load를 계산한다. */
 	float GetAcceptableScrapeLoad(float RequestedLoadAmount) const;

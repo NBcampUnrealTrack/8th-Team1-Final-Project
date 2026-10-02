@@ -128,12 +128,6 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Cut")
 	void AddCutProgress(float DeltaSeconds, AActor* Cutter);
 
-	// 절단 완료 효과 없이 누적량만 파일에 보관하기 위한 조회
-	FORCEINLINE float GetPersistentCutSeconds() { return CutProgressSeconds; }
-
-	// 점수와 파괴 이벤트를 발생시키지 않는 절단 진행 복원
-	bool RestorePersistentCutSeconds(float Seconds);
-
 	/** 서버 GA의 마지막 벽 충돌면을 조각 배분까지 동기 전달한다. */
 	void AddCutProgressFromHit(
 		float DeltaSeconds,
