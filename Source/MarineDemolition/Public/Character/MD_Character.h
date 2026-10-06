@@ -120,6 +120,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	UMD_EquipHotbarComponent* GetHotbarComponent() const { return EquipHotbarComponent; }
 
+	// 숫자키와 인벤토리 클릭이 공유하는 조준 종료 및 사용 슬롯 변경
+	UFUNCTION(BlueprintCallable, Category = "Equipment")
+	void SelectHotbarSlot(int32 SlotIndex);
+
 	UFUNCTION(BlueprintPure, Category = "MD|Audio")
 	UMD_AudioRelayComponent* GetAudioRelayComponent() const { return AudioRelayComponent; }
 
@@ -407,7 +411,6 @@ private:
 	void HandleScrapeFocusReleasedInput();
 	void HandleScrapeFocusInputEnded();
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
-	void HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
 	// 조작 설정 키가 반영된 런타임 플레이어 입력 컨텍스트 조회

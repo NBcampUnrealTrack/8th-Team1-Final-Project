@@ -1185,7 +1185,8 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 		{
 			continue;
 		}
-		EIC->BindAction(SlotAction,ETriggerEvent::Started,this,&AMD_Character::HandleSelectHotbarSlotInput,SlotIndex);
+		// 슬롯 단축키를 인벤토리와 동일한 장비 선택 경로에 연결
+		EIC->BindAction(SlotAction, ETriggerEvent::Started, this, &AMD_Character::SelectHotbarSlot, SlotIndex);
 	}
 }
 
@@ -1496,20 +1497,26 @@ void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
 	UE_LOG(LogTemp, Log, TEXT("[SwapEquipment] Direction: %s"), ScrollValue > 0.f ? TEXT("Next") : TEXT("Prev"));
 }
 
-void AMD_Character::HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex)
+void AMD_Character::SelectHotbarSlot(int32 SlotIndex)
 {
-	if (!IsValid(EquipHotbarComponent))
+	// 보관함이 없는 캐릭터의 장비 선택 차단
+	if (IsValid(EquipHotbarComponent) == false)
 	{
+		// 연결 전 입력 처리 종료
 		return;
 	}
-	if (SlotIndex == EquipHotbarComponent->GetCurrentSlotIndex())
+	// 범위 밖 입력과 현재 슬롯 재선택에서 진행 중인 도구 동작 유지
+	if (SlotIndex < 0 || SlotIndex >= EquipHotbarComponent->GetSlotCount() || SlotIndex == EquipHotbarComponent->GetCurrentSlotIndex())
 	{
+		// 실제 장비가 바뀌지 않는 요청 종료
 		return;
 	}
+	// 도구 변경 전에 긁기와 폼건 조준 상태 정리
 	HandleScrapeFocusInputEnded();
-
+	// 기존 예측 처리와 서버 요청을 통한 사용 슬롯 변경
 	EquipHotbarComponent->SelectSlot(SlotIndex);
-	UE_LOG(LogTemp, Log, TEXT("[Hotbar] 숫자키 슬롯 선택: %d"), SlotIndex);
+	// 입력 장치와 무관한 최종 선택 위치 기록
+	UE_LOG(LogTemp, Log, TEXT("[Hotbar] 슬롯 선택: %d"), SlotIndex);
 }
 
 void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
