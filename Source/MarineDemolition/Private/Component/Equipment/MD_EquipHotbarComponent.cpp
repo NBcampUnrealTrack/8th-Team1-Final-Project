@@ -779,6 +779,30 @@ bool UMD_EquipHotbarComponent::ConsumeToolCharge(UMD_ToolDefinition* ToolDefinit
 	return true;
 }
 
+float UMD_EquipHotbarComponent::ConsumeToolChargeAmount(UMD_ToolDefinition* ToolDefinition, float Amount)
+{
+	if (!IsValid(GetOwner()) || !GetOwner()->HasAuthority() || !IsValid(ToolDefinition)
+		|| !FMath::IsFinite(Amount) || Amount <= 0.0f
+		|| !FMath::IsFinite(ToolDefinition->MaxCharge) || ToolDefinition->MaxCharge <= 0.0f)
+	{
+		return 0.0f;
+	}
+	const int32 Index = FindItemEntry(ToolDefinition);
+	if (!ToolEntries.IsValidIndex(Index) || GetItemCount(ToolDefinition) <= 0)
+	{
+		return 0.0f;
+	}
+	FMD_HotbarToolEntry& Entry = ToolEntries[Index];
+	if (!FMath::IsFinite(Entry.Charge) || Entry.Charge <= 0.0f)
+	{
+		return 0.0f;
+	}
+	const float Spent = FMath::Min(Amount, Entry.Charge);
+	Entry.Charge -= Spent;
+	NotifyEntriesChanged();
+	return Spent;
+}
+
 bool UMD_EquipHotbarComponent::CanAddToolCharge(UMD_ToolDefinition* ToolDefinition, float Amount)
 {
 	// 충전 설정과 보유 수량 및 잔량을 함께 확인

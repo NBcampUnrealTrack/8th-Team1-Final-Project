@@ -38,6 +38,19 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Contamination", meta = (ClampMin = "1", ClampMax = "10000"))
 	int32 StainRemovalAmount = 100;
 
+	/** Charged scrapers keep working at basic strength after their heat runs out. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Contamination", meta = (ClampMin = "0.01"))
+	float UnchargedBarnacleDamagePerClick = 1.0f;
+
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool|Contamination", meta = (ClampMin = "1", ClampMax = "10000"))
+	int32 UnchargedStainRemovalAmount = 100;
+
+	UFUNCTION(BlueprintPure, Category = "Tool|Contamination")
+	float GetScrapeBarnacleDamage(float RemainingCharge) const;
+
+	UFUNCTION(BlueprintPure, Category = "Tool|Contamination")
+	int32 GetScrapeStainRemovalAmount(float RemainingCharge) const;
+
 	// 절단 진행 속도 배율. 기획 08 §3의 "절단 시간 −35%"(IT-C1)는 속도 배율 약 1.54에 해당한다 (1 / 0.65)
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Tool",
 		meta = (ClampMin = "0.1"))

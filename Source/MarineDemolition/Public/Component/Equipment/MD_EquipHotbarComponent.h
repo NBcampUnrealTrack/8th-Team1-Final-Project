@@ -132,6 +132,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar|Charge")
 	bool ConsumeToolCharge(UMD_ToolDefinition* ToolDefinition);
 
+	/** Consume elapsed operating seconds, including the final partial charge. Returns the amount spent. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar|Charge")
+	float ConsumeToolChargeAmount(UMD_ToolDefinition* ToolDefinition, float Amount);
+
 	// 도구 보유 상태와 충전 상한을 기준으로 보충 가능 여부 확인
 	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")
 	bool CanAddToolCharge(UMD_ToolDefinition* ToolDefinition, float Amount);

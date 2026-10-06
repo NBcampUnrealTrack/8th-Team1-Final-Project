@@ -29,6 +29,7 @@ private:
 	bool CanUseEquippedScraper() const;
 	AActor* TraceTarget() const;
 	void ApplyImpact();
+	void UpdateStrokeCharge();
 	void PlaySwing();
 
 	UFUNCTION(NetMulticast, Unreliable)
@@ -48,5 +49,6 @@ private:
 	TWeakObjectPtr<UMD_ToolDefinition> StrokeTool;
 	FTimerHandle ImpactTimer;
 	double StrokeStartedAt = -10.0;
+	double ChargeUpdatedAt = -10.0;
 	double NextStrokeAllowedAt = 0.0;
 };

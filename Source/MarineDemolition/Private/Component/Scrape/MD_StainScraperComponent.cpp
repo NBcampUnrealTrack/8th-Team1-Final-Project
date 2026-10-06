@@ -36,12 +36,13 @@ bool UMD_StainScraperComponent::CanUseEquippedScraper() const
 
 bool UMD_StainScraperComponent::StartStroke(FGameplayAbilitySpecHandle AbilityHandle)
 {
-	if (!AbilityHandle.IsValid() || !GetWorld() || !CanUseEquippedScraper()
+	if (!AbilityHandle.IsValid() || StrokeAbility.IsValid() || !GetWorld() || !CanUseEquippedScraper()
 		|| !FMath::IsFinite(StrokeDurationSeconds) || StrokeDurationSeconds < 0.2f || StrokeDurationSeconds > 2.0f
 		|| GetWorld()->GetTimeSeconds() < NextStrokeAllowedAt) return false;
 	AMD_Character* Character = CastChecked<AMD_Character>(GetOwner());
 	StrokeAbility = AbilityHandle;
 	StrokeStartedAt = GetWorld()->GetTimeSeconds();
+	ChargeUpdatedAt = StrokeStartedAt;
 	NextStrokeAllowedAt = StrokeStartedAt + StrokeDurationSeconds;
 	StrokeTool = Character->GetHotbarComponent()->GetCurrentTool();
 	PlaySwing();
@@ -73,19 +74,34 @@ AActor* UMD_StainScraperComponent::TraceTarget() const
 		? Hit.GetActor() : nullptr;
 }
 
+void UMD_StainScraperComponent::UpdateStrokeCharge()
+{
+	AMD_Character* Character = Cast<AMD_Character>(GetOwner());
+	UMD_ToolDefinition* Tool = StrokeTool.Get();
+	if (!Character || !Character->HasAuthority() || !GetWorld() || !IsValid(Tool)
+		|| Tool->MaxCharge <= 0.0f || !Character->GetHotbarComponent()) return;
+	// Settle at impact and finish/cancel, without an idle tick or a per-frame UI refresh.
+	const double Now = FMath::Min(double(GetWorld()->GetTimeSeconds()), StrokeStartedAt + StrokeDurationSeconds);
+	const float Elapsed = float(FMath::Max(0.0, Now - ChargeUpdatedAt));
+	ChargeUpdatedAt = Now; // Advance before inventory callbacks can cancel this stroke.
+	if (Elapsed > 0.0f) Character->GetHotbarComponent()->ConsumeToolChargeAmount(Tool, Elapsed);
+}
+
 void UMD_StainScraperComponent::ApplyImpact()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceStain_Impact);
+	UpdateStrokeCharge();
 	AMD_Character* Character = Cast<AMD_Character>(GetOwner());
 	AActor* Target = StrokeTarget.Get();
 	StrokeTarget.Reset(); // Consume before any callback; one stroke cannot hit twice.
 	if (!Character || !Character->HasAuthority() || !CanUseEquippedScraper()
 		|| Character->GetHotbarComponent()->GetCurrentTool() != StrokeTool.Get()) return;
 	if (!IsValid(Target) || TraceTarget() != Target) return;
+	const float Charge = Character->GetHotbarComponent()->GetToolCharge(StrokeTool.Get());
 	if (AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Target))
-		Stain->ApplyScrapeStroke(FMD_SurfaceStainSize::RemovalFromToolStrength(StrokeTool->StainRemovalAmount));
+		Stain->ApplyScrapeStroke(FMD_SurfaceStainSize::RemovalFromToolStrength(StrokeTool->GetScrapeStainRemovalAmount(Charge)));
 	else if (AMD_Barnacle* Barnacle = Cast<AMD_Barnacle>(Target))
-		Barnacle->ApplyScrapeClickDamage(StrokeTool->BarnacleDamagePerClick);
+		Barnacle->ApplyScrapeClickDamage(StrokeTool->GetScrapeBarnacleDamage(Charge));
 }
 
 void UMD_StainScraperComponent::PlaySwing()
@@ -113,13 +129,15 @@ FVector UMD_StainScraperComponent::GetHandSwingOffset() const
 
 void UMD_StainScraperComponent::CancelStroke(bool bCancelAbility)
 {
+	// Release ability ownership before charge-change delegates can re-enter cancellation.
+	const FGameplayAbilitySpecHandle AbilityToCancel = StrokeAbility;
+	StrokeAbility = FGameplayAbilitySpecHandle();
 	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(ImpactTimer);
+	UpdateStrokeCharge();
 	StrokeTarget.Reset();
 	StrokeTool.Reset();
 	StrokeStartedAt = -10.0;
-	// Clear ownership before GAS callbacks can re-enter EndAbility.
-	const FGameplayAbilitySpecHandle AbilityToCancel = StrokeAbility;
-	StrokeAbility = FGameplayAbilitySpecHandle();
+	ChargeUpdatedAt = -10.0;
 	if (bCancelAbility && AbilityToCancel.IsValid())
 	{
 		if (AMD_Character* Character = Cast<AMD_Character>(GetOwner()))

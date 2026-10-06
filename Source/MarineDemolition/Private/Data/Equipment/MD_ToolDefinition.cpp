@@ -5,6 +5,19 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "GameFramework/Actor.h"
 
+float UMD_ToolDefinition::GetScrapeBarnacleDamage(float RemainingCharge) const
+{
+	const bool bUncharged = MaxCharge > 0.0f && (!FMath::IsFinite(RemainingCharge) || RemainingCharge <= 0.0f);
+	const float Damage = bUncharged ? UnchargedBarnacleDamagePerClick : BarnacleDamagePerClick;
+	return FMath::IsFinite(Damage) ? FMath::Max(0.0f, Damage) : 0.0f;
+}
+
+int32 UMD_ToolDefinition::GetScrapeStainRemovalAmount(float RemainingCharge) const
+{
+	const bool bUncharged = MaxCharge > 0.0f && (!FMath::IsFinite(RemainingCharge) || RemainingCharge <= 0.0f);
+	return FMath::Clamp(bUncharged ? UnchargedStainRemovalAmount : StainRemovalAmount, 0, 10000);
+}
+
 bool UMD_ToolDefinition::IsChargeSettingsValid()
 {
 	// 비충전 아이템의 미사용 비용을 제외한 유한 값 및 사용 가능한 범위 검사
