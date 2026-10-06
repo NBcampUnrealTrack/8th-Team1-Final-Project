@@ -54,21 +54,11 @@ void UMD_ExpeditionStatusWidget::UpdateStatusText()
     FText CurrentScoreText = FText::AsNumber(CurrentScore);
     SetTextPair(ScoreText, ScoreText_Shadow, CurrentScoreText);
 
-    // 현재 일차에 난이도와 인원 및 경고 배율이 반영된 목표 점수를 계산한다.
-    int32 CurrentDay = MDGameState->GetCurrentDay();
-    int32 Threshold = MDGameState->GetInspectionThreshold(CurrentDay);
-
-    // 현재 일차의 목표 점수를 본문과 그림자에 동일하게 표시한다.
-    FText ThresholdText = Threshold == 0 ? FText::FromString(TEXT("-")) : FText::AsNumber(Threshold);
-    SetTextPair(GoalText, GoalText_Shadow, ThresholdText);
-
+    // 목표 점수(점검 기준)는 폐지됨. 정리 달성률 표시는 분모 확정 후 연결한다.
+    SetTextPair(GoalText, GoalText_Shadow, FText::FromString(TEXT("-")));
     if (IsValid(ScoreProgress) == true)
     {
-        // 정수 나눗셈으로 목표 미달 진행률이 0이 되지 않도록 실수 비율을 계산한다.
-        float ScorePercent = Threshold > 0 ? static_cast<float>(CurrentScore) / Threshold : 0;
-        // 음수 점수와 목표 초과 점수를 진행 막대의 유효 범위로 보정한다.
-        ScorePercent = FMath::Clamp(ScorePercent, 0.0f, 1.0f);
-        ScoreProgress->SetPercent(ScorePercent);
+        ScoreProgress->SetPercent(0.0f);
     }
 }
 

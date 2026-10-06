@@ -302,7 +302,7 @@ void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole*
 	if (AMD_GameModeBase* GM = GetWorld()->GetAuthGameMode<AMD_GameModeBase>())
 	{
 		// 서버 콘솔에 설정된 보고서를 모든 접속 플레이어에게 표시
-		GM->RequestEndDay(EMD_DayEndReason::Console, Console->GetConsoleWidgetTag());
+		GM->RequestEndDay(Console->GetConsoleWidgetTag());
 	}
 }
 
@@ -768,11 +768,6 @@ void AMD_PlayerController::ServerBeginContract_Implementation()
 	}
 }
 
-void AMD_PlayerController::MD_BeginDay(int32 Day)
-{
-	ServerBeginDay(Day);
-}
-
 AMD_CuttableWall* AMD_PlayerController::FindWallToClean(const float SearchRadiusCm) const
 {
 	UWorld* const World = GetWorld();
@@ -977,33 +972,6 @@ void AMD_PlayerController::ServerRepairUtility_Implementation(AMD_WallUtility* U
 		*Utility->GetName(),
 		*StaticEnum<EMD_UtilityState>()->GetNameStringByValue(
 			static_cast<int64>(Utility->GetUtilityState())));
-}
-
-void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)
-{
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == false)
-	{
-		return;
-	}
-
-	// 실제 맵 재진입 경로처럼 종료된 계약 다음 Day 명령에서 새 디버그 계약을 먼저 구성하는 처리
-	if (Merchant->HasActiveContract() == false)
-	{
-		Merchant->BeginContract(DebugSite);
-	}
-
-	// DebugSite 미설정으로 계약 생성에 실패했을 때 잘못된 Day 상태만 남기지 않기 위한 검사
-	if (Merchant->HasActiveContract() == false)
-	{
-		return;
-	}
-
-	// 실제 Day 시작과 동일하게 GameState의 비상 상태를 디버그 착수금 계산에 전달
-	AMD_GameStateBase* MDGameState = GetWorld()->GetGameState<AMD_GameStateBase>();
-	bool bEmergencyDay = IsValid(MDGameState) == true ? bEmergencyDay = MDGameState->IsEmergencyDay() : false;
-
-	Merchant->BeginDay(Day, DebugAdvancePayment, bEmergencyDay);
 }
 
 

@@ -104,12 +104,6 @@ protected:
     // 숫자 영역별 마지막 값과 지역화된 표시 문자열 재사용
     TMap<TWeakObjectPtr<UTextBlock>, TPair<int64, FText>> AmountTextCache;
 
-    // 동일 날짜의 부제목 재생성 방지를 위한 날짜 캐시
-    TOptional<int32> CachedReportDay;
-
-    // 날짜가 유지되는 동안 재사용할 지역화된 부제목
-    FText CachedReportHeader;
-
     // 경과 시간에 맞춰 점수와 크레딧 합계를 함께 보간
     void UpdateSummaryAnimation();
 

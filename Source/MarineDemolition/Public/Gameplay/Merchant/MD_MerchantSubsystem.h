@@ -45,9 +45,8 @@ protected:
 public:
 
 	int32 GetCredits() const { return Credits; }
-	// 현재 Day의 Enum Map 크레딧 원장을 네트워크 전달용 항목 배열로 반환하는 함수
+	// 계약 동안 누적된 분류별 크레딧 원장을 네트워크 전달용 항목 배열로 반환하는 함수
 	TArray<FMD_DailyReportValue> GetDailyCreditTotals() const;
-	int32 GetCurrentDay() const { return CurrentDay; }
 	// 상점 해금과 대화 분기에 사용하는 현재 호감도를 반환하는 함수
 	float GetAffinity() const { return Affinity; }
 
@@ -94,7 +93,6 @@ public:
 	int32 GetAvailableLoanAmount() const;
 
 	// 기획에서 확정한 일일 대출 이자율을 반환하는 함수
-	float GetDailyInterestRate() const { return DailyInterestRate; }
 
 	// 요청 금액과 현재 한도를 검증한 뒤 크레딧과 부채를 함께 증가시키는 함수
 	bool TryBorrowCredits(int32 Amount);
@@ -102,18 +100,11 @@ public:
 	// 보유 크레딧과 미상환 잔액 범위에서 대출금을 상환하는 함수
 	bool TryRepayLoan(int32 Amount);
 
-	// 일 마감 시 미상환 잔액에 일일 이자를 한 번 합산하고 부과액을 반환하는 함수
-	int32 ApplyDailyLoanInterest();
-
-	// 새 현장 계약과 일차 및 경고 배율 초기화
-	void BeginContract(UMD_SiteDefinition* Site);
+	// 새 현장 계약 시작. 크레딧 원장을 초기화하고 호감도 배율이 반영된 착수금을 지급
+	void BeginContract(UMD_SiteDefinition* Site, int32 BaseAdvancePayment = 0);
 
 	// 게임오버 시 전체 리셋
 	void ResetContract();
-
-	// 다음 정규일 착수금 배율 (경고 0.7 / 비상 0). 착수금 지급 지점에서 소비
-	void SetNextDepositMultiplier(float Multiplier) { NextDepositMultiplier = Multiplier; }
-	float GetNextDepositMultiplier() const { return NextDepositMultiplier; }
 
 	// 소모품 할인 활성 여부 (경고 시 해제). 상점에서 조회
 	void SetConsumableDiscountActive(bool bActive) { bConsumableDiscountActive = bActive; }
@@ -122,9 +113,6 @@ public:
 
 	/** 현재 계약 현장이 과거에 클리어된 적 있는지 저장 이력에서 확인하는 함수 */
 	bool HasClearedCurrentSite() const;
-
-	/** Day 시작 시 호감도와 경고·비상 배율을 반영한 착수금 지급 */
-	void BeginDay(int32 NewDay, int32 BaseAdvancePayment, bool bEmergencyDay);
 
 	/** 계약 클리어 시 호출하여 현장 완료 이력을 남기는 함수 */
 	void MarkSiteCleared();
@@ -154,7 +142,7 @@ private:
 
 	int32 Credits = 0;
 
-	// 현재 Day의 크레딧 증감을 정산 분류별로 누적하는 서버 Map 원장
+	// 계약 동안 크레딧 증감을 정산 분류별로 누적하는 서버 Map 원장
 	TMap<EMD_DailyReportCategory, int64> DailyCreditTotals;
 
 	// 계약과 게임 재시작을 넘어 유지되는 팀 공유 미상환 대출 잔액
@@ -163,11 +151,6 @@ private:
 	// 상점 해금과 대화 분기를 계약 사이에도 유지하기 위한 누적 호감도
 	float Affinity = 0.0f;
 
-	int32 CurrentDay = 0;
-
-	// 다음 정규일 착수금 배율 (1.0 기본)
-	float NextDepositMultiplier = 1.f;
-
 	// 소모품 할인 활성 여부
 	bool bConsumableDiscountActive = true;
 
@@ -175,7 +158,4 @@ private:
 	/** 계약 중 구매 결과와 선행 품목 해금을 유지하기 위한 서버 권위 구매 원장 */
 	UPROPERTY()
 	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
-
-	// 기획상 모든 호감도 구간에 공통으로 적용되는 일일 대출 이자율
-	static constexpr float DailyInterestRate = 0.05f;
 };

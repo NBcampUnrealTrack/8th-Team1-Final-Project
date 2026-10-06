@@ -30,9 +30,8 @@ enum class EMD_LoadingContext : uint8
 	/** 작업을 중단하고 로비로 복귀. */
 	MissionIncomplete,
 	/** 로비에서 팀 이탈. */
-	LeavingCrew,
+	LeavingCrew
 	/** 다음 작업일로 전환. */
-	NextShift
 };
 
 /** 로딩 연출의 진행 단계. 서브시스템은 개별 플래그 대신 이 하나로 상태를 관리한다. */

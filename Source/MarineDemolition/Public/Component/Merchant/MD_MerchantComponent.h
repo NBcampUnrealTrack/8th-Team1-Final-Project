@@ -47,9 +47,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	int32 GetDebtBalance() const { return DebtBalance; }
 
-	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
-	int32 GetCurrentDay() const { return CurrentDay; }
-
 	// 서버 원장에서 복제된 호감도를 UI와 상점 해금 판정에 제공하는 함수
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	float GetAffinity() const { return Affinity; }
@@ -74,9 +71,6 @@ private:
 	// 모든 클라이언트가 같은 대출 잔액과 상환 가능 상태를 표시하기 위한 복제 값
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
 	int32 DebtBalance = 0;
-
-	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
-	int32 CurrentDay = 0;
 
 	// 모든 클라이언트가 같은 상점 해금 상태를 사용하기 위한 복제 호감도
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)

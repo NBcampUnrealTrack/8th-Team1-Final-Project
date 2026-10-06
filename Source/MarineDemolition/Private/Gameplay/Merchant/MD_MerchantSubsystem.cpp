@@ -308,74 +308,9 @@ bool UMD_MerchantSubsystem::TryRepayLoan(int32 Amount)
 	return true;
 }
 
-int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
-{
-	// 빚이 존재하지 않거나 최대값의 경우 추가되는 이자 없음
-	if (DebtBalance <= 0 || DebtBalance == MAX_int32)
-	{
-		return 0;
-	}
-
-	// 기획 예시의 450₡ 대출 이자 23₡과 일치하도록 원 단위 반올림을 적용하는 계산
-	float CalculatedInterest = DebtBalance * DailyInterestRate;
-	int32 InterestAmount = FMath::Clamp(CalculatedInterest, 1, MAX_int32 - DebtBalance);	// 이자 값 보정
-	if (InterestAmount <= 0)
-	{
-		return 0;
-	}
-
-	// 빚에 이자 추가
-	DebtBalance += InterestAmount;
-	OnMerchantStateChanged.Broadcast();
-
-	// 추가된 이자 값 반환
-	return InterestAmount;
-}
-
-void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site)
-{
-	if (IsValid(Site) == false)
-	{
-		return;
-	}
-
-	CurrentSite = Site;
-	CurrentDay = 0;
-
-	// 새 계약이므로 경고 모디파이어 초기화
-	NextDepositMultiplier = 1.f;
-	bConsumableDiscountActive = true;
-
-
-	OnMerchantStateChanged.Broadcast();
-}
-
 bool UMD_MerchantSubsystem::HasClearedCurrentSite() const
 {
 	return IsValid(CurrentSite) && ClearedSites.Contains(CurrentSite);
-}
-
-void UMD_MerchantSubsystem::BeginDay(int32 NewDay, int32 BaseAdvancePayment, bool bEmergencyDay)
-{
-	// 잘못된 설정값으로 팀 크레딧이 차감되지 않도록 기본 착수금을 0 이상으로 제한
-	int32 ValidBaseAdvancePayment = FMath::Max(BaseAdvancePayment, 0);
-
-	// 높은 호감도는 착수금을 10% 늘리고 낮은 호감도는 10% 줄이는 배율 계산
-	float AffinityAdvanceMultiplier = FMath::GetRangePct(-2.0f, 2.0f, Affinity);
-	AffinityAdvanceMultiplier = 0.9f + 0.2f * FMath::Clamp(AffinityAdvanceMultiplier, 0, 1);
-	// 경고 이후 착수금 배율을 반영하고 비상 Day의 지급 배율을 0으로 고정
-	AffinityAdvanceMultiplier *= bEmergencyDay == true ? 0.f : NextDepositMultiplier;
-
-	// 비상 Day에는 호감도와 무관하게 착수금을 지급하지 않는 최종 금액 계산
-	int32 GrantedAdvancePayment = FMath::RoundToInt32(ValidBaseAdvancePayment * AffinityAdvanceMultiplier);
-	// 새 Day의 Enum Map 원장을 초기화한 뒤 실제 착수금을 기록
-	DailyCreditTotals.Reset();
-	AddCreditsInternal(EMD_DailyReportCategory::Retainer, GrantedAdvancePayment);
-
-	// 현재 계약의 일차를 서버 상인 원장에 반영
-	CurrentDay = NewDay;
-
-	OnMerchantStateChanged.Broadcast();
 }
 
 void UMD_MerchantSubsystem::MarkSiteCleared()
@@ -398,7 +333,6 @@ void UMD_MerchantSubsystem::MarkSiteCleared()
 void UMD_MerchantSubsystem::FinalizeContract()
 {
 	CurrentSite = nullptr;
-	CurrentDay = 0;
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 종료"));
 
@@ -459,9 +393,7 @@ void UMD_MerchantSubsystem::ResetContract()
 	DebtBalance = 0;
 	Affinity = 0.0f;
 	CurrentSite = nullptr;
-	CurrentDay = 0;
 	ClearedSites.Reset();
-	NextDepositMultiplier = 1.f;
 	bConsumableDiscountActive = true;
 	// 새 계약에 사용할 전체 AssetId 구매 원장 초기화
 	PurchasedItemAssetCounts.Reset();
@@ -476,4 +408,25 @@ void UMD_MerchantSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UMD_MerchantSubsystem::Deinitialize()
 {
     Super::Deinitialize();
+}
+
+void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 BaseAdvancePayment)
+{
+	if (IsValid(Site) == false)
+	{
+		return;
+	}
+
+	CurrentSite = Site;
+	bConsumableDiscountActive = true;
+	// 잘못된 설정값으로 팀 크레딧이 차감되지 않도록 기본 착수금을 0 이상으로 제한
+	int32 ValidBaseAdvancePayment = FMath::Max(BaseAdvancePayment, 0);
+	// 높은 호감도는 착수금을 10% 늘리고 낮은 호감도는 10% 줄이는 배율 계산
+	float AffinityAdvanceMultiplier = FMath::GetRangePct(-2.0f, 2.0f, Affinity);
+	AffinityAdvanceMultiplier = 0.9f + 0.2f * FMath::Clamp(AffinityAdvanceMultiplier, 0, 1);
+	int32 GrantedAdvancePayment = FMath::RoundToInt32(ValidBaseAdvancePayment * AffinityAdvanceMultiplier);
+	// 새 계약의 Enum Map 원장을 초기화한 뒤 실제 착수금을 기록
+	DailyCreditTotals.Reset();
+	AddCreditsInternal(EMD_DailyReportCategory::Retainer, GrantedAdvancePayment);
+	OnMerchantStateChanged.Broadcast();
 }

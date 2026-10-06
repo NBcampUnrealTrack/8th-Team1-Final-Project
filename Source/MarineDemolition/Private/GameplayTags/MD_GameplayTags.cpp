@@ -187,10 +187,6 @@ namespace MDGameplayTags
 		"Score.Penalty.Death",
 		"사망 후 부활");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Score_Penalty_Warning,
-		"Score.Penalty.Warning",
-		"점검 실패 경고");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Score_Penalty_CableCut,
 		"Score.Penalty.CableCut",
 		"전선 절단, 섹터 암전");

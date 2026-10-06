@@ -204,10 +204,6 @@ private:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Debug")
 	TObjectPtr<UMD_SiteDefinition> DebugSite;
 
-	/** 표준 난이도 착수금 (07 §2.1) */
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Debug")
-	int32 DebugAdvancePayment = 500;
-
 	UFUNCTION(Exec)
 	void MD_BeginContract();
 
@@ -267,12 +263,6 @@ private:
 
 	UFUNCTION(Server, Reliable)
 	void ServerBeginContract();
-
-	UFUNCTION(Exec)
-	void MD_BeginDay(int32 Day);
-
-	UFUNCTION(Server, Reliable)
-	void ServerBeginDay(int32 Day);
 
 	/**
 	 * 조준한 격벽(없으면 가장 가까운 오염된 격벽) 하나의 오염을 100% 제거한다.

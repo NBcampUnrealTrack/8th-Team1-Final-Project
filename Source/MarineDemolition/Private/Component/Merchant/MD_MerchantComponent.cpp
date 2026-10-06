@@ -21,7 +21,6 @@ void UMD_MerchantComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	// 상인 상태는 팀 공유 데이터라 전원에게 보낸다.
 	DOREPLIFETIME(UMD_MerchantComponent, Credits);
 	DOREPLIFETIME(UMD_MerchantComponent, DebtBalance);
-	DOREPLIFETIME(UMD_MerchantComponent, CurrentDay);
 	DOREPLIFETIME(UMD_MerchantComponent, Affinity);
 	DOREPLIFETIME(UMD_MerchantComponent, OwnedItemIds);
 }
@@ -80,7 +79,6 @@ void UMD_MerchantComponent::RefreshFromSubsystem()
 
 	Credits = Merchant->GetCredits();
 	DebtBalance = Merchant->GetDebtBalance();
-	CurrentDay = Merchant->GetCurrentDay();
 	Affinity = Merchant->GetAffinity();
 	OwnedItemIds = Merchant->GetOwnedItemIds();
     // 팀 원장을 소유한 GameState 확인
@@ -109,7 +107,6 @@ FMD_MerchantMenuInfo UMD_MerchantComponent::BuildMenuInfo() const
 	FMD_MerchantMenuInfo Info;
 
 	Info.Credits = Credits;
-	Info.ContractDay = CurrentDay;
 	Info.Affinity = Affinity;
 
 	// 다음 해금 임계값은 카탈로그별 값이므로 호출 위젯에서 계산하기 위한 기본 상태 유지

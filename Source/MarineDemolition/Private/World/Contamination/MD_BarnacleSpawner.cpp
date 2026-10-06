@@ -248,45 +248,6 @@ int32 AMD_BarnacleSpawner::SpawnBarnacles()
 	return SpawnedCount;
 }
 
-int32 AMD_BarnacleSpawner::GrowBarnacles(
-	const int32 GrowthCount,
-	const int32 GrowthSeedOffset)
-{
-	if (!HasAuthority()
-		|| !BarnacleClass
-		|| !bHasSpawnedInitialPlacement
-		|| GrowthCount <= 0
-		|| (!bAllowFrontBackSurfaces
-			&& !bAllowLeftRightSurfaces
-			&& !bAllowTopBottomSurfaces))
-	{
-		return 0;
-	}
-
-	// 상한을 넘지 않는 만큼만 돋운다. 없으면 3일 동안 개수가 계속 늘어
-	// 05 배치 예산을 넘긴다.
-	const int32 AliveCount = CountAliveBarnacles();
-	const int32 AllowedCount = FMath::Min(
-		GrowthCount,
-		GetEffectiveMaximumAliveCount() - AliveCount);
-	if (AllowedCount <= 0)
-	{
-		return 0;
-	}
-
-	// 시드를 어긋내야 초기 배치와 다른 자리에 돋는다. 같은 시드면 제거 목록에
-	// 걸려 아무 데도 못 붙는다.
-	// 증식분은 제거 목록을 보지 않는다. 새로 돋는 것이지 되살아나는 것이 아니다.
-	const uint32 GrowthPlacementSeed =
-		static_cast<uint32>(GetEffectivePlacementSeed())
-		+ static_cast<uint32>(GrowthSeedOffset);
-	return PlaceBarnacles(
-		AllowedCount,
-		static_cast<int32>(GrowthPlacementSeed),
-		NextSpawnIndex,
-		false);
-}
-
 void AMD_BarnacleSpawner::NotifyBarnacleRemoved(const int32 RemovedSpawnIndex)
 {
 	if (HasAuthority() && RemovedSpawnIndex != INDEX_NONE)

@@ -86,11 +86,4 @@ struct FMD_MerchantMenuInfo
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Loan")
 	float DailyInterestRate = 0.05f;
 
-	/** 계약 진행 일차 (`04` §5 미션 카드: `3 Day Contract`) */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Contract")
-	int32 ContractDay = 1;
-
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Contract")
-	int32 ContractTotalDays = 3;
-
 };

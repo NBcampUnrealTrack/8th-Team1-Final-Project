@@ -81,9 +81,6 @@ public:
 
     bool CaptureState(FMD_TrashGeneratorState& OutState) const;
     bool CanRestoreState(const FMD_TrashGeneratorState& State) const;
-    bool CapturePlacement(FMD_TrashGeneratorPlacement& Out) const;
-    bool CanRestorePlacement(const FMD_TrashGeneratorState& State, const FMD_TrashGeneratorPlacement& Placement) const;
-    bool RestorePlacement(const FMD_TrashGeneratorState& State, const FMD_TrashGeneratorPlacement& Placement);
     bool RestoreState(const FMD_TrashGeneratorState& State, const TArray<AMD_TrashItem*>* ReusableItems = nullptr);
     bool InitializeFresh();
     bool BuildEmptyState(FMD_TrashGeneratorState& OutState) const;

@@ -67,9 +67,6 @@ namespace
 		case EMD_LoadingContext::LeavingCrew:
 			return {LOCTEXT("LeavingLobby",       "LEAVING THE CREW • 팀에서 나가는 중"),
 			        LOCTEXT("DepartureReady",     "DEPARTURE READY • 팀 이탈 준비 완료")};
-		case EMD_LoadingContext::NextShift:
-			return {LOCTEXT("StartingNextDay",    "NEXT SHIFT PREPARING • 다음 작업일 준비 중"),
-			        LOCTEXT("NextShiftReady",     "NEXT SHIFT READY • 다음 작업일 준비 완료")};
 		default:
 			return {LOCTEXT("DefaultSubtitle",    "PREPARING EXPEDITION • 원정 준비 중"),
 			        LOCTEXT("LoadingComplete",    "LOADING COMPLETE • 로딩 완료")};
