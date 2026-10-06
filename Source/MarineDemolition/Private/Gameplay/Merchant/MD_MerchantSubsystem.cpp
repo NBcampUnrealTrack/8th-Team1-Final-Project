@@ -308,27 +308,33 @@ bool UMD_MerchantSubsystem::TryRepayLoan(int32 Amount)
 	return true;
 }
 
+int32 UMD_MerchantSubsystem::CalculateLoanInterest(int32 InDebtBalance)
+{
+	// 상환 완료 또는 원장 상한 도달 시 추가 이자 없음
+	if (InDebtBalance <= 0 || InDebtBalance == MAX_int32)
+	{
+		// 증가 가능한 부채가 없는 경우의 부과액
+		return 0;
+	}
+	// 정수 나눗셈으로 5% 소수점 절삭 및 기존 최소 1크레딧과 원장 상한 보장
+	return FMath::Clamp(InDebtBalance / 20, 1, MAX_int32 - InDebtBalance);
+}
+
 int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 {
-	// 빚이 존재하지 않거나 최대값의 경우 추가되는 이자 없음
-	if (DebtBalance <= 0 || DebtBalance == MAX_int32)
-	{
-		return 0;
-	}
-
-	// 기획 예시의 450₡ 대출 이자 23₡과 일치하도록 원 단위 반올림을 적용하는 계산
-	float CalculatedInterest = DebtBalance * DailyInterestRate;
-	int32 InterestAmount = FMath::Clamp(CalculatedInterest, 1, MAX_int32 - DebtBalance);	// 이자 값 보정
+	// 대출 UI와 동일한 현재 부채의 실제 부과액 계산
+	int32 InterestAmount = CalculateLoanInterest(DebtBalance);
+	// 변화가 없는 부채의 불필요한 복제 알림 생략
 	if (InterestAmount <= 0)
 	{
+		// 이자 미부과 결과 반환
 		return 0;
 	}
-
-	// 빚에 이자 추가
+	// 이전 이자를 포함한 잔액에 이번 이자 합산
 	DebtBalance += InterestAmount;
+	// 호스트와 클라이언트의 부채 및 대출 가능액 갱신
 	OnMerchantStateChanged.Broadcast();
-
-	// 추가된 이자 값 반환
+	// 이번 주기에 실제 추가한 이자 반환
 	return InterestAmount;
 }
 
@@ -366,11 +372,14 @@ void UMD_MerchantSubsystem::BeginDay(int32 NewDay, int32 BaseAdvancePayment, boo
 	// 경고 이후 착수금 배율을 반영하고 비상 Day의 지급 배율을 0으로 고정
 	AffinityAdvanceMultiplier *= bEmergencyDay == true ? 0.f : NextDepositMultiplier;
 
-	// 비상 Day에는 호감도와 무관하게 착수금을 지급하지 않는 최종 금액 계산
-	int32 GrantedAdvancePayment = FMath::RoundToInt32(ValidBaseAdvancePayment * AffinityAdvanceMultiplier);
+	// 지급액과 부채를 같은 금액으로 기록하도록 두 원장의 잔여 범위 안에서 착수금 확정
+	int32 GrantedAdvancePayment = static_cast<int32>(FMath::RoundToInt64(FMath::Clamp(static_cast<double>(ValidBaseAdvancePayment) * AffinityAdvanceMultiplier,
+		0.0, static_cast<double>(FMath::Min(MAX_int32 - Credits, MAX_int32 - DebtBalance)))));
 	// 새 Day의 Enum Map 원장을 초기화한 뒤 실제 착수금을 기록
 	DailyCreditTotals.Reset();
 	AddCreditsInternal(EMD_DailyReportCategory::Retainer, GrantedAdvancePayment);
+	// 실제 수령한 착수금을 기존 미상환 부채에 합산
+	DebtBalance += GrantedAdvancePayment;
 
 	// 현재 계약의 일차를 서버 상인 원장에 반영
 	CurrentDay = NewDay;

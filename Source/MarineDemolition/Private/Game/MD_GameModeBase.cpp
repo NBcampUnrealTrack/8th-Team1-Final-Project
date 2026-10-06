@@ -79,14 +79,6 @@ void AMD_GameModeBase::BeginPlay()
     // 게임 맵의 액터 초기화 이후 월드 준비와 계약 동기화를 위한 다음 틱 예약
     GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
 
-    GetWorldTimerManager().SetTimer(
-        CheckGameTimeTimerHandle,
-        this,
-        &AMD_GameModeBase::CheckGameTimeEvents,
-        0.1f,
-        true
-    );
-
     // 레벨의 모든 격벽에 붕괴·철거 점수 처리 바인딩 (GameMode는 서버 전용이라 중복 적용 없음)
     for (TActorIterator<AMD_CuttableWall> It(GetWorld()); It; ++It)
     {
@@ -123,6 +115,9 @@ void AMD_GameModeBase::ApplyRequestedContractSettings()
 
 void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    // 맵 이동 후 GameInstance 타이머 관리자의 이전 현장 예약 해제
+    GetWorldTimerManager().ClearTimer(LoanInterestTimerHandle);
+
     if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
     {
         GS->OnDayChanged.RemoveDynamic(this, &AMD_GameModeBase::HandleGameDayChanged);
@@ -282,47 +277,44 @@ void AMD_GameModeBase::HandleWallDemolished(AMD_CuttableWall* Wall, AActor* Cutt
     }
 }
 
+void AMD_GameModeBase::StartLoanInterestTimer()
+{
+    // 타이머를 소유할 현재 서버 월드 조회
+    UWorld* World = GetWorld();
+    // 로비와 클라이언트 및 이미 정산된 작업의 이자 예약 차단
+    if (IsValid(World) == false || World->GetNetMode() == NM_Client || bDayFinalized == true || IsValid(ResolveExpeditionSite()) == false)
+    {
+        // 게임 현장 외 이자 부과 방지
+        return;
+    }
+    // 일차 동기화나 재호출로 첫 이자 시점이 연장되는 상황 차단
+    if (GetWorldTimerManager().TimerExists(LoanInterestTimerHandle) == true)
+    {
+        // 현재 현장의 최초 예약 유지
+        return;
+    }
+    // 초기화 대기 시간도 맵 진입 이후 경과 시간에 포함
+    GetWorldTimerManager().SetTimer(LoanInterestTimerHandle, this, &ThisClass::CheckGameTimeEvents, 180.f, true,
+        FMath::Max(600.f - World->GetTimeSeconds(), KINDA_SMALL_NUMBER));
+}
+
 void AMD_GameModeBase::CheckGameTimeEvents()
 {
-    AMD_GameStateBase* MDGameState =
-        GetGameState<AMD_GameStateBase>();
-
-    if (!IsValid(MDGameState))
+    // 이자 원장을 보유한 게임 인스턴스 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    // 정산 종료 이후 호출과 유효하지 않은 인스턴스 차단
+    if (HasAuthority() == false || bDayFinalized == true || IsValid(GameInstance) == false)
     {
+        // 종료된 작업의 부채 변경 방지
         return;
     }
-
-    const EMD_WithdrawalPhase CurrentPhase =
-        MDGameState->GetWithdrawalPhase();
-
-    //17:00
-    if (CurrentPhase == EMD_WithdrawalPhase::None
-        && MDGameState->HasReachedTime(17, 0))
+    // 팀 공용 부채를 관리하는 서버 원장 조회
+    UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+    // 유효한 계약의 미상환 잔액에만 주기 이자 적용
+    if (IsValid(Merchant) == true && Merchant->HasActiveContract() == true)
     {
-        MDGameState->SetWithdrawalPhase(
-            EMD_WithdrawalPhase::Notice
-        );
-
-        return;
-    }
-
-    //17:30
-    if (CurrentPhase == EMD_WithdrawalPhase::Notice
-        && MDGameState->HasReachedTime(17, 30))
-    {
-        MDGameState->SetWithdrawalPhase(
-            EMD_WithdrawalPhase::Warning
-        );
-
-        return;
-    }
-
-    //18:00
-    if (CurrentPhase == EMD_WithdrawalPhase::Warning
-        && MDGameState->HasReachedTime(18, 0))
-    {
-        // 제한 시간 도달 원인을 보고서까지 전달
-        RequestEndDay(EMD_DayEndReason::TimeExpired);
+        // 원장 변경 알림을 통한 호스트 UI 및 클라이언트 복제 갱신
+        Merchant->ApplyDailyLoanInterest();
     }
 }
 
@@ -334,7 +326,8 @@ void AMD_GameModeBase::RequestEndDay(EMD_DayEndReason EndReason, FGameplayTag Re
         return;
     }
 
-    GetWorldTimerManager().ClearTimer(CheckGameTimeTimerHandle);
+    // 수동 정산 이후 보고서 대기 중 추가 이자 부과 방지
+    GetWorldTimerManager().ClearTimer(LoanInterestTimerHandle);
 
     // 정산 결과와 요청 원인을 함께 반영
     RouteAfterDay(FinalizeDay(), EndReason, ReportWidgetTag);
@@ -417,17 +410,6 @@ EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
 
     // 일일 점수 정산에 반영할 플레이어 복귀 상태 확정
     FinalizeReturnStatuses();
-
-    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
-    {
-        if (UMD_MerchantSubsystem* Merchant =
-            GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
-        {
-
-			// 빚에 대한 이자 측정 및 증가
-			Merchant->ApplyDailyLoanInterest();
-        }
-    }
 
     FinalizeDailyScore();
 
@@ -1061,6 +1043,9 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day, bool bStartNewContract)
 
         Merchant->BeginDay(Day, ExpeditionAdvancePayment, bEmergencyDay);
     }
+    // 착수금과 계약 확정 이후 맵 진입 기준 이자 주기 시작
+    StartLoanInterestTimer();
+
 }
 
 void AMD_GameModeBase::MD_EndDay()
@@ -1123,6 +1108,4 @@ void AMD_GameModeBase::MD_SetTime(int32 Hour)
     }
     // 적용된 정각 표시
     UE_LOG(LogTemp, Display, TEXT("[Time] 현재 일자 시각 변경 %02d:00"), Hour);
-    // 기존 알림 및 시간 종료 처리 경로로 진입
-    CheckGameTimeEvents();
 }

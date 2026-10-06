@@ -102,8 +102,11 @@ public:
 	// 보유 크레딧과 미상환 잔액 범위에서 대출금을 상환하는 함수
 	bool TryRepayLoan(int32 Amount);
 
-	// 일 마감 시 미상환 잔액에 일일 이자를 한 번 합산하고 부과액을 반환하는 함수
+	// 현장 타이머가 요청한 미상환 잔액의 5% 이자 합산
 	int32 ApplyDailyLoanInterest();
+
+	// 서버 부과액과 대출 UI가 공유하는 소수점 절삭 및 원장 상한 계산
+	static int32 CalculateLoanInterest(int32 InDebtBalance);
 
 	// 새 현장 계약과 일차 및 경고 배율 초기화
 	void BeginContract(UMD_SiteDefinition* Site);
