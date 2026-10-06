@@ -50,9 +50,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	int32 GetCurrentDay() const { return CurrentDay; }
 
-	// 서버 원장에서 복제된 호감도를 UI와 상점 해금 판정에 제공하는 함수
-	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
-	float GetAffinity() const { return Affinity; }
 
 
 	// 클라이언트에 복제된 전체 구매 식별자 목록 제공
@@ -78,9 +75,6 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
 	int32 CurrentDay = 0;
 
-	// 모든 클라이언트가 같은 상점 해금 상태를 사용하기 위한 복제 호감도
-	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
-	float Affinity = 0.0f;
 
 
 	// 팀 구매 이력을 타입과 이름을 포함하여 클라이언트에 복제

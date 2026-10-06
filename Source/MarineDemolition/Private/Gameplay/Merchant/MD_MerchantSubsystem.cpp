@@ -59,7 +59,7 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerStat
 	TArray<FPrimaryAssetId> PurchasedItemIds = PurchasingPlayerState->GetPurchasedShopItemIds();
 	// 등록된 구매 금지를 먼저 적용하고 나머지 상점 진행 조건 검사
 	if (PurchasingPlayerState->IsShopItemPurchaseBlocked(ItemAssetId) == true
-		|| ShopItem.IsUnlocked(Affinity, PurchasedItemIds) == false)
+		|| ShopItem.IsUnlocked(PurchasedItemIds) == false)
 	{
 		return EMD_ShopPurchaseResult::Locked;
 	}
@@ -227,49 +227,27 @@ int32 UMD_MerchantSubsystem::GetPurchasedItemCount(FPrimaryAssetId ItemAssetId) 
 	return PurchasedCount != nullptr ? *PurchasedCount : 0;
 }
 
-void UMD_MerchantSubsystem::AddAffinity(float Amount)
-{
-	// 의미 없는 변경 알림과 부동소수점 누적 오차를 줄이기 위한 조기 종료
-	if (FMath::IsNearlyZero(Amount) == true)
-	{
-		return;
-	}
-
-	// 기획에서 정의한 호감도 범위를 벗어나 상점 해금 판정이 왜곡되지 않도록 하는 제한
-	Affinity = FMath::Clamp(Affinity + Amount, -4.0f, 5.0f);
-	OnMerchantStateChanged.Broadcast();
-}
-
 int32 UMD_MerchantSubsystem::GetLoanLimit() const
 {
-	return CalculateLoanLimit(Affinity);
+	// 기본 대출 한도를 서버와 UI에 동일하게 제공
+	return CalculateLoanLimit();
 }
 
-int32 UMD_MerchantSubsystem::CalculateLoanLimit(float InAffinity)
+int32 UMD_MerchantSubsystem::CalculateLoanLimit()
 {
-	// 높은 호감도 보상과 낮은 호감도 제한을 기획 임계값에 맞춰 구분하는 계산
-	float ClampedAffinity = FMath::Clamp(InAffinity, -2.0f, 2.0f);
-
-	float ClampedAffinityFactor = FMath::GetRangePct(-2.0f, 2.0f, ClampedAffinity);
-
-	// 호감도가 -2일 때 최소값(400), 호감도가 2일 때 최대값(1200)
-	int32 PotentialLoanLimit = FMath::Lerp(400, 1200, ClampedAffinityFactor);
-
-	// 100 단위로 끊기
-	int32 ActualLoanLimit = FMath::RoundToInt32(PotentialLoanLimit * 0.01f) * 100;
-
-	return ActualLoanLimit;
+	// 기존 기본 대출 한도 800크레딧 적용
+	return 800;
 }
 
 int32 UMD_MerchantSubsystem::GetAvailableLoanAmount() const
 {
-	// 호감도 하락으로 현재 부채가 새 한도를 넘더라도 강제 회수 없이 추가 대출만 차단하는 계산
+	// 이자 등으로 부채가 기본 한도를 넘은 경우 추가 대출만 차단
 	return FMath::Max(0, GetLoanLimit() - DebtBalance);
 }
 
 bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount)
 {
-	// 잘못된 금액과 현재 호감도 한도를 넘는 대출 요청을 서버 원장에 반영하지 않기 위한 검사
+	// 잘못된 금액과 잔여 대출 한도를 초과하는 요청 차단
 	if (Amount <= 0 || Amount > GetAvailableLoanAmount())
 	{
 		return false;
@@ -366,14 +344,11 @@ void UMD_MerchantSubsystem::BeginDay(int32 NewDay, int32 BaseAdvancePayment, boo
 	// 잘못된 설정값으로 팀 크레딧이 차감되지 않도록 기본 착수금을 0 이상으로 제한
 	int32 ValidBaseAdvancePayment = FMath::Max(BaseAdvancePayment, 0);
 
-	// 높은 호감도는 착수금을 10% 늘리고 낮은 호감도는 10% 줄이는 배율 계산
-	float AffinityAdvanceMultiplier = FMath::GetRangePct(-2.0f, 2.0f, Affinity);
-	AffinityAdvanceMultiplier = 0.9f + 0.2f * FMath::Clamp(AffinityAdvanceMultiplier, 0, 1);
-	// 경고 이후 착수금 배율을 반영하고 비상 Day의 지급 배율을 0으로 고정
-	AffinityAdvanceMultiplier *= bEmergencyDay == true ? 0.f : NextDepositMultiplier;
+	// 경고 이후 착수금 배율을 반영하고 비상 Day 지급 배율을 0으로 고정
+	float AdvanceMultiplier = bEmergencyDay == true ? 0.f : NextDepositMultiplier;
 
 	// 지급액과 부채를 같은 금액으로 기록하도록 두 원장의 잔여 범위 안에서 착수금 확정
-	int32 GrantedAdvancePayment = static_cast<int32>(FMath::RoundToInt64(FMath::Clamp(static_cast<double>(ValidBaseAdvancePayment) * AffinityAdvanceMultiplier,
+	int32 GrantedAdvancePayment = static_cast<int32>(FMath::RoundToInt64(FMath::Clamp(static_cast<double>(ValidBaseAdvancePayment) * AdvanceMultiplier,
 		0.0, static_cast<double>(FMath::Min(MAX_int32 - Credits, MAX_int32 - DebtBalance)))));
 	// 새 Day의 Enum Map 원장을 초기화한 뒤 실제 착수금을 기록
 	DailyCreditTotals.Reset();
@@ -466,7 +441,6 @@ void UMD_MerchantSubsystem::ResetContract()
 	Credits = 0;
 	DailyCreditTotals.Reset();
 	DebtBalance = 0;
-	Affinity = 0.0f;
 	CurrentSite = nullptr;
 	CurrentDay = 0;
 	ClearedSites.Reset();
