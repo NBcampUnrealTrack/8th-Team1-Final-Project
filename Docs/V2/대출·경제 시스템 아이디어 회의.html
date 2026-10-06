@@ -21,7 +21,9 @@
 <a href="#throwing">Q키 충전 던지기</a>
 <a href="#sorter-rules">즉시 정산·무작위 고장</a>
 <a href="#door-repairs">문·설비 수리</a>
+<a href="#cooperative-repair">지문패드·차단기 협동 수리</a>
 <a href="#pump-hazard">처리장 펌프·데미지존</a>
+
 <a href="#economy-now">돈·평가·대출</a>
 <a href="#balance-check">밸런스 검증</a>
 <a href="#open-decisions">남은 결정 사항</a>
@@ -36,20 +38,23 @@
 <div class="mast"><span>협동 청소 · 경제 · 현장 고장</span><span class="state">최신 논의 통합본</span></div>
 <h1>협동 청소와 경제<br>현장 고장 기획 정리</h1>
 <p class="intro">착수금으로 장비를 사서 역할을 나누고, 청소 수익으로 구매와 상환을 선택한다. 문·분리수거기의 고장과 폐기물처리장의 펌프 위험은 작업·정산을 방해하고 수리를 요구한다.</p>
-<dl class="metadata"><dt>정리 기준일</dt><dd>2026-10-02 · 제공된 아이디어 회의와 이후 사용자 대화 반영</dd><dt>상태 구분</dt><dd>사용자 지정 방향 / 회의에서 의견이 모인 방향 / 테스트 후보 / 미결정</dd><dt>문서 범위</dt><dd>경제·역할 분담·던지기·현장 고장 기획. 실제 맵·코드 변경 결과는 아님.</dd></dl>
-</header>
+<dl class="metadata"><dt>정리 기준일</dt><dd>2026-10-06 · 제공된 아이디어 회의와 이후 사용자 대화 반영</dd><dt>상태 구분</dt><dd>사용자 지정 방향 / 회의에서 의견이 모인 방향 / 테스트 후보 / 미결정</dd><dt>문서 범위</dt><dd>경제·역할 분담·던지기·현장 고장·협동 수리 기획. 실제 맵·코드 변경 결과는 아님.</dd></dl>
+<aside style="margin-top:20px;padding:15px 18px;border-left:4px solid #194a8d;background:#edf3fa;color:#20314a;font-size:14px"><strong>문서 기준 안내</strong><p style="margin:6px 0">2026-10-06 전체 기준으로 정리했습니다. 상세 규칙과 미결정 항목은 분야별 문서를 함께 확인합니다.</p><a href="V2%20%EC%A0%84%EC%B2%B4%20%EA%B8%B0%ED%9A%8D%20%EC%A0%95%EB%A6%AC.html">최신 전체 기획 정리</a> · <a href="%ED%98%91%EB%8F%99%20%EC%88%98%EB%A6%AC%20%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EA%B8%B0%ED%9A%8D%EC%84%9C.html">협동 수리 상세</a></aside></header>
 
 <section id="overview-now">
 <h2>최신 기준 요약</h2>
+<p class="rule-state"><strong>2026-10-06 제외 결정:</strong> 분리수거기 역배출과 전자석 이벤트는 구현·밸런스·검증 범위에서 제외한다. 역배출 정산액 회수·재지급과 벽 부착 쓰레기 제거도 함께 제외한다. 분리수거기 고장·수리 전 투입 중단·고장 중 비용 차감은 유지한다.</p>
 <div class="table-wrap"><table><thead><tr><th scope="col">항목</th><th scope="col">현재 기준</th><th scope="col">상태</th></tr></thead><tbody>
 <tr><th scope="row">초기 장비</th><td>절단기·원샷헤라·스캐너·폼건 4종. 0원 지급 대신 착수금으로 구매하며 역할을 나눈다.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
 <tr><th scope="row">Q 던지기</th><td>손이나 인벤토리의 쓰레기·장비를 던진다. 오래 누를수록 멀리 던지며, 떨어진 물체는 다시 획득한다.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
 <tr><th scope="row">분리수거 정산</th><td>정상 기계에 쓰레기를 넣는 즉시 정산한다. 주기적 일괄 정산으로 바꾸지 않는다.</td><td><span class="flag aligned">기존 방식 유지</span></td></tr>
-<tr><th scope="row">분리수거기 고장</th><td>5종의 기계가 일정 주기마다 무작위로 고장 난다. 해당 기계의 투입·정산은 수리 전까지 중단된다.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
+<tr><th scope="row">분리수거기 고장</th><td>5종의 기계가 일정 주기마다 무작위로 고장 난다. 고장 중 수리 전까지 돈이 차감된다. 해당 기계의 투입·정산은 수리 전까지 중단된다.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
 <tr><th scope="row">문·기계 수리</th><td>절연테이프를 사용한다. 문은 테이프·도구가 없어도 시간이 오래 걸리는 수동 수리가 가능하다.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
+<tr><th scope="row">협동 수리</th><td>두 지문패드 동시 인식과 지침 설명·차단기 조작 역할 분리. 차단기 수리 중 기지 정전, 지침실만 약한 보조조명, 스캐너 라이트로 차단기 수리. 지문패드 솔로는 제한 시간 내 순차 인식, 차단기 솔로는 지침실 지침 상호작용 잠금 생략.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
 <tr><th scope="row">냉각수펌프</th><td>기존 펌프·데미지존을 폐기물처리장에 고정 배치한다. 고장 중 방에 있으면 피해를 받고, 수리 후 위험을 해제한다.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
+
 <tr><th scope="row">돈과 최종 평가</th><td>돈은 청소 수익과 구매에, 최종 점수·랭크는 청소 결과에 연결해 분리한다.</td><td><span class="flag proposed">회의에서 모인 방향</span></td></tr>
-<tr><th scope="row">경제 압박</th><td>추가 대출을 받지 않거나 빨리 갚는 것만으로 부담이 사라지지 않게 한다. 인원별 수익·수리 부담을 함께 맞춘다.</td><td><span class="flag aligned">사용자 요구</span></td></tr>
+<tr><th scope="row">경제 압박</th><td>시설이 고장 나면 수리 전까지 돈이 계속 차감된다. 대출 완납 후에도 적용해 수리 압박을 유지한다. 차감 수치와 인원별 부담은 미정이다.</td><td><span class="flag aligned">사용자 요구</span></td></tr>
 </tbody></table></div>
 <div class="note warning"><p><strong>가격·금리·주기·수리 시간은 아직 검증하지 않았다.</strong> 아래 수치는 비교를 위한 후보이며, 대화에서 정한 게임 규칙과 같은 확정 수준으로 취급하지 않는다.</p></div>
 </section>
@@ -60,7 +65,7 @@
 <li><div><strong>착수금으로 도구 구매·역할 배분</strong><p>기본 4종의 담당을 정한다. 실제로 구매한 장비를 지급하며 시작 전에 자동 구매가 끝난 것으로 처리하지 않는다.</p></div></li>
 <li><div><strong>탐색·절단·오염 제거·운반</strong><p>스캐너로 대상을 찾고 절단기·원샷헤라로 작업한다. 모든 담당이 쓰레기 집기·분리수거·Q 전달에 참여할 수 있다.</p></div></li>
 <li><div><strong>폐기물처리장에서 즉시 정산</strong><p>정상 분리수거기에 쓰레기를 넣어 돈을 받는다. 기계 고장이나 처리장 피해가 생기면 수리·위험 감수·물량 집적을 판단한다.</p></div></li>
-<li><div><strong>수익을 구매·보급·상환에 배분</strong><p>새 장비를 살지, 테이프·폼건 보급을 확보할지, 상환할지 선택한다. 최종 청소 평가는 돈과 별도로 판단하는 방향이다.</p></div></li>
+<li><div><strong>수익을 구매·보급·상환에 배분</strong><p>새 장비를 살지, 테이프·폼건 보급을 확보할지, 상환할지 선택한다. 시설 고장 중에는 수리 전까지 돈이 차감되므로 복구 우선순위도 판단한다. 최종 청소 평가는 돈과 별도로 판단하는 방향이다.</p></div></li>
 </ol>
 <div class="table-wrap"><table><thead><tr><th scope="col">인원</th><th scope="col">역할 구성 예시 · 후보</th></tr></thead><tbody>
 <tr><th scope="row">1인</th><td>4종을 교체해 사용하며 운반과 수리를 직접 수행한다. ‘한 사람은 도구 하나만 소유’ 제한을 강제하지 않는다.</td></tr>
@@ -76,7 +81,7 @@
 <div class="table-wrap"><table><thead><tr><th scope="col">장비</th><th scope="col">가격 후보</th><th scope="col">역할</th></tr></thead><tbody>
 <tr><th scope="row">절단기</th><td>400</td><td>통로 개방·철거.</td></tr>
 <tr><th scope="row">원샷헤라</th><td>300</td><td>오염 제거. 분리수거기 수리 도구로 사용하는 이전 후보는 제외.</td></tr>
-<tr><th scope="row">스캐너</th><td>200</td><td>대상 탐색·정보 공유.</td></tr>
+<tr><th scope="row">스캐너</th><td>200</td><td>대상 탐색·정보 공유. 차단기 수리 중 정전 구간은 스캐너 라이트로 이동하고 차단기를 조작한다.</td></tr>
 <tr><th scope="row">폼건</th><td>200</td><td>냉각수펌프 봉합·처리장 위험 해제. 첫 수리에 필요한 초기 충전량 포함 후보.</td></tr>
 <tr><th scope="row">합계</th><td><strong>1,100</strong></td><td>착수금 1,300에서 200이 남음 · 약 15%.</td></tr>
 </tbody></table></div>
@@ -93,7 +98,7 @@
 <h2>Q키 충전 던지기</h2>
 <p><span class="flag aligned">지정 방향</span> 손이나 인벤토리의 쓰레기·장비를 Q키로 던지고 다시 획득한다. 오래 누를수록 비거리가 증가한다.</p>
 <ol class="flow">
-<li><div><strong>대상 선택</strong><p>손에 든 물체를 우선하고, 손이 비면 선택한 인벤토리 슬롯을 사용하는 후보.</p></div></li>
+<li><div><strong>대상 선택</strong><p>10월 2일 회의 방향은 손에 든 쓰레기 우선, 쓰레기가 없으면 손에 든 도구, 둘 다 없으면 동작 없음. 인벤토리 선택 슬롯을 직접 던질지는 별도 미정.</p></div></li>
 <li><div><strong>누르는 동안 충전</strong><p>조준점 근처 충전 표시를 제안한다. 최대 충전 뒤 강도는 더 증가하지 않는 안이다.</p></div></li>
 <li><div><strong>놓으면 던지기</strong><p>성공 시점에 물체 1개를 꺼낸다. 실패·취소 시 소유 상태를 유지하는 후보.</p></div></li>
 <li><div><strong>착지 후 재획득·인계</strong><p>물체 종류·수량·장비 상태를 보존하고 동료가 주울 수 있게 한다. 재획득 자체에 돈을 지급하지 않는다.</p></div></li>
@@ -106,12 +111,12 @@
 <p><strong>정산 타이머는 없다.</strong> 정상 기계에 투입하면 기존 투입 판정·보상 규칙에 따라 즉시 정산한다. 일정 주기는 기계 고장 발생에 사용한다.</p>
 <div class="table-wrap"><table><thead><tr><th scope="col">상태</th><th scope="col">쓰레기 처리·수익</th></tr></thead><tbody>
 <tr><th scope="row">정상</th><td>투입 즉시 처리·정산.</td></tr>
-<tr><th scope="row">고장</th><td>해당 기계는 투입·소비·정산 중단. 물체는 남고, 다른 정상 기계는 계속 즉시 정산.</td></tr>
-<tr><th scope="row">수리 완료</th><td>절연테이프로 복구하고 실제로 다시 투입한 물체를 즉시 정산. 수리·재획득만으로 돈을 지급하지 않음.</td></tr>
+<tr><th scope="row">고장</th><td>해당 기계는 투입·소비·정산 중단과 고장 중 돈 차감. 다른 정상 기계는 계속 즉시 정산.</td></tr>
+<tr><th scope="row">수리 완료</th><td>절연테이프로 복구하면 해당 고장의 비용 차감이 종료되고 정상 투입·즉시 정산을 재개한다.</td></tr>
 </tbody></table></div>
 <p><strong>5종 중 무작위로 고장 대상을 선택한다.</strong> 수리 전까지 사용이 막히며 마지막 정상 기계도 고장 대상이 될 수 있다. 전부 고장 나면 수거 수익은 0이 되고 수리가 필요하다.</p>
 <details><summary>고장 추첨·주기 테스트 후보</summary><div class="inside"><ul>
-<li>작업 시작 6분에 첫 고장, 이후 4분마다 정상 기계 1대 추첨.</li>
+<li>기존 비교 후보는 작업 시작 6분에 첫 고장, 이후 4분마다 정상 기계 1대 추첨. 회의의 “5분이라고 해볼까요”는 별도 주기 제안이며 최종 수치 미정.</li>
 <li>후보 간 균등 추첨, 이미 고장 난 기계 제외. 새 고장으로 수리 진행을 초기화하지 않음.</li>
 <li>복구 후 한 회차 추첨 제외. 후보가 없으면 새 발생만 건너뛰고 기존 고장은 유지.</li>
 <li>수리하지 않은 고장은 누적될 수 있음. ‘회차당 1대’는 새 고장 수이며 누적 상한이 아님.</li>
@@ -121,18 +126,20 @@
 
 <section id="door-repairs">
 <h2>문·설비 수리</h2>
-<p><span class="flag aligned">지정 방향</span> 문과 분리수거기는 절연테이프로 고친다. <strong>문은 테이프·도구가 없어도 시간이 오래 걸리는 수동 수리가 가능</strong>해 영구 갇힘을 방지한다.</p>
+<p><span class="flag aligned">지정 방향</span> 일반 고장 문과 분리수거기는 절연테이프로 고친다. <strong>일반 고장 문은 테이프·도구가 없어도 시간이 오래 걸리는 수동 수리가 가능</strong>해 영구 갇힘을 방지한다. 아래 차단기 지침실의 협동 수리 잠금은 별도 규칙이다.</p>
 <div class="table-wrap"><table><thead><tr><th scope="col">문 수리</th><th scope="col">시간 후보</th><th scope="col">조건</th></tr></thead><tbody>
 <tr><th scope="row">절연테이프 사용</th><td>15초</td><td>소모량·가격 미정. 빠른 복구 수단.</td></tr>
 <tr><th scope="row">도구 없는 수동 수리</th><td>60초</td><td>도구·충전·현금 없이 가능. 문 양쪽에서 접근.</td></tr>
 </tbody></table></div>
 <p>고장 난 문은 실제 통로를 막고, 고장 난 분리수거기는 실제 정산을 막는다. 수익이 끊길 수 있다는 압박은 유지한다. 수리 중 이자 시간을 계속 진행하는 것은 경제 테스트 후보다.</p>
 <ul>
-<li>문 수리 지점은 어느 쪽에 갇혀도 접근 가능해야 한다. 수리 완료 후 현재 문 고장 사건을 해제한다.</li>
-<li>수리 중단 시 진행 보존·동료 교대·테이프 전달 후 남은 진행 가속을 후보로 둔다. 문당 한 명 수리도 후보다.</li>
+<li>일반 문 수리 지점은 어느 쪽에 갇혀도 접근 가능해야 한다. 수리 완료 후 현재 문 고장 사건을 해제한다. 차단기 지침실은 다인 지침 상호작용으로 잠기며 재시작으로 문을 연다. 입실·시간 만료에 따른 자동 잠금은 없고, 솔로는 지침 상호작용 잠금을 생략한다.</li>
+<li>일반 문 수리 중단 시 진행 보존·동료 교대·테이프 전달 후 남은 진행 가속을 후보로 둔다. 일반 문당 한 명 수리도 후보다. 지침실의 수동·테이프 우회 허용과 동료 이탈 시 탈출 처리는 별도로 결정한다.</li>
 <li>분리수거기·펌프까지 무도구 복구를 허용할지는 미정이다. 문에 지정된 기본 수리를 모든 설비의 확정 규칙으로 확대하지 않는다.</li>
 </ul>
 </section>
+
+<section id="cooperative-repair" data-section><h2>지문패드·정전 차단기 협동 수리</h2><p><a href="%ED%98%91%EB%8F%99%20%EC%88%98%EB%A6%AC%20%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EA%B8%B0%ED%9A%8D%EC%84%9C.html">협동 수리 시스템 기획서</a>가 상태·조작·UI·예외·검증의 상세 기준입니다.</p><div class="table-wrap"><table><thead><tr><th scope="col">종류</th><th scope="col">다인</th><th scope="col">솔로</th></tr></thead><tbody><tr><td>지문패드</td><td>서로 다른 두 명이 A·B 패드 동시 인식</td><td>첫 패드 인식 후 제한 시간 내 다른 패드 인식</td></tr><tr><td>차단기</td><td>설명자는 지침실 입실 후 지침에 상호작용해 잠금·지침 전달. 스캐너 담당이 라이트로 이동·노브 조작</td><td>지침실 지침 상호작용 잠금 생략. 지침 확인 후 라이트로 이동·조작</td></tr></tbody></table></div><p>차단기 수리 중 기지 일반 조명을 끄고 지침실 지침에만 약한 하향 보조조명을 둡니다. 음성이 없으면 창문 유리 그림으로 전달합니다. 성공하면 연결된 차단기·조명·지침실 문을 복구합니다.</p><p>일반 문 수리와 지침실 잠금, 고장 중 차감·펌프 피해의 겹침은 상세 예외 항목에서 결정합니다. 수리 시간·동시 오차·오답·노브 수·배터리·소모품은 미정입니다.</p><p>지침실 문은 입실·점유로 자동 잠그지 않습니다. 다인에서 수리 지침에 한 번 상호작용하면 닫혀 잠깁니다. 재시작을 누르면 문이 열리고, 다음 새 지침 상호작용까지 열린 상태를 유지합니다. 개방 시간 제한·재잠금 대기 시간·카운트다운은 없습니다. 솔로는 지침 사용으로도 잠기지 않습니다. 재시작은 수리 완료가 아니며 지침·노브·그림 초기화 여부는 미정입니다.</p><p><strong>협동 수리 배치:</strong> 지침실은 1F 09 전력실 내부 유리 부스, 차단기는 창밖 작업 구역의 설비벽. 패드 A는 1F 02 통제실 입구 바깥 중앙 해치 쪽 벽, 패드 B는 B1-07 유지 보수실 입구 바깥·해치 출구 부근 공용 벽입니다. <strong>기획상 B1은 실제 맵의 위층인 2층</strong>이며 방 식별자는 유지합니다. 솔로 제한 시간은 양방향 층간 이동을 실측해 결정합니다. <a href="%ED%98%91%EB%8F%99%20%EC%88%98%EB%A6%AC%20%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EA%B8%B0%ED%9A%8D%EC%84%9C.html#placement">협동 수리 배치 상세·층 구분</a></p></section>
 
 <section id="pump-hazard">
 <h2>폐기물처리장 고정 펌프와 데미지존</h2>
@@ -152,13 +159,25 @@
 </ul>
 </section>
 
+
+
 <section id="economy-now">
-<h2>돈·최종 평가·대출</h2>
+<h2>돈·최종 평가·대출</h2><aside class="note warning"><p><strong>발표 수치와 계산 가정 구분:</strong> 회의에서는 9분 유예·3분 간격을 제시했습니다. 아래 계산기는 이전 6분 유예·첫 징수 9분 가정을 유지합니다. 금리·원금·가격·인원 가정과 함께 하나의 공식으로 정합화해야 하며, 발표한 약 28분·17분 완납 수치를 현재 공식의 확정값으로 취급하지 않습니다.</p></aside>
 <div class="ledger"><div class="ledger-row"><div class="ledger-key">돈</div><div><p>쓰레기 투입 수익을 도구·보급·상환에 사용한다. 공동 지갑은 역할 분담을 위한 후보다.</p></div></div><div class="ledger-row"><div class="ledger-key">최종 평가</div><div><p>남은 쓰레기·청소 완료량으로 평가하는 회의 방향. 돈을 쓰거나 상환했다는 이유로 평가를 낮추지 않는 방향이며 산식은 미정이다.</p></div></div></div>
-<p><strong>추가 대출이 선택 사항이라면 그것만으로 의무 압박을 만들 수 없다.</strong> 같은 기본 세트를 다인이 공유하면 수익이 빨라 초기 지출도 빨리 회수한다. 가격은 역할 분담을 만들고, 장기 압박은 초기 채무의 성격과 실제 수익·설비 복구 부담을 함께 정해야 한다.</p>
+<div class="note"><p><span class="flag aligned">사용자 추가 아이디어</span> <strong>시설 고장 중 지속 차감:</strong> 고장 발생부터 수리 완료까지 돈을 차감한다. 대출을 모두 갚아도 고장이 나면 차감되므로 작업을 마칠 때까지 복구할 이유가 남는다.</p></div>
+<h3>완납 이후의 압박 · 고장 중 지속 차감</h3>
+<div class="table-wrap"><table><thead><tr><th scope="col">상태</th><th scope="col">금전 처리</th></tr></thead><tbody>
+<tr><th scope="row">정상 시설</th><td>이 고장 규칙으로 돈을 차감하지 않는다.</td></tr>
+<tr><th scope="row">시설 고장</th><td>고장이 유지되는 동안 돈 차감. 수리 중에도 완료 전까지 고장 상태가 이어진다.</td></tr>
+<tr><th scope="row">수리 완료</th><td>해당 고장의 차감 종료. 다른 시설의 고장은 별도로 남는다.</td></tr>
+<tr><th scope="row">대출 완납</th><td>대출 의무 종료 여부와 독립적으로 시설 고장 차감은 적용한다.</td></tr>
+</tbody></table></div>
+<p>정상 분리수거기의 즉시 정산은 유지한다. 고장 차감은 별도의 현금 지출로 기록하며 쓰레기 보상을 지연하지 않는다. 문·분리수거기·펌프 중 적용 범위, 차감 대상 지갑, 차감액·주기·다중 고장 합산 방식은 미정이다.</p>
+<p class="rule-state">밸런스 비교 후보: 고장 부담 = 고장 지속 시간에 따른 차감 + 실제 입금 지연·수익 손실 + 수리·보급 비용. 복구 후 처리할 수 있는 대기 쓰레기는 입금 지연과 영구 손실을 구분한다. 1–4인의 현장 이동·복구 시간을 함께 측정한다.</p>
+<p>가격은 초기 역할 분담을 만들고, 대출은 장비 구매와 상환 선택에 연결한다. 완납 이후 압박은 새 고장과 수리 전 지속 차감으로 이어간다. 큰 초기 채무를 반드시 부과해야 하는 구조는 아직 채택하지 않았다.</p>
 <p><strong>아직 결정되지 않은 핵심:</strong> 착수금 자체가 대출인지, 이미 집행된 초기 계약 채무까지 포함할지, 원금과 이자를 어떤 방식으로 징수할지. 아래 두 모델은 비교 시나리오이며 채택된 규칙이 아니다.</p>
 <div class="table-wrap"><table><thead><tr><th scope="col">비교 모델</th><th scope="col">가정</th><th scope="col">의미</th></tr></thead><tbody>
-<tr><th scope="row">착수금만 대출</th><td>착수금·원금 1,300, 도구 구매 1,100, 잔액 200.</td><td>4인 예상 수익이 빠르면 첫 징수 전 완납할 수 있어 장기 압박이 약하다.</td></tr>
+<tr><th scope="row">착수금만 대출</th><td>착수금·원금 1,300, 도구 구매 1,100, 잔액 200.</td><td>4인 예상 수익이 빠르면 첫 징수 전 완납할 수 있다. 완납 후 시설 고장 차감은 별도로 적용한다.</td></tr>
 <tr><th scope="row">초기 계약 채무 포함</th><td>착수금 1,300과 현장 준비에 이미 쓴 금액을 합쳐 총채무를 별도로 둠.</td><td>추가 설정·계약이 필요한 이전 제안. 사용자가 채택하지 않았으며 기존 스토리·코드의 사실도 아니다.</td></tr>
 </tbody></table></div>
 <details><summary>경제 수치 비교용 가정</summary><div class="inside">
@@ -175,7 +194,7 @@
 </div></details>
 <details><summary>인원·수익·채무 모델 계산기</summary><div class="inside">
 <div class="calculator" aria-labelledby="calc-title"><h3 id="calc-title" style="margin-top:0">비교용 계산 · 실제 플레이 검증 아님</h3>
-<p class="muted">일정 수익·30분 작업과 위 징수 가정을 사용한다. 현금이 남은 원금 이상이면 즉시 완납하는 최선 조건. 테이프·폼건 보급·설비 고장·펌프 피해·수거 간격·추가 대출은 포함하지 않는다. 구매 성능에 따른 수익 증가도 포함하지 않는다.</p>
+<p class="muted">일정 수익·30분 작업과 위 징수 가정을 사용한다. 현금이 남은 원금 이상이면 즉시 완납하는 최선 조건. 테이프·폼건 보급·시설 고장 중 지속 차감·정산 중단·펌프 피해·수거 간격·추가 대출은 포함하지 않는다. 이 계산기로 완납 이후 현장 압박을 평가할 수 없다. 협동 수리의 인식·설명·정전 중 이동과 조작 시간도 포함하지 않는다. 구매 성능에 따른 수익 증가도 포함하지 않는다.</p>
 <div class="controls"><label>인원<select id="party"><option value="0">1인</option><option value="1">2인</option><option value="2">3인</option><option value="3">4인</option></select></label><label>채무 모델 · 미결정<select id="debt-model"><option value="advance">착수금만 대출</option><option value="contract">초기 계약 채무 포함</option></select></label><label>예상 수익 대비 <span id="pace-label">100%</span><input id="pace" type="range" min="0" max="150" step="10" value="100"></label><label>12분 추가 구매<select id="upgrade"><option value="0">구매 없음</option><option value="300">절단기 강화 차액 300</option><option value="400">추가 기본 절단기 400</option></select></label></div>
 <p id="start-budget"></p><div class="results"><div><span>예정 원금+이자 / 3분 예상 수익</span><strong id="burden">계산 중</strong></div><div><span>최선 완납 시점</span><strong id="repay-time">계산 중</strong></div><div><span>30분 잔액 / 남은 원금</span><strong id="end-state">계산 중</strong></div></div><output id="calc-note" aria-live="polite"></output>
 </div></div></details>
@@ -183,13 +202,17 @@
 
 <section id="balance-check">
 <h2>밸런스 검증</h2>
-<p><strong>한 번에 모든 압박 수치를 올리지 않는다.</strong> 기본 구매와 수익을 먼저 측정하고, 기계 고장·처리장 피해를 단계적으로 넣어 원금·이자·보급을 조정한다.</p>
+<p><strong>한 번에 모든 압박 수치를 올리지 않는다.</strong> 기본 구매와 수익을 먼저 측정하고, 기계 고장·처리장 피해·고장 중 지속 차감을 단계적으로 넣어 원금·이자·보급을 조정한다.</p>
 <div class="table-wrap"><table><thead><tr><th scope="col">검증 대상</th><th scope="col">확인할 내용</th></tr></thead><tbody>
 <tr><th scope="row">초기 구매</th><td>1–4인 모두 기본 세트를 살 수 있는가? 테이프 구매 후 첫 고장 대응 비용이 남는가?</td></tr>
 <tr><th scope="row">역할 가치</th><td>절단·오염 제거·탐색·폼건·운반이 실제 팀 수익에 기여하는가? 스캐너·폼건 담당이 대기만 하는가?</td></tr>
 <tr><th scope="row">기계 고장</th><td>정상 기계는 즉시 정산하고 고장 난 기계만 멈추는가? 대기 물량을 복구 후 한 번씩 정산하는가?</td></tr>
 <tr><th scope="row">문 수리</th><td>어느 쪽에 갇혀도 테이프·돈 없이 수리 가능한가? 수동 60초와 경제 회복 60초가 부당하게 충돌하지 않는가?</td></tr>
 <tr><th scope="row">처리장 펌프</th><td>고장 중 방 피해, 수리 후 종료, 정상 기계 즉시 정산이 함께 작동하는가? 위험 밖 Q 투척 우회·수리 접근 불가가 있는가?</td></tr>
+
+
+<tr><th scope="row">협동 수리</th><td>다인 두 패드 동시 인식·솔로 제한 시간 내 순차 인식이 작동하는가? 차단기 지침·노브 일치와 다인 문 잠금·성공 해제, 솔로 지침 상호작용 잠금 생략을 확인한다. 기지 일반 조명은 꺼지고 지침실 보조조명은 지침을 위에서 아래로 약하게 비추는가? 스캐너를 든 상태로 라이트와 노브를 사용할 수 있는가? 음성 없이 유리 그림으로 완료 가능한가? 반대편 거울상·스캐너 분실·중도 이탈·잠금 우회를 검증한다.</td></tr>
+<tr><th scope="row">고장 중 차감</th><td>완납 후에도 차감되는가? 고장 시작·복구 완료에 정확히 연동되는가? 여러 고장과 정산 중단이 겹칠 때 복구까지 버틸 수 있는가? 고장별 차감률·누적 손실과 수리 대상을 표시하는 UI를 검토한다.</td></tr>
 <tr><th scope="row">실효 수익</th><td>분류별 보상 비중·3분 순수익·입금 지연을 측정한다. 피해·보급비·수리 시간을 포함한다.</td></tr>
 <tr><th scope="row">인원 차이</th><td>현장 물량·동선·복구 시간이 다인 수익 증가에 맞는가? 같은 쓰레기 단가와 도구 단가를 유지하면서 조정할 수 있는가?</td></tr>
 <tr><th scope="row">악용·중복</th><td>재획득·수리·생성 볼륨 반복 생성으로 보상이 중복되지 않는가? 펌프와 데미지존 연결 오류·겹침으로 피해가 남거나 중복되지 않는가?</td></tr>
@@ -201,11 +224,14 @@
 <section id="open-decisions">
 <h2>남은 결정 사항</h2>
 <div class="table-wrap"><table><thead><tr><th scope="col">분야</th><th scope="col">다음에 결정할 내용</th></tr></thead><tbody>
-<tr><th scope="row">초기 자금·채무</th><td>착수금은 지원금인가 대출인가? 초기 의무채무의 범위·원금·상환 방법. 추가 대출 한도와 완납 이후 압박.</td></tr>
+<tr><th scope="row">초기 자금·채무</th><td>착수금은 지원금인가 대출인가? 초기 의무채무의 범위·원금·상환 방법. 추가 대출 한도. 완납 이후 시설 고장 차감과 대출 부담의 분리.</td></tr>
 <tr><th scope="row">가격·보급</th><td>4종 가격·착수금 후보 채택 여부. 테이프 가격·초기 수량·소모량, 폼건 충전·추가 보급 비용.</td></tr>
 <tr><th scope="row">지갑·구매</th><td>공동 지갑·구매 확인·초기 재고·필수 구매 세트. 강화·환매·다음 계약 장비 재사용.</td></tr>
 <tr><th scope="row">수익·평가</th><td>쓰레기별 보상·평가 산식. 볼륨 생성 쓰레기·절단 잔해·오염물의 수익·목표량 반영.</td></tr>
 <tr><th scope="row">고장·수리</th><td>기계·문·펌프의 주기와 겹침. 추첨 제외·누적 고장·수리 진행·테이프 시간. 문 외 무도구 수리 범위.</td></tr>
+
+<tr><th scope="row">협동 수리</th><td>적용 시설·발생 조건·패드 제한 시간과 동시 인식 허용 오차, 차단기 열·칸 수·노브 조작·랜덤 규칙·오답 판정. 지침실 보조조명과 스캐너 라이트 밝기·범위·조작·소모, 정전 시작 시점·복구 범위. 유리 그림·스캐너 분실·중도 이탈·다인 지침실 잠금 우회. 솔로 잠금 생략은 지정 방향.</td></tr>
+<tr><th scope="row">시설 고장 차감</th><td>적용 시설·차감 지갑·금액·주기·다중 고장 합산과 인원 배율. 수리 중 차감, 일시정지·로딩·정산 종료 시 처리, 음수 잔액과 회복 유예.</td></tr>
 <tr><th scope="row">체력·실패</th><td>처리장 피해량·피해 간격·경고·회복·사망 규칙. 음수 종료·회복 유예와 수리 시간의 관계.</td></tr>
 <tr><th scope="row">인원·시간</th><td>1–4인 맵 물량·동선·실효 수익. 합류·장기 이탈·일시정지·로딩·다음 계약 처리.</td></tr>
 <tr><th scope="row">던지기</th><td>충전 시간·거리·대상 우선순위·취소·충돌·맵 밖 분실 처리.</td></tr>
