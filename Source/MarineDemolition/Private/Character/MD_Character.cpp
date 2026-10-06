@@ -8,6 +8,7 @@
 #include "Component/Scrape/MD_StainScraperComponent.h"
 #include "Component/Scanning/MD_ScannerComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Equipment/MD_ThrowComponent.h"
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Component/Equipment/MD_FoamGunComponent.h"
@@ -102,6 +103,7 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	ScannerComponent = CreateDefaultSubobject<UMD_ScannerComponent>(TEXT("ScannerComponent"));
 
 	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
+	ThrowComponent = CreateDefaultSubobject<UMD_ThrowComponent>(TEXT("ThrowComponent"));
 
 	AudioRelayComponent = CreateDefaultSubobject<UMD_AudioRelayComponent>(TEXT("AudioRelayComponent"));
 
@@ -247,6 +249,7 @@ void AMD_Character::CancelScrapeInteraction()
 void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
+	if (ThrowComponent && InputConfig) ThrowComponent->Configure(InputConfig->ThrowSettings);
 
 	// 시작 시점에 이미 준비된 PlayerState의 이름을 이름표에 반영한다.
 	RefreshNameTag();
@@ -324,6 +327,7 @@ void AMD_Character::ConfigureFirstPersonRendering()
 
 void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (ThrowComponent) ThrowComponent->CancelThrow();
 	UnbindAppearanceDelegate();
 	CancelScrapeInteraction();
 
@@ -1018,6 +1022,7 @@ void AMD_Character::PossessedBy(AController* NewController)
 
 void AMD_Character::UnPossessed()
 {
+	if (ThrowComponent) ThrowComponent->CancelThrow();
 	CancelScrapeInteraction();
 
 	if (IsValid(InteractionComponent))
@@ -1032,6 +1037,7 @@ void AMD_Character::UnPossessed()
 
 void AMD_Character::PawnClientRestart()
 {
+	if (ThrowComponent) ThrowComponent->CancelThrow();
 	// 입력 컴포넌트가 재생성되기 전에 기존 포커스와 입력 소유권을 정리한다.
 	CancelScrapeInteraction();
 
@@ -1107,6 +1113,17 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	if (!IsValid(InputConfig))
 	{
 		return;
+	}
+
+	if (IsValid(InputConfig->ThrowAction))
+	{
+		EIC->BindAction(InputConfig->ThrowAction, ETriggerEvent::Started, this, &AMD_Character::HandleThrowStartedInput);
+		EIC->BindAction(InputConfig->ThrowAction, ETriggerEvent::Completed, this, &AMD_Character::HandleThrowReleasedInput);
+		EIC->BindAction(InputConfig->ThrowAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleThrowCanceledInput);
+	}
+	if (IsValid(InputConfig->CancelThrowAction))
+	{
+		EIC->BindAction(InputConfig->CancelThrowAction, ETriggerEvent::Started, this, &AMD_Character::HandleThrowCanceledInput);
 	}
 
 	if (IsValid(InputConfig->ScannerModeSwitchAction))
@@ -1245,6 +1262,7 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 {
+	if (ThrowComponent) ThrowComponent->CancelThrow();
 	// 상호작용 시작 시 진행 중인 오염물 제거 동작을 취소한다.
 	CancelScrapeInteraction();
 
@@ -1269,6 +1287,7 @@ void AMD_Character::HandleScannerModeSwitchInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 {
+	if (ThrowComponent && ThrowComponent->IsCharging()) return;
 	if (!IsValid(EquipHotbarComponent))
 	{
 		return;
@@ -1326,6 +1345,21 @@ void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 	ASC->CancelAbilities(&AbilityTags);
 }
 
+void AMD_Character::HandleThrowStartedInput(const FInputActionValue& Value)
+{
+	if (ThrowComponent) ThrowComponent->BeginThrow();
+}
+
+void AMD_Character::HandleThrowReleasedInput(const FInputActionValue& Value)
+{
+	if (ThrowComponent) ThrowComponent->ReleaseThrow();
+}
+
+void AMD_Character::HandleThrowCanceledInput(const FInputActionValue& Value)
+{
+	if (ThrowComponent) ThrowComponent->CancelThrow();
+}
+
 void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
 {
 	//GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("SwapEquipment: Activated"));
@@ -1342,6 +1376,7 @@ void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
 	{
 		return;
 	}
+	if (ThrowComponent) ThrowComponent->CancelThrow();
 	CancelScrapeInteraction();
 
 	EquipHotbarComponent->CycleSlot(ScrollValue > 0.f ? 1 : -1);
@@ -1350,6 +1385,7 @@ void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex)
 {
+	if (ThrowComponent) ThrowComponent->CancelThrow();
 	if (!IsValid(EquipHotbarComponent))
 	{
 		return;
@@ -1602,6 +1638,8 @@ void AMD_Character::RefreshStainInputState()
 
 void AMD_Character::HandleHotbarChanged()
 {
+	// Charge replication for the same tool must not cancel a newly started throw.
+	// The throw component validates target/slot changes while charging and again on release.
 	RefreshStainInputState();
 	RefreshToolMesh();
 
@@ -1620,6 +1658,7 @@ void AMD_Character::HandleHotbarChanged()
 
 void AMD_Character::HandleHeldActorChanged(AActor* HeldActor)
 {
+	if (ThrowComponent) ThrowComponent->CancelThrow();
 	// EndPlay 의 CancelInteraction 으로도 오므로 파괴 중엔 메시를 건드리지 않는다
 	if (IsActorBeingDestroyed())
 	{
@@ -1926,6 +1965,7 @@ void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
 	const bool bIsDead = (NewState == EMD_HealthState::Dead);
 	if (bIsDead)
 	{
+		if (ThrowComponent) ThrowComponent->CancelThrow();
 		CancelScrapeInteraction();
 		if (ScannerComponent) ScannerComponent->ClearScan();
 	}

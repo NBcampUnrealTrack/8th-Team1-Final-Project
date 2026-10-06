@@ -95,6 +95,8 @@ public:
 	 * 헤라 상호작용을 정리한다. GameOnly 복귀에서도 호출되지만 정리는 멱등이다.
 	 */
 	virtual void SetInputMode(const FInputModeDataBase& InData) override;
+	/** 입력 초기화가 키 해제로 처리되기 전에 충전 던지기를 취소한다. */
+	virtual void FlushPressedKeys() override;
 	virtual void SetViewTarget(
 		AActor* NewViewTarget,
 		FViewTargetTransitionParams TransitionParams = FViewTargetTransitionParams()) override;
@@ -233,6 +235,9 @@ protected:
 	virtual void SetPawn(APawn* InPawn) override;
 
 private:
+	/** UI 전환과 창 비활성화에서 현재 캐릭터의 충전 던지기를 중단한다. */
+	void CancelThrowInteraction();
+
 	/** 로컬 커스터마이징 세이브에서 가장 최근 외형을 읽어 서버에 전달한다. */
 	void RestoreAppearanceFromLocalSave();
 

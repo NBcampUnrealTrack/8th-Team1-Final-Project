@@ -116,6 +116,18 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
 	bool AddItem(UMD_ItemDefinition* ItemDefinition, int32 Amount = 1);
 
+	/** Snapshot one owned item without refilling its stored charge. */
+	UFUNCTION(BlueprintPure, Category = "Hotbar|Transfer")
+	bool GetItemTransferAtSlot(int32 SlotIndex, FMD_HotbarToolEntry& OutEntry) const;
+
+	/** Remove exactly the snapshotted item after a world pickup has been prepared. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar|Transfer")
+	bool TryRemoveTransferredItem(int32 SlotIndex, const FMD_HotbarToolEntry& ExpectedEntry);
+
+	/** Receive one existing item, preserving its charge and original usage cost. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar|Transfer")
+	bool AddTransferredItem(const FMD_HotbarToolEntry& Entry);
+
 	// 보관 중인 도구의 현재 충전 잔량 조회
 	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")
 	float GetToolCharge(UMD_ToolDefinition* ToolDefinition);
@@ -212,6 +224,9 @@ protected:
 
 	// 서버 슬롯 변경을 캐릭터와 UI 및 복제 대상에 전달
 	void NotifyEntriesChanged();
+
+	// GE and UI callbacks must not start another transfer inside the current one.
+	bool bItemTransferInProgress = false;
 
 	// 클라이언트의 선택 요청을 서버 상태에 반영
 	UFUNCTION(Server, Reliable)

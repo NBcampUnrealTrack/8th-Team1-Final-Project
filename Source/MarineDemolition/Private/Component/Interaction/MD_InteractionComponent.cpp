@@ -819,6 +819,11 @@ bool UMD_InteractionComponent::IsHeldByOtherPawn(const AActor* Target) const
 	return false;
 }
 
+UPrimitiveComponent* UMD_InteractionComponent::GetHeldPrimitive() const
+{
+	return IsValid(HeldActor) && HasAuthorityPhysicsGrip() ? PhysicsHandle->GetGrabbedComponent() : nullptr;
+}
+
 void UMD_InteractionComponent::ReleaseHeldActor()
 {
 	APawn* OwnerPawn = GetOwnerPawn();

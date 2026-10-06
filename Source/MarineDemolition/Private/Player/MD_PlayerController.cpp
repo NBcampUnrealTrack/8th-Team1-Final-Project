@@ -40,6 +40,7 @@
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Equipment/MD_ThrowComponent.h"
 #include "Data/Equipment/MD_QuestItemDefinition.h"
 #include "World/Merchant/MD_Merchant.h"
 #include "Interfaces/OnlineIdentityInterface.h"
@@ -64,7 +65,27 @@ void AMD_PlayerController::SetInputMode(const FInputModeDataBase& InData)
 {
 	// UI 전환으로 입력을 잃기 전에 진행 중인 오염물 타격을 정리한다.
 	CancelScrapeInteraction();
+	CancelThrowInteraction();
 	Super::SetInputMode(InData);
+}
+
+void AMD_PlayerController::CancelThrowInteraction()
+{
+	AMD_Character* const MDCharacter = Cast<AMD_Character>(GetPawn());
+	if (IsValid(MDCharacter))
+	{
+		if (UMD_ThrowComponent* ThrowComponent = MDCharacter->GetThrowComponent())
+		{
+			ThrowComponent->CancelThrow();
+		}
+	}
+}
+
+void AMD_PlayerController::FlushPressedKeys()
+{
+	// Enhanced Input의 Completed 콜백보다 먼저 취소해 창 전환을 발사로 해석하지 않는다.
+	CancelThrowInteraction();
+	Super::FlushPressedKeys();
 }
 
 void AMD_PlayerController::SetViewTarget(
@@ -75,6 +96,7 @@ void AMD_PlayerController::SetViewTarget(
 	{
 		// 컷신·관전 카메라로 전환하기 전에 진행 중인 타격을 정리한다.
 		CancelScrapeInteraction();
+		CancelThrowInteraction();
 	}
 	Super::SetViewTarget(NewViewTarget, TransitionParams);
 }
@@ -99,6 +121,7 @@ void AMD_PlayerController::ClientWasKicked_Implementation(const FText& KickReaso
 void AMD_PlayerController::HandleApplicationWillDeactivate()
 {
 	CancelScrapeInteraction();
+	CancelThrowInteraction();
 }
 
 void AMD_PlayerController::SubmitPlatformNickname()
@@ -663,6 +686,7 @@ void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	CancelScrapeInteraction();
+	CancelThrowInteraction();
 	Super::EndPlay(EndPlayReason);
 }
 

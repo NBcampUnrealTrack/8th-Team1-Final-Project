@@ -26,6 +26,7 @@ class UMD_StainScraperComponent;
 class UMD_ScannerComponent;
 class UGameplayAbility;
 class UMD_EquipHotbarComponent;
+class UMD_ThrowComponent;
 class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
 class UMD_ItemDefinition;
@@ -78,6 +79,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "Equipment")
 	UMD_EquipHotbarComponent* GetHotbarComponent() const { return EquipHotbarComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "Throw")
+	UMD_ThrowComponent* GetThrowComponent() const { return ThrowComponent; }
 
 	UFUNCTION(BlueprintPure, Category = "MD|Audio")
 	UMD_AudioRelayComponent* GetAudioRelayComponent() const { return AudioRelayComponent; }
@@ -214,6 +218,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_EquipHotbarComponent> EquipHotbarComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_ThrowComponent> ThrowComponent;
 
 	/** 도구 작업음을 다른 클라이언트에게 중계한다 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -359,6 +366,9 @@ private:
 	void HandleAbilityInput(const FInputActionValue& Value);
 	void HandleScannerModeSwitchInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
+	void HandleThrowStartedInput(const FInputActionValue& Value);
+	void HandleThrowReleasedInput(const FInputActionValue& Value);
+	void HandleThrowCanceledInput(const FInputActionValue& Value);
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
 	void HandleSelectHotbarSlotInput(const FInputActionValue& Value, int32 SlotIndex);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
