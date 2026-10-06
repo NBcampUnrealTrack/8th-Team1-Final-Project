@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><meta name="description" content="Project ATM 협동 수리 시스템: 두 지문패드 동시 인식, 솔로 순차 인식, 정전 차단기 지침 전달, 스캐너 라이트와 유리창 그림."><title>협동 수리 시스템 기획서 | Project ATM</title><style>
+:root{--ink:#20314a;--muted:#55647b;--blue:#194a8d;--paper:#fff;--wash:#edf3fa;--line:#d5deea;--green:#226750;--amber:#885b17;--amberwash:#fff6e6}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:#f4f7fb;color:var(--ink);font-family:"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif;font-size:15px;line-height:1.85;word-break:keep-all;overflow-wrap:anywhere}a{color:var(--blue);text-underline-offset:4px}a:focus-visible,button:focus-visible,summary:focus-visible{outline:3px solid var(--blue);outline-offset:4px}button{font:inherit;cursor:pointer}p{margin:0 0 15px}h1,h2,h3{line-height:1.4;letter-spacing:-.04em}h1{font-size:clamp(29px,4vw,43px);margin:20px 0 18px}h2{font-size:25px;margin:0 0 18px}h3{font-size:18px;margin:26px 0 12px}strong{font-weight:700}ul,ol{padding-left:24px;margin:10px 0 18px}li+li{margin-top:7px}.shell{max-width:1280px;margin:auto;display:grid;grid-template-columns:230px minmax(0,1fr);gap:42px;padding:32px}.rail{align-self:start;position:sticky;top:26px}.brand{font-size:17px;font-weight:700;color:var(--blue);margin:0 0 25px}.rail nav{border-left:2px solid var(--line);padding-left:17px}.rail nav a{display:block;text-decoration:none;padding:8px 0;font-size:14px}.rail nav a:hover{text-decoration:underline}.rail p{font-size:12px;line-height:1.8;color:var(--muted);margin-top:24px}.print{margin-top:20px;padding:8px 15px;border:1px solid var(--line);background:var(--paper);color:var(--blue);border-radius:6px}.document{min-width:0;background:var(--paper);border:1px solid var(--line);border-top:6px solid var(--blue);padding:38px 44px 26px}.mast{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--muted)}.state{padding:4px 11px;background:var(--wash);color:var(--blue);border-radius:4px;font-weight:700}.intro{font-size:17px;max-width:40em}.metadata{display:grid;grid-template-columns:110px 1fr;gap:5px 12px;font-size:13px;color:var(--muted);margin:24px 0 0}.metadata dt{font-weight:700}.metadata dd{margin:0}section{margin-top:36px;padding-top:30px;border-top:1px solid var(--line)}.note{padding:16px 20px;border-left:4px solid var(--blue);background:var(--wash);margin:20px 0}.note p:last-child{margin-bottom:0}.warning{background:var(--amberwash);border-left-color:var(--amber)}.flag{display:inline-block;padding:2px 8px;font-size:12px;font-weight:700;line-height:1.6;border-radius:4px;white-space:nowrap}.aligned{background:#eaf4ef;color:var(--green)}.proposed{background:var(--wash);color:var(--blue)}.open{background:var(--amberwash);color:var(--amber)}.table-wrap{overflow:auto;margin:18px 0}table{width:100%;border-collapse:collapse;font-size:14px;line-height:1.75}th,td{text-align:left;vertical-align:top;padding:13px 14px;border-bottom:1px solid var(--line)}th{background:var(--wash);font-weight:700}th:first-child,td:first-child{padding-left:12px}td p{margin:0}td .flag{margin-bottom:6px}.summary-table th:first-child{width:24%}.summary-table th:last-child{width:20%}.choice-table th:first-child{width:22%}.ledger{margin:24px 0;border:1px solid var(--line)}.ledger-row{display:grid;grid-template-columns:120px 1fr;gap:20px;padding:20px 22px}.ledger-row+.ledger-row{border-top:1px solid var(--line)}.ledger-key{font-size:20px;font-weight:700;color:var(--blue)}.ledger-row p{margin:0}.ledger-small{font-size:13px;color:var(--muted);margin-top:8px!important}.flow{list-style:none;counter-reset:step;padding:0;margin:20px 0}.flow li{counter-increment:step;display:grid;grid-template-columns:38px 1fr;gap:14px;margin:0;padding:14px 0;border-bottom:1px solid var(--line)}.flow li:before{content:counter(step);display:flex;width:32px;height:32px;align-items:center;justify-content:center;border-radius:50%;background:var(--blue);color:white;font-weight:700}.flow p{margin:4px 0 0}.muted{color:var(--muted);font-size:13px}.quote{margin:18px 0;padding:16px 20px;border-left:3px solid var(--line);background:#f8fafc}.quote p{margin:0}.quote cite{display:block;margin-top:8px;font-style:normal;font-size:12px;color:var(--muted)}details{margin:15px 0;border:1px solid var(--line);border-radius:6px}summary{padding:14px 18px;color:var(--blue);font-weight:700;cursor:pointer}details .inside{padding:0 18px 10px}.checklist li::marker{color:var(--blue)}footer{margin-top:32px;padding-top:20px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}.screen-reader{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+@media(max-width:1000px){.shell{grid-template-columns:190px minmax(0,1fr);gap:22px;padding:22px}.document{padding:30px 28px}.rail nav a{font-size:13px}}
+@media(max-width:760px){.shell{display:block;padding:14px}.rail{position:static;margin-bottom:18px}.brand{margin-bottom:10px}.rail nav{display:flex;flex-wrap:wrap;gap:2px 18px;border:0;padding:0}.rail nav a{padding:3px 0}.rail p{margin:12px 0 0}.print{margin-top:10px}.document{padding:24px 18px}.metadata{grid-template-columns:80px 1fr}.ledger-row{grid-template-columns:1fr;gap:8px;padding:18px}.table-wrap table{min-width:580px}.mast{font-size:12px}h2{font-size:23px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@media print{@page{size:A4;margin:16mm 14mm}body{background:white;font-size:10pt;line-height:1.65}.shell{display:block;padding:0;max-width:none}.rail,.print{display:none}.document{border:0;padding:0}.mast{font-size:9pt}h1{font-size:24pt}h2{font-size:16pt}h3{font-size:12pt}section{margin-top:24px;padding-top:20px}.table-wrap{overflow:visible}table{font-size:9pt;min-width:0!important}th,td{padding:8px}tr,.note,.quote,.flow li,.ledger-row{break-inside:avoid}h2,h3{break-after:avoid}a{color:inherit;text-decoration:none}.flag{font-size:8pt}details{border:0}details:not([open])>.inside{display:block}summary{padding:8px 0}footer{font-size:8pt}}
+.calculator{background:var(--wash);padding:20px;margin:20px 0;border-radius:6px}.controls{display:flex;flex-wrap:wrap;gap:18px;margin:15px 0}.controls label{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:700}.controls select,.controls input{font:inherit;padding:8px;border:1px solid var(--line);border-radius:4px;background:white;color:var(--ink)}.controls input[type=range]{width:200px}.results{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.results div{border-top:2px solid var(--blue);padding-top:12px}.results span{display:block;color:var(--muted);font-size:13px}.results strong{font-size:21px}.calculator output{display:block;margin-top:16px}.formula{padding:14px 18px;background:#f8fafc;border:1px solid var(--line);font-size:14px}.new-note{margin:24px 0 0}.controls input:focus-visible,.controls select:focus-visible{outline:3px solid var(--blue);outline-offset:3px}@media(max-width:760px){.results{grid-template-columns:1fr}}@media print{.calculator{break-inside:avoid}.controls{display:none}}
+
+.rail nav a{padding:6px 0}.rule-state{font-size:13px;color:var(--muted)}.draft-table th:first-child{width:27%}.archive .inside{padding-top:10px}.archive section:first-child{margin-top:10px}.source-note{font-size:13px;color:var(--muted)}@media print{#meeting-record details:not([open])>.inside{display:none}#meeting-record details[open]>.inside{display:block}}
+
+.status{font-size:12px;font-weight:700;padding:3px 8px;border:1px solid var(--line);border-radius:4px;white-space:nowrap}.confirmed{color:var(--green);background:#eaf4ef}.candidate{color:var(--amber);background:var(--amberwash)}.scope-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.scope-grid>div{border-top:2px solid var(--blue);padding-top:12px}.scope-grid h3{margin-top:0}.prototype{border:1px solid var(--line);padding:22px;margin:20px 0}.prototype h3{margin-top:0}.knob-controls{display:flex;flex-wrap:wrap;gap:15px;margin:16px 0}.knob-controls label{font-weight:700;display:grid;gap:6px}.knob-controls select{font:inherit;padding:8px;border:1px solid var(--line);background:white;color:var(--ink)}.actions{display:flex;flex-wrap:wrap;gap:10px;margin:12px 0}.actions button{border:1px solid var(--blue);border-radius:5px;padding:8px 13px;background:white;color:var(--blue)}.actions button.primary{background:var(--blue);color:white}canvas{display:block;width:100%;height:auto;background:#f2f8fc;border:2px solid #9cbacf;touch-action:none}.demo-feedback{min-height:2em;display:block;color:var(--blue);font-weight:700}.demo-feedback[data-state="ok"]{color:var(--green)}.demo-feedback[data-state="retry"]{color:var(--amber)}textarea{font:inherit;width:100%;min-height:75px;padding:10px;border:1px solid var(--line);background:white}.muted{color:var(--muted);font-size:13px}.process{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:18px 0}.process span{padding:7px 11px;background:var(--wash);border:1px solid var(--line)}.process b{color:var(--muted)}.spec-table th:first-child{width:22%}select:focus-visible,textarea:focus-visible,canvas:focus-visible{outline:3px solid var(--blue);outline-offset:4px}figure{margin:20px 0}figcaption{margin-top:10px;color:var(--muted);font-size:13px}.document{padding-bottom:38px}@media(max-width:760px){.scope-grid{grid-template-columns:1fr}.prototype{padding:15px}.process{font-size:13px}}@media print{.actions,.knob-controls,canvas,textarea,.demo-feedback{display:none}.prototype{padding:10px;border:0}.scope-grid{display:block}.process{display:block}.process span{display:inline-block;margin:3px}.prototype svg{max-height:270px}details:not([open])>.inside{display:block}}
+</style></head><body><div class="shell"><aside class="rail"><div class="brand">Project ATM 시스템 기획</div><nav aria-label="문서 목차"><a href="#summary">시스템 개요</a><a href="#rules">확정 규칙</a><a href="#placement">배치 구역·층 구분</a><a href="#fingerprint">지문패드 수리</a><a href="#breaker">차단기 수리</a><a href="#restart">지침실 재시작·문 개방</a><a href="#lighting">정전·스캐너 라이트</a><a href="#communication">음성·유리 그림</a><a href="#interface">조작·UI</a><a href="#states">상태와 판정</a><a href="#integration">고장·경제 연결</a><a href="#exceptions">솔로·이탈·예외</a><a href="#implementation">구현·데이터 요구</a><a href="#verification">검증 기준</a><a href="#decisions">미결정 항목</a><a href="#preview">노브·그림 미리보기</a></nav><button type="button" class="print" onclick="window.print()">인쇄 / PDF 저장</button><p>최신 사용자 지정 규칙을 기준으로 작성했습니다. 수치와 예외 처리 후보는 구현 전에 결정해야 합니다.</p></aside><main class="document">
+<header>
+<div class="mast"><span>Project ATM · 시스템 기획</span><span class="state">협동 수리</span></div>
+<h1>협동 수리 시스템 기획서</h1>
+<p class="intro">두 지점의 동시 인식과 지침 전달·차단기 조작으로 협력을 만든다. 정전 구간에서는 스캐너 담당이 빛을 제공하고 수리를 수행한다.</p>
+<dl class="metadata"><dt>작성 기준</dt><dd>2026-10-06 · 이 대화에서 지정한 규칙</dd><dt>문서 상태</dt><dd>시스템 설계안 · 구현 및 플레이 검증 전</dd><dt>읽기 기준</dt><dd>사용자 확정 규칙 / 설계 후보 / 미결정 수치를 구분</dd><dt>관련 문서</dt><dd><a href="%EB%8C%80%EC%B6%9C%C2%B7%EA%B2%BD%EC%A0%9C%20%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EC%95%84%EC%9D%B4%EB%94%94%EC%96%B4%20%ED%9A%8C%EC%9D%98.html#cooperative-repair">협동 청소·경제·현장 고장 통합 기획</a> · <a href="index.html">V2 문서 목차</a></dd></dl>
+</header>
+
+<section id="summary"><h2>시스템 개요</h2>
+<div class="scope-grid"><div><h3>지문패드 · 동시 행동</h3><p>서로 다른 두 플레이어가 떨어진 지점에서 타이밍을 맞춘다. 솔로는 두 지점을 제한 시간 안에 순서대로 인식한다.</p></div><div><h3>차단기 · 정보와 조작 분담</h3><p>설명자는 지침실에서 노브 위치를 전달하고, 스캐너 담당은 어둠 속 차단기로 이동해 배치를 맞춘다.</p></div></div>
+<p>목적은 고장 복구를 역할 분담과 대화가 필요한 작업으로 만드는 것이다. 두 수리 방식은 독립적인 종류이며 한 고장마다 반드시 두 방식을 연속 수행하는 규칙은 정하지 않았다.</p>
+<div class="note"><p><strong>적용 대상은 미정.</strong> 어떤 문·분리수거기·설비가 지문패드 또는 차단기 수리로 연결되는지 별도 지정해야 한다. 차단기 수리의 정전은 현재 사용자 지정에 따라 기지 일반 조명 전체에 적용한다.</p></div>
+</section>
+
+<section id="rules"><h2>확정 규칙</h2>
+<div class="table-wrap"><table class="spec-table"><thead><tr><th scope="col">항목</th><th scope="col">사용자 지정 기준</th></tr></thead><tbody>
+<tr><th scope="row">지문패드 · 다인</th><td>수리할 두 지점에 패드를 두고, 서로 다른 두 명이 각각 한 지점에서 동시에 상호작용해야 성공.</td></tr>
+<tr><th scope="row">지문패드 · 솔로</th><td>한 지점 인식 후 제한 시간 안에 다른 지점으로 이동해 인식하면 성공.</td></tr>
+<tr><th scope="row">차단기 지침</th><td>수리 지침에는 각 세로 열의 노브 위치가 무작위로 배치됨. 설명을 듣고 차단기의 배치를 맞춤.</td></tr>
+<tr><th scope="row">지침실 · 다인</th><td>입실·점유로 자동 잠그지 않음. 방 안에서 수리 지침에 한 번 상호작용하면 문이 닫혀 잠김. 차단기 수리 완료 또는 재시작으로 개방.</td></tr>
+<tr><th scope="row">지침실 · 재시작</th><td>재시작을 누르면 문이 열림. 시간 제한·대기 시간 없이 열린 상태를 유지하고, 수리 지침에 새로 상호작용하면 다시 닫혀 잠김.</td></tr>
+<tr><th scope="row">지침실 · 솔로</th><td>지침 상호작용에 따른 문 잠금을 생략. 지침을 읽고 밖으로 나가 차단기를 조작 가능.</td></tr>
+<tr><th scope="row">정전</th><td>차단기 수리 이벤트 중 기지 일반 조명 꺼짐.</td></tr>
+<tr><th scope="row">보조조명</th><td>지침실에만 보조조명을 두고 수리 지침 위에서 아래로 약하게 비춤.</td></tr>
+<tr><th scope="row">스캐너 담당</th><td>스캐너의 라이트를 켜고 차단기로 가서 수리.</td></tr>
+<tr><th scope="row">전달 수단</th><td>창문을 통해 말로 설명. 마이크가 없으면 유리창에 그림을 그려 설명 가능.</td></tr>
+</tbody></table></div>
+<p class="muted">재시작 문 개방에는 시간 제한이 없다. 패드 시간·거리·조명 세기·소모품 비용·오답 불이익은 미정이다. UI 문구·상태 이름과 별도 표시된 예외 후보는 구현 상태를 뜻하지 않는다.</p>
+</section>
+
+<section id="placement"><h2>배치 구역과 층 구분</h2>
+<p><span class="status confirmed">사용자 지정 배치 방향</span> 지침실·차단기는 1F 09 전력실에, 지문패드는 통제실 입구와 다른 층의 유지 보수실 입구에 배치한다. 정확한 좌표·회전·치수는 실제 맵에서 조정한다.</p>
+<div class="note"><p><strong>기획상 B1 = 실제 맵의 위층인 2층.</strong> 문서의 B1·B1-07 등 방 식별자는 유지하고, 배치 설명에 실제 2층임을 함께 표시한다. 새 층을 추가하거나 B1 구역을 지하로 다시 옮기는 지시가 아니다.</p></div>
+<div class="table-wrap"><table><thead><tr><th scope="col">대상</th><th scope="col">기획 구역 / 실제 층</th><th scope="col">배치 기준</th></tr></thead><tbody>
+<tr><th scope="row">지침실</th><td>1F 09 전력실 / 실제 1층</td><td>전력실 내부 한쪽을 유리 칸막이 부스로 구분. 창문은 바깥 작업 구역을 향하게 배치.</td></tr>
+<tr><th scope="row">수리 지침</th><td>지침실 안쪽</td><td>창문 옆 불투명 내벽에 배치해 바깥에서 정답 원문을 직접 읽을 수 없도록 구성.</td></tr>
+<tr><th scope="row">차단기</th><td>1F 09 전력실 / 실제 1층</td><td>지침실 창밖 작업 구역의 설비벽. 수리자가 창문 그림을 확인하고 스캐너 라이트로 이동·조작할 수 있게 배치.</td></tr>
+<tr><th scope="row">지문패드 A</th><td>1F 02 통제실 / 실제 1층</td><td>입구 바깥 중앙 해치 쪽 공용 벽. 통제실 문 고장과 관계없이 접근 가능.</td></tr>
+<tr><th scope="row">지문패드 B</th><td>B1-07 유지 보수실 / 실제 위층인 2층</td><td>입구 바깥 공용 벽, 해당 층 해치 출구 부근. 유지 보수실 문 고장과 관계없이 접근 가능.</td></tr>
+</tbody></table></div>
+<h3>패드 이동과 접근</h3><p>대표 솔로 경로는 <strong>A 인식 → 1층 중앙 해치 → 층간 이동 → 실제 2층 해치 출구 → B1-07 입구 바깥 B 인식</strong>이다. 반대 패드에서 시작하는 경로도 함께 측정해 이동·상호작용과 여유 시간을 포함한 제한 시간을 정한다.</p>
+<ul><li>다인은 층별로 한 명씩 맡아 두 패드에서 동시에 유효 인식.</li><li>두 패드는 지침실 내부에 넣지 않고, 패드 간 경로를 고장 문·일방 통행으로 막지 않음.</li><li>지문패드와 차단기는 독립적인 수리 종류. 어느 시설에 연결할지는 별도 결정.</li><li>지침실은 다인 지침 상호작용으로 잠금. 재시작하면 시간 제한 없이 열리고 다음 새 지침 사용에 잠금. 솔로 잠금 생략 유지.</li></ul>
+<p class="muted">부스 약 3×4m, 창문과 차단기 사이 약 3–5m는 검토 후보이며 확정 치수가 아니다. 시야·유리 그림 가독성·통행 폭·문턱 충돌·스캐너 조작을 실제 맵에서 확인한다.</p>
+</section>
+
+<section id="fingerprint"><h2>지문패드 수리</h2>
+<h3>공간 구성</h3><p>같은 수리 이벤트에 패드 A와 B를 연결한다. 다인은 각각의 지점에서 상호작용하고, 솔로는 두 지점을 이동할 수 있어야 한다. 솔로 경로를 잠긴 문·일방 통행·접근 불가 구간으로 막지 않는 배치가 필요하다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">단계</th><th scope="col">다인</th><th scope="col">솔로</th></tr></thead><tbody>
+<tr><th scope="row">준비</th><td>두 명이 A·B 지점을 나눔.</td><td>첫 패드와 두 번째 패드의 동선 확인.</td></tr>
+<tr><th scope="row">첫 인식</th><td>한 명의 인식 상태를 표시. 상대 인식 대기.</td><td>첫 인식 성공 시 제한 시간 시작.</td></tr>
+<tr><th scope="row">성공 판정</th><td>서로 다른 두 플레이어의 인식이 동시에 유효.</td><td>제한 시간 안에 같은 플레이어가 다른 패드 인식.</td></tr>
+<tr><th scope="row">복구</th><td colspan="2">연결된 고장을 복구하고 패드를 완료 상태로 변경.</td></tr>
+</tbody></table></div>
+<h3>판정의 경계</h3><ul><li>다인에서는 같은 플레이어가 두 패드에 연속 입력한 것으로 동시 인식을 대체하지 않는다.</li><li>솔로는 첫 패드 반복 인식만으로 성공하지 않는다. 반대 패드의 인식이 필요하다.</li><li>누르고 있는 동안 인식을 유지할지, 두 입력의 시각 차이를 비교할지는 미정이다. 두 판정 방식을 혼합해 구현하기 전에 하나를 선택한다.</li><li>솔로 시간 초과 시 첫 인식을 해제하고 다시 시작하는 안을 후보로 둔다. 이동 중 제한 시간을 반복 갱신하는 동작은 별도 결정한다.</li></ul>
+<p class="muted">제한 시간은 A가 있는 실제 1층과 B가 있는 실제 2층(기획 B1) 사이의 수직 이동·상호작용 시간과 여유 시간을 측정해 정한다. 다인 동시 인식 허용 오차는 네트워크 지연을 포함해 검증한다. 임의의 초 단위 값을 확정하지 않는다.</p>
+</section>
+
+<section id="breaker"><h2>차단기 수리</h2>
+<div class="process" aria-label="차단기 수리 흐름"><span>정전</span><b>→</b><span>지침 확인</span><b>→</b><span>음성·그림 전달</span><b>→</b><span>스캐너 라이트</span><b>→</b><span>노브 조작</span><b>→</b><span>복구·퇴실</span></div>
+<div class="table-wrap"><table><thead><tr><th scope="col">역할</th><th scope="col">장소·정보</th><th scope="col">수행</th></tr></thead><tbody>
+<tr><th scope="row">설명자</th><td>지침실. 보조조명으로 지침 확인.</td><td>열별 노브 위치를 읽고 창문을 통해 전달. 다인에서는 완료까지 지침실에 머묾.</td></tr>
+<tr><th scope="row">수리자</th><td>스캐너 소지. 창문 밖과 차단기.</td><td>라이트를 켜고 이동해 전달받은 배치대로 노브 조작.</td></tr>
+<tr><th scope="row">솔로</th><td>지침실과 차단기를 직접 오감.</td><td>지침과 상호작용해도 잠기지 않음. 지침 확인 후 스캐너 라이트로 이동·조작.</td></tr>
+<tr><th scope="row">나머지 팀원</th><td>3–4인 플레이의 다른 작업 지점.</td><td>다른 수리·청소를 계속하거나 전달·도구 운반을 도움. 추가 필수 역할은 정하지 않음.</td></tr>
+</tbody></table></div>
+<ol class="flow"><li><div><strong>이벤트 시작</strong><p>차단기 수리용 지침 배치를 만들고 기지 일반 조명을 끈다. 정전이 고장 발생 즉시 시작되는지, 수리 시작 시점인지 미정.</p></div></li><li><div><strong>입실 후 지침 상호작용</strong><p>입실만으로는 문을 잠그지 않는다. 다인에서 설명자가 수리 지침에 한 번 상호작용하면 문이 닫혀 잠긴다. 스캐너 담당자나 전원이 안에 남아 잠겼다면 지침의 재시작으로 문을 열어 역할을 다시 배치한다. 솔로는 지침을 사용해도 잠기지 않는다.</p></div></li><li><div><strong>지침 전달</strong><p>설명자는 “왼쪽부터 위에서 3칸, 2칸, 4칸, 5칸”처럼 열 순서와 칸 번호를 전달한다. 마이크가 없으면 창문에 그림으로 남긴다.</p></div></li><li><div><strong>스캐너로 이동·노브 조작</strong><p>수리자는 라이트로 길과 차단기를 비춘다. 각 열의 노브를 지침에 해당하는 칸으로 이동한다.</p></div></li><li><div><strong>일치 판정</strong><p>모든 열의 배치가 해당 이벤트의 지침과 일치하면 성공한다. 자동 판정 또는 별도 확인 입력, 오답 피드백은 미정.</p></div></li><li><div><strong>완료</strong><p>차단기와 기지 조명, 다인 지침실 문을 복구한다. 다른 고장 상태는 별도로 유지한다.</p></div></li></ol>
+<h3>노브와 기준 방향</h3><p>첨부 스케치의 세로 레일 구조를 따른다. 설명과 조작의 기준을 통일하기 위해 열 번호를 고정하고 칸은 위에서부터 세는 안을 제안한다. 아래 미리보기의 4열·5칸은 설명용 예시이며 실제 개수는 미정이다.</p>
+<p>지침 배치는 한 수리 시도 동안 유지하는 안을 후보로 둔다. 플레이어가 차단기로 이동하는 동안 정답이 바뀌면 전달한 정보가 무효가 되므로 재추첨 조건을 명시해야 한다.</p>
+</section>
+
+<section id="restart"><h2>지침실 재시작과 문 개방</h2>
+<p><span class="status confirmed">사용자 지정 예외</span> 스캐너 담당자나 4명 전원이 안에 있는 상태에서 누군가 지침을 사용해 문이 잠겼다면, 수리 지침의 <strong>재시작</strong> 버튼으로 문을 열어 역할을 다시 배치한다. 개방 시간 제한이나 재잠금 대기 시간은 없다.</p>
+<ol class="flow"><li><div><strong>재시작 선택</strong><p>수리 지침의 재시작을 누르면 문 잠금을 해제하고 문을 연다. 재시작 버튼 입력 자체는 지침 잠금 입력으로 처리하지 않는다.</p></div></li><li><div><strong>열린 상태 유지</strong><p>스캐너 담당자와 외부 수리자가 퇴실하고 설명자는 남거나 재입실할 수 있다. 입실·퇴실·잔류 인원·시간 경과만으로 문을 닫지 않는다.</p></div></li><li><div><strong>새 지침 상호작용으로 잠금</strong><p>다인에서 수리 지침에 다시 한 번 상호작용하면 문이 닫혀 잠긴다. 재시작 직후에도 새 상호작용이 가능하며 시간을 기다리는 조건은 없다. 솔로는 지침 사용으로 잠기지 않는다.</p></div></li></ol>
+<div class="table-wrap"><table><thead><tr><th scope="col">상황</th><th scope="col">문과 진행 기준</th></tr></thead><tbody>
+<tr><th scope="row">스캐너 담당자가 안에 있음</th><td>재시작으로 문을 열어 퇴실. 설명자가 다음 지침 상호작용을 하면 다시 잠김.</td></tr>
+<tr><th scope="row">4명 전원 입실</th><td>입실만으로 잠기지 않음. 지침 사용으로 전원이 갇혔다면 재시작 후 외부 수리자가 퇴실하고, 설명자가 지침을 다시 사용해 잠금을 시작.</td></tr>
+<tr><th scope="row">전원 퇴실·재입실</th><td>문 열림 유지. 입실·점유로 자동 잠기지 않으며 지침 사용 대기.</td></tr>
+<tr><th scope="row">여러 명 잔류</th><td>잔류 인원과 무관하게 문 열림 유지. 지침을 새로 사용하면 잠기며 필요하면 재시작을 다시 사용.</td></tr>
+<tr><th scope="row">솔로</th><td>입실·지침 사용·재시작 모두에서 잠금 생략 유지.</td></tr>
+<tr><th scope="row">개방 중 수리 완료</th><td>완료가 우선. 이후 지침 사용이나 오래된 입력으로 복구된 문을 다시 잠그지 않음.</td></tr>
+</tbody></table></div>
+<p>재시작은 고장 복구가 아니므로 정전·지침실 보조조명과 적용 중인 고장 차감을 유지한다. 대출 유예·고장 발생 시각·차감 누적·다른 고장 진행을 초기화하지 않는다.</p>
+<p class="note warning"><strong>추가 결정 필요.</strong> 재시작 시 지침 정답·현재 노브·유리 그림을 유지할지 초기화할지는 미정이다. 문턱에 사람이 걸린 순간의 안전한 폐쇄는 별도 결정·검증한다.</p>
+</section>
+
+<section id="lighting"><h2>정전·스캐너 라이트</h2>
+<div class="table-wrap"><table class="spec-table"><thead><tr><th scope="col">대상</th><th scope="col">이벤트 중</th><th scope="col">완료 후</th></tr></thead><tbody>
+<tr><th scope="row">기지 일반 조명</th><td>꺼짐.</td><td>차단기 복구 시 해당 정전 해제. 여러 정전이 겹치면 복구 범위를 별도 관리.</td></tr>
+<tr><th scope="row">지침실 보조조명</th><td>지침 위에서 아래로 약한 조명. 읽기와 그림 전달 가능.</td><td>이벤트 종료 후 상태는 미정.</td></tr>
+<tr><th scope="row">스캐너 라이트</th><td>소지자가 켜서 이동·차단기 작업.</td><td>켜짐 유지 또는 자동 종료 여부 미정.</td></tr>
+</tbody></table></div>
+<ul><li>지침실 보조조명은 지침 전체의 노브·칸을 읽을 수 있어야 한다. 분위기 때문에 일부 칸을 판독 불가능하게 만들지 않는다.</li><li>스캐너를 손에 든 채 조명과 노브 조작이 함께 가능해야 한다. 조작 진입 시 장비를 숨기는 기존 동작이 있다면 라이트가 유지되는지 확인한다.</li><li>이동 거리·문·차단기의 칸 번호·창문 그림이 실제 카메라에서 읽히는지 검증한다.</li><li>스캐너 고장 위치 탐지·지도 표시는 이전 회의의 추가 제안이다. 이번 사용자 지정에서 확정된 기능은 라이트를 이용한 차단기 수리다.</li></ul>
+<p class="muted">밝기·색·범위·조작키·충전 소모는 미정. 배터리 부족이나 스캐너 분실로 수리가 불가능해질 때의 복구 방법도 필요하다.</p>
+</section>
+
+<section id="communication"><h2>음성·유리 그림 전달</h2>
+<p>설명자는 창문을 통해 지침을 전달한다. 음성을 사용할 수 없으면 유리창에 노브 위치를 그린다. 수리자는 그림을 확인하고 차단기로 이동할 수 있다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">항목</th><th scope="col">설계 기준·후보</th></tr></thead><tbody>
+<tr><th scope="row">표현</th><td>세로 열과 노브 위치를 그릴 수 있어야 함. 열 번호와 위에서 세는 칸 기준을 함께 표시하는 후보.</td></tr>
+<tr><th scope="row">반대편 가독성</th><td>유리 양쪽의 좌우 반전으로 번호가 바뀌지 않게 설계. 어느 쪽 시점을 기준으로 그리는지 안내.</td></tr>
+<tr><th scope="row">유지·삭제</th><td>수리자가 이동한 뒤 다시 확인 가능하도록 이벤트 중 유지하는 후보. 지우기·이벤트 종료 시 초기화 규칙 미정.</td></tr>
+<tr><th scope="row">다인 공유</th><td>설명자의 선과 지우기 결과가 창문 밖 플레이어에게 보이도록 동기화 필요.</td></tr>
+<tr><th scope="row">정보 분리</th><td>지침을 차단기 UI에 직접 띄우지 않는 후보. 창문 밖에서 지침 원본을 그대로 읽을 수 있는 배치인지도 확인.</td></tr>
+</tbody></table></div>
+<p>그림은 전달 수단이며 노브를 자동으로 맞추거나 정답 입력으로 판정하지 않는다. 솔로의 별도 메모 기능은 아직 정하지 않았다.</p>
+</section>
+
+<section id="interface"><h2>조작·UI</h2>
+<p><span class="status candidate">UI·조작 후보</span> 실제 키는 기존 상호작용 입력과 연결하고, 컨트롤러 입력도 함께 정한다. 새로운 고정 키나 충전 소모를 임의로 추가하지 않는다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">대상</th><th scope="col">필요한 피드백</th><th scope="col">문구 예시</th></tr></thead><tbody>
+<tr><th scope="row">지문패드</th><td>A·B 구분, 인식 가능·대기·완료, 다인 상대 인식 상태.</td><td>“상대 패드 인식 대기”</td></tr>
+<tr><th scope="row">솔로 패드</th><td>첫 인식 성공, 반대 패드와 남은 제한 시간.</td><td>“다른 패드를 제한 시간 안에 인식하세요”</td></tr>
+<tr><th scope="row">지침실 입구</th><td>입실은 자유, 다인 지침 사용 시 잠금·재시작 문 개방·수리 완료 해제를 안내.</td><td>“수리 지침을 사용하면 문이 잠깁니다. 재시작으로 문을 열 수 있습니다”</td></tr>
+<tr><th scope="row">수리 지침 재시작</th><td>재시작 버튼, 문 열림 상태와 다음 지침 사용 시 잠금 안내. 개방 카운트다운 없음.</td><td>“재시작 · 문 열기” / “다음 지침 사용 시 문이 잠깁니다”</td></tr>
+<tr><th scope="row">스캐너</th><td>라이트 켜기·끄기 상태와 조작 안내.</td><td>“스캐너 라이트 켜기”</td></tr>
+<tr><th scope="row">차단기</th><td>선택 열·현재 칸·조작 가능·수리 성공.</td><td>“2열 · 위에서 3칸”</td></tr>
+<tr><th scope="row">유리창</th><td>그리기 진입·종료·지우기 안내.</td><td>“유리창에 지침 그리기”</td></tr>
+<tr><th scope="row">복구</th><td>조명 복구와 지침실 문 해제의 시청각 피드백.</td><td>“차단기 복구 완료”</td></tr>
+</tbody></table></div>
+<p>기존 상시 시간 HUD 제거 방향과 별개로, 솔로 패드의 제한 시간은 해당 수리 중에만 표시하는 후보다. 전화 독촉 UI와 협동 수리 안내가 서로 가리지 않게 배치한다.</p>
+</section>
+
+<section id="states"><h2>상태와 성공 판정</h2>
+<p><span class="status candidate">구현용 상태 설계 후보</span> 이름은 설명을 위한 것이며 실제 코드·에셋의 이름이 아니다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">종류</th><th scope="col">상태</th><th scope="col">주요 전이</th></tr></thead><tbody>
+<tr><th scope="row">공통</th><td>정상 → 고장·수리 대기 → 수리 중 → 복구 완료</td><td>원인 이벤트와 연결된 수리 성공을 함께 관리. 중복 완료 금지.</td></tr>
+<tr><th scope="row">다인 패드</th><td>대기 → 한쪽 인식 → 동시 인식 성공</td><td>서로 다른 플레이어·같은 수리 사건·서로 다른 패드 조건 확인.</td></tr>
+<tr><th scope="row">솔로 패드</th><td>대기 → 첫 인식·시간 진행 → 두 번째 인식 성공 / 시간 초과</td><td>반대 패드인지, 동일 플레이어인지, 제한 시간을 넘었는지 판정.</td></tr>
+<tr><th scope="row">차단기</th><td>정전·지침 생성 → 전달·노브 조작 → 배치 일치 → 복구</td><td>현재 수리 사건의 지침과 노브 배열을 비교. 지침실 잠금은 별도 상태로 연결.</td></tr>
+<tr><th scope="row">지침실 재시작</th><td>지침 사용·잠김 → 재시작·문 열림 → 새 지침 사용·잠김</td><td>다인·미복구 상태에서 새 지침 상호작용으로만 잠금. 개방 시간·보호 시간 조건 없음. 입실·점유·시간 경과는 잠금 트리거가 아님. 솔로 생략·수리 완료 우선.</td></tr>
+</tbody></table></div>
+<p>같은 시설의 오래된 인식·노브 입력이 새 고장을 즉시 해결하지 않도록 수리 사건 식별자를 둔다. 성공 후 늦게 도착한 입력이 재정전·재잠금·중복 비용 처리를 일으키지 않도록 한다.</p>
+</section>
+
+<section id="integration"><h2>고장·경제 연결</h2>
+<p>기존 기획에서는 시설이 고장 난 동안 돈이 차감되고, 대출 완납 후에도 이 차감이 적용된다. 협동 수리의 이동·대기·설명 시간이 금전 부담과 겹치므로 실제 수리 시간을 기준으로 조정한다.</p>
+<ul><li>연결된 시설을 수리하면 그 고장의 차감을 종료한다. 다른 시설의 고장이나 별도 대출 의무는 함께 지우지 않는다.</li><li>정전만으로 정상 분리수거기의 정산을 전부 막는 규칙은 정하지 않았다. 정상 기계의 쓰레기 투입 즉시 정산은 유지한다.</li><li>분리수거기에 협동 수리를 연결할 경우 고장 중 투입·정산 중단, 수리 전까지의 비용 차감, 복구 후 즉시 정산 재개를 함께 확인한다.</li><li>지침실 문 잠금을 별도 돈 차감으로 계산할지, 수리 실패 시 추가 비용을 부과할지 미정이다. 하나의 차단기 사건에 문·정전 비용을 중복 부과하지 않는 안을 검토한다.</li><li>정전과 처리장 펌프 피해가 겹칠 때 위험한 이동·피해·돈 차감이 과도하게 누적되는지 측정한다. 동시 발생 수와 완충 조건은 미정이다.</li></ul>
+</section>
+
+<section id="exceptions"><h2>솔로·인원 이탈·예외</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">상황</th><th scope="col">기준 또는 설계 후보</th><th scope="col">상태</th></tr></thead><tbody>
+<tr><th scope="row">처음부터 솔로</th><td>패드는 시간 내 순차 인식. 지침에 상호작용해도 잠기지 않고 스캐너로 직접 차단기 수리.</td><td><span class="status confirmed">확정</span></td></tr>
+<tr><th scope="row">2인 → 1인</th><td>남은 사람을 솔로 처리로 전환하고 지침실 잠금을 해제하는 안. 정답 유지·패드 진행 재시작 여부는 미정.</td><td><span class="status candidate">후보</span></td></tr>
+<tr><th scope="row">사망·일시 행동 불가</th><td>접속 인원과 수리 가능한 인원의 기준을 분리해 결정. 자동 솔로 전환 시점 미정.</td><td><span class="status candidate">미정</span></td></tr>
+<tr><th scope="row">늦은 합류</th><td>현재 정전·문 잠금·지침·노브·그림·패드 상태 전달. 진행 중 솔로를 다인으로 전환할지 미정.</td><td><span class="status candidate">후보</span></td></tr>
+<tr><th scope="row">스캐너 분실·소지자 이탈</th><td>남은 팀이 스캐너를 확보할 수 있는 복구 경로 필요. 자동 지급·재구매·회수 방식은 미정.</td><td><span class="status candidate">미정</span></td></tr>
+<tr><th scope="row">일반 문 수리로 지침실 탈출</th><td>기존 일반 문의 무도구 수리와 별도 잠금. 테이프·수동 수리 우회 허용 여부 결정 필요.</td><td><span class="status candidate">미정</span></td></tr>
+<tr><th scope="row">여러 정전·고장</th><td>수리한 사건만 해제. 아직 활성인 정전이 남았는데 전체 조명을 켜는 오류 방지.</td><td><span class="status candidate">후보</span></td></tr>
+<tr><th scope="row">스캐너 담당·전원 입실</th><td>수리 지침의 재시작으로 문 개방. 외부 수리자가 퇴실하고, 설명자가 지침에 새로 상호작용하면 재잠금. 대기 시간 없음.</td><td><span class="status confirmed">확정</span></td></tr>
+<tr><th scope="row">여러 명 동시 입실</th><td>입실·점유로 잠기지 않음. 다인에서 지침을 사용하면 인원과 무관하게 잠김. 재시작 후 새 지침 사용으로 바로 잠금 가능. 문턱 충돌과 정원은 별도 결정.</td><td><span class="status candidate">일부 미정</span></td></tr>
+</tbody></table></div>
+<p class="warning note">다인 중 동료 이탈로 영구 갇힘을 만들지 않도록 예외 처리가 필요하다. 이는 솔로의 지침 상호작용 잠금 생략과 별도로 구현해야 하는 전환 문제다.</p>
+</section>
+
+<section id="implementation"><h2>구현·데이터 요구</h2>
+<p><span class="status candidate">개발 연결 후보</span> 기존 프로젝트의 클래스·네트워크 구조를 확인한 뒤 적용한다. 이 문서에서는 에셋 생성이나 코드 구현을 수행하지 않았다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">구성</th><th scope="col">필요 데이터·연결</th></tr></thead><tbody>
+<tr><th scope="row">수리 이벤트</th><td>사건 식별자, 대상 시설, 수리 종류, 상태, 솔로·다인 판정, 연결된 차감 원인.</td></tr>
+<tr><th scope="row">패드 A·B</th><td>패드 식별자와 사건 연결, 인식자, 인식 시각 또는 유지 상태, 솔로 첫 패드·마감 시간.</td></tr>
+<tr><th scope="row">지침·차단기</th><td>열·칸 수, 정답 배열, 현재 배열, 조작자. 랜덤 범위·재추첨 조건.</td></tr>
+<tr><th scope="row">지침실</th><td>지침 상호작용자·유효 입력 시점, 설명자, 연결 문, 잠금 원인·복구 이벤트, 솔로 잠금 예외. 문 열림·지침 사용 대기 상태. 문 개방 타이머·보호 종료 시각은 필요 없음. 방 내부 접근·문턱 안전 판정은 잠금 트리거와 분리.</td></tr>
+<tr><th scope="row">조명</th><td>기지 일반 조명 대상, 지침 보조조명, 스캐너 라이트. 정전 원인별 활성 상태.</td></tr>
+<tr><th scope="row">유리 그림</th><td>그림 면과 좌표, 작성자, 선 정보·순서, 지우기·초기화 이벤트, 반대편 표시 기준.</td></tr>
+</tbody></table></div>
+<ul><li>권위 측에서 인식·노브·완료를 판정하고 문·조명·고장 상태를 공유하는 구조를 후보로 둔다. 클라이언트의 “성공” 요청만으로 복구하지 않는다.</li><li>상호작용 거리·접근 권한·현재 사건·조작자를 확인한다. 지침의 유효 상호작용·재시작 문 개방은 권위 측에서 판정·공유한다. 재시작 버튼은 지침 잠금 입력과 구분해 개방 즉시 다시 잠기는 오류를 막는다. 재시작과 별개의 새 지침 입력으로 다시 잠그며, 완료된 사건의 늦은 입력은 무시한다. 다인 패드의 같은 사람 중복 판정과 완료 이벤트 중복을 방지한다.</li><li>지침과 현재 노브 상태를 분리한다. 수리자에게 정답 UI가 자동 노출되지 않도록 정보 접근과 표시를 설계한다.</li><li>그림은 화면 좌표 대신 공통 유리 면 좌표로 공유하는 안을 검토한다. 선 샘플 수·전송량을 제한하면서 글씨와 칸 표시가 읽히는지 확인한다.</li></ul>
+</section>
+
+<section id="verification"><h2>검증 기준</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">상황</th><th scope="col">통과 기준</th></tr></thead><tbody>
+<tr><th scope="row">2인 패드</th><td>서로 다른 두 명의 유효 동시 인식에만 성공. 한 명·한쪽 인식으로 성공하지 않음.</td></tr>
+<tr><th scope="row">솔로 패드</th><td>반대 패드에 제한 시간 내 인식 시 성공. 같은 패드 반복·시간 초과는 성공하지 않음.</td></tr>
+<tr><th scope="row">배치·층 구분</th><td>지침실·차단기 1F09, 패드 A 1F02 입구 바깥, 패드 B B1-07 입구 바깥·실제 2층. B1 식별자 유지. 솔로 양방향 층간 이동, 고장 문과 독립된 패드 접근, 창밖 지침 원문 차폐 검증.</td></tr>
+<tr><th scope="row">다인 차단기</th><td>입실·점유만으로 잠기지 않음. 첫 유효 지침 상호작용으로 잠금. 이미 잠긴 상태의 추가 지침 사용은 잠금을 유지하며 토글 해제하지 않음. 지침·노브 일치로 성공 후 문 복구.</td></tr>
+<tr><th scope="row">스캐너 담당·4명 입실</th><td>지침의 재시작 한 번으로 문 개방. 스캐너 담당·외부 수리자가 퇴실해 역할 재배치 가능.</td></tr>
+<tr><th scope="row">재시작·재입실·재잠금</th><td>재시작 후 인원·입실·시간 경과와 무관하게 열림 유지. 다음 새 지침 상호작용에만 잠금. 재시작 직후에도 기다리지 않고 지침 상호작용 가능. 반복 재시작 가능.</td></tr>
+<tr><th scope="row">재시작 완료 경합</th><td>개방 중 수리 완료 후 지침 사용·늦은 입력으로 재잠금되지 않음. 정전·고장 차감·대출 시각은 재시작만으로 초기화되지 않음.</td></tr>
+<tr><th scope="row">솔로 차단기</th><td>입실·지침 사용·재시작 모두 잠금 없음. 지침 확인·퇴실·라이트·차단기 수리를 혼자 완료 가능.</td></tr>
+<tr><th scope="row">조명</th><td>기지 일반 조명 꺼짐, 지침실의 약한 하향 조명 유지. 스캐너로 이동과 노브 조작 가능.</td></tr>
+<tr><th scope="row">마이크 없음</th><td>그림이 반대편과 동료에게 읽히고 유리 그림만으로 완료 가능. 열·칸 기준 불일치 없음.</td></tr>
+<tr><th scope="row">정보 유지</th><td>전달 중 정답 변동 없음. 창문 밖에서 지침 원본이 직접 노출되는지 확인.</td></tr>
+<tr><th scope="row">실패·재시도</th><td>선택한 오답·시간 초과 정책을 일관되게 적용. 완료 중복이나 오래된 입력의 복구 없음.</td></tr>
+<tr><th scope="row">이탈·합류</th><td>갇힘·영구 정전 없이 정한 전환 정책 적용. 늦은 합류자에게 현재 상태 전달.</td></tr>
+<tr><th scope="row">경제·다중 사건</th><td>해결한 고장의 차감만 종료. 정상 분리수거 즉시 정산 유지. 다른 고장과 차감 원인 보존.</td></tr>
+</tbody></table></div>
+<p>밸런스 측정은 1–4인의 패드 이동 시간, 설명·조작 시간, 오답 횟수, 라이트 없이 길 찾는 시간, 차감·피해 누적, 마이크 없는 성공률을 기록한다. 이 문서의 확인은 HTML 동작 검증이며 실제 플레이 검증이 아니다.</p>
+</section>
+
+<section id="decisions"><h2>미결정 항목</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">영역</th><th scope="col">결정할 내용</th></tr></thead><tbody>
+<tr><th scope="row">적용·발생</th><td>어느 시설에 어느 수리 적용, 주기·정확한 좌표·치수·동시 사건 수·정전 시작 시점. 구역과 층은 배치 기준 참고.</td></tr>
+<tr><th scope="row">패드</th><td>솔로 제한 시간, 다인 동시 판정 방식·허용 오차, 유지 입력·취소·재시도.</td></tr>
+<tr><th scope="row">차단기</th><td>열·칸 수, 노브 입력, 확인 버튼, 오답 피드백·불이익·재추첨, 시작 노브 상태.</td></tr>
+<tr><th scope="row">잠금</th><td>지침 상호작용 잠금·재시작 문 개방은 확정. 문턱 안전 폐쇄, 지침·노브·그림 초기화, 정원·일반 수리 우회, 사망·접속 이탈의 솔로 전환은 미정.</td></tr>
+<tr><th scope="row">조명·스캐너</th><td>밝기·범위·조작키·소모, 장비를 든 채 조작, 분실 복구, 겹친 정전의 복구 범위.</td></tr>
+<tr><th scope="row">그림</th><td>진입·그리기·지우기 입력, 유지 시간·초기화, 유리 양면 방향·공유·선 제한.</td></tr>
+<tr><th scope="row">경제·소모품</th><td>수리 도구·테이프 필요 여부, 지침실 문 추가 차감, 실패 비용, 대출·펌프 피해와 겹침.</td></tr>
+</tbody></table></div>
+<p>현재 일반 고장 문의 무도구 수리 시간 60초·테이프 15초 후보를 협동 수리의 제한 시간이나 차단기 작업 시간으로 그대로 적용하지 않는다.</p>
+</section>
+
+<section id="preview"><h2>노브·유리 그림 미리보기</h2>
+<p>설계 설명용 로컬 미리보기다. 지침과 조작을 한 화면에 함께 보여주며 실제 게임의 정보 분리·네트워크·문·조명·수리 시간은 구현하지 않는다. 확인 버튼과 초기 배치는 미리보기용 선택이다.</p>
+<div class="prototype"><h3>4열·5칸 지침 예시</h3>
+<svg viewBox="0 0 640 370" role="img" aria-labelledby="spec-diagram-title spec-diagram-desc" style="display:block;width:100%;max-width:640px;margin:auto;background:#fff;border:1px solid #d5deea"><title id="spec-diagram-title">차단기 수리 지침 예시: 왼쪽부터 3, 2, 4, 5칸</title><desc id="spec-diagram-desc">세로 레일 4열에 각각 5칸을 표시한 설명용 예시입니다. 열은 왼쪽부터 1번에서 4번, 칸은 위에서부터 1번에서 5번입니다. 파란 노브는 각 열의 3번, 2번, 4번, 5번 칸에 있습니다.</desc><text x="24" y="30" fill="#20314a" font-size="18">수리 지침 예시 · 위에서부터 칸 번호</text><text x="28" y="65" fill="#55647b" font-size="15">1칸</text><text x="28" y="117" fill="#55647b" font-size="15">2칸</text><text x="28" y="169" fill="#55647b" font-size="15">3칸</text><text x="28" y="221" fill="#55647b" font-size="15">4칸</text><text x="28" y="273" fill="#55647b" font-size="15">5칸</text><text x="115" y="45" text-anchor="middle" fill="#20314a" font-size="16">1열</text><path d="M115 60V268" stroke="#c34040" stroke-width="5"/><path d="M95 60H135" stroke="#20314a" stroke-width="4"/><path d="M95 112H135" stroke="#20314a" stroke-width="4"/><path d="M95 164H135" stroke="#20314a" stroke-width="4"/><path d="M95 216H135" stroke="#20314a" stroke-width="4"/><path d="M95 268H135" stroke="#20314a" stroke-width="4"/><circle id="guide-knob-0" cx="115" cy="164" r="13" fill="#194a8d" stroke="#fff" stroke-width="3"/><text id="guide-label-0" x="115" y="308" text-anchor="middle" fill="#194a8d" font-size="18">3칸</text><text x="260" y="45" text-anchor="middle" fill="#20314a" font-size="16">2열</text><path d="M260 60V268" stroke="#c34040" stroke-width="5"/><path d="M240 60H280" stroke="#20314a" stroke-width="4"/><path d="M240 112H280" stroke="#20314a" stroke-width="4"/><path d="M240 164H280" stroke="#20314a" stroke-width="4"/><path d="M240 216H280" stroke="#20314a" stroke-width="4"/><path d="M240 268H280" stroke="#20314a" stroke-width="4"/><circle id="guide-knob-1" cx="260" cy="112" r="13" fill="#194a8d" stroke="#fff" stroke-width="3"/><text id="guide-label-1" x="260" y="308" text-anchor="middle" fill="#194a8d" font-size="18">2칸</text><text x="405" y="45" text-anchor="middle" fill="#20314a" font-size="16">3열</text><path d="M405 60V268" stroke="#c34040" stroke-width="5"/><path d="M385 60H425" stroke="#20314a" stroke-width="4"/><path d="M385 112H425" stroke="#20314a" stroke-width="4"/><path d="M385 164H425" stroke="#20314a" stroke-width="4"/><path d="M385 216H425" stroke="#20314a" stroke-width="4"/><path d="M385 268H425" stroke="#20314a" stroke-width="4"/><circle id="guide-knob-2" cx="405" cy="216" r="13" fill="#194a8d" stroke="#fff" stroke-width="3"/><text id="guide-label-2" x="405" y="308" text-anchor="middle" fill="#194a8d" font-size="18">4칸</text><text x="550" y="45" text-anchor="middle" fill="#20314a" font-size="16">4열</text><path d="M550 60V268" stroke="#c34040" stroke-width="5"/><path d="M530 60H570" stroke="#20314a" stroke-width="4"/><path d="M530 112H570" stroke="#20314a" stroke-width="4"/><path d="M530 164H570" stroke="#20314a" stroke-width="4"/><path d="M530 216H570" stroke="#20314a" stroke-width="4"/><path d="M530 268H570" stroke="#20314a" stroke-width="4"/><circle id="guide-knob-3" cx="550" cy="268" r="13" fill="#194a8d" stroke="#fff" stroke-width="3"/><text id="guide-label-3" x="550" y="308" text-anchor="middle" fill="#194a8d" font-size="18">5칸</text><text id="guide-example" x="320" y="345" text-anchor="middle" fill="#55647b" font-size="14">설명: 왼쪽부터 위에서 3칸 · 2칸 · 4칸 · 5칸</text></svg>
+<p class="muted">파란 원의 위치가 지침이다. 최초 예시는 3·2·4·5이며, 새 지침을 만들면 그림과 칸 번호가 함께 갱신된다.</p>
+<p id="demo-guide-text">현재 지침: 왼쪽부터 위에서 3칸, 2칸, 4칸, 5칸</p>
+<div class="knob-controls"><label for="demo-col-0">1열<select id="demo-col-0"><option value="1">위에서 1칸</option><option value="2">위에서 2칸</option><option value="3">위에서 3칸</option><option value="4">위에서 4칸</option><option value="5">위에서 5칸</option></select></label><label for="demo-col-1">2열<select id="demo-col-1"><option value="1">위에서 1칸</option><option value="2">위에서 2칸</option><option value="3">위에서 3칸</option><option value="4">위에서 4칸</option><option value="5">위에서 5칸</option></select></label><label for="demo-col-2">3열<select id="demo-col-2"><option value="1">위에서 1칸</option><option value="2">위에서 2칸</option><option value="3">위에서 3칸</option><option value="4">위에서 4칸</option><option value="5">위에서 5칸</option></select></label><label for="demo-col-3">4열<select id="demo-col-3"><option value="1">위에서 1칸</option><option value="2">위에서 2칸</option><option value="3">위에서 3칸</option><option value="4">위에서 4칸</option><option value="5">위에서 5칸</option></select></label></div>
+<div class="actions"><button type="button" class="primary" id="demo-check">배치 확인</button><button type="button" id="demo-new">새 지침 예시</button></div>
+<output id="demo-result" class="demo-feedback" aria-live="polite">각 열의 위치를 맞춘 뒤 확인하세요.</output>
+</div>
+<div class="prototype"><h3>유리창에 그림으로 설명하기</h3><p>마우스나 터치로 열과 노브 위치를 그릴 수 있다. 이 미리보기의 그림은 저장·공유되지 않는다.</p><canvas id="demo-glass" width="640" height="220" aria-label="유리창 그림 미리보기">그림 미리보기를 지원하지 않는 환경입니다. 아래 메모를 사용할 수 있습니다.</canvas><div class="actions"><button type="button" id="demo-clear">그림 지우기</button></div><label for="demo-note">설명 메모 · 키보드로 전달 내용 확인</label><textarea id="demo-note" placeholder="예: 1열 3칸 / 2열 2칸 / 3열 4칸 / 4열 5칸"></textarea><p class="muted">텍스트 메모는 문서 미리보기의 접근성 보조 기능이다. 게임에 텍스트 입력 기능을 추가하는 확정 규칙은 아니다.</p></div>
+</section>
+<footer>2026-10-06 작성. 사용자 지정 규칙과 설계 후보를 구분했습니다. 이 문서의 조작 예시는 기획 확인용이며 실제 시스템·맵 구현과 플레이 검증은 별도로 진행합니다.</footer>
+</main></div><script>
+(()=>{'use strict';
+const el=id=>document.getElementById(id);let guide=[3,2,4,5];
+const cols=Array.from({length:4},(_,i)=>el('demo-col-'+i));
+function showGuide(){guide.forEach((n,i)=>{el('guide-knob-'+i).setAttribute('cy',String(60+(n-1)*52));el('guide-label-'+i).textContent=n+'칸';});const words=guide.map(n=>n+'칸').join(', ');el('demo-guide-text').textContent='현재 지침: 왼쪽부터 위에서 '+words;el('guide-example').textContent='설명: 왼쪽부터 위에서 '+words;el('spec-diagram-title').textContent='차단기 수리 지침: 왼쪽부터 '+words;el('spec-diagram-desc').textContent='4열, 각 5칸의 예시. 칸은 위에서부터 세며 각 열의 노브는 '+words+'에 위치합니다.';}
+el('demo-check').addEventListener('click',()=>{const correct=cols.every((c,i)=>Number(c.value)===guide[i]);el('demo-result').textContent=correct?'지침과 일치합니다. 게임에서는 차단기·조명·지침실 문을 복구하는 지점입니다.':'배치가 다릅니다. 지침의 열 순서와 위에서 세는 칸 번호를 다시 확인하세요.';el('demo-result').dataset.state=correct?'ok':'retry';});
+el('demo-new').addEventListener('click',()=>{guide=Array.from({length:4},()=>1+Math.floor(Math.random()*5));cols.forEach(c=>c.value='1');showGuide();el('demo-result').textContent='새 예시 지침입니다. 각 열을 맞춰 보세요.';el('demo-result').dataset.state='';});
+cols.forEach(c=>c.addEventListener('change',()=>{el('demo-result').textContent='배치를 변경했습니다. 확인 버튼을 누르세요.';el('demo-result').dataset.state='';}));showGuide();
+const canvas=el('demo-glass'),ctx=canvas.getContext('2d');if(!ctx){el('demo-clear').disabled=true;return;}ctx.strokeStyle='#194a8d';ctx.lineWidth=3;ctx.lineCap='round';let pointer=null;
+const point=e=>{const r=canvas.getBoundingClientRect();return [(e.clientX-r.left)*canvas.width/r.width,(e.clientY-r.top)*canvas.height/r.height];};
+canvas.addEventListener('pointerdown',e=>{if(e.button!==0||pointer!==null)return;e.preventDefault();pointer=e.pointerId;canvas.setPointerCapture(pointer);const p=point(e);ctx.beginPath();ctx.moveTo(...p);ctx.lineTo(p[0]+.1,p[1]+.1);ctx.stroke();});
+canvas.addEventListener('pointermove',e=>{if(pointer!==e.pointerId)return;ctx.lineTo(...point(e));ctx.stroke();});
+const stop=e=>{if(pointer!==e.pointerId)return;pointer=null;};['pointerup','pointercancel','lostpointercapture'].forEach(t=>canvas.addEventListener(t,stop));
+el('demo-clear').addEventListener('click',()=>{pointer=null;ctx.clearRect(0,0,canvas.width,canvas.height);});
+})();
+</script></body></html>
