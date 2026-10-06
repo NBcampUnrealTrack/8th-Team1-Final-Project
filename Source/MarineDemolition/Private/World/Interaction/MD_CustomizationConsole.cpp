@@ -6,9 +6,9 @@
 #include "Components/SceneCaptureComponent2D.h"
 #include "Components/SceneComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/TextureRenderTarget2D.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
-#include "GameplayTags/MD_GameplayTags.h"
 #include "Kismet/KismetRenderingLibrary.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "UI/Customization/MD_CharacterSelectWidget.h"
@@ -62,7 +62,8 @@ void AMD_CustomizationConsole::Tick(float DeltaSeconds)
 	{
 		TickApproach(DeltaSeconds);
 	}
-	else if (bTurningFacing == true)
+	// 회전 키 또는 버튼이 눌린 동안에만 연속 회전 처리
+	else if (FacingTurnInput != 0.f)
 	{
 		TickFacing(DeltaSeconds);
 	}
@@ -156,7 +157,8 @@ void AMD_CustomizationConsole::Interact_Implementation(AActor* Interactor)
 	ULocalPlayer* LocalPlayer = PC->GetLocalPlayer();
 	UMD_LocalUIManager* LocalUIManager =
 		IsValid(LocalPlayer) == true ? LocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
-	if (IsValid(LocalUIManager) == false || IsValid(SelectWidgetClass) == false)
+	// 태그 요청을 처리할 로컬 UI 관리자와 화면 태그 확인
+	if (IsValid(LocalUIManager) == false || ConsoleWidgetTag.IsValid() == false)
 	{
 		return;
 	}
@@ -166,10 +168,19 @@ void AMD_CustomizationConsole::Interact_Implementation(AActor* Interactor)
 	{
 		return;
 	}
-	// HUD 스택의 현재 선택 화면 조회
-	UCommonActivatableWidget* ActiveHUDLayerWidget = LocalUIManager->GetActiveScreen(MDGameplayTags::UI_Layer_GameHUD);
-	// 이미 열린 외형 선택 화면의 중복 진입 차단
-	if (IsValid(ActiveHUDLayerWidget) == true && ActiveHUDLayerWidget->IsA(SelectWidgetClass) == true)
+	// 화면 태그에 등록된 부모 레이어와 소프트 클래스 조회
+	FGameplayTag LayerTag;
+	// 콘솔이 직접 보관하지 않는 UI 설정의 등록 클래스
+	TSoftClassPtr<UCommonActivatableWidget> RegisteredWidgetClass;
+	// 등록되지 않은 화면의 카메라 전환과 접근 시작 차단
+	if (LocalUIManager->ResolveWidgetRegistration(ConsoleWidgetTag, LayerTag, RegisteredWidgetClass) == false)
+	{
+		return;
+	}
+	// 태그에서 결정된 레이어의 현재 화면 조회
+	UCommonActivatableWidget* ActiveScreen = LocalUIManager->GetActiveScreen(LayerTag);
+	// 동일한 등록 화면이 이미 열린 경우 중복 접근 차단
+	if (IsValid(ActiveScreen) == true && ActiveScreen->GetClass() == RegisteredWidgetClass.Get())
 	{
 		return;
 	}
@@ -182,23 +193,42 @@ bool AMD_CustomizationConsole::PushSelectWidget(APlayerController* PC)
 	ULocalPlayer* LocalPlayer = IsValid(PC) == true ? PC->GetLocalPlayer() : nullptr;
 	UMD_LocalUIManager* LocalUIManager =
 		IsValid(LocalPlayer) == true ? LocalPlayer->GetSubsystem<UMD_LocalUIManager>() : nullptr;
-	if (IsValid(LocalUIManager) == false || IsValid(SelectWidgetClass) == false)
+	// 태그 요청을 처리할 로컬 UI 관리자와 화면 태그 확인
+	if (IsValid(LocalUIManager) == false || ConsoleWidgetTag.IsValid() == false)
 	{
 		return false;
 	}
 
-	UCommonActivatableWidget* PushedScreen = LocalUIManager->PushScreenToLayerInitialized(
-		// HUD 재활성화와 입력 복구를 공유하는 화면 레이어
-		MDGameplayTags::UI_Layer_GameHUD,
-		SelectWidgetClass,
+	// 접근 완료 시점에 화면 태그의 최신 레이어 등록 조회
+	FGameplayTag LayerTag;
+	// UI 설정에서 선택된 소프트 클래스의 동기 로드 준비
+	TSoftClassPtr<UCommonActivatableWidget> RegisteredWidgetClass;
+	// 접근 중 레이어나 등록이 사라진 경우 화면 생성 중단
+	if (LocalUIManager->ResolveWidgetRegistration(ConsoleWidgetTag, LayerTag, RegisteredWidgetClass) == false)
+	{
+		return false;
+	}
+	// 콘솔의 직접 에셋 참조 없이 등록된 화면 클래스 로드
+	UClass* ScreenClass = RegisteredWidgetClass.LoadSynchronous();
+	// 콘솔 회전과 닫기 복구를 지원하는 선택 화면인지 확인
+	if (IsValid(ScreenClass) == false || ScreenClass->IsChildOf(UMD_CharacterSelectWidget::StaticClass()) == false)
+	{
+		return false;
+	}
+	// 태그에서 결정된 레이어에 활성화 전 초기화를 적용하여 화면 생성
+	UCommonActivatableWidget* PushedScreen = LocalUIManager->PushScreenToLayerInitialized(LayerTag, ScreenClass,
 		[this](UCommonActivatableWidget& Screen)
 		{
+			// 등록 클래스에서 보장한 선택 화면의 콘솔 연결 대상 조회
 			UMD_CharacterSelectWidget* SelectWidget = Cast<UMD_CharacterSelectWidget>(&Screen);
+			// 활성화 전에 현재 콘솔의 카메라 복구와 회전 경로 연결
 			if (IsValid(SelectWidget) == true)
 			{
+				// 화면을 연 콘솔을 선택 위젯에 전달
 				SelectWidget->SetOwningConsole(this);
 			}
 		});
+	// 생성 실패 시 기존 접근 종료 경로에서 카메라와 입력 복구
 	return IsValid(PushedScreen) == true;
 }
 
@@ -264,8 +294,8 @@ void AMD_CustomizationConsole::TickApproach(float DeltaSeconds)
 void AMD_CustomizationConsole::FinishApproach()
 {
 	bApproaching = false;
-	bTurningFacing = false;
-	bFacingMirror = true;
+	// 접근 완료 또는 화면 종료 시 이전 회전 입력 초기화
+	FacingTurnInput = 0.f;
 	SetActorTickEnabled(false);
 
 	AMD_Character* Character = ActiveCharacter.Get();
@@ -276,82 +306,38 @@ void AMD_CustomizationConsole::FinishApproach()
 	}
 }
 
-float AMD_CustomizationConsole::GetMirrorFacingYaw() const
+void AMD_CustomizationConsole::TurnFacing(float TurnInput)
 {
-	return IsValid(StandPoint) == true ? StandPoint->GetComponentRotation().Yaw : GetActorRotation().Yaw + 180.f;
-}
-
-float AMD_CustomizationConsole::GetCameraFacingYaw() const
-{
-	const AMD_Character* Character = ActiveCharacter.Get();
-	if (IsValid(Character) == false || IsValid(ViewCamera) == false)
+	// 입력 장치와 무관하게 동일한 좌우 회전 범위 적용
+	FacingTurnInput = FMath::Clamp(TurnInput, -1.f, 1.f);
+	// 선택 대상이 없거나 접근 중인 상태의 회전 입력 차단
+	if (IsValid(ActiveCharacter.Get()) == false || bApproaching == true)
 	{
-		return GetMirrorFacingYaw() + 180.f;
+		// 적용할 수 없는 회전 입력 해제
+		FacingTurnInput = 0.f;
 	}
-
-	// 캐릭터 위치에서 카메라를 향한 수평 방향. 카메라가 바로 위에 있으면 거울 반대쪽으로 둔다
-	const FVector ToCamera = (ViewCamera->GetComponentLocation() - Character->GetActorLocation()).GetSafeNormal2D();
-	if (ToCamera.IsNearlyZero() == true)
-	{
-		return GetMirrorFacingYaw() + 180.f;
-	}
-	return ToCamera.Rotation().Yaw + FacingCameraYawOffset;
-}
-
-void AMD_CustomizationConsole::TurnFacing(bool bTurnRight)
-{
-	AMD_Character* Character = ActiveCharacter.Get();
-	APlayerController* PC = IsValid(Character) == true ? Cast<APlayerController>(Character->GetController()) : nullptr;
-	// 접근이 끝나고 선택 화면이 열린 동안만 돈다
-	if (IsValid(Character) == false || IsValid(PC) == false || bApproaching == true)
-	{
-		return;
-	}
-
-	bFacingMirror = !bFacingMirror;
-	const float DesiredYaw = bFacingMirror == true ? GetMirrorFacingYaw() : GetCameraFacingYaw();
-
-	// 회전 중 다시 누르면 지금 각도에서 이어서 돈다
-	if (bTurningFacing == false)
-	{
-		FacingCurrentYaw = PC->GetControlRotation().Yaw;
-	}
-
-	// 두 방향이 거의 정반대라 최단 경로로는 회전 방향이 정해지지 않는다. 요청한 쪽으로만 돌도록 목표를 누적값으로 잡는다
-	float Delta = FRotator::NormalizeAxis(DesiredYaw - FacingCurrentYaw);
-	if (bTurnRight == true && Delta < 0.f)
-	{
-		Delta += 360.f;
-	}
-	else if (bTurnRight == false && Delta > 0.f)
-	{
-		Delta -= 360.f;
-	}
-	FacingTargetYaw = FacingCurrentYaw + Delta;
-
-	bTurningFacing = true;
-	SetActorTickEnabled(true);
+	// 접근 연출 또는 눌린 회전 입력이 있는 동안만 틱 유지
+	SetActorTickEnabled(bApproaching == true || FacingTurnInput != 0.f);
 }
 
 void AMD_CustomizationConsole::TickFacing(float DeltaSeconds)
 {
+	// 현재 외형 선택 중인 캐릭터 조회
 	AMD_Character* Character = ActiveCharacter.Get();
+	// 연속 회전을 적용할 소유 컨트롤러 조회
 	APlayerController* PC = IsValid(Character) == true ? Cast<APlayerController>(Character->GetController()) : nullptr;
+	// 회전 대상이 사라진 경우 입력과 틱 정리
 	if (IsValid(Character) == false || IsValid(PC) == false)
 	{
-		bTurningFacing = false;
+		// 이후 선택에 남지 않도록 회전 입력 초기화
+		FacingTurnInput = 0.f;
+		// 불필요한 회전 틱 중단
 		SetActorTickEnabled(false);
 		return;
 	}
-
-	FacingCurrentYaw = FMath::FInterpTo(FacingCurrentYaw, FacingTargetYaw, DeltaSeconds, FacingTurnInterpSpeed);
-	if (FMath::Abs(FacingTargetYaw - FacingCurrentYaw) <= 0.5f)
-	{
-		FacingCurrentYaw = FacingTargetYaw;
-		bTurningFacing = false;
-		SetActorTickEnabled(false);
-	}
-	PC->SetControlRotation(FRotator(0.f, FRotator::NormalizeAxis(FacingCurrentYaw), 0.f));
+	// 프레임률과 무관하게 누른 시간과 설정 속도만큼 방향 갱신
+	PC->SetControlRotation(FRotator(0.f, FRotator::NormalizeAxis(PC->GetControlRotation().Yaw
+		+ FacingTurnInput * FMath::Max(0.f, FacingTurnSpeed) * DeltaSeconds), 0.f));
 }
 
 void AMD_CustomizationConsole::BeginCustomization(AMD_Character* Character)
@@ -428,8 +414,8 @@ void AMD_CustomizationConsole::EndCustomization(AMD_Character* Character)
 	ActiveCharacter.Reset();
 	bApproaching = false;
 	bReachedStandPoint = false;
-	bTurningFacing = false;
-	bFacingMirror = true;
+	// 접근 완료 또는 화면 종료 시 이전 회전 입력 초기화
+	FacingTurnInput = 0.f;
 	SetActorTickEnabled(false);
 	SetMirrorActive(false);
 
