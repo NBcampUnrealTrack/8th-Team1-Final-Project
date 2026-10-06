@@ -37,10 +37,7 @@ void AMD_WallPiece::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLif
 
 FGameplayTag AMD_WallPiece::GetTrashCategory_Implementation() const
 {
-	// 기획 02 §11 매핑표: 조각벽(깨끗) → 안타는 쓰레기 / 오염된 조각벽 → 오염된 쓰레기
-	return bContaminated
-		? MDGameplayTags::Score_Sorting_Contaminated
-		: MDGameplayTags::Score_Sorting_NonBurnable;
+	return MDGameplayTags::Score_Sorting_NonBurnable;
 }
 
 void AMD_WallPiece::GetOwnedGameplayTags(FGameplayTagContainer& TagContainer) const
@@ -71,7 +68,7 @@ void AMD_WallPiece::SetInteractionHighlighted_Implementation(bool bHighlighted)
 
 void AMD_WallPiece::SetContaminated(bool bInContaminated)
 {
-	bContaminated = bInContaminated;
+	bContaminated = false;
 
 	// 클라이언트는 OnRep_Contaminated가 같은 일을 한다
 	ApplyContaminationVisual();
@@ -79,6 +76,14 @@ void AMD_WallPiece::SetContaminated(bool bInContaminated)
 
 void AMD_WallPiece::OnRep_Contaminated()
 {
+	bContaminated = false;
+	ApplyContaminationVisual();
+}
+
+void AMD_WallPiece::BeginPlay()
+{
+	Super::BeginPlay();
+	bContaminated = false;
 	ApplyContaminationVisual();
 }
 
@@ -86,10 +91,10 @@ void AMD_WallPiece::ApplyContaminationVisual()
 {
 	if (!IsValid(Mesh)) return;
 
-	// 깨끗 = 밝은 회백색, 오염 = 보라 (격벽 스캔 색과 겹치지 않게)
+	// 깨끗한 조각은 밝은 회백색으로 표시한다.
 	if (UMaterialInstanceDynamic* PieceMID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
 	{
 		MDMaterialTint::SetVectorParameterChecked(PieceMID, TEXT("Color"),
-			bContaminated ? FLinearColor(0.45f, 0.1f, 0.5f) : FLinearColor(0.85f, 0.85f, 0.8f));
+			FLinearColor(0.85f, 0.85f, 0.8f));
 	}
 }

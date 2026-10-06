@@ -116,6 +116,22 @@ struct FMD_InspectionReport
 	UPROPERTY(BlueprintReadOnly, Category = "Score")
 	int32 Score = 0;
 
+    // 판정 점수와 구분한 경고 감점 적용 후 현재 누적 점수
+    UPROPERTY(BlueprintReadOnly, Category = "Score")
+    int32 CumulativeScore = 0;
+
+    // 일일 증감과 같은 시점에 서버가 확정한 보유 크레딧
+    UPROPERTY(BlueprintReadOnly, Category = "Credit")
+    int32 Credits = 0;
+
+    // 보고서가 집계된 현장의 데이터 에셋 표시 이름
+    UPROPERTY(BlueprintReadOnly, Category = "Daily Report")
+    FText SiteName;
+
+    // 현재 점검 판정 기준과 구분할 다음 점검 목표이며 없는 경우 영점
+    UPROPERTY(BlueprintReadOnly, Category = "Daily Report")
+    int32 NextThreshold = 0;
+
 	// 일일 정산 화면에서 누적 점수와 분리해 표시할 해당 Day의 점수 증감 합계
 	UPROPERTY(BlueprintReadOnly, Category = "Score")
 	int32 DailyScore = 0;

@@ -7,6 +7,7 @@
 #include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Net/UnrealNetwork.h"
+#include "World/Trash/MD_TrashSpawnVolume.h"
 
 AMD_TrashItem::AMD_TrashItem()
 {
@@ -106,6 +107,45 @@ void AMD_TrashItem::SetTrashKindId(const FName NewTrashKindId)
 	if (TrashKindId != NewTrashKindId)
 	{
 		SetTrashAppearance(NewTrashKindId, NAME_None);
+	}
+}
+
+AMD_TrashSpawnVolume* AMD_TrashItem::GetOriginGenerator() const
+{
+	return OriginGenerator.Get();
+}
+
+void AMD_TrashItem::SetOriginGenerator(AMD_TrashSpawnVolume* NewOriginGenerator)
+{
+	if (HasAuthority())
+	{
+		OriginGenerator = NewOriginGenerator;
+		OriginKindId = IsValid(NewOriginGenerator) ? TrashKindId : NAME_None;
+		bHasOriginFloorCell = false;
+	}
+}
+
+void AMD_TrashItem::SetOriginFloorCell(const FIntVector& Cell)
+{
+	if (HasAuthority() && OriginGenerator.IsValid() && !bHasOriginFloorCell)
+	{
+		OriginFloorCell = Cell;
+		bHasOriginFloorCell = true;
+	}
+}
+
+bool AMD_TrashItem::GetOriginFloorCell(FIntVector& OutCell) const
+{
+	if (!bHasOriginFloorCell) return false;
+	OutCell = OriginFloorCell;
+	return true;
+}
+
+void AMD_TrashItem::UseAuthoredMeshScaleForProceduralSpawn()
+{
+	if (HasAuthority() && IsValid(Mesh))
+	{
+		Mesh->SetRelativeScale3D(FVector::OneVector);
 	}
 }
 

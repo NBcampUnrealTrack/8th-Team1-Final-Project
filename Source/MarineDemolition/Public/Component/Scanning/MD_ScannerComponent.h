@@ -10,9 +10,6 @@ class AMD_WallUtility;
 class AMD_SurfaceStain;
 class UCameraComponent;
 class UMaterialInterface;
-class UMaterialInstanceDynamic;
-class UStaticMeshComponent;
-class UMD_ScrapeSurfaceComponent;
 class UMaterialParameterCollection;
 class UMD_EquipHotbarComponent;
 class UMD_ToolDefinition;
@@ -22,17 +19,6 @@ class AController;
 class UAudioComponent;
 class USoundBase;
 class AMD_QuestItem;
-
-/** Local, temporary depth mask. It shares live contamination textures with the surface. */
-USTRUCT()
-struct FMD_ContaminationScanVisual
-{
-	GENERATED_BODY()
-	UPROPERTY(Transient) TWeakObjectPtr<UMD_ScrapeSurfaceComponent> Surface;
-	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> MaskMesh;
-	UPROPERTY(Transient) TObjectPtr<UMaterialInstanceDynamic> Material;
-	FMD_ScanMeshState SolidState;
-};
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnScanModeChanged, EMD_ScanMode, Mode);
 
@@ -94,9 +80,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Scanner|Visual")
 	TObjectPtr<UMaterialInterface> WallScanMaterial;
 
-	UPROPERTY(EditDefaultsOnly, Category="MD|Scanner|Visual")
-	TObjectPtr<UMaterialInterface> ContaminationMaskMaterial;
-
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
@@ -130,11 +113,6 @@ private:
 	TArray<TWeakObjectPtr<AMD_SurfaceStain>> StainHighlights;
 	TWeakObjectPtr<UMD_EquipHotbarComponent> BoundHotbar;
 	TWeakObjectPtr<UMD_ToolDefinition> LastTool;
-	UPROPERTY(Transient) TArray<FMD_ContaminationScanVisual> ContaminationHighlights;
-	FTimerHandle ContaminationRefreshTimer;
-	void AddContaminationHighlight(UMD_ScrapeSurfaceComponent* Surface);
-	void RefreshContaminationHighlights();
-	void ClearContaminationHighlights();
 	FTimerHandle ScanTimer;
 	FGameplayTag ActivePulseTag;
 	float PulseFadeSeconds = 0.15f;

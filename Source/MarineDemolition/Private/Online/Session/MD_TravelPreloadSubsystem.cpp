@@ -1,6 +1,5 @@
 #include "Online/Session/MD_TravelPreloadSubsystem.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
-#include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
 #include "Engine/AssetManager.h"
 #include "Engine/StreamableManager.h"
 #include "Engine/GameInstance.h"
@@ -13,8 +12,6 @@ namespace
 {
     TAutoConsoleVariable<int32> CVarTravelPreloadEnabled(TEXT("MD.Travel.Preload"), 1,
         TEXT("Prepare the configured lobby destination after the lobby loading screen closes."));
-    TAutoConsoleVariable<float> CVarTravelSnapshotBudgetMs(TEXT("MD.Travel.PreloadSnapshotBudgetMs"), .5f,
-        TEXT("Soft per-frame input-copy budget in the lobby; zero copies each profile synchronously."));
 }
 
 void UMD_TravelPreloadSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -42,17 +39,6 @@ bool UMD_TravelPreloadSubsystem::TickPreparation(float DeltaTime)
     if (Handle)
     {
         if (!Handle->HasLoadCompleted()) return true;
-        // One owned snapshot/worker at a time bounds lobby preparation memory.
-        while (VisualPreparationIndex < WarmupAssets.Num())
-        {
-            auto* Data = Cast<UMD_ScrapeMeshUVData>(WarmupAssets[VisualPreparationIndex].ResolveObject());
-            if (!Data) { ++VisualPreparationIndex; continue; }
-            Data->BeginVisualPreparation(FMath::Clamp(CVarTravelSnapshotBudgetMs.GetValueOnGameThread(), 0.f, 2.f));
-            if (!Data->IsVisualPreparationReady()) return true;
-            Data->GetVisualDependents();
-            ++VisualPreparationIndex;
-            if (VisualPreparationIndex < WarmupAssets.Num()) return true;
-        }
         Ticker.Reset();
         return false;
     }
@@ -81,14 +67,10 @@ void UMD_TravelPreloadSubsystem::Release()
 {
     FTSTicker::GetCoreTicker().RemoveTicker(Ticker);
     Ticker.Reset();
-    if (WarmupAssets.IsValidIndex(VisualPreparationIndex))
-        if (auto* Data = Cast<UMD_ScrapeMeshUVData>(WarmupAssets[VisualPreparationIndex].ResolveObject()))
-            Data->CancelVisualPreparationSnapshot();
     if (Handle) { Handle->CancelHandle(); Handle.Reset(); }
     DestinationPath.Reset();
     SourceWorld.Reset();
     ReadySince = 0.0;
-    VisualPreparationIndex = 0;
 }
 
 void UMD_TravelPreloadSubsystem::Deinitialize()

@@ -1,9 +1,10 @@
 #include "Component/Scrape/MD_StainScraperComponent.h"
 
 #include "AbilitySystemComponent.h"
+#include "Camera/CameraComponent.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
-#include "Component/Scrape/MD_ScrapeToolComponent.h"
+#include "Component/Interaction/MD_InteractionComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
@@ -13,6 +14,7 @@
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "TimerManager.h"
 #include "World/Contamination/MD_SurfaceStain.h"
+#include "World/Contamination/MD_Barnacle.h"
 
 UMD_StainScraperComponent::UMD_StainScraperComponent()
 {
@@ -23,12 +25,13 @@ UMD_StainScraperComponent::UMD_StainScraperComponent()
 bool UMD_StainScraperComponent::CanUseEquippedScraper() const
 {
 	const AMD_Character* Character = Cast<AMD_Character>(GetOwner());
-	if (!Character || !Character->GetController() || !Character->GetHotbarComponent()) return false;
+	if (!Character || !Character->GetController() || !Character->GetHotbarComponent()
+		|| !GetWorld() || GetWorld()->IsPaused()
+		|| (Character->GetInteractionComponent() && Character->GetInteractionComponent()->IsHolding())) return false;
 	const UMD_ToolDefinition* Tool = Character->GetHotbarComponent()->GetCurrentTool();
 	const UAbilitySystemComponent* AbilitySystem = Character->GetAbilitySystemComponent();
 	return IsValid(Tool) && Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_Scrape)
-		&& AbilitySystem && !AbilitySystem->HasMatchingGameplayTag(MDGameplayTags::State_Dead)
-		&& Character->GetScrapeToolComponent() && !Character->GetScrapeToolComponent()->IsScrapeFocusActive();
+		&& AbilitySystem && !AbilitySystem->HasMatchingGameplayTag(MDGameplayTags::State_Dead);
 }
 
 bool UMD_StainScraperComponent::StartStroke(FGameplayAbilitySpecHandle AbilityHandle)
@@ -52,30 +55,37 @@ bool UMD_StainScraperComponent::StartStroke(FGameplayAbilitySpecHandle AbilityHa
 	return true;
 }
 
-AMD_SurfaceStain* UMD_StainScraperComponent::TraceTarget() const
+AActor* UMD_StainScraperComponent::TraceTarget() const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceStain_Trace);
 	const APawn* Pawn = Cast<APawn>(GetOwner());
 	if (!Pawn || !Pawn->GetController() || !GetWorld() || !FMath::IsFinite(ReachCm) || ReachCm <= 0.0f) return nullptr;
-	FVector Origin;
-	FRotator Rotation;
-	Pawn->GetController()->GetPlayerViewPoint(Origin, Rotation);
+	// Remote player-camera caches accept client positions. Keep reach anchored to the
+	// server's pawn while retaining the authored first-person camera offset.
+	const UCameraComponent* Camera = Pawn->FindComponentByClass<UCameraComponent>();
+	const FVector Origin = IsValid(Camera) ? Camera->GetComponentLocation() : Pawn->GetPawnViewLocation();
+	const FRotator Rotation = Pawn->GetController()->GetControlRotation();
+	if (Origin.ContainsNaN() || Rotation.ContainsNaN()) return nullptr;
 	const FVector Direction = Rotation.Vector();
-	if (Origin.ContainsNaN() || Direction.ContainsNaN()) return nullptr;
+	if (Direction.ContainsNaN()) return nullptr;
 	FHitResult Hit;
-	return FMD_StainTargeting::Trace(*GetWorld(), Origin, Direction, FMath::Min(ReachCm, 250.0f), Hit, Pawn)
-		? Cast<AMD_SurfaceStain>(Hit.GetActor()) : nullptr;
+	return FMD_StainTargeting::Trace(*GetWorld(), Origin, Direction, FMath::Min(ReachCm, 250.0f), Hit, Pawn, true)
+		? Hit.GetActor() : nullptr;
 }
 
 void UMD_StainScraperComponent::ApplyImpact()
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceStain_Impact);
 	AMD_Character* Character = Cast<AMD_Character>(GetOwner());
-	AMD_SurfaceStain* Target = StrokeTarget.Get();
+	AActor* Target = StrokeTarget.Get();
 	StrokeTarget.Reset(); // Consume before any callback; one stroke cannot hit twice.
 	if (!Character || !Character->HasAuthority() || !CanUseEquippedScraper()
 		|| Character->GetHotbarComponent()->GetCurrentTool() != StrokeTool.Get()) return;
-	if (IsValid(Target) && TraceTarget() == Target) Target->ApplyScrapeStroke(FMD_SurfaceStainSize::RemovalFromToolStrength(StrokeTool->StainRemovalAmount));
+	if (!IsValid(Target) || TraceTarget() != Target) return;
+	if (AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Target))
+		Stain->ApplyScrapeStroke(FMD_SurfaceStainSize::RemovalFromToolStrength(StrokeTool->StainRemovalAmount));
+	else if (AMD_Barnacle* Barnacle = Cast<AMD_Barnacle>(Target))
+		Barnacle->ApplyScrapeClickDamage(StrokeTool->BarnacleDamagePerClick);
 }
 
 void UMD_StainScraperComponent::PlaySwing()
@@ -116,6 +126,12 @@ void UMD_StainScraperComponent::CancelStroke(bool bCancelAbility)
 			if (UAbilitySystemComponent* AbilitySystem = Character->GetAbilitySystemComponent())
 				AbilitySystem->CancelAbilityHandle(AbilityToCancel);
 	}
+}
+
+void UMD_StainScraperComponent::FinishStroke(FGameplayAbilitySpecHandle AbilityHandle)
+{
+	// An ability from another item must not clear the currently active stroke.
+	if (StrokeAbility == AbilityHandle) CancelStroke(false);
 }
 
 void UMD_StainScraperComponent::EndPlay(const EEndPlayReason::Type Reason)

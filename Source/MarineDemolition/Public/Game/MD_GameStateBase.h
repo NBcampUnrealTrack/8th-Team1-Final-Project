@@ -10,7 +10,6 @@
 class UMD_ScoreTableData;
 class UMD_MerchantComponent;
 class UMD_LoreComponent;
-struct FMD_GameStateData;
 
 UENUM(BlueprintType)
 enum class EMD_WithdrawalPhase : uint8
@@ -261,14 +260,6 @@ public:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Merchant")
     TObjectPtr<UMD_MerchantComponent> MerchantComponent;
 
-    // 현재 서버 권위 점수·일차·시간 상태를 저장 필드로 복사하는 함수
-    FMD_GameStateData GetGameStateSaveData() const;
-
-    // 저장 필드를 변경 없이 검사하여 다른 서브시스템과의 원자적 복원 순서를 보장하는 함수
-    bool CanApplyGameStateSaveData(const FMD_GameStateData& SaveData) const;
-
-    // 검증된 저장 필드를 복제 GameState와 리슨 서버 알림에 적용하는 함수
-    bool ApplyGameStateSaveData(const FMD_GameStateData& SaveData);
 public:
     // PlayerController 응답 RPC가 조회하는 서버 당일 원장 합계
     UPROPERTY(Transient)

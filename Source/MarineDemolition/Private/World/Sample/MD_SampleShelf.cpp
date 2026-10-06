@@ -6,7 +6,6 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/PlayerState.h"
 // MD_MerchantSubsystem.h는 FGameplayTag를 전방 선언만 한다. 값으로 받으므로 전체 정의가 필요하다.
-#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Net/UnrealNetwork.h"
 #include "Util/MD_MaterialTintUtility.h"
 #include "World/Sample/MD_SampleItem.h"
@@ -223,15 +222,12 @@ void AMD_SampleShelf::CollectQuestItem(AMD_QuestItem* QuestItem)
 		return;
 	}
 
-	UWorld* World = GetWorld();
-	UGameInstance* GameInstance = IsValid(World) ? World->GetGameInstance() : nullptr;
 	bool bIntact = QuestItem->IsQuestItemIntact();
-	UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
 	AMD_SampleItem* Sample = Cast<AMD_SampleItem>(QuestItem);
 	bool bIsDestructibleSample = IsValid(Sample);
 	EMD_SampleGrade SampleGrade = bIsDestructibleSample == true ? Sample->Grade : EMD_SampleGrade::C;
 
-	// 아이템 액터 제거 이후에도 선반 전시와 퀘스트 진행에 사용할 최소 정보 복사
+	// 아이템 액터 제거 이후에도 선반 전시에 사용할 최소 정보 복사
 	FMD_ShelfDisplayEntry Entry;
 	Entry.bDamaged = bIntact == false;
 	Entry.Scale = QuestItem->GetActorScale3D();
@@ -241,18 +237,8 @@ void AMD_SampleShelf::CollectQuestItem(AMD_QuestItem* QuestItem)
 		Entry.Mesh = QuestItemMesh->GetStaticMesh();
 	}
 
-	// 퀘스트 판정에 실제 액터를 사용하고 제거가 확정된 뒤에만 진행도를 반영하는 제출 처리
-	bool bQuestItemRemoved = false;
-	if (IsValid(Merchant) == true)
-	{
-		bQuestItemRemoved = Merchant->TryDeliverQuestItem(QuestItem);
-	}
-	else
-	{
-		bQuestItemRemoved = QuestItem->Destroy();
-	}
-
-	if (bQuestItemRemoved == false)
+	// 회수물 제거 성공 후에만 선반 전시 반영
+	if (QuestItem->Destroy() == false)
 	{
 		return;
 	}

@@ -3,14 +3,73 @@
 
 #include "UI/Merchant/MD_MerchantMenuWidget.h"
 
+#include "Component/Merchant/MD_MerchantComponent.h"
 #include "Components/ScrollBox.h"
 #include "Components/TextBlock.h"
+#include "Engine/World.h"
+#include "Game/MD_GameStateBase.h"
 
 void UMD_MerchantMenuWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated();
 
-	RefreshDisplay();
+	// 서버와 클라이언트가 함께 사용하는 현재 월드의 상인 복제 상태 조회
+	UWorld* World = GetWorld();
+	// 메뉴가 속한 월드의 팀 공유 원장 조회
+	AMD_GameStateBase* GameState = IsValid(World) == true ? World->GetGameState<AMD_GameStateBase>() : nullptr;
+	// 호감도 변경을 알리는 복제 컴포넌트 조회
+	UMD_MerchantComponent* MerchantComponent = IsValid(GameState) == true ? GameState->GetMerchantComponent() : nullptr;
+	// 재사용된 메뉴에 남아 있는 이전 원장 연결 조회
+	UMD_MerchantComponent* PreviousMerchantComponent = BoundMerchantComponent.Get();
+	// 원장 교체 시 이전 월드의 상태 알림 연결 해제
+	if (PreviousMerchantComponent != MerchantComponent && IsValid(PreviousMerchantComponent) == true)
+	{
+		// 이전 컴포넌트가 현재 메뉴 정보를 덮어쓰는 상황 방지
+		PreviousMerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &UMD_MerchantMenuWidget::HandleMerchantStateChanged);
+	}
+	// 메뉴가 실제로 구독하는 컴포넌트의 수명 추적
+	BoundMerchantComponent = MerchantComponent;
+	// 상인 복제 컴포넌트가 준비된 경우에만 변경 알림 연결
+	if (IsValid(MerchantComponent) == true)
+	{
+		// 메뉴 재활성화 시 중복 없이 호감도와 상인 정보의 즉시 갱신 구독
+		MerchantComponent->OnMerchantStateChanged.AddUniqueDynamic(this, &UMD_MerchantMenuWidget::HandleMerchantStateChanged);
+	}
+	// 다시 열린 메뉴에 현재 원장 상태를 즉시 반영
+	HandleMerchantStateChanged();
+}
+
+void UMD_MerchantMenuWidget::NativeDestruct()
+{
+	// 메뉴 제거 전 실제로 구독했던 컴포넌트 조회
+	UMD_MerchantComponent* MerchantComponent = BoundMerchantComponent.Get();
+	// 제거된 메뉴로 상태 변경 알림이 전달되지 않도록 연결 해제
+	if (IsValid(MerchantComponent) == true)
+	{
+		// 다른 상인 화면의 상태 구독을 유지하고 이 메뉴의 연결만 제거
+		MerchantComponent->OnMerchantStateChanged.RemoveDynamic(this, &UMD_MerchantMenuWidget::HandleMerchantStateChanged);
+	}
+	// 재사용 시 새 원장을 연결할 수 있도록 이전 참조 정리
+	BoundMerchantComponent.Reset();
+
+	Super::NativeDestruct();
+}
+
+void UMD_MerchantMenuWidget::HandleMerchantStateChanged()
+{
+	// 현재 구독 중인 서버 또는 클라이언트 복제 상태 조회
+	UMD_MerchantComponent* MerchantComponent = BoundMerchantComponent.Get();
+	// 유효한 원장이 있으면 대사 유지 규칙을 적용하며 최신 정보 반영
+	if (IsValid(MerchantComponent) == true)
+	{
+		// 호감도만 변경된 경우 현재 대사와 스크롤 위치 보존
+		SetMenuInfo(MerchantComponent->BuildMenuInfo());
+	}
+	else
+	{
+		// 원장이 없는 미리보기 등에서는 직접 지정한 메뉴 정보 표시
+		RefreshDisplay();
+	}
 }
 
 void UMD_MerchantMenuWidget::SetOwningMerchant(AMD_Merchant* InMerchant)

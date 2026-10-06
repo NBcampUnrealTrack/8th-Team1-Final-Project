@@ -2,7 +2,7 @@
 
 
 #include "Player/MD_PlayerState.h"
-#include "Types/SaveGame/MD_SaveDataTypes.h"
+#include "Types/Session/MD_PlayerCarryTypes.h"
 #include "Audio/MD_AudioSubsystem.h"
 #include "GameFramework/PlayerController.h"
 #include "Character/MD_Character.h"
@@ -297,7 +297,7 @@ void AMD_PlayerState::CollectShopPurchaseState(FMD_PlayerData& SaveData) const
 bool AMD_PlayerState::RestoreShopPurchaseState(FMD_PlayerData& SaveData)
 {
 	// 준비되지 않은 호환 기록이나 손상된 이력의 서버 상태 변경 차단
-	if (HasAuthority() == false || SaveData.bHasShopPurchaseState == false || SaveData.IsStructurallyValid() == false)
+	if (HasAuthority() == false || SaveData.bHasShopPurchaseState == false)
 	{
 		// 기존 개인 이력을 유지한 실패 반환
 		return false;

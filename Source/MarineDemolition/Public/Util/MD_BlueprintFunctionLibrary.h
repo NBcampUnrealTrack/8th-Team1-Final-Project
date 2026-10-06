@@ -29,9 +29,6 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Online Session", meta = (NativeMakeFunc, DisplayName = "Make MD_Session Find Params"))
 	static FMD_SessionFindParams MakeMD_SessionFindParams(FString ServerName, FString RoomCodeString);
 
-	UFUNCTION(BlueprintPure, Category = "Game Data", meta = (NativeMakeFunc, DisplayName = "Make MD_GameData"))
-	static struct FMD_GameData MakeMD_GameData(TSoftObjectPtr<UWorld> GameMap);
-
 	UFUNCTION(BlueprintPure, Category = "Utility", meta = (NativeMakeFunc, DisplayName = "Get Map Package Path"))
 	static FString GetMapPackagePath(TSoftObjectPtr<UWorld> InMap);
 };

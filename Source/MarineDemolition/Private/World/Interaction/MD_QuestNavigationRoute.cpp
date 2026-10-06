@@ -51,7 +51,7 @@ void AMD_QuestNavigationRoute::BeginPlay()
     RouteGeometry->SetVisibility(true);
     const bool bActive = ShouldDisplayRoute();
     RouteGeometry->SetHiddenInGame(!bActive);
-    UpdateTargetHighlight(IsQuestActive());
+    UpdateTargetHighlight(IsDestinationAvailable());
 }
 
 void AMD_QuestNavigationRoute::Tick(float DeltaSeconds)
@@ -59,7 +59,7 @@ void AMD_QuestNavigationRoute::Tick(float DeltaSeconds)
     Super::Tick(DeltaSeconds);
     const bool bActive = ShouldDisplayRoute();
     RouteGeometry->SetHiddenInGame(!bActive);
-    UpdateTargetHighlight(IsQuestActive());
+    UpdateTargetHighlight(IsDestinationAvailable());
 }
 
 void AMD_QuestNavigationRoute::UpdateTargetHighlight(bool bActive)
@@ -94,24 +94,16 @@ void AMD_QuestNavigationRoute::EndPlay(const EEndPlayReason::Type EndPlayReason)
     Super::EndPlay(EndPlayReason);
 }
 
-bool AMD_QuestNavigationRoute::IsQuestActive() const
+bool AMD_QuestNavigationRoute::IsDestinationAvailable() const
 {
-    if (!QuestDefinitionId.IsValid()) return false;
-    if (!bGuideToQuestLocation && (!IsValid(Terminal) || Terminal->IsDumped())) return false;
-    const AMD_GameStateBase* State = GetWorld() ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
-    const UMD_MerchantComponent* Merchant = State ? State->GetMerchantComponent() : nullptr;
-    if (!Merchant || (RequiredDay > 0 && Merchant->GetCurrentDay() != RequiredDay)) return false;
-    const TArray<FMD_MainQuestState> Quests = Merchant->GetMainQuests();
-    const FMD_MainQuestState* Quest = Quests.FindByPredicate([this](const FMD_MainQuestState& Q)
-    {
-        return Q.DefinitionId == QuestDefinitionId && Q.IsActive() && Q.CurrentPhaseIndex == PhaseIndex;
-    });
-    return Quest != nullptr;
+    // 단말기 회수 완료 여부에 따른 월드 안내 사용 가능 판정
+    return bGuideToQuestLocation == true || (IsValid(Terminal) == true && Terminal->IsDumped() == false);
 }
 
 bool AMD_QuestNavigationRoute::ShouldDisplayRoute() const
 {
-    if (!IsQuestActive()) return false;
+    // 이미 회수한 단말기의 안내 표시 제외
+    if (IsDestinationAvailable() == false) return false;
     if (bGuideToQuestLocation) return true;
     for (const AMD_WallUtility* Utility : RequiredRepairs)
     {

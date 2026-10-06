@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Player/MD_PlayerController.h"
@@ -18,7 +18,6 @@
 #include "GameplayEffect.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "EngineUtils.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallUtility.h"
@@ -54,16 +53,16 @@ AMD_PlayerController::AMD_PlayerController()
 
 void AMD_PlayerController::CancelScrapeInteraction()
 {
-	AMD_Character* const ScrapeCharacter = Cast<AMD_Character>(GetPawn());
-	if (IsValid(ScrapeCharacter))
+	AMD_Character* const MDCharacter = Cast<AMD_Character>(GetPawn());
+	if (IsValid(MDCharacter))
 	{
-		ScrapeCharacter->CancelScrapeInteraction();
+		MDCharacter->CancelScrapeInteraction();
 	}
 }
 
 void AMD_PlayerController::SetInputMode(const FInputModeDataBase& InData)
 {
-	// UI 전환으로 Completed/Canceled 입력을 잃기 전에 먼저 Focus와 Ability를 정리한다.
+	// UI 전환으로 입력을 잃기 전에 진행 중인 오염물 타격을 정리한다.
 	CancelScrapeInteraction();
 	Super::SetInputMode(InData);
 }
@@ -74,7 +73,7 @@ void AMD_PlayerController::SetViewTarget(
 {
 	if (NewViewTarget != GetPawn())
 	{
-		// 컷신·관전 카메라가 Focus 고정 카메라와 경쟁하지 않게 먼저 정리한다.
+		// 컷신·관전 카메라로 전환하기 전에 진행 중인 타격을 정리한다.
 		CancelScrapeInteraction();
 	}
 	Super::SetViewTarget(NewViewTarget, TransitionParams);
@@ -594,27 +593,6 @@ void AMD_PlayerController::MD_BeginContract()
 	ServerBeginContract();
 }
 
-void AMD_PlayerController::MD_DumpQuests()
-{
-	UGameInstance* GameInstance = GetGameInstance();
-	if (!IsValid(GameInstance))
-	{
-		return;
-	}
-
-	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
-	if (!IsValid(Merchant))
-	{
-		return;
-	}
-
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] Credits=%d Day=%d"), Merchant->GetCredits(), Merchant->GetCurrentDay());
-	for (const FMD_MainQuestState& Q : Merchant->GetMainQuests())
-	{
-		UE_LOG(LogTemp, Log, TEXT("[Merchant]   Main: %s Status=%d Phase=%d Progress=%d UnlockDay=%d"),
-			*Q.DefinitionId.ToString(), (int32)Q.Status, Q.CurrentPhaseIndex, Q.CurrentProgress, Q.UnlockDay);
-	}
-}
 
 void AMD_PlayerController::BeginPlay()
 {
@@ -701,98 +679,6 @@ void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
 	}
 }
 
-void AMD_PlayerController::ServerAbandonRepeatQuest_Implementation(int32 Index)
-{
-	// 퀘스트 포기에 따른 패널티를 적용할 GameState 얻기
-	AMD_GameStateBase* MDGameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
-	if (IsValid(MDGameState) == false || MDGameState->HasAuthority() == false)
-	{
-		return;
-	}
-
-	// 퀘스트 상태와 경제·호감도 페널티를 관리하는 서버의 상인 매니저 얻기
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == false)
-	{
-		return;
-	}
-
-	// 고정 점수 차감 없이 퀘스트 에셋의 미회수 패널티만 적용하는 포기 처리
-	Merchant->TryAbandonRepeatQuest(Index);
-}
-
-void AMD_PlayerController::ServerAdvanceMainQuestPhase_Implementation(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex)
-{
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == true)
-	{
-		Merchant->TryAdvanceMainQuestPhase(QuestDefinitionId, ExpectedPhaseIndex);
-	}
-}
-
-void AMD_PlayerController::ServerNotifyQuestInteraction_Implementation(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex)
-{
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == true)
-	{
-		Merchant->NotifyInteractionProgress(QuestDefinitionId, ExpectedPhaseIndex);
-	}
-}
-
-void AMD_PlayerController::ServerDeliverHotbarQuestItems_Implementation(AMD_Merchant* MerchantActor)
-{
-	APawn* PlayerPawn = GetPawn();
-	if (IsValid(MerchantActor) == false || IsValid(PlayerPawn) == false)
-	{
-		return;
-	}
-
-	// 대출·상환과 같은 상인 접근 거리 검증
-	if (FVector::DistSquared(PlayerPawn->GetActorLocation(), MerchantActor->GetActorLocation()) > FMath::Square(500.0f))
-	{
-		return;
-	}
-
-	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
-	UMD_EquipHotbarComponent* Hotbar = PlayerPawn->FindComponentByClass<UMD_EquipHotbarComponent>();
-	if (IsValid(MerchantSubsystem) == false || IsValid(Hotbar) == false)
-	{
-		return;
-	}
-
-	// 슬롯을 앞에서부터 훑어 퀘스트 회수물만 납품한다. 차감으로 슬롯이 비어도 인덱스는 유지된다
-	for (int32 SlotIndex = 0; SlotIndex < Hotbar->GetSlotCount(); ++SlotIndex)
-	{
-		UMD_QuestItemDefinition* QuestItem = Cast<UMD_QuestItemDefinition>(Hotbar->GetItemAtSlot(SlotIndex));
-		int32 HeldCount = Hotbar->GetItemCountAtSlot(SlotIndex);
-		if (IsValid(QuestItem) == false || HeldCount <= 0)
-		{
-			continue;
-		}
-
-		int32 DeliveredCount = MerchantSubsystem->TryDeliverQuestItemDefinition(QuestItem, HeldCount);
-		if (DeliveredCount <= 0)
-		{
-			continue;
-		}
-
-		// 진행도는 이미 반영됐으므로 차감 실패는 로그만 남긴다 (도구가 아닌 보관 품목이라 실패 경로는 사실상 없다)
-		if (Hotbar->TryConsumeItem(QuestItem, DeliveredCount) == false)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("[Merchant] 핫바 회수물 차감 실패: %s x%d"), *QuestItem->ItemName.ToString(), DeliveredCount);
-		}
-
-		ClientReceiveQuestItemDelivery(MerchantActor, QuestItem->ItemName, DeliveredCount);
-	}
-}
-
-void AMD_PlayerController::ClientReceiveQuestItemDelivery_Implementation(AMD_Merchant* MerchantActor, const FText& ItemName, int32 Count)
-{
-	if (IsValid(MerchantActor) == true)
-	{
-		MerchantActor->ReceiveQuestItemDelivery(this, ItemName, Count);
-	}
-}
 
 void AMD_PlayerController::ServerBorrowCredits_Implementation(AMD_Merchant* MerchantActor, int32 Amount)
 {
@@ -884,99 +770,6 @@ void AMD_PlayerController::ServerBeginContract_Implementation()
 void AMD_PlayerController::MD_BeginDay(int32 Day)
 {
 	ServerBeginDay(Day);
-}
-
-AMD_CuttableWall* AMD_PlayerController::FindWallToClean(const float SearchRadiusCm) const
-{
-	UWorld* const World = GetWorld();
-	if (!World)
-	{
-		return nullptr;
-	}
-
-	auto NeedsCleaning = [](const AMD_CuttableWall* Wall) -> bool
-	{
-		const UMD_ScrapeSurfaceComponent* const Surface =
-			Wall ? Wall->GetScrapeSurfaceComponent() : nullptr;
-		return Surface && Surface->IsContaminationEnabled();
-	};
-
-	// 1) 조준선 우선. 여러 벽이 붙어 있을 때 어느 것을 지웠는지 헷갈리지 않게 한다.
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	GetPlayerViewPoint(ViewLocation, ViewRotation);
-
-	FHitResult Hit;
-	FCollisionQueryParams Params;
-	if (const APawn* const OwnPawn = GetPawn())
-	{
-		Params.AddIgnoredActor(OwnPawn);
-	}
-	if (World->LineTraceSingleByChannel(
-			Hit,
-			ViewLocation,
-			ViewLocation + ViewRotation.Vector() * SearchRadiusCm,
-			ECC_Visibility,
-			Params))
-	{
-		if (AMD_CuttableWall* const AimedWall = Cast<AMD_CuttableWall>(Hit.GetActor()))
-		{
-			return AimedWall;
-		}
-	}
-
-	// 2) 조준이 빗나갔으면 반경 안에서 아직 오염이 남은 가장 가까운 벽.
-	AMD_CuttableWall* Closest = nullptr;
-	float ClosestDistanceSquared = FMath::Square(SearchRadiusCm);
-	for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
-	{
-		AMD_CuttableWall* const Wall = *It;
-		if (!NeedsCleaning(Wall))
-		{
-			continue;
-		}
-
-		const float DistanceSquared =
-			FVector::DistSquared(Wall->GetActorLocation(), ViewLocation);
-		if (DistanceSquared < ClosestDistanceSquared)
-		{
-			ClosestDistanceSquared = DistanceSquared;
-			Closest = Wall;
-		}
-	}
-	return Closest;
-}
-
-void AMD_PlayerController::MD_CleanWall()
-{
-	AMD_CuttableWall* const Wall = FindWallToClean();
-	if (!Wall)
-	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("MD_CleanWall: 조준선과 주변 20m 안에 오염된 격벽이 없다"));
-		return;
-	}
-
-	UE_LOG(LogTemp, Log, TEXT("MD_CleanWall: %s 오염 제거 요청"), *Wall->GetName());
-	ServerCleanWall(Wall);
-}
-
-void AMD_PlayerController::ServerCleanWall_Implementation(AMD_CuttableWall* Wall)
-{
-	UMD_ScrapeSurfaceComponent* const Surface =
-		IsValid(Wall) ? Wall->GetScrapeSurfaceComponent() : nullptr;
-	if (!Surface)
-	{
-		return;
-	}
-
-	// 셀 배열을 직접 0으로 쓰지 않고 공개 API 를 쓴다. 오염 셀·마스크 아틀라스·복제 상태가
-	// 컴포넌트 내부에서 다섯 파일에 걸쳐 맞물려 있어서, 밖에서 손대면 조용히 어긋난다.
-	// 이 스위치는 제거율 1.0 · 완전제거 판정 true · 데칼 0장을 모두 성립시킨다.
-	Surface->SetContaminationEnabled(false);
-
-	UE_LOG(LogTemp, Log, TEXT("MD_CleanWall: %s 오염 제거 완료 (제거율 %.2f)"),
-		*Wall->GetName(), Surface->GetContaminationCleanRatio());
 }
 
 AMD_WallUtility* AMD_PlayerController::FindUtilityToRepair(const float SearchRadiusCm) const
@@ -1119,31 +912,6 @@ void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)
 	Merchant->BeginDay(Day, DebugAdvancePayment, bEmergencyDay);
 }
 
-void AMD_PlayerController::MD_AcceptRepeat(int32 Index)
-{
-	ServerAcceptRepeat(Index);
-}
-
-void AMD_PlayerController::ServerAcceptRepeat_Implementation(int32 Index)
-{
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
-	{
-		Merchant->TryAcceptRepeatQuest(Index);
-	}
-}
-
-void AMD_PlayerController::MD_DeclineRepeat(int32 Index)
-{
-	ServerDeclineRepeat(Index);
-}
-
-void AMD_PlayerController::ServerDeclineRepeat_Implementation(int32 Index)
-{
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
-	{
-		Merchant->TryDeclineRepeatQuest(Index);
-	}
-}
 
 void AMD_PlayerController::MD_Deliver(const FString& GradeName, bool bIntact)
 {

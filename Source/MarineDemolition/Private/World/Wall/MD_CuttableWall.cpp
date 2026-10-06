@@ -2,9 +2,8 @@
 #include "GameplayTags/MD_GameplayTags.h"
 
 #include "Audio/MD_AudioSubsystem.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
-#include "Components/DecalComponent.h"
-#include "Gameplay/Scrape/MD_ScrapeFaceProgress.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "NiagaraFunctionLibrary.h"
 #include "World/Wall/MD_WallPiece.h"
@@ -27,63 +26,6 @@ AMD_CuttableWall::AMD_CuttableWall()
 	SetRootComponent(Mesh);
 	// 특정 Cube를 벽 크기로 찌그러뜨리지 않는다. 실제 메시 또는 Blueprint가 크기를 결정한다.
 	Mesh->SetRelativeScale3D(FVector::OneVector);
-
-	FrontContaminationDecal = CreateDefaultSubobject<UDecalComponent>(
-		TEXT("FrontContaminationDecal"));
-	FrontContaminationDecal->SetupAttachment(Mesh);
-	FrontContaminationDecal->SetAbsolute(false, false, true);
-	FrontContaminationDecal->SetRelativeScale3D(FVector::OneVector);
-	FrontContaminationDecal->SetFadeScreenSize(0.0f);
-	FrontContaminationDecal->SetVisibility(false);
-	FrontContaminationDecal->SetHiddenInGame(true);
-
-	BackContaminationDecal = CreateDefaultSubobject<UDecalComponent>(
-		TEXT("BackContaminationDecal"));
-	BackContaminationDecal->SetupAttachment(Mesh);
-	BackContaminationDecal->SetAbsolute(false, false, true);
-	BackContaminationDecal->SetRelativeScale3D(FVector::OneVector);
-	BackContaminationDecal->SetFadeScreenSize(0.0f);
-	BackContaminationDecal->SetVisibility(false);
-	BackContaminationDecal->SetHiddenInGame(true);
-
-	ScrapeSurface = CreateDefaultSubobject<UMD_ScrapeSurfaceComponent>(
-		TEXT("ScrapeSurface"));
-	ScrapeSurface->ConfigureExternalComponents(
-		Mesh,
-		FrontContaminationDecal,
-		BackContaminationDecal);
-	SyncLegacySurfaceConfiguration();
-}
-
-
-void AMD_CuttableWall::PreRegisterAllComponents()
-{
-    // MeshUV uses its mesh overlay. Legacy hidden decals sometimes serialize
-    // that surface material, which cannot render as a decal and opens a blocking
-    // editor notification during PIE registration. Keep all valid decal bindings.
-    if (GetWorld() && GetWorld()->IsGameWorld() && ScrapeSurface && ScrapeSurface->UsesMeshUVSurface())
-    {
-        for (UDecalComponent* Decal : {FrontContaminationDecal.Get(), BackContaminationDecal.Get()})
-            if (Decal && (!Decal->IsVisible() || Decal->bHiddenInGame) && Decal->GetDecalMaterial()
-                && Decal->GetDecalMaterial()->GetMaterial()->MaterialDomain != MD_DeferredDecal)
-                Decal->SetDecalMaterial(nullptr);
-    }
-    Super::PreRegisterAllComponents();
-}
-
-void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
-{
-	Super::OnConstruction(Transform);
-
-	SyncLegacySurfaceConfiguration();
-	if (ScrapeSurface)
-	{
-		ScrapeSurface->ConfigureExternalComponents(
-			Mesh,
-			FrontContaminationDecal,
-			BackContaminationDecal);
-		ScrapeSurface->RefreshSurfaceGeometry();
-	}
 }
 
 
@@ -96,83 +38,19 @@ void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& Out
 }
 
 
-void AMD_CuttableWall::BeginPlay()
-{
-	Super::BeginPlay();
-	SyncLegacySurfaceConfiguration();
-	if (ScrapeSurface)
-	{
-		if (ScrapeSurface->IsContaminationEnabled()
-			&& !ScrapeSurface->IsSurfaceInitialized())
-		{
-			ScrapeSurface->InitializeSurface();
-		}
-	}
-}
-
-
 void AMD_CuttableWall::Cut(AActor* Cutter)
-{
-	CutFromHit(Cutter, nullptr);
-}
-
-
-void AMD_CuttableWall::CutFromHit(
-	AActor* Cutter,
-	const FHitResult* WallHit)
 {
 	if (!HasAuthority() || !CanCut())
 	{
 		return;
 	}
 
-	const float CutSurfaceCleanRatio = ResolveCutSurfaceCleanRatio(WallHit);
 	bCut = true;
-	CompleteCutWithCleanRatio(Cutter, CutSurfaceCleanRatio);
+	CompleteCut(Cutter);
 }
 
 
-float AMD_CuttableWall::ResolveCutSurfaceCleanRatio(
-	const FHitResult* WallHit)
-{
-	if (!ScrapeSurface)
-	{
-		return 0.0f;
-	}
-
-	if (WallHit
-		&& WallHit->bBlockingHit
-		&& WallHit->GetActor() == this)
-	{
-		EMD_ScrapeSurfaceFace CutSurfaceFace = EMD_ScrapeSurfaceFace::Front;
-		bool bResolvedFace = ScrapeSurface->TryGetScrapeSurfaceFaceFromHit(
-			*WallHit,
-			CutSurfaceFace);
-		if (!bResolvedFace)
-		{
-			// 모서리나 BP 추가 충돌 컴포넌트를 맞은 경우에도 GA 시점이
-			// 벽의 어느 쪽에 있는지로 한쪽 면을 결정한다.
-			bResolvedFace = ScrapeSurface->
-				TryResolveContaminationFaceFromWorldPosition(
-					WallHit->TraceStart,
-					CutSurfaceFace);
-		}
-
-		if (bResolvedFace)
-		{
-			return ScrapeSurface->GetContaminationCleanRatio(CutSurfaceFace);
-		}
-	}
-
-	// Hit이 없는 기존 Blueprint 직접 호출이나 기하 해석 불가 상태만
-	// 이전 동작과 동일한 양면 전체 값으로 안전하게 폴백한다.
-	return ScrapeSurface->GetContaminationCleanRatio();
-}
-
-
-void AMD_CuttableWall::CompleteCutWithCleanRatio(
-	AActor* Cutter,
-	const float CutSurfaceCleanRatio)
+void AMD_CuttableWall::CompleteCut(AActor* Cutter)
 {
 	// Keep the support links and authored collapse settings after the wall disappears.
 	bAwaitingSupportCollapse = WallType == EMD_WallType::Strut && bHasSupport;
@@ -187,12 +65,8 @@ void AMD_CuttableWall::CompleteCutWithCleanRatio(
 		OnWallDemolished.Broadcast(this, Cutter);
 	}
 
-	// 파편 드랍: GA가 타격한 한쪽 면의 남은 오염만으로 깨끗/오염 배분
-	// (기획 §2.5: 제거율 70% → 7:3)
+	// Wall debris is always clean.
 	const int32 SafePieceCount = FMath::Max(0, PieceCount);
-	const int32 CleanCount = FMD_ScrapeFaceProgress::CalculateCleanPieceCount(
-		SafePieceCount,
-		CutSurfaceCleanRatio);
 
 	const FVector Origin = GetActorLocation();
 	const FVector Extent = Mesh->Bounds.BoxExtent;
@@ -212,7 +86,7 @@ void AMD_CuttableWall::CompleteCutWithCleanRatio(
 		if (Piece)
 		{
 			Piece->SetActorScale3D(FVector(FMath::FRandRange(0.15f, 0.35f)));
-			Piece->SetContaminated(i >= CleanCount);
+			Piece->SetContaminated(false);
 		}
 	}
 
@@ -230,8 +104,6 @@ void AMD_CuttableWall::OnRep_Cut()
 	if (!bCut) return;
 	SetActorHiddenInGame(true);
 	SetActorEnableCollision(false);
-	// The retained wall only tracks support. Release its contamination cells and GPU visuals.
-	if (ScrapeSurface && HasAuthority()) ScrapeSurface->SetContaminationEnabled(false);
 }
 
 void AMD_CuttableWall::MulticastPlayDemolishEffect_Implementation()
@@ -324,12 +196,9 @@ void AMD_CuttableWall::AddCutProgressInternal(
 
 	CutProgressSeconds = FMath::Clamp(CutProgressSeconds + DeltaSeconds, 0.0f, Required);
 	const bool bCompletesCut = CutProgressSeconds >= Required;
-	const float CompletionCleanRatio = bCompletesCut
-		? ResolveCutSurfaceCleanRatio(WallHit)
-		: 0.0f;
 	if (bCompletesCut)
 	{
-		// 진행도 delegate의 재진입보다 먼저 파괴를 예약하고 비율을 고정한다.
+		// 진행도 delegate의 재진입보다 먼저 파괴를 예약한다.
 		bCut = true;
 	}
 
@@ -338,7 +207,7 @@ void AMD_CuttableWall::AddCutProgressInternal(
 
 	if (bCompletesCut)
 	{
-		CompleteCutWithCleanRatio(Cutter, CompletionCleanRatio);
+		CompleteCut(Cutter);
 	}
 }
 
@@ -360,36 +229,4 @@ void AMD_CuttableWall::OnRep_CutProgress()
 	const float ProgressRatio = GetCutProgressRatio();
 	OnCutProgressChanged.Broadcast(this, ProgressRatio);
 
-}
-
-void AMD_CuttableWall::SyncLegacySurfaceConfiguration()
-{
-	if (!ScrapeSurface)
-	{
-		return;
-	}
-
-	ScrapeSurface->ContaminationItemClass = ContaminationItemClass;
-	ScrapeSurface->ContaminationItemsPerFace = ContaminationItemsPerFace;
-	ScrapeSurface->bUseProceduralContamination = bUseProceduralContamination;
-    ScrapeSurface->bForceFullContamination = bForceFullContamination;
-	ScrapeSurface->ContaminationDecalMaterial = ContaminationDecalMaterial;
-}
-
-bool AMD_CuttableWall::RestorePersistentCutSeconds(float Seconds)
-{
-	// 저장 당시 진행량의 손상과 클라이언트 적용 차단
-	if (HasAuthority() == false || FMath::IsFinite(Seconds) == false || Seconds < 0.0f || Seconds > GetRequiredCutSeconds())
-	{
-		// 현재 벽의 절단 상태를 유지한 채 실패 반환
-		return false;
-	}
-	// 절단 완료를 다시 실행하지 않고 누적 진행만 복구
-	CutProgressSeconds = Seconds;
-	// 호스트 진행 표시 갱신
-	OnRep_CutProgress();
-	// 접속 클라이언트의 절단 표시 동기화
-	ForceNetUpdate();
-	// 절단 상태 복원 성공 반환
-	return true;
 }

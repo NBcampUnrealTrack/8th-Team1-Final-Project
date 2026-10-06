@@ -13,7 +13,6 @@
 #include "Player/MD_PlayerState.h"
 #include "Component/Hazard/MD_HazardVolumeComponent.h"
 #include "GameplayTags/MD_GameplayTags.h"
-#include "Types/Persistence/MD_WorldActorSnapshotTypes.h"
 #include "World/Environment/MD_CoolingHazardZone.h"
 #include "World/Wall/MD_CoolingPump.h"
 #include "GameFramework/CharacterMovementComponent.h"
@@ -147,16 +146,10 @@ bool FMDCoolingFlowTest::RunTest(const FString& Parameters)
 	TestNotNull(TEXT("Leak Niagara asset"), LeakFX ? LeakFX->GetAsset() : nullptr);
 	TestFalse(TEXT("No free E repair"), Pump->CanInteract_Implementation(nullptr));
 	TestFalse(TEXT("Wrong tool rejected"), Pump->TryExternalRepair(nullptr, MDGameplayTags::Ability_UtilityRepair_Insulation));
-	const FMD_UtilityRecord BrokenRecord = Pump->BuildPersistenceRecord();
 	TestTrue(TEXT("Foam repairs pump"), Pump->TryExternalRepair(nullptr, MDGameplayTags::Ability_UtilityRepair_Foam));
 	TestTrue(TEXT("Cooling restored"), Pump->IsCoolingRestored());
 	TestFalse(TEXT("Room immediately safe"), Zone->IsHazardActive());
 	TestFalse(TEXT("Duplicate repair rejected"), Pump->TryExternalRepair(nullptr, MDGameplayTags::Ability_UtilityRepair_Foam));
-	const FMD_UtilityRecord RepairedRecord = Pump->BuildPersistenceRecord();
-	TestTrue(TEXT("Restore broken save"), Pump->RestorePersistenceRecord(BrokenRecord));
-	TestTrue(TEXT("Loaded broken room dangerous"), Zone->IsHazardActive());
-	TestTrue(TEXT("Restore repaired save"), Pump->RestorePersistenceRecord(RepairedRecord));
-	TestFalse(TEXT("Loaded repaired room safe"), Zone->IsHazardActive());
 	// Exercise actual room overlap -> ApplyDamage -> player GAS Health.
 	Zone->SetActorLocation(FVector(10000.f, 0.f, 0.f));
 	AMD_PlayerState* PlayerState = World->SpawnActor<AMD_PlayerState>();
@@ -186,7 +179,11 @@ bool FMDCoolingFlowTest::RunTest(const FString& Parameters)
 			TestEqual(TEXT("Native damage bridge changes HP"),
 				ASC->GetNumericAttribute(UMD_CharacterAttributeSet::GetHealthAttribute()), 99.f);
 			ASC->SetNumericAttributeBase(UMD_CharacterAttributeSet::GetHealthAttribute(), 100.f);
-			TestTrue(TEXT("Restore broken before entry"), Pump->RestorePersistenceRecord(BrokenRecord));
+			// 저장 복원 경로가 없으므로 시작 파손 상태의 새 펌프로 진입 검사
+			AMD_CoolingPump* EntryPump = World->SpawnActor<AMD_CoolingPump>();
+			if (!TestNotNull(TEXT("Entry pump"), EntryPump)) return false;
+			Zone->CoolingPump = EntryPump;
+			TestEqual(TEXT("Entry pump starts broken"), EntryPump->GetUtilityState(), EMD_UtilityState::Broken);
 			TestTrue(TEXT("Room is hazardous before entry"), Zone->IsHazardActive());
 			Character->SetActorLocation(FVector(10000.f, 0.f, 0.f));
 			TestTrue(TEXT("Character actually overlaps room"), Zone->DamageZone->IsOverlappingActor(Character));
@@ -196,7 +193,7 @@ bool FMDCoolingFlowTest::RunTest(const FString& Parameters)
 			Zone->DamageZone->OnComponentBeginOverlap.Broadcast(Zone->DamageZone, Character, nullptr, 0, false, FHitResult());
 			TestEqual(TEXT("Duplicate overlap cannot double damage"),
 				ASC->GetNumericAttribute(UMD_CharacterAttributeSet::GetHealthAttribute()), 92.f);
-			ADD_LATENT_AUTOMATION_COMMAND(FMDCoolingTimedDamageCheck(this, World, Pump, Zone, Character, ASC));
+			ADD_LATENT_AUTOMATION_COMMAND(FMDCoolingTimedDamageCheck(this, World, EntryPump, Zone, Character, ASC));
 			bDeferredCleanup = true;
 			return true;
 		}
