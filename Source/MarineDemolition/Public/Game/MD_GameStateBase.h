@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "GameFramework/GameStateBase.h"
@@ -67,7 +67,7 @@ public:
     UFUNCTION(BlueprintPure, Category = "Game Time")
     bool HasReachedTime(int32 Hour, int32 Minute) const;
 
-    /** 0..1 progress across the playable day window (StartHour..EndHour). */
+    // 자정 기준 24시간 시계의 0~1 주기 진행률
     UFUNCTION(BlueprintPure, Category = "Game Time")
     float GetDayCycleProgress() const;
 
