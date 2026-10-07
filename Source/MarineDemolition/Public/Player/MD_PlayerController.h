@@ -193,9 +193,6 @@ private:
 	UFUNCTION(Exec)
 	void MD_ShowCredits();
 
-	UFUNCTION(Exec)
-	void MD_AddAffinity(int32 DeltaAffinity);
-
 	//서버에서 크레딧 변경 처리
 	UFUNCTION(Server, Reliable)
 	void ServerAddCredits(int32 Amount);

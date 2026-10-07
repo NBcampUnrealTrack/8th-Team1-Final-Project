@@ -48,8 +48,6 @@ public:
 	// 현재 Day의 Enum Map 크레딧 원장을 네트워크 전달용 항목 배열로 반환하는 함수
 	TArray<FMD_DailyReportValue> GetDailyCreditTotals() const;
 	int32 GetCurrentDay() const { return CurrentDay; }
-	// 상점 해금과 대화 분기에 사용하는 현재 호감도를 반환하는 함수
-	float GetAffinity() const { return Affinity; }
 
 	/** BeginContract 이후 현장 계약이 살아 있는지. GameInstance 수명 동안 유지된다. */
 	bool HasActiveContract() const { return CurrentSite != nullptr; }
@@ -78,17 +76,15 @@ public:
 	/** 소모품을 포함한 품목별 누적 구매 횟수 */
 	int32 GetPurchasedItemCount(FPrimaryAssetId ItemAssetId) const;
 
-	// 호감도를 기획 범위 안에서 증감하고 복제 미러 갱신을 요청하는 함수
-	void AddAffinity(float Amount);
 
 	// 현재 미상환 대출 잔액을 반환하는 함수
 	int32 GetDebtBalance() const { return DebtBalance; }
 
-	// 현재 호감도 구간에 맞는 대출 한도를 반환하는 함수
+	// 현재 상인의 기본 대출 한도 조회
 	int32 GetLoanLimit() const;
 
-	// 서버 원장과 클라이언트 복제 UI가 동일한 호감도 구간별 한도를 사용하기 위한 계산 함수
-	static int32 CalculateLoanLimit(float InAffinity);
+	// 서버와 클라이언트 UI에 공통으로 적용하는 기본 대출 한도
+	static int32 CalculateLoanLimit();
 
 	// 현재 부채를 제외하고 추가로 빌릴 수 있는 금액을 반환하는 함수
 	int32 GetAvailableLoanAmount() const;
@@ -102,8 +98,11 @@ public:
 	// 보유 크레딧과 미상환 잔액 범위에서 대출금을 상환하는 함수
 	bool TryRepayLoan(int32 Amount);
 
-	// 일 마감 시 미상환 잔액에 일일 이자를 한 번 합산하고 부과액을 반환하는 함수
+	// 현장 타이머가 요청한 미상환 잔액의 5% 이자 합산
 	int32 ApplyDailyLoanInterest();
+
+	// 서버 부과액과 대출 UI가 공유하는 소수점 절삭 및 원장 상한 계산
+	static int32 CalculateLoanInterest(int32 InDebtBalance);
 
 	// 새 현장 계약과 일차 및 경고 배율 초기화
 	void BeginContract(UMD_SiteDefinition* Site);
@@ -123,7 +122,7 @@ public:
 	/** 현재 계약 현장이 과거에 클리어된 적 있는지 저장 이력에서 확인하는 함수 */
 	bool HasClearedCurrentSite() const;
 
-	/** Day 시작 시 호감도와 경고·비상 배율을 반영한 착수금 지급 */
+	/** Day 시작 시 경고·비상 배율을 반영한 착수금 지급 */
 	void BeginDay(int32 NewDay, int32 BaseAdvancePayment, bool bEmergencyDay);
 
 	/** 계약 클리어 시 호출하여 현장 완료 이력을 남기는 함수 */
@@ -160,8 +159,6 @@ private:
 	// 계약과 게임 재시작을 넘어 유지되는 팀 공유 미상환 대출 잔액
 	int32 DebtBalance = 0;
 
-	// 상점 해금과 대화 분기를 계약 사이에도 유지하기 위한 누적 호감도
-	float Affinity = 0.0f;
 
 	int32 CurrentDay = 0;
 
@@ -176,6 +173,6 @@ private:
 	UPROPERTY()
 	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
 
-	// 기획상 모든 호감도 구간에 공통으로 적용되는 일일 대출 이자율
+	// 미상환 잔액에 적용하는 일일 대출 이자율
 	static constexpr float DailyInterestRate = 0.05f;
 };

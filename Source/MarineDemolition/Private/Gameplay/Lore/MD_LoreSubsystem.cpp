@@ -1,117 +1,98 @@
 ﻿#include "Gameplay/Lore/MD_LoreSubsystem.h"
-#include "Engine/GameInstance.h"
 
 #include "Data/Lore/MD_LoreDefinition.h"
-#include "Util/MD_LogUtility.h"
+#include "Engine/GameInstance.h"
+#include "Engine/LocalPlayer.h"
+#include "Gameplay/Lore/MD_LoreProfileSubsystem.h"
 
 bool UMD_LoreSubsystem::TryDiscoverLore(FPrimaryAssetId LoreAssetId)
 {
-	// 서버 권한과 유효한 Asset ID가 모두 있어야 발견 원장을 변경한다.
-	if (HasServerAuthority() == false)
+	// 로컬 개인 기록을 소유하는 저장 원장 조회
+	UMD_LoreProfileSubsystem* Profile = GetLocalProfile();
+	// 실제 콘텐츠에 존재하는 조사 대상 정의 확인
+	UMD_LoreDefinition* Definition = GetLoreDefinition(LoreAssetId);
+	// 로컬 사용자와 유효한 기록이 없는 수집 차단
+	if (IsValid(Profile) == false || IsValid(Definition) == false || Definition->IsValidDefinition() == false)
 	{
+		// 무효 기록의 개인 저장 방지
 		return false;
 	}
-
-	if (LoreAssetId.IsValid() == false)
+	// 기존 API의 최초 발견 의미를 유지한 중복 요청 차단
+	if (Profile->EnsureLoaded() == false || Profile->GetDiscoveredLoreAssetIds().Contains(LoreAssetId) == true)
 	{
+		// 저장 로드 이전과 기보유 기록의 중복 수집 종료
 		return false;
 	}
-
-	// 액터에 할당된 Asset ID가 실제 로어 정의로 해석되는지 확인한다.
-	UMD_LoreDefinition* LoreDefinition = GetLoreDefinition(LoreAssetId);
-	if (IsValid(LoreDefinition) == false)
-	{
-		return false;
-	}
-
-	if (LoreDefinition->IsValidDefinition() == false)
-	{
-		return false;
-	}
-	// 이미 발견한 로어는 전역 원장에 중복 기록하지 않는다.
-	if (DiscoveredLoreAssetIds.Contains(LoreAssetId) == true)
-	{
-		return false;
-	}
-
-	// 카탈로그와 관계없이 전역 발견 사실을 기록한다.
-	DiscoveredLoreAssetIds.Add(LoreAssetId);
-
-	// 액터 파괴 이벤트보다 먼저 서버의 확정 결과를 남기기 위한 수집 로그
-	UE_LOG(MarineDemolition, Log, TEXT("%s [로어] 기록물 수집 완료: 에셋=%s, 전체 진행=%d"), *UE_CALL_LOCATIONINFO, *LoreAssetId.ToString(), DiscoveredLoreAssetIds.Num());
-	OnLoreProgressChanged.Broadcast();
-
-	return true;
+	// 조사한 본인의 저장 파일에만 수집 결과 반영
+	return Profile->RecordLore(LoreAssetId);
 }
 
 UMD_LoreDefinition* UMD_LoreSubsystem::GetLoreDefinition(FPrimaryAssetId LoreAssetId) const
 {
-	// 정의 클래스의 공통 Asset Manager 조회 경로를 사용한다.
-	UMD_LoreDefinition* LoreDefinition = UMD_LoreDefinition::LoadDefinition(LoreAssetId);
-	return LoreDefinition;
+	// 카탈로그와 월드 액터가 공유하는 정의 조회 경로
+	return UMD_LoreDefinition::LoadDefinition(LoreAssetId);
 }
 
 EMD_LoreEntryState UMD_LoreSubsystem::GetLoreState(const UMD_LoreCatalog* LoreCatalog, FPrimaryAssetId LoreAssetId) const
 {
-	if (IsValid(LoreCatalog) == false || LoreAssetId.IsValid() == false)
+	// 카탈로그 부재 시 공개할 본문이 없는 상태 반환
+	if (IsValid(LoreCatalog) == false)
 	{
+		// 미발견 기본 상태 유지
 		return EMD_LoreEntryState::Undiscovered;
 	}
+	// 개인 선행 기록만으로 본문 해독 상태 계산
+	return LoreCatalog->ResolveLoreState(LoreAssetId, GetDiscoveredLoreAssetIds());
+}
 
-	EMD_LoreEntryState LoreState = LoreCatalog->ResolveLoreState(LoreAssetId, DiscoveredLoreAssetIds);
-	return LoreState;
+int32 UMD_LoreSubsystem::GetDiscoveredLoreCount() const
+{
+	// 현재 사용자의 개인 수집 개수 반환
+	return GetDiscoveredLoreAssetIds().Num();
 }
 
 bool UMD_LoreSubsystem::HasDiscoveredLore(FPrimaryAssetId LoreAssetId) const
 {
-	if (LoreAssetId.IsValid() == false)
-	{
-		return false;
-	}
-
-	bool bIsDiscovered = DiscoveredLoreAssetIds.Contains(LoreAssetId);
-	return bIsDiscovered;
+	// 서버 또는 팀 원장과 독립된 본인 보유 여부 반환
+	return GetDiscoveredLoreAssetIds().Contains(LoreAssetId);
 }
 
 bool UMD_LoreSubsystem::IsCatalogComplete(const UMD_LoreCatalog* LoreCatalog) const
 {
-	if (IsValid(LoreCatalog) == false || LoreCatalog->LoreEntries.Num() <= 0)
+	// 비어 있는 카탈로그의 수집 완료 오판 방지
+	if (IsValid(LoreCatalog) == false || LoreCatalog->LoreEntries.IsEmpty() == true)
 	{
+		// 유효한 수집 대상 부재 반환
 		return false;
 	}
-
-	// 정적 카탈로그의 모든 식별자가 발견 원장에 존재하는지 확인하는 완성 판정
-	for (int32 LoreIndex = 0; LoreIndex < LoreCatalog->GetLoreCount(); ++LoreIndex)
+	// 반복 검사에서 동일 개인 기록 재사용
+	TArray<FPrimaryAssetId> PersonalIds = GetDiscoveredLoreAssetIds();
+	// 카탈로그의 모든 기록을 본인이 수집했는지 확인
+	for (FPrimaryAssetId LoreAssetId : LoreCatalog->LoreEntries)
 	{
-		// 카탈로그 Asset ID를 완성 판정에 사용할 정의 에셋으로 해석한다.
-		UMD_LoreDefinition* LoreDefinition = LoreCatalog->GetLoreDefinition(LoreIndex);
-		if (IsValid(LoreDefinition) == false)
+		// 유효하지 않거나 미보유한 기록이 있으면 미완료 처리
+		if (LoreAssetId.IsValid() == false || IsValid(GetLoreDefinition(LoreAssetId)) == false || PersonalIds.Contains(LoreAssetId) == false)
 		{
-			return false;
-		}
-
-		FPrimaryAssetId LoreAssetId = LoreCatalog->LoreEntries[LoreIndex];
-		if (DiscoveredLoreAssetIds.Contains(LoreAssetId) == false)
-		{
+			// 본인에게 남아 있는 수집 대상 표시
 			return false;
 		}
 	}
-
+	// 본인의 전체 기록 수집 완료 반환
 	return true;
 }
 
-bool UMD_LoreSubsystem::HasServerAuthority() const
+TArray<FPrimaryAssetId> UMD_LoreSubsystem::GetDiscoveredLoreAssetIds() const
 {
-	const UWorld* World = GetWorld();
-	return IsValid(World) == true && World->GetNetMode() != ENetMode::NM_Client;
+	// 현재 사용자에 대응하는 개인 원장 조회
+	UMD_LoreProfileSubsystem* Profile = GetLocalProfile();
+	// 계정 준비 이전에는 다른 사용자의 기록을 표시하지 않는 조회
+	return IsValid(Profile) == true && Profile->EnsureLoaded() == true ? Profile->GetDiscoveredLoreAssetIds() : TArray<FPrimaryAssetId>();
 }
 
-void UMD_LoreSubsystem::Initialize(FSubsystemCollectionBase& Collection)
+UMD_LoreProfileSubsystem* UMD_LoreSubsystem::GetLocalProfile() const
 {
-    Super::Initialize(Collection);
-}
-
-void UMD_LoreSubsystem::Deinitialize()
-{
-    Super::Deinitialize();
+	// GameInstance가 유지하는 첫 로컬 사용자 조회
+	ULocalPlayer* LocalPlayer = GetGameInstance()->GetFirstGamePlayer();
+	// 원격 참가자나 전용 서버의 개인 파일 접근 방지
+	return IsValid(LocalPlayer) == true ? LocalPlayer->GetSubsystem<UMD_LoreProfileSubsystem>() : nullptr;
 }

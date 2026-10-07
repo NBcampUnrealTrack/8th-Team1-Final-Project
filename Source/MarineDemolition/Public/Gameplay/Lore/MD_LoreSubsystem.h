@@ -5,62 +5,43 @@
 #include "Data/Lore/MD_LoreCatalog.h"
 #include "MD_LoreSubsystem.generated.h"
 
-
 class UMD_LoreDefinition;
+class UMD_LoreProfileSubsystem;
 
-/** 서버 로어 원장 변경을 복제 미러와 저장 시스템에 알리는 이벤트 */
-DECLARE_MULTICAST_DELEGATE(FMD_OnLoreProgressChanged);
-
-/** 계약과 맵 이동을 넘어 영구 누적되는 팀 공유 로어 진행의 서버 권위 관리자 */
+// 기존 로어 API에서 개인 저장 원장과 정의 에셋으로 연결하는 조회 경로
 UCLASS()
 class MARINEDEMOLITION_API UMD_LoreSubsystem : public UGameInstanceSubsystem
 {
 	GENERATED_BODY()
 
 public:
-    virtual void Initialize(FSubsystemCollectionBase& Collection) override;
-
-    virtual void Deinitialize() override;
-
-public:
-	/** 로어 발견 또는 저장 복원 이후 복제 미러 갱신을 요청하는 이벤트 */
-	FMD_OnLoreProgressChanged OnLoreProgressChanged;
-
-protected:
-	/** 모든 카탈로그가 공유하는 전역 로어 발견 원장 */
-	UPROPERTY()
-	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds;
-
-public:
-	/** 기록물의 최초 발견 사실을 서버 원장에 기록하는 함수 */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Lore")
+	// 현재 로컬 사용자가 조사한 기록의 개인 저장
+	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
 	bool TryDiscoverLore(FPrimaryAssetId LoreAssetId);
 
-	/** Primary Asset ID에 할당된 로어 정의 에셋을 조회하는 함수 */
+	// 기존 카탈로그에서 사용하는 로어 정의 에셋 조회
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	UMD_LoreDefinition* GetLoreDefinition(FPrimaryAssetId LoreAssetId) const;
 
-	/** 현재 발견 목록과 카탈로그 선행 조건으로 코덱스 공개 상태를 계산하는 함수 */
+	// 개인 발견 이력과 선행 조건에 따른 해독 상태 조회
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	EMD_LoreEntryState GetLoreState(const UMD_LoreCatalog* LoreCatalog, FPrimaryAssetId LoreAssetId) const;
 
-	/** 전역 원장에 기록된 로어 개수를 반환하는 조회 함수 */
+	// 본인 누적 수집 개수 조회
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
-	FORCEINLINE int32 GetDiscoveredLoreCount() const { return DiscoveredLoreAssetIds.Num(); }
+	int32 GetDiscoveredLoreCount() const;
 
-	/** 로어 식별자가 서버 원장에 최초 발견으로 기록되었는지 확인하는 함수 */
+	// 다른 참가자와 무관한 개인 보유 여부 조회
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	bool HasDiscoveredLore(FPrimaryAssetId LoreAssetId) const;
 
-	/** 지정한 카탈로그의 모든 기록물이 발견되었는지 확인하는 조회 함수 */
+	// 본인의 카탈로그 수집 완료 여부 조회
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	bool IsCatalogComplete(const UMD_LoreCatalog* LoreCatalog) const;
 
-	/** 복제 미러가 서버 원장 전체를 동일한 순서로 복사하기 위한 조회 함수 */
-	FORCEINLINE const TArray<FPrimaryAssetId>& GetDiscoveredLoreAssetIds() const { return DiscoveredLoreAssetIds; }
+	// 개인 저장 원장에서 현재 발견 목록 조회
+	TArray<FPrimaryAssetId> GetDiscoveredLoreAssetIds() const;
 
-protected:
-	/** 클라이언트가 로컬 원장을 변경하지 못하도록 현재 실행 권한을 확인하는 함수 */
-	bool HasServerAuthority() const;
-
+	// 현재 로컬 사용자에 대응하는 개인 원장 조회
+	UMD_LoreProfileSubsystem* GetLocalProfile() const;
 };
