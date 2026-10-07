@@ -7,6 +7,7 @@
 #include "MD_InputConfig.generated.h"
 
 class UInputAction;
+class UMD_ThrowSettings;
 
 UCLASS()
 class MARINEDEMOLITION_API UMD_InputConfig : public UDataAsset
@@ -29,13 +30,19 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> AbilityAction;
 
+	/** Boolean action: Started charges, Completed releases, Canceled aborts. */
+	UPROPERTY(EditDefaultsOnly, Category = "Input|Throw")
+	TObjectPtr<UInputAction> ThrowAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input|Throw")
+	TObjectPtr<UInputAction> CancelThrowAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input|Throw")
+	TObjectPtr<UMD_ThrowSettings> ThrowSettings;
+
 	/** Optional user-authored Boolean IA. Bind R in the mapping context. */
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> ScannerModeSwitchAction;
-
-	// 헤라 Focus 진입/해제 토글. 키 매핑은 PlayerMappingContext에서 설정한다.
-	UPROPERTY(EditDefaultsOnly, Category = "Input")
-	TObjectPtr<UInputAction> ScrapeFocusAction;
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> SwapEquipmentAction;

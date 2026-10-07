@@ -6,10 +6,15 @@
 #include "Input/UIActionBindingHandle.h"
 #include "Components/VerticalBox.h"
 #include "UI/Game/MD_TalkNotificationWidget.h"
+#include "UI/Game/MD_ThrowChargeWidget.h"
 
 void UMD_HUDWidget::NativeConstruct()
 {
 	Super::NativeConstruct();
+	if (IsValid(ThrowChargeWidget))
+	{
+		ThrowChargeWidget->SetHUDPresentationEnabled(IsActivated());
+	}
 
 	// 전용 목록이 있는 경우 이전 항목 정리
 	if (IsValid(VB_TalkList) == true)
@@ -21,6 +26,11 @@ void UMD_HUDWidget::NativeConstruct()
 
 void UMD_HUDWidget::NativeDestruct()
 {
+	if (IsValid(ThrowChargeWidget))
+	{
+		ThrowChargeWidget->SetHUDPresentationEnabled(false);
+	}
+
 	// HUD 제거 시 알림의 부모 연결 정리
 	if (IsValid(VB_TalkList) == true)
 	{
@@ -29,6 +39,24 @@ void UMD_HUDWidget::NativeDestruct()
 	}
 
 	Super::NativeDestruct();
+}
+
+void UMD_HUDWidget::NativeOnActivated()
+{
+	Super::NativeOnActivated();
+	if (IsValid(ThrowChargeWidget))
+	{
+		ThrowChargeWidget->SetHUDPresentationEnabled(true);
+	}
+}
+
+void UMD_HUDWidget::NativeOnDeactivated()
+{
+	if (IsValid(ThrowChargeWidget))
+	{
+		ThrowChargeWidget->SetHUDPresentationEnabled(false);
+	}
+	Super::NativeOnDeactivated();
 }
 
 UMD_TalkNotificationWidget* UMD_HUDWidget::CreateTalkNotification()

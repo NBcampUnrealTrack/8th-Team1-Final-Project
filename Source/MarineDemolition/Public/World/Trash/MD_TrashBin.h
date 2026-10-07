@@ -27,30 +27,6 @@ struct FMD_CarryFrozenContent
 };
 
 /**
- * 서버가 확정한 헤라 털기 한 번의 결과.
- *
- * 게임 상태는 이미 서버에서 반영된 뒤 이 값을 방송한다. Blueprint는 이 구조체를
- * 덩어리 낙하·소리 같은 짧은 연출에만 사용하고 통 액체량으로 해석하지 않는다.
- */
-USTRUCT(BlueprintType)
-struct MARINEDEMOLITION_API FMD_TrashBinScrapeUnloadResult
-{
-	GENERATED_BODY()
-
-	/** 털기를 실행한 Pawn. 손 위치를 보조 연출에 사용할 수 있다. */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Trash Bin|Scrape Unload")
-	TObjectPtr<APawn> Interactor = nullptr;
-
-	/** 이번 입력에서 헤라에서 실제로 빠진 Load. 기본 성공은 20, 잔량이 적으면 그보다 작다. */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Trash Bin|Scrape Unload")
-	float RemovedLoadAmount = 0.0f;
-
-	/** 서버 반영 뒤 같은 헤라에 남은 Load. */
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Trash Bin|Scrape Unload")
-	float RemainingLoadAmount = 0.0f;
-};
-
-/**
  * 고체 ContentCount와 별도로 복제되는 통의 액체 원장 요약.
  * LiquidUnits는 관리 부피, RewardUnits는 나중에 정분류할 경제 가치다.
  */
@@ -120,10 +96,6 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
 	LiquidUnits,
 	double,
 	RewardUnits);
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(
-	FMDOnTrashBinScrapeUnloadSucceeded,
-	const FMD_TrashBinScrapeUnloadResult&,
-	Result);
 
 UCLASS()
 class MARINEDEMOLITION_API AMD_TrashBin	: public AActor, public IGameplayTagAssetInterface, public IMD_Grabbable, public IMD_Interactable, public IMD_TrashContainer
@@ -148,9 +120,6 @@ public:
 
 	/** Implements IMD_Interactable*/
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
-	virtual bool ShouldPrioritizeInteractionOverPhysicsPickup_Implementation(
-		AActor* Interactor) const override;
-	virtual void Interact_Implementation(AActor* Interactor) override;
 	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const override;
 	/** ~Implements IMD_Interactable*/
 
@@ -194,8 +163,6 @@ public:
 	/** 성공한 spill transaction의 prepared sequence만 한 번 확정한다. */
 	bool CommitNextSpillSequence(uint64 PreparedSequence);
 
-	/** 현재 여유와 요청량을 함께 적용해 헤라에서 실제로 받을 수 있는 Load를 계산한다. */
-	float GetAcceptableScrapeLoad(float RequestedLoadAmount) const;
 
 	/** ClaimSubsystem이 이 통을 후보 소유자로 판단할 때 사용하는 수용 가능 여부 조회. */
 	bool CanAcceptContentClaim(AActor* Content) const;
@@ -215,11 +182,6 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MD|Trash Bin|Liquid")
 	FMDOnTrashBinLiquidChanged OnLiquidChanged;
 
-	/** 서버 게임플레이용 성공 알림. 기본 Niagara는 multicast가 재생하고 BP 이벤트는 추가 연출에만 사용한다. */
-	UPROPERTY(BlueprintAssignable, BlueprintAuthorityOnly,
-		Category = "MD|Trash Bin|Scrape Unload")
-	FMDOnTrashBinScrapeUnloadSucceeded OnScrapeUnloadSucceeded;
-
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -232,9 +194,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
 	TObjectPtr<USceneComponent> GrabPoint;
 
-	/** FX-006에서 오염 덩어리를 생성할 통 안쪽 기준점. Blueprint 뷰포트에서 위치를 맞춘다. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash Bin|Scrape Unload")
-	TObjectPtr<USceneComponent> ScrapeUnloadEffectOrigin;
+	/** 액체가 쏟아지는 통 입구 기준점. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash Bin|Liquid")
+	TObjectPtr<USceneComponent> SpillMouthOrigin;
 
 	/** 통 내부 바닥 기준점. 사용자는 BP 뷰포트에서 이 위치만 실제 통 안쪽에 맞춘다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash Bin|Liquid")
@@ -244,9 +206,6 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash Bin|Liquid")
 	TObjectPtr<UStaticMeshComponent> LiquidFillMesh;
 
-	/** 성공한 털기 한 번마다 ScrapeUnloadEffectOrigin에서 재생할 짧은 Niagara 연출. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Bin|Scrape Unload")
-	TObjectPtr<UNiagaraSystem> ScrapeUnloadEffect;
 
 	/** 캐릭터 HoldPoint의 로컬 축 기준 운반 위치 오프셋 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Interaction", meta = (Units = "cm"))
@@ -265,9 +224,6 @@ protected:
 	FGameplayTag PickupMethodTag;
 
 	/** 개별 상호작용 한 번이 현재 장착한 헤라에서 덜어내는 최대 적재량. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Bin|Scrape Unload",
-		meta = (ClampMin = "0.0", ClampMax = "20.0", UIMin = "0.0", UIMax = "20.0"))
-	float ScrapeLoadUnloadAmount = 20.0f;
 
 	/** 100cm 기준 채움 표면을 통 내부 폭에 맞추는 반폭(기존 설정명은 호환을 위해 유지). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Trash Bin|Liquid|Visual",
@@ -322,14 +278,9 @@ protected:
 	 * 기본 Niagara는 C++가 이미 재생하므로 같은 효과를 여기서 다시 Spawn하지 않는다.
 	 * 필요하면 추후 짧은 효과음이나 손 동작 같은 별도 cosmetic만 연결한다.
 	 */
-	UFUNCTION(BlueprintImplementableEvent, BlueprintCosmetic,
-		Category = "MD|Trash Bin|Scrape Unload")
-	void OnScrapeUnloadVisual(const FMD_TrashBinScrapeUnloadResult& Result);
 
 private:
 	/** 성공 결과를 모든 관찰자에게 전달한다. 연출 전용이라 한 번 유실돼도 상태는 유지된다. */
-	UFUNCTION(NetMulticast, Unreliable)
-	void MulticastScrapeUnloadVisual(const FMD_TrashBinScrapeUnloadResult& Result);
 
 	/** 성공 commit을 현재 관찰자에게만 전달한다. 과거 event를 보관하지 않는다. */
 	UFUNCTION(NetMulticast, Unreliable)
@@ -337,7 +288,6 @@ private:
 		const FMD_TrashBinSpillCosmeticResult& Result);
 
 	/** 설정된 감산량이 유한한 양수일 때만 최대 20으로 제한해 반환한다. */
-	bool TryGetScrapeLoadUnloadAmount(float& OutRequestedAmount) const;
 
 	UFUNCTION()
 	void HandleBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
@@ -376,10 +326,6 @@ private:
 	void RefreshLiquidVisual();
 	void ResetSpillCosmeticAfterRestoreEpoch();
 	void NotifyLiquidStateChanged();
-	bool TryBuildLiquidTransferCandidate(
-		const FMD_ScrapeLoadTransferResult& PreviewTransfer,
-		FMD_TrashBinLiquidState& OutState,
-		TArray<FMD_ScrapeRecoveryLot>& OutLots) const;
 
 	enum class ESpillAttemptResult : uint8
 	{

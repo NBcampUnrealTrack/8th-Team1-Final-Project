@@ -2,33 +2,21 @@
 
 #include "CoreMinimal.h"
 #include "World/Sample/MD_QuestSampleSpawner.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "GameplayTagAssetInterface.h"
 #include "MD_QuestRackSpawner.generated.h"
 
-class UDecalComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 
 UENUM(BlueprintType)
 enum class EMD_QuestRackMode : uint8
 {
-	Contamination UMETA(DisplayName = "Rack 1 - Clean 50 percent"),
+	// Retired cleaning mode retains its serialized value and now has open access.
+	Contamination UMETA(DisplayName = "Rack 1 - Open access", Hidden),
 	// Retain the serialized enum name/value for existing Blueprint assets and saves.
 	BarnaclesAndPadlock UMETA(DisplayName = "Rack 2 - Cut padlock"),
 	Open UMETA(DisplayName = "Rack 3 - Open access")
-};
-
-/** Same physical scraping/replication/visual implementation as cuttable walls. */
-UCLASS()
-class MARINEDEMOLITION_API UMD_QuestRackScrapeSurface : public UMD_ScrapeSurfaceComponent
-{
-	GENERATED_BODY()
-public:
-	UMD_QuestRackScrapeSurface();
-	void ConfigureRackBeforePlay(UStaticMeshComponent* RackMesh, UDecalComponent* Front, UDecalComponent* Back, bool bEnabled);
-	bool CompleteCleaningWithoutDrops();
 };
 
 /** A deterministic, one-cartridge rack. Three authored racks can serve one two-item quest. */
@@ -51,8 +39,6 @@ public:
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
 	UFUNCTION(BlueprintPure, Category="MD|Quest Rack")
-	float GetContaminationRemovedRatio() const;
-	UFUNCTION(BlueprintPure, Category="MD|Quest Rack")
 	float GetPadlockCutRatio() const;
 	UFUNCTION(BlueprintPure, Category="MD|Quest Rack")
 	bool IsPadlockCut() const { return bPadlockCut; }
@@ -74,17 +60,8 @@ public:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
 	TObjectPtr<UStaticMeshComponent> RackMesh;
-	/** A front work panel; excludes unreachable rack interiors from cleaning progress. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
-	TObjectPtr<UStaticMeshComponent> RackWorkSurface;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
 	TObjectPtr<UStaticMeshComponent> PadlockMesh;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
-	TObjectPtr<UMD_QuestRackScrapeSurface> RackScrapeSurface;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
-	TObjectPtr<UDecalComponent> FrontContaminationDecal;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
-	TObjectPtr<UDecalComponent> BackContaminationDecal;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing=OnRep_RackState, Category="MD|Quest Rack")
 	EMD_QuestRackMode RackMode = EMD_QuestRackMode::Open;
@@ -92,8 +69,6 @@ public:
 	FPrimaryAssetId RackQuestDefinitionId;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MD|Quest Rack", meta=(ClampMin="0"))
 	int32 RackPhaseIndex = 0;
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MD|Quest Rack", meta=(ClampMin="0.0", ClampMax="1.0"))
-	float RequiredCleanRatio = 0.5f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MD|Quest Rack", meta=(ClampMin="0.1", Units="s"))
 	float RequiredPadlockCutSeconds = 3.6f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MD|Quest Rack", meta=(ClampMin="1.0", Units="cm"))

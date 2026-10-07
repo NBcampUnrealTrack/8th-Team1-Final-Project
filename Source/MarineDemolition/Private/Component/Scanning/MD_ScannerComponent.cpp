@@ -5,8 +5,6 @@
 #include "Camera/CameraComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "World/Contamination/MD_Barnacle.h"
 #include "World/Contamination/MD_SurfaceStain.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
@@ -32,9 +30,6 @@ UMD_ScannerComponent::UMD_ScannerComponent()
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WallStyle(
 		TEXT("/Game/VFX/03_Scanner/MI_ScanWallType.MI_ScanWallType"));
 	WallScanMaterial = WallStyle.Object;
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Mask(
-		TEXT("/Game/VFX/03_Scanner/M_ScanCleanupMask.M_ScanCleanupMask"));
-	ContaminationMaskMaterial = Mask.Object;
 }
 
 void UMD_ScannerComponent::BeginPlay()
@@ -124,7 +119,6 @@ void UMD_ScannerComponent::PresentLocalScan(uint32 RequestId, EMD_ScanMode Mode,
 					StainHighlights.AddUnique(Stain);
 				}
 			}
-			else AddContaminationHighlight(Target->FindComponentByClass<UMD_ScrapeSurfaceComponent>());
 		}
 		else if (Target->GetClass()->ImplementsInterface(UMD_Scannable::StaticClass()))
 		{
@@ -143,10 +137,7 @@ void UMD_ScannerComponent::PresentLocalScan(uint32 RequestId, EMD_ScanMode Mode,
 		MPC->SetScalarParameterValue(TEXT("ScanDisplayDuration"), Duration);
 		MPC->SetScalarParameterValue(TEXT("ScanStartTime"), GetWorld()->GetTimeSeconds());
 	}
-	if (Mode != EMD_ScanMode::InternalStructure && (!WallHighlights.IsEmpty() || !ContaminationHighlights.IsEmpty() || !StainHighlights.IsEmpty())) EnableWallPostProcess();
-	if (!ContaminationHighlights.IsEmpty())
-		GetWorld()->GetTimerManager().SetTimer(ContaminationRefreshTimer, this,
-			&ThisClass::RefreshContaminationHighlights, 0.1f, true);
+	if (Mode != EMD_ScanMode::InternalStructure && (!WallHighlights.IsEmpty() || !StainHighlights.IsEmpty())) EnableWallPostProcess();
 	FTimerDelegate Expire;
 	Expire.BindWeakLambda(this, [this, RequestId] { FinishLocalRequest(RequestId); });
 	GetWorld()->GetTimerManager().SetTimer(ScanTimer, Expire, Duration, false);
@@ -219,7 +210,9 @@ void UMD_ScannerComponent::ClearScan(bool bNotifyServer)
 	const uint32 PreviousRequest = ActiveRequestId;
 	ActiveRequestId = 0;
 	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(ScanTimer);
-	ClearContaminationHighlights();
+	for (const TWeakObjectPtr<AMD_SurfaceStain>& Stain : StainHighlights)
+		if (Stain.IsValid()) Stain->SetScanHighlighted(this, false);
+	StainHighlights.Empty();
 	for (FMD_ScanMeshState& State : WallHighlights) State.Restore();
 	WallHighlights.Empty();
 	ClearWallPostProcess();

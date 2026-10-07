@@ -537,8 +537,8 @@ bool AMD_TrashBin::TryFindSpillContact(
 
 FVector AMD_TrashBin::CalculateSpillMouthCenterWorldLocation() const
 {
-	FVector MouthCenterWorld = IsValid(ScrapeUnloadEffectOrigin)
-		? ScrapeUnloadEffectOrigin->GetComponentLocation()
+	FVector MouthCenterWorld = IsValid(SpillMouthOrigin)
+		? SpillMouthOrigin->GetComponentLocation()
 		: IsValid(Mesh.Get())
 			? Mesh->Bounds.Origin
 			: GetActorLocation();

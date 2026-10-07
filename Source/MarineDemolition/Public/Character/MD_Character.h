@@ -3,12 +3,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "GameplayAbilitySpecHandle.h"
 #include "GameFramework/Character.h"
 #include "InputActionValue.h"
 #include "AbilitySystemInterface.h"
 #include "Types/State/MD_HealthTypes.h"
 #include "Types/Customization/MD_CharacterAppearanceTypes.h"
+#include "Types/Scrape/MD_ScrapePresentationState.h"
 #include "MD_Character.generated.h"
 
 class UMD_InputConfig;
@@ -22,11 +22,11 @@ class USkeletalMeshComponent;
 class UPhysicsHandleComponent;
 class UMD_CharacterMovementComponent;
 class UMD_InteractionComponent;
-class UMD_ScrapeToolComponent;
 class UMD_StainScraperComponent;
 class UMD_ScannerComponent;
 class UGameplayAbility;
 class UMD_EquipHotbarComponent;
+class UMD_ThrowComponent;
 class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
 class UMD_ItemDefinition;
@@ -71,25 +71,43 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "Movement|Water")
 	void ForceEnterWalkState();
 
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape")
-	UMD_ScrapeToolComponent* GetScrapeToolComponent() const	{ return ScrapeToolComponent; }
-
 	UFUNCTION(BlueprintPure, Category = "MD|Stain")
 	UMD_StainScraperComponent* GetStainScraperComponent() const { return StainScraperComponent; }
 
 	UFUNCTION(BlueprintPure, Category="MD|Scanner")
 	UMD_ScannerComponent* GetScannerComponent() const { return ScannerComponent; }
 
-	/** 현재 장착한 헤라에 털어낼 적재량이 있는지 외부 상호작용 대상에 알려준다. */
-	UFUNCTION(BlueprintPure, Category = "MD|Scrape|Unload")
-	bool CanUnloadScrapeLoad() const;
+	UFUNCTION(BlueprintPure, Category = "Equipment")
+	UMD_EquipHotbarComponent* GetHotbarComponent() const { return EquipHotbarComponent; }
 
-	/** 현재 장착한 헤라에서 요청량만큼 실제 표현 가능한 감소가 생기는지 반환한다. */
-	bool CanUnloadScrapeLoadForRequest(float RequestedAmount) const;
+	// 숫자키와 인벤토리 클릭이 공유하는 도구 동작 취소 및 사용 슬롯 변경
+	UFUNCTION(BlueprintCallable, Category = "Equipment")
+	void SelectHotbarSlot(int32 SlotIndex);
 
-	/** 서버에서 장착 상태를 재검증하고 요청량만큼 헤라 적재량 제거를 시도한다. */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Scrape|Unload")
-	float TryUnloadScrapeLoad(float RequestedAmount);
+	UFUNCTION(BlueprintPure, Category = "Throw")
+	UMD_ThrowComponent* GetThrowComponent() const { return ThrowComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Audio")
+	UMD_AudioRelayComponent* GetAudioRelayComponent() const { return AudioRelayComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
+	UMD_InteractionComponent* GetInteractionComponent() const { return InteractionComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|Oxygen")
+	UMD_OxygenComponent* GetOxygenComponent() const { return OxygenComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
+	UMD_FoamGunComponent* GetFoamGunComponent() const { return FoamGunComponent; }
+
+	/**
+	 * 지금 이 화면에 보이는 도구 메시(로컬 1인칭 / 거울·타인·서버는 3인칭)의 소켓 월드 위치.
+	 * 1인칭 메시는 FirstPersonScale로 카메라 쪽에 당겨 그려지므로 화면상 보이는 자리로 보정해 돌려준다.
+	 * 도구 메시에 해당 소켓이 없으면 false.
+	 */
+	bool TryGetVisibleToolSocketLocation(FName SocketName, FVector& OutLocation) const;
+
+	// 절단 루프 VFX 토글. 어빌리티가 서버·소유 클라 양쪽에서 부르고, 사본 프록시는 복제로 따라온다
+	void SetCutterVFXActive(bool bActive);
 
 	/** 기존 AnimBP 호환용 출력. 3인칭 포인터 조준은 사용하지 않으므로 항상 비활성이다. */
 	UFUNCTION(BlueprintCallable, BlueprintPure = false, Category = "MD|Scrape|Animation")
@@ -117,63 +135,13 @@ public:
 		bool& TeleportOrSnap,
 		int64& PoseGeneration);
 
-	UFUNCTION(BlueprintPure, Category = "Equipment")
-	UMD_EquipHotbarComponent* GetHotbarComponent() const { return EquipHotbarComponent; }
-
-	// 숫자키와 인벤토리 클릭이 공유하는 조준 종료 및 사용 슬롯 변경
-	UFUNCTION(BlueprintCallable, Category = "Equipment")
-	void SelectHotbarSlot(int32 SlotIndex);
-
-	UFUNCTION(BlueprintPure, Category = "MD|Audio")
-	UMD_AudioRelayComponent* GetAudioRelayComponent() const { return AudioRelayComponent; }
-
-	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
-	UMD_InteractionComponent* GetInteractionComponent() const { return InteractionComponent; }
-
-	UFUNCTION(BlueprintPure, Category = "MD|Oxygen")
-	UMD_OxygenComponent* GetOxygenComponent() const { return OxygenComponent; }
-
-	UFUNCTION(BlueprintPure, Category = "MD|FoamGun")
-	UMD_FoamGunComponent* GetFoamGunComponent() const { return FoamGunComponent; }
-
-	/**
-	 * 지금 이 화면에 보이는 도구 메시(로컬 1인칭 / 거울·타인·서버는 3인칭)의 소켓 월드 위치.
-	 * 1인칭 메시는 FirstPersonScale로 카메라 쪽에 당겨 그려지므로 화면상 보이는 자리로 보정해 돌려준다.
-	 * 도구 메시에 해당 소켓이 없으면 false.
-	 */
-	bool TryGetVisibleToolSocketLocation(FName SocketName, FVector& OutLocation) const;
-
-	// 절단 루프 VFX 토글. 어빌리티가 서버·소유 클라 양쪽에서 부르고, 사본 프록시는 복제로 따라온다
-	void SetCutterVFXActive(bool bActive);
-
-	/**
-	 * 따개비 타격용 원샷 몽타주(AS_Scraper_Oneshot_Montage)를 3인칭 메시에서 재생한다.
-	 * 클릭 제거/타격 연동·멀티캐스트는 이후 단계에서 붙인다.
-	 * @return Montage_Play 가 돌려준 길이. 재생하지 못하면 0.
-	 */
+	/** 배치된 오염물의 좌클릭 휘두르기 몽타주를 3인칭 메시에서 재생한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape|Animation")
 	float PlayBarnacleScrapeMontage();
 
-	/** UI·앱 비활성화·외부 시스템이 입력을 가져가기 전에 헤라 Ability와 Focus를 정리한다. */
-	UFUNCTION(BlueprintCallable, Category = "MD|Scrape")
+	/** UI·앱 비활성화·외부 시스템이 입력을 가져가기 전에 오염물 타격을 취소한다. */
+	UFUNCTION(BlueprintCallable, Category = "MD|Stain")
 	void CancelScrapeInteraction();
-
-	/**
-	 * Called from the actual GA activation callback on both client and server.
-	 * The session id prevents a late EndAbility from clearing a newer activation
-	 * that reuses the same GameplayAbilitySpecHandle.
-	 */
-	bool RegisterActiveScrapeAbility(
-		FGameplayAbilitySpecHandle AbilityHandle,
-		uint64 FocusSessionId);
-
-	/** Clears the tracked activation only when both handle and session still match. */
-	void UnregisterActiveScrapeAbility(
-		FGameplayAbilitySpecHandle AbilityHandle,
-		uint64 FocusSessionId);
-
-	/** Server Focus cleanup cancels exactly the GA registered for this session. */
-	void CancelScrapeAbilityForSession(uint64 FocusSessionId);
 
 protected:
 	// Called when the game starts or when spawned
@@ -190,7 +158,6 @@ protected:
 	virtual void OnRep_PlayerState() override;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-	virtual void CalcCamera(float DeltaTime, FMinimalViewInfo& OutResult) override;
 	virtual void OnRep_Controller() override;
 public:
 	// Called to bind functionality to input
@@ -247,9 +214,6 @@ protected:
 		meta = (ClampMin = "0.1", ClampMax = "1.0", UIMin = "0.1", UIMax = "1.0"))
 	float FirstPersonRenderScale = 0.8f;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UMD_ScrapeToolComponent> ScrapeToolComponent;
-
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Stain", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UMD_StainScraperComponent> StainScraperComponent;
 
@@ -258,6 +222,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_EquipHotbarComponent> EquipHotbarComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_ThrowComponent> ThrowComponent;
 
 	/** 도구 작업음을 다른 클라이언트에게 중계한다 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -273,11 +240,11 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_ComfortComponent> ComfortComponent;
 
-	/** 다른 플레이어가 보는 전체 도구 메시. 적재 단계가 바뀌면 메시 자체를 교체한다. */
+	/** 다른 플레이어가 보는 전체 도구 메시. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> ThirdPersonToolMesh;
 
-	/** 로컬 플레이어가 보는 전체 도구 메시. 적재 단계가 바뀌면 메시 자체를 교체한다. */
+	/** 로컬 플레이어가 보는 전체 도구 메시. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UStaticMeshComponent> FirstPersonToolMesh;
 
@@ -302,11 +269,7 @@ protected:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|VFX")
 	FName CutterVFXSocketName = TEXT("VFX_Blade");
 
-	/**
-	 * 따개비 타격 원샷 몽타주. 헤라 연속 긁기 포즈(AS_Scraper_Pose)와 별개이며,
-	 * DefaultSlot 에 한 번 재생된다. BP(또는 CDO)에서 할당한다. 비어 있으면
-	 * PlayBarnacleScrapeMontage 는 no-op.
-	 */
+	/** 배치된 오염물 타격 몽타주. BP에서 지정하며, 비어 있으면 재생하지 않는다. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Equipment|Animation")
 	TObjectPtr<UAnimMontage> BarnacleScrapeMontage;
 
@@ -407,9 +370,9 @@ private:
 	void HandleAbilityInput(const FInputActionValue& Value);
 	void HandleScannerModeSwitchInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
-	void HandleScrapeFocusToggleInput();
-	void HandleScrapeFocusReleasedInput();
-	void HandleScrapeFocusInputEnded();
+	void HandleThrowStartedInput(const FInputActionValue& Value);
+	void HandleThrowReleasedInput(const FInputActionValue& Value);
+	void HandleThrowCanceledInput(const FInputActionValue& Value);
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
@@ -430,9 +393,6 @@ private:
 	UFUNCTION()
 	void HandleHotbarChanged();
 
-	UFUNCTION()
-	void HandleScrapeLoadChanged(float NewScrapeLoad);
-
 	/** 운반 시작·종료에 맞춰 도구 메시를 내리고 다시 든다 */
 	UFUNCTION()
 	void HandleHeldActorChanged(AActor* HeldActor);
@@ -447,7 +407,7 @@ private:
 
 	/** 절단 중일 때만 톱날을 돌린다. Tick 에서 부른다 */
 	void UpdateCutterBladeSpin(float DeltaSeconds);
-	void RefreshScrapeLoadVisual();
+	void RefreshToolVisual();
 
 	UFUNCTION()
 	void OnRep_CutterVFXActive();
@@ -483,24 +443,8 @@ private:
 	UPROPERTY(Transient)
 	TObjectPtr<UNiagaraComponent> CutterVFXComponent;
 
-	/** 장비 identity 변경 시 이전 헤라 입력 소유권과 Focus를 정리한다. */
-	void RefreshScrapeFocusInputState();
-
-	/** 빙의/종료 경계에서 진행 중인 헤라 입력과 장비 identity를 초기화한다. */
-	void ResetScrapeFocusInputState();
-
-	/** 이번 LMB 입력으로 정확히 활성화한 헤라 Ability만 취소한다. */
-	void CancelActiveScrapeAbility();
-
-	/** Ability 취소와 Focus 종료를 한 입력 경계에서 순서대로 처리한다. */
-	void CancelActiveScrapeAbilityAndEndFocus();
-
-	bool TryActivateScrapeAbility(
-		UAbilitySystemComponent* AbilitySystem,
-		const FGameplayTag& AbilityTag,
-		UMD_ToolDefinition* SourceTool);
-
-	bool IsScrapeToolEquipped() const;
+	/** 선택 도구가 바뀌면 진행 중인 오염물 타격을 취소한다. */
+	void RefreshStainInputState();
 
 	/** 현재 슬롯이 폼건인지. RMB 조준 컨텍스트 유지 판정에 쓴다 */
 	bool IsFoamGunEquipped() const;
@@ -537,19 +481,17 @@ private:
 
 	void UpdateFirstPersonArms(float DeltaSeconds, bool bSnapToTarget = false);
 
-	/**
-	 * 1인칭 도구를 Focus viewmodel 또는 기본 팔 소켓 경로로 배치한다.
-	 *
-	 * Focus 중에는 Blade_Tip을 가상 포인터에 맞추고, Focus 해제 후에는
-	 * 본체의 컴포넌트 공간 ToolSocket을 1인칭 팔 월드 변환에 합성한다.
-	 */
+	/** 본체 손 소켓을 기준으로 1인칭 도구를 배치한다. */
 	void UpdateFirstPersonToolTransform(float DeltaSeconds);
 
-	/** Focus 진입/해제 경계에서 1인칭 헤라를 팔 부착과 독립 뷰모델 사이로 전환한다. */
+	/** Keep the evaluated arms/tool grip together while aligning Blade_Tip to the center. */
 	void SetFirstPersonScrapeViewModelActive(bool bActive);
-
-	/** 가상 포인터를 카메라 앞 평면으로 투영해 Blade_Tip을 그 위치에 배치한다. */
 	bool UpdateFirstPersonScrapeViewModel(float DeltaSeconds);
+	bool ApplyFirstPersonScrapeRigTransform(const FTransform& DesiredToolWorld);
+	void RestoreFirstPersonScrapeRigTransform();
+	void ResetFirstPersonScrapePresentation();
+	void SetScrapePresentationCenterViewActive(bool bActive);
+	bool IsScrapeToolEquipped() const;
 private:
 	UFUNCTION()
 	void HandleHealthStateChanged(EMD_HealthState NewState);
@@ -584,23 +526,11 @@ private:
 	/** 직전에 사망 상태였는지. 부활 전이 판별용 */
 	bool bWasDeadState = false;
 
-	/** 수량 변경과 실제 장비 교체를 구분하기 위해 마지막 장착 도구를 기억한다. */
-	TWeakObjectPtr<UMD_ToolDefinition> ScrapeFocusInputTool;
+	/** 같은 도구의 수량 변경은 진행 중인 타격을 취소하지 않는다. */
+	TWeakObjectPtr<UMD_ToolDefinition> StainInputTool;
 
-	/** 서버가 현재 ScrapeTool runtime snapshot에 적용한 기본 Profile의 도구 identity. */
-	TWeakObjectPtr<UMD_ToolDefinition> AppliedScrapeProfileTool;
-
-	/** LMB로 실제 활성화된 Scrape Ability Spec. 장비가 바뀌어도 이 핸들로 정확히 취소한다. */
-	FGameplayAbilitySpecHandle ActiveScrapeAbilityHandle;
-
-	/** 같은 SpecHandle을 재사용하는 빠른 Focus 재진입을 구분하는 권위 session identity. */
-	uint64 ActiveScrapeAbilitySessionId = 0;
-
-	/** 수량 변경과 장비 교체를 구분하는 활성 Ability의 도구 identity. */
-	TWeakObjectPtr<UMD_ToolDefinition> ActiveScrapeAbilityTool;
-
-	/** 장비 변경이 LMB release보다 빨라도 release가 새 도구를 취소하지 않도록 입력 소유권을 유지한다. */
-	bool bScrapeAbilityInputCaptured = false;
+	/** 유한 타격은 LMB를 놓아도 끝까지 진행하며 새 도구 입력은 취소하지 않는다. */
+	bool bStainStrokeInputCaptured = false;
 
 	/** StaticMesh contact frame. X=화면을 향한 normal, Z=포인터 진행 방향 계약이다. */
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Scrape|ViewModel")
@@ -662,5 +592,18 @@ private:
 
 	/** 접촉이 끊길 때 도구 회전을 AttachOffset으로 부드럽게 복귀시키는 현재 값. */
 	FRotator ScrapeAnimationToolRelativeRotation = FRotator::ZeroRotator;
+
+	/** Display-only state; stroke/contact and legacy arm hiding have no producer. */
+	FMD_ScrapePresentationState ScrapePresentationState;
+	bool bScrapeViewModelHidArms = false;
+	FTransform FirstPersonScrapeRigBaseRelativeTransform = FTransform::Identity;
+	bool bHasFirstPersonScrapeRigBaseTransform = false;
+	FTransform FirstPersonScrapeArmsBaseRelativeTransform = FTransform::Identity;
+	TWeakObjectPtr<USceneComponent> FirstPersonScrapeArmsBaseAttachParent;
+	FName FirstPersonScrapeArmsBaseAttachSocketName = NAME_None;
+	bool bHasFirstPersonScrapeArmsBaseTransform = false;
+	FTransform LastScrapeViewModelToolWorldTransform = FTransform::Identity;
+	bool bHasLastScrapeViewModelToolWorldTransform = false;
+
 
 };
