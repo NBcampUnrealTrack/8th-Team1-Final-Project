@@ -47,8 +47,6 @@ public:
 	int32 GetCredits() const { return Credits; }
 	// 계약 동안 누적된 분류별 크레딧 원장을 네트워크 전달용 항목 배열로 반환하는 함수
 	TArray<FMD_DailyReportValue> GetDailyCreditTotals() const;
-	// 상점 해금과 대화 분기에 사용하는 현재 호감도를 반환하는 함수
-	float GetAffinity() const { return Affinity; }
 
 	/** BeginContract 이후 현장 계약이 살아 있는지. GameInstance 수명 동안 유지된다. */
 	bool HasActiveContract() const { return CurrentSite != nullptr; }
@@ -77,17 +75,15 @@ public:
 	/** 소모품을 포함한 품목별 누적 구매 횟수 */
 	int32 GetPurchasedItemCount(FPrimaryAssetId ItemAssetId) const;
 
-	// 호감도를 기획 범위 안에서 증감하고 복제 미러 갱신을 요청하는 함수
-	void AddAffinity(float Amount);
 
 	// 현재 미상환 대출 잔액을 반환하는 함수
 	int32 GetDebtBalance() const { return DebtBalance; }
 
-	// 현재 호감도 구간에 맞는 대출 한도를 반환하는 함수
+	// 현재 상인의 기본 대출 한도 조회
 	int32 GetLoanLimit() const;
 
-	// 서버 원장과 클라이언트 복제 UI가 동일한 호감도 구간별 한도를 사용하기 위한 계산 함수
-	static int32 CalculateLoanLimit(float InAffinity);
+	// 서버와 클라이언트 UI에 공통으로 적용하는 기본 대출 한도
+	static int32 CalculateLoanLimit();
 
 	// 현재 부채를 제외하고 추가로 빌릴 수 있는 금액을 반환하는 함수
 	int32 GetAvailableLoanAmount() const;
@@ -100,7 +96,13 @@ public:
 	// 보유 크레딧과 미상환 잔액 범위에서 대출금을 상환하는 함수
 	bool TryRepayLoan(int32 Amount);
 
-	// 새 현장 계약 시작. 크레딧 원장을 초기화하고 호감도 배율이 반영된 착수금을 지급
+	// 현장 타이머가 요청한 미상환 잔액의 5% 이자 합산
+	int32 ApplyDailyLoanInterest();
+
+	// 서버 부과액과 대출 UI가 공유하는 소수점 절삭 및 원장 상한 계산
+	static int32 CalculateLoanInterest(int32 InDebtBalance);
+
+	// 새 현장 계약 시작. 크레딧 원장을 초기화하고 착수금을 지급(착수금은 부채에 가산)
 	void BeginContract(UMD_SiteDefinition* Site, int32 BaseAdvancePayment = 0);
 
 	// 게임오버 시 전체 리셋
@@ -148,8 +150,6 @@ private:
 	// 계약과 게임 재시작을 넘어 유지되는 팀 공유 미상환 대출 잔액
 	int32 DebtBalance = 0;
 
-	// 상점 해금과 대화 분기를 계약 사이에도 유지하기 위한 누적 호감도
-	float Affinity = 0.0f;
 
 	// 소모품 할인 활성 여부
 	bool bConsumableDiscountActive = true;
@@ -158,4 +158,7 @@ private:
 	/** 계약 중 구매 결과와 선행 품목 해금을 유지하기 위한 서버 권위 구매 원장 */
 	UPROPERTY()
 	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
+
+	// 미상환 잔액에 적용하는 일일 대출 이자율
+	static constexpr float DailyInterestRate = 0.05f;
 };

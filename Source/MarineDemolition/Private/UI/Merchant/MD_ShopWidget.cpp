@@ -95,7 +95,7 @@ void UMD_ShopWidget::SetShopInfo(const FMD_MerchantMenuInfo& InInfo)
 	// 전달받은 상점 정보 저장
 	ShopInfo = InInfo;
 
-	// 크레딧과 호감도 변경에 필요한 헤더 및 거래 조건만 갱신
+	// 크레딧 변경에 필요한 헤더 및 거래 조건만 갱신
 	RefreshCredits();
 	// 표시 품목과 카드 가격에 영향 없는 정보의 목록 재순회 방지
 	RefreshSelectedItem();
@@ -480,7 +480,7 @@ void UMD_ShopWidget::RefreshSelectedItem()
 		// 판매는 실제 소지 수량과 적립 한도이며 구매는 기존 해금 및 지급 조건 적용
 		Btn_Buy->SetIsEnabled(bSellingMode == true
 			? FindSaleSlot(SelectedItemAssetId) != INDEX_NONE && selectedItem.Price >= 0 && ShopInfo.Credits <= MAX_int32 - selectedItem.Price
-			: selectedItem.IsUnlocked(ShopInfo.Affinity, OwnedItemIds) == true
+			: selectedItem.IsUnlocked(OwnedItemIds) == true
 				&& selectedItem.Price >= 0 && ShopInfo.Credits >= selectedItem.Price && IsItemGrantable(selectedItem) == true);
 	}
 }
@@ -644,7 +644,7 @@ void UMD_ShopWidget::HandleBuyClicked()
 	SelectedItem.Price = SelectedItem.GetPurchasePrice(OwnedItemIds);
 	// 비활성 구매 버튼과 같은 가격 및 해금 조건 검사
 	if (SelectedItem.Price < 0 || ShopInfo.Credits < SelectedItem.Price
-		|| SelectedItem.IsUnlocked(ShopInfo.Affinity, OwnedItemIds) == false)
+		|| SelectedItem.IsUnlocked(OwnedItemIds) == false)
 	{
 		// 현재 결제 조건을 충족하지 않은 요청 차단
 		return;

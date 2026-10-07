@@ -47,6 +47,15 @@ protected:
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
+    // 현장 맵을 떠나거나 정산할 때 해제할 대출 이자 예약
+    FTimerHandle LoanInterestTimerHandle;
+
+    // 현장 진입 10분 뒤부터 3분 간격으로 서버 이자 계산 예약
+    void StartLoanInterestTimer();
+
+    // 현재 미상환 잔액에 주기 이자를 적용하는 서버 콜백
+    void CheckGameTimeEvents();
+
     // 참여 또는 퇴장한 플레이어의 이름을 각 소유 클라이언트에 전달
     void NotifyPlayerJoinAndExit(AController* ChangedPlayer, bool bIsJoin);
 

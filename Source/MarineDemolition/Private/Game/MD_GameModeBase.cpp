@@ -109,6 +109,11 @@ void AMD_GameModeBase::ApplyRequestedContractSettings()
 
 void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    // 맵 이동 후 GameInstance 타이머 관리자의 이전 현장 예약 해제
+    GetWorldTimerManager().ClearTimer(LoanInterestTimerHandle);
+    // 종료된 월드에서 정산 완료 이동 콜백 실행 방지
+    GetWorldTimerManager().ClearTimer(DepartTravelTimerHandle);
+
     Super::EndPlay(EndPlayReason);
 }
 
@@ -407,17 +412,42 @@ void AMD_GameModeBase::TravelToLevel(const TSoftObjectPtr<UWorld>& Level)
         return;
     }
 
-    // 게임 세션 종료와 로비 복귀를 하나의 비동기 절차로 처리할 세션 관리자 참조
-    UGameInstance* GameInstance = GetGameInstance();
-    UMD_MultiplayManager* MultiplayManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MultiplayManager>() : nullptr;
-    if (IsValid(MultiplayManager) == false)
+    UWorld* World = GetWorld();
+    if (IsValid(World) == false || HasAuthority() == false)
     {
-        UE_LOG(LogTemp, Error, TEXT("[Day] 세션 종료와 로비 이동을 처리할 MultiplayManager가 존재하지 않습니다."));
         return;
     }
 
-    // 기존 Listen Server 연결을 유지하면서 세션 상태와 광고 맵을 로비 기준으로 갱신하는 처리
-    MultiplayManager->EndSession(Package);
+    // 온라인 세션의 종료와 로비 광고 갱신을 담당할 관리자 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    UMD_MultiplayManager* MultiplayManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MultiplayManager>() : nullptr;
+    // 진행 중인 세션은 기존 Listen Server 연결을 유지하는 종료 절차 사용
+    if (IsValid(MultiplayManager) == true && MultiplayManager->IsSessionInProgress() == true)
+    {
+        MultiplayManager->EndSession(Package);
+        return;
+    }
+
+    // 세션을 만들지 않은 실행(PIE 등)에서도 전체 플레이어의 로딩 시작 후 직접 이동
+    PreparePlayersForTravel(EMD_LoadingContext::MissionIncomplete);
+    UMD_LoadingScreenSubsystem* LoadingScreen = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_LoadingScreenSubsystem>() : nullptr;
+    TWeakObjectPtr<UWorld> WeakWorld(World);
+    auto StartTravel = [WeakWorld, Package]()
+    {
+        UWorld* TravelWorld = WeakWorld.Get();
+        if (IsValid(TravelWorld) == true && TravelWorld->ServerTravel(Package) == false)
+        {
+            UE_LOG(LogTemp, Error, TEXT("[Report] 로비 맵 이동을 시작하지 못했습니다."));
+        }
+    };
+    if (IsValid(LoadingScreen) == true)
+    {
+        LoadingScreen->RunAfterIntro(MoveTemp(StartTravel));
+    }
+    else
+    {
+        StartTravel();
+    }
 }
 
 void AMD_GameModeBase::FinalizeReturnStatuses()
@@ -663,15 +693,60 @@ void AMD_GameModeBase::BeginExpeditionContract()
     }
     // 새 계약과 착수금 지급
     Merchant->BeginContract(ResolvedSite, ExpeditionAdvancePayment);
+    // 착수금과 계약 확정 이후 맵 진입 기준 이자 주기 시작
+    StartLoanInterestTimer();
+}
+
+void AMD_GameModeBase::StartLoanInterestTimer()
+{
+    // 타이머를 소유할 현재 서버 월드 조회
+    UWorld* World = GetWorld();
+    // 로비와 클라이언트 및 이미 정산된 작업의 이자 예약 차단
+    if (IsValid(World) == false || World->GetNetMode() == NM_Client || bDayFinalized == true || IsValid(ResolveExpeditionSite()) == false)
+    {
+        // 게임 현장 외 이자 부과 방지
+        return;
+    }
+    // 재호출로 첫 이자 시점이 연장되는 상황 차단
+    if (GetWorldTimerManager().TimerExists(LoanInterestTimerHandle) == true)
+    {
+        // 현재 현장의 최초 예약 유지
+        return;
+    }
+    // 초기화 대기 시간도 맵 진입 이후 경과 시간에 포함
+    GetWorldTimerManager().SetTimer(LoanInterestTimerHandle, this, &ThisClass::CheckGameTimeEvents, 180.f, true,
+        FMath::Max(600.f - World->GetTimeSeconds(), KINDA_SMALL_NUMBER));
+}
+
+void AMD_GameModeBase::CheckGameTimeEvents()
+{
+    // 이자 원장을 보유한 게임 인스턴스 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    // 정산 종료 이후 호출과 유효하지 않은 인스턴스 차단
+    if (HasAuthority() == false || bDayFinalized == true || IsValid(GameInstance) == false)
+    {
+        // 종료된 작업의 부채 변경 방지
+        return;
+    }
+    // 팀 공용 부채를 관리하는 서버 원장 조회
+    UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+    // 유효한 계약의 미상환 잔액에만 주기 이자 적용
+    if (IsValid(Merchant) == true && Merchant->HasActiveContract() == true)
+    {
+        // 원장 변경 알림을 통한 호스트 UI 및 클라이언트 복제 갱신
+        Merchant->ApplyDailyLoanInterest();
+    }
 }
 
 void AMD_GameModeBase::RequestEndDay(FGameplayTag ReportWidgetTag)
 {
     // 콘솔 중복 상호작용에도 1회만 실행
-    if (bDayFinalized)
+    if (HasAuthority() == false || bDayFinalized)
     {
         return;
     }
+    // 수동 정산 이후 보고서 대기 중 추가 이자 부과 방지
+    GetWorldTimerManager().ClearTimer(LoanInterestTimerHandle);
     FinalizeDay();
     ShowFinalReport(ReportWidgetTag);
 }
@@ -735,6 +810,13 @@ void AMD_GameModeBase::ShowFinalReport(FGameplayTag ReportWidgetTag)
 
 void AMD_GameModeBase::FinishDayEndReport()
 {
+    // 서버가 예약한 정산 종료만 한 번 처리
+    if (HasAuthority() == false || bDayFinalized == false || DepartTravelTimerHandle.IsValid() == false)
+    {
+        return;
+    }
+    // 재호출과 종료 후 타이머 실행 방지
+    GetWorldTimerManager().ClearTimer(DepartTravelTimerHandle);
     // 맵 이동 전에 모든 소유 클라이언트의 정산 화면 종료
     for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
     {

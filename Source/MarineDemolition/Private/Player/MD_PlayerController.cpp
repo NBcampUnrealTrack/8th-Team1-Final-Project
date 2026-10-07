@@ -573,14 +573,6 @@ void AMD_PlayerController::MD_ShowCredits()
 	UE_LOG(LogTemp, Log, TEXT("[Merchant][%s] Credits = %d"),HasAuthority() ? TEXT("Server") : TEXT("Client"),Merchant->GetCredits());
 }
 
-void AMD_PlayerController::MD_AddAffinity(int32 DeltaAffinity)
-{
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
-	{
-		Merchant->AddAffinity(DeltaAffinity);
-	}
-}
-
 void AMD_PlayerController::ServerAddCredits_Implementation(int32 Amount)
 {
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())

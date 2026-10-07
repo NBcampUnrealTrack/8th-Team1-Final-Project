@@ -4,6 +4,7 @@
 
 #include "Components/EditableTextBox.h"
 #include "Components/TextBlock.h"
+#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "UI/MD_CommonButtonBase.h"
 
 void UMD_LoanWidget::NativeConstruct()
@@ -26,15 +27,8 @@ void UMD_LoanWidget::RefreshDisplay()
 {
 	// 현재 부채를 제외한 추가 대출 가능액 계산
 	int32 AvailableLoanAmount = FMath::Max(0, LoanInfo.LoanLimit - LoanInfo.DebtBalance);
-	// 부채가 없거나 원장 상한에 도달한 경우의 예상 이자 기본값
-	int32 NextInterestAmount = 0;
-	// 서버 정산과 같은 최소 이자 및 잔여 원장 범위 적용
-	if (LoanInfo.DebtBalance > 0 && LoanInfo.DebtBalance < MAX_int32)
-	{
-		// 서버의 소수 절삭과 동일한 예상 이자 계산
-		NextInterestAmount = FMath::TruncToInt(FMath::Clamp(static_cast<double>(LoanInfo.DebtBalance * LoanInfo.DailyInterestRate),
-			1.0, static_cast<double>(MAX_int32 - LoanInfo.DebtBalance)));
-	}
+	// 다음 3분 주기에 부과될 이자를 서버와 동일한 정수 계산으로 표시
+	int32 NextInterestAmount = UMD_MerchantSubsystem::CalculateLoanInterest(LoanInfo.DebtBalance);
 
 	// 표시가 달라진 텍스트만 갱신하여 반복 원장 통지에 따른 재배치 방지
 	auto SetDisplayText = [](UTextBlock* TextBlock, FText Text)
@@ -51,7 +45,7 @@ void UMD_LoanWidget::RefreshDisplay()
 	SetDisplayText(Txt_Credit, FText::AsNumber(LoanInfo.Credits));
 	// 현재 미상환 잔액 표시
 	SetDisplayText(Txt_Debt, FText::AsNumber(LoanInfo.DebtBalance));
-	// 다음 일 마감의 예상 이자 표시
+	// 다음 주기의 예상 이자 표시
 	SetDisplayText(Txt_Interest, FText::AsNumber(NextInterestAmount));
 	// 현재 부채를 제외한 추가 대출 가능액 표시
 	SetDisplayText(Txt_Margin, FText::AsNumber(AvailableLoanAmount));

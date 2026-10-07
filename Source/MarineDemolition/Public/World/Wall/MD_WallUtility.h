@@ -31,8 +31,6 @@ class MARINEDEMOLITION_API AMD_WallUtility : public AActor, public IMD_Interacta
 public:
 	AMD_WallUtility();
 
-	void SetQuestHighlighted(AActor* Source, bool bHighlighted);
-
 	void StopScanFor(AActor* Scanner);
 
 	// Scan actual infrastructure independently of physics-based host-wall links.
@@ -221,7 +219,5 @@ private:
 	FMD_ScanMeshState HighlightState;
 	bool bScanHighlighted = false;
 	bool bInteractionHighlighted = false;
-	bool bQuestHighlighted = false;
-	TSet<TWeakObjectPtr<AActor>> QuestHighlightSources;
 	void RefreshHighlight();
 };

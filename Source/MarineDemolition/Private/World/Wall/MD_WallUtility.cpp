@@ -238,22 +238,17 @@ void AMD_WallUtility::SetScanSilhouette(bool bVisible)
 
 void AMD_WallUtility::RefreshHighlight()
 {
-	if (bScanHighlighted || bInteractionHighlighted || bQuestHighlighted)
-		HighlightState.Apply(Mesh, bScanHighlighted ? ScanSilhouetteStencil : IMD_Interactable::HighlightStencilValue);
+	// 일반 스캔 또는 조준 중인 설비만 강조
+	if (bScanHighlighted == true || bInteractionHighlighted == true)
+	{
+		// 스캔 색상을 우선하고 조준만 남으면 상호작용 색상 적용
+		HighlightState.Apply(Mesh, bScanHighlighted == true ? ScanSilhouetteStencil : IMD_Interactable::HighlightStencilValue);
+	}
 	else
+	{
+		// 스캔과 조준이 모두 끝난 메시의 원래 렌더 상태 복원
 		HighlightState.Restore();
-}
-
-void AMD_WallUtility::SetQuestHighlighted(AActor* Source, bool bHighlighted)
-{
-	if (bHighlighted) QuestHighlightSources.Add(Source);
-	else QuestHighlightSources.Remove(Source);
-	for (auto It = QuestHighlightSources.CreateIterator(); It; ++It)
-		if (!It->IsValid()) It.RemoveCurrent();
-	const bool bRequested = !QuestHighlightSources.IsEmpty();
-	if (bQuestHighlighted == bRequested) return;
-	bQuestHighlighted = bRequested;
-	RefreshHighlight();
+	}
 }
 
 void AMD_WallUtility::EndScanSilhouette()

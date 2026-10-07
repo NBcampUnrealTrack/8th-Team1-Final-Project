@@ -56,28 +56,13 @@ void AMD_DataDumpTerminal::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AMD_DataDumpTerminal::SetInteractionHighlighted_Implementation(bool bHighlighted)
 {
-	bInteractionHighlighted = bHighlighted;
-	RefreshHighlight();
-}
-
-void AMD_DataDumpTerminal::SetQuestHighlighted(AActor* Source, bool bHighlighted)
-{
-	if (bHighlighted) QuestHighlightSources.Add(Source);
-	else QuestHighlightSources.Remove(Source);
-	for (auto It = QuestHighlightSources.CreateIterator(); It; ++It)
-		if (!It->IsValid()) It.RemoveCurrent();
-	const bool bRequested = !QuestHighlightSources.IsEmpty();
-	if (bQuestHighlighted == bRequested) return;
-	bQuestHighlighted = bRequested;
-	RefreshHighlight();
-}
-
-void AMD_DataDumpTerminal::RefreshHighlight()
-{
+	// 유효한 단말 메시의 일반 조준 강조 갱신
 	if (IsValid(Mesh) == true)
 	{
+		// 공용 상호작용 외곽선 색상 적용
 		Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
-		Mesh->SetRenderCustomDepth(bInteractionHighlighted || bQuestHighlighted);
+		// 조준 시작과 종료에 따른 외곽선 표시
+		Mesh->SetRenderCustomDepth(bHighlighted);
 	}
 }
 
