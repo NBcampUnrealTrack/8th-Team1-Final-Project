@@ -11,12 +11,11 @@ class USkyLightComponent;
 class UExponentialHeightFogComponent;
 class UPostProcessComponent;
 class UMD_StylizedSkyControllerComponent;
-class UMD_GameStateDayCycleAdapterComponent;
 
 /**
  * SoStylized sky actor shell: presentation components + controller/adapters.
  * Logic lives in UMD_StylizedSkyControllerComponent — assign SoftObjects on BP_Sky CDO.
- * Match time: enable UMD_GameStateDayCycleAdapterComponent (no GameState/GameMode edits).
+ * Match time: local 24h loop (DayLengthSeconds, default 3600s = 1 real hour per sky day).
  */
 UCLASS(Blueprintable)
 class MARINEDEMOLITION_API AMD_StylizedSkyActor : public AActor
@@ -78,8 +77,4 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_StylizedSkyControllerComponent> SkyController;
-
-	/** Optional: reads AMD_GameStateBase when bDriveFromGameState is enabled. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	TObjectPtr<UMD_GameStateDayCycleAdapterComponent> GameStateTimeAdapter;
 };

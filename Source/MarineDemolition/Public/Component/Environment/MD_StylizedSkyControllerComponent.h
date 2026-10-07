@@ -49,7 +49,7 @@ struct FMD_StylizedSkyPresentationRefs
 /**
  * SoStylized-style sky logic: orbit, MPC, directional light, asset resolve.
  * Meshes/lights stay on AMD_StylizedSkyActor; assign SoftObjects on BP_Sky CDO.
- * Match time: optional UMD_GameStateDayCycleAdapterComponent (never edit GameState for sky).
+ * Match time: local 24h loop (no external time source).
  */
 UCLASS(ClassGroup = (MD), meta = (BlueprintSpawnableComponent))
 class MARINEDEMOLITION_API UMD_StylizedSkyControllerComponent : public UActorComponent
@@ -99,8 +99,6 @@ protected:
 	void ConfigureInteriorDomeMesh(UStaticMeshComponent* Dome) const;
 	bool IsBlueprintPreviewWorld() const;
 	float SanitizeTimeOfDayHours(float Hours) const;
-	bool IsDrivenByExternalTimeSource() const;
-	bool TryReadExternalTime(float& OutHours, float& OutDayProgress) const;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|Content")
 	TSoftObjectPtr<UStaticMesh> SkyDomeMesh;
@@ -145,9 +143,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle")
 	bool bLocalDayCycle = true;
 
-	/** Preview-only 24h loop when GameState is not driving (24 min = 1 sky hour / real minute). Ignored in-match. */
+	/** 24h loop length. Default 3600s = 1 real hour per sky day. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle", meta = (ClampMin = "1.0"))
-	float DayLengthSeconds = 1440.f;
+	float DayLengthSeconds = 3600.f;
 
 	/** 12 = midnight. Default 20 = wall 08:00 so editor preview matches match start. */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle", meta = (ClampMin = "0.0", ClampMax = "24.0"))

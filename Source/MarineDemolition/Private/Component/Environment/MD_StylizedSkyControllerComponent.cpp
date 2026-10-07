@@ -14,7 +14,6 @@
 #include "Engine/World.h"
 #include "EngineUtils.h"
 #include "Kismet/KismetMaterialLibrary.h"
-#include "Gameplay/Environment/MD_DayCycleTimeSource.h"
 #include "Materials/MaterialParameterCollection.h"
 
 UMD_StylizedSkyControllerComponent::UMD_StylizedSkyControllerComponent()
@@ -55,7 +54,7 @@ void UMD_StylizedSkyControllerComponent::TickComponent(
 {
 	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
 
-	if (!bFrozenTime && bLocalDayCycle && !IsDrivenByExternalTimeSource())
+	if (!bFrozenTime && bLocalDayCycle)
 	{
 		const float SecondsPerDay = FMath::Max(DayLengthSeconds, 1.f);
 		LocalTimeOfDayHours = FMath::Fmod(
@@ -100,57 +99,6 @@ void UMD_StylizedSkyControllerComponent::RefreshSkyNow()
 	}
 }
 
-bool UMD_StylizedSkyControllerComponent::IsDrivenByExternalTimeSource() const
-{
-	if (bFrozenTime)
-	{
-		return false;
-	}
-
-	if (const AActor* Owner = GetOwner())
-	{
-		TArray<UActorComponent*> Components;
-		Owner->GetComponents(Components);
-		for (UActorComponent* Comp : Components)
-		{
-			if (Comp && Comp->Implements<UMD_DayCycleTimeSource>())
-			{
-				if (IMD_DayCycleTimeSource::Execute_IsDayCycleActive(Comp))
-				{
-					return true;
-				}
-			}
-		}
-	}
-	return false;
-}
-
-bool UMD_StylizedSkyControllerComponent::TryReadExternalTime(float& OutHours, float& OutDayProgress) const
-{
-	// Lobby/editor frozen preview must win over GameState adapter.
-	if (bFrozenTime)
-	{
-		return false;
-	}
-
-	if (const AActor* Owner = GetOwner())
-	{
-		TArray<UActorComponent*> Components;
-		Owner->GetComponents(Components);
-		for (UActorComponent* Comp : Components)
-		{
-			if (Comp && Comp->Implements<UMD_DayCycleTimeSource>()
-				&& IMD_DayCycleTimeSource::Execute_IsDayCycleActive(Comp))
-			{
-				OutHours = IMD_DayCycleTimeSource::Execute_GetTimeOfDayHours(Comp);
-				OutDayProgress = IMD_DayCycleTimeSource::Execute_GetDayCycleProgress(Comp);
-				return true;
-			}
-		}
-	}
-	return false;
-}
-
 float UMD_StylizedSkyControllerComponent::SanitizeTimeOfDayHours(float Hours) const
 {
 	// 24:00 is midnight — same as 0:00 (night). Do not remap to 23.999 (samples day end on curves).
@@ -179,13 +127,6 @@ float UMD_StylizedSkyControllerComponent::GetEffectiveTimeOfDayHours() const
 		return SanitizeTimeOfDayHours(FrozenTimeOfDayHours);
 	}
 
-	float ExternalHours = 0.f;
-	float ExternalProgress = 0.f;
-	if (TryReadExternalTime(ExternalHours, ExternalProgress))
-	{
-		return SanitizeTimeOfDayHours(ExternalHours);
-	}
-
 	return SanitizeTimeOfDayHours(LocalTimeOfDayHours);
 }
 
@@ -199,13 +140,6 @@ float UMD_StylizedSkyControllerComponent::GetEffectiveDayCycleProgress() const
 	if (bFrozenTime)
 	{
 		return ProgressFromClock(FrozenTimeOfDayHours);
-	}
-
-	float ExternalHours = 0.f;
-	float ExternalProgress = 0.f;
-	if (TryReadExternalTime(ExternalHours, ExternalProgress))
-	{
-		return ProgressFromClock(ExternalHours);
 	}
 
 	return ProgressFromClock(LocalTimeOfDayHours);

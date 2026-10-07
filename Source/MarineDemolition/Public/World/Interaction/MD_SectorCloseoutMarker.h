@@ -7,8 +7,6 @@
 #include "GameFramework/Actor.h"
 #include "MD_SectorCloseoutMarker.generated.h"
 
-class AMD_Sector;
-
 // 섹터 구역 마감 제출 마커. 제출 시 평가 +40, 마감 상태는 Day 간 유지 (기획 02 §3)
 UCLASS()
 class MARINEDEMOLITION_API AMD_SectorCloseoutMarker : public AActor, public IMD_Interactable
@@ -37,10 +35,6 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, Category = "Closeout")
 	TObjectPtr<UStaticMeshComponent> Mesh;
-
-	// 마감 대상 섹터. 표시·후속 조건 검사용 (현재 점수 지급에는 미사용)
-	UPROPERTY(EditAnywhere, Category = "Closeout")
-	TObjectPtr<AMD_Sector> TargetSector;
 
 	UPROPERTY(ReplicatedUsing = OnRep_Closed)
 	bool bClosed = false;

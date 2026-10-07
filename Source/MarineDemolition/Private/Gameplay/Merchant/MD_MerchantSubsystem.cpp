@@ -316,50 +316,9 @@ int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 	return InterestAmount;
 }
 
-void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site)
-{
-	if (IsValid(Site) == false)
-	{
-		return;
-	}
-
-	CurrentSite = Site;
-	CurrentDay = 0;
-
-	// 새 계약이므로 경고 모디파이어 초기화
-	NextDepositMultiplier = 1.f;
-	bConsumableDiscountActive = true;
-
-
-	OnMerchantStateChanged.Broadcast();
-}
-
 bool UMD_MerchantSubsystem::HasClearedCurrentSite() const
 {
 	return IsValid(CurrentSite) && ClearedSites.Contains(CurrentSite);
-}
-
-void UMD_MerchantSubsystem::BeginDay(int32 NewDay, int32 BaseAdvancePayment, bool bEmergencyDay)
-{
-	// 잘못된 설정값으로 팀 크레딧이 차감되지 않도록 기본 착수금을 0 이상으로 제한
-	int32 ValidBaseAdvancePayment = FMath::Max(BaseAdvancePayment, 0);
-
-	// 경고 이후 착수금 배율을 반영하고 비상 Day 지급 배율을 0으로 고정
-	float AdvanceMultiplier = bEmergencyDay == true ? 0.f : NextDepositMultiplier;
-
-	// 지급액과 부채를 같은 금액으로 기록하도록 두 원장의 잔여 범위 안에서 착수금 확정
-	int32 GrantedAdvancePayment = static_cast<int32>(FMath::RoundToInt64(FMath::Clamp(static_cast<double>(ValidBaseAdvancePayment) * AdvanceMultiplier,
-		0.0, static_cast<double>(FMath::Min(MAX_int32 - Credits, MAX_int32 - DebtBalance)))));
-	// 새 Day의 Enum Map 원장을 초기화한 뒤 실제 착수금을 기록
-	DailyCreditTotals.Reset();
-	AddCreditsInternal(EMD_DailyReportCategory::Retainer, GrantedAdvancePayment);
-	// 실제 수령한 착수금을 기존 미상환 부채에 합산
-	DebtBalance += GrantedAdvancePayment;
-
-	// 현재 계약의 일차를 서버 상인 원장에 반영
-	CurrentDay = NewDay;
-
-	OnMerchantStateChanged.Broadcast();
 }
 
 void UMD_MerchantSubsystem::MarkSiteCleared()
@@ -382,7 +341,6 @@ void UMD_MerchantSubsystem::MarkSiteCleared()
 void UMD_MerchantSubsystem::FinalizeContract()
 {
 	CurrentSite = nullptr;
-	CurrentDay = 0;
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 종료"));
 
@@ -442,9 +400,7 @@ void UMD_MerchantSubsystem::ResetContract()
 	DailyCreditTotals.Reset();
 	DebtBalance = 0;
 	CurrentSite = nullptr;
-	CurrentDay = 0;
 	ClearedSites.Reset();
-	NextDepositMultiplier = 1.f;
 	bConsumableDiscountActive = true;
 	// 새 계약에 사용할 전체 AssetId 구매 원장 초기화
 	PurchasedItemAssetCounts.Reset();
@@ -459,4 +415,25 @@ void UMD_MerchantSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 void UMD_MerchantSubsystem::Deinitialize()
 {
     Super::Deinitialize();
+}
+
+void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 BaseAdvancePayment)
+{
+	if (IsValid(Site) == false)
+	{
+		return;
+	}
+
+	CurrentSite = Site;
+	bConsumableDiscountActive = true;
+	// 잘못된 설정값으로 팀 크레딧이 차감되지 않도록 기본 착수금을 0 이상으로 제한
+	int32 ValidBaseAdvancePayment = FMath::Max(BaseAdvancePayment, 0);
+	// 지급액과 부채를 같은 금액으로 기록하도록 두 원장의 잔여 범위 안에서 착수금 확정
+	int32 GrantedAdvancePayment = FMath::Min(ValidBaseAdvancePayment, FMath::Min(MAX_int32 - Credits, MAX_int32 - DebtBalance));
+	// 새 계약의 Enum Map 원장을 초기화한 뒤 실제 착수금을 기록
+	DailyCreditTotals.Reset();
+	AddCreditsInternal(EMD_DailyReportCategory::Retainer, GrantedAdvancePayment);
+	// 착수금은 대출이므로 실제 수령액을 기존 미상환 부채에 합산
+	DebtBalance += GrantedAdvancePayment;
+	OnMerchantStateChanged.Broadcast();
 }

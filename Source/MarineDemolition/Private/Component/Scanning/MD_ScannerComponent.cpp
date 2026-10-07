@@ -60,9 +60,7 @@ bool UMD_ScannerComponent::IsScannerEquipped() const
 FText UMD_ScannerComponent::GetScanModeText() const
 {
 	if (ScanMode == EMD_ScanMode::Cleanup) return NSLOCTEXT("MDScanner", "CleanupMode", "오염물·따개비");
-	return ScanMode == EMD_ScanMode::WallType
-		? NSLOCTEXT("MDScanner", "WallTypeMode", "벽 종류")
-		: NSLOCTEXT("MDScanner", "InternalMode", "내부 구조물");
+	return NSLOCTEXT("MDScanner", "InternalMode", "내부 구조물");
 }
 
 bool UMD_ScannerComponent::ToggleScanMode()
@@ -75,12 +73,8 @@ bool UMD_ScannerComponent::ToggleScanMode()
 		return false;
 	}
 	ClearScan();
-	switch (ScanMode)
-	{
-	case EMD_ScanMode::InternalStructure: ScanMode = EMD_ScanMode::WallType; break;
-	case EMD_ScanMode::WallType: ScanMode = EMD_ScanMode::Cleanup; break;
-	default: ScanMode = EMD_ScanMode::InternalStructure; break;
-	}
+	// 내부 구조물 ↔ 오염물·따개비 2모드 토글
+	ScanMode = ScanMode == EMD_ScanMode::InternalStructure ? EMD_ScanMode::Cleanup : EMD_ScanMode::InternalStructure;
 	RefreshModeIndicator();
 	OnScanModeChanged.Broadcast(ScanMode);
 	return true;
@@ -125,14 +119,6 @@ void UMD_ScannerComponent::PresentLocalScan(uint32 RequestId, EMD_ScanMode Mode,
 					StainHighlights.AddUnique(Stain);
 				}
 			}
-		}
-		else if (Mode == EMD_ScanMode::WallType)
-		{
-			AMD_CuttableWall* Wall = Cast<AMD_CuttableWall>(Target);
-			if (!Wall || Wall->IsHidden() || !Wall->CanCut()) continue;
-			FMD_ScanMeshState& State = WallHighlights.AddDefaulted_GetRef();
-			State.Apply(Wall->GetScanMesh(), Wall->GetWallType() == EMD_WallType::Strut
-				? MDScanning::StrutStencil : MDScanning::PartitionStencil);
 		}
 		else if (Target->GetClass()->ImplementsInterface(UMD_Scannable::StaticClass()))
 		{

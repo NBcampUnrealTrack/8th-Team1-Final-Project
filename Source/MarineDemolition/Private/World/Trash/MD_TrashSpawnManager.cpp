@@ -258,38 +258,11 @@ bool UMD_TrashSpawnManager::CanRestoreStates(const TArray<FMD_TrashGeneratorStat
 	return true;
 }
 
-bool UMD_TrashSpawnManager::CapturePlacements(TMap<FName, FMD_TrashGeneratorPlacement>& Out) const
-{
-    Out.Reset();
-    for (const auto& Entry : Generators)
-        if (const auto* Generator = Entry.Get())
-        {
-            if (Out.Contains(Generator->GetFName()) || !Generator->CapturePlacement(Out.Add(Generator->GetFName())))
-            { Out.Reset(); return false; }
-        }
-    return GetWorld() && GetWorld()->GetNetMode() != NM_Client;
-}
-
-bool UMD_TrashSpawnManager::CanRestorePlacements(const TArray<FMD_TrashGeneratorState>& States,
-    const TMap<FName, FMD_TrashGeneratorPlacement>& Placements) const
-{
-    if (!CanRestoreStates(States) || Placements.Num() != States.Num()) return false;
-    for (const auto& Entry : Generators)
-        if (const auto* Generator = Entry.Get())
-        {
-            const auto* Placement = Placements.Find(Generator->GetFName());
-            const auto* State = States.FindByPredicate([Generator](const auto& S) { return S.GeneratorName == Generator->GetFName(); });
-            if (!State || !Placement || !Generator->CanRestorePlacement(*State, *Placement)) return false;
-        }
-    return true;
-}
-
-bool UMD_TrashSpawnManager::RestoreStates(const TArray<FMD_TrashGeneratorState>& Input,
-    const TMap<FName, FMD_TrashGeneratorPlacement>* DayPlacements)
+bool UMD_TrashSpawnManager::RestoreStates(const TArray<FMD_TrashGeneratorState>& Input)
 {
 	TArray<FMD_TrashGeneratorState> States;
 	if (!NormalizeStates(Input, States)) return false;
-	if (!CanRestoreStates(States) || (DayPlacements && !CanRestorePlacements(Input, *DayPlacements))) return false;
+	if (!CanRestoreStates(States)) return false;
     TMap<FName, AMD_TrashSpawnVolume*> ByName;
     for (const auto& Entry : Generators)
         if (AMD_TrashSpawnVolume* Generator = Entry.Get()) ByName.Add(Generator->GetFName(), Generator);
@@ -314,9 +287,7 @@ bool UMD_TrashSpawnManager::RestoreStates(const TArray<FMD_TrashGeneratorState>&
 				if (AMD_TrashItem* Item = Entry.Get()) { Reusable.Add(Item); Ignored.Add(Item); }
 			Generator->GetFloorPlacement()->SetTransitionSources(Ignored);
 		}
-        const bool bRestored = DayPlacements
-            ? Generator->RestorePlacement(State, DayPlacements->FindChecked(State.GeneratorName))
-            : Generator->RestoreState(State, Reusable.IsEmpty() ? nullptr : &Reusable);
+        const bool bRestored = Generator->RestoreState(State, Reusable.IsEmpty() ? nullptr : &Reusable);
 		if (IsTransitionGenerator(Generator)) Generator->GetFloorPlacement()->SetTransitionSources({});
 		if (!bRestored)
 		{

@@ -40,11 +40,7 @@ public:
 	bool PrepareRestoreStates(const TArray<FMD_TrashGeneratorState>& States);
 	bool ReserveAuthoredTrashForRestore(AMD_TrashItem* Item);
 	void CancelPreparedRestore() { ReservedTrash.Reset(); bReserveAuthoredTrash = false; }
-    bool CapturePlacements(TMap<FName, FMD_TrashGeneratorPlacement>& Out) const;
-    bool CanRestorePlacements(const TArray<FMD_TrashGeneratorState>& States,
-        const TMap<FName, FMD_TrashGeneratorPlacement>& Placements) const;
-    bool RestoreStates(const TArray<FMD_TrashGeneratorState>& States,
-        const TMap<FName, FMD_TrashGeneratorPlacement>* DayPlacements = nullptr);
+    bool RestoreStates(const TArray<FMD_TrashGeneratorState>& States);
 	/** Called before save restoration; captures immutable authored identity and source positions. */
 	bool EnableAuthoredFloorTransition();
 	bool IsTransitionGenerator(const AMD_TrashSpawnVolume* Generator) const;

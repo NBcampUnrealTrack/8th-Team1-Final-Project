@@ -10,18 +10,16 @@ class UPrimitiveComponent;
 UENUM(BlueprintType)
 enum class EMD_ScanMode : uint8
 {
-	InternalStructure UMETA(DisplayName = "내부 구조물"),
-	WallType UMETA(DisplayName = "벽 종류"),
-	Cleanup UMETA(DisplayName = "오염물·따개비")
+	// 값 고정: MPC "ScanMode" 스칼라와 와이어 직렬화가 숫자를 그대로 쓴다 (1 = 삭제된 벽 종류 모드)
+	InternalStructure = 0 UMETA(DisplayName = "내부 구조물"),
+	Cleanup = 2 UMETA(DisplayName = "오염물·따개비")
 };
 
 namespace MDScanning
 {
 	constexpr int32 UtilityStencil = 251;
-	constexpr int32 PartitionStencil = 252;
-	constexpr int32 StrutStencil = 253;
-	constexpr int32 ContaminationStencil = StrutStencil;
-	constexpr int32 BarnacleStencil = PartitionStencil;
+	constexpr int32 BarnacleStencil = 252;
+	constexpr int32 ContaminationStencil = 253;
 	bool IsValidMode(EMD_ScanMode Mode);
 	bool IsNewerRequest(uint32 Request, uint32 Previous);
 	bool SphereIntersectsScanCone(const FVector& Origin, const FVector& Forward,

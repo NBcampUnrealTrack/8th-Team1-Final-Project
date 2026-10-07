@@ -24,28 +24,6 @@ enum class EMD_SampleScoreType : uint8
 	Destroyed   UMETA(DisplayName = "파괴"),
 };
 
-// Day2/3/4 점검 판정 결과
-UENUM(BlueprintType)
-enum class EMD_InspectionResult : uint8
-{
-	NotApplicable      UMETA(DisplayName = "점검 없음"),
-	Passed             UMETA(DisplayName = "통과"),
-	ContractCleared    UMETA(DisplayName = "계약 클리어"),
-	WarningIssued      UMETA(DisplayName = "경고"),
-	EmergencyDayOpened UMETA(DisplayName = "비상 4일차 개방"),
-	GameOver           UMETA(DisplayName = "게임오버"),
-};
-
-// 일일 보고서에서 수동 퇴근과 작업 시간 종료를 구분하는 원인
-UENUM(BlueprintType)
-enum class EMD_DayEndReason : uint8
-{
-    // 콘솔을 통한 퇴근 확인 및 수동 마감
-    Console UMETA(DisplayName = "퇴근 확인"),
-    // 작업 제한 시간 도달로 인한 자동 마감
-    TimeExpired UMETA(DisplayName = "작업 시간 종료"),
-};
-
 // 점수와 크레딧 일일 원장이 공통으로 사용하는 정산 분류
 UENUM(BlueprintType)
 enum class EMD_DailyReportCategory : uint8
@@ -93,7 +71,7 @@ struct FMD_SampleScoreRow
 	int32 Destroyed = 0;
 };
 
-// 점검 결과 통지 페이로드. GameState가 복제해 전 클라이언트 UI에 전달
+// 작업 정산 페이로드. 서버 원장 응답과 마감 보고서가 공유한다
 USTRUCT(BlueprintType)
 struct FMD_InspectionReport
 {
@@ -102,21 +80,11 @@ struct FMD_InspectionReport
 	UPROPERTY(BlueprintReadOnly, Category = "Score")
 	bool bValid = false;
 
-	UPROPERTY(BlueprintReadOnly, Category = "Score")
-	int32 Day = 0;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Score")
-	EMD_InspectionResult Result = EMD_InspectionResult::NotApplicable;
-
-    // 서버 마감 원인을 원장 응답 RPC로 전달하는 구분값
-    UPROPERTY(BlueprintReadOnly, Category = "Daily Report")
-    EMD_DayEndReason EndReason = EMD_DayEndReason::Console;
-
-	// 판정에 사용된 점수 (경고 감점 적용 전)
+	// 계약 누적 점수
 	UPROPERTY(BlueprintReadOnly, Category = "Score")
 	int32 Score = 0;
 
-    // 판정 점수와 구분한 경고 감점 적용 후 현재 누적 점수
+    // 보고서 시점의 누적 점수 (Score와 동일, UI 호환용)
     UPROPERTY(BlueprintReadOnly, Category = "Score")
     int32 CumulativeScore = 0;
 
@@ -128,11 +96,7 @@ struct FMD_InspectionReport
     UPROPERTY(BlueprintReadOnly, Category = "Daily Report")
     FText SiteName;
 
-    // 현재 점검 판정 기준과 구분할 다음 점검 목표이며 없는 경우 영점
-    UPROPERTY(BlueprintReadOnly, Category = "Daily Report")
-    int32 NextThreshold = 0;
-
-	// 일일 정산 화면에서 누적 점수와 분리해 표시할 해당 Day의 점수 증감 합계
+	// 정산 화면 합계 연출용 점수 (계약 누적 점수와 동일)
 	UPROPERTY(BlueprintReadOnly, Category = "Score")
 	int32 DailyScore = 0;
 
@@ -143,9 +107,6 @@ struct FMD_InspectionReport
 	// 서버 크레딧 Map을 RPC와 복제가 가능한 항목 배열로 전달
 	UPROPERTY(BlueprintReadOnly, Category = "Credit")
 	TArray<FMD_DailyReportValue> DailyCreditTotals;
-
-	UPROPERTY(BlueprintReadOnly, Category = "Score")
-	int32 Threshold = 0;
 };
 
 // 서버 원장 로그 1건. 정산 화면 연결 전까지는 서버에만 보관
@@ -159,7 +120,4 @@ struct FMD_ScoreEntry
 
 	UPROPERTY()
 	int32 Delta = 0;
-
-	UPROPERTY()
-	int32 Day = 0;
 };
