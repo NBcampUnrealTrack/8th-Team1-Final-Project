@@ -95,20 +95,44 @@ bool UMD_LoreProfileSubsystem::EnsureLoaded()
 			}
 		}
 	}
+	// 개인 저장 복원 전에 수신한 새 팀 습득만 기존 목록에 추가
+	for (FPrimaryAssetId LoreAssetId : PendingLoreAssetIds)
+	{
+		// 이미 보유한 기록의 중복 저장 방지
+		if (DiscoveredLoreAssetIds.Contains(LoreAssetId) == false)
+		{
+			// 복원한 개인 이력과 수신한 새 습득의 합집합 구성
+			DiscoveredLoreAssetIds.Add(LoreAssetId);
+			// 로드 이후 병합한 기록의 파일 반영 예약
+			bDirty = true;
+		}
+	}
+	// 개인 원장에 옮긴 수신 대기 목록 정리
+	PendingLoreAssetIds.Reset();
 	// 원장 구독자가 재진입해도 재로드하지 않는 완료 상태
 	bLoaded = true;
 	// 코덱스와 로컬 원장에 복원 완료 전달
 	OnPersonalLoreChanged.Broadcast();
+	// 로그인 대기 중 수신한 기록도 로드 직후 저장
+	SavePending();
 	// 신규 또는 복원된 개인 기록 사용 허용
 	return true;
 }
 
 bool UMD_LoreProfileSubsystem::RecordLore(FPrimaryAssetId LoreAssetId)
 {
-	// 소유 사용자 확정 전 또는 빈 기록의 저장 차단
-	if (EnsureLoaded() == false || LoreAssetId.IsValid() == false)
+	// 빈 식별자가 대기 목록과 저장 파일에 들어가는 상황 차단
+	if (LoreAssetId.IsValid() == false)
 	{
 		// 무효 발견 요청 거부
+		return false;
+	}
+	// 로그인과 개인 파일 복원이 끝나지 않은 팀 수신 보존
+	if (EnsureLoaded() == false)
+	{
+		// 중복 전달을 합치고 맵 이동 이후에도 습득 유지
+		PendingLoreAssetIds.AddUnique(LoreAssetId);
+		// 실제 계정 저장 준비 전 파일 쓰기 보류
 		return false;
 	}
 	// 이미 보유한 기록은 재작성 없이 실패 저장만 재시도
@@ -117,7 +141,7 @@ bool UMD_LoreProfileSubsystem::RecordLore(FPrimaryAssetId LoreAssetId)
 		// 이전 파일 반영 결과 반환
 		return SavePending();
 	}
-	// 본인이 직접 조사한 새 기록만 누적
+	// 본인 또는 현재 팀원이 새로 습득한 기록만 누적
 	DiscoveredLoreAssetIds.Add(LoreAssetId);
 	// 저장 실패 시에도 재시도할 발견 기록 유지
 	bDirty = true;

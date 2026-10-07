@@ -10,14 +10,13 @@ class UMD_LoreSubsystem;
 class UMD_LoreProfileSubsystem;
 class USphereComponent;
 
-// 개인 월드에 배치되어 조사한 사용자에게만 사라지는 기록물 액터
+// 개인 보유 상태로 표시하고 새 습득을 팀에 공유하는 기록물 액터
 UCLASS()
 class MARINEDEMOLITION_API AMD_LoreActor : public AActor, public IMD_Interactable
 {
 	GENERATED_BODY()
 
 public:
-	// 다른 참가자와 수집 상태를 공유하지 않는 기록물 생성자
 	AMD_LoreActor();
 
 	virtual bool RequiresServerInteraction_Implementation() const override;
@@ -73,9 +72,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	FORCEINLINE FPrimaryAssetId GetLoreAssetId() const { return LoreAssetId; }
 
-private:
-	// 로컬 플레이어의 개인 보유 상태와 기록물 거리 검사
+	// 개인 보유 상태와 독립된 서버 배치 및 수집 거리 검사
 	bool CanCollectLore(APawn* InteractorPawn) const;
+
+private:
 
 	/** 빈 Asset ID와 잘못된 정의 에셋 참조를 차단하는 배치 설정 검사 */
 	bool IsLoreConfigurationValid() const;

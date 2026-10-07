@@ -4,6 +4,7 @@
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
 #include "Gameplay/Lore/MD_LoreProfileSubsystem.h"
+#include "Player/MD_PlayerController.h"
 
 bool UMD_LoreSubsystem::TryDiscoverLore(FPrimaryAssetId LoreAssetId)
 {
@@ -18,13 +19,23 @@ bool UMD_LoreSubsystem::TryDiscoverLore(FPrimaryAssetId LoreAssetId)
 		return false;
 	}
 	// 기존 API의 최초 발견 의미를 유지한 중복 요청 차단
-	if (Profile->EnsureLoaded() == false || Profile->GetDiscoveredLoreAssetIds().Contains(LoreAssetId) == true)
+	if (Profile->EnsureLoaded() == false || Profile->HasDiscoveredLore(LoreAssetId) == true)
 	{
 		// 저장 로드 이전과 기보유 기록의 중복 수집 종료
 		return false;
 	}
-	// 조사한 본인의 저장 파일에만 수집 결과 반영
-	return Profile->RecordLore(LoreAssetId);
+	// 개인 입력을 서버에 전달할 소유 컨트롤러 조회
+	AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(GetGameInstance()->GetFirstLocalPlayerController());
+	// 서버 요청 경로가 준비되지 않은 수집 보류
+	if (IsValid(PlayerController) == false)
+	{
+		// 검증 없이 개인 원장을 선반영하는 상황 방지
+		return false;
+	}
+	// 서버 배치와 거리 검증 이후 접속 중인 팀원에게 공유
+	PlayerController->ServerRequestDiscoverLore(LoreAssetId);
+	// 저장 완료와 구분되는 습득 요청 전달 결과
+	return true;
 }
 
 UMD_LoreDefinition* UMD_LoreSubsystem::GetLoreDefinition(FPrimaryAssetId LoreAssetId) const
@@ -53,8 +64,10 @@ int32 UMD_LoreSubsystem::GetDiscoveredLoreCount() const
 
 bool UMD_LoreSubsystem::HasDiscoveredLore(FPrimaryAssetId LoreAssetId) const
 {
-	// 서버 또는 팀 원장과 독립된 본인 보유 여부 반환
-	return GetDiscoveredLoreAssetIds().Contains(LoreAssetId);
+	// 개인 원장을 재사용하여 보유 여부 조회용 배열 복사 방지
+	UMD_LoreProfileSubsystem* Profile = GetLocalProfile();
+	// 개인 저장 복원 이후 단일 기록의 보유 여부 확인
+	return IsValid(Profile) == true && Profile->EnsureLoaded() == true && Profile->HasDiscoveredLore(LoreAssetId) == true;
 }
 
 bool UMD_LoreSubsystem::IsCatalogComplete(const UMD_LoreCatalog* LoreCatalog) const
