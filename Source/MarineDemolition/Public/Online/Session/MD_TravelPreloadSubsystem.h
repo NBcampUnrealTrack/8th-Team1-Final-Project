@@ -28,5 +28,4 @@ private:
     TSharedPtr<FStreamableHandle> Handle;
     FTSTicker::FDelegateHandle Ticker;
     double ReadySince = 0.0;
-    int32 VisualPreparationIndex = 0;
 };

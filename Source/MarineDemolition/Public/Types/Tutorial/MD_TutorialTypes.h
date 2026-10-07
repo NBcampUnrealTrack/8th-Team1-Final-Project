@@ -18,8 +18,8 @@ enum class EMD_TutorialWallPhase : uint8
 	/** 지정한 박스 존 안으로 들어간다 (슬롯의 TargetZoneTag 로 존을 찾는다) */
 	ReachZone UMETA(DisplayName = "지점 도달"),
 
-	/** 헤라로 오염물을 전부 긁어낸다 (UMD_ScrapeSurfaceComponent::OnContaminationFullyRemoved) */
-	Scrape UMETA(DisplayName = "정화"),
+	/** Reserved serialized value for the retired wall-cleaning tutorial phase. */
+	Scrape UMETA(Hidden),
 
 	/** 절단기로 벽을 철거한다 (AMD_CuttableWall::OnWallDemolished) */
 	Cut UMETA(DisplayName = "철거"),
@@ -50,7 +50,7 @@ struct MARINEDEMOLITION_API FMD_TutorialGuideStep
 	GENERATED_BODY()
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Tutorial")
-	EMD_TutorialWallPhase Phase = EMD_TutorialWallPhase::Scrape;
+	EMD_TutorialWallPhase Phase = EMD_TutorialWallPhase::Cut;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Tutorial")
 	FText Title;
@@ -147,7 +147,7 @@ struct MARINEDEMOLITION_API FMD_TutorialWallSlot
 
 	/**
 	 * Sort 단계를 끝내는 칸. 이 칸의 분류기에 조각벽을 정분류로 넣어야 넘어간다.
-	 * 깨끗한 조각은 Score.Sorting.NonBurnable, 오염된 조각은 Score.Sorting.Contaminated 다.
+	 * 조각은 항상 깨끗하며 Score.Sorting.NonBurnable로 분류한다.
 	 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Tutorial|정리",
 		meta = (Categories = "Score.Sorting"))

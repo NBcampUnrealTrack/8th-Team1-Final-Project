@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Game/MD_GameModeBase.h"
@@ -8,9 +8,8 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
-#include "Gameplay/Persistence/MD_DayPersistenceSubsystem.h"
-#include "Gameplay/Scrape/MD_ScrapeInitializationSubsystem.h"
 #include "Game/MD_GameStateBase.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Player/MD_PlayerController.h"
@@ -36,12 +35,6 @@ AMD_GameModeBase::AMD_GameModeBase()
 void AMD_GameModeBase::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
     Super::InitGame(MapName, Options, ErrorMessage);
-    if (auto* GI=GetGameInstance())
-    {
-        if (auto* Persistence=GI->GetSubsystem<UMD_DayPersistenceSubsystem>())
-            Persistence->PrepareContaminationContext(GetWorld());
-    }
-
     // 출발 콘솔이 전달한 난이도 옵션만 계약 난이도로 인정하기 위한 원문 검사
     FString DifficultyOption = UGameplayStatics::ParseOption(Options, TEXT("Difficulty"));
     if (DifficultyOption.IsEmpty() == false)
@@ -325,13 +318,6 @@ void AMD_GameModeBase::HandleContractCleared()
         Merchant->FinalizeContract();
     }
 
-    // 진행(크레딧·부채·구매 이력)은 유지, 오염 컨텍스트만 폐기 → 다음 현장은 새로 시작
-    UMD_DayPersistenceSubsystem* Persistence = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr;
-    if (IsValid(Persistence) == true)
-    {
-        Persistence->ResetContaminationContext();
-    }
-
     // 마감의 목적지는 항상 로비
     TravelToLevel(LobbyLevel);
 }
@@ -518,12 +504,6 @@ void AMD_GameModeBase::InitializeExpeditionDay()
         return;
     }
     TRACE_CPUPROFILER_EVENT_SCOPE(MD_GameMode_InitializeExpeditionDay);
-    if (const auto* Initializer = GetWorld()->GetSubsystem<UMD_ScrapeInitializationSubsystem>(); Initializer && Initializer->IsPending())
-    {
-        // Contract setup must never run on a partially prepared world.
-        GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
-        return;
-    }
     // 세이브가 없으므로 모든 출항은 새 계약으로 시작한다. 스포너 평가보다 먼저 확정
     BeginExpeditionContract();
 

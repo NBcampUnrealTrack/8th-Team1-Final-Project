@@ -5,8 +5,6 @@
 #include "Audio/MD_AudioSubsystem.h"
 #include "Camera/CameraComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
-#include "Component/Scrape/MD_ScrapeToolComponent.h"
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Data/Equipment/MD_ConsumeItemDefinition.h"
@@ -40,22 +38,6 @@ static void AddActorAndAttachmentsToInteractionQuery(
 		AddActorAndAttachmentsToInteractionQuery(AttachedActor, QueryParams);
 		return true;
 	});
-}
-
-namespace
-{
-	FText MakeWallInteractionPrompt(
-		const bool bContaminated,
-		const FText& ActionText)
-	{
-		const FText WallStateText = bContaminated
-			? NSLOCTEXT("MDInteraction", "ContaminatedWall", "오염된 벽")
-			: NSLOCTEXT("MDInteraction", "CleanWall", "깨끗한 벽");
-		return FText::Format(
-			NSLOCTEXT("MDInteraction", "WallPromptFormat", "{0}\n{1}"),
-			WallStateText,
-			ActionText);
-	}
 }
 
 UMD_InteractionComponent::UMD_InteractionComponent()
@@ -94,14 +76,6 @@ FText UMD_InteractionComponent::ResolveCurrentInteractionPrompt() const
 		|| !OwnerPawn->IsLocallyControlled()
 		|| !CanOwnerInteract())
 	{
-		return FText::GetEmpty();
-	}
-
-	const UMD_ScrapeToolComponent* ScrapeTool =
-		OwnerPawn->FindComponentByClass<UMD_ScrapeToolComponent>();
-	if (IsValid(ScrapeTool) && ScrapeTool->IsScrapeFocusActive())
-	{
-		// Focus 진입 뒤에는 가상 포인터와 작업 화면이 조작을 안내하므로 중앙 HUD를 비운다.
 		return FText::GetEmpty();
 	}
 
@@ -190,37 +164,6 @@ FText UMD_InteractionComponent::ResolveAbilityInteractionPrompt() const
 		return FText::GetEmpty();
 	}
 
-	if (Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_Scrape))
-	{
-		const UMD_ScrapeToolComponent* ScrapeTool =
-			OwnerPawn->FindComponentByClass<UMD_ScrapeToolComponent>();
-		if (!IsValid(ScrapeTool))
-		{
-			return FText::GetEmpty();
-		}
-
-		const FMD_ScrapeAimQueryResult Aim = ScrapeTool->QueryCurrentScrapeAim();
-		if (Aim.Type != EMD_ScrapeAimQueryType::SurfaceHit
-			|| !IsValid(Aim.Surface)
-			|| !IsValid(Cast<AMD_CuttableWall>(Aim.Surface->GetOwner())))
-		{
-			return FText::GetEmpty();
-		}
-
-		bool bContaminated = false;
-		if (!Aim.Surface->TryGetContaminationStateAtSurfacePosition(
-				Aim.SurfacePositionCm,
-				Aim.SurfaceFace,
-				bContaminated))
-		{
-			return FText::GetEmpty();
-		}
-
-		return MakeWallInteractionPrompt(
-			bContaminated,
-			NSLOCTEXT("MDInteraction", "ScrapeWallAction", "[RMB] 오염물 제거"));
-	}
-
 	const bool bCutTool =
 		Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_WallCut);
 	const bool bScanTool =
@@ -239,18 +182,9 @@ FText UMD_InteractionComponent::ResolveAbilityInteractionPrompt() const
 		return FText::GetEmpty();
 	}
 
-	UMD_ScrapeSurfaceComponent* Surface = Wall->GetScrapeSurfaceComponent();
-	bool bContaminated = false;
-	if (!IsValid(Surface)
-		|| !Surface->TryGetContaminationStateFromHit(
-			WallHit,
-			bContaminated))
-	{
-		return FText::GetEmpty();
-	}
-
-	return MakeWallInteractionPrompt(
-		bContaminated,
+	return FText::Format(
+		NSLOCTEXT("MDInteraction", "WallPromptFormat", "{0}\n{1}"),
+		NSLOCTEXT("MDInteraction", "Wall", "격벽"),
 		bCutTool
 			? NSLOCTEXT("MDInteraction", "CutWallAction", "[LMB] 파괴")
 			: NSLOCTEXT("MDInteraction", "ScanWallAction", "[LMB] 스캔"));
@@ -883,6 +817,11 @@ bool UMD_InteractionComponent::IsHeldByOtherPawn(const AActor* Target) const
 	}
 
 	return false;
+}
+
+UPrimitiveComponent* UMD_InteractionComponent::GetHeldPrimitive() const
+{
+	return IsValid(HeldActor) && HasAuthorityPhysicsGrip() ? PhysicsHandle->GetGrabbedComponent() : nullptr;
 }
 
 void UMD_InteractionComponent::ReleaseHeldActor()

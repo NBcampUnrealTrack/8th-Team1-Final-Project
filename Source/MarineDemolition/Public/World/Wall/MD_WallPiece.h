@@ -10,7 +10,7 @@
 #include "MD_WallPiece.generated.h"
 
 /**
- * 격벽 조각. 절단 시 드랍되며 오염 여부로 칸이 갈린다 (기획 02 §11 매핑표).
+ * 격벽 조각. 절단 시 드랍되며 안 타는 쓰레기로 분류한다.
  * 매일 ~10개가 나와 산재 쓰레기와 맞먹는 분리 대상이다.
  */
 UCLASS()
@@ -26,21 +26,23 @@ public:
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 
 	/** Implements IMD_TrashSortable */
-	/** 쓰레기와 달리 종류 테이블을 거치지 않는다. 칸이 오염 여부 하나에서 갈린다 */
+	/** 쓰레기와 달리 종류 테이블을 거치지 않는다. */
 	virtual FGameplayTag GetTrashCategory_Implementation() const override;
 
 	/** 조각벽에는 품목 보너스가 없다 (기획 05 §1.1 S+06~09는 쓰레기 4종만) */
 	virtual FGameplayTag GetSortScoreBonusTag_Implementation() const override { return FGameplayTag(); }
 	/** ~Implements IMD_TrashSortable */
 
-	// 오염 여부 지정 + 색 적용. 스폰 직후 서버에서 호출
+	// 기존 Blueprint/저장 호출의 호환 경로. 값과 무관하게 깨끗한 조각으로 유지한다.
 	void SetContaminated(bool bInContaminated);
 
-	/** 어느 칸에 넣어야 하는지가 이 값으로 갈리므로 클라이언트도 알아야 한다 */
+	/** 기존 저장/Blueprint 호환 값. 런타임에는 항상 false로 정규화한다. */
 	UPROPERTY(ReplicatedUsing = OnRep_Contaminated, VisibleAnywhere, BlueprintReadOnly, Category = "MD|Wall|Piece")
 	bool bContaminated = false;
 
 protected:
+	virtual void BeginPlay() override;
+
 	UPROPERTY(VisibleAnywhere, Category = "MD|Wall|Piece")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
@@ -58,6 +60,6 @@ private:
 	UFUNCTION()
 	void OnRep_Contaminated();
 
-	/** 오염 여부를 메시 색에 반영. 서버·클라이언트 양쪽에서 같은 경로를 탄다 */
+	/** 서버·클라이언트 양쪽에서 깨끗한 조각 색을 적용한다 */
 	void ApplyContaminationVisual();
 };

@@ -64,6 +64,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
 	void ReleaseHeldActor();
 
+	/** Actual server physics body, including carried geometry collections. Never resolves a different actor. */
+	UPrimitiveComponent* GetHeldPrimitive() const;
+
 	/** Server-only handoff from a currently aimed, validated interaction source. */
 	bool TryReceiveQuestItem(class AMD_QuestItem* Item, AActor* Source);
 

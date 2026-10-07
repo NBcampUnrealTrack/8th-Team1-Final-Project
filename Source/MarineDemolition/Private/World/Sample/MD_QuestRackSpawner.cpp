@@ -4,7 +4,6 @@
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Components/ArrowComponent.h"
-#include "Components/DecalComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
 #include "Data/Merchant/MD_QuestDefinition.h"
@@ -14,56 +13,12 @@
 #include "GameFramework/Controller.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
-#include "Gameplay/Scrape/MD_ScrapeMeshUVData.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Kismet/GameplayStatics.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "World/Sample/MD_QuestItem.h"
 #include "World/Sample/MD_QuestSampleSpawnerManager.h"
-
-UMD_QuestRackScrapeSurface::UMD_QuestRackScrapeSurface()
-{
-	bContaminationEnabled = false;
-	bForceFullContamination = false;
-	ContaminationItemsPerFace = 0;
-	ContaminationSurfaceMapping.Mode = EMD_ScrapeSurfaceMappingMode::MeshUV;
-}
-
-void UMD_QuestRackScrapeSurface::ConfigureRackBeforePlay(UStaticMeshComponent* InMesh,
-	UDecalComponent* Front, UDecalComponent* Back, bool bEnabled)
-{
-	if (!HasBegunPlay())
-	{
-		bContaminationEnabled = bEnabled;
-		ConfigureExternalComponents(InMesh, Front, Back);
-	}
-}
-
-bool UMD_QuestRackScrapeSurface::CompleteCleaningWithoutDrops()
-{
-	if (!GetOwner() || !GetOwner()->HasAuthority() || !IsSurfaceInitialized()) return false;
-	if (IsContaminationFullyRemoved()) return true;
-	TArray<int32> Indices;
-	TArray<float> Initial;
-	TArray<float> Zero;
-	TArray<float> Covered;
-	const FIntPoint Grid = GetContaminationGridDimensions();
-	for (int32 Index = 0; Index < Grid.X * Grid.Y * 2; ++Index)
-	{
-		FMD_ScrapeSurfaceCell Cell;
-		if (!GetContaminationCellState(Index, Cell)) continue;
-		Indices.Add(Index);
-		Initial.Add(Cell.InitialContamination);
-		Zero.Add(0.f);
-		Covered.Add(1.f);
-	}
-	// Reuse the shared wall state/visual/replication path. Keep the surface
-	// enabled so saved clean cells and pre-completion saves remain restorable.
-	// Restoring absolute cells produces no extra loot or tool-load rewards.
-	RestoreContaminationCells(Indices, Initial, Zero, Zero, Zero, Covered);
-	return IsContaminationFullyRemoved();
-}
 
 AMD_QuestRackSpawner::AMD_QuestRackSpawner()
 {
@@ -73,13 +28,6 @@ AMD_QuestRackSpawner::AMD_QuestRackSpawner()
 	RackMesh->SetupAttachment(Root);
 	RackMesh->SetCollisionProfileName(TEXT("BlockAll"));
 	RackMesh->SetRelativeScale3D(FVector(2.f));
-	RackWorkSurface = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RackWorkSurface"));
-	RackWorkSurface->SetupAttachment(RackMesh);
-	RackWorkSurface->SetRelativeLocation(FVector(0.f, 24.f, 50.f));
-	RackWorkSurface->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
-	RackWorkSurface->SetCollisionResponseToAllChannels(ECR_Ignore);
-	RackWorkSurface->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
-	RackWorkSurface->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
 	PadlockMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PadlockMesh"));
 	PadlockMesh->SetupAttachment(RackMesh);
 	PadlockMesh->SetRelativeLocation(FVector(-2.f, 26.f, 44.f));
@@ -88,16 +36,6 @@ AMD_QuestRackSpawner::AMD_QuestRackSpawner()
 	PadlockMesh->SetCollisionResponseToAllChannels(ECR_Ignore);
 	PadlockMesh->SetCollisionResponseToChannel(ECC_Visibility, ECR_Block);
 	PadlockMesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
-	FrontContaminationDecal = CreateDefaultSubobject<UDecalComponent>(TEXT("FrontContaminationDecal"));
-	BackContaminationDecal = CreateDefaultSubobject<UDecalComponent>(TEXT("BackContaminationDecal"));
-	for (UDecalComponent* Decal : {FrontContaminationDecal.Get(), BackContaminationDecal.Get()})
-	{
-		Decal->SetupAttachment(RackWorkSurface);
-		Decal->SetVisibility(false);
-		Decal->SetHiddenInGame(true);
-	}
-	RackScrapeSurface = CreateDefaultSubobject<UMD_QuestRackScrapeSurface>(TEXT("RackScrapeSurface"));
-	RackScrapeSurface->ConfigureRackBeforePlay(RackWorkSurface, FrontContaminationDecal, BackContaminationDecal, false);
 	DefaultSpawnPoint->SetRelativeLocation(FVector(0.f, 85.f, 105.f));
 	DefaultSpawnPoint->SetRelativeRotation(FRotator(0.f, 90.f, 0.f));
 }
@@ -105,10 +43,8 @@ AMD_QuestRackSpawner::AMD_QuestRackSpawner()
 void AMD_QuestRackSpawner::ConfigureRackComponents()
 {
 	// BlockAll inherits Ignore for the project's custom interaction channel.
-	// The body remains the E target after the work panel/lock disappears.
+	// The body remains the E target after the lock disappears.
 	RackMesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
-	RackScrapeSurface->ConfigureRackBeforePlay(RackWorkSurface, FrontContaminationDecal, BackContaminationDecal,
-		RackMode == EMD_QuestRackMode::Contamination);
 	OnRep_RackState();
 }
 
@@ -128,12 +64,6 @@ void AMD_QuestRackSpawner::BeginPlay()
 {
 	ConfigureRackComponents();
 	Super::BeginPlay();
-	// Component BeginPlay runs while its actor is still beginning play, so the
-	// shared wall surface deliberately defers initialization to its owner.
-	if (RackScrapeSurface->IsContaminationEnabled() && !RackScrapeSurface->IsSurfaceInitialized())
-	{
-		RackScrapeSurface->InitializeSurface();
-	}
 	if (HasAuthority())
 	{
 		OnRep_RackState();
@@ -168,17 +98,6 @@ bool AMD_QuestRackSpawner::ClaimsQuestPhase(const FPrimaryAssetId& Id, int32 Pha
 }
 
 
-float AMD_QuestRackSpawner::GetContaminationRemovedRatio() const
-{
-	if (RackMode == EMD_QuestRackMode::Contamination && bCartridgeReleased) return 1.f;
-	if (!IsValid(RackScrapeSurface) || !RackScrapeSurface->IsContaminationEnabled()
-		|| !RackScrapeSurface->IsSurfaceInitialized()) return 0.f;
-	const UMD_ScrapeMeshUVData* Data = RackScrapeSurface->GetContaminationMeshUVData();
-	// No baked surface must not count as an already clean rack.
-	if (!Data || Data->ValidCellCount <= 0) return 0.f;
-	return RackScrapeSurface->GetContaminationCleanRatio();
-}
-
 float AMD_QuestRackSpawner::GetPadlockCutRatio() const
 {
 	return bPadlockCut ? 1.f : FMath::Clamp(PadlockCutSeconds / FMath::Max(RequiredPadlockCutSeconds, 0.1f), 0.f, 1.f);
@@ -189,7 +108,7 @@ bool AMD_QuestRackSpawner::IsAccessRequirementMet() const
 	switch (RackMode)
 	{
 	case EMD_QuestRackMode::Contamination:
-		return FMath::IsFinite(RequiredCleanRatio) && GetContaminationRemovedRatio() >= FMath::Clamp(RequiredCleanRatio, 0.f, 1.f);
+		return true; // Retired cleaning mode behaves as an open rack.
 	case EMD_QuestRackMode::BarnaclesAndPadlock:
 		return bPadlockCut;
 	case EMD_QuestRackMode::Open:
@@ -216,12 +135,7 @@ void AMD_QuestRackSpawner::TrySpawnForQuestState()
 		// 클라이언트에 복구된 랙 접근 상태 전달
 		ForceNetUpdate();
 	}
-	// 청소 및 잠금 해제 완료 후 한 번만 카트리지 준비
 	if (bCartridgeReleased == true || IsAccessRequirementMet() == false) return;
-	if (RackMode == EMD_QuestRackMode::Contamination)
-	{
-		if (!RackScrapeSurface->CompleteCleaningWithoutDrops()) return;
-	}
 	bCartridgeReleased = true;
 	OnRep_RackState();
 	ForceNetUpdate();
@@ -315,13 +229,6 @@ void AMD_QuestRackSpawner::AddPadlockCutProgress(float WorkSeconds, AActor* Cutt
 void AMD_QuestRackSpawner::OnRep_RackState()
 {
 	const bool bCanWork = !HasActorBegunPlay() || (bQuestActive && !bRackDisabled && !bCartridgeCollected);
-	if (RackWorkSurface)
-	{
-		const bool bShowWorkSurface = RackMode == EMD_QuestRackMode::Contamination && !bCartridgeReleased;
-		RackWorkSurface->SetVisibility(bShowWorkSurface);
-		RackWorkSurface->SetHiddenInGame(!bShowWorkSurface);
-		RackWorkSurface->SetCollisionEnabled(bShowWorkSurface && bCanWork ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
-	}
 	if (IsValid(ReleasedCartridge) && !bCartridgeCollected)
 	{
 		// Old saves may contain a released but uncollected floor item. Keep it
@@ -358,9 +265,6 @@ FText AMD_QuestRackSpawner::GetInteractionPrompt_Implementation(AActor* Interact
 	if (!CanInteract_Implementation(Interactor)) return FText::GetEmpty();
 	if (bCartridgeReleased)
 		return NSLOCTEXT("MDQuestRack", "Collect", "[E] 카트리지 회수");
-	if (RackMode == EMD_QuestRackMode::Contamination)
-		return FText::Format(NSLOCTEXT("MDQuestRack", "Clean", "[RMB] 오염물 제거 {0}% / {1}%"),
-			FMath::FloorToInt(GetContaminationRemovedRatio()*100.f), FMath::RoundToInt(RequiredCleanRatio*100.f));
 	if (RackMode == EMD_QuestRackMode::BarnaclesAndPadlock)
 	{
 		return FText::Format(NSLOCTEXT("MDQuestRack", "Lock", "[LMB] 자물쇠 절단 {0}%"), FMath::FloorToInt(GetPadlockCutRatio()*100.f));
