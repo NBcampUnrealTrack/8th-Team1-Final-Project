@@ -7,6 +7,7 @@
 #include "MD_HUDWidget.generated.h"
 
 class UMD_TalkNotificationWidget;
+class UMD_ThrowChargeWidget;
 class UVerticalBox;
 
 /**
@@ -25,6 +26,8 @@ protected:
 	virtual void NativeConstruct() override;
 
 	virtual void NativeDestruct() override;
+	virtual void NativeOnActivated() override;
+	virtual void NativeOnDeactivated() override;
 
 protected:
 	// 생성된 발화 알림을 배치하는 전용 목록
@@ -34,6 +37,10 @@ protected:
 	// HUD에서 대리 생성할 발화자 알림 Blueprint 클래스
 	UPROPERTY(EditDefaultsOnly, Category = "Voice Chat")
 	TSoftClassPtr<UMD_TalkNotificationWidget> TalkNotificationClass;
+
+	// The charge widget is placed and styled in the HUD Designer.
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Throw", meta = (BindWidgetOptional))
+	TObjectPtr<UMD_ThrowChargeWidget> ThrowChargeWidget = nullptr;
 
 public:
 	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent)
