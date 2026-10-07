@@ -235,8 +235,8 @@ int32 UMD_MerchantSubsystem::GetLoanLimit() const
 
 int32 UMD_MerchantSubsystem::CalculateLoanLimit()
 {
-	// 기존 기본 대출 한도 800크레딧 적용
-	return 800;
+	// 기본 대출 한도 2,000크레딧. 착수금 1,300이 부채로 잡힌 뒤에도 700까지 추가 대출 가능
+	return 2000;
 }
 
 int32 UMD_MerchantSubsystem::GetAvailableLoanAmount() const
