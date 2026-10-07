@@ -47,13 +47,7 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 	Controller->GetPlayerViewPoint(OutOrigin, Rotation);
 	OutForward = Rotation.Vector().GetSafeNormal();
 	TArray<AActor*> Candidates;
-	if (Mode == EMD_ScanMode::WallType)
-	{
-		// Some authored walls have complex collision only and are absent from simple
-		// overlap results. Classify their rendered bounds once per scan, without Tick.
-		for (TActorIterator<AMD_CuttableWall> It(Pawn->GetWorld()); It; ++It) Candidates.Add(*It);
-	}
-	else if (Mode == EMD_ScanMode::Cleanup)
+	if (Mode == EMD_ScanMode::Cleanup)
 	{
 		// Surfaces also exist on floors/equipment; the collision query is not authoritative.
 		for (TObjectIterator<UMD_ScrapeSurfaceComponent> It; It; ++It)
@@ -104,16 +98,6 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 				if (!IsValid(Mesh) || !Mesh->GetStaticMesh() || !Mesh->IsVisible() || !Mesh->bRenderInMainPass) continue;
 				Center = Mesh->Bounds.Origin; BoundRadius = Mesh->Bounds.SphereRadius;
 			}
-		}
-		else if (Mode == EMD_ScanMode::WallType)
-		{
-			const AMD_CuttableWall* Wall = Cast<AMD_CuttableWall>(Candidate);
-			if (!Wall || !Wall->CanCut() || !IsValid(Wall->GetScanMesh())) continue;
-			if (Wall->GetWallType() != EMD_WallType::Partition && Wall->GetWallType() != EMD_WallType::Strut) continue;
-			const UStaticMeshComponent* Mesh = Wall->GetScanMesh();
-			if (!Mesh->IsVisible() || !Mesh->bRenderInMainPass) continue;
-			Center = Mesh->Bounds.Origin;
-			BoundRadius = Mesh->Bounds.SphereRadius;
 		}
 		else if (const AMD_WallUtility* Utility = Cast<AMD_WallUtility>(Candidate))
 		{

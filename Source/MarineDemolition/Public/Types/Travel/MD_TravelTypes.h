@@ -37,11 +37,6 @@ struct FMD_TravelSiteEntry
 
 namespace MDTravel
 {
-	/** 표준 난이도 기준 Day2 / Day3 / Day4 점검 기준선 (05 §0.1, 4인 기준) */
-	inline constexpr int32 BaseInspectionDay2 = 500;
-	inline constexpr int32 BaseInspectionDay3 = 1200;
-	inline constexpr int32 BaseInspectionDay4 = 1380;
-
 	/** 난이도 배율 (05 §0.1) */
 	inline float GetDifficultyMultiplier(EMD_Difficulty Difficulty)
 	{
@@ -53,11 +48,5 @@ namespace MDTravel
 		case EMD_Difficulty::Standard:
 		default:                        return 1.0f;
 		}
-	}
-
-	/** 표준 기준선에 난이도 배율만 적용한 값. 인원 배율은 GameMode가 인원 확정 후 다시 곱한다 */
-	inline int32 GetScaledInspectionTarget(int32 BaseTarget, EMD_Difficulty Difficulty)
-	{
-		return FMath::RoundToInt(BaseTarget * GetDifficultyMultiplier(Difficulty));
 	}
 }

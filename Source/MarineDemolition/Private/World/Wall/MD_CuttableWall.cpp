@@ -12,7 +12,7 @@
 AMD_CuttableWall::AMD_CuttableWall()
 {
 	PrimaryActorTick.bCanEverTick = false;
-	// bHasSupport 복제용 (원격 클라이언트의 절단 판정 일치)
+	// bCut·절단 진행도 복제용
 	bReplicates = true;
 
 
@@ -90,7 +90,6 @@ void AMD_CuttableWall::OnConstruction(const FTransform& Transform)
 void AMD_CuttableWall::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
 {
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-	DOREPLIFETIME(AMD_CuttableWall, bHasSupport);
 	DOREPLIFETIME(AMD_CuttableWall, bCut);
 	DOREPLIFETIME(AMD_CuttableWall, CutProgressSeconds);
 }
@@ -174,18 +173,8 @@ void AMD_CuttableWall::CompleteCutWithCleanRatio(
 	AActor* Cutter,
 	const float CutSurfaceCleanRatio)
 {
-	// Keep the support links and authored collapse settings after the wall disappears.
-	bAwaitingSupportCollapse = WallType == EMD_WallType::Strut && bHasSupport;
-	if (bAwaitingSupportCollapse) bAlwaysRelevant = true;
-	if (WallType == EMD_WallType::Strut && !bHasSupport)
-	{
-		CollapseIfUnsupported(Cutter);
-	}
-	else
-	{
-		// 칸막이 또는 지지 상태 지주 = 철거 성공 (무지지 지주는 붕괴로 전환, 점수 없음)
-		OnWallDemolished.Broadcast(this, Cutter);
-	}
+	// 모든 벽은 절단 완료 = 철거 성공
+	OnWallDemolished.Broadcast(this, Cutter);
 
 	// 파편 드랍: GA가 타격한 한쪽 면의 남은 오염만으로 깨끗/오염 배분
 	// (기획 §2.5: 제거율 70% → 7:3)
@@ -221,7 +210,7 @@ void AMD_CuttableWall::CompleteCutWithCleanRatio(
 	// 경로 개방 (조각이 벽 자리를 대체).
 	// 즉시 Destroy하면 방금 보낸 멀티캐스트가 채널과 함께 유실될 수 있어 잠깐 미룬다
 	OnRep_Cut();
-	SetLifeSpan(bAwaitingSupportCollapse ? 0.f : 0.2f);
+	SetLifeSpan(0.2f);
 	ForceNetUpdate();
 }
 
@@ -344,7 +333,7 @@ void AMD_CuttableWall::AddCutProgressInternal(
 
 float AMD_CuttableWall::GetRequiredCutSeconds() const
 {
-	return (WallType == EMD_WallType::Strut) ? StrutCutSeconds : PartitionCutSeconds;
+	return PartitionCutSeconds;
 }
 
 float AMD_CuttableWall::GetCutProgressRatio() const

@@ -26,11 +26,11 @@ class MARINEDEMOLITION_API AMD_GameModeBase : public AGameModeBase
 public:
     AMD_GameModeBase();
 
-    // 전체 플레이어의 정산 화면을 닫고 로비로 함께 이동
+    // 전체 플레이어의 정산 화면을 닫고 로비로 이동
     void FinishDayEndReport();
 
-    // 시간 만료 요청을 제외한 서버 수동 퇴근 진입점
-    void RequestEndDay(EMD_DayEndReason EndReason = EMD_DayEndReason::Console, FGameplayTag ReportWidgetTag = FGameplayTag());
+    // 작업 마감 콘솔의 종료 진입점. 정산 → 보고서 표시 → 로비
+    void RequestEndDay(FGameplayTag ReportWidgetTag = FGameplayTag());
 
     virtual void StartPlay() override;
     virtual void RestartPlayer(AController* NewPlayer) override;
@@ -64,13 +64,13 @@ private:
     // 출발 요청 URL에서 검증한 계약 난이도를 GameState 생성 이후 적용하기 위한 임시 상태
     EMD_Difficulty RequestedContractDifficulty = EMD_Difficulty::Standard;
 
-    // 직접 맵 실행과 Day 재시작을 출발 난이도 지정 계약과 구분하기 위한 옵션 존재 여부
+    // 직접 맵 실행을 출발 난이도 지정 계약과 구분하기 위한 옵션 존재 여부
     bool bHasRequestedContractDifficulty = false;
 
     // 출발 요청 URL에서 검증한 계약 인원수를 GameState 생성 이후 적용하기 위한 임시 상태
     int32 RequestedContractCrewCount = 0;
 
-    // 직접 맵 실행과 Day 재시작을 출발 인원 지정 계약과 구분하기 위한 옵션 존재 여부
+    // 직접 맵 실행을 출발 인원 지정 계약과 구분하기 위한 옵션 존재 여부
     bool bHasRequestedContractCrewCount = false;
 
     // 서버 GameState에 검증된 출발 난이도와 인원수를 계약 상태로 반영하는 처리
@@ -82,24 +82,22 @@ private:
     void FinalizeReturnStatuses();
 
 
- //Collapse Score
+ //Demolition Score
 private:
-    UFUNCTION()
-    void HandleStrutCollapsed(AMD_CuttableWall* Wall, AActor* Cutter);
-
     UFUNCTION()
     void HandleWallDemolished(AMD_CuttableWall* Wall, AActor* Cutter);
 
- //Daily Score & Inspection
+ //Contract Settlement
 private:
-    // 중복 보상 없이 현재 작업의 점수와 재화를 확정하는 수동 정산
-    EMD_InspectionResult FinalizeDay();
+    // 마감 정산 시퀀스. 계약당 1회만 실행
+    void FinalizeDay();
 
-    // 전체 플레이어에게 동일 보고서 표시 후 로비 이동 예약
-    void RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReason EndReason, FGameplayTag ReportWidgetTag);
+    // 확정 보고서를 모든 플레이어에게 표시한 뒤 로비 이동 예약
+    void ShowFinalReport(FGameplayTag ReportWidgetTag);
 
-    // 정산 완료 후 현장 계약을 종료하고 로비로 이동
-    void ExecuteDayTransition();
+    void HandleContractCleared();
+
+    void HandleGameOver();
 
     // 게임 종료 세션 상태를 갱신한 뒤 대상 로비 레벨로 이동하는 함수
     void TravelToLevel(const TSoftObjectPtr<UWorld>& Level);
@@ -111,29 +109,34 @@ private:
     // FinalizeDay 중복 실행 방지 플래그. 레벨 재시작 시 초기화
     bool bDayFinalized = false;
 
-    // 중복 정산 요청에 반환할 확정 결과
-    EMD_InspectionResult PendingResult = EMD_InspectionResult::NotApplicable;
+    // 계약 종료 시 이동할 레벨(로비). BP GameMode에서 지정
+    UPROPERTY(EditDefaultsOnly, Category = "Contract")
+    TSoftObjectPtr<UWorld> ClearedLevel;
+
+    // 게임오버 시 이동할 레벨(타이틀). BP GameMode에서 지정
+    UPROPERTY(EditDefaultsOnly, Category = "Contract")
+    TSoftObjectPtr<UWorld> GameOverLevel;
 
     FTimerHandle DepartTravelTimerHandle;
 
     // 세션 절차를 거치지 않는 직접 ServerTravel 전에 모든 소유 클라이언트에 로딩 화면을 요청한다.
     void PreparePlayersForTravel(EMD_LoadingContext Context);
 
-    // 18:00 정산 시점의 인원 복귀 점수와 현장 미수거 점수를 적용하는 처리
+    // 로딩 인트로가 화면을 완전히 덮은 뒤에 같은 레벨 재시작 트래블을 실행한다.
+    void RestartLevelAfterLoadingIntro();
+
+    // 마감 시점의 인원 복귀 점수와 현장 미수거 점수를 적용하는 처리
     void FinalizeDailyScore();
 
- //Day Persistence
+ //Expedition Contract
 private:
-    // 다음 틱에 월드 준비를 기다린 뒤 계약 동기화 (전 액터 BeginPlay 완료 보장)
+    // 다음 틱에 월드 준비를 기다린 뒤 계약 시작 (전 액터 BeginPlay 완료 보장)
     void InitializeExpeditionDay();
 
-    // 서버 일차와 퀘스트를 동기화하고 명시적인 새 출항만 같은 현장의 계약 재구성
-    void SyncMerchantToGameDay(int32 Day, bool bStartNewContract = false);
+    // 현재 맵의 현장으로 새 계약을 시작하고 착수금 지급
+    void BeginExpeditionContract();
 
     UMD_SiteDefinition* ResolveExpeditionSite() const;
-
-    UFUNCTION()
-    void HandleGameDayChanged(int32 NewDay);
 
     /** 현재 맵을 키로 사용하여 현장 데이터를 직접 선택하기 위한 맵별 계약 목록 */
     UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
@@ -156,15 +159,5 @@ private:
     void MD_AddScore(int32 Delta);
 
     UFUNCTION(Exec)
-    void MD_SetDay(int32 Day);
-
-    // 현재 일자의 시간을 H시 00분으로 설정하는 호스트 콘솔 명령
-    UFUNCTION(Exec)
-    void MD_SetTime(int32 Hour);
-
-    UFUNCTION(Exec)
     void MD_SetCrew(int32 Crew);
-
-    UFUNCTION(Exec)
-    void MD_SetWarned(int32 bWarned);
 };

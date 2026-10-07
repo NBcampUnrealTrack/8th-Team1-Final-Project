@@ -103,10 +103,6 @@ void UMD_DailyReportWidget::NativeDestruct()
     StopLedgerUpdates();
     // 해제된 숫자 영역과 표시 문자열의 캐시 정리
     AmountTextCache.Reset();
-    // 다음 구성에서 날짜 부제목의 최초 생성 허용
-    CachedReportDay.Reset();
-    // 사용이 끝난 지역화 부제목 참조 해제
-    CachedReportHeader = FText::GetEmpty();
     Super::NativeDestruct();
 }
 
@@ -184,52 +180,24 @@ void UMD_DailyReportWidget::SetReport(const FMD_InspectionReport& Report)
     int64 PreviousSummaryScore = SummaryScore;
     // 분류별 항목이 바뀌어도 합계가 같으면 기존 연출을 유지하기 위한 이전 크레딧
     int64 PreviousSummaryCredit = SummaryCredit;
-	// 현재 정산 날짜 부제목 갱신
+	// 정산 부제목 (일차 개념 없음)
 	if (IsValid(Txt_SubHeader) == true)
 	{
-		// 날짜가 달라진 경우에만 숫자 서식 및 부제목 생성
-		if (CachedReportDay.IsSet() == false || CachedReportDay.GetValue() != Report.Day)
+		const FText Header = NSLOCTEXT("MDDailyReport", "ReportHeader", "작업 정산");
+		if (Txt_SubHeader->GetText().IdenticalTo(Header) == false)
 		{
-			// 두 자리 날짜를 위한 형식 설정
-			FNumberFormattingOptions DayOptions;
-			// 날짜의 불필요한 자리 구분 제거
-			DayOptions.UseGrouping = false;
-			// 한 자리 날짜의 앞자리 영점 표시
-			DayOptions.MinimumIntegralDigits = 2;
-			// 동일 날짜의 후속 원장 갱신에서 재사용할 부제목 생성
-			CachedReportHeader = FText::Format(NSLOCTEXT("MDDailyReport", "ReportHeader", "DAY {0} 작업 정산"), FText::AsNumber(Report.Day, &DayOptions));
-			// 생성된 부제목의 날짜 기록
-			CachedReportDay = Report.Day;
-		}
-		// 실제 표시가 달라진 경우에만 부제목 갱신
-		if (Txt_SubHeader->GetText().IdenticalTo(CachedReportHeader) == false)
-		{
-			// 현재 날짜의 지역화된 부제목 적용
-			Txt_SubHeader->SetText(CachedReportHeader);
+			Txt_SubHeader->SetText(Header);
 		}
 	}
-    // 마감 원인보다 최종 게임 판정을 우선하는 배지 표시
+    // 콘솔 확인 화면과 서버 확정 마감 보고서를 구분하는 배지 표시
     if (IsValid(Txt_Badge) == true)
     {
         // 콘솔에서 열어 확인하는 수동 퇴근 문구
         FText BadgeText = NSLOCTEXT("MDDailyReport", "ConsoleBadge", "퇴근 확인");
-        // 실패로 확정된 최종 결과 표시
-        if (Report.Result == EMD_InspectionResult::GameOver)
+        // 마감이 확정된 최종 보고서는 현장 종료로 표시
+        if (bShowingFinalReport == true)
         {
-            // 시간 종료 및 콘솔 진입과 구분하는 실패 문구
-            BadgeText = NSLOCTEXT("MDDailyReport", "GameOverBadge", "게임 오버");
-        }
-        // 계약 완료를 현재 사이트의 클리어로 표시
-        else if (Report.Result == EMD_InspectionResult::ContractCleared)
-        {
-            // 시간 종료 및 콘솔 진입과 구분하는 성공 문구
-            BadgeText = NSLOCTEXT("MDDailyReport", "SiteClearedBadge", "사이트 클리어");
-        }
-        // 최종 판정이 없는 자동 마감의 원인 표시
-        else if (Report.EndReason == EMD_DayEndReason::TimeExpired)
-        {
-            // 제한 시간 도달에 따른 작업 종료 문구
-            BadgeText = NSLOCTEXT("MDDailyReport", "TimeExpiredBadge", "작업 시간 종료");
+            BadgeText = NSLOCTEXT("MDDailyReport", "SiteClearedBadge", "작업 종료");
         }
         // 같은 배지 문구의 반복 적용 방지
         if (Txt_Badge->GetText().IdenticalTo(BadgeText) == false)
@@ -254,9 +222,8 @@ void UMD_DailyReportWidget::SetReport(const FMD_InspectionReport& Report)
     SetSummaryText(Txt_CumulativeScore, FText::AsNumber(Report.CumulativeScore));
     // 일일 크레딧 변동과 구분한 실제 보유 잔액 표시
     SetSummaryText(Txt_CumulativeCredit, FText::AsNumber(Report.Credits));
-    // 다음 점검이 없는 종료 상태에서 기준 대신 대시 표시
-    SetSummaryText(Txt_NextThreshold, Report.NextThreshold > 0 ? FText::AsNumber(Report.NextThreshold)
-        : NSLOCTEXT("MDDailyReport", "NoNextThreshold", "-"));
+    // 점검 목표가 사라져 기준 영역은 대시 표시 (정리 달성률 표시는 분모 확정 후)
+    SetSummaryText(Txt_NextThreshold, NSLOCTEXT("MDDailyReport", "NoNextThreshold", "-"));
 	// 점수 영역의 분류별 값과 합계 갱신
 	SetScoreValues(Report);
 	// 크레딧 영역의 분류별 값과 전체 변동 합계 갱신

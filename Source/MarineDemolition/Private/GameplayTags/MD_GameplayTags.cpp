@@ -142,10 +142,6 @@ namespace MDGameplayTags
 		Score_Demolition_Partition,
 		"Score.Demolition.Partition",
 		"칸막이벽 철거 성공");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Score_Demolition_Strut,
-		"Score.Demolition.Strut",
-		"내력벽 철거 성공, 지지대 설치 상태");
 
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
@@ -183,14 +179,6 @@ namespace MDGameplayTags
 		"Score.Penalty.UncollectedRemain",
 		"현장 미수거");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Score_Penalty_Collapse_Unsupported,
-		"Score.Penalty.Collapse.Unsupported",
-		"내력 무지지 절단 천장 붕괴");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Score_Penalty_Collapse_Supported,
-		"Score.Penalty.Collapse.Supported",
-		"지지대 있어도 붕괴");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Score_Penalty_NotReturned,
 		"Score.Penalty.NotReturned",
 		"18:00 미복귀 인당");
@@ -198,10 +186,6 @@ namespace MDGameplayTags
 		Score_Penalty_Death,
 		"Score.Penalty.Death",
 		"사망 후 부활");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Score_Penalty_Warning,
-		"Score.Penalty.Warning",
-		"점검 실패 경고");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Score_Penalty_CableCut,
 		"Score.Penalty.CableCut",

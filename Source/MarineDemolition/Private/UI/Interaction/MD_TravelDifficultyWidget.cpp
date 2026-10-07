@@ -38,7 +38,6 @@ void UMD_TravelDifficultyWidget::NativeConstruct()
 	}
 
 	RefreshDifficultyButtons();
-	RefreshInspectionPreview();
 }
 
 bool UMD_TravelDifficultyWidget::IsHost() const
@@ -56,7 +55,6 @@ void UMD_TravelDifficultyWidget::SetSelectedSite(const FText& InSiteDisplayName)
 	}
 
 	RefreshDifficultyButtons();
-	RefreshInspectionPreview();
 }
 
 void UMD_TravelDifficultyWidget::ResetSelection()
@@ -64,7 +62,6 @@ void UMD_TravelDifficultyWidget::ResetSelection()
 	SelectedDifficulty = EMD_Difficulty::Standard;
 
 	RefreshDifficultyButtons();
-	RefreshInspectionPreview();
 }
 
 void UMD_TravelDifficultyWidget::SelectDifficulty(EMD_Difficulty NewDifficulty)
@@ -77,7 +74,6 @@ void UMD_TravelDifficultyWidget::SelectDifficulty(EMD_Difficulty NewDifficulty)
 	SelectedDifficulty = NewDifficulty;
 
 	RefreshDifficultyButtons();
-	RefreshInspectionPreview();
 }
 
 void UMD_TravelDifficultyWidget::RefreshDifficultyButtons()
@@ -109,22 +105,6 @@ void UMD_TravelDifficultyWidget::RefreshDifficultyButtons()
 	{
 		BTN_Depart->SetIsEnabled(bHost);
 	}
-}
-
-void UMD_TravelDifficultyWidget::RefreshInspectionPreview()
-{
-	if (!TXT_InspectionPreview)
-	{
-		return;
-	}
-
-	const int32 Day2 = MDTravel::GetScaledInspectionTarget(MDTravel::BaseInspectionDay2, SelectedDifficulty);
-	const int32 Day3 = MDTravel::GetScaledInspectionTarget(MDTravel::BaseInspectionDay3, SelectedDifficulty);
-	const int32 Day4 = MDTravel::GetScaledInspectionTarget(MDTravel::BaseInspectionDay4, SelectedDifficulty);
-
-	TXT_InspectionPreview->SetText(FText::Format(
-		NSLOCTEXT("MDTravel", "InspectionPreview", "점검 기준 · Day2 {0} · Day3 {1} · Day4 {2}   (4인 기준)"),
-		FText::AsNumber(Day2), FText::AsNumber(Day3), FText::AsNumber(Day4)));
 }
 
 void UMD_TravelDifficultyWidget::HandleDiffSafeClicked()
