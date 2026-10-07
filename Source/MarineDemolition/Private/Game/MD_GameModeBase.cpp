@@ -72,14 +72,6 @@ void AMD_GameModeBase::BeginPlay()
     // 게임 맵의 액터 초기화 이후 월드 준비와 계약 동기화를 위한 다음 틱 예약
     GetWorldTimerManager().SetTimerForNextTick(this, &ThisClass::InitializeExpeditionDay);
 
-    GetWorldTimerManager().SetTimer(
-        CheckGameTimeTimerHandle,
-        this,
-        &AMD_GameModeBase::CheckGameTimeEvents,
-        0.1f,
-        true
-    );
-
     // 레벨의 모든 격벽에 붕괴·철거 점수 처리 바인딩 (GameMode는 서버 전용이라 중복 적용 없음)
     for (TActorIterator<AMD_CuttableWall> It(GetWorld()); It; ++It)
     {
@@ -116,6 +108,11 @@ void AMD_GameModeBase::ApplyRequestedContractSettings()
 
 void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+    // 맵 이동 후 GameInstance 타이머 관리자의 이전 현장 예약 해제
+    GetWorldTimerManager().ClearTimer(LoanInterestTimerHandle);
+    // 종료된 월드에서 정산 완료 이동 콜백 실행 방지
+    GetWorldTimerManager().ClearTimer(DepartTravelTimerHandle);
+
     if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
     {
         GS->OnDayChanged.RemoveDynamic(this, &AMD_GameModeBase::HandleGameDayChanged);
@@ -275,76 +272,68 @@ void AMD_GameModeBase::HandleWallDemolished(AMD_CuttableWall* Wall, AActor* Cutt
     }
 }
 
+void AMD_GameModeBase::StartLoanInterestTimer()
+{
+    // 타이머를 소유할 현재 서버 월드 조회
+    UWorld* World = GetWorld();
+    // 로비와 클라이언트 및 이미 정산된 작업의 이자 예약 차단
+    if (IsValid(World) == false || World->GetNetMode() == NM_Client || bDayFinalized == true || IsValid(ResolveExpeditionSite()) == false)
+    {
+        // 게임 현장 외 이자 부과 방지
+        return;
+    }
+    // 일차 동기화나 재호출로 첫 이자 시점이 연장되는 상황 차단
+    if (GetWorldTimerManager().TimerExists(LoanInterestTimerHandle) == true)
+    {
+        // 현재 현장의 최초 예약 유지
+        return;
+    }
+    // 초기화 대기 시간도 맵 진입 이후 경과 시간에 포함
+    GetWorldTimerManager().SetTimer(LoanInterestTimerHandle, this, &ThisClass::CheckGameTimeEvents, 180.f, true,
+        FMath::Max(600.f - World->GetTimeSeconds(), KINDA_SMALL_NUMBER));
+}
+
 void AMD_GameModeBase::CheckGameTimeEvents()
 {
-    AMD_GameStateBase* MDGameState =
-        GetGameState<AMD_GameStateBase>();
-
-    if (!IsValid(MDGameState))
+    // 이자 원장을 보유한 게임 인스턴스 조회
+    UGameInstance* GameInstance = GetGameInstance();
+    // 정산 종료 이후 호출과 유효하지 않은 인스턴스 차단
+    if (HasAuthority() == false || bDayFinalized == true || IsValid(GameInstance) == false)
     {
+        // 종료된 작업의 부채 변경 방지
         return;
     }
-
-    const EMD_WithdrawalPhase CurrentPhase =
-        MDGameState->GetWithdrawalPhase();
-
-    //17:00
-    if (CurrentPhase == EMD_WithdrawalPhase::None
-        && MDGameState->HasReachedTime(17, 0))
+    // 팀 공용 부채를 관리하는 서버 원장 조회
+    UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
+    // 유효한 계약의 미상환 잔액에만 주기 이자 적용
+    if (IsValid(Merchant) == true && Merchant->HasActiveContract() == true)
     {
-        MDGameState->SetWithdrawalPhase(
-            EMD_WithdrawalPhase::Notice
-        );
-
-        return;
-    }
-
-    //17:30
-    if (CurrentPhase == EMD_WithdrawalPhase::Notice
-        && MDGameState->HasReachedTime(17, 30))
-    {
-        MDGameState->SetWithdrawalPhase(
-            EMD_WithdrawalPhase::Warning
-        );
-
-        return;
-    }
-
-    //18:00
-    if (CurrentPhase == EMD_WithdrawalPhase::Warning
-        && MDGameState->HasReachedTime(18, 0))
-    {
-        // 제한 시간 도달 원인을 보고서까지 전달
-        RequestEndDay(EMD_DayEndReason::TimeExpired);
+        // 원장 변경 알림을 통한 호스트 UI 및 클라이언트 복제 갱신
+        Merchant->ApplyDailyLoanInterest();
     }
 }
 
 void AMD_GameModeBase::RequestEndDay(EMD_DayEndReason EndReason, FGameplayTag ReportWidgetTag)
 {
-    // 18:00 자동 마감과 인터랙트가 겹쳐도 1회만 실행
-    if (bDayFinalized)
+    // 서버의 수동 퇴근만 허용하고 시간 만료 및 중복 요청 차단
+    if (HasAuthority() == false || EndReason != EMD_DayEndReason::Console || bDayFinalized == true)
     {
         return;
     }
-
-    GetWorldTimerManager().ClearTimer(CheckGameTimeTimerHandle);
-
-    // 정산 결과와 요청 원인을 함께 반영
+    // 월드 초기화가 끝난 보고서만 최종 정산 대상으로 허용
+    AMD_GameStateBase* State = GetGameState<AMD_GameStateBase>();
+    // 로딩 중이나 게임 상태가 없는 요청의 불완전한 정산 차단
+    if (IsValid(State) == false || State->IsWorldInitializationReady() == false)
+    {
+        return;
+    }
+    // 수동 정산 이후 보고서 대기 중 추가 이자 부과 방지
+    GetWorldTimerManager().ClearTimer(LoanInterestTimerHandle);
+    // 확정된 정산을 전체 플레이어에게 전달하고 로비 복귀 예약
     RouteAfterDay(FinalizeDay(), EndReason, ReportWidgetTag);
 }
 
-void AMD_GameModeBase::TravelToNextDay()
-{
-    // Day 시스템 제거 단계에서 함수째 삭제 예정. 세이브 삭제로 스냅샷 복원 없이 같은 레벨만 재시작한다.
-    PreparePlayersForTravel(EMD_LoadingContext::NextShift);
 
-    // 같은 레벨을 다시 로드 → BeginPlay에서 복원 경로 진입
-    RestartLevelAfterLoadingIntro();
-}
-
-// 세션 절차를 거치지 않는 직접 ServerTravel 앞에서 모든 소유 클라이언트의 로딩을 켠다.
-// 클라이언트가 서버와 같은 시점에 인트로를 시작해야 하므로
-// RestartLevelAfterLoadingIntro의 콜백 안이 아니라 그 전에 호출해야 한다.
 void AMD_GameModeBase::PreparePlayersForTravel(EMD_LoadingContext Context)
 {
     UWorld* World = GetWorld();
@@ -362,46 +351,11 @@ void AMD_GameModeBase::PreparePlayersForTravel(EMD_LoadingContext Context)
     }
 }
 
-// 같은 레벨 재시작(?Restart)을 로딩 인트로가 끝난 뒤로 미룬다. 세션 이동 경로는
-// MD_MultiplayManager::RunAfterLoadingIntro가 같은 역할을 하며, 이 헬퍼는 세션을
-// 거치지 않는 Day 전환과 목적지 미지정 fallback 두 곳이 공유한다.
-void AMD_GameModeBase::RestartLevelAfterLoadingIntro()
-{
-    UGameInstance* GameInstance = GetGameInstance();
-    UMD_LoadingScreenSubsystem* LoadingScreen = IsValid(GameInstance) == true
-        ? GameInstance->GetSubsystem<UMD_LoadingScreenSubsystem>()
-        : nullptr;
-
-    // 로딩 서브시스템이 없는 실행에서는 기존 동작대로 즉시 이동한다.
-    if (IsValid(LoadingScreen) == false)
-    {
-        if (UWorld* World = GetWorld())
-        {
-            World->ServerTravel(TEXT("?Restart"));
-        }
-        return;
-    }
-
-    TWeakObjectPtr<AMD_GameModeBase> WeakThis(this);
-    LoadingScreen->RunAfterIntro([WeakThis]()
-    {
-        AMD_GameModeBase* Self = WeakThis.Get();
-        UWorld* TravelWorld = Self != nullptr ? Self->GetWorld() : nullptr;
-        if (IsValid(TravelWorld) == false)
-        {
-            return;
-        }
-        if (TravelWorld->ServerTravel(TEXT("?Restart")) == false)
-        {
-            UE_LOG(LogTemp, Error, TEXT("[Day] 같은 레벨 재시작 트래블을 시작하지 못했습니다."));
-        }
-    });
-}
 
 EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
 {
-    // 18:00 자동 마감 후 MD_EndDay가 호출돼도 감점·점검이 중복 적용되지 않게 1회만 실행
-    if (bDayFinalized)
+    // 여러 플레이어의 퇴근 요청에도 점수와 보상을 한 번만 정산
+    if (bDayFinalized == true)
     {
         return PendingResult;
     }
@@ -411,22 +365,12 @@ EMD_InspectionResult AMD_GameModeBase::FinalizeDay()
     // 일일 점수 정산에 반영할 플레이어 복귀 상태 확정
     FinalizeReturnStatuses();
 
-    if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
-    {
-        if (UMD_MerchantSubsystem* Merchant =
-            GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
-        {
-
-			// 빚에 대한 이자 측정 및 증가
-			Merchant->ApplyDailyLoanInterest();
-        }
-    }
-
     FinalizeDailyScore();
 
-    PendingResult = EvaluateInspection();
+    // 다음 일차 점검 없이 현재 작업의 정산 결과만 확정
+    PendingResult = EMD_InspectionResult::NotApplicable;
 
-    // 점검 실패 페널티까지 포함한 당일 최종 평가 점수를 크레딧 연동 보너스로 지급
+    // 현재 작업의 최종 평가 점수를 크레딧 연동 보너스로 지급
     AMD_GameStateBase* ScoreGameState = GetGameState<AMD_GameStateBase>();
     bool bScoreGameStateValid = IsValid(ScoreGameState);
     if (bScoreGameStateValid == true)
@@ -498,65 +442,31 @@ TSoftObjectPtr<UWorld> AMD_GameModeBase::MakeWorldAssetReference(UWorld* World) 
 void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReason EndReason, FGameplayTag ReportWidgetTag)
 {
     AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>();
-    const int32 Day = IsValid(GS) == true ? GS->GetCurrentDay() : 0;
+    // 기존 원장 형식으로 현재 작업의 집계 구간 조회
+    int32 Day = IsValid(GS) == true ? GS->GetCurrentDay() : 0;
 
-    // Day4 상한 가드: 4일차 이후 '계속' 결과(통과/경고/비상)는 나올 수 없음 → 게임오버 강제
-    if (Day >= 4 && Result != EMD_InspectionResult::ContractCleared)
-    {
-        Result = EMD_InspectionResult::GameOver;
-    }
-
+    // 모든 수동 퇴근에 동일한 일반 정산 결과 사용
     PendingResult = Result;
-
+    // 보고서에 포함할 현장 및 재화 원장 조회
     UGameInstance* GameInstance = GetGameInstance();
-    // 유효성 검사와 서브시스템 조회에 동일 인스턴스 재사용
+    // 게임 인스턴스 수명의 기존 부채와 재화 보존
     UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
 
-    // 경고/비상 경제 컨텍스트를 다음 Day로 전달
-    if (IsValid(Merchant) == true)
-    {
-        if (Result == EMD_InspectionResult::WarningIssued)
-        {
-            // 다음 정규일 착수금 ×0.7 · 소모품 할인 제거
-            Merchant->SetNextDepositMultiplier(0.7f);
-            Merchant->SetConsumableDiscountActive(false);
-        }
-        else if (Result == EMD_InspectionResult::EmergencyDayOpened)
-        {
-            // 비상 4일차 착수금 없음
-            Merchant->SetNextDepositMultiplier(0.f);
-            Merchant->SetConsumableDiscountActive(false);
-        }
-    }
-
-    // Day 1처럼 점검 기준이 없는 날에도 DailyReport가 표시될 수 있도록 하는 결과 보정
+    // 이전 점검 결과를 재사용하지 않는 현재 작업의 확정 보고서
     FMD_InspectionReport DailyReport;
     if (IsValid(GS) == true)
     {
-        DailyReport = GS->GetInspectionReport();
-
-        // Day 1처럼 기존 점검 보고서가 없는 경우에만 누적 점수와 기준을 새로 구성하는 처리
-        if (DailyReport.bValid == false)
-        {
-            DailyReport.Score = GS->GetScore();
-            DailyReport.Threshold = GS->GetInspectionThreshold(Day);
-        }
-
+        // 퇴근 시점의 평가 점수 반영
+        DailyReport.Score = GS->GetScore();
         DailyReport.bValid = true;
         DailyReport.Day = Day;
         DailyReport.Result = Result;
-        // 콘솔 확인과 시간 종료를 구분할 서버 마감 원인 보존
+        // 서버에서 검증한 수동 퇴근 원인 보존
         DailyReport.EndReason = EndReason;
-        // 점검 판정 점수와 별도로 경고 감점까지 반영한 누적 점수 기록
+        // 현재 작업의 누적 점수 기록
         DailyReport.CumulativeScore = GS->GetScore();
         // 계약 종료 시 다음 점검이 없는 상태 표시
         DailyReport.NextThreshold = 0;
-        // 진행 중인 계약에만 다음 일자의 점검 목표 제공
-        if (Result != EMD_InspectionResult::ContractCleared && Result != EMD_InspectionResult::GameOver)
-        {
-            // 난이도와 인원 및 경고 배율을 반영한 다음 점검 기준 기록
-            DailyReport.NextThreshold = GS->GetInspectionThreshold(Day + 1);
-        }
         // 이전 보고서의 보유 잔액 초기화
         DailyReport.Credits = 0;
         // 이전 현장 표시 초기화
@@ -588,7 +498,7 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReas
         // 모든 클라이언트에 출발 단계 전달
         GS->SetWithdrawalPhase(EMD_WithdrawalPhase::Departed);
     }
-    // 시간 종료 등 콘솔이 없는 요청에는 등록된 기본 보고서 태그 사용
+    // 별도 화면 태그가 없는 수동 요청에 등록된 기본 보고서 사용
     if (ReportWidgetTag.IsValid() == false)
     {
         // UI Manager 설정에 등록된 보고서 조회 태그
@@ -613,6 +523,13 @@ void AMD_GameModeBase::RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReas
 
 void AMD_GameModeBase::FinishDayEndReport()
 {
+    // 서버가 예약한 정산 종료만 한 번 처리
+    if (HasAuthority() == false || bDayFinalized == false || DepartTravelTimerHandle.IsValid() == false)
+    {
+        return;
+    }
+    // 재호출과 종료 후 타이머 실행 방지
+    GetWorldTimerManager().ClearTimer(DepartTravelTimerHandle);
     // 로딩 및 맵 이동 전에 모든 소유 클라이언트의 정산 화면 종료
     for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
     {
@@ -624,86 +541,77 @@ void AMD_GameModeBase::FinishDayEndReport()
             Controller->ClientCloseDayEndReport();
         }
     }
-    // 일반 결과는 다음 일자, 최종 판정은 기존 결과 이동 실행
+    // 정산 결과와 무관하게 모든 접속자의 로비 복귀 실행
     ExecuteDayTransition();
 }
 
 void AMD_GameModeBase::ExecuteDayTransition()
 {
-    switch (PendingResult)
-    {
-    case EMD_InspectionResult::ContractCleared:
-        HandleContractCleared();
-        break;
-
-    case EMD_InspectionResult::GameOver:
-        HandleGameOver();
-        break;
-
-    default:
-        // Passed / WarningIssued / EmergencyDayOpened / NotApplicable → 다음 날 진입
-        TravelToNextDay();
-        break;
-    }
-}
-
-void AMD_GameModeBase::HandleContractCleared()
-{
-    // 클리어 이력 등록 후 같은 현장 재진입을 새 계약으로 판정하기 위한 기존 계약 종료
+    // 재화와 개인 장비를 보존하는 게임 인스턴스 조회
     UGameInstance* GameInstance = GetGameInstance();
+    // 현장 계약만 종료하고 누적 재화 및 부채 유지
     UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
+    // 유효한 원장의 현장 진행 상태 정리
     if (IsValid(Merchant) == true)
     {
-        Merchant->MarkSiteCleared();
+        // 다음 출항에서 새로운 현장 계약 초기화 허용
         Merchant->FinalizeContract();
     }
-
-    TravelToLevel(ClearedLevel);
-}
-
-void AMD_GameModeBase::HandleGameOver()
-{
-    // 새 런은 기본 장비로 시작하도록 운반 중인 핫바와 구매 이력 폐기
-    if (UMD_SessionCarrySubsystem* Carry = GetGameInstance()->GetSubsystem<UMD_SessionCarrySubsystem>())
-    {
-        Carry->Reset();
-    }
-
-    // 게임오버 시에만 전체 리셋 (크레딧·계약)
-    if (UMD_MerchantSubsystem* Merchant =
-        GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
-    {
-        Merchant->ResetContract();
-    }
-
-    TravelToLevel(GameOverLevel);
+    // 모든 정산 결과의 목적지를 로비 맵으로 고정
+    TravelToLevel(TSoftObjectPtr<UWorld>(FSoftObjectPath(TEXT("/Game/Maps/L_Lobby.L_Lobby"))));
 }
 
 void AMD_GameModeBase::TravelToLevel(const TSoftObjectPtr<UWorld>& Level)
 {
-    const FString Package = Level.ToSoftObjectPath().GetLongPackageName();
-
-    if (Package.IsEmpty())
+    // 서버가 지정한 로비 에셋의 패키지 경로 조회
+    FString Package = Level.ToSoftObjectPath().GetLongPackageName();
+    // 접속 플레이어 전체 이동을 수행할 서버 월드 조회
+    UWorld* World = GetWorld();
+    // 잘못된 목적지를 같은 현장 재시작으로 대체하지 않도록 차단
+    if (IsValid(World) == false || HasAuthority() == false || Package.IsEmpty() == true)
     {
-        // 대상 미지정 → 안전하게 현재 레벨 리스타트 (BP에서 레벨 지정 필요)
-        UE_LOG(LogTemp, Warning,
-            TEXT("[Day] 전환 대상 레벨 미지정. BP GameMode에서 지정 필요"));
-        PreparePlayersForTravel(EMD_LoadingContext::Default);
-        RestartLevelAfterLoadingIntro();
         return;
     }
-
-    // 게임 세션 종료와 로비 복귀를 하나의 비동기 절차로 처리할 세션 관리자 참조
+    // 온라인 세션의 종료와 로비 광고 갱신을 담당할 관리자 조회
     UGameInstance* GameInstance = GetGameInstance();
+    // 독립 실행과 실제 진행 중인 온라인 세션 구분
     UMD_MultiplayManager* MultiplayManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MultiplayManager>() : nullptr;
-    if (IsValid(MultiplayManager) == false)
+    // 진행 중인 세션은 기존 연결을 유지하는 종료 절차 사용
+    if (IsValid(MultiplayManager) == true && MultiplayManager->IsSessionInProgress() == true)
     {
-        UE_LOG(LogTemp, Error, TEXT("[Day] 세션 종료와 로비 이동을 처리할 MultiplayManager가 존재하지 않습니다."));
+        // 세션 상태와 참가 허용 및 광고 맵을 갱신한 뒤 전체 이동
+        MultiplayManager->EndSession(Package);
         return;
     }
-
-    // 기존 Listen Server 연결을 유지하면서 세션 상태와 광고 맵을 로비 기준으로 갱신하는 처리
-    MultiplayManager->EndSession(Package);
+    // 세션을 만들지 않은 실행에서도 전체 플레이어의 로딩 시작
+    PreparePlayersForTravel(EMD_LoadingContext::MissionIncomplete);
+    // 실제 맵 이동 전에 로딩 인트로 완료 대기
+    UMD_LoadingScreenSubsystem* LoadingScreen = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_LoadingScreenSubsystem>() : nullptr;
+    // 비동기 인트로 중 종료된 월드 접근 방지
+    TWeakObjectPtr<UWorld> WeakWorld(World);
+    // 서버 트래블로 호스트와 접속 플레이어의 목적지 통일
+    auto StartTravel = [WeakWorld, Package]()
+    {
+        // 인트로 완료 시점에 여전히 살아 있는 서버 월드 조회
+        UWorld* TravelWorld = WeakWorld.Get();
+        // 유효한 월드에서만 로비 이동 요청
+        if (IsValid(TravelWorld) == true && TravelWorld->ServerTravel(Package) == false)
+        {
+            // 실패를 같은 현장 재시작으로 숨기지 않는 오류 기록
+            UE_LOG(LogTemp, Error, TEXT("[Report] 로비 맵 이동을 시작하지 못했습니다."));
+        }
+    };
+    // 로딩 시스템이 있는 실행의 인트로 완료 후 이동
+    if (IsValid(LoadingScreen) == true)
+    {
+        // 현재 로딩 인트로를 유지한 단일 이동 예약
+        LoadingScreen->RunAfterIntro(MoveTemp(StartTravel));
+    }
+    else
+    {
+        // 로딩 화면이 없는 독립 실행의 직접 이동
+        StartTravel();
+    }
 }
 
 void AMD_GameModeBase::FinalizeReturnStatuses()
@@ -807,80 +715,6 @@ void AMD_GameModeBase::FinalizeDailyScore()
     }
 }
 
-EMD_InspectionResult AMD_GameModeBase::EvaluateInspection()
-{
-    AMD_GameStateBase* MDGameState = GetGameState<AMD_GameStateBase>();
-
-    if (!IsValid(MDGameState))
-    {
-        return EMD_InspectionResult::NotApplicable;
-    }
-
-    const int32 Day = MDGameState->GetCurrentDay();
-    const int32 Threshold = MDGameState->GetInspectionThreshold(Day);
-
-    // 기준이 없는 날(Day1)은 점검 없음
-    if (Threshold <= 0)
-    {
-        return EMD_InspectionResult::NotApplicable;
-    }
-
-    // 판정은 경고 감점(-40) 적용 전 점수 기준
-    const int32 JudgedScore = MDGameState->GetScore();
-    const bool bPassed = JudgedScore >= Threshold;
-
-    EMD_InspectionResult Result;
-
-    if (bPassed)
-    {
-        Result = (Day >= 3) ? EMD_InspectionResult::ContractCleared : EMD_InspectionResult::Passed;
-    }
-    else if (Day == 2)
-    {
-        Result = EMD_InspectionResult::WarningIssued;
-    }
-    else if (Day == 3)
-    {
-        // 2일차 실패 경고가 남아 있으면 3일차 재실패를 게임 오버로 확정한다.
-        if (MDGameState->IsInspectionWarned() == true)
-        {
-            Result = EMD_InspectionResult::GameOver;
-        }
-        else
-        {
-            // 2일차 점검을 통과한 계약에는 비상 4일차 기회를 부여한다.
-            Result = EMD_InspectionResult::EmergencyDayOpened;
-        }
-    }
-    else
-    {
-        Result = EMD_InspectionResult::GameOver;
-    }
-
-    // 2일차 점검 실패에만 경고 감점과 다음 점검 기준 상승을 적용한다.
-    if (Result == EMD_InspectionResult::WarningIssued)
-    {
-        MDGameState->AddScoreEvent(MDGameplayTags::Score_Penalty_Warning);
-        MDGameState->SetInspectionWarned(true);
-    }
-
-    // 경고 없이 3일차 점검에 실패한 경우 비상 4일차 개방 상태만 유지한다.
-    if (Result == EMD_InspectionResult::EmergencyDayOpened)
-    {
-        MDGameState->SetEmergencyDay(true);
-    }
-
-    // 결과를 복제 리포트로 기록 → 전 클라이언트 UI 통지
-    FMD_InspectionReport Report;
-    Report.bValid = true;
-    Report.Day = Day;
-    Report.Result = Result;
-    Report.Score = JudgedScore;
-    Report.Threshold = Threshold;
-    MDGameState->SetInspectionReport(Report);
-
-    return Result;
-}
 
 void AMD_GameModeBase::InitializeExpeditionDay()
 {
@@ -1034,6 +868,9 @@ void AMD_GameModeBase::SyncMerchantToGameDay(int32 Day, bool bStartNewContract)
 
         Merchant->BeginDay(Day, ExpeditionAdvancePayment, bEmergencyDay);
     }
+    // 착수금과 계약 확정 이후 맵 진입 기준 이자 주기 시작
+    StartLoanInterestTimer();
+
 }
 
 void AMD_GameModeBase::MD_EndDay()
@@ -1096,6 +933,4 @@ void AMD_GameModeBase::MD_SetTime(int32 Hour)
     }
     // 적용된 정각 표시
     UE_LOG(LogTemp, Display, TEXT("[Time] 현재 일자 시각 변경 %02d:00"), Hour);
-    // 기존 알림 및 시간 종료 처리 경로로 진입
-    CheckGameTimeEvents();
 }

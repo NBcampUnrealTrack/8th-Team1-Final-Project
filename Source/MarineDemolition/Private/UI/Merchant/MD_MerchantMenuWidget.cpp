@@ -17,7 +17,7 @@ void UMD_MerchantMenuWidget::NativeOnActivated()
 	UWorld* World = GetWorld();
 	// 메뉴가 속한 월드의 팀 공유 원장 조회
 	AMD_GameStateBase* GameState = IsValid(World) == true ? World->GetGameState<AMD_GameStateBase>() : nullptr;
-	// 호감도 변경을 알리는 복제 컴포넌트 조회
+	// 상인 경제 상태 변경을 알리는 복제 컴포넌트 조회
 	UMD_MerchantComponent* MerchantComponent = IsValid(GameState) == true ? GameState->GetMerchantComponent() : nullptr;
 	// 재사용된 메뉴에 남아 있는 이전 원장 연결 조회
 	UMD_MerchantComponent* PreviousMerchantComponent = BoundMerchantComponent.Get();
@@ -32,7 +32,7 @@ void UMD_MerchantMenuWidget::NativeOnActivated()
 	// 상인 복제 컴포넌트가 준비된 경우에만 변경 알림 연결
 	if (IsValid(MerchantComponent) == true)
 	{
-		// 메뉴 재활성화 시 중복 없이 호감도와 상인 정보의 즉시 갱신 구독
+		// 메뉴 재활성화 시 중복 없이 상인 정보의 즉시 갱신 구독
 		MerchantComponent->OnMerchantStateChanged.AddUniqueDynamic(this, &UMD_MerchantMenuWidget::HandleMerchantStateChanged);
 	}
 	// 다시 열린 메뉴에 현재 원장 상태를 즉시 반영
@@ -62,7 +62,7 @@ void UMD_MerchantMenuWidget::HandleMerchantStateChanged()
 	// 유효한 원장이 있으면 대사 유지 규칙을 적용하며 최신 정보 반영
 	if (IsValid(MerchantComponent) == true)
 	{
-		// 호감도만 변경된 경우 현재 대사와 스크롤 위치 보존
+		// 경제 상태 갱신 중 현재 대사와 스크롤 위치 보존
 		SetMenuInfo(MerchantComponent->BuildMenuInfo());
 	}
 	else
@@ -99,7 +99,7 @@ void UMD_MerchantMenuWidget::SetMenuInfo(const FMD_MerchantMenuInfo& InInfo)
 		// 같은 순서의 대사 비교로 불필요한 대화 초기화 방지
 		bDialogueChanged = MenuInfo.TalkLines[Index].EqualTo(InInfo.TalkLines[Index]) == false;
 	}
-	// 최신 상인 이름과 호감도 및 대사 구성 저장
+	// 최신 상인 이름과 경제 상태 및 대사 구성 저장
 	MenuInfo = InInfo;
 	// 대사 구성이 바뀐 경우에만 인사말부터 다시 시작
 	if (bDialogueChanged == true)
@@ -120,13 +120,6 @@ void UMD_MerchantMenuWidget::RefreshDisplay()
 	{
 		// 초상화 아래 이름에 현재 상인 정보 반영
 		Txt_NpcName->SetText(MenuInfo.DisplayName);
-	}
-
-	// 별도 라벨 옆 호감도 수치 영역 유효성 확인
-	if (IsValid(Txt_Affinity) == true)
-	{
-		// 호감도 라벨을 중복하지 않고 부호와 소수점 한 자리 수치 표시
-		Txt_Affinity->SetText(FText::FromString(FString::Printf(TEXT("%+.1f"), MenuInfo.Affinity)));
 	}
 
 	// 상인 또는 대사 구성이 바뀐 최초 표시에서만 인사말 적용

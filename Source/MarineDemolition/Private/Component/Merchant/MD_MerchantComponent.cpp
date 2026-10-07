@@ -22,7 +22,6 @@ void UMD_MerchantComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	DOREPLIFETIME(UMD_MerchantComponent, Credits);
 	DOREPLIFETIME(UMD_MerchantComponent, DebtBalance);
 	DOREPLIFETIME(UMD_MerchantComponent, CurrentDay);
-	DOREPLIFETIME(UMD_MerchantComponent, Affinity);
 	DOREPLIFETIME(UMD_MerchantComponent, OwnedItemIds);
 }
 
@@ -81,7 +80,6 @@ void UMD_MerchantComponent::RefreshFromSubsystem()
 	Credits = Merchant->GetCredits();
 	DebtBalance = Merchant->GetDebtBalance();
 	CurrentDay = Merchant->GetCurrentDay();
-	Affinity = Merchant->GetAffinity();
 	OwnedItemIds = Merchant->GetOwnedItemIds();
     // 팀 원장을 소유한 GameState 확인
     AMD_GameStateBase* GameState = Cast<AMD_GameStateBase>(GetOwner());
@@ -110,12 +108,11 @@ FMD_MerchantMenuInfo UMD_MerchantComponent::BuildMenuInfo() const
 
 	Info.Credits = Credits;
 	Info.ContractDay = CurrentDay;
-	Info.Affinity = Affinity;
 
-	// 다음 해금 임계값은 카탈로그별 값이므로 호출 위젯에서 계산하기 위한 기본 상태 유지
+	// 클라이언트에 표시할 현재 미상환 잔액 반영
 	Info.DebtBalance = DebtBalance;
-	// 클라이언트와 서버의 대출 한도 값이 달라지지 않도록 복제 값 기반 계산
-	Info.LoanLimit = UMD_MerchantSubsystem::CalculateLoanLimit(Affinity);
+	// 서버와 동일한 기본 대출 한도를 클라이언트 UI에 적용
+	Info.LoanLimit = UMD_MerchantSubsystem::CalculateLoanLimit();
 	Info.DailyInterestRate = 0.05f;
 	return Info;
 }

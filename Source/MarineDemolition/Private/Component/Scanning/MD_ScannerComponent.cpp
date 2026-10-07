@@ -18,7 +18,6 @@
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "TimerManager.h"
-#include "Sound/SoundBase.h"
 #include "UI/Equipment/MD_ScannerModeWidget.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/Wall/MD_CuttableWall.h"
@@ -31,16 +30,11 @@ UMD_ScannerComponent::UMD_ScannerComponent()
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WallStyle(
 		TEXT("/Game/VFX/03_Scanner/MI_ScanWallType.MI_ScanWallType"));
 	WallScanMaterial = WallStyle.Object;
-	static ConstructorHelpers::FObjectFinder<USoundBase> LocatorSound(
-		TEXT("/Game/Audio/Scanner/SW_QuestSampleBeacon.SW_QuestSampleBeacon"));
-	QuestLocatorSound = LocatorSound.Object;
 }
 
 void UMD_ScannerComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	if (GetWorld() && GetNetMode() != NM_DedicatedServer)
-		GetWorld()->GetTimerManager().SetTimer(QuestLocatorTimer, this, &ThisClass::UpdateQuestLocator, 0.1f, true);
 	if (APawn* Pawn = Cast<APawn>(GetOwner()))
 		Pawn->ReceiveControllerChangedDelegate.AddUniqueDynamic(this, &ThisClass::HandleControllerChanged);
 	if (const AMD_Character* Character = Cast<AMD_Character>(GetOwner()))
@@ -290,7 +284,6 @@ void UMD_ScannerComponent::PlayScanPulse(uint32 RequestId, const FGameplayTag& T
 
 void UMD_ScannerComponent::HandleHotbarChanged()
 {
-	if (!IsScannerEquipped()) StopQuestLocator();
 	UMD_ToolDefinition* Current = BoundHotbar.IsValid() ? BoundHotbar->GetCurrentTool() : nullptr;
 	if (Current != LastTool.Get())
 	{
@@ -319,7 +312,6 @@ void UMD_ScannerComponent::RefreshModeIndicator()
 
 void UMD_ScannerComponent::HandleControllerChanged(APawn*, AController*, AController*)
 {
-	StopQuestLocator();
 	ClearScan(false);
 	IssuedRequestId = 0;
 	AcceptedRequestId = 0;
@@ -331,8 +323,6 @@ void UMD_ScannerComponent::HandleControllerChanged(APawn*, AController*, AContro
 
 void UMD_ScannerComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
-	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(QuestLocatorTimer);
-	StopQuestLocator();
 	ClearScan(false);
 	if (ModeIndicator) ModeIndicator->RemoveFromParent();
 	ModeIndicator = nullptr;

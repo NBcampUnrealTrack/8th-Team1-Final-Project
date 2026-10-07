@@ -85,13 +85,6 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 
 	// ───── 해금 조건 (`07` §4). 아무것도 설정하지 않으면 "상점 상시". ─────
 
-	/** 예: 열선 헤라는 호감 ≥0, 고속 절단기는 호감 ≥+1 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Unlock")
-	bool bRequiresAffinity = false;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Unlock", meta = (EditCondition = "bRequiresAffinity", ClampMin = "-4.0", ClampMax = "5.0"))
-	float AffinityRequired = 0.f;
-
 
 	/** 예: 열선 배터리는 IT-H2(열선 헤라) 보유, 폼 카트리지는 IT-FG0(폼건) 보유 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Shop|Unlock", meta = (AllowedTypes = "Item"))
@@ -105,8 +98,8 @@ struct MARINEDEMOLITION_API FMD_ShopItem
 	// 카탈로그 재검색 없이 판매 및 선행 정의의 로드 상태 확인
 	bool IsDefinitionLoaded();
 
-	// 호감도와 선행 품목의 전체 AssetId 보유 이력으로 해금 판정
-	bool IsUnlocked(float Affinity, const TArray<FPrimaryAssetId>& OwnedItemAssetIds) const;
+	// 선행 품목의 전체 AssetId 보유 이력으로 해금 판정
+	bool IsUnlocked(const TArray<FPrimaryAssetId>& OwnedItemAssetIds) const;
 
 	// 공통 정의의 표시 이름을 사용한 해금 문구 생성 (예: 열선 헤라 보유)
 	FText GetUnlockConditionText() const;

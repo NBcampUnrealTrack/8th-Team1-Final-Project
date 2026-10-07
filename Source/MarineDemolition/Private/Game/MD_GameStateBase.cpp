@@ -1,4 +1,4 @@
-#include "Game/MD_GameStateBase.h"
+﻿#include "Game/MD_GameStateBase.h"
 #include "Game/MD_GameModeBase.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Component/Lore/MD_LoreComponent.h"
@@ -133,37 +133,33 @@ double AMD_GameStateBase::GetElapsedRealSeconds() const
 double AMD_GameStateBase::GetElapsedGameSeconds() const
 {
     const double TotalGameSeconds =(EndHour - StartHour) * 60 * 60;
-
-    if (RealDayDurationSeconds <= 0.0f)
+    // 잘못된 시간 배율에서 역행 또는 나눗셈 오류 방지
+    if (RealDayDurationSeconds <= 0.0 || TotalGameSeconds <= 0.0)
     {
         return 0.0;
     }
-
-    //Real: 1sec, InGame: 60sec
-    const double TimeScale =
-        TotalGameSeconds / RealDayDurationSeconds;
-
-    return FMath::Clamp(
-        GetElapsedRealSeconds() * TimeScale,
-        0.0,
-        TotalGameSeconds
-    );
+    // 작업 종료 시각으로 제한하지 않는 누적 인게임 경과 시간 반환
+    return GetElapsedRealSeconds() * TotalGameSeconds / RealDayDurationSeconds;
 }
 
 int32 AMD_GameStateBase::GetCurrentHour() const
 {
-    const int32 ElapsedMinutes =
-        FMath::FloorToInt(GetElapsedGameSeconds() / 60.0);
-
-    return StartHour + ElapsedMinutes / 60;
+    // 시각 계산에 사용할 누적 인게임 경과 초 조회
+    double ElapsedGameSeconds = GetElapsedGameSeconds();
+    // 장시간 정수 넘침을 방지하는 24시간 범위의 경과 초 계산
+    double DayCycleSeconds = FMath::Fmod(ElapsedGameSeconds, 86400.0);
+    // 시작 시각을 반영하여 자정부터 반복하는 현재 시 반환
+    return (StartHour + FMath::FloorToInt(DayCycleSeconds / 3600.0)) % 24;
 }
 
 int32 AMD_GameStateBase::GetCurrentMinute() const
 {
-    const int32 ElapsedMinutes =
-        FMath::FloorToInt(GetElapsedGameSeconds() / 60.0);
-
-    return ElapsedMinutes % 60;
+    // 분 계산에 사용할 누적 인게임 경과 초 조회
+    double ElapsedGameSeconds = GetElapsedGameSeconds();
+    // 현재 한 시간 안에서 흐른 초 단위 시간 계산
+    double HourCycleSeconds = FMath::Fmod(ElapsedGameSeconds, 3600.0);
+    // 누적 진행 시간과 무관하게 현재 시간대의 00~59분 반환
+    return FMath::FloorToInt(HourCycleSeconds / 60.0);
 }
 
 bool AMD_GameStateBase::HasReachedTime(
@@ -188,14 +184,8 @@ float AMD_GameStateBase::GetTimeOfDayHours() const
 
 float AMD_GameStateBase::GetDayCycleProgress() const
 {
-    const int32 DayLengthHours = EndHour - StartHour;
-    if (DayLengthHours <= 0)
-    {
-        return 0.f;
-    }
-
-    const float ElapsedHours = static_cast<float>(GetElapsedGameSeconds()) / 3600.f;
-    return FMath::Clamp(ElapsedHours / static_cast<float>(DayLengthHours), 0.f, 1.f);
+    // 18시에 고정되지 않는 자정 기준 24시간 주기 진행률 반환
+    return GetTimeOfDayHours() / 24.f;
 }
 
 // Withdrawal
@@ -616,12 +606,8 @@ bool AMD_GameStateBase::SetGameTimeHour(int32 Hour)
     {
         return false;
     }
-    // 설정 가능한 작업 시간 범위의 시작 시각 확인
-    if (Hour < StartHour)
-    {
-        return false;
-    }
-    if (Hour > EndHour)
+    // 야간을 포함하는 24시간 시계의 유효한 시각만 허용
+    if (Hour < 0 || Hour >= 24)
     {
         return false;
     }
@@ -636,8 +622,8 @@ bool AMD_GameStateBase::SetGameTimeHour(int32 Hour)
     {
         return false;
     }
-    // 지정한 시각을 작업 시작 이후의 인게임 경과 초로 환산
-    double TargetGameSeconds = static_cast<double>(Hour - StartHour) * 3600.0;
+    // 시작 시각보다 이른 새벽도 음수 없이 순환 주기의 경과 초로 환산
+    double TargetGameSeconds = static_cast<double>((Hour - StartHour + 24) % 24) * 3600.0;
     // 기존 시간 진행 속도에 맞춘 서버 시작 시각 역산
     PendingElapsedRealSeconds = TargetGameSeconds * RealDayDurationSeconds / TotalGameSeconds;
     GameStartServerTime = GetServerWorldTimeSeconds() - PendingElapsedRealSeconds;
