@@ -79,6 +79,12 @@ protected:
 	FGameplayTag ClickSoundTag;
 
 public:
+	// 공통 버튼에 바인딩된 이미지 위젯 참조 반환
+	FORCEINLINE UImage* GetContentImageWidget() { return Img_ButtonImage; }
+
+	// 공통 버튼에 바인딩된 텍스트 위젯 참조 반환
+	FORCEINLINE UTextBlock* GetContentTextWidget() { return Txt_ButtonText; }
+
 	// 버튼 TextBlock에 표시된 Content를 반환한다.
 	UFUNCTION(BlueprintPure, Category = "MD|UI")
 	FORCEINLINE FText GetContentText() { return Text_ButtonText; }
