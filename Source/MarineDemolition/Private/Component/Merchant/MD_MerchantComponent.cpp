@@ -21,6 +21,7 @@ void UMD_MerchantComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	// 상인 상태는 팀 공유 데이터라 전원에게 보낸다.
 	DOREPLIFETIME(UMD_MerchantComponent, Credits);
 	DOREPLIFETIME(UMD_MerchantComponent, DebtBalance);
+	DOREPLIFETIME(UMD_MerchantComponent, LoanPrincipal);
 	DOREPLIFETIME(UMD_MerchantComponent, OwnedItemIds);
 }
 
@@ -78,6 +79,7 @@ void UMD_MerchantComponent::RefreshFromSubsystem()
 
 	Credits = Merchant->GetCredits();
 	DebtBalance = Merchant->GetDebtBalance();
+	LoanPrincipal = Merchant->GetLoanPrincipal();
 	OwnedItemIds = Merchant->GetOwnedItemIds();
     // 팀 원장을 소유한 GameState 확인
     AMD_GameStateBase* GameState = Cast<AMD_GameStateBase>(GetOwner());
@@ -108,8 +110,10 @@ FMD_MerchantMenuInfo UMD_MerchantComponent::BuildMenuInfo() const
 
 	// 클라이언트에 표시할 현재 미상환 잔액 반영
 	Info.DebtBalance = DebtBalance;
+	// 클라이언트가 서버와 같은 고정 이자를 계산하도록 기준 원금 전달
+	Info.LoanPrincipal = LoanPrincipal;
 	// 서버와 동일한 기본 대출 한도를 클라이언트 UI에 적용
 	Info.LoanLimit = UMD_MerchantSubsystem::CalculateLoanLimit();
-	Info.DailyInterestRate = 0.05f;
+	Info.DailyInterestRate = UMD_MerchantSubsystem::LoanInterestRate;
 	return Info;
 }

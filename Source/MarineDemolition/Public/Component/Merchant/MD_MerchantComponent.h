@@ -47,6 +47,10 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	int32 GetDebtBalance() const { return DebtBalance; }
 
+	// 서버 원장에서 복제된 고정 이자 기준 원금을 반환하는 함수
+	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
+	int32 GetLoanPrincipal() const { return LoanPrincipal; }
+
 
 
 	// 클라이언트에 복제된 전체 구매 식별자 목록 제공
@@ -68,6 +72,10 @@ private:
 	// 모든 클라이언트가 같은 대출 잔액과 상환 가능 상태를 표시하기 위한 복제 값
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
 	int32 DebtBalance = 0;
+
+	// 클라이언트 대출 UI가 서버와 같은 고정 이자를 계산하기 위한 복제 원금
+	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
+	int32 LoanPrincipal = 0;
 
 
 

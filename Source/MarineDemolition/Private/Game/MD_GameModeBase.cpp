@@ -713,9 +713,10 @@ void AMD_GameModeBase::StartLoanInterestTimer()
         // 현재 현장의 최초 예약 유지
         return;
     }
-    // 초기화 대기 시간도 맵 진입 이후 경과 시간에 포함
-    GetWorldTimerManager().SetTimer(LoanInterestTimerHandle, this, &ThisClass::CheckGameTimeEvents, 180.f, true,
-        FMath::Max(600.f - World->GetTimeSeconds(), KINDA_SMALL_NUMBER));
+    // 초기화 대기 시간도 맵 진입 이후 경과 시간에 포함. 첫 징수 9분, 이후 3분 주기
+    GetWorldTimerManager().SetTimer(LoanInterestTimerHandle, this, &ThisClass::CheckGameTimeEvents,
+        FMath::Max(LoanInterestIntervalSeconds, KINDA_SMALL_NUMBER), true,
+        FMath::Max(LoanFirstInterestDelaySeconds - World->GetTimeSeconds(), KINDA_SMALL_NUMBER));
 }
 
 void AMD_GameModeBase::CheckGameTimeEvents()

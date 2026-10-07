@@ -51,12 +51,16 @@ struct FMD_MerchantMenuInfo
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Loan")
 	int32 DebtBalance = 0;
 
+	/** 고정 이자의 기준 원금 (착수금 + 추가 대출, 이자 제외) */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Loan")
+	int32 LoanPrincipal = 0;
+
 	// 기본 대출 한도 800이며 원장 갱신 시 서버 공통 기준 반영
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Loan")
 	int32 LoanLimit = 800;
 
-	/** 일 이자율. 0.05 = 5% (`07` §5) */
+	/** 주기 고정 이자율. 0.02 = 원금의 2% (대출·경제 회의 계산기) */
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Loan")
-	float DailyInterestRate = 0.05f;
+	float DailyInterestRate = 0.02f;
 
 };

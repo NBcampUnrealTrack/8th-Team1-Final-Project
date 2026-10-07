@@ -263,6 +263,8 @@ bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount)
 	// 대출 수령액을 기타 정산 분류로 기록
 	AddCreditsInternal(EMD_DailyReportCategory::Other, Amount);
 	DebtBalance += Amount;
+	// 추가 대출은 고정 이자의 기준 원금에 합산
+	LoanPrincipal = FMath::Min(LoanPrincipal, MAX_int32 - Amount) + Amount;
 
 	OnMerchantStateChanged.Broadcast();
 
@@ -281,27 +283,33 @@ bool UMD_MerchantSubsystem::TryRepayLoan(int32 Amount)
 	// 대출 상환액을 기타 정산 분류로 기록
 	AddCreditsInternal(EMD_DailyReportCategory::Other, -Amount);
 	DebtBalance -= Amount;
+	// 완납 시 이자 종료. 다음 대출은 새 원금으로 시작
+	if (DebtBalance <= 0)
+	{
+		LoanPrincipal = 0;
+	}
 	OnMerchantStateChanged.Broadcast();
 
 	return true;
 }
 
-int32 UMD_MerchantSubsystem::CalculateLoanInterest(int32 InDebtBalance)
+int32 UMD_MerchantSubsystem::CalculateLoanInterest(int32 InDebtBalance, int32 InLoanPrincipal)
 {
 	// 상환 완료 또는 원장 상한 도달 시 추가 이자 없음
-	if (InDebtBalance <= 0 || InDebtBalance == MAX_int32)
+	if (InDebtBalance <= 0 || InDebtBalance == MAX_int32 || InLoanPrincipal <= 0)
 	{
 		// 증가 가능한 부채가 없는 경우의 부과액
 		return 0;
 	}
-	// 정수 나눗셈으로 5% 소수점 절삭 및 기존 최소 1크레딧과 원장 상한 보장
-	return FMath::Clamp(InDebtBalance / 20, 1, MAX_int32 - InDebtBalance);
+	// 원금의 2%를 올림한 고정 이자. 잔액이 줄어도 금액은 유지되며 원장 상한 안에서 최소 1크레딧 보장
+	int32 FixedInterest = FMath::CeilToInt32(static_cast<double>(InLoanPrincipal) * LoanInterestRate);
+	return FMath::Clamp(FixedInterest, 1, MAX_int32 - InDebtBalance);
 }
 
 int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 {
-	// 대출 UI와 동일한 현재 부채의 실제 부과액 계산
-	int32 InterestAmount = CalculateLoanInterest(DebtBalance);
+	// 대출 UI와 동일한 현재 원금 기준의 실제 부과액 계산
+	int32 InterestAmount = CalculateLoanInterest(DebtBalance, LoanPrincipal);
 	// 변화가 없는 부채의 불필요한 복제 알림 생략
 	if (InterestAmount <= 0)
 	{
@@ -399,6 +407,7 @@ void UMD_MerchantSubsystem::ResetContract()
 	Credits = 0;
 	DailyCreditTotals.Reset();
 	DebtBalance = 0;
+	LoanPrincipal = 0;
 	CurrentSite = nullptr;
 	ClearedSites.Reset();
 	bConsumableDiscountActive = true;
@@ -435,5 +444,7 @@ void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 BaseAd
 	AddCreditsInternal(EMD_DailyReportCategory::Retainer, GrantedAdvancePayment);
 	// 착수금은 대출이므로 실제 수령액을 기존 미상환 부채에 합산
 	DebtBalance += GrantedAdvancePayment;
+	// 착수금은 고정 이자의 기준 원금에도 합산
+	LoanPrincipal = FMath::Min(LoanPrincipal, MAX_int32 - GrantedAdvancePayment) + GrantedAdvancePayment;
 	OnMerchantStateChanged.Broadcast();
 }

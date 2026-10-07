@@ -50,8 +50,16 @@ protected:
     // 현장 맵을 떠나거나 정산할 때 해제할 대출 이자 예약
     FTimerHandle LoanInterestTimerHandle;
 
-    // 현장 진입 10분 뒤부터 3분 간격으로 서버 이자 계산 예약
+    // 현장 진입 9분 뒤 첫 징수, 이후 3분 간격으로 서버 이자 계산 예약 (6분 유예 + 3분)
     void StartLoanInterestTimer();
+
+    // 맵 진입 기준 첫 이자 징수 시각(초). 대출·경제 회의 계산기: 6분 유예 후 9분에 첫 징수
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+    float LoanFirstInterestDelaySeconds = 540.f;
+
+    // 첫 징수 이후 이자 징수 주기(초)
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+    float LoanInterestIntervalSeconds = 180.f;
 
     // 현재 미상환 잔액에 주기 이자를 적용하는 서버 콜백
     void CheckGameTimeEvents();
@@ -146,9 +154,9 @@ private:
     UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
     TObjectPtr<UMD_SiteDefinition> ExpeditionSite;
 
-    /** 표준 난이도 착수금 (`07` §2.1). 계약 최초 1회만 지급된다. */
+    /** 착수금 대출. 계약 최초 1회 지급되며 같은 금액이 부채에 가산된다 (V2 기획: 초기 도구 4종 가격 합 1,300) */
     UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
-    int32 ExpeditionAdvancePayment = 500;
+    int32 ExpeditionAdvancePayment = 1300;
 
     // 테스트용 콘솔 커맨드: 정식 마감 경로(RequestEndDay) 즉시 호출
     UFUNCTION(Exec)
