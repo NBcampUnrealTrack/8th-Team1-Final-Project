@@ -20,5 +20,7 @@ private:
 
 	UPROPERTY(Transient)
 	TObjectPtr<UClass> DoorClass;
+	UPROPERTY(Transient)
+	TObjectPtr<UClass> BlackDoorClass;
 	FDelegateHandle ActorSpawnedHandle;
 };

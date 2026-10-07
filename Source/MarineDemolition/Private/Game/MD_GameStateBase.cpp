@@ -2,6 +2,7 @@
 #include "Game/MD_GameModeBase.h"
 #include "Data/Merchant/MD_SiteDefinition.h"
 #include "Component/Lore/MD_LoreComponent.h"
+#include "Component/Facility/MD_FacilityFaultManagerComponent.h"
 #include "Data/Score/MD_ScoreTableData.h"
 #include "GameFramework/PlayerState.h"
 #include "Net/UnrealNetwork.h"
@@ -16,6 +17,7 @@ AMD_GameStateBase::AMD_GameStateBase()
 
     LoreComponent = CreateDefaultSubobject<UMD_LoreComponent>(TEXT("LoreComponent"));
     MerchantComponent = CreateDefaultSubobject<UMD_MerchantComponent>(TEXT("MerchantComponent"));
+    FacilityFaultManager = CreateDefaultSubobject<UMD_FacilityFaultManagerComponent>(TEXT("FacilityFaultManager"));
 }
 
 void AMD_GameStateBase::AddPlayerState(APlayerState* PlayerState)

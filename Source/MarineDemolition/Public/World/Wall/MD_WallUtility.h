@@ -5,11 +5,14 @@
 #include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTagAssetInterface.h"
 #include "Gameplay/Scanning/MD_ScanTypes.h"
+#include "Types/Facility/MD_FacilityTypes.h"
 #include "MD_WallUtility.generated.h"
 
 class UBoxComponent;
 class UStaticMeshComponent;
 class AMD_CuttableWall;
+class UMD_FacilityFaultComponent;
+class UMD_FacilityRepairComponent;
 
 UENUM(BlueprintType)
 enum class EMD_UtilityState : uint8
@@ -30,6 +33,8 @@ class MARINEDEMOLITION_API AMD_WallUtility : public AActor, public IMD_Interacta
 
 public:
 	AMD_WallUtility();
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Facility")
+	TObjectPtr<UMD_FacilityRepairComponent> FacilityRepair;
 
 	void StopScanFor(AActor* Scanner);
 
@@ -206,6 +211,8 @@ protected:
 	void UnlockLinkedGate();
 
 private:
+	UFUNCTION()
+	void HandleFacilityState(UMD_FacilityFaultComponent* Facility, const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current);
 	// LinkTrigger와 겹치는 CuttableWall을 찾아 철거 델리게이트 구독 (서버)
 	void LinkOverlappingWalls();
 

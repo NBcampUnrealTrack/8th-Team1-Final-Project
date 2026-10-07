@@ -2,16 +2,14 @@
 
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
+#include "Types/Facility/MD_FacilityTypes.h"
 #include "MD_DoorStatusLightComponent.generated.h"
 
+class UMD_FacilityFaultComponent;
 class UMaterialInstanceDynamic;
 class UStaticMeshComponent;
 
-/**
- * BP_Door의 잠금 상태를 디스플레이 점멸로 표시한다.
- * bLocked가 true인 동안 1초 간격으로 빨강/검정을 반복하고,
- * 잠금이 풀리면 원래 EmissiveColor로 복원한다.
- */
+/** Actual facility faults blink red/black; ordinary quest locks keep the normal color. */
 UCLASS(ClassGroup=(MarineDemolition), meta=(BlueprintSpawnableComponent))
 class MARINEDEMOLITION_API UMD_DoorStatusLightComponent : public UActorComponent
 {
@@ -37,10 +35,6 @@ private:
 	UPROPERTY(EditAnywhere, Category="MD|Door|Status Light")
 	FName EmissiveColorParameterName = TEXT("EmissiveColor");
 
-	/** 소유 BP_Door의 잠금/고장 상태 변수 이름 */
-	UPROPERTY(EditAnywhere, Category="MD|Door|Status Light")
-	FName LockedPropertyName = TEXT("bLocked");
-
 	/** 고장 상태에서 켜지는 색 */
 	UPROPERTY(EditAnywhere, Category="MD|Door|Status Light")
 	FLinearColor FaultColor = FLinearColor::Red;
@@ -59,9 +53,12 @@ private:
 	FTimerHandle BlinkTimerHandle;
 	bool bFaultLightOn = false;
 	bool bWasLocked = false;
+	TWeakObjectPtr<UMD_FacilityFaultComponent> BoundFault;
 
 	bool InitializeDisplayMaterial();
-	bool IsDoorLocked() const;
+	bool IsDoorFaultActive() const;
+	UFUNCTION()
+	void HandleFaultChanged(UMD_FacilityFaultComponent* Facility, const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current);
 	void RefreshBlinkState();
 	void ApplyEmissiveColor(const FLinearColor& Color);
 	void RestoreNormalColor();

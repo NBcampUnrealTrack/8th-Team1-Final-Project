@@ -5,6 +5,7 @@
 #include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "World/Trash/MD_TrashSorterAnimationComponent.h"
+#include "Types/Facility/MD_FacilityTypes.h"
 #include "MD_TrashSorter.generated.h"
 
 class UBoxComponent;
@@ -13,6 +14,8 @@ class UStaticMeshComponent;
 class UStateTreeComponent;
 class AMD_GameStateBase;
 class UMD_MerchantSubsystem;
+class UMD_FacilityFaultComponent;
+class UMD_FacilityRepairComponent;
 struct FMD_TrashSortResult;
 
 /** Keep the animation result and timing together when replicating to clients. */
@@ -57,6 +60,8 @@ class MARINEDEMOLITION_API AMD_TrashSorter
 
 public:
 	AMD_TrashSorter();
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Facility")
+	TObjectPtr<UMD_FacilityRepairComponent> FacilityRepair;
 
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
@@ -168,7 +173,7 @@ protected:
 	FText SortActionText;
 
 	/** 담당 칸. 드롭다운에 Bonus.* 도 뜨지만 그건 칸이 아니다 — BeginPlay에서 걸러 경고한다 */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash",
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_AcceptedCategory, Category = "MD|Trash",
 		meta = (Categories = "Score.Sorting"))
 	FGameplayTag AcceptedCategory;
 
@@ -193,6 +198,10 @@ protected:
 	TObjectPtr<UMaterialInstanceDynamic> SorterMID;
 
 private:
+	UFUNCTION()
+	void OnRep_AcceptedCategory();
+	UFUNCTION()
+	void HandleFacilityState(UMD_FacilityFaultComponent* Facility, const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current);
 	/** 액터는 서버에서 파괴되므로 위치를 실어 보낸다 */
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastItemSwallowed(bool bCorrectSort, FVector Location);

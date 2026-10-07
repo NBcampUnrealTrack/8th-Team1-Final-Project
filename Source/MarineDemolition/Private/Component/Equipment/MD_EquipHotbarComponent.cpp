@@ -10,6 +10,7 @@
 #include "Net/UnrealNetwork.h"
 #include "Util/MD_LogUtility.h"
 #include "Types/Session/MD_PlayerCarryTypes.h"
+#include "Component/Interaction/MD_InteractionComponent.h"
 
 namespace
 {
@@ -1194,6 +1195,8 @@ void UMD_EquipHotbarComponent::InitializeItemAbilities()
 
 bool UMD_EquipHotbarComponent::TryActivateCurrentItemAbility()
 {
+	if (UMD_InteractionComponent* Interaction = GetOwner()->FindComponentByClass<UMD_InteractionComponent>();
+		Interaction && Interaction->TryUseFacilityTape()) return true;
 	// 실제 선택 품목의 SourceObject와 태그에 해당하는 부여 GA 조회
 	FGameplayAbilitySpecHandle Handle = FindItemAbility(GetCurrentItem());
 	// 클라이언트 입력의 서버 활성화 요청을 지원하는 ASC 조회

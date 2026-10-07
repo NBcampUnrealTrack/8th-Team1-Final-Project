@@ -59,6 +59,8 @@ public:
 	/** 소유 폰이 지금 상호작용할 수 있는 상태인지 (차단·사망·빙의 해제 검사). 홀드 대상이 서버 틱에서 유지 조건으로 쓴다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	bool CanOwnerInteract() const;
+	/** LMB consumable input; requests repair via this owned component, not the unowned facility. */
+	bool TryUseFacilityTape();
 
 	/** Releases the held actor on the server. Client calls are intentionally ignored. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
@@ -180,6 +182,10 @@ private:
 	/** 홀드 대상의 키 해제를 서버에 전달한다. 해제는 항상 안전하므로 조준·간격 검증 없이 대상에 그대로 넘긴다. */
 	UFUNCTION(Server, Reliable)
 	void ServerInteractReleased(AActor* RequestedActor);
+	UFUNCTION(Server, Reliable)
+	void ServerRepairFacilityWithTape(AActor* Target, int32 ExpectedFaultId);
+	UFUNCTION(Server, Reliable)
+	void ServerBeginFacilityRepair(AActor* Target, int32 ExpectedFaultId);
 
 	bool TryHoldTarget(AActor* Target);
 	bool TryGrabPhysicsComponent(UPrimitiveComponent* Component, const FVector& PreferredGrabLocation,

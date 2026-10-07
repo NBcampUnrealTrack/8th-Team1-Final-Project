@@ -8,6 +8,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "Components/SceneComponent.h"
 #include "Data/Equipment/MD_ConsumeItemDefinition.h"
+#include "Component/Facility/MD_FacilityRepairComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "World/Wall/MD_PowerConduit.h"
 #include "Engine/World.h"
@@ -86,6 +87,11 @@ FText UMD_InteractionComponent::ResolveCurrentInteractionPrompt() const
 	}
 
 	AActor* Target = CurrentTarget.Get();
+	if (IsValid(Target))
+	{
+		const UMD_FacilityRepairComponent* Repair = Target->FindComponentByClass<UMD_FacilityRepairComponent>();
+		if (Repair && Repair->HasRepairFault()) return Repair->GetRepairPrompt();
+	}
 	if (!IsValid(Target) || !Target->Implements<UMD_Interactable>())
 	{
 		return FText::GetEmpty();
@@ -151,6 +157,10 @@ FText UMD_InteractionComponent::ResolveAbilityInteractionPrompt() const
 		}
 
 		const AMD_PowerConduit* Conduit = Cast<AMD_PowerConduit>(Hit.GetActor());
+		const UMD_FacilityRepairComponent* Repair = IsValid(Hit.GetActor())
+			? Hit.GetActor()->FindComponentByClass<UMD_FacilityRepairComponent>() : nullptr;
+		if (Repair && Repair->bAllowInsulationTape && Repair->CanReachForRepair(OwnerPawn))
+			return NSLOCTEXT("MDInteraction", "FacilityTapeRepair", "[LMB] 수리 (절연테이프 1개)");
 		return IsValid(Conduit) && Conduit->CanRepairWithToolInput(GetOwnerPawn())
 			? NSLOCTEXT("MDInteraction", "InsulationRepairAction", "고장난 전선\n[LMB] 수리 (절연테이프 1개)")
 			: FText::GetEmpty();
@@ -325,6 +335,16 @@ void UMD_InteractionComponent::Interact()
 
 	// 이전 홀드가 해제 없이 남아 있으면 새 입력 전에 정리한다.
 	HoldInteractionTarget.Reset();
+	if (IsValid(Target))
+	{
+		UMD_FacilityRepairComponent* Repair = Target->FindComponentByClass<UMD_FacilityRepairComponent>();
+		if (Repair && Repair->HasRepairFault() && !IsHolding())
+		{
+			if (Repair->bAllowManualRepair) HoldInteractionTarget = Target;
+			ServerBeginFacilityRepair(Target, Repair->GetRepairSnapshot().FaultId);
+			return;
+		}
+	}
 
 	// New interactables are server-authoritative by default. UI-only targets must explicitly opt out.
 	if (IsValid(Target) && Target->Implements<UMD_Interactable>())
@@ -360,6 +380,11 @@ void UMD_InteractionComponent::InteractReleased()
 	HoldInteractionTarget.Reset();
 
 	APawn* OwnerPawn = GetOwnerPawn();
+	if (IsValid(OwnerPawn) && IsValid(Target) && Target->FindComponentByClass<UMD_FacilityRepairComponent>())
+	{
+		ServerInteractReleased(Target);
+		return;
+	}
 	if (!IsValid(OwnerPawn) || !IsValid(Target) || !Target->Implements<UMD_Interactable>())
 	{
 		return;
@@ -379,6 +404,14 @@ void UMD_InteractionComponent::ServerInteractReleased_Implementation(AActor* Req
 {
 	APawn* OwnerPawn = GetOwnerPawn();
 	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()) return;
+	if (IsValid(RequestedActor))
+	{
+		if (UMD_FacilityRepairComponent* Repair = RequestedActor->FindComponentByClass<UMD_FacilityRepairComponent>())
+		{
+			Repair->StopManualRepair(OwnerPawn);
+			return;
+		}
+	}
 
 	// 해제는 진행 중인 홀드를 멈출 뿐이라 조준·거리·간격 검증 없이 대상에 넘긴다. 대상이 자기 홀더인지 확인한다.
 	if (!IsValid(RequestedActor) || !RequestedActor->Implements<UMD_Interactable>()
@@ -392,6 +425,7 @@ void UMD_InteractionComponent::ServerInteractReleased_Implementation(AActor* Req
 
 void UMD_InteractionComponent::CancelInteraction()
 {
+	InteractReleased();
 	// 키 해제를 못 받는 상황(사망·이동)에서도 홀드 대상은 서버 틱의 CanOwnerInteract 검사로 스스로 멈춘다.
 	HoldInteractionTarget.Reset();
 	SetCurrentTarget(nullptr);
@@ -459,6 +493,15 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 
 	bHasServerInteractionTimestamp = true;
 	LastServerInteractionTimeSeconds = ServerTimeSeconds;
+	if (IsValid(RequestedActor))
+	{
+		if (UMD_FacilityRepairComponent* Repair = RequestedActor->FindComponentByClass<UMD_FacilityRepairComponent>();
+			Repair && Repair->HasRepairFault())
+		{
+			// Fault repair requests use a separate incident-ID-validated RPC.
+			return;
+		}
+	}
 
 	if (!IsValid(RequestedActor) || !RequestedActor->Implements<UMD_Interactable>())
 	{
@@ -1111,6 +1154,12 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 		HitActor = Hit.GetComponent()->GetOwner();
 	}
 
+	if (IsValid(HitActor))
+	{
+		const UMD_FacilityRepairComponent* Repair = HitActor->FindComponentByClass<UMD_FacilityRepairComponent>();
+		if (Repair && Repair->HasRepairFault()
+			&& (!IsHolding() || HitActor->IsA<AMD_TrashSorter>())) return HitActor;
+	}
 	if (!IsValid(HitActor) || !HitActor->Implements<UMD_Interactable>())
 	{
 		return nullptr;
@@ -1228,6 +1277,41 @@ bool UMD_InteractionComponent::ValidateInteractionTarget(AActor* RequestedActor)
 	}
 
 	return true;
+}
+
+bool UMD_InteractionComponent::TryUseFacilityTape()
+{
+	APawn* Pawn = GetOwnerPawn();
+	UMD_EquipHotbarComponent* Hotbar = IsValid(Pawn) ? Pawn->FindComponentByClass<UMD_EquipHotbarComponent>() : nullptr;
+	const UMD_ConsumeItemDefinition* Tape = Hotbar ? Cast<UMD_ConsumeItemDefinition>(Hotbar->GetCurrentItem()) : nullptr;
+	if (!CanOwnerInteract() || IsHolding() || !Tape
+		|| !Tape->UseAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Insulation)) return false;
+	FVector Origin;
+	FRotator Rotation;
+	Pawn->GetController()->GetPlayerViewPoint(Origin, Rotation);
+	FHitResult Hit;
+	// Match the server repair reach check; coarse wall hulls must not hide mounted panels.
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(FacilityTapeInput), true, Pawn);
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, Origin, Origin + Rotation.Vector() * AbilityPromptTraceDistance, ECC_Visibility, Params)) return false;
+	UMD_FacilityRepairComponent* Repair = IsValid(Hit.GetActor()) ? Hit.GetActor()->FindComponentByClass<UMD_FacilityRepairComponent>() : nullptr;
+	if (!Repair || !Repair->bAllowInsulationTape || !Repair->HasRepairFault()) return false;
+	ServerRepairFacilityWithTape(Hit.GetActor(), Repair->GetRepairSnapshot().FaultId);
+	return true;
+}
+
+void UMD_InteractionComponent::ServerRepairFacilityWithTape_Implementation(AActor* Target, int32 ExpectedFaultId)
+{
+	if (!IsValid(Target) || !IsValid(GetOwnerPawn()) || !GetOwnerPawn()->HasAuthority()) return;
+	if (UMD_FacilityRepairComponent* Repair = Target->FindComponentByClass<UMD_FacilityRepairComponent>())
+		Repair->TryRepairWithTape(GetOwnerPawn(), ExpectedFaultId);
+}
+
+void UMD_InteractionComponent::ServerBeginFacilityRepair_Implementation(AActor* Target, int32 ExpectedFaultId)
+{
+	if (!IsValid(Target) || !IsValid(GetOwnerPawn()) || !GetOwnerPawn()->HasAuthority()) return;
+	if (UMD_FacilityRepairComponent* Repair = Target->FindComponentByClass<UMD_FacilityRepairComponent>();
+		Repair && Repair->GetRepairSnapshot().FaultId == ExpectedFaultId)
+		Repair->BeginManualRepair(GetOwnerPawn());
 }
 
 void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)

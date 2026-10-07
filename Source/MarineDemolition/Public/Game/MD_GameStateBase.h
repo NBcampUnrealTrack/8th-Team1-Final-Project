@@ -10,6 +10,7 @@
 class UMD_ScoreTableData;
 class UMD_MerchantComponent;
 class UMD_LoreComponent;
+class UMD_FacilityFaultManagerComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnScoreChanged, int32, NewScore);
 // 접속 플레이어 구성 또는 표시 이름 변경을 활성 UI에 전달하는 네이티브 이벤트 선언
@@ -24,6 +25,9 @@ class MARINEDEMOLITION_API AMD_GameStateBase : public AGameStateBase
 
 public:
     AMD_GameStateBase();
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Facility")
+    TObjectPtr<UMD_FacilityFaultManagerComponent> FacilityFaultManager;
 
     virtual void AddPlayerState(APlayerState* PlayerState) override;
 

@@ -1,6 +1,7 @@
 #include "World/Wall/MD_WallUtility.h"
 
 #include "Character/MD_Character.h"
+#include "Component/Facility/MD_FacilityRepairComponent.h"
 #include "Component/Scanning/MD_ScannerComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Components/BoxComponent.h"
@@ -16,6 +17,8 @@ AMD_WallUtility::AMD_WallUtility()
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	SetReplicateMovement(false);
+	FacilityRepair = CreateDefaultSubobject<UMD_FacilityRepairComponent>(TEXT("FacilityRepair"));
+	FacilityRepair->Kind = EMD_FacilityKind::LegacyUtility;
 
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
 	SetRootComponent(Root);
@@ -63,6 +66,8 @@ void AMD_WallUtility::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 void AMD_WallUtility::BeginPlay()
 {
 	Super::BeginPlay();
+	FacilityRepair->OnStateChanged.AddUniqueDynamic(this, &ThisClass::HandleFacilityState);
+	HandleFacilityState(FacilityRepair, FMD_FacilitySnapshot(), FacilityRepair->GetSnapshot());
 
 	// 모든 머신에서 링크한다. 컷 델리게이트는 서버에서만 방송되어 클라 구독은 무해하고,
 	// 스캔 실루엣은 스캔한 클라 로컬에서 떠야 하므로 클라 파이프도 구독해야 한다.
@@ -280,6 +285,7 @@ void AMD_WallUtility::SetBroken(AActor* Cutter)
 	UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s SetBroken -> Broken"), *GetName());
 
 	UtilityState = EMD_UtilityState::Broken;
+	FacilityRepair->TryBreak();
 
 	OnBroken(Cutter);
 
@@ -317,6 +323,7 @@ void AMD_WallUtility::SetRepaired(AActor* Repairer)
 	}
 
 	UtilityState = EMD_UtilityState::Repaired;
+	FacilityRepair->CompleteRepairFromValidatedSource(FacilityRepair->GetSnapshot().FaultId);
 	UE_LOG(LogTemp, Display, TEXT("[MD_Utility] %s SetRepaired: UtilityState=Repaired, Repairer=%s"),
 		*GetName(), *GetNameSafe(Repairer));
 
@@ -335,6 +342,8 @@ void AMD_WallUtility::UnlockLinkedGate()
 	{
 		return;
 	}
+	if (const UMD_FacilityFaultComponent* GateFault = GateActor->FindComponentByClass<UMD_FacilityFaultComponent>();
+		GateFault && GateFault->IsFaultActive()) return;
 
 	// BP_Door의 bLocked 변수를 FBoolProperty로 직접 접근해 false 세팅
 	FBoolProperty* LockedProp = CastField<FBoolProperty>(
@@ -352,6 +361,25 @@ void AMD_WallUtility::UnlockLinkedGate()
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s UnlockLinkedGate: %s has no bLocked property"),
 			*GetName(), *GateActor->GetName());
+	}
+}
+
+void AMD_WallUtility::HandleFacilityState(UMD_FacilityFaultComponent* Facility,
+	const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current)
+{
+	if (!HasAuthority()) return;
+	if (Current.IsFaultActive() && UtilityState != EMD_UtilityState::Broken)
+	{
+		const FTransform Transform = GetActorTransform();
+		BreakLocation = StartBreakLocalOffset.IsNearlyZero()
+			? (IsValid(Mesh) ? Mesh->Bounds.Origin : GetActorLocation())
+			: Transform.TransformPosition(StartBreakLocalOffset);
+		BreakNormal = Transform.TransformVectorNoScale(StartBreakLocalNormal).GetSafeNormal();
+		SetBroken(nullptr);
+	}
+	else if (Current.State == EMD_FacilityState::Repaired && UtilityState == EMD_UtilityState::Broken)
+	{
+		SetRepaired(Previous.Repairer);
 	}
 }
 
