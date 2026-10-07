@@ -317,12 +317,11 @@ TSoftObjectPtr<UWorld> AMD_GameModeBase::MakeWorldAssetReference(UWorld* World) 
 
 void AMD_GameModeBase::HandleContractCleared()
 {
-    // 클리어 이력 등록 후 같은 현장 재진입을 새 계약으로 판정하기 위한 기존 계약 종료
+    // 다음 출항을 새 계약으로 판정하기 위한 기존 계약 종료
     UGameInstance* GameInstance = GetGameInstance();
     UMD_MerchantSubsystem* Merchant = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_MerchantSubsystem>() : nullptr;
     if (IsValid(Merchant) == true)
     {
-        Merchant->MarkSiteCleared();
         Merchant->FinalizeContract();
     }
 

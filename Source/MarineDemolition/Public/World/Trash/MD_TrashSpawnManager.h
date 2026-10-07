@@ -11,7 +11,7 @@ class AMD_TrashItem;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnTotalTrashCountChanged, int32, RemainingCount);
 
-/** Server-side collection and save boundary for the map's procedural trash generators. */
+/** Server-side collection of the map's procedural trash generators. */
 UCLASS(Config = Game)
 class MARINEDEMOLITION_API UMD_TrashSpawnManager : public UWorldSubsystem
 {
@@ -27,23 +27,15 @@ public:
         TArray<float>& Radii, float& MinimumSpacing) const;
 	void RegisterGenerator(AMD_TrashSpawnVolume* Generator);
 	void UnregisterGenerator(AMD_TrashSpawnVolume* Generator);
-	/** Loading pumps this before applying file/day saves; false means failed, !ready means pending. */
+	/** 월드 초기화가 매 틱 호출; false는 실패, !ready는 준비 대기 */
 	bool PrepareGenerators(bool& bReady);
 	void RequestInitialization();
 
-	/** Called after file and day state have been restored, before the initial auto-save. */
+	/** 준비가 끝난 뒤 아직 초기화되지 않은 생성기에 첫 배치를 실행 */
 	bool InitializeUnrestoredGenerators();
 
-	bool CaptureStates(TArray<FMD_TrashGeneratorState>& OutStates) const;
-	bool CanRestoreStates(const TArray<FMD_TrashGeneratorState>& States) const;
-	/** Reserve only obsolete authored trash while the actor snapshot is applied. */
-	bool PrepareRestoreStates(const TArray<FMD_TrashGeneratorState>& States);
-	bool ReserveAuthoredTrashForRestore(AMD_TrashItem* Item);
-	void CancelPreparedRestore() { ReservedTrash.Reset(); bReserveAuthoredTrash = false; }
-    bool RestoreStates(const TArray<FMD_TrashGeneratorState>& States);
-	/** Called before save restoration; captures immutable authored identity and source positions. */
+	/** AutoFloorMaps 맵에서 배치된 쓰레기를 바닥 생성기로 전환하기 위한 원본 위치 수집 */
 	bool EnableAuthoredFloorTransition();
-	bool IsTransitionGenerator(const AMD_TrashSpawnVolume* Generator) const;
 
 	UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
 	int32 GetGeneratorCount() const;
@@ -59,11 +51,7 @@ private:
 	TArray<FName> AutoFloorMaps;
 	TWeakObjectPtr<AMD_TrashFloorGenerator> TransitionGenerator;
 	TMap<FName, FVector> AuthoredPositions;
-	bool bMigrateRestoredActors = false;
-	bool bReserveAuthoredTrash = false;
-	TArray<TWeakObjectPtr<AMD_TrashItem>> ReservedTrash;
-	bool NormalizeStates(const TArray<FMD_TrashGeneratorState>& Input, TArray<FMD_TrashGeneratorState>& Out) const;
-	bool ConvertAuthoredTrash(bool bPreserveCells);
+	bool ConvertAuthoredTrash();
 	void FlushCountChanged();
 	void InitializeWhenReady();
 

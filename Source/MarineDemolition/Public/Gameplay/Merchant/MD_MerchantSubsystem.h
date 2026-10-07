@@ -109,20 +109,6 @@ public:
 	// 새 현장 계약 시작. 크레딧 원장을 초기화하고 착수금을 지급(착수금은 부채에 가산)
 	void BeginContract(UMD_SiteDefinition* Site, int32 BaseAdvancePayment = 0);
 
-	// 게임오버 시 전체 리셋
-	void ResetContract();
-
-	// 소모품 할인 활성 여부 (경고 시 해제). 상점에서 조회
-	void SetConsumableDiscountActive(bool bActive) { bConsumableDiscountActive = bActive; }
-	bool IsConsumableDiscountActive() const { return bConsumableDiscountActive; }
-
-
-	/** 현재 계약 현장이 과거에 클리어된 적 있는지 저장 이력에서 확인하는 함수 */
-	bool HasClearedCurrentSite() const;
-
-	/** 계약 클리어 시 호출하여 현장 완료 이력을 남기는 함수 */
-	void MarkSiteCleared();
-
 
 	/** 계약 종료 시 활성 현장과 일차 해제 */
 	void FinalizeContract();
@@ -137,9 +123,6 @@ private:
 	UPROPERTY()
 	TObjectPtr<UMD_SiteDefinition> CurrentSite;
 
-
-	UPROPERTY()
-	TSet<TObjectPtr<UMD_SiteDefinition>> ClearedSites;
 
 
 	/** 방송하지 않고 잔액과 Enum Map 원장을 함께 변경하는 내부 함수 */
@@ -157,9 +140,6 @@ private:
 	// 고정 이자의 기준 원금. 착수금과 추가 대출의 합이며 이자는 포함하지 않고 완납 시 0으로 초기화
 	int32 LoanPrincipal = 0;
 
-
-	// 소모품 할인 활성 여부
-	bool bConsumableDiscountActive = true;
 
 
 	/** 계약 중 구매 결과와 선행 품목 해금을 유지하기 위한 서버 권위 구매 원장 */

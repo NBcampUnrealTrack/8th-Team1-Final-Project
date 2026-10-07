@@ -439,33 +439,6 @@ int32 AMD_TrashSpawnVolume::GetRemainingKindCount(const FName TrashKindId) const
 {
     return FMath::Max(0, RemainingKindCounts.FindRef(TrashKindId));
 }
-bool AMD_TrashSpawnVolume::CaptureState(FMD_TrashGeneratorState& OutState) const
-{
-    if (!bStateInitialized)
-    {
-        return false;
-    }
-
-    OutState = FMD_TrashGeneratorState();
-    OutState.GeneratorName = GetFName();
-    OutState.RemainingKindCounts = RemainingKindCounts;
-    OutState.bUsesTowerPlacement = UsesTowerPlacement();
-    if (UsesAutomaticFloorCells())
-    {
-        OutState.bUsesFloorCells = true;
-        OutState.FloorCellSize = FloorPlacement->CellSize;
-        OutState.FloorLayerHeight = FloorPlacement->LayerHeight;
-        OutState.FloorLayoutId = FloorPlacement->GetLayoutId();
-        RemainingFloorCells.GenerateValueArray(OutState.FloorCells);
-        OutState.FloorCells.Sort([](const FMD_TrashFloorCellState& A, const FMD_TrashFloorCellState& B)
-        {
-            return A.Cell.X != B.Cell.X ? A.Cell.X < B.Cell.X
-                : A.Cell.Y != B.Cell.Y ? A.Cell.Y < B.Cell.Y : A.Cell.Z < B.Cell.Z;
-        });
-    }
-    return OutState.IsStructurallyValid();
-}
-
 bool AMD_TrashSpawnVolume::PrepareSpawnLocations(const double BudgetSeconds, bool& bReady)
 {
     bReady = !UsesAutomaticFloorCells();
@@ -566,7 +539,7 @@ bool AMD_TrashSpawnVolume::CanRestoreState(const FMD_TrashGeneratorState& State)
     return true;
 }
 
-bool AMD_TrashSpawnVolume::RestoreState(const FMD_TrashGeneratorState& State, const TArray<AMD_TrashItem*>* ReusableItems)
+bool AMD_TrashSpawnVolume::RestoreState(const FMD_TrashGeneratorState& State)
 {
     if (!CanRestoreState(State)) return false;
     TArray<FName> KindIds;
@@ -595,22 +568,7 @@ bool AMD_TrashSpawnVolume::RestoreState(const FMD_TrashGeneratorState& State, co
     InitializeFloorLedger();
 
     LastUsedSeed = static_cast<int32>(GetTypeHash(FGuid::NewGuid()));
-    TArray<AMD_TrashItem*> Reused;
-    if (ReusableItems && UsesAutomaticFloorCells())
-    {
-        TMap<FName, TArray<AMD_TrashItem*>> ByKind;
-        for (AMD_TrashItem* Item : *ReusableItems)
-            if (IsValid(Item) && !Item->GetOriginGenerator() && Item->GetClass() == TrashItemClass)
-                ByKind.FindOrAdd(Item->GetTrashKindId()).Add(Item);
-        for (const FName Kind : KindIds)
-        {
-            auto* Items = ByKind.Find(Kind);
-            if (!Items || Items->IsEmpty()) { Reused.Reset(); break; }
-            Reused.Add(Items->Pop(EAllowShrinking::No));
-        }
-    }
-    if (!PlaceTrashKinds(KindIds, LastUsedSeed, UsesAutomaticFloorCells() ? &RequiredCells : nullptr,
-        Reused.Num() == KindIds.Num() ? &Reused : nullptr))
+    if (!PlaceTrashKinds(KindIds, LastUsedSeed, UsesAutomaticFloorCells() ? &RequiredCells : nullptr))
     {
         ClearSpawnedTrashInternal();
         return false;

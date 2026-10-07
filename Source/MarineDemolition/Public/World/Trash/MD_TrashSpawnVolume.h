@@ -79,9 +79,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
 	int32 GetSpawnedTrashCount() const;
 
-    bool CaptureState(FMD_TrashGeneratorState& OutState) const;
     bool CanRestoreState(const FMD_TrashGeneratorState& State) const;
-    bool RestoreState(const FMD_TrashGeneratorState& State, const TArray<AMD_TrashItem*>* ReusableItems = nullptr);
+    bool RestoreState(const FMD_TrashGeneratorState& State);
     bool InitializeFresh();
     bool BuildEmptyState(FMD_TrashGeneratorState& OutState) const;
     /** Plan the entire transition before relocating any original actor. */
