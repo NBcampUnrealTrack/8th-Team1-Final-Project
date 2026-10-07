@@ -1,8 +1,8 @@
 ﻿
 #include "UI/Screen/MD_NotifyWidget.h"
 
+#include "Components/Button.h"
 #include "Components/TextBlock.h"
-#include "UI/MD_CommonButtonBase.h"
 
 void UMD_NotifyWidget::NativePreConstruct()
 {
