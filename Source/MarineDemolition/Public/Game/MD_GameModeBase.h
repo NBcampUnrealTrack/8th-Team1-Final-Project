@@ -103,9 +103,8 @@ private:
     // 확정 보고서를 모든 플레이어에게 표시한 뒤 로비 이동 예약
     void ShowFinalReport(FGameplayTag ReportWidgetTag);
 
+    // 계약 종료 처리 후 로비로 이동. 마감의 유일한 종착점
     void HandleContractCleared();
-
-    void HandleGameOver();
 
     // 게임 종료 세션 상태를 갱신한 뒤 대상 로비 레벨로 이동하는 함수
     void TravelToLevel(const TSoftObjectPtr<UWorld>& Level);
@@ -117,21 +116,14 @@ private:
     // FinalizeDay 중복 실행 방지 플래그. 레벨 재시작 시 초기화
     bool bDayFinalized = false;
 
-    // 계약 종료 시 이동할 레벨(로비). BP GameMode에서 지정
+    // 마감 후 이동할 로비 레벨. BP GameMode에서 지정 (구 ClearedLevel)
     UPROPERTY(EditDefaultsOnly, Category = "Contract")
-    TSoftObjectPtr<UWorld> ClearedLevel;
-
-    // 게임오버 시 이동할 레벨(타이틀). BP GameMode에서 지정
-    UPROPERTY(EditDefaultsOnly, Category = "Contract")
-    TSoftObjectPtr<UWorld> GameOverLevel;
+    TSoftObjectPtr<UWorld> LobbyLevel;
 
     FTimerHandle DepartTravelTimerHandle;
 
     // 세션 절차를 거치지 않는 직접 ServerTravel 전에 모든 소유 클라이언트에 로딩 화면을 요청한다.
     void PreparePlayersForTravel(EMD_LoadingContext Context);
-
-    // 로딩 인트로가 화면을 완전히 덮은 뒤에 같은 레벨 재시작 트래블을 실행한다.
-    void RestartLevelAfterLoadingIntro();
 
     // 마감 시점의 인원 복귀 점수와 현장 미수거 점수를 적용하는 처리
     void FinalizeDailyScore();

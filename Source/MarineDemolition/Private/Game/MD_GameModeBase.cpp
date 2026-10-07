@@ -259,8 +259,7 @@ void AMD_GameModeBase::HandleWallDemolished(AMD_CuttableWall* Wall, AActor* Cutt
 }
 
 // 세션 절차를 거치지 않는 직접 ServerTravel 앞에서 모든 소유 클라이언트의 로딩을 켠다.
-// 클라이언트가 서버와 같은 시점에 인트로를 시작해야 하므로
-// RestartLevelAfterLoadingIntro의 콜백 안이 아니라 그 전에 호출해야 한다.
+// 클라이언트가 서버와 같은 시점에 인트로를 시작해야 하므로 트래블 콜백 안이 아니라 그 전에 호출해야 한다.
 void AMD_GameModeBase::PreparePlayersForTravel(EMD_LoadingContext Context)
 {
     UWorld* World = GetWorld();
@@ -276,42 +275,6 @@ void AMD_GameModeBase::PreparePlayersForTravel(EMD_LoadingContext Context)
             PlayerController->ClientPrepareLoadingTransition(Context);
         }
     }
-}
-
-// 같은 레벨 재시작(?Restart)을 로딩 인트로가 끝난 뒤로 미룬다. 세션 이동 경로는
-// MD_MultiplayManager::RunAfterLoadingIntro가 같은 역할을 하며, 이 헬퍼는 세션을
-// 거치지 않는 Day 전환과 목적지 미지정 fallback 두 곳이 공유한다.
-void AMD_GameModeBase::RestartLevelAfterLoadingIntro()
-{
-    UGameInstance* GameInstance = GetGameInstance();
-    UMD_LoadingScreenSubsystem* LoadingScreen = IsValid(GameInstance) == true
-        ? GameInstance->GetSubsystem<UMD_LoadingScreenSubsystem>()
-        : nullptr;
-
-    // 로딩 서브시스템이 없는 실행에서는 기존 동작대로 즉시 이동한다.
-    if (IsValid(LoadingScreen) == false)
-    {
-        if (UWorld* World = GetWorld())
-        {
-            World->ServerTravel(TEXT("?Restart"));
-        }
-        return;
-    }
-
-    TWeakObjectPtr<AMD_GameModeBase> WeakThis(this);
-    LoadingScreen->RunAfterIntro([WeakThis]()
-    {
-        AMD_GameModeBase* Self = WeakThis.Get();
-        UWorld* TravelWorld = Self != nullptr ? Self->GetWorld() : nullptr;
-        if (IsValid(TravelWorld) == false)
-        {
-            return;
-        }
-        if (TravelWorld->ServerTravel(TEXT("?Restart")) == false)
-        {
-            UE_LOG(LogTemp, Error, TEXT("[Day] 같은 레벨 재시작 트래블을 시작하지 못했습니다."));
-        }
-    });
 }
 
 bool AMD_GameModeBase::DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld* World) const
@@ -363,39 +326,15 @@ void AMD_GameModeBase::HandleContractCleared()
         Merchant->FinalizeContract();
     }
 
-    // 진행(크레딧·퀘스트·호감도)은 유지, 오염 컨텍스트만 폐기 → 다음 현장은 새로 시작
-    if (UMD_DayPersistenceSubsystem* Persistence =
-        GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
+    // 진행(크레딧·부채·구매 이력)은 유지, 오염 컨텍스트만 폐기 → 다음 현장은 새로 시작
+    UMD_DayPersistenceSubsystem* Persistence = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_DayPersistenceSubsystem>() : nullptr;
+    if (IsValid(Persistence) == true)
     {
         Persistence->ResetContaminationContext();
     }
 
-    TravelToLevel(ClearedLevel);
-}
-
-void AMD_GameModeBase::HandleGameOver()
-{
-    // 게임오버 시 오염 컨텍스트 폐기
-    if (UMD_DayPersistenceSubsystem* Persistence =
-        GetGameInstance()->GetSubsystem<UMD_DayPersistenceSubsystem>())
-    {
-        Persistence->ResetContaminationContext();
-    }
-
-    // 새 런은 기본 장비로 시작하도록 운반 중인 핫바와 구매 이력 폐기
-    if (UMD_SessionCarrySubsystem* Carry = GetGameInstance()->GetSubsystem<UMD_SessionCarrySubsystem>())
-    {
-        Carry->Reset();
-    }
-
-    // 게임오버 시에만 전체 리셋 (크레딧·계약)
-    if (UMD_MerchantSubsystem* Merchant =
-        GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
-    {
-        Merchant->ResetContract();
-    }
-
-    TravelToLevel(GameOverLevel);
+    // 마감의 목적지는 항상 로비
+    TravelToLevel(LobbyLevel);
 }
 
 void AMD_GameModeBase::TravelToLevel(const TSoftObjectPtr<UWorld>& Level)
@@ -404,11 +343,8 @@ void AMD_GameModeBase::TravelToLevel(const TSoftObjectPtr<UWorld>& Level)
 
     if (Package.IsEmpty())
     {
-        // 대상 미지정 → 안전하게 현재 레벨 리스타트 (BP에서 레벨 지정 필요)
-        UE_LOG(LogTemp, Warning,
-            TEXT("[Day] 전환 대상 레벨 미지정. BP GameMode에서 지정 필요"));
-        PreparePlayersForTravel(EMD_LoadingContext::Default);
-        RestartLevelAfterLoadingIntro();
+        // 잘못된 목적지를 같은 현장 재시작으로 숨기지 않는다. BP GameMode의 LobbyLevel 지정 필요
+        UE_LOG(LogTemp, Error, TEXT("[Contract] 로비 레벨 미지정. BP_MDGameModeBase의 LobbyLevel을 설정해야 합니다."));
         return;
     }
 
