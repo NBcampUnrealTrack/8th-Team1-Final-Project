@@ -50,8 +50,16 @@ protected:
     // 현장 맵을 떠나거나 정산할 때 해제할 대출 이자 예약
     FTimerHandle LoanInterestTimerHandle;
 
-    // 현장 진입 10분 뒤부터 3분 간격으로 서버 이자 계산 예약
+    // 현장 진입 9분 뒤 첫 징수, 이후 3분 간격으로 서버 이자 계산 예약 (6분 유예 + 3분)
     void StartLoanInterestTimer();
+
+    // 맵 진입 기준 첫 이자 징수 시각(초). 대출·경제 회의 계산기: 6분 유예 후 9분에 첫 징수
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+    float LoanFirstInterestDelaySeconds = 540.f;
+
+    // 첫 징수 이후 이자 징수 주기(초)
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+    float LoanInterestIntervalSeconds = 180.f;
 
     // 현재 미상환 잔액에 주기 이자를 적용하는 서버 콜백
     void CheckGameTimeEvents();
@@ -95,9 +103,8 @@ private:
     // 확정 보고서를 모든 플레이어에게 표시한 뒤 로비 이동 예약
     void ShowFinalReport(FGameplayTag ReportWidgetTag);
 
+    // 계약 종료 처리 후 로비로 이동. 마감의 유일한 종착점
     void HandleContractCleared();
-
-    void HandleGameOver();
 
     // 게임 종료 세션 상태를 갱신한 뒤 대상 로비 레벨로 이동하는 함수
     void TravelToLevel(const TSoftObjectPtr<UWorld>& Level);
@@ -109,21 +116,14 @@ private:
     // FinalizeDay 중복 실행 방지 플래그. 레벨 재시작 시 초기화
     bool bDayFinalized = false;
 
-    // 계약 종료 시 이동할 레벨(로비). BP GameMode에서 지정
+    // 마감 후 이동할 로비 레벨. BP GameMode에서 지정 (구 ClearedLevel)
     UPROPERTY(EditDefaultsOnly, Category = "Contract")
-    TSoftObjectPtr<UWorld> ClearedLevel;
-
-    // 게임오버 시 이동할 레벨(타이틀). BP GameMode에서 지정
-    UPROPERTY(EditDefaultsOnly, Category = "Contract")
-    TSoftObjectPtr<UWorld> GameOverLevel;
+    TSoftObjectPtr<UWorld> LobbyLevel;
 
     FTimerHandle DepartTravelTimerHandle;
 
     // 세션 절차를 거치지 않는 직접 ServerTravel 전에 모든 소유 클라이언트에 로딩 화면을 요청한다.
     void PreparePlayersForTravel(EMD_LoadingContext Context);
-
-    // 로딩 인트로가 화면을 완전히 덮은 뒤에 같은 레벨 재시작 트래블을 실행한다.
-    void RestartLevelAfterLoadingIntro();
 
     // 마감 시점의 인원 복귀 점수와 현장 미수거 점수를 적용하는 처리
     void FinalizeDailyScore();
@@ -146,9 +146,9 @@ private:
     UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
     TObjectPtr<UMD_SiteDefinition> ExpeditionSite;
 
-    /** 표준 난이도 착수금 (`07` §2.1). 계약 최초 1회만 지급된다. */
+    /** 착수금 대출. 계약 최초 1회 지급되며 같은 금액이 부채에 가산된다 (V2 기획: 초기 도구 4종 가격 합 1,300) */
     UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
-    int32 ExpeditionAdvancePayment = 500;
+    int32 ExpeditionAdvancePayment = 1300;
 
     // 테스트용 콘솔 커맨드: 정식 마감 경로(RequestEndDay) 즉시 호출
     UFUNCTION(Exec)

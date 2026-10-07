@@ -180,10 +180,6 @@ EMD_DailyReportCategory AMD_GameStateBase::ResolveScoreCategory(FGameplayTag Eve
     {
         bIsQuest = EventName == TEXT("Score.Daily.QuestS");
     }
-    if (bIsQuest == false)
-    {
-        bIsQuest = EventName == TEXT("Score.Penalty.Quest");
-    }
     if (bIsQuest == true)
     {
         return EMD_DailyReportCategory::Quest;

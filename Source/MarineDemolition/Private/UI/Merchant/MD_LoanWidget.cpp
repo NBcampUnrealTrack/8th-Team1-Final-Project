@@ -27,8 +27,8 @@ void UMD_LoanWidget::RefreshDisplay()
 {
 	// 현재 부채를 제외한 추가 대출 가능액 계산
 	int32 AvailableLoanAmount = FMath::Max(0, LoanInfo.LoanLimit - LoanInfo.DebtBalance);
-	// 다음 3분 주기에 부과될 이자를 서버와 동일한 정수 계산으로 표시
-	int32 NextInterestAmount = UMD_MerchantSubsystem::CalculateLoanInterest(LoanInfo.DebtBalance);
+	// 다음 3분 주기에 부과될 고정 이자를 서버와 동일한 원금 기준 계산으로 표시
+	int32 NextInterestAmount = UMD_MerchantSubsystem::CalculateLoanInterest(LoanInfo.DebtBalance, LoanInfo.LoanPrincipal);
 
 	// 표시가 달라진 텍스트만 갱신하여 반복 원장 통지에 따른 재배치 방지
 	auto SetDisplayText = [](UTextBlock* TextBlock, FText Text)

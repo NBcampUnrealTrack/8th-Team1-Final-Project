@@ -235,8 +235,8 @@ int32 UMD_MerchantSubsystem::GetLoanLimit() const
 
 int32 UMD_MerchantSubsystem::CalculateLoanLimit()
 {
-	// 기존 기본 대출 한도 800크레딧 적용
-	return 800;
+	// 기본 대출 한도 2,000크레딧. 착수금 1,300이 부채로 잡힌 뒤에도 700까지 추가 대출 가능
+	return 2000;
 }
 
 int32 UMD_MerchantSubsystem::GetAvailableLoanAmount() const
@@ -263,6 +263,8 @@ bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount)
 	// 대출 수령액을 기타 정산 분류로 기록
 	AddCreditsInternal(EMD_DailyReportCategory::Other, Amount);
 	DebtBalance += Amount;
+	// 추가 대출은 고정 이자의 기준 원금에 합산
+	LoanPrincipal = FMath::Min(LoanPrincipal, MAX_int32 - Amount) + Amount;
 
 	OnMerchantStateChanged.Broadcast();
 
@@ -281,27 +283,33 @@ bool UMD_MerchantSubsystem::TryRepayLoan(int32 Amount)
 	// 대출 상환액을 기타 정산 분류로 기록
 	AddCreditsInternal(EMD_DailyReportCategory::Other, -Amount);
 	DebtBalance -= Amount;
+	// 완납 시 이자 종료. 다음 대출은 새 원금으로 시작
+	if (DebtBalance <= 0)
+	{
+		LoanPrincipal = 0;
+	}
 	OnMerchantStateChanged.Broadcast();
 
 	return true;
 }
 
-int32 UMD_MerchantSubsystem::CalculateLoanInterest(int32 InDebtBalance)
+int32 UMD_MerchantSubsystem::CalculateLoanInterest(int32 InDebtBalance, int32 InLoanPrincipal)
 {
 	// 상환 완료 또는 원장 상한 도달 시 추가 이자 없음
-	if (InDebtBalance <= 0 || InDebtBalance == MAX_int32)
+	if (InDebtBalance <= 0 || InDebtBalance == MAX_int32 || InLoanPrincipal <= 0)
 	{
 		// 증가 가능한 부채가 없는 경우의 부과액
 		return 0;
 	}
-	// 정수 나눗셈으로 5% 소수점 절삭 및 기존 최소 1크레딧과 원장 상한 보장
-	return FMath::Clamp(InDebtBalance / 20, 1, MAX_int32 - InDebtBalance);
+	// 원금의 2%를 올림한 고정 이자. 잔액이 줄어도 금액은 유지되며 원장 상한 안에서 최소 1크레딧 보장
+	int32 FixedInterest = FMath::CeilToInt32(static_cast<double>(InLoanPrincipal) * LoanInterestRate);
+	return FMath::Clamp(FixedInterest, 1, MAX_int32 - InDebtBalance);
 }
 
 int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 {
-	// 대출 UI와 동일한 현재 부채의 실제 부과액 계산
-	int32 InterestAmount = CalculateLoanInterest(DebtBalance);
+	// 대출 UI와 동일한 현재 원금 기준의 실제 부과액 계산
+	int32 InterestAmount = CalculateLoanInterest(DebtBalance, LoanPrincipal);
 	// 변화가 없는 부채의 불필요한 복제 알림 생략
 	if (InterestAmount <= 0)
 	{
@@ -315,28 +323,6 @@ int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 	// 이번 주기에 실제 추가한 이자 반환
 	return InterestAmount;
 }
-
-bool UMD_MerchantSubsystem::HasClearedCurrentSite() const
-{
-	return IsValid(CurrentSite) && ClearedSites.Contains(CurrentSite);
-}
-
-void UMD_MerchantSubsystem::MarkSiteCleared()
-{
-	if (!IsValid(CurrentSite))
-	{
-		return;
-	}
-
-	ClearedSites.Add(CurrentSite);
-
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] 현장 클리어 기록: %s"), *CurrentSite->SiteName.ToString());
-
-	OnMerchantStateChanged.Broadcast();
-}
-
-
-
 
 void UMD_MerchantSubsystem::FinalizeContract()
 {
@@ -394,19 +380,6 @@ FGameplayTag UMD_MerchantSubsystem::GradeTagFromSampleGrade(EMD_SampleGrade Grad
 }
 
 
-void UMD_MerchantSubsystem::ResetContract()
-{
-	Credits = 0;
-	DailyCreditTotals.Reset();
-	DebtBalance = 0;
-	CurrentSite = nullptr;
-	ClearedSites.Reset();
-	bConsumableDiscountActive = true;
-	// 새 계약에 사용할 전체 AssetId 구매 원장 초기화
-	PurchasedItemAssetCounts.Reset();
-	OnMerchantStateChanged.Broadcast();
-}
-
 void UMD_MerchantSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
     Super::Initialize(Collection);
@@ -425,7 +398,6 @@ void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 BaseAd
 	}
 
 	CurrentSite = Site;
-	bConsumableDiscountActive = true;
 	// 잘못된 설정값으로 팀 크레딧이 차감되지 않도록 기본 착수금을 0 이상으로 제한
 	int32 ValidBaseAdvancePayment = FMath::Max(BaseAdvancePayment, 0);
 	// 지급액과 부채를 같은 금액으로 기록하도록 두 원장의 잔여 범위 안에서 착수금 확정
@@ -435,5 +407,7 @@ void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 BaseAd
 	AddCreditsInternal(EMD_DailyReportCategory::Retainer, GrantedAdvancePayment);
 	// 착수금은 대출이므로 실제 수령액을 기존 미상환 부채에 합산
 	DebtBalance += GrantedAdvancePayment;
+	// 착수금은 고정 이자의 기준 원금에도 합산
+	LoanPrincipal = FMath::Min(LoanPrincipal, MAX_int32 - GrantedAdvancePayment) + GrantedAdvancePayment;
 	OnMerchantStateChanged.Broadcast();
 }

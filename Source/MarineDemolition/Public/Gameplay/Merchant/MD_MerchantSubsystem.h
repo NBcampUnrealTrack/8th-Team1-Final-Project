@@ -79,6 +79,9 @@ public:
 	// 현재 미상환 대출 잔액을 반환하는 함수
 	int32 GetDebtBalance() const { return DebtBalance; }
 
+	// 이자 계산의 기준이 되는 누적 대출 원금(착수금 + 추가 대출, 이자 제외)을 반환하는 함수
+	int32 GetLoanPrincipal() const { return LoanPrincipal; }
+
 	// 현재 상인의 기본 대출 한도 조회
 	int32 GetLoanLimit() const;
 
@@ -88,36 +91,23 @@ public:
 	// 현재 부채를 제외하고 추가로 빌릴 수 있는 금액을 반환하는 함수
 	int32 GetAvailableLoanAmount() const;
 
-	// 기획에서 확정한 일일 대출 이자율을 반환하는 함수
-
 	// 요청 금액과 현재 한도를 검증한 뒤 크레딧과 부채를 함께 증가시키는 함수
 	bool TryBorrowCredits(int32 Amount);
 
 	// 보유 크레딧과 미상환 잔액 범위에서 대출금을 상환하는 함수
 	bool TryRepayLoan(int32 Amount);
 
-	// 현장 타이머가 요청한 미상환 잔액의 5% 이자 합산
+	// 현장 타이머가 주기마다 요청하는 고정 이자 합산. 원금의 2%(올림)이며 일부 상환 후에도 유지, 완납 시 종료
 	int32 ApplyDailyLoanInterest();
 
-	// 서버 부과액과 대출 UI가 공유하는 소수점 절삭 및 원장 상한 계산
-	static int32 CalculateLoanInterest(int32 InDebtBalance);
+	// 서버 부과액과 대출 UI가 공유하는 고정 이자 계산. 미상환 잔액이 없으면 0, 있으면 원금 × 이자율 올림
+	static int32 CalculateLoanInterest(int32 InDebtBalance, int32 InLoanPrincipal);
+
+	// 주기마다 대출 원금에 적용하는 고정 이자율 (대출·경제 회의 계산기: 최초 원금의 2%)
+	static constexpr float LoanInterestRate = 0.02f;
 
 	// 새 현장 계약 시작. 크레딧 원장을 초기화하고 착수금을 지급(착수금은 부채에 가산)
 	void BeginContract(UMD_SiteDefinition* Site, int32 BaseAdvancePayment = 0);
-
-	// 게임오버 시 전체 리셋
-	void ResetContract();
-
-	// 소모품 할인 활성 여부 (경고 시 해제). 상점에서 조회
-	void SetConsumableDiscountActive(bool bActive) { bConsumableDiscountActive = bActive; }
-	bool IsConsumableDiscountActive() const { return bConsumableDiscountActive; }
-
-
-	/** 현재 계약 현장이 과거에 클리어된 적 있는지 저장 이력에서 확인하는 함수 */
-	bool HasClearedCurrentSite() const;
-
-	/** 계약 클리어 시 호출하여 현장 완료 이력을 남기는 함수 */
-	void MarkSiteCleared();
 
 
 	/** 계약 종료 시 활성 현장과 일차 해제 */
@@ -134,9 +124,6 @@ private:
 	TObjectPtr<UMD_SiteDefinition> CurrentSite;
 
 
-	UPROPERTY()
-	TSet<TObjectPtr<UMD_SiteDefinition>> ClearedSites;
-
 
 	/** 방송하지 않고 잔액과 Enum Map 원장을 함께 변경하는 내부 함수 */
 	void AddCreditsInternal(EMD_DailyReportCategory Category, int32 Amount);
@@ -150,15 +137,12 @@ private:
 	// 계약과 게임 재시작을 넘어 유지되는 팀 공유 미상환 대출 잔액
 	int32 DebtBalance = 0;
 
+	// 고정 이자의 기준 원금. 착수금과 추가 대출의 합이며 이자는 포함하지 않고 완납 시 0으로 초기화
+	int32 LoanPrincipal = 0;
 
-	// 소모품 할인 활성 여부
-	bool bConsumableDiscountActive = true;
 
 
 	/** 계약 중 구매 결과와 선행 품목 해금을 유지하기 위한 서버 권위 구매 원장 */
 	UPROPERTY()
 	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
-
-	// 미상환 잔액에 적용하는 일일 대출 이자율
-	static constexpr float DailyInterestRate = 0.05f;
 };

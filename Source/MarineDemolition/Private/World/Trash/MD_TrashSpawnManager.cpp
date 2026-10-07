@@ -3,7 +3,6 @@
 #include "Engine/World.h"
 #include "HAL/PlatformTime.h"
 #include "TimerManager.h"
-#include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "Util/MD_LogUtility.h"
 #include "World/Trash/MD_TrashSpawnVolume.h"
 #include "World/Trash/MD_TrashFloorGenerator.h"
@@ -143,10 +142,9 @@ bool UMD_TrashSpawnManager::InitializeUnrestoredGenerators()
 	}
 
 	bool bSuccessful = true;
-	if (TransitionGenerator.IsValid() && (!TransitionGenerator->IsStateInitialized() || bMigrateRestoredActors))
+	if (TransitionGenerator.IsValid() && !TransitionGenerator->IsStateInitialized())
 	{
-		if (!ConvertAuthoredTrash(bMigrateRestoredActors)) return false;
-		bMigrateRestoredActors = false;
+		if (!ConvertAuthoredTrash()) return false;
 	}
     TArray<AMD_TrashSpawnVolume*> Order = GetGenerators();
     Order.StableSort([](const AMD_TrashSpawnVolume& A, const AMD_TrashSpawnVolume& B)
@@ -166,190 +164,6 @@ bool UMD_TrashSpawnManager::InitializeUnrestoredGenerators()
 	bWorldInitialized = bSuccessful;
 	NotifyGeneratorStateChanged();
 	return bSuccessful;
-}
-
-bool UMD_TrashSpawnManager::CaptureStates(TArray<FMD_TrashGeneratorState>& OutStates) const
-{
-	OutStates.Reset();
-	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client)
-	{
-		return false;
-	}
-
-	TSet<FName> SeenNames;
-	for (const TWeakObjectPtr<AMD_TrashSpawnVolume>& Entry : Generators)
-	{
-		const AMD_TrashSpawnVolume* Generator = Entry.Get();
-		if (!IsValid(Generator))
-		{
-			continue;
-		}
-
-		FMD_TrashGeneratorState State;
-		if (!Generator->CaptureState(State) || State.GeneratorName.IsNone()
-			|| SeenNames.Contains(State.GeneratorName))
-		{
-			OutStates.Reset();
-			return false;
-		}
-		SeenNames.Add(State.GeneratorName);
-		OutStates.Add(MoveTemp(State));
-	}
-	OutStates.Sort([](const FMD_TrashGeneratorState& Left, const FMD_TrashGeneratorState& Right)
-	{
-		return Left.GeneratorName.LexicalLess(Right.GeneratorName);
-	});
-	return true;
-}
-
-bool UMD_TrashSpawnManager::CanRestoreStates(const TArray<FMD_TrashGeneratorState>& Input) const
-{
-	TArray<FMD_TrashGeneratorState> States;
-	if (!NormalizeStates(Input, States)) return false;
-	if (!GetWorld() || GetWorld()->GetNetMode() == NM_Client)
-	{
-		return false;
-	}
-
-	TMap<FName, AMD_TrashSpawnVolume*> ByName;
-	for (const TWeakObjectPtr<AMD_TrashSpawnVolume>& Entry : Generators)
-	{
-		AMD_TrashSpawnVolume* Generator = Entry.Get();
-		if (!IsValid(Generator))
-		{
-			continue;
-		}
-		const FName Name = Generator->GetFName();
-		if (ByName.Contains(Name))
-		{
-			return false;
-		}
-		ByName.Add(Name, Generator);
-	}
-
-	TSet<FName> SeenNames;
-	for (const FMD_TrashGeneratorState& State : States)
-	{
-		if (!State.IsStructurallyValid() || SeenNames.Contains(State.GeneratorName)
-			|| !ByName.Contains(State.GeneratorName))
-		{
-			return false;
-		}
-		SeenNames.Add(State.GeneratorName);
-		if (!ByName[State.GeneratorName]->CanRestoreState(State)) return false;
-		for (const TPair<FName, int32>& KindCount : State.RemainingKindCounts)
-		{
-			FMD_TrashKindRow KindRow;
-			if (KindCount.Key.IsNone() || KindCount.Value < 0
-				|| !UMD_TrashLibrary::FindTrashKindRow(KindCount.Key, KindRow))
-			{
-				return false;
-			}
-		}
-	}
-
-	// A current-format save must describe every registered generator. Missing records
-	// must not be silently replaced with a fresh weighted draw.
-	if (SeenNames.Num() != ByName.Num())
-	{
-		return false;
-	}
-
-	return true;
-}
-
-bool UMD_TrashSpawnManager::RestoreStates(const TArray<FMD_TrashGeneratorState>& Input)
-{
-	TArray<FMD_TrashGeneratorState> States;
-	if (!NormalizeStates(Input, States)) return false;
-	if (!CanRestoreStates(States)) return false;
-    TMap<FName, AMD_TrashSpawnVolume*> ByName;
-    for (const auto& Entry : Generators)
-        if (AMD_TrashSpawnVolume* Generator = Entry.Get()) ByName.Add(Generator->GetFName(), Generator);
-	// The adapter commits last, after every ordinary generator has restored successfully.
-	States.StableSort([this, &ByName](const FMD_TrashGeneratorState& A, const FMD_TrashGeneratorState& B)
-	{
-        if (ByName[A.GeneratorName]->IsFloorBonusVolume() != ByName[B.GeneratorName]->IsFloorBonusVolume())
-            return ByName[A.GeneratorName]->IsFloorBonusVolume();
-		const FName Name = TransitionGenerator.IsValid() ? TransitionGenerator->GetFName() : NAME_None;
-		return A.GeneratorName != Name && B.GeneratorName == Name;
-	});
-	TArray<AMD_TrashSpawnVolume*> RestoredGenerators;
-	RestoredGenerators.Reserve(States.Num());
-	for (const FMD_TrashGeneratorState& State : States)
-	{
-		AMD_TrashSpawnVolume* Generator = ByName[State.GeneratorName];
-		TArray<AMD_TrashItem*> Reusable;
-		TArray<AActor*> Ignored;
-		if (IsTransitionGenerator(Generator))
-		{
-			for (const auto& Entry : ReservedTrash)
-				if (AMD_TrashItem* Item = Entry.Get()) { Reusable.Add(Item); Ignored.Add(Item); }
-			Generator->GetFloorPlacement()->SetTransitionSources(Ignored);
-		}
-        const bool bRestored = Generator->RestoreState(State, Reusable.IsEmpty() ? nullptr : &Reusable);
-		if (IsTransitionGenerator(Generator)) Generator->GetFloorPlacement()->SetTransitionSources({});
-		if (!bRestored)
-		{
-			for (AMD_TrashSpawnVolume* Restored : RestoredGenerators)
-			{
-				Restored->ClearSpawnedTrash();
-			}
-			return false;
-		}
-		RestoredGenerators.Add(Generator);
-	}
-	for (const auto& Entry : ReservedTrash)
-		if (AMD_TrashItem* Item = Entry.Get(); Item && !Item->GetOriginGenerator())
-			if (!Item->Destroy()) return false;
-	ReservedTrash.Reset();
-	bReserveAuthoredTrash = false;
-	NotifyGeneratorStateChanged();
-	bMigrateRestoredActors = TransitionGenerator.IsValid() && !Input.ContainsByPredicate([this](const FMD_TrashGeneratorState& State)
-	{
-		return State.GeneratorName == TransitionGenerator->GetFName();
-	});
-	return true;
-}
-
-bool UMD_TrashSpawnManager::PrepareRestoreStates(const TArray<FMD_TrashGeneratorState>& States)
-{
-	CancelPreparedRestore();
-	if (!CanRestoreStates(States)) return false;
-	bReserveAuthoredTrash = TransitionGenerator.IsValid() && States.ContainsByPredicate([this](const auto& State)
-	{
-		return State.GeneratorName == TransitionGenerator->GetFName() && State.bUsesFloorCells;
-	});
-	return true;
-}
-
-bool UMD_TrashSpawnManager::ReserveAuthoredTrashForRestore(AMD_TrashItem* Item)
-{
-	if (!bReserveAuthoredTrash || !IsValid(Item) || !Item->HasAuthority() || Item->GetOriginGenerator()
-		|| !AuthoredPositions.Contains(MakeAuthoredTrashKey(Item))) return false;
-	ReservedTrash.AddUnique(Item);
-	return true;
-}
-
-bool UMD_TrashSpawnManager::IsTransitionGenerator(const AMD_TrashSpawnVolume* Generator) const
-{
-	return TransitionGenerator.Get() == Generator;
-}
-
-bool UMD_TrashSpawnManager::NormalizeStates(const TArray<FMD_TrashGeneratorState>& Input,
-	TArray<FMD_TrashGeneratorState>& Out) const
-{
-	Out = Input;
-	if (const auto* Generator = TransitionGenerator.Get())
-	{
-		if (!Input.ContainsByPredicate([Generator](const FMD_TrashGeneratorState& State) { return State.GeneratorName == Generator->GetFName(); }))
-		{
-			FMD_TrashGeneratorState Empty;
-			if (!Generator->BuildEmptyState(Empty)) return false;
-			Out.Add(MoveTemp(Empty));
-		}
-	}
-	return true;
 }
 
 bool UMD_TrashSpawnManager::EnableAuthoredFloorTransition()
@@ -383,28 +197,24 @@ bool UMD_TrashSpawnManager::EnableAuthoredFloorTransition()
 	return true;
 }
 
-bool UMD_TrashSpawnManager::ConvertAuthoredTrash(const bool bPreserveCells)
+bool UMD_TrashSpawnManager::ConvertAuthoredTrash()
 {
 	auto* Generator = TransitionGenerator.Get();
 	if (!Generator) return false;
 	TArray<AMD_TrashItem*> Items;
-	TArray<FVector> Origins;
 	for (TActorIterator<AMD_TrashItem> It(GetWorld()); It; ++It)
 	{
-		if (It->GetOriginGenerator()) continue;
-		const FVector* Origin = AuthoredPositions.Find(MakeAuthoredTrashKey(*It));
-		// Unknown dynamic/legacy items retain their exact actor snapshot identity.
-		if (!Origin) continue;
+		// 전환 수집 시점에 없던 동적·외부 쓰레기는 그대로 둔다.
+		if (It->GetOriginGenerator() || !AuthoredPositions.Contains(MakeAuthoredTrashKey(*It))) continue;
 		Items.Add(*It);
-		Origins.Add(*Origin);
 	}
-	if (Generator->ConvertAuthoredItems(Items, bPreserveCells ? &Origins : nullptr))
+	if (Generator->ConvertAuthoredItems(Items, nullptr))
 	{
-		UE_LOG(MarineDemolition, Display, TEXT("Floor transition: converted %d authored trash items (preserve cells=%d)."), Items.Num(), bPreserveCells);
+		UE_LOG(MarineDemolition, Display, TEXT("Floor transition: converted %d authored trash items."), Items.Num());
 		return true;
 	}
-	// Never invent a clean-cell history or delete leftovers to make migration fit.
-	UE_LOG(MarineDemolition, Warning, TEXT("Floor transition deferred: retaining %d legacy actors and their saved positions."), Items.Num());
+	// 전환에 실패해도 배치된 액터는 지우지 않고 빈 생성기 상태로 둔다.
+	UE_LOG(MarineDemolition, Warning, TEXT("Floor transition deferred: retaining %d legacy actors."), Items.Num());
 	if (Generator->IsStateInitialized()) return true;
 	FMD_TrashGeneratorState Empty;
 	return Generator->BuildEmptyState(Empty) && Generator->RestoreState(Empty);

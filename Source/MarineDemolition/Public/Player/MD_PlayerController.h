@@ -294,12 +294,6 @@ private:
 	void ServerDeliver(FGameplayTag GradeTag, bool bIntact);
 
 	UFUNCTION(Exec)
-	void MD_MarkSiteCleared();
-
-	UFUNCTION(Server, Reliable)
-	void ServerMarkSiteCleared();
-
-	UFUNCTION(Exec)
 	void MD_FinalizeContract();
 
 	UFUNCTION(Server, Reliable)

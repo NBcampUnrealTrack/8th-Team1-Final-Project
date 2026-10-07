@@ -910,24 +910,6 @@ void AMD_PlayerController::ServerDeliver_Implementation(FGameplayTag GradeTag, b
 	UE_LOG(LogTemp, Warning, TEXT("[Quest] MD_Deliver 제출 차단: 실제 아이템 액터 필요 (등급=%s, 온전함=%s)"), *GradeTag.ToString(), bIntact == true ? TEXT("true") : TEXT("false"));
 }
 
-void AMD_PlayerController::MD_MarkSiteCleared()
-{
-	ServerMarkSiteCleared();
-}
-
-void AMD_PlayerController::ServerMarkSiteCleared_Implementation()
-{
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == false)
-	{
-		return;
-	}
-
-	// 실제 사이트 클리어 전환과 동일하게 이력 등록 후 현재 계약을 종료하는 처리
-	Merchant->MarkSiteCleared();
-	Merchant->FinalizeContract();
-}
-
 void AMD_PlayerController::MD_FinalizeContract()
 {
 	ServerFinalizeContract();
