@@ -18,6 +18,7 @@ DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
 
 class UMD_SiteDefinition;
 class AMD_PlayerState;
+class APlayerState;
 struct FGameplayTag;
 struct FMD_ShopItem;
 
@@ -61,7 +62,7 @@ public:
 
 
 	// Enum 분류와 금액을 잔액 및 현재 Day Map 원장에 함께 기록하는 단일 함수
-	void AddCredits(EMD_DailyReportCategory Category, int32 Amount);
+	void AddCredits(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer = nullptr);
 
 	/** 플레이어별 소유권을 검증하고 아이템 지급 성공 시에만 팀 재화 차감과 구매 원장을 확정하는 서버 구매 함수 */
 	EMD_ShopPurchaseResult TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase);
@@ -92,10 +93,10 @@ public:
 	int32 GetAvailableLoanAmount() const;
 
 	// 요청 금액과 현재 한도를 검증한 뒤 크레딧과 부채를 함께 증가시키는 함수
-	bool TryBorrowCredits(int32 Amount);
+	bool TryBorrowCredits(int32 Amount, APlayerState* ResponsiblePlayer = nullptr);
 
 	// 보유 크레딧과 미상환 잔액 범위에서 대출금을 상환하는 함수
-	bool TryRepayLoan(int32 Amount);
+	bool TryRepayLoan(int32 Amount, APlayerState* ResponsiblePlayer = nullptr);
 
 	// 현장 타이머가 주기마다 요청하는 고정 이자 합산. 원금의 2%(올림)이며 일부 상환 후에도 유지, 완납 시 종료
 	int32 ApplyDailyLoanInterest();
@@ -116,6 +117,46 @@ public:
 	/** `Resource.Sample.Grade.X` 태그 변환. 등급 태그가 필요한 곳에서 공용으로 쓴다. */
 	static FGameplayTag GradeTagFromSampleGrade(EMD_SampleGrade Grade);
 
+    // 정산 보고서에 네 개인 슬롯과 여섯 시점의 누적 금액 반영
+    void BuildCreditHistory(FMD_InspectionReport& Report);
+
+    // 최종 평가 보상 이후의 그래프 종료 시각 고정
+    void FinishCreditHistory();
+
+    // 서버의 실제 거래 발생 시각과 금액 및 개인 인덱스 조회
+    FORCEINLINE TArray<FMD_CreditLogEntry>& GetCreditLog() { return CreditLog; }
+
+    // 원시 로그의 개인 인덱스를 이름과 식별자로 해석하는 목록 조회
+    FORCEINLINE TArray<FMD_PlayerCreditHistory>& GetCreditPlayers() { return CreditPlayers; }
+
+protected:
+    // 계약 단위로 초기화하며 조회 시에도 원본을 유지하는 서버 금액 로그
+    TArray<FMD_CreditLogEntry> CreditLog;
+
+    // 퇴장과 재접속에도 색상 및 기록 인덱스를 유지하는 개인 목록
+    TArray<FMD_PlayerCreditHistory> CreditPlayers;
+
+    // 온라인 식별자 준비 이전과 이후의 같은 플레이어 연결 유지
+    TArray<TWeakObjectPtr<APlayerState>> CreditPlayerStates;
+
+    // 맵 이동으로 다른 월드의 시계가 섞이지 않도록 계약 월드 보관
+    TWeakObjectPtr<UWorld> CreditHistoryWorld;
+
+    // 원시 로그의 경과 시간 기준
+    double CreditHistoryStartSeconds = 0.0;
+
+    // 최종 보고서가 확정된 경우 고정한 종료 경과 초
+    double CreditHistoryEndSeconds = -1.0;
+
+    // 최종 보고서 또는 월드 이동 이전까지의 실제 기록 경과 초
+    double GetCreditHistoryElapsedSeconds();
+
+    // 현재 서버의 참가자를 고정 인덱스에 등록하거나 기존 기록과 재연결
+    int32 RegisterCreditPlayer(APlayerState* PlayerState);
+
+    // 거래가 없는 참가자도 영점 그래프를 표시하기 위한 현재 명단 등록
+    void RegisterCurrentCreditPlayers();
+
 private:
 
 
@@ -126,7 +167,7 @@ private:
 
 
 	/** 방송하지 않고 잔액과 Enum Map 원장을 함께 변경하는 내부 함수 */
-	void AddCreditsInternal(EMD_DailyReportCategory Category, int32 Amount);
+	void AddCreditsInternal(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer = nullptr);
 
 
 	int32 Credits = 0;

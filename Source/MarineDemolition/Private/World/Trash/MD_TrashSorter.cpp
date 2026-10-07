@@ -257,7 +257,10 @@ bool AMD_TrashSorter::BeginPendingSort()
 	RuntimeState.ItemVisual = ItemVisual;
 	if (RefundCredits > 0)
 	{
-		Merchant->AddCredits(EMD_DailyReportCategory::Categorizing, RefundCredits);
+		// 분류를 실제로 요청한 Pawn의 플레이어에게 환급 이력 귀속
+		APawn* SortingPawn = Cast<APawn>(Interactor);
+		// 자동 처리 등 요청자가 없는 경우에는 팀 공용 환급으로 기록
+		Merchant->AddCredits(EMD_DailyReportCategory::Categorizing, RefundCredits, IsValid(SortingPawn) == true ? SortingPawn->GetPlayerState() : nullptr);
 	}
 
 	ForceNetUpdate();

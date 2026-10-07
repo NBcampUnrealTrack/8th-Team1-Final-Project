@@ -9,6 +9,7 @@
 #include "Types/Travel/MD_TravelTypes.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 #include "Engine/GameInstance.h"
+#include "TimerManager.h"
 
 AMD_GameStateBase::AMD_GameStateBase()
 {
@@ -62,6 +63,13 @@ void AMD_GameStateBase::BeginPlay()
         // 초기 착수금과 계약 보고서 구성
         RefreshDailyLedger();
     }
+}
+
+void AMD_GameStateBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
+{
+    // 월드 이동 및 게임 종료 이후 원장 갱신 예약 정리
+    GetWorldTimerManager().ClearTimer(DailyLedgerRefreshTimer);
+    Super::EndPlay(EndPlayReason);
 }
 
 void AMD_GameStateBase::GetLifetimeReplicatedProps(
@@ -238,6 +246,30 @@ void AMD_GameStateBase::OnRep_Score()
     OnScoreChanged.Broadcast(Score);
 }
 
+void AMD_GameStateBase::UpdateDailyLedgerRefreshTimer()
+{
+    // 클라이언트의 별도 시간 계산과 중복 서버 예약 방지
+    if (HasAuthority() == false)
+    {
+        // 서버가 전달하는 시간축 사용
+        return;
+    }
+    // 같은 월드의 여러 보고서가 하나의 갱신 예약 공유
+    FTimerManager& TimerManager = GetWorldTimerManager();
+    // 마지막 보고서가 닫히면 주기적인 원장 집계 중단
+    if (OnDailyLedgerChanged.IsBound() == false)
+    {
+        // 다음 화면 활성화까지 경과 시간 갱신 예약 해제
+        TimerManager.ClearTimer(DailyLedgerRefreshTimer);
+    }
+    // 추가 플레이어의 보고서 활성화로 기존 주기가 밀리지 않는 처리
+    else if (TimerManager.IsTimerActive(DailyLedgerRefreshTimer) == false)
+    {
+        // 거래가 없는 동안에도 시작 영점부터 현재까지의 시간축 갱신
+        TimerManager.SetTimer(DailyLedgerRefreshTimer, this, &AMD_GameStateBase::RefreshDailyLedger, 1.0f, true);
+    }
+}
+
 void AMD_GameStateBase::RefreshDailyLedger()
 {
     // 서버에서만 원장 응답 데이터 구성
@@ -253,7 +285,8 @@ void AMD_GameStateBase::RefreshDailyLedger()
     Report.CumulativeScore = Score;
     Report.DailyScore = Score;
     Report.Credits = 0;
-    Report.SiteName = FText::GetEmpty();
+    // 계약 종료로 현장 참조가 해제되어도 마지막 보고서의 현장명 유지
+    Report.SiteName = DailyLedger.SiteName;
     // 분류별 점수 원장 조회
     Report.DailyScoreTotals = GetDailyScoreTotals();
     Report.DailyCreditTotals.Reset();
@@ -262,11 +295,13 @@ void AMD_GameStateBase::RefreshDailyLedger()
     if (IsValid(GameInstance) == true)
     {
         UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
-        // 활성 계약의 크레딧 원장만 반영
-        if (IsValid(Merchant) == true && Merchant->HasActiveContract() == true)
+        // 계약 종료 후 보존된 기록도 보고서 표시 시점과 무관하게 반영
+        if (IsValid(Merchant) == true)
         {
             Report.DailyCreditTotals = Merchant->GetDailyCreditTotals();
             Report.Credits = Merchant->GetCredits();
+            // 같은 서버 원장의 네 개인 슬롯과 여섯 시점 및 공용 금액 반영
+            Merchant->BuildCreditHistory(Report);
             UMD_SiteDefinition* Site = Merchant->GetCurrentSite();
             if (IsValid(Site) == true)
             {

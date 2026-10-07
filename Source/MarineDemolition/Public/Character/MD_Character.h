@@ -19,6 +19,7 @@ class UStaticMesh;
 class UStaticMeshComponent;
 class USceneComponent;
 class USkeletalMeshComponent;
+enum class EVisibilityBasedAnimTickOption : uint8;
 class UPhysicsHandleComponent;
 class UMD_CharacterMovementComponent;
 class UMD_InteractionComponent;
@@ -195,6 +196,9 @@ protected:
 
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<USkeletalMeshComponent> FirstPersonMesh;
+
+	// 로컬 조작 해제 시 복원할 본체 애니메이션 갱신 설정
+	TOptional<EVisibilityBasedAnimTickOption> OriginalBodyMeshAnimTickOption;
 
 	/** 조준 기준점에서 팔을 얼마나 띄울지. 조준 방향 기준 (X=앞, Y=오른쪽, Z=위). */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadWrite, Category = "MD|FirstPerson")

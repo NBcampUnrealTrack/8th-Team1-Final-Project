@@ -697,6 +697,14 @@ void AMD_GameModeBase::FinalizeDay()
 
 void AMD_GameModeBase::ShowFinalReport(FGameplayTag ReportWidgetTag)
 {
+    // 모든 최종 보상 반영 이후의 시각을 그래프 종료점으로 고정
+    UMD_MerchantSubsystem* Merchant = GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>();
+    // 유효한 서버 원장에만 시간 확정 요청
+    if (IsValid(Merchant) == true)
+    {
+        // 이후 보고서 표시 대기 시간을 작업 기록에서 제외
+        Merchant->FinishCreditHistory();
+    }
     // 정산 직후의 서버 원장을 확정 보고서로 사용
     FMD_InspectionReport FinalReport;
     if (AMD_GameStateBase* GS = GetGameState<AMD_GameStateBase>())
