@@ -531,6 +531,40 @@ void AMD_PlayerController::ClientNotifyPlayerJoinAndExit_Implementation(const FT
 	HUD->HandlePlayerJoinAndExit(PlayerName, bIsJoin);
 }
 
+void AMD_PlayerController::ClientNotifyLoanInterest_Implementation(int32 InterestAmount, int32 DebtBalance, int32 NotificationStage)
+{
+	// 실제 부과액이 없는 알림과 원격 컨트롤러의 로컬 UI 접근 차단
+	if (InterestAmount <= 0 || IsLocalController() == false)
+	{
+		// 화면에 전달할 이자 발생 결과가 없는 요청 종료
+		return;
+	}
+	// 소유 플레이어의 HUD를 조회할 로컬 UI 컨텍스트
+	ULocalPlayer* LocalPlayer = GetLocalPlayer();
+	// 서버 전용 컨트롤러 등 로컬 화면이 없는 요청 제외
+	if (IsValid(LocalPlayer) == false)
+	{
+		// 로컬 UI 접근 불가 상태의 알림 종료
+		return;
+	}
+	// 이미 생성된 GameHUD를 관리하는 플레이어별 관리자 조회
+	UMD_LocalUIManager* UIManager = LocalPlayer->GetSubsystem<UMD_LocalUIManager>();
+	// UI 관리자가 종료되었거나 준비되지 않은 요청 제외
+	if (IsValid(UIManager) == false)
+	{
+		// 유효한 HUD 조회 경로가 없는 알림 종료
+		return;
+	}
+	// 기존 HUD 인스턴스를 통한 디자이너 배치 알림 재사용
+	UMD_HUDWidget* HUD = Cast<UMD_HUDWidget>(UIManager->GetActiveScreen(MDGameplayTags::UI_Layer_GameHUD));
+	// HUD가 존재하는 소유 클라이언트에만 확정 금액과 단계 전달
+	if (IsValid(HUD) == true)
+	{
+		// 위젯 값 변경과 애니메이션 재생을 담당하는 Blueprint 이벤트 호출
+		HUD->HandleLoanInterestApplied(InterestAmount, DebtBalance, NotificationStage);
+	}
+}
+
 void AMD_PlayerController::ClientShowHUDMessage_Implementation(const FText& Message)
 {
 	// HUD 위젯이 알림 이벤트를 구현하기 전까지 화면에서 확인할 임시 표시 — 폼건·지지대 실패 메시지와 같은 방식

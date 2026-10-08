@@ -649,8 +649,52 @@ void AMD_GameModeBase::CheckGameTimeEvents()
     // 유효한 계약의 미상환 잔액에만 주기 이자 적용
     if (IsValid(Merchant) == true && Merchant->HasActiveContract() == true)
     {
-        // 원장 변경 알림을 통한 호스트 UI 및 클라이언트 복제 갱신
-        Merchant->ApplyDailyLoanInterest();
+        // 실제 부과된 금액으로 이자 발생 알림 여부 판정
+        int32 InterestAmount = Merchant->ApplyDailyLoanInterest();
+        // 완납 또는 부채 상한으로 이자가 추가되지 않은 시점 제외
+        if (InterestAmount <= 0)
+        {
+            // 금액 변화가 없는 알림 종료
+            return;
+        }
+        // 이자 반영 직후 모든 플레이어에게 전달할 공통 부채 확정
+        int32 DebtBalance = Merchant->GetDebtBalance();
+        // 비율 경계의 곱셈 오버플로 방지를 위한 원금 확장
+        int64 Principal = Merchant->GetLoanPrincipal();
+        // 상환으로 부채가 원금 이하인 경우 추가 이자 0으로 처리
+        int64 AddedInterest = FMath::Max<int64>(static_cast<int64>(DebtBalance) - Principal, 0);
+        // 원금 대비 5퍼센트 이하에 해당하는 기본 단계
+        int32 NotificationStage = 0;
+        // 부동소수점 나눗셈 없이 20퍼센트 초과 판정
+        if (Principal > 0 && AddedInterest * 100 > Principal * 20)
+        {
+            // 가장 높은 독촉 단계 적용
+            NotificationStage = 3;
+        }
+        // 10퍼센트 초과부터 20퍼센트 이하까지 판정
+        else if (Principal > 0 && AddedInterest * 100 > Principal * 10)
+        {
+            // 두 번째 비율 경계 초과 단계 적용
+            NotificationStage = 2;
+        }
+        // 5퍼센트 초과부터 10퍼센트 이하까지 판정
+        else if (Principal > 0 && AddedInterest * 100 > Principal * 5)
+        {
+            // 첫 번째 비율 경계 초과 단계 적용
+            NotificationStage = 1;
+        }
+        // 접속 중인 각 플레이어에게 동일한 부과 결과 전달
+        for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+        {
+            // 소유 클라이언트의 알림 RPC를 제공하는 컨트롤러 조회
+            AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(It->Get());
+            // 유효한 플레이어에게만 이자 발생 알림 전송
+            if (IsValid(PlayerController) == true)
+            {
+                // 복제 값의 도착 순서와 무관한 금액 및 단계 전달
+                PlayerController->ClientNotifyLoanInterest(InterestAmount, DebtBalance, NotificationStage);
+            }
+        }
     }
 }
 

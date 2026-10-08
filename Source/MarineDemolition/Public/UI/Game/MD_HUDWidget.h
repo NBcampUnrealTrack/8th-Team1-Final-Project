@@ -50,6 +50,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent)
 	void HandleHUDMessage(const FText& Message);
 
+	// 서버 확정 이자와 부채 및 비율 단계를 기존 HUD의 알림 위젯에 전달
+	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category = "HUD|Loan")
+	void HandleLoanInterestApplied(int32 InterestAmount, int32 DebtBalance, int32 NotificationStage);
+
 	// 알림 위젯을 생성하여 HUD 목록에 추가한 후 반환
 	UMD_TalkNotificationWidget* CreateTalkNotification();
 };
