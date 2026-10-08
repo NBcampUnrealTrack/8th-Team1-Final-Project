@@ -9,6 +9,7 @@
 class AMD_TrashSpawnVolume;
 class AMD_TrashFloorGenerator;
 class AMD_TrashItem;
+class UMD_TrashSpawnProfile;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnTotalTrashCountChanged, int32, RemainingCount);
 
@@ -58,6 +59,20 @@ public:
 	// 마지막 비율 분배에 쓴 계약 난이도
 	UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
 	EMD_Difficulty GetDistributedDifficulty() const { return DistributedDifficulty; }
+
+	// 활성 총량 프로필: 생성기 재정의 → 현장(Site) 프로필 → 없음(Project Settings 폴백). 에디터 월드에서도 동작한다
+	static UMD_TrashSpawnProfile* ResolveProfile(UWorld* World, const AMD_TrashSpawnVolume* Preferred = nullptr);
+
+	// 프로필이 있으면 프로필로, 없으면 Project Settings로 총량을 계산한다
+	static int32 ComputeTotalTrashCount(UWorld* World, int32 PlayerCount, EMD_Difficulty Difficulty, const AMD_TrashSpawnVolume* Preferred = nullptr);
+
+	// 최대 잉여법 분배. Capacity는 볼륨별 상한(무제한은 MAX_int32), 반환은 못 넣은 개수
+	static int32 ApportionShares(int32 Total, const TArray<float>& Shares, const TArray<int32>& Capacity, TArray<int32>& OutAssigned);
+
+#if WITH_EDITOR
+	// 에디터 월드의 비율 볼륨에 총량을 나눠 Preview 필드에 기록하고 로그 표를 남긴다
+	static void PreviewShareDistribution(UWorld* World, const AMD_TrashSpawnVolume* Requester, int32 PlayerCount, EMD_Difficulty Difficulty);
+#endif
 
 private:
 	// 기준 개수 × 인원 배율 × 난이도 배율. 인원은 관전자가 아닌 현재 PlayerState 수

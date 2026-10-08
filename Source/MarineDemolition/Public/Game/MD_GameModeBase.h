@@ -111,6 +111,12 @@ private:
 
     bool DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld* World) const;
 
+public:
+    // 맵별 계약 목록과 호환 후보에서 해당 월드의 현장을 찾는다. 에디터에서 CDO로 호출해도 된다
+    UMD_SiteDefinition* FindExpeditionSiteForWorld(UWorld* World) const;
+
+private:
+
     TSoftObjectPtr<UWorld> MakeWorldAssetReference(UWorld* World) const;
 
     // FinalizeDay 중복 실행 방지 플래그. 레벨 재시작 시 초기화

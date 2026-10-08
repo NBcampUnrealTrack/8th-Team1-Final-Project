@@ -23,10 +23,6 @@ void UMD_TravelDifficultyWidget::NativeConstruct()
 	{
 		BTN_Diff_Dangerous->OnClicked.AddDynamic(this, &UMD_TravelDifficultyWidget::HandleDiffDangerousClicked);
 	}
-	if (BTN_Diff_Extreme)
-	{
-		BTN_Diff_Extreme->OnClicked.AddDynamic(this, &UMD_TravelDifficultyWidget::HandleDiffExtremeClicked);
-	}
 
 	if (BTN_Back)
 	{
@@ -80,12 +76,11 @@ void UMD_TravelDifficultyWidget::RefreshDifficultyButtons()
 {
 	const bool bHost = IsHost();
 
-	UButton* const DiffButtons[] = { BTN_Diff_Safe, BTN_Diff_Standard, BTN_Diff_Dangerous, BTN_Diff_Extreme };
+	UButton* const DiffButtons[] = { BTN_Diff_Safe, BTN_Diff_Standard, BTN_Diff_Dangerous };
 	const EMD_Difficulty DiffValues[] = {
 		EMD_Difficulty::Safe,
 		EMD_Difficulty::Standard,
-		EMD_Difficulty::Dangerous,
-		EMD_Difficulty::Extreme
+		EMD_Difficulty::Dangerous
 	};
 
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(DiffButtons); ++Index)
@@ -120,11 +115,6 @@ void UMD_TravelDifficultyWidget::HandleDiffStandardClicked()
 void UMD_TravelDifficultyWidget::HandleDiffDangerousClicked()
 {
 	SelectDifficulty(EMD_Difficulty::Dangerous);
-}
-
-void UMD_TravelDifficultyWidget::HandleDiffExtremeClicked()
-{
-	SelectDifficulty(EMD_Difficulty::Extreme);
 }
 
 void UMD_TravelDifficultyWidget::HandleBackClicked()

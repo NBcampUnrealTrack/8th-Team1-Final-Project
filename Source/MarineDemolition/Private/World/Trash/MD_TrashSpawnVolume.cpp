@@ -19,6 +19,7 @@
 #include "World/Trash/MD_TrashItem.h"
 #include "World/Trash/MD_TrashSpawnManager.h"
 #include "World/Trash/MD_TrashFloorPlacementComponent.h"
+#include "Data/Trash/MD_TrashSpawnProfile.h"
 #if WITH_EDITOR
 #include "StaticMeshCompiler.h"
 #endif
@@ -761,7 +762,8 @@ bool AMD_TrashSpawnVolume::NotifyTrashConsumed(const FName TrashKindId, const FI
 bool AMD_TrashSpawnVolume::BuildTrashKindChances(TArray<FMD_TrashSpawnKindChance>& OutChances) const
 {
     OutChances.Reset();
-    if (TrashKindChances.IsEmpty())
+    const TArray<FMD_TrashSpawnKindChance>& EffectiveChances = GetEffectiveKindChances();
+    if (EffectiveChances.IsEmpty())
     {
         const TArray<FName> EligibleIds = BuildEligibleTrashKindIds();
         for (const FName KindId : EligibleIds)
@@ -775,7 +777,7 @@ bool AMD_TrashSpawnVolume::BuildTrashKindChances(TArray<FMD_TrashSpawnKindChance
 
     TSet<FName> SeenIds;
     double TotalPercent = 0.0;
-    for (const FMD_TrashSpawnKindChance& Chance : TrashKindChances)
+    for (const FMD_TrashSpawnKindChance& Chance : EffectiveChances)
     {
         FMD_TrashKindRow KindRow;
         if (Chance.TrashKindId.IsNone()
@@ -854,7 +856,8 @@ bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const i
         {
             continue;
         }
-        const FMD_TrashSpawnKindChance* ConfiguredKind = TrashKindChances.FindByPredicate(
+        const TArray<FMD_TrashSpawnKindChance>& EffectiveChances = GetEffectiveKindChances();
+        const FMD_TrashSpawnKindChance* ConfiguredKind = EffectiveChances.FindByPredicate(
             [KindId](const FMD_TrashSpawnKindChance& Chance)
             {
                 return Chance.TrashKindId == KindId;
@@ -862,7 +865,7 @@ bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const i
         TArray<FMD_TrashSpawnVariantChance> ResolvedVariants;
         if (!BuildVariantChancesForKind(
             KindId, ConfiguredKind ? &ConfiguredKind->VariantChances : nullptr, ResolvedVariants,
-            TrashKindChances.IsEmpty()))
+            EffectiveChances.IsEmpty()))
         {
             UE_LOG(MarineDemolition, Warning,
                 TEXT("TrashSpawnVolume '%s' cannot place kind '%s': invalid Variant chances or no usable mesh."),
@@ -1279,8 +1282,61 @@ void AMD_TrashSpawnVolume::UpdateShapeVisualization()
         }
         PolygonBoundary->SetVisibility(!UsesAutomaticFloorCells() || IsFloorBonusVolume(), true);
         PolygonBoundary->bDrawDebug = !UsesAutomaticFloorCells() || IsFloorBonusVolume();
+#if WITH_EDITORONLY_DATA
+        // 비율이 클수록 붉게. 비율을 쓰지 않는 볼륨은 기본 흰색
+        if (FMath::IsFinite(SpawnShare) && SpawnShare > 0.0f)
+        {
+            const float Hue = FMath::Lerp(120.0f, 0.0f, FMath::Clamp(SpawnShare / 50.0f, 0.0f, 1.0f));
+            PolygonBoundary->EditorUnselectedSplineSegmentColor = FLinearColor::MakeFromHSV8(static_cast<uint8>(Hue / 360.0f * 255.0f), 220, 255);
+        }
+        else
+        {
+            PolygonBoundary->EditorUnselectedSplineSegmentColor = FLinearColor::White;
+        }
+#endif
     }
 }
+
+const TArray<FMD_TrashSpawnKindChance>& AMD_TrashSpawnVolume::GetEffectiveKindChances() const
+{
+    if (!TrashKindChances.IsEmpty())
+    {
+        return TrashKindChances;
+    }
+    if (const UMD_TrashSpawnProfile* Profile = UMD_TrashSpawnManager::ResolveProfile(GetWorld(), this))
+    {
+        return Profile->DefaultKindChances;
+    }
+    return TrashKindChances;
+}
+
+double AMD_TrashSpawnVolume::ComputeBoundaryArea() const
+{
+    TArray<FVector2D> Vertices;
+    FBox2D Bounds(ForceInit);
+    double MinZ = 0.0, MaxZ = 0.0;
+    if (!BuildPolygonVertices(PolygonBoundary, PolygonSamplesPerSegment, Vertices, Bounds, MinZ, MaxZ))
+    {
+        return 0.0;
+    }
+    // 신발끈 공식. 스플라인 로컬 좌표라 액터 스케일을 따로 곱한다
+    double TwiceArea = 0.0;
+    for (int32 I = 0; I < Vertices.Num(); ++I)
+    {
+        const FVector2D& A = Vertices[I];
+        const FVector2D& B = Vertices[(I + 1) % Vertices.Num()];
+        TwiceArea += A.X * B.Y - B.X * A.Y;
+    }
+    const FVector Scale = PolygonBoundary->GetComponentTransform().GetScale3D();
+    return FMath::Abs(TwiceArea) * 0.5 * FMath::Abs(Scale.X * Scale.Y);
+}
+
+#if WITH_EDITOR
+void AMD_TrashSpawnVolume::PreviewShareDistribution()
+{
+    UMD_TrashSpawnManager::PreviewShareDistribution(GetWorld(), this, PreviewPlayerCount, PreviewDifficulty);
+}
+#endif
 
 void AMD_TrashSpawnVolume::CompactSpawnedTrashItems()
 {

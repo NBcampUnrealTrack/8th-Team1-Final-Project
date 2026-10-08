@@ -12,8 +12,7 @@ enum class EMD_Difficulty : uint8
 {
 	Safe      UMETA(DisplayName = "안전"),
 	Standard  UMETA(DisplayName = "표준"),
-	Dangerous UMETA(DisplayName = "위험"),
-	Extreme   UMETA(DisplayName = "극한")
+	Dangerous UMETA(DisplayName = "위험")
 };
 
 /* 출발 콘솔 목록에 뜨는 현장 한 칸. bAvailable이 false면 목록에는 남되 선택할 수 없다 (04 §3) */
@@ -44,7 +43,6 @@ namespace MDTravel
 		{
 		case EMD_Difficulty::Safe:      return 0.8f;
 		case EMD_Difficulty::Dangerous: return 1.2f;
-		case EMD_Difficulty::Extreme:   return 1.4f;
 		case EMD_Difficulty::Standard:
 		default:                        return 1.0f;
 		}

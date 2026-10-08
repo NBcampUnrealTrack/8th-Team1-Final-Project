@@ -6,6 +6,7 @@
 #include "MD_SiteDefinition.generated.h"
 
 class UMD_LoreCatalog;
+class UMD_TrashSpawnProfile;
 class UWorld;
 
 /** 작업 현장의 원정 맵과 로어 카탈로그 정의 */
@@ -28,4 +29,8 @@ public:
 	// 현장별 고정 로어 목록과 코덱스 표시 순서를 제공하는 카탈로그
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Lore")
 	TObjectPtr<UMD_LoreCatalog> LoreCatalog;
+
+	// 이 현장의 쓰레기 총량 규칙(기준 개수·인원·난이도 배율). 비어 있으면 Project Settings의 MD Trash 값을 쓴다
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Trash")
+	TObjectPtr<UMD_TrashSpawnProfile> TrashSpawnProfile;
 };
