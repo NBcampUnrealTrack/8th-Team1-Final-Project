@@ -116,6 +116,16 @@ public:
     UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
     bool IsStateInitialized() const { return bStateInitialized; }
 
+    UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
+    float GetSpawnShare() const { return SpawnShare; }
+
+    UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
+    int32 GetSpawnCount() const { return SpawnCount; }
+
+    // 비율 볼륨이 공간 부족으로 SpawnCount보다 적게 놓았을 때 그 차이. 매니저가 다른 볼륨으로 넘긴다
+    UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
+    int32 GetLastSpawnShortfall() const { return LastSpawnShortfall; }
+
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -198,6 +208,11 @@ protected:
 		meta = (ClampMin = "0", UIMin = "0"))
 	int32 SpawnCount = 20;
 
+	// 0보다 크면 맵 전체 총량(기준 개수 × 인원 배율 × 난이도 배율)을 다른 볼륨과 이 가중치 비율로 나눠 SpawnCount를 덮어쓴다. 0이면 SpawnCount를 그대로 쓴다
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash Spawn",
+		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "100.0"))
+	float SpawnShare = 0.0f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash Spawn")
 	bool bSpawnOnBeginPlay = true;
 
@@ -253,4 +268,7 @@ private:
 
     UPROPERTY(Transient)
     bool bStateInitialized = false;
+
+    UPROPERTY(Transient)
+    int32 LastSpawnShortfall = 0;
 };
