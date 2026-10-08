@@ -33,4 +33,15 @@ const UDataTable* UMD_TrashSettings::GetTrashKindTable() const
 	return TrashKindTable.LoadSynchronous();
 }
 
+float UMD_TrashSettings::GetPlayerCountTrashMultiplier(const int32 PlayerCount) const
+{
+	if (PlayerCountTrashMultipliers.IsEmpty())
+	{
+		return 1.0f;
+	}
+	const int32 Index = FMath::Clamp(PlayerCount - 1, 0, PlayerCountTrashMultipliers.Num() - 1);
+	const float Multiplier = PlayerCountTrashMultipliers[Index];
+	return FMath::IsFinite(Multiplier) && Multiplier > 0.0f ? Multiplier : 1.0f;
+}
+
 #undef LOCTEXT_NAMESPACE

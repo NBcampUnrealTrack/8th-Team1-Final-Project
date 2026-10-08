@@ -234,7 +234,7 @@ void AMD_GameStateBase::SetContractDifficulty(EMD_Difficulty Difficulty)
     }
 
     // C++ 또는 Blueprint에서 전달된 열거형 값도 정식 난이도 범위로 제한하기 위한 검사
-    if (Difficulty < EMD_Difficulty::Safe || Difficulty > EMD_Difficulty::Extreme)
+    if (Difficulty < EMD_Difficulty::Safe || Difficulty > EMD_Difficulty::Dangerous)
     {
         return;
     }

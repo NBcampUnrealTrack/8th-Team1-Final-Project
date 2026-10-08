@@ -273,7 +273,7 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 	}
 
 	// 네트워크로 전달된 난이도 값이 정의된 계약 범위를 벗어나지 않도록 하는 서버 검증
-	if (Difficulty < EMD_Difficulty::Safe || Difficulty > EMD_Difficulty::Extreme)
+	if (Difficulty < EMD_Difficulty::Safe || Difficulty > EMD_Difficulty::Dangerous)
 	{
 		return;
 	}

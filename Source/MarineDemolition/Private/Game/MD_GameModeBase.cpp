@@ -41,7 +41,7 @@ void AMD_GameModeBase::InitGame(const FString& MapName, const FString& Options, 
     {
         // 변조되거나 정의되지 않은 정수 값이 점검 기준을 오염시키지 않도록 하는 서버 검증
         uint8 DifficultyValue = MAX_uint8;
-        if (LexTryParseString(DifficultyValue, *DifficultyOption) == true && DifficultyValue >= static_cast<uint8>(EMD_Difficulty::Safe) && DifficultyValue <= static_cast<uint8>(EMD_Difficulty::Extreme))
+        if (LexTryParseString(DifficultyValue, *DifficultyOption) == true && DifficultyValue >= static_cast<uint8>(EMD_Difficulty::Safe) && DifficultyValue <= static_cast<uint8>(EMD_Difficulty::Dangerous))
         {
             RequestedContractDifficulty = static_cast<EMD_Difficulty>(DifficultyValue);
             bHasRequestedContractDifficulty = true;
@@ -520,6 +520,28 @@ void AMD_GameModeBase::InitializeExpeditionDay()
     if (auto* GS = GetGameState<AMD_GameStateBase>()) GS->FinishWorldInitialization();
 }
 
+UMD_SiteDefinition* AMD_GameModeBase::FindExpeditionSiteForWorld(UWorld* World) const
+{
+    if (IsValid(World) == false)
+    {
+        return nullptr;
+    }
+    // PIE에서도 원본 맵 키로 조회하기 위한 현재 월드 소프트 참조
+    TSoftObjectPtr<UWorld> CurrentWorldReference = MakeWorldAssetReference(World);
+    // 현재 맵과 일대일로 등록된 현장 데이터 조회
+    TObjectPtr<UMD_SiteDefinition> RegisteredSite = ExpeditionSitesByMap.FindRef(CurrentWorldReference);
+    if (IsValid(RegisteredSite) == true)
+    {
+        return RegisteredSite.Get();
+    }
+    // 기존 단일 Site 설정을 사용하는 Blueprint와의 호환 경로
+    if (DoesSiteUseCurrentWorld(ExpeditionSite, World) == true)
+    {
+        return ExpeditionSite;
+    }
+    return nullptr;
+}
+
 UMD_SiteDefinition* AMD_GameModeBase::ResolveExpeditionSite() const
 {
     // 현재 월드와 퀘스트 맵이 일치하는 현장만 반환하기 위한 결과
@@ -529,21 +551,7 @@ UMD_SiteDefinition* AMD_GameModeBase::ResolveExpeditionSite() const
     UWorld* World = GetWorld();
     if (IsValid(World) == true)
     {
-        // PIE에서도 원본 맵 키로 조회하기 위한 현재 월드 소프트 참조
-        TSoftObjectPtr<UWorld> CurrentWorldReference = MakeWorldAssetReference(World);
-
-        // 현재 맵과 일대일로 등록된 현장 데이터 조회
-        TObjectPtr<UMD_SiteDefinition> RegisteredSite = ExpeditionSitesByMap.FindRef(CurrentWorldReference);
-        if (IsValid(RegisteredSite) == true)
-        {
-            OutSite = RegisteredSite.Get();
-        }
-
-        // 기존 단일 Site 설정을 사용하는 Blueprint와의 호환 경로
-        if (IsValid(OutSite) == false && DoesSiteUseCurrentWorld(ExpeditionSite, World) == true)
-        {
-            OutSite = ExpeditionSite;
-        }
+        OutSite = FindExpeditionSiteForWorld(World);
 
         if (IsValid(OutSite) == false)
         {

@@ -6,12 +6,14 @@
 #include "Math/Box2D.h"
 #include "Templates/SubclassOf.h"
 #include "Types/Trash/MD_TrashSpawnState.h"
+#include "Types/Travel/MD_TravelTypes.h"
 #include "MD_TrashSpawnVolume.generated.h"
 
 class AMD_TrashItem;
 class USceneComponent;
 class USplineComponent;
 class UMD_TrashFloorPlacementComponent;
+class UMD_TrashSpawnProfile;
 struct FMD_TrashGeneratorState;
 
 struct FMD_TrashFloorAppearance
@@ -116,6 +118,32 @@ public:
     UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
     bool IsStateInitialized() const { return bStateInitialized; }
 
+    UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
+    float GetSpawnShare() const { return SpawnShare; }
+
+    // 이 볼륨에서 우선 사용할 총량 프로필. 전체 생성기에 두면 현장 프로필보다 앞선다
+    UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
+    UMD_TrashSpawnProfile* GetTrashSpawnProfileOverride() const { return TrashSpawnProfileOverride; }
+
+    // 볼륨 확률표가 비어 있으면 활성 프로필의 기본 확률표를 쓴다
+    const TArray<FMD_TrashSpawnKindChance>& GetEffectiveKindChances() const;
+
+    // 스플라인 다각형의 바닥 면적(cm²). 비율 볼륨의 수용량 추정에 쓴다
+    double ComputeBoundaryArea() const;
+
+#if WITH_EDITOR
+    // PIE 없이 현재 레벨의 비율 볼륨에 총량을 나눠 보고 각 볼륨의 Preview 필드에 기록한다
+    UFUNCTION(CallInEditor, BlueprintCallable, Category = "MD|Trash Spawn|Preview", meta = (DisplayName = "분배 미리보기"))
+    void PreviewShareDistribution();
+#endif
+
+    UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
+    int32 GetSpawnCount() const { return SpawnCount; }
+
+    // 비율 볼륨이 공간 부족으로 SpawnCount보다 적게 놓았을 때 그 차이. 매니저가 다른 볼륨으로 넘긴다
+    UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
+    int32 GetLastSpawnShortfall() const { return LastSpawnShortfall; }
+
 protected:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -194,9 +222,39 @@ protected:
         meta = (TitleProperty = "TrashKindId"))
     TArray<FMD_TrashSpawnKindChance> TrashKindChances;
 
+	// 0보다 크면 맵 전체 총량(기준 개수 × 인원 배율 × 난이도 배율)을 다른 볼륨과 이 가중치 비율로 나눠 SpawnCount를 덮어쓴다. 0이면 SpawnCount를 그대로 쓴다
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash Spawn",
-		meta = (ClampMin = "0", UIMin = "0"))
+		meta = (ClampMin = "0.0", UIMin = "0.0", UIMax = "100.0", DisplayPriority = "1"))
+	float SpawnShare = 0.0f;
+
+	// 고정 개수. SpawnShare가 0일 때만 쓴다
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash Spawn",
+		meta = (ClampMin = "0", UIMin = "0", EditCondition = "SpawnShare <= 0.0", DisplayPriority = "2"))
 	int32 SpawnCount = 20;
+
+	// 총량 규칙 재정의. 전체 생성기에 설정하면 현장(Site) 프로필과 Project Settings보다 우선한다
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash Spawn")
+	TObjectPtr<UMD_TrashSpawnProfile> TrashSpawnProfileOverride;
+
+	// 미리보기에 쓸 인원수
+	UPROPERTY(EditAnywhere, Category = "MD|Trash Spawn|Preview", meta = (ClampMin = "1", ClampMax = "4", UIMin = "1", UIMax = "4"))
+	int32 PreviewPlayerCount = 4;
+
+	// 미리보기에 쓸 계약 난이도
+	UPROPERTY(EditAnywhere, Category = "MD|Trash Spawn|Preview")
+	EMD_Difficulty PreviewDifficulty = EMD_Difficulty::Standard;
+
+	// 마지막 미리보기에서 이 볼륨에 배정된 개수
+	UPROPERTY(VisibleAnywhere, Transient, Category = "MD|Trash Spawn|Preview")
+	int32 PreviewAssignedCount = 0;
+
+	// 바닥 면적과 아이템 크기·간격으로 추정한 이 볼륨의 최대 수용량. 실제 배치는 이보다 적을 수 있다
+	UPROPERTY(VisibleAnywhere, Transient, Category = "MD|Trash Spawn|Preview")
+	int32 PreviewEstimatedCapacity = 0;
+
+	// 마지막 미리보기의 맵 전체 총량(전체 생성기에서 확인)
+	UPROPERTY(VisibleAnywhere, Transient, Category = "MD|Trash Spawn|Preview")
+	int32 PreviewTotalCount = 0;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash Spawn")
 	bool bSpawnOnBeginPlay = true;
@@ -253,4 +311,7 @@ private:
 
     UPROPERTY(Transient)
     bool bStateInitialized = false;
+
+    UPROPERTY(Transient)
+    int32 LastSpawnShortfall = 0;
 };
