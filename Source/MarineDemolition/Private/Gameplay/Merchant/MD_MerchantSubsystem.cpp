@@ -14,6 +14,14 @@
 #include "Engine/World.h"
 
 
+bool UMD_MerchantSubsystem::HasServerAuthority()
+{
+    // 경제 상태가 속한 현재 게임 월드 조회
+    UWorld* World = GetWorld();
+    // 월드 초기화 전과 클라이언트 및 편집기에서의 원장 변경 차단
+    return IsValid(World) == true && World->IsGameWorld() == true && World->GetNetMode() != NM_Client;
+}
+
 double UMD_MerchantSubsystem::GetCreditHistoryElapsedSeconds()
 {
     // 최종 정산 이후에는 조회 시각과 무관한 종료점 사용
@@ -227,6 +235,13 @@ TArray<FMD_DailyReportValue> UMD_MerchantSubsystem::GetDailyCreditTotals() const
 
 void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer)
 {
+	// 클라이언트와 게임 월드 외 경제 상태 변경 차단
+	if (HasServerAuthority() == false)
+	{
+		// 서버 확정 조건을 충족하지 않은 변경 요청 종료
+		return;
+	}
+
 	// 모든 외부 크레딧 변경을 단일 Enum 기반 기록 경로로 처리
 	AddCreditsInternal(Category, Amount, ResponsiblePlayer);
 	OnMerchantStateChanged.Broadcast();
@@ -234,6 +249,13 @@ void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 A
 
 EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase)
 {
+	// 클라이언트와 게임 월드 외 소지품 및 결제 변경 차단
+	if (HasServerAuthority() == false)
+	{
+		// 지급과 회수 전에 서버 확정 조건 미충족 전달
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
 	// 클라이언트가 로컬 원장을 변경하지 못하도록 막는 서버 권위 검사
 	if (IsValid(PurchasingPlayerState) == false || PurchasingPlayerState->HasAuthority() == false || bShopTransactionInProgress == true)
 	{
@@ -304,6 +326,13 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerStat
 
 EMD_ShopSaleResult UMD_MerchantSubsystem::TrySellShopItem(AMD_PlayerState* SellingPlayerState, FMD_ShopItem ShopItem, int32 SlotIndex, int32 Quantity)
 {
+	// 클라이언트와 게임 월드 외 소지품 및 결제 변경 차단
+	if (HasServerAuthority() == false)
+	{
+		// 지급과 회수 전에 서버 확정 조건 미충족 전달
+		return EMD_ShopSaleResult::InvalidRequest;
+	}
+
 	// 서버 소유권과 양수 수량 및 진행 중 거래 검사
 	if (IsValid(SellingPlayerState) == false || SellingPlayerState->HasAuthority() == false || Quantity <= 0 || bShopTransactionInProgress == true)
 	{
@@ -447,6 +476,13 @@ int32 UMD_MerchantSubsystem::GetAvailableLoanAmount() const
 
 bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount, APlayerState* ResponsiblePlayer)
 {
+	// 클라이언트와 게임 월드 외 경제 상태 변경 차단
+	if (HasServerAuthority() == false)
+	{
+		// 서버 확정 조건을 충족하지 않은 변경 요청 종료
+		return false;
+	}
+
 	// 잘못된 금액과 잔여 대출 한도를 초과하는 요청 차단
 	if (Amount <= 0 || Amount > GetAvailableLoanAmount())
 	{
@@ -474,6 +510,13 @@ bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount, APlayerState* Respons
 
 bool UMD_MerchantSubsystem::TryRepayLoan(int32 Amount, APlayerState* ResponsiblePlayer)
 {
+	// 클라이언트와 게임 월드 외 경제 상태 변경 차단
+	if (HasServerAuthority() == false)
+	{
+		// 서버 확정 조건을 충족하지 않은 변경 요청 종료
+		return false;
+	}
+
 	// 실제 부채와 보유 크레딧 범위를 넘는 상환 요청을 거부하여 두 원장의 불일치를 방지하는 검사
 	if (Amount <= 0 || Amount > DebtBalance || Amount > Credits)
 	{
@@ -510,6 +553,13 @@ int32 UMD_MerchantSubsystem::CalculateLoanInterest(int32 InDebtBalance, int32 In
 
 int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 {
+	// 클라이언트와 게임 월드 외 경제 상태 변경 차단
+	if (HasServerAuthority() == false)
+	{
+		// 서버 확정 조건을 충족하지 않은 변경 요청 종료
+		return 0;
+	}
+
 	// 대출 UI와 동일한 현재 원금 기준의 실제 부과액 계산
 	int32 InterestAmount = CalculateLoanInterest(DebtBalance, LoanPrincipal);
 	// 변화가 없는 부채의 불필요한 복제 알림 생략
@@ -528,6 +578,13 @@ int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 
 void UMD_MerchantSubsystem::FinalizeContract()
 {
+	// 클라이언트와 게임 월드 외 경제 상태 변경 차단
+	if (HasServerAuthority() == false)
+	{
+		// 서버 확정 조건을 충족하지 않은 변경 요청 종료
+		return;
+	}
+
     // 원장을 보존한 채 계약 종료 시각 고정
     FinishCreditHistory();
 	CurrentSite = nullptr;
@@ -640,6 +697,13 @@ void UMD_MerchantSubsystem::Deinitialize()
 
 void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 BaseAdvancePayment)
 {
+	// 클라이언트와 게임 월드 외 경제 상태 변경 차단
+	if (HasServerAuthority() == false)
+	{
+		// 서버 확정 조건을 충족하지 않은 변경 요청 종료
+		return;
+	}
+
 	if (IsValid(Site) == false)
 	{
 		return;

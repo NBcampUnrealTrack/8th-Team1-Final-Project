@@ -157,6 +157,9 @@ protected:
     // 거래가 없는 참가자도 영점 그래프를 표시하기 위한 현재 명단 등록
     void RegisterCurrentCreditPlayers();
 
+    // 서버 게임 월드에서만 경제 원장 변경을 허용하기 위한 권한 검사
+    bool HasServerAuthority();
+
 private:
 
 

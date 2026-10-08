@@ -277,15 +277,28 @@ void AMD_WallUtility::EndPlay(const EEndPlayReason::Type Reason)
 
 void AMD_WallUtility::SetBroken(AActor* Cutter)
 {
-	if (!HasAuthority() || UtilityState == EMD_UtilityState::Broken)
+	// 서버 권한과 시설 상태 저장소가 유효한 신규 파손 전이만 허용
+	if (HasAuthority() == false || UtilityState == EMD_UtilityState::Broken || IsValid(FacilityRepair) == false)
 	{
+		// 중복 호출과 무효한 상태 저장소의 부수 효과 차단
 		return;
 	}
 
-	UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s SetBroken -> Broken"), *GetName());
-
+	// 공통 고장 확정 실패 시 복원할 기존 표현 상태 보관
+	EMD_UtilityState PreviousState = UtilityState;
+	// 공통 상태 방송의 재진입을 차단할 파손 표현 상태 선반영
 	UtilityState = EMD_UtilityState::Broken;
-	FacilityRepair->TryBreak();
+	// 이미 확정된 고장 동기화 또는 신규 서버 고장 확정만 허용
+	if (FacilityRepair->IsFaultActive() == false && FacilityRepair->TryBreak() == false)
+	{
+		// 거부된 고장이 기존 표현 상태에 남지 않도록 복원
+		UtilityState = PreviousState;
+		// 파손 효과와 감점 및 조명 변경 실행 차단
+		return;
+	}
+
+	// 공통 고장 확정 이후 파손 전이 기록
+	UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s SetBroken -> Broken"), *GetName());
 
 	OnBroken(Cutter);
 
@@ -312,18 +325,34 @@ bool AMD_WallUtility::TryExternalRepair(AActor* Repairer, FGameplayTag RepairToo
 	}
 
 	SetRepaired(Repairer);
-	return true;
+	// 실제 서버 복구가 반영된 경우에만 수리 성공 전달
+	return UtilityState == EMD_UtilityState::Repaired;
 }
 
 void AMD_WallUtility::SetRepaired(AActor* Repairer)
 {
-	if (!HasAuthority() || UtilityState != EMD_UtilityState::Broken)
+	// 서버 권한과 시설 상태 저장소가 유효한 파손 상태의 복구만 허용
+	if (HasAuthority() == false || UtilityState != EMD_UtilityState::Broken || IsValid(FacilityRepair) == false)
 	{
+		// 중복 복구와 무효한 상태 저장소의 부수 효과 차단
 		return;
 	}
 
+	// 공통 수리 확정 실패 시 복원할 기존 표현 상태 보관
+	EMD_UtilityState PreviousState = UtilityState;
+	// 공통 상태 방송의 재진입을 차단할 복구 표현 상태 선반영
 	UtilityState = EMD_UtilityState::Repaired;
-	FacilityRepair->CompleteRepairFromValidatedSource(FacilityRepair->GetSnapshot().FaultId);
+	// 복구 여부와 사건 검증에 함께 사용할 공통 시설 상태 조회
+	FMD_FacilitySnapshot CurrentFault = FacilityRepair->GetSnapshot();
+	// 이미 확정된 복구 동기화 또는 신규 서버 수리 확정만 허용
+	if (CurrentFault.State != EMD_FacilityState::Repaired
+		&& FacilityRepair->CompleteRepairFromValidatedSource(CurrentFault.FaultId) == false)
+	{
+		// 거부된 수리가 기존 표현 상태에 남지 않도록 복원
+		UtilityState = PreviousState;
+		// 복구 효과와 연결된 문의 잠금 해제 실행 차단
+		return;
+	}
 	UE_LOG(LogTemp, Display, TEXT("[MD_Utility] %s SetRepaired: UtilityState=Repaired, Repairer=%s"),
 		*GetName(), *GetNameSafe(Repairer));
 
@@ -442,7 +471,8 @@ bool AMD_WallUtility::TryRepairWithEquippedTool(AActor* Repairer)
 	}
 
 	SetRepaired(Repairer);
-	return true;
+	// 실제 서버 복구가 반영된 경우에만 수리 성공 전달
+	return UtilityState == EMD_UtilityState::Repaired;
 }
 
 void AMD_WallUtility::Interact_Implementation(AActor* Interactor)
