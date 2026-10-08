@@ -19,6 +19,9 @@ void UMD_ThrowChargeWidget::NativeConstruct()
 	Super::NativeConstruct();
 	SetVisibility(ESlateVisibility::HitTestInvisible);
 	SetIsFocusable(false);
+	// 재구성 시 충전 상태와 이미지 표시를 다시 동기화하기 위한 캐시 초기화
+	LastChargeFraction = -1.0f;
+	// 현재 소유 플레이어의 실제 충전 상태를 Blueprint에 반영
 	UpdateThrowChargeUI();
 }
 
@@ -88,10 +91,21 @@ void UMD_ThrowChargeWidget::UpdateThrowChargeUI()
 		}
 	}
 
+	// 시작과 종료 또는 충전 비율 변화가 있을 때만 이미지 갱신 요청
+	bool bChargeChanged = bThrowCharging != bCharging || LastChargeFraction != Fraction;
 	if (bThrowCharging != bCharging || bThrowFullyCharged != bFullyCharged)
 	{
 		bThrowCharging = bCharging;
 		bThrowFullyCharged = bFullyCharged;
 		OnChargeStateChanged(bCharging, bFullyCharged);
+	}
+
+	// Blueprint의 기존 충전 시작과 갱신 및 종료 함수 연결
+	if (bChargeChanged == true)
+	{
+		// 다음 프레임의 중복 알림을 차단할 표시 비율 저장
+		LastChargeFraction = Fraction;
+		// 이미지와 머티리얼 처리를 담당하는 이벤트 호출
+		OnChargeUpdated(bCharging, Fraction);
 	}
 }
