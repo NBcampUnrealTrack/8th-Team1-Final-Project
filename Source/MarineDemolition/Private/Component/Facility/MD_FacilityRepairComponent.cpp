@@ -116,8 +116,12 @@ bool UMD_FacilityRepairComponent::TryRepairWithTape(APawn* Pawn, int32 ExpectedF
 	UMD_FacilityFaultComponent* Target = ResolveRepairTarget();
 	if (!IsValid(Target) || !Target->GetOwner()->HasAuthority() || !Target->IsFaultActive()
 		|| Target->GetSnapshot().FaultId != ExpectedFaultId) return false;
-	if (!Hotbar->TryConsumeItem(Tape, 1)) return false;
-	return Target->CompleteRepairFromValidatedSource(ExpectedFaultId);
+	// 수량 예약과 동일 사건의 복구 확정을 단일 성공 결과로 연결
+	return Hotbar->TryConsumeItemAndCommit(Tape, 1, [Target, ExpectedFaultId]()
+	{
+		// 실제 복구 거부 시 예약 수량 복원을 위한 확정 결과 전달
+		return Target->CompleteRepairFromValidatedSource(ExpectedFaultId);
+	});
 }
 
 FText UMD_FacilityRepairComponent::GetRepairPrompt() const

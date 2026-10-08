@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Subsystems/GameInstanceSubsystem.h"
+#include "Engine/TimerHandle.h"
 #include "Types/Merchant/MD_MerchantTypes.h"
 #include "Types/Score/MD_ScoreTypes.h"
 #include "MD_MerchantSubsystem.generated.h"
@@ -40,7 +41,7 @@ public:
 	FMD_OnMerchantStateChanged OnMerchantStateChanged;
 
 protected:
-	// 아이템 변경 알림에서 중첩 구매와 판매가 실행되는 상황 차단
+	// 경제 원장 변경과 알림 중 중첩 거래가 실행되는 상황 차단
 	bool bShopTransactionInProgress = false;
 
 public:
@@ -189,4 +190,25 @@ private:
 	/** 계약 중 구매 결과와 선행 품목 해금을 유지하기 위한 서버 권위 구매 원장 */
 	UPROPERTY()
 	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
+
+protected:
+    // 거래 도중 발생한 독립 보상의 원인과 금액 및 약한 책임자 참조 보관
+    struct FPendingCreditChange
+    {
+        // 기존 정산 원장에 사용할 보상 분류
+        EMD_DailyReportCategory Category = EMD_DailyReportCategory::Other;
+        // 보상 발생 순서대로 반영할 실제 요청 금액
+        int32 Amount = 0;
+        // 퇴장한 플레이어의 수명을 연장하지 않는 책임자 연결
+        TWeakObjectPtr<APlayerState> ResponsiblePlayer;
+    };
+
+    // 현재 거래가 확정된 다음 순차 반영할 독립 보상 목록
+    TArray<FPendingCreditChange> PendingCreditChanges;
+
+    // 보상 알림의 재진입을 다음 틱으로 넘기는 단일 예약
+    FTimerHandle PendingCreditFlushTimerHandle;
+
+    // 거래 가드 해제 이후 보관된 보상을 원장과 표시 상태에 반영
+    void FlushPendingCreditChanges();
 };

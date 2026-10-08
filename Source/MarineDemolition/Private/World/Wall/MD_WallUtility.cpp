@@ -277,33 +277,46 @@ void AMD_WallUtility::EndPlay(const EEndPlayReason::Type Reason)
 
 void AMD_WallUtility::SetBroken(AActor* Cutter)
 {
-	// 서버 권한과 시설 상태 저장소가 유효한 신규 파손 전이만 허용
+	// 파손 효과 처리 중 동일 인프라 재진입 차단
+	if (bUtilityTransitionInProgress == true)
+	{
+		// 진행 중인 사건과 효과 보존
+		return;
+	}
+	// 서버와 신규 파손 상태 및 공통 저장소 확인
 	if (HasAuthority() == false || UtilityState == EMD_UtilityState::Broken || IsValid(FacilityRepair) == false)
 	{
-		// 중복 호출과 무효한 상태 저장소의 부수 효과 차단
+		// 중복 또는 무효 파손 요청 거부
 		return;
 	}
-
-	// 공통 고장 확정 실패 시 복원할 기존 표현 상태 보관
+	// 파생 효과와 표현 알림까지 인프라 전이 보호
+	TGuardValue<bool> TransitionGuard(bUtilityTransitionInProgress, true);
+	// 공통 확정 실패 시 복원할 표현 상태 보관
 	EMD_UtilityState PreviousState = UtilityState;
-	// 공통 상태 방송의 재진입을 차단할 파손 표현 상태 선반영
+	// 공통 방송으로 인한 동일 효과 중복 실행 차단
 	UtilityState = EMD_UtilityState::Broken;
-	// 이미 확정된 고장 동기화 또는 신규 서버 고장 확정만 허용
-	if (FacilityRepair->IsFaultActive() == false && FacilityRepair->TryBreak() == false)
+	// 공통 전이 보호 안에서 실행할 파손 효과 묶음
+	auto ApplyBrokenEffects = [this, Cutter]()
 	{
-		// 거부된 고장이 기존 표현 상태에 남지 않도록 복원
-		UtilityState = PreviousState;
-		// 파손 효과와 감점 및 조명 변경 실행 차단
-		return;
+		// 확정된 인프라 파손 기록
+		UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s SetBroken -> Broken"), *GetName());
+		// 기존 절단자 정보를 전달한 파생 파손 효과 적용
+		OnBroken(Cutter);
+		// 리슨 서버의 표현 상태 갱신
+		OnRep_UtilityState();
+	};
+	// 공통 방송에서 이미 확정된 사건의 효과 적용
+	if (FacilityRepair->IsFaultActive() == true)
+	{
+		// 공통 사건과 인프라 표현 동기화
+		ApplyBrokenEffects();
 	}
-
-	// 공통 고장 확정 이후 파손 전이 기록
-	UE_LOG(LogTemp, Warning, TEXT("[MD_Utility] %s SetBroken -> Broken"), *GetName());
-
-	OnBroken(Cutter);
-
-	// 리슨 서버 호스트는 OnRep이 안 오므로 직접 연출 반영
-	OnRep_UtilityState();
+	// 신규 파손의 효과까지 공통 전이 보호 아래 확정
+	else if (FacilityRepair->TryBreakWithEffects(ApplyBrokenEffects) == false)
+	{
+		// 거부된 파손의 선반영 상태 복원
+		UtilityState = PreviousState;
+	}
 }
 
 void AMD_WallUtility::DebugForceRepair(AActor* Repairer)
@@ -331,37 +344,50 @@ bool AMD_WallUtility::TryExternalRepair(AActor* Repairer, FGameplayTag RepairToo
 
 void AMD_WallUtility::SetRepaired(AActor* Repairer)
 {
-	// 서버 권한과 시설 상태 저장소가 유효한 파손 상태의 복구만 허용
+	// 복구 효과 처리 중 동일 인프라 재진입 차단
+	if (bUtilityTransitionInProgress == true)
+	{
+		// 진행 중인 복구와 효과 보존
+		return;
+	}
+	// 서버와 파손 상태 및 공통 저장소 확인
 	if (HasAuthority() == false || UtilityState != EMD_UtilityState::Broken || IsValid(FacilityRepair) == false)
 	{
-		// 중복 복구와 무효한 상태 저장소의 부수 효과 차단
+		// 중복 또는 무효 복구 요청 거부
 		return;
 	}
-
-	// 공통 수리 확정 실패 시 복원할 기존 표현 상태 보관
+	// 파생 효과와 문 해제 및 표현 알림까지 전이 보호
+	TGuardValue<bool> TransitionGuard(bUtilityTransitionInProgress, true);
+	// 공통 확정 실패 시 복원할 표현 상태 보관
 	EMD_UtilityState PreviousState = UtilityState;
-	// 공통 상태 방송의 재진입을 차단할 복구 표현 상태 선반영
+	// 공통 방송으로 인한 동일 복구 효과 중복 실행 차단
 	UtilityState = EMD_UtilityState::Repaired;
-	// 복구 여부와 사건 검증에 함께 사용할 공통 시설 상태 조회
+	// 복구 상태와 사건 번호를 함께 확인할 공통 상태 조회
 	FMD_FacilitySnapshot CurrentFault = FacilityRepair->GetSnapshot();
-	// 이미 확정된 복구 동기화 또는 신규 서버 수리 확정만 허용
-	if (CurrentFault.State != EMD_FacilityState::Repaired
-		&& FacilityRepair->CompleteRepairFromValidatedSource(CurrentFault.FaultId) == false)
+	// 공통 전이 보호 안에서 실행할 복구 효과 묶음
+	auto ApplyRepairedEffects = [this, Repairer]()
 	{
-		// 거부된 수리가 기존 표현 상태에 남지 않도록 복원
-		UtilityState = PreviousState;
-		// 복구 효과와 연결된 문의 잠금 해제 실행 차단
-		return;
+		// 확정된 복구 상태와 요청자 기록
+		UE_LOG(LogTemp, Display, TEXT("[MD_Utility] %s SetRepaired: UtilityState=Repaired, Repairer=%s"), *GetName(), *GetNameSafe(Repairer));
+		// 기존 요청자 정보를 전달한 파생 복구 효과 적용
+		OnRepaired(Repairer);
+		// 복구된 인프라에 연결된 문 잠금 해제
+		UnlockLinkedGate();
+		// 리슨 서버의 표현 상태 갱신
+		OnRep_UtilityState();
+	};
+	// 공통 방송에서 이미 확정된 복구의 효과 적용
+	if (CurrentFault.State == EMD_FacilityState::Repaired)
+	{
+		// 공통 복구와 인프라 표현 동기화
+		ApplyRepairedEffects();
 	}
-	UE_LOG(LogTemp, Display, TEXT("[MD_Utility] %s SetRepaired: UtilityState=Repaired, Repairer=%s"),
-		*GetName(), *GetNameSafe(Repairer));
-
-	OnRepaired(Repairer);
-
-	// 수리 완료 시 연결된 문의 잠금 해제
-	UnlockLinkedGate();
-
-	OnRep_UtilityState();
+	// 신규 복구의 효과까지 동일 사건의 공통 전이 안에서 확정
+	else if (FacilityRepair->CompleteRepairWithEffects(CurrentFault.FaultId, ApplyRepairedEffects) == false)
+	{
+		// 거부된 복구의 선반영 상태 복원
+		UtilityState = PreviousState;
+	}
 }
 
 void AMD_WallUtility::UnlockLinkedGate()
@@ -453,25 +479,51 @@ bool AMD_WallUtility::CanInteract_Implementation(AActor* Interactor) const
 
 bool AMD_WallUtility::TryRepairWithEquippedTool(AActor* Repairer)
 {
-	if (!HasAuthority() || UtilityState != EMD_UtilityState::Broken || !CanRepairWith(Repairer))
+	// 서버와 파손 상태 및 현재 장착 도구 확인
+	if (HasAuthority() == false || UtilityState != EMD_UtilityState::Broken || CanRepairWith(Repairer) == false)
 	{
+		// 무효 도구 수리 요청 거부
 		return false;
 	}
-
-	// 소모형 수리 도구는 차감이 먼저다. 차감 실패(수량 0)면 수리도 하지 않는다
-	if (bConsumesRepairTool)
+	// 소모형 수리만 수량 예약과 복구 확정을 함께 처리
+	if (bConsumesRepairTool == true)
 	{
-		const AMD_Character* Character = Cast<AMD_Character>(Repairer);
-		UMD_EquipHotbarComponent* Hotbar = IsValid(Character) ? Character->GetHotbarComponent() : nullptr;
-		// 수리 도구의 공통 수량 차감 실패 시 수리 진행 차단
-		if (IsValid(Hotbar) == false || Hotbar->TryConsumeItem(Hotbar->GetCurrentItem(), 1) == false)
+		// 수리자의 실제 보관 상태 조회
+		AMD_Character* Character = Cast<AMD_Character>(Repairer);
+		// 캐릭터와 공통 시설 저장소 확인
+		if (IsValid(Character) == false || IsValid(FacilityRepair) == false || FacilityRepair->IsFaultActive() == false)
 		{
+			// 상태 검증 실패 시 소모 차단
 			return false;
 		}
+		// 소모를 확정할 핫바 조회
+		UMD_EquipHotbarComponent* Hotbar = Character->GetHotbarComponent();
+		// 유효한 보관 상태만 허용
+		if (IsValid(Hotbar) == false)
+		{
+			// 보관 상태 없는 소모 거부
+			return false;
+		}
+		// 예약 전 현재 사건 번호 보관
+		int32 ExpectedFaultId = FacilityRepair->GetSnapshot().FaultId;
+		// 복구 성공 시에만 수량 차감과 능력 회수 및 알림 확정
+		return Hotbar->TryConsumeItemAndCommit(Hotbar->GetCurrentItem(), 1, [this, Repairer, ExpectedFaultId]()
+		{
+			// 예약한 사건이 유지된 경우에만 복구 실행
+			if (IsValid(FacilityRepair) == false || FacilityRepair->IsFaultActive() == false || FacilityRepair->GetSnapshot().FaultId != ExpectedFaultId)
+			{
+				// 사건 변경 시 소모 복원 요청
+				return false;
+			}
+			// 동일 사건의 공통 복구와 장치 효과 적용
+			SetRepaired(Repairer);
+			// 실제 복구 확정 결과 전달
+			return UtilityState == EMD_UtilityState::Repaired;
+		});
 	}
-
+	// 비소모형 도구의 기존 복구 처리
 	SetRepaired(Repairer);
-	// 실제 서버 복구가 반영된 경우에만 수리 성공 전달
+	// 실제 서버 복구 결과 전달
 	return UtilityState == EMD_UtilityState::Repaired;
 }
 

@@ -227,4 +227,8 @@ private:
 	bool bScanHighlighted = false;
 	bool bInteractionHighlighted = false;
 	void RefreshHighlight();
+
+protected:
+	// 파손과 복구 효과 중 동일 인프라의 중첩 전이 차단
+	bool bUtilityTransitionInProgress = false;
 };
