@@ -33,6 +33,8 @@
 #include "GameFramework/GameSession.h"
 #include "Gameplay/Customization/MD_CharacterAppearanceLibrary.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+#include "Gameplay/Lore/MD_LoreProfileSubsystem.h"
+#include "World/Lore/MD_LoreActor.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
 
@@ -50,6 +52,59 @@
 AMD_PlayerController::AMD_PlayerController()
 {
 	PlayerCameraManagerClass = AMD_PlayerCameraManager::StaticClass();
+}
+
+void AMD_PlayerController::ServerRequestDiscoverLore_Implementation(FPrimaryAssetId LoreAssetId)
+{
+	// 권한 월드와 실제 요청자의 폰이 준비된 경우만 처리
+	if (HasAuthority() == false || IsValid(GetWorld()) == false || IsValid(GetPawn()) == false || LoreAssetId.IsValid() == false)
+	{
+		// 유효하지 않은 팀 습득 요청 종료
+		return;
+	}
+	// 개인별 액터 제거 상태와 독립된 서버 배치물 검색
+	for (TActorIterator<AMD_LoreActor> It(GetWorld()); It; ++It)
+	{
+		// 요청 ID에 해당하는 실제 배치물과 수집 거리 확인
+		if (IsValid(*It) == false || It->GetLoreAssetId() != LoreAssetId || It->CanCollectLore(GetPawn()) == false)
+		{
+			// 다른 기록이나 원거리 배치 제외
+			continue;
+		}
+		// 습득 시점에 접속 중인 각 참가자에게 단일 기록 전달
+		for (FConstPlayerControllerIterator PlayerIt = GetWorld()->GetPlayerControllerIterator(); PlayerIt; ++PlayerIt)
+		{
+			// 소유 클라이언트에 전달할 플레이어 컨트롤러 조회
+			AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(PlayerIt->Get());
+			// 종료된 참가자나 다른 컨트롤러 제외
+			if (IsValid(PlayerController) == true)
+			{
+				// 기존 개인 이력 전체를 보내지 않고 이번 습득만 공유
+				PlayerController->ClientReceiveDiscoveredLore(LoreAssetId);
+			}
+		}
+		// 동일 ID의 중복 배치로 인한 반복 전송 방지
+		return;
+	}
+}
+
+void AMD_PlayerController::ClientReceiveDiscoveredLore_Implementation(FPrimaryAssetId LoreAssetId)
+{
+	// 수신 컨트롤러를 소유한 실제 로컬 사용자 조회
+	ULocalPlayer* LocalPlayer = GetLocalPlayer();
+	// 원격 컨트롤러나 전용 서버의 개인 파일 접근 방지
+	if (IsValid(LocalPlayer) == false)
+	{
+		return;
+	}
+	// 계정별 기존 이력을 유지하는 개인 원장 조회
+	UMD_LoreProfileSubsystem* Profile = LocalPlayer->GetSubsystem<UMD_LoreProfileSubsystem>();
+	// 생성된 개인 원장에만 습득 결과 전달
+	if (IsValid(Profile) == true)
+	{
+		// 로그인 준비 이전의 수신도 보관하여 개인 로드 이후 병합
+		Profile->RecordLore(LoreAssetId);
+	}
 }
 
 void AMD_PlayerController::CancelScrapeInteraction()

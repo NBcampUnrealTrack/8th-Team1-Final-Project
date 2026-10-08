@@ -11,7 +11,7 @@
 AMD_LoreActor::AMD_LoreActor()
 {
 	PrimaryActorTick.bCanEverTick = false;
-	// 각 클라이언트의 독립 배치 액터로 수집과 파괴를 개인에게만 적용
+	// 기존 개인 기록에 따른 표시 상태를 각 월드에서 독립 관리
 	bReplicates = false;
 	SetReplicateMovement(false);
 
@@ -31,20 +31,30 @@ AMD_LoreActor::AMD_LoreActor()
 
 bool AMD_LoreActor::RequiresServerInteraction_Implementation() const
 {
-	// 개인 기록만 변경하므로 로컬 입력 경로에서 수집 처리
+	// 로컬 입력에서 소유 컨트롤러의 팀 습득 요청으로 연결
 	return false;
 }
 
 bool AMD_LoreActor::CanInteract_Implementation(AActor* Interactor) const
 {
-	// 조사한 로컬 플레이어의 개인 보유 상태 검사
-	return CanCollectLore(Cast<APawn>(Interactor));
+	// 입력한 본인의 미보유 기록만 조사 대상으로 허용
+	APawn* InteractorPawn = Cast<APawn>(Interactor);
+	// 원격 입력과 유효하지 않은 배치 또는 거리 차단
+	if (CanCollectLore(InteractorPawn) == false || InteractorPawn->IsLocallyControlled() == false)
+	{
+		// 개인 상호작용 대상에서 제외
+		return false;
+	}
+	// 초기화 때 연결한 개인 원장을 재사용하여 반복 조회 방지
+	UMD_LoreProfileSubsystem* Profile = LocalProfile.Get();
+	// 목록 복사 없이 최초 로드 완료와 개인 미보유 상태 확인
+	return IsValid(Profile) == true && Profile->IsLoaded() == true && Profile->HasDiscoveredLore(LoreAssetId) == false;
 }
 
 void AMD_LoreActor::Interact_Implementation(AActor* Interactor)
 {
-	APawn* InteractorPawn = Cast<APawn>(Interactor);
-	if (CanCollectLore(InteractorPawn) == false)
+	// 기존 개인 이력과 상호작용 조건을 확인한 팀 습득 요청
+	if (CanInteract_Implementation(Interactor) == false)
 	{
 		return;
 	}
@@ -55,7 +65,7 @@ void AMD_LoreActor::Interact_Implementation(AActor* Interactor)
 		return;
 	}
 
-	// 조사한 본인의 개인 원장에만 발견 기록 반영
+	// 서버가 확인한 새 기록을 현재 참가자 각자의 원장에 반영
 	if (LoreSubsystem->TryDiscoverLore(LoreAssetId) == false)
 	{
 		RefreshCollectionState();
@@ -93,10 +103,14 @@ void AMD_LoreActor::BeginPlay()
 		// 개인 수집 대상이 없는 초기화 종료
 		return;
 	}
-	// 로그인과 로컬 사용자 생성 지연에 따른 초기화 재시도
-	GetWorldTimerManager().SetTimer(ProfileReadyTimer, this, &ThisClass::RefreshCollectionState, 0.25f, true);
 	// 이미 준비된 개인 기록의 즉시 반영
 	RefreshCollectionState();
+	// 개인 원장 준비가 지연된 배치물에만 재시도 타이머 사용
+	if (LocalProfile.IsValid() == false && IsActorBeingDestroyed() == false)
+	{
+		// 로그인 또는 로컬 사용자 생성 이후 초기화 재시도
+		GetWorldTimerManager().SetTimer(ProfileReadyTimer, this, &ThisClass::RefreshCollectionState, 0.25f, true);
+	}
 }
 
 void AMD_LoreActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
@@ -118,8 +132,8 @@ void AMD_LoreActor::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 bool AMD_LoreActor::CanCollectLore(APawn* InteractorPawn) const
 {
-	// 다른 참가자의 입력과 이미 제거 중인 기록물의 조사 차단
-	if (IsActorBeingDestroyed() == true || IsValid(InteractorPawn) == false || InteractorPawn->IsLocallyControlled() == false)
+	// 서버에서도 실제 요청자의 폰과 살아 있는 배치물 확인
+	if (IsActorBeingDestroyed() == true || IsValid(InteractorPawn) == false || InteractorPawn->GetWorld() != GetWorld())
 	{
 		return false;
 	}
@@ -130,7 +144,7 @@ bool AMD_LoreActor::CanCollectLore(APawn* InteractorPawn) const
 		return false;
 	}
 
-	// 로컬 인터페이스를 직접 호출해도 원거리 기록을 수집하지 않는 거리 검사
+	// 클라이언트가 보낸 식별자와 무관하게 실제 서버 배치 위치로 거리 검사
 	float MaximumDistanceSquared = FMath::Square(FMath::Max(1.0f, MaxCollectionDistance));
 	float InteractionDistanceSquared = FVector::DistSquared(InteractorPawn->GetActorLocation(), GetActorLocation());
 	if (InteractionDistanceSquared > MaximumDistanceSquared)
@@ -138,21 +152,8 @@ bool AMD_LoreActor::CanCollectLore(APawn* InteractorPawn) const
 		return false;
 	}
 
-	if (IsLoreConfigurationValid() == false)
-	{
-		return false;
-	}
-
-	UMD_LoreSubsystem* LoreSubsystem = GetLoreSubsystem();
-	if (IsValid(LoreSubsystem) == false)
-	{
-		return false;
-	}
-
-	// 로드되지 않은 개인 기록을 빈 목록으로 간주하는 상황 방지
-	UMD_LoreProfileSubsystem* Profile = LoreSubsystem->GetLocalProfile();
-	// 계정별 최초 로드 완료와 개인 미보유 상태를 함께 검사
-	return IsValid(Profile) == true && Profile->IsLoaded() == true && Profile->GetDiscoveredLoreAssetIds().Contains(LoreAssetId) == false;
+	// 호스트의 기존 수집 이력과 무관하게 실제 정의의 유효성 확인
+	return IsLoreConfigurationValid();
 }
 
 bool AMD_LoreActor::IsLoreConfigurationValid() const
@@ -193,39 +194,60 @@ void AMD_LoreActor::RefreshCollectionState()
 		// 중복 파괴 요청 종료
 		return;
 	}
-	// 현재 월드에서 사용하는 개인 기록 접근 경로 조회
-	UMD_LoreSubsystem* Lore = GetLoreSubsystem();
-	// 로컬 사용자 생성 이전의 접근 보류
-	if (IsValid(Lore) == false)
+	// 이미 연결된 개인 원장을 수집 이벤트에서도 재사용
+	UMD_LoreProfileSubsystem* Profile = LocalProfile.Get();
+	// 최초 연결 또는 원장 해제 이후에만 서브시스템 재조회
+	if (IsValid(Profile) == false)
 	{
-		// 다음 초기화 재시도까지 대기
-		return;
+		// 현재 월드의 개인 원장 접근 경로 확인
+		UMD_LoreSubsystem* Lore = GetLoreSubsystem();
+		// 로컬 사용자 생성 이전의 접근 보류
+		if (IsValid(Lore) == false)
+		{
+			// 다음 초기화 재시도까지 대기
+			return;
+		}
+		// 실제 개인 파일을 소유하는 로컬 원장 연결 준비
+		Profile = Lore->GetLocalProfile();
 	}
-	// 실제 개인 파일을 소유하는 로컬 원장 조회
-	UMD_LoreProfileSubsystem* Profile = Lore->GetLocalProfile();
 	// 계정과 저장 파일이 준비될 때까지 개인 보유 판정 보류
 	if (IsValid(Profile) == false || Profile->EnsureLoaded() == false)
 	{
 		// 다른 사용자의 상태로 배치물을 제거하는 상황 방지
 		return;
 	}
-	// 개인 파일 복원 이후 초기화 재시도 종료
-	GetWorldTimerManager().ClearTimer(ProfileReadyTimer);
-	// 이후 동일 기록의 개인 수집 이벤트 구독
+	// 최초 연결 때만 타이머 정리와 수집 이벤트 구독 수행
 	if (LocalProfile.IsValid() == false)
 	{
+		// 개인 파일 복원 이후 초기화 재시도 종료
+		GetWorldTimerManager().ClearTimer(ProfileReadyTimer);
 		// 종료 시 구독 해제에 사용할 개인 원장 보관
 		LocalProfile = Profile;
 		// 같은 개인에게 배치된 중복 기록물도 함께 정리
 		LoreProgressChangedHandle = Profile->OnPersonalLoreChanged.AddUObject(this, &ThisClass::RefreshCollectionState);
 	}
 	// 본인이 이미 보유한 기록만 현재 월드에서 제거
-	if (Profile->GetDiscoveredLoreAssetIds().Contains(LoreAssetId) == true)
+	if (Profile->HasDiscoveredLore(LoreAssetId) == true)
 	{
+		// 수집 완료된 배치물의 불필요한 후속 알림 처리 중단
+		Profile->OnPersonalLoreChanged.Remove(LoreProgressChangedHandle);
+		// 종료 시 중복 구독 해제 방지
+		LoreProgressChangedHandle.Reset();
 		// 수집 직전 활성 하이라이트 정리
 		SetInteractionHighlighted_Implementation(false);
-		// 비복제 액터의 로컬 파괴로 다른 참가자의 기록물 보존
-		Destroy();
+		// 호스트가 수집한 배치물도 다른 참가자의 요청 검증에 계속 사용
+		if (GetNetMode() == NM_ListenServer)
+		{
+			// 호스트 화면에서 이미 보유한 기록물 제거
+			SetActorHiddenInGame(true);
+			// 호스트의 조준과 이동에 남은 배치물이 개입하는 상황 방지
+			SetActorEnableCollision(false);
+		}
+		else
+		{
+			// 서버 검증에 사용하지 않는 로컬 사본 제거
+			Destroy();
+		}
 		// 파괴 이후 표시 변경 방지
 		return;
 	}

@@ -67,17 +67,17 @@ bool UMD_LoreComponent::HasDiscoveredLore(FPrimaryAssetId LoreAssetId) const
 
 void UMD_LoreComponent::UpdateLocalProfile()
 {
-	// 기존 BP의 GameState 조회에 제공할 로컬 사용자 확인
-	ULocalPlayer* LocalPlayer = GetWorld()->GetGameInstance()->GetFirstGamePlayer();
-	// 로컬 사용자 생성 이전의 초기화 보류
-	if (IsValid(LocalPlayer) == false)
-	{
-		// 다음 재시도 주기까지 대기
-		return;
-	}
-	// 맵과 독립된 개인 저장 원장 연결
+	// 연결된 개인 원장을 재사용하여 주기적인 사용자 조회 방지
 	if (IsValid(LocalProfile) == false)
 	{
+		// 최초 연결에 사용할 로컬 사용자 확인
+		ULocalPlayer* LocalPlayer = GetWorld()->GetGameInstance()->GetFirstGamePlayer();
+		// 로컬 사용자 생성 이전의 초기화 보류
+		if (IsValid(LocalPlayer) == false)
+		{
+			// 다음 재시도 주기까지 대기
+			return;
+		}
 		// 로컬 사용자별 저장 인스턴스 조회
 		LocalProfile = LocalPlayer->GetSubsystem<UMD_LoreProfileSubsystem>();
 		// 사용자 서브시스템 생성 이전의 접근 방지
@@ -88,6 +88,8 @@ void UMD_LoreComponent::UpdateLocalProfile()
 		}
 		// 수집과 로드 결과를 현재 화면 원장으로 전달
 		ProfileChangedHandle = LocalProfile->OnPersonalLoreChanged.AddUObject(this, &ThisClass::RefreshLocalProfile);
+		// 구독 전에 로드된 이력도 최초 연결에서 한 번 반영
+		RefreshLocalProfile();
 	}
 	// 계정 식별과 최초 파일 복원이 완료될 때까지 대기
 	if (LocalProfile->EnsureLoaded() == false)
@@ -95,8 +97,6 @@ void UMD_LoreComponent::UpdateLocalProfile()
 		// 다른 사용자의 임시 기록 표시 차단
 		return;
 	}
-	// 최초 로드가 구독 이전에 완료된 경우에도 현재 목록 적용
-	RefreshLocalProfile();
 	// 이전 수집 시 파일 반영에 실패한 기록 재시도
 	LocalProfile->SavePending();
 }

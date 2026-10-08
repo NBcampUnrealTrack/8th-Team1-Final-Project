@@ -15,7 +15,7 @@ class MARINEDEMOLITION_API UMD_LoreSubsystem : public UGameInstanceSubsystem
 	GENERATED_BODY()
 
 public:
-	// 현재 로컬 사용자가 조사한 기록의 개인 저장
+	// 로컬 사용자가 조사한 새 기록의 서버 검증 및 팀 공유 요청
 	UFUNCTION(BlueprintCallable, Category = "MD|Lore")
 	bool TryDiscoverLore(FPrimaryAssetId LoreAssetId);
 

@@ -67,6 +67,14 @@ public:
     UFUNCTION(Client, Reliable)
     void ClientReceiveDailyLedger(int32 RequestId, FMD_InspectionReport Report);
 
+    // 요청자가 조사한 기록의 서버 배치 및 거리 검증
+    UFUNCTION(Server, Reliable)
+    void ServerRequestDiscoverLore(FPrimaryAssetId LoreAssetId);
+
+    // 새 습득 기록 하나를 수신자의 개인 저장 원장에 전달
+    UFUNCTION(Client, Reliable)
+    void ClientReceiveDiscoveredLore(FPrimaryAssetId LoreAssetId);
+
     // 서버 확정 보고서를 각 소유 클라이언트의 UI Manager에 전달
     UFUNCTION(Client, Reliable)
     void ClientShowDayEndReport(FGameplayTag ReportWidgetTag, FMD_InspectionReport Report, double EndServerTime);
