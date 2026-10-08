@@ -71,6 +71,64 @@ struct FMD_SampleScoreRow
 	int32 Destroyed = 0;
 };
 
+// 계약 중 실제 잔액에 반영된 금액의 서버 원시 로그
+USTRUCT(BlueprintType)
+struct FMD_CreditLogEntry
+{
+    GENERATED_BODY()
+
+    // 계약 시작 이후 금액이 반영된 게임 시간
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    double ElapsedSeconds = 0.0;
+
+    // 계약 내 고정 개인 기록 인덱스이며 INDEX_NONE은 팀 공용 금액
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    int32 PlayerIndex = INDEX_NONE;
+
+    // 기존 원장과 동일한 수입 및 지출의 원인 분류
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    EMD_DailyReportCategory Category = EMD_DailyReportCategory::Other;
+
+    // 잔액 상하한 적용 이후의 실제 증감액
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    int32 Amount = 0;
+};
+
+// 개인별 이름과 누적 순수익 여섯 시점을 전달하는 그래프 기록
+USTRUCT(BlueprintType)
+struct FMD_PlayerCreditHistory
+{
+    GENERATED_BODY()
+
+    // 미참여 슬롯과 실제로 순수익이 영점인 플레이어 구분
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    bool bHasPlayer = false;
+
+    // 동명이인 및 재접속을 구분하는 서버 확정 플레이어 키
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    FString PlayerKey;
+
+    // 접속 종료 후에도 정산에 남길 플레이어 표시 이름
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    FString PlayerName;
+
+    // 해당 플레이어가 발생시킨 양수 금액의 합계
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    int64 CreditsGained = 0;
+
+    // 해당 플레이어가 발생시킨 음수 금액의 절댓값 합계
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    int64 CreditsSpent = 0;
+
+    // 획득 금액에서 지출 금액을 뺀 최종 순수익
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    int64 NetCredits = 0;
+
+    // X는 계약 경과 초이며 Y는 해당 시점까지의 누적 순수익
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    TArray<FVector2D> Samples;
+};
+
 // 작업 정산 페이로드. 서버 원장 응답과 마감 보고서가 공유한다
 USTRUCT(BlueprintType)
 struct FMD_InspectionReport
@@ -107,6 +165,31 @@ struct FMD_InspectionReport
 	// 서버 크레딧 Map을 RPC와 복제가 가능한 항목 배열로 전달
 	UPROPERTY(BlueprintReadOnly, Category = "Credit")
 	TArray<FMD_DailyReportValue> DailyCreditTotals;
+
+    // 실제 정산 시점 또는 현재 조회 시점까지의 계약 경과 초
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    double CreditHistoryDuration = 0.0;
+
+    // 시작 영점과 종료 시점을 포함한 균등한 여섯 시각
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    TArray<double> CreditSampleTimes;
+
+    // 참가 순서를 유지하는 네 개인 슬롯이며 빈 슬롯은 bHasPlayer로 구분
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    TArray<FMD_PlayerCreditHistory> PlayerCreditHistories;
+
+    // 개인 순수익과 구분하여 표시할 착수금 및 평가 보상 등의 공용 증감
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    int64 SharedCreditDelta = 0;
+
+    // 공용 금액을 포함한 실제 원장의 전체 증감액
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    int64 TotalCreditDelta = 0;
+
+    // 분류 합계의 상쇄 이전에 기록한 모든 실제 차감액의 절댓값 합계
+    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
+    int64 TotalCreditsSpent = 0;
+
 };
 
 // 서버 원장 로그 1건. 정산 화면 연결 전까지는 서버에만 보관

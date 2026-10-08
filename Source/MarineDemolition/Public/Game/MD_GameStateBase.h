@@ -79,6 +79,8 @@ public:
 protected:
     virtual void BeginPlay() override;
 
+    virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
     virtual void GetLifetimeReplicatedProps(
         TArray<FLifetimeProperty>& OutLifetimeProps
     ) const override;
@@ -139,6 +141,14 @@ public:
 
     // 활성 보고서가 구독할 원장 갱신 이벤트
     FMD_OnDailyLedgerChanged OnDailyLedgerChanged;
+
+protected:
+    // 열린 보고서들의 경과 시간을 함께 갱신하는 서버 공용 예약
+    FTimerHandle DailyLedgerRefreshTimer;
+
+public:
+    // 보고서 구독 유무에 따른 경과 시간 갱신 예약 시작 및 해제
+    void UpdateDailyLedgerRefreshTimer();
 
     // 서버 점수와 크레딧 원장을 응답용 보고서에 반영
     void RefreshDailyLedger();

@@ -654,7 +654,8 @@ void AMD_PlayerController::ServerAddCredits_Implementation(int32 Amount)
 {
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
 	{
-		Merchant->AddCredits(EMD_DailyReportCategory::Other, Amount);
+		// 명령을 실행한 서버 플레이어의 금액 이력 기록
+		Merchant->AddCredits(EMD_DailyReportCategory::Other, Amount, PlayerState);
 	}
 }
 
@@ -769,7 +770,8 @@ void AMD_PlayerController::ServerBorrowCredits_Implementation(AMD_Merchant* Merc
 	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
 	if (IsValid(MerchantSubsystem) == true)
 	{
-		MerchantSubsystem->TryBorrowCredits(Amount);
+		// 서버가 검증한 대출 요청자를 시간별 기록에 연결
+		MerchantSubsystem->TryBorrowCredits(Amount, PlayerState);
 	}
 }
 
@@ -791,7 +793,8 @@ void AMD_PlayerController::ServerRepayLoan_Implementation(AMD_Merchant* Merchant
 	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
 	if (IsValid(MerchantSubsystem) == true)
 	{
-		MerchantSubsystem->TryRepayLoan(Amount);
+		// 서버가 검증한 상환 요청자를 시간별 기록에 연결
+		MerchantSubsystem->TryRepayLoan(Amount, PlayerState);
 	}
 }
 
@@ -1032,6 +1035,8 @@ void AMD_PlayerController::ServerRequestDailyLedger_Implementation(int32 Request
     GameState->OnDailyLedgerChanged.AddUObject(this, &AMD_PlayerController::SendDailyLedger);
     // 구독 해제와 응답 조회에 사용할 서버 원장 보관
     DailyLedgerSource = GameState;
+    // 열린 보고서들의 경과 시간을 서버 공용 예약으로 갱신
+    GameState->UpdateDailyLedgerRefreshTimer();
     // 현재 원장의 최초 응답 전송
     SendDailyLedger();
 }
@@ -1078,6 +1083,8 @@ void AMD_PlayerController::UnbindDailyLedger()
     {
         // 현재 컨트롤러의 원장 변경 수신 해제
         GameState->OnDailyLedgerChanged.RemoveAll(this);
+        // 마지막 보고서 구독 해제 시 주기적인 시간축 집계 중단
+        GameState->UpdateDailyLedgerRefreshTimer();
     }
     // 이전 월드와 구독 번호 정리
     DailyLedgerSource.Reset();
