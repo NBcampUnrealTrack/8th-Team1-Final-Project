@@ -67,6 +67,7 @@ void AMD_TrashSorter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 	DOREPLIFETIME(AMD_TrashSorter, SortedCount);
 	DOREPLIFETIME(AMD_TrashSorter, RuntimeState);
 	DOREPLIFETIME(AMD_TrashSorter, AcceptedCategory);
+	DOREPLIFETIME(AMD_TrashSorter, bSafetyInterlocked);
 }
 
 void AMD_TrashSorter::OnConstruction(const FTransform& Transform)
@@ -117,7 +118,7 @@ void AMD_TrashSorter::BeginPlay()
 		return;
 	}
 
-	if (HasAuthority() && !FacilityRepair->IsFaultActive())
+	if (HasAuthority() && !IsOperationBlocked())
 	{
 		SorterStateTree->StartLogic();
 	}
@@ -136,6 +137,7 @@ void AMD_TrashSorter::SetInteractionHighlighted_Implementation(bool bHighlighted
 
 FText AMD_TrashSorter::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
+	if (bSafetyInterlocked) return NSLOCTEXT("MDInteraction", "SorterSafetyLock", "처리장 안전 정지 · 지문 인증 필요");
 	if (!CanInteract_Implementation(Interactor) || SortActionText.IsEmpty())
 	{
 		return FText::GetEmpty();
@@ -149,14 +151,14 @@ FText AMD_TrashSorter::GetInteractionPrompt_Implementation(AActor* Interactor) c
 bool AMD_TrashSorter::CanInteract_Implementation(AActor* Interactor) const
 {
 	// 거리와 조준은 InteractionComponent의 공통 Trace 및 서버 재검증이 담당한다.
-	return !FacilityRepair->IsFaultActive() && RuntimeState.bReady && !RuntimeState.bSorting && !bHasPendingSortRequest
+	return !IsOperationBlocked() && RuntimeState.bReady && !RuntimeState.bSorting && !bHasPendingSortRequest
 		&& (!HasAuthority() || (SorterStateTree->IsRunning() && !SorterStateTree->IsPaused()))
 		&& IsValid(Interactor) && Interactor->IsA<APawn>();
 }
 
 bool AMD_TrashSorter::CanAcceptHeldItem(AActor* Interactor) const
 {
-	if (FacilityRepair->IsFaultActive() || !UMD_TrashLibrary::IsTrashCategory(AcceptedCategory)) return false;
+	if (IsOperationBlocked() || !UMD_TrashLibrary::IsTrashCategory(AcceptedCategory)) return false;
 	AActor* Item = GetHeldSortableForInteractor(Interactor);
 	if (!IsValid(Item)) return false;
 	const AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Item);
@@ -201,7 +203,7 @@ void AMD_TrashSorter::Interact_Implementation(AActor* Interactor)
 
 bool AMD_TrashSorter::EnterReadyState()
 {
-	if (!HasAuthority() || FacilityRepair->IsFaultActive() || RuntimeState.bSorting) return false;
+	if (!HasAuthority() || IsOperationBlocked() || RuntimeState.bSorting) return false;
 	ClearPendingSortRequest();
 	RuntimeState.bReady = true;
 	ForceNetUpdate();
@@ -224,7 +226,7 @@ void AMD_TrashSorter::ClearPendingSortRequest()
 
 bool AMD_TrashSorter::BeginPendingSort()
 {
-	if (!HasAuthority() || FacilityRepair->IsFaultActive() || RuntimeState.bSorting || !bHasPendingSortRequest) return false;
+	if (!HasAuthority() || IsOperationBlocked() || RuntimeState.bSorting || !bHasPendingSortRequest) return false;
 
 	AActor* Interactor = PendingInteractor.Get();
 	AActor* Item = PendingItem.Get();
@@ -327,7 +329,7 @@ void AMD_TrashSorter::RefreshSortingPresentation()
 
 bool AMD_TrashSorter::BeginErrorState()
 {
-	if (!HasAuthority() || FacilityRepair->IsFaultActive()) return false;
+	if (!HasAuthority() || IsOperationBlocked()) return false;
 	ClearPendingSortRequest();
 	MulticastErrorFeedback();
 	return true;
@@ -337,9 +339,32 @@ void AMD_TrashSorter::HandleFacilityState(UMD_FacilityFaultComponent* Facility,
 	const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current)
 {
 	if (!HasAuthority() || Previous.IsFaultActive() == Current.IsFaultActive()) return;
-	if (Current.IsFaultActive())
+	RefreshOperationBlock();
+}
+
+bool AMD_TrashSorter::IsOperationBlocked() const
+{
+	return bSafetyInterlocked || (FacilityRepair && FacilityRepair->IsFaultActive());
+}
+
+void AMD_TrashSorter::SetSafetyInterlock(AActor* Source, bool bLocked)
+{
+	if (!HasAuthority() || !IsValid(Source) || Source->GetWorld() != GetWorld()) return;
+	SafetyInterlockSources.RemoveAll([](const auto& Weak) { return !Weak.IsValid(); });
+	if (bLocked) SafetyInterlockSources.AddUnique(Source);
+	else SafetyInterlockSources.Remove(Source);
+	const bool bNewBlocked = SafetyInterlockSources.Num() > 0;
+	if (bSafetyInterlocked == bNewBlocked) return;
+	bSafetyInterlocked = bNewBlocked;
+	RefreshOperationBlock();
+	ForceNetUpdate();
+}
+
+void AMD_TrashSorter::RefreshOperationBlock()
+{
+	if (IsOperationBlocked())
 	{
-		SorterStateTree->StopLogic(TEXT("Facility fault"));
+		SorterStateTree->StopLogic(TEXT("Facility fault or safety interlock"));
 		EndSortingState(); // Only presentation/queued requests; never undo an already paid item.
 	}
 	else if (UMD_TrashLibrary::IsTrashCategory(AcceptedCategory))
