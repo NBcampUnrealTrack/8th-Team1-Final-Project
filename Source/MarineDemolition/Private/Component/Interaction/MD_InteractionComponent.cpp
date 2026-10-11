@@ -1171,8 +1171,13 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 	}
 	if (const AMD_TrashSorter* Sorter = Cast<AMD_TrashSorter>(HitActor))
 	{
+		if (Sorter->IsActorBeingDestroyed()) return nullptr;
+		// Keep the stopped machine aimable for its safety notice. Otherwise E
+		// becomes a null-target drop while carrying trash. CanInteract remains
+		// false, so neither the local nor server path can submit an intake.
+		if (Sorter->IsSafetyInterlocked()) return HitActor;
 		// 조준 대상은 현재 운반 물건과 유효한 분류 카테고리를 요구한다.
-		if (Sorter->IsActorBeingDestroyed() || !Sorter->CanInteract_Implementation(OwnerPawn)) return nullptr;
+		if (!Sorter->CanInteract_Implementation(OwnerPawn)) return nullptr;
 	}
 	if (IsHeldByOtherPawn(HitActor)) return nullptr;
 	if (!IMD_Interactable::CanInteractWith(HitActor, OwnerPawn)) return nullptr;

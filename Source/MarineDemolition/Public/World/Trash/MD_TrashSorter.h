@@ -81,6 +81,13 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	int32 GetSortedCount() const { return SortedCount; }
 
+	/** Safety shutdown is independent of this machine's repairable fault. */
+	void SetSafetyInterlock(AActor* Source, bool bLocked);
+	UFUNCTION(BlueprintPure, Category = "MD|Trash")
+	bool IsSafetyInterlocked() const { return bSafetyInterlocked; }
+	UFUNCTION(BlueprintPure, Category = "MD|Trash")
+	bool IsOperationBlocked() const;
+
 	/** 품목이 소비될 때마다 서버에서 방송. 튜토리얼 진행 판정이 구독한다 */
 	UPROPERTY(BlueprintAssignable, Category = "MD|Trash")
 	FMD_OnTrashSorted OnTrashSorted;
@@ -198,6 +205,11 @@ protected:
 	TObjectPtr<UMaterialInstanceDynamic> SorterMID;
 
 private:
+	UPROPERTY(Replicated)
+	bool bSafetyInterlocked = false;
+	TArray<TWeakObjectPtr<AActor>> SafetyInterlockSources;
+	void RefreshOperationBlock();
+
 	UFUNCTION()
 	void OnRep_AcceptedCategory();
 	UFUNCTION()
