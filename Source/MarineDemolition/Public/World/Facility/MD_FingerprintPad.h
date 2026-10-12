@@ -19,6 +19,7 @@ class MARINEDEMOLITION_API AMD_FingerprintPad : public AActor, public IMD_Intera
 	GENERATED_BODY()
 public:
 	AMD_FingerprintPad();
+	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Fingerprint")
@@ -37,8 +38,18 @@ public:
 	int32 PadIndex = 0;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MD|Fingerprint", meta=(ClampMin="1"))
 	float ScanReach = 250.f;
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Fingerprint|Presentation")
+	FVector2D FingerprintSize = FVector2D(14.f, 19.f);
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Fingerprint|Presentation")
+	FVector FingerprintOffset = FVector(9.2f, 0.f, 0.f);
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Fingerprint|Presentation", meta=(ClampMin="0.05", ClampMax="2.0"))
+	float ScanFadeInSeconds = 0.45f;
 	UPROPERTY(Replicated, BlueprintReadOnly, Category="MD|Fingerprint")
 	TObjectPtr<APawn> ActiveScanner;
+	/** Also survives scans completed in the same frame, unlike ActiveScanner. */
+	UPROPERTY(Replicated)
+	double ScanVisualStartTime = -1.;
+	void NotifyScanAccepted();
 	bool CanMaintainScan(const APawn* Pawn) const;
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 	virtual FText GetInteractionDisplayName_Implementation() const override;
@@ -53,4 +64,7 @@ protected:
 private:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> DisplayMaterial;
+	void ApplyDisplayLayout();
+	float DisplayOpacity = 1.f;
+	int32 LastPresentationState = INDEX_NONE;
 };

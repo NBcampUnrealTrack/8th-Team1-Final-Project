@@ -166,6 +166,7 @@ bool AMD_FingerprintInterlock::BeginScan(AMD_FingerprintPad* Pad, APawn* Pawn)
 	RefreshParticipantMode();
 	if (IsValid(Pad->ActiveScanner) && Pad->ActiveScanner != Pawn) return false;
 	Pad->ActiveScanner = Pawn;
+	Pad->NotifyScanAccepted();
 	Pad->ForceNetUpdate();
 	const double Now = GetWorld()->GetTimeSeconds();
 	if (bSoloMode)
