@@ -12,7 +12,59 @@
 #include "Player/MD_PlayerState.h"
 #include "Util/MD_LogUtility.h"
 #include "Engine/World.h"
+#include "Misc/ScopeExit.h"
+#include "TimerManager.h"
 
+
+bool UMD_MerchantSubsystem::HasServerAuthority()
+{
+    // 경제 상태가 속한 현재 게임 월드 조회
+    UWorld* World = GetWorld();
+    // 월드 초기화 전과 클라이언트 및 편집기에서의 원장 변경 차단
+    return IsValid(World) == true && World->IsGameWorld() == true && World->GetNetMode() != NM_Client;
+}
+
+void UMD_MerchantSubsystem::FlushPendingCreditChanges()
+{
+    // 서버 거래가 끝난 뒤 실제 대기 보상이 있는 경우에만 처리 허용
+    if (HasServerAuthority() == false || bShopTransactionInProgress == true || PendingCreditChanges.IsEmpty() == true)
+    {
+        // 다른 거래의 진행 상태와 보관 중인 보상 유지
+        return;
+    }
+    // 대기 예약 취소와 다음 틱 예약에 사용할 현재 서버 월드 조회
+    UWorld* World = GetWorld();
+    // 월드 종료 중에는 보관된 보상을 유지한 채 처리 중단
+    if (IsValid(World) == false)
+    {
+        // 타이머 관리자에 접근할 수 없는 처리 종료
+        return;
+    }
+    // 같은 대기 배치를 처리할 이전 예약의 중복 실행 방지
+    World->GetTimerManager().ClearTimer(PendingCreditFlushTimerHandle);
+    // 알림 중 추가되는 보상을 분리하기 위한 현재 배치 이동
+    TArray<FPendingCreditChange> CreditChanges = MoveTemp(PendingCreditChanges);
+    {
+        // 배치 적용과 최종 알림 도중의 중첩 경제 거래 차단
+        TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
+        // 같은 금액도 서로 다른 보상으로 유지하는 발생 순서별 처리
+        for (FPendingCreditChange& CreditChange : CreditChanges)
+        {
+            // 개별 보상의 상한과 하한 및 분류별 원장 규칙 유지
+            AddCreditsInternal(CreditChange.Category, CreditChange.Amount, CreditChange.ResponsiblePlayer.Get());
+        }
+        // 현재 배치의 완성된 잔액과 부채 상태를 한 번만 전달
+        OnMerchantStateChanged.Broadcast();
+    }
+    // 알림 콜백 이후의 실제 월드로 다음 배치 예약 대상 갱신
+    World = GetWorld();
+    // 무조건 보상을 생성하는 알림도 같은 프레임의 무한 처리 방지
+    if (PendingCreditChanges.IsEmpty() == false && IsValid(World) == true)
+    {
+        // 새로 발생한 독립 보상을 잃지 않는 다음 틱 단일 예약
+        PendingCreditFlushTimerHandle = World->GetTimerManager().SetTimerForNextTick(this, &ThisClass::FlushPendingCreditChanges);
+    }
+}
 
 double UMD_MerchantSubsystem::GetCreditHistoryElapsedSeconds()
 {
@@ -227,20 +279,64 @@ TArray<FMD_DailyReportValue> UMD_MerchantSubsystem::GetDailyCreditTotals() const
 
 void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer)
 {
+	// 클라이언트와 게임 월드 외 변경 및 실제 금액 없는 알림 차단
+	if (HasServerAuthority() == false || Amount == 0)
+	{
+		// 서버 확정 조건 또는 실제 변동이 없는 요청 종료
+		return;
+	}
+	// 진행 중인 결제와 분류 환급을 섞지 않는 독립 보상 보관
+	if (bShopTransactionInProgress == true)
+	{
+		// 이번 보상에 필요한 분류와 책임자 문맥 준비
+		FPendingCreditChange CreditChange;
+		// 실제 보상 원인 보관
+		CreditChange.Category = Category;
+		// 결제 확정 후 반영할 실제 요청액 보관
+		CreditChange.Amount = Amount;
+		// 퇴장 이후 유효하지 않은 책임자 접근을 막는 약한 연결 보관
+		CreditChange.ResponsiblePlayer = ResponsiblePlayer;
+		// 같은 금액의 정상 보상도 생략하지 않는 순차 등록
+		PendingCreditChanges.Add(MoveTemp(CreditChange));
+		// 현재 거래를 중단하지 않은 보상 요청 종료
+		return;
+	}
+	// 거래 가드가 해제된 다음에 대기 보상을 처리하는 종료 예약
+	ON_SCOPE_EXIT
+	{
+		// 현재 변경과 알림에서 발생한 독립 보상 반영
+		FlushPendingCreditChanges();
+	};
+	// 원장 확정과 알림 사이에 추가 거래가 끼어드는 상황 차단
+	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
 	// 모든 외부 크레딧 변경을 단일 Enum 기반 기록 경로로 처리
 	AddCreditsInternal(Category, Amount, ResponsiblePlayer);
+	// 변경이 완료된 원장을 호스트와 복제 미러에 전달
 	OnMerchantStateChanged.Broadcast();
 }
 
 EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase)
 {
+	// 클라이언트와 게임 월드 외 소지품 및 결제 변경 차단
+	if (HasServerAuthority() == false)
+	{
+		// 지급과 회수 전에 서버 확정 조건 미충족 전달
+		return EMD_ShopPurchaseResult::InvalidRequest;
+	}
+
 	// 클라이언트가 로컬 원장을 변경하지 못하도록 막는 서버 권위 검사
 	if (IsValid(PurchasingPlayerState) == false || PurchasingPlayerState->HasAuthority() == false || bShopTransactionInProgress == true)
 	{
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
 
-	// 지급과 경제 알림이 완료될 때까지 중첩 상점 거래 차단
+	// 거래 가드가 해제된 다음에 대기 보상을 처리하는 종료 예약
+	ON_SCOPE_EXIT
+	{
+		// 현재 거래와 알림에서 발생한 독립 보상 반영
+		FlushPendingCreditChanges();
+	};
+	// 지급과 경제 알림이 완료될 때까지 중첩 경제 거래 차단
 	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
 
 	// 검증과 구매 기록에서 함께 사용할 전체 식별자 조회
@@ -304,12 +400,31 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerStat
 
 EMD_ShopSaleResult UMD_MerchantSubsystem::TrySellShopItem(AMD_PlayerState* SellingPlayerState, FMD_ShopItem ShopItem, int32 SlotIndex, int32 Quantity)
 {
-	// 서버 소유권과 양수 수량 및 진행 중 거래 검사
-	if (IsValid(SellingPlayerState) == false || SellingPlayerState->HasAuthority() == false || Quantity <= 0 || bShopTransactionInProgress == true)
+	// 클라이언트와 게임 월드 외 소지품 및 결제 변경 차단
+	if (HasServerAuthority() == false)
+	{
+		// 지급과 회수 전에 서버 확정 조건 미충족 전달
+		return EMD_ShopSaleResult::InvalidRequest;
+	}
+
+	// 진행 중인 경제 원장 변경과 판매 요청의 중첩 차단
+	if (bShopTransactionInProgress == true)
+	{
+		// 소지품과 대금이 변경되기 전 중첩 판매 거부
+		return EMD_ShopSaleResult::InvalidRequest;
+	}
+	// 서버 소유권과 양수 수량 검사
+	if (IsValid(SellingPlayerState) == false || SellingPlayerState->HasAuthority() == false || Quantity <= 0)
 	{
 		// 소지품과 원장을 변경하지 않은 요청 거부
 		return EMD_ShopSaleResult::InvalidRequest;
 	}
+	// 거래 가드가 해제된 다음에 대기 보상을 처리하는 종료 예약
+	ON_SCOPE_EXIT
+	{
+		// 현재 거래와 알림에서 발생한 독립 보상 반영
+		FlushPendingCreditChanges();
+	};
 	// 소지품 변경과 크레딧 알림의 재진입을 전체 거래 동안 차단
 	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
 	// 등록되지 않은 품목을 사용한 대금 요청 차단
@@ -447,6 +562,22 @@ int32 UMD_MerchantSubsystem::GetAvailableLoanAmount() const
 
 bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount, APlayerState* ResponsiblePlayer)
 {
+	// 클라이언트와 게임 월드 외 변경 및 중첩 경제 거래 차단
+	if (HasServerAuthority() == false || bShopTransactionInProgress == true)
+	{
+		// 서버 확정 조건을 충족하지 않은 변경 요청 종료
+		return false;
+	}
+
+	// 거래 가드가 해제된 다음에 대기 보상을 처리하는 종료 예약
+	ON_SCOPE_EXIT
+	{
+		// 현재 거래와 알림에서 발생한 독립 보상 반영
+		FlushPendingCreditChanges();
+	};
+	// 원장 변경과 최종 알림이 끝날 때까지 다른 경제 거래 차단
+	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
+
 	// 잘못된 금액과 잔여 대출 한도를 초과하는 요청 차단
 	if (Amount <= 0 || Amount > GetAvailableLoanAmount())
 	{
@@ -474,6 +605,22 @@ bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount, APlayerState* Respons
 
 bool UMD_MerchantSubsystem::TryRepayLoan(int32 Amount, APlayerState* ResponsiblePlayer)
 {
+	// 클라이언트와 게임 월드 외 변경 및 중첩 경제 거래 차단
+	if (HasServerAuthority() == false || bShopTransactionInProgress == true)
+	{
+		// 서버 확정 조건을 충족하지 않은 변경 요청 종료
+		return false;
+	}
+
+	// 거래 가드가 해제된 다음에 대기 보상을 처리하는 종료 예약
+	ON_SCOPE_EXIT
+	{
+		// 현재 거래와 알림에서 발생한 독립 보상 반영
+		FlushPendingCreditChanges();
+	};
+	// 원장 변경과 최종 알림이 끝날 때까지 다른 경제 거래 차단
+	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
+
 	// 실제 부채와 보유 크레딧 범위를 넘는 상환 요청을 거부하여 두 원장의 불일치를 방지하는 검사
 	if (Amount <= 0 || Amount > DebtBalance || Amount > Credits)
 	{
@@ -510,6 +657,22 @@ int32 UMD_MerchantSubsystem::CalculateLoanInterest(int32 InDebtBalance, int32 In
 
 int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 {
+	// 클라이언트와 게임 월드 외 변경 및 중첩 경제 거래 차단
+	if (HasServerAuthority() == false || bShopTransactionInProgress == true)
+	{
+		// 서버 확정 조건을 충족하지 않은 변경 요청 종료
+		return 0;
+	}
+
+	// 거래 가드가 해제된 다음에 대기 보상을 처리하는 종료 예약
+	ON_SCOPE_EXIT
+	{
+		// 현재 거래와 알림에서 발생한 독립 보상 반영
+		FlushPendingCreditChanges();
+	};
+	// 원장 변경과 최종 알림이 끝날 때까지 다른 경제 거래 차단
+	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
+
 	// 대출 UI와 동일한 현재 원금 기준의 실제 부과액 계산
 	int32 InterestAmount = CalculateLoanInterest(DebtBalance, LoanPrincipal);
 	// 변화가 없는 부채의 불필요한 복제 알림 생략
@@ -528,6 +691,29 @@ int32 UMD_MerchantSubsystem::ApplyDailyLoanInterest()
 
 void UMD_MerchantSubsystem::FinalizeContract()
 {
+	// 클라이언트와 게임 월드 외 변경 및 중첩 경제 거래 차단
+	if (HasServerAuthority() == false || bShopTransactionInProgress == true)
+	{
+		// 서버 확정 조건을 충족하지 않은 변경 요청 종료
+		return;
+	}
+
+	// 거래 가드가 해제된 다음에 대기 보상을 처리하는 종료 예약
+	ON_SCOPE_EXIT
+	{
+		// 현재 거래와 알림에서 발생한 독립 보상 반영
+		FlushPendingCreditChanges();
+	};
+	// 원장 변경과 최종 알림이 끝날 때까지 다른 경제 거래 차단
+	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
+
+	// 이미 종료된 계약의 종료 시각과 상태 알림 중복 변경 차단
+	if (IsValid(CurrentSite) == false)
+	{
+		// 기존 확정 원장을 유지한 중복 종료 요청 중단
+		return;
+	}
+
     // 원장을 보존한 채 계약 종료 시각 고정
     FinishCreditHistory();
 	CurrentSite = nullptr;
@@ -635,13 +821,48 @@ void UMD_MerchantSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UMD_MerchantSubsystem::Deinitialize()
 {
+    // 게임 종료 중 남아 있는 보상 예약을 정리할 월드 조회
+    UWorld* World = GetWorld();
+    // 월드가 살아 있는 경우에만 타이머 관리자 접근
+    if (IsValid(World) == true)
+    {
+        // 종료된 원장으로 전달되는 다음 틱 콜백 차단
+        World->GetTimerManager().ClearTimer(PendingCreditFlushTimerHandle);
+    }
+    // 이미 월드가 종료된 경우까지 예약 식별자 초기화
+    PendingCreditFlushTimerHandle.Invalidate();
+    // 종료된 게임 인스턴스의 책임자 연결과 대기 보상 정리
+    PendingCreditChanges.Reset();
     Super::Deinitialize();
 }
 
 void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 BaseAdvancePayment)
 {
+	// 클라이언트와 게임 월드 외 변경 및 중첩 경제 거래 차단
+	if (HasServerAuthority() == false || bShopTransactionInProgress == true)
+	{
+		// 서버 확정 조건을 충족하지 않은 변경 요청 종료
+		return;
+	}
+
+	// 거래 가드가 해제된 다음에 대기 보상을 처리하는 종료 예약
+	ON_SCOPE_EXIT
+	{
+		// 현재 거래와 알림에서 발생한 독립 보상 반영
+		FlushPendingCreditChanges();
+	};
+	// 원장 변경과 최종 알림이 끝날 때까지 다른 경제 거래 차단
+	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
+
 	if (IsValid(Site) == false)
 	{
+		return;
+	}
+
+	// 현재 월드의 동일 활성 계약을 다시 시작하는 착수금 중복 지급 차단
+	if (CurrentSite == Site && CreditHistoryWorld.Get() == GetWorld() && CreditHistoryEndSeconds < 0.0)
+	{
+		// 기존 시간과 개인 거래 이력을 보존한 중복 계약 요청 종료
 		return;
 	}
 
