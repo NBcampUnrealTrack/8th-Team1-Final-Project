@@ -742,6 +742,7 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 	{
 		return false;
 	}
+	const bool bGrabbable = Target->Implements<UMD_Grabbable>();
 
 	UPrimitiveComponent* Component = nullptr;
 	FVector GrabLocation = FVector::ZeroVector;
@@ -757,6 +758,7 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 		{
 			return false;
 		}
+		if (!IMD_Grabbable::Execute_PreparePhysicsGrip(Target, OwnerPawn)) return false;
 
 		GrabLocation = GrabPoint->GetComponentLocation();
 		HoldOffset = IMD_Grabbable::Execute_GetHoldOffset(Target);
@@ -775,6 +777,7 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 
 	if (!TryGrabPhysicsComponent(Component, GrabLocation, HoldProfile))
 	{
+		if (bGrabbable) IMD_Grabbable::Execute_OnCarryEnded(Target);
 		return false;
 	}
 
@@ -1008,6 +1011,24 @@ void UMD_InteractionComponent::UpdateHeldTarget()
 		|| !HasAuthorityPhysicsGrip() || !IsValid(HoldPoint)) return;
 
 	const FTransform HoldTransform = GetHoldPointTransform();
+	if (HeldActor->Implements<UMD_Grabbable>())
+	{
+		FTransform CustomTarget;
+		const EMD_PhysicsHoldTargetResult Result = IMD_Grabbable::Execute_ResolvePhysicsHoldTarget(
+			HeldActor, GetOwnerPawn(), CustomTarget);
+		if (Result == EMD_PhysicsHoldTargetResult::Release)
+		{
+			ReleaseHeldActor();
+			return;
+		}
+		if (Result == EMD_PhysicsHoldTargetResult::Resolved)
+		{
+			if (ActiveHoldProfile.bConstrainRotation)
+				PhysicsHandle->SetTargetLocationAndRotation(CustomTarget.GetLocation(), CustomTarget.Rotator());
+			else PhysicsHandle->SetTargetLocation(CustomTarget.GetLocation());
+			return;
+		}
+	}
 	const FVector TargetLocation = ResolveHoldTargetLocation(HoldTransform);
 
 	if (ActiveHoldProfile.bConstrainRotation)
@@ -1041,7 +1062,12 @@ void UMD_InteractionComponent::UpdateCarrySettle(float DeltaSeconds)
 		Component->GetComponentTransform().TransformPositionNoScale(HeldGrabPointOffset);
 	// 정착 판정은 스프링이 실제로 쫓는 좌표와 같아야 한다. 보정 전 좌표로 재면
 	// 시선을 내린 채 집었을 때 영영 도달하지 못해 OnCarrySettled가 불리지 않는다.
-	const FVector TargetLocation = ResolveHoldTargetLocation(GetHoldPointTransform());
+	FTransform CustomTarget;
+	const EMD_PhysicsHoldTargetResult TargetResult = IMD_Grabbable::Execute_ResolvePhysicsHoldTarget(
+		HeldActor, GetOwnerPawn(), CustomTarget);
+	if (TargetResult == EMD_PhysicsHoldTargetResult::Release) return;
+	const FVector TargetLocation = TargetResult == EMD_PhysicsHoldTargetResult::Resolved
+		? CustomTarget.GetLocation() : ResolveHoldTargetLocation(GetHoldPointTransform());
 
 	const bool bReachedTarget =
 		FVector::DistSquared(CurrentGrabPoint, TargetLocation) <= FMath::Square(CarrySettleTolerance);

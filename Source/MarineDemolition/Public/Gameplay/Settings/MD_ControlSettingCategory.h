@@ -55,6 +55,13 @@ public:
 		return AppliedSettings;
 	}
 
+	// 현재 실제 입력에서 사용하는 상호작용 키를 반환한다.
+	UFUNCTION(BlueprintPure, Category = "MarineDemolition|Settings|Controls")
+	FORCEINLINE FKey GetAppliedInteractionKey() const
+	{
+		return AppliedSettings.InteractKey;
+	}
+
 	// 현재 적용값을 반영한 플레이어 입력 매핑 컨텍스트 준비
 	UInputMappingContext* PrepareInputMappingContext(UInputMappingContext* InputMappingContext);
 

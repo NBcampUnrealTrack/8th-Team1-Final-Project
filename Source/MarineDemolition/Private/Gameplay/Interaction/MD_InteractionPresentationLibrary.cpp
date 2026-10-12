@@ -3,6 +3,8 @@
 #include "Engine/DataTable.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "Gameplay/Interaction/MD_InteractionSettings.h"
+#include "Gameplay/Settings/MD_ControlSettingCategory.h"
+#include "Gameplay/Settings/MD_SettingsManager.h"
 #include "Types/Interaction/MD_InteractionTypes.h"
 
 FName UMD_InteractionPresentationLibrary::MakeShortInteractionId(const UClass* TargetClass)
@@ -15,6 +17,21 @@ FName UMD_InteractionPresentationLibrary::MakeShortInteractionId(const UClass* T
 	FString ClassName = TargetClass->GetName();
 	ClassName.RemoveFromStart(TEXT("MD_"));
 	return FName(*ClassName);
+}
+
+namespace
+{
+const UDataTable* GetValidatedInteractionPresentationTable()
+{
+	const UMD_InteractionSettings* Settings = UMD_InteractionSettings::Get();
+	const UDataTable* Table = IsValid(Settings)
+		? Settings->GetInteractionPresentationTable()
+		: nullptr;
+	return IsValid(Table)
+		&& IsValid(Table->GetRowStruct())
+		&& Table->GetRowStruct()->IsChildOf(FMD_InteractionPresentationRow::StaticStruct())
+		? Table : nullptr;
+}
 }
 
 bool UMD_InteractionPresentationLibrary::FindDisplayName(const FName InteractionId, FText& OutDisplayName)
@@ -46,6 +63,37 @@ bool UMD_InteractionPresentationLibrary::FindDisplayName(const FName Interaction
 
 	OutDisplayName = Row->DisplayName;
 	return true;
+}
+
+FText UMD_InteractionPresentationLibrary::FindActionPrompt(
+	const FName InteractionId, UObject* WorldContextObject)
+{
+	if (InteractionId.IsNone()) return FText::GetEmpty();
+	const UDataTable* Table = GetValidatedInteractionPresentationTable();
+	if (Table == nullptr) return FText::GetEmpty();
+
+	static const FString Context(TEXT("MD_InteractionPresentation"));
+	const FMD_InteractionPresentationRow* Row =
+		Table->FindRow<FMD_InteractionPresentationRow>(InteractionId, Context, false);
+	if (Row == nullptr) return FText::GetEmpty();
+
+	// Keep the text value rather than a row pointer while formatting can invoke external code.
+	const FText ActionPrompt = Row->ActionPrompt;
+	if (ActionPrompt.IsEmpty()) return FText::GetEmpty();
+
+	static const FKey DefaultInteractionKey = FMD_ControlSettings().InteractKey;
+	FKey InteractionKey = DefaultInteractionKey;
+	if (UMD_SettingsManager* Settings = UMD_SettingsManager::Get(WorldContextObject); IsValid(Settings))
+	{
+		if (UMD_ControlSettingCategory* Controls = Settings->GetControlSettings(); IsValid(Controls))
+		{
+			const FKey AppliedKey = Controls->GetAppliedInteractionKey();
+			if (AppliedKey.IsValid()) InteractionKey = AppliedKey;
+		}
+	}
+
+	return FText::Format(NSLOCTEXT("MDInteraction", "KeyActionPromptFormat", "[{0}] {1}"),
+		InteractionKey.GetDisplayName(false), ActionPrompt);
 }
 
 FText UMD_InteractionPresentationLibrary::ResolveInteractionDisplayName(const UObject* Target)

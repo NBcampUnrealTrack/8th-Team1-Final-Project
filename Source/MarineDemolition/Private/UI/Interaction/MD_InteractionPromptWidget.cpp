@@ -43,10 +43,11 @@ namespace
 		ActionPromptString.TrimStartAndEndInline();
 		Parts.bHasAction = !ActionPromptString.IsEmpty();
 
+		// A closing-bracket key produces "[]] action"; skip the key character.
 		int32 ClosingBracketIndex = INDEX_NONE;
-		if (ActionPromptString.StartsWith(TEXT("["))
-			&& ActionPromptString.FindChar(TEXT(']'), ClosingBracketIndex)
-			&& ClosingBracketIndex > 1)
+		if (ActionPromptString.StartsWith(TEXT("[]]"))) ClosingBracketIndex = 2;
+		else ActionPromptString.FindChar(TEXT(']'), ClosingBracketIndex);
+		if (ActionPromptString.StartsWith(TEXT("[")) && ClosingBracketIndex > 1)
 		{
 			Parts.Key = FText::FromString(
 				ActionPromptString.Mid(1, ClosingBracketIndex - 1));
