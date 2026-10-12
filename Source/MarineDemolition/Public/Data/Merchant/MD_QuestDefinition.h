@@ -16,13 +16,6 @@ struct MARINEDEMOLITION_API FMD_QuestPhaseData
 {
 	GENERATED_BODY()
 
-	FMD_QuestPhaseData()
-	{
-		// FMD_QuestRewardData의 기본 Affinity가 0.1f라서 중간 보상이 없는 페이즈에서도
-		// 호감도가 지급되는 것을 방지하기 위해 0으로 초기화한다.
-		PhaseCompletionReward.Affinity = 0.0f;
-	}
-
 	/** 납품·청소·마감 등 현재 페이즈의 목표 분류 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
 	EMD_QuestObjectiveType ObjectiveType = EMD_QuestObjectiveType::RecoverIntact;
@@ -59,8 +52,7 @@ struct MARINEDEMOLITION_API FMD_QuestPhaseData
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
 	FText CompletionDialogue;
 
-	/** 이 페이즈가 완료될 때 지급할 중간 보상. 최종 완료 보상(SuccessReward)과 별도다.
-	 *  대부분 페이즈에서는 비어 있고, M03a처럼 호감도만 주는 중간 단계에서 사용한다. */
+	// 최종 완료 보상과 별도로 구성하는 페이즈 중간 보상
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Phase")
 	FMD_QuestRewardData PhaseCompletionReward;
 
@@ -108,15 +100,15 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Dialogue")
 	FText OfferDialogue;
 
-	/** 성공 크레딧·점수·호감도를 정산하기 위한 공통 보상 데이터 */
+	/** 성공 크레딧·점수를 정산하기 위한 공통 보상 데이터 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Reward")
 	FMD_QuestRewardData SuccessReward;
 
-	/** 실패(미회수) 크레딧·점수·호감도를 정산하기 위한 공통 패널티 데이터 */
+	/** 실패(미회수) 크레딧·점수를 정산하기 위한 공통 패널티 데이터 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Reward")
 	FMD_QuestRewardData UnrecoveredFailurePenalty;
 
-	/** 실패(파괴) 크레딧·점수·호감도를 정산하기 위한 공통 패널티 데이터 */
+	/** 실패(파괴) 크레딧·점수를 정산하기 위한 공통 패널티 데이터 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Quest|Reward")
 	FMD_QuestRewardData DestroyedFailureReward;
 

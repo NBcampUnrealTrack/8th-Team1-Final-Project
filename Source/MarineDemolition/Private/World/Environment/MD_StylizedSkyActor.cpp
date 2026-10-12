@@ -6,7 +6,6 @@
 #include "Components/SceneComponent.h"
 #include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Component/Environment/MD_GameStateDayCycleAdapterComponent.h"
 #include "Component/Environment/MD_StylizedSkyControllerComponent.h"
 
 AMD_StylizedSkyActor::AMD_StylizedSkyActor()
@@ -48,7 +47,6 @@ AMD_StylizedSkyActor::AMD_StylizedSkyActor()
 	PostProcess->bUnbound = true;
 
 	SkyController = CreateDefaultSubobject<UMD_StylizedSkyControllerComponent>(TEXT("SkyController"));
-	GameStateTimeAdapter = CreateDefaultSubobject<UMD_GameStateDayCycleAdapterComponent>(TEXT("GameStateTimeAdapter"));
 }
 
 void AMD_StylizedSkyActor::OnConstruction(const FTransform& Transform)

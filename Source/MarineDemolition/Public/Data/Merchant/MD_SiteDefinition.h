@@ -6,9 +6,10 @@
 #include "MD_SiteDefinition.generated.h"
 
 class UMD_LoreCatalog;
+class UMD_TrashSpawnProfile;
 class UWorld;
 
-/** 작업 현장 1곳의 메타데이터 + 메인/반복 퀘스트 목록. */
+/** 작업 현장의 원정 맵과 로어 카탈로그 정의 */
 UCLASS(BlueprintType)
 class MARINEDEMOLITION_API UMD_SiteDefinition : public UDataAsset
 {
@@ -18,25 +19,18 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
 	FText SiteName;
 
-	/** 이 현장의 메인·반복 퀘스트를 수행하는 공통 원정 맵 */
+	/** 현장 계약과 일차 진행에 사용하는 원정 맵 */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site")
 	TSoftObjectPtr<UWorld> QuestMap;
 
-	/** Day1, Day2, … 순서로 메인 역할을 부여할 공통 퀘스트 에셋의 PrimaryAssetId 목록 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Main", meta = (AllowedTypes = "Quest"))
-	TArray<FPrimaryAssetId> MainQuestLine;
 
-	/** 현장에서 반복 역할로 선택할 공통 퀘스트 에셋의 PrimaryAssetId 목록 */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat", meta = (AllowedTypes = "Quest"))
-	TArray<FPrimaryAssetId> RepeatQuestPool;
 
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat")
-	int32 MinRepeatCount = 2;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Repeat")
-	int32 MaxRepeatCount = 3;
 
 	// 현장별 고정 로어 목록과 코덱스 표시 순서를 제공하는 카탈로그
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Lore")
 	TObjectPtr<UMD_LoreCatalog> LoreCatalog;
+
+	// 이 현장의 쓰레기 총량 규칙(기준 개수·인원·난이도 배율). 비어 있으면 Project Settings의 MD Trash 값을 쓴다
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Site|Trash")
+	TObjectPtr<UMD_TrashSpawnProfile> TrashSpawnProfile;
 };

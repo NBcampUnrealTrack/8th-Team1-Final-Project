@@ -3,6 +3,7 @@
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Interaction/MD_InteractionComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "GameFramework/PlayerController.h"
 #include "GameplayTags/MD_GameplayTags.h"
@@ -197,10 +198,30 @@ void UMD_FoamGunComponent::ComputeLaunch(FVector& OutOrigin, FVector& OutDirecti
 void UMD_FoamGunComponent::ServerFire_Implementation(FVector_NetQuantize Origin, FVector_NetQuantizeNormal Direction,
                                                      FGameplayTag FireSoundTag)
 {
+	// 발사 요청을 보낸 소유 캐릭터와 서버 월드 조회
 	AMD_Character* Character = Cast<AMD_Character>(GetOwner());
+	// 요청 도착 시점의 권한과 게임 진행 상태를 확인할 월드 조회
 	UWorld* World = GetWorld();
-	if (!Character || !World || !ProjectileClass)
+	// 사망과 빙의 해제 및 운반 상태를 재검증할 상호작용 저장소 조회
+	UMD_InteractionComponent* Interaction = IsValid(Character) == true ? Character->FindComponentByClass<UMD_InteractionComponent>() : nullptr;
+	// 유효한 캐릭터와 월드의 서버 권한 검사
+	if (IsValid(Character) == false || IsValid(World) == false || Character->HasAuthority() == false)
 	{
+		// 무효한 소유자와 비권한 요청의 충전 차감 및 생성 차단
+		return;
+	}
+
+	// 서버 게임 월드와 발사체 설정의 실행 조건 검사
+	if (World->IsGameWorld() == false || World->GetNetMode() == NM_Client || IsValid(ProjectileClass.Get()) == false)
+	{
+		// 게임 진행 외 호출과 발사체 설정 누락의 실행 차단
+		return;
+	}
+
+	// 요청 도착 시점의 상호작용 가능 여부와 운반 상태 검사
+	if (IsValid(Interaction) == false || Interaction->CanOwnerInteract() == false || Interaction->IsHolding() == true)
+	{
+		// 도착 전에 무효화된 요청의 충전 차감과 발사 효과 차단
 		return;
 	}
 
@@ -218,6 +239,17 @@ void UMD_FoamGunComponent::ServerFire_Implementation(FVector_NetQuantize Origin,
 	if (!bOriginTrusted || !bDirectionTrusted)
 	{
 		ComputeLaunch(LaunchOrigin, LaunchDirection);
+	}
+
+	// 클라이언트 총구와 서버 대체 총구에 동일하게 적용할 차폐 판정 결과
+	FHitResult OriginObstruction;
+	// 소유 캐릭터를 제외한 실제 표면으로 시점과 발사 원점 사이의 가림 검사
+	FCollisionQueryParams OriginQuery(SCENE_QUERY_STAT(MDFoamLaunchOrigin), true, Character);
+	// 허용 거리 안에서도 벽 뒤에 지정된 발사 원점의 요청 차단
+	if (World->LineTraceSingleByChannel(OriginObstruction, ViewLocation, LaunchOrigin, ECC_Visibility, OriginQuery) == true)
+	{
+		// 차폐된 원점에서의 발사체 생성과 충전 차감 방지
+		return;
 	}
 
 	// 충전 소모는 서버 권위. 부족하면 스폰·발사음 없음 (클라이언트는 이미 헛방 피드백을 냈다)

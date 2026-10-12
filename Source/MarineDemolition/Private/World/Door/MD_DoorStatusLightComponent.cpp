@@ -5,7 +5,8 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Materials/MaterialInterface.h"
 #include "TimerManager.h"
-#include "UObject/UnrealType.h"
+#include "World/Door/MD_DoorFaultComponent.h"
+#include "GameFramework/GameStateBase.h"
 
 UMD_DoorStatusLightComponent::UMD_DoorStatusLightComponent()
 {
@@ -21,7 +22,7 @@ void UMD_DoorStatusLightComponent::BeginPlay()
 		return;
 	}
 
-	bWasLocked = IsDoorLocked();
+	bWasLocked = IsDoorFaultActive();
 	bFaultLightOn = bWasLocked;
 	ApplyEmissiveColor(bWasLocked ? FaultColor : NormalEmissiveColor);
 
@@ -31,7 +32,7 @@ void UMD_DoorStatusLightComponent::BeginPlay()
 			BlinkTimerHandle,
 			this,
 			&UMD_DoorStatusLightComponent::RefreshBlinkState,
-			FMath::Max(BlinkIntervalSeconds, 0.1f),
+			0.1f,
 			true);
 	}
 }
@@ -43,6 +44,7 @@ void UMD_DoorStatusLightComponent::EndPlay(const EEndPlayReason::Type EndPlayRea
 		World->GetTimerManager().ClearTimer(BlinkTimerHandle);
 	}
 
+	if (BoundFault.IsValid()) BoundFault->OnStateChanged.RemoveDynamic(this, &ThisClass::HandleFaultChanged);
 	RestoreNormalColor();
 	Super::EndPlay(EndPlayReason);
 }
@@ -105,18 +107,15 @@ bool UMD_DoorStatusLightComponent::InitializeDisplayMaterial()
 	return true;
 }
 
-bool UMD_DoorStatusLightComponent::IsDoorLocked() const
+bool UMD_DoorStatusLightComponent::IsDoorFaultActive() const
 {
-	const AActor* Owner = GetOwner();
-	if (!IsValid(Owner))
-	{
-		return false;
-	}
+	const UMD_DoorFaultComponent* Fault = IsValid(GetOwner()) ? GetOwner()->FindComponentByClass<UMD_DoorFaultComponent>() : nullptr;
+	return Fault && Fault->IsFaultActive();
+}
 
-	const FBoolProperty* LockedProperty = CastField<FBoolProperty>(
-		Owner->GetClass()->FindPropertyByName(LockedPropertyName));
-	return LockedProperty != nullptr
-		&& LockedProperty->GetPropertyValue_InContainer(Owner);
+void UMD_DoorStatusLightComponent::HandleFaultChanged(UMD_FacilityFaultComponent*, const FMD_FacilitySnapshot&, const FMD_FacilitySnapshot&)
+{
+	RefreshBlinkState();
 }
 
 void UMD_DoorStatusLightComponent::RefreshBlinkState()
@@ -126,7 +125,14 @@ void UMD_DoorStatusLightComponent::RefreshBlinkState()
 		return;
 	}
 
-	const bool bLocked = IsDoorLocked();
+	UMD_DoorFaultComponent* Fault = GetOwner()->FindComponentByClass<UMD_DoorFaultComponent>();
+	if (BoundFault.Get() != Fault)
+	{
+		if (BoundFault.IsValid()) BoundFault->OnStateChanged.RemoveDynamic(this, &ThisClass::HandleFaultChanged);
+		BoundFault = Fault;
+		if (Fault) Fault->OnStateChanged.AddUniqueDynamic(this, &ThisClass::HandleFaultChanged);
+	}
+	const bool bLocked = IsDoorFaultActive();
 	if (!bLocked)
 	{
 		if (bWasLocked)
@@ -138,15 +144,11 @@ void UMD_DoorStatusLightComponent::RefreshBlinkState()
 		return;
 	}
 
-	if (!bWasLocked)
-	{
-		bWasLocked = true;
-		bFaultLightOn = true;
-		ApplyEmissiveColor(FaultColor);
-		return;
-	}
-
-	bFaultLightOn = !bFaultLightOn;
+	bWasLocked = true;
+	const AGameStateBase* GS = GetWorld()->GetGameState();
+	const double Now = GS ? GS->GetServerWorldTimeSeconds() : GetWorld()->GetTimeSeconds();
+	const double Elapsed = FMath::Max(0.0, Now - Fault->GetSnapshot().FaultStartedAt);
+	bFaultLightOn = (static_cast<int64>(Elapsed / FMath::Max(0.1f, BlinkIntervalSeconds)) % 2) == 0;
 	ApplyEmissiveColor(bFaultLightOn ? FaultColor : FLinearColor::Black);
 }
 

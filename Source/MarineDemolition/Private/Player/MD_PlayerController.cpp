@@ -1,4 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+// Fill out your copyright notice in the Description page of Project Settings.
 
 
 #include "Player/MD_PlayerController.h"
@@ -18,7 +18,6 @@
 #include "GameplayEffect.h"
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "EngineUtils.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallUtility.h"
@@ -34,6 +33,8 @@
 #include "GameFramework/GameSession.h"
 #include "Gameplay/Customization/MD_CharacterAppearanceLibrary.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+#include "Gameplay/Lore/MD_LoreProfileSubsystem.h"
+#include "World/Lore/MD_LoreActor.h"
 #include "Online/Session/MD_MultiplayManager.h"
 #include "UI/Loading/MD_LoadingScreenSubsystem.h"
 
@@ -41,6 +42,7 @@
 #include "Data/Shop/MD_ShopCatalog.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Equipment/MD_ThrowComponent.h"
 #include "Data/Equipment/MD_QuestItemDefinition.h"
 #include "World/Merchant/MD_Merchant.h"
 #include "Interfaces/OnlineIdentityInterface.h"
@@ -52,20 +54,93 @@ AMD_PlayerController::AMD_PlayerController()
 	PlayerCameraManagerClass = AMD_PlayerCameraManager::StaticClass();
 }
 
+void AMD_PlayerController::ServerRequestDiscoverLore_Implementation(FPrimaryAssetId LoreAssetId)
+{
+	// 권한 월드와 실제 요청자의 폰이 준비된 경우만 처리
+	if (HasAuthority() == false || IsValid(GetWorld()) == false || IsValid(GetPawn()) == false || LoreAssetId.IsValid() == false)
+	{
+		// 유효하지 않은 팀 습득 요청 종료
+		return;
+	}
+	// 개인별 액터 제거 상태와 독립된 서버 배치물 검색
+	for (TActorIterator<AMD_LoreActor> It(GetWorld()); It; ++It)
+	{
+		// 요청 ID에 해당하는 실제 배치물과 수집 거리 확인
+		if (IsValid(*It) == false || It->GetLoreAssetId() != LoreAssetId || It->CanCollectLore(GetPawn()) == false)
+		{
+			// 다른 기록이나 원거리 배치 제외
+			continue;
+		}
+		// 습득 시점에 접속 중인 각 참가자에게 단일 기록 전달
+		for (FConstPlayerControllerIterator PlayerIt = GetWorld()->GetPlayerControllerIterator(); PlayerIt; ++PlayerIt)
+		{
+			// 소유 클라이언트에 전달할 플레이어 컨트롤러 조회
+			AMD_PlayerController* PlayerController = Cast<AMD_PlayerController>(PlayerIt->Get());
+			// 종료된 참가자나 다른 컨트롤러 제외
+			if (IsValid(PlayerController) == true)
+			{
+				// 기존 개인 이력 전체를 보내지 않고 이번 습득만 공유
+				PlayerController->ClientReceiveDiscoveredLore(LoreAssetId);
+			}
+		}
+		// 동일 ID의 중복 배치로 인한 반복 전송 방지
+		return;
+	}
+}
+
+void AMD_PlayerController::ClientReceiveDiscoveredLore_Implementation(FPrimaryAssetId LoreAssetId)
+{
+	// 수신 컨트롤러를 소유한 실제 로컬 사용자 조회
+	ULocalPlayer* LocalPlayer = GetLocalPlayer();
+	// 원격 컨트롤러나 전용 서버의 개인 파일 접근 방지
+	if (IsValid(LocalPlayer) == false)
+	{
+		return;
+	}
+	// 계정별 기존 이력을 유지하는 개인 원장 조회
+	UMD_LoreProfileSubsystem* Profile = LocalPlayer->GetSubsystem<UMD_LoreProfileSubsystem>();
+	// 생성된 개인 원장에만 습득 결과 전달
+	if (IsValid(Profile) == true)
+	{
+		// 로그인 준비 이전의 수신도 보관하여 개인 로드 이후 병합
+		Profile->RecordLore(LoreAssetId);
+	}
+}
+
 void AMD_PlayerController::CancelScrapeInteraction()
 {
-	AMD_Character* const ScrapeCharacter = Cast<AMD_Character>(GetPawn());
-	if (IsValid(ScrapeCharacter))
+	AMD_Character* const MDCharacter = Cast<AMD_Character>(GetPawn());
+	if (IsValid(MDCharacter))
 	{
-		ScrapeCharacter->CancelScrapeInteraction();
+		MDCharacter->CancelScrapeInteraction();
 	}
 }
 
 void AMD_PlayerController::SetInputMode(const FInputModeDataBase& InData)
 {
-	// UI 전환으로 Completed/Canceled 입력을 잃기 전에 먼저 Focus와 Ability를 정리한다.
+	// UI 전환으로 입력을 잃기 전에 진행 중인 오염물 타격을 정리한다.
 	CancelScrapeInteraction();
+	CancelThrowInteraction();
 	Super::SetInputMode(InData);
+}
+
+void AMD_PlayerController::CancelThrowInteraction()
+{
+	AMD_Character* const MDCharacter = Cast<AMD_Character>(GetPawn());
+	if (IsValid(MDCharacter))
+	{
+		if (UMD_ThrowComponent* ThrowComponent = MDCharacter->GetThrowComponent())
+		{
+			ThrowComponent->CancelThrow();
+		}
+	}
+}
+
+void AMD_PlayerController::FlushPressedKeys()
+{
+	// Enhanced Input의 Completed 콜백보다 먼저 취소해 창 전환을 발사로 해석하지 않는다.
+	CancelThrowInteraction();
+	Super::FlushPressedKeys();
 }
 
 void AMD_PlayerController::SetViewTarget(
@@ -74,8 +149,9 @@ void AMD_PlayerController::SetViewTarget(
 {
 	if (NewViewTarget != GetPawn())
 	{
-		// 컷신·관전 카메라가 Focus 고정 카메라와 경쟁하지 않게 먼저 정리한다.
+		// 컷신·관전 카메라로 전환하기 전에 진행 중인 타격을 정리한다.
 		CancelScrapeInteraction();
+		CancelThrowInteraction();
 	}
 	Super::SetViewTarget(NewViewTarget, TransitionParams);
 }
@@ -100,6 +176,7 @@ void AMD_PlayerController::ClientWasKicked_Implementation(const FText& KickReaso
 void AMD_PlayerController::HandleApplicationWillDeactivate()
 {
 	CancelScrapeInteraction();
+	CancelThrowInteraction();
 }
 
 void AMD_PlayerController::SubmitPlatformNickname()
@@ -196,7 +273,7 @@ void AMD_PlayerController::ServerRequestTravel_Implementation(AMD_TravelConsole*
 	}
 
 	// 네트워크로 전달된 난이도 값이 정의된 계약 범위를 벗어나지 않도록 하는 서버 검증
-	if (Difficulty < EMD_Difficulty::Safe || Difficulty > EMD_Difficulty::Extreme)
+	if (Difficulty < EMD_Difficulty::Safe || Difficulty > EMD_Difficulty::Dangerous)
 	{
 		return;
 	}
@@ -302,7 +379,7 @@ void AMD_PlayerController::ServerRequestEndDay_Implementation(AMD_DayEndConsole*
 	if (AMD_GameModeBase* GM = GetWorld()->GetAuthGameMode<AMD_GameModeBase>())
 	{
 		// 서버 콘솔에 설정된 보고서를 모든 접속 플레이어에게 표시
-		GM->RequestEndDay(EMD_DayEndReason::Console, Console->GetConsoleWidgetTag());
+		GM->RequestEndDay(Console->GetConsoleWidgetTag());
 	}
 }
 
@@ -454,6 +531,40 @@ void AMD_PlayerController::ClientNotifyPlayerJoinAndExit_Implementation(const FT
 	HUD->HandlePlayerJoinAndExit(PlayerName, bIsJoin);
 }
 
+void AMD_PlayerController::ClientNotifyLoanInterest_Implementation(int32 InterestAmount, int32 DebtBalance, int32 NotificationStage)
+{
+	// 실제 부과액이 없는 알림과 원격 컨트롤러의 로컬 UI 접근 차단
+	if (InterestAmount <= 0 || IsLocalController() == false)
+	{
+		// 화면에 전달할 이자 발생 결과가 없는 요청 종료
+		return;
+	}
+	// 소유 플레이어의 HUD를 조회할 로컬 UI 컨텍스트
+	ULocalPlayer* LocalPlayer = GetLocalPlayer();
+	// 서버 전용 컨트롤러 등 로컬 화면이 없는 요청 제외
+	if (IsValid(LocalPlayer) == false)
+	{
+		// 로컬 UI 접근 불가 상태의 알림 종료
+		return;
+	}
+	// 이미 생성된 GameHUD를 관리하는 플레이어별 관리자 조회
+	UMD_LocalUIManager* UIManager = LocalPlayer->GetSubsystem<UMD_LocalUIManager>();
+	// UI 관리자가 종료되었거나 준비되지 않은 요청 제외
+	if (IsValid(UIManager) == false)
+	{
+		// 유효한 HUD 조회 경로가 없는 알림 종료
+		return;
+	}
+	// 기존 HUD 인스턴스를 통한 디자이너 배치 알림 재사용
+	UMD_HUDWidget* HUD = Cast<UMD_HUDWidget>(UIManager->GetActiveScreen(MDGameplayTags::UI_Layer_GameHUD));
+	// HUD가 존재하는 소유 클라이언트에만 확정 금액과 단계 전달
+	if (IsValid(HUD) == true)
+	{
+		// 위젯 값 변경과 애니메이션 재생을 담당하는 Blueprint 이벤트 호출
+		HUD->HandleLoanInterestApplied(InterestAmount, DebtBalance, NotificationStage);
+	}
+}
+
 void AMD_PlayerController::ClientShowHUDMessage_Implementation(const FText& Message)
 {
 	// HUD 위젯이 알림 이벤트를 구현하기 전까지 화면에서 확인할 임시 표시 — 폼건·지지대 실패 메시지와 같은 방식
@@ -573,19 +684,12 @@ void AMD_PlayerController::MD_ShowCredits()
 	UE_LOG(LogTemp, Log, TEXT("[Merchant][%s] Credits = %d"),HasAuthority() ? TEXT("Server") : TEXT("Client"),Merchant->GetCredits());
 }
 
-void AMD_PlayerController::MD_AddAffinity(int32 DeltaAffinity)
-{
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
-	{
-		Merchant->AddAffinity(DeltaAffinity);
-	}
-}
-
 void AMD_PlayerController::ServerAddCredits_Implementation(int32 Amount)
 {
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
 	{
-		Merchant->AddCredits(EMD_DailyReportCategory::Other, Amount);
+		// 명령을 실행한 서버 플레이어의 금액 이력 기록
+		Merchant->AddCredits(EMD_DailyReportCategory::Other, Amount, PlayerState);
 	}
 }
 
@@ -594,27 +698,6 @@ void AMD_PlayerController::MD_BeginContract()
 	ServerBeginContract();
 }
 
-void AMD_PlayerController::MD_DumpQuests()
-{
-	UGameInstance* GameInstance = GetGameInstance();
-	if (!IsValid(GameInstance))
-	{
-		return;
-	}
-
-	UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>();
-	if (!IsValid(Merchant))
-	{
-		return;
-	}
-
-	UE_LOG(LogTemp, Log, TEXT("[Merchant] Credits=%d Day=%d"), Merchant->GetCredits(), Merchant->GetCurrentDay());
-	for (const FMD_MainQuestState& Q : Merchant->GetMainQuests())
-	{
-		UE_LOG(LogTemp, Log, TEXT("[Merchant]   Main: %s Status=%d Phase=%d Progress=%d UnlockDay=%d"),
-			*Q.DefinitionId.ToString(), (int32)Q.Status, Q.CurrentPhaseIndex, Q.CurrentProgress, Q.UnlockDay);
-	}
-}
 
 void AMD_PlayerController::BeginPlay()
 {
@@ -685,6 +768,7 @@ void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 	}
 
 	CancelScrapeInteraction();
+	CancelThrowInteraction();
 	Super::EndPlay(EndPlayReason);
 }
 
@@ -701,98 +785,6 @@ void AMD_PlayerController::SetGameplayHUDVisible(bool bVisible)
 	}
 }
 
-void AMD_PlayerController::ServerAbandonRepeatQuest_Implementation(int32 Index)
-{
-	// 퀘스트 포기에 따른 패널티를 적용할 GameState 얻기
-	AMD_GameStateBase* MDGameState = IsValid(GetWorld()) == true ? GetWorld()->GetGameState<AMD_GameStateBase>() : nullptr;
-	if (IsValid(MDGameState) == false || MDGameState->HasAuthority() == false)
-	{
-		return;
-	}
-
-	// 퀘스트 상태와 경제·호감도 페널티를 관리하는 서버의 상인 매니저 얻기
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == false)
-	{
-		return;
-	}
-
-	// 고정 점수 차감 없이 퀘스트 에셋의 미회수 패널티만 적용하는 포기 처리
-	Merchant->TryAbandonRepeatQuest(Index);
-}
-
-void AMD_PlayerController::ServerAdvanceMainQuestPhase_Implementation(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex)
-{
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == true)
-	{
-		Merchant->TryAdvanceMainQuestPhase(QuestDefinitionId, ExpectedPhaseIndex);
-	}
-}
-
-void AMD_PlayerController::ServerNotifyQuestInteraction_Implementation(FPrimaryAssetId QuestDefinitionId, int32 ExpectedPhaseIndex)
-{
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == true)
-	{
-		Merchant->NotifyInteractionProgress(QuestDefinitionId, ExpectedPhaseIndex);
-	}
-}
-
-void AMD_PlayerController::ServerDeliverHotbarQuestItems_Implementation(AMD_Merchant* MerchantActor)
-{
-	APawn* PlayerPawn = GetPawn();
-	if (IsValid(MerchantActor) == false || IsValid(PlayerPawn) == false)
-	{
-		return;
-	}
-
-	// 대출·상환과 같은 상인 접근 거리 검증
-	if (FVector::DistSquared(PlayerPawn->GetActorLocation(), MerchantActor->GetActorLocation()) > FMath::Square(500.0f))
-	{
-		return;
-	}
-
-	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
-	UMD_EquipHotbarComponent* Hotbar = PlayerPawn->FindComponentByClass<UMD_EquipHotbarComponent>();
-	if (IsValid(MerchantSubsystem) == false || IsValid(Hotbar) == false)
-	{
-		return;
-	}
-
-	// 슬롯을 앞에서부터 훑어 퀘스트 회수물만 납품한다. 차감으로 슬롯이 비어도 인덱스는 유지된다
-	for (int32 SlotIndex = 0; SlotIndex < Hotbar->GetSlotCount(); ++SlotIndex)
-	{
-		UMD_QuestItemDefinition* QuestItem = Cast<UMD_QuestItemDefinition>(Hotbar->GetItemAtSlot(SlotIndex));
-		int32 HeldCount = Hotbar->GetItemCountAtSlot(SlotIndex);
-		if (IsValid(QuestItem) == false || HeldCount <= 0)
-		{
-			continue;
-		}
-
-		int32 DeliveredCount = MerchantSubsystem->TryDeliverQuestItemDefinition(QuestItem, HeldCount);
-		if (DeliveredCount <= 0)
-		{
-			continue;
-		}
-
-		// 진행도는 이미 반영됐으므로 차감 실패는 로그만 남긴다 (도구가 아닌 보관 품목이라 실패 경로는 사실상 없다)
-		if (Hotbar->TryConsumeItem(QuestItem, DeliveredCount) == false)
-		{
-			UE_LOG(LogTemp, Warning, TEXT("[Merchant] 핫바 회수물 차감 실패: %s x%d"), *QuestItem->ItemName.ToString(), DeliveredCount);
-		}
-
-		ClientReceiveQuestItemDelivery(MerchantActor, QuestItem->ItemName, DeliveredCount);
-	}
-}
-
-void AMD_PlayerController::ClientReceiveQuestItemDelivery_Implementation(AMD_Merchant* MerchantActor, const FText& ItemName, int32 Count)
-{
-	if (IsValid(MerchantActor) == true)
-	{
-		MerchantActor->ReceiveQuestItemDelivery(this, ItemName, Count);
-	}
-}
 
 void AMD_PlayerController::ServerBorrowCredits_Implementation(AMD_Merchant* MerchantActor, int32 Amount)
 {
@@ -812,7 +804,8 @@ void AMD_PlayerController::ServerBorrowCredits_Implementation(AMD_Merchant* Merc
 	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
 	if (IsValid(MerchantSubsystem) == true)
 	{
-		MerchantSubsystem->TryBorrowCredits(Amount);
+		// 서버가 검증한 대출 요청자를 시간별 기록에 연결
+		MerchantSubsystem->TryBorrowCredits(Amount, PlayerState);
 	}
 }
 
@@ -834,7 +827,8 @@ void AMD_PlayerController::ServerRepayLoan_Implementation(AMD_Merchant* Merchant
 	UMD_MerchantSubsystem* MerchantSubsystem = GetMerchantSubsystem();
 	if (IsValid(MerchantSubsystem) == true)
 	{
-		MerchantSubsystem->TryRepayLoan(Amount);
+		// 서버가 검증한 상환 요청자를 시간별 기록에 연결
+		MerchantSubsystem->TryRepayLoan(Amount, PlayerState);
 	}
 }
 
@@ -879,104 +873,6 @@ void AMD_PlayerController::ServerBeginContract_Implementation()
 	{
 		Merchant->BeginContract(DebugSite);
 	}
-}
-
-void AMD_PlayerController::MD_BeginDay(int32 Day)
-{
-	ServerBeginDay(Day);
-}
-
-AMD_CuttableWall* AMD_PlayerController::FindWallToClean(const float SearchRadiusCm) const
-{
-	UWorld* const World = GetWorld();
-	if (!World)
-	{
-		return nullptr;
-	}
-
-	auto NeedsCleaning = [](const AMD_CuttableWall* Wall) -> bool
-	{
-		const UMD_ScrapeSurfaceComponent* const Surface =
-			Wall ? Wall->GetScrapeSurfaceComponent() : nullptr;
-		return Surface && Surface->IsContaminationEnabled();
-	};
-
-	// 1) 조준선 우선. 여러 벽이 붙어 있을 때 어느 것을 지웠는지 헷갈리지 않게 한다.
-	FVector ViewLocation;
-	FRotator ViewRotation;
-	GetPlayerViewPoint(ViewLocation, ViewRotation);
-
-	FHitResult Hit;
-	FCollisionQueryParams Params;
-	if (const APawn* const OwnPawn = GetPawn())
-	{
-		Params.AddIgnoredActor(OwnPawn);
-	}
-	if (World->LineTraceSingleByChannel(
-			Hit,
-			ViewLocation,
-			ViewLocation + ViewRotation.Vector() * SearchRadiusCm,
-			ECC_Visibility,
-			Params))
-	{
-		if (AMD_CuttableWall* const AimedWall = Cast<AMD_CuttableWall>(Hit.GetActor()))
-		{
-			return AimedWall;
-		}
-	}
-
-	// 2) 조준이 빗나갔으면 반경 안에서 아직 오염이 남은 가장 가까운 벽.
-	AMD_CuttableWall* Closest = nullptr;
-	float ClosestDistanceSquared = FMath::Square(SearchRadiusCm);
-	for (TActorIterator<AMD_CuttableWall> It(World); It; ++It)
-	{
-		AMD_CuttableWall* const Wall = *It;
-		if (!NeedsCleaning(Wall))
-		{
-			continue;
-		}
-
-		const float DistanceSquared =
-			FVector::DistSquared(Wall->GetActorLocation(), ViewLocation);
-		if (DistanceSquared < ClosestDistanceSquared)
-		{
-			ClosestDistanceSquared = DistanceSquared;
-			Closest = Wall;
-		}
-	}
-	return Closest;
-}
-
-void AMD_PlayerController::MD_CleanWall()
-{
-	AMD_CuttableWall* const Wall = FindWallToClean();
-	if (!Wall)
-	{
-		UE_LOG(LogTemp, Warning,
-			TEXT("MD_CleanWall: 조준선과 주변 20m 안에 오염된 격벽이 없다"));
-		return;
-	}
-
-	UE_LOG(LogTemp, Log, TEXT("MD_CleanWall: %s 오염 제거 요청"), *Wall->GetName());
-	ServerCleanWall(Wall);
-}
-
-void AMD_PlayerController::ServerCleanWall_Implementation(AMD_CuttableWall* Wall)
-{
-	UMD_ScrapeSurfaceComponent* const Surface =
-		IsValid(Wall) ? Wall->GetScrapeSurfaceComponent() : nullptr;
-	if (!Surface)
-	{
-		return;
-	}
-
-	// 셀 배열을 직접 0으로 쓰지 않고 공개 API 를 쓴다. 오염 셀·마스크 아틀라스·복제 상태가
-	// 컴포넌트 내부에서 다섯 파일에 걸쳐 맞물려 있어서, 밖에서 손대면 조용히 어긋난다.
-	// 이 스위치는 제거율 1.0 · 완전제거 판정 true · 데칼 0장을 모두 성립시킨다.
-	Surface->SetContaminationEnabled(false);
-
-	UE_LOG(LogTemp, Log, TEXT("MD_CleanWall: %s 오염 제거 완료 (제거율 %.2f)"),
-		*Wall->GetName(), Surface->GetContaminationCleanRatio());
 }
 
 AMD_WallUtility* AMD_PlayerController::FindUtilityToRepair(const float SearchRadiusCm) const
@@ -1092,58 +988,6 @@ void AMD_PlayerController::ServerRepairUtility_Implementation(AMD_WallUtility* U
 			static_cast<int64>(Utility->GetUtilityState())));
 }
 
-void AMD_PlayerController::ServerBeginDay_Implementation(int32 Day)
-{
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == false)
-	{
-		return;
-	}
-
-	// 실제 맵 재진입 경로처럼 종료된 계약 다음 Day 명령에서 새 디버그 계약을 먼저 구성하는 처리
-	if (Merchant->HasActiveContract() == false)
-	{
-		Merchant->BeginContract(DebugSite);
-	}
-
-	// DebugSite 미설정으로 계약 생성에 실패했을 때 잘못된 Day 상태만 남기지 않기 위한 검사
-	if (Merchant->HasActiveContract() == false)
-	{
-		return;
-	}
-
-	// 실제 Day 시작과 동일하게 GameState의 비상 상태를 디버그 착수금 계산에 전달
-	AMD_GameStateBase* MDGameState = GetWorld()->GetGameState<AMD_GameStateBase>();
-	bool bEmergencyDay = IsValid(MDGameState) == true ? bEmergencyDay = MDGameState->IsEmergencyDay() : false;
-
-	Merchant->BeginDay(Day, DebugAdvancePayment, bEmergencyDay);
-}
-
-void AMD_PlayerController::MD_AcceptRepeat(int32 Index)
-{
-	ServerAcceptRepeat(Index);
-}
-
-void AMD_PlayerController::ServerAcceptRepeat_Implementation(int32 Index)
-{
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
-	{
-		Merchant->TryAcceptRepeatQuest(Index);
-	}
-}
-
-void AMD_PlayerController::MD_DeclineRepeat(int32 Index)
-{
-	ServerDeclineRepeat(Index);
-}
-
-void AMD_PlayerController::ServerDeclineRepeat_Implementation(int32 Index)
-{
-	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
-	{
-		Merchant->TryDeclineRepeatQuest(Index);
-	}
-}
 
 void AMD_PlayerController::MD_Deliver(const FString& GradeName, bool bIntact)
 {
@@ -1156,24 +1000,6 @@ void AMD_PlayerController::ServerDeliver_Implementation(FGameplayTag GradeTag, b
 {
 	// 실제 퀘스트 아이템 액터 검사를 우회하는 필드 기반 디버그 제출의 차단 기록
 	UE_LOG(LogTemp, Warning, TEXT("[Quest] MD_Deliver 제출 차단: 실제 아이템 액터 필요 (등급=%s, 온전함=%s)"), *GradeTag.ToString(), bIntact == true ? TEXT("true") : TEXT("false"));
-}
-
-void AMD_PlayerController::MD_MarkSiteCleared()
-{
-	ServerMarkSiteCleared();
-}
-
-void AMD_PlayerController::ServerMarkSiteCleared_Implementation()
-{
-	UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem();
-	if (IsValid(Merchant) == false)
-	{
-		return;
-	}
-
-	// 실제 사이트 클리어 전환과 동일하게 이력 등록 후 현재 계약을 종료하는 처리
-	Merchant->MarkSiteCleared();
-	Merchant->FinalizeContract();
 }
 
 void AMD_PlayerController::MD_FinalizeContract()
@@ -1243,6 +1069,8 @@ void AMD_PlayerController::ServerRequestDailyLedger_Implementation(int32 Request
     GameState->OnDailyLedgerChanged.AddUObject(this, &AMD_PlayerController::SendDailyLedger);
     // 구독 해제와 응답 조회에 사용할 서버 원장 보관
     DailyLedgerSource = GameState;
+    // 열린 보고서들의 경과 시간을 서버 공용 예약으로 갱신
+    GameState->UpdateDailyLedgerRefreshTimer();
     // 현재 원장의 최초 응답 전송
     SendDailyLedger();
 }
@@ -1289,6 +1117,8 @@ void AMD_PlayerController::UnbindDailyLedger()
     {
         // 현재 컨트롤러의 원장 변경 수신 해제
         GameState->OnDailyLedgerChanged.RemoveAll(this);
+        // 마지막 보고서 구독 해제 시 주기적인 시간축 집계 중단
+        GameState->UpdateDailyLedgerRefreshTimer();
     }
     // 이전 월드와 구독 번호 정리
     DailyLedgerSource.Reset();

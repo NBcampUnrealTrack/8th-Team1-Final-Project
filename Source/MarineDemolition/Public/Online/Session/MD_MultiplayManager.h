@@ -15,7 +15,6 @@ class APlayerState;
 struct FBlueprintSessionResult;
 struct FMD_SessionCreateParams;     // Hosting Session 설정값
 struct FMD_SessionFindParams;     // Find Session 설정 값
-struct FMD_GameData;     // 게임 시작과 불러오기에 사용하는 확장 세이브 데이터
 
 // Session 생성 완료 시 이벤트
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FOnCreateMDSessionCompleteSignature, bool, bWasSuccessful);
@@ -113,10 +112,6 @@ public:
     // 비동기 Listen Server 호스팅 절차를 시작하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
     void CreateSession(const FString& ServerName, int32 MaxPlayerCount, const FMD_SessionCreateParams& SessionCreateParams);
-
-    // 불러오기 여부와 현재 진행 데이터 존재 여부에 따라 게임 시작 방식을 결정하고 모든 접속자를 지정 맵으로 이동시키는 함수
-    UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
-    void StartSession(const struct FMD_GameData& GameData, bool bLoadGame = false);
 
     // 지정 맵과 URL 옵션을 사용하여 기존 Session의 게임 시작 및 모든 접속자의 맵 이동 절차를 실행하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
@@ -234,9 +229,6 @@ protected:
 
     // Online Session Interface에서 Destroy Session을 완료하였을 때 호출되는 함수
     void HandleDestroySessionComplete(FName SessionName, bool bWasSuccessful);
-
-    // Session 시작 또는 맵 이동 실패 시 데이터 저장 시스템의 저장된 데이터 적용 작업을 취소하는 함수
-    void CancelPendingGameDataOperation();
 
     // 생성, 참여 또는 게임 시작 실패 후 남은 NamedSession을 외부 제거 이벤트 없이 정리하는 함수
     void RollbackSession(FName SessionName, EMD_SessionRollbackOperation RollbackOperation);

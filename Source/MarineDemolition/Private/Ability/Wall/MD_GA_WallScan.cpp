@@ -3,10 +3,8 @@
 #include "AbilitySystemComponent.h"
 #include "Character/MD_Character.h"
 #include "Component/Scanning/MD_ScannerComponent.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "World/Contamination/MD_Barnacle.h"
 #include "World/Contamination/MD_SurfaceStain.h"
-#include "UObject/UObjectIterator.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -47,18 +45,8 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 	Controller->GetPlayerViewPoint(OutOrigin, Rotation);
 	OutForward = Rotation.Vector().GetSafeNormal();
 	TArray<AActor*> Candidates;
-	if (Mode == EMD_ScanMode::WallType)
+	if (Mode == EMD_ScanMode::Cleanup)
 	{
-		// Some authored walls have complex collision only and are absent from simple
-		// overlap results. Classify their rendered bounds once per scan, without Tick.
-		for (TActorIterator<AMD_CuttableWall> It(Pawn->GetWorld()); It; ++It) Candidates.Add(*It);
-	}
-	else if (Mode == EMD_ScanMode::Cleanup)
-	{
-		// Surfaces also exist on floors/equipment; the collision query is not authoritative.
-		for (TObjectIterator<UMD_ScrapeSurfaceComponent> It; It; ++It)
-			if (It->GetWorld() == Pawn->GetWorld() && It->IsRegistered() && IsValid(It->GetOwner()))
-				Candidates.AddUnique(It->GetOwner());
 		for (TActorIterator<AMD_Barnacle> It(Pawn->GetWorld()); It; ++It) Candidates.AddUnique(*It);
 		for (TActorIterator<AMD_SurfaceStain> It(Pawn->GetWorld()); It; ++It) Candidates.Add(*It);
 	}
@@ -87,12 +75,6 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 				if (Barnacle->IsFullyRemoved()) continue;
 				Mesh = Barnacle->GetScanMesh();
 			}
-			else if (const auto* Surface = Candidate->FindComponentByClass<UMD_ScrapeSurfaceComponent>())
-			{
-				if (!Surface->IsContaminationEnabled() || !Surface->IsSurfaceInitialized()
-					|| !Surface->UsesMeshUVSurface() || Surface->IsContaminationFullyRemoved()) continue;
-				Mesh = Surface->GetSurfaceMesh();
-			}
 			if (const AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Candidate))
 			{
 				if (Stain->GetRemainingSize() <= 0) continue;
@@ -104,16 +86,6 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 				if (!IsValid(Mesh) || !Mesh->GetStaticMesh() || !Mesh->IsVisible() || !Mesh->bRenderInMainPass) continue;
 				Center = Mesh->Bounds.Origin; BoundRadius = Mesh->Bounds.SphereRadius;
 			}
-		}
-		else if (Mode == EMD_ScanMode::WallType)
-		{
-			const AMD_CuttableWall* Wall = Cast<AMD_CuttableWall>(Candidate);
-			if (!Wall || !Wall->CanCut() || !IsValid(Wall->GetScanMesh())) continue;
-			if (Wall->GetWallType() != EMD_WallType::Partition && Wall->GetWallType() != EMD_WallType::Strut) continue;
-			const UStaticMeshComponent* Mesh = Wall->GetScanMesh();
-			if (!Mesh->IsVisible() || !Mesh->bRenderInMainPass) continue;
-			Center = Mesh->Bounds.Origin;
-			BoundRadius = Mesh->Bounds.SphereRadius;
 		}
 		else if (const AMD_WallUtility* Utility = Cast<AMD_WallUtility>(Candidate))
 		{

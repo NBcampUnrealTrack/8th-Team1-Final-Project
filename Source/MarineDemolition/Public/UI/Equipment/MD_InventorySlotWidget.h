@@ -3,28 +3,25 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Blueprint/UserWidget.h"
+#include "UI/MD_CommonButtonBase.h"
 #include "Styling/SlateColor.h"
 #include "MD_InventorySlotWidget.generated.h"
 
 class UBorder;
-class UHorizontalBox;
-class UImage;
 class UTextBlock;
 class UMD_InventoryDragDropOperation;
 class UMD_InventoryWidget;
 class UMD_ItemDefinition;
 
-// 가로 인벤토리 카드의 표시 데이터와 슬롯 간 드래그 교환을 제공하는 위젯 부모 클래스
+// 공통 버튼 입력과 인벤토리 표시 및 슬롯 간 드래그 교환을 제공하는 클래스
 UCLASS(Abstract, Blueprintable)
-class MARINEDEMOLITION_API UMD_InventorySlotWidget : public UUserWidget
+class MARINEDEMOLITION_API UMD_InventorySlotWidget : public UMD_CommonButtonBase
 {
 	GENERATED_BODY()
 
 protected:
-	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
-	virtual FReply NativeOnMouseButtonDown(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
+	virtual FReply HandleButtonDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent) override;
 	virtual void NativeOnDragDetected(const FGeometry& InGeometry, const FPointerEvent& InMouseEvent, UDragDropOperation*& OutOperation) override;
 	virtual void NativeOnDragEnter(const FGeometry& InGeometry, const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
 	virtual void NativeOnDragLeave(const FDragDropEvent& InDragDropEvent, UDragDropOperation* InOperation) override;
@@ -34,27 +31,15 @@ protected:
 protected:
 	// 드롭 가능한 카드의 외곽선 색상을 변경할 배경 테두리
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Inventory", meta = (BindWidgetOptional))
-	TObjectPtr<UBorder> BDR_Background;
+	TObjectPtr<UBorder> BDR_Root;
 
 	// 카드 상단에 표시할 1부터 시작하는 Hotbar 번호
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Inventory", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_SlotNumber;
 
-	// 카드 중앙의 아이템 아이콘 표시
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Inventory", meta = (BindWidgetOptional))
-	TObjectPtr<UImage> Img_ToolIcon;
-
-	// 카드 하단의 아이템 이름 표시
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Inventory", meta = (BindWidgetOptional))
-	TObjectPtr<UTextBlock> Txt_ToolName;
-
 	// 아이템과 함께 이동하는 보유 수량 표시
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Inventory", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_ToolCount;
-
-	// 빈 슬롯에서 보유 수량 문구와 숫자를 함께 숨길 영역
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Inventory", meta = (BindWidgetOptional))
-	TObjectPtr<UHorizontalBox> HB_ToolCount;
 
 	// 표시 조회와 교환 요청을 전달할 인벤토리 화면
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "MD|Inventory")
@@ -84,16 +69,12 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, BlueprintSetter = SetDropHighlightColor, Category = "MD|Inventory")
 	FLinearColor DropHighlightColor = FLinearColor::Yellow;
 
-	// 다음 드래그에서 생성할 기본 미리보기 아이콘의 가로 및 세로 크기
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Inventory", meta = (ClampMin = "1.0", UIMin = "1.0"))
-	FVector2D DragIconSize = FVector2D(192.0f, 192.0f);
-
 	// 현재 카드에 드롭 대상 테두리 강조가 적용된 상태
 	UPROPERTY(Transient, BlueprintReadOnly, Category = "MD|Inventory")
 	bool bIsDropHighlighted = false;
 
-	// 드래그가 끝난 뒤 복원할 기존 외곽선 색상
-	UPROPERTY(Transient)
+	// 드래그 강조 중에도 BP의 선택 상태에 맞춰 갱신할 복원용 외곽선 색상
+	UPROPERTY(Transient, BlueprintReadWrite, Category = "MD|Inventory")
 	FSlateColor DefaultOutlineColor;
 
 	// 커서가 카드 위에 있는 동안 종료 알림을 받을 드래그 작업
@@ -126,7 +107,7 @@ public:
 
 	// 현재 드래그의 교환 가능 여부에 맞춰 대상 테두리 갱신
 	UFUNCTION(BlueprintCallable, Category = "MD|Inventory")
-	void UpdateDropHighlight(UMD_InventoryDragDropOperation* Operation);
+	bool UpdateDropHighlight(UMD_InventoryDragDropOperation* Operation);
 
 	// 드롭과 취소 및 화면 종료 시 기존 테두리 복원
 	UFUNCTION(BlueprintCallable, Category = "MD|Inventory")
@@ -140,20 +121,13 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Inventory")
 	bool TryDropItem(UMD_InventoryDragDropOperation* Operation);
 
-	// 아이템 상태에 따른 카드 배경 등의 표시 갱신 이벤트
+	// 실제 보유 여부를 전달하여 BP에서 빈 슬롯 본문과 카드 디자인 갱신
 	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Inventory")
-	void OnSlotRefreshed();
-
-	// 기본 아이콘을 대체할 드래그 미리보기 위젯
-	UFUNCTION(BlueprintImplementableEvent, Category = "MD|Inventory")
-	UWidget* CreateItemDragVisual();
+	void OnSlotRefreshed(bool bHasItem);
 
 protected:
 	// 표시 내용과 텍스트 이력이 달라진 경우에만 텍스트 위젯 갱신
 	void SetSlotText(UTextBlock* TextBlock, FText NewText);
-
-	// 강조 표시와 입력 처리에서 공유할 드롭 가능 여부 계산
-	bool UpdateDropHighlightState(UMD_InventoryDragDropOperation* Operation);
 
 	// 배경과 모서리 및 두께를 유지한 외곽선 강조 전환
 	void SetDropHighlighted(bool bHighlight);

@@ -1,22 +1,17 @@
 ﻿#pragma once
 
 #include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
 #include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTagAssetInterface.h"
 #include "MD_CuttableWall.generated.h"
 
-class UCameraShakeBase;
-class UDecalComponent;
-class UMaterialInterface;
 class UStaticMeshComponent;
-class UMD_ScrapeSurfaceComponent;
 class UNiagaraSystem;
 class AMD_CuttableWall;
-class AMD_ContaminationItem;
 class AMD_WallPiece;
 struct FHitResult;
 
-DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnStrutCollapsed, AMD_CuttableWall*, Wall, AActor*, Cutter);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnWallDemolished, AMD_CuttableWall*, Wall,	AActor*, Cutter);
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_ThreeParams(FMD_OnWallScanned, AMD_CuttableWall*, Wall, float, Duration, AActor*, Scanner);
 
@@ -33,20 +28,7 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(
  */
 DECLARE_DELEGATE_RetVal_OneParam(bool, FMD_CutLocationFilter, const FHitResult*);
 
-UENUM(BlueprintType)
-enum class EMD_WallType : uint8
-{
-	Partition UMETA(DisplayName = "칸막이격벽"),
-	Strut UMETA(DisplayName = "지주격벽"),
-};
-
-/**
- * A demolishable wall.
- *
- * Wall demolition remains here. Reusable contamination behavior lives in
- * UMD_ScrapeSurfaceComponent. This actor only keeps serialized Blueprint
- * settings that have not been migrated to the component yet.
- */
+/** A demolishable wall with cutting and scanning behavior. */
 UCLASS()
 class MARINEDEMOLITION_API AMD_CuttableWall : public AActor, public IGameplayTagAssetInterface, public IMD_Scannable
 {
@@ -69,40 +51,11 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|태그")
 	FGameplayTagContainer OwnedGameplayTags;
 
-	virtual void PreRegisterAllComponents() override;
-	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void GetLifetimeReplicatedProps(
 		TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
-	void SetSupported(bool bSupported) { UpdateSupportState(bSupported, nullptr); }
-
-	/** Native brace changes also identify the player responsible for losing support. */
-	void UpdateSupportState(bool bSupported, AActor* ResponsibleActor);
-	bool IsAwaitingSupportCollapse() const { return bAwaitingSupportCollapse; }
-	/** Restore the hidden load-bearing state without replaying cutting, rewards or collapse. */
-	void RestorePendingSupportCollapse();
-
-	// 저장 복원 시 붕괴나 감점 이벤트 없이 지지 유무만 교체
-	void RestoreSupportState(bool bSupported);
-
-	UFUNCTION(BlueprintPure, Category = "MD|Wall")
-	bool IsSupported() const { return bHasSupport; }
-
-	UFUNCTION(BlueprintPure, Category = "MD|Wall")
-	EMD_WallType GetWallType() const { return WallType; }
-
-	/** Original wall geometry, excluding contamination and shadow-only proxies. */
+	/** Original wall geometry, used for scanning. */
 	UStaticMeshComponent* GetScanMesh() const { return Mesh.Get(); }
-
-	UFUNCTION(BlueprintPure, Category = "MD|Wall|Contamination")
-	UMD_ScrapeSurfaceComponent* GetScrapeSurfaceComponent() const
-	{
-		return ScrapeSurface.Get();
-	}
-
-	UPROPERTY(BlueprintAssignable, Category = "MD|Wall")
-	FMD_OnStrutCollapsed OnStrutCollapsed;
 
 	UPROPERTY(BlueprintAssignable, Category = "MD|Wall")
 	FMD_OnWallDemolished OnWallDemolished;
@@ -128,12 +81,6 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall|Cut")
 	void AddCutProgress(float DeltaSeconds, AActor* Cutter);
 
-	// 절단 완료 효과 없이 누적량만 파일에 보관하기 위한 조회
-	FORCEINLINE float GetPersistentCutSeconds() { return CutProgressSeconds; }
-
-	// 점수와 파괴 이벤트를 발생시키지 않는 절단 진행 복원
-	bool RestorePersistentCutSeconds(float Seconds);
-
 	/** 서버 GA의 마지막 벽 충돌면을 조각 배분까지 동기 전달한다. */
 	void AddCutProgressFromHit(
 		float DeltaSeconds,
@@ -158,28 +105,9 @@ public:
 	FMD_CutLocationFilter CutLocationFilter;
 
 protected:
-	virtual void BeginPlay() override;
-
 	UPROPERTY(VisibleAnywhere, Category = "MD|Wall")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Decal")
-	TObjectPtr<UDecalComponent> FrontContaminationDecal;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Decal")
-	TObjectPtr<UDecalComponent> BackContaminationDecal;
-
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination")
-	TObjectPtr<UMD_ScrapeSurfaceComponent> ScrapeSurface;
-
-	UPROPERTY(EditAnywhere, Category = "MD|Wall")
-	EMD_WallType WallType = EMD_WallType::Partition;
-
-	UPROPERTY(EditAnywhere, Replicated, Category = "MD|Wall")
-	bool bHasSupport = false;
 
 	UPROPERTY(EditAnywhere, Category = "MD|Wall",
 		meta = (ClampMin = "0"))
@@ -188,47 +116,6 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall")
 	TSubclassOf<AMD_WallPiece> PieceClass;
 
-	/** Local collapse footprint around the cut wall. */
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "50", ClampMax = "1000", Units = "cm"))
-	float CollapseRadiusCm = 250.f;
-
-	/** Search above wall mid-height for the actual underside of the ceiling. */
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "50", ClampMax = "1000", Units = "cm"))
-	float CollapseCeilingSearchHeightCm = 400.f;
-
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "0", ClampMax = "24"))
-	int32 CollapseDebrisCount = 12;
-
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Collapse", meta = (ClampMin = "0"))
-	float CollapseDamage = 40.f;
-
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Collapse")
-	TObjectPtr<UNiagaraSystem> CollapseEffect;
-
-	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Collapse")
-	TSubclassOf<UCameraShakeBase> CollapseShakeClass;
-
-	/** Serialized BP values retained until BP_MD_CuttableWall is migrated. */
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Debris")
-	TSubclassOf<AMD_ContaminationItem> ContaminationItemClass;
-
-	UPROPERTY(EditAnywhere, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Debris",
-		meta = (ClampMin = "0", UIMax = "10"))
-	int32 ContaminationItemsPerFace = 3;
-
-	/** Legacy authored mode is retained for pre-default-change saves only. */
-    UPROPERTY()
-    bool bUseProceduralContamination = false;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Wall|Contamination|Procedural",
-        meta = (DisplayName = "Full Contamination"))
-    bool bForceFullContamination = false;
-
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly,
-		Category = "MD|Wall|Contamination|Decal")
-	TObjectPtr<UMaterialInterface> ContaminationDecalMaterial;
 
 	/** 철거 완료 순간 벽 중심에 재생할 원샷 버스트 (NS_Cutter_Finish) */
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|VFX")
@@ -241,26 +128,14 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "MD|Wall|Audio", meta = (Categories = "SFX"))
 	FGameplayTag DemolishSoundTag;
 
-	// 기획 §2 — 애니메이션 1사이클(3.567초)의 정수배로 잡는다
+	// 기획 §2 — 애니메이션 1사이클(3.567초)의 정수배로 잡는다. 모든 벽이 같은 값을 쓴다
 	UPROPERTY(EditAnywhere, Category = "MD|Wall|Cut",
 		meta = (ClampMin = "0.1", Units = "s"))
 	float PartitionCutSeconds = 10.8f;      // 3사이클
 
-	UPROPERTY(EditAnywhere, Category = "MD|Wall|Cut",
-		meta = (ClampMin = "0.1", Units = "s"))
-	float StrutCutSeconds = 14.4f;          // 4사이클
-
 private:
 
-	void SyncLegacySurfaceConfiguration();
-	void CutFromHit(AActor* Cutter, const FHitResult* WallHit);
-	float ResolveCutSurfaceCleanRatio(const FHitResult* WallHit);
-	void CompleteCutWithCleanRatio(AActor* Cutter, float CutSurfaceCleanRatio);
-	void CollapseIfUnsupported(AActor* ResponsibleActor);
-	void TriggerUnsupportedCollapse(AActor* Cutter);
-
-	UFUNCTION(NetMulticast, Reliable)
-	void MulticastPlayCollapseEffect(FVector EffectLocation, FVector EffectScale);
+	void CompleteCut(AActor* Cutter);
 
 	void AddCutProgressInternal(
 		float DeltaSeconds,
@@ -279,9 +154,6 @@ private:
 
 	UPROPERTY(ReplicatedUsing = OnRep_Cut)
 	bool bCut = false;
-
-	bool bAwaitingSupportCollapse = false;
-	bool bCollapseTriggered = false;
 
 	//  누적 절단 시간. 감소하지 않으며 Day 간에도 유지된다 (기획 §3)
 	UPROPERTY(ReplicatedUsing = OnRep_CutProgress)

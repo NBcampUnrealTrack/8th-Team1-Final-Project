@@ -3,15 +3,13 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Data/Lore/MD_LoreCatalog.h"
-#include "Types/Lore/MD_LoreTypes.h"
 #include "MD_LoreComponent.generated.h"
 
-class UMD_LoreSubsystem;
+class UMD_LoreProfileSubsystem;
 
-/** 복제된 로어 진행 상태가 갱신되었음을 UI와 월드 표현에 알리는 이벤트 */
 DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_OnLoreProgressUpdated);
 
-/** 로어 관리 GameState 컴포넌트 */
+// 기존 GameState 접근 경로에 로컬 개인 기록을 제공하는 UI 원장
 UCLASS(ClassGroup = (Custom), meta = (BlueprintSpawnableComponent))
 class MARINEDEMOLITION_API UMD_LoreComponent : public UActorComponent
 {
@@ -20,47 +18,47 @@ class MARINEDEMOLITION_API UMD_LoreComponent : public UActorComponent
 public:
 	UMD_LoreComponent();
 
-	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
-
 protected:
 	virtual void BeginPlay() override;
-
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
 
 public:
-	/** 리슨 서버와 클라이언트가 동일한 갱신 시점에 반응하기 위한 이벤트 */
+	// 개인 수집과 저장 복원 이후 로컬 화면 갱신 알림
 	UPROPERTY(BlueprintAssignable, Category = "MD|Lore")
 	FMD_OnLoreProgressUpdated OnLoreProgressUpdated;
 
 protected:
-	/** 코덱스와 월드 수집물 표현에 제공하는 복제된 전역 로어 발견 목록 */
-	UPROPERTY(ReplicatedUsing = OnRep_LoreProgress)
+	// 다른 참가자에게 복제하지 않는 로컬 사용자의 발견 목록
+	UPROPERTY()
 	TArray<FPrimaryAssetId> DiscoveredLoreAssetIds;
 
-	/** 컴포넌트 종료 시 정확한 서버 원장 이벤트를 해제하기 위한 구독 핸들 */
-	FDelegateHandle SubsystemChangedHandle;
+	// 맵 이동과 독립된 개인 저장 원장
+	UPROPERTY()
+	TObjectPtr<UMD_LoreProfileSubsystem> LocalProfile;
+
+	// 이전 월드의 구독 해제용 핸들
+	FDelegateHandle ProfileChangedHandle;
+
+	// 로그인 준비와 파일 반영 실패의 재시도 주기
+	FTimerHandle ProfileRetryHandle;
 
 public:
-	/** 복제된 발견 목록과 카탈로그 선행 조건으로 공개 상태를 계산하는 함수 */
+	// 본인 발견 목록과 선행 조건에 따른 본문 공개 상태 조회
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	EMD_LoreEntryState GetLoreState(const UMD_LoreCatalog* LoreCatalog, FPrimaryAssetId LoreAssetId) const;
 
-	/** 서버의 원장에서 지정한 로어의 최초 발견 여부를 확인하는 함수 */
+	// 해당 사용자의 개인 기록 보유 여부 조회
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	bool HasDiscoveredLore(FPrimaryAssetId LoreAssetId) const;
 
-	/** 열린 코덱스 UI가 전역 로어 수집 정보를 복사하기 위한 조회 함수 */
+	// 기존 코덱스에 전달할 개인 발견 목록 조회
 	UFUNCTION(BlueprintPure, Category = "MD|Lore")
 	FORCEINLINE TArray<FPrimaryAssetId> GetDiscoveredLoreAssetIds() const { return DiscoveredLoreAssetIds; }
 
 protected:
-	/** 서버 원장 전체를 복제 배열로 복사하고 즉시 전파하는 함수 */
-	void RefreshFromSubsystem();
+	// 로컬 사용자 준비와 미저장 발견 기록의 주기적 재시도
+	void UpdateLocalProfile();
 
-	/** 현재 게임 인스턴스의 로어 원장을 조회하는 함수 */
-	UMD_LoreSubsystem* GetLoreSubsystem() const;
-
-	/** 클라이언트 복제 완료 이후 로어 UI 갱신을 알리는 함수 */
-	UFUNCTION()
-	void OnRep_LoreProgress();
+	// 개인 기록 변화에 따른 화면용 목록 동기화
+	void RefreshLocalProfile();
 };

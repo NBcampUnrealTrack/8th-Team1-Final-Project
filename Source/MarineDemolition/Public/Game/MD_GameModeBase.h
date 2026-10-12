@@ -14,7 +14,6 @@ class AMD_GameStateBase;
 class AMD_PlayerController;
 class UMD_SiteDefinition;
 class UWorld;
-struct FMD_GameData;
 
 /**
  *
@@ -27,11 +26,11 @@ class MARINEDEMOLITION_API AMD_GameModeBase : public AGameModeBase
 public:
     AMD_GameModeBase();
 
-    // 전체 플레이어의 정산 화면을 닫고 기존 판정에 따른 이동 실행
+    // 전체 플레이어의 정산 화면을 닫고 로비로 이동
     void FinishDayEndReport();
 
-    // 수동 퇴근과 시간 종료 원인을 구분하는 하루 마감 진입점
-    void RequestEndDay(EMD_DayEndReason EndReason = EMD_DayEndReason::Console, FGameplayTag ReportWidgetTag = FGameplayTag());
+    // 작업 마감 콘솔의 종료 진입점. 정산 → 보고서 표시 → 로비
+    void RequestEndDay(FGameplayTag ReportWidgetTag = FGameplayTag());
 
     virtual void StartPlay() override;
     virtual void RestartPlayer(AController* NewPlayer) override;
@@ -44,36 +43,26 @@ public:
     virtual void PostLogin(APlayerController* NewPlayer) override;
 
 protected:
-    // 로비처럼 자동 저장에서 제외할 맵 목록
-    UPROPERTY(EditDefaultsOnly, Category = "Save Game")
-    TSet<TSoftObjectPtr<UWorld>> AutoSaveExcludedMaps;
-
-public:
-    // 현재 맵의 자동 저장 허용 여부 확인
-    bool IsAutoSaveAllowed();
-
-    // 로그아웃과 저장 이벤트가 공유하는 단일 플레이어 장비 수집
-    bool CollectPlayerGameData(const APlayerState* PlayerState, FMD_GameData& GameData);
-
-    // 재접속과 적용 이벤트가 공유하는 단일 플레이어 장비 복원
-    bool OverwritePlayerGameData(const APlayerState* PlayerState, const FMD_GameData& GameData);
-
-protected:
-    // 저장 이벤트에 게임 진행과 접속 플레이어 기록을 추가하는 함수
-    UFUNCTION()
-    void CollectGameData(UPARAM(ref) FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
-
-    // 전달된 저장 데이터에서 게임 진행과 개인 기록을 찾아 직접 복원하는 함수
-    UFUNCTION()
-    void OverwriteGameData(const FMD_GameData& GameData, UPARAM(ref) bool& bWasSuccessful);
-
-    // 온라인 식별자와 오프라인 이름의 기존 개인 저장 키 정책 유지
-    FString BuildPlayerPersistenceKey(const APlayerState* PlayerState);
-
-protected:
     virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
     virtual void BeginPlay() override;
     virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+    // 현장 맵을 떠나거나 정산할 때 해제할 대출 이자 예약
+    FTimerHandle LoanInterestTimerHandle;
+
+    // 현장 진입 9분 뒤 첫 징수, 이후 3분 간격으로 서버 이자 계산 예약 (6분 유예 + 3분)
+    void StartLoanInterestTimer();
+
+    // 맵 진입 기준 첫 이자 징수 시각(초). 대출·경제 회의 계산기: 6분 유예 후 9분에 첫 징수
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+    float LoanFirstInterestDelaySeconds = 540.f;
+
+    // 첫 징수 이후 이자 징수 주기(초)
+    UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
+    float LoanInterestIntervalSeconds = 180.f;
+
+    // 현재 미상환 잔액에 주기 이자를 적용하는 서버 콜백
+    void CheckGameTimeEvents();
 
     // 참여 또는 퇴장한 플레이어의 이름을 각 소유 클라이언트에 전달
     void NotifyPlayerJoinAndExit(AController* ChangedPlayer, bool bIsJoin);
@@ -83,117 +72,77 @@ private:
     // 출발 요청 URL에서 검증한 계약 난이도를 GameState 생성 이후 적용하기 위한 임시 상태
     EMD_Difficulty RequestedContractDifficulty = EMD_Difficulty::Standard;
 
-    // 직접 맵 실행과 Day 재시작을 출발 난이도 지정 계약과 구분하기 위한 옵션 존재 여부
+    // 직접 맵 실행을 출발 난이도 지정 계약과 구분하기 위한 옵션 존재 여부
     bool bHasRequestedContractDifficulty = false;
 
     // 출발 요청 URL에서 검증한 계약 인원수를 GameState 생성 이후 적용하기 위한 임시 상태
     int32 RequestedContractCrewCount = 0;
 
-    // 직접 맵 실행과 Day 재시작을 출발 인원 지정 계약과 구분하기 위한 옵션 존재 여부
+    // 직접 맵 실행을 출발 인원 지정 계약과 구분하기 위한 옵션 존재 여부
     bool bHasRequestedContractCrewCount = false;
 
     // 서버 GameState에 검증된 출발 난이도와 인원수를 계약 상태로 반영하는 처리
     void ApplyRequestedContractSettings();
 
-    // 파일 복원 직후 저장된 퀘스트와 시간을 일차 초기화에서 보호하는 상태
-    bool bRestoredSavedWorld = false;
-
-    // 비동기 구역 복원의 무한 대기를 막는 실시간 기준
-    double SavedStreamingStartSeconds = 0.0;
-
     bool bStartPlayWaitingForMapRegistration = false;
     TArray<TWeakObjectPtr<AController>> PendingMapRegistrationPlayers;
 
-    FTimerHandle CheckGameTimeTimerHandle;
-
-    // 새 게임 또는 불러오기 데이터를 World에 적용하는 함수
-    void ApplyPendingGameDataOperation();
-
-    void CheckGameTimeEvents();
-
     void FinalizeReturnStatuses();
 
-    // Day 마감 시 복귀 구역 내부 샘플을 퀘스트 제출로 확정하는 처리
-    void FinalizeDeliveredSamples();
 
- //Collapse Score
+ //Demolition Score
 private:
-    UFUNCTION()
-    void HandleStrutCollapsed(AMD_CuttableWall* Wall, AActor* Cutter);
-
     UFUNCTION()
     void HandleWallDemolished(AMD_CuttableWall* Wall, AActor* Cutter);
 
- //Daily Score & Inspection
+ //Contract Settlement
 private:
-    // 18:00 자동 마감과 MD_EndDay 공용 하루 마감 시퀀스. 하루 1회만 실행. 판정 결과 반환
-    EMD_InspectionResult FinalizeDay();
+    // 마감 정산 시퀀스. 계약당 1회만 실행
+    void FinalizeDay();
 
-    // 마감 원인을 보존하고 판정에 따른 다음 날 및 최종 결과 전환
-    void RouteAfterDay(EMD_InspectionResult Result, EMD_DayEndReason EndReason, FGameplayTag ReportWidgetTag);
+    // 확정 보고서를 모든 플레이어에게 표시한 뒤 로비 이동 예약
+    void ShowFinalReport(FGameplayTag ReportWidgetTag);
 
-    // 지연 타이머가 호출. PendingResult에 따라 실제 전환 실행
-    void ExecuteDayTransition();
-
+    // 계약 종료 처리 후 로비로 이동. 마감의 유일한 종착점
     void HandleContractCleared();
-
-    void HandleGameOver();
 
     // 게임 종료 세션 상태를 갱신한 뒤 대상 로비 레벨로 이동하는 함수
     void TravelToLevel(const TSoftObjectPtr<UWorld>& Level);
 
     bool DoesSiteUseCurrentWorld(UMD_SiteDefinition* Site, UWorld* World) const;
 
+public:
+    // 맵별 계약 목록과 호환 후보에서 해당 월드의 현장을 찾는다. 에디터에서 CDO로 호출해도 된다
+    UMD_SiteDefinition* FindExpeditionSiteForWorld(UWorld* World) const;
+
+private:
+
     TSoftObjectPtr<UWorld> MakeWorldAssetReference(UWorld* World) const;
 
     // FinalizeDay 중복 실행 방지 플래그. 레벨 재시작 시 초기화
     bool bDayFinalized = false;
 
-    // ExecuteDayTransition이 참조할 직전 판정 결과
-    EMD_InspectionResult PendingResult = EMD_InspectionResult::NotApplicable;
-
-    // 클리어 시 이동할 레벨(모선/다음 현장 대기). BP GameMode에서 지정
-    UPROPERTY(EditDefaultsOnly, Category = "Day")
-    TSoftObjectPtr<UWorld> ClearedLevel;
-
-    // 게임오버 시 이동할 레벨(타이틀). BP GameMode에서 지정
-    UPROPERTY(EditDefaultsOnly, Category = "Day")
-    TSoftObjectPtr<UWorld> GameOverLevel;
+    // 마감 후 이동할 로비 레벨. BP GameMode에서 지정 (구 ClearedLevel)
+    UPROPERTY(EditDefaultsOnly, Category = "Contract")
+    TSoftObjectPtr<UWorld> LobbyLevel;
 
     FTimerHandle DepartTravelTimerHandle;
-
-    // 같은 레벨 재로드 → 복원 경로에서 Day+1 진입
-    void TravelToNextDay();
 
     // 세션 절차를 거치지 않는 직접 ServerTravel 전에 모든 소유 클라이언트에 로딩 화면을 요청한다.
     void PreparePlayersForTravel(EMD_LoadingContext Context);
 
-    // 로딩 인트로가 화면을 완전히 덮은 뒤에 같은 레벨 재시작 트래블을 실행한다.
-    void RestartLevelAfterLoadingIntro();
-
-    // 18:00 정산 시점의 인원 복귀 점수와 현장 미수거 점수를 적용하는 처리
+    // 마감 시점의 인원 복귀 점수와 현장 미수거 점수를 적용하는 처리
     void FinalizeDailyScore();
 
-    // Day2/3/4 점검 판정 + 경고/게임오버 상태 적용
-    EMD_InspectionResult EvaluateInspection();
-
- //Day Persistence
+ //Expedition Contract
 private:
-    // 18:00 마감 또는 트래블 직전에 스냅샷 기록
-    void CaptureDaySnapshot();
-
-    // 다음 틱에 스냅샷 복원 후 Merchant Day 동기화 (전 액터 BeginPlay 완료 보장)
+    // 다음 틱에 월드 준비를 기다린 뒤 계약 시작 (전 액터 BeginPlay 완료 보장)
     void InitializeExpeditionDay();
 
-    bool RestoreDaySnapshot();
-
-    // 서버 일차와 퀘스트를 동기화하고 명시적인 새 출항만 같은 현장의 계약 재구성
-    void SyncMerchantToGameDay(int32 Day, bool bStartNewContract = false);
+    // 현재 맵의 현장으로 새 계약을 시작하고 착수금 지급
+    void BeginExpeditionContract();
 
     UMD_SiteDefinition* ResolveExpeditionSite() const;
-
-    UFUNCTION()
-    void HandleGameDayChanged(int32 NewDay);
 
     /** 현재 맵을 키로 사용하여 현장 데이터를 직접 선택하기 위한 맵별 계약 목록 */
     UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
@@ -203,9 +152,9 @@ private:
     UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
     TObjectPtr<UMD_SiteDefinition> ExpeditionSite;
 
-    /** 표준 난이도 착수금 (`07` §2.1). 계약 최초 1회만 지급된다. */
+    /** 착수금 대출. 계약 최초 1회 지급되며 같은 금액이 부채에 가산된다 (V2 기획: 초기 도구 4종 가격 합 1,300) */
     UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")
-    int32 ExpeditionAdvancePayment = 500;
+    int32 ExpeditionAdvancePayment = 1300;
 
     // 테스트용 콘솔 커맨드: 정식 마감 경로(RequestEndDay) 즉시 호출
     UFUNCTION(Exec)
@@ -216,15 +165,5 @@ private:
     void MD_AddScore(int32 Delta);
 
     UFUNCTION(Exec)
-    void MD_SetDay(int32 Day);
-
-    // 현재 일자의 시간을 H시 00분으로 설정하는 호스트 콘솔 명령
-    UFUNCTION(Exec)
-    void MD_SetTime(int32 Hour);
-
-    UFUNCTION(Exec)
     void MD_SetCrew(int32 Crew);
-
-    UFUNCTION(Exec)
-    void MD_SetWarned(int32 bWarned);
 };

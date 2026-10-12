@@ -54,7 +54,7 @@ public:
 
 	// 진행 조건과 구매 이력 및 등록된 구매 금지를 상점 화면에 전달
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
-	void SetProgress(int32 InQuestCompletions, const TArray<FPrimaryAssetId>& InOwnedItemIds, TArray<FPrimaryAssetId> InBlockedItemIds);
+	void SetProgress(const TArray<FPrimaryAssetId>& InOwnedItemIds, TArray<FPrimaryAssetId> InBlockedItemIds);
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Shop")
 	// 이벤트 그래프에서 선택한 카테고리 Enum 값으로 품목 필터 적용
@@ -154,8 +154,6 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")
 	FMD_MerchantMenuInfo ShopInfo;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop", meta = (ClampMin = "0"))
-	int32 QuestCompletions = 0;
 
 	// 현재 플레이어의 전체 AssetId 구매 이력
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Shop")

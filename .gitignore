@@ -59,6 +59,8 @@ Config/DefaultEditorPerProjectUserSettings.ini
 Art/
 
 # Docs: track planning markdown; ignore local audit dumps
+# Personal presentation draft (local only)
+/Docs/Presentation/발표 준비 템플릿.html
 Docs/**/_read_*.txt
 Docs/**/_*.tmp.md
 Docs/**/_audit*

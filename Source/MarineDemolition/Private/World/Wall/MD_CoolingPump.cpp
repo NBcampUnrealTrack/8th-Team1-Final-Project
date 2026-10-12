@@ -1,6 +1,7 @@
 #include "World/Wall/MD_CoolingPump.h"
 
 #include "Components/BoxComponent.h"
+#include "Component/Facility/MD_FacilityRepairComponent.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "NiagaraComponent.h"
 #include "NiagaraSystem.h"
@@ -8,7 +9,9 @@
 
 AMD_CoolingPump::AMD_CoolingPump()
 {
-	bStartBroken = true;
+	bStartBroken = false;
+	FacilityRepair->Kind = EMD_FacilityKind::CoolingPump;
+	FacilityRepair->bRandomFaultEligible = true;
 	bLinkHostWalls = false;
 	LinkTrigger->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	LinkTrigger->SetGenerateOverlapEvents(false);
@@ -31,6 +34,9 @@ AMD_CoolingPump::AMD_CoolingPump()
 
 void AMD_CoolingPump::BeginPlay()
 {
+	// V2 incidents replace the removed Day3 mission's serialized initial fault.
+	// An explicit initial incident is configured on FacilityRepair.bStartBroken instead.
+	bStartBroken = false;
 	Super::BeginPlay();
 	// Also handles an intact start and clients whose initial replication preceded BeginPlay.
 	OnUtilityStateChangedLocal(GetUtilityState());

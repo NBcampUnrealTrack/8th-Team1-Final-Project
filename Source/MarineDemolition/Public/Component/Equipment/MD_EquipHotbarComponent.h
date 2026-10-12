@@ -116,6 +116,18 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
 	bool AddItem(UMD_ItemDefinition* ItemDefinition, int32 Amount = 1);
 
+	/** Snapshot one owned item without refilling its stored charge. */
+	UFUNCTION(BlueprintPure, Category = "Hotbar|Transfer")
+	bool GetItemTransferAtSlot(int32 SlotIndex, FMD_HotbarToolEntry& OutEntry) const;
+
+	/** Remove exactly the snapshotted item after a world pickup has been prepared. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar|Transfer")
+	bool TryRemoveTransferredItem(int32 SlotIndex, const FMD_HotbarToolEntry& ExpectedEntry);
+
+	/** Receive one existing item, preserving its charge and original usage cost. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar|Transfer")
+	bool AddTransferredItem(const FMD_HotbarToolEntry& Entry);
+
 	// 보관 중인 도구의 현재 충전 잔량 조회
 	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")
 	float GetToolCharge(UMD_ToolDefinition* ToolDefinition);
@@ -132,6 +144,10 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar|Charge")
 	bool ConsumeToolCharge(UMD_ToolDefinition* ToolDefinition);
 
+	/** Consume elapsed operating seconds, including the final partial charge. Returns the amount spent. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar|Charge")
+	float ConsumeToolChargeAmount(UMD_ToolDefinition* ToolDefinition, float Amount);
+
 	// 도구 보유 상태와 충전 상한을 기준으로 보충 가능 여부 확인
 	UFUNCTION(BlueprintPure, Category = "Hotbar|Charge")
 	bool CanAddToolCharge(UMD_ToolDefinition* ToolDefinition, float Amount);
@@ -143,6 +159,9 @@ public:
 	// 효과 적용과 분리하여 보유 수량만 차감하는 서버 처리
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
 	bool TryConsumeItem(UMD_ItemDefinition* ItemDefinition, int32 Amount = 1);
+
+	// 소모 예약과 외부 확정을 묶고 실패 시 수량과 능력 보존
+	bool TryConsumeItemAndCommit(UMD_ItemDefinition* ItemDefinition, int32 Amount, TFunctionRef<bool()> Commit);
 
 	// 같은 AssetId의 중복 슬롯을 막는 지정 슬롯 설정이며 수량 영은 비우기
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
@@ -209,6 +228,9 @@ protected:
 	// 서버 슬롯 변경을 캐릭터와 UI 및 복제 대상에 전달
 	void NotifyEntriesChanged();
 
+	// GE and UI callbacks must not start another transfer inside the current one.
+	bool bItemTransferInProgress = false;
+
 	// 클라이언트의 선택 요청을 서버 상태에 반영
 	UFUNCTION(Server, Reliable)
 	void ServerSelectSlot(int32 SlotIndex);
@@ -220,4 +242,7 @@ protected:
 	// 선택 위치의 복제 완료 알림
 	UFUNCTION()
 	void OnRep_CurrentSlotIndex();
+
+	// 소모 확정과 능력 회수 및 알림 중 슬롯 변경 재진입 차단
+	bool bItemConsumptionInProgress = false;
 };

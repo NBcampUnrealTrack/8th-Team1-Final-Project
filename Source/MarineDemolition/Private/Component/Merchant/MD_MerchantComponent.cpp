@@ -3,8 +3,6 @@
 
 #include "Component/Merchant/MD_MerchantComponent.h"
 #include "Gameplay/Merchant/MD_MerchantSubsystem.h"
-#include "Data/Merchant/MD_SiteDefinition.h"
-#include "Data/Merchant/MD_QuestDefinition.h"
 #include "Engine/GameInstance.h"
 #include "Net/UnrealNetwork.h"
 #include "Game/MD_GameStateBase.h"
@@ -23,12 +21,7 @@ void UMD_MerchantComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>
 	// 상인 상태는 팀 공유 데이터라 전원에게 보낸다.
 	DOREPLIFETIME(UMD_MerchantComponent, Credits);
 	DOREPLIFETIME(UMD_MerchantComponent, DebtBalance);
-	DOREPLIFETIME(UMD_MerchantComponent, CurrentDay);
-	DOREPLIFETIME(UMD_MerchantComponent, Affinity);
-	DOREPLIFETIME(UMD_MerchantComponent, QuestCompletions);
-	DOREPLIFETIME(UMD_MerchantComponent, ActiveQuestReward);
-	DOREPLIFETIME(UMD_MerchantComponent, MainQuests);
-	DOREPLIFETIME(UMD_MerchantComponent, RepeatQuests);
+	DOREPLIFETIME(UMD_MerchantComponent, LoanPrincipal);
 	DOREPLIFETIME(UMD_MerchantComponent, OwnedItemIds);
 }
 
@@ -86,33 +79,7 @@ void UMD_MerchantComponent::RefreshFromSubsystem()
 
 	Credits = Merchant->GetCredits();
 	DebtBalance = Merchant->GetDebtBalance();
-	CurrentDay = Merchant->GetCurrentDay();
-	Affinity = Merchant->GetAffinity();
-	QuestCompletions = Merchant->GetQuestCompletions();
-	// 저장된 계약의 현장과 실제 표시 대상 월드 조회
-	UMD_SiteDefinition* CurrentSite = Merchant->GetCurrentSite();
-	// 서버에서 판정한 동일 목록을 호스트와 모든 클라이언트에 제공
-	UWorld* World = GetWorld();
-	// PIE 접두사를 제외한 전체 패키지 경로로 해당 현장의 맵만 허용
-	if (IsValid(CurrentSite) == true && IsValid(World) == true && CurrentSite->QuestMap.IsNull() == false
-		&& CurrentSite->QuestMap.ToSoftObjectPath().GetLongPackageFName() == FName(UWorld::RemovePIEPrefix(World->GetPackage()->GetName())))
-	{
-		// 현재 맵에서 표시할 진행 중인 퀘스트 보상 반영
-		ActiveQuestReward = Merchant->GetActiveQuestReward();
-		// 원본 순서를 유지하여 화면의 퀘스트 선택 인덱스 보존
-		MainQuests = Merchant->GetMainQuests();
-		// 현재 현장의 반복 퀘스트 목록을 클라이언트에도 동일하게 전달
-		RepeatQuests = Merchant->GetRepeatQuests();
-	}
-	else
-	{
-		// 다른 맵에서 이전 현장의 보상 표시 제거
-		ActiveQuestReward = 0;
-		// 서버 원장의 진행도는 유지하고 표시용 메인 목록만 비우기
-		MainQuests.Reset();
-		// 서버 원장의 수락 상태는 유지하고 표시용 반복 목록만 비우기
-		RepeatQuests.Reset();
-	}
+	LoanPrincipal = Merchant->GetLoanPrincipal();
 	OwnedItemIds = Merchant->GetOwnedItemIds();
     // 팀 원장을 소유한 GameState 확인
     AMD_GameStateBase* GameState = Cast<AMD_GameStateBase>(GetOwner());
@@ -139,32 +106,14 @@ FMD_MerchantMenuInfo UMD_MerchantComponent::BuildMenuInfo() const
 {
 	FMD_MerchantMenuInfo Info;
 
-	// 실물 샘플 납품 완료 대사는 복제된 오늘의 메인 퀘스트 상태로 선택한다.
-	// 핫바 카트리지는 기존 ReceiveQuestItemDelivery의 즉시 납품 대사를 유지한다.
-	for (const FMD_MainQuestState& Quest : MainQuests)
-	{
-		if (Quest.UnlockDay != CurrentDay || Quest.Status != EMD_MainQuestStatus::Completed) continue;
-		const UMD_QuestDefinition* Definition = UMD_QuestDefinition::LoadDefinition(Quest.DefinitionId);
-		if (!Definition) continue;
-		const int32 LastPhaseIndex = Definition->GetPhaseCount() - 1;
-		const FMD_QuestPhaseData* Phase = Definition->GetPhase(LastPhaseIndex);
-		if (!Phase || Phase->UsesHotbarDelivery()) continue;
-		const FText Line = Definition->GetCompletionDialogue(LastPhaseIndex);
-		if (Line.IsEmpty()) continue;
-		Info.Greeting = Line;
-		Info.TalkLines.Insert(Line, 0);
-		break;
-	}
-
 	Info.Credits = Credits;
-	Info.ContractDay = CurrentDay;
-	Info.ActiveQuestReward = ActiveQuestReward;
-	Info.Affinity = Affinity;
 
-	// 다음 해금 임계값은 카탈로그별 값이므로 호출 위젯에서 계산하기 위한 기본 상태 유지
+	// 클라이언트에 표시할 현재 미상환 잔액 반영
 	Info.DebtBalance = DebtBalance;
-	// 클라이언트와 서버의 대출 한도 값이 달라지지 않도록 복제 값 기반 계산
-	Info.LoanLimit = UMD_MerchantSubsystem::CalculateLoanLimit(Affinity);
-	Info.DailyInterestRate = 0.05f;
+	// 클라이언트가 서버와 같은 고정 이자를 계산하도록 기준 원금 전달
+	Info.LoanPrincipal = LoanPrincipal;
+	// 서버와 동일한 기본 대출 한도를 클라이언트 UI에 적용
+	Info.LoanLimit = UMD_MerchantSubsystem::CalculateLoanLimit();
+	Info.DailyInterestRate = UMD_MerchantSubsystem::LoanInterestRate;
 	return Info;
 }

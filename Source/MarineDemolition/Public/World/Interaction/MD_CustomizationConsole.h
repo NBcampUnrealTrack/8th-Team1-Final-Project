@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GameplayTagContainer.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "GameFramework/Actor.h"
 #include "MD_CustomizationConsole.generated.h"
@@ -10,7 +11,6 @@ class APlayerController;
 class UCameraComponent;
 class UMaterialInstanceDynamic;
 class UMaterialInterface;
-class UMD_CharacterSelectWidget;
 class USceneCaptureComponent2D;
 class USceneComponent;
 class UStaticMeshComponent;
@@ -40,8 +40,8 @@ public:
 	// 카메라·메시 표시·입력을 되돌린다. 선택 화면이 닫힐 때(또는 접근 실패 시) 호출된다
 	void EndCustomization(AMD_Character* Character);
 
-	// 선택 화면이 열린 동안 캐릭터를 거울 방향과 카메라 방향 사이에서 돌린다. bTurnRight면 오른쪽(Yaw 증가)으로 돈다
-	void TurnFacing(bool bTurnRight);
+	// 누르고 있는 회전 입력의 방향을 적용하고 0 입력으로 정지
+	void TurnFacing(float TurnInput);
 
 protected:
 	virtual void BeginPlay() override;
@@ -67,9 +67,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Console")
 	TObjectPtr<USceneComponent> StandPoint;
 
-	// 열릴 선택 화면 클래스. BP에서 할당한다
-	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Console")
-	TSubclassOf<UMD_CharacterSelectWidget> SelectWidgetClass;
+	// UI 관리자에 등록된 외형 선택 화면과 레이어를 지정하는 태그
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Console", meta = (Categories = "UI"))
+	FGameplayTag ConsoleWidgetTag;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console")
 	float CameraBlendTime = 0.5f;
@@ -114,13 +114,9 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Approach")
 	float ApproachTimeout = 4.f;
 
-	// 선택 화면에서 Q/E로 돌 때의 보간 속도
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Facing")
-	float FacingTurnInterpSpeed = 6.f;
-
-	// 카메라를 볼 때 카메라 정면에서 이만큼 Yaw를 더한다. 살짝 비스듬히 서게 할 때 쓴다
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Facing")
-	float FacingCameraYawOffset = 0.f;
+	// 회전 입력을 누르고 있는 동안 적용할 초당 회전 각도
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Facing", meta = (ClampMin = "0.0"))
+	float FacingTurnSpeed = 90.f;
 
 	// 거울 면 머티리얼. 비우면 MirrorSurface의 첫 머티리얼을 쓴다
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Console|Mirror")
@@ -151,19 +147,15 @@ private:
 	void FinishApproach();
 	bool PushSelectWidget(APlayerController* PC);
 
-	// Q/E 회전 보간. 목표 Yaw는 회전 방향을 지키기 위해 정규화하지 않은 누적값으로 둔다
+	// 누르고 있는 입력 방향과 경과 시간에 따른 연속 회전
 	void TickFacing(float DeltaSeconds);
-	float GetMirrorFacingYaw() const;
-	float GetCameraFacingYaw() const;
 
 	bool bApproaching = false;
 	bool bReachedStandPoint = false;
 	float ApproachElapsed = 0.f;
 
-	bool bTurningFacing = false;
-	bool bFacingMirror = true;
-	float FacingCurrentYaw = 0.f;
-	float FacingTargetYaw = 0.f;
+	// 왼쪽 -1, 정지 0, 오른쪽 1의 현재 회전 입력
+	float FacingTurnInput = 0.f;
 
 	UPROPERTY(Transient)
 	TObjectPtr<UTextureRenderTarget2D> MirrorRenderTarget;

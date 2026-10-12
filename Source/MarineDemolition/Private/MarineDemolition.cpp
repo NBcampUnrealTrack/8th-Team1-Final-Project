@@ -1,13 +1,13 @@
-﻿// Copyright Epic Games, Inc. All Rights Reserved.
+// Copyright Epic Games, Inc. All Rights Reserved.
 
 #include "MarineDemolition.h"
-#include "Gameplay/Scrape/MD_ScrapeMaskPixels.h"
 #include "Modules/ModuleManager.h"
 
 #if WITH_EDITOR
 #include "PropertyEditorModule.h"
 #include "UI/Foundation/Editor/MD_CarouselWidgetCustomization.h"
 #include "UI/Foundation/Editor/MD_FilledSliderCustomization.h"
+#include "World/Wall/Editor/MD_PowerConduitCustomization.h"
 #endif
 
 // 기존 게임 모듈 동작에 에디터 전용 캐러셀 디테일 등록 추가
@@ -32,12 +32,13 @@ void FMarineDemolitionModule::StartupModule()
 	PropertyEditor.RegisterCustomClassLayout(TEXT("MD_CarouselWidget"), FOnGetDetailCustomizationInstance::CreateStatic(&FMD_CarouselWidgetCustomization::MakeInstance));
 	// 기존 Slider Style 내부의 채움 이미지 편집 행 등록
 	PropertyEditor.RegisterCustomClassLayout(TEXT("MD_FilledSlider"), FOnGetDetailCustomizationInstance::CreateStatic(&FMD_FilledSliderCustomization::MakeInstance));
+	// 배치 전선의 다중 액터 드롭 등록 영역 연결
+	PropertyEditor.RegisterCustomClassLayout(TEXT("MD_PowerConduit"), FOnGetDetailCustomizationInstance::CreateStatic(&FMD_PowerConduitCustomization::MakeInstance));
 #endif
 }
 
 void FMarineDemolitionModule::ShutdownModule()
 {
-    FMD_ScrapeMaskPixels::ShutdownDeferredPageReleases();
 // 모듈 종료 시 디테일 델리게이트 잔존 방지
 #if WITH_EDITOR
 	// 종료 중 모듈 재로드 방지
@@ -51,6 +52,8 @@ void FMarineDemolitionModule::ShutdownModule()
 		PropertyEditor.UnregisterCustomClassLayout(TEXT("MD_CarouselWidget"));
 		// 채움 슬라이더 디테일 등록 해제
 		PropertyEditor.UnregisterCustomClassLayout(TEXT("MD_FilledSlider"));
+		// 전선 액터 드롭 디테일 등록 해제
+		PropertyEditor.UnregisterCustomClassLayout(TEXT("MD_PowerConduit"));
 	}
 #endif
 	// 기본 게임 모듈 종료 유지

@@ -65,9 +65,6 @@ public:
 	 *
 	 * @return 실제로 돋운 개수
 	 */
-	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Barnacle|Spawner")
-	int32 GrowBarnacles(int32 GrowthCount, int32 GrowthSeedOffset);
-
 	/** 따개비가 떨어질 때 스스로 알린다. 서버 전용 */
 	void NotifyBarnacleRemoved(int32 RemovedSpawnIndex);
 

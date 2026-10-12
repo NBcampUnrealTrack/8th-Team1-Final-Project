@@ -4,35 +4,14 @@
 #include "World/Interaction/MD_DayEndConsole.h"
 #include "Player/MD_PlayerController.h"
 #include "Components/TextBlock.h"
+#include "Components/Image.h"
+#include "Components/PanelWidget.h"
+#include "Rendering/DrawElements.h"
 #include "GameFramework/GameStateBase.h"
 #include "TimerManager.h"
 #include "Internationalization/Culture.h"
 #include "Internationalization/FastDecimalFormat.h"
 #include "Internationalization/Internationalization.h"
-
-int64 UMD_DailyReportWidget::CollectDailyReportValues(const TArray<FMD_DailyReportValue>& Values, FDailyReportValues& Amounts)
-{
-	// 합계를 사용하지 않는 점수 원장도 정수 넘침 없이 순회하기 위한 누적값
-	int64 Total = 0;
-	// 중복 분류의 첫 항목이 최종 값으로 남도록 역순 순회
-	for (int32 Index = Values.Num() - 1; Index >= 0; --Index)
-	{
-		// 조회표와 합계에서 함께 사용할 현재 원장 항목
-		const FMD_DailyReportValue& Entry = Values[Index];
-		// 표시 여부와 관계없이 모든 항목의 실제 변동 합산
-		Total += Entry.Amount;
-		// 동적 할당 없이 분류별 슬롯을 조회할 인덱스
-		int32 CategoryIndex = static_cast<uint8>(Entry.Category);
-		// 조회표 범위에 포함되는 정의된 분류만 기록
-		if (CategoryIndex < Amounts.Num())
-		{
-			// 앞선 항목의 값으로 덮어써 최초 값 선택 유지
-			Amounts[CategoryIndex] = Entry.Amount;
-		}
-	}
-	// 여러 분류의 합계가 개별 원장의 범위를 넘어도 정확한 변동 합계 반환
-	return Total;
-}
 
 FText UMD_DailyReportWidget::FormatDailyReportAmount(int64 Amount)
 {
@@ -103,10 +82,6 @@ void UMD_DailyReportWidget::NativeDestruct()
     StopLedgerUpdates();
     // 해제된 숫자 영역과 표시 문자열의 캐시 정리
     AmountTextCache.Reset();
-    // 다음 구성에서 날짜 부제목의 최초 생성 허용
-    CachedReportDay.Reset();
-    // 사용이 끝난 지역화 부제목 참조 해제
-    CachedReportHeader = FText::GetEmpty();
     Super::NativeDestruct();
 }
 
@@ -180,64 +155,21 @@ void UMD_DailyReportWidget::NativeOnDeactivated()
 
 void UMD_DailyReportWidget::SetReport(const FMD_InspectionReport& Report)
 {
-    // 동일 보고서의 반복 수신으로 진행 중인 연출을 중단하지 않기 위한 이전 점수
-    int64 PreviousSummaryScore = SummaryScore;
+    // 기존 BP 갱신 이벤트보다 먼저 서버의 시간별·개인별 이력 보관
+    ReportData = Report;
+    // 동일 보고서의 반복 수신으로 진행 중인 연출을 중단하지 않기 위한 이전 지출
+    int64 PreviousSummaryLoss = SummaryLoss;
     // 분류별 항목이 바뀌어도 합계가 같으면 기존 연출을 유지하기 위한 이전 크레딧
     int64 PreviousSummaryCredit = SummaryCredit;
-	// 현재 정산 날짜 부제목 갱신
+	// 정산 부제목 (일차 개념 없음)
 	if (IsValid(Txt_SubHeader) == true)
 	{
-		// 날짜가 달라진 경우에만 숫자 서식 및 부제목 생성
-		if (CachedReportDay.IsSet() == false || CachedReportDay.GetValue() != Report.Day)
+		const FText Header = NSLOCTEXT("MDDailyReport", "ReportHeader", "작업 정산");
+		if (Txt_SubHeader->GetText().IdenticalTo(Header) == false)
 		{
-			// 두 자리 날짜를 위한 형식 설정
-			FNumberFormattingOptions DayOptions;
-			// 날짜의 불필요한 자리 구분 제거
-			DayOptions.UseGrouping = false;
-			// 한 자리 날짜의 앞자리 영점 표시
-			DayOptions.MinimumIntegralDigits = 2;
-			// 동일 날짜의 후속 원장 갱신에서 재사용할 부제목 생성
-			CachedReportHeader = FText::Format(NSLOCTEXT("MDDailyReport", "ReportHeader", "DAY {0} 작업 정산"), FText::AsNumber(Report.Day, &DayOptions));
-			// 생성된 부제목의 날짜 기록
-			CachedReportDay = Report.Day;
-		}
-		// 실제 표시가 달라진 경우에만 부제목 갱신
-		if (Txt_SubHeader->GetText().IdenticalTo(CachedReportHeader) == false)
-		{
-			// 현재 날짜의 지역화된 부제목 적용
-			Txt_SubHeader->SetText(CachedReportHeader);
+			Txt_SubHeader->SetText(Header);
 		}
 	}
-    // 마감 원인보다 최종 게임 판정을 우선하는 배지 표시
-    if (IsValid(Txt_Badge) == true)
-    {
-        // 콘솔에서 열어 확인하는 수동 퇴근 문구
-        FText BadgeText = NSLOCTEXT("MDDailyReport", "ConsoleBadge", "퇴근 확인");
-        // 실패로 확정된 최종 결과 표시
-        if (Report.Result == EMD_InspectionResult::GameOver)
-        {
-            // 시간 종료 및 콘솔 진입과 구분하는 실패 문구
-            BadgeText = NSLOCTEXT("MDDailyReport", "GameOverBadge", "게임 오버");
-        }
-        // 계약 완료를 현재 사이트의 클리어로 표시
-        else if (Report.Result == EMD_InspectionResult::ContractCleared)
-        {
-            // 시간 종료 및 콘솔 진입과 구분하는 성공 문구
-            BadgeText = NSLOCTEXT("MDDailyReport", "SiteClearedBadge", "사이트 클리어");
-        }
-        // 최종 판정이 없는 자동 마감의 원인 표시
-        else if (Report.EndReason == EMD_DayEndReason::TimeExpired)
-        {
-            // 제한 시간 도달에 따른 작업 종료 문구
-            BadgeText = NSLOCTEXT("MDDailyReport", "TimeExpiredBadge", "작업 시간 종료");
-        }
-        // 같은 배지 문구의 반복 적용 방지
-        if (Txt_Badge->GetText().IdenticalTo(BadgeText) == false)
-        {
-            // 실제로 달라진 상황별 문구만 배지에 적용
-            Txt_Badge->SetText(BadgeText);
-        }
-    }
     // 누적 값과 현장명은 부호 색상을 덮어쓰지 않고 디자이너 스타일 유지
     auto SetSummaryText = [](UTextBlock* TextBlock, FText Text)
     {
@@ -250,20 +182,17 @@ void UMD_DailyReportWidget::SetReport(const FMD_InspectionReport& Report)
     };
     // 서버 보고서와 동일한 현장 이름 표시
     SetSummaryText(Txt_Location, Report.SiteName);
-    // 일일 점수와 구분한 누적 평가 점수 표시
-    SetSummaryText(Txt_CumulativeScore, FText::AsNumber(Report.CumulativeScore));
     // 일일 크레딧 변동과 구분한 실제 보유 잔액 표시
     SetSummaryText(Txt_CumulativeCredit, FText::AsNumber(Report.Credits));
-    // 다음 점검이 없는 종료 상태에서 기준 대신 대시 표시
-    SetSummaryText(Txt_NextThreshold, Report.NextThreshold > 0 ? FText::AsNumber(Report.NextThreshold)
-        : NSLOCTEXT("MDDailyReport", "NoNextThreshold", "-"));
-	// 점수 영역의 분류별 값과 합계 갱신
-	SetScoreValues(Report);
-	// 크레딧 영역의 분류별 값과 전체 변동 합계 갱신
+    // 점검 목표가 사라져 기준 영역은 대시 표시 (정리 달성률 표시는 분모 확정 후)
+    SetSummaryText(Txt_NextThreshold, NSLOCTEXT("MDDailyReport", "NoNextThreshold", "-"));
+	// 현재 UI의 전체 변동 및 지출 연출 목표 갱신
 	SetCreditValues(Report);
+    // 개인 기록과 실제 조회 시각을 현재 그래프에 반영
+    UpdateCreditHistory();
     // 영점 합계도 첫 서버 응답에서 연출하도록 보고서 준비 상태까지 비교
     bool bSummaryTargetsChanged = bHasSummaryTargets != Report.bValid
-        || PreviousSummaryScore != SummaryScore || PreviousSummaryCredit != SummaryCredit;
+        || PreviousSummaryLoss != SummaryLoss || PreviousSummaryCredit != SummaryCredit;
     // 초기화용 보고서 대신 실제 서버 합계가 준비되었는지 보관
     bHasSummaryTargets = Report.bValid;
     // 목표가 달라진 경우에만 기존 연출 예약 교체
@@ -282,42 +211,234 @@ void UMD_DailyReportWidget::SetReport(const FMD_InspectionReport& Report)
     BP_OnReportUpdated(bShowingFinalReport);
 }
 
-void UMD_DailyReportWidget::SetScoreValues(const FMD_InspectionReport& Report)
-{
-	// 누락 분류를 영점으로 표시하는 스택 기반 점수 조회표
-	FDailyReportValues Amounts{};
-	// 점수 배열을 한 번만 읽어 분류별 표시 값 구성
-	CollectDailyReportValues(Report.DailyScoreTotals, Amounts);
-	// 분류 작업으로 발생한 점수 표시
-	SetAmountText(Txt_Score_Categorizing, Amounts[static_cast<uint8>(EMD_DailyReportCategory::Categorizing)]);
-	// 복귀 판정으로 발생한 점수 표시
-	SetAmountText(Txt_Score_Return, Amounts[static_cast<uint8>(EMD_DailyReportCategory::Return)]);
-	// 사고 및 기타 점수 조정 표시
-	SetAmountText(Txt_Score_Accident, Amounts[static_cast<uint8>(EMD_DailyReportCategory::Accident)]
-		+ Amounts[static_cast<uint8>(EMD_DailyReportCategory::Other)]);
-	// 퀘스트 완료로 발생한 점수 표시
-	SetAmountText(Txt_Score_Quest, Amounts[static_cast<uint8>(EMD_DailyReportCategory::Quest)]);
-    // 현재 표시와 구분하여 다음 연출의 실제 점수 목표 보관
-    SummaryScore = Report.DailyScore;
-}
-
 void UMD_DailyReportWidget::SetCreditValues(const FMD_InspectionReport& Report)
 {
-	// 누락 분류를 영점으로 표시하는 스택 기반 크레딧 조회표
-	FDailyReportValues Amounts{};
-    // 분류별 조회표와 실제 합계를 같은 순회에서 구성하여 연출 목표로 보관
-    SummaryCredit = CollectDailyReportValues(Report.DailyCreditTotals, Amounts);
-	// 일차별 착수금 표시
-	SetAmountText(Txt_Credit_Retainer, Amounts[static_cast<uint8>(EMD_DailyReportCategory::Retainer)]);
-	// 분류 작업 환급액 표시
-	SetAmountText(Txt_Credit_Categorizing, Amounts[static_cast<uint8>(EMD_DailyReportCategory::Categorizing)]);
-	// 사고 및 기타 금액 조정 표시
-	SetAmountText(Txt_Credit_Accident, Amounts[static_cast<uint8>(EMD_DailyReportCategory::Accident)]
-		+ Amounts[static_cast<uint8>(EMD_DailyReportCategory::Other)]);
-	// 점검 평가 보상 표시
-	SetAmountText(Txt_Credit_Evaluation, Amounts[static_cast<uint8>(EMD_DailyReportCategory::Evaluation)]);
-	// 퀘스트 보상 및 지출 표시
-	SetAmountText(Txt_Credit_Quest, Amounts[static_cast<uint8>(EMD_DailyReportCategory::Quest)]);
+    // 팀 공용 금액까지 포함된 실제 전체 증감액을 그대로 사용
+    SummaryCredit = Report.TotalCreditDelta;
+    // 합계 상쇄 이전의 전체 지출을 음수로 표시
+    SummaryLoss = -Report.TotalCreditsSpent;
+    // 초기 응답 대기 및 풀 재사용에서 이전 금액 표시 제거
+    if (Report.bValid == false)
+    {
+        // 증감 없는 기본 금액 표시
+        SetAmountText(Txt_CreditDelta, 0);
+        // 이전 계약의 지출 표시 초기화
+        SetAmountText(Txt_CreditLoss, 0);
+    }
+}
+
+void UMD_DailyReportWidget::UpdateCreditHistory()
+{
+    // 표시 시점과 무관하게 영점에서 시작하는 유효한 전체 기록 구간
+    double Duration = FMath::IsFinite(ReportData.CreditHistoryDuration) == true ? FMath::Max(0.0, ReportData.CreditHistoryDuration) : 0.0;
+    // 현재 배치 순서와 서버의 고정 개인 인덱스 대응
+    UWidget* Rows[] = { HB_Player_1, HB_Player_2, HB_Player_3, HB_Player_4 };
+    // 표시 이름과 금액에 같은 개인 인덱스 적용
+    UTextBlock* Names[] = { Txt_PlayerName_1, Txt_PlayerName_2, Txt_PlayerName_3, Txt_PlayerName_4 };
+    // 개인 순수익의 색상은 디자이너 범례 색상 유지
+    UTextBlock* Results[] = { Txt_PlayerResult_1, Txt_PlayerResult_2, Txt_PlayerResult_3, Txt_PlayerResult_4 };
+    // 여섯 시점에 대응하는 현재 시간축 텍스트
+    UTextBlock* Times[] = { Txt_Axis_Time_1, Txt_Axis_Time_2, Txt_Axis_Time_3, Txt_Axis_Time_4, Txt_Axis_Time_5, Txt_Axis_Time_6 };
+    // 위에서 아래로 배치된 공통 크레딧 눈금
+    UTextBlock* Credits[] = { Txt_Axis_Credit_1, Txt_Axis_Credit_2, Txt_Axis_Credit_3, Txt_Axis_Credit_4, Txt_Axis_Credit_5 };
+    // 조회 시점의 소수 초도 구분할 수 있는 시간 표시 서식
+    FNumberFormattingOptions TimeFormat;
+    // 축이 길어지지 않도록 소수 첫째 자리까지만 표시
+    TimeFormat.MaximumFractionalDigits = 1;
+    // 모든 개인 그래프에서 영점이 포함되는 공통 범위 초기화
+    double MinimumCredit = 0.0;
+    // 수입과 손실을 같은 좌표계로 비교할 최대값
+    double MaximumCredit = 0.0;
+    // 빈 참가자와 실제 영점 참가자를 구분하는 결과 갱신
+    for (int32 Index = 0; Index < PlayerGraphPoints.Num(); ++Index)
+    {
+        // 이전 보고서의 선 좌표 제거 및 메모리 재사용
+        PlayerGraphPoints[Index].Reset();
+        // 실제 참가자가 존재하는 슬롯만 표시
+        bool bHasPlayer = ReportData.PlayerCreditHistories.IsValidIndex(Index) == true
+            && ReportData.PlayerCreditHistories[Index].bHasPlayer == true;
+        // 빈 슬롯은 레이아웃에서 제외
+        if (IsValid(Rows[Index]) == true)
+        {
+            // 풀 재사용이나 인원 변화에도 개인 행 표시 복원
+            Rows[Index]->SetVisibility(bHasPlayer == true ? ESlateVisibility::HitTestInvisible : ESlateVisibility::Collapsed);
+        }
+        // 사라진 참가자의 이름도 남지 않도록 초기화
+        if (IsValid(Names[Index]) == true)
+        {
+            // 서버가 보낸 개인 표시 이름 적용
+            Names[Index]->SetText(bHasPlayer == true ? FText::FromString(ReportData.PlayerCreditHistories[Index].PlayerName) : FText::GetEmpty());
+        }
+        // 영점 참가자도 실제 누적 순수익 표시
+        if (IsValid(Results[Index]) == true)
+        {
+            // 부호 서식만 적용하여 개인별 범례 색상 보존
+            Results[Index]->SetText(bHasPlayer == true ? FormatDailyReportAmount(ReportData.PlayerCreditHistories[Index].NetCredits) : FText::GetEmpty());
+        }
+        // 존재하지 않는 참가자의 영점 선 생성 방지
+        if (bHasPlayer == false)
+        {
+            // 현재 항목을 제외하고 다음 유효 기록으로 진행
+            continue;
+        }
+        // 표시할 여섯 표본만으로 전체 그래프 범위 계산
+        for (FVector2D Sample : ReportData.PlayerCreditHistories[Index].Samples)
+        {
+            // 잘못된 좌표의 Slate 전파 방지
+            if (FMath::IsFinite(Sample.X) == false || FMath::IsFinite(Sample.Y) == false)
+            {
+                // 현재 항목을 제외하고 다음 유효 기록으로 진행
+                continue;
+            }
+            // 보고서 수신 이후 페인트에서 원본 배열 재조회 생략
+            PlayerGraphPoints[Index].Add(Sample);
+            // 가장 낮은 개인 손실까지 포함
+            MinimumCredit = FMath::Min(MinimumCredit, Sample.Y);
+            // 가장 높은 개인 수익까지 포함
+            MaximumCredit = FMath::Max(MaximumCredit, Sample.Y);
+        }
+    }
+    // 모든 참가자가 영점인 경우에도 영점 선을 중앙에 표시
+    if (MinimumCredit == MaximumCredit)
+    {
+        // 영점 아래의 두 눈금 확보
+        MinimumCredit = -2.0;
+        // 영점 위의 두 눈금 확보
+        MaximumCredit = 2.0;
+    }
+    // 다섯 눈금에 사용할 정수 단위 최소 간격 계산
+    double Step = FMath::Max(1.0, FMath::Pow(10.0, FMath::FloorToDouble(FMath::LogX(10.0, (MaximumCredit - MinimumCredit) / 4.0))));
+    // 영점을 포함하여 전체 범위를 네 칸 안에 수용하는 간격 선택
+    while (FMath::CeilToDouble(MaximumCredit / Step) - FMath::FloorToDouble(MinimumCredit / Step) > 4.0)
+    {
+        // 눈금 값을 읽기 쉬운 1·2·5 단위로 증가
+        double Magnitude = FMath::Pow(10.0, FMath::FloorToDouble(FMath::LogX(10.0, Step)));
+        // 다음 간격의 자리수 내 배율 선택
+        Step = Step / Magnitude < 1.5 ? 2.0 * Magnitude : (Step / Magnitude < 3.5 ? 5.0 * Magnitude : 10.0 * Magnitude);
+    }
+    // 최저값을 눈금 간격에 맞춰 내림
+    MinimumCredit = FMath::FloorToDouble(MinimumCredit / Step) * Step;
+    // 항상 네 칸과 다섯 눈금 유지
+    MaximumCredit = MinimumCredit + Step * 4.0;
+    // 실제 서버 시간으로 여섯 시간축 라벨 갱신
+    for (int32 Index = 0; Index < UE_ARRAY_COUNT(Times); ++Index)
+    {
+        // 현재 디자이너의 선택적 텍스트만 갱신
+        if (IsValid(Times[Index]) == true)
+        {
+            // 가장 왼쪽은 항상 영점이며 나머지는 실제 종료점까지 균등 분할
+            Times[Index]->SetText(FText::AsNumber(Index == 0 ? 0.0 : Duration * Index / (UE_ARRAY_COUNT(Times) - 1), &TimeFormat));
+        }
+    }
+    // 눈금과 그래프의 상하 방향 일치
+    for (int32 Index = 0; Index < UE_ARRAY_COUNT(Credits); ++Index)
+    {
+        // 현재 배치된 금액축만 갱신
+        if (IsValid(Credits[Index]) == true)
+        {
+            // 선 좌표와 같은 범위의 정수 크레딧 표시
+            Credits[Index]->SetText(FText::AsNumber(MaximumCredit - Step * Index));
+        }
+    }
+    // 화면 해상도와 무관한 정규화 좌표를 수신 때 한 번 계산
+    for (TArray<FVector2D>& Points : PlayerGraphPoints)
+    {
+        // 시작 직후 중복된 영점 표본도 보이는 선으로 배치할 순서 유지
+        for (int32 Index = 0; Index < Points.Num(); ++Index)
+        {
+            // 기존 표본의 시간과 금액을 같은 위치에서 정규화
+            FVector2D& Point = Points[Index];
+            // 영점 길이에서는 같은 시점의 누적값을 가로로 펼쳐 시작 상태 표시
+            Point.X = Duration > 0.0 ? FMath::Clamp(Point.X / Duration, 0.0, 1.0)
+                : (Points.Num() > 1 ? static_cast<double>(Index) / (Points.Num() - 1) : 0.0);
+            // Slate의 아래 방향 좌표에 맞춰 수익 방향 반전
+            Point.Y = FMath::Clamp((MaximumCredit - Point.Y) / (MaximumCredit - MinimumCredit), 0.0, 1.0);
+        }
+    }
+    // 유효성 검사와 페인트 갱신에 재사용할 Slate 위젯 조회
+    TSharedPtr<SWidget> CachedWidget = GetCachedWidget();
+    // 축 문구가 같아도 개인 선만 달라진 경우 페인트 캐시 갱신
+    if (CachedWidget.IsValid() == true)
+    {
+        // 불필요한 Tick 없이 새 보고서가 도착한 화면만 다시 그리기
+        CachedWidget->Invalidate(EInvalidateWidgetReason::Paint);
+    }
+}
+
+int32 UMD_DailyReportWidget::NativePaint(const FPaintArgs& Args, const FGeometry& AllottedGeometry, const FSlateRect& MyCullingRect,
+    FSlateWindowElementList& OutDrawElements, int32 LayerId, const FWidgetStyle& InWidgetStyle, bool bParentEnabled) const
+{
+    int32 TopLayer = Super::NativePaint(Args, AllottedGeometry, MyCullingRect, OutDrawElements, LayerId, InWidgetStyle, bParentEnabled);
+    // 디자이너 기본 화면과 표시 영역이 없는 파생 위젯에서는 선 생성 생략
+    if (IsDesignTime() == true || IsValid(BDR_Graph_Grid) == false || GraphLineThickness <= 0.0f)
+    {
+        // 부모 위젯이 그린 레이어 그대로 유지
+        return TopLayer;
+    }
+    // 디자이너에서 변경한 범례 색상을 그대로 사용하는 그래프
+    UImage* Palettes[] = { Img_PlayerPallete_1, Img_PlayerPallete_2, Img_PlayerPallete_3, Img_PlayerPallete_4 };
+    // 이번 페인트에서 자식 레이아웃까지 반영된 실제 그래프 좌표
+    FGeometry GraphGeometry = BDR_Graph_Grid->GetPaintSpaceGeometry();
+    // 화면 비율과 ScaleBox에 독립적인 그래프 로컬 크기
+    FVector2D Size = GraphGeometry.GetLocalSize();
+    // 숨겨지거나 아직 배치되지 않은 그래프의 잘못된 선 방지
+    if (Size.X <= GraphLineThickness || Size.Y <= GraphLineThickness)
+    {
+        // 부모 위젯이 그린 레이어 그대로 유지
+        return TopLayer;
+    }
+    // 부모 애니메이션과 동일하게 적용할 그래프 투명도
+    float Opacity = 1.0f;
+    // 그래프까지 이어진 실제 위젯 계층의 숨김 및 투명도 반영
+    for (UWidget* Parent = BDR_Graph_Grid; IsValid(Parent) == true; Parent = Parent->GetParent())
+    {
+        // 접힌 컨테이너나 숨겨진 영역의 선 잔상 방지
+        if (Parent->IsVisible() == false)
+        {
+            // 부모 위젯이 그린 레이어 그대로 유지
+            return TopLayer;
+        }
+        // 기존 보고서 표시 애니메이션의 투명도 누적
+        Opacity *= Parent->GetRenderOpacity();
+    }
+    // 경계의 선 두께까지 그래프 안쪽에 유지
+    FVector2D Inset(GraphLineThickness * 0.5f, GraphLineThickness * 0.5f);
+    // 네 선에 재사용할 최대 여섯 점 버퍼
+    TArray<FVector2D> Points;
+    // 보고서당 고정 표본 수만큼 미리 확보
+    Points.Reserve(6);
+    // 그래프 영역 외부로 선이 번지지 않는 클리핑 적용
+    OutDrawElements.PushClip(FSlateClippingZone(GraphGeometry));
+    // 실제 참가자의 기록만 범례 순서로 그리기
+    for (int32 Index = 0; Index < PlayerGraphPoints.Num(); ++Index)
+    {
+        // 빈 슬롯이나 선을 구성할 수 없는 기록 제외
+        if (PlayerGraphPoints[Index].Num() < 2 || IsValid(Palettes[Index]) == false)
+        {
+            // 현재 항목을 제외하고 다음 유효 기록으로 진행
+            continue;
+        }
+        // 이전 개인의 좌표를 다음 선에 섞지 않는 버퍼 초기화
+        Points.Reset();
+        // 최신 레이아웃 크기에서만 로컬 픽셀 위치 계산
+        for (FVector2D Point : PlayerGraphPoints[Index])
+        {
+            // 데이터 범위를 그리드 내부의 실제 그리기 범위에 대응
+            Points.Add(Inset + Point * (Size - Inset * 2.0));
+        }
+        // 범례와 부모 스타일의 색상·투명도를 함께 적용
+        FLinearColor Color = Palettes[Index]->GetColorAndOpacity() * InWidgetStyle.GetColorAndOpacityTint();
+        // 그래프 부모의 활성화 애니메이션 투명도 반영
+        Color.A *= Opacity;
+        // 기존 그리드 위에 개인별 누적 순수익 선 표시
+        FSlateDrawElement::MakeLines(OutDrawElements, TopLayer + 1, GraphGeometry.ToPaintGeometry(), Points,
+            bParentEnabled == true && GetIsEnabled() == true ? ESlateDrawEffect::None : ESlateDrawEffect::DisabledEffect,
+            Color, true, GraphLineThickness);
+    }
+    // 다른 UI 영역에 그래프 클리핑이 남지 않도록 복원
+    OutDrawElements.PopClip();
+    // 뒤이어 그려지는 상위 UI의 레이어 충돌 방지
+    return TopLayer + 1;
 }
 
 int64 UMD_DailyReportWidget::ReadSummaryAmount(UTextBlock* AmountTextBlock, int64 FallbackAmount)
@@ -389,12 +510,12 @@ void UMD_DailyReportWidget::AnimateSummaryValues(float Duration)
         }
         return;
     }
-    // 함수가 호출된 순간의 실제 점수 표시를 보간 시작값으로 저장
-    SummaryScoreStart = ReadSummaryAmount(Txt_Summary_Score, SummaryScore);
+    // 함수가 호출된 순간의 실제 지출 표시를 보간 시작값으로 저장
+    SummaryLossStart = ReadSummaryAmount(Txt_CreditLoss, SummaryLoss);
     // 함수가 호출된 순간의 실제 크레딧 표시를 보간 시작값으로 저장
-    SummaryCreditStart = ReadSummaryAmount(Txt_Summary_Credit, SummaryCredit);
+    SummaryCreditStart = ReadSummaryAmount(Txt_CreditDelta, SummaryCredit);
     // 목표가 영점이어도 현재 값이 다르면 연출하고 동일한 두 값만 생략
-    if (SummaryScoreStart == SummaryScore && SummaryCreditStart == SummaryCredit)
+    if (SummaryLossStart == SummaryLoss && SummaryCreditStart == SummaryCredit)
     {
         // 동일한 합계의 숫자 서식과 색상만 복원하고 반복 예약 생략
         StopSummaryAnimation();
@@ -402,10 +523,10 @@ void UMD_DailyReportWidget::AnimateSummaryValues(float Duration)
         BP_OnSummaryAnimationFinished();
         return;
     }
-    // 읽어 온 점수 시작값에 기존 숫자 서식과 부호 색상 적용
-    SetAmountText(Txt_Summary_Score, SummaryScoreStart);
+    // 읽어 온 지출 시작값에 기존 숫자 서식과 부호 색상 적용
+    SetAmountText(Txt_CreditLoss, SummaryLossStart);
     // 읽어 온 크레딧 시작값에 기존 숫자 서식과 부호 색상 적용
-    SetAmountText(Txt_Summary_Credit, SummaryCreditStart);
+    SetAmountText(Txt_CreditDelta, SummaryCreditStart);
     // 프레임 지연과 무관하게 전체 진행률을 계산할 시작 시각 저장
     SummaryAnimationStartTime = World->GetTimeSeconds();
     // 타이머 누적 호출 없이 프레임당 한 번만 숫자를 갱신하는 설정
@@ -425,13 +546,13 @@ void UMD_DailyReportWidget::UpdateSummaryAnimation()
     UWorld* World = GetWorld();
     // 표시 대상이나 시간 기준이 사라진 연출 정리
     if (IsValid(World) == false || SummaryAnimationDuration <= 0.0f
-        || (IsValid(Txt_Summary_Score) == false && IsValid(Txt_Summary_Credit) == false))
+        || (IsValid(Txt_CreditLoss) == false && IsValid(Txt_CreditDelta) == false))
     {
         // 남아 있는 타이머 해제 및 실제 합계 복원
         StopSummaryAnimation();
         return;
     }
-    // 콜백 횟수 대신 실제 경과 시간으로 두 합계의 공통 진행률 계산
+    // 콜백 횟수 대신 실제 경과 시간으로 두 금액의 공통 진행률 계산
     double Alpha = FMath::Clamp((World->GetTimeSeconds() - SummaryAnimationStartTime) / SummaryAnimationDuration, 0.0, 1.0);
     // 목표 시각 이후에는 부동소수점 보간 대신 원본 정수 사용
     if (Alpha >= 1.0)
@@ -460,10 +581,10 @@ void UMD_DailyReportWidget::UpdateSummaryAnimation()
         // 기존 정수 단위 표시 방식 유지
         return FMath::TruncToInt64(Value);
     };
-    // 현재 표시에서 실제 점수까지 증가 또는 감소
-    SetAmountText(Txt_Summary_Score, InterpolateAmount(SummaryScoreStart, SummaryScore));
+    // 현재 표시에서 실제 지출까지 증가 또는 감소
+    SetAmountText(Txt_CreditLoss, InterpolateAmount(SummaryLossStart, SummaryLoss));
     // 현재 표시에서 실제 크레딧까지 같은 진행률로 변화
-    SetAmountText(Txt_Summary_Credit, InterpolateAmount(SummaryCreditStart, SummaryCredit));
+    SetAmountText(Txt_CreditDelta, InterpolateAmount(SummaryCreditStart, SummaryCredit));
 }
 
 void UMD_DailyReportWidget::StopSummaryAnimation(bool bApplyFinalValues)
@@ -480,10 +601,10 @@ void UMD_DailyReportWidget::StopSummaryAnimation(bool bApplyFinalValues)
     // 재시작과 보고서 교체에서는 표시값을 보존하고 완료 시에만 목표 적용
     if (bApplyFinalValues == true)
     {
-        // 표시 캐시와 부호 색상을 유지한 정확한 최종 점수 적용
-        SetAmountText(Txt_Summary_Score, SummaryScore);
+        // 표시 캐시와 부호 색상을 유지한 정확한 최종 지출 적용
+        SetAmountText(Txt_CreditLoss, SummaryLoss);
         // 보간 오차 없이 서버 기록에서 계산한 실제 크레딧 적용
-        SetAmountText(Txt_Summary_Credit, SummaryCredit);
+        SetAmountText(Txt_CreditDelta, SummaryCredit);
     }
 }
 

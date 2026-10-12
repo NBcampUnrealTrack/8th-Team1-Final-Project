@@ -59,9 +59,6 @@ protected:
 	void HandleDiffDangerousClicked();
 
 	UFUNCTION()
-	void HandleDiffExtremeClicked();
-
-	UFUNCTION()
 	void HandleBackClicked();
 
 	UFUNCTION()
@@ -69,11 +66,8 @@ protected:
 
 	void SelectDifficulty(EMD_Difficulty NewDifficulty);
 
-	/** 난이도 4버튼 갱신. 선택된 하나만 비활성으로 눌린 상태를 표시한다 */
+	/** 난이도 3버튼 갱신. 선택된 하나만 비활성으로 눌린 상태를 표시한다 */
 	void RefreshDifficultyButtons();
-
-	/** 난이도 배율을 반영한 Day2/3/4 점검 기준 표시 갱신 */
-	void RefreshInspectionPreview();
 
 	bool IsHost() const;
 
@@ -87,9 +81,6 @@ protected:
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Travel", meta = (BindWidgetOptional))
 	TObjectPtr<UButton> BTN_Diff_Dangerous;
-
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Travel", meta = (BindWidgetOptional))
-	TObjectPtr<UButton> BTN_Diff_Extreme;
 
 	// ───────────────────────── 안내 ─────────────────────────
 

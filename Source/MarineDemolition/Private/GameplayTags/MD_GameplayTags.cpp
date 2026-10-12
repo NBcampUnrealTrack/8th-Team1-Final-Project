@@ -70,11 +70,6 @@ namespace MDGameplayTags
 		"Carry the interacted actor as a world physics object");
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-	  Ability_PlaceSupport,
-	  "Ability.PlaceSupport",
-	  "임시 지지대 설치 어빌리티");
-
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Sample_Grade,
 		"Resource.Sample.Grade",
 		"샘플 등급 분류의 공통 루트");
@@ -147,10 +142,6 @@ namespace MDGameplayTags
 		Score_Demolition_Partition,
 		"Score.Demolition.Partition",
 		"칸막이벽 철거 성공");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Score_Demolition_Strut,
-		"Score.Demolition.Strut",
-		"내력벽 철거 성공, 지지대 설치 상태");
 
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
@@ -188,14 +179,6 @@ namespace MDGameplayTags
 		"Score.Penalty.UncollectedRemain",
 		"현장 미수거");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Score_Penalty_Collapse_Unsupported,
-		"Score.Penalty.Collapse.Unsupported",
-		"내력 무지지 절단 천장 붕괴");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Score_Penalty_Collapse_Supported,
-		"Score.Penalty.Collapse.Supported",
-		"지지대 있어도 붕괴");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Score_Penalty_NotReturned,
 		"Score.Penalty.NotReturned",
 		"18:00 미복귀 인당");
@@ -203,10 +186,6 @@ namespace MDGameplayTags
 		Score_Penalty_Death,
 		"Score.Penalty.Death",
 		"사망 후 부활");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Score_Penalty_Warning,
-		"Score.Penalty.Warning",
-		"점검 실패 경고");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Score_Penalty_CableCut,
 		"Score.Penalty.CableCut",
@@ -219,10 +198,6 @@ namespace MDGameplayTags
 		Score_Penalty_PipeLeakTick,
 		"Score.Penalty.PipeLeakTick",
 		"수도 미밀봉 오염 확산 30초당");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Score_Penalty_Quest,
-		"Score.Penalty.Quest",
-		"상인 퀘스트 실패");
 
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
@@ -260,28 +235,6 @@ namespace MDGameplayTags
 		State_Oxygen_Depleted,
 		"State.Oxygen.Depleted",
 		"산소 0 상태. 잠수중이면 질식 피해 -15/s");
-
-	// For Save Data
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_GameState,
-		"Save.Data.GameState",
-		"저장된 게임 데이터로부터 점수, 인게임 시간 등의 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_Merchant,
-		"Save.Data.Merchant",
-		"저장된 게임 데이터로부터 상인 관련 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_Player,
-		"Save.Data.Player",
-		"저장된 게임 데이터로부터 플레이어 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_World,
-		"Save.Data.World",
-		"저장된 게임 데이터로부터 맵의 변경 사항에 대한 정보를 얻는 키");
-	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
-		Save_Data_Lore,
-		"Save.Data.Lore",
-		"저장된 게임 데이터로부터 영구 누적 로어 진행 정보를 얻는 키");
 
 	// UI
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(

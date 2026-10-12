@@ -57,8 +57,6 @@ namespace MDGameplayTags
 	/** 상호작용한 대상을 월드의 물리 오브젝트로 운반하는 픽업 방식 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Interaction_Pickup_Physics);
 
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_PlaceSupport);
-
 	/*샘플 등급 분류. 퀘스트 목표 달성 여부 확인*/
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Sample_Grade);
 
@@ -87,7 +85,6 @@ namespace MDGameplayTags
 
 	/** 철거 성공 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Demolition_Partition);
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Demolition_Strut);
 
 	/** 일과 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Daily_SectorClosed);
@@ -100,15 +97,11 @@ namespace MDGameplayTags
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_MissortContaminated);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_UnsortedRemain);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_UncollectedRemain);
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_Collapse_Unsupported);
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_Collapse_Supported);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_NotReturned);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_Death);
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_Warning);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_CableCut);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_PipeBurst);
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_PipeLeakTick);
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Score_Penalty_Quest);
 
 	//  ===== 현재 HP에 따른 상태  =====
 
@@ -131,18 +124,6 @@ namespace MDGameplayTags
 
 	/* 산소 0. State_Submerged와 함께 있을때 HP -15/s */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(State_Oxygen_Depleted);
-
-	/* For Save Data */
-	// 저장된 게임 데이터로부터 점수, 인게임 시간 등의 정보를 얻는 키
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_GameState);
-	// 저장된 게임 데이터로부터 상인 관련 정보를 얻는 키
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_Merchant);
-	// 저장된 게임 데이터로부터 플레이어 정보를 얻는 키
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_Player);
-	// 저장된 게임 데이터로부터 맵의 변경 사항에 대한 정보를 얻는 키
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_World);
-	// 저장된 게임 데이터로부터 영구 누적 로어 진행 정보를 얻는 키
-	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Save_Data_Lore);
 
 	/* UI */
 	/** Common UI 레이어 분류의 공통 루트 */

@@ -41,29 +41,3 @@ bool FMD_TrashGeneratorState::IsStructurallyValid() const
 	return true;
 }
 
-
-bool FMD_TrashGeneratorPlacement::MatchesState(const FMD_TrashGeneratorState& State) const
-{
-    if (!State.IsStructurallyValid()) return false;
-    TMap<FName, int32> Counts = State.RemainingKindCounts;
-    TMap<FIntVector, TMap<FName, int32>> Cells;
-    for (const auto& Cell : State.FloorCells) Cells.Add(Cell.Cell, Cell.RemainingKindCounts);
-    for (const auto& Item : Items)
-    {
-        const FVector Scale = Item.Transform.GetScale3D();
-        if (Item.KindId.IsNone() || Item.VariantId.IsNone() || !Item.Transform.IsValid()
-            || Scale.GetAbsMin() <= UE_SMALL_NUMBER || Item.LinearVelocity.ContainsNaN() || Item.AngularVelocity.ContainsNaN()) return false;
-        int32* Count = Counts.Find(Item.KindId);
-        if (!Count || --*Count < 0) return false;
-        if (State.bUsesFloorCells)
-        {
-            auto* Cell = Cells.Find(Item.OriginCell);
-            int32* CellCount = Cell ? Cell->Find(Item.KindId) : nullptr;
-            if (!CellCount || --*CellCount < 0) return false;
-        }
-    }
-    for (const auto& Count : Counts) if (Count.Value != 0) return false;
-    for (const auto& Cell : Cells)
-        for (const auto& Count : Cell.Value) if (Count.Value != 0) return false;
-    return true;
-}

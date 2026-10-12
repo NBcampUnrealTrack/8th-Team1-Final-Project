@@ -4,6 +4,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/StateTreeComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
+#include "Component/Facility/MD_FacilityRepairComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -33,6 +34,10 @@ AMD_TrashSorter::AMD_TrashSorter()
 {
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
+	FacilityRepair = CreateDefaultSubobject<UMD_FacilityRepairComponent>(TEXT("FacilityRepair"));
+	FacilityRepair->Kind = EMD_FacilityKind::TrashSorter;
+	FacilityRepair->bRandomFaultEligible = true;
+	FacilityRepair->bAllowInsulationTape = true;
 	SorterStateTree = CreateDefaultSubobject<UStateTreeComponent>(TEXT("SorterStateTree"));
 	SorterStateTree->SetStartLogicAutomatically(false);
 	SortingAnimation = CreateDefaultSubobject<UMD_TrashSorterAnimationComponent>(TEXT("SortingAnimation"));
@@ -61,12 +66,19 @@ void AMD_TrashSorter::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutL
 
 	DOREPLIFETIME(AMD_TrashSorter, SortedCount);
 	DOREPLIFETIME(AMD_TrashSorter, RuntimeState);
+	DOREPLIFETIME(AMD_TrashSorter, AcceptedCategory);
+	DOREPLIFETIME(AMD_TrashSorter, bSafetyInterlocked);
 }
 
 void AMD_TrashSorter::OnConstruction(const FTransform& Transform)
 {
 	Super::OnConstruction(Transform);
 
+	ApplyCategoryTint();
+}
+
+void AMD_TrashSorter::OnRep_AcceptedCategory()
+{
 	ApplyCategoryTint();
 }
 
@@ -88,6 +100,7 @@ void AMD_TrashSorter::EndPlay(const EEndPlayReason::Type EndPlayReason)
 void AMD_TrashSorter::BeginPlay()
 {
 	Super::BeginPlay();
+	FacilityRepair->OnStateChanged.AddUniqueDynamic(this, &ThisClass::HandleFacilityState);
 
 	// 기존 BP의 충돌 프로파일이 프로젝트 InteractTrace 기본 Ignore를 상속해도 조준된다.
 	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
@@ -105,7 +118,7 @@ void AMD_TrashSorter::BeginPlay()
 		return;
 	}
 
-	if (HasAuthority())
+	if (HasAuthority() && !IsOperationBlocked())
 	{
 		SorterStateTree->StartLogic();
 	}
@@ -124,6 +137,7 @@ void AMD_TrashSorter::SetInteractionHighlighted_Implementation(bool bHighlighted
 
 FText AMD_TrashSorter::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
+	if (bSafetyInterlocked) return NSLOCTEXT("MDInteraction", "SorterSafetyLock", "처리장 안전 정지 · 지문 인증 필요");
 	if (!CanInteract_Implementation(Interactor) || SortActionText.IsEmpty())
 	{
 		return FText::GetEmpty();
@@ -137,14 +151,14 @@ FText AMD_TrashSorter::GetInteractionPrompt_Implementation(AActor* Interactor) c
 bool AMD_TrashSorter::CanInteract_Implementation(AActor* Interactor) const
 {
 	// 거리와 조준은 InteractionComponent의 공통 Trace 및 서버 재검증이 담당한다.
-	return RuntimeState.bReady && !RuntimeState.bSorting && !bHasPendingSortRequest
+	return !IsOperationBlocked() && RuntimeState.bReady && !RuntimeState.bSorting && !bHasPendingSortRequest
 		&& (!HasAuthority() || (SorterStateTree->IsRunning() && !SorterStateTree->IsPaused()))
 		&& IsValid(Interactor) && Interactor->IsA<APawn>();
 }
 
 bool AMD_TrashSorter::CanAcceptHeldItem(AActor* Interactor) const
 {
-	if (!UMD_TrashLibrary::IsTrashCategory(AcceptedCategory)) return false;
+	if (IsOperationBlocked() || !UMD_TrashLibrary::IsTrashCategory(AcceptedCategory)) return false;
 	AActor* Item = GetHeldSortableForInteractor(Interactor);
 	if (!IsValid(Item)) return false;
 	const AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Item);
@@ -189,7 +203,7 @@ void AMD_TrashSorter::Interact_Implementation(AActor* Interactor)
 
 bool AMD_TrashSorter::EnterReadyState()
 {
-	if (!HasAuthority() || RuntimeState.bSorting) return false;
+	if (!HasAuthority() || IsOperationBlocked() || RuntimeState.bSorting) return false;
 	ClearPendingSortRequest();
 	RuntimeState.bReady = true;
 	ForceNetUpdate();
@@ -212,7 +226,7 @@ void AMD_TrashSorter::ClearPendingSortRequest()
 
 bool AMD_TrashSorter::BeginPendingSort()
 {
-	if (!HasAuthority() || RuntimeState.bSorting || !bHasPendingSortRequest) return false;
+	if (!HasAuthority() || IsOperationBlocked() || RuntimeState.bSorting || !bHasPendingSortRequest) return false;
 
 	AActor* Interactor = PendingInteractor.Get();
 	AActor* Item = PendingItem.Get();
@@ -257,7 +271,10 @@ bool AMD_TrashSorter::BeginPendingSort()
 	RuntimeState.ItemVisual = ItemVisual;
 	if (RefundCredits > 0)
 	{
-		Merchant->AddCredits(EMD_DailyReportCategory::Categorizing, RefundCredits);
+		// 분류를 실제로 요청한 Pawn의 플레이어에게 환급 이력 귀속
+		APawn* SortingPawn = Cast<APawn>(Interactor);
+		// 자동 처리 등 요청자가 없는 경우에는 팀 공용 환급으로 기록
+		Merchant->AddCredits(EMD_DailyReportCategory::Categorizing, RefundCredits, IsValid(SortingPawn) == true ? SortingPawn->GetPlayerState() : nullptr);
 	}
 
 	ForceNetUpdate();
@@ -312,10 +329,48 @@ void AMD_TrashSorter::RefreshSortingPresentation()
 
 bool AMD_TrashSorter::BeginErrorState()
 {
-	if (!HasAuthority()) return false;
+	if (!HasAuthority() || IsOperationBlocked()) return false;
 	ClearPendingSortRequest();
 	MulticastErrorFeedback();
 	return true;
+}
+
+void AMD_TrashSorter::HandleFacilityState(UMD_FacilityFaultComponent* Facility,
+	const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current)
+{
+	if (!HasAuthority() || Previous.IsFaultActive() == Current.IsFaultActive()) return;
+	RefreshOperationBlock();
+}
+
+bool AMD_TrashSorter::IsOperationBlocked() const
+{
+	return bSafetyInterlocked || (FacilityRepair && FacilityRepair->IsFaultActive());
+}
+
+void AMD_TrashSorter::SetSafetyInterlock(AActor* Source, bool bLocked)
+{
+	if (!HasAuthority() || !IsValid(Source) || Source->GetWorld() != GetWorld()) return;
+	SafetyInterlockSources.RemoveAll([](const auto& Weak) { return !Weak.IsValid(); });
+	if (bLocked) SafetyInterlockSources.AddUnique(Source);
+	else SafetyInterlockSources.Remove(Source);
+	const bool bNewBlocked = SafetyInterlockSources.Num() > 0;
+	if (bSafetyInterlocked == bNewBlocked) return;
+	bSafetyInterlocked = bNewBlocked;
+	RefreshOperationBlock();
+	ForceNetUpdate();
+}
+
+void AMD_TrashSorter::RefreshOperationBlock()
+{
+	if (IsOperationBlocked())
+	{
+		SorterStateTree->StopLogic(TEXT("Facility fault or safety interlock"));
+		EndSortingState(); // Only presentation/queued requests; never undo an already paid item.
+	}
+	else if (UMD_TrashLibrary::IsTrashCategory(AcceptedCategory))
+	{
+		SorterStateTree->StartLogic();
+	}
 }
 
 void AMD_TrashSorter::MulticastErrorFeedback_Implementation()

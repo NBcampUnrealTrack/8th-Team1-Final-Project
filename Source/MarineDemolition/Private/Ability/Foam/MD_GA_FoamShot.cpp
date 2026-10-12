@@ -3,6 +3,7 @@
 #include "Audio/MD_AudioSubsystem.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_FoamGunComponent.h"
+#include "Component/Interaction/MD_InteractionComponent.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "GameFramework/Pawn.h"
@@ -10,7 +11,7 @@
 
 namespace
 {
-	// 실패 사유 노출 — PlaceSupport와 같은 임시 방식
+	// 실패 사유 노출 — 임시 방식
 	void ShowFoamFailMessage(const FString& Reason)
 	{
 		if (GEngine)
@@ -61,8 +62,21 @@ bool UMD_GA_FoamShot::CanActivateAbility(const FGameplayAbilitySpecHandle Handle
 		return false;
 	}
 
+	// 발사 능력을 사용하는 실제 소유 폰 조회
+	APawn* Pawn = ActorInfo != nullptr ? Cast<APawn>(ActorInfo->AvatarActor.Get()) : nullptr;
+	// 서버 발사 요청과 같은 조작 가능 조건을 확인할 상호작용 저장소 조회
+	UMD_InteractionComponent* Interaction = IsValid(Pawn) == true ? Pawn->FindComponentByClass<UMD_InteractionComponent>() : nullptr;
+	// 기존 발사체 설정 조건과 결합할 폼건 조회
 	const UMD_FoamGunComponent* FoamGun = GetFoamGun(ActorInfo);
-	return FoamGun && FoamGun->GetProjectileClass() != nullptr;
+	// 사망과 빙의 해제 및 운반 중 입력의 로컬 발사 효과와 서버 요청 차단
+	if (IsValid(Interaction) == false || Interaction->CanOwnerInteract() == false || Interaction->IsHolding() == true)
+	{
+		// 조작 불가능한 상태의 발사 능력 활성화 거절
+		return false;
+	}
+
+	// 조작 조건 통과 후 폼건과 발사체 설정의 유효성 반환
+	return IsValid(FoamGun) == true && IsValid(FoamGun->GetProjectileClass().Get()) == true;
 }
 
 void UMD_GA_FoamShot::ActivateAbility(const FGameplayAbilitySpecHandle Handle,

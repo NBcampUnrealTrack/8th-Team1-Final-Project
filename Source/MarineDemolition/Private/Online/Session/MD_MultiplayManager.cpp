@@ -25,7 +25,6 @@
 #include "Online/Session/MD_SessionSettingKey.h"
 #include "Types/Online/MD_RoomCode.h"
 #include "Types/Online/MD_SessionTypes.h"
-#include "Data/SaveGame/MD_SaveSlotManager.h"
 #include "Util/MD_LogUtility.h"
 
 void UMD_MultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
@@ -205,53 +204,6 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
     CreateSessionInternal(ServerName, MaxPlayerCount, SessionCreateParams);
 }
 
-void UMD_MultiplayManager::StartSession(const FMD_GameData& GameData, bool bLoadGame)
-{
-    // 클라이언트 환경 실행 제한
-    UWorld* World = GetWorld();
-    if (IsValid(World) == false || World->GetNetMode() == ENetMode::NM_Client)
-    {
-        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작은 Host 또는 Server에서만 실행할 수 있습니다."), *UE_CALL_LOCATIONINFO);
-
-        OnStartGameComplete.Broadcast(false);
-        return;
-    }
-
-    // 세이브 데이터 관리자 참조
-    UGameInstance* GameInstance = GetGameInstance();
-    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-    if (IsValid(SaveSlotManager) == false)
-    {
-        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터를 관리하는 매니저가 존재하지 않습니다."), *UE_CALL_LOCATIONINFO);
-
-        OnStartGameComplete.Broadcast(false);
-        return;
-    }
-
-    // 불러오기 여부와 현재 진행 데이터 존재 여부에 맞는 시작 작업과 목적지 맵을 준비하는 처리
-    FString GameMapPackagePath;
-    const bool bWasGameDataPrepared = SaveSlotManager->OnTryStartGameWithGameData(GameData, bLoadGame, GameMapPackagePath);
-    if (bWasGameDataPrepared == false)
-    {
-        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 데이터 검증 실패로 세션 시작을 취소합니다."), *UE_CALL_LOCATIONINFO);
-        OnStartGameComplete.Broadcast(false);
-        return;
-    }
-
-    // SaveSlotManager가 결정한 시작 방식의 맵이 실제 World 패키지인지 확인하는 처리
-    if (IsValidMapPackagePath(GameMapPackagePath) == false)
-    {
-        UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작에 사용할 맵 패키지 경로가 유효하지 않습니다: %s"), *UE_CALL_LOCATIONINFO, *GameMapPackagePath);
-
-        SaveSlotManager->CancelPendingGameDataOperation();
-        OnStartGameComplete.Broadcast(false);
-        return;
-    }
-
-    BeginLoadingScreenForTravel(EMD_LoadingContext::DiveStarting);
-    StartSessionInternal(GameMapPackagePath, GameMapPackagePath);
-}
-
 void UMD_MultiplayManager::StartSessionByMap(const FString& MapPackagePath, const FString& TravelOptions)
 {
     // 클라이언트가 호스트의 Session 상태와 전체 접속자의 이동을 변경하지 못하도록 하는 실행 환경 검사
@@ -279,19 +231,6 @@ void UMD_MultiplayManager::StartSessionByMap(const FString& MapPackagePath, cons
         UE_LOG(MarineDemolition, Warning, TEXT("%s 지정 맵 Session 시작에 사용할 Travel 옵션이 유효하지 않습니다: %s"), *UE_CALL_LOCATIONINFO, *TravelOptions);
 
         OnStartGameComplete.Broadcast(false);
-        return;
-    }
-
-    // 로비에서 같은 맵으로 출항해도 이전 계약이 이어지지 않도록 저장 관리자 조회
-    UGameInstance* GameInstance = GetGameInstance();
-    // 맵 이동 성공 이후 새 계약을 적용할 예약 소유자 확인
-    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-    // 기존 경제 및 장비를 보존한 새 계약 예약에 실패하면 출항 중단
-    if (IsValid(SaveSlotManager) == false || SaveSlotManager->PrepareNewContract() == false)
-    {
-        // 호출 화면에 새 출항 준비 실패 전달
-        OnStartGameComplete.Broadcast(false);
-        // 준비되지 않은 계약의 맵 이동 방지
         return;
     }
 
@@ -1061,7 +1000,6 @@ void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath, c
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작에 사용할 맵 패키지 경로가 유효하지 않습니다: %s"), *UE_CALL_LOCATIONINFO, *MapPackagePath);
 
-        CancelPendingGameDataOperation();
 
         OnStartGameComplete.Broadcast(false);
         return;
@@ -1072,7 +1010,6 @@ void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath, c
     {
         UE_LOG(MarineDemolition, Error, TEXT("%s Online Subsystem의 Session 모듈이 유효하지 않아 게임을 시작할 수 없습니다."), *UE_CALL_LOCATIONINFO);
 
-        CancelPendingGameDataOperation();
 
         OnStartGameComplete.Broadcast(false);
         return;
@@ -1083,7 +1020,6 @@ void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath, c
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s Online Subsystem의 Session 모듈에서 진행 중인 이전 작업이 완료되지 않았습니다."), *UE_CALL_LOCATIONINFO);
 
-        CancelPendingGameDataOperation();
 
         OnStartGameComplete.Broadcast(false);
         return;
@@ -1095,7 +1031,6 @@ void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath, c
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s 시작 대기 또는 종료 상태의 호스팅 중인 GameSession이 존재하지 않습니다."), *UE_CALL_LOCATIONINFO);
 
-        CancelPendingGameDataOperation();
 
         OnStartGameComplete.Broadcast(false);
         return;
@@ -1125,7 +1060,6 @@ void UMD_MultiplayManager::StartSessionInternal(const FString& MapPackagePath, c
 
         UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작 전 추가 참가 차단 요청을 접수하지 못했습니다."), *UE_CALL_LOCATIONINFO);
 
-        CancelPendingGameDataOperation();
 
         RecoverStartGameJoinability();
     }
@@ -1138,7 +1072,6 @@ void UMD_MultiplayManager::RequestStartSession(const FString& TravelURL)
     {
         UE_LOG(MarineDemolition, Error, TEXT("%s 추가 참가 차단 이후 GameSession을 시작할 수 없습니다."), *UE_CALL_LOCATIONINFO);
 
-        CancelPendingGameDataOperation();
 
         RecoverStartGameJoinability();
         return;
@@ -1160,7 +1093,6 @@ void UMD_MultiplayManager::RequestStartSession(const FString& TravelURL)
 
         UE_LOG(MarineDemolition, Warning, TEXT("%s Online Subsystem의 Session 모듈에서 Session 시작 요청에 실패하였습니다."), *UE_CALL_LOCATIONINFO);
 
-        CancelPendingGameDataOperation();
 
         RecoverStartGameJoinability();
     }
@@ -1307,7 +1239,6 @@ void UMD_MultiplayManager::HandleStartGameJoinabilityUpdateComplete(FName Sessio
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s 게임 시작 전 로비의 추가 참가 차단에 실패했습니다."), *UE_CALL_LOCATIONINFO);
 
-        CancelPendingGameDataOperation();
 
         RecoverStartGameJoinability();
         return;
@@ -1331,7 +1262,6 @@ void UMD_MultiplayManager::HandleStartSessionComplete(FName SessionName, bool bW
     {
         UE_LOG(MarineDemolition, Warning, TEXT("%s GameSession 시작에 실패했습니다."), *UE_CALL_LOCATIONINFO);
 
-        CancelPendingGameDataOperation();
 
         RecoverStartGameJoinability();
         return;
@@ -1343,7 +1273,6 @@ void UMD_MultiplayManager::HandleStartSessionComplete(FName SessionName, bool bW
     {
         UE_LOG(MarineDemolition, Error, TEXT("%s 현재 World가 유효하지 않습니다."), *UE_CALL_LOCATIONINFO);
 
-        CancelPendingGameDataOperation();
 
         RollbackSession(SessionName, EMD_SessionRollbackOperation::StartGame);
         return;
@@ -1352,7 +1281,6 @@ void UMD_MultiplayManager::HandleStartSessionComplete(FName SessionName, bool bW
 	ServerTravelAfterLoadingIntro(TravelURL, TEXT("GameSession 시작 후 지정 맵 이동을 시작하지 못했습니다"),
 		[SessionName](UMD_MultiplayManager& Self)
 		{
-			Self.CancelPendingGameDataOperation();
 			Self.RollbackSession(SessionName, EMD_SessionRollbackOperation::StartGame);
 		},
 		[](UMD_MultiplayManager& Self) { Self.OnStartGameComplete.Broadcast(true); });
@@ -1722,19 +1650,6 @@ void UMD_MultiplayManager::HandleDestroySessionComplete(FName SessionName, bool 
     }
 
 	DisconnectAfterLoadingIntro();
-}
-
-void UMD_MultiplayManager::CancelPendingGameDataOperation()
-{
-    // 세이브 데이터 관리자 참조
-    UGameInstance* GameInstance = GetGameInstance();
-    UMD_SaveSlotManager* SaveSlotManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SaveSlotManager>() : nullptr;
-
-    // 현재 진행 데이터는 유지하고 실패한 시작 절차의 보류 작업만 취소하는 처리
-    if (IsValid(SaveSlotManager) == true)
-    {
-        SaveSlotManager->CancelPendingGameDataOperation();
-    }
 }
 
 void UMD_MultiplayManager::RollbackSession(FName SessionName, EMD_SessionRollbackOperation RollbackOperation)

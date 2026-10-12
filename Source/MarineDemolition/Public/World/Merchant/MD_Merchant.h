@@ -14,7 +14,7 @@ struct FStreamableHandle;
 class UMD_MerchantMenuWidget;
 class UMD_ShopCatalog;
 class UMD_ShopWidget;
-class UMD_QuestScreenWidget;
+class UCommonActivatableWidget;
 class UMD_LoanWidget;
 class UMD_LoreComponent;
 class UMD_MerchantComponent;
@@ -64,16 +64,14 @@ public:
 	/** 서버 구매 결과를 현재 로컬 상점과 대사창에 반영하는 함수 */
 	void ReceiveShopPurchaseResult(FPrimaryAssetId ItemAssetId, EMD_ShopPurchaseResult Result);
 
-	/** 서버가 핫바 회수물(카트리지 등)을 납품 처리한 결과를 대사창 또는 HUD 알림에 반영하는 함수 */
-	void ReceiveQuestItemDelivery(AMD_PlayerController* Requester, const FText& ItemName, int32 Count);
 
 	/** Blueprint가 Push하기 전에 전달한 상점 화면에 상인 데이터와 도메인 이벤트를 연결한다. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	void InitializePushedShop(UMD_ShopWidget* ShopWidget, UMD_MerchantMenuWidget* MenuWidget);
 
-	/** Blueprint가 Push한 퀘스트 화면에 상인 데이터와 도메인 이벤트를 연결한다. */
+	/** Blueprint가 Push한 기록 화면에 로어 원장과 변경 알림 연결 */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
-	void InitializePushedQuest(UMD_QuestScreenWidget* QuestWidget, UMD_MerchantMenuWidget* MenuWidget);
+	void InitializePushedLore(UCommonActivatableWidget* LoreScreen, UMD_MerchantMenuWidget* MenuWidget);
 
 	/** Blueprint가 Push한 대출 화면에 상인 데이터와 도메인 이벤트를 연결하는 함수 */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
@@ -131,16 +129,14 @@ protected:
 	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
 	FText InvalidPurchaseDialogue = FText::FromString(TEXT("그 거래는 처리할 수 없어."));
 
-	/** 핫바 회수물 납품 성공 대사. {0} = 품목명, {1} = 개수 (`03` §3 카트리지 납품) */
-	UPROPERTY(EditAnywhere, Category = "MD|Merchant")
-	FText QuestDeliveryDialogue = FText::FromString(TEXT("{0} {1}개, 확실히 받았어. 본사엔 내가 넘길게."));
 
 	/** 열려 있는 위젯 (중복 생성 방지용) */
 	TWeakObjectPtr<UMD_MerchantMenuWidget> ActiveMenuWidget;
 
 	TWeakObjectPtr<UMD_ShopWidget> ActiveShopWidget;
 
-	TWeakObjectPtr<UMD_QuestScreenWidget> ActiveQuestWidget;
+	// 재사용한 기록 화면의 상태 갱신과 종료 처리용 약한 참조
+	TWeakObjectPtr<UCommonActivatableWidget> ActiveLoreScreen;
 
 	// 중복 생성 방지와 복제 상태 갱신에 사용하는 현재 대출 화면 참조
 	TWeakObjectPtr<UMD_LoanWidget> ActiveLoanWidget;
@@ -175,8 +171,8 @@ private:
 	UFUNCTION()
 	void HandlePlayerShopOwnershipChanged();
 
-	/** Common UI Stack에서 퀘스트 화면이 비활성화되면 상태 구독과 활성 화면 참조를 정리한다. */
-	void HandleQuestBackRequested();
+	/** 기록 화면 비활성화 시 원장 구독과 활성 화면 참조 정리 */
+	void HandleLoreDeactivated();
 
 	/** Common UI Stack에서 대출 화면이 비활성화되면 상태 구독과 활성 화면 참조를 정리하는 함수 */
 	void HandleLoanDeactivated();
@@ -189,16 +185,6 @@ private:
 	UFUNCTION()
 	void HandleRepayRequested(int32 Amount);
 
-	/** 반복 퀘스트 카드에서 '수락'을 눌렀을 때 — 서버 판정은 PlayerController RPC가 맡는다. */
-	UFUNCTION()
-	void HandleRepeatAcceptRequested(int32 QuestIndex);
-
-	UFUNCTION()
-	void HandleRepeatDeclineRequested(int32 QuestIndex);
-
-	/** 반복 퀘스트 카드의 포기 요청을 서버 권위 PlayerController로 전달하는 함수 */
-	UFUNCTION()
-	void HandleRepeatAbandonRequested(int32 QuestIndex);
 
 	/** 상인 상태 변경 시 열려 있는 UI의 호감도 정보를 갱신하는 함수 */
 	UFUNCTION()
@@ -208,7 +194,6 @@ private:
 	UFUNCTION()
 	void HandleLoreProgressUpdated();
 
-	void RefreshQuestWidgetFromComponent();
 
 	/** UI 개방 또는 로어 수집 변경 시 코덱스 탭에 복제 원장을 적용하는 함수 */
 	void RefreshLoreWidgetFromComponent();
@@ -219,11 +204,6 @@ private:
 	// 복제된 크레딧과 부채를 현재 대출 화면에 다시 적용하는 함수
 	void RefreshLoanWidgetFromComponent();
 
-	/** 활성 메인 퀘스트 중 Interaction 목표를 찾아 서버 페이즈 전환을 요청하는 함수 */
-	void TryAdvanceInteractionQuests(APlayerController* PC);
-
-	/** 대화를 연 플레이어의 핫바 회수물을 서버에서 납품하도록 요청하는 함수. 메뉴가 열린 뒤 호출해야 응답 대사가 표시된다 */
-	void RequestHotbarQuestDelivery(APlayerController* PC);
 
 	UMD_MerchantComponent* GetMerchantComponent() const;
 

@@ -19,6 +19,7 @@
 #include "World/Trash/MD_TrashItem.h"
 #include "World/Trash/MD_TrashSpawnManager.h"
 #include "World/Trash/MD_TrashFloorPlacementComponent.h"
+#include "Data/Trash/MD_TrashSpawnProfile.h"
 #if WITH_EDITOR
 #include "StaticMeshCompiler.h"
 #endif
@@ -439,33 +440,6 @@ int32 AMD_TrashSpawnVolume::GetRemainingKindCount(const FName TrashKindId) const
 {
     return FMath::Max(0, RemainingKindCounts.FindRef(TrashKindId));
 }
-bool AMD_TrashSpawnVolume::CaptureState(FMD_TrashGeneratorState& OutState) const
-{
-    if (!bStateInitialized)
-    {
-        return false;
-    }
-
-    OutState = FMD_TrashGeneratorState();
-    OutState.GeneratorName = GetFName();
-    OutState.RemainingKindCounts = RemainingKindCounts;
-    OutState.bUsesTowerPlacement = UsesTowerPlacement();
-    if (UsesAutomaticFloorCells())
-    {
-        OutState.bUsesFloorCells = true;
-        OutState.FloorCellSize = FloorPlacement->CellSize;
-        OutState.FloorLayerHeight = FloorPlacement->LayerHeight;
-        OutState.FloorLayoutId = FloorPlacement->GetLayoutId();
-        RemainingFloorCells.GenerateValueArray(OutState.FloorCells);
-        OutState.FloorCells.Sort([](const FMD_TrashFloorCellState& A, const FMD_TrashFloorCellState& B)
-        {
-            return A.Cell.X != B.Cell.X ? A.Cell.X < B.Cell.X
-                : A.Cell.Y != B.Cell.Y ? A.Cell.Y < B.Cell.Y : A.Cell.Z < B.Cell.Z;
-        });
-    }
-    return OutState.IsStructurallyValid();
-}
-
 bool AMD_TrashSpawnVolume::PrepareSpawnLocations(const double BudgetSeconds, bool& bReady)
 {
     bReady = !UsesAutomaticFloorCells();
@@ -566,7 +540,7 @@ bool AMD_TrashSpawnVolume::CanRestoreState(const FMD_TrashGeneratorState& State)
     return true;
 }
 
-bool AMD_TrashSpawnVolume::RestoreState(const FMD_TrashGeneratorState& State, const TArray<AMD_TrashItem*>* ReusableItems)
+bool AMD_TrashSpawnVolume::RestoreState(const FMD_TrashGeneratorState& State)
 {
     if (!CanRestoreState(State)) return false;
     TArray<FName> KindIds;
@@ -595,117 +569,12 @@ bool AMD_TrashSpawnVolume::RestoreState(const FMD_TrashGeneratorState& State, co
     InitializeFloorLedger();
 
     LastUsedSeed = static_cast<int32>(GetTypeHash(FGuid::NewGuid()));
-    TArray<AMD_TrashItem*> Reused;
-    if (ReusableItems && UsesAutomaticFloorCells())
-    {
-        TMap<FName, TArray<AMD_TrashItem*>> ByKind;
-        for (AMD_TrashItem* Item : *ReusableItems)
-            if (IsValid(Item) && !Item->GetOriginGenerator() && Item->GetClass() == TrashItemClass)
-                ByKind.FindOrAdd(Item->GetTrashKindId()).Add(Item);
-        for (const FName Kind : KindIds)
-        {
-            auto* Items = ByKind.Find(Kind);
-            if (!Items || Items->IsEmpty()) { Reused.Reset(); break; }
-            Reused.Add(Items->Pop(EAllowShrinking::No));
-        }
-    }
-    if (!PlaceTrashKinds(KindIds, LastUsedSeed, UsesAutomaticFloorCells() ? &RequiredCells : nullptr,
-        Reused.Num() == KindIds.Num() ? &Reused : nullptr))
+    if (!PlaceTrashKinds(KindIds, LastUsedSeed, UsesAutomaticFloorCells() ? &RequiredCells : nullptr))
     {
         ClearSpawnedTrashInternal();
         return false;
     }
 
-    bStateInitialized = true;
-    NotifyManagerStateChanged();
-    return true;
-}
-
-bool AMD_TrashSpawnVolume::CapturePlacement(FMD_TrashGeneratorPlacement& Out) const
-{
-    Out.Items.Reset();
-    FMD_TrashGeneratorState State;
-    if (!CaptureState(State)) return false;
-    Out.Items.Reserve(GetRemainingTrashCount());
-    for (const AMD_TrashItem* Item : SpawnedTrashItems)
-    {
-        if (!IsValid(Item)) continue;
-        if (Item->GetOriginGenerator() != this || Item->GetOriginKindId() != Item->GetTrashKindId()) return false;
-        auto& Record = Out.Items.AddDefaulted_GetRef();
-        Record.KindId = Item->GetTrashKindId();
-        Record.VariantId = Item->GetTrashVariantId();
-        Record.Transform = Item->GetActorTransform();
-        if (const auto* Mesh = Cast<UStaticMeshComponent>(Item->GetRootComponent()); Mesh && Mesh->IsSimulatingPhysics())
-        {
-            Record.bWasAwake = Mesh->RigidBodyIsAwake();
-            if (Record.bWasAwake)
-            {
-                Record.LinearVelocity = Mesh->GetPhysicsLinearVelocity();
-                Record.AngularVelocity = Mesh->GetPhysicsAngularVelocityInRadians();
-            }
-        }
-        if (UsesAutomaticFloorCells() && !Item->GetOriginFloorCell(Record.OriginCell)) return false;
-    }
-    return Out.MatchesState(State);
-}
-
-bool AMD_TrashSpawnVolume::CanRestorePlacement(const FMD_TrashGeneratorState& State,
-    const FMD_TrashGeneratorPlacement& Placement) const
-{
-    if (!CanRestoreState(State) || !Placement.MatchesState(State)) return false;
-    for (const auto& Item : Placement.Items)
-    {
-        TSoftObjectPtr<UStaticMesh> Mesh;
-        if (!UMD_TrashLibrary::ResolveTrashKindMesh(Item.KindId, Item.VariantId, Mesh)) return false;
-    }
-    return Placement.Items.IsEmpty() || TrashItemClass != nullptr;
-}
-
-bool AMD_TrashSpawnVolume::RestorePlacement(const FMD_TrashGeneratorState& State,
-    const FMD_TrashGeneratorPlacement& Placement)
-{
-    if (!CanRestorePlacement(State, Placement)) return false;
-    // Day travel preserves even carried/off-floor items. Do not run the random floor planner.
-    for (const auto& Record : Placement.Items)
-    {
-        AMD_TrashItem* Item = GetWorld()->SpawnActorDeferred<AMD_TrashItem>(TrashItemClass,
-            Record.Transform, this, nullptr, ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
-        if (!IsValid(Item)) { ClearSpawnedTrashInternal(); return false; }
-        SpawnedTrashItems.Add(Item);
-        // Mesh compilation / construction can recreate the body after FinishSpawning.
-        // Its initial sleep state must agree with the restored state too.
-        if (auto* Mesh = Cast<UStaticMeshComponent>(Item->GetRootComponent()))
-            Mesh->BodyInstance.bStartAwake = Record.bWasAwake;
-        Item->UseAuthoredMeshScaleForProceduralSpawn();
-        const bool bAppearanceValid = Item->SetTrashAppearance(Record.KindId, Record.VariantId);
-#if WITH_EDITOR
-        // Editor map travel can reload an asynchronously compiling mesh. Such a
-        // component cannot create its physics body, so velocity writes would be lost.
-        // Cooked builds already have prepared meshes and do not take this path.
-        if (auto* Mesh = Cast<UStaticMeshComponent>(Item->GetRootComponent()); Mesh && Mesh->GetStaticMesh())
-            FStaticMeshCompilingManager::Get().FinishCompilation({Mesh->GetStaticMesh()});
-#endif
-        Item->SetOriginGenerator(this);
-        if (UsesAutomaticFloorCells()) Item->SetOriginFloorCell(Record.OriginCell);
-        UGameplayStatics::FinishSpawningActor(Item, Record.Transform);
-        if (!bAppearanceValid || !IsValid(Item)) { ClearSpawnedTrashInternal(); return false; }
-        Item->SetActorTransform(Record.Transform, false, nullptr, ETeleportType::TeleportPhysics);
-        if (auto* Mesh = Cast<UStaticMeshComponent>(Item->GetRootComponent()); Mesh && Mesh->IsSimulatingPhysics())
-        {
-            if (Record.bWasAwake)
-            {
-                // Construction can leave the body asleep even with bStartAwake.
-                // UE's velocity setters alone do not reliably wake a sleeping body.
-                Mesh->WakeAllRigidBodies();
-                Mesh->SetPhysicsLinearVelocity(Record.LinearVelocity);
-                Mesh->SetPhysicsAngularVelocityInRadians(Record.AngularVelocity);
-            }
-            else Mesh->PutAllRigidBodiesToSleep();
-        }
-    }
-    RemainingKindCounts = State.RemainingKindCounts;
-    RemainingFloorCells.Reset();
-    for (const auto& Cell : State.FloorCells) RemainingFloorCells.Add(Cell.Cell, Cell);
     bStateInitialized = true;
     NotifyManagerStateChanged();
     return true;
@@ -748,10 +617,55 @@ bool AMD_TrashSpawnVolume::InitializeFresh()
     }
 
     LastUsedSeed = static_cast<int32>(GetTypeHash(FGuid::NewGuid()));
+    LastSpawnShortfall = 0;
     if (!PlaceTrashKinds(KindIds, LastUsedSeed))
     {
         ClearSpawnedTrashInternal();
-        return false;
+        // 고정 개수 볼륨은 기존대로 실패. 비율 볼륨은 공간이 허락하는 만큼 줄여 놓고 부족분을 기록한다
+        if (!FMath::IsFinite(SpawnShare) || SpawnShare <= 0.0f)
+        {
+            return false;
+        }
+        // 들어가는 최대 개수를 이분 탐색으로 찾는다. 실패는 배치 전 계획 단계에서 끝나므로 비용이 작다
+        const TArray<FName> FullKindIds = KindIds;
+        int32 Attempt = 0;
+        int32 Low = 0;
+        int32 High = FullKindIds.Num();
+        while (High - Low > 1)
+        {
+            const int32 Mid = (Low + High) / 2;
+            // 정리 함수가 바닥 셀 장부까지 비우므로 매 시도 전에 다시 채운다
+            InitializeFloorLedger();
+            KindIds = FullKindIds;
+            KindIds.SetNum(Mid);
+            if (PlaceTrashKinds(KindIds, LastUsedSeed + ++Attempt))
+            {
+                Low = Mid;
+                ClearSpawnedTrashInternal();
+            }
+            else
+            {
+                High = Mid;
+                ClearSpawnedTrashInternal();
+            }
+        }
+        InitializeFloorLedger();
+        if (Low > 0)
+        {
+            KindIds = FullKindIds;
+            KindIds.SetNum(Low);
+            // 계획은 무작위라 같은 개수가 다시 실패할 수 있다. 그때는 한 개씩 줄여 확정한다
+            while (!KindIds.IsEmpty() && !PlaceTrashKinds(KindIds, LastUsedSeed + ++Attempt))
+            {
+                ClearSpawnedTrashInternal();
+                InitializeFloorLedger();
+                KindIds.SetNum(KindIds.Num() - 1);
+            }
+        }
+        LastSpawnShortfall = SpawnCount - GetSpawnedTrashCount();
+        UE_LOG(MarineDemolition, Warning,
+            TEXT("TrashSpawnVolume '%s' placed %d of %d shared items; %d passed on to other volumes."),
+            *GetName(), GetSpawnedTrashCount(), SpawnCount, LastSpawnShortfall);
     }
 
     bStateInitialized = true;
@@ -848,7 +762,8 @@ bool AMD_TrashSpawnVolume::NotifyTrashConsumed(const FName TrashKindId, const FI
 bool AMD_TrashSpawnVolume::BuildTrashKindChances(TArray<FMD_TrashSpawnKindChance>& OutChances) const
 {
     OutChances.Reset();
-    if (TrashKindChances.IsEmpty())
+    const TArray<FMD_TrashSpawnKindChance>& EffectiveChances = GetEffectiveKindChances();
+    if (EffectiveChances.IsEmpty())
     {
         const TArray<FName> EligibleIds = BuildEligibleTrashKindIds();
         for (const FName KindId : EligibleIds)
@@ -862,7 +777,7 @@ bool AMD_TrashSpawnVolume::BuildTrashKindChances(TArray<FMD_TrashSpawnKindChance
 
     TSet<FName> SeenIds;
     double TotalPercent = 0.0;
-    for (const FMD_TrashSpawnKindChance& Chance : TrashKindChances)
+    for (const FMD_TrashSpawnKindChance& Chance : EffectiveChances)
     {
         FMD_TrashKindRow KindRow;
         if (Chance.TrashKindId.IsNone()
@@ -941,7 +856,8 @@ bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const i
         {
             continue;
         }
-        const FMD_TrashSpawnKindChance* ConfiguredKind = TrashKindChances.FindByPredicate(
+        const TArray<FMD_TrashSpawnKindChance>& EffectiveChances = GetEffectiveKindChances();
+        const FMD_TrashSpawnKindChance* ConfiguredKind = EffectiveChances.FindByPredicate(
             [KindId](const FMD_TrashSpawnKindChance& Chance)
             {
                 return Chance.TrashKindId == KindId;
@@ -949,7 +865,7 @@ bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const i
         TArray<FMD_TrashSpawnVariantChance> ResolvedVariants;
         if (!BuildVariantChancesForKind(
             KindId, ConfiguredKind ? &ConfiguredKind->VariantChances : nullptr, ResolvedVariants,
-            TrashKindChances.IsEmpty()))
+            EffectiveChances.IsEmpty()))
         {
             UE_LOG(MarineDemolition, Warning,
                 TEXT("TrashSpawnVolume '%s' cannot place kind '%s': invalid Variant chances or no usable mesh."),
@@ -1366,8 +1282,61 @@ void AMD_TrashSpawnVolume::UpdateShapeVisualization()
         }
         PolygonBoundary->SetVisibility(!UsesAutomaticFloorCells() || IsFloorBonusVolume(), true);
         PolygonBoundary->bDrawDebug = !UsesAutomaticFloorCells() || IsFloorBonusVolume();
+#if WITH_EDITORONLY_DATA
+        // 비율이 클수록 붉게. 비율을 쓰지 않는 볼륨은 기본 흰색
+        if (FMath::IsFinite(SpawnShare) && SpawnShare > 0.0f)
+        {
+            const float Hue = FMath::Lerp(120.0f, 0.0f, FMath::Clamp(SpawnShare / 50.0f, 0.0f, 1.0f));
+            PolygonBoundary->EditorUnselectedSplineSegmentColor = FLinearColor::MakeFromHSV8(static_cast<uint8>(Hue / 360.0f * 255.0f), 220, 255);
+        }
+        else
+        {
+            PolygonBoundary->EditorUnselectedSplineSegmentColor = FLinearColor::White;
+        }
+#endif
     }
 }
+
+const TArray<FMD_TrashSpawnKindChance>& AMD_TrashSpawnVolume::GetEffectiveKindChances() const
+{
+    if (!TrashKindChances.IsEmpty())
+    {
+        return TrashKindChances;
+    }
+    if (const UMD_TrashSpawnProfile* Profile = UMD_TrashSpawnManager::ResolveProfile(GetWorld(), this))
+    {
+        return Profile->DefaultKindChances;
+    }
+    return TrashKindChances;
+}
+
+double AMD_TrashSpawnVolume::ComputeBoundaryArea() const
+{
+    TArray<FVector2D> Vertices;
+    FBox2D Bounds(ForceInit);
+    double MinZ = 0.0, MaxZ = 0.0;
+    if (!BuildPolygonVertices(PolygonBoundary, PolygonSamplesPerSegment, Vertices, Bounds, MinZ, MaxZ))
+    {
+        return 0.0;
+    }
+    // 신발끈 공식. 스플라인 로컬 좌표라 액터 스케일을 따로 곱한다
+    double TwiceArea = 0.0;
+    for (int32 I = 0; I < Vertices.Num(); ++I)
+    {
+        const FVector2D& A = Vertices[I];
+        const FVector2D& B = Vertices[(I + 1) % Vertices.Num()];
+        TwiceArea += A.X * B.Y - B.X * A.Y;
+    }
+    const FVector Scale = PolygonBoundary->GetComponentTransform().GetScale3D();
+    return FMath::Abs(TwiceArea) * 0.5 * FMath::Abs(Scale.X * Scale.Y);
+}
+
+#if WITH_EDITOR
+void AMD_TrashSpawnVolume::PreviewShareDistribution()
+{
+    UMD_TrashSpawnManager::PreviewShareDistribution(GetWorld(), this, PreviewPlayerCount, PreviewDifficulty);
+}
+#endif
 
 void AMD_TrashSpawnVolume::CompactSpawnedTrashItems()
 {

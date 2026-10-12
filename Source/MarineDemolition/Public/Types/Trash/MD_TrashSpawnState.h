@@ -53,24 +53,3 @@ struct MARINEDEMOLITION_API FMD_TrashGeneratorState
 	bool IsStructurallyValid() const;
 };
 
-/** In-memory day travel only. File saves deliberately retain the count/cell ledger instead. */
-USTRUCT()
-struct MARINEDEMOLITION_API FMD_TrashItemPlacement
-{
-    GENERATED_BODY()
-    UPROPERTY() FName KindId;
-    UPROPERTY() FName VariantId;
-    UPROPERTY() FIntVector OriginCell = FIntVector::ZeroValue;
-    UPROPERTY() FTransform Transform = FTransform::Identity;
-    UPROPERTY() bool bWasAwake = false;
-    UPROPERTY() FVector LinearVelocity = FVector::ZeroVector;
-    UPROPERTY() FVector AngularVelocity = FVector::ZeroVector;
-};
-
-USTRUCT()
-struct MARINEDEMOLITION_API FMD_TrashGeneratorPlacement
-{
-    GENERATED_BODY()
-    UPROPERTY() TArray<FMD_TrashItemPlacement> Items;
-    bool MatchesState(const FMD_TrashGeneratorState& State) const;
-};

@@ -95,24 +95,22 @@ void UMD_ShopWidget::SetShopInfo(const FMD_MerchantMenuInfo& InInfo)
 	// 전달받은 상점 정보 저장
 	ShopInfo = InInfo;
 
-	// 크레딧과 호감도 변경에 필요한 헤더 및 거래 조건만 갱신
+	// 크레딧 변경에 필요한 헤더 및 거래 조건만 갱신
 	RefreshCredits();
 	// 표시 품목과 카드 가격에 영향 없는 정보의 목록 재순회 방지
 	RefreshSelectedItem();
 }
 
-void UMD_ShopWidget::SetProgress(int32 InQuestCompletions, const TArray<FPrimaryAssetId>& InOwnedItemIds, TArray<FPrimaryAssetId> InBlockedItemIds)
+void UMD_ShopWidget::SetProgress(const TArray<FPrimaryAssetId>& InOwnedItemIds, TArray<FPrimaryAssetId> InBlockedItemIds)
 {
 	// 동일한 복제 스냅샷의 중복 표시 갱신 방지
-	if (QuestCompletions == InQuestCompletions && OwnedItemIds == InOwnedItemIds && BlockedItemIds == InBlockedItemIds)
+	if (OwnedItemIds == InOwnedItemIds && BlockedItemIds == InBlockedItemIds)
 	{
 		// 현재 카드와 상세 패널 유지
 		return;
 	}
 	// 무료 재구매 가격을 바꾸는 구매 이력 변경 여부
 	bool bPricesChanged = OwnedItemIds != InOwnedItemIds;
-	// 해금 판정용 진행 상태 저장
-	QuestCompletions = InQuestCompletions;
 	// 도구의 무료 재구매와 정의 조건에 사용할 이력 저장
 	OwnedItemIds = InOwnedItemIds;
 	// 소스 도구를 다시 구매하지 못하도록 등록된 식별자 저장
@@ -125,7 +123,7 @@ void UMD_ShopWidget::SetProgress(int32 InQuestCompletions, const TArray<FPrimary
 	}
 	else
 	{
-		// 퀘스트와 구매 금지 변경은 선택 품목의 거래 조건에만 반영
+		// 구매 금지 변경을 선택 품목의 거래 조건에 반영
 		RefreshSelectedItem();
 	}
 }
@@ -482,7 +480,7 @@ void UMD_ShopWidget::RefreshSelectedItem()
 		// 판매는 실제 소지 수량과 적립 한도이며 구매는 기존 해금 및 지급 조건 적용
 		Btn_Buy->SetIsEnabled(bSellingMode == true
 			? FindSaleSlot(SelectedItemAssetId) != INDEX_NONE && selectedItem.Price >= 0 && ShopInfo.Credits <= MAX_int32 - selectedItem.Price
-			: selectedItem.IsUnlocked(ShopInfo.Affinity, QuestCompletions, OwnedItemIds) == true
+			: selectedItem.IsUnlocked(OwnedItemIds) == true
 				&& selectedItem.Price >= 0 && ShopInfo.Credits >= selectedItem.Price && IsItemGrantable(selectedItem) == true);
 	}
 }
@@ -646,7 +644,7 @@ void UMD_ShopWidget::HandleBuyClicked()
 	SelectedItem.Price = SelectedItem.GetPurchasePrice(OwnedItemIds);
 	// 비활성 구매 버튼과 같은 가격 및 해금 조건 검사
 	if (SelectedItem.Price < 0 || ShopInfo.Credits < SelectedItem.Price
-		|| SelectedItem.IsUnlocked(ShopInfo.Affinity, QuestCompletions, OwnedItemIds) == false)
+		|| SelectedItem.IsUnlocked(OwnedItemIds) == false)
 	{
 		// 현재 결제 조건을 충족하지 않은 요청 차단
 		return;
