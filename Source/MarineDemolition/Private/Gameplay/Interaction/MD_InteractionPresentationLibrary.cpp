@@ -32,6 +32,34 @@ const UDataTable* GetValidatedInteractionPresentationTable()
 		&& Table->GetRowStruct()->IsChildOf(FMD_InteractionPresentationRow::StaticStruct())
 		? Table : nullptr;
 }
+
+bool FindDisplayNameInValidatedTable(
+	const UDataTable* Table, const FName InteractionId, FText& OutDisplayName,
+	bool* bOutCanReuseTable = nullptr)
+{
+	if (InteractionId.IsNone())
+	{
+		return false;
+	}
+
+	static const FString Context(TEXT("MD_InteractionPresentation"));
+	const FMD_InteractionPresentationRow* Row =
+		Table->FindRow<FMD_InteractionPresentationRow>(InteractionId, Context, false);
+	if (Row == nullptr)
+	{
+		if (bOutCanReuseTable != nullptr) *bOutCanReuseTable = true;
+		return false;
+	}
+	// Reading text can rebuild a history and invoke external code. Revalidate
+	// the table before another lookup whenever a row was read.
+	if (Row->DisplayName.IsEmpty())
+	{
+		return false;
+	}
+
+	OutDisplayName = Row->DisplayName;
+	return true;
+}
 }
 
 bool UMD_InteractionPresentationLibrary::FindDisplayName(const FName InteractionId, FText& OutDisplayName)
@@ -42,27 +70,8 @@ bool UMD_InteractionPresentationLibrary::FindDisplayName(const FName Interaction
 		return false;
 	}
 
-	const UMD_InteractionSettings* Settings = UMD_InteractionSettings::Get();
-	const UDataTable* Table = IsValid(Settings)
-		? Settings->GetInteractionPresentationTable()
-		: nullptr;
-	if (!IsValid(Table)
-		|| !IsValid(Table->GetRowStruct())
-		|| !Table->GetRowStruct()->IsChildOf(FMD_InteractionPresentationRow::StaticStruct()))
-	{
-		return false;
-	}
-
-	static const FString Context(TEXT("MD_InteractionPresentation"));
-	const FMD_InteractionPresentationRow* Row =
-		Table->FindRow<FMD_InteractionPresentationRow>(InteractionId, Context, false);
-	if (Row == nullptr || Row->DisplayName.IsEmpty())
-	{
-		return false;
-	}
-
-	OutDisplayName = Row->DisplayName;
-	return true;
+	const UDataTable* Table = GetValidatedInteractionPresentationTable();
+	return Table != nullptr && FindDisplayNameInValidatedTable(Table, InteractionId, OutDisplayName);
 }
 
 FText UMD_InteractionPresentationLibrary::FindActionPrompt(
@@ -110,16 +119,28 @@ FText UMD_InteractionPresentationLibrary::ResolveInteractionDisplayName(const UO
 		return TargetOwnedName;
 	}
 
+	const UDataTable* Table = nullptr;
+	bool bCanReuseTable = false;
+	auto FindFallbackDisplayName = [&Table, &bCanReuseTable](const FName Id, FText& DisplayName)
+	{
+		DisplayName = FText::GetEmpty();
+		if (Id.IsNone()) return false;
+		if (!bCanReuseTable) Table = GetValidatedInteractionPresentationTable();
+		bCanReuseTable = false;
+		return Table != nullptr
+			&& FindDisplayNameInValidatedTable(Table, Id, DisplayName, &bCanReuseTable);
+	};
+
 	for (const UClass* TargetClass = Target->GetClass(); IsValid(TargetClass); TargetClass = TargetClass->GetSuperClass())
 	{
 		FText DisplayName;
-		if (FindDisplayName(TargetClass->GetFName(), DisplayName))
+		if (FindFallbackDisplayName(TargetClass->GetFName(), DisplayName))
 		{
 			return DisplayName;
 		}
 
 		const FName ShortId = MakeShortInteractionId(TargetClass);
-		if (ShortId != TargetClass->GetFName() && FindDisplayName(ShortId, DisplayName))
+		if (ShortId != TargetClass->GetFName() && FindFallbackDisplayName(ShortId, DisplayName))
 		{
 			return DisplayName;
 		}

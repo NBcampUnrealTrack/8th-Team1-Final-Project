@@ -9,6 +9,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
 #include "GameplayTags/MD_GameplayTags.h"
+#include "Internationalization/Internationalization.h"
 #include "TimerManager.h"
 
 UMD_FacilityFaultComponent* UMD_FacilityRepairComponent::ResolveRepairTarget() const
@@ -135,10 +136,11 @@ FText UMD_FacilityRepairComponent::GetRepairPrompt(APawn* Requester) const
 		return FText::GetEmpty();
 	}
 	// 점유 여부와 관계없이 현재 서버 진척도를 백분율로 표시
-	FText Progress = FText::AsNumber(FMath::FloorToInt(State.RepairProgress * 100.f));
+	const int32 DisplayedPercent = FMath::FloorToInt(State.RepairProgress * 100.f);
 	// 작업자 참조가 아직 도착하지 않은 경우도 본인 작업으로 오인 방지
 	if (State.State == EMD_FacilityState::Repairing && (IsValid(Requester) == false || State.Repairer != Requester))
 	{
+		FText Progress = FText::AsNumber(DisplayedPercent);
 		// 다른 작업자가 점유한 수리의 진행 안내
 		return FText::Format(NSLOCTEXT("MDInteraction", "FacilityRepairOccupied", "다른 플레이어가 수리 중 · {0}%"), Progress);
 	}
@@ -151,9 +153,21 @@ FText UMD_FacilityRepairComponent::GetRepairPrompt(APawn* Requester) const
 			: NSLOCTEXT("MDInteraction", "FacilityNeedsFoam", "고장 · 폼건으로 수리");
 	}
 	// 수동 수리 입력과 실제 허용된 절연테이프 사용 안내
-	return FText::Format(bAllowInsulationTape == true
+	const FText Pattern = bAllowInsulationTape == true
 		? NSLOCTEXT("MDInteraction", "FacilityManualRepair", "[E 유지] 수리 {0}% · 절연테이프 사용 가능")
-		: NSLOCTEXT("MDInteraction", "FacilityManualOnlyRepair", "[E 유지] 수리 {0}%"), Progress);
+		: NSLOCTEXT("MDInteraction", "FacilityManualOnlyRepair", "[E 유지] 수리 {0}%");
+	const FCultureRef Locale = FInternationalization::Get().GetCurrentLocale();
+	if (!bHasCachedManualRepairPrompt || CachedManualRepairPercent != DisplayedPercent
+		|| CachedManualRepairLocale.Get() != &Locale.Get()
+		|| !CachedManualRepairPattern.IdenticalTo(Pattern))
+	{
+		CachedManualRepairPrompt = FText::Format(Pattern, FText::AsNumber(DisplayedPercent));
+		CachedManualRepairPercent = DisplayedPercent;
+		CachedManualRepairPattern = FTextSnapshot(Pattern);
+		CachedManualRepairLocale = Locale;
+		bHasCachedManualRepairPrompt = true;
+	}
+	return CachedManualRepairPrompt;
 }
 
 void UMD_FacilityRepairComponent::EndPlay(const EEndPlayReason::Type Reason)

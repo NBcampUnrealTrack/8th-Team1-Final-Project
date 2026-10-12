@@ -14,6 +14,7 @@
 #include "Misc/Guid.h"
 #include "Misc/ScopeExit.h"
 #include "PhysicsEngine/BodyInstance.h"
+#include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "Types/Trash/MD_TrashSpawnState.h"
 #include "Util/MD_LogUtility.h"
 #include "World/Trash/MD_TrashItem.h"
@@ -823,6 +824,7 @@ bool AMD_TrashSpawnVolume::BuildTrashKindChances(TArray<FMD_TrashSpawnKindChance
 bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const int32 PlacementSeed,
     const TArray<FIntVector>* RequiredCells, const TArray<AMD_TrashItem*>* ReusedItems)
 {
+    TRACE_CPUPROFILER_EVENT_SCOPE(MD_TrashGeneration_PlaceKinds);
 
     if (KindIds.IsEmpty())
     {
@@ -850,6 +852,8 @@ bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const i
     // Resolve each used kind once. With no kind overrides, every usable Variant is eligible.
     // Restored kinds absent from an explicit probability list retain their table default.
     TMap<FName, TArray<FMD_TrashSpawnVariantChance>> VariantChancesByKind;
+    {
+        TRACE_CPUPROFILER_EVENT_SCOPE(MD_TrashGeneration_ResolveKindChances);
     for (const FName KindId : KindIds)
     {
         if (VariantChancesByKind.Contains(KindId))
@@ -873,6 +877,7 @@ bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const i
             return false;
         }
         VariantChancesByKind.Add(KindId, MoveTemp(ResolvedVariants));
+    }
     }
 
     TArray<FVector2D> PolygonVertices;
@@ -925,6 +930,8 @@ bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const i
         bool bPlanned = false;
         for (int32 AppearanceAttempt = 0; AppearanceAttempt < (RequiredCells ? 8 : 1); ++AppearanceAttempt)
         {
+            {
+                TRACE_CPUPROFILER_EVENT_SCOPE(MD_TrashGeneration_ResolveAppearances);
             FloorVariants.Reset(); FloorBounds.Reset(); FloorRotations.Reset();
             FloorScales.Reset(); FloorRadii.Reset();
             for (const FName Kind : KindIds)
@@ -980,6 +987,9 @@ bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const i
                 // Radius is measured from the floor anchor after rotation, including the full height.
                 FloorRadii.Add(static_cast<float>(FVector(Extent.X, Extent.Y, Extent.Z * 2.0).Size() + 2.0));
             }
+            }
+            {
+                TRACE_CPUPROFILER_EVENT_SCOPE(MD_TrashGeneration_FloorPlan);
             FloorTransforms.SetNum(KindIds.Num());
             const int32 AttemptSeed = static_cast<int32>(static_cast<uint32>(PlacementSeed) + static_cast<uint32>(AppearanceAttempt));
             if (UsesTowerPlacement())
@@ -992,6 +1002,7 @@ bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const i
                     {
                         return FloorPlacement->Fit(Point, FloorBounds[Index], FloorRotations[Index], FloorTransforms[Index]);
                     }, &FloorRadii, &OccupiedRadii);
+            }
             if (bPlanned) break;
         }
         if (!bPlanned)
@@ -1006,6 +1017,8 @@ bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const i
             FloorTransforms[I].SetScale3D(FloorScales[I]);
         }
     }
+    {
+        TRACE_CPUPROFILER_EVENT_SCOPE(MD_TrashGeneration_SpawnItems);
     for (int32 ItemIndex = 0; ItemIndex < KindIds.Num(); ++ItemIndex)
     {
         const FName KindId = KindIds[ItemIndex];
@@ -1163,6 +1176,7 @@ bool AMD_TrashSpawnVolume::PlaceTrashKinds(const TArray<FName>& KindIds, const i
             Mesh->WakeAllRigidBodies();
             Item->ForceNetUpdate();
         }
+    }
     }
     return true;
 }

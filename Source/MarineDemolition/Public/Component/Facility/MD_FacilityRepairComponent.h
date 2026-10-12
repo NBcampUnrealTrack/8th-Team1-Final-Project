@@ -1,6 +1,8 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Internationalization/CulturePointer.h"
+#include "Internationalization/Text.h"
 #include "Component/Facility/MD_FacilityFaultComponent.h"
 #include "MD_FacilityRepairComponent.generated.h"
 
@@ -42,6 +44,11 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 private:
 	void AdvanceManualRepair();
+	mutable bool bHasCachedManualRepairPrompt = false;
+	mutable int32 CachedManualRepairPercent = 0;
+	mutable FText CachedManualRepairPrompt = FText::GetEmpty();
+	mutable FTextSnapshot CachedManualRepairPattern;
+	mutable FCulturePtr CachedManualRepairLocale;
 	FTimerHandle ManualTimer;
 	TWeakObjectPtr<APawn> ManualRepairer;
 	TWeakObjectPtr<UMD_FacilityFaultComponent> ManualTarget;

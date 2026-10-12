@@ -6,6 +6,7 @@
 #include "GameplayTagContainer.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
 #include "Types/Trash/MD_TrashTypes.h"
+#include "Templates/Function.h"
 #include "MD_TrashLibrary.generated.h"
 
 /**
@@ -26,6 +27,9 @@ public:
 	/** 행이 없으면 false, OutRow는 기본값 */
 	UFUNCTION(BlueprintCallable, Category = "MD|Trash")
 	static bool FindTrashKindRow(FName TrashKindId, FMD_TrashKindRow& OutRow);
+
+	/** Native synchronous read; missing rows use the default row. Do not load assets, mutate tables, or retain row references in Reader. */
+	static void ReadTrashKindRow(FName TrashKindId, TFunctionRef<void(const FMD_TrashKindRow&)> Reader);
 
 	/** 해당 품목의 유효한 Variant 이름. 메시를 로드하지 않는다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
