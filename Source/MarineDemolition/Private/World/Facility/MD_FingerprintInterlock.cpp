@@ -180,10 +180,16 @@ void AMD_FingerprintInterlock::HandleFault(UMD_FacilityFaultComponent*, const FM
 	ForceNetUpdate();
 }
 
-bool AMD_FingerprintInterlock::BeginScan(AMD_FingerprintPad* Pad, APawn* Pawn)
+bool AMD_FingerprintInterlock::BeginScan(AMD_FingerprintPad* Pad, APawn* Pawn, int32 ExpectedFaultId)
 {
-	if (!HasAuthority() || !IsActive() || !HasValidConfiguration() || !IsValid(Pad)
-		|| !Pads.IsValidIndex(Pad->PadIndex) || Pads[Pad->PadIndex] != Pad || !Pad->CanMaintainScan(Pawn)) return false;
+	// 권한과 현재 사건을 함께 검사하여 이전 고장에 대한 지연 인증 차단
+	if (HasAuthority() == false || IsValid(Fault) == false || IsActive() == false
+		|| Fault->GetSnapshot().FaultId != ExpectedFaultId || HasValidConfiguration() == false || IsValid(Pad) == false
+		|| Pads.IsValidIndex(Pad->PadIndex) == false || Pads[Pad->PadIndex] != Pad || Pad->CanMaintainScan(Pawn) == false)
+	{
+		// 유효한 현재 사건에 속하지 않는 요청 거절
+		return false;
+	}
 	RefreshParticipantMode();
 	if (IsValid(Pad->ActiveScanner) && Pad->ActiveScanner != Pawn) return false;
 	Pad->ActiveScanner = Pawn;
@@ -193,7 +199,8 @@ bool AMD_FingerprintInterlock::BeginScan(AMD_FingerprintPad* Pad, APawn* Pawn)
 	if (bSoloMode)
 	{
 		if (SoloFirstPad != INDEX_NONE && SoloPawn == Pawn && Now < SoloDeadline && SoloFirstPad != Pad->PadIndex)
-			CompleteAuthentication();
+			// 단독 인증을 시작한 사건 번호를 복구까지 유지
+			CompleteAuthentication(ExpectedFaultId);
 		else if (SoloFirstPad == INDEX_NONE || Now >= SoloDeadline || SoloPawn != Pawn)
 		{
 			SoloFirstPad = Pad->PadIndex; SoloPawn = Pawn; SoloDeadline = Now + SoloWindowSeconds;
@@ -203,7 +210,8 @@ bool AMD_FingerprintInterlock::BeginScan(AMD_FingerprintPad* Pad, APawn* Pawn)
 	else if (IsValid(Pads[0]->ActiveScanner) && IsValid(Pads[1]->ActiveScanner)
 		&& Pads[0]->ActiveScanner != Pads[1]->ActiveScanner
 		&& Pads[0]->CanMaintainScan(Pads[0]->ActiveScanner) && Pads[1]->CanMaintainScan(Pads[1]->ActiveScanner))
-		CompleteAuthentication();
+		// 동시 인증을 승인한 사건 번호를 복구까지 유지
+		CompleteAuthentication(ExpectedFaultId);
 	return true;
 }
 
@@ -215,11 +223,16 @@ void AMD_FingerprintInterlock::ReleaseScan(AMD_FingerprintPad* Pad, APawn* Pawn)
 	}
 }
 
-void AMD_FingerprintInterlock::CompleteAuthentication()
+void AMD_FingerprintInterlock::CompleteAuthentication(int32 ExpectedFaultId)
 {
 	// Account for whole elapsed seconds before recovery, never charge after it.
 	ApplyElapsedCharges();
-	Fault->CompleteRepairFromValidatedSource(Fault->GetSnapshot().FaultId);
+	// 비용 알림 중 제거된 고장 컴포넌트에 대한 후속 처리 차단
+	if (IsValid(Fault) == true)
+	{
+		// 비용 알림 중 사건이 바뀌어도 원래 인증한 사건에만 복구 시도
+		Fault->CompleteRepairFromValidatedSource(ExpectedFaultId);
+	}
 }
 
 void AMD_FingerprintInterlock::ApplyElapsedCharges()
@@ -232,10 +245,21 @@ void AMD_FingerprintInterlock::ApplyElapsedCharges()
 	if (auto* Merchant = GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
 	{
 		const int32 Charge = int32(FMath::Min<int64>(MAX_int32, Seconds * LossPerSecond));
-		const int32 Before = Merchant->GetCredits();
-		Merchant->AddCredits(EMD_DailyReportCategory::Accident, -Charge);
-		TotalFaultLoss += int64(Before) - Merchant->GetCredits();
-		ForceNetUpdate();
+		// 거래 대기 중에도 실제 적용액을 받을 사건 소유자 약한 참조
+		TWeakObjectPtr<AMD_FingerprintInterlock> WeakThis(this);
+		// 다른 거래 알림에서 요청된 비용도 실제 반영 시점에 손실 누계 갱신
+		Merchant->AddCredits(EMD_DailyReportCategory::Accident, -Charge, nullptr, [WeakThis](int32 AppliedAmount)
+		{
+			// 대기 거래 처리 전에 종료된 사건 소유자 접근 차단
+			if (WeakThis.IsValid() == false)
+			{
+				return;
+			}
+			// 현재 요청의 실제 차감액만 누적하여 다른 거래의 잔액 변동 제외
+			WeakThis->TotalFaultLoss -= int64(AppliedAmount);
+			// 확정된 손실 누계를 참가자 표시로 복제
+			WeakThis->ForceNetUpdate();
+		});
 	}
 }
 

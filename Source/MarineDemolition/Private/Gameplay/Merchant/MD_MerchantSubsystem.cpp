@@ -50,8 +50,16 @@ void UMD_MerchantSubsystem::FlushPendingCreditChanges()
         // 같은 금액도 서로 다른 보상으로 유지하는 발생 순서별 처리
         for (FPendingCreditChange& CreditChange : CreditChanges)
         {
+            // 다른 대기 거래와 구분할 개별 금액 적용 전 잔액 보관
+            int32 CreditsBeforeChange = Credits;
             // 개별 보상의 상한과 하한 및 분류별 원장 규칙 유지
             AddCreditsInternal(CreditChange.Category, CreditChange.Amount, CreditChange.ResponsiblePlayer.Get());
+            // 실제 반영액을 요청한 거래에만 완료 결과 전달
+            if (static_cast<bool>(CreditChange.AppliedAmountCallback) == true)
+            {
+                // 거래 가드 안에서 재진입 보상과 분리된 실제 증감 통지
+                CreditChange.AppliedAmountCallback(Credits - CreditsBeforeChange);
+            }
         }
         // 현재 배치의 완성된 잔액과 부채 상태를 한 번만 전달
         OnMerchantStateChanged.Broadcast();
@@ -277,7 +285,8 @@ TArray<FMD_DailyReportValue> UMD_MerchantSubsystem::GetDailyCreditTotals() const
 	return OutCreditTotals;
 }
 
-void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer)
+void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer,
+	TFunction<void(int32)> AppliedAmountCallback)
 {
 	// 클라이언트와 게임 월드 외 변경 및 실제 금액 없는 알림 차단
 	if (HasServerAuthority() == false || Amount == 0)
@@ -296,6 +305,8 @@ void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 A
 		CreditChange.Amount = Amount;
 		// 퇴장 이후 유효하지 않은 책임자 접근을 막는 약한 연결 보관
 		CreditChange.ResponsiblePlayer = ResponsiblePlayer;
+		// 대기 거래가 실제 확정될 때 사용할 완료 알림 소유권 이전
+		CreditChange.AppliedAmountCallback = MoveTemp(AppliedAmountCallback);
 		// 같은 금액의 정상 보상도 생략하지 않는 순차 등록
 		PendingCreditChanges.Add(MoveTemp(CreditChange));
 		// 현재 거래를 중단하지 않은 보상 요청 종료
@@ -309,8 +320,16 @@ void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 A
 	};
 	// 원장 확정과 알림 사이에 추가 거래가 끼어드는 상황 차단
 	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
+	// 다른 재진입 거래와 구분할 현재 금액 적용 전 잔액 보관
+	int32 CreditsBeforeChange = Credits;
 	// 모든 외부 크레딧 변경을 단일 Enum 기반 기록 경로로 처리
 	AddCreditsInternal(Category, Amount, ResponsiblePlayer);
+	// 실제 반영액을 요청한 거래에만 완료 결과 전달
+	if (static_cast<bool>(AppliedAmountCallback) == true)
+	{
+		// 방송 전 거래 가드 안에서 확정된 증감 통지
+		AppliedAmountCallback(Credits - CreditsBeforeChange);
+	}
 	// 변경이 완료된 원장을 호스트와 복제 미러에 전달
 	OnMerchantStateChanged.Broadcast();
 }

@@ -79,20 +79,63 @@ void UMD_FacilityFaultManagerComponent::EndPlay(const EEndPlayReason::Type Reaso
 
 bool UMD_FacilityFaultManagerComponent::RegisterFacility(UMD_FacilityFaultComponent* Facility)
 {
-	if (!HasServerAuthority() || !IsValid(Facility) || Facility->GetWorld() != GetWorld()
-		|| !IsValid(Facility->GetOwner()) || !Facility->GetOwner()->HasAuthority()) return false;
-	Facilities.RemoveAll([](const auto& Weak) { return !Weak.IsValid(); });
+	// 현재 서버 월드에 속한 유효 시설만 상태 레지스트리에 등록
+	if (HasServerAuthority() == false || IsValid(Facility) == false || Facility->GetWorld() != GetWorld()
+		|| IsValid(Facility->GetOwner()) == false || Facility->GetOwner()->HasAuthority() == false)
+	{
+		// 권한 또는 시설 참조가 맞지 않는 등록 거부
+		return false;
+	}
+	// 다른 관리자의 종료 연결을 덮어쓰는 중복 소유 방지
+	if (Facility->Manager.IsValid() == true && Facility->Manager.Get() != this)
+	{
+		// 기존 관리자의 사건 소유권 유지
+		return false;
+	}
+	// 이미 종료된 시설의 약한 참조 제거
+	Facilities.RemoveAll([](TWeakObjectPtr<UMD_FacilityFaultComponent>& Weak)
+		{
+			// 더 이상 상태를 제공하지 못하는 시설 제외 여부 전달
+			return Weak.IsValid() == false;
+		});
+	// 반복 등록에서도 같은 사건 제공자를 한 번만 보관
 	Facilities.AddUnique(Facility);
+	// 자동 등록 재시도 전에 직접 등록된 시설의 종료 해제 경로 연결
+	Facility->Manager = this;
+	// 명시적 등록으로 충족된 초기 관리자 대기 예약 해제
+	GetWorld()->GetTimerManager().ClearTimer(Facility->RegistrationTimer);
+	// 고장과 복구의 지속 상태 변경을 한 번만 구독
 	Facility->OnStateChanged.AddUniqueDynamic(this, &UMD_FacilityFaultManagerComponent::HandleFacilityStateChanged);
+	// 시설과 관리자 양방향 등록 성공 전달
 	return true;
 }
 
 void UMD_FacilityFaultManagerComponent::UnregisterFacility(UMD_FacilityFaultComponent* Facility)
 {
-	if (!HasServerAuthority()) return;
-	if (IsValid(Facility))
+	// 서버에서만 시설 등록 해제
+	if (HasServerAuthority() == false)
+	{
+		// 클라이언트의 레지스트리 변경 거부
+		return;
+	}
+	// 아직 유효한 시설의 상태 변경 구독과 역참조 정리
+	if (IsValid(Facility) == true)
+	{
+		// 해제 이후 늦은 고장 알림의 재집계 차단
 		Facility->OnStateChanged.RemoveDynamic(this, &UMD_FacilityFaultManagerComponent::HandleFacilityStateChanged);
-	Facilities.RemoveAll([Facility](const auto& Weak) { return !Weak.IsValid() || Weak.Get() == Facility; });
+		// 현재 관리자가 소유한 수명 연결만 해제
+		if (Facility->Manager.Get() == this)
+		{
+			// 같은 시설의 후속 정상 등록 허용
+			Facility->Manager.Reset();
+		}
+	}
+	// 지정 시설과 이미 제거된 시설의 레지스트리 항목 정리
+	Facilities.RemoveAll([Facility](TWeakObjectPtr<UMD_FacilityFaultComponent>& Weak)
+		{
+			// 해제 대상이거나 수명이 끝난 시설 여부 전달
+			return Weak.IsValid() == false || Weak.Get() == Facility;
+		});
 }
 
 TArray<UMD_FacilityFaultComponent*> UMD_FacilityFaultManagerComponent::GetRegisteredFacilities() const

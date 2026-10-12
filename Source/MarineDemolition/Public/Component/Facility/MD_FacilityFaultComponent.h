@@ -18,6 +18,9 @@ class MARINEDEMOLITION_API UMD_FacilityFaultComponent : public UActorComponent
 {
 	GENERATED_BODY()
 
+	// 명시적 등록과 자동 등록이 동일한 수명 해제 연결을 공유하도록 관리자 접근 허용
+	friend class UMD_FacilityFaultManagerComponent;
+
 public:
 	UMD_FacilityFaultComponent();
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
