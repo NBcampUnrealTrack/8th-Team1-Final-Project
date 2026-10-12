@@ -8,6 +8,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "TimerManager.h"
+#include "UObject/UnrealType.h"
 
 AMD_PowerConduit::AMD_PowerConduit()
 {
@@ -27,6 +28,8 @@ AMD_PowerConduit::AMD_PowerConduit()
 
 void AMD_PowerConduit::BeginPlay()
 {
+	// 레벨 재진입 시 현재 월드의 메시 연결 허용
+	bPowerLightsShuttingDown = false;
 	Super::BeginPlay();
 	// 초기 복제와 BeginPlay 순서에 관계없이 BP 메시 슬롯 설정 등록
 	OnUtilityStateChangedVisual(UtilityState);
@@ -34,6 +37,8 @@ void AMD_PowerConduit::BeginPlay()
 
 void AMD_PowerConduit::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// 정리 도중의 머티리얼 콜백에서 전선 재등록 차단
+	bPowerLightsShuttingDown = true;
 	// 월드 종료 이후의 조명 재연결 콜백 차단
 	if (IsValid(GetWorld()) == true)
 	{
@@ -55,15 +60,51 @@ void AMD_PowerConduit::EndPlay(const EEndPlayReason::Type EndPlayReason)
 
 void AMD_PowerConduit::ApplyPoweredLights()
 {
+	// 삭제되지 않고 레벨에서 이탈한 전선의 재시도 차단
+	if (bPowerLightsShuttingDown == true)
+	{
+		// 종료 정리가 끝난 메시 연결 유지
+		return;
+	}
 	// 게임 월드에 속한 전선의 머티리얼 연결만 허용
 	if (IsValid(GetWorld()) == false || GetWorld()->IsGameWorld() == false || IsActorBeingDestroyed() == true)
 	{
 		// 편집기와 종료 중인 전선의 상태 변경 차단
 		return;
 	}
+	// 이전 준비 대기를 현재 BP 설정 기준으로 다시 판단
+	GetWorld()->GetTimerManager().ClearTimer(PowerRegistrationTimer);
+	// 이름으로 지정한 컴포넌트와 메시 에셋의 지연 준비 여부 보관
+	bool bPendingPowerMeshes = false;
 	// BP에서 참조를 변경한 경우 이전 메시 슬롯까지 서버 집계에서 갱신
 	ControlledPowerLights.Reset();
-	// 클래스의 공통 슬롯과 머티리얼 설정을 적용할 컴포넌트 목록 순회
+	// 드롭한 액터의 직접 소유 메시를 공통 머티리얼 적용 대상으로 확장
+	for (AActor* TargetActor : TargetActors)
+	{
+		// 다른 월드와 종료 중인 배치 액터의 메시 등록 제외
+		if (IsValid(TargetActor) == false || TargetActor->GetWorld() != GetWorld() || TargetActor->IsActorBeingDestroyed() == true)
+		{
+			// 현재 월드에 남아 있는 액터만 대상 해석
+			continue;
+		}
+		// 자식 액터까지 확장하지 않는 직접 소유 스태틱 메시 목록
+		TInlineComponentArray<UStaticMeshComponent*> ActorMeshes;
+		// 액터의 메시 루트와 추가 메시 컴포넌트를 함께 수집
+		TargetActor->GetComponents<UStaticMeshComponent>(ActorMeshes, false);
+		// 초기화 순서상 컴포넌트가 아직 준비되지 않은 액터만 재확인
+		if (ActorMeshes.IsEmpty() == true && TargetActor->HasActorBegunPlay() == false && MaterialIndex >= 0)
+		{
+			// 액터 초기화가 끝날 때까지 기존 단일 재시도 예약 사용
+			bPendingPowerMeshes = true;
+		}
+		// 여러 메시가 있는 액터의 각 컴포넌트를 동일 슬롯으로 등록
+		for (UStaticMeshComponent* MeshComponent : ActorMeshes)
+		{
+			// 개별 참조와 공유하는 슬롯 검증 및 중복 제거 적용
+			AddPoweredMesh(MeshComponent, bPendingPowerMeshes);
+		}
+	}
+	// 특정 컴포넌트만 지정한 기존 참조도 같은 적용 목록에 병합
 	for (FComponentReference& MeshReference : MeshComponents)
 	{
 		// 제거된 외부 액터와 컴포넌트 참조의 자기 루트 대체 해석 차단
@@ -82,47 +123,117 @@ void AMD_PowerConduit::ApplyPoweredLights()
 				continue;
 			}
 		}
-		// 해당 액터에 부착된 지정 스태틱 메시 컴포넌트 해석
-		UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(MeshReference.GetComponent(this));
-		// 다른 월드와 종료 중인 메시 참조 제외
-		if (IsValid(MeshComponent) == false || MeshComponent->GetWorld() != GetWorld() || MeshComponent->IsBeingDestroyed() == true)
+		// 지연 생성과 잘못된 컴포넌트 타입을 구분할 원래 참조 해석
+		UActorComponent* ReferencedComponent = MeshReference.GetComponent(this);
+		// 명시한 이름의 컴포넌트가 아직 생성되지 않은 경우 준비 대기
+		if (IsValid(ReferencedComponent) == false)
 		{
-			// 현재 월드의 유효 메시만 등록
-			continue;
-		}
-		// 존재하지 않는 슬롯의 머티리얼 추가 및 교체 방지
-		if (MaterialIndex < 0 || MaterialIndex >= MeshComponent->GetNumMaterials())
-		{
-			// 현재 메시의 유효한 슬롯만 등록
-			continue;
-		}
-		// 같은 컴포넌트와 슬롯을 반복 지정한 전선의 사건 중복 집계 방지
-		if (ControlledPowerLights.ContainsByPredicate([this, MeshComponent](FMD_PowerLightState& State)
+			// 조회할 대상 액터가 현재 월드에서 살아 있는 경우에만 재시도
+			AActor* ReferenceOwner = MeshReference.OtherActor.IsValid() == true ? MeshReference.OtherActor.Get() : this;
+			// 삭제 중이거나 다른 월드의 대상에 대한 대기 차단
+			if (ReferenceOwner->GetWorld() == GetWorld() && ReferenceOwner->IsActorBeingDestroyed() == false && MaterialIndex >= 0)
 			{
-				// 같은 컴포넌트와 슬롯의 기존 등록 여부 확인
-				return State.MeshComponent == MeshComponent && State.MaterialIndex == MaterialIndex;
-			}) == true)
-		{
-			// 같은 전선에서는 최초 슬롯 설정만 사용
+				// 클래스에 실제 존재하는 컴포넌트 프로퍼티만 준비 대기
+				if (MeshReference.ComponentProperty.IsNone() == false)
+				{
+					// 존재하지 않는 이름을 영구 미생성 참조로 오인하는 상황 방지
+					FObjectPropertyBase* ReferenceProperty = FindFProperty<FObjectPropertyBase>(ReferenceOwner->GetClass(), MeshReference.ComponentProperty);
+					// 스태틱 메시를 보관할 수 없는 프로퍼티의 재시도 제외
+					if (ReferenceProperty != nullptr && IsValid(ReferenceProperty->PropertyClass) == true)
+					{
+						// 상위 객체 타입 또는 스태틱 메시 파생 타입의 지연 값 허용
+						if (UStaticMeshComponent::StaticClass()->IsChildOf(ReferenceProperty->PropertyClass) == true
+							|| ReferenceProperty->PropertyClass->IsChildOf(UStaticMeshComponent::StaticClass()) == true)
+						{
+							// 실제 프로퍼티 값이 채워진 이후 재해석 예약
+							bPendingPowerMeshes = true;
+						}
+					}
+				}
+				else if (MeshReference.PathToComponent.IsEmpty() == false)
+				{
+					// 런타임 생성이 가능한 컴포넌트 경로의 준비 대기
+					bPendingPowerMeshes = true;
+				}
+			}
+			// 유효 컴포넌트가 준비된 이후 등록
 			continue;
 		}
-		// 실제 슬롯과 BP 머티리얼을 전달할 적용 항목 구성
-		FMD_PowerLightState& Target = ControlledPowerLights.AddDefaulted_GetRef();
-		// 참조가 지정한 실제 컴포넌트 보관
-		Target.MeshComponent = MeshComponent;
-		// 교체 대상 슬롯 보관
-		Target.MaterialIndex = MaterialIndex;
-		// 정상 상태의 BP 지정 머티리얼 전달
-		Target.NormalMaterial = NormalMaterial;
-		// 정전 상태의 BP 지정 머티리얼 전달
-		Target.BlackoutMaterial = BlackoutMaterial;
+		// 해당 액터에 부착된 지정 스태틱 메시 컴포넌트 해석
+		UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(ReferencedComponent);
+		// 액터 목록과 동일한 검증으로 실제 메시 슬롯 등록
+		AddPoweredMesh(MeshComponent, bPendingPowerMeshes);
 	}
 	// 현재 전선 고장과 메시 슬롯 설정을 준비된 관리자에 전달
 	RegisterPowerLights();
+	// 유효한 설정의 준비 지연만 현재 상태를 유지하며 재확인
+	if (bPendingPowerMeshes == true && bPowerLightsShuttingDown == false && IsActorBeingDestroyed() == false)
+	{
+		// 관리자 준비 대기와 메시 준비 대기의 중복 예약 방지
+		if (GetWorld()->GetTimerManager().IsTimerActive(PowerRegistrationTimer) == false)
+		{
+			// 게임 규칙과 분리된 준비 확인만 0.1초 간격으로 제한
+			GetWorld()->GetTimerManager().SetTimer(PowerRegistrationTimer, this, &ThisClass::ApplyPoweredLights, 0.1f, false);
+		}
+	}
+}
+
+void AMD_PowerConduit::AddPoweredMesh(UStaticMeshComponent* MeshComponent, bool& bPendingPowerMeshes)
+{
+	// 다른 월드와 종료 중인 메시 참조 제외
+	if (IsValid(MeshComponent) == false || MeshComponent->GetWorld() != GetWorld() || MeshComponent->IsBeingDestroyed() == true)
+	{
+		// 현재 월드의 유효 메시만 등록
+		return;
+	}
+	// 컴포넌트 제거보다 먼저 종료된 소유 액터의 준비 대기 차단
+	if (IsValid(MeshComponent->GetOwner()) == false || MeshComponent->GetOwner()->IsActorBeingDestroyed() == true)
+	{
+		// 종료된 대상 메시의 재등록 생략
+		return;
+	}
+	// 존재하지 않는 슬롯의 머티리얼 추가 및 교체 방지
+	if (MaterialIndex < 0 || MaterialIndex >= MeshComponent->GetNumMaterials())
+	{
+		// 메시 에셋이 아직 없는 경우에만 슬롯 생성 대기
+		if (MaterialIndex >= 0 && IsValid(MeshComponent->GetStaticMesh()) == false)
+		{
+			// 에셋 준비 이후 BP에서 지정한 슬롯 재확인
+			bPendingPowerMeshes = true;
+		}
+		// 현재 메시의 유효한 슬롯만 등록
+		return;
+	}
+	// 같은 컴포넌트와 슬롯을 반복 지정한 전선의 사건 중복 집계 방지
+	if (ControlledPowerLights.ContainsByPredicate([this, MeshComponent](FMD_PowerLightState& State)
+		{
+			// 같은 컴포넌트와 슬롯의 기존 등록 여부 확인
+			return State.MeshComponent == MeshComponent && State.MaterialIndex == MaterialIndex;
+		}) == true)
+	{
+		// 같은 전선에서는 최초 슬롯 설정만 사용
+		return;
+	}
+	// 실제 슬롯과 BP 머티리얼을 전달할 적용 항목 구성
+	FMD_PowerLightState& Target = ControlledPowerLights.AddDefaulted_GetRef();
+	// 참조가 지정한 실제 컴포넌트 보관
+	Target.MeshComponent = MeshComponent;
+	// 교체 대상 슬롯 보관
+	Target.MaterialIndex = MaterialIndex;
+	// 정상 상태의 BP 지정 머티리얼 전달
+	Target.NormalMaterial = NormalMaterial;
+	// 정전 상태의 BP 지정 머티리얼 전달
+	Target.BlackoutMaterial = BlackoutMaterial;
 }
 
 void AMD_PowerConduit::RegisterPowerLights()
 {
+	// 레벨 이탈 이후 지연 도착한 연결 콜백 차단
+	if (bPowerLightsShuttingDown == true)
+	{
+		// 종료된 전선의 등록 해제 상태 유지
+		return;
+	}
 	// 준비 여부와 다음 틱 예약에 사용할 실제 월드 조회
 	UWorld* World = GetWorld();
 	// 종료 중인 월드와 전선의 재연결 차단
@@ -146,8 +257,8 @@ void AMD_PowerConduit::RegisterPowerLights()
 	{
 		// 중복 재시도 예약 제거
 		World->GetTimerManager().ClearTimer(PowerRegistrationTimer);
-		// 게임 규칙의 제한 시간 없이 다음 프레임에 연결 재확인
-		PowerRegistrationTimer = World->GetTimerManager().SetTimerForNextTick(this, &ThisClass::RegisterPowerLights);
+		// 게임 규칙과 분리된 관리자 준비 확인만 0.1초 간격으로 제한
+		World->GetTimerManager().SetTimer(PowerRegistrationTimer, this, &ThisClass::ApplyPoweredLights, 0.1f, false);
 		// 관리자가 준비된 이후 현재 상태 적용
 		return;
 	}
@@ -181,13 +292,16 @@ void AMD_PowerConduit::RegisterPowerLights()
 		// 현재 메시 슬롯과 BP 머티리얼 설정 추가
 		Lights.Add(Light);
 	}
-	// 각 머신의 최초 슬롯 머티리얼 보관과 복제 집계 적용
-	Manager->RegisterLocalPowerLights(Lights);
-	// 서버에서만 현재 전선 고장의 실제 메시 슬롯 집계 변경
+	// 서버는 최신 집계 확정 이후 한 번만 원본 보관과 재질 적용
 	if (HasAuthority() == true)
 	{
-		// 표시용 BP 인자 대신 서버 시설 Snapshot 기준으로 집계
-		Manager->UpdatePowerSource(this, Lights);
+		// 로컬 적용 콜백 이후 오래된 설정을 다시 등록하는 순서 역전 방지
+		Manager->UpdatePowerSource(this, MoveTemp(Lights));
+	}
+	else
+	{
+		// 클라이언트는 수신한 현재 집계의 로컬 재질만 적용
+		Manager->RegisterLocalPowerLights(MoveTemp(Lights));
 	}
 }
 

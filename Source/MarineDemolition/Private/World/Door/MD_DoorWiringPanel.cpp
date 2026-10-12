@@ -130,7 +130,11 @@ FText AMD_DoorWiringPanel::GetInteractionDisplayName_Implementation() const
 	return NSLOCTEXT("MDInteraction", "DoorWiringPanelName", "문 배선반");
 }
 
-FText AMD_DoorWiringPanel::GetInteractionPrompt_Implementation(AActor*) const { return FacilityRepair->GetRepairPrompt(); }
+FText AMD_DoorWiringPanel::GetInteractionPrompt_Implementation(AActor* Interactor) const
+{
+	// 배선반을 조회한 요청자를 연결된 문의 수리 안내에 전달
+	return FacilityRepair->GetRepairPrompt(Cast<APawn>(Interactor));
+}
 bool AMD_DoorWiringPanel::CanInteract_Implementation(AActor*) const { return FacilityRepair->HasRepairFault(); }
 void AMD_DoorWiringPanel::Interact_Implementation(AActor* Interactor) { FacilityRepair->BeginManualRepair(Cast<APawn>(Interactor)); }
 void AMD_DoorWiringPanel::InteractReleased_Implementation(AActor* Interactor) { FacilityRepair->StopManualRepair(Cast<APawn>(Interactor)); }

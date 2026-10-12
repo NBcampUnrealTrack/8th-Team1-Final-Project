@@ -67,6 +67,8 @@ protected:
 		TWeakObjectPtr<AMD_PowerConduit> Source;
 		// 해당 전선이 담당하는 메시 슬롯과 BP 재질 설정
 		TArray<FMD_PowerLightState> Targets;
+		// 동일 설정 재등록에서 고장 활성 상태의 변경 여부 비교
+		bool bFaultActive = false;
 	};
 	// 중도 합류에도 남아 있는 메시 슬롯별 활성 정전 사건
 	UPROPERTY(ReplicatedUsing = OnRep_PowerLightStates)
@@ -99,8 +101,8 @@ protected:
 	void OnRep_PowerLightStates();
 	// 현재 전선의 고장 사건을 메시 슬롯별로 재집계
 	void RebuildPowerLightStates();
-	// 최초 등록한 메시 슬롯의 원래 재질 보관
-	void CacheLocalPowerLight(UStaticMeshComponent* MeshComponent, int32 MaterialIndex);
+	// 최초 등록한 메시 슬롯의 원래 재질 보관과 캐시 반환
+	FMD_PowerMaterialBaseline* CacheLocalPowerLight(UStaticMeshComponent* MeshComponent, int32 MaterialIndex);
 	// 서버 또는 복제 상태를 각 머신의 메시 슬롯 재질에 적용
 	void ApplyPowerLightStates();
 	// 다른 월드 또는 범위를 벗어난 메시 슬롯의 적용 차단

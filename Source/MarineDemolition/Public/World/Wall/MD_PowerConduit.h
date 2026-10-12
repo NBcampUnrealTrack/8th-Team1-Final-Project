@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 
 #include "CoreMinimal.h"
 #include "Audio/MD_AudioSubsystem.h"
@@ -8,6 +8,7 @@
 #include "MD_PowerConduit.generated.h"
 
 class UMaterialInterface;
+class UStaticMeshComponent;
 class UMD_FacilityFaultManagerComponent;
 
 // 배선: 겹친 벽 철거 시 담당 조명 그룹 OFF + 점수. 절연테이프로 재점등
@@ -52,20 +53,24 @@ private:
 	FMD_AudioHandle SparkLoopHandle;
 
 public:
-	// 동일한 슬롯과 머티리얼 설정을 적용할 스태틱 메시 컴포넌트 목록
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Utility|Power", meta = (UseComponentPicker, AllowAnyActor, AllowedClasses = "/Script/Engine.StaticMeshComponent"))
+	// 맵에서 등록한 액터가 직접 소유한 모든 스태틱 메시의 공통 슬롯 제어
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category = "MD|Power|Targets")
+	TArray<TObjectPtr<AActor>> TargetActors;
+
+	// 액터 전체 대신 특정 스태틱 메시만 추가할 개별 참조 목록
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, AdvancedDisplay, Category = "MD|Power|Targets", meta = (UseComponentPicker, AllowAnyActor, AllowedClasses = "/Script/Engine.StaticMeshComponent"))
 	TArray<FComponentReference> MeshComponents;
 
-	// 모든 대상 메시에서 교체할 0부터 시작하는 머티리얼 슬롯
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Utility|Power", meta = (ClampMin = "0"))
+	// BP 기본값과 배치 액터에서 지정할 모든 대상 메시의 공통 머티리얼 슬롯
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Power|Materials", meta = (ClampMin = "0"))
 	int32 MaterialIndex = 0;
 
-	// 모든 대상 메시의 정상 상태에 사용할 BP 지정 머티리얼
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Utility|Power")
+	// BP 기본값을 상속하고 배치 액터에서 개별 변경 가능한 정상 머티리얼
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Power|Materials")
 	TObjectPtr<UMaterialInterface> NormalMaterial = nullptr;
 
-	// 모든 대상 메시의 정전 상태에 사용할 BP 지정 머티리얼
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Utility|Power")
+	// BP 기본값을 상속하고 배치 액터에서 개별 변경 가능한 정전 머티리얼
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Power|Materials")
 	TObjectPtr<UMaterialInterface> BlackoutMaterial = nullptr;
 
 protected:
@@ -78,6 +83,8 @@ protected:
 
 	// GameState 지연 도착 이후 조명 연결을 다시 적용할 단일 예약
 	FTimerHandle PowerRegistrationTimer;
+	// 레벨 이탈을 포함한 종료 이후 메시 재등록과 준비 대기 차단
+	bool bPowerLightsShuttingDown = false;
 
 public:
 	// 현재 BP 메시 설정을 서버 고장 집계와 각 클라이언트 머티리얼 교체에 연결
@@ -85,6 +92,9 @@ public:
 	void ApplyPoweredLights();
 
 protected:
+	// 두 입력 목록의 유효성 및 준비 대기와 메시 슬롯 중복 제거를 공통 처리
+	void AddPoweredMesh(UStaticMeshComponent* MeshComponent, bool& bPendingPowerMeshes);
+
 	// 준비된 GameState 관리자에 현재 메시 슬롯과 전선 고장 상태 적용
 	void RegisterPowerLights();
 };

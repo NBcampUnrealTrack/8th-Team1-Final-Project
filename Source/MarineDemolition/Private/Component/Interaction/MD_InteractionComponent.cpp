@@ -90,7 +90,12 @@ FText UMD_InteractionComponent::ResolveCurrentInteractionPrompt() const
 	if (IsValid(Target))
 	{
 		const UMD_FacilityRepairComponent* Repair = Target->FindComponentByClass<UMD_FacilityRepairComponent>();
-		if (Repair && Repair->HasRepairFault()) return Repair->GetRepairPrompt();
+		// 로컬 요청자 기준으로 수리 점유 여부 확인
+		if (IsValid(Repair) == true && Repair->HasRepairFault() == true)
+		{
+			// 본인 작업과 다른 플레이어 작업을 구분한 안내 반환
+			return Repair->GetRepairPrompt(OwnerPawn);
+		}
 	}
 	if (!IsValid(Target) || !Target->Implements<UMD_Interactable>())
 	{

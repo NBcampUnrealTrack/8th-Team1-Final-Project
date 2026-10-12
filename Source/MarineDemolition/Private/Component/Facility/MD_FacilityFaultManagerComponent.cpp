@@ -114,8 +114,12 @@ TArray<UMD_FacilityFaultComponent*> UMD_FacilityFaultManagerComponent::GetActive
 void UMD_FacilityFaultManagerComponent::HandleFacilityStateChanged(UMD_FacilityFaultComponent* Facility,
 	const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current)
 {
-	// 전원 설비의 진척과 취소를 포함한 현재 사건 집계 반영
-	RebuildPowerLightStates();
+	// 진척률만 바뀐 수리의 동일 정전 집계 재구성 생략
+	if (Previous.IsFaultActive() != Current.IsFaultActive())
+	{
+		// 고장 기여가 시작되거나 끝난 경우에만 현재 사건 재집계
+		RebuildPowerLightStates();
+	}
 	OnFacilityStateChanged.Broadcast(Facility, Previous, Current);
 }
 
@@ -203,6 +207,8 @@ void UMD_FacilityFaultManagerComponent::UpdatePowerSource(AMD_PowerConduit* Sour
 	}
 	// 전선별 중복 없는 메시 슬롯 설정 구성
 	TArray<FMD_PowerLightState> Targets;
+	// 등록 대상 수에 맞춘 임시 배열의 반복 확장 방지
+	Targets.Reserve(Lights.Num());
 	// 실제 메시 슬롯별 정전 집계를 위한 참조 정규화
 	for (FMD_PowerLightState& Light : Lights)
 	{
@@ -235,9 +241,46 @@ void UMD_FacilityFaultManagerComponent::UpdatePowerSource(AMD_PowerConduit* Sour
 			// 같은 전선 인스턴스의 등록 항목 여부 전달
 			return Registered.Source.Get() == Source;
 		});
-	// 이미 등록된 전선은 대상 설정만 갱신
+	// 별도 시설 등록보다 먼저 도착한 고장 변경도 현재 상태로 비교
+	bool bFaultActive = IsValid(Source->FacilityRepair) == true && Source->FacilityRepair->GetSnapshot().IsFaultActive() == true;
+	// 이미 등록된 전선은 실제 설정이나 고장 기여가 달라진 경우만 갱신
 	if (Existing != nullptr)
 	{
+		// 동일 슬롯 목록과 고장 상태의 재등록 여부 확인
+		bool bUnchanged = IsValid(Source->FacilityRepair) == true && Existing->Targets.Num() == Targets.Num() && Existing->bFaultActive == bFaultActive;
+		// 등록 순서와 재질 설정까지 비교하여 최초 전선 우선순위 보존
+		for (int32 Index = 0; bUnchanged == true && Index < Targets.Num(); ++Index)
+		{
+			// 같은 위치의 실제 메시와 슬롯 비교
+			bUnchanged = Existing->Targets[Index].MeshComponent == Targets[Index].MeshComponent
+				&& Existing->Targets[Index].MaterialIndex == Targets[Index].MaterialIndex;
+			// 같은 슬롯을 유지하는 경우 BP의 두 재질 변경 확인
+			if (bUnchanged == true)
+			{
+				// 정상 및 정전 재질이 모두 같은 경우에만 기존 등록 재사용
+				bUnchanged = Existing->Targets[Index].NormalMaterial == Targets[Index].NormalMaterial
+					&& Existing->Targets[Index].BlackoutMaterial == Targets[Index].BlackoutMaterial;
+			}
+			// 메시 재준비 후 집계에서 빠진 슬롯의 재등록 필요 여부 확인
+			if (bUnchanged == true)
+			{
+				// 유효한 담당 집계가 남아 있는 슬롯에만 기존 등록 재사용
+				bUnchanged = PowerLightStates.ContainsByPredicate([&Targets, Index](FMD_PowerLightState& State)
+					{
+						// 같은 메시 슬롯에 현재 전선 기여가 남아 있는지 확인
+						return State.bHasPowerSource == true && State.MeshComponent == Targets[Index].MeshComponent
+							&& State.MaterialIndex == Targets[Index].MaterialIndex;
+					});
+			}
+		}
+		// 준비 대기의 동일 등록에서 전체 서버 집계와 배열 교체 생략
+		if (bUnchanged == true)
+		{
+			// 명시적 BP 재적용은 현재 집계로 즉시 처리
+			ApplyPowerLightStates();
+			// 기존 전선 순서와 슬롯 저장소 유지
+			return;
+		}
 		// 최초 등록 순서를 유지하면서 현재 설정 반영
 		Existing->Targets = MoveTemp(Targets);
 	}
@@ -347,6 +390,8 @@ void UMD_FacilityFaultManagerComponent::RebuildPowerLightStates()
 		AMD_PowerConduit* Source = Registered.Source.Get();
 		// 해당 전선이 담당하는 모든 슬롯에 사용할 고장 상태 보관
 		bool bFaultActive = Source->FacilityRepair->GetSnapshot().IsFaultActive();
+		// 다음 동일 설정 재등록에서 비교할 확정 고장 기여 보관
+		Registered.bFaultActive = bFaultActive;
 		// 동일 전선의 중복 없는 메시 슬롯을 각각 반영
 		for (FMD_PowerLightState& Target : Registered.Targets)
 		{
@@ -452,23 +497,25 @@ void UMD_FacilityFaultManagerComponent::RebuildPowerLightStates()
 	ApplyPowerLightStates();
 }
 
-void UMD_FacilityFaultManagerComponent::CacheLocalPowerLight(UStaticMeshComponent* MeshComponent, int32 MaterialIndex)
+FMD_PowerMaterialBaseline* UMD_FacilityFaultManagerComponent::CacheLocalPowerLight(UStaticMeshComponent* MeshComponent, int32 MaterialIndex)
 {
 	// 현재 월드에 남아 있는 유효한 메시 슬롯만 보관
 	if (IsPowerMeshValid(MeshComponent, MaterialIndex) == false)
 	{
-		// 무효 대상의 최초 재질 캐시 생략
-		return;
+		// 무효 대상에 적용 가능한 캐시 없음 전달
+		return nullptr;
 	}
-	// 동일 슬롯의 최초 재질을 정전 재질로 덮어쓰기 방지
-	if (LocalPowerLights.ContainsByPredicate([MeshComponent, MaterialIndex](FMD_PowerMaterialBaseline& Baseline)
+	// 동일 슬롯의 최초 재질을 한 번의 검색으로 조회
+	FMD_PowerMaterialBaseline* Existing = LocalPowerLights.FindByPredicate([MeshComponent, MaterialIndex](FMD_PowerMaterialBaseline& Baseline)
 		{
 			// 같은 메시 슬롯의 기존 캐시 여부 전달
 			return Baseline.MeshComponent == MeshComponent && Baseline.MaterialIndex == MaterialIndex;
-		}) == true)
+		});
+	// 최초 등록 시점의 원래 재질 유지
+	if (Existing != nullptr)
 	{
-		// 최초 등록 시점의 원래 재질 유지
-		return;
+		// 재검색 없이 기존 GC 보호 캐시 반환
+		return Existing;
 	}
 	// 새 메시 슬롯의 GC 보호 캐시 항목 확보
 	FMD_PowerMaterialBaseline& Baseline = LocalPowerLights.AddDefaulted_GetRef();
@@ -478,6 +525,8 @@ void UMD_FacilityFaultManagerComponent::CacheLocalPowerLight(UStaticMeshComponen
 	Baseline.MaterialIndex = MaterialIndex;
 	// 정상 재질 미설정과 참조 해제 시 사용할 최초 재질 보관
 	Baseline.OriginalMaterial = MeshComponent->GetMaterial(MaterialIndex);
+	// 생성한 원본 캐시를 재검색 없이 반환
+	return &Baseline;
 }
 
 void UMD_FacilityFaultManagerComponent::OnRep_PowerLightStates()
@@ -506,6 +555,10 @@ void UMD_FacilityFaultManagerComponent::ApplyPowerLightStates()
 		// 현재 재질 적용 보호 유지
 		return;
 	}
+	// 현재 적용으로 대체할 이전 프레임의 재시도 예약 정리
+	GetWorld()->GetTimerManager().ClearTimer(PowerLightRefreshTimer);
+	// 메시 에셋이 늦게 준비되는 복제 대상의 재적용 여부 보관
+	bool bPendingPowerMeshes = false;
 	// 실제 재질 변경이 끝날 때까지 동일 스택 적용 보호
 	TGuardValue<bool> ApplyGuard(bApplyingPowerLights, true);
 	// 재질 콜백이 복제 배열을 바꾸어도 현재 순회 보존
@@ -522,17 +575,26 @@ void UMD_FacilityFaultManagerComponent::ApplyPowerLightStates()
 		// 지연 도착 또는 제거된 복제 메시 슬롯 제외
 		if (IsPowerMeshValid(State.MeshComponent, State.MaterialIndex) == false)
 		{
+			// 복제 참조가 해석된 현재 월드의 메시만 에셋 준비 대기
+			if (IsValid(State.MeshComponent) == true && State.MaterialIndex >= 0 && State.MeshComponent->GetWorld() == GetWorld())
+			{
+				// 제거 중인 대상에 대한 불필요한 재시도 차단
+				if (IsValid(State.MeshComponent->GetOwner()) == true && State.MeshComponent->IsBeingDestroyed() == false
+					&& State.MeshComponent->GetOwner()->IsActorBeingDestroyed() == false)
+				{
+					// 존재하는 에셋의 잘못된 슬롯과 아직 없는 에셋 구분
+					if (IsValid(State.MeshComponent->GetStaticMesh()) == false)
+					{
+						// 복제 상태가 바뀌지 않아도 에셋 준비 이후 다시 적용
+						bPendingPowerMeshes = true;
+					}
+				}
+			}
 			// 실제 메시가 준비된 다음 적용으로 연기
 			continue;
 		}
-		// 신규 메시 슬롯의 최초 재질 확보
-		CacheLocalPowerLight(State.MeshComponent, State.MaterialIndex);
-		// 적용 대상의 머신 로컬 복원 정보 조회
-		FMD_PowerMaterialBaseline* Baseline = LocalPowerLights.FindByPredicate([&State](FMD_PowerMaterialBaseline& Cached)
-			{
-				// 동일 메시 슬롯의 최초 재질 캐시 여부 전달
-				return Cached.MeshComponent == State.MeshComponent && Cached.MaterialIndex == State.MaterialIndex;
-			});
+		// 최초 재질 보관과 기존 캐시 조회를 한 번의 검색으로 처리
+		FMD_PowerMaterialBaseline* Baseline = CacheLocalPowerLight(State.MeshComponent, State.MaterialIndex);
 		// 준비되지 않은 최초 재질 정보의 적용 생략
 		if (Baseline == nullptr)
 		{
@@ -571,6 +633,16 @@ void UMD_FacilityFaultManagerComponent::ApplyPowerLightStates()
 		{
 			// 가시성과 다른 재질 슬롯을 유지하면서 해당 슬롯만 교체
 			State.MeshComponent->SetMaterial(State.MaterialIndex, Material);
+		}
+	}
+	// 지연 준비 중인 메시가 남은 경우에만 주기적인 준비 확인 예약
+	if (bPendingPowerMeshes == true && bPowerLightsShuttingDown == false)
+	{
+		// 재진입 콜백이 예약한 갱신과 같은 단일 타이머 사용
+		if (GetWorld()->GetTimerManager().IsTimerActive(PowerLightRefreshTimer) == false)
+		{
+			// 다음 틱의 재진입 갱신은 유지하고 에셋 준비 확인만 0.1초 간격으로 제한
+			GetWorld()->GetTimerManager().SetTimer(PowerLightRefreshTimer, this, &ThisClass::ApplyPowerLightStates, 0.1f, false);
 		}
 	}
 }
