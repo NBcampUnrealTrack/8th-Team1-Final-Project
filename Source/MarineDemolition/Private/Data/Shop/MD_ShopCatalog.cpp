@@ -46,39 +46,21 @@ bool FMD_ShopItem::IsDefinitionLoaded()
 	return true;
 }
 
-bool FMD_ShopItem::IsUnlocked(float Affinity, int32 QuestCompletions, const TArray<FPrimaryAssetId>& OwnedItemAssetIds) const
+bool FMD_ShopItem::IsUnlocked(const TArray<FPrimaryAssetId>& OwnedItemAssetIds) const
 {
-	// 미충족 진행 조건의 해금 차단
-	if ((bRequiresAffinity == true && Affinity < AffinityRequired) || (QuestCompletionsRequired > 0 && QuestCompletions < QuestCompletionsRequired))
-	{
-		// 조건을 충족하지 않은 품목의 잠금 유지
-		return false;
-	}
 	// 유효한 선행 조건이 지정된 경우에만 전체 AssetId의 보유 여부 확인
 	if ((PrerequisiteItemAssetId.IsValid() == true && OwnedItemAssetIds.Contains(PrerequisiteItemAssetId) == false))
 	{
 		// 조건을 충족하지 않은 품목의 잠금 유지
 		return false;
 	}
-	// 모든 진행 및 선행 에셋 보유 조건 통과
+	// 선행 에셋 보유 조건 통과
 	return true;
 }
 
 FText FMD_ShopItem::GetUnlockConditionText() const
 {
 	TArray<FString> Parts;
-
-	if (bRequiresAffinity)
-	{
-		// 기획서 표기를 그대로 따른다: `호감 ≥0`, `호감 ≥+1`
-		const FString Sign = AffinityRequired > 0.f ? TEXT("+") : TEXT("");
-		Parts.Add(FString::Printf(TEXT("호감 ≥%s%g"), *Sign, AffinityRequired));
-	}
-
-	if (QuestCompletionsRequired > 0)
-	{
-		Parts.Add(FString::Printf(TEXT("퀘스트 %d회"), QuestCompletionsRequired));
-	}
 
 	// 선행 품목이 필요한 경우 공통 정의의 표시 이름으로 조건 구성
 	if (PrerequisiteItemAssetId.IsValid() == true)

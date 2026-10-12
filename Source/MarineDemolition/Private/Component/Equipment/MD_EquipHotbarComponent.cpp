@@ -9,7 +9,28 @@
 #include "GameplayEffectComponents/AbilitiesGameplayEffectComponent.h"
 #include "Net/UnrealNetwork.h"
 #include "Util/MD_LogUtility.h"
-#include "Types/SaveGame/MD_SaveDataTypes.h"
+#include "Types/Session/MD_PlayerCarryTypes.h"
+#include "Component/Interaction/MD_InteractionComponent.h"
+
+namespace
+{
+	bool IsValidTransferredItem(const FMD_HotbarToolEntry& Entry)
+	{
+		if (!IsValid(Entry.ToolDefinition) || !Entry.ToolDefinition->GetPrimaryAssetId().IsValid()
+			|| Entry.Count != 1 || !FMath::IsFinite(Entry.Charge) || Entry.Charge < 0.0f
+			|| !FMath::IsFinite(Entry.CostPerOnce) || Entry.CostPerOnce < 0.0f)
+		{
+			return false;
+		}
+		UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(Entry.ToolDefinition);
+		if (IsValid(Tool))
+		{
+			return Tool->IsChargeSettingsValid() && Entry.Charge <= Tool->MaxCharge
+				&& (Tool->MaxCharge > 0.0f || Entry.CostPerOnce == 0.0f);
+		}
+		return Entry.Charge == 0.0f && Entry.CostPerOnce == 0.0f;
+	}
+}
 
 UMD_EquipHotbarComponent::UMD_EquipHotbarComponent()
 {
@@ -257,6 +278,101 @@ bool UMD_EquipHotbarComponent::AddItem(UMD_ItemDefinition* ItemDefinition, int32
 	return true;
 }
 
+bool UMD_EquipHotbarComponent::GetItemTransferAtSlot(int32 SlotIndex, FMD_HotbarToolEntry& OutEntry) const
+{
+	OutEntry = FMD_HotbarToolEntry();
+	if (!ToolEntries.IsValidIndex(SlotIndex) || !IsValid(GetItemAtSlot(SlotIndex)))
+	{
+		return false;
+	}
+	const FMD_HotbarToolEntry& Stored = ToolEntries[SlotIndex];
+	if (Stored.ToolDefinition->IsA<UMD_ToolDefinition>() && Stored.Count != 1)
+	{
+		return false;
+	}
+	FMD_HotbarToolEntry Snapshot = Stored;
+	Snapshot.Count = 1;
+	if (!IsValidTransferredItem(Snapshot))
+	{
+		return false;
+	}
+	OutEntry = Snapshot;
+	return true;
+}
+
+bool UMD_EquipHotbarComponent::TryRemoveTransferredItem(int32 SlotIndex, const FMD_HotbarToolEntry& ExpectedEntry)
+{
+	if (!IsValid(GetOwner()) || !GetOwner()->HasAuthority() || bItemTransferInProgress
+		|| !IsValidTransferredItem(ExpectedEntry))
+	{
+		return false;
+	}
+	TGuardValue<bool> TransferGuard(bItemTransferInProgress, true);
+	const auto MatchesSnapshot = [this, SlotIndex, &ExpectedEntry]()
+	{
+		FMD_HotbarToolEntry Current;
+		return GetItemTransferAtSlot(SlotIndex, Current)
+			&& Current.ToolDefinition == ExpectedEntry.ToolDefinition
+			&& Current.Charge == ExpectedEntry.Charge && Current.CostPerOnce == ExpectedEntry.CostPerOnce;
+	};
+	if (!MatchesSnapshot())
+	{
+		return false;
+	}
+	// A tool cannot continue operating after leaving its owner's inventory.
+	UAbilitySystemComponent* AbilitySystem = UAbilitySystemGlobals::GetAbilitySystemComponentFromActor(GetOwner());
+	const FGameplayAbilitySpecHandle AbilityHandle = FindItemAbility(ExpectedEntry.ToolDefinition);
+	if (IsValid(AbilitySystem) && AbilityHandle.IsValid())
+	{
+		AbilitySystem->CancelAbilityHandle(AbilityHandle);
+		const FGameplayAbilitySpec* RemainingAbility = AbilitySystem->FindAbilitySpecFromHandle(AbilityHandle);
+		if (RemainingAbility && RemainingAbility->IsActive())
+		{
+			return false;
+		}
+	}
+	// Ending an ability can settle charge or consume an item. A stale snapshot must stay owned.
+	if (!MatchesSnapshot())
+	{
+		return false;
+	}
+	FMD_HotbarToolEntry& Stored = ToolEntries[SlotIndex];
+	--Stored.Count;
+	if (Stored.Count == 0)
+	{
+		Stored = FMD_HotbarToolEntry();
+		RemoveItemAbility(ExpectedEntry.ToolDefinition);
+	}
+	NotifyEntriesChanged();
+	return true;
+}
+
+bool UMD_EquipHotbarComponent::AddTransferredItem(const FMD_HotbarToolEntry& Entry)
+{
+	if (!IsValid(GetOwner()) || !GetOwner()->HasAuthority() || bItemTransferInProgress
+		|| !IsValidTransferredItem(Entry))
+	{
+		return false;
+	}
+	TGuardValue<bool> TransferGuard(bItemTransferInProgress, true);
+	int32 EntryIndex = INDEX_NONE;
+	if (!FindAvailableItemEntry(Entry.ToolDefinition, 1, EntryIndex) || !GrantItemAbility(Entry.ToolDefinition))
+	{
+		return false;
+	}
+	FMD_HotbarToolEntry& Stored = ToolEntries[EntryIndex];
+	if (IsValid(GetItemAtSlot(EntryIndex)))
+	{
+		++Stored.Count;
+	}
+	else
+	{
+		Stored = Entry;
+	}
+	NotifyEntriesChanged();
+	return true;
+}
+
 bool UMD_EquipHotbarComponent::TryConsumeItem(UMD_ItemDefinition* ItemDefinition, int32 Amount)
 {
 	// 소유자가 없거나 서버 권한 및 차감 수량이 올바르지 않은 요청 차단
@@ -422,8 +538,6 @@ FMD_PlayerData UMD_EquipHotbarComponent::BuildEquipmentSaveData()
 {
 	// 현재 보관 상태를 원본 슬롯과 분리하여 기록할 결과
 	FMD_PlayerData Result;
-	// 파일에 기록할 수 있는 상세 상태로 표시
-	Result.bHasHotbarState = true;
 	// 클라이언트나 초기화되지 않은 보관함의 수집 차단
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false)
 	{
@@ -462,28 +576,6 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(FMD_PlayerData SaveData)
 		// 기존 보관 상태를 유지한 채 실패 반환
 		return false;
 	}
-	// 상세 상태가 없는 기존 파일의 경로 목록을 네 슬롯으로 해석
-	if (SaveData.bHasHotbarState == false)
-	{
-		// 기존 파일에 개인 보관 기록이 없는 경우 기본 지급 유지
-		if (SaveData.HotbarToolList.IsEmpty() == true)
-		{
-			// 실제 적용할 기록 부재의 정상 종료
-			return true;
-		}
-		// 기존 형식의 빈 칸을 포함한 네 위치 확보
-		SaveData.HotbarItems.SetNum(4);
-		// 기록되지 않았던 선택 위치는 현재 유효 위치 유지
-		SaveData.SelectedHotbarSlot = FMath::Clamp(CurrentSlotIndex, 0, 3);
-		// 실제로 저장되어 있던 아이템 경로만 변환
-		for (int32 Index = 0; Index < SaveData.HotbarToolList.Num(); ++Index)
-		{
-			// 동일 슬롯에 저장된 기존 애셋 연결
-			SaveData.HotbarItems[Index].Item = SaveData.HotbarToolList[Index];
-			// 과거 파일에 없던 수량은 기존 복원 정책으로 해석
-			SaveData.HotbarItems[Index].Count = SaveData.HotbarToolList[Index].IsNull() == true ? 0 : 1;
-		}
-	}
 	// 모든 애셋과 상태 검증을 마칠 때까지 원본 보관함 보호
 	TArray<FMD_HotbarToolEntry> RestoredEntries;
 	// 현재 보관함의 네 슬롯 형식 유지
@@ -511,14 +603,6 @@ bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(FMD_PlayerData SaveData)
 		}
 		// 도구 전용 충전 규칙 적용 대상 조회
 		UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(Item);
-		// 경로만 있는 기존 파일에는 원래 지급 기준 적용
-		if (SaveData.bHasHotbarState == false && IsValid(Tool) == true)
-		{
-			// 과거 기록에 없던 충전량의 기본값 구성
-			Saved.Charge = Tool->MaxCharge;
-			// 무제한 도구와 일반 충전 도구의 비용 구분
-			Saved.CostPerOnce = Tool->MaxCharge > 0.0f ? Tool->CostPerOnce : 0.0f;
-		}
 		// 도구 수량과 충전 범위 및 사용 비용의 의미 검증
 		if (IsValid(Tool) == true)
 		{
@@ -811,6 +895,30 @@ bool UMD_EquipHotbarComponent::ConsumeToolCharge(UMD_ToolDefinition* ToolDefinit
 	return true;
 }
 
+float UMD_EquipHotbarComponent::ConsumeToolChargeAmount(UMD_ToolDefinition* ToolDefinition, float Amount)
+{
+	if (!IsValid(GetOwner()) || !GetOwner()->HasAuthority() || !IsValid(ToolDefinition)
+		|| !FMath::IsFinite(Amount) || Amount <= 0.0f
+		|| !FMath::IsFinite(ToolDefinition->MaxCharge) || ToolDefinition->MaxCharge <= 0.0f)
+	{
+		return 0.0f;
+	}
+	const int32 Index = FindItemEntry(ToolDefinition);
+	if (!ToolEntries.IsValidIndex(Index) || GetItemCount(ToolDefinition) <= 0)
+	{
+		return 0.0f;
+	}
+	FMD_HotbarToolEntry& Entry = ToolEntries[Index];
+	if (!FMath::IsFinite(Entry.Charge) || Entry.Charge <= 0.0f)
+	{
+		return 0.0f;
+	}
+	const float Spent = FMath::Min(Amount, Entry.Charge);
+	Entry.Charge -= Spent;
+	NotifyEntriesChanged();
+	return Spent;
+}
+
 bool UMD_EquipHotbarComponent::CanAddToolCharge(UMD_ToolDefinition* ToolDefinition, float Amount)
 {
 	// 충전 설정과 보유 수량 및 잔량을 함께 확인
@@ -1087,6 +1195,8 @@ void UMD_EquipHotbarComponent::InitializeItemAbilities()
 
 bool UMD_EquipHotbarComponent::TryActivateCurrentItemAbility()
 {
+	if (UMD_InteractionComponent* Interaction = GetOwner()->FindComponentByClass<UMD_InteractionComponent>();
+		Interaction && Interaction->TryUseFacilityTape()) return true;
 	// 실제 선택 품목의 SourceObject와 태그에 해당하는 부여 GA 조회
 	FGameplayAbilitySpecHandle Handle = FindItemAbility(GetCurrentItem());
 	// 클라이언트 입력의 서버 활성화 요청을 지원하는 ASC 조회

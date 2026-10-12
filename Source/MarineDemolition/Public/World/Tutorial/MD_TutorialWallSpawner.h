@@ -12,7 +12,6 @@ class AMD_CuttableWall;
 class AMD_TrashSorter;
 class AMD_WallPiece;
 class AMD_WallUtility;
-class UMD_ScrapeSurfaceComponent;
 class UMD_TutorialScriptData;
 struct FHitResult;
 
@@ -46,6 +45,7 @@ class MARINEDEMOLITION_API AMD_TutorialWallSpawner : public AActor
 public:
 	AMD_TutorialWallSpawner();
 
+	virtual void PostLoad() override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
 	/** 지금 띄워야 할 안내. 진행이 끝났거나 시작 전이면 false를 돌려주고 출력은 비운다 */
@@ -115,6 +115,9 @@ protected:
 	float NoticeCooldown = 1.0f;
 
 private:
+	/** Strip retired cleaning lessons from existing Blueprint/level slot data. */
+	void RemoveRetiredCleaningLessons();
+
 	//~ 대본 조회 — 전부 ScriptData 에서 읽는다.
 	//  캐시하지 않는 이유: OnRep 이 BeginPlay 보다 먼저 올 수 있어 초기화 순서에 기대면 위험하다.
 	const TArray<FMD_TutorialGuideStep>& GetIntroPages() const;
@@ -181,9 +184,6 @@ private:
 	void SetPollingEnabled(bool bEnabled);
 
 	//~ 기존 시스템 신호 구독
-	UFUNCTION()
-	void HandleContaminationFullyRemoved(UMD_ScrapeSurfaceComponent* Surface);
-
 	UFUNCTION()
 	void HandleWallDemolished(AMD_CuttableWall* Wall, AActor* Cutter);
 

@@ -16,13 +16,14 @@ void UMD_DoorStatusLightSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 	DoorClass = LoadClass<AActor>(
 		nullptr,
 		TEXT("/Game/Assets/X7/Interior/Objects/Door/BP_Door.BP_Door_C"));
-	if (!IsValid(DoorClass))
+	BlackDoorClass = LoadClass<AActor>(nullptr, TEXT("/Game/Assets/X7/Interior/Objects/Door/BP_Door_Black.BP_Door_Black_C"));
+	if (!IsValid(DoorClass) && !IsValid(BlackDoorClass))
 	{
 		UE_LOG(LogTemp, Warning, TEXT("[DoorStatusLight] BP_Door class not found"));
 		return;
 	}
 
-	for (TActorIterator<AActor> It(&InWorld, DoorClass); It; ++It)
+	for (TActorIterator<AActor> It(&InWorld); It; ++It)
 	{
 		AttachStatusLight(*It);
 	}
@@ -40,14 +41,14 @@ void UMD_DoorStatusLightSubsystem::Deinitialize()
 	}
 
 	DoorClass = nullptr;
+	BlackDoorClass = nullptr;
 	Super::Deinitialize();
 }
 
 void UMD_DoorStatusLightSubsystem::AttachStatusLight(AActor* Door)
 {
 	if (!IsValid(Door)
-		|| !IsValid(DoorClass)
-		|| !Door->IsA(DoorClass)
+		|| !((IsValid(DoorClass) && Door->IsA(DoorClass)) || (IsValid(BlackDoorClass) && Door->IsA(BlackDoorClass)))
 		|| IsValid(Door->FindComponentByClass<UMD_DoorStatusLightComponent>()))
 	{
 		return;

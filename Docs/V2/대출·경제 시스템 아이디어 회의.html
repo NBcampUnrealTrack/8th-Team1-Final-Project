@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><meta name="description" content="협동 청소, 초기 구매, 즉시 정산, 설비 고장과 폐기물처리장 펌프 위험에 관한 최신 대화 통합 기획. 지정 방향과 밸런스 후보를 구분."><title>협동 청소·경제·현장 고장 기획 정리 | Project ATM</title><style>
+:root{--ink:#20314a;--muted:#55647b;--blue:#194a8d;--paper:#fff;--wash:#edf3fa;--line:#d5deea;--green:#226750;--amber:#885b17;--amberwash:#fff6e6}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:24px}body{margin:0;background:#f4f7fb;color:var(--ink);font-family:"Malgun Gothic","Apple SD Gothic Neo","Noto Sans KR",sans-serif;font-size:15px;line-height:1.85;word-break:keep-all;overflow-wrap:anywhere}a{color:var(--blue);text-underline-offset:4px}a:focus-visible,button:focus-visible,summary:focus-visible{outline:3px solid var(--blue);outline-offset:4px}button{font:inherit;cursor:pointer}p{margin:0 0 15px}h1,h2,h3{line-height:1.4;letter-spacing:-.04em}h1{font-size:clamp(29px,4vw,43px);margin:20px 0 18px}h2{font-size:25px;margin:0 0 18px}h3{font-size:18px;margin:26px 0 12px}strong{font-weight:700}ul,ol{padding-left:24px;margin:10px 0 18px}li+li{margin-top:7px}.shell{max-width:1280px;margin:auto;display:grid;grid-template-columns:230px minmax(0,1fr);gap:42px;padding:32px}.rail{align-self:start;position:sticky;top:26px}.brand{font-size:17px;font-weight:700;color:var(--blue);margin:0 0 25px}.rail nav{border-left:2px solid var(--line);padding-left:17px}.rail nav a{display:block;text-decoration:none;padding:8px 0;font-size:14px}.rail nav a:hover{text-decoration:underline}.rail p{font-size:12px;line-height:1.8;color:var(--muted);margin-top:24px}.print{margin-top:20px;padding:8px 15px;border:1px solid var(--line);background:var(--paper);color:var(--blue);border-radius:6px}.document{min-width:0;background:var(--paper);border:1px solid var(--line);border-top:6px solid var(--blue);padding:38px 44px 26px}.mast{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;font-size:13px;color:var(--muted)}.state{padding:4px 11px;background:var(--wash);color:var(--blue);border-radius:4px;font-weight:700}.intro{font-size:17px;max-width:40em}.metadata{display:grid;grid-template-columns:110px 1fr;gap:5px 12px;font-size:13px;color:var(--muted);margin:24px 0 0}.metadata dt{font-weight:700}.metadata dd{margin:0}section{margin-top:36px;padding-top:30px;border-top:1px solid var(--line)}.note{padding:16px 20px;border-left:4px solid var(--blue);background:var(--wash);margin:20px 0}.note p:last-child{margin-bottom:0}.warning{background:var(--amberwash);border-left-color:var(--amber)}.flag{display:inline-block;padding:2px 8px;font-size:12px;font-weight:700;line-height:1.6;border-radius:4px;white-space:nowrap}.aligned{background:#eaf4ef;color:var(--green)}.proposed{background:var(--wash);color:var(--blue)}.open{background:var(--amberwash);color:var(--amber)}.table-wrap{overflow:auto;margin:18px 0}table{width:100%;border-collapse:collapse;font-size:14px;line-height:1.75}th,td{text-align:left;vertical-align:top;padding:13px 14px;border-bottom:1px solid var(--line)}th{background:var(--wash);font-weight:700}th:first-child,td:first-child{padding-left:12px}td p{margin:0}td .flag{margin-bottom:6px}.summary-table th:first-child{width:24%}.summary-table th:last-child{width:20%}.choice-table th:first-child{width:22%}.ledger{margin:24px 0;border:1px solid var(--line)}.ledger-row{display:grid;grid-template-columns:120px 1fr;gap:20px;padding:20px 22px}.ledger-row+.ledger-row{border-top:1px solid var(--line)}.ledger-key{font-size:20px;font-weight:700;color:var(--blue)}.ledger-row p{margin:0}.ledger-small{font-size:13px;color:var(--muted);margin-top:8px!important}.flow{list-style:none;counter-reset:step;padding:0;margin:20px 0}.flow li{counter-increment:step;display:grid;grid-template-columns:38px 1fr;gap:14px;margin:0;padding:14px 0;border-bottom:1px solid var(--line)}.flow li:before{content:counter(step);display:flex;width:32px;height:32px;align-items:center;justify-content:center;border-radius:50%;background:var(--blue);color:white;font-weight:700}.flow p{margin:4px 0 0}.muted{color:var(--muted);font-size:13px}.quote{margin:18px 0;padding:16px 20px;border-left:3px solid var(--line);background:#f8fafc}.quote p{margin:0}.quote cite{display:block;margin-top:8px;font-style:normal;font-size:12px;color:var(--muted)}details{margin:15px 0;border:1px solid var(--line);border-radius:6px}summary{padding:14px 18px;color:var(--blue);font-weight:700;cursor:pointer}details .inside{padding:0 18px 10px}.checklist li::marker{color:var(--blue)}footer{margin-top:32px;padding-top:20px;border-top:1px solid var(--line);font-size:12px;color:var(--muted)}.screen-reader{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0)}
+@media(max-width:1000px){.shell{grid-template-columns:190px minmax(0,1fr);gap:22px;padding:22px}.document{padding:30px 28px}.rail nav a{font-size:13px}}
+@media(max-width:760px){.shell{display:block;padding:14px}.rail{position:static;margin-bottom:18px}.brand{margin-bottom:10px}.rail nav{display:flex;flex-wrap:wrap;gap:2px 18px;border:0;padding:0}.rail nav a{padding:3px 0}.rail p{margin:12px 0 0}.print{margin-top:10px}.document{padding:24px 18px}.metadata{grid-template-columns:80px 1fr}.ledger-row{grid-template-columns:1fr;gap:8px;padding:18px}.table-wrap table{min-width:580px}.mast{font-size:12px}h2{font-size:23px}}
+@media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+@media print{@page{size:A4;margin:16mm 14mm}body{background:white;font-size:10pt;line-height:1.65}.shell{display:block;padding:0;max-width:none}.rail,.print{display:none}.document{border:0;padding:0}.mast{font-size:9pt}h1{font-size:24pt}h2{font-size:16pt}h3{font-size:12pt}section{margin-top:24px;padding-top:20px}.table-wrap{overflow:visible}table{font-size:9pt;min-width:0!important}th,td{padding:8px}tr,.note,.quote,.flow li,.ledger-row{break-inside:avoid}h2,h3{break-after:avoid}a{color:inherit;text-decoration:none}.flag{font-size:8pt}details{border:0}details:not([open])>.inside{display:block}summary{padding:8px 0}footer{font-size:8pt}}
+.calculator{background:var(--wash);padding:20px;margin:20px 0;border-radius:6px}.controls{display:flex;flex-wrap:wrap;gap:18px;margin:15px 0}.controls label{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:700}.controls select,.controls input{font:inherit;padding:8px;border:1px solid var(--line);border-radius:4px;background:white;color:var(--ink)}.controls input[type=range]{width:200px}.results{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}.results div{border-top:2px solid var(--blue);padding-top:12px}.results span{display:block;color:var(--muted);font-size:13px}.results strong{font-size:21px}.calculator output{display:block;margin-top:16px}.formula{padding:14px 18px;background:#f8fafc;border:1px solid var(--line);font-size:14px}.new-note{margin:24px 0 0}.controls input:focus-visible,.controls select:focus-visible{outline:3px solid var(--blue);outline-offset:3px}@media(max-width:760px){.results{grid-template-columns:1fr}}@media print{.calculator{break-inside:avoid}.controls{display:none}}
+
+.rail nav a{padding:6px 0}.rule-state{font-size:13px;color:var(--muted)}.draft-table th:first-child{width:27%}.archive .inside{padding-top:10px}.archive section:first-child{margin-top:10px}.source-note{font-size:13px;color:var(--muted)}@media print{#meeting-record details:not([open])>.inside{display:none}#meeting-record details[open]>.inside{display:block}}
+</style></head><body>
+
+<div class="shell">
+<aside class="rail" aria-label="문서 탐색">
+<p class="brand">Project ATM 기획 정리</p>
+<nav aria-label="목차">
+<a href="#overview-now">최신 기준 요약</a>
+<a href="#team-loop">플레이 흐름과 역할</a>
+<a href="#initial-gear">초기 구매·가격 후보</a>
+<a href="#throwing">Q키 충전 던지기</a>
+<a href="#sorter-rules">즉시 정산·무작위 고장</a>
+<a href="#door-repairs">문·설비 수리</a>
+<a href="#cooperative-repair">지문패드·차단기 협동 수리</a>
+<a href="#pump-hazard">처리장 펌프·데미지존</a>
+
+<a href="#economy-now">돈·평가·대출</a>
+<a href="#balance-check">밸런스 검증</a>
+<a href="#open-decisions">남은 결정 사항</a>
+<a href="#reuse-assets">기존 기능 재사용</a>
+<a href="#meeting-record">원본 회의 기록</a>
+<a href="#fingerprint-fault-20261009">지문 인증·차감</a></nav>
+<button class="print" type="button" onclick="window.print()">인쇄 / PDF 저장</button>
+<p>대화에서 정한 방향과 테스트 후보를 구분했습니다.<br>구현 완료나 밸런스 검증을 뜻하지 않습니다.</p>
+</aside>
+<main class="document">
+<header>
+<div class="mast"><span>협동 청소 · 경제 · 현장 고장</span><span class="state">최신 논의 통합본</span></div>
+<h1>협동 청소와 경제<br>현장 고장 기획 정리</h1>
+<p class="intro">착수금으로 장비를 사서 역할을 나누고, 청소 수익으로 구매와 상환을 선택한다. 문·분리수거기의 고장과 폐기물처리장의 펌프 위험은 작업·정산을 방해하고 수리를 요구한다.</p>
+<dl class="metadata"><dt>정리 기준일</dt><dd>2026-10-06 · 제공된 아이디어 회의와 이후 사용자 대화 반영</dd><dt>상태 구분</dt><dd>사용자 지정 방향 / 회의에서 의견이 모인 방향 / 테스트 후보 / 미결정</dd><dt>문서 범위</dt><dd>경제·역할 분담·던지기·현장 고장·협동 수리 기획. 실제 맵·코드 변경 결과는 아님.</dd></dl>
+<aside style="margin-top:20px;padding:15px 18px;border-left:4px solid #194a8d;background:#edf3fa;color:#20314a;font-size:14px"><strong>문서 기준 안내</strong><p style="margin:6px 0">2026-10-06 전체 기준으로 정리했습니다. 상세 규칙과 미결정 항목은 분야별 문서를 함께 확인합니다.</p><a href="V2%20%EC%A0%84%EC%B2%B4%20%EA%B8%B0%ED%9A%8D%20%EC%A0%95%EB%A6%AC.html">최신 전체 기획 정리</a> · <a href="%ED%98%91%EB%8F%99%20%EC%88%98%EB%A6%AC%20%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EA%B8%B0%ED%9A%8D%EC%84%9C.html">협동 수리 상세</a></aside></header>
+
+<section id="overview-now">
+<h2>최신 기준 요약</h2>
+<p class="rule-state"><strong>2026-10-06 제외 결정:</strong> 분리수거기 역배출과 전자석 이벤트는 구현·밸런스·검증 범위에서 제외한다. 역배출 정산액 회수·재지급과 벽 부착 쓰레기 제거도 함께 제외한다. 분리수거기 고장·수리 전 투입 중단·고장 중 비용 차감은 유지한다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">항목</th><th scope="col">현재 기준</th><th scope="col">상태</th></tr></thead><tbody>
+<tr><th scope="row">초기 장비</th><td>절단기·원샷헤라·스캐너·폼건 4종. 0원 지급 대신 착수금으로 구매하며 역할을 나눈다.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
+<tr><th scope="row">Q 던지기</th><td>손이나 인벤토리의 쓰레기·장비를 던진다. 오래 누를수록 멀리 던지며, 떨어진 물체는 다시 획득한다.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
+<tr><th scope="row">분리수거 정산</th><td>정상 기계에 쓰레기를 넣는 즉시 정산한다. 주기적 일괄 정산으로 바꾸지 않는다.</td><td><span class="flag aligned">기존 방식 유지</span></td></tr>
+<tr><th scope="row">분리수거기 고장</th><td>5종의 기계가 일정 주기마다 무작위로 고장 난다. 고장 중 수리 전까지 돈이 차감된다. 해당 기계의 투입·정산은 수리 전까지 중단된다.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
+<tr><th scope="row">문·기계 수리</th><td>절연테이프를 사용한다. 문은 테이프·도구가 없어도 시간이 오래 걸리는 수동 수리가 가능하다.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
+<tr><th scope="row">협동 수리</th><td>두 지문패드 동시 인식과 지침 설명·차단기 조작 역할 분리. 차단기 수리 중 기지 정전, 지침실만 약한 보조조명, 스캐너 라이트로 차단기 수리. 지문패드 솔로는 제한 시간 내 순차 인식, 차단기 솔로는 지침실 지침 상호작용 잠금 생략.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
+<tr><th scope="row">냉각수펌프</th><td>기존 펌프·데미지존을 폐기물처리장에 고정 배치한다. 고장 중 방에 있으면 피해를 받고, 수리 후 위험을 해제한다.</td><td><span class="flag aligned">사용자 지정</span></td></tr>
+
+<tr><th scope="row">돈과 최종 평가</th><td>돈은 청소 수익과 구매에, 최종 점수·랭크는 청소 결과에 연결해 분리한다.</td><td><span class="flag proposed">회의에서 모인 방향</span></td></tr>
+<tr><th scope="row">경제 압박</th><td>시설이 고장 나면 수리 전까지 돈이 계속 차감된다. 대출 완납 후에도 적용해 수리 압박을 유지한다. 차감 수치와 인원별 부담은 미정이다.</td><td><span class="flag aligned">사용자 요구</span></td></tr>
+</tbody></table></div>
+<div class="note warning"><p><strong>가격·금리·주기와 협동 수리 퍼즐 시간은 아직 검증하지 않았다. 일반 문·배선반의 무도구 수리 시간은 아래 인원별 확정값을 따른다.</strong> 아래 수치는 비교를 위한 후보이며, 대화에서 정한 게임 규칙과 같은 확정 수준으로 취급하지 않는다.</p></div>
+</section>
+
+<section id="team-loop">
+<h2>플레이 흐름과 역할</h2>
+<ol class="flow">
+<li><div><strong>착수금으로 도구 구매·역할 배분</strong><p>기본 4종의 담당을 정한다. 실제로 구매한 장비를 지급하며 시작 전에 자동 구매가 끝난 것으로 처리하지 않는다.</p></div></li>
+<li><div><strong>탐색·절단·오염 제거·운반</strong><p>스캐너로 대상을 찾고 절단기·원샷헤라로 작업한다. 모든 담당이 쓰레기 집기·분리수거·Q 전달에 참여할 수 있다.</p></div></li>
+<li><div><strong>폐기물처리장에서 즉시 정산</strong><p>정상 분리수거기에 쓰레기를 넣어 돈을 받는다. 기계 고장이나 처리장 피해가 생기면 수리·위험 감수·물량 집적을 판단한다.</p></div></li>
+<li><div><strong>수익을 구매·보급·상환에 배분</strong><p>새 장비를 살지, 테이프·폼건 보급을 확보할지, 상환할지 선택한다. 시설 고장 중에는 수리 전까지 돈이 차감되므로 복구 우선순위도 판단한다. 최종 청소 평가는 돈과 별도로 판단하는 방향이다.</p></div></li>
+</ol>
+<div class="table-wrap"><table><thead><tr><th scope="col">인원</th><th scope="col">역할 구성 예시 · 후보</th></tr></thead><tbody>
+<tr><th scope="row">1인</th><td>4종을 교체해 사용하며 운반과 수리를 직접 수행한다. ‘한 사람은 도구 하나만 소유’ 제한을 강제하지 않는다.</td></tr>
+<tr><th scope="row">2인</th><td>절단·탐색과 오염 제거·폼건을 나눠 맡고, 필요할 때 도구를 전달한다.</td></tr>
+<tr><th scope="row">3인</th><td>절단·오염 제거를 분담하고 탐색·폼건을 겸한다. 운반은 전원이 참여한다.</td></tr>
+<tr><th scope="row">4인</th><td>기본 4종을 하나씩 맡되, 스캐너·폼건 담당이 자기 작업을 기다리는 동안 운반을 돕는다.</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="initial-gear">
+<h2>초기 구매와 가격 후보</h2>
+<p><span class="flag proposed">첫 테스트 후보</span> <strong>팀 착수금 1,300 / 도구 총액 1,100 / 구매 후 현금 200.</strong> 초기 구매로 대부분의 돈을 사용하면서 첫 보급·실수에 대비할 여유를 남기는 안이다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">장비</th><th scope="col">가격 후보</th><th scope="col">역할</th></tr></thead><tbody>
+<tr><th scope="row">절단기</th><td>400</td><td>통로 개방·철거.</td></tr>
+<tr><th scope="row">원샷헤라</th><td>300</td><td>오염 제거. 분리수거기 수리 도구로 사용하는 이전 후보는 제외.</td></tr>
+<tr><th scope="row">스캐너</th><td>200</td><td>대상 탐색·정보 공유. 차단기 수리 중 정전 구간은 스캐너 라이트로 이동하고 차단기를 조작한다.</td></tr>
+<tr><th scope="row">폼건</th><td>200</td><td>냉각수펌프 봉합·처리장 위험 해제. 첫 수리에 필요한 초기 충전량 포함 후보.</td></tr>
+<tr><th scope="row">합계</th><td><strong>1,100</strong></td><td>착수금 1,300에서 200이 남음 · 약 15%.</td></tr>
+</tbody></table></div>
+<ul>
+<li><strong>팀 공동 지갑</strong>과 <strong>초기 각 도구 재고 1개</strong>를 후보로 둔다. 개인별 동일 금액으로 쪼개면 비싼 도구 구매를 위한 송금이 필요하고, 인원만큼 착수금을 곱하면 같은 세트 비용 대비 현금이 과해진다.</li>
+<li>최소 세트를 준비하고 현장에 들어가는 안이다. 어떤 도구가 맵마다 실제 필수인지와 구매 완료 조건은 확인해야 한다.</li>
+<li><strong>절연테이프는 수리용 소모품</strong>으로 별도 계산한다. 도구 총액 1,100에는 테이프 비용이 아직 포함되지 않았다. 가격·초기 수량을 정한 뒤 예비 현금 200이 충분한지 다시 맞춘다.</li>
+<li>같은 기본 도구 가격은 인원과 무관하게 유지하는 후보로 둔다. 다음 계약의 장비 재사용·중복 구매·환매는 아직 미정이다.</li>
+</ul>
+<details><summary>강화 장비 가격 참고 후보</summary><div class="inside"><p>기본형을 교환하며 차액을 낸다는 가정에서 절단기 총 700(추가 300), 헤라 총 550(추가 250), 스캐너 총 400(추가 200)을 참고값으로 둔다. 폼건 강화 기능·가격은 미정이다. 실제 성능·상점 가격을 적용한 값은 아니다.</p><p>투자 회수 시간은 ‘추가 구매 비용 ÷ 분당 실제 추가 수익’으로 비교한다. 비용 300·추가 수익 40/분이라면 약 7.5분이지만, 도구 성능 증가가 곧 같은 비율의 수익 증가를 뜻하지는 않는다.</p></div></details>
+</section>
+
+<section id="throwing">
+<h2>Q키 충전 던지기</h2>
+<p><span class="flag aligned">지정 방향</span> 손이나 인벤토리의 쓰레기·장비를 Q키로 던지고 다시 획득한다. 오래 누를수록 비거리가 증가한다.</p>
+<ol class="flow">
+<li><div><strong>대상 선택</strong><p>10월 2일 회의 방향은 손에 든 쓰레기 우선, 쓰레기가 없으면 손에 든 도구, 둘 다 없으면 동작 없음. 인벤토리 선택 슬롯을 직접 던질지는 별도 미정.</p></div></li>
+<li><div><strong>누르는 동안 충전</strong><p>조준점 근처 충전 표시를 제안한다. 최대 충전 뒤 강도는 더 증가하지 않는 안이다.</p></div></li>
+<li><div><strong>놓으면 던지기</strong><p>성공 시점에 물체 1개를 꺼낸다. 실패·취소 시 소유 상태를 유지하는 후보.</p></div></li>
+<li><div><strong>착지 후 재획득·인계</strong><p>물체 종류·수량·장비 상태를 보존하고 동료가 주울 수 있게 한다. 재획득 자체에 돈을 지급하지 않는다.</p></div></li>
+</ol>
+<p class="rule-state">테스트 후보: 최대 충전 1.2초, 평지 쓰레기 약 3–10m·휴대 장비 약 2–6m, 우클릭 취소. 실제 비거리는 물체·조준·출발 높이·충돌에 따라 검증한다. 맵 밖 분실 복구·플레이어 충돌 규칙은 미정이다.</p>
+</section>
+
+<section id="sorter-rules">
+<h2>즉시 정산과 5종 분리수거기 고장</h2>
+<p><strong>정산 타이머는 없다.</strong> 정상 기계에 투입하면 기존 투입 판정·보상 규칙에 따라 즉시 정산한다. 일정 주기는 기계 고장 발생에 사용한다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">상태</th><th scope="col">쓰레기 처리·수익</th></tr></thead><tbody>
+<tr><th scope="row">정상</th><td>투입 즉시 처리·정산.</td></tr>
+<tr><th scope="row">고장</th><td>해당 기계는 투입·소비·정산 중단과 고장 중 돈 차감. 다른 정상 기계는 계속 즉시 정산.</td></tr>
+<tr><th scope="row">수리 완료</th><td>절연테이프로 복구하면 해당 고장의 비용 차감이 종료되고 정상 투입·즉시 정산을 재개한다.</td></tr>
+</tbody></table></div>
+<p><strong>5종 중 무작위로 고장 대상을 선택한다.</strong> 수리 전까지 사용이 막히며 마지막 정상 기계도 고장 대상이 될 수 있다. 전부 고장 나면 수거 수익은 0이 되고 수리가 필요하다.</p>
+<details><summary>고장 추첨·주기 테스트 후보</summary><div class="inside"><ul>
+<li>기존 비교 후보는 작업 시작 6분에 첫 고장, 이후 4분마다 정상 기계 1대 추첨. 회의의 “5분이라고 해볼까요”는 별도 주기 제안이며 최종 수치 미정.</li>
+<li>후보 간 균등 추첨, 이미 고장 난 기계 제외. 새 고장으로 수리 진행을 초기화하지 않음.</li>
+<li>복구 후 한 회차 추첨 제외. 후보가 없으면 새 발생만 건너뛰고 기존 고장은 유지.</li>
+<li>수리하지 않은 고장은 누적될 수 있음. ‘회차당 1대’는 새 고장 수이며 누적 상한이 아님.</li>
+<li>1–4인 모두 회차당 1대로 먼저 비교하고 실제 수익·복구 시간으로 주기를 조정.</li>
+</ul><p class="muted">주기·추첨 제외·회차당 대수는 미확정 후보다. 분류별 쓰레기 양과 수익이 같다는 가정은 하지 않는다.</p></div></details>
+</section>
+
+<section id="door-repairs">
+<h2>문·설비 수리</h2>
+<p><span class="flag aligned">지정 방향</span> 일반 고장 문과 분리수거기는 절연테이프로 고친다. <strong>일반 고장 문은 테이프·도구가 없어도 시간이 오래 걸리는 수동 수리가 가능</strong>해 영구 갇힘을 방지한다. 아래 차단기 지침실의 협동 수리 잠금은 별도 규칙이다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">문 수리</th><th scope="col">수리 시간</th><th scope="col">조건</th></tr></thead><tbody>
+<tr><th scope="row">절연테이프 사용</th><td>즉시 복구</td><td>수리 1회에 1개 소비. 가격 미정.</td></tr>
+<tr><th scope="row">도구 없는 수동 수리</th><td>1인 10초 · 2인 20초 · 3인 30초 · 4인 40초</td><td>사용자 확정. 접근 가능한 내부 배선반에서 도구·충전·현금 없이 E 유지. 사망 후 문 밖의 재진입은 별도 빠루 규칙을 따른다.</td></tr>
+</tbody></table></div>
+<p>무도구 문·배선반 수리는 참여 인원 기준으로 1인 10초, 2인 20초, 3인 30초, 4인 40초로 확정한다. 서버가 E 유지 수리 시작 시 참여 인원수를 확정하며 관전자·접속이 끊긴 인원은 제외한다. 진행 중에는 시간이 바뀌지 않고, 중단 후 다시 시작하면 현재 인원수로 계산한다. 중단 전 진행도는 보존한다.</p><p>고장 난 문은 실제 통로를 막고, 고장 난 분리수거기는 실제 정산을 막는다. 수익이 끊길 수 있다는 압박은 유지한다. 수리 중 이자 시간을 계속 진행하는 것은 경제 테스트 후보다.</p>
+<ul>
+<li>접근 가능한 내부 배선반에서 일반 문을 수리하면 현재 문 고장 사건을 해제한다. 내부 플레이어 사망으로 배선반에 접근할 수 없는 경우의 외부 재진입은 고가·영구 사용 빠루의 강제 개방으로 해결한다. 차단기 지침실은 다인 지침 상호작용으로 잠기며 재시작으로 문을 연다. 입실·시간 만료에 따른 자동 잠금은 없고, 솔로는 지침 상호작용 잠금을 생략한다.</li>
+<li>일반 문 현재 E 수리는 중단 시 진행도를 보존하고 다른 플레이어가 이어서 수리할 수 있다. 한 문 사건은 한 명만 수리한다. 절연테이프 1개로 남은 진행도와 관계없이 즉시 복구한다. 지침실의 수동·테이프 우회 허용과 동료 이탈 시 탈출 처리는 별도로 결정한다.</li>
+<li>분리수거기·펌프까지 무도구 복구를 허용할지는 미정이다. 문에 지정된 기본 수리를 모든 설비의 확정 규칙으로 확대하지 않는다.</li>
+</ul>
+</section>
+
+<section id="cooperative-repair" data-section><h2>지문패드·정전 차단기 협동 수리</h2><p><a href="%ED%98%91%EB%8F%99%20%EC%88%98%EB%A6%AC%20%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EA%B8%B0%ED%9A%8D%EC%84%9C.html">협동 수리 시스템 기획서</a>가 상태·조작·UI·예외·검증의 상세 기준입니다.</p><div class="table-wrap"><table><thead><tr><th scope="col">종류</th><th scope="col">다인</th><th scope="col">솔로</th></tr></thead><tbody><tr><td>지문패드</td><td>서로 다른 두 명이 A·B에서 상호작용을 누르고 있어 인식 상태가 겹치면 성공</td><td>첫 패드 인식 후 제한 시간 내 다른 패드 인식</td></tr><tr><td>차단기</td><td>설명자는 지침실 입실 후 지침에 상호작용해 잠금·지침 전달. 스캐너 담당이 라이트로 이동·노브 조작</td><td>지침실 지침 상호작용 잠금 생략. 지침 확인 후 라이트로 이동·조작</td></tr></tbody></table></div><p>차단기 수리 중 기지 일반 조명을 끄고 지침실 지침에만 약한 하향 보조조명을 둡니다. 음성이 없으면 창문 유리 그림으로 전달합니다. 성공하면 연결된 차단기·조명·지침실 문을 복구합니다.</p><p>일반 문 수리와 지침실 잠금, 고장 중 차감·펌프 피해의 겹침은 상세 예외 항목에서 결정합니다. 수리 시간·오답·노브 수·배터리·소모품은 미정입니다.</p><p>지침실 문은 입실·점유로 자동 잠그지 않습니다. 다인에서 수리 지침에 한 번 상호작용하면 닫혀 잠깁니다. 재시작을 누르면 문이 열리고, 다음 새 지침 상호작용까지 열린 상태를 유지합니다. 개방 시간 제한·재잠금 대기 시간·카운트다운은 없습니다. 솔로는 지침 사용으로도 잠기지 않습니다. 재시작할 때 각 열의 목표 위치를 새로 추첨해 이전과 다른 정답으로 변경합니다. 차단기는 조작 순서가 아니라 모든 열의 목표 위치 일치로 성공을 판정합니다. 재시작은 수리 완료가 아닙니다.</p><p><strong>협동 수리 배치:</strong> 지침실은 1F 09 전력실 내부 유리 부스, 차단기는 창밖 작업 구역의 설비벽. 패드 A는 1F 02 통제실 입구 바깥 중앙 해치 쪽 벽, 패드 B는 B1-07 유지 보수실 입구 바깥·해치 출구 부근 공용 벽입니다. <strong>기획상 B1은 실제 맵의 위층인 2층</strong>이며 방 식별자는 유지합니다. 솔로 제한 시간은 양방향 층간 이동을 실측해 결정합니다. <a href="%ED%98%91%EB%8F%99%20%EC%88%98%EB%A6%AC%20%EC%8B%9C%EC%8A%A4%ED%85%9C%20%EA%B8%B0%ED%9A%8D%EC%84%9C.html#placement">협동 수리 배치 상세·층 구분</a></p></section>
+
+<section id="pump-hazard">
+<h2>폐기물처리장 고정 펌프와 데미지존</h2>
+<p><span class="flag aligned">지정 방향</span> 메인퀘스트에서 만든 냉각수펌프·데미지존을 재사용한다. <strong>폐기물처리장에 고정 배치하고, 고장 중 그 방에 있으면 수리 전까지 피해를 받는다.</strong> 다른 방으로 청소를 옮겨 수익 목적지의 위험을 계속 피하지 못하게 한다.</p>
+<ol class="flow">
+<li><div><strong>펌프 고장</strong><p>고정된 처리장 데미지존 활성화. 고장 알림과 위험 상태 표시.</p></div></li>
+<li><div><strong>위험한 수거 또는 선행 수리</strong><p>피해를 감수하고 정상 기계에 투입하면 즉시 정산할 수 있다. 다른 방에서 청소·집적은 가능하지만 돈을 받으려면 처리장으로 돌아온다.</p></div></li>
+<li><div><strong>폼건으로 펌프 수리</strong><p>기존 폼건 봉합 기반을 사용해 연결된 방 피해를 종료하는 방향.</p></div></li>
+<li><div><strong>안전한 정산 재개</strong><p>별도로 고장 난 분리수거기는 여전히 절연테이프로 고쳐야 한다. 펌프 수리가 기계 고장까지 해제하지 않는다.</p></div></li>
+</ol>
+<div class="ledger"><div class="ledger-row"><div class="ledger-key">기계 고장</div><div><p>해당 분류의 투입·정산을 중단한다.</p></div></div><div class="ledger-row"><div class="ledger-key">펌프 고장</div><div><p>처리장 체류에 피해를 준다. 정상 기계의 즉시 정산은 유지한다.</p></div></div></div>
+<ul>
+<li>5종 투입 지점과 처리장 체류 구간을 공통 위험 목적지로 배치한다.</li>
+<li>안전한 입구 밖에서 Q 투척만으로 정산을 완전히 우회하는지 확인한다. 투입구의 안쪽 배치·시야·인계 동선으로 검토하며 Q 자체를 금지하지 않는다.</li>
+<li>폼건 수리 지점에 접근·조준할 수 있어야 한다. 이동·봉합 시간과 누적 피해를 함께 맞춘다.</li>
+<li>펌프 고장 주기·피해량·회복 비용은 미정이다. 분리수거기 고장과 별도로 상태를 관리하고, 두 사건이 겹칠 때의 부담을 검증한다.</li>
+</ul>
+</section>
+
+
+
+<section id="economy-now">
+<h2>돈·최종 평가·대출</h2><aside class="note warning"><p><strong>발표 수치와 계산 가정 구분:</strong> 회의에서는 9분 유예·3분 간격을 제시했습니다. 아래 계산기는 이전 6분 유예·첫 징수 9분 가정을 유지합니다. 금리·원금·가격·인원 가정과 함께 하나의 공식으로 정합화해야 하며, 발표한 약 28분·17분 완납 수치를 현재 공식의 확정값으로 취급하지 않습니다.</p></aside>
+<div class="ledger"><div class="ledger-row"><div class="ledger-key">돈</div><div><p>쓰레기 투입 수익을 도구·보급·상환에 사용한다. 공동 지갑은 역할 분담을 위한 후보다.</p></div></div><div class="ledger-row"><div class="ledger-key">최종 평가</div><div><p>남은 쓰레기·청소 완료량으로 평가하는 회의 방향. 돈을 쓰거나 상환했다는 이유로 평가를 낮추지 않는 방향이며 산식은 미정이다.</p></div></div></div>
+<div class="note"><p><span class="flag aligned">사용자 추가 아이디어</span> <strong>시설 고장 중 지속 차감:</strong> 고장 발생부터 수리 완료까지 돈을 차감한다. 대출을 모두 갚아도 고장이 나면 차감되므로 작업을 마칠 때까지 복구할 이유가 남는다.</p></div>
+<h3>완납 이후의 압박 · 고장 중 지속 차감</h3>
+<div class="table-wrap"><table><thead><tr><th scope="col">상태</th><th scope="col">금전 처리</th></tr></thead><tbody>
+<tr><th scope="row">정상 시설</th><td>이 고장 규칙으로 돈을 차감하지 않는다.</td></tr>
+<tr><th scope="row">시설 고장</th><td>고장이 유지되는 동안 돈 차감. 수리 중에도 완료 전까지 고장 상태가 이어진다.</td></tr>
+<tr><th scope="row">수리 완료</th><td>해당 고장의 차감 종료. 다른 시설의 고장은 별도로 남는다.</td></tr>
+<tr><th scope="row">대출 완납</th><td>대출 의무 종료 여부와 독립적으로 시설 고장 차감은 적용한다.</td></tr>
+</tbody></table></div>
+<p>정상 분리수거기의 즉시 정산은 유지한다. 고장 차감은 별도의 현금 지출로 기록하며 쓰레기 보상을 지연하지 않는다. 문·분리수거기·펌프 중 적용 범위, 차감 대상 지갑, 차감액·주기·다중 고장 합산 방식은 미정이다.</p>
+<p class="rule-state">밸런스 비교 후보: 고장 부담 = 고장 지속 시간에 따른 차감 + 실제 입금 지연·수익 손실 + 수리·보급 비용. 복구 후 처리할 수 있는 대기 쓰레기는 입금 지연과 영구 손실을 구분한다. 1–4인의 현장 이동·복구 시간을 함께 측정한다.</p>
+<p>가격은 초기 역할 분담을 만들고, 대출은 장비 구매와 상환 선택에 연결한다. 완납 이후 압박은 새 고장과 수리 전 지속 차감으로 이어간다. 큰 초기 채무를 반드시 부과해야 하는 구조는 아직 채택하지 않았다.</p>
+<p><strong>아직 결정되지 않은 핵심:</strong> 착수금 자체가 대출인지, 이미 집행된 초기 계약 채무까지 포함할지, 원금과 이자를 어떤 방식으로 징수할지. 아래 두 모델은 비교 시나리오이며 채택된 규칙이 아니다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">비교 모델</th><th scope="col">가정</th><th scope="col">의미</th></tr></thead><tbody>
+<tr><th scope="row">착수금만 대출</th><td>착수금·원금 1,300, 도구 구매 1,100, 잔액 200.</td><td>4인 예상 수익이 빠르면 첫 징수 전 완납할 수 있다. 완납 후 시설 고장 차감은 별도로 적용한다.</td></tr>
+<tr><th scope="row">초기 계약 채무 포함</th><td>착수금 1,300과 현장 준비에 이미 쓴 금액을 합쳐 총채무를 별도로 둠.</td><td>추가 설정·계약이 필요한 이전 제안. 사용자가 채택하지 않았으며 기존 스토리·코드의 사실도 아니다.</td></tr>
+</tbody></table></div>
+<details><summary>경제 수치 비교용 가정</summary><div class="inside">
+<div class="table-wrap"><table class="draft-table"><thead><tr><th scope="col">항목</th><th scope="col">후보 · 계산 가정</th></tr></thead><tbody>
+<tr><th scope="row">작업 길이</th><td>30분. 실제 완료 시간 미측정.</td></tr>
+<tr><th scope="row">실효 인원 배율 F</th><td>1인 1.0 / 2인 1.7 / 3인 2.3 / 4인 2.8. 미측정 가정.</td></tr>
+<tr><th scope="row">기준 수익</th><td>분당 100 × F. 분류·이동·사건별 실제 수익으로 교체해야 함.</td></tr>
+<tr><th scope="row">유예·징수</th><td>6분 유예, 첫 징수 작업 시작 9분, 이후 3분 주기.</td></tr>
+<tr><th scope="row">정기 원금·이자</th><td>원금 최대 150 × F + 최초 원금의 2% 고정 이자(올림). 일부 상환 후 이자는 유지, 완납 후 종료.</td></tr>
+<tr><th scope="row">음수 회복</th><td>60초 회복 기회. 기존 회의의 ‘음수 즉시 게임오버’에 완충을 둔 제안. 아직 미채택.</td></tr>
+<tr><th scope="row">계약 채무 모델</th><td>총원금 2,400 × F. 착수금 외 나머지 금액의 용도와 설정을 설명해야 함.</td></tr>
+</tbody></table></div>
+<p>예를 들어 1인의 총채무 2,400 = 착수금 1,300 + 이전 준비 집행분 1,100이다. 이전 집행분을 실제로 채택할 이유가 없으면 이 모델도 쓰면 안 된다. 수익 속도·수리 부담을 검증하기 전에 큰 초기 채무와 잦은 사건을 함께 확정하지 않는다.</p>
+</div></details>
+<details><summary>인원·수익·채무 모델 계산기</summary><div class="inside">
+<div class="calculator" aria-labelledby="calc-title"><h3 id="calc-title" style="margin-top:0">비교용 계산 · 실제 플레이 검증 아님</h3>
+<p class="muted">일정 수익·30분 작업과 위 징수 가정을 사용한다. 현금이 남은 원금 이상이면 즉시 완납하는 최선 조건. 테이프·폼건 보급·시설 고장 중 지속 차감·정산 중단·펌프 피해·수거 간격·추가 대출은 포함하지 않는다. 이 계산기로 완납 이후 현장 압박을 평가할 수 없다. 협동 수리의 인식·설명·정전 중 이동과 조작 시간도 포함하지 않는다. 구매 성능에 따른 수익 증가도 포함하지 않는다.</p>
+<div class="controls"><label>인원<select id="party"><option value="0">1인</option><option value="1">2인</option><option value="2">3인</option><option value="3">4인</option></select></label><label>채무 모델 · 미결정<select id="debt-model"><option value="advance">착수금만 대출</option><option value="contract">초기 계약 채무 포함</option></select></label><label>예상 수익 대비 <span id="pace-label">100%</span><input id="pace" type="range" min="0" max="150" step="10" value="100"></label><label>12분 추가 구매<select id="upgrade"><option value="0">구매 없음</option><option value="300">절단기 강화 차액 300</option><option value="400">추가 기본 절단기 400</option></select></label></div>
+<p id="start-budget"></p><div class="results"><div><span>예정 원금+이자 / 3분 예상 수익</span><strong id="burden">계산 중</strong></div><div><span>최선 완납 시점</span><strong id="repay-time">계산 중</strong></div><div><span>30분 잔액 / 남은 원금</span><strong id="end-state">계산 중</strong></div></div><output id="calc-note" aria-live="polite"></output>
+</div></div></details>
+</section>
+
+<section id="balance-check">
+<h2>밸런스 검증</h2>
+<p><strong>한 번에 모든 압박 수치를 올리지 않는다.</strong> 기본 구매와 수익을 먼저 측정하고, 기계 고장·처리장 피해·고장 중 지속 차감을 단계적으로 넣어 원금·이자·보급을 조정한다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">검증 대상</th><th scope="col">확인할 내용</th></tr></thead><tbody>
+<tr><th scope="row">초기 구매</th><td>1–4인 모두 기본 세트를 살 수 있는가? 테이프 구매 후 첫 고장 대응 비용이 남는가?</td></tr>
+<tr><th scope="row">역할 가치</th><td>절단·오염 제거·탐색·폼건·운반이 실제 팀 수익에 기여하는가? 스캐너·폼건 담당이 대기만 하는가?</td></tr>
+<tr><th scope="row">기계 고장</th><td>정상 기계는 즉시 정산하고 고장 난 기계만 멈추는가? 대기 물량을 복구 후 한 번씩 정산하는가?</td></tr>
+<tr><th scope="row">문 수리</th><td>어느 쪽에 갇혀도 테이프·돈 없이 수리 가능한가? 인원별 수동 수리 10–40초와 경제 회복 60초 후보가 부당하게 충돌하지 않는가?</td></tr>
+<tr><th scope="row">처리장 펌프</th><td>고장 중 방 피해, 수리 후 종료, 정상 기계 즉시 정산이 함께 작동하는가? 위험 밖 Q 투척 우회·수리 접근 불가가 있는가?</td></tr>
+
+
+<tr><th scope="row">협동 수리</th><td>다인 두 패드 동시 인식·솔로 제한 시간 내 순차 인식이 작동하는가? 차단기 지침·노브 일치와 다인 문 잠금·성공 해제, 솔로 지침 상호작용 잠금 생략을 확인한다. 기지 일반 조명은 꺼지고 지침실 보조조명은 지침을 위에서 아래로 약하게 비추는가? 스캐너를 든 상태로 라이트와 노브를 사용할 수 있는가? 음성 없이 유리 그림으로 완료 가능한가? 반대편 거울상·스캐너 분실·중도 이탈·잠금 우회를 검증한다.</td></tr>
+<tr><th scope="row">고장 중 차감</th><td>완납 후에도 차감되는가? 고장 시작·복구 완료에 정확히 연동되는가? 여러 고장과 정산 중단이 겹칠 때 복구까지 버틸 수 있는가? 고장별 차감률·누적 손실과 수리 대상을 표시하는 UI를 검토한다.</td></tr>
+<tr><th scope="row">실효 수익</th><td>분류별 보상 비중·3분 수익·입금 지연을 측정한다. 피해·보급비 등 지출과 수리 시간은 별도로 산출한다.</td></tr>
+<tr><th scope="row">인원 차이</th><td>현장 물량·동선·복구 시간이 다인 수익 증가에 맞는가? 같은 쓰레기 단가와 도구 단가를 유지하면서 조정할 수 있는가?</td></tr>
+<tr><th scope="row">악용·중복</th><td>재획득·수리·생성 볼륨 반복 생성으로 보상이 중복되지 않는가? 펌프와 데미지존 연결 오류·겹침으로 피해가 남거나 중복되지 않는가?</td></tr>
+</tbody></table></div>
+<p class="rule-state">기존 목표 후보: 정상 팀의 징수 부담을 실제 3분 수익의 약 55–70%로 비교하고, 완납 시간·인원별 편차를 측정한다. 펌프 위험과 기계 고장을 포함해 검증한 목표는 아니다.</p>
+<details><summary>수익 중단을 계산할 때 주의</summary><div class="inside"><p>3분 중 30초 동안 모든 정산이 멈춘다면 분당 100 가정의 수익은 300에서 250으로 줄어든다. 징수 198은 79.2%다. 원금 125 + 이자 48 = 173의 비교안은 69.2%다. 이는 모든 수익 경로가 막힌 단일 구간 예시이며 새 상환액을 채택한 것은 아니다.</p><p>한 기계 고장을 전체 수익 0으로 계산하지 않는다. 분류별 보상 비중과 다른 작업으로의 전환을 봐야 한다. 복구 후 대기 쓰레기를 몰아서 넣을 수 있으면 총수익 손실보다 입금 지연일 수도 있다. 펌프 피해는 정상 기계 정산을 차단하지 않으므로 체력·체류·회복 비용으로 따로 측정한다.</p></div></details>
+</section>
+
+<section id="open-decisions">
+<h2>남은 결정 사항</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">분야</th><th scope="col">다음에 결정할 내용</th></tr></thead><tbody>
+<tr><th scope="row">초기 자금·채무</th><td>착수금은 지원금인가 대출인가? 초기 의무채무의 범위·원금·상환 방법. 추가 대출 한도. 완납 이후 시설 고장 차감과 대출 부담의 분리.</td></tr>
+<tr><th scope="row">가격·보급</th><td>4종 가격·착수금 후보 채택 여부. 테이프 가격·초기 수량·소모량, 폼건 충전·추가 보급 비용.</td></tr>
+<tr><th scope="row">지갑·구매</th><td>공동 지갑·구매 확인·초기 재고·필수 구매 세트. 강화·환매·다음 계약 장비 재사용.</td></tr>
+<tr><th scope="row">수익·평가</th><td>쓰레기별 보상·평가 산식. 볼륨 생성 쓰레기·절단 잔해·오염물의 수익·목표량 반영.</td></tr>
+<tr><th scope="row">고장·수리</th><td>기계·문·펌프의 주기와 겹침. 추첨 제외·누적 고장·수리 진행·테이프 시간. 문 외 무도구 수리 범위.</td></tr>
+
+<tr><th scope="row">협동 수리</th><td>적용 시설·발생 조건·패드 솔로 제한 시간, 차단기 열·칸 수·노브 조작·랜덤 규칙·오답 판정. 지침실 보조조명과 스캐너 라이트 밝기·범위·조작·소모, 정전 시작 시점·복구 범위. 유리 그림·스캐너 분실·중도 이탈·다인 지침실 잠금 우회. 솔로 잠금 생략은 지정 방향.</td></tr>
+<tr><th scope="row">시설 고장 차감</th><td>적용 시설·차감 지갑·금액·주기·다중 고장 합산과 인원 배율. 수리 중 차감, 일시정지·로딩·정산 종료 시 처리, 음수 잔액과 회복 유예.</td></tr>
+<tr><th scope="row">체력·실패</th><td>처리장 피해량·피해 간격·경고·회복·사망 규칙. 음수 종료·회복 유예와 수리 시간의 관계.</td></tr>
+<tr><th scope="row">인원·시간</th><td>1–4인 맵 물량·동선·실효 수익. 합류·장기 이탈·일시정지·로딩·다음 계약 처리.</td></tr>
+<tr><th scope="row">던지기</th><td>충전 시간·거리·대상 우선순위·취소·충돌·맵 밖 분실 처리.</td></tr>
+</tbody></table></div>
+<details><summary>이번 정리에서 발전 대상에서 제외한 안</summary><div class="inside"><ul>
+<li>정기 회수·주기적 일괄 정산: 기존 즉시 정산 유지.</li>
+<li>반복 현장 체류 비용: 사용자 평가로 제외.</li>
+<li>새로운 분리수거 검수 시스템: 사용자 설명에 따르면 이미 있는 기능.</li>
+<li>구역별 폐쇄: 현재 발전 대상으로 선택되지 않음.</li>
+<li>누수 물살·물건 흩어짐과 방별 무작위 펌프 피해: 폐기물처리장 고정 펌프·데미지존으로 변경.</li>
+<li>자동 지급된 기본 장비·자동 선지출만으로 시작하는 흐름: 착수금으로 직접 구매하는 역할 배분으로 변경.</li>
+</ul></div></details>
+</section>
+
+<section id="reuse-assets">
+<h2>기존 펌프·데미지존 재사용</h2>
+<p>현재 작업 폴더의 정적 소스에서 기반 기능을 확인했다. 새 맵 배치·주기 고장·최신 브랜치 통합 빌드·실제 플레이 검증은 수행하지 않았다.</p>
+<details><summary>확인한 기반 기능과 연결 작업</summary><div class="inside"><ul>
+<li><a href="../../Source/MarineDemolition/Private/World/Wall/MD_CoolingPump.cpp">MD_CoolingPump.cpp</a>: 폼건 수리 태그·폼 투사체 수리와 고장 누수 연출 기반. <code>BP_MD_CoolingPump</code> 에셋도 작업 폴더에 존재.</li>
+<li><a href="../../Source/MarineDemolition/Private/World/Environment/MD_CoolingHazardZone.cpp">MD_CoolingHazardZone.cpp</a>: 연결된 펌프 고장 상태에서 구역 피해, 수리 후 추가 피해 중단.</li>
+<li><a href="../../Source/MarineDemolition/Public/World/Environment/MD_CoolingHazardZone.h">MD_CoolingHazardZone.h</a>: 로컬 소스 기본값 초당 피해 8·간격 1초. 새 처리장 밸런스 값으로 확정한 수치가 아님.</li>
+<li>펌프 기본 시작 상태는 고장이다. 새 주기 기믹은 정상 시작과 반복 고장 전환을 연결해야 한다. <code>SetBroken</code>은 보호된 내부 진입점이므로 적절한 호출 경로 필요.</li>
+<li>각 존의 <code>CoolingPump</code>를 고정 펌프에 연결한다. 참조가 없거나 로드되지 않으면 현재 소스는 위험 상태를 유지하므로 연결 오류로 피해가 영구히 남지 않게 검증.</li>
+<li>기존 메인퀘스트·Day3 수락·완료·강조 표시·보상을 다시 요구하지 않는 공통 현장 고장으로 분리. 피해 존 중첩·수리 즉시 해제·중도 합류 상태 확인.</li>
+</ul></div></details>
+</section>
+
+<section id="meeting-record">
+<h2>원본 회의 기록</h2>
+<p>제공된 채팅 16:58–17:23 · 회의 날짜 미기재. 참여자: 이길호·박준민·차지훈·김동연·이은진.</p>
+<details class="archive"><summary>초기 회의 요약·참여자 의견·논의 흐름 보기</summary><div class="inside">
+<div class="note warning"><p><strong>아래는 당시 회의 기록이다.</strong> 30분 유예·1분/3분 차감·초기금 대출 여부 등은 당시 후보로 보존했다. 현재 규칙과 남은 결정은 위 통합 본문을 기준으로 읽는다. 기록을 펼친 경우에만 인쇄에 포함한다.</p></div>
+<section id="overview">
+<h2>회의 요약</h2>
+<p>핵심은 <strong>청소로 얻는 돈과 청소 결과를 평가하는 점수·랭크를 분리하자</strong>는 제안이다. 대출은 삭제하는 방안과 시간 기반으로 유지하는 방안을 비교했으며, 후반부에는 유예 후 일정 주기로 돈을 차감하는 안을 중심으로 논의했다.</p>
+<div class="note warning"><p><strong>최종 확정 발언은 없다.</strong> 아래의 ‘의견이 모인 방향’은 대화에서 긍정적인 반응이 확인된 제안이며, 채택·구현 승인이 완료됐다는 뜻은 아니다. 특히 30분·3분·10%는 서로 확정 수준이 다른 후보값이다.</p></div>
+<div class="table-wrap"><table class="summary-table"><caption class="screen-reader">핵심 안건과 논의 상태</caption><thead><tr><th scope="col">안건</th><th scope="col">논의 내용</th><th scope="col">현재 상태</th></tr></thead><tbody>
+<tr><th scope="row">돈과 최종 평가</th><td>쓰레기 처리로 돈을 벌고 도구를 구매한다. 최종 평가는 돈과 별개로 남은 쓰레기·청소량을 기준으로 판단한다.</td><td><span class="flag aligned">의견이 모인 방향</span></td></tr>
+<tr><th scope="row">대출 존폐</th><td>완전 삭제와 시간 기반 유지 모두 제시됨. 후반 논의는 시간 차감 방식에 집중했다.</td><td><span class="flag open">최종 결정 필요</span></td></tr>
+<tr><th scope="row">유예·차감 주기</th><td>대출 후 30분 유예가 제안됐고, 차감 주기는 1분에서 3분 쪽으로 의견이 모였다. 5분도 후보로 언급됨.</td><td><span class="flag proposed">후보안</span></td></tr>
+<tr><th scope="row">차감액·실패 조건</th><td>일정한 금액을 주기적으로 차감하고 잔액이 음수가 되면 게임오버하는 안. 구체적인 비율과 종료 범위는 미정.</td><td><span class="flag open">설계 필요</span></td></tr>
+<tr><th scope="row">초기금</th><td>처음에는 대출과 분리하자는 의견, 이후에는 초기금도 대출로 볼 수 있다는 의견이 나옴.</td><td><span class="flag open">입장 재검토</span></td></tr>
+<tr><th scope="row">초기 도구</th><td>무료 초기 장비를 유료화하고, 시작 도구를 4개로 정해 하나씩 구매하게 하자는 제안.</td><td><span class="flag aligned">긍정 반응 · 규칙 미정</span></td></tr>
+</tbody></table></div>
+</section>
+
+<section id="economy">
+<h2>돈과 최종 평가를 분리</h2>
+<p>‘점수 = 돈’으로 묶으면 돈을 소비하거나 이자로 차감할 때 최종 평가까지 함께 내려가는 문제가 생긴다. 박준민은 현재 누적 점수를 재화인 <strong>돈</strong>으로 보고, 랭크는 남은 쓰레기를 기준으로 별도 판단하자고 제안했다. 이길호가 이를 쓰레기 처리 수익·도구 구매·청소량 평가의 흐름으로 재확인했다.</p>
+<div class="ledger" aria-label="재화와 평가의 역할 비교">
+<div class="ledger-row"><div class="ledger-key">돈</div><div><p><strong>쓰레기 처리 수익 → 도구 구매</strong><br>쓰레기를 넣을 때마다 누적되는 구매 재화. 대출을 유지하면 이자 차감도 이 재화에 적용하는 안이다.</p><p class="ledger-small">쓰레기별 수익, 오분류 시 보상, 개인·팀 공동 지갑 여부는 논의되지 않았다.</p></div></div>
+<div class="ledger-row"><div class="ledger-key">최종 평가</div><div><p><strong>남아 있는 쓰레기 / 얼마나 치웠는가 → 점수·랭크</strong><br>현재 보유한 돈과 별개로 청소 결과를 평가한다.</p><p class="ledger-small">100점에서 감점하는 구조가 언급됐으나, 산식·랭크 경계·평가 대상은 확정되지 않았다.</p></div></div>
+</div>
+<blockquote class="quote"><p>“랭크가 점수랑 무관하고 그냥 남아있는 쓰레기로만 판단해서 깎으면 되죠”</p><cite>박준민 · 17:03</cite></blockquote>
+<p><strong>정리상 의미:</strong> 도구 구매와 이자 차감은 지갑에 영향을 주고, 최종 평가는 청소 결과에 영향을 받도록 역할을 나누자는 방향이다. 오염물·기믹 철거·추가 생성 쓰레기를 평가에 어떻게 포함할지는 별도 확인이 필요하다.</p>
+</section>
+
+<section id="loan">
+<h2>대출과 시간 차감</h2>
+<h3>왜 다시 논의했나</h3>
+<p>기존 대출이 Day 시스템과 연계돼 있어, Day 흐름을 바꿀 경우 대출도 막거나 삭제할지, 실제 시간 단위로 전환할지 검토가 필요했다. ‘1시간을 하루로 간주’하는 아이디어도 나왔지만, 시간을 다시 도입해야 한다는 부담이 바로 제기됐다.</p>
+<div class="table-wrap"><table class="choice-table"><thead><tr><th scope="col">검토 방안</th><th scope="col">발언 취지</th><th scope="col">논의 결과</th></tr></thead><tbody>
+<tr><th scope="row">대출 중지 / 삭제</th><td>Day 연계를 제거하고 청소 수익으로 장비를 구매하게 한다.</td><td>대안으로 제시됐으나 삭제 여부는 확정되지 않음.</td></tr>
+<tr><th scope="row">시간을 Day로 환산</th><td>1시간을 하루로 간주하는 방식.</td><td>시간 체계를 다시 넣어야 한다는 부담을 언급했고, 이후 이 안을 구체화하지 않음.</td></tr>
+<tr><th scope="row">시간 기반 주기 차감</th><td>유예 후 일정 주기로 돈을 차감해 청소와 수익 확보를 유도한다.</td><td>후반부의 중심 후보안. 수치·상환 방식·실패 규칙은 미정.</td></tr>
+</tbody></table></div>
+<h3>후반부 중심 후보안</h3>
+<p class="muted">여러 발언을 연결해 정리한 흐름이다. 확정 명세가 아니며, 시간의 기준과 상환의 효과는 추가 결정이 필요하다.</p>
+<ol class="flow">
+<li><div><strong>대출 실행</strong><p>돈을 받아 장비 구매 등에 사용한다. 선택 대출인지 초기금까지 포함하는 강제 대출인지 미정.</p></div></li>
+<li><div><strong>30분 유예</strong><p>대출을 받은 순간부터 30분의 유예를 두자는 제안. 이 기간 내 상환을 유도하는 발언도 있었으나 상환 규칙은 구체화되지 않았다.</p></div></li>
+<li><div><strong>유예 이후 주기 차감</strong><p>초기 1분 제안은 압박이 크다는 의견을 받았고, 김동연이 제안한 3분에 이길호도 동의했다. 차감액은 증가시키지 않고 일정하게 유지하자는 의견이 나왔다.</p></div></li>
+<li><div><strong>잔액이 음수가 되면 게임오버</strong><p>차지훈·박준민이 제안한 실패 조건. 0원은 음수와 다르며, 팀 전체 종료인지 개인 실패인지는 정하지 않았다.</p></div></li>
+</ol>
+<h3>이자·징수액은 결정되지 않음</h3>
+<ul>
+<li><strong>이길호:</strong> 이자가 늘어나지 않고 동일하게 차감되는 방식을 선호했다. 반대로 너무 적게 차감하면 초반 대출로 좋은 장비를 모두 확보할 수 있다는 우려도 제기했다.</li>
+<li><strong>박준민:</strong> ‘3분마다 빌린 돈의 1/10’을 고리대금이라는 표현과 함께 제안했다. <strong>10%를 채택했다는 합의는 없다.</strong></li>
+<li><strong>차지훈:</strong> 대출 시 갚아야 할 금액을 고정하고, 그 금액의 일정 비율을 지속 징수하는 방식을 제안했다.</li>
+</ul>
+<div class="note warning"><p><strong>‘이자’와 ‘원금 상환’은 구분이 필요하다.</strong> 원문만으로는 주기 차감액이 이자만인지, 원금까지 갚는 금액인지 알 수 없다. ‘빌린 돈의 10%’와 ‘고정된 상환 총액의 일정 비율’도 같은 계산식으로 확정하면 안 된다.</p></div>
+<h3>관련 UI 아이디어</h3>
+<p>이길호는 독촉하는 느낌의 UI와 ‘몇 분 남았다’는 안내를 제안했다. 표시할 시간이 유예 종료까지인지, 다음 징수까지인지 구분되지 않았으므로 화면 설계 전에 결정해야 한다.</p>
+</section>
+
+<section id="funding">
+<h2>초기금과 장비 구매</h2>
+<h3>초기금의 성격은 열린 상태</h3>
+<p>차지훈이 초기 착수금도 대출로 볼 것인지 질문했다. 박준민은 처음에는 과하다고 보고 교통비 같은 느낌이라고 설명했지만, 이후에는 초기금도 대출로 처리해도 괜찮을 것 같다고 입장을 재검토했다. 뒤이어 강제로 돈을 주고 30분 안에 갚게 한다는 흐름이 언급됐다.</p>
+<p>차지훈은 스토리를 제외하면 창업 비용으로 볼 수 있다고 제안했고, 박준민은 스토리를 완전히 무시하는 컨셉은 아니라고 답했다. <strong>초기 지원금 유지·초기 강제 대출·선택 대출 중 어떤 방식을 사용할지는 확정되지 않았다.</strong></p>
+<h3>초기 장비를 유료화해 역할 분담 유도</h3>
+<ul>
+<li>박준민이 기존 0원 초기 장비의 가격을 올리자고 제안했다. 목적은 알맞은 역할 분담이다.</li>
+<li>이길호가 긍정적으로 반응하고, 처음 살 수 있는 도구를 4개로 정해 하나씩만 살 수 있게 하자고 구체화했다.</li>
+<li>도구 4개의 종류·가격·구매 주체·중복 제한 범위는 정하지 않았다.</li>
+</ul>
+<div class="note"><p><strong>‘하나씩’의 의미를 확인해야 한다.</strong> 팀에 각 도구 1개씩만 허용하는 것인지, 플레이어마다 도구 1개를 선택하는 것인지 원문으로 확정할 수 없다. 4명 플레이가 언급됐지만 인원별 지급·구매 규칙은 미정이다.</p></div>
+</section>
+
+<section id="tone">
+<h2>게임의 방향성: 힐링과 수익 압박</h2>
+<p>대출의 기능적 목표는 <strong>돈을 벌어야 한다는 동기를 주고 자연스럽게 청소를 시작하게 만드는 것</strong>이었다. 다만 주기 징수와 게임오버를 붙이면 힐링 중심에서 긴박한 협동 플레이로 무게가 이동한다는 점을 함께 논의했다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">관점</th><th scope="col">발언에서 확인된 의견</th></tr></thead><tbody>
+<tr><th scope="row">압박이 과할 수 있음</th><td>이길호는 초기 게임오버 안이 빡셀 수 있다고 우려했고, 이자는 늘어나지 않았으면 한다고 말했다. 김동연은 4명이 활동하면 1분이 금방 지나간다는 이유로 3분을 제안했다.</td></tr>
+<tr><th scope="row">수익 확보 동기가 필요함</th><td>차지훈은 돈을 벌어야 한다는 강제성이 있으면 좋겠다고 설명했고, 박준민이 동의했다. 이길호도 자연스럽게 청소를 시작할 수 있다고 반응했다.</td></tr>
+<tr><th scope="row">긴박함도 재미가 될 수 있음</th><td>이은진은 힐링을 버리는 방향과 고리대금 방식의 재미 가능성을 언급했다. 이길호는 힐링을 버린다면 수익 압박으로 리듬감을 주는 것도 괜찮다고 답했다.</td></tr>
+</tbody></table></div>
+<p><strong>결론:</strong> 긴박한 방향에 긍정적인 의견이 있었지만, 힐링 정체성을 실제로 변경한다는 최종 결정은 없다. 수치 확정 전에 게임의 목표 감정을 먼저 합의해야 한다.</p>
+</section>
+
+<section id="voices">
+<h2>참여자별 주요 의견</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">참여자</th><th scope="col">주요 제안·반응</th></tr></thead><tbody>
+<tr><th scope="row">이길호</th><td>Day 연계 대출의 존폐·시간 전환 질문. 청소 수익을 돈으로, 최종 평가는 청소량으로 분리하는 흐름 재확인. 게임오버 압박 우려, 독촉 UI 제안, 3분 주기 긍정, 증가하지 않는 차감액 선호. 낮은 이자의 초반 장비 확보 우려. 초기 도구 4개·하나씩 구매 제안.</td></tr>
+<tr><th scope="row">박준민</th><td>돈과 랭크 분리 제안. 대출 후 30분 유예·1분 차감·음수 시 종료안, 3분마다 원금 1/10 차감안 제시. 초기금은 처음엔 대출과 분리하려 했으나 이후 대출 포함도 가능하다고 재검토. 스토리를 완전히 무시하지 않는다고 설명. 초기 무료 장비 유료화 제안.</td></tr>
+<tr><th scope="row">차지훈</th><td>시간별 돈 차감·음수 시 게임오버 제안. 돈을 벌어야 한다는 동기 부여를 목적이라고 설명. 초기 착수금의 대출 여부 질문. 상환 총액을 고정하고 일정 비율을 지속 징수하는 안, 초기금을 창업 비용으로 보는 해석 제안.</td></tr>
+<tr><th scope="row">김동연</th><td>4명 협동 플레이에서 1분 주기는 짧다고 판단하고 3분 주기를 제안.</td></tr>
+<tr><th scope="row">이은진</th><td>힐링을 내려놓는 방향도 검토할 수 있다고 의견 제시. 재미 측면에서 고리대금 방식에 긍정적인 가능성을 언급.</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="timeline">
+<h2>논의 흐름</h2>
+<div class="table-wrap"><table><thead><tr><th scope="col">시간</th><th scope="col">논의 전환</th></tr></thead><tbody>
+<tr><th scope="row">16:58–17:02</th><td>대출 변경 여부 확인 → Day 연계 문제 → 대출 중지·시간 환산 검토 → 점수와 돈이 묶인 구조의 문제 제기.</td></tr>
+<tr><th scope="row">17:03–17:07</th><td>돈과 최종 랭크 분리 제안 및 재확인 → 대출 삭제와 시간 기반 유지 비교.</td></tr>
+<tr><th scope="row">17:10–17:13</th><td>주기 차감·음수 게임오버 제안 → 30분 유예안 → 독촉 UI → 초기금의 대출 여부 논의.</td></tr>
+<tr><th scope="row">17:14–17:16</th><td>청소 동기 부여 필요성에 동의 → 1분 주기 부담 지적 → 3분 제안에 긍정 반응.</td></tr>
+<tr><th scope="row">17:17–17:19</th><td>일정한 차감액 선호 → 원금 10% 후보 → 힐링과 긴박함의 방향성 검토 → 고정 상환액 기반 징수 제안.</td></tr>
+<tr><th scope="row">17:20–17:23</th><td>초기 강제 대출·창업 비용·스토리 해석 → 무료 초기 장비 유료화 → 시작 도구 4개와 하나씩 구매 제안.</td></tr>
+</tbody></table></div>
+<details><summary>핵심 발언 확인</summary><div class="inside">
+<blockquote class="quote"><p>“최종점수 반영은 쓰레기가 얼마나 치워졌느냐로 따진다는말이죠?”</p><cite>이길호 · 17:04 · 돈과 평가의 분리 확인</cite></blockquote>
+<blockquote class="quote"><p>“그러면 어떨까? 하는 생각입니다”</p><cite>박준민 · 17:13 · 유예·차감 흐름은 제안 단계</cite></blockquote>
+<blockquote class="quote"><p>“저는 한 3분정도면 좋지 않을까합니다”</p><cite>김동연 · 17:15 · 1분 주기 부담에 대한 대안</cite></blockquote>
+<blockquote class="quote"><p>“저는 이자가 늘어나지는 않고 동일하게 깍였으면 좋겠긴 한데”</p><cite>이길호 · 17:17 · 고정 차감 선호</cite></blockquote>
+<blockquote class="quote"><p>“고정 금액 차감에 대하여 대출할 때 갚아야 하는 금액을 고정시켜놓고, 해당 금액의 일정 비율만큼 지속적으로 징수해가는 겄은 어떠할까요?”</p><cite>차지훈 · 17:19 · 징수 기준 금액 제안</cite></blockquote>
+<blockquote class="quote"><p>“처음에 살 수 있는 도구를 딱 4개 정해서 하나씩 만 살 수 있게”</p><cite>이길호 · 17:23 · 시작 도구 구매안</cite></blockquote>
+</div></details>
+</section>
+
+<section id="questions">
+<h2>결정이 필요한 사항</h2>
+<p>앞부분의 후보안을 구현 규칙으로 옮기려면 아래 질문에 답해야 한다. ‘추가 확인’ 항목은 회의에서 직접 논의하지 않았지만, 제안들을 연결할 때 생기는 빈칸이다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">구분</th><th scope="col">결정할 질문</th></tr></thead><tbody>
+<tr><th scope="row">게임 방향</th><td>힐링을 유지하는가, 수익 압박이 있는 긴박한 협동 플레이를 목표로 하는가?</td></tr>
+<tr><th scope="row">대출 존폐</th><td>삭제하는가, 선택 대출로 유지하는가, 초기금부터 강제 대출로 시작하는가?</td></tr>
+<tr><th scope="row">유예·주기</th><td>30분 유예와 3분 차감을 채택하는가? 첫 징수는 유예 종료 즉시인가, 종료 후 한 주기가 지난 시점인가?</td></tr>
+<tr><th scope="row">차감 계산</th><td>정액인가, 최초 원금의 비율인가, 고정된 상환 총액의 비율인가? 10% 제안을 사용할 것인가?</td></tr>
+<tr><th scope="row">상환 처리</th><td>주기 징수는 이자만인가, 원금 상환도 포함하는가? 수동 상환과 일부 상환을 허용하는가? 완납 후 무엇이 멈추는가?</td></tr>
+<tr><th scope="row">초기 경제</th><td>초기금과 시작 장비 가격은 얼마인가? 구매 가능한 도구 4개는 무엇인가? ‘하나씩’의 제한은 팀 기준인가, 개인 기준인가?</td></tr>
+<tr><th scope="row">게임오버</th><td>음수 즉시 종료안을 채택하는가? 개인 실패인가, 팀 전체 실패인가? 기존 평가·보상과 어떻게 연결하는가?</td></tr>
+<tr><th scope="row">최종 평가</th><td>남은 쓰레기와 청소량을 어떤 산식으로 평가하는가? 100점 감점형을 유지하는가? 오염물·기믹·추가 생성 쓰레기를 포함하는가?</td></tr>
+<tr><th scope="row">추가 확인: 시간</th><td>실시간인가, 실제 플레이 시간인가? 일시정지·로딩·재접속 시 유예와 징수 시간을 어떻게 처리하는가?</td></tr>
+<tr><th scope="row">추가 확인: 협동</th><td>돈·대출·상환은 개인 단위인가, 팀 공동 단위인가? 인원 감소나 미참여 플레이어가 있을 때 어떻게 처리하는가?</td></tr>
+<tr><th scope="row">추가 확인: 도구 접근</th><td>4명 미만으로 시작하거나 필요한 도구 구매에 실패해도 기본 청소를 진행할 수 있는가?</td></tr>
+<tr><th scope="row">추가 확인: UI·스토리</th><td>남은 시간·잔액·부채·차감액 중 무엇을 보여줄 것인가? 초기금과 대출의 설정을 기존 스토리에 어떻게 설명하는가?</td></tr>
+</tbody></table></div>
+</section>
+
+<section id="next">
+<h2>다음 회의 준비</h2>
+<p class="muted">아래는 문서 정리 과정에서 제안한 후속 검토 항목이다. 회의에서 담당자나 일정이 배정된 작업은 아니다.</p>
+<ol class="checklist">
+<li><strong>게임의 목표 감정과 대출 존폐부터 결정한다.</strong> 힐링 유지와 시간 압박 강화 중 방향을 선택한 뒤 경제 규칙을 맞춘다.</li>
+<li><strong>숫자 비교표를 만든다.</strong> 초기금·도구 가격·쓰레기 수익·대출액·주기 차감액을 함께 놓고, 시작 장비 구매와 상환이 가능한지 비교한다.</li>
+<li><strong>후보 시간을 실제 플레이로 검토한다.</strong> 30분 유예와 3분 주기를 기준 후보로 두되, 1분·5분과 비교해 청소 동기와 협동 방해 정도를 확인한다. 후보를 채택했다는 뜻은 아니다.</li>
+<li><strong>쉬운 악용과 막히는 상황을 확인한다.</strong> 초반 대출로 고급 장비를 모두 구매하는 경우, 낮은 수익으로 상환이 불가능한 경우, 도구 제한으로 청소가 막히는 경우를 점검한다.</li>
+<li><strong>합의된 규칙을 별도 명세로 옮긴다.</strong> 돈·평가·부채·시간·게임오버·협동 단위를 정의하고, UI와 스토리 설명까지 연결한다.</li>
+</ol>
+</section>
+
+</div></details>
+</section>
+<footer>2026-10-02 대화 통합 정리. 사용자 지정 방향과 제안·미결정 사항을 구분했다. 원본 회의 기록은 별도 보존했다. 외부 이미지·폰트·라이브러리 없이 이 HTML 파일 하나로 열람하며, JSON·검사 로그에 의존하지 않는다.</footer>
+<section id="income-report" data-section><h2>결과 보고서 · 수익과 지출</h2><p>플레이어별 수익은 벌어들인 돈으로 표시합니다. 돈이 빠져나가는 내역은 별도로 산출합니다. 문·분리수거기 고장 손실은 팀 전체 합산으로 표시하고, 아이템 구매비는 별도 지출로 구분해 고장 손실에 포함하지 않습니다.</p></section><section id="crowbar-emergency-entry" data-section><h2>빠루 · 500원 영구 사용 장비</h2><p class="subtle">2026-10-07 사용자 확정 · 기획 반영 / 구현 예정</p><p>방 안의 플레이어가 문을 수리하기 전에 사망해 내부 배선반에 접근할 수 없는 상황에서는, 문 밖에서 빠루를 사용해 고장 난 문을 강제로 열고 다시 진입한다.</p><div class="table-wrap"><table><thead><tr><th>항목</th><th>확정 규칙</th></tr></thead><tbody><tr><td>구매</td><td>상점 판매 가격은 우선 500원으로 설정한다. 영구 사용 장비이며, 밸런스 검증 후 가격을 조정할 수 있다.</td></tr><tr><td>사용</td><td>문 밖에서 고장 난 문을 강제로 개방해 재진입할 수 있다.</td></tr><tr><td>소모</td><td>영구 사용. 사용 시 빠루가 소비되거나 파손되어 다시 구매해야 하는 방식이 아니다.</td></tr><tr><td>자금 마련</td><td>빠루가 없거나 구매할 돈이 부족하면, 막힌 방 외의 구역에서 청소·분리수거로 돈을 벌거나 추가 대출을 받아 구매한다.</td></tr><tr><td>기존 수리</td><td>접근 가능한 내부 배선반의 절연테이프 1개 수리와 인원별 무도구 수리는 유지한다. 양쪽 배선반 설치나 무료 외부 비상 수리를 이번 사망 예외의 해결책으로 추가하지 않는다.</td></tr></tbody></table></div><p>진행 흐름: 내부 플레이어 사망 → 빠루 보유 여부 확인 → 미보유 시 다른 구역에서 수익 확보 또는 추가 대출 → 상점 구매 → 문 밖에서 강제 개방 → 방 재진입. 이미 빠루가 있으면 재구매 없이 반복 사용할 수 있다.</p><p>남은 결정: 강제 개방 소요 시간, 개방 후 고장·지속 차감의 처리. 판매 가격은 우선 500원이며 밸런스 검증 후 조정 가능하다. 차단기 지침실의 별도 잠금을 빠루로 우회할 수 있는지는 이번 결정에 포함하지 않는다.</p></section><section id="meeting-20261007-confirmed"><h2>2026-10-07 회의 후 확인 사항</h2><div class="table-wrap"><table><thead><tr><th>항목</th><th>확정·처리 상태</th></tr></thead><tbody><tr><td>빠루</td><td>영구 사용 확정. 사용 시 소모하지 않는 장비이며, 외부에서 고장 문을 강제로 개방한다. 회의록의 일회용 표기는 적용하지 않는다. 실제 아이템 구현은 별도 작업이다.</td></tr><tr><td>문 고장 주기</td><td>Ocean의 3~5분 랜덤 주기 설정 완료. 기존 방 점유 판정과 고장 제외 조건을 유지한다. 펌프·분리수거기 주기 완료를 뜻하지 않는다.</td></tr><tr><td>대출 한도</td><td>조정 필요. 현재 코드의 총 한도 2,000과 초기 부채 1,300 기준 추가 대출 여유는 700이다. 새로운 한도 수치는 아직 정하지 않았으며 코드값은 변경하지 않는다.</td></tr><tr><td>빠루 가격</td><td>판매 가격을 우선 500원으로 설정한다. 영구 사용 규칙을 유지하며, 대출 한도와 함께 밸런스를 검증한 뒤 필요하면 조정한다.</td></tr></tbody></table></div><p>그 외 회의 대조에서 제기된 항목은 추후 확인한다. 이번 확인으로 다른 규칙·수치·구현 완료 상태를 새로 확정하지 않는다.</p></section><section id="fingerprint-fault-20261009" data-section><h2>지문 인증 방해와 인원별 고장 차감</h2><p class="subtle">2026-10-09 · C=5원 우선 적용 / 구현·오션 1인 및 격리 2인 검증 완료</p><p>폐기물처리장 비상 안전모드가 발생하면 연결된 5종 분리수거기의 투입·소비·정산을 중단한다. 쓰레기 수거와 운반은 계속할 수 있다. 패드 A는 1층 통제실 <code>BP_Door3</code> 입구 바깥, 패드 B는 기획 B1 유지보수실 <code>BP_Door6</code> 입구 바깥의 공용 벽에 두며, 기획 B1은 실제 배치상 2층이다.</p><p>다인은 서로 다른 두 플레이어가 각 패드의 E 상호작용을 누르고 있어 인식 상태가 겹치면 복구한다. 누르기 시작한 시각이 같을 필요는 없고, 해제·조준 이탈·거리 이탈·사망·접속 종료 시 해당 인식을 해제한다. 솔로는 한 패드를 인증한 뒤 제한 시간 내 반대 패드를 인증한다. 제한 시간은 우선 45초의 조정 가능한 구현값으로 두고 양방향 층간 이동 실측 후 확정한다. 같은 패드를 다시 눌러도 남은 시간을 늘리지 않는다. 운반 중인 쓰레기는 내려놓은 뒤 인증한다.</p><div class="table-wrap"><table><thead><tr><th>참여 인원</th><th>초당 차감</th><th>1분 미수리 시</th></tr></thead><tbody><tr><td>1인</td><td>0원</td><td>0원</td></tr><tr><td>2인</td><td>5원</td><td>300원</td></tr><tr><td>3인</td><td>10원</td><td>600원</td></tr><tr><td>4인</td><td>20원</td><td>1,200원</td></tr></tbody></table></div><p>차감 기준 C는 우선 5원이다. 배수는 1인 0 / 2인 1 / 3인 2 / 4인 4이며 실제 쓰레기 정산 단가는 변경하지 않는다. 고장 발생부터 복구까지 팀 공동 자금에서 차감하고, 수익과 분리해 사고 지출로 산출한다. 대출 완납 여부와 무관하다.</p><p>이번 연결 범위는 지문 인증으로 해제하는 안전모드 사건이다. 안전모드 해제 시 정산을 재개하되 개별 문·펌프·분리수거기의 기존 고장은 유지한다. 자동 발생은 문 고장과 별도로 5~7분(300~420초) 랜덤 주기로 우선 테스트한다. 이미 진행 중인 사건은 중복 발생하지 않는다. 배기 연출과 다른 고장의 차감 중첩은 후속 조정 대상이다.</p><p>구현 정책: 서버가 차감 시점의 실제 참여 인원을 계산하며 관전자·비활성 인원은 제외한다. 인원이 변해 솔로/다인 인증 방식이 바뀌면 이전 인증을 초기화한다. 동일 안전모드 사건은 한 번만 차감하며 중복 발생 요청으로 타이머를 늘리지 않는다. 잔액 하한은 기존 경제 시스템의 0원 규칙을 유지한다.</p><p>테스트 명령: 호스트/서버 콘솔에서 <code>MD.BreakFingerprint</code>를 실행하면 배치된 지문 안전모드 사건을 즉시 발생시킨다. 이벤트 BP의 기본 자동 주기는 300~420초이며 문 고장의 180~300초 설정과 별개다. 패드 A·B와 연결된 분리수거기 목록은 맵 인스턴스에서 지정한다.</p><p class="subtle">검증 범위: 오션맵 1인 플레이에서 실제 상호작용 경로로 A·B 인증과 분리수거기 5대 정지·복구를 확인했다. 격리 2인 PIE에서는 서로 다른 플레이어의 E 유지, 해제·조준 이탈·사망 처리, 금액 차감, 복구 후 쓰레기 정산을 검증했다. 3·4인 차감 수치는 자동화로 확인했으며 실제 3·4인 오션 플레이와 솔로 층간 이동 시간 실측은 후속 검증이다. 오션 1인 테스트는 패드 사이를 이동시켜 인증했으므로 45초를 실측 완료값으로 취급하지 않는다.</p></section></main>
+</div>
+<script>
+
+(()=>{'use strict';const byId=id=>document.getElementById(id);const factors=[1,1.7,2.3,2.8];const fmt=n=>Math.round(n).toLocaleString('ko-KR');function calculate(){const f=factors[Number(byId('party').value)];const pace=Number(byId('pace').value)/100;const basket=1100;const advance=1300;const isContract=byId('debt-model').value==='contract';const initial=isContract?2400*f:advance;const alreadySpent=initial-advance;const income=100*f*pace;const interest=Math.ceil(initial*.02);const principal=150*f;const purchase=Number(byId('upgrade').value);let cash=advance-basket,debt=initial,paidInterest=0,full=null,failed=null,negativeAt=null,purchased=false,purchaseDenied=false;for(let step=1;step<=300;step++){const t=step/10;cash+=income/10;if(step>=90&&(step-90)%30===0&&debt>0){const repay=Math.min(principal,debt);cash-=repay+interest;debt-=repay;paidInterest+=interest;}if(step===120&&purchase>0){if(cash>=purchase){cash-=purchase;purchased=true;}else purchaseDenied=true;}if(cash<-.000001){if(negativeAt===null)negativeAt=t;if(t-negativeAt>=1-.000001){failed=t;break;}}else negativeAt=null;if(debt>0&&cash>=debt&&cash>=0){cash-=debt;debt=0;full=t;}if(debt===0&&full===null&&cash>=0)full=t;}byId('pace-label').textContent=Math.round(pace*100)+'%';byId('start-budget').textContent='착수금 '+fmt(advance)+' − 기본 도구 '+fmt(basket)+' = 현장 잔액 200. 총채무 '+fmt(initial)+(isContract?' 중 이전 준비 집행분 '+fmt(alreadySpent)+'.':'. 별도 계약 채무 없음.');byId('burden').textContent=income>0?((principal+interest)/(income*3)*100).toFixed(1)+'%':'수익 없음';byId('repay-time').textContent=failed!==null?'회복 실패':full!==null?'약 '+full.toFixed(1)+'분':'30분 내 미완납';byId('end-state').textContent=fmt(cash)+' / '+fmt(debt);let message=failed!==null?'약 '+failed.toFixed(1)+'분에 60초 회복 시간이 끝납니다. 오른쪽 금액은 실패 시점 상태입니다.':'30분까지 계산했습니다. 납부 이자 합계 '+fmt(paidInterest)+'.';if(purchased)message+=' 12분에 '+fmt(purchase)+' 추가 구매 반영. 성능에 따른 수익 증가는 포함하지 않았습니다.';if(purchaseDenied)message+=' 12분 구매는 잔액 부족으로 취소했습니다.';if(failed===null&&negativeAt!==null)message+=' 30분 시점에 음수 회복 시간이 진행 중입니다.';if(!isContract&&full!==null&&full<9)message+=' 첫 징수 전에 완납하므로 장기 압박을 만들지 못합니다.';byId('calc-note').textContent=message;}['party','debt-model','pace','upgrade'].forEach(id=>byId(id).addEventListener('input',calculate));calculate();})();
+
+</script></body></html>

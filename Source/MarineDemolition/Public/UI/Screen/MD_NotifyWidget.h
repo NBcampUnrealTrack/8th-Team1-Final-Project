@@ -5,7 +5,7 @@
 #include "UI/Foundation/MD_CommonGameMenuWidget.h"
 #include "MD_NotifyWidget.generated.h"
 
-class UMD_CommonButtonBase;
+class UButton;
 class UTextBlock;
 
 // 알림 화면에서 독립적으로 선택 가능한 버튼 플래그
@@ -71,13 +71,13 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Notify", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_Description;
 
-	// 취소 입력을 받는 WBP 버튼을 바인딩한다.
+	// 취소 입력을 받는 기본 UMG 버튼 바인딩
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Notify", meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CommonButtonBase> Btn_Cancel;
+	TObjectPtr<UButton> Btn_Cancel;
 
-	// 확인 입력을 받는 WBP 버튼을 바인딩한다.
+	// 확인 입력을 받는 기본 UMG 버튼 바인딩
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Notify", meta = (BindWidgetOptional))
-	TObjectPtr<UMD_CommonButtonBase> Btn_Confirm;
+	TObjectPtr<UButton> Btn_Confirm;
 
 public:
 	// 제목과 설명 및 선택된 버튼 플래그의 일괄 반영

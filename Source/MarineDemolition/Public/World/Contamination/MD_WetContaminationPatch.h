@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CoreMinimal.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "GameFramework/Actor.h"
 #include "Types/Trash/MD_TrashBinSpillTypes.h"
 #include "MD_WetContaminationPatch.generated.h"
@@ -44,22 +43,6 @@ struct MARINEDEMOLITION_API FMD_WetContaminationVisualDescriptor
 
 	/** 기존 단일 Wet의 액체량 기반 크기 계약을 그대로 보존한다. */
 	static float CalculateAmountBaseScale(double LiquidUnits);
-};
-
-/**
- * Wet 패치가 나중에 Adhered 오염으로 바뀔 때 사용할 전용 표면이다.
- *
- * 생성 시점에는 실제 오염 마스크가 없어야 하므로 초기량과 산출물 수를 0으로
- * 고정하고 기능도 꺼 둔다. SPILL-019가 원장을 넘기는 데 성공한 뒤에만 켠다.
- */
-UCLASS(ClassGroup = (MD))
-class MARINEDEMOLITION_API UMD_WetScrapeSurfaceComponent final
-	: public UMD_ScrapeSurfaceComponent
-{
-	GENERATED_BODY()
-
-public:
-	UMD_WetScrapeSurfaceComponent();
 };
 
 /** 클라이언트가 현재 젖은 웅덩이를 그리는 데 필요한 작은 복제 요약. */
@@ -167,10 +150,6 @@ public:
 	}
 
 	UStaticMeshComponent* GetVisualMesh() const { return VisualMesh; }
-	UMD_WetScrapeSurfaceComponent* GetWetScrapeSurface() const
-	{
-		return ScrapeSurface;
-	}
 
 	/** 제품 Blueprint가 런타임에 보이는 Wet을 만들 모든 에셋을 명시했는지. */
 	bool HasCompleteVisualConfiguration() const;
@@ -215,9 +194,6 @@ private:
 		Category = "MD|Wet Contamination|Visual",
 		meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UMaterialInterface> VisualMaterial;
-
-	UPROPERTY(VisibleAnywhere, Category = "MD|Wet Contamination")
-	TObjectPtr<UMD_WetScrapeSurfaceComponent> ScrapeSurface;
 
 	UPROPERTY(ReplicatedUsing = OnRep_PatchState, VisibleInstanceOnly,
 		Category = "MD|Wet Contamination")

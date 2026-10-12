@@ -2,7 +2,6 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
-#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
 
 AMD_QuestInteractionPickup::AMD_QuestInteractionPickup()
 {
@@ -32,26 +31,10 @@ FText AMD_QuestInteractionPickup::GetInteractionDisplayName_Implementation() con
 
 void AMD_QuestInteractionPickup::Interact_Implementation(AActor* Interactor)
 {
-	// Interact는 서버에서 실행된다 (RequiresServerInteraction 기본값 true)
-	if (HasAuthority() == false)
+	// 서버에서 상호작용한 일회용 월드 오브젝트 회수
+	if (HasAuthority() == true)
 	{
-		return;
-	}
-
-	if (QuestDefinitionId.IsValid() == false)
-	{
-		return;
-	}
-
-	UMD_MerchantSubsystem* Merchant = GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>();
-	if (IsValid(Merchant) == false)
-	{
-		return;
-	}
-
-	bool bSuccess = Merchant->NotifyInteractionProgress(QuestDefinitionId, PhaseIndex);
-	if (bSuccess == true)
-	{
+		// 퀘스트 진행도와 무관한 오브젝트 제거
 		Destroy();
 	}
 }

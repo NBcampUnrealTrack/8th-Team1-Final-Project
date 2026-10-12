@@ -151,16 +151,6 @@ FMD_WetContaminationVisualDescriptor::FromPatchId(const FGuid& PatchId)
 	return Descriptor;
 }
 
-UMD_WetScrapeSurfaceComponent::UMD_WetScrapeSurfaceComponent()
-{
-	bContaminationEnabled = false;
-	InitialContaminationPerCell = 0.0f;
-	bUseProceduralContamination = false;
-    bForceFullContamination = true;
-	ContaminationItemsPerFace = 0;
-	bShowContaminationDecals = false;
-}
-
 bool FMD_WetContaminationPatchState::IsValid() const
 {
 	return PatchId.IsValid()
@@ -205,9 +195,6 @@ AMD_WetContaminationPatch::AMD_WetContaminationPatch()
 	VisualVariantMeshes.SetNum(
 		FMD_WetContaminationVisualDescriptor::VariantCount);
 
-	ScrapeSurface = CreateDefaultSubobject<UMD_WetScrapeSurfaceComponent>(
-		TEXT("WetScrapeSurface"));
-	ScrapeSurface->ConfigureExternalComponents(VisualMesh, nullptr, nullptr);
 }
 
 bool AMD_WetContaminationPatch::HasCompleteVisualConfiguration() const
@@ -233,7 +220,6 @@ bool AMD_WetContaminationPatch::HasCompleteVisualConfiguration() const
 void AMD_WetContaminationPatch::BeginPlay()
 {
 	Super::BeginPlay();
-	ScrapeSurface->ConfigureExternalComponents(VisualMesh, nullptr, nullptr);
 	RefreshSupportAttachment();
 	RefreshVisual();
 }

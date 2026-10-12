@@ -2,34 +2,21 @@
 
 #include "CoreMinimal.h"
 #include "World/Sample/MD_QuestSampleSpawner.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "GameplayTagAssetInterface.h"
 #include "MD_QuestRackSpawner.generated.h"
 
-struct FMD_QuestRackRecord;
-class UDecalComponent;
 class UStaticMesh;
 class UStaticMeshComponent;
 
 UENUM(BlueprintType)
 enum class EMD_QuestRackMode : uint8
 {
-	Contamination UMETA(DisplayName = "Rack 1 - Clean 50 percent"),
+	// Retired cleaning mode retains its serialized value and now has open access.
+	Contamination UMETA(DisplayName = "Rack 1 - Open access", Hidden),
 	// Retain the serialized enum name/value for existing Blueprint assets and saves.
 	BarnaclesAndPadlock UMETA(DisplayName = "Rack 2 - Cut padlock"),
 	Open UMETA(DisplayName = "Rack 3 - Open access")
-};
-
-/** Same physical scraping/replication/visual implementation as cuttable walls. */
-UCLASS()
-class MARINEDEMOLITION_API UMD_QuestRackScrapeSurface : public UMD_ScrapeSurfaceComponent
-{
-	GENERATED_BODY()
-public:
-	UMD_QuestRackScrapeSurface();
-	void ConfigureRackBeforePlay(UStaticMeshComponent* RackMesh, UDecalComponent* Front, UDecalComponent* Back, bool bEnabled);
-	bool CompleteCleaningWithoutDrops();
 };
 
 /** A deterministic, one-cartridge rack. Three authored racks can serve one two-item quest. */
@@ -52,8 +39,6 @@ public:
 	virtual void Interact_Implementation(AActor* Interactor) override;
 
 	UFUNCTION(BlueprintPure, Category="MD|Quest Rack")
-	float GetContaminationRemovedRatio() const;
-	UFUNCTION(BlueprintPure, Category="MD|Quest Rack")
 	float GetPadlockCutRatio() const;
 	UFUNCTION(BlueprintPure, Category="MD|Quest Rack")
 	bool IsPadlockCut() const { return bPadlockCut; }
@@ -72,24 +57,11 @@ public:
 	bool CanCutPadlockFromHit(const FHitResult& Hit) const;
 	/** Called only by the existing server cutter ability. Revalidates equipment and line of sight. */
 	void AddPadlockCutProgress(float WorkSeconds, AActor* Cutter, const FHitResult& Hit);
-	void CaptureRackState(FMD_QuestRackRecord& OutRecord) const;
-	static bool ValidateRackState(const FMD_QuestRackRecord& Record);
-	bool CanRestoreRackState(const FMD_QuestRackRecord& Record) const;
-	bool RestoreRackState(const FMD_QuestRackRecord& Record);
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
 	TObjectPtr<UStaticMeshComponent> RackMesh;
-	/** A front work panel; excludes unreachable rack interiors from cleaning progress. */
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
-	TObjectPtr<UStaticMeshComponent> RackWorkSurface;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
 	TObjectPtr<UStaticMeshComponent> PadlockMesh;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
-	TObjectPtr<UMD_QuestRackScrapeSurface> RackScrapeSurface;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
-	TObjectPtr<UDecalComponent> FrontContaminationDecal;
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Quest Rack|Components")
-	TObjectPtr<UDecalComponent> BackContaminationDecal;
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing=OnRep_RackState, Category="MD|Quest Rack")
 	EMD_QuestRackMode RackMode = EMD_QuestRackMode::Open;
@@ -97,8 +69,6 @@ public:
 	FPrimaryAssetId RackQuestDefinitionId;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MD|Quest Rack", meta=(ClampMin="0"))
 	int32 RackPhaseIndex = 0;
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MD|Quest Rack", meta=(ClampMin="0.0", ClampMax="1.0"))
-	float RequiredCleanRatio = 0.5f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MD|Quest Rack", meta=(ClampMin="0.1", Units="s"))
 	float RequiredPadlockCutSeconds = 3.6f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MD|Quest Rack", meta=(ClampMin="1.0", Units="cm"))
@@ -115,10 +85,9 @@ protected:
 
 private:
 	void ConfigureRackComponents();
-	bool FindActiveRackQuest(FMD_MainQuestState& OutState) const;
 	bool IsAccessRequirementMet() const;
-	AMD_QuestItem* SpawnCartridge(const FMD_MainQuestState& QuestState);
-	void RefreshRackGroup();
+	// 랙에 저장된 물품 구성으로 회수용 카트리지 생성
+	AMD_QuestItem* SpawnCartridge();
 	UFUNCTION() void OnRep_RackState();
 
 	UPROPERTY(ReplicatedUsing=OnRep_RackState) bool bQuestActive = false;

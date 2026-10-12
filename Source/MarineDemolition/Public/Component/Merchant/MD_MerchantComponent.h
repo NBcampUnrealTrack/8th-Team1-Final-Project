@@ -47,24 +47,11 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
 	int32 GetDebtBalance() const { return DebtBalance; }
 
+	// 서버 원장에서 복제된 고정 이자 기준 원금을 반환하는 함수
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
-	int32 GetCurrentDay() const { return CurrentDay; }
+	int32 GetLoanPrincipal() const { return LoanPrincipal; }
 
-	// 서버 원장에서 복제된 호감도를 UI와 상점 해금 판정에 제공하는 함수
-	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
-	float GetAffinity() const { return Affinity; }
 
-	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
-	int32 GetQuestCompletions() const { return QuestCompletions; }
-
-	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
-	int32 GetActiveQuestReward() const { return ActiveQuestReward; }
-
-	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
-	TArray<FMD_MainQuestState> GetMainQuests() const { return MainQuests; }
-
-	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
-	TArray<FMD_RepeatQuestState> GetRepeatQuests() const { return RepeatQuests; }
 
 	// 클라이언트에 복제된 전체 구매 식별자 목록 제공
 	UFUNCTION(BlueprintPure, Category = "MD|Merchant")
@@ -86,24 +73,11 @@ private:
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
 	int32 DebtBalance = 0;
 
+	// 클라이언트 대출 UI가 서버와 같은 고정 이자를 계산하기 위한 복제 원금
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
-	int32 CurrentDay = 0;
+	int32 LoanPrincipal = 0;
 
-	// 모든 클라이언트가 같은 상점 해금 상태를 사용하기 위한 복제 호감도
-	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
-	float Affinity = 0.0f;
 
-	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
-	int32 QuestCompletions = 0;
-
-	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
-	int32 ActiveQuestReward = 0;
-
-	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
-	TArray<FMD_MainQuestState> MainQuests;
-
-	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)
-	TArray<FMD_RepeatQuestState> RepeatQuests;
 
 	// 팀 구매 이력을 타입과 이름을 포함하여 클라이언트에 복제
 	UPROPERTY(ReplicatedUsing = OnRep_MerchantState)

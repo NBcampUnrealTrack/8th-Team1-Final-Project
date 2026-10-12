@@ -23,10 +23,6 @@ void UMD_TravelDifficultyWidget::NativeConstruct()
 	{
 		BTN_Diff_Dangerous->OnClicked.AddDynamic(this, &UMD_TravelDifficultyWidget::HandleDiffDangerousClicked);
 	}
-	if (BTN_Diff_Extreme)
-	{
-		BTN_Diff_Extreme->OnClicked.AddDynamic(this, &UMD_TravelDifficultyWidget::HandleDiffExtremeClicked);
-	}
 
 	if (BTN_Back)
 	{
@@ -38,7 +34,6 @@ void UMD_TravelDifficultyWidget::NativeConstruct()
 	}
 
 	RefreshDifficultyButtons();
-	RefreshInspectionPreview();
 }
 
 bool UMD_TravelDifficultyWidget::IsHost() const
@@ -56,7 +51,6 @@ void UMD_TravelDifficultyWidget::SetSelectedSite(const FText& InSiteDisplayName)
 	}
 
 	RefreshDifficultyButtons();
-	RefreshInspectionPreview();
 }
 
 void UMD_TravelDifficultyWidget::ResetSelection()
@@ -64,7 +58,6 @@ void UMD_TravelDifficultyWidget::ResetSelection()
 	SelectedDifficulty = EMD_Difficulty::Standard;
 
 	RefreshDifficultyButtons();
-	RefreshInspectionPreview();
 }
 
 void UMD_TravelDifficultyWidget::SelectDifficulty(EMD_Difficulty NewDifficulty)
@@ -77,19 +70,17 @@ void UMD_TravelDifficultyWidget::SelectDifficulty(EMD_Difficulty NewDifficulty)
 	SelectedDifficulty = NewDifficulty;
 
 	RefreshDifficultyButtons();
-	RefreshInspectionPreview();
 }
 
 void UMD_TravelDifficultyWidget::RefreshDifficultyButtons()
 {
 	const bool bHost = IsHost();
 
-	UButton* const DiffButtons[] = { BTN_Diff_Safe, BTN_Diff_Standard, BTN_Diff_Dangerous, BTN_Diff_Extreme };
+	UButton* const DiffButtons[] = { BTN_Diff_Safe, BTN_Diff_Standard, BTN_Diff_Dangerous };
 	const EMD_Difficulty DiffValues[] = {
 		EMD_Difficulty::Safe,
 		EMD_Difficulty::Standard,
-		EMD_Difficulty::Dangerous,
-		EMD_Difficulty::Extreme
+		EMD_Difficulty::Dangerous
 	};
 
 	for (int32 Index = 0; Index < UE_ARRAY_COUNT(DiffButtons); ++Index)
@@ -111,22 +102,6 @@ void UMD_TravelDifficultyWidget::RefreshDifficultyButtons()
 	}
 }
 
-void UMD_TravelDifficultyWidget::RefreshInspectionPreview()
-{
-	if (!TXT_InspectionPreview)
-	{
-		return;
-	}
-
-	const int32 Day2 = MDTravel::GetScaledInspectionTarget(MDTravel::BaseInspectionDay2, SelectedDifficulty);
-	const int32 Day3 = MDTravel::GetScaledInspectionTarget(MDTravel::BaseInspectionDay3, SelectedDifficulty);
-	const int32 Day4 = MDTravel::GetScaledInspectionTarget(MDTravel::BaseInspectionDay4, SelectedDifficulty);
-
-	TXT_InspectionPreview->SetText(FText::Format(
-		NSLOCTEXT("MDTravel", "InspectionPreview", "점검 기준 · Day2 {0} · Day3 {1} · Day4 {2}   (4인 기준)"),
-		FText::AsNumber(Day2), FText::AsNumber(Day3), FText::AsNumber(Day4)));
-}
-
 void UMD_TravelDifficultyWidget::HandleDiffSafeClicked()
 {
 	SelectDifficulty(EMD_Difficulty::Safe);
@@ -140,11 +115,6 @@ void UMD_TravelDifficultyWidget::HandleDiffStandardClicked()
 void UMD_TravelDifficultyWidget::HandleDiffDangerousClicked()
 {
 	SelectDifficulty(EMD_Difficulty::Dangerous);
-}
-
-void UMD_TravelDifficultyWidget::HandleDiffExtremeClicked()
-{
-	SelectDifficulty(EMD_Difficulty::Extreme);
 }
 
 void UMD_TravelDifficultyWidget::HandleBackClicked()

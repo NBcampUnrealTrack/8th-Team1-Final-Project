@@ -3,15 +3,17 @@
 #include "CoreMinimal.h"
 #include "Subsystems/WorldSubsystem.h"
 #include "Types/Trash/MD_TrashSpawnState.h"
+#include "Types/Travel/MD_TravelTypes.h"
 #include "MD_TrashSpawnManager.generated.h"
 
 class AMD_TrashSpawnVolume;
 class AMD_TrashFloorGenerator;
 class AMD_TrashItem;
+class UMD_TrashSpawnProfile;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnTotalTrashCountChanged, int32, RemainingCount);
 
-/** Server-side collection and save boundary for the map's procedural trash generators. */
+/** Server-side collection of the map's procedural trash generators. */
 UCLASS(Config = Game)
 class MARINEDEMOLITION_API UMD_TrashSpawnManager : public UWorldSubsystem
 {
@@ -27,27 +29,15 @@ public:
         TArray<float>& Radii, float& MinimumSpacing) const;
 	void RegisterGenerator(AMD_TrashSpawnVolume* Generator);
 	void UnregisterGenerator(AMD_TrashSpawnVolume* Generator);
-	/** Loading pumps this before applying file/day saves; false means failed, !ready means pending. */
+	/** 월드 초기화가 매 틱 호출; false는 실패, !ready는 준비 대기 */
 	bool PrepareGenerators(bool& bReady);
 	void RequestInitialization();
 
-	/** Called after file and day state have been restored, before the initial auto-save. */
+	/** 준비가 끝난 뒤 아직 초기화되지 않은 생성기에 첫 배치를 실행 */
 	bool InitializeUnrestoredGenerators();
 
-	bool CaptureStates(TArray<FMD_TrashGeneratorState>& OutStates) const;
-	bool CanRestoreStates(const TArray<FMD_TrashGeneratorState>& States) const;
-	/** Reserve only obsolete authored trash while the actor snapshot is applied. */
-	bool PrepareRestoreStates(const TArray<FMD_TrashGeneratorState>& States);
-	bool ReserveAuthoredTrashForRestore(AMD_TrashItem* Item);
-	void CancelPreparedRestore() { ReservedTrash.Reset(); bReserveAuthoredTrash = false; }
-    bool CapturePlacements(TMap<FName, FMD_TrashGeneratorPlacement>& Out) const;
-    bool CanRestorePlacements(const TArray<FMD_TrashGeneratorState>& States,
-        const TMap<FName, FMD_TrashGeneratorPlacement>& Placements) const;
-    bool RestoreStates(const TArray<FMD_TrashGeneratorState>& States,
-        const TMap<FName, FMD_TrashGeneratorPlacement>* DayPlacements = nullptr);
-	/** Called before save restoration; captures immutable authored identity and source positions. */
+	/** AutoFloorMaps 맵에서 배치된 쓰레기를 바닥 생성기로 전환하기 위한 원본 위치 수집 */
 	bool EnableAuthoredFloorTransition();
-	bool IsTransitionGenerator(const AMD_TrashSpawnVolume* Generator) const;
 
 	UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
 	int32 GetGeneratorCount() const;
@@ -58,16 +48,46 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
 	int32 GetRemainingTrashCount() const;
 
+	// 마지막 비율 분배에서 계산한 맵 전체 목표 개수. 분배 전이면 0
+	UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
+	int32 GetDistributedTrashTotal() const { return DistributedTrashTotal; }
+
+	// 마지막 비율 분배에 쓴 인원수
+	UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
+	int32 GetDistributedPlayerCount() const { return DistributedPlayerCount; }
+
+	// 마지막 비율 분배에 쓴 계약 난이도
+	UFUNCTION(BlueprintPure, Category = "MD|Trash Spawn")
+	EMD_Difficulty GetDistributedDifficulty() const { return DistributedDifficulty; }
+
+	// 활성 총량 프로필: 생성기 재정의 → 현장(Site) 프로필 → 없음(Project Settings 폴백). 에디터 월드에서도 동작한다
+	static UMD_TrashSpawnProfile* ResolveProfile(UWorld* World, const AMD_TrashSpawnVolume* Preferred = nullptr);
+
+	// 프로필이 있으면 프로필로, 없으면 Project Settings로 총량을 계산한다
+	static int32 ComputeTotalTrashCount(UWorld* World, int32 PlayerCount, EMD_Difficulty Difficulty, const AMD_TrashSpawnVolume* Preferred = nullptr);
+
+	// 최대 잉여법 분배. Capacity는 볼륨별 상한(무제한은 MAX_int32), 반환은 못 넣은 개수
+	static int32 ApportionShares(int32 Total, const TArray<float>& Shares, const TArray<int32>& Capacity, TArray<int32>& OutAssigned);
+
+#if WITH_EDITOR
+	// 에디터 월드의 비율 볼륨에 총량을 나눠 Preview 필드에 기록하고 로그 표를 남긴다
+	static void PreviewShareDistribution(UWorld* World, const AMD_TrashSpawnVolume* Requester, int32 PlayerCount, EMD_Difficulty Difficulty);
+#endif
+
 private:
+	// 기준 개수 × 인원 배율 × 난이도 배율. 인원은 관전자가 아닌 현재 PlayerState 수
+	int32 ResolveTargetTrashTotal(int32& OutPlayerCount, EMD_Difficulty& OutDifficulty) const;
+	// SpawnShare > 0인 미초기화 생성기에 총량을 가중치 비율로 나눠 SpawnCount를 덮어쓴다. 바닥 셀 후보 수를 상한으로 두고 넘치는 양은 다른 볼륨으로 넘긴다
+	void DistributeSpawnShares();
+	int32 DistributedTrashTotal = 0;
+	int32 DistributedPlayerCount = 0;
+	EMD_Difficulty DistributedDifficulty = EMD_Difficulty::Standard;
+
 	UPROPERTY(Config)
 	TArray<FName> AutoFloorMaps;
 	TWeakObjectPtr<AMD_TrashFloorGenerator> TransitionGenerator;
 	TMap<FName, FVector> AuthoredPositions;
-	bool bMigrateRestoredActors = false;
-	bool bReserveAuthoredTrash = false;
-	TArray<TWeakObjectPtr<AMD_TrashItem>> ReservedTrash;
-	bool NormalizeStates(const TArray<FMD_TrashGeneratorState>& Input, TArray<FMD_TrashGeneratorState>& Out) const;
-	bool ConvertAuthoredTrash(bool bPreserveCells);
+	bool ConvertAuthoredTrash();
 	void FlushCountChanged();
 	void InitializeWhenReady();
 

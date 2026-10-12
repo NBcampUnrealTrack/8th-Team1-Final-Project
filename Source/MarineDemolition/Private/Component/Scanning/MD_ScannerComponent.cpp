@@ -5,8 +5,6 @@
 #include "Camera/CameraComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Components/StaticMeshComponent.h"
-#include "Component/Scrape/MD_ScrapeSurfaceComponent.h"
-#include "Materials/MaterialInstanceDynamic.h"
 #include "World/Contamination/MD_Barnacle.h"
 #include "World/Contamination/MD_SurfaceStain.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
@@ -20,7 +18,6 @@
 #include "Materials/MaterialParameterCollectionInstance.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
 #include "TimerManager.h"
-#include "Sound/SoundBase.h"
 #include "UI/Equipment/MD_ScannerModeWidget.h"
 #include "UObject/ConstructorHelpers.h"
 #include "World/Wall/MD_CuttableWall.h"
@@ -33,19 +30,11 @@ UMD_ScannerComponent::UMD_ScannerComponent()
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WallStyle(
 		TEXT("/Game/VFX/03_Scanner/MI_ScanWallType.MI_ScanWallType"));
 	WallScanMaterial = WallStyle.Object;
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Mask(
-		TEXT("/Game/VFX/03_Scanner/M_ScanCleanupMask.M_ScanCleanupMask"));
-	ContaminationMaskMaterial = Mask.Object;
-	static ConstructorHelpers::FObjectFinder<USoundBase> LocatorSound(
-		TEXT("/Game/Audio/Scanner/SW_QuestSampleBeacon.SW_QuestSampleBeacon"));
-	QuestLocatorSound = LocatorSound.Object;
 }
 
 void UMD_ScannerComponent::BeginPlay()
 {
 	Super::BeginPlay();
-	if (GetWorld() && GetNetMode() != NM_DedicatedServer)
-		GetWorld()->GetTimerManager().SetTimer(QuestLocatorTimer, this, &ThisClass::UpdateQuestLocator, 0.1f, true);
 	if (APawn* Pawn = Cast<APawn>(GetOwner()))
 		Pawn->ReceiveControllerChangedDelegate.AddUniqueDynamic(this, &ThisClass::HandleControllerChanged);
 	if (const AMD_Character* Character = Cast<AMD_Character>(GetOwner()))
@@ -71,9 +60,7 @@ bool UMD_ScannerComponent::IsScannerEquipped() const
 FText UMD_ScannerComponent::GetScanModeText() const
 {
 	if (ScanMode == EMD_ScanMode::Cleanup) return NSLOCTEXT("MDScanner", "CleanupMode", "오염물·따개비");
-	return ScanMode == EMD_ScanMode::WallType
-		? NSLOCTEXT("MDScanner", "WallTypeMode", "벽 종류")
-		: NSLOCTEXT("MDScanner", "InternalMode", "내부 구조물");
+	return NSLOCTEXT("MDScanner", "InternalMode", "내부 구조물");
 }
 
 bool UMD_ScannerComponent::ToggleScanMode()
@@ -86,12 +73,8 @@ bool UMD_ScannerComponent::ToggleScanMode()
 		return false;
 	}
 	ClearScan();
-	switch (ScanMode)
-	{
-	case EMD_ScanMode::InternalStructure: ScanMode = EMD_ScanMode::WallType; break;
-	case EMD_ScanMode::WallType: ScanMode = EMD_ScanMode::Cleanup; break;
-	default: ScanMode = EMD_ScanMode::InternalStructure; break;
-	}
+	// 내부 구조물 ↔ 오염물·따개비 2모드 토글
+	ScanMode = ScanMode == EMD_ScanMode::InternalStructure ? EMD_ScanMode::Cleanup : EMD_ScanMode::InternalStructure;
 	RefreshModeIndicator();
 	OnScanModeChanged.Broadcast(ScanMode);
 	return true;
@@ -136,15 +119,6 @@ void UMD_ScannerComponent::PresentLocalScan(uint32 RequestId, EMD_ScanMode Mode,
 					StainHighlights.AddUnique(Stain);
 				}
 			}
-			else AddContaminationHighlight(Target->FindComponentByClass<UMD_ScrapeSurfaceComponent>());
-		}
-		else if (Mode == EMD_ScanMode::WallType)
-		{
-			AMD_CuttableWall* Wall = Cast<AMD_CuttableWall>(Target);
-			if (!Wall || Wall->IsHidden() || !Wall->CanCut()) continue;
-			FMD_ScanMeshState& State = WallHighlights.AddDefaulted_GetRef();
-			State.Apply(Wall->GetScanMesh(), Wall->GetWallType() == EMD_WallType::Strut
-				? MDScanning::StrutStencil : MDScanning::PartitionStencil);
 		}
 		else if (Target->GetClass()->ImplementsInterface(UMD_Scannable::StaticClass()))
 		{
@@ -163,10 +137,7 @@ void UMD_ScannerComponent::PresentLocalScan(uint32 RequestId, EMD_ScanMode Mode,
 		MPC->SetScalarParameterValue(TEXT("ScanDisplayDuration"), Duration);
 		MPC->SetScalarParameterValue(TEXT("ScanStartTime"), GetWorld()->GetTimeSeconds());
 	}
-	if (Mode != EMD_ScanMode::InternalStructure && (!WallHighlights.IsEmpty() || !ContaminationHighlights.IsEmpty() || !StainHighlights.IsEmpty())) EnableWallPostProcess();
-	if (!ContaminationHighlights.IsEmpty())
-		GetWorld()->GetTimerManager().SetTimer(ContaminationRefreshTimer, this,
-			&ThisClass::RefreshContaminationHighlights, 0.1f, true);
+	if (Mode != EMD_ScanMode::InternalStructure && (!WallHighlights.IsEmpty() || !StainHighlights.IsEmpty())) EnableWallPostProcess();
 	FTimerDelegate Expire;
 	Expire.BindWeakLambda(this, [this, RequestId] { FinishLocalRequest(RequestId); });
 	GetWorld()->GetTimerManager().SetTimer(ScanTimer, Expire, Duration, false);
@@ -239,7 +210,9 @@ void UMD_ScannerComponent::ClearScan(bool bNotifyServer)
 	const uint32 PreviousRequest = ActiveRequestId;
 	ActiveRequestId = 0;
 	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(ScanTimer);
-	ClearContaminationHighlights();
+	for (const TWeakObjectPtr<AMD_SurfaceStain>& Stain : StainHighlights)
+		if (Stain.IsValid()) Stain->SetScanHighlighted(this, false);
+	StainHighlights.Empty();
 	for (FMD_ScanMeshState& State : WallHighlights) State.Restore();
 	WallHighlights.Empty();
 	ClearWallPostProcess();
@@ -297,7 +270,6 @@ void UMD_ScannerComponent::PlayScanPulse(uint32 RequestId, const FGameplayTag& T
 
 void UMD_ScannerComponent::HandleHotbarChanged()
 {
-	if (!IsScannerEquipped()) StopQuestLocator();
 	UMD_ToolDefinition* Current = BoundHotbar.IsValid() ? BoundHotbar->GetCurrentTool() : nullptr;
 	if (Current != LastTool.Get())
 	{
@@ -326,7 +298,6 @@ void UMD_ScannerComponent::RefreshModeIndicator()
 
 void UMD_ScannerComponent::HandleControllerChanged(APawn*, AController*, AController*)
 {
-	StopQuestLocator();
 	ClearScan(false);
 	IssuedRequestId = 0;
 	AcceptedRequestId = 0;
@@ -338,8 +309,6 @@ void UMD_ScannerComponent::HandleControllerChanged(APawn*, AController*, AContro
 
 void UMD_ScannerComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
-	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(QuestLocatorTimer);
-	StopQuestLocator();
 	ClearScan(false);
 	if (ModeIndicator) ModeIndicator->RemoveFromParent();
 	ModeIndicator = nullptr;

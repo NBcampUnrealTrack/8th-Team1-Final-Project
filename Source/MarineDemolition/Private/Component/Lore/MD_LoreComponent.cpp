@@ -1,103 +1,124 @@
 #include "Component/Lore/MD_LoreComponent.h"
 
 #include "Engine/GameInstance.h"
-#include "Gameplay/Lore/MD_LoreSubsystem.h"
-#include "Net/UnrealNetwork.h"
+#include "Engine/LocalPlayer.h"
+#include "Gameplay/Lore/MD_LoreProfileSubsystem.h"
+#include "TimerManager.h"
 
 UMD_LoreComponent::UMD_LoreComponent()
 {
+	// 수집 이벤트와 저장 재시도 타이머만 사용
 	PrimaryComponentTick.bCanEverTick = false;
-	SetIsReplicatedByDefault(true);
-}
-
-void UMD_LoreComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
-{
-	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
-
-	// 영구 누적 로어는 팀 공유 정보이므로 모든 접속자에게 전달하는 복제 등록
-	DOREPLIFETIME(UMD_LoreComponent, DiscoveredLoreAssetIds);
+	// 호스트의 수집 목록이 다른 참가자에게 전달되는 경로 차단
+	SetIsReplicatedByDefault(false);
 }
 
 void UMD_LoreComponent::BeginPlay()
 {
 	Super::BeginPlay();
-
-	AActor* Owner = GetOwner();
-	if (IsValid(Owner) == false || Owner->HasAuthority() == false)
+	// 개인 사용자가 없는 전용 서버의 파일 접근 차단
+	if (GetNetMode() == NM_DedicatedServer)
 	{
+		// 로컬 코덱스를 생성하지 않는 서버 초기화 종료
 		return;
 	}
-
-	UMD_LoreSubsystem* LoreSubsystem = GetLoreSubsystem();
-	if (IsValid(LoreSubsystem) == false)
-	{
-		return;
-	}
-
-	SubsystemChangedHandle = LoreSubsystem->OnLoreProgressChanged.AddUObject(this, &UMD_LoreComponent::RefreshFromSubsystem);
-	RefreshFromSubsystem();
+	// 로컬 사용자 생성 지연과 저장 실패에 대한 재시도 예약
+	GetWorld()->GetTimerManager().SetTimer(ProfileRetryHandle, this, &ThisClass::UpdateLocalProfile, 1.0f, true);
+	// 이미 준비된 개인 기록의 즉시 복원
+	UpdateLocalProfile();
 }
 
 void UMD_LoreComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
-	UMD_LoreSubsystem* LoreSubsystem = GetLoreSubsystem();
-	if (IsValid(LoreSubsystem) == true)
+	// 종료된 컴포넌트의 재시도 콜백 정리
+	if (IsValid(GetWorld()) == true)
 	{
-		LoreSubsystem->OnLoreProgressChanged.Remove(SubsystemChangedHandle);
+		// 월드가 먼저 해제된 종료 경로의 타이머 접근 방지
+		GetWorld()->GetTimerManager().ClearTimer(ProfileRetryHandle);
 	}
-
-	SubsystemChangedHandle.Reset();
+	// 구독한 개인 원장이 존재할 때만 정리
+	if (IsValid(LocalProfile) == true)
+	{
+		// 맵 이동 이후 이전 컴포넌트로 알림 전달 방지
+		LocalProfile->OnPersonalLoreChanged.Remove(ProfileChangedHandle);
+		// 연결 종료 전 미저장 기록 반영 재시도
+		LocalProfile->SavePending();
+	}
 	Super::EndPlay(EndPlayReason);
 }
 
 EMD_LoreEntryState UMD_LoreComponent::GetLoreState(const UMD_LoreCatalog* LoreCatalog, FPrimaryAssetId LoreAssetId) const
 {
+	// 카탈로그와 식별자가 준비되지 않은 상태 보호
 	if (IsValid(LoreCatalog) == false || LoreAssetId.IsValid() == false)
 	{
+		// 공개할 기록이 없는 기본 상태 반환
 		return EMD_LoreEntryState::Undiscovered;
 	}
-
-	EMD_LoreEntryState LoreState = LoreCatalog->ResolveLoreState(LoreAssetId, DiscoveredLoreAssetIds);
-	return LoreState;
+	// 다른 참가자의 기록 대신 본인 선행 조건으로 해독 판정
+	return LoreCatalog->ResolveLoreState(LoreAssetId, DiscoveredLoreAssetIds);
 }
 
 bool UMD_LoreComponent::HasDiscoveredLore(FPrimaryAssetId LoreAssetId) const
 {
-	if (LoreAssetId.IsValid() == false)
-	{
-		return false;
-	}
-
-	bool bIsDiscovered = DiscoveredLoreAssetIds.Contains(LoreAssetId);
-
-	return bIsDiscovered;
+	// 개인 원장의 유효한 기록 보유 여부 반환
+	return LoreAssetId.IsValid() == true && DiscoveredLoreAssetIds.Contains(LoreAssetId) == true;
 }
 
-void UMD_LoreComponent::RefreshFromSubsystem()
+void UMD_LoreComponent::UpdateLocalProfile()
 {
-	UMD_LoreSubsystem* LoreSubsystem = GetLoreSubsystem();
-	AActor* Owner = GetOwner();
-	if (IsValid(LoreSubsystem) == false || IsValid(Owner) == false || Owner->HasAuthority() == false)
+	// 연결된 개인 원장을 재사용하여 주기적인 사용자 조회 방지
+	if (IsValid(LocalProfile) == false)
 	{
+		// 최초 연결에 사용할 로컬 사용자 확인
+		ULocalPlayer* LocalPlayer = GetWorld()->GetGameInstance()->GetFirstGamePlayer();
+		// 로컬 사용자 생성 이전의 초기화 보류
+		if (IsValid(LocalPlayer) == false)
+		{
+			// 다음 재시도 주기까지 대기
+			return;
+		}
+		// 로컬 사용자별 저장 인스턴스 조회
+		LocalProfile = LocalPlayer->GetSubsystem<UMD_LoreProfileSubsystem>();
+		// 사용자 서브시스템 생성 이전의 접근 방지
+		if (IsValid(LocalProfile) == false)
+		{
+			// 다음 재시도 주기까지 대기
+			return;
+		}
+		// 수집과 로드 결과를 현재 화면 원장으로 전달
+		ProfileChangedHandle = LocalProfile->OnPersonalLoreChanged.AddUObject(this, &ThisClass::RefreshLocalProfile);
+		// 구독 전에 로드된 이력도 최초 연결에서 한 번 반영
+		RefreshLocalProfile();
+	}
+	// 계정 식별과 최초 파일 복원이 완료될 때까지 대기
+	if (LocalProfile->EnsureLoaded() == false)
+	{
+		// 다른 사용자의 임시 기록 표시 차단
 		return;
 	}
-
-	DiscoveredLoreAssetIds = LoreSubsystem->GetDiscoveredLoreAssetIds();
-	Owner->ForceNetUpdate();
-
-	// Listen Server 환경을 고려하여 직접 알림
-	OnLoreProgressUpdated.Broadcast();
+	// 이전 수집 시 파일 반영에 실패한 기록 재시도
+	LocalProfile->SavePending();
 }
 
-UMD_LoreSubsystem* UMD_LoreComponent::GetLoreSubsystem() const
+void UMD_LoreComponent::RefreshLocalProfile()
 {
-	UWorld* World = GetWorld();
-	UGameInstance* GameInstance = IsValid(World) == true ? World->GetGameInstance() : nullptr;
-	UMD_LoreSubsystem* LoreManager = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_LoreSubsystem>() : nullptr;
-	return LoreManager;
-}
-
-void UMD_LoreComponent::OnRep_LoreProgress()
-{
+	// 아직 연결되지 않은 개인 원장 접근 차단
+	if (IsValid(LocalProfile) == false)
+	{
+		// 기존 화면 원장 유지
+		return;
+	}
+	// 로컬 사용자의 영구 기록 스냅샷 조회
+	TArray<FPrimaryAssetId> PersonalIds = LocalProfile->GetDiscoveredLoreAssetIds();
+	// 재시도 주기마다 불필요한 화면 갱신 방지
+	if (DiscoveredLoreAssetIds == PersonalIds)
+	{
+		// 동일한 개인 기록 유지
+		return;
+	}
+	// 팀 전체 이력이 아닌 본인 기록만 표시
+	DiscoveredLoreAssetIds = MoveTemp(PersonalIds);
+	// 열린 코덱스와 상인 로어 화면 갱신
 	OnLoreProgressUpdated.Broadcast();
 }

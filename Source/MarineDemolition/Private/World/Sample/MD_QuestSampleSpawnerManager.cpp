@@ -352,10 +352,6 @@ void UMD_QuestSampleSpawnerManager::RecoverLegacyQuestItems()
 			// 종료된 스포너 처리 생략
 			continue;
 		}
-		// 이전 플레이 시점의 메인 퀘스트 생성 캐시 제거
-		Spawner->LastSpawnedMainPhaseIndex = INDEX_NONE;
-		// 동일 단계 번호의 다른 퀘스트도 현재 저장 상태로 재평가
-		Spawner->LastSpawnedMainQuestDefinitionId = FPrimaryAssetId();
 		// 저장된 진행도와 현재 생존 수량을 제외한 부족 물품만 생성
 		Spawner->TrySpawnForQuestState();
 	}

@@ -24,7 +24,7 @@ public class MarineDemolition : ModuleRules
 			// Landscape (editor import helper uses ALandscape::Import)
 			"Landscape",
 			"GeometryCollectionEngine",
-			// Solid geometry bounds are exposed by the runtime visual component header.
+			// Geometry types used by placed-contaminant surface fitting.
 			"GeometryCore",
 			// FInstancedStruct
 			"StructUtils"
@@ -43,13 +43,11 @@ public class MarineDemolition : ModuleRules
 			"CoreOnline",
 			// 기존 온라인 음성 캡처와 입출력 장치 런타임 제어
 			"Voice", "AudioCaptureCore", "AudioMixerCore", "SignalProcessing",
-			// 오염 마스크 런타임 텍스처 업로드
+			// 렌더 리소스와 셰이더
 			"RHI", "RenderCore",
             // Bounded runtime solid-contamination geometry (no editor dependency).
             "GeometryFramework", "GeometryAlgorithms",
-            // Shared solid templates, GPU displacement and sparse GPU updates.
-            "MDSolidRendering",
-			// 절단·헤라 VFX
+			// 절단·배치 오염물 VFX
 			"Niagara",
 			// 수중 서브믹스 LPF (SubmixEffectFilterPreset)
 			"Synthesis"

@@ -89,10 +89,6 @@ protected:
 	// 초상화 아래에 표시할 현재 상인 이름
 	TObjectPtr<UTextBlock> Txt_NpcName;
 
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Merchant", meta = (BindWidgetOptional))
-	// 별도 호감도 라벨 옆에 표시할 부호와 소수점 한 자리 수치
-	TObjectPtr<UTextBlock> Txt_Affinity;
-
 	/** 화면 중앙 대사창의 본문 */
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Merchant", meta = (BindWidgetOptional))
 	TObjectPtr<UTextBlock> Txt_Dialogue;

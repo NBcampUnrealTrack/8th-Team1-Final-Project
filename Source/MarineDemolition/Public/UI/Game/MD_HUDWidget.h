@@ -7,6 +7,7 @@
 #include "MD_HUDWidget.generated.h"
 
 class UMD_TalkNotificationWidget;
+class UMD_ThrowChargeWidget;
 class UVerticalBox;
 
 /**
@@ -25,6 +26,8 @@ protected:
 	virtual void NativeConstruct() override;
 
 	virtual void NativeDestruct() override;
+	virtual void NativeOnActivated() override;
+	virtual void NativeOnDeactivated() override;
 
 protected:
 	// 생성된 발화 알림을 배치하는 전용 목록
@@ -35,6 +38,10 @@ protected:
 	UPROPERTY(EditDefaultsOnly, Category = "Voice Chat")
 	TSoftClassPtr<UMD_TalkNotificationWidget> TalkNotificationClass;
 
+	// The charge widget is placed and styled in the HUD Designer.
+	UPROPERTY(BlueprintReadOnly, Category = "HUD|Throw", meta = (BindWidgetOptional))
+	TObjectPtr<UMD_ThrowChargeWidget> ThrowChargeWidget = nullptr;
+
 public:
 	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent)
 	void HandlePlayerJoinAndExit(const FText& PlayerName, bool bIsJoin);
@@ -42,6 +49,10 @@ public:
 	// 서버 판정 한 줄 알림(슬롯 가득 참·전원 없음 등). WBP_PlayerNotification 계열에 표시하도록 BP에서 구현한다
 	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent)
 	void HandleHUDMessage(const FText& Message);
+
+	// 서버 확정 이자와 부채 및 비율 단계를 기존 HUD의 알림 위젯에 전달
+	UFUNCTION(BlueprintCallable, BlueprintImplementableEvent, Category = "HUD|Loan")
+	void HandleLoanInterestApplied(int32 InterestAmount, int32 DebtBalance, int32 NotificationStage);
 
 	// 알림 위젯을 생성하여 HUD 목록에 추가한 후 반환
 	UMD_TalkNotificationWidget* CreateTalkNotification();

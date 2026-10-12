@@ -87,25 +87,6 @@ void AMD_ReturnZone::OnReturnZoneBeginOverlap(
 		return;
 	}
 
-	const UWorld* World = GetWorld();
-
-	if (!IsValid(World))
-	{
-		return;
-	}
-
-	const AMD_GameStateBase* MDGameState = World->GetGameState<AMD_GameStateBase>();
-
-	if (!IsValid(MDGameState))
-	{
-		return;
-	}
-
-	if (MDGameState->HasReachedTime(18, 0))
-	{
-		return;
-	}
-
 	MDPlayerState->SetReturnStatus(EMD_ReturnStatus::Returned);
 
 }

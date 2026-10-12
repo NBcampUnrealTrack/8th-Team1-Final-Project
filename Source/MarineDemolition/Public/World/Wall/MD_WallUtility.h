@@ -5,12 +5,14 @@
 #include "Gameplay/Scanning/MD_Scannable.h"
 #include "GameplayTagAssetInterface.h"
 #include "Gameplay/Scanning/MD_ScanTypes.h"
+#include "Types/Facility/MD_FacilityTypes.h"
 #include "MD_WallUtility.generated.h"
 
 class UBoxComponent;
 class UStaticMeshComponent;
 class AMD_CuttableWall;
-struct FMD_UtilityRecord;
+class UMD_FacilityFaultComponent;
+class UMD_FacilityRepairComponent;
 
 UENUM(BlueprintType)
 enum class EMD_UtilityState : uint8
@@ -31,14 +33,8 @@ class MARINEDEMOLITION_API AMD_WallUtility : public AActor, public IMD_Interacta
 
 public:
 	AMD_WallUtility();
-
-	void SetQuestHighlighted(AActor* Source, bool bHighlighted);
-
-	// 파손과 수리 상태를 점수 처리 없이 보관하는 기록 생성
-	virtual FMD_UtilityRecord BuildPersistenceRecord();
-
-	// 저장된 상태로 설비와 연결된 연출 및 게이트 복원
-	virtual bool RestorePersistenceRecord(FMD_UtilityRecord Record);
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Facility")
+	TObjectPtr<UMD_FacilityRepairComponent> FacilityRepair;
 
 	void StopScanFor(AActor* Scanner);
 
@@ -215,6 +211,8 @@ protected:
 	void UnlockLinkedGate();
 
 private:
+	UFUNCTION()
+	void HandleFacilityState(UMD_FacilityFaultComponent* Facility, const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current);
 	// LinkTrigger와 겹치는 CuttableWall을 찾아 철거 델리게이트 구독 (서버)
 	void LinkOverlappingWalls();
 
@@ -228,7 +226,5 @@ private:
 	FMD_ScanMeshState HighlightState;
 	bool bScanHighlighted = false;
 	bool bInteractionHighlighted = false;
-	bool bQuestHighlighted = false;
-	TSet<TWeakObjectPtr<AActor>> QuestHighlightSources;
 	void RefreshHighlight();
 };
