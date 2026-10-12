@@ -54,6 +54,8 @@ public:
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Facility")
 	bool TryBreak();
+	// 파손 부수 효과와 상태 알림까지 동일 전이 안에서 확정
+	bool TryBreakWithEffects(TFunctionRef<void()> Effects);
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Facility")
 	bool BeginRepair(AActor* Repairer, int32 ExpectedFaultId);
 	/** Positive normalized work; reaching 1 completes this incident once. */
@@ -63,10 +65,14 @@ public:
 	bool CancelRepair(AActor* Repairer, int32 ExpectedFaultId);
 	/** Caller has already validated and paid for an external tool hit. Server only. */
 	bool CompleteRepairFromValidatedSource(int32 ExpectedFaultId);
+	// 수리 부수 효과와 상태 알림까지 동일 사건 전이 안에서 확정
+	bool CompleteRepairWithEffects(int32 ExpectedFaultId, TFunctionRef<void()> Effects);
 
 protected:
 	/** Common server incident transition; a development door cheat may skip occupancy only. */
 	bool TryBreakInternal(bool bSkipDeviceCondition);
+	// 장치 조건과 효과를 포함한 공통 파손 확정
+	bool TryBreakInternalWithEffects(bool bSkipDeviceCondition, TFunctionRef<void()> Effects);
 	/** Device-specific safety condition, checked again immediately before an incident starts. */
 	virtual bool CanStartFault() const { return true; }
 	virtual void BeginPlay() override;
@@ -83,4 +89,8 @@ private:
 	double GetServerTime() const;
 	TWeakObjectPtr<UMD_FacilityFaultManagerComponent> Manager;
 	FTimerHandle RegistrationTimer;
+
+protected:
+	// 상태 효과와 방송 도중 같은 시설의 중첩 사건 변경 차단
+	bool bStateTransitionInProgress = false;
 };

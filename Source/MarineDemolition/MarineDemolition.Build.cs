@@ -1,4 +1,4 @@
-// Copyright Epic Games, Inc. All Rights Reserved.
+﻿// Copyright Epic Games, Inc. All Rights Reserved.
 
 using UnrealBuildTool;
 
@@ -58,6 +58,7 @@ public class MarineDemolition : ModuleRules
 			PrivateDependencyModuleNames.AddRange(new string[] { "UnrealEd", "MeshDescription", "StaticMeshDescription", "MeshConversion", "DynamicMesh" });
 			// 캐러셀의 Enum 전용 디테일 선택기 지원
 			PrivateDependencyModuleNames.AddRange(new string[] { "PropertyEditor", "KismetWidgets", "BlueprintGraph" });
+			PrivateDependencyModuleNames.Add("EditorWidgets");
 		}
 
         DynamicallyLoadedModuleNames.Add("OnlineSubsystemSteam");

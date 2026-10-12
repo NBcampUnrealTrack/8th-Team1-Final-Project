@@ -35,7 +35,8 @@ public:
 	bool BeginManualRepair(APawn* Pawn);
 	void StopManualRepair(APawn* Pawn);
 	bool TryRepairWithTape(APawn* Pawn, int32 ExpectedFaultId);
-	FText GetRepairPrompt() const;
+	// 요청자와 현재 작업자의 일치 여부를 반영한 수리 안내
+	FText GetRepairPrompt(APawn* Requester = nullptr) const;
 protected:
 	virtual UMD_FacilityFaultComponent* ResolveRepairTarget() const;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
