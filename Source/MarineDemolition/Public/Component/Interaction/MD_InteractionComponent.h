@@ -62,6 +62,8 @@ public:
 	bool CanOwnerInteract() const;
 	/** LMB consumable input; requests repair via this owned component, not the unowned facility. */
 	bool TryUseFacilityTape();
+	/** Revision-bound instruction input, routed through this player's owned RPC endpoint. */
+	void RequestInstructionRepair(class AMD_RepairInstructionControl* Control, int32 ExpectedRevision);
 
 	/** Releases the held actor on the server. Client calls are intentionally ignored. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
@@ -177,6 +179,8 @@ protected:
 	bool bIsolateCarriedFromPawnChannel = false;
 
 private:
+	UFUNCTION(Server, Reliable)
+	void ServerInstructionRepair(class AMD_RepairInstructionControl* Control, int32 ExpectedRevision);
 	UFUNCTION(Server, Reliable)
 	void ServerInteract(AActor* RequestedActor);
 

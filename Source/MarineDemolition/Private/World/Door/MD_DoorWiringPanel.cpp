@@ -42,7 +42,7 @@ AMD_DoorWiringPanel::AMD_DoorWiringPanel()
 	PanelMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("PanelMesh"));
 	PanelMesh->SetupAttachment(RootComponent);
 	PanelMesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> Panel(TEXT("/Game/Assets/X7/Interior/Objects/futuristic+panel+3d+model/StaticMeshes/futuristic+panel+3d+model.futuristic+panel+3d+model"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> Panel(TEXT("/Game/Assets/X7/Interior/Objects/StaticMeshes/futuristic+panel+3d+model.futuristic+panel+3d+model"));
 	if (Panel.Succeeded()) PanelMesh->SetStaticMesh(Panel.Object);
 	FacilityRepair = CreateDefaultSubobject<UMD_DoorPanelRepairComponent>(TEXT("FacilityRepair"));
 	FaultSparks = CreateDefaultSubobject<UNiagaraComponent>(TEXT("FaultSparks"));

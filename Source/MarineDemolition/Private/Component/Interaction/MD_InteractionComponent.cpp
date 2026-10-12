@@ -29,6 +29,24 @@
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Facility/MD_FingerprintInterlock.h"
 #include "World/Facility/MD_FingerprintPad.h"
+#include "World/Facility/MD_RepairInstruction.h"
+
+void UMD_InteractionComponent::RequestInstructionRepair(AMD_RepairInstructionControl* Control, int32 ExpectedRevision)
+{
+	ServerInstructionRepair(Control, ExpectedRevision);
+}
+
+void UMD_InteractionComponent::ServerInstructionRepair_Implementation(AMD_RepairInstructionControl* Control, int32 ExpectedRevision)
+{
+	APawn* Pawn = GetOwnerPawn();
+	if (!IsValid(Pawn) || !Pawn->HasAuthority() || !CanOwnerInteract() || IsHolding()
+		|| !IsValid(Control) || Control->GetWorld()!=GetWorld() || !ValidateInteractionTarget(Control)
+		|| !IMD_Interactable::CanInteractWith(Control,Pawn) || !IsValid(Control->Controller)) return;
+	const double Now=GetWorld()->GetTimeSeconds();
+	if (bHasServerInteractionTimestamp && Now-LastServerInteractionTimeSeconds < FMath::Clamp(ServerInteractionMinInterval,0.05f,0.1f)) return;
+	bHasServerInteractionTimestamp=true; LastServerInteractionTimeSeconds=Now;
+	Control->Controller->ApplyControl(Control,Pawn,ExpectedRevision);
+}
 
 static void AddActorAndAttachmentsToInteractionQuery(
 	const AActor* Actor, FCollisionQueryParams& QueryParams)

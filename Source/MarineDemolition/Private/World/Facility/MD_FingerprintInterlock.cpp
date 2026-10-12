@@ -12,6 +12,9 @@
 #include "HAL/IConsoleManager.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
+#include "Components/PostProcessComponent.h"
+#include "Materials/MaterialInterface.h"
+#include "UObject/ConstructorHelpers.h"
 
 bool UMD_FingerprintFaultComponent::CanStartFault() const
 {
@@ -30,6 +33,14 @@ AMD_FingerprintInterlock::AMD_FingerprintInterlock()
 	// A single controller timer owns this event; the global manager must not double-schedule it.
 	Fault->bRandomFaultEligible = false;
 	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
+	FaultHighlight = CreateDefaultSubobject<UPostProcessComponent>(TEXT("FaultHighlight"));
+	FaultHighlight->SetupAttachment(RootComponent);
+	FaultHighlight->bUnbound = true;
+	FaultHighlight->bEnabled = false;
+	FaultHighlight->Priority = 100.f;
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> Locator(
+		TEXT("/Game/Materials/PP_FingerprintFaultHighlight.PP_FingerprintFaultHighlight"));
+	if (Locator.Succeeded()) FaultHighlight->Settings.WeightedBlendables.Array.Emplace(1.f, Locator.Object);
 }
 
 void AMD_FingerprintInterlock::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -46,6 +57,7 @@ void AMD_FingerprintInterlock::BeginPlay()
 {
 	Super::BeginPlay();
 	Fault->OnStateChanged.AddUniqueDynamic(this, &ThisClass::HandleFault);
+	RefreshFaultHighlight();
 	if (HasAuthority())
 	{
 		if (IsActive()) HandleFault(Fault, FMD_FacilitySnapshot(), Fault->GetSnapshot());
@@ -57,11 +69,19 @@ void AMD_FingerprintInterlock::EndPlay(const EEndPlayReason::Type Reason)
 {
 	GetWorldTimerManager().ClearTimer(FaultTimer);
 	Fault->OnStateChanged.RemoveDynamic(this, &ThisClass::HandleFault);
+	FaultHighlight->bEnabled = false;
 	if (HasAuthority()) { ResetScans(); SetSorterLocks(false); }
 	Super::EndPlay(Reason);
 }
 
 bool AMD_FingerprintInterlock::IsActive() const { return Fault && Fault->IsFaultActive(); }
+
+void AMD_FingerprintInterlock::RefreshFaultHighlight()
+{
+	// Driven by the replicated fault snapshot, including late joiners; no extra RPC.
+	FaultHighlight->bUnbound = true;
+	FaultHighlight->bEnabled = GetNetMode() != NM_DedicatedServer && IsActive();
+}
 
 bool AMD_FingerprintInterlock::HasValidConfiguration() const
 {
@@ -146,6 +166,7 @@ void AMD_FingerprintInterlock::RefreshParticipantMode()
 void AMD_FingerprintInterlock::HandleFault(UMD_FacilityFaultComponent*, const FMD_FacilitySnapshot& Previous,
 	const FMD_FacilitySnapshot& Current)
 {
+	RefreshFaultHighlight();
 	if (!HasAuthority() || Previous.IsFaultActive() == Current.IsFaultActive()) return;
 	ResetScans();
 	if (Current.IsFaultActive())
@@ -172,6 +193,7 @@ bool AMD_FingerprintInterlock::BeginScan(AMD_FingerprintPad* Pad, APawn* Pawn, i
 	RefreshParticipantMode();
 	if (IsValid(Pad->ActiveScanner) && Pad->ActiveScanner != Pawn) return false;
 	Pad->ActiveScanner = Pawn;
+	Pad->NotifyScanAccepted();
 	Pad->ForceNetUpdate();
 	const double Now = GetWorld()->GetTimeSeconds();
 	if (bSoloMode)
@@ -244,6 +266,7 @@ void AMD_FingerprintInterlock::ApplyElapsedCharges()
 void AMD_FingerprintInterlock::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	RefreshFaultHighlight();
 	if (!HasAuthority() || !IsActive()) return;
 	if (!HasValidConfiguration())
 	{

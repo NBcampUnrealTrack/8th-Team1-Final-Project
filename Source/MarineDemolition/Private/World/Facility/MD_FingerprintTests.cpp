@@ -7,6 +7,7 @@
 #include "World/Trash/MD_TrashItem.h"
 #include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/PostProcessComponent.h"
 #include "UObject/UnrealType.h"
 #include "../../Component/Facility/MD_FacilityPlayTestGameMode.h"
 #include "Editor.h"
@@ -128,6 +129,16 @@ public:
     if(It->GetFName()==Event->GetFName()) RemoteEvent=*It;
    if(!Test->TestNotNull(TEXT("Second endpoint replicates"),RemotePad)||!Test->TestNotNull(TEXT("Controller replicates"),RemoteEvent)) return true;
    Test->TestTrue(TEXT("Client receives active fault"),RemoteEvent->IsActive());
+   Test->TestTrue(TEXT("Remote global locator enabled without scanner equipment"),RemoteEvent->FaultHighlight->bEnabled);
+   Test->TestTrue(TEXT("Locator has no distance bound"),RemoteEvent->FaultHighlight->bUnbound);
+   Test->TestTrue(TEXT("Locator material assigned"),RemoteEvent->FaultHighlight->Settings.WeightedBlendables.Array.Num()>0);
+   for(TActorIterator<AMD_FingerprintPad> It(Client);It;++It)
+    if(It->Interlock==RemoteEvent)
+    {
+     It->SetInteractionHighlighted_Implementation(false);
+     Test->TestTrue(TEXT("Both remote endpoints remain outlined after looking away"),It->PadMesh->bRenderCustomDepth);
+     Test->TestEqual(TEXT("Fault stencil distinct from interaction and handheld scan"),It->PadMesh->CustomDepthStencilValue,AMD_FingerprintPad::FaultHighlightStencilValue);
+    }
    // GetPlayerViewPoint uses the camera manager's per-frame cache. Aim, then wait
    // for a real frame before input, exactly as a human moving between targets.
    if(PickupStage==0) { Aim(Character,PC,Item); ++PickupStage; WaitFrame(); return false; }
@@ -165,6 +176,12 @@ public:
   case 4:
    Test->TestFalse(TEXT("Two distinct held scans complete"),Event->IsActive());
    Test->TestFalse(TEXT("Client receives recovery"),RemoteEvent->IsActive());
+   Test->TestFalse(TEXT("Remote locator disabled after authentication"),RemoteEvent->FaultHighlight->bEnabled);
+   RemotePad->SetInteractionHighlighted_Implementation(false);
+   Test->TestFalse(TEXT("Remote pad outline clears after repair and look away"),RemotePad->PadMesh->bRenderCustomDepth);
+   RemotePad->SetInteractionHighlighted_Implementation(true);
+   Test->TestEqual(TEXT("Healthy pad retains normal hover stencil"),RemotePad->PadMesh->CustomDepthStencilValue,IMD_Interactable::HighlightStencilValue);
+   RemotePad->SetInteractionHighlighted_Implementation(false);
    Test->TestFalse(TEXT("Healthy sorter resumes"),Sorters[0]->IsOperationBlocked());
    Test->TestTrue(TEXT("Independent device fault remains"),Sorters[1]->IsOperationBlocked()&&Sorters[1]->FacilityRepair->IsFaultActive());
    Test->TestFalse(TEXT("Event removes only its own sorter lock"),Sorters[1]->IsSafetyInterlocked());
@@ -222,6 +239,12 @@ private:
   {
   case 0:
    Press(Interaction,Pads[0]); SavedDeadline=Event->SoloDeadline;
+   Test->TestTrue(TEXT("Solo global locator enabled"),Event->FaultHighlight->bEnabled);
+   for(auto* Pad : Pads)
+   {
+    Pad->SetInteractionHighlighted_Implementation(false);
+    Test->TestTrue(TEXT("Solo both pads outlined without hover"),Pad->PadMesh->bRenderCustomDepth);
+   }
    Test->TestEqual(TEXT("Solo first endpoint armed"),Event->SoloFirstPad,0);
    Interaction->InteractReleased(); Next(0.4f); break;
   case 1:
