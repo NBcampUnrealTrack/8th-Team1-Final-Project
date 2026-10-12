@@ -6,6 +6,16 @@
 
 class UPrimitiveComponent;
 class USceneComponent;
+class APawn;
+
+/** A grabbable may keep the normal carry target, supply its own, or end the grip. */
+UENUM(BlueprintType)
+enum class EMD_PhysicsHoldTargetResult : uint8
+{
+	Default,
+	Resolved,
+	Release
+};
 
 /** PhysicsHandle이 물리 픽업을 운반할 때 적용할 설정 묶음 */
 USTRUCT(BlueprintType)
@@ -75,6 +85,17 @@ class MARINEDEMOLITION_API IMD_Grabbable
 	GENERATED_BODY()
 
 public:
+	/** Validate and prepare object-specific grip state before creating the server physics handle. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction|Physics Pickup")
+	bool PreparePhysicsGrip(APawn* Interactor);
+	virtual bool PreparePhysicsGrip_Implementation(APawn* Interactor) { return true; }
+
+	/** Override the carry target without requiring the player to know a concrete actor class. */
+	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction|Physics Pickup")
+	EMD_PhysicsHoldTargetResult ResolvePhysicsHoldTarget(APawn* Interactor, FTransform& OutTarget) const;
+	virtual EMD_PhysicsHoldTargetResult ResolvePhysicsHoldTarget_Implementation(
+		APawn* Interactor, FTransform& OutTarget) const { return EMD_PhysicsHoldTargetResult::Default; }
+
 	/** PhysicsHandle이 실제로 잡을 물리 시뮬레이션 컴포넌트 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction|Physics Pickup")
 	UPrimitiveComponent* GetGrabComponent() const;

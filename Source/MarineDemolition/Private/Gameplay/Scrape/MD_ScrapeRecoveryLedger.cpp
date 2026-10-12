@@ -11,6 +11,46 @@ namespace
 		return A.SourceId == B.SourceId
 			&& A.RewardClass == B.RewardClass;
 	}
+
+	// These destinations are owned temporaries. Keep the public append fallback
+	// if a floating-point merge invalidates a lot, preserving its failure rules.
+	bool AppendRecoveryLotToValidatedDestination(
+		TArray<FMD_ScrapeRecoveryLot>& InOutLots,
+		const FMD_ScrapeRecoveryLot& Lot,
+		bool& bDestinationIsValid)
+	{
+		if (!bDestinationIsValid)
+		{
+			return FMD_ScrapeRecoveryLedger::AppendLot(InOutLots, Lot);
+		}
+		if (!FMD_ScrapeRecoveryLedger::IsLotValid(Lot))
+		{
+			return false;
+		}
+		if (Lot.CarrierAmount == 0.0 && Lot.RewardUnits == 0.0)
+		{
+			return true;
+		}
+		for (FMD_ScrapeRecoveryLot& ExistingLot : InOutLots)
+		{
+			if (!AreSameRecoveryLot(ExistingLot, Lot))
+			{
+				continue;
+			}
+			const double NewCarrierAmount = ExistingLot.CarrierAmount + Lot.CarrierAmount;
+			const double NewRewardUnits = ExistingLot.RewardUnits + Lot.RewardUnits;
+			if (!FMath::IsFinite(NewCarrierAmount) || !FMath::IsFinite(NewRewardUnits))
+			{
+				return false;
+			}
+			ExistingLot.CarrierAmount = NewCarrierAmount;
+			ExistingLot.RewardUnits = NewRewardUnits;
+			bDestinationIsValid = FMD_ScrapeRecoveryLedger::IsLotValid(ExistingLot);
+			return true;
+		}
+		InOutLots.Add(Lot);
+		return true;
+	}
 }
 
 bool FMD_ScrapeRecoveryLedger::IsLotValid(
@@ -268,6 +308,8 @@ double FMD_ScrapeRecoveryLedger::ExtractProportional(
 	TArray<FMD_ScrapeRecoveryLot> ExtractedLots;
 	RemainingLots.Reserve(InOutLots.Num());
 	ExtractedLots.Reserve(InOutLots.Num());
+	bool bRemainingLotsValid = true;
+	bool bExtractedLotsValid = true;
 	for (const FMD_ScrapeRecoveryLot& SourceLot : InOutLots)
 	{
 		if (!IsLotValid(SourceLot))
@@ -281,8 +323,10 @@ double FMD_ScrapeRecoveryLedger::ExtractProportional(
 		FMD_ScrapeRecoveryLot RemainingLot = SourceLot;
 		RemainingLot.CarrierAmount -= ExtractedLot.CarrierAmount;
 		RemainingLot.RewardUnits -= ExtractedLot.RewardUnits;
-		if (!AppendLot(ExtractedLots, ExtractedLot)
-			|| !AppendLot(RemainingLots, RemainingLot))
+		if (!AppendRecoveryLotToValidatedDestination(
+			ExtractedLots, ExtractedLot, bExtractedLotsValid)
+			|| !AppendRecoveryLotToValidatedDestination(
+				RemainingLots, RemainingLot, bRemainingLotsValid))
 		{
 			return 0.0;
 		}
