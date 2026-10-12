@@ -27,6 +27,24 @@
 #include "World/Sample/MD_QuestItem.h"
 #include "World/Trash/MD_TrashSorter.h"
 #include "World/Wall/MD_CuttableWall.h"
+#include "World/Facility/MD_RepairInstruction.h"
+
+void UMD_InteractionComponent::RequestInstructionRepair(AMD_RepairInstructionControl* Control, int32 ExpectedRevision)
+{
+	ServerInstructionRepair(Control, ExpectedRevision);
+}
+
+void UMD_InteractionComponent::ServerInstructionRepair_Implementation(AMD_RepairInstructionControl* Control, int32 ExpectedRevision)
+{
+	APawn* Pawn = GetOwnerPawn();
+	if (!IsValid(Pawn) || !Pawn->HasAuthority() || !CanOwnerInteract() || IsHolding()
+		|| !IsValid(Control) || Control->GetWorld()!=GetWorld() || !ValidateInteractionTarget(Control)
+		|| !IMD_Interactable::CanInteractWith(Control,Pawn) || !IsValid(Control->Controller)) return;
+	const double Now=GetWorld()->GetTimeSeconds();
+	if (bHasServerInteractionTimestamp && Now-LastServerInteractionTimeSeconds < FMath::Clamp(ServerInteractionMinInterval,0.05f,0.1f)) return;
+	bHasServerInteractionTimestamp=true; LastServerInteractionTimeSeconds=Now;
+	Control->Controller->ApplyControl(Control,Pawn,ExpectedRevision);
+}
 
 static void AddActorAndAttachmentsToInteractionQuery(
 	const AActor* Actor, FCollisionQueryParams& QueryParams)
@@ -90,7 +108,12 @@ FText UMD_InteractionComponent::ResolveCurrentInteractionPrompt() const
 	if (IsValid(Target))
 	{
 		const UMD_FacilityRepairComponent* Repair = Target->FindComponentByClass<UMD_FacilityRepairComponent>();
-		if (Repair && Repair->HasRepairFault()) return Repair->GetRepairPrompt();
+		// 로컬 요청자 기준으로 수리 점유 여부 확인
+		if (IsValid(Repair) == true && Repair->HasRepairFault() == true)
+		{
+			// 본인 작업과 다른 플레이어 작업을 구분한 안내 반환
+			return Repair->GetRepairPrompt(OwnerPawn);
+		}
 	}
 	if (!IsValid(Target) || !Target->Implements<UMD_Interactable>())
 	{

@@ -116,18 +116,44 @@ bool UMD_FacilityRepairComponent::TryRepairWithTape(APawn* Pawn, int32 ExpectedF
 	UMD_FacilityFaultComponent* Target = ResolveRepairTarget();
 	if (!IsValid(Target) || !Target->GetOwner()->HasAuthority() || !Target->IsFaultActive()
 		|| Target->GetSnapshot().FaultId != ExpectedFaultId) return false;
-	if (!Hotbar->TryConsumeItem(Tape, 1)) return false;
-	return Target->CompleteRepairFromValidatedSource(ExpectedFaultId);
+	// 수량 예약과 동일 사건의 복구 확정을 단일 성공 결과로 연결
+	return Hotbar->TryConsumeItemAndCommit(Tape, 1, [Target, ExpectedFaultId]()
+	{
+		// 실제 복구 거부 시 예약 수량 복원을 위한 확정 결과 전달
+		return Target->CompleteRepairFromValidatedSource(ExpectedFaultId);
+	});
 }
 
-FText UMD_FacilityRepairComponent::GetRepairPrompt() const
+FText UMD_FacilityRepairComponent::GetRepairPrompt(APawn* Requester) const
 {
-	if (!HasRepairFault()) return FText::GetEmpty();
-	if (!bAllowManualRepair) return bAllowInsulationTape
-		? NSLOCTEXT("MDInteraction", "FacilityNeedsTape", "고장 · 절연테이프로 수리")
-		: NSLOCTEXT("MDInteraction", "FacilityNeedsFoam", "고장 · 폼건으로 수리");
-	return FText::Format(NSLOCTEXT("MDInteraction", "FacilityManualRepair", "[E 유지] 수리 {0}% · 절연테이프 사용 가능"),
-		FText::AsNumber(FMath::FloorToInt(GetRepairSnapshot().RepairProgress * 100.f)));
+	// 작업자와 진척도를 같은 복제 상태에서 조회
+	FMD_FacilitySnapshot State = GetRepairSnapshot();
+	// 활성 고장이 없는 시설의 수리 안내 생략
+	if (State.IsFaultActive() == false)
+	{
+		// 정상 또는 복구 완료 상태의 빈 안내 반환
+		return FText::GetEmpty();
+	}
+	// 점유 여부와 관계없이 현재 서버 진척도를 백분율로 표시
+	FText Progress = FText::AsNumber(FMath::FloorToInt(State.RepairProgress * 100.f));
+	// 작업자 참조가 아직 도착하지 않은 경우도 본인 작업으로 오인 방지
+	if (State.State == EMD_FacilityState::Repairing && (IsValid(Requester) == false || State.Repairer != Requester))
+	{
+		// 다른 작업자가 점유한 수리의 진행 안내
+		return FText::Format(NSLOCTEXT("MDInteraction", "FacilityRepairOccupied", "다른 플레이어가 수리 중 · {0}%"), Progress);
+	}
+	// 수동 수리 미지원 시설의 기존 도구 안내 유지
+	if (bAllowManualRepair == false)
+	{
+		// 시설에서 허용한 소모품 또는 폼건 수리 안내
+		return bAllowInsulationTape == true
+			? NSLOCTEXT("MDInteraction", "FacilityNeedsTape", "고장 · 절연테이프로 수리")
+			: NSLOCTEXT("MDInteraction", "FacilityNeedsFoam", "고장 · 폼건으로 수리");
+	}
+	// 수동 수리 입력과 실제 허용된 절연테이프 사용 안내
+	return FText::Format(bAllowInsulationTape == true
+		? NSLOCTEXT("MDInteraction", "FacilityManualRepair", "[E 유지] 수리 {0}% · 절연테이프 사용 가능")
+		: NSLOCTEXT("MDInteraction", "FacilityManualOnlyRepair", "[E 유지] 수리 {0}%"), Progress);
 }
 
 void UMD_FacilityRepairComponent::EndPlay(const EEndPlayReason::Type Reason)

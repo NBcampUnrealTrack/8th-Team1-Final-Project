@@ -235,6 +235,12 @@ bool UMD_EquipHotbarComponent::CanAddItem(UMD_ItemDefinition* ItemDefinition, in
 
 bool UMD_EquipHotbarComponent::AddItem(UMD_ItemDefinition* ItemDefinition, int32 Amount)
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return false;
+	}
 	// 실제 상태와 복제 갱신에 사용할 소유 액터 조회
 	AActor* OwnerActor = GetOwner();
 	// 클라이언트의 직접 아이템 지급 차단
@@ -302,6 +308,12 @@ bool UMD_EquipHotbarComponent::GetItemTransferAtSlot(int32 SlotIndex, FMD_Hotbar
 
 bool UMD_EquipHotbarComponent::TryRemoveTransferredItem(int32 SlotIndex, const FMD_HotbarToolEntry& ExpectedEntry)
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return false;
+	}
 	if (!IsValid(GetOwner()) || !GetOwner()->HasAuthority() || bItemTransferInProgress
 		|| !IsValidTransferredItem(ExpectedEntry))
 	{
@@ -349,6 +361,12 @@ bool UMD_EquipHotbarComponent::TryRemoveTransferredItem(int32 SlotIndex, const F
 
 bool UMD_EquipHotbarComponent::AddTransferredItem(const FMD_HotbarToolEntry& Entry)
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return false;
+	}
 	if (!IsValid(GetOwner()) || !GetOwner()->HasAuthority() || bItemTransferInProgress
 		|| !IsValidTransferredItem(Entry))
 	{
@@ -375,48 +393,84 @@ bool UMD_EquipHotbarComponent::AddTransferredItem(const FMD_HotbarToolEntry& Ent
 
 bool UMD_EquipHotbarComponent::TryConsumeItem(UMD_ItemDefinition* ItemDefinition, int32 Amount)
 {
-	// 소유자가 없거나 서버 권한 및 차감 수량이 올바르지 않은 요청 차단
+	// 외부 확정이 필요 없는 기존 소모 요청을 공통 처리로 전달
+	return TryConsumeItemAndCommit(ItemDefinition, Amount, []()
+	{
+		// 수량 예약만으로 완료되는 일반 소모 확정
+		return true;
+	});
+}
+
+
+
+bool UMD_EquipHotbarComponent::TryConsumeItemAndCommit(UMD_ItemDefinition* ItemDefinition, int32 Amount, TFunctionRef<bool()> Commit)
+{
+	// 서버 소유자와 양의 소모 수량 검증
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false || Amount <= 0)
 	{
-		// 차감 권한 또는 수량 실패 기록
-		UE_LOG(MarineDemolition, Warning, TEXT("%s Hotbar 차감의 서버 권한 또는 수량이 유효하지 않음"), *UE_CALL_LOCATIONINFO);
-		// 차감 요청 검증 실패 전달
+		// 무효 소모 요청 거부
 		return false;
 	}
-	// 실제 정의 AssetId에 해당하는 차감 위치 조회
+	// 진행 중인 소모 알림에서 추가 소모 시작 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 기존 소모와 슬롯 상태 보존
+		return false;
+	}
+	// 실제 보관 슬롯과 품목 조회
 	int32 EntryIndex = FindItemEntry(ItemDefinition);
-	// 전달된 정의와 별도로 실제 보관 중인 아이템 유형과 표시 정보 조회
+	// 정의의 별칭과 무관하게 보유 품목 기준으로 소모 검사
 	UMD_ItemDefinition* StoredItem = GetItemAtSlot(EntryIndex);
-	// 미보유 품목과 도구 및 보유 수량보다 큰 차감 요청 차단
+	// 일반 소모품과 충분한 수량만 허용
 	if (IsValid(StoredItem) == false || StoredItem->IsA<UMD_ToolDefinition>() == true || ToolEntries[EntryIndex].Count < Amount)
 	{
-		// 도구 제외 조건과 잔여 수량 검증 실패 기록
-		UE_LOG(MarineDemolition, Warning, TEXT("%s 차감할 아이템이 없거나 도구이거나 보유 수량이 부족함"), *UE_CALL_LOCATIONINFO);
-		// 수량을 변경하지 않은 차감 실패 전달
+		// 미보유 또는 수량 부족 요청 거부
 		return false;
 	}
-	// 해당 슬롯의 보유 수량만 차감
+	// 외부 확정과 능력 회수 및 UI 알림까지 재진입 차단 유지
+	TGuardValue<bool> ConsumptionGuard(bItemConsumptionInProgress, true);
+	// 외부 확정 거부 시 되돌릴 슬롯 전체 상태 보관
+	FMD_HotbarToolEntry PreviousEntry = ToolEntries[EntryIndex];
+	// 외부 콜백 없이 필요한 수량 예약
 	ToolEntries[EntryIndex].Count -= Amount;
-	// 소진 처리와 사용 결과 로그에 사용할 차감 직후 수량 보존
+	// 소진 여부와 기록에 사용할 예약 후 수량 보관
 	int32 RemainingCount = ToolEntries[EntryIndex].Count;
-	// 소진 시 배열 위치를 유지하면서 정의 참조 제거
+	// 확정 콜백에서도 소진된 품목의 재사용 차단
 	if (RemainingCount == 0)
 	{
-		// 실행 중인 소비 GA는 GE의 종료 후 제거 정책으로 마무리까지 유지
-		RemoveItemAbility(ItemDefinition);
-		// 다음 아이템이 사용할 수 있도록 슬롯 비우기
+		// 능력을 유지한 채 빈 슬롯 상태 선반영
 		ToolEntries[EntryIndex].ToolDefinition = nullptr;
 	}
-	// 선택 슬롯과 무관하게 실제 소비한 품목과 차감량 및 잔여 수량 기록
+	// 복구 등 외부 동작의 실제 성공 여부 확인
+	if (Commit() == false)
+	{
+		// 실패한 동작의 소모와 슬롯 상태 복원
+		ToolEntries[EntryIndex] = PreviousEntry;
+		// 능력 회수와 변경 알림 없는 실패 전달
+		return false;
+	}
+	// 외부 확정 완료 후 마지막 품목의 능력 회수
+	if (RemainingCount == 0)
+	{
+		// 실행 중인 소비 능력의 기존 종료 후 제거 정책 유지
+		RemoveItemAbility(StoredItem);
+	}
+	// 확정된 실제 소비량과 잔여 수량 기록
 	UE_LOG(MarineDemolition, Log, TEXT("[ItemUse] Item: %s, Consumed: %d, Remaining: %d"), *StoredItem->ItemName.ToString(), Amount, RemainingCount);
-	// 수량과 정의 변경을 함께 전달
+	// 소모와 외부 확정이 완료된 상태만 전달
 	NotifyEntriesChanged();
-	// 실제 수량 차감 성공 전달
+	// 확정된 소모 성공 전달
 	return true;
 }
 
 bool UMD_EquipHotbarComponent::SetItemAtSlot(int32 SlotIndex, UMD_ItemDefinition* ItemDefinition, int32 Amount)
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return false;
+	}
 	// 서버 소유자와 지정 슬롯 및 수량의 공통 검사
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false || ToolEntries.IsValidIndex(SlotIndex) == false || Amount < 0)
 	{
@@ -496,6 +550,12 @@ UMD_ToolDefinition* UMD_EquipHotbarComponent::GetCurrentTool() const
 
 void UMD_EquipHotbarComponent::SelectSlot(int32 SlotIndex)
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return;
+	}
 	// 범위 밖 위치와 현재 위치의 중복 선택 차단
 	if (ToolEntries.IsValidIndex(SlotIndex) == false || SlotIndex == CurrentSlotIndex)
 	{
@@ -570,6 +630,12 @@ FMD_PlayerData UMD_EquipHotbarComponent::BuildEquipmentSaveData()
 
 bool UMD_EquipHotbarComponent::RestoreEquipmentSaveData(FMD_PlayerData SaveData)
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return false;
+	}
 	// 손상된 슬롯을 현재 보관함에 일부 적용하는 상황 차단
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false || SaveData.IsStructurallyValid() == false)
 	{
@@ -724,6 +790,12 @@ bool UMD_EquipHotbarComponent::CanSwapItemSlots(int32 FromSlotIndex, int32 ToSlo
 
 bool UMD_EquipHotbarComponent::SwapItemSlots(int32 FromSlotIndex, int32 ToSlotIndex)
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return false;
+	}
 	// 요청 권한과 복제 갱신에 사용할 소유 액터 조회
 	AActor* OwnerActor = GetOwner();
 	// 소유 액터가 없거나 현재 배열에서 처리할 수 없는 교환 차단
@@ -816,6 +888,12 @@ void UMD_EquipHotbarComponent::OnRep_CurrentSlotIndex()
 
 void UMD_EquipHotbarComponent::ServerSelectSlot_Implementation(int32 SlotIndex)
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return;
+	}
 	// 소유자 권한과 선택 위치 범위의 서버 재검증
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false || ToolEntries.IsValidIndex(SlotIndex) == false)
 	{
@@ -866,6 +944,12 @@ bool UMD_EquipHotbarComponent::IsToolChargeAvailable(UMD_ToolDefinition* ToolDef
 
 bool UMD_EquipHotbarComponent::ConsumeToolCharge(UMD_ToolDefinition* ToolDefinition)
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return false;
+	}
 	// 서버 권한과 현재 보유 잔량을 함께 재검증
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false || IsToolChargeAvailable(ToolDefinition) == false)
 	{
@@ -897,6 +981,12 @@ bool UMD_EquipHotbarComponent::ConsumeToolCharge(UMD_ToolDefinition* ToolDefinit
 
 float UMD_EquipHotbarComponent::ConsumeToolChargeAmount(UMD_ToolDefinition* ToolDefinition, float Amount)
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return 0.0f;
+	}
 	if (!IsValid(GetOwner()) || !GetOwner()->HasAuthority() || !IsValid(ToolDefinition)
 		|| !FMath::IsFinite(Amount) || Amount <= 0.0f
 		|| !FMath::IsFinite(ToolDefinition->MaxCharge) || ToolDefinition->MaxCharge <= 0.0f)
@@ -937,6 +1027,12 @@ bool UMD_EquipHotbarComponent::CanAddToolCharge(UMD_ToolDefinition* ToolDefiniti
 
 bool UMD_EquipHotbarComponent::AddToolCharge(UMD_ToolDefinition* ToolDefinition, float Amount)
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return false;
+	}
 	// 실제 충전 상태 변경 전 서버 권한 확인
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false)
 	{
@@ -1173,6 +1269,12 @@ void UMD_EquipHotbarComponent::RemoveAllItemAbilities()
 
 void UMD_EquipHotbarComponent::InitializeItemAbilities()
 {
+	// 소모 확정과 알림 중 보관 상태의 중첩 변경 차단
+	if (bItemConsumptionInProgress == true)
+	{
+		// 진행 중인 소모 예약과 능력 상태 보존
+		return;
+	}
 	// 서버의 ASC 연결 이후에만 기본 아이템 능력 초기화
 	if (IsValid(GetOwner()) == false || GetOwner()->HasAuthority() == false)
 	{

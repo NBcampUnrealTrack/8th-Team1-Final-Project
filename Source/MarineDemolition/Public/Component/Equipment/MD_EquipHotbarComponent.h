@@ -160,6 +160,9 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
 	bool TryConsumeItem(UMD_ItemDefinition* ItemDefinition, int32 Amount = 1);
 
+	// 소모 예약과 외부 확정을 묶고 실패 시 수량과 능력 보존
+	bool TryConsumeItemAndCommit(UMD_ItemDefinition* ItemDefinition, int32 Amount, TFunctionRef<bool()> Commit);
+
 	// 같은 AssetId의 중복 슬롯을 막는 지정 슬롯 설정이며 수량 영은 비우기
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "Hotbar")
 	bool SetItemAtSlot(int32 SlotIndex, UMD_ItemDefinition* ItemDefinition, int32 Amount = 1);
@@ -239,4 +242,7 @@ protected:
 	// 선택 위치의 복제 완료 알림
 	UFUNCTION()
 	void OnRep_CurrentSlotIndex();
+
+	// 소모 확정과 능력 회수 및 알림 중 슬롯 변경 재진입 차단
+	bool bItemConsumptionInProgress = false;
 };

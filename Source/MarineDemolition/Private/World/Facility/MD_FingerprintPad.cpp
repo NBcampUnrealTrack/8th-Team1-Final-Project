@@ -33,9 +33,9 @@ AMD_FingerprintPad::AMD_FingerprintPad()
 	FingerprintDisplay->SetupAttachment(RootComponent);
 	FingerprintDisplay->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	FingerprintDisplay->SetCastShadow(false);
-	FingerprintDisplay->SetRelativeLocation(FVector(9,0,0));
+	FingerprintDisplay->SetRelativeLocation(FingerprintOffset);
 	FingerprintDisplay->SetRelativeRotation(FRotator(0,90,-90));
-	FingerprintDisplay->SetRelativeScale3D(FVector(0.22f,0.32f,1.f));
+	FingerprintDisplay->SetRelativeScale3D(FVector(FingerprintSize.X/100.f,FingerprintSize.Y/100.f,1.f));
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Plane(TEXT("/Engine/BasicShapes/Plane.Plane"));
 	if (Plane.Succeeded()) FingerprintDisplay->SetStaticMesh(Plane.Object);
 	StatusLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("StatusLight"));
@@ -46,11 +46,32 @@ AMD_FingerprintPad::AMD_FingerprintPad()
 	StatusText->SetHorizontalAlignment(EHTA_Center); StatusText->SetWorldSize(9.f);
 }
 
+void AMD_FingerprintPad::ApplyDisplayLayout()
+{
+	FingerprintDisplay->SetRelativeLocation(FingerprintOffset);
+	FingerprintDisplay->SetRelativeRotation(FRotator(0,90,-90));
+	FingerprintDisplay->SetRelativeScale3D(FVector(FingerprintSize.X/100.f,FingerprintSize.Y/100.f,1.f));
+}
+
+void AMD_FingerprintPad::OnConstruction(const FTransform& Transform)
+{
+	Super::OnConstruction(Transform);
+	ApplyDisplayLayout();
+}
+
 void AMD_FingerprintPad::BeginPlay()
 {
 	Super::BeginPlay();
+	// Saved component overrides must not retain the old oversized display.
+	ApplyDisplayLayout();
 	if (GetNetMode() != NM_DedicatedServer)
+	{
+		SetActorTickInterval(0.f);
 		DisplayMaterial = FingerprintDisplay->CreateDynamicMaterialInstance(0);
+		DisplayOpacity = IsValid(Interlock) && Interlock->IsActive() ? 0.15f : 1.f;
+		if (DisplayMaterial) DisplayMaterial->SetScalarParameterValue(TEXT("ScanOpacity"),DisplayOpacity);
+	}
+	else SetActorTickEnabled(false);
 }
 
 void AMD_FingerprintPad::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const
@@ -59,6 +80,14 @@ void AMD_FingerprintPad::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& O
 	DOREPLIFETIME(AMD_FingerprintPad, Interlock);
 	DOREPLIFETIME(AMD_FingerprintPad, PadIndex);
 	DOREPLIFETIME(AMD_FingerprintPad, ActiveScanner);
+	DOREPLIFETIME(AMD_FingerprintPad, ScanVisualStartTime);
+}
+
+void AMD_FingerprintPad::NotifyScanAccepted()
+{
+	if (!HasAuthority()) return;
+	ScanVisualStartTime = GetWorld()->GetTimeSeconds();
+	ForceNetUpdate();
 }
 
 bool AMD_FingerprintPad::CanMaintainScan(const APawn* Pawn) const
@@ -78,8 +107,19 @@ bool AMD_FingerprintPad::CanMaintainScan(const APawn* Pawn) const
 
 void AMD_FingerprintPad::SetInteractionHighlighted_Implementation(bool bHighlighted)
 {
-	PadMesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
-	PadMesh->SetRenderCustomDepth(bHighlighted);
+	bInteractionHighlighted = bHighlighted;
+	RefreshHighlight();
+}
+
+void AMD_FingerprintPad::RefreshHighlight()
+{
+	if (GetNetMode() == NM_DedicatedServer) return;
+	const bool bFault = IsValid(Interlock) && Interlock->IsActive();
+	const int32 Stencil = bFault ? FaultHighlightStencilValue : IMD_Interactable::HighlightStencilValue;
+	const bool bEnabled = bFault || bInteractionHighlighted;
+	// Looking away must not clear a locator needed by the entire team.
+	if (PadMesh->CustomDepthStencilValue != Stencil) PadMesh->SetCustomDepthStencilValue(Stencil);
+	if (PadMesh->bRenderCustomDepth != bEnabled) PadMesh->SetRenderCustomDepth(bEnabled);
 }
 
 FText AMD_FingerprintPad::GetInteractionDisplayName_Implementation() const
@@ -121,15 +161,39 @@ void AMD_FingerprintPad::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	if (GetNetMode()==NM_DedicatedServer) return;
+	RefreshHighlight();
 	const bool bActive = IsValid(Interlock) && Interlock->IsActive();
 	const bool bScanning = IsValid(ActiveScanner) || (bActive && Interlock->SoloFirstPad==PadIndex);
+	const auto* GS = GetWorld()->GetGameState();
+	const double Now = GS ? GS->GetServerWorldTimeSeconds() : GetWorld()->GetTimeSeconds();
+	const double Age = FMath::Max(0., Now - ScanVisualStartTime);
+	const float FadeDuration = FMath::IsFinite(ScanFadeInSeconds) ? FMath::Max(0.05f, ScanFadeInSeconds) : 0.45f;
+	const bool bRecentScan = ScanVisualStartTime >= 0. && Age < FadeDuration;
+	float ScanProgress = 1.f;
+	if (bRecentScan && (bScanning || !bActive))
+	{
+		const float Alpha = FMath::Clamp(float(Age / FadeDuration), 0.f, 1.f);
+		ScanProgress = Alpha * Alpha * (3.f - 2.f * Alpha);
+	}
+	const float Target = !bActive || bScanning ? 1.f : 0.15f;
+	DisplayOpacity = FMath::FInterpConstantTo(DisplayOpacity, Target, DeltaSeconds, 1.f / 0.18f);
 	const FLinearColor Color = !bActive ? FLinearColor(0.1f,0.9f,0.3f) : bScanning ? FLinearColor(0.1f,0.7f,1.f) : FLinearColor(1.f,0.1f,0.03f);
-	StatusLight->SetLightColor(Color);
-	if (DisplayMaterial) DisplayMaterial->SetVectorParameterValue(TEXT("Tint"),Color);
+	if (DisplayMaterial)
+	{
+		DisplayMaterial->SetVectorParameterValue(TEXT("Tint"),Color);
+		DisplayMaterial->SetScalarParameterValue(TEXT("ScanOpacity"),DisplayOpacity);
+		DisplayMaterial->SetScalarParameterValue(TEXT("ScanProgress"),ScanProgress);
+	}
 	StatusLight->SetIntensity(bActive&&!bScanning ? (FMath::Frac(GetWorld()->GetTimeSeconds())<0.5f?60.f:10.f) : 40.f);
-	const FString State = !bActive ? TEXT("READY") : bScanning ? TEXT("SCANNING") : TEXT("AUTH REQUIRED");
-	StatusText->SetText(FText::FromString(FString::Printf(TEXT("%s / %s"),PadIndex==0?TEXT("A"):TEXT("B"),*State)));
-	StatusText->SetTextRenderColor(Color.ToFColor(true));
+	const int32 PresentationState = !bActive ? 0 : bScanning ? 2 : 1;
+	if (LastPresentationState != PresentationState)
+	{
+		LastPresentationState = PresentationState;
+		StatusLight->SetLightColor(Color);
+		const TCHAR* State = !bActive ? TEXT("READY") : bScanning ? TEXT("SCANNING") : TEXT("AUTH REQUIRED");
+		StatusText->SetText(FText::FromString(FString::Printf(TEXT("%s / %s"),PadIndex==0?TEXT("A"):TEXT("B"),State)));
+		StatusText->SetTextRenderColor(Color.ToFColor(true));
+	}
 }
 
 void AMD_FingerprintPad::EndPlay(const EEndPlayReason::Type Reason)
