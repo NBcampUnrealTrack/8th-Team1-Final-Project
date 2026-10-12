@@ -107,8 +107,19 @@ bool AMD_FingerprintPad::CanMaintainScan(const APawn* Pawn) const
 
 void AMD_FingerprintPad::SetInteractionHighlighted_Implementation(bool bHighlighted)
 {
-	PadMesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
-	PadMesh->SetRenderCustomDepth(bHighlighted);
+	bInteractionHighlighted = bHighlighted;
+	RefreshHighlight();
+}
+
+void AMD_FingerprintPad::RefreshHighlight()
+{
+	if (GetNetMode() == NM_DedicatedServer) return;
+	const bool bFault = IsValid(Interlock) && Interlock->IsActive();
+	const int32 Stencil = bFault ? FaultHighlightStencilValue : IMD_Interactable::HighlightStencilValue;
+	const bool bEnabled = bFault || bInteractionHighlighted;
+	// Looking away must not clear a locator needed by the entire team.
+	if (PadMesh->CustomDepthStencilValue != Stencil) PadMesh->SetCustomDepthStencilValue(Stencil);
+	if (PadMesh->bRenderCustomDepth != bEnabled) PadMesh->SetRenderCustomDepth(bEnabled);
 }
 
 FText AMD_FingerprintPad::GetInteractionDisplayName_Implementation() const
@@ -150,6 +161,7 @@ void AMD_FingerprintPad::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	if (GetNetMode()==NM_DedicatedServer) return;
+	RefreshHighlight();
 	const bool bActive = IsValid(Interlock) && Interlock->IsActive();
 	const bool bScanning = IsValid(ActiveScanner) || (bActive && Interlock->SoloFirstPad==PadIndex);
 	const auto* GS = GetWorld()->GetGameState();

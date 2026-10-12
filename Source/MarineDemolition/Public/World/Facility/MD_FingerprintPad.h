@@ -19,6 +19,8 @@ class MARINEDEMOLITION_API AMD_FingerprintPad : public AActor, public IMD_Intera
 	GENERATED_BODY()
 public:
 	AMD_FingerprintPad();
+	/** Reserved for the fault locator, distinct from hover and handheld scanner stencils. */
+	static constexpr int32 FaultHighlightStencilValue = 249;
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
@@ -62,6 +64,8 @@ protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 private:
+	void RefreshHighlight();
+	bool bInteractionHighlighted = false;
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> DisplayMaterial;
 	void ApplyDisplayLayout();
