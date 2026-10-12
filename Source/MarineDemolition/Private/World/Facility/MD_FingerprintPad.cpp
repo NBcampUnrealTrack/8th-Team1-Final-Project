@@ -109,7 +109,12 @@ bool AMD_FingerprintPad::CanInteract_Implementation(AActor* Interactor) const
 
 void AMD_FingerprintPad::Interact_Implementation(AActor* Interactor)
 {
-	if (HasAuthority() && IsValid(Interlock)) Interlock->BeginScan(this,Cast<APawn>(Interactor));
+	// 서버에서 직접 호출한 인증에 대한 연결 상태 검증
+	if (HasAuthority() == true && IsValid(Interlock) == true && IsValid(Interlock->Fault) == true)
+	{
+		// 서버 직접 입력의 현재 고장 번호를 인증 판정에 전달
+		Interlock->BeginScan(this, Cast<APawn>(Interactor), Interlock->Fault->GetSnapshot().FaultId);
+	}
 }
 
 void AMD_FingerprintPad::InteractReleased_Implementation(AActor* Interactor)
