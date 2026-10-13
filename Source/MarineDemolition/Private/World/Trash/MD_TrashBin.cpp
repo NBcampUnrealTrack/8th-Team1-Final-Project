@@ -1,6 +1,7 @@
 #include "World/Trash/MD_TrashBin.h"
 #include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
 #include "Component/Interaction/MD_InteractionPromptComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Character/MD_Character.h"
 #include "Components/BoxComponent.h"
@@ -898,14 +899,15 @@ void AMD_TrashBin::SyncContentCount()
 {
 	const int32 NewCount = Contents.Num();
 	if (ContentCount == NewCount) return;
-
+	if (NewCount > ContentCount) MDAudioFeedback::World(this, TEXT("SFX.Carry.Bin.Insert"));
 	ContentCount = NewCount;
 	OnContentsChanged.Broadcast(ContentCount);
 	ForceNetUpdate();
 }
 
-void AMD_TrashBin::OnRep_ContentCount()
+void AMD_TrashBin::OnRep_ContentCount(int32 PreviousCount)
 {
+	if (HasActorBegunPlay() && ContentCount > PreviousCount) MDAudioFeedback::World(this, TEXT("SFX.Carry.Bin.Insert"));
 	OnContentsChanged.Broadcast(ContentCount);
 }
 

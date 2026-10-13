@@ -1,6 +1,7 @@
 #include "Component/Facility/MD_FacilityFaultComponent.h"
 
 #include "Component/Facility/MD_FacilityFaultManagerComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
 #include "Net/UnrealNetwork.h"
@@ -68,6 +69,8 @@ void UMD_FacilityFaultComponent::RegisterWithManager()
 
 void UMD_FacilityFaultComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
+	MDAudioFeedback::Stop(this, RepairAudio, 0.f);
+	MDAudioFeedback::Stop(this, FaultAudio, 0.f);
 	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(RegistrationTimer);
 	if (Manager.IsValid()) Manager->UnregisterFacility(this);
 	Manager.Reset();
@@ -300,5 +303,47 @@ void UMD_FacilityFaultComponent::OnRep_Snapshot(const FMD_FacilitySnapshot& Prev
 {
 	// Copy before broadcasting so a listener's subsequent transition cannot change this event.
 	const FMD_FacilitySnapshot Current = Snapshot;
+	RefreshAudio(Previous, Current);
 	OnStateChanged.Broadcast(this, Previous, Current);
+}
+
+void UMD_FacilityFaultComponent::PlayFeedbackForAll(const TCHAR* Event, const FVector& Location)
+{
+	if (HasServerAuthority()) MulticastFeedback(FGameplayTag::RequestGameplayTag(FName(Event), false), Location);
+}
+void UMD_FacilityFaultComponent::MulticastFeedback_Implementation(FGameplayTag Event, FVector_NetQuantize Location)
+{
+	MDAudioFeedback::At(this, *Event.ToString(), Location);
+}
+void UMD_FacilityFaultComponent::RefreshAudio(const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current)
+{
+	if (!GetWorld() || !GetWorld()->IsGameWorld() || GetWorld()->GetNetMode() == NM_DedicatedServer) return;
+	if (!Previous.IsFaultActive() && Current.IsFaultActive())
+	{
+		if (Kind == EMD_FacilityKind::Door) MDAudioFeedback::World(GetOwner(), TEXT("SFX.World.Door.Jammed"));
+		if (Kind == EMD_FacilityKind::CoolingPump) MDAudioFeedback::World(GetOwner(), TEXT("SFX.Facility.Pump.Fault"));
+		if (Kind == EMD_FacilityKind::TrashSorter) MDAudioFeedback::World(GetOwner(), TEXT("SFX.Facility.Sorter.Fault"));
+		if (Kind == EMD_FacilityKind::Fingerprint) MDAudioFeedback::UI(this, TEXT("SFX.Facility.Fingerprint.Request"));
+	}
+	if (Kind == EMD_FacilityKind::TrashSorter && Current.IsFaultActive() && !FaultAudio.IsValid())
+		FaultAudio = MDAudioFeedback::Attached(GetOwner()->GetRootComponent(), TEXT("SFX.Facility.Sorter.FaultLoop"));
+	if (!Current.IsFaultActive()) MDAudioFeedback::Stop(this, FaultAudio);
+	if (Current.State == EMD_FacilityState::Repairing && !RepairAudio.IsValid())
+	{
+		AActor* Source = IsValid(Current.Repairer) ? Current.Repairer.Get() : GetOwner();
+		if (Previous.State != EMD_FacilityState::Repairing) MDAudioFeedback::World(Source, TEXT("SFX.Facility.Repair.Start"));
+		RepairAudio = MDAudioFeedback::Attached(Source->GetRootComponent(), TEXT("SFX.Facility.Repair.Loop"));
+	}
+	if (Current.State != EMD_FacilityState::Repairing)
+	{
+		MDAudioFeedback::Stop(this, RepairAudio);
+		if (Previous.State == EMD_FacilityState::Repairing && Current.IsFaultActive())
+			MDAudioFeedback::World(GetOwner(), TEXT("SFX.Facility.Repair.Cancel"));
+	}
+	if (Previous.IsFaultActive() && Current.State == EMD_FacilityState::Repaired)
+	{
+		const TCHAR* Event = Kind == EMD_FacilityKind::Fingerprint ? TEXT("SFX.Facility.Fingerprint.Complete")
+			: Kind == EMD_FacilityKind::Breaker ? TEXT("SFX.Facility.Breaker.Complete") : TEXT("SFX.Facility.Repair.Complete");
+		MDAudioFeedback::World(GetOwner(), Event);
+	}
 }

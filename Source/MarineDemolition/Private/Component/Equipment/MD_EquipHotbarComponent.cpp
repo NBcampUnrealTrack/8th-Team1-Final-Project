@@ -2,6 +2,8 @@
 
 
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
+#include "GameFramework/Pawn.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Data/Equipment/MD_ConsumeItemDefinition.h"
 #include "AbilitySystemGlobals.h"
@@ -562,6 +564,7 @@ void UMD_EquipHotbarComponent::SelectSlot(int32 SlotIndex)
 		// 변경이 없는 선택 요청 종료
 		return;
 	}
+	MDAudioFeedback::LocalPawn(Cast<APawn>(GetOwner()), TEXT("SFX.Tool.Hotbar.Switch"));
 	// 유효한 서버 소유자에 한해서 선택 상태 직접 확정
 	if (IsValid(GetOwner()) == true && GetOwner()->HasAuthority() == true)
 	{

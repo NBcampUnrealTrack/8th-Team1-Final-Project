@@ -158,6 +158,8 @@ public:
 	// 실제 이자 발생 결과를 소유 클라이언트의 기존 HUD에 전달
 	UFUNCTION(Client, Reliable)
 	void ClientNotifyLoanInterest(int32 InterestAmount, int32 DebtBalance, int32 NotificationStage);
+	UFUNCTION(Client, Reliable)
+	void ClientLoanFeedback(bool bBorrow, bool bSuccess);
 
 	// 서버 판정 결과(슬롯 가득 참·전원 없음 등) 한 줄을 소유 클라이언트 HUD 알림에 전달
 	UFUNCTION(Client, Reliable)

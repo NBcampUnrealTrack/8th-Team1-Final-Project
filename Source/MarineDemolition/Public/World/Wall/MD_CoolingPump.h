@@ -2,6 +2,7 @@
 
 #include "CoreMinimal.h"
 #include "World/Wall/MD_WallUtility.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "MD_CoolingPump.generated.h"
 
 class UNiagaraComponent;
@@ -20,9 +21,13 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 	virtual void OnUtilityStateChangedLocal(EMD_UtilityState NewState) override;
 
 	/** Assign a looping contaminated-water Niagara system; position at the pump's damaged outlet. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Cooling")
 	TObjectPtr<UNiagaraComponent> ContaminatedWaterFX;
+
+private:
+	FMD_AudioHandle LeakAudio;
 };

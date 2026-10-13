@@ -7,6 +7,7 @@
 
 class AMD_PowerConduit;
 class UStaticMeshComponent;
+DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnBlackoutChanged, bool, bBlackout);
 
 /** GameState-owned server registry and timer-based random incident scheduler. */
 UCLASS(ClassGroup = (MD), meta = (BlueprintSpawnableComponent))
@@ -24,6 +25,8 @@ public:
 	int32 RandomSeed = 0;
 	UPROPERTY(BlueprintAssignable, Category = "MD|Facility")
 	FMD_OnFacilityStateChanged OnFacilityStateChanged;
+	UFUNCTION(BlueprintPure, Category="MD|Facility|Power") bool IsBlackoutActive() const { return bBlackoutActive; }
+	UPROPERTY(BlueprintAssignable, Category="MD|Facility|Power") FMD_OnBlackoutChanged OnBlackoutChanged;
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Facility")
 	bool RegisterFacility(UMD_FacilityFaultComponent* Facility);
@@ -47,6 +50,9 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
 private:
+	UPROPERTY(ReplicatedUsing=OnRep_BlackoutActive) bool bBlackoutActive=false;
+	UFUNCTION() void OnRep_BlackoutActive();
+	void RefreshBlackoutState();
 	UFUNCTION()
 	void HandleFacilityStateChanged(UMD_FacilityFaultComponent* Facility,
 		const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current);

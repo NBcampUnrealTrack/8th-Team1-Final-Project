@@ -1,6 +1,7 @@
 #include "Component/Scrape/MD_StainScraperComponent.h"
 
 #include "AbilitySystemComponent.h"
+#include "Audio/MD_AudioRelayComponent.h"
 #include "Camera/CameraComponent.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
@@ -99,7 +100,11 @@ void UMD_StainScraperComponent::ApplyImpact()
 	if (!IsValid(Target) || TraceTarget() != Target) return;
 	const float Charge = Character->GetHotbarComponent()->GetToolCharge(StrokeTool.Get());
 	if (AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Target))
-		Stain->ApplyScrapeStroke(FMD_SurfaceStainSize::RemovalFromToolStrength(StrokeTool->GetScrapeStainRemovalAmount(Charge)));
+	{
+		if (Stain->ApplyScrapeStroke(FMD_SurfaceStainSize::RemovalFromToolStrength(StrokeTool->GetScrapeStainRemovalAmount(Charge)))
+			&& Stain->GetRemainingSize() == 0 && Character->GetAudioRelayComponent())
+			Character->GetAudioRelayComponent()->PlayConfirmedAtOwnerLocationForAll(FGameplayTag::RequestGameplayTag(TEXT("SFX.Clean.Sludge.Drop"), false));
+	}
 	else if (AMD_Barnacle* Barnacle = Cast<AMD_Barnacle>(Target))
 		Barnacle->ApplyScrapeClickDamage(StrokeTool->GetScrapeBarnacleDamage(Charge));
 }
