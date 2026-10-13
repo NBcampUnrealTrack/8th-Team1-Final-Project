@@ -1,4 +1,5 @@
 #include "World/Trash/MD_TrashSorter.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -375,6 +376,7 @@ void AMD_TrashSorter::RefreshOperationBlock()
 
 void AMD_TrashSorter::MulticastErrorFeedback_Implementation()
 {
+	MDAudioFeedback::World(this, TEXT("SFX.Mothership.Sort.Wrong"));
 	OnSortErrorFeedback();
 }
 
@@ -462,6 +464,7 @@ bool AMD_TrashSorter::GetServerLedgers(
 
 void AMD_TrashSorter::MulticastItemSwallowed_Implementation(const bool bCorrectSort, const FVector Location)
 {
+	MDAudioFeedback::At(this, bCorrectSort ? TEXT("SFX.Mothership.Sort.Correct") : TEXT("SFX.Mothership.Sort.Wrong"), Location);
 	OnItemSwallowed(bCorrectSort, Location);
 }
 

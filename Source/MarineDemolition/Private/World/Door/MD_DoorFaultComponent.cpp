@@ -106,6 +106,7 @@ void UMD_DoorFaultComponent::StopFaultAudio()
 	FaultAudioHandle = FMD_AudioHandle();
 }
 
+
 void UMD_DoorFaultComponent::CloseDoor(bool bForceAnimation)
 {
 	AActor* Door = GetOwner();

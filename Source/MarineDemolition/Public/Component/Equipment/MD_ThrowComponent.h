@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "Components/ActorComponent.h"
 #include "MD_ThrowComponent.generated.h"
 
@@ -49,6 +50,7 @@ private:
 	double LocalStartedAt = 0.0;
 	uint32 LocalRequestId = 0;
 	bool bLocalCharging = false;
+	FMD_AudioHandle ChargeAudio;
 
 	TWeakObjectPtr<AActor> ServerHeldActor;
 	TWeakObjectPtr<UMD_ToolDefinition> ServerTool;

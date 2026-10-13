@@ -1,4 +1,5 @@
 #include "World/Facility/MD_FingerprintPad.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "World/Facility/MD_FingerprintInterlock.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Components/BoxComponent.h"
@@ -169,11 +170,19 @@ void AMD_FingerprintPad::Tick(float DeltaSeconds)
 	RefreshHighlight();
 	const bool bActive = IsValid(Interlock) && Interlock->IsActive();
 	const bool bScanning = IsValid(ActiveScanner) || (bActive && Interlock->SoloFirstPad==PadIndex);
+	if (bActive && bScanning && !ScanAudio.IsValid())
+		ScanAudio = MDAudioFeedback::Attached(RootComponent, TEXT("SFX.Facility.Fingerprint.WaitLoop"));
+	if (!bActive || !bScanning) MDAudioFeedback::Stop(this, ScanAudio);
 	const auto* GS = GetWorld()->GetGameState();
 	const double Now = GS ? GS->GetServerWorldTimeSeconds() : GetWorld()->GetTimeSeconds();
 	const double Age = FMath::Max(0., Now - ScanVisualStartTime);
 	const float FadeDuration = FMath::IsFinite(ScanFadeInSeconds) ? FMath::Max(0.05f, ScanFadeInSeconds) : 0.45f;
 	const bool bRecentScan = ScanVisualStartTime >= 0. && Age < FadeDuration;
+	if (ScanVisualStartTime >= 0. && ScanVisualStartTime > LastAudioScanTime)
+	{
+		LastAudioScanTime = ScanVisualStartTime;
+		if (bRecentScan) MDAudioFeedback::World(this, TEXT("SFX.Facility.Fingerprint.Scan"));
+	}
 	float ScanProgress = 1.f;
 	if (bRecentScan && (bScanning || !bActive))
 	{
@@ -203,6 +212,7 @@ void AMD_FingerprintPad::Tick(float DeltaSeconds)
 
 void AMD_FingerprintPad::EndPlay(const EEndPlayReason::Type Reason)
 {
+	MDAudioFeedback::Stop(this, ScanAudio, 0.f);
 	if (HasAuthority() && IsValid(Interlock)) Interlock->ReleaseScan(this,ActiveScanner);
 	Super::EndPlay(Reason);
 }

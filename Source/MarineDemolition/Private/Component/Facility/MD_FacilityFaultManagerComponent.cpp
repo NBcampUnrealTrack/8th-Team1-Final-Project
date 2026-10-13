@@ -1,4 +1,5 @@
 #include "Component/Facility/MD_FacilityFaultManagerComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Component/Facility/MD_FacilityRepairComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -20,6 +21,7 @@ void UMD_FacilityFaultManagerComponent::GetLifetimeReplicatedProps(TArray<FLifet
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	// 변경 이벤트 수신 시점과 무관한 현재 정전 상태 복제
 	DOREPLIFETIME(UMD_FacilityFaultManagerComponent, PowerLightStates);
+	DOREPLIFETIME(UMD_FacilityFaultManagerComponent, bBlackoutActive);
 }
 
 bool UMD_FacilityFaultManagerComponent::HasServerAuthority() const
@@ -106,6 +108,7 @@ bool UMD_FacilityFaultManagerComponent::RegisterFacility(UMD_FacilityFaultCompon
 	GetWorld()->GetTimerManager().ClearTimer(Facility->RegistrationTimer);
 	// 고장과 복구의 지속 상태 변경을 한 번만 구독
 	Facility->OnStateChanged.AddUniqueDynamic(this, &UMD_FacilityFaultManagerComponent::HandleFacilityStateChanged);
+	RefreshBlackoutState();
 	// 시설과 관리자 양방향 등록 성공 전달
 	return true;
 }
@@ -136,6 +139,7 @@ void UMD_FacilityFaultManagerComponent::UnregisterFacility(UMD_FacilityFaultComp
 			// 해제 대상이거나 수명이 끝난 시설 여부 전달
 			return Weak.IsValid() == false || Weak.Get() == Facility;
 		});
+	RefreshBlackoutState();
 }
 
 TArray<UMD_FacilityFaultComponent*> UMD_FacilityFaultManagerComponent::GetRegisteredFacilities() const
@@ -162,8 +166,26 @@ void UMD_FacilityFaultManagerComponent::HandleFacilityStateChanged(UMD_FacilityF
 	{
 		// 고장 기여가 시작되거나 끝난 경우에만 현재 사건 재집계
 		RebuildPowerLightStates();
+		RefreshBlackoutState();
 	}
 	OnFacilityStateChanged.Broadcast(Facility, Previous, Current);
+}
+
+void UMD_FacilityFaultManagerComponent::RefreshBlackoutState()
+{
+	if(bPowerLightsShuttingDown || !HasServerAuthority()) return;
+	const bool bActive=Facilities.ContainsByPredicate([](const TWeakObjectPtr<UMD_FacilityFaultComponent>& Entry)
+	{
+		const auto* Facility=Entry.Get();
+		return Facility && Facility->IsFaultActive() && IsValid(Facility->GetOwner()) && Facility->GetOwner()->IsA<AMD_PowerConduit>();
+	});
+	if(bActive==bBlackoutActive) return;
+	bBlackoutActive=bActive;OnRep_BlackoutActive();GetOwner()->ForceNetUpdate();
+}
+void UMD_FacilityFaultManagerComponent::OnRep_BlackoutActive()
+{
+	MDAudioFeedback::UI(this, bBlackoutActive ? TEXT("SFX.Hazard.Light.Off") : TEXT("SFX.Hazard.Light.On"));
+	OnBlackoutChanged.Broadcast(bBlackoutActive);
 }
 
 void UMD_FacilityFaultManagerComponent::StartFaultSchedules()

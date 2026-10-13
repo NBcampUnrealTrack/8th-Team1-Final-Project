@@ -1,6 +1,7 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 #include "UI/Game/MD_DailyReportWidget.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "World/Interaction/MD_DayEndConsole.h"
 #include "Player/MD_PlayerController.h"
 #include "Components/TextBlock.h"
@@ -87,6 +88,7 @@ void UMD_DailyReportWidget::NativeDestruct()
 
 void UMD_DailyReportWidget::NativeOnActivated()
 {
+	MDAudioFeedback::UI(this, TEXT("SFX.Mothership.Report.Open"));
     // 풀에서 재사용하는 화면도 이번 Blueprint 연출 시점까지 대기
     bSummaryAnimationRequested = false;
     // 일반 화면의 활성화 이벤트가 이전 보고서를 연출 대상으로 사용하지 않도록 초기화
@@ -673,6 +675,7 @@ void UMD_DailyReportWidget::StopLedgerUpdates()
 
 void UMD_DailyReportWidget::SetFinalReport(FMD_InspectionReport& Report, double EndServerTime)
 {
+	if (!bShowingFinalReport) MDAudioFeedback::UI(this, TEXT("SFX.Mothership.Report.Stamp"));
     // 최종 정산을 서버 표시 시간이 끝날 때까지 고정
     bShowingFinalReport = true;
     // 네트워크 전달 지연을 포함하는 서버 종료 시각 보관
