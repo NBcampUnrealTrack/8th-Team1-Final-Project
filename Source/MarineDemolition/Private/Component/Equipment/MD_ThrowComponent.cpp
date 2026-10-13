@@ -14,6 +14,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Gameplay/Trash/MD_TrashSortable.h"
 #include "World/Equipment/MD_EquipmentPickup.h"
+#include "World/Trash/MD_TrashSorter.h"
 
 UMD_ThrowComponent::UMD_ThrowComponent()
 {
@@ -251,6 +252,13 @@ bool UMD_ThrowComponent::ThrowHeldActor(AActor* HeldActor, const FVector& Veloci
 	Primitive->SetPhysicsLinearVelocity(Velocity);
 	Primitive->WakeAllRigidBodies();
 	HeldActor->ForceNetUpdate();
+	// A held item may already overlap the inlet; releasing it does not create another BeginOverlap.
+	TArray<AActor*> Sorters;
+	Primitive->GetOverlappingActors(Sorters, AMD_TrashSorter::StaticClass());
+	for (AActor* Actor : Sorters)
+	{
+		if (CastChecked<AMD_TrashSorter>(Actor)->TryRequestIntake(HeldActor)) break;
+	}
 	return true;
 }
 
