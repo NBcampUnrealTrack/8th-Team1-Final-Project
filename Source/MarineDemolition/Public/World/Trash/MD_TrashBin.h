@@ -299,7 +299,7 @@ private:
 	void HandleContentDestroyed(AActor* DestroyedActor);
 
 	UFUNCTION()
-	void OnRep_ContentCount();
+	void OnRep_ContentCount(int32 PreviousCount);
 
 	UFUNCTION()
 	void OnRep_LiquidState();

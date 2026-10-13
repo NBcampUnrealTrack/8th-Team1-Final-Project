@@ -1,4 +1,5 @@
 #include "World/Trash/MD_TrashDispenser.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Components/ArrowComponent.h"
 #include "Components/BoxComponent.h"
@@ -323,6 +324,8 @@ void AMD_TrashDispenser::HandleClearanceEndOverlap(
 void AMD_TrashDispenser::MulticastDispenseResult_Implementation(
 	EMD_TrashDispenseResult Result, APawn* RequestingPawn)
 {
+	if (Result == EMD_TrashDispenseResult::Success) MDAudioFeedback::World(this, TEXT("SFX.Carry.Dispenser.Release"));
+	else MDAudioFeedback::LocalPawn(RequestingPawn, TEXT("SFX.Tool.Interact.Denied"));
 	// 실패 메시지처럼 요청자 화면에만 띄울 연출을 BP가 구분할 수 있게 로컬 여부를 계산해 넘긴다.
 	const bool bIsLocalRequester = IsValid(RequestingPawn) && RequestingPawn->IsLocallyControlled();
 	OnDispenseResult(Result, bIsLocalRequester);

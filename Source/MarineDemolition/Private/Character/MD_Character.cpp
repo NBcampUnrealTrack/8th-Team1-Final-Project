@@ -2,6 +2,7 @@
 
 
 #include "Character/MD_Character.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "Player/MD_PlayerState.h"
 #include "Data/Input/MD_InputConfig.h"
 #include "Component/Character/MD_CharacterMovementComponent.h"
@@ -1829,7 +1830,14 @@ float AMD_Character::PlayBarnacleScrapeMontage()
 		return 0.f;
 	}
 
-	return AnimInstance->Montage_Play(BarnacleScrapeMontage);
+	const float Duration = AnimInstance->Montage_Play(BarnacleScrapeMontage);
+	if (Duration > 0.f)
+	{
+		const auto Tag = FGameplayTag::RequestGameplayTag(TEXT("SFX.Clean.Hera.Swing"), false);
+		if (IsLocallyControlled()) MDAudioFeedback::World(this, TEXT("SFX.Clean.Hera.Swing"));
+		if (HasAuthority() && AudioRelayComponent) AudioRelayComponent->PlayAtOwnerLocationForAll(Tag);
+	}
+	return Duration;
 }
 
 void AMD_Character::OnRep_CutterVFXActive()
@@ -1976,6 +1984,7 @@ void AMD_Character::RefreshCutterVFX()
 void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
 {
 	const bool bIsDead = (NewState == EMD_HealthState::Dead);
+	if (bIsDead != bWasDeadState) MDAudioFeedback::World(this, bIsDead ? TEXT("SFX.Character.Death") : TEXT("SFX.Character.Respawn"));
 	if (bIsDead)
 	{
 		if (ThrowComponent) ThrowComponent->CancelThrow();

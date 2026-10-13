@@ -1,4 +1,5 @@
 #include "World/Facility/MD_RepairInstruction.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "World/Wall/MD_PowerConduit.h"
 #include "World/Door/MD_DoorFaultComponent.h"
 #include "Component/Facility/MD_FacilityRepairComponent.h"
@@ -432,6 +433,17 @@ void AMD_RepairInstructionController::PublishState()
 
 void AMD_RepairInstructionController::OnRep_State()
 {
+	if (bAudioInitialized && State.bActive && State.bGuideRead && !LastAudioState.bGuideRead)
+		MDAudioFeedback::World(Guide, TEXT("SFX.Facility.Instruction.Use"));
+	if (bAudioInitialized && State.RestartFlashUntil > LastAudioState.RestartFlashUntil)
+		MDAudioFeedback::World(Guide, TEXT("SFX.Facility.Instruction.Restart"));
+	if (LastAudioState.bActive && LastAudioState.Revision == State.Revision)
+		for (int32 I = 0; I < 4; ++I)
+			if (State.CurrentRows.IsValidIndex(I) && LastAudioState.CurrentRows.IsValidIndex(I)
+				&& State.CurrentRows[I] != LastAudioState.CurrentRows[I])
+				MDAudioFeedback::At(this, TEXT("SFX.Facility.Breaker.Snap"), GetActorTransform().TransformPosition(GetKnobSlotCenter(I, State.CurrentRows[I])));
+	LastAudioState = State;
+	bAudioInitialized = true;
 	ApplyDoorState();
 	RefreshKnobs();
 	if (IsValid(Guide)) Guide->RefreshPresentation();

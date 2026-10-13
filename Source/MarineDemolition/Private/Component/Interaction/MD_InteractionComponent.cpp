@@ -1,4 +1,5 @@
 #include "Component/Interaction/MD_InteractionComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
@@ -1035,6 +1036,7 @@ void UMD_InteractionComponent::ReleaseHeldActor()
 	}
 
 	AActor* PreviousHeldActor = HeldActor;
+	if (IsValid(PreviousHeldActor)) MDAudioFeedback::World(GetOwner(), TEXT("SFX.Carry.Hand.Drop"));
 	HeldActor = nullptr;
 	HeldTargetOffset = FVector::ZeroVector;
 	HeldGrabPointOffset = FVector::ZeroVector;
@@ -1213,6 +1215,7 @@ void UMD_InteractionComponent::UpdateCarrySettle(float DeltaSeconds)
 
 void UMD_InteractionComponent::OnRep_HeldActor()
 {
+	if (!HeldActor) MDAudioFeedback::World(GetOwner(), TEXT("SFX.Carry.Hand.Drop"));
 	// HeldActor is only presentation state on clients. Actor/physics movement stays server-authoritative.
 	if (IsHolding())
 	{

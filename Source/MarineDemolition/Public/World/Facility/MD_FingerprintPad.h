@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "GameFramework/Actor.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_FingerprintPad.generated.h"
@@ -71,4 +72,6 @@ private:
 	void ApplyDisplayLayout();
 	float DisplayOpacity = 1.f;
 	int32 LastPresentationState = INDEX_NONE;
+	double LastAudioScanTime = -1.;
+	FMD_AudioHandle ScanAudio;
 };

@@ -1,4 +1,5 @@
 #include "Component/Scanning/MD_ScannerComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Character/MD_Character.h"
@@ -84,6 +85,8 @@ void UMD_ScannerComponent::RefreshBlackoutLight()
 	const bool bHasPossession=Character && (Character->GetLocalRole()==ROLE_SimulatedProxy || Character->GetController());
 	const bool bOn=Manager && Manager->IsBlackoutActive() && bHasPossession && !Character->IsHidden() && IsScannerEquipped()
 		&& Interaction && !Interaction->IsHolding() && (!ASC || !ASC->HasMatchingGameplayTag(MDGameplayTags::State_Dead));
+	if (BlackoutLight->IsVisible() != bOn)
+		MDAudioFeedback::LocalPawn(Character, bOn ? TEXT("SFX.Tool.Scanner.LightOn") : TEXT("SFX.Tool.Scanner.LightOff"));
 	BlackoutLight->SetVisibility(bOn);SetComponentTickEnabled(bOn);if(bOn) UpdateBlackoutLightTransform();
 }
 void UMD_ScannerComponent::UpdateBlackoutLightTransform()
@@ -129,6 +132,7 @@ bool UMD_ScannerComponent::ToggleScanMode()
 	// 내부 구조물 ↔ 오염물·따개비 2모드 토글
 	ScanMode = ScanMode == EMD_ScanMode::InternalStructure ? EMD_ScanMode::Cleanup : EMD_ScanMode::InternalStructure;
 	RefreshModeIndicator();
+	MDAudioFeedback::LocalPawn(Pawn, TEXT("SFX.Tool.Scanner.ModeSwitch"));
 	OnScanModeChanged.Broadcast(ScanMode);
 	return true;
 }

@@ -2,6 +2,7 @@
 
 
 #include "Player/MD_PlayerController.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "UI/Game/MD_HUDWidget.h"
 #include "UI/MD_LocalUIManager.h"
 #include "UI/Game/MD_DailyReportWidget.h"
@@ -415,6 +416,7 @@ void AMD_PlayerController::ClientReceiveShopPurchaseResult_Implementation(AMD_Me
 	if (IsValid(Merchant) == true)
 	{
 		// 정확한 품목의 표시 이름을 조회할 전체 식별자 전달
+		MDAudioFeedback::UI(this, Result == EMD_ShopPurchaseResult::Success ? TEXT("SFX.Merchant.Purchase.Success") : TEXT("SFX.Merchant.Purchase.Fail"));
 		Merchant->ReceiveShopPurchaseResult(ItemAssetId, Result);
 	}
 }
@@ -539,6 +541,7 @@ void AMD_PlayerController::ClientNotifyLoanInterest_Implementation(int32 Interes
 		// 화면에 전달할 이자 발생 결과가 없는 요청 종료
 		return;
 	}
+	MDAudioFeedback::UI(this, TEXT("SFX.Merchant.Loan.Interest"));
 	// 소유 플레이어의 HUD를 조회할 로컬 UI 컨텍스트
 	ULocalPlayer* LocalPlayer = GetLocalPlayer();
 	// 서버 전용 컨트롤러 등 로컬 화면이 없는 요청 제외
@@ -805,7 +808,7 @@ void AMD_PlayerController::ServerBorrowCredits_Implementation(AMD_Merchant* Merc
 	if (IsValid(MerchantSubsystem) == true)
 	{
 		// 서버가 검증한 대출 요청자를 시간별 기록에 연결
-		MerchantSubsystem->TryBorrowCredits(Amount, PlayerState);
+		ClientLoanFeedback(true, MerchantSubsystem->TryBorrowCredits(Amount, PlayerState));
 	}
 }
 
@@ -828,7 +831,7 @@ void AMD_PlayerController::ServerRepayLoan_Implementation(AMD_Merchant* Merchant
 	if (IsValid(MerchantSubsystem) == true)
 	{
 		// 서버가 검증한 상환 요청자를 시간별 기록에 연결
-		MerchantSubsystem->TryRepayLoan(Amount, PlayerState);
+		ClientLoanFeedback(false, MerchantSubsystem->TryRepayLoan(Amount, PlayerState));
 	}
 }
 
@@ -1231,6 +1234,13 @@ void AMD_PlayerController::ClientReceiveShopSaleResult_Implementation(AMD_Mercha
 	if (IsValid(Merchant) == true)
 	{
 		// 상인별 활성 화면으로 서버 확정 결과 전달
+		MDAudioFeedback::UI(this, Result == EMD_ShopSaleResult::Success ? TEXT("SFX.Merchant.Sell.Success") : TEXT("SFX.Merchant.Purchase.Fail"));
 		Merchant->ReceiveShopSaleResult(Result);
 	}
+}
+
+void AMD_PlayerController::ClientLoanFeedback_Implementation(bool bBorrow, bool bSuccess)
+{
+	if (IsLocalController()) MDAudioFeedback::UI(this, !bSuccess ? TEXT("SFX.Merchant.Purchase.Fail")
+		: bBorrow ? TEXT("SFX.Merchant.Loan.Borrow") : TEXT("SFX.Merchant.Loan.Repay"));
 }

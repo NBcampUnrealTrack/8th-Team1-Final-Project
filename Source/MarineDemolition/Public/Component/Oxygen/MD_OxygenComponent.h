@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "Components/ActorComponent.h"
 #include "GameplayEffectTypes.h"        
 #include "MD_OxygenComponent.generated.h"
@@ -173,6 +174,11 @@ protected:
 
 	/** 산소 0 여부. 태그를 매번 다시 붙이지 않으려고 직전 값을 기억한다 */
 	bool bOxygenDepleted = false;
+	void RefreshSurvivalAudio();
+	bool bAudioOxygenLow = false;
+	bool bAudioOxygenEmpty = false;
+	float PreviousAudioOxygen = -1.f;
+	FMD_AudioHandle HeartbeatAudio;
 
 	FTimerHandle EvaluationTimerHandle;
 

@@ -1,4 +1,5 @@
 #include "UI/Game/MD_BreakerOperateWidget.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "World/Facility/MD_RepairInstruction.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Blueprint/WidgetTree.h"
@@ -55,6 +56,7 @@ void UMD_BreakerOperateWidget::NativeOnActivated()
 {
 	Super::NativeOnActivated(); auto* PC=GetOwningPlayer();
 	if(!PC || !IsValid(Breaker) || !Interaction || !PC->IsLocalController()) { DeactivateWidget(); return; }
+	MDAudioFeedback::UI(this, TEXT("SFX.Facility.Breaker.Open"));
 	bRestored=false; OpenedAt=GetWorld()->GetTimeSeconds(); PreviousViewTarget=PC->GetViewTarget(); bPreviousCursor=PC->bShowMouseCursor;
 	PC->SetIgnoreMoveInput(true); PC->SetIgnoreLookInput(true); PC->bShowMouseCursor=true;
 	AddedHiddenActors.Reset();

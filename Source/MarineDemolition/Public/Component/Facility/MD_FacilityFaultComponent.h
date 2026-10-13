@@ -3,6 +3,8 @@
 #include "CoreMinimal.h"
 #include "Components/ActorComponent.h"
 #include "Types/Facility/MD_FacilityTypes.h"
+#include "Audio/MD_AudioSubsystem.h"
+#include "Engine/NetSerialization.h"
 #include "MD_FacilityFaultComponent.generated.h"
 
 class UMD_FacilityFaultManagerComponent;
@@ -70,6 +72,8 @@ public:
 	bool CompleteRepairFromValidatedSource(int32 ExpectedFaultId);
 	// 수리 부수 효과와 상태 알림까지 동일 사건 전이 안에서 확정
 	bool CompleteRepairWithEffects(int32 ExpectedFaultId, TFunctionRef<void()> Effects);
+	/** Only the authority can announce an already validated one-shot (tape or solo timeout). */
+	void PlayFeedbackForAll(const TCHAR* Event, const FVector& Location);
 
 protected:
 	/** Common server incident transition; a development door cheat may skip occupancy only. */
@@ -86,6 +90,11 @@ private:
 	FMD_FacilitySnapshot Snapshot;
 	UFUNCTION()
 	void OnRep_Snapshot(const FMD_FacilitySnapshot& Previous);
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastFeedback(FGameplayTag Event, FVector_NetQuantize Location);
+	FMD_AudioHandle RepairAudio;
+	FMD_AudioHandle FaultAudio;
+	void RefreshAudio(const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current);
 	void PublishChange(const FMD_FacilitySnapshot& Previous);
 	void RegisterWithManager();
 	bool HasServerAuthority() const;

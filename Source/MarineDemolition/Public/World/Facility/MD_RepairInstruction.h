@@ -114,6 +114,8 @@ private:
 	bool bPreviousLocked = false;
 	bool bDoorOwned = false;
 	bool bCompleting = false;
+	FMD_RepairInstructionState LastAudioState;
+	bool bAudioInitialized = false;
 	FRandomStream Random;
 };
 

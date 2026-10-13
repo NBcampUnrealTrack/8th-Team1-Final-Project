@@ -1,4 +1,5 @@
 #include "Component/Facility/MD_FacilityFaultManagerComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Component/Facility/MD_FacilityRepairComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -181,7 +182,11 @@ void UMD_FacilityFaultManagerComponent::RefreshBlackoutState()
 	if(bActive==bBlackoutActive) return;
 	bBlackoutActive=bActive;OnRep_BlackoutActive();GetOwner()->ForceNetUpdate();
 }
-void UMD_FacilityFaultManagerComponent::OnRep_BlackoutActive() { OnBlackoutChanged.Broadcast(bBlackoutActive); }
+void UMD_FacilityFaultManagerComponent::OnRep_BlackoutActive()
+{
+	MDAudioFeedback::UI(this, bBlackoutActive ? TEXT("SFX.Hazard.Light.Off") : TEXT("SFX.Hazard.Light.On"));
+	OnBlackoutChanged.Broadcast(bBlackoutActive);
+}
 
 void UMD_FacilityFaultManagerComponent::StartFaultSchedules()
 {

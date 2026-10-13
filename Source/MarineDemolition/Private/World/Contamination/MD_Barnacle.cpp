@@ -1,4 +1,5 @@
 #include "World/Contamination/MD_Barnacle.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
@@ -245,6 +246,7 @@ bool AMD_Barnacle::InitializeFromSpawner(
 
 void AMD_Barnacle::BreakOff()
 {
+	MulticastPlayRemovalSound();
 	UWorld* const World = GetWorld();
 	if (!World)
 	{
@@ -280,6 +282,11 @@ void AMD_Barnacle::BreakOff()
 	}
 
 	Destroy();
+}
+
+void AMD_Barnacle::MulticastPlayRemovalSound_Implementation()
+{
+	MDAudioFeedback::World(this, TEXT("SFX.Clean.Barnacle.Pop"));
 }
 
 #if WITH_EDITOR
