@@ -564,10 +564,14 @@ bool UMD_CharacterMovementComponent::CanSweepBetweenLocations(const FVector& Sta
 
 	// 현재 캐릭터를 제외한 이동 경로 검사 설정 구성
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MDLadderMovementSweep), false, CharacterOwner);
+	// 일반 이동과 동일한 채널별 충돌 응답을 전달할 검사 설정
+	FCollisionResponseParams ResponseParams;
+	// 운반물 등 이동 제외 대상과 캡슐 충돌 응답을 사다리 경로 검사에 반영
+	InitCollisionParams(QueryParams, ResponseParams);
 	FCollisionShape CapsuleShape = FCollisionShape::MakeCapsule(CapsuleComponent->GetScaledCapsuleRadius(), CapsuleComponent->GetScaledCapsuleHalfHeight());
 
 	// 캐릭터 캡슐 전체 경로에 차단 충돌이 없는 경우에만 이동 허용
-	return World->SweepTestByChannel(StartLocation, TargetLocation, UpdatedComponent->GetComponentQuat(), CapsuleComponent->GetCollisionObjectType(), CapsuleShape, QueryParams) == false;
+	return World->SweepTestByChannel(StartLocation, TargetLocation, UpdatedComponent->GetComponentQuat(), CapsuleComponent->GetCollisionObjectType(), CapsuleShape, QueryParams, ResponseParams) == false;
 }
 
 float UMD_CharacterMovementComponent::GetLadderStandOffDistance() const

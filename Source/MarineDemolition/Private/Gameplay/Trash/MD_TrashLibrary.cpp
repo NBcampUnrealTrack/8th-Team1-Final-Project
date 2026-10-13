@@ -214,6 +214,18 @@ bool UMD_TrashLibrary::FindTrashKindRow(const FName TrashKindId, FMD_TrashKindRo
 	return false;
 }
 
+void UMD_TrashLibrary::ReadTrashKindRow(const FName TrashKindId, TFunctionRef<void(const FMD_TrashKindRow&)> Reader)
+{
+	if (const FMD_TrashKindRow* Row = FindTrashKindRowInternal(TrashKindId))
+	{
+		Reader(*Row);
+		return;
+	}
+
+	const FMD_TrashKindRow DefaultRow;
+	Reader(DefaultRow);
+}
+
 TArray<FName> UMD_TrashLibrary::GetTrashVariantIds(const FName TrashKindId)
 {
 	const FMD_TrashKindRow* Row = FindTrashKindRowInternal(TrashKindId);

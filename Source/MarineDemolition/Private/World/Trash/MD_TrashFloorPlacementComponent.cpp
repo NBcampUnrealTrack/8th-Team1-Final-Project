@@ -691,9 +691,8 @@ bool UMD_TrashFloorPlacementComponent::Fit(const FMD_TrashFloorPoint& Point, con
 	const FVector Footprint = RotatedBounds.GetExtent();
 	const FVector Bottom(RotatedBounds.GetCenter().X, RotatedBounds.GetCenter().Y, RotatedBounds.Min.Z);
 	Out = FTransform(Rotation, Point.Location + Point.Normal * 2.0 - SurfaceRotation.RotateVector(Bottom));
-	// Nine probes cover center, edges and corners. All must hit the same local support plane.
-	for (int32 X = -1; X <= 1; ++X)
-	for (int32 Y = -1; Y <= 1; ++Y)
+	// Check corner and center support before the occupied box, then finish edge support.
+	const auto HasSupportAt = [&](int32 X, int32 Y)
 	{
 		const FVector P = Point.Location + SurfaceRotation.RotateVector(FVector(X * (Footprint.X + 1.0), Y * (Footprint.Y + 1.0), 0));
 		FHitResult Hit;
@@ -701,10 +700,16 @@ bool UMD_TrashFloorPlacementComponent::Fit(const FMD_TrashFloorPoint& Point, con
 			|| Hit.bStartPenetrating || !AllowedSurfaces.Contains(Cast<UStaticMeshComponent>(Hit.GetComponent()))
 			|| Hit.ImpactNormal.Z < MinimumNormalZ || FVector::DotProduct(Hit.ImpactNormal, Point.Normal) < 0.99
 			|| FVector::DistSquared(Hit.ImpactPoint, P) > 4.0) { return false; }
-	}
+		return true;
+	};
+	if (!HasSupportAt(-1, -1) || !HasSupportAt(0, 0)
+		|| !HasSupportAt(-1, 1) || !HasSupportAt(1, -1) || !HasSupportAt(1, 1)) return false;
 	// Keep the bottom above its supporting plane while padding the sides/top against furniture.
 	if (GetWorld()->OverlapAnyTestByObjectType(Out.TransformPosition(Bounds.GetCenter()) + Point.Normal * 0.5,
 		Rotation, Objects, FCollisionShape::MakeBox(Extent + FVector(1)), Query)) { return false; }
+	// The four edge probes retain their original relative order.
+	if (!HasSupportAt(-1, 0) || !HasSupportAt(0, -1)
+		|| !HasSupportAt(0, 1) || !HasSupportAt(1, 0)) return false;
 	if (AccessRadius == 0) return true;
 	const double Offset = FMath::Max(80.0, Footprint.Size2D() + AccessRadius + 5.0);
 	for (const FVector Direction : {FVector::ForwardVector, -FVector::ForwardVector, FVector::RightVector, -FVector::RightVector})

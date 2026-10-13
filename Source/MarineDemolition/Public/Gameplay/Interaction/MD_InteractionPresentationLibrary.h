@@ -15,6 +15,10 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
 	static bool FindDisplayName(FName InteractionId, FText& OutDisplayName);
 
+	/** 공용 행동 문구에 현재 적용된 상호작용 키를 붙인다. 미지정 행/문구는 빈 값을 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction", meta = (WorldContext = "WorldContextObject"))
+	static FText FindActionPrompt(FName InteractionId, UObject* WorldContextObject);
+
 	/** 대상 고유 데이터가 있으면 우선 사용하고, 없으면 대상 클래스에 맞는 공용 이름을 반환한다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	static FText ResolveInteractionDisplayName(const UObject* Target);

@@ -27,6 +27,8 @@
 #include "World/Sample/MD_QuestItem.h"
 #include "World/Trash/MD_TrashSorter.h"
 #include "World/Wall/MD_CuttableWall.h"
+#include "World/Facility/MD_FingerprintInterlock.h"
+#include "World/Facility/MD_FingerprintPad.h"
 #include "World/Facility/MD_RepairInstruction.h"
 
 void UMD_InteractionComponent::RequestInstructionRepair(AMD_RepairInstructionControl* Control, int32 ExpectedRevision)
@@ -394,6 +396,23 @@ void UMD_InteractionComponent::Interact()
 		}
 	}
 
+	// 패드의 현재 고장 번호를 요청에 포함하기 위한 대상 확인
+	AMD_FingerprintPad* Pad = Cast<AMD_FingerprintPad>(Target);
+	// 패드 입력을 사건 번호 검증 전용 서버 경로로 분기
+	if (IsValid(Pad) == true)
+	{
+		// 초기 복제 중 연결 정보가 없는 패드 입력 차단
+		if (IsValid(Pad->Interlock) == false || IsValid(Pad->Interlock->Fault) == false)
+		{
+			// 사건 번호를 확인할 수 없는 입력 종료
+			return;
+		}
+		// 클라이언트가 표시 중인 사건에 대한 인증 요청
+		ServerBeginFingerprintScan(Pad, Pad->Interlock->Fault->GetSnapshot().FaultId);
+		// 일반 상호작용 경로의 중복 인증 방지
+		return;
+	}
+
 	ServerInteract(Target);
 }
 
@@ -477,6 +496,12 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 {
 	APawn* OwnerPawn = GetOwnerPawn();
 	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()) return;
+	// 사건 번호가 없는 일반 요청을 통한 패드 인증 우회 차단
+	if (IsValid(RequestedActor) == true && RequestedActor->IsA<AMD_FingerprintPad>() == true)
+	{
+		// 패드 전용 서버 요청으로만 클라이언트 인증 허용
+		return;
+	}
 	if (!CanOwnerInteract())
 	{
 		ReleaseHeldActor();
@@ -742,6 +767,7 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 	{
 		return false;
 	}
+	const bool bGrabbable = Target->Implements<UMD_Grabbable>();
 
 	UPrimitiveComponent* Component = nullptr;
 	FVector GrabLocation = FVector::ZeroVector;
@@ -757,6 +783,7 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 		{
 			return false;
 		}
+		if (!IMD_Grabbable::Execute_PreparePhysicsGrip(Target, OwnerPawn)) return false;
 
 		GrabLocation = GrabPoint->GetComponentLocation();
 		HoldOffset = IMD_Grabbable::Execute_GetHoldOffset(Target);
@@ -775,6 +802,7 @@ bool UMD_InteractionComponent::TryHoldTarget(AActor* Target)
 
 	if (!TryGrabPhysicsComponent(Component, GrabLocation, HoldProfile))
 	{
+		if (bGrabbable) IMD_Grabbable::Execute_OnCarryEnded(Target);
 		return false;
 	}
 
@@ -1008,6 +1036,24 @@ void UMD_InteractionComponent::UpdateHeldTarget()
 		|| !HasAuthorityPhysicsGrip() || !IsValid(HoldPoint)) return;
 
 	const FTransform HoldTransform = GetHoldPointTransform();
+	if (HeldActor->Implements<UMD_Grabbable>())
+	{
+		FTransform CustomTarget;
+		const EMD_PhysicsHoldTargetResult Result = IMD_Grabbable::Execute_ResolvePhysicsHoldTarget(
+			HeldActor, GetOwnerPawn(), CustomTarget);
+		if (Result == EMD_PhysicsHoldTargetResult::Release)
+		{
+			ReleaseHeldActor();
+			return;
+		}
+		if (Result == EMD_PhysicsHoldTargetResult::Resolved)
+		{
+			if (ActiveHoldProfile.bConstrainRotation)
+				PhysicsHandle->SetTargetLocationAndRotation(CustomTarget.GetLocation(), CustomTarget.Rotator());
+			else PhysicsHandle->SetTargetLocation(CustomTarget.GetLocation());
+			return;
+		}
+	}
 	const FVector TargetLocation = ResolveHoldTargetLocation(HoldTransform);
 
 	if (ActiveHoldProfile.bConstrainRotation)
@@ -1041,7 +1087,12 @@ void UMD_InteractionComponent::UpdateCarrySettle(float DeltaSeconds)
 		Component->GetComponentTransform().TransformPositionNoScale(HeldGrabPointOffset);
 	// 정착 판정은 스프링이 실제로 쫓는 좌표와 같아야 한다. 보정 전 좌표로 재면
 	// 시선을 내린 채 집었을 때 영영 도달하지 못해 OnCarrySettled가 불리지 않는다.
-	const FVector TargetLocation = ResolveHoldTargetLocation(GetHoldPointTransform());
+	FTransform CustomTarget;
+	const EMD_PhysicsHoldTargetResult TargetResult = IMD_Grabbable::Execute_ResolvePhysicsHoldTarget(
+		HeldActor, GetOwnerPawn(), CustomTarget);
+	if (TargetResult == EMD_PhysicsHoldTargetResult::Release) return;
+	const FVector TargetLocation = TargetResult == EMD_PhysicsHoldTargetResult::Resolved
+		? CustomTarget.GetLocation() : ResolveHoldTargetLocation(GetHoldPointTransform());
 
 	const bool bReachedTarget =
 		FVector::DistSquared(CurrentGrabPoint, TargetLocation) <= FMath::Square(CarrySettleTolerance);
@@ -1340,6 +1391,21 @@ void UMD_InteractionComponent::ServerBeginFacilityRepair_Implementation(AActor* 
 	if (UMD_FacilityRepairComponent* Repair = Target->FindComponentByClass<UMD_FacilityRepairComponent>();
 		Repair && Repair->GetRepairSnapshot().FaultId == ExpectedFaultId)
 		Repair->BeginManualRepair(GetOwnerPawn());
+}
+
+void UMD_InteractionComponent::ServerBeginFingerprintScan_Implementation(AMD_FingerprintPad* Pad, int32 ExpectedFaultId)
+{
+	// RPC 소유 폰을 인증 요청자로 고정
+	APawn* OwnerPawn = GetOwnerPawn();
+	// 서버 권한과 패드 연결 상태를 인증 판정 전에 검증
+	if (IsValid(OwnerPawn) == false || OwnerPawn->HasAuthority() == false || IsValid(Pad) == false
+		|| IsValid(Pad->Interlock) == false)
+	{
+		// 유효하지 않은 인증 요청 종료
+		return;
+	}
+	// 서버에서 거리와 시선 및 고장 번호를 함께 검증한 뒤 인증 반영
+	Pad->Interlock->BeginScan(Pad, OwnerPawn, ExpectedFaultId);
 }
 
 void UMD_InteractionComponent::SetCurrentTarget(AActor* NewTarget)

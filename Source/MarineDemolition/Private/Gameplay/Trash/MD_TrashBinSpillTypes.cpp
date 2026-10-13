@@ -10,6 +10,48 @@ namespace
 	constexpr double SpillRewardTolerance = 1.0e-12;
 	constexpr double TiltDegreeTolerance = 1.0e-6;
 
+	bool IsSpillPayloadValidOrdered(const FMD_TrashBinSpillPayload& Payload)
+	{
+		if (!FMath::IsFinite(Payload.LiquidUnits)
+			|| Payload.LiquidUnits < 0.0
+			|| !FMath::IsFinite(Payload.RewardUnits)
+			|| Payload.RewardUnits < 0.0
+			|| Payload.RewardUnits > Payload.LiquidUnits)
+		{
+			return false;
+		}
+
+		double LotLiquidUnits = 0.0;
+		double LotRewardUnits = 0.0;
+		for (const FMD_ScrapeRecoveryLot& Lot : Payload.RecoveryLots)
+		{
+			if (!FMD_ScrapeRecoveryLedger::IsLotValid(Lot))
+			{
+				return false;
+			}
+			LotLiquidUnits += Lot.CarrierAmount;
+			if (!FMath::IsFinite(LotLiquidUnits))
+			{
+				return false;
+			}
+			LotRewardUnits += Lot.RewardUnits;
+			if (!FMath::IsFinite(LotRewardUnits))
+			{
+				return false;
+			}
+		}
+		return LotLiquidUnits >= 0.0
+			&& LotRewardUnits >= 0.0
+			&& FMath::IsNearlyEqual(
+				LotLiquidUnits,
+				Payload.LiquidUnits,
+				SpillLiquidTolerance)
+			&& FMath::IsNearlyEqual(
+				LotRewardUnits,
+				Payload.RewardUnits,
+				SpillRewardTolerance);
+	}
+
 	bool IsFiniteVector(const FVector& Vector)
 	{
 		return FMath::IsFinite(Vector.X)
@@ -163,29 +205,7 @@ void FMD_TrashBinPerBinDedupeState::Reset()
 
 bool FMD_TrashBinSpillPayload::IsValid() const
 {
-	if (!FMath::IsFinite(LiquidUnits)
-		|| LiquidUnits < 0.0
-		|| !FMath::IsFinite(RewardUnits)
-		|| RewardUnits < 0.0
-		|| RewardUnits > LiquidUnits)
-	{
-		return false;
-	}
-
-	const double LotLiquidUnits =
-		FMD_ScrapeRecoveryLedger::GetTotalCarrierAmount(RecoveryLots);
-	const double LotRewardUnits =
-		FMD_ScrapeRecoveryLedger::GetTotalRewardUnits(RecoveryLots);
-	return LotLiquidUnits >= 0.0
-		&& LotRewardUnits >= 0.0
-		&& FMath::IsNearlyEqual(
-			LotLiquidUnits,
-			LiquidUnits,
-			SpillLiquidTolerance)
-		&& FMath::IsNearlyEqual(
-			LotRewardUnits,
-			RewardUnits,
-			SpillRewardTolerance);
+	return IsSpillPayloadValidOrdered(*this);
 }
 
 bool FMD_TrashBinSpillCandidate::IsValid() const

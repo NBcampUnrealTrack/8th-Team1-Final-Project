@@ -73,10 +73,12 @@ void AMD_TrashItem::SetInteractionHighlighted_Implementation(bool bHighlighted)
 
 FText AMD_TrashItem::GetInteractionDisplayName_Implementation() const
 {
-	FMD_TrashKindRow TrashKind;
-	return UMD_TrashLibrary::FindTrashKindRow(TrashKindId, TrashKind)
-		? TrashKind.DisplayName
-		: FText::GetEmpty();
+	FText DisplayName = FText::GetEmpty();
+	UMD_TrashLibrary::ReadTrashKindRow(TrashKindId, [&DisplayName](const FMD_TrashKindRow& TrashKind)
+	{
+		DisplayName = TrashKind.DisplayName;
+	});
+	return DisplayName;
 }
 
 FText AMD_TrashItem::GetInteractionPrompt_Implementation(AActor* Interactor) const
@@ -240,13 +242,18 @@ void AMD_TrashItem::ApplyTrashKindRow()
 	if (!bHasAppliedTrashKind || AppliedTrashKindId != TrashKindId || AppliedTrashVariantId != TrashVariantId)
 	{
 		// 행이 없으면 기본값 행이 그대로 적용된다. 무효 카테고리는 아래에서 누락 신호 색이 된다
-		FMD_TrashKindRow KindRow;
-		UMD_TrashLibrary::FindTrashKindRow(TrashKindId, KindRow);
-		// 이전 맵의 None 선택도 이름을 저장하도록 정규화한다. 클라이언트는 서버 값을 받는다.
-		if (HasAuthority() && TrashVariantId.IsNone()) TrashVariantId = KindRow.GetDefaultVariantId();
-
 		TSoftObjectPtr<UStaticMesh> MeshReference;
-		const bool bValidVariant = KindRow.ResolveMesh(TrashVariantId, MeshReference);
+		float MassKg = 1.0f;
+		FGameplayTag Category;
+		bool bValidVariant = false;
+		UMD_TrashLibrary::ReadTrashKindRow(TrashKindId, [this, &MeshReference, &MassKg, &Category, &bValidVariant](const FMD_TrashKindRow& KindRow)
+		{
+			// 이전 맵의 None 선택도 이름을 저장하도록 정규화한다. 클라이언트는 서버 값을 받는다.
+			if (HasAuthority() && TrashVariantId.IsNone()) TrashVariantId = KindRow.GetDefaultVariantId();
+			bValidVariant = KindRow.ResolveMesh(TrashVariantId, MeshReference);
+			MassKg = KindRow.MassKg;
+			Category = KindRow.Category;
+		});
 		UStaticMesh* KindMesh = nullptr;
 		if (bValidVariant && !MeshReference.IsNull())
 		{
@@ -255,11 +262,11 @@ void AMD_TrashItem::ApplyTrashKindRow()
 		}
 		// 명시적 Variant가 삭제되거나 로드에 실패하면 다른 변형을 대신 표시하지 않는다.
 		if (Mesh->GetStaticMesh() != KindMesh) Mesh->SetStaticMesh(KindMesh);
-		Mesh->SetMassOverrideInKg(NAME_None, FMath::Max(KindRow.MassKg, 0.01f), true);
+		Mesh->SetMassOverrideInKg(NAME_None, FMath::Max(MassKg, 0.01f), true);
 
 		AppliedTrashKindId = TrashKindId;
 		AppliedTrashVariantId = TrashVariantId;
-		AppliedCategory = KindRow.Category;
+		AppliedCategory = Category;
 		bHasAppliedTrashKind = true;
 	}
 

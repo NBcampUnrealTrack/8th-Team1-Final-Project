@@ -9,6 +9,7 @@
 
 class AActor;
 class APawn;
+class AMD_FingerprintPad;
 class UCameraComponent;
 class UPhysicsHandleComponent;
 class UPrimitiveComponent;
@@ -190,6 +191,9 @@ private:
 	void ServerRepairFacilityWithTape(AActor* Target, int32 ExpectedFaultId);
 	UFUNCTION(Server, Reliable)
 	void ServerBeginFacilityRepair(AActor* Target, int32 ExpectedFaultId);
+	UFUNCTION(Server, Reliable)
+	// 소유 플레이어의 패드 입력과 해당 고장 번호를 서버 판정에 전달
+	void ServerBeginFingerprintScan(AMD_FingerprintPad* Pad, int32 ExpectedFaultId);
 
 	bool TryHoldTarget(AActor* Target);
 	bool TryGrabPhysicsComponent(UPrimitiveComponent* Component, const FVector& PreferredGrabLocation,
