@@ -33,11 +33,10 @@ public:
 	virtual FGameplayTag GetSortScoreBonusTag_Implementation() const override { return FGameplayTag(); }
 	/** ~Implements IMD_TrashSortable */
 
-	// 기존 Blueprint/저장 호출의 호환 경로. 값과 무관하게 깨끗한 조각으로 유지한다.
+	/** Server assigns contamination from the host wall's remaining surface-slime ratio. */
 	void SetContaminated(bool bInContaminated);
 
-	/** 기존 저장/Blueprint 호환 값. 런타임에는 항상 false로 정규화한다. */
-	UPROPERTY(ReplicatedUsing = OnRep_Contaminated, VisibleAnywhere, BlueprintReadOnly, Category = "MD|Wall|Piece")
+	UPROPERTY(ReplicatedUsing = OnRep_Contaminated, SaveGame, VisibleAnywhere, BlueprintReadOnly, Category = "MD|Wall|Piece")
 	bool bContaminated = false;
 
 protected:
@@ -60,6 +59,6 @@ private:
 	UFUNCTION()
 	void OnRep_Contaminated();
 
-	/** 서버·클라이언트 양쪽에서 깨끗한 조각 색을 적용한다 */
+	/** Server and clients use the same clean/contaminated tint. */
 	void ApplyContaminationVisual();
 };

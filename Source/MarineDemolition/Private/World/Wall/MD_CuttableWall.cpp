@@ -7,6 +7,9 @@
 #include "Net/UnrealNetwork.h"
 #include "NiagaraFunctionLibrary.h"
 #include "World/Wall/MD_WallPiece.h"
+#include "World/Contamination/MD_Barnacle.h"
+#include "World/Contamination/MD_BarnacleSpawner.h"
+#include "World/Contamination/MD_SurfaceStain.h"
 
 AMD_CuttableWall::AMD_CuttableWall()
 {
@@ -54,10 +57,12 @@ void AMD_CuttableWall::CompleteCut(AActor* Cutter)
 	// 모든 벽은 절단 완료 = 철거 성공
 	OnWallDemolished.Broadcast(this, Cutter);
 
-	// Wall debris is always clean.
+	// Preserve uncleaned surface slime on a proportional number of sortable pieces.
 	const int32 SafePieceCount = FMath::Max(0, PieceCount);
+	const int32 DirtyPieceCount = FMath::Clamp(
+		FMath::CeilToInt(GetRemainingContaminationRatio() * SafePieceCount), 0, SafePieceCount);
 
-	const FVector Origin = GetActorLocation();
+	const FVector Origin = Mesh->Bounds.Origin;
 	const FVector Extent = Mesh->Bounds.BoxExtent;
 
 	FActorSpawnParameters SpawnParams;
@@ -75,10 +80,20 @@ void AMD_CuttableWall::CompleteCut(AActor* Cutter)
 		if (Piece)
 		{
 			Piece->SetActorScale3D(FVector(FMath::FRandRange(0.15f, 0.35f)));
-			Piece->SetContaminated(false);
+			Piece->SetContaminated(i < DirtyPieceCount);
 		}
 	}
 
+	// Slime is now represented by the wall debris, not a floating surface actor.
+	TArray<AActor*> Attached;
+	GetAttachedActors(Attached, true, true);
+	for (AActor* Actor : Attached)
+	{
+		if (AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Actor)) Stain->Destroy();
+		// All its barnacles have already been removed. Retire the source volume
+		// with the host so it cannot keep granting surface focus after demolition.
+		if (AMD_BarnacleSpawner* Spawner = Cast<AMD_BarnacleSpawner>(Actor)) Spawner->Destroy();
+	}
 	MulticastPlayDemolishEffect();
 
 	// 경로 개방 (조각이 벽 자리를 대체).
@@ -126,7 +141,30 @@ void AMD_CuttableWall::MulticastPlayDemolishEffect_Implementation()
 
 bool AMD_CuttableWall::CanCut() const
 {
-	return !bCut;
+	if (bCut) return false;
+	TArray<AActor*> Attached;
+	GetAttachedActors(Attached, true, true);
+	for (AActor* Actor : Attached)
+	{
+		const AMD_Barnacle* Barnacle = Cast<AMD_Barnacle>(Actor);
+		if (IsValid(Barnacle) && !Barnacle->IsActorBeingDestroyed() && !Barnacle->IsFullyRemoved()) return false;
+	}
+	return true;
+}
+
+float AMD_CuttableWall::GetRemainingContaminationRatio() const
+{
+	TArray<AActor*> Attached;
+	GetAttachedActors(Attached, true, true);
+	double Initial = 0.0, Remaining = 0.0;
+	for (AActor* Actor : Attached)
+	{
+		const AMD_SurfaceStain* Stain = Cast<AMD_SurfaceStain>(Actor);
+		if (!IsValid(Stain) || Stain->IsActorBeingDestroyed()) continue;
+		Initial += Stain->GetInitialSize();
+		Remaining += FMath::Clamp(Stain->GetRemainingSize(), 0, Stain->GetInitialSize());
+	}
+	return Initial > 0.0 ? static_cast<float>(FMath::Clamp(Remaining / Initial, 0.0, 1.0)) : 0.0f;
 }
 
 
