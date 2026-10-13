@@ -2,11 +2,15 @@
 
 작성일: 2026-10-13
 
+## 기존 사운드 복구 정책
+
+기존 사운드는 원래 버전을 유지한다. 발소리 5개는 작업 전 에셋으로 복구했고, 변경한 기존 효과음 24개는 원래 SoundCue/SoundWave 참조 및 볼륨·피치·감쇠·조건 설정으로 복구했다. 사용자 요청에 따라 피격음은 현재 버전을 그대로 유지한다. V2 신규 기능 효과음 49개와 새 연결 로직은 유지한다.
+
 ## 제작 방향
 
 짧고 경쾌한 기계·장난감·접촉음을 중심으로 캐주얼 SF 청소 게임의 분위기를 맞췄다. 경고는 또렷하게, 반복 작업음은 낮게 구성했다. 효과음 원본은 모노 48 kHz로 제작하며 수중 필터는 기존 오디오 프레임워크에서 적용한다. 배경음악·환경음은 유지한다.
 
-기존에 승인된 귀여운 피격 반응과 +5반음 피치는 유지한다. V2 SoundWave 74종(승인 피격음 복제 포함)과 기존 경로를 유지한 일반 발소리 5종을 구성했다.
+기존에 승인된 귀여운 피격 반응과 +5반음 피치는 유지한다. 현재 카탈로그는 새 V2 효과음 49개, 현재 피격음 1개, 기존 사운드 28개로 구성한다. 일반 발소리 5개도 원본으로 유지한다. 초기 제작했던 기존 효과음의 대체본은 현재 카탈로그에서 사용하지 않는다.
 
 ## 적용 범위
 
@@ -32,43 +36,43 @@
 
 | 이벤트 | 에셋 | 상태 |
 | --- | --- | --- |
-| `SFX.Clean.Hera.ScrapeBarnacle` | `/Game/SFX/V2/S_V2_Clean_Hera_ScrapeBarnacle` | 카탈로그 등록 |
-| `SFX.Clean.Barnacle.Pop` | `/Game/SFX/V2/S_V2_Clean_Barnacle_Pop` | 카탈로그 등록 |
-| `SFX.Clean.Sludge.Drop` | `/Game/SFX/V2/S_V2_Clean_Sludge_Drop` | 카탈로그 등록 |
+| `SFX.Clean.Hera.ScrapeBarnacle` | `/Game/SFX/Cues/SC_MD_Hera_ScrapeBarnacle` | 기존 사운드 복구 |
+| `SFX.Clean.Barnacle.Pop` | `/Game/SFX/A_Clean/S_A_Barnacle_Pop_01` | 기존 사운드 복구 |
+| `SFX.Clean.Sludge.Drop` | `/Game/SFX/Cues/SC_MD_Sludge_Drop` | 기존 사운드 복구 |
 | `SFX.Cut.Cutter.Start` | `/Game/SFX/V2/S_V2_Cut_Cutter_Start` | 카탈로그 등록 |
-| `SFX.Cut.Cutter.Loop` | `/Game/SFX/V2/S_V2_Cut_Cutter_Loop` | 카탈로그 등록 |
-| `SFX.Cut.Cutter.Stop` | `/Game/SFX/V2/S_V2_Cut_Cutter_Stop` | 카탈로그 등록 |
-| `SFX.Cut.Wall.Break` | `/Game/SFX/V2/S_V2_Cut_Wall_Break` | 카탈로그 등록 |
-| `SFX.Hazard.Cable.Cut` | `/Game/SFX/V2/S_V2_Hazard_Cable_Cut` | 카탈로그 등록 |
-| `SFX.Hazard.Cable.SparkLoop` | `/Game/SFX/V2/S_V2_Hazard_Cable_SparkLoop` | 카탈로그 등록 |
-| `SFX.Hazard.Light.Off` | `/Game/SFX/V2/S_V2_Hazard_Light_Off` | 카탈로그 등록 |
-| `SFX.Hazard.Light.On` | `/Game/SFX/V2/S_V2_Hazard_Light_On` | 카탈로그 등록 |
-| `SFX.Hazard.FoamGun.Fire` | `/Game/SFX/V2/S_V2_Hazard_FoamGun_Fire` | 카탈로그 등록 |
-| `SFX.Hazard.FoamGun.Empty` | `/Game/SFX/V2/S_V2_Hazard_FoamGun_Empty` | 카탈로그 등록 |
-| `SFX.Hazard.Pipe.GushLoop` | `/Game/SFX/V2/S_V2_Hazard_Pipe_GushLoop` | 카탈로그 등록 |
-| `SFX.Carry.Hand.Pickup` | `/Game/SFX/V2/S_V2_Carry_Hand_Pickup` | 카탈로그 등록 |
-| `SFX.Carry.Hand.Drop` | `/Game/SFX/V2/S_V2_Carry_Hand_Drop` | 카탈로그 등록 |
+| `SFX.Cut.Cutter.Loop` | `/Game/SFX/B_Cut/S_B_Cutter_LoopConcrete_02` | 기존 사운드 복구 |
+| `SFX.Cut.Cutter.Stop` | `/Game/SFX/B_Cut/S_B_Cutter_Stop_02` | 기존 사운드 복구 |
+| `SFX.Cut.Wall.Break` | `/Game/SFX/B_Cut/S_B_Wall_Break_01` | 기존 사운드 복구 |
+| `SFX.Hazard.Cable.Cut` | `/Game/SFX/C_Hazard/S_C_Cable_Cut_01` | 기존 사운드 복구 |
+| `SFX.Hazard.Cable.SparkLoop` | `/Game/SFX/C_Hazard/S_C_Cable_SparkLoop_01` | 기존 사운드 복구 |
+| `SFX.Hazard.Light.Off` | `/Game/SFX/C_Hazard/S_C_Light_Off_01` | 기존 사운드 복구 |
+| `SFX.Hazard.Light.On` | `/Game/SFX/C_Hazard/S_C_Light_On_01` | 기존 사운드 복구 |
+| `SFX.Hazard.FoamGun.Fire` | `/Game/SFX/Cues/SC_MD_FoamGun_Fire` | 기존 사운드 복구 |
+| `SFX.Hazard.FoamGun.Empty` | `/Game/SFX/Cues/SC_MD_FoamGun_Empty` | 기존 사운드 복구 |
+| `SFX.Hazard.Pipe.GushLoop` | `/Game/SFX/C_Hazard/S_C_Pipe_GushLoop_01` | 기존 사운드 복구 |
+| `SFX.Carry.Hand.Pickup` | `/Game/SFX/Cues/SC_MD_Hand_Pickup` | 기존 사운드 복구 |
+| `SFX.Carry.Hand.Drop` | `/Game/SFX/D_Carry/S_D_Hand_Drop_01` | 기존 사운드 복구 |
 | `SFX.Carry.Hand.ThrowCharge` | `/Game/SFX/V2/S_V2_Carry_Hand_ThrowCharge` | 카탈로그 등록 |
 | `SFX.Carry.Hand.Throw` | `/Game/SFX/V2/S_V2_Carry_Hand_Throw` | 카탈로그 등록 |
-| `SFX.Carry.Bin.Insert` | `/Game/SFX/V2/S_V2_Carry_Bin_Insert` | 카탈로그 등록 |
-| `SFX.Carry.Dispenser.Release` | `/Game/SFX/V2/S_V2_Carry_Dispenser_Release` | 카탈로그 등록 |
-| `SFX.Character.Oxygen.Depleted` | `/Game/SFX/V2/S_V2_Character_Oxygen_Depleted` | 카탈로그 등록 |
+| `SFX.Carry.Bin.Insert` | `/Game/SFX/D_Carry/S_D_Bin_Insert_01` | 기존 사운드 복구 |
+| `SFX.Carry.Dispenser.Release` | `/Game/SFX/D_Carry/S_D_Dispenser_Release_01` | 기존 사운드 복구 |
+| `SFX.Character.Oxygen.Depleted` | `/Game/SFX/Cues/SC_MD_Oxygen_Depleted` | 기존 사운드 복구 |
 | `SFX.Character.Oxygen.Low` | `/Game/SFX/V2/S_V2_Character_Oxygen_Low` | 카탈로그 등록 |
 | `SFX.Character.Oxygen.Refill` | `/Game/SFX/V2/S_V2_Character_Oxygen_Refill` | 카탈로그 등록 |
-| `SFX.Character.Oxygen.HeartbeatLoop` | `/Game/SFX/V2/S_V2_Character_Oxygen_HeartbeatLoop` | 카탈로그 등록 |
+| `SFX.Character.Oxygen.HeartbeatLoop` | `/Game/SFX/E_Character/S_E_Player_HeartbeatLoop_01` | 기존 사운드 복구 |
 | `SFX.Character.Death` | `/Game/SFX/V2/S_V2_Character_Death` | 카탈로그 등록 |
 | `SFX.Character.Respawn` | `/Game/SFX/V2/S_V2_Character_Respawn` | 카탈로그 등록 |
-| `SFX.Tool.Hotbar.Switch` | `/Game/SFX/V2/S_V2_Tool_Hotbar_Switch` | 카탈로그 등록 |
+| `SFX.Tool.Hotbar.Switch` | `/Game/SFX/F_Tool/S_F_Hotbar_Switch_01` | 기존 사운드 복구 |
 | `SFX.Tool.Interact.Denied` | `/Game/SFX/V2/S_V2_Tool_Interact_Denied` | 카탈로그 등록 |
-| `SFX.Tool.Scanner.PulseLoop` | `/Game/SFX/V2/S_V2_Tool_Scanner_PulseLoop` | 카탈로그 등록 |
+| `SFX.Tool.Scanner.PulseLoop` | `/Game/SFX/F_Tool/S_F_Scanner_PulseLoop_01` | 기존 사운드 복구 |
 | `SFX.Tool.Scanner.ModeSwitch` | `/Game/SFX/V2/S_V2_Tool_Scanner_ModeSwitch` | 카탈로그 등록 |
 | `SFX.Tool.Scanner.LightOn` | `/Game/SFX/V2/S_V2_Tool_Scanner_LightOn` | 카탈로그 등록 |
 | `SFX.Tool.Scanner.LightOff` | `/Game/SFX/V2/S_V2_Tool_Scanner_LightOff` | 카탈로그 등록 |
-| `SFX.UI.Click` | `/Game/SFX/V2/S_V2_UI_Click` | 카탈로그 등록 |
-| `SFX.UI.Hover` | `/Game/SFX/V2/S_V2_UI_Hover` | 카탈로그 등록 |
+| `SFX.UI.Click` | `/Game/SFX/J_UI/S_J_UI_Click_05` | 기존 사운드 복구 |
+| `SFX.UI.Hover` | `/Game/SFX/J_UI/S_J_UI_Click_06` | 기존 사운드 복구 |
 | `SFX.UI.ContractClear` | `/Game/SFX/V2/S_V2_UI_ContractClear` | 연결 대기 |
 | `SFX.UI.GameOver` | `/Game/SFX/V2/S_V2_UI_GameOver` | 연결 대기 |
-| `SFX.World.Door.FaultAlarm` | `/Game/SFX/V2/S_V2_World_Door_FaultAlarm` | 카탈로그 등록 |
+| `SFX.World.Door.FaultAlarm` | `/Game/SFX/K_World/S_K_Door_FaultAlarmLoop_01` | 기존 사운드 복구 |
 | `SFX.World.Door.Open` | `/Game/SFX/V2/S_V2_World_Door_Open` | 카탈로그 등록 |
 | `SFX.World.Door.Close` | `/Game/SFX/V2/S_V2_World_Door_Close` | 카탈로그 등록 |
 | `SFX.World.Door.Jammed` | `/Game/SFX/V2/S_V2_World_Door_Jammed` | 카탈로그 등록 |
@@ -105,15 +109,15 @@
 | `SFX.Tool.Glass.DrawLoop` | `/Game/SFX/V2/S_V2_Tool_Glass_DrawLoop` | 연결 대기 |
 | `SFX.Tool.Glass.Clear` | `/Game/SFX/V2/S_V2_Tool_Glass_Clear` | 연결 대기 |
 | `SFX.Clean.Hera.Swing` | `/Game/SFX/V2/S_V2_Clean_Hera_Swing` | 카탈로그 등록 |
-| `SFX.Character.Damage.Tick` | `/Game/SFX/V2/S_V2_Character_Damage_Tick` | 카탈로그 등록 |
-| `일반 발소리` | `/Game/SFX/N_Footstep/Normal/S_N_Footstep_Normal_01` | 카탈로그 등록 |
-| `일반 발소리` | `/Game/SFX/N_Footstep/Normal/S_N_Footstep_Normal_02` | 카탈로그 등록 |
-| `일반 발소리` | `/Game/SFX/N_Footstep/Normal/S_N_Footstep_Normal_03` | 카탈로그 등록 |
-| `일반 발소리` | `/Game/SFX/N_Footstep/Normal/S_N_Footstep_Normal_04` | 카탈로그 등록 |
-| `일반 발소리` | `/Game/SFX/N_Footstep/Normal/S_N_Footstep_Normal_05` | 카탈로그 등록 |
+| `SFX.Character.Damage.Tick` | `/Game/SFX/V2/S_V2_Character_Damage_Tick` | 현재 피격음 유지 |
+| `일반 발소리` | `/Game/SFX/N_Footstep/Normal/S_N_Footstep_Normal_01` | 원본 에셋 복구 |
+| `일반 발소리` | `/Game/SFX/N_Footstep/Normal/S_N_Footstep_Normal_02` | 원본 에셋 복구 |
+| `일반 발소리` | `/Game/SFX/N_Footstep/Normal/S_N_Footstep_Normal_03` | 원본 에셋 복구 |
+| `일반 발소리` | `/Game/SFX/N_Footstep/Normal/S_N_Footstep_Normal_04` | 원본 에셋 복구 |
+| `일반 발소리` | `/Game/SFX/N_Footstep/Normal/S_N_Footstep_Normal_05` | 원본 에셋 복구 |
 
 
-## 검증 결과
+## 최초 V2 적용 당시 검증 결과 (기존 사운드 복구 전)
 
 - 에디터 빌드 성공. 최종 추가 연결분까지 원본 프로젝트 DLL에 적용하고 에디터를 다시 열었다.
 - 저장 후 별도 프로세스에서 SoundWave 79개·카탈로그 78개 항목 재조회 성공. 승인된 피격 피치와 기존 음악·환경음 항목 보존을 확인했다.
@@ -123,4 +127,11 @@
 - 게임 출력만 녹음한 검증 파일은 무음이 아니며 클리핑이 없었다. 짧은 원본 비교 파일: `Saved/Diagnostics/V2Audio_20261013/V2_SFX_Short_Preview.wav`.
 - 검증 종료 후 PIE를 종료하고 임시 설정을 복구했다. 마지막 에디터 상태는 Ocean / 미저장 맵·에셋 0 / Multi-User 연결 해제 상태다.
 
-스캐너 라이트와 사운드 코드·필수 에셋·이 문서는 dev-v2 대상 PR #215에서 공유한다. 오션맵, 별도의 기존 BP 변경, 개인 발표자료와 진단 JSON은 사운드 커밋에서 제외한다.
+초기 V2 기능·사운드는 PR #215에서 공유했다. 기존 사운드 복구도 dev-v2에 반영한다. 오션맵, 별도의 기존 BP 변경, 개인 발표자료와 진단 JSON은 사운드 커밋에서 제외한다.
+
+## 기존 사운드 복구 검증
+
+- 발소리 5개는 최초 사운드 작업 전 Git LFS 해시와 일치하는 원본 에셋으로 복구했다.
+- 별도 프로세스에서 기존 항목 28개의 전체 설정 일치, 현재 피격음과 신규 항목 49개의 설정 보존, 카탈로그 78항목의 참조 유효성을 확인했다.
+- 에디터 빌드 및 카탈로그·솔로/2인 수리·펌프 반복음 검사 3개가 통과했다.
+- 맵과 지침 BP는 수정하지 않았다.
