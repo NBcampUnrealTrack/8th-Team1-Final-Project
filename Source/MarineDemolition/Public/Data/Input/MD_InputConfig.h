@@ -8,6 +8,7 @@
 
 class UInputAction;
 class UMD_ThrowSettings;
+class UMD_GlassMarkerSettings;
 
 UCLASS()
 class MARINEDEMOLITION_API UMD_InputConfig : public UDataAsset
@@ -39,6 +40,17 @@ public:
 
 	UPROPERTY(EditDefaultsOnly, Category = "Input|Throw")
 	TObjectPtr<UMD_ThrowSettings> ThrowSettings;
+
+	/** Hold secondary use to present the marker's rear eraser. Keys are authored in the IMC. */
+	UPROPERTY(EditDefaultsOnly, Category = "Input|Glass Marker")
+	TObjectPtr<UInputAction> GlassMarkerEraseAction;
+
+	/** Press to select the next marker ink color; its key is authored in the IMC. */
+	UPROPERTY(EditDefaultsOnly, Category = "Input|Glass Marker")
+	TObjectPtr<UInputAction> GlassMarkerColorCycleAction;
+
+	UPROPERTY(EditDefaultsOnly, Category = "Input|Glass Marker")
+	TObjectPtr<UMD_GlassMarkerSettings> GlassMarkerSettings;
 
 	/** Optional user-authored Boolean IA. Bind R in the mapping context. */
 	UPROPERTY(EditDefaultsOnly, Category = "Input")

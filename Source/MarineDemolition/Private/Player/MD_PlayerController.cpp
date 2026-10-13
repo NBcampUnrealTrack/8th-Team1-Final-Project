@@ -2,6 +2,7 @@
 
 
 #include "Player/MD_PlayerController.h"
+#include "Components/WidgetComponent.h"
 #include "UI/Game/MD_HUDWidget.h"
 #include "UI/MD_LocalUIManager.h"
 #include "UI/Game/MD_DailyReportWidget.h"
@@ -43,15 +44,38 @@
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
 #include "Component/Equipment/MD_ThrowComponent.h"
+#include "Component/Interaction/MD_GlassDrawingFocusComponent.h"
 #include "Data/Equipment/MD_QuestItemDefinition.h"
 #include "World/Merchant/MD_Merchant.h"
 #include "Interfaces/OnlineIdentityInterface.h"
 #include "OnlineSubsystem.h"
 #include "Util/MD_LogUtility.h"
 
+namespace
+{
+	void EndGlassDrawingFocus(APlayerController* Controller)
+	{
+		AMD_Character* Character = Controller ? Cast<AMD_Character>(Controller->GetPawn()) : nullptr;
+		UMD_GlassDrawingFocusComponent* Focus = Character ? Character->GetGlassDrawingFocusComponent() : nullptr;
+		if (IsValid(Focus) && Focus->IsFocusActive() && !Focus->IsChangingView()) Focus->EndFocus(true);
+	}
+}
+
 AMD_PlayerController::AMD_PlayerController()
 {
 	PlayerCameraManagerClass = AMD_PlayerCameraManager::StaticClass();
+}
+
+void AMD_PlayerController::UpdateHiddenComponents(const FVector& ViewLocation, TSet<FPrimitiveComponentId>& HiddenComponents)
+{
+	Super::UpdateHiddenComponents(ViewLocation, HiddenComponents);
+	const AMD_Character* MDCharacter = Cast<AMD_Character>(GetPawn());
+	const UWidgetComponent* NameTag = IsValid(MDCharacter) ? MDCharacter->GetNameTagWidgetComponent() : nullptr;
+	if (IsValid(NameTag) && NameTag->IsRegistered())
+	{
+		// 외부 카메라의 이동 중에도 본인 이름표만 이 화면에서 숨긴다.
+		HiddenComponents.Add(NameTag->GetPrimitiveSceneId());
+	}
 }
 
 void AMD_PlayerController::ServerRequestDiscoverLore_Implementation(FPrimaryAssetId LoreAssetId)
@@ -118,10 +142,17 @@ void AMD_PlayerController::CancelScrapeInteraction()
 
 void AMD_PlayerController::SetInputMode(const FInputModeDataBase& InData)
 {
+	EndGlassDrawingFocus(this);
 	// UI 전환으로 입력을 잃기 전에 진행 중인 오염물 타격을 정리한다.
 	CancelScrapeInteraction();
 	CancelThrowInteraction();
 	Super::SetInputMode(InData);
+}
+
+bool AMD_PlayerController::SetPause(bool bPause, FCanUnpause CanUnpauseDelegate)
+{
+	if (bPause) EndGlassDrawingFocus(this);
+	return Super::SetPause(bPause, CanUnpauseDelegate);
 }
 
 void AMD_PlayerController::CancelThrowInteraction()
@@ -138,6 +169,8 @@ void AMD_PlayerController::CancelThrowInteraction()
 
 void AMD_PlayerController::FlushPressedKeys()
 {
+	EndGlassDrawingFocus(this);
+	CancelScrapeInteraction();
 	// Enhanced Input의 Completed 콜백보다 먼저 취소해 창 전환을 발사로 해석하지 않는다.
 	CancelThrowInteraction();
 	Super::FlushPressedKeys();
@@ -147,6 +180,7 @@ void AMD_PlayerController::SetViewTarget(
 	AActor* NewViewTarget,
 	const FViewTargetTransitionParams TransitionParams)
 {
+	EndGlassDrawingFocus(this);
 	if (NewViewTarget != GetPawn())
 	{
 		// 컷신·관전 카메라로 전환하기 전에 진행 중인 타격을 정리한다.
@@ -175,6 +209,7 @@ void AMD_PlayerController::ClientWasKicked_Implementation(const FText& KickReaso
 
 void AMD_PlayerController::HandleApplicationWillDeactivate()
 {
+	EndGlassDrawingFocus(this);
 	CancelScrapeInteraction();
 	CancelThrowInteraction();
 }
@@ -758,6 +793,7 @@ void AMD_PlayerController::SetPawn(APawn* InPawn)
 
 void AMD_PlayerController::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	EndGlassDrawingFocus(this);
     // 월드 종료 후 원장 변경 응답이 발생하지 않도록 구독 정리
     UnbindDailyLedger();
 	if (ApplicationWillDeactivateHandle.IsValid())
