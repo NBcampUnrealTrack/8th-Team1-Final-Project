@@ -136,6 +136,16 @@ void UMD_AudioRelayComponent::PlayAtOwnerLocationForAll(const FGameplayTag& Even
 
 // -------------------------------------------------------------------- 멀티캐스트
 
+void UMD_AudioRelayComponent::PlayConfirmedAtOwnerLocationForAll(const FGameplayTag& EventTag)
+{
+	if (EventTag.IsValid() && GetOwner() && GetOwner()->HasAuthority())
+		Multicast_PlayConfirmedAtLocation(EventTag, GetOwner()->GetActorLocation());
+}
+void UMD_AudioRelayComponent::Multicast_PlayConfirmedAtLocation_Implementation(FGameplayTag EventTag, FVector_NetQuantize Location)
+{
+	if (UMD_AudioSubsystem* Audio = GetAudio()) Audio->PlayEventAtLocation(EventTag, Location);
+}
+
 void UMD_AudioRelayComponent::Multicast_PlayAttached_Implementation(const FGameplayTag EventTag)
 {
 	if (ShouldIgnoreMulticast(EventTag))

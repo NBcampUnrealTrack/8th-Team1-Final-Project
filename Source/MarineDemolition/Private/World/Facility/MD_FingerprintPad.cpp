@@ -1,4 +1,5 @@
 #include "World/Facility/MD_FingerprintPad.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "World/Facility/MD_FingerprintInterlock.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Components/BoxComponent.h"
@@ -149,7 +150,12 @@ bool AMD_FingerprintPad::CanInteract_Implementation(AActor* Interactor) const
 
 void AMD_FingerprintPad::Interact_Implementation(AActor* Interactor)
 {
-	if (HasAuthority() && IsValid(Interlock)) Interlock->BeginScan(this,Cast<APawn>(Interactor));
+	// 서버에서 직접 호출한 인증에 대한 연결 상태 검증
+	if (HasAuthority() == true && IsValid(Interlock) == true && IsValid(Interlock->Fault) == true)
+	{
+		// 서버 직접 입력의 현재 고장 번호를 인증 판정에 전달
+		Interlock->BeginScan(this, Cast<APawn>(Interactor), Interlock->Fault->GetSnapshot().FaultId);
+	}
 }
 
 void AMD_FingerprintPad::InteractReleased_Implementation(AActor* Interactor)
@@ -164,11 +170,19 @@ void AMD_FingerprintPad::Tick(float DeltaSeconds)
 	RefreshHighlight();
 	const bool bActive = IsValid(Interlock) && Interlock->IsActive();
 	const bool bScanning = IsValid(ActiveScanner) || (bActive && Interlock->SoloFirstPad==PadIndex);
+	if (bActive && bScanning && !ScanAudio.IsValid())
+		ScanAudio = MDAudioFeedback::Attached(RootComponent, TEXT("SFX.Facility.Fingerprint.WaitLoop"));
+	if (!bActive || !bScanning) MDAudioFeedback::Stop(this, ScanAudio);
 	const auto* GS = GetWorld()->GetGameState();
 	const double Now = GS ? GS->GetServerWorldTimeSeconds() : GetWorld()->GetTimeSeconds();
 	const double Age = FMath::Max(0., Now - ScanVisualStartTime);
 	const float FadeDuration = FMath::IsFinite(ScanFadeInSeconds) ? FMath::Max(0.05f, ScanFadeInSeconds) : 0.45f;
 	const bool bRecentScan = ScanVisualStartTime >= 0. && Age < FadeDuration;
+	if (ScanVisualStartTime >= 0. && ScanVisualStartTime > LastAudioScanTime)
+	{
+		LastAudioScanTime = ScanVisualStartTime;
+		if (bRecentScan) MDAudioFeedback::World(this, TEXT("SFX.Facility.Fingerprint.Scan"));
+	}
 	float ScanProgress = 1.f;
 	if (bRecentScan && (bScanning || !bActive))
 	{
@@ -198,6 +212,7 @@ void AMD_FingerprintPad::Tick(float DeltaSeconds)
 
 void AMD_FingerprintPad::EndPlay(const EEndPlayReason::Type Reason)
 {
+	MDAudioFeedback::Stop(this, ScanAudio, 0.f);
 	if (HasAuthority() && IsValid(Interlock)) Interlock->ReleaseScan(this,ActiveScanner);
 	Super::EndPlay(Reason);
 }

@@ -16,6 +16,8 @@ class UMD_ToolDefinition;
 class UMD_ScannerModeWidget;
 class APawn;
 class AController;
+class USpotLightComponent;
+class UMD_FacilityFaultManagerComponent;
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnScanModeChanged, EMD_ScanMode, Mode);
 
@@ -36,6 +38,9 @@ public:
 
 	UFUNCTION(BlueprintPure, Category="MD|Scanner")
 	bool IsScannerEquipped() const;
+	UFUNCTION(BlueprintPure, Category="MD|Scanner|Light") bool IsBlackoutLightActive() const;
+	UFUNCTION(BlueprintPure, Category="MD|Scanner|Light") USpotLightComponent* GetBlackoutLight() const { return BlackoutLight; }
+	virtual void TickComponent(float DeltaSeconds,ELevelTick TickType,FActorComponentTickFunction* ThisTickFunction) override;
 
 	/** Bind the user's Boolean IA Started event, or use InputConfig.ScannerModeSwitchAction. */
 	UFUNCTION(BlueprintCallable, Category="MD|Scanner")
@@ -60,6 +65,9 @@ public:
 	void ClearScan(bool bNotifyServer = true);
 
 protected:
+	UPROPERTY(EditDefaultsOnly, Category="MD|Scanner|Light", meta=(ClampMin="0")) float BlackoutLightLumens=100.f;
+	UPROPERTY(EditDefaultsOnly, Category="MD|Scanner|Light", meta=(ClampMin="1")) float BlackoutLightRadius=1100.f;
+	UPROPERTY(EditDefaultsOnly, Category="MD|Scanner|Light") FLinearColor BlackoutLightColor=FLinearColor(.8f,.93f,1.f);
 	/** Dedicated wall-style pass, installed on the local camera only during a wall scan. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Scanner|Visual")
 	TObjectPtr<UMaterialInterface> WallScanMaterial;
@@ -68,6 +76,13 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 
 private:
+	UPROPERTY(Transient) TObjectPtr<USpotLightComponent> BlackoutLight;
+	TWeakObjectPtr<UMD_FacilityFaultManagerComponent> BoundPowerManager;
+	FTimerHandle BlackoutLightTimer;
+	void RefreshBlackoutLight();
+	void UpdateBlackoutLightTransform();
+	UFUNCTION() void HandleBlackoutChanged(bool bBlackout);
+	UFUNCTION() void HandleHeldActorChanged(AActor* Actor);
 	UPROPERTY(Transient, BlueprintReadOnly, Category="MD|Scanner", meta=(AllowPrivateAccess="true"))
 	EMD_ScanMode ScanMode = EMD_ScanMode::InternalStructure;
 

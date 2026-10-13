@@ -1,6 +1,7 @@
 #include "World/Door/MD_DoorFaultSubsystem.h"
 #include "EngineUtils.h"
 #include "World/Door/MD_DoorFaultComponent.h"
+#include "Audio/MD_DoorAudioComponent.h"
 #if !UE_BUILD_SHIPPING
 #include "HAL/IConsoleManager.h"
 #include "GameFramework/PlayerController.h"
@@ -76,9 +77,9 @@ FAutoConsoleCommandWithWorldAndArgs GMDForceDoorFault(
 void UMD_DoorFaultSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 {
 	Super::OnWorldBeginPlay(InWorld);
-	if (!InWorld.IsGameWorld() || InWorld.GetNetMode() == NM_Client) return;
-	DoorClass = LoadClass<AActor>(nullptr, TEXT("/Game/Assets/X7/Interior/Objects/Door/BP_Door.BP_Door_C"));
-	BlackDoorClass = LoadClass<AActor>(nullptr, TEXT("/Game/Assets/X7/Interior/Objects/Door/BP_Door_Black.BP_Door_Black_C"));
+	if (!InWorld.IsGameWorld()) return;
+	DoorClass = LoadClass<AActor>(nullptr, TEXT("/Game/Assets/X7/Interior/Objects/Blueprints/Door/BP_Door.BP_Door_C"));
+	BlackDoorClass = LoadClass<AActor>(nullptr, TEXT("/Game/Assets/X7/Interior/Objects/Blueprints/Door/BP_Door_Black.BP_Door_Black_C"));
 	if (!DoorClass && !BlackDoorClass) return;
 	for (TActorIterator<AActor> It(&InWorld); It; ++It) AttachFaultAdapter(*It);
 	SpawnHandle = InWorld.AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this, &ThisClass::AttachFaultAdapter));
@@ -86,8 +87,13 @@ void UMD_DoorFaultSubsystem::OnWorldBeginPlay(UWorld& InWorld)
 
 void UMD_DoorFaultSubsystem::AttachFaultAdapter(AActor* Actor)
 {
-	if (!IsValid(Actor) || !((DoorClass && Actor->IsA(DoorClass)) || (BlackDoorClass && Actor->IsA(BlackDoorClass))) || !Actor->HasAuthority()
-		|| Actor->ActorHasTag(UMD_FacilityFaultComponent::FaultExemptActorTag)
+	if (!IsValid(Actor) || !((DoorClass && Actor->IsA(DoorClass)) || (BlackDoorClass && Actor->IsA(BlackDoorClass)))) return;
+	if (Actor->GetNetMode() != NM_DedicatedServer && !Actor->FindComponentByClass<UMD_DoorAudioComponent>())
+	{
+		auto* Audio = NewObject<UMD_DoorAudioComponent>(Actor, TEXT("DoorAudioRuntime"));
+		Actor->AddInstanceComponent(Audio); Audio->RegisterComponent();
+	}
+	if (!Actor->HasAuthority() || Actor->ActorHasTag(UMD_FacilityFaultComponent::FaultExemptActorTag)
 		|| Actor->FindComponentByClass<UMD_FacilityFaultComponent>()) return;
 	Actor->SetReplicates(true);
 	UMD_DoorFaultComponent* Adapter = NewObject<UMD_DoorFaultComponent>(Actor, TEXT("FacilityDoorFaultRuntime"));

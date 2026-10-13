@@ -63,7 +63,8 @@ public:
 	UFUNCTION(BlueprintPure, Category="MD|Fingerprint")
 	int32 GetParticipantCount() const;
 	static int32 CalculateLossPerSecond(int32 Count, int32 Unit = 5);
-	bool BeginScan(AMD_FingerprintPad* Pad, APawn* Pawn);
+	// 요청 시점의 고장 번호와 현재 사건 일치 확인 후 패드 인증 시작
+	bool BeginScan(AMD_FingerprintPad* Pad, APawn* Pawn, int32 ExpectedFaultId);
 	void ReleaseScan(AMD_FingerprintPad* Pad, APawn* Pawn);
 protected:
 	virtual void BeginPlay() override;
@@ -76,7 +77,8 @@ private:
 	void ArmNextFault();
 	void AutomaticFault();
 	void ResetScans();
-	void CompleteAuthentication();
+	// 비용 반영 뒤에도 인증을 시작한 사건에만 복구 적용
+	void CompleteAuthentication(int32 ExpectedFaultId);
 	void RefreshParticipantMode();
 	void SetSorterLocks(bool bLocked);
 	void ApplyElapsedCharges();

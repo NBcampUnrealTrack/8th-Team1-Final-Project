@@ -1,9 +1,16 @@
 #include "Component/Scanning/MD_ScannerComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Character/MD_Character.h"
 #include "Camera/CameraComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Component/Facility/MD_FacilityFaultManagerComponent.h"
+#include "Component/Interaction/MD_InteractionComponent.h"
+#include "Components/SpotLightComponent.h"
+#include "Camera/PlayerCameraManager.h"
+#include "GameFramework/GameStateBase.h"
+#include "AbilitySystemComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "World/Contamination/MD_Barnacle.h"
 #include "World/Contamination/MD_SurfaceStain.h"
@@ -25,7 +32,8 @@
 
 UMD_ScannerComponent::UMD_ScannerComponent()
 {
-	PrimaryComponentTick.bCanEverTick = false;
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.bStartWithTickEnabled = false;
 	SetIsReplicatedByDefault(true);
 	static ConstructorHelpers::FObjectFinder<UMaterialInterface> WallStyle(
 		TEXT("/Game/VFX/03_Scanner/MI_ScanWallType.MI_ScanWallType"));
@@ -39,6 +47,8 @@ void UMD_ScannerComponent::BeginPlay()
 		Pawn->ReceiveControllerChangedDelegate.AddUniqueDynamic(this, &ThisClass::HandleControllerChanged);
 	if (const AMD_Character* Character = Cast<AMD_Character>(GetOwner()))
 	{
+		if(auto* Interaction=Character->GetInteractionComponent())
+			Interaction->OnHeldActorChanged.AddUniqueDynamic(this,&ThisClass::HandleHeldActorChanged);
 		BoundHotbar = Character->GetHotbarComponent();
 		if (BoundHotbar.IsValid())
 		{
@@ -47,7 +57,53 @@ void UMD_ScannerComponent::BeginPlay()
 			RefreshModeIndicator();
 		}
 	}
+	if(GetWorld()->GetNetMode()!=NM_DedicatedServer)
+	{
+		BlackoutLight=NewObject<USpotLightComponent>(GetOwner(),TEXT("ScannerBlackoutLight"),RF_Transient);
+		BlackoutLight->SetupAttachment(GetOwner()->GetRootComponent());BlackoutLight->SetMobility(EComponentMobility::Movable);
+		BlackoutLight->SetIntensityUnits(ELightUnits::Lumens);BlackoutLight->SetIntensity(BlackoutLightLumens);
+		BlackoutLight->SetLightColor(BlackoutLightColor);BlackoutLight->SetAttenuationRadius(BlackoutLightRadius);
+		BlackoutLight->SetInnerConeAngle(16);BlackoutLight->SetOuterConeAngle(28);BlackoutLight->SetCastShadows(true);
+		BlackoutLight->SetVolumetricScatteringIntensity(.15f);BlackoutLight->SetVisibility(false);BlackoutLight->RegisterComponent();
+		GetWorld()->GetTimerManager().SetTimer(BlackoutLightTimer,this,&ThisClass::RefreshBlackoutLight,.1f,true);
+		RefreshBlackoutLight();
+	}
 }
+
+bool UMD_ScannerComponent::IsBlackoutLightActive() const { return BlackoutLight && BlackoutLight->IsVisible(); }
+void UMD_ScannerComponent::RefreshBlackoutLight()
+{
+	if(!BlackoutLight || !GetWorld()) return;
+	const auto* GS=GetWorld()->GetGameState();auto* Manager=GS?GS->FindComponentByClass<UMD_FacilityFaultManagerComponent>():nullptr;
+	if(Manager!=BoundPowerManager.Get())
+	{
+		if(BoundPowerManager.IsValid()) BoundPowerManager->OnBlackoutChanged.RemoveDynamic(this,&ThisClass::HandleBlackoutChanged);
+		BoundPowerManager=Manager;if(Manager) Manager->OnBlackoutChanged.AddUniqueDynamic(this,&ThisClass::HandleBlackoutChanged);
+	}
+	const auto* Character=Cast<AMD_Character>(GetOwner());const auto* Interaction=Character?Character->GetInteractionComponent():nullptr;
+	const auto* ASC=Character?Character->GetAbilitySystemComponent():nullptr;
+	const bool bHasPossession=Character && (Character->GetLocalRole()==ROLE_SimulatedProxy || Character->GetController());
+	const bool bOn=Manager && Manager->IsBlackoutActive() && bHasPossession && !Character->IsHidden() && IsScannerEquipped()
+		&& Interaction && !Interaction->IsHolding() && (!ASC || !ASC->HasMatchingGameplayTag(MDGameplayTags::State_Dead));
+	if (BlackoutLight->IsVisible() != bOn)
+		MDAudioFeedback::LocalPawn(Character, bOn ? TEXT("SFX.Tool.Scanner.LightOn") : TEXT("SFX.Tool.Scanner.LightOff"));
+	BlackoutLight->SetVisibility(bOn);SetComponentTickEnabled(bOn);if(bOn) UpdateBlackoutLightTransform();
+}
+void UMD_ScannerComponent::UpdateBlackoutLightTransform()
+{
+	const auto* Pawn=Cast<APawn>(GetOwner());if(!Pawn || !BlackoutLight) return;
+	FVector Location=Pawn->GetPawnViewLocation();FRotator Rotation=Pawn->GetBaseAimRotation();
+	if(Pawn->IsLocallyControlled())
+		if(const auto* PC=Cast<APlayerController>(Pawn->GetController());PC && PC->PlayerCameraManager)
+		{ Location=PC->PlayerCameraManager->GetCameraLocation();Rotation=PC->PlayerCameraManager->GetCameraRotation(); }
+	BlackoutLight->SetWorldLocationAndRotation(Location+Rotation.RotateVector(FVector(15,10,-8)),Rotation);
+}
+void UMD_ScannerComponent::TickComponent(float DeltaSeconds,ELevelTick TickType,FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaSeconds,TickType,ThisTickFunction);RefreshBlackoutLight();
+}
+void UMD_ScannerComponent::HandleBlackoutChanged(bool) { RefreshBlackoutLight(); }
+void UMD_ScannerComponent::HandleHeldActorChanged(AActor*) { RefreshBlackoutLight(); }
 
 bool UMD_ScannerComponent::IsScannerEquipped() const
 {
@@ -76,6 +132,7 @@ bool UMD_ScannerComponent::ToggleScanMode()
 	// 내부 구조물 ↔ 오염물·따개비 2모드 토글
 	ScanMode = ScanMode == EMD_ScanMode::InternalStructure ? EMD_ScanMode::Cleanup : EMD_ScanMode::InternalStructure;
 	RefreshModeIndicator();
+	MDAudioFeedback::LocalPawn(Pawn, TEXT("SFX.Tool.Scanner.ModeSwitch"));
 	OnScanModeChanged.Broadcast(ScanMode);
 	return true;
 }
@@ -277,6 +334,9 @@ void UMD_ScannerComponent::HandleHotbarChanged()
 		LastTool = Current;
 	}
 	RefreshModeIndicator();
+	RefreshBlackoutLight();
+	// Send the selected-slot change promptly even when an idle character's adaptive replication is slow.
+	if(GetOwner() && GetOwner()->HasAuthority()) GetOwner()->ForceNetUpdate();
 }
 
 void UMD_ScannerComponent::RefreshModeIndicator()
@@ -305,10 +365,16 @@ void UMD_ScannerComponent::HandleControllerChanged(APawn*, AController*, AContro
 	if (ModeIndicator) ModeIndicator->RemoveFromParent();
 	ModeIndicator = nullptr;
 	RefreshModeIndicator();
+	RefreshBlackoutLight();
 }
 
 void UMD_ScannerComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
+	if(GetWorld()) GetWorld()->GetTimerManager().ClearTimer(BlackoutLightTimer);
+	if(BoundPowerManager.IsValid()) BoundPowerManager->OnBlackoutChanged.RemoveDynamic(this,&ThisClass::HandleBlackoutChanged);
+	if(const auto* Character=Cast<AMD_Character>(GetOwner()))
+		if(auto* Interaction=Character->GetInteractionComponent()) Interaction->OnHeldActorChanged.RemoveDynamic(this,&ThisClass::HandleHeldActorChanged);
+	if(BlackoutLight) { BlackoutLight->DestroyComponent();BlackoutLight=nullptr; }
 	ClearScan(false);
 	if (ModeIndicator) ModeIndicator->RemoveFromParent();
 	ModeIndicator = nullptr;

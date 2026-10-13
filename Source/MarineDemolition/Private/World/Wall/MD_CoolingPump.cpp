@@ -44,12 +44,14 @@ void AMD_CoolingPump::BeginPlay()
 
 void AMD_CoolingPump::OnUtilityStateChangedLocal(EMD_UtilityState NewState)
 {
+	Super::OnUtilityStateChangedLocal(NewState);
 	if (GetNetMode() == NM_DedicatedServer)
 	{
 		return;
 	}
 	if (NewState == EMD_UtilityState::Broken)
 	{
+		if (!LeakAudio.IsValid()) LeakAudio = MDAudioFeedback::Attached(ContaminatedWaterFX, TEXT("SFX.Hazard.Pipe.GushLoop"));
 		if (!ContaminatedWaterFX->IsActive())
 		{
 			ContaminatedWaterFX->Activate(true);
@@ -57,6 +59,13 @@ void AMD_CoolingPump::OnUtilityStateChangedLocal(EMD_UtilityState NewState)
 	}
 	else
 	{
+		MDAudioFeedback::Stop(this, LeakAudio);
 		ContaminatedWaterFX->DeactivateImmediate();
 	}
+}
+
+void AMD_CoolingPump::EndPlay(const EEndPlayReason::Type Reason)
+{
+	MDAudioFeedback::Stop(this, LeakAudio, 0.f);
+	Super::EndPlay(Reason);
 }

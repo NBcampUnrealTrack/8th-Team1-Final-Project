@@ -18,6 +18,17 @@
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallUtility.h"
 
+namespace
+{
+// InternalStructure's unique gather selects this append policy once before the unchanged evaluation loop.
+template <bool bCandidatesUnique, typename Pointee>
+FORCEINLINE void AddAcceptedScanTargetSpecialized(TArray<Pointee*>& Output, Pointee* Value)
+{
+    if constexpr (bCandidatesUnique) Output.Add(Value);
+    else Output.AddUnique(Value);
+}
+}
+
 UMD_GA_WallScan::UMD_GA_WallScan()
 {
 	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
@@ -60,6 +71,8 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 		for (TActorIterator<AMD_WallUtility> It(Pawn->GetWorld()); It; ++It)
 			Candidates.AddUnique(*It);
 	}
+	const auto AppendAcceptedTargets = [&, this]<bool bCandidatesUnique>()
+	{
 	for (AActor* Candidate : Candidates)
 	{
 		if (!IsValid(Candidate) || Candidate->IsHidden()
@@ -98,8 +111,11 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 		else if (!Candidate->GetClass()->ImplementsInterface(UMD_Scannable::StaticClass()))
 			continue;
 		if (MDScanning::SphereIntersectsScanCone(OutOrigin, OutForward, Center, BoundRadius,
-			ScanRadius, ScanConeHalfAngleDegrees)) OutTargets.AddUnique(Candidate);
+			ScanRadius, ScanConeHalfAngleDegrees)) AddAcceptedScanTargetSpecialized<bCandidatesUnique>(OutTargets, Candidate);
 	}
+	};
+	if (Mode == EMD_ScanMode::InternalStructure) AppendAcceptedTargets.operator()<true>();
+	else AppendAcceptedTargets.operator()<false>();
 	UE_LOG(LogTemp, VeryVerbose, TEXT("[Scanner] Find %s mode=%d candidates=%d targets=%d"), *GetNameSafe(Pawn), int32(Mode), Candidates.Num(), OutTargets.Num());
 	return true;
 }

@@ -16,6 +16,13 @@ namespace
     {
         return FMath::Abs(A - B) <= 1.0e-9 * FMath::Max(1.0, FMath::Max(FMath::Abs(A), FMath::Abs(B)));
     }
+    FMD_ContaminationPendingDrop CopyMultiItemRecordForDrain(FMD_ContaminationPendingDrop& Working)
+    {
+        TArray<FMD_ScrapeRecoveryLot> RecoveryLots = MoveTemp(Working.RecoveryLots);
+        FMD_ContaminationPendingDrop ItemRecord = Working;
+        Working.RecoveryLots = MoveTemp(RecoveryLots);
+        return ItemRecord;
+    }
     bool HasAuthorityWorld(const UWorld* World)
     {
         return World && World->GetNetMode() != NM_Client;
@@ -211,7 +218,7 @@ int32 UMD_ContaminationDebrisSubsystem::DrainPendingDrops(const uint64 FrameId, 
         if (Index == INDEX_NONE) break;
         FMD_ContaminationPendingDrop Working = PendingDrops[Index];
         const FGuid SourceBatchId = Working.BatchId;
-        FMD_ContaminationPendingDrop ItemRecord = Working;
+        FMD_ContaminationPendingDrop ItemRecord = Working.bSinglePhysicalItem ? Working : CopyMultiItemRecordForDrain(Working);
         ItemRecord.BatchId = Working.bSinglePhysicalItem ? Working.BatchId : FGuid::NewGuid();
         ItemRecord.bSinglePhysicalItem = true;
         const double Amount = Working.bSinglePhysicalItem ? Working.PendingCarrierAmount
@@ -322,7 +329,12 @@ void UMD_ContaminationDebrisSubsystem::TraceMemory() const
 {
     TRACE_COUNTER_SET(MD_Debris_LiveItems, ActiveItems.Num());
     TRACE_COUNTER_SET(MD_Debris_PendingBatches, PendingDrops.Num());
-    TRACE_COUNTER_SET(MD_Debris_LedgerBytes, GetAllocatedSize());
+#if COUNTERSTRACE_ENABLED
+    if (UE_TRACE_CHANNELEXPR_IS_ENABLED(CountersChannel))
+    {
+        TRACE_COUNTER_SET(MD_Debris_LedgerBytes, GetAllocatedSize());
+    }
+#endif
 }
 
 void UMD_ContaminationDebrisSubsystem::Deinitialize()
