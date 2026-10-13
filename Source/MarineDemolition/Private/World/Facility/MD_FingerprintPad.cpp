@@ -1,4 +1,6 @@
 #include "World/Facility/MD_FingerprintPad.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
 #include "World/Facility/MD_FingerprintInterlock.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Components/BoxComponent.h"
@@ -18,6 +20,11 @@
 
 AMD_FingerprintPad::AMD_FingerprintPad()
 {
+	// 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::Authenticate;
+
 	bReplicates = true; bAlwaysRelevant = true;
 	PrimaryActorTick.bCanEverTick = true; PrimaryActorTick.TickInterval = 0.1f;
 	InteractionBounds = CreateDefaultSubobject<UBoxComponent>(TEXT("InteractionBounds"));
@@ -127,19 +134,34 @@ FText AMD_FingerprintPad::GetInteractionDisplayName_Implementation() const
 	return FText::Format(NSLOCTEXT("MDFingerprint","Name","지문 패드 {0}"),FText::FromString(PadIndex==0?TEXT("A"):TEXT("B")));
 }
 
-FText AMD_FingerprintPad::GetInteractionPrompt_Implementation(AActor*) const
+FText AMD_FingerprintPad::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
 	if (!IsValid(Interlock) || !Interlock->IsActive()) return NSLOCTEXT("MDFingerprint","Normal","처리장 정상 가동");
+	// 인증 상태별 안내에서 공유할 선택 유형과 현재 입력 키 조회
+	FText ActionPrompt = UMD_InteractionPresentationLibrary::FindActorActionPrompt(this, Interactor);
+	// 표시 제외 유형의 행동 안내와 부가 손실 표시 생략
+	if (ActionPrompt.IsEmpty() == true)
+	{
+		// 빈 유형 설정의 명시적 안내 숨김
+		return FText::GetEmpty();
+	}
 	if (Interlock->SoloFirstPad != INDEX_NONE)
 	{
 		const auto* GS = GetWorld()->GetGameState();
 		const double Now = GS ? GS->GetServerWorldTimeSeconds() : GetWorld()->GetTimeSeconds();
 		const int32 Remaining = FMath::Max(0, FMath::CeilToInt(Interlock->SoloDeadline - Now));
-		return FText::Format(Interlock->SoloFirstPad == PadIndex
-			? NSLOCTEXT("MDFingerprint","SoloFirst","인증 완료 · 반대 패드로 이동 · {0}초 남음")
-			: NSLOCTEXT("MDFingerprint","SoloSecond","[E 유지] 반대 패드 인증 · {0}초 남음"), FText::AsNumber(Remaining));
+		// 먼저 인증한 패드의 완료 상태 안내 유지
+		if (Interlock->SoloFirstPad == PadIndex)
+		{
+			// 다음 패드 이동에 필요한 남은 시간 표시
+			return FText::Format(NSLOCTEXT("MDFingerprint", "SoloFirst", "인증 완료 · 반대 패드로 이동 · {0}초 남음"), FText::AsNumber(Remaining));
+		}
+		// 두 번째 패드에도 선택 문구와 재지정 입력 키 적용
+		return FText::Format(NSLOCTEXT("MDFingerprint", "TypedSoloSecond", "{0} · 반대 패드 · {1}초 남음"), ActionPrompt, FText::AsNumber(Remaining));
 	}
-	return FText::Format(NSLOCTEXT("MDFingerprint","Prompt","[E 유지] 지문 인증 · 고장 손실 {0}원/초"),FText::AsNumber(Interlock->LossPerSecond));
+	// 선택한 인증 행동에 현재 고장의 초당 손실 정보를 결합
+	return FText::Format(NSLOCTEXT("MDFingerprint", "TypedPrompt", "{0} · 고장 손실 {1}원/초"),
+		ActionPrompt, FText::AsNumber(Interlock->LossPerSecond));
 }
 
 bool AMD_FingerprintPad::CanInteract_Implementation(AActor* Interactor) const

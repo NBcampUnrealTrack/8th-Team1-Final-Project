@@ -15,6 +15,7 @@
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/Pawn.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
 #include "HAL/IConsoleManager.h"
 #include "EngineUtils.h"
 #include "Net/UnrealNetwork.h"
@@ -398,12 +399,37 @@ FText AMD_RepairInstructionControl::GetInteractionDisplayName_Implementation() c
 	return FText::Format(NSLOCTEXT("MDInstruction","Knob","차단기 {0}열"),FText::AsNumber(Column+1));
 }
 
-FText AMD_RepairInstructionControl::GetInteractionPrompt_Implementation(AActor*) const
+FText AMD_RepairInstructionControl::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
-	if(!IsValid(Controller) || !Controller->State.bActive) return NSLOCTEXT("MDInstruction","Idle","전력 정상");
-	if(ControlKind==EMD_InstructionControlKind::Restart) return NSLOCTEXT("MDInstruction","RestartPrompt","[E] 정답 변경 · 문 열기");
-	if(ControlKind==EMD_InstructionControlKind::Guide) return NSLOCTEXT("MDInstruction","GuidePrompt","[E] 지침 사용 · 다인 플레이 시 문 잠금");
-	return FText::Format(NSLOCTEXT("MDInstruction","KnobPrompt","[E] 다음 칸 · 현재 위에서 {0}칸"),FText::AsNumber(Controller->State.CurrentRows.IsValidIndex(Column)?Controller->State.CurrentRows[Column]+1:1));
+	// 수리 사건이 없는 장치의 정상 상태 안내 유지
+	if (IsValid(Controller) == false || Controller->State.bActive == false)
+	{
+		// 비활성 상태에서는 조작 행동 대신 전력 상태 표시
+		return NSLOCTEXT("MDInstruction", "Idle", "전력 정상");
+	}
+	// 재시작 장치에 지정된 행동 유형 선택
+	if (ControlKind == EMD_InstructionControlKind::Restart)
+	{
+		// 현재 입력 키와 재시작 행동의 설정 문구 반환
+		return UMD_InteractionPresentationLibrary::FindActionPromptByType(RestartPromptType, Interactor);
+	}
+	// 지침 장치에 지정된 행동 유형 선택
+	if (ControlKind == EMD_InstructionControlKind::Guide)
+	{
+		// 현재 입력 키와 지침 행동의 설정 문구 반환
+		return UMD_InteractionPresentationLibrary::FindActionPromptByType(GuidePromptType, Interactor);
+	}
+	// 노브 행동의 설정 문구를 빈 안내 검사와 현재 행 표시에서 공유
+	FText ActionPrompt = UMD_InteractionPresentationLibrary::FindActionPromptByType(KnobPromptType, Interactor);
+	// 표시 안 함 유형이나 비어 있는 설정 문구 존중
+	if (ActionPrompt.IsEmpty() == true)
+	{
+		// 행동 문구가 없는 경우 부가 행 정보도 생략
+		return FText::GetEmpty();
+	}
+	// 기존 노브 행 위치를 선택한 행동 문구 뒤에 표시
+	return FText::Format(NSLOCTEXT("MDInstruction", "TypedKnobPrompt", "{0} · 현재 위에서 {1}칸"), ActionPrompt,
+		FText::AsNumber(Controller->State.CurrentRows.IsValidIndex(Column) ? Controller->State.CurrentRows[Column] + 1 : 1));
 }
 
 #if !UE_BUILD_SHIPPING

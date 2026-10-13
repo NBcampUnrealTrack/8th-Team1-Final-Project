@@ -1,4 +1,6 @@
 #include "World/Sample/MD_QuestSampleCabinet.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
 #include "Components/ArrowComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -11,6 +13,11 @@
 
 AMD_QuestSampleCabinet::AMD_QuestSampleCabinet()
 {
+    // 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+    InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+    // 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+    InteractionPrompt->PromptType = EMD_InteractionPromptType::Open;
+
     bReplicates = true;
     PrimaryActorTick.bCanEverTick = true;
     PrimaryActorTick.bStartWithTickEnabled = false;
@@ -61,8 +68,8 @@ FText AMD_QuestSampleCabinet::GetInteractionDisplayName_Implementation() const
 FText AMD_QuestSampleCabinet::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
     if (bOpened) return FText::FromString(TEXT("샘플을 조준해 회수"));
-    // 퀘스트 카드 없이 사용할 수 있는 캐비닛 상호작용 안내
-    return FText::FromString(TEXT("E — 문 열기"));
+    // 캐비닛에 선택된 문 열기 유형의 공통 설정 문구 반환
+    return UMD_InteractionPresentationLibrary::FindActorActionPrompt(this, Interactor);
 }
 
 bool AMD_QuestSampleCabinet::CanInteract_Implementation(AActor* Interactor) const

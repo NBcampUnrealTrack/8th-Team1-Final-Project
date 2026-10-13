@@ -4,6 +4,7 @@
 #include "GameFramework/Actor.h"
 #include "Component/Facility/MD_FacilityFaultComponent.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
+#include "Types/Interaction/MD_InteractionTypes.h"
 #include "MD_RepairInstruction.generated.h"
 
 class AMD_PowerConduit;
@@ -101,6 +102,15 @@ public:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Replicated, Category="MD|Instruction") TObjectPtr<AMD_RepairInstructionController> Controller;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Replicated, Category="MD|Instruction") EMD_InstructionControlKind ControlKind = EMD_InstructionControlKind::Guide;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Replicated, Category="MD|Instruction", meta=(ClampMin="0",ClampMax="3")) int32 Column = 0;
+	// 지침 판독 장치가 사용할 공통 행동 문구 유형
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Instruction|Interaction")
+	EMD_InteractionPromptType GuidePromptType = EMD_InteractionPromptType::UseInstruction;
+	// 재시작 장치가 사용할 공통 행동 문구 유형
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Instruction|Interaction")
+	EMD_InteractionPromptType RestartPromptType = EMD_InteractionPromptType::RestartInstruction;
+	// 노브 조작에 현재 행 정보를 덧붙일 공통 행동 문구 유형
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Instruction|Interaction")
+	EMD_InteractionPromptType KnobPromptType = EMD_InteractionPromptType::AdvanceBreakerRow;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Instruction") TArray<TObjectPtr<UStaticMeshComponent>> Markers;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Instruction") TArray<TObjectPtr<UTextRenderComponent>> Labels;
 	void RefreshPresentation();

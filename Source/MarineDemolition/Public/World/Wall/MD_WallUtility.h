@@ -8,6 +8,8 @@
 #include "Types/Facility/MD_FacilityTypes.h"
 #include "MD_WallUtility.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class UBoxComponent;
 class UStaticMeshComponent;
 class AMD_CuttableWall;
@@ -90,6 +92,10 @@ public:
 	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
 	virtual bool RequiresServerInteraction_Implementation() const override { return true; }
 	virtual void Interact_Implementation(AActor* Interactor) override;
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	virtual void BeginPlay() override;
