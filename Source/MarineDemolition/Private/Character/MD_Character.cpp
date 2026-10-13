@@ -1289,6 +1289,11 @@ void AMD_Character::HandleScannerModeSwitchInput(const FInputActionValue& Value)
 void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 {
 	if (ThrowComponent && ThrowComponent->IsCharging()) return;
+	if(InteractionComponent && InteractionComponent->TryClickInstructionRestart())
+	{
+		bInstructionClickCaptured=true;
+		return;
+	}
 	if (!IsValid(EquipHotbarComponent))
 	{
 		return;
@@ -1318,6 +1323,7 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 {
+	if(bInstructionClickCaptured) { bInstructionClickCaptured=false; return; }
 	if (bStainStrokeInputCaptured)
 	{
 		bStainStrokeInputCaptured = false;
