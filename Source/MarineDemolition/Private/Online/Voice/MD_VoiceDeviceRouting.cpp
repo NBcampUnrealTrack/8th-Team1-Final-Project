@@ -1,12 +1,15 @@
 #include "Online/Voice/MD_VoiceDeviceRouting.h"
 
 #include "AudioCaptureCore.h"
+#include "Components/AudioComponent.h"
+#include "Engine/World.h"
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemNames.h"
 #include "OnlineSubsystemUtils.h"
 #include "VoiceEngineImpl.h"
 #include "VoiceInterfaceImpl.h"
 #include "VoiceModule.h"
+#include "VoipListenerSynthComponent.h"
 
 // 엔진 파일 변경 없이 UE 5.8의 보호된 엔진 참조에 접근하는 타입 지정 브리지
 class FMD_OnlineVoiceAccess : public FOnlineVoiceImpl
@@ -22,7 +25,7 @@ public:
 	}
 };
 
-// 공통 음성 엔진의 캡처 참조에 한정된 버전 의존 브리지
+// 공통 음성 엔진의 캡처와 원격 재생 버퍼에 한정된 버전 의존 브리지
 class FMD_VoiceEngineAccess : public FVoiceEngineImpl
 {
 public:
@@ -33,6 +36,13 @@ public:
 		TSharedPtr<IVoiceCapture>& (FVoiceEngineImpl::*Member)() = &FMD_VoiceEngineAccess::GetVoiceCapture;
 		// 타입 검증된 멤버 포인터 반환
 		return Member;
+	}
+
+	// 원격 등록 저장소의 타입을 노출하지 않는 재생 버퍼 접근 브리지
+	static auto RemoteBuffersMember()
+	{
+		// 기존 엔진 인스턴스에 적용할 보호된 원격 버퍼 접근 함수 반환
+		return &FMD_VoiceEngineAccess::GetRemoteTalkerBuffers;
 	}
 };
 
@@ -54,6 +64,38 @@ TSharedPtr<FVoiceEngineImpl, ESPMode::ThreadSafe> MDVoiceDeviceRouting::GetEngin
 	TSharedPtr<FVoiceEngineImpl, ESPMode::ThreadSafe> Engine = StaticCastSharedPtr<FVoiceEngineImpl>(Voice.*Member);
 	// 기존 등록 사용자와 코덱을 보존한 엔진 반환
 	return Engine;
+}
+
+void MDVoiceDeviceRouting::ResetWorldRemoteTalkers(UWorld* World, FVoiceEngineImpl& Engine)
+{
+	// 종료 월드를 확인할 수 없는 호출의 원격 재생 변경 차단
+	if (IsValid(World) == false)
+	{
+		// 유효한 종료 월드가 없는 정리 요청 종료
+		return;
+	}
+	// 등록 사용자와 디코더를 보존한 기존 엔진의 원격 재생 버퍼 순회
+	for (auto& RemoteTalkerPair : (Engine.*FMD_VoiceEngineAccess::RemoteBuffersMember())())
+	{
+		// 현재 원격 플레이어의 등록 정보를 유지할 재생 데이터 참조
+		FRemoteTalkerDataImpl& RemoteTalkerData = RemoteTalkerPair.Value;
+		// 실제 음성 재생에 사용 중인 원격 합성 컴포넌트 조회
+		UVoipListenerSynthComponent* SynthComponent = RemoteTalkerData.VoipSynthComponent.Get();
+		// 이미 정리되었거나 아직 생성되지 않은 재생 대상 제외
+		if (IsValid(SynthComponent) == false)
+		{
+			// 재생 객체가 없는 원격 플레이어의 등록 상태 유지
+			continue;
+		}
+		// 합성 컴포넌트와 별도로 월드에 등록될 수 있는 내부 출력 조회
+		UAudioComponent* AudioComponent = SynthComponent->GetAudioComponent();
+		// 종료 대상 월드에 속한 합성 또는 내부 출력만 선택
+		if (SynthComponent->GetWorld() == World || (IsValid(AudioComponent) == true && AudioComponent->GetWorld() == World))
+		{
+			// 오디오 장치 해제 전에 재생을 중지하고 원격 등록과 디코더 및 캡처 유지
+			RemoteTalkerData.Reset();
+		}
+	}
 }
 
 bool MDVoiceDeviceRouting::ReplaceCapture(TSharedPtr<IVoiceCapture>& CurrentCapture, TSharedPtr<IVoiceCapture> NewCapture)
@@ -97,7 +139,7 @@ bool MDVoiceDeviceRouting::ReplaceCapture(TSharedPtr<IVoiceCapture>& CurrentCapt
 }
 
 MDVoiceDeviceRouting::EApplyResult MDVoiceDeviceRouting::ApplyInputDevice(UWorld* World, FString DeviceId,
-	FString& AppliedDeviceId, TWeakPtr<IVoiceCapture>& AppliedCapture)
+	FString& AppliedDeviceId, TWeakPtr<IVoiceCapture>& AppliedCapture, TWeakPtr<FVoiceEngineImpl, ESPMode::ThreadSafe>& AppliedEngine)
 {
 	// 월드별 PIE 인스턴스와 실제 게임의 온라인 서브시스템 조회
 	IOnlineSubsystem* Subsystem = Online::GetSubsystem(World);
@@ -145,6 +187,8 @@ MDVoiceDeviceRouting::EApplyResult MDVoiceDeviceRouting::ApplyInputDevice(UWorld
 		// 초기화 대기 결과 반환
 		return Result;
 	}
+	// 입력 장치 변경 실패와 무관하게 종료 월드 정리에 사용할 기존 엔진 보관
+	AppliedEngine = Engine;
 	// 네트워크 음성에서 실제 읽는 캡처 참조 조회
 	TSharedPtr<IVoiceCapture>& CurrentCapture = GetCapture(*Engine);
 	// 장치 ID뿐 아니라 음성 엔진 재생성 여부를 포함한 중복 적용 검사
