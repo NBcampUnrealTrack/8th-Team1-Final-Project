@@ -218,6 +218,9 @@ protected:
 		meta = (ClampMin = "0.1", ClampMax = "1.0", UIMin = "0.1", UIMax = "1.0"))
 	float FirstPersonRenderScale = 0.8f;
 
+	// Crowbar presentation moves the visible arms only; restore before another tool or pose update.
+	TOptional<FTransform> CrowbarArmsBaseRelativeTransform;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Stain", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UMD_StainScraperComponent> StainScraperComponent;
 

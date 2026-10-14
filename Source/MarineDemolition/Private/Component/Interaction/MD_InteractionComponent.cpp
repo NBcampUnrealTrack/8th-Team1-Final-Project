@@ -11,6 +11,7 @@
 #include "Data/Equipment/MD_ConsumeItemDefinition.h"
 #include "Component/Facility/MD_FacilityRepairComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "World/Door/MD_DoorFaultComponent.h"
 #include "World/Wall/MD_PowerConduit.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
@@ -282,6 +283,18 @@ FText UMD_InteractionComponent::ResolveAbilityInteractionPrompt() const
 	{
 		return FText::GetEmpty();
 	}
+	if (Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Crowbar))
+	{
+		FVector Origin; FRotator Rotation;
+		OwnerPawn->GetController()->GetPlayerViewPoint(Origin, Rotation);
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(CrowbarPrompt), true, OwnerPawn);
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Origin, Origin + Rotation.Vector() * AbilityPromptTraceDistance, ECC_Visibility, Params))
+			if (const UMD_DoorFaultComponent* Door = Hit.GetActor() ? Hit.GetActor()->FindComponentByClass<UMD_DoorFaultComponent>() : nullptr;
+				Door && Door->CanReachForRepair(OwnerPawn))
+				return NSLOCTEXT("MDInteraction", "CrowbarDoorRepair", "[E] 강제 개방·수리 (빠루 · 영구 사용)");
+		return FText::GetEmpty();
+	}
 
 	const bool bCutTool =
 		Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_WallCut);
@@ -453,6 +466,12 @@ void UMD_InteractionComponent::Interact()
 		return;
 	}
 
+	// Crowbar uses the same interaction input as doors, not the primary tool button.
+	if (TryUseCrowbar())
+	{
+		HoldInteractionTarget.Reset();
+		return;
+	}
 	AActor* Target = CurrentTarget.Get();
 	if(const auto* Control=Cast<AMD_RepairInstructionControl>(Target))
 		if(Control->ControlKind==EMD_InstructionControlKind::Restart) return;
@@ -1479,6 +1498,32 @@ bool UMD_InteractionComponent::TryUseFacilityTape()
 	if (!Repair || !Repair->bAllowInsulationTape || !Repair->HasRepairFault()) return false;
 	ServerRepairFacilityWithTape(Hit.GetActor(), Repair->GetRepairSnapshot().FaultId);
 	return true;
+}
+
+bool UMD_InteractionComponent::TryUseCrowbar()
+{
+	APawn* Pawn = GetOwnerPawn();
+	const UMD_EquipHotbarComponent* Hotbar = IsValid(Pawn) ? Pawn->FindComponentByClass<UMD_EquipHotbarComponent>() : nullptr;
+	const UMD_ToolDefinition* Tool = Hotbar ? Hotbar->GetCurrentTool() : nullptr;
+	if (!CanOwnerInteract() || IsHolding() || !IsValid(Tool)
+		|| !Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Crowbar)) return false;
+	FVector Origin; FRotator Rotation;
+	Pawn->GetController()->GetPlayerViewPoint(Origin, Rotation);
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(CrowbarInput), true, Pawn);
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, Origin, Origin + Rotation.Vector() * AbilityPromptTraceDistance, ECC_Visibility, Params)) return false;
+	UMD_DoorFaultComponent* Door = IsValid(Hit.GetActor()) ? Hit.GetActor()->FindComponentByClass<UMD_DoorFaultComponent>() : nullptr;
+	if (!Door || !Door->CanReachForRepair(Pawn)) return false;
+	ServerRepairDoorWithCrowbar(Hit.GetActor(), Door->GetSnapshot().FaultId);
+	return true;
+}
+
+void UMD_InteractionComponent::ServerRepairDoorWithCrowbar_Implementation(AActor* Target, int32 ExpectedFaultId)
+{
+	APawn* Pawn = GetOwnerPawn();
+	if (!IsValid(Target) || !IsValid(Pawn) || !Pawn->HasAuthority()) return;
+	if (UMD_DoorFaultComponent* Door = Target->FindComponentByClass<UMD_DoorFaultComponent>())
+		Door->TryRepairWithCrowbar(Pawn, ExpectedFaultId);
 }
 
 void UMD_InteractionComponent::ServerRepairFacilityWithTape_Implementation(AActor* Target, int32 ExpectedFaultId)

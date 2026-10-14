@@ -20,6 +20,8 @@ public:
 	virtual bool CanReceiveRandomFault() const override;
 	/** A possessed player must be inside a tagged repair-room box; not just near the doorway. */
 	bool HasRepairRoomOccupant() const;
+	/** Both sides; validates the equipped tool, aimed surface and incident on the server. */
+	bool TryRepairWithCrowbar(APawn* Pawn, int32 ExpectedFaultId);
 	static const FString RepairRoomTagPrefix;
 	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
 protected:

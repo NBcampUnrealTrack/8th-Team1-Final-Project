@@ -297,6 +297,16 @@ void AMD_Character::BeginPlay()
 
 void AMD_Character::ConfigureFirstPersonRendering()
 {
+	for (UPrimitiveComponent* ViewMesh : {static_cast<UPrimitiveComponent*>(FirstPersonMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonToolMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonCutterBlade.Get())})
+	{
+		if (IsValid(ViewMesh))
+		{
+			ViewMesh->SetOnlyOwnerSee(true);
+			ViewMesh->SetHiddenInSceneCapture(true);
+		}
+	}
 	if (IsValid(FirstPersonMesh))
 	{
 		FirstPersonMesh->SetReceivesDecals(false);
@@ -351,8 +361,23 @@ void AMD_Character::Tick(float DeltaSeconds)
 	// 로컬 여부를 가리지 않고 모든 클라이언트에서 갱신한다.
 	UpdateCutterBladeSpin(DeltaSeconds);
 
-	// 1인칭 팔과 도구는 해당 캐릭터를 직접 조작하는 로컬 플레이어만 갱신한다.
-	if (IsLocallyControlled() == true)
+	// OnlyOwnerSee also admits cameras owned by this pawn. Explicitly hide the
+	// viewmodel when viewing the body, spectating, or ejecting from PIE.
+	const APlayerController* ViewController = Cast<APlayerController>(GetController());
+	const bool bFirstPersonView = IsLocallyControlled() && IsValid(ViewController)
+		&& ViewController->GetViewTarget() == this && !bLocalThirdPersonViewEnabled;
+	for (UPrimitiveComponent* ViewMesh : {static_cast<UPrimitiveComponent*>(FirstPersonMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonToolMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonCutterBlade.Get())})
+	{
+		if (IsValid(ViewMesh)) ViewMesh->SetHiddenInGame(!bFirstPersonView, false);
+	}
+	if (CrowbarArmsBaseRelativeTransform.IsSet() && IsValid(FirstPersonMesh))
+	{
+		FirstPersonMesh->SetRelativeTransform(CrowbarArmsBaseRelativeTransform.GetValue());
+		CrowbarArmsBaseRelativeTransform.Reset();
+	}
+	if (bFirstPersonView)
 	{
 		UpdateFirstPersonArms(DeltaSeconds);
 		UpdateFirstPersonToolTransform(DeltaSeconds);
@@ -913,6 +938,19 @@ void AMD_Character::UpdateFirstPersonToolTransform(const float DeltaSeconds)
 		BodyMesh->GetSocketTransform(AttachSocketName, RTS_Component);
 	const FTransform Offset =
 		GetToolAttachTransform(FirstPersonToolMesh->GetStaticMesh(), CurrentItem);
+	const UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(CurrentItem);
+	const bool bCrowbar = IsValid(Tool)
+		&& Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Crowbar)
+		&& FirstPersonToolMesh->IsVisible() && !FirstPersonToolMesh->bHiddenInGame && IsValid(Camera);
+	if (bCrowbar)
+	{
+		CrowbarArmsBaseRelativeTransform = FirstPersonMesh->GetRelativeTransform();
+		// Copy the actual third-person pose and its frame, without inventing a wrist pose.
+		BindFirstPersonArmsToBodyPose();
+		FirstPersonMesh->SetWorldTransform(BodyMesh->GetComponentTransform());
+		FirstPersonToolMesh->SetWorldTransform(ThirdPersonToolMesh->GetComponentTransform());
+		return;
+	}
 
 	// 부모가 피벗(값이 확정적인 SceneComponent)이므로 월드로 지정해도 역산 기준이
 	// 흔들리지 않는다. 컴포넌트 계층이 어떻게 구성돼 있든 결과가 같도록
