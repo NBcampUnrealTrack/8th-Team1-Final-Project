@@ -3,6 +3,7 @@
 #include "UI/Game/MD_ReticleWidget.h"
 
 #include "Character/MD_Character.h"
+#include "Component/Interaction/MD_GlassDrawingFocusComponent.h"
 #include "Components/Image.h"
 
 UMD_ReticleWidget::UMD_ReticleWidget(const FObjectInitializer& ObjectInitializer)
@@ -41,6 +42,8 @@ void UMD_ReticleWidget::UpdateCenterReticleVisibility()
 	}
 
 	const bool bVisible = CachedCharacter.IsValid()
+		&& (!CachedCharacter->GetGlassDrawingFocusComponent()
+			|| !CachedCharacter->GetGlassDrawingFocusComponent()->IsFocusActive())
 		&& IsValid(Img_CenterReticle->GetBrush().GetResourceObject());
 	// Hidden preserves the authored layout when the owning pawn is unavailable.
 	const ESlateVisibility CenterVisibility = bVisible
