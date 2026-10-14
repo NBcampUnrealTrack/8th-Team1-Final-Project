@@ -1,5 +1,7 @@
 #include "World/Equipment/MD_EquipmentPickup.h"
 
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Data/Equipment/MD_ItemDefinition.h"
@@ -10,6 +12,10 @@
 
 AMD_EquipmentPickup::AMD_EquipmentPickup()
 {
+	// 투척 도구와 아이템에 공통 적용할 유형 선택 컴포넌트 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 월드에 놓인 인벤토리 항목의 기본 줍기 안내 선택
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::Pickup;
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	SetReplicateMovement(true);
@@ -145,8 +151,8 @@ FText AMD_EquipmentPickup::GetInteractionDisplayName_Implementation() const
 
 FText AMD_EquipmentPickup::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
-	static_cast<void>(Interactor);
-	return NSLOCTEXT("MDInteraction", "EquipmentPickupPrompt", "줍기");
+	// 선택한 유형과 현재 적용 입력 키를 사용하는 줍기 안내 반환
+	return UMD_InteractionPresentationLibrary::FindActorActionPrompt(this, Interactor);
 }
 
 bool AMD_EquipmentPickup::CanInteract_Implementation(AActor* Interactor) const

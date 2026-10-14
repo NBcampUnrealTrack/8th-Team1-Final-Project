@@ -28,6 +28,8 @@ class UMD_ScannerComponent;
 class UGameplayAbility;
 class UMD_EquipHotbarComponent;
 class UMD_ThrowComponent;
+class UMD_GlassMarkerComponent;
+class UMD_GlassDrawingFocusComponent;
 class UMD_AudioRelayComponent;
 class UMD_ToolDefinition;
 class UMD_ItemDefinition;
@@ -88,6 +90,15 @@ public:
 	UFUNCTION(BlueprintPure, Category = "Throw")
 	UMD_ThrowComponent* GetThrowComponent() const { return ThrowComponent; }
 
+	UFUNCTION(BlueprintPure, Category = "Glass Marker")
+	UMD_GlassMarkerComponent* GetGlassMarkerComponent() const { return GlassMarkerComponent; }
+
+	UFUNCTION(BlueprintPure, Category = "Glass|Desk")
+	UMD_GlassDrawingFocusComponent* GetGlassDrawingFocusComponent() const { return GlassDrawingFocusComponent; }
+
+	/** Refresh the temporary desk marker or restore the selected inventory item. */
+	void RefreshDrawingToolPresentation();
+
 	UFUNCTION(BlueprintPure, Category = "MD|Audio")
 	UMD_AudioRelayComponent* GetAudioRelayComponent() const { return AudioRelayComponent; }
 
@@ -140,7 +151,7 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Scrape|Animation")
 	float PlayBarnacleScrapeMontage();
 
-	/** UI·앱 비활성화·외부 시스템이 입력을 가져가기 전에 오염물 타격을 취소한다. */
+	/** Existing cancellation hook also ends held glass marker/eraser use before input changes owners. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Stain")
 	void CancelScrapeInteraction();
 
@@ -177,8 +188,12 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Customization")
 	const FMD_CharacterAppearance& GetAppliedAppearance() const { return AppliedAppearance; }
 
+	/** 현재 플레이어 화면에서 본인 이름표만 제외하기 위한 컴포넌트 조회. */
+	UWidgetComponent* GetNameTagWidgetComponent() const { return NameTagWidgetComponent; }
+
 	/** 거울 앞에서 로컬 플레이어가 자기 3인칭 몸을 보고 1인칭 팔은 숨기도록 전환한다. */
 	void SetLocalThirdPersonViewEnabled(bool bEnabled);
+	bool IsLocalThirdPersonViewEnabled() const { return bLocalThirdPersonViewEnabled; }
 protected:
 	/** 1인칭 프리미티브의 실제 월드 위치를 렌더에 보이는 위치(카메라 기준 FirstPersonScale·FOV 보정)로 변환한다. */
 	FVector ToFirstPersonApparentWorldLocation(const FVector& WorldLocation) const;
@@ -232,6 +247,12 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
 	TObjectPtr<UMD_ThrowComponent> ThrowComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_GlassMarkerComponent> GlassMarkerComponent;
+
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
+	TObjectPtr<UMD_GlassDrawingFocusComponent> GlassDrawingFocusComponent;
 
 	/** 도구 작업음을 다른 클라이언트에게 중계한다 */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
@@ -378,9 +399,17 @@ private:
 	bool bInstructionClickCaptured=false;
 	void HandleScannerModeSwitchInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
+	// 폼건 RMB 조준. 누르면 궤적 프리뷰·조준 자세, 떼면 해제. 폼건이 아니면 무시한다
+	void HandleAimStartedInput(const FInputActionValue& Value);
+	void HandleAimReleasedInput(const FInputActionValue& Value);
+	// 도구 전환·운반 시작 등 입력 밖 경로에서도 조준 상태를 정리한다
+	void EndFoamAiming();
 	void HandleThrowStartedInput(const FInputActionValue& Value);
 	void HandleThrowReleasedInput(const FInputActionValue& Value);
 	void HandleThrowCanceledInput(const FInputActionValue& Value);
+	void HandleGlassMarkerEraseStartedInput(const FInputActionValue& Value);
+	void HandleGlassMarkerEraseReleasedInput(const FInputActionValue& Value);
+	void HandleGlassMarkerColorCycleInput(const FInputActionValue& Value);
 	void HandleSwapEquipmentInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimInput(const FInputActionValue& Value);
 	void HandleJumpOrSwimReleasedInput(const FInputActionValue& Value);
@@ -401,11 +430,18 @@ private:
 	UFUNCTION()
 	void HandleHotbarChanged();
 
+	UFUNCTION()
+	void HandleGlassMarkerModeChanged(bool bErasing);
+
+	UFUNCTION()
+	void HandleGlassMarkerInkColorChanged(uint8 ColorIndex, FLinearColor Color);
+
 	/** 운반 시작·종료에 맞춰 도구 메시를 내리고 다시 든다 */
 	UFUNCTION()
 	void HandleHeldActorChanged(AActor* HeldActor);
 
 	void RefreshToolMesh();
+	UMD_ItemDefinition* GetPresentedItemDefinition() const;
 
 	/**
 	 * 절단기 톱날 메시와 표시 여부를 확정한다. 도구 메시가 바뀔 때마다 불러야
@@ -416,6 +452,7 @@ private:
 	/** 절단 중일 때만 톱날을 돌린다. Tick 에서 부른다 */
 	void UpdateCutterBladeSpin(float DeltaSeconds);
 	void RefreshToolVisual();
+	void RefreshGlassMarkerInkIndicator();
 
 	UFUNCTION()
 	void OnRep_CutterVFXActive();

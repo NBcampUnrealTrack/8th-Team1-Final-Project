@@ -19,6 +19,10 @@
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/Pawn.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
+#include "Gameplay/Interaction/MD_InteractionSettings.h"
+#include "Gameplay/Settings/MD_ControlSettingCategory.h"
+#include "Gameplay/Settings/MD_SettingsManager.h"
 #include "HAL/IConsoleManager.h"
 #include "EngineUtils.h"
 #include "TimerManager.h"
@@ -691,12 +695,76 @@ FText AMD_RepairInstructionControl::GetInteractionDisplayName_Implementation() c
 	return FText::Format(NSLOCTEXT("MDInstruction","Knob","차단기 {0}열"),FText::AsNumber(Column+1));
 }
 
-FText AMD_RepairInstructionControl::GetInteractionPrompt_Implementation(AActor*) const
+FText AMD_RepairInstructionControl::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
-	if(!IsValid(Controller) || !Controller->State.bActive) return NSLOCTEXT("MDInstruction","Idle","전력 정상");
-	if(ControlKind==EMD_InstructionControlKind::Restart) return NSLOCTEXT("MDInstruction","RestartClickPrompt","[좌클릭] 정답 변경 · 문 열기");
-	if(ControlKind==EMD_InstructionControlKind::Guide) return NSLOCTEXT("MDInstruction","GuidePrompt","[E] 지침 사용 · 다인 플레이 시 문 잠금");
-	return FText::Format(NSLOCTEXT("MDInstruction","KnobPrompt","[E] 다음 칸 · 현재 위에서 {0}칸"),FText::AsNumber(Controller->State.CurrentRows.IsValidIndex(Column)?Controller->State.CurrentRows[Column]+1:1));
+	// 수리 사건이 없는 장치의 정상 상태 안내 유지
+	if (IsValid(Controller) == false || Controller->State.bActive == false)
+	{
+		// 비활성 상태에서는 조작 행동 대신 전력 상태 표시
+		return NSLOCTEXT("MDInstruction", "Idle", "전력 정상");
+	}
+	// 재시작 장치에 지정된 행동 유형 선택
+	if (ControlKind == EMD_InstructionControlKind::Restart)
+	{
+		// 유형별 행동 문구를 소유한 프로젝트 설정 조회
+		const UMD_InteractionSettings* PromptSettings = UMD_InteractionSettings::Get();
+		// 설정 준비 실패 시 잘못된 안내 표시 방지
+		if (IsValid(PromptSettings) == false)
+		{
+			// 조회할 수 없는 행동 문구의 안내 생략
+			return FText::GetEmpty();
+		}
+		// 빈 문구 검사와 입력 안내 결합에서 사용할 재시작 행동 보관
+		FText ActionPrompt = PromptSettings->GetPromptText(RestartPromptType);
+		// 표시 안 함 유형과 빈 문구 설정 존중
+		if (ActionPrompt.IsEmpty() == true)
+		{
+			// 행동 문구가 없는 경우 입력 키만 남는 상황 방지
+			return FText::GetEmpty();
+		}
+		// 기본 재시작 입력인 도구 사용 키 준비
+		FKey AbilityKey = EKeys::LeftMouseButton;
+		// 현재 플레이어에게 적용된 입력 설정 조회
+		UMD_SettingsManager* Settings = UMD_SettingsManager::Get(Interactor);
+		// 설정 관리자 준비 여부 확인
+		if (IsValid(Settings) == true)
+		{
+			// 편집 중인 값과 구분되는 적용 입력 카테고리 조회
+			UMD_ControlSettingCategory* Controls = Settings->GetControlSettings();
+			// 적용 입력 카테고리 준비 여부 확인
+			if (IsValid(Controls) == true)
+			{
+				// 실제 재시작 조작에 연결된 도구 사용 키 보관
+				FKey AppliedKey = Controls->GetAppliedSettings().AbilityKey;
+				// 유효한 재지정 키만 기본 입력에 우선 적용
+				if (AppliedKey.IsValid() == true)
+				{
+					// 화면 안내와 실제 재시작 입력의 일치
+					AbilityKey = AppliedKey;
+				}
+			}
+		}
+		// 기본 좌클릭 표현과 재지정 키 이름을 반영한 행동 안내 반환
+		return FText::Format(NSLOCTEXT("MDInstruction", "TypedRestartClickPrompt", "[{0}] {1}"),
+			AbilityKey == EKeys::LeftMouseButton ? NSLOCTEXT("MDInstruction", "LeftMouseButton", "좌클릭") : AbilityKey.GetDisplayName(false), ActionPrompt);
+	}
+	// 지침 장치에 지정된 행동 유형 선택
+	if (ControlKind == EMD_InstructionControlKind::Guide)
+	{
+		// 현재 입력 키와 지침 행동의 설정 문구 반환
+		return UMD_InteractionPresentationLibrary::FindActionPromptByType(GuidePromptType, Interactor);
+	}
+	// 노브 행동의 설정 문구를 빈 안내 검사와 현재 행 표시에서 공유
+	FText ActionPrompt = UMD_InteractionPresentationLibrary::FindActionPromptByType(KnobPromptType, Interactor);
+	// 표시 안 함 유형이나 비어 있는 설정 문구 존중
+	if (ActionPrompt.IsEmpty() == true)
+	{
+		// 행동 문구가 없는 경우 부가 행 정보도 생략
+		return FText::GetEmpty();
+	}
+	// 기존 노브 행 위치를 선택한 행동 문구 뒤에 표시
+	return FText::Format(NSLOCTEXT("MDInstruction", "TypedKnobPrompt", "{0} · 현재 위에서 {1}칸"), ActionPrompt,
+		FText::AsNumber(Controller->State.CurrentRows.IsValidIndex(Column) ? Controller->State.CurrentRows[Column] + 1 : 1));
 }
 
 #if !UE_BUILD_SHIPPING

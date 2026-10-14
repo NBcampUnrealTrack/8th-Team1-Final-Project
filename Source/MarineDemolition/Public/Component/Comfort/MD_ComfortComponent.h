@@ -39,6 +39,9 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Comfort")
 	FVector2D ShapeLookInput(const FVector2D& RawLookInput);
 
+	/** A fixed desk view must not inherit delayed rotations from ordinary look input. */
+	void ResetPendingLookInput();
+
 protected:
 	virtual void BeginPlay() override;
 

@@ -154,10 +154,11 @@ void UMD_ScannerComponent::PresentLocalScan(uint32 RequestId, EMD_ScanMode Mode,
 	const APawn* Pawn = Cast<APawn>(GetOwner());
 	if (!Pawn || !Pawn->IsLocallyControlled() || RequestId != ActiveRequestId
 		|| !MDScanning::IsValidMode(Mode) || Mode != ScanMode || !FMath::IsFinite(Duration) || Duration <= 0
-		|| Targets.IsEmpty() || !GetWorld()) return;
+		|| !GetWorld()) return;
 
 	ActiveCollection = Collection;
 	bScanVisible = true;
+	// 대상이 없어도 스윕·펄스는 그대로 재생한다. 별도 알림 문구는 띄우지 않는다
 	for (AActor* Target : Targets)
 	{
 		if (!IsValid(Target)) continue;

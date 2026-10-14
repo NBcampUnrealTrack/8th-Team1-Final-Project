@@ -3,6 +3,8 @@
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
+#include "Character/MD_Character.h"
+#include "Component/Interaction/MD_GlassDrawingFocusComponent.h"
 #include "Audio/MD_AudioSubsystem.h"
 #include "Camera/CameraComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
@@ -183,6 +185,13 @@ FText UMD_InteractionComponent::ResolveCurrentInteractionPrompt() const
 		|| !CanOwnerInteract())
 	{
 		return FText::GetEmpty();
+	}
+
+	const AMD_Character* Character = Cast<AMD_Character>(OwnerPawn);
+	const UMD_GlassDrawingFocusComponent* DrawingFocus = Character ? Character->GetGlassDrawingFocusComponent() : nullptr;
+	if (IsValid(DrawingFocus) && DrawingFocus->IsFocusActive())
+	{
+		return NSLOCTEXT("MDInteraction", "GlassDeskControls", "[좌클릭] 그리기 · [우클릭] 지우기 · [R] 색 변경 · [E] 나가기");
 	}
 
 	const FText AbilityPrompt = ResolveAbilityInteractionPrompt();

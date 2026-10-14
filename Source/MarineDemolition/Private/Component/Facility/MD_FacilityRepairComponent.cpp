@@ -9,6 +9,7 @@
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Internationalization/Internationalization.h"
 #include "TimerManager.h"
@@ -155,21 +156,51 @@ FText UMD_FacilityRepairComponent::GetRepairPrompt(APawn* Requester) const
 			? NSLOCTEXT("MDInteraction", "FacilityNeedsTape", "고장 · 절연테이프로 수리")
 			: NSLOCTEXT("MDInteraction", "FacilityNeedsFoam", "고장 · 폼건으로 수리");
 	}
-	// 수동 수리 입력과 실제 허용된 절연테이프 사용 안내
-	const FText Pattern = bAllowInsulationTape == true
-		? NSLOCTEXT("MDInteraction", "FacilityManualRepair", "[E 유지] 수리 {0}% · 절연테이프 사용 가능")
-		: NSLOCTEXT("MDInteraction", "FacilityManualOnlyRepair", "[E 유지] 수리 {0}%");
-	const FCultureRef Locale = FInternationalization::Get().GetCurrentLocale();
-	if (!bHasCachedManualRepairPrompt || CachedManualRepairPercent != DisplayedPercent
-		|| CachedManualRepairLocale.Get() != &Locale.Get()
-		|| !CachedManualRepairPattern.IdenticalTo(Pattern))
+	// 요청자를 생략한 조회에서도 현재 월드의 입력 설정을 찾을 컨텍스트 선택
+	UObject* WorldContextObject = GetOwner();
+	// 실제 요청자가 있는 경우 해당 플레이어의 월드 우선 적용
+	if (IsValid(Requester) == true)
 	{
-		CachedManualRepairPrompt = FText::Format(Pattern, FText::AsNumber(DisplayedPercent));
+		// 수리 안내를 조회한 플레이어의 컨텍스트 사용
+		WorldContextObject = Requester;
+	}
+	// 선택 유형의 공용 문구에 요청자의 실제 상호작용 키 적용
+	FText ActionPrompt = UMD_InteractionPresentationLibrary::FindActionPromptByType(ManualRepairPromptType, WorldContextObject);
+	// 숨김 유형이나 빈 설정에서 진행률만 행동 안내로 남는 상황 방지
+	if (ActionPrompt.IsEmpty() == true)
+	{
+		// 다시 표시할 때 현재 설정을 반영할 캐시 무효화
+		bHasCachedManualRepairPrompt = false;
+		// 명시적으로 비워진 수동 수리 안내 생략
+		return FText::GetEmpty();
+	}
+	// 현재 허용된 절연테이프와 홀드 입력을 포함하는 상태 문구 선택
+	FText Pattern = bAllowInsulationTape == true
+		? NSLOCTEXT("MDInteraction", "FacilityTypedManualRepair", "{0} (길게 누르기) {1}% · 절연테이프 사용 가능")
+		: NSLOCTEXT("MDInteraction", "FacilityTypedManualOnlyRepair", "{0} (길게 누르기) {1}%");
+	// 언어 변경 시 진행률과 번역을 다시 조합할 현재 로캘 조회
+	FCultureRef Locale = FInternationalization::Get().GetCurrentLocale();
+	// 상태와 유형 및 실제 표시 문구가 같으면 이전 최종 문구 재사용
+	if (bHasCachedManualRepairPrompt == false || CachedManualRepairPercent != DisplayedPercent
+		|| CachedManualRepairPromptType != ManualRepairPromptType || CachedManualRepairLocale.Get() != &Locale.Get()
+		|| CachedManualRepairPattern.IdenticalTo(Pattern) == false || CachedManualRepairActionPrompt.EqualTo(ActionPrompt) == false)
+	{
+		// 공용 행동 문구와 현재 수리 진행률의 결합
+		CachedManualRepairPrompt = FText::Format(Pattern, ActionPrompt, FText::AsNumber(DisplayedPercent));
+		// 다음 조회에서 비교할 표시 진행률 보관
 		CachedManualRepairPercent = DisplayedPercent;
+		// 설정 문구와 키 변경을 감지할 마지막 행동 안내 보관
+		CachedManualRepairActionPrompt = ActionPrompt;
+		// 액터의 수동 수리 유형 변경 감지를 위한 선택값 보관
+		CachedManualRepairPromptType = ManualRepairPromptType;
+		// 절연테이프 지원 여부와 번역 변경 감지를 위한 서식 보관
 		CachedManualRepairPattern = FTextSnapshot(Pattern);
+		// 언어 변경 감지를 위한 마지막 로캘 보관
 		CachedManualRepairLocale = Locale;
+		// 현재 상태에 맞는 최종 안내 캐시의 준비 완료
 		bHasCachedManualRepairPrompt = true;
 	}
+	// 상태 변경이 없으면 재조합 없이 이전 안내 반환
 	return CachedManualRepairPrompt;
 }
 

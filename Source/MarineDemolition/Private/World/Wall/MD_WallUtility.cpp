@@ -1,4 +1,5 @@
 #include "World/Wall/MD_WallUtility.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
 
 #include "Character/MD_Character.h"
 #include "Component/Facility/MD_FacilityRepairComponent.h"
@@ -14,6 +15,11 @@
 
 AMD_WallUtility::AMD_WallUtility()
 {
+	// 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::Repair;
+
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	SetReplicateMovement(false);

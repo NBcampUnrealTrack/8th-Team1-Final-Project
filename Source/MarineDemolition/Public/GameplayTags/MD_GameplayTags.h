@@ -25,6 +25,9 @@ namespace MDGameplayTags
 	/** Permanent emergency tool for broken ordinary doors. */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_UtilityRepair_Crowbar);
 
+	/** Shared glass drawing and rear eraser tool use. */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_UtilityRepair_GlassMarker);
+
 
 	/** 물리 보관함에 담을 수 있는 내용물 분류의 공통 루트 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Resource_Storage_Content);

@@ -7,6 +7,8 @@
 #include "GameFramework/Actor.h"
 #include "MD_SectorCloseoutMarker.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 // 섹터 구역 마감 제출 마커. 제출 시 평가 +40, 마감 상태는 Day 간 유지 (기획 02 §3)
 UCLASS()
 class MARINEDEMOLITION_API AMD_SectorCloseoutMarker : public AActor, public IMD_Interactable
@@ -17,6 +19,7 @@ public:
 	AMD_SectorCloseoutMarker();
 
 	virtual bool RequiresServerInteraction_Implementation() const override { return false; }
+	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
 	virtual void Interact_Implementation(AActor* Interactor) override;
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
 
@@ -27,6 +30,10 @@ public:
 	void RestoreClosed(bool bWasClosed = true);
 
 	bool IsClosed() const { return bClosed; }
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	// 마감 시 비주얼 훅 (마커 색 변경 등)

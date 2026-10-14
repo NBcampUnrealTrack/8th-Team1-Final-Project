@@ -8,6 +8,8 @@
 #include "Types/Trash/MD_TrashTypes.h"
 #include "MD_TrashItem.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class UStaticMeshComponent;
 class AMD_TrashSpawnVolume;
 
@@ -73,6 +75,10 @@ public:
 	virtual void PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent) override;
 	virtual void PostEditUndo() override;
 #endif
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	/** 배치 인스턴스에서 종류를 바꿔도 에디터에 바로 반영되게 한다 */

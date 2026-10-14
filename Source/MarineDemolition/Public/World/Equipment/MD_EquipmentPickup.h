@@ -7,6 +7,7 @@
 #include "MD_EquipmentPickup.generated.h"
 
 class UBoxComponent;
+class UMD_InteractionPromptComponent;
 class UPrimitiveComponent;
 class UStaticMeshComponent;
 
@@ -41,6 +42,10 @@ public:
 
 protected:
 	virtual void BeginPlay() override;
+
+	// 액터에서 선택하고 공용 설정에서 문구를 관리하는 안내 유형
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Equipment")
 	TObjectPtr<UBoxComponent> PhysicsRoot;

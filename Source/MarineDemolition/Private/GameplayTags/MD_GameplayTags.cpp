@@ -34,6 +34,11 @@ namespace MDGameplayTags
 		"Ability.UtilityRepair.Insulation",
 		"절연테이프 배선 수리 능력");
 
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Ability_UtilityRepair_GlassMarker,
+		"Ability.UtilityRepair.GlassMarker",
+		"Shared glass marker and rear eraser ability");
+
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
 		Resource_Storage_Content,

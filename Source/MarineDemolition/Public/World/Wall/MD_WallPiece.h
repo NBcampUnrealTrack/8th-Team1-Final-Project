@@ -9,6 +9,8 @@
 #include "Gameplay/Trash/MD_TrashSortable.h"
 #include "MD_WallPiece.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 /**
  * 격벽 조각. 절단 시 드랍되며 안 타는 쓰레기로 분류한다.
  * 매일 ~10개가 나와 산재 쓰레기와 맞먹는 분리 대상이다.
@@ -38,6 +40,10 @@ public:
 
 	UPROPERTY(ReplicatedUsing = OnRep_Contaminated, SaveGame, VisibleAnywhere, BlueprintReadOnly, Category = "MD|Wall|Piece")
 	bool bContaminated = false;
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	virtual void BeginPlay() override;
