@@ -9,6 +9,8 @@
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_Merchant.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 struct FStreamableHandle;
 
 class UMD_MerchantMenuWidget;
@@ -76,6 +78,10 @@ public:
 	/** Blueprint가 Push한 대출 화면에 상인 데이터와 도메인 이벤트를 연결하는 함수 */
 	UFUNCTION(BlueprintCallable, Category = "MD|Merchant")
 	void InitializePushedLoan(UMD_LoanWidget* LoanWidget, UMD_MerchantMenuWidget* MenuWidget);
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	virtual void BeginPlay() override;

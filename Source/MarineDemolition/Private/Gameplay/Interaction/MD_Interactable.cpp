@@ -1,6 +1,8 @@
 #include "Gameplay/Interaction/MD_Interactable.h"
 
 #include "UObject/Class.h"
+#include "GameFramework/Actor.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
 
 bool IMD_Interactable::CanInteractWith(const UObject* Target, AActor* Interactor)
 {
@@ -24,4 +26,10 @@ bool IMD_Interactable::CanInteractWith(const UObject* Target, AActor* Interactor
 
 	// Blueprint가 인터페이스만 추가하고 판정 함수를 재정의하지 않았다면 기존 동작을 유지한다.
 	return true;
+}
+
+FText IMD_Interactable::GetInteractionPrompt_Implementation(AActor* Interactor) const
+{
+	// 별도 상태 분기가 없는 액터의 선택 유형 안내 반환
+	return UMD_InteractionPresentationLibrary::FindActorActionPrompt(Cast<AActor>(this), Interactor);
 }

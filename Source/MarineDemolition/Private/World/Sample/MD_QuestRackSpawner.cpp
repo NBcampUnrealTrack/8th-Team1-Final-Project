@@ -1,4 +1,6 @@
 #include "World/Sample/MD_QuestRackSpawner.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
 
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
@@ -22,6 +24,11 @@
 
 AMD_QuestRackSpawner::AMD_QuestRackSpawner()
 {
+	// 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::Collect;
+
 	bReplicates = true;
 	RackQuestDefinitionId = FPrimaryAssetId(FPrimaryAssetType(TEXT("Quest")), FName(TEXT("X7-M01")));
 	RackMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("RackMesh"));
@@ -264,7 +271,8 @@ FText AMD_QuestRackSpawner::GetInteractionPrompt_Implementation(AActor* Interact
 {
 	if (!CanInteract_Implementation(Interactor)) return FText::GetEmpty();
 	if (bCartridgeReleased)
-		return NSLOCTEXT("MDQuestRack", "Collect", "[E] 카트리지 회수");
+		// 회수 가능한 카트리지 행동을 선택된 유형의 문구로 표시
+		return UMD_InteractionPresentationLibrary::FindActorActionPrompt(this, Interactor);
 	if (RackMode == EMD_QuestRackMode::BarnaclesAndPadlock)
 	{
 		return FText::Format(NSLOCTEXT("MDQuestRack", "Lock", "[LMB] 자물쇠 절단 {0}%"), FMath::FloorToInt(GetPadlockCutRatio()*100.f));
