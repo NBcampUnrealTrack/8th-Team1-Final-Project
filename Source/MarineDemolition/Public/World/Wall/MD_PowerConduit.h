@@ -61,6 +61,10 @@ public:
 	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, AdvancedDisplay, Category = "MD|Power|Targets", meta = (UseComponentPicker, AllowAnyActor, AllowedClasses = "/Script/Engine.StaticMeshComponent"))
 	TArray<FComponentReference> MeshComponents;
 
+	/** Slot-specific additions; existing common-slot actor/component groups remain supported. */
+	UPROPERTY(EditInstanceOnly, BlueprintReadWrite, Category="MD|Power|Targets")
+	TArray<FMD_PowerLightTarget> PowerLightTargets;
+
 	// BP 기본값과 배치 액터에서 지정할 모든 대상 메시의 공통 머티리얼 슬롯
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Power|Materials", meta = (ClampMin = "0"))
 	int32 MaterialIndex = 0;

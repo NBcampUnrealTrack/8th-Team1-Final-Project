@@ -42,6 +42,8 @@ public:
 	/** 아바타 위치에서 1회 재생. 아바타가 사라진 뒤에도 남아야 하는 소리 */
 	UFUNCTION(BlueprintCallable, Category = "MD|Audio", meta = (AutoCreateRefTerm = "EventTag"))
 	void PlayAtOwnerLocationForAll(const FGameplayTag& EventTag);
+	/** Server-confirmed action: also play on the owner, who has not predicted this sound. */
+	void PlayConfirmedAtOwnerLocationForAll(const FGameplayTag& EventTag);
 
 	/**
 	 * 태그를 지정한 시간 동안 재생하고 스스로 끊는다.
@@ -74,6 +76,8 @@ private:
 
 	UFUNCTION(NetMulticast, Reliable)
 	void Multicast_PlayAtLocation(const FGameplayTag EventTag, const FVector_NetQuantize Location);
+	UFUNCTION(NetMulticast, Reliable)
+	void Multicast_PlayConfirmedAtLocation(FGameplayTag EventTag, FVector_NetQuantize Location);
 
 	/**
 	 * 이 머신이 이 소리를 이미 직접 냈는지.

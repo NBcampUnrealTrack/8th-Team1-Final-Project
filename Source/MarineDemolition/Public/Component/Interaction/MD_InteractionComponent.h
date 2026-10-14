@@ -9,6 +9,7 @@
 
 class AActor;
 class APawn;
+class AMD_FingerprintPad;
 class UCameraComponent;
 class UPhysicsHandleComponent;
 class UPrimitiveComponent;
@@ -61,6 +62,20 @@ public:
 	bool CanOwnerInteract() const;
 	/** LMB consumable input; requests repair via this owned component, not the unowned facility. */
 	bool TryUseFacilityTape();
+	UFUNCTION(BlueprintCallable, Category="MD|Interaction")
+	bool TryUseCrowbar();
+	/** LMB-only restart button. Returns true when the click is consumed. */
+	UFUNCTION(BlueprintCallable, Category="MD|Interaction")
+	bool TryClickInstructionRestart();
+	/** Revision-bound instruction input, routed through this player's owned RPC endpoint. */
+	void RequestInstructionRepair(class AMD_RepairInstructionControl* Control, int32 ExpectedRevision);
+	void RequestBreakerKnob(class AMD_RepairInstructionController* Breaker, int32 Column, int32 ExpectedRevision);
+	void RequestBeginBreakerOperation(class AMD_RepairInstructionController* Breaker, int32 ExpectedRevision);
+	void RequestBreakerSlot(class AMD_RepairInstructionController* Breaker, int32 Column, int32 Row, int32 ExpectedRevision, int32 OperationId);
+	void RequestEndBreakerOperation(class AMD_RepairInstructionController* Breaker, int32 OperationId);
+	class UMD_BreakerOperateWidget* GetBreakerWidget() const { return BreakerWidget; }
+	void NotifyBreakerWidgetClosed(class UMD_BreakerOperateWidget* Widget);
+	float GetInteractTraceDistance() const { return InteractTraceDistance; }
 
 	/** Releases the held actor on the server. Client calls are intentionally ignored. */
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
@@ -177,6 +192,16 @@ protected:
 
 private:
 	UFUNCTION(Server, Reliable)
+	void ServerInstructionRepair(class AMD_RepairInstructionControl* Control, int32 ExpectedRevision);
+	UFUNCTION(Server, Reliable)
+	void ServerBreakerKnob(class AMD_RepairInstructionController* Breaker, int32 Column, int32 ExpectedRevision);
+	UFUNCTION(Server, Reliable) void ServerBeginBreakerOperation(class AMD_RepairInstructionController* Breaker, int32 ExpectedRevision);
+	UFUNCTION(Client, Reliable) void ClientBeginBreakerOperation(class AMD_RepairInstructionController* Breaker, int32 ExpectedRevision, int32 OperationId);
+	UFUNCTION(Server, Reliable) void ServerBreakerSlot(class AMD_RepairInstructionController* Breaker, int32 Column, int32 Row, int32 ExpectedRevision, int32 OperationId);
+	UFUNCTION(Client, Reliable) void ClientBreakerSlotResult(class AMD_RepairInstructionController* Breaker, int32 OperationId, int32 Column, int32 Row, bool bAccepted);
+	UFUNCTION(Server, Reliable) void ServerEndBreakerOperation(class AMD_RepairInstructionController* Breaker, int32 OperationId);
+	UPROPERTY(Transient) TObjectPtr<class UMD_BreakerOperateWidget> BreakerWidget;
+	UFUNCTION(Server, Reliable)
 	void ServerInteract(AActor* RequestedActor);
 
 	/** 홀드 대상의 키 해제를 서버에 전달한다. 해제는 항상 안전하므로 조준·간격 검증 없이 대상에 그대로 넘긴다. */
@@ -185,7 +210,12 @@ private:
 	UFUNCTION(Server, Reliable)
 	void ServerRepairFacilityWithTape(AActor* Target, int32 ExpectedFaultId);
 	UFUNCTION(Server, Reliable)
+	void ServerRepairDoorWithCrowbar(AActor* Target, int32 ExpectedFaultId);
+	UFUNCTION(Server, Reliable)
 	void ServerBeginFacilityRepair(AActor* Target, int32 ExpectedFaultId);
+	UFUNCTION(Server, Reliable)
+	// 소유 플레이어의 패드 입력과 해당 고장 번호를 서버 판정에 전달
+	void ServerBeginFingerprintScan(AMD_FingerprintPad* Pad, int32 ExpectedFaultId);
 
 	bool TryHoldTarget(AActor* Target);
 	bool TryGrabPhysicsComponent(UPrimitiveComponent* Component, const FVector& PreferredGrabLocation,

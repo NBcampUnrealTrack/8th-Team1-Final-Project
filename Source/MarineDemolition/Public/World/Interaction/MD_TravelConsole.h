@@ -9,6 +9,8 @@
 #include "Types/Travel/MD_TravelTypes.h"
 #include "MD_TravelConsole.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 UCLASS()
 class MARINEDEMOLITION_API AMD_TravelConsole : public AActor, public IMD_Interactable
 {
@@ -31,6 +33,10 @@ public:
 	// 서버가 클라에서 받은 인덱스로 레벨을 되찾는다. 잠긴 현장이거나 범위 밖이면 빈 경로
 	UFUNCTION(BlueprintCallable, Category = "MD|Travel")
 	TSoftObjectPtr<UWorld> ResolveSiteLevel(int32 SiteIndex) const;
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	virtual void BeginPlay() override;

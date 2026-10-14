@@ -34,6 +34,8 @@ class MARINEDEMOLITION_API AMD_PlayerController : public APlayerController
 public:
 	AMD_PlayerController();
 
+	virtual void UpdateHiddenComponents(const FVector& ViewLocation, TSet<FPrimitiveComponentId>& HiddenComponents) override;
+
     // 응답 RPC를 구독하는 로컬 UI 이벤트
     UPROPERTY(BlueprintAssignable, Category = "MD|Score")
     FMD_OnDailyLedgerReceived OnDailyLedgerReceived;
@@ -103,6 +105,7 @@ public:
 	 * 헤라 상호작용을 정리한다. GameOnly 복귀에서도 호출되지만 정리는 멱등이다.
 	 */
 	virtual void SetInputMode(const FInputModeDataBase& InData) override;
+	virtual bool SetPause(bool bPause, FCanUnpause CanUnpauseDelegate = FCanUnpause()) override;
 	/** 입력 초기화가 키 해제로 처리되기 전에 충전 던지기를 취소한다. */
 	virtual void FlushPressedKeys() override;
 	virtual void SetViewTarget(
@@ -158,6 +161,8 @@ public:
 	// 실제 이자 발생 결과를 소유 클라이언트의 기존 HUD에 전달
 	UFUNCTION(Client, Reliable)
 	void ClientNotifyLoanInterest(int32 InterestAmount, int32 DebtBalance, int32 NotificationStage);
+	UFUNCTION(Client, Reliable)
+	void ClientLoanFeedback(bool bBorrow, bool bSuccess);
 
 	// 서버 판정 결과(슬롯 가득 참·전원 없음 등) 한 줄을 소유 클라이언트 HUD 알림에 전달
 	UFUNCTION(Client, Reliable)

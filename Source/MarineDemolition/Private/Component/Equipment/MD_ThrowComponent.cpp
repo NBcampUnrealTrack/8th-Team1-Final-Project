@@ -1,4 +1,6 @@
 #include "Component/Equipment/MD_ThrowComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
+#include "Audio/MD_AudioRelayComponent.h"
 
 #include "AbilitySystemComponent.h"
 #include "Character/MD_Character.h"
@@ -12,6 +14,7 @@
 #include "GameFramework/PlayerController.h"
 #include "Gameplay/Trash/MD_TrashSortable.h"
 #include "World/Equipment/MD_EquipmentPickup.h"
+#include "World/Trash/MD_TrashSorter.h"
 
 UMD_ThrowComponent::UMD_ThrowComponent()
 {
@@ -103,6 +106,7 @@ void UMD_ThrowComponent::BeginThrow()
 	LocalStartedAt = GetWorld()->GetTimeSeconds();
 	if (++LocalRequestId == 0) ++LocalRequestId;
 	bLocalCharging = true;
+	ChargeAudio = MDAudioFeedback::LocalPawn(GetCharacter(), TEXT("SFX.Carry.Hand.ThrowCharge"));
 	RefreshTickEnabled();
 	ServerBeginThrow(LocalRequestId, Held, Tool, Slot);
 }
@@ -136,6 +140,7 @@ float UMD_ThrowComponent::GetChargeFraction() const
 
 void UMD_ThrowComponent::ResetLocalCharge()
 {
+	MDAudioFeedback::Stop(this, ChargeAudio);
 	bLocalCharging = false;
 	LocalHeldActor.Reset();
 	LocalTool.Reset();
@@ -228,7 +233,12 @@ void UMD_ThrowComponent::ServerReleaseThrow_Implementation(uint32 RequestId)
 		+ Character->GetVelocity() * Settings->InheritedVelocityScale;
 	if (Direction.IsNearlyZero() || Velocity.ContainsNaN()) return;
 	const bool bThrown = HeldActor ? ThrowHeldActor(HeldActor, Velocity) : ThrowEquipment(Tool, Slot, Direction, Velocity);
-	if (bThrown) NextServerThrowTime = GetWorld()->GetTimeSeconds() + Settings->ThrowCooldownSeconds;
+	if (bThrown)
+	{
+		NextServerThrowTime = GetWorld()->GetTimeSeconds() + Settings->ThrowCooldownSeconds;
+		if (auto* Relay = Character->GetAudioRelayComponent())
+			Relay->PlayConfirmedAtOwnerLocationForAll(FGameplayTag::RequestGameplayTag(TEXT("SFX.Carry.Hand.Throw"), false));
+	}
 }
 
 bool UMD_ThrowComponent::ThrowHeldActor(AActor* HeldActor, const FVector& Velocity)
@@ -242,6 +252,13 @@ bool UMD_ThrowComponent::ThrowHeldActor(AActor* HeldActor, const FVector& Veloci
 	Primitive->SetPhysicsLinearVelocity(Velocity);
 	Primitive->WakeAllRigidBodies();
 	HeldActor->ForceNetUpdate();
+	// A held item may already overlap the inlet; releasing it does not create another BeginOverlap.
+	TArray<AActor*> Sorters;
+	Primitive->GetOverlappingActors(Sorters, AMD_TrashSorter::StaticClass());
+	for (AActor* Actor : Sorters)
+	{
+		if (CastChecked<AMD_TrashSorter>(Actor)->TryRequestIntake(HeldActor)) break;
+	}
 	return true;
 }
 

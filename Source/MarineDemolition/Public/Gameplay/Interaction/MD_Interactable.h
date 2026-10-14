@@ -39,10 +39,7 @@ public:
 	 */
 	UFUNCTION(BlueprintNativeEvent, BlueprintCallable, Category = "MD|Interaction")
 	FText GetInteractionPrompt(AActor* Interactor) const;
-	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const
-	{
-		return FText::GetEmpty();
-	}
+	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const;
 
 	/**
 	 * 이 Interactor가 현재 대상과 상호작용할 수 있는지.

@@ -2,8 +2,11 @@
 
 #include "Components/BoxComponent.h"
 #include "Components/PrimitiveComponent.h"
+#include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
+#include "GameFramework/PhysicsVolume.h"
 #include "Math/RandomStream.h"
 #include "Math/RotationMatrix.h"
 #include "Misc/Guid.h"
@@ -665,6 +668,21 @@ void AMD_BarnacleSpawner::GatherSurfaceCandidates(
 
 	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MD_BarnacleSpawn), true);
 	QueryParams.AddIgnoredActors(IgnoredActors);
+	// Water's runtime custom mesh can block this project-specific trace even
+	// inside the base. It is not a solid attachment surface. Resolve the optional
+	// plugin class from the loaded world without introducing a Water dependency.
+	if (Cast<AMD_CuttableWall>(GetAttachParentActor()))
+	{
+		// Water/swimming physics brushes can also encompass the entire room.
+		// They define gameplay regions, not geometry that can carry barnacles.
+		for (TActorIterator<APhysicsVolume> It(World); It; ++It)
+			QueryParams.AddIgnoredActor(*It);
+		if (UClass* WaterBodyClass = FindObject<UClass>(nullptr, TEXT("/Script/Water.WaterBody")))
+		{
+			for (TActorIterator<AActor> It(World, WaterBodyClass); It; ++It)
+				QueryParams.AddIgnoredActor(*It);
+		}
+	}
 
 	int32 StalledOriginAttempts = 0;
 	for (int32 OriginAttempt = 0;
@@ -836,6 +854,13 @@ FTransform AMD_BarnacleSpawner::MakeAttachedTransform(
 
 bool AMD_BarnacleSpawner::IsAcceptableSurface(const FHitResult& Hit) const
 {
+	// A spawner attached to a demolition wall authors that wall alone. Keep the
+	// existing unattached room-volume behavior, and leave cuttable walls opt-in.
+	if (const AMD_CuttableWall* Host = Cast<AMD_CuttableWall>(GetAttachParentActor()))
+	{
+		if (Host->IsActorBeingDestroyed() || !Host->GetActorEnableCollision()
+			|| Hit.GetActor() != Host || Hit.GetComponent() != Host->GetScanMesh()) return false;
+	}
 	// 벽과 가구는 모두 허용하지만 기존 기획 제약상 철거 대상 격벽은 기본 제외한다.
 	if (!bAllowCuttableWallSurfaces && Cast<AMD_CuttableWall>(Hit.GetActor()))
 	{

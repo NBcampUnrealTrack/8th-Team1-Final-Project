@@ -1,4 +1,5 @@
 #include "World/Interaction/MD_CustomizationConsole.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
 
 #include "Camera/CameraComponent.h"
 #include "Character/MD_Character.h"
@@ -16,6 +17,11 @@
 
 AMD_CustomizationConsole::AMD_CustomizationConsole()
 {
+	// 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::Customize;
+
 	// 접근 중에만 틱을 켠다
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;

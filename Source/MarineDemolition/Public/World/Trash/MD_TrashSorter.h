@@ -8,7 +8,10 @@
 #include "Types/Facility/MD_FacilityTypes.h"
 #include "MD_TrashSorter.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class UBoxComponent;
+class UPrimitiveComponent;
 class UMaterialInstanceDynamic;
 class UStaticMeshComponent;
 class UStateTreeComponent;
@@ -121,6 +124,12 @@ public:
 	void EndSortingState();
 	bool BeginErrorState();
 
+	/** Server intake, also called after a throw released inside the volume. Queues the same sort as Interact. */
+	bool TryRequestIntake(AActor* Item);
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
+
 protected:
 	/** 배치 인스턴스에서 칸을 바꿔도 에디터에 바로 색이 반영되게 한다 */
 	virtual void OnConstruction(const FTransform& Transform) override;
@@ -171,13 +180,9 @@ protected:
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash")
 	TObjectPtr<UStaticMeshComponent> Mesh;
 
-	/** 기존 BP 참조 호환용 비활성 컴포넌트. 분류 판정에는 사용하지 않는다. */
+	/** 손에서 놓인 쓰레기가 실제 투입구 안에 들어왔는지 서버에서 감지한다. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Trash")
 	TObjectPtr<UBoxComponent> IntakeVolume;
-
-	/** 행동 문구만 지정한다. 기존 Interact 위젯에 필요한 [E] 접두사는 코드에서 붙인다. */
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Trash|Interaction")
-	FText SortActionText;
 
 	/** 담당 칸. 드롭다운에 Bonus.* 도 뜨지만 그건 칸이 아니다 — BeginPlay에서 걸러 경고한다 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, ReplicatedUsing = OnRep_AcceptedCategory, Category = "MD|Trash",
@@ -230,7 +235,14 @@ private:
 	TWeakObjectPtr<AActor> PendingInteractor;
 	TWeakObjectPtr<AActor> PendingItem;
 	bool bHasPendingSortRequest = false;
+	bool bPendingIntake = false;
 
+	UFUNCTION()
+	void HandleIntakeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+		UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+	bool CanAcceptIntakeItem(AActor* Item) const;
+	void RequestOverlappingIntake();
+	void QueueSortRequest(AActor* Item, AActor* Interactor, bool bFromIntake);
 	void ClearPendingSortRequest();
 	void RefreshSortingPresentation();
 

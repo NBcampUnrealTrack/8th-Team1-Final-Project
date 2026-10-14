@@ -1,4 +1,7 @@
 #include "World/Trash/MD_TrashDispenser.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Components/ArrowComponent.h"
 #include "Components/BoxComponent.h"
@@ -9,6 +12,11 @@
 
 AMD_TrashDispenser::AMD_TrashDispenser()
 {
+	// 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::SpawnTrashBin;
+
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	SetReplicateMovement(false);
@@ -100,11 +108,8 @@ void AMD_TrashDispenser::SetInteractionHighlighted_Implementation(bool bHighligh
 
 FText AMD_TrashDispenser::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
-	static_cast<void>(Interactor);
-	return NSLOCTEXT(
-		"MDInteraction",
-		"TrashDispenserPrompt",
-		"[E] 쓰레기 통 소환");
+	// 선택한 행동 유형의 설정 문구와 현재 입력 키 표시
+	return UMD_InteractionPresentationLibrary::FindActorActionPrompt(this, Interactor);
 }
 
 void AMD_TrashDispenser::Interact_Implementation(AActor* Interactor)
@@ -323,6 +328,8 @@ void AMD_TrashDispenser::HandleClearanceEndOverlap(
 void AMD_TrashDispenser::MulticastDispenseResult_Implementation(
 	EMD_TrashDispenseResult Result, APawn* RequestingPawn)
 {
+	if (Result == EMD_TrashDispenseResult::Success) MDAudioFeedback::World(this, TEXT("SFX.Carry.Dispenser.Release"));
+	else MDAudioFeedback::LocalPawn(RequestingPawn, TEXT("SFX.Tool.Interact.Denied"));
 	// 실패 메시지처럼 요청자 화면에만 띄울 연출을 BP가 구분할 수 있게 로컬 여부를 계산해 넘긴다.
 	const bool bIsLocalRequester = IsValid(RequestingPawn) && RequestingPawn->IsLocallyControlled();
 	OnDispenseResult(Result, bIsLocalRequester);

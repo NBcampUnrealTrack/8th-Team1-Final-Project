@@ -18,6 +18,17 @@
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Wall/MD_WallUtility.h"
 
+namespace
+{
+// InternalStructure's unique gather selects this append policy once before the unchanged evaluation loop.
+template <bool bCandidatesUnique, typename Pointee>
+FORCEINLINE void AddAcceptedScanTargetSpecialized(TArray<Pointee*>& Output, Pointee* Value)
+{
+    if constexpr (bCandidatesUnique) Output.Add(Value);
+    else Output.AddUnique(Value);
+}
+}
+
 UMD_GA_WallScan::UMD_GA_WallScan()
 {
 	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
@@ -60,6 +71,8 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 		for (TActorIterator<AMD_WallUtility> It(Pawn->GetWorld()); It; ++It)
 			Candidates.AddUnique(*It);
 	}
+	const auto AppendAcceptedTargets = [&, this]<bool bCandidatesUnique>()
+	{
 	for (AActor* Candidate : Candidates)
 	{
 		if (!IsValid(Candidate) || Candidate->IsHidden()
@@ -98,10 +111,23 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 		else if (!Candidate->GetClass()->ImplementsInterface(UMD_Scannable::StaticClass()))
 			continue;
 		if (MDScanning::SphereIntersectsScanCone(OutOrigin, OutForward, Center, BoundRadius,
-			ScanRadius, ScanConeHalfAngleDegrees)) OutTargets.AddUnique(Candidate);
+			ScanRadius, ScanConeHalfAngleDegrees)) AddAcceptedScanTargetSpecialized<bCandidatesUnique>(OutTargets, Candidate);
 	}
+	};
+	if (Mode == EMD_ScanMode::InternalStructure) AppendAcceptedTargets.operator()<true>();
+	else AppendAcceptedTargets.operator()<false>();
 	UE_LOG(LogTemp, VeryVerbose, TEXT("[Scanner] Find %s mode=%d candidates=%d targets=%d"), *GetNameSafe(Pawn), int32(Mode), Candidates.Num(), OutTargets.Num());
 	return true;
+}
+
+bool UMD_GA_WallScan::CanActivateAbility(const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo, const FGameplayTagContainer* SourceTags,
+	const FGameplayTagContainer* TargetTags, FGameplayTagContainer* OptionalRelevantTags) const
+{
+	if (!Super::CanActivateAbility(Handle, ActorInfo, SourceTags, TargetTags, OptionalRelevantTags)) return false;
+	const UWorld* World = GetWorld();
+	return !World || !FMath::IsFinite(ScanCooldownSeconds) || ScanCooldownSeconds <= 0.f
+		|| World->GetTimeSeconds() >= LastScanStartedAt + ScanCooldownSeconds;
 }
 
 void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
@@ -119,6 +145,8 @@ void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 		return;
 	}
+	// 장비 검사를 통과한 시점부터 쿨타임을 센다. 거절된 활성은 쿨타임을 먹지 않는다
+	if (GetWorld()) LastScanStartedAt = GetWorld()->GetTimeSeconds();
 	PendingHandle = Handle;
 	PendingKey = ActivationInfo.GetActivationPredictionKey();
 	if (ActorInfo->IsNetAuthority() && !ActorInfo->IsLocallyControlled())
@@ -181,13 +209,11 @@ bool UMD_GA_WallScan::PerformScan(EMD_ScanMode Mode, uint32 RequestId)
 	TArray<AActor*> Targets;
 	FVector Origin, Forward;
 	FindScanTargets(Info, Mode, Targets, Origin, Forward);
-	if (!Targets.IsEmpty())
-	{
-		if (Info->IsLocallyControlled())
-			Scanner->PresentLocalScan(RequestId, Mode, Targets, ScanDuration, ScanMPC, Origin,
-				Forward, ScanRadius, ScanConeHalfAngleDegrees);
-		Scanner->PlayScanPulse(RequestId, ScanPulseSoundTag, ScanDuration, ScanPulseFadeOutSeconds);
-	}
+	// 대상이 없어도 스윕·펄스는 재생한다. 무반응이면 플레이어가 고장으로 오해한다
+	if (Info->IsLocallyControlled())
+		Scanner->PresentLocalScan(RequestId, Mode, Targets, ScanDuration, ScanMPC, Origin,
+			Forward, ScanRadius, ScanConeHalfAngleDegrees);
+	Scanner->PlayScanPulse(RequestId, ScanPulseSoundTag, ScanDuration, ScanPulseFadeOutSeconds);
 	return true;
 }
 

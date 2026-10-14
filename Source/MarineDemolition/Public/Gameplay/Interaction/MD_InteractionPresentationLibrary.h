@@ -2,7 +2,10 @@
 
 #include "CoreMinimal.h"
 #include "Kismet/BlueprintFunctionLibrary.h"
+#include "Types/Interaction/MD_InteractionTypes.h"
 #include "MD_InteractionPresentationLibrary.generated.h"
+
+class AActor;
 
 /** 대상 액터의 기존 데이터와 공용 이름표를 한 경로로 해석한다. */
 UCLASS()
@@ -15,11 +18,26 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "MD|Interaction")
 	static bool FindDisplayName(FName InteractionId, FText& OutDisplayName);
 
+	/** 공용 행동 문구에 현재 적용된 상호작용 키를 붙인다. 미지정 행/문구는 빈 값을 반환한다. */
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction", meta = (WorldContext = "WorldContextObject"))
+	static FText FindActionPrompt(FName InteractionId, UObject* WorldContextObject);
+
 	/** 대상 고유 데이터가 있으면 우선 사용하고, 없으면 대상 클래스에 맞는 공용 이름을 반환한다. */
 	UFUNCTION(BlueprintPure, Category = "MD|Interaction")
 	static FText ResolveInteractionDisplayName(const UObject* Target);
 
-private:
+	// 유형별 공용 행동 문구와 현재 적용된 입력 키의 결합
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction", meta = (WorldContext = "WorldContextObject"))
+	static FText FindActionPromptByType(EMD_InteractionPromptType PromptType, UObject* WorldContextObject);
+
+	// 액터에 선택된 프롬프트 유형의 행동 문구 조회
+	UFUNCTION(BlueprintPure, Category = "MD|Interaction", meta = (WorldContext = "WorldContextObject"))
+	static FText FindActorActionPrompt(const AActor* Target, UObject* WorldContextObject);
+
+protected:
+	// 기존 이름표와 새 유형 설정이 공유하는 실제 입력 키 표시
+	static FText FormatActionPrompt(FText ActionPrompt, UObject* WorldContextObject);
+
 	/** 클래스 이름 앞의 프로젝트 접두사(MD_)를 제거한 공용 이름표 ID를 만든다. */
 	static FName MakeShortInteractionId(const UClass* TargetClass);
 };

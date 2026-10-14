@@ -48,11 +48,10 @@ enum class EMD_ShopSaleResult : uint8
 UENUM(BlueprintType)
 enum class EMD_ShopCategory : uint8
 {
+	// 안전·회수 분류는 품목이 없어져 제거했다 (2026-10-14). 남은 값은 이름으로 직렬화되므로 순서 변경에 안전하다
 	Tool			UMETA(DisplayName = "도구"),
-	Safety			UMETA(DisplayName = "안전"),
 	UtilityRepair	UMETA(DisplayName = "유틸 수리"),
-	Survival		UMETA(DisplayName = "생존"),
-	Recovery		UMETA(DisplayName = "회수")
+	Survival		UMETA(DisplayName = "생존")
 };
 
 /**

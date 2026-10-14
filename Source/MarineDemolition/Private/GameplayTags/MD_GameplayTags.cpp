@@ -4,6 +4,7 @@
 
 namespace MDGameplayTags
 {
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_UtilityRepair_Crowbar, "Ability.UtilityRepair.Crowbar", "Permanent crowbar door recovery");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Consume_OxygenCan, "Ability.Consume.OxygenCan", "산소 캔 사용 능력");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(Ability_Consume_SampleProtection, "Ability.Consume.SampleProtection", "완충 패드 사용 능력");
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(State_SampleProtection, "State.SampleProtection", "손 운반 충돌 한 회 보호");
@@ -32,6 +33,11 @@ namespace MDGameplayTags
 		Ability_UtilityRepair_Insulation,
 		"Ability.UtilityRepair.Insulation",
 		"절연테이프 배선 수리 능력");
+
+	UE_DEFINE_GAMEPLAY_TAG_COMMENT(
+		Ability_UtilityRepair_GlassMarker,
+		"Ability.UtilityRepair.GlassMarker",
+		"Shared glass marker and rear eraser ability");
 
 
 	UE_DEFINE_GAMEPLAY_TAG_COMMENT(

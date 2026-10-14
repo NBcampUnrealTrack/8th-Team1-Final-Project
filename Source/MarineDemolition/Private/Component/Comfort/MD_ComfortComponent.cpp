@@ -47,6 +47,11 @@ void UMD_ComfortComponent::TickComponent(
 	DrainPendingLookInput(DeltaTime);
 }
 
+void UMD_ComfortComponent::ResetPendingLookInput()
+{
+	PendingLookInput = FVector2D::ZeroVector;
+}
+
 FVector2D UMD_ComfortComponent::ShapeLookInput(const FVector2D& RawLookInput)
 {
 	const UMD_ComfortSettings* Settings = UMD_ComfortSettings::Get();

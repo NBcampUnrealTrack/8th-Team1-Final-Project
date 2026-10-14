@@ -8,6 +8,7 @@
 class AMD_FingerprintPad;
 class AMD_TrashSorter;
 class APawn;
+class UPostProcessComponent;
 
 UCLASS()
 class MARINEDEMOLITION_API UMD_FingerprintFaultComponent : public UMD_FacilityFaultComponent
@@ -28,6 +29,9 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Fingerprint")
 	TObjectPtr<UMD_FingerprintFaultComponent> Fault;
+	/** Unbound locator visible to every local view while this incident is active. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="MD|Fingerprint|Presentation")
+	TObjectPtr<UPostProcessComponent> FaultHighlight;
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Replicated, Category="MD|Fingerprint")
 	TArray<TObjectPtr<AMD_FingerprintPad>> Pads;
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="MD|Fingerprint")
@@ -59,19 +63,22 @@ public:
 	UFUNCTION(BlueprintPure, Category="MD|Fingerprint")
 	int32 GetParticipantCount() const;
 	static int32 CalculateLossPerSecond(int32 Count, int32 Unit = 5);
-	bool BeginScan(AMD_FingerprintPad* Pad, APawn* Pawn);
+	// 요청 시점의 고장 번호와 현재 사건 일치 확인 후 패드 인증 시작
+	bool BeginScan(AMD_FingerprintPad* Pad, APawn* Pawn, int32 ExpectedFaultId);
 	void ReleaseScan(AMD_FingerprintPad* Pad, APawn* Pawn);
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 private:
+	void RefreshFaultHighlight();
 	UFUNCTION()
 	void HandleFault(UMD_FacilityFaultComponent* Component, const FMD_FacilitySnapshot& Previous,
 		const FMD_FacilitySnapshot& Current);
 	void ArmNextFault();
 	void AutomaticFault();
 	void ResetScans();
-	void CompleteAuthentication();
+	// 비용 반영 뒤에도 인증을 시작한 사건에만 복구 적용
+	void CompleteAuthentication(int32 ExpectedFaultId);
 	void RefreshParticipantMode();
 	void SetSorterLocks(bool bLocked);
 	void ApplyElapsedCharges();

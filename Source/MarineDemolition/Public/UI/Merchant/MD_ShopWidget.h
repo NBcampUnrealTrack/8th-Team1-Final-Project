@@ -198,20 +198,12 @@ protected:
 	TObjectPtr<UMD_CommonButtonBase> Btn_Category_Tool;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	// 안전 분류의 선택 표시를 담당하는 버튼
-	TObjectPtr<UMD_CommonButtonBase> Btn_Category_Safety;
-
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
 	// 유틸 수리 분류의 선택 표시를 담당하는 버튼
 	TObjectPtr<UMD_CommonButtonBase> Btn_Category_Repair;
 
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
 	// 생존 분류의 선택 표시를 담당하는 버튼
 	TObjectPtr<UMD_CommonButtonBase> Btn_Category_Survive;
-
-	UPROPERTY(BlueprintReadOnly, Category = "MD|Shop", meta = (BindWidgetOptional))
-	// 회수 분류의 선택 표시를 담당하는 버튼
-	TObjectPtr<UMD_CommonButtonBase> Btn_Category_Recovery;
 
 	UPROPERTY(Transient)
 	// 카테고리 버튼 중 하나의 선택 상태를 유지하는 그룹

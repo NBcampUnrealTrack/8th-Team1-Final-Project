@@ -1,12 +1,18 @@
 #include "Component/Facility/MD_FacilityFaultManagerComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Component/Facility/MD_FacilityRepairComponent.h"
 #include "Components/StaticMeshComponent.h"
+#include "Components/LightComponent.h"
+#include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
 #include "Engine/World.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "World/Wall/MD_PowerConduit.h"
+#include "World/Facility/MD_RepairInstruction.h"
+
+const FName UMD_FacilityFaultManagerComponent::BaseLightActorTag(TEXT("MD.Power.BaseLight"));
 
 UMD_FacilityFaultManagerComponent::UMD_FacilityFaultManagerComponent()
 {
@@ -20,6 +26,7 @@ void UMD_FacilityFaultManagerComponent::GetLifetimeReplicatedProps(TArray<FLifet
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	// 변경 이벤트 수신 시점과 무관한 현재 정전 상태 복제
 	DOREPLIFETIME(UMD_FacilityFaultManagerComponent, PowerLightStates);
+	DOREPLIFETIME(UMD_FacilityFaultManagerComponent, bBlackoutActive);
 }
 
 bool UMD_FacilityFaultManagerComponent::HasServerAuthority() const
@@ -31,6 +38,11 @@ bool UMD_FacilityFaultManagerComponent::HasServerAuthority() const
 void UMD_FacilityFaultManagerComponent::BeginPlay()
 {
 	Super::BeginPlay();
+	if (GetWorld()->GetNetMode()!=NM_DedicatedServer)
+	{
+		for (TActorIterator<AActor> It(GetWorld());It;++It) RegisterBlackoutLights(*It);
+		LightSpawnHandle=GetWorld()->AddOnActorSpawnedHandler(FOnActorSpawned::FDelegate::CreateUObject(this,&ThisClass::RegisterBlackoutLights));
+	}
 	Random.Initialize(RandomSeed != 0 ? RandomSeed : FMath::Rand());
 	StartFaultSchedules();
 }
@@ -44,7 +56,10 @@ void UMD_FacilityFaultManagerComponent::EndPlay(const EEndPlayReason::Type Reaso
 	{
 		// 종료 대상 머신의 다음 틱 예약 정리
 		GetWorld()->GetTimerManager().ClearTimer(PowerLightRefreshTimer);
+		GetWorld()->RemoveOnActorSpawnedHandler(LightSpawnHandle);
 	}
+	for (const FBaseLamp& Lamp:BaseLamps) if (Lamp.Light.IsValid()) Lamp.Light->SetVisibility(Lamp.bOriginalVisible);
+	BaseLamps.Reset();
 	// 원본 재질의 GC 보호를 유지하면서 복원 순회 분리
 	TArray<FMD_PowerMaterialBaseline> LightsToRestore = LocalPowerLights;
 	// 이전 월드의 전선 참조 제거
@@ -79,20 +94,65 @@ void UMD_FacilityFaultManagerComponent::EndPlay(const EEndPlayReason::Type Reaso
 
 bool UMD_FacilityFaultManagerComponent::RegisterFacility(UMD_FacilityFaultComponent* Facility)
 {
-	if (!HasServerAuthority() || !IsValid(Facility) || Facility->GetWorld() != GetWorld()
-		|| !IsValid(Facility->GetOwner()) || !Facility->GetOwner()->HasAuthority()) return false;
-	Facilities.RemoveAll([](const auto& Weak) { return !Weak.IsValid(); });
+	// 현재 서버 월드에 속한 유효 시설만 상태 레지스트리에 등록
+	if (HasServerAuthority() == false || IsValid(Facility) == false || Facility->GetWorld() != GetWorld()
+		|| IsValid(Facility->GetOwner()) == false || Facility->GetOwner()->HasAuthority() == false)
+	{
+		// 권한 또는 시설 참조가 맞지 않는 등록 거부
+		return false;
+	}
+	// 다른 관리자의 종료 연결을 덮어쓰는 중복 소유 방지
+	if (Facility->Manager.IsValid() == true && Facility->Manager.Get() != this)
+	{
+		// 기존 관리자의 사건 소유권 유지
+		return false;
+	}
+	// 이미 종료된 시설의 약한 참조 제거
+	Facilities.RemoveAll([](TWeakObjectPtr<UMD_FacilityFaultComponent>& Weak)
+		{
+			// 더 이상 상태를 제공하지 못하는 시설 제외 여부 전달
+			return Weak.IsValid() == false;
+		});
+	// 반복 등록에서도 같은 사건 제공자를 한 번만 보관
 	Facilities.AddUnique(Facility);
+	// 자동 등록 재시도 전에 직접 등록된 시설의 종료 해제 경로 연결
+	Facility->Manager = this;
+	// 명시적 등록으로 충족된 초기 관리자 대기 예약 해제
+	GetWorld()->GetTimerManager().ClearTimer(Facility->RegistrationTimer);
+	// 고장과 복구의 지속 상태 변경을 한 번만 구독
 	Facility->OnStateChanged.AddUniqueDynamic(this, &UMD_FacilityFaultManagerComponent::HandleFacilityStateChanged);
+	RefreshBlackoutState();
+	// 시설과 관리자 양방향 등록 성공 전달
 	return true;
 }
 
 void UMD_FacilityFaultManagerComponent::UnregisterFacility(UMD_FacilityFaultComponent* Facility)
 {
-	if (!HasServerAuthority()) return;
-	if (IsValid(Facility))
+	// 서버에서만 시설 등록 해제
+	if (HasServerAuthority() == false)
+	{
+		// 클라이언트의 레지스트리 변경 거부
+		return;
+	}
+	// 아직 유효한 시설의 상태 변경 구독과 역참조 정리
+	if (IsValid(Facility) == true)
+	{
+		// 해제 이후 늦은 고장 알림의 재집계 차단
 		Facility->OnStateChanged.RemoveDynamic(this, &UMD_FacilityFaultManagerComponent::HandleFacilityStateChanged);
-	Facilities.RemoveAll([Facility](const auto& Weak) { return !Weak.IsValid() || Weak.Get() == Facility; });
+		// 현재 관리자가 소유한 수명 연결만 해제
+		if (Facility->Manager.Get() == this)
+		{
+			// 같은 시설의 후속 정상 등록 허용
+			Facility->Manager.Reset();
+		}
+	}
+	// 지정 시설과 이미 제거된 시설의 레지스트리 항목 정리
+	Facilities.RemoveAll([Facility](TWeakObjectPtr<UMD_FacilityFaultComponent>& Weak)
+		{
+			// 해제 대상이거나 수명이 끝난 시설 여부 전달
+			return Weak.IsValid() == false || Weak.Get() == Facility;
+		});
+	RefreshBlackoutState();
 }
 
 TArray<UMD_FacilityFaultComponent*> UMD_FacilityFaultManagerComponent::GetRegisteredFacilities() const
@@ -119,8 +179,50 @@ void UMD_FacilityFaultManagerComponent::HandleFacilityStateChanged(UMD_FacilityF
 	{
 		// 고장 기여가 시작되거나 끝난 경우에만 현재 사건 재집계
 		RebuildPowerLightStates();
+		RefreshBlackoutState();
 	}
 	OnFacilityStateChanged.Broadcast(Facility, Previous, Current);
+}
+
+void UMD_FacilityFaultManagerComponent::RefreshBlackoutState()
+{
+	if(bPowerLightsShuttingDown || !HasServerAuthority()) return;
+	const bool bActive=Facilities.ContainsByPredicate([](const TWeakObjectPtr<UMD_FacilityFaultComponent>& Entry)
+	{
+		const auto* Facility=Entry.Get();
+		return Facility && Facility->IsFaultActive() && IsValid(Facility->GetOwner()) && (Facility->GetOwner()->IsA<AMD_PowerConduit>()
+			|| (Facility->Kind==EMD_FacilityKind::Breaker && Facility->GetOwner()->IsA<AMD_RepairInstructionController>()));
+	});
+	if(bActive==bBlackoutActive) return;
+	bBlackoutActive=bActive;OnRep_BlackoutActive();GetOwner()->ForceNetUpdate();
+}
+void UMD_FacilityFaultManagerComponent::OnRep_BlackoutActive()
+{
+	ApplyBaseLighting();
+	MDAudioFeedback::UI(this, bBlackoutActive ? TEXT("SFX.Hazard.Light.Off") : TEXT("SFX.Hazard.Light.On"));
+	OnBlackoutChanged.Broadcast(bBlackoutActive);
+}
+
+void UMD_FacilityFaultManagerComponent::RegisterBlackoutLights(AActor* Actor)
+{
+	if (bPowerLightsShuttingDown || !GetWorld() || !GetWorld()->IsGameWorld()
+		|| !IsValid(Actor) || Actor->GetWorld()!=GetWorld() || Actor->IsActorBeingDestroyed()
+		|| !Actor->ActorHasTag(BaseLightActorTag) || GetWorld()->GetNetMode()==NM_DedicatedServer) return;
+	TInlineComponentArray<ULightComponent*> Lights(Actor);
+	for (ULightComponent* Light:Lights)
+	{
+		if (!IsValid(Light) || Light->IsBeingDestroyed()) continue;
+		if (!BaseLamps.ContainsByPredicate([Light](const FBaseLamp& Lamp){return Lamp.Light==Light;}))
+			BaseLamps.Add({Light,Light->IsVisible()});
+	}
+	ApplyBaseLighting();
+}
+
+void UMD_FacilityFaultManagerComponent::ApplyBaseLighting()
+{
+	BaseLamps.RemoveAll([](const FBaseLamp& Lamp){return !Lamp.Light.IsValid();});
+	for (const FBaseLamp& Lamp:BaseLamps)
+		if (ULightComponent* Light=Lamp.Light.Get()) Light->SetVisibility(!bBlackoutActive && Lamp.bOriginalVisible);
 }
 
 void UMD_FacilityFaultManagerComponent::StartFaultSchedules()
@@ -381,6 +483,12 @@ void UMD_FacilityFaultManagerComponent::RebuildPowerLightStates()
 			// 공통 고장 상태가 없는 전선 제외 여부 전달
 			return IsValid(Source->FacilityRepair) == false;
 		});
+	// Periodic breaker outages affect the same circuit without changing a wire's repair state.
+	int32 BreakerFaultCount = 0;
+	for (const auto& Weak : Facilities)
+		if (const auto* Facility = Weak.Get(); Facility && Facility->Kind==EMD_FacilityKind::Breaker
+			&& Facility->IsFaultActive() && IsValid(Facility->GetOwner()) && Facility->GetOwner()->IsA<AMD_RepairInstructionController>())
+			++BreakerFaultCount;
 	// 현재 등록 순서에 따른 메시 슬롯별 설정과 사건 수 구성
 	TArray<FMD_PowerLightState> CurrentStates;
 	// 최초 전선의 재질 설정을 유지하며 전체 고장 기여 합산
@@ -430,6 +538,7 @@ void UMD_FacilityFaultManagerComponent::RebuildPowerLightStates()
 			}
 		}
 	}
+	for (FMD_PowerLightState& State : CurrentStates) State.ActiveFaultCount += BreakerFaultCount;
 	// 기존 메시 슬롯 순서를 유지해 불필요한 복제 순서 변경 방지
 	TArray<FMD_PowerLightState> UpdatedStates = PowerLightStates;
 	// 이미 제거된 메시와 무효 슬롯의 강한 복제 참조 정리
@@ -458,9 +567,9 @@ void UMD_FacilityFaultManagerComponent::RebuildPowerLightStates()
 		else
 		{
 			// 담당 전선이 사라진 슬롯의 정전 기여 해제
-			State.ActiveFaultCount = 0;
-			// BP 정상 재질 대신 최초 재질로 복원할 상태 표시
-			State.bHasPowerSource = false;
+			State.ActiveFaultCount = BreakerFaultCount;
+			// A remaining timed blackout keeps even a retired circuit dark until breaker repair.
+			State.bHasPowerSource = BreakerFaultCount > 0;
 		}
 	}
 	// 새롭게 연결된 슬롯만 지속 복제 배열 뒤에 추가

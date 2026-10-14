@@ -7,6 +7,8 @@
 #include "Gameplay/Trash/MD_TrashSortable.h"
 #include "MD_ScrapedDebrisBase.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class UStaticMeshComponent;
 
 /**
@@ -45,6 +47,10 @@ public:
 	/** 품목 보너스는 산재 쓰레기 4종에만 있다 (기획 05 §1.1 S+06~09) */
 	virtual FGameplayTag GetSortScoreBonusTag_Implementation() const override { return FGameplayTag(); }
 	/** ~Implements IMD_TrashSortable */
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	UPROPERTY(VisibleAnywhere, Category = "MD|Contamination|Debris")

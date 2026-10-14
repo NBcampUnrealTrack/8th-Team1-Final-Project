@@ -62,8 +62,9 @@ public:
 	}
 
 
-	// Enum 분류와 금액을 잔액 및 현재 Day Map 원장에 함께 기록하는 단일 함수
-	void AddCredits(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer = nullptr);
+	// Enum 분류별 원장 변경과 실제 적용 금액의 완료 알림
+	void AddCredits(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer = nullptr,
+		TFunction<void(int32)> AppliedAmountCallback = {});
 
 	/** 플레이어별 소유권을 검증하고 아이템 지급 성공 시에만 팀 재화 차감과 구매 원장을 확정하는 서버 구매 함수 */
 	EMD_ShopPurchaseResult TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase);
@@ -201,6 +202,8 @@ protected:
         int32 Amount = 0;
         // 퇴장한 플레이어의 수명을 연장하지 않는 책임자 연결
         TWeakObjectPtr<APlayerState> ResponsiblePlayer;
+        // 대기 금액이 실제 반영된 뒤 요청자에게 전달할 완료 알림
+        TFunction<void(int32)> AppliedAmountCallback;
     };
 
     // 현재 거래가 확정된 다음 순차 반영할 독립 보상 목록

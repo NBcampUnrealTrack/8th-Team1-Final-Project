@@ -56,6 +56,7 @@ void UMD_OxygenComponent::BeginPlay()
 
 void UMD_OxygenComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	MDAudioFeedback::Stop(this, HeartbeatAudio, 0.f);
 	// 캐릭터 제거 및 월드 이동 전에 이 컴포넌트가 교체한 머티리얼 복원
 	UpdateOxygenPostProcess(true);
 
@@ -141,6 +142,7 @@ void UMD_OxygenComponent::SetOxygenTankEquipped(bool bEquipped)
 
 void UMD_OxygenComponent::EvaluateBreathState()
 {
+	RefreshSurvivalAudio();
 	// 산소 비율과 현재 등록된 PostProcess를 소유 클라이언트 화면에 반영
 	UpdateOxygenPostProcess();
 
@@ -533,6 +535,40 @@ UAbilitySystemComponent* UMD_OxygenComponent::GetAbilitySystemComponent() const
 		IsValid(OwnerPawn) ? OwnerPawn->GetPlayerState<AMD_PlayerState>() : nullptr;
 
 	return IsValid(MDPlayerState) ? MDPlayerState->GetAbilitySystemComponent() : nullptr;
+}
+
+void UMD_OxygenComponent::RefreshSurvivalAudio()
+{
+	const APawn* Pawn = Cast<APawn>(GetOwner());
+	const auto* Attributes = GetAttributeSet();
+	const auto* ASC = GetAbilitySystemComponent();
+	if (!Pawn || !Pawn->IsLocallyControlled() || !Attributes || !ASC)
+	{
+		MDAudioFeedback::Stop(this, HeartbeatAudio);
+		bAudioOxygenLow = bAudioOxygenEmpty = false; PreviousAudioOxygen = -1.f;
+		NextLowOxygenWarningTime = 0.;
+		return;
+	}
+	const bool bDead = ASC->HasMatchingGameplayTag(MDGameplayTags::State_Dead);
+	const float Max = Attributes->GetMaxOxygen();
+	const float Oxygen = Attributes->GetOxygen();
+	const float Ratio = Max > 0.f ? Oxygen / Max : 1.f;
+	// HUD는 ceil(산소 비율 * 8)칸을 표시한다. 3칸 경계 위에서는 경고를 멈춘다.
+	const bool bLow = !bDead && BreathState == EMD_BreathState::Submerged && Max > 0.f && Ratio <= 3.f / 8.f;
+	const bool bEmpty = bLow && Oxygen <= 0.f;
+	const double Now = GetWorld()->GetTimeSeconds();
+	if (bLow && (!bAudioOxygenLow || Now >= NextLowOxygenWarningTime))
+	{
+		MDAudioFeedback::LocalPawn(Pawn, TEXT("SFX.Character.Oxygen.Low"));
+		NextLowOxygenWarningTime = Now + 4.;
+	}
+	if (!bLow) NextLowOxygenWarningTime = 0.;
+	if (bEmpty && !bAudioOxygenEmpty) MDAudioFeedback::LocalPawn(Pawn, TEXT("SFX.Character.Oxygen.Depleted"));
+	if (bLow && !HeartbeatAudio.IsValid()) HeartbeatAudio = MDAudioFeedback::LocalPawn(Pawn, TEXT("SFX.Character.Oxygen.HeartbeatLoop"));
+	if (!bLow) MDAudioFeedback::Stop(this, HeartbeatAudio);
+	if (!bDead && PreviousAudioOxygen >= 0.f && PreviousAudioOxygen < Max * .75f && Oxygen - PreviousAudioOxygen > Max * .25f)
+		MDAudioFeedback::LocalPawn(Pawn, TEXT("SFX.Character.Oxygen.Refill"));
+	bAudioOxygenLow = bLow; bAudioOxygenEmpty = bEmpty; PreviousAudioOxygen = Oxygen;
 }
 
 UMD_CharacterAttributeSet* UMD_OxygenComponent::GetAttributeSet() const
