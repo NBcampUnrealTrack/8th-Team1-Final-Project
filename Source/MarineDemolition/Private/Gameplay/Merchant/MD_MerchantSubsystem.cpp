@@ -72,6 +72,24 @@ void UMD_MerchantSubsystem::FlushPendingCreditChanges()
         // 새로 발생한 독립 보상을 잃지 않는 다음 틱 단일 예약
         PendingCreditFlushTimerHandle = World->GetTimerManager().SetTimerForNextTick(this, &ThisClass::FlushPendingCreditChanges);
     }
+    // 다음 틱 예약으로 들어온 배치가 음수를 만들었을 때도 종료 방송이 빠지지 않게 한다
+    NotifyBankruptcyIfPending();
+}
+
+void UMD_MerchantSubsystem::NotifyBankruptcyIfPending()
+{
+    // 거래 가드 안이거나 계약이 이미 끝났으면 방송하지 않는다. 플래그는 계약 종료 시 함께 비운다
+    if (bBankruptcyPending == false || bShopTransactionInProgress == true || HasServerAuthority() == false)
+    {
+        return;
+    }
+    bBankruptcyPending = false;
+    if (IsValid(CurrentSite) == false)
+    {
+        return;
+    }
+    UE_LOG(LogTemp, Warning, TEXT("[Merchant] 팀 잔액 음수 진입 — 계약 즉시 종료"));
+    OnBankrupt.Broadcast();
 }
 
 double UMD_MerchantSubsystem::GetCreditHistoryElapsedSeconds()
@@ -317,6 +335,8 @@ void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 A
 	{
 		// 현재 변경과 알림에서 발생한 독립 보상 반영
 		FlushPendingCreditChanges();
+		// 가드가 풀린 뒤에 방송해야 GameMode의 FinalizeContract가 거래 중으로 막히지 않는다
+		NotifyBankruptcyIfPending();
 	};
 	// 원장 확정과 알림 사이에 추가 거래가 끼어드는 상황 차단
 	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
@@ -736,6 +756,8 @@ void UMD_MerchantSubsystem::FinalizeContract()
     // 원장을 보존한 채 계약 종료 시각 고정
     FinishCreditHistory();
 	CurrentSite = nullptr;
+	// 종료된 계약의 파산 예약은 다음 계약으로 넘기지 않는다
+	bBankruptcyPending = false;
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 종료"));
 
@@ -760,7 +782,12 @@ void UMD_MerchantSubsystem::AddCreditsInternal(EMD_DailyReportCategory Category,
 	}
 	else if (Amount < 0 && Amount < -Credits)
 	{
+		// 잔액 이상의 차감 = 음수 진입. 원장은 0에서 멈추되 계약 즉시 종료를 예약한다
 		Credits = 0;
+		if (IsValid(CurrentSite) == true)
+		{
+			bBankruptcyPending = true;
+		}
 	}
 	else
 	{

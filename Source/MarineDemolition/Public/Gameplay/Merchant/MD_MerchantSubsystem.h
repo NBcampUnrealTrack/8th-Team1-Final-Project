@@ -16,6 +16,8 @@
 
 
 DECLARE_MULTICAST_DELEGATE(FMD_OnMerchantStateChanged);
+// 차감이 잔액보다 커서 팀 지갑이 음수가 됐을 때(0원과 구분). 서버에서 거래 가드 해제 뒤 한 번만 방송
+DECLARE_MULTICAST_DELEGATE(FMD_OnBankrupt);
 
 class UMD_SiteDefinition;
 class AMD_PlayerState;
@@ -39,6 +41,8 @@ public:
 public:
 
 	FMD_OnMerchantStateChanged OnMerchantStateChanged;
+	// 음수 잔액 = 계약 즉시 종료(2026-10-14 결정). GameMode가 받아 로비로 보낸다
+	FMD_OnBankrupt OnBankrupt;
 
 protected:
 	// 경제 원장 변경과 알림 중 중첩 거래가 실행되는 상황 차단
@@ -173,6 +177,10 @@ private:
 
 	/** 방송하지 않고 잔액과 Enum Map 원장을 함께 변경하는 내부 함수 */
 	void AddCreditsInternal(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer = nullptr);
+
+	// 거래 가드 안에서 음수 차감이 감지됐음을 보관. 가드가 풀린 뒤 NotifyBankruptcyIfPending이 한 번 방송한다
+	bool bBankruptcyPending = false;
+	void NotifyBankruptcyIfPending();
 
 
 	int32 Credits = 0;
