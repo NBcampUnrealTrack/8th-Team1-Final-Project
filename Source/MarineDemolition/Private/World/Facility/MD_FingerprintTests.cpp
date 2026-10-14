@@ -113,6 +113,8 @@ public:
    Test->TestFalse(TEXT("Duplicate event cannot allocate another incident"),Event->StartFault());
    Test->TestTrue(TEXT("Both sorters safety-locked"),Sorters[0]->IsSafetyInterlocked()&&Sorters[1]->IsSafetyInterlocked());
    Test->TestFalse(TEXT("Locked sorter rejects intake"),Sorters[0]->CanInteract_Implementation(Character));
+   // 기존 지문 비용 검사를 독립 시설의 추가 차감과 분리
+   Sorters[1]->FacilityRepair->bFaultCostEnabled=false;
    Test->TestTrue(TEXT("Independent sorter fault can coexist"),Sorters[1]->FacilityRepair->TryBreak());
    CreditsBefore=Merchant->GetCredits(); LossBefore=Event->TotalFaultLoss;
    Aim(Character,PC,Pads[0]);
