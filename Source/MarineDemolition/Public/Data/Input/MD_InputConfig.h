@@ -31,6 +31,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, Category = "Input")
 	TObjectPtr<UInputAction> AbilityAction;
 
+	// 폼건 조준(RMB 홀드). 누르는 동안 궤적 프리뷰와 조준 자세를 켠다. 키는 IMC에서 매핑한다.
+	UPROPERTY(EditDefaultsOnly, Category = "Input")
+	TObjectPtr<UInputAction> AimAction;
+
 	/** Boolean action: Started charges, Completed releases, Canceled aborts. */
 	UPROPERTY(EditDefaultsOnly, Category = "Input|Throw")
 	TObjectPtr<UInputAction> ThrowAction;

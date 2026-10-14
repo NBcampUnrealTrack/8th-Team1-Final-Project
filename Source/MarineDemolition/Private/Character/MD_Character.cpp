@@ -1167,6 +1167,12 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Started, this, &AMD_Character::HandleAbilityInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAbilityReleasedInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAbilityReleasedInput);
+	if (IsValid(InputConfig->AimAction))
+	{
+		EIC->BindAction(InputConfig->AimAction, ETriggerEvent::Started, this, &AMD_Character::HandleAimStartedInput);
+		EIC->BindAction(InputConfig->AimAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAimReleasedInput);
+		EIC->BindAction(InputConfig->AimAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAimReleasedInput);
+	}
 	EIC->BindAction(InputConfig->SwapEquipmentAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleSwapEquipmentInput);
 	//EIC->BindAction(InputConfig->WallCutAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallCutInput);
 	//EIC->BindAction(InputConfig->WallScanAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallScanInput);
@@ -1404,6 +1410,35 @@ void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 	FGameplayTagContainer AbilityTags;
 	AbilityTags.AddTag(CurrentTool->ToolAbilityTag);
 	ASC->CancelAbilities(&AbilityTags);
+}
+
+void AMD_Character::HandleAimStartedInput(const FInputActionValue& Value)
+{
+	// 폼건: RMB를 누르는 동안 조준 궤적 표시 + 조준 자세. 운반 중에는 조준하지 않는다
+	if (!IsFoamGunEquipped() || (IsValid(InteractionComponent) && InteractionComponent->IsHolding()))
+	{
+		return;
+	}
+
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(true);
+	}
+	SetFoamAiming(true);
+}
+
+void AMD_Character::HandleAimReleasedInput(const FInputActionValue& Value)
+{
+	EndFoamAiming();
+}
+
+void AMD_Character::EndFoamAiming()
+{
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(false);
+	}
+	SetFoamAiming(false);
 }
 
 void AMD_Character::HandleThrowStartedInput(const FInputActionValue& Value)
@@ -1731,6 +1766,11 @@ void AMD_Character::HandleHotbarChanged()
 	// Charge replication for the same tool must not cancel a newly started throw.
 	// The throw component validates target/slot changes while charging and again on release.
 	RefreshStainInputState();
+	// 폼건에서 다른 도구로 바꾸면 RMB를 누른 채라도 조준을 끝낸다
+	if (!IsFoamGunEquipped())
+	{
+		EndFoamAiming();
+	}
 	RefreshToolMesh();
 
 	// 공통 아이템 상태를 조회할 Hotbar 유효성 검사
@@ -1765,6 +1805,11 @@ void AMD_Character::HandleHeldActorChanged(AActor* HeldActor)
 		return;
 	}
 	CancelScrapeInteraction();
+	// 물건을 드는 순간 폼건 조준도 끝낸다. 운반 중엔 도구를 내리므로 궤적만 남으면 어색하다
+	if (IsValid(HeldActor))
+	{
+		EndFoamAiming();
+	}
 	// 슬롯은 그대로, 표시만 바꾼다. 도구 메시와 톱날을 함께 갱신한다
 	RefreshToolMesh();
 }
