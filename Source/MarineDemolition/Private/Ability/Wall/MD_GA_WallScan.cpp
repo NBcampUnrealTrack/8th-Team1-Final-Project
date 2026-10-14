@@ -120,6 +120,16 @@ bool UMD_GA_WallScan::FindScanTargets(const FGameplayAbilityActorInfo* ActorInfo
 	return true;
 }
 
+bool UMD_GA_WallScan::CanActivateAbility(const FGameplayAbilitySpecHandle Handle,
+	const FGameplayAbilityActorInfo* ActorInfo, const FGameplayTagContainer* SourceTags,
+	const FGameplayTagContainer* TargetTags, FGameplayTagContainer* OptionalRelevantTags) const
+{
+	if (!Super::CanActivateAbility(Handle, ActorInfo, SourceTags, TargetTags, OptionalRelevantTags)) return false;
+	const UWorld* World = GetWorld();
+	return !World || !FMath::IsFinite(ScanCooldownSeconds) || ScanCooldownSeconds <= 0.f
+		|| World->GetTimeSeconds() >= LastScanStartedAt + ScanCooldownSeconds;
+}
+
 void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 	const FGameplayAbilityActorInfo* ActorInfo, const FGameplayAbilityActivationInfo ActivationInfo,
 	const FGameplayEventData*)
@@ -135,6 +145,8 @@ void UMD_GA_WallScan::ActivateAbility(const FGameplayAbilitySpecHandle Handle,
 		EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
 		return;
 	}
+	// 장비 검사를 통과한 시점부터 쿨타임을 센다. 거절된 활성은 쿨타임을 먹지 않는다
+	if (GetWorld()) LastScanStartedAt = GetWorld()->GetTimeSeconds();
 	PendingHandle = Handle;
 	PendingKey = ActivationInfo.GetActivationPredictionKey();
 	if (ActorInfo->IsNetAuthority() && !ActorInfo->IsLocallyControlled())
@@ -197,13 +209,11 @@ bool UMD_GA_WallScan::PerformScan(EMD_ScanMode Mode, uint32 RequestId)
 	TArray<AActor*> Targets;
 	FVector Origin, Forward;
 	FindScanTargets(Info, Mode, Targets, Origin, Forward);
-	if (!Targets.IsEmpty())
-	{
-		if (Info->IsLocallyControlled())
-			Scanner->PresentLocalScan(RequestId, Mode, Targets, ScanDuration, ScanMPC, Origin,
-				Forward, ScanRadius, ScanConeHalfAngleDegrees);
-		Scanner->PlayScanPulse(RequestId, ScanPulseSoundTag, ScanDuration, ScanPulseFadeOutSeconds);
-	}
+	// 대상이 없어도 스윕·펄스는 재생한다. 무반응이면 플레이어가 고장으로 오해한다
+	if (Info->IsLocallyControlled())
+		Scanner->PresentLocalScan(RequestId, Mode, Targets, ScanDuration, ScanMPC, Origin,
+			Forward, ScanRadius, ScanConeHalfAngleDegrees);
+	Scanner->PlayScanPulse(RequestId, ScanPulseSoundTag, ScanDuration, ScanPulseFadeOutSeconds);
 	return true;
 }
 
