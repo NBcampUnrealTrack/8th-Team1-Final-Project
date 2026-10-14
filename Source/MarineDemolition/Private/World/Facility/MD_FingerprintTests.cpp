@@ -80,7 +80,8 @@ public:
    Interaction=Character->FindComponentByClass<UMD_InteractionComponent>();
    Merchant=World->GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>();
    if(!Test->TestNotNull(TEXT("Real player interaction"),Interaction) || !Test->TestNotNull(TEXT("Team wallet"),Merchant)) return true;
-   Merchant->AddCredits(EMD_DailyReportCategory::Other,1000);
+   // 지문 비용 검증을 위한 시스템 초기 잔액 지급
+   Merchant->AddCredits(1000);
    if(!bSolo)
    {
     for(TActorIterator<APlayerController> It(Client);It;++It)

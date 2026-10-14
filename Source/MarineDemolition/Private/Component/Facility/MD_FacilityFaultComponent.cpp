@@ -386,8 +386,8 @@ void UMD_FacilityFaultComponent::ApplyFaultCost(bool bFinalCharge)
 	{
 		// 기존 거래의 정수 범위 안에서 경과 초 비용 합산
 		int32 Charge = int32(FMath::Min<int64>(MAX_int32, FMath::Min<int64>(ElapsedSeconds, MAX_int32) * int64(LossPerSecond)));
-		// 대출 잔액과 무관하게 기존 사고 비용 항목으로 Credit 차감
-		Merchant->AddCredits(EMD_DailyReportCategory::Accident, -Charge);
+		// 대출 잔액과 무관하게 개인 기록에 귀속되지 않는 시스템 비용 차감
+		Merchant->AddCredits(-Charge);
 	}
 }
 

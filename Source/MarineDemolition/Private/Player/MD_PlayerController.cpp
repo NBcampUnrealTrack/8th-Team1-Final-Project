@@ -692,7 +692,7 @@ void AMD_PlayerController::ServerAddCredits_Implementation(int32 Amount)
 	if (UMD_MerchantSubsystem* Merchant = GetMerchantSubsystem())
 	{
 		// 명령을 실행한 서버 플레이어의 금액 이력 기록
-		Merchant->AddCredits(EMD_DailyReportCategory::Other, Amount, PlayerState);
+		Merchant->AddCredits(Amount, PlayerState);
 	}
 }
 

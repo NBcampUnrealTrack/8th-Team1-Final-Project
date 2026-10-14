@@ -741,7 +741,8 @@ void AMD_GameModeBase::FinalizeDay()
             UMD_MerchantSubsystem* Merchant = GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>();
             if (IsValid(Merchant) == true)
             {
-                Merchant->AddCredits(EMD_DailyReportCategory::Evaluation, ScoreCreditReward);
+                // 개인별 기록과 구분한 시스템 평가 보상 반영
+                Merchant->AddCredits(ScoreCreditReward);
             }
         }
     }
