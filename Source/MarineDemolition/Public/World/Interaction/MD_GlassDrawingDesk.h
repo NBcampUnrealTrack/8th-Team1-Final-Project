@@ -43,7 +43,7 @@ public:
 	bool HasValidConfiguration() const;
 
 	/** Fits the assigned pane without moving the character or changing any camera. */
-	bool ResolveFocusView(const AMD_Character* Character, float Aspect, FVector& OutLocation,
+	virtual bool ResolveFocusView(const AMD_Character* Character, float Aspect, FVector& OutLocation,
 		FRotator& OutRotation, float& OutFOV, float& OutTraceDistance) const;
 
 	/** Only the current occupant may release the desk and pane after the exit blend finishes. */

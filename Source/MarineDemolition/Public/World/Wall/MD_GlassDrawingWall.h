@@ -15,10 +15,14 @@ public:
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
 	virtual FText GetInteractionPrompt_Implementation(AActor* Interactor) const override;
+	virtual bool CanInteract_Implementation(AActor* Interactor) const override;
+	virtual bool ResolveFocusView(const AMD_Character* Character, float Aspect, FVector& OutLocation,
+		FRotator& OutRotation, float& OutFOV, float& OutTraceDistance) const override;
 
 protected:
 	virtual void RefreshPenDisplay() override;
 
 private:
 	void ConfigureOwnGlass();
+	bool IsViewingFrontGlass(const AMD_Character* Character) const;
 };
