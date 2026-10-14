@@ -35,6 +35,8 @@ AMD_RepairInstructionController::AMD_RepairInstructionController()
 	SetRootComponent(CreateDefaultSubobject<USceneComponent>(TEXT("Root")));
 	Fault = CreateDefaultSubobject<UMD_FacilityFaultComponent>(TEXT("Fault"));
 	Fault->Kind = EMD_FacilityKind::Breaker; Fault->bRandomFaultEligible = false;
+	// 독립 차단기 고장에 대한 공통 비용 활성화
+	Fault->bFaultCostEnabled = true;
 	BreakerBody=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BreakerBody")); BreakerBody->SetupAttachment(RootComponent); BreakerBody->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	BreakerInteractionBounds=CreateDefaultSubobject<UBoxComponent>(TEXT("BreakerInteractionBounds"));
 	BreakerInteractionBounds->SetupAttachment(RootComponent); BreakerInteractionBounds->SetBoxExtent(FVector(10,64,66));

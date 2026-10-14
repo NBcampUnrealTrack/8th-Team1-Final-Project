@@ -288,11 +288,8 @@ void UMD_FacilityFaultComponent::UpdateFaultCostState(FMD_FacilitySnapshot Previ
 		// 클라이언트의 중복 차감 방지
 		return;
 	}
-	// 문을 제외한 일반 시설만 추가 청구하고 기존 지문 차감 유지
-	bool bSupportedKind = Kind == EMD_FacilityKind::CoolingPump || Kind == EMD_FacilityKind::TrashSorter
-		|| Kind == EMD_FacilityKind::WiringPanel;
-	// 실제 고장 상태와 비용 대상 설정이 모두 맞는 경우에만 청구 유지
-	if (Snapshot.IsFaultActive() == true && bFaultCostEnabled == true && bSupportedKind == true)
+	// 실제 고장 상태와 컴포넌트의 공통 비용 사용 설정에 따른 청구 유지
+	if (Snapshot.IsFaultActive() == true && bFaultCostEnabled == true)
 	{
 		// 수리 진행 알림에서는 기존 사건의 청구 시각 유지
 		if (CostFaultId != Snapshot.FaultId)

@@ -12,6 +12,8 @@ AMD_CoolingPump::AMD_CoolingPump()
 	bStartBroken = false;
 	FacilityRepair->Kind = EMD_FacilityKind::CoolingPump;
 	FacilityRepair->bRandomFaultEligible = true;
+	// 펌프 자체 고장에 대한 공통 비용 활성화
+	FacilityRepair->bFaultCostEnabled = true;
 	bLinkHostWalls = false;
 	LinkTrigger->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	LinkTrigger->SetGenerateOverlapEvents(false);

@@ -39,6 +39,8 @@ AMD_TrashSorter::AMD_TrashSorter()
 	FacilityRepair = CreateDefaultSubobject<UMD_FacilityRepairComponent>(TEXT("FacilityRepair"));
 	FacilityRepair->Kind = EMD_FacilityKind::TrashSorter;
 	FacilityRepair->bRandomFaultEligible = true;
+	// 수거기 자체 고장에 대한 공통 비용 활성화
+	FacilityRepair->bFaultCostEnabled = true;
 	FacilityRepair->bAllowInsulationTape = true;
 	SorterStateTree = CreateDefaultSubobject<UStateTreeComponent>(TEXT("SorterStateTree"));
 	SorterStateTree->SetStartLogicAutomatically(false);

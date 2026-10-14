@@ -43,9 +43,9 @@ public:
 	float RefaultGraceSeconds = 0.f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Facility")
 	bool bResetProgressOnCancel = false;
-	// 실제 고장을 대신 표시하는 수리 패널의 중복 차감 제외 설정
+	// 시설 종류와 무관하게 선택하는 공통 고장 비용 사용 설정
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Facility")
-	bool bFaultCostEnabled = true;
+	bool bFaultCostEnabled = false;
 	// 기존 인원 배율에 적용할 두 명 기준 초당 Credit 차감액
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Facility", meta = (ClampMin = "0"))
 	int32 CostUnit = 5;
