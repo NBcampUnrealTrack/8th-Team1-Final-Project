@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Component/Facility/MD_FacilityFaultComponent.h"
+#include "Audio/MD_AudioSubsystem.h"
 #include "MD_FingerprintInterlock.generated.h"
 
 class AMD_FingerprintPad;
@@ -71,6 +72,8 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 private:
 	void RefreshFaultHighlight();
+	void RefreshFaultAlarm();
+	FMD_AudioHandle FaultAlarmAudio;
 	UFUNCTION()
 	void HandleFault(UMD_FacilityFaultComponent* Component, const FMD_FacilitySnapshot& Previous,
 		const FMD_FacilitySnapshot& Current);

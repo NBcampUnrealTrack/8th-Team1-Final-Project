@@ -8,6 +8,10 @@
 #include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/PostProcessComponent.h"
+#include "Components/AudioComponent.h"
+#include "Sound/SoundWave.h"
+#include "Data/Audio/MD_AudioCategoryData.h"
+#include "UObject/UObjectIterator.h"
 #include "UObject/UnrealType.h"
 #include "../../Component/Facility/MD_FacilityPlayTestGameMode.h"
 #include "Editor.h"
@@ -45,6 +49,21 @@ bool FMDFingerprintBalanceTest::RunTest(const FString&)
   TestEqual(TEXT("Blueprint inherits the new balance"),BlueprintClass->GetDefaultObject<AMD_FingerprintInterlock>()->CostUnit,1);
  TestEqual(TEXT("Automatic interval minimum five minutes"),Defaults->MinFaultInterval,300.f);
  TestEqual(TEXT("Automatic interval maximum seven minutes"),Defaults->MaxFaultInterval,420.f);
+ const auto* WorldAudio=LoadObject<UMD_AudioCategoryData>(nullptr,TEXT("/Game/SFX/Data/DA_MD_Audio_World.DA_MD_Audio_World"));
+ const auto* CharacterAudio=LoadObject<UMD_AudioCategoryData>(nullptr,TEXT("/Game/SFX/Data/DA_MD_Audio_Character.DA_MD_Audio_Character"));
+ for(const auto& Pair : {TPair<const UMD_AudioCategoryData*,const TCHAR*>(WorldAudio,TEXT("SFX.Facility.Fingerprint.AlarmLoop")),TPair<const UMD_AudioCategoryData*,const TCHAR*>(CharacterAudio,TEXT("SFX.Character.Oxygen.Low"))})
+ {
+  if(!TestNotNull(TEXT("Warning audio category exists"),Pair.Key)) continue;
+  const auto* Entry=Pair.Key->Entries.FindByPredicate([&](const FMD_AudioEntry& E){return E.EventTag.ToString()==Pair.Value;});
+  if(!TestNotNull(TEXT("Warning event is catalogued"),Entry)) continue;
+  TestTrue(TEXT("Warning loop uses dry 2D UI playback without underwater pitch change"),Entry->bLooping&&Entry->b2D&&Entry->Space==EMD_AudioSpace::UI&&!Entry->bDepthPitch);
+  auto* Wave=Cast<USoundWave>(Entry->Sound.LoadSynchronous());
+  if(TestNotNull(TEXT("Warning SoundWave resolves"),Wave))
+  {
+   TestTrue(TEXT("Wave itself loops"),Wave->bLooping);
+   TestEqual(TEXT("Authored warning cycle is exactly three seconds"),Wave->Duration,3.f);
+  }
+ }
  return true;
 }
 
@@ -133,6 +152,7 @@ public:
     if(It->GetFName()==Event->GetFName()) RemoteEvent=*It;
    if(!Test->TestNotNull(TEXT("Second endpoint replicates"),RemotePad)||!Test->TestNotNull(TEXT("Controller replicates"),RemoteEvent)) return true;
    Test->TestTrue(TEXT("Client receives active fault"),RemoteEvent->IsActive());
+   CheckAlarm(1);
    Test->TestTrue(TEXT("Remote global locator enabled without scanner equipment"),RemoteEvent->FaultHighlight->bEnabled);
    Test->TestTrue(TEXT("Locator has no distance bound"),RemoteEvent->FaultHighlight->bUnbound);
    Test->TestTrue(TEXT("Locator material assigned"),RemoteEvent->FaultHighlight->Settings.WeightedBlendables.Array.Num()>0);
@@ -164,6 +184,7 @@ public:
    Test->TestEqual(TEXT("Host E hold registers"),Pads[0]->ActiveScanner.Get(),static_cast<APawn*>(Character));
    Next(1.3f); break;
   case 1:
+   CheckAlarm(1);
    Test->TestTrue(TEXT("Active incident deducts actual team money"),Merchant->GetCredits()<CreditsBefore);
    Test->TestEqual(TEXT("Two-player rate one per second"),Event->LossPerSecond,1);
    Test->TestEqual(TEXT("Client receives the same one-per-second rate"),RemoteEvent->LossPerSecond,1);
@@ -179,6 +200,7 @@ public:
    Test->TestTrue(TEXT("Non-overlapping scans do not repair"),Event->IsActive());
    Press(Interaction,Pads[0]); Next(0.5f); break;
   case 4:
+   CheckAlarm(0);
    Test->TestFalse(TEXT("Two distinct held scans complete"),Event->IsActive());
    Test->TestFalse(TEXT("Client receives recovery"),RemoteEvent->IsActive());
    Test->TestFalse(TEXT("Remote locator disabled after authentication"),RemoteEvent->FaultHighlight->bEnabled);
@@ -219,6 +241,7 @@ public:
    Test->TestEqual(TEXT("Fourth participant rate"),Event->LossPerSecond,3);
    Pads[1]->Destroy(); Next(0.3f); break;
   case 11:
+   CheckAlarm(0);
    Test->TestFalse(TEXT("Removed endpoint releases unrepairable event"),Event->IsActive());
    Test->TestFalse(TEXT("Removed endpoint releases healthy sorter"),Sorters[0]->IsSafetyInterlocked());
    Test->TestFalse(TEXT("Invalid configuration rejects another incident"),Event->StartFault());
@@ -238,11 +261,25 @@ public:
   return false;
  }
 private:
+ void CheckAlarm(int32 Expected)
+ {
+  for(UWorld* W : {World,Client}) if(W)
+  {
+   int32 Count=0;
+   for(TObjectIterator<UAudioComponent> It;It;++It)
+    if(It->GetWorld()==W&&It->Sound&&It->Sound->GetFName()==FName(TEXT("S_MD_Fingerprint_AlarmLoop"))&&It->IsPlaying())
+    {
+     ++Count; Test->TestFalse(TEXT("Global alarm is not attenuated or spatialized at distant pads"),It->bAllowSpatialization);
+    }
+   Test->TestEqual(TEXT("One global fingerprint alarm per peer while faulty, none after repair/removal"),Count,Expected);
+  }
+ }
  bool SoloSteps()
  {
   switch(Phase)
   {
   case 0:
+   CheckAlarm(1);
    Press(Interaction,Pads[0]); SavedDeadline=Event->SoloDeadline;
    Test->TestTrue(TEXT("Solo global locator enabled"),Event->FaultHighlight->bEnabled);
    for(auto* Pad : Pads)
@@ -256,6 +293,7 @@ private:
    Press(Interaction,Pads[0]); Test->TestEqual(TEXT("Repeated same pad cannot extend solo deadline"),Event->SoloDeadline,SavedDeadline);
    Interaction->InteractReleased(); Next(1.f); break;
   case 2:
+   CheckAlarm(1);
    Test->TestEqual(TEXT("Solo timeout clears first endpoint"),Event->SoloFirstPad,INDEX_NONE);
    Test->TestEqual(TEXT("Solo never loses money"),Merchant->GetCredits(),CreditsBefore);
    Event->SoloWindowSeconds=4.f;
@@ -264,6 +302,7 @@ private:
   case 3:
    Press(Interaction,Pads[1]);
    Test->TestFalse(TEXT("Solo opposite endpoint within window repairs"),Event->IsActive());
+   CheckAlarm(0);
    Test->TestFalse(TEXT("Solo restores normal sorter"),Sorters[0]->IsOperationBlocked());
    Test->TestTrue(TEXT("Solo preserves unrelated sorter fault"),Sorters[1]->FacilityRepair->IsFaultActive());
    Interaction->InteractReleased();
@@ -289,6 +328,7 @@ private:
    Test->TestTrue(TEXT("Automatic timer recurs after repair"),AutoEvent->IsActive());
    Test->TestEqual(TEXT("Recurring timer starts exactly second incident"),AutoEvent->Fault->GetSnapshot().FaultId,2);
    AutoEvent->Destroy();
+   CheckAlarm(0);
    Test->TestFalse(TEXT("Controller removal releases its safety lock"),Sorters[0]->IsSafetyInterlocked());
    return true;
   }

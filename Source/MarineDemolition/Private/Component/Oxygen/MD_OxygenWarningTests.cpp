@@ -80,9 +80,13 @@ public:
 		case 1:
 			Refresh(); CheckLow(1); CheckHeartbeat(1);
 			for (int32 I = 0; I < 5; ++I) Refresh();
-			CheckLow(1); CheckHeartbeat(1); Wait(4.2f); return false;
+			CheckLow(1); CheckHeartbeat(1);
+			ForOxygen([&](UMD_OxygenComponent* O) { if (Cast<APawn>(O->GetOwner())->IsLocallyControlled()) LoopIds.Add(O, O->LowOxygenAudio.Id); });
+			Wait(3.2f); return false;
 		case 2:
-			Refresh(); CheckLow(1); CheckHeartbeat(1); SetRatio(.3751f); break;
+			Refresh(); CheckLow(1); CheckHeartbeat(1);
+			ForOxygen([&](UMD_OxygenComponent* O) { if (const int32* Id = LoopIds.Find(O)) Test->TestEqual(TEXT("Three-second alarm repeats on the same loop, not an additional audio component"), O->LowOxygenAudio.Id, *Id); });
+			SetRatio(.3751f); break;
 		case 3:
 			Refresh(); break;
 		case 4:
@@ -130,7 +134,7 @@ private:
 				auto* O = It->FindComponentByClass<UMD_OxygenComponent>();
 				Test->AddInfo(FString::Printf(TEXT("Phase %d peer %d oxygen %.5f/%.5f low %d"), Phase, int32(W->GetNetMode()), O->GetAttributeSet()->GetOxygen(), O->GetAttributeSet()->GetMaxOxygen(), O->bAudioOxygenLow));
 			}
-			Test->TestEqual(TEXT("Low warning plays once per local player at three of eight cells, repeats after four seconds, and stops above threshold"), CountSound(W, TEXT("S_V2_Character_Oxygen_Low")), Expected);
+			Test->TestEqual(TEXT("Three-beep loop plays once per local player at three of eight cells and stops above threshold"), CountSound(W, TEXT("S_MD_Oxygen_AlarmLoop")), Expected);
 			for (TActorIterator<AMD_Character> It(W); It; ++It) if (!It->IsLocallyControlled())
 				Test->TestFalse(TEXT("Remote pawn never starts a private low oxygen warning"), It->FindComponentByClass<UMD_OxygenComponent>()->bAudioOxygenLow);
 		}
@@ -141,6 +145,7 @@ private:
 			Test->TestEqual(TEXT("Heartbeat has one loop per local player and stops on recovery, surfacing or death"), CountSound(W, TEXT("S_E_Player_HeartbeatLoop_01")), Expected);
 	}
 	FAutomationTestBase* Test; bool bSolo; TStrongObjectPtr<ULevelEditorPlaySettings> Settings;
+	TMap<UMD_OxygenComponent*, int32> LoopIds;
 	double Start = 0.; float At = 0.f; float TargetRatio = 1.f; int32 Phase = 0; UWorld* World = nullptr; UWorld* Client = nullptr;
 };
 
