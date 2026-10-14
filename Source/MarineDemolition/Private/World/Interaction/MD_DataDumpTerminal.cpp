@@ -1,4 +1,6 @@
 #include "World/Interaction/MD_DataDumpTerminal.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
 
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Data/Equipment/MD_QuestItemDefinition.h"
@@ -12,6 +14,11 @@
 
 AMD_DataDumpTerminal::AMD_DataDumpTerminal()
 {
+	// 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::StartDump;
+
 	// 홀드 중에만 서버에서 켠다
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
@@ -98,7 +105,8 @@ FText AMD_DataDumpTerminal::GetInteractionPrompt_Implementation(AActor* Interact
 		return FText::Format(LOCTEXT("PromptBusy", "{0} 덤프 중... {1}%"), HolderName, FText::AsNumber(Percent));
 	}
 
-	return LOCTEXT("PromptIdle", "[E] 길게 눌러 데이터 덤프");
+	// 대기 상태의 덤프 시작 행동을 공통 설정에서 조회
+	return UMD_InteractionPresentationLibrary::FindActorActionPrompt(this, Interactor);
 }
 
 bool AMD_DataDumpTerminal::CanInteract_Implementation(AActor* Interactor) const

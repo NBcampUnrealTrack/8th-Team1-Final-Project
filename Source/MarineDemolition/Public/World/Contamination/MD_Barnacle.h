@@ -109,6 +109,8 @@ private:
 	/** 히트 되는 순간을 모든 클라이언트에서 재생 */
 	UFUNCTION(NetMulticast, Unreliable)
 	void MulticastPlayImpactWobble();
+	UFUNCTION(NetMulticast, Reliable)
+	void MulticastPlayRemovalSound();
 
 	/** 고정 로컬 축과 에디터 설정값으로 흔들림을 시작한다 */
 	void StartImpactWobble();

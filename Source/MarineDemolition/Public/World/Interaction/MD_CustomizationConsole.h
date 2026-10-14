@@ -6,6 +6,8 @@
 #include "GameFramework/Actor.h"
 #include "MD_CustomizationConsole.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class AMD_Character;
 class APlayerController;
 class UCameraComponent;
@@ -42,6 +44,10 @@ public:
 
 	// 누르고 있는 회전 입력의 방향을 적용하고 0 입력으로 정지
 	void TurnFacing(float TurnInput);
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	virtual void BeginPlay() override;

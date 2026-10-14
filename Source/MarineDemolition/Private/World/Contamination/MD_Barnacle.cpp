@@ -1,4 +1,5 @@
 #include "World/Contamination/MD_Barnacle.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
@@ -200,7 +201,7 @@ void AMD_Barnacle::Tick(const float DeltaSeconds)
 
 void AMD_Barnacle::ApplyRemovalProgressVisual()
 {
-	if (!IsValid(Mesh))
+	if (!IsValid(Mesh) || Mesh->GetNumMaterials() == 0)
 	{
 		return;
 	}
@@ -212,6 +213,11 @@ void AMD_Barnacle::ApplyRemovalProgressVisual()
 
 	if (MeshMID)
 	{
+		// Authored shell materials may use wobble/pop feedback without a removal
+		// shader. Preserve their texture rather than expecting a proxy-only input.
+		float Unused = 0.f;
+		if (!MeshMID->GetScalarParameterValue(FHashedMaterialParameterInfo(
+			MDMaterialParameterNames::Barnacle::RemovalProgress), Unused)) return;
 		// 코드는 0~1 숫자 하나만 넘긴다. 어떻게 벗겨 보일지는 머티리얼이 정한다.
 		MDMaterialTint::SetScalarParameterChecked(
 			MeshMID,
@@ -245,6 +251,7 @@ bool AMD_Barnacle::InitializeFromSpawner(
 
 void AMD_Barnacle::BreakOff()
 {
+	MulticastPlayRemovalSound();
 	UWorld* const World = GetWorld();
 	if (!World)
 	{
@@ -282,6 +289,11 @@ void AMD_Barnacle::BreakOff()
 	Destroy();
 }
 
+void AMD_Barnacle::MulticastPlayRemovalSound_Implementation()
+{
+	MDAudioFeedback::World(this, TEXT("SFX.Clean.Barnacle.Pop"));
+}
+
 #if WITH_EDITOR
 void AMD_Barnacle::CheckForErrors()
 {
@@ -291,6 +303,11 @@ void AMD_Barnacle::CheckForErrors()
 	if (!World || !IsValid(Mesh))
 	{
 		return;
+	}
+	// Intentionally authored demolition-wall barnacles gate cutting until removed.
+	for (AActor* Parent = GetAttachParentActor(); Parent; Parent = Parent->GetAttachParentActor())
+	{
+		if (Parent->IsA<AMD_CuttableWall>()) return;
 	}
 
 	TArray<AActor*> OverlappingActors;

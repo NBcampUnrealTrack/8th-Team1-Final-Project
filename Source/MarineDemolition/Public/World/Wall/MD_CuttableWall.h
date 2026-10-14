@@ -67,9 +67,13 @@ public:
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Wall")
 	void Cut(AActor* Cutter);
 
-	/** 오염 상태와 무관하게 아직 파괴되지 않은 벽이면 절단할 수 있다. */
+	/** Attached barnacles must be removed first; surface slime may remain. */
 	UFUNCTION(BlueprintPure, Category = "MD|Wall")
 	bool CanCut() const;
+
+	/** Weighted remaining/initial surface-slime size, clamped to 0..1. */
+	UFUNCTION(BlueprintPure, Category = "MD|Wall")
+	float GetRemainingContaminationRatio() const;
 
 	UFUNCTION(BlueprintCallable, Category = "MD|Wall")
 	void ScanHighlight(float Duration = 3.0f, AActor* Scanner = nullptr);

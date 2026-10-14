@@ -6,10 +6,12 @@
 #include "Blueprint/UserWidget.h"
 #include "MD_ExpeditionStatusWidget.generated.h"
 
+class AGameStateBase;
+class UMD_MerchantComponent;
 class UTextBlock;
-class UProgressBar;
+class UWorld;
 
-// HUD 원정 상태 패널. 누적 평가 점수와 오늘 점검 기준을 표시
+// HUD 원정 상태 패널의 크레딧 기반 점수와 증감 알림
 UCLASS()
 class MARINEDEMOLITION_API UMD_ExpeditionStatusWidget : public UUserWidget
 {
@@ -20,33 +22,39 @@ protected:
 
     virtual void NativeDestruct() override;
 
-private:
-    // 현재 누적 평가 점수를 표시한다.
-    UPROPERTY(meta = (BindWidget))
+protected:
+    // 점수 표시 레이아웃에 연결하는 현재 크레딧 본문
+    UPROPERTY(meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> ScoreText;
 
-    // 누적 평가 점수 글자의 외곽 그림자를 표시한다.
-    UPROPERTY(meta = (BindWidget))
+    // 본문과 동일한 현재 크레딧을 표시하는 그림자
+    UPROPERTY(meta = (BindWidgetOptional))
     TObjectPtr<UTextBlock> ScoreText_Shadow;
 
-    // 현재 일차의 목표 점수를 표시한다.
-    UPROPERTY(meta = (BindWidget))
-    TObjectPtr<UTextBlock> GoalText;
+    // 위젯 월드가 변경되어도 기존 구독을 해제할 원본 월드
+    TWeakObjectPtr<UWorld> BoundWorld;
 
-    // 목표 점수 글자의 외곽 그림자를 표시한다.
-    UPROPERTY(meta = (BindWidget))
-    TObjectPtr<UTextBlock> GoalText_Shadow;
+    // 서버와 클라이언트가 함께 조회하는 크레딧 복제 상태
+    TWeakObjectPtr<UMD_MerchantComponent> BoundMerchantComponent;
 
-    // 목표 점수 대비 현재 누적 점수의 달성률을 표시한다.
-    UPROPERTY(meta = (BindWidget))
-    TObjectPtr<UProgressBar> ScoreProgress;
+    // GameState 준비와 교체 알림의 해제 식별자
+    FDelegateHandle GameStateSetHandle;
 
-    // 원정 상태 표시를 주기적으로 갱신하는 타이머를 보관한다.
-    FTimerHandle UpdateStatusTimerHandle;
+    // 최초 표시를 증감에서 제외하고 중복 알림을 거르는 직전 크레딧
+    int32 CachedCredits = 0;
 
-    // 현재 GameState의 누적 점수와 일차별 목표 점수를 UI에 반영한다.
-    void UpdateStatusText();
+protected:
+    // 새 GameState의 크레딧 구독과 최초 표시 기준 설정
+    void HandleGameStateSet(AGameStateBase* GameState);
 
-    // 본문과 그림자 TextBlock에 같은 내용을 적용한다.
+    // 실제 크레딧 변화의 본문 반영과 Feed 전달
+    UFUNCTION()
+    void HandleMerchantStateChanged();
+
+    // Blueprint Feed 대기열에 전달할 실제 크레딧 증감
+    UFUNCTION(BlueprintImplementableEvent, Category = "MD|HUD")
+    void OnCreditDelta(int32 Delta);
+
+    // 본문과 그림자에 동일한 현재 크레딧 표시
     void SetTextPair(UTextBlock* TextWidget, UTextBlock* ShadowWidget, FText Text);
 };

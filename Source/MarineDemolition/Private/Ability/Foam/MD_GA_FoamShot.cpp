@@ -24,6 +24,7 @@ namespace
 UMD_GA_FoamShot::UMD_GA_FoamShot()
 {
 	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
+	FireSoundTag = FGameplayTag::RequestGameplayTag(TEXT("SFX.Hazard.FoamGun.Fire"), false);
 
 	// 기본 태그. 대응 정의는 DA_MD_Audio_Hazard 에 있고, 없으면 조용히 넘어간다
 	EmptySoundTag = FGameplayTag::RequestGameplayTag(

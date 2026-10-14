@@ -1,9 +1,12 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "GameFramework/Actor.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_FingerprintPad.generated.h"
+
+class UMD_InteractionPromptComponent;
 
 class AMD_FingerprintInterlock;
 class UBoxComponent;
@@ -60,6 +63,10 @@ public:
 	virtual bool IsHoldInteraction_Implementation() const override { return true; }
 	virtual void Interact_Implementation(AActor* Interactor) override;
 	virtual void InteractReleased_Implementation(AActor* Interactor) override;
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
@@ -71,4 +78,6 @@ private:
 	void ApplyDisplayLayout();
 	float DisplayOpacity = 1.f;
 	int32 LastPresentationState = INDEX_NONE;
+	double LastAudioScanTime = -1.;
+	FMD_AudioHandle ScanAudio;
 };

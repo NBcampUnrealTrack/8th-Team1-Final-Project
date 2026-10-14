@@ -2,6 +2,7 @@
 
 
 #include "World/Merchant/MD_Merchant.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
 
 #include "CommonActivatableWidget.h"
 #include "Components/SkeletalMeshComponent.h"
@@ -30,6 +31,11 @@
 
 AMD_Merchant::AMD_Merchant()
 {
+	// 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::Talk;
+
 	PrimaryActorTick.bCanEverTick = false;
 
 	Root = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));

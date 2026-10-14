@@ -8,6 +8,8 @@
 #include "Types/Trash/MD_TrashBinSpillTypes.h"
 #include "MD_TrashBin.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class UBoxComponent;
 class UMD_TrashContentClaimSubsystem;
 class UMD_TrashBinLiquidSloshVisualComponent;
@@ -182,6 +184,10 @@ public:
 	UPROPERTY(BlueprintAssignable, Category = "MD|Trash Bin|Liquid")
 	FMDOnTrashBinLiquidChanged OnLiquidChanged;
 
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
+
 protected:
 	virtual void BeginPlay() override;
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
@@ -299,7 +305,7 @@ private:
 	void HandleContentDestroyed(AActor* DestroyedActor);
 
 	UFUNCTION()
-	void OnRep_ContentCount();
+	void OnRep_ContentCount(int32 PreviousCount);
 
 	UFUNCTION()
 	void OnRep_LiquidState();

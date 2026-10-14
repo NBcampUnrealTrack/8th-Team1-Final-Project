@@ -1,4 +1,5 @@
 #include "World/Facility/MD_FingerprintInterlock.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "World/Facility/MD_FingerprintPad.h"
 #include "World/Trash/MD_TrashSorter.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
@@ -280,6 +281,8 @@ void AMD_FingerprintInterlock::Tick(float DeltaSeconds)
 	{
 		const APawn* Pawn = SoloPawn.Get();
 		const auto* Interaction = Pawn ? Pawn->FindComponentByClass<UMD_InteractionComponent>() : nullptr;
+		if (GetWorld()->GetTimeSeconds() >= SoloDeadline)
+			Fault->PlayFeedbackForAll(TEXT("SFX.Facility.Fingerprint.Timeout"), GetActorLocation());
 		if (GetWorld()->GetTimeSeconds() >= SoloDeadline || !Pawn || !Pawn->GetController()
 			|| !Interaction || !Interaction->CanOwnerInteract()) ResetScans();
 	}

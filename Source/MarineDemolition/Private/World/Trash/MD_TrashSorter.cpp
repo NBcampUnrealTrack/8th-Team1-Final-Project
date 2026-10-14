@@ -1,4 +1,7 @@
 #include "World/Trash/MD_TrashSorter.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -7,6 +10,7 @@
 #include "Component/Facility/MD_FacilityRepairComponent.h"
 #include "Engine/GameInstance.h"
 #include "Engine/World.h"
+#include "EngineUtils.h"
 #include "GameFramework/Pawn.h"
 #include "Game/MD_GameStateBase.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
@@ -32,6 +36,11 @@ UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_TrashSorter_ErrorFinished, "Event.TrashSorter.
 
 AMD_TrashSorter::AMD_TrashSorter()
 {
+	// 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::SortTrash;
+
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	FacilityRepair = CreateDefaultSubobject<UMD_FacilityRepairComponent>(TEXT("FacilityRepair"));
@@ -41,7 +50,6 @@ AMD_TrashSorter::AMD_TrashSorter()
 	SorterStateTree = CreateDefaultSubobject<UStateTreeComponent>(TEXT("SorterStateTree"));
 	SorterStateTree->SetStartLogicAutomatically(false);
 	SortingAnimation = CreateDefaultSubobject<UMD_TrashSorterAnimationComponent>(TEXT("SortingAnimation"));
-	SortActionText = NSLOCTEXT("MDInteraction", "TrashSorterSortAction", "분류");
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
@@ -53,10 +61,12 @@ AMD_TrashSorter::AMD_TrashSorter()
 
 	IntakeVolume = CreateDefaultSubobject<UBoxComponent>(TEXT("IntakeVolume"));
 	IntakeVolume->SetupAttachment(Mesh);
-	// 기존 BP의 컴포넌트 참조만 보존한다. 분류는 InteractTrace로만 선택한다.
-	IntakeVolume->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	IntakeVolume->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+	IntakeVolume->SetCollisionObjectType(ECC_WorldDynamic);
 	IntakeVolume->SetCollisionResponseToAllChannels(ECR_Ignore);
-	IntakeVolume->SetGenerateOverlapEvents(false);
+	IntakeVolume->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Overlap);
+	IntakeVolume->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
+	IntakeVolume->SetGenerateOverlapEvents(true);
 	IntakeVolume->SetCanEverAffectNavigation(false);
 }
 
@@ -105,9 +115,17 @@ void AMD_TrashSorter::BeginPlay()
 	// 기존 BP의 충돌 프로파일이 프로젝트 InteractTrace 기본 Ignore를 상속해도 조준된다.
 	Mesh->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
 
-	// 기존 BP에 저장된 충돌/Overlap 설정도 끈다. 영역 크기와 위치는 분류에 영향이 없다.
-	IntakeVolume->SetGenerateOverlapEvents(false);
-	IntakeVolume->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	// Keep the authored inlet shape, but enforce server-only queries even for existing BP defaults.
+	IntakeVolume->SetCollisionObjectType(ECC_WorldDynamic);
+	IntakeVolume->SetCollisionResponseToAllChannels(ECR_Ignore);
+	IntakeVolume->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Overlap);
+	IntakeVolume->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Overlap);
+	IntakeVolume->SetGenerateOverlapEvents(HasAuthority());
+	IntakeVolume->SetCollisionEnabled(HasAuthority() ? ECollisionEnabled::QueryOnly : ECollisionEnabled::NoCollision);
+	if (HasAuthority())
+	{
+		IntakeVolume->OnComponentBeginOverlap.AddUniqueDynamic(this, &ThisClass::HandleIntakeBeginOverlap);
+	}
 
 	// 드롭다운에 Bonus.* 도 뜨므로 칸이 아닌 값을 걸러낸다
 	if (!UMD_TrashLibrary::IsTrashCategory(AcceptedCategory))
@@ -121,6 +139,7 @@ void AMD_TrashSorter::BeginPlay()
 	if (HasAuthority() && !IsOperationBlocked())
 	{
 		SorterStateTree->StartLogic();
+		RequestOverlappingIntake();
 	}
 }
 
@@ -138,14 +157,15 @@ void AMD_TrashSorter::SetInteractionHighlighted_Implementation(bool bHighlighted
 FText AMD_TrashSorter::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
 	if (bSafetyInterlocked) return NSLOCTEXT("MDInteraction", "SorterSafetyLock", "처리장 안전 정지 · 지문 인증 필요");
-	if (!CanInteract_Implementation(Interactor) || SortActionText.IsEmpty())
+	// 실제 분류 가능한 상태에서만 행동 안내 표시
+	if (CanInteract_Implementation(Interactor) == false)
 	{
+		// 사용할 수 없는 분류 행동의 안내 생략
 		return FText::GetEmpty();
 	}
 
-	return FText::Format(
-		NSLOCTEXT("MDInteraction", "TrashSorterPromptFormat", "[E] {0}"),
-		SortActionText);
+	// 선택한 분류 유형의 공통 설정 문구 반환
+	return UMD_InteractionPresentationLibrary::FindActorActionPrompt(this, Interactor);
 }
 
 bool AMD_TrashSorter::CanInteract_Implementation(AActor* Interactor) const
@@ -191,14 +211,68 @@ void AMD_TrashSorter::Interact_Implementation(AActor* Interactor)
 
 	// Invalid held items still reach Interact so the tree can play its Error feedback.
 	const bool bCanAcceptItem = CanAcceptHeldItem(Interactor);
+	QueueSortRequest(bCanAcceptItem ? GetHeldSortableForInteractor(Interactor) : nullptr, Interactor, false);
+}
+
+void AMD_TrashSorter::QueueSortRequest(AActor* Item, AActor* Interactor, bool bFromIntake)
+{
 	PendingInteractor = Interactor;
-	PendingItem = bCanAcceptItem ? GetHeldSortableForInteractor(Interactor) : nullptr;
+	PendingItem = Item;
 	bHasPendingSortRequest = true;
+	bPendingIntake = bFromIntake;
 	// Reserve both accepted and rejected requests until their event has been processed.
 	RuntimeState.bReady = false;
 	RuntimeState.bHasResult = false;
 	ForceNetUpdate();
-	SorterStateTree->SendStateTreeEvent(bCanAcceptItem ? TAG_TrashSorter_Request : TAG_TrashSorter_Rejected);
+	SorterStateTree->SendStateTreeEvent(IsValid(Item) ? TAG_TrashSorter_Request : TAG_TrashSorter_Rejected);
+}
+
+void AMD_TrashSorter::HandleIntakeBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor,
+	UPrimitiveComponent* OtherComponent, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	TryRequestIntake(OtherActor);
+}
+
+bool AMD_TrashSorter::CanAcceptIntakeItem(AActor* Item) const
+{
+	if (!IsValid(Item) || Item->IsActorBeingDestroyed() || Item->GetAttachParentActor()
+		|| Item->Implements<UMD_TrashContainer>() || !Item->Implements<UMD_TrashSortable>()
+		|| !IntakeVolume->IsOverlappingActor(Item)) return false;
+
+	const AMD_QuestItem* QuestItem = Cast<AMD_QuestItem>(Item);
+	if (IsValid(QuestItem) && !QuestItem->CanBeDestroyedByGameplay()) return false;
+
+	// Physics handles do not attach trash or assign its Owner. Check every pawn's actual carry state.
+	for (TActorIterator<APawn> It(GetWorld()); It; ++It)
+	{
+		const UMD_InteractionComponent* Interaction = It->FindComponentByClass<UMD_InteractionComponent>();
+		if (Interaction && Interaction->GetHeldActor() == Item) return false;
+	}
+	return true;
+}
+
+bool AMD_TrashSorter::TryRequestIntake(AActor* Item)
+{
+	if (!HasAuthority() || IsOperationBlocked() || !RuntimeState.bReady || RuntimeState.bSorting
+		|| bHasPendingSortRequest || !SorterStateTree->IsRunning() || SorterStateTree->IsPaused()
+		|| !UMD_TrashLibrary::IsTrashCategory(AcceptedCategory) || !CanAcceptIntakeItem(Item)) return false;
+
+	FMD_TrashSortResult Result;
+	if (!ResolveSortResult(Item, Result)) return false;
+
+	QueueSortRequest(Item, nullptr, true);
+	return true;
+}
+
+void AMD_TrashSorter::RequestOverlappingIntake()
+{
+	if (!HasAuthority() || !RuntimeState.bReady || !SorterStateTree->IsRunning()) return;
+	TArray<AActor*> Items;
+	IntakeVolume->GetOverlappingActors(Items);
+	for (AActor* Item : Items)
+	{
+		if (TryRequestIntake(Item)) break;
+	}
 }
 
 bool AMD_TrashSorter::EnterReadyState()
@@ -207,6 +281,7 @@ bool AMD_TrashSorter::EnterReadyState()
 	ClearPendingSortRequest();
 	RuntimeState.bReady = true;
 	ForceNetUpdate();
+	RequestOverlappingIntake();
 	return true;
 }
 
@@ -222,6 +297,7 @@ void AMD_TrashSorter::ClearPendingSortRequest()
 	PendingInteractor.Reset();
 	PendingItem.Reset();
 	bHasPendingSortRequest = false;
+	bPendingIntake = false;
 }
 
 bool AMD_TrashSorter::BeginPendingSort()
@@ -230,10 +306,11 @@ bool AMD_TrashSorter::BeginPendingSort()
 
 	AActor* Interactor = PendingInteractor.Get();
 	AActor* Item = PendingItem.Get();
+	const bool bFromIntake = bPendingIntake;
 	// Consume the request once, including failures. Never substitute a newly held item.
 	ClearPendingSortRequest();
-	if (!IsValid(Item) || !CanAcceptHeldItem(Interactor)
-		|| GetHeldSortableForInteractor(Interactor) != Item)
+	if (!IsValid(Item) || (bFromIntake ? !CanAcceptIntakeItem(Item)
+		: (!CanAcceptHeldItem(Interactor) || GetHeldSortableForInteractor(Interactor) != Item)))
 	{
 		return false;
 	}
@@ -247,14 +324,14 @@ bool AMD_TrashSorter::BeginPendingSort()
 		return false;
 	}
 
-	UMD_InteractionComponent* Interaction = Interactor->FindComponentByClass<UMD_InteractionComponent>();
-	if (!IsValid(Interaction)) return false;
+	UMD_InteractionComponent* Interaction = bFromIntake ? nullptr : Interactor->FindComponentByClass<UMD_InteractionComponent>();
+	if (!bFromIntake && !IsValid(Interaction)) return false;
 
 	const FVector SwallowLocation = Item->GetActorLocation();
 	const FMD_SorterItemVisual ItemVisual = UMD_TrashSorterAnimationComponent::CaptureItem(Item);
 	RuntimeState.bReady = false;
 	RuntimeState.bSorting = true;
-	Interaction->ReleaseHeldActor();
+	if (Interaction) Interaction->ReleaseHeldActor();
 
 	int32 RefundCredits = 0;
 	if (!ConsumeSortable(Item, MDGameState, Result, RefundCredits))
@@ -370,11 +447,13 @@ void AMD_TrashSorter::RefreshOperationBlock()
 	else if (UMD_TrashLibrary::IsTrashCategory(AcceptedCategory))
 	{
 		SorterStateTree->StartLogic();
+		RequestOverlappingIntake();
 	}
 }
 
 void AMD_TrashSorter::MulticastErrorFeedback_Implementation()
 {
+	MDAudioFeedback::World(this, TEXT("SFX.Mothership.Sort.Wrong"));
 	OnSortErrorFeedback();
 }
 
@@ -462,6 +541,7 @@ bool AMD_TrashSorter::GetServerLedgers(
 
 void AMD_TrashSorter::MulticastItemSwallowed_Implementation(const bool bCorrectSort, const FVector Location)
 {
+	MDAudioFeedback::At(this, bCorrectSort ? TEXT("SFX.Mothership.Sort.Correct") : TEXT("SFX.Mothership.Sort.Wrong"), Location);
 	OnItemSwallowed(bCorrectSort, Location);
 }
 

@@ -13,7 +13,7 @@
 AMD_PowerConduit::AMD_PowerConduit()
 {
 	FacilityRepair->Kind = EMD_FacilityKind::WiringPanel;
-	FacilityRepair->bAllowManualRepair = true;
+	FacilityRepair->bAllowManualRepair = false;
 	FacilityRepair->bAllowInsulationTape = true;
 	RequiredRepairToolTag = MDGameplayTags::Ability_UtilityRepair_Insulation;
 	// 절연테이프는 1회용: 수리 성공 시 핫바에서 1개 차감. 상호작용 키가 아니라 도구 입력(LMB)으로만 사용
@@ -30,6 +30,9 @@ void AMD_PowerConduit::BeginPlay()
 {
 	// 레벨 재진입 시 현재 월드의 메시 연결 허용
 	bPowerLightsShuttingDown = false;
+	// Cut wires are repaired with one insulation tape, independently of the breaker puzzle.
+	FacilityRepair->bAllowManualRepair = false;
+	FacilityRepair->bAllowInsulationTape = true;
 	Super::BeginPlay();
 	// 초기 복제와 BeginPlay 순서에 관계없이 BP 메시 슬롯 설정 등록
 	OnUtilityStateChangedVisual(UtilityState);
@@ -163,6 +166,22 @@ void AMD_PowerConduit::ApplyPoweredLights()
 		UStaticMeshComponent* MeshComponent = Cast<UStaticMeshComponent>(ReferencedComponent);
 		// 액터 목록과 동일한 검증으로 실제 메시 슬롯 등록
 		AddPoweredMesh(MeshComponent, bPendingPowerMeshes);
+	}
+	for (const FMD_PowerLightTarget& Slot : PowerLightTargets)
+	{
+		UStaticMeshComponent* TargetMesh = Slot.MeshComponent;
+		if (!IsValid(TargetMesh) || TargetMesh->GetWorld()!=GetWorld() || TargetMesh->IsBeingDestroyed()
+			|| !IsValid(TargetMesh->GetOwner()) || TargetMesh->GetOwner()->IsActorBeingDestroyed()) continue;
+		if (Slot.MaterialIndex<0 || Slot.MaterialIndex>=TargetMesh->GetNumMaterials())
+		{
+			bPendingPowerMeshes |= !TargetMesh->GetStaticMesh() && Slot.MaterialIndex>=0;
+			continue;
+		}
+		if (ControlledPowerLights.ContainsByPredicate([&Slot](const FMD_PowerLightState& Entry)
+			{ return Entry.MeshComponent==Slot.MeshComponent && Entry.MaterialIndex==Slot.MaterialIndex; })) continue;
+		FMD_PowerLightState& State=ControlledPowerLights.AddDefaulted_GetRef();
+		State.MeshComponent=TargetMesh;State.MaterialIndex=Slot.MaterialIndex;
+		State.NormalMaterial=Slot.NormalMaterial;State.BlackoutMaterial=Slot.BlackoutMaterial;
 	}
 	// 현재 전선 고장과 메시 슬롯 설정을 준비된 관리자에 전달
 	RegisterPowerLights();

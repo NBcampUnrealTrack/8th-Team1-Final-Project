@@ -1,7 +1,10 @@
-﻿#include "Component/Interaction/MD_InteractionComponent.h"
+#include "Component/Interaction/MD_InteractionComponent.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "AbilitySystemComponent.h"
 #include "AbilitySystemInterface.h"
+#include "Character/MD_Character.h"
+#include "Component/Interaction/MD_GlassDrawingFocusComponent.h"
 #include "Audio/MD_AudioSubsystem.h"
 #include "Camera/CameraComponent.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
@@ -10,6 +13,7 @@
 #include "Data/Equipment/MD_ConsumeItemDefinition.h"
 #include "Component/Facility/MD_FacilityRepairComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "World/Door/MD_DoorFaultComponent.h"
 #include "World/Wall/MD_PowerConduit.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
@@ -30,10 +34,93 @@
 #include "World/Facility/MD_FingerprintInterlock.h"
 #include "World/Facility/MD_FingerprintPad.h"
 #include "World/Facility/MD_RepairInstruction.h"
+#include "UI/Game/MD_BreakerOperateWidget.h"
+#include "UI/MD_LocalUIManager.h"
+#include "UI/Foundation/MD_WidgetStack.h"
+#include "Engine/LocalPlayer.h"
+#include "GameFramework/PlayerController.h"
+
+void UMD_InteractionComponent::RequestBeginBreakerOperation(AMD_RepairInstructionController* Breaker, int32 Revision) { ServerBeginBreakerOperation(Breaker,Revision); }
+void UMD_InteractionComponent::RequestBreakerSlot(AMD_RepairInstructionController* Breaker, int32 Column, int32 Row, int32 Revision, int32 Id) { ServerBreakerSlot(Breaker,Column,Row,Revision,Id); }
+void UMD_InteractionComponent::RequestEndBreakerOperation(AMD_RepairInstructionController* Breaker, int32 Id) { ServerEndBreakerOperation(Breaker,Id); }
+
+void UMD_InteractionComponent::ServerBeginBreakerOperation_Implementation(AMD_RepairInstructionController* Breaker, int32 Revision)
+{
+	APawn* Pawn=GetOwnerPawn();
+	if(!IsValid(Pawn) || !Pawn->HasAuthority() || !IsValid(Breaker) || Breaker->GetWorld()!=GetWorld() || !CanOwnerInteract() || IsHolding()) return;
+	const int32 Id=Breaker->BeginOperation(Pawn,Revision);
+	UE_LOG(LogTemp,Verbose,TEXT("[BreakerUI] Begin id=%d rev=%d continue=%d aimed=%d pawn=%s"),Id,Revision,Breaker->CanContinueOperation(Pawn,Revision),Breaker->GetAimedKnobColumn(Pawn),*GetNameSafe(Pawn));
+	if(Id>0) ClientBeginBreakerOperation(Breaker,Revision,Id);
+}
+
+void UMD_InteractionComponent::ClientBeginBreakerOperation_Implementation(AMD_RepairInstructionController* Breaker, int32 Revision, int32 Id)
+{
+	APawn* Pawn=GetOwnerPawn(); auto* PC=Pawn?Cast<APlayerController>(Pawn->GetController()):nullptr;
+	if(!PC || !PC->IsLocalController() || !IsValid(Breaker) || Id<=0 || !CanOwnerInteract() || IsHolding()) { RequestEndBreakerOperation(Breaker,Id); return; }
+	if(BreakerWidget) BreakerWidget->DeactivateWidget();
+	auto Init=[&](UCommonActivatableWidget& Screen) { auto& Widget=static_cast<UMD_BreakerOperateWidget&>(Screen); Widget.InitializeOperation(Breaker,this,Revision,Id); BreakerWidget=&Widget; };
+	UMD_LocalUIManager* UI=PC->GetLocalPlayer()?PC->GetLocalPlayer()->GetSubsystem<UMD_LocalUIManager>():nullptr;
+	if(UI && UI->IsLayerRegistered(MDGameplayTags::UI_Layer_GameMenu))
+	{
+		// An inactive screen can remain the stack's active pointer during its exit transition.
+		// Always run the initializer for the newly granted operation instead of the manager's class-only deduplication.
+		UI->FindLayerStack(MDGameplayTags::UI_Layer_GameMenu)->AddWidget<UCommonActivatableWidget>(UMD_BreakerOperateWidget::StaticClass(),Init);
+	}
+	else
+	{
+		BreakerWidget=CreateWidget<UMD_BreakerOperateWidget>(PC,UMD_BreakerOperateWidget::StaticClass());
+		if(BreakerWidget) { BreakerWidget->InitializeOperation(Breaker,this,Revision,Id); BreakerWidget->UseFallbackInput(); BreakerWidget->AddToPlayerScreen(500); BreakerWidget->ActivateWidget(); }
+	}
+	if(!BreakerWidget) RequestEndBreakerOperation(Breaker,Id);
+}
+
+void UMD_InteractionComponent::ServerBreakerSlot_Implementation(AMD_RepairInstructionController* Breaker, int32 Column, int32 Row, int32 Revision, int32 Id)
+{
+	APawn* Pawn=GetOwnerPawn(); bool bAccepted=false;
+	if(IsValid(Pawn) && Pawn->HasAuthority() && IsValid(Breaker) && Breaker->GetWorld()==GetWorld() && CanOwnerInteract() && !IsHolding())
+	{
+		const double Now=GetWorld()->GetTimeSeconds();
+		if(!bHasServerInteractionTimestamp || Now-LastServerInteractionTimeSeconds>=FMath::Clamp(ServerInteractionMinInterval,0.05f,0.1f))
+		{
+			bHasServerInteractionTimestamp=true; LastServerInteractionTimeSeconds=Now;
+			bAccepted=Breaker->ApplyKnobSlot(Pawn,Column,Row,Revision,Id);
+		}
+	}
+	ClientBreakerSlotResult(Breaker,Id,Column,Row,bAccepted);
+}
+
+void UMD_InteractionComponent::ClientBreakerSlotResult_Implementation(AMD_RepairInstructionController* Breaker, int32 Id, int32 Column, int32 Row, bool bAccepted)
+{
+	if(BreakerWidget) BreakerWidget->HandleSlotResult(Breaker,Id,Column,Row,bAccepted);
+}
+
+void UMD_InteractionComponent::ServerEndBreakerOperation_Implementation(AMD_RepairInstructionController* Breaker, int32 Id)
+{
+	if(IsValid(Breaker) && Breaker->GetWorld()==GetWorld()) Breaker->EndOperation(GetOwnerPawn(),Id);
+}
+
+void UMD_InteractionComponent::NotifyBreakerWidgetClosed(UMD_BreakerOperateWidget* Widget) { if(BreakerWidget==Widget) BreakerWidget=nullptr; }
 
 void UMD_InteractionComponent::RequestInstructionRepair(AMD_RepairInstructionControl* Control, int32 ExpectedRevision)
 {
 	ServerInstructionRepair(Control, ExpectedRevision);
+}
+
+void UMD_InteractionComponent::RequestBreakerKnob(AMD_RepairInstructionController* Breaker, int32 Column, int32 ExpectedRevision)
+{
+	ServerBreakerKnob(Breaker, Column, ExpectedRevision);
+}
+
+void UMD_InteractionComponent::ServerBreakerKnob_Implementation(AMD_RepairInstructionController* Breaker, int32 Column, int32 ExpectedRevision)
+{
+	APawn* Pawn = GetOwnerPawn();
+	if (!IsValid(Pawn) || !Pawn->HasAuthority() || !CanOwnerInteract() || IsHolding()
+		|| !IsValid(Breaker) || Breaker->GetWorld()!=GetWorld() || Breaker->GetAimedKnobColumn(Pawn)!=Column
+		|| !IMD_Interactable::CanInteractWith(Breaker,Pawn)) return;
+	const double Now=GetWorld()->GetTimeSeconds();
+	if (bHasServerInteractionTimestamp && Now-LastServerInteractionTimeSeconds < FMath::Clamp(ServerInteractionMinInterval,0.05f,0.1f)) return;
+	bHasServerInteractionTimestamp=true; LastServerInteractionTimeSeconds=Now;
+	Breaker->ApplyKnob(Pawn,Column,ExpectedRevision);
 }
 
 void UMD_InteractionComponent::ServerInstructionRepair_Implementation(AMD_RepairInstructionControl* Control, int32 ExpectedRevision)
@@ -98,6 +185,13 @@ FText UMD_InteractionComponent::ResolveCurrentInteractionPrompt() const
 		|| !CanOwnerInteract())
 	{
 		return FText::GetEmpty();
+	}
+
+	const AMD_Character* Character = Cast<AMD_Character>(OwnerPawn);
+	const UMD_GlassDrawingFocusComponent* DrawingFocus = Character ? Character->GetGlassDrawingFocusComponent() : nullptr;
+	if (IsValid(DrawingFocus) && DrawingFocus->IsFocusActive())
+	{
+		return NSLOCTEXT("MDInteraction", "GlassDeskControls", "[좌클릭] 그리기 · [우클릭] 지우기 · [R] 색 변경 · [E] 나가기");
 	}
 
 	const FText AbilityPrompt = ResolveAbilityInteractionPrompt();
@@ -198,6 +292,18 @@ FText UMD_InteractionComponent::ResolveAbilityInteractionPrompt() const
 	{
 		return FText::GetEmpty();
 	}
+	if (Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Crowbar))
+	{
+		FVector Origin; FRotator Rotation;
+		OwnerPawn->GetController()->GetPlayerViewPoint(Origin, Rotation);
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(CrowbarPrompt), true, OwnerPawn);
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Origin, Origin + Rotation.Vector() * AbilityPromptTraceDistance, ECC_Visibility, Params))
+			if (const UMD_DoorFaultComponent* Door = Hit.GetActor() ? Hit.GetActor()->FindComponentByClass<UMD_DoorFaultComponent>() : nullptr;
+				Door && Door->CanReachForRepair(OwnerPawn))
+				return NSLOCTEXT("MDInteraction", "CrowbarDoorRepair", "[E] 강제 개방·수리 (빠루 · 영구 사용)");
+		return FText::GetEmpty();
+	}
 
 	const bool bCutTool =
 		Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_WallCut);
@@ -294,6 +400,7 @@ void UMD_InteractionComponent::BeginPlay()
 
 void UMD_InteractionComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if(BreakerWidget) BreakerWidget->DeactivateWidget();
 	CancelInteraction();
 
 	Super::EndPlay(EndPlayReason);
@@ -347,6 +454,18 @@ void UMD_InteractionComponent::TickComponent(float DeltaTime, ELevelTick TickTyp
 	}
 }
 
+bool UMD_InteractionComponent::TryClickInstructionRestart()
+{
+	APawn* Pawn=GetOwnerPawn();
+	if(!IsValid(Pawn) || !Pawn->IsLocallyControlled() || !CanOwnerInteract() || IsHolding()) return false;
+	UpdateInteractionFocus();
+	auto* Control=Cast<AMD_RepairInstructionControl>(CurrentTarget.Get());
+	if(!Control || Control->ControlKind!=EMD_InstructionControlKind::Restart || !IsValid(Control->Controller)
+		|| !IMD_Interactable::CanInteractWith(Control,Pawn)) return false;
+	RequestInstructionRepair(Control,Control->Controller->State.Revision);
+	return true;
+}
+
 void UMD_InteractionComponent::Interact()
 {
 	APawn* OwnerPawn = GetOwnerPawn();
@@ -356,7 +475,15 @@ void UMD_InteractionComponent::Interact()
 		return;
 	}
 
+	// Crowbar uses the same interaction input as doors, not the primary tool button.
+	if (TryUseCrowbar())
+	{
+		HoldInteractionTarget.Reset();
+		return;
+	}
 	AActor* Target = CurrentTarget.Get();
+	if(const auto* Control=Cast<AMD_RepairInstructionControl>(Target))
+		if(Control->ControlKind==EMD_InstructionControlKind::Restart) return;
 
 	// 이전 홀드가 해제 없이 남아 있으면 새 입력 전에 정리한다.
 	HoldInteractionTarget.Reset();
@@ -496,6 +623,8 @@ void UMD_InteractionComponent::ServerInteract_Implementation(AActor* RequestedAc
 {
 	APawn* OwnerPawn = GetOwnerPawn();
 	if (!IsValid(OwnerPawn) || !OwnerPawn->HasAuthority()) return;
+	// The breaker requires an aimed column and the client's puzzle revision.
+	if (IsValid(RequestedActor) && RequestedActor->IsA<AMD_RepairInstructionController>()) return;
 	// 사건 번호가 없는 일반 요청을 통한 패드 인증 우회 차단
 	if (IsValid(RequestedActor) == true && RequestedActor->IsA<AMD_FingerprintPad>() == true)
 	{
@@ -935,6 +1064,7 @@ void UMD_InteractionComponent::ReleaseHeldActor()
 	}
 
 	AActor* PreviousHeldActor = HeldActor;
+	if (IsValid(PreviousHeldActor)) MDAudioFeedback::World(GetOwner(), TEXT("SFX.Carry.Hand.Drop"));
 	HeldActor = nullptr;
 	HeldTargetOffset = FVector::ZeroVector;
 	HeldGrabPointOffset = FVector::ZeroVector;
@@ -1113,6 +1243,7 @@ void UMD_InteractionComponent::UpdateCarrySettle(float DeltaSeconds)
 
 void UMD_InteractionComponent::OnRep_HeldActor()
 {
+	if (!HeldActor) MDAudioFeedback::World(GetOwner(), TEXT("SFX.Carry.Hand.Drop"));
 	// HeldActor is only presentation state on clients. Actor/physics movement stays server-authoritative.
 	if (IsHolding())
 	{
@@ -1376,6 +1507,32 @@ bool UMD_InteractionComponent::TryUseFacilityTape()
 	if (!Repair || !Repair->bAllowInsulationTape || !Repair->HasRepairFault()) return false;
 	ServerRepairFacilityWithTape(Hit.GetActor(), Repair->GetRepairSnapshot().FaultId);
 	return true;
+}
+
+bool UMD_InteractionComponent::TryUseCrowbar()
+{
+	APawn* Pawn = GetOwnerPawn();
+	const UMD_EquipHotbarComponent* Hotbar = IsValid(Pawn) ? Pawn->FindComponentByClass<UMD_EquipHotbarComponent>() : nullptr;
+	const UMD_ToolDefinition* Tool = Hotbar ? Hotbar->GetCurrentTool() : nullptr;
+	if (!CanOwnerInteract() || IsHolding() || !IsValid(Tool)
+		|| !Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Crowbar)) return false;
+	FVector Origin; FRotator Rotation;
+	Pawn->GetController()->GetPlayerViewPoint(Origin, Rotation);
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(CrowbarInput), true, Pawn);
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, Origin, Origin + Rotation.Vector() * AbilityPromptTraceDistance, ECC_Visibility, Params)) return false;
+	UMD_DoorFaultComponent* Door = IsValid(Hit.GetActor()) ? Hit.GetActor()->FindComponentByClass<UMD_DoorFaultComponent>() : nullptr;
+	if (!Door || !Door->CanReachForRepair(Pawn)) return false;
+	ServerRepairDoorWithCrowbar(Hit.GetActor(), Door->GetSnapshot().FaultId);
+	return true;
+}
+
+void UMD_InteractionComponent::ServerRepairDoorWithCrowbar_Implementation(AActor* Target, int32 ExpectedFaultId)
+{
+	APawn* Pawn = GetOwnerPawn();
+	if (!IsValid(Target) || !IsValid(Pawn) || !Pawn->HasAuthority()) return;
+	if (UMD_DoorFaultComponent* Door = Target->FindComponentByClass<UMD_DoorFaultComponent>())
+		Door->TryRepairWithCrowbar(Pawn, ExpectedFaultId);
 }
 
 void UMD_InteractionComponent::ServerRepairFacilityWithTape_Implementation(AActor* Target, int32 ExpectedFaultId)

@@ -8,6 +8,8 @@
 #include "GameplayTagContainer.h"
 #include "MD_DayEndConsole.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class UCommonActivatableWidget;
 
 // 모선 하루 마감 콘솔. 한 명이 눌러도 즉시 출발, 미복귀 인원은 마감 시 자동 판정
@@ -22,6 +24,10 @@ public:
 	virtual bool RequiresServerInteraction_Implementation() const override { return false; }
 	virtual void Interact_Implementation(AActor* Interactor) override;
 	virtual void SetInteractionHighlighted_Implementation(bool bHighlighted) override;
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	UPROPERTY(VisibleAnywhere, Category="Console")

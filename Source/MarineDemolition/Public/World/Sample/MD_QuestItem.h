@@ -8,6 +8,8 @@
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_QuestItem.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class UStaticMeshComponent;
 
 /** 운반·퀘스트 귀속·납품 기능만 제공하고 게임플레이 파괴를 허용하지 않는 기본 퀘스트 아이템 클래스 */
@@ -49,6 +51,10 @@ public:
 	/** 아이템을 생성하거나 할당한 메인·반복 퀘스트와 납품 이벤트를 연결하는 식별자 */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Replicated, Category = "MD|Quest")
 	FPrimaryAssetId QuestDefinitionId;
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	/** 퀘스트 아이템의 물리 운반과 시각 표현을 담당하는 메시 */

@@ -2,6 +2,7 @@
 
 
 #include "Character/MD_Character.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
 #include "Player/MD_PlayerState.h"
 #include "Data/Input/MD_InputConfig.h"
 #include "Component/Character/MD_CharacterMovementComponent.h"
@@ -11,7 +12,9 @@
 #include "Component/Equipment/MD_ThrowComponent.h"
 #include "Audio/MD_AudioRelayComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
+#include "Component/Interaction/MD_GlassDrawingFocusComponent.h"
 #include "Component/Equipment/MD_FoamGunComponent.h"
+#include "Component/Equipment/MD_GlassMarkerComponent.h"
 #include "Component/Oxygen/MD_OxygenComponent.h"
 #include "Component/Comfort/MD_ComfortComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
@@ -104,6 +107,7 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 
 	EquipHotbarComponent = CreateDefaultSubobject<UMD_EquipHotbarComponent>(TEXT("EquipHotbarComponent"));
 	ThrowComponent = CreateDefaultSubobject<UMD_ThrowComponent>(TEXT("ThrowComponent"));
+	GlassMarkerComponent = CreateDefaultSubobject<UMD_GlassMarkerComponent>(TEXT("GlassMarkerComponent"));
 
 	AudioRelayComponent = CreateDefaultSubobject<UMD_AudioRelayComponent>(TEXT("AudioRelayComponent"));
 
@@ -152,6 +156,7 @@ AMD_Character::AMD_Character(const FObjectInitializer& ObjectInitializer)
 	InteractionComponent->SetInteractionDependencies(Camera, HoldPoint, PhysicsHandle);
 
 	ComfortComponent = CreateDefaultSubobject<UMD_ComfortComponent>(TEXT("ComfortComponent"));
+	GlassDrawingFocusComponent = CreateDefaultSubobject<UMD_GlassDrawingFocusComponent>(TEXT("GlassDrawingFocusComponent"));
 
 	FoamGunComponent = CreateDefaultSubobject<UMD_FoamGunComponent>(TEXT("FoamGunComponent"));
 
@@ -204,7 +209,7 @@ void AMD_Character::UpdateScrapeAnimationBlade(
 	(void)DeltaTime;
 	Swing = FRotator::ZeroRotator;
 	// 애니메이션 갱신 시에도 선택한 공통 아이템의 부착 설정 유지
-	UMD_ItemDefinition* CurrentItem = IsValid(EquipHotbarComponent) == true ? EquipHotbarComponent->GetCurrentItem() : nullptr;
+	UMD_ItemDefinition* CurrentItem = GetPresentedItemDefinition();
 	// 소모품을 포함한 아이템별 오프셋의 삼인칭 메시 반영
 	FTransform BaseAttachOffset = IsValid(CurrentItem) == true ? CurrentItem->AttachOffset : FTransform::Identity;
 	ScrapeAnimationToolRelativeRotation = BaseAttachOffset.Rotator();
@@ -241,6 +246,7 @@ void AMD_Character::GetScrapeAnimationHandIK(
 
 void AMD_Character::CancelScrapeInteraction()
 {
+	if (GlassMarkerComponent) GlassMarkerComponent->CancelUse();
 	if (StainScraperComponent) StainScraperComponent->CancelStroke();
 	ResetFirstPersonScrapePresentation();
 }
@@ -250,6 +256,12 @@ void AMD_Character::BeginPlay()
 {
 	Super::BeginPlay();
 	if (ThrowComponent && InputConfig) ThrowComponent->Configure(InputConfig->ThrowSettings);
+	if (GlassMarkerComponent && InputConfig)
+	{
+		GlassMarkerComponent->Configure(InputConfig->GlassMarkerSettings);
+		GlassMarkerComponent->OnMarkerModeChanged.AddDynamic(this, &AMD_Character::HandleGlassMarkerModeChanged);
+		GlassMarkerComponent->OnInkColorChanged.AddDynamic(this, &AMD_Character::HandleGlassMarkerInkColorChanged);
+	}
 
 	// 시작 시점에 이미 준비된 PlayerState의 이름을 이름표에 반영한다.
 	RefreshNameTag();
@@ -296,6 +308,16 @@ void AMD_Character::BeginPlay()
 
 void AMD_Character::ConfigureFirstPersonRendering()
 {
+	for (UPrimitiveComponent* ViewMesh : {static_cast<UPrimitiveComponent*>(FirstPersonMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonToolMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonCutterBlade.Get())})
+	{
+		if (IsValid(ViewMesh))
+		{
+			ViewMesh->SetOnlyOwnerSee(true);
+			ViewMesh->SetHiddenInSceneCapture(true);
+		}
+	}
 	if (IsValid(FirstPersonMesh))
 	{
 		FirstPersonMesh->SetReceivesDecals(false);
@@ -327,6 +349,7 @@ void AMD_Character::ConfigureFirstPersonRendering()
 
 void AMD_Character::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	if (GlassDrawingFocusComponent) GlassDrawingFocusComponent->EndFocus(true);
 	if (ThrowComponent) ThrowComponent->CancelThrow();
 	UnbindAppearanceDelegate();
 	CancelScrapeInteraction();
@@ -350,8 +373,23 @@ void AMD_Character::Tick(float DeltaSeconds)
 	// 로컬 여부를 가리지 않고 모든 클라이언트에서 갱신한다.
 	UpdateCutterBladeSpin(DeltaSeconds);
 
-	// 1인칭 팔과 도구는 해당 캐릭터를 직접 조작하는 로컬 플레이어만 갱신한다.
-	if (IsLocallyControlled() == true)
+	// OnlyOwnerSee also admits cameras owned by this pawn. Explicitly hide the
+	// viewmodel when viewing the body, spectating, or ejecting from PIE.
+	const APlayerController* ViewController = Cast<APlayerController>(GetController());
+	const bool bFirstPersonView = IsLocallyControlled() && IsValid(ViewController)
+		&& ViewController->GetViewTarget() == this && !bLocalThirdPersonViewEnabled;
+	for (UPrimitiveComponent* ViewMesh : {static_cast<UPrimitiveComponent*>(FirstPersonMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonToolMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonCutterBlade.Get())})
+	{
+		if (IsValid(ViewMesh)) ViewMesh->SetHiddenInGame(!bFirstPersonView, false);
+	}
+	if (CrowbarArmsBaseRelativeTransform.IsSet() && IsValid(FirstPersonMesh))
+	{
+		FirstPersonMesh->SetRelativeTransform(CrowbarArmsBaseRelativeTransform.GetValue());
+		CrowbarArmsBaseRelativeTransform.Reset();
+	}
+	if (bFirstPersonView)
 	{
 		UpdateFirstPersonArms(DeltaSeconds);
 		UpdateFirstPersonToolTransform(DeltaSeconds);
@@ -905,13 +943,26 @@ void AMD_Character::UpdateFirstPersonToolTransform(const float DeltaSeconds)
 	}
 
 	// 일인칭 배치에 사용할 선택 아이템의 공통 부착 설정 조회
-	UMD_ItemDefinition* CurrentItem = IsValid(EquipHotbarComponent) == true ? EquipHotbarComponent->GetCurrentItem() : nullptr;
+	UMD_ItemDefinition* CurrentItem = GetPresentedItemDefinition();
 
 	// 본체의 실제 부착 소켓 자세를 일인칭 팔 공간에 합성하기 위한 조회
 	const FTransform SocketLocal =
 		BodyMesh->GetSocketTransform(AttachSocketName, RTS_Component);
 	const FTransform Offset =
 		GetToolAttachTransform(FirstPersonToolMesh->GetStaticMesh(), CurrentItem);
+	const UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(CurrentItem);
+	const bool bCrowbar = IsValid(Tool)
+		&& Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Crowbar)
+		&& FirstPersonToolMesh->IsVisible() && !FirstPersonToolMesh->bHiddenInGame && IsValid(Camera);
+	if (bCrowbar)
+	{
+		CrowbarArmsBaseRelativeTransform = FirstPersonMesh->GetRelativeTransform();
+		// Copy the actual third-person pose and its frame, without inventing a wrist pose.
+		BindFirstPersonArmsToBodyPose();
+		FirstPersonMesh->SetWorldTransform(BodyMesh->GetComponentTransform());
+		FirstPersonToolMesh->SetWorldTransform(ThirdPersonToolMesh->GetComponentTransform());
+		return;
+	}
 
 	// 부모가 피벗(값이 확정적인 SceneComponent)이므로 월드로 지정해도 역산 기준이
 	// 흔들리지 않는다. 컴포넌트 계층이 어떻게 구성돼 있든 결과가 같도록
@@ -1022,6 +1073,7 @@ void AMD_Character::PossessedBy(AController* NewController)
 
 void AMD_Character::UnPossessed()
 {
+	if (GlassDrawingFocusComponent) GlassDrawingFocusComponent->EndFocus(true);
 	if (ThrowComponent) ThrowComponent->CancelThrow();
 	CancelScrapeInteraction();
 
@@ -1125,11 +1177,22 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	{
 		EIC->BindAction(InputConfig->CancelThrowAction, ETriggerEvent::Started, this, &AMD_Character::HandleThrowCanceledInput);
 	}
+	if (IsValid(InputConfig->GlassMarkerEraseAction))
+	{
+		EIC->BindAction(InputConfig->GlassMarkerEraseAction, ETriggerEvent::Started, this, &AMD_Character::HandleGlassMarkerEraseStartedInput);
+		EIC->BindAction(InputConfig->GlassMarkerEraseAction, ETriggerEvent::Completed, this, &AMD_Character::HandleGlassMarkerEraseReleasedInput);
+		EIC->BindAction(InputConfig->GlassMarkerEraseAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleGlassMarkerEraseReleasedInput);
+	}
 
 	if (IsValid(InputConfig->ScannerModeSwitchAction))
 	{
 		EIC->BindAction(InputConfig->ScannerModeSwitchAction, ETriggerEvent::Started,
 			this, &AMD_Character::HandleScannerModeSwitchInput);
+	}
+	if (IsValid(InputConfig->GlassMarkerColorCycleAction))
+	{
+		EIC->BindAction(InputConfig->GlassMarkerColorCycleAction, ETriggerEvent::Started,
+			this, &AMD_Character::HandleGlassMarkerColorCycleInput);
 	}
 
 	EIC->BindAction(InputConfig->MoveAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleMoveInput);
@@ -1142,6 +1205,12 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Started, this, &AMD_Character::HandleAbilityInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAbilityReleasedInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAbilityReleasedInput);
+	if (IsValid(InputConfig->AimAction))
+	{
+		EIC->BindAction(InputConfig->AimAction, ETriggerEvent::Started, this, &AMD_Character::HandleAimStartedInput);
+		EIC->BindAction(InputConfig->AimAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAimReleasedInput);
+		EIC->BindAction(InputConfig->AimAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAimReleasedInput);
+	}
 	EIC->BindAction(InputConfig->SwapEquipmentAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleSwapEquipmentInput);
 	//EIC->BindAction(InputConfig->WallCutAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallCutInput);
 	//EIC->BindAction(InputConfig->WallScanAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallScanInput);
@@ -1196,6 +1265,7 @@ UInputMappingContext* AMD_Character::ResolvePlayerMappingContext()
 
 void AMD_Character::HandleMoveInput(const FInputActionValue& Value)
 {
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive()) return;
 	if (!Controller)
 	{
 		return;
@@ -1244,6 +1314,8 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 	}
 	// 시점 입력에 사용자 감도 적용
 	FVector2D LookInput = RawLookInput * AppliedControlSettings.MouseSensitivity;
+	// 펜에도 적용된 마우스 감도를 사용하되 카메라 반전과 스무딩은 적용하지 않는다.
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->ConsumeLookInput(LookInput)) return;
 	// 카메라 상하 반전 설정의 적용 여부 확인
 	if (AppliedControlSettings.bInvertVerticalLook == true)
 	{
@@ -1263,6 +1335,11 @@ void AMD_Character::HandleLookInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleInteractInput(const FInputActionValue& Value)
 {
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive())
+	{
+		GlassDrawingFocusComponent->EndFocus(false);
+		return;
+	}
 	if (ThrowComponent) ThrowComponent->CancelThrow();
 	// 상호작용 시작 시 진행 중인 오염물 제거 동작을 취소한다.
 	CancelScrapeInteraction();
@@ -1283,12 +1360,23 @@ void AMD_Character::HandleInteractReleasedInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleScannerModeSwitchInput(const FInputActionValue& Value)
 {
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive()) return;
 	if (IsValid(ScannerComponent)) ScannerComponent->ToggleScanMode();
 }
 
 void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 {
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive())
+	{
+		if (GlassMarkerComponent) GlassMarkerComponent->SetDrawInputHeld(true);
+		return;
+	}
 	if (ThrowComponent && ThrowComponent->IsCharging()) return;
+	if(InteractionComponent && InteractionComponent->TryClickInstructionRestart())
+	{
+		bInstructionClickCaptured=true;
+		return;
+	}
 	if (!IsValid(EquipHotbarComponent))
 	{
 		return;
@@ -1311,6 +1399,11 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 	}
 
 	bStainStrokeInputCaptured = CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_Scrape);
+	if (CurrentTool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_GlassMarker))
+	{
+		if (GlassMarkerComponent) GlassMarkerComponent->SetDrawInputHeld(true);
+		return;
+	}
 
 	// 같은 GA 태그를 공유하는 도구 사이에서도 선택 아이템의 부여 능력만 실행
 	EquipHotbarComponent->TryActivateCurrentItemAbility();
@@ -1318,6 +1411,17 @@ void AMD_Character::HandleAbilityInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 {
+	if(bInstructionClickCaptured) { bInstructionClickCaptured=false; return; }
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive())
+	{
+		if (GlassMarkerComponent) GlassMarkerComponent->SetDrawInputHeld(false);
+		return;
+	}
+	if (GlassMarkerComponent && GlassMarkerComponent->CanUseEquippedMarker())
+	{
+		GlassMarkerComponent->SetDrawInputHeld(false);
+		return;
+	}
 	if (bStainStrokeInputCaptured)
 	{
 		bStainStrokeInputCaptured = false;
@@ -1346,13 +1450,44 @@ void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 	ASC->CancelAbilities(&AbilityTags);
 }
 
+void AMD_Character::HandleAimStartedInput(const FInputActionValue& Value)
+{
+	// 폼건: RMB를 누르는 동안 조준 궤적 표시 + 조준 자세. 운반 중에는 조준하지 않는다
+	if (!IsFoamGunEquipped() || (IsValid(InteractionComponent) && InteractionComponent->IsHolding()))
+	{
+		return;
+	}
+
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(true);
+	}
+	SetFoamAiming(true);
+}
+
+void AMD_Character::HandleAimReleasedInput(const FInputActionValue& Value)
+{
+	EndFoamAiming();
+}
+
+void AMD_Character::EndFoamAiming()
+{
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(false);
+	}
+	SetFoamAiming(false);
+}
+
 void AMD_Character::HandleThrowStartedInput(const FInputActionValue& Value)
 {
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive()) return;
 	if (ThrowComponent) ThrowComponent->BeginThrow();
 }
 
 void AMD_Character::HandleThrowReleasedInput(const FInputActionValue& Value)
 {
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive()) return;
 	if (ThrowComponent) ThrowComponent->ReleaseThrow();
 }
 
@@ -1361,8 +1496,25 @@ void AMD_Character::HandleThrowCanceledInput(const FInputActionValue& Value)
 	if (ThrowComponent) ThrowComponent->CancelThrow();
 }
 
+void AMD_Character::HandleGlassMarkerEraseStartedInput(const FInputActionValue& Value)
+{
+	if (ThrowComponent) ThrowComponent->CancelThrow();
+	if (GlassMarkerComponent) GlassMarkerComponent->SetEraseInputHeld(true);
+}
+
+void AMD_Character::HandleGlassMarkerEraseReleasedInput(const FInputActionValue& Value)
+{
+	if (GlassMarkerComponent) GlassMarkerComponent->SetEraseInputHeld(false);
+}
+
+void AMD_Character::HandleGlassMarkerColorCycleInput(const FInputActionValue& Value)
+{
+	if (GlassMarkerComponent) GlassMarkerComponent->CycleInkColor();
+}
+
 void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
 {
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive()) return;
 	//GEngine->AddOnScreenDebugMessage(-1, 4.f, FColor::Red, TEXT("SwapEquipment: Activated"));
 	if (!IsValid(EquipHotbarComponent))
 	{
@@ -1386,6 +1538,7 @@ void AMD_Character::HandleSwapEquipmentInput(const FInputActionValue& Value)
 
 void AMD_Character::SelectHotbarSlot(int32 SlotIndex)
 {
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive()) return;
 	// 보관함이 없는 캐릭터의 장비 선택 차단
 	if (IsValid(EquipHotbarComponent) == false)
 	{
@@ -1409,6 +1562,7 @@ void AMD_Character::SelectHotbarSlot(int32 SlotIndex)
 
 void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 {
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive()) return;
 	CancelScrapeInteraction();
 
 	UMD_CharacterMovementComponent* MDMovement = Cast<UMD_CharacterMovementComponent>(GetCharacterMovement());
@@ -1441,6 +1595,7 @@ void AMD_Character::HandleJumpOrSwimInput(const FInputActionValue& Value)
 
 void AMD_Character::HandleJumpOrSwimReleasedInput(const FInputActionValue& Value)
 {
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive()) return;
 	StopJumping();
 }
 
@@ -1569,7 +1724,8 @@ void AMD_Character::RefreshCutterBladeMesh()
 
 	// 절단기를 들고, 톱날 메시가 있고, 본체에 회전 중심 소켓이 있어야 표시한다.
 	// 소켓이 없으면 톱날이 도구 원점에 겹쳐 박히므로 숨기는 편이 낫다.
-	const bool bWantsBlade = IsCutterEquipped() && IsValid(CutterBladeMesh) && !IsCarryingItem();
+	const bool bWantsBlade = !(GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive())
+		&& IsCutterEquipped() && IsValid(CutterBladeMesh) && !IsCarryingItem();
 
 	const auto Apply = [this, bWantsBlade](UStaticMeshComponent* const Blade,
 		const UStaticMeshComponent* const ToolMesh)
@@ -1648,6 +1804,11 @@ void AMD_Character::HandleHotbarChanged()
 	// Charge replication for the same tool must not cancel a newly started throw.
 	// The throw component validates target/slot changes while charging and again on release.
 	RefreshStainInputState();
+	// 폼건에서 다른 도구로 바꾸면 RMB를 누른 채라도 조준을 끝낸다
+	if (!IsFoamGunEquipped())
+	{
+		EndFoamAiming();
+	}
 	RefreshToolMesh();
 
 	// 공통 아이템 상태를 조회할 Hotbar 유효성 검사
@@ -1663,6 +1824,16 @@ void AMD_Character::HandleHotbarChanged()
 	}
 }
 
+void AMD_Character::HandleGlassMarkerModeChanged(bool bErasing)
+{
+	if (!IsActorBeingDestroyed()) RefreshToolVisual();
+}
+
+void AMD_Character::HandleGlassMarkerInkColorChanged(uint8 ColorIndex, FLinearColor Color)
+{
+	if (!IsActorBeingDestroyed()) RefreshGlassMarkerInkIndicator();
+}
+
 void AMD_Character::HandleHeldActorChanged(AActor* HeldActor)
 {
 	if (ThrowComponent) ThrowComponent->CancelThrow();
@@ -1672,6 +1843,11 @@ void AMD_Character::HandleHeldActorChanged(AActor* HeldActor)
 		return;
 	}
 	CancelScrapeInteraction();
+	// 물건을 드는 순간 폼건 조준도 끝낸다. 운반 중엔 도구를 내리므로 궤적만 남으면 어색하다
+	if (IsValid(HeldActor))
+	{
+		EndFoamAiming();
+	}
 	// 슬롯은 그대로, 표시만 바꾼다. 도구 메시와 톱날을 함께 갱신한다
 	RefreshToolMesh();
 }
@@ -1679,6 +1855,18 @@ void AMD_Character::HandleHeldActorChanged(AActor* HeldActor)
 bool AMD_Character::IsCarryingItem() const
 {
 	return IsValid(InteractionComponent) && InteractionComponent->IsHolding();
+}
+
+UMD_ItemDefinition* AMD_Character::GetPresentedItemDefinition() const
+{
+	if (GlassDrawingFocusComponent && GlassDrawingFocusComponent->IsFocusActive())
+		return GlassDrawingFocusComponent->GetMarkerTool();
+	return IsValid(EquipHotbarComponent) ? EquipHotbarComponent->GetCurrentItem() : nullptr;
+}
+
+void AMD_Character::RefreshDrawingToolPresentation()
+{
+	if (!IsActorBeingDestroyed()) RefreshToolMesh();
 }
 
 void AMD_Character::RefreshToolMesh()
@@ -1690,7 +1878,7 @@ void AMD_Character::RefreshToolMesh()
 	}
 
 	// 선택한 공통 아이템에서 메시 부착 설정 조회
-	UMD_ItemDefinition* CurrentItem = EquipHotbarComponent->GetCurrentItem();
+	UMD_ItemDefinition* CurrentItem = GetPresentedItemDefinition();
 	// 아이템별 지정 소켓을 우선하고 미지정 시 캐릭터 기본 소켓 선택
 	FName SocketName = IsValid(CurrentItem) == true && CurrentItem->AttachSocketName.IsNone() == false
 		? CurrentItem->AttachSocketName : ToolAttachSocketName;
@@ -1732,7 +1920,7 @@ void AMD_Character::RefreshToolMesh()
 void AMD_Character::RefreshToolVisual()
 {
 	// 도구와 소모품을 포함한 선택 슬롯의 공통 정의 조회
-	UMD_ItemDefinition* CurrentItem = IsValid(EquipHotbarComponent) == true ? EquipHotbarComponent->GetCurrentItem() : nullptr;
+	UMD_ItemDefinition* CurrentItem = GetPresentedItemDefinition();
 	// 아이템 유형에 관계없이 공통 기본 메시를 사용하고 빈 슬롯은 표시 해제
 	UStaticMesh* NewToolMesh = IsValid(CurrentItem) == true ? CurrentItem->ToolMesh : nullptr;
 	// 물건을 들고 있는 동안은 도구를 내린다 (슬롯 유지, 연출만)
@@ -1741,6 +1929,19 @@ void AMD_Character::RefreshToolVisual()
 		&& GetMesh()->DoesSocketExist(ThirdPersonToolMesh->GetAttachSocketName());
 	// 일인칭도 기본 소켓 대신 실제 부착 소켓의 유효성으로 표시 여부 결정
 	bool bHasFirstPersonSocket = IsValid(FirstPersonMesh) == true && bHasThirdPersonSocket == true;
+	// Material overrides survive SetStaticMesh; release the marker indicator before changing tools.
+	if (GlassMarkerComponent)
+	{
+		for (UStaticMeshComponent* ToolVisualMesh : { FirstPersonToolMesh.Get(), ThirdPersonToolMesh.Get() })
+		{
+			UStaticMesh* PreviousMesh = ToolVisualMesh->GetStaticMesh();
+			if (!PreviousMesh || PreviousMesh == NewToolMesh) continue;
+			const int32 Slot = PreviousMesh->GetMaterialIndex(GlassMarkerComponent->GetInkIndicatorMaterialSlot());
+			if (Slot == INDEX_NONE) continue;
+			UMaterialInstanceDynamic* Indicator = Cast<UMaterialInstanceDynamic>(ToolVisualMesh->GetMaterial(Slot));
+			if (Indicator && Indicator->Parent == PreviousMesh->GetMaterial(Slot)) ToolVisualMesh->SetMaterial(Slot, nullptr);
+		}
+	}
 	FirstPersonToolMesh->SetStaticMesh(NewToolMesh);
 	FirstPersonToolMesh->SetVisibility(bShowTool && bHasFirstPersonSocket, true);
 	ThirdPersonToolMesh->SetStaticMesh(NewToolMesh);
@@ -1753,6 +1954,23 @@ void AMD_Character::RefreshToolVisual()
 	FTransform ToolTransform = GetToolAttachTransform(NewToolMesh, CurrentItem);
 	ThirdPersonToolMesh->SetRelativeTransform(ToolTransform);
 	FirstPersonToolMesh->SetRelativeTransform(ToolTransform);
+	RefreshGlassMarkerInkIndicator();
+}
+
+void AMD_Character::RefreshGlassMarkerInkIndicator()
+{
+	const UMD_ToolDefinition* Tool = GlassMarkerComponent ? GlassMarkerComponent->GetActiveToolDefinition() : nullptr;
+	if (!Tool || !GlassMarkerComponent
+		|| !Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_GlassMarker)) return;
+	for (UStaticMeshComponent* ToolVisualMesh : { FirstPersonToolMesh.Get(), ThirdPersonToolMesh.Get() })
+	{
+		if (!IsValid(ToolVisualMesh) || !ToolVisualMesh->GetStaticMesh()) continue;
+		const int32 Slot = ToolVisualMesh->GetStaticMesh()->GetMaterialIndex(GlassMarkerComponent->GetInkIndicatorMaterialSlot());
+		if (Slot == INDEX_NONE) continue;
+		UMaterialInstanceDynamic* Material = Cast<UMaterialInstanceDynamic>(ToolVisualMesh->GetMaterial(Slot));
+		if (!Material) Material = ToolVisualMesh->CreateAndSetMaterialInstanceDynamic(Slot);
+		if (Material) Material->SetVectorParameterValue(TEXT("MarkerInkColor"), GlassMarkerComponent->GetSelectedInkColor());
+	}
 }
 
 FTransform AMD_Character::GetToolAttachTransform(const UStaticMesh* ToolMesh, UMD_ItemDefinition* Item) const
@@ -1760,6 +1978,10 @@ FTransform AMD_Character::GetToolAttachTransform(const UStaticMesh* ToolMesh, UM
 	// 선택 아이템의 공통 오프셋을 메시 그립 보정의 기준으로 사용
 	FTransform Offset = IsValid(Item) == true ? Item->AttachOffset : FTransform::Identity;
 	Offset.SetRotation(ScrapeAnimationToolRelativeRotation.Quaternion());
+	const UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(Item);
+	if (Tool && Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_GlassMarker)
+		&& GlassMarkerComponent && GlassMarkerComponent->IsErasing())
+		Offset.SetRotation(Offset.GetRotation() * GlassMarkerComponent->GetEraserRotationOffset().Quaternion());
 	return GetToolAttachTransformFromOffset(ToolMesh, Offset);
 }
 
@@ -1823,7 +2045,14 @@ float AMD_Character::PlayBarnacleScrapeMontage()
 		return 0.f;
 	}
 
-	return AnimInstance->Montage_Play(BarnacleScrapeMontage);
+	const float Duration = AnimInstance->Montage_Play(BarnacleScrapeMontage);
+	if (Duration > 0.f)
+	{
+		const auto Tag = FGameplayTag::RequestGameplayTag(TEXT("SFX.Clean.Hera.Swing"), false);
+		if (IsLocallyControlled()) MDAudioFeedback::World(this, TEXT("SFX.Clean.Hera.Swing"));
+		if (HasAuthority() && AudioRelayComponent) AudioRelayComponent->PlayAtOwnerLocationForAll(Tag);
+	}
+	return Duration;
 }
 
 void AMD_Character::OnRep_CutterVFXActive()
@@ -1970,6 +2199,7 @@ void AMD_Character::RefreshCutterVFX()
 void AMD_Character::HandleHealthStateChanged(EMD_HealthState NewState)
 {
 	const bool bIsDead = (NewState == EMD_HealthState::Dead);
+	if (bIsDead != bWasDeadState) MDAudioFeedback::World(this, bIsDead ? TEXT("SFX.Character.Death") : TEXT("SFX.Character.Respawn"));
 	if (bIsDead)
 	{
 		if (ThrowComponent) ThrowComponent->CancelThrow();
@@ -2047,6 +2277,7 @@ void AMD_Character::TeleportToMothership()
 	}
 
 	const AActor* RespawnPoint = FoundStarts[0];
+	CancelScrapeInteraction();
 	if (IsValid(InteractionComponent))
 	{
 		InteractionComponent->CancelInteraction();

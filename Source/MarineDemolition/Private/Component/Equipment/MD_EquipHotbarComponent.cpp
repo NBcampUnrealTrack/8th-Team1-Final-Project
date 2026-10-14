@@ -2,6 +2,9 @@
 
 
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "GameplayTags/MD_GameplayTags.h"
+#include "Audio/MD_GameplayAudioFeedback.h"
+#include "GameFramework/Pawn.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Data/Equipment/MD_ConsumeItemDefinition.h"
 #include "AbilitySystemGlobals.h"
@@ -562,6 +565,7 @@ void UMD_EquipHotbarComponent::SelectSlot(int32 SlotIndex)
 		// 변경이 없는 선택 요청 종료
 		return;
 	}
+	MDAudioFeedback::LocalPawn(Cast<APawn>(GetOwner()), TEXT("SFX.Tool.Hotbar.Switch"));
 	// 유효한 서버 소유자에 한해서 선택 상태 직접 확정
 	if (IsValid(GetOwner()) == true && GetOwner()->HasAuthority() == true)
 	{
@@ -1297,6 +1301,9 @@ void UMD_EquipHotbarComponent::InitializeItemAbilities()
 
 bool UMD_EquipHotbarComponent::TryActivateCurrentItemAbility()
 {
+	// Door prying is an E interaction; primary/LMB must not execute the granted legacy ability.
+	const UMD_ToolDefinition* Tool = GetCurrentTool();
+	if (Tool && Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Crowbar)) return false;
 	if (UMD_InteractionComponent* Interaction = GetOwner()->FindComponentByClass<UMD_InteractionComponent>();
 		Interaction && Interaction->TryUseFacilityTape()) return true;
 	// 실제 선택 품목의 SourceObject와 태그에 해당하는 부여 GA 조회

@@ -4,6 +4,8 @@
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_DataDumpTerminal.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class UMD_QuestItemDefinition;
 class UStaticMeshComponent;
 
@@ -62,6 +64,10 @@ public:
 	/** 홀드 진행도 변경 알림. HUD 게이지가 구독한다 (서버·클라 모두 방송) */
 	UPROPERTY(BlueprintAssignable, Category = "MD|DataDump")
 	FMDOnDumpProgressChanged OnDumpProgressChanged;
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	/** 홀드 시작·취소 시 전 머신에서 호출. 화면 연출·사운드용 */

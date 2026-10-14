@@ -2,6 +2,7 @@
 
 
 #include "World/Interaction/MD_SectorCloseoutMarker.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
 
 #include "Character/MD_Character.h"
 #include "Components/StaticMeshComponent.h"
@@ -14,6 +15,11 @@
 
 AMD_SectorCloseoutMarker::AMD_SectorCloseoutMarker()
 {
+	// 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::CloseSector;
+
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 
@@ -37,6 +43,12 @@ void AMD_SectorCloseoutMarker::SetInteractionHighlighted_Implementation(bool bHi
 		Mesh->SetCustomDepthStencilValue(IMD_Interactable::HighlightStencilValue);
 		Mesh->SetRenderCustomDepth(bHighlighted);
 	}
+}
+
+bool AMD_SectorCloseoutMarker::CanInteract_Implementation(AActor*) const
+{
+	// 이미 마감한 구역의 재상호작용과 실행 안내 차단
+	return bClosed == false;
 }
 
 void AMD_SectorCloseoutMarker::Interact_Implementation(AActor* Interactor)
