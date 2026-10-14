@@ -39,7 +39,7 @@ struct FMD_RepairInstructionState
 
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnInstructionRepairCompleted, int32, FaultId);
 
-/** Subscribes to the existing wire faults. Does not schedule blackouts or replace light management. */
+/** Periodic breaker incident, independent of tape-repaired cut wires. */
 UCLASS(Blueprintable)
 class MARINEDEMOLITION_API AMD_RepairInstructionController : public AActor, public IMD_Interactable
 {
@@ -65,7 +65,13 @@ public:
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Replicated, Category="MD|Instruction|Legacy", meta=(AdvancedDisplay,EditCondition="!bUseIntegratedKnobs")) TArray<TObjectPtr<AMD_RepairInstructionControl>> Knobs;
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Replicated, Category="MD|Instruction") TObjectPtr<AActor> InstructionDoor;
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="MD|Instruction") TObjectPtr<ATriggerBox> InstructionRoom;
+	/** Legacy circuit references; breaker completion never repairs these wires. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category="MD|Instruction") TArray<TObjectPtr<AMD_PowerConduit>> PowerConduits;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MD|Instruction|Schedule") bool bTimedBlackoutsEnabled = true;
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category="MD|Instruction|Schedule", meta=(ClampMin="0.1", Units="s")) float BlackoutIntervalSeconds = 600.f;
+	/** Fixed cadence from level start; an active incident is not restarted or stacked. */
+	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category="MD|Instruction|Schedule") void ConfigureBlackoutSchedule(bool bEnabled, float IntervalSeconds);
+	UFUNCTION(BlueprintPure, Category="MD|Instruction|Schedule") float GetSecondsUntilTimedBlackout() const;
 	UPROPERTY(ReplicatedUsing=OnRep_State, BlueprintReadOnly, Category="MD|Instruction") FMD_RepairInstructionState State;
 	/** Called once after validated completion; team blackout code may also bind in Blueprint. */
 	UPROPERTY(BlueprintAssignable, Category="MD|Instruction") FMD_OnInstructionRepairCompleted OnRepairCompleted;
@@ -97,18 +103,16 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 private:
 	UFUNCTION() void OnRep_State();
-	UFUNCTION() void HandlePowerFault(UMD_FacilityFaultComponent* Source, const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current);
 	UFUNCTION() void HandleOwnFault(UMD_FacilityFaultComponent* Source, const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current);
 	void PublishState();
 	void ApplyDoorState();
 	void ReleaseDoor();
 	void FinishRepair();
 	bool IsInInstructionRoom(const APawn* Pawn) const;
-	void TrackBrokenPowerSources();
 	bool CanApplyInput(const APawn* Pawn, int32 ExpectedRevision) const;
 	bool AdvanceKnob(int32 Column);
 	int32 NextOperationId = 0;
-	TMap<TWeakObjectPtr<UMD_FacilityFaultComponent>, int32> SourceIncidents;
+	FTimerHandle BlackoutTimer;
 	TArray<TWeakObjectPtr<UPrimitiveComponent>> SuppressedSensors;
 	TWeakObjectPtr<AActor> ManagedDoor;
 	bool bPreviousLocked = false;
@@ -156,6 +160,7 @@ private:
 	UPROPERTY(Transient, DuplicateTransient) TObjectPtr<UMaterialInstanceDynamic> GuideMID;
 	void RemoveLegacyOverlayComponents();
 	void UpdateRestartFlash();
+	void UpdateAuxiliaryLighting();
 	int32 PresentedRevision = INDEX_NONE;
 	int32 PresentedRow = INDEX_NONE;
 	bool bPresentedActive = false;

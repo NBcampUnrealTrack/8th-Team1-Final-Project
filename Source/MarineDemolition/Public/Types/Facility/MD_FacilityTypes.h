@@ -81,6 +81,25 @@ struct MARINEDEMOLITION_API FMD_FacilityFaultSchedule
 	}
 };
 
+/** Explicit circuit slot; different lamp meshes may use different material indices. */
+USTRUCT(BlueprintType)
+struct MARINEDEMOLITION_API FMD_PowerLightTarget
+{
+	GENERATED_BODY()
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TObjectPtr<UStaticMeshComponent> MeshComponent = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, meta = (ClampMin = "0"))
+	int32 MaterialIndex = 0;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TObjectPtr<UMaterialInterface> NormalMaterial = nullptr;
+
+	UPROPERTY(EditAnywhere, BlueprintReadWrite)
+	TObjectPtr<UMaterialInterface> BlackoutMaterial = nullptr;
+};
+
 // 실제 메시 슬롯에 영향을 주는 활성 전선 고장과 머티리얼의 지속 복제 상태
 USTRUCT(BlueprintType)
 struct MARINEDEMOLITION_API FMD_PowerLightState

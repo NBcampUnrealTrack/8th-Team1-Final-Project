@@ -97,13 +97,20 @@
 </section>
 
 <section id="lighting"><h2>정전·스캐너 라이트</h2>
+<p class="note"><span class="status confirmed">2026-10-14 확정</span> 정전은 <strong>10분 주기 정전</strong>과 <strong>전선 절단 정전</strong>으로 나눈다. 두 원인은 각각 복구해야 한다.</p>
+<div class="table-wrap"><table><thead><tr><th scope="col">원인</th><th scope="col">발생</th><th scope="col">복구</th></tr></thead><tbody>
+<tr><th scope="row">주기 정전</th><td>게임 시작 10분 후 첫 발생, 이후 600초 고정 주기. 이미 수리 중이면 중복 발생·정답 초기화 없이 다음 주기를 기다린다.</td><td>E키로 지침 확인 후 차단기 노브를 목표 구멍에 맞춘다. 전선 고장은 수리하지 않는다.</td></tr>
+<tr><th scope="row">전선 절단 정전</th><td>기존 전선 절단 판정으로 즉시 발생. 차단기 퍼즐을 시작하지 않는다.</td><td>잘린 전선에 절연테이프 1개 사용. 주기 정전은 해제하지 않는다.</td></tr>
+<tr><th scope="row">중첩</th><td>두 정전이 동시에 발생할 수 있다.</td><td>한쪽만 복구하면 계속 정전. 모든 정전 원인을 복구해야 일반 조명·원래 발광 재질이 돌아온다.</td></tr>
+</tbody></table></div>
+
 <div class="table-wrap"><table class="spec-table"><thead><tr><th scope="col">대상</th><th scope="col">이벤트 중</th><th scope="col">완료 후</th></tr></thead><tbody>
-<tr><th scope="row">기지 일반 조명</th><td>꺼짐.</td><td>차단기 복구 시 해당 정전 해제. 여러 정전이 겹치면 복구 범위를 별도 관리.</td></tr>
-<tr><th scope="row">지침실 보조조명</th><td>지침 위에서 아래로 약한 조명. 읽기와 그림 전달 가능.</td><td>이벤트 종료 후 상태는 미정.</td></tr>
-<tr><th scope="row">스캐너 라이트</th><td>소지자가 켜서 이동·차단기 작업.</td><td>켜짐 유지 또는 자동 종료 여부 미정.</td></tr>
+<tr><th scope="row">기지 일반 조명</th><td>꺼짐.</td><td>모든 정전 원인 복구 시 원래 조명·재질 복원.</td></tr>
+<tr><th scope="row">지침실 보조조명</th><td>지침 위에서 아래로 약한 조명. 읽기와 그림 전달 가능.</td><td>정전이 남아 있으면 유지, 마지막 정전 복구 후 꺼짐.</td></tr>
+<tr><th scope="row">스캐너 라이트</th><td>정전 중 스캐너를 손에 들었을 때 자동 점등. 인벤토리 보관·빈손이면 꺼짐.</td><td>마지막 정전 복구 후 자동 종료.</td></tr>
 </tbody></table></div>
 <ul><li>지침실 보조조명은 지침 전체의 노브·칸을 읽을 수 있어야 한다. 분위기 때문에 일부 칸을 판독 불가능하게 만들지 않는다.</li><li>스캐너를 손에 든 채 조명과 노브 조작이 함께 가능해야 한다. 조작 진입 시 장비를 숨기는 기존 동작이 있다면 라이트가 유지되는지 확인한다.</li><li>이동 거리·문·차단기의 칸 번호·창문 그림이 실제 카메라에서 읽히는지 검증한다.</li><li>스캐너 고장 위치 탐지·지도 표시는 이전 회의의 추가 제안이다. 이번 사용자 지정에서 확정된 기능은 라이트를 이용한 차단기 수리다.</li></ul>
-<p class="muted">밝기·색·범위·조작키·충전 소모는 미정. 배터리 부족이나 스캐너 분실로 수리가 불가능해질 때의 복구 방법도 필요하다.</p>
+<p class="muted">세부 밝기·색·범위·충전 소모의 추가 조정은 미정. 배터리 부족이나 스캐너 분실로 수리가 불가능해질 때의 복구 방법도 필요하다.</p>
 </section>
 
 <section id="communication"><h2>음성·유리 그림 전달</h2>

@@ -7,6 +7,7 @@
 
 class AMD_PowerConduit;
 class UStaticMeshComponent;
+class ULightComponent;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnBlackoutChanged, bool, bBlackout);
 
 /** GameState-owned server registry and timer-based random incident scheduler. */
@@ -27,6 +28,9 @@ public:
 	FMD_OnFacilityStateChanged OnFacilityStateChanged;
 	UFUNCTION(BlueprintPure, Category="MD|Facility|Power") bool IsBlackoutActive() const { return bBlackoutActive; }
 	UPROPERTY(BlueprintAssignable, Category="MD|Facility|Power") FMD_OnBlackoutChanged OnBlackoutChanged;
+	/** Only tagged interior lamps participate; scanner, status and outdoor lights stay independent. */
+	static const FName BaseLightActorTag;
+	UFUNCTION(BlueprintCallable, Category="MD|Facility|Power") void RegisterBlackoutLights(AActor* Actor);
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Facility")
 	bool RegisterFacility(UMD_FacilityFaultComponent* Facility);
@@ -53,6 +57,10 @@ private:
 	UPROPERTY(ReplicatedUsing=OnRep_BlackoutActive) bool bBlackoutActive=false;
 	UFUNCTION() void OnRep_BlackoutActive();
 	void RefreshBlackoutState();
+	void ApplyBaseLighting();
+	struct FBaseLamp { TWeakObjectPtr<ULightComponent> Light; bool bOriginalVisible=true; };
+	TArray<FBaseLamp> BaseLamps;
+	FDelegateHandle LightSpawnHandle;
 	UFUNCTION()
 	void HandleFacilityStateChanged(UMD_FacilityFaultComponent* Facility,
 		const FMD_FacilitySnapshot& Previous, const FMD_FacilitySnapshot& Current);
