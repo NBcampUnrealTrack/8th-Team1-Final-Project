@@ -107,6 +107,12 @@ void UMD_DailyReportWidget::NativeOnActivated()
         SetContinueVisibility(ESlateVisibility::Collapsed);
         // 활성화 시점의 서버 시간에 맞춰 카운트다운 예약 갱신
         UpdateRemainingTime();
+        // 활성화 전에 수신한 최종 합계의 누락된 연출 요청 보완
+        if (bHasSummaryTargets == true && bSummaryAnimationRequested == false)
+        {
+            // 활성 상태를 요구하는 기존 Blueprint 정산 연출 연결
+            BP_OnReportUpdated(true);
+        }
         return;
     }
     // 마감 전 확인 화면에는 이전 카운트다운 표시 제거
@@ -211,6 +217,12 @@ void UMD_DailyReportWidget::SetReport(const FMD_InspectionReport& Report)
     }
     // 비동기 서버 응답과 최종 정산 모두에서 데이터 준비 완료 알림
     BP_OnReportUpdated(bShowingFinalReport);
+    // 별도 합계 연출이 없는 일반 보고서의 실제 금액 표시
+    if (bHasSummaryTargets == true && bShowingFinalReport == false && bSummaryAnimationRequested == false)
+    {
+        // 서버 집계와 동일한 합계 및 부호별 서식 적용
+        StopSummaryAnimation();
+    }
 }
 
 void UMD_DailyReportWidget::SetCreditValues(const FMD_InspectionReport& Report)
@@ -243,10 +255,10 @@ void UMD_DailyReportWidget::UpdateCreditHistory()
     UTextBlock* Times[] = { Txt_Axis_Time_1, Txt_Axis_Time_2, Txt_Axis_Time_3, Txt_Axis_Time_4, Txt_Axis_Time_5, Txt_Axis_Time_6 };
     // 위에서 아래로 배치된 공통 크레딧 눈금
     UTextBlock* Credits[] = { Txt_Axis_Credit_1, Txt_Axis_Credit_2, Txt_Axis_Credit_3, Txt_Axis_Credit_4, Txt_Axis_Credit_5 };
-    // 조회 시점의 소수 초도 구분할 수 있는 시간 표시 서식
+    // 하단 눈금을 정수 초로 표시하기 위한 숫자 서식
     FNumberFormattingOptions TimeFormat;
-    // 축이 길어지지 않도록 소수 첫째 자리까지만 표시
-    TimeFormat.MaximumFractionalDigits = 1;
+    // 시간축 라벨의 소수점 이하 표시 제거
+    TimeFormat.MaximumFractionalDigits = 0;
     // 모든 개인 그래프에서 영점이 포함되는 공통 범위 초기화
     double MinimumCredit = 0.0;
     // 수입과 손실을 같은 좌표계로 비교할 최대값

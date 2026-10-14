@@ -122,6 +122,9 @@ public:
     // 최종 평가 보상 이후의 그래프 종료 시각 고정
     void FinishCreditHistory();
 
+    // 최종 보고서 확정 이후 시설 비용 청구를 막기 위한 원장 마감 상태 조회
+    FORCEINLINE bool IsCreditHistoryFinished() { return CreditHistoryEndSeconds >= 0.0; }
+
     // 서버의 실제 거래 발생 시각과 금액 및 개인 인덱스 조회
     FORCEINLINE TArray<FMD_CreditLogEntry>& GetCreditLog() { return CreditLog; }
 

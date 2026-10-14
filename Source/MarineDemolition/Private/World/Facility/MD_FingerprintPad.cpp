@@ -140,7 +140,8 @@ FText AMD_FingerprintPad::GetInteractionPrompt_Implementation(AActor*) const
 			? NSLOCTEXT("MDFingerprint","SoloFirst","인증 완료 · 반대 패드로 이동 · {0}초 남음")
 			: NSLOCTEXT("MDFingerprint","SoloSecond","[E 유지] 반대 패드 인증 · {0}초 남음"), FText::AsNumber(Remaining));
 	}
-	return FText::Format(NSLOCTEXT("MDFingerprint","Prompt","[E 유지] 지문 인증 · 고장 손실 {0}원/초"),FText::AsNumber(Interlock->LossPerSecond));
+	// 비용 정보 없이 현재 수행할 인증 행동만 표시
+	return NSLOCTEXT("MDFingerprint", "Prompt", "지문 인증");
 }
 
 bool AMD_FingerprintPad::CanInteract_Implementation(AActor* Interactor) const

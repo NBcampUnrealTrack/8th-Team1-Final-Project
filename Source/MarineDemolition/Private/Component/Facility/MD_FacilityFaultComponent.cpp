@@ -381,8 +381,8 @@ void UMD_FacilityFaultComponent::ApplyFaultCost(bool bFinalCharge)
 	}
 	// 팀의 실제 Credit을 관리하는 기존 경제 원장 조회
 	UMD_MerchantSubsystem* Merchant = GetWorld()->GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>();
-	// 기존 원장이 준비된 경우에만 실제 잔액 변경
-	if (IsValid(Merchant) == true)
+	// 최종 보고서 확정 이전의 고장 비용만 실제 잔액에 반영
+	if (IsValid(Merchant) == true && Merchant->IsCreditHistoryFinished() == false)
 	{
 		// 기존 거래의 정수 범위 안에서 경과 초 비용 합산
 		int32 Charge = int32(FMath::Min<int64>(MAX_int32, FMath::Min<int64>(ElapsedSeconds, MAX_int32) * int64(LossPerSecond)));
