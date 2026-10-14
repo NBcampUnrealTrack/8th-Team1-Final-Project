@@ -68,22 +68,22 @@ void AMD_WallPiece::SetInteractionHighlighted_Implementation(bool bHighlighted)
 
 void AMD_WallPiece::SetContaminated(bool bInContaminated)
 {
-	bContaminated = false;
+	if (!HasAuthority()) return;
+	bContaminated = bInContaminated;
 
 	// 클라이언트는 OnRep_Contaminated가 같은 일을 한다
 	ApplyContaminationVisual();
+	ForceNetUpdate();
 }
 
 void AMD_WallPiece::OnRep_Contaminated()
 {
-	bContaminated = false;
 	ApplyContaminationVisual();
 }
 
 void AMD_WallPiece::BeginPlay()
 {
 	Super::BeginPlay();
-	bContaminated = false;
 	ApplyContaminationVisual();
 }
 
@@ -91,10 +91,10 @@ void AMD_WallPiece::ApplyContaminationVisual()
 {
 	if (!IsValid(Mesh)) return;
 
-	// 깨끗한 조각은 밝은 회백색으로 표시한다.
+	// Match the green surface slime while keeping clean debris light grey.
 	if (UMaterialInstanceDynamic* PieceMID = Mesh->CreateAndSetMaterialInstanceDynamic(0))
 	{
 		MDMaterialTint::SetVectorParameterChecked(PieceMID, TEXT("Color"),
-			FLinearColor(0.85f, 0.85f, 0.8f));
+			bContaminated ? FLinearColor(0.18f, 0.42f, 0.09f) : FLinearColor(0.85f, 0.85f, 0.8f));
 	}
 }

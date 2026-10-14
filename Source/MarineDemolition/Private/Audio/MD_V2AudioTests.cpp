@@ -42,7 +42,7 @@ bool FV2AudioCatalog::RunTest(const FString&)
 		}
 		else TestTrue(TEXT("World sound has distance attenuation"), !Entry.Attenuation.IsNull());
 	}
-	TestEqual(TEXT("All generated tag-driven V2 sounds registered"), NewSounds, 74);
+	TestEqual(TEXT("New V2 feedback and approved hit sound registered alongside preserved legacy sounds"), NewSounds, 50);
 	return true;
 }
 
@@ -127,7 +127,7 @@ private:
 	void CheckPump(int32 Loops)
 	{
 		for (UWorld* W : {World, Client}) if (W)
-			Test->TestEqual(TEXT("Pump leak loop follows fault, repair and destruction on each peer"), CountLoop(W, TEXT("S_V2_Hazard_Pipe_GushLoop")), Loops);
+			Test->TestEqual(TEXT("Original pump leak sound follows fault, repair and destruction on each peer"), CountLoop(W, TEXT("S_C_Pipe_GushLoop_01")), Loops);
 	}
 	void Wait() { At = World->GetTimeSeconds(); }
 	void Check(int32 Repairs, int32 Faults)

@@ -98,7 +98,7 @@ public:
 			Test->TestFalse(TEXT("Separate restart mesh is hidden"),Restart->Body->IsVisible());
 			Test->TestFalse(TEXT("Separate restart label is hidden"),Restart->Heading->IsVisible());
 			Test->TestTrue(TEXT("Restart query is centered on the original button"),Restart->GetActorLocation().Equals(Guide->GetRestartButtonWorldLocation()+Guide->GetActorForwardVector()*7.,.01));
-			Test->TestTrue(TEXT("Linked wire break starts instruction event"),Event->State.bActive);
+			Test->TestTrue(TEXT("Independent breaker incident starts instruction event"),Event->State.bActive);
 			Test->TestFalse(TEXT("Room occupancy alone never locks"),Event->State.bDoorLocked);
 			Test->TestTrue(TEXT("Door starts open"),DoorOpen());
 			Test->TestFalse(TEXT("Duplicate starts rejected"),Event->StartRepairIncident());
@@ -278,7 +278,7 @@ if(bStartBroken) Pawn->GetAbilitySystemComponent()->RemoveLooseGameplayTag(MDGam
 		case 10:
 			CheckGuideLight(Guide,Event->State);
 			Test->TestFalse(TEXT("All columns matching completes event"),Event->State.bActive);
-			Test->TestFalse(TEXT("Validated puzzle completes only linked wire fault"),Wire->FacilityRepair->IsFaultActive());
+			Test->TestTrue(TEXT("Validated puzzle preserves tape-repaired wire incident"),Wire->FacilityRepair->IsFaultActive());
 			Test->TestTrue(TEXT("Unrelated wire remains broken"),UnrelatedWire->FacilityRepair->IsFaultActive());
 			Test->TestTrue(TEXT("Readers can leave after success"),DoorOpen());
 			Test->TestFalse(TEXT("Completed incident rejects late guide input"),Event->ApplyControl(Guide,Pawn,Event->State.Revision));
@@ -364,7 +364,9 @@ private:
 		Event->KnobMeshes[0]->SetRelativeScale3D(OriginalScale); Event->KnobMeshes[0]->SetRelativeRotation(OriginalRotation);
 		Event->State.CurrentRows={0,0,0,0}; Event->RefreshKnobs();
 		Test->TestTrue(TEXT("Unrelated power incident starts independently"),UnrelatedWire->FacilityRepair->TryBreak());
-		Test->TestTrue(TEXT("Actual wire shared fault event starts"),Wire->FacilityRepair->TryBreak());
+		Test->TestTrue(TEXT("Cut wire fault starts independently"),Wire->FacilityRepair->TryBreak());
+		if (!bStartBroken) Test->TestFalse(TEXT("Cut wire does not start breaker puzzle"),Event->State.bActive);
+		if (!Event->State.bActive) Test->TestTrue(TEXT("Independent breaker incident starts"),Event->StartRepairIncident());
 	}
 	AMD_RepairInstructionControl* Control(EMD_InstructionControlKind Kind,int32 Col,FVector Location)
 	{

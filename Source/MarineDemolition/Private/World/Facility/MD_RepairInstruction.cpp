@@ -3,6 +3,7 @@
 #include "World/Wall/MD_PowerConduit.h"
 #include "World/Door/MD_DoorFaultComponent.h"
 #include "Component/Facility/MD_FacilityRepairComponent.h"
+#include "Component/Facility/MD_FacilityFaultManagerComponent.h"
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Components/BoxComponent.h"
 #include "Components/StaticMeshComponent.h"
@@ -20,6 +21,7 @@
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "HAL/IConsoleManager.h"
 #include "EngineUtils.h"
+#include "TimerManager.h"
 #include "Net/UnrealNetwork.h"
 #include "UObject/ConstructorHelpers.h"
 #include "UObject/UnrealType.h"
@@ -125,45 +127,34 @@ void AMD_RepairInstructionController::BeginPlay()
 		{ InstructionDoor->SetReplicates(true); InstructionDoor->FlushNetDormancy(); InstructionDoor->ForceNetUpdate(); }
 		// Components can enter an initial fault before the actor's BeginPlay binds its delegate.
 		if (Fault->IsFaultActive()) HandleOwnFault(Fault,FMD_FacilitySnapshot(),Fault->GetSnapshot());
-		for (AMD_PowerConduit* Wire : PowerConduits)
-			if (IsValid(Wire) && Wire->GetWorld()==GetWorld() && Wire->FacilityRepair)
-				Wire->FacilityRepair->OnStateChanged.AddUniqueDynamic(this,&ThisClass::HandlePowerFault);
-		TrackBrokenPowerSources();
-		if (!SourceIncidents.IsEmpty()) StartRepairIncident();
+		ConfigureBlackoutSchedule(bTimedBlackoutsEnabled, BlackoutIntervalSeconds);
 	}
 	OnRep_State();
 }
 
 void AMD_RepairInstructionController::EndPlay(const EEndPlayReason::Type Reason)
 {
-	for (AMD_PowerConduit* Wire : PowerConduits)
-		if (IsValid(Wire) && Wire->FacilityRepair) Wire->FacilityRepair->OnStateChanged.RemoveDynamic(this,&ThisClass::HandlePowerFault);
+	GetWorldTimerManager().ClearTimer(BlackoutTimer);
 	Fault->OnStateChanged.RemoveDynamic(this,&ThisClass::HandleOwnFault);
-	ReleaseDoor(); SourceIncidents.Empty();
+	ReleaseDoor();
 	Super::EndPlay(Reason);
 }
 
-void AMD_RepairInstructionController::TrackBrokenPowerSources()
+void AMD_RepairInstructionController::ConfigureBlackoutSchedule(bool bEnabled, float IntervalSeconds)
 {
-	for (AMD_PowerConduit* Wire : PowerConduits)
-		if (IsValid(Wire) && Wire->GetWorld()==GetWorld() && Wire->FacilityRepair && Wire->FacilityRepair->IsFaultActive())
-			SourceIncidents.Add(Wire->FacilityRepair.Get(),Wire->FacilityRepair->GetSnapshot().FaultId);
+	if (!HasAuthority() || !GetWorld() || !GetWorld()->IsGameWorld()) return;
+	GetWorldTimerManager().ClearTimer(BlackoutTimer);
+	bTimedBlackoutsEnabled = bEnabled;
+	if (!FMath::IsFinite(IntervalSeconds) || IntervalSeconds <= 0.f) return;
+	BlackoutIntervalSeconds = IntervalSeconds;
+	if (bTimedBlackoutsEnabled)
+		GetWorldTimerManager().SetTimer(BlackoutTimer, FTimerDelegate::CreateWeakLambda(this,
+			[this]() { StartRepairIncident(); }), BlackoutIntervalSeconds, true);
 }
 
-void AMD_RepairInstructionController::HandlePowerFault(UMD_FacilityFaultComponent* Source, const FMD_FacilitySnapshot&, const FMD_FacilitySnapshot& Current)
+float AMD_RepairInstructionController::GetSecondsUntilTimedBlackout() const
 {
-	if (!HasAuthority() || bCompleting || !Source || !PowerConduits.Contains(Cast<AMD_PowerConduit>(Source->GetOwner()))) return;
-	if (Current.IsFaultActive())
-	{
-		SourceIncidents.Add(Source,Current.FaultId);
-		if (!State.bActive) StartRepairIncident();
-	}
-	else
-	{
-		SourceIncidents.Remove(Source);
-		// An external tape repair stays valid. Do not leave readers locked after all linked power is restored.
-		if (State.bActive && SourceIncidents.IsEmpty()) Fault->CompleteRepairFromValidatedSource(Fault->GetSnapshot().FaultId);
-	}
+	return GetWorld() ? FMath::Max(0.f, GetWorld()->GetTimerManager().GetTimerRemaining(BlackoutTimer)) : 0.f;
 }
 
 bool AMD_RepairInstructionController::StartRepairIncident()
@@ -183,9 +174,7 @@ void AMD_RepairInstructionController::HandleOwnFault(UMD_FacilityFaultComponent*
 		State.bDoorPreviouslyLocked=Locked && Locked->GetPropertyValue_InContainer(InstructionDoor);
 		State.Revision = State.Revision == MAX_int32 ? 1 : State.Revision+1;
 		State.TargetRows = GenerateDifferentAnswer(State.TargetRows,Random); State.CurrentRows = {0,0,0,0};
-		TrackBrokenPowerSources();
 	}
-	else SourceIncidents.Empty();
 	PublishState();
 }
 
@@ -417,10 +406,6 @@ FText AMD_RepairInstructionController::GetInteractionPrompt_Implementation(AActo
 void AMD_RepairInstructionController::FinishRepair()
 {
 	const int32 Id=Fault->GetSnapshot().FaultId; bCompleting=true;
-	const auto Sources=SourceIncidents;
-	for (const auto& Pair:Sources)
-		if (UMD_FacilityFaultComponent* Source=Pair.Key.Get())
-			Source->CompleteRepairFromValidatedSource(Pair.Value);
 	const bool bCompleted=Fault->CompleteRepairFromValidatedSource(Id); bCompleting=false;
 	if (bCompleted) OnRepairCompleted.Broadcast(Id);
 }
@@ -617,7 +602,7 @@ void AMD_RepairInstructionControl::RefreshPresentation()
 			+Guide->GetActorForwardVector()*7.*FMath::Abs(Guide->GetActorScale3D().X),Guide->GetActorScale3D()));
 		InteractionBounds->SetBoxExtent(FVector(2,7,7));
 	}
-	AuxiliaryLight->SetVisibility(bGuide && bActive);
+	UpdateAuxiliaryLighting();
 	Heading->SetRelativeLocation(FVector(8,0,bGuide?72:bKnob?70:0));
 	Heading->SetText(FText::FromString(bGuide?TEXT("REPAIR INSTRUCTIONS"):bKnob?FString::Printf(TEXT("COL %d"),Column+1):TEXT("RESTART\nOPEN DOOR")));
 	Heading->SetVisibility(!bGuide && !bKnob && !bMeshRestart);
@@ -646,9 +631,19 @@ void AMD_RepairInstructionControl::RefreshPresentation()
 void AMD_RepairInstructionControl::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
+	UpdateAuxiliaryLighting();
 	if(ControlKind==EMD_InstructionControlKind::Guide) UpdateRestartFlash();
 	if(IsValid(Controller) && (PresentedRevision!=Controller->State.Revision || bPresentedActive!=Controller->State.bActive
 		|| (ControlKind==EMD_InstructionControlKind::Knob && Controller->State.CurrentRows.IsValidIndex(Column) && PresentedRow!=Controller->State.CurrentRows[Column]))) RefreshPresentation();
+}
+
+void AMD_RepairInstructionControl::UpdateAuxiliaryLighting()
+{
+	const AGameStateBase* GS=GetWorld()?GetWorld()->GetGameState():nullptr;
+	const auto* Manager=GS?GS->FindComponentByClass<UMD_FacilityFaultManagerComponent>():nullptr;
+	const bool bIncident=IsValid(Controller) && Controller->State.bActive;
+	AuxiliaryLight->SetVisibility(ControlKind==EMD_InstructionControlKind::Guide
+		&& (bIncident || (Manager && Manager->IsBlackoutActive())));
 }
 
 FVector AMD_RepairInstructionControl::GetRestartButtonWorldLocation() const
@@ -706,60 +701,19 @@ FText AMD_RepairInstructionControl::GetInteractionPrompt_Implementation(AActor*)
 
 #if !UE_BUILD_SHIPPING
 static FAutoConsoleCommandWithWorld GMDTestBlackout(
-	TEXT("MD.Blackout"), TEXT("Trigger the configured breaker's linked wire faults and repair instructions. Host/server only."),
+	TEXT("MD.Blackout"), TEXT("Start the periodic breaker blackout immediately. Does not cut or repair wires. Host/server only."),
 	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
 	{
-		if (!World || !World->IsGameWorld() || World->GetNetMode()==NM_Client)
-		{
-			UE_LOG(LogTemp, Display, TEXT("[MD.Blackout] Run this command during play on the host/server."));
-			return;
-		}
+		if (!World || !World->IsGameWorld() || World->GetNetMode()==NM_Client) return;
 		for (TActorIterator<AMD_RepairInstructionController> It(World); It; ++It)
-		{
-			if (!It->HasValidConfiguration()) continue;
-			if (It->State.bActive)
+			if (It->HasValidConfiguration())
 			{
-				UE_LOG(LogTemp, Display, TEXT("[MD.Blackout] %s is already active; the current incident is preserved."), *It->GetName());
+				UE_LOG(LogTemp, Display, TEXT("[MD.Blackout] %s: %s; cut wires still require insulation tape."),
+					*It->GetName(), It->StartRepairIncident()?TEXT("breaker blackout started"):TEXT("existing incident preserved"));
 				return;
 			}
-			int32 BrokenWires=0;
-			for (AMD_PowerConduit* Wire : It->PowerConduits)
-			{
-				if (!IsValid(Wire) || Wire->GetWorld()!=World || !IsValid(Wire->FacilityRepair)) continue;
-				// Unconfigured maps can preview blackout without saving new map references.
-				// Restrict the fallback to the wire's exact normal material and slot.
-				if (Wire->TargetActors.IsEmpty() && Wire->MeshComponents.IsEmpty()
-					&& Wire->NormalMaterial && Wire->BlackoutMaterial && Wire->MaterialIndex>=0)
-				{
-					for (TActorIterator<AActor> Target(World); Target; ++Target)
-					{
-						TInlineComponentArray<UStaticMeshComponent*> Meshes;
-						Target->GetComponents(Meshes);
-						for (UStaticMeshComponent* Mesh : Meshes)
-							if (IsValid(Mesh) && Wire->MaterialIndex<Mesh->GetNumMaterials()
-								&& Mesh->GetMaterial(Wire->MaterialIndex)==Wire->NormalMaterial)
-							{
-								FComponentReference Reference; Reference.OverrideComponent=Mesh;
-								Wire->MeshComponents.Add(Reference);
-							}
-						}
-					UE_LOG(LogTemp, Display, TEXT("[MD.Blackout] %s: temporarily connected %d matching power meshes for this play session."),
-						*Wire->GetName(), Wire->MeshComponents.Num());
-				}
-				Wire->ApplyPoweredLights();
-				// Use the normal wire-fault notification path for power, effects and the linked puzzle.
-				if (Wire->FacilityRepair->IsFaultActive() || Wire->FacilityRepair->TryBreak()) ++BrokenWires;
-			}
-			if (BrokenWires>0)
-			{
-				UE_LOG(LogTemp, Display, TEXT("[MD.Blackout] %s: %d linked wire fault(s), repair instructions %s."),
-					*It->GetName(), BrokenWires, It->State.bActive?TEXT("active"):TEXT("inactive"));
-				return;
-			}
-		}
-		UE_LOG(LogTemp, Display, TEXT("[MD.Blackout] No configured breaker with an available linked wire was found."));
 	}), ECVF_Cheat);
 
-static FAutoConsoleCommandWithWorld GMDStartInstruction(TEXT("MD.BreakInstruction"),TEXT("Start the configured repair-instruction incident on the host/server; does not schedule or create a wire blackout."),
+static FAutoConsoleCommandWithWorld GMDStartInstruction(TEXT("MD.BreakInstruction"),TEXT("Start the independent breaker blackout on the host/server; preserves cut-wire incidents."),
 	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World) { if(World && World->IsGameWorld() && World->GetNetMode()!=NM_Client) for(TActorIterator<AMD_RepairInstructionController> It(World);It;++It) if(It->StartRepairIncident()) break; }),ECVF_Cheat);
 #endif
