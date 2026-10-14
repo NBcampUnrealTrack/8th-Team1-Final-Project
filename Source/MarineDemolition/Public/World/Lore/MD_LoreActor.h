@@ -6,6 +6,8 @@
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_LoreActor.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class UMD_LoreSubsystem;
 class UMD_LoreProfileSubsystem;
 class USphereComponent;
@@ -30,6 +32,10 @@ public:
 
 	/** 할당된 로어 정의 에셋의 기록물 이름을 상호작용 HUD에 제공한다. */
 	virtual FText GetInteractionDisplayName_Implementation() const override;
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	virtual void BeginPlay() override;

@@ -7,6 +7,8 @@
 #include "Gameplay/Interaction/MD_Interactable.h"
 #include "MD_Cart.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class APawn;
 class UBoxComponent;
 class UStaticMeshComponent;
@@ -41,6 +43,10 @@ public:
 	virtual EMD_PhysicsHoldTargetResult ResolvePhysicsHoldTarget_Implementation(APawn* Pawn, FTransform& OutTarget) const override;
 	virtual void OnCarryStarted_Implementation() override;
 	virtual void OnCarryEnded_Implementation() override;
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	virtual void BeginPlay() override;

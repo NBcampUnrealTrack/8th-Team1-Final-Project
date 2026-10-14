@@ -1,4 +1,6 @@
 #include "World/Trash/MD_TrashSorter.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
 #include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "Components/BoxComponent.h"
@@ -34,6 +36,11 @@ UE_DEFINE_GAMEPLAY_TAG_STATIC(TAG_TrashSorter_ErrorFinished, "Event.TrashSorter.
 
 AMD_TrashSorter::AMD_TrashSorter()
 {
+	// 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::SortTrash;
+
 	PrimaryActorTick.bCanEverTick = false;
 	bReplicates = true;
 	FacilityRepair = CreateDefaultSubobject<UMD_FacilityRepairComponent>(TEXT("FacilityRepair"));
@@ -45,7 +52,6 @@ AMD_TrashSorter::AMD_TrashSorter()
 	SorterStateTree = CreateDefaultSubobject<UStateTreeComponent>(TEXT("SorterStateTree"));
 	SorterStateTree->SetStartLogicAutomatically(false);
 	SortingAnimation = CreateDefaultSubobject<UMD_TrashSorterAnimationComponent>(TEXT("SortingAnimation"));
-	SortActionText = NSLOCTEXT("MDInteraction", "TrashSorterSortAction", "분류");
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	SetRootComponent(Mesh);
@@ -153,14 +159,15 @@ void AMD_TrashSorter::SetInteractionHighlighted_Implementation(bool bHighlighted
 FText AMD_TrashSorter::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
 	if (bSafetyInterlocked) return NSLOCTEXT("MDInteraction", "SorterSafetyLock", "처리장 안전 정지 · 지문 인증 필요");
-	if (!CanInteract_Implementation(Interactor) || SortActionText.IsEmpty())
+	// 실제 분류 가능한 상태에서만 행동 안내 표시
+	if (CanInteract_Implementation(Interactor) == false)
 	{
+		// 사용할 수 없는 분류 행동의 안내 생략
 		return FText::GetEmpty();
 	}
 
-	return FText::Format(
-		NSLOCTEXT("MDInteraction", "TrashSorterPromptFormat", "[E] {0}"),
-		SortActionText);
+	// 선택한 분류 유형의 공통 설정 문구 반환
+	return UMD_InteractionPresentationLibrary::FindActorActionPrompt(this, Interactor);
 }
 
 bool AMD_TrashSorter::CanInteract_Implementation(AActor* Interactor) const

@@ -543,7 +543,7 @@ void UMD_ShopWidget::InitializeCategoryButtons()
 	CategoryButtonGroup->SetSelectionRequired(true);
 	// 이벤트 그래프의 클릭 연결을 유지할 디자이너 버튼 목록
 	TArray<UMD_CommonButtonBase*> CategoryButtons = {
-		Btn_Category_All, Btn_Category_Tool, Btn_Category_Safety, Btn_Category_Repair, Btn_Category_Survive, Btn_Category_Recovery
+		Btn_Category_All, Btn_Category_Tool, Btn_Category_Repair, Btn_Category_Survive
 	};
 	// 새 버튼 생성 없이 기존 버튼의 선택 정책만 적용
 	for (UMD_CommonButtonBase* CategoryButton : CategoryButtons)
@@ -569,7 +569,7 @@ void UMD_ShopWidget::RefreshCategorySelection()
 {
 	// 화면 배치 순서와 독립적으로 Enum에 대응할 버튼 목록
 	TArray<UMD_CommonButtonBase*> CategoryButtons = {
-		Btn_Category_All, Btn_Category_Tool, Btn_Category_Safety, Btn_Category_Repair, Btn_Category_Survive, Btn_Category_Recovery
+		Btn_Category_All, Btn_Category_Tool, Btn_Category_Repair, Btn_Category_Survive
 	};
 	// 전체 보기 또는 지정한 Enum 값에 대응하는 버튼 위치 산출
 	int32 CategoryIndex = bShowAllCategories == true ? 0 : StaticEnum<EMD_ShopCategory>()->GetIndexByValue(static_cast<int64>(SelectedCategory)) + 1;

@@ -1,4 +1,5 @@
 #include "World/Sample/MD_SampleItem.h"
+#include "Gameplay/Interaction/MD_InteractionPresentationLibrary.h"
 #include "World/Sample/MD_SampleProtectionZone.h"
 
 #include "AbilitySystemComponent.h"
@@ -59,8 +60,8 @@ void AMD_SampleItem::Tick(float DeltaSeconds)
 
 FText AMD_SampleItem::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
-	static_cast<void>(Interactor);
-	return NSLOCTEXT("MDInteraction", "SampleCarryPrompt", "[E] 들기");
+	// 선택한 행동 유형의 설정 문구와 현재 입력 키 표시
+	return UMD_InteractionPresentationLibrary::FindActorActionPrompt(this, Interactor);
 }
 
 void AMD_SampleItem::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

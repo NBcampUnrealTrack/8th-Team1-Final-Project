@@ -1,4 +1,5 @@
 #include "World/Transport/MD_Cart.h"
+#include "Component/Interaction/MD_InteractionPromptComponent.h"
 
 #include "Component/Interaction/MD_InteractionComponent.h"
 #include "Components/BoxComponent.h"
@@ -16,6 +17,11 @@
 
 AMD_Cart::AMD_Cart()
 {
+	// 인스턴스와 파생 BP가 행동 유형을 선택하는 기본 구성 생성
+	InteractionPrompt = CreateDefaultSubobject<UMD_InteractionPromptComponent>(TEXT("InteractionPrompt"));
+	// 기존 상호작용 동작에 대응하는 공통 문구 유형 지정
+	InteractionPrompt->PromptType = EMD_InteractionPromptType::PushCart;
+
 	PrimaryActorTick.bCanEverTick = true;
 	PrimaryActorTick.bStartWithTickEnabled = false;
 	PrimaryActorTick.TickInterval = 1.f / 30.f;
@@ -169,7 +175,8 @@ FText AMD_Cart::GetInteractionDisplayName_Implementation() const
 
 FText AMD_Cart::GetInteractionPrompt_Implementation(AActor* Interactor) const
 {
-	return UMD_InteractionPresentationLibrary::FindActionPrompt(TEXT("Cart"), Interactor);
+	// 선택한 행동 유형의 설정 문구와 현재 입력 키 표시
+	return UMD_InteractionPresentationLibrary::FindActorActionPrompt(this, Interactor);
 }
 
 bool AMD_Cart::IsPawnInsideTray(const APawn* Pawn) const

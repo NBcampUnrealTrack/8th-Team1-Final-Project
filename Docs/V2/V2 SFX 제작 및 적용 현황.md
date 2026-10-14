@@ -24,7 +24,7 @@
 
 ## 연결 대기
 
-빠루 사용·강제 개방, 유리창 그리기·지우기, 계약 완료·게임 오버 전용음은 준비했다. 현재 확인된 실제 게임플레이 호출 지점이 없어 임의로 기능을 추가하지 않았다. 해당 기능 구현 시 아래 태그를 연결해야 한다.
+빠루 사용·강제 개방음은 문 빠루 수리 성공 지점에 연결했다. 유리창 그리기·지우기와 계약 완료·게임 오버 전용음은 준비했으며, 확인된 실제 호출 지점이 없어 연결 대기 상태다. 해당 기능 구현 시 아래 태그를 연결해야 한다.
 
 기존 연속 헤라 긁기 태그는 호환용으로 남겼다. 현재 스트로크 방식에는 휘두르기와 실제 얼룩 제거·따개비 제거 성공음을 사용한다.
 
@@ -104,8 +104,8 @@
 | `SFX.Merchant.Loan.Interest` | `/Game/SFX/V2/S_V2_Merchant_Loan_Interest` | 카탈로그 등록 |
 | `SFX.Mothership.Report.Open` | `/Game/SFX/V2/S_V2_Mothership_Report_Open` | 카탈로그 등록 |
 | `SFX.Mothership.Report.Stamp` | `/Game/SFX/V2/S_V2_Mothership_Report_Stamp` | 카탈로그 등록 |
-| `SFX.Tool.Crowbar.Pry` | `/Game/SFX/V2/S_V2_Tool_Crowbar_Pry` | 연결 대기 |
-| `SFX.Tool.Crowbar.Release` | `/Game/SFX/V2/S_V2_Tool_Crowbar_Release` | 연결 대기 |
+| `SFX.Tool.Crowbar.Pry` | `/Game/SFX/V2/S_V2_Tool_Crowbar_Pry` | 문 빠루 수리 성공 시 서버 확정 재생 |
+| `SFX.Tool.Crowbar.Release` | `/Game/SFX/V2/S_V2_Tool_Crowbar_Release` | 문 빠루 수리 성공 시 서버 확정 재생 |
 | `SFX.Tool.Glass.DrawLoop` | `/Game/SFX/V2/S_V2_Tool_Glass_DrawLoop` | 연결 대기 |
 | `SFX.Tool.Glass.Clear` | `/Game/SFX/V2/S_V2_Tool_Glass_Clear` | 연결 대기 |
 | `SFX.Clean.Hera.Swing` | `/Game/SFX/V2/S_V2_Clean_Hera_Swing` | 카탈로그 등록 |
@@ -135,3 +135,5 @@
 - 별도 프로세스에서 기존 항목 28개의 전체 설정 일치, 현재 피격음과 신규 항목 49개의 설정 보존, 카탈로그 78항목의 참조 유효성을 확인했다.
 - 에디터 빌드 및 카탈로그·솔로/2인 수리·펌프 반복음 검사 3개가 통과했다.
 - 맵과 지침 BP는 수정하지 않았다.
+
+2026-10-14: 빠루 문 수리 성공 지점에 Pry/Release를 연결했다. 영구 사용·고장 완전 복구·문 개방이며 실패/중복 요청에는 재생하지 않는다.

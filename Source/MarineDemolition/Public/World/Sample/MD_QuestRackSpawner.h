@@ -6,6 +6,8 @@
 #include "GameplayTagAssetInterface.h"
 #include "MD_QuestRackSpawner.generated.h"
 
+class UMD_InteractionPromptComponent;
+
 class UStaticMesh;
 class UStaticMeshComponent;
 
@@ -76,6 +78,10 @@ public:
 	/** Optional visual variant, required to derive from the quest's required item class. */
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category="MD|Quest Rack")
 	TSubclassOf<AMD_QuestItem> RackCartridgeClass;
+
+	// 액터별 행동 유형을 공통 프롬프트 설정에 연결하는 구성
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Interaction")
+	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
 	virtual void PostInitializeComponents() override;
