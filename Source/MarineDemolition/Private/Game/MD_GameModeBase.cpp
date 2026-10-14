@@ -106,6 +106,14 @@ void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
     GetWorldTimerManager().ClearTimer(LoanInterestTimerHandle);
     // 종료된 월드에서 정산 완료 이동 콜백 실행 방지
     GetWorldTimerManager().ClearTimer(DepartTravelTimerHandle);
+    // GameInstance 서브시스템에 남은 이 월드의 파산 바인딩 해제
+    if (UGameInstance* GameInstance = GetGameInstance())
+    {
+        if (UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>())
+        {
+            Merchant->OnBankrupt.RemoveAll(this);
+        }
+    }
 
     Super::EndPlay(EndPlayReason);
 }
@@ -616,8 +624,39 @@ void AMD_GameModeBase::BeginExpeditionContract()
     }
     // 새 계약과 착수금 지급
     Merchant->BeginContract(ResolvedSite, ExpeditionAdvancePayment);
+    // 서브시스템은 GameInstance 수명이라 이 월드의 GameMode만 받도록 중복 없이 연결. EndPlay에서 해제
+    Merchant->OnBankrupt.RemoveAll(this);
+    Merchant->OnBankrupt.AddUObject(this, &AMD_GameModeBase::HandleBankruptcy);
     // 착수금과 계약 확정 이후 맵 진입 기준 이자 주기 시작
     StartLoanInterestTimer();
+}
+
+void AMD_GameModeBase::HandleBankruptcy()
+{
+    // 종료 트래블 중에도 초당 차감이 계속 들어오므로 첫 발화만 처리한다
+    if (HasAuthority() == false || bDayFinalized == true)
+    {
+        return;
+    }
+    bDayFinalized = true;
+    GetWorldTimerManager().ClearTimer(LoanInterestTimerHandle);
+    GetWorldTimerManager().ClearTimer(DepartTravelTimerHandle);
+
+    // 복귀 상태와 점수는 기록으로 남기되, 평가 보너스 지급은 하지 않는다(잔액을 다시 채우면 안 됨)
+    FinalizeReturnStatuses();
+    FinalizeDailyScore();
+
+    for (FConstPlayerControllerIterator It = GetWorld()->GetPlayerControllerIterator(); It; ++It)
+    {
+        AMD_PlayerController* Controller = Cast<AMD_PlayerController>(It->Get());
+        if (IsValid(Controller) == true)
+        {
+            Controller->ClientShowHUDMessage(NSLOCTEXT("MDContract", "Bankrupt", "자금이 바닥났습니다. 계약이 강제 종료됩니다."));
+        }
+    }
+    UE_LOG(LogTemp, Warning, TEXT("[Contract] 파산 — 정산 보고서 표시 후 로비 이동"));
+    // 마감 콘솔과 같은 흐름: 확정 보고서 5초 표시 → FinishDayEndReport → HandleContractCleared(로비)
+    ShowFinalReport(FGameplayTag());
 }
 
 void AMD_GameModeBase::StartLoanInterestTimer()

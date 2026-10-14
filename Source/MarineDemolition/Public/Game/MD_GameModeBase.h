@@ -106,6 +106,9 @@ private:
     // 계약 종료 처리 후 로비로 이동. 마감의 유일한 종착점
     void HandleContractCleared();
 
+    // 팀 잔액이 음수가 되면 정산 보고서 없이 즉시 계약을 끝내고 로비로 보낸다 (2026-10-14 결정)
+    void HandleBankruptcy();
+
     // 게임 종료 세션 상태를 갱신한 뒤 대상 로비 레벨로 이동하는 함수
     void TravelToLevel(const TSoftObjectPtr<UWorld>& Level);
 
