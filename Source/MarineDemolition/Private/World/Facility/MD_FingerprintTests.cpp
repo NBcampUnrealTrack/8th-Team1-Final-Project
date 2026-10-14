@@ -31,14 +31,18 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FMDFingerprintBalanceTest, "MarineDemolition.Fi
  EAutomationTestFlags::EditorContext | EAutomationTestFlags::EngineFilter)
 bool FMDFingerprintBalanceTest::RunTest(const FString&)
 {
- const int32 Rates[] = {0,5,10,20};
+ const int32 Rates[] = {0,1,2,3};
  for (int32 Count=1; Count<=4; ++Count)
-  TestEqual(FString::Printf(TEXT("%dp C=5 charge"),Count),AMD_FingerprintInterlock::CalculateLossPerSecond(Count),Rates[Count-1]);
+  TestEqual(FString::Printf(TEXT("%dp one/two/three-per-second balance"),Count),AMD_FingerprintInterlock::CalculateLossPerSecond(Count),Rates[Count-1]);
  TestEqual(TEXT("No negative participant index"),AMD_FingerprintInterlock::CalculateLossPerSecond(-1),0);
- TestEqual(TEXT("Clamp at four participants"),AMD_FingerprintInterlock::CalculateLossPerSecond(100),20);
+ TestEqual(TEXT("Clamp at four participants"),AMD_FingerprintInterlock::CalculateLossPerSecond(100),3);
  TestEqual(TEXT("Invalid negative cost does not credit money"),AMD_FingerprintInterlock::CalculateLossPerSecond(4,-1),0);
  TestEqual(TEXT("Large cost saturates without overflow"),AMD_FingerprintInterlock::CalculateLossPerSecond(4,MAX_int32),MAX_int32);
  const auto* Defaults=GetDefault<AMD_FingerprintInterlock>();
+ TestEqual(TEXT("One-credit base cost"),Defaults->CostUnit,1);
+ const auto* BlueprintClass=LoadClass<AMD_FingerprintInterlock>(nullptr,TEXT("/Game/Blueprint/Facility/BP_MD_FingerprintInterlock.BP_MD_FingerprintInterlock_C"));
+ if(TestNotNull(TEXT("Placed interlock Blueprint resolves"),BlueprintClass))
+  TestEqual(TEXT("Blueprint inherits the new balance"),BlueprintClass->GetDefaultObject<AMD_FingerprintInterlock>()->CostUnit,1);
  TestEqual(TEXT("Automatic interval minimum five minutes"),Defaults->MinFaultInterval,300.f);
  TestEqual(TEXT("Automatic interval maximum seven minutes"),Defaults->MaxFaultInterval,420.f);
  return true;
@@ -161,7 +165,8 @@ public:
    Next(1.3f); break;
   case 1:
    Test->TestTrue(TEXT("Active incident deducts actual team money"),Merchant->GetCredits()<CreditsBefore);
-   Test->TestEqual(TEXT("Two-player rate five per second"),Event->LossPerSecond,5);
+   Test->TestEqual(TEXT("Two-player rate one per second"),Event->LossPerSecond,1);
+   Test->TestEqual(TEXT("Client receives the same one-per-second rate"),RemoteEvent->LossPerSecond,1);
    Test->TestEqual(TEXT("Expense matches actual wallet loss"),int64(CreditsBefore-Merchant->GetCredits()),Event->TotalFaultLoss-LossBefore);
    Interaction->InteractReleased();
    Test->TestNull(TEXT("E release clears holder"),Pads[0]->ActiveScanner.Get());
@@ -208,10 +213,10 @@ public:
    ServerRemote->GetPlayerState()->SetIsSpectator(false);
    ExtraStates.Add(World->SpawnActor<APlayerState>()); Next(0.3f); break;
   case 9:
-   Test->TestEqual(TEXT("Third participant rate"),Event->LossPerSecond,10);
+   Test->TestEqual(TEXT("Third participant rate"),Event->LossPerSecond,2);
    ExtraStates.Add(World->SpawnActor<APlayerState>()); Next(0.3f); break;
   case 10:
-   Test->TestEqual(TEXT("Fourth participant rate"),Event->LossPerSecond,20);
+   Test->TestEqual(TEXT("Fourth participant rate"),Event->LossPerSecond,3);
    Pads[1]->Destroy(); Next(0.3f); break;
   case 11:
    Test->TestFalse(TEXT("Removed endpoint releases unrepairable event"),Event->IsActive());

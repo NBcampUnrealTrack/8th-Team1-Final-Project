@@ -104,7 +104,7 @@ int32 AMD_FingerprintInterlock::GetParticipantCount() const
 
 int32 AMD_FingerprintInterlock::CalculateLossPerSecond(int32 Count, int32 Unit)
 {
-	static constexpr int32 Multipliers[] = {0, 1, 2, 4};
+	static constexpr int32 Multipliers[] = {0, 1, 2, 3};
 	return int32(FMath::Clamp<int64>(int64(FMath::Max(0, Unit)) * Multipliers[FMath::Clamp(Count, 1, 4)-1], 0, MAX_int32));
 }
 
