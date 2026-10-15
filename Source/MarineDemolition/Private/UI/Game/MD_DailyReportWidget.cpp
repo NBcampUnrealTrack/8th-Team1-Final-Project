@@ -322,11 +322,11 @@ void UMD_DailyReportWidget::UpdateCreditHistory()
     }
     // 다섯 눈금에 사용할 정수 단위 최소 간격 계산
     double Step = FMath::Max(1.0, FMath::Pow(10.0, FMath::FloorToDouble(FMath::LogX(10.0, (MaximumCredit - MinimumCredit) / 4.0))));
-    // 영점을 포함하여 전체 범위를 네 칸 안에 수용하는 간격 선택
-    while (FMath::CeilToDouble(MaximumCredit / Step) - FMath::FloorToDouble(MinimumCredit / Step) > 4.0)
+    // 영점을 포함하여 전체 범위를 네 칸 안에 수용하는 간격 선택 (어떤 입력에도 게임 스레드가 멈추지 않도록 반복 상한 유지)
+    for (int32 StepIteration = 0; StepIteration < 64 && FMath::CeilToDouble(MaximumCredit / Step) - FMath::FloorToDouble(MinimumCredit / Step) > 4.0; ++StepIteration)
     {
-        // 눈금 값을 읽기 쉬운 1·2·5 단위로 증가
-        double Magnitude = FMath::Pow(10.0, FMath::FloorToDouble(FMath::LogX(10.0, Step)));
+        // 눈금 값을 읽기 쉬운 1·2·5 단위로 증가 (LogX(10, 1000) = 2.9999…로 자릿수가 한 단계 낮게 잡혀 제자리걸음하는 부동소수점 오차 보정)
+        double Magnitude = FMath::Pow(10.0, FMath::FloorToDouble(FMath::LogX(10.0, Step) + 1.0e-6));
         // 다음 간격의 자리수 내 배율 선택
         Step = Step / Magnitude < 1.5 ? 2.0 * Magnitude : (Step / Magnitude < 3.5 ? 5.0 * Magnitude : 10.0 * Magnitude);
     }
