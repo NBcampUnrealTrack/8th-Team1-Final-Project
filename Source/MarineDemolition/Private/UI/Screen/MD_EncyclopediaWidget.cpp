@@ -3,13 +3,16 @@
 #include "UI/Screen/MD_EncyclopediaWidget.h"
 
 #include "Component/Lore/MD_LoreComponent.h"
+#include "Components/Image.h"
 #include "Components/PanelWidget.h"
 #include "Components/ScrollBox.h"
 #include "Components/Slider.h"
 #include "Components/TextBlock.h"
+#include "Components/WidgetSwitcher.h"
 #include "Data/Lore/MD_LoreCatalog.h"
 #include "Data/Lore/MD_LoreDefinition.h"
 #include "GameFramework/GameStateBase.h"
+#include "Groups/CommonButtonGroupBase.h"
 #include "UI/MD_CommonButtonBase.h"
 
 void UMD_EncyclopediaWidget::NativeOnActivated()
@@ -110,7 +113,8 @@ void UMD_EncyclopediaWidget::ApplyLoreProgress(TArray<FPrimaryAssetId> InDiscove
 void UMD_EncyclopediaWidget::SelectCategory(int32 CategoryIndex)
 {
 	// 존재하지 않는 탭과 중복 선택 및 구성 중 입력 차단
-	if (bIsRefreshingEntries == true || Categories.IsValidIndex(CategoryIndex) == false || SelectedCategoryIndex == CategoryIndex)
+	if (bIsRefreshingEntries == true || SelectedCategoryIndex == CategoryIndex ||
+		(Categories.IsValidIndex(CategoryIndex) == false && IsCategorizingCategory(CategoryIndex) == false))
 	{
 		// 현재 카테고리를 유지한 무효 요청 종료
 		return;
@@ -123,6 +127,24 @@ void UMD_EncyclopediaWidget::SelectCategory(int32 CategoryIndex)
 	SelectedLoreId = FPrimaryAssetId();
 	// 새 탭의 데이터와 빈 목록 상태 반영
 	RebuildEntries();
+}
+
+void UMD_EncyclopediaWidget::SelectCategorizingEntry(int32 CategorizingIndex)
+{
+	// 페이지와 버튼이 모두 준비된 새로운 분류 선택만 허용
+	if (bIsRefreshingEntries == true || SelectedCategorizingIndex == CategorizingIndex ||
+		CategorizingButtons.IsValidIndex(CategorizingIndex) == false || IsValid(CategorizingButtons[CategorizingIndex]) == false ||
+		IsValid(WS_Categorizing) == false || IsValid(WS_Categorizing->GetChildAt(CategorizingIndex)) == false)
+	{
+		// 현재 분류를 유지한 중복 또는 범위 밖 선택 종료
+		return;
+	}
+	// 재열기와 로어 갱신에서도 유지할 품목 분류 보관
+	SelectedCategorizingIndex = CategorizingIndex;
+	// 품목 안내와 제목 및 식별 색상 갱신
+	RefreshCategorizingDisplay();
+	// 기존 Blueprint의 페이지 전환 연출 재사용
+	OnEntrySelectionChanged();
 }
 
 void UMD_EncyclopediaWidget::SelectEntry(int32 EntryIndex)
@@ -188,13 +210,14 @@ void UMD_EncyclopediaWidget::RebuildEntries()
 	// 이전 카드 구독과 표시 인스턴스 정리
 	ReleaseEntryWidgets();
 	// 설정이 바뀐 경우 첫 탭 또는 빈 선택으로 보정
-	if (Categories.IsValidIndex(SelectedCategoryIndex) == false)
+	if (Categories.IsValidIndex(SelectedCategoryIndex) == false && IsCategorizingCategory(SelectedCategoryIndex) == false)
 	{
 		// 카테고리 부재와 첫 번째 카테고리 구분
 		SelectedCategoryIndex = Categories.IsEmpty() == true ? INDEX_NONE : 0;
 	}
-	// 카탈로그 없는 탭도 정상적인 빈 화면으로 처리
-	CurrentCatalog = Categories.IsValidIndex(SelectedCategoryIndex) == true ? Categories[SelectedCategoryIndex].LoreCatalog : nullptr;
+	// 분류 설명서와 카탈로그 없는 탭에서는 로어 기록 조회 제외
+	CurrentCatalog = IsCategorizingCategory(SelectedCategoryIndex) == false && Categories.IsValidIndex(SelectedCategoryIndex) == true
+		? Categories[SelectedCategoryIndex].LoreCatalog : nullptr;
 	// 이전 선택 식별자를 새 목록의 인덱스로 변환
 	SelectedEntryIndex = IsValid(CurrentCatalog) == true ? CurrentCatalog->LoreEntries.IndexOfByKey(SelectedLoreId) : INDEX_NONE;
 	// 선택한 기록이 없는 유효한 목록의 첫 항목 선택
@@ -433,12 +456,106 @@ void UMD_EncyclopediaWidget::RefreshSelectionDisplay()
 		// 카테고리 개수와 무관하게 데이터 순서대로 표시 반영
 		RefreshCategoryButton(CategoryButtons[CategoryIndex], CategoryIndex);
 	}
+	// 로어 수집 갱신 중에도 현재 메뉴와 품목 분류 유지
+	RefreshCategorizingDisplay();
+}
+
+bool UMD_EncyclopediaWidget::IsCategorizingCategory(int32 CategoryIndex)
+{
+	// 설명서 페이지가 없는 기존 Blueprint의 카테고리 처리 유지
+	if (CategoryIndex >= 0 && CategoryIndex == CategorizingCategoryIndex && IsValid(WS_Page) == true && IsValid(HB_Categorizing) == true)
+	{
+		// 실제 페이지 전환 영역에 포함된 설명서만 지원
+		return WS_Page->GetChildIndex(HB_Categorizing) != INDEX_NONE;
+	}
+	// 설명서가 아닌 카테고리 구분
+	return false;
+}
+
+void UMD_EncyclopediaWidget::RefreshCategorizingDisplay()
+{
+	// 디자이너에 연결된 페이지를 현재 카테고리에 맞게 표시
+	if (IsValid(WS_Page) == true)
+	{
+		// 숫자 페이지 순서 대신 실제 페이지 위젯으로 전환 대상 결정
+		UPanelWidget* Page = IsCategorizingCategory(SelectedCategoryIndex) == true ? HB_Categorizing : HB_LoreCodex;
+		// 선택적인 페이지 누락과 잘못된 부모 연결 보호
+		if (IsValid(Page) == true && WS_Page->GetChildIndex(Page) != INDEX_NONE)
+		{
+			// 수집 알림에서도 선택한 설명서 또는 로어 페이지 유지
+			WS_Page->SetActiveWidget(Page);
+		}
+	}
+	// 설명서 페이지가 없는 기존 위젯의 추가 갱신 생략
+	if (IsValid(WS_Categorizing) == false)
+	{
+		// 기존 로어 표시만 유지
+		return;
+	}
+	// 디자이너 구성이 바뀌어 사라진 선택의 첫 분류 보정
+	if (CategorizingButtons.IsValidIndex(SelectedCategorizingIndex) == false ||
+		IsValid(CategorizingButtons[SelectedCategorizingIndex]) == false ||
+		IsValid(WS_Categorizing->GetChildAt(SelectedCategorizingIndex)) == false)
+	{
+		// 유효한 버튼과 안내 페이지가 없을 때의 빈 선택 준비
+		SelectedCategorizingIndex = INDEX_NONE;
+		// 누락 슬롯을 건너뛴 첫 표시 가능 분류 탐색
+		for (int32 Index = 0; Index < CategorizingButtons.Num(); ++Index)
+		{
+			// 입력 버튼과 본문이 모두 존재하는 분류만 선택 가능
+			if (IsValid(CategorizingButtons[Index]) == true && IsValid(WS_Categorizing->GetChildAt(Index)) == true)
+			{
+				// 다른 분류의 페이지 순서를 유지한 기본 선택 보관
+				SelectedCategorizingIndex = Index;
+				// 첫 유효 분류의 선택을 유지한 탐색 종료
+				break;
+			}
+		}
+	}
+	// 품목 분류 버튼마다 페이지 존재 여부와 선택 상태 반영
+	for (int32 Index = 0; Index < CategorizingButtons.Num(); ++Index)
+	{
+		// 해당 분류의 입력과 표시를 갱신할 버튼 조회
+		UMD_CommonButtonBase* Button = CategorizingButtons[Index];
+		// 소멸하거나 누락된 버튼의 접근 방지
+		if (IsValid(Button) == false)
+		{
+			// 다음 품목 분류로 갱신 이동
+			continue;
+		}
+		// 실제 안내 페이지가 있는 분류만 입력 허용
+		Button->SetIsEnabled(IsValid(WS_Categorizing->GetChildAt(Index)));
+		// 현재 분류에 한정하여 페이지와 제목 및 색상 반영
+		if (SelectedCategorizingIndex == Index)
+		{
+			// 그룹의 단일 선택 상태와 현재 분류 표시 동기화
+			if (IsValid(CategorizingButtonGroup) == true)
+			{
+				// 추가 클릭음 없이 이전 버튼 선택을 해제한 현재 분류 선택
+				CategorizingButtonGroup->SelectButtonAtIndex(CategorizingButtonGroup->FindButtonIndex(Button), false);
+			}
+			// 선택한 분류에 대응하는 기존 디자이너 본문 표시
+			WS_Categorizing->SetActiveWidgetIndex(Index);
+			// 버튼에 설정된 분류명을 상세 제목으로 사용
+			if (IsValid(Txt_Categorizing_Name) == true)
+			{
+				// 분류 이름을 별도 데이터로 중복 관리하지 않는 제목 갱신
+				Txt_Categorizing_Name->SetText(Button->GetContentText());
+			}
+			// 디자이너의 헤더 모양을 유지한 분류 색상 반영
+			if (IsValid(Img_Categorizing_Color) == true)
+			{
+				// 버튼에 지정된 식별 색상만 헤더 브러시에 적용
+				Img_Categorizing_Color->SetBrushTintColor(Button->GetContentImage().TintColor);
+			}
+		}
+	}
 }
 
 void UMD_EncyclopediaWidget::HandleCategoryClicked(int32 CategoryIndex)
 {
 	// 목록 구성 도중의 입력과 설정에 없는 카테고리 클릭 차단
-	if (bIsRefreshingEntries == true || Categories.IsValidIndex(CategoryIndex) == false)
+	if (bIsRefreshingEntries == true || (Categories.IsValidIndex(CategoryIndex) == false && IsCategorizingCategory(CategoryIndex) == false))
 	{
 		// 유효한 클릭이 아닌 경우 데이터 변경과 연출 알림 생략
 		return;
@@ -453,6 +570,38 @@ void UMD_EncyclopediaWidget::RebuildCategoryBindings()
 {
 	// 이전 패널 구성에서 남은 클릭 구독 제거
 	ReleaseCategoryBindings();
+	// 버튼 누락에도 금속부터 비가연성까지의 고정 페이지 인덱스 유지
+	CategorizingButtons = { Btn_Categorizing_Metal, Btn_Categorizing_Plastic, Btn_Categorizing_General, Btn_Categorizing_Pollution, Btn_Categorizing_Scrap };
+	// 재활성화와 새로고침에서 기존 단일 선택 그룹 재사용
+	if (IsValid(CategorizingButtonGroup) == false)
+	{
+		// 화면 수명에 맞춘 품목 분류 선택 그룹 생성
+		CategorizingButtonGroup = NewObject<UCommonButtonGroupBase>(this);
+	}
+	// 품목 분류가 존재하는 동안 하나의 선택 유지
+	CategorizingButtonGroup->SetSelectionRequired(true);
+	// 이름으로 바인딩한 분류 버튼을 고정 페이지 순서대로 연결
+	for (int32 Index = 0; Index < CategorizingButtons.Num(); ++Index)
+	{
+		// 현재 페이지 인덱스에 대응하는 선택적 버튼 조회
+		UMD_CommonButtonBase* Button = CategorizingButtons[Index];
+		// 누락된 버튼의 슬롯을 유지한 유효 버튼 연결
+		if (IsValid(Button) == true)
+		{
+			// 그룹에서 현재 품목 분류의 선택 강조 허용
+			Button->SetIsSelectable(true);
+			// 현재 분류 재클릭에 따른 선택 해제 방지
+			Button->SetIsToggleable(false);
+			// 포커스 이동과 실제 분류 선택의 표시 구분 유지
+			Button->SetShouldSelectUponReceivingFocus(false);
+			// 그룹 등록 이전의 디자이너 선택 상태 초기화
+			Button->ClearSelection();
+			// 다른 품목 버튼의 선택을 자동 해제할 그룹 등록
+			CategorizingButtonGroup->AddWidget(Button);
+			// 그룹 순서와 독립적인 고정 페이지 인덱스 전달
+			Button->OnClicked().AddUObject(this, &ThisClass::SelectCategorizingEntry, Index);
+		}
+	}
 	// 카테고리 패널이 없는 화면의 입력 연결 생략
 	if (IsValid(VB_Categories) == false)
 	{
@@ -467,8 +616,14 @@ void UMD_EncyclopediaWidget::RebuildCategoryBindings()
 		// 카테고리 입력을 지원하는 위젯만 연결
 		if (IsValid(Button) == true)
 		{
-			// 실제 버튼 순서를 보관하며 해당 카테고리로 클릭 연결
-			Button->OnClicked().AddUObject(this, &ThisClass::HandleCategoryClicked, CategoryButtons.Add(Button));
+			// Blueprint에서 여는 설명서를 포함한 실제 카테고리 순서 보관
+			int32 CategoryIndex = CategoryButtons.Add(Button);
+			// 설명서 열기 이벤트를 제외한 로어 카테고리의 네이티브 입력 연결
+			if (CategoryIndex != CategorizingCategoryIndex)
+			{
+				// 기존 카테고리 인덱스를 전달하는 클릭 처리 연결
+				Button->OnClicked().AddUObject(this, &ThisClass::HandleCategoryClicked, CategoryIndex);
+			}
 		}
 	}
 }
@@ -487,6 +642,24 @@ void UMD_EncyclopediaWidget::ReleaseCategoryBindings()
 	}
 	// 이전 버튼 구성에 대한 강한 참조 제거
 	CategoryButtons.Reset();
+	// 재수집과 화면 제거 시 이전 품목의 그룹 선택 및 구독 정리
+	if (IsValid(CategorizingButtonGroup) == true)
+	{
+		// 그룹의 동적 버튼 알림까지 해제하여 중복 등록 방지
+		CategorizingButtonGroup->RemoveAll();
+	}
+	// 설명서 재연결 및 제거 시 이전 분류 클릭 구독 정리
+	for (UMD_CommonButtonBase* Button : CategorizingButtons)
+	{
+		// 소멸한 설명서 버튼의 접근 방지
+		if (IsValid(Button) == true)
+		{
+			// 현재 화면에 연결한 분류 선택 처리만 제거
+			Button->OnClicked().RemoveAll(this);
+		}
+	}
+	// 이전 설명서 버튼의 강한 참조 제거
+	CategorizingButtons.Reset();
 }
 
 void UMD_EncyclopediaWidget::RefreshCategoryButton(UMD_CommonButtonBase* Button, int32 CategoryIndex)
@@ -497,8 +670,8 @@ void UMD_EncyclopediaWidget::RefreshCategoryButton(UMD_CommonButtonBase* Button,
 		// 선택 표시 대상이 없는 갱신 종료
 		return;
 	}
-	// 카테고리 설정에서 버튼 표시 이름 적용
-	if (Categories.IsValidIndex(CategoryIndex) == true)
+	// 설명서의 디자이너 제목을 유지하고 로어 버튼에만 설정 이름 적용
+	if (IsCategorizingCategory(CategoryIndex) == false && Categories.IsValidIndex(CategoryIndex) == true)
 	{
 		// 데이터 순서 변경에도 올바른 카테고리 이름 표시
 		Button->SetContentText(Categories[CategoryIndex].DisplayName);
@@ -509,8 +682,8 @@ void UMD_EncyclopediaWidget::RefreshCategoryButton(UMD_CommonButtonBase* Button,
 	Button->SetIsToggleable(false);
 	// 포커스만 이동했을 때 카테고리 표시 변경 방지
 	Button->SetShouldSelectUponReceivingFocus(false);
-	// 카테고리 설정이 없는 버튼의 입력 차단
-	Button->SetIsEnabled(Categories.IsValidIndex(CategoryIndex));
+	// 카탈로그 설정 또는 분류 설명서 페이지가 있는 버튼만 입력 허용
+	Button->SetIsEnabled(Categories.IsValidIndex(CategoryIndex) == true || IsCategorizingCategory(CategoryIndex) == true);
 	// 이전 카테고리의 선택 표시 제거
 	Button->ClearSelection();
 	// 현재 카테고리 버튼 하나만 선택

@@ -25,9 +25,13 @@ namespace MDVoiceDeviceRouting
 	// 이미 등록된 음성 엔진의 유지 및 신규 엔진 생성 방지
 	TSharedPtr<FVoiceEngineImpl, ESPMode::ThreadSafe> GetEngine(FOnlineVoiceImpl& Voice);
 
+	// 원격 등록과 디코더를 유지한 종료 월드의 음성 재생 객체 정리
+	void ResetWorldRemoteTalkers(UWorld* World, FVoiceEngineImpl& Engine);
+
 	// 새 캡처의 시작 성공 이후에만 기존 캡처를 교체하는 트랜잭션
 	bool ReplaceCapture(TSharedPtr<IVoiceCapture>& CurrentCapture, TSharedPtr<IVoiceCapture> NewCapture);
 
 	// 저장된 장치 ID를 실제 레거시 캡처 이름에 매핑한 입력 전환
-	EApplyResult ApplyInputDevice(UWorld* World, FString DeviceId, FString& AppliedDeviceId, TWeakPtr<IVoiceCapture>& AppliedCapture);
+	EApplyResult ApplyInputDevice(UWorld* World, FString DeviceId, FString& AppliedDeviceId,
+		TWeakPtr<IVoiceCapture>& AppliedCapture, TWeakPtr<FVoiceEngineImpl, ESPMode::ThreadSafe>& AppliedEngine);
 }

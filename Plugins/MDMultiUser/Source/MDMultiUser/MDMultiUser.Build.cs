@@ -6,7 +6,7 @@ public class MDMultiUser : ModuleRules
     {
         PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
         PrivateDependencyModuleNames.AddRange(new[] {
-            "Core", "CoreUObject", "Engine", "UnrealEd", "Slate", "SlateCore",
+            "AssetRegistry", "Json", "Core", "CoreUObject", "Engine", "UnrealEd", "Slate", "SlateCore",
             "LevelEditor", "EditorFramework", "MeshDescription", "ToolMenus", "ApplicationCore", "InputCore", "MultiUserClient", "Concert", "ConcertClient", "ConcertSyncClient"
         });
     }

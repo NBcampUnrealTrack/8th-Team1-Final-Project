@@ -260,13 +260,16 @@ void AMD_FingerprintInterlock::ApplyElapsedCharges()
 	if (Seconds <= 0) return;
 	LastChargeTime += double(Seconds);
 	if (LossPerSecond <= 0 || !GetGameInstance()) return;
-	if (auto* Merchant = GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
+	// 지문 비용의 최종 정산 여부를 제공하는 기존 경제 원장 조회
+	auto* Merchant = GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>();
+	// 최종 보고서 확정 이후 지갑과 지문 손실 누계의 추가 차감 방지
+	if (IsValid(Merchant) == true && Merchant->IsCreditHistoryFinished() == false)
 	{
 		const int32 Charge = int32(FMath::Min<int64>(MAX_int32, Seconds * LossPerSecond));
 		// 거래 대기 중에도 실제 적용액을 받을 사건 소유자 약한 참조
 		TWeakObjectPtr<AMD_FingerprintInterlock> WeakThis(this);
-		// 다른 거래 알림에서 요청된 비용도 실제 반영 시점에 손실 누계 갱신
-		Merchant->AddCredits(EMD_DailyReportCategory::Accident, -Charge, nullptr, [WeakThis](int32 AppliedAmount)
+		// 시스템 비용으로 기록하고 실제 반영 시점에 지문 손실 누계 갱신
+		Merchant->AddCredits(-Charge, nullptr, [WeakThis](int32 AppliedAmount)
 		{
 			// 대기 거래 처리 전에 종료된 사건 소유자 접근 차단
 			if (WeakThis.IsValid() == false)

@@ -12,7 +12,9 @@
 #include "Gameplay/Attribute/MD_CharacterAttributeSet.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Online/Voice/MD_CharacterVOIPTalker.h"
+#include "Online/Voice/MD_VoiceVolumeSubsystem.h"
 #include "AbilitySystemComponent.h"
+#include "Engine/GameInstance.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "Util/MD_LogUtility.h"
@@ -49,6 +51,9 @@ void AMD_PlayerState::BeginPlay()
 {
 	Super::BeginPlay();
 
+	// 능력 시스템 준비 상태와 무관한 이전 월드의 로컬 음량 복원
+	RestoreVoiceVolumeMultiplier();
+
 	if (!IsValid(AbilitySystemComponent) || !IsValid(CharacterAttributeSet))
 	{
 		return;
@@ -59,6 +64,14 @@ void AMD_PlayerState::BeginPlay()
 	AbilitySystemComponent->GetGameplayAttributeValueChangeDelegate(CharacterAttributeSet->GetHealthAttribute()).AddUObject(this, &AMD_PlayerState::HandleHealthChanged);
 
 	CachedHealthState = GetHealthState();
+}
+
+void AMD_PlayerState::OnSetUniqueId()
+{
+	Super::OnSetUniqueId();
+
+	// 서버 설정과 클라이언트 식별자 복제 이후의 로컬 음량 복원
+	RestoreVoiceVolumeMultiplier();
 }
 
 void AMD_PlayerState::OnRep_PlayerName()
@@ -170,8 +183,107 @@ UAbilitySystemComponent* AMD_PlayerState::GetAbilitySystemComponent() const
 void AMD_PlayerState::SetVoiceVolumeMultiplier(float NewVoiceVolumeMultiplier)
 {
 	// 음성 채팅 UI와 Talker가 공유하는 허용 범위 적용
-	float ClampedVoiceVolumeMultiplier = FMath::Clamp(NewVoiceVolumeMultiplier, 0.0f, UMD_CharacterVOIPTalker::MaxVolumeMultiplier);
-	VoiceVolumeMultiplier = ClampedVoiceVolumeMultiplier;
+	VoiceVolumeMultiplier = FMath::Clamp(NewVoiceVolumeMultiplier, 0.0f, UMD_CharacterVOIPTalker::MaxVolumeMultiplier);
+	// 온라인 식별자 또는 저장소 준비 전 최신 사용자 입력 보존
+	bHasPendingVoiceVolumeOverride = true;
+
+	// 월드 이동에도 유지되는 현재 클라이언트의 저장소 조회
+	UGameInstance* GameInstance = GetGameInstance();
+	// GameInstance 준비 전 현재 PlayerState의 입력만 보존
+	if (IsValid(GameInstance) == false)
+	{
+		// 저장소 준비 이후의 복원 시점까지 영구 키 저장 연기
+		return;
+	}
+
+	// 플레이어별 로컬 음성 설정의 세션 수명 저장소 조회
+	UMD_VoiceVolumeSubsystem* VoiceVolumeSubsystem = GameInstance->GetSubsystem<UMD_VoiceVolumeSubsystem>();
+	// 확정된 온라인 식별자로 저장된 사용자 입력만 대기 상태 해제
+	if (IsValid(VoiceVolumeSubsystem) == true && VoiceVolumeSubsystem->StoreVolumeMultiplier(GetUniqueId(), VoiceVolumeMultiplier) == true)
+	{
+		// 이후 복원에서 보존된 온라인 식별자 설정 사용
+		bHasPendingVoiceVolumeOverride = false;
+	}
+}
+
+void AMD_PlayerState::RestoreVoiceVolumeMultiplier()
+{
+	// 여러 플레이어의 초기 상태를 혼동하지 않을 확정 식별자 조회
+	FUniqueNetIdRepl PlayerUniqueId = GetUniqueId();
+	// 식별자 준비 전 사용자 입력과 기존 표시 상태 유지
+	if (PlayerUniqueId.IsValid() == false)
+	{
+		// 온라인 식별자 변경 콜백까지 복원 연기
+		return;
+	}
+
+	// 현재 월드와 별도 수명으로 유지되는 클라이언트 저장소 조회
+	UGameInstance* GameInstance = GetGameInstance();
+	// GameInstance 생성 전 호출의 설정 변경 생략
+	if (IsValid(GameInstance) == false)
+	{
+		// BeginPlay 또는 식별자 변경 시점의 후속 복원 대기
+		return;
+	}
+
+	// 온라인 식별자별 로컬 음성 배율 저장소 조회
+	UMD_VoiceVolumeSubsystem* VoiceVolumeSubsystem = GameInstance->GetSubsystem<UMD_VoiceVolumeSubsystem>();
+	// 저장소가 준비되지 않은 상태의 기본값 덮어쓰기 차단
+	if (IsValid(VoiceVolumeSubsystem) == false)
+	{
+		// 현재 PlayerState 설정을 유지한 복원 중단
+		return;
+	}
+
+	// 식별자 복제 전 발생한 최신 사용자 입력 우선 반영
+	if (bHasPendingVoiceVolumeOverride == true)
+	{
+		// 이전 캐시보다 최근인 사용자 입력의 확정 식별자 저장
+		if (VoiceVolumeSubsystem->StoreVolumeMultiplier(PlayerUniqueId, VoiceVolumeMultiplier) == false)
+		{
+			// 저장 실패 시 사용자 입력 대기 상태 보존
+			return;
+		}
+		// 확정 식별자에 보존된 사용자 입력의 대기 상태 해제
+		bHasPendingVoiceVolumeOverride = false;
+	}
+	else
+	{
+		// 저장된 사용자 설정이 없는 플레이어의 기본 배율 준비
+		VoiceVolumeMultiplier = UMD_CharacterVOIPTalker::DefaultVolumeMultiplier;
+		// 이전 월드에서 보존한 동일 플레이어의 음성 배율 복원
+		VoiceVolumeSubsystem->FindVolumeMultiplier(PlayerUniqueId, VoiceVolumeMultiplier);
+	}
+
+	// 이미 생성된 플레이어 Pawn의 음성 재생 대상 조회
+	APawn* PlayerPawn = GetPawn();
+	// Pawn 준비 전에는 Talker의 기존 등록 재시도 경로 사용
+	if (IsValid(PlayerPawn) == true)
+	{
+		// 현재 플레이어의 실제 음성 출력을 제어하는 Talker 조회
+		UMD_CharacterVOIPTalker* VoiceTalker = PlayerPawn->FindComponentByClass<UMD_CharacterVOIPTalker>();
+		// 이미 준비된 Talker에 복원된 배율 즉시 적용
+		if (IsValid(VoiceTalker) == true)
+		{
+			// 현재 발화와 다음 발화에 동일한 복원 배율 반영
+			VoiceTalker->SetVolumeMuliplier(VoiceVolumeMultiplier);
+		}
+	}
+
+	// 열려 있는 플레이어 카드의 음량 표시 갱신을 위한 월드 조회
+	UWorld* World = GetWorld();
+	// 월드 종료 또는 생성 전의 화면 갱신 생략
+	if (IsValid(World) == true)
+	{
+		// 플레이어 목록 변경 알림을 제공하는 GameState 조회
+		AMD_GameStateBase* GameState = World->GetGameState<AMD_GameStateBase>();
+		// 현재 월드의 목록을 구독한 화면에 복원 완료 전달
+		if (IsValid(GameState) == true)
+		{
+			// 저장 작업 없이 복원된 PlayerState 음량의 카드 재표시 요청
+			GameState->OnPlayerListChanged.Broadcast();
+		}
+	}
 }
 
 EMD_HealthState AMD_PlayerState::GetHealthState() const

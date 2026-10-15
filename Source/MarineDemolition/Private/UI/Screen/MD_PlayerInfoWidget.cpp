@@ -8,6 +8,7 @@
 #include "Online/Voice/MD_CharacterVOIPTalker.h"
 #include "Player/MD_PlayerController.h"
 #include "Player/MD_PlayerState.h"
+#include "Templates/UnrealTemplate.h"
 
 void UMD_PlayerInfoWidget::NativePreConstruct()
 {
@@ -91,7 +92,8 @@ void UMD_PlayerInfoWidget::SetPlayerState(APlayerState* InPlayerState)
 	{
 		float StoredVolumeMultiplier = ProjectPlayerState->GetVoiceVolumeMultiplier();
 		float StoredNormalizedVolume = StoredVolumeMultiplier / UMD_CharacterVOIPTalker::MaxVolumeMultiplier;
-		SetVolume(StoredNormalizedVolume);
+		// 복원된 PlayerState 음량의 사용자 설정 덮어쓰기 없는 표시
+		SetVolumeInternal(StoredNormalizedVolume, false);
 		return;
 	}
 
@@ -101,14 +103,16 @@ void UMD_PlayerInfoWidget::SetPlayerState(APlayerState* InPlayerState)
 	{
 		// Talker 준비 전 카드에 새 접속 기본 음량 적용
 		float DefaultNormalizedVolume = UMD_CharacterVOIPTalker::DefaultVolumeMultiplier / UMD_CharacterVOIPTalker::MaxVolumeMultiplier;
-		SetVolume(DefaultNormalizedVolume);
+		// 식별자 준비 전 기본 표시를 사용자 입력으로 저장하는 동작 차단
+		SetVolumeInternal(DefaultNormalizedVolume, false);
 		return;
 	}
 
 	// Talker 재생 배율의 Slider 정규화 값 변환
 	float CurrentVolumeMultiplier = VoiceTalker->GetVolumeMultiplier();
 	float NormalizedVolume = CurrentVolumeMultiplier / UMD_CharacterVOIPTalker::MaxVolumeMultiplier;
-	SetVolume(NormalizedVolume);
+	// 기존 Talker 음량의 사용자 설정 저장 없는 카드 표시
+	SetVolumeInternal(NormalizedVolume, false);
 }
 
 void UMD_PlayerInfoWidget::SetPlayerName(FText InPlayerName)
@@ -140,13 +144,22 @@ void UMD_PlayerInfoWidget::KickAssignedPlayer()
 
 void UMD_PlayerInfoWidget::SetVolume(float InVolume)
 {
+	// 외부 호출과 Slider 조작에 따른 명시적 사용자 설정 저장
+	SetVolumeInternal(InVolume, true);
+}
+
+void UMD_PlayerInfoWidget::SetVolumeInternal(float InVolume, bool bSavePreference)
+{
+	// Slider 값 반영 중 동기 발생하는 변경 알림의 사용자 입력 재진입 차단
+	TGuardValue<bool> UpdatingVolumeDisplayGuard(bUpdatingVolumeDisplay, true);
+
 	// Slider 범위에 맞춘 새 볼륨 값 보정
-	float ClampedVolume = FMath::Clamp(InVolume, 0.0f, 1.0f);
-	Volume = ClampedVolume;
+	Volume = FMath::Clamp(InVolume, 0.0f, 1.0f);
 
 	// 바인딩된 Slider에 보정된 볼륨 값 반영
 	if (IsValid(Sd_Volume) == true)
 	{
+		// 사용자 입력과 복원 표시의 동일한 Slider 진행도 반영
 		Sd_Volume->SetValue(Volume);
 	}
 
@@ -155,8 +168,8 @@ void UMD_PlayerInfoWidget::SetVolume(float InVolume)
 	// 음성 크기 단계와 음소거 아이콘 동기화
 	UpdateVolumeIndicator();
 
-	// 할당된 플레이어의 실제 음성 재생 배율 갱신
-	ApplyAssignedVoiceVolume();
+	// 사용자 입력 저장 여부를 유지한 실제 음성 재생 배율 갱신
+	ApplyAssignedVoiceVolume(bSavePreference);
 }
 
 void UMD_PlayerInfoWidget::ApplyPlayerName()
@@ -174,15 +187,17 @@ void UMD_PlayerInfoWidget::ApplyPlayerName()
 	}
 }
 
-void UMD_PlayerInfoWidget::ApplyAssignedVoiceVolume()
+void UMD_PlayerInfoWidget::ApplyAssignedVoiceVolume(bool bSavePreference)
 {
 	// Slider 정규화 값을 실제 음성 재생 배율로 변환
 	float VolumeMultiplier = Volume * UMD_CharacterVOIPTalker::MaxVolumeMultiplier;
 
-	// Pawn 교체 이후 복원을 위한 현재 PlayerState의 로컬 음량 저장
+	// 사용자 입력의 월드 이동 이후 보존을 위한 PlayerState 조회
 	AMD_PlayerState* ProjectPlayerState = Cast<AMD_PlayerState>(AssignedPlayerState);
-	if (IsValid(ProjectPlayerState) == true)
+	// 카드 초기화와 목록 새로고침을 제외한 명시적 설정 변경만 저장
+	if (bSavePreference == true && IsValid(ProjectPlayerState) == true)
 	{
+		// 확정된 온라인 식별자 저장 또는 식별자 준비 전 입력 보존
 		ProjectPlayerState->SetVoiceVolumeMultiplier(VolumeMultiplier);
 	}
 
@@ -337,6 +352,13 @@ UMD_CharacterVOIPTalker* UMD_PlayerInfoWidget::GetAssignedVoiceTalker()
 
 void UMD_PlayerInfoWidget::HandleVolumeChanged(float InVolume)
 {
+	// 프로그램 표시 복원으로 발생한 Slider 알림의 저장과 외부 전파 차단
+	if (bUpdatingVolumeDisplay == true)
+	{
+		// 명시적 사용자 입력 처리와 분리된 표시 갱신 완료
+		return;
+	}
+
 	// Slider 값을 저장하고 할당된 플레이어의 실제 음성 재생에 적용
 	SetVolume(InVolume);
 	// 변경된 정규화 볼륨의 외부 구독자 전달

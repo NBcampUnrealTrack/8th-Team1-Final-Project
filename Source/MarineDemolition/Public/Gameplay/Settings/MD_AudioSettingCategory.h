@@ -9,6 +9,8 @@
 #include "MD_AudioSettingCategory.generated.h"
 
 class IVoiceCapture;
+class FVoiceEngineImpl;
+struct FMD_AudioOutputRequestState;
 
 // 출력 장치 전환 완료 결과와 실제 사용 중인 장치 ID를 UI에 전달한다.
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_TwoParams(FMD_OnAudioOutputDeviceChanged, bool, bWasSuccessful, FString, CurrentDeviceId);
@@ -63,12 +65,20 @@ protected:
 	FString CurrentOutputDeviceId;
 	// 트래블 전 출력 요청의 실제 대상 월드
 	TWeakObjectPtr<UWorld> OutputRequestWorld;
+	// 월드 준비 전 대기와 대상 월드 소멸을 구분하는 요청 귀속 상태
+	bool bOutputRequestWorldAssigned = false;
+	// 최초 게임 월드의 출력 처리를 시작한 이후 초기 임시 월드 예외를 차단하는 상태
+	bool bHasOutputRequestStarted = false;
+	// 출력 작업 실행과 게임 스레드 취소를 직렬화하는 요청별 공유 상태
+	TSharedPtr<FMD_AudioOutputRequestState, ESPMode::ThreadSafe> OutputDeviceRequestState;
 	// 미적용 편집값과 분리된 입력 선택
 	FString RequestedInputDeviceId;
 	// 마지막으로 실제 적용된 입력 장치 식별자
 	FString AppliedInputDeviceId;
 	// 음성 엔진 재생성 시 입력 재적용을 위한 약한 캡처 참조
 	TWeakPtr<IVoiceCapture> AppliedVoiceCapture;
+	// 월드 종료 시 새 엔진 생성 없이 기존 원격 음성 재생을 정리할 약한 참조
+	TWeakPtr<FVoiceEngineImpl, ESPMode::ThreadSafe> AppliedVoiceEngine;
 	// 일시정지 중에도 출력 전환 완료를 확인하는 코어 틱 핸들
 	FTSTicker::FDelegateHandle OutputDeviceTickerHandle;
 	// 오래된 비동기 출력 응답을 구분하는 요청 번호
@@ -81,6 +91,12 @@ protected:
 	bool bOutputDeviceRequestAccepted = false;
 	// 장치 응답 유실에 대한 무한 대기 방지 시각
 	double OutputDeviceRequestStartTime = 0.0;
+	// 월드 전환과 종료 중 입출력 장치 변경을 차단하는 상태
+	bool bAudioDevicesSuspended = false;
+	// 현재 게임 인스턴스의 심리스 이동 시작 구독 핸들
+	FDelegateHandle SeamlessTravelStartHandle;
+	// 현재 게임 인스턴스의 월드 종료 시작 구독 핸들
+	FDelegateHandle WorldBeginTearDownHandle;
 
 public:
 	// 현재 시스템에서 사용할 수 있는 출력 장치 목록을 비동기로 요청한다.
@@ -123,13 +139,31 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MarineDemolition|Settings|Audio")
 	FORCEINLINE bool IsPushToTalkEnabled() { return Settings.bUsePushToTalk; }
 
-	// 월드 오디오 장치 준비 이후 확정된 입출력 선택 재적용
+	// 최초 설정과 사용자 확정에 따른 입출력 선택 적용 예약
 	void RefreshAudioDevices();
+
+	// 월드 이동 전에 대기 중인 출력 작업 취소와 입출력 변경 차단
+	void SuspendAudioDeviceRequests();
+
+	// 목적지 월드 시작 후 장치 변경 차단 해제와 입력 선택 복원
+	void RestoreWorldInputDevice();
+
+	// 설정 카테고리 종료 시 월드 구독 해제와 장치 작업 취소
+	void ShutdownAudioDevices();
 
 	// 로컬 음성 엔진의 지연 초기화 이후 확정된 입력 선택 재적용
 	void ApplyInputDeviceSettings();
 
 protected:
+	// 현재 요청의 오디오 작업과 틱 및 비동기 응답 일괄 취소
+	void CancelOutputDeviceRequest();
+
+	// 소유 게임 인스턴스의 심리스 이동 시작에 따른 장치 요청 중단
+	void HandleSeamlessTravelStart(UWorld* World, const FString& DestinationUrl);
+
+	// 소유 게임 인스턴스의 월드 종료 시작에 따른 장치 요청 중단
+	void HandleWorldBeginTearDown(UWorld* World);
+
 	// 오디오 스레드에서 확인한 실제 출력 장치 상태 반영
 	void HandleOutputDeviceChecked(uint32 RequestSerial, bool bSuccessful, bool bAccepted, FString CurrentDeviceId);
 

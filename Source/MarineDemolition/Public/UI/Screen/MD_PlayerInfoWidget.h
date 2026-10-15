@@ -76,6 +76,9 @@ protected:
 	UPROPERTY(Transient)
 	TObjectPtr<UMaterialInstanceDynamic> VolumeBarMaterialInstance;
 
+	// 프로그램 표시 갱신을 Slider 사용자 입력으로 재처리하지 않을 보호 상태
+	bool bUpdatingVolumeDisplay = false;
+
 public:
 	// 현재 플레이어 이름 반환
 	UFUNCTION(BlueprintPure, Category = "MD|Player Info")
@@ -114,11 +117,14 @@ public:
 	void SetVolume(float InVolume);
 
 protected:
+	// 사용자 입력 저장과 기존 설정 표시를 구분한 볼륨 반영
+	void SetVolumeInternal(float InVolume, bool bSavePreference);
+
 	// 저장된 플레이어 이름의 바인딩된 텍스트 요소 적용
 	void ApplyPlayerName();
 
-	// 정규화된 볼륨의 할당된 플레이어 음성 Talker 적용
-	void ApplyAssignedVoiceVolume();
+	// 사용자 입력 저장 여부를 구분한 실제 음성 Talker 배율 적용
+	void ApplyAssignedVoiceVolume(bool bSavePreference);
 
 	// Slider 바 Brush에 카드 전용 동적 Material 적용
 	void InitializeVolumeBarMaterial();
