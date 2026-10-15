@@ -740,6 +740,33 @@ void UMD_MerchantSubsystem::FinalizeContract()
 	OnMerchantStateChanged.Broadcast();
 }
 
+void UMD_MerchantSubsystem::ResetContractEconomy()
+{
+	// 클라이언트와 중첩 거래 중의 초기화 차단
+	if (HasServerAuthority() == false || bShopTransactionInProgress == true)
+	{
+		return;
+	}
+	// 종료된 계약의 지연 보상이 초기화 이후 잔액을 되살리는 상황 차단
+	UWorld* World = GetWorld();
+	if (IsValid(World) == true)
+	{
+		World->GetTimerManager().ClearTimer(PendingCreditFlushTimerHandle);
+	}
+	PendingCreditFlushTimerHandle.Invalidate();
+	PendingCreditChanges.Reset();
+	// 팀 잔액과 대출 상태 초기화 (부채·원금 포함)
+	Credits = 0;
+	DebtBalance = 0;
+	LoanPrincipal = 0;
+	// 다음 계약의 상점 해금 기준이 되는 구매 원장 초기화
+	PurchasedItemAssetCounts.Reset();
+	// 종료된 계약의 파산 예약 제거
+	bBankruptcyPending = false;
+	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 경제 초기화 (잔액·부채·원금·구매 원장)"));
+	OnMerchantStateChanged.Broadcast();
+}
+
 
 void UMD_MerchantSubsystem::AddCreditsInternal(int32 Amount, APlayerState* ResponsiblePlayer)
 {

@@ -438,6 +438,27 @@ bool AMD_PlayerState::IsShopItemPurchaseBlocked(FPrimaryAssetId ItemAssetId)
 	return ItemAssetId.IsValid() == true && BlockedShopItemIds.Contains(ItemAssetId) == true;
 }
 
+void AMD_PlayerState::ResetShopPurchaseState()
+{
+	// 서버에서 확정한 계약 종료에만 개인 이력 초기화 허용
+	if (HasAuthority() == false)
+	{
+		return;
+	}
+	// 이미 비어 있는 이력의 불필요한 갱신과 복제 생략
+	if (PurchasedShopItemIds.IsEmpty() == true && BlockedShopItemIds.IsEmpty() == true)
+	{
+		return;
+	}
+	// 다음 계약을 빈손으로 시작하도록 구매 이력과 구매 금지 제거
+	PurchasedShopItemIds.Reset();
+	BlockedShopItemIds.Reset();
+	// 두 목록을 함께 초기화한 상태를 서버 상점 화면에 전달
+	OnRep_ShopPurchaseState();
+	// 소유 클라이언트에 비워진 구매 및 잠금 이력 복제 요청
+	ForceNetUpdate();
+}
+
 void AMD_PlayerState::OnRep_ShopPurchaseState()
 {
 	// 플레이어의 화면에 보여지는 상점 UI를 갱신하도록 UI 소유 플레이어 변경 이벤트 호출

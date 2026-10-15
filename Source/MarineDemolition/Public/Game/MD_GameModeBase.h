@@ -125,6 +125,9 @@ private:
     // FinalizeDay 중복 실행 방지 플래그. 레벨 재시작 시 초기화
     bool bDayFinalized = false;
 
+    // 계약 종료 후 로비 이동 중 핫바·구매 이력 재캡처를 막는 플래그. 레벨 재시작 시 초기화
+    bool bContractCleared = false;
+
     // 마감 후 이동할 로비 레벨. BP GameMode에서 지정 (구 ClearedLevel)
     UPROPERTY(EditDefaultsOnly, Category = "Contract")
     TSoftObjectPtr<UWorld> LobbyLevel;

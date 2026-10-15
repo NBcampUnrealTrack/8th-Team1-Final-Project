@@ -167,6 +167,11 @@ void AMD_GameModeBase::GetSeamlessTravelActorList(bool bToTransition, TArray<AAc
     {
         return;
     }
+    // 계약 종료 이동에서는 도구를 로비로 넘기지 않는다
+    if (bContractCleared == true)
+    {
+        return;
+    }
     // 기존 캐릭터가 제거되기 전에 개인 기록을 보관할 게임 인스턴스 조회
     UGameInstance* GameInstance = GetGameInstance();
     // 맵 이동 중에도 유지되는 운반 보관소 조회
@@ -198,7 +203,7 @@ void AMD_GameModeBase::Logout(AController* Exiting)
     // 재접속에 대비해 퇴장 플레이어의 핫바와 구매 이력 보관
     UGameInstance* GameInstance = GetGameInstance();
     UMD_SessionCarrySubsystem* Carry = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SessionCarrySubsystem>() : nullptr;
-    if (IsValid(Carry) == true && IsValid(Exiting) == true)
+    if (IsValid(Carry) == true && IsValid(Exiting) == true && bContractCleared == false)
     {
         Carry->CapturePlayer(Exiting->PlayerState);
     }
@@ -324,7 +329,28 @@ void AMD_GameModeBase::HandleContractCleared()
     if (IsValid(Merchant) == true)
     {
         Merchant->FinalizeContract();
+        // 퇴근 = 계약 종료. 잔액·부채·원금·구매 원장을 모두 초기화 (2026-10-15 결정)
+        Merchant->ResetContractEconomy();
     }
+    // 다음 계약을 빈손으로 시작하도록 모든 플레이어의 구매 이력 초기화
+    if (IsValid(GameState) == true)
+    {
+        for (APlayerState* PlayerState : GameState->PlayerArray)
+        {
+            AMD_PlayerState* MDPlayerState = Cast<AMD_PlayerState>(PlayerState);
+            if (IsValid(MDPlayerState) == true)
+            {
+                MDPlayerState->ResetShopPurchaseState();
+            }
+        }
+    }
+    // 보관된 핫바를 비우고 이후 트래블·로그아웃 캡처를 차단해 도구가 로비로 넘어가지 않게 처리
+    UMD_SessionCarrySubsystem* Carry = IsValid(GameInstance) == true ? GameInstance->GetSubsystem<UMD_SessionCarrySubsystem>() : nullptr;
+    if (IsValid(Carry) == true)
+    {
+        Carry->Reset();
+    }
+    bContractCleared = true;
 
     // 마감의 목적지는 항상 로비
     TravelToLevel(LobbyLevel);

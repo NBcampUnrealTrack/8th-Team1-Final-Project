@@ -117,6 +117,9 @@ public:
 	/** 계약 종료 시 활성 현장과 일차 해제 */
 	void FinalizeContract();
 
+	/** 퇴근(계약 종료) 후 로비 복귀 시 잔액·부채·원금·구매 원장을 모두 0으로 초기화 (2026-10-15 결정: 부채까지 전부 초기화) */
+	void ResetContractEconomy();
+
 	/** `Resource.Sample.Grade.X` 태그 변환. 등급 태그가 필요한 곳에서 공용으로 쓴다. */
 	static FGameplayTag GradeTagFromSampleGrade(EMD_SampleGrade Grade);
 
@@ -185,7 +188,7 @@ private:
 
 	int32 Credits = 0;
 
-	// 계약과 게임 재시작을 넘어 유지되는 팀 공유 미상환 대출 잔액
+	// 계약 중 유지되는 팀 공유 미상환 대출 잔액. 계약 종료 시 ResetContractEconomy로 초기화
 	int32 DebtBalance = 0;
 
 	// 고정 이자의 기준 원금. 착수금과 추가 대출의 합이며 이자는 포함하지 않고 완납 시 0으로 초기화

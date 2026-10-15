@@ -137,6 +137,9 @@ public:
 	// 검증된 개인 이력을 교체한 뒤 상점 화면 갱신과 소유 클라이언트 복제
 	bool RestoreShopPurchaseState(FMD_PlayerData& SaveData);
 
+	// 계약 종료 시 구매 이력과 구매 금지를 모두 비우고 상점 화면 갱신 및 소유 클라이언트 복제
+	void ResetShopPurchaseState();
+
 	// 업그레이드 구매로 금지된 전체 식별자 여부 검사
 	UFUNCTION(BlueprintPure, Category = "MD|Shop")
 	bool IsShopItemPurchaseBlocked(FPrimaryAssetId ItemAssetId);
