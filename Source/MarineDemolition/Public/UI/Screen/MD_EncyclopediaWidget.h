@@ -7,13 +7,16 @@
 #include "UI/Foundation/MD_CommonGameMenuWidget.h"
 #include "MD_EncyclopediaWidget.generated.h"
 
+class UCommonButtonGroupBase;
 class UMD_CommonButtonBase;
 class UMD_LoreCatalog;
 class UMD_LoreComponent;
+class UImage;
 class UPanelWidget;
 class UScrollBox;
 class USlider;
 class UTextBlock;
+class UWidgetSwitcher;
 
 // 도감 탭별 표시 이름과 기록물 목록 설정
 USTRUCT(BlueprintType)
@@ -46,6 +49,22 @@ protected:
 	// 디자이너의 카테고리 순서에 대응하는 데이터 설정
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Encyclopedia")
 	TArray<FMD_EncyclopediaCategory> Categories;
+
+	// 로어 카탈로그 대신 분류 설명서를 표시할 카테고리 버튼 순서
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Encyclopedia|Categorizing")
+	int32 CategorizingCategoryIndex = 3;
+
+	// 분류 설명서에서 현재 표시하는 품목 분류 순서
+	UPROPERTY(Transient, BlueprintReadOnly, Category = "MD|Encyclopedia|Categorizing")
+	int32 SelectedCategorizingIndex = 0;
+
+	// 디자이너의 분류 페이지 순서에 대응하는 설명서 버튼
+	UPROPERTY(Transient)
+	TArray<TObjectPtr<UMD_CommonButtonBase>> CategorizingButtons;
+
+	// 설명서의 품목 분류 중 하나의 선택을 유지할 버튼 그룹
+	UPROPERTY(Transient)
+	TObjectPtr<UCommonButtonGroupBase> CategorizingButtonGroup;
 
 	// 각 기록물의 번호와 발견 여부를 표시할 공통 버튼 클래스
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "MD|Encyclopedia")
@@ -181,10 +200,62 @@ protected:
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
 	TObjectPtr<UPanelWidget> VB_Categories;
 
+	// 로어 기록과 분류 설명서 사이의 페이지 전환 영역
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UWidgetSwitcher> WS_Page;
+
+	// 기존 로어 기록의 목록과 상세 페이지
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UPanelWidget> HB_LoreCodex;
+
+	// 분류 버튼과 품목 안내를 포함하는 설명서 페이지
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UPanelWidget> HB_Categorizing;
+
+	// 설명서의 품목 분류 버튼 목록
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UScrollBox> SB_CategorizingList;
+
+	// 금속 안내 페이지를 선택할 설명서 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UMD_CommonButtonBase> Btn_Categorizing_Metal;
+
+	// 플라스틱 안내 페이지를 선택할 설명서 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UMD_CommonButtonBase> Btn_Categorizing_Plastic;
+
+	// 일반 쓰레기 안내 페이지를 선택할 설명서 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UMD_CommonButtonBase> Btn_Categorizing_General;
+
+	// 오염물 안내 페이지를 선택할 설명서 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UMD_CommonButtonBase> Btn_Categorizing_Pollution;
+
+	// 비가연성 안내 페이지를 선택할 설명서 버튼
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UMD_CommonButtonBase> Btn_Categorizing_Scrap;
+
+	// 분류 버튼 순서대로 배치된 품목 안내 페이지
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UWidgetSwitcher> WS_Categorizing;
+
+	// 현재 품목 분류의 표시 이름
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UTextBlock> Txt_Categorizing_Name;
+
+	// 현재 품목 분류의 식별 색상
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Encyclopedia", meta = (BindWidgetOptional))
+	TObjectPtr<UImage> Img_Categorizing_Color;
+
 public:
 	// 현재 카테고리 인덱스 반환
 	UFUNCTION(BlueprintPure, Category = "MD|Encyclopedia")
 	FORCEINLINE int32 GetSelectedCategoryIndex() { return SelectedCategoryIndex; }
+
+	// 현재 설명서의 품목 분류 인덱스 반환
+	UFUNCTION(BlueprintPure, Category = "MD|Encyclopedia|Categorizing")
+	FORCEINLINE int32 GetSelectedCategorizingIndex() { return SelectedCategorizingIndex; }
 
 	// 현재 기록물 인덱스 반환
 	UFUNCTION(BlueprintPure, Category = "MD|Encyclopedia")
@@ -205,6 +276,10 @@ public:
 	// 유효한 카테고리 선택 및 기록 목록 전환
 	UFUNCTION(BlueprintCallable, Category = "MD|Encyclopedia")
 	void SelectCategory(int32 CategoryIndex);
+
+	// 설명서의 품목 분류 선택과 제목 및 색상 동기화
+	UFUNCTION(BlueprintCallable, Category = "MD|Encyclopedia|Categorizing")
+	void SelectCategorizingEntry(int32 CategorizingIndex);
 
 	// 유효한 기록 선택 및 상세 내용 전환
 	UFUNCTION(BlueprintCallable, Category = "MD|Encyclopedia")
@@ -240,7 +315,14 @@ protected:
 	// 선택과 진행률 및 상세 본문 동기화
 	void RefreshSelectionDisplay();
 
+	// 분류 설명서에 연결된 유효한 카테고리 여부 확인
+	bool IsCategorizingCategory(int32 CategoryIndex);
+
+	// 현재 메뉴와 품목 분류의 페이지 및 선택 표시 동기화
+	void RefreshCategorizingDisplay();
+
 	// 유효한 카테고리 클릭의 데이터 갱신과 Blueprint 알림 전달
+	UFUNCTION(BlueprintCallable, Category = "MD|Encyclopedia")
 	void HandleCategoryClicked(int32 CategoryIndex);
 
 	// 패널의 버튼 순서와 데이터 순서에 따른 입력 연결

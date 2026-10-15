@@ -36,6 +36,7 @@ public:
 	AMD_PlayerState();
 
 	virtual void CopyProperties(APlayerState* PlayerState) override;
+	virtual void OnSetUniqueId() override;
 
     void SetReturnStatus(EMD_ReturnStatus NewStatus);
 
@@ -75,9 +76,13 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Attribute")
     TObjectPtr<UMD_CharacterAttributeSet> CharacterAttributeSet;
 
-	// 현재 클라이언트의 동일 PlayerState 수명 동안 유지되는 음성 재생 배율
+	// 현재 클라이언트의 플레이어별 저장 설정에서 복원된 음성 재생 배율
 	UPROPERTY(Transient)
 	float VoiceVolumeMultiplier = 1.5f;
+
+	// 온라인 식별자 준비 전 사용자 입력을 저장된 설정보다 우선할 대기 상태
+	UPROPERTY(Transient)
+	bool bHasPendingVoiceVolumeOverride = false;
 
 public:
 	// 현재 클라이언트에 저장된 플레이어별 음성 재생 배율 반환
@@ -85,6 +90,9 @@ public:
 
 	// 현재 클라이언트의 플레이어별 음성 재생 배율 저장
 	void SetVoiceVolumeMultiplier(float NewVoiceVolumeMultiplier);
+
+	// 온라인 식별자 확정 이후 보존된 로컬 음량과 화면 표시 복원
+	void RestoreVoiceVolumeMultiplier();
 
 	//상태 변경 알림 HUD, 이동속도 변경시 사용
 	UPROPERTY(BlueprintAssignable, Category = "MD|Health")
