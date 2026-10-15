@@ -1,4 +1,7 @@
 #include "SMDMultiUserWorkspace.h"
+#include "SMDGitPanel.h"
+#include "MDMultiUserSafety.h"
+#include "Editor.h"
 #include "MDWorkspacePreferences.h"
 #include "MDPlacementTools.h"
 #include "Framework/Docking/TabManager.h"
@@ -189,13 +192,29 @@ void SMDMultiUserWorkspace::BuildContent()
                     ]
                 ]
             ]
+            + SVerticalBox::Slot().AutoHeight().Padding(0, 14, 0, 0)[SNew(SMDGitPanel)]
             + SVerticalBox::Slot().AutoHeight().Padding(0, 14, 0, 0)
             [
                 SNew(SWrapBox).UseAllottedSize(true).InnerSlotPadding(FVector2D(8, 6))
                 + SWrapBox::Slot()
+                [SNew(STextBlock).AutoWrapText(true).Text_Lambda([] { return FMDMultiUserSafety::Get().Status(); })]
+                + SWrapBox::Slot()
+                [SNew(SButton).Text(FText::FromString(TEXT("지금 체크포인트"))).OnClicked_Lambda([] {
+                    FString Error;
+                    if (!FMDMultiUserSafety::Get().Checkpoint(GEditor ? GEditor->GetEditorWorldContext().World() : nullptr, Error))
+                        UE_LOG(LogTemp, Warning, TEXT("%s"), *Error);
+                    return FReply::Handled();
+                })]
+                + SWrapBox::Slot()
+                [SNew(SButton).Text(FText::FromString(TEXT("복구 폴더"))).OnClicked_Lambda([] {
+                    FPlatformProcess::ExploreFolder(*FMDMultiUserSafety::Get().RecoveryRoot());
+                    return FReply::Handled();
+                })]
+
+                + SWrapBox::Slot()
                 [SNew(SButton).ButtonStyle(FAppStyle::Get(), "SimpleButton").ContentPadding(FMargin(6, 5))
                     .OnClicked_Lambda([] {
-                        const FString Path = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Docs/MultiUser/멀티유저 편집 운영 규칙.md"));
+                        const FString Path = FPaths::ConvertRelativePathToFull(FPaths::ProjectDir() / TEXT("Docs/V1/MultiUser/멀티유저 편집 운영 규칙.md"));
                         FPlatformProcess::LaunchFileInDefaultExternalApplication(*Path);
                         return FReply::Handled();
                     })[Label(MDLOC("Guide", "팀 작업 가이드"), 10, false, Muted)]]
