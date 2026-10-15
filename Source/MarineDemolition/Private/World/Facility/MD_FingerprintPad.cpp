@@ -160,9 +160,8 @@ FText AMD_FingerprintPad::GetInteractionPrompt_Implementation(AActor* Interactor
 		// 두 번째 패드에도 선택 문구와 재지정 입력 키 적용
 		return FText::Format(NSLOCTEXT("MDFingerprint", "TypedSoloSecond", "{0} · 반대 패드 · {1}초 남음"), ActionPrompt, FText::AsNumber(Remaining));
 	}
-	// 선택한 인증 행동에 현재 고장의 초당 손실 정보를 결합
-	return FText::Format(NSLOCTEXT("MDFingerprint", "TypedPrompt", "{0} · 고장 손실 {1}원/초"),
-		ActionPrompt, FText::AsNumber(Interlock->LossPerSecond));
+	// 비용 정보 없이 선택한 인증 행동과 현재 입력 키만 표시
+	return ActionPrompt;
 }
 
 bool AMD_FingerprintPad::CanInteract_Implementation(AActor* Interactor) const

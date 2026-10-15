@@ -51,8 +51,6 @@ protected:
 public:
 
 	int32 GetCredits() const { return Credits; }
-	// 계약 동안 누적된 분류별 크레딧 원장을 네트워크 전달용 항목 배열로 반환하는 함수
-	TArray<FMD_DailyReportValue> GetDailyCreditTotals() const;
 
 	/** BeginContract 이후 현장 계약이 살아 있는지. GameInstance 수명 동안 유지된다. */
 	bool HasActiveContract() const { return CurrentSite != nullptr; }
@@ -66,9 +64,8 @@ public:
 	}
 
 
-	// Enum 분류별 원장 변경과 실제 적용 금액의 완료 알림
-	void AddCredits(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer = nullptr,
-		TFunction<void(int32)> AppliedAmountCallback = {});
+	// 개인 또는 시스템 금액의 시간순 기록과 실제 적용 금액의 완료 알림
+	void AddCredits(int32 Amount, APlayerState* ResponsiblePlayer = nullptr, TFunction<void(int32)> AppliedAmountCallback = {});
 
 	/** 플레이어별 소유권을 검증하고 아이템 지급 성공 시에만 팀 재화 차감과 구매 원장을 확정하는 서버 구매 함수 */
 	EMD_ShopPurchaseResult TryPurchaseShopItem(AMD_PlayerState* PurchasingPlayerState, const FMD_ShopItem& ShopItem, TFunctionRef<bool()> FulfillPurchase);
@@ -129,6 +126,9 @@ public:
     // 최종 평가 보상 이후의 그래프 종료 시각 고정
     void FinishCreditHistory();
 
+    // 최종 보고서 확정 이후 시설 비용 청구를 막기 위한 원장 마감 상태 조회
+    FORCEINLINE bool IsCreditHistoryFinished() { return CreditHistoryEndSeconds >= 0.0; }
+
     // 서버의 실제 거래 발생 시각과 금액 및 개인 인덱스 조회
     FORCEINLINE TArray<FMD_CreditLogEntry>& GetCreditLog() { return CreditLog; }
 
@@ -175,8 +175,8 @@ private:
 
 
 
-	/** 방송하지 않고 잔액과 Enum Map 원장을 함께 변경하는 내부 함수 */
-	void AddCreditsInternal(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer = nullptr);
+	// 방송 없이 잔액과 개인 또는 시스템의 시간순 거래 기록 반영
+	void AddCreditsInternal(int32 Amount, APlayerState* ResponsiblePlayer = nullptr);
 
 	// 거래 가드 안에서 음수 차감이 감지됐음을 보관. 가드가 풀린 뒤 NotifyBankruptcyIfPending이 한 번 방송한다
 	bool bBankruptcyPending = false;
@@ -184,9 +184,6 @@ private:
 
 
 	int32 Credits = 0;
-
-	// 계약 동안 크레딧 증감을 정산 분류별로 누적하는 서버 Map 원장
-	TMap<EMD_DailyReportCategory, int64> DailyCreditTotals;
 
 	// 계약과 게임 재시작을 넘어 유지되는 팀 공유 미상환 대출 잔액
 	int32 DebtBalance = 0;
@@ -201,11 +198,9 @@ private:
 	TMap<FPrimaryAssetId, int32> PurchasedItemAssetCounts;
 
 protected:
-    // 거래 도중 발생한 독립 보상의 원인과 금액 및 약한 책임자 참조 보관
+    // 거래 도중 발생한 독립 금액과 약한 책임자 참조 보관
     struct FPendingCreditChange
     {
-        // 기존 정산 원장에 사용할 보상 분류
-        EMD_DailyReportCategory Category = EMD_DailyReportCategory::Other;
         // 보상 발생 순서대로 반영할 실제 요청 금액
         int32 Amount = 0;
         // 퇴장한 플레이어의 수명을 연장하지 않는 책임자 연결

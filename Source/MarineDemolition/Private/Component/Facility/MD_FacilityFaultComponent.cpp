@@ -1,9 +1,12 @@
-#include "Component/Facility/MD_FacilityFaultComponent.h"
+﻿#include "Component/Facility/MD_FacilityFaultComponent.h"
 
 #include "Component/Facility/MD_FacilityFaultManagerComponent.h"
 #include "Audio/MD_GameplayAudioFeedback.h"
+#include "Gameplay/Merchant/MD_MerchantSubsystem.h"
+#include "Engine/GameInstance.h"
 #include "Engine/World.h"
 #include "GameFramework/GameStateBase.h"
+#include "GameFramework/PlayerState.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 
@@ -47,6 +50,8 @@ void UMD_FacilityFaultComponent::BeginPlay()
 	{
 		RegisterWithManager();
 		if (bStartBroken) TryBreak();
+		// 서브레벨 재진입 시 이미 고장 난 시설의 비용 시계 재연결
+		UpdateFaultCostState(Snapshot);
 	}
 }
 
@@ -69,6 +74,14 @@ void UMD_FacilityFaultComponent::RegisterWithManager()
 
 void UMD_FacilityFaultComponent::EndPlay(const EEndPlayReason::Type Reason)
 {
+	// 제거된 시설의 비용 시계와 사건 연결 해제
+	CostFaultId = 0;
+	// 월드가 남아 있는 종료 단계에서 차감 예약 정리
+	if (IsValid(GetWorld()) == true)
+	{
+		// 다른 시설의 예약을 유지한 현재 시설의 청구 중단
+		GetWorld()->GetTimerManager().ClearTimer(FaultCostTimer);
+	}
 	MDAudioFeedback::Stop(this, RepairAudio, 0.f);
 	MDAudioFeedback::Stop(this, FaultAudio, 0.f);
 	if (GetWorld()) GetWorld()->GetTimerManager().ClearTimer(RegistrationTimer);
@@ -254,9 +267,125 @@ bool UMD_FacilityFaultComponent::CancelRepair(AActor* Repairer, int32 ExpectedFa
 
 void UMD_FacilityFaultComponent::PublishChange(const FMD_FacilitySnapshot& Previous)
 {
+	// 기존 상태 확정에 맞춰 해당 사건의 Credit 차감 갱신
+	UpdateFaultCostState(Previous);
+	// Credit 변경 알림에서 제거된 소유자의 후속 접근 차단
+	if (IsValid(GetOwner()) == false || GetOwner()->IsActorBeingDestroyed() == true)
+	{
+		// 종료된 시설의 복제 및 상태 알림 중단
+		return;
+	}
 	GetOwner()->FlushNetDormancy();
 	GetOwner()->ForceNetUpdate();
 	OnRep_Snapshot(Previous); // Listen server receives the same presentation event as clients.
+}
+
+void UMD_FacilityFaultComponent::UpdateFaultCostState(FMD_FacilitySnapshot Previous)
+{
+	// 서버에서 확정한 게임 월드의 사건만 비용 처리
+	if (HasServerAuthority() == false || IsValid(GetWorld()) == false)
+	{
+		// 클라이언트의 중복 차감 방지
+		return;
+	}
+	// 실제 고장 상태와 컴포넌트의 공통 비용 사용 설정에 따른 청구 유지
+	if (Snapshot.IsFaultActive() == true && bFaultCostEnabled == true)
+	{
+		// 수리 진행 알림에서는 기존 사건의 청구 시각 유지
+		if (CostFaultId != Snapshot.FaultId)
+		{
+			// 새 고장 또는 재진입한 사건의 비용 시계 연결
+			CostFaultId = Snapshot.FaultId;
+			// 정상 상태와 서브레벨 이탈 구간의 소급 청구 방지
+			LastFaultChargeTime = GetWorld()->GetTimeSeconds();
+			// 경과 정수 초에 따른 차감을 확인하는 서버 예약 시작
+			GetWorld()->GetTimerManager().SetTimer(FaultCostTimer,
+				FTimerDelegate::CreateUObject(this, &ThisClass::ApplyFaultCost, false), 0.1f, true);
+		}
+		// 같은 고장에 대한 수리 시작과 취소 중에도 차감 유지
+		return;
+	}
+	// 복구한 동일 사건의 미정산 정수 초만 마지막 차감
+	if (CostFaultId > 0 && CostFaultId == Previous.FaultId)
+	{
+		// 정상 상태로 돌아가기 직전까지의 Credit 비용 반영
+		ApplyFaultCost(true);
+	}
+	// Credit 알림 중 월드가 종료된 경우의 타이머 접근 방지
+	if (IsValid(GetWorld()) == true)
+	{
+		// 복구한 시설에 속한 예약만 제거
+		GetWorld()->GetTimerManager().ClearTimer(FaultCostTimer);
+	}
+	// 종료된 사건에 대한 추가 청구 차단
+	CostFaultId = 0;
+}
+
+void UMD_FacilityFaultComponent::ApplyFaultCost(bool bFinalCharge)
+{
+	// 유효한 서버와 같은 고장 사건에 한정한 청구 허용
+	if (HasServerAuthority() == false || IsValid(GetWorld()) == false || CostFaultId <= 0
+		|| CostFaultId != Snapshot.FaultId || bFaultCostEnabled == false)
+	{
+		// 종료되었거나 다른 사건으로 바뀐 예약의 차감 방지
+		return;
+	}
+	// 복구 시 마지막 정산을 제외한 정상 상태의 차감 방지
+	if (Snapshot.IsFaultActive() == false && bFinalCharge == false)
+	{
+		// 수리가 끝난 시설에 대한 반복 청구 중단
+		return;
+	}
+	// 아직 청구하지 않은 시간 계산
+	int64 ElapsedSeconds = FMath::FloorToInt64(FMath::Max(0.0, GetWorld()->GetTimeSeconds() - LastFaultChargeTime));
+	// 한 초 미만의 구간은 다음 정산까지 유지
+	if (ElapsedSeconds <= 0)
+	{
+		// 동일 시각의 중복 차감 방지
+		return;
+	}
+	// Credit 변경 알림의 재진입보다 먼저 청구 구간 확정
+	LastFaultChargeTime += double(ElapsedSeconds);
+	// 현재 실제 참가자 수를 제공하는 게임 상태 조회
+	AGameStateBase* GameState = GetWorld()->GetGameState();
+	// 비활성 인원과 관전자를 제외할 참가 인원 누계
+	int32 ParticipantCount = 0;
+	// 초기화가 끝난 게임 상태에서만 유효 인원 집계
+	if (IsValid(GameState) == true)
+	{
+		// 현재 접속한 각 플레이어의 참가 상태 확인
+		for (APlayerState* PlayerState : GameState->PlayerArray)
+		{
+			// 기존 지문 비용과 동일한 참가자 필터 적용
+			if (IsValid(PlayerState) == true && PlayerState->IsInactive() == false
+				&& PlayerState->IsSpectator() == false && PlayerState->IsOnlyASpectator() == false)
+			{
+				// 실제 참가자 한 명의 비용 인원 반영
+				++ParticipantCount;
+			}
+		}
+	}
+	// 1인도 기본 비용을 부과하고 기존 다인 비용을 유지하는 배율
+	int32 Multipliers[] = {1, 1, 2, 4};
+	// 잘못된 설정과 정수 오버플로를 제한한 초당 Credit 비용
+	int32 LossPerSecond = int32(FMath::Min<int64>(MAX_int32,
+		int64(FMath::Max(0, CostUnit)) * Multipliers[FMath::Clamp(ParticipantCount, 1, 4) - 1]));
+	// 참가자 부재, 비용 비활성화 또는 종료된 게임 인스턴스의 거래 생략
+	if (ParticipantCount <= 0 || LossPerSecond <= 0 || IsValid(GetWorld()->GetGameInstance()) == false)
+	{
+		// 무료 구간을 이후 인원 증가 시 소급 청구하지 않는 종료
+		return;
+	}
+	// 팀의 실제 Credit을 관리하는 기존 경제 원장 조회
+	UMD_MerchantSubsystem* Merchant = GetWorld()->GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>();
+	// 최종 보고서 확정 이전의 고장 비용만 실제 잔액에 반영
+	if (IsValid(Merchant) == true && Merchant->IsCreditHistoryFinished() == false)
+	{
+		// 기존 거래의 정수 범위 안에서 경과 초 비용 합산
+		int32 Charge = int32(FMath::Min<int64>(MAX_int32, FMath::Min<int64>(ElapsedSeconds, MAX_int32) * int64(LossPerSecond)));
+		// 대출 잔액과 무관하게 개인 기록에 귀속되지 않는 시스템 비용 차감
+		Merchant->AddCredits(-Charge);
+	}
 }
 
 bool UMD_FacilityFaultComponent::CompleteRepairFromValidatedSource(int32 ExpectedFaultId)

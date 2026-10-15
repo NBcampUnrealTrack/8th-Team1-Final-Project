@@ -24,7 +24,7 @@ enum class EMD_SampleScoreType : uint8
 	Destroyed   UMETA(DisplayName = "파괴"),
 };
 
-// 점수와 크레딧 일일 원장이 공통으로 사용하는 정산 분류
+// 점수 일일 원장에 사용하는 정산 분류
 UENUM(BlueprintType)
 enum class EMD_DailyReportCategory : uint8
 {
@@ -81,13 +81,9 @@ struct FMD_CreditLogEntry
     UPROPERTY(BlueprintReadOnly, Category = "Credit History")
     double ElapsedSeconds = 0.0;
 
-    // 계약 내 고정 개인 기록 인덱스이며 INDEX_NONE은 팀 공용 금액
+    // 계약 내 고정 개인 기록 인덱스이며 INDEX_NONE은 개인에게 귀속되지 않는 시스템 금액
     UPROPERTY(BlueprintReadOnly, Category = "Credit History")
     int32 PlayerIndex = INDEX_NONE;
-
-    // 기존 원장과 동일한 수입 및 지출의 원인 분류
-    UPROPERTY(BlueprintReadOnly, Category = "Credit History")
-    EMD_DailyReportCategory Category = EMD_DailyReportCategory::Other;
 
     // 잔액 상하한 적용 이후의 실제 증감액
     UPROPERTY(BlueprintReadOnly, Category = "Credit History")
@@ -162,10 +158,6 @@ struct FMD_InspectionReport
 	UPROPERTY(BlueprintReadOnly, Category = "Score")
 	TArray<FMD_DailyReportValue> DailyScoreTotals;
 
-	// 서버 크레딧 Map을 RPC와 복제가 가능한 항목 배열로 전달
-	UPROPERTY(BlueprintReadOnly, Category = "Credit")
-	TArray<FMD_DailyReportValue> DailyCreditTotals;
-
     // 실제 정산 시점 또는 현재 조회 시점까지의 계약 경과 초
     UPROPERTY(BlueprintReadOnly, Category = "Credit History")
     double CreditHistoryDuration = 0.0;
@@ -178,7 +170,7 @@ struct FMD_InspectionReport
     UPROPERTY(BlueprintReadOnly, Category = "Credit History")
     TArray<FMD_PlayerCreditHistory> PlayerCreditHistories;
 
-    // 개인 순수익과 구분하여 표시할 착수금 및 평가 보상 등의 공용 증감
+    // 개인 그래프에서 제외하며 전체 집계에 포함할 시설 비용과 착수금 및 평가 보상 등의 시스템 증감
     UPROPERTY(BlueprintReadOnly, Category = "Credit History")
     int64 SharedCreditDelta = 0;
 
@@ -186,7 +178,7 @@ struct FMD_InspectionReport
     UPROPERTY(BlueprintReadOnly, Category = "Credit History")
     int64 TotalCreditDelta = 0;
 
-    // 분류 합계의 상쇄 이전에 기록한 모든 실제 차감액의 절댓값 합계
+    // 개인 및 시스템 수입과 상쇄되기 이전의 모든 실제 차감액 절댓값 합계
     UPROPERTY(BlueprintReadOnly, Category = "Credit History")
     int64 TotalCreditsSpent = 0;
 

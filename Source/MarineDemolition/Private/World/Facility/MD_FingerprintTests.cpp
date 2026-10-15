@@ -103,7 +103,8 @@ public:
    Interaction=Character->FindComponentByClass<UMD_InteractionComponent>();
    Merchant=World->GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>();
    if(!Test->TestNotNull(TEXT("Real player interaction"),Interaction) || !Test->TestNotNull(TEXT("Team wallet"),Merchant)) return true;
-   Merchant->AddCredits(EMD_DailyReportCategory::Other,1000);
+   // 지문 비용 검증을 위한 시스템 초기 잔액 지급
+   Merchant->AddCredits(1000);
    if(!bSolo)
    {
     for(TActorIterator<APlayerController> It(Client);It;++It)
@@ -136,6 +137,8 @@ public:
    Test->TestFalse(TEXT("Duplicate event cannot allocate another incident"),Event->StartFault());
    Test->TestTrue(TEXT("Both sorters safety-locked"),Sorters[0]->IsSafetyInterlocked()&&Sorters[1]->IsSafetyInterlocked());
    Test->TestFalse(TEXT("Locked sorter rejects intake"),Sorters[0]->CanInteract_Implementation(Character));
+   // 기존 지문 비용 검사를 독립 시설의 추가 차감과 분리
+   Sorters[1]->FacilityRepair->bFaultCostEnabled=false;
    Test->TestTrue(TEXT("Independent sorter fault can coexist"),Sorters[1]->FacilityRepair->TryBreak());
    CreditsBefore=Merchant->GetCredits(); LossBefore=Event->TotalFaultLoss;
    Aim(Character,PC,Pads[0]);
