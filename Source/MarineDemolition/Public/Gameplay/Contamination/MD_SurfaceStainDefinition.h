@@ -106,7 +106,7 @@ public:
 	EMD_SurfaceStainVolumePlacement VolumePlacementPolicy = EMD_SurfaceStainVolumePlacement::ManualOnly;
 
 	/** Limits automatic placement only; the existing runtime cleaning-size contract is unchanged. */
-	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Stain|Placement", meta = (ClampMin = "100", ClampMax = "5000"))
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Stain|Placement", meta = (ClampMin = "100", ClampMax = "10000"))
 	int32 MaximumPlanarInitialSize = 300;
 
 	UPROPERTY(VisibleAnywhere, Transient, Category = "MD|Stain|Placement")
