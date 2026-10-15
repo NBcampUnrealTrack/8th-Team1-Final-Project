@@ -34,6 +34,7 @@ AMD_TrashItem::AMD_TrashItem()
 	// 쓰레기통이 오버랩으로 내용물을 세므로 꺼서는 안 된다
 	Mesh->SetGenerateOverlapEvents(true);
 	Mesh->SetSimulatePhysics(true);
+	Mesh->SetUseCCD(true);
 
 	// 감쇠가 없으면 가벼운 쓰레기가 계속 굴러가 동선 밖으로 사라진다
 	Mesh->SetLinearDamping(0.5f);
@@ -207,6 +208,9 @@ void AMD_TrashItem::PostEditUndo()
 void AMD_TrashItem::BeginPlay()
 {
 	Super::BeginPlay();
+	// Small or sideways trash can cross a tray wall in one physics step when carried
+	// or thrown. Also enforce this for existing Blueprint defaults saved without CCD.
+	Mesh->SetUseCCD(true);
 	ApplyTrashKindRow();
 }
 

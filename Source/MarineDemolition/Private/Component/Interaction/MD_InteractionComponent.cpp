@@ -1,4 +1,5 @@
 #include "Component/Interaction/MD_InteractionComponent.h"
+#include "World/Transport/MD_Cart.h"
 #include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "AbilitySystemComponent.h"
@@ -1145,6 +1146,29 @@ FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& Ho
 
 	const FVector ToDesired = Desired - Origin;
 	const double DesiredDistance = ToDesired.Size();
+	if (bBlocked && DesiredDistance > UE_KINDA_SMALL_NUMBER && Cast<AMD_Cart>(Hit.GetActor()))
+	{
+		// A long object's bounding sphere may already overlap the tray at the camera,
+		// even though the object itself fits. Sweep its oriented bounds from a clear
+		// point instead of allowing the carry spring to drive through the cart.
+		const FBoxSphereBounds LocalBounds = Held->CalcBounds(FTransform::Identity);
+		const FVector Scale = Held->GetComponentScale();
+		const FVector HalfExtent = (LocalBounds.BoxExtent * Scale.GetAbs() * HoldProbeRadiusScale).ComponentMax(FVector(HoldProbeMinRadius));
+		const FQuat Rotation = ActiveHoldProfile.bConstrainRotation ? HoldTransform.GetRotation() : Held->GetComponentQuat();
+		const FVector GrabOffset = Held->GetComponentTransform().InverseTransformPositionNoScale(Held->GetCenterOfMass());
+		const FVector CenterOffset = Rotation.RotateVector(LocalBounds.Origin * Scale - GrabOffset);
+		const FVector Direction = ToDesired / DesiredDistance;
+		const double Backoff = HalfExtent.Size() + HoldProbeMinRadius;
+		FHitResult ShapeHit;
+		if (World->SweepSingleByChannel(ShapeHit, Origin - Direction * Backoff + CenterOffset, Desired + CenterOffset,
+			Rotation, Held->GetCollisionObjectType(), FCollisionShape::MakeBox(HalfExtent), QueryParams, ProbeResponses)
+			&& !ShapeHit.bStartPenetrating && Cast<AMD_Cart>(ShapeHit.GetActor()))
+		{
+			// A close contact takes precedence over HoldMinDistance; enforcing that
+			// minimum would put the leading end of a long item below the tray again.
+			return Origin + Direction * FMath::Min(DesiredDistance, ShapeHit.Distance - Backoff - 1.0);
+		}
+	}
 
 	// 시작 지점이 이미 묻혀 있으면 Distance가 0이라 물체가 얼굴로 끌려온다. 기존 동작을 유지한다.
 	if (!bBlocked || Hit.bStartPenetrating || DesiredDistance <= UE_KINDA_SMALL_NUMBER)
