@@ -21,6 +21,7 @@ public:
 	AMD_SurfaceStain();
 	virtual void PostLoad() override;
 	virtual void PostRegisterAllComponents() override;
+	virtual void PostUnregisterAllComponents() override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 #if WITH_EDITOR
 	virtual void PostEditMove(bool bFinished) override;

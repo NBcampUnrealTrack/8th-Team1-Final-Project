@@ -8,6 +8,7 @@
 #include "Engine/StaticMesh.h"
 #include "Gameplay/Contamination/MD_SurfaceStainDefinition.h"
 #include "Gameplay/Contamination/MD_SurfaceStainSize.h"
+#include "Gameplay/Contamination/MD_StainRayTracingResidency.h"
 #include "Gameplay/Scrape/MD_ContaminationDebrisSubsystem.h"
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
@@ -68,6 +69,12 @@ void AMD_SurfaceStain::PostRegisterAllComponents()
 	Super::PostRegisterAllComponents();
 	if (GetWorld() && !GetWorld()->IsGameWorld()) RemainingSize = GetInitialSize();
 	RefreshSize();
+}
+
+void AMD_SurfaceStain::PostUnregisterAllComponents()
+{
+	if (StickerMesh) MD_StainRayTracingResidency::ForgetComponent(*StickerMesh);
+	Super::PostUnregisterAllComponents();
 }
 
 void AMD_SurfaceStain::ConfigurePlacement(UMD_SurfaceStainDefinition* InDefinition, int32 InSize,
@@ -279,12 +286,13 @@ void AMD_SurfaceStain::RefreshSize()
 		StickerMesh->SetVisibility(bVisible && Stage);
 		if (!bVisible || !Stage)
 		{
+            MD_StainRayTracingResidency::SetStage(*StickerMesh, GetDefinition(), nullptr);
 			SurfaceQuery->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 			return;
 		}
 		// The common contact anchor stays fixed. Scaling is for this controlled prototype, not arbitrary edge fitting.
 		const FVector MeshScale = ActiveDefinition->GetVolumeScale(GetInitialSize());
-		StickerMesh->SetStaticMesh(Stage->Mesh);
+		MD_StainRayTracingResidency::SetStage(*StickerMesh, GetDefinition(), Stage->Mesh);
 		StickerMesh->SetRelativeTransform(FTransform(FQuat::Identity, FVector::ZeroVector, MeshScale));
 		StickerMesh->SetCastShadow(true);
 		const FVector Extent = Stage->QueryBounds.Min.GetAbs().ComponentMax(Stage->QueryBounds.Max.GetAbs()) * MeshScale;
@@ -296,7 +304,7 @@ void AMD_SurfaceStain::RefreshSize()
 		RefreshMaterial();
 		return;
 	}
-	StickerMesh->SetStaticMesh(LegacyStickerMesh);
+	MD_StainRayTracingResidency::SetStage(*StickerMesh, nullptr, LegacyStickerMesh);
 	StickerMesh->SetRelativeTransform(FTransform::Identity);
 	StickerMesh->SetCastShadow(false);
 	const bool bSticker = HasSticker();
