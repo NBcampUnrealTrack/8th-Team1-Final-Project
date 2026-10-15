@@ -37,6 +37,12 @@ void UMD_AudioSettingCategory::ApplySettings()
 		// 월드 해제 전 대기 중인 플랫폼 작업 취소 연결
 		WorldBeginTearDownHandle = FWorldDelegates::OnWorldBeginTearDown.AddUObject(this, &UMD_AudioSettingCategory::HandleWorldBeginTearDown);
 	}
+	// 월드 정리 직전의 중복 없는 최종 음성 정리 구독
+	if (WorldCleanupHandle.IsValid() == false)
+	{
+		// 심리스 이동의 옛 월드 정리 검증 전에 남은 원격 재생 해제 연결
+		WorldCleanupHandle = FWorldDelegates::OnWorldCleanup.AddUObject(this, &UMD_AudioSettingCategory::HandleWorldCleanup);
+	}
 
 	// 송신 모드 변경으로 시작될 캡처에도 동일한 입력 선택 적용
 	RequestedInputDeviceId = Settings.InputDeviceId;
@@ -259,6 +265,10 @@ void UMD_AudioSettingCategory::ShutdownAudioDevices()
 	FWorldDelegates::OnWorldBeginTearDown.Remove(WorldBeginTearDownHandle);
 	// 반복 종료에 대비한 월드 해제 구독 핸들 초기화
 	WorldBeginTearDownHandle.Reset();
+	// 종료된 카테고리의 월드 정리 이벤트 구독 제거
+	FWorldDelegates::OnWorldCleanup.Remove(WorldCleanupHandle);
+	// 반복 종료에 대비한 월드 정리 구독 핸들 초기화
+	WorldCleanupHandle.Reset();
 	// 월드 구독 해제 이후 장치 작업과 비동기 응답 일괄 중단
 	SuspendAudioDeviceRequests();
 }
@@ -326,13 +336,47 @@ void UMD_AudioSettingCategory::HandleWorldBeginTearDown(UWorld* World)
 		// 음성 엔진과 월드 오디오 정리 이전에 장치 작업 중단
 		SuspendAudioDeviceRequests();
 	}
-	// 입력 설정 과정에서 이미 확보한 음성 엔진만 일시적으로 유지
-	TSharedPtr<FVoiceEngineImpl, ESPMode::ThreadSafe> VoiceEngine = AppliedVoiceEngine.Pin();
-	// 엔진 생성이나 온라인 인터페이스 재조회 없는 원격 재생 정리
+	// 종료 월드의 오디오 장치가 유효한 동안 원격 재생 객체 해제
+	ReleaseWorldRemoteVoice(World);
+}
+
+void UMD_AudioSettingCategory::HandleWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources)
+{
+	// 여러 PIE 인스턴스 중 현재 카테고리 소유 게임 인스턴스 조회
+	UGameInstance* GameInstance = GetTypedOuter<UGameInstance>();
+	// 다른 플레이어 인스턴스의 월드 정리 제외
+	if (IsValid(World) == false || IsValid(GameInstance) == false || World->GetGameInstance() != GameInstance)
+	{
+		// 소유 게임 인스턴스와 관계없는 월드 이벤트 제외
+		return;
+	}
+	// 심리스 이동은 PostLoadMap 정리가 옛 월드 소멸 이후에 오므로 등록 검증 전에 직접 해제
+	ReleaseWorldRemoteVoice(World);
+}
+
+void UMD_AudioSettingCategory::ReleaseWorldRemoteVoice(UWorld* World)
+{
+	// 입력 설정 이전에도 정리할 수 있도록 서브시스템에서 실제 음성 엔진 조회
+	TSharedPtr<FVoiceEngineImpl, ESPMode::ThreadSafe> VoiceEngine = MDVoiceDeviceRouting::FindEngine(World);
+	// 서브시스템 조회 실패 시 입력 설정 과정에서 확보한 엔진으로 대체
+	if (VoiceEngine.IsValid() == false)
+	{
+		// 종료 중에도 유지되는 약한 참조 승격
+		VoiceEngine = AppliedVoiceEngine.Pin();
+	}
+	// 엔진 버퍼가 추적하는 원격 재생의 등록 유지 정리
 	if (VoiceEngine.IsValid() == true)
 	{
-		// 종료 월드의 오디오 장치가 유효한 동안 해당 원격 재생 객체 해제
+		// 원격 등록과 디코더를 보존한 재생 객체 해제
 		MDVoiceDeviceRouting::ResetWorldRemoteTalkers(World, *VoiceEngine);
+	}
+	// 엔진이 놓친 채 월드에 등록된 합성 컴포넌트의 최종 해제
+	int32 ReleasedCount = MDVoiceDeviceRouting::ReleaseWorldVoiceSynthComponents(World);
+	// 심리스 이동 크래시 원인 추적용 해제 기록
+	if (ReleasedCount > 0)
+	{
+		// 월드 정리 검증 전에 해제한 잔류 컴포넌트 수 기록
+		UE_LOG(MarineDemolition, Display, TEXT("Released %d leftover VOIP synth components from world %s"), ReleasedCount, *World->GetName());
 	}
 }
 

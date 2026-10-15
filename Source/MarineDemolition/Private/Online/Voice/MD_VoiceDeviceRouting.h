@@ -28,6 +28,12 @@ namespace MDVoiceDeviceRouting
 	// 원격 등록과 디코더를 유지한 종료 월드의 음성 재생 객체 정리
 	void ResetWorldRemoteTalkers(UWorld* World, FVoiceEngineImpl& Engine);
 
+	// 새 엔진 생성 없이 월드의 온라인 서브시스템에 이미 만들어진 음성 엔진 조회
+	TSharedPtr<FVoiceEngineImpl, ESPMode::ThreadSafe> FindEngine(UWorld* World);
+
+	// 엔진 버퍼가 추적하지 않거나 정리 이후 다시 만들어져 종료 월드에 남은 원격 재생 컴포넌트 해제
+	int32 ReleaseWorldVoiceSynthComponents(UWorld* World);
+
 	// 새 캡처의 시작 성공 이후에만 기존 캡처를 교체하는 트랜잭션
 	bool ReplaceCapture(TSharedPtr<IVoiceCapture>& CurrentCapture, TSharedPtr<IVoiceCapture> NewCapture);
 

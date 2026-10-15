@@ -6,6 +6,7 @@
 #include "OnlineSubsystem.h"
 #include "OnlineSubsystemNames.h"
 #include "OnlineSubsystemUtils.h"
+#include "UObject/UObjectHash.h"
 #include "VoiceEngineImpl.h"
 #include "VoiceInterfaceImpl.h"
 #include "VoiceModule.h"
@@ -96,6 +97,93 @@ void MDVoiceDeviceRouting::ResetWorldRemoteTalkers(UWorld* World, FVoiceEngineIm
 			RemoteTalkerData.Reset();
 		}
 	}
+}
+
+TSharedPtr<FVoiceEngineImpl, ESPMode::ThreadSafe> MDVoiceDeviceRouting::FindEngine(UWorld* World)
+{
+	// 엔진을 찾지 못한 경우의 기본 결과
+	TSharedPtr<FVoiceEngineImpl, ESPMode::ThreadSafe> Engine;
+	// 종료 중인 월드의 컨텍스트로도 조회되는 온라인 서브시스템
+	IOnlineSubsystem* Subsystem = IsValid(World) == true ? Online::GetSubsystem(World) : nullptr;
+	// 온라인 초기화 이전 또는 월드 없는 호출 제외
+	if (Subsystem == nullptr)
+	{
+		// 엔진 없음 결과 반환
+		return Engine;
+	}
+	// 기반 타입 캐스팅이 검증된 구현 이름 조회
+	FName SubsystemName = Subsystem->GetSubsystemName();
+	// Steam 및 NULL 외 구현의 잘못된 캐스팅 차단
+	if (SubsystemName != STEAM_SUBSYSTEM && SubsystemName != NULL_SUBSYSTEM)
+	{
+		// 미지원 구현 결과 반환
+		return Engine;
+	}
+	// 실제 플레이어가 사용하는 온라인 음성 인터페이스 조회
+	IOnlineVoicePtr Voice = Subsystem->GetVoiceInterface();
+	// 음성 비활성화 또는 초기화 실패 제외
+	if (Voice.IsValid() == false)
+	{
+		// 엔진 없음 결과 반환
+		return Engine;
+	}
+	// 새 음성 엔진을 만들지 않는 기존 엔진 조회
+	Engine = GetEngine(static_cast<FOnlineVoiceImpl&>(*Voice));
+	// 기존 등록 사용자를 보존한 엔진 반환
+	return Engine;
+}
+
+int32 MDVoiceDeviceRouting::ReleaseWorldVoiceSynthComponents(UWorld* World)
+{
+	// 해제한 컴포넌트 수의 기본값
+	int32 ReleasedCount = 0;
+	// 종료 월드를 확인할 수 없는 호출의 해제 차단
+	if (IsValid(World) == false)
+	{
+		// 해제 없음 결과 반환
+		return ReleasedCount;
+	}
+	// 액터 소유 없이 월드에 직접 등록되는 엔진 생성 합성 컴포넌트 전체 조회
+	TArray<UObject*> SynthObjects;
+	GetObjectsOfClass(UVoipListenerSynthComponent::StaticClass(), SynthObjects);
+	// 종료 월드에 등록된 채 남은 컴포넌트 선별
+	for (UObject* SynthObject : SynthObjects)
+	{
+		// 엔진 생성 컴포넌트의 공통 합성 기반 타입 조회
+		USynthComponent* SynthComponent = Cast<USynthComponent>(SynthObject);
+		// 이미 해제되었거나 등록되지 않은 컴포넌트 제외
+		if (IsValid(SynthComponent) == false || SynthComponent->IsRegistered() == false)
+		{
+			// 월드 정리에 영향 없는 컴포넌트 유지
+			continue;
+		}
+		// 합성 컴포넌트와 별도로 월드에 등록될 수 있는 내부 출력 조회
+		UAudioComponent* AudioComponent = SynthComponent->GetAudioComponent();
+		// 종료 대상 월드에 속한 합성 또는 내부 출력만 선택
+		bool bInWorld = SynthComponent->GetWorld() == World || (IsValid(AudioComponent) == true && AudioComponent->GetWorld() == World);
+		// 다른 월드의 재생 유지
+		if (bInWorld == false)
+		{
+			// 목적지 월드에 이미 생성된 컴포넌트 유지
+			continue;
+		}
+		// 오디오 장치 해제 전 재생 중지
+		SynthComponent->Stop();
+		// 월드 정리 검증에 걸리는 내부 출력 등록 해제
+		if (IsValid(AudioComponent) == true && AudioComponent->IsRegistered() == true)
+		{
+			// 내부 출력의 렌더 상태 해제
+			AudioComponent->UnregisterComponent();
+		}
+		// 월드 소멸 이후 오디오 스레드가 참조하지 않도록 등록 해제
+		SynthComponent->UnregisterComponent();
+		// 엔진의 약한 참조를 무효화해 다음 음성 패킷에서 목적지 월드에 새로 생성되도록 처리
+		SynthComponent->MarkAsGarbage();
+		// 해제 수 누적
+		++ReleasedCount;
+	}
+	// 실제 해제한 컴포넌트 수 반환
+	return ReleasedCount;
 }
 
 bool MDVoiceDeviceRouting::ReplaceCapture(TSharedPtr<IVoiceCapture>& CurrentCapture, TSharedPtr<IVoiceCapture> NewCapture)

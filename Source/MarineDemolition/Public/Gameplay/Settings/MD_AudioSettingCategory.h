@@ -97,6 +97,8 @@ protected:
 	FDelegateHandle SeamlessTravelStartHandle;
 	// 현재 게임 인스턴스의 월드 종료 시작 구독 핸들
 	FDelegateHandle WorldBeginTearDownHandle;
+	// 현재 게임 인스턴스의 월드 정리 구독 핸들
+	FDelegateHandle WorldCleanupHandle;
 
 public:
 	// 현재 시스템에서 사용할 수 있는 출력 장치 목록을 비동기로 요청한다.
@@ -163,6 +165,12 @@ protected:
 
 	// 소유 게임 인스턴스의 월드 종료 시작에 따른 장치 요청 중단
 	void HandleWorldBeginTearDown(UWorld* World);
+
+	// 심리스 이동에서 종료 시작 이후 다시 생성된 원격 음성 재생의 최종 정리
+	void HandleWorldCleanup(UWorld* World, bool bSessionEnded, bool bCleanupResources);
+
+	// 종료 월드에 남은 원격 음성 재생 객체를 월드 오디오 장치 해제 전에 정리
+	void ReleaseWorldRemoteVoice(UWorld* World);
 
 	// 오디오 스레드에서 확인한 실제 출력 장치 상태 반영
 	void HandleOutputDeviceChecked(uint32 RequestSerial, bool bSuccessful, bool bAccepted, FString CurrentDeviceId);
