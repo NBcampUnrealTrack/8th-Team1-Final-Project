@@ -48,7 +48,7 @@ public:
 	bool bFaultCostEnabled = false;
 	// 기존 인원 배율에 적용할 두 명 기준 초당 Credit 차감액
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Facility", meta = (ClampMin = "0"))
-	int32 CostUnit = 5;
+	int32 CostUnit = 2;
 	/** Optional linked device for a remote panel; never changes unrelated devices automatically. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "MD|Facility")
 	TObjectPtr<AActor> LinkedFacility = nullptr;

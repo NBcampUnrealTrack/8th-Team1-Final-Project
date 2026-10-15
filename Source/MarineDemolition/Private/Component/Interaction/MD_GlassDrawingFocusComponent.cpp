@@ -1,6 +1,7 @@
 #include "Component/Interaction/MD_GlassDrawingFocusComponent.h"
 
 #include "AbilitySystemComponent.h"
+#include "CommonActivatableWidget.h"
 #include "GameplayEffect.h"
 #include "Camera/CameraActor.h"
 #include "Camera/CameraComponent.h"
@@ -15,6 +16,7 @@
 #include "Data/Drawing/MD_GlassDrawingProfile.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
 #include "Engine/StaticMesh.h"
+#include "Engine/LocalPlayer.h"
 #include "Engine/World.h"
 #include "GameFramework/InputSettings.h"
 #include "GameFramework/PlayerState.h"
@@ -23,7 +25,10 @@
 #include "Net/UnrealNetwork.h"
 #include "Subsystem/World/MD_GlassDrawingSubsystem.h"
 #include "TimerManager.h"
+#include "UI/MD_LocalUIManager.h"
+#include "UI/Foundation/MD_WidgetStack.h"
 #include "World/Interaction/MD_GlassDrawingDesk.h"
+#include "World/Wall/MD_GlassDrawingWall.h"
 
 namespace
 {
@@ -278,6 +283,114 @@ void UMD_GlassDrawingFocusComponent::ClientConfigureView_Implementation(uint32 S
 	bChangingView = true;
 	PC->SetViewTargetWithBlend(FocusCamera, LocalBlendSeconds, VTBlend_Cubic, 0.0f, true);
 	bChangingView = false;
+	// 카메라 구성이 완료된 소유 클라이언트의 태그 화면 표시
+	OpenDrawingWidget();
+}
+
+void UMD_GlassDrawingFocusComponent::OpenDrawingWidget()
+{
+	// 전용 벽의 설정만 사용하여 기존 책상 상호작용 보존
+	AMD_GlassDrawingWall* Wall = Cast<AMD_GlassDrawingWall>(ActiveDesk);
+	// 태그를 지정하지 않은 벽의 기존 그리기 동작 유지
+	if (IsValid(Wall) == false || Wall->GetDrawingWidgetTag().IsValid() == false)
+	{
+		// 화면 표시가 필요 없는 세션의 UI 처리 종료
+		return;
+	}
+	// 현재 세션을 소유한 로컬 플레이어 조회
+	APlayerController* PC = SessionController.Get();
+	// 소유자 이탈 후 화면 생성 차단
+	if (IsValid(PC) == false || IsValid(PC->GetLocalPlayer()) == false)
+	{
+		// 화면을 표시할 수 없는 상호작용의 점유 해제
+		EndFocus(true);
+		// 잘못된 로컬 플레이어의 UI 접근 차단
+		return;
+	}
+	// 플레이어별 태그 및 레이어 등록 관리자 조회
+	UMD_LocalUIManager* UIManager = PC->GetLocalPlayer()->GetSubsystem<UMD_LocalUIManager>();
+	// 초기화되지 않은 UI 관리자 접근 차단
+	if (IsValid(UIManager) == false)
+	{
+		// 화면 생성 실패에 따른 이동과 점유 상태 복원
+		EndFocus(true);
+		// 사용할 수 없는 UI 관리자 처리 종료
+		return;
+	}
+	// 전환 중 종료에도 화면을 제거할 실제 등록 레이어 조회
+	FGameplayTag LayerTag;
+	// 기존 UI 등록 조회에 필요한 화면 클래스 출력값
+	TSoftClassPtr<UCommonActivatableWidget> WidgetClass;
+	// 화면 활성화 콜백에서 세션이 종료되어도 유지할 스택 참조
+	UMD_WidgetStack* Stack = nullptr;
+	// 태그에 해당하는 스택이 등록된 경우 소유 스택 보관
+	if (UIManager->ResolveWidgetRegistration(Wall->GetDrawingWidgetTag(), LayerTag, WidgetClass) == true)
+	{
+		// 활성화 대기 중인 화면도 제거 가능한 스택 참조 저장
+		Stack = UIManager->FindLayerStack(LayerTag);
+	}
+	// 프로젝트 설정에 등록된 태그의 화면을 소유 플레이어에게 표시
+	DrawingWidget = UIManager->PushScreenToLayerByTag(Wall->GetDrawingWidgetTag());
+	// 화면 생성 중 재진입 종료 이후에도 제거 가능한 스택 보관
+	DrawingWidgetStack = Stack;
+	// 미등록 태그나 클래스 로드 실패의 세션 잔류 방지
+	if (IsValid(DrawingWidget.Get()) == false)
+	{
+		// 실패한 UI 표시 요청의 상호작용 종료
+		EndFocus(true);
+		// 생성되지 않은 화면의 구독 차단
+		return;
+	}
+	// 화면의 활성화 동작에서 이미 종료된 세션의 UI 잔류 방지
+	if (LocalPhase != EMD_GlassDrawingFocusPhase::Entering)
+	{
+		// 생성 도중 취소된 상호작용의 화면 제거
+		CloseDrawingWidget();
+		// 종료된 세션의 닫힘 구독 차단
+		return;
+	}
+	// 외부 Pop 또는 Deactivate 시에도 유리 점유 해제 연결
+	DrawingWidgetClosedHandle = DrawingWidget->OnDeactivated().AddUObject(this, &ThisClass::HandleDrawingWidgetClosed);
+}
+
+void UMD_GlassDrawingFocusComponent::CloseDrawingWidget()
+{
+	// 정리 중 콜백과 분리할 기존 화면 참조 보관
+	UCommonActivatableWidget* Widget = DrawingWidget.Get();
+	// 화면 제거 중 참조 정리와 분리할 소유 스택 보관
+	UMD_WidgetStack* Stack = DrawingWidgetStack.Get();
+	// 화면 비활성화 재진입에 앞선 세션 참조 해제
+	DrawingWidget.Reset();
+	// 종료된 세션의 스택 참조 해제
+	DrawingWidgetStack.Reset();
+	// 살아 있는 세션 화면에 한정한 구독 및 표시 정리
+	if (IsValid(Widget) == true)
+	{
+		// 상호작용 종료에 의한 Deactivate의 중복 종료 요청 차단
+		Widget->OnDeactivated().Remove(DrawingWidgetClosedHandle);
+		// 활성화 전 전환 중인 화면까지 소유 스택에서 제거
+		if (IsValid(Stack) == true)
+		{
+			// 대기 화면 취소 시 이전 화면 활성화까지 복원하는 제거
+			Stack->RemoveWidgetAndRestore(Widget);
+		}
+		// 스택이 먼저 제거된 경우 남은 화면의 직접 비활성화
+		else
+		{
+			// 스택 수명과 무관한 세션 화면의 입력 및 표시 종료
+			Widget->DeactivateWidget();
+		}
+	}
+	// 종료된 화면의 구독 식별자 초기화
+	DrawingWidgetClosedHandle.Reset();
+}
+
+void UMD_GlassDrawingFocusComponent::HandleDrawingWidgetClosed()
+{
+	// 외부에서 닫힌 화면의 구독과 참조 정리
+	CloseDrawingWidget();
+	// 원래 시점으로 복귀하면서 서버의 유리 점유 해제 요청
+	EndFocus(false);
 }
 
 void UMD_GlassDrawingFocusComponent::ServerReady_Implementation(uint32 Serial)
@@ -573,6 +686,8 @@ void UMD_GlassDrawingFocusComponent::ClientExitFocus_Implementation(uint32 Seria
 
 void UMD_GlassDrawingFocusComponent::StartLocalExit(bool bImmediate)
 {
+	// 뒤로가기와 기존 상호작용 종료 경로의 화면 정리
+	CloseDrawingWidget();
 	if (LocalPhase == EMD_GlassDrawingFocusPhase::Idle) return;
 	if (LocalPhase == EMD_GlassDrawingFocusPhase::Exiting && !bImmediate) return;
 	DestroyCursorPen();
@@ -610,6 +725,8 @@ void UMD_GlassDrawingFocusComponent::StartLocalExit(bool bImmediate)
 
 void UMD_GlassDrawingFocusComponent::FinishLocalExit()
 {
+	// 세션 교체와 강제 종료에서도 이전 화면 제거
+	CloseDrawingWidget();
 	const uint32 FinishedSerial = LocalSerial;
 	AMD_Character* Character = GetCharacter();
 	SetLocalBodyHidden(false);
@@ -683,6 +800,8 @@ void UMD_GlassDrawingFocusComponent::OnRep_ActiveDesk()
 
 void UMD_GlassDrawingFocusComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	// 소유 캐릭터 제거 시 남아 있는 로컬 화면 정리
+	CloseDrawingWidget();
 	EndFocus(true);
 	DestroyCursorPen();
 	if (IsValid(FocusCamera)) FocusCamera->Destroy();

@@ -15,6 +15,9 @@ class MARINEDEMOLITION_API UMD_WidgetStack : public UCommonActivatableWidgetStac
 public:
 	void RemoveWidgetsOnWorldTravel();
 
+	// 전환 대기 화면의 취소와 이전 화면 활성화 복원을 포함한 제거
+	void RemoveWidgetAndRestore(UCommonActivatableWidget* Widget);
+
 protected:
 	virtual void OnWidgetAddedToList(UCommonActivatableWidget& AddedWidget) override;
 
