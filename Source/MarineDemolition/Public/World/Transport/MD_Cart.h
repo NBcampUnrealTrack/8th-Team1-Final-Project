@@ -11,6 +11,7 @@ class UMD_InteractionPromptComponent;
 
 class APawn;
 class UBoxComponent;
+class UCharacterMovementComponent;
 class UStaticMeshComponent;
 
 /** Standalone Blueprint cart with an open physical tray, steered exclusively through its handle. */
@@ -25,6 +26,7 @@ public:
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void Tick(float DeltaSeconds) override;
+	virtual bool CanBeBaseForCharacter(APawn* Pawn) const override;
 	bool PrepareGrip(APawn* Pawn);
 	bool ResolveSteeringTarget(APawn* Pawn, FTransform& OutTarget) const;
 	bool IsSteering() const { return bSteering; }
@@ -122,10 +124,13 @@ private:
 	bool IsAimingAtHandle(const APawn* Pawn) const;
 	void LimitSteeringTarget(FTransform& Target) const;
 	void RefreshCargo();
+	void RestorePawnPhysicsInteraction();
 	UPROPERTY(Replicated)
 	bool bSteering = false;
 
 	TWeakObjectPtr<APawn> GripPawn;
+	TWeakObjectPtr<UCharacterMovementComponent> SteeringMovement;
+	bool bPreviousPhysicsInteraction = false;
 	TMap<TWeakObjectPtr<UPrimitiveComponent>, float> Cargo;
 	float CargoRefreshSeconds = 0.f;
 };

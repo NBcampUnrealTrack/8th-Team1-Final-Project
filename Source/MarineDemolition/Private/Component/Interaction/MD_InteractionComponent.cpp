@@ -20,6 +20,7 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerState.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
@@ -152,6 +153,7 @@ static void AddActorAndAttachmentsToInteractionQuery(
 UMD_InteractionComponent::UMD_InteractionComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickGroup = TG_PrePhysics;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
 	SetIsReplicatedByDefault(true);
 
@@ -395,6 +397,21 @@ void UMD_InteractionComponent::SetCurrentInteractionPrompt(
 void UMD_InteractionComponent::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// BP에 저장된 틱 설정도 보정해 이동 후의 목표를 같은 프레임의 물리에 전달한다.
+	SetTickGroup(TG_PrePhysics);
+	if (APawn* Pawn = GetOwnerPawn())
+	{
+		if (UPawnMovementComponent* Movement = Pawn->GetMovementComponent())
+		{
+			AddTickPrerequisiteComponent(Movement);
+		}
+	}
+	if (IsValid(PhysicsHandle))
+	{
+		PhysicsHandle->AddTickPrerequisiteComponent(this);
+	}
+
 	CaptureDefaultHoldProfile();
 	RefreshTickEnabled();
 }
