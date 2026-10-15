@@ -21,6 +21,7 @@ public:
 	AMD_SurfaceStain();
 	virtual void PostLoad() override;
 	virtual void PostRegisterAllComponents() override;
+	virtual void PostUnregisterAllComponents() override;
 	virtual void OnConstruction(const FTransform& Transform) override;
 #if WITH_EDITOR
 	virtual void PostEditMove(bool bFinished) override;
@@ -94,7 +95,7 @@ private:
 #endif
 
 	/** Zero is a serialization sentinel for level assets authored before numeric sizes. */
-	UPROPERTY(EditAnywhere, ReplicatedUsing = RefreshSize, Category = "MD|Stain", meta = (ClampMin = "100", ClampMax = "5000"))
+	UPROPERTY(EditAnywhere, ReplicatedUsing = RefreshSize, Category = "MD|Stain", meta = (ClampMin = "100", ClampMax = "10000"))
 	int32 InitialSize = 0;
 
 	/** Retained solely to migrate previously saved level actors. */

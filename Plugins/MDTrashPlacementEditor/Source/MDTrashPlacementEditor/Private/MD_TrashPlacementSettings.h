@@ -30,6 +30,10 @@ public:
 	UPROPERTY(config, EditAnywhere, Category = "Stains")
 	TArray<TSoftObjectPtr<UMD_SurfaceStainDefinition>> StainPalette;
 
+	/** Four optional 60 cm wall sources. The tool resolves only the selected entry. */
+	UPROPERTY(config, EditAnywhere, Category = "Stains", meta = (DisplayName = "벽용 원형 목록"))
+	TArray<TSoftObjectPtr<UMD_SurfaceStainDefinition>> WallStainPalette;
+
 	/** Optional 100 cm XY quad for the legacy sticker moving preview; the volume preview uses its own shared mesh. */
 	UPROPERTY(config, EditAnywhere, Category = "Stains")
 	TSoftObjectPtr<UStaticMesh> StickerPreviewMesh;

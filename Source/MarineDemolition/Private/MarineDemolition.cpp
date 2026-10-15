@@ -2,6 +2,7 @@
 
 #include "MarineDemolition.h"
 #include "Modules/ModuleManager.h"
+#include "Gameplay/Contamination/MD_StainRayTracingResidency.h"
 
 #if WITH_EDITOR
 #include "PropertyEditorModule.h"
@@ -39,6 +40,7 @@ void FMarineDemolitionModule::StartupModule()
 
 void FMarineDemolitionModule::ShutdownModule()
 {
+	MD_StainRayTracingResidency::Shutdown();
 // 모듈 종료 시 디테일 델리게이트 잔존 방지
 #if WITH_EDITOR
 	// 종료 중 모듈 재로드 방지

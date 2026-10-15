@@ -7,6 +7,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
@@ -94,7 +95,7 @@ AMD_Cart::AMD_Cart()
 	SteeringProfile.LinearDamping = 800.f;
 	SteeringProfile.AngularStiffness = 1600.f;
 	SteeringProfile.AngularDamping = 650.f;
-	SteeringProfile.InterpolationSpeed = 20.f;
+	SteeringProfile.InterpolationSpeed = 40.f;
 	ApplyGeometry();
 }
 
@@ -240,10 +241,19 @@ bool AMD_Cart::IsPawnInsideTray(const APawn* Pawn) const
 		&& Local.Z > -FloorHalfThickness;
 }
 
+bool AMD_Cart::CanBeBaseForCharacter(APawn* Pawn) const
+{
+	const UMD_InteractionComponent* Interaction = IsValid(Pawn)
+		? Pawn->FindComponentByClass<UMD_InteractionComponent>() : nullptr;
+	// The operator must not ride their own physics handle; other pawns can stand here.
+	return (!Interaction || Interaction->GetHeldActor() != this) && Super::CanBeBaseForCharacter(Pawn);
+}
+
 bool AMD_Cart::CanInteract_Implementation(AActor* Interactor) const
 {
 	const APawn* Pawn = Cast<APawn>(Interactor);
-	return IsValid(Pawn) && (!GripPawn.IsValid() || GripPawn.Get() == Pawn)
+	return IsValid(Pawn) && APawn::GetMovementBaseActor(Pawn) != this
+		&& (!GripPawn.IsValid() || GripPawn.Get() == Pawn)
 		&& !IsPawnInsideTray(Pawn) && IsAimingAtHandle(Pawn);
 }
 
@@ -381,6 +391,19 @@ void AMD_Cart::LimitSteeringTarget(FTransform& Target) const
 void AMD_Cart::OnCarryStarted_Implementation()
 {
 	if (!HasAuthority() || !GripPawn.IsValid()) return;
+	RestorePawnPhysicsInteraction();
+	// The handle steers the cart; character push impulses would fight it at contact.
+	if (UCharacterMovementComponent* Movement = Cast<UCharacterMovementComponent>(GripPawn->GetMovementComponent()))
+	{
+		SteeringMovement = Movement;
+		bPreviousPhysicsInteraction = Movement->bEnablePhysicsInteraction;
+		Movement->bEnablePhysicsInteraction = false;
+	}
+	// Let the low chassis stop the capsule before the higher welded tray does.
+	if (UPrimitiveComponent* PawnCollision = Cast<UPrimitiveComponent>(GripPawn->GetRootComponent()))
+	{
+		PawnCollision->IgnoreComponentWhenMoving(CartBody, false);
+	}
 	CargoSensor->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	CargoRefreshSeconds = 0.f;
 	RefreshCargo();
@@ -388,8 +411,18 @@ void AMD_Cart::OnCarryStarted_Implementation()
 	ForceNetUpdate();
 }
 
+void AMD_Cart::RestorePawnPhysicsInteraction()
+{
+	if (UCharacterMovementComponent* Movement = SteeringMovement.Get())
+	{
+		Movement->bEnablePhysicsInteraction = bPreviousPhysicsInteraction;
+	}
+	SteeringMovement.Reset();
+}
+
 void AMD_Cart::OnCarryEnded_Implementation()
 {
+	RestorePawnPhysicsInteraction();
 	if (!HasAuthority()) return;
 	GripPawn.Reset();
 	bSteering = false;

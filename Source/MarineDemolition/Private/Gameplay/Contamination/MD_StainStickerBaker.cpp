@@ -8,6 +8,8 @@
 #include "DynamicMesh/DynamicMesh3.h"
 #include "DynamicMesh/DynamicMeshAABBTree3.h"
 #include "DynamicMesh/Operations/MergeCoincidentMeshEdges.h"
+#include "Distance/DistSegment3Triangle3.h"
+#include "Intersection/IntrRay3Triangle3.h"
 #include "Components/InstancedStaticMeshComponent.h"
 #include "DynamicMeshEditor.h"
 #include "Engine/StaticMesh.h"
@@ -15,6 +17,7 @@
 #include "Engine/World.h"
 #include "GameFramework/Actor.h"
 #include "Materials/MaterialInterface.h"
+#include "Misc/ScopeExit.h"
 #include "MeshDescription.h"
 #include "Operations/MeshBoolean.h"
 #include "Generators/MinimalBoxMeshGenerator.h"
@@ -617,10 +620,341 @@ namespace MD_StainStickerBake
 		return false;
 	}
 
+	bool ClipPortal(const FVector& A, const FVector& B, const FBox& Bounds, FVector& Start, FVector& End)
+	{
+		const FVector D = B - A;
+		double MinT = 0, MaxT = 1;
+		for (int32 Axis = 0; Axis < 3; ++Axis)
+		{
+			if (FMath::Abs(D[Axis]) < 1.e-12)
+			{
+				if (A[Axis] < Bounds.Min[Axis] || A[Axis] > Bounds.Max[Axis]) return false;
+				continue;
+			}
+			const double T0 = (Bounds.Min[Axis] - A[Axis]) / D[Axis];
+			const double T1 = (Bounds.Max[Axis] - A[Axis]) / D[Axis];
+			MinT = FMath::Max(MinT, FMath::Min(T0, T1));
+			MaxT = FMath::Min(MaxT, FMath::Max(T0, T1));
+			if (MinT > MaxT) return false;
+		}
+		Start = A + D * MinT; End = A + D * MaxT;
+		return true;
+	}
+
+	// A planar chord needs interval coverage, not a branching path through every
+	// tessellation edge. Every covered interval lies on a real convex source face;
+	// a hole or a different parallel layer cannot contribute an interval.
+	bool ProvePlanarChord(const FDynamicMesh3& Mesh, const FDynamicMeshAABBTree3& Tree,
+		const FVector& From, const FVector& To, TSet<int32>& UsedFaces, FProgressCancel* Progress)
+	{
+		TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceFit_PlanarContinuity);
+		constexpr double PlaneTolerance = 1.e-6;
+		constexpr double ParameterTolerance = 1.e-10;
+		struct FInterval { double Start, End; int32 Triangle; };
+		TArray<FInterval, TInlineAllocator<64>> Intervals;
+		const FAxisAlignedBox3d Bounds(From.ComponentMin(To), From.ComponentMax(To));
+		int32 BoxVisits = 0, FaceQueries = 0;
+		bool bLimitReached = false;
+		FDynamicMeshAABBTree3::FTreeTraversal Traversal;
+		Traversal.NextBoxF = [&](const FAxisAlignedBox3d& Box, int)
+		{
+			if (++BoxVisits > 4096) bLimitReached = true;
+			FVector Start, End;
+			return !bLimitReached && !(Progress && Progress->Cancelled())
+				&& Box.DistanceSquared(Bounds) <= PlaneTolerance * PlaneTolerance
+				&& ClipPortal(From,To,FBox(Box.Min,Box.Max).ExpandBy(PlaneTolerance),Start,End);
+		};
+		Traversal.NextTriangleF = [&](int32 Triangle)
+		{
+			if (bLimitReached) return;
+			if (++FaceQueries > 512) { bLimitReached = true; return; }
+			FVector A, B, C; Mesh.GetTriVertices(Triangle, A, B, C);
+			const FVector AB = B-A, AC = C-A, Normal = FVector::CrossProduct(AB,AC).GetSafeNormal();
+			if (Normal.IsNearlyZero() || FMath::Abs(FVector::DotProduct(From-A,Normal)) > PlaneTolerance
+				|| FMath::Abs(FVector::DotProduct(To-A,Normal)) > PlaneTolerance) return;
+			const double D00 = AB.SquaredLength(), D01 = FVector::DotProduct(AB,AC), D11 = AC.SquaredLength();
+			const double Denominator = D00*D11-D01*D01;
+			if (Denominator <= 1.e-20) return;
+			auto Barycentric = [&](const FVector& Point)
+			{
+				const double D20 = FVector::DotProduct(Point-A,AB), D21 = FVector::DotProduct(Point-A,AC);
+				const double V = (D11*D20-D01*D21)/Denominator, W = (D00*D21-D01*D20)/Denominator;
+				return FVector(1.-V-W,V,W);
+			};
+			const FVector StartBary = Barycentric(From), EndBary = Barycentric(To);
+			double Start = 0., End = 1.;
+			for (int32 K=0; K<3; ++K)
+			{
+				const double Delta = EndBary[K]-StartBary[K];
+				if (FMath::Abs(Delta) <= 1.e-15)
+				{
+					if (StartBary[K] < -ParameterTolerance) return;
+					continue;
+				}
+				const double Crossing = -StartBary[K]/Delta;
+				if (Delta > 0.) Start = FMath::Max(Start,Crossing);
+				else End = FMath::Min(End,Crossing);
+				if (Start > End+ParameterTolerance) return;
+			}
+			Intervals.Add({FMath::Clamp(Start,0.,1.),FMath::Clamp(End,0.,1.),Triangle});
+		};
+		Tree.DoTraversal(Traversal);
+		if (bLimitReached || (Progress && Progress->Cancelled())) return false;
+		Intervals.Sort([](const FInterval& A, const FInterval& B)
+		{
+			if (A.Start != B.Start) return A.Start < B.Start;
+			if (A.End != B.End) return A.End > B.End;
+			return A.Triangle < B.Triangle;
+		});
+		double Covered = 0.;
+		TArray<int32, TInlineAllocator<64>> Route;
+		for (const FInterval& Interval : Intervals)
+		{
+			if (Interval.Start > Covered+ParameterTolerance) return false;
+			if (Interval.End <= Covered) continue;
+			Covered = Interval.End; Route.Add(Interval.Triangle);
+			if (Covered >= 1.-ParameterTolerance)
+			{
+				for (int32 Triangle : Route) UsedFaces.Add(Triangle);
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// Prove only a short discontinuous projection. Every accepted link lies on a real
+	// shared edge or has an actual edge-to-face contact within 0.05 cm.
+	bool ProveLocalRoute(const FDynamicMesh3& Mesh, const FDynamicMeshAABBTree3& Tree,
+		int32 FromTriangle, const FVector& From, int32 ToTriangle, const FVector& To, double Step,
+		TSet<int32>& UsedFaces, bool& bBudgetExceeded, FProgressCancel* Progress, FString* Failure = nullptr)
+	{
+		auto Reject=[&](const FString& Reason) { if (Failure) *Failure=Reason; return false; };
+		constexpr double ContactTolerance = 0.05;
+		const double MaximumLength = Step + 2.05;
+		if (!Mesh.IsTriangle(FromTriangle) || !Mesh.IsTriangle(ToTriangle)) return Reject(TEXT("Invalid endpoint face"));
+		if (FVector::Distance(From, To) > MaximumLength)
+			return Reject(FString::Printf(TEXT("Endpoint distance %.9f exceeds route %.9f"),FVector::Distance(From,To),MaximumLength));
+		FVector A,B,C; Mesh.GetTriVertices(FromTriangle,A,B,C);
+		const FVector FromOnFace=FMath::ClosestPointOnTriangleToPoint(From,A,B,C);
+		const double FromFaceDistance=FVector::Distance(From,FromOnFace);
+		Mesh.GetTriVertices(ToTriangle,A,B,C);
+		const FVector ToOnFace=FMath::ClosestPointOnTriangleToPoint(To,A,B,C);
+		const double ToFaceDistance=FVector::Distance(To,ToOnFace);
+		if (FromFaceDistance>ContactTolerance || ToFaceDistance>ContactTolerance)
+			return Reject(FString::Printf(TEXT("Endpoint outside face: from %.9f, to %.9f cm"),FromFaceDistance,ToFaceDistance));
+		if (FromTriangle == ToTriangle)
+		{
+			if (FromFaceDistance+FVector::Distance(FromOnFace,ToOnFace)+ToFaceDistance>MaximumLength)
+				return Reject(TEXT("Same-face route exceeds length"));
+			UsedFaces.Add(ToTriangle); return true;
+		}
+		const FVector FromNormal = Mesh.GetTriNormal(FromTriangle), ToNormal = Mesh.GetTriNormal(ToTriangle);
+		if (FMath::Abs(FVector::DotProduct(FromNormal,ToNormal)) > 1.-1.e-10
+			&& FMath::Abs(FVector::DotProduct(ToOnFace-FromOnFace,FromNormal)) <= 1.e-6
+			&& FromFaceDistance+FVector::Distance(FromOnFace,ToOnFace)+ToFaceDistance <= MaximumLength
+			&& ProvePlanarChord(Mesh,Tree,FromOnFace,ToOnFace,UsedFaces,Progress))
+		{ UsedFaces.Add(FromTriangle); UsedFaces.Add(ToTriangle); return true; }
+		FString BudgetKind;
+		bool bSearchBudgetExceeded = false;
+		auto Search = [&](bool bCheckContacts, int32 MaximumStates)
+		{
+			TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceFit_LocalContinuity);
+			bSearchBudgetExceeded = false; BudgetKind.Reset();
+			const FBox Corridor = FBox(From.ComponentMin(To), From.ComponentMax(To)).ExpandBy(ContactTolerance);
+			struct FVisit { int32 Triangle; FVector Entry; double Length; int32 Parent; };
+			TArray<FVisit, TInlineAllocator<64>> Open;
+			TArray<FVisit, TInlineAllocator<64>> Expanded;
+			TSet<int32> ExpandedFaces;
+			struct FContact { int32 Triangle; FVector EdgePoint, FacePoint; };
+			// A clipped edge is fixed for this corridor. Cache its actual contacts so
+			// alternate entries do not spend the query budget on the same geometry.
+			TMap<int32,TArray<FContact>> ContactCache;
+			Open.Add({FromTriangle, FromOnFace, FromFaceDistance, INDEX_NONE});
+			int32 BoxVisits = 0, FaceQueries = 0;
+			double BestEndLength=TNumericLimits<double>::Max();
+			bool bFoundRoute=false;
+			auto Enqueue = [&](int32 Triangle, const FVector& Entry, double Length, int32 Parent)
+			{
+				if (bFoundRoute || bSearchBudgetExceeded || Length+FVector::Distance(Entry,To)>MaximumLength) return;
+				// A shortest valid route never needs to leave and re-enter a convex face.
+				// This is path-local: another route may still enter that face elsewhere.
+				for (int32 Ancestor=Parent;Ancestor>=0;Ancestor=Expanded[Ancestor].Parent)
+					if (Expanded[Ancestor].Triangle==Triangle) return;
+				FVector A,B,C; Mesh.GetTriVertices(Triangle,A,B,C);
+				const FVector End=FMath::ClosestPointOnTriangleToPoint(To,A,B,C);
+				const double EndGap=FVector::Distance(End,To);
+				if (EndGap<=ContactTolerance && Length+FVector::Distance(Entry,End)+EndGap<=MaximumLength)
+				{
+					UsedFaces.Add(Triangle); UsedFaces.Add(ToTriangle);
+					for (int32 Ancestor=Parent;Ancestor>=0;Ancestor=Expanded[Ancestor].Parent) UsedFaces.Add(Expanded[Ancestor].Triangle);
+					bFoundRoute=true; return;
+				}
+				// A previous entry dominates only if reaching this entry through the same
+				// convex face is no more expensive. A cheaper entry alone is insufficient.
+				for (const FVisit& Visited : Expanded)
+					if (Visited.Triangle==Triangle && Visited.Length+FVector::Distance(Visited.Entry,Entry)<=Length) return;
+				for (int32 I=Open.Num()-1; I>=0; --I)
+				{
+					const FVisit& Pending = Open[I];
+					if (Pending.Triangle != Triangle) continue;
+					const double InsideFace = FVector::Distance(Pending.Entry,Entry);
+					if (Pending.Length+InsideFace<=Length) return;
+					if (Length+InsideFace<=Pending.Length) Open.RemoveAtSwap(I);
+				}
+				if (Open.Num() + Expanded.Num() >= MaximumStates)
+				{ bSearchBudgetExceeded = true; BudgetKind=TEXT("route state"); return; }
+				Open.Add({Triangle, Entry, Length, Parent});
+			};
+			auto RejectBudget = [&]
+			{
+				return Reject(FString::Printf(TEXT("Local continuity %s limit: states %d/%d, contacts %d/512, tree boxes %d/4096; route allowance %.3f cm."),
+					*BudgetKind,Open.Num()+Expanded.Num(),MaximumStates,FaceQueries,BoxVisits,MaximumLength));
+			};
+			while (!Open.IsEmpty())
+			{
+				if (Progress && Progress->Cancelled()) return Reject(TEXT("Local continuity cancelled."));
+				if (bSearchBudgetExceeded) return RejectBudget();
+				int32 Best = 0;
+				for (int32 I = 1; I < Open.Num(); ++I)
+					if (Open[I].Length+FVector::Distance(Open[I].Entry,To)<Open[Best].Length+FVector::Distance(Open[Best].Entry,To)) Best = I;
+				const FVisit Current = Open[Best]; Open.RemoveAtSwap(Best);
+				const int32 CurrentIndex=Expanded.Add(Current); ExpandedFaces.Add(Current.Triangle);
+				Mesh.GetTriVertices(Current.Triangle,A,B,C);
+				const FVector End=FMath::ClosestPointOnTriangleToPoint(To,A,B,C);
+				const double EndGap=FVector::Distance(End,To);
+				const double EndLength=Current.Length+FVector::Distance(Current.Entry,End)+EndGap;
+				if (EndGap<=ContactTolerance) BestEndLength=FMath::Min(BestEndLength,EndLength);
+				// A ray landing exactly on a shared edge/vertex may name the other incident
+				// face. Accept only the actual coincident endpoint, charging its contact gap.
+				if (EndGap<=ContactTolerance && EndLength<=MaximumLength)
+				{
+					UsedFaces.Add(Current.Triangle);
+					for (int32 Ancestor=Current.Parent; Ancestor>=0; Ancestor=Expanded[Ancestor].Parent)
+						UsedFaces.Add(Expanded[Ancestor].Triangle);
+					UsedFaces.Add(ToTriangle);
+					return true;
+				}
+				const FIndex3i Edges = Mesh.GetTriEdges(Current.Triangle);
+				for (int32 K = 0; K < 3; ++K)
+				{
+					FVector3d EdgeA, EdgeB; Mesh.GetEdgeV(Edges[K], EdgeA, EdgeB);
+					FVector PortalA, PortalB;
+					if (!ClipPortal(EdgeA, EdgeB, Corridor, PortalA, PortalB)) continue;
+					FVector Portal = FMath::ClosestPointOnSegment(To, PortalA, PortalB);
+					// Preserve the projected route through large authored triangles instead of
+					// taking a lateral detour toward the final elevated/recessed point.
+					const FVector D=To-Current.Entry,E=PortalB-PortalA,R=PortalA-Current.Entry;
+					const double Den=D.X*E.Y-D.Y*E.X;
+					if (FMath::Abs(Den)>1.e-12)
+					{
+						const double T=(R.X*E.Y-R.Y*E.X)/Den,U=(R.X*D.Y-R.Y*D.X)/Den;
+						if (T>=-1.e-10 && T<=1+1.e-10 && U>=-1.e-10 && U<=1+1.e-10)
+							Portal=PortalA+E*FMath::Clamp(U,0.,1.);
+					}
+					else if (E.X*E.X+E.Y*E.Y>1.e-12)
+					{
+						const double U=((To.X-PortalA.X)*E.X+(To.Y-PortalA.Y)*E.Y)/(E.X*E.X+E.Y*E.Y);
+						Portal=PortalA+E*FMath::Clamp(U,0.,1.);
+					}
+					const FIndex2i Pair = Mesh.GetEdgeT(Edges[K]);
+					const int32 Neighbor = Pair.A == Current.Triangle ? Pair.B : Pair.A;
+					if (Neighbor >= 0) Enqueue(Neighbor, Portal, Current.Length + FVector::Distance(Current.Entry, Portal), CurrentIndex);
+					if (bFoundRoute) return true;
+					if (bSearchBudgetExceeded) return RejectBudget();
+					if (!bCheckContacts) continue;
+					auto TryContact = [&](const FContact& Contact)
+					{
+						FVector A,B,C; Mesh.GetTriVertices(Contact.Triangle,A,B,C);
+						FVector EdgePoint=Portal, FacePoint=FMath::ClosestPointOnTriangleToPoint(Portal,A,B,C);
+						if (FVector::DistSquared(EdgePoint,FacePoint)>ContactTolerance*ContactTolerance)
+						{ EdgePoint=Contact.EdgePoint; FacePoint=Contact.FacePoint; }
+						Enqueue(Contact.Triangle,FacePoint,Current.Length+FVector::Distance(Current.Entry,EdgePoint)
+							+FVector::Distance(EdgePoint,FacePoint),CurrentIndex);
+					};
+					if (const TArray<FContact>* Cached=ContactCache.Find(Edges[K]))
+					{
+						for (const FContact& Contact : *Cached)
+						{
+							TryContact(Contact);
+							if (bFoundRoute) return true;
+							if (bSearchBudgetExceeded) return RejectBudget();
+						}
+						continue;
+					}
+					TArray<FContact>& Contacts=ContactCache.Add(Edges[K]);
+					const FAxisAlignedBox3d PortalBounds(PortalA.ComponentMin(PortalB), PortalA.ComponentMax(PortalB));
+					FDynamicMeshAABBTree3::FTreeTraversal Traversal;
+					Traversal.NextBoxF = [&](const FAxisAlignedBox3d& Box, int)
+					{
+						if (bFoundRoute) return false;
+						if (++BoxVisits > 4096) { bSearchBudgetExceeded = true; BudgetKind=TEXT("tree traversal"); }
+						FVector Start,End;
+						return !bSearchBudgetExceeded && !(Progress && Progress->Cancelled())
+							&& Box.DistanceSquared(PortalBounds) <= ContactTolerance * ContactTolerance
+							&& ClipPortal(PortalA,PortalB,FBox(Box.Min,Box.Max).ExpandBy(ContactTolerance),Start,End);
+					};
+					Traversal.NextTriangleF = [&](int32 Triangle)
+					{
+						if (bFoundRoute || bSearchBudgetExceeded || Triangle == Current.Triangle || Triangle == Neighbor) return;
+						const FAxisAlignedBox3d FaceBounds=Mesh.GetTriBounds(Triangle);
+						FVector Start,End;
+						if (!ClipPortal(PortalA,PortalB,FBox(FaceBounds.Min,FaceBounds.Max).ExpandBy(ContactTolerance),Start,End)) return;
+						if (++FaceQueries > 512) { bSearchBudgetExceeded = true; BudgetKind=TEXT("contact candidate"); return; }
+						FTriangle3d Face; Mesh.GetTriVertices(Triangle, Face.V[0], Face.V[1], Face.V[2]);
+						FContact Contact{Triangle,PortalA,FMath::ClosestPointOnTriangleToPoint(PortalA,Face.V[0],Face.V[1],Face.V[2])};
+						if (FVector::DistSquared(PortalA,PortalB)>=1.e-18)
+						{
+							FDistSegment3Triangle3d Distance(FSegment3d(PortalA,PortalB),Face);
+							if (Distance.GetSquared()>ContactTolerance*ContactTolerance) return;
+							Contact.EdgePoint=Distance.SegmentClosest; Contact.FacePoint=Distance.TriangleClosest;
+						}
+						if (FVector::DistSquared(Contact.EdgePoint,Contact.FacePoint)>ContactTolerance*ContactTolerance) return;
+						Contacts.Add(Contact); TryContact(Contact);
+					};
+					Tree.DoTraversal(Traversal);
+					if (bFoundRoute) return true;
+					if (bSearchBudgetExceeded) return RejectBudget();
+				}
+			}
+			return Reject(FString::Printf(TEXT("No local route: states %d, faces %d, tree boxes %d, contacts %d, best endpoint route %.9f, limit %.9f, from-face error %.9f, to-face error %.9f"),
+				Expanded.Num(),ExpandedFaces.Num(),BoxVisits,FaceQueries,BestEndLength==TNumericLimits<double>::Max()?-1.:BestEndLength,MaximumLength,FromFaceDistance,ToFaceDistance));
+		};
+		// First prove ordinary mesh adjacency without expanding unrelated contact
+		// candidates. Only ambiguous seams need the more expensive bounded fallback.
+		if (Search(false,64)) return true;
+		if (Progress && Progress->Cancelled()) return false;
+		if (Search(true,256)) return true;
+		bBudgetExceeded = bSearchBudgetExceeded;
+		return false;
+	}
+
 	bool WalkSurface(const TArray<FSourceMesh>& Sources, const FVector2D& HalfSize,
-		FMD_StainStickerPatch& Patch, FString& Error, bool bLimitNeighborRise, FProgressCancel* Progress = nullptr)
+		FMD_StainStickerPatch& Patch, FString& Error, bool bLimitNeighborRise, FProgressCancel* Progress = nullptr,
+		FString* OutDiagnostics = nullptr)
 	{
 		TRACE_CPUPROFILER_EVENT_SCOPE(MD_SurfaceFit_Walk);
+		int32 InvalidSamples=0,UnprovenProjections=0,FailedInteriorRays=0,FailedInteriorRoutes=0,RejectedFrontTriangles=0;
+		struct FFailureExample { int32 FromID,ToID; FVector From,To; FString Text; };
+		TArray<FFailureExample,TInlineAllocator<3>> Failures;
+		auto RememberFailure=[&](const TCHAR* Phase,int32 FromID,const FVector& From,int32 ToID,const FVector& To,double Step,const FString& Reason)
+		{
+			if (Failures.Num()>=3) return;
+			for (const FFailureExample& Example:Failures)
+				if (Example.FromID==FromID && Example.ToID==ToID && Example.From.Equals(From,1.e-6) && Example.To.Equals(To,1.e-6)) return;
+			Failures.Add({FromID,ToID,From,To,FString::Printf(
+				TEXT("%s: From=(%.9f,%.9f,%.9f) face=%d; To=(%.9f,%.9f,%.9f) face=%d; step=%.9f; %s"),
+				Phase,From.X,From.Y,From.Z,FromID,To.X,To.Y,To.Z,ToID,Step,*Reason)});
+		};
+		ON_SCOPE_EXIT
+		{
+			if (OutDiagnostics)
+			{
+				*OutDiagnostics=FString::Printf(
+					TEXT("Surface checks: %d invalid samples, %d unproven projected transitions, %d missing interior hits, %d unproven interior routes, %d rejected front triangles."),
+					InvalidSamples,UnprovenProjections,FailedInteriorRays,FailedInteriorRoutes,RejectedFrontTriangles);
+				for (const FFailureExample& Example:Failures) *OutDiagnostics+=TEXT("\n")+Example.Text;
+			}
+		};
 		FDynamicMesh3 Mesh;
 		FDynamicMeshEditor Editor(&Mesh);
 		const FSourceMesh* Primary=nullptr; double SeedDistance=6.0;
@@ -628,14 +962,22 @@ namespace MD_StainStickerBake
 		{
 			FDynamicMeshAABBTree3 SourceTree(Source.Mesh.Get());
 			double T; FVector3d Bary; int32 ID=INDEX_NONE;
-			if (SourceTree.FindNearestHitTriangle(FRay3d(FVector3d(0,0,6),FVector3d(0,0,-1)),T,ID,Bary)
+			if (SourceTree.FindNearestHitTriangle(FWatertightRay3d(FVector3d(0,0,6),FVector3d(0,0,-1)),T,ID,Bary)
 				&& T<=12 && FMath::Abs(T-6)<SeedDistance)
 			{ Primary=&Source; SeedDistance=FMath::Abs(T-6); }
 		}
+		TMap<FIntVector, int32> ClippedVertices;
+		auto AddClippedVertex = [&](const FVector& P)
+		{
+			const FIntVector Key(FMath::RoundToInt(P.X * 1000), FMath::RoundToInt(P.Y * 1000), FMath::RoundToInt(P.Z * 1000));
+			if (const int32* Existing = ClippedVertices.Find(Key)) return *Existing;
+			const int32 Vertex = Mesh.AppendVertex(P); ClippedVertices.Add(Key, Vertex); return Vertex;
+		};
 		for (const auto& Source : Sources)
 		{
 			if (!bLimitNeighborRise || &Source==Primary)
 			{ FMeshIndexMappings Mapping; Editor.AppendMesh(Source.Mesh.Get(),Mapping); continue; }
+			ClippedVertices.Reset(); // Keep touching authored parts separate; prove their contact locally.
 			// A floor spill may cover adjacent low steps and chair feet, but must not climb
 			// an unrelated piece of furniture all the way to its seat. Direct furniture hits
 			// keep their full size-dependent wrapping; downward continuation is unchanged.
@@ -653,27 +995,49 @@ namespace MD_StainStickerBake
 				for (int32 I=1;I+1<Clipped.Num();++I)
 				{
 					if (FVector::CrossProduct(Clipped[I]-Clipped[0],Clipped[I+1]-Clipped[0]).SquaredLength()<1.e-12) continue;
-					Mesh.AppendTriangle(Mesh.AppendVertex(Clipped[0]),Mesh.AppendVertex(Clipped[I]),Mesh.AppendVertex(Clipped[I+1]));
+					const int32 A0 = AddClippedVertex(Clipped[0]), A1 = AddClippedVertex(Clipped[I]), A2 = AddClippedVertex(Clipped[I+1]);
+					if (A0 != A1 && A1 != A2 && A2 != A0) Mesh.AppendTriangle(A0, A1, A2);
 				}
 			}
 		}
 		FDynamicMeshAABBTree3 Tree(&Mesh);
-		auto Trace = [&](FVector A,FVector B,FVector& P,FVector& N)
+		auto Trace = [&](FVector A,FVector B,FVector& P,FVector& N,int32* OutTriangle = nullptr)
 		{
+			if (OutTriangle) *OutTriangle = INDEX_NONE;
 			const FVector D=B-A; const double Length=D.Length(); if (Length<1.e-6) return false;
-			const FRay3d Ray(A,D/Length);
+			const FWatertightRay3d Ray(A,D/Length);
 			double T; FVector3d Bary;
 			int32 ID=INDEX_NONE;
 			if (!Tree.FindNearestHitTriangle(Ray,T,ID,Bary,IMeshSpatial::FQueryOptions(Length,[&](int32 Triangle) { return FVector::DotProduct(Mesh.GetTriNormal(Triangle),D)<-1.e-6; })) || ID<0 || T>Length) return false;
-			P=Ray.PointAt(T); N=Mesh.GetTriNormal(ID);
+			P=A+D*(T/Length); N=Mesh.GetTriNormal(ID);
+			if (OutTriangle) *OutTriangle = ID;
 			return FVector::DotProduct(N,D)<-1.e-6;
 		};
-		FVector Seed,SeedNormal;
-		if (!Trace(FVector(0,0,6),FVector(0,0,-6),Seed,SeedNormal))
+		FVector Seed,SeedNormal; int32 SeedTriangle = INDEX_NONE;
+		if (!Trace(FVector(0,0,6),FVector(0,0,-6),Seed,SeedNormal,&SeedTriangle))
 		{ Error=TEXT("No readable surface at the cursor."); return false; }
-		auto Walk = [&](FVector2D Target,FVector& Result,FVector& ThicknessNormal,double StepLimit)
+		TSet<int32> UsedReceiverFaces; UsedReceiverFaces.Add(SeedTriangle);
+		bool bRouteBudgetExceeded = false;
+		FString RouteBudgetDetail;
+		auto ProveRoute = [&](int32 FromTriangle, const FVector& From, int32 ToTriangle, const FVector& To, double Step, FString* Failure = nullptr)
 		{
+			FString Detail;
+			const bool bProven = ProveLocalRoute(Mesh,Tree,FromTriangle,From,ToTriangle,To,Step,
+				UsedReceiverFaces,bRouteBudgetExceeded,Progress,&Detail);
+			if (Failure) *Failure=Detail;
+			if (bRouteBudgetExceeded) RouteBudgetDetail=Detail;
+			return bProven;
+		};
+		auto SetRouteBudgetError = [&]
+		{
+			Error=TEXT("This surface exceeds the bounded local continuity check. ")+RouteBudgetDetail
+				+TEXT(" Reduce the stain width or simplify the receiving mesh.");
+		};
+		auto Walk = [&](FVector2D Target,FVector& Result,FVector& ThicknessNormal,int32& ResultTriangle,double StepLimit)
+		{
+			ResultTriangle = INDEX_NONE;
 			FVector P=Seed,N=SeedNormal;
+			int32 CurrentTriangle = SeedTriangle;
 			const FVector PlanarDirection=FVector(Target.X,Target.Y,0).GetSafeNormal();
 			const double Radius=Target.Length();
 			const double Reach=FMath::Clamp(HalfSize.GetMax()*.5,6.0,40.0);
@@ -685,12 +1049,19 @@ namespace MD_StainStickerBake
 				if (Progress && Progress->Cancelled()) return false;
 				const double NextDistance=FMath::Min(Radius,Projected+.75);
 				const FVector Center=PlanarDirection*NextDistance;
-				FVector Next,NextNormal;
-				if (!Trace(Center+FVector::UpVector*Reach,Center-FVector::UpVector*Reach,Next,NextNormal)
-					|| FVector::Distance(P,Next)>FMath::Clamp(HalfSize.GetMax()*.3,6.0,18.0)) break;
-				P=Next; N=NextNormal; Projected=NextDistance;
+				FVector Next,NextNormal; int32 NextTriangle;
+				if (!Trace(Center+FVector::UpVector*Reach,Center-FVector::UpVector*Reach,Next,NextNormal,&NextTriangle)) break;
+				const double ProjectionStep = NextDistance - Projected;
+				FString Failure;
+				if (FVector::Distance(P,Next)>ProjectionStep+.05
+					&& !ProveRoute(CurrentTriangle,P,NextTriangle,Next,ProjectionStep,&Failure))
+				{
+					++UnprovenProjections; RememberFailure(TEXT("Projection"),CurrentTriangle,P,NextTriangle,Next,ProjectionStep,Failure);
+					return false; // A rear-layer hit is not an outer lip to wrap around.
+				}
+				P=Next; N=NextNormal; CurrentTriangle=NextTriangle; UsedReceiverFaces.Add(CurrentTriangle); Projected=NextDistance;
 			}
-			if (Projected>=Radius-.001) { Result=P; ThicknessNormal=FVector::UpVector; return true; }
+			if (Projected>=Radius-.001) { Result=P; ThicknessNormal=FVector::UpVector; ResultTriangle=CurrentTriangle; return true; }
 			FVector D=FQuat::FindBetweenNormals(FVector::UpVector,N).RotateVector(PlanarDirection);
 			double Remaining=Radius-Projected; const double WrappingDistance=Remaining; int32 Steps=0;
 			while (Remaining>0.01)
@@ -698,40 +1069,58 @@ namespace MD_StainStickerBake
 				if (++Steps>8192 || (Progress && Progress->Cancelled())) return false;
 				const double Step=FMath::Min(Remaining,StepLimit);
 				const FVector Predicted=P+D*Step;
-				FVector Next,NextNormal;
+				FVector Next,NextNormal; int32 NextTriangle = INDEX_NONE;
 				// An inset screen meets the inner bezel before a normal projection can see its top.
-				bool Found=Trace(P+N*.03,Predicted+N*.03,Next,NextNormal)
+				bool Found=Trace(P+N*.03,Predicted+N*.03,Next,NextNormal,&NextTriangle)
 					&& FVector::Distance(P,Next)>.02 && FVector::DotProduct(N,NextNormal)>-.95;
-				if (!Found) Found=Trace(Predicted+N*2.0,Predicted-N*2.0,Next,NextNormal)
+				if (!Found) Found=Trace(Predicted+N*2.0,Predicted-N*2.0,Next,NextNormal,&NextTriangle)
 					&& FVector::Distance(P,Next)<3.0 && FVector::DotProduct(N,NextNormal)>-.95;
 				if (!Found || FVector::DotProduct(Next-P,N)<-Step*.5)
 				{
 					// Cross a convex lip by looking back toward its side; no mesh-edge adjacency required.
-					FVector Side,SideNormal;
-					if (Trace(P+D*Step+N*.02,P-D*.15-N*Step,Side,SideNormal)
+					FVector Side,SideNormal; int32 SideTriangle;
+					if (Trace(P+D*Step+N*.02,P-D*.15-N*Step,Side,SideNormal,&SideTriangle)
 						&& FVector::Distance(P,Side)<2.0 && FVector::DotProduct(N,SideNormal)>-.95)
-					{ Next=Side; NextNormal=SideNormal; Found=true; }
+						{ Next=Side; NextNormal=SideNormal; NextTriangle=SideTriangle; Found=true; }
 				}
 				if (!Found) { Result=P; return false; }
 				const double Travel=FVector::Distance(P,Next);
 				if (Travel<0.0001) return false;
+				FString Failure;
+				if (Travel>Step+.05 && !ProveRoute(CurrentTriangle,P,NextTriangle,Next,Step,&Failure))
+				{
+					++UnprovenProjections; RememberFailure(TEXT("Wrapping"),CurrentTriangle,P,NextTriangle,Next,Step,Failure);
+					return false;
+				}
 				if (Travel>Remaining) { Next=FMath::Lerp(P,Next,Remaining/Travel); Remaining=0; }
 				else Remaining-=Travel;
 				D=FQuat::FindBetweenNormals(N,NextNormal).RotateVector(D).GetSafeNormal(); P=Next; N=NextNormal;
+				CurrentTriangle=NextTriangle; UsedReceiverFaces.Add(CurrentTriangle);
 			}
-			Result=P; ThicknessNormal=FMath::Lerp(FVector::UpVector,N,FMath::Clamp(WrappingDistance/3.0,0.0,1.0)).GetSafeNormal(); return true;
+			Result=P; ResultTriangle=CurrentTriangle;
+			ThicknessNormal=FMath::Lerp(FVector::UpVector,N,FMath::Clamp(WrappingDistance/3.0,0.0,1.0)).GetSafeNormal(); return true;
 		};
 		constexpr int32 Resolution=33;
 		TArray<FVector> Points,ThicknessNormals; Points.SetNum(Resolution*Resolution); ThicknessNormals.SetNum(Points.Num());
 		TArray<bool> Valid; Valid.SetNumZeroed(Points.Num());
+		TArray<int32> PointTriangles; PointTriangles.Init(INDEX_NONE,Points.Num());
 		for (int32 Y=0;Y<Resolution;++Y) for (int32 X=0;X<Resolution;++X)
 		{
 			if (Progress && Progress->Cancelled()) return false;
 			const int32 I=Y*Resolution+X;
 			const FVector2D Target=(FVector2D(X,Y)/(Resolution-1)-FVector2D(.5,.5))*(HalfSize*2);
-			Valid[I]=Walk(Target,Points[I],ThicknessNormals[I],0.25);
-			if (!Valid[I]) Valid[I]=Walk(Target,Points[I],ThicknessNormals[I],0.10);
-			if (!Valid[I]) Valid[I]=Walk(Target,Points[I],ThicknessNormals[I],0.05);
+			Valid[I]=Walk(Target,Points[I],ThicknessNormals[I],PointTriangles[I],0.25);
+			if (!Valid[I] && !bRouteBudgetExceeded) Valid[I]=Walk(Target,Points[I],ThicknessNormals[I],PointTriangles[I],0.10);
+			if (!Valid[I] && !bRouteBudgetExceeded) Valid[I]=Walk(Target,Points[I],ThicknessNormals[I],PointTriangles[I],0.05);
+			if (!Valid[I]) ++InvalidSamples;
+			if (bRouteBudgetExceeded) { SetRouteBudgetError(); return false; }
+		}
+		const TArray<FVector> SupportPoints = Points;
+		TArray<bool> OnOriginalFace; OnOriginalFace.Init(false,Points.Num());
+		for (int32 I=0;I<Points.Num();++I) if (Valid[I] && Mesh.IsTriangle(PointTriangles[I]))
+		{
+			FVector A,B,C; Mesh.GetTriVertices(PointTriangles[I],A,B,C);
+			OnOriginalFace[I]=FVector::DistSquared(SupportPoints[I],FMath::ClosestPointOnTriangleToPoint(SupportPoints[I],A,B,C))<=1.e-10;
 		}
 		// A bounded fluid fillet rises before a sharp bezel instead of pinching into its crease.
 		// Only the front height field changes; the flat interior and side-wrapping coordinates stay fixed.
@@ -781,13 +1170,60 @@ namespace MD_StainStickerBake
 			}
 			Points=MoveTemp(NextPoints); ThicknessNormals=MoveTemp(NextNormals);
 		}
+		auto SupportedInterior = [&](const FVector& Expected, const int32* CellCorners)
+		{
+			FVector Contact, Normal; int32 Triangle;
+			if (!Trace(Expected+FVector::UpVector*3,Expected-FVector::UpVector*3,Contact,Normal,&Triangle))
+			{ ++FailedInteriorRays; return false; }
+			// A different original corner can supply the actual short route at a crease.
+			// Try exact-face corners first, then nearest corners, without relaxing any proof.
+			int32 Choices[4]; for (int32 K=0;K<4;++K) Choices[K]=CellCorners[K];
+			auto Priority=[&](int32 Choice)
+			{
+				return !Valid[Choice]?3:(OnOriginalFace[Choice]?(PointTriangles[Choice]==Triangle?0:1):2);
+			};
+			for (int32 A=0;A<4;++A) for (int32 B=A+1;B<4;++B)
+				if (Priority(Choices[B])<Priority(Choices[A]) || (Priority(Choices[B])==Priority(Choices[A])
+					&& FVector::DistSquared(SupportPoints[Choices[B]],Contact)<FVector::DistSquared(SupportPoints[Choices[A]],Contact))) Swap(Choices[A],Choices[B]);
+			FString FirstFailure; double FirstStep=0.; int32 FirstAnchor=Choices[0];
+			for (int32 Anchor:Choices) if (Valid[Anchor])
+			{
+				const FVector Offset=Expected-SupportPoints[Anchor];
+				const double Step=FVector2D(Offset.X,Offset.Y).Length(); FString Failure;
+				if (ProveRoute(PointTriangles[Anchor],SupportPoints[Anchor],Triangle,Contact,Step,&Failure))
+				{ UsedReceiverFaces.Add(Triangle); return true; }
+				if (FirstFailure.IsEmpty()) { FirstFailure=Failure; FirstStep=Step; FirstAnchor=Anchor; }
+				if (bRouteBudgetExceeded || (Progress && Progress->Cancelled())) break;
+			}
+			++FailedInteriorRoutes; RememberFailure(TEXT("Interior"),PointTriangles[FirstAnchor],SupportPoints[FirstAnchor],Triangle,Contact,FirstStep,FirstFailure);
+			return false;
+		};
+		TMap<int32, bool> DiagonalSupport;
 		for (int32 Y=0;Y<Resolution-1;++Y) for (int32 X=0;X<Resolution-1;++X)
 		{
+			if (Progress && Progress->Cancelled()) return false;
 			const int32 A=Y*Resolution+X,B=A+1,C=A+Resolution,D=C+1;
+			const int32 CellCorners[]={A,B,C,D};
 			const int32 Indices[]={A,D,B,A,C,D};
 			for (int32 I=0;I<6;I+=3)
 			{
 				if (!Valid[Indices[I]] || !Valid[Indices[I+1]] || !Valid[Indices[I+2]]) continue;
+				const int32 T0=Indices[I],T1=Indices[I+1],T2=Indices[I+2];
+				// Three points on one convex authored face cannot enclose a receiver aperture.
+				// Across faces, verify the shared diagonal and the interior before emitting it.
+				if (Front[T0] && Front[T1] && Front[T2]
+					&& (PointTriangles[T0]!=PointTriangles[T1] || PointTriangles[T0]!=PointTriangles[T2]
+						|| !OnOriginalFace[T0] || !OnOriginalFace[T1] || !OnOriginalFace[T2]
+						|| !Points[T0].Equals(SupportPoints[T0],1.e-6) || !Points[T1].Equals(SupportPoints[T1],1.e-6)
+						|| !Points[T2].Equals(SupportPoints[T2],1.e-6)))
+				{
+					bool* Diagonal = DiagonalSupport.Find(A);
+					if (!Diagonal)
+						Diagonal = &DiagonalSupport.Add(A,SupportedInterior((SupportPoints[A]+SupportPoints[D])*.5,CellCorners));
+					const bool bCenter = *Diagonal && SupportedInterior((SupportPoints[T0]+SupportPoints[T1]+SupportPoints[T2])/3,CellCorners);
+					if (bRouteBudgetExceeded) { SetRouteBudgetError(); return false; }
+					if (!bCenter) { ++RejectedFrontTriangles; continue; }
+				}
 				if (FVector::CrossProduct(Points[Indices[I+1]]-Points[Indices[I]],Points[Indices[I+2]]-Points[Indices[I]]).SquaredLength()<1.e-8) continue;
 				for (int32 K=0;K<3;++K)
 				{
@@ -797,10 +1233,50 @@ namespace MD_StainStickerBake
 				}
 			}
 		}
+		if (!Patch.LocalBounds.IsValid) { Error=TEXT("This surface could not support a connected slime patch."); return false; }
+		// Coating queries reach at most 5 cm beyond coverage. Preserve whole source faces,
+		// but follow only real adjacency through portals inside that local neighborhood.
+		const FBox ReceiverBounds=Patch.LocalBounds.ExpandBy(5.0);
+		const FAxisAlignedBox3d ReceiverBox(ReceiverBounds.Min,ReceiverBounds.Max);
+		TSet<int32> ReceiverFaces;
+		TArray<int32> ReceiverQueue;
+		auto IncludeReceiver = [&](int32 Triangle)
+		{
+			if (Triangle<0 || ReceiverFaces.Contains(Triangle) || Mesh.GetTriBounds(Triangle).DistanceSquared(ReceiverBox)>0) return true;
+			if (ReceiverFaces.Num()>=FMD_StainStickerPatch::MaximumTriangles)
+			{
+				Error=TEXT("This placement needs over 4,096 local receiver triangles. Reduce the stain width or simplify the receiving mesh.");
+				return false;
+			}
+			ReceiverFaces.Add(Triangle); ReceiverQueue.Add(Triangle); return true;
+		};
+		TArray<int32> Seeds=UsedReceiverFaces.Array(); Seeds.Sort();
+		for (int32 Triangle : Seeds) if (!IncludeReceiver(Triangle)) return false;
+		for (int32 Cursor=0;Cursor<ReceiverQueue.Num();++Cursor)
+		{
+			if (Progress && Progress->Cancelled()) return false;
+			const int32 Triangle=ReceiverQueue[Cursor]; const FIndex3i Edges=Mesh.GetTriEdges(Triangle);
+			for (int32 K=0;K<3;++K)
+			{
+				FVector3d EdgeA,EdgeB; Mesh.GetEdgeV(Edges[K],EdgeA,EdgeB);
+				FVector PortalA,PortalB; if (!ClipPortal(EdgeA,EdgeB,ReceiverBounds,PortalA,PortalB)) continue;
+				const FIndex2i Pair=Mesh.GetEdgeT(Edges[K]);
+				if (!IncludeReceiver(Pair.A==Triangle?Pair.B:Pair.A)) return false;
+			}
+		}
+		ReceiverQueue.Sort();
 		TMap<int32,int32> ReceiverIDs;
-		for (int32 V : Mesh.VertexIndicesItr()) { ReceiverIDs.Add(V,Patch.FitReceiverVertices.Num()); Patch.FitReceiverVertices.Add(Mesh.GetVertex(V)); }
-		for (int32 T : Mesh.TriangleIndicesItr())
-		{ const auto V=Mesh.GetTriangle(T); Patch.FitReceiverTriangles.Add(FIntVector(ReceiverIDs[V.A],ReceiverIDs[V.B],ReceiverIDs[V.C])); }
+		for (int32 Triangle : ReceiverQueue)
+		{
+			const FIndex3i V=Mesh.GetTriangle(Triangle); FIntVector Output;
+			for (int32 K=0;K<3;++K)
+			{
+				int32* ID=ReceiverIDs.Find(V[K]);
+				if (!ID) ID=&ReceiverIDs.Add(V[K],Patch.FitReceiverVertices.Add(Mesh.GetVertex(V[K])));
+				Output[K]=*ID;
+			}
+			Patch.FitReceiverTriangles.Add(Output);
+		}
 		if (!Patch.IsValid()) { Error=TEXT("This surface could not support a connected slime patch."); return false; }
 		return true;
 	}
@@ -966,10 +1442,11 @@ TSharedPtr<FMD_StainStickerAsyncBake> FMD_StainStickerBaker::StartAsync(AActor& 
 		FDynamicMesh3 Surface;
 		TArray<int32> Disconnected;
 		TArray<MD_StainStickerBake::FSourceMesh> Sources;
+		FString WalkDiagnostics;
 		Result->Patch.InitialSize = InitialSize;
 		Result->bSuccess = !Progress.Cancelled()
 			&& MD_StainStickerBake::BuildSources(Instances, HalfSize.Length() + 1, Sources, Result->Error, &Progress)
-			&& (bSurfaceWalk ? MD_StainStickerBake::WalkSurface(Sources, HalfSize, Result->Patch, Result->Error, bLimitNeighborRise, &Progress)
+			&& (bSurfaceWalk ? MD_StainStickerBake::WalkSurface(Sources, HalfSize, Result->Patch, Result->Error, bLimitNeighborRise, &Progress, &WalkDiagnostics)
 				: (MD_StainStickerBake::MakeSurface(Sources, HalfSize, Surface, Disconnected, Result->Error, &Progress)
 				&& MD_StainStickerBake::AddDownhillBridges(Surface, Sources, Disconnected, HalfSize, Result->Error, &Progress)
 				&& !Progress.Cancelled()
@@ -984,6 +1461,8 @@ TSharedPtr<FMD_StainStickerAsyncBake> FMD_StainStickerBaker::StartAsync(AActor& 
 		if (Result->bSuccess && bSurfaceWalk)
 			Result->bSuccess=Result->FitJob.IsValid() && FMD_StainSurfaceFit::Prepare(*Result->FitJob,Result->Patch,InitialSize,Result->Error,&Progress);
 		if (!Result->bSuccess && Result->Error.IsEmpty()) Result->Error = TEXT("Could not unfold this connected surface.");
+		if (!Result->bSuccess && !Progress.Cancelled() && !WalkDiagnostics.IsEmpty())
+			UE_LOG(LogTemp,Verbose,TEXT("Stain fitting failed: %s\n%s"),*Result->Error,*WalkDiagnostics);
 		Instances.Reset(); Sources.Reset(); Surface = FDynamicMesh3();
 		Result->bReady.store(true);
 	}, UE::Tasks::ETaskPriority::BackgroundLow);

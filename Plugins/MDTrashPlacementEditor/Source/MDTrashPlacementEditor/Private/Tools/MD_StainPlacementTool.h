@@ -3,6 +3,7 @@
 #include "BaseBehaviors/BehaviorTargetInterfaces.h"
 #include "InteractiveTool.h"
 #include "Engine/HitResult.h"
+#include "UObject/SoftObjectPtr.h"
 #include "Gameplay/Contamination/MD_StainStickerPatch.h"
 #include "InteractiveToolBuilder.h"
 #include "MD_StainPlacementTool.generated.h"
@@ -39,37 +40,90 @@ public:
 	virtual UInteractiveTool* BuildTool(const FToolBuilderState& State) const override;
 };
 
+UENUM()
+enum class EMD_StainPaletteGroup : uint8
+{
+	Existing UMETA(DisplayName = "기존 원형"),
+	Wall UMETA(DisplayName = "벽용 원형")
+};
+
+UENUM()
+enum class EMD_StainSizeInput : uint8
+{
+	ContaminationAmount UMETA(DisplayName = "오염량"),
+	WidthCm UMETA(DisplayName = "가로 폭 (cm)")
+};
+
 UCLASS(Transient)
 class UMD_StainPlacementProperties : public UInteractiveToolPropertySet
 {
 	GENERATED_BODY()
 public:
-	UPROPERTY(EditAnywhere, Category = "Stains")
+	/** Every approved wall source has this full-stage width at reference size 300. */
+	static constexpr double WallReferenceWidthCm = 60.0;
+	static constexpr int32 WallProfileCount = 4;
+
+	UPROPERTY(EditAnywhere, Category = "Stains", meta = (DisplayName = "원형 목록"))
+	EMD_StainPaletteGroup PaletteGroup = EMD_StainPaletteGroup::Existing;
+
+	UPROPERTY(EditAnywhere, Category = "Stains", meta = (EditCondition = "PaletteGroup == EMD_StainPaletteGroup::Existing", EditConditionHides))
 	TArray<TObjectPtr<UMD_SurfaceStainDefinition>> Palette;
+
+	/** Soft references do not load the four sources or their twenty meshes together. */
+	UPROPERTY(VisibleAnywhere, Transient, Category = "Stains", meta = (TransientToolProperty, DisplayName = "벽 원형 목록", EditCondition = "PaletteGroup == EMD_StainPaletteGroup::Wall", EditConditionHides))
+	TArray<TSoftObjectPtr<UMD_SurfaceStainDefinition>> WallPalette;
+
+	UPROPERTY(EditAnywhere, Category = "Stains", meta = (DisplayName = "벽 원형 선택", ClampMin = "0", ClampMax = "3", EditCondition = "PaletteGroup == EMD_StainPaletteGroup::Wall && !bRandomVariant", EditConditionHides, ToolTip = "0: 넓은 비대칭, 1: 짧은 아래 흐름, 2: 짧은 사방 흐름, 3: 뭉친 덩어리"))
+	int32 WallVariantIndex = 0;
 
 	UPROPERTY(EditAnywhere, Category = "Stains")
 	bool bRandomVariant = false;
 
-	UPROPERTY(EditAnywhere, Category = "Stains", meta = (ClampMin = "0", EditCondition = "!bRandomVariant"))
+	UPROPERTY(EditAnywhere, Category = "Stains", meta = (ClampMin = "0", EditCondition = "PaletteGroup == EMD_StainPaletteGroup::Existing && !bRandomVariant", EditConditionHides))
 	int32 VariantIndex = 0;
 
-	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "5000", EditCondition = "!bRandomSize"))
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (DisplayName = "크기 입력 방식"))
+	EMD_StainSizeInput SizeInput = EMD_StainSizeInput::ContaminationAmount;
+
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (DisplayName = "원형 기준 가로 폭", Units = "cm", ClampMin = "0.1", EditCondition = "SizeInput == EMD_StainSizeInput::WidthCm", EditConditionHides))
+	double WidthCm = 0.0;
+
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "10000", EditCondition = "SizeInput == EMD_StainSizeInput::ContaminationAmount && !bRandomSize", EditConditionHides))
 	int32 InitialSize = 300;
 
-	UPROPERTY(EditAnywhere, Category = "Size")
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (EditCondition = "SizeInput == EMD_StainSizeInput::ContaminationAmount", EditConditionHides))
 	bool bRandomSize = false;
 
-	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "5000", EditCondition = "bRandomSize"))
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "10000", EditCondition = "SizeInput == EMD_StainSizeInput::ContaminationAmount && bRandomSize", EditConditionHides))
 	int32 MinSize = 100;
 
-	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "5000", EditCondition = "bRandomSize"))
-	int32 MaxSize = 5000;
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (ClampMin = "100", ClampMax = "10000", EditCondition = "SizeInput == EMD_StainSizeInput::ContaminationAmount && bRandomSize", EditConditionHides))
+	int32 MaxSize = 10000;
+
+	UPROPERTY(VisibleAnywhere, Transient, Category = "Size", meta = (DisplayName = "원형 치수와 적용 오염량", MultiLine = "true"))
+	FString SizeInfo;
+
+	UPROPERTY(VisibleAnywhere, Transient, Category = "Size", meta = (DisplayName = "허용 폭 안내", MultiLine = "true"))
+	FString WidthRangeInfo;
+
+	UPROPERTY(VisibleAnywhere, Transient, Category = "Size", meta = (DisplayName = "맞춤 후 치수", MultiLine = "true"))
+	FString MeasuredSizeInfo;
+
+	UPROPERTY(EditAnywhere, Category = "Size", meta = (DisplayName = "기준 치수 자 표시"))
+	bool bShowSizeRuler = true;
 
 	UPROPERTY(EditAnywhere, Category = "Placement", meta = (ClampMin = "1", Units = "cm"))
 	float SpacingCm = 60.0f;
 
+	/** Current cursor result only; old queued placements must not overwrite this status. */
+	UPROPERTY(VisibleAnywhere, Transient, Category = "Placement", meta = (TransientToolProperty, DisplayName = "배치 상태와 불가 이유", MultiLine = "true"))
+	FString PlacementStatusInfo;
+
 	UPROPERTY(EditAnywhere, Category = "Placement", meta = (Units = "deg"))
 	float RotationDegrees = 0.0f;
+
+	UPROPERTY(VisibleAnywhere, Transient, Category = "Placement", meta = (TransientToolProperty, DisplayName = "벽 방향 안내", MultiLine = "true", EditCondition = "PaletteGroup == EMD_StainPaletteGroup::Wall", EditConditionHides))
+	FString WallDirectionInfo = TEXT("벽의 아래 방향에 맞춥니다. 무작위 회전은 ±8°이며, 지정 회전은 추가로 적용합니다.");
 
 	UPROPERTY(EditAnywhere, Category = "Placement")
 	bool bRandomRotation = true;
@@ -134,9 +188,14 @@ public:
 
 private:
 	bool Trace(const FInputDeviceRay& Ray, FHitResult& Hit, bool bErase) const;
-	UMD_SurfaceStainDefinition* ResolveDefinition() const;
+	UMD_SurfaceStainDefinition* ResolveDefinition();
+	bool IsWallDefinitionCompatible(const UMD_SurfaceStainDefinition& Definition, FString& Error) const;
 	FTransform MakeTransform(const FHitResult& Hit) const;
-	int32 ResolveSize() const;
+	int32 ResolveSize(UMD_SurfaceStainDefinition* Definition, FString& Error) const;
+	bool ResolveWidthRange(FVector2D& Range, FString& Error) const;
+	void InitializeWidth();
+	void UpdateSizeInfo(UMD_SurfaceStainDefinition* Definition, int32 Size, const FString& Error);
+	void UpdateMeasuredSize();
 	void ApplyAt(const FInputDeviceRay& Ray);
 	void FinishStroke();
 	bool WantsErase() const;
@@ -152,12 +211,18 @@ private:
 	void CommitPrepared(const FMD_StainPlacementRequest& Request, FMD_StainStickerPatch Patch, UStaticMesh* Mesh);
 	void BeginStrokeTransaction();
 	void SetPreviewError(const FString& Error);
+	void ClearPreviewError();
+	void ReportPlacementError(const FMD_StainPlacementRequest& Request, const FString& Error);
 
 	UPROPERTY() TObjectPtr<UWorld> TargetWorld;
 	UPROPERTY() TObjectPtr<UMD_StainPlacementProperties> Properties;
 	UPROPERTY(Transient) TObjectPtr<AActor> PreviewOwner;
 	UPROPERTY(Transient) TObjectPtr<UStaticMeshComponent> Preview;
 	UPROPERTY(Transient) TObjectPtr<UStaticMesh> StickerPreviewMesh;
+	/** Keep only wall sources actually chosen, including those in queued weak-reference requests. */
+	UPROPERTY(Transient) TArray<TObjectPtr<UMD_SurfaceStainDefinition>> LoadedWallDefinitions;
+	TArray<FSoftObjectPath> FailedWallLoads;
+	FString DefinitionError;
 	UPROPERTY(Transient) TObjectPtr<UMD_SurfaceStainDefinition> PreparedFit;
 	UPROPERTY(Transient) TObjectPtr<UStaticMesh> DraftPreview;
 	bool bDraftAttempted = false;
@@ -179,6 +244,7 @@ private:
 	TWeakObjectPtr<UStaticMesh> PreviewSourceMesh;
 	FGuid PreviewSourceGuid;
 	FString PreviewError;
+	FString PreviewErrorInfo;
 	TWeakObjectPtr<UMD_SurfaceStainDefinition> PreviewDefinition;
 	FTransform PreviewTransform;
 	FTransform PreviewInputTransform;
@@ -195,6 +261,23 @@ private:
 	bool bHover = false;
 	bool bHoverEndPending = false;
 	bool bPreviewWasVisible = false;
+	bool bPreviewFollowSurface = true;
+	FVector NominalDimensions = FVector::ZeroVector;
+	mutable TArray<TPair<TWeakObjectPtr<UMD_SurfaceStainDefinition>, uint32>> WidthRangeDefinitions;
+	mutable FVector2D CachedWidthRange = FVector2D::ZeroVector;
+	mutable FString CachedWidthRangeError;
+	mutable bool bWidthRangeCached = false;
+	mutable EMD_StainPaletteGroup CachedPaletteGroup = EMD_StainPaletteGroup::Existing;
+	mutable bool bCachedRandomVariant = false;
+	mutable bool bCachedFollowSurface = true;
+	mutable int32 CachedVariantIndex = INDEX_NONE;
+	mutable uint32 WidthRangeVersion = 0;
+	uint32 DisplayedWidthRangeVersion = 0;
+	TWeakObjectPtr<UMD_SurfaceStainDefinition> SizeInfoDefinition;
+	uint32 SizeInfoRevision = 0;
+	int32 SizeInfoBudget = INDEX_NONE;
+	bool bSizeInfoFollowSurface = true;
+	FString SizeInfoError;
 	bool bShift = false;
 	bool bStroke = false;
 	bool bStrokeErase = false;
