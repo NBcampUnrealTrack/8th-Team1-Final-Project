@@ -62,6 +62,8 @@ public:
 	bool CanOwnerInteract() const;
 	/** LMB consumable input; requests repair via this owned component, not the unowned facility. */
 	bool TryUseFacilityTape();
+	UFUNCTION(BlueprintCallable, Category="MD|Interaction")
+	bool TryUseCrowbar();
 	/** LMB-only restart button. Returns true when the click is consumed. */
 	UFUNCTION(BlueprintCallable, Category="MD|Interaction")
 	bool TryClickInstructionRestart();
@@ -207,6 +209,8 @@ private:
 	void ServerInteractReleased(AActor* RequestedActor);
 	UFUNCTION(Server, Reliable)
 	void ServerRepairFacilityWithTape(AActor* Target, int32 ExpectedFaultId);
+	UFUNCTION(Server, Reliable)
+	void ServerRepairDoorWithCrowbar(AActor* Target, int32 ExpectedFaultId);
 	UFUNCTION(Server, Reliable)
 	void ServerBeginFacilityRepair(AActor* Target, int32 ExpectedFaultId);
 	UFUNCTION(Server, Reliable)

@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Engine/EngineBaseTypes.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"      // Online Subsystem의 Session 관련 모듈 참조
 #include "Interfaces/OnlineExternalUIInterface.h"   // Online SubSystem의 플랫폼 제공 UI 관련 모듈 참조
@@ -11,6 +12,7 @@
 
 class UMD_LoadingScreenSubsystem;
 class APlayerState;
+class UNetDriver;
 
 struct FBlueprintSessionResult;
 struct FMD_SessionCreateParams;     // Hosting Session 설정값
@@ -108,6 +110,15 @@ protected:
     // Session 비동기 작업의 중복 실행과 완료 이벤트 수명을 관리하기 위한 핸들
     FDelegateHandle SessionDelegateHandle;
 
+    // 호스트 연결 상실 이후 남은 온라인 세션의 정리 필요 여부
+    bool bDisconnectedSessionNeedsCleanup = false;
+
+    // 공용 비동기 핸들을 사용하는 연결 상실 정리 작업의 구분
+    bool bDisconnectedSessionCleanupInProgress = false;
+
+    // 온라인 탈퇴 완료 뒤 한 번만 재개할 방 생성 요청
+    TFunction<void(bool)> PendingCreateAfterDisconnectCleanup;
+
 public:
     // 비동기 Listen Server 호스팅 절차를 시작하는 함수
     UFUNCTION(BlueprintCallable, Category = "Marine Demolition|Session")
@@ -158,6 +169,18 @@ public:
     FMD_RoomCode ParseRoomCode(FString StringRoomCode);
     
 protected:
+	// 현재 참가자의 게임 연결 상실 시 남은 온라인 세션의 정리 시작
+	void HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString);
+
+	// 엔진의 타이틀 복귀와 별개로 온라인 서비스의 실제 탈퇴 요청
+	void CleanupDisconnectedSession();
+
+	// 연결 상실 세션의 정리 결과에 따른 대기 중 방 생성의 재개
+	void HandleDisconnectedSessionCleanupComplete(FName SessionName, bool bWasSuccessful);
+
+	// 세션 생성과 제거 및 맵 이동 단계의 현재 상태를 기록하는 진단 함수
+	void LogSessionLifecycle(FName Stage, FName SessionName, int32 Result = -1);
+
 	// 로컬 화면과 서버가 소유한 각 클라이언트 화면에 실제 로딩 시작을 전달하는 공통 처리
 	void BeginLoadingScreenForTravel(EMD_LoadingContext Context);
 

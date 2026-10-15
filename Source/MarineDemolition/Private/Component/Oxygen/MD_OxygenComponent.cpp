@@ -56,6 +56,7 @@ void UMD_OxygenComponent::BeginPlay()
 
 void UMD_OxygenComponent::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
+	MDAudioFeedback::Stop(this, LowOxygenAudio, 0.f);
 	MDAudioFeedback::Stop(this, HeartbeatAudio, 0.f);
 	// 캐릭터 제거 및 월드 이동 전에 이 컴포넌트가 교체한 머티리얼 복원
 	UpdateOxygenPostProcess(true);
@@ -544,9 +545,9 @@ void UMD_OxygenComponent::RefreshSurvivalAudio()
 	const auto* ASC = GetAbilitySystemComponent();
 	if (!Pawn || !Pawn->IsLocallyControlled() || !Attributes || !ASC)
 	{
+		MDAudioFeedback::Stop(this, LowOxygenAudio, 0.f);
 		MDAudioFeedback::Stop(this, HeartbeatAudio);
 		bAudioOxygenLow = bAudioOxygenEmpty = false; PreviousAudioOxygen = -1.f;
-		NextLowOxygenWarningTime = 0.;
 		return;
 	}
 	const bool bDead = ASC->HasMatchingGameplayTag(MDGameplayTags::State_Dead);
@@ -556,13 +557,12 @@ void UMD_OxygenComponent::RefreshSurvivalAudio()
 	// HUD는 ceil(산소 비율 * 8)칸을 표시한다. 3칸 경계 위에서는 경고를 멈춘다.
 	const bool bLow = !bDead && BreathState == EMD_BreathState::Submerged && Max > 0.f && Ratio <= 3.f / 8.f;
 	const bool bEmpty = bLow && Oxygen <= 0.f;
-	const double Now = GetWorld()->GetTimeSeconds();
-	if (bLow && (!bAudioOxygenLow || Now >= NextLowOxygenWarningTime))
+	if (bLow && !LowOxygenAudio.IsValid())
 	{
-		MDAudioFeedback::LocalPawn(Pawn, TEXT("SFX.Character.Oxygen.Low"));
-		NextLowOxygenWarningTime = Now + 4.;
+		// The wave contains a three-beep burst plus silence: an exact three-second cycle.
+		LowOxygenAudio = MDAudioFeedback::LocalPawn(Pawn, TEXT("SFX.Character.Oxygen.Low"));
 	}
-	if (!bLow) NextLowOxygenWarningTime = 0.;
+	if (!bLow) MDAudioFeedback::Stop(this, LowOxygenAudio, 0.f);
 	if (bEmpty && !bAudioOxygenEmpty) MDAudioFeedback::LocalPawn(Pawn, TEXT("SFX.Character.Oxygen.Depleted"));
 	if (bLow && !HeartbeatAudio.IsValid()) HeartbeatAudio = MDAudioFeedback::LocalPawn(Pawn, TEXT("SFX.Character.Oxygen.HeartbeatLoop"));
 	if (!bLow) MDAudioFeedback::Stop(this, HeartbeatAudio);

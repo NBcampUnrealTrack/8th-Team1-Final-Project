@@ -54,6 +54,9 @@ protected:
 
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Cart|Components")
 	TObjectPtr<UBoxComponent> CartBody;
+	/** Raised tray floor: blocks cargo while the ground chassis can pass low loose litter. */
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Cart|Components")
+	TObjectPtr<UBoxComponent> CargoFloor;
 	/** Assign the cart mesh and its local transform in the Blueprint. */
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Cart|Components")
 	TObjectPtr<UStaticMeshComponent> Visual;
@@ -72,6 +75,14 @@ protected:
 	FVector TrayHalfExtent = FVector(70.f, 95.f, 40.f);
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_Geometry, Category = "MD|Cart|Geometry", meta = (ClampMin = "1", Units = "cm"))
 	float FloorHalfThickness = 6.f;
+	/** Height of the tray floor above the chassis floor, matching the authored cart mesh. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_Geometry, Category = "MD|Cart|Geometry", meta = (ClampMin = "0", Units = "cm"))
+	float CargoFloorOffset = 24.f;
+	/** Usable cavity, independent of the wheel/handle footprint used by the chassis. */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_Geometry, Category = "MD|Cart|Geometry", meta = (ClampMin = "1", Units = "cm"))
+	FVector CargoHalfExtent = FVector(51.f, 72.f, 25.f);
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_Geometry, Category = "MD|Cart|Geometry", meta = (ClampMin = "1", Units = "cm"))
+	FVector2D CargoWallHalfThickness = FVector2D(10.5f, 6.f);
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, ReplicatedUsing = OnRep_Geometry, Category = "MD|Cart|Geometry", meta = (ClampMin = "1", Units = "cm"))
 	float WallHalfThickness = 3.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Cart|Grip", meta = (ClampMin = "30", ClampMax = "200", Units = "cm"))

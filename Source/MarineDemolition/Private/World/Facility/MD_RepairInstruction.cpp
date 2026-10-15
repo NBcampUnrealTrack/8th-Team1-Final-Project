@@ -46,7 +46,7 @@ AMD_RepairInstructionController::AMD_RepairInstructionController()
 	BreakerInteractionBounds->SetCollisionEnabled(ECollisionEnabled::QueryOnly); BreakerInteractionBounds->SetCollisionResponseToAllChannels(ECR_Ignore);
 	BreakerInteractionBounds->SetCollisionResponseToChannel(ECC_Visibility,ECR_Block); BreakerInteractionBounds->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace,ECR_Block);
 	BreakerInteractionBounds->SetGenerateOverlapEvents(false);
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> KnobMesh(TEXT("/Game/Assets/X7/Interior/Objects/RepairInstruction/SM_BreakerKnob.SM_BreakerKnob"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> KnobMesh(TEXT("/Game/Assets/X7/Interior/Objects/StaticMeshes/SM_BreakerKnob.SM_BreakerKnob"));
 	for (int32 Column=0; Column<4; ++Column)
 	{
 		auto* Bounds=CreateDefaultSubobject<UBoxComponent>(*FString::Printf(TEXT("KnobBounds_%d"),Column));
@@ -521,7 +521,7 @@ AMD_RepairInstructionControl::AMD_RepairInstructionControl()
 	InteractionBounds->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace,ECR_Block);
 	Body=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Body")); Body->SetupAttachment(RootComponent); Body->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube")); if(Cube.Succeeded()) Body->SetStaticMesh(Cube.Object);
-	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GuideMaterial(TEXT("/Game/Assets/X7/Interior/Objects/RepairInstruction/M_RepairDisplay_Instruction.M_RepairDisplay_Instruction"));
+	static ConstructorHelpers::FObjectFinder<UMaterialInterface> GuideMaterial(TEXT("/Game/Assets/X7/Interior/Objects/Materials/M_RepairDisplay_Instruction.M_RepairDisplay_Instruction"));
 	if(GuideMaterial.Succeeded()) GuideLightMaterial=GuideMaterial.Object;
 	AuxiliaryLightBody=CreateDefaultSubobject<UStaticMeshComponent>(TEXT("AuxiliaryLightBody")); AuxiliaryLightBody->SetupAttachment(RootComponent); AuxiliaryLightBody->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 	Heading=CreateDefaultSubobject<UTextRenderComponent>(TEXT("Heading")); Heading->SetupAttachment(RootComponent);

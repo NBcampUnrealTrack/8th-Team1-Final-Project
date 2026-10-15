@@ -10,8 +10,44 @@
 #include "GameFramework/PlayerController.h"
 #include "GameFramework/PlayerState.h"
 #include "GameFramework/SpectatorPawn.h"
+#include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Data/Equipment/MD_ToolDefinition.h"
+#include "GameplayTags/MD_GameplayTags.h"
+#include "World/Facility/MD_RepairInstruction.h"
 
 const FString UMD_DoorFaultComponent::RepairRoomTagPrefix(TEXT("MD.DoorFault.Room."));
+
+bool UMD_DoorFaultComponent::TryRepairWithCrowbar(APawn* Pawn, int32 ExpectedFaultId)
+{
+	AActor* Door = GetOwner();
+	if (!IsValid(Door) || !Door->HasAuthority() || !bOwnsLock || bPreviousLocked
+		|| !CanReachForRepair(Pawn) || GetSnapshot().FaultId != ExpectedFaultId) return false;
+	const UMD_EquipHotbarComponent* Hotbar = Pawn->FindComponentByClass<UMD_EquipHotbarComponent>();
+	const UMD_ToolDefinition* Tool = Hotbar ? Hotbar->GetCurrentTool() : nullptr;
+	if (!IsValid(Tool) || !Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Crowbar)) return false;
+	FVector ViewOrigin; FRotator ViewRotation;
+	Pawn->GetController()->GetPlayerViewPoint(ViewOrigin, ViewRotation);
+	FHitResult ReachHit;
+	FCollisionQueryParams ReachQuery(SCENE_QUERY_STAT(CrowbarServerReach), true, Pawn);
+	if (!GetWorld()->LineTraceSingleByChannel(ReachHit, ViewOrigin, ViewOrigin + ViewRotation.Vector() * RepairReach, ECC_Visibility, ReachQuery)
+		|| ReachHit.GetActor() != Door
+		|| FVector::DistSquared(Pawn->GetActorLocation(), ReachHit.ImpactPoint) > FMath::Square(RepairReach + Pawn->GetSimpleCollisionHalfHeight())) return false;
+	// A puzzle-owned lock is not an ordinary fault and cannot be bypassed.
+	for (TActorIterator<AMD_RepairInstructionController> It(GetWorld()); It; ++It)
+		if (It->InstructionDoor == Door && It->State.bDoorLocked) return false;
+	FBoolProperty* Open = FindFProperty<FBoolProperty>(Door->GetClass(), TEXT("bDoorOpen"));
+	UFunction* ApplyOpen = Door->FindFunction(TEXT("OnRep_bDoorOpen"));
+	if (!Open || !ApplyOpen || ApplyOpen->NumParms != 0) return false;
+	// Completion releases the fault-owned lock, alarms and manual repair occupancy first.
+	if (!CompleteRepairFromValidatedSource(ExpectedFaultId)) return false;
+	Open->SetPropertyValue_InContainer(Door, true);
+	Door->ProcessEvent(ApplyOpen, nullptr);
+	Door->FlushNetDormancy();
+	Door->ForceNetUpdate();
+	PlayFeedbackForAll(TEXT("SFX.Tool.Crowbar.Pry"), Door->GetActorLocation());
+	PlayFeedbackForAll(TEXT("SFX.Tool.Crowbar.Release"), Door->GetActorLocation());
+	return true;
+}
 
 bool UMD_DoorFaultComponent::HasRepairRoomOccupant() const
 {

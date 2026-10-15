@@ -22,6 +22,8 @@ namespace MDGameplayTags
 
 	/** 절연테이프로 배선을 수리할 수 있음을 식별하는 태그 */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_UtilityRepair_Insulation);
+	/** Permanent emergency tool for broken ordinary doors. */
+	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_UtilityRepair_Crowbar);
 
 	/** Shared glass drawing and rear eraser tool use. */
 	MARINEDEMOLITION_API UE_DECLARE_GAMEPLAY_TAG_EXTERN(Ability_UtilityRepair_GlassMarker);

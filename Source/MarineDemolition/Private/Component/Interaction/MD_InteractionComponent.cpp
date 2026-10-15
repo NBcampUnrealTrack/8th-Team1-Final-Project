@@ -1,4 +1,5 @@
 #include "Component/Interaction/MD_InteractionComponent.h"
+#include "World/Transport/MD_Cart.h"
 #include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "AbilitySystemComponent.h"
@@ -13,6 +14,7 @@
 #include "Data/Equipment/MD_ConsumeItemDefinition.h"
 #include "Component/Facility/MD_FacilityRepairComponent.h"
 #include "Data/Equipment/MD_ToolDefinition.h"
+#include "World/Door/MD_DoorFaultComponent.h"
 #include "World/Wall/MD_PowerConduit.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
@@ -292,6 +294,18 @@ FText UMD_InteractionComponent::ResolveAbilityInteractionPrompt() const
 	{
 		return FText::GetEmpty();
 	}
+	if (Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Crowbar))
+	{
+		FVector Origin; FRotator Rotation;
+		OwnerPawn->GetController()->GetPlayerViewPoint(Origin, Rotation);
+		FHitResult Hit;
+		FCollisionQueryParams Params(SCENE_QUERY_STAT(CrowbarPrompt), true, OwnerPawn);
+		if (GetWorld()->LineTraceSingleByChannel(Hit, Origin, Origin + Rotation.Vector() * AbilityPromptTraceDistance, ECC_Visibility, Params))
+			if (const UMD_DoorFaultComponent* Door = Hit.GetActor() ? Hit.GetActor()->FindComponentByClass<UMD_DoorFaultComponent>() : nullptr;
+				Door && Door->CanReachForRepair(OwnerPawn))
+				return NSLOCTEXT("MDInteraction", "CrowbarDoorRepair", "[E] 강제 개방·수리 (빠루 · 영구 사용)");
+		return FText::GetEmpty();
+	}
 
 	const bool bCutTool =
 		Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_WallCut);
@@ -463,6 +477,12 @@ void UMD_InteractionComponent::Interact()
 		return;
 	}
 
+	// Crowbar uses the same interaction input as doors, not the primary tool button.
+	if (TryUseCrowbar())
+	{
+		HoldInteractionTarget.Reset();
+		return;
+	}
 	AActor* Target = CurrentTarget.Get();
 	if(const auto* Control=Cast<AMD_RepairInstructionControl>(Target))
 		if(Control->ControlKind==EMD_InstructionControlKind::Restart) return;
@@ -1127,6 +1147,36 @@ FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& Ho
 
 	const FVector ToDesired = Desired - Origin;
 	const double DesiredDistance = ToDesired.Size();
+	if (bBlocked && DesiredDistance > UE_KINDA_SMALL_NUMBER && Cast<AMD_Cart>(Hit.GetActor()))
+	{
+		// A long object's bounding sphere may already overlap the tray at the camera,
+		// even though the object itself fits. Sweep its oriented bounds from a clear
+		// point instead of allowing the carry spring to drive through the cart.
+		const FBoxSphereBounds LocalBounds = Held->CalcBounds(FTransform::Identity);
+		const FVector Scale = Held->GetComponentScale();
+		const FVector HalfExtent = (LocalBounds.BoxExtent * Scale.GetAbs() * HoldProbeRadiusScale).ComponentMax(FVector(HoldProbeMinRadius));
+		FQuat Rotation = ActiveHoldProfile.bConstrainRotation ? HoldTransform.GetRotation() : Held->GetComponentQuat();
+		if (ActiveHoldProfile.bConstrainRotation)
+		{
+			if (const AMD_TrashItem* Trash = Cast<AMD_TrashItem>(Held->GetOwner()))
+			{
+				Rotation *= Trash->GetHoldRotationOffset();
+			}
+		}
+		const FVector GrabOffset = Held->GetComponentTransform().InverseTransformPositionNoScale(Held->GetCenterOfMass());
+		const FVector CenterOffset = Rotation.RotateVector(LocalBounds.Origin * Scale - GrabOffset);
+		const FVector Direction = ToDesired / DesiredDistance;
+		const double Backoff = HalfExtent.Size() + HoldProbeMinRadius;
+		FHitResult ShapeHit;
+		if (World->SweepSingleByChannel(ShapeHit, Origin - Direction * Backoff + CenterOffset, Desired + CenterOffset,
+			Rotation, Held->GetCollisionObjectType(), FCollisionShape::MakeBox(HalfExtent), QueryParams, ProbeResponses)
+			&& !ShapeHit.bStartPenetrating && Cast<AMD_Cart>(ShapeHit.GetActor()))
+		{
+			// A close contact takes precedence over HoldMinDistance; enforcing that
+			// minimum would put the leading end of a long item below the tray again.
+			return Origin + Direction * FMath::Min(DesiredDistance, ShapeHit.Distance - Backoff - 1.0);
+		}
+	}
 
 	// 시작 지점이 이미 묻혀 있으면 Distance가 0이라 물체가 얼굴로 끌려온다. 기존 동작을 유지한다.
 	if (!bBlocked || Hit.bStartPenetrating || DesiredDistance <= UE_KINDA_SMALL_NUMBER)
@@ -1494,6 +1544,32 @@ bool UMD_InteractionComponent::TryUseFacilityTape()
 	if (!Repair || !Repair->bAllowInsulationTape || !Repair->HasRepairFault()) return false;
 	ServerRepairFacilityWithTape(Hit.GetActor(), Repair->GetRepairSnapshot().FaultId);
 	return true;
+}
+
+bool UMD_InteractionComponent::TryUseCrowbar()
+{
+	APawn* Pawn = GetOwnerPawn();
+	const UMD_EquipHotbarComponent* Hotbar = IsValid(Pawn) ? Pawn->FindComponentByClass<UMD_EquipHotbarComponent>() : nullptr;
+	const UMD_ToolDefinition* Tool = Hotbar ? Hotbar->GetCurrentTool() : nullptr;
+	if (!CanOwnerInteract() || IsHolding() || !IsValid(Tool)
+		|| !Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Crowbar)) return false;
+	FVector Origin; FRotator Rotation;
+	Pawn->GetController()->GetPlayerViewPoint(Origin, Rotation);
+	FHitResult Hit;
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(CrowbarInput), true, Pawn);
+	if (!GetWorld()->LineTraceSingleByChannel(Hit, Origin, Origin + Rotation.Vector() * AbilityPromptTraceDistance, ECC_Visibility, Params)) return false;
+	UMD_DoorFaultComponent* Door = IsValid(Hit.GetActor()) ? Hit.GetActor()->FindComponentByClass<UMD_DoorFaultComponent>() : nullptr;
+	if (!Door || !Door->CanReachForRepair(Pawn)) return false;
+	ServerRepairDoorWithCrowbar(Hit.GetActor(), Door->GetSnapshot().FaultId);
+	return true;
+}
+
+void UMD_InteractionComponent::ServerRepairDoorWithCrowbar_Implementation(AActor* Target, int32 ExpectedFaultId)
+{
+	APawn* Pawn = GetOwnerPawn();
+	if (!IsValid(Target) || !IsValid(Pawn) || !Pawn->HasAuthority()) return;
+	if (UMD_DoorFaultComponent* Door = Target->FindComponentByClass<UMD_DoorFaultComponent>())
+		Door->TryRepairWithCrowbar(Pawn, ExpectedFaultId);
 }
 
 void UMD_InteractionComponent::ServerRepairFacilityWithTape_Implementation(AActor* Target, int32 ExpectedFaultId)

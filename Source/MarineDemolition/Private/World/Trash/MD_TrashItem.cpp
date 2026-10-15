@@ -36,11 +36,11 @@ AMD_TrashItem::AMD_TrashItem()
 	// 쓰레기통이 오버랩으로 내용물을 세므로 꺼서는 안 된다
 	Mesh->SetGenerateOverlapEvents(true);
 	Mesh->SetSimulatePhysics(true);
+	Mesh->SetUseCCD(true);
 
 	// Small air-drag approximation; floor contact supplies most of the stopping force.
 	Mesh->SetLinearDamping(0.05f);
 	Mesh->SetAngularDamping(0.1f);
-	Mesh->SetUseCCD(true);
 	static ConstructorHelpers::FObjectFinder<UPhysicalMaterial> PickupMaterial(
 		TEXT("/Game/Physics/PM_MD_LoosePickup.PM_MD_LoosePickup"));
 	if (PickupMaterial.Succeeded()) ContactMaterial = PickupMaterial.Object;
@@ -213,6 +213,9 @@ void AMD_TrashItem::PostEditUndo()
 void AMD_TrashItem::BeginPlay()
 {
 	Super::BeginPlay();
+	// Small or sideways trash can cross a tray wall in one physics step when carried
+	// or thrown. Also enforce this for existing Blueprint defaults saved without CCD.
+	Mesh->SetUseCCD(true);
 	ApplyTrashKindRow();
 }
 

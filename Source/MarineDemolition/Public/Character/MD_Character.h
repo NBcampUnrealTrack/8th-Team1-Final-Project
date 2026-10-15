@@ -233,6 +233,9 @@ protected:
 		meta = (ClampMin = "0.1", ClampMax = "1.0", UIMin = "0.1", UIMax = "1.0"))
 	float FirstPersonRenderScale = 0.8f;
 
+	// Crowbar presentation moves the visible arms only; restore before another tool or pose update.
+	TOptional<FTransform> CrowbarArmsBaseRelativeTransform;
+
 	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "MD|Stain", meta = (AllowPrivateAccess = "true"))
 	TObjectPtr<UMD_StainScraperComponent> StainScraperComponent;
 
@@ -396,6 +399,11 @@ private:
 	bool bInstructionClickCaptured=false;
 	void HandleScannerModeSwitchInput(const FInputActionValue& Value);
 	void HandleAbilityReleasedInput(const FInputActionValue& Value);
+	// 폼건 RMB 조준. 누르면 궤적 프리뷰·조준 자세, 떼면 해제. 폼건이 아니면 무시한다
+	void HandleAimStartedInput(const FInputActionValue& Value);
+	void HandleAimReleasedInput(const FInputActionValue& Value);
+	// 도구 전환·운반 시작 등 입력 밖 경로에서도 조준 상태를 정리한다
+	void EndFoamAiming();
 	void HandleThrowStartedInput(const FInputActionValue& Value);
 	void HandleThrowReleasedInput(const FInputActionValue& Value);
 	void HandleThrowCanceledInput(const FInputActionValue& Value);

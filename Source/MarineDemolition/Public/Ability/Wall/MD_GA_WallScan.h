@@ -20,8 +20,16 @@ public:
 		const FGameplayAbilityActivationInfo ActivationInfo, const FGameplayEventData* TriggerEventData) override;
 	virtual void EndAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo,
 		const FGameplayAbilityActivationInfo ActivationInfo, bool bReplicateEndAbility, bool bWasCancelled) override;
+	// 쿨타임 중에는 활성 자체를 막는다. 예측 클라와 서버가 각자 자기 시계로 판정한다
+	virtual bool CanActivateAbility(const FGameplayAbilitySpecHandle Handle, const FGameplayAbilityActorInfo* ActorInfo,
+		const FGameplayTagContainer* SourceTags = nullptr, const FGameplayTagContainer* TargetTags = nullptr,
+		FGameplayTagContainer* OptionalRelevantTags = nullptr) const override;
 
 protected:
+	// 스캔 시작 후 다음 스캔까지 기다리는 시간. 0이면 쿨타임 없음
+	UPROPERTY(EditDefaultsOnly, Category="Ability|스캔", meta=(ClampMin="0.0", Units="s"))
+	float ScanCooldownSeconds = 3.f;
+
 	UPROPERTY(EditDefaultsOnly, Category="Ability|스캔", meta=(ClampMin="0.0", Units="cm"))
 	float ScanRadius = 1000.f;
 
@@ -61,4 +69,6 @@ private:
 	FPredictionKey PendingKey;
 	uint32 LocalRequestId = 0;
 	bool bWaitingForMode = false;
+	// 마지막으로 스캔을 시작한 월드 시간. 인스턴스별(클라·서버 각각)로 기록한다
+	double LastScanStartedAt = -1.0e9;
 };

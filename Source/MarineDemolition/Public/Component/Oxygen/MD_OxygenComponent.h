@@ -178,7 +178,7 @@ protected:
 	bool bAudioOxygenLow = false;
 	bool bAudioOxygenEmpty = false;
 	float PreviousAudioOxygen = -1.f;
-	double NextLowOxygenWarningTime = 0.;
+	FMD_AudioHandle LowOxygenAudio;
 	FMD_AudioHandle HeartbeatAudio;
 
 	FTimerHandle EvaluationTimerHandle;

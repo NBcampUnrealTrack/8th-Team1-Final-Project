@@ -308,6 +308,16 @@ void AMD_Character::BeginPlay()
 
 void AMD_Character::ConfigureFirstPersonRendering()
 {
+	for (UPrimitiveComponent* ViewMesh : {static_cast<UPrimitiveComponent*>(FirstPersonMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonToolMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonCutterBlade.Get())})
+	{
+		if (IsValid(ViewMesh))
+		{
+			ViewMesh->SetOnlyOwnerSee(true);
+			ViewMesh->SetHiddenInSceneCapture(true);
+		}
+	}
 	if (IsValid(FirstPersonMesh))
 	{
 		FirstPersonMesh->SetReceivesDecals(false);
@@ -363,8 +373,23 @@ void AMD_Character::Tick(float DeltaSeconds)
 	// 로컬 여부를 가리지 않고 모든 클라이언트에서 갱신한다.
 	UpdateCutterBladeSpin(DeltaSeconds);
 
-	// 1인칭 팔과 도구는 해당 캐릭터를 직접 조작하는 로컬 플레이어만 갱신한다.
-	if (IsLocallyControlled() == true)
+	// OnlyOwnerSee also admits cameras owned by this pawn. Explicitly hide the
+	// viewmodel when viewing the body, spectating, or ejecting from PIE.
+	const APlayerController* ViewController = Cast<APlayerController>(GetController());
+	const bool bFirstPersonView = IsLocallyControlled() && IsValid(ViewController)
+		&& ViewController->GetViewTarget() == this && !bLocalThirdPersonViewEnabled;
+	for (UPrimitiveComponent* ViewMesh : {static_cast<UPrimitiveComponent*>(FirstPersonMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonToolMesh.Get()),
+		static_cast<UPrimitiveComponent*>(FirstPersonCutterBlade.Get())})
+	{
+		if (IsValid(ViewMesh)) ViewMesh->SetHiddenInGame(!bFirstPersonView, false);
+	}
+	if (CrowbarArmsBaseRelativeTransform.IsSet() && IsValid(FirstPersonMesh))
+	{
+		FirstPersonMesh->SetRelativeTransform(CrowbarArmsBaseRelativeTransform.GetValue());
+		CrowbarArmsBaseRelativeTransform.Reset();
+	}
+	if (bFirstPersonView)
 	{
 		UpdateFirstPersonArms(DeltaSeconds);
 		UpdateFirstPersonToolTransform(DeltaSeconds);
@@ -925,6 +950,19 @@ void AMD_Character::UpdateFirstPersonToolTransform(const float DeltaSeconds)
 		BodyMesh->GetSocketTransform(AttachSocketName, RTS_Component);
 	const FTransform Offset =
 		GetToolAttachTransform(FirstPersonToolMesh->GetStaticMesh(), CurrentItem);
+	const UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(CurrentItem);
+	const bool bCrowbar = IsValid(Tool)
+		&& Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Crowbar)
+		&& FirstPersonToolMesh->IsVisible() && !FirstPersonToolMesh->bHiddenInGame && IsValid(Camera);
+	if (bCrowbar)
+	{
+		CrowbarArmsBaseRelativeTransform = FirstPersonMesh->GetRelativeTransform();
+		// Copy the actual third-person pose and its frame, without inventing a wrist pose.
+		BindFirstPersonArmsToBodyPose();
+		FirstPersonMesh->SetWorldTransform(BodyMesh->GetComponentTransform());
+		FirstPersonToolMesh->SetWorldTransform(ThirdPersonToolMesh->GetComponentTransform());
+		return;
+	}
 
 	// 부모가 피벗(값이 확정적인 SceneComponent)이므로 월드로 지정해도 역산 기준이
 	// 흔들리지 않는다. 컴포넌트 계층이 어떻게 구성돼 있든 결과가 같도록
@@ -1167,6 +1205,12 @@ void AMD_Character::SetupPlayerInputComponent(UInputComponent* PlayerInputCompon
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Started, this, &AMD_Character::HandleAbilityInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAbilityReleasedInput);
 	EIC->BindAction(InputConfig->AbilityAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAbilityReleasedInput);
+	if (IsValid(InputConfig->AimAction))
+	{
+		EIC->BindAction(InputConfig->AimAction, ETriggerEvent::Started, this, &AMD_Character::HandleAimStartedInput);
+		EIC->BindAction(InputConfig->AimAction, ETriggerEvent::Completed, this, &AMD_Character::HandleAimReleasedInput);
+		EIC->BindAction(InputConfig->AimAction, ETriggerEvent::Canceled, this, &AMD_Character::HandleAimReleasedInput);
+	}
 	EIC->BindAction(InputConfig->SwapEquipmentAction, ETriggerEvent::Triggered, this, &AMD_Character::HandleSwapEquipmentInput);
 	//EIC->BindAction(InputConfig->WallCutAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallCutInput);
 	//EIC->BindAction(InputConfig->WallScanAction, ETriggerEvent::Started, this, &AMD_Character::HandleWallScanInput);
@@ -1404,6 +1448,35 @@ void AMD_Character::HandleAbilityReleasedInput(const FInputActionValue& Value)
 	FGameplayTagContainer AbilityTags;
 	AbilityTags.AddTag(CurrentTool->ToolAbilityTag);
 	ASC->CancelAbilities(&AbilityTags);
+}
+
+void AMD_Character::HandleAimStartedInput(const FInputActionValue& Value)
+{
+	// 폼건: RMB를 누르는 동안 조준 궤적 표시 + 조준 자세. 운반 중에는 조준하지 않는다
+	if (!IsFoamGunEquipped() || (IsValid(InteractionComponent) && InteractionComponent->IsHolding()))
+	{
+		return;
+	}
+
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(true);
+	}
+	SetFoamAiming(true);
+}
+
+void AMD_Character::HandleAimReleasedInput(const FInputActionValue& Value)
+{
+	EndFoamAiming();
+}
+
+void AMD_Character::EndFoamAiming()
+{
+	if (IsValid(FoamGunComponent))
+	{
+		FoamGunComponent->SetAimHeld(false);
+	}
+	SetFoamAiming(false);
 }
 
 void AMD_Character::HandleThrowStartedInput(const FInputActionValue& Value)
@@ -1731,6 +1804,11 @@ void AMD_Character::HandleHotbarChanged()
 	// Charge replication for the same tool must not cancel a newly started throw.
 	// The throw component validates target/slot changes while charging and again on release.
 	RefreshStainInputState();
+	// 폼건에서 다른 도구로 바꾸면 RMB를 누른 채라도 조준을 끝낸다
+	if (!IsFoamGunEquipped())
+	{
+		EndFoamAiming();
+	}
 	RefreshToolMesh();
 
 	// 공통 아이템 상태를 조회할 Hotbar 유효성 검사
@@ -1765,6 +1843,11 @@ void AMD_Character::HandleHeldActorChanged(AActor* HeldActor)
 		return;
 	}
 	CancelScrapeInteraction();
+	// 물건을 드는 순간 폼건 조준도 끝낸다. 운반 중엔 도구를 내리므로 궤적만 남으면 어색하다
+	if (IsValid(HeldActor))
+	{
+		EndFoamAiming();
+	}
 	// 슬롯은 그대로, 표시만 바꾼다. 도구 메시와 톱날을 함께 갱신한다
 	RefreshToolMesh();
 }
