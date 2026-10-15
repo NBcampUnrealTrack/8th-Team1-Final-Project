@@ -29,6 +29,7 @@
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "World/Sample/MD_QuestItem.h"
 #include "World/Trash/MD_TrashSorter.h"
+#include "World/Trash/MD_TrashItem.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Facility/MD_FingerprintInterlock.h"
 #include "World/Facility/MD_FingerprintPad.h"
@@ -1169,7 +1170,12 @@ void UMD_InteractionComponent::UpdateHeldTarget()
 
 	if (ActiveHoldProfile.bConstrainRotation)
 	{
-		PhysicsHandle->SetTargetLocationAndRotation(TargetLocation, HoldTransform.Rotator());
+		FQuat TargetRotation = HoldTransform.GetRotation();
+		if (const AMD_TrashItem* Trash = Cast<AMD_TrashItem>(HeldActor))
+		{
+			TargetRotation *= Trash->GetHoldRotationOffset();
+		}
+		PhysicsHandle->SetTargetLocationAndRotation(TargetLocation, TargetRotation.Rotator());
 	}
 	else
 	{

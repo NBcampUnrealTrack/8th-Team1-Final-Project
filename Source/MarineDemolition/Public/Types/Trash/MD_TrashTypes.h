@@ -167,6 +167,10 @@ struct MARINEDEMOLITION_API FMD_TrashKindRow : public FTableRowBase
 		meta = (ClampMin = "0.01", UIMin = "0.05", Units = "kg"))
 	float MassKg = 1.0f;
 
+	/** 운반 기준점의 로컬 축에 적용할 회전. 바닥에 놓인 메시 방향은 바꾸지 않는다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash")
+	FRotator HoldRotationOffset = FRotator::ZeroRotator;
+
 	/** 최소 한 개의 이름별 메시를 지정한다. 첫 항목이 기본 Variant다. 새 행은 Default 하나로 시작한다. */
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash", meta = (TitleProperty = "VariantId"))
 	TArray<FMD_TrashMeshVariant> MeshVariants;

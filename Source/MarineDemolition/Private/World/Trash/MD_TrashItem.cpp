@@ -268,6 +268,8 @@ void AMD_TrashItem::ApplyTrashKindRow()
 			bValidVariant = KindRow.ResolveMesh(TrashVariantId, MeshReference);
 			MassKg = KindRow.ResolveMassKg(TrashVariantId);
 			Category = KindRow.Category;
+			AppliedHoldRotationOffset = KindRow.HoldRotationOffset.ContainsNaN()
+				? FQuat::Identity : KindRow.HoldRotationOffset.Quaternion();
 		});
 		UStaticMesh* KindMesh = nullptr;
 		if (bValidVariant && !MeshReference.IsNull())

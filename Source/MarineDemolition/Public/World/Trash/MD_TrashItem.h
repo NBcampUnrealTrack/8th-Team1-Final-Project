@@ -47,6 +47,8 @@ public:
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	FName GetTrashKindId() const { return TrashKindId; }
 
+	FQuat GetHoldRotationOffset() const { return AppliedHoldRotationOffset; }
+
 	/** 동적 스폰 전에 종류를 지정한다. 서버에서 바꾼 값은 클라이언트에도 복제된다. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Trash")
 	void SetTrashKindId(FName NewTrashKindId);
@@ -146,6 +148,7 @@ private:
 	FName AppliedTrashKindId = NAME_None;
 	FName AppliedTrashVariantId;
 	FGameplayTag AppliedCategory;
+	FQuat AppliedHoldRotationOffset = FQuat::Identity;
 	bool bHasAppliedTrashKind = false;
 
 	/** Runtime origin; the generator's named ledger is persisted instead of item transforms. */
