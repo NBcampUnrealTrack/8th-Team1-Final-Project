@@ -59,6 +59,7 @@ void AMD_FingerprintInterlock::BeginPlay()
 	Super::BeginPlay();
 	Fault->OnStateChanged.AddUniqueDynamic(this, &ThisClass::HandleFault);
 	RefreshFaultHighlight();
+	RefreshFaultAlarm();
 	if (HasAuthority())
 	{
 		if (IsActive()) HandleFault(Fault, FMD_FacilitySnapshot(), Fault->GetSnapshot());
@@ -71,6 +72,7 @@ void AMD_FingerprintInterlock::EndPlay(const EEndPlayReason::Type Reason)
 	GetWorldTimerManager().ClearTimer(FaultTimer);
 	Fault->OnStateChanged.RemoveDynamic(this, &ThisClass::HandleFault);
 	FaultHighlight->bEnabled = false;
+	MDAudioFeedback::Stop(this, FaultAlarmAudio, 0.f);
 	if (HasAuthority()) { ResetScans(); SetSorterLocks(false); }
 	Super::EndPlay(Reason);
 }
@@ -82,6 +84,20 @@ void AMD_FingerprintInterlock::RefreshFaultHighlight()
 	// Driven by the replicated fault snapshot, including late joiners; no extra RPC.
 	FaultHighlight->bUnbound = true;
 	FaultHighlight->bEnabled = GetNetMode() != NM_DedicatedServer && IsActive();
+}
+
+void AMD_FingerprintInterlock::RefreshFaultAlarm()
+{
+	// Every peer follows the replicated incident, including clients joining mid-fault.
+	// 2D playback has no position/range limit and never runs on a dedicated server.
+	if (GetNetMode() == NM_DedicatedServer || !IsActive())
+	{
+		MDAudioFeedback::Stop(this, FaultAlarmAudio, 0.f);
+	}
+	else if (!FaultAlarmAudio.IsValid())
+	{
+		FaultAlarmAudio = MDAudioFeedback::UI(this, TEXT("SFX.Facility.Fingerprint.AlarmLoop"));
+	}
 }
 
 bool AMD_FingerprintInterlock::HasValidConfiguration() const
@@ -168,6 +184,7 @@ void AMD_FingerprintInterlock::HandleFault(UMD_FacilityFaultComponent*, const FM
 	const FMD_FacilitySnapshot& Current)
 {
 	RefreshFaultHighlight();
+	RefreshFaultAlarm();
 	if (!HasAuthority() || Previous.IsFaultActive() == Current.IsFaultActive()) return;
 	ResetScans();
 	if (Current.IsFaultActive())
@@ -243,13 +260,16 @@ void AMD_FingerprintInterlock::ApplyElapsedCharges()
 	if (Seconds <= 0) return;
 	LastChargeTime += double(Seconds);
 	if (LossPerSecond <= 0 || !GetGameInstance()) return;
-	if (auto* Merchant = GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>())
+	// 지문 비용의 최종 정산 여부를 제공하는 기존 경제 원장 조회
+	auto* Merchant = GetGameInstance()->GetSubsystem<UMD_MerchantSubsystem>();
+	// 최종 보고서 확정 이후 지갑과 지문 손실 누계의 추가 차감 방지
+	if (IsValid(Merchant) == true && Merchant->IsCreditHistoryFinished() == false)
 	{
 		const int32 Charge = int32(FMath::Min<int64>(MAX_int32, Seconds * LossPerSecond));
 		// 거래 대기 중에도 실제 적용액을 받을 사건 소유자 약한 참조
 		TWeakObjectPtr<AMD_FingerprintInterlock> WeakThis(this);
-		// 다른 거래 알림에서 요청된 비용도 실제 반영 시점에 손실 누계 갱신
-		Merchant->AddCredits(EMD_DailyReportCategory::Accident, -Charge, nullptr, [WeakThis](int32 AppliedAmount)
+		// 시스템 비용으로 기록하고 실제 반영 시점에 지문 손실 누계 갱신
+		Merchant->AddCredits(-Charge, nullptr, [WeakThis](int32 AppliedAmount)
 		{
 			// 대기 거래 처리 전에 종료된 사건 소유자 접근 차단
 			if (WeakThis.IsValid() == false)
@@ -268,6 +288,7 @@ void AMD_FingerprintInterlock::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	RefreshFaultHighlight();
+	RefreshFaultAlarm();
 	if (!HasAuthority() || !IsActive()) return;
 	if (!HasValidConfiguration())
 	{

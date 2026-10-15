@@ -303,8 +303,8 @@ void UMD_AudioSubsystem::RestoreWorldAudioSettings()
 			CurrentMusicVolume = AudioCategory->Settings.MusicVolume;
 			// 효과음의 저장 음량 복원
 			CurrentEffectsVolume = AudioCategory->Settings.EffectsVolume;
-			// 새 월드의 실제 출력 장치와 온라인 입력 캡처에 확정된 선택 복원
-			AudioCategory->RefreshAudioDevices();
+			// 새 월드의 장치 변경 차단 해제와 온라인 입력 캡처 선택 복원
+			AudioCategory->RestoreWorldInputDevice();
 		}
 	}
 

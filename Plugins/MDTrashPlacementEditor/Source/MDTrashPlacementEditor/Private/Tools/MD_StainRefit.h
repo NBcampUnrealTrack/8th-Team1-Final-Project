@@ -20,8 +20,11 @@ public:
 	static void Shutdown();
 	virtual ~FMD_StainRefit() override;
 	bool Start(AMD_SurfaceStain* Stain);
+	/** Apply a draft size only after a successful fit. Details requests may follow actor selection. */
+	bool Start(AMD_SurfaceStain* Stain, int32 TargetSize, bool bFollowSelection = false);
 	void Cancel();
 	bool IsRunning() const { return Bake.IsValid(); }
+	bool IsRunningFor(const AMD_SurfaceStain* Stain) const;
 	FText GetStatus() const { return Status; }
 	virtual void Tick(float DeltaTime) override;
 	virtual bool IsTickable() const override { return IsRunning(); }
@@ -40,8 +43,9 @@ private:
 	TSharedPtr<FMD_StainStickerAsyncBake> Bake;
 	TWeakPtr<SNotificationItem> Notification;
 	FTransform OriginalTransform, ContactTransform;
-	int32 Size = 0;
+	int32 Size = 0, OriginalSize = 0;
 	uint32 SourceRevision = 0;
 	bool bCancelling = false;
+	bool bFollowSelection = false;
 	FText Status;
 };

@@ -106,10 +106,41 @@ bool FMD_TrashKindRow::ResolveMesh(FName VariantId, TSoftObjectPtr<UStaticMesh>&
 	return true;
 }
 
+float FMD_TrashKindRow::ResolveMassKg(FName VariantId) const
+{
+	const float DefaultMassKg = FMath::IsFinite(MassKg) && MassKg >= 0.01f ? MassKg : 1.0f;
+	if (VariantId.IsNone())
+	{
+		if (MeshVariants.IsEmpty() || MeshVariants[0].VariantId.IsNone()) return DefaultMassKg;
+		VariantId = MeshVariants[0].VariantId;
+	}
+
+	const FMD_TrashMeshVariant* Match = nullptr;
+	for (const FMD_TrashMeshVariant& Variant : MeshVariants)
+	{
+		if (Variant.VariantId == VariantId)
+		{
+			if (Match) return DefaultMassKg;
+			Match = &Variant;
+		}
+	}
+	if (!Match || Match->Mesh.IsNull() || !FMath::IsFinite(Match->MassKgOverride)
+		|| Match->MassKgOverride <= 0.0f)
+	{
+		return DefaultMassKg;
+	}
+	return FMath::Max(Match->MassKgOverride, 0.01f);
+}
+
 #if WITH_EDITOR
 EDataValidationResult FMD_TrashKindRow::IsDataValid(FDataValidationContext& Context) const
 {
 	EDataValidationResult Result = EDataValidationResult::Valid;
+	if (!FMath::IsFinite(MassKg) || MassKg < 0.01f)
+	{
+		Context.AddError(NSLOCTEXT("MDTrash", "InvalidKindMass", "Kind mass must be finite and at least 0.01 kg."));
+		Result = EDataValidationResult::Invalid;
+	}
 	if (MeshVariants.IsEmpty())
 	{
 		Context.AddError(NSLOCTEXT("MDTrash", "MissingDefaultVariant", "At least one mesh Variant is required."));
@@ -122,6 +153,13 @@ EDataValidationResult FMD_TrashKindRow::IsDataValid(FDataValidationContext& Cont
 		{
 			Context.AddError(FText::Format(
 				NSLOCTEXT("MDTrash", "InvalidMeshVariant", "Variant '{0}' requires a unique non-None name and a mesh."),
+				FText::FromName(Variant.VariantId)));
+			Result = EDataValidationResult::Invalid;
+		}
+		if (!FMath::IsFinite(Variant.MassKgOverride) || Variant.MassKgOverride < 0.0f)
+		{
+			Context.AddError(FText::Format(
+				NSLOCTEXT("MDTrash", "InvalidVariantMass", "Variant '{0}' mass override must be finite and non-negative; 0 inherits the kind mass."),
 				FText::FromName(Variant.VariantId)));
 			Result = EDataValidationResult::Invalid;
 		}

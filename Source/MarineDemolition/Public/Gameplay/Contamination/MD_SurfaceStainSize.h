@@ -9,12 +9,13 @@ struct MARINEDEMOLITION_API FMD_SurfaceStainSize
 	static constexpr int32 Minimum = 100;
 	// Existing level actors and saves retain the original accepted range.
 	static constexpr int32 Maximum = 10000;
-	static constexpr int32 MaximumPlacement = 5000;
+	static constexpr int32 MaximumPlacement = Maximum;
 	static constexpr int32 Reference = 300;
 	// Legacy stage migration must remain 100 units per old stage.
 	static constexpr int32 DefaultRemoval = 100;
 	static constexpr int32 DefaultToolStrength = 100;
-	static constexpr int32 DefaultStrokeRemoval = MaximumPlacement / 5;
+	// Authoring a larger stain must not change existing cleaning-tool strength.
+	static constexpr int32 DefaultStrokeRemoval = 1000;
 
 	static bool IsValidRemaining(int32 Size) { return Size >= 0 && Size <= Maximum; }
 	static int32 ClampInitial(int32 Size) { return FMath::Clamp(Size, Minimum, Maximum); }

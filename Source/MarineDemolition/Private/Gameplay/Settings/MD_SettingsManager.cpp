@@ -31,6 +31,15 @@ void UMD_SettingsManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UMD_SettingsManager::Deinitialize()
 {
+	// 소유 카테고리 참조 해제 전에 비동기 오디오 작업의 종료 요청
+	UMD_AudioSettingCategory* AudioCategory = GetAudioSettings();
+	// 생성된 오디오 카테고리의 월드 이벤트와 장치 요청 정리
+	if (IsValid(AudioCategory) == true)
+	{
+		// GameInstance 종료 이후의 플랫폼 장치 변경 차단
+		AudioCategory->ShutdownAudioDevices();
+	}
+
 	// 매니저가 소유한 저장 이벤트의 모든 카테고리 구독을 해제한다.
 	OnSaveRequested.Clear();
 	// 관리 중인 설정 인스턴스 참조를 비운다.

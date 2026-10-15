@@ -52,8 +52,8 @@ void UMD_MerchantSubsystem::FlushPendingCreditChanges()
         {
             // 다른 대기 거래와 구분할 개별 금액 적용 전 잔액 보관
             int32 CreditsBeforeChange = Credits;
-            // 개별 보상의 상한과 하한 및 분류별 원장 규칙 유지
-            AddCreditsInternal(CreditChange.Category, CreditChange.Amount, CreditChange.ResponsiblePlayer.Get());
+            // 개별 금액의 상하한과 책임 플레이어별 시간순 기록 유지
+            AddCreditsInternal(CreditChange.Amount, CreditChange.ResponsiblePlayer.Get());
             // 실제 반영액을 요청한 거래에만 완료 결과 전달
             if (static_cast<bool>(CreditChange.AppliedAmountCallback) == true)
             {
@@ -72,6 +72,24 @@ void UMD_MerchantSubsystem::FlushPendingCreditChanges()
         // 새로 발생한 독립 보상을 잃지 않는 다음 틱 단일 예약
         PendingCreditFlushTimerHandle = World->GetTimerManager().SetTimerForNextTick(this, &ThisClass::FlushPendingCreditChanges);
     }
+    // 다음 틱 예약으로 들어온 배치가 음수를 만들었을 때도 종료 방송이 빠지지 않게 한다
+    NotifyBankruptcyIfPending();
+}
+
+void UMD_MerchantSubsystem::NotifyBankruptcyIfPending()
+{
+    // 거래 가드 안이거나 계약이 이미 끝났으면 방송하지 않는다. 플래그는 계약 종료 시 함께 비운다
+    if (bBankruptcyPending == false || bShopTransactionInProgress == true || HasServerAuthority() == false)
+    {
+        return;
+    }
+    bBankruptcyPending = false;
+    if (IsValid(CurrentSite) == false)
+    {
+        return;
+    }
+    UE_LOG(LogTemp, Warning, TEXT("[Merchant] 팀 잔액 음수 진입 — 계약 즉시 종료"));
+    OnBankrupt.Broadcast();
 }
 
 double UMD_MerchantSubsystem::GetCreditHistoryElapsedSeconds()
@@ -271,22 +289,7 @@ void UMD_MerchantSubsystem::BuildCreditHistory(FMD_InspectionReport& Report)
     }
 }
 
-TArray<FMD_DailyReportValue> UMD_MerchantSubsystem::GetDailyCreditTotals() const
-{
-	// 서버 Map을 RPC와 복제가 지원하는 항목 배열로 변환
-	TArray<FMD_DailyReportValue> OutCreditTotals;
-	OutCreditTotals.Reserve(DailyCreditTotals.Num());
-	for (const TPair<EMD_DailyReportCategory, int64>& CreditEntry : DailyCreditTotals)
-	{
-		int32 CreditValue = static_cast<int32>(FMath::Clamp<int64>(CreditEntry.Value, MIN_int32, MAX_int32));
-		OutCreditTotals.Add({CreditEntry.Key, CreditValue});
-	}
-
-	return OutCreditTotals;
-}
-
-void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer,
-	TFunction<void(int32)> AppliedAmountCallback)
+void UMD_MerchantSubsystem::AddCredits(int32 Amount, APlayerState* ResponsiblePlayer, TFunction<void(int32)> AppliedAmountCallback)
 {
 	// 클라이언트와 게임 월드 외 변경 및 실제 금액 없는 알림 차단
 	if (HasServerAuthority() == false || Amount == 0)
@@ -297,10 +300,8 @@ void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 A
 	// 진행 중인 결제와 분류 환급을 섞지 않는 독립 보상 보관
 	if (bShopTransactionInProgress == true)
 	{
-		// 이번 보상에 필요한 분류와 책임자 문맥 준비
+		// 이번 변동의 금액과 책임자 문맥 준비
 		FPendingCreditChange CreditChange;
-		// 실제 보상 원인 보관
-		CreditChange.Category = Category;
 		// 결제 확정 후 반영할 실제 요청액 보관
 		CreditChange.Amount = Amount;
 		// 퇴장 이후 유효하지 않은 책임자 접근을 막는 약한 연결 보관
@@ -317,13 +318,15 @@ void UMD_MerchantSubsystem::AddCredits(EMD_DailyReportCategory Category, int32 A
 	{
 		// 현재 변경과 알림에서 발생한 독립 보상 반영
 		FlushPendingCreditChanges();
+		// 가드가 풀린 뒤에 방송해야 GameMode의 FinalizeContract가 거래 중으로 막히지 않는다
+		NotifyBankruptcyIfPending();
 	};
 	// 원장 확정과 알림 사이에 추가 거래가 끼어드는 상황 차단
 	TGuardValue<bool> TransactionGuard(bShopTransactionInProgress, true);
 	// 다른 재진입 거래와 구분할 현재 금액 적용 전 잔액 보관
 	int32 CreditsBeforeChange = Credits;
-	// 모든 외부 크레딧 변경을 단일 Enum 기반 기록 경로로 처리
-	AddCreditsInternal(Category, Amount, ResponsiblePlayer);
+	// 모든 외부 크레딧 변경을 개인 또는 시스템의 시간순 기록 경로로 처리
+	AddCreditsInternal(Amount, ResponsiblePlayer);
 	// 실제 반영액을 요청한 거래에만 완료 결과 전달
 	if (static_cast<bool>(AppliedAmountCallback) == true)
 	{
@@ -400,10 +403,8 @@ EMD_ShopPurchaseResult UMD_MerchantSubsystem::TryPurchaseShopItem(AMD_PlayerStat
 		return EMD_ShopPurchaseResult::InvalidRequest;
 	}
 
-	// 지급 성공이 보장된 같은 프레임에 결제와 팀 구매 원장을 확정하는 원자적 처리
-	// 상점 구매 비용을 기타 정산 분류로 기록
-	// 구매자의 실제 결제 금액과 개인별 발생 시각 기록
-	AddCreditsInternal(EMD_DailyReportCategory::Other, -PurchasePrice, PurchasingPlayerState);
+	// 지급 성공이 확정된 구매자의 실제 결제 금액과 개인별 발생 시각 기록
+	AddCreditsInternal(-PurchasePrice, PurchasingPlayerState);
 	// 정의의 전체 AssetId를 사용하여 타입이 다른 구매 이력 구분
 	int32& PurchasedCount = PurchasedItemAssetCounts.FindOrAdd(ItemAssetId);
 	PurchasedCount += 1;
@@ -523,9 +524,8 @@ EMD_ShopSaleResult UMD_MerchantSubsystem::TrySellShopItem(AMD_PlayerState* Selli
 		// 실제 회수 실패 시 대금 지급 차단
 		return EMD_ShopSaleResult::InvalidRequest;
 	}
-	// 회수 성공 이후 기존 정산 분류로 대금 적립
-	// 판매자의 실제 수령 금액과 개인별 발생 시각 기록
-	AddCreditsInternal(EMD_DailyReportCategory::Other, static_cast<int32>(TotalPrice), SellingPlayerState);
+	// 회수 성공이 확정된 판매자의 실제 수령 금액과 개인별 발생 시각 기록
+	AddCreditsInternal(static_cast<int32>(TotalPrice), SellingPlayerState);
 	// 도구를 실제로 회수하고 대금을 확정한 뒤 업그레이드 이력 초기화
 	if (IsValid(SoldTool) == true)
 	{
@@ -609,10 +609,8 @@ bool UMD_MerchantSubsystem::TryBorrowCredits(int32 Amount, APlayerState* Respons
 		return false;
 	}
 
-	// 대출 실행
-	// 대출 수령액을 기타 정산 분류로 기록
 	// 대출 요청자의 실제 현금 수령 이력 기록
-	AddCreditsInternal(EMD_DailyReportCategory::Other, Amount, ResponsiblePlayer);
+	AddCreditsInternal(Amount, ResponsiblePlayer);
 	DebtBalance += Amount;
 	// 추가 대출은 고정 이자의 기준 원금에 합산
 	LoanPrincipal = FMath::Min(LoanPrincipal, MAX_int32 - Amount) + Amount;
@@ -646,10 +644,8 @@ bool UMD_MerchantSubsystem::TryRepayLoan(int32 Amount, APlayerState* Responsible
 		return false;
 	}
 
-	// 빚 상환 실행
-	// 대출 상환액을 기타 정산 분류로 기록
 	// 상환 요청자의 실제 현금 차감 이력 기록
-	AddCreditsInternal(EMD_DailyReportCategory::Other, -Amount, ResponsiblePlayer);
+	AddCreditsInternal(-Amount, ResponsiblePlayer);
 	DebtBalance -= Amount;
 	// 완납 시 이자 종료. 다음 대출은 새 원금으로 시작
 	if (DebtBalance <= 0)
@@ -736,6 +732,8 @@ void UMD_MerchantSubsystem::FinalizeContract()
     // 원장을 보존한 채 계약 종료 시각 고정
     FinishCreditHistory();
 	CurrentSite = nullptr;
+	// 종료된 계약의 파산 예약은 다음 계약으로 넘기지 않는다
+	bBankruptcyPending = false;
 
 	UE_LOG(LogTemp, Log, TEXT("[Merchant] 계약 종료"));
 
@@ -743,14 +741,14 @@ void UMD_MerchantSubsystem::FinalizeContract()
 }
 
 
-void UMD_MerchantSubsystem::AddCreditsInternal(EMD_DailyReportCategory Category, int32 Amount, APlayerState* ResponsiblePlayer)
+void UMD_MerchantSubsystem::AddCreditsInternal(int32 Amount, APlayerState* ResponsiblePlayer)
 {
 	if (Amount == 0)
 	{
 		return;
 	}
 
-	// 실제 잔액 반영액만 Map 원장에 기록하기 위한 변경 전 잔액 저장
+	// 실제 잔액 반영액만 시간순 원장에 기록하기 위한 변경 전 잔액 저장
 	int32 CreditsBeforeChange = Credits;
 
 	// int32 범위 안에서 여러 보상의 합산 상한과 차감 하한을 지키기 위한 원장 보호
@@ -760,17 +758,20 @@ void UMD_MerchantSubsystem::AddCreditsInternal(EMD_DailyReportCategory Category,
 	}
 	else if (Amount < 0 && Amount < -Credits)
 	{
+		// 잔액 이상의 차감 = 음수 진입. 원장은 0에서 멈추되 계약 즉시 종료를 예약한다
 		Credits = 0;
+		if (IsValid(CurrentSite) == true)
+		{
+			bBankruptcyPending = true;
+		}
 	}
 	else
 	{
 		Credits += Amount;
 	}
 
-	// 요청액이 아닌 실제 잔액 변동을 Enum 분류의 Map 합계에 누적
+	// 잔액 상하한 적용 후 실제 반영된 증감액 계산
 	int32 AppliedAmount = Credits - CreditsBeforeChange;
-	int64& CategoryTotal = DailyCreditTotals.FindOrAdd(Category);
-	CategoryTotal += AppliedAmount;
     // 실제 거래가 없는 요청과 종료된 계약의 원시 로그 추가 방지
     if (AppliedAmount == 0 || IsValid(CurrentSite) == false || CreditHistoryEndSeconds >= 0.0)
     {
@@ -783,14 +784,12 @@ void UMD_MerchantSubsystem::AddCreditsInternal(EMD_DailyReportCategory Category,
     {
         return;
     }
-    // 승인된 실제 거래 시각과 책임 플레이어 및 분류를 하나의 로그로 구성
+    // 승인된 실제 거래 시각과 책임 플레이어 및 금액을 하나의 로그로 구성
     FMD_CreditLogEntry Entry;
     // 같은 프레임 내 거래도 발생 순서대로 보존
     Entry.ElapsedSeconds = GetCreditHistoryElapsedSeconds();
-    // 책임 플레이어가 없는 금액은 팀 공용 인덱스로 기록
+    // 책임 플레이어가 없는 시설 비용과 공용 보상은 시스템 인덱스로 기록
     Entry.PlayerIndex = RegisterCreditPlayer(ResponsiblePlayer);
-    // 기존 분류별 원장과 같은 거래 원인 유지
-    Entry.Category = Category;
     // 잔액 상한과 하한을 적용한 뒤의 실제 금액만 저장
     Entry.Amount = AppliedAmount;
     // 여섯 점으로 축약하기 이전의 모든 거래 보존
@@ -905,9 +904,8 @@ void UMD_MerchantSubsystem::BeginContract(UMD_SiteDefinition* Site, int32 BaseAd
 	int32 ValidBaseAdvancePayment = FMath::Max(BaseAdvancePayment, 0);
 	// 지급액과 부채를 같은 금액으로 기록하도록 두 원장의 잔여 범위 안에서 착수금 확정
 	int32 GrantedAdvancePayment = FMath::Min(ValidBaseAdvancePayment, FMath::Min(MAX_int32 - Credits, MAX_int32 - DebtBalance));
-	// 새 계약의 Enum Map 원장을 초기화한 뒤 실제 착수금을 기록
-	DailyCreditTotals.Reset();
-	AddCreditsInternal(EMD_DailyReportCategory::Retainer, GrantedAdvancePayment);
+	// 새 계약의 실제 착수금을 개인에게 귀속되지 않는 시스템 금액으로 기록
+	AddCreditsInternal(GrantedAdvancePayment);
 	// 착수금은 대출이므로 실제 수령액을 기존 미상환 부채에 합산
 	DebtBalance += GrantedAdvancePayment;
 	// 착수금은 고정 이자의 기준 원금에도 합산

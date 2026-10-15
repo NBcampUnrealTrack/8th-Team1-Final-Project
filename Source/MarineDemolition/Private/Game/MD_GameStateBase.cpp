@@ -291,7 +291,6 @@ void AMD_GameStateBase::RefreshDailyLedger()
     Report.SiteName = DailyLedger.SiteName;
     // 분류별 점수 원장 조회
     Report.DailyScoreTotals = GetDailyScoreTotals();
-    Report.DailyCreditTotals.Reset();
     // 현재 월드의 서버 상인 원장 조회
     UGameInstance* GameInstance = GetGameInstance();
     if (IsValid(GameInstance) == true)
@@ -300,7 +299,6 @@ void AMD_GameStateBase::RefreshDailyLedger()
         // 계약 종료 후 보존된 기록도 보고서 표시 시점과 무관하게 반영
         if (IsValid(Merchant) == true)
         {
-            Report.DailyCreditTotals = Merchant->GetDailyCreditTotals();
             Report.Credits = Merchant->GetCredits();
             // 같은 서버 원장의 네 개인 슬롯과 여섯 시점 및 공용 금액 반영
             Merchant->BuildCreditHistory(Report);

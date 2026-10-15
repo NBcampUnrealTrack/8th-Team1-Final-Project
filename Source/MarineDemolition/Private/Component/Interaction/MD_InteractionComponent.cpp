@@ -1,4 +1,5 @@
 #include "Component/Interaction/MD_InteractionComponent.h"
+#include "World/Transport/MD_Cart.h"
 #include "Audio/MD_GameplayAudioFeedback.h"
 
 #include "AbilitySystemComponent.h"
@@ -19,6 +20,7 @@
 #include "GameFramework/Controller.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
+#include "GameFramework/PawnMovementComponent.h"
 #include "GameFramework/PlayerState.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Gameplay/Interaction/MD_Interactable.h"
@@ -30,6 +32,7 @@
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "World/Sample/MD_QuestItem.h"
 #include "World/Trash/MD_TrashSorter.h"
+#include "World/Trash/MD_TrashItem.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Facility/MD_FingerprintInterlock.h"
 #include "World/Facility/MD_FingerprintPad.h"
@@ -151,6 +154,7 @@ static void AddActorAndAttachmentsToInteractionQuery(
 UMD_InteractionComponent::UMD_InteractionComponent()
 {
 	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickGroup = TG_PrePhysics;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
 	SetIsReplicatedByDefault(true);
 
@@ -394,6 +398,21 @@ void UMD_InteractionComponent::SetCurrentInteractionPrompt(
 void UMD_InteractionComponent::BeginPlay()
 {
 	Super::BeginPlay();
+
+	// BP에 저장된 틱 설정도 보정해 이동 후의 목표를 같은 프레임의 물리에 전달한다.
+	SetTickGroup(TG_PrePhysics);
+	if (APawn* Pawn = GetOwnerPawn())
+	{
+		if (UPawnMovementComponent* Movement = Pawn->GetMovementComponent())
+		{
+			AddTickPrerequisiteComponent(Movement);
+		}
+	}
+	if (IsValid(PhysicsHandle))
+	{
+		PhysicsHandle->AddTickPrerequisiteComponent(this);
+	}
+
 	CaptureDefaultHoldProfile();
 	RefreshTickEnabled();
 }
@@ -1145,6 +1164,36 @@ FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& Ho
 
 	const FVector ToDesired = Desired - Origin;
 	const double DesiredDistance = ToDesired.Size();
+	if (bBlocked && DesiredDistance > UE_KINDA_SMALL_NUMBER && Cast<AMD_Cart>(Hit.GetActor()))
+	{
+		// A long object's bounding sphere may already overlap the tray at the camera,
+		// even though the object itself fits. Sweep its oriented bounds from a clear
+		// point instead of allowing the carry spring to drive through the cart.
+		const FBoxSphereBounds LocalBounds = Held->CalcBounds(FTransform::Identity);
+		const FVector Scale = Held->GetComponentScale();
+		const FVector HalfExtent = (LocalBounds.BoxExtent * Scale.GetAbs() * HoldProbeRadiusScale).ComponentMax(FVector(HoldProbeMinRadius));
+		FQuat Rotation = ActiveHoldProfile.bConstrainRotation ? HoldTransform.GetRotation() : Held->GetComponentQuat();
+		if (ActiveHoldProfile.bConstrainRotation)
+		{
+			if (const AMD_TrashItem* Trash = Cast<AMD_TrashItem>(Held->GetOwner()))
+			{
+				Rotation *= Trash->GetHoldRotationOffset();
+			}
+		}
+		const FVector GrabOffset = Held->GetComponentTransform().InverseTransformPositionNoScale(Held->GetCenterOfMass());
+		const FVector CenterOffset = Rotation.RotateVector(LocalBounds.Origin * Scale - GrabOffset);
+		const FVector Direction = ToDesired / DesiredDistance;
+		const double Backoff = HalfExtent.Size() + HoldProbeMinRadius;
+		FHitResult ShapeHit;
+		if (World->SweepSingleByChannel(ShapeHit, Origin - Direction * Backoff + CenterOffset, Desired + CenterOffset,
+			Rotation, Held->GetCollisionObjectType(), FCollisionShape::MakeBox(HalfExtent), QueryParams, ProbeResponses)
+			&& !ShapeHit.bStartPenetrating && Cast<AMD_Cart>(ShapeHit.GetActor()))
+		{
+			// A close contact takes precedence over HoldMinDistance; enforcing that
+			// minimum would put the leading end of a long item below the tray again.
+			return Origin + Direction * FMath::Min(DesiredDistance, ShapeHit.Distance - Backoff - 1.0);
+		}
+	}
 
 	// 시작 지점이 이미 묻혀 있으면 Distance가 0이라 물체가 얼굴로 끌려온다. 기존 동작을 유지한다.
 	if (!bBlocked || Hit.bStartPenetrating || DesiredDistance <= UE_KINDA_SMALL_NUMBER)
@@ -1188,7 +1237,12 @@ void UMD_InteractionComponent::UpdateHeldTarget()
 
 	if (ActiveHoldProfile.bConstrainRotation)
 	{
-		PhysicsHandle->SetTargetLocationAndRotation(TargetLocation, HoldTransform.Rotator());
+		FQuat TargetRotation = HoldTransform.GetRotation();
+		if (const AMD_TrashItem* Trash = Cast<AMD_TrashItem>(HeldActor))
+		{
+			TargetRotation *= Trash->GetHoldRotationOffset();
+		}
+		PhysicsHandle->SetTargetLocationAndRotation(TargetLocation, TargetRotation.Rotator());
 	}
 	else
 	{

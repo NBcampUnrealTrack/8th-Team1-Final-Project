@@ -13,6 +13,8 @@
 AMD_PowerConduit::AMD_PowerConduit()
 {
 	FacilityRepair->Kind = EMD_FacilityKind::WiringPanel;
+	// 독립 전선 고장에 대한 공통 비용 활성화
+	FacilityRepair->bFaultCostEnabled = true;
 	FacilityRepair->bAllowManualRepair = false;
 	FacilityRepair->bAllowInsulationTape = true;
 	RequiredRepairToolTag = MDGameplayTags::Ability_UtilityRepair_Insulation;

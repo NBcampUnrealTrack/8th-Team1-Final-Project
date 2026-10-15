@@ -65,6 +65,10 @@ public:
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Visual")
 	TObjectPtr<UStaticMesh> ToolMesh;
 
+	/** Mass of one dropped item. Zero preserves the pickup actor's fallback mass. */
+	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Physics", meta = (ClampMin = "0.0", Units = "kg"))
+	float WorldMassKg = 0.0f;
+
 	// 아이템 메시를 부착할 소켓이며 미지정 시 캐릭터 기본 소켓 사용
 	UPROPERTY(EditDefaultsOnly, BlueprintReadOnly, Category = "Item|Visual")
 	FName AttachSocketName;

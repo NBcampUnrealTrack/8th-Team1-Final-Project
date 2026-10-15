@@ -46,6 +46,8 @@ AMD_TrashSorter::AMD_TrashSorter()
 	FacilityRepair = CreateDefaultSubobject<UMD_FacilityRepairComponent>(TEXT("FacilityRepair"));
 	FacilityRepair->Kind = EMD_FacilityKind::TrashSorter;
 	FacilityRepair->bRandomFaultEligible = true;
+	// 수거기 자체 고장에 대한 공통 비용 활성화
+	FacilityRepair->bFaultCostEnabled = true;
 	FacilityRepair->bAllowInsulationTape = true;
 	SorterStateTree = CreateDefaultSubobject<UStateTreeComponent>(TEXT("SorterStateTree"));
 	SorterStateTree->SetStartLogicAutomatically(false);
@@ -351,7 +353,7 @@ bool AMD_TrashSorter::BeginPendingSort()
 		// 분류를 실제로 요청한 Pawn의 플레이어에게 환급 이력 귀속
 		APawn* SortingPawn = Cast<APawn>(Interactor);
 		// 자동 처리 등 요청자가 없는 경우에는 팀 공용 환급으로 기록
-		Merchant->AddCredits(EMD_DailyReportCategory::Categorizing, RefundCredits, IsValid(SortingPawn) == true ? SortingPawn->GetPlayerState() : nullptr);
+		Merchant->AddCredits(RefundCredits, IsValid(SortingPawn) == true ? SortingPawn->GetPlayerState() : nullptr);
 	}
 
 	ForceNetUpdate();

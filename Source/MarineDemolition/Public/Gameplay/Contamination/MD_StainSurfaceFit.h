@@ -14,6 +14,18 @@ class MARINEDEMOLITION_API FMD_StainSurfaceFit
 {
 public:
 #if WITH_EDITOR
+	/** Full-stage intrinsic spans at size 300, cached by original asset and authoring revision. */
+	static bool GetSourceDimensions(const UMD_SurfaceStainDefinition& Source, FVector& OutDimensions);
+	/** Read existing sizes through 10000 without changing their stored cleaning budget. */
+	static bool GetSizeDimensions(const UMD_SurfaceStainDefinition& Source, int32 Size,
+		FVector& OutDimensions, bool bFollowSurface = true);
+	/** New-placement width limits, including the original profile's limits when surface fitting is off. */
+	static bool GetAllowedWidthRange(const UMD_SurfaceStainDefinition& Source, bool bFollowSurface,
+		FVector2D& OutAllowedWidth, FString& Error);
+	/** Convert an in-range intrinsic width to the existing integer budget; never silently clamp input. */
+	static bool ResolveWidth(const UMD_SurfaceStainDefinition& Source, double RequestedWidthCm,
+		bool bFollowSurface, int32& OutSize, FVector& OutAppliedDimensions,
+		FVector2D& OutAllowedWidth, FString& Error);
 	static TSharedPtr<FMD_StainSurfaceFitJob, ESPMode::ThreadSafe> Capture(const UMD_SurfaceStainDefinition& Source);
 	static bool Prepare(FMD_StainSurfaceFitJob& Job, const FMD_StainStickerPatch& Surface, int32 Size,
 		FString& Error, FProgressCancel* Progress = nullptr);

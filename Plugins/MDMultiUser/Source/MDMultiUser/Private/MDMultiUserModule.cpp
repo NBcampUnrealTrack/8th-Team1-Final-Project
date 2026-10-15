@@ -5,6 +5,8 @@
 #include "SMDMultiUserWorkspace.h"
 #include "SMDPlacementTools.h"
 #include "MDHoldSnap.h"
+#include "MDMultiUserSafety.h"
+#include "MDMultiUserGit.h"
 #include "MDWorkspacePreferences.h"
 #include "Styling/AppStyle.h"
 #include "ToolMenus.h"
@@ -18,6 +20,8 @@ public:
     virtual void StartupModule() override
     {
         MDHoldSnap::Register();
+        FMDMultiUserSafety::Get().Start();
+        FMDMultiUserGit::Get().Start();
         FGlobalTabmanager::RegisterDefaultTabWindowSize(TabName, FVector2D(460, 720));
         FGlobalTabmanager::RegisterDefaultTabWindowSize(FName(TEXT("MDPlacementTools")), FVector2D(480, 850));
         FGlobalTabmanager::Get()->RegisterNomadTabSpawner("MDPlacementTools", FOnSpawnTab::CreateLambda([this](const FSpawnTabArgs&) {
@@ -53,6 +57,8 @@ public:
 
     virtual void ShutdownModule() override
     {
+        FMDMultiUserGit::Get().Stop();
+        FMDMultiUserSafety::Get().Stop();
         MDHoldSnap::Unregister();
         if (PlacementCommand) { IConsoleManager::Get().UnregisterConsoleObject(PlacementCommand); }
         if (const auto Tab = PlacementTab.Pin()) { Tab->RequestCloseTab(); }

@@ -5,10 +5,12 @@
 #include "Editor.h"
 #include "Engine/OverlapResult.h"
 #include "Engine/World.h"
+#include "Engine/Selection.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Gameplay/Contamination/MD_StainStickerBaker.h"
 #include "Gameplay/Contamination/MD_StainSurfaceFit.h"
 #include "Gameplay/Contamination/MD_SurfaceStainDefinition.h"
+#include "Gameplay/Contamination/MD_SurfaceStainSize.h"
 #include "LevelUtils.h"
 #include "ScopedTransaction.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -78,6 +80,11 @@ FMD_StainRefit::~FMD_StainRefit()
 
 bool FMD_StainRefit::Start(AMD_SurfaceStain* Stain)
 {
+	return Start(Stain, IsValid(Stain) ? Stain->GetInitialSize() : 0);
+}
+
+bool FMD_StainRefit::Start(AMD_SurfaceStain* Stain, int32 TargetSize, bool bInFollowSelection)
+{
 	if (IsRunning()) return false;
 	if (!CanEdit(Stain) || !Stain->UsesSharedVolume())
 	{ Finish(LOCTEXT("NotEditable", "편집 가능한 입체 오염물 하나를 선택하세요. 플레이 중에는 실행할 수 없습니다."), false); return false; }
@@ -88,9 +95,10 @@ bool FMD_StainRefit::Start(AMD_SurfaceStain* Stain)
 	if (!Source.IsValid() || !Source->IsAsset() || !Source->IsUsable() || !Source->UsesSharedVolume()
 		|| Source->VolumePlacementPolicy == EMD_SurfaceStainVolumePlacement::ManualOnly)
 	{ Finish(LOCTEXT("Source", "Refit Source에 배치에 사용한 원본 오염물 정의를 지정하세요. 표면에 맞춰 생성된 결과는 원본으로 사용할 수 없습니다."), false); return false; }
-	Size = Stain->GetInitialSize();
-	if (Size < 100 || Size > 5000)
-	{ Finish(LOCTEXT("Size", "Initial Size를 100~5,000 사이로 설정하세요."), false); return false; }
+	OriginalSize = Stain->GetInitialSize();
+	Size = TargetSize;
+	if (Size < FMD_SurfaceStainSize::Minimum || Size > FMD_SurfaceStainSize::MaximumPlacement)
+	{ Finish(LOCTEXT("Size", "새 오염량은 100~10,000 사이여야 합니다. 기존 오염물은 변경하지 않았습니다."), false); return false; }
 	FHitResult Hit;
 	if (!FindSurface(*Stain, Hit))
 	{ Finish(LOCTEXT("Surface", "가까운 표면을 찾지 못했습니다. 오염물의 파란 Z축이 표면 밖을 향하도록 놓고 Refit Search Distance를 확인하세요."), false); return false; }
@@ -101,6 +109,7 @@ bool FMD_StainRefit::Start(AMD_SurfaceStain* Stain)
 	// drifts at shared vertices (for example a sphere pole), even when nothing moved.
 	ContactTransform = FTransform(OriginalTransform.GetRotation(), Hit.ImpactPoint);
 	Target = Stain; Receiver = Component; PreviousDefinition = Stain->GetDefinition();
+	bFollowSelection = bInFollowSelection;
 	OriginalParent = Stain->GetRootComponent()->GetAttachParent();
 	SourceRevision = Source->GetAuthoringRevision();
 	FActorSpawnParameters Params;
@@ -115,7 +124,7 @@ bool FMD_StainRefit::Start(AMD_SurfaceStain* Stain)
 	Helper->SetRootComponent(Root); Root->RegisterComponent(); Helper->SetActorTransform(ContactTransform);
 	bCancelling = false;
 	Bake = FMD_StainStickerBaker::StartAsync(*Helper, FMD_StainSurfaceFit::HalfSize(*Source, Size), Size, nullptr, Source.Get(), false);
-	Status = FText::Format(LOCTEXT("Working", "{0}: 표면에 다시 맞추는 중입니다. 기존 모형은 계산이 끝날 때까지 유지됩니다."), FText::FromString(Stain->GetActorLabel()));
+	Status = FText::Format(LOCTEXT("Working", "{0}: 표면에 다시 맞추는 중입니다. 성공할 때까지 기존 크기와 모형을 유지합니다."), FText::FromString(Stain->GetActorLabel()));
 	FNotificationInfo Info(Status);
 	Info.bFireAndForget = false;
 	Info.ButtonDetails.Emplace(LOCTEXT("Cancel", "Cancel"), LOCTEXT("CancelTip", "계산을 취소하고 기존 모형을 유지합니다."),
@@ -125,14 +134,21 @@ bool FMD_StainRefit::Start(AMD_SurfaceStain* Stain)
 	return true;
 }
 
+bool FMD_StainRefit::IsRunningFor(const AMD_SurfaceStain* Stain) const
+{
+	return IsRunning() && Target.Get() == Stain;
+}
+
 bool FMD_StainRefit::IsCurrent() const
 {
 	const auto* Actor = Target.Get();
+	if (bFollowSelection && (!GEditor || !GEditor->GetSelectedActors()
+		|| GEditor->GetSelectedActors()->Num() != 1 || !GEditor->GetSelectedActors()->IsSelected(Actor))) return false;
 	return CanEdit(Actor) && Receiver.IsValid() && Receiver->IsRegistered() && Receiver->GetOwner()
 		&& !FLevelUtils::IsLevelLocked(Receiver->GetOwner()->GetLevel())
 		&& Actor->GetActorTransform().Equals(OriginalTransform, 0.0001)
 		&& Actor->GetRootComponent()->GetAttachParent() == OriginalParent.Get()
-		&& Actor->GetInitialSize() == Size && Actor->GetDefinition() == PreviousDefinition.Get()
+		&& Actor->GetInitialSize() == OriginalSize && Actor->GetDefinition() == PreviousDefinition.Get()
 		&& Actor->GetRefitSource().Get() == Source.Get() && Source->GetAuthoringRevision() == SourceRevision
 		&& Bake->SourcesAreCurrent();
 }
@@ -156,7 +172,7 @@ void FMD_StainRefit::Tick(float DeltaTime)
 	if (!IsCurrent())
 	{
 		Cancel();
-		Status = LOCTEXT("Changed", "오염물·표면·원본 설정 또는 편집 상태가 변경되어 계산을 취소했습니다. 조정을 마친 뒤 다시 실행하세요.");
+		Status = LOCTEXT("Changed", "오염물·표면·원본 설정 또는 선택·편집 상태가 변경되어 계산을 취소했습니다. 조정을 마친 뒤 다시 실행하세요.");
 		if (auto Item = Notification.Pin()) Item->SetText(Status);
 		return;
 	}
@@ -206,6 +222,8 @@ void FMD_StainRefit::Release()
 	Helper.Reset(); Source.Reset(); Target.Reset(); Receiver.Reset(); PreviousDefinition.Reset();
 	OriginalParent.Reset();
 	bCancelling = false;
+	bFollowSelection = false;
+	Size = OriginalSize = 0;
 }
 
 #undef LOCTEXT_NAMESPACE

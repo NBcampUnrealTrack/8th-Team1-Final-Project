@@ -1,4 +1,5 @@
 #include "World/Transport/MD_Cart.h"
+#include "World/Trash/MD_TrashItem.h"
 #include "Component/Interaction/MD_InteractionPromptComponent.h"
 
 #include "Component/Interaction/MD_InteractionComponent.h"
@@ -6,6 +7,7 @@
 #include "Components/StaticMeshComponent.h"
 #include "Engine/World.h"
 #include "GameFramework/Controller.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/GameStateBase.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/PlayerState.h"
@@ -35,12 +37,24 @@ AMD_Cart::AMD_Cart()
 	CartBody->SetMobility(EComponentMobility::Movable);
 	CartBody->SetCollisionProfileName(TEXT("PhysicsActor"));
 	CartBody->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
-	CartBody->CanCharacterStepUpOn = ECB_No;
-	CartBody->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Unwalkable, 0.f));
+	CartBody->CanCharacterStepUpOn = ECB_Yes;
+	CartBody->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Default, 0.f));
 	CartBody->SetLinearDamping(1.f);
 	CartBody->SetAngularDamping(2.f);
 	CartBody->SetUseCCD(true);
 	CartBody->SetIsReplicated(true);
+	CartBody->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Ignore);
+
+	CargoFloor = CreateDefaultSubobject<UBoxComponent>(TEXT("CargoFloor"));
+	CargoFloor->SetupAttachment(CartBody);
+	CargoFloor->SetMobility(EComponentMobility::Movable);
+	CargoFloor->SetCollisionProfileName(TEXT("PhysicsActor"));
+	CargoFloor->SetCollisionObjectType(ECC_WorldDynamic);
+	CargoFloor->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
+	CargoFloor->CanCharacterStepUpOn = ECB_Yes;
+	CargoFloor->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Default, 0.f));
+	CargoFloor->SetUseCCD(true);
+	CargoFloor->BodyInstance.bAutoWeld = true;
 
 	Visual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Visual"));
 	WheelVisual = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("WheelVisual"));
@@ -56,9 +70,10 @@ AMD_Cart::AMD_Cart()
 		Wall->SetupAttachment(CartBody);
 		Wall->SetMobility(EComponentMobility::Movable);
 		Wall->SetCollisionProfileName(TEXT("PhysicsActor"));
+		Wall->SetCollisionObjectType(ECC_WorldDynamic);
 		Wall->SetCollisionResponseToChannel(MDCollisionChannels::InteractTrace, ECR_Block);
-		Wall->CanCharacterStepUpOn = ECB_No;
-		Wall->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Unwalkable, 0.f));
+		Wall->CanCharacterStepUpOn = ECB_Yes;
+		Wall->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Default, 0.f));
 		Wall->BodyInstance.bAutoWeld = true;
 		Walls.Add(Wall);
 	}
@@ -80,7 +95,7 @@ AMD_Cart::AMD_Cart()
 	SteeringProfile.LinearDamping = 800.f;
 	SteeringProfile.AngularStiffness = 1600.f;
 	SteeringProfile.AngularDamping = 650.f;
-	SteeringProfile.InterpolationSpeed = 20.f;
+	SteeringProfile.InterpolationSpeed = 40.f;
 	ApplyGeometry();
 }
 
@@ -92,28 +107,57 @@ void AMD_Cart::OnConstruction(const FTransform& Transform)
 
 void AMD_Cart::ApplyGeometry()
 {
+	// Welded contacts can report the root body. Both it and the actual tray
+	// surfaces must support walking, including old Blueprint component defaults.
+	CartBody->CanCharacterStepUpOn = ECB_Yes;
+	CartBody->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Default, 0.f));
+	CargoFloor->CanCharacterStepUpOn = ECB_Yes;
+	CargoFloor->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Default, 0.f));
+	if (HasActorBegunPlay()) CargoFloor->UnWeldFromParent();
 	if (HasActorBegunPlay()) for (UBoxComponent* Wall : Walls) Wall->UnWeldFromParent();
 	const float X = TrayHalfExtent.X;
 	const float Y = TrayHalfExtent.Y;
 	const float Z = TrayHalfExtent.Z;
+	// The chassis includes the wheels/handle. The separate cavity follows the actual
+	// visible floor, thick side panels and lower rim of the cargo body.
+	const float FloorOffset = FMath::Clamp(CargoFloorOffset, 0.f, FMath::Max(0.f, 2.f * Z - 2.f));
+	const FVector Interior = CargoHalfExtent.ComponentMax(FVector(1.f));
+	const FVector2D WallThickness(FMath::Max(1.f, CargoWallHalfThickness.X), FMath::Max(1.f, CargoWallHalfThickness.Y));
+	const FVector VisualOffset = Visual->GetRelativeLocation();
+	const FVector CargoCenter(VisualOffset.X, VisualOffset.Y, FloorHalfThickness + FloorOffset + Interior.Z);
 	CartBody->SetBoxExtent(FVector(X, Y, FloorHalfThickness));
+	// The chassis represents ground support, not the visible cargo surface. Otherwise
+	// every loose can below the raised tray pushes the whole cart upward.
+	CartBody->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Ignore);
+	CargoFloor->SetBoxExtent(FVector(Interior.X + 2.f * WallThickness.X, Interior.Y + 2.f * WallThickness.Y, FloorHalfThickness));
+	CargoFloor->SetRelativeLocation(FVector(CargoCenter.X, CargoCenter.Y, FloorOffset));
+	// Carry target sweeps treat dynamic world geometry as a barrier, while excluding
+	// loose PhysicsBody props. The tray must also stop a held item being driven through it.
+	CargoFloor->SetCollisionObjectType(ECC_WorldDynamic);
 	for (int32 Index = 0; Index < Walls.Num(); ++Index)
 	{
+		Walls[Index]->CanCharacterStepUpOn = ECB_Yes;
+		Walls[Index]->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Default, 0.f));
+		Walls[Index]->SetCollisionObjectType(ECC_WorldDynamic);
 		const bool bSideX = Index < 2;
-		Walls[Index]->SetBoxExtent(bSideX ? FVector(WallHalfThickness, Y, Z) : FVector(X, WallHalfThickness, Z));
-		Walls[Index]->SetRelativeLocation(FVector(
-			bSideX ? (Index == 0 ? -X : X) : 0.f,
-			bSideX ? 0.f : (Index == 2 ? -Y : Y), FloorHalfThickness + Z));
+		Walls[Index]->SetBoxExtent(bSideX ? FVector(WallThickness.X, Interior.Y + 2.f * WallThickness.Y, Interior.Z)
+			: FVector(Interior.X, WallThickness.Y, Interior.Z));
+		Walls[Index]->SetRelativeLocation(CargoCenter + FVector(
+			bSideX ? (Index == 0 ? -1.f : 1.f) * (Interior.X + WallThickness.X) : 0.f,
+			bSideX ? 0.f : (Index == 2 ? -1.f : 1.f) * (Interior.Y + WallThickness.Y), 0.f));
 	}
 	const FVector Outward = HandleDirection.GetSafeNormal2D(UE_SMALL_NUMBER, FVector(0.f, 1.f, 0.f));
 	const bool bHandleOnY = FMath::Abs(Outward.Y) >= FMath::Abs(Outward.X);
 	Handle->SetBoxExtent(bHandleOnY ? FVector(FMath::Max(16.f, X * .6f), 12.f, 13.f)
 		: FVector(12.f, FMath::Max(16.f, Y * .6f), 13.f));
 	Handle->SetRelativeLocation(FVector(Outward.X * (X + 9.f), Outward.Y * (Y + 9.f), FloorHalfThickness + Z * 2.f));
-	CargoSensor->SetBoxExtent(FVector(X, Y, Z));
-	CargoSensor->SetRelativeLocation(FVector(0.f, 0.f, FloorHalfThickness + Z));
+	CargoSensor->SetBoxExtent(Interior);
+	CargoSensor->SetRelativeLocation(CargoCenter);
 	if (HasActorBegunPlay() && CartBody->IsSimulatingPhysics())
+	{
+		CargoFloor->WeldTo(CartBody);
 		for (UBoxComponent* Wall : Walls) Wall->WeldTo(CartBody);
+	}
 }
 
 void AMD_Cart::OnRep_Geometry()
@@ -126,6 +170,7 @@ void AMD_Cart::BeginPlay()
 	Super::BeginPlay();
 	ApplyGeometry();
 	CartBody->SetSimulatePhysics(true);
+	CargoFloor->WeldTo(CartBody);
 	for (UBoxComponent* Wall : Walls) Wall->WeldTo(CartBody);
 	CartBody->SetMassOverrideInKg(NAME_None, CartMass);
 }
@@ -146,6 +191,9 @@ void AMD_Cart::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetime
 	Super::GetLifetimeReplicatedProps(OutLifetimeProps);
 	DOREPLIFETIME_CONDITION(AMD_Cart, TrayHalfExtent, COND_InitialOnly);
 	DOREPLIFETIME_CONDITION(AMD_Cart, FloorHalfThickness, COND_InitialOnly);
+	DOREPLIFETIME_CONDITION(AMD_Cart, CargoFloorOffset, COND_InitialOnly);
+	DOREPLIFETIME_CONDITION(AMD_Cart, CargoHalfExtent, COND_InitialOnly);
+	DOREPLIFETIME_CONDITION(AMD_Cart, CargoWallHalfThickness, COND_InitialOnly);
 	DOREPLIFETIME_CONDITION(AMD_Cart, WallHalfThickness, COND_InitialOnly);
 	DOREPLIFETIME(AMD_Cart, bSteering);
 	DOREPLIFETIME_CONDITION(AMD_Cart, HandleDirection, COND_InitialOnly);
@@ -187,15 +235,25 @@ bool AMD_Cart::IsPawnInsideTray(const APawn* Pawn) const
 	const FVector Local = GetActorTransform().InverseTransformPosition(Origin);
 	const FVector Up = GetActorUpVector().GetAbs();
 	const float Feet = Local.Z - FVector::DotProduct(Up, Extent) / FMath::Max(FMath::Abs(GetActorScale3D().Z), UE_SMALL_NUMBER);
-	return FMath::Abs(Local.X) < TrayHalfExtent.X && FMath::Abs(Local.Y) < TrayHalfExtent.Y
-		&& Feet > FloorHalfThickness - 25.f && Feet < FloorHalfThickness + TrayHalfExtent.Z * 2.f
+	const FVector CargoLocal = GetActorTransform().InverseTransformPosition(CargoSensor->GetComponentLocation());
+	return FMath::Abs(Local.X - CargoLocal.X) < CargoHalfExtent.X && FMath::Abs(Local.Y - CargoLocal.Y) < CargoHalfExtent.Y
+		&& Feet > CargoFloorOffset + FloorHalfThickness - 25.f && Feet < CargoLocal.Z + CargoHalfExtent.Z
 		&& Local.Z > -FloorHalfThickness;
+}
+
+bool AMD_Cart::CanBeBaseForCharacter(APawn* Pawn) const
+{
+	const UMD_InteractionComponent* Interaction = IsValid(Pawn)
+		? Pawn->FindComponentByClass<UMD_InteractionComponent>() : nullptr;
+	// The operator must not ride their own physics handle; other pawns can stand here.
+	return (!Interaction || Interaction->GetHeldActor() != this) && Super::CanBeBaseForCharacter(Pawn);
 }
 
 bool AMD_Cart::CanInteract_Implementation(AActor* Interactor) const
 {
 	const APawn* Pawn = Cast<APawn>(Interactor);
-	return IsValid(Pawn) && (!GripPawn.IsValid() || GripPawn.Get() == Pawn)
+	return IsValid(Pawn) && APawn::GetMovementBaseActor(Pawn) != this
+		&& (!GripPawn.IsValid() || GripPawn.Get() == Pawn)
 		&& !IsPawnInsideTray(Pawn) && IsAimingAtHandle(Pawn);
 }
 
@@ -281,6 +339,8 @@ bool AMD_Cart::ResolveSteeringTarget(APawn* Pawn, FTransform& OutTarget) const
 	{
 		const UPrimitiveComponent* Other = Hit.GetComponent();
 		if (Hit.bStartPenetrating || !IsValid(Other) || !Other->IsPhysicsCollisionEnabled()
+			|| Other->IsSimulatingPhysics() || Cast<AMD_TrashItem>(Hit.GetActor())
+			|| Other->GetCollisionObjectType() == ECC_Pawn
 			|| CartBody->GetCollisionResponseToChannel(Other->GetCollisionObjectType()) != ECR_Block
 			|| Other->GetCollisionResponseToChannel(CartBody->GetCollisionObjectType()) != ECR_Block) continue;
 		if (!Support || Hit.Distance < Support->Distance) Support = &Hit;
@@ -331,6 +391,19 @@ void AMD_Cart::LimitSteeringTarget(FTransform& Target) const
 void AMD_Cart::OnCarryStarted_Implementation()
 {
 	if (!HasAuthority() || !GripPawn.IsValid()) return;
+	RestorePawnPhysicsInteraction();
+	// The handle steers the cart; character push impulses would fight it at contact.
+	if (UCharacterMovementComponent* Movement = Cast<UCharacterMovementComponent>(GripPawn->GetMovementComponent()))
+	{
+		SteeringMovement = Movement;
+		bPreviousPhysicsInteraction = Movement->bEnablePhysicsInteraction;
+		Movement->bEnablePhysicsInteraction = false;
+	}
+	// Let the low chassis stop the capsule before the higher welded tray does.
+	if (UPrimitiveComponent* PawnCollision = Cast<UPrimitiveComponent>(GripPawn->GetRootComponent()))
+	{
+		PawnCollision->IgnoreComponentWhenMoving(CartBody, false);
+	}
 	CargoSensor->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	CargoRefreshSeconds = 0.f;
 	RefreshCargo();
@@ -338,8 +411,18 @@ void AMD_Cart::OnCarryStarted_Implementation()
 	ForceNetUpdate();
 }
 
+void AMD_Cart::RestorePawnPhysicsInteraction()
+{
+	if (UCharacterMovementComponent* Movement = SteeringMovement.Get())
+	{
+		Movement->bEnablePhysicsInteraction = bPreviousPhysicsInteraction;
+	}
+	SteeringMovement.Reset();
+}
+
 void AMD_Cart::OnCarryEnded_Implementation()
 {
+	RestorePawnPhysicsInteraction();
 	if (!HasAuthority()) return;
 	GripPawn.Reset();
 	bSteering = false;
@@ -396,6 +479,8 @@ void AMD_Cart::Tick(float DeltaSeconds)
 	const FVector Up = GetActorUpVector();
 	const FTransform Tray = GetActorTransform();
 	const float VerticalScale = FMath::Max(FMath::Abs(Tray.GetScale3D().Z), UE_SMALL_NUMBER);
+	const float CargoFloorTop = CargoFloor->GetRelativeLocation().Z + FloorHalfThickness;
+	const FVector CargoLocal = Tray.InverseTransformPosition(CargoSensor->GetComponentLocation());
 	for (auto& Entry : Cargo)
 	{
 		UPrimitiveComponent* Primitive = Entry.Key.Get();
@@ -404,9 +489,9 @@ void AMD_Cart::Tick(float DeltaSeconds)
 		const float Feet = Local.Z - FVector::DotProduct(Up.GetAbs(), Primitive->Bounds.BoxExtent) / VerticalScale;
 		const FVector RelativeVelocity = Primitive->GetPhysicsLinearVelocity()
 			- CartBody->GetPhysicsLinearVelocityAtPoint(Primitive->Bounds.Origin);
-		const bool bSettled = Up.Z >= .55f && FMath::Abs(Local.X) < TrayHalfExtent.X - WallHalfThickness
-			&& FMath::Abs(Local.Y) < TrayHalfExtent.Y - WallHalfThickness && Local.Z < FloorHalfThickness + TrayHalfExtent.Z * 2.f
-			&& FMath::Abs(Feet - FloorHalfThickness) <= 12.f && RelativeVelocity.SizeSquared() <= FMath::Square(SettledRelativeSpeed);
+		const bool bSettled = Up.Z >= .55f && FMath::Abs(Local.X - CargoLocal.X) < CargoHalfExtent.X
+			&& FMath::Abs(Local.Y - CargoLocal.Y) < CargoHalfExtent.Y && Local.Z < CargoLocal.Z + CargoHalfExtent.Z
+			&& FMath::Abs(Feet - CargoFloorTop) <= 12.f && RelativeVelocity.SizeSquared() <= FMath::Square(SettledRelativeSpeed);
 		if (!bSettled) { Entry.Value = 0.f; continue; }
 		Entry.Value += DeltaSeconds;
 		if (Entry.Value < .15f) continue;

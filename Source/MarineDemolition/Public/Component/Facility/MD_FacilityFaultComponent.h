@@ -43,6 +43,12 @@ public:
 	float RefaultGraceSeconds = 0.f;
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Facility")
 	bool bResetProgressOnCancel = false;
+	// 시설 종류와 무관하게 선택하는 공통 고장 비용 사용 설정
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Facility")
+	bool bFaultCostEnabled = false;
+	// 기존 인원 배율에 적용할 두 명 기준 초당 Credit 차감액
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Facility", meta = (ClampMin = "0"))
+	int32 CostUnit = 5;
 	/** Optional linked device for a remote panel; never changes unrelated devices automatically. */
 	UPROPERTY(EditInstanceOnly, BlueprintReadOnly, Category = "MD|Facility")
 	TObjectPtr<AActor> LinkedFacility = nullptr;
@@ -105,4 +111,15 @@ private:
 protected:
 	// 상태 효과와 방송 도중 같은 시설의 중첩 사건 변경 차단
 	bool bStateTransitionInProgress = false;
+	// 해당 시설의 고장 시간만 정산하는 서버 예약
+	FTimerHandle FaultCostTimer;
+	// 비용 시계와 연결된 고장 사건 번호
+	int32 CostFaultId = 0;
+	// 마지막으로 정산한 정수 초까지의 월드 시각
+	double LastFaultChargeTime = 0.0;
+
+	// 기존 고장과 복구 판정에 따른 차감 시작 및 종료
+	void UpdateFaultCostState(FMD_FacilitySnapshot Previous);
+	// 진행 중인 고장 또는 복구 직전까지의 Credit 차감
+	void ApplyFaultCost(bool bFinalCharge);
 };
