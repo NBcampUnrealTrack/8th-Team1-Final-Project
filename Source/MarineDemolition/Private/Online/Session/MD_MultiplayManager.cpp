@@ -35,6 +35,9 @@ void UMD_MultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
 
     InitOnlineSessionInterface();
 
+    // Steam 멤버 갱신 이후 실제 빈자리 변화만 검색 결과에 재게시하는 관찰 예약
+    SessionPopulationTickerHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateUObject(this, &ThisClass::TickSessionPopulation), 0.5f);
+
     // 호스트 종료에 따른 자동 타이틀 복귀에서도 온라인 세션 정리를 위한 구독
     if (IsValid(GEngine) == true)
     {
@@ -51,6 +54,17 @@ void UMD_MultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UMD_MultiplayManager::Deinitialize()
 {
+    // 종료 중 새 인원 광고 요청의 발생 방지
+    FTSTicker::GetCoreTicker().RemoveTicker(SessionPopulationTickerHandle);
+    // 해제된 관찰 예약의 식별자 정리
+    SessionPopulationTickerHandle.Reset();
+    // 종료 뒤 보류된 사용자 세션 작업의 실행 방지
+    PendingSessionActionAfterPopulation = nullptr;
+    // 종료된 광고 요청의 완료 콜백 무시
+    bUpdatingSessionPopulation = false;
+    // 종료된 나가기 보류 상태의 정리
+    bSessionDestroyDeferredForPopulation = false;
+
     // 종료 중 연결 실패로 새 정리 작업이 시작되는 상황 방지
     if (IsValid(GEngine) == true)
     {
@@ -311,6 +325,17 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
 
 void UMD_MultiplayManager::StartSessionByMap(const FString& MapPackagePath, const FString& TravelOptions)
 {
+    // 짧은 인원 광고 작업 때문에 게임 시작 입력이 실패하는 상황 방지
+    if (DeferSessionActionForPopulation([this, MapPackagePath, TravelOptions]()
+        {
+            // 인원 광고 이후 기존 검증 및 게임 시작 절차의 재개
+            StartSessionByMap(MapPackagePath, TravelOptions);
+        }) == true)
+    {
+        // 보관한 시작 요청의 중복 실행 방지
+        return;
+    }
+
     // 클라이언트가 호스트의 Session 상태와 전체 접속자의 이동을 변경하지 못하도록 하는 실행 환경 검사
     UWorld* World = GetWorld();
     if (IsValid(World) == false || World->GetNetMode() == ENetMode::NM_Client)
@@ -347,6 +372,17 @@ void UMD_MultiplayManager::StartSessionByMap(const FString& MapPackagePath, cons
 
 void UMD_MultiplayManager::EndSession(const FString& MapPackagePath)
 {
+    // 인원 광고와 게임 종료 설정 갱신의 완료 이벤트 혼선 방지
+    if (DeferSessionActionForPopulation([this, MapPackagePath]()
+        {
+            // 인원 광고 이후 기존 게임 종료 절차의 재개
+            EndSession(MapPackagePath);
+        }) == true)
+    {
+        // 보관한 종료 요청의 중복 실행 방지
+        return;
+    }
+
     // 클라이언트 환경 실행 제한
     UWorld* World = GetWorld();
     if (IsValid(World) == false || World->GetNetMode() == ENetMode::NM_Client)
@@ -595,6 +631,17 @@ void UMD_MultiplayManager::JoinSession(const FBlueprintSessionResult& BlueprintS
 
 void UMD_MultiplayManager::DestroySession(FName SessionName)
 {
+    // 진행 중인 인원 광고 뒤 나가기 요청을 우선 실행하도록 보관
+    if (DeferSessionActionForPopulation([this, SessionName]()
+        {
+            // 광고 완료 이후 기존 세션 탈퇴 절차의 재개
+            DestroySession(SessionName);
+        }, true) == true)
+    {
+        // 보관한 탈퇴 요청의 중복 실행 방지
+        return;
+    }
+
     // 방 나가기 입력의 세션 관리자 진입 상태 기록
     LogSessionLifecycle(TEXT("Destroy.Enter"), SessionName);
 
@@ -667,6 +714,131 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
         // Destroy Session 실패 이벤트 실행
         OnDestroySessionComplete.Broadcast(false);
     }
+}
+
+bool UMD_MultiplayManager::TickSessionPopulation(float DeltaTime)
+{
+    // 다른 생성 및 시작 및 종료 작업의 완료 이벤트와 인원 광고의 분리
+    if (SessionInterface.IsValid() == false || SessionDelegateHandle.IsValid() == true)
+    {
+        // 진행 중인 작업을 방해하지 않고 다음 관찰에서 재확인
+        return true;
+    }
+    // 실제 호스트의 온라인 세션 원장 조회
+    FNamedOnlineSession* Session = SessionInterface->GetNamedSession(NAME_GameSession);
+    // 세션 소멸 또는 참가자 전환 이후 이전 광고 캐시의 폐기
+    if (Session == nullptr || Session->bHosting == false || Session->SessionInfo.IsValid() == false)
+    {
+        // 다음 호스팅 세션에 필요한 최초 광고 허용
+        PublishedPopulationSessionId.Reset();
+        // 이전 방의 빈자리 수 재사용 방지
+        PublishedOpenPublicConnections = INDEX_NONE;
+        // 다음 호스트 세션을 확인할 관찰 유지
+        return true;
+    }
+    // 생성 및 시작 및 종료 및 제거 중인 서비스 상태에 대한 중복 요청 방지
+    if (Session->SessionState != EOnlineSessionState::Pending && Session->SessionState != EOnlineSessionState::InProgress && Session->SessionState != EOnlineSessionState::Ended)
+    {
+        // 안정된 세션 상태에서만 광고 재게시 허용
+        return true;
+    }
+    // 세션 교체와 같은 방의 인원 변화를 구분할 식별자 보관
+    FString SessionId = Session->GetSessionIdStr();
+    // 요청 중 추가 입퇴장과 구분할 서비스의 현재 빈자리 수 보관
+    int32 OpenPublicConnections = Session->NumOpenPublicConnections;
+    // 마지막 성공 광고와 동일한 인원에 대한 불필요한 서비스 요청 생략
+    if (PublishedPopulationSessionId == SessionId && PublishedOpenPublicConnections == OpenPublicConnections)
+    {
+        // 다음 입퇴장으로 빈자리 수가 바뀔 때까지 관찰 유지
+        return true;
+    }
+    // 기존 맵 및 공개 여부 및 참가 허용 정책을 유지하는 광고 설정 복사
+    FOnlineSessionSettings UpdatedSettings = Session->SessionSettings;
+    // 지연 완료가 다른 광고 요청의 핸들을 해제하지 못하도록 요청 구분
+    uint64 RequestSerial = ++SessionPopulationUpdateSerial;
+    // 동기 완료 서비스에서도 사용자 작업을 안전하게 보류하기 위한 선행 상태 설정
+    bUpdatingSessionPopulation = true;
+    // 기존 세션 작업과 같은 핸들로 인원 광고의 독점 실행 보장
+    SessionDelegateHandle = SessionInterface->AddOnUpdateSessionCompleteDelegate_Handle(
+        FOnUpdateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleSessionPopulationUpdated, RequestSerial, SessionId, OpenPublicConnections));
+    // 서비스 메모리의 빈자리 수를 외부 검색에 사용되는 로비 데이터로 재게시
+    if (SessionInterface->UpdateSession(NAME_GameSession, UpdatedSettings, true) == false && bUpdatingSessionPopulation == true && SessionPopulationUpdateSerial == RequestSerial)
+    {
+        // 동기 거절 시 잠금을 해제하고 다음 관찰에서 재시도
+        HandleSessionPopulationUpdated(NAME_GameSession, false, RequestSerial, SessionId, OpenPublicConnections);
+    }
+    // 인원 변화 및 실패한 광고 재시도를 위한 관찰 유지
+    return true;
+}
+
+void UMD_MultiplayManager::HandleSessionPopulationUpdated(FName SessionName, bool bWasSuccessful, uint64 RequestSerial, FString SessionId, int32 OpenPublicConnections)
+{
+    // 다른 세션 또는 이미 정리된 요청의 완료 이벤트 제외
+    if (SessionName != NAME_GameSession || bUpdatingSessionPopulation == false || SessionPopulationUpdateSerial != RequestSerial)
+    {
+        // 현재 사용자 작업이 소유한 핸들의 잘못된 해제 방지
+        return;
+    }
+    // 완료된 인원 광고의 서비스 구독 해제
+    if (SessionInterface.IsValid() == true)
+    {
+        // 다음 사용자 작업의 완료 이벤트와 기존 인원 광고 콜백 분리
+        SessionInterface->ClearOnUpdateSessionCompleteDelegate_Handle(SessionDelegateHandle);
+    }
+    // 보관된 사용자 작업의 재진입 전에 공용 잠금 해제
+    SessionDelegateHandle.Reset();
+    // 완료 콜백에서 재개하는 작업의 재보류 방지
+    bUpdatingSessionPopulation = false;
+    // 같은 요청을 두 번 재개하지 않도록 보류 작업의 소유권 이전
+    TFunction<void()> PendingAction = MoveTemp(PendingSessionActionAfterPopulation);
+    // 다음 인원 광고에서 사용할 나가기 우선순위 초기화
+    bSessionDestroyDeferredForPopulation = false;
+    // 요청 이후 제거되거나 교체된 호스트 세션의 확인
+    FNamedOnlineSession* Session = SessionInterface.IsValid() == true ? SessionInterface->GetNamedSession(NAME_GameSession) : nullptr;
+    // 이전 방의 완료가 새로운 방의 광고 또는 이동을 변경하지 못하도록 제한
+    if (Session == nullptr || Session->bHosting == false || Session->SessionInfo.IsValid() == false || Session->GetSessionIdStr() != SessionId)
+    {
+        // 새로운 호스팅 세션의 최초 광고 허용
+        PublishedPopulationSessionId.Reset();
+        // 이전 방의 성공 인원 캐시 폐기
+        PublishedOpenPublicConnections = INDEX_NONE;
+        // 이전 방에 속한 보류 사용자 작업의 실행 방지
+        return;
+    }
+    // 실제 서비스 게시가 성공한 경우에만 중복 요청 생략 기준 갱신
+    if (bWasSuccessful == true)
+    {
+        // 게시가 완료된 방 식별자 저장
+        PublishedPopulationSessionId = SessionId;
+        // 요청 이후 입퇴장을 놓치지 않도록 요청 당시 빈자리 수만 저장
+        PublishedOpenPublicConnections = OpenPublicConnections;
+    }
+    // 실패 재시도보다 보류된 사용자 작업을 우선 재개
+    if (static_cast<bool>(PendingAction) == true)
+    {
+        // 기존 시작 또는 종료 또는 탈퇴 절차의 실행
+        PendingAction();
+    }
+}
+
+bool UMD_MultiplayManager::DeferSessionActionForPopulation(TFunction<void()>&& Action, bool bDestroySession)
+{
+    // 일반 세션 작업의 기존 동작 및 중복 요청 검사 유지
+    if (bUpdatingSessionPopulation == false)
+    {
+        // 인원 광고가 없으면 호출자가 기존 절차를 계속 실행
+        return false;
+    }
+    // 보관된 나가기 요청을 후속 시작 및 종료 입력이 덮어쓰는 상황 방지
+    if (bSessionDestroyDeferredForPopulation == false || bDestroySession == true)
+    {
+        // 현재 사용자 입력을 광고 완료 후 재개할 단일 작업으로 보관
+        PendingSessionActionAfterPopulation = MoveTemp(Action);
+        // 세션 탈퇴 입력의 우선순위 보관
+        bSessionDestroyDeferredForPopulation = bDestroySession;
+    }
+    // 호출자의 세션 작업을 지금 실행하지 않도록 보류 상태 반환
+    return true;
 }
 
 void UMD_MultiplayManager::HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)

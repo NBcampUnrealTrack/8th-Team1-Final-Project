@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Containers/Ticker.h"
 #include "Engine/EngineBaseTypes.h"
 #include "Subsystems/GameInstanceSubsystem.h"
 #include "Interfaces/OnlineSessionInterface.h"      // Online Subsystem의 Session 관련 모듈 참조
@@ -110,6 +111,27 @@ protected:
     // Session 비동기 작업의 중복 실행과 완료 이벤트 수명을 관리하기 위한 핸들
     FDelegateHandle SessionDelegateHandle;
 
+    // 맵 이동과 무관하게 호스트의 실제 빈자리 변화를 확인하는 예약
+    FTSTicker::FDelegateHandle SessionPopulationTickerHandle;
+
+    // 마지막 인원 광고가 성공한 세션의 고유 식별자
+    FString PublishedPopulationSessionId;
+
+    // 마지막으로 게시를 완료한 공개 빈자리 수
+    int32 PublishedOpenPublicConnections = INDEX_NONE;
+
+    // 이전 광고 요청의 지연 완료와 현재 요청을 구분하는 일련번호
+    uint64 SessionPopulationUpdateSerial = 0;
+
+    // 공용 비동기 핸들을 사용하는 인원 광고 작업의 구분
+    bool bUpdatingSessionPopulation = false;
+
+    // 인원 광고 대기 중 나가기 요청의 우선순위 유지
+    bool bSessionDestroyDeferredForPopulation = false;
+
+    // 인원 광고 완료 직후 재개할 사용자 세션 작업
+    TFunction<void()> PendingSessionActionAfterPopulation;
+
     // 호스트 연결 상실 이후 남은 온라인 세션의 정리 필요 여부
     bool bDisconnectedSessionNeedsCleanup = false;
 
@@ -169,6 +191,15 @@ public:
     FMD_RoomCode ParseRoomCode(FString StringRoomCode);
     
 protected:
+	// 온라인 서비스가 갱신한 호스트 빈자리 수의 검색 광고 반영
+	bool TickSessionPopulation(float DeltaTime);
+
+	// 인원 광고 결과 기록과 대기 중 사용자 작업의 재개
+	void HandleSessionPopulationUpdated(FName SessionName, bool bWasSuccessful, uint64 RequestSerial, FString SessionId, int32 OpenPublicConnections);
+
+	// 인원 광고와 사용자 세션 작업의 직렬화 및 나가기 우선 처리
+	bool DeferSessionActionForPopulation(TFunction<void()>&& Action, bool bDestroySession = false);
+
 	// 현재 참가자의 게임 연결 상실 시 남은 온라인 세션의 정리 시작
 	void HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString);
 
