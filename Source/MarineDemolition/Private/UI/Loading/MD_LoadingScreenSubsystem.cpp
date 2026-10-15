@@ -121,9 +121,14 @@ void UMD_LoadingScreenSubsystem::BeginLoadingScreen(EMD_LoadingContext Context)
 	UWorld* World = GetWorld();
 	if (World && World->GetNetMode() == NM_DedicatedServer) { return; }
 
-	// 이미 로딩 중이면 처음부터 다시 시작하지 않는다.
-	// (서버 로컬 호출과 자기 자신에게 온 Client RPC가 겹치는 경우가 있다.)
-	if (IsLoadingScreenActive()) { return; }
+	// 취소된 이전 인트로와 새 요청의 로딩 수명 분리
+	if (IsLoadingScreenActive() == true)
+	{
+		// 정상 로딩과 정상 완료 예약에 대한 중복 시작 방지
+		if (PendingFinish != EMD_LoadingFinishRequest::WithoutCompletion) { return; }
+		// 기존 취소 요청에 속한 이동 콜백의 새 로딩 진입 전 폐기
+		PendingIntroCallbacks.Reset();
+	}
 
 	// Common UI Transition이 이미 인트로를 재생 중이면 같은 연출을 Slate에서 다시 시작하지 않는다.
 	if (IsCommonTransitionScreenActive()) { return; }
@@ -135,6 +140,10 @@ void UMD_LoadingScreenSubsystem::BeginLoadingScreen(EMD_LoadingContext Context)
 void UMD_LoadingScreenSubsystem::RunAfterIntro(TFunction<void()>&& Callback)
 {
 	if (!Callback) { return; }
+
+	// 세션 완료 이후 맵 이동이 즉시 실행되는지 인트로에서 대기하는지 구분하기 위한 상태 기록
+	UE_LOG(MarineDemolition, Log, TEXT("[SessionFlow] IntroGate World=%s Phase=%d PendingFinish=%d Queued=%d"),
+		*GetNameSafe(GetWorld()), static_cast<int32>(Phase), static_cast<int32>(PendingFinish), PendingIntroCallbacks.Num());
 
 	// 인트로 중이 아니면 기다릴 이유가 없다. 이 즉시 실행 경로가 있어야
 	// 로딩 화면을 안 쓰는 호출부에서도 트래블이 멈추지 않는다.
@@ -193,6 +202,9 @@ void UMD_LoadingScreenSubsystem::HandlePostLoadMap(UWorld* LoadedWorld)
 	{
 		return;
 	}
+
+	// 세션의 맵 이동 요청과 실제 목적지 로드 완료를 연결하기 위한 기록
+	UE_LOG(MarineDemolition, Log, TEXT("[SessionFlow] WorldLoaded World=%s Phase=%d"), *LoadedWorld->GetName(), static_cast<int32>(Phase));
 
 	// LoadMap은 GameViewport의 overlay slot을 비울 수 있다. MoviePlayer가 아직 위를 덮고 있는
 	// 동안 같은 위젯을 다시 붙여, 자동 종료 뒤 검정 프레임이 없게 한다.
@@ -381,6 +393,13 @@ void UMD_LoadingScreenSubsystem::FinishLoadingScreen(bool bShowCompletion)
 	}
 
 	PendingFinish = EMD_LoadingFinishRequest::None;
+	// 로딩 종료가 예약된 세션 이동 콜백을 폐기하는 경우의 진단 기록
+	if (PendingIntroCallbacks.Num() > 0)
+	{
+		// 버튼 완료 이벤트 없이 이동 예약이 사라지는 경로의 식별 정보
+		UE_LOG(MarineDemolition, Warning, TEXT("[SessionFlow] IntroCallbacksDiscarded World=%s Queued=%d ShowCompletion=%d"),
+			*GetNameSafe(GetWorld()), PendingIntroCallbacks.Num(), bShowCompletion);
+	}
 	PendingIntroCallbacks.Reset();
 	StopWorldReadyPolling();
 	EnsureViewportLoadingWidget();
@@ -571,6 +590,10 @@ void UMD_LoadingScreenSubsystem::RemoveLoadingWidgets()
 
 void UMD_LoadingScreenSubsystem::HandleIntroAnimationFinished()
 {
+	// 인트로 타이머 도착 여부와 종료 요청에 따른 이동 콜백 처리 경로 기록
+	UE_LOG(MarineDemolition, Log, TEXT("[SessionFlow] IntroFinished World=%s Phase=%d PendingFinish=%d Queued=%d"),
+		*GetNameSafe(GetWorld()), static_cast<int32>(Phase), static_cast<int32>(PendingFinish), PendingIntroCallbacks.Num());
+
 	if (Phase != EMD_LoadingPhase::Intro) { return; }
 
 	Phase = EMD_LoadingPhase::Loading;

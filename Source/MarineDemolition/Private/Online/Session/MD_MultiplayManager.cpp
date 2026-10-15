@@ -16,6 +16,8 @@
 #include "Engine/Engine.h"
 #include "Engine/GameInstance.h"
 #include "Engine/LocalPlayer.h"
+#include "Engine/NetDriver.h"
+#include "Engine/PendingNetGame.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/PlayerState.h"
 #include "UObject/UObjectGlobals.h"
@@ -33,6 +35,13 @@ void UMD_MultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
 
     InitOnlineSessionInterface();
 
+    // 호스트 종료에 따른 자동 타이틀 복귀에서도 온라인 세션 정리를 위한 구독
+    if (IsValid(GEngine) == true)
+    {
+        // 현재 게임 인스턴스의 연결 실패를 처리할 이벤트 등록
+        GEngine->OnNetworkFailure().AddUObject(this, &ThisClass::HandleNetworkFailure);
+    }
+
     // Session 초대 수락 처리 완료에 대한 이벤트 등록
     if (SessionInterface.IsValid() == true)
     {
@@ -42,6 +51,20 @@ void UMD_MultiplayManager::Initialize(FSubsystemCollectionBase& Collection)
 
 void UMD_MultiplayManager::Deinitialize()
 {
+    // 종료 중 연결 실패로 새 정리 작업이 시작되는 상황 방지
+    if (IsValid(GEngine) == true)
+    {
+        // 게임 인스턴스 수명 종료에 맞춘 네트워크 실패 구독 해제
+        GEngine->OnNetworkFailure().RemoveAll(this);
+    }
+
+    // 종료 이후 보관된 방 생성 요청의 실행 방지
+    PendingCreateAfterDisconnectCleanup = nullptr;
+    // 종료 전용 정리 절차로 비동기 작업 소유권 이전
+    bDisconnectedSessionCleanupInProgress = false;
+    // 종료된 인스턴스의 연결 복구 상태 초기화
+    bDisconnectedSessionNeedsCleanup = false;
+
     OnDestroySessionComplete.RemoveAll(this);
 
     // Online Session의 유효성 검사
@@ -177,6 +200,9 @@ void UMD_MultiplayManager::CleanupSessionOnShutdown()
 
 void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPlayerCount, const FMD_SessionCreateParams& SessionCreateParams)
 {
+    // 방 만들기 입력의 세션 관리자 진입 상태 기록
+    LogSessionLifecycle(TEXT("Create.Enter"), NAME_GameSession);
+
     // 호스팅을 위한 설정 값 유효성 확인
     if (SessionCreateParams.IsValid() == false)
     {
@@ -196,6 +222,85 @@ void UMD_MultiplayManager::CreateSession(const FString& ServerName, int32 MaxPla
         // Create Session 실패 이벤트 실행
         OnCreateSessionComplete.Broadcast(false);
         return;
+    }
+
+    // 연결 상실로 남은 세션이 있을 때 실제 탈퇴 완료까지 새 호스팅의 보류
+    if (bDisconnectedSessionNeedsCleanup == true && SessionInterface.IsValid() == true)
+    {
+        // 이전 작업에서 이미 제거된 세션의 복구 상태 해제
+        if (SessionInterface->GetNamedSession(NAME_GameSession) == nullptr)
+        {
+            // 새 방 생성에 사용할 정상 상태 복원
+            bDisconnectedSessionNeedsCleanup = false;
+        }
+        else
+        {
+            // 다른 종류의 온라인 작업을 덮어쓰지 않도록 재시도 가능 실패 전달
+            if (SessionDelegateHandle.IsValid() == true && bDisconnectedSessionCleanupInProgress == false)
+            {
+                // 진행 중 작업 완료 후 다시 요청할 수 있도록 버튼 상태 복원
+                OnCreateSessionComplete.Broadcast(false);
+                // 기존 온라인 작업의 완료 계약 보존
+                return;
+            }
+
+            // 정리 도중 중복 입력에 의한 생성 요청의 교체 방지
+            if (static_cast<bool>(PendingCreateAfterDisconnectCleanup) == true)
+            {
+                // 먼저 접수된 방 생성 요청 한 건만 유지
+                return;
+            }
+
+            // 비동기 탈퇴 동안 게임 인스턴스 수명 보장을 위한 약한 참조
+            TWeakObjectPtr<UMD_MultiplayManager> WeakThis(this);
+            // 사용자 설정을 보존하여 탈퇴 결과에 따라 방 생성 재개 또는 실패 전달
+            PendingCreateAfterDisconnectCleanup = [WeakThis, ServerName, MaxPlayerCount, SessionCreateParams](bool bCleanedUp)
+            {
+                // 이미 종료된 게임 인스턴스에 대한 작업 재개 방지
+                if (WeakThis.IsValid() == false)
+                {
+                    // 종료된 화면에 대한 완료 이벤트 생략
+                    return;
+                }
+                // 이전 세션 제거가 확인된 경우에만 정상 생성 경로 재진입
+                if (bCleanedUp == true)
+                {
+                    // 정리 대기 중 다른 접속이나 맵 이동이 시작된 경우 요청 재개 방지
+                    UWorld* ResumeWorld = WeakThis->GetWorld();
+                    // 타이틀의 독립 실행 상태에서만 보관된 호스팅 요청 허용
+                    if (IsValid(GEngine) == false || IsValid(ResumeWorld) == false || ResumeWorld->GetNetMode() != NM_Standalone)
+                    {
+                        // 현재 화면을 덮는 지연 호스팅 대신 실패 결과 전달
+                        WeakThis->OnCreateSessionComplete.Broadcast(false);
+                        // 변경된 월드의 진행 상태 보존
+                        return;
+                    }
+                    // 아직 완료되지 않은 연결과 예약된 이동의 조회
+                    FWorldContext* ResumeContext = GEngine->GetWorldContextFromWorld(ResumeWorld);
+                    // 다른 접속 또는 이동을 덮어쓰는 지연 생성의 차단
+                    if (ResumeContext == nullptr || IsValid(ResumeContext->PendingNetGame) == true || ResumeContext->TravelURL.IsEmpty() == false)
+                    {
+                        // 재시도 가능한 기존 실패 이벤트 전달
+                        WeakThis->OnCreateSessionComplete.Broadcast(false);
+                        // 다른 접속 또는 이동의 우선 실행 보장
+                        return;
+                    }
+                    // 보관된 방 설정을 사용한 한 번의 생성 요청
+                    WeakThis->CreateSession(ServerName, MaxPlayerCount, SessionCreateParams);
+                }
+                else
+                {
+                    // 탈퇴 실패 시 버튼 복구를 위한 기존 완료 이벤트 전달
+                    WeakThis->OnCreateSessionComplete.Broadcast(false);
+                }
+            };
+            // Steam 탈퇴 완료 전 접수된 방 생성의 대기 상태 기록
+            LogSessionLifecycle(TEXT("Create.WaitDisconnectCleanup"), NAME_GameSession);
+            // 실패했던 탈퇴의 재시도 또는 진행 중인 정리 완료 대기
+            CleanupDisconnectedSession();
+            // 실제 탈퇴 완료 콜백으로 방 생성 실행 이관
+            return;
+        }
     }
 
     BeginLoadingScreenForTravel(EMD_LoadingContext::CrewAssembling);
@@ -490,6 +595,9 @@ void UMD_MultiplayManager::JoinSession(const FBlueprintSessionResult& BlueprintS
 
 void UMD_MultiplayManager::DestroySession(FName SessionName)
 {
+    // 방 나가기 입력의 세션 관리자 진입 상태 기록
+    LogSessionLifecycle(TEXT("Destroy.Enter"), SessionName);
+
     // Online Subsystem의 Session 모듈 유효성 확인
     if (SessionInterface.IsValid() == false)
     {
@@ -537,8 +645,14 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
     FOnDestroySessionCompleteDelegate OnDestroySessionCompleteDelegate = FOnDestroySessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleDestroySessionComplete);
     SessionDelegateHandle = SessionInterface->AddOnDestroySessionCompleteDelegate_Handle(OnDestroySessionCompleteDelegate);
 
+    // 온라인 서비스의 제거 요청 직전 상태 기록
+    LogSessionLifecycle(TEXT("Destroy.Request"), SessionName);
+
     // Game Session 제거 요청
     bool bWasRequestSuccess = SessionInterface->DestroySession(SessionName);
+
+    // 동기 완료 콜백과 구분할 제거 요청 반환 결과 기록
+    LogSessionLifecycle(TEXT("Destroy.Return"), SessionName, bWasRequestSuccess);
 
     // Game Session 제거 요청 성공 여부 확인
     if (bWasRequestSuccess == false)
@@ -553,6 +667,136 @@ void UMD_MultiplayManager::DestroySession(FName SessionName)
         // Destroy Session 실패 이벤트 실행
         OnDestroySessionComplete.Broadcast(false);
     }
+}
+
+void UMD_MultiplayManager::HandleNetworkFailure(UWorld* World, UNetDriver* NetDriver, ENetworkFailure::Type FailureType, const FString& ErrorString)
+{
+    // 다른 PIE 인스턴스나 이미 제거된 연결에서 전달된 실패의 제외
+    if (IsValid(World) == false || IsValid(NetDriver) == false || World->GetGameInstance() != GetGameInstance())
+    {
+        // 현재 참가자의 연결이 아닌 이벤트 무시
+        return;
+    }
+
+    // 실제 게임 서버에 접속했던 클라이언트 연결에 한정한 정리
+    if (World->GetNetDriver() != NetDriver || NetDriver->NetDriverName != NAME_GameNetDriver || NetDriver->GetNetMode() != NM_Client)
+    {
+        // 호스트의 다른 참가자 연결 및 보조 네트워크 연결 보존
+        return;
+    }
+
+    // 호스트 종료와 연결 시간 초과 및 서버의 연결 종료 통지 처리
+    if (FailureType != ENetworkFailure::ConnectionLost && FailureType != ENetworkFailure::ConnectionTimeout && FailureType != ENetworkFailure::FailureReceived)
+    {
+        // 현재 연결 상실 복구 대상이 아닌 네트워크 오류 제외
+        return;
+    }
+
+    // 실제 온라인 세션이 남아 있을 때만 서비스 탈퇴 요청
+    if (SessionInterface.IsValid() == false || SessionInterface->GetNamedSession(NAME_GameSession) == nullptr)
+    {
+        // 이미 완료된 정상 탈퇴의 중복 처리 방지
+        return;
+    }
+
+    // Steam 로비 소유권 이전과 무관한 클라이언트 연결 상실 상태 기록
+    bDisconnectedSessionNeedsCleanup = true;
+    // 자동 타이틀 복귀와 온라인 세션 잔류의 상관관계 진단
+    LogSessionLifecycle(TEXT("DisconnectCleanup.NetworkFailure"), NAME_GameSession, static_cast<int32>(FailureType));
+    // 맵 이동을 추가하지 않는 실제 온라인 세션 탈퇴 시작
+    CleanupDisconnectedSession();
+}
+
+void UMD_MultiplayManager::CleanupDisconnectedSession()
+{
+    // 기존 온라인 작업과 중복된 탈퇴 요청 방지
+    if (SessionInterface.IsValid() == false || SessionDelegateHandle.IsValid() == true)
+    {
+        // 진행 중 작업 보존 및 방 생성 시 후속 정리 허용
+        return;
+    }
+
+    // 동기 완료 서비스에서도 정리 작업 종류를 먼저 확정하는 처리
+    bDisconnectedSessionCleanupInProgress = true;
+    // 일반 나가기의 추가 맵 이동과 구분되는 완료 이벤트 등록
+    SessionDelegateHandle = SessionInterface->AddOnDestroySessionCompleteDelegate_Handle(
+        FOnDestroySessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleDisconnectedSessionCleanupComplete));
+    // 실제 서비스 탈퇴 요청 전 상태 기록
+    LogSessionLifecycle(TEXT("DisconnectCleanup.Request"), NAME_GameSession);
+    // 동기 실패 콜백에서 재시도한 새 작업과 현재 요청을 구분할 식별자 보관
+    FDelegateHandle CleanupRequestHandle = SessionDelegateHandle;
+    // 로컬 원장 강제 삭제 대신 Steam 로비의 실제 탈퇴 요청
+    if (SessionInterface->DestroySession(NAME_GameSession) == false && bDisconnectedSessionCleanupInProgress == true && SessionDelegateHandle == CleanupRequestHandle)
+    {
+        // 동기 콜백이 없는 접수 실패에 한해 완료 실패의 한 번 전달
+        HandleDisconnectedSessionCleanupComplete(NAME_GameSession, false);
+    }
+}
+
+void UMD_MultiplayManager::HandleDisconnectedSessionCleanupComplete(FName SessionName, bool bWasSuccessful)
+{
+    // 다른 세션의 완료 이벤트 및 이미 처리된 콜백의 제외
+    if (SessionName != NAME_GameSession || bDisconnectedSessionCleanupInProgress == false)
+    {
+        // 진행 중인 GameSession 정리 상태 보존
+        return;
+    }
+
+    // 재진입하는 방 생성 전에 현재 정리 콜백 연결 해제
+    if (SessionInterface.IsValid() == true)
+    {
+        // 이후 새 방의 제거 이벤트에 이전 정리 콜백이 반응하는 상황 방지
+        SessionInterface->ClearOnDestroySessionCompleteDelegate_Handle(SessionDelegateHandle);
+    }
+    // 후속 방 생성에서 사용할 공용 비동기 핸들 반환
+    SessionDelegateHandle.Reset();
+    // 정리 완료 이후 정상 온라인 작업 허용
+    bDisconnectedSessionCleanupInProgress = false;
+    // 실패 후 재시도 판단을 위한 실제 NamedSession 잔류 확인
+    bDisconnectedSessionNeedsCleanup = SessionInterface.IsValid() == true && SessionInterface->GetNamedSession(NAME_GameSession) != nullptr;
+    // 서비스 성공과 실제 세션 제거가 모두 확인된 경우에만 생성 허용
+    bool bCleanedUp = bWasSuccessful == true && SessionInterface.IsValid() == true && bDisconnectedSessionNeedsCleanup == false;
+    // 온라인 탈퇴 결과와 엔진의 타이틀 복귀 상태 기록
+    LogSessionLifecycle(TEXT("DisconnectCleanup.Complete"), SessionName, bCleanedUp);
+    // 보관된 요청의 재진입 및 중복 실행 방지를 위한 소유권 이전
+    TFunction<void(bool)> PendingCreate = MoveTemp(PendingCreateAfterDisconnectCleanup);
+    // 정리 중 방 만들기 입력이 있었던 경우에만 결과 전달
+    if (static_cast<bool>(PendingCreate) == true)
+    {
+        // 맵 재이동 없이 기존 방 생성 경로의 재개 또는 실패 전달
+        PendingCreate(bCleanedUp);
+    }
+}
+
+void UMD_MultiplayManager::LogSessionLifecycle(FName Stage, FName SessionName, int32 Result)
+{
+	// 기본 세션 이름으로 현재 로컬 세션 기록 조회
+	FNamedOnlineSession* Session = SessionInterface.IsValid() == true
+		? SessionInterface->GetNamedSession(SessionName == NAME_None ? NAME_GameSession : SessionName) : nullptr;
+	// 현재 월드의 식별 이름과 네트워크 역할을 기록하기 위한 조회
+	UWorld* World = GetWorld();
+	// 월드가 없는 구간과 독립 실행을 구분하는 진단 기본값
+	int32 NetMode = -1;
+	// 유효한 월드에서만 네트워크 역할 조회
+	if (IsValid(World) == true)
+	{
+		// 독립 실행과 클라이언트 및 리슨 서버의 역할 기록
+		NetMode = static_cast<int32>(World->GetNetMode());
+	}
+	// 세션 요청과 함께 진행 중인 로딩 상태의 조회
+	UMD_LoadingScreenSubsystem* LoadingScreen = GetLoadingScreen();
+	// 로딩 서브시스템이 없는 구간의 비활성 기본값
+	bool bLoadingActive = false;
+	// 유효한 서브시스템에서만 로딩 활성 여부 조회
+	if (IsValid(LoadingScreen) == true)
+	{
+		// 인트로 대기와 맵 이동 전후의 로딩 활성 상태 기록
+		bLoadingActive = LoadingScreen->IsLoadingScreenActive();
+	}
+	// 사용자 식별 정보와 방 이름을 제외한 세션 진행 상태 기록
+	UE_LOG(MarineDemolition, Log, TEXT("[SessionFlow] Stage=%s State=%s Hosting=%d Pending=%d World=%s NetMode=%d Loading=%d Result=%d"),
+		*Stage.ToString(), Session != nullptr ? EOnlineSessionState::ToString(Session->SessionState) : TEXT("NoSession"),
+		Session != nullptr && Session->bHosting == true, SessionDelegateHandle.IsValid(), *GetNameSafe(World), NetMode, bLoadingActive, Result);
 }
 
 // 로컬 화면과 서버가 소유한 모든 클라이언트 화면에서 동시에 로딩을 시작한다.
@@ -601,6 +845,9 @@ void UMD_MultiplayManager::RunAfterLoadingIntro(TFunction<void()>&& Callback)
 void UMD_MultiplayManager::ServerTravelAfterLoadingIntro(const FString& TravelURL, const FString& FailureMessage,
 	TFunction<void(UMD_MultiplayManager&)>&& OnFailed, TFunction<void(UMD_MultiplayManager&)>&& OnStarted)
 {
+	// 서버 맵 이동을 위한 인트로 대기 진입 상태 기록
+	LogSessionLifecycle(TEXT("Travel.WaitIntro"), NAME_GameSession);
+
 	TWeakObjectPtr<UMD_MultiplayManager> WeakThis(this);
 	RunAfterLoadingIntro(
 		[WeakThis, TravelURL, FailureMessage, OnFailed = MoveTemp(OnFailed), OnStarted = MoveTemp(OnStarted)]()
@@ -612,12 +859,18 @@ void UMD_MultiplayManager::ServerTravelAfterLoadingIntro(const FString& TravelUR
 			return;
 		}
 
+		// 인트로 이후 실제 서버 맵 이동 요청 직전 상태 기록
+		Self->LogSessionLifecycle(TEXT("Travel.Request"), NAME_GameSession);
+
 		if (!TravelWorld->ServerTravel(TravelURL))
 		{
 			UE_LOG(MarineDemolition, Error, TEXT("%s %s: %s"), *UE_CALL_LOCATIONINFO, *FailureMessage, *TravelURL);
 			if (OnFailed) { OnFailed(*Self); }
 			return;
 		}
+		// 서버 맵 이동 요청 수락 이후 상태 기록
+		Self->LogSessionLifecycle(TEXT("Travel.Accepted"), NAME_GameSession, true);
+
 		if (OnStarted) { OnStarted(*Self); }
 	});
 }
@@ -625,6 +878,9 @@ void UMD_MultiplayManager::ServerTravelAfterLoadingIntro(const FString& TravelUR
 // 클라이언트는 Session에서 나가고, 리슨 서버 호스트는 서버를 닫는다.
 void UMD_MultiplayManager::DisconnectAfterLoadingIntro()
 {
+	// 연결 종료를 위한 인트로 대기 진입 상태 기록
+	LogSessionLifecycle(TEXT("Disconnect.WaitIntro"), NAME_GameSession);
+
 	TWeakObjectPtr<UMD_MultiplayManager> WeakThis(this);
 	RunAfterLoadingIntro([WeakThis]()
 	{
@@ -635,7 +891,12 @@ void UMD_MultiplayManager::DisconnectAfterLoadingIntro()
 			return;
 		}
 
+		// 실제 연결 종료와 타이틀 복귀 예약 직전 상태 기록
+		Self->LogSessionLifecycle(TEXT("Disconnect.Request"), NAME_GameSession);
+
 		GEngine->HandleDisconnect(DisconnectWorld, DisconnectWorld->GetNetDriver());
+		// 엔진의 타이틀 복귀 예약 이후 상태 기록
+		Self->LogSessionLifecycle(TEXT("Disconnect.Return"), NAME_GameSession);
 		Self->OnDestroySessionComplete.Broadcast(true);
 	});
 }
@@ -905,8 +1166,14 @@ void UMD_MultiplayManager::CreateSessionInternal(const FString& ServerName, int3
     FOnCreateSessionCompleteDelegate OnCreateSessionCompleteDelegate = FOnCreateSessionCompleteDelegate::CreateUObject(this, &ThisClass::HandleCreateSessionComplete, SessionCreateParams.SessionMapPackagePath);
     SessionDelegateHandle = SessionInterface->AddOnCreateSessionCompleteDelegate_Handle(OnCreateSessionCompleteDelegate);
 
+    // 온라인 서비스의 생성 요청 직전 상태 기록
+    LogSessionLifecycle(TEXT("Create.Request"), NAME_GameSession);
+
     // Game Session 생성 요청
     bool bWasRequestSuccess = SessionInterface->CreateSession(*LocalPlayerNetID, NAME_GameSession, SessionSettings);
+
+    // 동기 완료 콜백과 구분할 생성 요청 반환 결과 기록
+    LogSessionLifecycle(TEXT("Create.Return"), NAME_GameSession, bWasRequestSuccess);
 
     // Game Session 생성 요청 성공 여부 확인
     if (bWasRequestSuccess == false)
@@ -1177,6 +1444,9 @@ void UMD_MultiplayManager::RecoverStartGameJoinability()
 
 void UMD_MultiplayManager::HandleCreateSessionComplete(FName SessionName, bool bWasSuccessful, const FString SessionMapPackagePath)
 {
+    // 온라인 서비스의 생성 완료 결과와 정리 전 상태 기록
+    LogSessionLifecycle(TEXT("Create.Complete"), SessionName, bWasSuccessful);
+
     // Session 생성 절차에서 연결한 이벤트 및 핸들 초기화
     if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
     {
@@ -1571,6 +1841,9 @@ void UMD_MultiplayManager::HandleJoinSessionComplete(FName SessionName, EOnJoinS
         return;
     }
 
+    // 이전 연결 상실의 정리 상태가 새로 참가한 세션에 적용되는 상황 방지
+    bDisconnectedSessionNeedsCleanup = false;
+
     // 참여하려는 서버 접속 주소 얻기
     FString ConnectInfo;
     bool bIsResolveSuccess = SessionInterface->GetResolvedConnectString(SessionName, ConnectInfo);
@@ -1631,6 +1904,9 @@ void UMD_MultiplayManager::HandleJoinSessionComplete(FName SessionName, EOnJoinS
 
 void UMD_MultiplayManager::HandleDestroySessionComplete(FName SessionName, bool bWasSuccessful)
 {
+    // 온라인 서비스의 제거 완료 결과와 정리 전 상태 기록
+    LogSessionLifecycle(TEXT("Destroy.Complete"), SessionName, bWasSuccessful);
+
     // Session 제거 절차에서 연결한 이벤트 및 핸들 초기화
     if (SessionInterface.IsValid() == true && SessionDelegateHandle.IsValid() == true)
     {

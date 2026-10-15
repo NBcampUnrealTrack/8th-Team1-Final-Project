@@ -59,6 +59,7 @@ void AMD_FingerprintInterlock::BeginPlay()
 	Super::BeginPlay();
 	Fault->OnStateChanged.AddUniqueDynamic(this, &ThisClass::HandleFault);
 	RefreshFaultHighlight();
+	RefreshFaultAlarm();
 	if (HasAuthority())
 	{
 		if (IsActive()) HandleFault(Fault, FMD_FacilitySnapshot(), Fault->GetSnapshot());
@@ -71,6 +72,7 @@ void AMD_FingerprintInterlock::EndPlay(const EEndPlayReason::Type Reason)
 	GetWorldTimerManager().ClearTimer(FaultTimer);
 	Fault->OnStateChanged.RemoveDynamic(this, &ThisClass::HandleFault);
 	FaultHighlight->bEnabled = false;
+	MDAudioFeedback::Stop(this, FaultAlarmAudio, 0.f);
 	if (HasAuthority()) { ResetScans(); SetSorterLocks(false); }
 	Super::EndPlay(Reason);
 }
@@ -82,6 +84,20 @@ void AMD_FingerprintInterlock::RefreshFaultHighlight()
 	// Driven by the replicated fault snapshot, including late joiners; no extra RPC.
 	FaultHighlight->bUnbound = true;
 	FaultHighlight->bEnabled = GetNetMode() != NM_DedicatedServer && IsActive();
+}
+
+void AMD_FingerprintInterlock::RefreshFaultAlarm()
+{
+	// Every peer follows the replicated incident, including clients joining mid-fault.
+	// 2D playback has no position/range limit and never runs on a dedicated server.
+	if (GetNetMode() == NM_DedicatedServer || !IsActive())
+	{
+		MDAudioFeedback::Stop(this, FaultAlarmAudio, 0.f);
+	}
+	else if (!FaultAlarmAudio.IsValid())
+	{
+		FaultAlarmAudio = MDAudioFeedback::UI(this, TEXT("SFX.Facility.Fingerprint.AlarmLoop"));
+	}
 }
 
 bool AMD_FingerprintInterlock::HasValidConfiguration() const
@@ -104,7 +120,7 @@ int32 AMD_FingerprintInterlock::GetParticipantCount() const
 
 int32 AMD_FingerprintInterlock::CalculateLossPerSecond(int32 Count, int32 Unit)
 {
-	static constexpr int32 Multipliers[] = {0, 1, 2, 4};
+	static constexpr int32 Multipliers[] = {0, 1, 2, 3};
 	return int32(FMath::Clamp<int64>(int64(FMath::Max(0, Unit)) * Multipliers[FMath::Clamp(Count, 1, 4)-1], 0, MAX_int32));
 }
 
@@ -168,6 +184,7 @@ void AMD_FingerprintInterlock::HandleFault(UMD_FacilityFaultComponent*, const FM
 	const FMD_FacilitySnapshot& Current)
 {
 	RefreshFaultHighlight();
+	RefreshFaultAlarm();
 	if (!HasAuthority() || Previous.IsFaultActive() == Current.IsFaultActive()) return;
 	ResetScans();
 	if (Current.IsFaultActive())
@@ -268,6 +285,7 @@ void AMD_FingerprintInterlock::Tick(float DeltaSeconds)
 {
 	Super::Tick(DeltaSeconds);
 	RefreshFaultHighlight();
+	RefreshFaultAlarm();
 	if (!HasAuthority() || !IsActive()) return;
 	if (!HasValidConfiguration())
 	{

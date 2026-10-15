@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Component/Facility/MD_FacilityFaultComponent.h"
+#include "Audio/MD_AudioSubsystem.h"
 #include "MD_FingerprintInterlock.generated.h"
 
 class AMD_FingerprintPad;
@@ -39,7 +40,7 @@ public:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MD|Fingerprint", meta=(ClampMin="1"))
 	float SoloWindowSeconds = 45.f;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MD|Fingerprint", meta=(ClampMin="0"))
-	int32 CostUnit = 5;
+	int32 CostUnit = 1;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MD|Fingerprint")
 	bool bAutomaticFaults = true;
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category="MD|Fingerprint", meta=(ClampMin="1"))
@@ -62,7 +63,7 @@ public:
 	bool HasValidConfiguration() const;
 	UFUNCTION(BlueprintPure, Category="MD|Fingerprint")
 	int32 GetParticipantCount() const;
-	static int32 CalculateLossPerSecond(int32 Count, int32 Unit = 5);
+	static int32 CalculateLossPerSecond(int32 Count, int32 Unit = 1);
 	// 요청 시점의 고장 번호와 현재 사건 일치 확인 후 패드 인증 시작
 	bool BeginScan(AMD_FingerprintPad* Pad, APawn* Pawn, int32 ExpectedFaultId);
 	void ReleaseScan(AMD_FingerprintPad* Pad, APawn* Pawn);
@@ -71,6 +72,8 @@ protected:
 	virtual void EndPlay(const EEndPlayReason::Type Reason) override;
 private:
 	void RefreshFaultHighlight();
+	void RefreshFaultAlarm();
+	FMD_AudioHandle FaultAlarmAudio;
 	UFUNCTION()
 	void HandleFault(UMD_FacilityFaultComponent* Component, const FMD_FacilitySnapshot& Previous,
 		const FMD_FacilitySnapshot& Current);
