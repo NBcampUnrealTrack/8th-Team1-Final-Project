@@ -9,6 +9,8 @@
 #include "Engine/StaticMesh.h"
 #include "Gameplay/Collision/MD_CollisionChannels.h"
 #include "Net/UnrealNetwork.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "UObject/ConstructorHelpers.h"
 
 AMD_EquipmentPickup::AMD_EquipmentPickup()
 {
@@ -31,6 +33,11 @@ AMD_EquipmentPickup::AMD_EquipmentPickup()
 	PhysicsRoot->SetWalkableSlopeOverride(FWalkableSlopeOverride(WalkableSlope_Unwalkable, 0.0f));
 	PhysicsRoot->SetSimulatePhysics(true);
 	PhysicsRoot->SetUseCCD(true);
+	PhysicsRoot->SetLinearDamping(0.05f);
+	PhysicsRoot->SetAngularDamping(0.1f);
+	static ConstructorHelpers::FObjectFinder<UPhysicalMaterial> PickupMaterial(
+		TEXT("/Game/Physics/PM_MD_LoosePickup.PM_MD_LoosePickup"));
+	if (PickupMaterial.Succeeded()) ContactMaterial = PickupMaterial.Object;
 
 	Mesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("Mesh"));
 	Mesh->SetupAttachment(PhysicsRoot);
@@ -98,11 +105,16 @@ bool AMD_EquipmentPickup::ApplyItemVisual()
 		return false;
 	}
 	UStaticMesh* ItemMesh = ItemPayload.ToolDefinition->ToolMesh;
+	const float DefinitionMass = ItemPayload.ToolDefinition->WorldMassKg;
+	if (!FMath::IsFinite(DefinitionMass) || DefinitionMass < 0.0f) return false;
+	const float ResolvedMassKg = DefinitionMass > 0.0f ? DefinitionMass : ItemMassKg;
+	if (IsValid(ContactMaterial) && PhysicsRoot->BodyInstance.GetPhysMaterialOverride() != ContactMaterial)
+		PhysicsRoot->SetPhysMaterialOverride(ContactMaterial);
 	const FBoxSphereBounds Bounds = ItemMesh->GetBounds();
 	if (Bounds.Origin.ContainsNaN() || Bounds.BoxExtent.ContainsNaN()
 		|| !FMath::IsFinite(Bounds.SphereRadius) || Bounds.SphereRadius <= 0.0f
 		|| !FMath::IsFinite(MinimumCollisionExtent) || MinimumCollisionExtent <= 0.0f
-		|| !FMath::IsFinite(ItemMassKg) || ItemMassKg <= 0.0f)
+		|| !FMath::IsFinite(ResolvedMassKg) || ResolvedMassKg <= 0.0f)
 	{
 		return false;
 	}
@@ -110,7 +122,7 @@ bool AMD_EquipmentPickup::ApplyItemVisual()
 	// The actor transform and throw sweep refer to the center of the body's bounds.
 	Mesh->SetRelativeLocation(-Bounds.Origin);
 	PhysicsRoot->SetBoxExtent(Bounds.BoxExtent.ComponentMax(FVector(MinimumCollisionExtent)));
-	PhysicsRoot->SetMassOverrideInKg(NAME_None, ItemMassKg, true);
+	PhysicsRoot->SetMassOverrideInKg(NAME_None, ResolvedMassKg, true);
 	return true;
 }
 

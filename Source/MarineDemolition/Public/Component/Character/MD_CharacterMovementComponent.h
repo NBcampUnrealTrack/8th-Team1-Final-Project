@@ -64,6 +64,16 @@ public:
 	bool GetWantsToSwim() const { return bWantsToSwim; }
 
 protected:
+	virtual bool IsWalkable(const FHitResult& Hit) const override;
+	virtual bool CanStepUp(const FHitResult& Hit) const override;
+	virtual void TwoWallAdjust(FVector& WorldSpaceDelta, const FHitResult& Hit, const FVector& OldHitNormal) const override;
+	virtual void ComputeFloorDist(const FVector& CapsuleLocation, float LineDistance, float SweepDistance, FFindFloorResult& OutFloorResult, float SweepRadius, const FHitResult* DownwardSweepResult = nullptr) const override;
+	virtual void InitCollisionParams(FCollisionQueryParams& OutParams, FCollisionResponseParams& OutResponseParam) const override;
+
+	virtual void ApplyImpactPhysicsForces(const FHitResult& Impact, const FVector& ImpactAcceleration, const FVector& ImpactVelocity) override;
+	virtual void CapsuleTouched(UPrimitiveComponent* OverlappedComp, AActor* Other, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult) override;
+	virtual void ApplyRepulsionForce(float DeltaSeconds) override;
+
 	/** 외부 이동 모드 전환 시 남아 있는 사다리 상태를 정리하는 함수 */
 	virtual void OnMovementModeChanged(EMovementMode PreviousMovementMode, uint8 PreviousCustomMode) override;
 
@@ -113,6 +123,10 @@ protected:
 	float LadderJumpVerticalSpeed = 300.0f;
 
 private:
+	// Multiple movement sweeps can hit the same body before Chaos consumes its impulse.
+	TArray<TWeakObjectPtr<UPrimitiveComponent>, TInlineAllocator<4>> PushedPickups;
+	uint64 PickupPushFrame = MAX_uint64;
+
 	/** 서버가 확정하고 클라이언트 이동 물리가 참조하는 현재 사다리 */
 	UPROPERTY(ReplicatedUsing = OnRep_CurrentLadder)
 	TObjectPtr<AMD_Ladder> CurrentLadder = nullptr;
@@ -199,6 +213,10 @@ protected:
 	void LeaveLadderAtBottom();
 
 private:
+	using FPickupFloorIgnoreList = TArray<TWeakObjectPtr<UPrimitiveComponent>, TInlineAllocator<8>>;
+	// Only active during a synchronous floor query; movement and physics still hit pickups.
+	mutable const FPickupFloorIgnoreList* PickupFloorIgnores = nullptr;
+
 	/** 서버가 복제한 사다리 참조에 맞춰 클라이언트 이동 모드를 보정하는 함수 */
 	UFUNCTION()
 	void OnRep_CurrentLadder();

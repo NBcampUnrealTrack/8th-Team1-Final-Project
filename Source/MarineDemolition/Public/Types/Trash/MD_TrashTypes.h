@@ -124,6 +124,11 @@ struct MARINEDEMOLITION_API FMD_TrashMeshVariant
 
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash")
 	TSoftObjectPtr<UStaticMesh> Mesh;
+
+	/** 메시별 실제 질량. 0이면 종류 행의 MassKg를 사용한다. */
+	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "MD|Trash",
+		meta = (ClampMin = "0", Units = "kg"))
+	float MassKgOverride = 0.0f;
 };
 
 /**
@@ -172,6 +177,8 @@ struct MARINEDEMOLITION_API FMD_TrashKindRow : public FTableRowBase
 	FName GetDefaultVariantId() const;
 	/** 이전 액터의 None은 첫 Variant로 해석한다. 잘못된 명시적 이름은 대체하지 않는다. */
 	bool ResolveMesh(FName VariantId, TSoftObjectPtr<UStaticMesh>& OutMesh) const;
+	/** 유효한 메시별 질량을 우선 사용한다. 무효 설정은 종류 질량 또는 1kg로 보완한다. */
+	float ResolveMassKg(FName VariantId) const;
 	void PostSerialize(const FArchive& Ar);
 	virtual void OnPostDataImport(const UDataTable* InDataTable, FName InRowName,
 		TArray<FString>& OutCollectedImportProblems) override;

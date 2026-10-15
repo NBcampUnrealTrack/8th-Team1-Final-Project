@@ -4,14 +4,186 @@
 #include "Component/Character/MD_CharacterMovementComponent.h"
 
 #include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "CollisionQueryParams.h"
+#include "Engine/OverlapInfo.h"
 #include "GameFramework/Character.h"
 #include "Net/UnrealNetwork.h"
+#include "PhysicsEngine/BodyInstance.h"
+#include "World/Equipment/MD_EquipmentPickup.h"
+#include "World/Trash/MD_TrashItem.h"
 #include "World/Traversal/MD_Ladder.h"
+
+namespace
+{
+	bool IsLoosePickup(const UPrimitiveComponent* Component)
+	{
+		const AActor* Owner = IsValid(Component) ? Component->GetOwner() : nullptr;
+		return IsValid(Owner) && (Owner->IsA<AMD_TrashItem>() || Owner->IsA<AMD_EquipmentPickup>());
+	}
+}
 
 UMD_CharacterMovementComponent::UMD_CharacterMovementComponent()
 {
 	// 현재 사다리 참조를 소유 캐릭터와 함께 복제하기 위한 기본 설정 활성화
 	SetIsReplicatedByDefault(true);
+}
+
+bool UMD_CharacterMovementComponent::IsWalkable(const FHitResult& Hit) const
+{
+	return !IsLoosePickup(Hit.GetComponent()) && Super::IsWalkable(Hit);
+}
+
+bool UMD_CharacterMovementComponent::CanStepUp(const FHitResult& Hit) const
+{
+	return !IsLoosePickup(Hit.GetComponent()) && Super::CanStepUp(Hit);
+}
+
+void UMD_CharacterMovementComponent::TwoWallAdjust(FVector& WorldSpaceDelta, const FHitResult& Hit, const FVector& OldHitNormal) const
+{
+	Super::TwoWallAdjust(WorldSpaceDelta, Hit, OldHitNormal);
+	// UE can allow upward slides from the capsule normal even on an unwalkable body.
+	if (IsMovingOnGround() && IsLoosePickup(Hit.GetComponent()) && GetGravitySpaceZ(WorldSpaceDelta) > 0.0f)
+	{
+		WorldSpaceDelta = ProjectToGravityFloor(WorldSpaceDelta);
+	}
+}
+
+void UMD_CharacterMovementComponent::ComputeFloorDist(const FVector& CapsuleLocation, float LineDistance, float SweepDistance, FFindFloorResult& OutFloorResult, float SweepRadius, const FHitResult* DownwardSweepResult) const
+{
+	Super::ComputeFloorDist(CapsuleLocation, LineDistance, SweepDistance, OutFloorResult, SweepRadius, DownwardSweepResult);
+	if (!IsLoosePickup(OutFloorResult.HitResult.GetComponent())) return;
+
+	// A small unwalkable body can hide the real floor and repeatedly trigger falling.
+	// Retry only these blocked queries, using the engine's floor distance and gravity rules.
+	FPickupFloorIgnoreList IgnoredPickups;
+	TGuardValue<const FPickupFloorIgnoreList*> IgnoreScope(PickupFloorIgnores, &IgnoredPickups);
+	constexpr int32 MaxIgnoredPickups = 8;
+	while (IgnoredPickups.Num() < MaxIgnoredPickups)
+	{
+		UPrimitiveComponent* Component = OutFloorResult.HitResult.GetComponent();
+		if (!IsLoosePickup(Component) || IgnoredPickups.Contains(Component)) break;
+		IgnoredPickups.Add(Component);
+		// Do not reuse a supplied downward pickup hit: it bypasses the floor sweep.
+		Super::ComputeFloorDist(CapsuleLocation, LineDistance, SweepDistance, OutFloorResult, SweepRadius, nullptr);
+	}
+	// At the retry limit, a pickup penetration is still not evidence of a floor.
+	if (IsLoosePickup(OutFloorResult.HitResult.GetComponent())) OutFloorResult.Clear();
+}
+
+void UMD_CharacterMovementComponent::InitCollisionParams(FCollisionQueryParams& OutParams, FCollisionResponseParams& OutResponseParam) const
+{
+	Super::InitCollisionParams(OutParams, OutResponseParam);
+	if (!PickupFloorIgnores) return;
+	for (const TWeakObjectPtr<UPrimitiveComponent>& Component : *PickupFloorIgnores)
+	{
+		if (Component.IsValid()) OutParams.AddIgnoredComponent(Component.Get());
+	}
+}
+
+void UMD_CharacterMovementComponent::ApplyImpactPhysicsForces(const FHitResult& Impact, const FVector& ImpactAcceleration, const FVector& ImpactVelocity)
+{
+	UPrimitiveComponent* Component = Impact.GetComponent();
+	if (!IsLoosePickup(Component))
+	{
+		Super::ApplyImpactPhysicsForces(Impact, ImpactAcceleration, ImpactVelocity);
+		return;
+	}
+	if (!bEnablePhysicsInteraction || !Impact.bBlockingHit) return;
+	FBodyInstance* Body = Component->GetBodyInstance(Impact.BoneName);
+	if (!Body || !Body->IsInstanceSimulatingPhysics()) return;
+
+	if (PickupPushFrame != GFrameCounter)
+	{
+		PickupPushFrame = GFrameCounter;
+		PushedPickups.Reset();
+	}
+	if (PushedPickups.Contains(Component)) return;
+
+	// Push along the floor at the body's center: contact height must not launch or spin it.
+	const FVector Direction = ProjectToGravityFloor(-Impact.ImpactNormal).GetSafeNormal();
+	const float ClosingSpeed = FMath::Max(0.0f, FVector::DotProduct(ImpactVelocity - Body->GetUnrealWorldVelocity(), Direction));
+	const float BodyMass = Body->GetBodyMass();
+	if (!FMath::IsFinite(ClosingSpeed) || !FMath::IsFinite(BodyMass) || BodyMass <= 0.0f) return;
+	// Model a gentle 50 N horizontal contact, integrated over this frame. The impulse
+	// cannot accelerate the item beyond the character's closing speed. kg*cm/s units
+	// require the 100 conversion from newtons; this avoids a fixed impulse per frame.
+	constexpr float ContactForceNewtons = 50.0f;
+	const float DeltaSeconds = GetWorld() ? GetWorld()->GetDeltaSeconds() : 0.0f;
+	if (!FMath::IsFinite(DeltaSeconds) || DeltaSeconds <= 0.0f) return;
+	const float Impulse = FMath::Min(BodyMass * ClosingSpeed, ContactForceNewtons * 100.0f * DeltaSeconds);
+	if (Impulse <= 0.0f) return;
+	PushedPickups.Add(Component);
+	Component->AddImpulse(Direction * Impulse, Impact.BoneName);
+}
+
+void UMD_CharacterMovementComponent::CapsuleTouched(UPrimitiveComponent* OverlappedComp, AActor* Other, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
+{
+	if (!IsLoosePickup(OtherComp))
+	{
+		Super::CapsuleTouched(OverlappedComp, Other, OtherComp, OtherBodyIndex, bFromSweep, SweepResult);
+	}
+}
+
+void UMD_CharacterMovementComponent::ApplyRepulsionForce(float DeltaSeconds)
+{
+	if (!UpdatedPrimitive || !CharacterOwner || RepulsionForce <= 0.0f) return;
+	const TArray<FOverlapInfo>& Overlaps = UpdatedPrimitive->GetOverlapInfos();
+	if (!Overlaps.ContainsByPredicate([](const FOverlapInfo& Overlap)
+	{
+		return IsLoosePickup(Overlap.OverlapInfo.Component.Get());
+	}))
+	{
+		Super::ApplyRepulsionForce(DeltaSeconds);
+		return;
+	}
+
+	// UE 5.8 has no per-body repulsion hook. Preserve its algorithm for other bodies
+	// in mixed overlaps, excluding only loose pickups from the character-mass radial force.
+	FCollisionQueryParams QueryParams(SCENE_QUERY_STAT(MD_ApplyRepulsionForce));
+	float CapsuleRadius = 0.0f, CapsuleHalfHeight = 0.0f;
+	CharacterOwner->GetCapsuleComponent()->GetScaledCapsuleSize(CapsuleRadius, CapsuleHalfHeight);
+	const float RepulsionRadius = CapsuleRadius * 1.2f;
+	const float StopBodyDistance = 2.5f;
+	const FVector MyLocation = UpdatedPrimitive->GetComponentLocation();
+	for (const FOverlapInfo& Overlap : Overlaps)
+	{
+		UPrimitiveComponent* Component = Overlap.OverlapInfo.Component.Get();
+		if (!IsValid(Component) || Component->Mobility < EComponentMobility::Movable || IsLoosePickup(Component)) continue;
+		const int32 BodyIndex = Overlap.GetBodyIndex();
+		const USkeletalMeshComponent* SkeletalMesh = BodyIndex != INDEX_NONE ? Cast<USkeletalMeshComponent>(Component) : nullptr;
+		FBodyInstance* Body = SkeletalMesh
+			? (SkeletalMesh->Bodies.IsValidIndex(BodyIndex) ? SkeletalMesh->Bodies[BodyIndex] : nullptr)
+			: Component->GetBodyInstance();
+		if (!Body || !Body->IsInstanceSimulatingPhysics()) continue;
+
+		const FVector BodyVelocity = Body->GetUnrealWorldVelocity();
+		const FVector BodyLocation = Body->GetUnrealWorldTransform().GetLocation();
+		FHitResult Hit;
+		const bool bHasHit = UpdatedPrimitive->LineTraceComponent(Hit, BodyLocation,
+			ProjectToGravityFloor(MyLocation) + GetGravitySpaceComponentZ(BodyLocation), QueryParams);
+		FVector HitLocation = Hit.ImpactPoint;
+		bool bPenetrating = Hit.bStartPenetrating || Hit.PenetrationDepth > StopBodyDistance;
+		if (!bHasHit)
+		{
+			HitLocation = BodyLocation;
+			bPenetrating = true;
+		}
+		const float DistanceNow = ProjectToGravityFloor(HitLocation - BodyLocation).SizeSquared();
+		const float DistanceLater = ProjectToGravityFloor(HitLocation - (BodyLocation + BodyVelocity * DeltaSeconds)).SizeSquared();
+		if (bHasHit && DistanceNow < StopBodyDistance && !bPenetrating)
+		{
+			Body->SetLinearVelocity(FVector::ZeroVector, false);
+		}
+		else if (DistanceLater <= DistanceNow || bPenetrating)
+		{
+			FVector ForceCenter = MyLocation;
+			const FVector::FReal MyHeight = GetGravitySpaceZ(MyLocation);
+			SetGravitySpaceZ(ForceCenter, bHasHit ? GetGravitySpaceZ(HitLocation)
+				: FMath::Clamp(GetGravitySpaceZ(BodyLocation), MyHeight - CapsuleHalfHeight, MyHeight + CapsuleHalfHeight));
+			Body->AddRadialForceToBody(ForceCenter, RepulsionRadius, RepulsionForce * Mass, ERadialImpulseFalloff::RIF_Constant);
+		}
+	}
 }
 
 void UMD_CharacterMovementComponent::GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const

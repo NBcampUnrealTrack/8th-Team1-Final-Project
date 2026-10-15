@@ -11,6 +11,7 @@
 class UMD_InteractionPromptComponent;
 
 class UStaticMeshComponent;
+class UPhysicalMaterial;
 class AMD_TrashSpawnVolume;
 
 /**
@@ -81,6 +82,9 @@ public:
 	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Trash|Physics")
+	TObjectPtr<UPhysicalMaterial> ContactMaterial;
+
 	/** 배치 인스턴스에서 종류를 바꿔도 에디터에 바로 반영되게 한다 */
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;

@@ -9,6 +9,8 @@
 #include "Gameplay/Trash/MD_TrashLibrary.h"
 #include "GameplayTags/MD_GameplayTags.h"
 #include "Net/UnrealNetwork.h"
+#include "PhysicalMaterials/PhysicalMaterial.h"
+#include "UObject/ConstructorHelpers.h"
 #include "World/Trash/MD_TrashSpawnVolume.h"
 
 AMD_TrashItem::AMD_TrashItem()
@@ -35,9 +37,13 @@ AMD_TrashItem::AMD_TrashItem()
 	Mesh->SetGenerateOverlapEvents(true);
 	Mesh->SetSimulatePhysics(true);
 
-	// 감쇠가 없으면 가벼운 쓰레기가 계속 굴러가 동선 밖으로 사라진다
-	Mesh->SetLinearDamping(0.5f);
-	Mesh->SetAngularDamping(1.f);
+	// Small air-drag approximation; floor contact supplies most of the stopping force.
+	Mesh->SetLinearDamping(0.05f);
+	Mesh->SetAngularDamping(0.1f);
+	Mesh->SetUseCCD(true);
+	static ConstructorHelpers::FObjectFinder<UPhysicalMaterial> PickupMaterial(
+		TEXT("/Game/Physics/PM_MD_LoosePickup.PM_MD_LoosePickup"));
+	if (PickupMaterial.Succeeded()) ContactMaterial = PickupMaterial.Object;
 
 	// 산재 쓰레기는 종류와 무관하게 태그가 같으므로 코드에서 기본값을 준다
 	PickupMethodTag = MDGameplayTags::Interaction_Pickup_Physics;
@@ -241,6 +247,8 @@ void AMD_TrashItem::ApplyTrashKindRow()
 	{
 		return;
 	}
+	if (IsValid(ContactMaterial) && Mesh->BodyInstance.GetPhysMaterialOverride() != ContactMaterial)
+		Mesh->SetPhysMaterialOverride(ContactMaterial);
 
 	// BP/이전 인스턴스의 단색 override가 Variant 메시의 원래 머티리얼을 가리지 않게 한다.
 	// 같은 메시를 다시 적용하는 경우에도 슬롯을 비워 메시 에셋의 머티리얼을 사용한다.
@@ -258,7 +266,7 @@ void AMD_TrashItem::ApplyTrashKindRow()
 			// 이전 맵의 None 선택도 이름을 저장하도록 정규화한다. 클라이언트는 서버 값을 받는다.
 			if (HasAuthority() && TrashVariantId.IsNone()) TrashVariantId = KindRow.GetDefaultVariantId();
 			bValidVariant = KindRow.ResolveMesh(TrashVariantId, MeshReference);
-			MassKg = KindRow.MassKg;
+			MassKg = KindRow.ResolveMassKg(TrashVariantId);
 			Category = KindRow.Category;
 		});
 		UStaticMesh* KindMesh = nullptr;
