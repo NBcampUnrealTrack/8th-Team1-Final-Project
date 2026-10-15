@@ -117,7 +117,7 @@ struct MARINEDEMOLITION_API FMD_ControlSettings
 
 	// 음성 채팅 송신에 사용할 입력 키
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "조작")
-	FKey VoiceChatKey = EKeys::M;
+	FKey VoiceChatKey = EKeys::V;
 
 	// 여섯 개 핫바 슬롯의 직접 선택에 사용할 입력 키 목록
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, SaveGame, Category = "조작")

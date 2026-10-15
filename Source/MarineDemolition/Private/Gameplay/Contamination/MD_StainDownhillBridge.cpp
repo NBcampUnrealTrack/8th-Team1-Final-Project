@@ -9,7 +9,8 @@ using namespace UE::Geometry;
 
 namespace
 {
-	constexpr double ContactTolerance = 0.02;
+	// 하강 연결부의 접촉 판정과 겹침 보정에 사용할 허용 거리
+	constexpr double DownhillContactTolerance = 0.02;
 	constexpr int32 MaximumBridges = 32;
 
 	// On the clicked plane, these bounds are the actual sticker footprint, including its rotation.
@@ -76,7 +77,8 @@ namespace
 			double Low = 0, High = 1;
 			for (int32 Axis = 0; Axis < 2; ++Axis)
 			{
-				const double Min = Axis == 0 ? 0 : ContactTolerance, Max = Axis == 0 ? 1 : Radius;
+				// 시작 면과의 자기 접촉을 피하기 위한 탐색 거리 하한
+				const double Min = Axis == 0 ? 0 : DownhillContactTolerance, Max = Axis == 0 ? 1 : Radius;
 				const double Delta = Ends[1][Axis] - Ends[0][Axis];
 				if (FMath::Abs(Delta) < 1.e-8)
 				{ if (Ends[0][Axis] < Min || Ends[0][Axis] > Max) return; }
@@ -102,10 +104,13 @@ namespace
 		if (bOverlapLanding)
 		{
 			// Alternate operand for ambiguous edge-only contacts. The visible ramp plane is unchanged.
-			Points[2] += (EndA-A).GetSafeNormal()*ContactTolerance;
-			Points[3] += (EndB-B).GetSafeNormal()*ContactTolerance;
+			// 착지 면 첫 끝점의 미세 겹침 확보
+			Points[2] += (EndA-A).GetSafeNormal()*DownhillContactTolerance;
+			// 착지 면 두 번째 끝점의 미세 겹침 확보
+			Points[3] += (EndB-B).GetSafeNormal()*DownhillContactTolerance;
 			for (int32 K : {4,5})
-				Points[K].Z = EndA.Z - (LandingNormal.X*(Points[K].X-EndA.X) + LandingNormal.Y*(Points[K].Y-EndA.Y))/LandingNormal.Z - ContactTolerance;
+				// 경계 접촉의 모호성을 줄이기 위한 바닥 꼭짓점의 하향 보정
+				Points[K].Z = EndA.Z - (LandingNormal.X*(Points[K].X-EndA.X) + LandingNormal.Y*(Points[K].Y-EndA.Y))/LandingNormal.Z - DownhillContactTolerance;
 		}
 		FVector Center = FVector::ZeroVector;
 		for (const FVector& P : Points) { Wedge.AppendVertex(P); Center += P / 6; }
@@ -137,12 +142,15 @@ bool FMD_StainDownhillBridge::Gather(const FDynamicMesh3& Surface, const FDynami
 		if (TopNormal.Z < 1 - 1.e-6 || FMath::Abs(SideNormal.Z) > 0.2) continue;
 		FVector A, B; Surface.GetEdgeV(Edge, A, B);
 		// Bridge only a departure from the clicked face. Other folded faces retain their authored topology.
-		if (FMath::Max(FMath::Abs(A.Z), FMath::Abs(B.Z)) > ContactTolerance
-			|| !ClipEdge(A, B, HalfSize) || FMath::ClosestPointOnSegment(FVector::ZeroVector, A, B).Length() >= Radius) continue;
+		// 클릭한 면에서 출발하는 모서리의 접촉 거리 확인
+		if (FMath::Max(FMath::Abs(A.Z), FMath::Abs(B.Z)) > DownhillContactTolerance
+			// 스티커 영역과 겹치지 않거나 탐색 반경 밖인 모서리 제외
+			|| ClipEdge(A, B, HalfSize) == false || FMath::ClosestPointOnSegment(FVector::ZeroVector, A, B).Length() >= Radius) continue;
 		const FIndex3i SideVertices = Surface.GetTriangle(Side);
 		double Lowest = TNumericLimits<double>::Max();
 		for (int32 K = 0; K < 3; ++K) Lowest = FMath::Min(Lowest, Surface.GetVertex(SideVertices[K]).Z);
-		if (Lowest >= FMath::Min(A.Z, B.Z) - ContactTolerance) continue;
+		// 높이 차이가 허용 거리보다 작은 연결 후보 제외
+		if (Lowest >= FMath::Min(A.Z, B.Z) - DownhillContactTolerance) continue;
 		if (!Tree) Tree = MakeUnique<FDynamicMeshAABBTree3>(&LandingSurface);
 		TArray<FDynamicMesh3> BestWedges;
 		double BestScore = 0;
@@ -172,7 +180,8 @@ bool FMD_StainDownhillBridge::Gather(const FDynamicMesh3& Surface, const FDynami
 				if (Progress && Progress->Cancelled()) return false;
 				if (Cuts[Index] - Cuts[Index - 1] < 1.e-7) continue;
 				const FVector StartA = FMath::Lerp(A, B, Cuts[Index - 1]), StartB = FMath::Lerp(A, B, Cuts[Index]);
-				const FRay3d Ray((StartA + StartB) * 0.5 + Direction * ContactTolerance, Direction);
+				// 출발 면 재충돌을 피하기 위한 광선 시작점 전진
+				const FRay3d Ray((StartA + StartB) * 0.5 + Direction * DownhillContactTolerance, Direction);
 				double Distance; int32 Hit;
 				if (!Tree->FindNearestHitTriangle(Ray, Distance, Hit, IMeshSpatial::FQueryOptions(Radius))
 					|| LandingSurface.GetTriNormal(Hit).Z < 0.9)
@@ -182,12 +191,14 @@ bool FMD_StainDownhillBridge::Gather(const FDynamicMesh3& Surface, const FDynami
 				if (Denominator >= -1.e-8) { if (!Flush()) return false; continue; }
 				const double DA = FVector::DotProduct(Point - StartA, Normal) / Denominator;
 				const double DB = FVector::DotProduct(Point - StartB, Normal) / Denominator;
-				if (FMath::Min(DA, DB) < ContactTolerance || FMath::Max(DA, DB) > Radius)
+				// 접촉 오차 범위 또는 최대 탐색 거리 밖의 착지 후보 제외
+				if (FMath::Min(DA, DB) < DownhillContactTolerance || FMath::Max(DA, DB) > Radius)
 				{ if (!Flush()) return false; continue; }
 				const FVector EndA = StartA + Direction * DA, EndB = StartB + Direction * DB;
 				Score += Cuts[Index] - Cuts[Index - 1];
 				// Adjacent triangles on the same landing form one wedge, not one Boolean per triangle.
-				if (bRun && RunB.Equals(StartA, ContactTolerance) && LandingB.Equals(EndA, ContactTolerance)
+				// 같은 착지 면의 인접 구간을 하나의 경사 연결로 병합
+				if (bRun == true && RunB.Equals(StartA, DownhillContactTolerance) == true && LandingB.Equals(EndA, DownhillContactTolerance) == true
 					&& FVector::DotProduct(RunNormal, Normal) > 1 - 1.e-8)
 				{ RunB = StartB; LandingB = EndB; }
 				else
