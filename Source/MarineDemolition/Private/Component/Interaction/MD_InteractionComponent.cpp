@@ -31,6 +31,7 @@
 #include "PhysicsEngine/PhysicsHandleComponent.h"
 #include "World/Sample/MD_QuestItem.h"
 #include "World/Trash/MD_TrashSorter.h"
+#include "World/Trash/MD_TrashItem.h"
 #include "World/Wall/MD_CuttableWall.h"
 #include "World/Facility/MD_FingerprintInterlock.h"
 #include "World/Facility/MD_FingerprintPad.h"
@@ -1154,7 +1155,14 @@ FVector UMD_InteractionComponent::ResolveHoldTargetLocation(const FTransform& Ho
 		const FBoxSphereBounds LocalBounds = Held->CalcBounds(FTransform::Identity);
 		const FVector Scale = Held->GetComponentScale();
 		const FVector HalfExtent = (LocalBounds.BoxExtent * Scale.GetAbs() * HoldProbeRadiusScale).ComponentMax(FVector(HoldProbeMinRadius));
-		const FQuat Rotation = ActiveHoldProfile.bConstrainRotation ? HoldTransform.GetRotation() : Held->GetComponentQuat();
+		FQuat Rotation = ActiveHoldProfile.bConstrainRotation ? HoldTransform.GetRotation() : Held->GetComponentQuat();
+		if (ActiveHoldProfile.bConstrainRotation)
+		{
+			if (const AMD_TrashItem* Trash = Cast<AMD_TrashItem>(Held->GetOwner()))
+			{
+				Rotation *= Trash->GetHoldRotationOffset();
+			}
+		}
 		const FVector GrabOffset = Held->GetComponentTransform().InverseTransformPositionNoScale(Held->GetCenterOfMass());
 		const FVector CenterOffset = Rotation.RotateVector(LocalBounds.Origin * Scale - GrabOffset);
 		const FVector Direction = ToDesired / DesiredDistance;
@@ -1212,7 +1220,12 @@ void UMD_InteractionComponent::UpdateHeldTarget()
 
 	if (ActiveHoldProfile.bConstrainRotation)
 	{
-		PhysicsHandle->SetTargetLocationAndRotation(TargetLocation, HoldTransform.Rotator());
+		FQuat TargetRotation = HoldTransform.GetRotation();
+		if (const AMD_TrashItem* Trash = Cast<AMD_TrashItem>(HeldActor))
+		{
+			TargetRotation *= Trash->GetHoldRotationOffset();
+		}
+		PhysicsHandle->SetTargetLocationAndRotation(TargetLocation, TargetRotation.Rotator());
 	}
 	else
 	{

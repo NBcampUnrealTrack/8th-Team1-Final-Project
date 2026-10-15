@@ -23,7 +23,6 @@ public:
     FString RecoveryRoot() const;
     static constexpr double IntervalSeconds = 300.0;
 private:
-    friend class FMDSafetyRecoveryTest;
     bool Tick(float Delta);
     bool Connected() const;
     void AssetDrag(const TArray<FAssetData>& Assets, UActorFactory* Factory);

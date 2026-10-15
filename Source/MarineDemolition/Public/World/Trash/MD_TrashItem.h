@@ -11,6 +11,7 @@
 class UMD_InteractionPromptComponent;
 
 class UStaticMeshComponent;
+class UPhysicalMaterial;
 class AMD_TrashSpawnVolume;
 
 /**
@@ -45,6 +46,8 @@ public:
 
 	UFUNCTION(BlueprintPure, Category = "MD|Trash")
 	FName GetTrashKindId() const { return TrashKindId; }
+
+	FQuat GetHoldRotationOffset() const { return AppliedHoldRotationOffset; }
 
 	/** 동적 스폰 전에 종류를 지정한다. 서버에서 바꾼 값은 클라이언트에도 복제된다. */
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Trash")
@@ -81,6 +84,9 @@ public:
 	TObjectPtr<UMD_InteractionPromptComponent> InteractionPrompt;
 
 protected:
+	UPROPERTY(EditDefaultsOnly, Category = "MD|Trash|Physics")
+	TObjectPtr<UPhysicalMaterial> ContactMaterial;
+
 	/** 배치 인스턴스에서 종류를 바꿔도 에디터에 바로 반영되게 한다 */
 	virtual void OnConstruction(const FTransform& Transform) override;
 	virtual void BeginPlay() override;
@@ -142,6 +148,7 @@ private:
 	FName AppliedTrashKindId = NAME_None;
 	FName AppliedTrashVariantId;
 	FGameplayTag AppliedCategory;
+	FQuat AppliedHoldRotationOffset = FQuat::Identity;
 	bool bHasAppliedTrashKind = false;
 
 	/** Runtime origin; the generator's named ledger is persisted instead of item transforms. */

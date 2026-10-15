@@ -26,7 +26,6 @@ public:
     FString Branch, Head, Upstream, Feedback;
     int32 Ahead = 0, Behind = 0, Revision = 0;
 private:
-    friend class FMDGitReferenceTest;
     bool Tick(float Delta);
     bool CanWrite(const FString& Operation, FString& Error) const;
     FTSTicker::FDelegateHandle Ticker;

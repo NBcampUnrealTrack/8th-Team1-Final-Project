@@ -181,10 +181,6 @@ protected:
 	FMD_AudioHandle LowOxygenAudio;
 	FMD_AudioHandle HeartbeatAudio;
 
-#if WITH_DEV_AUTOMATION_TESTS && WITH_EDITOR
-	friend class FMDOxygenWarningPIE;
-#endif
-
 	FTimerHandle EvaluationTimerHandle;
 
 	TWeakObjectPtr<UAbilitySystemComponent> BoundASC;
