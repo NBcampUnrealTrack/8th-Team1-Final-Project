@@ -2,6 +2,33 @@
 
 #include "UI/Foundation/MD_WidgetStack.h"
 #include "UI/MD_CommonActivatableWidget.h"
+#include "Slate/SCommonAnimatedSwitcher.h"
+
+void UMD_WidgetStack::RemoveWidgetAndRestore(UCommonActivatableWidget* Widget)
+{
+	// 이미 제거된 화면의 스택 접근 차단
+	if (IsValid(Widget) == false)
+	{
+		// 유효한 제거 대상이 없는 요청 종료
+		return;
+	}
+	// 아직 표시되지 않은 최상단 화면으로 이동 중인 경우에 한정한 취소
+	if (MySwitcher.IsValid() == true && MySwitcher->IsTransitionPlaying() == true
+		&& WidgetList.IsEmpty() == false && WidgetList.Last() == Widget
+		&& GetActiveWidget() != Widget && Widget->IsActivated() == false)
+	{
+		// 기존 화면으로 전환을 확정하여 활성화와 닫힘 구독을 함께 복원
+		MySwitcher->TransitionToIndex(MySwitcher->GetActiveWidgetIndex(), true);
+		// 전환 완료 콜백에서 제거된 대기 화면의 중복 해제 방지
+		return;
+	}
+	// 전환 취소 과정에서 이미 제거된 화면의 중복 해제 방지
+	if (WidgetList.Contains(Widget) == true)
+	{
+		// 활성 화면 또는 다른 위치의 화면에 대한 기존 스택 제거 처리
+		RemoveWidget(*Widget);
+	}
+}
 
 void UMD_WidgetStack::RemoveWidgetsOnWorldTravel()
 {

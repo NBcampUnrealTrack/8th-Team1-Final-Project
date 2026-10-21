@@ -15,6 +15,8 @@ class UMaterialInstanceDynamic;
 class UMD_ToolDefinition;
 class UStaticMeshComponent;
 class UPrimitiveComponent;
+class UCommonActivatableWidget;
+class UMD_WidgetStack;
 
 UENUM(BlueprintType)
 enum class EMD_GlassDrawingFocusPhase : uint8
@@ -77,6 +79,24 @@ public:
 
 protected:
 	virtual void EndPlay(const EEndPlayReason::Type EndPlayReason) override;
+
+	// 현재 로컬 그리기 세션에서 표시한 화면 참조
+	TWeakObjectPtr<UCommonActivatableWidget> DrawingWidget;
+
+	// 활성화 전 전환 중인 화면까지 제거할 소유 스택 참조
+	TWeakObjectPtr<UMD_WidgetStack> DrawingWidgetStack;
+
+	// 외부 화면 닫힘과 상호작용 종료를 연결하는 구독 핸들
+	FDelegateHandle DrawingWidgetClosedHandle;
+
+	// 벽에 지정된 태그로 소유 플레이어의 그리기 화면 표시
+	void OpenDrawingWidget();
+
+	// 종료 구독 해제와 세션 화면 비활성화
+	void CloseDrawingWidget();
+
+	// 외부 UI 닫힘에 따른 그리기 상호작용 종료
+	void HandleDrawingWidgetClosed();
 
 private:
 	UPROPERTY(ReplicatedUsing = OnRep_ActiveDesk)
