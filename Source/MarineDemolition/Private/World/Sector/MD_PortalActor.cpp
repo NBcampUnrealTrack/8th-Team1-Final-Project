@@ -768,17 +768,7 @@ void AMD_PortalActor::UpdatePortalCaptureScene(float DeltaSeconds)
 	bCaptureWasVisible = true;
 	// 다음 품질 판정에 사용할 현재 품질 기록
 	bFullQualityCapture = bUseFullQuality;
-	// 근접 화면은 매 프레임, 작은 화면은 제한된 빈도로 캡처하도록 간격 선택
-	float CaptureRate = bUseFullQuality == true ? 0.0f : FMath::Clamp(DistantCaptureRate, 1.0f, 120.0f);
-	// 캡처 시점에 도달한 프레임만 렌더링 작업 진행
-	if (ShouldCapturePortal(SecondsUntilNextCapture, DeltaSeconds, CaptureRate, bForceCapture) == false)
-	{
-		// 다음 캡처까지 직전 화면 유지
-		return;
-	}
 
-	// 실제 장면 캡처 구간의 CPU 추적 범위
-	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Portal_CaptureVisibleScene);
 	// 비균일 포털 크기를 반영한 캡처 위치 저장 공간
 	FVector CaptureLocation;
 	// 각도 왕복 변환 없이 적용할 캡처 회전 저장 공간
@@ -792,6 +782,26 @@ void AMD_PortalActor::UpdatePortalCaptureScene(float DeltaSeconds)
 		// 크기가 소실된 포털의 잘못된 행렬 적용 방지
 		return;
 	}
+
+	// 카메라와 두 Portal이 그대로라 직전 캡처와 같은 시점인지 확인
+	bool bCaptureViewUnchanged = LastCaptureLocation.Equals(CaptureLocation, 0.01f) && LastCaptureRotation.Equals(CaptureRotation, 1.e-5f)
+		&& LastCaptureProjection.Equals(CaptureProjection, 1.e-6f);
+	// 작은 화면은 제한된 빈도로 캡처하도록 간격 선택
+	float CaptureRate = FMath::Clamp(DistantCaptureRate, 1.0f, 120.0f);
+	// 근접 화면은 시점이 바뀌면 매 프레임, 그대로면 정지 상태 빈도로 캡처
+	if (bUseFullQuality == true)
+	{
+		CaptureRate = NearIdleCaptureRate > 0.0f && bCaptureViewUnchanged == true ? FMath::Clamp(NearIdleCaptureRate, 1.0f, 120.0f) : 0.0f;
+	}
+	// 캡처 시점에 도달한 프레임만 렌더링 작업 진행
+	if (ShouldCapturePortal(SecondsUntilNextCapture, DeltaSeconds, CaptureRate, bForceCapture) == false)
+	{
+		// 다음 캡처까지 직전 화면 유지
+		return;
+	}
+
+	// 실제 장면 캡처 구간의 CPU 추적 범위
+	TRACE_CPUPROFILER_EVENT_SCOPE(MD_Portal_CaptureVisibleScene);
 	// 계산된 목적지 카메라 위치와 회전 적용
 	SceneCaptureComponent->SetWorldLocationAndRotation(CaptureLocation, CaptureRotation);
 	// 선택된 품질에 맞는 렌더 타깃 크기 적용
@@ -806,6 +816,10 @@ void AMD_PortalActor::UpdatePortalCaptureScene(float DeltaSeconds)
 	SceneCaptureComponent->CaptureScene();
 	// 다음 창 크기 변경을 감지하기 위한 화면 크기 기록
 	LastCaptureViewSize = ViewSize;
+	// 다음 프레임의 시점 변경을 감지하기 위한 캡처 시점 기록
+	LastCaptureLocation = CaptureLocation;
+	LastCaptureRotation = CaptureRotation;
+	LastCaptureProjection = CaptureProjection;
 	// 이번 캡처에서 처리한 강제 갱신 예약 해제
 	bForceNextPortalCapture = false;
 }
