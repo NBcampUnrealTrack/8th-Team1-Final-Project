@@ -2,6 +2,18 @@
 
 `feat/multi-user-editing`의 Concert 설정 및 실행 도구와 함께 사용하는 프로젝트 전용 에디터 패널입니다.
 
+## 자동 체크포인트 — 2026-10-22
+
+큰 맵의 내보내기 검증은 T3D 액터 헤더를 한 번 순회해 이름 집합으로 비교합니다. 실패한 작업도 완료 시점에서 5분 후 재시도해 긴 실패 직후 백업이 반복 실행되는 현상을 방지합니다.
+
+Unreal의 `CopyActors`가 내보내지 않는 `GroupActor`는 `manifest.json`의 `groups`에 GUID·이름·클래스·잠금·직접 멤버·하위 그룹을 별도 기록합니다. `actor_count`는 T3D의 일반 액터 수이며 `group_count`는 별도 그룹 수입니다. 그룹 색인이 없는 기존 체크포인트도 읽습니다. 손상된 색인이나 T3D·기본 맵 체크섬 불일치는 복구 준비를 거부합니다.
+
+복구 준비는 검증된 `base.umap`, `actors.t3d`, 그룹 정보가 포함된 `manifest.json`을 별도 폴더로 복사합니다. 현재 세션에 액터나 그룹을 자동 삽입하지 않으며, 그룹 정보는 복구본 비교와 수동 재구성에 사용합니다. 체크포인트는 원본 맵 저장이나 Concert Persist를 실행하지 않습니다. 전체 액터 내보내기·파일 기록은 메인 스레드에서 실행되므로 큰 맵에서는 짧은 정지가 남을 수 있습니다.
+
+회귀 검사: `MDMultiUser.Safety.ActorExportIndex`는 큰 문자열과 누락 검색, `GroupCheckpoint`는 중첩 그룹·잠금·복구 복사·손상 거부·기존 형식 호환성을 검사합니다. `GroupCheckpoint`는 `/Engine/Maps/Entry`, `OceanCheckpointTiming`은 `/Game/Maps/L_Ocean`을 연 독립 에디터에서 `-MDMultiUserSafetyTest`로만 실행합니다. 테스트 백업은 `Saved/MultiUserRecovery/Automation/<PID>`에 분리됩니다.
+
+UE 5.8.3 Win64 Development Editor 빌드 및 위 3개 검사 통과. 실제 Ocean 검사에서 일반 액터 15,496개와 그룹 88개를 8.782초에 체크포인트로 기록하고 별도 복구본을 검증했습니다. 액터 수와 맵 dirty 상태는 유지됐습니다. 큰 문자열 색인 검사는 약 2,100만 문자·15,000회 조회를 검증합니다. 이 수치는 독립 에디터의 1회 검사이며 장시간 협업 세션 전체 성능을 보장하지 않습니다.
+
 ## 열기
 
 에디터 툴바의 **함께 편집** 또는 **창 → 함께 편집**을 선택합니다. 콘솔 명령은 `MD.MultiUser.Open`입니다. 탭을 우측에 도킹해서 디테일 패널처럼 사용할 수 있습니다.
