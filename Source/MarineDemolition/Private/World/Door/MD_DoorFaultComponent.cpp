@@ -93,8 +93,9 @@ UMD_DoorFaultComponent::UMD_DoorFaultComponent()
 {
 	Kind = EMD_FacilityKind::Door;
 	bRandomFaultEligible = true;
-	bAllowManualRepair = true;
-	bAllowInsulationTape = true;
+	// Ordinary repair is performed through the linked wiring panel, not the door surface.
+	bAllowManualRepair = false;
+	bAllowInsulationTape = false;
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
 	PrimaryComponentTick.TickInterval = 0.05f;
