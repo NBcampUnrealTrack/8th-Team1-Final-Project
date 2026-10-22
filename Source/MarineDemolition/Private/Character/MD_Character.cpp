@@ -398,6 +398,25 @@ void AMD_Character::Tick(float DeltaSeconds)
 
 void AMD_Character::RefreshFirstPersonArmsTick()
 {
+	// 숨겨진 본체도 1인칭 팔의 LeaderPose이므로 렌더 여부와 무관하게 뼈를 갱신한다.
+	// 낮은 그림자 품질에서는 본체가 렌더되지 않아 AlwaysTickPose만으로는 팔이 멈춘다.
+	if (USkeletalMeshComponent* BodyMesh = GetMesh())
+	{
+		if (IsLocallyControlled() && IsValid(FirstPersonMesh))
+		{
+			if (!OriginalBodyMeshAnimTickOption.IsSet())
+			{
+				OriginalBodyMeshAnimTickOption = BodyMesh->VisibilityBasedAnimTickOption;
+			}
+			BodyMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+		}
+		else if (OriginalBodyMeshAnimTickOption.IsSet())
+		{
+			BodyMesh->VisibilityBasedAnimTickOption = OriginalBodyMeshAnimTickOption.GetValue();
+			OriginalBodyMeshAnimTickOption.Reset();
+		}
+	}
+
 	// 로컬 캐릭터는 기존 1인칭 팔 갱신을 위해 틱한다.
 	bool bNeedsTick = IsLocallyControlled();
 
