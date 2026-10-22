@@ -362,7 +362,11 @@ void UMD_StylizedSkyControllerComponent::UpdateSkyFromTime(float TimeOfDayHours,
 	SuppressConflictingLevelSky();
 
 	const float OrbitDegrees = ComputeOrbitOrientationDegrees(TimeOfDayHours);
-	UpdateOrbit(OrbitDegrees);
+	// Only the light is stepped: an unchanged direction keeps its VSM pages cached.
+	const float LightOrbitDegrees = SunDirectionStepDegrees > 0.f
+		? FMath::GridSnap(OrbitDegrees, SunDirectionStepDegrees)
+		: OrbitDegrees;
+	UpdateOrbit(LightOrbitDegrees);
 	UpdateDirectionalLight(TimeOfDayHours, DayProgress01);
 	WriteMpc(TimeOfDayHours, DayProgress01, OrbitDegrees);
 }

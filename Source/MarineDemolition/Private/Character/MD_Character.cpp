@@ -410,6 +410,26 @@ void AMD_Character::RefreshFirstPersonArmsTick()
 		}
 	}
 
+	// 그림자가 생략되는 품질에서도 1인칭 팔의 원본 포즈와 본 갱신 유지
+	USkeletalMeshComponent* BodyMesh = GetMesh();
+	if (IsValid(BodyMesh) == true)
+	{
+		if (IsLocallyControlled() == true)
+		{
+			if (OriginalBodyMeshAnimTickOption.IsSet() == false)
+			{
+				OriginalBodyMeshAnimTickOption = BodyMesh->VisibilityBasedAnimTickOption;
+			}
+			BodyMesh->VisibilityBasedAnimTickOption = EVisibilityBasedAnimTickOption::AlwaysTickPoseAndRefreshBones;
+		}
+		else if (OriginalBodyMeshAnimTickOption.IsSet() == true)
+		{
+			// 로컬 조작이 끝난 캐릭터의 기존 애니메이션 갱신 정책 복원
+			BodyMesh->VisibilityBasedAnimTickOption = OriginalBodyMeshAnimTickOption.GetValue();
+			OriginalBodyMeshAnimTickOption.Reset();
+		}
+	}
+
 	SetActorTickEnabled(bNeedsTick);
 
 	if (bNeedsTick == false)

@@ -2,13 +2,44 @@
 
 #include "Components/CheckBox.h"
 #include "Components/ComboBoxString.h"
+#include "Components/Widget.h"
 #include "Gameplay/Settings/MD_GraphicsSettingCategory.h"
 #include "Gameplay/Settings/MD_SettingsManager.h"
 #include "Kismet/KismetSystemLibrary.h"
 #include "UI/Foundation/MD_CarouselWidget.h"
 
+namespace MDSettingsGraphicsWidget
+{
+	// 프레임 제한 목록에서 모니터 주사율 항목을 나타내는 실제 FPS와 겹치지 않는 값
+	static float DisplayRefreshRateOption = -1.0f;
+}
+
+void UMD_SettingsGraphicsWidget::NativeOnInitialized()
+{
+	// 위젯 인스턴스당 한 번 실행되는 상위 초기화 처리
+	Super::NativeOnInitialized();
+	// 풀에서 재사용될 때 숨긴 상태가 기록되지 않도록 인스턴스당 한 번만 디자이너 표시 상태 보관
+	if (IsValid(BDR_Resolution) == true)
+	{
+		// 숨기기 전 원래 표시 상태 기록
+		ResolutionRowVisibility = BDR_Resolution->GetVisibility();
+	}
+}
+
 void UMD_SettingsGraphicsWidget::NativeConstruct()
 {
+	// 사용자 창 모드 선택의 출력 해상도 행 표시 연결
+	if (IsValid(Carousel_WindowMode) == true)
+	{
+		// 위젯 재구성 시 중복 구독 방지
+		Carousel_WindowMode->OnEnumSelectionChanged.AddUniqueDynamic(this, &UMD_SettingsGraphicsWidget::HandleWindowModeChanged);
+	}
+	// 사용자 업스케일러 선택의 렌더 해상도 선택 가능 여부 연결
+	if (IsValid(CB_Upscaler) == true)
+	{
+		// 위젯 재구성 시 중복 구독 방지
+		CB_Upscaler->OnSelectionChanged.AddUniqueDynamic(this, &UMD_SettingsGraphicsWidget::HandleUpscalerChanged);
+	}
 	// 사용자 전체 품질 선택의 개별 품질 동기화 연결
 	if (IsValid(CB_TotalQuality) == true)
 	{
@@ -37,6 +68,18 @@ void UMD_SettingsGraphicsWidget::NativeConstruct()
 
 void UMD_SettingsGraphicsWidget::NativeDestruct()
 {
+	// 종료한 위젯의 창 모드 선택 구독 해제
+	if (IsValid(Carousel_WindowMode) == true)
+	{
+		// 창 모드 이벤트 수신 중단
+		Carousel_WindowMode->OnEnumSelectionChanged.RemoveDynamic(this, &UMD_SettingsGraphicsWidget::HandleWindowModeChanged);
+	}
+	// 종료한 위젯의 업스케일러 선택 구독 해제
+	if (IsValid(CB_Upscaler) == true)
+	{
+		// 업스케일러 이벤트 수신 중단
+		CB_Upscaler->OnSelectionChanged.RemoveDynamic(this, &UMD_SettingsGraphicsWidget::HandleUpscalerChanged);
+	}
 	// 종료한 위젯의 전체 품질 선택 구독 해제
 	if (IsValid(CB_TotalQuality) == true)
 	{
@@ -125,9 +168,23 @@ bool UMD_SettingsGraphicsWidget::CommitPendingSettings()
 
 void UMD_SettingsGraphicsWidget::ResetPendingSettings()
 {
-	// 실제 카테고리 변경 없는 프로젝트 기본값 준비
+	// 매니저나 카테고리가 없는 미리보기의 프로젝트 기본값 준비
 	PendingSettings = FMD_GraphicsSettings();
-	// 저장 버튼 호출 전까지 화면에만 기본값 반영
+	// 현재 위젯 월드의 설정 매니저 조회
+	UMD_SettingsManager* SettingsManager = UMD_SettingsManager::Get(this);
+	// 게임 인스턴스가 있는 경우에 한정한 그래픽 카테고리 조회
+	if (IsValid(SettingsManager) == true)
+	{
+		// 매니저가 소유한 그래픽 카테고리 조회
+		UMD_GraphicsSettingCategory* GraphicsCategory = SettingsManager->GetGraphicsSettings();
+		// 유효한 카테고리에 한정한 감지값 기반 초기화 값 사용
+		if (IsValid(GraphicsCategory) == true)
+		{
+			// Epic 고정값 대신 하드웨어 감지값을 덮어쓴 초기화 값 준비
+			PendingSettings = GraphicsCategory->MakeResetSettings();
+		}
+	}
+	// 저장 버튼 호출 전까지 화면에만 초기화 값 반영
 	RefreshDisplay();
 }
 
@@ -159,6 +216,30 @@ FMD_GraphicsSettings UMD_SettingsGraphicsWidget::GetPendingSettings()
 			SelectedSettings.ScreenResolution = ResolutionOptions[SelectedIndex];
 		}
 	}
+	// 업스케일러 선택기 확인
+	if (IsValid(CB_Upscaler) == true)
+	{
+		// Enum 선언 순서와 같은 선택 위치 조회
+		int32 SelectedIndex = CB_Upscaler->GetSelectedIndex();
+		// 미선택 상태와 Enum 범위 밖 항목의 기준값 보존
+		if (SelectedIndex >= 0 && SelectedIndex < StaticEnum<EMD_UpscalerMode>()->NumEnums() - 1)
+		{
+			// 선택한 업스케일러 반영
+			SelectedSettings.Upscaler = static_cast<EMD_UpscalerMode>(SelectedIndex);
+		}
+	}
+	// 렌더 해상도 선택기 확인
+	if (IsValid(CB_RenderResolution) == true)
+	{
+		// Enum 선언 순서와 같은 선택 위치 조회
+		int32 SelectedIndex = CB_RenderResolution->GetSelectedIndex();
+		// 미선택 상태와 Enum 범위 밖 항목의 기준값 보존
+		if (SelectedIndex >= 0 && SelectedIndex < StaticEnum<EMD_RenderResolutionMode>()->NumEnums() - 1)
+		{
+			// 선택한 렌더 해상도 단계 반영
+			SelectedSettings.RenderResolution = static_cast<EMD_RenderResolutionMode>(SelectedIndex);
+		}
+	}
 	// 수직 동기화 컨트롤의 선택 수집
 	if (IsValid(TB_VSync) == true)
 	{
@@ -173,8 +254,16 @@ FMD_GraphicsSettings UMD_SettingsGraphicsWidget::GetPendingSettings()
 		// 미선택 상태의 기준값 보존
 		if (FrameRateOptions.IsValidIndex(SelectedIndex) == true)
 		{
-			// 무제한과 사용자 지정 소수 FPS를 포함한 실제 값 반영
-			SelectedSettings.FrameRateLimit = FrameRateOptions[SelectedIndex];
+			// 선택 위치의 실제 FPS 값 조회
+			float SelectedFrameRate = FrameRateOptions[SelectedIndex];
+			// 모니터 주사율 항목 선택 여부 반영
+			SelectedSettings.bLimitToDisplayRefreshRate = SelectedFrameRate == MDSettingsGraphicsWidget::DisplayRefreshRateOption;
+			// 모니터 주사율 항목이 아닌 경우에 한정한 FPS 반영
+			if (SelectedSettings.bLimitToDisplayRefreshRate == false)
+			{
+				// 무제한과 사용자 지정 소수 FPS를 포함한 실제 값 반영
+				SelectedSettings.FrameRateLimit = SelectedFrameRate;
+			}
 		}
 	}
 	// 사용자 지정 상태에서는 마지막 전체 품질 기준값 보존
@@ -266,6 +355,18 @@ void UMD_SettingsGraphicsWidget::HandleIndividualQualityChanged(FString Selected
 	}
 }
 
+void UMD_SettingsGraphicsWidget::HandleWindowModeChanged(UEnum* EnumType, int64 EnumValue, FText SelectedOption)
+{
+	// 사용자가 고른 창 모드 기준의 출력 해상도 행 표시
+	RefreshResolutionVisibility(EnumValue);
+}
+
+void UMD_SettingsGraphicsWidget::HandleUpscalerChanged(FString SelectedItem, ESelectInfo::Type SelectionType)
+{
+	// 게임패드 확인도 Direct로 전달되며 갱신은 다른 선택을 바꾸지 않으므로 모든 선택 변경에서 렌더 해상도 선택 가능 여부 갱신
+	RefreshRenderResolutionEnabled();
+}
+
 void UMD_SettingsGraphicsWidget::RefreshDisplay()
 {
 	// 현재 위젯의 창 모드 캐러셀 표시
@@ -276,6 +377,14 @@ void UMD_SettingsGraphicsWidget::RefreshDisplay()
 	}
 	// 지원 해상도와 저장 해상도를 포함하는 선택 목록 갱신
 	RefreshResolutionOptions();
+	// 기준 창 모드의 출력 해상도 행 표시
+	RefreshResolutionVisibility(PendingSettings.WindowMode);
+	// 업스케일러 목록과 현재 선택 구성
+	RefreshUpscalerOptions();
+	// 렌더 해상도 단계 목록과 현재 선택 구성
+	RefreshRenderResolutionOptions();
+	// 기준 업스케일러의 렌더 해상도 선택 가능 여부 표시
+	RefreshRenderResolutionEnabled();
 	// 수직 동기화 컨트롤의 선택 표시
 	if (IsValid(TB_VSync) == true)
 	{
@@ -326,6 +435,113 @@ void UMD_SettingsGraphicsWidget::RefreshResolutionOptions()
 	CB_Resolution->SetSelectedIndex(ResolutionOptions.Find(PendingSettings.ScreenResolution));
 }
 
+void UMD_SettingsGraphicsWidget::RefreshResolutionVisibility(int64 WindowMode)
+{
+	// 출력 해상도 행을 생략한 레이아웃 허용
+	if (IsValid(BDR_Resolution) == false)
+	{
+		// 생략된 컨트롤의 표시 처리 종료
+		return;
+	}
+	// 전체 창 모드는 데스크톱 해상도로 고정되어 출력 해상도 선택이 렌더 비용을 줄이지 못함
+	bool bIsWindowedFullscreen = WindowMode == EWindowMode::WindowedFullscreen;
+	// 전체 창 모드에서는 행을 숨기고 그 외에는 디자이너 표시 상태 복원
+	BDR_Resolution->SetVisibility(bIsWindowedFullscreen == true ? ESlateVisibility::Collapsed : ResolutionRowVisibility);
+}
+
+void UMD_SettingsGraphicsWidget::RefreshUpscalerOptions()
+{
+	// 업스케일러 선택기를 생략한 레이아웃 허용
+	if (IsValid(CB_Upscaler) == false)
+	{
+		// 생략된 컨트롤의 표시 처리 종료
+		return;
+	}
+	// Enum 선언 순서와 일치하는 패키징용 업스케일러 표시 문구 구성
+	TArray<FText> DisplayNames = {
+		// 낮은 렌더 해상도를 복원하는 업스케일러 문구
+		NSLOCTEXT("MDSettingsGraphics", "UpscalerTSR", "TSR"),
+		// 화면 비율 100으로 고정되는 업스케일러 문구
+		NSLOCTEXT("MDSettingsGraphics", "UpscalerTAA", "TAA")
+	};
+	// 이전 업스케일러 표시 항목 제거
+	CB_Upscaler->ClearOptions();
+	// Enum 선언 순서대로 선택 목록 구성
+	for (const FText& DisplayName : DisplayNames)
+	{
+		// 업스케일러 선택 문구 등록
+		CB_Upscaler->AddOption(DisplayName.ToString());
+	}
+	// 현재 기준 업스케일러 선택 표시
+	CB_Upscaler->SetSelectedIndex(static_cast<int32>(PendingSettings.Upscaler));
+}
+
+void UMD_SettingsGraphicsWidget::RefreshRenderResolutionOptions()
+{
+	// 렌더 해상도 선택기를 생략한 레이아웃 허용
+	if (IsValid(CB_RenderResolution) == false)
+	{
+		// 생략된 컨트롤의 표시 처리 종료
+		return;
+	}
+	// Enum 선언 순서와 일치하는 패키징용 렌더 해상도 표시 문구 구성
+	TArray<FText> DisplayNames = {
+		// 엔진이 디스플레이 해상도로 비율을 고르는 단계 문구
+		NSLOCTEXT("MDSettingsGraphics", "RenderResolutionAuto", "자동"),
+		// 출력 해상도 그대로 렌더링하는 단계 문구
+		NSLOCTEXT("MDSettingsGraphics", "RenderResolutionNative", "네이티브"),
+		// 화질 우선 업스케일 단계 문구
+		NSLOCTEXT("MDSettingsGraphics", "RenderResolutionQuality", "품질"),
+		// 화질과 성능 균형 업스케일 단계 문구
+		NSLOCTEXT("MDSettingsGraphics", "RenderResolutionBalanced", "균형"),
+		// 성능 우선 업스케일 단계 문구
+		NSLOCTEXT("MDSettingsGraphics", "RenderResolutionPerformance", "성능")
+	};
+	// 엔진 프리셋 비율을 소수 첫째 자리까지 표시하는 형식 준비
+	FNumberFormattingOptions PercentFormat;
+	// 66.662 같은 프리셋 비율의 표시 자릿수 제한
+	PercentFormat.SetMaximumFractionalDigits(1);
+	// 이전 렌더 해상도 표시 항목 제거
+	CB_RenderResolution->ClearOptions();
+	// Enum 선언 순서대로 선택 목록 구성
+	for (int32 ModeIndex = 0; ModeIndex < DisplayNames.Num(); ++ModeIndex)
+	{
+		// 현재 항목의 렌더 해상도 단계
+		EMD_RenderResolutionMode RenderResolution = static_cast<EMD_RenderResolutionMode>(ModeIndex);
+		// 자동 단계는 엔진이 비율을 고르므로 이름만 등록
+		if (RenderResolution == EMD_RenderResolutionMode::Auto)
+		{
+			// 비율 없는 자동 항목 등록
+			CB_RenderResolution->AddOption(DisplayNames[ModeIndex].ToString());
+		}
+		else
+		{
+			// 엔진 프리셋과 같은 화면 비율 조회
+			float ScreenPercentage = UMD_GraphicsSettingCategory::ToScreenPercentage(RenderResolution);
+			// 단계 이름과 화면 비율을 포함하는 선택 문구 등록
+			CB_RenderResolution->AddOption(FText::Format(NSLOCTEXT("MDSettingsGraphics", "RenderResolutionPercent", "{0} ({1}%)"), DisplayNames[ModeIndex], FText::AsNumber(ScreenPercentage, &PercentFormat)).ToString());
+		}
+	}
+	// 현재 기준 렌더 해상도 단계 선택 표시
+	CB_RenderResolution->SetSelectedIndex(static_cast<int32>(PendingSettings.RenderResolution));
+}
+
+void UMD_SettingsGraphicsWidget::RefreshRenderResolutionEnabled()
+{
+	// 렌더 해상도 선택기를 생략한 레이아웃 허용
+	if (IsValid(CB_RenderResolution) == false)
+	{
+		// 생략된 컨트롤의 표시 처리 종료
+		return;
+	}
+	// 업스케일러 컨트롤의 현재 선택을 포함하는 편집값 수집
+	FMD_GraphicsSettings SelectedSettings = GetPendingSettings();
+	// TAA는 원본 해상도로 고정되므로 TSR일 때만 렌더 해상도 선택 허용
+	bool bUsesTSR = SelectedSettings.Upscaler == EMD_UpscalerMode::TSR;
+	// 업스케일러에 따른 렌더 해상도 선택 가능 여부 반영
+	CB_RenderResolution->SetIsEnabled(bUsesTSR);
+}
+
 void UMD_SettingsGraphicsWidget::RefreshFrameRateOptions()
 {
 	// 프레임 제한 컨트롤을 생략한 레이아웃 허용
@@ -334,8 +550,8 @@ void UMD_SettingsGraphicsWidget::RefreshFrameRateOptions()
 		// 생략된 컨트롤의 표시 처리 종료
 		return;
 	}
-	// 일반적인 FPS 제한과 무제한 항목 준비
-	FrameRateOptions = {30.0f, 60.0f, 90.0f, 120.0f, 144.0f, 165.0f, 240.0f, 360.0f, 0.0f};
+	// 모니터 주사율 항목과 일반적인 FPS 제한, 무제한 항목 준비
+	FrameRateOptions = {MDSettingsGraphicsWidget::DisplayRefreshRateOption, 30.0f, 60.0f, 90.0f, 120.0f, 144.0f, 165.0f, 240.0f, 360.0f, 0.0f};
 	// 표준 목록에 없는 현재 FPS의 정밀도 보존
 	FrameRateOptions.AddUnique(PendingSettings.FrameRateLimit);
 	// 이전 FPS 표시 항목 제거
@@ -343,8 +559,14 @@ void UMD_SettingsGraphicsWidget::RefreshFrameRateOptions()
 	// 실제 FPS 배열 순서에 맞춘 표시 목록 구성
 	for (float FrameRate : FrameRateOptions)
 	{
+		// 모니터 주사율을 의미하는 항목의 별도 문구 선택
+		if (FrameRate == MDSettingsGraphicsWidget::DisplayRefreshRateOption)
+		{
+			// 현재 모니터 주사율을 함께 표시하는 항목 등록
+			CB_FPSLimit->AddOption(FText::Format(NSLOCTEXT("MDSettingsGraphics", "DisplayRefreshRate", "모니터 주사율 ({0} FPS)"), FText::AsNumber(FPlatformMisc::GetMaxRefreshRate())).ToString());
+		}
 		// 제한 해제를 의미하는 FPS 값의 별도 문구 선택
-		if (FrameRate == 0.0f)
+		else if (FrameRate == 0.0f)
 		{
 			// 무제한 프레임 항목 등록
 			CB_FPSLimit->AddOption(NSLOCTEXT("MDSettingsGraphics", "Unlimited", "무제한").ToString());
@@ -355,8 +577,10 @@ void UMD_SettingsGraphicsWidget::RefreshFrameRateOptions()
 			CB_FPSLimit->AddOption(FText::Format(NSLOCTEXT("MDSettingsGraphics", "FrameRate", "{0} FPS"), FText::AsNumber(FrameRate)).ToString());
 		}
 	}
-	// 현재 저장 FPS에 대응하는 항목 선택
-	CB_FPSLimit->SetSelectedIndex(FrameRateOptions.Find(PendingSettings.FrameRateLimit));
+	// 모니터 주사율 옵션이면 해당 항목, 아니면 저장 FPS에 대응하는 항목 조회
+	int32 SelectedIndex = PendingSettings.bLimitToDisplayRefreshRate == true ? FrameRateOptions.Find(MDSettingsGraphicsWidget::DisplayRefreshRateOption) : FrameRateOptions.Find(PendingSettings.FrameRateLimit);
+	// 현재 기준 프레임 제한 항목 선택
+	CB_FPSLimit->SetSelectedIndex(SelectedIndex);
 }
 
 void UMD_SettingsGraphicsWidget::RefreshQualityOptions(UComboBoxString* ComboBox, int32 Quality, bool bIncludeCustom)

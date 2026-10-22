@@ -12,6 +12,7 @@
 class AMD_CuttableWall;
 class AMD_GameStateBase;
 class AMD_PlayerController;
+class UMD_MerchantSubsystem;
 class UMD_SiteDefinition;
 class UWorld;
 
@@ -51,7 +52,8 @@ protected:
     FTimerHandle LoanInterestTimerHandle;
 
     // 현장 진입 9분 뒤 첫 징수, 이후 3분 간격으로 서버 이자 계산 예약 (6분 유예 + 3분)
-    void StartLoanInterestTimer();
+    // 현재 부채가 없으면 해제하고 부채가 새로 생기면 초기 대기부터 예약하는 상태 갱신
+    void StartLoanInterestTimer(UMD_MerchantSubsystem* Merchant);
 
     // 맵 진입 기준 첫 이자 징수 시각(초). 대출·경제 회의 계산기: 6분 유예 후 9분에 첫 징수
     UPROPERTY(EditDefaultsOnly, Category = "MD|Merchant")

@@ -2,16 +2,17 @@
 
 #include "Components/StaticMeshComponent.h"
 #include "Data/Drawing/MD_GlassDrawingProfile.h"
+#include "Data/Drawing/MD_GlassDrawingSettings.h"
 #include "Engine/World.h"
-#include "UObject/ConstructorHelpers.h"
+#include "Util/MD_LogUtility.h"
 #include "World/Interaction/MD_GlassDrawingBoard.h"
 #include "World/Interaction/MD_GlassDrawingDesk.h"
 
-UMD_GlassDrawingSubsystem::UMD_GlassDrawingSubsystem()
+void UMD_GlassDrawingSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 {
-	static ConstructorHelpers::FObjectFinder<UMD_GlassDrawingProfile> ProfileAsset(
-		TEXT("/Game/Data/Drawing/DA_GlassDrawingProfile.DA_GlassDrawingProfile"));
-	DefaultProfile = ProfileAsset.Object;
+	Super::Initialize(Collection);
+	// Load while the world initializes so the first stroke does not stall on a synchronous load.
+	EnsureProfile();
 }
 
 bool UMD_GlassDrawingSubsystem::DoesSupportWorldType(EWorldType::Type WorldType) const
@@ -43,9 +44,12 @@ void UMD_GlassDrawingSubsystem::EnsureProfile()
 {
 	if (IsValid(DefaultProfile) || bProfileLookupAttempted) return;
 	bProfileLookupAttempted = true;
-	// The first editor authoring session can create the asset after this class's CDO was loaded.
-	DefaultProfile = LoadObject<UMD_GlassDrawingProfile>(nullptr,
-		TEXT("/Game/Data/Drawing/DA_GlassDrawingProfile.DA_GlassDrawingProfile"));
+	DefaultProfile = UMD_GlassDrawingSettings::Get()->LoadDefaultProfile();
+	if (!IsValid(DefaultProfile))
+	{
+		UE_LOG(MarineDemolition, Warning,
+			TEXT("Glass drawing is disabled: set Project Settings > Game > MD Glass Drawing > Default Profile."));
+	}
 }
 
 AMD_GlassDrawingBoard* UMD_GlassDrawingSubsystem::ResolveSurfaceHit(const FHitResult& Hit, FVector2D& OutUV, bool bCreate)

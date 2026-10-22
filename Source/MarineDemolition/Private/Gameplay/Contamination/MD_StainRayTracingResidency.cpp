@@ -23,6 +23,7 @@
 #include "UObject/UObjectGlobals.h"
 #include "World/Contamination/MD_SurfaceStain.h"
 #if WITH_EDITOR
+#include "AssetCompilingManager.h"
 #include "Editor.h"
 #include "Editor/EditorEngine.h"
 #include "Editor/TransBuffer.h"
@@ -31,6 +32,8 @@
 #include "RayTracingGeometry.h"
 #include "RayTracingGeometryManagerInterface.h"
 #endif
+
+DEFINE_LOG_CATEGORY_STATIC(LogMDStainRTResidency, Log, All);
 
 namespace MD_StainRayTracingResidency
 {
@@ -54,6 +57,7 @@ struct FRenderState
 {
     // Access slots only on the render thread. Game-thread code reads the atomic status.
     FSlot Slots[5];
+    FString DebugName; // Set once at group creation; read-only afterwards on any thread.
     TAtomic<bool> Aborted{false};
     TAtomic<bool> Stale{false};
     TAtomic<uint8> ReleasedMask{0};
@@ -98,13 +102,30 @@ static TWeakObjectPtr<UTransBuffer> UndoBuffer;
 static FDelegateHandle BeforeUndoHandle;
 static FDelegateHandle PrePropertyHandle;
 static TMap<TWeakObjectPtr<UStaticMesh>,FDelegateHandle> PreBuildHandles;
+struct FPendingStage
+{
+    TWeakObjectPtr<UStaticMeshComponent> Component;
+    TWeakObjectPtr<UMD_SurfaceStainDefinition> Definition;
+    TWeakObjectPtr<UStaticMesh> ActiveMesh;
+};
+static TMap<TWeakObjectPtr<UStaticMeshComponent>,FPendingStage> PendingStages;
+static FDelegateHandle AssetPostCompileHandle;
 #endif
 
-static bool CanManage()
+static bool CanManage(const TCHAR** OutReason=nullptr)
 {
-    return IsInGameThread() && FApp::CanEverRender() && !IsRunningCommandlet()
-        && GDynamicRHI && IsRayTracingAllowed() && IsRayTracingEnabled()
-        && GRayTracingGeometryManager && Enabled.GetValueOnGameThread() != 0;
+    auto Fail=[OutReason](const TCHAR* Reason) { if (OutReason) *OutReason=Reason; return false; };
+    if (!IsInGameThread()) return Fail(TEXT("not on the game thread"));
+    if (!FApp::CanEverRender() || IsRunningCommandlet() || !GDynamicRHI) return Fail(TEXT("process cannot render"));
+    if (!IsRayTracingAllowed() || !IsRayTracingEnabled() || !GRayTracingGeometryManager) return Fail(TEXT("ray tracing disabled"));
+    if (Enabled.GetValueOnGameThread()==0) return Fail(TEXT("MD.Stain.PlacedRTResidency is 0"));
+    return true;
+}
+static FString DescribeComponent(const UStaticMeshComponent& Component)
+{
+    const UWorld* World=Component.GetWorld();
+    return FString::Printf(TEXT("%s (world %s, begun play %d)"), *GetNameSafe(Component.GetOwner()),
+        *GetPathNameSafe(World), World && World->HasBegunPlay() ? 1 : 0);
 }
 static int32 FindStage(const FGroup& Group, const UStaticMesh* Mesh)
 {
@@ -131,21 +152,27 @@ static void Apply(const TSharedRef<FRenderState,ESPMode::ThreadSafe>& State, uin
     FRHICommandListImmediate& Cmd)
 {
     if (State->Stale.Load()) return;
+    auto Abort=[&State](const TCHAR* Reason, int32 Stage)
+    {
+        if (!State->Aborted.Exchange(true))
+            UE_LOG(LogMDStainRTResidency, Verbose, TEXT("Aborted %s at stage %d: %s"), *State->DebugName, Stage, Reason);
+    };
     // Stage leases require independent native resources. Reject aliases before
     // capture/release so a hidden slot cannot release another slot's displayed RT.
     for (int32 I=0; I<5; ++I)
         for (int32 J=0; J<I; ++J)
             if (State->Slots[I].Geometry==State->Slots[J].Geometry)
-            { State->Aborted.Store(true); return; }
+            { Abort(TEXT("stage geometries alias"), I); return; }
     // Validate/capture the whole group before releasing any slot. Unsupported or
     // asynchronously rebuilt render data must fail open to the baseline.
-    for (FSlot& Slot : State->Slots)
+    for (int32 SlotIndex=0; SlotIndex<5; ++SlotIndex)
     {
+        FSlot& Slot=State->Slots[SlotIndex];
         if (!Slot.Captured)
         {
             if (!Slot.Geometry || !Slot.Geometry->IsInitialized() || !Slot.Geometry->HasValidInitializer()
                 || Slot.Geometry->GroupHandle.IsNull())
-            { State->Aborted.Store(true); return; }
+            { Abort(TEXT("geometry not initialized, initializer invalid or no group"), SlotIndex); return; }
             const auto& Initializer=Slot.Geometry->GetInitializer();
             // Consumed cooked offline bytes cannot be reconstructed here. D3D12
             // sizes a BLAS from a valid offline header even with OfflineData==null.
@@ -154,7 +181,7 @@ static void Apply(const TSharedRef<FRenderState,ESPMode::ThreadSafe>& State, uin
                 || Initializer.Type!=ERayTracingGeometryInitializerType::Rendering || Initializer.bTemplate
                 || Initializer.SourceGeometry || Initializer.GeometryType!=RTGT_Triangles
                 || Slot.Geometry->DynamicGeometrySharedBufferGenerationID!=FRayTracingGeometry::NonSharedVertexBuffers)
-            { State->Aborted.Store(true); return; }
+            { Abort(TEXT("offline data, template, source geometry or shared buffers"), SlotIndex); return; }
             Slot.SavedInitializer=Slot.Geometry->GetInitializer();
             Slot.SavedInitializer.OfflineData=nullptr; // Uploaded offline storage is not owned by this cache.
             Slot.GroupHandle=Slot.Geometry->GroupHandle;
@@ -192,7 +219,8 @@ static void Apply(const TSharedRef<FRenderState,ESPMode::ThreadSafe>& State, uin
     }
     uint8 Released=0;
     for (int32 I=0; I<5; ++I) if (State->Slots[I].Released) Released|=uint8(1u<<I);
-    State->ReleasedMask.Store(Released);
+    if (State->ReleasedMask.Exchange(Released)!=Released)
+        UE_LOG(LogMDStainRTResidency, Verbose, TEXT("Released stage mask 0x%02x for %s"), Released, *State->DebugName);
 }
 static void QueuePolicy(FGroup& Group, uint8 Mask, bool Force=false, uint8 ForceBuildMask=AllStages)
 {
@@ -201,7 +229,12 @@ static void QueuePolicy(FGroup& Group, uint8 Mask, bool Force=false, uint8 Force
     auto State=Group.Render;
     ENQUEUE_RENDER_COMMAND(MD_StainApplyRTResidency)([State,Mask,ForceBuildMask](FRHICommandListImmediate& Cmd)
     {
-        if (!IsRayTracingAllowed() || !GRayTracingGeometryManager) { State->Aborted.Store(true); return; }
+        if (!IsRayTracingAllowed() || !GRayTracingGeometryManager)
+        {
+            if (!State->Aborted.Exchange(true))
+                UE_LOG(LogMDStainRTResidency, Verbose, TEXT("Aborted %s: ray tracing unavailable on the render thread"), *State->DebugName);
+            return;
+        }
         Apply(State,Mask,ForceBuildMask,Cmd);
     });
 }
@@ -246,34 +279,50 @@ static void RemoveLease(UStaticMeshComponent* Key, bool OldProxyRemoved=false)
     else if (OldProxyRemoved) QueuePolicy(*Lease.Group,DesiredMask(*Lease.Group),false,LeaseMask(*Lease.Group));
 }
 static bool Eligible(UStaticMeshComponent& Component, UMD_SurfaceStainDefinition* Definition,
-    UStaticMesh* Active)
+    UStaticMesh* Active, const TCHAR** OutReason=nullptr, int32* OutStage=nullptr,
+    bool* OutWaitingForCompilation=nullptr)
 {
+    if (OutWaitingForCompilation) *OutWaitingForCompilation=false;
+    // Same predicate as before; the split only records the first failing condition.
+    auto Fail=[OutReason,OutStage](const TCHAR* Reason, int32 Stage=INDEX_NONE)
+    { if (OutReason) *OutReason=Reason; if (OutStage) *OutStage=Stage; return false; };
     const AMD_SurfaceStain* Owner=Cast<AMD_SurfaceStain>(Component.GetOwner());
-    if (!Owner || !Definition || Definition->GetOuter()!=Owner || !Definition->UsesSharedVolume()
-        || !Definition->IsUsable() || Definition->VolumeStages.Num()!=5 || !Component.IsRegistered()
-        || !Component.GetWorld() || !Component.GetWorld()->Scene
-        || (!Active && Owner->GetRemainingSize()!=0)
-        || (Component.GetWorld()->HasBegunPlay() && Component.GetMobility()==EComponentMobility::Static
-            && Component.GetStaticMesh()!=Active)) return false;
+    if (!Owner || !Definition || Definition->GetOuter()!=Owner) return Fail(TEXT("definition is missing or not owned by the stain actor"));
+    if (!Definition->UsesSharedVolume() || !Definition->IsUsable() || Definition->VolumeStages.Num()!=5)
+        return Fail(TEXT("definition is unusable or does not have five volume stages"));
+    if (!Component.IsRegistered() || !Component.GetWorld() || !Component.GetWorld()->Scene)
+        return Fail(TEXT("component is not registered in a world with a scene"));
+    if (!Active && Owner->GetRemainingSize()!=0) return Fail(TEXT("no active mesh while size remains"));
+    if (Component.GetWorld()->HasBegunPlay() && Component.GetMobility()==EComponentMobility::Static
+        && Component.GetStaticMesh()!=Active) return Fail(TEXT("static mesh change after BeginPlay"));
     for (int32 I=0; I<5; ++I)
     {
         UStaticMesh* Mesh=Definition->VolumeStages[I].Mesh.Get();
         for (int32 J=0; J<I; ++J)
-            if (Definition->VolumeStages[J].Mesh.Get()==Mesh) return false;
-        const FStaticMeshRenderData* Data=Mesh && !Mesh->IsCompiling() ? Mesh->GetRenderData() : nullptr;
-        if (!Mesh || Mesh->GetOuter()!=Definition || !Mesh->bSupportRayTracing || Mesh->bDoFastBuild
+            if (Definition->VolumeStages[J].Mesh.Get()==Mesh) return Fail(TEXT("stage mesh is shared with another stage"), I);
+        if (!Mesh) return Fail(TEXT("stage mesh is missing"), I);
+        if (Mesh->IsCompiling())
+        {
+            if (OutWaitingForCompilation) *OutWaitingForCompilation=true;
+            return Fail(TEXT("stage mesh is still compiling"), I);
+        }
+        const FStaticMeshRenderData* Data=Mesh->GetRenderData();
+        if (Mesh->GetOuter()!=Definition || !Mesh->bSupportRayTracing || Mesh->bDoFastBuild
 #if WITH_EDITOR
             || Mesh->IsNaniteEnabled()
 #else
             || Mesh->HasValidNaniteData()
 #endif
-            || !Mesh->NeverStream || !Data || !Data->IsInitialized()
-            || Data->LODResources.Num()!=1 || !Data->RayTracingProxy
+            || !Mesh->NeverStream) return Fail(TEXT("stage mesh outer or build flags are unsupported"), I);
+        if (!Data || !Data->IsInitialized()) return Fail(TEXT("stage render data is not initialized"), I);
+        if (Data->LODResources.Num()!=1 || !Data->RayTracingProxy
             || !Data->RayTracingProxy->bUsingRenderingLODs || Data->RayTracingProxy->LODs.Num()!=1
             || !Data->RayTracingProxy->LODs[0].RayTracingGeometry
-            || Data->RayTracingProxy->LODs[0].StreamableData.GetBulkDataSize()!=0) return false;
+            || Data->RayTracingProxy->LODs[0].StreamableData.GetBulkDataSize()!=0)
+            return Fail(TEXT("stage ray tracing proxy layout is unsupported"), I);
     }
-    return !Active || Definition->VolumeStages.ContainsByPredicate([Active](const auto& S){return S.Mesh==Active;});
+    return !Active || Definition->VolumeStages.ContainsByPredicate([Active](const auto& S){return S.Mesh==Active;})
+        ? true : Fail(TEXT("active mesh is not one of the stages"));
 }
 static bool HasExternalConsumer(const FGroup& Group, const UStaticMeshComponent* Current)
 {
@@ -319,6 +368,38 @@ static void RestoreTargetGroup(UStaticMesh* Active)
         }
 }
 #if WITH_EDITOR
+static void AfterAssetCompilation(const TArray<FAssetCompileData>&)
+{
+    check(IsInGameThread());
+    TArray<FPendingStage> Ready;
+    for (auto It=PendingStages.CreateIterator(); It; ++It)
+    {
+        const FPendingStage& Pending=It.Value();
+        UStaticMeshComponent* Component=Pending.Component.Get();
+        UMD_SurfaceStainDefinition* Definition=Pending.Definition.Get();
+        if (!Component || !Component->IsRegistered() || !Definition || Pending.ActiveMesh.IsStale())
+        {
+            It.RemoveCurrent();
+            continue;
+        }
+        const bool StillCompiling=Definition->VolumeStages.ContainsByPredicate([](const auto& Stage)
+        { return Stage.Mesh && Stage.Mesh->IsCompiling(); });
+        if (!StillCompiling)
+        {
+            Ready.Add(Pending);
+            It.RemoveCurrent();
+        }
+    }
+    // SetStage can modify the pending map or trigger another compile notification.
+    // Remove ready entries before retrying, and resolve weak references again.
+    for (const FPendingStage& Pending : Ready)
+    {
+        UStaticMeshComponent* Component=Pending.Component.Get();
+        UMD_SurfaceStainDefinition* Definition=Pending.Definition.Get();
+        if (Component && Component->IsRegistered() && Definition && !Pending.ActiveMesh.IsStale())
+            SetStage(*Component,Definition,Pending.ActiveMesh.Get());
+    }
+}
 static bool HasManagedMesh(const UStaticMesh* Mesh)
 {
     for (const auto& Pair : Groups) if (FindStage(*Pair.Value,Mesh)!=INDEX_NONE) return true;
@@ -362,6 +443,10 @@ static void BeforeWorldCleanup(UWorld* World, bool, bool)
 {
     check(IsInGameThread());
     if (!World) return;
+#if WITH_EDITOR
+    for (auto It=PendingStages.CreateIterator(); It; ++It)
+        if (!It.Value().Component.IsValid() || It.Value().Component->GetWorld()==World) It.RemoveCurrent();
+#endif
     TArray<TSharedPtr<FGroup>> ClosingGroups;
     for (const auto& Pair : Groups)
         if (Pair.Value->WorldKey==World) ClosingGroups.AddUnique(Pair.Value);
@@ -408,6 +493,9 @@ static void InstallCallbacks()
     LastEnabled=Enabled.GetValueOnGameThread()!=0;
     ExitHandle=FCoreDelegates::OnEnginePreExit.AddStatic(&Shutdown);
     WorldCleanupHandle=FWorldDelegates::OnWorldCleanup.AddStatic(&BeforeWorldCleanup);
+#if WITH_EDITOR
+    AssetPostCompileHandle=FAssetCompilingManager::Get().OnAssetPostCompileEvent().AddStatic(&AfterAssetCompilation);
+#endif
     Enabled.AsVariable()->SetOnChangedCallback(FConsoleVariableDelegate::CreateLambda([](IConsoleVariable* V)
     {
         const bool Now=V->GetInt()!=0;
@@ -429,8 +517,18 @@ void SetStage(UStaticMeshComponent& Component, UMD_SurfaceStainDefinition* Defin
     check(IsInGameThread());
 #if RHI_RAYTRACING
     InstallCallbacks();
-    if (!CanManage() || !Eligible(Component,Definition,ActiveMesh))
+    const TCHAR* Reason=nullptr;
+    int32 ReasonStage=INDEX_NONE;
+    bool WaitingForCompilation=false;
+    if (!CanManage(&Reason) || !Eligible(Component,Definition,ActiveMesh,&Reason,&ReasonStage,&WaitingForCompilation))
     {
+#if WITH_EDITOR
+        if (WaitingForCompilation)
+            PendingStages.Add(&Component,FPendingStage{&Component,Definition,ActiveMesh});
+        else PendingStages.Remove(&Component);
+#endif
+        UE_LOG(LogMDStainRTResidency, Verbose, TEXT("Unmanaged %s: %s (stage %d)"),
+            *DescribeComponent(Component), Reason ? Reason : TEXT("unknown"), ReasonStage);
         // Ineligible/shared aliases may still select a mesh from an already
         // managed group. Restore it before SetStaticMesh can create its proxy.
         RestoreTargetGroup(ActiveMesh);
@@ -438,11 +536,15 @@ void SetStage(UStaticMeshComponent& Component, UMD_SurfaceStainDefinition* Defin
         Component.SetStaticMesh(ActiveMesh);
         return;
     }
+#if WITH_EDITOR
+    PendingStages.Remove(&Component);
+#endif
     TSharedPtr<FGroup>& Stored=Groups.FindOrAdd(Definition);
     if (!Stored)
     {
         Stored=MakeShared<FGroup>(); Stored->DefinitionKey=Definition; Stored->Definition=Definition;
         Stored->WorldKey=Component.GetWorld();
+        Stored->Render->DebugName=DescribeComponent(Component);
         for (int32 I=0; I<5; ++I)
         {
             UStaticMesh* Mesh=Definition->VolumeStages[I].Mesh.Get();
@@ -457,6 +559,7 @@ void SetStage(UStaticMeshComponent& Component, UMD_SurfaceStainDefinition* Defin
     TSharedPtr<FGroup> Group=Stored;
     if (!DataStillMatches(*Group))
     {
+        UE_LOG(LogMDStainRTResidency, Verbose, TEXT("Discarded stale group %s: render data changed"), *DescribeComponent(Component));
         // Not a supported resource-rebuild notification hook. Never dereference old
         // render pointers after an editor mesh rebuild: disable/restore BEFORE rebuild.
         DiscardStaleGroup(Group);
@@ -470,7 +573,11 @@ void SetStage(UStaticMeshComponent& Component, UMD_SurfaceStainDefinition* Defin
     {
         // One discovery scan per group, not on every cleaning amount/stage refresh.
         // Late external access remains an explicit integration boundary below.
-        if (HasExternalConsumer(*Group,&Component)) Group->BaselineOnly=true;
+        if (HasExternalConsumer(*Group,&Component))
+        {
+            Group->BaselineOnly=true;
+            UE_LOG(LogMDStainRTResidency, Verbose, TEXT("Baseline only %s: another component uses a stage mesh"), *DescribeComponent(Component));
+        }
         Group->ConsumersChecked=true;
     }
     if (Group->Render->Aborted.Load()) Group->BaselineOnly=true;
@@ -496,6 +603,8 @@ void SetStage(UStaticMeshComponent& Component, UMD_SurfaceStainDefinition* Defin
         }
         if (Stage>=0 && Stage<5) ++Group->Leases[Stage];
         Components.Add(&Component,FLease{&Component,Group,Stage});
+        UE_LOG(LogMDStainRTResidency, Verbose, TEXT("Managed %s: stage %d, baseline only %d"),
+            *DescribeComponent(Component), Stage, Group->BaselineOnly ? 1 : 0);
     }
     // A baseline-only group's mask may stay AllStages while its newly selected
     // visible stage still has a normal-priority pending build from an alias restore.
@@ -509,6 +618,9 @@ void ForgetComponent(UStaticMeshComponent& Component)
 {
     check(IsInGameThread());
 #if RHI_RAYTRACING
+#if WITH_EDITOR
+    Private::PendingStages.Remove(&Component);
+#endif
     // A still registered consumer is restored to the baseline, not silently stripped.
     if (auto* Lease=Private::Components.Find(&Component))
     {
@@ -527,6 +639,9 @@ void RestoreAll()
 {
     check(IsInGameThread());
 #if RHI_RAYTRACING
+#if WITH_EDITOR
+    Private::PendingStages.Reset();
+#endif
     if (Private::Groups.IsEmpty() && Private::RetiredGroups.IsEmpty())
     {
 #if WITH_EDITOR
@@ -561,6 +676,9 @@ void Shutdown()
     Private::WorldCleanupHandle.Reset();
     Private::Enabled.AsVariable()->SetOnChangedCallback(FConsoleVariableDelegate());
 #if WITH_EDITOR
+    if (Private::AssetPostCompileHandle.IsValid())
+        FAssetCompilingManager::Get().OnAssetPostCompileEvent().Remove(Private::AssetPostCompileHandle);
+    Private::AssetPostCompileHandle.Reset();
     if (auto* Buffer=Private::UndoBuffer.Get()) Buffer->OnBeforeRedoUndo().Remove(Private::BeforeUndoHandle);
     Private::UndoBuffer.Reset(); Private::BeforeUndoHandle.Reset();
     FCoreUObjectDelegates::OnPreObjectPropertyChanged.Remove(Private::PrePropertyHandle);

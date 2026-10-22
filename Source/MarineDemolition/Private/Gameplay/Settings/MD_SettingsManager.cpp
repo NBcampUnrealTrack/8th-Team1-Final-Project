@@ -1,6 +1,7 @@
 #include "Gameplay/Settings/MD_SettingsManager.h"
 
 #include "Engine/GameInstance.h"
+#include "Engine/World.h"
 #include "Gameplay/Settings/MD_AudioSettingCategory.h"
 #include "Gameplay/Settings/MD_ControlSettingCategory.h"
 #include "Gameplay/Settings/MD_GraphicsSettingCategory.h"
@@ -8,6 +9,7 @@
 #include "Gameplay/Settings/MD_SettingsSaveGame.h"
 #include "Kismet/GameplayStatics.h"
 #include "UI/Screen/Settings/MD_SettingsCategoryWidgetBase.h"
+#include "Util/MD_LogUtility.h"
 
 namespace MDSettingsManager
 {
@@ -21,12 +23,28 @@ void UMD_SettingsManager::Initialize(FSubsystemCollectionBase& Collection)
 {
 	// 상위 서브시스템 초기화 흐름을 먼저 실행한다.
 	Super::Initialize(Collection);
+	// 첫 실행 여부를 판단하기 위해 불러오기 전에 설정 슬롯 존재 여부를 확인한다.
+	bool bSettingsExist = UGameplayStatics::DoesSaveGameExist(MDSettingsManager::SlotName, MDSettingsManager::UserIndex);
 	// 카테고리별 UObject 인스턴스를 생성하고 이벤트를 연결한다.
 	CreateSettingCategories();
 	// 디스크에 저장된 InstancedStruct 맵을 각 인스턴스에 복원한다.
 	LoadSettings();
 	// 게임 시작 시 복원한 값을 각 런타임 시스템에 반영한다.
 	ApplyAllSettings();
+	// 맵마다 다른 MegaLights 볼륨 사용 여부에 맞춰 레이 트레이싱을 다시 판단하도록 맵 로드 이벤트를 구독한다.
+	PostLoadMapHandle = FCoreUObjectDelegates::PostLoadMapWithWorld.AddUObject(this, &UMD_SettingsManager::HandlePostLoadMap);
+	// 설정 슬롯이 이미 있으면 사용자가 고른 값을 유지한다.
+	if (bSettingsExist == true)
+	{
+		return;
+	}
+	// PIE, 서버, 렌더링 없는 실행에서는 하드웨어 감지를 건너뛴다.
+	if (CanRunFirstRunBenchmark() == false)
+	{
+		return;
+	}
+	// 엔진 초기화와 첫 맵 로드가 끝난 뒤 하드웨어 감지를 실행하도록 게임 시작 이벤트를 구독한다.
+	StartGameInstanceHandle = FWorldDelegates::OnStartGameInstance.AddUObject(this, &UMD_SettingsManager::HandleStartGameInstance);
 }
 
 void UMD_SettingsManager::Deinitialize()
@@ -40,6 +58,25 @@ void UMD_SettingsManager::Deinitialize()
 		AudioCategory->ShutdownAudioDevices();
 	}
 
+	// 실행되지 않은 첫 실행 하드웨어 감지 구독을 해제한다.
+	if (StartGameInstanceHandle.IsValid() == true)
+	{
+		FWorldDelegates::OnStartGameInstance.Remove(StartGameInstanceHandle);
+		StartGameInstanceHandle.Reset();
+	}
+	// 맵 로드 후 레이 트레이싱 재판단 구독을 해제한다.
+	if (PostLoadMapHandle.IsValid() == true)
+	{
+		FCoreUObjectDelegates::PostLoadMapWithWorld.Remove(PostLoadMapHandle);
+		PostLoadMapHandle.Reset();
+	}
+	// PIE 종료 시 에디터 뷰포트와 프로젝트 설정 편집에 업스케일러 덮어쓰기가 남지 않도록 해제한다.
+	UMD_GraphicsSettingCategory* GraphicsCategory = GetGraphicsSettings();
+	// 에디터 프로세스에서 유효한 그래픽 카테고리에 한정해 해제한다.
+	if (GIsEditor == true && IsValid(GraphicsCategory) == true)
+	{
+		GraphicsCategory->ReleaseUpscalerOverride();
+	}
 	// 매니저가 소유한 저장 이벤트의 모든 카테고리 구독을 해제한다.
 	OnSaveRequested.Clear();
 	// 관리 중인 설정 인스턴스 참조를 비운다.
@@ -251,6 +288,97 @@ void UMD_SettingsManager::RegisterSettingData(EMD_SettingsCategory Category, FIn
 	}
 	// 카테고리 키에 해당하는 저장 데이터를 새 값으로 등록한다.
 	SettingDataMap.Add(Category, MoveTemp(SettingData));
+}
+
+bool UMD_SettingsManager::ConsumeFirstRunBenchmarkNotice()
+{
+	// 아직 안내하지 않은 하드웨어 감지 결과가 있는지 보관한다.
+	bool bShouldNotify = bHasPendingBenchmarkNotice;
+	// 같은 안내가 반복되지 않도록 안내 상태를 비운다.
+	bHasPendingBenchmarkNotice = false;
+	// 안내 필요 여부를 호출부에 전달한다.
+	return bShouldNotify;
+}
+
+bool UMD_SettingsManager::CanRunFirstRunBenchmark()
+{
+	// PIE는 에디터 설정 파일에 품질을 저장하고 클라이언트마다 반복 실행되므로 제외한다.
+	if (GIsEditor == true)
+	{
+		return false;
+	}
+	// 서버, 커맨드릿, 렌더링 없는 실행 제외 조건은 그래픽 카테고리 기준을 따른다.
+	bool bCanRun = UMD_GraphicsSettingCategory::CanRunHardwareBenchmark();
+	// 감지 가능 여부를 호출부에 전달한다.
+	return bCanRun;
+}
+
+void UMD_SettingsManager::HandleStartGameInstance(UGameInstance* StartedGameInstance)
+{
+	// 다른 게임 인스턴스의 시작 이벤트는 무시한다.
+	if (StartedGameInstance != GetGameInstance())
+	{
+		return;
+	}
+	// 첫 실행 감지는 한 번만 실행하도록 구독을 해제한다.
+	FWorldDelegates::OnStartGameInstance.Remove(StartGameInstanceHandle);
+	// 해제한 구독 핸들을 비운다.
+	StartGameInstanceHandle.Reset();
+	// 하드웨어 감지 결과를 그래픽 설정에 반영한다.
+	RunFirstRunBenchmark();
+}
+
+void UMD_SettingsManager::RunFirstRunBenchmark()
+{
+	// 감지 결과를 저장할 그래픽 설정 인스턴스를 찾는다.
+	UMD_GraphicsSettingCategory* GraphicsCategory = GetGraphicsSettings();
+	// 그래픽 설정 인스턴스가 없으면 감지를 중단한다.
+	if (IsValid(GraphicsCategory) == false)
+	{
+		return;
+	}
+	// 하드웨어 벤치마크로 권장 품질과 렌더 해상도를 감지해 기록한다.
+	if (GraphicsCategory->DetectRecommendation() == false)
+	{
+		return;
+	}
+	// 감지한 권장값을 현재 그래픽 설정에 덮어쓴다.
+	UMD_GraphicsSettingCategory::ApplyRecommendation(GraphicsCategory->Settings);
+	// 감지 결과를 담은 그래픽 설정을 엔진에 적용한다.
+	ApplyCategory(EMD_SettingsCategory::Graphics);
+	// 그래픽 카테고리가 감지 결과를 저장 맵에 등록하도록 저장 이벤트를 호출한다.
+	OnSaveRequested.Broadcast(EMD_SettingsCategory::Graphics);
+	// 다음 실행에서 감지를 반복하지 않도록 설정 슬롯을 만든다.
+	bool bSaveSucceeded = SaveSettingDataMap();
+	// 타이틀 화면이 나중에 활성화되어도 감지 결과를 안내할 수 있도록 표시한다.
+	bHasPendingBenchmarkNotice = true;
+	// 감지 결과 저장 여부를 로그로 남긴다.
+	UE_LOG(MarineDemolition, Log, TEXT("%s 첫 실행 하드웨어 감지 결과 적용, 저장 %s"), *UE_CALL_LOCATIONINFO, bSaveSucceeded == true ? TEXT("성공") : TEXT("실패"));
+	// 이미 표시 중인 타이틀 화면이 감지 결과를 안내할 수 있도록 알린다.
+	OnFirstRunBenchmarkApplied.Broadcast();
+}
+
+void UMD_SettingsManager::HandlePostLoadMap(UWorld* LoadedWorld)
+{
+	// 유효하지 않은 월드의 로드 이벤트는 무시한다.
+	if (IsValid(LoadedWorld) == false)
+	{
+		return;
+	}
+	// 다른 게임 인스턴스의 맵 로드는 무시한다.
+	if (LoadedWorld->GetGameInstance() != GetGameInstance())
+	{
+		return;
+	}
+	// 레이 트레이싱 사용 여부를 판단할 그래픽 설정 인스턴스를 찾는다.
+	UMD_GraphicsSettingCategory* GraphicsCategory = GetGraphicsSettings();
+	// 그래픽 설정 인스턴스가 없으면 갱신을 중단한다.
+	if (IsValid(GraphicsCategory) == false)
+	{
+		return;
+	}
+	// 새 맵의 MegaLights 볼륨 사용 여부에 맞춰 레이 트레이싱 사용 여부를 다시 맞춘다.
+	GraphicsCategory->RefreshRayTracing();
 }
 
 void UMD_SettingsManager::CreateSettingCategories()

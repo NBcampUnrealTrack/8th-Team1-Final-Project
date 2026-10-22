@@ -41,5 +41,8 @@ public:
 	/** Normal-build actor-owned meshes from prepared geometry, without refitting or saving a separate asset. */
 	static UMD_SurfaceStainDefinition* BuildFinal(AMD_SurfaceStain& Owner,
 		const UMD_SurfaceStainDefinition& Prepared, FString& Error);
+	/** Best-effort reduction of actor-owned fitted coordinates; failure never changes the source. */
+	static UMD_SurfaceStainDefinition* OptimizeFinal(AMD_SurfaceStain& Owner,
+		const UMD_SurfaceStainDefinition& Prepared, FString& Error);
 #endif
 };
