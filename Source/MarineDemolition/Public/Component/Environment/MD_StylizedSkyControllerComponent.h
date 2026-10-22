@@ -160,6 +160,14 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle")
 	float OrbitOrientationOffsetDegrees = -90.f;
 
+	/**
+	 * Sun/moon light direction advances in steps of this many degrees so virtual shadow map
+	 * caches survive between steps. MPC (sky dome, clouds) still follows the continuous time.
+	 * 0 = rotate the light every tick.
+	 */
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle", meta = (ClampMin = "0.0", ClampMax = "15.0"))
+	float SunDirectionStepDegrees = 1.f;
+
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "MD|Sky|DayCycle", meta = (ClampMin = "1.0"))
 	float MpcDayLengthSeconds = 600.f;
 

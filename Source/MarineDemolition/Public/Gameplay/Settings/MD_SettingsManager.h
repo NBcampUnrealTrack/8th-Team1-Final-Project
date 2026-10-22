@@ -6,6 +6,8 @@
 #include "StructUtils/InstancedStruct.h"
 #include "MD_SettingsManager.generated.h"
 
+class UGameInstance;
+class UWorld;
 class UMD_AudioSettingCategory;
 class UMD_ControlSettingCategory;
 class UMD_GraphicsSettingCategory;
@@ -17,6 +19,9 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnSettingsApplied, EMD_SettingsC
 
 // 저장 직전에 요청한 카테고리 인스턴스가 자신의 데이터를 Map에 등록하도록 알린다.
 DECLARE_MULTICAST_DELEGATE_OneParam(FMD_OnSettingsSaveRequested, EMD_SettingsCategory);
+
+// 첫 실행 하드웨어 감지 결과로 그래픽 설정을 정하고 저장한 시점을 알린다.
+DECLARE_DYNAMIC_MULTICAST_DELEGATE(FMD_OnFirstRunBenchmarkApplied);
 
 // UObject 설정 인스턴스의 생성, 적용 이벤트 및 InstancedStruct 저장을 통합 관리한다.
 UCLASS()
@@ -39,6 +44,10 @@ public:
 	// 저장 요청 시 지정한 카테고리 인스턴스가 데이터를 등록하도록 호출한다.
 	FMD_OnSettingsSaveRequested OnSaveRequested;
 
+	// 첫 실행 하드웨어 감지 결과를 적용한 뒤 타이틀 화면 안내용으로 호출한다.
+	UPROPERTY(BlueprintAssignable, Category = "MarineDemolition|Settings|Graphics")
+	FMD_OnFirstRunBenchmarkApplied OnFirstRunBenchmarkApplied;
+
 protected:
 	// 카테고리 식별자와 런타임 UObject 설정 인스턴스를 연결한다.
 	UPROPERTY(Transient)
@@ -50,6 +59,15 @@ protected:
 
 	// 카테고리별 미적용 편집값을 제공하는 현재 화면의 약한 참조
 	TMap<EMD_SettingsCategory, TWeakObjectPtr<UMD_SettingsCategoryWidgetBase>> SettingsWidgets;
+
+	// 첫 실행 하드웨어 감지를 게임 시작 이후로 미루는 델리게이트 연결
+	FDelegateHandle StartGameInstanceHandle;
+
+	// 맵 로드 후 MegaLights 사용 여부에 맞춰 레이 트레이싱을 다시 판단하는 델리게이트 연결
+	FDelegateHandle PostLoadMapHandle;
+
+	// 첫 실행 하드웨어 감지 결과를 아직 화면에 안내하지 않았는지 보관한다.
+	bool bHasPendingBenchmarkNotice = false;
 
 public:
 	// 월드에서 현재 게임 인스턴스의 설정 매니저를 찾는다.
@@ -101,7 +119,23 @@ public:
 	// 설정 인스턴스가 생성한 카테고리 데이터를 저장 Map에 등록한다.
 	void RegisterSettingData(EMD_SettingsCategory Category, FInstancedStruct SettingData);
 
+	// 첫 실행 하드웨어 감지 결과를 안내해야 하면 true를 반환하고 안내 상태를 비운다.
+	UFUNCTION(BlueprintCallable, Category = "MarineDemolition|Settings|Graphics")
+	bool ConsumeFirstRunBenchmarkNotice();
+
 protected:
+	// PIE, 서버, 렌더링 없는 실행을 제외하고 첫 실행 하드웨어 감지가 가능한지 확인한다.
+	bool CanRunFirstRunBenchmark();
+
+	// 시작한 게임 인스턴스가 이 매니저의 소유자이면 첫 실행 하드웨어 감지를 실행한다.
+	void HandleStartGameInstance(UGameInstance* StartedGameInstance);
+
+	// 하드웨어 벤치마크 결과를 그래픽 설정에 옮겨 적용하고 설정 슬롯에 저장한다.
+	void RunFirstRunBenchmark();
+
+	// 이 매니저의 월드에 맵이 로드되면 레이 트레이싱 사용 여부를 다시 맞춘다.
+	void HandlePostLoadMap(UWorld* LoadedWorld);
+
 	// 기본 카테고리 UObject 인스턴스를 생성하고 저장 이벤트를 연결한다.
 	void CreateSettingCategories();
 

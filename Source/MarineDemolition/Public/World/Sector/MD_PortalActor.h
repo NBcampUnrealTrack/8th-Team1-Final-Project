@@ -77,6 +77,10 @@ protected:
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Portal|Rendering|Performance", meta = (ClampMin = "0.0", Units = "cm"))
 	float FullQualityDistance = 250.0f;
 
+	// 원본 품질 Portal의 캡처 시점이 직전 캡처와 같을 때의 초당 최대 캡처 횟수 (0이면 매 프레임 캡처)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Portal|Rendering|Performance", meta = (ClampMin = "0.0", ClampMax = "120.0"))
+	float NearIdleCaptureRate = 30.0f;
+
 	// Portal을 통한 이동 시 연결된 다른 Portal의 +X(Local)방향 위치 보정 값
 	UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Portal", meta = (ClampMin = "0.0"))
 	float ExitOffset = 1.0f;
@@ -103,6 +107,15 @@ protected:
 
 	// 마지막 캡처에 사용된 로컬 화면 크기
 	FIntPoint LastCaptureViewSize = FIntPoint::ZeroValue;
+
+	// 마지막 캡처에 사용된 캡처 위치
+	FVector LastCaptureLocation = FVector::ZeroVector;
+
+	// 마지막 캡처에 사용된 캡처 회전
+	FQuat LastCaptureRotation = FQuat::Identity;
+
+	// 마지막 캡처에 사용된 투영 행렬
+	FMatrix LastCaptureProjection = FMatrix::Identity;
 
 private:
 	// 연결된 다른 Portal에서 캡처된 Scene을 저장하는 TextureRenderTarget2D
