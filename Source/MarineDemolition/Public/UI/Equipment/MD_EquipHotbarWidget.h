@@ -51,6 +51,10 @@ public:
 	// 슬롯의 현재 보관 수량 제공
 	UFUNCTION(BlueprintPure, Category = "Hotbar")
 	int32 GetItemCountAtSlot(int32 SlotIndex);
+
+	// HUD 슬롯 우하단의 수량 또는 폼건 잔량 표시를 현재 장비 상태에 맞춰 갱신
+	UFUNCTION(BlueprintCallable, Category = "Hotbar")
+	void RefreshSlotAmounts();
 private:
 
 	UFUNCTION()

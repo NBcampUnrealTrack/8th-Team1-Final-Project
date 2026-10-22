@@ -4,6 +4,9 @@
 #include "UI/Equipment/MD_EquipHotbarWidget.h"
 #include "Character/MD_Character.h"
 #include "Component/Equipment/MD_EquipHotbarComponent.h"
+#include "Components/TextBlock.h"
+#include "Data/Equipment/MD_ToolDefinition.h"
+#include "GameplayTags/MD_GameplayTags.h"
 #include "GameFramework/PlayerController.h"
 #include "Engine/LocalPlayer.h"
 
@@ -118,6 +121,8 @@ void UMD_EquipHotbarWidget::HandleHotbarContentsChanged()
 	RefreshPlayerContext();
 	// 슬롯 아이콘과 보관 수량의 갱신 알림 전달
 	OnHotbarRefreshed();
+	// BP의 일반 수량 표시 이후 같은 위치에 폼건의 실제 잔량 반영
+	RefreshSlotAmounts();
 }
 
 void UMD_EquipHotbarWidget::HandleHotbarSelectionChanged()
@@ -214,4 +219,55 @@ int32 UMD_EquipHotbarWidget::GetItemCountAtSlot(int32 SlotIndex)
 {
 	// 바인딩된 공통 Hotbar에서 해당 위치의 보유 수량 조회
 	return BoundHotbar.IsValid() == true ? BoundHotbar->GetItemCountAtSlot(SlotIndex) : 0;
+}
+
+void UMD_EquipHotbarWidget::RefreshSlotAmounts()
+{
+	// 기본 HUD와 공통 HUD가 공유하는 네 개의 고정 장비 슬롯
+	static const FName SlotNames[] = {TEXT("Hotbar_1"), TEXT("Hotbar_2"), TEXT("Hotbar_3"), TEXT("Hotbar_4")};
+	for (int32 SlotIndex = 0; SlotIndex < UE_ARRAY_COUNT(SlotNames); ++SlotIndex)
+	{
+		UUserWidget* SlotWidget = Cast<UUserWidget>(GetWidgetFromName(SlotNames[SlotIndex]));
+		UTextBlock* Amount = IsValid(SlotWidget) == true ? Cast<UTextBlock>(SlotWidget->GetWidgetFromName(TEXT("Txt_Amount"))) : nullptr;
+		if (IsValid(Amount) == false)
+		{
+			continue;
+		}
+		UTextBlock* AmountShadow = Cast<UTextBlock>(SlotWidget->GetWidgetFromName(TEXT("Txt_Amount_Shadow")));
+
+		int32 Count = GetItemCountAtSlot(SlotIndex);
+		UMD_ToolDefinition* Tool = Cast<UMD_ToolDefinition>(GetItemAtSlot(SlotIndex));
+		bool bShowFoamCharge = Count > 0 && IsValid(Tool) == true && BoundHotbar.IsValid() == true
+			&& Tool->ToolAbilityTag.MatchesTagExact(MDGameplayTags::Ability_UtilityRepair_Foam) == true
+			&& FMath::IsFinite(Tool->MaxCharge) == true && Tool->MaxCharge > 0.0f;
+		FText AmountText = Count > 0 ? FText::AsNumber(Count) : FText::GetEmpty();
+		if (bShowFoamCharge == true)
+		{
+			// 실제 보관 잔량과 발당 비용으로 사용 가능한 남은 발수만 표시
+			float Charge = FMath::Clamp(BoundHotbar->GetToolCharge(Tool), 0.0f, Tool->MaxCharge);
+			float ShotCost = BoundHotbar->GetToolCostPerOnce(Tool);
+			int32 RemainingShots = FMath::IsFinite(ShotCost) == true && ShotCost > 0.0f
+				? FMath::FloorToInt(Charge / ShotCost) : 0;
+			AmountText = FText::AsNumber(RemainingShots);
+		}
+		// 일반 아이템의 기존 2개 이상 표시 규칙은 유지하고 폼건은 소진 상태도 표시
+		ESlateVisibility AmountVisibility = bShowFoamCharge == true || Count > 1
+			? ESlateVisibility::SelfHitTestInvisible : ESlateVisibility::Collapsed;
+		// 본문과 별도 그림자에 같은 수량과 표시 상태 반영
+		for (UTextBlock* TextWidget : {Amount, AmountShadow})
+		{
+			if (IsValid(TextWidget) == false)
+			{
+				continue;
+			}
+			if (TextWidget->GetText().EqualTo(AmountText) == false)
+			{
+				TextWidget->SetText(AmountText);
+			}
+			if (TextWidget->GetVisibility() != AmountVisibility)
+			{
+				TextWidget->SetVisibility(AmountVisibility);
+			}
+		}
+	}
 }
