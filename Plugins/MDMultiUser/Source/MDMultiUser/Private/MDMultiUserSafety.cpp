@@ -208,7 +208,6 @@ bool FMDMultiUserSafety::Connected() const
 void FMDMultiUserSafety::Start()
 {
     if (TickHandle.IsValid() || IsRunningCommandlet()) return;
-    NextCheckpoint = FPlatformTime::Seconds() + IntervalSeconds;
     TickHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateRaw(this, &FMDMultiUserSafety::Tick), 1.f);
     DragHandle = FEditorDelegates::OnAssetDragStarted.AddRaw(this, &FMDMultiUserSafety::AssetDrag);
     if (IMultiUserClientModule::IsAvailable())
@@ -252,7 +251,7 @@ void FMDMultiUserSafety::Warn(const FString& Message)
 FText FMDMultiUserSafety::Status() const
 {
     if (Connected() && !bSyncReady) return FText::FromString(TEXT("체크포인트: 동기화 완료 대기 중"));
-    return FText::FromString(LastStatus.IsEmpty() ? TEXT("체크포인트: 5분마다 · 원본 저장/Persist 없음") : LastStatus);
+    return FText::FromString(LastStatus.IsEmpty() ? TEXT("체크포인트: 수동 실행 · 원본 저장/Persist 없음") : LastStatus);
 }
 
 bool FMDMultiUserSafety::Checkpoint(UWorld* World, FString& Error)
@@ -328,9 +327,7 @@ bool FMDMultiUserSafety::Checkpoint(UWorld* World, FString& Error)
     const FString Target = Heads / (MDSafety::Key(World) + TEXT(".json")), Temp = Target + TEXT(".") + FGuid::NewGuid().ToString(EGuidFormats::Digits) + TEXT(".tmp");
     if (!MDSafety::WriteJson(Temp, Head) || !IFileManager::Get().Move(*Target, *Temp, true, true))
     { Error = TEXT("체크포인트 색인 기록 실패. 원본과 체크포인트 파일은 유지됩니다."); return false; }
-    LastStatus = FString::Printf(TEXT("체크포인트 %s · %d 액터 · %d 그룹 · 다음 자동 저장 5분 후"), *FDateTime::Now().ToString(TEXT("%H:%M:%S")), List.Num(), Groups.Num());
-    NextCheckpoint = FPlatformTime::Seconds() + IntervalSeconds;
-    bPendingRecovery = false;
+    LastStatus = FString::Printf(TEXT("수동 체크포인트 %s · %d 액터 · %d 그룹"), *FDateTime::Now().ToString(TEXT("%H:%M:%S")), List.Num(), Groups.Num());
     return true;
 }
 
@@ -375,7 +372,6 @@ void FMDMultiUserSafety::CheckForMissingActors(UWorld* World)
             if (!Current.Contains(Value->AsObject()->GetStringField(TEXT("guid")))) ++Missing;
     if (Missing > 0)
     {
-        bPendingRecovery = true;
         FString Folder;
         if (PrepareRecovery(World, Folder, Error)) Warn(FString::Printf(TEXT("지난 체크포인트의 액터 %d개가 없습니다. 별도 복구본을 자동 준비했습니다. 정상 삭제일 수도 있어 현재 맵에 자동 삽입하지 않습니다."), Missing));
     }
@@ -393,8 +389,6 @@ bool FMDMultiUserSafety::Tick(float)
         bWasConnected = bConnected;
         bCheckedPeers = false;
         bCheckedRecovery = false;
-        bPendingRecovery = false;
-        NextCheckpoint = Now + IntervalSeconds;
     }
     if (!World || Now < StableAfter || (bConnected && !bSyncReady)) return true;
     if (bConnected && !bCheckedPeers)
@@ -413,18 +407,6 @@ bool FMDMultiUserSafety::Tick(float)
     {
         CheckForMissingActors(World);
         bCheckedRecovery = true;
-    }
-    if (Now >= NextCheckpoint)
-    {
-        NextCheckpoint = Now + IntervalSeconds;
-        CheckForMissingActors(World);
-        if (!bPendingRecovery)
-        {
-            FString Error;
-            if (!Checkpoint(World, Error)) { LastStatus = Error; if (!Error.StartsWith(TEXT("편집 액터 없음"))) Warn(Error); }
-        }
-        // A slow failed attempt must not leave an already-expired deadline and run again next tick.
-        NextCheckpoint = FPlatformTime::Seconds() + IntervalSeconds;
     }
     return true;
 }

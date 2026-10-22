@@ -21,7 +21,6 @@ public:
     bool PrepareRecovery(UWorld* World, FString& Directory, FString& Error);
     FText Status() const;
     FString RecoveryRoot() const;
-    static constexpr double IntervalSeconds = 300.0;
 private:
     bool Tick(float Delta);
     bool Connected() const;
@@ -35,10 +34,10 @@ private:
     TWeakPtr<IConcertSyncClient> SyncClient;
     TWeakPtr<IConcertClientWorkspace> Workspace;
     bool bSyncReady = true, bCheckedPeers = false;
-    double NextCheckpoint = 0, LastWarning = -100;
+    double LastWarning = -100;
     bool bWasConnected = false, bWriting = false;
     TWeakObjectPtr<UWorld> ObservedWorld;
     double StableAfter = 0;
-    bool bCheckedRecovery = false, bPendingRecovery = false;
+    bool bCheckedRecovery = false;
     FString LastStatus, LastRecoverySource;
 };
