@@ -1416,6 +1416,12 @@ AActor* UMD_InteractionComponent::TraceInteractionTarget() const
 	if (IsValid(HitActor))
 	{
 		const UMD_FacilityRepairComponent* Repair = HitActor->FindComponentByClass<UMD_FacilityRepairComponent>();
+		// A faulty door is repaired at its linked wiring panel. Crowbar input uses
+		// the separate visibility trace and remains available on the door itself.
+		if (Repair && Repair->HasRepairFault() && HitActor->FindComponentByClass<UMD_DoorFaultComponent>())
+		{
+			return nullptr;
+		}
 		if (Repair && Repair->HasRepairFault()
 			&& (!IsHolding() || HitActor->IsA<AMD_TrashSorter>())) return HitActor;
 	}
