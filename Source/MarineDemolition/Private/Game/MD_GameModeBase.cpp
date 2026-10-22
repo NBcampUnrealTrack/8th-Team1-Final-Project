@@ -112,6 +112,8 @@ void AMD_GameModeBase::EndPlay(const EEndPlayReason::Type EndPlayReason)
         if (UMD_MerchantSubsystem* Merchant = GameInstance->GetSubsystem<UMD_MerchantSubsystem>())
         {
             Merchant->OnBankrupt.RemoveAll(this);
+            // 종료된 현장의 부채 변경에 의한 타이머 재예약 방지
+            Merchant->OnMerchantStateChanged.RemoveAll(this);
         }
     }
 
@@ -627,8 +629,12 @@ void AMD_GameModeBase::BeginExpeditionContract()
     // 서브시스템은 GameInstance 수명이라 이 월드의 GameMode만 받도록 중복 없이 연결. EndPlay에서 해제
     Merchant->OnBankrupt.RemoveAll(this);
     Merchant->OnBankrupt.AddUObject(this, &AMD_GameModeBase::HandleBankruptcy);
+    // 완납과 신규 대출의 상태 변경에 따른 이자 예약 갱신 연결
+    Merchant->OnMerchantStateChanged.RemoveAll(this);
+    Merchant->OnMerchantStateChanged.AddUObject(this, &AMD_GameModeBase::StartLoanInterestTimer, Merchant);
     // 착수금과 계약 확정 이후 맵 진입 기준 이자 주기 시작
-    StartLoanInterestTimer();
+    // 현장 진입 시점의 실제 부채를 반영한 최초 예약 갱신
+    StartLoanInterestTimer(Merchant);
 }
 
 void AMD_GameModeBase::HandleBankruptcy()
@@ -659,14 +665,33 @@ void AMD_GameModeBase::HandleBankruptcy()
     ShowFinalReport(FGameplayTag());
 }
 
-void AMD_GameModeBase::StartLoanInterestTimer()
+void AMD_GameModeBase::StartLoanInterestTimer(UMD_MerchantSubsystem* Merchant)
 {
     // 타이머를 소유할 현재 서버 월드 조회
     UWorld* World = GetWorld();
     // 로비와 클라이언트 및 이미 정산된 작업의 이자 예약 차단
-    if (IsValid(World) == false || World->GetNetMode() == NM_Client || bDayFinalized == true || IsValid(ResolveExpeditionSite()) == false)
+    if (IsValid(World) == false || World->GetNetMode() == NM_Client)
     {
         // 게임 현장 외 이자 부과 방지
+        return;
+    }
+    if (bDayFinalized == true || IsValid(ResolveExpeditionSite()) == false)
+    {
+        // 정산 완료 또는 현장 이탈 이후 남아 있는 이자 예약 해제
+        GetWorldTimerManager().ClearTimer(LoanInterestTimerHandle);
+        return;
+    }
+    // 상태 변경을 알린 서버 원장의 유효성 확인
+    if (IsValid(Merchant) == false)
+    {
+        // 원장이 준비되지 않은 현장의 이자 예약 해제
+        GetWorldTimerManager().ClearTimer(LoanInterestTimerHandle);
+        return;
+    }
+    if (Merchant->HasActiveContract() == false || Merchant->GetDebtBalance() <= 0)
+    {
+        // 계약 종료 또는 완납 시 기존 대기 시간과 반복 예약 해제
+        GetWorldTimerManager().ClearTimer(LoanInterestTimerHandle);
         return;
     }
     // 재호출로 첫 이자 시점이 연장되는 상황 차단
@@ -676,9 +701,10 @@ void AMD_GameModeBase::StartLoanInterestTimer()
         return;
     }
     // 초기화 대기 시간도 맵 진입 이후 경과 시간에 포함. 첫 징수 9분, 이후 3분 주기
+    // 부채 재발생 시점부터 초기 대기를 새로 적용하도록 기존 경과 시간 차감 대신 전체 지연 사용
     GetWorldTimerManager().SetTimer(LoanInterestTimerHandle, this, &ThisClass::CheckGameTimeEvents,
         FMath::Max(LoanInterestIntervalSeconds, KINDA_SMALL_NUMBER), true,
-        FMath::Max(LoanFirstInterestDelaySeconds - World->GetTimeSeconds(), KINDA_SMALL_NUMBER));
+        FMath::Max(LoanFirstInterestDelaySeconds, KINDA_SMALL_NUMBER));
 }
 
 void AMD_GameModeBase::CheckGameTimeEvents()
