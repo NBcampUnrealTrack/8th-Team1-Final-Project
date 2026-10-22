@@ -7,12 +7,14 @@
 #include "EngineUtils.h"
 #include "Materials/MaterialInterface.h"
 #include "Engine/World.h"
+#include "Engine/PostProcessVolume.h"
 #include "Net/UnrealNetwork.h"
 #include "TimerManager.h"
 #include "World/Wall/MD_PowerConduit.h"
 #include "World/Facility/MD_RepairInstruction.h"
 
 const FName UMD_FacilityFaultManagerComponent::BaseLightActorTag(TEXT("MD.Power.BaseLight"));
+const FName UMD_FacilityFaultManagerComponent::BlackoutExposureActorTag(TEXT("MD.Power.BlackoutExposure"));
 
 UMD_FacilityFaultManagerComponent::UMD_FacilityFaultManagerComponent()
 {
@@ -60,6 +62,9 @@ void UMD_FacilityFaultManagerComponent::EndPlay(const EEndPlayReason::Type Reaso
 	}
 	for (const FBaseLamp& Lamp:BaseLamps) if (Lamp.Light.IsValid()) Lamp.Light->SetVisibility(Lamp.bOriginalVisible);
 	BaseLamps.Reset();
+	for (const FBlackoutExposure& Exposure : BlackoutExposureVolumes)
+		if (APostProcessVolume* Volume = Exposure.Volume.Get()) Volume->BlendWeight = Exposure.OriginalBlendWeight;
+	BlackoutExposureVolumes.Reset();
 	// 원본 재질의 GC 보호를 유지하면서 복원 순회 분리
 	TArray<FMD_PowerMaterialBaseline> LightsToRestore = LocalPowerLights;
 	// 이전 월드의 전선 참조 제거
@@ -207,13 +212,25 @@ void UMD_FacilityFaultManagerComponent::RegisterBlackoutLights(AActor* Actor)
 {
 	if (bPowerLightsShuttingDown || !GetWorld() || !GetWorld()->IsGameWorld()
 		|| !IsValid(Actor) || Actor->GetWorld()!=GetWorld() || Actor->IsActorBeingDestroyed()
-		|| !Actor->ActorHasTag(BaseLightActorTag) || GetWorld()->GetNetMode()==NM_DedicatedServer) return;
-	TInlineComponentArray<ULightComponent*> Lights(Actor);
-	for (ULightComponent* Light:Lights)
+		|| GetWorld()->GetNetMode()==NM_DedicatedServer) return;
+	if (Actor->ActorHasTag(BlackoutExposureActorTag))
 	{
-		if (!IsValid(Light) || Light->IsBeingDestroyed()) continue;
-		if (!BaseLamps.ContainsByPredicate([Light](const FBaseLamp& Lamp){return Lamp.Light==Light;}))
-			BaseLamps.Add({Light,Light->IsVisible()});
+		if (APostProcessVolume* Volume = Cast<APostProcessVolume>(Actor); Volume && !Volume->bUnbound)
+		{
+			if (!BlackoutExposureVolumes.ContainsByPredicate([Volume](const FBlackoutExposure& Entry){return Entry.Volume == Volume;}))
+				BlackoutExposureVolumes.Add({Volume, Volume->BlendWeight});
+		}
+	}
+	else if (!Actor->ActorHasTag(BaseLightActorTag)) return;
+	if (Actor->ActorHasTag(BaseLightActorTag))
+	{
+		TInlineComponentArray<ULightComponent*> Lights(Actor);
+		for (ULightComponent* Light:Lights)
+		{
+			if (!IsValid(Light) || Light->IsBeingDestroyed()) continue;
+			if (!BaseLamps.ContainsByPredicate([Light](const FBaseLamp& Lamp){return Lamp.Light==Light;}))
+				BaseLamps.Add({Light,Light->IsVisible()});
+		}
 	}
 	ApplyBaseLighting();
 }
@@ -223,6 +240,9 @@ void UMD_FacilityFaultManagerComponent::ApplyBaseLighting()
 	BaseLamps.RemoveAll([](const FBaseLamp& Lamp){return !Lamp.Light.IsValid();});
 	for (const FBaseLamp& Lamp:BaseLamps)
 		if (ULightComponent* Light=Lamp.Light.Get()) Light->SetVisibility(!bBlackoutActive && Lamp.bOriginalVisible);
+	BlackoutExposureVolumes.RemoveAll([](const FBlackoutExposure& Entry){return !Entry.Volume.IsValid();});
+	for (const FBlackoutExposure& Entry : BlackoutExposureVolumes)
+		if (APostProcessVolume* Volume = Entry.Volume.Get()) Volume->BlendWeight = bBlackoutActive && !Volume->bUnbound ? 1.f : 0.f;
 }
 
 void UMD_FacilityFaultManagerComponent::StartFaultSchedules()

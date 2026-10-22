@@ -8,6 +8,7 @@
 class AMD_PowerConduit;
 class UStaticMeshComponent;
 class ULightComponent;
+class APostProcessVolume;
 DECLARE_DYNAMIC_MULTICAST_DELEGATE_OneParam(FMD_OnBlackoutChanged, bool, bBlackout);
 
 /** GameState-owned server registry and timer-based random incident scheduler. */
@@ -30,6 +31,8 @@ public:
 	UPROPERTY(BlueprintAssignable, Category="MD|Facility|Power") FMD_OnBlackoutChanged OnBlackoutChanged;
 	/** Only tagged interior lamps participate; scanner, status and outdoor lights stay independent. */
 	static const FName BaseLightActorTag;
+	/** Bounded, authored exposure volumes enabled only while the shared circuit is out. */
+	static const FName BlackoutExposureActorTag;
 	UFUNCTION(BlueprintCallable, Category="MD|Facility|Power") void RegisterBlackoutLights(AActor* Actor);
 
 	UFUNCTION(BlueprintCallable, BlueprintAuthorityOnly, Category = "MD|Facility")
@@ -60,6 +63,12 @@ private:
 	void ApplyBaseLighting();
 	struct FBaseLamp { TWeakObjectPtr<ULightComponent> Light; bool bOriginalVisible=true; };
 	TArray<FBaseLamp> BaseLamps;
+	struct FBlackoutExposure
+	{
+		TWeakObjectPtr<APostProcessVolume> Volume;
+		float OriginalBlendWeight = 0.f;
+	};
+	TArray<FBlackoutExposure> BlackoutExposureVolumes;
 	FDelegateHandle LightSpawnHandle;
 	UFUNCTION()
 	void HandleFacilityStateChanged(UMD_FacilityFaultComponent* Facility,

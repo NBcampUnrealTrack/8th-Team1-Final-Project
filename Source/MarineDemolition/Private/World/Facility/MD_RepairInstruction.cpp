@@ -771,17 +771,25 @@ FText AMD_RepairInstructionControl::GetInteractionPrompt_Implementation(AActor* 
 
 #if !UE_BUILD_SHIPPING
 static FAutoConsoleCommandWithWorld GMDTestBlackout(
-	TEXT("MD.Blackout"), TEXT("Start the periodic breaker blackout immediately. Does not cut or repair wires. Host/server only."),
+	TEXT("MD.Blackout"), TEXT("Start only the breaker blackout immediately, without advancing game time or other timers. Does not cut or repair wires. Host/server only."),
 	FConsoleCommandWithWorldDelegate::CreateLambda([](UWorld* World)
 	{
-		if (!World || !World->IsGameWorld() || World->GetNetMode()==NM_Client) return;
+		if (!World || !World->IsGameWorld() || World->GetNetMode()==NM_Client)
+		{
+			UE_LOG(LogTemp, Display, TEXT("[MD.Blackout] Run on the host/server in a playing game world."));
+			return;
+		}
 		for (TActorIterator<AMD_RepairInstructionController> It(World); It; ++It)
 			if (It->HasValidConfiguration())
 			{
-				UE_LOG(LogTemp, Display, TEXT("[MD.Blackout] %s: %s; cut wires still require insulation tape."),
-					*It->GetName(), It->StartRepairIncident()?TEXT("breaker blackout started"):TEXT("existing incident preserved"));
+				const bool bWasActive = It->State.bActive;
+				const bool bStarted = It->StartRepairIncident();
+				UE_LOG(LogTemp, Display, TEXT("[MD.Blackout] %s: %s; game time and scheduled timers unchanged."),
+					*It->GetName(), bStarted ? TEXT("breaker blackout started")
+						: bWasActive ? TEXT("existing incident preserved") : TEXT("could not start the incident"));
 				return;
 			}
+		UE_LOG(LogTemp, Warning, TEXT("[MD.Blackout] No configured breaker controller exists in this world."));
 	}), ECVF_Cheat);
 
 static FAutoConsoleCommandWithWorld GMDStartInstruction(TEXT("MD.BreakInstruction"),TEXT("Start the independent breaker blackout on the host/server; preserves cut-wire incidents."),
