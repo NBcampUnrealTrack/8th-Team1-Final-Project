@@ -45,6 +45,9 @@ public:
 
 	UFUNCTION(BlueprintCallable, CallInEditor, Category = "MD|Stain")
 	bool RebuildSticker();
+	/** Editor authoring only. Keeps the fitted contact anchor, cleaning budget and source profile. */
+	UFUNCTION(BlueprintCallable, CallInEditor, Category = "MD|Stain|Volume")
+	bool OptimizeFittedGeometry();
 	UFUNCTION(BlueprintPure, Category = "MD|Stain")
 	bool HasSticker() const;
 	UFUNCTION(BlueprintPure, Category = "MD|Stain|Volume")

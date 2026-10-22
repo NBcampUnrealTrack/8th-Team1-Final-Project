@@ -13,9 +13,12 @@
 #include "Materials/MaterialInstanceDynamic.h"
 #include "Net/UnrealNetwork.h"
 #include "ProfilingDebugging/CpuProfilerTrace.h"
+#include "Util/MD_LogUtility.h"
 #include "World/Contamination/MD_ContaminationItem.h"
 #if WITH_EDITOR
 #include "Gameplay/Contamination/MD_StainSurfaceFit.h"
+#include "LevelUtils.h"
+#include "ScopedTransaction.h"
 #endif
 
 AMD_SurfaceStain::AMD_SurfaceStain()
@@ -140,6 +143,36 @@ bool AMD_SurfaceStain::RebuildSticker()
 		ActiveDefinition->StickerMaterial, Patch, Mesh, Error))
 	{ StickerStatus = Error; return false; }
 	return ApplyPreparedSticker(MoveTemp(Patch), Mesh);
+#else
+	return false;
+#endif
+}
+
+bool AMD_SurfaceStain::OptimizeFittedGeometry()
+{
+#if WITH_EDITOR
+	check(IsInGameThread());
+	if (IsTemplate() || !GetWorld() || GetWorld()->IsGameWorld() || FLevelUtils::IsLevelLocked(GetLevel())
+		|| !IsValid(FittedDefinition) || FittedDefinition->GetOuter() != this
+		|| !IsValid(SurfaceQuery) || !IsValid(StickerMesh) || !IsValid(Decal)) return false;
+	FString Error;
+	UMD_SurfaceStainDefinition* Optimized = FMD_StainSurfaceFit::OptimizeFinal(*this, *FittedDefinition, Error);
+	if (!Optimized)
+	{
+		UE_LOG(MarineDemolition, Log, TEXT("Preserved fitted geometry for %s: %s"), *GetName(), *Error);
+		return false;
+	}
+	const FScopedTransaction Transaction(NSLOCTEXT("MDStain", "OptimizeFittedGeometry", "Optimize Fitted Stain Geometry"));
+	Modify();
+	StickerMesh->Modify();
+	SurfaceQuery->Modify();
+	Decal->Modify();
+	MD_StainRayTracingResidency::ForgetComponent(*StickerMesh);
+	FittedDefinition = Optimized;
+	RefreshSize();
+	StickerStatus = TEXT("Optimized fitted geometry; contact and stage transitions require visual verification.");
+	MarkPackageDirty();
+	return true;
 #else
 	return false;
 #endif

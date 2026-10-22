@@ -38,6 +38,10 @@ struct FMD_StainSurfaceFitJob
 namespace MD_SurfaceFit
 {
 	using namespace UE::Geometry;
+	// Keep the 4096-triangle validation limit compatible with existing serialized definitions.
+	constexpr int32 TargetVolumeTriangles = 2048;
+	constexpr double MaximumShapeErrorCm = 0.25;
+	constexpr double MaximumRelativeVolumeError = 0.02;
 	// Captured on the game thread so changing the diagnostic switch never changes a running job.
 	TAutoConsoleVariable<int32> ParallelSamples(TEXT("MD.Slime.ParallelSurfaceSamples"), 1,
 		TEXT("Parallelize precise coating samples while preserving sequential mesh construction. 0 = reference."));
@@ -613,15 +617,16 @@ namespace MD_SurfaceFit
 		FQEMSimplification Simplifier(&Coating); Simplifier.Progress=Progress; Simplifier.bPreventTinyTriangles=true;
 		FMeshProjectionTarget Projection(&Reference,&ReferenceTree); Simplifier.SetProjectionTarget(&Projection);
 		Simplifier.GeometricErrorConstraint=FQEMSimplification::EGeometricErrorCriteria::PredictedPointToProjectionTarget;
-		Simplifier.GeometricErrorTolerance=bPreview?.5:.25;
+		Simplifier.GeometricErrorTolerance=bPreview?.5:MaximumShapeErrorCm;
 		Simplifier.bRetainQuadricMemory=true;
 		Simplifier.CustomQuadricErrorScaleF=[&](const FDynamicMesh3& Mesh,int32 V)
 		{
 			FVector3d Q,N; FVector2D UV; double D=0.;
 			return Location(Mesh.GetVertex(V),Q,N,UV,D) && Field.NearOutline(UV)?8.0:1.0;
 		};
+		const int32 TriangleTarget=bPreview?1200:TargetVolumeTriangles;
 		const int32 TriangleBudget=bPreview?1200:UMD_SurfaceStainDefinition::MaximumVolumeQueryTriangles;
-		Simplifier.SimplifyToTriangleCount(TriangleBudget);
+		Simplifier.SimplifyToTriangleCount(TriangleTarget);
 		if (Cancelled()) return Fail(TEXT("Surface fitting was cancelled."));
 		if (!Coating.IsClosed()) return Fail(TEXT("Contour simplification could not preserve a closed coating."));
 		if (Coating.TriangleCount()>TriangleBudget || Coating.VertexCount()>UMD_SurfaceStainDefinition::MaximumVolumeQueryVertices)
@@ -693,6 +698,38 @@ namespace MD_SurfaceFit
 				|| Bounds.BoxExtent.GetMin()<=0 || Bounds.SphereRadius<=0) return false;
 		}
 		return true;
+	}
+
+	// Test both directions below: retained vertices alone can miss a lost bulge or indentation.
+	bool WithinShapeError(const FDynamicMesh3& Mesh, const FDynamicMeshAABBTree3& Target)
+	{
+		auto Within = [&Target](const FVector3d& Point)
+		{
+			double DistanceSquared = 0.0;
+			return Target.FindNearestTriangle(Point, DistanceSquared) >= 0 && FMath::IsFinite(DistanceSquared)
+				&& DistanceSquared <= FMath::Square(MaximumShapeErrorCm);
+		};
+		for (int32 Vertex : Mesh.VertexIndicesItr())
+			if (!Within(Mesh.GetVertex(Vertex))) return false;
+		for (int32 Triangle : Mesh.TriangleIndicesItr())
+		{
+			const FIndex3i Indices = Mesh.GetTriangle(Triangle);
+			const FVector3d A = Mesh.GetVertex(Indices.A), B = Mesh.GetVertex(Indices.B), C = Mesh.GetVertex(Indices.C);
+			if (!Within((A+B+C)/3.0) || !Within((A+B)*.5) || !Within((B+C)*.5) || !Within((C+A)*.5)) return false;
+		}
+		return true;
+	}
+
+	double SignedSixVolume(const FDynamicMesh3& Mesh)
+	{
+		double Volume = 0.0;
+		for (int32 Triangle : Mesh.TriangleIndicesItr())
+		{
+			const FIndex3i Indices = Mesh.GetTriangle(Triangle);
+			Volume += FVector3d::DotProduct(Mesh.GetVertex(Indices.A),
+				FVector3d::CrossProduct(Mesh.GetVertex(Indices.B), Mesh.GetVertex(Indices.C)));
+		}
+		return Volume;
 	}
 }
 
@@ -951,5 +988,114 @@ UMD_SurfaceStainDefinition* FMD_StainSurfaceFit::BuildFinal(AMD_SurfaceStain& Ow
 	if (!Saved->RebuildVolumeValidation() || !MD_SurfaceFit::HasValidSavedMeshes(*Saved))
 	{ Error=TEXT("Could not build valid render bounds for the fitted slime asset."); return nullptr; }
 	return Saved;
+}
+
+UMD_SurfaceStainDefinition* FMD_StainSurfaceFit::OptimizeFinal(AMD_SurfaceStain& Owner,
+	const UMD_SurfaceStainDefinition& Prepared, FString& Error)
+{
+	using namespace MD_SurfaceFit;
+	check(IsInGameThread());
+	Error.Reset();
+	if (Prepared.GetOuter() != &Owner || !Prepared.IsUsable() || !Prepared.UsesSharedVolume()
+		|| Prepared.VolumePlacementPolicy != EMD_SurfaceStainVolumePlacement::ManualOnly
+		|| Prepared.VolumeStages.Num() != UMD_SurfaceStainDefinition::VolumeStageCount)
+	{
+		Error = TEXT("Only a validated actor-owned five-stage fitted volume can be optimized.");
+		return nullptr;
+	}
+	const FVector Scale = Prepared.GetVolumeScale(Owner.GetInitialSize());
+	if (Scale.ContainsNaN() || Scale.GetMin() <= 0.0)
+	{
+		Error = TEXT("The fitted volume scale is invalid; the original geometry was preserved.");
+		return nullptr;
+	}
+	TArray<FMD_SurfaceStainVolumeStage> Stages = Prepared.VolumeStages;
+	bool bChanged = false;
+	int32 OriginalTriangles = 0, ResultTriangles = 0;
+	for (int32 Index = 0; Index < Stages.Num(); ++Index)
+	{
+		auto& Stage = Stages[Index];
+		const int32 Count = Stage.QueryTriangleIndices.Num()/3;
+		OriginalTriangles += Count;
+		if (Count <= TargetVolumeTriangles)
+		{
+			ResultTriangles += Count;
+			continue;
+		}
+		auto Reject = [&Error, Index](const TCHAR* Reason) -> UMD_SurfaceStainDefinition*
+		{
+			Error = FString::Printf(TEXT("Stage %d: %s The original five stages were preserved."), Index, Reason);
+			return nullptr;
+		};
+		FDynamicMesh3 Reduced;
+		// The error tolerance is in displayed centimeters, including the instance's initial-size scale.
+		for (const FVector& Position : Stage.QueryVerticesCm) Reduced.AppendVertex(FVector3d(Position*Scale));
+		for (int32 Triangle = 0; Triangle < Stage.QueryTriangleIndices.Num(); Triangle += 3)
+			if (Reduced.AppendTriangle(Stage.QueryTriangleIndices[Triangle], Stage.QueryTriangleIndices[Triangle+1],
+				Stage.QueryTriangleIndices[Triangle+2]) < 0) return Reject(TEXT("The fitted topology cannot be simplified."));
+		FDynamicMesh3 Reference = Reduced;
+		FDynamicMeshAABBTree3 ReferenceTree(&Reference);
+		FMeshProjectionTarget Projection(&Reference, &ReferenceTree);
+		FQEMSimplification Simplifier(&Reduced);
+		Simplifier.SetProjectionTarget(&Projection);
+		Simplifier.bPreventTinyTriangles = true;
+		Simplifier.bRetainQuadricMemory = true;
+		Simplifier.GeometricErrorConstraint = FQEMSimplification::EGeometricErrorCriteria::PredictedPointToProjectionTarget;
+		Simplifier.GeometricErrorTolerance = MaximumShapeErrorCm;
+		Simplifier.SimplifyToTriangleCount(TargetVolumeTriangles);
+		if (Reduced.TriangleCount() >= Count)
+		{
+			ResultTriangles += Count;
+			continue;
+		}
+		if (!Reduced.IsClosed() || !Reduced.CheckValidity(FDynamicMesh3::FValidityOptions(), EValidityCheckFailMode::ReturnOnly))
+			return Reject(TEXT("Simplification did not preserve a valid closed surface."));
+		FMeshConnectedComponents OriginalComponents(&Reference), ReducedComponents(&Reduced);
+		OriginalComponents.FindConnectedTriangles();
+		ReducedComponents.FindConnectedTriangles();
+		if (OriginalComponents.Components.Num() != ReducedComponents.Components.Num())
+			return Reject(TEXT("Simplification changed the connected coating components."));
+		const double OriginalVolume = SignedSixVolume(Reference), ReducedVolume = SignedSixVolume(Reduced);
+		if (!FMath::IsFinite(ReducedVolume) || FMath::Abs(ReducedVolume) <= 1.e-6 || OriginalVolume*ReducedVolume <= 0.0
+			|| FMath::Abs(ReducedVolume-OriginalVolume) > FMath::Abs(OriginalVolume)*MaximumRelativeVolumeError)
+			return Reject(TEXT("Simplification changed enclosed volume by more than 2 percent or reversed its winding."));
+		FDynamicMeshAABBTree3 ReducedTree(&Reduced);
+		if (!WithinShapeError(Reduced, ReferenceTree) || !WithinShapeError(Reference, ReducedTree))
+			return Reject(TEXT("Simplification exceeded the 0.25 cm surface-distance samples."));
+		Reduced.CompactInPlace();
+		Stage.QueryVerticesCm.Reset();
+		Stage.QueryTriangleIndices.Reset();
+		for (int32 Vertex : Reduced.VertexIndicesItr()) Stage.QueryVerticesCm.Add(FVector(Reduced.GetVertex(Vertex))/Scale);
+		for (int32 Triangle : Reduced.TriangleIndicesItr())
+		{
+			const FIndex3i Indices = Reduced.GetTriangle(Triangle);
+			Stage.QueryTriangleIndices.Append({Indices.A, Indices.B, Indices.C});
+		}
+		ResultTriangles += Reduced.TriangleCount();
+		bChanged = true;
+	}
+	if (!bChanged)
+	{
+		Error = TEXT("The fitted stages already meet the target or cannot be reduced within the shape tolerance.");
+		return nullptr;
+	}
+	UMD_SurfaceStainDefinition* Candidate = NewObject<UMD_SurfaceStainDefinition>(GetTransientPackage(), NAME_None, RF_Transient);
+	Candidate->Kind = Prepared.Kind;
+	Candidate->Presentation = Prepared.Presentation;
+	Candidate->VolumeMaterial = Prepared.VolumeMaterial;
+	Candidate->RemovedItemClass = Prepared.RemovedItemClass;
+	Candidate->VolumePlacementPolicy = Prepared.VolumePlacementPolicy;
+	Candidate->SizeCm = Prepared.SizeCm;
+	Candidate->VolumeStages = MoveTemp(Stages);
+	if (!Candidate->ValidateVolumeGeometry(false))
+	{
+		Error = Candidate->VolumeValidationStatus;
+		return nullptr;
+	}
+	UMD_SurfaceStainDefinition* Result = BuildFinal(Owner, *Candidate, Error);
+	if (Result)
+		UE_LOG(LogMDStainSurfaceFit, Log, TEXT("Optimized %s: %d -> %d triangles across five stages; sampled shape error <= %.2f cm, volume error <= %.0f%%."),
+			*Owner.GetName(), OriginalTriangles, ResultTriangles, MaximumShapeErrorCm, MaximumRelativeVolumeError*100.0);
+	return Result;
 }
 #endif
