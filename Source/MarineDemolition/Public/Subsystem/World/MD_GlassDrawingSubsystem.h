@@ -17,7 +17,7 @@ class MARINEDEMOLITION_API UMD_GlassDrawingSubsystem : public UWorldSubsystem
 	GENERATED_BODY()
 
 public:
-	UMD_GlassDrawingSubsystem();
+	virtual void Initialize(FSubsystemCollectionBase& Collection) override;
 	virtual bool DoesSupportWorldType(EWorldType::Type WorldType) const override;
 	virtual void Deinitialize() override;
 
@@ -40,7 +40,7 @@ public:
 private:
 	void EnsureProfile();
 	void RemoveInvalidDeskReservations();
-	/** Hard default reference keeps the profile and its mesh/material dependencies in the cook. */
+	/** Loaded from UMD_GlassDrawingSettings; the UPROPERTY keeps it and its mesh/material dependencies alive for this world. */
 	UPROPERTY() TObjectPtr<UMD_GlassDrawingProfile> DefaultProfile;
 	bool bProfileLookupAttempted = false;
 	TMap<TWeakObjectPtr<UStaticMeshComponent>, TWeakObjectPtr<AMD_GlassDrawingBoard>> Boards;
