@@ -9,6 +9,7 @@
 class UComboBoxString;
 class UCheckBox;
 class UMD_CarouselWidget;
+class UWidget;
 
 // BP 캐러셀에서 선택 가능한 엔진 확장성 품질 타입
 UENUM(BlueprintType, meta = (EnumDisplayNameFn = "UMD_SettingsGraphicsWidget::GetQualityDisplayName"))
@@ -33,6 +34,7 @@ class MARINEDEMOLITION_API UMD_SettingsGraphicsWidget : public UMD_SettingsCateg
 	GENERATED_BODY()
 
 protected:
+	virtual void NativeOnInitialized() override;
 	virtual void NativeConstruct() override;
 	virtual void NativeDestruct() override;
 	FORCEINLINE virtual EMD_SettingsCategory GetSettingsCategory() override { return EMD_SettingsCategory::Graphics; }
@@ -48,6 +50,18 @@ protected:
 	// 지원 해상도와 저장된 창 크기 선택
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
 	TObjectPtr<UComboBoxString> CB_Resolution;
+
+	// 렌더 비용에 영향이 없는 전체 창 모드에서 숨길 출력 해상도 행
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
+	TObjectPtr<UWidget> BDR_Resolution;
+
+	// TSR과 TAA 중 업스케일러 선택
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
+	TObjectPtr<UComboBoxString> CB_Upscaler;
+
+	// 출력 해상도 대비 렌더링 해상도 단계 선택
+	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
+	TObjectPtr<UComboBoxString> CB_RenderResolution;
 
 	// 수직 동기화 선택 토글
 	UPROPERTY(BlueprintReadOnly, Category = "MD|Settings|Graphics", meta = (BindWidgetOptional))
@@ -85,6 +99,9 @@ protected:
 	UPROPERTY(Transient)
 	TArray<float> FrameRateOptions;
 
+	// 전체 창 모드에서 숨겼다가 되돌릴 출력 해상도 행의 디자이너 표시 상태
+	ESlateVisibility ResolutionRowVisibility = ESlateVisibility::Visible;
+
 public:
 	// 현재 컨트롤 선택과 생략된 컨트롤의 기준값 수집
 	UFUNCTION(BlueprintPure, Category = "MD|Settings|Graphics")
@@ -102,13 +119,33 @@ protected:
 	UFUNCTION()
 	void HandleIndividualQualityChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
 
+	// 창 모드의 사용자 선택에 따른 출력 해상도 행 표시 갱신
+	UFUNCTION()
+	void HandleWindowModeChanged(UEnum* EnumType, int64 EnumValue, FText SelectedOption);
+
+	// 업스케일러의 사용자 선택에 따른 렌더 해상도 선택 가능 여부 갱신
+	UFUNCTION()
+	void HandleUpscalerChanged(FString SelectedItem, ESelectInfo::Type SelectionType);
+
 	// 실제 적용 없이 기준값을 모든 컨트롤에 표시
 	void RefreshDisplay();
 
 	// 지원 해상도와 현재 저장 해상도의 목록 구성
 	void RefreshResolutionOptions();
 
-	// 무제한과 사용자 지정 FPS를 포함한 목록 구성
+	// 전체 창 모드에서 렌더 비용과 무관한 출력 해상도 행 숨김
+	void RefreshResolutionVisibility(int64 WindowMode);
+
+	// 업스케일러 목록과 현재 선택 구성
+	void RefreshUpscalerOptions();
+
+	// 렌더 해상도 단계 목록과 현재 선택 구성
+	void RefreshRenderResolutionOptions();
+
+	// TAA 선택 시 원본 해상도로 고정되는 렌더 해상도 선택 비활성화
+	void RefreshRenderResolutionEnabled();
+
+	// 모니터 주사율, 무제한, 사용자 지정 FPS를 포함한 목록 구성
 	void RefreshFrameRateOptions();
 
 	// 엔진 품질 단계 순서의 콤보박스 목록과 선택 구성
